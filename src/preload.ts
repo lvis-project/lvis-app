@@ -124,7 +124,14 @@ const api = {
   chatSessions: async (opts?: { limit?: number; before?: string; beforeId?: string; after?: string }) =>
     ipcRenderer.invoke("lvis:chat:sessions", opts) as Promise<{
       current: string;
-      sessions: Array<{ id: string; modifiedAt: string; title: string }>;
+      sessions: Array<{
+        id: string;
+        modifiedAt: string;
+        title: string;
+        parentSessionId?: string;
+        branchedFromCompactNum?: number;
+        branchedAt?: string;
+      }>;
     }>,
   chatLoadSession: async (sessionId: string) =>
     ipcRenderer.invoke("lvis:chat:load-session", sessionId) as Promise<{
@@ -151,6 +158,17 @@ const api = {
   chatExport: async (format: "markdown" | "json") => ipcRenderer.invoke("lvis:chat:export", format),
   chatCompact: async () => ipcRenderer.invoke("lvis:chat:compact"),
   chatSessionResume: async (sessionId: string) => ipcRenderer.invoke("lvis:chat:session-resume", sessionId),
+  // §PR-5: Layer 3 View-Mode + Branch
+  chatEnterCheckpointView: async (sessionId: string, compactNum: number) =>
+    ipcRenderer.invoke("lvis:chat:enter-checkpoint-view", { sessionId, compactNum }) as Promise<
+      { messageIndexAtCreation: number } | { error: string }
+    >,
+  chatExitCheckpointView: async () =>
+    ipcRenderer.invoke("lvis:chat:exit-checkpoint-view") as Promise<{ ok: boolean }>,
+  chatBranchFromCheckpoint: async (sessionId: string, compactNum: number) =>
+    ipcRenderer.invoke("lvis:chat:branch-from-checkpoint", { sessionId, compactNum }) as Promise<
+      { newSessionId: string } | { error: string }
+    >,
   chatAbort: async () => ipcRenderer.invoke("lvis:chat:abort") as Promise<{ ok: boolean }>,
   // PR-4: lazy-load verbatim tool_result content (in-session only)
   chatGetVerbatimToolResult: async (sessionId: string, toolUseId: string) =>
@@ -162,7 +180,7 @@ const api = {
     ipcRenderer.invoke("lvis:starred:add", entry),
   starredRemove: async (opts: { id?: string; sessionId?: string; messageIndex?: number }) =>
     ipcRenderer.invoke("lvis:starred:remove", opts),
-  onChatStream: (handler: (event: { type: string; text?: string; thought?: string; name?: string; error?: string; result?: string; isError?: boolean; input?: Record<string, unknown>; groupId?: string; toolUseId?: string; displayOrder?: number; roundIndex?: number; stopReason?: "end_turn" | "tool_use"; hasToolCalls?: boolean; removedMessages?: number; freedTokens?: number; tier?: "auto-compact" | "manual"; summary?: string; turnDurationMs?: number; toolCount?: number; cumulativeToolMs?: number; tokensIn?: number; tokensOut?: number; breakdown?: Record<string, { count: number; ms: number }> }) => void) => {
+  onChatStream: (handler: (event: { type: string; text?: string; thought?: string; name?: string; error?: string; result?: string; isError?: boolean; input?: Record<string, unknown>; groupId?: string; toolUseId?: string; displayOrder?: number; roundIndex?: number; stopReason?: "end_turn" | "tool_use"; hasToolCalls?: boolean; removedMessages?: number; freedTokens?: number; tier?: "auto-compact" | "manual"; summary?: string; compactNum?: number; turnDurationMs?: number; toolCount?: number; cumulativeToolMs?: number; tokensIn?: number; tokensOut?: number; breakdown?: Record<string, { count: number; ms: number }> }) => void) => {
     const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
     ipcRenderer.on("lvis:chat:stream", listener);
     return () => ipcRenderer.removeListener("lvis:chat:stream", listener);

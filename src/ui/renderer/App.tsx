@@ -617,6 +617,8 @@ export function App() {
             activeView={activeView}
             setActiveView={handleSidebarSelect}
             starredCount={starred.length}
+            sessions={sessions}
+            onLoadSession={handleLoadSession}
           />
 
         <main className="flex min-h-0 min-w-0 flex-1 flex-col">

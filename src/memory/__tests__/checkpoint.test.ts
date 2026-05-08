@@ -606,6 +606,100 @@ describe("normalizeSessionMetadata — read-side summaryPreamble truncation (def
   });
 });
 
+// ── §PR-5: saveCheckpointSnapshot / loadCheckpointSnapshot ───────────────────
+
+describe("saveCheckpointSnapshot / loadCheckpointSnapshot — §PR-5", () => {
+  const SESSION_SNAP = "dddddddd-0000-1111-2222-333333333333";
+
+  it("round-trips messages through save and load", async () => {
+    const messages = [
+      { role: "user", content: "hello" },
+      { role: "assistant", content: "world" },
+    ];
+    await mm.saveCheckpointSnapshot(SESSION_SNAP, 1, messages);
+    const loaded = mm.loadCheckpointSnapshot(SESSION_SNAP, 1);
+    expect(loaded).toEqual(messages);
+  });
+
+  it("returns null when snapshot does not exist", () => {
+    const result = mm.loadCheckpointSnapshot(SESSION_SNAP, 99);
+    expect(result).toBeNull();
+  });
+
+  it("snapshot files do NOT appear in listSessions", async () => {
+    // Create a real session so listSessions has at least one entry
+    await mm.saveSession(SESSION_SNAP, [{ role: "user", content: "real session" }]);
+    // Save a checkpoint snapshot for that session
+    await mm.saveCheckpointSnapshot(SESSION_SNAP, 1, [{ role: "user", content: "pre-compact" }]);
+
+    const sessions = mm.listSessions();
+    const ids = sessions.map((s) => s.id);
+
+    // The real session must appear
+    expect(ids).toContain(SESSION_SNAP);
+    // No snapshot-derived id (e.g. containing ".cp" or housed in ".checkpoints") should appear
+    expect(ids.every((id) => !id.includes(".cp") && !id.includes(".checkpoints"))).toBe(true);
+    // Exactly one entry — snapshot did not add a ghost session
+    const matchingReal = ids.filter((id) => id === SESSION_SNAP);
+    expect(matchingReal).toHaveLength(1);
+  });
+
+  it("snapshot files do NOT appear in listSessionsPage", async () => {
+    await mm.saveSession(SESSION_SNAP, [{ role: "user", content: "real" }]);
+    await mm.saveCheckpointSnapshot(SESSION_SNAP, 2, [{ role: "user", content: "snap" }]);
+
+    const page = mm.listSessionsPage({ limit: 100 });
+    const ids = page.map((s) => s.id);
+    expect(ids).toContain(SESSION_SNAP);
+    expect(ids.every((id) => !id.includes(".cp") && !id.includes(".checkpoints"))).toBe(true);
+  });
+
+  it("multiple compactNums are all independently loadable", async () => {
+    const m1 = [{ role: "user", content: "snap1" }];
+    const m2 = [{ role: "user", content: "snap2" }, { role: "assistant", content: "a2" }];
+    await mm.saveCheckpointSnapshot(SESSION_SNAP, 1, m1);
+    await mm.saveCheckpointSnapshot(SESSION_SNAP, 2, m2);
+    expect(mm.loadCheckpointSnapshot(SESSION_SNAP, 1)).toEqual(m1);
+    expect(mm.loadCheckpointSnapshot(SESSION_SNAP, 2)).toEqual(m2);
+  });
+
+  it("rejects invalid sessionId without throwing fs errors", async () => {
+    await expect(
+      mm.saveCheckpointSnapshot("../evil/path", 1, []),
+    ).rejects.toThrow(/invalid sessionId/);
+    expect(mm.loadCheckpointSnapshot("../evil/path", 1)).toBeNull();
+  });
+});
+
+// ── §PR-5: branchFromCheckpoint post-compaction simulation ────────────────────
+
+describe("saveCheckpointSnapshot post-compaction simulation — §PR-5", () => {
+  const SESSION_BRANCH = "eeeeeeee-0000-1111-2222-333333333333";
+
+  it("snapshot survives a subsequent saveSession overwrite (simulates PostTurnHookChain)", async () => {
+    const preCompact = [
+      { role: "user", content: "q1" },
+      { role: "assistant", content: "a1" },
+      { role: "user", content: "q2" },
+    ];
+    const postCompact = [{ role: "assistant", content: "compact summary only" }];
+
+    // Save snapshot at compact #1 (pre-compact state)
+    await mm.saveCheckpointSnapshot(SESSION_BRANCH, 1, preCompact);
+
+    // Simulate PostTurnHookChain.saveSession overwriting main JSONL with post-compact data
+    await mm.saveSession(SESSION_BRANCH, postCompact);
+
+    // Snapshot must still return the original pre-compact messages
+    const loaded = mm.loadCheckpointSnapshot(SESSION_BRANCH, 1);
+    expect(loaded).toEqual(preCompact);
+
+    // Main session now reflects post-compact state
+    const main = mm.loadSession(SESSION_BRANCH);
+    expect(main).toEqual(postCompact);
+  });
+});
+
 // ── 5h. saveSessionMetadata / loadSessionMetadata — IPC input validation ──────
 
 describe("saveSessionMetadata — invalid sessionId throws", () => {

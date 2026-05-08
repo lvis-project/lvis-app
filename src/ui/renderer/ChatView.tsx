@@ -20,6 +20,7 @@ import { ChatSearchOverlay } from "./components/ChatSearchOverlay.js";
 import { DayDivider } from "./components/DayDivider.js";
 import { CheckpointDivider } from "./components/CheckpointDivider.js";
 import { SummaryToast } from "./components/SummaryToast.js";
+import { ViewModeBanner, type ViewModeState } from "./components/ViewModeBanner.js";
 import { SessionResumeDivider } from "./components/SessionResumeDivider.js";
 import { SessionTodoPanel } from "./components/SessionTodoPanel.js";
 import { SubAgentCard } from "./components/SubAgentCard.js";
@@ -162,10 +163,14 @@ function HistoricalEntriesList({
   entries,
   activePricing,
   activeVendor,
+  onEnterView,
+  onBranchFrom,
 }: {
   entries: ContinuousHistorySession["entries"];
   activePricing: ChatContextValue["activePricing"];
   activeVendor: ChatContextValue["activeVendor"];
+  onEnterView?: (compactNum: number) => void;
+  onBranchFrom?: (compactNum: number) => void;
 }) {
   const renderEntry = (entry: ContinuousHistorySession["entries"][number], idx: number, embedded = false) => {
     if (entry.kind === "assistant") {
@@ -317,7 +322,13 @@ function HistoricalEntriesList({
     if (entry.kind === "checkpoint") {
       rendered.push(
         <Fragment key={i}>
-          <CheckpointDivider tier={entry.tier} messageCount={entry.removedMessages} />
+          <CheckpointDivider
+            tier={entry.tier}
+            messageCount={entry.removedMessages}
+            compactNum={entry.compactNum}
+            onEnterView={onEnterView}
+            onBranchFrom={onBranchFrom}
+          />
           {entry.summary ? <SummaryToast summary={entry.summary} /> : null}
         </Fragment>,
       );
@@ -401,6 +412,25 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
     [subAgentSpawns],
   );
 
+  // §PR-5: Layer 3 View-Mode — null = live, non-null = viewing a past checkpoint slice
+  const [viewMode, setViewMode] = useState<ViewModeState | null>(null);
+  // §PR-5: brief fork-success toast (auto-dismisses after 3 s)
+  const [forkToast, setForkToast] = useState<string | null>(null);
+  const forkToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // §PR-5: cleanup fork toast timer on unmount to avoid setState-after-unmount
+  useEffect(() => {
+    return () => {
+      if (forkToastTimerRef.current) clearTimeout(forkToastTimerRef.current);
+    };
+  }, []);
+
+  // §PR-5: in view-mode, show only the sliced entries up to the checkpoint.
+  const visibleEntries = useMemo(
+    () => viewMode ? entries.slice(0, viewMode.slicedRangeEnd) : entries,
+    [entries, viewMode],
+  );
+
   // turn_summary entry 의 turnStart 별 lookup. 각 turn 의 final assistant
   // 와 WorkGroup 이 같은 turn 의 token / duration 정보를 inline 으로 가져와
   // 표시한다. turn_summary entry 자체는 standalone 렌더링 되지 않는다.
@@ -417,8 +447,8 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
     };
     const map = new Map<number, TurnSummary>();
     let curTurnStart = -1;
-    for (let i = 0; i < entries.length; i++) {
-      const e = entries[i];
+    for (let i = 0; i < visibleEntries.length; i++) {
+      const e = visibleEntries[i];
       if (!e) continue;
       if (e.kind === "user") curTurnStart = i;
       else if (e.kind === "turn_summary" && curTurnStart >= 0) {
@@ -435,7 +465,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
       }
     }
     return map;
-  }, [entries]);
+  }, [visibleEntries]);
 
   const renderSpawnsForGroup = useCallback(
     (group: { tools: { toolUseId: string }[] }) => {
@@ -502,6 +532,39 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
     await onLoadSession?.(sessionId);
   }, [onLoadSession, scrollToSessionMarker]);
 
+  // §PR-5: View-Mode handlers
+  const handleEnterView = useCallback(async (compactNum: number) => {
+    const result = await api.chatEnterCheckpointView?.(currentSessionId, compactNum);
+    if (!result || "error" in result) return;
+    // §PR-5 note: messageIndexAtCreation is engine history message count — it does NOT
+    // map 1:1 to renderer entries (which include reasoning/tool_group/checkpoint entries).
+    // We cap to entries.length so the slice is always valid, accepting that in tool-heavy
+    // sessions the visible range may show slightly more entries than the exact checkpoint.
+    // A precise renderer↔engine index mapping is deferred to a future PR.
+    const slicedRangeEnd = Math.min(result.messageIndexAtCreation, entries.length);
+    setViewMode({ compactNum, slicedRangeEnd });
+    scrollChatToBottom("auto");
+  }, [api, currentSessionId, entries.length, scrollChatToBottom]);
+
+  const handleExitView = useCallback(async () => {
+    await api.chatExitCheckpointView?.();
+    setViewMode(null);
+    scrollChatToBottom("auto");
+  }, [api, scrollChatToBottom]);
+
+  const handleBranchFrom = useCallback(async (compactNum: number) => {
+    const result = await api.chatBranchFromCheckpoint?.(currentSessionId, compactNum);
+    if (!result || "error" in result) return;
+    // §PR-5: exit view-mode before loading the new session so it opens in live mode
+    setViewMode(null);
+    // Load the branched session
+    await onLoadSession?.(result.newSessionId);
+    // Show 3-second fork-success toast
+    if (forkToastTimerRef.current) clearTimeout(forkToastTimerRef.current);
+    setForkToast(`checkpoint #${compactNum} 에서 새 분기를 시작했습니다`);
+    forkToastTimerRef.current = setTimeout(() => setForkToast(null), 3000);
+  }, [api, currentSessionId, onLoadSession]);
+
   useEffect(() => {
     initialBottomScrollPendingRef.current = true;
     sawHistoryLoadingRef.current = false;
@@ -531,10 +594,13 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
   }, [loadingHistory, scrollChatToBottom]);
 
   useEffect(() => {
+    // §PR-5: suppress auto-scroll while in view-mode so new live entries don't
+    // yank the viewport away from the frozen checkpoint slice the user is reading.
+    if (viewMode) return;
     if (isNearBottom()) {
       requestAnimationFrame(() => scrollChatToBottom("smooth"));
     }
-  }, [entries.length, isNearBottom, scrollChatToBottom]);
+  }, [entries.length, isNearBottom, scrollChatToBottom, viewMode]);
 
   const historicalByDay = useMemo(() => {
     const map = new Map<string, ContinuousHistorySession[]>();
@@ -653,6 +719,17 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
         </div>
       )}
       <div className="relative min-h-0 min-w-0 max-w-full flex-1 overflow-hidden">
+      {/* §PR-5: View-Mode banner — sticky at the top of the chat scroll area */}
+      <ViewModeBanner viewMode={viewMode} onExit={() => { void handleExitView(); }} />
+      {/* §PR-5: Fork-success toast — auto-dismisses after 3 s */}
+      {forkToast && (
+        <div
+          data-testid="fork-toast"
+          className="sticky top-0 z-30 mx-3 mt-2 rounded-md border border-[hsl(var(--action-branch)/0.4)] bg-[hsl(var(--action-branch)/0.1)] px-3 py-2 text-xs text-[hsl(var(--action-branch))]"
+        >
+          {forkToast}
+        </div>
+      )}
       <ScrollArea className="lvis-chat-scroll h-full min-h-0 min-w-0 max-w-full" viewportRef={scrollViewportRef}><div className="min-w-0 w-full max-w-full overflow-x-hidden space-y-3 px-3 py-4">
         <div ref={sentinelRef} data-testid="chat-history-sentinel" className="h-px" />
         {loadingHistory && (
@@ -681,6 +758,8 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
             {daySessions.map((session) => (
               <Fragment key={session.id}>
                 <HistoricalSessionMarker title={session.title} sessionId={session.id} />
+                {/* §PR-5: historical sessions use currentSessionId in IPC — hide view/branch actions
+                    to prevent session-mismatch. Actions are only valid on the live current session. */}
                 <HistoricalEntriesList entries={session.entries} activePricing={activePricing} activeVendor={activeVendor} />
               </Fragment>
             ))}
@@ -728,7 +807,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
         {orphanSpawns.map((spawn) => (
           <SubAgentCard key={spawn.spawnId} spawn={spawn} />
         ))}
-        {entries.length === 0 && !hasHistoricalContent && hasApiKey !== false && !hasAskQuestions && <div className="py-12 text-center text-sm text-muted-foreground">LVIS 에이전트가 준비되었습니다. 질문을 입력하거나 /command를 사용하세요.</div>}
+        {visibleEntries.length === 0 && !hasHistoricalContent && hasApiKey !== false && !hasAskQuestions && <div className="py-12 text-center text-sm text-muted-foreground">LVIS 에이전트가 준비되었습니다. 질문을 입력하거나 /command를 사용하세요.</div>}
         {(() => {
           // Three-way entry classification eliminates retroactive-reclassification flicker.
           //
@@ -742,10 +821,13 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
           //
           // TurnActionBar therefore appears ONLY when the whole turn is done, never during it.
 
+          // §PR-5: use visibleEntries (sliced in view-mode, full list otherwise)
+          const activeEntries = visibleEntries;
+
           // Last user-message index: determines which WorkGroup belongs to the active turn.
           let lastUserIdx = -1;
-          for (let k = entries.length - 1; k >= 0; k--) {
-            if (entries[k]?.kind === "user") { lastUserIdx = k; break; }
+          for (let k = activeEntries.length - 1; k >= 0; k--) {
+            if (activeEntries[k]?.kind === "user") { lastUserIdx = k; break; }
           }
 
           type EntryClass = "intermediate" | "live" | "final";
@@ -754,18 +836,18 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
           const entryTurnStartMap = new Map<number, number>(); // classified idx → turn-start idx
 
           let turnStart = -1;
-          for (let i = 0; i < entries.length; i++) {
-            const e = entries[i];
+          for (let i = 0; i < activeEntries.length; i++) {
+            const e = activeEntries[i];
             if (!e) continue;
             if (e.kind === "user") { turnStart = i; continue; }
             if (e.kind !== "assistant" && e.kind !== "reasoning" && e.kind !== "tool_group") continue;
 
-            let nextUserIdx = entries.length;
-            for (let j = i + 1; j < entries.length; j++) {
-              if (entries[j]?.kind === "user") { nextUserIdx = j; break; }
+            let nextUserIdx = activeEntries.length;
+            for (let j = i + 1; j < activeEntries.length; j++) {
+              if (activeEntries[j]?.kind === "user") { nextUserIdx = j; break; }
             }
 
-            const subsequentTurnEntries = entries.slice(i + 1, nextUserIdx);
+            const subsequentTurnEntries = activeEntries.slice(i + 1, nextUserIdx);
             const hasSubsequent = subsequentTurnEntries.some(
               (ne) => ne.kind === "assistant" || ne.kind === "tool_group" || ne.kind === "reasoning",
             );
@@ -776,7 +858,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
             const myTurnStart = turnStart >= 0 ? turnStart : 0;
             entryTurnStartMap.set(i, myTurnStart);
             const isActiveTurnEntry = myTurnStart === lastUserIdx && streaming;
-            const hasPriorWork = entries.slice(myTurnStart + 1, i).some(
+            const hasPriorWork = activeEntries.slice(myTurnStart + 1, i).some(
               (pe) => pe.kind === "tool_group" || pe.kind === "reasoning",
             );
 
@@ -800,8 +882,8 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
 
           const rendered: React.ReactNode[] = [];
           let i = 0;
-          while (i < entries.length) {
-            const entry = entries[i];
+          while (i < activeEntries.length) {
+            const entry = activeEntries[i];
             if (!entry) { i++; continue; }
             // Capture idx by value — closures in this loop must not close over mutable `i`
             const idx = i;
@@ -823,7 +905,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
               // the parent's `space-y-3` specificity (the descendant
               // selector `> :not([hidden]) ~ :not([hidden])` otherwise
               // wins).
-              const prevEntry = i > 0 ? entries[i - 1] : undefined;
+              const prevEntry = i > 0 ? activeEntries[i - 1] : undefined;
               const prevAssistantComplete =
                 prevEntry?.kind === "assistant" && prevEntry.streaming !== true;
               const userGapCls = prevAssistantComplete ? "!mt-4" : "";
@@ -849,13 +931,16 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
                     {starActive ? (
                       <Star className="absolute right-2 top-2 h-3 w-3 fill-yellow-400 text-yellow-400" />
                     ) : null}
-                    <div className="absolute right-2 top-2 hidden gap-1 group-hover:flex bg-message-user/95 rounded">
-                      <button className="rounded p-0.5 hover:bg-black/20" title="편집" onClick={() => setEditingEntryIdx(idx)}><Pencil className="h-3 w-3" /></button>
-                      <button className="rounded p-0.5 hover:bg-black/20" title="분기" onClick={() => void onFork(idx)}><GitBranch className="h-3 w-3" /></button>
-                      <button className="rounded p-0.5 hover:bg-black/20" title="즐겨찾기" onClick={() => void onToggleStar(idx)}>
-                        <Star className={`h-3 w-3 ${starActive ? "fill-yellow-400 text-yellow-400" : ""}`} />
-                      </button>
-                    </div>
+                    {/* §PR-5: hide mutating actions in view-mode (read-only slice) */}
+                    {!viewMode && (
+                      <div className="absolute right-2 top-2 hidden gap-1 group-hover:flex bg-message-user/95 rounded">
+                        <button className="rounded p-0.5 hover:bg-black/20" title="편집" onClick={() => setEditingEntryIdx(idx)}><Pencil className="h-3 w-3" /></button>
+                        <button className="rounded p-0.5 hover:bg-black/20" title="분기" onClick={() => void onFork(idx)}><GitBranch className="h-3 w-3" /></button>
+                        <button className="rounded p-0.5 hover:bg-black/20" title="즐겨찾기" onClick={() => void onToggleStar(idx)}>
+                          <Star className={`h-3 w-3 ${starActive ? "fill-yellow-400 text-yellow-400" : ""}`} />
+                        </button>
+                      </div>
+                    )}
                     <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{searchHighlight ? highlightText(entry.text, searchHighlight) : entry.text}</div>
                   </div>
                 );
@@ -894,6 +979,9 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
                   key={`cp-${idx}`}
                   tier={entry.tier}
                   messageCount={entry.removedMessages}
+                  compactNum={entry.compactNum}
+                  onEnterView={handleEnterView}
+                  onBranchFrom={handleBranchFrom}
                 />,
               );
               if (entry.summary) {
@@ -950,8 +1038,8 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
               }
               const groupEntries: { idx: number; node: React.ReactNode }[] = [];
 
-              while (i < entries.length) {
-                const e = entries[i];
+              while (i < activeEntries.length) {
+                const e = activeEntries[i];
                 if (!e) { i++; continue; }
                 if ((entryTurnStartMap.get(i) ?? groupTurnStart) !== groupTurnStart) break;
                 const cls = entryClassMap.get(i);
@@ -1008,7 +1096,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
                   // 으로 turnStart 일치 검증.
                   let aaTurnStart = -1;
                   for (let k = i; k >= 0; k--) {
-                    if (entries[k]?.kind === "user") { aaTurnStart = k; break; }
+                    if (activeEntries[k]?.kind === "user") { aaTurnStart = k; break; }
                   }
                   if (aaTurnStart === groupTurnStart) {
                     groupEntries.push({
@@ -1079,17 +1167,18 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
                     isStarred={!!isEntryStarred(idx)}
                     isFinal={true}
                   />
+                  {/* §PR-5: suppress mutating TurnActionBar actions in view-mode */}
                   <TurnActionBar
                     turnSummary={summary}
                     pricing={activePricing}
                     vendor={activeVendor}
                     isStarred={!!isEntryStarred(idx)}
-                    actions={{
+                    actions={viewMode ? {} : {
                       onRetry: () => void onRetryEffort(),
                       onFork: () => void onFork(idx),
                       onToggleStar: () => void onToggleStar(idx),
                     }}
-                    onFeedback={onFeedback ? (rating, reason) => void onFeedback(idx, rating, reason) : undefined}
+                    onFeedback={!viewMode && onFeedback ? (rating, reason) => void onFeedback(idx, rating, reason) : undefined}
                   />
                 </div>
               );
@@ -1282,7 +1371,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
             onSend={() => void (streaming ? onGuide(question) : onAsk(question))}
             onAbort={() => void onAbort()}
             streaming={streaming}
-            disabled={hasApiKey === false || contextOverflowPct >= 0.95}
+            disabled={hasApiKey === false || contextOverflowPct >= 0.95 || viewMode !== null}
             onWarning={(msg) => console.warn(msg)}
             placeholder={
               hasApiKey === false
