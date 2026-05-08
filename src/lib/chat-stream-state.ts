@@ -432,6 +432,25 @@ export function finalizeStreamingAssistant(
     const assistant = next[assistantIdx] as AssistantEntry;
     const text = opts?.overrideText !== undefined ? opts.overrideText : assistant.text || fallbackText;
     if (!text) {
+      // Preserve the entry (with empty text) when this turn produced
+      // tool_group or checkpoint siblings — those cards already render the
+      // turn's content and the entry must stay so the history timeline is
+      // intact.  Only splice when the entry is truly orphaned (no siblings
+      // in the current turn).
+      const lastUserIdx = findLastIdx(next, (e) => e.kind === "user");
+      const hasTurnSiblings = next
+        .slice(lastUserIdx + 1)
+        .some((e) => e.kind === "tool_group" || e.kind === "checkpoint");
+      if (hasTurnSiblings) {
+        next[assistantIdx] = {
+          ...assistant,
+          text: "",
+          streaming: false,
+          route: opts?.route,
+          phase: opts?.phase,
+        };
+        return next;
+      }
       next.splice(assistantIdx, 1);
       return next;
     }

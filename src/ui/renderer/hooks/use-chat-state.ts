@@ -13,7 +13,6 @@ import {
   setAssistantError,
   upsertStreamingAssistant,
   upsertStreamingReasoning,
-  EMPTY_ASSISTANT_RESPONSE_TEXT,
   type ChatEntry,
 } from "../../../lib/chat-stream-state.js";
 import { detectFromStream } from "../../../lib/stream-markers.js";
@@ -615,5 +614,9 @@ export function useChatState(api: LvisApi) {
 }
 
 function visibleAssistantText(text: string): string {
-  return text.trim().length > 0 ? text : EMPTY_ASSISTANT_RESPONSE_TEXT;
+  // Return the cleaned text as-is, or "" for marker-only / tool-only rounds.
+  // Never return a user-visible placeholder — finalizeStreamingAssistant
+  // decides whether to preserve or splice the entry based on surrounding
+  // context (tool_group / checkpoint siblings), not on placeholder text.
+  return text.trim().length > 0 ? text : "";
 }

@@ -338,9 +338,16 @@ ${input}`;
     return trackStreamTurn(() => runStreamedTurn(conversationLoop, effective, win?.webContents, "lvis:chat:stream", streamId, streamTurnOptions));
   });
 
-  ipcMain.handle("lvis:chat:abort", (e) => {
+  ipcMain.handle("lvis:chat:abort", async (e) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:abort", e); return UNAUTHORIZED_FRAME; }
     conversationLoop.abortCurrentTurn();
+    if (activeStreamTurn) {
+      try {
+        await activeStreamTurn;
+      } catch {
+        // expected: interrupted turns may reject
+      }
+    }
     return { ok: true };
   });
 
