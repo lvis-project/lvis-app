@@ -197,6 +197,16 @@ export function AskUserQuestionCard({
   };
   const goPrev = () => setStep((s) => Math.max(s - 1, 0));
 
+  // Always-defined submit handler: validates against the *current* draft at
+  // call time rather than at render time. This prevents the stale-closure bug
+  // where onSubmit was only passed when isAnswerComplete was true at render,
+  // but the keyboard handler needed it to fire after the draft was updated.
+  const handleSubmit = useCallback(() => {
+    if (currentItem && isAnswerComplete(currentItem, currentDraft)) {
+      goNext();
+    }
+  }, [currentItem, currentDraft, goNext]);
+
   const stepLabel = onConfirmStep
     ? "검토"
     : isMulti
@@ -241,7 +251,7 @@ export function AskUserQuestionCard({
               return isAnswerComplete(currentItem, { choice, choiceIndex });
             }}
             onFreeText={(freeText) => setAnswer(step, { freeText })}
-            onSubmit={isAnswerComplete(currentItem, currentDraft) ? goNext : undefined}
+            onSubmit={handleSubmit}
           />
         ) : (
           <ConfirmReview
@@ -351,8 +361,8 @@ function QuestionForm({
   /** Returns true if the new draft is complete (used by keyboard handler to advance). */
   onChoose: (choice: string, choiceIndex: number) => boolean;
   onFreeText: (text: string) => void;
-  /** Called when Enter is pressed on the free-text input to advance/submit. */
-  onSubmit?: () => void;
+  /** Called when Enter is pressed or a choice is keyboard-selected to advance/submit. */
+  onSubmit: () => void;
 }) {
   const choices = effectiveChoices(item);
   const recommend = recommendIndex(item);
@@ -396,7 +406,7 @@ function QuestionForm({
         // synchronous result to advance rather than the stale onSubmit
         // closure which reflects pre-selection isAnswerComplete state.
         const willBeComplete = onChoose(choices[i], i);
-        if (willBeComplete && onSubmit) onSubmit();
+        if (willBeComplete) onSubmit();
       }
     },
     [disabled, choices, onChoose, onSubmit],
@@ -455,7 +465,7 @@ function QuestionForm({
           value={draft.freeText ?? ""}
           onChange={(e) => onFreeText(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey && onSubmit) {
+            if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
               onSubmit();
             }
