@@ -885,6 +885,21 @@ export interface ConversationTriggerSpec {
   priority?: "low" | "normal" | "high";
   /** Suppress duplicate triggers for the same observation (window enforced by host). */
   dedupeKey?: string;
+  /**
+   * Q11 Overlay Runner — display title for the OverlayCard.
+   * Defaults to the source tag with the `proactive:` prefix stripped.
+   */
+  title?: string;
+  /**
+   * Q11 Overlay Runner — one-line summary shown in the OverlayCard body.
+   * Defaults to the first 200 chars of `prompt`.
+   */
+  summary?: string;
+  /**
+   * Q11 Overlay Runner — label for the OverlayCard primary action button.
+   * Defaults to "지금 답하기".
+   */
+  primaryActionLabel?: string;
 }
 
 export interface ConversationTriggerResult {
@@ -892,12 +907,12 @@ export interface ConversationTriggerResult {
   accepted: boolean;
   /**
    * When `accepted=false`, why:
-   *   `capability_denied` — plugin lacks `conversation-trigger`.
+   *   `capability_denied` — plugin lacks `conversation-trigger` or `host:overlay`.
    *   `invalid_source`    — `source` does not match `^proactive:[a-z][a-z0-9-]*$`,
    *                         `prompt` empty, or other shape problem.
    *   `duplicate`         — `dedupeKey` matched a recent trigger.
    *   `rate_limited`      — per-plugin call cap exceeded (sliding window).
-   *   `loop_unavailable`  — ConversationLoop not yet bound (boot ordering).
+   *   `loop_unavailable`  — ConversationLoop not yet bound (boot ordering, legacy).
    */
   reason?:
     | "capability_denied"
@@ -907,6 +922,12 @@ export interface ConversationTriggerResult {
     | "loop_unavailable";
   /** Echoed back so callers can correlate logs across plugin/host. */
   source: string;
+  /**
+   * Q11 Overlay Runner — present when `accepted=true` and the trigger was
+   * staged as an OverlayItem instead of starting a fresh ConversationLoop.
+   * Callers can use this to correlate the overlay item (e.g. for dismiss).
+   */
+  eventId?: string;
 }
 
 /**

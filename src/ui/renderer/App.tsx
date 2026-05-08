@@ -72,6 +72,7 @@ export function App() {
     resetStreamAccumulators, setErrorWithThought, handleCompactCommand,
     clearForNewChat, appendUserEntry, applyInitialSession, applyLoadedSession, truncateToEntry,
     fallbackToast,
+    insertImportedTriggerEntry,
   } = useChatState(api);
   const [question, setQuestion] = useState("");
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -132,6 +133,61 @@ export function App() {
 
     return () => { unsubStarted(); unsubFinished(); unsubFired(); };
   }, [api]);
+
+  // Q11 — overlay items ref: tracks all items pushed via onOverlayShow so
+  // handlePluginPrimaryAction can look up pendingPrompt by id without needing
+  // to reach into OverlayContext (App.tsx is the parent of OverlayContextProvider).
+  const overlayItemsRef = useRef<Map<string, import("./context/OverlayContext.js").OverlayItem>>(new Map());
+
+  // Q11 — overlay IPC subscriptions: main pushes plugin OverlayItems via OVERLAY_V1.show
+  useEffect(() => {
+    if (typeof api.onOverlayShow !== "function") return;
+    const unsubShow = api.onOverlayShow((item) => {
+      // Populate lookup ref so handlePluginPrimaryAction can find the item
+      overlayItemsRef.current.set(item.id, item);
+      addFireRef.current?.(item);
+    });
+    const unsubDismiss = typeof api.onOverlayDismiss === "function"
+      ? api.onOverlayDismiss((id) => {
+          overlayItemsRef.current.delete(id);
+        })
+      : () => {};
+    return () => { unsubShow(); unsubDismiss(); };
+  }, [api]);
+
+  // Q11 — plugin overlay primary action handler (user confirm → main chat insert).
+  // Called from OverlayCardRegion with the OverlayItem.id after OverlayContext.dismiss()
+  // has already removed the item from the queue. overlayItemsRef still holds it.
+  const handlePluginPrimaryAction = useCallback(
+    async (overlayItemId: string) => {
+      const item = overlayItemsRef.current.get(overlayItemId);
+      if (!item) return;
+
+      const { source, pendingPrompt, summary, title } = item;
+      if (source.kind !== "plugin" || !pendingPrompt) return;
+
+      // Clean up lookup ref
+      overlayItemsRef.current.delete(overlayItemId);
+
+      // Notify main process (audit log + plugin notification) — best-effort
+      try {
+        await api.notifyOverlayPrimary?.(source.pluginId, source.eventId);
+      } catch {
+        // audit is best-effort; do not block the chat insert
+      }
+
+      // Insert as imported_trigger entry — proactive provenance preserved,
+      // NOT a plain user bubble (architecture §9 plugin provenance contract)
+      insertImportedTriggerEntry({
+        sessionId: source.eventId,
+        pluginId: source.pluginId,
+        prompt: pendingPrompt,
+        summary,
+        title,
+      });
+    },
+    [api, insertImportedTriggerEntry],
+  );
 
   // Q10 — routine session modal (opened from OverlayCard "결과 보기")
   const [routineSessionModal, setRoutineSessionModal] = useState<{ jsonlPath: string } | null>(null);
@@ -687,6 +743,7 @@ export function App() {
             onOpenMarketplace={onOpenMarketplace}
             marketplaceUrlReady={marketplaceUrlReady}
             activePluginView={activePluginView ?? null}
+            onPluginPrimaryAction={(id) => { void handlePluginPrimaryAction(id); }}
           />
         </main>
         </div>

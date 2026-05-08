@@ -8,7 +8,7 @@ import { resolve as pathResolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { McpServerConfig } from "./mcp/types.js";
 import type { SerializedHistoryMessage } from "./shared/chat-history.js";
-import { ROUTINES_V2 } from "./shared/ipc-channels.js";
+import { OVERLAY_V1, ROUTINES_V2 } from "./shared/ipc-channels.js";
 import { PLUGIN_PRIVATE_NAMESPACES } from "./plugins/capabilities.js";
 
 // ─── Deterministic plugin webview asset URLs ────────────────────────────────
@@ -599,6 +599,25 @@ const api = {
     >,
   readRoutineSessionV2: async (jsonlPath: string) =>
     ipcRenderer.invoke(ROUTINES_V2.readSession, jsonlPath) as Promise<string>,
+
+  // Q11 — Overlay IPC bridges (main → renderer push + renderer → main confirm)
+  onOverlayShow: (handler: (item: unknown) => void) => {
+    const listener = (_e: unknown, item: unknown) => handler(item);
+    ipcRenderer.on(OVERLAY_V1.show, listener);
+    return () => ipcRenderer.removeListener(OVERLAY_V1.show, listener);
+  },
+  onOverlayUpdate: (handler: (id: string, patch: unknown) => void) => {
+    const listener = (_e: unknown, id: string, patch: unknown) => handler(id, patch);
+    ipcRenderer.on(OVERLAY_V1.update, listener);
+    return () => ipcRenderer.removeListener(OVERLAY_V1.update, listener);
+  },
+  onOverlayDismiss: (handler: (id: string) => void) => {
+    const listener = (_e: unknown, id: string) => handler(id);
+    ipcRenderer.on(OVERLAY_V1.dismiss, listener);
+    return () => ipcRenderer.removeListener(OVERLAY_V1.dismiss, listener);
+  },
+  notifyOverlayPrimary: async (pluginId: string, eventId: string) =>
+    ipcRenderer.invoke(OVERLAY_V1.primaryAction, pluginId, eventId),
 
   // todo_session_write — assistant's per-session checklist
   listSessionTodos: async (sessionId?: string) =>

@@ -42,6 +42,16 @@ export interface OverlayItem {
   primaryActionLabel?: string;
   /** routine-specific — path to JSONL for RoutineSessionView */
   routineSessionPath?: string;
+  /**
+   * Q11 plugin (insertion-type) — prompt to inject into main chat when the
+   * user confirms (primary action). Absent for routine-source items.
+   */
+  pendingPrompt?: string;
+  /**
+   * ISO timestamp when the item was created/received. Used by OverlayCard
+   * relativeTime display for plugin-source items (which lack a firedAt on source).
+   */
+  createdAt?: string;
 }
 
 export interface OverlayContextValue {

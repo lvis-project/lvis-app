@@ -384,6 +384,40 @@ export function useChatState(api: LvisApi) {
   );
 
   /**
+   * Q11 — Plugin overlay confirm → main chat insert.
+   *
+   * Inserts an imported_trigger entry (kind="imported_trigger") so the
+   * plugin-authored prompt is visible in chat history with proper proactive
+   * provenance — NOT as a plain user bubble. The user's next send turn (or
+   * an auto-fired handleAsk) will pick up from there.
+   *
+   * Conservative default: user message inserted, auto-turn NOT started.
+   * The caller (App.tsx handlePluginPrimaryAction) decides whether to also
+   * call handleAsk with the prompt.
+   */
+  const insertImportedTriggerEntry = useCallback(
+    (input: {
+      sessionId: string;
+      pluginId: string;
+      prompt: string;
+      summary: string;
+      title: string;
+    }) => {
+      setEntries((p) =>
+        appendImportedTriggerEntry(p, {
+          sessionId: input.sessionId,
+          source: `plugin:${input.pluginId}`,
+          prompt: input.prompt,
+          summary: input.summary,
+          toolCallCount: 0,
+          importedAt: new Date().toISOString(),
+        }),
+      );
+    },
+    [],
+  );
+
+  /**
    * Close any open imported_trigger card without surfacing an error.
    * Used by App's handleAsk catch path: a `chatSend` rejection (network
    * fail, abort) would otherwise leave the card's streaming spinner
@@ -608,6 +642,10 @@ export function useChatState(api: LvisApi) {
     applyInitialSession,
     applyLoadedSession,
     truncateToEntry,
+    // trigger import methods (brain trigger + Q11 plugin overlay)
+    addImportedTriggerEntry,
+    closeOpenImportedTrigger,
+    insertImportedTriggerEntry,
   };
 }
 

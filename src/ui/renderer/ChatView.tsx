@@ -99,6 +99,8 @@ export interface ChatViewProps {
   // PR-2-F-2 정정: fork-based revert (revertSessionId/onRevertCheckpoint) 폐지 — Layer 3
   // same-session checkpoint chain (Copilot 패턴) 으로 대체. sessionId 불변이므로 별도 revert action
   // 불필요 — 사용자가 임의 시점으로 돌아가려면 후속 PR 의 view-mode 지원 필요.
+  /** Q11 — called when user confirms a plugin overlay item; id is the OverlayItem.id */
+  onPluginPrimaryAction?: (overlayItemId: string) => void;
 }
 
 function HistoricalSessionMarker({ title, sessionId }: { title: string; sessionId: string }) {
@@ -365,7 +367,7 @@ function HistoricalEntriesList({
   return <div className="min-w-0 w-full max-w-full space-y-3 overflow-x-hidden">{rendered}</div>;
 }
 
-export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, installingPlugins, onOpenMarketplace, marketplaceUrlReady }: ChatViewProps) {
+export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, installingPlugins, onOpenMarketplace, marketplaceUrlReady, onPluginPrimaryAction }: ChatViewProps) {
   // We still need the api for SessionTodoPanel; obtain it via singleton.
   const workflowApi = getApi();
   const debugStreamEnabled = isDebugStreamEnabled();
@@ -653,8 +655,8 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           </Card>
         </div>
       )}
-      {/* Q10 — Routine fire overlay (isolated from chat history, Q9 policy). Running phase rendered by OverlayCard. */}
-      <OverlayCardRegion />
+      {/* Q10/Q11 — Routine fire + plugin (insertion-type) overlay. Q9 policy: routine items isolated from chat history. Plugin items insert via imported_trigger on confirm. */}
+      <OverlayCardRegion onPluginPrimaryAction={onPluginPrimaryAction ?? (() => {})} />
       <div className="relative min-h-0 min-w-0 max-w-full flex-1 overflow-hidden">
       {/* §PR-5: View-Mode banner — sticky at the top of the chat scroll area */}
       <ViewModeBanner viewMode={viewMode} onExit={() => { void handleExitView(); }} />

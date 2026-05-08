@@ -1,11 +1,14 @@
-// OverlayCard — routine fire inline overlay card.
+// OverlayCard — overlay card for routine fire and plugin (insertion-type) triggers.
+//
+// Two source variants share the same card shell:
+//   - routine (Q9): running=true shows spinner, false shows "결과 보기"
+//   - plugin (Q11, insertion-type): running=false shows primaryActionLabel ("지금 답하기")
 //
 // Inherits v1 RoutineCard policy:
 //   - Single active card with prev/next queue navigation
 //   - queueIndex / queueTotal counter (shown when queue ≥ 2)
 //   - dismiss (X) — permanent removal
 //   - snooze (clock icon) — default 30 min, re-enters queue on expiry
-//   - "결과 보기" opens RoutineSessionView modal
 //
 // Q9 isolation: only ~200ch summary flows here. Full content
 // lives in RoutineSessionView which reads the JSONL directly.
@@ -30,10 +33,11 @@ import {
 } from "../../../components/ui/tooltip.js";
 
 export interface OverlayCardProps {
-  routineTitle: string;
+  /** Card title — routine name or plugin-supplied title */
+  title: string;
   summary: string;
   firedAt: string;
-  /** true = LLM session in-flight; false = session complete */
+  /** true = LLM session in-flight; false = session complete or plugin proposal */
   running: boolean;
   /** 1-based index within visible queue */
   queueIndex: number;
@@ -43,7 +47,10 @@ export interface OverlayCardProps {
   onNext: () => void;
   onDismiss: () => void;
   onSnooze: () => void;
-  onOpenSession: () => void;
+  /** Called when the user clicks the primary action button */
+  onPrimaryAction: () => void;
+  /** Label for the primary action button — e.g. "결과 보기" or "지금 답하기" */
+  primaryActionLabel: string;
 }
 
 function relativeTime(isoString: string): string {
@@ -62,7 +69,7 @@ function relativeTime(isoString: string): string {
 }
 
 export function OverlayCard({
-  routineTitle,
+  title,
   summary,
   firedAt,
   running,
@@ -72,7 +79,8 @@ export function OverlayCard({
   onNext,
   onDismiss,
   onSnooze,
-  onOpenSession,
+  onPrimaryAction,
+  primaryActionLabel,
 }: OverlayCardProps) {
   const relTime = useMemo(() => relativeTime(firedAt), [firedAt]);
 
@@ -103,7 +111,7 @@ export function OverlayCard({
               ) : (
                 <span className="text-violet-500">●</span>
               )}
-              <span className="truncate">{routineTitle}</span>
+              <span className="truncate">{title}</span>
             </CardTitle>
             <CardDescription className="mt-0.5 flex items-center gap-1 text-[11px]">
               <span>{running ? "진행 중…" : "루틴 완료"}</span>
@@ -204,10 +212,10 @@ export function OverlayCard({
               size="sm"
               variant="default"
               className="h-7 text-xs"
-              data-testid="overlay-card-open-session"
-              onClick={onOpenSession}
+              data-testid="overlay-card-primary-action"
+              onClick={onPrimaryAction}
             >
-              결과 보기
+              {primaryActionLabel}
             </Button>
           </div>
         )}

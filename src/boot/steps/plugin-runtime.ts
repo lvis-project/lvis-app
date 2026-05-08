@@ -16,6 +16,7 @@
 import { app, BrowserWindow as ElectronBrowserWindow, shell } from "electron";
 import type { BrowserWindow } from "electron";
 import { mkdirSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { installPluginPartitionPolicy } from "../../main/html-preview-partition.js";
 import { pluginPartitionName } from "../../shared/plugin-partition.js";
 import { onEvent as onHostEvent } from "../types.js";
@@ -30,6 +31,7 @@ import {
   tamperedVarsAtBoot,
 } from "../dev-flags.js";
 import { canEmitEvent, requiredCapabilityForEmit } from "../../plugins/capabilities.js";
+import { OVERLAY_V1 } from "../../shared/ipc-channels.js";
 import { resolvePluginPaths } from "../../plugins/plugin-paths.js";
 import {
   emitPluginConfigChange,
@@ -1178,28 +1180,60 @@ export async function initPluginRuntime(
       },
 
       // ─── Proactive Brain — hostApi.triggerConversation() ───────────────
-      // Gate body lives in evaluateTriggerSpec() so prod and tests share
-      // one implementation; tests import + call this directly. Dispatch
-      // goes through TriggerExecutor which spawns a fresh ConversationLoop
-      // per trigger so the user's chat history is never polluted by the
-      // templated proactive turn.
+      // Q11 Overlay Runner: gate body lives in evaluateTriggerSpec() so prod
+      // and tests share one implementation. On allow, the host holds the spec
+      // in OverlayContext staging via IPC (fresh ConversationLoop is NOT
+      // started). The user's confirm action inserts the prompt as a user
+      // message into main chat via the imported_trigger mechanism.
+      //
+      // Capability gate: plugins must declare "host:overlay" (enforced) OR
+      // the legacy "conversation-trigger". evaluateTriggerSpec checks for
+      // "conversation-trigger"; we also accept "host:overlay" by injecting it
+      // into the effective capability list so the same gate logic applies.
       triggerConversation: async (spec: ConversationTriggerSpec) => {
+        const effectiveCapabilities = [
+          ...(manifest.capabilities ?? []),
+          // If the plugin has host:overlay but not conversation-trigger, treat
+          // host:overlay as satisfying the trigger gate — they are semantically
+          // equivalent for the overlay runner path.
+          ...((manifest.capabilities ?? []).includes("host:overlay") &&
+          !(manifest.capabilities ?? []).includes("conversation-trigger")
+            ? ["conversation-trigger"]
+            : []),
+        ];
         const decision = evaluateTriggerSpec({
           spec,
           pluginId,
-          capabilities: manifest.capabilities ?? [],
+          capabilities: effectiveCapabilities,
           dedupe: triggerConversationDedupe,
           rateLimiter: triggerConversationRateLimiter,
           denyAuditThrottle: triggerDenyAuditThrottle,
-          // `loop_unavailable` now maps to the trigger executor being unwired
-          // (boot ordering) rather than the user's chat loop missing.
-          loopBound: !!lateBinding.triggerExecutorRef.fn,
+          // Q11: overlay runner does not need a ConversationLoop — always bound.
+          loopBound: true,
           auditLogger: bootAuditLogger,
         });
-        // TriggerExecutor removed — triggerExecutorRef.fn is always null, so
-        // evaluateTriggerSpec always returns deny(loop_unavailable). Return the
-        // denial result; the allow branch is unreachable.
-        return decision.result;
+
+        if (decision.kind === "deny") {
+          return decision.result;
+        }
+
+        // Allow path — push to renderer OverlayContext via IPC instead of
+        // spawning a fresh ConversationLoop.
+        const eventId = randomUUID();
+        const overlayId = `plugin:${pluginId}:${eventId}`;
+        const overlayItem = {
+          id: overlayId,
+          source: { kind: "plugin" as const, pluginId, eventId },
+          title: spec.title ?? spec.source.replace(/^proactive:/, ""),
+          summary: spec.summary ?? spec.prompt.slice(0, 200),
+          running: false,
+          primaryActionLabel: spec.primaryActionLabel ?? "지금 답하기",
+          pendingPrompt: spec.prompt,
+          createdAt: new Date().toISOString(),
+        };
+        mainWindow.webContents.send(OVERLAY_V1.show, overlayItem);
+
+        return { accepted: true, source: decision.source, eventId };
       },
     }),
   });

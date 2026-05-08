@@ -58,6 +58,8 @@ export interface MainContentProps {
   marketplaceUrlReady?: boolean;
   // plugin view
   activePluginView: PluginView | null;
+  /** Q11 — called when user confirms a plugin overlay item; id is the OverlayItem.id */
+  onPluginPrimaryAction: (overlayItemId: string) => void;
 }
 
 function MainPaneShell({ children, padded = true }: { children: ReactNode; padded?: boolean }) {
@@ -100,6 +102,7 @@ function HomeChatPane(props: MainContentProps) {
         installingPlugins={props.installingPlugins}
         onOpenMarketplace={props.onOpenMarketplace}
         marketplaceUrlReady={props.marketplaceUrlReady}
+        onPluginPrimaryAction={props.onPluginPrimaryAction}
       />
     </ChatContextProvider>
   );
