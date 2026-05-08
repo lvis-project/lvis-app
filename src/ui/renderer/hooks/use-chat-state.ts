@@ -13,7 +13,6 @@ import {
   setAssistantError,
   upsertStreamingAssistant,
   upsertStreamingReasoning,
-  EMPTY_ASSISTANT_RESPONSE_TEXT,
   type ChatEntry,
 } from "../../../lib/chat-stream-state.js";
 import { detectFromStream } from "../../../lib/stream-markers.js";
@@ -615,5 +614,5 @@ export function useChatState(api: LvisApi) {
 }
 
 function visibleAssistantText(text: string): string {
-  return text.trim().length > 0 ? text : EMPTY_ASSISTANT_RESPONSE_TEXT;
+  return text.trim().length > 0 ? text : "";
 }
