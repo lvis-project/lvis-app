@@ -112,12 +112,11 @@ describe("AppearanceTab — followSystem toggle (LGE pair only)", () => {
   });
 
   it("followSystem toggle is shown when lge-dark is active", async () => {
-    const { getByRole, getByTestId } = renderWithBundle("lge-dark");
+    const { getByTestId } = renderWithBundle("lge-dark");
     // Already on lge-dark — toggle should be visible
     await waitFor(() => {
       expect(getByTestId("follow-system-toggle")).toBeTruthy();
     });
-    void getByRole; // suppress unused warning
   });
 
   it("high-contrast card has no followSystem toggle", async () => {

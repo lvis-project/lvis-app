@@ -385,9 +385,13 @@ describe("SettingsService appearance v1 → v2 migration", () => {
   it("v1 write-back: migrated appearance is written to disk as v2", async () => {
     writeV1({ theme: "dark", chatTheme: "lg", codeTheme: "auto" });
     const service = new SettingsService({ userDataPath });
-    // The constructor triggers async write-back — wait a tick
-    await new Promise<void>((res) => setTimeout(res, 50));
-    const onDisk = JSON.parse(readFileSync(join(userDataPath, "lvis-settings.json"), "utf-8"));
+    // The constructor triggers async write-back — poll until disk reflects v2
+    let onDisk: Record<string, unknown> = {};
+    for (let i = 0; i < 20; i++) {
+      await new Promise<void>((res) => setTimeout(res, 50));
+      onDisk = JSON.parse(readFileSync(join(userDataPath, "lvis-settings.json"), "utf-8")) as Record<string, unknown>;
+      if ((onDisk.appearance as Record<string, unknown>).schemaVersion === 2) break;
+    }
     expect(onDisk.appearance).toEqual({ schemaVersion: 2, bundleId: "lge-dark" });
     // No legacy keys remain after write-back
     expect(onDisk.appearance.theme).toBeUndefined();
@@ -403,5 +407,32 @@ describe("SettingsService appearance v1 → v2 migration", () => {
     );
     const s = new SettingsService({ userDataPath });
     expect(s.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "forest" });
+  });
+
+  // Main process has no window.matchMedia — system theme must not crash and must
+  // produce a deterministic DEFAULT_BUNDLE_ID result (no silent OS-scheme access).
+  it("system + default → tokyo-night (main process: no matchMedia needed)", () => {
+    writeV1({ theme: "system", chatTheme: "default", codeTheme: "auto" });
+    const s = new SettingsService({ userDataPath });
+    expect(s.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "tokyo-night" });
+  });
+
+  it("system + lg → lge-dark + followSystem:true (main process: renderer will track OS)", () => {
+    writeV1({ theme: "system", chatTheme: "lg", codeTheme: "auto" });
+    const s = new SettingsService({ userDataPath });
+    expect(s.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "lge-dark", followSystem: true });
+  });
+
+  it("codeTheme-only v1 triggers write-back (needsV2WriteBack includes codeTheme)", async () => {
+    writeV1({ codeTheme: "light" });
+    const service = new SettingsService({ userDataPath });
+    let onDisk: Record<string, unknown> = {};
+    for (let i = 0; i < 20; i++) {
+      await new Promise<void>((res) => setTimeout(res, 50));
+      onDisk = JSON.parse(readFileSync(join(userDataPath, "lvis-settings.json"), "utf-8")) as Record<string, unknown>;
+      if ((onDisk.appearance as Record<string, unknown>).schemaVersion === 2) break;
+    }
+    expect((onDisk.appearance as Record<string, unknown>).codeTheme).toBeUndefined();
+    expect(service.get("appearance")).toMatchObject({ schemaVersion: 2 });
   });
 });

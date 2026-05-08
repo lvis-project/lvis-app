@@ -594,7 +594,7 @@ export class SettingsService {
       // Detect v1 (legacy tri-axis) to trigger write-back after constructor.
       const needsV2WriteBack = !!onDisk && typeof onDisk === "object" &&
         onDisk.schemaVersion !== 2 &&
-        (typeof onDisk.theme === "string" || typeof onDisk.chatTheme === "string");
+        (typeof onDisk.theme === "string" || typeof onDisk.chatTheme === "string" || typeof onDisk.codeTheme === "string");
 
       const appearance = normalizeAppearance(parsed.appearance);
       const result: AppSettings & { __needsV2WriteBack?: boolean } = {
@@ -707,21 +707,25 @@ const VALID_BUNDLE_IDS: readonly string[] = [
  * Migrate a v1 tri-axis appearance object to a v2 bundleId.
  *
  * Migration matrix (12 cases, per spec §3):
- *  dark + default/auto → tokyo-night
- *  dark + lg           → lge-dark
+ *  dark + default/auto  → tokyo-night
+ *  dark + lg            → lge-dark
  *  light + default/auto → forest
- *  light + lg          → lge-light
- *  system + default    → matchMedia → tokyo-night or forest
- *  system + lg         → matchMedia → lge-light or lge-dark
+ *  light + lg           → lge-light
+ *  system + default     → tokyo-night (DEFAULT_BUNDLE_ID; renderer may apply followSystem)
+ *  system + lg          → lge-dark + followSystem:true (renderer tracks OS scheme)
  *  * + purple|orange|blue → midnight (closest dark accent coercion)
- *  high-contrast + *   → high-contrast (HC always wins)
+ *  high-contrast + *    → high-contrast (HC always wins)
  *  code override (dark+default+light / light+default+dark) → bundle wins, code override ignored
- *  dark + lg + dark    → lge-dark
- *  invalid/unknown     → DEFAULT_BUNDLE_ID
+ *  dark + lg + dark     → lge-dark
+ *  invalid/unknown      → DEFAULT_BUNDLE_ID
+ *
+ * Note: "system" is intentionally NOT resolved via window.matchMedia here.
+ * This function runs in the Electron main process where `window` is undefined.
+ * System-theme users get DEFAULT_BUNDLE_ID (or lge-dark+followSystem for LGE),
+ * and the renderer's followSystem toggle can track the OS scheme from there.
  */
 export function migrateAppearanceV1ToV2(
   legacy: AppearanceSettingsV1,
-  win?: Pick<Window, "matchMedia">,
 ): AppearanceSettings {
   const theme = VALID_THEMES_V1.includes(legacy.theme) ? legacy.theme : "system";
   const chatTheme = VALID_CHAT_THEMES_V1.includes(legacy.chatTheme) ? legacy.chatTheme : "default";
@@ -736,30 +740,20 @@ export function migrateAppearanceV1ToV2(
     return { schemaVersion: 2, bundleId: "midnight" };
   }
 
-  // Resolve "system" against matchMedia.
-  let resolvedShell: "light" | "dark";
-  if (theme === "system") {
-    try {
-      const mql = (win ?? (typeof window !== "undefined" ? window : undefined))
-        ?.matchMedia?.("(prefers-color-scheme: light)");
-      resolvedShell = mql?.matches ? "light" : "dark";
-    } catch {
-      resolvedShell = "dark";
-    }
-  } else {
-    resolvedShell = theme; // "light" | "dark"
-  }
-
   // LG pair.
   if (chatTheme === "lg") {
-    return { schemaVersion: 2, bundleId: resolvedShell === "light" ? "lge-light" : "lge-dark" };
+    if (theme === "light") return { schemaVersion: 2, bundleId: "lge-light" };
+    if (theme === "dark")  return { schemaVersion: 2, bundleId: "lge-dark" };
+    // system: default to lge-dark; renderer followSystem will track OS from here.
+    return { schemaVersion: 2, bundleId: "lge-dark", followSystem: true };
   }
 
-  // Default chat (no overlay) — pick by shell.
-  return {
-    schemaVersion: 2,
-    bundleId: resolvedShell === "light" ? "forest" : "tokyo-night",
-  };
+  // Default chat (no overlay) — pick by explicit shell; "system" → DEFAULT.
+  if (theme === "light") return { schemaVersion: 2, bundleId: "forest" };
+  if (theme === "dark")  return { schemaVersion: 2, bundleId: "tokyo-night" };
+
+  // system or unknown → DEFAULT_BUNDLE_ID
+  return { schemaVersion: 2, bundleId: "tokyo-night" };
 }
 
 function normalizeAppearance(input: unknown): AppearanceSettings {

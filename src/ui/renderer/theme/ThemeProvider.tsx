@@ -79,9 +79,10 @@ export function ThemeProvider({
         const settings = await api.getSettings();
         if (cancelled || userTouchedRef.current || !mountedRef.current) return;
         const appearance = settings.appearance as { schemaVersion?: number; bundleId?: string; followSystem?: boolean } | undefined;
-        const nextId = (appearance?.schemaVersion === 2 && typeof appearance.bundleId === "string")
+        const rawId = (appearance?.schemaVersion === 2 && typeof appearance.bundleId === "string")
           ? appearance.bundleId
           : DEFAULT_BUNDLE_ID;
+        const nextId = findBundle(rawId) ? rawId : DEFAULT_BUNDLE_ID;
         const nextFollow = appearance?.followSystem === true;
         setBundleIdState(nextId);
         setFollowSystemState(nextFollow);
@@ -169,8 +170,9 @@ export function ThemeProvider({
   const setBundle = useCallback(
     (id: BundleId) => {
       userTouchedRef.current = true;
-      setBundleIdState(id);
-      persistAppearance({ bundleId: id });
+      const safeId = findBundle(id) ? id : DEFAULT_BUNDLE_ID;
+      setBundleIdState(safeId);
+      persistAppearance({ bundleId: safeId });
     },
     [persistAppearance],
   );

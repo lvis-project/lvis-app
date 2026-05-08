@@ -12,9 +12,9 @@
  *   - `followSystem`     — LGE pair only: auto-switch based on prefers-color-scheme
  *   - `setFollowSystem`  — toggle followSystem (only meaningful for LGE pair)
  *
- * Legacy type aliases (ThemePreference, ChatThemePreference, etc.) are kept for
- * the settings-store migration path and are marked @internal. New code should
- * not import them — use bundleId exclusively.
+ * Legacy type aliases (ThemePreference, ChatThemePreference, etc.) live in
+ * `settings-store.ts` for the migration path only and are marked @internal.
+ * New code should not import them — use bundleId exclusively.
  *
  * `resolved` is kept for backward compatibility with CustomTitleBar's
  * `optionalTheme.resolved` usage (maps to the active bundle's shell).
