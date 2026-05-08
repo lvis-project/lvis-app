@@ -118,9 +118,14 @@ Mixed-language (코드+한글 주석) 시 ratio < 0.5 → weight 1.0. 보수적 
 
 **위치**: `auto-compact.ts:markStaleToolResults` (rename from `microcompactMessages`).
 
+> **구현 단계 (이 청사진은 *목표 상태* 기술)**
+> - PR-1b: rename + 200 자 임계. content stub-replace 동작 유지 (transitional).
+> - PR-3 (stamping behavior): 메모리 *verbatim* + serialization-time stub 으로 전환 — `meta.compactedAt` 마킹만 in-memory.
+> - 따라서 아래 “content 보존 (메모리)” 항목은 PR-3 머지 후 도달 상태이며, PR-1 시점은 stub-replace.
+
 **변경점**:
-- `meta.compactedAt: ts` 만 마킹, content 보존 (메모리)
-- 직렬화 단계 (provider 호출 + 디스크 JSONL append) 에서만 stub 화 — 메모리는 verbatim
+- `meta.compactedAt: ts` 만 마킹, content 보존 (메모리) ※ PR-3 후 도달
+- 직렬화 단계 (provider 호출 + 디스크 JSONL append) 에서만 stub 화 — 메모리는 verbatim ※ PR-3 후 도달
 - stub 임계: tool_result ≥ 200 자
 - 끝 N=8 tool_result preserve
 
@@ -131,7 +136,11 @@ Mixed-language (코드+한글 주석) 시 ratio < 0.5 → weight 1.0. 보수적 
 
 **SubAgentRunner stamping (Q2 default — architect v3 회귀 후 정정)**: child loop 의 `postTurnHookChain: undefined` (`subagent-runner.ts:149-151`) 는 *의도된 isolation contract* — fire-and-forget child 가 parent session 의 `notes/` / `audit.jsonl` / idle-poke 에 side effect 일으키면 안 됨. 따라서 6-stage hook chain 의 stage 1 만 *최소 inject*:
 
-- 신규 field `markStaleToolResultsHook?: (messages: GenericMessage[]) => GenericMessage[]` 를 `SubAgentRunnerDeps` 에 추가
+> **구현 단계**
+> - PR-1c (실제 머지본): `SubAgentRunnerDeps` 에 새 hook field 를 추가하지 않고, child ConversationLoop 의 *fallback path* (post-turn-hook-chain 미주입) 에서 `markStaleToolResults` 를 inline 호출하도록 단순화. side effect 0 + isolation contract 동일 유지.
+> - PR-1c 이후: 아래 “신규 field 추가” 안은 폐기. inline fallback 이 채택본.
+
+- ~~신규 field `markStaleToolResultsHook?: (messages: GenericMessage[]) => GenericMessage[]` 를 `SubAgentRunnerDeps` 에 추가~~ → PR-1c 에서 inline fallback 으로 대체됨
 - child loop 가 매 turn 후 *이것만* 호출 (extractMemory / auditLog / idle-poke / chainTitle / detect-checkpoint 모두 *제외*)
 - `postTurnHookChain` 자체는 `undefined` 유지 — isolation contract 그대로
 

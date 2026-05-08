@@ -1,6 +1,11 @@
 # Infinity Session Redesign v2 — opaque-state slot + 2-PR migration
 
-**Status**: 🟡 DRAFT (post-5-reviewer revision)
+> ⚠️ **Superseded by `infinity-session-redesign-v3.md`** (architect short-form 회귀 patches P1~P11 반영본).
+> 이 문서는 *historical reference* 입니다. 본문 §4.2 의 “Layer 1 marking-only + 메모리 verbatim” 표현은
+> *목표 상태* — 실제 PR-1c 머지본은 stub-replace, PR-3 stamping behavior 머지 시 marking-only 로 전환.
+> 현재 동작 / 단계별 매핑은 v3 문서를 참조하세요.
+
+**Status**: 🟡 DRAFT (post-5-reviewer revision) — superseded
 **Date**: 2026-05-08
 **Supersedes**: `infinity-session-redesign-v1.md` (5-reviewer 통합 정정 반영)
 **Architecture ref**: `architecture.md` v4 §4.5 / §4.6 / §5

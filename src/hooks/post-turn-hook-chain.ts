@@ -97,7 +97,7 @@ export class PostTurnHookChain {
       if (!autoCompactEnabled) {
         log.info("post-turn compact: SKIPPED (autoCompact 설정 OFF)");
       } else {
-        // Stage 1a: Layer 1 part marking (항상 실행, 저비용)
+        // Stage 1a: Layer 1 tool_result stub-replace (항상 실행, 저비용 — PR-3 에서 marking-only 로 전환 예정)
         const beforeMarkCount = ctx.messages.length;
         const { messages: afterMark, result: mr } = markStaleToolResults(ctx.messages);
         let working = afterMark;

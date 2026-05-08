@@ -6,7 +6,7 @@
  *
  * 핵심 원칙:
  * - tool_use/tool_result 쌍은 절대 분리하지 않음
- * - 최근 N개 메시지는 보존 (기본 4)
+ * - 최근 N개 메시지는 보존 (PR-1a 에서 DEFAULT_CONFIG.preserveRecentMessages 4 → 12 상향)
  * - 요약은 파일 참조, 진행 중인 작업, 핵심 결정을 보존
  */
 import type { GenericMessage, TokenUsage, LLMVendor, UserContentPart } from "./llm/types.js";
@@ -293,7 +293,7 @@ export interface MarkStaleResult {
   stripped: boolean;
   /** strip된 tool_result 개수 */
   strippedCount: number;
-  /** 확보된 총 바이트 수 (문자열 길이 기준) */
+  /** 확보된 총 문자 수 (UTF-16 code unit 기준 string.length 차이 — 바이트 아님). */
   freedChars: number;
 }
 
@@ -303,9 +303,12 @@ const DEFAULT_MARK_STALE_CONFIG: MarkStaleConfig = {
 };
 
 /**
- * Layer 1 — Preventive, LLM-free part marking (renamed from `microcompactMessages` in v3 PR-1b).
+ * Layer 1 — Preventive, LLM-free tool_result *stub-replace* (renamed from `microcompactMessages` in v3 PR-1b).
  *
  * 오래된 tool_result 메시지 content를 stub string으로 교체해 히스토리 크기를 낮춘다.
+ * (PR-3 stamping-behavior 머지 시 이 함수는 *marking only* — `meta.compactedAt` set 만 — 로 전환되고,
+ *  실제 stub 화는 wire/disk serialization 경계로 이동. 그 시점까지 content 교체 동작 유지.)
+ *
  * - 최근 `preserveRecentToolResults` 개는 원본 유지 (assistant가 참조 가능성 있음)
  * - content 길이가 `minStubThreshold` 미만이면 stub 으로 교체해도 이득이 거의 없으므로 skip (OpenCode 패턴)
  * - 이미 stripped된 메시지는 skip (idempotent)
