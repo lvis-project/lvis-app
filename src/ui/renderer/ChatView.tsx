@@ -184,6 +184,7 @@ function HistoricalEntriesList({
       return <ReasoningCard key={idx} entry={{ ...entry, streaming: false }} embedded={embedded} />;
     }
     if (entry.kind === "tool_group") {
+      // Historical sessions are loaded from disk stubs — no verbatim available (sessionId omitted)
       return <ToolGroupCard key={entry.groupId || idx} group={entry} embedded={embedded} />;
     }
     if (entry.kind === "ask_user_answer") {
@@ -967,10 +968,10 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
                     groupEntries.push({
                       idx: i,
                       node: spawnNodes.length === 0 ? (
-                        <ToolGroupCard key={e.groupId} group={e} embedded />
+                        <ToolGroupCard key={e.groupId} group={e} embedded sessionId={currentSessionId} />
                       ) : (
                         <Fragment key={e.groupId}>
-                          <ToolGroupCard group={e} embedded />
+                          <ToolGroupCard group={e} embedded sessionId={currentSessionId} />
                           {spawnNodes}
                         </Fragment>
                       ),
@@ -1048,7 +1049,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
               if (entry.kind === "reasoning") {
                 rendered.push(<ReasoningCard key={idx} entry={entry} />);
               } else if (entry.kind === "tool_group") {
-                rendered.push(<ToolGroupCard key={entry.groupId} group={entry} />);
+                rendered.push(<ToolGroupCard key={entry.groupId} group={entry} sessionId={currentSessionId} />);
                 for (const node of renderSpawnsForGroup(entry)) rendered.push(node);
               } else if (entry.kind === "assistant") {
                 rendered.push(
@@ -1100,7 +1101,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
             if (entry.kind === "reasoning") {
               rendered.push(<ReasoningCard key={idx} entry={entry} />);
             } else if (entry.kind === "tool_group") {
-              rendered.push(<ToolGroupCard key={entry.groupId} group={entry} />);
+              rendered.push(<ToolGroupCard key={entry.groupId} group={entry} sessionId={currentSessionId} />);
               for (const node of renderSpawnsForGroup(entry)) rendered.push(node);
             }
             i++;
