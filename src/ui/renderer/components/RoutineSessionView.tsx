@@ -21,9 +21,23 @@ export interface RoutineSessionViewProps {
 
 interface SessionLine {
   role?: string;
-  content?: string;
+  content?: unknown;
   text?: string;
   timestamp?: string;
+}
+
+function normalizeContent(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content.map(part => {
+      if (typeof part === "string") return part;
+      if (part !== null && typeof part === "object" && (part as Record<string, unknown>).type === "text" && typeof (part as Record<string, unknown>).text === "string") {
+        return (part as Record<string, unknown>).text as string;
+      }
+      return "";
+    }).join("\n");
+  }
+  return "";
 }
 
 function parseSessionLine(raw: string): SessionLine | null {
@@ -89,7 +103,7 @@ export function RoutineSessionView({ jsonlPath, api, onClose }: RoutineSessionVi
         )}
         {!loading && !error && lines.map((line, i) => {
           const role = line.role ?? "unknown";
-          const text = line.content ?? line.text ?? "";
+          const text = line.content !== undefined ? normalizeContent(line.content) : (line.text ?? "");
           const ts = line.timestamp;
           return (
             <div

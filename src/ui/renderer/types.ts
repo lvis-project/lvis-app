@@ -316,11 +316,7 @@ export type LvisApi = {
     | { ok: false; error: string }
   >;
   onRoutineFiredV2: (
-    handler: (event: import("../../shared/routines-types.js").RoutineRecord & {
-      firedAt: string;
-      title: string;
-      summary: string;
-    }) => void,
+    handler: (event: import("../../shared/routines-types.js").RoutineFiredPayload) => void,
   ) => () => void;
   // Q10 — running indicator
   // C1: enriched payload includes title+firedAt so renderer can push OverlayItem immediately

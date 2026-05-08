@@ -2,9 +2,9 @@
  * RoutineSessionStore — main-process only.
  *
  * Manages per-routine JSONL session files under:
- *   ~/.lvis/routine-sessions/<routineId>/<firedAt-ts>.jsonl
+ *   ~/.lvis/routine/sessions/<routineId>/<firedAt-ts>.jsonl
  *
- * Each file is mode 0o600, parent dir mode 0o700, written atomically.
+ * Each file is mode 0o600, parent dir mode 0o700, written sequentially (non-atomic).
  * Q9 isolation: routine sessions never write to ~/.lvis/sessions/ (main chat).
  */
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";

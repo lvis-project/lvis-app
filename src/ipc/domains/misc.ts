@@ -131,7 +131,7 @@ export function registerMiscHandlers(deps: IpcDeps): void {
     }
     // Renderer has already inserted pendingPrompt into chat before invoking this.
     // Main-side handler acknowledges the action (future: audit log, plugin callback).
-    return { ok: true };
+    return undefined;
   });
 
   // ─── Session Todo ────────────────────────────────

@@ -58,7 +58,9 @@ export interface OverlayCardProps {
 
 function relativeTime(isoString: string): string {
   try {
-    const diffMs = Date.now() - new Date(isoString).getTime();
+    const t = new Date(isoString).getTime();
+    if (!Number.isFinite(t)) return "";
+    const diffMs = Date.now() - t;
     const diffSec = Math.floor(diffMs / 1000);
     if (diffSec < 60) return `${diffSec}초 전`;
     const diffMin = Math.floor(diffSec / 60);
@@ -67,7 +69,7 @@ function relativeTime(isoString: string): string {
     if (diffHr < 24) return `${diffHr}시간 전`;
     return `${Math.floor(diffHr / 24)}일 전`;
   } catch {
-    return isoString;
+    return "";
   }
 }
 

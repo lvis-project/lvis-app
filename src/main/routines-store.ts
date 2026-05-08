@@ -1,7 +1,7 @@
 /**
  * RoutinesStore v2 — persistent backing for the `schedule_routine` LLM tool.
  *
- * Persists routines to `~/.lvis/routines.json` with an in-process async mutex
+ * Persists routines to `~/.lvis/routine/routines.json` with an in-process async mutex
  * (mirroring RemindersStore `withFileLock`) so concurrent add/dismiss operations
  * cannot corrupt the file.
  *
@@ -14,6 +14,8 @@ import { dirname, resolve } from "node:path";
 import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { isValidCronExpression } from "../routines/cron-evaluator.js";
+import { createLogger } from "../lib/logger.js";
+const log = createLogger("lvis");
 
 // Re-export from shared so callers that import from routines-store continue
 // to work unchanged, while the renderer imports from shared/ (no Node built-ins).
@@ -92,7 +94,14 @@ async function withFileLock<T>(filePath: string, fn: () => Promise<T>): Promise<
 async function readFileOrEmpty(filePath: string): Promise<RoutinesFile> {
   try {
     const raw = await readFile(filePath, "utf-8");
-    const parsed = JSON.parse(raw) as RoutinesFile;
+    let parsed: RoutinesFile;
+    try {
+      parsed = JSON.parse(raw) as RoutinesFile;
+    } catch (err) {
+      log.warn("[routines-store] corrupt JSON, treating as empty + backup");
+      await rename(filePath, `${filePath}.corrupt-${Date.now()}.bak`);
+      return { version: 2, routines: [] };
+    }
     if (!Array.isArray(parsed.routines)) {
       return { version: 2, routines: [] };
     }
