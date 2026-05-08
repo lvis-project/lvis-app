@@ -22,25 +22,40 @@ import { buildToolResultStub } from "./auto-compact.js";
  * @returns 직렬화용 stub-substituted array
  */
 export function stubMarkedToolResults(messages: GenericMessage[]): GenericMessage[] {
-  let mutated = false;
-  const out = messages.map((msg) => {
-    if (msg.role !== "tool_result") return msg;
-    if (msg.meta?.compactedAt === undefined) return msg;
-    // 이미 stub 형태로 들어온 경우 (e.g. JSONL load 후) — toolName + length-suffix 패턴이면 이중 stub 회피.
-    if (msg.content.startsWith("[tool_result stripped:")) return msg;
+  // Copy-on-write — eligible 메시지가 하나도 없으면 새 array 생성하지 않고 입력 그대로 반환.
+  // 사전 scan: marked + 아직-stub-아님 인 첫 인덱스 탐색.
+  let firstEligibleIdx = -1;
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i];
+    if (msg.role !== "tool_result") continue;
+    if (msg.meta?.compactedAt === undefined) continue;
+    if (msg.content.startsWith("[tool_result stripped:")) continue; // 이미 stub
+    firstEligibleIdx = i;
+    break;
+  }
+  if (firstEligibleIdx === -1) return messages; // no allocation
 
-    mutated = true;
-    const origLen = msg.content.length;
-    return {
-      role: "tool_result",
-      toolUseId: msg.toolUseId,
-      toolName: msg.toolName,
-      isError: msg.isError,
-      content: buildToolResultStub(msg.toolName, origLen),
-      meta: msg.meta,
-    } as GenericMessage;
-  });
-
-  // mutate 없으면 원본 reference 반환 (allocation 회피)
-  return mutated ? out : messages;
+  // 첫 eligible 부터만 새 array 분기 — 앞 부분은 reference 그대로 share.
+  const out: GenericMessage[] = messages.slice(0, firstEligibleIdx);
+  for (let i = firstEligibleIdx; i < messages.length; i++) {
+    const msg = messages[i];
+    if (
+      msg.role === "tool_result" &&
+      msg.meta?.compactedAt !== undefined &&
+      !msg.content.startsWith("[tool_result stripped:")
+    ) {
+      const origLen = msg.content.length;
+      out.push({
+        role: "tool_result",
+        toolUseId: msg.toolUseId,
+        toolName: msg.toolName,
+        isError: msg.isError,
+        content: buildToolResultStub(msg.toolName, origLen),
+        meta: msg.meta,
+      } as GenericMessage);
+    } else {
+      out.push(msg); // reference share
+    }
+  }
+  return out;
 }

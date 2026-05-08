@@ -120,8 +120,8 @@ export function estimateMessagesTokens(messages: GenericMessage[]): number {
 //   - wire: `wire-serialize.ts:stubMarkedToolResults` 가 provider 호출 직전 stub 변환
 //   - disk: 동일 helper 가 saveSession 직전 stub 변환 (R4 mitigation 유지)
 //
-// `meta.stripped` / `meta.strippedAt` / `meta.originalLength` 는 deprecate. 단일 marker
-// `meta.compactedAt` 가 "이 message 는 wire/disk 직렬화 시 stub 으로 변환되어야 함" 을 의미.
+// `meta.stripped` / `meta.strippedAt` / `meta.originalLength` 는 *완전 제거* (호환성 layer 없음).
+// 단일 marker `meta.compactedAt` 가 "이 message 는 wire/disk 직렬화 시 stub 으로 변환되어야 함" 을 의미.
 
 export interface MarkStaleConfig {
   /** 말단에서부터 이 개수만큼의 tool_result는 raw 유지 (기본 8) */
