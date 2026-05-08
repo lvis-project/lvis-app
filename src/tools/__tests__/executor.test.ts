@@ -541,4 +541,68 @@ describe("ToolExecutor — R2-CR-4 ask_user_question audit redaction is gated by
       logSpy.mockRestore();
     }
   });
+
+  it("preserves user-provided email in tool_result while masking UI callback and audit", async () => {
+    const builtinAskTool = createDynamicTool({
+      name: "ask_user_question",
+      description: "builtin",
+      source: "builtin",
+      category: "dangerous",
+      jsonSchema: {
+        type: "object",
+        properties: { recipient: { type: "string" } },
+      },
+      execute: async () => ({
+        output: JSON.stringify({
+          answers: [{ freeText: "real.user@gmail.com" }],
+          dismissed: false,
+        }),
+        isError: false,
+      }),
+    });
+    const registry = new ToolRegistry();
+    registry.register(builtinAskTool);
+
+    const { AuditLogger: AL } = await import("../../audit/audit-logger.js");
+    const logSpy = vi
+      .spyOn(AL.prototype, "log")
+      .mockImplementation(() => undefined);
+    const onToolStart = vi.fn();
+    const onToolEnd = vi.fn();
+
+    try {
+      const executor = new ToolExecutor(registry);
+      const results = await executor.executeAll(
+        [{
+          id: "tu-dlp-email",
+          name: "ask_user_question",
+          input: { recipient: "input.user@gmail.com" },
+        }],
+        { onToolStart, onToolEnd },
+        "sess-dlp-email-preserve",
+      );
+
+      expect(results).toHaveLength(1);
+      expect(results[0].content).toContain("real.user@gmail.com");
+
+      expect(onToolStart).toHaveBeenCalledTimes(1);
+      const renderedInput = JSON.stringify(onToolStart.mock.calls[0][1]);
+      expect(renderedInput).toContain("***@gmail.com");
+      expect(renderedInput).not.toContain("input.user@gmail.com");
+
+      expect(onToolEnd).toHaveBeenCalledTimes(1);
+      const renderedResult = onToolEnd.mock.calls[0][1] as string;
+      expect(renderedResult).toContain("***@gmail.com");
+      expect(renderedResult).not.toContain("real.user@gmail.com");
+
+      const auditEntries = logSpy.mock.calls
+        .map((c) => c[0] as { type?: string; input?: string; output?: string; sessionId?: string })
+        .filter((e) => e.sessionId === "sess-dlp-email-preserve");
+      expect(auditEntries.some((e) => e.type === "tool_call" && e.output?.includes("real.user@gmail.com"))).toBe(false);
+      expect(auditEntries.some((e) => e.type === "tool_call" && e.input?.includes("input.user@gmail.com"))).toBe(false);
+      expect(auditEntries.some((e) => e.type === "tool_call" && e.input?.includes("***@gmail.com"))).toBe(true);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
 });

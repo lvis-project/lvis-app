@@ -1,5 +1,6 @@
 import type { GenericMessage } from "../engine/llm/types.js";
 import { userContentText } from "../engine/llm/types.js";
+import { maskSensitiveData } from "./dlp.js";
 
 export type SerializedHistoryToolCall = {
   id: string;
@@ -25,13 +26,19 @@ export function serializeHistoryMessage(
   m: GenericMessage,
   index: number,
 ): SerializedHistoryMessage {
+  const content =
+    m.role === "user"
+      ? userContentText(m.content)
+      : m.role === "tool_result"
+        ? maskSensitiveData(m.content).masked
+        : m.content;
   const base = {
     index,
     role: m.role,
     // Renderer history replay operates on visible text. Multimodal user
     // content is flattened to the same placeholders used by export/search,
     // while assistant/tool structural fields below are passed through intact.
-    content: m.role === "user" ? userContentText(m.content) : m.content,
+    content,
   };
 
   if (m.role === "assistant") {
