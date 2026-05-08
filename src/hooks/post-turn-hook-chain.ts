@@ -1,19 +1,12 @@
 /**
  * Post-Turn Hook Chain — §4.5 11단계 후 실행
  *
- * compact → detect-checkpoint → saveSession → extractMemory → update-title → auditLog → idle-poke 순차 실행.
+ * mark-stale → detect-checkpoint → saveSession → extractMemory → update-title → auditLog → idle-poke 순차 실행.
  * 각 단계는 독립적이며 한 단계 실패가 다음을 차단하지 않음.
  *
- * §PR-3 확장:
- *   2. detect-checkpoint — detectFromStream() 호출, [checkpoint] 발견 시 checkpoint-suggested 이벤트 emit
- *   5. update-title — newTitle 있으면 session metadata 업데이트, 없으면 chainTitle LLM fallback (옵션)
- *
- * conversation-loop.ts의 기존 5개 post-turn 로직을 흡수:
- *   1. shouldCompact / compactMessages (§4.5.4)
- *   2. memoryManager.saveSession (§4.5.7)
- *   3. extractMemory "기억해" 패턴 (§4.5.5 Hook 3)
- *   4. auditLogger.logTurn (§14.2)
- *   5. idleScheduler.signalConversation (Agent 5 §6.1)
+ * PR-2-F-3 정정: Stage 1b (post-turn full compact) 제거. Layer 0 preflight (`runPreflightGuard`,
+ * conversation-loop.ts) 가 *next turn 진입 전* 동등한 LLM-based 압축을 더 보수적 임계로 처리.
+ * 이 hook chain 은 Layer 1 (markStaleToolResults) + 5 개 housekeeping step 만 담당.
  */
 
 import { markStaleToolResults } from "../engine/auto-compact.js";
@@ -32,8 +25,6 @@ export interface PostTurnHookContext {
   sessionId: string;
   /** 현재 대화 이력 메시지 배열 */
   messages: GenericMessage[];
-  /** 누적 토큰 사용량 — shouldCompact() 판단에 사용 */
-  cumulativeUsage: TokenUsage;
   input: string;
   output: string;
   toolCalls: Array<{ name: string; isError: boolean }>;

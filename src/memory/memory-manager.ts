@@ -47,14 +47,11 @@ export interface SessionListEntry {
 }
 
 /**
- * Checkpoint trigger reasons.
- * - "auto-compact": Layer 0 pre-flight 가 Layer 2 compact 를 실행 (PR-2-C, infinity-session-redesign-v3 §4.1)
- * - "hard-token":  legacy — decideRotation Tier 1 (PR-2-F 에서 제거 예정)
- * - "semantic-llm": LLM detected a topic shift
- * - "soft-time":   time-based soft trigger (e.g. session idle)
- * - "manual":      user explicitly triggered a checkpoint (e.g. /checkpoint command)
+ * Checkpoint trigger reasons (post-infinity-session-v3).
+ * - "auto-compact": Layer 0 pre-flight 가 Layer 2 compact 를 실행
+ * - "manual":      user explicitly triggered a checkpoint (e.g. /compact command)
  */
-export type CheckpointTrigger = "auto-compact" | "hard-token" | "semantic-llm" | "soft-time" | "manual";
+export type CheckpointTrigger = "auto-compact" | "manual";
 
 /**
  * A checkpoint record written into a session's metadata when context is compacted.
@@ -165,9 +162,7 @@ function isValidSessionId(id: unknown): id is string {
 
 /** Valid trigger values for strict narrowing. */
 const VALID_CHECKPOINT_TRIGGERS = new Set<CheckpointTrigger>([
-  "hard-token",
-  "semantic-llm",
-  "soft-time",
+  "auto-compact",
   "manual",
 ]);
 

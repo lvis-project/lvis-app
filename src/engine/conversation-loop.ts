@@ -65,12 +65,10 @@ export interface TurnCallbacks {
     removedMessages: number;
     freedTokens: number;
     /**
-     * Compact tier — Layer 0 preflight 가 발화 시 "hard-token" (default).
+     * Compact tier — `"auto-compact"` (Layer 0 preflight) | `"manual"` (`/compact`).
      * UI CheckpointDivider 가 색상/라벨 결정에 사용 (`lib/chat-stream-state.ts:CheckpointTier`).
-     * fork-based rotation 폐지로 (PR-2-F) `revertSessionId` 는 더 이상 set 되지 않음 — same-session
-     * 안 numbered checkpoint chain (Layer 3) 으로 대체됨.
      */
-    tier?: string;
+    tier?: "auto-compact" | "manual";
     /**
      * Rolling summary — Layer 2 의 `renderBoundaryAsPreamble()` 결과. 사용자 가시성용.
      */
@@ -814,7 +812,6 @@ export class ConversationLoop {
       const hookResult = await this.deps.postTurnHookChain.run({
         sessionId: this.sessionId,
         messages: this.history.getMessages(),
-        cumulativeUsage: this.cumulativeUsage,
         input,
         output: result.text,
         toolCalls: result.toolCalls.map((tc) => ({ name: tc.name, isError: false })),
@@ -1438,7 +1435,7 @@ export class ConversationLoop {
       callbacks?.onCompactOccurred?.({
         removedMessages: compactResult.removedCount,
         freedTokens: estimated - compactResult.estimatedAfter,
-        tier: "hard-token",
+        tier: "auto-compact",
       });
     } catch (err) {
       // Layer 2 실패 시 turn 자체는 계속 진행 — Layer 0 미적용 history 로 stream attempt.

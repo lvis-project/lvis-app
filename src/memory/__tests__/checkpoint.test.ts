@@ -15,7 +15,7 @@ function makeCheckpoint(overrides?: Partial<Checkpoint>): Checkpoint {
   return {
     id: "ckpt-0001",
     triggeredAt: "2026-05-01T10:00:00.000Z",
-    trigger: "hard-token",
+    trigger: "auto-compact",
     ctxUsageAtTrigger: 0.85,
     summary: "We discussed the quarterly review.",
     messageCountAtTrigger: 40,
@@ -54,7 +54,7 @@ describe("appendCheckpoint", () => {
 
   it("preserves existing checkpoints when appending a new one", () => {
     const first = makeCheckpoint({ id: "ckpt-0001", messageCountAtTrigger: 20 });
-    const second = makeCheckpoint({ id: "ckpt-0002", messageCountAtTrigger: 60, trigger: "semantic-llm" });
+    const second = makeCheckpoint({ id: "ckpt-0002", messageCountAtTrigger: 60, trigger: "auto-compact" });
     const meta: SessionMetadata = { checkpoints: [first] };
     const updated = mm.appendCheckpoint(meta, second);
     expect(updated.checkpoints).toHaveLength(2);
@@ -81,7 +81,7 @@ describe("appendCheckpoint", () => {
     expect(loaded).not.toBeNull();
     expect(loaded!.checkpoints).toHaveLength(1);
     expect(loaded!.checkpoints![0].id).toBe("ckpt-0001");
-    expect(loaded!.checkpoints![0].trigger).toBe("hard-token");
+    expect(loaded!.checkpoints![0].trigger).toBe("auto-compact");
     expect(loaded!.checkpoints![0].summary).toBe("We discussed the quarterly review.");
   });
 });
@@ -229,7 +229,7 @@ describe("backward compatibility — loading old-format metadata", () => {
           {
             id: "ckpt-valid",
             triggeredAt: "2026-05-01T10:00:00.000Z",
-            trigger: "hard-token",
+            trigger: "auto-compact",
             ctxUsageAtTrigger: 0.9,
             summary: null,
             messageCountAtTrigger: 30,
@@ -267,7 +267,7 @@ describe("normalizeCheckpoint range validation", () => {
           {
             id: "ckpt-neg-ctx",
             triggeredAt: "2026-05-01T10:00:00.000Z",
-            trigger: "hard-token",
+            trigger: "auto-compact",
             ctxUsageAtTrigger: -0.5,
             summary: null,
             messageCountAtTrigger: 10,
@@ -291,7 +291,7 @@ describe("normalizeCheckpoint range validation", () => {
           {
             id: "ckpt-over-ctx",
             triggeredAt: "2026-05-01T10:00:00.000Z",
-            trigger: "hard-token",
+            trigger: "auto-compact",
             ctxUsageAtTrigger: 1.5,
             summary: null,
             messageCountAtTrigger: 10,
@@ -316,7 +316,7 @@ describe("normalizeCheckpoint range validation", () => {
           {
             id: "ckpt-nan-ctx",
             triggeredAt: "2026-05-01T10:00:00.000Z",
-            trigger: "hard-token",
+            trigger: "auto-compact",
             ctxUsageAtTrigger: null,
             summary: null,
             messageCountAtTrigger: 10,
@@ -340,7 +340,7 @@ describe("normalizeCheckpoint range validation", () => {
           {
             id: "ckpt-neg-msg",
             triggeredAt: "2026-05-01T10:00:00.000Z",
-            trigger: "hard-token",
+            trigger: "auto-compact",
             ctxUsageAtTrigger: 0.5,
             summary: null,
             messageCountAtTrigger: -1,
@@ -364,7 +364,7 @@ describe("normalizeCheckpoint range validation", () => {
           {
             id: "ckpt-float-msg",
             triggeredAt: "2026-05-01T10:00:00.000Z",
-            trigger: "hard-token",
+            trigger: "auto-compact",
             ctxUsageAtTrigger: 0.5,
             summary: null,
             messageCountAtTrigger: 1.5,

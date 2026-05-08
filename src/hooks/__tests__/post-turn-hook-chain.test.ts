@@ -38,7 +38,6 @@ describe("PostTurnHookChain", () => {
     const result = await chain.run({
       sessionId: "session-disabled",
       messages,
-      cumulativeUsage: { inputTokens: 120_000, outputTokens: 0 },
       input: "긴 대화를 이어가자",
       output: "좋아요",
       toolCalls: [],
@@ -90,7 +89,6 @@ describe("PostTurnHookChain", () => {
     const result = await chain.run({
       sessionId: "session-micro",
       messages,
-      cumulativeUsage: { inputTokens: 1_000, outputTokens: 0 }, // 임계치 훨씬 아래
       input: "검색",
       output: "ok",
       toolCalls: [],
@@ -131,7 +129,6 @@ describe("PostTurnHookChain", () => {
         { role: "user", content: "회의 정리해줘" },
         { role: "assistant", content: rawOutput },
       ],
-      cumulativeUsage: { inputTokens: 100, outputTokens: 0 },
       input: "회의 정리해줘",
       output: rawOutput,
       toolCalls: [],
@@ -173,7 +170,6 @@ describe("PostTurnHookChain", () => {
         { role: "user", content: "제목만 만들지 말고 저장해줘" },
         { role: "assistant", content: rawOutput },
       ],
-      cumulativeUsage: { inputTokens: 100, outputTokens: 0 },
       input: "제목만 만들지 말고 저장해줘",
       output: rawOutput,
       toolCalls: [],
@@ -208,7 +204,6 @@ describe("PostTurnHookChain", () => {
     const result = await chain.run({
       sessionId: "session-checkpoint-cb",
       messages: createMessages(),
-      cumulativeUsage: { inputTokens: 100, outputTokens: 0 },
       input: "마무리",
       output: "완료.[checkpoint]",
       toolCalls: [],
@@ -237,7 +232,6 @@ describe("PostTurnHookChain", () => {
     const result = await chain.run({
       sessionId: "session-no-markers",
       messages: createMessages(),
-      cumulativeUsage: { inputTokens: 100, outputTokens: 0 },
       input: "질문",
       output,
       toolCalls: [],
@@ -275,7 +269,6 @@ describe("PostTurnHookChain", () => {
     await chain.run({
       sessionId: "session-memory",
       messages: createMessages(),
-      cumulativeUsage: { inputTokens: 100, outputTokens: 0 },
       input: "이거 기억해줘",
       output: "네, 기억하겠습니다.",
       toolCalls: [],
@@ -309,7 +302,6 @@ describe("PostTurnHookChain", () => {
     await chain.run({
       sessionId: "session-memory-cleaned",
       messages: createMessages(),
-      cumulativeUsage: { inputTokens: 100, outputTokens: 0 },
       input: "이거 기억해줘",
       output: "네, 기억하겠습니다.<title>기억 저장 테스트 제목</title>[checkpoint]",
       toolCalls: [],
@@ -341,7 +333,6 @@ describe("PostTurnHookChain", () => {
       await chain.run({
         sessionId: "session-llm",
         messages: createMessages(),
-        cumulativeUsage: { inputTokens: 100, outputTokens: 0 },
         input: "안녕",
         output: "반갑습니다",
         toolCalls: [],
@@ -367,7 +358,6 @@ describe("PostTurnHookChain", () => {
       await chain.run({
         sessionId: "session-skill",
         messages: createMessages(),
-        cumulativeUsage: { inputTokens: 100, outputTokens: 0 },
         input: "/help",
         output: "...",
         toolCalls: [],
@@ -390,7 +380,6 @@ describe("PostTurnHookChain", () => {
       await chain.run({
         sessionId: "session-snapshot",
         messages: createMessages(),
-        cumulativeUsage: { inputTokens: 100, outputTokens: 0 },
         input: "안녕",
         output: "반갑습니다",
         toolCalls: [],
@@ -419,7 +408,6 @@ describe("PostTurnHookChain", () => {
       await chain.run({
         sessionId: "session-audit-cleaned",
         messages: createMessages(),
-        cumulativeUsage: { inputTokens: 100, outputTokens: 0 },
         input: "정리",
         output: "정리 완료입니다.<title>감사 로그 테스트 제목</title>",
         toolCalls: [],
@@ -453,7 +441,6 @@ describe("PostTurnHookChain", () => {
       const result = await chain.run({
         sessionId: "session-flag-off",
         messages: createMessages(),
-        cumulativeUsage: { inputTokens: 100, outputTokens: 0 },
         input: "테스트",
         output: "응답 완료입니다.<title>테스트 제목</title>[checkpoint]",
         toolCalls: [],
@@ -489,7 +476,6 @@ describe("PostTurnHookChain", () => {
       await chain.run({
         sessionId: "session-no-title",
         messages: createMessages(),
-        cumulativeUsage: { inputTokens: 100, outputTokens: 0 },
         input: "테스트",
         output: "응답 완료입니다.<title>어떤 제목</title>",
         toolCalls: [],
