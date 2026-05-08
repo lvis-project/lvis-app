@@ -11,7 +11,6 @@
  */
 import type { GenericMessage, TokenUsage, LLMVendor, UserContentPart } from "./llm/types.js";
 import { serializeMessageForEstimation, userContentText } from "./llm/types.js";
-import { shouldSkipSummary as _shouldSkipSummary } from "./summary-generator.js";
 import { lookupPricing, effectiveContextWindow } from "../shared/pricing-data.js";
 import { getUsableContext, getPreflightThreshold } from "../shared/context-budget.js";
 

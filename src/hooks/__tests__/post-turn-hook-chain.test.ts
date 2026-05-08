@@ -49,41 +49,9 @@ describe("PostTurnHookChain", () => {
     expect(saveSession).toHaveBeenCalledWith("session-disabled", messages);
   });
 
-  it("compacts and saves the summarized history when chat.autoCompact is enabled", async () => {
-    vi.spyOn(console, "log").mockImplementation(() => {});
-
-    const saveSession = vi.fn();
-    const memoryManager = {
-      saveSession,
-      listSessions: vi.fn().mockReturnValue([]),
-      loadSessionMetadata: vi.fn().mockReturnValue(null),
-    } as unknown as MemoryManager;
-    const settingsService = {
-      get: vi.fn((key: string) => {
-        if (key === "llm") return fakeLlmSettings();
-        return { systemPrompt: "", autoCompact: true };
-      }),
-    } as unknown as SettingsService;
-    const chain = new PostTurnHookChain({ memoryManager, settingsService });
-    const messages = createMessages();
-
-    const result = await chain.run({
-      sessionId: "session-enabled",
-      messages,
-      cumulativeUsage: { inputTokens: 120_000, outputTokens: 0 },
-      input: "긴 대화를 이어가자",
-      output: "좋아요",
-      toolCalls: [],
-      route: "chat",
-    });
-
-    expect(result.compactedMessages).not.toBeNull();
-    // 요약 marker는 배열 어딘가에 존재
-    const marker = result.compactedMessages?.find((m) => m.role === "user" && m.meta?.compactBoundary === true);
-    expect(marker).toBeDefined();
-    expect(marker?.content).toContain("[이전 대화 요약]");
-    expect(saveSession).toHaveBeenCalledWith("session-enabled", result.compactedMessages);
-  });
+  // PR-2-F-3 정정: Stage 1b (post-turn full compact) 가 제거됐으므로 *PostTurnHookChain 안에서*
+  // boundary marker 생성 시나리오 자체 폐기. 동등 검증은 `runPreflightGuard` 의 Layer 2 경로
+  // (engine 통합 테스트) 에서 다뤄짐 — `structured-compact.test.ts:compactWithBoundary` 참조.
 
   it("runs mark-stale alone (no full compact) when threshold is not met", async () => {
     vi.spyOn(console, "log").mockImplementation(() => {});

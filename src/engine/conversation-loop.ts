@@ -12,7 +12,6 @@ import { ToolExecutor, type ToolUseBlock } from "../tools/executor.js";
 import { HookRunner } from "../hooks/hook-runner.js";
 import { shouldCompact, compactMessages, markStaleToolResults, estimateMessagesTokens, getModelUsableContext, getModelPreflightThreshold } from "./auto-compact.js";
 import { compactWithBoundary, renderBoundaryAsPreamble } from "./structured-compact.js";
-import { generateStructuredSummary } from "./summary-generator.js";
 import { createProvider, secretKeyFor } from "./llm/provider-factory.js";
 import { FallbackProvider } from "./llm/vercel/fallback-chain.js";
 import type { LLMProvider, ToolSchema, TokenUsage } from "./llm/types.js";
@@ -815,25 +814,16 @@ export class ConversationLoop {
       // PostTurnHookChain에서 이미 처리하므로 fallback에서도 호출하지 않는다.
       // PostTurnHookChain을 주입한 경우와 fallback 모두 memory 추출은
       // hook chain의 memory-extract 단계에서만 일어난다.
-      const llmSettings = this.deps.settingsService.get("llm");
       if (this.isAutoCompactEnabled()) {
-        // Stage 1a: Layer 1 part marking — 항상 실행, 저비용. child loop 에서도 작동.
+        // Layer 1 part marking — 항상 실행, 저비용. child loop 에서도 작동.
+        // PR-2-F-3: Stage 1b 제거 — Layer 0 preflight (next turn) 가 동등 압축 처리.
+        // child loop 은 fire-and-forget 이라 turn budget 짧음 → markStaleToolResults 만으로 충분.
         const { messages: afterMark, result: mr } = markStaleToolResults(this.history.getMessages());
         if (mr.stripped) {
           this.history.clear();
           this.history.restore(afterMark);
           if (process.env.NODE_ENV !== "production") {
             log.info(`mark-stale (fallback): stripped ${mr.strippedCount} tool_results, freed ~${mr.freedChars} chars`);
-          }
-        }
-        // Stage 1b: threshold-triggered full compact (기존 동작).
-        if (shouldCompact(this.cumulativeUsage, getModelUsableContext(llmSettings.provider, llmSettings.vendors[llmSettings.provider].model))) {
-          const { messages: compacted, result: cr } = compactMessages(this.history.getMessages());
-          if (cr.compacted) {
-            this.history.clear();
-            this.history.restore(compacted);
-            if (process.env.NODE_ENV !== "production") log.info(`auto-compact: removed ${cr.removedMessages} msgs, freed ~${cr.freedTokens} tokens`);
-            callbacks?.onCompactOccurred?.({ removedMessages: cr.removedMessages, freedTokens: cr.freedTokens });
           }
         }
       }
