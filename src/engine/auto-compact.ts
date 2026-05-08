@@ -307,7 +307,8 @@ const DEFAULT_MARK_STALE_CONFIG: MarkStaleConfig = {
  *
  * 오래된 tool_result 메시지 content를 stub string으로 교체해 히스토리 크기를 낮춘다.
  * (PR-3 stamping-behavior 머지 시 이 함수는 *marking only* — `meta.compactedAt` set 만 — 로 전환되고,
- *  실제 stub 화는 wire/disk serialization 경계로 이동. 그 시점까지 content 교체 동작 유지.)
+ *  실제 stub 화는 wire/disk serialization 경계로 이동. 현재 PR-1c 에서는 `meta.stripped`/`meta.strippedAt` 사용,
+ *  PR-3 후 `meta.compactedAt` 으로 의미 통합. 그 시점까지 content 교체 동작 유지.)
  *
  * - 최근 `preserveRecentToolResults` 개는 원본 유지 (assistant가 참조 가능성 있음)
  * - content 길이가 `minStubThreshold` 미만이면 stub 으로 교체해도 이득이 거의 없으므로 skip (OpenCode 패턴)

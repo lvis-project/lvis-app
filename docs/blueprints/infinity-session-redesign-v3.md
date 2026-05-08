@@ -120,8 +120,9 @@ Mixed-language (코드+한글 주석) 시 ratio < 0.5 → weight 1.0. 보수적 
 
 > **구현 단계 (이 청사진은 *목표 상태* 기술)**
 > - PR-1b: rename + 200 자 임계. content stub-replace 동작 유지 (transitional).
+> - PR-1c (현재 PR): `meta.stripped`/`meta.strippedAt` 사용. PR-3 머지 후: `meta.compactedAt` 으로 unify (의미 정정).
 > - PR-3 (stamping behavior): 메모리 *verbatim* + serialization-time stub 으로 전환 — `meta.compactedAt` 마킹만 in-memory.
-> - 따라서 아래 “content 보존 (메모리)” 항목은 PR-3 머지 후 도달 상태이며, PR-1 시점은 stub-replace.
+> - 따라서 아래 “content 보존 (메모리)” 항목은 PR-3 머지 후 도달 상태이며, PR-1c 시점은 stub-replace.
 
 **변경점**:
 - `meta.compactedAt: ts` 만 마킹, content 보존 (메모리) ※ PR-3 후 도달
@@ -372,7 +373,9 @@ interface CompactBoundary {
 meta?: {
   compactBoundary?: boolean;
   removedCount?: number;
-  compactedAt?: string;        // Layer 1 mark
+  // PR-1c 기준: meta.stripped / meta.strippedAt 사용 (Layer 1 mark)
+  // PR-3 머지 후: meta.compactedAt 으로 통합 (의미 unify)
+  compactedAt?: string;        // PR-3 후 Layer 1 mark (PR-1c 에서는 stripped/strippedAt)
   originalLength?: number;
   lock?: boolean;              // Layer 1 면제
   compactNum?: number;
@@ -414,7 +417,7 @@ meta?: {
 PR-2 머지 후 `meta.boundary` 필드가 사용자 sessions JSONL 에 들어간 뒤 rollback 시:
 - v3 → v2 코드 복귀 시 `meta.boundary` 필드는 *unknown field 로 graceful 무시* (현 LVIS session-store 가 unknown meta passthrough 라 안전)
 - v3 → v1 코드 복귀 시 동일
-- 단 v3 의 `markStaleToolResults` 가 만든 `meta.compactedAt` 은 v2 의 `meta.stripped` 와 의미 다름 → v2 로 rollback 시 *원본 content 가 보존된 채* 노출됨 (lossless rollback 가능)
+- 단 PR-1c 의 `markStaleToolResults` 가 만든 `meta.stripped`/`meta.strippedAt` 은 PR-3 머지 후 `meta.compactedAt` 으로 통합됨. v2 로 rollback 시 *원본 content 가 보존된 채* 노출됨 (lossless rollback 가능)
 - forward-incompat 시나리오 회귀 테스트: `tests/migration/v3-to-v2-rollback.test.ts` 신규
 
 ---
