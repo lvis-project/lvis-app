@@ -64,20 +64,24 @@ export const LVIS_CSS_ONLY_TOKEN_NAMES = [
 
 export type LvisCssOnlyTokenName = typeof LVIS_CSS_ONLY_TOKEN_NAMES[number];
 
+import { BUNDLE_IDS } from "./theme-bundles.js";
+
 /**
- * Runtime allowlist of theme bundle identifiers shipped by the host.
- * Single source of truth — `LvisThemeBundleId` is derived from this array.
+ * Re-export of the canonical bundle id list from `theme-bundles.ts`.
  *
- * Use this for runtime validation (e.g. `LVIS_THEME_BUNDLE_IDS.includes(id)`).
+ * `theme-bundles.ts` is the single source of truth (used by settings-store,
+ * plugins IPC, and the renderer). This re-export exists so that the Plugin
+ * SDK — which syncs this file via `bun run sync:from-host` — can expose the
+ * list under the stable public name `LVIS_THEME_BUNDLE_IDS` without
+ * duplicating the array.
+ *
+ * Use {@link isLvisThemeBundleId} for safe runtime validation.
+ *
+ * @example
+ * import { LVIS_THEME_BUNDLE_IDS, isLvisThemeBundleId } from "@lvis/plugin-sdk/ui/tokens";
+ * if (isLvisThemeBundleId(id)) { /* id narrowed to LvisThemeBundleId *\/ }
  */
-export const LVIS_THEME_BUNDLE_IDS = [
-  "tokyo-night",
-  "midnight",
-  "forest",
-  "lge-light",
-  "lge-dark",
-  "high-contrast",
-] as const;
+export const LVIS_THEME_BUNDLE_IDS = BUNDLE_IDS;
 
 /**
  * Theme bundle identifiers shipped by the host.
@@ -87,10 +91,25 @@ export const LVIS_THEME_BUNDLE_IDS = [
 export type LvisThemeBundleId = (typeof LVIS_THEME_BUNDLE_IDS)[number];
 
 /**
+ * Type guard for `LvisThemeBundleId`.
+ *
+ * Casts `LVIS_THEME_BUNDLE_IDS` to `readonly string[]` before calling
+ * `includes()` to satisfy TypeScript's narrowed `as const` type.
+ *
+ * @example
+ * import { isLvisThemeBundleId } from "@lvis/plugin-sdk/ui/tokens";
+ * if (isLvisThemeBundleId(rawId)) { /* rawId narrowed to LvisThemeBundleId *\/ }
+ */
+export function isLvisThemeBundleId(id: string): id is LvisThemeBundleId {
+  return (LVIS_THEME_BUNDLE_IDS as readonly string[]).includes(id);
+}
+
+/**
  * LvisHostThemeEvent v2 — broadcast by the host on every theme change.
  *
- * **v2 breaking change**: `theme`, `chatTheme`, and `codeTheme` fields
- * have been removed. Use `bundleId` + `shell` instead.
+ * **v2 migration**: legacy fields `colorScheme`, `reducedMotion`, and `fonts`
+ * (previously on `LvisThemePayload`) have been removed. Use `bundleId` + `shell`
+ * instead.
  *
  * Emitted on the `"host.theme.changed"` event bus channel.
  */
@@ -105,6 +124,22 @@ export interface LvisHostThemeEvent {
 
 /**
  * @deprecated Use {@link LvisHostThemeEvent} instead.
- * Kept only as a type alias name for documentation purposes — no runtime value.
+ *
+ * Legacy fields `colorScheme`, `reducedMotion`, and `fonts` are no longer
+ * emitted by the host. `bundleId` is now typed as {@link LvisThemeBundleId}
+ * (narrowed from `string`).
+ *
+ * Migration: replace all `LvisThemePayload` usages with `LvisHostThemeEvent`.
+ * These deprecated fields will be removed in a future cleanup PR.
  */
-export type LvisThemePayload = LvisHostThemeEvent;
+export interface LvisThemePayload extends LvisHostThemeEvent {
+  /** @deprecated No longer emitted by the host. Use `bundleId` + `shell`. */
+  colorScheme?: "light" | "dark" | "system";
+  /** @deprecated No longer emitted by the host. */
+  reducedMotion?: boolean;
+  /** @deprecated No longer emitted by the host. */
+  fonts?: {
+    sans?: string;
+    mono?: string;
+  };
+}
