@@ -434,7 +434,7 @@ export class ConversationLoop {
     // post-compact history after each turn, so it cannot be used to reconstruct the
     // pre-checkpoint transcript. saveCheckpointSnapshot() persists messagesBefore to
     // a checkpoint-specific file (.checkpoints/{sessionId}/{N}.jsonl) before the turn completes.
-    const snapshotMessages = this.deps.memoryManager.loadCheckpointSnapshot?.(this.sessionId, compactNum);
+    const snapshotMessages = this.deps.memoryManager.loadCheckpointSnapshot(this.sessionId, compactNum);
     if (!snapshotMessages) {
       throw new Error(
         `branchFromCheckpoint: no snapshot found for checkpoint #${compactNum} in session ${this.sessionId}. ` +
@@ -533,7 +533,13 @@ export class ConversationLoop {
     this.history.restore(normalized.messages);
     this.cumulativeUsage = { inputTokens: 0, outputTokens: 0 };
     this.sessionPluginExpansions = 0;
-    this.compactNum = sessionMeta?.checkpoints?.length ?? 0;
+    // §M4: use max compactNum across all checkpoints (monotonic guarantee).
+    // Using array length would produce a stale value when normalizeCheckpoint drops
+    // invalid entries — next compact would reuse an already-used compactNum.
+    this.compactNum = sessionMeta?.checkpoints?.reduce(
+      (max, c) => Math.max(max, c.compactNum ?? 0),
+      0,
+    ) ?? 0;
     this.tracer = createTracer(this.sessionId);
     // PR-4: inject rolling summary preamble from loaded session metadata
     const preamble = sessionMeta?.summaryPreamble ?? null;
@@ -640,7 +646,7 @@ export class ConversationLoop {
       }
 
       const estimated = estimateMessagesTokens(messagesBefore);
-      await this.applyBoundaryToSession(result, "manual", estimated, callbacks, messagesBefore.length);
+      await this.applyBoundaryToSession(result, "manual", estimated, callbacks, messagesBefore.length, messagesBefore);
 
       // 영속화 — manualCompact 완료 시점에 즉시 disk 반영. saveSession 실패는
       // 사용자 가시 결과에 영향 X (next turn 에서도 compact 결과 보존됨).
@@ -1437,8 +1443,25 @@ export class ConversationLoop {
     callbacks: TurnCallbacks | undefined,
     /** compact 직전 history 길이 — messageCountAtTrigger 에 기록 (origin count). */
     prevMessageCount: number,
+    /** §C1: verbatim pre-compact messages — persisted as checkpoint snapshot for branchFromCheckpoint. */
+    messagesBefore: import("./llm/types.js").GenericMessage[],
   ): Promise<void> {
     this.compactNum = result.boundary.compactNum;
+
+    // §C1: persist pre-compact verbatim history so branchFromCheckpoint can replay.
+    // wire-serialize stub applied (R4: avoids disk explosion from large tool results).
+    // Failure is non-fatal — warn and continue; branch-from-checkpoint will surface the
+    // "no snapshot found" error at use-time rather than silently corrupting a compact.
+    try {
+      await this.deps.memoryManager.saveCheckpointSnapshot(
+        this.sessionId,
+        this.compactNum,
+        stubMarkedToolResults(messagesBefore),
+      );
+    } catch (snapshotErr) {
+      log.warn(`applyBoundaryToSession: saveCheckpointSnapshot failed — ${(snapshotErr as Error).message}`);
+    }
+
     this.history.clear();
     this.history.restore([...result.newHistory]);
     const preamble = renderBoundaryAsPreamble(result.boundary);
@@ -1482,6 +1505,7 @@ export class ConversationLoop {
       freedTokens: Math.max(0, estimatedBefore - result.estimatedAfter),
       tier: trigger,
       summary: preamble,
+      compactNum: this.compactNum,
     });
   }
 
@@ -1548,17 +1572,13 @@ export class ConversationLoop {
       }
 
       // P1 sync chain — 다음 step 6 PROMPT_ASSEMBLE 가 새 boundary 를 read 해야 함.
-      await this.applyBoundaryToSession(compactResult, "auto-compact", estimated, callbacks, messagesBefore.length);
+      // §M3: onCompactOccurred (compactNum 포함) 은 applyBoundaryToSession 안에서 단일 emit.
+      // 여기서 두 번째 emit 을 제거해 CheckpointDivider 중복 방지.
+      await this.applyBoundaryToSession(compactResult, "auto-compact", estimated, callbacks, messagesBefore.length, messagesBefore);
 
       log.info(
         `preflight: APPLIED — removed=${compactResult.removedCount} estimatedAfter=${compactResult.estimatedAfter} compactNum=${this.compactNum}`,
       );
-      callbacks?.onCompactOccurred?.({
-        removedMessages: compactResult.removedCount,
-        freedTokens: estimated - compactResult.estimatedAfter,
-        tier: "auto-compact",
-        compactNum: this.compactNum,
-      });
     } catch (err) {
       // Layer 2 실패 시 turn 자체는 계속 진행 — Layer 0 미적용 history 로 stream attempt.
       // context_error 도달 시 stream-collector 의 safety net 이 사용자 안내 처리.
