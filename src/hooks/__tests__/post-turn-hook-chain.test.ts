@@ -96,13 +96,32 @@ describe("PostTurnHookChain", () => {
     });
 
     expect(result.compactedMessages).not.toBeNull();
-    // full-compact 요약 marker는 없어야 함
+    // full-compact 요약 marker 는 없음 (mark-stale 만 실행됨)
     const marker = result.compactedMessages?.find((m) => m.role === "user" && m.meta?.compactBoundary === true);
     expect(marker).toBeUndefined();
-    // 하지만 stripped 메시지는 존재
-    const strippedCount = result.compactedMessages?.filter((m) => m.role === "tool_result" && m.meta?.stripped === true).length ?? 0;
-    expect(strippedCount).toBeGreaterThan(0);
-    expect(saveSession).toHaveBeenCalledWith("session-micro", result.compactedMessages);
+    // PR-3 검증: 마킹된 (compactedAt set) tool_result 가 *memory 에서는 verbatim*
+    const marked = result.compactedMessages?.filter((m) => m.role === "tool_result" && m.meta?.compactedAt !== undefined) ?? [];
+    expect(marked.length).toBeGreaterThan(0);
+    for (const m of marked) {
+      if (m.role === "tool_result") {
+        // memory 의 content 는 *원본 그대로* (3000자) — wire-serialize 가 직렬화 시 stub 변환
+        expect(m.content.length).toBeGreaterThan(2000);
+        expect(m.content).not.toContain("[tool_result stripped");
+      }
+    }
+    // saveSession 은 *stub 변환된* 형태 받음 (R4 mitigation) — content 짧음
+    expect(saveSession).toHaveBeenCalledTimes(1);
+    const persisted = saveSession.mock.calls[0]?.[1] as GenericMessage[];
+    expect(persisted).toBeDefined();
+    const persistedMarked = persisted.filter((m) => m.role === "tool_result" && m.meta?.compactedAt !== undefined);
+    expect(persistedMarked.length).toBeGreaterThan(0);
+    for (const m of persistedMarked) {
+      if (m.role === "tool_result") {
+        // disk 형태는 stub
+        expect(m.content).toContain("[tool_result stripped");
+        expect(m.content.length).toBeLessThan(200);
+      }
+    }
   });
 
   it("detect-checkpoint: returns detector result with newTitle and checkpointSuggested", async () => {
