@@ -96,8 +96,11 @@ export function ThemeProvider({
     if (!api) return;
     const tokens = bundleToPluginTokens(activeBundle);
     void api.notifyPluginTheme({
+      bundleId: activeBundle.id,
+      shell: activeBundle.shell,
+      // v1 compat fields — plugin-ui-shell.js and SDK plugins read `theme`
       theme: activeBundle.shell,
-      chatTheme: "default",  // bundled — no separate chat axis
+      chatTheme: "default",
       codeTheme: activeBundle.shell === "light" ? "light" : "dark",
       tokens,
     }).catch((err: unknown) => {

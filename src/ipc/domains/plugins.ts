@@ -107,6 +107,11 @@ interface PluginWebviewBinding {
 const pluginWebviewRegistry = new Map<number, PluginWebviewBinding>();
 
 export type SafeThemePayload = {
+  /** v2: bundle identifier (e.g. "tokyo-night", "lge-dark"). Present when ThemeProvider v2 sends the payload. */
+  bundleId?: string;
+  /** v2: shell polarity derived from the active bundle. Replaces the v1 `theme` field for internal routing. */
+  shell?: "light" | "dark";
+  /** v1 compat: kept so SDK plugins and plugin-ui-shell.js that read `theme` still work. */
   theme: "light" | "dark" | "high-contrast";
   chatTheme: "default" | "lg" | "purple" | "orange" | "blue";
   codeTheme: "light" | "dark";
@@ -222,6 +227,12 @@ function clearPendingEntryUrl(webContentsId: number): void {
 const ALLOWED_THEMES = new Set(["light", "dark", "high-contrast"]);
 const ALLOWED_CHAT_THEMES = new Set(["default", "lg", "purple", "orange", "blue"]);
 const ALLOWED_CODE_THEMES = new Set(["light", "dark"]);
+// v2: bundle IDs that are valid for plugin theme propagation.
+// Must stay in sync with src/ui/renderer/theme/bundles/index.ts BUNDLES.
+const ALLOWED_BUNDLE_IDS = new Set([
+  "tokyo-night", "midnight", "forest", "lge-light", "lge-dark", "high-contrast",
+]);
+const ALLOWED_SHELLS = new Set(["light", "dark"]);
 // Host SoT: runtime validation stays in-app so main-process code never depends
 // on SDK runtime values. The SDK republishes the same contract for plugin
 // authors via sync-from-host.
@@ -271,6 +282,14 @@ export function validateThemePayload(payload: unknown):
     chatTheme: p.chatTheme as SafeThemePayload["chatTheme"],
     codeTheme: p.codeTheme as SafeThemePayload["codeTheme"],
   };
+  // v2: bundle identity fields (optional — ThemeProvider v2 sends these; old
+  // SDK payloads that omit them still pass validation via the v1 fields above).
+  if (typeof p.bundleId === "string" && ALLOWED_BUNDLE_IDS.has(p.bundleId)) {
+    safe.bundleId = p.bundleId;
+  }
+  if (typeof p.shell === "string" && ALLOWED_SHELLS.has(p.shell)) {
+    safe.shell = p.shell as "light" | "dark";
+  }
   if (p.tokens && typeof p.tokens === "object" && !Array.isArray(p.tokens)) {
     const safeTokens: Record<string, string> = {};
     for (const [k, v] of Object.entries(p.tokens as Record<string, unknown>)) {

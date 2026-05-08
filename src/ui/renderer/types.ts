@@ -201,7 +201,17 @@ export type LvisApi = {
    * renderer instead of resolving against `window.location.href`.
    */
   pluginShellUrl: string;
-  notifyPluginTheme: (payload: { theme: string; chatTheme: string; codeTheme: string; tokens?: Record<string, string> }) => Promise<{ ok: boolean; error?: string }>;
+  notifyPluginTheme: (payload: {
+    /** v2: active bundle identifier. */
+    bundleId?: string;
+    /** v2: shell polarity. */
+    shell?: "light" | "dark";
+    /** v1 compat */
+    theme: string;
+    chatTheme: string;
+    codeTheme: string;
+    tokens?: Record<string, string>;
+  }) => Promise<{ ok: boolean; error?: string }>;
   fileScanPaths: (paths: string[]) => Promise<{ ok: boolean; indexed?: number; failed?: number; jobId?: string; error?: string }>;
   getSettings: () => Promise<AppSettings>;
   updateSettings: (patch: DeepPartial<AppSettings>) => Promise<AppSettings>;
