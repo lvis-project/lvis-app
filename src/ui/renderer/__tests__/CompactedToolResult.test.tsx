@@ -15,10 +15,10 @@ const STUB = "[tool_result stripped: tool=Read, origLen=1234]";
 const SESSION_ID = "session-test-1";
 const TOOL_USE_ID = "tu-test-1";
 
-/** Build a minimal window.lvisApi stub with a controllable getVerbatimToolResult. */
+/** Build a minimal window.lvisApi stub with a controllable chatGetVerbatimToolResult. */
 function makeApi(impl: () => Promise<{ content: string; lineCount: number } | null>) {
   return {
-    getVerbatimToolResult: vi.fn(impl),
+    chatGetVerbatimToolResult: vi.fn(impl),
   };
 }
 

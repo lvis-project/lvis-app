@@ -4,14 +4,33 @@
  * Renders a compacted (stub) tool result as a collapsible 1-line row.
  * Clicking fetches the verbatim content via IPC (in-session only).
  *
- * Three display states:
- *   collapsed — ▶ 📦 ToolName(input) · [펼치기]
+ * Four display states:
+ *   collapsed — ▶ 📦 ToolName(input) · origLen chars  [펼치기]
+ *               (origLen parsed from stub when compactedAt+originalLen present)
+ *   loading   — ⋯ 📦 ToolName(input) · [불러오는 중…]  (IPC in-flight)
  *   expanded  — ▼ 📦 ToolName(input) · N줄  [접기] + line-numbered body
  *   missing   — ▸ 📦 ToolName(input) · 원본 소실 ⓘ  (disabled, restart 후)
  */
 
 import { useState } from "react";
 import { getApi } from "../api-client.js";
+
+/** Lazily split content into at most `limit` lines without scanning the full string. */
+function splitLines(content: string, limit: number): { lines: string[]; truncated: boolean } {
+  const lines: string[] = [];
+  let start = 0;
+  while (lines.length < limit) {
+    const idx = content.indexOf("\n", start);
+    if (idx === -1) {
+      lines.push(content.slice(start));
+      return { lines, truncated: false };
+    }
+    lines.push(content.slice(start, idx));
+    start = idx + 1;
+  }
+  const truncated = start < content.length;
+  return { lines, truncated };
+}
 
 /** Truncate tool input to a short display string. */
 function truncateInput(input: Record<string, unknown> | undefined): string {
@@ -72,7 +91,7 @@ export function CompactedToolResult({
     }
     setState("loading");
     try {
-      const result = await getApi().getVerbatimToolResult(sessionId, toolUseId);
+      const result = await getApi().chatGetVerbatimToolResult(sessionId, toolUseId);
       if (result === null) {
         setState("missing");
       } else {
@@ -80,7 +99,7 @@ export function CompactedToolResult({
         setState("expanded");
       }
     } catch (err) {
-      console.error("getVerbatimToolResult failed:", err);
+      console.error("chatGetVerbatimToolResult failed:", err);
       setState("missing");
     }
   }
@@ -107,9 +126,7 @@ export function CompactedToolResult({
         >
           {(() => {
             const MAX_DISPLAY_LINES = 1000;
-            const lines = verbatim.content.split("\n");
-            const displayLines = lines.slice(0, MAX_DISPLAY_LINES);
-            const truncated = lines.length > MAX_DISPLAY_LINES;
+            const { lines: displayLines, truncated } = splitLines(verbatim.content, MAX_DISPLAY_LINES);
             return (
               <div>
                 {displayLines.map((line, i) => (
@@ -120,7 +137,7 @@ export function CompactedToolResult({
                 ))}
                 {truncated && (
                   <div className="tre-truncated px-2 py-1 text-muted-foreground/60 italic">
-                    ⓘ {lines.length - MAX_DISPLAY_LINES}줄 더 — 화면 표시 제한 ({MAX_DISPLAY_LINES} 줄)
+                    ⓘ 화면 표시 제한 ({MAX_DISPLAY_LINES} 줄)
                   </div>
                 )}
               </div>

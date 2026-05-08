@@ -153,7 +153,7 @@ const api = {
   chatSessionResume: async (sessionId: string) => ipcRenderer.invoke("lvis:chat:session-resume", sessionId),
   chatAbort: async () => ipcRenderer.invoke("lvis:chat:abort") as Promise<{ ok: boolean }>,
   // PR-4: lazy-load verbatim tool_result content (in-session only)
-  getVerbatimToolResult: async (sessionId: string, toolUseId: string) =>
+  chatGetVerbatimToolResult: async (sessionId: string, toolUseId: string) =>
     ipcRenderer.invoke("lvis:chat:get-verbatim-tool-result", { sessionId, toolUseId }) as Promise<
       { content: string; lineCount: number } | null
     >,
