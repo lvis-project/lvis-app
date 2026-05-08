@@ -4,7 +4,7 @@
  * Tests: createSession (dir/mode), listRecent (sort order), purgeRoutine, path traversal guard.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, stat, readdir } from "node:fs/promises";
+import { mkdtemp, stat, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { rmSync } from "node:fs";
@@ -99,5 +99,67 @@ describe("isPathSafe (path traversal guard)", () => {
 
   it("rejects absolute path outside root", () => {
     expect(store.isPathSafe("/etc/passwd")).toBe(false);
+  });
+});
+
+describe("extractSummary", () => {
+  async function writeJsonl(filePath: string, messages: unknown[]): Promise<void> {
+    const lines = messages.map((m) => JSON.stringify(m)).join("\n");
+    await writeFile(filePath, lines + "\n", { encoding: "utf-8" });
+  }
+
+  it("extracts <summary> tag content from last assistant message", async () => {
+    const p = await store.createSession("es-test", "2026-05-09T10:00:00.000Z");
+    await writeJsonl(p, [
+      { role: "user", content: "루틴 실행해줘" },
+      { role: "assistant", content: "## 오늘의 업무 현황\n- 항목1\n- 항목2\n\n<summary>오늘 업무 3건 중 2건 완료, 1건 진행 중</summary>" },
+    ]);
+    const result = await store.extractSummary(p);
+    expect(result).toBe("오늘 업무 3건 중 2건 완료, 1건 진행 중");
+  });
+
+  it("returns [요약 형식 누락] when <summary> tag is absent", async () => {
+    const p = await store.createSession("es-test", "2026-05-09T10:01:00.000Z");
+    await writeJsonl(p, [
+      { role: "user", content: "루틴 실행해줘" },
+      { role: "assistant", content: "## 결과\n- 항목1\n- 항목2" },
+    ]);
+    const result = await store.extractSummary(p);
+    expect(result).toBe("[요약 형식 누락]");
+  });
+
+  it("caps extracted summary at 200 codepoints", async () => {
+    const longSummary = "가".repeat(250);
+    const p = await store.createSession("es-test", "2026-05-09T10:02:00.000Z");
+    await writeJsonl(p, [
+      { role: "assistant", content: `본문\n<summary>${longSummary}</summary>` },
+    ]);
+    const result = await store.extractSummary(p);
+    expect([...result].length).toBe(200);
+  });
+
+  it("returns empty string when file is empty", async () => {
+    const p = await store.createSession("es-test", "2026-05-09T10:03:00.000Z");
+    // file is created empty by createSession
+    const result = await store.extractSummary(p);
+    expect(result).toBe("");
+  });
+
+  it("returns empty string when file has no assistant message", async () => {
+    const p = await store.createSession("es-test", "2026-05-09T10:04:00.000Z");
+    await writeJsonl(p, [
+      { role: "user", content: "안녕" },
+    ]);
+    const result = await store.extractSummary(p);
+    expect(result).toBe("");
+  });
+
+  it("handles Anthropic-style content array with <summary> tag", async () => {
+    const p = await store.createSession("es-test", "2026-05-09T10:05:00.000Z");
+    await writeJsonl(p, [
+      { role: "assistant", content: [{ type: "text", text: "결과 본문\n<summary>요약 텍스트</summary>" }] },
+    ]);
+    const result = await store.extractSummary(p);
+    expect(result).toBe("요약 텍스트");
   });
 });

@@ -81,11 +81,18 @@ export class RoutineSessionStore {
   }
 
   /**
-   * Extract a ~200-codepoint summary from a routine session JSONL file.
+   * Extract the <summary>…</summary> tag content from a routine session JSONL file.
    *
-   * Reads the last assistant message text from the JSONL, collapses
-   * newlines to spaces, and caps at 200 codepoints with an ellipsis.
-   * Returns an empty string when the file is empty or has no assistant text.
+   * Reads the last assistant message text from the JSONL and extracts the
+   * <summary> tag injected by the Routine Summary Tag Instruction system prompt.
+   * Caps at 200 codepoints (OverlayCard surface budget).
+   *
+   * Tag absence means the LLM violated the system prompt format — returns
+   * "[요약 형식 누락]" so users and developers immediately notice the missing
+   * annotation. The system prompt mandates the tag, so its absence is an
+   * explicit LLM format violation.
+   *
+   * Returns empty string only when the file is missing or has no assistant text.
    */
   async extractSummary(jsonlPath: string): Promise<string> {
     let raw: string;
@@ -128,11 +135,14 @@ export class RoutineSessionStore {
       }
     }
     if (!lastAssistantText) return "";
-    // Collapse newlines → spaces, then cap at 200 codepoints.
-    const collapsed = lastAssistantText.replace(/[\r\n]+/g, " ").trim();
-    const codepoints = [...collapsed];
-    if (codepoints.length <= 200) return collapsed;
-    return codepoints.slice(0, 200).join("") + "…";
+    // Extract <summary>…</summary> tag mandated by Routine Summary Tag Instruction.
+    const match = lastAssistantText.match(/<summary>([\s\S]*?)<\/summary>/);
+    if (!match) {
+      return "[요약 형식 누락]";
+    }
+    const content = match[1].trim();
+    const codepoints = [...content];
+    return codepoints.length <= 200 ? content : codepoints.slice(0, 200).join("");
   }
 
   /**

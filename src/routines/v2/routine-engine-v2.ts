@@ -37,6 +37,29 @@ export interface RoutineEngineV2Deps {
   createConversationLoop: () => ConversationLoop;
 }
 
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * Extract the content of the first <summary>…</summary> tag from a routine
+ * LLM response. The system prompt (ROUTINE_SUMMARY_TAG_INSTRUCTION) mandates
+ * this tag at the end of every routine turn.
+ *
+ * Tag absence means the LLM violated the system prompt format — returns the
+ * explicit "[요약 형식 누락]" marker so users and developers immediately notice
+ * the missing annotation rather than silently getting a truncated body.
+ *
+ * Caps extracted content at 200 codepoints (OverlayCard surface budget).
+ */
+function extractSummaryTag(text: string): string {
+  const match = text.match(/<summary>([\s\S]*?)<\/summary>/);
+  if (!match) {
+    return "[요약 형식 누락]";
+  }
+  const content = match[1].trim();
+  const codepoints = [...content];
+  return codepoints.length <= 200 ? content : codepoints.slice(0, 200).join("");
+}
+
 export class RoutineEngineV2 {
   constructor(private readonly deps: RoutineEngineV2Deps) {}
 
@@ -49,7 +72,7 @@ export class RoutineEngineV2 {
     let summary = "";
     try {
       const result = await loop.runTurn(input.prePrompt);
-      summary = result.text ?? "";
+      summary = extractSummaryTag(result.text ?? "");
     } catch (err) {
       log.warn("runRoutine error (id=%s): %s", input.id, err instanceof Error ? err.message : String(err));
       summary = `루틴 실행 중 오류: ${err instanceof Error ? err.message : String(err)}`;
