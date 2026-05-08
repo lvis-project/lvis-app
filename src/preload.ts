@@ -110,15 +110,9 @@ const api = {
     ipcRenderer.invoke("lvis:mcp:import:claude-desktop:apply", payload),
 
   notifyPluginTheme: (payload: {
-    /** v2: active bundle identifier (e.g. "tokyo-night"). */
-    bundleId?: string;
-    /** v2: shell polarity derived from the bundle. */
-    shell?: "light" | "dark";
-    /** v1 compat: kept so plugin-ui-shell.js and SDK still work. */
-    theme: string;
-    chatTheme: string;
-    codeTheme: string;
-    tokens?: Record<string, string>;
+    bundleId: string;
+    shell: "light" | "dark";
+    tokens: Record<string, string>;
   }) =>
     ipcRenderer.invoke("lvis:host:plugin-theme-notify", payload),
 

@@ -11,26 +11,6 @@ import { LGE_PAIR_IDS } from "./types.js";
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
-/**
- * Map a ThemeBundle to the v1-compat `theme` field value.
- * High-contrast bundles report "high-contrast"; all others report their shell.
- * This preserves semantic meaning for plugins that read the legacy `theme` field.
- */
-function legacyTheme(bundle: ThemeBundle): "light" | "dark" | "high-contrast" {
-  if (bundle.highContrast) return "high-contrast";
-  return bundle.shell;
-}
-
-/**
- * Map a ThemeBundle to the v1-compat `chatTheme` field value.
- * LGE bundles report "lg" so existing plugins that branch on chatTheme
- * continue to identify the LGE context correctly. All other bundles
- * report "default" — the minimal backward-compat contract.
- */
-function legacyChatTheme(bundle: ThemeBundle): "default" | "lg" | "purple" | "orange" | "blue" {
-  if (bundle.id === "lge-light" || bundle.id === "lge-dark") return "lg";
-  return "default";
-}
 
 export interface ThemeProviderProps {
   api?: LvisApi;
@@ -123,12 +103,8 @@ export function ThemeProvider({
     if (!api) return;
     const tokens = bundleToPluginTokens(activeBundle);
     void api.notifyPluginTheme({
-      bundleId: activeBundle.id,
+      bundleId: effectiveBundleId,
       shell: activeBundle.shell,
-      // v1 compat fields — plugin-ui-shell.js and SDK plugins read `theme`
-      theme: legacyTheme(activeBundle),
-      chatTheme: legacyChatTheme(activeBundle),
-      codeTheme: activeBundle.shell === "light" ? "light" : "dark",
       tokens,
     }).catch((err: unknown) => {
       if (typeof process !== "undefined" && process.env?.LVIS_DEV === "1") {
