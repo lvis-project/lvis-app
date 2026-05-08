@@ -235,6 +235,10 @@ export function AskUserQuestionCard({
               if (!isMulti) {
                 void respondAndClose({ answers: [{ choice }] });
               }
+              // Return whether the new draft is complete so the keyboard
+              // handler can advance synchronously without relying on the
+              // stale onSubmit closure (which reflects pre-selection state).
+              return isAnswerComplete(currentItem, { choice, choiceIndex });
             }}
             onFreeText={(freeText) => setAnswer(step, { freeText })}
             onSubmit={isAnswerComplete(currentItem, currentDraft) ? goNext : undefined}
@@ -344,9 +348,10 @@ function QuestionForm({
   item: AskUserQuestionItem;
   draft: DraftAnswer;
   disabled: boolean;
-  onChoose: (choice: string, choiceIndex: number) => void;
+  /** Returns true if the new draft is complete (used by keyboard handler to advance). */
+  onChoose: (choice: string, choiceIndex: number) => boolean;
   onFreeText: (text: string) => void;
-  /** Called when Enter is pressed on a focused choice to advance/submit. */
+  /** Called when Enter is pressed on the free-text input to advance/submit. */
   onSubmit?: () => void;
 }) {
   const choices = effectiveChoices(item);
@@ -387,9 +392,11 @@ function QuestionForm({
         buttonRefs.current[prev]?.focus();
       } else if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
-        onChoose(choices[i], i);
-        // Give the selection state a frame to propagate before submitting.
-        if (onSubmit) requestAnimationFrame(() => onSubmit());
+        // onChoose returns whether the new draft is complete — use that
+        // synchronous result to advance rather than the stale onSubmit
+        // closure which reflects pre-selection isAnswerComplete state.
+        const willBeComplete = onChoose(choices[i], i);
+        if (willBeComplete && onSubmit) onSubmit();
       }
     },
     [disabled, choices, onChoose, onSubmit],

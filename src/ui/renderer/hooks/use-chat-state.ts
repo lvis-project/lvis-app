@@ -5,6 +5,7 @@ import {
   appendUserEntry,
   applyToolEnd,
   applyToolStart,
+  EMPTY_ASSISTANT_RESPONSE_TEXT,
   finalizeImportedTriggerResponse,
   finalizeStreamingAssistant,
   finalizeStreamingReasoning,
@@ -614,5 +615,11 @@ export function useChatState(api: LvisApi) {
 }
 
 function visibleAssistantText(text: string): string {
-  return text.trim().length > 0 ? text : "";
+  // Non-empty cleaned text renders as-is.
+  // Empty string means the assistant produced only marker tags (e.g.
+  // <title>…</title>[checkpoint]) with no user-visible body.
+  // Return EMPTY_ASSISTANT_RESPONSE_TEXT so finalizeStreamingAssistant
+  // keeps the entry in the list with an explicit placeholder rather than
+  // splicing it out (which would make tool-only turns disappear from history).
+  return text.trim().length > 0 ? text : EMPTY_ASSISTANT_RESPONSE_TEXT;
 }
