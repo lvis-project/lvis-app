@@ -27,8 +27,18 @@ export type BundleId = string;
 export type ResolvedShell = "light" | "dark";
 
 export interface ThemeContextValue {
-  /** Active bundle id written to `<html data-theme-bundle>`. */
+  /**
+   * The user-configured bundle id (e.g. "lge-light" or "lge-dark").
+   * When `followSystem` is active this may differ from `effectiveBundleId`.
+   */
   bundleId: BundleId;
+  /**
+   * The bundle id actually applied to the DOM after resolving `followSystem`.
+   * When `followSystem` is false this equals `bundleId`.
+   * When `followSystem` is true and bundleId is an LGE pair id, this reflects
+   * the OS-resolved variant ("lge-light" or "lge-dark").
+   */
+  effectiveBundleId: BundleId;
   /**
    * Live-set the active bundle. Updates the DOM immediately and persists
    * to `~/.lvis/settings.json` via `api.updateSettings({ appearance: ... })`.

@@ -11,6 +11,16 @@ import { LGE_PAIR_IDS } from "./types.js";
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
+/**
+ * Map a ThemeBundle to the v1-compat `theme` field value.
+ * High-contrast bundles report "high-contrast"; all others report their shell.
+ * This preserves semantic meaning for plugins that read the legacy `theme` field.
+ */
+function legacyTheme(bundle: ThemeBundle): "light" | "dark" | "high-contrast" {
+  if (bundle.highContrast) return "high-contrast";
+  return bundle.shell;
+}
+
 export interface ThemeProviderProps {
   api?: LvisApi;
   /** Initial bundle id — lets tests skip async hydrate. */
@@ -71,14 +81,19 @@ export function ThemeProvider({
     return () => { cancelled = true; };
   }, [api]);
 
+  // Tick counter — incremented by the OS media query listener below.
+  // Must be declared before effectiveBundleId so it is in scope for the dep array.
+  const [osTick, setOsTick] = useState(0);
+
   // Derive the effective bundle — when followSystem is active and the bundleId
   // is part of the LGE pair, override with the OS-resolved variant.
+  // osTick is included so any OS scheme change triggers a re-evaluation.
   const effectiveBundleId: BundleId = useMemo(() => {
     if (followSystem && LGE_PAIR_IDS.includes(bundleId)) {
       return resolveSystemPair();
     }
     return bundleId;
-  }, [bundleId, followSystem]);
+  }, [bundleId, followSystem, osTick]);
 
   const activeBundle: ThemeBundle = useMemo(
     () => resolveBundle(effectiveBundleId),
@@ -99,7 +114,7 @@ export function ThemeProvider({
       bundleId: activeBundle.id,
       shell: activeBundle.shell,
       // v1 compat fields — plugin-ui-shell.js and SDK plugins read `theme`
-      theme: activeBundle.shell,
+      theme: legacyTheme(activeBundle),
       chatTheme: "default",
       codeTheme: activeBundle.shell === "light" ? "light" : "dark",
       tokens,
@@ -112,7 +127,6 @@ export function ThemeProvider({
 
   // Live-follow OS preference when followSystem is active for LGE pair.
   // A tick counter forces effectiveBundleId to re-evaluate on OS scheme change.
-  const [, setOsTick] = useState(0);
   useEffect(() => {
     if (!followSystem || !LGE_PAIR_IDS.includes(bundleId)) return;
     if (typeof window === "undefined" || !window.matchMedia) return;
@@ -164,12 +178,13 @@ export function ThemeProvider({
   const value = useMemo<ThemeContextValue>(
     () => ({
       bundleId,
+      effectiveBundleId,
       setBundle,
       resolved,
       followSystem,
       setFollowSystem,
     }),
-    [bundleId, setBundle, resolved, followSystem, setFollowSystem],
+    [bundleId, effectiveBundleId, setBundle, resolved, followSystem, setFollowSystem],
   );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;

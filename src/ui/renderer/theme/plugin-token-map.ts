@@ -50,7 +50,7 @@ export function bundleToPluginTokens(bundle: ThemeBundle): Record<LvisTokenName,
   const bundleTokens: Partial<Record<LvisTokenName, string>> = {
     "--lvis-bg":              tripleToHsl(t.background),
     "--lvis-surface":         tripleToHsl(t.card),
-    "--lvis-surface-overlay": tripleToHsl(t["card-foreground"]),
+    "--lvis-surface-overlay": tripleToHsl(t.popover),
     "--lvis-fg":              tripleToHsl(t.foreground),
     "--lvis-fg-muted":        tripleToHsl(t["muted-foreground"]),
     "--lvis-fg-disabled":     tripleToHsl(t["accent-foreground"]),

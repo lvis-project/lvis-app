@@ -6,7 +6,7 @@
  * applied by writing `data-theme-bundle=<id>` on `<html>`.
  *
  * Token groups:
- *   - Tier B (26): semantic shell + chat surface tokens
+ *   - Tier B (25): semantic shell + chat surface tokens
  *   - Tier C (3):  code-surface tokens (--code-bg, --code-fg, --code-border)
  *   - Action (3):  PR-4/5 reserved action tokens (--action-view, --action-branch, --action-compact)
  */
@@ -61,6 +61,6 @@ export interface ThemeBundle {
   shell: "light" | "dark";
   /** When true this bundle is always displayed; never auto-suggested. */
   highContrast: boolean;
-  /** All 26 Tier B + 3 Tier C + 3 action tokens. */
+  /** All 25 Tier B + 3 Tier C + 3 action tokens. */
   tokens: BundleTokens;
 }
