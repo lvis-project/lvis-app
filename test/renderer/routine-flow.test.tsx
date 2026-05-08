@@ -1,7 +1,7 @@
 /**
  * Phase 3.3 safety net — routine result card lifecycle.
  *
- * onRoutineCompleted delivery, dismiss IPC, snooze IPC.
+ * onRoutineFiredV2 delivery, dismiss IPC, snooze IPC.
  */
 import "./setup.js";
 import { describe, it, expect, vi, afterEach } from "vitest";
@@ -10,18 +10,19 @@ import { renderApp } from "./render-app.js";
 
 function makeRoutineResult() {
   return {
-    routineId: "wakeup",
-    trigger: "wakeup",
-    generatedAt: new Date().toISOString(),
+    id: "schedule-daily",
+    trigger: "schedule",
+    firedAt: new Date().toISOString(),
+    title: "Daily schedule",
     summary: "daily summary",
   };
 }
 
 describe("Routine flow (Phase 3.3 regression net)", () => {
-  it("onRoutineCompleted renders the RoutineCard", async () => {
-    const { container, emitRoutineCompleted } = await renderApp();
+  it("onRoutineFiredV2 renders the OverlayCard", async () => {
+    const { container, emitRoutineFiredV2 } = await renderApp();
     await act(async () => {
-      emitRoutineCompleted(makeRoutineResult());
+      emitRoutineFiredV2(makeRoutineResult());
     });
     await waitFor(() => {
       expect(container.querySelector('[data-testid="routine-card"]')).toBeTruthy();
@@ -40,16 +41,16 @@ describe("Routine flow (Phase 3.3 regression net)", () => {
 
   it("does not let a delayed replay overwrite a newer live result", async () => {
     let resolveLatest: ((value: unknown) => void) | null = null;
-    const stale = { ...makeRoutineResult(), summary: "stale summary" };
+    const stale = { ...makeRoutineResult(), firedAt: new Date(Date.now() - 10_000).toISOString(), summary: "stale summary" };
     const fresh = { ...makeRoutineResult(), summary: "fresh summary" };
-    const { container, emitRoutineCompleted } = await renderApp({
+    const { container, emitRoutineFiredV2 } = await renderApp({
       latestRoutineResult: new Promise((resolve) => {
         resolveLatest = resolve;
       }),
     });
 
     await act(async () => {
-      emitRoutineCompleted(fresh);
+      emitRoutineFiredV2(fresh);
     });
     await act(async () => {
       resolveLatest?.(stale);
@@ -62,9 +63,9 @@ describe("Routine flow (Phase 3.3 regression net)", () => {
   });
 
   it("clicking dismiss removes the card", async () => {
-    const { container, emitRoutineCompleted } = await renderApp();
+    const { container, emitRoutineFiredV2 } = await renderApp();
     await act(async () => {
-      emitRoutineCompleted(makeRoutineResult());
+      emitRoutineFiredV2(makeRoutineResult());
     });
     const card = await waitFor(() => {
       const el = container.querySelector('[data-testid="routine-card"]');
@@ -87,12 +88,12 @@ describe("Routine flow (Phase 3.3 regression net)", () => {
 
   it("snooze trigger button is rendered with the new label", async () => {
     // The dropdown menu pop-open + item-click flow is exercised at the hook
-    // level (src/ui/renderer/hooks/__tests__/use-routine-result.test.ts) where
-    // we can drive timers without Radix portal/pointer-event friction.
+    // level (hook unit tests) where we can drive timers without Radix
+    // portal/pointer-event friction.
     // Here we only assert that the trigger exists with the redesigned label.
-    const { container, emitRoutineCompleted } = await renderApp();
+    const { container, emitRoutineFiredV2 } = await renderApp();
     await act(async () => {
-      emitRoutineCompleted(makeRoutineResult());
+      emitRoutineFiredV2(makeRoutineResult());
     });
     const card = await waitFor(() => {
       const el = container.querySelector('[data-testid="routine-card"]');
@@ -105,12 +106,12 @@ describe("Routine flow (Phase 3.3 regression net)", () => {
   });
 
   it("stacks results with distinct routineIds and shows the index indicator", async () => {
-    const { container, emitRoutineCompleted } = await renderApp();
+    const { container, emitRoutineFiredV2 } = await renderApp();
     await act(async () => {
-      emitRoutineCompleted({ ...makeRoutineResult(), routineId: "wakeup", summary: "morning" });
+      emitRoutineFiredV2({ ...makeRoutineResult(), id: "wakeup", summary: "morning" });
     });
     await act(async () => {
-      emitRoutineCompleted({ ...makeRoutineResult(), routineId: "schedule-1", trigger: "schedule", summary: "midday" });
+      emitRoutineFiredV2({ ...makeRoutineResult(), id: "schedule-1", trigger: "schedule", summary: "midday" });
     });
 
     await waitFor(() => {
@@ -121,13 +122,13 @@ describe("Routine flow (Phase 3.3 regression net)", () => {
   });
 
   it("in-place updates a card when the same routineId arrives again", async () => {
-    const { container, emitRoutineCompleted } = await renderApp();
+    const { container, emitRoutineFiredV2 } = await renderApp();
     await act(async () => {
-      emitRoutineCompleted({ ...makeRoutineResult(), summary: "v1" });
+      emitRoutineFiredV2({ ...makeRoutineResult(), summary: "v1" });
     });
     await waitFor(() => expect(container.textContent).toContain("v1"));
     await act(async () => {
-      emitRoutineCompleted({ ...makeRoutineResult(), summary: "v2" });
+      emitRoutineFiredV2({ ...makeRoutineResult(), summary: "v2" });
     });
     await waitFor(() => {
       expect(container.textContent).toContain("v2");

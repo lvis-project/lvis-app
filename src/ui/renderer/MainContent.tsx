@@ -10,7 +10,6 @@ import type { QuickAction } from "./components/CommandPopover.js";
 import { MemorySearchPanel } from "./components/MemorySearchPanel.js";
 import { RoutinePanel } from "./components/RoutinePanel.js";
 import { StarredView } from "./components/StarredView.js";
-import { RemindersList } from "./components/RemindersList.js";
 import type { SessionSummary } from "./hooks/use-sessions.js";
 
 type Api = ReturnType<typeof getApi>;
@@ -29,7 +28,6 @@ export interface MainContentProps {
   onActivateHome: () => void;
   onJumpToSession: (sessionId: string) => void;
   onRefreshSessions: () => void | Promise<void>;
-  onStartRoutineSession: (routineId: string) => Promise<void>;
   // chat
   chatContextValue: ChatContextValue;
   onAsk: (q: string) => Promise<void>;
@@ -60,6 +58,8 @@ export interface MainContentProps {
   marketplaceUrlReady?: boolean;
   // plugin view
   activePluginView: PluginView | null;
+  /** Q11 — called when user confirms a plugin overlay item; id is the OverlayItem.id */
+  onPluginPrimaryAction: (overlayItemId: string) => void;
 }
 
 function MainPaneShell({ children, padded = true }: { children: ReactNode; padded?: boolean }) {
@@ -102,6 +102,7 @@ function HomeChatPane(props: MainContentProps) {
         installingPlugins={props.installingPlugins}
         onOpenMarketplace={props.onOpenMarketplace}
         marketplaceUrlReady={props.marketplaceUrlReady}
+        onPluginPrimaryAction={props.onPluginPrimaryAction}
       />
     </ChatContextProvider>
   );
@@ -122,14 +123,6 @@ export function MainContent(props: MainContentProps): ReactNode {
     );
   }
 
-  if (activeView === "reminders") {
-    return (
-      <MainPaneShell>
-        <RemindersList api={api} />
-      </MainPaneShell>
-    );
-  }
-
   if (activeView === "starred") {
     return (
       <MainPaneShell>
@@ -145,15 +138,10 @@ export function MainContent(props: MainContentProps): ReactNode {
     );
   }
 
-  if (activeView === "routines") {
+  if (activeView === "reminders" || activeView === "routines") {
     return (
       <MainPaneShell>
-        <RoutinePanel
-          api={api}
-          onActivateHome={props.onActivateHome}
-          onJumpToSession={props.onJumpToSession}
-          onStartRoutineSession={props.onStartRoutineSession}
-        />
+        <RoutinePanel api={api} />
       </MainPaneShell>
     );
   }

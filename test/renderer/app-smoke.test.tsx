@@ -29,13 +29,14 @@ describe("App smoke (Phase 1 infra)", () => {
     expect(true).toBe(true);
   });
 
-  it("RoutineCard appears when onRoutineCompleted fires", async () => {
-    const { container, emitRoutineCompleted } = await renderApp();
+  it("OverlayCard appears when onRoutineFiredV2 fires", async () => {
+    const { container, emitRoutineFiredV2 } = await renderApp();
     await act(async () => {
-      emitRoutineCompleted({
-        routineId: "wakeup",
-        trigger: "wakeup",
-        generatedAt: new Date().toISOString(),
+      emitRoutineFiredV2({
+        id: "schedule-daily",
+        trigger: "schedule",
+        firedAt: new Date().toISOString(),
+        title: "Daily schedule",
         summary: "smoke summary",
       });
     });

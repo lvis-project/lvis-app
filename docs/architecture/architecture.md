@@ -1141,9 +1141,10 @@ lvis-app/src/
 │   ├── dialogs/                 # ApprovalDialog, PluginInstallDialog,
 │   │                            #  PluginUninstallDialog, CommandPaletteDialog
 │   ├── tabs/                    # LlmTab, AppearanceTab, ChatTab, WebTab,
-│   │                            #  RoutineTab, PrivacyTab, PermissionsTab,
+│   │                            #  PrivacyTab, PermissionsTab,
 │   │                            #  RolesTab, AuditTab, PluginPerfTab,
 │   │                            #  McpTab, PluginConfigTab, MarketplaceTab
+│   │                            #  (RoutinePanel → components/ as sidebar view)
 │   ├── utils/                   # cost-format, html-preview, history, compose
 │   └── types.ts, constants.ts, api-client.ts
 │
@@ -1869,7 +1870,6 @@ broadcast 만 처리.
 | `appearance` | 테마 | `AppearanceTab.tsx` | 테마 선택 (dark / light / high-contrast / system) |
 | `chat` | 채팅 | `ChatTab.tsx` | 자동 컴팩트 토글·**Stream Smoothing** (PR #342 이관) |
 | `web` | 검색 (Web) | `WebTab.tsx` | 웹 검색 공급자·API 키 |
-| `routine` | 브리핑 | `RoutineTab.tsx` | Wake-up Routine 활성화 |
 | `privacy` | 프라이버시 | `PrivacyTab.tsx` | DLP(PII) 리댁션 토글 + 통계 |
 | `permissions` | 권한 | `PermissionsTab.tsx` | 도구 권한 정책 |
 | `roles` | 역할 | `RolesTab.tsx` | Role Preset 편집 (이름·systemPromptAdd·effort) |
@@ -1879,6 +1879,8 @@ broadcast 만 처리.
 | `mcp` | MCP 서버 | `McpTab.tsx` | MCP 서버 등록 관리 |
 | `plugin-config` | 플러그인 설정 | `PluginConfigTab.tsx` | 플러그인별 설정 (configSchema 기반 폼 또는 raw key-value) |
 | `marketplace` | 마켓플레이스 | `MarketplaceTab.tsx` | 마켓플레이스 URL·API 키·private network 허용 |
+
+> **Note (Routine v2):** `RoutinePanel.tsx` 는 SettingsDialog 탭이 **아니다**. Routine v2 도입(feat/routine-v2-unified) 이후 RoutinePanel 은 `Sidebar.tsx` 의 `routines` 사이드바 엔트리(`Repeat2` 아이콘)로 이동하여 **사이드바 메인 뷰**로 동작한다. SettingsDialog 에는 더 이상 routine 탭이 존재하지 않는다.
 
 ### PR #342 재배치 요약
 
@@ -1974,6 +1976,16 @@ flowchart LR
 **브리핑 예시:**
 
 > 「오늘 미팅 3건 (10:00 디자인리뷰, 14:00 스프린트, 16:00 1:1), 미처리 이메일 5통 중 2통은 액션 필요 (파트너사 계약서 검토, 출장비 정산 확인), 기한 임박 태스크 1건 (Q2 보고서 초안 — 내일 마감), **에이전트 요청 승인 2건** (이영희 Agent → Q1 보고서 공유 요청, 박민수 Agent → 코드리뷰 결과 전달 요청)」
+
+### 7.X Routine v2 (PR #626)
+
+- **Storage**: `~/.lvis/routines.json` (mode 0o600, dir 0o700, cap 50)
+- **Scheduler**: 30s polling (RoutinesScheduler), cron minute-key dedup via `lastFiredMinuteUTC`
+- **Execution modes**: `llm-session` (RoutineEngine 호출, prePrompt 로 conversation 시작) / `notification-only` (OS notification, conversation 영향 0)
+- **Repeat kinds**: `none / daily / weekly / monthly / interval / cron` — Q5 monthly day-of-month clamping
+- **LLM tool**: `schedule_routine` (자연어 입력 → struct payload, 4 vendor 호환)
+- **UI**: 단일 RoutinePanel 의 통합 list (Reminder 흡수), execution mode badge, 3-tab 입력 모달 (form / cron / 자연어)
+- **Reminder 폐지**: PR #626 atomic cutover 로 `RemindersStore`, `RemindersScheduler`, `remind_at` tool, `RemindersList` 컴포넌트 모두 제거
 
 ---
 

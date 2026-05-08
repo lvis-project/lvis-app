@@ -63,7 +63,7 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   task_today: "오늘 할 일",
   task_overdue: "기한 지난 할 일",
   todo_session_write: "세션 TO-DO 저장",
-  remind_at: "알림 설정",
+  schedule_routine: "루틴 등록",
 
   // Agent Hub
   agent_hub_status: "허브 상태 확인",

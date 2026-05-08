@@ -9,7 +9,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { AskUserQuestionGate } from "../ask-user-question-gate.js";
 import { ApprovalGate } from "../../permissions/approval-gate.js";
-import { deliverRoutineResult } from "../../routines/routine-delivery.js";
 import type { NotificationService, FireOptions } from "../notification-service.js";
 
 function makeFakeNotificationService(): NotificationService {
@@ -77,37 +76,8 @@ describe("Trigger 4: ApprovalGate fires `approval` on requestAndWait entry", () 
   });
 });
 
-describe("Trigger 2: deliverRoutineResult fires `routine`", () => {
-  it("fires with kind=routine, title containing routineId, body=summary", async () => {
-    const svc = makeFakeNotificationService();
-    // null mainWindow short-circuits the actual IPC send but still hits the
-    // notification fire path — exactly what we need for this stub.
-    // notificationService is now passed as an explicit option (no
-    // module-level singleton) so parallel tests don't share state.
-    await deliverRoutineResult(
-      null,
-      {
-        routineId: "wakeup",
-        trigger: "wakeup",
-        summary: "오늘의 일정 3개입니다",
-        generatedAt: new Date().toISOString(),
-        sessionId: "sess-1",
-      },
-      { notificationService: svc },
-    );
-    expect(svc.fire).toHaveBeenCalledWith(
-      expect.objectContaining({
-        kind: "routine",
-        title: expect.stringContaining("wakeup"),
-        body: "오늘의 일정 3개입니다",
-        contextRef: expect.objectContaining({
-          routineId: "wakeup",
-          sessionId: "sess-1",
-        }),
-      }),
-    );
-  });
-});
+// Trigger 2 (deliverRoutineResult) was removed as part of the v2 routine
+// migration — routine-delivery.js is a v1 artifact and no longer exists.
 
 // Trigger 1 (turn-end) is exercised through the full ConversationLoop, which
 // requires extensive deps to construct (provider, tool registry, memory,

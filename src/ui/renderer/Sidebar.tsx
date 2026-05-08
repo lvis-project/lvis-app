@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import { Bell, Home, Repeat2, Star, Database, GitBranch } from "lucide-react";
+import { Home, Repeat2, Star, Database, GitBranch } from "lucide-react";
 import { Button } from "../../components/ui/button.js";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../../components/ui/tooltip.js";
 import type { SessionSummary } from "./hooks/use-sessions.js";
@@ -60,7 +60,6 @@ export function Sidebar(props: SidebarProps) {
   // cell + spinner-with-phase) so the sidebar stays clean.
   const navItems = [
     { key: "home", label: "홈", icon: Home },
-    { key: "reminders", label: "리마인더", icon: Bell },
     { key: "routines", label: "루틴", icon: Repeat2 },
     { key: "starred", label: "즐겨찾기", icon: Star, badge: starredCount > 0 ? String(starredCount) : null },
     { key: "memory", label: "메모리", icon: Database },

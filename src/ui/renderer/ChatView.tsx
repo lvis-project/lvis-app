@@ -8,10 +8,7 @@ import { ScrollArea } from "../../components/ui/scroll-area.js";
 import { formatCostBadge } from "../../lib/cost-estimator.js";
 import type { ChatEntry } from "../../lib/chat-stream-state.js";
 import { debugLog, isDebugStreamEnabled } from "../../lib/debug-stream.js";
-import { RoutineCard } from "./components/RoutineCard.js";
-import { RoutineRunningIndicator } from "./components/RoutineRunningIndicator.js";
-import { TriggerCard } from "./components/TriggerCard.js";
-import { ImportedTriggerCard } from "./components/ImportedTriggerCard.js";
+import { OverlayCardRegion } from "./components/OverlayCardRegion.js";
 import { AssistantCard } from "./components/AssistantCard.js";
 import { UserMessageEditor } from "./components/UserMessageEditor.js";
 import { ReasoningCard } from "./components/ReasoningCard.js";
@@ -53,6 +50,9 @@ import type { SubAgentSpawn } from "./components/SubAgentCard.js";
 import type { SkillBadgeProps } from "./components/SkillBadge.js";
 import type { SessionSummary } from "./hooks/use-sessions.js";
 import { useContinuousHistory, type ContinuousHistorySession } from "./hooks/use-continuous-history.js";
+import ReactMarkdown from "react-markdown";
+import { MARKDOWN_REMARK_PLUGINS } from "./utils/markdown-plugins.js";
+import { parseImportedTriggerEnvelope } from "../../shared/proactive-source.js";
 
 const CHAT_BOTTOM_THRESHOLD_PX = 96;
 
@@ -97,9 +97,13 @@ export interface ChatViewProps {
   installingPlugins?: ReadonlyMap<string, InstallPhase>;
   onOpenMarketplace: () => void;
   marketplaceUrlReady?: boolean;
+  /** Q10 — set of routineIds currently executing (LLM session in-flight) */
+  runningRoutines?: Set<string>;
   // PR-2-F-2 정정: fork-based revert (revertSessionId/onRevertCheckpoint) 폐지 — Layer 3
   // same-session checkpoint chain (Copilot 패턴) 으로 대체. sessionId 불변이므로 별도 revert action
   // 불필요 — 사용자가 임의 시점으로 돌아가려면 후속 PR 의 view-mode 지원 필요.
+  /** Q11 — called when user confirms a plugin overlay item; id is the OverlayItem.id */
+  onPluginPrimaryAction?: (overlayItemId: string) => void;
 }
 
 function HistoricalSessionMarker({ title, sessionId }: { title: string; sessionId: string }) {
@@ -342,17 +346,32 @@ function HistoricalEntriesList({
     }
 
     if (entry.kind === "imported_trigger") {
+      // Parse envelope source tag to confirm proactive provenance.
+      // title + summary fields are already clean (set at insert time).
+      const envelopeSource = parseImportedTriggerEnvelope(entry.prompt);
       rendered.push(
-        <ImportedTriggerCard
+        <div
           key={`trigger:${entry.sessionId}`}
-          source={entry.source}
-          prompt={entry.prompt}
-          summary={entry.summary}
-          toolCallCount={entry.toolCallCount}
-          importedAt={entry.importedAt}
-          response={entry.response}
-          responseStreaming={false}
-        />,
+          className="mx-3 my-1 rounded border border-violet-500/20 bg-violet-500/5 px-3 py-2 text-xs"
+        >
+          <div className="flex items-center gap-1 text-violet-500 font-medium">
+            <span>●</span>
+            <span>{envelopeSource ?? entry.summary.slice(0, 60)}</span>
+          </div>
+          {entry.summary && (
+            <p className="mt-1 text-muted-foreground">{entry.summary}</p>
+          )}
+          {entry.response && (
+            <div className="mt-2 text-foreground/80 prose prose-sm dark:prose-invert max-w-none">
+              <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>
+                {entry.response}
+              </ReactMarkdown>
+            </div>
+          )}
+          {entry.responseStreaming && !entry.response && (
+            <p className="mt-1 text-muted-foreground animate-pulse">응답 중...</p>
+          )}
+        </div>,
       );
       i++;
       continue;
@@ -364,7 +383,7 @@ function HistoricalEntriesList({
   return <div className="min-w-0 w-full max-w-full space-y-3 overflow-x-hidden">{rendered}</div>;
 }
 
-export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, installingPlugins, onOpenMarketplace, marketplaceUrlReady }: ChatViewProps) {
+export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, installingPlugins, onOpenMarketplace, marketplaceUrlReady, onPluginPrimaryAction }: ChatViewProps) {
   // We still need the api for SessionTodoPanel; obtain it via singleton.
   const workflowApi = getApi();
   const debugStreamEnabled = isDebugStreamEnabled();
@@ -373,10 +392,6 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
     question, setQuestion, chatEndRef, currentSessionId,
     hasApiKey, onOpenSettings,
-    routineResult, routineQueueIndex, routineQueueTotal,
-    onDismissRoutineResult, onSnoozeRoutineResult,
-    onPrevRoutineResult, onNextRoutineResult, runningRoutines,
-    triggerResult, onDismissTrigger, onAcceptTrigger,
     searchOpen, searchQuery, searchCase, searchMatches, searchMatchSet, searchIdx, searchHighlight,
     searchChangeQuery, searchToggleCase, searchNext, searchPrev, searchCloseOverlay, searchToggleOverlay,
     contextOverflowPct, usedTokens, contextBudget,
@@ -656,67 +671,8 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           </Card>
         </div>
       )}
-      {/* 루틴 floating overlay — 단일 슬롯에 진행 중 / 결과 중 하나만 표시.
-          진행 중이면 RoutineRunningIndicator, 아니면 직전 결과 RoutineCard.
-          긴 브리핑은 카드 내부에서 스크롤 (max-h-[60vh] + overflow-y-auto).
-          FloatingQuestionPanel은 App 레벨에서 렌더링 — 뷰 전환 시에도 유지. */}
-      {/* Suppress the floating routine overlay while an ask card is pending —
-          a question demanding the user's response shouldn't compete with a
-          running-routine indicator for attention. The overlay reappears
-          automatically once the user resolves or dismisses the question. */}
-      {(runningRoutines.size > 0 || routineResult) && !hasAskQuestions && (
-        <div className="pointer-events-none absolute left-0 right-0 top-2 z-20 flex justify-center px-4">
-          <div className="pointer-events-auto flex w-full max-w-2xl max-h-[60vh] flex-col overflow-hidden">
-            {runningRoutines.size > 0 ? (
-              <RoutineRunningIndicator runningRoutines={runningRoutines} />
-            ) : routineResult ? (
-              <RoutineCard
-                key={`${routineResult.routineId}::${routineResult.generatedAt}`}
-                result={routineResult}
-                onDismiss={onDismissRoutineResult}
-                onSnooze={onSnoozeRoutineResult}
-                index={routineQueueIndex}
-                total={routineQueueTotal}
-                onPrev={onPrevRoutineResult}
-                onNext={onNextRoutineResult}
-              />
-            ) : null}
-          </div>
-        </div>
-      )}
-      {/* Proactive trigger overlays — visibility-driven slot routing (P2):
-            user-visible → centered modal-like card (below routine area)
-            summary-only → top-right compact toast that auto-dismisses
-            silent       → never reaches here (filtered in useTriggerResult)
-          The trigger session is held in an isolated ConversationLoop so chat
-          history below remains clean unless the user clicks "지금 답하기". */}
-      {triggerResult && triggerResult.visibility === "user-visible" && (
-        <div className="pointer-events-none absolute left-0 right-0 top-[calc(0.5rem+62vh)] z-20 flex justify-center px-4">
-          <div className="pointer-events-auto flex w-full max-w-2xl max-h-[40vh] flex-col overflow-hidden">
-            <TriggerCard
-              key={triggerResult.sessionId}
-              result={triggerResult}
-              onDismiss={onDismissTrigger}
-              onAccept={onAcceptTrigger}
-            />
-          </div>
-        </div>
-      )}
-      {triggerResult && triggerResult.visibility === "summary-only" && (
-        // z-30 keeps the toast above the routine area (z-20) on narrow
-        // windows where the centered routine card and right-edge toast
-        // overlap horizontally.
-        <div className="pointer-events-none absolute right-4 top-2 z-30 flex justify-end">
-          <div className="pointer-events-auto w-[380px] max-w-[calc(100vw-2rem)]">
-            <TriggerCard
-              key={triggerResult.sessionId}
-              result={triggerResult}
-              onDismiss={onDismissTrigger}
-              onAccept={onAcceptTrigger}
-            />
-          </div>
-        </div>
-      )}
+      {/* Q10/Q11 — Routine fire + plugin (insertion-type) overlay. Q9 policy: routine items isolated from chat history. Plugin items insert via imported_trigger on confirm. */}
+      <OverlayCardRegion onPluginPrimaryAction={onPluginPrimaryAction ?? (() => {})} />
       <div className="relative min-h-0 min-w-0 max-w-full flex-1 overflow-hidden">
       {/* §PR-5: View-Mode banner — sticky at the top of the chat scroll area */}
       <ViewModeBanner viewMode={viewMode} onExit={() => { void handleExitView(); }} />
@@ -1004,17 +960,32 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             }
 
             if (entry.kind === "imported_trigger") {
+              // Parse envelope source tag to confirm proactive provenance.
+              // title + summary fields are already clean (set at insert time).
+              const envelopeSource = parseImportedTriggerEnvelope(entry.prompt);
               rendered.push(
-                <ImportedTriggerCard
+                <div
                   key={`trigger:${entry.sessionId}`}
-                  source={entry.source}
-                  prompt={entry.prompt}
-                  summary={entry.summary}
-                  toolCallCount={entry.toolCallCount}
-                  importedAt={entry.importedAt}
-                  response={entry.response}
-                  responseStreaming={entry.responseStreaming}
-                />
+                  className="mx-3 my-1 rounded border border-violet-500/20 bg-violet-500/5 px-3 py-2 text-xs"
+                >
+                  <div className="flex items-center gap-1 text-violet-500 font-medium">
+                    <span>●</span>
+                    <span>{envelopeSource ?? entry.summary.slice(0, 60)}</span>
+                  </div>
+                  {entry.summary && (
+                    <p className="mt-1 text-muted-foreground">{entry.summary}</p>
+                  )}
+                  {entry.response && (
+                    <div className="mt-2 text-foreground/80 prose prose-sm dark:prose-invert max-w-none">
+                      <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>
+                        {entry.response}
+                      </ReactMarkdown>
+                    </div>
+                  )}
+                  {entry.responseStreaming && !entry.response && (
+                    <p className="mt-1 text-muted-foreground animate-pulse">응답 중...</p>
+                  )}
+                </div>,
               );
               i++;
               continue;

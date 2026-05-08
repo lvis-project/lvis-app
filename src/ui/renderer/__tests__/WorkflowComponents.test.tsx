@@ -8,7 +8,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, fireEvent, act, waitFor } from "@testing-library/react";
 import { TooltipProvider } from "../../../components/ui/tooltip.js";
 import { AskUserQuestionCard } from "../components/AskUserQuestionCard.js";
-import { RemindersList } from "../components/RemindersList.js";
+import { RoutinePanel } from "../components/RoutinePanel.js";
 import { SessionTodoPanel } from "../components/SessionTodoPanel.js";
 import { SubAgentCard } from "../components/SubAgentCard.js";
 import { SkillBadge } from "../components/SkillBadge.js";
@@ -20,10 +20,10 @@ function fakeApi(overrides: Partial<LvisApi> = {}): LvisApi {
   return {
     // Only methods used by the components under test need real impls;
     // the rest are stubbed minimally to satisfy the type.
-    listReminders: () => Promise.resolve([]),
-    dismissReminder: stub as never,
-    removeReminder: stub as never,
-    onReminderFired: noopUnsub as never,
+    listRoutinesV2: () => Promise.resolve([]),
+    dismissRoutineV2: stub as never,
+    removeRoutineV2: stub as never,
+    onRoutineFiredV2: noopUnsub as never,
     listSessionTodos: () => Promise.resolve([]),
     onSessionTodoChanged: noopUnsub as never,
     respondAskUserQuestion: stub as never,
@@ -247,27 +247,28 @@ describe("AskUserQuestionCard — multi-question", () => {
   });
 });
 
-describe("RemindersList", () => {
-  it("renders empty-state when there are no reminders", async () => {
+describe("RoutinePanel", () => {
+  it("renders empty-state when there are no routines", async () => {
     const api = fakeApi();
-    const { findByText } = render(<RemindersList api={api} />);
-    expect(await findByText(/등록된 리마인더가 없습니다/)).toBeInTheDocument();
+    const { findByText } = render(<RoutinePanel api={api} />);
+    expect(await findByText(/등록된 루틴이 없습니다/)).toBeInTheDocument();
   });
 
-  it("renders an active reminder card", async () => {
+  it("renders an active routine card", async () => {
     const api = fakeApi({
-      listReminders: () =>
+      listRoutinesV2: () =>
         Promise.resolve([
           {
             id: "r1",
-            at: "2099-01-01T00:00:00.000Z",
-            title: "year-end",
-            repeat: "daily",
+            trigger: "schedule" as const,
+            execution: "notification-only" as const,
+            schedule: { at: "2099-01-01T00:00:00.000Z", repeat: { kind: "daily" as const } },
+            notificationTitle: "year-end",
             createdAt: "2024-01-01T00:00:00.000Z",
           },
         ]),
     });
-    const { findByText } = render(<RemindersList api={api} />);
+    const { findByText } = render(<RoutinePanel api={api} />);
     expect(await findByText("year-end")).toBeInTheDocument();
   });
 });
