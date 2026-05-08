@@ -6,6 +6,7 @@
 import { ipcMain } from "electron";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import type { IpcDeps } from "../types.js";
+import type { RoutineExecution, RoutineSchedule } from "../../main/routines-store.js";
 import { createLogger } from "../../lib/logger.js";
 const log = createLogger("lvis");
 
@@ -59,6 +60,34 @@ export function registerMiscHandlers(deps: IpcDeps): void {
     }
     return { ok: true };
   });
+
+  ipcMain.handle(
+    "lvis:routines:v2:add",
+    async (
+      e,
+      input: {
+        trigger: "shutdown" | "schedule";
+        schedule?: RoutineSchedule;
+        execution: RoutineExecution;
+        prePrompt?: string;
+        title?: string;
+        notificationTitle?: string;
+        notificationBody?: string;
+      },
+    ) => {
+      if (!validateSender(e)) {
+        auditUnauthorized(auditLogger, "lvis:routines:v2:add", e);
+        return UNAUTHORIZED_FRAME;
+      }
+      if (!routinesStore) return { ok: false, error: "no-store" };
+      try {
+        const record = await routinesStore.add(input);
+        return { ok: true, routine: record };
+      } catch (err) {
+        return { ok: false, error: (err as Error).message };
+      }
+    },
+  );
 
   // ─── Session Todo ────────────────────────────────
   ipcMain.handle("lvis:session-todo:list", (e, sessionId?: string) => {

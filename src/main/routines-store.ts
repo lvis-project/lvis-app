@@ -20,6 +20,20 @@ import { randomUUID } from "node:crypto";
  */
 export const MAX_PERSISTED_ROUTINES = 50;
 
+/** Maximum allowed distance into the future for schedule.at (parity with RemindersStore). */
+const MAX_FUTURE_OFFSET_MS = 5 * 365.25 * 24 * 60 * 60 * 1000;
+
+function validateScheduleAt(at: string): { ok: true } | { ok: false; error: string } {
+  const ts = Date.parse(at);
+  if (Number.isNaN(ts)) return { ok: false, error: "invalid-date" };
+  const offset = ts - Date.now();
+  if (offset > MAX_FUTURE_OFFSET_MS) {
+    return { ok: false, error: "future-too-far" };
+  }
+  // Past timestamps are allowed — past-due routines fire immediately on next poll.
+  return { ok: true };
+}
+
 export type RoutineExecution = "llm-session" | "notification-only";
 
 export type RepeatKind =
@@ -60,11 +74,26 @@ export interface RoutineRecord {
   createdAt: string;
   lastFiredAt?: string;
   dismissedAt?: string;
+  /**
+   * Persistent cron dedup key — ISO string of the UTC minute that last fired.
+   * Survives app restarts so the same cron minute cannot re-fire after reboot.
+   */
+  lastFiredMinuteUTC?: string;
 }
 
 export interface RoutinesFile {
   version: 2;
   routines: RoutineRecord[];
+}
+
+export interface AddRoutineInput {
+  trigger: "shutdown" | "schedule";
+  schedule?: RoutineSchedule;
+  execution: RoutineExecution;
+  prePrompt?: string;
+  title?: string;
+  notificationTitle?: string;
+  notificationBody?: string;
 }
 
 const DEFAULT_PATH = resolve(homedir(), ".lvis", "routines.json");
@@ -129,23 +158,15 @@ export class RoutinesStore {
     return this.cache.filter((r) => !r.dismissedAt);
   }
 
-  async add(input: {
-    trigger: "shutdown" | "schedule";
-    schedule?: RoutineSchedule;
-    execution: RoutineExecution;
-    prePrompt?: string;
-    title?: string;
-    notificationTitle?: string;
-    notificationBody?: string;
-  }): Promise<RoutineRecord> {
+  async add(input: AddRoutineInput): Promise<RoutineRecord> {
     if (!this.loaded) await this.load();
 
     // Validate `at` when provided.
     if (input.schedule?.at !== undefined) {
-      const parsedAt = new Date(input.schedule.at);
-      if (Number.isNaN(parsedAt.getTime())) {
+      const validation = validateScheduleAt(input.schedule.at);
+      if (!validation.ok) {
         throw new Error(
-          `RoutinesStore.add: invalid schedule.at (expected ISO 8601): ${input.schedule.at}`,
+          `RoutinesStore.add: invalid schedule.at (${validation.error}): ${input.schedule.at}`,
         );
       }
     }
@@ -202,6 +223,32 @@ export class RoutinesStore {
       await writeFileAtomic(this.filePath, file);
       this.cache = file.routines;
       return removed;
+    });
+  }
+
+  /**
+   * Patch a subset of mutable fields on a routine record.
+   * Only the fields present in `patch` are written; undefined values are ignored.
+   * Returns the updated record, or null if not found.
+   */
+  async update(
+    id: string,
+    patch: Partial<Pick<RoutineRecord, "lastFiredMinuteUTC" | "lastFiredAt" | "dismissedAt">>,
+  ): Promise<RoutineRecord | null> {
+    if (!this.loaded) await this.load();
+    return withFileLock(this.filePath, async () => {
+      const file = await readFileOrEmpty(this.filePath);
+      const r = file.routines.find((x) => x.id === id);
+      if (!r) {
+        this.cache = file.routines;
+        return null;
+      }
+      if (patch.lastFiredMinuteUTC !== undefined) r.lastFiredMinuteUTC = patch.lastFiredMinuteUTC;
+      if (patch.lastFiredAt !== undefined) r.lastFiredAt = patch.lastFiredAt;
+      if (patch.dismissedAt !== undefined) r.dismissedAt = patch.dismissedAt;
+      await writeFileAtomic(this.filePath, file);
+      this.cache = file.routines;
+      return r;
     });
   }
 

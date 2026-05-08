@@ -184,14 +184,8 @@ function AddRoutineModal({ api, onClose, onAdded }: AddRoutineModalProps) {
 
   const handleSubmit = async () => {
     if (tab === "natural") {
-      // Natural language: use chatSend to ask LLM to call schedule_routine tool.
-      // The LLM will use the tool directly — nothing to submit here manually.
-      onClose();
-      // Route the natural language input to the main chat.
-      await api.chatSend(
-        `다음 루틴을 schedule_routine 툴을 사용해서 등록해줘: ${naturalInput}`,
-      );
-      onAdded();
+      // Natural language tab has its own submit button; this branch is unreachable
+      // from the main submit button (which is hidden for tab === "natural").
       return;
     }
     const schedule = buildSchedulePayload();
@@ -199,42 +193,35 @@ function AddRoutineModal({ api, onClose, onAdded }: AddRoutineModalProps) {
       setError("스케줄 정보를 올바르게 입력해주세요.");
       return;
     }
-    const payload: Record<string, unknown> = {
-      execution,
-      schedule,
-      ...(title ? { title } : {}),
-    };
-    if (execution === "llm-session") {
-      if (!prePrompt.trim()) {
-        setError("LLM 세션 모드에서는 프롬프트가 필요합니다.");
-        return;
-      }
-      payload.prePrompt = prePrompt.trim();
-    } else {
-      if (notificationTitle.trim()) payload.notificationTitle = notificationTitle.trim();
-      if (notificationBody.trim()) payload.notificationBody = notificationBody.trim();
+
+    if (execution === "llm-session" && !prePrompt.trim()) {
+      setError("LLM 세션 모드에서는 프롬프트가 필요합니다.");
+      return;
     }
+
+    const input: import("../../../main/routines-store.js").AddRoutineInput = {
+      trigger: "schedule",
+      execution,
+      schedule: schedule as import("../../../main/routines-store.js").RoutineSchedule,
+      ...(title.trim() ? { title: title.trim() } : {}),
+      ...(execution === "llm-session"
+        ? { prePrompt: prePrompt.trim() }
+        : {
+            ...(notificationTitle.trim() ? { notificationTitle: notificationTitle.trim() } : {}),
+            ...(notificationBody.trim() ? { notificationBody: notificationBody.trim() } : {}),
+          }),
+    };
 
     setSubmitting(true);
     setError("");
     try {
-      // Use the LLM tool directly via chatSend — or call IPC add directly.
-      // We route via chatSend so the LLM can handle it, but for the UI path
-      // we want a direct IPC add. Since we don't have a direct IPC add in the
-      // preload (tool is LLM-invoked), we use chatSend with the structured call.
-      // The simplest correct approach: send a chat message asking the LLM to
-      // call schedule_routine with the exact parameters we've already built.
-      onClose();
-      const scheduleStr = JSON.stringify(schedule);
-      const prePromptStr = execution === "llm-session" ? `prePrompt: "${prePrompt.trim()}", ` : "";
-      const notifStr = execution === "notification-only"
-        ? `notificationTitle: "${notificationTitle}", notificationBody: "${notificationBody}", `
-        : "";
-      const titleStr = title ? `title: "${title}", ` : "";
-      await api.chatSend(
-        `schedule_routine 툴을 직접 호출해줘. 파라미터: execution="${execution}", schedule=${scheduleStr}, ${prePromptStr}${notifStr}${titleStr}`,
-      );
-      onAdded();
+      const result = await api.addRoutineV2(input);
+      if (result.ok) {
+        onAdded();
+        onClose();
+      } else {
+        setError(result.error ?? "루틴 등록 실패");
+      }
     } catch (err) {
       setError((err as Error).message ?? "루틴 등록 실패");
     } finally {
@@ -249,11 +236,11 @@ function AddRoutineModal({ api, onClose, onAdded }: AddRoutineModalProps) {
     try {
       // Natural language → LLM parses and calls schedule_routine directly.
       // No client-side parsing needed — just route to chat.
-      onClose();
       await api.chatSend(
         `다음 루틴을 schedule_routine 툴을 사용해서 등록해줘: ${naturalInput.trim()}`,
       );
       onAdded();
+      onClose();
     } catch (err) {
       setNaturalError((err as Error).message ?? "자연어 파싱 실패");
     } finally {

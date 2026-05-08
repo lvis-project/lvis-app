@@ -610,6 +610,10 @@ const api = {
   dismissRoutineV2: async (id: string) => ipcRenderer.invoke("lvis:routines:v2:dismiss", id),
   removeRoutineV2: async (id: string) => ipcRenderer.invoke("lvis:routines:v2:remove", id),
   triggerRoutineNowV2: async (id: string) => ipcRenderer.invoke("lvis:routines:v2:trigger-now", id),
+  addRoutineV2: async (input: import("./main/routines-store.js").AddRoutineInput) =>
+    ipcRenderer.invoke("lvis:routines:v2:add", input) as Promise<
+      { ok: true; routine: import("./main/routines-store.js").RoutineRecord } | { ok: false; error: string }
+    >,
   onRoutineFiredV2: (
     handler: (routine: import("./main/routines-store.js").RoutineRecord) => void,
   ) => {
