@@ -85,7 +85,7 @@ describe("PostTurnHookChain", () => {
     expect(saveSession).toHaveBeenCalledWith("session-enabled", result.compactedMessages);
   });
 
-  it("runs microcompact alone (no full compact) when threshold is not met", async () => {
+  it("runs mark-stale alone (no full compact) when threshold is not met", async () => {
     vi.spyOn(console, "log").mockImplementation(() => {});
 
     const saveSession = vi.fn();

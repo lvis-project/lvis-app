@@ -1,13 +1,13 @@
 /**
  * Auto-Compact — 2-stage compaction tests.
  *
- * Stage 1 (microcompact): preventive tool_result stub 교체.
+ * Stage 1 (markStaleToolResults): preventive tool_result stub 교체.
  * Stage 2 (compactMessages): threshold 초과 시 요약 생성 + boundary marker.
  */
 import { describe, it, expect } from "vitest";
 
 import {
-  microcompactMessages,
+  markStaleToolResults,
   compactMessages,
   decideRotation,
 } from "../auto-compact.js";
@@ -38,10 +38,10 @@ function synth(withLargeResults = true): GenericMessage[] {
   return msgs;
 }
 
-describe("microcompactMessages", () => {
+describe("markStaleToolResults", () => {
   it("strips older tool_results while preserving the most recent N", () => {
     const messages = synth();
-    const { messages: out, result } = microcompactMessages(messages, {
+    const { messages: out, result } = markStaleToolResults(messages, {
       preserveRecentToolResults: 4,
     });
 
@@ -73,8 +73,8 @@ describe("microcompactMessages", () => {
 
   it("is idempotent — second call produces no changes", () => {
     const messages = synth();
-    const first = microcompactMessages(messages, { preserveRecentToolResults: 4 });
-    const second = microcompactMessages(first.messages, { preserveRecentToolResults: 4 });
+    const first = markStaleToolResults(messages, { preserveRecentToolResults: 4 });
+    const second = markStaleToolResults(first.messages, { preserveRecentToolResults: 4 });
 
     expect(second.result.stripped).toBe(false);
     expect(second.result.strippedCount).toBe(0);
@@ -84,7 +84,7 @@ describe("microcompactMessages", () => {
 
   it("preserves tool_use_id linkage for stripped messages", () => {
     const messages = synth();
-    const { messages: out } = microcompactMessages(messages, {
+    const { messages: out } = markStaleToolResults(messages, {
       preserveRecentToolResults: 4,
     });
 
@@ -112,11 +112,61 @@ describe("microcompactMessages", () => {
       },
       { role: "tool_result", toolUseId: "t1", toolName: "f", content: "data" },
     ];
-    const { messages: out, result } = microcompactMessages(messages, {
+    const { messages: out, result } = markStaleToolResults(messages, {
       preserveRecentToolResults: 4,
     });
     expect(result.stripped).toBe(false);
     expect(out).toBe(messages); // reference-equal
+  });
+
+  it("skips tool_results below minStubThreshold (OpenCode pattern, default 200 chars)", () => {
+    // 10개 모두 100자짜리 (default threshold 200 미만). preserveRecentToolResults=4 라도 모두 skip.
+    const msgs: GenericMessage[] = [{ role: "user", content: "go" }];
+    for (let i = 0; i < 10; i++) {
+      const id = makeToolUseId(i);
+      msgs.push({
+        role: "assistant",
+        content: `s${i}`,
+        toolCalls: [{ id, name: "search", input: {} }],
+      });
+      msgs.push({
+        role: "tool_result",
+        toolUseId: id,
+        toolName: "search",
+        content: "y".repeat(100), // 100 < 200
+      });
+    }
+    const { messages: out, result } = markStaleToolResults(msgs, {
+      preserveRecentToolResults: 4,
+    });
+    expect(result.stripped).toBe(false);
+    expect(result.strippedCount).toBe(0);
+    expect(out).toBe(msgs); // reference-equal — no allocation
+  });
+
+  it("respects custom minStubThreshold", () => {
+    // 10개 모두 50자짜리. minStubThreshold=10 이면 처음 6개는 strip 됨.
+    const msgs: GenericMessage[] = [{ role: "user", content: "go" }];
+    for (let i = 0; i < 10; i++) {
+      const id = makeToolUseId(i);
+      msgs.push({
+        role: "assistant",
+        content: `s${i}`,
+        toolCalls: [{ id, name: "search", input: {} }],
+      });
+      msgs.push({
+        role: "tool_result",
+        toolUseId: id,
+        toolName: "search",
+        content: "z".repeat(50), // 50 >= 10
+      });
+    }
+    const { result } = markStaleToolResults(msgs, {
+      preserveRecentToolResults: 4,
+      minStubThreshold: 10,
+    });
+    expect(result.stripped).toBe(true);
+    expect(result.strippedCount).toBe(6);
   });
 });
 

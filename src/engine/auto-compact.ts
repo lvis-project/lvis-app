@@ -279,14 +279,16 @@ export function compactMessages(
   };
 }
 
-// ─── Microcompact (Stage 1 — preventive, LLM-free) ──
+// ─── Layer 1: Mark Stale Tool Results (preventive, LLM-free) ──
 
-export interface MicrocompactConfig {
-  /** 말단에서부터 이 개수만큼의 tool_result는 raw 유지 (기본 4) */
+export interface MarkStaleConfig {
+  /** 말단에서부터 이 개수만큼의 tool_result는 raw 유지 (기본 8) */
   preserveRecentToolResults: number;
+  /** 이 길이(자) 미만의 tool_result는 stub 대상에서 제외 (기본 200, OpenCode 패턴) */
+  minStubThreshold?: number;
 }
 
-export interface MicrocompactResult {
+export interface MarkStaleResult {
   /** 실제 strip이 일어났는지 여부 */
   stripped: boolean;
   /** strip된 tool_result 개수 */
@@ -295,24 +297,27 @@ export interface MicrocompactResult {
   freedChars: number;
 }
 
-const DEFAULT_MICROCOMPACT_CONFIG: MicrocompactConfig = {
+const DEFAULT_MARK_STALE_CONFIG: MarkStaleConfig = {
   preserveRecentToolResults: 8,
+  minStubThreshold: 200,
 };
 
 /**
- * Stage 1 — Preventive, LLM-free microcompact.
+ * Layer 1 — Preventive, LLM-free part marking (renamed from `microcompactMessages` in v3 PR-1b).
  *
  * 오래된 tool_result 메시지 content를 stub string으로 교체해 히스토리 크기를 낮춘다.
  * - 최근 `preserveRecentToolResults` 개는 원본 유지 (assistant가 참조 가능성 있음)
+ * - content 길이가 `minStubThreshold` 미만이면 stub 으로 교체해도 이득이 거의 없으므로 skip (OpenCode 패턴)
  * - 이미 stripped된 메시지는 skip (idempotent)
  * - `toolUseId`는 절대 변경하지 않음 — 다른 메시지 참조 무결성 보존
  * - 입력 array는 mutate하지 않고 새 배열 반환. strip된 메시지만 새 객체, 나머지는 reference-equal.
  */
-export function microcompactMessages(
+export function markStaleToolResults(
   messages: GenericMessage[],
-  config: MicrocompactConfig = DEFAULT_MICROCOMPACT_CONFIG,
-): { messages: GenericMessage[]; result: MicrocompactResult } {
+  config: MarkStaleConfig = DEFAULT_MARK_STALE_CONFIG,
+): { messages: GenericMessage[]; result: MarkStaleResult } {
   const preserveCount = Math.max(0, config.preserveRecentToolResults);
+  const minStub = config.minStubThreshold ?? DEFAULT_MARK_STALE_CONFIG.minStubThreshold ?? 200;
 
   // tool_result 인덱스를 순서대로 수집
   const toolResultIndices: number[] = [];
@@ -329,14 +334,20 @@ export function microcompactMessages(
 
   // 끝에서부터 preserveCount 개를 제외한 인덱스가 strip 후보
   const stripCandidates = toolResultIndices.slice(0, toolResultIndices.length - preserveCount);
-  // 후보 전원이 이미 stripped면 새 배열 생성 없이 early return (per-turn allocation 회피)
-  if (stripCandidates.every((i) => (messages[i] as { meta?: { stripped?: boolean } }).meta?.stripped === true)) {
+  // 후보 전원이 이미 stripped이거나 threshold 미만이면 새 배열 생성 없이 early return.
+  const eligibleCandidates = stripCandidates.filter((i) => {
+    const m = messages[i];
+    if (m.role !== "tool_result") return false;
+    if ((m as { meta?: { stripped?: boolean } }).meta?.stripped === true) return false;
+    return m.content.length >= minStub;
+  });
+  if (eligibleCandidates.length === 0) {
     return {
       messages,
       result: { stripped: false, strippedCount: 0, freedChars: 0 },
     };
   }
-  const stripCandidateIdxSet = new Set(stripCandidates);
+  const stripCandidateIdxSet = new Set(eligibleCandidates);
 
   let strippedCount = 0;
   let freedChars = 0;
@@ -345,7 +356,6 @@ export function microcompactMessages(
   const out = messages.map((msg, i) => {
     if (!stripCandidateIdxSet.has(i)) return msg;
     if (msg.role !== "tool_result") return msg;
-    if (msg.meta?.stripped === true) return msg; // idempotent
 
     const origLen = msg.content.length;
     const stub = `[tool_result stripped: tool=${msg.toolName ?? "?"}, origLen=${origLen}]`;

@@ -37,11 +37,11 @@ export const LLM_DEFAULT_MODELS: Record<LLMVendor, string> = {
 // ─── 범용 메시지 ────────────────────────────────────
 
 /**
- * Optional per-message metadata for lifecycle bookkeeping (auto-compact, microcompact,
+ * Optional per-message metadata for lifecycle bookkeeping (auto-compact, mark-stale,
  * boundary markers, etc.). All fields optional so existing callers remain unaffected.
  */
 export interface MessageMeta {
-  /** microcompact가 tool_result content를 stub으로 교체했는지 여부 */
+  /** Layer 1 markStaleToolResults 가 tool_result content를 stub으로 교체했는지 여부 */
   stripped?: boolean;
   /** stripped 되기 전 원본 content의 문자열 길이(JS string.length — UTF-16 code units, bytes 아님) */
   originalLength?: number;
@@ -49,7 +49,7 @@ export interface MessageMeta {
   compactBoundary?: boolean;
   /** 경계 marker의 경우, 요약 대상이 된 메시지 수 */
   removedCount?: number;
-  /** microcompact strip 발생 ISO timestamp */
+  /** Layer 1 mark-stale 발생 ISO timestamp */
   strippedAt?: string;
   /** compactMessages 실행 ISO timestamp */
   compactedAt?: string;
