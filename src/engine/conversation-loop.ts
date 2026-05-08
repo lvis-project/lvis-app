@@ -429,20 +429,23 @@ export class ConversationLoop {
     const target = checkpoints.find((c) => c.compactNum === compactNum);
     if (!target) throw new Error(`Checkpoint #${compactNum} not found in session ${this.sessionId}`);
 
-    // §PR-5 guard: after auto-compact the in-memory history is replaced with the
-    // compacted boundary + recent messages and will be shorter than messageCountAtTrigger.
-    // Silently slicing the compacted history would produce a wrong/incomplete fork.
-    // Fail fast so the caller surfaces a clear error rather than a corrupt session.
-    const currentLength = this.history.getMessages().length;
-    if (currentLength < target.messageCountAtTrigger) {
+    // §PR-5: Load the pre-compact transcript from disk rather than using the in-memory history.
+    // After auto-compact, this.history holds only the compacted boundary + recent turns and is
+    // always shorter than messageCountAtTrigger. The full pre-compact transcript is preserved on
+    // disk (saveSession is called before every compaction). We load it here and slice to the
+    // checkpoint boundary so the fork contains the exact messages that existed at that point.
+    const diskMessages = this.deps.memoryManager.loadSession(this.sessionId);
+    if (!diskMessages) {
+      throw new Error(`branchFromCheckpoint: session ${this.sessionId} not found on disk`);
+    }
+    if (diskMessages.length < target.messageCountAtTrigger) {
       throw new Error(
-        `branchFromCheckpoint: session history has been compacted (length ${currentLength} < checkpoint messageCountAtTrigger ${target.messageCountAtTrigger}). ` +
-        `Cannot reconstruct pre-checkpoint transcript from compacted history.`,
+        `branchFromCheckpoint: disk transcript length ${diskMessages.length} < checkpoint messageCountAtTrigger ${target.messageCountAtTrigger} for session ${this.sessionId}`,
       );
     }
 
     const newSessionId = crypto.randomUUID();
-    const sliced = this.history.getMessages().slice(0, target.messageCountAtTrigger);
+    const sliced = (diskMessages as import("./llm/types.js").GenericMessage[]).slice(0, target.messageCountAtTrigger);
 
     // wire-serialize: markStaleToolResults 된 verbatim history 를 stub 치환 후 영속화
     await this.deps.memoryManager.saveSession(newSessionId, stubMarkedToolResults(sliced));

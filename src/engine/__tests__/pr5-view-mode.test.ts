@@ -17,11 +17,24 @@ import { ToolRegistry } from "../../tools/registry.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
 import { SessionTodoStore } from "../../main/session-todo-store.js";
 
-function makeLoop(metaCheckpoints?: Array<{ compactNum: number; messageCountAtTrigger: number }>) {
+const FAKE_DISK_MESSAGES = [
+  { role: "user" as const, content: [{ type: "text" as const, text: "q1" }] },
+  { role: "assistant" as const, content: "a1" },
+  { role: "user" as const, content: [{ type: "text" as const, text: "q2" }] },
+];
+
+function makeLoop(
+  metaCheckpoints?: Array<{ compactNum: number; messageCountAtTrigger: number }>,
+  diskMessages?: unknown[] | null,
+) {
   const toolRegistry = new ToolRegistry();
 
   const savedSessions = new Map<string, unknown[]>();
   const savedMetadata = new Map<string, unknown>();
+
+  // By default simulate a disk that has FAKE_DISK_MESSAGES (3 messages),
+  // unless the caller explicitly passes null (session not found) or a custom array.
+  const resolvedDisk = diskMessages === undefined ? FAKE_DISK_MESSAGES : diskMessages;
 
   const memoryManager = {
     saveSession: vi.fn(async (id: string, msgs: unknown[]) => { savedSessions.set(id, msgs); }),
@@ -30,6 +43,7 @@ function makeLoop(metaCheckpoints?: Array<{ compactNum: number; messageCountAtTr
       if (!metaCheckpoints) return null;
       return { checkpoints: metaCheckpoints };
     }),
+    loadSession: vi.fn((_id: string) => resolvedDisk),
     listSessions: vi.fn(() => []),
   };
 
@@ -84,33 +98,37 @@ describe("ConversationLoop §PR-5 branchFromCheckpoint", () => {
     await expect(loop.branchFromCheckpoint(5)).rejects.toThrow("Checkpoint #5 not found");
   });
 
-  it("throws when in-memory history is shorter than messageCountAtTrigger (already compacted)", async () => {
-    const { loop } = makeLoop([
-      { compactNum: 1, messageCountAtTrigger: 10 },
-    ]);
-    // history is empty — 0 < 10, so branch must fail
-    await expect(loop.branchFromCheckpoint(1)).rejects.toThrow("Cannot reconstruct pre-checkpoint transcript");
+  it("throws when session is not on disk", async () => {
+    const { loop } = makeLoop([{ compactNum: 1, messageCountAtTrigger: 2 }], null);
+    await expect(loop.branchFromCheckpoint(1)).rejects.toThrow("not found on disk");
   });
 
-  it("persists sliced history and branch metadata", async () => {
-    const { loop, savedSessions, savedMetadata } = makeLoop([
+  it("throws when disk transcript is shorter than messageCountAtTrigger", async () => {
+    // Disk has only 1 message, checkpoint expects 10
+    const { loop } = makeLoop(
+      [{ compactNum: 1, messageCountAtTrigger: 10 }],
+      [{ role: "user", content: "only one msg" }],
+    );
+    await expect(loop.branchFromCheckpoint(1)).rejects.toThrow("disk transcript length");
+  });
+
+  it("loads from disk, slices to messageCountAtTrigger, and persists branch metadata", async () => {
+    // FAKE_DISK_MESSAGES has 3 messages; checkpoint at messageCountAtTrigger=2
+    const { loop, memoryManager, savedSessions, savedMetadata } = makeLoop([
       { compactNum: 1, messageCountAtTrigger: 2 },
     ]);
-
-    // Restore some fake messages into the loop's history
-    const fakeMessages = [
-      { role: "user" as const, content: [{ type: "text" as const, text: "q1" }] },
-      { role: "assistant" as const, content: "a1" },
-      { role: "user" as const, content: [{ type: "text" as const, text: "q2" }] },
-    ];
-    (loop as { history: { restore: (m: unknown[]) => void } }).history.restore(fakeMessages);
+    // In-memory history is intentionally empty (simulates post-compaction state)
+    // to confirm the implementation reads from disk, not this.history
 
     const { newSessionId } = await loop.branchFromCheckpoint(1);
+
+    // loadSession was called for the current session
+    expect(memoryManager.loadSession).toHaveBeenCalledWith(loop.getSessionId());
 
     // New session id is a UUID
     expect(newSessionId).toMatch(/^[0-9a-f-]{36}$/);
 
-    // Saved messages are sliced to exactly messageCountAtTrigger (2)
+    // Saved messages are sliced to exactly messageCountAtTrigger (2) from disk
     const saved = savedSessions.get(newSessionId) as unknown[] | undefined;
     expect(saved).toBeDefined();
     expect(saved!.length).toBe(2);

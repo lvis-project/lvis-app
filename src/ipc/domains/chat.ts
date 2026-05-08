@@ -600,7 +600,7 @@ ${input}`;
   ipcMain.handle("lvis:chat:enter-checkpoint-view", (e, payload: unknown) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:enter-checkpoint-view", e); return UNAUTHORIZED_FRAME; }
     const p = payload as { sessionId?: unknown; compactNum?: unknown };
-    if (typeof p?.sessionId !== "string" || typeof p?.compactNum !== "number") {
+    if (typeof p?.sessionId !== "string" || !Number.isSafeInteger(p?.compactNum) || (p.compactNum as number) < 0) {
       return { error: "invalid-args" };
     }
     if (p.sessionId !== conversationLoop.getSessionId()) {
@@ -620,7 +620,7 @@ ${input}`;
   ipcMain.handle("lvis:chat:branch-from-checkpoint", async (e, payload: unknown) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:branch-from-checkpoint", e); return UNAUTHORIZED_FRAME; }
     const p = payload as { sessionId?: unknown; compactNum?: unknown };
-    if (typeof p?.sessionId !== "string" || typeof p?.compactNum !== "number") {
+    if (typeof p?.sessionId !== "string" || !Number.isSafeInteger(p?.compactNum) || (p.compactNum as number) < 0) {
       return { error: "invalid-args" };
     }
     if (p.sessionId !== conversationLoop.getSessionId()) {
