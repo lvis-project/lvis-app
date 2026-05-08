@@ -109,7 +109,17 @@ const api = {
   applyClaudeDesktopMcpImport: async (payload: { raw: string; conflictPolicy?: "skip" | "overwrite" }) =>
     ipcRenderer.invoke("lvis:mcp:import:claude-desktop:apply", payload),
 
-  notifyPluginTheme: (payload: { theme: string; chatTheme: string; codeTheme: string; tokens?: Record<string, string> }) =>
+  notifyPluginTheme: (payload: {
+    /** v2: active bundle identifier (e.g. "tokyo-night"). */
+    bundleId?: string;
+    /** v2: shell polarity derived from the bundle. */
+    shell?: "light" | "dark";
+    /** v1 compat: kept so plugin-ui-shell.js and SDK still work. */
+    theme: string;
+    chatTheme: string;
+    codeTheme: string;
+    tokens?: Record<string, string>;
+  }) =>
     ipcRenderer.invoke("lvis:host:plugin-theme-notify", payload),
 
   // PR 3c: lvis:ms-graph:* IPC 채널 + bridge 메서드 제거 — ms-graph

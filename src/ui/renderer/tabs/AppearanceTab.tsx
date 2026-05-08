@@ -1,182 +1,104 @@
 /**
- * AppearanceTab — UX Track 3 visual theme picker (two-axis redesign).
+ * AppearanceTab — theme bundle picker (v2 single-bundle redesign).
  *
- * Two stacked sections, each rendered as a `role="radiogroup"` of visual
- * swatch cards (not native radios — the cards themselves are the controls):
+ * Single section: a 6-card grid where each card represents a ThemeBundle
+ * (도쿄나이트 / 미드나잇 / 포레스트 / LGE라이트 / LGE다크 / 고대비).
  *
- *   1. 채팅 테마  → ChatThemePreference  (default | purple | orange | blue)
- *   2. 코드 테마  → CodeThemePreference  (auto/light/dark)
+ * Clicking a card calls `setBundle(bundle.id)` and applies the bundle to
+ * `<html data-theme-bundle>` immediately via ThemeProvider.
  *
- * The shell preference (light/dark/high-contrast/system) lives below in a
- * compact secondary picker so power users can still reach it; the primary
- * focus of the tab is the card-based chat-theme + code-theme experience
- * matching the user-provided reference image.
+ * When the selected bundle is part of the LGE pair (lge-light / lge-dark),
+ * a `followSystem` toggle is shown. For all other bundles it is hidden.
  *
- * Cards are mini live previews built from CSS-only primitives (see
- * `src/styles.css` `.lvis-theme-card-*` rules). Selection state is signaled
- * via `aria-checked="true"` and a 2-px ring drawn in the active accent.
+ * High-contrast is always shown (never auto-suggested).
  *
- * Adding a new chat-theme variant: see ThemeProvider.tsx header comment.
+ * The external URL section (§B1 webView policy) is preserved verbatim.
  */
 import { useEffect, useState } from "react";
 import { useTheme } from "../theme/index.js";
-import type {
-  ChatThemePreference,
-  ThemePreference,
-} from "../theme/index.js";
+import { BUNDLES, LGE_PAIR_IDS } from "../theme/index.js";
+import type { ThemeBundle } from "../theme/index.js";
 import type { CSSProperties } from "react";
 import { getApi } from "../api-client.js";
 
 type WebViewPreferredFlow = "in-app" | "system-browser";
 
-/* ─── chat-theme card data ───────────────────────────────────────────── */
-interface ChatOption {
-  value: ChatThemePreference;
-  label: string;
-  /** CSS color expression injected as `--mock-accent` on the inner mock. */
-  accentVar: string;
-  /**
-   * Optional surface override for cards whose theme repaints background /
-   * text / assistant-bubble (e.g. LG). When omitted the mock keeps the
-   * generic slate defaults from styles.css. Each entry is a CSS color
-   * expression — the keys map 1:1 to mock CSS variables.
-   */
-  surface?: {
-    bg?: string;
-    text?: string;
-    bubbleOther?: string;
+/* ─── Bundle card mini-mock helpers ─────────────────────────────────────── */
+
+/**
+ * Derive the two dominant colors for a bundle mini-mock from its tokens.
+ * `bg` is the card background; `accent` is the primary color pill.
+ */
+function bundleMockColors(bundle: ThemeBundle): { bg: string; accent: string; text: string } {
+  const t = bundle.tokens;
+  return {
+    bg:     `hsl(${t.background})`,
+    accent: `hsl(${t.primary})`,
+    text:   `hsl(${t.foreground})`,
   };
 }
 
-const CHAT_OPTIONS: ReadonlyArray<ChatOption> = [
-  // "default" inherits from the active shell theme — show the slate/blue mix
-  // we use in the dark default. We render this with the literal blue accent
-  // so the card stays visually distinct from the explicit "blue" card below.
-  { value: "default", label: "기본", accentVar: "hsl(215 16% 47%)" },
-  // "lg" is a self-contained brand identity (warm-grey + lilac + LG red).
-  // Card preview shows the warm-grey background + Grey-7 muted bubble +
-  // lilac user bubble so users can recognize the full LG identity at a
-  // glance, not just the accent. (Other accent-only themes below keep
-  // generic slate surface — that matches their actual runtime behavior.)
-  {
-    value: "lg",
-    label: "LG",
-    accentVar: "hsl(271 76% 76%)",
-    surface: {
-      bg: "hsl(40 25% 92%)",       // Grey 6  #F0ECE4
-      text: "hsl(0 0% 15%)",        // Grey 1  #262626
-      bubbleOther: "hsl(44 37% 94%)", // Grey 7  #F6F3EB
-    },
-  },
-  { value: "purple", label: "퍼플", accentVar: "hsl(262 83% 58%)" },
-  { value: "orange", label: "오렌지", accentVar: "hsl(25 95% 53%)" },
-  { value: "blue", label: "블루", accentVar: "hsl(217.2 91.2% 59.8%)" },
-];
+/**
+ * Mini chat-shell mock for a bundle card. Shows background, a user bubble
+ * (accent color) and an assistant bubble (muted tone).
+ */
+function BundleMock({ bundle }: { bundle: ThemeBundle }) {
+  const { bg, accent, text } = bundleMockColors(bundle);
+  const userBubble = `hsl(${bundle.tokens["message-user-bg"]})`;
+  const mutedBubble = `hsl(${bundle.tokens.muted})`;
 
-/* ─── code-theme card data ───────────────────────────────────────────── */
-//
-// Only the explicit "light" / "dark" variants are surfaced as cards. The
-// "auto" preference is implicit — when the user hasn't explicitly chosen,
-// the card whose value matches `resolvedCodeTheme` is shown as selected.
-interface CodeOption {
-  value: "light" | "dark";
-  label: string;
-}
-const CODE_OPTIONS: ReadonlyArray<CodeOption> = [
-  { value: "light", label: "라이트" },
-  { value: "dark", label: "다크" },
-];
+  const style: CSSProperties = {
+    background: bg,
+    color: text,
+    width: "100%",
+    height: "100%",
+    padding: "0.4rem 0.45rem",
+    display: "flex",
+    flexDirection: "column",
+    gap: "0.28rem",
+  };
 
-/* ─── shell preference (kept as a compact text-radio row) ─────────────── */
-const SHELL_OPTIONS: ReadonlyArray<{ value: ThemePreference; label: string }> = [
-  { value: "system", label: "시스템" },
-  { value: "light", label: "라이트" },
-  { value: "dark", label: "다크" },
-  { value: "high-contrast", label: "고대비" },
-];
-
-/* ─── inline mock CSS-var helper ───────────────────────────────────────
- * Builds the inline style object that exposes per-card variables to the
- * mock CSS. Only `accent` is mandatory; surface fields are wired only
- * when the theme has its own surface palette (avoids overriding the
- * mock's generic light defaults for accent-only themes). */
-function mockStyle(accent: string, surface?: ChatOption["surface"]): CSSProperties {
-  const style: Record<string, string> = { "--mock-accent": accent };
-  if (surface?.bg) style["--mock-bg"] = surface.bg;
-  if (surface?.text) style["--mock-text"] = surface.text;
-  if (surface?.bubbleOther) style["--mock-bubble-other"] = surface.bubbleOther;
-  return style as CSSProperties;
-}
-
-/* ─── chat-theme card mock — generic chat shell ──────────────────────── */
-function ChatThemeMock({ accent, surface }: { accent: string; surface?: ChatOption["surface"] }) {
   return (
-    <div className="lvis-theme-card-mock-inner" style={mockStyle(accent, surface)}>
-      <div className="lvis-theme-card-mock-bar" />
-      <div className="lvis-theme-card-mock-row">
-        <span className="lvis-theme-card-mock-dot" />
-        <span className="lvis-theme-card-mock-bubble" />
+    <div style={style}>
+      {/* title bar mock */}
+      <div style={{ height: "0.45rem", borderRadius: "0.2rem", background: accent, width: "100%", flexShrink: 0 }} />
+      {/* assistant bubble row */}
+      <div style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>
+        <span style={{ width: "0.55rem", height: "0.55rem", borderRadius: "999px", background: accent, flexShrink: 0 }} />
+        <span style={{ height: "0.55rem", borderRadius: "0.45rem", background: mutedBubble, flex: "1 1 auto" }} />
       </div>
-      <div className="lvis-theme-card-mock-row">
-        <span className="lvis-theme-card-mock-bubble is-self" />
+      {/* user bubble row */}
+      <div style={{ display: "flex" }}>
+        <span style={{ height: "0.55rem", borderRadius: "0.45rem", background: userBubble, flex: "0 0 60%", marginLeft: "auto" }} />
       </div>
-      <div className="lvis-theme-card-mock-row">
-        <span className="lvis-theme-card-mock-bubble" />
+      {/* assistant bubble row */}
+      <div style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>
+        <span style={{ width: "0.55rem", height: "0.55rem", borderRadius: "999px", background: accent, flexShrink: 0 }} />
+        <span style={{ height: "0.55rem", borderRadius: "0.45rem", background: mutedBubble, flex: "1 1 auto" }} />
       </div>
     </div>
   );
 }
 
-/* ─── code-theme card mock — split-pane editor ───────────────────────── */
-function CodeThemeMock({ which }: { which: "light" | "dark" }) {
-  // We always show the SAME split (left=light, right=dark) so the card is
-  // immediately recognizable as "code editor". The selected card's ring
-  // signals the user choice; we additionally tint the dominant pane with
-  // the active card's identity by floating a `<>` glyph over it.
-  const dominantSide = which === "light" ? "left" : "right";
-  return (
-    <div className="lvis-theme-card-mock-split">
-      <div className="lvis-theme-card-mock-split-pane is-light">
-        <span className="lvis-theme-card-mock-codeline is-mid" />
-        <span className="lvis-theme-card-mock-codeline is-long" />
-        <span className="lvis-theme-card-mock-codeline is-short" />
-        {dominantSide === "left" ? (
-          <span className="lvis-theme-card-mock-glyph" aria-hidden="true">{"</>"}</span>
-        ) : null}
-      </div>
-      <div className="lvis-theme-card-mock-split-pane is-dark">
-        <span className="lvis-theme-card-mock-codeline is-long" />
-        <span className="lvis-theme-card-mock-codeline is-mid" />
-        <span className="lvis-theme-card-mock-codeline is-short" />
-        {dominantSide === "right" ? (
-          <span className="lvis-theme-card-mock-glyph" aria-hidden="true">{"</>"}</span>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
-/* ─── single swatch card (ARIA radio with visual mock) ───────────────── */
-interface SwatchCardProps {
+/* ─── Single swatch card (ARIA radio with bundle mini-mock) ──────────────── */
+interface BundleCardProps {
+  bundle: ThemeBundle;
   selected: boolean;
-  label: string;
-  accessibleName: string;
   onSelect: () => void;
-  children: React.ReactNode;
 }
 
-function SwatchCard({ selected, label, accessibleName, onSelect, children }: SwatchCardProps) {
+function BundleCard({ bundle, selected, onSelect }: BundleCardProps) {
   return (
     <button
       type="button"
       role="radio"
       aria-checked={selected}
-      aria-label={accessibleName}
+      aria-label={`테마: ${bundle.name}`}
       data-selected={selected ? "true" : "false"}
+      data-bundle-id={bundle.id}
       className="lvis-theme-card"
       onClick={onSelect}
       onKeyDown={(e) => {
-        // Standard radio activation — Space and Enter should both select.
         if (e.key === " " || e.key === "Enter") {
           e.preventDefault();
           onSelect();
@@ -184,17 +106,17 @@ function SwatchCard({ selected, label, accessibleName, onSelect, children }: Swa
       }}
     >
       <div className="lvis-theme-card-mock" aria-hidden="true">
-        {children}
+        <BundleMock bundle={bundle} />
       </div>
       <div className="lvis-theme-card-label">
-        <span>{label}</span>
+        <span>{bundle.name}</span>
         <span className="lvis-theme-card-checkmark" aria-hidden="true">✓</span>
       </div>
     </button>
   );
 }
 
-/* ─── webView preferredFlow options ──────────────────────────────────── */
+/* ─── webView preferredFlow options ──────────────────────────────────────── */
 const WEBVIEW_OPTIONS: ReadonlyArray<{ value: WebViewPreferredFlow; label: string; hint: string }> = [
   { value: "in-app", label: "인앱 표시", hint: "외부 URL 을 LVIS 창 안에 표시합니다." },
   { value: "system-browser", label: "시스템 브라우저", hint: "외부 URL 을 OS 기본 브라우저에서 엽니다." },
@@ -246,17 +168,10 @@ function useWebViewPreferredFlow(): {
 }
 
 export function AppearanceTab() {
-  const {
-    preference,
-    resolved,
-    chatTheme,
-    codeTheme,
-    resolvedCodeTheme,
-    setPreference,
-    setChatTheme,
-    setCodeTheme,
-  } = useTheme();
+  const { bundleId, setBundle, followSystem, setFollowSystem } = useTheme();
   const { flow: webViewFlow, setFlow: setWebViewFlow } = useWebViewPreferredFlow();
+
+  const isLgePair = LGE_PAIR_IDS.includes(bundleId);
 
   return (
     <div className="space-y-6 pt-4">
@@ -264,107 +179,58 @@ export function AppearanceTab() {
       <div className="space-y-1">
         <p className="text-sm font-medium">테마</p>
         <p className="text-[11px] text-muted-foreground">
-          채팅의 강조 색상과 코드 블록 표시 방식을 각각 선택할 수 있습니다. 변경은 즉시 적용되며 재시작이 필요 없습니다.
+          테마를 선택하면 채팅 배경, 강조 색상, 코드 블록이 함께 변경됩니다. 변경은 즉시 적용되며 재시작이 필요 없습니다.
         </p>
       </div>
 
-      {/* ── 채팅 테마 ───────────────────────────────────────────────── */}
+      {/* ── 6-bundle card grid ───────────────────────────────────────── */}
       <section className="space-y-3">
-        <div className="flex items-baseline justify-between">
-          <h3 className="text-sm font-semibold">채팅 테마</h3>
-          <span className="text-[11px] text-muted-foreground">색상과 배경을 함께 선택합니다</span>
-        </div>
-
         <div
           role="radiogroup"
-          aria-label="채팅 테마 선택"
-          className="grid grid-cols-2 gap-3 sm:grid-cols-4"
+          aria-label="테마 선택"
+          className="grid grid-cols-2 gap-3 sm:grid-cols-3"
         >
-          {CHAT_OPTIONS.map((opt) => (
-            <SwatchCard
-              key={opt.value}
-              selected={chatTheme === opt.value}
-              label={opt.label}
-              accessibleName={`채팅 테마: ${opt.label}`}
-              onSelect={() => setChatTheme(opt.value)}
-            >
-              <ChatThemeMock accent={opt.accentVar} surface={opt.surface} />
-            </SwatchCard>
+          {BUNDLES.map((bundle) => (
+            <BundleCard
+              key={bundle.id}
+              bundle={bundle}
+              selected={bundleId === bundle.id}
+              onSelect={() => setBundle(bundle.id)}
+            />
           ))}
         </div>
       </section>
 
-      {/* ── 코드 테마 ───────────────────────────────────────────────── */}
-      <section className="space-y-3">
-        <div className="flex items-baseline justify-between">
-          <h3 className="text-sm font-semibold">코드 테마</h3>
-          <span className="text-[11px] text-muted-foreground">
-            현재 적용: <span className="font-mono text-foreground">{resolvedCodeTheme}</span>
-            {codeTheme === "auto" && (
-              <span className="ml-1 opacity-70">(자동)</span>
-            )}
-          </span>
-        </div>
-
-        <div
-          role="radiogroup"
-          aria-label="코드 테마 선택"
-          className="grid grid-cols-2 gap-3 sm:max-w-md"
-        >
-          {CODE_OPTIONS.map((opt) => (
-            <SwatchCard
-              key={opt.value}
-              selected={codeTheme === opt.value || (codeTheme === "auto" && resolvedCodeTheme === opt.value)}
-              label={opt.label}
-              accessibleName={`코드 테마: ${opt.label}`}
-              onSelect={() => setCodeTheme(opt.value)}
+      {/* ── followSystem toggle — LGE pair only ─────────────────────── */}
+      {isLgePair && (
+        <section className="space-y-2 border-t border-border pt-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-semibold">시스템 테마 따르기</h3>
+              <p className="text-[11px] text-muted-foreground">
+                OS 라이트/다크 모드에 맞춰 LGE 라이트/다크를 자동 전환합니다.
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={followSystem}
+              aria-label="OS 시스템 색상 따라가기"
+              data-testid="follow-system-toggle"
+              onClick={() => setFollowSystem(!followSystem)}
+              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                followSystem ? "bg-primary" : "bg-muted"
+              }`}
             >
-              <CodeThemeMock which={opt.value} />
-            </SwatchCard>
-          ))}
-        </div>
-        <p className="text-[11px] text-muted-foreground">
-          명시적으로 선택하지 않으면(자동) 앱 라이트/다크 모드를 따라갑니다.
-        </p>
-      </section>
-
-      {/* ── 앱 라이트/다크 (compact secondary picker) ──────────────── */}
-      <section className="space-y-2 border-t border-border pt-4">
-        <div className="flex items-baseline justify-between">
-          <h3 className="text-sm font-semibold">앱 라이트/다크</h3>
-          <span className="text-[11px] text-muted-foreground">
-            현재: <span className="font-mono text-foreground">{resolved}</span>
-            {preference === "system" && (
-              <span className="ml-1 opacity-70">(시스템 설정 기반)</span>
-            )}
-          </span>
-        </div>
-        <div
-          role="radiogroup"
-          aria-label="앱 모드 선택"
-          className="flex flex-wrap gap-2"
-        >
-          {SHELL_OPTIONS.map((opt) => {
-            const checked = preference === opt.value;
-            return (
-              <button
-                key={opt.value}
-                type="button"
-                role="radio"
-                aria-checked={checked}
-                onClick={() => setPreference(opt.value)}
-                className={`rounded-full border px-3 py-1 text-xs transition-colors ${
-                  checked
-                    ? "border-primary bg-primary text-primary-foreground"
-                    : "border-border text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                  followSystem ? "translate-x-4" : "translate-x-1"
                 }`}
-              >
-                {opt.label}
-              </button>
-            );
-          })}
-        </div>
-      </section>
+              />
+            </button>
+          </div>
+        </section>
+      )}
 
       {/* ── 외부 URL 표시 정책 (B1) ─────────────────────────────────── */}
       <section className="space-y-2 border-t border-border pt-4">
