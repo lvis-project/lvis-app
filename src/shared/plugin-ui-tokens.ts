@@ -138,8 +138,5 @@ export interface LvisThemePayload extends LvisHostThemeEvent {
   /** @deprecated No longer emitted by the host. */
   reducedMotion?: boolean;
   /** @deprecated No longer emitted by the host. */
-  fonts?: {
-    sans?: string;
-    mono?: string;
-  };
+  fonts?: { family: string };
 }
