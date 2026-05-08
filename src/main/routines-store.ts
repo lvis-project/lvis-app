@@ -136,6 +136,7 @@ function cloneRecord(r: RoutineRecord): RoutineRecord {
           repeat: r.schedule.repeat ? { ...r.schedule.repeat } : undefined,
         }
       : undefined,
+    allowedPlugins: r.allowedPlugins ? [...r.allowedPlugins] : undefined,
   };
 }
 
@@ -231,6 +232,12 @@ export class RoutinesStore {
         );
       }
     }
+    const allowedPlugins = input.allowedPlugins?.map((p) => p.trim()).filter(Boolean) ?? [];
+    if (allowedPlugins.some((p) => !/^[a-z0-9][a-z0-9_.-]*$/i.test(p))) {
+      throw new Error(
+        "RoutinesStore.add: allowedPlugins entries must be plugin ids using letters, digits, dot, underscore, or hyphen",
+      );
+    }
 
     // Build schedule with normalized `at`.
     const normalizedSchedule: typeof input.schedule = input.schedule
@@ -249,6 +256,7 @@ export class RoutinesStore {
       title: input.title,
       notificationTitle: input.notificationTitle,
       notificationBody: input.notificationBody,
+      ...(allowedPlugins.length > 0 ? { allowedPlugins: [...new Set(allowedPlugins)] } : {}),
       createdAt: new Date().toISOString(),
     };
 

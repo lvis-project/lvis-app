@@ -39,6 +39,14 @@ export interface PermissionCheckResult {
   layer: number; // 어떤 단계에서 결정되었는지
 }
 
+export interface PermissionCheckContext {
+  /**
+   * Background/routine turns are not direct user gestures. Mutating tools must
+   * still ask even when an allow rule or auto mode would otherwise permit them.
+   */
+  headless?: boolean;
+}
+
 export class PermissionManager {
   private rules: PermissionRule[] = [];
   private mode: ExecutionMode = "default";
@@ -215,6 +223,7 @@ export class PermissionManager {
     source?: ToolSource,
     category?: "read" | "write" | "dangerous",
     proactiveOrigin?: string | null,
+    context: PermissionCheckContext = {},
   ): PermissionCheckResult {
     const trust = this.resolveTrust(toolName, source);
     // Strict pattern (shared with the rest of the proactive flow —
@@ -238,6 +247,14 @@ export class PermissionManager {
     const toolModeOverride = this.toolModeOverrides.get(toolName);
     if (toolModeOverride === "strict") {
       return { decision: "ask", reason: "MCP 서버 strict 모드", layer: 2 };
+    }
+
+    if (context.headless && isWrite) {
+      return {
+        decision: "ask",
+        reason: "headless 실행 컨텍스트 — 쓰기 도구는 사용자 컨펌 필수",
+        layer: 2,
+      };
     }
 
     // Proactive origin override — write/dangerous 도구는 cached
