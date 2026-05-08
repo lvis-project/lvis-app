@@ -41,19 +41,17 @@ export const LLM_DEFAULT_MODELS: Record<LLMVendor, string> = {
  * boundary markers, etc.). All fields optional so existing callers remain unaffected.
  */
 export interface MessageMeta {
-  /** Layer 1 markStaleToolResults 가 tool_result content를 stub으로 교체했는지 여부 */
-  stripped?: boolean;
-  /** stripped 되기 전 원본 content의 문자열 길이(JS string.length — UTF-16 code units, bytes 아님) */
-  originalLength?: number;
-  /** Layer 2 boundary marker — idempotency guard + UI CheckpointDivider 렌더 anchor.
-   *  (PR-2-F-2 이후 fork 기반 revert 는 동일 세션 chain 으로 대체되어 'revert anchor' 의미 폐기) */
+  /**
+   * Layer 1 mark-stale + Layer 2 compact 양쪽의 단일 marker — set 시 의미:
+   *   - tool_result message: `wire-serialize.ts:stubMarkedToolResults` 가 wire/disk 직렬화 시
+   *     content 를 stub 으로 변환해야 함 (memory verbatim, serialization stub — v3 §4.2)
+   *   - user-role boundary message: Layer 2 compact 가 생성한 경계 (compactBoundary 와 paired)
+   */
+  compactedAt?: string;
+  /** Layer 2 boundary marker (idempotency + revert anchor) */
   compactBoundary?: boolean;
   /** 경계 marker의 경우, 요약 대상이 된 메시지 수 */
   removedCount?: number;
-  /** Layer 1 mark-stale 발생 ISO timestamp */
-  strippedAt?: string;
-  /** Layer 2 compact 실행 ISO timestamp */
-  compactedAt?: string;
   /** Layer 2 boundary 의 #N (numbered checkpoint chain — Copilot 패턴 차용). */
   compactNum?: number;
   /** Layer 1 mark-stale 면제 — skill 도구 출력 또는 사용자 명시 lock. structured-compact 의 pinnedArtifacts 와 paired. */

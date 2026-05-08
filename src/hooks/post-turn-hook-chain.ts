@@ -10,6 +10,7 @@
  */
 
 import { markStaleToolResults } from "../engine/auto-compact.js";
+import { stubMarkedToolResults } from "../engine/wire-serialize.js";
 import { detectFromStream, type DetectorResult } from "../engine/checkpoint-detector.js";
 import { chainTitle } from "../engine/title-chainer.js";
 import type { GenericMessage, TokenUsage, LLMProvider } from "../engine/llm/types.js";
@@ -91,10 +92,10 @@ export class PostTurnHookChain {
       } else {
         const beforeMarkCount = ctx.messages.length;
         const { messages: afterMark, result: mr } = markStaleToolResults(ctx.messages);
-        if (mr.stripped) {
+        if (mr.marked) {
           compactedMessages = afterMark;
           log.info(
-            `mark-stale: stripped ${mr.strippedCount} tool_results, freed ~${mr.freedChars} chars (msgCount ${beforeMarkCount} → ${afterMark.length}, content stub-replaced)`,
+            `mark-stale: marked ${mr.markedCount} tool_results, ~${mr.freedCharsOnSerialize} chars saved on serialize (msgCount=${beforeMarkCount}, memory verbatim)`,
           );
         } else {
           log.info(`mark-stale: SKIPPED — no stale tool_result content found (msgCount=${beforeMarkCount})`);
@@ -140,7 +141,9 @@ export class PostTurnHookChain {
         outputForPersistence !== ctx.output
           ? replaceLastAssistantOutput(baseMessages, ctx.output, outputForPersistence)
           : baseMessages;
-      await this.deps.memoryManager?.saveSession(ctx.sessionId, messagesToSave);
+      // PR-3 (v3 §4.2): JSONL 영속화 직전 marked tool_result 를 stub 으로 변환 — disk 무한
+      // 성장 방지 (R4 mitigation 유지). caller (engine) 의 in-memory verbatim 은 변경 안 됨.
+      await this.deps.memoryManager?.saveSession(ctx.sessionId, stubMarkedToolResults(messagesToSave));
     } catch (err) {
       log.warn("saveSession failed: %s", err);
     }
