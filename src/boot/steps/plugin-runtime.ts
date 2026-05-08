@@ -16,6 +16,7 @@
 import { app, BrowserWindow as ElectronBrowserWindow, shell } from "electron";
 import type { BrowserWindow } from "electron";
 import { mkdirSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { installPluginPartitionPolicy } from "../../main/html-preview-partition.js";
 import { pluginPartitionName } from "../../shared/plugin-partition.js";
 import { onEvent as onHostEvent } from "../types.js";
@@ -30,12 +31,13 @@ import {
   tamperedVarsAtBoot,
 } from "../dev-flags.js";
 import { canEmitEvent, requiredCapabilityForEmit } from "../../plugins/capabilities.js";
+import { OVERLAY_V1 } from "../../shared/ipc-channels.js";
 import { resolvePluginPaths } from "../../plugins/plugin-paths.js";
 import {
   emitPluginConfigChange,
   subscribePluginConfigChange,
 } from "../../plugins/config-change-bus.js";
-import { PROACTIVE_SOURCE_PATTERN } from "../../engine/proactive-source.js";
+import { PROACTIVE_SOURCE_PATTERN, isProactiveOrigin } from "../../shared/proactive-source.js";
 import type {
   ApprovalChoice,
   AuthWindowCookie,
@@ -304,7 +306,7 @@ const MAX_PROMPT_LEN = 4096;
 // of every proactive trigger spec. It's the SAME pattern used by the
 // keyword engine, the trigger executor envelope, the IPC bridge's
 // originSource detection, and the permission manager's proactive-
-// origin override — see `engine/proactive-source.ts` for the single
+// origin override — see `shared/proactive-source.ts` for the single
 // definition. Without this gate, malformed sources (`proactive:`,
 // `proactive:_x`, `proactive:Bad/Path`) could flow into audit logs and
 // system prompts where loose substrings would be confusing.
@@ -651,13 +653,12 @@ export interface LateBindingRefs {
     fn: import("../../engine/conversation-loop.js").ConversationLoop | null;
   };
   /**
-   * Trigger executor — built once boot wires up the
-   * `createTriggerConversationLoop` factory + main window. Every
-   * `hostApi.triggerConversation()` call dispatches through this so the
-   * trigger turn runs on a *fresh* loop, not the user's chat loop.
+   * Trigger executor ref — kept for future use; currently always null since
+   * TriggerExecutor was removed. triggerConversation() returns loop_unavailable
+   * when this is null.
    */
   triggerExecutorRef: {
-    fn: import("../../engine/trigger-executor.js").TriggerExecutor | null;
+    fn: null;
   };
 }
 
@@ -1178,50 +1179,62 @@ export async function initPluginRuntime(
       },
 
       // ─── Proactive Brain — hostApi.triggerConversation() ───────────────
-      // Gate body lives in evaluateTriggerSpec() so prod and tests share
-      // one implementation; tests import + call this directly. Dispatch
-      // goes through TriggerExecutor which spawns a fresh ConversationLoop
-      // per trigger so the user's chat history is never polluted by the
-      // templated proactive turn.
+      // Q11 Overlay Runner: gate body lives in evaluateTriggerSpec() so prod
+      // and tests share one implementation. On allow, the host holds the spec
+      // in OverlayContext staging via IPC (fresh ConversationLoop is NOT
+      // started). The user's confirm action inserts the prompt as a user
+      // message into main chat via the imported_trigger mechanism.
+      //
+      // Capability gate: plugins must declare "host:overlay" (enforced) OR
+      // the legacy "conversation-trigger". evaluateTriggerSpec checks for
+      // "conversation-trigger"; we also accept "host:overlay" by injecting it
+      // into the effective capability list so the same gate logic applies.
       triggerConversation: async (spec: ConversationTriggerSpec) => {
+        const effectiveCapabilities = [
+          ...(manifest.capabilities ?? []),
+          // If the plugin has host:overlay but not conversation-trigger, treat
+          // host:overlay as satisfying the trigger gate — they are semantically
+          // equivalent for the overlay runner path.
+          ...((manifest.capabilities ?? []).includes("host:overlay") &&
+          !(manifest.capabilities ?? []).includes("conversation-trigger")
+            ? ["conversation-trigger"]
+            : []),
+        ];
         const decision = evaluateTriggerSpec({
           spec,
           pluginId,
-          capabilities: manifest.capabilities ?? [],
+          capabilities: effectiveCapabilities,
           dedupe: triggerConversationDedupe,
           rateLimiter: triggerConversationRateLimiter,
           denyAuditThrottle: triggerDenyAuditThrottle,
-          // `loop_unavailable` now maps to the trigger executor being unwired
-          // (boot ordering) rather than the user's chat loop missing.
-          loopBound: !!lateBinding.triggerExecutorRef.fn,
+          // Q11: overlay runner does not need a ConversationLoop — always bound.
+          loopBound: true,
           auditLogger: bootAuditLogger,
         });
-        if (decision.kind === "deny") return decision.result;
 
-        // Dispatch fire-and-forget. Wrap in Promise.resolve to convert any
-        // synchronous throw inside the executor into a rejection — the
-        // outer caller of triggerConversation must NEVER see an exception
-        // from this code path.
-        const executor = lateBinding.triggerExecutorRef.fn!;
-        void Promise.resolve()
-          .then(() =>
-            executor.run({
-              prompt: spec.prompt,
-              pluginId,
-              source: decision.source,
-              visibility: decision.visibility,
-              priority: decision.priority,
-              ...(spec.context ? { context: spec.context } : {}),
-            }),
-          )
-          // The executor already audits the failure with classified reason
-          // + raw message (operator-only). Swallow the rejection here — a
-          // second audit row per failure would just inflate the log and
-          // could leak the raw error to a sessionId tag the executor
-          // intentionally split into "trigger-executor".
-          .catch(() => undefined);
+        if (decision.kind === "deny") {
+          return decision.result;
+        }
 
-        return decision.result;
+        // Allow path — push to renderer OverlayContext via IPC instead of
+        // spawning a fresh ConversationLoop.
+        const eventId = randomUUID();
+        const overlayId = `plugin:${pluginId}:${eventId}`;
+        const overlayItem = {
+          id: overlayId,
+          source: { kind: "plugin" as const, pluginId, eventId },
+          title: spec.title ?? spec.source.replace(/^proactive:/, ""),
+          summary: spec.summary ?? spec.prompt.slice(0, 200),
+          running: false,
+          primaryActionLabel: spec.primaryActionLabel ?? "지금 답하기",
+          pendingPrompt: spec.prompt,
+          createdAt: new Date().toISOString(),
+        };
+        if (!mainWindow.isDestroyed()) {
+          mainWindow.webContents.send(OVERLAY_V1.show, overlayItem);
+        }
+
+        return { accepted: true, source: decision.source, eventId };
       },
     }),
   });

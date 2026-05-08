@@ -1,6 +1,6 @@
 /**
  * Unit tests for the 5 workflow system tools (S1+S2):
- * ask_user_question, remind_at, todo_session_write, agent_spawn, skill_load.
+ * ask_user_question, schedule_routine, todo_session_write, agent_spawn, skill_load.
  *
  * Each test stubs the service dependency and exercises the tool's
  * `execute(rawInput, ctx)` contract directly — no Electron / IPC.
@@ -11,11 +11,11 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { ToolExecutionContext } from "../base.js";
 import { createAskUserQuestionTool } from "../ask-user-question.js";
-import { createRemindAtTool } from "../remind-at.js";
+import { createScheduleRoutineTool } from "../schedule-routine.js";
 import { createTodoSessionWriteTool } from "../todo-session-write.js";
 import { createAgentSpawnTool } from "../agent-spawn.js";
 import { createSkillLoadTool } from "../skill-load.js";
-import { RemindersStore } from "../../main/reminders-store.js";
+import { RoutinesStore } from "../../main/routines-store.js";
 import { SessionTodoStore } from "../../main/session-todo-store.js";
 import { SkillStore } from "../../main/skill-store.js";
 import { SkillOverlay } from "../../main/skill-overlay.js";
@@ -135,14 +135,14 @@ describe("ask_user_question tool", () => {
   });
 });
 
-describe("remind_at tool", () => {
-  it("rejects bad ISO", async () => {
-    const tmp = mkdtempSync(join(tmpdir(), "lvis-rem-"));
+describe("schedule_routine tool", () => {
+  it("rejects missing schedule.at for non-cron", async () => {
+    const tmp = mkdtempSync(join(tmpdir(), "lvis-rt-"));
     try {
-      const store = new RemindersStore(join(tmp, "reminders.json"));
-      const tool = createRemindAtTool(store);
+      const store = new RoutinesStore(join(tmp, "routines.json"));
+      const tool = createScheduleRoutineTool(store);
       const r = await tool.execute(
-        { at: "not-a-date", title: "x" },
+        { execution: "notification-only", schedule: { at: "not-a-date" }, notificationTitle: "x" },
         ctx(),
       );
       expect(r.isError).toBe(true);
@@ -151,45 +151,60 @@ describe("remind_at tool", () => {
     }
   });
 
-  it("persists a reminder and returns the id", async () => {
-    const tmp = mkdtempSync(join(tmpdir(), "lvis-rem-"));
+  it("persists a notification-only routine and returns the id", async () => {
+    const tmp = mkdtempSync(join(tmpdir(), "lvis-rt-"));
     try {
-      const store = new RemindersStore(join(tmp, "reminders.json"));
-      const tool = createRemindAtTool(store);
+      const store = new RoutinesStore(join(tmp, "routines.json"));
+      const tool = createScheduleRoutineTool(store);
       const r = await tool.execute(
         {
-          at: "2030-12-31T09:00:00+09:00",
-          title: "year-end",
-          repeat: "daily",
+          execution: "notification-only",
+          schedule: { at: "2030-12-31T09:00:00+09:00", repeat: { kind: "daily" } },
+          notificationTitle: "year-end",
         },
         ctx(),
       );
       expect(r.isError).toBe(false);
       const parsed = JSON.parse(r.output);
-      expect(parsed.reminderId).toMatch(/[0-9a-f-]{36}/);
+      expect(parsed.routineId).toMatch(/[0-9a-f-]{36}/);
       const list = store.listActive();
       expect(list).toHaveLength(1);
-      expect(list[0].repeat).toBe("daily");
-      expect(list[0].title).toBe("year-end");
+      expect(list[0].schedule?.repeat?.kind).toBe("daily");
+      expect(list[0].notificationTitle).toBe("year-end");
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
   });
 
   it("accepts YYYY-MM-DD as KST 09:00", async () => {
-    const tmp = mkdtempSync(join(tmpdir(), "lvis-rem-"));
+    const tmp = mkdtempSync(join(tmpdir(), "lvis-rt-"));
     try {
-      const store = new RemindersStore(join(tmp, "reminders.json"));
-      const tool = createRemindAtTool(store);
+      const store = new RoutinesStore(join(tmp, "routines.json"));
+      const tool = createScheduleRoutineTool(store);
       const r = await tool.execute(
-        { at: "2030-01-01", title: "newyear" },
+        { execution: "notification-only", schedule: { at: "2030-01-01" }, notificationTitle: "newyear" },
         ctx(),
       );
       expect(r.isError).toBe(false);
       const list = store.listActive();
       // 2030-01-01 09:00 KST = 2030-01-01 00:00 UTC
-      expect(list[0].at).toBe("2030-01-01T00:00:00.000Z");
-      // (assertion preserved post H4(c) — 2030 is within the 5-year future cap)
+      expect(list[0].schedule?.at).toBe("2030-01-01T00:00:00.000Z");
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects llm-session without prePrompt", async () => {
+    const tmp = mkdtempSync(join(tmpdir(), "lvis-rt-"));
+    try {
+      const store = new RoutinesStore(join(tmp, "routines.json"));
+      const tool = createScheduleRoutineTool(store);
+      const r = await tool.execute(
+        { execution: "llm-session", schedule: { at: "2030-01-01T09:00:00Z" } },
+        ctx(),
+      );
+      expect(r.isError).toBe(true);
+      expect(r.output).toContain("prePrompt");
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }

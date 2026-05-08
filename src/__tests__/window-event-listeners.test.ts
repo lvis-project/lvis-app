@@ -31,7 +31,7 @@ vi.mock("../audit/dlp-filter.js", () => ({
   initDlpAudit: vi.fn(),
 }));
 vi.mock("../audit/audit-logger.js", () => ({ createAuditLogger: vi.fn() }));
-vi.mock("../engine/proactive-source.js", () => ({
+vi.mock("../shared/proactive-source.js", () => ({
   parseImportedTriggerEnvelope: vi.fn(),
 }));
 

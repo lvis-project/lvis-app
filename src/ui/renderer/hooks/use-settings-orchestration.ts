@@ -39,9 +39,7 @@ export interface SettingsOrchestrationState {
   setWebKeyInput: (v: string) => void;
   hasWebKey: boolean;
   setHasWebKey: (v: boolean) => void;
-  // Routine / Privacy
-  enableWakeupRoutine: boolean;
-  setEnableWakeupRoutine: (updater: boolean | ((prev: boolean) => boolean)) => void;
+  // Privacy
   piiRedactEnabled: boolean;
   setPiiRedactEnabled: (v: boolean) => void;
   // Experimental feature flags
@@ -86,7 +84,6 @@ export function useSettingsOrchestration(
   const [webProvider, setWebProvider] = useState("duckduckgo");
   const [webKeyInput, setWebKeyInput] = useState("");
   const [hasWebKey, setHasWebKey] = useState(false);
-  const [enableWakeupRoutine, setEnableWakeupRoutine] = useState(false);
   const [piiRedactEnabled, setPiiRedactEnabled] = useState(false);
   const [experimentalContinuousBackend, setExperimentalContinuousBackend] = useState(false);
   const [marketplaceBaseUrl, setMarketplaceBaseUrl] = useState("");
@@ -117,7 +114,6 @@ export function useSettingsOrchestration(
       const webApiKeySet = await api.hasWebApiKey(s.webSearch.provider);
       if (cancelled) return;
       setHasWebKey(webApiKeySet);
-      setEnableWakeupRoutine(s.routine?.enableWakeupRoutine ?? false);
       setPiiRedactEnabled(s.privacy?.piiRedactEnabled ?? false);
       setExperimentalContinuousBackend(s.features?.experimentalContinuousBackend ?? false);
       setMarketplaceBaseUrl(s.marketplace?.realCloudBaseUrl ?? "");
@@ -201,7 +197,6 @@ export function useSettingsOrchestration(
           },
           webSearch: { provider: webProvider as any },
           chat: { autoCompact },
-          routine: { enableWakeupRoutine } as any,
           privacy: { piiRedactEnabled },
           marketplace: {
             realCloudBaseUrl: marketplaceBaseUrl.trim() || undefined,
@@ -232,7 +227,6 @@ export function useSettingsOrchestration(
     webProvider, setWebProvider,
     webKeyInput, setWebKeyInput,
     hasWebKey, setHasWebKey,
-    enableWakeupRoutine, setEnableWakeupRoutine,
     piiRedactEnabled, setPiiRedactEnabled,
     experimentalContinuousBackend, setExperimentalContinuousBackend,
     marketplaceBaseUrl, setMarketplaceBaseUrl,

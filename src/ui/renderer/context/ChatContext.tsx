@@ -7,24 +7,6 @@ import type { ModelPricing } from "../../../shared/pricing-data.js";
 import type { LLMVendor } from "../../../shared/llm-vendor-defaults.js";
 import type { Attachment } from "../types/attachments.js";
 
-type RoutineResult = {
-  routineId: string;
-  trigger: string;
-  summary: string;
-  generatedAt: string;
-};
-
-type TriggerResult = {
-  sessionId: string;
-  pluginId: string;
-  source: string;
-  visibility: "silent" | "summary-only" | "user-visible";
-  priority: "low" | "normal" | "high";
-  prompt: string;
-  summary: string;
-  completedAt: string;
-};
-
 /**
  * Cross-cutting chat-view state bundle. Groups props by concern so ChatView
  * and its subtree can consume via `useChatContext()` instead of ~41 props.
@@ -53,25 +35,6 @@ export interface ChatContextValue {
   // API state
   hasApiKey: boolean | null;
   onOpenSettings: () => void;
-
-  // Routine result (queue-aware)
-  routineResult: RoutineResult | null;
-  /** 0-based index of the currently displayed routine result within the queue. */
-  routineQueueIndex: number;
-  /** Total entries in the routine queue. 0 = empty, 1 = single card, >1 = stack. */
-  routineQueueTotal: number;
-  onDismissRoutineResult: () => void;
-  onSnoozeRoutineResult: (durationMs: number) => void;
-  onPrevRoutineResult: () => void;
-  onNextRoutineResult: () => void;
-
-  // Routine running (spinner)
-  runningRoutines: Map<string, { routineId: string; trigger: string; startedAt: string }>;
-
-  // Brain — proactive trigger result (isolated session — never in chat history)
-  triggerResult: TriggerResult | null;
-  onDismissTrigger: (sessionId: string) => void;
-  onAcceptTrigger: (sessionId: string) => Promise<{ ok: boolean; imported?: number; reason?: string }>;
 
   // Search
   searchOpen: boolean;

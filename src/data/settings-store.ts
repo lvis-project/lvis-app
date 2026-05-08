@@ -8,14 +8,6 @@ import {
   type PluginConfigRecord,
 } from "../shared/plugin-config.js";
 import {
-  clampRoutinePrompt,
-  createDefaultScheduleEntry,
-  DEFAULT_SHUTDOWN_PROMPT,
-  DEFAULT_WAKEUP_ROUTINE_PROMPT,
-  normalizeScheduleEntries,
-  type ScheduleRoutineEntry,
-} from "../routines/schedule.js";
-import {
   DEFAULT_LLM_VENDOR,
   freshVendorBlocks,
   isLLMVendor,
@@ -241,29 +233,14 @@ export interface PrivacySettings {
 }
 
 /**
- * §7 Routine Engine settings.
+ * §7 Routine Engine settings — v2.
  *
- * - `enableWakeupRoutine`   — wakeup 루틴 마스터 스위치 (long_idle / schedule 트리거)
- * - `lastWakeupRoutineAt`   — ISO date (YYYY-MM-DD KST) of most recent wakeup routine run
- * - `lastDismissedAt`       — ISO timestamp of last user dismissal
+ * Q4 lenient parsing: unknown keys (including all v1 fields such as
+ * enableWakeupRoutine, wakeupRoutinePrompt, scheduleEntries, etc.) are
+ * silently accepted so dev machines with old settings.json do not crash at
+ * boot. No migration code — v1 keys are simply never read.
  */
-export interface RoutineSettings {
-  enableWakeupRoutine: boolean;
-  lastWakeupRoutineAt?: string;
-  lastDismissedAt?: string;
-  scheduleTimeKst?: string;
-  wakeupRoutinePrompt?: string;
-  enableShutdownRoutine?: boolean;
-  shutdownPrompt?: string;
-  enableScheduleRoutine?: boolean;
-  scheduleEntries?: ScheduleRoutineEntry[];
-  /**
-   * Long-idle threshold (ms) used by RoutineIdleSignaler to filter out short
-   * lock/unlock cycles. Default 10 min. Distinct from indexer's short 60s
-   * idle threshold (IdleSchedulerService.idleThresholdSec).
-   */
-  routineIdleThresholdMs?: number;
-}
+export type RoutineSettings = Record<string, unknown>;
 
 export interface WebSearchSettings {
   provider: "duckduckgo" | "tavily" | "serper" | "google";
@@ -330,16 +307,7 @@ const DEFAULT_SETTINGS: AppSettings = {
     realCloudBaseUrl: "https://marketplace.lvisai.xyz",
     realCloudAllowPrivateNetwork: false,
   },
-  routine: {
-    enableWakeupRoutine: false,
-    scheduleTimeKst: "08:30",
-    wakeupRoutinePrompt: DEFAULT_WAKEUP_ROUTINE_PROMPT,
-    enableShutdownRoutine: true,
-    shutdownPrompt: DEFAULT_SHUTDOWN_PROMPT,
-    enableScheduleRoutine: true,
-    scheduleEntries: [createDefaultScheduleEntry(0)],
-    routineIdleThresholdMs: 10 * 60_000,
-  },
+  routine: {},
   privacy: {
     piiRedactEnabled: false,
   },
@@ -566,29 +534,10 @@ export class SettingsService {
       // to the AppSettings type without preserving legacy "mock" inputs.
       marketplaceParsed.backend = "real-cloud";
       const pluginConfigs = sanitizeStoredPluginConfigs(parsed.pluginConfigs);
-      const routine = parsed.routine;
-      const ROUTINE_IDLE_THRESHOLD_MIN_MS = 60_000;        // 1 min floor (debug/test)
-      const ROUTINE_IDLE_THRESHOLD_MAX_MS = 60 * 60_000;   // 1 hour ceiling
-      const ROUTINE_IDLE_THRESHOLD_DEFAULT_MS = 10 * 60_000;
-      const rawIdleThreshold = routine?.routineIdleThresholdMs;
-      const idleThresholdMs = typeof rawIdleThreshold === "number" && Number.isFinite(rawIdleThreshold)
-        ? Math.max(ROUTINE_IDLE_THRESHOLD_MIN_MS, Math.min(rawIdleThreshold, ROUTINE_IDLE_THRESHOLD_MAX_MS))
-        : ROUTINE_IDLE_THRESHOLD_DEFAULT_MS;
+      // Q4 lenient parsing: spread all on-disk keys (including any v1 keys)
+      // without normalization — v1 keys are simply never read by v2 code.
       const normalizedRoutine: RoutineSettings = {
-        ...DEFAULT_SETTINGS.routine,
-        ...routine,
-        wakeupRoutinePrompt: typeof routine?.wakeupRoutinePrompt === "string" && routine.wakeupRoutinePrompt.trim().length > 0
-          ? clampRoutinePrompt(routine.wakeupRoutinePrompt.trim())
-          : DEFAULT_WAKEUP_ROUTINE_PROMPT,
-        scheduleEntries: normalizeScheduleEntries(routine?.scheduleEntries),
-        shutdownPrompt: typeof routine?.shutdownPrompt === "string" && routine.shutdownPrompt.trim().length > 0
-          ? clampRoutinePrompt(routine.shutdownPrompt.trim())
-          : DEFAULT_SHUTDOWN_PROMPT,
-        enableWakeupRoutine: routine?.enableWakeupRoutine ?? false,
-        lastWakeupRoutineAt: routine?.lastWakeupRoutineAt,
-        enableShutdownRoutine: routine?.enableShutdownRoutine ?? true,
-        enableScheduleRoutine: routine?.enableScheduleRoutine ?? true,
-        routineIdleThresholdMs: idleThresholdMs,
+        ...(parsed.routine as Record<string, unknown> | undefined ?? {}),
       };
 
       const onDisk = parsed.appearance as Record<string, unknown> | null | undefined;

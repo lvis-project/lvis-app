@@ -1,8 +1,8 @@
 /**
  * Chat domain IPC handlers.
- * Covers: lvis:chat:*, lvis:routines:*, lvis:routine:*, lvis:trigger:*,
- *         lvis:memory:*, lvis:starred:*, lvis:feedback:submit,
+ * Covers: lvis:chat:*, lvis:memory:*, lvis:starred:*, lvis:feedback:submit,
  *         lvis:ask-user-question:respond
+ * Note: routine v2 channels (lvis:routines:v2:*) are handled in misc.ts.
  */
 import { ipcMain } from "electron";
 import type { WebContents } from "electron";
@@ -12,25 +12,7 @@ import { userContentText } from "../../engine/llm/types.js";
 import { stubMarkedToolResults } from "../../engine/wire-serialize.js";
 import { serializeHistoryMessage } from "../../shared/chat-history.js";
 import type { ConversationLoop, TurnResult } from "../../engine/conversation-loop.js";
-import { parseImportedTriggerEnvelope } from "../../engine/proactive-source.js";
-import {
-  REGISTERED_ROUTINES,
-  buildRoutineForTrigger,
-  getRegisteredRoutine,
-} from "../../routines/registry.js";
-import {
-  DEFAULT_SHUTDOWN_PROMPT,
-  DEFAULT_WAKEUP_ROUTINE_PROMPT,
-  MAX_SCHEDULE_ENTRIES,
-  scheduleToCron,
-  isValidScheduleEntries,
-  normalizeScheduleEntries,
-} from "../../routines/schedule.js";
-import {
-  clearLatestRoutineResult,
-  getLatestRoutineResult,
-} from "../../routines/routine-delivery.js";
-import { isDevModeUnlocked } from "../../boot/dev-flags.js";
+import { parseImportedTriggerEnvelope } from "../../shared/proactive-source.js";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import type { IpcDeps } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
@@ -73,26 +55,6 @@ function entryOrdinalToHistoryIndex(history: GenericMessage[], ordinal: number):
     }
   }
   return -1;
-}
-
-function isRoutineEnabled(
-  routine: { id: string },
-  settings: {
-    enableWakeupRoutine?: boolean;
-    enableScheduleRoutine?: boolean;
-    enableShutdownRoutine?: boolean;
-  } | null | undefined,
-): boolean {
-  switch (routine.id) {
-    case "wakeup":
-      return settings?.enableWakeupRoutine ?? false;
-    case "schedule":
-      return settings?.enableScheduleRoutine ?? true;
-    case "shutdown":
-      return settings?.enableShutdownRoutine ?? true;
-    default:
-      return false;
-  }
 }
 
 /**
@@ -222,13 +184,10 @@ export function registerChatHandlers(deps: IpcDeps): void {
     conversationLoop,
     settingsService,
     memoryManager,
-    routineEngine,
-    triggerExecutor,
     starredStore,
     feedbackStore,
     auditLogger,
     askUserQuestionGate,
-    notificationService,
     getMainWindow,
   } = deps;
 
@@ -640,157 +599,6 @@ ${input}`;
       return { error: (err as Error).message };
     }
   });
-
-  // ─── Routines ──────────────────────────────────────────
-  // read-only; sender guard optional but added for cross-window consistency
-  ipcMain.handle("lvis:routines:list", (_e) => {
-    const routineSettings = settingsService.get("routine");
-    return REGISTERED_ROUTINES.map((routine) => {
-      const sessions = conversationLoop.listRoutineSessions(routine.id, 20).map((session) => ({
-        id: session.id,
-        modifiedAt: session.modifiedAt.toISOString(),
-        title: session.title,
-      }));
-      return {
-        id: routine.id,
-        title: routine.title,
-        description: routine.description,
-        trigger: routine.trigger,
-        enabled: isRoutineEnabled(routine, routineSettings),
-        scheduleTimeKst: routine.id === "wakeup" ? routineSettings?.scheduleTimeKst ?? "08:30" : undefined,
-        contextPrompt: routine.id === "wakeup"
-          ? routineSettings?.wakeupRoutinePrompt ?? DEFAULT_WAKEUP_ROUTINE_PROMPT
-          : routine.id === "shutdown"
-            ? routineSettings?.shutdownPrompt ?? DEFAULT_SHUTDOWN_PROMPT
-            : undefined,
-        scheduleEntries: routine.id === "schedule"
-          ? normalizeScheduleEntries(routineSettings?.scheduleEntries).map((entry) => ({
-            ...entry,
-            cron: scheduleToCron(entry.schedule),
-          }))
-          : undefined,
-        sessionCount: sessions.length,
-        sessions,
-      };
-    });
-  });
-
-  ipcMain.handle("lvis:routines:update", async (e, routineId: string, patch: Record<string, unknown>) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:routines:update", e); return UNAUTHORIZED_FRAME; }
-    const routine = getRegisteredRoutine(routineId);
-    if (!routine) return { ok: false, error: "routine-not-found" };
-    const current = settingsService.get("routine") ?? { enableWakeupRoutine: false };
-    const next = { ...current };
-    if (routineId === "wakeup") {
-      if (typeof patch.enabled === "boolean") next.enableWakeupRoutine = patch.enabled;
-      if (typeof patch.scheduleTimeKst === "string") next.scheduleTimeKst = patch.scheduleTimeKst;
-      if (typeof patch.contextPrompt === "string") {
-        next.wakeupRoutinePrompt = patch.contextPrompt.trim() || DEFAULT_WAKEUP_ROUTINE_PROMPT;
-      }
-    } else if (routineId === "schedule") {
-      if (typeof patch.enabled === "boolean") next.enableScheduleRoutine = patch.enabled;
-      if ("scheduleEntries" in patch) {
-        const rawEntries = (patch as { scheduleEntries?: unknown }).scheduleEntries;
-        if (Array.isArray(rawEntries) && rawEntries.length > MAX_SCHEDULE_ENTRIES) {
-          return { ok: false, error: "too-many-schedule-entries" };
-        }
-        const entries = normalizeScheduleEntries(rawEntries);
-        if (!isValidScheduleEntries(entries)) return { ok: false, error: "invalid-schedule-entries" };
-        next.scheduleEntries = entries;
-      }
-    } else if (routineId === "shutdown") {
-      if (typeof patch.enabled === "boolean") next.enableShutdownRoutine = patch.enabled;
-      if (typeof patch.contextPrompt === "string") {
-        next.shutdownPrompt = patch.contextPrompt.trim() || DEFAULT_SHUTDOWN_PROMPT;
-      }
-    }
-    await settingsService.patch({ routine: next });
-    return { ok: true };
-  });
-
-  ipcMain.handle("lvis:routines:start-session", async (e, routineId: string) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:routines:start-session", e); return UNAUTHORIZED_FRAME; }
-    const routine = getRegisteredRoutine(routineId);
-    if (!routine) return { ok: false, error: "routine-not-found" };
-    const sessionId = await conversationLoop.startRoutineConversation(routine.id, routine.title);
-    return { ok: true, sessionId };
-  });
-
-  ipcMain.handle("lvis:routine:get-latest-result", () => getLatestRoutineResult());
-
-  // ─── Proactive trigger lifecycle ──────────────────────
-  ipcMain.handle("lvis:trigger:dismiss", (e, sessionId: unknown) => {
-    if (!validateSender(e)) {
-      auditUnauthorized(auditLogger, "lvis:trigger:dismiss", e);
-      return UNAUTHORIZED_FRAME;
-    }
-    if (typeof sessionId !== "string" || sessionId.length === 0) {
-      return { ok: false, error: "invalid-session-id" };
-    }
-    if (!triggerExecutor) return { ok: false, error: "executor-unavailable" };
-    const removed = triggerExecutor.dismiss(sessionId);
-    return { ok: true, removed };
-  });
-
-  ipcMain.handle("lvis:trigger:import", (e, sessionId: unknown) => {
-    if (!validateSender(e)) {
-      auditUnauthorized(auditLogger, "lvis:trigger:import", e);
-      return UNAUTHORIZED_FRAME;
-    }
-    if (typeof sessionId !== "string" || sessionId.length === 0) {
-      return { ok: false, error: "invalid-session-id" };
-    }
-    if (!triggerExecutor) return { ok: false, error: "executor-unavailable" };
-    return triggerExecutor.importIntoChat(sessionId, conversationLoop);
-  });
-
-  // ─── Dev-only routine triggers ─────────────────────────
-  const devTriggerHandler = async (e: import("electron").IpcMainInvokeEvent, routineId: string) => {
-    if (!validateSender(e)) {
-      auditUnauthorized(auditLogger, `lvis:routines:dev-trigger-${routineId}`, e);
-      return UNAUTHORIZED_FRAME;
-    }
-    if (!getRegisteredRoutine(routineId)) {
-      return { ok: false, error: "routine-not-found" };
-    }
-    if (!isDevModeUnlocked()) return { ok: false, error: "dev-only" };
-    if (!routineEngine) return { ok: false, error: "routine-engine-unavailable" };
-
-    const built = buildRoutineForTrigger(routineId, settingsService.get("routine"));
-    if (!built.ok) return { ok: false, error: built.error };
-
-    if (routineId === "wakeup") {
-      const current = settingsService.get("routine") ?? { enableWakeupRoutine: false };
-      await settingsService.patch({
-        routine: { ...current, lastWakeupRoutineAt: undefined },
-      });
-    }
-
-    const { deliverRoutineResult, notifyRoutineStarted, notifyRoutineFailed } =
-      await import("../../routines/routine-delivery.js");
-    auditLogger.log({
-      timestamp: new Date().toISOString(),
-      sessionId: "dev-trigger",
-      type: "info",
-      input: `dev-trigger ${routineId}`,
-    });
-    const trackedId = built.routine.id;
-    const startedPayload = { routineId: trackedId, trigger: built.routine.trigger, startedAt: new Date().toISOString() };
-    notifyRoutineStarted(getMainWindow(), startedPayload);
-    try {
-      const result = await routineEngine.runRoutine(built.routine);
-      await deliverRoutineResult(getMainWindow(), result, { notificationService });
-      return { ok: true, summary: result.summary };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      notifyRoutineFailed(getMainWindow(), { routineId: trackedId, trigger: built.routine.trigger }, message);
-      return { ok: false, error: message };
-    }
-  };
-
-  ipcMain.handle("lvis:routines:dev-trigger-wakeup", (e) => { if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:routines:dev-trigger-wakeup", e); return UNAUTHORIZED_FRAME; } return devTriggerHandler(e, "wakeup"); });
-  ipcMain.handle("lvis:routines:dev-trigger-schedule", (e) => { if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:routines:dev-trigger-schedule", e); return UNAUTHORIZED_FRAME; } return devTriggerHandler(e, "schedule"); });
-  ipcMain.handle("lvis:routines:dev-trigger-shutdown", (e) => { if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:routines:dev-trigger-shutdown", e); return UNAUTHORIZED_FRAME; } return devTriggerHandler(e, "shutdown"); });
 
   // ─── Memory ─────────────────────────────────────
   ipcMain.handle("lvis:memory:entries:list", (e) => {
