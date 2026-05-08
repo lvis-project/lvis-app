@@ -429,23 +429,26 @@ export class ConversationLoop {
     const target = checkpoints.find((c) => c.compactNum === compactNum);
     if (!target) throw new Error(`Checkpoint #${compactNum} not found in session ${this.sessionId}`);
 
-    // §PR-5: Load the pre-compact transcript from disk rather than using the in-memory history.
-    // After auto-compact, this.history holds only the compacted boundary + recent turns and is
-    // always shorter than messageCountAtTrigger. The full pre-compact transcript is preserved on
-    // disk (saveSession is called before every compaction). We load it here and slice to the
-    // checkpoint boundary so the fork contains the exact messages that existed at that point.
-    const diskMessages = this.deps.memoryManager.loadSession(this.sessionId);
-    if (!diskMessages) {
-      throw new Error(`branchFromCheckpoint: session ${this.sessionId} not found on disk`);
-    }
-    if (diskMessages.length < target.messageCountAtTrigger) {
+    // §PR-5: Load the pre-compact snapshot saved at compaction time.
+    // The main session JSONL is overwritten by PostTurnHookChain.saveSession with the
+    // post-compact history after each turn, so it cannot be used to reconstruct the
+    // pre-checkpoint transcript. saveCheckpointSnapshot() persists messagesBefore to
+    // a checkpoint-specific file ({sessionId}.cp{N}.jsonl) before the turn completes.
+    const snapshotMessages = this.deps.memoryManager.loadCheckpointSnapshot?.(this.sessionId, compactNum);
+    if (!snapshotMessages) {
       throw new Error(
-        `branchFromCheckpoint: disk transcript length ${diskMessages.length} < checkpoint messageCountAtTrigger ${target.messageCountAtTrigger} for session ${this.sessionId}`,
+        `branchFromCheckpoint: no snapshot found for checkpoint #${compactNum} in session ${this.sessionId}. ` +
+        `Snapshots are only available for checkpoints created after this feature was introduced.`,
+      );
+    }
+    if (snapshotMessages.length < target.messageCountAtTrigger) {
+      throw new Error(
+        `branchFromCheckpoint: snapshot length ${snapshotMessages.length} < checkpoint messageCountAtTrigger ${target.messageCountAtTrigger} for session ${this.sessionId}`,
       );
     }
 
     const newSessionId = crypto.randomUUID();
-    const sliced = (diskMessages as import("./llm/types.js").GenericMessage[]).slice(0, target.messageCountAtTrigger);
+    const sliced = (snapshotMessages as import("./llm/types.js").GenericMessage[]).slice(0, target.messageCountAtTrigger);
 
     // wire-serialize: markStaleToolResults 된 verbatim history 를 stub 치환 후 영속화
     await this.deps.memoryManager.saveSession(newSessionId, stubMarkedToolResults(sliced));

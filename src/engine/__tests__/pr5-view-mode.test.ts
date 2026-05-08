@@ -6,7 +6,9 @@
  *  2. enterViewMode returns messageIndexAtCreation for a known checkpoint
  *  3. exitViewMode is a no-op (does not throw)
  *  4. branchFromCheckpoint throws when checkpoint not found
- *  5. branchFromCheckpoint persists sliced history + metadata with parentSessionId
+ *  5. branchFromCheckpoint throws when snapshot is null (not saved yet)
+ *  6. branchFromCheckpoint throws when snapshot is shorter than messageCountAtTrigger
+ *  7. branchFromCheckpoint loads from snapshot, slices to messageCountAtTrigger, persists branch metadata
  */
 import { describe, it, expect, vi } from "vitest";
 
@@ -25,16 +27,16 @@ const FAKE_DISK_MESSAGES = [
 
 function makeLoop(
   metaCheckpoints?: Array<{ compactNum: number; messageCountAtTrigger: number }>,
-  diskMessages?: unknown[] | null,
+  snapshotMessages?: unknown[] | null,
 ) {
   const toolRegistry = new ToolRegistry();
 
   const savedSessions = new Map<string, unknown[]>();
   const savedMetadata = new Map<string, unknown>();
 
-  // By default simulate a disk that has FAKE_DISK_MESSAGES (3 messages),
-  // unless the caller explicitly passes null (session not found) or a custom array.
-  const resolvedDisk = diskMessages === undefined ? FAKE_DISK_MESSAGES : diskMessages;
+  // By default simulate a snapshot that has FAKE_DISK_MESSAGES (3 messages),
+  // unless the caller explicitly passes null (snapshot not found) or a custom array.
+  const resolvedSnapshot = snapshotMessages === undefined ? FAKE_DISK_MESSAGES : snapshotMessages;
 
   const memoryManager = {
     saveSession: vi.fn(async (id: string, msgs: unknown[]) => { savedSessions.set(id, msgs); }),
@@ -43,7 +45,7 @@ function makeLoop(
       if (!metaCheckpoints) return null;
       return { checkpoints: metaCheckpoints };
     }),
-    loadSession: vi.fn((_id: string) => resolvedDisk),
+    loadCheckpointSnapshot: vi.fn((_id: string, _num: number) => resolvedSnapshot),
     listSessions: vi.fn(() => []),
   };
 
@@ -98,37 +100,37 @@ describe("ConversationLoop §PR-5 branchFromCheckpoint", () => {
     await expect(loop.branchFromCheckpoint(5)).rejects.toThrow("Checkpoint #5 not found");
   });
 
-  it("throws when session is not on disk", async () => {
+  it("throws when checkpoint snapshot is null (not saved yet)", async () => {
     const { loop } = makeLoop([{ compactNum: 1, messageCountAtTrigger: 2 }], null);
-    await expect(loop.branchFromCheckpoint(1)).rejects.toThrow("not found on disk");
+    await expect(loop.branchFromCheckpoint(1)).rejects.toThrow("no snapshot found");
   });
 
-  it("throws when disk transcript is shorter than messageCountAtTrigger", async () => {
-    // Disk has only 1 message, checkpoint expects 10
+  it("throws when snapshot is shorter than messageCountAtTrigger", async () => {
+    // Snapshot has only 1 message, checkpoint expects 10
     const { loop } = makeLoop(
       [{ compactNum: 1, messageCountAtTrigger: 10 }],
       [{ role: "user", content: "only one msg" }],
     );
-    await expect(loop.branchFromCheckpoint(1)).rejects.toThrow("disk transcript length");
+    await expect(loop.branchFromCheckpoint(1)).rejects.toThrow("snapshot length");
   });
 
-  it("loads from disk, slices to messageCountAtTrigger, and persists branch metadata", async () => {
+  it("loads from snapshot, slices to messageCountAtTrigger, and persists branch metadata", async () => {
     // FAKE_DISK_MESSAGES has 3 messages; checkpoint at messageCountAtTrigger=2
     const { loop, memoryManager, savedSessions, savedMetadata } = makeLoop([
       { compactNum: 1, messageCountAtTrigger: 2 },
     ]);
     // In-memory history is intentionally empty (simulates post-compaction state)
-    // to confirm the implementation reads from disk, not this.history
+    // to confirm the implementation reads from snapshot, not this.history
 
     const { newSessionId } = await loop.branchFromCheckpoint(1);
 
-    // loadSession was called for the current session
-    expect(memoryManager.loadSession).toHaveBeenCalledWith(loop.getSessionId());
+    // loadCheckpointSnapshot was called for the current session and compactNum
+    expect(memoryManager.loadCheckpointSnapshot).toHaveBeenCalledWith(loop.getSessionId(), 1);
 
     // New session id is a UUID
     expect(newSessionId).toMatch(/^[0-9a-f-]{36}$/);
 
-    // Saved messages are sliced to exactly messageCountAtTrigger (2) from disk
+    // Saved messages are sliced to exactly messageCountAtTrigger (2) from snapshot
     const saved = savedSessions.get(newSessionId) as unknown[] | undefined;
     expect(saved).toBeDefined();
     expect(saved!.length).toBe(2);

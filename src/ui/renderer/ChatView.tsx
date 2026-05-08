@@ -594,10 +594,13 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
   }, [loadingHistory, scrollChatToBottom]);
 
   useEffect(() => {
+    // §PR-5: suppress auto-scroll while in view-mode so new live entries don't
+    // yank the viewport away from the frozen checkpoint slice the user is reading.
+    if (viewMode) return;
     if (isNearBottom()) {
       requestAnimationFrame(() => scrollChatToBottom("smooth"));
     }
-  }, [entries.length, isNearBottom, scrollChatToBottom]);
+  }, [entries.length, isNearBottom, scrollChatToBottom, viewMode]);
 
   const historicalByDay = useMemo(() => {
     const map = new Map<string, ContinuousHistorySession[]>();

@@ -412,6 +412,39 @@ export class MemoryManager {
     });
   }
 
+  /**
+   * §PR-5: Save a per-checkpoint pre-compact snapshot before compaction overwrites the main JSONL.
+   * Stored at `{sessionsDir}/{sessionId}.cp{compactNum}.jsonl`.
+   * branchFromCheckpoint() loads from here instead of the mutable main session file.
+   */
+  async saveCheckpointSnapshot(sessionId: string, compactNum: number, messages: unknown[]): Promise<void> {
+    if (!isValidSessionId(sessionId)) {
+      throw new Error(`saveCheckpointSnapshot: invalid sessionId "${sessionId}"`);
+    }
+    const targetPath = join(this.sessionsDir, `${sessionId}.cp${compactNum}.jsonl`);
+    const lines = messages.map((m) => JSON.stringify(m)).join("\n") + "\n";
+    await withFileLock(targetPath, async () => {
+      writeFileSync(targetPath, lines, "utf-8");
+    });
+  }
+
+  /** §PR-5: Load a per-checkpoint pre-compact snapshot saved by saveCheckpointSnapshot(). Returns null if not found. */
+  loadCheckpointSnapshot(sessionId: string, compactNum: number): unknown[] | null {
+    if (!isValidSessionId(sessionId)) return null;
+    const path = join(this.sessionsDir, `${sessionId}.cp${compactNum}.jsonl`);
+    if (!existsSync(path)) return null;
+    const lines = readFileSync(path, "utf-8").trim().split("\n");
+    const messages: unknown[] = [];
+    for (const line of lines.filter(Boolean)) {
+      try {
+        messages.push(JSON.parse(line));
+      } catch {
+        log.warn({ sessionId, compactNum }, "skipping malformed checkpoint snapshot line");
+      }
+    }
+    return messages;
+  }
+
   /** 세션 복원 */
   loadSession(sessionId: string): unknown[] | null {
     const path = join(this.sessionsDir, `${sessionId}.jsonl`);
