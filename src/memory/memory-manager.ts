@@ -44,6 +44,10 @@ export interface SessionListEntry {
   preview: string;
   routineId?: string;
   routineTitle?: string;
+  /** §PR-5: set when this session was forked from another via branchFromCheckpoint. */
+  parentSessionId?: string;
+  /** §PR-5: compact sequence number this session was forked from. */
+  branchedFromCompactNum?: number;
 }
 
 /**
@@ -194,8 +198,9 @@ function normalizeCheckpoint(raw: unknown): Checkpoint | null {
   if (typeof msgCount !== "number" || msgCount < 0 || !Number.isInteger(msgCount)) return null;
   // PR-2-E (#608) — `compactNum` 은 numbered checkpoint chain 의 #N. load 시 누락되면
   // chain 깨짐 → 신규 record 만 set 되도록 optional 유지하되 정상 read.
+  // §PR-5: >= 0 허용 — enterViewMode/branchFromCheckpoint 가 compactNum=0 checkpoint 검색.
   const compactNum =
-    typeof r.compactNum === "number" && r.compactNum > 0 && Number.isInteger(r.compactNum)
+    typeof r.compactNum === "number" && r.compactNum >= 0 && Number.isInteger(r.compactNum)
       ? r.compactNum
       : undefined;
   return {
@@ -490,6 +495,9 @@ export class MemoryManager {
           preview: summary.preview,
           routineId: metadata?.routineId,
           routineTitle: metadata?.routineTitle,
+          // §PR-5: branch provenance — already loaded from metadata, no extra disk IO
+          ...(metadata?.parentSessionId ? { parentSessionId: metadata.parentSessionId } : {}),
+          ...(metadata?.branchedFromCompactNum !== undefined ? { branchedFromCompactNum: metadata.branchedFromCompactNum } : {}),
         };
       });
   }
@@ -541,6 +549,9 @@ export class MemoryManager {
           preview: summary.preview,
           routineId: metadata?.routineId,
           routineTitle: metadata?.routineTitle,
+          // §PR-5: branch provenance — already loaded from metadata above, no extra disk IO
+          ...(metadata?.parentSessionId ? { parentSessionId: metadata.parentSessionId } : {}),
+          ...(metadata?.branchedFromCompactNum !== undefined ? { branchedFromCompactNum: metadata.branchedFromCompactNum } : {}),
         };
       });
   }

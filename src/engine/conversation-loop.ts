@@ -429,6 +429,18 @@ export class ConversationLoop {
     const target = checkpoints.find((c) => c.compactNum === compactNum);
     if (!target) throw new Error(`Checkpoint #${compactNum} not found in session ${this.sessionId}`);
 
+    // §PR-5 guard: after auto-compact the in-memory history is replaced with the
+    // compacted boundary + recent messages and will be shorter than messageCountAtTrigger.
+    // Silently slicing the compacted history would produce a wrong/incomplete fork.
+    // Fail fast so the caller surfaces a clear error rather than a corrupt session.
+    const currentLength = this.history.getMessages().length;
+    if (currentLength < target.messageCountAtTrigger) {
+      throw new Error(
+        `branchFromCheckpoint: session history has been compacted (length ${currentLength} < checkpoint messageCountAtTrigger ${target.messageCountAtTrigger}). ` +
+        `Cannot reconstruct pre-checkpoint transcript from compacted history.`,
+      );
+    }
+
     const newSessionId = crypto.randomUUID();
     const sliced = this.history.getMessages().slice(0, target.messageCountAtTrigger);
 

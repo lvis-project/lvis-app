@@ -84,6 +84,14 @@ describe("ConversationLoop §PR-5 branchFromCheckpoint", () => {
     await expect(loop.branchFromCheckpoint(5)).rejects.toThrow("Checkpoint #5 not found");
   });
 
+  it("throws when in-memory history is shorter than messageCountAtTrigger (already compacted)", async () => {
+    const { loop } = makeLoop([
+      { compactNum: 1, messageCountAtTrigger: 10 },
+    ]);
+    // history is empty — 0 < 10, so branch must fail
+    await expect(loop.branchFromCheckpoint(1)).rejects.toThrow("Cannot reconstruct pre-checkpoint transcript");
+  });
+
   it("persists sliced history and branch metadata", async () => {
     const { loop, savedSessions, savedMetadata } = makeLoop([
       { compactNum: 1, messageCountAtTrigger: 2 },

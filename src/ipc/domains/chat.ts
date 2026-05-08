@@ -368,17 +368,14 @@ ${input}`;
       : undefined;
     const sessions = memoryManager
       .listSessionsPage({ limit, ...(before ? { before } : {}), ...(beforeId ? { beforeId } : {}), ...(after ? { after } : {}) })
-      .map((s) => {
-        const meta = memoryManager.loadSessionMetadata(s.id);
-        return {
-          id: s.id,
-          modifiedAt: s.modifiedAt.toISOString(),
-          title: s.title,
-          // §PR-5: branch provenance for Sidebar tree visualization
-          ...(meta?.parentSessionId ? { parentSessionId: meta.parentSessionId } : {}),
-          ...(meta?.branchedFromCompactNum !== undefined ? { branchedFromCompactNum: meta.branchedFromCompactNum } : {}),
-        };
-      });
+      .map((s) => ({
+        id: s.id,
+        modifiedAt: s.modifiedAt.toISOString(),
+        title: s.title,
+        // §PR-5: branch provenance — already on SessionListEntry, no extra loadSessionMetadata call
+        ...(s.parentSessionId ? { parentSessionId: s.parentSessionId } : {}),
+        ...(s.branchedFromCompactNum !== undefined ? { branchedFromCompactNum: s.branchedFromCompactNum } : {}),
+      }));
     return {
       current: conversationLoop.getSessionId(),
       sessions,

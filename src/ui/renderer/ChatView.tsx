@@ -536,9 +536,15 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
   const handleEnterView = useCallback(async (compactNum: number) => {
     const result = await api.chatEnterCheckpointView?.(currentSessionId, compactNum);
     if (!result || "error" in result) return;
-    setViewMode({ compactNum, slicedRangeEnd: result.messageIndexAtCreation });
+    // §PR-5 note: messageIndexAtCreation is engine history message count — it does NOT
+    // map 1:1 to renderer entries (which include reasoning/tool_group/checkpoint entries).
+    // We cap to entries.length so the slice is always valid, accepting that in tool-heavy
+    // sessions the visible range may show slightly more entries than the exact checkpoint.
+    // A precise renderer↔engine index mapping is deferred to a future PR.
+    const slicedRangeEnd = Math.min(result.messageIndexAtCreation, entries.length);
+    setViewMode({ compactNum, slicedRangeEnd });
     scrollChatToBottom("auto");
-  }, [api, currentSessionId, scrollChatToBottom]);
+  }, [api, currentSessionId, entries.length, scrollChatToBottom]);
 
   const handleExitView = useCallback(async () => {
     await api.chatExitCheckpointView?.();
@@ -747,7 +753,9 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
             {daySessions.map((session) => (
               <Fragment key={session.id}>
                 <HistoricalSessionMarker title={session.title} sessionId={session.id} />
-                <HistoricalEntriesList entries={session.entries} activePricing={activePricing} activeVendor={activeVendor} onEnterView={handleEnterView} onBranchFrom={handleBranchFrom} />
+                {/* §PR-5: historical sessions use currentSessionId in IPC — hide view/branch actions
+                    to prevent session-mismatch. Actions are only valid on the live current session. */}
+                <HistoricalEntriesList entries={session.entries} activePricing={activePricing} activeVendor={activeVendor} />
               </Fragment>
             ))}
           </Fragment>
@@ -918,13 +926,16 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
                     {starActive ? (
                       <Star className="absolute right-2 top-2 h-3 w-3 fill-yellow-400 text-yellow-400" />
                     ) : null}
-                    <div className="absolute right-2 top-2 hidden gap-1 group-hover:flex bg-message-user/95 rounded">
-                      <button className="rounded p-0.5 hover:bg-black/20" title="편집" onClick={() => setEditingEntryIdx(idx)}><Pencil className="h-3 w-3" /></button>
-                      <button className="rounded p-0.5 hover:bg-black/20" title="분기" onClick={() => void onFork(idx)}><GitBranch className="h-3 w-3" /></button>
-                      <button className="rounded p-0.5 hover:bg-black/20" title="즐겨찾기" onClick={() => void onToggleStar(idx)}>
-                        <Star className={`h-3 w-3 ${starActive ? "fill-yellow-400 text-yellow-400" : ""}`} />
-                      </button>
-                    </div>
+                    {/* §PR-5: hide mutating actions in view-mode (read-only slice) */}
+                    {!viewMode && (
+                      <div className="absolute right-2 top-2 hidden gap-1 group-hover:flex bg-message-user/95 rounded">
+                        <button className="rounded p-0.5 hover:bg-black/20" title="편집" onClick={() => setEditingEntryIdx(idx)}><Pencil className="h-3 w-3" /></button>
+                        <button className="rounded p-0.5 hover:bg-black/20" title="분기" onClick={() => void onFork(idx)}><GitBranch className="h-3 w-3" /></button>
+                        <button className="rounded p-0.5 hover:bg-black/20" title="즐겨찾기" onClick={() => void onToggleStar(idx)}>
+                          <Star className={`h-3 w-3 ${starActive ? "fill-yellow-400 text-yellow-400" : ""}`} />
+                        </button>
+                      </div>
+                    )}
                     <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{searchHighlight ? highlightText(entry.text, searchHighlight) : entry.text}</div>
                   </div>
                 );
@@ -1151,17 +1162,18 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
                     isStarred={!!isEntryStarred(idx)}
                     isFinal={true}
                   />
+                  {/* §PR-5: suppress mutating TurnActionBar actions in view-mode */}
                   <TurnActionBar
                     turnSummary={summary}
                     pricing={activePricing}
                     vendor={activeVendor}
                     isStarred={!!isEntryStarred(idx)}
-                    actions={{
+                    actions={viewMode ? {} : {
                       onRetry: () => void onRetryEffort(),
                       onFork: () => void onFork(idx),
                       onToggleStar: () => void onToggleStar(idx),
                     }}
-                    onFeedback={onFeedback ? (rating, reason) => void onFeedback(idx, rating, reason) : undefined}
+                    onFeedback={!viewMode && onFeedback ? (rating, reason) => void onFeedback(idx, rating, reason) : undefined}
                   />
                 </div>
               );
