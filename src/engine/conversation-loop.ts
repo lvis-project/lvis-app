@@ -577,6 +577,9 @@ export class ConversationLoop {
         summary: `${result.removedCount}개 메시지 요약됨 (compact #${this.compactNum})`,
         removedMessageCount: result.removedCount,
       };
+    } catch (err) {
+      log.error("manualCompact failed: %s", (err as Error).message);
+      throw err;
     } finally {
       this.isCompacting = false;
     }
@@ -1408,8 +1411,8 @@ export class ConversationLoop {
    * R14 mitigation — `isCompacting` lock per ConversationLoop instance. 동시 turn 에서
    * Layer 0 진입 race 시 두번째는 silent skip.
    *
-   * 이 경로가 활성화되면 mid-loop reactive compact (line 1027~) 는 *거의 발화 안 함* —
-   * preflight 가 사전 차단. 단 estimator drift 또는 rare race 로 도달 시 reactive 가 safety net.
+   * 이 경로가 활성화되면 mid-loop reactive compact 는 PR-2-F-1 에서 영구 제거됨.
+   * context_error 도달 시 early-exit + 사용자 안내로 전환.
    */
   private async runPreflightGuard(
     abortSignal?: AbortSignal,
