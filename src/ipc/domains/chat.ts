@@ -9,6 +9,7 @@ import type { WebContents } from "electron";
 import { redactForLLM } from "../../audit/dlp-filter.js";
 import type { GenericMessage } from "../../engine/llm/types.js";
 import { userContentText } from "../../engine/llm/types.js";
+import { stubMarkedToolResults } from "../../engine/wire-serialize.js";
 import { serializeHistoryMessage } from "../../shared/chat-history.js";
 import type { ConversationLoop, TurnResult } from "../../engine/conversation-loop.js";
 import { parseImportedTriggerEnvelope } from "../../engine/proactive-source.js";
@@ -476,11 +477,13 @@ ${input}`;
     }
     let slice = current.slice(0, upto);
     slice = removeOrphanToolUse(slice);
+    // PR-3 (v3 §4.2): JSONL 영속화 직전 marked tool_result 를 stub 으로 변환 — fork
+    // path 도 동일 boundary 통과해야 R4 (disk 무한 성장 방지) 일관 유지.
     if (current.length > 0) {
-      await memoryManager.saveSession(conversationLoop.getSessionId(), current);
+      await memoryManager.saveSession(conversationLoop.getSessionId(), stubMarkedToolResults(current));
     }
     const newId = crypto.randomUUID();
-    await memoryManager.saveSession(newId, slice);
+    await memoryManager.saveSession(newId, stubMarkedToolResults(slice));
     const loaded = conversationLoop.loadSession(newId);
     return { ok: loaded, sessionId: loaded ? newId : null };
   });

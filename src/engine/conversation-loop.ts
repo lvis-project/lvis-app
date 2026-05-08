@@ -12,6 +12,7 @@ import { ToolExecutor, type ToolUseBlock } from "../tools/executor.js";
 import { HookRunner } from "../hooks/hook-runner.js";
 import { markStaleToolResults, estimateMessagesTokens, getModelPreflightThreshold, getModelUsableContext } from "./auto-compact.js";
 import { compactWithBoundary, renderBoundaryAsPreamble } from "./structured-compact.js";
+import { stubMarkedToolResults } from "./wire-serialize.js";
 import { createProvider, secretKeyFor } from "./llm/provider-factory.js";
 import { FallbackProvider } from "./llm/vercel/fallback-chain.js";
 import type { LLMProvider, ToolSchema, TokenUsage } from "./llm/types.js";
@@ -368,7 +369,7 @@ export class ConversationLoop {
   /** 대화 이력 초기화 (새 대화) — §4.5.7 */
   newConversation(): void {
     if (this.history.length > 0) {
-      this.deps.memoryManager.saveSession(this.sessionId, this.history.getMessages()).catch((err: unknown) => {
+      this.deps.memoryManager.saveSession(this.sessionId, stubMarkedToolResults(this.history.getMessages())).catch((err: unknown) => {
         log.warn("newConversation saveSession failed: %s", (err as Error).message);
       });
     }
@@ -432,7 +433,7 @@ export class ConversationLoop {
 
     // 현재 세션 저장 후 전환
     if (this.history.length > 0) {
-      this.deps.memoryManager.saveSession(this.sessionId, this.history.getMessages()).catch((err: unknown) => {
+      this.deps.memoryManager.saveSession(this.sessionId, stubMarkedToolResults(this.history.getMessages())).catch((err: unknown) => {
         log.warn("loadSession saveSession failed: %s", (err as Error).message);
       });
     }
@@ -442,7 +443,7 @@ export class ConversationLoop {
       log.warn(
         `loadSession: repaired invalid tool history for ${sessionId} (removedMessages=${normalized.removedMessages}, removedToolCalls=${normalized.removedToolCalls})`,
       );
-      void this.deps.memoryManager.saveSession(sessionId, normalized.messages).catch((err: unknown) => {
+      void this.deps.memoryManager.saveSession(sessionId, stubMarkedToolResults(normalized.messages)).catch((err: unknown) => {
         log.warn("loadSession repair saveSession failed: %s", (err as Error).message);
       });
     }
@@ -566,7 +567,7 @@ export class ConversationLoop {
       // 영속화 — manualCompact 완료 시점에 즉시 disk 반영. saveSession 실패는
       // 사용자 가시 결과에 영향 X (next turn 에서도 compact 결과 보존됨).
       void Promise.resolve(
-        this.deps.memoryManager?.saveSession(this.sessionId, this.history.getMessages()),
+        this.deps.memoryManager?.saveSession(this.sessionId, stubMarkedToolResults(this.history.getMessages())),
       ).catch((err: unknown) => {
         log.warn("manualCompact saveSession failed: %s", (err as Error).message);
       });
@@ -852,15 +853,15 @@ export class ConversationLoop {
         // PR-2-F-3: Stage 1b 제거 — Layer 0 preflight (next turn) 가 동등 압축 처리.
         // child loop 은 fire-and-forget 이라 turn budget 짧음 → markStaleToolResults 만으로 충분.
         const { messages: afterMark, result: mr } = markStaleToolResults(this.history.getMessages());
-        if (mr.stripped) {
+        if (mr.marked) {
           this.history.clear();
           this.history.restore(afterMark);
           if (process.env.NODE_ENV !== "production") {
-            log.info(`mark-stale (fallback): stripped ${mr.strippedCount} tool_results, freed ~${mr.freedChars} chars`);
+            log.info(`mark-stale (fallback): marked ${mr.markedCount} tool_results, ~${mr.freedCharsOnSerialize} chars saved on serialize`);
           }
         }
       }
-      await this.deps.memoryManager.saveSession(this.sessionId, this.history.getMessages());
+      await this.deps.memoryManager.saveSession(this.sessionId, stubMarkedToolResults(this.history.getMessages()));
       // Mirror PostTurnHookChain's audit-route format so usage attribution
       // stays consistent across both code paths. SubAgentRunner constructs
       // child loops with `postTurnHookChain: undefined`, which would

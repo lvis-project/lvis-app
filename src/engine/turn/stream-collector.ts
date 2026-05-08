@@ -16,6 +16,7 @@
  */
 import type { LLMProvider, StreamEvent, ToolCallBlock, ToolSchema, GenericMessage, TokenUsage, ThinkingBlock } from "../llm/types.js";
 import { isContextLengthError } from "../auto-compact.js";
+import { stubMarkedToolResults } from "../wire-serialize.js";
 import { classifyProviderError } from "../llm/error-classifier.js";
 
 export interface StreamCollectParams {
@@ -99,11 +100,15 @@ export async function collectRoundStream(
   let usage: TokenUsage | undefined;
   let sawMessageComplete = false;
 
+  // PR-3 (v3 §4.2): provider 호출 직전에 marked tool_result 를 stub 으로 변환.
+  // memory 의 verbatim history 와 wire format 을 분리 — single source of truth.
+  const wireMessages = stubMarkedToolResults(messages);
+
   try {
     for await (const event of provider.streamTurn({
       model,
       systemPrompt,
-      messages,
+      messages: wireMessages,
       tools: toolSchemas.length > 0 ? toolSchemas : undefined,
       streamSmoothing: llmSettings.streamSmoothing as never,
       enableThinking: llmSettings.enableThinking,
