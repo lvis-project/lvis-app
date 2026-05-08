@@ -44,6 +44,16 @@ export interface SessionListEntry {
   preview: string;
   routineId?: string;
   routineTitle?: string;
+  /**
+   * ID of the previous session in this chain. Set for all chained sessions
+   * (session-resume, rotation, and §PR-5 branchFromCheckpoint forks).
+   * Use branchedFromCompactNum to distinguish true checkpoint forks from other chain types.
+   */
+  parentSessionId?: string;
+  /** §PR-5: compact sequence number this session was forked from. Only set on true checkpoint forks. */
+  branchedFromCompactNum?: number;
+  /** §PR-5: ISO timestamp when this session was branched. Only set on true checkpoint forks. */
+  branchedAt?: string;
 }
 
 /**
@@ -110,6 +120,17 @@ export interface SessionMetadata {
    * auto-derived title from session content. Max 20 chars enforced on write.
    */
   title?: string;
+  /**
+   * §PR-5: compact number of the checkpoint this session was branched from.
+   * Set when a session is created via branchFromCheckpoint().
+   * Absent for normal (non-branched) sessions.
+   */
+  branchedFromCompactNum?: number;
+  /**
+   * §PR-5: ISO timestamp when this session was branched from a checkpoint.
+   * Absent for normal (non-branched) sessions.
+   */
+  branchedAt?: string;
 }
 
 const MEMORY_MARKER = "<!-- lvis:kind=memory -->";
@@ -183,8 +204,9 @@ function normalizeCheckpoint(raw: unknown): Checkpoint | null {
   if (typeof msgCount !== "number" || msgCount < 0 || !Number.isInteger(msgCount)) return null;
   // PR-2-E (#608) — `compactNum` 은 numbered checkpoint chain 의 #N. load 시 누락되면
   // chain 깨짐 → 신규 record 만 set 되도록 optional 유지하되 정상 read.
+  // §PR-5: >= 0 허용 — enterViewMode/branchFromCheckpoint 가 compactNum=0 checkpoint 검색.
   const compactNum =
-    typeof r.compactNum === "number" && r.compactNum > 0 && Number.isInteger(r.compactNum)
+    typeof r.compactNum === "number" && r.compactNum >= 0 && Number.isInteger(r.compactNum)
       ? r.compactNum
       : undefined;
   return {
@@ -211,6 +233,10 @@ function normalizeSessionMetadata(raw: Record<string, unknown>): SessionMetadata
 
   const rawPreamble = typeof raw.summaryPreamble === "string" ? raw.summaryPreamble : undefined;
   const rawTitle = typeof raw.title === "string" ? raw.title.trim() : undefined;
+  const rawBranchedFromCompactNum = typeof raw.branchedFromCompactNum === "number" && Number.isInteger(raw.branchedFromCompactNum) && raw.branchedFromCompactNum >= 0
+    ? raw.branchedFromCompactNum
+    : undefined;
+  const rawBranchedAt = typeof raw.branchedAt === "string" ? raw.branchedAt : undefined;
   return {
     routineId: typeof raw.routineId === "string" ? raw.routineId : undefined,
     routineTitle: typeof raw.routineTitle === "string" ? raw.routineTitle : undefined,
@@ -222,6 +248,9 @@ function normalizeSessionMetadata(raw: Record<string, unknown>): SessionMetadata
     checkpoints: checkpoints && checkpoints.length > 0 ? checkpoints : undefined,
     // §PR-3: stored title (max 20 chars enforced on write; cap defensively on read too)
     title: rawTitle && rawTitle.length > 0 ? rawTitle.slice(0, 20) : undefined,
+    // §PR-5: branch provenance fields
+    branchedFromCompactNum: rawBranchedFromCompactNum,
+    branchedAt: rawBranchedAt,
   };
 }
 
@@ -229,6 +258,10 @@ export class MemoryManager {
   private readonly lvisDir: string;
   private readonly memoryDir: string;
   private readonly sessionsDir: string;
+  /** §PR-5: Pre-compact snapshots stored here to avoid polluting listSessions scan. */
+  private get checkpointsDir(): string {
+    return join(this.sessionsDir, ".checkpoints");
+  }
   // 부팅 시 로드되어 캐시되는 영속 기억
   private lvisMd: string = "";
   private userPreferences: string = "";
@@ -385,6 +418,42 @@ export class MemoryManager {
     });
   }
 
+  /**
+   * §PR-5: Save a per-checkpoint pre-compact snapshot before compaction overwrites the main JSONL.
+   * Stored at `{sessionsDir}/.checkpoints/{sessionId}/{compactNum}.jsonl` so that
+   * listSessions/listSessionsPage (which only scan sessionsDir root) never pick them up.
+   * branchFromCheckpoint() loads from here instead of the mutable main session file.
+   */
+  async saveCheckpointSnapshot(sessionId: string, compactNum: number, messages: unknown[]): Promise<void> {
+    if (!isValidSessionId(sessionId)) {
+      throw new Error(`saveCheckpointSnapshot: invalid sessionId "${sessionId}"`);
+    }
+    const sessionSnapshotDir = join(this.checkpointsDir, sessionId);
+    mkdirSync(sessionSnapshotDir, { recursive: true });
+    const targetPath = join(sessionSnapshotDir, `${compactNum}.jsonl`);
+    const lines = messages.map((m) => JSON.stringify(m)).join("\n") + "\n";
+    await withFileLock(targetPath, async () => {
+      writeFileSync(targetPath, lines, "utf-8");
+    });
+  }
+
+  /** §PR-5: Load a per-checkpoint pre-compact snapshot saved by saveCheckpointSnapshot(). Returns null if not found. */
+  loadCheckpointSnapshot(sessionId: string, compactNum: number): unknown[] | null {
+    if (!isValidSessionId(sessionId)) return null;
+    const snapshotPath = join(this.checkpointsDir, sessionId, `${compactNum}.jsonl`);
+    if (!existsSync(snapshotPath)) return null;
+    const lines = readFileSync(snapshotPath, "utf-8").trim().split("\n");
+    const messages: unknown[] = [];
+    for (const line of lines.filter(Boolean)) {
+      try {
+        messages.push(JSON.parse(line));
+      } catch {
+        log.warn({ sessionId, compactNum }, "skipping malformed checkpoint snapshot line");
+      }
+    }
+    return messages;
+  }
+
   /** 세션 복원 */
   loadSession(sessionId: string): unknown[] | null {
     const path = join(this.sessionsDir, `${sessionId}.jsonl`);
@@ -472,6 +541,10 @@ export class MemoryManager {
           preview: summary.preview,
           routineId: metadata?.routineId,
           routineTitle: metadata?.routineTitle,
+          // §PR-5: branch provenance — already loaded from metadata, no extra disk IO
+          ...(metadata?.parentSessionId ? { parentSessionId: metadata.parentSessionId } : {}),
+          ...(metadata?.branchedFromCompactNum !== undefined ? { branchedFromCompactNum: metadata.branchedFromCompactNum } : {}),
+          ...(metadata?.branchedAt ? { branchedAt: metadata.branchedAt } : {}),
         };
       });
   }
@@ -523,6 +596,10 @@ export class MemoryManager {
           preview: summary.preview,
           routineId: metadata?.routineId,
           routineTitle: metadata?.routineTitle,
+          // §PR-5: branch provenance — already loaded from metadata above, no extra disk IO
+          ...(metadata?.parentSessionId ? { parentSessionId: metadata.parentSessionId } : {}),
+          ...(metadata?.branchedFromCompactNum !== undefined ? { branchedFromCompactNum: metadata.branchedFromCompactNum } : {}),
+          ...(metadata?.branchedAt ? { branchedAt: metadata.branchedAt } : {}),
         };
       });
   }

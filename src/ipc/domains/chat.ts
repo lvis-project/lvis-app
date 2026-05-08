@@ -177,13 +177,14 @@ async function runStreamedTurn(
       onToolEnd: (name, toolResult, isError, meta, uiPayload, durationMs) =>
         send({ type: "tool_end", name, result: toolResult, isError, ...meta, ...(uiPayload && { uiPayload }), durationMs }),
       onError: (error) => send({ type: "error", error }),
-      onCompactOccurred: ({ removedMessages, freedTokens, tier, summary }) =>
+      onCompactOccurred: ({ removedMessages, freedTokens, tier, summary, compactNum }) =>
         send({
           type: "compact_notice",
           removedMessages,
           freedTokens,
           ...(tier !== undefined ? { tier } : {}),
           ...(summary !== undefined ? { summary } : {}),
+          ...(compactNum !== undefined ? { compactNum } : {}),
         }),
       onTurnSummary: ({ turnDurationMs, toolCount, cumulativeToolMs, tokensIn, freshInputTokens, tokensOut, cacheReadTokens, cacheWriteTokens, breakdown }) =>
         send({
@@ -368,10 +369,14 @@ ${input}`;
     const sessions = memoryManager
       .listSessionsPage({ limit, ...(before ? { before } : {}), ...(beforeId ? { beforeId } : {}), ...(after ? { after } : {}) })
       .map((s) => ({
-      id: s.id,
-      modifiedAt: s.modifiedAt.toISOString(),
-      title: s.title,
-    }));
+        id: s.id,
+        modifiedAt: s.modifiedAt.toISOString(),
+        title: s.title,
+        // §PR-5: branch provenance — already on SessionListEntry, no extra loadSessionMetadata call
+        ...(s.parentSessionId ? { parentSessionId: s.parentSessionId } : {}),
+        ...(s.branchedFromCompactNum !== undefined ? { branchedFromCompactNum: s.branchedFromCompactNum } : {}),
+        ...(s.branchedAt ? { branchedAt: s.branchedAt } : {}),
+      }));
     return {
       current: conversationLoop.getSessionId(),
       sessions,
@@ -589,6 +594,44 @@ ${input}`;
     }
     await writeFile(res.filePath, body, "utf-8");
     return { ok: true, filePath: res.filePath };
+  });
+
+  // ─── §PR-5: Layer 3 View-Mode + Branch ────────────────
+
+  ipcMain.handle("lvis:chat:enter-checkpoint-view", (e, payload: unknown) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:enter-checkpoint-view", e); return UNAUTHORIZED_FRAME; }
+    const p = payload as { sessionId?: unknown; compactNum?: unknown };
+    if (typeof p?.sessionId !== "string" || !Number.isSafeInteger(p?.compactNum) || (p.compactNum as number) < 0) {
+      return { error: "invalid-args" };
+    }
+    if (p.sessionId !== conversationLoop.getSessionId()) {
+      return { error: "session-mismatch" };
+    }
+    const result = conversationLoop.enterViewMode(p.compactNum as number);
+    if (!result) return { error: "checkpoint-not-found" };
+    return result;
+  });
+
+  ipcMain.handle("lvis:chat:exit-checkpoint-view", (e) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:exit-checkpoint-view", e); return UNAUTHORIZED_FRAME; }
+    conversationLoop.exitViewMode();
+    return { ok: true };
+  });
+
+  ipcMain.handle("lvis:chat:branch-from-checkpoint", async (e, payload: unknown) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:branch-from-checkpoint", e); return UNAUTHORIZED_FRAME; }
+    const p = payload as { sessionId?: unknown; compactNum?: unknown };
+    if (typeof p?.sessionId !== "string" || !Number.isSafeInteger(p?.compactNum) || (p.compactNum as number) < 0) {
+      return { error: "invalid-args" };
+    }
+    if (p.sessionId !== conversationLoop.getSessionId()) {
+      return { error: "session-mismatch" };
+    }
+    try {
+      return await conversationLoop.branchFromCheckpoint(p.compactNum as number);
+    } catch (err) {
+      return { error: (err as Error).message };
+    }
   });
 
   // ─── Routines ──────────────────────────────────────────

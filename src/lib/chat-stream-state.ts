@@ -32,6 +32,8 @@ export type StreamEvent = {
   tier?: CheckpointTier;
   /** Rolling summary attached to a compact checkpoint (rendered preamble). */
   summary?: string;
+  /** §PR-5: compact sequence number on `compact_notice` — enables view/branch actions. */
+  compactNum?: number;
   /** Set to "command" on `done` events when the turn was a slash command. */
   route?: "command";
   /** MCP Apps spec §3.2 — optional UI payload emitted with tool_end events. */
@@ -123,6 +125,8 @@ export type ChatEntry =
       removedMessages: number;
       freedTokens: number;
       summary?: string;
+      /** §PR-5: compact sequence number — enables view/branch actions on CheckpointDivider. */
+      compactNum?: number;
     }
   // §457 PR-A: marker placed at the head of a resumed child session's
   // historical entry list when the parent session left a rolling
