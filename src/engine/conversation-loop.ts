@@ -511,7 +511,7 @@ export class ConversationLoop {
    *
    * R14 lock — 동시 compact race 방지.
    */
-  async manualCompact(): Promise<{
+  async manualCompact(callbacks?: Pick<TurnCallbacks, "onCompactOccurred">): Promise<{
     compacted: boolean;
     compactedAt: string | null;
     summary: string;
@@ -561,7 +561,7 @@ export class ConversationLoop {
       }
 
       const estimated = estimateMessagesTokens(messagesBefore);
-      await this.applyBoundaryToSession(result, "manual", estimated, undefined, messagesBefore.length);
+      await this.applyBoundaryToSession(result, "manual", estimated, callbacks, messagesBefore.length);
 
       // 영속화 — manualCompact 완료 시점에 즉시 disk 반영. saveSession 실패는
       // 사용자 가시 결과에 영향 X (next turn 에서도 compact 결과 보존됨).
@@ -1425,6 +1425,10 @@ export class ConversationLoop {
     abortSignal?: AbortSignal,
     callbacks?: TurnCallbacks,
   ): Promise<void> {
+    if (!this.isAutoCompactEnabled()) {
+      log.debug("runPreflightGuard: skipped (autoCompact 설정 OFF)");
+      return;
+    }
     if (this.isCompacting) {
       log.info("preflight: SKIPPED — isCompacting lock held (concurrent turn race avoided)");
       return;
@@ -1566,7 +1570,8 @@ export class ConversationLoop {
         // PR-2-F-4: extractive compactMessages → LLM-based compactWithBoundary 마이그레이션.
         // manualCompact 가 Layer 2 path 를 사용 (12-section structured summary + freezeBoundary +
         // ⑧ slot 갱신 + summaryPreamble 영속화 + Layer 3 checkpoint append 포함).
-        const r = await this.manualCompact();
+        // callbacks 전달 — onCompactOccurred 가 renderer 에 compact_notice 이벤트 전달 가능.
+        const r = await this.manualCompact(callbacks);
         result = r.summary;
         break;
       }
