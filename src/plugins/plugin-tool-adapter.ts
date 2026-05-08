@@ -7,6 +7,7 @@
  * wrapper shape.
  */
 import { createDynamicTool, type Tool } from "../tools/base.js";
+import type { ToolCategory } from "../tools/types.js";
 import type { PluginRuntime } from "./runtime.js";
 import type { PluginManifest } from "./types.js";
 import { plog, PluginPhase } from "./lifecycle-log.js";
@@ -23,6 +24,7 @@ const GENERIC_PAYLOAD_SCHEMA = {
 
 interface ToolSchemaEntry {
   description?: string;
+  category?: ToolCategory;
   /** §6.4 Tool versioning — optional per-tool semver. Falls back to manifest.version. */
   version?: string;
   deprecatedSince?: string;
@@ -51,6 +53,12 @@ function untypedDescription(toolName: string): string {
   return `플러그인 도구: ${toolName}. payload에 필요한 매개변수를 JSON 객체로 전달하세요.`;
 }
 
+function normalizeToolCategory(entry: ToolSchemaEntry | undefined): ToolCategory {
+  return entry?.category === "read" || entry?.category === "dangerous"
+    ? entry.category
+    : "write";
+}
+
 function buildPluginTool(
   pluginRuntime: PluginRuntime,
   toolName: string,
@@ -60,15 +68,18 @@ function buildPluginTool(
 ): Tool {
   const typed = isValidTypedSchema(schemaEntry?.inputSchema) ? schemaEntry!.inputSchema : undefined;
   const description = schemaEntry?.description ?? (typed ? typedDescription(toolName) : untypedDescription(toolName));
+  const category = normalizeToolCategory(schemaEntry);
   return createDynamicTool({
     name: toolName,
     description,
     source: "plugin",
+    category,
     pluginId,
     version: schemaEntry?.version ?? manifestVersion,
     deprecatedSince: schemaEntry?.deprecatedSince,
     replacedBy: schemaEntry?.replacedBy,
     jsonSchema: typed ?? GENERIC_PAYLOAD_SCHEMA,
+    isReadOnly: () => category === "read",
     execute: async (rawInput) => {
       plog("debug", { pluginId, phase: PluginPhase.INVOKE_START, toolName, inputType: typeof rawInput, inputKeys: rawInput !== null && typeof rawInput === "object" ? Object.keys(rawInput as object).length : 0 }, "tool invocation start");
       // Both typed and untyped paths accept a JSON-string input (some provider

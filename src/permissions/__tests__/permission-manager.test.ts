@@ -200,6 +200,23 @@ describe("PermissionManager (B1 persistence)", () => {
     expect(result.decision).toBe("allow");
     expect(result.layer).toBe(6);
   });
+
+  it("headless context forces write tools to ask before allow rules or auto mode", async () => {
+    await pm.setModePersist("auto");
+    await pm.addAlwaysAllowedPersist("write_report");
+
+    const result = pm.checkDetailed(
+      "write_report",
+      "builtin",
+      "write",
+      null,
+      { headless: true },
+    );
+
+    expect(result.decision).toBe("ask");
+    expect(result.reason).toContain("headless");
+    expect(result.layer).toBe(2);
+  });
 });
 
 describe("PermissionManager — proactive-origin override (R2-1 fix)", () => {

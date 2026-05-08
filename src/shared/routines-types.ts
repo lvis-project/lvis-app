@@ -57,6 +57,11 @@ export interface RoutineRecord {
   notificationTitle?: string;
   /** Shown as OS notification body when execution === "notification-only". */
   notificationBody?: string;
+  /**
+   * Plugin ids this routine may use during its isolated LLM session.
+   * Missing/empty means plugin tools are not exposed to the routine.
+   */
+  allowedPlugins?: string[];
   createdAt: string;
   lastFiredAt?: string;
   dismissedAt?: string;
@@ -75,6 +80,7 @@ export interface AddRoutineInput {
   title?: string;
   notificationTitle?: string;
   notificationBody?: string;
+  allowedPlugins?: string[];
 }
 
 /**
@@ -89,4 +95,6 @@ export interface RoutineFiredPayload {
   firedAt: string;
   title: string;
   summary: string;
+  /** Present for llm-session routines so the overlay can open the captured JSONL. */
+  routineSessionPath?: string;
 }

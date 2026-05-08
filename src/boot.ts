@@ -315,6 +315,10 @@ export async function bootstrap(
   const permissionManager = await createPermissionManager();
   toolRegistry.setDenyRules(permissionManager.getVisibilityDenyRules());
 
+  // Tier A4 (W3): HookRunner. Shared by interactive and routine loops so
+  // every tool call traverses the same Pre/PostToolUse hook surface.
+  const hookRunner = createHookRunner();
+
   // §7: Routine Engine — 루틴마다 독립된 ConversationLoop를 생성하는 factory를 주입.
   // interactive 채팅의 ConversationLoop 인스턴스를 공유하면 세션 히스토리 오염 및
   // concurrent IPC 채팅 턴과의 race condition이 발생한다. factory는 stateless deps만
@@ -327,10 +331,16 @@ export async function bootstrap(
     toolRegistry,
     memoryManager,
     permissionManager,
+    approvalGate,
+    hookRunner,
+    bashAstValidator,
     pluginRuntime,
   };
   const routineEngine = createRoutineEngine({
-    createConversationLoop: () => createRoutineConversationLoop(routineLoopDeps),
+    createConversationLoop: (input) => createRoutineConversationLoop(
+      routineLoopDeps,
+      { allowedPlugins: input.allowedPlugins },
+    ),
   });
 
   // §4.2 Step 7: manifest-driven IPC bridges.
@@ -348,9 +358,6 @@ export async function bootstrap(
   // ApprovalGate already constructed above (before initPluginRuntime) so the
   // plugin HostApi factory could wire `agentApproval` to the live gate.
   // approvalGateRef was bound at construction time.
-
-  // Tier A4 (W3): HookRunner.
-  const hookRunner = createHookRunner();
 
   // §4.5: ConversationLoop.
   const conversationLoop = createConversationLoop({
@@ -451,6 +458,7 @@ export async function bootstrap(
           trigger: routine.trigger,
           prePrompt: routine.prePrompt ?? "",
           title: routine.title,
+          allowedPlugins: routine.allowedPlugins,
           storagePath: jsonlPath ?? undefined,
         });
         runSummary = runResult.summary;
@@ -484,6 +492,7 @@ export async function bootstrap(
           firedAt,
           title,
           summary,
+          ...(jsonlPath ? { routineSessionPath: jsonlPath } : {}),
         } satisfies import("./shared/routines-types.js").RoutineFiredPayload);
       } catch (err) {
         log.warn("routines v2 llm-session emit failed: %s", (err as Error).message);

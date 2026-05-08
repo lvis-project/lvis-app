@@ -181,6 +181,16 @@ export interface ConversationLoopDeps {
    */
   forcedActivePluginIds?: ReadonlySet<string>;
   /**
+   * Hard plugin allowlist for scoped callers such as routines. When set,
+   * keyword matches, forced plugins, and request_plugin expansions are all
+   * intersected with this set.
+   */
+  allowedPluginIds?: ReadonlySet<string>;
+  /** Background/routine loop: write tools must ask and cannot rely on auto/allow cache. */
+  headless?: boolean;
+  /** Disable normal ~/.lvis/sessions persistence for isolated routine loops. */
+  disableSessionPersistence?: boolean;
+  /**
    * C2(c): per-session SkillOverlay handle. Cleared on `newConversation()`
    * so a brand-new session does not inherit a previous session's loaded
    * skills. Optional — legacy unit-test setups skip the overlay.
@@ -837,7 +847,7 @@ export class ConversationLoop {
     // 가 model 의 preflight threshold 도달 시 차단형으로 Layer 2 (compactWithBoundary) 실행.
     // 결과: ⑧ slot 갱신 + history 교체 + cumulativeUsage reset → 후속 step 6 build() 가
     // 새 compact 결과를 반영. mid-loop reactive compact 영구 예방 (R13 sync chain + R14 lock).
-    if (this.provider) {
+    if (this.provider && !this.deps.disableSessionPersistence) {
       await this.runPreflightGuard(turnSignal, callbacks);
     }
 
@@ -945,7 +955,9 @@ export class ConversationLoop {
           }
         }
       }
-      await this.deps.memoryManager.saveSession(this.sessionId, stubMarkedToolResults(this.history.getMessages()));
+      if (!this.deps.disableSessionPersistence) {
+        await this.deps.memoryManager.saveSession(this.sessionId, stubMarkedToolResults(this.history.getMessages()));
+      }
       // Mirror PostTurnHookChain's audit-route format so usage attribution
       // stays consistent across both code paths. SubAgentRunner constructs
       // child loops with `postTurnHookChain: undefined`, which would
@@ -1304,7 +1316,7 @@ export class ConversationLoop {
         turnExpansions: pluginExpansions,
         sessionExpansions: this.sessionPluginExpansions,
         activePluginIds: scope.activePluginIds,
-        availablePluginIds: this.deps.pluginRuntime?.listPluginIds() ?? [],
+        availablePluginIds: this.filterAllowedPluginIds(this.deps.pluginRuntime?.listPluginIds() ?? []),
       });
       pluginExpansions = pluginOutcome.nextTurnExpansions;
       this.sessionPluginExpansions = pluginOutcome.nextSessionExpansions;
@@ -1373,6 +1385,10 @@ export class ConversationLoop {
         // (`ask_user_question`) honor the user's 중단 button instead of
         // hanging until their internal timeout.
         abortSignal,
+        {
+          headless: this.deps.headless,
+          allowedPluginIds: new Set(scope.activePluginIds),
+        },
       );
 
       for (let i = 0; i < capResult.allowed.length; i++) {
@@ -1610,11 +1626,22 @@ export class ConversationLoop {
     for (const pluginId of this.deps.forcedActivePluginIds ?? []) {
       activePluginIds.add(pluginId);
     }
+    const allowed = this.deps.allowedPluginIds;
+    if (allowed) {
+      for (const pluginId of [...activePluginIds]) {
+        if (!allowed.has(pluginId)) activePluginIds.delete(pluginId);
+      }
+    }
     return {
       activePluginIds,
       includeBuiltins: true,
-      includeMcp: true,
+      includeMcp: this.deps.headless !== true,
     };
+  }
+
+  private filterAllowedPluginIds(pluginIds: string[]): string[] {
+    const allowed = this.deps.allowedPluginIds;
+    return allowed ? pluginIds.filter((id) => allowed.has(id)) : pluginIds;
   }
 
   // ─── Private: Command Handler ─────────────────────
