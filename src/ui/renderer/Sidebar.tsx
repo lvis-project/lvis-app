@@ -1,12 +1,15 @@
 import { useCallback, useRef, useState } from "react";
-import { Bell, Home, Repeat2, Star, Database } from "lucide-react";
+import { Bell, Home, Repeat2, Star, Database, GitBranch } from "lucide-react";
 import { Button } from "../../components/ui/button.js";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../../components/ui/tooltip.js";
+import type { SessionSummary } from "./hooks/use-sessions.js";
 
 export interface SidebarProps {
   activeView: string;
   setActiveView: (key: string) => void;
   starredCount: number;
+  sessions?: SessionSummary[];
+  onLoadSession?: (sessionId: string) => void;
 }
 
 // "home" is the chat view — not detachable (it is the primary anchor window).
@@ -19,7 +22,10 @@ interface ContextMenuState {
 }
 
 export function Sidebar(props: SidebarProps) {
-  const { activeView, setActiveView, starredCount } = props;
+  const { activeView, setActiveView, starredCount, sessions, onLoadSession } = props;
+
+  // Branch sessions: those with a parentSessionId are child forks
+  const branchSessions = sessions?.filter((s) => s.parentSessionId) ?? [];
 
   // Context menu for "Open in new window" — built-in detachable views only.
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
@@ -99,6 +105,41 @@ export function Sidebar(props: SidebarProps) {
           })}
         </div>
       </TooltipProvider>
+
+      {/* Branch session tree — shown when forked sessions exist */}
+      {branchSessions.length > 0 && (
+        <div className="mt-2 w-full border-t pt-2">
+          <TooltipProvider delayDuration={250}>
+            <div className="flex flex-col items-start gap-1 px-1">
+              {branchSessions.map((s) => (
+                <Tooltip key={s.id}>
+                  <TooltipTrigger asChild>
+                    <button
+                      data-testid={`branch-session-${s.id}`}
+                      className="branch-session-item flex w-full items-center gap-1 rounded px-1 py-0.5 text-left text-xs hover:bg-accent hover:text-accent-foreground"
+                      onClick={() => onLoadSession?.(s.id)}
+                      title={s.title}
+                    >
+                      <GitBranch className="h-3 w-3 shrink-0 text-[hsl(var(--action-branch))]" />
+                      <span className="branch-badge ml-0.5 rounded bg-[hsl(var(--action-branch)/0.15)] px-1 text-[9px] font-medium text-[hsl(var(--action-branch))]">
+                        branch
+                      </span>
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">
+                    <span className="block max-w-[180px] truncate">{s.title}</span>
+                    {s.branchedFromCompactNum !== undefined && (
+                      <span className="block text-[10px] text-muted-foreground">
+                        checkpoint #{s.branchedFromCompactNum} 에서 분기
+                      </span>
+                    )}
+                  </TooltipContent>
+                </Tooltip>
+              ))}
+            </div>
+          </TooltipProvider>
+        </div>
+      )}
 
       {/* Right-click context menu */}
       {contextMenu && (
