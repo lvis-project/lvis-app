@@ -49,4 +49,26 @@ describe("chat history IPC serialization", () => {
       content: "완료",
     });
   });
+
+  it("masks sensitive tool_result content for renderer history replay without mutating history", () => {
+    const message: GenericMessage = {
+      role: "tool_result",
+      toolUseId: "tool-email",
+      toolName: "ask_user_question",
+      content: JSON.stringify({ recipient: "real.user@gmail.com" }),
+      isError: false,
+    };
+
+    expect(serializeHistoryMessage(message, 3)).toEqual({
+      index: 3,
+      role: "tool_result",
+      content: JSON.stringify({ recipient: "***@gmail.com" }),
+      toolUseId: "tool-email",
+      toolName: "ask_user_question",
+      isError: false,
+    });
+    if (message.role === "tool_result") {
+      expect(message.content).toContain("real.user@gmail.com");
+    }
+  });
 });
