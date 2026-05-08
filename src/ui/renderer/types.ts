@@ -288,6 +288,14 @@ export type LvisApi = {
   chatCompact: () => Promise<{ compacted: boolean; compactedAt: string | null; summary: string; removedMessageCount: number }>;
   chatSessionResume: (sessionId: string) => Promise<{ ok: boolean; compacted: boolean; compactedAt: string | null; removedMessageCount: number }>;
   chatAbort: () => Promise<{ ok: boolean }>;
+  /** PR-4: lazy-load in-session verbatim content for a compacted tool_result.
+   * Returns null when: session has rotated, toolUseId not found, verbatim
+   * already flushed to disk stub, or meta.compactedAt was never set. lineCount
+   * is pre-computed server-side. */
+  chatGetVerbatimToolResult: (
+    sessionId: string,
+    toolUseId: string,
+  ) => Promise<{ content: string; lineCount: number } | null>;
   submitFeedback: (payload: { sessionId: string; messageIndex: number; rating: "up" | "down"; reason?: string }) => Promise<{ ok: boolean; error?: string }>;
   starredList: () => Promise<Array<{ id: string; sessionId: string; messageIndex: number; role: string; text: string; starredAt: string }>>;
   starredAdd: (entry: { sessionId?: string; messageIndex: number; role: string; text: string }) => Promise<{ ok: boolean; entry?: { id: string; sessionId: string; messageIndex: number; role: string; text: string; starredAt: string } }>;
