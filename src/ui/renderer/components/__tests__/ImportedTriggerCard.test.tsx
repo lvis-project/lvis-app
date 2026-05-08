@@ -115,15 +115,16 @@ describe("ImportedTriggerCard", () => {
     expect(container.querySelector('[data-testid="imported-trigger-response"] strong')?.textContent).toBe("정상");
   });
 
-  it("renders an empty-response placeholder when the LLM ended without text", () => {
+  it("always renders the response section container even when response text is empty and not streaming", () => {
     // Edge case: LLM only emits a tool_use then end_turn, no text_delta.
-    // Earlier the response section was hidden on empty content, which
-    // made the click-then-blank case look broken to the user. Now we
-    // surface "응답이 비어있습니다…" so the user sees the click landed.
-    const { getByTestId, getByText } = render(
+    // The response section container is always rendered so the user
+    // knows the click landed. The inner content area is empty (no
+    // placeholder text) — the streaming indicator handles the in-progress
+    // case and the "LVIS 응답" label alone is sufficient as a receipt.
+    const { getByTestId, queryByText } = render(
       <ImportedTriggerCard {...base} response="" responseStreaming={false} />,
     );
     expect(getByTestId("imported-trigger-response")).toBeTruthy();
-    expect(getByText(/응답이 비어있습니다/)).toBeTruthy();
+    expect(queryByText(/응답이 비어있습니다/)).toBeNull();
   });
 });

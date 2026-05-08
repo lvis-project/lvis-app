@@ -303,6 +303,48 @@ describe("chat-stream-state", () => {
     if (group?.kind !== "tool_group") throw new Error("expected tool_group");
     expect(group.tools[0]?.durationMs).toBeUndefined();
   });
+
+  it("preserves assistant entry with empty text on tool-only turn (no placeholder)", () => {
+    // Tool-only turn: assistant streamed marker-only text (stripped to "") but
+    // a tool_group sibling exists.  finalizeStreamingAssistant must keep the
+    // entry with text "" rather than splicing it out — and must NOT inject the
+    // user-visible placeholder.
+    let entries: ChatEntry[] = appendUserEntry([], "작업 실행");
+    // Simulate a marker-only delta that was accumulated during streaming
+    entries = upsertStreamingAssistant(entries, "<title>임시</title>");
+    entries = applyToolStart(entries, {
+      groupId: "round-1",
+      toolUseId: "tool-1",
+      name: "bash",
+      displayOrder: 0,
+      input: { command: "ls" },
+    });
+    entries = applyToolEnd(entries, {
+      groupId: "round-1",
+      toolUseId: "tool-1",
+      result: "file.ts",
+      isError: false,
+    });
+    // overrideText "" simulates detectFromStream stripping markers to empty
+    entries = finalizeStreamingAssistant(entries, "", { phase: "work", overrideText: "" });
+
+    const assistantEntry = entries.find((e) => e.kind === "assistant");
+    expect(assistantEntry).toBeDefined();
+    expect(assistantEntry).toMatchObject({ kind: "assistant", text: "", streaming: false });
+    // Must NOT contain EMPTY_ASSISTANT_RESPONSE_TEXT placeholder
+    expect((assistantEntry as Extract<ChatEntry, { kind: "assistant" }>).text).toBe("");
+  });
+
+  it("splices assistant entry on truly empty turn with no tool_group or checkpoint siblings", () => {
+    // Assistant had a streaming entry (marker-only delta) but no tool siblings.
+    // finalizeStreamingAssistant should splice it out entirely.
+    let entries: ChatEntry[] = appendUserEntry([], "질문");
+    entries = upsertStreamingAssistant(entries, "<title>임시</title>");
+    entries = finalizeStreamingAssistant(entries, "", { overrideText: "" });
+
+    expect(entries.find((e) => e.kind === "assistant")).toBeUndefined();
+    expect(entries.map((e) => e.kind)).toEqual(["user"]);
+  });
 });
 
 describe("imported_trigger helpers (brain-import card lifecycle)", () => {
