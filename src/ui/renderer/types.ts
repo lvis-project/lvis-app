@@ -4,7 +4,6 @@
 import type { PluginUiExtensionView } from "../../plugin-ui-host.js";
 import type { StreamEvent } from "../../lib/chat-stream-state.js";
 import type { McpServerConfig, McpServerConfigDto, McpServerState } from "../../mcp/types.js";
-import type { ScheduleAgentId, ScheduleRoutineEntry, ScheduleRoutineSchedule } from "../../routines/schedule.js";
 import type { SerializedHistoryMessage } from "../../shared/chat-history.js";
 import type { PluginConfigRecord } from "../../shared/plugin-config.js";
 
@@ -104,17 +103,7 @@ export type AppSettings = {
   };
   chat: { systemPrompt: string; autoCompact: boolean };
   webSearch: { provider: string };
-  routine?: {
-    enableWakeupRoutine: boolean;
-    lastWakeupRoutineAt?: string;
-    lastDismissedAt?: string;
-    scheduleTimeKst?: string;
-    wakeupRoutinePrompt?: string;
-    enableScheduleRoutine?: boolean;
-    scheduleEntries?: ScheduleRoutineEntry[];
-    enableShutdownRoutine?: boolean;
-    shutdownPrompt?: string;
-  };
+  routine?: Record<string, unknown>;
   privacy?: { piiRedactEnabled: boolean };
   plugins?: Record<string, never>;
   marketplace?: {
@@ -165,24 +154,6 @@ export type UsageSummaryShape = {
   generatedAt: string;
 };
 
-export type RoutineSessionSummary = {
-  id: string;
-  modifiedAt: string;
-  title: string;
-};
-
-export type RoutineRecord = {
-  id: string;
-  title: string;
-  description: string;
-  trigger: "wakeup" | "schedule" | "shutdown";
-  enabled: boolean;
-  scheduleTimeKst?: string;
-  contextPrompt?: string;
-  scheduleEntries?: Array<ScheduleRoutineEntry & { cron: string }>;
-  sessionCount: number;
-  sessions: RoutineSessionSummary[];
-};
 
 export type PluginMarketplaceActionResult =
   | { ok: true; pluginId: string; installed?: true; uninstalled?: true; version?: string }
@@ -333,76 +304,37 @@ export type LvisApi = {
    */
   onPluginEvent?: (eventType: string, handler: (data: unknown) => void) => (() => void);
   listPluginCards: () => Promise<PluginCardSummary[]>;
-  listRoutines: () => Promise<RoutineRecord[]>;
-  updateRoutine: (
+  // schedule_routine v2 — persistent routine list + lifecycle
+  listRoutinesV2: () => Promise<import("../../shared/routines-types.js").RoutineRecord[]>;
+  dismissRoutineV2: (id: string) => Promise<{ ok: boolean; error?: string }>;
+  removeRoutineV2: (id: string) => Promise<{ ok: boolean; error?: string }>;
+  triggerRoutineNowV2: (id: string) => Promise<{ ok: boolean; error?: string }>;
+  addRoutineV2: (
+    input: import("../../shared/routines-types.js").AddRoutineInput,
+  ) => Promise<
+    | { ok: true; routine: import("../../shared/routines-types.js").RoutineRecord }
+    | { ok: false; error: string }
+  >;
+  onRoutineFiredV2: (
+    handler: (event: import("../../shared/routines-types.js").RoutineFiredPayload) => void,
+  ) => () => void;
+  // Q10 — running indicator
+  // C1: enriched payload includes title+firedAt so renderer can push OverlayItem immediately
+  onRoutineRunningStarted: (handler: (payload: { routineId: string; firedAt: string; title: string }) => void) => () => void;
+  onRoutineRunningFinished: (handler: (routineId: string) => void) => () => void;
+  // failed: clears running:true stuck OverlayItem when the LLM session throws
+  onRoutineFailedV2: (handler: (event: { routineId: string; error: string }) => void) => () => void;
+  // Q11 — overlay IPC bridges
+  onOverlayShow: (handler: (item: import("./context/OverlayContext.js").OverlayItem) => void) => () => void;
+  onOverlayUpdate: (handler: (id: string, patch: Partial<import("./context/OverlayContext.js").OverlayItem>) => void) => () => void;
+  onOverlayDismiss: (handler: (id: string) => void) => () => void;
+  notifyOverlayPrimary: (pluginId: string, eventId: string) => Promise<void>;
+  // Q9 session history
+  listRoutineSessionsV2: (
     routineId: string,
-    patch: {
-      enabled?: boolean;
-      scheduleTimeKst?: string;
-      contextPrompt?: string;
-      scheduleEntries?: Array<{
-        id: string;
-        enabled: boolean;
-        agentId: ScheduleAgentId;
-        schedule: ScheduleRoutineSchedule;
-        prompt: string;
-      }>;
-    },
-  ) => Promise<{ ok: boolean; error?: string }>;
-  startRoutineSession: (routineId: string) => Promise<{ ok: boolean; sessionId?: string; error?: string }>;
-  getLatestRoutineResult: () => Promise<{ routineId: string; trigger: string; summary: string; generatedAt: string } | null>;
-  triggerWakeupRoutineDev: () => Promise<{ ok: boolean; summary?: string; error?: string }>;
-  triggerScheduleRoutineDev: () => Promise<{ ok: boolean; summary?: string; error?: string }>;
-  triggerShutdownRoutineDev: () => Promise<{ ok: boolean; summary?: string; error?: string }>;
-  onRoutineStarted: (h: (payload: { routineId: string; trigger: string; startedAt: string }) => void) => () => void;
-  onRoutineCompleted: (h: (result: { routineId: string; trigger: string; summary: string; generatedAt: string }) => void) => () => void;
-  // Brain — proactive trigger lifecycle
-  onTriggerStarted: (
-    h: (payload: {
-      sessionId: string;
-      source: string;
-      visibility: "silent" | "summary-only" | "user-visible";
-      priority: "low" | "normal" | "high";
-      startedAt: string;
-    }) => void,
-  ) => () => void;
-  onTriggerCompleted: (
-    h: (result: {
-      sessionId: string;
-      pluginId: string;
-      source: string;
-      visibility: "silent" | "summary-only" | "user-visible";
-      priority: "low" | "normal" | "high";
-      prompt: string;
-      summary: string;
-      completedAt: string;
-    }) => void,
-  ) => () => void;
-  onTriggerFailed: (
-    h: (payload: {
-      sessionId: string;
-      pluginId: string;
-      source: string;
-      reason: "provider_error" | "tool_error" | "abort" | "unknown";
-      errorId: string;
-    }) => void,
-  ) => () => void;
-  onTriggerExpired: (
-    h: (payload: { sessionId: string; pluginId: string; source: string }) => void,
-  ) => () => void;
-  onTriggerImported: (
-    h: (payload: {
-      sessionId: string;
-      source: string;
-      prompt: string;
-      summary: string;
-      toolCallCount: number;
-      importedAt: string;
-      wrappedPrompt: string;
-    }) => void,
-  ) => () => void;
-  dismissTrigger: (sessionId: string) => Promise<{ ok: boolean; removed?: boolean; error?: string }>;
-  importTrigger: (sessionId: string) => Promise<{ ok: boolean; imported?: number; reason?: string; error?: string }>;
+    limit?: number,
+  ) => Promise<Array<{ routineId: string; firedAt: string; jsonlPath: string }>>;
+  readRoutineSessionV2: (jsonlPath: string) => Promise<string>;
   onMarketplaceUpdatesAvailable: (h: (updates: Array<{ pluginId: string; installedVersion: string; latestVersion: string }>) => void) => () => void;
   onBootstrapStatus: (
     h: (status:
@@ -439,7 +371,7 @@ export type LvisApi = {
   plugins: {
     getPerfStats: () => Promise<Record<string, PluginPerfStats>>;
   };
-  // Workflow tools (S1+S2)
+  // Workflow tools — routines v2
   onAskUserQuestion: (
     h: (req: {
       id: string;
@@ -460,29 +392,6 @@ export type LvisApi = {
   /** M2: renderer is notified when the gate's 5-minute timeout fires. */
   onAskUserQuestionTimeout?: (
     h: (payload: { requestId: string }) => void,
-  ) => () => void;
-  listReminders: () => Promise<
-    Array<{
-      id: string;
-      at: string;
-      title: string;
-      body?: string;
-      repeat: "daily" | "weekly" | "none";
-      createdAt: string;
-      lastFiredAt?: string;
-      dismissedAt?: string;
-    }>
-  >;
-  dismissReminder: (id: string) => Promise<{ ok: boolean }>;
-  removeReminder: (id: string) => Promise<{ ok: boolean }>;
-  onReminderFired: (
-    h: (reminder: {
-      id: string;
-      at: string;
-      title: string;
-      body?: string;
-      repeat: "daily" | "weekly" | "none";
-    }) => void,
   ) => () => void;
   listSessionTodos: (sessionId?: string) => Promise<
     Array<{ id: string; content: string; status: string }>

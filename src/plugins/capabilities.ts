@@ -49,6 +49,10 @@ export const KNOWN_CAPABILITIES: ReadonlySet<string> = new Set([
   "document-indexer",
   "conversation-trigger",
   "lifecycle-observer",
+  // Q11: host:overlay — plugin may call triggerConversation() as overlay runner.
+  // triggerConversation() now routes to OverlayContext staging instead of spawning
+  // a fresh ConversationLoop. Capability gates the same method as before.
+  "host:overlay",
 ]);
 
 /**
@@ -158,6 +162,15 @@ export const ENFORCED_CAPABILITIES: ReadonlyMap<string, CapabilityPolicy> = new 
         "Advisory (v3.x) — signals the plugin uses getInstalledPluginIds() or onPluginsChanged() to observe peer-plugin lifecycle. Not enforced at runtime yet; declare it now for forward-compatibility when enforcement is added.",
       enforcement: "advisory",
       gates: [],
+    },
+  ],
+  [
+    "host:overlay",
+    {
+      description:
+        "Q11 — Plugin may call hostApi.triggerConversation() as an Overlay Runner. The host holds the spec in OverlayContext staging (fresh ConversationLoop is NOT started). User confirm inserts the prompt as a user message into main chat via the imported_trigger mechanism. Required because the overlay surface lets plugins inject text the user sees before any LLM turn — must be curated.",
+      enforcement: "enforced",
+      gates: ["triggerConversation"],
     },
   ],
 ]);

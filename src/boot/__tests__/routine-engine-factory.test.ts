@@ -35,13 +35,13 @@ describe("createRoutineEngine", () => {
     });
 
     const result = await engine.runRoutine({
-      id: "wakeup",
-      trigger: "wakeup",
+      id: "schedule-daily",
+      trigger: "schedule",
       prePrompt: "오늘 업무 맥락 정리",
     });
 
     expect(mockLoop.runTurn).toHaveBeenCalledWith("오늘 업무 맥락 정리");
-    expect(result.routineId).toBe("wakeup");
-    expect(result.trigger).toBe("wakeup");
+    expect(result.routineId).toBe("schedule-daily");
+    expect(result.trigger).toBe("schedule");
   });
 });
