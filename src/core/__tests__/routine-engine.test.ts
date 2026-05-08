@@ -29,11 +29,11 @@ describe("RoutineEngine.runRoutine", () => {
     expect(result.routineId).toBe("schedule-daily");
     expect(result.trigger).toBe("schedule");
     expect(typeof result.generatedAt).toBe("string");
-    expect(loop.runTurn).toHaveBeenCalledWith("오늘 하루 알려줘.");
+    expect(loop.runTurn).toHaveBeenCalledWith("오늘 하루 알려줘.", undefined, undefined);
   });
 
-  it("uses TurnResult.text as summary", async () => {
-    const loop = makeLoop({ text: "오늘 할 일 요약 텍스트" });
+  it("uses <summary> tag content as summary", async () => {
+    const loop = makeLoop({ text: "본문\n<summary>오늘 할 일 요약 텍스트</summary>" });
     const engine = new RoutineEngine({ createConversationLoop: () => loop as any });
 
     const result = await engine.runRoutine({
@@ -45,7 +45,7 @@ describe("RoutineEngine.runRoutine", () => {
     expect(result.summary).toBe("오늘 할 일 요약 텍스트");
   });
 
-  it("uses empty string summary when runTurn returns no text", async () => {
+  it("returns missing-tag marker when runTurn returns no <summary> tag", async () => {
     const loop = {
       getSessionId: vi.fn(() => "test-session-id"),
       runTurn: vi.fn(async () => ({ text: "", toolCalls: [], route: "llm" })),
@@ -53,16 +53,16 @@ describe("RoutineEngine.runRoutine", () => {
     };
     const engine = new RoutineEngine({ createConversationLoop: () => loop as any });
 
-    const result = await engine.runRoutine({ id: "schedule", trigger: "schedule" });
+    const result = await engine.runRoutine({ id: "schedule", trigger: "schedule", prePrompt: "" });
 
-    expect(result.summary).toBe("");
+    expect(result.summary).toBe("[요약 형식 누락]");
   });
 
   it("captures error message as summary when runTurn throws", async () => {
     const loop = makeLoop({ throws: true });
     const engine = new RoutineEngine({ createConversationLoop: () => loop as any });
 
-    const result = await engine.runRoutine({ id: "shutdown-daily", trigger: "shutdown" });
+    const result = await engine.runRoutine({ id: "shutdown-daily", trigger: "shutdown", prePrompt: "" });
 
     expect(result.summary).toContain("loop crashed");
   });

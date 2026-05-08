@@ -130,20 +130,26 @@ export function OverlayContextProvider({
       // Stale fire replace: source.kind === "routine" + same routineId → replace;
       // source.kind === "plugin" + same (pluginId, eventId) → replace.
       // Stale guard: for routine items, only replace if incoming firedAt >= existing firedAt.
-      // Date.parse() defensive comparison — handles any ISO string normalisation
-      // differences; falls back to keeping existing on NaN (safe).
+      // Date.parse() defensive comparison — handles any ISO string normalisation differences.
+      // Invalid timestamp on incoming item → drop (stale-by-default); invalid existing → accept incoming.
       let dominated = false;
       const filtered = prev.filter((it) => {
         if (item.source.kind === "routine" && it.source.kind === "routine") {
           if (it.source.routineId !== item.source.routineId) return true;
-          // Same routineId: drop existing only if incoming is same age or newer.
+          // Same routineId: compare timestamps.
           const itemTime = Date.parse(item.source.firedAt);
           const existingTime = Date.parse(it.source.firedAt);
-          if (Number.isFinite(itemTime) && Number.isFinite(existingTime) && itemTime < existingTime) {
-            dominated = true; // incoming is stale — keep existing
+          // Incoming has invalid timestamp — treat as stale, keep existing.
+          if (!Number.isFinite(itemTime)) {
+            dominated = true;
             return true;
           }
-          return false; // drop existing, incoming is newer
+          // Both valid and incoming is strictly older — keep existing.
+          if (Number.isFinite(existingTime) && itemTime < existingTime) {
+            dominated = true;
+            return true;
+          }
+          return false; // drop existing, incoming is newer (or existing timestamp invalid)
         }
         if (item.source.kind === "plugin" && it.source.kind === "plugin") {
           return !(

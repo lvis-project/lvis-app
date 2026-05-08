@@ -126,6 +126,19 @@ async function writeFileAtomic(filePath: string, data: RoutinesFile): Promise<vo
   await rename(tmp, filePath);
 }
 
+/** Deep clone a RoutineRecord to prevent callers from mutating shared cache refs. */
+function cloneRecord(r: RoutineRecord): RoutineRecord {
+  return {
+    ...r,
+    schedule: r.schedule
+      ? {
+          ...r.schedule,
+          repeat: r.schedule.repeat ? { ...r.schedule.repeat } : undefined,
+        }
+      : undefined,
+  };
+}
+
 export class RoutinesStore {
   private cache: RoutineRecord[] = [];
   private loaded = false;
@@ -143,20 +156,12 @@ export class RoutinesStore {
 
   list(): RoutineRecord[] {
     // M5: deep clone to prevent callers from mutating shared cache refs
-    return this.cache.map((r) => ({
-      ...r,
-      schedule: r.schedule
-        ? {
-            ...r.schedule,
-            repeat: r.schedule.repeat ? { ...r.schedule.repeat } : undefined,
-          }
-        : undefined,
-    }));
+    return this.cache.map(cloneRecord);
   }
 
   /** Active routines = not dismissed. */
   listActive(): RoutineRecord[] {
-    return this.cache.filter((r) => !r.dismissedAt);
+    return this.cache.filter((r) => !r.dismissedAt).map(cloneRecord);
   }
 
   async add(input: AddRoutineInput): Promise<RoutineRecord> {
