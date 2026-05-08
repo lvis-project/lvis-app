@@ -8,14 +8,14 @@ import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
 import { EMPTY_ASSISTANT_RESPONSE_TEXT } from "../../lib/chat-stream-state.js";
 
 function createMessages(): GenericMessage[] {
-  return [
-    { role: "user", content: "첫 번째 요청입니다." },
-    { role: "assistant", content: "첫 번째 응답입니다." },
-    { role: "user", content: "두 번째 요청입니다." },
-    { role: "assistant", content: "두 번째 응답입니다." },
-    { role: "user", content: "세 번째 요청입니다." },
-    { role: "assistant", content: "세 번째 응답입니다." },
-  ];
+  // 16 messages — preserveRecentMessages=12 보다 커야 compactMessages 가 실제로 압축 수행.
+  // 8 turn (user+assistant 쌍 × 8 = 16) 으로 새 default 와 정합.
+  const out: GenericMessage[] = [];
+  for (let i = 1; i <= 8; i++) {
+    out.push({ role: "user", content: `${i}번째 요청입니다.` });
+    out.push({ role: "assistant", content: `${i}번째 응답입니다.` });
+  }
+  return out;
 }
 
 describe("PostTurnHookChain", () => {
@@ -85,7 +85,7 @@ describe("PostTurnHookChain", () => {
     expect(saveSession).toHaveBeenCalledWith("session-enabled", result.compactedMessages);
   });
 
-  it("runs microcompact alone (no full compact) when threshold is not met", async () => {
+  it("runs mark-stale alone (no full compact) when threshold is not met", async () => {
     vi.spyOn(console, "log").mockImplementation(() => {});
 
     const saveSession = vi.fn();
