@@ -21,7 +21,7 @@
  *     advisory only here — the prompt enforces; the UI renders whatever
  *     the model produces and trusts upstream validation.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../../../components/ui/button.js";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui/card.js";
 import { Input } from "../../../components/ui/input.js";
@@ -197,6 +197,16 @@ export function AskUserQuestionCard({
   };
   const goPrev = () => setStep((s) => Math.max(s - 1, 0));
 
+  // Always-defined submit handler: validates against the *current* draft at
+  // call time rather than at render time. This prevents the stale-closure bug
+  // where onSubmit was only passed when isAnswerComplete was true at render,
+  // but the keyboard handler needed it to fire after the draft was updated.
+  const handleSubmit = useCallback(() => {
+    if (currentItem && isAnswerComplete(currentItem, currentDraft)) {
+      goNext();
+    }
+  }, [currentItem, currentDraft, goNext]);
+
   const stepLabel = onConfirmStep
     ? "검토"
     : isMulti
@@ -207,6 +217,12 @@ export function AskUserQuestionCard({
     <Card
       className="w-full max-w-none border border-l-4 border-l-message-user bg-card shadow-none"
       data-testid="ask-user-question-card"
+      onKeyDown={(e) => {
+        if (e.key === "Escape" && !submitting) {
+          e.preventDefault();
+          dismiss();
+        }
+      }}
     >
       <CardHeader className="flex flex-row items-center justify-between gap-2 px-3 pt-3 pb-1.5 space-y-0">
         <CardTitle className="text-[12px] font-medium text-muted-foreground">
@@ -225,12 +241,26 @@ export function AskUserQuestionCard({
             draft={currentDraft}
             disabled={submitting}
             onChoose={(choice, choiceIndex) => {
-              setAnswer(step, { choice, choiceIndex });
+              const newDraft = { choice, choiceIndex };
+              setAnswer(step, newDraft);
               if (!isMulti) {
+                // Single-question path: respondAndClose handles everything.
+                // Return "closed" so the keyboard handler does NOT call
+                // onAdvance() — doing so would be a redundant double advance.
                 void respondAndClose({ answers: [{ choice }] });
+                return { kind: "closed" };
               }
+              // Multi-step path: signal "advance" when the draft is complete
+              // so the keyboard handler calls onAdvance() (goNext), or
+              // "incomplete" when further input is needed.
+              if (isAnswerComplete(currentItem, newDraft)) {
+                return { kind: "advance" };
+              }
+              return { kind: "incomplete" };
             }}
             onFreeText={(freeText) => setAnswer(step, { freeText })}
+            onSubmit={handleSubmit}
+            onAdvance={goNext}
           />
         ) : (
           <ConfirmReview
@@ -302,14 +332,20 @@ export function AskUserQuestionCard({
   );
 }
 
+/**
+ * ChoiceBadge — visible in ALL button states (default/outline/selected).
+ *
+ * When the parent Button is `variant="default"` (selected), its background
+ * becomes `bg-primary` and `text-primary` / `bg-primary/15` become
+ * invisible.  Using a ring-based border-only style with `currentColor`
+ * fallback text ensures the badge reads correctly against both the
+ * outline (unselected) and filled primary (selected) button backgrounds.
+ */
 function ChoiceBadge({ kind }: { kind: "recommend" | "alt" }) {
-  // Both badges sit at the start of the chip so the 20-char answer text
-  // owns the rest of the row. Color-only difference (recommend = primary
-  // blue tint, alt = neutral muted) keeps the pattern compact.
   const cls =
     kind === "recommend"
-      ? "bg-primary/15 text-primary"
-      : "bg-muted text-muted-foreground";
+      ? "border border-current/60 text-inherit opacity-90"
+      : "border border-current/40 text-inherit opacity-60";
   return (
     <span
       className={`flex-shrink-0 rounded px-1.5 py-[1px] text-[9.5px] font-semibold tracking-wider ${cls}`}
@@ -320,22 +356,98 @@ function ChoiceBadge({ kind }: { kind: "recommend" | "alt" }) {
   );
 }
 
+/**
+ * Explicit signal returned by `onChoose` so the keyboard handler knows
+ * exactly what action (if any) to take after a choice selection:
+ *
+ *   "incomplete" — draft updated but not yet complete; handler does nothing.
+ *   "advance"    — draft complete in a multi-step flow; handler calls onAdvance().
+ *   "closed"     — respondAndClose() already called (single-question path);
+ *                  handler must NOT call onAdvance() to avoid a double advance/race.
+ */
+export type ChoiceResult =
+  | { kind: "incomplete" }
+  | { kind: "advance" }
+  | { kind: "closed" };
+
 function QuestionForm({
   item,
   draft,
   disabled,
   onChoose,
   onFreeText,
+  onSubmit,
+  onAdvance,
 }: {
   item: AskUserQuestionItem;
   draft: DraftAnswer;
   disabled: boolean;
-  onChoose: (choice: string, choiceIndex: number) => void;
+  /** Returns a ChoiceResult signalling what the keyboard handler should do next. */
+  onChoose: (choice: string, choiceIndex: number) => ChoiceResult;
   onFreeText: (text: string) => void;
+  /**
+   * Called on free-text Enter: validates current draft (which IS current
+   * because free-text onChange fires before onKeyDown) then advances.
+   */
+  onSubmit: () => void;
+  /**
+   * Called by the keyboard choice handler when onChoose returns { kind: "advance" }.
+   * Advances directly (goNext) without re-checking draft — the synchronous
+   * return value of onChoose is authoritative; re-reading currentDraft here
+   * would be stale due to React 18 state batching.
+   */
+  onAdvance: () => void;
 }) {
   const choices = effectiveChoices(item);
   const recommend = recommendIndex(item);
   const alts = altIndices(item);
+  // Roving tabIndex: track which choice button has the "tab stop".
+  const [focusedIdx, setFocusedIdx] = useState<number>(
+    () => draft.choiceIndex ?? (recommendIndex(item) ?? 0),
+  );
+  const buttonRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  // Reset focused idx when the question item changes (step transition).
+  // Prevents out-of-range focusedIdx when the new step has fewer choices,
+  // which would leave all option buttons with tabIndex={-1} (keyboard nav broken).
+  useEffect(() => {
+    setFocusedIdx(recommendIndex(item) ?? 0);
+  }, [item]);
+
+  // Sync focused idx when the draft's selected choice changes externally.
+  useEffect(() => {
+    if (typeof draft.choiceIndex === "number") {
+      setFocusedIdx(draft.choiceIndex);
+    }
+  }, [draft.choiceIndex]);
+
+  const handleChoiceKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLButtonElement>, i: number) => {
+      if (disabled) return;
+      if (e.key === "ArrowDown" || e.key === "ArrowRight") {
+        e.preventDefault();
+        const next = (i + 1) % choices.length;
+        setFocusedIdx(next);
+        buttonRefs.current[next]?.focus();
+      } else if (e.key === "ArrowUp" || e.key === "ArrowLeft") {
+        e.preventDefault();
+        const prev = (i - 1 + choices.length) % choices.length;
+        setFocusedIdx(prev);
+        buttonRefs.current[prev]?.focus();
+      } else if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        // onChoose returns a ChoiceResult enum:
+        //   "advance" → multi-step draft complete, call onAdvance() to go next.
+        //   "closed"  → single-question path already called respondAndClose();
+        //               do NOT call onAdvance() to avoid a double advance/race.
+        //   "incomplete" → draft updated but not yet complete; do nothing more.
+        const result = onChoose(choices[i], i);
+        if (result.kind === "advance") onAdvance();
+      }
+    },
+    [disabled, choices, onChoose, onAdvance],
+  );
+
   return (
     <>
       <div
@@ -345,7 +457,11 @@ function QuestionForm({
         {item.question}
       </div>
       {choices.length > 0 && (
-        <div className="flex flex-col gap-1">
+        <div
+          role="listbox"
+          aria-label={item.question}
+          className="flex flex-col gap-1"
+        >
           {choices.map((c, i) => {
             // Selection compares by index, not by label — duplicate
             // choice strings would otherwise mark every same-label chip
@@ -354,13 +470,22 @@ function QuestionForm({
             const selected = draft.choiceIndex === i;
             const showRecommend = recommend === i;
             const showAlt = alts.has(i);
+            // Roving tabIndex: only the focused item (or selected item when
+            // none is explicitly focused) is in the tab order.
+            const isTabStop = focusedIdx === i || (focusedIdx < 0 && i === 0);
             return (
               <Button
                 key={`${i}:${c}`}
+                ref={(el) => { buttonRefs.current[i] = el; }}
+                role="option"
+                aria-selected={selected}
+                tabIndex={isTabStop ? 0 : -1}
                 size="sm"
                 variant={selected ? "default" : "outline"}
                 disabled={disabled}
                 onClick={() => onChoose(c, i)}
+                onKeyDown={(e) => handleChoiceKeyDown(e, i)}
+                onFocus={() => setFocusedIdx(i)}
                 className="h-auto justify-start gap-2 px-2.5 py-1.5 text-[12px]"
               >
                 {showRecommend && <ChoiceBadge kind="recommend" />}
@@ -375,6 +500,12 @@ function QuestionForm({
         <Input
           value={draft.freeText ?? ""}
           onChange={(e) => onFreeText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              onSubmit();
+            }
+          }}
           placeholder={item.placeholder ?? "직접입력하기"}
           className="h-8 text-[12px]"
           disabled={disabled}

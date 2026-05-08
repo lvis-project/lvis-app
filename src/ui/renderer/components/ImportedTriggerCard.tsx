@@ -22,7 +22,6 @@ import ReactMarkdown from "react-markdown";
 import { clampDanglingMarkdownLink } from "../utils/streaming-markdown.js";
 import { MARKDOWN_REMARK_PLUGINS } from "../utils/markdown-plugins.js";
 import { detectFromStream } from "../../../lib/stream-markers.js";
-import { EMPTY_ASSISTANT_RESPONSE_TEXT } from "../../../lib/chat-stream-state.js";
 
 /**
  * Strip lines whose only purpose is to feed an opaque base64 entry id
@@ -132,10 +131,6 @@ export function ImportedTriggerCard({
               {responseStreaming ? clampDanglingMarkdownLink(displayResponse) : displayResponse}
             </ReactMarkdown>
           </div>
-        ) : !responseStreaming ? (
-          <p className="text-xs text-muted-foreground">
-            {EMPTY_ASSISTANT_RESPONSE_TEXT}
-          </p>
         ) : null}
       </div>
       <button

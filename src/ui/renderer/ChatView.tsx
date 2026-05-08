@@ -64,7 +64,6 @@ const CHAT_BOTTOM_THRESHOLD_PX = 96;
 export interface ChatViewProps {
   api: LvisApi;
   onAsk: (q: string) => void | Promise<void>;
-  onGuide: (q: string) => void | Promise<void>;
   onEditSave: (idx: number, text: string) => void | Promise<void>;
   onFork: (idx: number) => void | Promise<void>;
   onToggleStar: (idx: number) => void | Promise<void>;
@@ -365,7 +364,7 @@ function HistoricalEntriesList({
   return <div className="min-w-0 w-full max-w-full space-y-3 overflow-x-hidden">{rendered}</div>;
 }
 
-export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, installingPlugins, onOpenMarketplace, marketplaceUrlReady }: ChatViewProps) {
+export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, installingPlugins, onOpenMarketplace, marketplaceUrlReady }: ChatViewProps) {
   // We still need the api for SessionTodoPanel; obtain it via singleton.
   const workflowApi = getApi();
   const debugStreamEnabled = isDebugStreamEnabled();
@@ -899,7 +898,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
               // Add extra breathing room only after a *completed* assistant
               // turn (whose action bar sits at the bottom of the card).
               // Skip the gap for day/session markers, session-opening user
-              // turns, and mid-stream onGuide() messages where the previous
+              // turns, and mid-stream guidance messages where the previous
               // assistant entry is still streaming and has no action bar
               // yet. `!mt-4` uses Tailwind's important prefix to outweigh
               // the parent's `space-y-3` specificity (the descendant
@@ -1368,7 +1367,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
             allocateN={() => ++attachmentNCounter.current}
             saveClipboardImage={(b64) => window.lvis.attach.saveClipboardImage(b64)}
             openExternal={(p) => window.lvis.attach.openExternal(p)}
-            onSend={() => void (streaming ? onGuide(question) : onAsk(question))}
+            onSend={() => void onAsk(question)}
             onAbort={() => void onAbort()}
             streaming={streaming}
             disabled={hasApiKey === false || contextOverflowPct >= 0.95 || viewMode !== null}
@@ -1377,7 +1376,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
               hasApiKey === false
                 ? "API 키를 먼저 설정해 주세요..."
                 : streaming
-                  ? "응답 방향 지시 입력 (Enter 힌트 전송 / Shift+Enter 줄바꿈)"
+                  ? "새 메시지 전송 시 현재 응답을 중단하고 새 턴을 시작합니다"
                   : "질문 입력 (Enter 전송 · Cmd/Ctrl+V 첨부) · /command 사용 가능"
             }
           />
