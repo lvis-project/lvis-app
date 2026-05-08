@@ -256,6 +256,10 @@ export class MemoryManager {
   private readonly lvisDir: string;
   private readonly memoryDir: string;
   private readonly sessionsDir: string;
+  /** §PR-5: Pre-compact snapshots stored here to avoid polluting listSessions scan. */
+  private get checkpointsDir(): string {
+    return join(this.sessionsDir, ".checkpoints");
+  }
   // 부팅 시 로드되어 캐시되는 영속 기억
   private lvisMd: string = "";
   private userPreferences: string = "";
@@ -414,14 +418,17 @@ export class MemoryManager {
 
   /**
    * §PR-5: Save a per-checkpoint pre-compact snapshot before compaction overwrites the main JSONL.
-   * Stored at `{sessionsDir}/{sessionId}.cp{compactNum}.jsonl`.
+   * Stored at `{sessionsDir}/.checkpoints/{sessionId}/{compactNum}.jsonl` so that
+   * listSessions/listSessionsPage (which only scan sessionsDir root) never pick them up.
    * branchFromCheckpoint() loads from here instead of the mutable main session file.
    */
   async saveCheckpointSnapshot(sessionId: string, compactNum: number, messages: unknown[]): Promise<void> {
     if (!isValidSessionId(sessionId)) {
       throw new Error(`saveCheckpointSnapshot: invalid sessionId "${sessionId}"`);
     }
-    const targetPath = join(this.sessionsDir, `${sessionId}.cp${compactNum}.jsonl`);
+    const sessionSnapshotDir = join(this.checkpointsDir, sessionId);
+    mkdirSync(sessionSnapshotDir, { recursive: true });
+    const targetPath = join(sessionSnapshotDir, `${compactNum}.jsonl`);
     const lines = messages.map((m) => JSON.stringify(m)).join("\n") + "\n";
     await withFileLock(targetPath, async () => {
       writeFileSync(targetPath, lines, "utf-8");
@@ -431,9 +438,9 @@ export class MemoryManager {
   /** §PR-5: Load a per-checkpoint pre-compact snapshot saved by saveCheckpointSnapshot(). Returns null if not found. */
   loadCheckpointSnapshot(sessionId: string, compactNum: number): unknown[] | null {
     if (!isValidSessionId(sessionId)) return null;
-    const path = join(this.sessionsDir, `${sessionId}.cp${compactNum}.jsonl`);
-    if (!existsSync(path)) return null;
-    const lines = readFileSync(path, "utf-8").trim().split("\n");
+    const snapshotPath = join(this.checkpointsDir, sessionId, `${compactNum}.jsonl`);
+    if (!existsSync(snapshotPath)) return null;
+    const lines = readFileSync(snapshotPath, "utf-8").trim().split("\n");
     const messages: unknown[] = [];
     for (const line of lines.filter(Boolean)) {
       try {
