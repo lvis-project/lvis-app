@@ -16,7 +16,7 @@
  *   audit        lvis:audit:*, lvis:dlp:*
  *   permissions  lvis:permission:*, lvis:approval:*, lvis:policy:*
  *   window       window:*
- *   misc         lvis:reminders:*, lvis:session-todo:*
+ *   misc         lvis:routines:v2:*, lvis:session-todo:*
  */
 import { initDlpAudit } from "../audit/dlp-filter.js";
 import { registerSettingsHandlers } from "./domains/settings.js";

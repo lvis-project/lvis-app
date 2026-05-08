@@ -7,8 +7,8 @@ import { contextBridge, ipcRenderer } from "electron";
 import { resolve as pathResolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { McpServerConfig } from "./mcp/types.js";
-import type { ScheduleAgentId, ScheduleRoutineSchedule } from "./routines/schedule.js";
 import type { SerializedHistoryMessage } from "./shared/chat-history.js";
+import { OVERLAY_V1, ROUTINES_V2 } from "./shared/ipc-channels.js";
 import { PLUGIN_PRIVATE_NAMESPACES } from "./plugins/capabilities.js";
 
 // ─── Deterministic plugin webview asset URLs ────────────────────────────────
@@ -225,56 +225,10 @@ const api = {
     getPerfStats: async () => ipcRenderer.invoke("lvis:plugins:perf-stats"),
   },
 
-  listRoutines: async () => ipcRenderer.invoke("lvis:routines:list"),
-  updateRoutine: async (
-    routineId: string,
-    patch: {
-      enabled?: boolean;
-      scheduleTimeKst?: string;
-      contextPrompt?: string;
-      scheduleEntries?: Array<{
-        id: string;
-        enabled: boolean;
-        agentId: ScheduleAgentId;
-        schedule: ScheduleRoutineSchedule;
-        prompt: string;
-      }>;
-    },
-  ) => ipcRenderer.invoke("lvis:routines:update", routineId, patch),
-  startRoutineSession: async (routineId: string) =>
-    ipcRenderer.invoke("lvis:routines:start-session", routineId) as Promise<{ ok: boolean; sessionId?: string; error?: string }>,
-  getLatestRoutineResult: async () =>
-    ipcRenderer.invoke("lvis:routine:get-latest-result") as Promise<{
-      routineId: string;
-      trigger: string;
-      summary: string;
-      generatedAt: string;
-    } | null>,
-  triggerWakeupRoutineDev: async () =>
-    ipcRenderer.invoke("lvis:routines:dev-trigger-wakeup") as Promise<{ ok: boolean; summary?: string; error?: string }>,
-  triggerScheduleRoutineDev: async () =>
-    ipcRenderer.invoke("lvis:routines:dev-trigger-schedule") as Promise<{ ok: boolean; summary?: string; error?: string }>,
-  triggerShutdownRoutineDev: async () =>
-    ipcRenderer.invoke("lvis:routines:dev-trigger-shutdown") as Promise<{ ok: boolean; summary?: string; error?: string }>,
-
-  // ─── Routine started event ────────────────────────────────────────────────
-  onRoutineStarted: (handler: (payload: { routineId: string; trigger: string; startedAt: string }) => void) => {
-    const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
-    ipcRenderer.on("lvis:routine:started", listener);
-    return () => ipcRenderer.removeListener("lvis:routine:started", listener);
-  },
-
   // ─── Usage Observability (Sprint 4.B) ────────────
   getUsageSummary: async (days?: number) => ipcRenderer.invoke("lvis:usage:summary", days),
   getUsageRange: async (opts: { dateFrom: string; dateTo: string }) => ipcRenderer.invoke("lvis:usage:range", opts),
   exportUsageCsv: async (rows: Array<Record<string, string | number>>) => ipcRenderer.invoke("lvis:usage:export-csv", rows),
-
-  // ─── Routine completed event (신규: RoutineResult 전달) ──────────────────
-  onRoutineCompleted: (handler: (result: { routineId: string; trigger: string; summary: string; generatedAt: string }) => void) => {
-    const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
-    ipcRenderer.on("lvis:routine:completed", listener);
-    return () => ipcRenderer.removeListener("lvis:routine:completed", listener);
-  },
 
   // ─── Brain — proactive trigger lifecycle ────────────────────────────────
   onTriggerStarted: (
@@ -605,23 +559,69 @@ const api = {
     return () => ipcRenderer.removeListener("lvis:ask-user-question:timeout", listener);
   },
 
-  // remind_at — persistent reminder list + lifecycle
-  listReminders: async () => ipcRenderer.invoke("lvis:reminders:list"),
-  dismissReminder: async (id: string) => ipcRenderer.invoke("lvis:reminders:dismiss", id),
-  removeReminder: async (id: string) => ipcRenderer.invoke("lvis:reminders:remove", id),
-  onReminderFired: (
-    handler: (reminder: {
-      id: string;
-      at: string;
-      title: string;
-      body?: string;
-      repeat: "daily" | "weekly" | "none";
-    }) => void,
+  // schedule_routine v2 — persistent routine list + lifecycle
+  listRoutinesV2: async () => ipcRenderer.invoke(ROUTINES_V2.list),
+  dismissRoutineV2: async (id: string) => ipcRenderer.invoke(ROUTINES_V2.dismiss, id),
+  removeRoutineV2: async (id: string) => ipcRenderer.invoke(ROUTINES_V2.remove, id),
+  triggerRoutineNowV2: async (id: string) => ipcRenderer.invoke(ROUTINES_V2.triggerNow, id),
+  addRoutineV2: async (input: import("./shared/routines-types.js").AddRoutineInput) =>
+    ipcRenderer.invoke(ROUTINES_V2.add, input) as Promise<
+      { ok: true; routine: import("./shared/routines-types.js").RoutineRecord } | { ok: false; error: string }
+    >,
+  onRoutineFiredV2: (
+    handler: (event: import("./shared/routines-types.js").RoutineFiredPayload) => void,
   ) => {
     const listener = (_e: unknown, r: Parameters<typeof handler>[0]) => handler(r);
-    ipcRenderer.on("lvis:reminder:fired", listener);
-    return () => ipcRenderer.removeListener("lvis:reminder:fired", listener);
+    ipcRenderer.on(ROUTINES_V2.fired, listener);
+    return () => ipcRenderer.removeListener(ROUTINES_V2.fired, listener);
   },
+  // Q10 — running indicator: emitted when a routine LLM session starts/finishes
+  // C1: runningStarted payload enriched to { routineId, firedAt, title } so the
+  // renderer can push a proper OverlayItem immediately without waiting for fired.
+  onRoutineRunningStarted: (handler: (payload: { routineId: string; firedAt: string; title: string }) => void) => {
+    const listener = (_e: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
+    ipcRenderer.on(ROUTINES_V2.runningStarted, listener);
+    return () => ipcRenderer.removeListener(ROUTINES_V2.runningStarted, listener);
+  },
+  onRoutineRunningFinished: (handler: (routineId: string) => void) => {
+    const listener = (_e: unknown, id: string) => handler(id);
+    ipcRenderer.on(ROUTINES_V2.runningFinished, listener);
+    return () => ipcRenderer.removeListener(ROUTINES_V2.runningFinished, listener);
+  },
+  // failed: emitted when the routine LLM session throws (e.g. provider error).
+  // Without this bridge the renderer never learns the session failed and the
+  // running OverlayItem stays stuck with running:true indefinitely.
+  onRoutineFailedV2: (handler: (event: { routineId: string; error: string }) => void) => {
+    const listener = (_e: unknown, payload: { routineId: string; error: string }) => handler(payload);
+    ipcRenderer.on(ROUTINES_V2.failed, listener);
+    return () => ipcRenderer.removeListener(ROUTINES_V2.failed, listener);
+  },
+  // Q9 session history — read-only viewer for per-routine session JSONL files
+  listRoutineSessionsV2: async (routineId: string, limit?: number) =>
+    ipcRenderer.invoke(ROUTINES_V2.listSessions, routineId, limit) as Promise<
+      Array<{ routineId: string; firedAt: string; jsonlPath: string }>
+    >,
+  readRoutineSessionV2: async (jsonlPath: string) =>
+    ipcRenderer.invoke(ROUTINES_V2.readSession, jsonlPath) as Promise<string>,
+
+  // Q11 — Overlay IPC bridges (main → renderer push + renderer → main confirm)
+  onOverlayShow: (handler: (item: unknown) => void) => {
+    const listener = (_e: unknown, item: unknown) => handler(item);
+    ipcRenderer.on(OVERLAY_V1.show, listener);
+    return () => ipcRenderer.removeListener(OVERLAY_V1.show, listener);
+  },
+  onOverlayUpdate: (handler: (id: string, patch: unknown) => void) => {
+    const listener = (_e: unknown, id: string, patch: unknown) => handler(id, patch);
+    ipcRenderer.on(OVERLAY_V1.update, listener);
+    return () => ipcRenderer.removeListener(OVERLAY_V1.update, listener);
+  },
+  onOverlayDismiss: (handler: (id: string) => void) => {
+    const listener = (_e: unknown, id: string) => handler(id);
+    ipcRenderer.on(OVERLAY_V1.dismiss, listener);
+    return () => ipcRenderer.removeListener(OVERLAY_V1.dismiss, listener);
+  },
+  notifyOverlayPrimary: async (pluginId: string, eventId: string) =>
+    ipcRenderer.invoke(OVERLAY_V1.primaryAction, pluginId, eventId),
 
   // todo_session_write — assistant's per-session checklist
   listSessionTodos: async (sessionId?: string) =>

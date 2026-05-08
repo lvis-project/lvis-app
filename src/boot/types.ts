@@ -73,13 +73,6 @@ export interface AppServices {
   toolRegistry: ToolRegistry;
   systemPromptBuilder: SystemPromptBuilder;
   conversationLoop: ConversationLoop;
-  /**
-   * Brain — orchestrates `hostApi.triggerConversation()` calls on a fresh
-   * ConversationLoop per trigger so the user's chat history stays clean.
-   * Renderer uses this surface (via IPC) to dismiss / import a captured
-   * trigger session.
-   */
-  triggerExecutor?: import("../engine/trigger-executor.js").TriggerExecutor;
   routineEngine?: RoutineEngine;
   mcpManager: McpManager;
   /**
@@ -103,9 +96,11 @@ export interface AppServices {
   starredStore?: StarredStore;
   /** D6 privacy hardening — feedback persistence separate from audit log (~/.lvis/feedback.jsonl) */
   feedbackStore?: FeedbackStore;
-  /** Workflow tools (S1+S2) — exposed for IPC handlers + shutdown wiring. */
-  remindersStore?: import("../main/reminders-store.js").RemindersStore;
-  remindersScheduler?: import("../main/reminders-scheduler.js").RemindersScheduler;
+  /** Workflow tools — exposed for IPC handlers + shutdown wiring. */
+  routinesStore?: import("../main/routines-store.js").RoutinesStore;
+  routinesScheduler?: import("../main/routines-scheduler.js").RoutinesScheduler;
+  /** Q9: per-routine session JSONL store (~/.lvis/routine-sessions/). */
+  routineSessionStore?: import("../main/routine-session-store.js").RoutineSessionStore;
   sessionTodoStore?: import("../main/session-todo-store.js").SessionTodoStore;
   askUserQuestionGate?: import("../main/ask-user-question-gate.js").AskUserQuestionGate;
   skillStore?: import("../main/skill-store.js").SkillStore;
@@ -137,11 +132,11 @@ export interface AppServices {
   /** Central app shutdown hook for timers, background services, and transports. */
   shutdown?: () => Promise<void>;
   /**
-   * L1: deferred RemindersScheduler.start() handle. main.ts calls this AFTER
-   * registerIpcHandlers() so a past-due reminder firing immediately on boot
+   * L1: deferred RoutinesScheduler.start() handle. main.ts calls this AFTER
+   * registerIpcHandlers() so a past-due routine firing immediately on boot
    * has a renderer listener attached. Idempotent — safe to call multiple times.
    */
-  startRemindersScheduler?: () => void;
+  startRoutinesScheduler?: () => void;
   /**
    * Issue #260 — system-level notification service. Auto-fires desktop
    * notifications at 4 lifecycle points (turn-end / routine / ask-user /

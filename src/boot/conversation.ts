@@ -189,9 +189,21 @@ export type RoutineConversationLoopDeps = Pick<
 >;
 
 export function createRoutineConversationLoop(deps: RoutineConversationLoopDeps): ConversationLoop {
+  // Layer 1 (UX hot-fix v3): each routine fire gets its *own* SystemPromptBuilder
+  // instance with routineMode=true so the LLM is instructed to append a
+  // <summary>…</summary> tag. A dedicated instance (not the shared main-chat
+  // builder) is used to prevent routineMode from leaking into main-chat turns
+  // even when concurrent routine fires and user chat turns overlap.
+  const routineSystemPromptBuilder = createSystemPromptBuilder({
+    memoryManager: deps.memoryManager,
+    toolRegistry: deps.toolRegistry,
+    pluginRuntime: deps.pluginRuntime,
+    // Skill overlay is interactive-only — routine sessions are headless.
+  });
+  routineSystemPromptBuilder.setRoutineMode(true);
   return new ConversationLoop({
     settingsService: deps.settingsService,
-    systemPromptBuilder: deps.systemPromptBuilder,
+    systemPromptBuilder: routineSystemPromptBuilder,
     keywordEngine: deps.keywordEngine,
     routeEngine: deps.routeEngine,
     toolRegistry: deps.toolRegistry,
