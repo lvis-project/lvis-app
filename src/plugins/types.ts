@@ -215,6 +215,12 @@ export interface PluginManifest {
     {
       description: string;
       /**
+       * Permission category used by the host executor. Omitted categories
+       * are treated as "write" at registration time so plugin tools fail
+       * closed until authors declare read-only intent explicitly.
+       */
+      category?: "read" | "write" | "dangerous";
+      /**
        * §6.4 Tool versioning — optional semver string for this tool. When
        * omitted, the plugin manifest's top-level `version` is used as the
        * tool version so plugins that ship tools in lock-step with their

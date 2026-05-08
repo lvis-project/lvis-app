@@ -171,10 +171,9 @@ export interface ConversationDeps {
  *
  * Each call returns a *fresh* ConversationLoop that shares stateless deps
  * (toolRegistry, settings, etc.) but owns its own ConversationHistory so
- * routine turns never appear in the user's chat transcript. The heavier
- * interactive-only deps (postTurnHookChain, approvalGate, hookRunner,
- * idleScheduler, bashAstValidator) are intentionally omitted — routines run
- * headlessly and do not need approval modals or idle-poke side-effects.
+ * routine turns never appear in the user's chat transcript. Routine loops
+ * still receive the approval gate + pre-tool hooks so background writes cannot
+ * bypass the normal tool policy.
  */
 export type RoutineConversationLoopDeps = Pick<
   ConversationDeps,
@@ -185,10 +184,16 @@ export type RoutineConversationLoopDeps = Pick<
   | "toolRegistry"
   | "memoryManager"
   | "permissionManager"
+  | "approvalGate"
+  | "hookRunner"
+  | "bashAstValidator"
   | "pluginRuntime"
 >;
 
-export function createRoutineConversationLoop(deps: RoutineConversationLoopDeps): ConversationLoop {
+export function createRoutineConversationLoop(
+  deps: RoutineConversationLoopDeps,
+  opts: { allowedPlugins?: string[] } = {},
+): ConversationLoop {
   // Layer 1 (UX hot-fix v3): each routine fire gets its *own* SystemPromptBuilder
   // instance with routineMode=true so the LLM is instructed to append a
   // <summary>…</summary> tag. A dedicated instance (not the shared main-chat
@@ -209,9 +214,16 @@ export function createRoutineConversationLoop(deps: RoutineConversationLoopDeps)
     toolRegistry: deps.toolRegistry,
     memoryManager: deps.memoryManager,
     permissionManager: deps.permissionManager,
+    approvalGate: deps.approvalGate,
+    hookRunner: deps.hookRunner,
+    bashAstValidator: deps.bashAstValidator,
     pluginRuntime: deps.pluginRuntime,
-    // postTurnHookChain / approvalGate / hookRunner / idleScheduler / bashAstValidator
-    // intentionally omitted — routine loops are headless and isolated.
+    allowedPluginIds: new Set(opts.allowedPlugins ?? []),
+    forcedActivePluginIds: new Set(opts.allowedPlugins ?? []),
+    headless: true,
+    disableSessionPersistence: true,
+    // postTurnHookChain / idleScheduler intentionally omitted — routine loops
+    // are isolated from normal chat persistence and idle-poke side effects.
   });
 }
 

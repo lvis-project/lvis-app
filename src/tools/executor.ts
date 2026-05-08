@@ -24,6 +24,7 @@ import type { ToolRegistry } from "./registry.js";
 import type {
   ToolSource,
   TrustLevel,
+  ToolCategory,
   ToolExecutionContext,
 } from "./types.js";
 import { trustFromSource } from "./types.js";
@@ -43,23 +44,7 @@ export interface ToolCallMeta {
   displayOrder: number;
 }
 
-// ─── C1: Sensitive-path + read-only hint extraction ────────
-
-/**
- * Static list of tool names known to perform only read operations.
- * Used by {@link ToolExecutor} to set `isReadOnly` on ApprovalRequest so
- * the §S4 approval-gate short-circuit can auto-approve (except in plan mode).
- * Conservative: tools not listed here are treated as state-mutating.
- */
-const READ_ONLY_TOOL_NAMES = new Set<string>([
-  "read_file",
-  "glob",
-  "grep",
-  "knowledge_search",
-  "list_directory",
-  "file_read",
-  "web_fetch",
-]);
+// ─── C1: Sensitive-path + invocation category extraction ────────
 
 /**
  * Extract an absolute filesystem target path from a tool's input, if one
@@ -85,6 +70,23 @@ function extractTargetFilePath(
     return pathResolve(candidate);
   } catch {
     return undefined;
+  }
+}
+
+function resolveInvocationCategory(
+  tool: import("./base.js").Tool,
+  finalInput: Record<string, unknown>,
+): ToolCategory {
+  if (tool.category === "dangerous") return "dangerous";
+  try {
+    return tool.isReadOnly(finalInput) ? "read" : "write";
+  } catch (err) {
+    log.warn(
+      "tool '%s' isReadOnly(input) failed — treating invocation as write: %s",
+      tool.name,
+      err instanceof Error ? err.message : String(err),
+    );
+    return "write";
   }
 }
 
@@ -160,6 +162,11 @@ export interface ToolExecutorCallbacks {
     uiPayload: import("../mcp/types.js").McpUiPayload | undefined,
     durationMs: number,
   ) => void;
+}
+
+export interface ToolPermissionContext {
+  headless?: boolean;
+  allowedPluginIds?: ReadonlySet<string>;
 }
 
 function maskDisplayValue(value: unknown): unknown {
@@ -296,17 +303,18 @@ export class ToolExecutor {
      * even though the streaming side has already been aborted.
      */
     abortSignal?: AbortSignal,
+    permissionContext?: ToolPermissionContext,
   ): Promise<ToolResult[]> {
     const groupId = randomUUID();
     const BATCH_SIZE = 5;
     if (toolUses.length <= BATCH_SIZE) {
-      return Promise.all(toolUses.map((tu, idx) => this.executeOne(tu, groupId, idx, callbacks, sessionId, proactiveOrigin, spawnDepth, abortSignal)));
+      return Promise.all(toolUses.map((tu, idx) => this.executeOne(tu, groupId, idx, callbacks, sessionId, proactiveOrigin, spawnDepth, abortSignal, permissionContext)));
     }
 
     const results: ToolResult[] = [];
     for (let i = 0; i < toolUses.length; i += BATCH_SIZE) {
       const batch = toolUses.slice(i, i + BATCH_SIZE);
-      const batchResults = await Promise.all(batch.map((tu, batchIdx) => this.executeOne(tu, groupId, i + batchIdx, callbacks, sessionId, proactiveOrigin, spawnDepth, abortSignal)));
+      const batchResults = await Promise.all(batch.map((tu, batchIdx) => this.executeOne(tu, groupId, i + batchIdx, callbacks, sessionId, proactiveOrigin, spawnDepth, abortSignal, permissionContext)));
       results.push(...batchResults);
     }
     return results;
@@ -322,6 +330,7 @@ export class ToolExecutor {
     proactiveOrigin?: string | null,
     spawnDepth?: number,
     abortSignal?: AbortSignal,
+    permissionContext?: ToolPermissionContext,
   ): Promise<ToolResult> {
     const startTime = Date.now();
     const meta: ToolCallMeta = { groupId, toolUseId: toolUse.id, displayOrder };
@@ -346,20 +355,74 @@ export class ToolExecutor {
       toolInput: toolUse.input,
     });
 
+    if (preResult.action === "deny") {
+      const msg = `[훅 차단] ${preResult.reason ?? "PreToolUse 훅에 의해 차단됨"}`;
+      const durationMs = Date.now() - startTime;
+      emitToolStart(callbacks, toolUse.name, toolUse.input, meta);
+      callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+      this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, permissionResult, Infinity);
+      return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+    }
+
+    const finalInput = preResult.action === "modify" && preResult.updatedInput
+      ? preResult.updatedInput
+      : toolUse.input;
+
     // ── Step 2.5: Bash AST Pre-Validator ────────────
+    //
+    // Hooks are allowed to rewrite tool inputs. Validate the final invocation,
+    // not the original provider payload, so a hook cannot approve one command
+    // and execute another.
     if (this.bashAstValidator) {
-      const bashResult = this.bashAstValidator.validate(toolUse.name, toolUse.input);
+      const bashResult = this.bashAstValidator.validate(toolUse.name, finalInput);
       if (bashResult.decision === "deny") {
         const msg = `[Bash AST 차단] ${bashResult.reason} (pattern: ${bashResult.patternId})`;
         const durationMs = Date.now() - startTime;
-        emitToolStart(callbacks, toolUse.name, toolUse.input, meta);
+        emitToolStart(callbacks, toolUse.name, finalInput, meta);
         callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-        this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, { decision: "deny", reason: bashResult.reason ?? "bash AST", layer: 0 }, Infinity);
+        this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { decision: "deny", reason: bashResult.reason ?? "bash AST", layer: 0 }, Infinity);
         return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
       }
       if (bashResult.decision === "warn") {
         log.warn(`${bashResult.reason}`);
       }
+    }
+
+    const invocationCategory = resolveInvocationCategory(tool, finalInput);
+    const targetFilePath = extractTargetFilePath(toolUse.name, finalInput);
+    const sensitivePathPattern = targetFilePath
+      ? isSensitivePath(canonicalizePathForMatch(targetFilePath))
+      : null;
+
+    if (source === "plugin" && permissionContext?.allowedPluginIds) {
+      const pluginAllowed = !!tool.pluginId && permissionContext.allowedPluginIds.has(tool.pluginId);
+      if (!pluginAllowed) {
+        const msg = `[권한 차단] 플러그인 도구 '${toolUse.name}' — 현재 실행 scope 밖의 pluginId=${tool.pluginId ?? "(unknown)"}`;
+        const durationMs = Date.now() - startTime;
+        const blockedPermission: PermissionCheckResult = {
+          decision: "deny",
+          reason: "plugin tool outside active allowed plugin scope",
+          layer: 0,
+        };
+        emitToolStart(callbacks, toolUse.name, finalInput, meta);
+        callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+        this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, blockedPermission, Infinity);
+        return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+      }
+    }
+
+    if (sensitivePathPattern) {
+      const msg = `[민감 경로 차단] 도구 '${toolUse.name}' (${source}) — ${targetFilePath} matches ${sensitivePathPattern}`;
+      const durationMs = Date.now() - startTime;
+      const blockedPermission: PermissionCheckResult = {
+        decision: "deny",
+        reason: `sensitive path hard-block: ${sensitivePathPattern}`,
+        layer: 0,
+      };
+      emitToolStart(callbacks, toolUse.name, finalInput, meta);
+      callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+      this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, blockedPermission, Infinity);
+      return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
     }
 
     // ── Step 3: Permission (source-aware) ───────────
@@ -380,7 +443,13 @@ export class ToolExecutor {
     const isAskUserQuestionShortCircuit =
       toolUse.name === "ask_user_question" && source === "builtin";
     if (this.permissionManager && !isAskUserQuestionShortCircuit) {
-      permissionResult = this.permissionManager.checkDetailed(toolUse.name, source, tool.category, proactiveOrigin);
+      permissionResult = this.permissionManager.checkDetailed(
+        toolUse.name,
+        source,
+        invocationCategory,
+        proactiveOrigin,
+        permissionContext,
+      );
       if (permissionResult.decision === "deny") {
         const msg = `[권한 차단] 도구 '${toolUse.name}' (${source}, trust:${trust}) — ${permissionResult.reason}`;
         const durationMs = Date.now() - startTime;
@@ -396,20 +465,16 @@ export class ToolExecutor {
           // sensitive-path hard-block and §S4 read-only short-circuit
           // actually fire. Previously these were missing → §S1 check
           // read `undefined` and was effectively dead code.
-          const targetFilePath = extractTargetFilePath(toolUse.name, toolUse.input);
-          const sensitivePathPattern = targetFilePath
-            ? isSensitivePath(canonicalizePathForMatch(targetFilePath))
-            : null;
           const approvalRequest = {
             id: randomUUID(),
             category: "tool" as const,
             toolName: toolUse.name,
-            args: toolUse.input,
+            args: finalInput,
             reason: permissionResult.reason,
             source: source as "builtin" | "plugin" | "mcp",
             createdAt: Date.now(),
             ...(targetFilePath ? { target: { filePath: targetFilePath } } : {}),
-            isReadOnly: READ_ONLY_TOOL_NAMES.has(toolUse.name),
+            isReadOnly: invocationCategory === "read",
             mode: this.currentApprovalMode(),
             sensitivePathPattern,
           };
@@ -459,20 +524,6 @@ export class ToolExecutor {
         }
       }
     }
-
-    // ── Step 4: Hook Override ───────────────────────
-    if (preResult.action === "deny") {
-      const msg = `[훅 차단] ${preResult.reason ?? "PreToolUse 훅에 의해 차단됨"}`;
-      const durationMs = Date.now() - startTime;
-      emitToolStart(callbacks, toolUse.name, toolUse.input, meta);
-      callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-      this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, permissionResult, Infinity);
-      return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
-    }
-
-    const finalInput = preResult.action === "modify" && preResult.updatedInput
-      ? preResult.updatedInput
-      : toolUse.input;
 
     // ── Step 5: Rate Limit (trust별) ────────────────
     const rateResult = this.rateLimiter.check(toolUse.name, trust);

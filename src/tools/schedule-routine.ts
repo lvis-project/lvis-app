@@ -110,6 +110,14 @@ function parseSchedule(raw: unknown): RoutineSchedule | null {
   };
 }
 
+function parseAllowedPlugins(raw: unknown): string[] | null {
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw)) return null;
+  const ids = raw.map((v) => (typeof v === "string" ? v.trim() : ""));
+  if (ids.some((v) => !v || !/^[a-z0-9][a-z0-9_.-]*$/i.test(v))) return null;
+  return [...new Set(ids)];
+}
+
 export function createScheduleRoutineTool(store: RoutinesStore): Tool {
   return createDynamicTool({
     name: "schedule_routine",
@@ -168,6 +176,12 @@ export function createScheduleRoutineTool(store: RoutinesStore): Tool {
           type: "string",
           description: "execution=notification-only 시 알림 본문",
         },
+        allowedPlugins: {
+          type: "array",
+          description:
+            "execution=llm-session 루틴에서 노출할 플러그인 id 목록. 미지정 또는 []이면 플러그인 도구를 사용하지 않습니다.",
+          items: { type: "string" },
+        },
       },
     },
     execute: async (rawInput) => {
@@ -223,6 +237,13 @@ export function createScheduleRoutineTool(store: RoutinesStore): Tool {
         : undefined;
 
       const title = typeof a.title === "string" ? a.title.trim() : undefined;
+      const allowedPlugins = parseAllowedPlugins(a.allowedPlugins);
+      if (!allowedPlugins) {
+        return {
+          output: JSON.stringify({ error: "allowedPlugins must be an array of valid plugin id strings" }),
+          isError: true,
+        };
+      }
 
       try {
         const record = await store.add({
@@ -233,6 +254,7 @@ export function createScheduleRoutineTool(store: RoutinesStore): Tool {
           title,
           notificationTitle,
           notificationBody,
+          ...(allowedPlugins.length > 0 ? { allowedPlugins } : {}),
         });
         return {
           output: JSON.stringify({ routineId: record.id, schedule: record.schedule }),

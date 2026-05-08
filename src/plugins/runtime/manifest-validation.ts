@@ -363,6 +363,19 @@ export async function parsePluginJson(
         `remove the key or add '${k}' to tools[]`,
       );
     }
+    const category = parsed.toolSchemas?.[k]?.category;
+    if (
+      category !== undefined &&
+      category !== "read" &&
+      category !== "write" &&
+      category !== "dangerous"
+    ) {
+      fail(
+        `toolSchemas['${k}'].category`,
+        "must be one of read, write, dangerous",
+        `"toolSchemas": { "${k}": { "description": "...", "category": "read", "inputSchema": { "type": "object", "properties": {} } } }`,
+      );
+    }
   }
 
   // Phase 5 §3 — notificationEvents[i].event should be in eventSubscriptions (soft warn).
