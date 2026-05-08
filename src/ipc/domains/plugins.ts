@@ -21,6 +21,7 @@ import { resolvePluginPaths } from "../../plugins/plugin-paths.js";
 import { readPluginRegistry } from "../../plugins/registry.js";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized, validatePluginFrame } from "../gated.js";
 import type { IpcDeps } from "../types.js";
+import { BUNDLE_IDS } from "../../shared/theme-bundles.js";
 import { createLogger } from "../../lib/logger.js";
 import { plog, PluginPhase } from "../../plugins/lifecycle-log.js";
 import { redactFsPath, redactAuditPayload } from "../../audit/dlp-filter.js";
@@ -228,10 +229,8 @@ const ALLOWED_THEMES = new Set(["light", "dark", "high-contrast"]);
 const ALLOWED_CHAT_THEMES = new Set(["default", "lg", "purple", "orange", "blue"]);
 const ALLOWED_CODE_THEMES = new Set(["light", "dark"]);
 // v2: bundle IDs that are valid for plugin theme propagation.
-// Must stay in sync with src/ui/renderer/theme/bundles/index.ts BUNDLES.
-const ALLOWED_BUNDLE_IDS = new Set([
-  "tokyo-night", "midnight", "forest", "lge-light", "lge-dark", "high-contrast",
-]);
+// §C3: single source from src/shared/theme-bundles.ts — no manual sync needed.
+const ALLOWED_BUNDLE_IDS = new Set<string>(BUNDLE_IDS);
 const ALLOWED_SHELLS = new Set(["light", "dark"]);
 // Host SoT: runtime validation stays in-app so main-process code never depends
 // on SDK runtime values. The SDK republishes the same contract for plugin

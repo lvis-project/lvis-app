@@ -23,6 +23,7 @@ import {
   type LLMVendor,
   type LLMVendorSettings,
 } from "../shared/llm-vendor-defaults.js";
+import { BUNDLE_IDS, DEFAULT_BUNDLE_ID } from "../shared/theme-bundles.js";
 import { createLogger } from "../lib/logger.js";
 const log = createLogger("settings");
 
@@ -358,7 +359,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   },
   appearance: {
     schemaVersion: 2,
-    bundleId: "tokyo-night",
+    bundleId: DEFAULT_BUNDLE_ID,
   },
   webView: {
     preferredFlow: "in-app",
@@ -698,10 +699,8 @@ function mergeLlmPatch(base: LLMSettings, partial: LLMSettingsPatch): LLMSetting
 const VALID_THEMES_V1: readonly ThemePreference[] = ["system", "light", "dark", "high-contrast"];
 const VALID_CHAT_THEMES_V1: readonly ChatThemePreference[] = ["default", "lg", "purple", "orange", "blue"];
 
-/** All valid bundle IDs — checked at runtime to avoid importing the renderer bundle registry into main. */
-const VALID_BUNDLE_IDS: readonly string[] = [
-  "tokyo-night", "midnight", "forest", "lge-light", "lge-dark", "high-contrast",
-];
+/** All valid bundle IDs — §C3: single source from src/shared/theme-bundles.ts. */
+const VALID_BUNDLE_IDS: readonly string[] = BUNDLE_IDS;
 
 /**
  * Migrate a v1 tri-axis appearance object to a v2 bundleId.
@@ -767,7 +766,7 @@ function normalizeAppearance(input: unknown): AppearanceSettings {
     const bundleId =
       typeof obj.bundleId === "string" && VALID_BUNDLE_IDS.includes(obj.bundleId)
         ? obj.bundleId
-        : "tokyo-night";
+        : DEFAULT_BUNDLE_ID;
     const followSystem = typeof obj.followSystem === "boolean" ? obj.followSystem : undefined;
     const result: AppearanceSettings = { schemaVersion: 2, bundleId };
     if (followSystem !== undefined) result.followSystem = followSystem;
