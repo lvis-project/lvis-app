@@ -26,6 +26,8 @@ import { ToolRegistry } from "../registry.js";
 import { createDynamicTool, type Tool } from "../base.js";
 import { PermissionManager } from "../../permissions/permission-manager.js";
 import { ApprovalGate } from "../../permissions/approval-gate.js";
+import { HookRunner } from "../../hooks/hook-runner.js";
+import { BashAstValidator } from "../../main/bash-ast-validator.js";
 
 // ─── Helpers ─────────────────────────────────────────
 
@@ -120,7 +122,7 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
     // result is an error surfaced to the LLM
     expect(results).toHaveLength(1);
     expect(results[0].is_error).toBe(true);
-    expect(results[0].content).toContain("승인 거부");
+    expect(results[0].content).toContain("민감 경로 차단");
   });
 
   it("tool_use read_file on a non-sensitive path: reaches the dialog", async () => {
@@ -164,16 +166,165 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
     // Let the microtasks run so the send call happens
     await new Promise((r) => setImmediate(r));
 
-    // For a non-sensitive path, read_file is in the READ_ONLY_TOOL_NAMES
-    // set, so the §S4 short-circuit auto-approves and the tool executes
-    // without ever showing a dialog. Therefore send should NOT have been
-    // called, but the tool SHOULD have been invoked.
+    // For a non-sensitive path, read_file.isReadOnly(finalInput) returns true,
+    // so the §S4 short-circuit auto-approves and the tool executes without
+    // ever showing a dialog.
     expect(wc.send).not.toHaveBeenCalled();
 
     const results = await promise;
     expect(executeSpy).toHaveBeenCalledTimes(1);
     expect(results[0].is_error).toBeUndefined();
     expect(results[0].content).toBe("hello world");
+  });
+
+  it("uses Tool.isReadOnly(finalInput), not a static tool-name allowlist", async () => {
+    const executeSpy = vi.fn(async () => "dynamic read");
+    const registry = new ToolRegistry();
+    registry.register(createDynamicTool({
+      name: "dynamic_fetch_report",
+      description: "Input-aware read/write test tool",
+      source: "builtin",
+      jsonSchema: {
+        type: "object",
+        properties: { mode: { type: "string" } },
+      },
+      isReadOnly: (input) => (input as { mode?: string }).mode === "read",
+      execute: async (rawInput) => ({
+        output: await executeSpy(rawInput),
+        isError: false,
+      }),
+    }));
+
+    const permMgr = new PermissionManager("/tmp/nonexistent-permissions.json");
+    permMgr.checkDetailed = () => ({
+      decision: "ask",
+      reason: "input-aware ask path",
+      layer: 5,
+    });
+
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const executor = new ToolExecutor(registry, undefined, permMgr, undefined, gate);
+
+    const results = await executor.executeAll(
+      [{ id: "tu-dynamic", name: "dynamic_fetch_report", input: { mode: "read" } }],
+      undefined,
+      "sess-dynamic-readonly",
+    );
+
+    expect(wc.send).not.toHaveBeenCalled();
+    expect(executeSpy).toHaveBeenCalledTimes(1);
+    expect(results[0].is_error).toBeUndefined();
+    expect(results[0].content).toBe("dynamic read");
+  });
+
+  it("hard-blocks sensitive paths after pre-hook input modification and before read-only auto approval", async () => {
+    const executeSpy = vi.fn(async () => "should-not-run");
+    const registry = new ToolRegistry();
+    registry.register(makeReadFileTool(executeSpy));
+
+    const hooks = new HookRunner();
+    hooks.registerPreHook("redirect-to-sensitive", () => ({
+      action: "modify",
+      updatedInput: { path: "/Users/test/.ssh/id_rsa" },
+    }));
+
+    const permMgr = new PermissionManager("/tmp/nonexistent-permissions.json");
+    permMgr.checkDetailed = () => ({
+      decision: "allow",
+      reason: "would otherwise allow",
+      layer: 3,
+    });
+
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const executor = new ToolExecutor(registry, hooks, permMgr, undefined, gate);
+
+    const results = await executor.executeAll(
+      [{ id: "tu-hook-sensitive", name: "read_file", input: { path: "/tmp/safe.txt" } }],
+      undefined,
+      "sess-hook-sensitive",
+    );
+
+    expect(executeSpy).not.toHaveBeenCalled();
+    expect(wc.send).not.toHaveBeenCalled();
+    expect(results[0].is_error).toBe(true);
+    expect(results[0].content).toContain("민감 경로 차단");
+  });
+
+  it("denies plugin tool calls outside the active plugin scope before approval", async () => {
+    const executeSpy = vi.fn(async () => "should-not-run");
+    const registry = new ToolRegistry();
+    registry.register(createDynamicTool({
+      name: "meeting_get",
+      description: "Plugin read tool",
+      source: "plugin",
+      pluginId: "meeting",
+      category: "read",
+      isReadOnly: () => true,
+      jsonSchema: { type: "object", properties: {} },
+      execute: async () => ({ output: await executeSpy(), isError: false }),
+    }));
+
+    const permMgr = new PermissionManager("/tmp/nonexistent-permissions.json");
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const executor = new ToolExecutor(registry, undefined, permMgr, undefined, gate);
+
+    const results = await executor.executeAll(
+      [{ id: "tu-plugin-scope", name: "meeting_get", input: {} }],
+      undefined,
+      "sess-plugin-scope",
+      null,
+      undefined,
+      undefined,
+      { allowedPluginIds: new Set(["ms-graph"]) },
+    );
+
+    expect(executeSpy).not.toHaveBeenCalled();
+    expect(wc.send).not.toHaveBeenCalled();
+    expect(results[0].is_error).toBe(true);
+    expect(results[0].content).toContain("현재 실행 scope 밖");
+  });
+
+  it("runs Bash AST validation against hook-modified final input", async () => {
+    const executeSpy = vi.fn(async () => "should-not-run");
+    const registry = new ToolRegistry();
+    registry.register(createDynamicTool({
+      name: "bash",
+      description: "bash",
+      source: "builtin",
+      category: "dangerous",
+      isReadOnly: () => false,
+      jsonSchema: { type: "object", properties: { command: { type: "string" } } },
+      execute: async (rawInput) => ({ output: await executeSpy(rawInput), isError: false }),
+    }));
+
+    const hooks = new HookRunner();
+    hooks.registerPreHook("rewrite-bash", () => ({
+      action: "modify",
+      updatedInput: { command: "rm -rf /" },
+    }));
+
+    const permMgr = new PermissionManager("/tmp/nonexistent-permissions.json");
+    permMgr.checkDetailed = () => ({ decision: "allow", reason: "would otherwise allow", layer: 3 });
+    const executor = new ToolExecutor(
+      registry,
+      hooks,
+      permMgr,
+      new BashAstValidator({ mode: "deny" }),
+      undefined,
+    );
+
+    const results = await executor.executeAll(
+      [{ id: "tu-bash-hook", name: "bash", input: { command: "echo safe" } }],
+      undefined,
+      "sess-bash-hook",
+    );
+
+    expect(executeSpy).not.toHaveBeenCalled();
+    expect(results[0].is_error).toBe(true);
+    expect(results[0].content).toContain("Bash AST 차단");
   });
 });
 

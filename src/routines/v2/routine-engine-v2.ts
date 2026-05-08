@@ -15,6 +15,7 @@ export interface RoutineV2RunInput {
   trigger: "shutdown" | "schedule";
   prePrompt: string;
   title?: string;
+  allowedPlugins?: string[];
   /**
    * Q9: absolute path to the pre-created JSONL file for this routine fire.
    * When provided, the engine appends history messages here so
@@ -40,7 +41,7 @@ export interface RoutineV2Result {
 
 export interface RoutineEngineV2Deps {
   /** Called once per routine fire to produce a fresh, isolated ConversationLoop. */
-  createConversationLoop: () => ConversationLoop;
+  createConversationLoop: (input: RoutineV2RunInput) => ConversationLoop;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -72,7 +73,7 @@ export class RoutineEngineV2 {
   async runRoutine(input: RoutineV2RunInput): Promise<RoutineV2Result> {
     const generatedAt = new Date().toISOString();
     // Q9: each fire gets its own loop — no history sharing with main chat.
-    const loop = this.deps.createConversationLoop();
+    const loop = this.deps.createConversationLoop(input);
     const sessionId = loop.getSessionId();
 
     let summary = "";

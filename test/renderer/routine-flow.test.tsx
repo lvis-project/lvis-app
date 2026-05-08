@@ -2,7 +2,8 @@
  * Phase 3.3 safety net — routine result card lifecycle.
  *
  * onRoutineFiredV2 delivery + dismiss IPC. Snooze IPC was removed in PR
- * #626 (Routine v2) — see OverlayCard.tsx comment.
+ * #626 (Routine v2) — see OverlayCard.tsx comment. Also covers result-view
+ * action wiring for routine results with session paths.
  */
 import "./setup.js";
 import { describe, it, expect, vi, afterEach } from "vitest";
@@ -92,6 +93,24 @@ describe("Routine flow (Phase 3.3 regression net)", () => {
   // previous "snooze trigger button is rendered with the new label" test
   // pointed at a `routine-card-snooze-trigger` data-testid that no longer
   // exists; deleting the orphan rather than leaving it to fail every run.
+  it("renders the result-view action for routines with a session path", async () => {
+    const { container, emitRoutineFiredV2 } = await renderApp();
+    await act(async () => {
+      emitRoutineFiredV2({
+        ...makeRoutineResult(),
+        routineSessionPath: "/tmp/routine-session.jsonl",
+      });
+    });
+    const card = await waitFor(() => {
+      const el = container.querySelector('[data-testid="routine-card"]');
+      if (!el) throw new Error("card not rendered");
+      return el;
+    });
+    expect(card.querySelector('[data-testid="routine-card-snooze-trigger"]')).toBeFalsy();
+    const primary = card.querySelector('[data-testid="overlay-card-primary-action"]');
+    expect(primary).toBeTruthy();
+    expect(primary?.textContent).toContain("결과 보기");
+  });
 
   it("stacks results with distinct routineIds and shows the index indicator", async () => {
     const { container, emitRoutineFiredV2 } = await renderApp();

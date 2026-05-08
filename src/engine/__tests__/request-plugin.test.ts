@@ -33,6 +33,7 @@ class RecordingProvider implements LLMProvider {
 function makeLoop(opts: {
   provider: LLMProvider;
   availablePluginIds: string[];
+  allowedPluginIds?: string[];
 }): ConversationLoop {
   const toolRegistry = new ToolRegistry();
   // request_plugin builtin (source=builtin so scope filter includes it)
@@ -81,6 +82,7 @@ function makeLoop(opts: {
     pluginRuntime: {
       listPluginIds: () => opts.availablePluginIds,
     },
+    ...(opts.allowedPluginIds ? { allowedPluginIds: new Set(opts.allowedPluginIds) } : {}),
   } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
   (loop as { provider: LLMProvider | null }).provider = opts.provider;
   return loop;
@@ -163,5 +165,31 @@ describe("ConversationLoop — request_plugin meta tool (Option C)", () => {
     expect(toolResults[1].isError).not.toBe(true);
     expect(toolResults[2].isError).toBe(true);
     expect(toolResults[2].content).toContain("한도 초과");
+  });
+
+  it("rejects request_plugin outside the loop allowedPluginIds scope", async () => {
+    const provider = new RecordingProvider([
+      [
+        { type: "tool_call", id: "tu-1", name: "request_plugin", input: { pluginId: "com.lge.meeting" } },
+        { type: "message_complete", stopReason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "blocked" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const loop = makeLoop({
+      provider,
+      availablePluginIds: ["com.lge.meeting"],
+      allowedPluginIds: [],
+    });
+
+    await loop.runTurn("일반 질문");
+
+    expect(provider.observedToolNames[0]).not.toContain("meeting_start");
+    const messages = loop.getHistory().getMessages();
+    const toolResult = messages.find((m) => m.role === "tool_result") as { content: string; isError?: boolean } | undefined;
+    expect(toolResult?.isError).toBe(true);
+    expect(toolResult?.content).toContain("알 수 없는 플러그인 ID");
   });
 });

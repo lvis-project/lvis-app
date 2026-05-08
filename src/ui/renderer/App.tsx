@@ -151,6 +151,7 @@ export function App() {
         title: evt.title,
         summary: evt.summary,
         running: false,
+        routineSessionPath: evt.routineSessionPath,
       });
     });
 
