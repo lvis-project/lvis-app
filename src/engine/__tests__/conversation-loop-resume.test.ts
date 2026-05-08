@@ -185,19 +185,17 @@ describe("ConversationLoop.manualCompact — Major Fix callbacks", () => {
     } as unknown as ConversationLoopDeps["memoryManager"];
   }
 
-  it("no-op (short history): compacted:false, onCompactOccurred NOT called", async () => {
+  it("no-op (short history): compacted:false", async () => {
     const mem = makeMemoryManagerWithCheckpoint();
     const loop = new ConversationLoop(makeDeps({ memoryManager: mem }));
-    const onCompactOccurred = vi.fn();
 
     // Provider 없으면 early-return — 짧은 history 로 충분히 no-op 검증
     const result = await loop.manualCompact();
 
     expect(result.compacted).toBe(false);
-    expect(onCompactOccurred).not.toHaveBeenCalled();
   });
 
-  it("Major Fix #2: manualCompact calls onCompactOccurred after successful compact", async () => {
+  it("manualCompact appends Layer 3 checkpoint + persists summary", async () => {
     // Long enough history to trigger compact
     const longHistory = makeLongHistory(40);
     const mem = makeMemoryManagerWithCheckpoint();
@@ -211,8 +209,6 @@ describe("ConversationLoop.manualCompact — Major Fix callbacks", () => {
 
     const loop = new ConversationLoop(makeDeps({ memoryManager: memWithHistory }));
     loop.resetAndResume("test-session-id");
-
-    const onCompactOccurred = vi.fn();
 
     // Inject a fake provider that returns a valid 12-section summary
     const fakeSummary = [
@@ -242,12 +238,8 @@ describe("ConversationLoop.manualCompact — Major Fix callbacks", () => {
     const result = await loop.manualCompact();
 
     if (result.compacted) {
-      // onCompactOccurred must have been called — Major Fix #2 (renderer compact_notice)
-      // Note: runTurn callbacks path; manualCompact internal path uses applyBoundaryToSession
-      // which calls callbacks?.onCompactOccurred — but manualCompact has no callbacks param.
-      // The fix wires applyBoundaryToSession(result, "manual", estimated, undefined) — so
-      // onCompactOccurred is NOT fired via external callbacks but is available via runTurn callbacks.
-      // This test validates that result.compacted is true and the checkpoint was persisted.
+      // manualCompact 는 callbacks 파라미터가 없으므로 onCompactOccurred 는 호출 안 됨.
+      // 이 테스트는 Layer 3 checkpoint 영속화 (appendCheckpoint + saveSessionMetadata) 를 검증.
       expect(result.compacted).toBe(true);
       expect(result.removedMessageCount).toBeGreaterThan(0);
       // Layer 3: appendCheckpoint and saveSessionMetadata must have been called

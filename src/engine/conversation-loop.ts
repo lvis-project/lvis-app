@@ -561,7 +561,7 @@ export class ConversationLoop {
       }
 
       const estimated = estimateMessagesTokens(messagesBefore);
-      await this.applyBoundaryToSession(result, "manual", estimated, undefined);
+      await this.applyBoundaryToSession(result, "manual", estimated, undefined, messagesBefore.length);
 
       // 영속화 — manualCompact 완료 시점에 즉시 disk 반영. saveSession 실패는
       // 사용자 가시 결과에 영향 X (next turn 에서도 compact 결과 보존됨).
@@ -1344,6 +1344,8 @@ export class ConversationLoop {
     trigger: "auto-compact" | "manual",
     estimatedBefore: number,
     callbacks?: TurnCallbacks,
+    /** compact 직전 history 길이 — messageCountAtTrigger 에 기록 (origin count). */
+    prevMessageCount?: number,
   ): Promise<void> {
     this.compactNum = result.boundary.compactNum;
     this.history.clear();
@@ -1371,7 +1373,7 @@ export class ConversationLoop {
         trigger,
         ctxUsageAtTrigger,
         summary: preamble,
-        messageCountAtTrigger: result.removedCount + result.newHistory.length,
+        messageCountAtTrigger: prevMessageCount ?? result.removedCount + result.newHistory.length,
         compactNum: this.compactNum,
       };
       const existingMeta = this.deps.memoryManager.loadSessionMetadata(this.sessionId) ?? {};
@@ -1383,7 +1385,7 @@ export class ConversationLoop {
 
     callbacks?.onCompactOccurred?.({
       removedMessages: result.removedCount,
-      freedTokens: estimatedBefore - result.estimatedAfter,
+      freedTokens: Math.max(0, estimatedBefore - result.estimatedAfter),
       tier: trigger,
       summary: preamble,
     });
@@ -1448,7 +1450,7 @@ export class ConversationLoop {
       }
 
       // P1 sync chain — 다음 step 6 PROMPT_ASSEMBLE 가 새 boundary 를 read 해야 함.
-      await this.applyBoundaryToSession(compactResult, "auto-compact", estimated, callbacks);
+      await this.applyBoundaryToSession(compactResult, "auto-compact", estimated, callbacks, messagesBefore.length);
 
       log.info(
         `preflight: APPLIED — removed=${compactResult.removedCount} estimatedAfter=${compactResult.estimatedAfter} compactNum=${this.compactNum}`,
