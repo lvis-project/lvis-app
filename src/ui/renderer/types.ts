@@ -288,6 +288,8 @@ export type LvisApi = {
   chatCompact: () => Promise<{ compacted: boolean; compactedAt: string | null; summary: string; removedMessageCount: number }>;
   chatSessionResume: (sessionId: string) => Promise<{ ok: boolean; compacted: boolean; compactedAt: string | null; removedMessageCount: number }>;
   // §PR-5: Layer 3 View-Mode + Branch
+  // Note: enter/branch return discriminated unions without `ok`; exit follows the
+  // standard { ok: boolean } pattern. Callers guard with `"error" in result`.
   chatEnterCheckpointView: (sessionId: string, compactNum: number) => Promise<{ messageIndexAtCreation: number } | { error: string }>;
   chatExitCheckpointView: () => Promise<{ ok: boolean }>;
   chatBranchFromCheckpoint: (sessionId: string, compactNum: number) => Promise<{ newSessionId: string } | { error: string }>;

@@ -418,6 +418,13 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
   const [forkToast, setForkToast] = useState<string | null>(null);
   const forkToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // §PR-5: cleanup fork toast timer on unmount to avoid setState-after-unmount
+  useEffect(() => {
+    return () => {
+      if (forkToastTimerRef.current) clearTimeout(forkToastTimerRef.current);
+    };
+  }, []);
+
   // §PR-5: in view-mode, show only the sliced entries up to the checkpoint.
   const visibleEntries = useMemo(
     () => viewMode ? entries.slice(0, viewMode.slicedRangeEnd) : entries,

@@ -133,9 +133,10 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     }),
     chatEditResend: vi.fn(async () => ({ ok: true })),
     chatFork: vi.fn(async () => ({ ok: true, sessionId: currentSession })),
-    chatEnterCheckpointView: vi.fn(async (_sessionId: string, _compactNum: number) => ({ ok: true, messageIndexAtCreation: 5 })),
+    // §PR-5: shapes match actual preload/IPC return types exactly (no `ok` on enter/branch)
+    chatEnterCheckpointView: vi.fn(async (_sessionId: string, _compactNum: number) => ({ messageIndexAtCreation: 5 })),
     chatExitCheckpointView: vi.fn(async () => ({ ok: true })),
-    chatBranchFromCheckpoint: vi.fn(async (_sessionId: string, _compactNum: number) => ({ ok: true, newSessionId: "sess-branch-1" })),
+    chatBranchFromCheckpoint: vi.fn(async (_sessionId: string, _compactNum: number) => ({ newSessionId: "sess-branch-1" })),
     chatRetryEffort: vi.fn(async () => ({ ok: true })),
     chatExport: vi.fn(async () => ({ ok: true, filePath: "/tmp/out.md" })),
     onChatStream: vi.fn((h: (ev: unknown) => void) => {

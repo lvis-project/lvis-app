@@ -116,13 +116,16 @@ export function Sidebar(props: SidebarProps) {
                   <TooltipTrigger asChild>
                     <button
                       data-testid={`branch-session-${s.id}`}
+                      aria-label={`분기 세션: ${s.title}`}
                       className="branch-session-item flex w-full items-center gap-1 rounded px-1 py-0.5 text-left text-xs hover:bg-accent hover:text-accent-foreground"
                       onClick={() => onLoadSession?.(s.id)}
-                      title={s.title}
                     >
                       <GitBranch className="h-3 w-3 shrink-0 text-[hsl(var(--action-branch))]" />
                       <span className="branch-badge ml-0.5 rounded bg-[hsl(var(--action-branch)/0.15)] px-1 text-[9px] font-medium text-[hsl(var(--action-branch))]">
                         branch
+                      </span>
+                      <span className="min-w-0 flex-1 truncate text-[9px] text-foreground/70">
+                        {s.title}
                       </span>
                     </button>
                   </TooltipTrigger>

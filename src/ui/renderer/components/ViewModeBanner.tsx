@@ -11,7 +11,10 @@
 
 export interface ViewModeState {
   compactNum: number;
-  /** message slice end index — messages.slice(0, slicedRangeEnd) */
+  /**
+   * Exclusive slice end — use as `messages.slice(0, slicedRangeEnd)`.
+   * Equal to `messageCountAtTrigger` stored in the checkpoint metadata.
+   */
   slicedRangeEnd: number;
 }
 
@@ -37,7 +40,7 @@ export function ViewModeBanner({
           📖 #{viewMode.compactNum} 시점 보기 모드
         </span>
         <span className="text-[10px] text-muted-foreground">
-          slice [0..{viewMode.slicedRangeEnd}] · 이 시점 이후 메시지는 숨겨짐
+          첫 {viewMode.slicedRangeEnd}개 메시지 · 이 시점 이후 메시지는 숨겨짐
         </span>
       </div>
       <button

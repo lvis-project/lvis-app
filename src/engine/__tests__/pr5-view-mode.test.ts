@@ -102,10 +102,10 @@ describe("ConversationLoop §PR-5 branchFromCheckpoint", () => {
     // New session id is a UUID
     expect(newSessionId).toMatch(/^[0-9a-f-]{36}$/);
 
-    // Saved messages are sliced to messageCountAtTrigger (2)
+    // Saved messages are sliced to exactly messageCountAtTrigger (2)
     const saved = savedSessions.get(newSessionId) as unknown[] | undefined;
     expect(saved).toBeDefined();
-    expect(saved!.length).toBeLessThanOrEqual(2);
+    expect(saved!.length).toBe(2);
 
     // Metadata includes parentSessionId and branchedFromCompactNum
     const meta = savedMetadata.get(newSessionId) as Record<string, unknown> | undefined;
