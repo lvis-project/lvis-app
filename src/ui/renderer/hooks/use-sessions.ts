@@ -7,6 +7,14 @@ export interface SessionSummary {
   id: string;
   modifiedAt: string;
   title: string;
+  /**
+   * §PR-5: ID of the previous session in this chain.
+   * This field is set for all chained sessions (resume, rotation, and checkpoint forks).
+   * Check branchedFromCompactNum to determine if this is a true checkpoint fork.
+   */
+  parentSessionId?: string;
+  /** §PR-5: compact number of the checkpoint this session was forked from. Only set on true checkpoint forks. */
+  branchedFromCompactNum?: number;
 }
 
 /**

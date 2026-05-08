@@ -2,6 +2,23 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ─── §PR-5: View-Mode + Branch action tokens ───────────────────────────────
+   Semantic action color tokens used by CheckpointDivider buttons and
+   ViewModeBanner. Defined here so PR-4 (feat/pr4-ui-lazyload) can reference
+   the same tokens without duplication.
+
+   --action-view:    "view this point" — violet (reading / passive)
+   --action-branch:  "restart from here" — orange (destructive-adjacent / active)
+   --action-compact: "compact now" — blue (neutral, matches default checkpoint tier)
+─────────────────────────────────────────────────────────────────────────────── */
+@layer base {
+  :root {
+    --action-view:    262 83% 58%;   /* violet-500 */
+    --action-branch:  25  95% 53%;   /* orange-500 */
+    --action-compact: 217 91% 60%;   /* blue-400 */
+  }
+}
+
 /* ─── Plugin grid (PluginGridButton v3) ─────────────────────────────────────
    .plugin-cell transition + installing overlay pulse. Tailwind's animate-spin
    covers the spinner; cellPulse dims installing cells so they read as "busy".
