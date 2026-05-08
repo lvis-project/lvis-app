@@ -162,6 +162,34 @@ export interface ToolExecutorCallbacks {
   ) => void;
 }
 
+function maskDisplayValue(value: unknown): unknown {
+  if (typeof value === "string") {
+    return maskSensitiveData(value).masked;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => maskDisplayValue(item));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, maskDisplayValue(item)]),
+    );
+  }
+  return value;
+}
+
+function maskToolInputForDisplay(input: Record<string, unknown>): Record<string, unknown> {
+  return maskDisplayValue(input) as Record<string, unknown>;
+}
+
+function emitToolStart(
+  callbacks: ToolExecutorCallbacks | undefined,
+  name: string,
+  input: Record<string, unknown>,
+  meta: ToolCallMeta,
+): void {
+  callbacks?.onToolStart?.(name, maskToolInputForDisplay(input), meta);
+}
+
 // ─── Rate Limiter (tool-governance.md §9) ──────────
 
 interface RateBucket {
@@ -324,7 +352,7 @@ export class ToolExecutor {
       if (bashResult.decision === "deny") {
         const msg = `[Bash AST 차단] ${bashResult.reason} (pattern: ${bashResult.patternId})`;
         const durationMs = Date.now() - startTime;
-        callbacks?.onToolStart?.(toolUse.name, toolUse.input, meta);
+        emitToolStart(callbacks, toolUse.name, toolUse.input, meta);
         callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
         this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, { decision: "deny", reason: bashResult.reason ?? "bash AST", layer: 0 }, Infinity);
         return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
@@ -356,7 +384,7 @@ export class ToolExecutor {
       if (permissionResult.decision === "deny") {
         const msg = `[권한 차단] 도구 '${toolUse.name}' (${source}, trust:${trust}) — ${permissionResult.reason}`;
         const durationMs = Date.now() - startTime;
-        callbacks?.onToolStart?.(toolUse.name, toolUse.input, meta);
+        emitToolStart(callbacks, toolUse.name, toolUse.input, meta);
         callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
         this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, permissionResult, Infinity);
         return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
@@ -393,7 +421,7 @@ export class ToolExecutor {
           } catch (approvalErr) {
             const msg = `[승인 오류] 도구 '${toolUse.name}' — 승인 게이트 내부 오류: ${approvalErr instanceof Error ? approvalErr.message : String(approvalErr)}`;
             const durationMs = Date.now() - startTime;
-            callbacks?.onToolStart?.(toolUse.name, toolUse.input, meta);
+            emitToolStart(callbacks, toolUse.name, toolUse.input, meta);
             callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
             this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, permissionResult, Infinity);
             return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
@@ -407,7 +435,7 @@ export class ToolExecutor {
             }
             const msg = `[승인 거부] 도구 '${toolUse.name}' — 사용자가 실행을 거부했습니다.`;
             const durationMs = Date.now() - startTime;
-            callbacks?.onToolStart?.(toolUse.name, toolUse.input, meta);
+            emitToolStart(callbacks, toolUse.name, toolUse.input, meta);
             callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
             this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, permissionResult, Infinity);
             return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
@@ -424,7 +452,7 @@ export class ToolExecutor {
           const msg = `[승인 게이트 미연결] 도구 '${toolUse.name}' (${source}) — ask 결정이지만 승인 게이트가 없어 차단. ${permissionResult.reason}`;
           const durationMs = Date.now() - startTime;
           log.error(msg);
-          callbacks?.onToolStart?.(toolUse.name, toolUse.input, meta);
+          emitToolStart(callbacks, toolUse.name, toolUse.input, meta);
           callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
           this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, permissionResult, Infinity);
           return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
@@ -436,7 +464,7 @@ export class ToolExecutor {
     if (preResult.action === "deny") {
       const msg = `[훅 차단] ${preResult.reason ?? "PreToolUse 훅에 의해 차단됨"}`;
       const durationMs = Date.now() - startTime;
-      callbacks?.onToolStart?.(toolUse.name, toolUse.input, meta);
+      emitToolStart(callbacks, toolUse.name, toolUse.input, meta);
       callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
       this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, permissionResult, Infinity);
       return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
@@ -451,13 +479,13 @@ export class ToolExecutor {
     if (!rateResult.allowed) {
       const msg = `[속도 제한] 도구 '${toolUse.name}' (trust:${trust}) 호출 빈도 초과. 잠시 후 다시 시도해주세요.`;
       const durationMs = Date.now() - startTime;
-      callbacks?.onToolStart?.(toolUse.name, finalInput, meta);
+      emitToolStart(callbacks, toolUse.name, finalInput, meta);
       callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
       this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, permissionResult, 0);
       return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
     }
 
-    callbacks?.onToolStart?.(toolUse.name, finalInput, meta);
+    emitToolStart(callbacks, toolUse.name, finalInput, meta);
 
     // ── Step 6: Execute ─────────────────────────────
     let content: string;
@@ -504,9 +532,17 @@ export class ToolExecutor {
     if (preResult.feedback) content = `${content}\n\n[Pre-Hook Note]\n${preResult.feedback}`;
 
     // ── Step 7b: DLP 민감 데이터 마스킹 ────────────
+    //
+    // The tool_result content is part of the machine channel consumed by
+    // the next LLM round. Do not mutate it with display/audit redactions:
+    // user-provided operational data such as an email recipient must remain
+    // available to later tools. DLP applies only to renderer callbacks and
+    // audit entries.
+    let displayContent = content;
     const dlpResult = maskSensitiveData(content);
     if (dlpResult.detections.length > 0) {
-      content = dlpResult.masked;
+      displayContent = dlpResult.masked;
+      const dlpAuditInput = maskSensitiveData(JSON.stringify(finalInput)).masked;
       log.warn(
         `민감 데이터 탐지 및 마스킹 — 도구: '${toolUse.name}', 패턴: ${dlpResult.detections.join(", ")}`,
       );
@@ -514,7 +550,7 @@ export class ToolExecutor {
         timestamp: new Date().toISOString(),
         sessionId: sessionId ?? "unknown",
         type: "tool_call",
-        input: JSON.stringify(finalInput).slice(0, 500),
+        input: dlpAuditInput.slice(0, 500),
         output: `[DLP 마스킹 적용] 패턴: ${dlpResult.detections.join(", ")}`,
         toolCalls: [{
           name: toolUse.name,
@@ -530,7 +566,7 @@ export class ToolExecutor {
 
     // ── Step 8: Audit + Result (항상 실행) ──────────
     const durationMs = Date.now() - startTime;
-    callbacks?.onToolEnd?.(toolUse.name, content, isError, meta, uiPayload, durationMs);
+    callbacks?.onToolEnd?.(toolUse.name, displayContent, isError, meta, uiPayload, durationMs);
     // H3: redact the user's freeText answer before it lands in the audit
     // log. The DLP filter at Step 7b only catches structured patterns
     // (emails, IDs); a free-form answer ("내 비밀번호는 …") wouldn't match
@@ -544,8 +580,8 @@ export class ToolExecutor {
     // replaced — a name collision should not trigger host-level redaction.
     const auditContent =
       toolUse.name === "ask_user_question" && source === "builtin" && !isError
-        ? redactAskUserAuditOutput(content)
-        : content;
+        ? redactAskUserAuditOutput(displayContent)
+        : displayContent;
     this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, auditContent, isError, startTime, permissionResult, rateResult.remaining);
 
     return { tool_use_id: toolUse.id, content, ...(isError && { is_error: true }), ...(uiPayload && { uiPayload }), durationMs };
@@ -566,11 +602,13 @@ export class ToolExecutor {
     rateLimitRemaining: number,
   ): void {
     try {
+      const inputText = JSON.stringify(input);
+      const auditInput = maskSensitiveData(inputText).masked;
       this.auditLogger.log({
         timestamp: new Date().toISOString(),
         sessionId: sessionId ?? "unknown",
         type: "tool_call",
-        input: JSON.stringify(input).slice(0, 500),
+        input: auditInput.slice(0, 500),
         output: output.slice(0, 1024),
         toolCalls: [{
           name: toolName,
