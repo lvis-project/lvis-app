@@ -299,7 +299,7 @@ export function App() {
   const handleAsk = useCallback(
     async (
       q: string,
-      mode: "default" | "guidance" | "trigger-import" = "default",
+      mode: "default" | "trigger-import" = "default",
     ) => {
       debugLog("handleAsk", "enter", { mode, qLen: q.length, streaming });
       const t = q.trim();
@@ -384,22 +384,17 @@ export function App() {
       // visibly, and rendering the wrapped envelope as a user bubble
       // would misattribute authorship.
       if (mode !== "trigger-import") {
-        appendUserEntry(mode === "guidance" ? `↳ ${t}` : t);
+        appendUserEntry(t);
       }
       resetStreamAccumulators();
       try {
-        if (mode === "guidance") {
-          await api.chatGuide(outgoing);
-          debugLog("handleAsk", "chatGuide:resolved", { requestId });
-        } else {
-          await api.chatSend(outgoing, outgoingAttachments);
-          debugLog("handleAsk", "chatSend:resolved", { requestId });
-          // After successful send, clear attachments — the textarea was
-          // already cleared by setQuestion(""). N counter persists across
-          // turns so re-attached items get fresh numbers.
-          if (outgoingAttachments.length > 0 || attachments.length > 0) {
-            setAttachments([]);
-          }
+        await api.chatSend(outgoing, outgoingAttachments);
+        debugLog("handleAsk", "chatSend:resolved", { requestId });
+        // After successful send, clear attachments — the textarea was
+        // already cleared by setQuestion(""). N counter persists across
+        // turns so re-attached items get fresh numbers.
+        if (outgoingAttachments.length > 0 || attachments.length > 0) {
+          setAttachments([]);
         }
       } catch (err) {
         debugLog("handleAsk", "chatSend:rejected", {
@@ -674,7 +669,6 @@ export function App() {
             onStartRoutineSession={handleStartRoutineSession}
             chatContextValue={chatContextValue}
             onAsk={(q) => handleAsk(q, "default")}
-            onGuide={(q) => handleAsk(q, "guidance")}
             onEditSave={handleEditSave}
             onFork={handleFork}
             onToggleStar={handleToggleStar}
