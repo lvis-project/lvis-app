@@ -10,7 +10,7 @@
 import { ConversationHistory, normalizeToolPairInvariant } from "./conversation-history.js";
 import { ToolExecutor, type ToolUseBlock } from "../tools/executor.js";
 import { HookRunner } from "../hooks/hook-runner.js";
-import { shouldCompact, compactMessages, markStaleToolResults, estimateMessagesTokens, getModelUsableContext, getModelPreflightThreshold } from "./auto-compact.js";
+import { markStaleToolResults, estimateMessagesTokens, getModelPreflightThreshold } from "./auto-compact.js";
 import { compactWithBoundary, renderBoundaryAsPreamble } from "./structured-compact.js";
 import { createProvider, secretKeyFor } from "./llm/provider-factory.js";
 import { FallbackProvider } from "./llm/vercel/fallback-chain.js";
@@ -487,75 +487,108 @@ export class ConversationLoop {
       return { ok: false, compacted: false, compactedAt: null, removedMessageCount: 0 };
     }
 
-    // loadSession resets cumulativeUsage to zero, so shouldCompact() would
-    // never fire on resume. Estimate usage from loaded history via the
-    // canonical `estimateMessagesTokens` helper — counts thinking blocks
-    // and tool fields too, not just user-text content. Known limitation:
-    // chars/4 under-estimates Korean by ~50% (Korean ≈ 1.7-2 chars/token);
-    // resumed sessions near the rotation threshold may take one extra turn
-    // to fire compact. Acceptable for the resume edge case — full real-
-    // time accounting takes over once the next provider response lands.
+    // PR-2-F-4: loadSession 후 auto-compact 제거 — Layer 0 preflight 가 next user turn
+    // 진입 시 estimateMessagesTokens 평가 + 도달 시 Layer 2 LLM compact 처리. resume-time
+    // sync compact 는 redundant. cumulativeUsage 만 추정값으로 set 하여 Layer 0 가
+    // 정확한 ratio 평가 가능하도록 함.
     this.cumulativeUsage = {
       inputTokens: estimateMessagesTokens(this.history.getMessages()),
       outputTokens: 0,
     };
 
-    let compacted = false;
-    let removedMessageCount = 0;
-    if (this.isAutoCompactEnabled()) {
-      const llmSettings = this.deps.settingsService.get("llm");
-      if (shouldCompact(this.cumulativeUsage, getModelUsableContext(llmSettings.provider, llmSettings.vendors[llmSettings.provider].model))) {
-        const { messages: compactedMsgs, result: cr } = compactMessages(this.history.getMessages());
-        if (cr.compacted) {
-          this.history.clear();
-          this.history.restore(compactedMsgs);
-          compacted = true;
-          removedMessageCount = cr.removedMessages;
-        }
-      }
-    }
-
     return {
       ok: true,
-      compacted,
-      compactedAt: compacted ? new Date().toISOString() : null,
-      removedMessageCount,
+      compacted: false,
+      compactedAt: null,
+      removedMessageCount: 0,
     };
   }
 
   /**
-   * §4.5.4 B1 — Manual compact trigger.
-   * Forces compactMessages on current history and returns result metadata.
+   * §4.5.4 — Manual compact trigger (`/compact` user command).
+   *
+   * PR-2-F-4 정정: extractive `compactMessages` → LLM-based `compactWithBoundary` 마이그레이션.
+   * 사용자가 명시적으로 trigger 한 강제 압축이므로 임계값 무시하고 진입 — 단 history 가
+   * preserveRecentTokens 보다 작으면 no-op (압축할 내용 없음).
+   *
+   * R14 lock — 동시 compact race 방지.
    */
-  manualCompact(): {
+  async manualCompact(): Promise<{
     compacted: boolean;
     compactedAt: string | null;
     summary: string;
     removedMessageCount: number;
-  } {
-    const { messages: compactedMsgs, result: cr } = compactMessages(this.history.getMessages());
-    if (cr.compacted) {
+  }> {
+    if (!this.provider) {
+      return {
+        compacted: false,
+        compactedAt: null,
+        summary: "LLM provider 미구성 — 압축 실행 불가.",
+        removedMessageCount: 0,
+      };
+    }
+    if (this.isCompacting) {
+      return {
+        compacted: false,
+        compactedAt: null,
+        summary: "이미 다른 압축이 진행 중입니다.",
+        removedMessageCount: 0,
+      };
+    }
+
+    const llmSettings = this.deps.settingsService.get("llm");
+    const provider = llmSettings.provider;
+    const model = llmSettings.vendors[provider].model;
+    const preflight = getModelPreflightThreshold(provider, model);
+    const preserveRecentTokens = Math.max(1_000, Math.floor(preflight * 0.4));
+
+    this.isCompacting = true;
+    try {
+      const result = await compactWithBoundary({
+        messages: this.history.getMessages(),
+        llm: this.provider,
+        model,
+        preserveRecentTokens,
+        compactNum: this.compactNum + 1,
+      });
+
+      if (result.removedCount === 0) {
+        return {
+          compacted: false,
+          compactedAt: null,
+          summary: "컴팩트 불필요: 메시지 수가 충분히 적습니다.",
+          removedMessageCount: 0,
+        };
+      }
+
+      this.compactNum = result.boundary.compactNum;
       this.history.clear();
-      this.history.restore(compactedMsgs);
-      // Issue 2: persist compacted state so next resume sees the compacted history.
+      this.history.restore([...result.newHistory]);
+      this.deps.systemPromptBuilder.setSummaryPreamble?.(renderBoundaryAsPreamble(result.boundary));
+      this.cumulativeUsage = {
+        inputTokens: result.estimatedAfter,
+        outputTokens: this.cumulativeUsage.outputTokens,
+        ...(this.cumulativeUsage.cacheReadTokens !== undefined && { cacheReadTokens: 0 }),
+        ...(this.cumulativeUsage.cacheWriteTokens !== undefined && { cacheWriteTokens: 0 }),
+      };
+
+      // 영속화 — manualCompact 완료 시점에 즉시 disk 반영. saveSession 실패는
+      // 사용자 가시 결과에 영향 X (next turn 에서도 compact 결과 보존됨).
       void Promise.resolve(
         this.deps.memoryManager?.saveSession(this.sessionId, this.history.getMessages()),
       ).catch((err: unknown) => {
         log.warn("manualCompact saveSession failed: %s", (err as Error).message);
       });
+
       return {
         compacted: true,
-        compactedAt: new Date().toISOString(),
-        summary: `${cr.removedMessages}개 메시지 요약됨, ~${cr.freedTokens} 토큰 확보`,
-        removedMessageCount: cr.removedMessages,
+        compactedAt: result.boundary.createdAt,
+        summary: `${result.removedCount}개 메시지 요약됨 (compact #${this.compactNum})`,
+        removedMessageCount: result.removedCount,
       };
+    } finally {
+      this.isCompacting = false;
     }
-    return {
-      compacted: false,
-      compactedAt: null,
-      summary: "컴팩트 불필요: 메시지 수가 충분히 적습니다.",
-      removedMessageCount: 0,
-    };
   }
 
   /**
@@ -1502,16 +1535,11 @@ export class ConversationLoop {
         result = `현재 벤더: ${this.getVendor()}\n세션: ${this.sessionId.slice(0, 8)}…\n누적 토큰: 입력 ${this.cumulativeUsage.inputTokens}, 출력 ${this.cumulativeUsage.outputTokens}`;
         break;
       case "compact": {
-        const { messages: compacted, result: cr } = compactMessages(this.history.getMessages());
-        if (cr.compacted) {
-          this.history.clear();
-          this.history.restore(compacted);
-          void this.deps.memoryManager?.saveSession(this.sessionId, this.history.getMessages())
-            .catch((e: Error) => log.warn("/compact saveSession: %s", e.message));
-          result = `컴팩트 완료: ${cr.removedMessages}개 메시지 제거, ~${cr.freedTokens} 토큰 확보`;
-        } else {
-          result = "컴팩트 불필요: 메시지 수가 충분히 적습니다.";
-        }
+        // PR-2-F-4: extractive compactMessages → LLM-based compactWithBoundary 마이그레이션.
+        // manualCompact 가 Layer 2 path 를 사용 (12-section structured summary + freezeBoundary +
+        // ⑧ slot 갱신 + Layer 3 자동 북마크 — 단 Layer 3 wiring 은 manualCompact 밖에 있음).
+        const r = await this.manualCompact();
+        result = r.summary;
         break;
       }
       case "tools": {

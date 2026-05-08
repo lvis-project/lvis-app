@@ -2,13 +2,11 @@
  * Auto-Compact — 2-stage compaction tests.
  *
  * Stage 1 (markStaleToolResults): preventive tool_result stub 교체.
- * Stage 2 (compactMessages): threshold 초과 시 요약 생성 + boundary marker.
  */
 import { describe, it, expect } from "vitest";
 
 import {
   markStaleToolResults,
-  compactMessages,
   estimateTokens,
   countHangul,
 } from "../auto-compact.js";
@@ -170,61 +168,6 @@ describe("markStaleToolResults", () => {
     expect(result.strippedCount).toBe(6);
   });
 });
-
-describe("compactMessages — boundary marker", () => {
-  it("tags the generated summary user message with compactBoundary=true", () => {
-    const messages: GenericMessage[] = [];
-    for (let i = 0; i < 20; i++) {
-      messages.push({ role: "user", content: `q${i}` });
-      messages.push({ role: "assistant", content: `a${i}` });
-    }
-    const { messages: out, result } = compactMessages(messages);
-    expect(result.compacted).toBe(true);
-
-    const marker = out.find(
-      (m) => m.role === "user" && m.meta?.compactBoundary === true,
-    );
-    expect(marker).toBeDefined();
-    expect(marker?.content).toContain("[이전 대화 요약]");
-    expect(marker?.meta?.removedCount).toBeGreaterThan(0);
-    expect(marker?.meta?.compactedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
-  });
-
-  it("does not re-summarize an existing boundary marker (double-compact prevention)", () => {
-    // 1) 첫 compact
-    const initial: GenericMessage[] = [];
-    for (let i = 0; i < 20; i++) {
-      initial.push({ role: "user", content: `q${i}` });
-      initial.push({ role: "assistant", content: `a${i}` });
-    }
-    const first = compactMessages(initial);
-    expect(first.result.compacted).toBe(true);
-    const originalMarker = first.messages.find(
-      (m) => m.role === "user" && m.meta?.compactBoundary === true,
-    );
-
-    // 2) 대화를 더 이어서 두 번째 compact 트리거
-    const extended: GenericMessage[] = [...first.messages];
-    for (let i = 0; i < 20; i++) {
-      extended.push({ role: "user", content: `q2-${i}` });
-      extended.push({ role: "assistant", content: `a2-${i}` });
-    }
-    const second = compactMessages(extended);
-    expect(second.result.compacted).toBe(true);
-
-    // 원본 marker가 여전히 메시지 배열 안에 reference-equal로 존재
-    const stillThere = second.messages.find((m) => m === originalMarker);
-    expect(stillThere).toBeDefined();
-
-    // 새 marker도 생성됨 (두 개의 boundary 가능)
-    const markerCount = second.messages.filter(
-      (m) => m.role === "user" && m.meta?.compactBoundary === true,
-    ).length;
-    expect(markerCount).toBeGreaterThanOrEqual(2);
-  });
-});
-
-// ─── Korean weighting (P11) ────────────────────────────
 
 describe("countHangul", () => {
   it("counts 가-힣 characters only", () => {

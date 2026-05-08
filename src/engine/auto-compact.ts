@@ -14,8 +14,6 @@ import { serializeMessageForEstimation, userContentText } from "./llm/types.js";
 import { lookupPricing, effectiveContextWindow } from "../shared/pricing-data.js";
 import { getUsableContext, getPreflightThreshold } from "../shared/context-budget.js";
 
-/** compactMessages()가 boundary marker 뒤에 삽입하는 assistant ACK (double-compact 감지용) */
-const POST_COMPACT_ACK = "이전 대화 내용을 확인했습니다. 계속 도와드리겠습니다.";
 
 // ─── Context Window Registry ─────────────────────────
 //
@@ -71,38 +69,6 @@ export function getModelPreflightThreshold(vendor: LLMVendor, model: string): nu
 
 // ─── Types ──────────────────────────────────────────
 
-export interface CompactConfig {
-  /** 자동 컴팩션 트리거 사용률 임계치 (기본 80%) — 모델 컨텍스트 윈도우 대비 */
-  thresholdPct: number;
-  /** 보존할 최근 메시지 수 (기본 4) */
-  preserveRecentMessages: number;
-  /** 요약 최대 토큰 예산 (기본 2K) */
-  summaryBudgetTokens: number;
-}
-
-export interface CompactResult {
-  /** 컴팩션 수행 여부 */
-  compacted: boolean;
-  /** 제거된 메시지 수 */
-  removedMessages: number;
-  /** 생성된 요약 */
-  summary?: string;
-  /** 확보된 예상 토큰 수 */
-  freedTokens: number;
-  /**
-   * 컴팩션 트리거 종류.
-   * - "auto": 토큰 임계치 기반 사전 컴팩션 (PostTurnHookChain)
-   * - "reactive": 벤더 context-length 오류 수신 후 즉시 컴팩션
-   */
-  trigger?: "auto" | "reactive";
-}
-
-const DEFAULT_CONFIG: CompactConfig = {
-  thresholdPct: 0.8,
-  preserveRecentMessages: 12,
-  summaryBudgetTokens: 2_000,
-};
-
 // ─── Token Estimation ───────────────────────────────
 
 /**
@@ -144,107 +110,6 @@ export function estimateMessagesTokens(messages: GenericMessage[]): number {
   return total;
 }
 
-// ─── Compact Logic ──────────────────────────────────
-
-/**
- * 컴팩션 필요 여부 확인.
- *
- * 임계치 = floor(contextWindowTokens × config.thresholdPct).
- * 호출자는 `getModelUsableContext()` 결과를 넘기므로 (Cline buffer 적용된
- * usable 분모), 0.8 임계는 사실상 "usable 의 80% 도달 → preventive compact".
- *
- * @param cumulativeUsage - 누적 토큰 사용량 (fresh-only inputTokens)
- * @param contextWindowTokens - usable context window — 호출자 책임
- * @param config - 컴팩션 설정 (미제공 시 기본값: thresholdPct=0.8)
- *
- * @example
- * // 200K Sonnet → usable 160K → 80% × 160K = 128K trigger
- * shouldCompact({ inputTokens: 130_000, outputTokens: 0 }, 160_000); // true
- */
-export function shouldCompact(
-  cumulativeUsage: TokenUsage,
-  contextWindowTokens: number,
-  config: CompactConfig = DEFAULT_CONFIG,
-): boolean {
-  const threshold = Math.floor(contextWindowTokens * config.thresholdPct);
-  return cumulativeUsage.inputTokens >= threshold;
-}
-
-/**
- * 메시지 배열을 컴팩션 — 오래된 메시지를 요약으로 교체
- *
- * @returns 컴팩션된 메시지 배열 + 결과 정보
- */
-export function compactMessages(
-  messages: GenericMessage[],
-  config: CompactConfig = DEFAULT_CONFIG,
-  trigger?: "auto" | "reactive",
-): { messages: GenericMessage[]; result: CompactResult } {
-  if (messages.length <= config.preserveRecentMessages) {
-    return { messages, result: { compacted: false, removedMessages: 0, freedTokens: 0 } };
-  }
-
-  // 기존 경계 marker가 있으면 절대 re-summarize 하지 않음 (double-compact 방지)
-  // marker 이전 메시지는 이미 요약 대상이었으므로, 요약은 마지막 marker 이후부터만 수행
-  let lastMarkerIdx = -1;
-  for (let i = 0; i < messages.length; i++) {
-    const m = messages[i];
-    if (m.role === "user" && m.meta?.compactBoundary === true) {
-      lastMarkerIdx = i;
-    }
-  }
-
-  // 보존할 메시지 경계 찾기 (marker 이후 구간에서만 요약)
-  const idealBoundary = messages.length - config.preserveRecentMessages;
-  const preserveFrom = findSafeBoundary(messages, idealBoundary);
-  // 요약 대상은 marker(+ack) 다음부터 preserveFrom까지.
-  // compactMessages는 marker 뒤에 ACK assistant 메시지를 붙이므로 그 경우 한 칸 더 skip.
-  const ackAfterMarker =
-    lastMarkerIdx >= 0 &&
-    messages[lastMarkerIdx + 1]?.role === "assistant" &&
-    messages[lastMarkerIdx + 1]?.content === POST_COMPACT_ACK;
-  const compactStart = lastMarkerIdx >= 0 ? (ackAfterMarker ? lastMarkerIdx + 2 : lastMarkerIdx + 1) : 0;
-  const effectivePreserveFrom = Math.max(preserveFrom, compactStart);
-  const preAnchor = messages.slice(0, compactStart); // 이전 marker + 그 앞 (있다면)
-  const toCompact = messages.slice(compactStart, effectivePreserveFrom);
-  const toPreserve = messages.slice(effectivePreserveFrom);
-
-  if (toCompact.length === 0) {
-    return { messages, result: { compacted: false, removedMessages: 0, freedTokens: 0 } };
-  }
-
-  // 요약 생성
-  const summary = generateSummary(toCompact, config.summaryBudgetTokens);
-  const freedTokens = estimateMessagesTokens(toCompact) - estimateTokens(summary);
-
-  // 요약 메시지 + 보존 메시지
-  const boundaryMessage: GenericMessage = {
-    role: "user",
-    content: `[이전 대화 요약]\n${summary}`,
-    meta: {
-      compactBoundary: true,
-      removedCount: toCompact.length,
-      compactedAt: new Date().toISOString(),
-    },
-  };
-  const compactedMessages: GenericMessage[] = [
-    ...preAnchor,
-    boundaryMessage,
-    { role: "assistant", content: POST_COMPACT_ACK },
-    ...toPreserve,
-  ];
-
-  return {
-    messages: compactedMessages,
-    result: {
-      compacted: true,
-      removedMessages: toCompact.length,
-      summary,
-      freedTokens: Math.max(0, freedTokens),
-      ...(trigger !== undefined && { trigger }),
-    },
-  };
-}
 
 // ─── Layer 1: Mark Stale Tool Results (preventive, LLM-free) ──
 
@@ -417,71 +282,3 @@ export function isContextLengthError(err: unknown): boolean {
   return false;
 }
 
-// ─── Private Helpers ────────────────────────────────
-
-/**
- * tool_use/tool_result 쌍이 분리되지 않는 안전한 경계 찾기
- * claw-code 패턴: 경계가 tool_result 안에 있으면 뒤로 밀어냄
- */
-function findSafeBoundary(messages: GenericMessage[], idealBoundary: number): number {
-  let boundary = idealBoundary;
-
-  // 경계가 tool_result면 해당 tool_use까지 포함되도록 뒤로 이동
-  while (boundary > 0 && boundary < messages.length) {
-    const msg = messages[boundary];
-    if (msg.role === "tool_result") {
-      boundary--;
-    } else if (msg.role === "assistant" && msg.toolCalls && msg.toolCalls.length > 0) {
-      // assistant의 tool_call과 그 결과가 함께 보존되어야 함
-      boundary--;
-    } else {
-      break;
-    }
-  }
-
-  return Math.max(0, boundary);
-}
-
-/**
- * 메시지 배열에서 요약 생성 (LLM 없이 추출 기반)
- * claw-code 패턴: 파일 참조, 진행 중 작업, 핵심 결정 보존
- */
-function generateSummary(messages: GenericMessage[], budgetTokens: number): string {
-  const sections: string[] = [];
-
-  // 1. 사용자 요청 요약
-  const userRequests = messages
-    .filter((m) => m.role === "user" && !userContentText(m.content).startsWith("[이전 대화 요약]"))
-    .map((m) => userContentText((m as { content: string | UserContentPart[] }).content).slice(0, 100));
-  if (userRequests.length > 0) {
-    sections.push(`## 사용자 요청\n${userRequests.map((r) => `- ${r}`).join("\n")}`);
-  }
-
-  // 2. 도구 사용 이력
-  const toolUses = messages
-    .filter((m): m is GenericMessage & { role: "assistant"; toolCalls: NonNullable<(GenericMessage & { role: "assistant" })["toolCalls"]> } =>
-      m.role === "assistant" && !!m.toolCalls && m.toolCalls.length > 0)
-    .flatMap((m) => m.toolCalls.map((tc) => tc.name));
-  if (toolUses.length > 0) {
-    const unique = [...new Set(toolUses)];
-    sections.push(`## 사용된 도구\n${unique.join(", ")}`);
-  }
-
-  // 3. 핵심 응답 요약 (마지막 assistant 메시지에서)
-  const assistantMessages = messages.filter((m) => m.role === "assistant" && m.content.length > 20);
-  if (assistantMessages.length > 0) {
-    const lastFew = assistantMessages.slice(-2);
-    const summaries = lastFew.map((m) => m.content.slice(0, 200));
-    sections.push(`## 주요 응답\n${summaries.map((s) => `- ${s}...`).join("\n")}`);
-  }
-
-  let result = sections.join("\n\n");
-
-  // 토큰 예산 내로 자르기
-  const maxChars = budgetTokens * 4;
-  if (result.length > maxChars) {
-    result = result.slice(0, maxChars) + "\n...(잘림)";
-  }
-
-  return result || "이전 대화 내용이 있었습니다.";
-}
