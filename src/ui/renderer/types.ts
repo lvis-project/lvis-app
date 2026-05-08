@@ -202,15 +202,9 @@ export type LvisApi = {
    */
   pluginShellUrl: string;
   notifyPluginTheme: (payload: {
-    /** v2: active bundle identifier. */
-    bundleId?: string;
-    /** v2: shell polarity. */
-    shell?: "light" | "dark";
-    /** v1 compat */
-    theme: string;
-    chatTheme: string;
-    codeTheme: string;
-    tokens?: Record<string, string>;
+    bundleId: string;
+    shell: "light" | "dark";
+    tokens: Record<string, string>;
   }) => Promise<{ ok: boolean; error?: string }>;
   fileScanPaths: (paths: string[]) => Promise<{ ok: boolean; indexed?: number; failed?: number; jobId?: string; error?: string }>;
   getSettings: () => Promise<AppSettings>;
