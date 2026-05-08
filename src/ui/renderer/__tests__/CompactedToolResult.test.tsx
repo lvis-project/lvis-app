@@ -27,7 +27,7 @@ describe("CompactedToolResult", () => {
     vi.unstubAllGlobals();
   });
 
-  it("renders in collapsed state by default with line count hint from stub", () => {
+  it("renders in collapsed state by default with char count hint from stub", () => {
     vi.stubGlobal("lvisApi", makeApi(() => Promise.resolve(null)));
     const { container } = render(
       <CompactedToolResult

@@ -300,7 +300,7 @@ describe("ToolGroupCard", () => {
   it("PR-4: single tool with stub result + sessionId → renders CompactedToolResult (펼치기 visible)", () => {
     const stubResult = "[tool_result stripped: tool=Read, origLen=5000]";
     vi.stubGlobal("lvisApi", {
-      getVerbatimToolResult: vi.fn(() => new Promise(() => {})), // never resolves — just test render
+      chatGetVerbatimToolResult: vi.fn(() => new Promise(() => {})), // never resolves — just test render
     });
     const group = makeGroup({
       tools: [
