@@ -28,7 +28,7 @@ jobs:
 
     steps:
       - name: Checkout lvis-app
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: lvis-app
 
