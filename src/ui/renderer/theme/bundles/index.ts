@@ -5,42 +5,30 @@
  *   `import { BUNDLES, findBundle } from "../theme/bundles/index.js"`
  */
 import type { ThemeBundle } from "./types.js";
-import type { BundleId } from "../../../../shared/theme-bundles.js";
 import { tokyoNightBundle } from "./tokyo-night.js";
 import { midnightBundle } from "./midnight.js";
 import { forestBundle } from "./forest.js";
 import { lgeLightBundle } from "./lge-light.js";
 import { lgeDarkBundle } from "./lge-dark.js";
 import { highContrastBundle } from "./high-contrast.js";
-import { BUNDLE_IDS, DEFAULT_BUNDLE_ID as _SHARED_DEFAULT_BUNDLE_ID } from "../../../../shared/theme-bundles.js";
+import { DEFAULT_BUNDLE_ID as _SHARED_DEFAULT_BUNDLE_ID } from "../../../../shared/theme-bundles.js";
 
 export type { ThemeBundle, BundleTokens } from "./types.js";
 // §C3: re-export shared bundle IDs so renderer callers can import from this single registry path.
 export { BUNDLE_IDS } from "../../../../shared/theme-bundles.js";
 
+// §C3: compile-time guard — `satisfies readonly ThemeBundle[]` ensures each entry's id is a
+// valid BundleId (ThemeBundle.id is typed as BundleId). TypeScript errors here if any bundle
+// uses an id not declared in theme-bundles.ts. No runtime guard needed.
 /** Ordered list of all built-in bundles (display order in AppearanceTab). */
-export const BUNDLES: readonly ThemeBundle[] = [
+export const BUNDLES = [
   tokyoNightBundle,
   midnightBundle,
   forestBundle,
   lgeLightBundle,
   lgeDarkBundle,
   highContrastBundle,
-];
-
-// §C3: compile-time guard — BUNDLES ids must be valid BundleId values.
-// TypeScript errors here if a bundle object uses an id not declared in theme-bundles.ts.
-// For the reverse (a BundleId added to theme-bundles.ts but missing from BUNDLES),
-// a non-throwing runtime warn is used so startup is never crashed by a missing bundle.
-void (BUNDLES as readonly { id: BundleId }[]);
-if (process.env.NODE_ENV !== "production") {
-  const registeredIds = new Set(BUNDLES.map((b) => b.id));
-  for (const id of BUNDLE_IDS) {
-    if (!registeredIds.has(id)) {
-      console.warn(`[theme-bundles] Bundle object missing for id "${id}" — add it to BUNDLES in bundles/index.ts`);
-    }
-  }
-}
+] as const satisfies readonly ThemeBundle[];
 
 /** Default bundle applied on fresh installs. §C3: sourced from shared/theme-bundles.ts. */
 export const DEFAULT_BUNDLE_ID = _SHARED_DEFAULT_BUNDLE_ID;

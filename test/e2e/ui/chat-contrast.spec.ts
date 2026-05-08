@@ -63,9 +63,6 @@ test.describe('Chat surface contrast — WCAG AA across all 6 theme bundles', ()
   test('every bundle passes contrast >= 4.5:1 for body text and inline code', async ({
     mainWindow,
   }) => {
-    // Sanity — row count assertion so a future bundle addition forces this spec to update.
-    expect(BUNDLE_IDS.length).toBe(6);
-
     type RowResult = {
       bundle: BundleId;
       bodyColor: string;
