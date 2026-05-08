@@ -1,5 +1,5 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -233,5 +233,175 @@ describe("SettingsService msGraph patching", () => {
 
     const reloaded = new SettingsService({ userDataPath });
     expect(reloaded.get("msGraph")).toEqual({ environment: "corporate" });
+  });
+});
+
+// ─── Appearance v2 schema ────────────────────────────────────────────────────
+
+describe("SettingsService appearance v2 — fresh install defaults", () => {
+  let userDataPath: string;
+
+  beforeEach(() => {
+    userDataPath = mkdtempSync(join(tmpdir(), "settings-appearance-v2-fresh-"));
+    mockedElectron.safeStorage.isEncryptionAvailable.mockReturnValue(false);
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    rmSync(userDataPath, { recursive: true, force: true });
+  });
+
+  it("fresh install returns schemaVersion:2 with bundleId=tokyo-night", () => {
+    const service = new SettingsService({ userDataPath });
+    expect(service.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "tokyo-night" });
+  });
+
+  it("v2 appearance round-trips across restart", async () => {
+    const service = new SettingsService({ userDataPath });
+    await service.patch({ appearance: { schemaVersion: 2, bundleId: "midnight" } });
+    const reloaded = new SettingsService({ userDataPath });
+    expect(reloaded.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "midnight" });
+  });
+
+  it("v2 with followSystem=true round-trips", async () => {
+    const service = new SettingsService({ userDataPath });
+    await service.patch({ appearance: { schemaVersion: 2, bundleId: "lge-light", followSystem: true } });
+    const reloaded = new SettingsService({ userDataPath });
+    expect(reloaded.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "lge-light", followSystem: true });
+  });
+
+  it("unknown bundleId coerces to tokyo-night", () => {
+    writeFileSync(
+      join(userDataPath, "lvis-settings.json"),
+      JSON.stringify({ appearance: { schemaVersion: 2, bundleId: "nonexistent-bundle" } }),
+      "utf-8",
+    );
+    const service = new SettingsService({ userDataPath });
+    expect(service.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "tokyo-night" });
+  });
+
+  it("appearance block absent (pre-theme system install) → default tokyo-night", () => {
+    writeFileSync(
+      join(userDataPath, "lvis-settings.json"),
+      JSON.stringify({ chat: { systemPrompt: "preserved", autoCompact: false } }),
+      "utf-8",
+    );
+    const service = new SettingsService({ userDataPath });
+    expect(service.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "tokyo-night" });
+    // Unrelated section preserved
+    expect(service.get("chat").systemPrompt).toBe("preserved");
+  });
+});
+
+// ─── Appearance v1 → v2 migration matrix ────────────────────────────────────
+
+describe("SettingsService appearance v1 → v2 migration", () => {
+  let userDataPath: string;
+
+  beforeEach(() => {
+    userDataPath = mkdtempSync(join(tmpdir(), "settings-appearance-migration-"));
+    mockedElectron.safeStorage.isEncryptionAvailable.mockReturnValue(false);
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    rmSync(userDataPath, { recursive: true, force: true });
+  });
+
+  function writeV1(appearance: Record<string, unknown>): void {
+    writeFileSync(
+      join(userDataPath, "lvis-settings.json"),
+      JSON.stringify({ appearance }),
+      "utf-8",
+    );
+  }
+
+  it("dark + default → tokyo-night", () => {
+    writeV1({ theme: "dark", chatTheme: "default", codeTheme: "auto" });
+    const s = new SettingsService({ userDataPath });
+    expect(s.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "tokyo-night" });
+  });
+
+  it("dark + lg → lge-dark", () => {
+    writeV1({ theme: "dark", chatTheme: "lg", codeTheme: "auto" });
+    const s = new SettingsService({ userDataPath });
+    expect(s.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "lge-dark" });
+  });
+
+  it("light + default → forest", () => {
+    writeV1({ theme: "light", chatTheme: "default", codeTheme: "auto" });
+    const s = new SettingsService({ userDataPath });
+    expect(s.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "forest" });
+  });
+
+  it("light + lg → lge-light", () => {
+    writeV1({ theme: "light", chatTheme: "lg", codeTheme: "auto" });
+    const s = new SettingsService({ userDataPath });
+    expect(s.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "lge-light" });
+  });
+
+  it("dark + lg + dark (code override) → lge-dark (code override ignored)", () => {
+    writeV1({ theme: "dark", chatTheme: "lg", codeTheme: "dark" });
+    const s = new SettingsService({ userDataPath });
+    expect(s.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "lge-dark" });
+  });
+
+  it("light + default + dark (code override) → forest (code override ignored)", () => {
+    writeV1({ theme: "light", chatTheme: "default", codeTheme: "dark" });
+    const s = new SettingsService({ userDataPath });
+    expect(s.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "forest" });
+  });
+
+  it("* + purple → midnight (closest accent coercion)", () => {
+    writeV1({ theme: "dark", chatTheme: "purple", codeTheme: "auto" });
+    const s = new SettingsService({ userDataPath });
+    expect(s.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "midnight" });
+  });
+
+  it("* + orange → midnight", () => {
+    writeV1({ theme: "light", chatTheme: "orange", codeTheme: "auto" });
+    const s = new SettingsService({ userDataPath });
+    expect(s.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "midnight" });
+  });
+
+  it("* + blue → midnight", () => {
+    writeV1({ theme: "dark", chatTheme: "blue", codeTheme: "dark" });
+    const s = new SettingsService({ userDataPath });
+    expect(s.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "midnight" });
+  });
+
+  it("high-contrast + * → high-contrast (HC always wins)", () => {
+    writeV1({ theme: "high-contrast", chatTheme: "purple", codeTheme: "dark" });
+    const s = new SettingsService({ userDataPath });
+    expect(s.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "high-contrast" });
+  });
+
+  it("invalid theme string → tokyo-night (DEFAULT_BUNDLE_ID)", () => {
+    writeV1({ theme: "sepia", chatTheme: "default", codeTheme: "auto" });
+    const s = new SettingsService({ userDataPath });
+    expect(s.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "tokyo-night" });
+  });
+
+  it("v1 write-back: migrated appearance is written to disk as v2", async () => {
+    writeV1({ theme: "dark", chatTheme: "lg", codeTheme: "auto" });
+    const service = new SettingsService({ userDataPath });
+    // The constructor triggers async write-back — wait a tick
+    await new Promise<void>((res) => setTimeout(res, 50));
+    const onDisk = JSON.parse(readFileSync(join(userDataPath, "lvis-settings.json"), "utf-8"));
+    expect(onDisk.appearance).toEqual({ schemaVersion: 2, bundleId: "lge-dark" });
+    // No legacy keys remain after write-back
+    expect(onDisk.appearance.theme).toBeUndefined();
+    expect(onDisk.appearance.chatTheme).toBeUndefined();
+    expect(service.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "lge-dark" });
+  });
+
+  it("v2 file loads without re-migration", () => {
+    writeFileSync(
+      join(userDataPath, "lvis-settings.json"),
+      JSON.stringify({ appearance: { schemaVersion: 2, bundleId: "forest" } }),
+      "utf-8",
+    );
+    const s = new SettingsService({ userDataPath });
+    expect(s.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "forest" });
   });
 });

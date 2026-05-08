@@ -124,38 +124,44 @@ export interface AppSettings {
 export interface PluginSettings {}
 
 /**
- * UX Track 3 — visual appearance preferences.
+ * UX Track 3 — visual appearance preferences (schema v2).
  *
- * Three independent axes:
- *   - `theme`      — global shell light/dark/high-contrast
- *       "system" | "light" | "dark" | "high-contrast"
- *       (default "system")
- *   - `chatTheme`  — visual chat theme for accents and, when needed, surfaces
- *       "default" | "lg" | "purple" | "orange" | "blue"
- *       (default "lg" — LG brand identity: warm-grey chat surface
- *        with lilac user bubble + vivid SEND button + LG red.
- *        "purple"/"orange"/"blue" are pure accent variants that only
- *        repaint the action color. "default" means no override —
- *        inherits surface and accent from `theme`.)
- *   - `codeTheme`  — code-block surface scheme, independent of shell
- *       "auto" | "light" | "dark"
- *       (default "auto" — follows `theme`: light shell → light code,
- *        dark/high-contrast shell → dark code)
+ * v2 replaces the three-axis model (theme × chatTheme × codeTheme) with a
+ * single paired bundle selected by `bundleId`. Each bundle is a fully-
+ * specified set of shell + chat + code tokens, so combinatorial mismatches
+ * are impossible.
  *
- * The renderer's ThemeProvider is the single consumer of these fields.
- * Changes are propagated by writing `data-theme`, `data-chat-theme`, and
- * `data-code-theme` on <html>; no reload.
+ * `followSystem` (optional, LGE pair only): when true and the active bundle
+ * is "lge-light" or "lge-dark", the host automatically switches between the
+ * two based on `prefers-color-scheme`.
  *
- * See `docs/development/theme-system.md` for the token-tier model.
+ * `schemaVersion: 2` distinguishes v2 from legacy v1 files that have
+ * `theme`/`chatTheme`/`codeTheme` keys. On load, v1 files are migrated once
+ * and written back as v2.
+ *
+ * Legacy type aliases are kept for the migration path only — they are not
+ * exposed to new code. New code exclusively uses `AppearanceSettings`.
  */
+
+/** @internal — legacy v1 axis types, used only in migration. */
 export type ThemePreference = "system" | "light" | "dark" | "high-contrast";
+/** @internal — legacy v1 axis types, used only in migration. */
 export type ChatThemePreference = "default" | "lg" | "purple" | "orange" | "blue";
+/** @internal — legacy v1 axis types, used only in migration. */
 export type CodeThemePreference = "auto" | "light" | "dark";
 
-export interface AppearanceSettings {
+/** @internal — legacy v1 shape, used only in migrateAppearanceV1ToV2. */
+export interface AppearanceSettingsV1 {
   theme: ThemePreference;
   chatTheme: ChatThemePreference;
   codeTheme: CodeThemePreference;
+}
+
+/** v2 appearance settings — single bundle, optional followSystem. */
+export interface AppearanceSettings {
+  schemaVersion: 2;
+  bundleId: string;
+  followSystem?: boolean;
 }
 
 /**
@@ -351,9 +357,8 @@ const DEFAULT_SETTINGS: AppSettings = {
     environment: "external",
   },
   appearance: {
-    theme: "system",
-    chatTheme: "lg",
-    codeTheme: "auto",
+    schemaVersion: 2,
+    bundleId: "tokyo-night",
   },
   webView: {
     preferredFlow: "in-app",
@@ -376,7 +381,14 @@ export class SettingsService {
     this.settingsPath = resolve(dir, "lvis-settings.json");
     this.secretsPath = resolve(dir, "lvis-secrets.json");
     this.migrateSecretsMode();
-    this.settings = this.loadSettings();
+    const loaded = this.loadSettings() as AppSettings & { __needsV2WriteBack?: boolean };
+    const needsWriteBack = loaded.__needsV2WriteBack === true;
+    delete (loaded as { __needsV2WriteBack?: boolean }).__needsV2WriteBack;
+    this.settings = loaded;
+    // v1 → v2 write-back: persist the migrated appearance so next load is clean.
+    if (needsWriteBack) {
+      void this.saveSettings().catch(() => { /* best-effort — next load re-migrates */ });
+    }
   }
 
   /**
@@ -578,7 +590,14 @@ export class SettingsService {
         routineIdleThresholdMs: idleThresholdMs,
       };
 
-      return {
+      const onDisk = parsed.appearance as Record<string, unknown> | null | undefined;
+      // Detect v1 (legacy tri-axis) to trigger write-back after constructor.
+      const needsV2WriteBack = !!onDisk && typeof onDisk === "object" &&
+        onDisk.schemaVersion !== 2 &&
+        (typeof onDisk.theme === "string" || typeof onDisk.chatTheme === "string");
+
+      const appearance = normalizeAppearance(parsed.appearance);
+      const result: AppSettings & { __needsV2WriteBack?: boolean } = {
         llm,
         chat: { ...DEFAULT_SETTINGS.chat, ...parsed.chat },
         webSearch: { ...DEFAULT_SETTINGS.webSearch, ...parsed.webSearch },
@@ -589,12 +608,14 @@ export class SettingsService {
         telemetry: { ...DEFAULT_SETTINGS.telemetry, ...parsed.telemetry },
         audit: { ...DEFAULT_SETTINGS.audit, ...parsed.audit },
         msGraph: { ...DEFAULT_SETTINGS.msGraph, ...parsed.msGraph },
-        appearance: normalizeAppearance(parsed.appearance),
+        appearance,
         webView: normalizeWebView(parsed.webView),
         plugins: {},
         pluginConfigs: { ...DEFAULT_SETTINGS.pluginConfigs, ...pluginConfigs },
         features: { ...DEFAULT_SETTINGS.features, ...normalizeFeatureFlags(parsed.features) },
       };
+      if (needsV2WriteBack) result.__needsV2WriteBack = true;
+      return result;
     } catch {
       return structuredClone(DEFAULT_SETTINGS);
     }
@@ -664,49 +685,114 @@ function mergeLlmPatch(base: LLMSettings, partial: LLMSettingsPatch): LLMSetting
 }
 
 /**
- * UX Track 3 — coerce on-disk `appearance` block back into the
- * AppearanceSettings shape. Old installs (pre-theme-system) have no
- * `appearance` field — they fall through to the default ("system").
+ * UX Track 3 — coerce on-disk `appearance` block into AppearanceSettings v2.
  *
- * Unknown theme strings (e.g. a hand-edited settings.json with a typo) are
- * coerced to "system" rather than thrown — settings load must never crash
- * boot over a UI-only field.
+ * Detects whether the on-disk value is v1 (has `theme`/`chatTheme`/`codeTheme`)
+ * or v2 (has `schemaVersion: 2`). v1 inputs are migrated; v2 inputs are
+ * validated and returned as-is. Unknown bundleId falls back to DEFAULT_BUNDLE_ID.
+ *
+ * Settings load must never crash boot over a UI-only field.
  */
-const VALID_THEMES: readonly ThemePreference[] = ["system", "light", "dark", "high-contrast"];
-const VALID_CHAT_THEMES: readonly ChatThemePreference[] = ["default", "lg", "purple", "orange", "blue"];
-const VALID_CODE_THEMES: readonly CodeThemePreference[] = ["auto", "light", "dark"];
+
+/** @internal — v1 legacy axis validation sets, used in migration only. */
+const VALID_THEMES_V1: readonly ThemePreference[] = ["system", "light", "dark", "high-contrast"];
+const VALID_CHAT_THEMES_V1: readonly ChatThemePreference[] = ["default", "lg", "purple", "orange", "blue"];
+
+/** All valid bundle IDs — checked at runtime to avoid importing the renderer bundle registry into main. */
+const VALID_BUNDLE_IDS: readonly string[] = [
+  "tokyo-night", "midnight", "forest", "lge-light", "lge-dark", "high-contrast",
+];
+
+/**
+ * Migrate a v1 tri-axis appearance object to a v2 bundleId.
+ *
+ * Migration matrix (12 cases, per spec §3):
+ *  dark + default/auto → tokyo-night
+ *  dark + lg           → lge-dark
+ *  light + default/auto → forest
+ *  light + lg          → lge-light
+ *  system + default    → matchMedia → tokyo-night or forest
+ *  system + lg         → matchMedia → lge-light or lge-dark
+ *  * + purple|orange|blue → midnight (closest dark accent coercion)
+ *  high-contrast + *   → high-contrast (HC always wins)
+ *  code override (dark+default+light / light+default+dark) → bundle wins, code override ignored
+ *  dark + lg + dark    → lge-dark
+ *  invalid/unknown     → DEFAULT_BUNDLE_ID
+ */
+export function migrateAppearanceV1ToV2(
+  legacy: AppearanceSettingsV1,
+  win?: Pick<Window, "matchMedia">,
+): AppearanceSettings {
+  const theme = VALID_THEMES_V1.includes(legacy.theme) ? legacy.theme : "system";
+  const chatTheme = VALID_CHAT_THEMES_V1.includes(legacy.chatTheme) ? legacy.chatTheme : "default";
+
+  // High-contrast always wins — accessibility first.
+  if (theme === "high-contrast") {
+    return { schemaVersion: 2, bundleId: "high-contrast" };
+  }
+
+  // Accent-only chat themes (purple/orange/blue) → midnight (closest dark accent).
+  if (chatTheme === "purple" || chatTheme === "orange" || chatTheme === "blue") {
+    return { schemaVersion: 2, bundleId: "midnight" };
+  }
+
+  // Resolve "system" against matchMedia.
+  let resolvedShell: "light" | "dark";
+  if (theme === "system") {
+    try {
+      const mql = (win ?? (typeof window !== "undefined" ? window : undefined))
+        ?.matchMedia?.("(prefers-color-scheme: light)");
+      resolvedShell = mql?.matches ? "light" : "dark";
+    } catch {
+      resolvedShell = "dark";
+    }
+  } else {
+    resolvedShell = theme; // "light" | "dark"
+  }
+
+  // LG pair.
+  if (chatTheme === "lg") {
+    return { schemaVersion: 2, bundleId: resolvedShell === "light" ? "lge-light" : "lge-dark" };
+  }
+
+  // Default chat (no overlay) — pick by shell.
+  return {
+    schemaVersion: 2,
+    bundleId: resolvedShell === "light" ? "forest" : "tokyo-night",
+  };
+}
 
 function normalizeAppearance(input: unknown): AppearanceSettings {
   if (!input || typeof input !== "object") {
     return { ...DEFAULT_SETTINGS.appearance };
   }
-  const obj = input as { theme?: unknown; chatTheme?: unknown; codeTheme?: unknown };
+  const obj = input as Record<string, unknown>;
 
-  const themeRaw = obj.theme;
-  const theme: ThemePreference =
-    typeof themeRaw === "string" && (VALID_THEMES as readonly string[]).includes(themeRaw)
-      ? (themeRaw as ThemePreference)
-      : "system";
+  // v2 path — schemaVersion:2 present.
+  if (obj.schemaVersion === 2) {
+    const bundleId =
+      typeof obj.bundleId === "string" && VALID_BUNDLE_IDS.includes(obj.bundleId)
+        ? obj.bundleId
+        : "tokyo-night";
+    const followSystem = typeof obj.followSystem === "boolean" ? obj.followSystem : undefined;
+    const result: AppearanceSettings = { schemaVersion: 2, bundleId };
+    if (followSystem !== undefined) result.followSystem = followSystem;
+    return result;
+  }
 
-  // No migration — `normalizeAppearance` runs on every settings read,
-  // so coercing "purple" → "lg" here would prevent users from ever
-  // picking pure-purple again (every load would flip their explicit
-  // choice back to "lg"). The cohort affected is small (only PR #476's
-  // ~1-day window where "purple" was the LG default), so we accept a
-  // one-time manual repick over a buggy auto-migration.
-  const chatRaw = obj.chatTheme;
-  const chatTheme: ChatThemePreference =
-    typeof chatRaw === "string" && (VALID_CHAT_THEMES as readonly string[]).includes(chatRaw)
-      ? (chatRaw as ChatThemePreference)
-      : "lg";
+  // v1 path — has legacy keys.
+  if (typeof obj.theme === "string" || typeof obj.chatTheme === "string" || typeof obj.codeTheme === "string") {
+    const legacy: AppearanceSettingsV1 = {
+      theme: (typeof obj.theme === "string" && (VALID_THEMES_V1 as readonly string[]).includes(obj.theme)
+        ? obj.theme : "system") as ThemePreference,
+      chatTheme: (typeof obj.chatTheme === "string" && (VALID_CHAT_THEMES_V1 as readonly string[]).includes(obj.chatTheme)
+        ? obj.chatTheme : "lg") as ChatThemePreference,
+      codeTheme: (typeof obj.codeTheme === "string" ? obj.codeTheme : "auto") as CodeThemePreference,
+    };
+    return migrateAppearanceV1ToV2(legacy);
+  }
 
-  const codeRaw = obj.codeTheme;
-  const codeTheme: CodeThemePreference =
-    typeof codeRaw === "string" && (VALID_CODE_THEMES as readonly string[]).includes(codeRaw)
-      ? (codeRaw as CodeThemePreference)
-      : "auto";
-
-  return { theme, chatTheme, codeTheme };
+  return { ...DEFAULT_SETTINGS.appearance };
 }
 
 /**
