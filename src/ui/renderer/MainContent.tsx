@@ -56,6 +56,8 @@ export interface MainContentProps {
   installingPlugins?: ReadonlyMap<string, InstallPhase>;
   onOpenMarketplace: () => void;
   marketplaceUrlReady?: boolean;
+  /** Q10 — set of routineIds currently executing */
+  runningRoutines?: Set<string>;
   // plugin view
   activePluginView: PluginView | null;
 }
@@ -100,6 +102,7 @@ function HomeChatPane(props: MainContentProps) {
         installingPlugins={props.installingPlugins}
         onOpenMarketplace={props.onOpenMarketplace}
         marketplaceUrlReady={props.marketplaceUrlReady}
+        runningRoutines={props.runningRoutines}
       />
     </ChatContextProvider>
   );
