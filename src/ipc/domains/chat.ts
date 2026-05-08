@@ -846,8 +846,9 @@ ${input}`;
   // stubbed to disk and the verbatim is gone. Returns null when:
   //   - sessionId does not match the active session
   //   - toolUseId not found in history
-  //   - message is already a disk stub (meta.compactedAt set but content
-  //     starts with "[tool_result stripped:" — serialized form)
+  //   - message has NOT been compacted (meta.compactedAt not set) — callers
+  //     should only request verbatim for compacted (stubbed) tool results
+  //   - message is already a disk stub (content starts with "[tool_result stripped:")
   // lineCount is computed here so the renderer never has to split on "\n".
   ipcMain.handle(
     "lvis:chat:get-verbatim-tool-result",
@@ -859,6 +860,8 @@ ${input}`;
           m.role === "tool_result" && m.toolUseId === toolUseId,
       );
       if (!msg) return null;
+      // only serve verbatim for messages that have been compacted
+      if (msg.meta?.compactedAt === undefined) return null;
       // content is always string on tool_result messages
       const content = msg.content;
       if (typeof content !== "string") return null;

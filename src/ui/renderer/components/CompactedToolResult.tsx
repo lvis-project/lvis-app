@@ -66,12 +66,17 @@ export function CompactedToolResult({
 
   async function handleExpand() {
     setState("loading");
-    const result = await getApi().getVerbatimToolResult(sessionId, toolUseId);
-    if (result === null) {
+    try {
+      const result = await getApi().getVerbatimToolResult(sessionId, toolUseId);
+      if (result === null) {
+        setState("missing");
+      } else {
+        setVerbatim(result);
+        setState("expanded");
+      }
+    } catch (err) {
+      console.error("getVerbatimToolResult failed:", err);
       setState("missing");
-    } else {
-      setVerbatim(result);
-      setState("expanded");
     }
   }
 
@@ -95,7 +100,7 @@ export function CompactedToolResult({
         <div className="tre-body min-w-0 rounded-b-md border-t"
           style={{ backgroundColor: "hsl(var(--code-bg))", color: "hsl(var(--code-fg))" }}
         >
-          <pre className="max-h-[16rem] overflow-y-auto px-0 py-1 font-mono text-[10px] leading-[1.4]">
+          <div className="max-h-[16rem] overflow-y-auto px-0 py-1 font-mono text-[10px] leading-[1.4]">
             {verbatim.content.split("\n").map((line, i) => (
               <div key={i} className="tre-line flex min-w-0 gap-0">
                 <span
@@ -109,7 +114,7 @@ export function CompactedToolResult({
                 </span>
               </div>
             ))}
-          </pre>
+          </div>
         </div>
       </div>
     );

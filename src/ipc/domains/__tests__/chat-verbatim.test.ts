@@ -155,7 +155,7 @@ describe("lvis:chat:get-verbatim-tool-result", () => {
   it("returns verbatim content + lineCount for matching in-session tool_result", async () => {
     const content = "line1\nline2\nline3";
     const loop = makeConversationLoop(SESSION_ID, [
-      makeToolResultMsg({ toolUseId: "tu-1", content }),
+      makeToolResultMsg({ toolUseId: "tu-1", content, compactedAt: "2026-05-08T00:00:00Z" }),
     ]);
     await setupHandlers(loop);
 
@@ -197,11 +197,40 @@ describe("lvis:chat:get-verbatim-tool-result", () => {
     expect(result).toBeNull();
   });
 
+  it("returns null for non-compacted tool_result (meta.compactedAt not set)", async () => {
+    // A tool_result that was never compacted should NOT be served via this IPC.
+    // Only messages that have gone through the compact pipeline are valid callers.
+    const loop = makeConversationLoop(SESSION_ID, [
+      makeToolResultMsg({ toolUseId: "tu-1", content: "verbatim content no compact" }),
+    ]);
+    await setupHandlers(loop);
+
+    const result = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-1" });
+    expect(result).toBeNull();
+  });
+
+  it("returns verbatim for compacted tool_result that still has verbatim content", async () => {
+    // compactedAt is set (message went through compact) but content is still the
+    // verbatim (in-memory, not yet serialized as stub).
+    const content = "verbatim still present\nline two";
+    const loop = makeConversationLoop(SESSION_ID, [
+      makeToolResultMsg({
+        toolUseId: "tu-1",
+        content,
+        compactedAt: "2026-05-08T01:00:00Z",
+      }),
+    ]);
+    await setupHandlers(loop);
+
+    const result = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-1" });
+    expect(result).toEqual({ content, lineCount: 2 });
+  });
+
   it("computes lineCount accurately for multi-line content", async () => {
     const lines = Array.from({ length: 50 }, (_, i) => `line ${i + 1}`);
     const content = lines.join("\n");
     const loop = makeConversationLoop(SESSION_ID, [
-      makeToolResultMsg({ toolUseId: "tu-50", content }),
+      makeToolResultMsg({ toolUseId: "tu-50", content, compactedAt: "2026-05-08T00:00:00Z" }),
     ]);
     await setupHandlers(loop);
 
@@ -217,7 +246,7 @@ describe("lvis:chat:get-verbatim-tool-result", () => {
   it("returns lineCount of 1 for single-line content", async () => {
     const content = "single line no newline";
     const loop = makeConversationLoop(SESSION_ID, [
-      makeToolResultMsg({ toolUseId: "tu-single", content }),
+      makeToolResultMsg({ toolUseId: "tu-single", content, compactedAt: "2026-05-08T00:00:00Z" }),
     ]);
     await setupHandlers(loop);
 
@@ -233,8 +262,8 @@ describe("lvis:chat:get-verbatim-tool-result", () => {
     const loop = makeConversationLoop(SESSION_ID, [
       { role: "user" as const, content: "hello" } as any,
       { role: "assistant" as const, content: "I'll read it" } as any,
-      makeToolResultMsg({ toolUseId: "tu-A", content: "content-A" }),
-      makeToolResultMsg({ toolUseId: "tu-B", content: "content-B" }),
+      makeToolResultMsg({ toolUseId: "tu-A", content: "content-A", compactedAt: "2026-05-08T00:00:00Z" }),
+      makeToolResultMsg({ toolUseId: "tu-B", content: "content-B", compactedAt: "2026-05-08T00:00:00Z" }),
     ]);
     await setupHandlers(loop);
 
