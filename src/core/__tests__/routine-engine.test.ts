@@ -21,13 +21,13 @@ describe("RoutineEngine.runRoutine", () => {
     const engine = new RoutineEngine({ createConversationLoop: () => loop as any });
 
     const result = await engine.runRoutine({
-      id: "wakeup",
-      trigger: "wakeup",
+      id: "schedule-daily",
+      trigger: "schedule",
       prePrompt: "오늘 하루 알려줘.",
     });
 
-    expect(result.routineId).toBe("wakeup");
-    expect(result.trigger).toBe("wakeup");
+    expect(result.routineId).toBe("schedule-daily");
+    expect(result.trigger).toBe("schedule");
     expect(typeof result.generatedAt).toBe("string");
     expect(loop.runTurn).toHaveBeenCalledWith("오늘 하루 알려줘.");
   });
@@ -62,7 +62,7 @@ describe("RoutineEngine.runRoutine", () => {
     const loop = makeLoop({ throws: true });
     const engine = new RoutineEngine({ createConversationLoop: () => loop as any });
 
-    const result = await engine.runRoutine({ id: "wakeup", trigger: "wakeup" });
+    const result = await engine.runRoutine({ id: "shutdown-daily", trigger: "shutdown" });
 
     expect(result.summary).toContain("loop crashed");
   });

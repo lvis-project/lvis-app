@@ -3,7 +3,7 @@
  *
  * Tests: createSession (dir/mode), listRecent (sort order), purgeRoutine, path traversal guard.
  */
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtemp, stat, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

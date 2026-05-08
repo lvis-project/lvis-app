@@ -49,6 +49,10 @@ export const KNOWN_CAPABILITIES: ReadonlySet<string> = new Set([
   "document-indexer",
   "conversation-trigger",
   "lifecycle-observer",
+  // NOTE: "host:overlay" will be added here once the companion SDK PR
+  // (plugin-manifest.schema.json) lands and the capability-schema-sync
+  // test can be kept green. PluginHostApi.showOverlay() is already typed
+  // in types.ts — no runtime gate yet.
 ]);
 
 /**

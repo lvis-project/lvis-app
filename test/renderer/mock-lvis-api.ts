@@ -30,7 +30,7 @@ const DEFAULT_SETTINGS = {
   llm: fakeLlmSettings({ provider: "openai", model: "gpt-4o-mini" }),
   chat: { systemPrompt: "", autoCompact: true },
   webSearch: { provider: "none" },
-  routine: { enableWakeupRoutine: false },
+  routine: {},
   privacy: { piiRedactEnabled: false },
 };
 
@@ -48,7 +48,7 @@ const DEFAULT_USAGE = {
 export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   api: MockLvisApi;
   emitChatStream: (ev: unknown) => void;
-  emitRoutineCompleted: (r: unknown) => void;
+  emitRoutineFiredV2: (r: unknown) => void;
   emitViewActivate: (v: string) => void;
   emitAskUserQuestion: (r: unknown) => void;
 } {
@@ -70,7 +70,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   const latestRoutineResult = overrides.latestRoutineResult ?? null;
 
   const chatStreamHandlers = new Set<(ev: unknown) => void>();
-  const routineCompletedHandlers = new Set<(r: unknown) => void>();
+  const routineFiredV2Handlers = new Set<(r: unknown) => void>();
   const viewHandlers = new Set<(v: string) => void>();
   const askUserQuestionHandlers = new Set<(r: unknown) => void>();
 
@@ -180,15 +180,26 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     getRecentNotes: vi.fn(async () => []),
 
     getUsageSummary: vi.fn(async () => usage),
-    getLatestRoutineResult: vi.fn(async () => latestRoutineResult),
-    triggerWakeupRoutineDev: vi.fn(async () => ({ ok: true, summary: "dev trigger" })),
-    triggerScheduleRoutineDev: vi.fn(async () => ({ ok: true, summary: "dev trigger schedule" })),
-    triggerShutdownRoutineDev: vi.fn(async () => ({ ok: true, summary: "dev trigger shutdown" })),
-    onRoutineStarted: vi.fn((_h: (p: unknown) => void) => () => {}),
-    onRoutineCompleted: vi.fn((h: (r: unknown) => void) => {
-      routineCompletedHandlers.add(h);
-      return () => routineCompletedHandlers.delete(h);
+    // Routine v2 API
+    listRoutinesV2: vi.fn(async () => []),
+    dismissRoutineV2: vi.fn(async () => ({ ok: true })),
+    removeRoutineV2: vi.fn(async () => ({ ok: true })),
+    triggerRoutineNowV2: vi.fn(async () => ({ ok: true })),
+    addRoutineV2: vi.fn(async () => ({ ok: true, routine: {} })),
+    onRoutineFiredV2: vi.fn((h: (r: unknown) => void) => {
+      routineFiredV2Handlers.add(h);
+      // Replay latestRoutineResult on subscription (simulates mount-time catchup).
+      if (latestRoutineResult !== null) {
+        Promise.resolve(latestRoutineResult).then((r) => {
+          if (r !== null && r !== undefined) h(r);
+        });
+      }
+      return () => routineFiredV2Handlers.delete(h);
     }),
+    onRoutineRunningStarted: vi.fn((_h: (p: unknown) => void) => () => {}),
+    onRoutineRunningFinished: vi.fn((_h: (id: string) => void) => () => {}),
+    listRoutineSessionsV2: vi.fn(async () => []),
+    readRoutineSessionV2: vi.fn(async () => ""),
     // Brain — proactive trigger lifecycle. Tests that don't exercise the
     // trigger card just need these to be callable subscribe/no-op functions.
     onTriggerStarted: vi.fn((_h: (p: unknown) => void) => () => {}),
@@ -227,7 +238,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   return {
     api,
     emitChatStream: (ev) => chatStreamHandlers.forEach((h) => h(ev)),
-    emitRoutineCompleted: (r) => routineCompletedHandlers.forEach((h) => h(r)),
+    emitRoutineFiredV2: (r) => routineFiredV2Handlers.forEach((h) => h(r)),
     emitViewActivate: (v) => viewHandlers.forEach((h) => h(v)),
     emitAskUserQuestion: (r) => askUserQuestionHandlers.forEach((h) => h(r)),
   };

@@ -17,4 +17,6 @@ export const ROUTINES_V2 = {
   // Q10 — running indicator events (renderer reflects LLM session progress)
   runningStarted: "lvis:routines:v2:running-started",
   runningFinished: "lvis:routines:v2:running-finished",
+  // M8 — emitted when an LLM session errors out so renderer can clear running state
+  failed: "lvis:routines:v2:failed",
 } as const;

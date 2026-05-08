@@ -1,8 +1,8 @@
 /**
  * Chat domain IPC handlers.
- * Covers: lvis:chat:*, lvis:routines:*, lvis:routine:*, lvis:trigger:*,
- *         lvis:memory:*, lvis:starred:*, lvis:feedback:submit,
+ * Covers: lvis:chat:*, lvis:memory:*, lvis:starred:*, lvis:feedback:submit,
  *         lvis:ask-user-question:respond
+ * Note: routine v2 channels (lvis:routines:v2:*) are handled in misc.ts.
  */
 import { ipcMain } from "electron";
 import type { WebContents } from "electron";

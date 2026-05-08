@@ -141,6 +141,14 @@ export class RoutinesScheduler {
     const active = this.store.listActive();
     const routine = active.find((r) => r.id === routineId);
     if (!routine) return false;
+    // M2: apply same cron dedup as the scheduled tick path — persist the
+    // minuteKey before dispatching so a scheduler-tick in the same minute
+    // does not double-fire.
+    if (routine.schedule?.repeat?.kind === "cron") {
+      const minuteKey = minuteKeyUTC(new Date());
+      if (routine.lastFiredMinuteUTC === minuteKey) return false;
+      await this.store.update(routine.id, { lastFiredMinuteUTC: minuteKey });
+    }
     const updated = await this.store.markFired(routine.id);
     if (!updated) return false;
     this.dispatch(updated);

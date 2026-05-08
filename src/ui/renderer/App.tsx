@@ -93,8 +93,34 @@ export function App() {
   // Q10 — addFire ref: populated by OverlayContextProvider during render
   // so the IPC subscription below can call it without prop-drilling
   const addFireRef = useRef<import("./context/OverlayContext.js").OverlayContextValue["addFire"] | null>(null);
+
+  // C1+M4: single subscription for routine IPC events. runningStarted pushes a
+  // running OverlayItem immediately (running:true); fired replaces it with the
+  // completed item (running:false + summary). runningRoutines Set is kept in
+  // sync for OverlayContextProvider to derive running flags on queue items.
   useEffect(() => {
-    const unsub = api.onRoutineFiredV2((evt) => {
+    const unsubStarted = api.onRoutineRunningStarted((payload) => {
+      const { routineId, firedAt, title } = payload;
+      setRunningRoutines((prev) => new Set([...prev, routineId]));
+      addFireRef.current?.({
+        id: `${routineId}-running`,
+        source: { kind: "routine", routineId, firedAt },
+        title,
+        summary: "",
+        running: true,
+      });
+    });
+
+    const unsubFinished = api.onRoutineRunningFinished((routineId) => {
+      setRunningRoutines((prev) => {
+        const next = new Set(prev);
+        next.delete(routineId);
+        return next;
+      });
+    });
+
+    // M1: fired payload uses explicit allowlist fields only (no ...routine spread)
+    const unsubFired = api.onRoutineFiredV2((evt) => {
       addFireRef.current?.({
         id: `${evt.id}-${evt.firedAt}`,
         source: { kind: "routine", routineId: evt.id, firedAt: evt.firedAt },
@@ -103,22 +129,8 @@ export function App() {
         running: false,
       });
     });
-    return unsub;
-  }, [api]);
 
-  // Q10 — running-started / running-finished IPC: update runningRoutines set
-  useEffect(() => {
-    const unsubA = api.onRoutineRunningStarted((routineId) => {
-      setRunningRoutines((prev) => new Set([...prev, routineId]));
-    });
-    const unsubB = api.onRoutineRunningFinished((routineId) => {
-      setRunningRoutines((prev) => {
-        const next = new Set(prev);
-        next.delete(routineId);
-        return next;
-      });
-    });
-    return () => { unsubA(); unsubB(); };
+    return () => { unsubStarted(); unsubFinished(); unsubFired(); };
   }, [api]);
 
   // Q10 — routine session modal (opened from OverlayCard "결과 보기")
@@ -596,6 +608,7 @@ export function App() {
     <OverlayContextProvider
       onOpenSession={handleOpenRoutineSession}
       addFireRef={addFireRef}
+      runningRoutines={runningRoutines}
     >
         <div className="flex h-screen flex-col overflow-hidden">
           <CustomTitleBar />

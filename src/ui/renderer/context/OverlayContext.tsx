@@ -73,6 +73,7 @@ export function OverlayContextProvider({
   children,
   onOpenSession,
   addFireRef,
+  runningRoutines,
 }: {
   children: ReactNode;
   onOpenSession: (routineId: string, firedAt: string) => void;
@@ -82,6 +83,11 @@ export function OverlayContextProvider({
    * The ref is set synchronously during render, before any effects fire.
    */
   addFireRef?: RefObject<((item: Omit<OverlayItem, "snoozedUntil">) => void) | null>;
+  /**
+   * C1: Set of currently-running routine IDs from App.tsx runningRoutines state.
+   * Provider syncs queue items' running flag when this set changes.
+   */
+  runningRoutines?: Set<string>;
 }) {
   const [queue, setQueue] = useState<OverlayItem[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -120,13 +126,39 @@ export function OverlayContextProvider({
     };
   }, [queue]);
 
+  // C1: sync running flag from runningRoutines set whenever it changes
+  useEffect(() => {
+    if (!runningRoutines) return;
+    setQueue((prev) => {
+      let changed = false;
+      const next = prev.map((item) => {
+        if (item.source.kind !== "routine") return item;
+        const isRunning = runningRoutines.has(item.source.routineId);
+        if (isRunning !== item.running) {
+          changed = true;
+          return { ...item, running: isRunning };
+        }
+        return item;
+      });
+      return changed ? next : prev;
+    });
+  }, [runningRoutines]);
+
   const addFire = useCallback((item: Omit<OverlayItem, "snoozedUntil">) => {
     setQueue((prev) => {
       // Stale fire replace: source.kind === "routine" + same routineId → replace;
       // source.kind === "plugin" + same (pluginId, eventId) → replace.
+      // Stale guard: for routine items, only replace if incoming firedAt >= existing firedAt.
+      let dominated = false;
       const filtered = prev.filter((it) => {
         if (item.source.kind === "routine" && it.source.kind === "routine") {
-          return it.source.routineId !== item.source.routineId;
+          if (it.source.routineId !== item.source.routineId) return true;
+          // Same routineId: drop existing only if incoming is same age or newer.
+          if (item.source.firedAt < it.source.firedAt) {
+            dominated = true; // incoming is stale — keep existing
+            return true;
+          }
+          return false; // drop existing, incoming is newer
         }
         if (item.source.kind === "plugin" && it.source.kind === "plugin") {
           return !(
@@ -136,10 +168,12 @@ export function OverlayContextProvider({
         }
         return true;
       });
-      return [...filtered, { ...item }];
+      if (dominated) return prev; // stale replay — discard
+      const newQueue = [...filtered, { ...item }];
+      // M7: navigate to tail (newest item) when a new fire arrives
+      setActiveIndex(newQueue.length - 1);
+      return newQueue;
     });
-    // When a new fire arrives, navigate to tail (newest item)
-    setActiveIndex((prev) => Math.max(0, prev));
   }, []);
 
   // Expose addFire via ref so App.tsx can call it from IPC subscription

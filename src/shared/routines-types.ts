@@ -76,3 +76,17 @@ export interface AddRoutineInput {
   notificationTitle?: string;
   notificationBody?: string;
 }
+
+/**
+ * M1: explicit allowlist for the routine fired IPC payload.
+ * Only these fields are sent to the renderer — no ...routine spread
+ * to prevent PII from prePrompt and other fields leaking to the UI.
+ */
+export interface RoutineFiredPayload {
+  id: string;
+  trigger: "shutdown" | "schedule";
+  execution: RoutineExecution;
+  firedAt: string;
+  title: string;
+  summary: string;
+}

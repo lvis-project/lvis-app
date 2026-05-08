@@ -10,9 +10,10 @@
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
-const DEFAULT_SESSIONS_ROOT = resolve(homedir(), ".lvis", "routine-sessions");
+// Q9: consolidated under ~/.lvis/routine/sessions/ (same namespace as routines.json)
+const DEFAULT_SESSIONS_ROOT = resolve(homedir(), ".lvis", "routine", "sessions");
 
 export interface RoutineSessionRecord {
   routineId: string;
@@ -139,9 +140,10 @@ export class RoutineSessionStore {
    * Returns true if safe, false if the path escapes the root.
    */
   isPathSafe(filePath: string): boolean {
-    const resolved = resolve(filePath);
-    const root = resolve(this.sessionsRoot);
-    return resolved.startsWith(root + "/") || resolved === root;
+    // Use path.relative to avoid Windows separator + prefix collision bugs.
+    // A safe path has a relative path that neither starts with ".." nor is absolute.
+    const rel = relative(resolve(this.sessionsRoot), resolve(filePath));
+    return rel === "" || (!rel.startsWith("..") && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
   }
 }
 

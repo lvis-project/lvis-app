@@ -580,8 +580,10 @@ const api = {
     return () => ipcRenderer.removeListener(ROUTINES_V2.fired, listener);
   },
   // Q10 — running indicator: emitted when a routine LLM session starts/finishes
-  onRoutineRunningStarted: (handler: (routineId: string) => void) => {
-    const listener = (_e: unknown, id: string) => handler(id);
+  // C1: runningStarted payload enriched to { routineId, firedAt, title } so the
+  // renderer can push a proper OverlayItem immediately without waiting for fired.
+  onRoutineRunningStarted: (handler: (payload: { routineId: string; firedAt: string; title: string }) => void) => {
+    const listener = (_e: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
     ipcRenderer.on(ROUTINES_V2.runningStarted, listener);
     return () => ipcRenderer.removeListener(ROUTINES_V2.runningStarted, listener);
   },

@@ -323,7 +323,8 @@ export type LvisApi = {
     }) => void,
   ) => () => void;
   // Q10 — running indicator
-  onRoutineRunningStarted: (handler: (routineId: string) => void) => () => void;
+  // C1: enriched payload includes title+firedAt so renderer can push OverlayItem immediately
+  onRoutineRunningStarted: (handler: (payload: { routineId: string; firedAt: string; title: string }) => void) => () => void;
   onRoutineRunningFinished: (handler: (routineId: string) => void) => () => void;
   // Q9 session history
   listRoutineSessionsV2: (

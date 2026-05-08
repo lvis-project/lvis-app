@@ -27,6 +27,7 @@ export function OverlayCardRegion() {
           routineTitle={active.title}
           summary={active.summary}
           firedAt={firedAt}
+          running={active.running}
           queueIndex={queueIndex}
           queueTotal={queueTotal}
           onPrev={prev}

@@ -76,7 +76,8 @@ export interface RoutinesFile {
   routines: RoutineRecord[];
 }
 
-const DEFAULT_PATH = resolve(homedir(), ".lvis", "routines.json");
+// Q9: consolidated under ~/.lvis/routine/ namespace (single directory for all routine data)
+const DEFAULT_PATH = resolve(homedir(), ".lvis", "routine", "routines.json");
 
 const fileLocks = new Map<string, Promise<void>>();
 
@@ -132,7 +133,16 @@ export class RoutinesStore {
   }
 
   list(): RoutineRecord[] {
-    return [...this.cache];
+    // M5: deep clone to prevent callers from mutating shared cache refs
+    return this.cache.map((r) => ({
+      ...r,
+      schedule: r.schedule
+        ? {
+            ...r.schedule,
+            repeat: r.schedule.repeat ? { ...r.schedule.repeat } : undefined,
+          }
+        : undefined,
+    }));
   }
 
   /** Active routines = not dismissed. */
@@ -370,25 +380,22 @@ function advanceWeekly(atIso: string): string {
 /**
  * Advance by one calendar month, clamping to the last day of the target month
  * so 31-day routines don't skip February (Q5).
+ *
+ * originalDay is captured once before the loop so that multi-month advances
+ * (e.g. Jan 31 skipped while app was offline) correctly restore the original
+ * day each month rather than drifting toward 28 after a Feb clamp.
  */
 function advanceMonthly(atIso: string): string {
   const d = new Date(atIso);
+  const originalDay = d.getDate(); // capture once — never re-read from d
   const nowMs = Date.now();
   while (d.getTime() <= nowMs) {
-    const dayOfMonth = d.getDate();
-    const nextMonth = d.getMonth() + 1;
-    // Attempt to set target month (may overflow to next if day > last-day).
-    d.setMonth(nextMonth);
-    // Clamp: if overflow happened (e.g. Jan 31 → Mar 3), rewind to last day.
-    if (d.getMonth() !== ((nextMonth) % 12)) {
-      // Overflowed — set to 0th day of overflow month = last day of target
-      d.setDate(0);
-    }
-    // Restore day-of-month up to available max.
+    // Set day=1 first to avoid month-overflow when current day > target-month days.
+    d.setDate(1);
+    d.setMonth(d.getMonth() + 1);
+    // Clamp to last day of the new month, then restore originalDay.
     const maxDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
-    if (dayOfMonth < d.getDate() || d.getDate() > maxDay) {
-      d.setDate(Math.min(dayOfMonth, maxDay));
-    }
+    d.setDate(Math.min(originalDay, maxDay));
   }
   return d.toISOString();
 }

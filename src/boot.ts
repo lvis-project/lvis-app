@@ -408,20 +408,40 @@ export async function bootstrap(
     // Q9: create an isolated session file before firing so the JSONL path
     // can be passed to the engine and routine turns never mix with main chat.
     // Q10: emit running-started/finished so renderer can show progress indicator.
+    // M8: createSession runs before runningStarted — abort if it throws.
     void (async () => {
       const firedAt = new Date().toISOString();
-      // Q10: notify renderer that this routine is now running
-      try {
-        getMainWindow()?.webContents.send(ROUTINES_V2.runningStarted, routine.id);
-      } catch {
-        // non-fatal
-      }
+      const title = routine.title ?? routine.notificationTitle ?? routine.id.slice(0, 8);
+
+      // M8: createSession first — if it fails, abort and emit failed event.
       let jsonlPath: string | null = null;
       try {
         jsonlPath = await routineSessionStore.createSession(routine.id, firedAt);
       } catch (err) {
-        log.warn("routines v2 session-store create failed (non-fatal): %s", (err as Error).message);
+        log.warn("routines v2 session-store create failed: %s", (err as Error).message);
+        try {
+          getMainWindow()?.webContents.send(ROUTINES_V2.failed, {
+            routineId: routine.id,
+            error: (err as Error).message,
+          });
+        } catch {
+          // non-fatal
+        }
+        return;
       }
+
+      // C1: runningStarted after session created — enriched payload with title+firedAt
+      // so renderer can push a proper running OverlayItem immediately.
+      try {
+        getMainWindow()?.webContents.send(ROUTINES_V2.runningStarted, {
+          routineId: routine.id,
+          firedAt,
+          title,
+        });
+      } catch {
+        // non-fatal
+      }
+
       try {
         await routineEngine.runRoutine({
           id: routine.id,
@@ -431,6 +451,15 @@ export async function bootstrap(
         });
       } catch (err) {
         log.warn("routines v2 llm-session run failed: %s", (err as Error).message);
+        // M8: emit failed so renderer knows to clear running state
+        try {
+          getMainWindow()?.webContents.send(ROUTINES_V2.failed, {
+            routineId: routine.id,
+            error: (err as Error).message,
+          });
+        } catch {
+          // non-fatal
+        }
       } finally {
         // Q10: always clear running state regardless of success/failure
         try {
@@ -448,14 +477,16 @@ export async function bootstrap(
           log.warn("routines v2 summary extract failed (non-fatal): %s", (err as Error).message);
         }
       }
+      // M1: explicit allowlist payload — no ...routine spread to prevent PII leak
       try {
-        const title = routine.title ?? routine.notificationTitle ?? routine.id.slice(0, 8);
         getMainWindow()?.webContents.send(ROUTINES_V2.fired, {
-          ...routine,
+          id: routine.id,
+          trigger: routine.trigger,
+          execution: routine.execution,
           firedAt,
           title,
           summary,
-        });
+        } satisfies import("./shared/routines-types.js").RoutineFiredPayload);
       } catch (err) {
         log.warn("routines v2 llm-session emit failed: %s", (err as Error).message);
       }

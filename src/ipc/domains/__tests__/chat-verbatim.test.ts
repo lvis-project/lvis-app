@@ -28,23 +28,6 @@ vi.mock("../../../audit/dlp-filter.js", () => ({
 }));
 vi.mock("../../../engine/wire-serialize.js", () => ({ stubMarkedToolResults: vi.fn((m: unknown) => m) }));
 vi.mock("../../../engine/proactive-source.js", () => ({ parseImportedTriggerEnvelope: vi.fn(() => null) }));
-vi.mock("../../../routines/registry.js", () => ({
-  REGISTERED_ROUTINES: [],
-  buildRoutineForTrigger: vi.fn(),
-  getRegisteredRoutine: vi.fn(),
-}));
-vi.mock("../../../routines/schedule.js", () => ({
-  DEFAULT_SHUTDOWN_PROMPT: "",
-  DEFAULT_WAKEUP_ROUTINE_PROMPT: "",
-  MAX_SCHEDULE_ENTRIES: 10,
-  scheduleToCron: vi.fn(),
-  isValidScheduleEntries: vi.fn(() => true),
-  normalizeScheduleEntries: vi.fn((e: unknown) => e ?? []),
-}));
-vi.mock("../../../routines/routine-delivery.js", () => ({
-  clearLatestRoutineResult: vi.fn(),
-  getLatestRoutineResult: vi.fn(() => null),
-}));
 vi.mock("../../../boot/dev-flags.js", () => ({ isDevModeUnlocked: vi.fn(() => false) }));
 vi.mock("../../../lib/logger.js", () => ({
   createLogger: vi.fn(() => ({ warn: vi.fn(), info: vi.fn(), error: vi.fn() })),

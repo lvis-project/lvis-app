@@ -783,6 +783,22 @@ export interface PluginHostApi {
    * Usage pattern (lvis-plugin-agent-hub decide-approval-with-host):
    *   await context.hostApi.agentApproval.respond(approvalId, choice, nonce, hmac)
    */
+  /**
+   * M6: Q10 overlay extensibility — show an overlay card from a plugin.
+   * Returns an OverlayHandle with a dismiss() disposer.
+   * Advisory: `host:overlay` capability should be declared in manifest.capabilities[].
+   *
+   * running=true shows spinner + "진행 중…"; false (default) shows summary + actions.
+   */
+  showOverlay?: (input: {
+    title: string;
+    summary: string;
+    running?: boolean;
+    primaryActionLabel?: string;
+    onPrimaryAction?: () => void;
+    onDismiss?: () => void;
+  }) => { dismiss(): void };
+
   agentApproval: {
     /**
      * Request an approval via the §8 ApprovalGate on behalf of this plugin.

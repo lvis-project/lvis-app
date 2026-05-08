@@ -106,11 +106,13 @@ export function RoutineSessionView({ jsonlPath, api, onClose }: RoutineSessionVi
                 <span className="text-xs font-semibold uppercase text-muted-foreground">
                   {role}
                 </span>
-                {ts && (
-                  <span className="text-xs text-muted-foreground">
-                    {new Date(ts).toLocaleTimeString("ko-KR")}
-                  </span>
-                )}
+                {ts && (() => {
+                  const d = new Date(ts);
+                  const timeStr = isNaN(d.getTime()) ? "" : d.toLocaleTimeString("ko-KR");
+                  return timeStr ? (
+                    <span className="text-xs text-muted-foreground">{timeStr}</span>
+                  ) : null;
+                })()}
               </div>
               <p className="whitespace-pre-wrap break-words">{text}</p>
             </div>

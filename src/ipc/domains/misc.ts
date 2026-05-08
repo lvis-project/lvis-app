@@ -105,13 +105,15 @@ export function registerMiscHandlers(deps: IpcDeps): void {
   ipcMain.handle(ROUTINES_V2.readSession, async (e, jsonlPath: string) => {
     if (!validateSender(e)) {
       auditUnauthorized(auditLogger, ROUTINES_V2.readSession, e);
-      return UNAUTHORIZED_FRAME;
+      // Return empty string (not UNAUTHORIZED_FRAME object) — preload type is Promise<string>
+      log.warn("read-session: unauthorized frame rejected");
+      return "";
     }
     if (!routineSessionStore) return "";
     // Path traversal guard — only allow paths inside ~/.lvis/routine-sessions/.
     if (!routineSessionStore.isPathSafe(jsonlPath)) {
       log.warn("read-session: path traversal attempt blocked: %s", jsonlPath);
-      return UNAUTHORIZED_FRAME;
+      return "";
     }
     try {
       return await readFile(jsonlPath, "utf-8");

@@ -437,3 +437,63 @@ describe("RoutinesStore v2 — advanceInterval far-past (no loop)", () => {
     }
   });
 });
+
+describe("RoutinesStore v2 — advanceMonthly originalDay preservation (C-critic-2)", () => {
+  it("multi-month advance preserves originalDay across all months (Jan 31 → 6 cycles)", async () => {
+    // Simulate Jan 31 far in the past so markFired multi-skips through 6 months.
+    // Expected: originalDay=31 is clamped per-month (Feb→28/29, Apr→30, Jun→30)
+    // but NEVER drifts below 28 after a Feb clamp (the pre-fix bug: 31→28→28→28...).
+    const { store, cleanup } = tempStore();
+    try {
+      // Use Jan 31, 2020 — far enough back that markFired will advance 6+ months.
+      const jan31 = new Date("2020-01-31T09:00:00Z");
+      const r = await store.add({
+        trigger: "schedule",
+        execution: "notification-only",
+        schedule: { at: jan31.toISOString(), repeat: { kind: "monthly" } },
+        notificationTitle: "monthly-31",
+      });
+      const updated = await store.markFired(r.id);
+      const nextAt = new Date(updated!.schedule!.at!);
+
+      // The next-fire date must be after now.
+      expect(nextAt.getTime()).toBeGreaterThan(Date.now());
+
+      // The day-of-month must be originalDay (31) clamped to the month's last day.
+      // It must NEVER be less than the last day of that month.
+      const year = nextAt.getUTCFullYear();
+      const month = nextAt.getUTCMonth(); // 0-based
+      const lastDayOfMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+      const actualDay = nextAt.getUTCDate();
+      // actualDay should be min(31, lastDayOfMonth) — never < lastDayOfMonth when original=31
+      expect(actualDay).toBe(Math.min(31, lastDayOfMonth));
+
+      // Specifically: it must never be 28 when the month has 30+ days.
+      if (lastDayOfMonth >= 30) {
+        expect(actualDay).toBeGreaterThanOrEqual(30);
+      }
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("Feb 28 → Mar preserves day 28 (originalDay < lastDay)", async () => {
+    const { store, cleanup } = tempStore();
+    try {
+      const feb28 = new Date("2020-02-28T09:00:00Z");
+      const r = await store.add({
+        trigger: "schedule",
+        execution: "notification-only",
+        schedule: { at: feb28.toISOString(), repeat: { kind: "monthly" } },
+        notificationTitle: "monthly-28",
+      });
+      const updated = await store.markFired(r.id);
+      const nextAt = new Date(updated!.schedule!.at!);
+      expect(nextAt.getTime()).toBeGreaterThan(Date.now());
+      // Day should be 28 (originalDay), not clamped higher
+      expect(nextAt.getUTCDate()).toBe(28);
+    } finally {
+      cleanup();
+    }
+  });
+});

@@ -69,11 +69,6 @@ const CHANNEL_MANIFEST: Record<string, "tier1" | "tier2" | "tier3"> = {
   // Policy
   "lvis:policy:get": "tier3",
   "lvis:policy:set": "tier1",
-  // Routine
-  "lvis:routine:get-latest-result": "tier3",
-  "lvis:routines:dev-trigger-wakeup": "tier1",
-  "lvis:routines:dev-trigger-schedule": "tier1",
-  "lvis:routines:dev-trigger-shutdown": "tier1",
   // Usage / observability
   "lvis:usage:summary": "tier3",
   // Conversation UX extras
