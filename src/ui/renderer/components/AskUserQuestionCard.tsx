@@ -302,14 +302,20 @@ export function AskUserQuestionCard({
   );
 }
 
+/**
+ * ChoiceBadge — visible in ALL button states (default/outline/selected).
+ *
+ * When the parent Button is `variant="default"` (selected), its background
+ * becomes `bg-primary` and `text-primary` / `bg-primary/15` become
+ * invisible.  Using a ring-based border-only style with `currentColor`
+ * fallback text ensures the badge reads correctly against both the
+ * outline (unselected) and filled primary (selected) button backgrounds.
+ */
 function ChoiceBadge({ kind }: { kind: "recommend" | "alt" }) {
-  // Both badges sit at the start of the chip so the 20-char answer text
-  // owns the rest of the row. Color-only difference (recommend = primary
-  // blue tint, alt = neutral muted) keeps the pattern compact.
   const cls =
     kind === "recommend"
-      ? "bg-primary/15 text-primary"
-      : "bg-muted text-muted-foreground";
+      ? "border border-current/60 text-inherit opacity-90"
+      : "border border-current/40 text-inherit opacity-60";
   return (
     <span
       className={`flex-shrink-0 rounded px-1.5 py-[1px] text-[9.5px] font-semibold tracking-wider ${cls}`}
