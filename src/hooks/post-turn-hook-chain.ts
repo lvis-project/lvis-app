@@ -16,7 +16,7 @@
  *   5. idleScheduler.signalConversation (Agent 5 §6.1)
  */
 
-import { shouldCompact, compactMessages, microcompactMessages, getModelUsableContext } from "../engine/auto-compact.js";
+import { shouldCompact, compactMessages, markStaleToolResults, getModelUsableContext } from "../engine/auto-compact.js";
 import { detectFromStream, type DetectorResult } from "../engine/checkpoint-detector.js";
 import { chainTitle } from "../engine/title-chainer.js";
 import type { GenericMessage, TokenUsage, LLMProvider } from "../engine/llm/types.js";
@@ -90,31 +90,31 @@ export class PostTurnHookChain {
     let compactedMessages: GenericMessage[] | null = null;
 
     // 1. Auto-Compact (§4.5.4) — 2-stage
-    //    Stage 1a (preventive): microcompact — 매 턴 실행, 오래된 tool_result를 stub으로 교체
+    //    Stage 1a (Layer 1, preventive): markStaleToolResults — 매 턴 실행, 오래된 tool_result를 stub으로 교체 (≥200자만)
     //    Stage 1b (threshold):  full compact — 사용률 임계치 초과 시 LLM-free 요약으로 압축
     try {
       const autoCompactEnabled = this.deps.settingsService?.get("chat").autoCompact ?? true;
       if (!autoCompactEnabled) {
         log.info("post-turn compact: SKIPPED (autoCompact 설정 OFF)");
       } else {
-        // Stage 1a: microcompact (항상 실행, 저비용)
-        const beforeMicroCount = ctx.messages.length;
-        const { messages: afterMicro, result: mr } = microcompactMessages(ctx.messages);
-        let working = afterMicro;
+        // Stage 1a: Layer 1 tool_result stub-replace (항상 실행, 저비용 — PR-3 에서 marking-only 로 전환 예정)
+        const beforeMarkCount = ctx.messages.length;
+        const { messages: afterMark, result: mr } = markStaleToolResults(ctx.messages);
+        let working = afterMark;
         if (mr.stripped) {
-          compactedMessages = afterMicro;
+          compactedMessages = afterMark;
           log.info(
-            `microcompact: stripped ${mr.strippedCount} tool_results, freed ~${mr.freedChars} chars (msgCount ${beforeMicroCount} → ${afterMicro.length}, content stub-replaced)`,
+            `mark-stale: stripped ${mr.strippedCount} tool_results, freed ~${mr.freedChars} chars (msgCount ${beforeMarkCount} → ${afterMark.length}, content stub-replaced)`,
           );
         } else {
-          log.info(`microcompact: SKIPPED — no stale tool_result content found (msgCount=${beforeMicroCount})`);
+          log.info(`mark-stale: SKIPPED — no stale tool_result content found (msgCount=${beforeMarkCount})`);
         }
 
         // Stage 1b: threshold-triggered full compact. Denominator is *usable*
         // (raw − Cline buffer) so the 80% threshold matches the rotation /
         // UI-ring math — see `shared/context-budget.ts:getUsableContext`.
         // No llmSettings → can't determine context window → skip Stage 1b
-        // (microcompact above already covered the safe per-turn path).
+        // (mark-stale above already covered the safe per-turn path).
         const llmSettings = this.deps.settingsService?.get("llm");
         if (!llmSettings) {
           log.info("auto-compact: SKIPPED — settingsService missing, cannot resolve usable context");

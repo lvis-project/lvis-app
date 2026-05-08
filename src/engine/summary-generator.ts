@@ -14,7 +14,7 @@ import { userContentText } from "./llm/types.js";
  * - 결과: rolling summary preamble (max ~3200 chars / ~800 tokens)
  * - 빈 messages → "" 반환
  */
-export async function generateSummary(
+export async function generateStructuredSummary(
   llm: LLMProvider,
   messages: GenericMessage[],
   options?: { maxTokens?: number; model?: string },
