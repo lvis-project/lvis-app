@@ -295,8 +295,74 @@ describe("ToolGroupCard", () => {
     expect(badges[0]?.textContent).toContain("⏱ 0.3s");
     expect(badges[1]?.textContent).toContain("⏱ 1.4s");
   });
+
+  // ─── PR-4: CompactedToolResult rendering paths (Major #4) ───────────────
+  it("PR-4: single tool with stub result + sessionId → renders CompactedToolResult (펼치기 visible)", () => {
+    const stubResult = "[tool_result stripped: tool=Read, origLen=5000]";
+    vi.stubGlobal("lvisApi", {
+      chatGetVerbatimToolResult: vi.fn(() => new Promise(() => {})), // never resolves — just test render
+    });
+    const group = makeGroup({
+      tools: [
+        {
+          toolUseId: "tu-stub",
+          name: "read_file",
+          input: { path: "/tmp/big.txt" },
+          result: stubResult,
+          status: "done",
+          displayOrder: 0,
+        },
+      ],
+    });
+    const { container } = render(<ToolGroupCard group={group} sessionId="session-1" />);
+    // CompactedToolResult renders [펼치기] in collapsed state
+    expect(container.textContent).toContain("[펼치기]");
+    // Must NOT show raw stub text as-is in a ToolPayloadBlock
+    expect(container.textContent).not.toContain("[tool_result stripped:");
+  });
+
+  it("PR-4: single tool with stub result but NO sessionId → renders ToolPayloadBlock (raw stub shown)", () => {
+    const stubResult = "[tool_result stripped: tool=Read, origLen=5000]";
+    const group = makeGroup({
+      tools: [
+        {
+          toolUseId: "tu-stub",
+          name: "read_file",
+          input: { path: "/tmp/big.txt" },
+          result: stubResult,
+          status: "done",
+          displayOrder: 0,
+        },
+      ],
+    });
+    // no sessionId prop → falls back to ToolPayloadBlock
+    const { container } = render(<ToolGroupCard group={group} />);
+    fireEvent.click(container.querySelector("button") as HTMLButtonElement);
+    expect(container.textContent).toContain("[tool_result stripped:");
+    expect(container.textContent).not.toContain("[펼치기]");
+  });
+
+  it("PR-4: single tool with non-stub result + sessionId → renders ToolPayloadBlock (not CompactedToolResult)", () => {
+    const group = makeGroup({
+      tools: [
+        {
+          toolUseId: "tu-normal",
+          name: "read_file",
+          input: { path: "/tmp/small.txt" },
+          result: "normal file content",
+          status: "done",
+          displayOrder: 0,
+        },
+      ],
+    });
+    const { container } = render(<ToolGroupCard group={group} sessionId="session-1" />);
+    fireEvent.click(container.querySelector("button") as HTMLButtonElement);
+    expect(container.textContent).toContain("normal file content");
+    expect(container.textContent).not.toContain("[펼치기]");
+  });
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
+

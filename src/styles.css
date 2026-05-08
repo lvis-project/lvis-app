@@ -426,6 +426,32 @@
     --ring:    60 100% 50%;
   }
 
+  /* ── PR-4/5 action tokens — collapsible tool result + branch UI ────────
+   *  --action-view:    verbatim viewer chevron / header accent
+   *  --action-branch:  branch/fork action accent
+   *  --action-compact: compress marker accent (📦 compact box)
+   *
+   *  Dark/light map to purple-500/600 for view+compact (inline with
+   *  chat "verbatim memory" intent) and orange-500/600 for branch
+   *  (consistent with existing fork/GitBranch usage).
+   *  High-contrast locks all three to the accessibility yellow.
+   * ──────────────────────────────────────────────────────────────────── */
+  :root[data-theme="dark"] {
+    --action-view:    var(--p-purple-500);
+    --action-branch:  var(--p-orange-500);
+    --action-compact: var(--p-purple-500);
+  }
+  :root[data-theme="light"] {
+    --action-view:    var(--p-purple-600);
+    --action-branch:  var(--p-orange-600);
+    --action-compact: var(--p-purple-600);
+  }
+  :root[data-theme="high-contrast"] {
+    --action-view:    60 100% 50%;
+    --action-branch:  60 100% 50%;
+    --action-compact: 60 100% 50%;
+  }
+
   /* ── Tier C: code-surface tokens ───────────────────────────────────────
    *  Default (no data-code-theme) inherits from the active data-theme:
    *  light shells get the light code panel, dark shells get the dark panel.
