@@ -43,6 +43,7 @@ import { formatToolDuration } from "../utils/format-duration.js";
 import type { RenderHtmlPayload } from "../types.js";
 import { HtmlPreview } from "./HtmlPreview.js";
 import { McpAppView } from "./McpAppView.js";
+import { CompactedToolResult } from "./CompactedToolResult.js";
 
 /**
  * Per-tool execution duration badge — `⏱ 1.4s`. Rendered next to the
@@ -101,12 +102,34 @@ function expandJsonStrings(value: unknown, depth = 0): unknown {
 /** Single-tool inline indicator — no collapsible wrapper */
 function SingleToolInline({
   tool,
+  sessionId,
 }: {
   tool: Extract<ChatEntry, { kind: "tool_group" }>["tools"][number];
+  sessionId?: string;
 }) {
   const isRunning = tool.status === "running";
   const isError = tool.status === "error";
   const [open, setOpen] = useState(false);
+
+  // PR-4: stub result — render collapsible CompactedToolResult instead of raw block
+  const isStubResult =
+    !isRunning &&
+    !isError &&
+    typeof tool.result === "string" &&
+    tool.result.startsWith("[tool_result stripped:");
+
+  if (isStubResult && sessionId) {
+    return (
+      <CompactedToolResult
+        toolUseId={tool.toolUseId}
+        toolName={getToolDisplayName(tool.name)}
+        input={tool.input}
+        stubContent={tool.result as string}
+        sessionId={sessionId}
+      />
+    );
+  }
+
   return (
     <div className="min-w-0 w-full max-w-full rounded-md text-[11px] text-muted-foreground">
       <button
@@ -148,9 +171,12 @@ function SingleToolInline({
 
 export function ToolGroupCard({
   group,
+  sessionId,
 }: {
   group: Extract<ChatEntry, { kind: "tool_group" }>;
   embedded?: boolean;
+  /** PR-4: active session id for verbatim IPC fetch. When provided, stub results render as CompactedToolResult. */
+  sessionId?: string;
 }) {
   // All hooks must be declared before any conditional return (Rules of Hooks)
   const tools = [...group.tools].sort((a, b) => a.displayOrder - b.displayOrder);
@@ -160,7 +186,7 @@ export function ToolGroupCard({
 
   // Single tool: render inline without group wrapper
   if (group.tools.length === 1 && group.tools[0]) {
-    return <SingleToolInline tool={group.tools[0]} />;
+    return <SingleToolInline tool={group.tools[0]} sessionId={sessionId} />;
   }
   const doneCount = group.tools.filter((t) => t.status !== "running").length;
   const hasError = group.tools.some((t) => t.status === "error");
@@ -253,7 +279,18 @@ export function ToolGroupCard({
                         <div className={`mb-0.5 text-[9px] uppercase opacity-60 ${tool.status === "error" ? "text-red-400" : ""}`}>
                           {tool.status === "error" ? "오류" : "결과"}
                         </div>
-                        <ToolPayloadBlock value={tool.result} isError={tool.status === "error"} />
+                        {/* PR-4: stub results render as collapsible CompactedToolResult */}
+                        {tool.result.startsWith("[tool_result stripped:") && sessionId ? (
+                          <CompactedToolResult
+                            toolUseId={tool.toolUseId}
+                            toolName={getToolDisplayName(tool.name)}
+                            input={tool.input}
+                            stubContent={tool.result}
+                            sessionId={sessionId}
+                          />
+                        ) : (
+                          <ToolPayloadBlock value={tool.result} isError={tool.status === "error"} />
+                        )}
                       </div>
                     )}
                   </div>
