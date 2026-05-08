@@ -996,8 +996,6 @@ export class ConversationLoop {
     let pluginExpansions = 0;
     let knowledgeCallCount = 0;
     let roundIndex = 0;
-    // Reactive compact recovery: turn당 1회만 허용
-    let reactiveCompacted = false;
     // C3(a): assistant-round counter — used by the maxRounds break below.
     let assistantRoundsRun = 0;
     // C3(a): effective round budget. Default = MAX_TOOL_ROUNDS (10); when a
@@ -1043,8 +1041,8 @@ export class ConversationLoop {
         );
       }
 
-      // ─── Stream 1차 시도 → context-length 에러면 reactive compact 후 재시도 ───
-      let stream = await collectRoundStream({
+      // ─── Stream attempt — Layer 0 preflight 가 사전 압축 처리하므로 mid-loop retry 없음 ───
+      const stream = await collectRoundStream({
         provider: this.provider!,
         model,
         systemPrompt,
@@ -1054,56 +1052,20 @@ export class ConversationLoop {
         abortSignal,
         onReasoningDelta: callbacks?.onReasoningDelta,
         onTextDelta: callbacks?.onTextDelta,
-        reactiveCompacted,
       });
 
-      if (stream.kind === "context_error" && !reactiveCompacted) {
+      // EARLY-EXIT (R6 safety net): Layer 0 estimator drift 로 context_error 도달 시
+      // 사용자 안내 + turn 종료. retry 없음 — mid-loop history mutation 으로 LLM tool-chain
+      // 손상되던 silent failure 패턴 영구 제거.
+      if (stream.kind === "context_error") {
         log.warn(
-          `queryLoop: context_error caught (round=${roundIndex} errMsg="${(stream.errorMessage ?? "").slice(0, 100)}") — entering reactive-compact + retry branch`,
+          `queryLoop: EARLY-EXIT(context_error after Layer 0) — round=${roundIndex} err="${(stream.errorMessage ?? "").slice(0, 100)}" (estimator drift suspected)`,
         );
-        reactiveCompacted = true;
-        const retried = this.tryReactiveCompact(callbacks);
-        if (retried) {
-          log.info(`queryLoop: reactive-compact succeeded — retrying stream (round=${roundIndex})`);
-          stream = await collectRoundStream({
-            provider: this.provider!,
-            model,
-            systemPrompt,
-            messages: this.history.getMessages(),
-            toolSchemas,
-            llmSettings: { ...activeBlock, streamSmoothing: llmSettings.streamSmoothing },
-            abortSignal,
-            onReasoningDelta: callbacks?.onReasoningDelta,
-            onTextDelta: callbacks?.onTextDelta,
-            reactiveCompacted,
-          });
-          // 재시도 결과 분류 — silent failure 의 정확한 원인 추적용.
-          log.warn(
-            `queryLoop: post-reactive-compact retry result kind="${stream.kind}" round=${roundIndex}` +
-              (stream.kind === "ok"
-                ? ` text=${stream.text.length}ch toolCalls=${stream.toolCalls.length} stopReason="${stream.stopReason}"`
-                : ""),
-          );
-          // LLM 이 retry 후 *empty + 0 tool* 응답하면 prior tool chain 이
-          // mid-flight 으로 손상되어 LLM 이 plan 잃은 경우. 사용자에게 명시.
-          if (
-            stream.kind === "ok" &&
-            stream.text.length === 0 &&
-            stream.toolCalls.length === 0
-          ) {
-            log.warn(
-              "queryLoop: reactive-compact retry returned EMPTY response — LLM 추론 chain 이 history mutation 으로 손상된 가능성 (silent failure 후보)",
-            );
-            callbacks?.onError?.(
-              "대화 이력이 길어 일부 압축됐고 그 직후 LLM 응답이 비어있습니다. 이어서 진행하려면 메시지를 다시 보내주세요.",
-            );
-          }
-        } else {
-          log.warn(
-            `queryLoop: reactive-compact failed (compactMessages no-op or threw) — propagating context_error`,
-          );
-          throw new Error(stream.errorMessage);
-        }
+        const userMsg =
+          "대화 이력이 모델 한도를 초과했습니다. 새 메시지를 보내면 자동 압축이 다시 시도됩니다.";
+        callbacks?.onError?.(userMsg);
+        this.history.append({ role: "assistant", content: userMsg });
+        return { text: userMsg, toolCalls: allToolCalls, usage: turnUsage };
       }
 
       if (stream.kind === "stream_error") {
@@ -1127,11 +1089,6 @@ export class ConversationLoop {
         this.history.append({ role: "assistant", content: savedText });
         callbacks?.onTextDelta?.("\n\n[중단됨]");
         return { text: savedText, toolCalls: allToolCalls, usage: turnUsage, stopReason: "interrupted" };
-      }
-
-      // stream.kind === "context_error" 이면서 reactiveCompacted=true 인 경우는 위 재시도 분기에서 이미 재할당.
-      if (stream.kind === "context_error") {
-        throw new Error(stream.errorMessage);
       }
 
       // stream.kind === "ok" — usage 반영 + assistant round commit
@@ -1482,51 +1439,11 @@ export class ConversationLoop {
         tier: "hard-token",
       });
     } catch (err) {
-      log.warn(`preflight: Layer 2 failed — ${(err as Error).message}. mid-loop reactive 가 safety net 으로 작동.`);
+      // Layer 2 실패 시 turn 자체는 계속 진행 — Layer 0 미적용 history 로 stream attempt.
+      // context_error 도달 시 stream-collector 의 safety net 이 사용자 안내 처리.
+      log.warn(`preflight: Layer 2 failed — ${(err as Error).message}. context_error safety net 으로 위임.`);
     } finally {
       this.isCompacting = false;
-    }
-  }
-
-  /**
-   * Reactive compact — context-length 초과 시 history 를 압축한다.
-   * 성공했으면 true 반환 (호출자가 stream 재시도). 실패 시 false.
-   *
-   * **PR-2-C 이후**: Layer 0 preflight 가 대부분 사전 차단하므로 이 경로는 estimator drift /
-   * rare race 의 *safety net* 으로 강등. PR-2-F 에서 isContextLengthError() safety net 만
-   * 남기고 본체 삭제 예정.
-   */
-  private tryReactiveCompact(callbacks?: TurnCallbacks): boolean {
-    const before = {
-      msgCount: this.history.getMessages().length,
-      lastRole: this.history.getMessages().at(-1)?.role,
-      cumulativeIn: this.cumulativeUsage.inputTokens,
-    };
-    log.warn(
-      `reactive-compact: BEFORE — msgCount=${before.msgCount} lastRole=${before.lastRole} cumIn=${before.cumulativeIn}`,
-    );
-    try {
-      const { messages: compactedMsgs, result: cr } = compactMessages(this.history.getMessages(), undefined, "reactive");
-      if (!cr.compacted) {
-        log.warn("reactive-compact: compactMessages returned compacted=false (no-op) — provider context_error will propagate");
-        return false;
-      }
-      this.history.clear();
-      this.history.restore(compactedMsgs);
-      const after = {
-        msgCount: this.history.getMessages().length,
-        lastRole: this.history.getMessages().at(-1)?.role,
-      };
-      // production 에서도 항상 log — dev-only 가드 제거 (silent compact 가
-      // mid-loop incident 의 root cause 진단을 막던 패턴 정정).
-      log.warn(
-        `reactive-compact: AFTER — removed=${cr.removedMessages} freed~${cr.freedTokens} msgCount=${after.msgCount} lastRole=${after.lastRole} (history mutated mid-loop — LLM 의 prior tool_result 회상 손실 가능)`,
-      );
-      callbacks?.onCompactOccurred?.({ removedMessages: cr.removedMessages, freedTokens: cr.freedTokens });
-      return true;
-    } catch (compactErr) {
-      log.warn("reactive-compact: compactMessages threw, skipping retry: %s", compactErr);
-      return false;
     }
   }
 
