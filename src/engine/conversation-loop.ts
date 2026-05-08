@@ -542,15 +542,16 @@ export class ConversationLoop {
 
     this.isCompacting = true;
     try {
+      const messagesBefore = this.history.getMessages();
       const result = await compactWithBoundary({
-        messages: this.history.getMessages(),
+        messages: messagesBefore,
         llm: this.provider,
         model,
         preserveRecentTokens,
         compactNum: this.compactNum + 1,
       });
 
-      if (result.removedCount === 0) {
+      if (result === null || result.removedCount === 0) {
         return {
           compacted: false,
           compactedAt: null,
@@ -559,16 +560,8 @@ export class ConversationLoop {
         };
       }
 
-      this.compactNum = result.boundary.compactNum;
-      this.history.clear();
-      this.history.restore([...result.newHistory]);
-      this.deps.systemPromptBuilder.setSummaryPreamble?.(renderBoundaryAsPreamble(result.boundary));
-      this.cumulativeUsage = {
-        inputTokens: result.estimatedAfter,
-        outputTokens: this.cumulativeUsage.outputTokens,
-        ...(this.cumulativeUsage.cacheReadTokens !== undefined && { cacheReadTokens: 0 }),
-        ...(this.cumulativeUsage.cacheWriteTokens !== undefined && { cacheWriteTokens: 0 }),
-      };
+      const estimated = estimateMessagesTokens(messagesBefore);
+      await this.applyBoundaryToSession(result, "manual", estimated, undefined);
 
       // 영속화 — manualCompact 완료 시점에 즉시 disk 반영. saveSession 실패는
       // 사용자 가시 결과에 영향 X (next turn 에서도 compact 결과 보존됨).
@@ -1334,6 +1327,69 @@ export class ConversationLoop {
   }
 
   /**
+   * DRY helper — boundary 적용 공통 경로.
+   *
+   * `runPreflightGuard` (auto) 와 `manualCompact` (manual) 가 동일 동작을 공유:
+   *   1. `compactNum` 증가
+   *   2. `history` 교체 (boundary stub + recentVerbatim)
+   *   3. `setSummaryPreamble` 로 ⑧ slot 갱신 (P1 sync chain)
+   *   4. `cumulativeUsage.inputTokens = estimatedAfter` reset
+   *   5. Layer 3 checkpoint append + saveSessionMetadata 영속화
+   *   6. `callbacks.onCompactOccurred` surface (사용자 가시 compact_notice)
+   *
+   * Layer 3 storage 실패는 대화 차단 금지 — warn 후 계속.
+   */
+  private async applyBoundaryToSession(
+    result: import("./structured-compact.js").CompactWithBoundaryResult,
+    trigger: "auto-compact" | "manual",
+    estimatedBefore: number,
+    callbacks?: TurnCallbacks,
+  ): Promise<void> {
+    this.compactNum = result.boundary.compactNum;
+    this.history.clear();
+    this.history.restore([...result.newHistory]);
+    const preamble = renderBoundaryAsPreamble(result.boundary);
+    this.deps.systemPromptBuilder.setSummaryPreamble?.(preamble);
+    this.cumulativeUsage = {
+      inputTokens: result.estimatedAfter,
+      outputTokens: this.cumulativeUsage.outputTokens,
+      ...(this.cumulativeUsage.cacheReadTokens !== undefined && { cacheReadTokens: 0 }),
+      ...(this.cumulativeUsage.cacheWriteTokens !== undefined && { cacheWriteTokens: 0 }),
+    };
+
+    // Layer 3 — same-session checkpoint chain (§4.4).
+    // PR-2-E (#608) 정정: ctxUsageAtTrigger 분모는 *usable context window* (Cline buffer 적용).
+    try {
+      const llmSettings = this.deps.settingsService.get("llm");
+      const provider = llmSettings.provider;
+      const model = llmSettings.vendors[provider].model;
+      const usable = getModelUsableContext(provider, model);
+      const ctxUsageAtTrigger = usable > 0 ? Math.min(1.0, estimatedBefore / usable) : 0;
+      const checkpointEntry: import("../memory/memory-manager.js").Checkpoint = {
+        id: crypto.randomUUID(),
+        triggeredAt: result.boundary.createdAt,
+        trigger,
+        ctxUsageAtTrigger,
+        summary: preamble,
+        messageCountAtTrigger: result.removedCount + result.newHistory.length,
+        compactNum: this.compactNum,
+      };
+      const existingMeta = this.deps.memoryManager.loadSessionMetadata(this.sessionId) ?? {};
+      const updatedMeta = this.deps.memoryManager.appendCheckpoint(existingMeta, checkpointEntry);
+      await this.deps.memoryManager.saveSessionMetadata(this.sessionId, updatedMeta);
+    } catch (storageErr) {
+      log.warn(`applyBoundaryToSession: Layer 3 checkpoint persist 실패 — ${(storageErr as Error).message}`);
+    }
+
+    callbacks?.onCompactOccurred?.({
+      removedMessages: result.removedCount,
+      freedTokens: estimatedBefore - result.estimatedAfter,
+      tier: trigger,
+      summary: preamble,
+    });
+  }
+
+  /**
    * Layer 0 — Pre-flight Guard (`infinity-session-redesign-v3.md` §4.1, P1 sync chain).
    *
    * step 5 (HISTORY_APPEND) 직후 호출 — `estimateMessagesTokens(history) >= getModelPreflightThreshold()`
@@ -1386,61 +1442,17 @@ export class ConversationLoop {
         ...(abortSignal !== undefined && { abortSignal }),
       });
 
-      if (compactResult.removedCount === 0) {
+      if (compactResult === null || compactResult.removedCount === 0) {
         log.info("preflight: Layer 2 returned removedCount=0 (preserveRecentTokens covered all) — no mutation");
         return;
       }
 
       // P1 sync chain — 다음 step 6 PROMPT_ASSEMBLE 가 새 boundary 를 read 해야 함.
-      this.compactNum = compactResult.boundary.compactNum;
-      this.history.clear();
-      this.history.restore([...compactResult.newHistory]);
-      const preamble = renderBoundaryAsPreamble(compactResult.boundary);
-      this.deps.systemPromptBuilder.setSummaryPreamble?.(preamble);
-      this.cumulativeUsage = {
-        inputTokens: compactResult.estimatedAfter,
-        outputTokens: this.cumulativeUsage.outputTokens,
-        ...(this.cumulativeUsage.cacheReadTokens !== undefined && { cacheReadTokens: 0 }),
-        ...(this.cumulativeUsage.cacheWriteTokens !== undefined && { cacheWriteTokens: 0 }),
-      };
-
-      // Layer 3 — same-session checkpoint chain (`infinity-session-redesign-v3.md` §4.4).
-      // Existing `MemoryManager.appendCheckpoint` 재사용 — 별도 storage path 불필요. summary 필드에
-      // rendered preamble 보관 (full CompactBoundary 는 memory ⊥ engine 모듈 경계상 in-memory only,
-      // `MessageMeta.boundary` frozen reference 로 history[0] 에 carry).
-      try {
-        const existingMeta = this.deps.memoryManager.loadSessionMetadata(this.sessionId) ?? {};
-        // PR-2-E (#608) 정정: ctxUsageAtTrigger 분모는 *usable context window* (Cline buffer 적용).
-        // 이전 (preflight 분모) 은 trigger threshold 자체였으므로 ratio 항상 ≥ 1 → clamp 1.0.
-        // usable 기준으로 계산해야 "트리거 시점에 모델 한도의 몇 % 였는지" 의미가 됨.
-        const usable = getModelUsableContext(provider, model);
-        const ctxUsageAtTrigger = usable > 0
-          ? Math.min(1.0, estimated / usable)
-          : 0;
-        const checkpointEntry: import("../memory/memory-manager.js").Checkpoint = {
-          id: crypto.randomUUID(),
-          triggeredAt: compactResult.boundary.createdAt,
-          trigger: "auto-compact",
-          ctxUsageAtTrigger,
-          summary: preamble,
-          messageCountAtTrigger: messagesBefore.length,
-          compactNum: this.compactNum,
-        };
-        const updatedMeta = this.deps.memoryManager.appendCheckpoint(existingMeta, checkpointEntry);
-        await this.deps.memoryManager.saveSessionMetadata(this.sessionId, updatedMeta);
-      } catch (storageErr) {
-        // Layer 3 storage 실패는 *대화 차단 금지* — Layer 0/2 결과 자체는 이미 메모리 적용됨.
-        log.warn(`preflight: Layer 3 checkpoint persist 실패 — ${(storageErr as Error).message}`);
-      }
+      await this.applyBoundaryToSession(compactResult, "auto-compact", estimated, callbacks);
 
       log.info(
         `preflight: APPLIED — removed=${compactResult.removedCount} estimatedAfter=${compactResult.estimatedAfter} compactNum=${this.compactNum}`,
       );
-      callbacks?.onCompactOccurred?.({
-        removedMessages: compactResult.removedCount,
-        freedTokens: estimated - compactResult.estimatedAfter,
-        tier: "auto-compact",
-      });
     } catch (err) {
       // Layer 2 실패 시 turn 자체는 계속 진행 — Layer 0 미적용 history 로 stream attempt.
       // context_error 도달 시 stream-collector 의 safety net 이 사용자 안내 처리.

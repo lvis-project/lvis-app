@@ -333,7 +333,7 @@ describe("compactWithBoundary — Layer 2 LLM call integration", () => {
     expect(r.boundary.compactNum).toBe(1);
   });
 
-  it("returns empty boundary when nothing to compact (preserveRecentTokens covers all)", async () => {
+  it("returns null when nothing to compact (preserveRecentTokens covers all)", async () => {
     const llm = makeMockLlm(["(should not be called)"]);
     const messages: GenericMessage[] = [
       { role: "user", content: "hi" },
@@ -346,8 +346,8 @@ describe("compactWithBoundary — Layer 2 LLM call integration", () => {
       preserveRecentTokens: 1_000_000, // 모든 메시지 보존
       compactNum: 1,
     });
-    expect(r.removedCount).toBe(0);
-    expect(r.newHistory).toBe(messages); // reference-equal
+    // no-op path: null 반환 (boundary/freeze 부작용 없음 — Major Fix #1)
+    expect(r).toBeNull();
   });
 
   it("retries parse failure once, then graceful raw fallback", async () => {

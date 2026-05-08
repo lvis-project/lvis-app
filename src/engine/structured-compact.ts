@@ -298,6 +298,12 @@ export interface CompactWithBoundaryResult {
 }
 
 /**
+ * `compactWithBoundary` 가 no-op 시 반환 — `toCompact.length === 0` 경로.
+ * caller 는 null 을 받으면 compact 건너뜀 (boundary/freeze 부작용 0).
+ */
+export type CompactWithBoundaryNoOp = null;
+
+/**
  * Layer 2 — Structured compact with LLM call + opaque-state slot.
  *
  * 알고리즘 (v3 §4.3.3, P1 sync chain):
@@ -314,29 +320,16 @@ export interface CompactWithBoundaryResult {
  */
 export async function compactWithBoundary(
   args: CompactWithBoundaryArgs,
-): Promise<CompactWithBoundaryResult> {
+): Promise<CompactWithBoundaryResult | CompactWithBoundaryNoOp> {
   const { messages, llm, model, preserveRecentTokens, compactNum, abortSignal } = args;
 
   // 1. Split — 끝에서부터 preserveRecentTokens 만큼 보존, tool 페어 안전.
   const { toCompact, toPreserve } = splitForBoundary(messages, preserveRecentTokens);
 
   if (toCompact.length === 0) {
-    // 압축할 내용 없음. empty boundary 반환 — caller 는 무시 또는 noop 처리.
-    const empty = freezeBoundary({
-      templateVersion: 1,
-      structuredSummary: { templateVersion: 1, sections: {}, raw: "" },
-      recentVerbatim: messages,
-      pinnedArtifacts: [],
-      toolBoundaryLedger: [],
-      createdAt: new Date().toISOString(),
-      compactNum,
-    });
-    return {
-      boundary: empty,
-      newHistory: messages,
-      removedCount: 0,
-      estimatedAfter: estimateMessagesTokens(messages),
-    };
+    // 압축할 내용 없음 — boundary 자체를 만들지 않음. caller 가 null 을 받으면 compact skip.
+    // (freezeBoundary 에 외부 messages 배열을 직접 넘기면 caller array 까지 frozen 되는 부작용 차단.)
+    return null;
   }
 
   // 2-3. LLM call + parse with retry-once (R2 mitigation).
