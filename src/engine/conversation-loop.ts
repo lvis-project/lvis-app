@@ -10,7 +10,7 @@
 import { ConversationHistory, normalizeToolPairInvariant } from "./conversation-history.js";
 import { ToolExecutor, type ToolUseBlock } from "../tools/executor.js";
 import { HookRunner } from "../hooks/hook-runner.js";
-import { shouldCompact, compactMessages, markStaleToolResults, estimateMessagesTokens, getModelUsableContext, getModelPreflightThreshold, decideRotation, type CheckpointTriggerType } from "./auto-compact.js";
+import { shouldCompact, compactMessages, markStaleToolResults, estimateMessagesTokens, getModelUsableContext, getModelPreflightThreshold } from "./auto-compact.js";
 import { compactWithBoundary, renderBoundaryAsPreamble } from "./structured-compact.js";
 import { generateStructuredSummary } from "./summary-generator.js";
 import { createProvider, secretKeyFor } from "./llm/provider-factory.js";
@@ -66,22 +66,14 @@ export interface TurnCallbacks {
     removedMessages: number;
     freedTokens: number;
     /**
-     * 3-tier rotation tier when the compact was driven by `runRotationCheck`.
-     * Absent for plain auto/reactive compaction (no rotation occurred).
-     * Lets the renderer differentiate emergency vs voluntary checkpoints.
+     * Compact tier — Layer 0 preflight 가 발화 시 "hard-token" (default).
+     * UI CheckpointDivider 가 색상/라벨 결정에 사용 (`lib/chat-stream-state.ts:CheckpointTier`).
+     * fork-based rotation 폐지로 (PR-2-F) `revertSessionId` 는 더 이상 set 되지 않음 — same-session
+     * 안 numbered checkpoint chain (Layer 3) 으로 대체됨.
      */
-    tier?: CheckpointTriggerType;
+    tier?: string;
     /**
-     * §457 Phase 3: parent session id from which the rotation forked. Allows
-     * the renderer to surface a "여기로 되돌아가기" action that resumes the
-     * pre-rotation session. Only set on rotation-driven compacts; absent for
-     * plain auto/reactive compaction (no fork occurred).
-     */
-    revertSessionId?: string;
-    /**
-     * Rolling summary generated for rotation checkpoints. Undefined means no
-     * user-facing summary is available; null summaries are intentionally not
-     * sent because there is nothing useful to render.
+     * Rolling summary — Layer 2 의 `renderBoundaryAsPreamble()` 결과. 사용자 가시성용.
      */
     summary?: string;
   }) => void;
@@ -246,14 +238,6 @@ export class ConversationLoop {
    * 와 다른 metric.
    */
   private lastRoundInputTokens = 0;
-  /** PR-4: timestamp when the current session started (ms since epoch) — used by decideRotation */
-  private sessionStartedAt: number = Date.now();
-  // 2026-05-04 incident 후속: rotation 직후 한 turn 동안 다음 rotation 보류
-  // (OpenCode 패턴 — 회전 결과 자체가 다시 회전 트리거되는 race 방지). next
-  // runRotationCheck 가 호출되면 이 flag 를 보고 early-return + clear.
-  private justRotated: boolean = false;
-  /** PR-4: index into history marking where the last checkpoint rotation occurred */
-  private lastCheckpointMessageIndex: number = 0;
   /** B4: current turn's AbortController — abortCurrentTurn() calls .abort() */
   currentAbortController: AbortController | null = null;
   /**
@@ -398,9 +382,8 @@ export class ConversationLoop {
     this.sessionRoutineId = null;
     this.history.clear();
     this.cumulativeUsage = { inputTokens: 0, outputTokens: 0 };
-    this.sessionStartedAt = Date.now();
-    this.lastCheckpointMessageIndex = 0;
     this.sessionPluginExpansions = 0;
+    this.compactNum = 0;
     this.tracer = createTracer(this.sessionId);
     // PR-4: clear rolling summary preamble for fresh session
     this.deps.systemPromptBuilder.setSummaryPreamble?.(null);
@@ -473,9 +456,8 @@ export class ConversationLoop {
     this.history.clear();
     this.history.restore(normalized.messages);
     this.cumulativeUsage = { inputTokens: 0, outputTokens: 0 };
-    this.sessionStartedAt = Date.now();
-    this.lastCheckpointMessageIndex = 0;
     this.sessionPluginExpansions = 0;
+    this.compactNum = sessionMeta?.checkpoints?.length ?? 0;
     this.tracer = createTracer(this.sessionId);
     // PR-4: inject rolling summary preamble from loaded session metadata
     const preamble = sessionMeta?.summaryPreamble ?? null;
@@ -876,12 +858,9 @@ export class ConversationLoop {
       this.deps.idleScheduler?.signalConversation();
     }
 
-    // PR-4: 3-tier rotation orchestration. 2026-05-04 incident 정정: turn
-    // 이 *완전 종료* 됐을 때만 rotation. stopReason==="interrupted" /
-    // empty text / 마지막이 tool_result 인 (LLM 이 도구 후 답을 못 한)
-    // 케이스는 incomplete turn 으로 보고 회전 보류. notification (line 695-)
-    // 와 동일한 turn-completeness 판정.
-    await this.runRotationCheck(result.text, result.stopReason, callbacks);
+    // PR-2-F-2: rotation orchestration 폐지. Layer 2 의 same-session checkpoint chain
+    // (`runPreflightGuard` 안의 appendCheckpoint) 으로 대체 — fork 없음, sessionId 불변.
+    // Turn 종료 후 별도 hook 불필요: Layer 0 가 다음 turn 진입 시 다시 평가.
 
     // Turn aggregate footer — see TurnCallbacks.onTurnSummary doc above.
     // Tokens come from the LLM provider's usage report (Vercel AI SDK
@@ -1571,189 +1550,7 @@ export class ConversationLoop {
     return { text: result, toolCalls: [], route: "command" };
   }
 
-  // ─── PR-4: 3-Tier Rotation ────────────────────────
-
-  /**
-   * 매 턴 종료 후 호출. 3-tier rotation 결정 트리를 평가하고
-   * 필요 시 summary 생성 → checkpoint 기록 → child session으로 전환.
-   */
-  private async runRotationCheck(
-    lastAssistantText: string,
-    stopReason: "end_turn" | "tool_use" | "interrupted" | undefined,
-    callbacks?: TurnCallbacks,
-  ): Promise<void> {
-    if (!this.provider) return;
-
-    // 2026-05-04 incident: turn-completeness guards. 4 케이스에서 rotation 보류:
-    //
-    //   (A1) stopReason === "interrupted": 사용자가 abort 한 turn — 이어서
-    //        하려는 작업이 아직 남아있을 가능성이 큼.
-    //   (A2) lastAssistantText.trim() === "": LLM 이 도구 호출 후 빈 답변으로
-    //        end_turn — incident 의 직접 원인. assistant 가 사용자에게 final
-    //        answer 를 못 준 상태.
-    //   (A3) 마지막 history msg.role === "tool_result": tool 후 follow-up
-    //        assistant text 가 없음 — A2 와 같은 incomplete state 의 다른
-    //        측면 (history 관점). 둘 다 잡으면 좀 더 robust.
-    //   (B)  this.justRotated === true: 직전 turn 에서 회전 → 이번 turn 은
-    //        skip (OpenCode 패턴 — 회전 직후 즉시 또 회전 트리거되는 race 방지).
-    //
-    // 어느 하나라도 hit 하면 사용자가 본 *답변 미완료 + 체크포인트 표시*
-    // incident 가 차단됨. 첫 두 가드만으로도 직접 원인 막히지만, 4 가드
-    // 묶으면 비슷한 latent 케이스 (사용자 abort, race, etc.) 까지 함께 잡힘.
-    if (this.justRotated) {
-      this.justRotated = false; // one-shot — 다음 turn 부터는 정상 검사
-      return;
-    }
-    if (stopReason === "interrupted") return;
-    if (lastAssistantText.trim().length === 0) return;
-    const messages = this.history.getMessages();
-    if (messages.at(-1)?.role === "tool_result") return;
-
-    const llmSettings = this.deps.settingsService.get("llm");
-    // ctxUsage 는 *usable* 분모 기준. UI ring / decideRotation 의 0.85 임계가
-    // raw 가 아닌 usable 의 비율이 되도록 일치시킴 — Cline 패턴.
-    const usable = getModelUsableContext(llmSettings.provider, llmSettings.vendors[llmSettings.provider].model);
-    const ctxUsage = usable > 0
-      ? Math.min(1.0, this.cumulativeUsage.inputTokens / usable)
-      : 0;
-
-    const features = this.deps.settingsService.get("features");
-    const continuousBackendEnabled = features?.experimentalContinuousBackend ?? false;
-    const devMode = process.env.LVIS_DEV === "1";
-    const sessionAgeMs = Date.now() - this.sessionStartedAt;
-    const semanticHint = lastAssistantText.includes("[checkpoint]");
-    const decision = decideRotation({
-      ctxUsage,
-      sessionAgeMs,
-      semanticHint,
-      continuousBackendEnabled,
-      devMode,
-    });
-
-    // Diagnostic: 모든 회전 결정의 input/output 을 production 에서도 log.
-    // "왜 갑자기 체크포인트 정리?" 류 사용자 의문 시 정확한 trigger + 상태 추적 가능.
-    log.info(
-      `runRotationCheck: ctxUsage=${(ctxUsage * 100).toFixed(1)}% sessionAgeMs=${sessionAgeMs} semanticHint=${semanticHint} continuousBackend=${continuousBackendEnabled} devMode=${devMode} → decision: shouldRotate=${decision.shouldRotate}${decision.trigger ? ` trigger="${decision.trigger}"` : ""} skipSummary=${decision.shouldSkipSummary}`,
-    );
-
-    if (!decision.shouldRotate) return;
-
-    try {
-      // 마지막 체크포인트 이후 메시지만 요약
-      const messagesSinceCheckpoint = messages.slice(this.lastCheckpointMessageIndex);
-
-      const userModel = llmSettings.vendors[llmSettings.provider].model;
-      const summary = decision.shouldSkipSummary
-        ? null
-        : await generateStructuredSummary(this.provider, messagesSinceCheckpoint, { model: userModel });
-
-      // 현재 세션 메타데이터에 checkpoint 기록
-      const existingMeta = this.deps.memoryManager.loadSessionMetadata(this.sessionId) ?? {};
-      const checkpointEntry = {
-        id: crypto.randomUUID(),
-        triggeredAt: new Date().toISOString(),
-        trigger: decision.trigger!,
-        ctxUsageAtTrigger: ctxUsage,
-        summary,
-        messageCountAtTrigger: messages.length,
-      };
-      const updatedMeta = this.deps.memoryManager.appendCheckpoint(existingMeta, checkpointEntry);
-      await this.deps.memoryManager.saveSessionMetadata(this.sessionId, updatedMeta);
-
-      // §457 Phase 3: capture the parent session id BEFORE rotateActive
-      // swaps `this.sessionId` to the child. The renderer's revert action
-      // resumes the parent — i.e., the pre-rotation conversation surface.
-      const parentSessionId = this.sessionId;
-      // child session으로 전환
-      const childId = await this.createChildSession(this.sessionId, summary);
-      // §457 PR-A: notify the renderer with `messagesSinceCheckpoint.length`,
-      // not `messages.length`. Only the slice since the previous checkpoint
-      // was rolled into this rotation's summary; the older portion was
-      // already summarized in a prior checkpoint and is not being "removed"
-      // again. Showing the full parent count would inflate the displayed
-      // figure on multi-rotation sessions.
-      const removedMessageCount = messagesSinceCheckpoint.length;
-      this.rotateActive(childId, summary);
-
-      // Notify renderer so the chat surface can render a CheckpointDivider with
-      // tier-aware label/color. Reuses `compact_notice` since the user-facing
-      // semantic is identical: "older messages were rolled into a summary".
-      // freedTokens is best-effort estimated using the same length/4 + 1 formula
-      // as estimateTokens() in auto-compact.ts; we keep it inline to avoid an
-      // import cycle and to keep this rotation path independent of the
-      // serialization layer.
-      const freedTokens = messagesSinceCheckpoint.reduce((sum, m) => {
-        const c = (m as { content?: unknown }).content;
-        const len = typeof c === "string" ? c.length : 0;
-        return sum + Math.ceil(len / 4) + 1;
-      }, 0);
-      callbacks?.onCompactOccurred?.({
-        removedMessages: removedMessageCount,
-        freedTokens,
-        tier: decision.trigger,
-        revertSessionId: parentSessionId,
-        ...(summary ? { summary } : {}),
-      });
-
-      if (process.env.NODE_ENV !== "production") {
-        log.info(`rotation: trigger=${decision.trigger} ctxUsage=${ctxUsage.toFixed(2)} childSession=${childId.slice(0, 8)}`);
-      }
-    } catch (err) {
-      // rotation 실패는 대화를 차단하지 않음 — 로그만 남기고 계속
-      log.warn("rotation failed: %s", (err as Error).message);
-    }
-  }
-
-  /**
-   * 부모 세션을 기반으로 새 child session을 생성하고 ID를 반환.
-   * child session의 metadata에 parentSessionId, summaryPreamble,
-   * 그리고 부모의 routineId/routineTitle을 propagate한다.
-   */
-  private async createChildSession(parentSessionId: string, summary: string | null): Promise<string> {
-    const childId = crypto.randomUUID();
-    await this.deps.memoryManager.saveSession(childId, []);
-
-    // Propagate routine context from parent so the child session remains
-    // associated with the same routine (if any).
-    const parentMeta = this.deps.memoryManager.loadSessionMetadata(parentSessionId) ?? {};
-    const routineFields: { routineId?: string; routineTitle?: string } = {};
-    if (parentMeta.routineId) routineFields.routineId = parentMeta.routineId;
-    if (parentMeta.routineTitle) routineFields.routineTitle = parentMeta.routineTitle;
-
-    const baseMeta = { parentSessionId, ...routineFields };
-    const childMeta = summary
-      ? this.deps.memoryManager.setSummaryPreamble(baseMeta, summary)
-      : baseMeta;
-    await this.deps.memoryManager.saveSessionMetadata(childId, childMeta);
-
-    return childId;
-  }
-
-  /**
-   * 현재 활성 세션을 child session으로 전환.
-   * - sessionId 교체
-   * - history 클리어 (이전 세션은 이미 영속화됨)
-   * - cumulativeUsage 리셋
-   * - sessionStartedAt 리셋
-   * - lastCheckpointMessageIndex 리셋
-   * - tracer 리셋 (session-scoped observability state)
-   * - sessionPluginExpansions 리셋
-   * - summaryPreamble 주입
-   */
-  private rotateActive(childSessionId: string, summary: string | null): void {
-    this.sessionId = childSessionId;
-    this.history.clear();
-    this.cumulativeUsage = { inputTokens: 0, outputTokens: 0 };
-    this.sessionStartedAt = Date.now();
-    this.lastCheckpointMessageIndex = 0;
-    // Reset all session-scoped helpers so the new session starts clean.
-    this.tracer = createTracer(childSessionId);
-    this.sessionPluginExpansions = 0;
-    // 2026-05-04 incident 후속: 회전 직후 한 turn 동안 다음 회전 보류 (one-shot).
-    // 막 만들어진 child session 의 첫 user turn 이 끝나도 즉시 또 회전 트리거
-    // 되는 race 방지. runRotationCheck 진입부에서 read + clear 됨.
-    this.justRotated = true;
-    // rolling summary preamble 주입 — 다음 턴부터 LLM context에 포함됨
-    this.deps.systemPromptBuilder.setSummaryPreamble?.(summary);
-  }
+  // PR-2-F-2: 3-tier rotation 폐지 — Layer 0/2/3 가 same-session checkpoint chain
+  // (Copilot 패턴) 으로 대체. `runRotationCheck`, `createChildSession`, `rotateActive`,
+  // `decideRotation` 모두 제거. fork 없음 — sessionId 불변.
 }

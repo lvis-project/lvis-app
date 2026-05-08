@@ -66,77 +66,9 @@ export function getModelPreflightThreshold(vendor: LLMVendor, model: string): nu
   return getPreflightThreshold(getModelContextWindow(vendor, model));
 }
 
-// ─── 3-Tier Rotation Types ────────────────────────────
-
-/**
- * 체크포인트 트리거 종류 (3-tier rotation 결정 트리).
- * - "hard-token":  컨텍스트 윈도우 85% 도달 → 즉시 rotation 필요
- * - "semantic-llm": LLM이 [checkpoint] 마커를 삽입 → 토픽 전환 감지
- * - "soft-time":  24h 경과 또는 30개 메시지 → 자연 체크포인트
- */
-export type CheckpointTriggerType = "hard-token" | "semantic-llm" | "soft-time";
-
-export interface RotationDecision {
-  shouldRotate: boolean;
-  trigger?: CheckpointTriggerType;
-  shouldSkipSummary: boolean;
-}
-
-/**
- * 3-tier rotation 결정 트리.
- *
- * Tier 1 (hard-token):  ctxUsage >= 0.85 → 무조건 rotation + 요약 생성
- * Tier 2 (semantic-llm): LLM이 [checkpoint] 마커 삽입 → rotation, 요약은 ctxUsage 판단
- * Tier 3 (soft-time):   24h 경과 → rotation, 요약은 ctxUsage 판단 (day-boundary 안전망)
- *
- * @param args.ctxUsage         0.0–1.0 컨텍스트 사용률
- * @param args.sessionAgeMs     세션 시작 이후 경과 ms
- * @param args.semanticHint     [checkpoint] 마커 발견 여부
- * @param args.continuousBackendEnabled  Safety gate: when false, always returns { shouldRotate: false }.
- * @param args.devMode          Developer mode: reduces soft-time threshold to 1h for easier testing.
- *
- * 2026-05-04 incident 후속 정정: tier 3 의 message-count 분기 (`userMessageCount
- * >= 30`) 를 *제거*. message-count 는 토큰/시간/의미 어느 진짜 신호도 측정하지
- * 않는 weak-signal proxy 로 판명 — ctx 1% 인 짧은 도구-heavy 세션에서도 회전
- * 트리거되어 사용자 답변 도중 CheckpointDivider 가 표시되는 incident 의 root
- * cause 였음. context 압박은 tier 1 (토큰), topic shift 는 tier 2 (semantic),
- * day-boundary 안전망만 tier 3 (24h time-based) 으로 정합화. OpenCode 의 순수
- * 토큰 기반 패턴과 정렬됨.
- */
-export function decideRotation(args: {
-  ctxUsage: number;
-  sessionAgeMs: number;
-  semanticHint: boolean;
-  continuousBackendEnabled?: boolean;
-  devMode?: boolean;
-}): RotationDecision {
-  const { ctxUsage, sessionAgeMs, semanticHint } = args;
-  const continuousBackendEnabled = args.continuousBackendEnabled ?? true;
-  const devMode = args.devMode ?? false;
-
-  // Safety gate: when experimentalContinuousBackend is OFF, rotation is disabled.
-  if (!continuousBackendEnabled) {
-    return { shouldRotate: false, shouldSkipSummary: false };
-  }
-
-  // Tier 1: hard-token (85% 이상 → 즉시 rotation, 요약 항상 생성)
-  if (ctxUsage >= 0.85) {
-    return { shouldRotate: true, trigger: "hard-token", shouldSkipSummary: false };
-  }
-
-  // Tier 2: semantic (LLM 마커 감지)
-  if (semanticHint) {
-    return { shouldRotate: true, trigger: "semantic-llm", shouldSkipSummary: _shouldSkipSummary(ctxUsage) };
-  }
-
-  // Tier 3: soft-time — day boundary 안전망. devMode 는 1h 로 단축.
-  const dayMs = devMode ? 60 * 60 * 1_000 : 24 * 60 * 60 * 1_000;
-  if (sessionAgeMs >= dayMs) {
-    return { shouldRotate: true, trigger: "soft-time", shouldSkipSummary: _shouldSkipSummary(ctxUsage) };
-  }
-
-  return { shouldRotate: false, shouldSkipSummary: false };
-}
+// PR-2-F-2: 3-tier rotation 폐지 — `decideRotation` 함수 + `RotationDecision` interface +
+// `CheckpointTriggerType` type 모두 제거. Layer 0 preflight + Layer 2 LLM compact +
+// Layer 3 same-session checkpoint chain (Copilot 패턴) 으로 fork-based rotation 대체.
 
 // ─── Types ──────────────────────────────────────────
 
