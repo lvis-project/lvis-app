@@ -27,7 +27,7 @@ vi.mock("../../../audit/dlp-filter.js", () => ({
   initDlpAudit: vi.fn(),
 }));
 vi.mock("../../../engine/wire-serialize.js", () => ({ stubMarkedToolResults: vi.fn((m: unknown) => m) }));
-vi.mock("../../../engine/proactive-source.js", () => ({ parseImportedTriggerEnvelope: vi.fn(() => null) }));
+vi.mock("../../../shared/proactive-source.js", () => ({ parseImportedTriggerEnvelope: vi.fn(() => null) }));
 vi.mock("../../../boot/dev-flags.js", () => ({ isDevModeUnlocked: vi.fn(() => false) }));
 vi.mock("../../../lib/logger.js", () => ({
   createLogger: vi.fn(() => ({ warn: vi.fn(), info: vi.fn(), error: vi.fn() })),

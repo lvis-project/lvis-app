@@ -8,7 +8,7 @@ import { readFile } from "node:fs/promises";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import type { IpcDeps } from "../types.js";
 import type { RoutineExecution, RoutineSchedule } from "../../main/routines-store.js";
-import { ROUTINES_V2 } from "../../shared/ipc-channels.js";
+import { ROUTINES_V2, OVERLAY_V1 } from "../../shared/ipc-channels.js";
 import { createLogger } from "../../lib/logger.js";
 const log = createLogger("lvis");
 
@@ -110,7 +110,7 @@ export function registerMiscHandlers(deps: IpcDeps): void {
       return "";
     }
     if (!routineSessionStore) return "";
-    // Path traversal guard — only allow paths inside ~/.lvis/routine-sessions/.
+    // Path traversal guard — only allow paths inside ~/.lvis/routine/sessions/.
     if (!routineSessionStore.isPathSafe(jsonlPath)) {
       log.warn("read-session: path traversal attempt blocked: %s", jsonlPath);
       return "";
@@ -121,6 +121,17 @@ export function registerMiscHandlers(deps: IpcDeps): void {
       log.warn("read-session: read failed: %s", (err as Error).message);
       return "";
     }
+  });
+
+  // ─── Overlay v1 — renderer→main notification (tier1: influences chat content) ──
+  ipcMain.handle(OVERLAY_V1.primaryAction, (e, _pluginId: string, _eventId: string) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, OVERLAY_V1.primaryAction, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    // Renderer has already inserted pendingPrompt into chat before invoking this.
+    // Main-side handler acknowledges the action (future: audit log, plugin callback).
+    return { ok: true };
   });
 
   // ─── Session Todo ────────────────────────────────

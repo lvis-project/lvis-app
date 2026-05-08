@@ -80,6 +80,16 @@ const CHANNEL_MANIFEST: Record<string, "tier1" | "tier2" | "tier3"> = {
   "lvis:audit:stats": "tier3",
   // Telemetry
   "lvis:telemetry:consent-answer": "tier1",
+  // Routines v2 — invoke channels only (fired/running-started/running-finished are main→renderer push, no handle)
+  "lvis:routines:v2:list": "tier3",
+  "lvis:routines:v2:add": "tier1",
+  "lvis:routines:v2:dismiss": "tier1",
+  "lvis:routines:v2:remove": "tier1",
+  "lvis:routines:v2:trigger-now": "tier1",
+  "lvis:routines:v2:list-sessions": "tier3",
+  "lvis:routines:v2:read-session": "tier2",
+  // Overlay v1 — primary-action is renderer→main invoke (write influence); show/update/dismiss are main→renderer push events
+  "lvis:overlay:primary-action": "tier1",
 };
 
 // ─── validateSender unit tests ───────────────────────────────────────────────

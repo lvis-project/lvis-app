@@ -12,13 +12,7 @@ import { userContentText } from "../../engine/llm/types.js";
 import { stubMarkedToolResults } from "../../engine/wire-serialize.js";
 import { serializeHistoryMessage } from "../../shared/chat-history.js";
 import type { ConversationLoop, TurnResult } from "../../engine/conversation-loop.js";
-/** Inlined from deleted engine/proactive-source.ts — trigger envelope detection. */
-const IMPORTED_TRIGGER_ENVELOPE_PATTERN =
-  /^<imported-from-proactive\s+source="(proactive:[a-z][a-z0-9-]*)"\s*>/;
-function parseImportedTriggerEnvelope(input: string): string | null {
-  const m = input.trimStart().match(IMPORTED_TRIGGER_ENVELOPE_PATTERN);
-  return m ? m[1] : null;
-}
+import { parseImportedTriggerEnvelope } from "../../shared/proactive-source.js";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import type { IpcDeps } from "../types.js";
 import { createLogger } from "../../lib/logger.js";

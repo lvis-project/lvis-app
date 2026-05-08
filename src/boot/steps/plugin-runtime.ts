@@ -37,8 +37,7 @@ import {
   emitPluginConfigChange,
   subscribePluginConfigChange,
 } from "../../plugins/config-change-bus.js";
-/** Strict source pattern — inlined from deleted engine/proactive-source.ts. */
-const PROACTIVE_SOURCE_PATTERN = /^proactive:[a-z][a-z0-9-]*$/;
+import { PROACTIVE_SOURCE_PATTERN, isProactiveOrigin } from "../../shared/proactive-source.js";
 import type {
   ApprovalChoice,
   AuthWindowCookie,
@@ -307,7 +306,7 @@ const MAX_PROMPT_LEN = 4096;
 // of every proactive trigger spec. It's the SAME pattern used by the
 // keyword engine, the trigger executor envelope, the IPC bridge's
 // originSource detection, and the permission manager's proactive-
-// origin override — see `engine/proactive-source.ts` for the single
+// origin override — see `shared/proactive-source.ts` for the single
 // definition. Without this gate, malformed sources (`proactive:`,
 // `proactive:_x`, `proactive:Bad/Path`) could flow into audit logs and
 // system prompts where loose substrings would be confusing.

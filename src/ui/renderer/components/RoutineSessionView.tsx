@@ -5,7 +5,7 @@
  * Deliberately does NOT reuse ChatView — routine sessions are read-only
  * history, not interactive chat windows.
  *
- * Q9 isolation: reads only from ~/.lvis/routine-sessions/ via the
+ * Q9 isolation: reads only from ~/.lvis/routine/sessions/ via the
  * lvis:routines:v2:read-session IPC (path traversal guard enforced main-side).
  */
 import { useEffect, useState } from "react";

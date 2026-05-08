@@ -1869,7 +1869,6 @@ broadcast 만 처리.
 | `appearance` | 테마 | `AppearanceTab.tsx` | 테마 선택 (dark / light / high-contrast / system) |
 | `chat` | 채팅 | `ChatTab.tsx` | 자동 컴팩트 토글·**Stream Smoothing** (PR #342 이관) |
 | `web` | 검색 (Web) | `WebTab.tsx` | 웹 검색 공급자·API 키 |
-| `routine` | 루틴 | `RoutinePanel.tsx` | 루틴 & 알림 통합 관리 (Routine v2 — execution mode, 6 repeat kinds, 3 input styles) |
 | `privacy` | 프라이버시 | `PrivacyTab.tsx` | DLP(PII) 리댁션 토글 + 통계 |
 | `permissions` | 권한 | `PermissionsTab.tsx` | 도구 권한 정책 |
 | `roles` | 역할 | `RolesTab.tsx` | Role Preset 편집 (이름·systemPromptAdd·effort) |
@@ -1879,6 +1878,8 @@ broadcast 만 처리.
 | `mcp` | MCP 서버 | `McpTab.tsx` | MCP 서버 등록 관리 |
 | `plugin-config` | 플러그인 설정 | `PluginConfigTab.tsx` | 플러그인별 설정 (configSchema 기반 폼 또는 raw key-value) |
 | `marketplace` | 마켓플레이스 | `MarketplaceTab.tsx` | 마켓플레이스 URL·API 키·private network 허용 |
+
+> **Note (Routine v2):** `RoutinePanel.tsx` 는 SettingsDialog 탭이 **아니다**. Routine v2 도입(feat/routine-v2-unified) 이후 RoutinePanel 은 `Sidebar.tsx` 의 `routines` 사이드바 엔트리(`Repeat2` 아이콘)로 이동하여 **사이드바 메인 뷰**로 동작한다. SettingsDialog 에는 더 이상 routine 탭이 존재하지 않는다.
 
 ### PR #342 재배치 요약
 
