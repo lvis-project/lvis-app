@@ -375,6 +375,7 @@ ${input}`;
         // §PR-5: branch provenance — already on SessionListEntry, no extra loadSessionMetadata call
         ...(s.parentSessionId ? { parentSessionId: s.parentSessionId } : {}),
         ...(s.branchedFromCompactNum !== undefined ? { branchedFromCompactNum: s.branchedFromCompactNum } : {}),
+        ...(s.branchedAt ? { branchedAt: s.branchedAt } : {}),
       }));
     return {
       current: conversationLoop.getSessionId(),

@@ -114,6 +114,40 @@ describe("ConversationLoop §PR-5 branchFromCheckpoint", () => {
     await expect(loop.branchFromCheckpoint(1)).rejects.toThrow("snapshot length");
   });
 
+  it("repairs orphaned tool_call/tool_result pairs from a malformed snapshot before persisting", async () => {
+    // Snapshot simulates a malformed JSONL that skipped a tool_result line,
+    // leaving an orphaned tool_call (no matching tool_result partner).
+    // GenericMessage format uses message.toolCalls[] for assistant tool calls
+    // and role="tool_result" messages for results.
+    // normalizeToolPairInvariant should strip the dangling toolCall so the
+    // branched session has a valid paired history.
+    const orphanedSnapshot = [
+      { role: "user" as const, content: [{ type: "text" as const, text: "hello" }] },
+      // Assistant message with a tool_call whose tool_result was skipped (malformed JSONL)
+      { role: "assistant" as const, content: "ok", toolCalls: [{ id: "t1", name: "foo", input: {} }] },
+      // tool_result for "t1" deliberately omitted — simulates malformed JSONL skip
+      { role: "user" as const, content: [{ type: "text" as const, text: "next question" }] },
+    ];
+    // messageCountAtTrigger covers all 3 messages from the snapshot
+    const { loop, savedSessions } = makeLoop(
+      [{ compactNum: 2, messageCountAtTrigger: 3 }],
+      orphanedSnapshot,
+    );
+
+    const { newSessionId } = await loop.branchFromCheckpoint(2);
+
+    const saved = savedSessions.get(newSessionId) as unknown[] | undefined;
+    expect(saved).toBeDefined();
+    // normalizeToolPairInvariant strips toolCalls with no matching tool_result.
+    // The assistant message had visible content ("ok"), so it is kept but with toolCalls removed.
+    // Verify no saved message retains toolCalls referencing the orphaned id "t1".
+    const hasOrphanedToolCall = (saved ?? []).some((msg: unknown) => {
+      const m = msg as { role: string; toolCalls?: Array<{ id: string }> };
+      return m.role === "assistant" && Array.isArray(m.toolCalls) && m.toolCalls.some((tc) => tc.id === "t1");
+    });
+    expect(hasOrphanedToolCall).toBe(false);
+  });
+
   it("loads from snapshot, slices to messageCountAtTrigger, and persists branch metadata", async () => {
     // FAKE_DISK_MESSAGES has 3 messages; checkpoint at messageCountAtTrigger=2
     const { loop, memoryManager, savedSessions, savedMetadata } = makeLoop([

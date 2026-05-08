@@ -450,8 +450,17 @@ export class ConversationLoop {
     const newSessionId = crypto.randomUUID();
     const sliced = (snapshotMessages as import("./llm/types.js").GenericMessage[]).slice(0, target.messageCountAtTrigger);
 
+    // §PR-5 round-8: repair tool-pair invariant — loadCheckpointSnapshot skips malformed JSONL
+    // lines, which can leave orphaned tool_call or tool_result entries in the slice.
+    const { messages: repaired, removedMessages, removedToolCalls } = normalizeToolPairInvariant(sliced);
+    if (removedMessages > 0 || removedToolCalls > 0) {
+      log.warn(
+        `branchFromCheckpoint: repaired ${removedMessages} messages + ${removedToolCalls} tool calls from snapshot (session ${this.sessionId} compact #${compactNum})`,
+      );
+    }
+
     // wire-serialize: markStaleToolResults 된 verbatim history 를 stub 치환 후 영속화
-    await this.deps.memoryManager.saveSession(newSessionId, stubMarkedToolResults(sliced));
+    await this.deps.memoryManager.saveSession(newSessionId, stubMarkedToolResults(repaired));
 
     // 브랜치 세션 metadata — parentSessionId + 브랜치 provenance
     await this.deps.memoryManager.saveSessionMetadata(newSessionId, {

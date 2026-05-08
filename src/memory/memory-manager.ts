@@ -52,6 +52,8 @@ export interface SessionListEntry {
   parentSessionId?: string;
   /** §PR-5: compact sequence number this session was forked from. Only set on true checkpoint forks. */
   branchedFromCompactNum?: number;
+  /** §PR-5: ISO timestamp when this session was branched. Only set on true checkpoint forks. */
+  branchedAt?: string;
 }
 
 /**
@@ -542,6 +544,7 @@ export class MemoryManager {
           // §PR-5: branch provenance — already loaded from metadata, no extra disk IO
           ...(metadata?.parentSessionId ? { parentSessionId: metadata.parentSessionId } : {}),
           ...(metadata?.branchedFromCompactNum !== undefined ? { branchedFromCompactNum: metadata.branchedFromCompactNum } : {}),
+          ...(metadata?.branchedAt ? { branchedAt: metadata.branchedAt } : {}),
         };
       });
   }
@@ -596,6 +599,7 @@ export class MemoryManager {
           // §PR-5: branch provenance — already loaded from metadata above, no extra disk IO
           ...(metadata?.parentSessionId ? { parentSessionId: metadata.parentSessionId } : {}),
           ...(metadata?.branchedFromCompactNum !== undefined ? { branchedFromCompactNum: metadata.branchedFromCompactNum } : {}),
+          ...(metadata?.branchedAt ? { branchedAt: metadata.branchedAt } : {}),
         };
       });
   }
