@@ -108,14 +108,10 @@ interface PluginWebviewBinding {
 const pluginWebviewRegistry = new Map<number, PluginWebviewBinding>();
 
 export type SafeThemePayload = {
-  /** v2: bundle identifier (e.g. "tokyo-night", "lge-dark"). Present when ThemeProvider v2 sends the payload. */
-  bundleId?: string;
-  /** v2: shell polarity derived from the active bundle. Replaces the v1 `theme` field for internal routing. */
-  shell?: "light" | "dark";
-  /** v1 compat: kept so SDK plugins and plugin-ui-shell.js that read `theme` still work. */
-  theme: "light" | "dark" | "high-contrast";
-  chatTheme: "default" | "lg" | "purple" | "orange" | "blue";
-  codeTheme: "light" | "dark";
+  /** v2: bundle identifier (e.g. "tokyo-night", "lge-dark"). */
+  bundleId: string;
+  /** v2: shell polarity derived from the active bundle. */
+  shell: "light" | "dark";
   colorScheme?: "light" | "dark";
   reducedMotion?: boolean;
   fonts?: { family: string };
@@ -225,10 +221,6 @@ function clearPendingEntryUrl(webContentsId: number): void {
 }
 
 
-const ALLOWED_THEMES = new Set(["light", "dark", "high-contrast"]);
-const ALLOWED_CHAT_THEMES = new Set(["default", "lg", "purple", "orange", "blue"]);
-const ALLOWED_CODE_THEMES = new Set(["light", "dark"]);
-// v2: bundle IDs that are valid for plugin theme propagation.
 // §C3: single source from src/shared/theme-bundles.ts — no manual sync needed.
 const ALLOWED_BUNDLE_IDS = new Set<string>(BUNDLE_IDS);
 const ALLOWED_SHELLS = new Set(["light", "dark"]);
@@ -273,31 +265,22 @@ export function validateThemePayload(payload: unknown):
   | { ok: false; error: string } {
   if (!payload || typeof payload !== "object") return { ok: false, error: "invalid-payload" };
   const p = payload as Record<string, unknown>;
-  if (typeof p.theme !== "string" || !ALLOWED_THEMES.has(p.theme)) return { ok: false, error: "invalid-theme" };
-  if (typeof p.chatTheme !== "string" || !ALLOWED_CHAT_THEMES.has(p.chatTheme)) return { ok: false, error: "invalid-chat-theme" };
-  if (typeof p.codeTheme !== "string" || !ALLOWED_CODE_THEMES.has(p.codeTheme)) return { ok: false, error: "invalid-code-theme" };
+  if (typeof p.bundleId !== "string" || !ALLOWED_BUNDLE_IDS.has(p.bundleId)) return { ok: false, error: "invalid-bundle-id" };
+  if (typeof p.shell !== "string" || !ALLOWED_SHELLS.has(p.shell)) return { ok: false, error: "invalid-shell" };
   const safe: SafeThemePayload = {
-    theme: p.theme as SafeThemePayload["theme"],
-    chatTheme: p.chatTheme as SafeThemePayload["chatTheme"],
-    codeTheme: p.codeTheme as SafeThemePayload["codeTheme"],
+    bundleId: p.bundleId,
+    shell: p.shell as "light" | "dark",
   };
-  // v2: bundle identity fields (optional — ThemeProvider v2 sends these; old
-  // SDK payloads that omit them still pass validation via the v1 fields above).
-  if (typeof p.bundleId === "string" && ALLOWED_BUNDLE_IDS.has(p.bundleId)) {
-    safe.bundleId = p.bundleId;
+  if (!p.tokens || typeof p.tokens !== "object" || Array.isArray(p.tokens)) {
+    return { ok: false, error: "missing-tokens" };
   }
-  if (typeof p.shell === "string" && ALLOWED_SHELLS.has(p.shell)) {
-    safe.shell = p.shell as "light" | "dark";
-  }
-  if (p.tokens && typeof p.tokens === "object" && !Array.isArray(p.tokens)) {
-    const safeTokens: Record<string, string> = {};
-    for (const [k, v] of Object.entries(p.tokens as Record<string, unknown>)) {
-      if (PLUGIN_TOKEN_NAMES.has(k) && typeof v === "string" && _SAFE_TOKEN_VALUE.test(v)) {
-        safeTokens[k] = v;
-      }
+  const safeTokens: Record<string, string> = {};
+  for (const [k, v] of Object.entries(p.tokens as Record<string, unknown>)) {
+    if (PLUGIN_TOKEN_NAMES.has(k) && typeof v === "string" && _SAFE_TOKEN_VALUE.test(v)) {
+      safeTokens[k] = v;
     }
-    if (Object.keys(safeTokens).length > 0) safe.tokens = safeTokens;
   }
+  safe.tokens = safeTokens;
   // fonts.family: allowlist of safe system/web font family names (no injection)
   if (p.fonts && typeof p.fonts === "object" && !Array.isArray(p.fonts)) {
     const f = p.fonts as Record<string, unknown>;
