@@ -22,6 +22,12 @@ export interface RoutineV2RunInput {
    * File is created by RoutineSessionStore.createSession() before runRoutine().
    */
   storagePath?: string;
+  /**
+   * Optional abort signal. When signalled (e.g. shutdown timeout), the
+   * underlying ConversationLoop.runTurn is aborted rather than only dropping
+   * the Promise.race winner while the turn continues running.
+   */
+  signal?: AbortSignal;
 }
 
 export interface RoutineV2Result {
@@ -71,7 +77,7 @@ export class RoutineEngineV2 {
 
     let summary = "";
     try {
-      const result = await loop.runTurn(input.prePrompt);
+      const result = await loop.runTurn(input.prePrompt, undefined, input.signal);
       summary = extractSummaryTag(result.text ?? "");
     } catch (err) {
       log.warn("runRoutine error (id=%s): %s", input.id, err instanceof Error ? err.message : String(err));

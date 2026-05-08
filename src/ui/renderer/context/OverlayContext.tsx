@@ -17,6 +17,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
   type RefObject,
@@ -129,12 +130,16 @@ export function OverlayContextProvider({
       // Stale fire replace: source.kind === "routine" + same routineId → replace;
       // source.kind === "plugin" + same (pluginId, eventId) → replace.
       // Stale guard: for routine items, only replace if incoming firedAt >= existing firedAt.
+      // Date.parse() defensive comparison — handles any ISO string normalisation
+      // differences; falls back to keeping existing on NaN (safe).
       let dominated = false;
       const filtered = prev.filter((it) => {
         if (item.source.kind === "routine" && it.source.kind === "routine") {
           if (it.source.routineId !== item.source.routineId) return true;
           // Same routineId: drop existing only if incoming is same age or newer.
-          if (item.source.firedAt < it.source.firedAt) {
+          const itemTime = Date.parse(item.source.firedAt);
+          const existingTime = Date.parse(it.source.firedAt);
+          if (Number.isFinite(itemTime) && Number.isFinite(existingTime) && itemTime < existingTime) {
             dominated = true; // incoming is stale — keep existing
             return true;
           }
@@ -149,12 +154,20 @@ export function OverlayContextProvider({
         return true;
       });
       if (dominated) return prev; // stale replay — discard
-      const newQueue = [...filtered, { ...item }];
-      // M7: navigate to tail (newest item) when a new fire arrives
-      setActiveIndex(newQueue.length - 1);
-      return newQueue;
+      return [...filtered, { ...item }];
     });
   }, []);
+
+  // M7: navigate to tail (newest item) when a new fire arrives.
+  // Kept outside setQueue updater to avoid setState-inside-updater side-effect
+  // (StrictMode double-invokes updaters, which would double-advance activeIndex).
+  const prevQueueLengthRef = useRef(0);
+  useEffect(() => {
+    if (queue.length > prevQueueLengthRef.current) {
+      setActiveIndex(queue.length - 1);
+    }
+    prevQueueLengthRef.current = queue.length;
+  }, [queue.length]);
 
   // Expose addFire via ref so App.tsx can call it from IPC subscription
   if (addFireRef) {

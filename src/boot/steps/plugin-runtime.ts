@@ -1230,7 +1230,9 @@ export async function initPluginRuntime(
           pendingPrompt: spec.prompt,
           createdAt: new Date().toISOString(),
         };
-        mainWindow.webContents.send(OVERLAY_V1.show, overlayItem);
+        if (!mainWindow.isDestroyed()) {
+          mainWindow.webContents.send(OVERLAY_V1.show, overlayItem);
+        }
 
         return { accepted: true, source: decision.source, eventId };
       },

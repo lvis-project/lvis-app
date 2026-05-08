@@ -795,15 +795,25 @@ app.on("before-quit", (event) => {
           for (const r of shutdownRoutines) {
             try {
               if (r.execution === "llm-session") {
-                await Promise.race([
-                  svc.routineEngine.runRoutine({
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort("shutdown timeout"), 5000);
+                try {
+                  await svc.routineEngine.runRoutine({
                     id: r.id,
                     trigger: r.trigger,
                     prePrompt: r.prePrompt ?? "",
                     title: r.title,
-                  }),
-                  new Promise<void>((resolve) => setTimeout(resolve, 5000)),
-                ]);
+                    signal: controller.signal,
+                  });
+                } catch (abortErr) {
+                  if (controller.signal.aborted) {
+                    log.warn("before-quit: shutdown routine aborted (5s timeout, id=%s)", r.id);
+                  } else {
+                    throw abortErr;
+                  }
+                } finally {
+                  clearTimeout(timeoutId);
+                }
               } else {
                 svc.notificationService?.fire({
                   kind: "routine",

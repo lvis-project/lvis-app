@@ -61,7 +61,7 @@ describe("isValidCronExpression", () => {
     expect(isValidCronExpression("0 25 * * *")).toBe(false);
   });
 
-  it("rejects non-string", () => {
+  it("returns null for malformed expression string", () => {
     expect(isValidCronExpression("not valid")).toBe(false);
   });
 });

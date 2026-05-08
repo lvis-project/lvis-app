@@ -127,13 +127,11 @@ export function parseCronExpression(expr: string): CronFields | null {
 }
 
 /**
- * Check whether `now` satisfies the cron expression (minute-level resolution).
- * All field comparisons use UTC so behaviour is timezone-independent.
+ * Internal field-match helper — assumes `fields` has already been validated.
+ * Called by both matchesCron (after its own validation) and the hot loop in
+ * nextCronFire (where validation runs once before the loop, not per-iter).
  */
-export function matchesCron(expr: string | CronFields, now: Date): boolean {
-  const fields = typeof expr === "string" ? parseCronExpression(expr) : expr;
-  if (!fields || !isValidCronExpression(fields)) return false;
-
+function _matchesCronFields(fields: CronFields, now: Date): boolean {
   const minute = now.getUTCMinutes();
   const hour = now.getUTCHours();
   const dayOfMonth = now.getUTCDate();
@@ -147,6 +145,16 @@ export function matchesCron(expr: string | CronFields, now: Date): boolean {
     matchField(fields.month, month, CRON_SPECS.month) &&
     matchField(fields.dayOfWeek, dayOfWeek, CRON_SPECS.dayOfWeek)
   );
+}
+
+/**
+ * Check whether `now` satisfies the cron expression (minute-level resolution).
+ * All field comparisons use UTC so behaviour is timezone-independent.
+ */
+export function matchesCron(expr: string | CronFields, now: Date): boolean {
+  const fields = typeof expr === "string" ? parseCronExpression(expr) : expr;
+  if (!fields || !isValidCronExpression(fields)) return false;
+  return _matchesCronFields(fields, now);
 }
 
 /**
@@ -174,7 +182,7 @@ export function nextCronFire(
   candidate.setUTCMinutes(candidate.getUTCMinutes() + 1);
 
   for (let i = 0; i < maxMinutes; i++) {
-    if (matchesCron(fields, candidate)) return new Date(candidate.getTime());
+    if (_matchesCronFields(fields, candidate)) return new Date(candidate.getTime());
     candidate.setUTCMinutes(candidate.getUTCMinutes() + 1);
   }
   return null;
