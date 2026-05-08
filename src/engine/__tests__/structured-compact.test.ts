@@ -199,6 +199,59 @@ describe("freezeBoundary — Object.freeze invariant (P7)", () => {
       (b as unknown as { compactNum: number }).compactNum = 999;
     }).toThrow(TypeError);
   });
+
+  it("deep-freezes nested msg.content array and elements (Copilot round 2)", () => {
+    const contentParts = [{ type: "text" as const, text: "hello" }];
+    const msg: GenericMessage = { role: "user", content: contentParts };
+    const b: CompactBoundary = {
+      ...makeBoundary(),
+      recentVerbatim: [msg],
+    };
+    freezeBoundary(b);
+    expect(Object.isFrozen(contentParts)).toBe(true);
+    expect(Object.isFrozen(contentParts[0])).toBe(true);
+  });
+
+  it("deep-freezes msg.toolCalls array and each ToolCall input (Copilot round 2)", () => {
+    const toolInput = { query: "search term" };
+    const msg: GenericMessage = {
+      role: "assistant",
+      content: "calling tool",
+      toolCalls: [{ id: "t1", name: "search", input: toolInput }],
+    };
+    const b: CompactBoundary = {
+      ...makeBoundary(),
+      recentVerbatim: [msg],
+    };
+    freezeBoundary(b);
+    expect(Object.isFrozen(msg.toolCalls)).toBe(true);
+    expect(Object.isFrozen(msg.toolCalls![0])).toBe(true);
+    expect(Object.isFrozen(toolInput)).toBe(true);
+  });
+
+  it("deep-freezes msg.thinkingBlocks array (Copilot round 2)", () => {
+    const block = { thinking: "let me think", signature: "sig123" };
+    const msg: GenericMessage = {
+      role: "assistant",
+      content: "result",
+      thinkingBlocks: [block],
+    };
+    const b: CompactBoundary = {
+      ...makeBoundary(),
+      recentVerbatim: [msg],
+    };
+    freezeBoundary(b);
+    expect(Object.isFrozen(msg.thinkingBlocks)).toBe(true);
+    expect(Object.isFrozen(block)).toBe(true);
+  });
+
+  it("deepFreeze is idempotent — already-frozen boundary re-frozen safely", () => {
+    const b = makeBoundary();
+    const frozen1 = freezeBoundary(b);
+    const frozen2 = freezeBoundary(b); // second call must not throw
+    expect(frozen1).toBe(frozen2);
+    expect(Object.isFrozen(frozen2)).toBe(true);
+  });
 });
 
 // ─── compactWithBoundary (Layer 2 LLM call) ──────────

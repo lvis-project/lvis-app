@@ -231,34 +231,36 @@ export function parseSummary(text: string): ParsedSummary {
 }
 
 /**
+ * Generic deep-freeze — P7 invariant 보장을 위해 CompactBoundary 의 모든
+ * nested object 를 재귀적으로 freeze.
+ *
+ * - primitive / null / undefined: 그대로 반환 (freeze 불필요)
+ * - 이미 frozen: idempotent (재귀 중단)
+ * - circular reference 없는 구조 (CompactBoundary 정의상 acyclic)
+ */
+function deepFreeze<T>(obj: T): T {
+  if (obj === null || obj === undefined) return obj;
+  if (typeof obj !== "object") return obj;
+  if (Object.isFrozen(obj)) return obj;
+  Object.freeze(obj);
+  for (const key of Object.keys(obj)) {
+    deepFreeze((obj as Record<string, unknown>)[key]);
+  }
+  return obj;
+}
+
+/**
  * P7 invariant — boundary object 와 그 자식 구조를 *deeply freeze*.
  *
  * ⑧ slot + Layer 3 checkpoint storage + history[0] system block — 3 view 가
  * 동일 immutable reference 를 가리키도록 보장. step 9 이후 어떤 view 에서든
- * boundary 가 mutate 되면 race 발생하므로 freeze 로 hard-block.
+ * boundary 가 mutate 되면 race 발생하므로 deepFreeze 로 hard-block.
+ *
+ * GenericMessage 의 nested mutable fields (content array / toolCalls / thinkingBlocks 등)
+ * 도 모두 재귀 freeze — Copilot round 2 지적 (PR-2 round 3 fix).
  */
 export function freezeBoundary(boundary: CompactBoundary): Readonly<CompactBoundary> {
-  Object.freeze(boundary.structuredSummary.sections);
-  Object.freeze(boundary.structuredSummary);
-  // PR-2-D (#608) 정정: deep freeze — 각 array element + nested object 모두 freeze.
-  // 이전 top-level 만 freeze 하면 nested mutation 가능 → P7 invariant 약화.
-  for (const msg of boundary.recentVerbatim) {
-    Object.freeze(msg);
-    if (msg.meta) Object.freeze(msg.meta);
-  }
-  Object.freeze(boundary.recentVerbatim);
-  Object.freeze(boundary.pinnedArtifacts);
-  for (const entry of boundary.toolBoundaryLedger) {
-    Object.freeze(entry);
-  }
-  Object.freeze(boundary.toolBoundaryLedger);
-  if (boundary.vendorOpaqueState) {
-    if (boundary.vendorOpaqueState.vendor === "openai") {
-      Object.freeze(boundary.vendorOpaqueState.openaiCompactionItem);
-    }
-    Object.freeze(boundary.vendorOpaqueState);
-  }
-  Object.freeze(boundary);
+  deepFreeze(boundary);
   return boundary;
 }
 
