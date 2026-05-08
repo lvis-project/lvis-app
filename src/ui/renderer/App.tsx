@@ -777,8 +777,14 @@ export function App() {
       <SnapEdgeHighlight />
       {/* Q10 — routine session modal opened from OverlayCard "결과 보기" */}
       {routineSessionModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="relative w-full max-w-2xl max-h-[80vh] overflow-hidden rounded-lg shadow-xl">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+          onClick={() => setRoutineSessionModal(null)}
+        >
+          <div
+            className="relative w-full max-w-2xl max-h-[80vh] overflow-hidden rounded-lg shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
             <RoutineSessionView
               jsonlPath={routineSessionModal.jsonlPath}
               api={api}

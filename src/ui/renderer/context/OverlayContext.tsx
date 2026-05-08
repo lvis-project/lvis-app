@@ -1,11 +1,11 @@
 /**
  * OverlayContext — Q10 routine fire overlay queue.
  *
- * Inherits v1 RoutineCard policy:
+ * Q10 policy:
  *   - Single active card + queue navigation (prev/next)
  *   - queueIndex / queueTotal display
  *   - dismiss (permanent removal)
- *   - snooze (default 30 min, re-enters queue on expiry)
+ *   - snooze removed (production smoke test: UX risk)
  *   - stale fire replace: new fire for same routineId replaces all prior entries
  *
  * Q9 isolation: only ~200ch summary flows here. Full content is read
@@ -17,7 +17,6 @@ import {
   useContext,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type ReactNode,
   type RefObject,
@@ -36,8 +35,6 @@ export interface OverlayItem {
   summary: string;
   /** running phase — true: spinner + "진행 중…", false: summary + actions */
   running: boolean;
-  /** ms epoch — when snooze expires; absent means not snoozed */
-  snoozedUntil?: number;
   /** primary action label — routine: "결과 보기", plugin: free */
   primaryActionLabel?: string;
   /** routine-specific — path to JSONL for RoutineSessionView */
@@ -59,7 +56,7 @@ export interface OverlayContextValue {
   active: OverlayItem | null;
   /** 1-based index of active within visible queue */
   queueIndex: number;
-  /** Total items in visible (non-snoozed) queue */
+  /** Total items in visible queue */
   queueTotal: number;
   /** Navigate to previous item */
   prev: () => void;
@@ -67,15 +64,11 @@ export interface OverlayContextValue {
   next: () => void;
   /** Permanently remove from queue */
   dismiss: (id: string) => void;
-  /** Snooze — default 30 min. Expired items re-enter queue at tail */
-  snooze: (id: string, durationMs?: number) => void;
   /** Add or update an overlay item. Replaces existing entry with same source key. */
-  addFire: (item: Omit<OverlayItem, "snoozedUntil">) => void;
+  addFire: (item: OverlayItem) => void;
   /** Open RoutineSessionView modal */
   openSession: (routineId: string, firedAt: string) => void;
 }
-
-const SNOOZE_DEFAULT_MS = 30 * 60 * 1000; // 30 minutes
 
 const OverlayContext = createContext<OverlayContextValue | null>(null);
 
@@ -92,7 +85,7 @@ export function OverlayContextProvider({
    * outside the React tree (e.g. from an IPC subscription useEffect).
    * The ref is set synchronously during render, before any effects fire.
    */
-  addFireRef?: RefObject<((item: Omit<OverlayItem, "snoozedUntil">) => void) | null>;
+  addFireRef?: RefObject<((item: OverlayItem) => void) | null>;
   /**
    * C1: Set of currently-running routine IDs from App.tsx runningRoutines state.
    * Provider syncs queue items' running flag when this set changes.
@@ -101,40 +94,17 @@ export function OverlayContextProvider({
 }) {
   const [queue, setQueue] = useState<OverlayItem[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
-  const snoozeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [tick, setTick] = useState(0); // forces re-render on snooze expiry
 
-  // Visible queue = queue items whose snooze has expired (or never snoozed)
-  const now = Date.now();
-  const visible = useMemo(
-    () => queue.filter((it) => !it.snoozedUntil || it.snoozedUntil <= now),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [queue, tick],
-  );
+  const active = queue[activeIndex] ?? null;
+  const queueIndex = queue.length > 0 ? Math.min(activeIndex, queue.length - 1) + 1 : 0;
+  const queueTotal = queue.length;
 
-  const active = visible[activeIndex] ?? null;
-  const queueIndex = visible.length > 0 ? Math.min(activeIndex, visible.length - 1) + 1 : 0;
-  const queueTotal = visible.length;
-
-  // Clamp activeIndex when visible queue shrinks
+  // Clamp activeIndex when queue shrinks
   useEffect(() => {
-    if (activeIndex >= visible.length && visible.length > 0) {
-      setActiveIndex(visible.length - 1);
+    if (activeIndex >= queue.length && queue.length > 0) {
+      setActiveIndex(queue.length - 1);
     }
-  }, [visible.length, activeIndex]);
-
-  // Schedule re-render when next snoozed item is ready to re-enter
-  useEffect(() => {
-    if (snoozeTimerRef.current) clearTimeout(snoozeTimerRef.current);
-    const snoozed = queue.filter((it) => it.snoozedUntil && it.snoozedUntil > Date.now());
-    if (snoozed.length === 0) return;
-    const nextExpiry = Math.min(...snoozed.map((it) => it.snoozedUntil!));
-    const delay = nextExpiry - Date.now();
-    snoozeTimerRef.current = setTimeout(() => setTick((t) => t + 1), delay + 50);
-    return () => {
-      if (snoozeTimerRef.current) clearTimeout(snoozeTimerRef.current);
-    };
-  }, [queue]);
+  }, [queue.length, activeIndex]);
 
   // C1: sync running flag from runningRoutines set whenever it changes
   useEffect(() => {
@@ -154,7 +124,7 @@ export function OverlayContextProvider({
     });
   }, [runningRoutines]);
 
-  const addFire = useCallback((item: Omit<OverlayItem, "snoozedUntil">) => {
+  const addFire = useCallback((item: OverlayItem) => {
     setQueue((prev) => {
       // Stale fire replace: source.kind === "routine" + same routineId → replace;
       // source.kind === "plugin" + same (pluginId, eventId) → replace.
@@ -196,20 +166,13 @@ export function OverlayContextProvider({
     setQueue((prev) => prev.filter((it) => it.id !== id));
   }, []);
 
-  const snooze = useCallback((id: string, durationMs = SNOOZE_DEFAULT_MS) => {
-    const until = Date.now() + durationMs;
-    setQueue((prev) =>
-      prev.map((it) => (it.id === id ? { ...it, snoozedUntil: until } : it)),
-    );
-  }, []);
-
   const prev = useCallback(() => {
     setActiveIndex((i) => Math.max(0, i - 1));
   }, []);
 
   const next = useCallback(() => {
-    setActiveIndex((i) => Math.min(visible.length - 1, i + 1));
-  }, [visible.length]);
+    setActiveIndex((i) => Math.min(queue.length - 1, i + 1));
+  }, [queue.length]);
 
   const openSession = useCallback(
     (routineId: string, firedAt: string) => {
@@ -219,8 +182,8 @@ export function OverlayContextProvider({
   );
 
   const value = useMemo<OverlayContextValue>(
-    () => ({ active, queueIndex, queueTotal, prev, next, dismiss, snooze, addFire, openSession }),
-    [active, queueIndex, queueTotal, prev, next, dismiss, snooze, addFire, openSession],
+    () => ({ active, queueIndex, queueTotal, prev, next, dismiss, addFire, openSession }),
+    [active, queueIndex, queueTotal, prev, next, dismiss, addFire, openSession],
   );
 
   return <OverlayContext.Provider value={value}>{children}</OverlayContext.Provider>;

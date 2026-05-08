@@ -1,14 +1,14 @@
 // OverlayCard — overlay card for routine fire and plugin (insertion-type) triggers.
 //
 // Two source variants share the same card shell:
-//   - routine (Q9): running=true shows spinner, false shows "결과 보기"
+//   - routine (Q9): running=true shows spinner, false shows "결과 보기" (only when jsonl exists)
 //   - plugin (Q11, insertion-type): running=false shows primaryActionLabel ("지금 답하기")
 //
-// Inherits v1 RoutineCard policy:
+// Q10 policy:
 //   - Single active card with prev/next queue navigation
 //   - queueIndex / queueTotal counter (shown when queue ≥ 2)
 //   - dismiss (X) — permanent removal
-//   - snooze (clock icon) — default 30 min, re-enters queue on expiry
+//   - snooze removed (production smoke test: UX risk)
 //
 // Q9 isolation: only ~200ch summary flows here. Full content
 // lives in RoutineSessionView which reads the JSONL directly.
@@ -17,7 +17,7 @@
 // summary + actions. Transitions to done phase when running flips to false.
 
 import { useMemo } from "react";
-import { ChevronLeft, ChevronRight, Clock, Loader2, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Loader2, X } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
 import {
   Card,
@@ -46,11 +46,14 @@ export interface OverlayCardProps {
   onPrev: () => void;
   onNext: () => void;
   onDismiss: () => void;
-  onSnooze: () => void;
-  /** Called when the user clicks the primary action button */
-  onPrimaryAction: () => void;
+  /**
+   * Called when the user clicks the primary action button.
+   * When undefined, the primary action button is not rendered
+   * (e.g. notification-only routine with no JSONL session).
+   */
+  onPrimaryAction?: () => void;
   /** Label for the primary action button — e.g. "결과 보기" or "지금 답하기" */
-  primaryActionLabel: string;
+  primaryActionLabel?: string;
 }
 
 function relativeTime(isoString: string): string {
@@ -78,7 +81,6 @@ export function OverlayCard({
   onPrev,
   onNext,
   onDismiss,
-  onSnooze,
   onPrimaryAction,
   primaryActionLabel,
 }: OverlayCardProps) {
@@ -166,24 +168,6 @@ export function OverlayCard({
                 </Button>
               </>
             )}
-            {!running && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-7 gap-1 px-2 text-xs"
-                    data-testid="routine-card-snooze-trigger"
-                    aria-label="30분 후 다시 알림"
-                    onClick={onSnooze}
-                  >
-                    <Clock className="h-3.5 w-3.5" />
-                    나중에 다시
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>30분 후 다시 알림</TooltipContent>
-              </Tooltip>
-            )}
             <Button
               size="sm"
               variant="ghost"
@@ -206,7 +190,7 @@ export function OverlayCard({
         ) : (
           <p className="text-xs text-muted-foreground/50">요약 없음</p>
         )}
-        {!running && (
+        {!running && onPrimaryAction && (
           <div className="mt-2 flex justify-end">
             <Button
               size="sm"

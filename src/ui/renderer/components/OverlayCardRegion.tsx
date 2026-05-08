@@ -5,6 +5,7 @@
 //
 // Q11: Two source variants:
 //   - routine: primary action opens RoutineSessionView modal ("결과 보기")
+//     — only shown when routineSessionPath is present (notification-only routines hide the button)
 //   - plugin (insertion-type): primary action deferred to onPluginPrimaryAction prop
 
 import { useOverlayContext } from "../context/OverlayContext.js";
@@ -20,13 +21,15 @@ export interface OverlayCardRegionProps {
 }
 
 export function OverlayCardRegion({ onPluginPrimaryAction }: OverlayCardRegionProps) {
-  const { active, queueIndex, queueTotal, prev, next, dismiss, snooze, openSession } =
+  const { active, queueIndex, queueTotal, prev, next, dismiss, openSession } =
     useOverlayContext();
 
   if (!active) return null;
 
   if (active.source.kind === "routine") {
     const { routineId, firedAt } = active.source;
+    // Only show "결과 보기" when there is a JSONL session file (notification-only routines have none)
+    const hasJsonl = !!active.routineSessionPath;
     return (
       <div
         data-testid="overlay-card-region"
@@ -43,8 +46,7 @@ export function OverlayCardRegion({ onPluginPrimaryAction }: OverlayCardRegionPr
             onPrev={prev}
             onNext={next}
             onDismiss={() => dismiss(active.id)}
-            onSnooze={() => snooze(active.id)}
-            onPrimaryAction={() => openSession(routineId, firedAt)}
+            onPrimaryAction={hasJsonl ? () => openSession(routineId, firedAt) : undefined}
             primaryActionLabel="결과 보기"
           />
         </div>
@@ -71,7 +73,6 @@ export function OverlayCardRegion({ onPluginPrimaryAction }: OverlayCardRegionPr
             onPrev={prev}
             onNext={next}
             onDismiss={() => dismiss(active.id)}
-            onSnooze={() => snooze(active.id)}
             onPrimaryAction={() => {
               // Dismiss from queue first, then notify App for chat insert
               dismiss(active.id);
