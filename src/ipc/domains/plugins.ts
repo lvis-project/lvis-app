@@ -271,15 +271,16 @@ export function validateThemePayload(payload: unknown):
     bundleId: p.bundleId,
     shell: p.shell as "light" | "dark",
   };
-  if (p.tokens && typeof p.tokens === "object" && !Array.isArray(p.tokens)) {
-    const safeTokens: Record<string, string> = {};
-    for (const [k, v] of Object.entries(p.tokens as Record<string, unknown>)) {
-      if (PLUGIN_TOKEN_NAMES.has(k) && typeof v === "string" && _SAFE_TOKEN_VALUE.test(v)) {
-        safeTokens[k] = v;
-      }
-    }
-    if (Object.keys(safeTokens).length > 0) safe.tokens = safeTokens;
+  if (!p.tokens || typeof p.tokens !== "object" || Array.isArray(p.tokens)) {
+    return { ok: false, error: "missing-tokens" };
   }
+  const safeTokens: Record<string, string> = {};
+  for (const [k, v] of Object.entries(p.tokens as Record<string, unknown>)) {
+    if (PLUGIN_TOKEN_NAMES.has(k) && typeof v === "string" && _SAFE_TOKEN_VALUE.test(v)) {
+      safeTokens[k] = v;
+    }
+  }
+  if (Object.keys(safeTokens).length > 0) safe.tokens = safeTokens;
   // fonts.family: allowlist of safe system/web font family names (no injection)
   if (p.fonts && typeof p.fonts === "object" && !Array.isArray(p.fonts)) {
     const f = p.fonts as Record<string, unknown>;

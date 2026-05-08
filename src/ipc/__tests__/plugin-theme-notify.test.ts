@@ -1,20 +1,21 @@
 import { describe, it, expect } from "vitest";
 import { validateThemePayload } from "../domains/plugins.js";
 
-// v2 helper: a full ThemeProvider v2 payload shape
+// v2 helper: a full ThemeProvider v2 payload shape — tokens required per spec
 const V2_PAYLOAD = {
   bundleId: "tokyo-night",
   shell: "dark",
+  tokens: { "--lvis-bg": "#0d0d12" },
 } as const;
 
 describe("validateThemePayload", () => {
   it("accepts a valid bundleId + shell (dark)", () => {
-    const result = validateThemePayload({ bundleId: "tokyo-night", shell: "dark" });
-    expect(result).toEqual({ ok: true, safe: { bundleId: "tokyo-night", shell: "dark" } });
+    const result = validateThemePayload({ bundleId: "tokyo-night", shell: "dark", tokens: { "--lvis-bg": "#0d0d12" } });
+    expect(result).toEqual({ ok: true, safe: { bundleId: "tokyo-night", shell: "dark", tokens: { "--lvis-bg": "#0d0d12" } } });
   });
 
   it("accepts light shell", () => {
-    const result = validateThemePayload({ bundleId: "lge-light", shell: "light" });
+    const result = validateThemePayload({ bundleId: "lge-light", shell: "light", tokens: { "--lvis-bg": "#fff" } });
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.safe.bundleId).toBe("lge-light");
@@ -23,7 +24,7 @@ describe("validateThemePayload", () => {
   });
 
   it("accepts high-contrast bundle", () => {
-    const result = validateThemePayload({ bundleId: "high-contrast", shell: "dark" });
+    const result = validateThemePayload({ bundleId: "high-contrast", shell: "dark", tokens: { "--lvis-bg": "#000" } });
     expect(result.ok).toBe(true);
   });
 
@@ -56,16 +57,17 @@ describe("validateThemePayload", () => {
     expect(result).toEqual({ ok: false, error: "invalid-shell" });
   });
 
-  it("rejects extra injected fields — safe output has only bundleId/shell keys", () => {
+  it("rejects extra injected fields — safe output strips unknown keys", () => {
     const result = validateThemePayload({
       bundleId: "midnight", shell: "dark",
+      tokens: { "--lvis-bg": "#000" },
       evil: "injected", __proto__: { polluted: true },
     });
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.safe.bundleId).toBe("midnight");
       expect(result.safe.shell).toBe("dark");
-      expect(result.safe.tokens).toBeUndefined();
+      expect(result.safe.tokens).toEqual({ "--lvis-bg": "#000" });
       expect((result.safe as Record<string, unknown>).evil).toBeUndefined();
     }
   });
@@ -136,11 +138,11 @@ describe("validateThemePayload", () => {
     }
   });
 
-  it("accepts tokens=undefined gracefully", () => {
+  it("rejects token-less payload (tokens required)", () => {
     const result = validateThemePayload({ bundleId: "tokyo-night", shell: "dark" });
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.safe.tokens).toBeUndefined();
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBe("missing-tokens");
     }
   });
 
@@ -187,7 +189,7 @@ describe("validateThemePayload", () => {
       ["high-contrast", "dark"],
     ];
     for (const [bundleId, shell] of cases) {
-      const result = validateThemePayload({ bundleId, shell });
+      const result = validateThemePayload({ bundleId, shell, tokens: { "--lvis-bg": "#000" } });
       expect(result.ok, `bundleId=${bundleId}`).toBe(true);
       if (result.ok) expect(result.safe.bundleId).toBe(bundleId);
     }
@@ -199,6 +201,7 @@ describe("validateThemePayload", () => {
     if (result.ok) {
       expect(result.safe.bundleId).toBe("tokyo-night");
       expect(result.safe.shell).toBe("dark");
+      expect(result.safe.tokens).toEqual({ "--lvis-bg": "#0d0d12" });
     }
   });
 });

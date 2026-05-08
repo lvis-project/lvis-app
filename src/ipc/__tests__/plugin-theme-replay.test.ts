@@ -30,18 +30,20 @@ describe("plugin theme replay cache", () => {
 
   it("records a valid payload", () => {
     const result = recordValidatedTheme({
-      bundleId: "tokyo-night",
+      bundleId: "midnight",
       shell: "dark",
+      tokens: { "--lvis-bg": "#000" },
     });
     expect(result.ok).toBe(true);
     expect(getLastThemePayload()).toEqual({
-      bundleId: "tokyo-night",
+      bundleId: "midnight",
       shell: "dark",
+      tokens: { "--lvis-bg": "#000" },
     });
   });
 
   it("invalid payload leaves the existing cache untouched", () => {
-    recordValidatedTheme({ bundleId: "lge-light", shell: "light" });
+    recordValidatedTheme({ bundleId: "lge-light", shell: "light", tokens: { "--lvis-bg": "#fff" } });
     const before = getLastThemePayload();
 
     const result = recordValidatedTheme({ bundleId: "sepia", shell: "light" });
@@ -51,12 +53,13 @@ describe("plugin theme replay cache", () => {
   });
 
   it("overwrites earlier payload on each new valid call", () => {
-    recordValidatedTheme({ bundleId: "lge-dark", shell: "dark" });
-    recordValidatedTheme({ bundleId: "forest", shell: "light" });
+    recordValidatedTheme({ bundleId: "lge-dark", shell: "dark", tokens: { "--lvis-bg": "#111" } });
+    recordValidatedTheme({ bundleId: "forest", shell: "light", tokens: { "--lvis-bg": "#eee" } });
 
     expect(getLastThemePayload()).toEqual({
       bundleId: "forest",
       shell: "light",
+      tokens: { "--lvis-bg": "#eee" },
     });
   });
 
@@ -78,6 +81,7 @@ describe("plugin theme replay cache", () => {
     recordValidatedTheme({
       bundleId: "forest",
       shell: "light",
+      tokens: { "--lvis-bg": "#eee" },
     });
 
     const cached = getLastThemePayload();
@@ -114,7 +118,7 @@ describe("replayThemeToWebview", () => {
 
   it("sends host.theme.changed exactly once to the resolved wc when cache is filled", () => {
     fromIdSpy.mockReturnValue({ send: sendSpy, isDestroyed: () => false });
-    recordValidatedTheme({ bundleId: "tokyo-night", shell: "dark" });
+    recordValidatedTheme({ bundleId: "tokyo-night", shell: "dark", tokens: { "--lvis-bg": "#0d0d12" } });
 
     const result = replayThemeToWebview(42);
 
@@ -124,14 +128,14 @@ describe("replayThemeToWebview", () => {
     expect(sendSpy).toHaveBeenCalledWith(
       "lvis:plugin:event",
       "host.theme.changed",
-      { bundleId: "tokyo-night", shell: "dark" },
+      { bundleId: "tokyo-night", shell: "dark", tokens: { "--lvis-bg": "#0d0d12" } },
     );
-    expect(result).toEqual({ bundleId: "tokyo-night", shell: "dark" });
+    expect(result).toEqual({ bundleId: "tokyo-night", shell: "dark", tokens: { "--lvis-bg": "#0d0d12" } });
   });
 
   it("does not send when wc.fromId returns undefined (already-destroyed wcId)", () => {
     fromIdSpy.mockReturnValue(undefined);
-    recordValidatedTheme({ bundleId: "lge-light", shell: "light" });
+    recordValidatedTheme({ bundleId: "lge-light", shell: "light", tokens: { "--lvis-bg": "#fff" } });
 
     const result = replayThemeToWebview(99);
 
@@ -141,7 +145,7 @@ describe("replayThemeToWebview", () => {
 
   it("does not send when wc.isDestroyed() is true", () => {
     fromIdSpy.mockReturnValue({ send: sendSpy, isDestroyed: () => true });
-    recordValidatedTheme({ bundleId: "lge-dark", shell: "dark" });
+    recordValidatedTheme({ bundleId: "lge-dark", shell: "dark", tokens: { "--lvis-bg": "#111" } });
 
     const result = replayThemeToWebview(11);
 
@@ -154,7 +158,7 @@ describe("replayThemeToWebview", () => {
       send: () => { throw new Error("wc gone"); },
       isDestroyed: () => false,
     });
-    recordValidatedTheme({ bundleId: "lge-dark", shell: "dark" });
+    recordValidatedTheme({ bundleId: "lge-dark", shell: "dark", tokens: { "--lvis-bg": "#111" } });
 
     expect(() => replayThemeToWebview(7)).not.toThrow();
     expect(replayThemeToWebview(7)).toBeNull();
