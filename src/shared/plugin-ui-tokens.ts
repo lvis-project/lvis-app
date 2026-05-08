@@ -151,8 +151,12 @@ export interface LvisThemePayload {
    *   narrowed `LvisThemeBundleId` type.
    */
   bundleId: string;
-  /** @deprecated No longer emitted by the host. Use `bundleId` + `shell`. */
-  colorScheme?: "light" | "dark" | "system";
+  /**
+   * @deprecated No longer emitted by the host. Use `bundleId` + `shell`.
+   * Only `"light" | "dark"` — matches host `validateThemePayload` accept range.
+   * `"system"` is NOT part of the legacy contract and will be rejected by the host.
+   */
+  colorScheme?: "light" | "dark";
   /** @deprecated No longer emitted by the host. */
   reducedMotion?: boolean;
   /** @deprecated No longer emitted by the host. */
