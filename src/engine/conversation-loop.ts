@@ -74,6 +74,11 @@ export interface TurnCallbacks {
      * Rolling summary — Layer 2 의 `renderBoundaryAsPreamble()` 결과. 사용자 가시성용.
      */
     summary?: string;
+    /**
+     * §PR-5: compact sequence number — passed to CheckpointDivider to enable
+     * view-mode and branch-from-checkpoint actions.
+     */
+    compactNum?: number;
   }) => void;
   onFallback?: (from: string, to: string) => void;
   /**
@@ -393,6 +398,52 @@ export class ConversationLoop {
 
   getSessionId(): string {
     return this.sessionId;
+  }
+
+  /**
+   * §PR-5 Layer 3 View-Mode — 체크포인트 #compactNum 의 슬라이스 끝 인덱스를 반환.
+   * 렌더러가 visibleMessages = messages.slice(0, slicedRangeEnd) 로 view-mode 를 구현.
+   * 해당 compactNum 체크포인트가 없으면 null 반환.
+   */
+  public enterViewMode(compactNum: number): { messageIndexAtCreation: number } | null {
+    const checkpoints = this.deps.memoryManager.loadSessionMetadata(this.sessionId)?.checkpoints ?? [];
+    const target = checkpoints.find((c) => c.compactNum === compactNum);
+    if (!target) return null;
+    return { messageIndexAtCreation: target.messageCountAtTrigger };
+  }
+
+  /**
+   * §PR-5 Layer 3 View-Mode — view-mode 종료 audit hook.
+   * 실제 engine 상태 변경 없음 (렌더러 state 만 reset). 추후 감사 로그 추가 가능.
+   */
+  public exitViewMode(): void {
+    // no-op: renderer-side state reset only
+  }
+
+  /**
+   * §PR-5 Layer 3 Branch — 체크포인트 #compactNum 지점에서 새 세션을 fork.
+   * history 를 slicing 하고 wire-serialize 후 disk 영속화. 새 sessionId 반환.
+   */
+  public async branchFromCheckpoint(compactNum: number): Promise<{ newSessionId: string }> {
+    const checkpoints = this.deps.memoryManager.loadSessionMetadata(this.sessionId)?.checkpoints ?? [];
+    const target = checkpoints.find((c) => c.compactNum === compactNum);
+    if (!target) throw new Error(`Checkpoint #${compactNum} not found in session ${this.sessionId}`);
+
+    const newSessionId = crypto.randomUUID();
+    const sliced = this.history.getMessages().slice(0, target.messageCountAtTrigger);
+
+    // wire-serialize: markStaleToolResults 된 verbatim history 를 stub 치환 후 영속화
+    await this.deps.memoryManager.saveSession(newSessionId, stubMarkedToolResults(sliced));
+
+    // 브랜치 세션 metadata — parentSessionId + 브랜치 provenance
+    await this.deps.memoryManager.saveSessionMetadata(newSessionId, {
+      parentSessionId: this.sessionId,
+      branchedFromCompactNum: compactNum,
+      branchedAt: new Date().toISOString(),
+    });
+
+    log.info(`branchFromCheckpoint: new session ${newSessionId} from ${this.sessionId} @ compact #${compactNum}`);
+    return { newSessionId };
   }
 
   getSessionRoutineId(): string | null {
@@ -1475,6 +1526,12 @@ export class ConversationLoop {
       log.info(
         `preflight: APPLIED — removed=${compactResult.removedCount} estimatedAfter=${compactResult.estimatedAfter} compactNum=${this.compactNum}`,
       );
+      callbacks?.onCompactOccurred?.({
+        removedMessages: compactResult.removedCount,
+        freedTokens: estimated - compactResult.estimatedAfter,
+        tier: "auto-compact",
+        compactNum: this.compactNum,
+      });
     } catch (err) {
       // Layer 2 실패 시 turn 자체는 계속 진행 — Layer 0 미적용 history 로 stream attempt.
       // context_error 도달 시 stream-collector 의 safety net 이 사용자 안내 처리.

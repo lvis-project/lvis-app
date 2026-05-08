@@ -110,6 +110,17 @@ export interface SessionMetadata {
    * auto-derived title from session content. Max 20 chars enforced on write.
    */
   title?: string;
+  /**
+   * §PR-5: compact number of the checkpoint this session was branched from.
+   * Set when a session is created via branchFromCheckpoint().
+   * Absent for normal (non-branched) sessions.
+   */
+  branchedFromCompactNum?: number;
+  /**
+   * §PR-5: ISO timestamp when this session was branched from a checkpoint.
+   * Absent for normal (non-branched) sessions.
+   */
+  branchedAt?: string;
 }
 
 const MEMORY_MARKER = "<!-- lvis:kind=memory -->";
@@ -211,6 +222,10 @@ function normalizeSessionMetadata(raw: Record<string, unknown>): SessionMetadata
 
   const rawPreamble = typeof raw.summaryPreamble === "string" ? raw.summaryPreamble : undefined;
   const rawTitle = typeof raw.title === "string" ? raw.title.trim() : undefined;
+  const rawBranchedFromCompactNum = typeof raw.branchedFromCompactNum === "number" && Number.isInteger(raw.branchedFromCompactNum) && raw.branchedFromCompactNum >= 0
+    ? raw.branchedFromCompactNum
+    : undefined;
+  const rawBranchedAt = typeof raw.branchedAt === "string" ? raw.branchedAt : undefined;
   return {
     routineId: typeof raw.routineId === "string" ? raw.routineId : undefined,
     routineTitle: typeof raw.routineTitle === "string" ? raw.routineTitle : undefined,
@@ -222,6 +237,9 @@ function normalizeSessionMetadata(raw: Record<string, unknown>): SessionMetadata
     checkpoints: checkpoints && checkpoints.length > 0 ? checkpoints : undefined,
     // §PR-3: stored title (max 20 chars enforced on write; cap defensively on read too)
     title: rawTitle && rawTitle.length > 0 ? rawTitle.slice(0, 20) : undefined,
+    // §PR-5: branch provenance fields
+    branchedFromCompactNum: rawBranchedFromCompactNum,
+    branchedAt: rawBranchedAt,
   };
 }
 
