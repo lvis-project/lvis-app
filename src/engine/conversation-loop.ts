@@ -10,7 +10,7 @@
 import { ConversationHistory, normalizeToolPairInvariant } from "./conversation-history.js";
 import { ToolExecutor, type ToolUseBlock } from "../tools/executor.js";
 import { HookRunner } from "../hooks/hook-runner.js";
-import { shouldCompact, compactMessages, estimateMessagesTokens, getModelUsableContext, decideRotation, type CheckpointTriggerType } from "./auto-compact.js";
+import { shouldCompact, compactMessages, markStaleToolResults, estimateMessagesTokens, getModelUsableContext, decideRotation, type CheckpointTriggerType } from "./auto-compact.js";
 import { generateStructuredSummary } from "./summary-generator.js";
 import { createProvider, secretKeyFor } from "./llm/provider-factory.js";
 import { FallbackProvider } from "./llm/vercel/fallback-chain.js";
@@ -808,18 +808,34 @@ export class ConversationLoop {
       }
     } else {
       // fallback: PostTurnHookChain 미주입 시 기존 inline 로직 유지.
+      // SubAgentRunner 의 child loop 가 이 경로를 사용 (`postTurnHookChain: undefined`)
+      // — isolation contract 보존 (parent session 의 audit/extractMemory/idle-poke 미터치) +
+      // Layer 1 markStaleToolResults 만 child 에도 적용하여 child tool_result 가 parent
+      // 로 surface 되어 history 부풀리는 문제 방지 (v3 PR-1c).
       // cycle 1 MED: extractMemory 중복 제거 — memory-extract hook이
       // PostTurnHookChain에서 이미 처리하므로 fallback에서도 호출하지 않는다.
       // PostTurnHookChain을 주입한 경우와 fallback 모두 memory 추출은
       // hook chain의 memory-extract 단계에서만 일어난다.
       const llmSettings = this.deps.settingsService.get("llm");
-      if (this.isAutoCompactEnabled() && shouldCompact(this.cumulativeUsage, getModelUsableContext(llmSettings.provider, llmSettings.vendors[llmSettings.provider].model))) {
-        const { messages: compacted, result: cr } = compactMessages(this.history.getMessages());
-        if (cr.compacted) {
+      if (this.isAutoCompactEnabled()) {
+        // Stage 1a: Layer 1 part marking — 항상 실행, 저비용. child loop 에서도 작동.
+        const { messages: afterMark, result: mr } = markStaleToolResults(this.history.getMessages());
+        if (mr.stripped) {
           this.history.clear();
-          this.history.restore(compacted);
-          if (process.env.NODE_ENV !== "production") log.info(`auto-compact: removed ${cr.removedMessages} msgs, freed ~${cr.freedTokens} tokens`);
-          callbacks?.onCompactOccurred?.({ removedMessages: cr.removedMessages, freedTokens: cr.freedTokens });
+          this.history.restore(afterMark);
+          if (process.env.NODE_ENV !== "production") {
+            log.info(`mark-stale (fallback): stripped ${mr.strippedCount} tool_results, freed ~${mr.freedChars} chars`);
+          }
+        }
+        // Stage 1b: threshold-triggered full compact (기존 동작).
+        if (shouldCompact(this.cumulativeUsage, getModelUsableContext(llmSettings.provider, llmSettings.vendors[llmSettings.provider].model))) {
+          const { messages: compacted, result: cr } = compactMessages(this.history.getMessages());
+          if (cr.compacted) {
+            this.history.clear();
+            this.history.restore(compacted);
+            if (process.env.NODE_ENV !== "production") log.info(`auto-compact: removed ${cr.removedMessages} msgs, freed ~${cr.freedTokens} tokens`);
+            callbacks?.onCompactOccurred?.({ removedMessages: cr.removedMessages, freedTokens: cr.freedTokens });
+          }
         }
       }
       await this.deps.memoryManager.saveSession(this.sessionId, this.history.getMessages());
