@@ -241,14 +241,22 @@ export function AskUserQuestionCard({
             draft={currentDraft}
             disabled={submitting}
             onChoose={(choice, choiceIndex) => {
-              setAnswer(step, { choice, choiceIndex });
+              const newDraft = { choice, choiceIndex };
+              setAnswer(step, newDraft);
               if (!isMulti) {
+                // Single-question path: respondAndClose handles everything.
+                // Return "closed" so the keyboard handler does NOT call
+                // onAdvance() — doing so would be a redundant double advance.
                 void respondAndClose({ answers: [{ choice }] });
+                return { kind: "closed" };
               }
-              // Return whether the new draft is complete so the keyboard
-              // handler can advance synchronously without relying on the
-              // stale onSubmit closure (which reflects pre-selection state).
-              return isAnswerComplete(currentItem, { choice, choiceIndex });
+              // Multi-step path: signal "advance" when the draft is complete
+              // so the keyboard handler calls onAdvance() (goNext), or
+              // "incomplete" when further input is needed.
+              if (isAnswerComplete(currentItem, newDraft)) {
+                return { kind: "advance" };
+              }
+              return { kind: "incomplete" };
             }}
             onFreeText={(freeText) => setAnswer(step, { freeText })}
             onSubmit={handleSubmit}
@@ -348,6 +356,20 @@ function ChoiceBadge({ kind }: { kind: "recommend" | "alt" }) {
   );
 }
 
+/**
+ * Explicit signal returned by `onChoose` so the keyboard handler knows
+ * exactly what action (if any) to take after a choice selection:
+ *
+ *   "incomplete" — draft updated but not yet complete; handler does nothing.
+ *   "advance"    — draft complete in a multi-step flow; handler calls onAdvance().
+ *   "closed"     — respondAndClose() already called (single-question path);
+ *                  handler must NOT call onAdvance() to avoid a double advance/race.
+ */
+export type ChoiceResult =
+  | { kind: "incomplete" }
+  | { kind: "advance" }
+  | { kind: "closed" };
+
 function QuestionForm({
   item,
   draft,
@@ -360,8 +382,8 @@ function QuestionForm({
   item: AskUserQuestionItem;
   draft: DraftAnswer;
   disabled: boolean;
-  /** Returns true if the new draft is complete (used by keyboard handler to advance). */
-  onChoose: (choice: string, choiceIndex: number) => boolean;
+  /** Returns a ChoiceResult signalling what the keyboard handler should do next. */
+  onChoose: (choice: string, choiceIndex: number) => ChoiceResult;
   onFreeText: (text: string) => void;
   /**
    * Called on free-text Enter: validates current draft (which IS current
@@ -369,7 +391,7 @@ function QuestionForm({
    */
   onSubmit: () => void;
   /**
-   * Called by the keyboard choice handler when `onChoose` returns true.
+   * Called by the keyboard choice handler when onChoose returns { kind: "advance" }.
    * Advances directly (goNext) without re-checking draft — the synchronous
    * return value of onChoose is authoritative; re-reading currentDraft here
    * would be stale due to React 18 state batching.
@@ -414,12 +436,13 @@ function QuestionForm({
         buttonRefs.current[prev]?.focus();
       } else if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
-        // onChoose returns whether the new draft is complete — use that
-        // synchronous result to advance via onAdvance (which calls goNext
-        // directly) rather than onSubmit (which re-reads currentDraft and
-        // would see the pre-setAnswer stale value due to React 18 batching).
-        const willBeComplete = onChoose(choices[i], i);
-        if (willBeComplete) onAdvance();
+        // onChoose returns a ChoiceResult enum:
+        //   "advance" → multi-step draft complete, call onAdvance() to go next.
+        //   "closed"  → single-question path already called respondAndClose();
+        //               do NOT call onAdvance() to avoid a double advance/race.
+        //   "incomplete" → draft updated but not yet complete; do nothing more.
+        const result = onChoose(choices[i], i);
+        if (result.kind === "advance") onAdvance();
       }
     },
     [disabled, choices, onChoose, onAdvance],
