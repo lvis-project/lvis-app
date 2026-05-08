@@ -840,6 +840,46 @@ ${input}`;
     return { ok: true };
   });
 
+  // ─── PR-4: verbatim tool_result lazy-load ───────────────────────────────
+  // Returns the in-memory verbatim content for a compacted tool_result.
+  // Only works for the currently-active session — other sessions have been
+  // stubbed to disk and the verbatim is gone. Returns null when:
+  //   - sessionId does not match the active session
+  //   - toolUseId not found in history
+  //   - message has NOT been compacted (meta.compactedAt not set) — callers
+  //     should only request verbatim for compacted (stubbed) tool results
+  //   - message is already a disk stub (content starts with "[tool_result stripped:")
+  // lineCount is computed here so the renderer never has to split on "\n".
+  ipcMain.handle(
+    "lvis:chat:get-verbatim-tool-result",
+    (e, { sessionId, toolUseId }: { sessionId: string; toolUseId: string }) => {
+      if (!validateSender(e)) {
+        auditUnauthorized(auditLogger, "lvis:chat:get-verbatim-tool-result", e);
+        return null;
+      }
+      if (sessionId !== conversationLoop.getSessionId()) return null;
+      const messages = conversationLoop.getHistory().getMessages() as GenericMessage[];
+      const msg = messages.find(
+        (m): m is Extract<GenericMessage, { role: "tool_result" }> =>
+          m.role === "tool_result" && m.toolUseId === toolUseId,
+      );
+      if (!msg) return null;
+      // only serve verbatim for messages that have been compacted
+      if (msg.meta?.compactedAt === undefined) return null;
+      // content is always string on tool_result messages
+      const content = msg.content;
+      if (typeof content !== "string") return null;
+      // already stub text → verbatim lost
+      if (content.startsWith("[tool_result stripped:")) return null;
+      // zero-allocation line count
+      let lineCount = 1;
+      for (let i = 0; i < content.length; i++) {
+        if (content.charCodeAt(i) === 10) lineCount++;
+      }
+      return { content, lineCount };
+    },
+  );
+
   // ─── ask_user_question response ─────────────────────────────────────────
   ipcMain.handle("lvis:ask-user-question:respond", (e, response: unknown) => {
     if (!validateSender(e)) {
