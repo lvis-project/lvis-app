@@ -18,7 +18,6 @@ import { ThemeProvider } from "./theme/index.js";
 import { TooltipProvider } from "../../components/ui/tooltip.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
 import { getApi, toViewKey } from "./api-client.js";
-import { RemindersList } from "./components/RemindersList.js";
 import { RoutinePanel } from "./components/RoutinePanel.js";
 import { MemorySearchPanel } from "./components/MemorySearchPanel.js";
 import { StarredView } from "./components/StarredView.js";
@@ -83,26 +82,8 @@ function DetachedContent({ viewKey }: ContentProps) {
     }
   }, [viewKey, refreshViews]);
 
-  if (viewKey === "reminders") {
-    return <RemindersList api={api} />;
-  }
-
-  if (viewKey === "routines") {
-    return (
-      <RoutinePanel
-        api={api}
-        onActivateHome={() => {
-          // In a detached window there is no "home" — close the detached view.
-          void api.window?.closeDetached();
-        }}
-        onJumpToSession={() => {
-          // Session jump not supported in detached view.
-        }}
-        onStartRoutineSession={async () => {
-          // Routine sessions open in main window.
-        }}
-      />
-    );
+  if (viewKey === "reminders" || viewKey === "routines") {
+    return <RoutinePanel api={api} />;
   }
 
   if (viewKey === "memory") {

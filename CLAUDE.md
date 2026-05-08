@@ -100,6 +100,50 @@ src/
   ui/                         — LVIS-custom UI components/views
 ```
 
+## Storage Namespace per Feature (REQUIRED)
+
+LVIS host + plugin 의 모든 user-data storage 는 **`~/.lvis/<feature>/`** 디렉토리 namespace 로 격리한다. *feature* 는 host 도메인 (chat sessions, routine, audit log 등) 또는 plugin id (`work-proactive`, `meeting`, `local-indexer` 등).
+
+### 정합 패턴
+
+```
+~/.lvis/
+├── sessions/                          # main chat (host)
+│   └── <sessionId>.jsonl
+├── routine/                           # routine v2 (host) — Q9 isolation
+│   ├── routines.json
+│   └── sessions/<routineId>/<firedAt>.jsonl
+├── settings.json                      # cross-cutting host settings
+├── audit.log                          # cross-cutting audit
+├── secrets/                           # cross-cutting secrets (encrypted)
+└── plugins/<pluginId>/                # plugin per-namespace
+    ├── data.json
+    └── ...
+```
+
+### 룰
+
+- **단일 도메인 = 단일 디렉토리**. 같은 도메인의 설정 + session + cache + state 모두 그 디렉토리 하위에 모은다.
+- **디렉토리 권한**: 0o700 (디렉토리), 0o600 (파일). secrets 는 추가 암호화 의무.
+- **Cross-cutting 자원** (`settings.json`, `audit.log`, `secrets/`) 만 `~/.lvis/` 직속. 도메인 specific 자원이 root 에 흩어지면 안 됨.
+- **Plugin 자체 data** 는 `~/.lvis/plugins/<pluginId>/` 만 사용. host 의 다른 디렉토리 (`~/.lvis/routine/` 등) 직접 read/write 금지 — host API (예: `hostApi.addTask`, `hostApi.saveNote`) 통한 access 만.
+- **Backup / clear**: 도메인 단위 (`rm -rf ~/.lvis/<feature>/`) 가능해야 함.
+
+### 효과
+
+1. **Operational ergonomics** — 도메인 단위 backup/restore/clear
+2. **Permission boundary** — plugin namespace 밖 access 시 host capability check 자연 trigger
+3. **Architectural visibility** — 디렉토리 구조 자체가 도메인 격리 표현
+4. **Plugin extensibility 정합** — `plugins/<id>/` convention 이 host 도메인과 동등 위계
+
+### 위반 패턴
+
+- `~/.lvis/<feature>.json` (root 에 도메인 specific 파일) → `~/.lvis/<feature>/<feature>.json`
+- plugin 이 host 의 `~/.lvis/sessions/` 직접 read → host API 통한 access
+- 새 feature 추가 시 root 에 새 파일 추가 → `~/.lvis/<new-feature>/` 신설
+
+위반 사례 (2026-05-09 Routine v2 PR #626 도입 전): `~/.lvis/routines.json` + `~/.lvis/routine-sessions/` 두 path 가 root 에 분산 → 단일 namespace `~/.lvis/routine/` 로 consolidate. Q9 isolation lock 의 정확한 운영.
+
 ## Key Principles
 
 1. **NO plugin-specific code in host** — All plugin integration via HostApi self-registration
