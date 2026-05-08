@@ -1,9 +1,9 @@
 /**
- * Summary Generator — generateSummary + shouldSkipSummary
+ * Summary Generator — generateStructuredSummary + shouldSkipSummary
  */
 import { describe, it, expect } from "vitest";
 import type { LLMProvider, StreamEvent } from "../llm/types.js";
-import { generateSummary, shouldSkipSummary } from "../summary-generator.js";
+import { generateStructuredSummary, shouldSkipSummary } from "../summary-generator.js";
 import type { GenericMessage } from "../llm/types.js";
 
 // ─── Mock LLM Provider ────────────────────────────────
@@ -51,12 +51,12 @@ describe("shouldSkipSummary", () => {
   });
 });
 
-// ─── generateSummary ─────────────────────────────────
+// ─── generateStructuredSummary ─────────────────────────────────
 
-describe("generateSummary", () => {
+describe("generateStructuredSummary", () => {
   it("returns empty string for empty messages array", async () => {
     const llm = makeMockLlm("이 텍스트는 반환되면 안 됩니다");
-    const result = await generateSummary(llm, []);
+    const result = await generateStructuredSummary(llm, []);
     expect(result).toBe("");
   });
 
@@ -66,7 +66,7 @@ describe("generateSummary", () => {
       { role: "user", content: "auth 모듈 구현해줘" },
       { role: "assistant", content: "네, JWT 기반으로 구현하겠습니다." },
     ];
-    const result = await generateSummary(llm, messages);
+    const result = await generateStructuredSummary(llm, messages);
     expect(result).toBe("요약: 사용자가 auth 모듈 구현을 요청했습니다.");
   });
 
@@ -85,7 +85,7 @@ describe("generateSummary", () => {
       { role: "user", content: "미팅 노트 정리해줘" },
       { role: "assistant", content: "노트를 정리했습니다." },
     ];
-    await generateSummary(llm, messages);
+    await generateStructuredSummary(llm, messages);
 
     expect(capturedParams).not.toBeNull();
     const p = capturedParams as { messages: GenericMessage[]; systemPrompt: string };
@@ -103,7 +103,7 @@ describe("generateSummary", () => {
     const messages: GenericMessage[] = [
       { role: "user", content: "테스트" },
     ];
-    await expect(generateSummary(llm, messages)).rejects.toThrow("summary LLM error");
+    await expect(generateStructuredSummary(llm, messages)).rejects.toThrow("summary LLM error");
   });
 
   it("respects maxTokens option by truncating long responses", async () => {
@@ -114,7 +114,7 @@ describe("generateSummary", () => {
       { role: "assistant", content: "응답" },
     ];
     // maxTokens=50 → max ~200 chars
-    const result = await generateSummary(llm, messages, { maxTokens: 50 });
+    const result = await generateStructuredSummary(llm, messages, { maxTokens: 50 });
     expect(result.length).toBeLessThanOrEqual(200);
   });
 });
