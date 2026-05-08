@@ -1,4 +1,6 @@
 import { test, expect } from './fixtures';
+import { BUNDLE_IDS } from '../../../src/shared/theme-bundles.js';
+import type { BundleId } from '../../../src/shared/theme-bundles.js';
 
 /**
  * Chat-surface text contrast — WCAG AA regression guard for every shipped
@@ -26,34 +28,9 @@ import { test, expect } from './fixtures';
  *      be updated.
  */
 
-const BUNDLE_IDS = [
-  'tokyo-night',
-  'midnight',
-  'forest',
-  'lge-light',
-  'lge-dark',
-  'high-contrast',
-] as const;
-
-type BundleId = (typeof BUNDLE_IDS)[number];
-
-const PROBE_BODY_ID = '__lvis_contrast_probe_body__';
-
 /* ───────────────────────────────────────────────────────────────────────
  *  WCAG contrast helpers (run inside page context)
  * ─────────────────────────────────────────────────────────────────────── */
-
-/** Walk parents until we find one with a non-transparent painted background. */
-function paintedBackground(el: Element): string {
-  let cur: Element | null = el;
-  while (cur) {
-    const style = getComputedStyle(cur);
-    const bg = style.backgroundColor;
-    if (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') return bg;
-    cur = cur.parentElement;
-  }
-  return getComputedStyle(document.documentElement).backgroundColor || 'rgb(255, 255, 255)';
-}
 
 /** Parse "rgb(r, g, b)" / "rgba(r, g, b, a)" into [r,g,b] in 0..1. */
 function rgbToTuple(input: string): [number, number, number] {

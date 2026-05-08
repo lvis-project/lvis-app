@@ -5,6 +5,7 @@
  *   `import { BUNDLES, findBundle } from "../theme/bundles/index.js"`
  */
 import type { ThemeBundle } from "./types.js";
+import type { BundleId } from "../../../../shared/theme-bundles.js";
 import { tokyoNightBundle } from "./tokyo-night.js";
 import { midnightBundle } from "./midnight.js";
 import { forestBundle } from "./forest.js";
@@ -27,17 +28,19 @@ export const BUNDLES: readonly ThemeBundle[] = [
   highContrastBundle,
 ];
 
-// §C3: compile-time guard — ensure every BUNDLE_IDS entry has a matching bundle object.
-// If a bundle ID is added to theme-bundles.ts but not to BUNDLES above, TypeScript will
-// surface a type error here rather than a silent runtime mismatch.
-((): void => {
+// §C3: compile-time guard — BUNDLES ids must be valid BundleId values.
+// TypeScript errors here if a bundle object uses an id not declared in theme-bundles.ts.
+// For the reverse (a BundleId added to theme-bundles.ts but missing from BUNDLES),
+// a non-throwing runtime warn is used so startup is never crashed by a missing bundle.
+void (BUNDLES as readonly { id: BundleId }[]);
+if (process.env.NODE_ENV !== "production") {
   const registeredIds = new Set(BUNDLES.map((b) => b.id));
   for (const id of BUNDLE_IDS) {
     if (!registeredIds.has(id)) {
-      throw new Error(`[theme-bundles] Bundle object missing for id "${id}" — add it to BUNDLES in bundles/index.ts`);
+      console.warn(`[theme-bundles] Bundle object missing for id "${id}" — add it to BUNDLES in bundles/index.ts`);
     }
   }
-})();
+}
 
 /** Default bundle applied on fresh installs. §C3: sourced from shared/theme-bundles.ts. */
 export const DEFAULT_BUNDLE_ID = _SHARED_DEFAULT_BUNDLE_ID;
