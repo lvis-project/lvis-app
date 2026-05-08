@@ -1869,7 +1869,7 @@ broadcast 만 처리.
 | `appearance` | 테마 | `AppearanceTab.tsx` | 테마 선택 (dark / light / high-contrast / system) |
 | `chat` | 채팅 | `ChatTab.tsx` | 자동 컴팩트 토글·**Stream Smoothing** (PR #342 이관) |
 | `web` | 검색 (Web) | `WebTab.tsx` | 웹 검색 공급자·API 키 |
-| `routine` | 브리핑 | `RoutinePanel.tsx` | 루틴 & 알림 통합 관리 (Routine v2 — execution mode, 6 repeat kinds, 3 input styles) |
+| `routine` | 루틴 | `RoutinePanel.tsx` | 루틴 & 알림 통합 관리 (Routine v2 — execution mode, 6 repeat kinds, 3 input styles) |
 | `privacy` | 프라이버시 | `PrivacyTab.tsx` | DLP(PII) 리댁션 토글 + 통계 |
 | `permissions` | 권한 | `PermissionsTab.tsx` | 도구 권한 정책 |
 | `roles` | 역할 | `RolesTab.tsx` | Role Preset 편집 (이름·systemPromptAdd·effort) |
