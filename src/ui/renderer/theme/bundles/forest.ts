@@ -1,0 +1,45 @@
+import type { ThemeBundle } from "./types.js";
+
+export const forestBundle: ThemeBundle = {
+  id: "forest",
+  name: "포레스트",
+  description: "라이트 셸 + 틸 액센트 + 라이트 코드",
+  shell: "light",
+  highContrast: false,
+  tokens: {
+    /* ── Tier B: semantic shell ──────────────────────────────────── */
+    background:               "0 0% 100%",
+    foreground:               "222 47% 11%",
+    card:                     "0 0% 100%",
+    "card-foreground":        "222 47% 11%",
+    popover:                  "0 0% 100%",
+    "popover-foreground":     "222 47% 11%",
+    primary:                  "170 70% 45%",
+    "primary-foreground":     "210 40% 98%",
+    secondary:                "210 40% 96%",
+    "secondary-foreground":   "222 47% 11%",
+    muted:                    "210 40% 96%",
+    "muted-foreground":       "215 16% 47%",
+    accent:                   "210 40% 96%",
+    "accent-foreground":      "222 47% 11%",
+    destructive:              "0 84% 60%",
+    "destructive-foreground": "210 40% 98%",
+    warning:                  "48 96% 89%",
+    "warning-foreground":     "30 80% 25%",
+    success:                  "142 71% 45%",
+    border:                   "214 32% 91%",
+    input:                    "214 32% 91%",
+    ring:                     "170 70% 35%",
+    "message-user-bg":        "170 70% 45%",
+    "message-user-fg":        "210 40% 98%",
+    "input-bar-bg":           "0 0% 100%",
+    /* ── Tier C: code surface ──────────────────────────────────── */
+    "code-bg":                "210 40% 98%",
+    "code-fg":                "222 47% 11%",
+    "code-border":            "214 32% 88%",
+    /* ── Action tokens (PR-4/5) ────────────────────────────────── */
+    "action-view":            "170 70% 35%",
+    "action-branch":          "25 95% 53%",
+    "action-compact":         "170 70% 35%",
+  },
+};

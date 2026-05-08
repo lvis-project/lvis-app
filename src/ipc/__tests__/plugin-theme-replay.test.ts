@@ -78,6 +78,33 @@ describe("plugin theme replay cache", () => {
       tokens: { "--lvis-bg": "#111" },
     });
   });
+
+  it("v2: records bundleId and shell alongside v1 fields", () => {
+    recordValidatedTheme({
+      bundleId: "forest",
+      shell: "light",
+      theme: "light",
+      chatTheme: "default",
+      codeTheme: "light",
+    });
+
+    const cached = getLastThemePayload();
+    expect(cached?.bundleId).toBe("forest");
+    expect(cached?.shell).toBe("light");
+    expect(cached?.theme).toBe("light");
+  });
+
+  it("v2: unknown bundleId is dropped from cache", () => {
+    recordValidatedTheme({
+      bundleId: "injected-theme",
+      shell: "dark",
+      theme: "dark",
+      chatTheme: "default",
+      codeTheme: "dark",
+    });
+
+    expect(getLastThemePayload()?.bundleId).toBeUndefined();
+  });
 });
 
 describe("replayThemeToWebview", () => {
