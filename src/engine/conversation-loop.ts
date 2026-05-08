@@ -1343,9 +1343,9 @@ export class ConversationLoop {
     result: import("./structured-compact.js").CompactWithBoundaryResult,
     trigger: "auto-compact" | "manual",
     estimatedBefore: number,
-    callbacks?: TurnCallbacks,
+    callbacks: TurnCallbacks | undefined,
     /** compact 직전 history 길이 — messageCountAtTrigger 에 기록 (origin count). */
-    prevMessageCount?: number,
+    prevMessageCount: number,
   ): Promise<void> {
     this.compactNum = result.boundary.compactNum;
     this.history.clear();
@@ -1373,12 +1373,15 @@ export class ConversationLoop {
         trigger,
         ctxUsageAtTrigger,
         summary: preamble,
-        messageCountAtTrigger: prevMessageCount ?? result.removedCount + result.newHistory.length,
+        messageCountAtTrigger: prevMessageCount,
         compactNum: this.compactNum,
       };
       const existingMeta = this.deps.memoryManager.loadSessionMetadata(this.sessionId) ?? {};
       const updatedMeta = this.deps.memoryManager.appendCheckpoint(existingMeta, checkpointEntry);
-      await this.deps.memoryManager.saveSessionMetadata(this.sessionId, updatedMeta);
+      await this.deps.memoryManager.saveSessionMetadata(this.sessionId, {
+        ...updatedMeta,
+        summaryPreamble: preamble,
+      });
     } catch (storageErr) {
       log.warn(`applyBoundaryToSession: Layer 3 checkpoint persist 실패 — ${(storageErr as Error).message}`);
     }
@@ -1552,7 +1555,7 @@ export class ConversationLoop {
       case "compact": {
         // PR-2-F-4: extractive compactMessages → LLM-based compactWithBoundary 마이그레이션.
         // manualCompact 가 Layer 2 path 를 사용 (12-section structured summary + freezeBoundary +
-        // ⑧ slot 갱신 + Layer 3 자동 북마크 — 단 Layer 3 wiring 은 manualCompact 밖에 있음).
+        // ⑧ slot 갱신 + summaryPreamble 영속화 + Layer 3 checkpoint append 포함).
         const r = await this.manualCompact();
         result = r.summary;
         break;

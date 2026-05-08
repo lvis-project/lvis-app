@@ -883,7 +883,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
               continue;
             }
 
-            // Structured compact checkpoint marker — auto-compact / manual tier 표시.
+            // Structured compact checkpoint marker — auto-compact 전용 checkpoint divider (manual 은 system banner 로 표시).
             // PR-2-F-2 이후 sessionId 불변이라 revert 액션 없음 (Copilot 패턴).
             // SummaryToast 가 rendered preamble (12-section structured summary) 노출.
             if (entry.kind === "checkpoint") {

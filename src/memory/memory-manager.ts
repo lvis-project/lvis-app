@@ -83,7 +83,7 @@ export interface Checkpoint {
   messageCountAtTrigger: number;
   /**
    * Layer 2 compact #N (numbered checkpoint chain — Copilot 패턴).
-   * PR-2-C 이후 auto-compact trigger 일 때만 set. legacy rotation 은 absent.
+   * PR-2-C 이후 auto-compact + manual compact 양쪽에서 set. legacy rotation 은 absent.
    */
   compactNum?: number;
 }
