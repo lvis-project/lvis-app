@@ -127,7 +127,7 @@ export interface TurnResult {
   toolCalls: Array<{ name: string; input: Record<string, unknown>; result: string }>;
   route: string;
   usage?: TokenUsage;
-  stopReason?: "end_turn" | "tool_use" | "interrupted";
+  stopReason?: "end_turn" | "tool_use" | "interrupted" | "context-error";
 }
 
 export interface ConversationLoopDeps {
@@ -898,6 +898,7 @@ export class ConversationLoop {
      // 0 표시. 어느 단계에서 끊겼는지 정확히 가시화.
     const willEmitSummary =
       result.stopReason !== "interrupted" &&
+      result.stopReason !== "context-error" &&
       typeof result.text === "string" &&
       result.text.trim().length > 0;
     log.info(
@@ -945,11 +946,12 @@ export class ConversationLoop {
     callbacks?.onTurnComplete?.(result.text);
 
     // Issue #260 — fire system notification on turn-end. Skip if the turn
-    // was interrupted (user aborted) or produced no assistant text (rare
-    // tool-only termination). Body is the leading slice of the assistant
-    // response — NotificationService caps + ellipses it.
+    // was interrupted (user aborted), hit context_error, or produced no
+    // assistant text (rare tool-only termination). Body is the leading slice
+    // of the assistant response — NotificationService caps + ellipses it.
     if (
       result.stopReason !== "interrupted" &&
+      result.stopReason !== "context-error" &&
       typeof result.text === "string" &&
       result.text.trim().length > 0
     ) {
@@ -981,7 +983,7 @@ export class ConversationLoop {
       sessionIdOverride?: string;
       spawnDepth?: number;
     },
-  ): Promise<{ text: string; toolCalls: Array<{ name: string; input: Record<string, unknown>; result: string }>; usage?: TokenUsage; stopReason?: "end_turn" | "tool_use" | "interrupted" }> {
+  ): Promise<{ text: string; toolCalls: Array<{ name: string; input: Record<string, unknown>; result: string }>; usage?: TokenUsage; stopReason?: "end_turn" | "tool_use" | "interrupted" | "context-error" }> {
     const llmSettings = this.deps.settingsService.get("llm");
     const activeBlock = llmSettings.vendors[llmSettings.provider];
     const model = activeBlock.model;
@@ -1067,7 +1069,7 @@ export class ConversationLoop {
           "대화 이력이 모델 한도를 초과했습니다. 새 메시지를 보내면 자동 압축이 다시 시도됩니다.";
         callbacks?.onError?.(userMsg);
         this.history.append({ role: "assistant", content: userMsg });
-        return { text: userMsg, toolCalls: allToolCalls, usage: turnUsage };
+        return { text: userMsg, toolCalls: allToolCalls, usage: turnUsage, stopReason: "context-error" };
       }
 
       if (stream.kind === "stream_error") {
