@@ -50,6 +50,9 @@ import type { SubAgentSpawn } from "./components/SubAgentCard.js";
 import type { SkillBadgeProps } from "./components/SkillBadge.js";
 import type { SessionSummary } from "./hooks/use-sessions.js";
 import { useContinuousHistory, type ContinuousHistorySession } from "./hooks/use-continuous-history.js";
+import ReactMarkdown from "react-markdown";
+import { MARKDOWN_REMARK_PLUGINS } from "./utils/markdown-plugins.js";
+import { parseImportedTriggerEnvelope } from "../../shared/proactive-source.js";
 
 const CHAT_BOTTOM_THRESHOLD_PX = 96;
 
@@ -343,18 +346,31 @@ function HistoricalEntriesList({
     }
 
     if (entry.kind === "imported_trigger") {
-      // ImportedTriggerCard removed (proactive sweep). Render a minimal
-      // archived entry so historical sessions remain readable.
+      // Parse envelope source tag to confirm proactive provenance.
+      // title + summary fields are already clean (set at insert time).
+      const envelopeSource = parseImportedTriggerEnvelope(entry.prompt);
       rendered.push(
         <div
           key={`trigger:${entry.sessionId}`}
-          className="mx-3 my-1 rounded border border-violet-500/20 bg-violet-500/5 px-3 py-2 text-xs text-muted-foreground"
+          className="mx-3 my-1 rounded border border-violet-500/20 bg-violet-500/5 px-3 py-2 text-xs"
         >
-          <span className="mr-1 text-violet-500">●</span>
-          {entry.summary || entry.prompt.slice(0, 80)}
-          {entry.response ? (
-            <p className="mt-1 text-foreground/70">{entry.response}</p>
-          ) : null}
+          <div className="flex items-center gap-1 text-violet-500 font-medium">
+            <span>●</span>
+            <span>{envelopeSource ?? entry.summary.slice(0, 60)}</span>
+          </div>
+          {entry.summary && (
+            <p className="mt-1 text-muted-foreground">{entry.summary}</p>
+          )}
+          {entry.response && (
+            <div className="mt-2 text-foreground/80 prose prose-sm dark:prose-invert max-w-none">
+              <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>
+                {entry.response}
+              </ReactMarkdown>
+            </div>
+          )}
+          {entry.responseStreaming && !entry.response && (
+            <p className="mt-1 text-muted-foreground animate-pulse">응답 중...</p>
+          )}
         </div>,
       );
       i++;
@@ -944,17 +960,31 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             }
 
             if (entry.kind === "imported_trigger") {
-              // ImportedTriggerCard removed (proactive sweep). Render minimal archived entry.
+              // Parse envelope source tag to confirm proactive provenance.
+              // title + summary fields are already clean (set at insert time).
+              const envelopeSource = parseImportedTriggerEnvelope(entry.prompt);
               rendered.push(
                 <div
                   key={`trigger:${entry.sessionId}`}
-                  className="mx-3 my-1 rounded border border-violet-500/20 bg-violet-500/5 px-3 py-2 text-xs text-muted-foreground"
+                  className="mx-3 my-1 rounded border border-violet-500/20 bg-violet-500/5 px-3 py-2 text-xs"
                 >
-                  <span className="mr-1 text-violet-500">●</span>
-                  {entry.summary || entry.prompt.slice(0, 80)}
-                  {entry.response ? (
-                    <p className="mt-1 text-foreground/70">{entry.response}</p>
-                  ) : null}
+                  <div className="flex items-center gap-1 text-violet-500 font-medium">
+                    <span>●</span>
+                    <span>{envelopeSource ?? entry.summary.slice(0, 60)}</span>
+                  </div>
+                  {entry.summary && (
+                    <p className="mt-1 text-muted-foreground">{entry.summary}</p>
+                  )}
+                  {entry.response && (
+                    <div className="mt-2 text-foreground/80 prose prose-sm dark:prose-invert max-w-none">
+                      <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>
+                        {entry.response}
+                      </ReactMarkdown>
+                    </div>
+                  )}
+                  {entry.responseStreaming && !entry.response && (
+                    <p className="mt-1 text-muted-foreground animate-pulse">응답 중...</p>
+                  )}
                 </div>,
               );
               i++;

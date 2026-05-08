@@ -77,6 +77,11 @@ export function App() {
   const [question, setQuestion] = useState("");
   const chatEndRef = useRef<HTMLDivElement>(null);
   const turnRequestRef = useRef(0);
+  // Ref so handlePluginPrimaryAction (defined before handleAsk) can call
+  // handleAsk without a forward-declaration TS error. Updated each render.
+  const handleAskRef = useRef<(q: string, mode?: "default" | "trigger-import") => Promise<void>>(
+    async () => { /* populated below */ },
+  );
 
   // App state
   const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
@@ -185,6 +190,11 @@ export function App() {
         summary,
         title,
       });
+
+      // Start the main ConversationLoop turn immediately (Q11 user-in-the-loop
+      // confirm → auto-process). trigger-import mode skips the user-bubble
+      // append since the imported_trigger card already represents the prompt.
+      void handleAskRef.current(pendingPrompt, "trigger-import");
     },
     [api, insertImportedTriggerEntry],
   );
@@ -531,7 +541,9 @@ export function App() {
       llmModel,
     ],
   );
-
+  // Keep ref in sync so handlePluginPrimaryAction can call handleAsk
+  // without a forward-declaration error (ref is populated before first use).
+  handleAskRef.current = handleAsk;
 
   const { costEstimate, costBadgeClass } =
     useCostEstimate({ entries, question, llmVendor, llmModel, maxOutputTokens, composeOutgoing });
