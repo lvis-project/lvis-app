@@ -433,7 +433,7 @@ export class ConversationLoop {
     // The main session JSONL is overwritten by PostTurnHookChain.saveSession with the
     // post-compact history after each turn, so it cannot be used to reconstruct the
     // pre-checkpoint transcript. saveCheckpointSnapshot() persists messagesBefore to
-    // a checkpoint-specific file ({sessionId}.cp{N}.jsonl) before the turn completes.
+    // a checkpoint-specific file (.checkpoints/{sessionId}/{N}.jsonl) before the turn completes.
     const snapshotMessages = this.deps.memoryManager.loadCheckpointSnapshot?.(this.sessionId, compactNum);
     if (!snapshotMessages) {
       throw new Error(

@@ -124,7 +124,14 @@ const api = {
   chatSessions: async (opts?: { limit?: number; before?: string; beforeId?: string; after?: string }) =>
     ipcRenderer.invoke("lvis:chat:sessions", opts) as Promise<{
       current: string;
-      sessions: Array<{ id: string; modifiedAt: string; title: string }>;
+      sessions: Array<{
+        id: string;
+        modifiedAt: string;
+        title: string;
+        parentSessionId?: string;
+        branchedFromCompactNum?: number;
+        branchedAt?: string;
+      }>;
     }>,
   chatLoadSession: async (sessionId: string) =>
     ipcRenderer.invoke("lvis:chat:load-session", sessionId) as Promise<{
