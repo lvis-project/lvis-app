@@ -12,6 +12,11 @@ export function OverlayCardRegion() {
 
   if (!active) return null;
 
+  // Routine source 만 RoutineSessionView 모달 가능. plugin source 는 자체 onPrimaryAction 사용.
+  if (active.source.kind !== "routine") return null;
+
+  const { routineId, firedAt } = active.source;
+
   return (
     <div
       data-testid="overlay-card-region"
@@ -19,16 +24,16 @@ export function OverlayCardRegion() {
     >
       <div className="pointer-events-auto">
         <OverlayCard
-          routineTitle={active.routineTitle ?? active.title}
+          routineTitle={active.title}
           summary={active.summary}
-          firedAt={active.firedAt ?? ""}
+          firedAt={firedAt}
           queueIndex={queueIndex}
           queueTotal={queueTotal}
           onPrev={prev}
           onNext={next}
           onDismiss={() => dismiss(active.id)}
           onSnooze={() => snooze(active.id)}
-          onOpenSession={() => openSession(active.routineId ?? active.id, active.firedAt ?? "")}
+          onOpenSession={() => openSession(routineId, firedAt)}
         />
       </div>
     </div>

@@ -101,9 +101,6 @@ export function App() {
         title: evt.title,
         summary: evt.summary,
         running: false,
-        routineId: evt.id,
-        routineTitle: evt.title,
-        firedAt: evt.firedAt,
       });
     });
     return unsub;

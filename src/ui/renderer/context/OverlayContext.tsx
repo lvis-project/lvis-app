@@ -42,12 +42,6 @@ export interface OverlayItem {
   primaryActionLabel?: string;
   /** routine-specific — path to JSONL for RoutineSessionView */
   routineSessionPath?: string;
-  /** Convenience alias for source.kind==="routine" — routine display title */
-  routineTitle?: string;
-  /** Convenience alias for source.kind==="routine" — routineId */
-  routineId?: string;
-  /** Convenience alias for source.kind==="routine" — ISO fire timestamp */
-  firedAt?: string;
 }
 
 export interface OverlayContextValue {
