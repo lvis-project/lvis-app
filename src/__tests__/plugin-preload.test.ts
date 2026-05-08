@@ -171,9 +171,8 @@ describe("plugin-preload bridge", () => {
   it("getTheme invokes lvis:plugin:get-theme and unwraps the cached payload", async () => {
     const bridge = exposed.get("lvisPlugin") as { getTheme: () => Promise<unknown> };
     const payload = {
-      theme: "light",
-      chatTheme: "lg",
-      codeTheme: "dark",
+      bundleId: "lge-dark",
+      shell: "dark",
       tokens: { "--lvis-bg": "hsl(0,0%,100%)", "--lvis-fg": "hsl(222,47%,11%)" },
     };
     mockInvoke.mockResolvedValueOnce({ ok: true, theme: payload });
