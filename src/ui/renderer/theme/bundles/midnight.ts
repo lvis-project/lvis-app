@@ -1,0 +1,45 @@
+import type { ThemeBundle } from "./types.js";
+
+export const midnightBundle: ThemeBundle = {
+  id: "midnight",
+  name: "미드나잇",
+  description: "다크 셸 + 마젠타 액센트 + 다크 코드",
+  shell: "dark",
+  highContrast: false,
+  tokens: {
+    /* ── Tier B: semantic shell ──────────────────────────────────── */
+    background:               "222.2 84% 4.9%",
+    foreground:               "210 40% 98%",
+    card:                     "222.2 84% 7%",
+    "card-foreground":        "210 40% 98%",
+    popover:                  "222.2 84% 4.9%",
+    "popover-foreground":     "210 40% 98%",
+    primary:                  "290 80% 60%",
+    "primary-foreground":     "210 40% 98%",
+    secondary:                "217 33% 17%",
+    "secondary-foreground":   "210 40% 98%",
+    muted:                    "217 33% 17%",
+    "muted-foreground":       "215 20% 65%",
+    accent:                   "217 33% 17%",
+    "accent-foreground":      "210 40% 98%",
+    destructive:              "0 62.8% 30.6%",
+    "destructive-foreground": "210 40% 98%",
+    warning:                  "48 97% 77%",
+    "warning-foreground":     "30 80% 25%",
+    success:                  "142 71% 45%",
+    border:                   "217 33% 17%",
+    input:                    "217 33% 17%",
+    ring:                     "290 70% 50%",
+    "message-user-bg":        "290 80% 60%",
+    "message-user-fg":        "210 40% 98%",
+    "input-bar-bg":           "222.2 84% 7%",
+    /* ── Tier C: code surface ──────────────────────────────────── */
+    "code-bg":                "222 47% 9%",
+    "code-fg":                "210 40% 96%",
+    "code-border":            "217 33% 22%",
+    /* ── Action tokens (PR-4/5) ────────────────────────────────── */
+    "action-view":            "290 80% 60%",
+    "action-branch":          "25 95% 53%",
+    "action-compact":         "290 80% 60%",
+  },
+};
