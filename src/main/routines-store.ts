@@ -174,6 +174,18 @@ export class RoutinesStore {
       normalizedAt = new Date(input.schedule.at).toISOString();
     }
 
+    // Validate that non-cron repeats always have schedule.at.
+    // Without it, RoutinesScheduler.isDue() can never match and the routine
+    // silently never fires — a hard error is strictly better than silent failure.
+    if (input.schedule?.repeat) {
+      const kind = input.schedule.repeat.kind;
+      if (kind !== "cron" && !input.schedule.at) {
+        throw new Error(
+          `RoutinesStore.add: schedule.at is required for repeat.kind="${kind}" (non-cron repeats fire on a fixed instant)`,
+        );
+      }
+    }
+
     // Validate cron expression when repeat.kind === 'cron'.
     if (input.schedule?.repeat?.kind === "cron") {
       const expr = (input.schedule.repeat as { kind: "cron"; expression: string }).expression;

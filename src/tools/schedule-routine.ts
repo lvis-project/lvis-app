@@ -1,7 +1,7 @@
 /**
  * `schedule_routine` LLM tool — creates a persistent routine that fires at a
  * scheduled time (one-off or repeating). The routine survives app restart
- * (persisted to `~/.lvis/routines.json`) and fires via the RoutinesScheduler.
+ * (persisted to `~/.lvis/routine/routines.json`) and fires via the RoutinesScheduler.
  *
  * Execution modes (Q2):
  *   - "llm-session"       → starts a ConversationLoop with prePrompt

@@ -125,6 +125,24 @@ export function App() {
       });
     });
 
+    // Major fix: clears running:true stuck OverlayItem when LLM session fails.
+    // Uses the same stale-replace path as fired so the running OverlayItem
+    // transitions to a visible error summary instead of staying spinning.
+    const unsubFailed = api.onRoutineFailedV2((evt) => {
+      setRunningRoutines((prev) => {
+        const next = new Set(prev);
+        next.delete(evt.routineId);
+        return next;
+      });
+      addFireRef.current?.({
+        id: `${evt.routineId}-running`,
+        source: { kind: "routine", routineId: evt.routineId, firedAt: new Date().toISOString() },
+        title: `[실패] 루틴`,
+        summary: `루틴 실행 실패: ${evt.error}`,
+        running: false,
+      });
+    });
+
     // M1: fired payload uses explicit allowlist fields only (no ...routine spread)
     const unsubFired = api.onRoutineFiredV2((evt) => {
       addFireRef.current?.({
@@ -136,7 +154,7 @@ export function App() {
       });
     });
 
-    return () => { unsubStarted(); unsubFinished(); unsubFired(); };
+    return () => { unsubStarted(); unsubFinished(); unsubFailed(); unsubFired(); };
   }, [api]);
 
   // Q11 — overlay items ref: tracks all items pushed via onOverlayShow so

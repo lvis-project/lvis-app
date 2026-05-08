@@ -104,6 +104,31 @@ describe("RoutinesStore v2 — invalid at", () => {
   });
 });
 
+describe("RoutinesStore v2 — non-cron repeat requires schedule.at", () => {
+  const kinds = ["daily", "weekly", "monthly", "interval"] as const;
+  for (const kind of kinds) {
+    it(`rejects ${kind} repeat without schedule.at`, async () => {
+      const { store, cleanup } = tempStore();
+      try {
+        const repeat =
+          kind === "interval"
+            ? { kind: "interval" as const, intervalMs: 3_600_000 }
+            : { kind };
+        await expect(
+          store.add({
+            trigger: "schedule",
+            execution: "notification-only",
+            schedule: { repeat } as import("../../shared/routines-types.js").RoutineSchedule,
+            notificationTitle: "test",
+          }),
+        ).rejects.toThrow(/schedule.at is required/);
+      } finally {
+        cleanup();
+      }
+    });
+  }
+});
+
 describe("RoutinesStore v2 — atomic write", () => {
   it("does not leave a .tmp file behind after successful add", async () => {
     const { store, dir, cleanup } = tempStore();

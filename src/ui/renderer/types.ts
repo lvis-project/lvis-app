@@ -322,6 +322,8 @@ export type LvisApi = {
   // C1: enriched payload includes title+firedAt so renderer can push OverlayItem immediately
   onRoutineRunningStarted: (handler: (payload: { routineId: string; firedAt: string; title: string }) => void) => () => void;
   onRoutineRunningFinished: (handler: (routineId: string) => void) => () => void;
+  // failed: clears running:true stuck OverlayItem when the LLM session throws
+  onRoutineFailedV2: (handler: (event: { routineId: string; error: string }) => void) => () => void;
   // Q11 — overlay IPC bridges
   onOverlayShow: (handler: (item: import("./context/OverlayContext.js").OverlayItem) => void) => () => void;
   onOverlayUpdate: (handler: (id: string, patch: Partial<import("./context/OverlayContext.js").OverlayItem>) => void) => () => void;

@@ -588,6 +588,14 @@ const api = {
     ipcRenderer.on(ROUTINES_V2.runningFinished, listener);
     return () => ipcRenderer.removeListener(ROUTINES_V2.runningFinished, listener);
   },
+  // failed: emitted when the routine LLM session throws (e.g. provider error).
+  // Without this bridge the renderer never learns the session failed and the
+  // running OverlayItem stays stuck with running:true indefinitely.
+  onRoutineFailedV2: (handler: (event: { routineId: string; error: string }) => void) => {
+    const listener = (_e: unknown, payload: { routineId: string; error: string }) => handler(payload);
+    ipcRenderer.on(ROUTINES_V2.failed, listener);
+    return () => ipcRenderer.removeListener(ROUTINES_V2.failed, listener);
+  },
   // Q9 session history — read-only viewer for per-routine session JSONL files
   listRoutineSessionsV2: async (routineId: string, limit?: number) =>
     ipcRenderer.invoke(ROUTINES_V2.listSessions, routineId, limit) as Promise<
