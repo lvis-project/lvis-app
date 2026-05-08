@@ -53,6 +53,7 @@ export function OverlayCardRegion({ onPluginPrimaryAction }: OverlayCardRegionPr
             onDismiss={() => dismiss(active.id)}
             onPrimaryAction={hasJsonl ? () => openSession(routineId, firedAt) : undefined}
             primaryActionLabel="결과 보기"
+            kind="routine"
           />
         </div>
       </div>
@@ -84,6 +85,7 @@ export function OverlayCardRegion({ onPluginPrimaryAction }: OverlayCardRegionPr
               onPluginPrimaryAction(active.id);
             }}
             primaryActionLabel={active.primaryActionLabel ?? "지금 답하기"}
+            kind="plugin"
           />
         </div>
       </div>

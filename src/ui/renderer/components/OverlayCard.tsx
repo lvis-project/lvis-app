@@ -54,6 +54,8 @@ export interface OverlayCardProps {
   onPrimaryAction?: () => void;
   /** Label for the primary action button — e.g. "결과 보기" or "지금 답하기" */
   primaryActionLabel?: string;
+  /** Source kind — drives status label when not running ("루틴 완료" vs "플러그인 알림") */
+  kind?: "routine" | "plugin";
 }
 
 function relativeTime(isoString: string): string {
@@ -61,6 +63,7 @@ function relativeTime(isoString: string): string {
     const t = new Date(isoString).getTime();
     if (!Number.isFinite(t)) return "";
     const diffMs = Date.now() - t;
+    if (diffMs < 0) return "방금"; // future timestamp (clock skew) — clamp
     const diffSec = Math.floor(diffMs / 1000);
     if (diffSec < 60) return `${diffSec}초 전`;
     const diffMin = Math.floor(diffSec / 60);
@@ -85,6 +88,7 @@ export function OverlayCard({
   onDismiss,
   onPrimaryAction,
   primaryActionLabel,
+  kind = "routine",
 }: OverlayCardProps) {
   const relTime = useMemo(() => relativeTime(firedAt), [firedAt]);
 
@@ -118,7 +122,7 @@ export function OverlayCard({
               <span className="truncate">{title}</span>
             </CardTitle>
             <CardDescription className="mt-0.5 flex items-center gap-1 text-[11px]">
-              <span>{running ? "진행 중…" : "루틴 완료"}</span>
+              <span>{running ? "진행 중…" : kind === "plugin" ? "플러그인 알림" : "루틴 완료"}</span>
               {!running && (
                 <>
                   <span>·</span>

@@ -1141,9 +1141,10 @@ lvis-app/src/
 │   ├── dialogs/                 # ApprovalDialog, PluginInstallDialog,
 │   │                            #  PluginUninstallDialog, CommandPaletteDialog
 │   ├── tabs/                    # LlmTab, AppearanceTab, ChatTab, WebTab,
-│   │                            #  RoutinePanel, PrivacyTab, PermissionsTab,
+│   │                            #  PrivacyTab, PermissionsTab,
 │   │                            #  RolesTab, AuditTab, PluginPerfTab,
 │   │                            #  McpTab, PluginConfigTab, MarketplaceTab
+│   │                            #  (RoutinePanel → components/ as sidebar view)
 │   ├── utils/                   # cost-format, html-preview, history, compose
 │   └── types.ts, constants.ts, api-client.ts
 │

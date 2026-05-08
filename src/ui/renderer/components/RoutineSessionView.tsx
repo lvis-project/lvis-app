@@ -82,6 +82,7 @@ export function RoutineSessionView({ jsonlPath, api, onClose }: RoutineSessionVi
         <span className="text-sm font-medium text-muted-foreground">루틴 세션 기록</span>
         {onClose && (
           <button
+            type="button"
             onClick={onClose}
             className="text-xs text-muted-foreground hover:text-foreground"
             aria-label="닫기"

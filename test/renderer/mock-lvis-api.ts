@@ -198,6 +198,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     }),
     onRoutineRunningStarted: vi.fn((_h: (p: unknown) => void) => () => {}),
     onRoutineRunningFinished: vi.fn((_h: (id: string) => void) => () => {}),
+    onRoutineFailedV2: vi.fn((_handler: (event: { routineId: string; error: string }) => void) => () => {}),
     listRoutineSessionsV2: vi.fn(async () => []),
     readRoutineSessionV2: vi.fn(async () => ""),
     // Brain — proactive trigger lifecycle. Tests that don't exercise the
