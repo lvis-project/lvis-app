@@ -1439,21 +1439,47 @@ export class ConversationLoop {
       this.compactNum = compactResult.boundary.compactNum;
       this.history.clear();
       this.history.restore([...compactResult.newHistory]);
-      this.deps.systemPromptBuilder.setSummaryPreamble?.(
-        renderBoundaryAsPreamble(compactResult.boundary),
-      );
+      const preamble = renderBoundaryAsPreamble(compactResult.boundary);
+      this.deps.systemPromptBuilder.setSummaryPreamble?.(preamble);
       this.cumulativeUsage = {
         inputTokens: compactResult.estimatedAfter,
         outputTokens: this.cumulativeUsage.outputTokens,
         ...(this.cumulativeUsage.cacheReadTokens !== undefined && { cacheReadTokens: 0 }),
         ...(this.cumulativeUsage.cacheWriteTokens !== undefined && { cacheWriteTokens: 0 }),
       };
+
+      // Layer 3 — same-session checkpoint chain (`infinity-session-redesign-v3.md` §4.4).
+      // Existing `MemoryManager.appendCheckpoint` 재사용 — 별도 storage path 불필요. summary 필드에
+      // rendered preamble 보관 (full CompactBoundary 는 memory ⊥ engine 모듈 경계상 in-memory only,
+      // `MessageMeta.boundary` frozen reference 로 history[0] 에 carry).
+      try {
+        const existingMeta = this.deps.memoryManager.loadSessionMetadata(this.sessionId) ?? {};
+        const ctxUsageAtTrigger = preflight > 0
+          ? Math.min(1.0, estimated / preflight)
+          : 0;
+        const checkpointEntry: import("../memory/memory-manager.js").Checkpoint = {
+          id: crypto.randomUUID(),
+          triggeredAt: compactResult.boundary.createdAt,
+          trigger: "auto-compact",
+          ctxUsageAtTrigger,
+          summary: preamble,
+          messageCountAtTrigger: messagesBefore.length,
+          compactNum: this.compactNum,
+        };
+        const updatedMeta = this.deps.memoryManager.appendCheckpoint(existingMeta, checkpointEntry);
+        await this.deps.memoryManager.saveSessionMetadata(this.sessionId, updatedMeta);
+      } catch (storageErr) {
+        // Layer 3 storage 실패는 *대화 차단 금지* — Layer 0/2 결과 자체는 이미 메모리 적용됨.
+        log.warn(`preflight: Layer 3 checkpoint persist 실패 — ${(storageErr as Error).message}`);
+      }
+
       log.info(
         `preflight: APPLIED — removed=${compactResult.removedCount} estimatedAfter=${compactResult.estimatedAfter} compactNum=${this.compactNum}`,
       );
       callbacks?.onCompactOccurred?.({
         removedMessages: compactResult.removedCount,
         freedTokens: estimated - compactResult.estimatedAfter,
+        tier: "hard-token",
       });
     } catch (err) {
       log.warn(`preflight: Layer 2 failed — ${(err as Error).message}. mid-loop reactive 가 safety net 으로 작동.`);

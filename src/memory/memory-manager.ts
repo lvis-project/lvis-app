@@ -48,16 +48,21 @@ export interface SessionListEntry {
 
 /**
  * Checkpoint trigger reasons.
- * - "hard-token":  context window reached hard token threshold
+ * - "auto-compact": Layer 0 pre-flight 가 Layer 2 compact 를 실행 (PR-2-C, infinity-session-redesign-v3 §4.1)
+ * - "hard-token":  legacy — decideRotation Tier 1 (PR-2-F 에서 제거 예정)
  * - "semantic-llm": LLM detected a topic shift
  * - "soft-time":   time-based soft trigger (e.g. session idle)
- * - "manual":      user explicitly triggered a checkpoint
+ * - "manual":      user explicitly triggered a checkpoint (e.g. /checkpoint command)
  */
-export type CheckpointTrigger = "hard-token" | "semantic-llm" | "soft-time" | "manual";
+export type CheckpointTrigger = "auto-compact" | "hard-token" | "semantic-llm" | "soft-time" | "manual";
 
 /**
  * A checkpoint record written into a session's metadata when context is compacted.
  * Stores enough information to reconstruct the chain and resume with prior context.
+ *
+ * PR-2-C 정정 — `summary` 는 이제 `renderBoundaryAsPreamble()` 결과 (12-section structured)
+ * 또는 raw fallback. 전체 `CompactBoundary` 객체는 module boundary (memory ⊥ engine)
+ * 준수상 *in-memory only* — `MessageMeta.boundary` 에 frozen reference 로 보존됨.
  */
 export interface Checkpoint {
   /** Unique checkpoint identifier (any non-empty string; typically a UUID) */
@@ -74,10 +79,16 @@ export interface Checkpoint {
   /**
    * Rolling summary text generated at checkpoint time.
    * null when context was below the 10% minimum — no summary needed.
+   * PR-2-C 이후 Layer 0 preflight checkpoint 의 경우 `renderBoundaryAsPreamble()` 결과.
    */
   summary: string | null;
   /** Number of messages in the session at trigger time */
   messageCountAtTrigger: number;
+  /**
+   * Layer 2 compact #N (numbered checkpoint chain — Copilot 패턴).
+   * PR-2-C 이후 auto-compact trigger 일 때만 set. legacy rotation 은 absent.
+   */
+  compactNum?: number;
 }
 
 /**
