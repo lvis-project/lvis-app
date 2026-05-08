@@ -4,28 +4,30 @@
  * Reminder IPC (lvis:reminders:*) removed — absorbed by lvis:routines:v2:* (atomic cutover).
  */
 import { ipcMain } from "electron";
+import { readFile } from "node:fs/promises";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import type { IpcDeps } from "../types.js";
 import type { RoutineExecution, RoutineSchedule } from "../../main/routines-store.js";
+import { ROUTINES_V2 } from "../../shared/ipc-channels.js";
 import { createLogger } from "../../lib/logger.js";
 const log = createLogger("lvis");
 
 export function registerMiscHandlers(deps: IpcDeps): void {
-  const { routinesStore, routinesScheduler, sessionTodoStore, conversationLoop, auditLogger, getMainWindow } = deps;
+  const { routinesStore, routinesScheduler, routineSessionStore, sessionTodoStore, conversationLoop, auditLogger, getMainWindow } = deps;
 
   // ─── Routines v2 ────────────────────────────────
-  ipcMain.handle("lvis:routines:v2:list", (e) => {
+  ipcMain.handle(ROUTINES_V2.list, (e) => {
     if (!validateSender(e)) {
-      auditUnauthorized(auditLogger, "lvis:routines:v2:list", e);
+      auditUnauthorized(auditLogger, ROUTINES_V2.list, e);
       return UNAUTHORIZED_FRAME;
     }
     if (!routinesStore) return [];
     return routinesStore.listActive();
   });
 
-  ipcMain.handle("lvis:routines:v2:dismiss", async (e, id: string) => {
+  ipcMain.handle(ROUTINES_V2.dismiss, async (e, id: string) => {
     if (!validateSender(e)) {
-      auditUnauthorized(auditLogger, "lvis:routines:v2:dismiss", e);
+      auditUnauthorized(auditLogger, ROUTINES_V2.dismiss, e);
       return UNAUTHORIZED_FRAME;
     }
     if (!routinesStore) return { ok: false, error: "no-store" };
@@ -33,19 +35,23 @@ export function registerMiscHandlers(deps: IpcDeps): void {
     return { ok };
   });
 
-  ipcMain.handle("lvis:routines:v2:remove", async (e, id: string) => {
+  ipcMain.handle(ROUTINES_V2.remove, async (e, id: string) => {
     if (!validateSender(e)) {
-      auditUnauthorized(auditLogger, "lvis:routines:v2:remove", e);
+      auditUnauthorized(auditLogger, ROUTINES_V2.remove, e);
       return UNAUTHORIZED_FRAME;
     }
     if (!routinesStore) return { ok: false, error: "no-store" };
     const ok = await routinesStore.remove(id);
+    // Q9: purge session files when routine is removed.
+    if (ok && routineSessionStore) {
+      await routineSessionStore.purgeRoutine(id);
+    }
     return { ok };
   });
 
-  ipcMain.handle("lvis:routines:v2:trigger-now", async (e, id: string) => {
+  ipcMain.handle(ROUTINES_V2.triggerNow, async (e, id: string) => {
     if (!validateSender(e)) {
-      auditUnauthorized(auditLogger, "lvis:routines:v2:trigger-now", e);
+      auditUnauthorized(auditLogger, ROUTINES_V2.triggerNow, e);
       return UNAUTHORIZED_FRAME;
     }
     if (!routinesStore) return { ok: false, error: "no-store" };
@@ -59,7 +65,7 @@ export function registerMiscHandlers(deps: IpcDeps): void {
   });
 
   ipcMain.handle(
-    "lvis:routines:v2:add",
+    ROUTINES_V2.add,
     async (
       e,
       input: {
@@ -73,7 +79,7 @@ export function registerMiscHandlers(deps: IpcDeps): void {
       },
     ) => {
       if (!validateSender(e)) {
-        auditUnauthorized(auditLogger, "lvis:routines:v2:add", e);
+        auditUnauthorized(auditLogger, ROUTINES_V2.add, e);
         return UNAUTHORIZED_FRAME;
       }
       if (!routinesStore) return { ok: false, error: "no-store" };
@@ -85,6 +91,35 @@ export function registerMiscHandlers(deps: IpcDeps): void {
       }
     },
   );
+
+  // ─── Routines v2 session history (Q9) ────────────
+  ipcMain.handle(ROUTINES_V2.listSessions, async (e, routineId: string, limit?: number) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, ROUTINES_V2.listSessions, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    if (!routineSessionStore) return [];
+    return routineSessionStore.listRecent(routineId, limit ?? 10);
+  });
+
+  ipcMain.handle(ROUTINES_V2.readSession, async (e, jsonlPath: string) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, ROUTINES_V2.readSession, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    if (!routineSessionStore) return "";
+    // Path traversal guard — only allow paths inside ~/.lvis/routine-sessions/.
+    if (!routineSessionStore.isPathSafe(jsonlPath)) {
+      log.warn("read-session: path traversal attempt blocked: %s", jsonlPath);
+      return UNAUTHORIZED_FRAME;
+    }
+    try {
+      return await readFile(jsonlPath, "utf-8");
+    } catch (err) {
+      log.warn("read-session: read failed: %s", (err as Error).message);
+      return "";
+    }
+  });
 
   // ─── Session Todo ────────────────────────────────
   ipcMain.handle("lvis:session-todo:list", (e, sessionId?: string) => {

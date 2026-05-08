@@ -57,6 +57,7 @@ import { openLinkWindow as openLinkWindowService } from "./main/link-window-serv
 import { shell } from "electron";
 
 import { type AppServices, emitEvent, onEvent } from "./boot/types.js";
+import { ROUTINES_V2 } from "./shared/ipc-channels.js";
 import { startWatcherTelemetryCollector } from "./boot/steps/watcher-telemetry-collector.js";
 import { bootstrapCoreServices } from "./boot/services.js";
 import { registerPluginNotifications } from "./boot/plugins.js";
@@ -68,6 +69,7 @@ import {
 } from "./boot/tools.js";
 import { RoutinesStore } from "./main/routines-store.js";
 import { RoutinesScheduler } from "./main/routines-scheduler.js";
+import { RoutineSessionStore } from "./main/routine-session-store.js";
 import { SessionTodoStore } from "./main/session-todo-store.js";
 import { AskUserQuestionGate, IPC_ASK_USER_QUESTION_REQUEST } from "./main/ask-user-question-gate.js";
 import { NotificationService } from "./main/notification-service.js";
@@ -96,7 +98,6 @@ import { TriggerExecutor } from "./engine/trigger-executor.js";
 import type { ConversationLoop } from "./engine/conversation-loop.js";
 import { initPluginRuntime } from "./boot/steps/plugin-runtime.js";
 import { registerPluginEventBridge } from "./boot/steps/ipc-bridge.js";
-import { wireRoutineCoordinator } from "./boot/steps/routine-coordinator.js";
 import { wireReleasePrep, wireUpdateCheck } from "./boot/steps/post-boot.js";
 import { runManagedBootstrap } from "./boot/managed-marketplace.js";
 import { createLogger } from "./lib/logger.js";
@@ -192,6 +193,7 @@ export async function bootstrap(
     log.warn("boot: routines load failed (non-fatal): %s", (err as Error).message);
   });
   const routinesScheduler = new RoutinesScheduler(routinesStore);
+  const routineSessionStore = new RoutineSessionStore();
   const sessionTodoStore = new SessionTodoStore();
   const skillStore = new SkillStore();
   const skillOverlay = new SkillOverlay();
@@ -331,21 +333,6 @@ export async function bootstrap(
   };
   const routineEngine = createRoutineEngine({
     createConversationLoop: () => createRoutineConversationLoop(routineLoopDeps),
-    memoryManager,
-  });
-
-  // §7 Routine wiring — schedule cron timer + RoutineIdleSignaler (idle entry/exit).
-  // Note: routine notification firing lives inside deliverRoutineResult so all
-  // 3 delivery paths (coordinator / IPC dev-trigger / shutdown) participate.
-  // notificationService is passed in explicitly so each delivery site forwards
-  // it via deliverRoutineResult(... { notificationService }).
-  const routineCoordinator = wireRoutineCoordinator({
-    routineEngine,
-    pluginRuntime,
-    settingsService,
-    powerMonitor: adaptPowerMonitor(powerMonitor),
-    mainWindow,
-    notificationService,
   });
 
   // §4.2 Step 7: manifest-driven IPC bridges.
@@ -420,9 +407,15 @@ export async function bootstrap(
   // llm-session routines start a ConversationLoop with prePrompt.
   // notification-only routines fire an OS notification.
   routinesScheduler.onLlmSession(({ routine }) => {
-    // Critical #1: invoke RoutineEngine with prePrompt to actually start the
-    // LLM conversation. The fired event is a UI hint emitted after dispatch.
+    // Q9: create an isolated session file before firing so the JSONL path
+    // can be passed to the engine and routine turns never mix with main chat.
     void (async () => {
+      const firedAt = new Date().toISOString();
+      try {
+        await routineSessionStore.createSession(routine.id, firedAt);
+      } catch (err) {
+        log.warn("routines v2 session-store create failed (non-fatal): %s", (err as Error).message);
+      }
       try {
         await routineEngine.runRoutine({
           id: routine.id,
@@ -434,7 +427,7 @@ export async function bootstrap(
         log.warn("routines v2 llm-session run failed: %s", (err as Error).message);
       }
       try {
-        getMainWindow()?.webContents.send("lvis:routines:v2:fired", routine);
+        getMainWindow()?.webContents.send(ROUTINES_V2.fired, routine);
       } catch (err) {
         log.warn("routines v2 llm-session emit failed: %s", (err as Error).message);
       }
@@ -451,10 +444,10 @@ export async function bootstrap(
     } catch (err) {
       log.warn("routines v2 notification emit failed: %s", (err as Error).message);
     }
-    // Major #10: emit fired event for notification-only branch so the UI
-    // reflects the fire consistently across both execution modes.
+    // Emit fired event for notification-only branch so the UI reflects the
+    // fire consistently across both execution modes.
     try {
-      getMainWindow()?.webContents.send("lvis:routines:v2:fired", routine);
+      getMainWindow()?.webContents.send(ROUTINES_V2.fired, routine);
     } catch (err) {
       log.warn("routines v2 notification fired emit failed: %s", (err as Error).message);
     }
@@ -575,7 +568,7 @@ export async function bootstrap(
     triggerExecutor: lateBinding.triggerExecutorRef.fn ?? undefined,
     idleScheduler, bashAstValidator, auditService, auditLogger: bootAuditLogger, postTurnHookChain,
     approvalGate, knowledgeAvailable, starredStore, feedbackStore,
-    routinesStore, routinesScheduler, sessionTodoStore, askUserQuestionGate, skillStore,
+    routinesStore, routinesScheduler, routineSessionStore, sessionTodoStore, askUserQuestionGate, skillStore,
     notificationService,
     telemetry, pluginTelemetry, autoUpdaterStop,
     startRoutinesScheduler: () => routinesScheduler.start(),
@@ -591,7 +584,6 @@ export async function bootstrap(
       shutdownPromise = (async () => {
         disposePluginNotifications();
         disposePluginEventBridge();
-        routineCoordinator.dispose();
         autoUpdaterStop?.();
         telemetry?.stop();
         pluginTelemetry?.stop();

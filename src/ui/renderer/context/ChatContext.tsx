@@ -7,13 +7,6 @@ import type { ModelPricing } from "../../../shared/pricing-data.js";
 import type { LLMVendor } from "../../../shared/llm-vendor-defaults.js";
 import type { Attachment } from "../types/attachments.js";
 
-type RoutineResult = {
-  routineId: string;
-  trigger: string;
-  summary: string;
-  generatedAt: string;
-};
-
 type TriggerResult = {
   sessionId: string;
   pluginId: string;
@@ -53,20 +46,6 @@ export interface ChatContextValue {
   // API state
   hasApiKey: boolean | null;
   onOpenSettings: () => void;
-
-  // Routine result (queue-aware)
-  routineResult: RoutineResult | null;
-  /** 0-based index of the currently displayed routine result within the queue. */
-  routineQueueIndex: number;
-  /** Total entries in the routine queue. 0 = empty, 1 = single card, >1 = stack. */
-  routineQueueTotal: number;
-  onDismissRoutineResult: () => void;
-  onSnoozeRoutineResult: (durationMs: number) => void;
-  onPrevRoutineResult: () => void;
-  onNextRoutineResult: () => void;
-
-  // Routine running (spinner)
-  runningRoutines: Map<string, { routineId: string; trigger: string; startedAt: string }>;
 
   // Brain — proactive trigger result (isolated session — never in chat history)
   triggerResult: TriggerResult | null;

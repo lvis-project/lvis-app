@@ -28,7 +28,6 @@ export interface MainContentProps {
   onActivateHome: () => void;
   onJumpToSession: (sessionId: string) => void;
   onRefreshSessions: () => void | Promise<void>;
-  onStartRoutineSession: (routineId: string) => Promise<void>;
   // chat
   chatContextValue: ChatContextValue;
   onAsk: (q: string) => Promise<void>;

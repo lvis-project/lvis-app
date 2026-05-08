@@ -13,7 +13,6 @@ import { LlmTab } from "./tabs/LlmTab.js";
 import { AppearanceTab } from "./tabs/AppearanceTab.js";
 import { ChatTab } from "./tabs/ChatTab.js";
 import { WebTab } from "./tabs/WebTab.js";
-import { RoutineTab } from "./tabs/RoutineTab.js";
 import { McpTab } from "./tabs/McpTab.js";
 import { PluginConfigTab } from "./tabs/PluginConfigTab.js";
 import { MarketplaceTab } from "./tabs/MarketplaceTab.js";
@@ -33,7 +32,6 @@ export function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boo
             <TabsTrigger value="appearance">테마</TabsTrigger>
             <TabsTrigger value="chat">채팅</TabsTrigger>
             <TabsTrigger value="web">검색 (Web)</TabsTrigger>
-            <TabsTrigger value="routine">브리핑</TabsTrigger>
             <TabsTrigger value="privacy">프라이버시</TabsTrigger>
             <TabsTrigger value="permissions">권한</TabsTrigger>
             <TabsTrigger value="roles">역할</TabsTrigger>
@@ -99,13 +97,6 @@ export function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boo
               webKeyInput={s.webKeyInput}
               setWebKeyInput={s.setWebKeyInput}
               onSaved={onSaved}
-            />
-          </TabsContent>
-
-          <TabsContent value="routine">
-            <RoutineTab
-              enableWakeupRoutine={s.enableWakeupRoutine}
-              setEnableWakeupRoutine={s.setEnableWakeupRoutine}
             />
           </TabsContent>
 

@@ -21,7 +21,6 @@ import { findLvisProtocolUri, parsePluginAuthUri } from "./main/lvis-protocol.js
 import { buildDevProtocolArgs } from "./main/electron-protocol-args.js";
 import { devNoSandboxAllowed, setIsPackaged } from "./boot/dev-flags.js";
 import { emitEvent as emitHostEvent } from "./boot/types.js";
-import { deliverRoutineResult } from "./routines/routine-delivery.js";
 import { WindowManager } from "./main/window-manager.js";
 import { createLogger } from "./lib/logger.js";
 import { LVIS_LOGO_PATH, LVIS_LOGO_VIEW_BOX } from "./shared/lvis-logo.js";
@@ -786,43 +785,39 @@ app.on("before-quit", (event) => {
   const svc = services;
   void (async () => {
     try {
-      const routineSettings = svc.settingsService.get("routine");
-      if ((routineSettings?.enableShutdownRoutine ?? true) && svc.routineEngine) {
-        // Isolate the routine call so a throw here doesn't skip the
-        // services.shutdown() / pluginRuntime.stopAll() teardown below
-        // (those persist state and must run on every quit path).
+      // v2 shutdown routines — fire all active shutdown-trigger routines with a
+      // 5s timeout so a hung LLM call cannot block app.quit() indefinitely.
+      if (svc.routinesStore && svc.routineEngine) {
         try {
-          const { buildRoutineForTrigger } = await import("./routines/registry.js");
-          const { notifyRoutineStarted, notifyRoutineFailed } = await import("./routines/routine-delivery.js");
-          const built = buildRoutineForTrigger("shutdown", routineSettings);
-          if (built.ok) {
-            notifyRoutineStarted(mainWindow, { routineId: "shutdown", trigger: "shutdown", startedAt: new Date().toISOString() });
+          const shutdownRoutines = svc.routinesStore.listActive().filter(
+            (r) => r.trigger === "shutdown",
+          );
+          for (const r of shutdownRoutines) {
             try {
-              // Bound the LLM call so a hung provider can't block app.quit()
-              // indefinitely. 15s is generous for a single-turn summary;
-              // beyond that we surface as failure and continue teardown.
-              const SHUTDOWN_ROUTINE_TIMEOUT_MS = 15_000;
-              const routineEngine = svc.routineEngine;
-              const result = await Promise.race([
-                routineEngine.runRoutine(built.routine),
-                new Promise<never>((_, reject) =>
-                  setTimeout(
-                    () => reject(new Error(`shutdown routine timed out after ${SHUTDOWN_ROUTINE_TIMEOUT_MS}ms`)),
-                    SHUTDOWN_ROUTINE_TIMEOUT_MS,
-                  ),
-                ),
-              ]);
-              await deliverRoutineResult(mainWindow, result, {
-                notificationService: svc.notificationService,
-              });
-            } catch (e) {
-              const message = e instanceof Error ? e.message : String(e);
-              log.warn("before-quit: shutdown routine failed: %s", message);
-              notifyRoutineFailed(mainWindow, { routineId: "shutdown", trigger: "shutdown" }, message);
+              if (r.execution === "llm-session") {
+                await Promise.race([
+                  svc.routineEngine.runRoutine({
+                    id: r.id,
+                    trigger: r.trigger,
+                    prePrompt: r.prePrompt ?? "",
+                    title: r.title,
+                  }),
+                  new Promise<void>((resolve) => setTimeout(resolve, 5000)),
+                ]);
+              } else {
+                svc.notificationService?.fire({
+                  kind: "routine",
+                  title: r.notificationTitle ?? r.title ?? "종료 루틴 알림",
+                  body: r.notificationBody ?? "",
+                  contextRef: { routineId: r.id },
+                });
+              }
+            } catch (err) {
+              log.warn("before-quit: shutdown routine failed (id=%s): %s", r.id, (err as Error).message);
             }
           }
         } catch (e) {
-          log.warn("before-quit: shutdown routine setup failed: %s", e instanceof Error ? e.message : String(e));
+          log.warn("before-quit: shutdown routines setup failed: %s", (e as Error).message);
         }
       }
       await svc.shutdown?.();

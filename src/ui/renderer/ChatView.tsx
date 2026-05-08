@@ -8,8 +8,6 @@ import { ScrollArea } from "../../components/ui/scroll-area.js";
 import { formatCostBadge } from "../../lib/cost-estimator.js";
 import type { ChatEntry } from "../../lib/chat-stream-state.js";
 import { debugLog, isDebugStreamEnabled } from "../../lib/debug-stream.js";
-import { RoutineCard } from "./components/RoutineCard.js";
-import { RoutineRunningIndicator } from "./components/RoutineRunningIndicator.js";
 import { TriggerCard } from "./components/TriggerCard.js";
 import { ImportedTriggerCard } from "./components/ImportedTriggerCard.js";
 import { AssistantCard } from "./components/AssistantCard.js";
@@ -373,9 +371,6 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
     question, setQuestion, chatEndRef, currentSessionId,
     hasApiKey, onOpenSettings,
-    routineResult, routineQueueIndex, routineQueueTotal,
-    onDismissRoutineResult, onSnoozeRoutineResult,
-    onPrevRoutineResult, onNextRoutineResult, runningRoutines,
     triggerResult, onDismissTrigger, onAcceptTrigger,
     searchOpen, searchQuery, searchCase, searchMatches, searchMatchSet, searchIdx, searchHighlight,
     searchChangeQuery, searchToggleCase, searchNext, searchPrev, searchCloseOverlay, searchToggleOverlay,
@@ -654,34 +649,6 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           <Card className="w-[400px]"><CardHeader className="text-center"><KeyRound className="mx-auto mb-2 h-10 w-10 text-muted-foreground" /><CardTitle>API 키 설정 필요</CardTitle><CardDescription>채팅을 시작하려면 Claude API 키를 설정해 주세요.</CardDescription></CardHeader>
             <CardContent className="flex justify-center"><Button onClick={onOpenSettings}><KeyRound className="mr-2 h-4 w-4" />설정 열기</Button></CardContent>
           </Card>
-        </div>
-      )}
-      {/* 루틴 floating overlay — 단일 슬롯에 진행 중 / 결과 중 하나만 표시.
-          진행 중이면 RoutineRunningIndicator, 아니면 직전 결과 RoutineCard.
-          긴 브리핑은 카드 내부에서 스크롤 (max-h-[60vh] + overflow-y-auto).
-          FloatingQuestionPanel은 App 레벨에서 렌더링 — 뷰 전환 시에도 유지. */}
-      {/* Suppress the floating routine overlay while an ask card is pending —
-          a question demanding the user's response shouldn't compete with a
-          running-routine indicator for attention. The overlay reappears
-          automatically once the user resolves or dismisses the question. */}
-      {(runningRoutines.size > 0 || routineResult) && !hasAskQuestions && (
-        <div className="pointer-events-none absolute left-0 right-0 top-2 z-20 flex justify-center px-4">
-          <div className="pointer-events-auto flex w-full max-w-2xl max-h-[60vh] flex-col overflow-hidden">
-            {runningRoutines.size > 0 ? (
-              <RoutineRunningIndicator runningRoutines={runningRoutines} />
-            ) : routineResult ? (
-              <RoutineCard
-                key={`${routineResult.routineId}::${routineResult.generatedAt}`}
-                result={routineResult}
-                onDismiss={onDismissRoutineResult}
-                onSnooze={onSnoozeRoutineResult}
-                index={routineQueueIndex}
-                total={routineQueueTotal}
-                onPrev={onPrevRoutineResult}
-                onNext={onNextRoutineResult}
-              />
-            ) : null}
-          </div>
         </div>
       )}
       {/* Proactive trigger overlays — visibility-driven slot routing (P2):

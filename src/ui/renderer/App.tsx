@@ -24,8 +24,6 @@ import { useStatusBar, type NotificationToastMeta } from "./hooks/use-status-bar
 import { useSettings } from "./hooks/use-settings.js";
 import { lookupPricingOptional } from "../../shared/pricing-data.js";
 import { useChatState } from "./hooks/use-chat-state.js";
-import { useRoutineResult } from "./hooks/use-routine-result.js";
-import { useRoutineRunning } from "./hooks/use-routine-running.js";
 import { useTriggerResult } from "./hooks/use-trigger-result.js";
 import { useApproval } from "./hooks/use-approval.js";
 import { useSearch } from "./hooks/use-search.js";
@@ -51,9 +49,6 @@ import { CustomTitleBar } from "./components/CustomTitleBar.js";
 import { useWorkflowTools } from "./hooks/use-workflow-tools.js";
 import { useInstallingPlugins } from "./hooks/use-installing-plugins.js";
 import { useMarketplaceUrl } from "./hooks/use-marketplace-url.js";
-
-// RoutineCard: new routine result card
-export { RoutineCard } from "./components/RoutineCard.js";
 
 // ─── App ────────────────────────────────────────────
 
@@ -89,16 +84,6 @@ export function App() {
   const [activeView, setActiveView] = useState("home");
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
   const [commandPopoverOpen, setCommandPopoverOpen] = useState(false);
-  const {
-    routineResult,
-    routineQueueIndex,
-    routineQueueTotal,
-    dismiss: dismissRoutineResult,
-    snooze: snoozeRoutineResult,
-    goPrev: prevRoutineResult,
-    goNext: nextRoutineResult,
-  } = useRoutineResult(api);
-  const { runningRoutines } = useRoutineRunning(api);
   const { triggerResult, dismiss: dismissTrigger, importIntoChat: importTriggerIntoChat } = useTriggerResult(api);
   const { updates: marketplaceUpdates, dismiss: dismissMarketplaceUpdates } = useMarketplaceUpdates(api);
   const { status: bootstrapStatus, dismiss: dismissBootstrapStatus, retry: retryBootstrap } = useBootstrapStatus(api);
@@ -485,15 +470,6 @@ export function App() {
     await api.chatNew(); clearForNewChat(); resetForNewSession(); void refreshSessionId();
   }, [api, streaming, refreshSessionId, clearForNewChat, resetForNewSession]);
 
-  const handleStartRoutineSession = useCallback(async (routineId: string) => {
-    const result = await api.startRoutineSession(routineId);
-    if (!result.ok || !result.sessionId) return;
-    await sessionLoad(result.sessionId, streaming, applyLoadedSession);
-    setActiveView("home");
-    await refreshSessionId();
-    await refreshSessions();
-  }, [api, sessionLoad, streaming, applyLoadedSession, refreshSessionId, refreshSessions]);
-
   // ─── Effects ──────────────────────────────────
   const toggleCommandPopover = useCallback(() => {
     if (activeView !== "home") {
@@ -566,10 +542,6 @@ export function App() {
   const chatContextValue = useChatContextValue({
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
     question, setQuestion, chatEndRef, currentSessionId, hasApiKey, onOpenSettings,
-    routineResult, routineQueueIndex, routineQueueTotal,
-    onDismissRoutineResult: dismissRoutineResult, onSnoozeRoutineResult: snoozeRoutineResult,
-    onPrevRoutineResult: prevRoutineResult, onNextRoutineResult: nextRoutineResult,
-    runningRoutines,
     triggerResult, onDismissTrigger: dismissTrigger, onAcceptTrigger: importTriggerIntoChat,
     searchOpen, searchQuery, searchCase, searchMatches, searchMatchSet, searchIdx, searchHighlight,
     searchChangeQuery, searchToggleCase, searchNext, searchPrev, searchCloseOverlay, searchToggleOverlay,
@@ -666,7 +638,6 @@ export function App() {
             onActivateHome={() => setActiveView("home")}
             onJumpToSession={handleLoadSession}
             onRefreshSessions={refreshSessions}
-            onStartRoutineSession={handleStartRoutineSession}
             chatContextValue={chatContextValue}
             onAsk={(q) => handleAsk(q, "default")}
             onEditSave={handleEditSave}
