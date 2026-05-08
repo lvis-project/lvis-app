@@ -10,7 +10,7 @@
 import { ConversationHistory, normalizeToolPairInvariant } from "./conversation-history.js";
 import { ToolExecutor, type ToolUseBlock } from "../tools/executor.js";
 import { HookRunner } from "../hooks/hook-runner.js";
-import { markStaleToolResults, estimateMessagesTokens, getModelPreflightThreshold } from "./auto-compact.js";
+import { markStaleToolResults, estimateMessagesTokens, getModelPreflightThreshold, getModelUsableContext } from "./auto-compact.js";
 import { compactWithBoundary, renderBoundaryAsPreamble } from "./structured-compact.js";
 import { createProvider, secretKeyFor } from "./llm/provider-factory.js";
 import { FallbackProvider } from "./llm/vercel/fallback-chain.js";
@@ -1410,8 +1410,12 @@ export class ConversationLoop {
       // `MessageMeta.boundary` frozen reference 로 history[0] 에 carry).
       try {
         const existingMeta = this.deps.memoryManager.loadSessionMetadata(this.sessionId) ?? {};
-        const ctxUsageAtTrigger = preflight > 0
-          ? Math.min(1.0, estimated / preflight)
+        // PR-2-E (#608) 정정: ctxUsageAtTrigger 분모는 *usable context window* (Cline buffer 적용).
+        // 이전 (preflight 분모) 은 trigger threshold 자체였으므로 ratio 항상 ≥ 1 → clamp 1.0.
+        // usable 기준으로 계산해야 "트리거 시점에 모델 한도의 몇 % 였는지" 의미가 됨.
+        const usable = getModelUsableContext(provider, model);
+        const ctxUsageAtTrigger = usable > 0
+          ? Math.min(1.0, estimated / usable)
           : 0;
         const checkpointEntry: import("../memory/memory-manager.js").Checkpoint = {
           id: crypto.randomUUID(),

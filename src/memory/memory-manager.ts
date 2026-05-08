@@ -181,6 +181,12 @@ function normalizeCheckpoint(raw: unknown): Checkpoint | null {
   if (r.summary !== null && typeof r.summary !== "string") return null;
   const msgCount = r.messageCountAtTrigger;
   if (typeof msgCount !== "number" || msgCount < 0 || !Number.isInteger(msgCount)) return null;
+  // PR-2-E (#608) — `compactNum` 은 numbered checkpoint chain 의 #N. load 시 누락되면
+  // chain 깨짐 → 신규 record 만 set 되도록 optional 유지하되 정상 read.
+  const compactNum =
+    typeof r.compactNum === "number" && r.compactNum > 0 && Number.isInteger(r.compactNum)
+      ? r.compactNum
+      : undefined;
   return {
     id: r.id,
     triggeredAt: r.triggeredAt,
@@ -188,6 +194,7 @@ function normalizeCheckpoint(raw: unknown): Checkpoint | null {
     ctxUsageAtTrigger: ctxUsage,
     summary: r.summary as string | null,
     messageCountAtTrigger: msgCount,
+    ...(compactNum !== undefined && { compactNum }),
   };
 }
 

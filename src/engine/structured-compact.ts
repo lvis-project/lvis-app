@@ -1,15 +1,16 @@
 /**
  * Structured Compact — Layer 2 of `docs/blueprints/infinity-session-redesign-v3.md`.
  *
- * 이 파일은 *interface + parser + prompt* 만 제공. 실제 LLM call wiring 은
- * 후속 sub-slice (PR-2-D) 에서. 호출자가 아직 없으므로 머지 시 행동 변경 0.
+ * 이 파일은 interface + parser + prompt + LLM call (`compactWithBoundary`) 모두 제공.
+ * `ConversationLoop.runPreflightGuard` 가 caller — Layer 0 preflight 도달 시 await.
  *
  * 핵심 추상화:
  *   - `CompactBoundary` — provider-neutral opaque-state slot (codex CLI v2 회귀 권장)
- *     OpenAI 향후 path 의 `openaiCompactionItem` 전체 저장 + Anthropic/Gemini fallback
+ *     OpenAI 향후 path 의 `openaiCompactionItem` 전체 저장 + Anthropic/Gemini 의
  *     `structuredSummary` 양쪽을 단일 인터페이스로 표현.
  *   - `ParsedSummary` — 12-section SUMMARY_TEMPLATE 의 구조화 결과 (OpenCode 7 + GPT-5 prompting 5).
  *   - `freezeBoundary()` — P7 invariant. ⑧ slot + Layer 3 storage + history[0] 3 view 일관 보장.
+ *   - `compactWithBoundary()` — Layer 2 LLM call (동일 vendor 동급 모델, codex Q2 default).
  *
  * 청사진 §4.3, §5, §7.1 참조.
  */
@@ -239,10 +240,22 @@ export function parseSummary(text: string): ParsedSummary {
 export function freezeBoundary(boundary: CompactBoundary): Readonly<CompactBoundary> {
   Object.freeze(boundary.structuredSummary.sections);
   Object.freeze(boundary.structuredSummary);
+  // PR-2-D (#608) 정정: deep freeze — 각 array element + nested object 모두 freeze.
+  // 이전 top-level 만 freeze 하면 nested mutation 가능 → P7 invariant 약화.
+  for (const msg of boundary.recentVerbatim) {
+    Object.freeze(msg);
+    if (msg.meta) Object.freeze(msg.meta);
+  }
   Object.freeze(boundary.recentVerbatim);
   Object.freeze(boundary.pinnedArtifacts);
+  for (const entry of boundary.toolBoundaryLedger) {
+    Object.freeze(entry);
+  }
   Object.freeze(boundary.toolBoundaryLedger);
   if (boundary.vendorOpaqueState) {
+    if (boundary.vendorOpaqueState.vendor === "openai") {
+      Object.freeze(boundary.vendorOpaqueState.openaiCompactionItem);
+    }
     Object.freeze(boundary.vendorOpaqueState);
   }
   Object.freeze(boundary);
@@ -508,6 +521,7 @@ async function callSummaryLLM(args: {
       "당신은 대화 상태 관리자입니다. 12-section structured summary 를 정확히 출력하세요. 형식 위반 금지.",
     messages: [{ role: "user", content: filledPrompt }],
     tools: [],
+    ...(args.abortSignal !== undefined && { abortSignal: args.abortSignal }),
   }) as AsyncIterable<StreamEvent>) {
     if (args.abortSignal?.aborted) {
       throw new Error("Layer 2 compact aborted by signal");

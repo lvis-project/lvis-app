@@ -45,7 +45,8 @@ export interface MessageMeta {
   stripped?: boolean;
   /** stripped 되기 전 원본 content의 문자열 길이(JS string.length — UTF-16 code units, bytes 아님) */
   originalLength?: number;
-  /** Layer 2 boundary marker (idempotency + revert anchor) */
+  /** Layer 2 boundary marker — idempotency guard + UI CheckpointDivider 렌더 anchor.
+   *  (PR-2-F-2 이후 fork 기반 revert 는 동일 세션 chain 으로 대체되어 'revert anchor' 의미 폐기) */
   compactBoundary?: boolean;
   /** 경계 marker의 경우, 요약 대상이 된 메시지 수 */
   removedCount?: number;
