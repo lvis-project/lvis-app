@@ -6,9 +6,13 @@
  *
  * 호출자는:
  *   - `history` append (assistant round commit)
- *   - reactive compact 재시도 분기
+ *   - context_error / stream_error / interrupted 결과 처리 (Layer 0 preflight 후 도달 시 사용자 안내)
  *   - callbacks 트리거 (onAssistantRound 등)
  * 를 담당한다. 본 모듈은 LLM 추상화 + 에러 분류 + abort 처리만 관여.
+ *
+ * PR-2-F-1 정정: reactive compact 재시도 인프라 (`reactiveCompacted` flag) 제거 —
+ * Layer 0 preflight (`runPreflightGuard`) 가 사전 차단하므로 mid-loop 압축 retry 불필요.
+ * estimator drift 로 도달 시 호출자가 사용자 안내 + turn 종료.
  */
 import type { LLMProvider, StreamEvent, ToolCallBlock, ToolSchema, GenericMessage, TokenUsage, ThinkingBlock } from "../llm/types.js";
 import { isContextLengthError } from "../auto-compact.js";
@@ -39,11 +43,6 @@ export interface StreamCollectParams {
   /** stream 이벤트 콜백 — UI 로 delta 방출. */
   onReasoningDelta?: (text: string) => void;
   onTextDelta?: (text: string) => void;
-  /**
-   * reactive compact 후 재시도 여부. true 면 context-length error 를
-   * retry 신호(streamContextError) 로 반환하지 않고 최종 에러로 취급한다.
-   */
-  reactiveCompacted: boolean;
 }
 
 export type StreamCollectResult =
@@ -71,8 +70,7 @@ export type StreamCollectResult =
  * 한 round 의 stream 을 소비한다.
  *
  * 이 함수는 usage 토큰을 **자체 누적하지 않는다** (호출자가 `usage` 필드를
- * 받아 cumulativeUsage 에 반영). 덕분에 reactive compact 재시도 시 double-count
- * 위험이 사라진다.
+ * 받아 cumulativeUsage 에 반영) — turn 단위 합산 책임을 호출자에게 둠.
  */
 export async function collectRoundStream(
   params: StreamCollectParams,
@@ -87,7 +85,6 @@ export async function collectRoundStream(
     abortSignal,
     onReasoningDelta,
     onTextDelta,
-    reactiveCompacted,
   } = params;
 
   if (abortSignal?.aborted) {
@@ -136,14 +133,13 @@ export async function collectRoundStream(
           break;
         case "error": {
           if (abortSignal?.aborted) return { kind: "interrupted", text };
-          if (isContextLengthError(event.error) && !reactiveCompacted) {
+          if (isContextLengthError(event.error)) {
+            // Layer 0 preflight 가 사전 차단하지만 estimator drift 시 도달.
+            // 호출자 (queryLoop) 는 사용자 안내 후 turn 종료 — retry 없음.
             return { kind: "context_error", errorMessage: event.error };
           }
           const classified = classifyProviderError(event.error);
-          const userMsg = reactiveCompacted && isContextLengthError(event.error)
-            ? `오류: 대화 기록을 압축한 뒤에도 모델 컨텍스트 한도를 초과했습니다. 새 세션을 시작하거나 이전 첨부를 정리해 주세요 (원인: ${event.error})`
-            : `오류: ${classified.userMessage}`;
-          return { kind: "stream_error", userMessage: userMsg };
+          return { kind: "stream_error", userMessage: `오류: ${classified.userMessage}` };
         }
       }
     }
@@ -151,16 +147,10 @@ export async function collectRoundStream(
     if (abortSignal?.aborted || (err instanceof Error && err.name === "AbortError")) {
       return { kind: "interrupted", text };
     }
-    if (isContextLengthError(err) && !reactiveCompacted) {
+    if (isContextLengthError(err)) {
       return { kind: "context_error", errorMessage: (err as Error)?.message ?? String(err) };
     }
     const raw = err instanceof Error ? err.message : String(err);
-    if (reactiveCompacted && isContextLengthError(err)) {
-      return {
-        kind: "stream_error",
-        userMessage: `오류: 대화 기록을 압축한 뒤에도 모델 컨텍스트 한도를 초과했습니다. 새 세션을 시작하거나 이전 첨부를 정리해 주세요 (원인: ${raw})`,
-      };
-    }
     const classified = classifyProviderError(raw);
     return { kind: "stream_error", userMessage: `오류: ${classified.userMessage}` };
   }
