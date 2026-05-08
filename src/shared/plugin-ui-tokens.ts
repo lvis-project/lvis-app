@@ -64,10 +64,17 @@ export const LVIS_CSS_ONLY_TOKEN_NAMES = [
 
 export type LvisCssOnlyTokenName = typeof LVIS_CSS_ONLY_TOKEN_NAMES[number];
 
-import { BUNDLE_IDS } from "./theme-bundles.js";
+import { BUNDLE_IDS, type BundleId } from "./theme-bundles.js";
 
 /**
- * Re-export of the canonical bundle id list from `theme-bundles.ts`.
+ * Theme bundle identifiers shipped by the host.
+ * Each bundle maps to a full token set (dark/light/contrast variants).
+ * Aliases {@link BundleId} from `theme-bundles.ts` — the canonical source of truth.
+ */
+export type LvisThemeBundleId = BundleId;
+
+/**
+ * Immutable copy of the canonical bundle id list from `theme-bundles.ts`.
  *
  * `theme-bundles.ts` is the single source of truth (used by settings-store,
  * plugins IPC, and the renderer). This re-export exists so that the Plugin
@@ -75,33 +82,30 @@ import { BUNDLE_IDS } from "./theme-bundles.js";
  * list under the stable public name `LVIS_THEME_BUNDLE_IDS` without
  * duplicating the array.
  *
+ * Spread + `Object.freeze` produces an immutable copy so that mutations
+ * (e.g. `push`, `splice`) on this export cannot affect the canonical
+ * `BUNDLE_IDS` array in `theme-bundles.ts` (settings-store / plugins IPC).
+ *
  * Use {@link isLvisThemeBundleId} for safe runtime validation.
  *
  * @example
  * import { LVIS_THEME_BUNDLE_IDS, isLvisThemeBundleId } from "@lvis/plugin-sdk/ui/tokens";
  * if (isLvisThemeBundleId(id)) { /* id narrowed to LvisThemeBundleId *\/ }
  */
-export const LVIS_THEME_BUNDLE_IDS = BUNDLE_IDS;
-
-/**
- * Theme bundle identifiers shipped by the host.
- * Each bundle maps to a full token set (dark/light/contrast variants).
- * Derived from {@link LVIS_THEME_BUNDLE_IDS} — the runtime single source of truth.
- */
-export type LvisThemeBundleId = (typeof LVIS_THEME_BUNDLE_IDS)[number];
+export const LVIS_THEME_BUNDLE_IDS: readonly LvisThemeBundleId[] = Object.freeze([...BUNDLE_IDS]) as readonly LvisThemeBundleId[];
 
 /**
  * Type guard for `LvisThemeBundleId`.
  *
- * Casts `LVIS_THEME_BUNDLE_IDS` to `readonly string[]` before calling
- * `includes()` to satisfy TypeScript's narrowed `as const` type.
+ * Accepts `unknown` at the boundary so callers need not pre-cast arbitrary
+ * values (e.g. IPC payloads, JSON deserialized objects) before validating.
  *
  * @example
  * import { isLvisThemeBundleId } from "@lvis/plugin-sdk/ui/tokens";
  * if (isLvisThemeBundleId(rawId)) { /* rawId narrowed to LvisThemeBundleId *\/ }
  */
-export function isLvisThemeBundleId(id: string): id is LvisThemeBundleId {
-  return (LVIS_THEME_BUNDLE_IDS as readonly string[]).includes(id);
+export function isLvisThemeBundleId(id: unknown): id is LvisThemeBundleId {
+  return typeof id === "string" && (LVIS_THEME_BUNDLE_IDS as readonly string[]).includes(id);
 }
 
 /**
@@ -126,13 +130,26 @@ export interface LvisHostThemeEvent {
  * @deprecated Use {@link LvisHostThemeEvent} instead.
  *
  * Legacy fields `colorScheme`, `reducedMotion`, and `fonts` are no longer
- * emitted by the host. `bundleId` is now typed as {@link LvisThemeBundleId}
- * (narrowed from `string`).
+ * emitted by the host. `bundleId` is kept as `string` (not narrowed to
+ * {@link LvisThemeBundleId}) to preserve backward compatibility with SDK
+ * consumers that forward arbitrary strings into this field. Use
+ * {@link LvisHostThemeEvent} for the narrowed v2 contract.
  *
  * Migration: replace all `LvisThemePayload` usages with `LvisHostThemeEvent`.
  * These deprecated fields will be removed in a future cleanup PR.
  */
-export interface LvisThemePayload extends LvisHostThemeEvent {
+export interface LvisThemePayload extends Omit<LvisHostThemeEvent, "bundleId"> {
+  /**
+   * Active theme bundle identifier.
+   *
+   * Kept as `string` (not narrowed to {@link LvisThemeBundleId}) for
+   * backward compatibility — SDK consumers may forward arbitrary strings.
+   * Use {@link isLvisThemeBundleId} to validate at runtime boundaries.
+   *
+   * @deprecated Migrate to {@link LvisHostThemeEvent} which carries the
+   *   narrowed `LvisThemeBundleId` type.
+   */
+  bundleId: string;
   /** @deprecated No longer emitted by the host. Use `bundleId` + `shell`. */
   colorScheme?: "light" | "dark" | "system";
   /** @deprecated No longer emitted by the host. */
