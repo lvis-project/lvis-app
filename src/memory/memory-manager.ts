@@ -44,9 +44,13 @@ export interface SessionListEntry {
   preview: string;
   routineId?: string;
   routineTitle?: string;
-  /** §PR-5: set when this session was forked from another via branchFromCheckpoint. */
+  /**
+   * ID of the previous session in this chain. Set for all chained sessions
+   * (session-resume, rotation, and §PR-5 branchFromCheckpoint forks).
+   * Use branchedFromCompactNum to distinguish true checkpoint forks from other chain types.
+   */
   parentSessionId?: string;
-  /** §PR-5: compact sequence number this session was forked from. */
+  /** §PR-5: compact sequence number this session was forked from. Only set on true checkpoint forks. */
   branchedFromCompactNum?: number;
 }
 

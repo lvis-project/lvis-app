@@ -104,29 +104,33 @@ describe("CheckpointDivider", () => {
  * Sidebar branch tree
  * ──────────────────────────────────────────────────────────────────────── */
 describe("Sidebar branch tree", () => {
+  // Both fork sessions must have branchedFromCompactNum — that's the discriminator
+  // for true checkpoint forks (parentSessionId alone is also used for resume/rotation).
   const baseSessions = [
     { id: "sess-parent", modifiedAt: "2026-05-08T10:00:00Z", title: "부모 세션" },
     { id: "sess-child-1", modifiedAt: "2026-05-08T11:00:00Z", title: "분기 세션 A", parentSessionId: "sess-parent", branchedFromCompactNum: 2 },
-    { id: "sess-child-2", modifiedAt: "2026-05-08T12:00:00Z", title: "분기 세션 B", parentSessionId: "sess-parent" },
+    { id: "sess-child-2", modifiedAt: "2026-05-08T12:00:00Z", title: "분기 세션 B", parentSessionId: "sess-parent", branchedFromCompactNum: 3 },
   ];
 
-  it("does not render branch panel when no sessions have parentSessionId", () => {
-    const plainSessions = [
+  it("does not render branch panel when no sessions have branchedFromCompactNum", () => {
+    // parentSessionId without branchedFromCompactNum = resume/rotation, not a fork
+    const resumeSessions = [
       { id: "s1", modifiedAt: "2026-05-08T10:00:00Z", title: "일반 세션" },
+      { id: "s2", modifiedAt: "2026-05-08T11:00:00Z", title: "재개 세션", parentSessionId: "s1" },
     ];
     const { container } = render(
       <Sidebar
         activeView="home"
         setActiveView={vi.fn()}
         starredCount={0}
-        sessions={plainSessions}
+        sessions={resumeSessions}
         onLoadSession={vi.fn()}
       />,
     );
-    expect(container.querySelector("[data-testid='branch-session-sess-child-1']")).toBeNull();
+    expect(container.querySelector("[data-testid='branch-session-s2']")).toBeNull();
   });
 
-  it("renders branch sessions with branch badge when parentSessionId present", () => {
+  it("renders branch sessions with branch badge when branchedFromCompactNum present", () => {
     const { getByTestId } = render(
       <Sidebar
         activeView="home"

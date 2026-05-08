@@ -555,6 +555,8 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
   const handleBranchFrom = useCallback(async (compactNum: number) => {
     const result = await api.chatBranchFromCheckpoint?.(currentSessionId, compactNum);
     if (!result || "error" in result) return;
+    // §PR-5: exit view-mode before loading the new session so it opens in live mode
+    setViewMode(null);
     // Load the branched session
     await onLoadSession?.(result.newSessionId);
     // Show 3-second fork-success toast

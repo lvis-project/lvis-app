@@ -24,8 +24,11 @@ interface ContextMenuState {
 export function Sidebar(props: SidebarProps) {
   const { activeView, setActiveView, starredCount, sessions, onLoadSession } = props;
 
-  // Branch sessions: those with a parentSessionId are child forks
-  const branchSessions = sessions?.filter((s) => s.parentSessionId) ?? [];
+  // Branch sessions: use branchedFromCompactNum as the discriminator for true
+  // branchFromCheckpoint forks. parentSessionId is a general chain pointer
+  // (also set on session-resume / rotation) so filtering on it alone would
+  // show non-fork sessions with the GitBranch badge.
+  const branchSessions = sessions?.filter((s) => s.branchedFromCompactNum !== undefined) ?? [];
 
   // Context menu for "Open in new window" — built-in detachable views only.
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
@@ -115,6 +118,7 @@ export function Sidebar(props: SidebarProps) {
                 <Tooltip key={s.id}>
                   <TooltipTrigger asChild>
                     <button
+                      type="button"
                       data-testid={`branch-session-${s.id}`}
                       aria-label={`분기 세션: ${s.title}`}
                       className="branch-session-item flex w-full items-center gap-1 rounded px-1 py-0.5 text-left text-xs hover:bg-accent hover:text-accent-foreground"
