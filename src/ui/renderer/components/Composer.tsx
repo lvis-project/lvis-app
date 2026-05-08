@@ -241,7 +241,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
-        if (disabled || streaming) return;
+        if (disabled) return;
         onSend();
       }
     },
@@ -293,26 +293,26 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           className="min-w-0 flex-1 resize-none min-h-[88px] border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none rounded-none text-xs placeholder:text-xs px-4 py-3"
         />
 
-        {streaming ? (
+        {streaming && (
           <Button
             variant="destructive"
             onClick={() => onAbort?.()}
             data-testid="composer-abort-button"
-            className="shrink-0 rounded-none self-stretch !h-auto w-[72px] px-0 text-xs font-bold"
+            className="shrink-0 rounded-none self-stretch !h-auto w-[44px] px-0 text-xs font-bold"
+            aria-label="응답 중지"
             title="스트리밍 중단 (Ctrl/Cmd+C)"
           >
-            <Square className="h-4 w-4 mr-1" />STOP
-          </Button>
-        ) : (
-          <Button
-            onClick={onSend}
-            disabled={disabled || (text.trim().length === 0 && liveAttachments.length === 0)}
-            data-testid="composer-send-button"
-            className="shrink-0 rounded-none self-stretch !h-auto w-[72px] px-0 text-xs font-bold"
-          >
-            <Loader2 className="h-4 w-4 mr-1 hidden" />SEND
+            <Square className="h-4 w-4" />
           </Button>
         )}
+        <Button
+          onClick={onSend}
+          disabled={disabled || (text.trim().length === 0 && liveAttachments.length === 0)}
+          data-testid="composer-send-button"
+          className="shrink-0 rounded-none self-stretch !h-auto w-[72px] px-0 text-xs font-bold"
+        >
+          <Loader2 className="h-4 w-4 mr-1 hidden" />SEND
+        </Button>
       </div>
       {isFull ? (
         <div

@@ -33,7 +33,6 @@ export interface MainContentProps {
   // chat
   chatContextValue: ChatContextValue;
   onAsk: (q: string) => Promise<void>;
-  onGuide: (q: string) => Promise<void>;
   onEditSave: Parameters<typeof ChatView>[0]["onEditSave"];
   onFork: (entryIdx: number) => Promise<void>;
   onToggleStar: (entryIdx: number) => void;
@@ -80,7 +79,6 @@ function HomeChatPane(props: MainContentProps) {
       <ChatView
         api={props.api}
         onAsk={props.onAsk}
-        onGuide={props.onGuide}
         onEditSave={props.onEditSave}
         onFork={props.onFork}
         onToggleStar={props.onToggleStar}
