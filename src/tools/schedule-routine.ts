@@ -32,11 +32,31 @@ import { isValidCronExpression } from "../routines/cron-evaluator.js";
 const DATE_ONLY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 const KST_OFFSET = "+09:00";
 
+/** Maximum allowed cron expression length (prevents regex DoS on oversized inputs). */
+const MAX_CRON_EXPR_LENGTH = 256;
+
+/** Minimum interval: 1 minute (prevents sub-minute polling spam). */
+const MIN_INTERVAL_MS = 60_000;
+
+/** Maximum interval: 5 years (matches MAX_FUTURE_OFFSET_MS in routines-store). */
+const MAX_INTERVAL_MS = 5 * 365.25 * 24 * 60 * 60 * 1000;
+
+/**
+ * Normalize a date/datetime string to a UTC ISO string.
+ *
+ * Accepts:
+ * - ISO 8601 datetime strings (with or without timezone offset)
+ * - `YYYY-MM-DD` date-only strings — defaults to **09:00 KST (+09:00)**
+ *   when no time component is provided.
+ *
+ * @returns UTC ISO string, or null if the input cannot be parsed.
+ */
 function asIso(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   if (!trimmed) return null;
   if (DATE_ONLY_RE.test(trimmed)) {
+    // Default time 09:00 KST when only date provided (YYYY-MM-DD).
     const parsed = new Date(`${trimmed}T09:00:00${KST_OFFSET}`);
     return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
   }
@@ -53,15 +73,19 @@ function parseRepeat(raw: unknown): RoutineRepeat | null {
   if (kind === "weekly") return { kind: "weekly" };
   if (kind === "monthly") return { kind: "monthly" };
   if (kind === "interval") {
-    const ms = typeof r.intervalMs === "number" && Number.isFinite(r.intervalMs) && r.intervalMs > 0
+    const ms = typeof r.intervalMs === "number"
+      && Number.isFinite(r.intervalMs)
+      && r.intervalMs >= MIN_INTERVAL_MS
+      && r.intervalMs <= MAX_INTERVAL_MS
       ? r.intervalMs
       : null;
     if (!ms) return null;
     return { kind: "interval", intervalMs: ms };
   }
   if (kind === "cron") {
-    const expr = typeof r.expression === "string" ? r.expression.trim() : "";
-    if (!expr || !isValidCronExpression(expr)) return null;
+    const raw = typeof r.expression === "string" ? r.expression : "";
+    const expr = raw.trim();
+    if (!expr || expr.length > MAX_CRON_EXPR_LENGTH || !isValidCronExpression(expr)) return null;
     return { kind: "cron", expression: expr };
   }
   return null;
@@ -94,6 +118,7 @@ export function createScheduleRoutineTool(store: RoutinesStore): Tool {
       "execution='llm-session'이면 지정 시각에 LLM 대화를 시작하고, " +
       "'notification-only'이면 OS 알림만 발송합니다. " +
       "반복 방식: none/daily/weekly/monthly/interval/cron. " +
+      "schedule.at 에 날짜만 제공(YYYY-MM-DD)하면 기본 시각 09:00 KST 로 처리됩니다. " +
       "예: 매일 오전 9시 데일리 리포트 → execution:'llm-session', " +
       "schedule:{at:'2026-05-09T09:00:00+09:00', repeat:{kind:'daily'}}, " +
       "prePrompt:'오늘의 데일리 리포트 작성'",
@@ -168,11 +193,22 @@ export function createScheduleRoutineTool(store: RoutinesStore): Tool {
         };
       }
 
-      if (execution === "llm-session" && typeof a.prePrompt !== "string") {
-        return {
-          output: JSON.stringify({ error: "prePrompt is required for execution='llm-session'" }),
-          isError: true,
-        };
+      if (execution === "llm-session") {
+        if (typeof a.prePrompt !== "string" || (a.prePrompt as string).trim().length === 0) {
+          return {
+            output: JSON.stringify({ error: "prePrompt is required and must be non-empty for execution='llm-session'" }),
+            isError: true,
+          };
+        }
+      }
+
+      if (execution === "notification-only") {
+        if (typeof a.notificationTitle !== "string" || (a.notificationTitle as string).trim().length === 0) {
+          return {
+            output: JSON.stringify({ error: "notificationTitle is required and must be non-empty for execution='notification-only'" }),
+            isError: true,
+          };
+        }
       }
 
       const prePrompt = execution === "llm-session"

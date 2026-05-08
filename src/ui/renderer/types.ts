@@ -461,17 +461,17 @@ export type LvisApi = {
   onAskUserQuestionTimeout?: (
     h: (payload: { requestId: string }) => void,
   ) => () => void;
-  listRoutinesV2: () => Promise<import("../../main/routines-store.js").RoutineRecord[]>;
+  listRoutinesV2: () => Promise<import("../../shared/routines-types.js").RoutineRecord[]>;
   dismissRoutineV2: (id: string) => Promise<{ ok: boolean }>;
   removeRoutineV2: (id: string) => Promise<{ ok: boolean }>;
   triggerRoutineNowV2: (id: string) => Promise<{ ok: boolean; error?: string }>;
   addRoutineV2: (
-    input: import("../../main/routines-store.js").AddRoutineInput,
+    input: import("../../shared/routines-types.js").AddRoutineInput,
   ) => Promise<
-    | { ok: true; routine: import("../../main/routines-store.js").RoutineRecord }
+    | { ok: true; routine: import("../../shared/routines-types.js").RoutineRecord }
     | { ok: false; error: string }
   >;
-  onRoutineFiredV2: (h: (routine: import("../../main/routines-store.js").RoutineRecord) => void) => () => void;
+  onRoutineFiredV2: (h: (routine: import("../../shared/routines-types.js").RoutineRecord) => void) => () => void;
   listSessionTodos: (sessionId?: string) => Promise<
     Array<{ id: string; content: string; status: string }>
   >;

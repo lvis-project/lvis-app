@@ -420,11 +420,25 @@ export async function bootstrap(
   // llm-session routines start a ConversationLoop with prePrompt.
   // notification-only routines fire an OS notification.
   routinesScheduler.onLlmSession(({ routine }) => {
-    try {
-      getMainWindow()?.webContents.send("lvis:routines:v2:fired", routine);
-    } catch (err) {
-      log.warn("routines v2 llm-session emit failed: %s", (err as Error).message);
-    }
+    // Critical #1: invoke RoutineEngine with prePrompt to actually start the
+    // LLM conversation. The fired event is a UI hint emitted after dispatch.
+    void (async () => {
+      try {
+        await routineEngine.runRoutine({
+          id: routine.id,
+          trigger: routine.trigger,
+          prePrompt: routine.prePrompt ?? "",
+          title: routine.title,
+        });
+      } catch (err) {
+        log.warn("routines v2 llm-session run failed: %s", (err as Error).message);
+      }
+      try {
+        getMainWindow()?.webContents.send("lvis:routines:v2:fired", routine);
+      } catch (err) {
+        log.warn("routines v2 llm-session emit failed: %s", (err as Error).message);
+      }
+    })();
   });
   routinesScheduler.onNotification(({ routine }) => {
     try {
@@ -436,6 +450,13 @@ export async function bootstrap(
       });
     } catch (err) {
       log.warn("routines v2 notification emit failed: %s", (err as Error).message);
+    }
+    // Major #10: emit fired event for notification-only branch so the UI
+    // reflects the fire consistently across both execution modes.
+    try {
+      getMainWindow()?.webContents.send("lvis:routines:v2:fired", routine);
+    } catch (err) {
+      log.warn("routines v2 notification fired emit failed: %s", (err as Error).message);
     }
   });
   // L1: NOT started here. Boot order matters — if scheduler.start() runs

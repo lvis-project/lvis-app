@@ -11,7 +11,7 @@ import { createLogger } from "../../lib/logger.js";
 const log = createLogger("lvis");
 
 export function registerMiscHandlers(deps: IpcDeps): void {
-  const { routinesStore, sessionTodoStore, conversationLoop, auditLogger, getMainWindow } = deps;
+  const { routinesStore, routinesScheduler, sessionTodoStore, conversationLoop, auditLogger, getMainWindow } = deps;
 
   // ─── Routines v2 ────────────────────────────────
   ipcMain.handle("lvis:routines:v2:list", (e) => {
@@ -49,15 +49,12 @@ export function registerMiscHandlers(deps: IpcDeps): void {
       return UNAUTHORIZED_FRAME;
     }
     if (!routinesStore) return { ok: false, error: "no-store" };
-    const active = routinesStore.listActive();
-    const routine = active.find((r) => r.id === id);
-    if (!routine) return { ok: false, error: "routine-not-found" };
-    // Notify renderer so it can reflect the manual trigger visually.
-    try {
-      getMainWindow()?.webContents.send("lvis:routines:v2:fired", routine);
-    } catch (err) {
-      log.warn("routines:v2:trigger-now emit failed: %s", (err as Error).message);
-    }
+    if (!routinesScheduler) return { ok: false, error: "no-scheduler" };
+    // Dispatch through the scheduler so persistence (lastFiredAt, dedup) and
+    // execution handlers (LLM session or notification) fire identically to a
+    // scheduled trigger — no separate renderer-only event path.
+    const dispatched = await routinesScheduler.dispatchNow(id);
+    if (!dispatched) return { ok: false, error: "routine-not-found" };
     return { ok: true };
   });
 

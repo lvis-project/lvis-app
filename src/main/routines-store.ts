@@ -13,15 +13,52 @@ import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
+import { isValidCronExpression } from "../routines/cron-evaluator.js";
 
-/**
- * Hard cap on persisted routines (Q6). Hitting the cap means add() throws —
- * the LLM receives a clear error and can prompt the user to dismiss old routines.
- */
-export const MAX_PERSISTED_ROUTINES = 50;
+// Re-export from shared so callers that import from routines-store continue
+// to work unchanged, while the renderer imports from shared/ (no Node built-ins).
+export {
+  MAX_PERSISTED_ROUTINES,
+  MAX_LLM_SESSION_ROUTINES,
+  type RoutineExecution,
+  type RepeatKind,
+  type RoutineRepeat,
+  type RoutineSchedule,
+  type RoutineRecord,
+  type AddRoutineInput,
+} from "../shared/routines-types.js";
+
+import type {
+  RoutineExecution,
+  RoutineRepeat,
+  RoutineRecord,
+  RoutineSchedule,
+  AddRoutineInput,
+} from "../shared/routines-types.js";
+import { MAX_PERSISTED_ROUTINES, MAX_LLM_SESSION_ROUTINES } from "../shared/routines-types.js";
 
 /** Maximum allowed distance into the future for schedule.at (parity with RemindersStore). */
 const MAX_FUTURE_OFFSET_MS = 5 * 365.25 * 24 * 60 * 60 * 1000;
+
+/** Maximum cron expression length (prevents regex DoS). Must match schedule-routine.ts. */
+const MAX_CRON_EXPR_LENGTH = 256;
+
+/** Minimum interval in ms (1 minute — prevents sub-minute polling spam). */
+const MIN_INTERVAL_MS = 60_000;
+
+/**
+ * Validate a record loaded from disk. Rejects tampered / corrupted entries
+ * so a single bad record cannot infect the scheduler tick.
+ */
+function isValidRecord(r: unknown): r is RoutineRecord {
+  if (!r || typeof r !== "object") return false;
+  const x = r as Record<string, unknown>;
+  if (typeof x.id !== "string" || x.id.length > 128) return false;
+  if (x.trigger !== "schedule" && x.trigger !== "shutdown") return false;
+  if (x.execution !== "llm-session" && x.execution !== "notification-only") return false;
+  if (x.lastFiredMinuteUTC !== undefined && typeof x.lastFiredMinuteUTC !== "string") return false;
+  return true;
+}
 
 function validateScheduleAt(at: string): { ok: true } | { ok: false; error: string } {
   const ts = Date.parse(at);
@@ -34,66 +71,9 @@ function validateScheduleAt(at: string): { ok: true } | { ok: false; error: stri
   return { ok: true };
 }
 
-export type RoutineExecution = "llm-session" | "notification-only";
-
-export type RepeatKind =
-  | "none"
-  | "daily"
-  | "weekly"
-  | "monthly"
-  | "interval"
-  | "cron";
-
-export type RoutineRepeat =
-  | { kind: "none" }
-  | { kind: "daily" }
-  | { kind: "weekly" }
-  | { kind: "monthly" }
-  | { kind: "interval"; intervalMs: number }
-  | { kind: "cron"; expression: string };
-
-export interface RoutineSchedule {
-  /** ISO timestamp for the first (or one-time) fire. */
-  at?: string;
-  repeat?: RoutineRepeat;
-}
-
-export interface RoutineRecord {
-  id: string;
-  /** wakeup trigger is removed (Q1) — only schedule and shutdown remain. */
-  trigger: "shutdown" | "schedule";
-  schedule?: RoutineSchedule;
-  execution: RoutineExecution;
-  /** System prompt injected when execution === "llm-session". */
-  prePrompt?: string;
-  title?: string;
-  /** Shown as OS notification title when execution === "notification-only". */
-  notificationTitle?: string;
-  /** Shown as OS notification body when execution === "notification-only". */
-  notificationBody?: string;
-  createdAt: string;
-  lastFiredAt?: string;
-  dismissedAt?: string;
-  /**
-   * Persistent cron dedup key — ISO string of the UTC minute that last fired.
-   * Survives app restarts so the same cron minute cannot re-fire after reboot.
-   */
-  lastFiredMinuteUTC?: string;
-}
-
 export interface RoutinesFile {
   version: 2;
   routines: RoutineRecord[];
-}
-
-export interface AddRoutineInput {
-  trigger: "shutdown" | "schedule";
-  schedule?: RoutineSchedule;
-  execution: RoutineExecution;
-  prePrompt?: string;
-  title?: string;
-  notificationTitle?: string;
-  notificationBody?: string;
 }
 
 const DEFAULT_PATH = resolve(homedir(), ".lvis", "routines.json");
@@ -115,7 +95,9 @@ async function readFileOrEmpty(filePath: string): Promise<RoutinesFile> {
     if (!Array.isArray(parsed.routines)) {
       return { version: 2, routines: [] };
     }
-    return { version: 2, routines: parsed.routines };
+    // Filter out tampered/corrupted records so a single bad entry cannot
+    // cause the scheduler tick to throw and stall all other routines.
+    return { version: 2, routines: parsed.routines.filter(isValidRecord) };
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
       return { version: 2, routines: [] };
@@ -161,7 +143,8 @@ export class RoutinesStore {
   async add(input: AddRoutineInput): Promise<RoutineRecord> {
     if (!this.loaded) await this.load();
 
-    // Validate `at` when provided.
+    // Validate and normalize `at` to canonical ISO string when provided.
+    let normalizedAt: string | undefined;
     if (input.schedule?.at !== undefined) {
       const validation = validateScheduleAt(input.schedule.at);
       if (!validation.ok) {
@@ -169,12 +152,62 @@ export class RoutinesStore {
           `RoutinesStore.add: invalid schedule.at (${validation.error}): ${input.schedule.at}`,
         );
       }
+      normalizedAt = new Date(input.schedule.at).toISOString();
     }
+
+    // Validate cron expression when repeat.kind === 'cron'.
+    if (input.schedule?.repeat?.kind === "cron") {
+      const expr = (input.schedule.repeat as { kind: "cron"; expression: string }).expression;
+      if (typeof expr !== "string" || expr.length > MAX_CRON_EXPR_LENGTH) {
+        throw new Error(
+          `RoutinesStore.add: cron expression too long or invalid type (max ${MAX_CRON_EXPR_LENGTH} chars)`,
+        );
+      }
+      if (!expr.trim() || !isValidCronExpression(expr)) {
+        throw new Error(
+          `RoutinesStore.add: invalid cron expression: ${String(expr)}`,
+        );
+      }
+    }
+
+    // Validate intervalMs bounds when repeat.kind === 'interval'.
+    if (input.schedule?.repeat?.kind === "interval") {
+      const intervalMs = (input.schedule.repeat as { kind: "interval"; intervalMs: number }).intervalMs;
+      if (!Number.isFinite(intervalMs) || intervalMs < MIN_INTERVAL_MS || intervalMs > MAX_FUTURE_OFFSET_MS) {
+        throw new Error(
+          `RoutinesStore.add: intervalMs out of range (min ${MIN_INTERVAL_MS}ms, max ${MAX_FUTURE_OFFSET_MS}ms): ${String(intervalMs)}`,
+        );
+      }
+    }
+
+    // Validate execution-mode-specific required fields.
+    if (input.execution === "llm-session") {
+      if (!input.prePrompt || input.prePrompt.trim().length === 0) {
+        throw new Error(
+          "RoutinesStore.add: prePrompt is required and must be non-empty for execution='llm-session'",
+        );
+      }
+    }
+    if (input.execution === "notification-only") {
+      if (!input.notificationTitle || input.notificationTitle.trim().length === 0) {
+        throw new Error(
+          "RoutinesStore.add: notificationTitle is required and must be non-empty for execution='notification-only'",
+        );
+      }
+    }
+
+    // Build schedule with normalized `at`.
+    const normalizedSchedule: typeof input.schedule = input.schedule
+      ? {
+          ...input.schedule,
+          ...(normalizedAt !== undefined ? { at: normalizedAt } : {}),
+        }
+      : undefined;
 
     const record: RoutineRecord = {
       id: randomUUID(),
       trigger: input.trigger,
-      schedule: input.schedule,
+      schedule: normalizedSchedule,
       execution: input.execution,
       prePrompt: input.prePrompt,
       title: input.title,
@@ -185,6 +218,17 @@ export class RoutinesStore {
 
     return withFileLock(this.filePath, async () => {
       const file = await readFileOrEmpty(this.filePath);
+      // Q8: llm-session sub-cap check (before total cap to give a specific error).
+      if (record.execution === "llm-session") {
+        const llmCount = file.routines.filter(
+          (r) => r.execution === "llm-session" && !r.dismissedAt,
+        ).length;
+        if (llmCount >= MAX_LLM_SESSION_ROUTINES) {
+          throw new Error(
+            `RoutinesStore.add: LLM session routine cap reached (${MAX_LLM_SESSION_ROUTINES}); dismiss/remove old LLM routines first`,
+          );
+        }
+      }
       if (file.routines.length >= MAX_PERSISTED_ROUTINES) {
         throw new Error(
           `RoutinesStore.add: routine cap reached (${MAX_PERSISTED_ROUTINES}); dismiss/remove old routines first`,
@@ -302,8 +346,11 @@ export class RoutinesStore {
 function advanceDaily(atIso: string): string {
   const d = new Date(atIso);
   const nowMs = Date.now();
-  while (d.getTime() <= nowMs) {
-    d.setTime(d.getTime() + 24 * 60 * 60 * 1000);
+  if (d.getTime() <= nowMs) {
+    const intervalMs = 24 * 60 * 60 * 1000;
+    const elapsed = nowMs - d.getTime();
+    const skips = Math.ceil(elapsed / intervalMs);
+    d.setTime(d.getTime() + skips * intervalMs);
   }
   return d.toISOString();
 }
@@ -311,8 +358,11 @@ function advanceDaily(atIso: string): string {
 function advanceWeekly(atIso: string): string {
   const d = new Date(atIso);
   const nowMs = Date.now();
-  while (d.getTime() <= nowMs) {
-    d.setTime(d.getTime() + 7 * 24 * 60 * 60 * 1000);
+  if (d.getTime() <= nowMs) {
+    const intervalMs = 7 * 24 * 60 * 60 * 1000;
+    const elapsed = nowMs - d.getTime();
+    const skips = Math.ceil(elapsed / intervalMs);
+    d.setTime(d.getTime() + skips * intervalMs);
   }
   return d.toISOString();
 }
@@ -347,8 +397,10 @@ function advanceInterval(atIso: string, intervalMs: number): string {
   const d = new Date(atIso);
   const nowMs = Date.now();
   if (intervalMs <= 0) return d.toISOString();
-  while (d.getTime() <= nowMs) {
-    d.setTime(d.getTime() + intervalMs);
+  if (d.getTime() <= nowMs) {
+    const elapsed = nowMs - d.getTime();
+    const skips = Math.ceil(elapsed / intervalMs);
+    d.setTime(d.getTime() + skips * intervalMs);
   }
   return d.toISOString();
 }

@@ -1141,7 +1141,7 @@ lvis-app/src/
 │   ├── dialogs/                 # ApprovalDialog, PluginInstallDialog,
 │   │                            #  PluginUninstallDialog, CommandPaletteDialog
 │   ├── tabs/                    # LlmTab, AppearanceTab, ChatTab, WebTab,
-│   │                            #  RoutineTab, PrivacyTab, PermissionsTab,
+│   │                            #  RoutinePanel, PrivacyTab, PermissionsTab,
 │   │                            #  RolesTab, AuditTab, PluginPerfTab,
 │   │                            #  McpTab, PluginConfigTab, MarketplaceTab
 │   ├── utils/                   # cost-format, html-preview, history, compose
@@ -1869,7 +1869,7 @@ broadcast 만 처리.
 | `appearance` | 테마 | `AppearanceTab.tsx` | 테마 선택 (dark / light / high-contrast / system) |
 | `chat` | 채팅 | `ChatTab.tsx` | 자동 컴팩트 토글·**Stream Smoothing** (PR #342 이관) |
 | `web` | 검색 (Web) | `WebTab.tsx` | 웹 검색 공급자·API 키 |
-| `routine` | 브리핑 | `RoutineTab.tsx` | Wake-up Routine 활성화 |
+| `routine` | 브리핑 | `RoutinePanel.tsx` | 루틴 & 알림 통합 관리 (Routine v2 — execution mode, 6 repeat kinds, 3 input styles) |
 | `privacy` | 프라이버시 | `PrivacyTab.tsx` | DLP(PII) 리댁션 토글 + 통계 |
 | `permissions` | 권한 | `PermissionsTab.tsx` | 도구 권한 정책 |
 | `roles` | 역할 | `RolesTab.tsx` | Role Preset 편집 (이름·systemPromptAdd·effort) |
@@ -1974,6 +1974,16 @@ flowchart LR
 **브리핑 예시:**
 
 > 「오늘 미팅 3건 (10:00 디자인리뷰, 14:00 스프린트, 16:00 1:1), 미처리 이메일 5통 중 2통은 액션 필요 (파트너사 계약서 검토, 출장비 정산 확인), 기한 임박 태스크 1건 (Q2 보고서 초안 — 내일 마감), **에이전트 요청 승인 2건** (이영희 Agent → Q1 보고서 공유 요청, 박민수 Agent → 코드리뷰 결과 전달 요청)」
+
+### 7.X Routine v2 (PR #626)
+
+- **Storage**: `~/.lvis/routines.json` (mode 0o600, dir 0o700, cap 50)
+- **Scheduler**: 30s polling (RoutinesScheduler), cron minute-key dedup via `lastFiredMinuteUTC`
+- **Execution modes**: `llm-session` (RoutineEngine 호출, prePrompt 로 conversation 시작) / `notification-only` (OS notification, conversation 영향 0)
+- **Repeat kinds**: `none / daily / weekly / monthly / interval / cron` — Q5 monthly day-of-month clamping
+- **LLM tool**: `schedule_routine` (자연어 입력 → struct payload, 4 vendor 호환)
+- **UI**: 단일 RoutinePanel 의 통합 list (Reminder 흡수), execution mode badge, 3-tab 입력 모달 (form / cron / 자연어)
+- **Reminder 폐지**: PR #626 atomic cutover 로 `RemindersStore`, `RemindersScheduler`, `remind_at` tool, `RemindersList` 컴포넌트 모두 제거
 
 ---
 

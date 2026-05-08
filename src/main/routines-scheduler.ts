@@ -90,17 +90,22 @@ export class RoutinesScheduler {
     const now = new Date();
     const active = this.store.listActive();
     for (const routine of active) {
-      const due = this.isDue(routine, now);
-      if (!due) continue;
-      if (routine.schedule?.repeat?.kind === "cron") {
-        // Persist the dedup key before firing so that a crash/restart mid-dispatch
-        // does not re-fire in the same minute.
-        const currentMinuteUTC = minuteKeyUTC(now);
-        await this.store.update(routine.id, { lastFiredMinuteUTC: currentMinuteUTC });
+      try {
+        const due = this.isDue(routine, now);
+        if (!due) continue;
+        if (routine.schedule?.repeat?.kind === "cron") {
+          // Persist the dedup key before firing so that a crash/restart mid-dispatch
+          // does not re-fire in the same minute.
+          const currentMinuteUTC = minuteKeyUTC(now);
+          await this.store.update(routine.id, { lastFiredMinuteUTC: currentMinuteUTC });
+        }
+        const updated = await this.store.markFired(routine.id);
+        if (!updated) continue;
+        this.dispatch(updated);
+      } catch (err) {
+        // One bad routine must not stall all remaining routines in this tick.
+        log.warn("routine tick error (id=%s): %s", routine.id, (err as Error).message);
       }
-      const updated = await this.store.markFired(routine.id);
-      if (!updated) continue;
-      this.dispatch(updated);
     }
   }
 
@@ -124,6 +129,22 @@ export class RoutinesScheduler {
     if (!schedule.at) return false;
     const at = new Date(schedule.at).getTime();
     return Number.isFinite(at) && at <= now.getTime();
+  }
+
+  /**
+   * Publicly dispatch a single routine through its execution-mode handlers,
+   * updating persistence (markFired) so lastFiredAt and dedup keys are written.
+   * Used by the IPC `trigger-now` handler so manual triggers go through the
+   * same code path as scheduled fires — persistence + fired event included.
+   */
+  async dispatchNow(routineId: string): Promise<boolean> {
+    const active = this.store.listActive();
+    const routine = active.find((r) => r.id === routineId);
+    if (!routine) return false;
+    const updated = await this.store.markFired(routine.id);
+    if (!updated) return false;
+    this.dispatch(updated);
+    return true;
   }
 
   private dispatch(routine: RoutineRecord): void {
