@@ -14,4 +14,7 @@ export const ROUTINES_V2 = {
   fired: "lvis:routines:v2:fired",
   listSessions: "lvis:routines:v2:list-sessions",
   readSession: "lvis:routines:v2:read-session",
+  // Q10 — running indicator events (renderer reflects LLM session progress)
+  runningStarted: "lvis:routines:v2:running-started",
+  runningFinished: "lvis:routines:v2:running-finished",
 } as const;

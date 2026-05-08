@@ -608,8 +608,6 @@ export function useChatState(api: LvisApi) {
     applyInitialSession,
     applyLoadedSession,
     truncateToEntry,
-    addImportedTriggerEntry,
-    closeOpenImportedTrigger,
   };
 }
 

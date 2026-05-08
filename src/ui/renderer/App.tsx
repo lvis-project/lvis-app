@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { flushSync } from "react-dom";
 import { debugLog } from "../../lib/debug-stream.js";
 import { composeOutgoing as composeOutgoingUtil } from "./utils/compose.js";
 import { vendorSupportsThinking as vendorSupportsThinkingShared } from "../../shared/vendor-capabilities.js";
@@ -24,7 +23,6 @@ import { useStatusBar, type NotificationToastMeta } from "./hooks/use-status-bar
 import { useSettings } from "./hooks/use-settings.js";
 import { lookupPricingOptional } from "../../shared/pricing-data.js";
 import { useChatState } from "./hooks/use-chat-state.js";
-import { useTriggerResult } from "./hooks/use-trigger-result.js";
 import { useApproval } from "./hooks/use-approval.js";
 import { useSearch } from "./hooks/use-search.js";
 import { useContextBudget } from "./hooks/use-context-budget.js";
@@ -49,6 +47,8 @@ import { CustomTitleBar } from "./components/CustomTitleBar.js";
 import { useWorkflowTools } from "./hooks/use-workflow-tools.js";
 import { useInstallingPlugins } from "./hooks/use-installing-plugins.js";
 import { useMarketplaceUrl } from "./hooks/use-marketplace-url.js";
+import { OverlayContextProvider } from "./context/OverlayContext.js";
+import { RoutineSessionView } from "./components/RoutineSessionView.js";
 
 // ─── App ────────────────────────────────────────────
 
@@ -71,7 +71,6 @@ export function App() {
     entryIndexToHistoryIndex, handleEditSave, handleRetryEffort,
     resetStreamAccumulators, setErrorWithThought, handleCompactCommand,
     clearForNewChat, appendUserEntry, applyInitialSession, applyLoadedSession, truncateToEntry,
-    addImportedTriggerEntry, closeOpenImportedTrigger,
     fallbackToast,
   } = useChatState(api);
   const [question, setQuestion] = useState("");
@@ -84,10 +83,62 @@ export function App() {
   const [activeView, setActiveView] = useState("home");
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
   const [commandPopoverOpen, setCommandPopoverOpen] = useState(false);
-  const { triggerResult, dismiss: dismissTrigger, importIntoChat: importTriggerIntoChat } = useTriggerResult(api);
   const { updates: marketplaceUpdates, dismiss: dismissMarketplaceUpdates } = useMarketplaceUpdates(api);
   const { status: bootstrapStatus, dismiss: dismissBootstrapStatus, retry: retryBootstrap } = useBootstrapStatus(api);
   const { queue: approvalQueue, decide: handleApprovalDecide, decideAll: handleApprovalDecideAll } = useApproval();
+
+  // Q10 — runningRoutines: tracks in-flight LLM sessions
+  const [runningRoutines, setRunningRoutines] = useState<Set<string>>(new Set());
+
+  // Q10 — addFire ref: populated by OverlayContextProvider during render
+  // so the IPC subscription below can call it without prop-drilling
+  const addFireRef = useRef<import("./context/OverlayContext.js").OverlayContextValue["addFire"] | null>(null);
+  useEffect(() => {
+    const unsub = api.onRoutineFiredV2((evt) => {
+      addFireRef.current?.({
+        id: `${evt.id}-${evt.firedAt}`,
+        source: { kind: "routine", routineId: evt.id, firedAt: evt.firedAt },
+        title: evt.title,
+        summary: evt.summary,
+        running: false,
+        routineId: evt.id,
+        routineTitle: evt.title,
+        firedAt: evt.firedAt,
+      });
+    });
+    return unsub;
+  }, [api]);
+
+  // Q10 — running-started / running-finished IPC: update runningRoutines set
+  useEffect(() => {
+    const unsubA = api.onRoutineRunningStarted((routineId) => {
+      setRunningRoutines((prev) => new Set([...prev, routineId]));
+    });
+    const unsubB = api.onRoutineRunningFinished((routineId) => {
+      setRunningRoutines((prev) => {
+        const next = new Set(prev);
+        next.delete(routineId);
+        return next;
+      });
+    });
+    return () => { unsubA(); unsubB(); };
+  }, [api]);
+
+  // Q10 — routine session modal (opened from OverlayCard "결과 보기")
+  const [routineSessionModal, setRoutineSessionModal] = useState<{ jsonlPath: string } | null>(null);
+  const handleOpenRoutineSession = useCallback(
+    async (routineId: string, firedAt: string) => {
+      try {
+        const sessions = await api.listRoutineSessionsV2(routineId, 20);
+        // Match firedAt — find closest session file for this fire event
+        const match = sessions.find((s) => s.firedAt === firedAt) ?? sessions[0];
+        if (match) setRoutineSessionModal({ jsonlPath: match.jsonlPath });
+      } catch (err) {
+        console.warn("[lvis] openRoutineSession failed:", (err as Error).message);
+      }
+    },
+    [api],
+  );
 
   // Marketplace + plugin UI extensions
   const {
@@ -330,15 +381,7 @@ export function App() {
       const streamingRequestId = beginStreamingRequest();
       debugLog("handleAsk", "begin", { requestId, streamingRequestId });
       setQuestion("");
-      // trigger-import: send the wrapped prompt verbatim. composeOutgoing
-      // would prefix it with role-preset / language-lock framing that
-      // doesn't apply to brain-authored prompts. The brain envelope and
-      // the system prompt's `<proactive-origin-guidance>` already steer
-      // the LLM correctly.
-      const composed =
-        mode === "trigger-import"
-          ? { text: t, attachments: [] }
-          : composeOutgoing(t);
+      const composed = composeOutgoing(t);
       const outgoing = composed.text;
       let outgoingAttachments = composed.attachments;
       // Vendor vision capability gate. The composer accepts images
@@ -346,7 +389,7 @@ export function App() {
       // freely; check at send time and confirm before silently dropping
       // image parts on a text-only model.
       const hasImageParts = outgoingAttachments.some((p) => p.type === "image");
-      if (mode !== "trigger-import" && hasImageParts && !supportsVision(llmVendor, llmModel)) {
+      if (hasImageParts && !supportsVision(llmVendor, llmModel)) {
         const proceed = window.confirm(
           `현재 모델(${llmModel})은 이미지를 지원하지 않습니다.\n` +
             "이미지는 전달되지 않고 파일 경로 / 텍스트만 전송됩니다.\n\n" +
@@ -386,11 +429,6 @@ export function App() {
           requestId,
           err: (err as Error)?.message,
         });
-        // chatSend rejection (network fail, abort, etc.) on a
-        // trigger-import turn never lands a `done` event, so the
-        // open imported_trigger card's streaming spinner would hang
-        // forever. Close the card before surfacing the error.
-        if (mode === "trigger-import") closeOpenImportedTrigger();
         setErrorWithThought(`오류: ${(err as Error).message}`);
       } finally {
         const turnMatch = turnRequestRef.current === requestId;
@@ -418,7 +456,6 @@ export function App() {
       applyLoadedSession,
       refreshSessionId,
       refreshSessions,
-      closeOpenImportedTrigger,
       // attachments is read directly at the post-send cleanup branch
       // (line ~260) and is also a transitive dep via composeOutgoing,
       // but listing it explicitly avoids stale-closure surprises if
@@ -430,30 +467,6 @@ export function App() {
     ],
   );
 
-  // Brain trigger accept → chat takes over. Server emits
-  // `lvis:trigger:imported` with both metadata for the visible card
-  // and the pre-wrapped prompt that should fire as the next chat
-  // turn.
-  //
-  // `flushSync` around the entry insert is load-bearing: handleAsk
-  // immediately fires `api.chatSend(wrappedPrompt)`, which round-
-  // trips to main and starts emitting `text_delta` events. The
-  // renderer's text_delta handler routes the delta INTO the
-  // imported_trigger card iff `responseStreaming === true` is
-  // already in `entries`. Without flushSync, React batching can
-  // delay the entry insert past the first delta arrival → the
-  // delta falls through to `upsertStreamingAssistant` and renders
-  // as a sibling assistant bubble below the card (the duplicate-
-  // response bug R1-1).
-  useEffect(() => {
-    const unsub = api.onTriggerImported((payload) => {
-      flushSync(() => {
-        addImportedTriggerEntry(payload);
-      });
-      void handleAsk(payload.wrappedPrompt, "trigger-import");
-    });
-    return () => { unsub(); };
-  }, [api, addImportedTriggerEntry, handleAsk]);
 
   const { costEstimate, costBadgeClass } =
     useCostEstimate({ entries, question, llmVendor, llmModel, maxOutputTokens, composeOutgoing });
@@ -542,7 +555,6 @@ export function App() {
   const chatContextValue = useChatContextValue({
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
     question, setQuestion, chatEndRef, currentSessionId, hasApiKey, onOpenSettings,
-    triggerResult, onDismissTrigger: dismissTrigger, onAcceptTrigger: importTriggerIntoChat,
     searchOpen, searchQuery, searchCase, searchMatches, searchMatchSet, searchIdx, searchHighlight,
     searchChangeQuery, searchToggleCase, searchNext, searchPrev, searchCloseOverlay, searchToggleOverlay,
     contextOverflowPct, usedTokens, contextBudget,
@@ -584,6 +596,10 @@ export function App() {
     <ErrorBoundary fallback="앱 오류가 발생했습니다">
     <ThemeProvider api={api}>
     <TooltipProvider>
+    <OverlayContextProvider
+      onOpenSession={handleOpenRoutineSession}
+      addFireRef={addFireRef}
+    >
         <div className="flex h-screen flex-col overflow-hidden">
           <CustomTitleBar />
         <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
@@ -692,6 +708,19 @@ export function App() {
       <DevConsoleToggle />
       {/* Snap edge highlight — shown when a detached child window enters the snap zone */}
       <SnapEdgeHighlight />
+      {/* Q10 — routine session modal opened from OverlayCard "결과 보기" */}
+      {routineSessionModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="relative w-full max-w-2xl max-h-[80vh] overflow-hidden rounded-lg shadow-xl">
+            <RoutineSessionView
+              jsonlPath={routineSessionModal.jsonlPath}
+              api={api}
+              onClose={() => setRoutineSessionModal(null)}
+            />
+          </div>
+        </div>
+      )}
+    </OverlayContextProvider>
     </TooltipProvider>
     </ThemeProvider>
     </ErrorBoundary>

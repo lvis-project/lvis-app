@@ -7,17 +7,6 @@ import type { ModelPricing } from "../../../shared/pricing-data.js";
 import type { LLMVendor } from "../../../shared/llm-vendor-defaults.js";
 import type { Attachment } from "../types/attachments.js";
 
-type TriggerResult = {
-  sessionId: string;
-  pluginId: string;
-  source: string;
-  visibility: "silent" | "summary-only" | "user-visible";
-  priority: "low" | "normal" | "high";
-  prompt: string;
-  summary: string;
-  completedAt: string;
-};
-
 /**
  * Cross-cutting chat-view state bundle. Groups props by concern so ChatView
  * and its subtree can consume via `useChatContext()` instead of ~41 props.
@@ -46,11 +35,6 @@ export interface ChatContextValue {
   // API state
   hasApiKey: boolean | null;
   onOpenSettings: () => void;
-
-  // Brain — proactive trigger result (isolated session — never in chat history)
-  triggerResult: TriggerResult | null;
-  onDismissTrigger: (sessionId: string) => void;
-  onAcceptTrigger: (sessionId: string) => Promise<{ ok: boolean; imported?: number; reason?: string }>;
 
   // Search
   searchOpen: boolean;

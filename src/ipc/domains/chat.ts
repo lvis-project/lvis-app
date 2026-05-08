@@ -12,7 +12,13 @@ import { userContentText } from "../../engine/llm/types.js";
 import { stubMarkedToolResults } from "../../engine/wire-serialize.js";
 import { serializeHistoryMessage } from "../../shared/chat-history.js";
 import type { ConversationLoop, TurnResult } from "../../engine/conversation-loop.js";
-import { parseImportedTriggerEnvelope } from "../../engine/proactive-source.js";
+/** Inlined from deleted engine/proactive-source.ts — trigger envelope detection. */
+const IMPORTED_TRIGGER_ENVELOPE_PATTERN =
+  /^<imported-from-proactive\s+source="(proactive:[a-z][a-z0-9-]*)"\s*>/;
+function parseImportedTriggerEnvelope(input: string): string | null {
+  const m = input.trimStart().match(IMPORTED_TRIGGER_ENVELOPE_PATTERN);
+  return m ? m[1] : null;
+}
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import type { IpcDeps } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
@@ -184,7 +190,6 @@ export function registerChatHandlers(deps: IpcDeps): void {
     conversationLoop,
     settingsService,
     memoryManager,
-    triggerExecutor,
     starredStore,
     feedbackStore,
     auditLogger,
@@ -599,32 +604,6 @@ ${input}`;
     } catch (err) {
       return { error: (err as Error).message };
     }
-  });
-
-  // ─── Proactive trigger lifecycle ──────────────────────
-  ipcMain.handle("lvis:trigger:dismiss", (e, sessionId: unknown) => {
-    if (!validateSender(e)) {
-      auditUnauthorized(auditLogger, "lvis:trigger:dismiss", e);
-      return UNAUTHORIZED_FRAME;
-    }
-    if (typeof sessionId !== "string" || sessionId.length === 0) {
-      return { ok: false, error: "invalid-session-id" };
-    }
-    if (!triggerExecutor) return { ok: false, error: "executor-unavailable" };
-    const removed = triggerExecutor.dismiss(sessionId);
-    return { ok: true, removed };
-  });
-
-  ipcMain.handle("lvis:trigger:import", (e, sessionId: unknown) => {
-    if (!validateSender(e)) {
-      auditUnauthorized(auditLogger, "lvis:trigger:import", e);
-      return UNAUTHORIZED_FRAME;
-    }
-    if (typeof sessionId !== "string" || sessionId.length === 0) {
-      return { ok: false, error: "invalid-session-id" };
-    }
-    if (!triggerExecutor) return { ok: false, error: "executor-unavailable" };
-    return triggerExecutor.importIntoChat(sessionId, conversationLoop);
   });
 
   // ─── Memory ─────────────────────────────────────

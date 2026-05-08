@@ -8,8 +8,7 @@ import { ScrollArea } from "../../components/ui/scroll-area.js";
 import { formatCostBadge } from "../../lib/cost-estimator.js";
 import type { ChatEntry } from "../../lib/chat-stream-state.js";
 import { debugLog, isDebugStreamEnabled } from "../../lib/debug-stream.js";
-import { TriggerCard } from "./components/TriggerCard.js";
-import { ImportedTriggerCard } from "./components/ImportedTriggerCard.js";
+import { OverlayCardRegion } from "./components/OverlayCardRegion.js";
 import { AssistantCard } from "./components/AssistantCard.js";
 import { UserMessageEditor } from "./components/UserMessageEditor.js";
 import { ReasoningCard } from "./components/ReasoningCard.js";
@@ -95,6 +94,8 @@ export interface ChatViewProps {
   installingPlugins?: ReadonlyMap<string, InstallPhase>;
   onOpenMarketplace: () => void;
   marketplaceUrlReady?: boolean;
+  /** Q10 — set of routineIds currently executing (LLM session in-flight) */
+  runningRoutines?: Set<string>;
   // PR-2-F-2 정정: fork-based revert (revertSessionId/onRevertCheckpoint) 폐지 — Layer 3
   // same-session checkpoint chain (Copilot 패턴) 으로 대체. sessionId 불변이므로 별도 revert action
   // 불필요 — 사용자가 임의 시점으로 돌아가려면 후속 PR 의 view-mode 지원 필요.
@@ -340,17 +341,19 @@ function HistoricalEntriesList({
     }
 
     if (entry.kind === "imported_trigger") {
+      // ImportedTriggerCard removed (proactive sweep). Render a minimal
+      // archived entry so historical sessions remain readable.
       rendered.push(
-        <ImportedTriggerCard
+        <div
           key={`trigger:${entry.sessionId}`}
-          source={entry.source}
-          prompt={entry.prompt}
-          summary={entry.summary}
-          toolCallCount={entry.toolCallCount}
-          importedAt={entry.importedAt}
-          response={entry.response}
-          responseStreaming={false}
-        />,
+          className="mx-3 my-1 rounded border border-violet-500/20 bg-violet-500/5 px-3 py-2 text-xs text-muted-foreground"
+        >
+          <span className="mr-1 text-violet-500">●</span>
+          {entry.summary || entry.prompt.slice(0, 80)}
+          {entry.response ? (
+            <p className="mt-1 text-foreground/70">{entry.response}</p>
+          ) : null}
+        </div>,
       );
       i++;
       continue;
@@ -371,7 +374,6 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
     question, setQuestion, chatEndRef, currentSessionId,
     hasApiKey, onOpenSettings,
-    triggerResult, onDismissTrigger, onAcceptTrigger,
     searchOpen, searchQuery, searchCase, searchMatches, searchMatchSet, searchIdx, searchHighlight,
     searchChangeQuery, searchToggleCase, searchNext, searchPrev, searchCloseOverlay, searchToggleOverlay,
     contextOverflowPct, usedTokens, contextBudget,
@@ -651,39 +653,8 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           </Card>
         </div>
       )}
-      {/* Proactive trigger overlays — visibility-driven slot routing (P2):
-            user-visible → centered modal-like card (below routine area)
-            summary-only → top-right compact toast that auto-dismisses
-            silent       → never reaches here (filtered in useTriggerResult)
-          The trigger session is held in an isolated ConversationLoop so chat
-          history below remains clean unless the user clicks "지금 답하기". */}
-      {triggerResult && triggerResult.visibility === "user-visible" && (
-        <div className="pointer-events-none absolute left-0 right-0 top-[calc(0.5rem+62vh)] z-20 flex justify-center px-4">
-          <div className="pointer-events-auto flex w-full max-w-2xl max-h-[40vh] flex-col overflow-hidden">
-            <TriggerCard
-              key={triggerResult.sessionId}
-              result={triggerResult}
-              onDismiss={onDismissTrigger}
-              onAccept={onAcceptTrigger}
-            />
-          </div>
-        </div>
-      )}
-      {triggerResult && triggerResult.visibility === "summary-only" && (
-        // z-30 keeps the toast above the routine area (z-20) on narrow
-        // windows where the centered routine card and right-edge toast
-        // overlap horizontally.
-        <div className="pointer-events-none absolute right-4 top-2 z-30 flex justify-end">
-          <div className="pointer-events-auto w-[380px] max-w-[calc(100vw-2rem)]">
-            <TriggerCard
-              key={triggerResult.sessionId}
-              result={triggerResult}
-              onDismiss={onDismissTrigger}
-              onAccept={onAcceptTrigger}
-            />
-          </div>
-        </div>
-      )}
+      {/* Q10 — Routine fire overlay (isolated from chat history, Q9 policy). Running phase rendered by OverlayCard. */}
+      <OverlayCardRegion />
       <div className="relative min-h-0 min-w-0 max-w-full flex-1 overflow-hidden">
       {/* §PR-5: View-Mode banner — sticky at the top of the chat scroll area */}
       <ViewModeBanner viewMode={viewMode} onExit={() => { void handleExitView(); }} />
@@ -971,17 +942,18 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             }
 
             if (entry.kind === "imported_trigger") {
+              // ImportedTriggerCard removed (proactive sweep). Render minimal archived entry.
               rendered.push(
-                <ImportedTriggerCard
+                <div
                   key={`trigger:${entry.sessionId}`}
-                  source={entry.source}
-                  prompt={entry.prompt}
-                  summary={entry.summary}
-                  toolCallCount={entry.toolCallCount}
-                  importedAt={entry.importedAt}
-                  response={entry.response}
-                  responseStreaming={entry.responseStreaming}
-                />
+                  className="mx-3 my-1 rounded border border-violet-500/20 bg-violet-500/5 px-3 py-2 text-xs text-muted-foreground"
+                >
+                  <span className="mr-1 text-violet-500">●</span>
+                  {entry.summary || entry.prompt.slice(0, 80)}
+                  {entry.response ? (
+                    <p className="mt-1 text-foreground/70">{entry.response}</p>
+                  ) : null}
+                </div>,
               );
               i++;
               continue;

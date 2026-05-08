@@ -12,7 +12,13 @@
  * 5. 일반 대화 (fallback)
  */
 
-import { parseImportedTriggerEnvelope } from "../engine/proactive-source.js";
+/** Inlined from deleted engine/proactive-source.ts — trigger envelope pattern. */
+const IMPORTED_TRIGGER_ENVELOPE_PATTERN =
+  /^<imported-from-proactive\s+source="(proactive:[a-z][a-z0-9-]*)"\s*>/;
+function parseImportedTriggerEnvelope(input: string): string | null {
+  const m = input.trimStart().match(IMPORTED_TRIGGER_ENVELOPE_PATTERN);
+  return m ? m[1] : null;
+}
 
 // ─── Types ──────────────────────────────────────────
 

@@ -569,11 +569,26 @@ const api = {
       { ok: true; routine: import("./main/routines-store.js").RoutineRecord } | { ok: false; error: string }
     >,
   onRoutineFiredV2: (
-    handler: (routine: import("./main/routines-store.js").RoutineRecord) => void,
+    handler: (event: import("./main/routines-store.js").RoutineRecord & {
+      firedAt: string;
+      title: string;
+      summary: string;
+    }) => void,
   ) => {
     const listener = (_e: unknown, r: Parameters<typeof handler>[0]) => handler(r);
     ipcRenderer.on(ROUTINES_V2.fired, listener);
     return () => ipcRenderer.removeListener(ROUTINES_V2.fired, listener);
+  },
+  // Q10 — running indicator: emitted when a routine LLM session starts/finishes
+  onRoutineRunningStarted: (handler: (routineId: string) => void) => {
+    const listener = (_e: unknown, id: string) => handler(id);
+    ipcRenderer.on(ROUTINES_V2.runningStarted, listener);
+    return () => ipcRenderer.removeListener(ROUTINES_V2.runningStarted, listener);
+  },
+  onRoutineRunningFinished: (handler: (routineId: string) => void) => {
+    const listener = (_e: unknown, id: string) => handler(id);
+    ipcRenderer.on(ROUTINES_V2.runningFinished, listener);
+    return () => ipcRenderer.removeListener(ROUTINES_V2.runningFinished, listener);
   },
   // Q9 session history — read-only viewer for per-routine session JSONL files
   listRoutineSessionsV2: async (routineId: string, limit?: number) =>

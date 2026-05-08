@@ -316,61 +316,21 @@ export type LvisApi = {
     | { ok: false; error: string }
   >;
   onRoutineFiredV2: (
-    handler: (routine: import("../../shared/routines-types.js").RoutineRecord) => void,
+    handler: (event: import("../../shared/routines-types.js").RoutineRecord & {
+      firedAt: string;
+      title: string;
+      summary: string;
+    }) => void,
   ) => () => void;
+  // Q10 — running indicator
+  onRoutineRunningStarted: (handler: (routineId: string) => void) => () => void;
+  onRoutineRunningFinished: (handler: (routineId: string) => void) => () => void;
   // Q9 session history
   listRoutineSessionsV2: (
     routineId: string,
     limit?: number,
   ) => Promise<Array<{ routineId: string; firedAt: string; jsonlPath: string }>>;
   readRoutineSessionV2: (jsonlPath: string) => Promise<string>;
-  // Brain — proactive trigger lifecycle
-  onTriggerStarted: (
-    h: (payload: {
-      sessionId: string;
-      source: string;
-      visibility: "silent" | "summary-only" | "user-visible";
-      priority: "low" | "normal" | "high";
-      startedAt: string;
-    }) => void,
-  ) => () => void;
-  onTriggerCompleted: (
-    h: (result: {
-      sessionId: string;
-      pluginId: string;
-      source: string;
-      visibility: "silent" | "summary-only" | "user-visible";
-      priority: "low" | "normal" | "high";
-      prompt: string;
-      summary: string;
-      completedAt: string;
-    }) => void,
-  ) => () => void;
-  onTriggerFailed: (
-    h: (payload: {
-      sessionId: string;
-      pluginId: string;
-      source: string;
-      reason: "provider_error" | "tool_error" | "abort" | "unknown";
-      errorId: string;
-    }) => void,
-  ) => () => void;
-  onTriggerExpired: (
-    h: (payload: { sessionId: string; pluginId: string; source: string }) => void,
-  ) => () => void;
-  onTriggerImported: (
-    h: (payload: {
-      sessionId: string;
-      source: string;
-      prompt: string;
-      summary: string;
-      toolCallCount: number;
-      importedAt: string;
-      wrappedPrompt: string;
-    }) => void,
-  ) => () => void;
-  dismissTrigger: (sessionId: string) => Promise<{ ok: boolean; removed?: boolean; error?: string }>;
-  importTrigger: (sessionId: string) => Promise<{ ok: boolean; imported?: number; reason?: string; error?: string }>;
   onMarketplaceUpdatesAvailable: (h: (updates: Array<{ pluginId: string; installedVersion: string; latestVersion: string }>) => void) => () => void;
   onBootstrapStatus: (
     h: (status:

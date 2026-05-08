@@ -7,7 +7,7 @@
  * Each file is mode 0o600, parent dir mode 0o700, written atomically.
  * Q9 isolation: routine sessions never write to ~/.lvis/sessions/ (main chat).
  */
-import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
@@ -77,6 +77,61 @@ export class RoutineSessionStore {
     } catch {
       // Non-fatal — orphan cleanup is best-effort.
     }
+  }
+
+  /**
+   * Extract a ~200-codepoint summary from a routine session JSONL file.
+   *
+   * Reads the last assistant message text from the JSONL, collapses
+   * newlines to spaces, and caps at 200 codepoints with an ellipsis.
+   * Returns an empty string when the file is empty or has no assistant text.
+   */
+  async extractSummary(jsonlPath: string): Promise<string> {
+    let raw: string;
+    try {
+      raw = await readFile(jsonlPath, { encoding: "utf-8" });
+    } catch {
+      return "";
+    }
+    const lines = raw.split("\n").filter((l) => l.trim().length > 0);
+    // Scan from tail — last assistant message text wins.
+    let lastAssistantText = "";
+    for (let i = lines.length - 1; i >= 0; i--) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(lines[i]);
+      } catch {
+        continue;
+      }
+      if (
+        parsed !== null &&
+        typeof parsed === "object" &&
+        (parsed as Record<string, unknown>)["role"] === "assistant"
+      ) {
+        const content = (parsed as Record<string, unknown>)["content"];
+        if (typeof content === "string" && content.length > 0) {
+          lastAssistantText = content;
+          break;
+        }
+        // Anthropic-style content array: [{type:"text", text:"..."}]
+        if (Array.isArray(content)) {
+          for (let j = content.length - 1; j >= 0; j--) {
+            const block = content[j] as Record<string, unknown>;
+            if (block["type"] === "text" && typeof block["text"] === "string" && block["text"].length > 0) {
+              lastAssistantText = block["text"] as string;
+              break;
+            }
+          }
+          if (lastAssistantText) break;
+        }
+      }
+    }
+    if (!lastAssistantText) return "";
+    // Collapse newlines → spaces, then cap at 200 codepoints.
+    const collapsed = lastAssistantText.replace(/[\r\n]+/g, " ").trim();
+    const codepoints = [...collapsed];
+    if (codepoints.length <= 200) return collapsed;
+    return codepoints.slice(0, 200).join("") + "…";
   }
 
   /**

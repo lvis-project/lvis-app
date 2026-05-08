@@ -19,7 +19,11 @@ import { resolve } from "node:path";
 import type { DenyRule, ToolSource, TrustLevel } from "../tools/types.js";
 import { trustFromSource } from "../tools/types.js";
 import { readPermissionsFile, updatePermissionsFile } from "./permissions-store.js";
-import { isProactiveOrigin } from "../engine/proactive-source.js";
+/** Inlined from deleted engine/proactive-source.ts — strict proactive origin check. */
+const PROACTIVE_ORIGIN_PATTERN = /^proactive:[a-z][a-z0-9-]*$/;
+function isProactiveOrigin(source: unknown): source is string {
+  return typeof source === "string" && PROACTIVE_ORIGIN_PATTERN.test(source);
+}
 
 export type PermissionDecision = "allow" | "deny" | "ask";
 export type ExecutionMode = "default" | "strict" | "auto";

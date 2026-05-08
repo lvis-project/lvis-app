@@ -35,7 +35,8 @@ import {
   emitPluginConfigChange,
   subscribePluginConfigChange,
 } from "../../plugins/config-change-bus.js";
-import { PROACTIVE_SOURCE_PATTERN } from "../../engine/proactive-source.js";
+/** Strict source pattern — inlined from deleted engine/proactive-source.ts. */
+const PROACTIVE_SOURCE_PATTERN = /^proactive:[a-z][a-z0-9-]*$/;
 import type {
   ApprovalChoice,
   AuthWindowCookie,
@@ -651,13 +652,12 @@ export interface LateBindingRefs {
     fn: import("../../engine/conversation-loop.js").ConversationLoop | null;
   };
   /**
-   * Trigger executor — built once boot wires up the
-   * `createTriggerConversationLoop` factory + main window. Every
-   * `hostApi.triggerConversation()` call dispatches through this so the
-   * trigger turn runs on a *fresh* loop, not the user's chat loop.
+   * Trigger executor ref — kept for future use; currently always null since
+   * TriggerExecutor was removed. triggerConversation() returns loop_unavailable
+   * when this is null.
    */
   triggerExecutorRef: {
-    fn: import("../../engine/trigger-executor.js").TriggerExecutor | null;
+    fn: null;
   };
 }
 
@@ -1196,31 +1196,9 @@ export async function initPluginRuntime(
           loopBound: !!lateBinding.triggerExecutorRef.fn,
           auditLogger: bootAuditLogger,
         });
-        if (decision.kind === "deny") return decision.result;
-
-        // Dispatch fire-and-forget. Wrap in Promise.resolve to convert any
-        // synchronous throw inside the executor into a rejection — the
-        // outer caller of triggerConversation must NEVER see an exception
-        // from this code path.
-        const executor = lateBinding.triggerExecutorRef.fn!;
-        void Promise.resolve()
-          .then(() =>
-            executor.run({
-              prompt: spec.prompt,
-              pluginId,
-              source: decision.source,
-              visibility: decision.visibility,
-              priority: decision.priority,
-              ...(spec.context ? { context: spec.context } : {}),
-            }),
-          )
-          // The executor already audits the failure with classified reason
-          // + raw message (operator-only). Swallow the rejection here — a
-          // second audit row per failure would just inflate the log and
-          // could leak the raw error to a sessionId tag the executor
-          // intentionally split into "trigger-executor".
-          .catch(() => undefined);
-
+        // TriggerExecutor removed — triggerExecutorRef.fn is always null, so
+        // evaluateTriggerSpec always returns deny(loop_unavailable). Return the
+        // denial result; the allow branch is unreachable.
         return decision.result;
       },
     }),

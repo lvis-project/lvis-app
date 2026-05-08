@@ -90,11 +90,9 @@ import {
   createHookRunner,
   createConversationLoop,
   createRoutineConversationLoop,
-  createTriggerConversationLoop,
   createCallLlm,
   createCallLlmForPlugin,
 } from "./boot/conversation.js";
-import { TriggerExecutor } from "./engine/trigger-executor.js";
 import type { ConversationLoop } from "./engine/conversation-loop.js";
 import { initPluginRuntime } from "./boot/steps/plugin-runtime.js";
 import { registerPluginEventBridge } from "./boot/steps/ipc-bridge.js";
@@ -109,7 +107,7 @@ export type { AppServices } from "./boot/types.js";
  * @param getMainWindow Live BrowserWindow getter — must read the current
  *   `main.ts` binding because Electron close+reopen replaces the window.
  *   Bootstrap-time consumers (e.g. plugin event bridge) take the resolved
- *   `mainWindow`; runtime consumers (e.g. TriggerExecutor) take this getter.
+ *   `mainWindow`; runtime consumers (e.g. routinesScheduler) take this getter.
  *   Defaults to a closure over `mainWindow` for callers that don't have a
  *   live reference, but those callers will silently lose IPC after window
  *   recreation.
@@ -409,10 +407,18 @@ export async function bootstrap(
   routinesScheduler.onLlmSession(({ routine }) => {
     // Q9: create an isolated session file before firing so the JSONL path
     // can be passed to the engine and routine turns never mix with main chat.
+    // Q10: emit running-started/finished so renderer can show progress indicator.
     void (async () => {
       const firedAt = new Date().toISOString();
+      // Q10: notify renderer that this routine is now running
       try {
-        await routineSessionStore.createSession(routine.id, firedAt);
+        getMainWindow()?.webContents.send(ROUTINES_V2.runningStarted, routine.id);
+      } catch {
+        // non-fatal
+      }
+      let jsonlPath: string | null = null;
+      try {
+        jsonlPath = await routineSessionStore.createSession(routine.id, firedAt);
       } catch (err) {
         log.warn("routines v2 session-store create failed (non-fatal): %s", (err as Error).message);
       }
@@ -425,9 +431,31 @@ export async function bootstrap(
         });
       } catch (err) {
         log.warn("routines v2 llm-session run failed: %s", (err as Error).message);
+      } finally {
+        // Q10: always clear running state regardless of success/failure
+        try {
+          getMainWindow()?.webContents.send(ROUTINES_V2.runningFinished, routine.id);
+        } catch {
+          // non-fatal
+        }
+      }
+      // Q10: extract summary from session JSONL and include in fired payload.
+      let summary = "";
+      if (jsonlPath) {
+        try {
+          summary = await routineSessionStore.extractSummary(jsonlPath);
+        } catch (err) {
+          log.warn("routines v2 summary extract failed (non-fatal): %s", (err as Error).message);
+        }
       }
       try {
-        getMainWindow()?.webContents.send(ROUTINES_V2.fired, routine);
+        const title = routine.title ?? routine.notificationTitle ?? routine.id.slice(0, 8);
+        getMainWindow()?.webContents.send(ROUTINES_V2.fired, {
+          ...routine,
+          firedAt,
+          title,
+          summary,
+        });
       } catch (err) {
         log.warn("routines v2 llm-session emit failed: %s", (err as Error).message);
       }
@@ -447,7 +475,14 @@ export async function bootstrap(
     // Emit fired event for notification-only branch so the UI reflects the
     // fire consistently across both execution modes.
     try {
-      getMainWindow()?.webContents.send(ROUTINES_V2.fired, routine);
+      const firedAt = new Date().toISOString();
+      const title = routine.title ?? routine.notificationTitle ?? routine.id.slice(0, 8);
+      getMainWindow()?.webContents.send(ROUTINES_V2.fired, {
+        ...routine,
+        firedAt,
+        title,
+        summary: "",
+      });
     } catch (err) {
       log.warn("routines v2 notification fired emit failed: %s", (err as Error).message);
     }
@@ -457,29 +492,6 @@ export async function bootstrap(
   // routine fires immediately into a void. main.ts now invokes
   // `services.startRoutinesScheduler()` AFTER `registerIpcHandlers()` to
   // close that gap.
-
-  // Trigger executor — spawns a fresh ConversationLoop per
-  // hostApi.triggerConversation() call so the user's chat history is never
-  // polluted by templated proactive turns. See trigger-executor.ts.
-  lateBinding.triggerExecutorRef.fn = new TriggerExecutor({
-    createLoop: () =>
-      createTriggerConversationLoop({
-        settingsService,
-        systemPromptBuilder,
-        keywordEngine,
-        routeEngine,
-        toolRegistry,
-        memoryManager,
-        permissionManager,
-        approvalGate,
-        bashAstValidator,
-        pluginRuntime,
-      }),
-    // Live getter so close+reopen window cycles still deliver trigger events.
-    getMainWindow,
-    auditLogger: bootAuditLogger,
-  });
-  log.info("boot: trigger executor wired (proactive turns isolated)");
 
   // §9.5: MCP Server 연결.
   const mcpGovernance = new McpGovernance();
@@ -565,7 +577,6 @@ export async function bootstrap(
     pluginRuntime, pluginMarketplace, settingsService,
     memoryManager, keywordEngine, routeEngine, toolRegistry,
     systemPromptBuilder, conversationLoop, routineEngine, mcpManager, mcpArtifactStore,
-    triggerExecutor: lateBinding.triggerExecutorRef.fn ?? undefined,
     idleScheduler, bashAstValidator, auditService, auditLogger: bootAuditLogger, postTurnHookChain,
     approvalGate, knowledgeAvailable, starredStore, feedbackStore,
     routinesStore, routinesScheduler, routineSessionStore, sessionTodoStore, askUserQuestionGate, skillStore,
