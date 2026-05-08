@@ -252,6 +252,7 @@ export function AskUserQuestionCard({
             }}
             onFreeText={(freeText) => setAnswer(step, { freeText })}
             onSubmit={handleSubmit}
+            onAdvance={goNext}
           />
         ) : (
           <ConfirmReview
@@ -354,6 +355,7 @@ function QuestionForm({
   onChoose,
   onFreeText,
   onSubmit,
+  onAdvance,
 }: {
   item: AskUserQuestionItem;
   draft: DraftAnswer;
@@ -361,8 +363,18 @@ function QuestionForm({
   /** Returns true if the new draft is complete (used by keyboard handler to advance). */
   onChoose: (choice: string, choiceIndex: number) => boolean;
   onFreeText: (text: string) => void;
-  /** Called when Enter is pressed or a choice is keyboard-selected to advance/submit. */
+  /**
+   * Called on free-text Enter: validates current draft (which IS current
+   * because free-text onChange fires before onKeyDown) then advances.
+   */
   onSubmit: () => void;
+  /**
+   * Called by the keyboard choice handler when `onChoose` returns true.
+   * Advances directly (goNext) without re-checking draft — the synchronous
+   * return value of onChoose is authoritative; re-reading currentDraft here
+   * would be stale due to React 18 state batching.
+   */
+  onAdvance: () => void;
 }) {
   const choices = effectiveChoices(item);
   const recommend = recommendIndex(item);
@@ -403,13 +415,14 @@ function QuestionForm({
       } else if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
         // onChoose returns whether the new draft is complete — use that
-        // synchronous result to advance rather than the stale onSubmit
-        // closure which reflects pre-selection isAnswerComplete state.
+        // synchronous result to advance via onAdvance (which calls goNext
+        // directly) rather than onSubmit (which re-reads currentDraft and
+        // would see the pre-setAnswer stale value due to React 18 batching).
         const willBeComplete = onChoose(choices[i], i);
-        if (willBeComplete) onSubmit();
+        if (willBeComplete) onAdvance();
       }
     },
-    [disabled, choices, onChoose, onSubmit],
+    [disabled, choices, onChoose, onAdvance],
   );
 
   return (
