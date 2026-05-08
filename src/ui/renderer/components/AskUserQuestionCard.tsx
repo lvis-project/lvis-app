@@ -21,7 +21,7 @@
  *     advisory only here — the prompt enforces; the UI renders whatever
  *     the model produces and trusts upstream validation.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../../../components/ui/button.js";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui/card.js";
 import { Input } from "../../../components/ui/input.js";
@@ -207,6 +207,12 @@ export function AskUserQuestionCard({
     <Card
       className="w-full max-w-none border border-l-4 border-l-message-user bg-card shadow-none"
       data-testid="ask-user-question-card"
+      onKeyDown={(e) => {
+        if (e.key === "Escape" && !submitting) {
+          e.preventDefault();
+          dismiss();
+        }
+      }}
     >
       <CardHeader className="flex flex-row items-center justify-between gap-2 px-3 pt-3 pb-1.5 space-y-0">
         <CardTitle className="text-[12px] font-medium text-muted-foreground">
@@ -231,6 +237,7 @@ export function AskUserQuestionCard({
               }
             }}
             onFreeText={(freeText) => setAnswer(step, { freeText })}
+            onSubmit={isAnswerComplete(currentItem, currentDraft) ? goNext : undefined}
           />
         ) : (
           <ConfirmReview
@@ -332,16 +339,55 @@ function QuestionForm({
   disabled,
   onChoose,
   onFreeText,
+  onSubmit,
 }: {
   item: AskUserQuestionItem;
   draft: DraftAnswer;
   disabled: boolean;
   onChoose: (choice: string, choiceIndex: number) => void;
   onFreeText: (text: string) => void;
+  /** Called when Enter is pressed on a focused choice to advance/submit. */
+  onSubmit?: () => void;
 }) {
   const choices = effectiveChoices(item);
   const recommend = recommendIndex(item);
   const alts = altIndices(item);
+  // Roving tabIndex: track which choice button has the "tab stop".
+  const [focusedIdx, setFocusedIdx] = useState<number>(
+    () => draft.choiceIndex ?? (recommendIndex(item) ?? 0),
+  );
+  const buttonRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  // Sync focused idx when the draft's selected choice changes externally.
+  useEffect(() => {
+    if (typeof draft.choiceIndex === "number") {
+      setFocusedIdx(draft.choiceIndex);
+    }
+  }, [draft.choiceIndex]);
+
+  const handleChoiceKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLButtonElement>, i: number) => {
+      if (disabled) return;
+      if (e.key === "ArrowDown" || e.key === "ArrowRight") {
+        e.preventDefault();
+        const next = (i + 1) % choices.length;
+        setFocusedIdx(next);
+        buttonRefs.current[next]?.focus();
+      } else if (e.key === "ArrowUp" || e.key === "ArrowLeft") {
+        e.preventDefault();
+        const prev = (i - 1 + choices.length) % choices.length;
+        setFocusedIdx(prev);
+        buttonRefs.current[prev]?.focus();
+      } else if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        onChoose(choices[i], i);
+        // Give the selection state a frame to propagate before submitting.
+        if (onSubmit) requestAnimationFrame(() => onSubmit());
+      }
+    },
+    [disabled, choices, onChoose, onSubmit],
+  );
+
   return (
     <>
       <div
@@ -351,7 +397,11 @@ function QuestionForm({
         {item.question}
       </div>
       {choices.length > 0 && (
-        <div className="flex flex-col gap-1">
+        <div
+          role="listbox"
+          aria-label={item.question}
+          className="flex flex-col gap-1"
+        >
           {choices.map((c, i) => {
             // Selection compares by index, not by label — duplicate
             // choice strings would otherwise mark every same-label chip
@@ -360,13 +410,22 @@ function QuestionForm({
             const selected = draft.choiceIndex === i;
             const showRecommend = recommend === i;
             const showAlt = alts.has(i);
+            // Roving tabIndex: only the focused item (or selected item when
+            // none is explicitly focused) is in the tab order.
+            const isTabStop = focusedIdx === i || (focusedIdx < 0 && i === 0);
             return (
               <Button
                 key={`${i}:${c}`}
+                ref={(el) => { buttonRefs.current[i] = el; }}
+                role="option"
+                aria-selected={selected}
+                tabIndex={isTabStop ? 0 : -1}
                 size="sm"
                 variant={selected ? "default" : "outline"}
                 disabled={disabled}
                 onClick={() => onChoose(c, i)}
+                onKeyDown={(e) => handleChoiceKeyDown(e, i)}
+                onFocus={() => setFocusedIdx(i)}
                 className="h-auto justify-start gap-2 px-2.5 py-1.5 text-[12px]"
               >
                 {showRecommend && <ChoiceBadge kind="recommend" />}
@@ -381,6 +440,12 @@ function QuestionForm({
         <Input
           value={draft.freeText ?? ""}
           onChange={(e) => onFreeText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey && onSubmit) {
+              e.preventDefault();
+              onSubmit();
+            }
+          }}
           placeholder={item.placeholder ?? "직접입력하기"}
           className="h-8 text-[12px]"
           disabled={disabled}
