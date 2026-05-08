@@ -57,6 +57,13 @@ export interface MessageMeta {
   /** Layer 1 mark-stale 면제 — skill 도구 출력 또는 사용자 명시 lock. structured-compact 의 pinnedArtifacts 와 paired. */
   lock?: boolean;
   /**
+   * wire/disk serialization 직전 stub 화가 적용되어 content 가 이미 placeholder 인 경우 true.
+   * 이중 변환 방지 idempotency guard. memoryManager.saveSession 시 보존되어야 함.
+   * string-prefix 체크 대신 이 flag 를 사용함으로써 도구 출력이 우연히 stub prefix 로 시작하는
+   * false-positive (R4 회귀) 방지 — Copilot round 2 지적 (PR-3 round 3 fix).
+   */
+  serializedStub?: boolean;
+  /**
    * Layer 2 boundary 의 opaque-state slot. type-only import 로 cycle 회피.
    * 단일 source of truth: src/engine/structured-compact.ts:CompactBoundary.
    * ⑧ slot / Layer 3 storage / history[0] 3 view 가 같은 frozen reference.

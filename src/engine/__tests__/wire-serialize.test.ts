@@ -45,6 +45,8 @@ describe("stubMarkedToolResults", () => {
       expect(wireToolResult.toolName).toBe("search");
       // meta.compactedAt 은 그대로 carry
       expect(wireToolResult.meta?.compactedAt).toBe("2026-05-08T00:00:00.000Z");
+      // meta.serializedStub flag 가 set 됨 (idempotency guard)
+      expect(wireToolResult.meta?.serializedStub).toBe(true);
     }
 
     // 입력 array 의 verbatim message 는 mutate 되지 않음 (memory 보존)
@@ -52,6 +54,8 @@ describe("stubMarkedToolResults", () => {
     if (memoryToolResult.role === "tool_result") {
       expect(memoryToolResult.content).toBe(verbatim);
       expect(memoryToolResult.content.length).toBe(verbatim.length);
+      // 원본 meta 에는 serializedStub 가 없음 (입력 객체 mutate 안 함)
+      expect(memoryToolResult.meta?.serializedStub).toBeUndefined();
     }
   });
 
@@ -77,19 +81,42 @@ describe("stubMarkedToolResults", () => {
     expect(out).toBe(messages); // reference-equal
   });
 
-  it("idempotent — already-stub content is not double-stubbed", () => {
+  it("idempotent — meta.serializedStub=true prevents double-stubbing (Copilot round 2 fix)", () => {
     const messages: GenericMessage[] = [
       {
         role: "tool_result",
         toolUseId: "t1",
         toolName: "search",
         content: "[tool_result stripped: tool=search, origLen=12345]",
-        meta: { compactedAt: "2026-05-08T00:00:00.000Z" },
+        meta: { compactedAt: "2026-05-08T00:00:00.000Z", serializedStub: true },
       },
     ];
     const out = stubMarkedToolResults(messages);
-    // already stub form — reference-equal, no transformation
+    // already stub (meta flag) — reference-equal, no transformation
     expect(out).toBe(messages);
+  });
+
+  it("false-positive guard — tool output starting with stub prefix still converted when serializedStub not set", () => {
+    // 도구 출력이 우연히 stub prefix 로 시작해도, serializedStub flag 가 없으면 올바르게 stub 변환
+    const trickContent = "[tool_result stripped: this is real tool output, not a stub]";
+    const messages: GenericMessage[] = [
+      {
+        role: "tool_result",
+        toolUseId: "t1",
+        toolName: "search",
+        content: trickContent,
+        meta: { compactedAt: "2026-05-08T00:00:00.000Z" },
+        // serializedStub 미설정 — 아직 stub 화 안 됨
+      },
+    ];
+    const out = stubMarkedToolResults(messages);
+    expect(out).not.toBe(messages); // 새 array — 변환 발생
+    const wireMsg = out[0];
+    if (wireMsg.role === "tool_result") {
+      // content 가 새 stub 으로 교체됨 (origLen 이 trickContent.length 기반)
+      expect(wireMsg.content).toContain(`origLen=${trickContent.length}`);
+      expect(wireMsg.meta?.serializedStub).toBe(true);
+    }
   });
 
   it("transforms only tool_result roles (user/assistant unchanged)", () => {

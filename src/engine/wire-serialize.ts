@@ -23,13 +23,15 @@ import { buildToolResultStub } from "./auto-compact.js";
  */
 export function stubMarkedToolResults(messages: GenericMessage[]): GenericMessage[] {
   // Copy-on-write — eligible 메시지가 하나도 없으면 새 array 생성하지 않고 입력 그대로 반환.
-  // 사전 scan: marked + 아직-stub-아님 인 첫 인덱스 탐색.
+  // 사전 scan: marked (compactedAt set) + 아직 stub 아님 (serializedStub !== true) 인 첫 인덱스 탐색.
+  // NOTE: string-prefix 체크는 도구 출력이 우연히 그 prefix 로 시작하는 false-positive 위험 →
+  //       meta.serializedStub flag 기반으로 전환 (Copilot round 2 지적, PR-3 round 3 fix).
   let firstEligibleIdx = -1;
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i];
     if (msg.role !== "tool_result") continue;
     if (msg.meta?.compactedAt === undefined) continue;
-    if (msg.content.startsWith("[tool_result stripped:")) continue; // 이미 stub
+    if (msg.meta.serializedStub === true) continue; // 이미 stub (meta flag)
     firstEligibleIdx = i;
     break;
   }
@@ -42,7 +44,7 @@ export function stubMarkedToolResults(messages: GenericMessage[]): GenericMessag
     if (
       msg.role === "tool_result" &&
       msg.meta?.compactedAt !== undefined &&
-      !msg.content.startsWith("[tool_result stripped:")
+      msg.meta.serializedStub !== true
     ) {
       const origLen = msg.content.length;
       out.push({
@@ -51,7 +53,7 @@ export function stubMarkedToolResults(messages: GenericMessage[]): GenericMessag
         toolName: msg.toolName,
         isError: msg.isError,
         content: buildToolResultStub(msg.toolName, origLen),
-        meta: msg.meta,
+        meta: { ...msg.meta, serializedStub: true },
       } as GenericMessage);
     } else {
       out.push(msg); // reference share
