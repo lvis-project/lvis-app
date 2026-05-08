@@ -280,7 +280,7 @@ export function validateThemePayload(payload: unknown):
       safeTokens[k] = v;
     }
   }
-  if (Object.keys(safeTokens).length > 0) safe.tokens = safeTokens;
+  safe.tokens = safeTokens;
   // fonts.family: allowlist of safe system/web font family names (no injection)
   if (p.fonts && typeof p.fonts === "object" && !Array.isArray(p.fonts)) {
     const f = p.fonts as Record<string, unknown>;

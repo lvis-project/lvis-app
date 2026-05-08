@@ -57,7 +57,7 @@ describe("validateThemePayload", () => {
     expect(result).toEqual({ ok: false, error: "invalid-shell" });
   });
 
-  it("rejects extra injected fields — safe output strips unknown keys", () => {
+  it("accepts payload and strips unknown injected fields", () => {
     const result = validateThemePayload({
       bundleId: "midnight", shell: "dark",
       tokens: { "--lvis-bg": "#000" },
@@ -101,7 +101,7 @@ describe("validateThemePayload", () => {
     });
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.safe.tokens).toBeUndefined();
+      expect(result.safe.tokens).toEqual({});
     }
   });
 
@@ -112,7 +112,7 @@ describe("validateThemePayload", () => {
     });
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.safe.tokens).toBeUndefined();
+      expect(result.safe.tokens).toEqual({});
     }
   });
 
@@ -123,18 +123,18 @@ describe("validateThemePayload", () => {
     });
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.safe.tokens).toBeUndefined();
+      expect(result.safe.tokens).toEqual({});
     }
   });
 
-  it("does not include tokens key when all token entries are invalid", () => {
+  it("returns stable empty tokens object when all token entries are filtered out", () => {
     const result = validateThemePayload({
       bundleId: "tokyo-night", shell: "dark",
       tokens: { "--evil": "red" },
     });
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.safe.tokens).toBeUndefined();
+      expect(result.safe.tokens).toEqual({});
     }
   });
 
@@ -153,7 +153,7 @@ describe("validateThemePayload", () => {
     });
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.safe.tokens).toBeUndefined();
+      expect(result.safe.tokens).toEqual({});
     }
   });
 
@@ -164,7 +164,7 @@ describe("validateThemePayload", () => {
     });
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.safe.tokens).toBeUndefined();
+      expect(result.safe.tokens).toEqual({});
     }
   });
 
