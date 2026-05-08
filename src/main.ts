@@ -26,6 +26,10 @@ import { createLogger } from "./lib/logger.js";
 import { LVIS_LOGO_PATH, LVIS_LOGO_VIEW_BOX } from "./shared/lvis-logo.js";
 const log = createLogger("lvis");
 
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const distRoot = resolve(__dirname, "..");
@@ -102,7 +106,7 @@ async function injectCorporateCa() {
     log.info(`corporate CA injected: source=${result.source} certs=${result.certCount} path=${result.path}`);
   } catch (e) {
     // 주입 실패해도 앱은 계속 실행 (해외망에서는 기본 CA로 충분)
-    log.error("corporate CA 주입 실패 (non-fatal): %s", (e as Error).message);
+    log.error("corporate CA 주입 실패 (non-fatal): %s", errorMessage(e));
   }
 }
 await injectCorporateCa();
@@ -803,6 +807,7 @@ app.on("before-quit", (event) => {
                     trigger: r.trigger,
                     prePrompt: r.prePrompt ?? "",
                     title: r.title,
+                    allowedPlugins: r.allowedPlugins,
                     signal: controller.signal,
                   });
                 } catch (abortErr) {
@@ -822,12 +827,13 @@ app.on("before-quit", (event) => {
                   contextRef: { routineId: r.id },
                 });
               }
+              await svc.routinesStore.markFired(r.id);
             } catch (err) {
-              log.warn("before-quit: shutdown routine failed (id=%s): %s", r.id, (err as Error).message);
+              log.warn("before-quit: shutdown routine failed (id=%s): %s", r.id, errorMessage(err));
             }
           }
         } catch (e) {
-          log.warn("before-quit: shutdown routines setup failed: %s", (e as Error).message);
+          log.warn("before-quit: shutdown routines setup failed: %s", errorMessage(e));
         }
       }
       await svc.shutdown?.();

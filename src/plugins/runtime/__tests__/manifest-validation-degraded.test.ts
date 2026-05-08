@@ -78,4 +78,58 @@ describe("parsePluginJson — degraded-validator warn log", () => {
     expect(manifest.id).toBe("com.test.degraded");
     expect(manifest.version).toBe("1.0.0");
   });
+
+  it("validates toolSchemas category under degraded mode", async () => {
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        id: "com.test.degraded",
+        name: "Degraded Test",
+        version: "1.0.0",
+        entry: "dist/index.js",
+        tools: ["degraded_ping"],
+        description: "Degraded validator test plugin",
+        publisher: "Test",
+        toolSchemas: {
+          degraded_ping: {
+            description: "Degraded ping test tool",
+            category: "read",
+            inputSchema: { type: "object", properties: {} },
+          },
+        },
+      }),
+      "utf-8",
+    );
+
+    const manifest = await parsePluginJson(manifestPath, null);
+
+    expect(manifest.toolSchemas?.degraded_ping?.category).toBe("read");
+  });
+
+  it("rejects invalid toolSchemas category under degraded mode", async () => {
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        id: "com.test.degraded",
+        name: "Degraded Test",
+        version: "1.0.0",
+        entry: "dist/index.js",
+        tools: ["degraded_ping"],
+        description: "Degraded validator test plugin",
+        publisher: "Test",
+        toolSchemas: {
+          degraded_ping: {
+            description: "Degraded ping test tool",
+            category: "side-effect-free",
+            inputSchema: { type: "object", properties: {} },
+          },
+        },
+      }),
+      "utf-8",
+    );
+
+    await expect(parsePluginJson(manifestPath, null)).rejects.toThrow(
+      /toolSchemas\['degraded_ping'\]\.category/,
+    );
+  });
 });
