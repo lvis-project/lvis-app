@@ -673,7 +673,6 @@ export function App() {
             isEntryStarred={isEntryStarred}
             onAbort={handleAbort}
             onFeedback={handleFeedback}
-            onRevertCheckpoint={handleLoadSession}
             subAgentSpawns={subAgentSpawns}
             loadedSkills={loadedSkills}
             hasAskQuestions={askQuestions.length > 0}

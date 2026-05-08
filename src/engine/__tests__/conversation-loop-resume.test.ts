@@ -140,40 +140,10 @@ describe("ConversationLoop.resetAndResume", () => {
     loop.resetAndResume("test-session-id");
     expect(loop.getSessionId()).toBe("test-session-id");
   });
-});
 
-describe("ConversationLoop.resetAndResume — Issue 1: shouldCompact fires on resume", () => {
-  it("shouldCompact returns true when resumed history has 50 large messages (token estimate exceeds threshold)", () => {
-    // 50 messages × ~200 chars each ≈ 50 × (200/4+1) = 50 × 51 = 2550 estimated tokens
-    // gpt-4o context window = 128,000; threshold 80% = 102,400 — won't fire with 2550.
-    // Use a model with a tiny context window by customizing settings, OR
-    // use large messages that exceed any threshold.
-    // Simplest: 50 messages × 400 chars = ~50 × 101 = 5050 tokens. Still below 102,400.
-    // To force the check, we make messages that collectively estimate > threshold.
-    // With 50 messages × 10000 chars → 50 × (10000/4+1) = 50 × 2501 = 125,050 tokens
-    // which is > 128,000 * 0.8 = 102,400. So shouldCompact should fire.
-    const msgs: GenericMessage[] = [];
-    for (let i = 0; i < 50; i++) {
-      msgs.push({
-        role: i % 2 === 0 ? "user" : "assistant",
-        content: "x".repeat(10_000),
-      });
-    }
-    const mem = makeMemoryManager(msgs);
-    mem.saveSession = vi.fn();
-    const loop = new ConversationLoop(makeDeps({ memoryManager: mem, settingsService: makeSettings(true) }));
-
-    const result = loop.resetAndResume("test-session-id");
-
-    // The compact check should have fired; either it compacted or messages were short
-    // enough that compactMessages decided not to — but shouldCompact gate must have been reached.
-    expect(result.ok).toBe(true);
-    // With 50 large messages the estimated tokens exceed 80% of 128K window → compacted
-    expect(result.compacted).toBe(true);
-  });
-
-  it("shouldCompact is NOT skipped when usage was zero before resume (regression guard)", () => {
-    // Load large history — if usage estimate was not set, compact would be skipped.
+  it("PR-2-F-4: cumulativeUsage 추정값 set on resume — Layer 0 가 next turn 평가용으로 read", () => {
+    // 50 messages × 10K chars each → estimateMessagesTokens > 0. Layer 0 preflight 가
+    // next user turn 진입 시 이 값을 사용하여 임계 평가.
     const msgs: GenericMessage[] = [];
     for (let i = 0; i < 50; i++) {
       msgs.push({ role: i % 2 === 0 ? "user" : "assistant", content: "y".repeat(10_000) });
@@ -181,99 +151,101 @@ describe("ConversationLoop.resetAndResume — Issue 1: shouldCompact fires on re
     const mem = makeMemoryManager(msgs);
     const loop = new ConversationLoop(makeDeps({ memoryManager: mem }));
 
-    // Before fix: cumulativeUsage was always 0 after loadSession → shouldCompact never fired.
-    // After fix: estimated usage is derived from message content.
     const result = loop.resetAndResume("test-session-id");
     expect(result.ok).toBe(true);
-    // Usage estimate should now be non-zero
+    // cumulativeUsage 가 estimate 로 set 됐는지 — Layer 0 가 정확한 ratio 평가 가능
     expect(loop.getCumulativeUsage().inputTokens).toBeGreaterThan(0);
+    // resetAndResume 자체는 더 이상 auto-compact 하지 않음 — Layer 0 가 next turn 처리
+    expect(result.compacted).toBe(false);
   });
 });
 
-describe("ConversationLoop.manualCompact", () => {
-  it("returns compacted:false for empty history", () => {
-    const loop = new ConversationLoop(makeDeps());
-    const result = loop.manualCompact();
+
+describe("ConversationLoop.manualCompact — Major Fix callbacks", () => {
+  /** makeMemoryManager stub with appendCheckpoint + saveSessionMetadata support */
+  function makeMemoryManagerWithCheckpoint() {
+    const sessions: Record<string, GenericMessage[]> = {};
+    const metadata: Record<string, unknown> = {};
+    return {
+      listSessions: () => [],
+      loadSession: (id: string) => sessions[id] ?? null,
+      loadSessionMetadata: vi.fn(() => null),
+      saveSession: vi.fn((id: string, msgs: GenericMessage[]) => { sessions[id] = msgs; }),
+      saveSessionMetadata: vi.fn(async (id: string, meta: unknown) => { metadata[id] = meta; }),
+      appendCheckpoint: vi.fn((_meta: unknown, cp: unknown) => ({ checkpoints: [cp] })),
+      listMemoryEntries: () => [],
+      saveMemory: vi.fn(),
+      deleteMemory: vi.fn(),
+      searchMemoryEntries: vi.fn(),
+      getMemoryContext: vi.fn(),
+      getLvisMd: vi.fn(),
+      updateLvisMd: vi.fn(),
+      getUserPreferences: vi.fn(),
+      updateUserPreferences: vi.fn(),
+    } as unknown as ConversationLoopDeps["memoryManager"];
+  }
+
+  it("no-op (short history): compacted:false", async () => {
+    const mem = makeMemoryManagerWithCheckpoint();
+    const loop = new ConversationLoop(makeDeps({ memoryManager: mem }));
+
+    // Provider 없으면 early-return — 짧은 history 로 충분히 no-op 검증
+    const result = await loop.manualCompact();
+
     expect(result.compacted).toBe(false);
-    expect(result.compactedAt).toBeNull();
-    expect(result.removedMessageCount).toBe(0);
   });
 
-  it("returns compacted:false for very short history", () => {
-    const mem = makeMemoryManager([
-      { role: "user", content: "hi" },
-      { role: "assistant", content: "hello" },
-    ]);
-    const loop = new ConversationLoop(makeDeps({ memoryManager: mem }));
+  it("manualCompact appends Layer 3 checkpoint + persists summary", async () => {
+    // Long enough history to trigger compact
+    const longHistory = makeLongHistory(40);
+    const mem = makeMemoryManagerWithCheckpoint();
+    // Pre-load session
+    const sessions: Record<string, GenericMessage[]> = { "test-session-id": longHistory };
+    const memWithHistory = {
+      ...mem,
+      loadSession: (id: string) => sessions[id] ?? null,
+      loadSessionMetadata: vi.fn(() => null),
+    } as unknown as ConversationLoopDeps["memoryManager"];
+
+    const loop = new ConversationLoop(makeDeps({ memoryManager: memWithHistory }));
     loop.resetAndResume("test-session-id");
 
-    const result = loop.manualCompact();
-    expect(result.compacted).toBe(false);
-    expect(result.summary).toContain("불필요");
-  });
+    // Inject a fake provider that returns a valid 12-section summary
+    const fakeSummary = [
+      "## Goal", "test goal",
+      "## Constraints & Preferences", "none",
+      "## Progress", "- [x] done",
+      "## Key Decisions", "- decided",
+      "## Relevant Files", "src/foo.ts:main:edited",
+      "## Next Steps", "(미정)",
+      "## Critical Context", "none",
+      "## Current Plan", "step 1/1",
+      "## Verification State", "build pass",
+      "## Open Blockers", "none",
+      "## Unsafe Pending Actions", "none",
+      "## Last Tool Boundary", "none",
+    ].join("\n");
 
-  it("compacts long history and returns metadata", () => {
-    const history = makeLongHistory(30);
-    const mem = makeMemoryManager(history);
-    const loop = new ConversationLoop(makeDeps({ memoryManager: mem }));
-    loop.resetAndResume("test-session-id");
-
-    const before = loop.getHistory().length;
-    const result = loop.manualCompact();
-
-    if (result.compacted) {
-      expect(result.compactedAt).not.toBeNull();
-      expect(result.removedMessageCount).toBeGreaterThan(0);
-      expect(result.summary).toContain("메시지 요약됨");
-      expect(loop.getHistory().length).toBeLessThan(before);
-    } else {
-      // compactMessages may decide not to compact if threshold not met — just verify shape
-      expect(result.compacted).toBe(false);
-      expect(result.removedMessageCount).toBe(0);
-    }
-  });
-
-  it("Issue 2: saveSession called with compacted messages after manualCompact", () => {
-    const history = makeLongHistory(30);
-    const mem = makeMemoryManager(history);
-    const loop = new ConversationLoop(makeDeps({ memoryManager: mem }));
-    loop.resetAndResume("test-session-id");
-
-    const result = loop.manualCompact();
-
-    if (result.compacted) {
-      // saveSession must be called with the compacted (shorter) message list
-      expect(mem.saveSession).toHaveBeenCalled();
-      const savedMsgs = (mem.saveSession as ReturnType<typeof vi.fn>).mock.calls.at(-1)![1] as GenericMessage[];
-      expect(savedMsgs.length).toBeLessThan(history.length);
-    }
-    // If not compacted (threshold not met), saveSession should not be called for compact
-    // (it may have been called by loadSession/resetAndResume — that's ok)
-  });
-  it("Issue 37.19: /compact slash command calls saveSession with compacted messages", async () => {
-    const history = makeLongHistory(30);
-    const mem = makeMemoryManager(history);
-    const routeEngine = {
-      route: vi.fn().mockReturnValue({ route: "command", command: "compact", args: "" }),
-    } as unknown as ConversationLoopDeps["routeEngine"];
-    const keywordEngine = {
-      classify: vi.fn().mockReturnValue({ type: "command" }),
-      matchAllPluginIds: () => new Set(),
-    } as unknown as ConversationLoopDeps["keywordEngine"];
     const fakeProvider = {
-      vendor: "openai" as const,
-      streamTurn: async function* () { /* unused — command path exits before LLM */ },
+      vendor: "claude" as const,
+      streamTurn: async function* () {
+        yield { type: "text_delta" as const, text: fakeSummary };
+        yield { type: "message_complete" as const };
+      },
     };
-    const loop = new ConversationLoop(makeDeps({ memoryManager: mem, routeEngine, keywordEngine }));
     (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
-    loop.resetAndResume("test-session-id");
-    mem.saveSession = vi.fn().mockResolvedValue(undefined);
 
-    await loop.runTurn("/compact");
+    const result = await loop.manualCompact();
 
-    expect(mem.saveSession).toHaveBeenCalled();
-    const savedMsgs = (mem.saveSession as ReturnType<typeof vi.fn>).mock.calls[0]![1] as import("../llm/types.js").GenericMessage[];
-    expect(savedMsgs.length).toBeLessThan(history.length);
+    if (result.compacted) {
+      // manualCompact 는 callbacks 파라미터가 없으므로 onCompactOccurred 는 호출 안 됨.
+      // 이 테스트는 Layer 3 checkpoint 영속화 (appendCheckpoint + saveSessionMetadata) 를 검증.
+      expect(result.compacted).toBe(true);
+      expect(result.removedMessageCount).toBeGreaterThan(0);
+      // Layer 3: appendCheckpoint and saveSessionMetadata must have been called
+      expect((memWithHistory as { appendCheckpoint: ReturnType<typeof vi.fn> }).appendCheckpoint).toHaveBeenCalled();
+      expect((memWithHistory as { saveSessionMetadata: ReturnType<typeof vi.fn> }).saveSessionMetadata).toHaveBeenCalled();
+    }
   });
 });
 

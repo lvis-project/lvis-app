@@ -2,14 +2,13 @@
  * Auto-Compact — 2-stage compaction tests.
  *
  * Stage 1 (markStaleToolResults): preventive tool_result stub 교체.
- * Stage 2 (compactMessages): threshold 초과 시 요약 생성 + boundary marker.
  */
 import { describe, it, expect } from "vitest";
 
 import {
   markStaleToolResults,
-  compactMessages,
-  decideRotation,
+  estimateTokens,
+  countHangul,
 } from "../auto-compact.js";
 import type { GenericMessage } from "../llm/types.js";
 
@@ -170,203 +169,62 @@ describe("markStaleToolResults", () => {
   });
 });
 
-describe("compactMessages — boundary marker", () => {
-  it("tags the generated summary user message with compactBoundary=true", () => {
-    const messages: GenericMessage[] = [];
-    for (let i = 0; i < 20; i++) {
-      messages.push({ role: "user", content: `q${i}` });
-      messages.push({ role: "assistant", content: `a${i}` });
-    }
-    const { messages: out, result } = compactMessages(messages);
-    expect(result.compacted).toBe(true);
-
-    const marker = out.find(
-      (m) => m.role === "user" && m.meta?.compactBoundary === true,
-    );
-    expect(marker).toBeDefined();
-    expect(marker?.content).toContain("[이전 대화 요약]");
-    expect(marker?.meta?.removedCount).toBeGreaterThan(0);
-    expect(marker?.meta?.compactedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+describe("countHangul", () => {
+  it("counts 가-힣 characters only", () => {
+    expect(countHangul("안녕하세요")).toBe(5);
+    expect(countHangul("hello")).toBe(0);
+    expect(countHangul("안녕 hello 세계")).toBe(4); // 안녕 (2) + 세계 (2) = 4
   });
 
-  it("does not re-summarize an existing boundary marker (double-compact prevention)", () => {
-    // 1) 첫 compact
-    const initial: GenericMessage[] = [];
-    for (let i = 0; i < 20; i++) {
-      initial.push({ role: "user", content: `q${i}` });
-      initial.push({ role: "assistant", content: `a${i}` });
-    }
-    const first = compactMessages(initial);
-    expect(first.result.compacted).toBe(true);
-    const originalMarker = first.messages.find(
-      (m) => m.role === "user" && m.meta?.compactBoundary === true,
-    );
+  it("ignores hangul jamo (ㄱ-ㅎ, ㅏ-ㅣ outside 가-힣 syllable block)", () => {
+    // U+3131 (ㄱ) is *outside* 가-힣 (U+AC00~U+D7A3) syllable range — not counted
+    expect(countHangul("ㄱㄴㄷ")).toBe(0);
+  });
 
-    // 2) 대화를 더 이어서 두 번째 compact 트리거
-    const extended: GenericMessage[] = [...first.messages];
-    for (let i = 0; i < 20; i++) {
-      extended.push({ role: "user", content: `q2-${i}` });
-      extended.push({ role: "assistant", content: `a2-${i}` });
-    }
-    const second = compactMessages(extended);
-    expect(second.result.compacted).toBe(true);
-
-    // 원본 marker가 여전히 메시지 배열 안에 reference-equal로 존재
-    const stillThere = second.messages.find((m) => m === originalMarker);
-    expect(stillThere).toBeDefined();
-
-    // 새 marker도 생성됨 (두 개의 boundary 가능)
-    const markerCount = second.messages.filter(
-      (m) => m.role === "user" && m.meta?.compactBoundary === true,
-    ).length;
-    expect(markerCount).toBeGreaterThanOrEqual(2);
+  it("returns 0 for empty string", () => {
+    expect(countHangul("")).toBe(0);
   });
 });
 
-// ─── decideRotation ───────────────────────────────────
-
-const DAY_MS = 24 * 60 * 60 * 1_000;
-
-describe("decideRotation — 3-tier rotation decision tree", () => {
-  // ── Tier 1: hard-token ────────────────────────────
-
-  it("tier-1: ctxUsage=0.85 triggers hard-token rotation", () => {
-    const r = decideRotation({ ctxUsage: 0.85, sessionAgeMs: 0, semanticHint: false });
-    expect(r.shouldRotate).toBe(true);
-    expect(r.trigger).toBe("hard-token");
-    expect(r.shouldSkipSummary).toBe(false);
+describe("estimateTokens — chars/4 + 1 with Korean weighting (P11)", () => {
+  it("100% English: weight 1.0", () => {
+    // length 8 / 4 + 1 = 3
+    expect(estimateTokens("hello123")).toBe(3);
   });
 
-  it("tier-1: ctxUsage=1.0 triggers hard-token rotation with shouldSkipSummary=false", () => {
-    const r = decideRotation({ ctxUsage: 1.0, sessionAgeMs: 0, semanticHint: false });
-    expect(r.shouldRotate).toBe(true);
-    expect(r.trigger).toBe("hard-token");
-    expect(r.shouldSkipSummary).toBe(false);
+  it("100% Korean (ratio = 1.0): weight 1.3", () => {
+    // length 5 (안녕하세요), ratio 1.0 → ceil(5 × 1.3 / 4) + 1 = ceil(1.625) + 1 = 2 + 1 = 3
+    expect(estimateTokens("안녕하세요")).toBe(3);
   });
 
-  it("tier-1: ctxUsage=0.84 does NOT trigger hard-token", () => {
-    const r = decideRotation({ ctxUsage: 0.84, sessionAgeMs: 0, semanticHint: false });
-    // no tier-2 or tier-3 hints → no rotation
-    expect(r.shouldRotate).toBe(false);
-    expect(r.trigger).toBeUndefined();
+  it("Korean ≥ 50% triggers weight 1.3", () => {
+    // 한글 5 chars + ABC 3 chars = 8 total, ratio 5/8 = 0.625 ≥ 0.5
+    // ceil(8 × 1.3 / 4) + 1 = ceil(2.6) + 1 = 3 + 1 = 4
+    expect(estimateTokens("한글ABC글한")).toBe(4);
   });
 
-  // ── Tier 2: semantic-llm ──────────────────────────
-
-  it("tier-2: semanticHint=true triggers semantic-llm rotation", () => {
-    const r = decideRotation({ ctxUsage: 0.5, sessionAgeMs: 0, semanticHint: true });
-    expect(r.shouldRotate).toBe(true);
-    expect(r.trigger).toBe("semantic-llm");
+  it("Korean < 50% does NOT trigger weight (mixed code+comment)", () => {
+    // "function 한글() { return 1; }" — 30 chars total, hangul 2 = ratio 0.067 < 0.5 → weight 1.0
+    const text = "function 한글() { return 1; }";
+    const expected = Math.ceil(text.length / 4) + 1;
+    expect(estimateTokens(text)).toBe(expected);
   });
 
-  it("tier-2: semanticHint at low ctx (0.05) skips summary", () => {
-    const r = decideRotation({ ctxUsage: 0.05, sessionAgeMs: 0, semanticHint: true });
-    expect(r.shouldRotate).toBe(true);
-    expect(r.trigger).toBe("semantic-llm");
-    expect(r.shouldSkipSummary).toBe(true); // ctxUsage 0.05 < 0.10
+  it("50:50 boundary edge — exactly 50% triggers weight", () => {
+    // 5 hangul + 5 ASCII = 10 chars, ratio 0.5 → weight 1.3
+    // ceil(10 × 1.3 / 4) + 1 = ceil(3.25) + 1 = 4 + 1 = 5
+    expect(estimateTokens("ABCDE안녕하세요")).toBe(5);
   });
 
-  it("tier-2: semanticHint at 0.10 ctx generates summary", () => {
-    const r = decideRotation({ ctxUsage: 0.10, sessionAgeMs: 0, semanticHint: true });
-    expect(r.shouldRotate).toBe(true);
-    expect(r.trigger).toBe("semantic-llm");
-    expect(r.shouldSkipSummary).toBe(false); // ctxUsage 0.10 is NOT < 0.10
+  it("empty string returns 1 (no division by zero)", () => {
+    expect(estimateTokens("")).toBe(1);
   });
 
-  it("tier-2: hard-token takes precedence over semantic hint", () => {
-    const r = decideRotation({ ctxUsage: 0.90, sessionAgeMs: 0, semanticHint: true });
-    expect(r.trigger).toBe("hard-token"); // tier-1 wins
-    expect(r.shouldSkipSummary).toBe(false);
-  });
-
-  // ── Tier 3: soft-time ─────────────────────────────
-
-  it("tier-3: sessionAgeMs >= 24h triggers soft-time rotation", () => {
-    const r = decideRotation({ ctxUsage: 0.05, sessionAgeMs: DAY_MS, semanticHint: false });
-    expect(r.shouldRotate).toBe(true);
-    expect(r.trigger).toBe("soft-time");
-  });
-
-  it("tier-3: sessionAgeMs < 24h does NOT trigger by time alone", () => {
-    const r = decideRotation({ ctxUsage: 0.05, sessionAgeMs: DAY_MS - 1, semanticHint: false });
-    expect(r.shouldRotate).toBe(false);
-  });
-
-  // 2026-05-04 incident 후속 정정: tier-3 의 message-count 분기 *제거*. weak
-  // signal proxy 가 짧은 도구-heavy 세션에서 false-positive 트리거하던 root
-  // cause. tier 3 는 24h day-boundary 안전망만 유지 — context 압박은 tier 1
-  // (토큰), topic shift 는 tier 2 (semantic) 에서 처리.
-  it("tier-3: low ctx (0.09) with 24h skips summary", () => {
-    const r = decideRotation({ ctxUsage: 0.09, sessionAgeMs: DAY_MS, semanticHint: false });
-    expect(r.shouldRotate).toBe(true);
-    expect(r.trigger).toBe("soft-time");
-    expect(r.shouldSkipSummary).toBe(true);
-  });
-
-  it("tier-3: high ctx (0.50) with 24h generates summary", () => {
-    const r = decideRotation({ ctxUsage: 0.50, sessionAgeMs: DAY_MS, semanticHint: false });
-    expect(r.shouldRotate).toBe(true);
-    expect(r.trigger).toBe("soft-time");
-    expect(r.shouldSkipSummary).toBe(false);
-  });
-
-  it("tier-3: 23h59m does NOT trigger (boundary)", () => {
-    const r = decideRotation({ ctxUsage: 0.05, sessionAgeMs: DAY_MS - 1, semanticHint: false });
-    expect(r.shouldRotate).toBe(false);
-  });
-
-  // ── No rotation ───────────────────────────────────
-
-  it("no rotation when none of the conditions met", () => {
-    const r = decideRotation({ ctxUsage: 0.50, sessionAgeMs: DAY_MS - 1, semanticHint: false });
-    expect(r.shouldRotate).toBe(false);
-    expect(r.trigger).toBeUndefined();
-    expect(r.shouldSkipSummary).toBe(false);
-  });
-
-  it("shouldSkipSummary is always false when shouldRotate is false", () => {
-    const r = decideRotation({ ctxUsage: 0.0, sessionAgeMs: 0, semanticHint: false });
-    expect(r.shouldRotate).toBe(false);
-    expect(r.shouldSkipSummary).toBe(false);
-  });
-
-  // ── Safety gate: continuousBackendEnabled ─────────
-
-  it("safety gate OFF: always returns { shouldRotate: false } regardless of inputs", () => {
-    // Even with hard-token threshold exceeded and semantic hint, OFF gate wins.
-    const r = decideRotation({
-      ctxUsage: 0.90,
-      sessionAgeMs: DAY_MS * 2,
-      semanticHint: true,
-      continuousBackendEnabled: false,
-    });
-    expect(r.shouldRotate).toBe(false);
-    expect(r.trigger).toBeUndefined();
-  });
-
-  it("safety gate ON (explicit): hard-token still triggers rotation", () => {
-    const r = decideRotation({
-      ctxUsage: 0.85,
-      sessionAgeMs: 0,
-      semanticHint: false,
-      continuousBackendEnabled: true,
-    });
-    expect(r.shouldRotate).toBe(true);
-    expect(r.trigger).toBe("hard-token");
-  });
-
-  // ── Dev mode thresholds ───────────────────────────
-
-  it("devMode: soft-time triggers at 1h (vs 24h in prod)", () => {
-    const ONE_HOUR_MS = 60 * 60 * 1_000;
-    const r = decideRotation({
-      ctxUsage: 0.05,
-      sessionAgeMs: ONE_HOUR_MS,
-      semanticHint: false,
-      continuousBackendEnabled: true,
-      devMode: true,
-    });
-    expect(r.shouldRotate).toBe(true);
-    expect(r.trigger).toBe("soft-time");
+  it("Korean estimate is strictly larger than naive chars/4 for hangul-heavy", () => {
+    const longHangul = "안녕".repeat(100); // 200 hangul chars
+    const naive = Math.ceil(200 / 4) + 1; // 51
+    const weighted = estimateTokens(longHangul);
+    expect(weighted).toBeGreaterThan(naive);
+    expect(weighted).toBe(Math.ceil(200 * 1.3 / 4) + 1); // 66
   });
 });

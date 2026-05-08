@@ -147,6 +147,35 @@ describe("ConversationLoop onTurnSummary", () => {
     expect(calls).toBe(0);
   });
 
+  it("does not emit a summary or notification when stopReason is context-error", async () => {
+    // Regression guard for Copilot round 10: context_error path must set
+    // stopReason="context-error" so willEmitSummary skips, preventing stale
+    // lastRoundInputTokens from being reported to the user.
+    const toolRegistry = new ToolRegistry();
+    const provider = new FakeProvider([
+      [
+        // Emit a context-length error — triggers stream-collector context_error branch.
+        // Must match isContextLengthError() patterns (see auto-compact.ts).
+        { type: "error", error: "prompt is too long for this model" } as StreamEvent,
+      ],
+    ]);
+    const loop = createLoopWithRegistry(provider, toolRegistry);
+
+    let summaryCallCount = 0;
+    const result = await loop.runTurn("질문", {
+      onTurnSummary: () => {
+        summaryCallCount += 1;
+      },
+    });
+
+    // stopReason must be "context-error" (not undefined / "end_turn")
+    expect(result.stopReason).toBe("context-error");
+    // No turn summary emitted — stale lastRoundInputTokens must not reach UI
+    expect(summaryCallCount).toBe(0);
+    // Error message was surfaced as turn text
+    expect(result.text).toContain("한도를 초과");
+  });
+
   it("reports zero tokens when usage is unavailable", async () => {
     const toolRegistry = new ToolRegistry();
     const provider = new FakeProvider([

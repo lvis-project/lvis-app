@@ -96,8 +96,7 @@ describe("useChatState", () => {
         type: "compact_notice",
         removedMessages: 7,
         freedTokens: 123,
-        tier: "semantic-llm",
-        revertSessionId: "parent-session",
+        tier: "auto-compact",
         summary: "이전 주제 요약",
       });
     });
@@ -107,8 +106,7 @@ describe("useChatState", () => {
         kind: "checkpoint",
         removedMessages: 7,
         freedTokens: 123,
-        tier: "semantic-llm",
-        revertSessionId: "parent-session",
+        tier: "auto-compact",
         summary: "이전 주제 요약",
       });
     });
