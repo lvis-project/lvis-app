@@ -457,8 +457,11 @@ describe("ChatView", () => {
     });
 
     await waitFor(() => {
-      expect(container.textContent).toMatch(/작업\s*1단계/);
-      expect(container.textContent).toContain("응답이 비어있습니다.");
+      // PR #623: standalone reasoning collapses to "생각 완료" header with
+      // the raw thought hidden. The legacy "응답이 비어있습니다." placeholder
+      // is no longer rendered for tool/text-empty turns.
+      expect(container.textContent).toContain("생각 완료");
+      expect(container.textContent).not.toContain("응답이 비어있습니다.");
       expect(container.textContent).not.toContain("완료되면 접혀야 하는 생각");
     });
   });
