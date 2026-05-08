@@ -52,8 +52,11 @@ function parseTokenRange(
   }
   const match = /^(\d+)-(\d+)$/.exec(token);
   if (!match) return null;
-  const start = normalizeValue(Number.parseInt(match[1], 10), spec);
-  const end = normalizeValue(Number.parseInt(match[2], 10), spec);
+  // Do NOT normalize range endpoints — normalization (e.g. 7→0 for dayOfWeek)
+  // would turn "5-7" into "5-0" (start > end → invalid). Range endpoints are
+  // validated against the raw spec bounds; match-time normalization handles 7=Sunday.
+  const start = Number.parseInt(match[1], 10);
+  const end = Number.parseInt(match[2], 10);
   if (start < spec.min || end > spec.max || start > end) return null;
   return { start, end };
 }
@@ -138,12 +141,21 @@ function _matchesCronFields(fields: CronFields, now: Date): boolean {
   const month = now.getUTCMonth() + 1;
   const dayOfWeek = now.getUTCDay();
 
+  // dayOfWeek: getUTCDay() returns 0 for Sunday, but cron allows 7=Sunday too.
+  // Check both 0 and 7 so that ranges like "5-7" (Fri-Sun) correctly match Sunday.
+  const dayOfWeekSpec = CRON_SPECS.dayOfWeek;
+  const dayOfWeekMatches =
+    dayOfWeek === 0
+      ? matchField(fields.dayOfWeek, 0, dayOfWeekSpec) ||
+        matchField(fields.dayOfWeek, 7, dayOfWeekSpec)
+      : matchField(fields.dayOfWeek, dayOfWeek, dayOfWeekSpec);
+
   return (
     matchField(fields.minute, minute, CRON_SPECS.minute) &&
     matchField(fields.hour, hour, CRON_SPECS.hour) &&
     matchField(fields.dayOfMonth, dayOfMonth, CRON_SPECS.dayOfMonth) &&
     matchField(fields.month, month, CRON_SPECS.month) &&
-    matchField(fields.dayOfWeek, dayOfWeek, CRON_SPECS.dayOfWeek)
+    dayOfWeekMatches
   );
 }
 

@@ -105,6 +105,23 @@ describe("matchesCron", () => {
     const sun = new Date("2026-05-10T10:00:00Z");
     expect(matchesCron("0 10 * * 7", sun)).toBe(true);
   });
+
+  it("dayOfWeek range 5-7 (Fri-Sun) validates, parses and matches all three days", () => {
+    // isValidCronExpression must accept "5-7" (was broken: 7→0 normalize made start>end)
+    expect(isValidCronExpression("0 10 * * 5-7")).toBe(true);
+    // Friday 2026-05-08
+    const fri = new Date("2026-05-08T10:00:00Z");
+    // Saturday 2026-05-09
+    const sat = new Date("2026-05-09T10:00:00Z");
+    // Sunday 2026-05-10 (getUTCDay()===0, but range 5-7 should still match)
+    const sun = new Date("2026-05-10T10:00:00Z");
+    // Monday 2026-05-11 must NOT match
+    const mon = new Date("2026-05-11T10:00:00Z");
+    expect(matchesCron("0 10 * * 5-7", fri)).toBe(true);
+    expect(matchesCron("0 10 * * 5-7", sat)).toBe(true);
+    expect(matchesCron("0 10 * * 5-7", sun)).toBe(true);
+    expect(matchesCron("0 10 * * 5-7", mon)).toBe(false);
+  });
 });
 
 describe("nextCronFire", () => {

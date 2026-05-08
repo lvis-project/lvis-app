@@ -172,7 +172,7 @@ export function OverlayContextProvider({
   // Expose addFire via ref so App.tsx can call it from IPC subscription
   if (addFireRef) {
     // Safe: synchronous assignment during render, before effects
-    (addFireRef as { current: typeof addFire }).current = addFire;
+    addFireRef.current = addFire;
   }
 
   const dismiss = useCallback((id: string) => {

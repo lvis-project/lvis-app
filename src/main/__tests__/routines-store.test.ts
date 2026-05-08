@@ -438,6 +438,43 @@ describe("RoutinesStore v2 — advanceInterval far-past (no loop)", () => {
   });
 });
 
+describe("RoutinesStore v2 — advanceMonthly UTC correctness (DST-independence)", () => {
+  it("monthly clamp is unaffected by host timezone (TZ=America/Los_Angeles)", async () => {
+    // Save original TZ, force a DST-heavy timezone, then restore.
+    const origTZ = process.env.TZ;
+    process.env.TZ = "America/Los_Angeles";
+    const { store, cleanup } = tempStore();
+    try {
+      // Jan 31 in UTC — if advanceMonthly used local-time methods, LA timezone
+      // offset would shift the date and produce a different day.
+      const jan31Utc = new Date("2026-01-31T12:00:00Z");
+      const r = await store.add({
+        trigger: "schedule",
+        execution: "notification-only",
+        schedule: { at: jan31Utc.toISOString(), repeat: { kind: "monthly" } },
+        notificationTitle: "utc-monthly",
+      });
+      const updated = await store.markFired(r.id);
+      const nextAt = new Date(updated!.schedule!.at!);
+      // Must be after now
+      expect(nextAt.getTime()).toBeGreaterThan(Date.now());
+      // Day must be clamped to last day of month using UTC, not local time
+      const year = nextAt.getUTCFullYear();
+      const month = nextAt.getUTCMonth();
+      const lastDayOfMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+      const actualDay = nextAt.getUTCDate();
+      expect(actualDay).toBe(Math.min(31, lastDayOfMonth));
+    } finally {
+      if (origTZ === undefined) {
+        delete process.env.TZ;
+      } else {
+        process.env.TZ = origTZ;
+      }
+      cleanup();
+    }
+  });
+});
+
 describe("RoutinesStore v2 — advanceMonthly originalDay preservation (C-critic-2)", () => {
   it("multi-month advance preserves originalDay across all months (Jan 31 → 6 cycles)", async () => {
     // Simulate Jan 31 far in the past so markFired multi-skips through 6 months.

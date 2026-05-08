@@ -3,6 +3,11 @@
 // Renders in a separate z-layer inside ChatView above the scroll area.
 // Never injects entries into chat history (Q9 isolation maintained for routine source).
 //
+// Active item is resolved from OverlayContext queue. App.tsx also maintains an
+// overlayItemsRef Map for items that persist after dismiss — e.g. to keep the
+// routine session path available for RoutineSessionView modal after the overlay card
+// is removed from the queue (notification-only routines omit routineSessionPath).
+//
 // Q11: Two source variants:
 //   - routine: primary action opens RoutineSessionView modal ("결과 보기")
 //     — only shown when routineSessionPath is present (notification-only routines hide the button)
