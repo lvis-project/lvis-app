@@ -504,10 +504,16 @@ async function callSummaryLLM(args: {
   compactNum: number;
   abortSignal?: AbortSignal;
 }): Promise<string> {
-  const filledPrompt = SUMMARY_TEMPLATE_PROMPT_V1
-    .replace("{{conversationText}}", args.conversationText)
-    .replace("{{timestamp}}", new Date().toISOString())
-    .replace("{{compactNum}}", String(args.compactNum));
+  const isoTime = new Date().toISOString();
+  const templateValues: Record<string, string> = {
+    conversationText: args.conversationText,
+    timestamp: isoTime,
+    compactNum: String(args.compactNum),
+  };
+  const filledPrompt = SUMMARY_TEMPLATE_PROMPT_V1.replace(
+    /\{\{(\w+)\}\}/g,
+    (_match, key) => templateValues[key] ?? _match,
+  );
 
   let text = "";
   for await (const ev of args.llm.streamTurn({
