@@ -25,9 +25,14 @@ export type NotificationHandler = (event: RoutineFiredEvent) => void;
 
 const POLL_INTERVAL_MS = 30_000;
 
-/** Per-minute dedup key to prevent double-firing cron routines within same minute. */
-function minuteKey(now: Date): string {
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}T${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+/**
+ * Build a UTC ISO minute string used as a persistent dedup key for cron routines.
+ * Format: "YYYY-MM-DDTHH:MMZ" (always UTC, no seconds).
+ */
+function minuteKeyUTC(now: Date): string {
+  return new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), now.getUTCHours(), now.getUTCMinutes()),
+  ).toISOString().slice(0, 16) + "Z";
 }
 
 export class RoutinesScheduler {
@@ -36,8 +41,6 @@ export class RoutinesScheduler {
   private readonly notificationHandlers = new Set<NotificationHandler>();
   /** M1: reentrancy guard — skip tick if previous check is still running. */
   private inFlight = false;
-  /** Per-routine dedup: routineId → last minuteKey that fired. */
-  private readonly cronLastFiredMinute = new Map<string, string>();
 
   constructor(private readonly store: RoutinesStore) {}
 
@@ -89,6 +92,12 @@ export class RoutinesScheduler {
     for (const routine of active) {
       const due = this.isDue(routine, now);
       if (!due) continue;
+      if (routine.schedule?.repeat?.kind === "cron") {
+        // Persist the dedup key before firing so that a crash/restart mid-dispatch
+        // does not re-fire in the same minute.
+        const currentMinuteUTC = minuteKeyUTC(now);
+        await this.store.update(routine.id, { lastFiredMinuteUTC: currentMinuteUTC });
+      }
       const updated = await this.store.markFired(routine.id);
       if (!updated) continue;
       this.dispatch(updated);
@@ -103,15 +112,12 @@ export class RoutinesScheduler {
 
     const repeat = schedule.repeat;
 
-    // Cron expression: match current minute.
+    // Cron expression: match current minute using persistent dedup key.
     if (repeat?.kind === "cron") {
-      const key = minuteKey(now);
-      if (this.cronLastFiredMinute.get(routine.id) === key) return false;
-      if (matchesCron(repeat.expression, now)) {
-        this.cronLastFiredMinute.set(routine.id, key);
-        return true;
-      }
-      return false;
+      const currentMinuteUTC = minuteKeyUTC(now);
+      // Persistent dedup: skip if this minute was already fired (survives restarts).
+      if (routine.lastFiredMinuteUTC === currentMinuteUTC) return false;
+      return matchesCron(repeat.expression, now);
     }
 
     // All other kinds: compare next-fire `at` vs now.
