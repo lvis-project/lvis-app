@@ -19,7 +19,7 @@ import { useCostEstimate } from "../../../src/ui/renderer/hooks/use-cost-estimat
 import { useSessions } from "../../../src/ui/renderer/hooks/use-sessions.js";
 import { useStarred } from "../../../src/ui/renderer/hooks/use-starred.js";
 import type { LvisApi } from "../../../src/ui/renderer/types.js";
-import { EMPTY_ASSISTANT_RESPONSE_TEXT, type ChatEntry } from "../../../src/lib/chat-stream-state.js";
+import type { ChatEntry } from "../../../src/lib/chat-stream-state.js";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -52,7 +52,7 @@ describe("useChatState", () => {
     });
   });
 
-  it("finalizes marker-only assistant rounds as an explicit empty response", async () => {
+  it("splices marker-only assistant rounds when no tool/checkpoint sibling exists (#619)", async () => {
     const { api, emitChatStream } = makeMockLvisApi();
     const { result } = renderHook(() => useChatState(api as unknown as LvisApi));
 
@@ -67,12 +67,12 @@ describe("useChatState", () => {
     });
 
     await waitFor(() => {
-      const assistant = result.current.entries.findLast((e) => e.kind === "assistant") as { text: string } | undefined;
-      expect(assistant?.text).toBe(EMPTY_ASSISTANT_RESPONSE_TEXT);
+      const assistant = result.current.entries.findLast((e) => e.kind === "assistant");
+      expect(assistant).toBeUndefined();
     });
   });
 
-  it("finalizes marker-only done events as an explicit empty response", async () => {
+  it("splices marker-only done events when no tool/checkpoint sibling exists (#619)", async () => {
     const { api, emitChatStream } = makeMockLvisApi();
     const { result } = renderHook(() => useChatState(api as unknown as LvisApi));
 
@@ -82,8 +82,8 @@ describe("useChatState", () => {
     });
 
     await waitFor(() => {
-      const assistant = result.current.entries.findLast((e) => e.kind === "assistant") as { text: string } | undefined;
-      expect(assistant?.text).toBe(EMPTY_ASSISTANT_RESPONSE_TEXT);
+      const assistant = result.current.entries.findLast((e) => e.kind === "assistant");
+      expect(assistant).toBeUndefined();
     });
   });
 
