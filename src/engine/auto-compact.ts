@@ -11,12 +11,9 @@
  */
 import type { GenericMessage, TokenUsage, LLMVendor, UserContentPart } from "./llm/types.js";
 import { serializeMessageForEstimation, userContentText } from "./llm/types.js";
-import { shouldSkipSummary as _shouldSkipSummary } from "./summary-generator.js";
 import { lookupPricing, effectiveContextWindow } from "../shared/pricing-data.js";
-import { getUsableContext } from "../shared/context-budget.js";
+import { getUsableContext, getPreflightThreshold } from "../shared/context-budget.js";
 
-/** compactMessages()가 boundary marker 뒤에 삽입하는 assistant ACK (double-compact 감지용) */
-const POST_COMPACT_ACK = "이전 대화 내용을 확인했습니다. 계속 도와드리겠습니다.";
 
 // ─── Context Window Registry ─────────────────────────
 //
@@ -53,117 +50,53 @@ export function getModelUsableContext(vendor: LLMVendor, model: string): number 
   return getUsableContext(getModelContextWindow(vendor, model));
 }
 
-// ─── 3-Tier Rotation Types ────────────────────────────
-
 /**
- * 체크포인트 트리거 종류 (3-tier rotation 결정 트리).
- * - "hard-token":  컨텍스트 윈도우 85% 도달 → 즉시 rotation 필요
- * - "semantic-llm": LLM이 [checkpoint] 마커를 삽입 → 토픽 전환 감지
- * - "soft-time":  24h 경과 또는 30개 메시지 → 자연 체크포인트
+ * Layer 0 pre-flight 트리거 (절대 token count). v3 §6 보수 default —
+ * 64K → 50% / 128K → 55% / 200K → 60% / 1M → 65% / other → 60%.
+ * 호출자: queryLoop 의 step 5/6 사이 (`infinity-session-redesign-v3.md` §4.1).
+ *
+ * @example
+ * // 200K Sonnet → usable 160K → 60% × 160K = 96K trigger
+ * estimateMessagesTokens(history) >= getModelPreflightThreshold("claude", "claude-sonnet-4-6");
  */
-export type CheckpointTriggerType = "hard-token" | "semantic-llm" | "soft-time";
-
-export interface RotationDecision {
-  shouldRotate: boolean;
-  trigger?: CheckpointTriggerType;
-  shouldSkipSummary: boolean;
+export function getModelPreflightThreshold(vendor: LLMVendor, model: string): number {
+  return getPreflightThreshold(getModelContextWindow(vendor, model));
 }
 
-/**
- * 3-tier rotation 결정 트리.
- *
- * Tier 1 (hard-token):  ctxUsage >= 0.85 → 무조건 rotation + 요약 생성
- * Tier 2 (semantic-llm): LLM이 [checkpoint] 마커 삽입 → rotation, 요약은 ctxUsage 판단
- * Tier 3 (soft-time):   24h 경과 → rotation, 요약은 ctxUsage 판단 (day-boundary 안전망)
- *
- * @param args.ctxUsage         0.0–1.0 컨텍스트 사용률
- * @param args.sessionAgeMs     세션 시작 이후 경과 ms
- * @param args.semanticHint     [checkpoint] 마커 발견 여부
- * @param args.continuousBackendEnabled  Safety gate: when false, always returns { shouldRotate: false }.
- * @param args.devMode          Developer mode: reduces soft-time threshold to 1h for easier testing.
- *
- * 2026-05-04 incident 후속 정정: tier 3 의 message-count 분기 (`userMessageCount
- * >= 30`) 를 *제거*. message-count 는 토큰/시간/의미 어느 진짜 신호도 측정하지
- * 않는 weak-signal proxy 로 판명 — ctx 1% 인 짧은 도구-heavy 세션에서도 회전
- * 트리거되어 사용자 답변 도중 CheckpointDivider 가 표시되는 incident 의 root
- * cause 였음. context 압박은 tier 1 (토큰), topic shift 는 tier 2 (semantic),
- * day-boundary 안전망만 tier 3 (24h time-based) 으로 정합화. OpenCode 의 순수
- * 토큰 기반 패턴과 정렬됨.
- */
-export function decideRotation(args: {
-  ctxUsage: number;
-  sessionAgeMs: number;
-  semanticHint: boolean;
-  continuousBackendEnabled?: boolean;
-  devMode?: boolean;
-}): RotationDecision {
-  const { ctxUsage, sessionAgeMs, semanticHint } = args;
-  const continuousBackendEnabled = args.continuousBackendEnabled ?? true;
-  const devMode = args.devMode ?? false;
-
-  // Safety gate: when experimentalContinuousBackend is OFF, rotation is disabled.
-  if (!continuousBackendEnabled) {
-    return { shouldRotate: false, shouldSkipSummary: false };
-  }
-
-  // Tier 1: hard-token (85% 이상 → 즉시 rotation, 요약 항상 생성)
-  if (ctxUsage >= 0.85) {
-    return { shouldRotate: true, trigger: "hard-token", shouldSkipSummary: false };
-  }
-
-  // Tier 2: semantic (LLM 마커 감지)
-  if (semanticHint) {
-    return { shouldRotate: true, trigger: "semantic-llm", shouldSkipSummary: _shouldSkipSummary(ctxUsage) };
-  }
-
-  // Tier 3: soft-time — day boundary 안전망. devMode 는 1h 로 단축.
-  const dayMs = devMode ? 60 * 60 * 1_000 : 24 * 60 * 60 * 1_000;
-  if (sessionAgeMs >= dayMs) {
-    return { shouldRotate: true, trigger: "soft-time", shouldSkipSummary: _shouldSkipSummary(ctxUsage) };
-  }
-
-  return { shouldRotate: false, shouldSkipSummary: false };
-}
+// PR-2-F-2: 3-tier rotation 폐지 — `decideRotation` 함수 + `RotationDecision` interface +
+// `CheckpointTriggerType` type 모두 제거. Layer 0 preflight + Layer 2 LLM compact +
+// Layer 3 same-session checkpoint chain (Copilot 패턴) 으로 fork-based rotation 대체.
 
 // ─── Types ──────────────────────────────────────────
 
-export interface CompactConfig {
-  /** 자동 컴팩션 트리거 사용률 임계치 (기본 80%) — 모델 컨텍스트 윈도우 대비 */
-  thresholdPct: number;
-  /** 보존할 최근 메시지 수 (기본 4) */
-  preserveRecentMessages: number;
-  /** 요약 최대 토큰 예산 (기본 2K) */
-  summaryBudgetTokens: number;
-}
-
-export interface CompactResult {
-  /** 컴팩션 수행 여부 */
-  compacted: boolean;
-  /** 제거된 메시지 수 */
-  removedMessages: number;
-  /** 생성된 요약 */
-  summary?: string;
-  /** 확보된 예상 토큰 수 */
-  freedTokens: number;
-  /**
-   * 컴팩션 트리거 종류.
-   * - "auto": 토큰 임계치 기반 사전 컴팩션 (PostTurnHookChain)
-   * - "reactive": 벤더 context-length 오류 수신 후 즉시 컴팩션
-   */
-  trigger?: "auto" | "reactive";
-}
-
-const DEFAULT_CONFIG: CompactConfig = {
-  thresholdPct: 0.8,
-  preserveRecentMessages: 12,
-  summaryBudgetTokens: 2_000,
-};
-
 // ─── Token Estimation ───────────────────────────────
 
-/** 텍스트의 토큰 수 추정 (claw-code 방식: length/4 + 1) */
+/**
+ * 한글 음절 (가-힣 범위, U+AC00 ~ U+D7A3) 카운트 — Korean weighting helper.
+ * Anthropic/OpenAI/Gemini 토크나이저 모두 한글을 1.5~2x 비율로 토큰화하므로
+ * chars/4 공식이 한글 위주 대화에서는 underestimate. 50% 이상이면 1.3x 보정.
+ */
+export function countHangul(text: string): number {
+  let count = 0;
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    if (c >= 0xAC00 && c <= 0xD7A3) count++;
+  }
+  return count;
+}
+
+/**
+ * 텍스트의 토큰 수 추정 (claw-code 방식: length/4 + 1) + 한글 가중치 (P11).
+ *
+ * 한글 비율 ≥ 50% 면 weight 1.3 적용 (mixed-language 코드+주석 등은 ratio < 50% → weight 1.0).
+ * 보수적 fallback: 모르는 문자는 기본 4-char/token 가정.
+ */
 export function estimateTokens(text: string): number {
-  return Math.ceil(text.length / 4) + 1;
+  if (text.length === 0) return 1;
+  const hangul = countHangul(text);
+  const ratio = hangul / text.length;
+  const weight = ratio >= 0.5 ? 1.3 : 1.0;
+  return Math.ceil((text.length * weight) / 4) + 1;
 }
 
 /** 메시지 배열의 총 토큰 추정 */
@@ -177,107 +110,6 @@ export function estimateMessagesTokens(messages: GenericMessage[]): number {
   return total;
 }
 
-// ─── Compact Logic ──────────────────────────────────
-
-/**
- * 컴팩션 필요 여부 확인.
- *
- * 임계치 = floor(contextWindowTokens × config.thresholdPct).
- * 호출자는 `getModelUsableContext()` 결과를 넘기므로 (Cline buffer 적용된
- * usable 분모), 0.8 임계는 사실상 "usable 의 80% 도달 → preventive compact".
- *
- * @param cumulativeUsage - 누적 토큰 사용량 (fresh-only inputTokens)
- * @param contextWindowTokens - usable context window — 호출자 책임
- * @param config - 컴팩션 설정 (미제공 시 기본값: thresholdPct=0.8)
- *
- * @example
- * // 200K Sonnet → usable 160K → 80% × 160K = 128K trigger
- * shouldCompact({ inputTokens: 130_000, outputTokens: 0 }, 160_000); // true
- */
-export function shouldCompact(
-  cumulativeUsage: TokenUsage,
-  contextWindowTokens: number,
-  config: CompactConfig = DEFAULT_CONFIG,
-): boolean {
-  const threshold = Math.floor(contextWindowTokens * config.thresholdPct);
-  return cumulativeUsage.inputTokens >= threshold;
-}
-
-/**
- * 메시지 배열을 컴팩션 — 오래된 메시지를 요약으로 교체
- *
- * @returns 컴팩션된 메시지 배열 + 결과 정보
- */
-export function compactMessages(
-  messages: GenericMessage[],
-  config: CompactConfig = DEFAULT_CONFIG,
-  trigger?: "auto" | "reactive",
-): { messages: GenericMessage[]; result: CompactResult } {
-  if (messages.length <= config.preserveRecentMessages) {
-    return { messages, result: { compacted: false, removedMessages: 0, freedTokens: 0 } };
-  }
-
-  // 기존 경계 marker가 있으면 절대 re-summarize 하지 않음 (double-compact 방지)
-  // marker 이전 메시지는 이미 요약 대상이었으므로, 요약은 마지막 marker 이후부터만 수행
-  let lastMarkerIdx = -1;
-  for (let i = 0; i < messages.length; i++) {
-    const m = messages[i];
-    if (m.role === "user" && m.meta?.compactBoundary === true) {
-      lastMarkerIdx = i;
-    }
-  }
-
-  // 보존할 메시지 경계 찾기 (marker 이후 구간에서만 요약)
-  const idealBoundary = messages.length - config.preserveRecentMessages;
-  const preserveFrom = findSafeBoundary(messages, idealBoundary);
-  // 요약 대상은 marker(+ack) 다음부터 preserveFrom까지.
-  // compactMessages는 marker 뒤에 ACK assistant 메시지를 붙이므로 그 경우 한 칸 더 skip.
-  const ackAfterMarker =
-    lastMarkerIdx >= 0 &&
-    messages[lastMarkerIdx + 1]?.role === "assistant" &&
-    messages[lastMarkerIdx + 1]?.content === POST_COMPACT_ACK;
-  const compactStart = lastMarkerIdx >= 0 ? (ackAfterMarker ? lastMarkerIdx + 2 : lastMarkerIdx + 1) : 0;
-  const effectivePreserveFrom = Math.max(preserveFrom, compactStart);
-  const preAnchor = messages.slice(0, compactStart); // 이전 marker + 그 앞 (있다면)
-  const toCompact = messages.slice(compactStart, effectivePreserveFrom);
-  const toPreserve = messages.slice(effectivePreserveFrom);
-
-  if (toCompact.length === 0) {
-    return { messages, result: { compacted: false, removedMessages: 0, freedTokens: 0 } };
-  }
-
-  // 요약 생성
-  const summary = generateSummary(toCompact, config.summaryBudgetTokens);
-  const freedTokens = estimateMessagesTokens(toCompact) - estimateTokens(summary);
-
-  // 요약 메시지 + 보존 메시지
-  const boundaryMessage: GenericMessage = {
-    role: "user",
-    content: `[이전 대화 요약]\n${summary}`,
-    meta: {
-      compactBoundary: true,
-      removedCount: toCompact.length,
-      compactedAt: new Date().toISOString(),
-    },
-  };
-  const compactedMessages: GenericMessage[] = [
-    ...preAnchor,
-    boundaryMessage,
-    { role: "assistant", content: POST_COMPACT_ACK },
-    ...toPreserve,
-  ];
-
-  return {
-    messages: compactedMessages,
-    result: {
-      compacted: true,
-      removedMessages: toCompact.length,
-      summary,
-      freedTokens: Math.max(0, freedTokens),
-      ...(trigger !== undefined && { trigger }),
-    },
-  };
-}
 
 // ─── Layer 1: Mark Stale Tool Results (preventive, LLM-free) ──
 
@@ -450,71 +282,3 @@ export function isContextLengthError(err: unknown): boolean {
   return false;
 }
 
-// ─── Private Helpers ────────────────────────────────
-
-/**
- * tool_use/tool_result 쌍이 분리되지 않는 안전한 경계 찾기
- * claw-code 패턴: 경계가 tool_result 안에 있으면 뒤로 밀어냄
- */
-function findSafeBoundary(messages: GenericMessage[], idealBoundary: number): number {
-  let boundary = idealBoundary;
-
-  // 경계가 tool_result면 해당 tool_use까지 포함되도록 뒤로 이동
-  while (boundary > 0 && boundary < messages.length) {
-    const msg = messages[boundary];
-    if (msg.role === "tool_result") {
-      boundary--;
-    } else if (msg.role === "assistant" && msg.toolCalls && msg.toolCalls.length > 0) {
-      // assistant의 tool_call과 그 결과가 함께 보존되어야 함
-      boundary--;
-    } else {
-      break;
-    }
-  }
-
-  return Math.max(0, boundary);
-}
-
-/**
- * 메시지 배열에서 요약 생성 (LLM 없이 추출 기반)
- * claw-code 패턴: 파일 참조, 진행 중 작업, 핵심 결정 보존
- */
-function generateSummary(messages: GenericMessage[], budgetTokens: number): string {
-  const sections: string[] = [];
-
-  // 1. 사용자 요청 요약
-  const userRequests = messages
-    .filter((m) => m.role === "user" && !userContentText(m.content).startsWith("[이전 대화 요약]"))
-    .map((m) => userContentText((m as { content: string | UserContentPart[] }).content).slice(0, 100));
-  if (userRequests.length > 0) {
-    sections.push(`## 사용자 요청\n${userRequests.map((r) => `- ${r}`).join("\n")}`);
-  }
-
-  // 2. 도구 사용 이력
-  const toolUses = messages
-    .filter((m): m is GenericMessage & { role: "assistant"; toolCalls: NonNullable<(GenericMessage & { role: "assistant" })["toolCalls"]> } =>
-      m.role === "assistant" && !!m.toolCalls && m.toolCalls.length > 0)
-    .flatMap((m) => m.toolCalls.map((tc) => tc.name));
-  if (toolUses.length > 0) {
-    const unique = [...new Set(toolUses)];
-    sections.push(`## 사용된 도구\n${unique.join(", ")}`);
-  }
-
-  // 3. 핵심 응답 요약 (마지막 assistant 메시지에서)
-  const assistantMessages = messages.filter((m) => m.role === "assistant" && m.content.length > 20);
-  if (assistantMessages.length > 0) {
-    const lastFew = assistantMessages.slice(-2);
-    const summaries = lastFew.map((m) => m.content.slice(0, 200));
-    sections.push(`## 주요 응답\n${summaries.map((s) => `- ${s}...`).join("\n")}`);
-  }
-
-  let result = sections.join("\n\n");
-
-  // 토큰 예산 내로 자르기
-  const maxChars = budgetTokens * 4;
-  if (result.length > maxChars) {
-    result = result.slice(0, maxChars) + "\n...(잘림)";
-  }
-
-  return result || "이전 대화 내용이 있었습니다.";
-}
