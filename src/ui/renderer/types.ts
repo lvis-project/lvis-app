@@ -122,11 +122,11 @@ export type AppSettings = {
     realCloudBaseUrl?: string;
     realCloudAllowPrivateNetwork?: boolean;
   };
-  /** UX Track 3 — visual theme preferences (three-axis). */
+  /** UX Track 3 — visual theme preferences (v2 single bundle). */
   appearance?: {
-    theme: "system" | "light" | "dark" | "high-contrast";
-    chatTheme?: "default" | "lg" | "purple" | "orange" | "blue";
-    codeTheme?: "auto" | "light" | "dark";
+    schemaVersion?: 2;
+    bundleId?: string;
+    followSystem?: boolean;
   };
   /** §B1 — external URL viewer policy (in-app vs system browser). */
   webView?: {

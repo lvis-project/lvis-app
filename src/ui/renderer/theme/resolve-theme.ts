@@ -1,96 +1,51 @@
-import type {
-  ChatThemePreference,
-  CodeThemePreference,
-  ResolvedCodeTheme,
-  ResolvedTheme,
-  ThemePreference,
-} from "./types.js";
+import type { ThemeBundle } from "./bundles/index.js";
+import type { ResolvedShell } from "./types.js";
 
 /**
- * UX Track 3 — resolve a user shell preference to the concrete theme that
- * should be applied to <html data-theme="…">.
+ * Apply a ThemeBundle to the document root element.
  *
- * "system" reads `prefers-color-scheme`; if matchMedia is unavailable
- * (older Electron / SSR / test envs without the polyfill) it falls back
- * to "dark" — the historical app default.
+ * Sets:
+ *   - `data-theme-bundle="<id>"` — activates the matching CSS block in styles.css
+ *   - `data-shell="<light|dark>"` — drives color-scheme meta for native widgets
+ *   - class `lvis-bundle-<id>` — for test selectors / snapshot matching
  *
- * High-contrast is never inferred from the OS — it's an explicit opt-in.
+ * Removes all prior `lvis-bundle-*` classes before adding the new one.
+ * Idempotent.
  */
-export function resolveTheme(
-  preference: ThemePreference,
+export function applyBundleToDocument(bundle: ThemeBundle, doc: Document = document): void {
+  const root = doc.documentElement;
+  // Remove all prior bundle classes
+  const toRemove = Array.from(root.classList).filter((c) => c.startsWith("lvis-bundle-"));
+  root.classList.remove(...toRemove);
+  root.setAttribute("data-theme-bundle", bundle.id);
+  root.setAttribute("data-shell", bundle.shell);
+  root.classList.add(`lvis-bundle-${bundle.id}`);
+}
+
+/**
+ * For the LGE pair (lge-light / lge-dark): resolve which bundle to use based
+ * on `prefers-color-scheme`. Returns "lge-light" for a light OS scheme, "lge-dark"
+ * otherwise.
+ *
+ * Only called when `followSystem` is true and the current bundleId is one of
+ * the LGE pair.
+ */
+export function resolveSystemPair(
   win: Pick<Window, "matchMedia"> | undefined = typeof window !== "undefined" ? window : undefined,
-): ResolvedTheme {
-  if (preference === "light" || preference === "dark" || preference === "high-contrast") {
-    return preference;
-  }
-  // preference === "system"
+): "lge-light" | "lge-dark" {
   try {
     const mql = win?.matchMedia?.("(prefers-color-scheme: light)");
-    if (mql && mql.matches) return "light";
+    if (mql?.matches) return "lge-light";
   } catch {
-    /* matchMedia unsupported — fall through */
+    /* matchMedia unavailable */
   }
-  return "dark";
+  return "lge-dark";
 }
 
 /**
- * Resolve the user code-theme preference to the concrete scheme.
- *
- * "auto" mirrors the resolved shell theme: a light shell pairs with a
- * light code panel; dark and high-contrast shells pair with dark code.
- * Explicit "light" / "dark" wins regardless of shell.
+ * Derive the resolved shell ("light" | "dark") from a bundle.
+ * Convenience wrapper for components that need the scalar shell value.
  */
-export function resolveCodeTheme(
-  preference: CodeThemePreference,
-  resolvedShell: ResolvedTheme,
-): ResolvedCodeTheme {
-  if (preference === "light" || preference === "dark") return preference;
-  // preference === "auto" — follow the shell.
-  return resolvedShell === "light" ? "light" : "dark";
-}
-
-/**
- * Apply the resolved shell theme to a target document element. Idempotent.
- *
- * Writing `data-theme` on <html> is what activates the matching semantic
- * token block in `styles.css`. We also write a `lvis-theme-*` class so
- * test snapshots / CSS selectors can match without relying on attribute
- * selectors.
- */
-export function applyThemeToDocument(theme: ResolvedTheme, doc: Document = document): void {
-  const root = doc.documentElement;
-  root.setAttribute("data-theme", theme);
-  root.classList.remove("lvis-theme-light", "lvis-theme-dark", "lvis-theme-high-contrast");
-  root.classList.add(`lvis-theme-${theme}`);
-}
-
-/**
- * Apply the chat theme preference to a target document element.
- * "default" REMOVES the attribute so the dark/light shell defaults win
- * (no override). Anything else writes a `data-chat-theme` value that is
- * matched by the chat-theme overlay block in styles.css.
- */
-export function applyChatThemeToDocument(
-  chatTheme: ChatThemePreference,
-  doc: Document = document,
-): void {
-  const root = doc.documentElement;
-  if (chatTheme === "default") {
-    root.removeAttribute("data-chat-theme");
-  } else {
-    root.setAttribute("data-chat-theme", chatTheme);
-  }
-}
-
-/**
- * Apply the resolved code theme to a target document element.
- * Always writes the attribute (no "auto" — already resolved by the
- * caller) so code-surface tokens are deterministic regardless of shell.
- */
-export function applyCodeThemeToDocument(
-  codeTheme: ResolvedCodeTheme,
-  doc: Document = document,
-): void {
-  const root = doc.documentElement;
-  root.setAttribute("data-code-theme", codeTheme);
+export function bundleShell(bundle: ThemeBundle): ResolvedShell {
+  return bundle.shell;
 }

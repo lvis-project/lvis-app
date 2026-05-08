@@ -1,27 +1,21 @@
 /**
- * UX Track 3 — theme system barrel.
+ * Theme system v2 barrel.
  *
  * Components import from here to avoid deep paths:
  *   `import { useTheme } from "../theme/index.js"`
  */
 export { ThemeProvider, useTheme, useOptionalTheme } from "./ThemeProvider.js";
+export { applyBundleToDocument, resolveSystemPair, bundleShell } from "./resolve-theme.js";
+export { bundleToPluginTokens } from "./plugin-token-map.js";
 export {
-  resolveTheme,
-  resolveCodeTheme,
-  applyThemeToDocument,
-  applyChatThemeToDocument,
-  applyCodeThemeToDocument,
-} from "./resolve-theme.js";
-export {
-  THEME_PREFERENCES,
-  CHAT_THEME_PREFERENCES,
-  CODE_THEME_PREFERENCES,
-} from "./types.js";
+  BUNDLES,
+  DEFAULT_BUNDLE_ID,
+  findBundle,
+} from "./bundles/index.js";
+export type { ThemeBundle, BundleTokens } from "./bundles/index.js";
 export type {
   ThemeContextValue,
-  ThemePreference,
-  ResolvedTheme,
-  ChatThemePreference,
-  CodeThemePreference,
-  ResolvedCodeTheme,
+  BundleId,
+  ResolvedShell,
 } from "./types.js";
+export { LGE_PAIR_IDS } from "./types.js";

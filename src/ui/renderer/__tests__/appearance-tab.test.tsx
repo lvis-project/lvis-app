@@ -1,138 +1,141 @@
 /**
- * UX Track 3 — AppearanceTab tests (two-axis redesign).
+ * AppearanceTab v2 — bundle picker tests.
  *
- * The tab is a stack of three radio groups:
- *  1. 채팅 테마 (chat accent — 4 visual cards)
- *  2. 코드 테마 (code surface — 2 visual cards)
- *  3. 앱 라이트/다크 (shell — 4 pill buttons)
+ * The tab now shows 6 bundle cards (one per ThemeBundle) in a single grid.
+ * Clicking a card sets the active bundle and writes data-theme-bundle to <html>.
  *
- * Cards/pills are <button role="radio">; we drive them with click events
- * and assert against the document data-attributes that ThemeProvider writes.
+ * followSystem toggle is shown only when the LGE pair (lge-light / lge-dark)
+ * is selected; hidden otherwise.
+ *
+ * The external URL (webView) section is unchanged from v1.
  */
 import "../../../../test/renderer/setup.js";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { fireEvent, render, waitFor } from "@testing-library/react";
 import { ThemeProvider } from "../theme/ThemeProvider.js";
 import { AppearanceTab } from "../tabs/AppearanceTab.js";
+import { BUNDLES } from "../theme/index.js";
 
 afterEach(() => {
-  document.documentElement.removeAttribute("data-theme");
-  document.documentElement.removeAttribute("data-chat-theme");
-  document.documentElement.removeAttribute("data-code-theme");
+  document.documentElement.removeAttribute("data-theme-bundle");
+  document.documentElement.removeAttribute("data-shell");
+  Array.from(document.documentElement.classList)
+    .filter((c) => c.startsWith("lvis-bundle-"))
+    .forEach((c) => document.documentElement.classList.remove(c));
   vi.unstubAllGlobals();
 });
 
-function renderWithTheme(initial: "system" | "light" | "dark" | "high-contrast" = "dark") {
+function renderWithBundle(initialBundleId = "tokyo-night") {
   return render(
-    <ThemeProvider initialPreference={initial}>
+    <ThemeProvider initialBundleId={initialBundleId}>
       <AppearanceTab />
     </ThemeProvider>,
   );
 }
 
-describe("AppearanceTab — chat-theme picker", () => {
-  it("renders one card per chat-theme variant", () => {
-    const { getByRole } = renderWithTheme();
-    expect(getByRole("radio", { name: /채팅 테마: 기본/ })).toBeTruthy();
-    expect(getByRole("radio", { name: /채팅 테마: LG/ })).toBeTruthy();
-    expect(getByRole("radio", { name: /채팅 테마: 퍼플/ })).toBeTruthy();
-    expect(getByRole("radio", { name: /채팅 테마: 오렌지/ })).toBeTruthy();
-    expect(getByRole("radio", { name: /채팅 테마: 블루/ })).toBeTruthy();
+describe("AppearanceTab — bundle card grid", () => {
+  it("renders exactly 6 bundle cards (one per ThemeBundle)", () => {
+    const { getAllByRole } = renderWithBundle();
+    // All cards have role="radio" with aria-label "테마: <name>"
+    const cards = getAllByRole("radio").filter((el) =>
+      el.getAttribute("aria-label")?.startsWith("테마:"),
+    );
+    expect(cards).toHaveLength(6);
   });
 
-  it("clicking LG writes data-chat-theme=lg to <html>", async () => {
-    const { getByRole } = renderWithTheme("dark");
-    // First switch away from the LG default, then back.
-    fireEvent.click(getByRole("radio", { name: /채팅 테마: 퍼플/ }));
-    await waitFor(() => {
-      expect(document.documentElement.getAttribute("data-chat-theme")).toBe("purple");
-    });
-    fireEvent.click(getByRole("radio", { name: /채팅 테마: LG/ }));
-    await waitFor(() => {
-      expect(document.documentElement.getAttribute("data-chat-theme")).toBe("lg");
-    });
+  it("renders a card for each bundle in BUNDLES", () => {
+    const { getByRole } = renderWithBundle();
+    for (const bundle of BUNDLES) {
+      expect(getByRole("radio", { name: `테마: ${bundle.name}` })).toBeTruthy();
+    }
   });
 
-  it("clicking 퍼플 writes data-chat-theme=purple to <html>", async () => {
-    const { getByRole } = renderWithTheme("dark");
-    fireEvent.click(getByRole("radio", { name: /채팅 테마: 퍼플/ }));
-    await waitFor(() => {
-      expect(document.documentElement.getAttribute("data-chat-theme")).toBe("purple");
-    });
+  it("the default bundle card has aria-checked=true", () => {
+    const { getByRole } = renderWithBundle("tokyo-night");
+    const card = getByRole("radio", { name: /테마: 도쿄나이트/ });
+    expect(card.getAttribute("aria-checked")).toBe("true");
   });
 
-  it("clicking 기본 removes data-chat-theme (no override)", async () => {
-    const { getByRole } = renderWithTheme("dark");
-    // The provider defaults to chatTheme="lg" so the data-chat-theme
-    // attribute is already set on mount; "기본" must clear it.
+  it("other cards have aria-checked=false initially", () => {
+    const { getByRole } = renderWithBundle("tokyo-night");
+    const forest = getByRole("radio", { name: /테마: 포레스트/ });
+    expect(forest.getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("clicking a bundle card writes data-theme-bundle to <html>", async () => {
+    const { getByRole } = renderWithBundle("tokyo-night");
+    fireEvent.click(getByRole("radio", { name: /테마: 포레스트/ }));
     await waitFor(() => {
-      expect(document.documentElement.getAttribute("data-chat-theme")).toBe("lg");
-    });
-    fireEvent.click(getByRole("radio", { name: /채팅 테마: 기본/ }));
-    await waitFor(() => {
-      expect(document.documentElement.hasAttribute("data-chat-theme")).toBe(false);
+      expect(document.documentElement.getAttribute("data-theme-bundle")).toBe("forest");
     });
   });
 
-  it("selected card receives aria-checked=true", async () => {
-    const { getByRole } = renderWithTheme("dark");
-    fireEvent.click(getByRole("radio", { name: /채팅 테마: 오렌지/ }));
+  it("clicking lge-dark card writes data-theme-bundle=lge-dark", async () => {
+    const { getByRole } = renderWithBundle("tokyo-night");
+    fireEvent.click(getByRole("radio", { name: /테마: LGE 다크/ }));
     await waitFor(() => {
-      expect(getByRole("radio", { name: /채팅 테마: 오렌지/ }).getAttribute("aria-checked")).toBe("true");
-      expect(getByRole("radio", { name: /채팅 테마: 기본/ }).getAttribute("aria-checked")).toBe("false");
+      expect(document.documentElement.getAttribute("data-theme-bundle")).toBe("lge-dark");
     });
+  });
+
+  it("clicking high-contrast card writes data-theme-bundle=high-contrast", async () => {
+    const { getByRole } = renderWithBundle("tokyo-night");
+    fireEvent.click(getByRole("radio", { name: /테마: 고대비/ }));
+    await waitFor(() => {
+      expect(document.documentElement.getAttribute("data-theme-bundle")).toBe("high-contrast");
+    });
+  });
+
+  it("selected card updates aria-checked after click", async () => {
+    const { getByRole } = renderWithBundle("tokyo-night");
+    const forest = getByRole("radio", { name: /테마: 포레스트/ });
+    fireEvent.click(forest);
+    await waitFor(() => {
+      expect(forest.getAttribute("aria-checked")).toBe("true");
+    });
+    expect(getByRole("radio", { name: /테마: 도쿄나이트/ }).getAttribute("aria-checked")).toBe("false");
   });
 });
 
-describe("AppearanceTab — code-theme picker", () => {
-  it("renders one card per code-theme variant", () => {
-    const { getByRole } = renderWithTheme();
-    expect(getByRole("radio", { name: /코드 테마: 라이트/ })).toBeTruthy();
-    expect(getByRole("radio", { name: /코드 테마: 다크/ })).toBeTruthy();
+describe("AppearanceTab — followSystem toggle (LGE pair only)", () => {
+  it("followSystem toggle is hidden when a non-LGE bundle is active", () => {
+    const { queryByTestId } = renderWithBundle("tokyo-night");
+    expect(queryByTestId("follow-system-toggle")).toBeNull();
   });
 
-  it("clicking 라이트 writes data-code-theme=light", async () => {
-    const { getByRole } = renderWithTheme("dark");
-    fireEvent.click(getByRole("radio", { name: /코드 테마: 라이트/ }));
+  it("followSystem toggle is shown when lge-light is active", async () => {
+    const { getByRole, getByTestId } = renderWithBundle("tokyo-night");
+    fireEvent.click(getByRole("radio", { name: /테마: LGE 라이트/ }));
     await waitFor(() => {
-      expect(document.documentElement.getAttribute("data-code-theme")).toBe("light");
+      expect(getByTestId("follow-system-toggle")).toBeTruthy();
     });
   });
 
-  it("on dark shell with auto codeTheme, the dark card is the implicitly selected one", () => {
-    const { getByRole } = renderWithTheme("dark");
-    // codeTheme starts as "auto"; on dark shell, resolvedCodeTheme === "dark"
-    expect(getByRole("radio", { name: /코드 테마: 다크/ }).getAttribute("aria-checked")).toBe("true");
-    expect(getByRole("radio", { name: /코드 테마: 라이트/ }).getAttribute("aria-checked")).toBe("false");
+  it("followSystem toggle is shown when lge-dark is active", async () => {
+    const { getByRole, getByTestId } = renderWithBundle("lge-dark");
+    // Already on lge-dark — toggle should be visible
+    await waitFor(() => {
+      expect(getByTestId("follow-system-toggle")).toBeTruthy();
+    });
+    void getByRole; // suppress unused warning
+  });
+
+  it("high-contrast card has no followSystem toggle", async () => {
+    const { getByRole, queryByTestId } = renderWithBundle("tokyo-night");
+    fireEvent.click(getByRole("radio", { name: /테마: 고대비/ }));
+    await waitFor(() => {
+      expect(document.documentElement.getAttribute("data-theme-bundle")).toBe("high-contrast");
+    });
+    expect(queryByTestId("follow-system-toggle")).toBeNull();
   });
 });
 
-describe("AppearanceTab — shell picker", () => {
-  it("renders all four shell options as pill radios", () => {
-    const { getByRole } = renderWithTheme();
-    expect(getByRole("radio", { name: /^시스템$/ })).toBeTruthy();
-    expect(getByRole("radio", { name: /^라이트$/ })).toBeTruthy();
-    expect(getByRole("radio", { name: /^다크$/ })).toBeTruthy();
-    expect(getByRole("radio", { name: /^고대비$/ })).toBeTruthy();
-  });
-
-  it("clicking 라이트 writes data-theme=light", async () => {
-    const { getByRole } = renderWithTheme("dark");
-    fireEvent.click(getByRole("radio", { name: /^라이트$/ }));
-    await waitFor(() => {
-      expect(document.documentElement.getAttribute("data-theme")).toBe("light");
-    });
-  });
-
-  it("shows the resolved shell theme in the disclosure caption", async () => {
-    const { getAllByText } = renderWithTheme("dark");
-    await waitFor(() => {
-      expect(getAllByText(/현재:/).some((el) => el.textContent === "현재: dark")).toBe(true);
-    });
-  });
-
-  it("indicates system when the user picked system", () => {
-    const { getByText } = renderWithTheme("system");
-    expect(getByText(/시스템 설정 기반/)).toBeTruthy();
+describe("AppearanceTab — webView preferredFlow section", () => {
+  it("renders in-app and system-browser radio options", () => {
+    const { getByTestId } = renderWithBundle();
+    const group = getByTestId("webview-preferred-flow");
+    expect(group).toBeTruthy();
+    expect(group.querySelector('[data-value="in-app"]')).toBeTruthy();
+    expect(group.querySelector('[data-value="system-browser"]')).toBeTruthy();
   });
 });

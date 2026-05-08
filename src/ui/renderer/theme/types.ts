@@ -1,67 +1,49 @@
 /**
- * UX Track 3 — theme system public types.
+ * Theme system v2 public types.
  *
- * Three independent axes are managed by ThemeProvider:
- *   1. ThemePreference     — global shell light/dark/high-contrast (`data-theme`)
- *   2. ChatThemePreference — chat visual overlay (`data-chat-theme`)
- *   3. CodeThemePreference — code-block surface scheme (`data-code-theme`)
+ * The three-axis model (ThemePreference × ChatThemePreference × CodeThemePreference)
+ * is replaced by a single paired bundle (`bundleId`). Each bundle is a fully-
+ * specified set of shell + chat + code tokens — no combinatorial mismatches.
  *
- * Mirrors the unions in `src/data/settings-store.ts` so the renderer can
- * ship without importing main-process types directly. Keep these in sync.
+ * `ThemeContextValue` exposes:
+ *   - `bundleId`         — the active bundle id (e.g. "tokyo-night")
+ *   - `setBundle`        — live-set the bundle + persist
+ *   - `shell`            — derived shell ("light" | "dark") from the active bundle
+ *   - `followSystem`     — LGE pair only: auto-switch based on prefers-color-scheme
+ *   - `setFollowSystem`  — toggle followSystem (only meaningful for LGE pair)
  *
- * `Resolved*` types are what gets written to the <html> data-attributes:
- *   - "system" theme is resolved against `prefers-color-scheme`
- *   - "auto" codeTheme is resolved against the active resolved theme
- *   - chatTheme has no resolution step (preference IS the resolved value)
+ * Legacy type aliases (ThemePreference, ChatThemePreference, etc.) are kept for
+ * the settings-store migration path and are marked @internal. New code should
+ * not import them — use bundleId exclusively.
+ *
+ * `resolved` is kept for backward compatibility with CustomTitleBar's
+ * `optionalTheme.resolved` usage (maps to the active bundle's shell).
  */
-export type ThemePreference = "system" | "light" | "dark" | "high-contrast";
-export type ResolvedTheme = "light" | "dark" | "high-contrast";
 
-export type ChatThemePreference = "default" | "lg" | "purple" | "orange" | "blue";
+/** Active bundle id. */
+export type BundleId = string;
 
-export type CodeThemePreference = "auto" | "light" | "dark";
-export type ResolvedCodeTheme = "light" | "dark";
+/** Derived shell color scheme from the active bundle. */
+export type ResolvedShell = "light" | "dark";
 
 export interface ThemeContextValue {
-  /** User-facing shell preference (light/dark/system/high-contrast). */
-  preference: ThemePreference;
-  /** Concrete shell theme actually applied to <html data-theme>. */
-  resolved: ResolvedTheme;
-  /** User-facing chat visual theme (default/lg/purple/orange/blue). */
-  chatTheme: ChatThemePreference;
-  /** User-facing code-surface preference (auto/light/dark). */
-  codeTheme: CodeThemePreference;
-  /** Concrete code-surface scheme written to <html data-code-theme>. */
-  resolvedCodeTheme: ResolvedCodeTheme;
+  /** Active bundle id written to `<html data-theme-bundle>`. */
+  bundleId: BundleId;
   /**
-   * Live-set the shell preference. Updates the DOM immediately and persists
-   * to `~/.lvis/settings.json` via `api.updateSettings({ appearance: ... })`
-   * if the provider was given an api.
+   * Live-set the active bundle. Updates the DOM immediately and persists
+   * to `~/.lvis/settings.json` via `api.updateSettings({ appearance: ... })`.
    */
-  setPreference: (next: ThemePreference) => void;
-  /** Live-set the chat visual theme. Same persistence semantics. */
-  setChatTheme: (next: ChatThemePreference) => void;
-  /** Live-set the code-surface preference. Same persistence semantics. */
-  setCodeTheme: (next: CodeThemePreference) => void;
+  setBundle: (id: BundleId) => void;
+  /**
+   * Shell color scheme derived from the active bundle's `shell` field.
+   * Kept for backward compatibility (CustomTitleBar uses `optionalTheme.resolved`).
+   */
+  resolved: ResolvedShell;
+  /** When true (LGE pair only): auto-switch lge-light/lge-dark on OS scheme change. */
+  followSystem: boolean;
+  /** Toggle followSystem persistence. Only meaningful when bundleId is "lge-light" or "lge-dark". */
+  setFollowSystem: (next: boolean) => void;
 }
 
-export const THEME_PREFERENCES: readonly ThemePreference[] = [
-  "system",
-  "light",
-  "dark",
-  "high-contrast",
-];
-
-export const CHAT_THEME_PREFERENCES: readonly ChatThemePreference[] = [
-  "default",
-  "lg",
-  "purple",
-  "orange",
-  "blue",
-];
-
-export const CODE_THEME_PREFERENCES: readonly CodeThemePreference[] = [
-  "auto",
-  "light",
-  "dark",
-];
+/** LGE pair bundle ids that support followSystem. */
+export const LGE_PAIR_IDS: readonly string[] = ["lge-light", "lge-dark"];

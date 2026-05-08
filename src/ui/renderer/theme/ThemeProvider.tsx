@@ -1,86 +1,55 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { LvisApi } from "../types.js";
-import {
-  applyChatThemeToDocument,
-  applyCodeThemeToDocument,
-  applyThemeToDocument,
-  resolveCodeTheme,
-  resolveTheme,
-} from "./resolve-theme.js";
-import { resolvePluginTokens } from "./plugin-token-map.js";
-export { resolvePluginTokens };
-import type {
-  ChatThemePreference,
-  CodeThemePreference,
-  ResolvedCodeTheme,
-  ResolvedTheme,
-  ThemeContextValue,
-  ThemePreference,
-} from "./types.js";
+import { BUNDLES, DEFAULT_BUNDLE_ID, findBundle } from "./bundles/index.js";
+import type { ThemeBundle } from "./bundles/index.js";
+import { applyBundleToDocument, resolveSystemPair } from "./resolve-theme.js";
+import { bundleToPluginTokens } from "./plugin-token-map.js";
+export { bundleToPluginTokens };
+import type { ThemeContextValue, BundleId, ResolvedShell } from "./types.js";
+import { LGE_PAIR_IDS } from "./types.js";
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
-/**
- * UX Track 3 — single global theme provider.
- *
- * Manages three independent axes:
- *   - `preference`  → `<html data-theme="...">`        (shell light/dark/HC)
- *   - `chatTheme`   → `<html data-chat-theme="...">`   (chat visual overlay)
- *   - `codeTheme`   → `<html data-code-theme="...">`   (code-surface scheme)
- *
- * Responsibilities:
- *   - Hydrate from `api.getSettings().appearance.{theme,chatTheme,codeTheme}`
- *     on mount.
- *   - Apply each axis to <html> so the corresponding CSS-variable block in
- *     styles.css activates.
- *   - When preference is "system", listen to `prefers-color-scheme` and
- *     re-resolve live (no reload). codeTheme="auto" follows that resolution.
- *   - Persist preference changes through `api.updateSettings({ appearance })`.
- *
- * `initialPreference` / `initialChatTheme` / `initialCodeTheme` let tests
- * skip the async hydrate; production renders with the defaults until the
- * first getSettings() call lands.
- *
- * Adding a new chat theme:
- *  1. Add the literal to `ChatThemePreference` in `src/data/settings-store.ts`
- *     and `VALID_CHAT_THEMES`.
- *  2. Mirror the union in `src/ui/renderer/theme/types.ts` and append to
- *     `CHAT_THEME_PREFERENCES`.
- *  3. Add a `[data-chat-theme="<id>"]` block in `src/styles.css` that
- *     remaps `--primary` and `--ring` (and any other accent tokens).
- *  4. Add an entry to the `CHAT_OPTIONS` array in
- *     `src/ui/renderer/tabs/AppearanceTab.tsx`.
- */
 export interface ThemeProviderProps {
   api?: LvisApi;
-  initialPreference?: ThemePreference;
-  initialChatTheme?: ChatThemePreference;
-  initialCodeTheme?: CodeThemePreference;
+  /** Initial bundle id — lets tests skip async hydrate. */
+  initialBundleId?: BundleId;
+  /** Initial followSystem — lets tests skip async hydrate. */
+  initialFollowSystem?: boolean;
   children: ReactNode;
 }
 
+/**
+ * Theme system v2 — single bundle provider.
+ *
+ * Manages one active ThemeBundle (selected by `bundleId`). On mount, hydrates
+ * from `api.getSettings().appearance.bundleId`. On change, writes
+ * `data-theme-bundle` on `<html>` and persists via `api.updateSettings`.
+ *
+ * For the LGE pair (lge-light / lge-dark), `followSystem` auto-switches the
+ * active bundle based on `prefers-color-scheme`.
+ */
 export function ThemeProvider({
   api,
-  initialPreference = "system",
-  initialChatTheme = "lg",
-  initialCodeTheme = "auto",
+  initialBundleId = DEFAULT_BUNDLE_ID,
+  initialFollowSystem = false,
   children,
 }: ThemeProviderProps) {
-  const [preference, setPreferenceState] = useState<ThemePreference>(initialPreference);
-  const [chatTheme, setChatThemeState] = useState<ChatThemePreference>(initialChatTheme);
-  const [codeTheme, setCodeThemeState] = useState<CodeThemePreference>(initialCodeTheme);
-  const [resolved, setResolved] = useState<ResolvedTheme>(() => resolveTheme(initialPreference));
+  const resolveBundle = useCallback((id: BundleId): ThemeBundle => {
+    return findBundle(id) ?? findBundle(DEFAULT_BUNDLE_ID)!;
+  }, []);
 
-  // Track mount state so a late getSettings() resolution doesn't clobber a
-  // user toggle that happened in the meantime.
+  const [bundleId, setBundleIdState] = useState<BundleId>(initialBundleId);
+  const [followSystem, setFollowSystemState] = useState<boolean>(initialFollowSystem);
+
+  // Track mount + user-touched state so late getSettings() doesn't clobber
+  // a user toggle that happened in the meantime.
   const userTouchedRef = useRef(false);
   const mountedRef = useRef(true);
   useEffect(() => () => { mountedRef.current = false; }, []);
 
-  // Hydrate from settings on mount. Failures fall back silently to whatever
-  // the initial values already produced — the app must boot even if
-  // settings are unavailable (first launch, IPC mid-init, etc.).
+  // Hydrate from settings on mount.
   useEffect(() => {
     if (!api) return;
     let cancelled = false;
@@ -88,65 +57,64 @@ export function ThemeProvider({
       try {
         const settings = await api.getSettings();
         if (cancelled || userTouchedRef.current || !mountedRef.current) return;
-        const next = settings.appearance?.theme ?? "system";
-        const nextChat = (settings.appearance?.chatTheme as ChatThemePreference | undefined) ?? "lg";
-        const nextCode = (settings.appearance?.codeTheme as CodeThemePreference | undefined) ?? "auto";
-        setPreferenceState(next);
-        setChatThemeState(nextChat);
-        setCodeThemeState(nextCode);
+        const appearance = settings.appearance as { schemaVersion?: number; bundleId?: string; followSystem?: boolean } | undefined;
+        const nextId = (appearance?.schemaVersion === 2 && typeof appearance.bundleId === "string")
+          ? appearance.bundleId
+          : DEFAULT_BUNDLE_ID;
+        const nextFollow = appearance?.followSystem === true;
+        setBundleIdState(nextId);
+        setFollowSystemState(nextFollow);
       } catch {
-        /* ignore — boot continues with default */
+        /* ignore — boot continues with defaults */
       }
     })();
     return () => { cancelled = true; };
   }, [api]);
 
-  // Apply shell theme to the DOM whenever the resolved theme changes. Wrapped
-  // in an effect so SSR / non-DOM unit tests can render without crashing.
-  useEffect(() => {
-    if (typeof document === "undefined") return;
-    applyThemeToDocument(resolved);
-  }, [resolved]);
+  // Derive the effective bundle — when followSystem is active and the bundleId
+  // is part of the LGE pair, override with the OS-resolved variant.
+  const effectiveBundleId: BundleId = useMemo(() => {
+    if (followSystem && LGE_PAIR_IDS.includes(bundleId)) {
+      return resolveSystemPair();
+    }
+    return bundleId;
+  }, [bundleId, followSystem]);
 
-  // Apply chat visual overlay whenever the user changes it.
-  useEffect(() => {
-    if (typeof document === "undefined") return;
-    applyChatThemeToDocument(chatTheme);
-  }, [chatTheme]);
-
-  // Resolve + apply code-theme. Depends on both the user preference and the
-  // resolved shell (so "auto" follows shell flips live).
-  const resolvedCodeTheme: ResolvedCodeTheme = useMemo(
-    () => resolveCodeTheme(codeTheme, resolved),
-    [codeTheme, resolved],
+  const activeBundle: ThemeBundle = useMemo(
+    () => resolveBundle(effectiveBundleId),
+    [effectiveBundleId, resolveBundle],
   );
+
+  // Apply bundle to DOM on every active bundle change.
   useEffect(() => {
     if (typeof document === "undefined") return;
-    applyCodeThemeToDocument(resolvedCodeTheme);
-  }, [resolvedCodeTheme]);
+    applyBundleToDocument(activeBundle);
+  }, [activeBundle]);
 
-  // Propagate theme to plugin webviews whenever any axis changes.
-  // Must be after resolvedCodeTheme declaration.
+  // Propagate bundle tokens to plugin webviews whenever active bundle changes.
   useEffect(() => {
     if (!api) return;
-    const tokens = resolvePluginTokens(resolved, chatTheme);
-    void api.notifyPluginTheme({ theme: resolved, chatTheme, codeTheme: resolvedCodeTheme, tokens })
-      .catch((err: unknown) => {
-        if (typeof process !== "undefined" && process.env?.LVIS_DEV === "1") console.warn("[theme-propagation] notifyPluginTheme failed:", err);
-      });
-  }, [api, resolved, chatTheme, resolvedCodeTheme]);
+    const tokens = bundleToPluginTokens(activeBundle);
+    void api.notifyPluginTheme({
+      theme: activeBundle.shell,
+      chatTheme: "default",  // bundled — no separate chat axis
+      codeTheme: activeBundle.shell === "light" ? "light" : "dark",
+      tokens,
+    }).catch((err: unknown) => {
+      if (typeof process !== "undefined" && process.env?.LVIS_DEV === "1") {
+        console.warn("[theme-propagation] notifyPluginTheme failed:", err);
+      }
+    });
+  }, [api, activeBundle]);
 
-  // Re-resolve the shell theme whenever the preference changes.
+  // Live-follow OS preference when followSystem is active for LGE pair.
+  // A tick counter forces effectiveBundleId to re-evaluate on OS scheme change.
+  const [, setOsTick] = useState(0);
   useEffect(() => {
-    setResolved(resolveTheme(preference));
-  }, [preference]);
-
-  // Live-follow OS preference when the user picked "system".
-  useEffect(() => {
-    if (preference !== "system") return;
+    if (!followSystem || !LGE_PAIR_IDS.includes(bundleId)) return;
     if (typeof window === "undefined" || !window.matchMedia) return;
     const mql = window.matchMedia("(prefers-color-scheme: light)");
-    const onChange = () => setResolved(resolveTheme("system"));
+    const onChange = () => setOsTick((n) => n + 1);
     if (typeof mql.addEventListener === "function") {
       mql.addEventListener("change", onChange);
       return () => mql.removeEventListener("change", onChange);
@@ -158,58 +126,47 @@ export function ThemeProvider({
       };
     }
     return undefined;
-  }, [preference]);
+  }, [followSystem, bundleId]);
 
   const persistAppearance = useCallback(
-    (patch: { theme?: ThemePreference; chatTheme?: ChatThemePreference; codeTheme?: CodeThemePreference }) => {
+    (patch: { bundleId?: BundleId; followSystem?: boolean }) => {
       if (!api) return;
-      // Best-effort persistence — UI never blocks on this.
       void api
-        .updateSettings({ appearance: patch })
-        .catch(() => { /* ignore — local state already reflects the choice */ });
+        .updateSettings({ appearance: { schemaVersion: 2, ...patch } })
+        .catch(() => { /* ignore — local state already reflects */ });
     },
     [api],
   );
 
-  const setPreference = useCallback(
-    (next: ThemePreference) => {
+  const setBundle = useCallback(
+    (id: BundleId) => {
       userTouchedRef.current = true;
-      setPreferenceState(next);
-      persistAppearance({ theme: next });
+      setBundleIdState(id);
+      persistAppearance({ bundleId: id });
     },
     [persistAppearance],
   );
 
-  const setChatTheme = useCallback(
-    (next: ChatThemePreference) => {
+  const setFollowSystem = useCallback(
+    (next: boolean) => {
       userTouchedRef.current = true;
-      setChatThemeState(next);
-      persistAppearance({ chatTheme: next });
+      setFollowSystemState(next);
+      persistAppearance({ followSystem: next });
     },
     [persistAppearance],
   );
 
-  const setCodeTheme = useCallback(
-    (next: CodeThemePreference) => {
-      userTouchedRef.current = true;
-      setCodeThemeState(next);
-      persistAppearance({ codeTheme: next });
-    },
-    [persistAppearance],
-  );
+  const resolved: ResolvedShell = activeBundle.shell;
 
   const value = useMemo<ThemeContextValue>(
     () => ({
-      preference,
+      bundleId,
+      setBundle,
       resolved,
-      chatTheme,
-      codeTheme,
-      resolvedCodeTheme,
-      setPreference,
-      setChatTheme,
-      setCodeTheme,
+      followSystem,
+      setFollowSystem,
     }),
-    [preference, resolved, chatTheme, codeTheme, resolvedCodeTheme, setPreference, setChatTheme, setCodeTheme],
+    [bundleId, setBundle, resolved, followSystem, setFollowSystem],
   );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
@@ -235,3 +192,6 @@ export function useTheme(): ThemeContextValue {
 export function useOptionalTheme(): ThemeContextValue | null {
   return useContext(ThemeContext);
 }
+
+/** @internal — exported for the bundle registry */
+export { BUNDLES };
