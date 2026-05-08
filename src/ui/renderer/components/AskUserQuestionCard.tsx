@@ -358,6 +358,13 @@ function QuestionForm({
   );
   const buttonRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
+  // Reset focused idx when the question item changes (step transition).
+  // Prevents out-of-range focusedIdx when the new step has fewer choices,
+  // which would leave all option buttons with tabIndex={-1} (keyboard nav broken).
+  useEffect(() => {
+    setFocusedIdx(recommendIndex(item) ?? 0);
+  }, [item]);
+
   // Sync focused idx when the draft's selected choice changes externally.
   useEffect(() => {
     if (typeof draft.choiceIndex === "number") {
