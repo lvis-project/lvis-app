@@ -8,8 +8,11 @@ import {
   SUMMARY_TEMPLATE_PROMPT_V1,
   parseSummary,
   freezeBoundary,
+  compactWithBoundary,
+  renderBoundaryAsPreamble,
   type CompactBoundary,
 } from "../structured-compact.js";
+import type { GenericMessage, LLMProvider, StreamEvent } from "../llm/types.js";
 
 // ─── parseSummary ──────────────────────────────────────
 
@@ -195,5 +198,309 @@ describe("freezeBoundary — Object.freeze invariant (P7)", () => {
     expect(() => {
       (b as unknown as { compactNum: number }).compactNum = 999;
     }).toThrow(TypeError);
+  });
+});
+
+// ─── compactWithBoundary (Layer 2 LLM call) ──────────
+
+function makeMockLlm(responses: string[]): LLMProvider {
+  let idx = 0;
+  return {
+    vendor: "claude",
+    async *streamTurn(): AsyncIterable<StreamEvent> {
+      const text = responses[idx++] ?? responses[responses.length - 1] ?? "";
+      yield { type: "text_delta", text } satisfies StreamEvent;
+      yield { type: "message_complete", stopReason: "end_turn" } satisfies StreamEvent;
+    },
+  };
+}
+
+function makeFullSummaryText(): string {
+  return [
+    "# Session State as of 2026-05-08T00:00:00Z (compact #1, templateVersion 1)",
+    "",
+    "## Goal",
+    "auth refactor",
+    "## Constraints & Preferences",
+    "TypeScript strict",
+    "## Progress",
+    "- [x] schema",
+    "- [-] migration",
+    "## Key Decisions",
+    "JWT (이유: stateless)",
+    "## Relevant Files",
+    "src/auth.ts:edited:done",
+    "## Next Steps",
+    "마이그레이션 테스트",
+    "## Critical Context",
+    "활성 plugin: agent-hub",
+    "## Current Plan",
+    "step 2/4",
+    "## Verification State",
+    "build pass",
+    "## Open Blockers",
+    "(미정)",
+    "## Unsafe Pending Actions",
+    "(미정)",
+    "## Last Tool Boundary",
+    "round 5: read_file",
+  ].join("\n");
+}
+
+function makeLongHistory(turnCount: number): GenericMessage[] {
+  const out: GenericMessage[] = [];
+  for (let i = 1; i <= turnCount; i++) {
+    out.push({ role: "user", content: `질문 ${i} `.repeat(20) });
+    out.push({ role: "assistant", content: `응답 ${i} `.repeat(20) });
+  }
+  return out;
+}
+
+describe("compactWithBoundary — Layer 2 LLM call integration", () => {
+  it("splits, calls LLM, parses, returns frozen boundary + new history", async () => {
+    const llm = makeMockLlm([makeFullSummaryText()]);
+    const messages = makeLongHistory(50);
+
+    const r = await compactWithBoundary({
+      messages,
+      llm,
+      model: "claude-sonnet-4-6",
+      preserveRecentTokens: 200, // 작게 잡아서 split 발생 보장
+      compactNum: 1,
+    });
+
+    expect(r.removedCount).toBeGreaterThan(0);
+    expect(r.newHistory.length).toBeLessThan(messages.length);
+    expect(r.newHistory[0].role).toBe("user");
+    expect(r.newHistory[0].meta?.compactBoundary).toBe(true);
+    expect(r.newHistory[0].meta?.compactNum).toBe(1);
+    expect(r.newHistory[0].meta?.boundary).toBe(r.boundary);
+    expect(Object.isFrozen(r.boundary)).toBe(true);
+    expect(r.boundary.structuredSummary.sections.Goal).toBe("auth refactor");
+    expect(r.boundary.compactNum).toBe(1);
+  });
+
+  it("returns empty boundary when nothing to compact (preserveRecentTokens covers all)", async () => {
+    const llm = makeMockLlm(["(should not be called)"]);
+    const messages: GenericMessage[] = [
+      { role: "user", content: "hi" },
+      { role: "assistant", content: "hello" },
+    ];
+    const r = await compactWithBoundary({
+      messages,
+      llm,
+      model: "claude-sonnet-4-6",
+      preserveRecentTokens: 1_000_000, // 모든 메시지 보존
+      compactNum: 1,
+    });
+    expect(r.removedCount).toBe(0);
+    expect(r.newHistory).toBe(messages); // reference-equal
+  });
+
+  it("retries parse failure once, then graceful raw fallback", async () => {
+    // 두 번 모두 형식 위반 → raw fallback
+    const llm = makeMockLlm(["bad response 1", "bad response 2"]);
+    const messages = makeLongHistory(50);
+
+    const r = await compactWithBoundary({
+      messages,
+      llm,
+      model: "claude-sonnet-4-6",
+      preserveRecentTokens: 200,
+      compactNum: 2,
+    });
+    expect(r.boundary.structuredSummary.raw).toBeDefined();
+    expect(r.boundary.structuredSummary.raw).toContain("bad response 2");
+  });
+
+  it("recovers when 1st attempt malformed but 2nd succeeds", async () => {
+    const llm = makeMockLlm(["malformed", makeFullSummaryText()]);
+    const messages = makeLongHistory(50);
+
+    const r = await compactWithBoundary({
+      messages,
+      llm,
+      model: "claude-sonnet-4-6",
+      preserveRecentTokens: 200,
+      compactNum: 3,
+    });
+    expect(r.boundary.structuredSummary.raw).toBeUndefined();
+    expect(r.boundary.structuredSummary.sections.Goal).toBe("auth refactor");
+  });
+
+  it("collects pinnedArtifacts from skill outputs and meta.lock=true", async () => {
+    const llm = makeMockLlm([makeFullSummaryText()]);
+    const messages: GenericMessage[] = [
+      { role: "user", content: "x".repeat(500) },
+      {
+        role: "assistant",
+        content: "skill called",
+        toolCalls: [{ id: "s1", name: "skill", input: {} }],
+      },
+      {
+        role: "tool_result",
+        toolUseId: "s1",
+        toolName: "skill",
+        content: "REPL ran successfully\n결과: ok",
+      },
+      { role: "user", content: "lock me", meta: { lock: true } },
+    ];
+    // pad with more to ensure split
+    for (let i = 0; i < 30; i++) {
+      messages.push({ role: "user", content: `q${i} `.repeat(10) });
+      messages.push({ role: "assistant", content: `a${i} `.repeat(10) });
+    }
+
+    const r = await compactWithBoundary({
+      messages,
+      llm,
+      model: "claude-sonnet-4-6",
+      preserveRecentTokens: 200,
+      compactNum: 1,
+    });
+    expect(r.boundary.pinnedArtifacts.length).toBeGreaterThan(0);
+    const hasSkill = r.boundary.pinnedArtifacts.some((p) => p.startsWith("skill:"));
+    const hasLock = r.boundary.pinnedArtifacts.some((p) => p.startsWith("lock-user:"));
+    expect(hasSkill).toBe(true);
+    expect(hasLock).toBe(true);
+  });
+
+  it("respects abortSignal mid-stream", async () => {
+    const ctrl = new AbortController();
+    const llm: LLMProvider = {
+      vendor: "claude",
+      async *streamTurn(): AsyncIterable<StreamEvent> {
+        // 첫 chunk 후 abort 시뮬레이션
+        yield { type: "text_delta", text: "partial" } satisfies StreamEvent;
+        ctrl.abort();
+        yield { type: "text_delta", text: " more" } satisfies StreamEvent;
+        yield { type: "message_complete", stopReason: "end_turn" } satisfies StreamEvent;
+      },
+    };
+    const messages = makeLongHistory(50);
+
+    await expect(
+      compactWithBoundary({
+        messages,
+        llm,
+        model: "claude-sonnet-4-6",
+        preserveRecentTokens: 200,
+        compactNum: 1,
+        abortSignal: ctrl.signal,
+      }),
+    ).rejects.toThrow(/aborted/);
+  });
+
+  it("respects tool_use/tool_result invariant on split", async () => {
+    const llm = makeMockLlm([makeFullSummaryText()]);
+    // 끝부분에 tool_use → tool_result 페어. preserveRecentTokens 가 작게 설정되어
+    // tool_result 만 preserve 영역에 포함되면 split adjust 가 페어 보존하도록 뒤로 밂.
+    const messages: GenericMessage[] = [];
+    for (let i = 0; i < 30; i++) {
+      messages.push({ role: "user", content: `q${i} `.repeat(20) });
+      messages.push({ role: "assistant", content: `a${i} `.repeat(20) });
+    }
+    messages.push({
+      role: "assistant",
+      content: "tool call",
+      toolCalls: [{ id: "t1", name: "search", input: {} }],
+    });
+    messages.push({
+      role: "tool_result",
+      toolUseId: "t1",
+      toolName: "search",
+      content: "result",
+    });
+
+    const r = await compactWithBoundary({
+      messages,
+      llm,
+      model: "claude-sonnet-4-6",
+      preserveRecentTokens: 50, // 작게 — tool_result 만 preserve 영역에 들어가도 페어 보존
+      compactNum: 1,
+    });
+    // newHistory 의 첫번째 non-stub 이 tool_use 가 있는 assistant 라면 페어 보존.
+    // 또는 양쪽 다 toCompact 로 넘어가도 OK (페어 분리 X).
+    const preservedToolResults = r.newHistory.filter((m) => m.role === "tool_result");
+    if (preservedToolResults.length > 0) {
+      // tool_result 가 보존됐다면 그 직전에 매칭 tool_use 도 보존돼야 함.
+      const idx = r.newHistory.findIndex((m) => m.role === "tool_result");
+      const prev = idx > 0 ? r.newHistory[idx - 1] : undefined;
+      expect(prev?.role).toBe("assistant");
+      expect(
+        prev?.role === "assistant" && prev.toolCalls && prev.toolCalls.length > 0,
+      ).toBe(true);
+    }
+  });
+});
+
+// ─── renderBoundaryAsPreamble ──────────────────────────
+
+describe("renderBoundaryAsPreamble — boundary → ⑧ slot text", () => {
+  function makeFrozenBoundary(): Readonly<CompactBoundary> {
+    return freezeBoundary({
+      templateVersion: 1,
+      structuredSummary: {
+        templateVersion: 1,
+        sections: {
+          Goal: "test goal",
+          "Key Decisions": "decision 1",
+        },
+      },
+      recentVerbatim: [],
+      pinnedArtifacts: ["skill:run-tests", "lock-user:중요"],
+      toolBoundaryLedger: [
+        { round: 1, toolName: "read_file", resultSummary: "read 200 lines" },
+        { round: 2, toolName: "run", resultSummary: "exit 1", isError: true },
+      ],
+      createdAt: "2026-05-08T00:00:00.000Z",
+      compactNum: 5,
+    });
+  }
+
+  it("renders header + included sections + ledger + pinned", () => {
+    const text = renderBoundaryAsPreamble(makeFrozenBoundary());
+    expect(text).toContain("Compact #5");
+    expect(text).toContain("## Goal");
+    expect(text).toContain("test goal");
+    expect(text).toContain("## Key Decisions");
+    expect(text).toContain("decision 1");
+    expect(text).toContain("Recent Tool Activity Ledger");
+    expect(text).toContain("read_file");
+    expect(text).toContain("run [error]");
+    expect(text).toContain("Pinned Artifacts");
+    expect(text).toContain("skill:run-tests");
+  });
+
+  it("returns raw when structuredSummary has raw fallback", () => {
+    const b = freezeBoundary({
+      templateVersion: 1,
+      structuredSummary: { templateVersion: 1, sections: {}, raw: "raw fallback content" },
+      recentVerbatim: [],
+      pinnedArtifacts: [],
+      toolBoundaryLedger: [],
+      createdAt: "2026-05-08T00:00:00.000Z",
+      compactNum: 1,
+    });
+    expect(renderBoundaryAsPreamble(b)).toBe("raw fallback content");
+  });
+
+  it("omits empty ledger and pinned sections", () => {
+    const b = freezeBoundary({
+      templateVersion: 1,
+      structuredSummary: {
+        templateVersion: 1,
+        sections: { Goal: "minimal" },
+      },
+      recentVerbatim: [],
+      pinnedArtifacts: [],
+      toolBoundaryLedger: [],
+      createdAt: "2026-05-08T00:00:00.000Z",
+      compactNum: 1,
+    });
+    const text = renderBoundaryAsPreamble(b);
+    expect(text).not.toContain("Recent Tool Activity Ledger");
+    expect(text).not.toContain("Pinned Artifacts");
+    expect(text).toContain("Goal");
   });
 });

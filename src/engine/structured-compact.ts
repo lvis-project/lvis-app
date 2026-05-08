@@ -14,7 +14,9 @@
  * 청사진 §4.3, §5, §7.1 참조.
  */
 
-import type { GenericMessage } from "./llm/types.js";
+import type { GenericMessage, LLMProvider, StreamEvent } from "./llm/types.js";
+import { serializeMessageForEstimation, userContentText } from "./llm/types.js";
+import { estimateTokens, estimateMessagesTokens } from "./auto-compact.js";
 
 /** 12-section SUMMARY_TEMPLATE 헤더 (v3 §5.1). 순서/이름 모두 contract — 변경 시 templateVersion bump 필수. */
 export const SUMMARY_TEMPLATE_HEADERS_V1 = [
@@ -245,4 +247,321 @@ export function freezeBoundary(boundary: CompactBoundary): Readonly<CompactBound
   }
   Object.freeze(boundary);
   return boundary;
+}
+
+// ─── Layer 2 — compactWithBoundary (LLM call) ──────────
+
+/** Stub message body 가 history 에 들어감 — 진짜 본문은 ⑧ slot 의 preamble. */
+const BOUNDARY_STUB_TEMPLATE = (n: number): string =>
+  `[이전 대화 요약 #${n} — 자세한 내용은 system prompt 의 ⑧ Compact Summary 섹션 참조]`;
+
+/** parser 실패 시 1회 재시도. 2회째 raw fallback (R2). */
+const MAX_PARSE_RETRY = 1;
+
+/** Tool boundary ledger 에 보존할 마지막 K 라운드. */
+const TOOL_BOUNDARY_LEDGER_K = 5;
+
+/** Tool ledger 의 결과 요지 trim 길이. */
+const LEDGER_RESULT_MAX = 200;
+
+export interface CompactWithBoundaryArgs {
+  messages: GenericMessage[];
+  llm: LLMProvider;
+  model: string;
+  /** Cline preserve-recent-tokens — `getModelPreflightThreshold()` 의 일부 또는 별도 설정. */
+  preserveRecentTokens: number;
+  compactNum: number;
+  abortSignal?: AbortSignal;
+}
+
+export interface CompactWithBoundaryResult {
+  boundary: Readonly<CompactBoundary>;
+  newHistory: GenericMessage[];
+  removedCount: number;
+  /** post-compact estimated input tokens — caller 가 cumulativeUsage 리셋용. */
+  estimatedAfter: number;
+}
+
+/**
+ * Layer 2 — Structured compact with LLM call + opaque-state slot.
+ *
+ * 알고리즘 (v3 §4.3.3, P1 sync chain):
+ *   1. preserveRecentTokens 로 split (toCompact / toPreserve), tool_use/tool_result 무결성 보존
+ *   2. SUMMARY_TEMPLATE_PROMPT_V1 LLM call — 동일 vendor 동급 모델 (codex 권장)
+ *   3. parseSummary (실패 시 1회 재시도, 그래도 실패 시 raw fallback)
+ *   4. pinnedArtifacts 수집 (skill / lock=true)
+ *   5. toolBoundaryLedger 생성 (마지막 K 라운드)
+ *   6. CompactBoundary assemble + freezeBoundary
+ *   7. newHistory = [stub user message + boundary meta, ...toPreserve]
+ *
+ * 호출자 (queryLoop, PR-2-C) 는 step 7 결과로 `history.restore()` + `setSummaryPreamble(renderBoundaryAsPreamble(boundary))`
+ * 를 *동기* 순서로 실행해야 ⑧ slot 정합성 보장 (architect N2 sync chain).
+ */
+export async function compactWithBoundary(
+  args: CompactWithBoundaryArgs,
+): Promise<CompactWithBoundaryResult> {
+  const { messages, llm, model, preserveRecentTokens, compactNum, abortSignal } = args;
+
+  // 1. Split — 끝에서부터 preserveRecentTokens 만큼 보존, tool 페어 안전.
+  const { toCompact, toPreserve } = splitForBoundary(messages, preserveRecentTokens);
+
+  if (toCompact.length === 0) {
+    // 압축할 내용 없음. empty boundary 반환 — caller 는 무시 또는 noop 처리.
+    const empty = freezeBoundary({
+      templateVersion: 1,
+      structuredSummary: { templateVersion: 1, sections: {}, raw: "" },
+      recentVerbatim: messages,
+      pinnedArtifacts: [],
+      toolBoundaryLedger: [],
+      createdAt: new Date().toISOString(),
+      compactNum,
+    });
+    return {
+      boundary: empty,
+      newHistory: messages,
+      removedCount: 0,
+      estimatedAfter: estimateMessagesTokens(messages),
+    };
+  }
+
+  // 2-3. LLM call + parse with retry-once (R2 mitigation).
+  const conversationText = renderConversation(toCompact);
+  let summary: ParsedSummary | null = null;
+  let lastRawText = "";
+  for (let attempt = 0; attempt <= MAX_PARSE_RETRY; attempt++) {
+    const text = await callSummaryLLM({
+      llm,
+      model,
+      conversationText,
+      compactNum,
+      abortSignal,
+    });
+    lastRawText = text;
+    const parsed = parseSummary(text);
+    if (!parsed.raw) {
+      summary = parsed;
+      break;
+    }
+  }
+  if (!summary) {
+    // 2회 모두 형식 위반. raw 본문이라도 LLM 이 다음 턴에 의미 추론 가능 → graceful (R2).
+    summary = { templateVersion: 1, sections: {}, raw: lastRawText };
+  }
+
+  // 4-5. Pinned artifacts + tool boundary ledger.
+  const pinnedArtifacts = collectPinned(toCompact);
+  const toolBoundaryLedger = makeToolLedger(toCompact, TOOL_BOUNDARY_LEDGER_K);
+
+  // 6. Build + freeze boundary (P7 invariant — 3 view 동일 reference).
+  const boundary = freezeBoundary({
+    templateVersion: 1,
+    structuredSummary: summary,
+    recentVerbatim: toPreserve,
+    pinnedArtifacts,
+    toolBoundaryLedger,
+    createdAt: new Date().toISOString(),
+    compactNum,
+  });
+
+  // 7. Stub boundary message + preserved → newHistory.
+  const stubMessage: GenericMessage = {
+    role: "user",
+    content: BOUNDARY_STUB_TEMPLATE(compactNum),
+    meta: {
+      compactBoundary: true,
+      compactNum,
+      removedCount: toCompact.length,
+      compactedAt: boundary.createdAt,
+      boundary,
+    },
+  };
+  const newHistory: GenericMessage[] = [stubMessage, ...toPreserve];
+
+  return {
+    boundary,
+    newHistory,
+    removedCount: toCompact.length,
+    estimatedAfter: estimateMessagesTokens(newHistory),
+  };
+}
+
+/**
+ * CompactBoundary → system prompt ⑧ slot preamble 텍스트 변환.
+ *
+ * Anthropic / Gemini 는 이 텍스트가 system prompt 안 `<prior-context-summary>` fence
+ * 안에 들어감 (`system-prompt-builder.ts:447-453`) — prompt-injection vector 차단 (R9).
+ * raw fallback 경우 raw 그대로 반환.
+ */
+export function renderBoundaryAsPreamble(boundary: CompactBoundary): string {
+  if (boundary.structuredSummary.raw !== undefined && boundary.structuredSummary.raw.length > 0) {
+    return boundary.structuredSummary.raw;
+  }
+  const sectionLines: string[] = [];
+  for (const header of SUMMARY_TEMPLATE_HEADERS_V1) {
+    const body = boundary.structuredSummary.sections[header];
+    if (body) {
+      sectionLines.push(`## ${header}`, body, "");
+    }
+  }
+
+  if (boundary.toolBoundaryLedger.length > 0) {
+    sectionLines.push("## Recent Tool Activity Ledger");
+    for (const entry of boundary.toolBoundaryLedger) {
+      const errFlag = entry.isError ? " [error]" : "";
+      sectionLines.push(`- round ${entry.round}: ${entry.toolName}${errFlag} → ${entry.resultSummary}`);
+    }
+    sectionLines.push("");
+  }
+
+  if (boundary.pinnedArtifacts.length > 0) {
+    sectionLines.push("## Pinned Artifacts");
+    for (const a of boundary.pinnedArtifacts) {
+      sectionLines.push(`- ${a}`);
+    }
+    sectionLines.push("");
+  }
+
+  const header = `# Compact #${boundary.compactNum} (${boundary.createdAt})`;
+  return [header, "", ...sectionLines].join("\n").trimEnd();
+}
+
+// ─── Private helpers ────────────────────────────────
+
+/**
+ * Token-aware split — 끝에서부터 preserveRecentTokens 까지 보존, 나머지는 compact.
+ * tool_use/tool_result 페어 무결성 보존 (claw-code findSafeBoundary 패턴).
+ */
+function splitForBoundary(
+  messages: GenericMessage[],
+  preserveRecentTokens: number,
+): { toCompact: GenericMessage[]; toPreserve: GenericMessage[] } {
+  if (messages.length === 0 || preserveRecentTokens <= 0) {
+    return { toCompact: messages, toPreserve: [] };
+  }
+  let preserveStart = messages.length;
+  let preservedTokens = 0;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msgTokens = estimateTokens(serializeMessageForEstimation(messages[i]));
+    preservedTokens += msgTokens;
+    preserveStart = i;
+    if (preservedTokens >= preserveRecentTokens) break;
+  }
+  preserveStart = adjustToToolBoundary(messages, preserveStart);
+  return {
+    toCompact: messages.slice(0, preserveStart),
+    toPreserve: messages.slice(preserveStart),
+  };
+}
+
+/** Move `idx` backwards if it splits a tool_use → tool_result pair. */
+function adjustToToolBoundary(messages: GenericMessage[], idx: number): number {
+  let cur = idx;
+  while (cur > 0 && cur < messages.length) {
+    const m = messages[cur];
+    if (m.role === "tool_result") {
+      cur--;
+    } else if (m.role === "assistant" && m.toolCalls && m.toolCalls.length > 0) {
+      cur--;
+    } else {
+      break;
+    }
+  }
+  return Math.max(0, cur);
+}
+
+/** Conversation 직렬화 — LLM 프롬프트 본문용. trimmed per-message + role marker. */
+function renderConversation(messages: GenericMessage[]): string {
+  const lines: string[] = [];
+  for (const msg of messages) {
+    if (msg.role === "user") {
+      lines.push(`[user] ${userContentText(msg.content).slice(0, 800)}`);
+    } else if (msg.role === "assistant") {
+      const tool = msg.toolCalls && msg.toolCalls.length > 0
+        ? ` (called: ${msg.toolCalls.map((t) => t.name).join(", ")})`
+        : "";
+      lines.push(`[assistant${tool}] ${msg.content.slice(0, 800)}`);
+    } else {
+      const errFlag = msg.isError ? " [error]" : "";
+      lines.push(`[tool_result ${msg.toolName ?? "?"}${errFlag}] ${msg.content.slice(0, 400)}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+/** SUMMARY_TEMPLATE LLM 호출. 동일 vendor 동급 모델 (codex 권장 — Q2 default). */
+async function callSummaryLLM(args: {
+  llm: LLMProvider;
+  model: string;
+  conversationText: string;
+  compactNum: number;
+  abortSignal?: AbortSignal;
+}): Promise<string> {
+  const filledPrompt = SUMMARY_TEMPLATE_PROMPT_V1
+    .replace("{{conversationText}}", args.conversationText)
+    .replace("{{timestamp}}", new Date().toISOString())
+    .replace("{{compactNum}}", String(args.compactNum));
+
+  let text = "";
+  for await (const ev of args.llm.streamTurn({
+    model: args.model,
+    systemPrompt:
+      "당신은 대화 상태 관리자입니다. 12-section structured summary 를 정확히 출력하세요. 형식 위반 금지.",
+    messages: [{ role: "user", content: filledPrompt }],
+    tools: [],
+  }) as AsyncIterable<StreamEvent>) {
+    if (args.abortSignal?.aborted) {
+      throw new Error("Layer 2 compact aborted by signal");
+    }
+    if (ev.type === "text_delta" && ev.text) {
+      text += ev.text;
+    } else if (ev.type === "message_complete") {
+      break;
+    } else if (ev.type === "error") {
+      throw new Error(`Layer 2 LLM error: ${ev.error}`);
+    }
+  }
+  return text.trim();
+}
+
+/** skill route 도구 출력 + `meta.lock=true` 메시지의 압축 면제 — 정확한 paths/IDs 수집. */
+function collectPinned(messages: GenericMessage[]): string[] {
+  const pinned = new Set<string>();
+  for (const msg of messages) {
+    if (msg.role === "tool_result" && msg.toolName === "skill") {
+      const head = msg.content.split("\n")[0]?.slice(0, 200) ?? "";
+      if (head) pinned.add(`skill:${head}`);
+    }
+    if (msg.meta?.lock === true) {
+      const sig = msg.role === "user"
+        ? `lock-user:${userContentText(msg.content).slice(0, 80)}`
+        : msg.role === "assistant"
+          ? `lock-assistant:${msg.content.slice(0, 80)}`
+          : `lock-tool:${msg.toolName ?? "?"}:${msg.content.slice(0, 80)}`;
+      pinned.add(sig);
+    }
+  }
+  return Array.from(pinned);
+}
+
+/** 마지막 K 라운드 tool_use/tool_result 쌍을 ledger 로 — Codex GPT-5 prompting "last tool boundary" 패턴. */
+function makeToolLedger(messages: GenericMessage[], k: number): ToolCallSummary[] {
+  const entries: ToolCallSummary[] = [];
+  let round = 0;
+  for (const msg of messages) {
+    if (msg.role === "assistant" && msg.toolCalls && msg.toolCalls.length > 0) {
+      round++;
+    }
+    if (msg.role !== "tool_result") continue;
+    const trimmed = msg.content.length > LEDGER_RESULT_MAX
+      ? msg.content.slice(0, LEDGER_RESULT_MAX) + "…"
+      : msg.content;
+    const entry: ToolCallSummary = {
+      round,
+      toolName: msg.toolName ?? "?",
+      resultSummary: trimmed,
+    };
+    if (msg.isError) entry.isError = true;
+    entries.push(entry);
+  }
+  return entries.slice(-k);
 }

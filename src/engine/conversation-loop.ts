@@ -10,7 +10,8 @@
 import { ConversationHistory, normalizeToolPairInvariant } from "./conversation-history.js";
 import { ToolExecutor, type ToolUseBlock } from "../tools/executor.js";
 import { HookRunner } from "../hooks/hook-runner.js";
-import { shouldCompact, compactMessages, markStaleToolResults, estimateMessagesTokens, getModelUsableContext, decideRotation, type CheckpointTriggerType } from "./auto-compact.js";
+import { shouldCompact, compactMessages, markStaleToolResults, estimateMessagesTokens, getModelUsableContext, getModelPreflightThreshold, decideRotation, type CheckpointTriggerType } from "./auto-compact.js";
+import { compactWithBoundary, renderBoundaryAsPreamble } from "./structured-compact.js";
 import { generateStructuredSummary } from "./summary-generator.js";
 import { createProvider, secretKeyFor } from "./llm/provider-factory.js";
 import { FallbackProvider } from "./llm/vercel/fallback-chain.js";
@@ -263,6 +264,13 @@ export class ConversationLoop {
   private lastTurnScope: Set<string> | null = null;
   /** M2: Session-wide total of request_plugin activations (cap MAX_SESSION_PLUGIN_EXPANSION). */
   private sessionPluginExpansions = 0;
+  /**
+   * PR-2-C R14 mitigation — single in-flight Layer 2 compact lock per ConversationLoop.
+   * 같은 instance 에서 두 turn 이 동시에 Layer 0 trigger 시 두 번째는 skip (race 방지).
+   */
+  private isCompacting: boolean = false;
+  /** PR-2-C — Layer 2 compact 가 #N 번째인지 (numbered checkpoint chain, Copilot 패턴). */
+  private compactNum: number = 0;
 
   constructor(deps: ConversationLoopDeps) {
     this.deps = deps;
@@ -723,6 +731,15 @@ export class ConversationLoop {
     this.history.append({ role: "user", content: userContent });
     // §4.5.2 step 5 — HISTORY_APPEND
     this.tracer.step("HISTORY_APPEND", { role: "user", historySize: this.history.length });
+
+    // ─── Layer 0 — Pre-flight Guard (`infinity-session-redesign-v3.md` §4.1) ───
+    // step 5 (HISTORY_APPEND) 직후 / step 6 (PROMPT_ASSEMBLE) 직전. estimateMessagesTokens
+    // 가 model 의 preflight threshold 도달 시 차단형으로 Layer 2 (compactWithBoundary) 실행.
+    // 결과: ⑧ slot 갱신 + history 교체 + cumulativeUsage reset → 후속 step 6 build() 가
+    // 새 compact 결과를 반영. mid-loop reactive compact 영구 예방 (R13 sync chain + R14 lock).
+    if (this.provider) {
+      await this.runPreflightGuard(turnSignal, callbacks);
+    }
 
     // Phase 1 Lazy Tool Scoping — 이 턴에서 노출할 plugin 집합 결정.
     // SystemPromptBuilder Tool Schemas 섹션도 동일 scope로 필터링되도록
@@ -1361,13 +1378,97 @@ export class ConversationLoop {
   }
 
   /**
+   * Layer 0 — Pre-flight Guard (`infinity-session-redesign-v3.md` §4.1, P1 sync chain).
+   *
+   * step 5 (HISTORY_APPEND) 직후 호출 — `estimateMessagesTokens(history) >= getModelPreflightThreshold()`
+   * 시 차단형 await 로 Layer 2 (`compactWithBoundary`) 실행. 결과:
+   *   1. `compactNum` 증가
+   *   2. `history` 교체 (boundary stub + recentVerbatim)
+   *   3. `setSummaryPreamble` 로 ⑧ slot 갱신 (P1 — step 6 진입 전 반드시 set)
+   *   4. `cumulativeUsage.inputTokens = estimatedAfter` (의미 정합 reset)
+   *   5. `onCompactOccurred` 콜백 surface
+   *
+   * R14 mitigation — `isCompacting` lock per ConversationLoop instance. 동시 turn 에서
+   * Layer 0 진입 race 시 두번째는 silent skip.
+   *
+   * 이 경로가 활성화되면 mid-loop reactive compact (line 1027~) 는 *거의 발화 안 함* —
+   * preflight 가 사전 차단. 단 estimator drift 또는 rare race 로 도달 시 reactive 가 safety net.
+   */
+  private async runPreflightGuard(
+    abortSignal?: AbortSignal,
+    callbacks?: TurnCallbacks,
+  ): Promise<void> {
+    if (this.isCompacting) {
+      log.info("preflight: SKIPPED — isCompacting lock held (concurrent turn race avoided)");
+      return;
+    }
+    if (!this.provider) return;
+
+    const llmSettings = this.deps.settingsService.get("llm");
+    const provider = llmSettings.provider;
+    const model = llmSettings.vendors[provider].model;
+    const preflight = getModelPreflightThreshold(provider, model);
+    if (preflight <= 0) return;
+
+    const messagesBefore = this.history.getMessages();
+    const estimated = estimateMessagesTokens(messagesBefore);
+    if (estimated < preflight) return;
+
+    this.isCompacting = true;
+    try {
+      log.info(
+        `preflight: TRIGGER — estimated=${estimated} >= preflight=${preflight} (model=${provider}/${model}) → Layer 2 compact #${this.compactNum + 1}`,
+      );
+      // preserve budget = preflight 의 40% — Cline preserve-recent-tokens 휴리스틱 (per-model 추가 조정 가능).
+      const preserveRecentTokens = Math.max(1_000, Math.floor(preflight * 0.4));
+      const compactResult = await compactWithBoundary({
+        messages: messagesBefore,
+        llm: this.provider,
+        model,
+        preserveRecentTokens,
+        compactNum: this.compactNum + 1,
+        ...(abortSignal !== undefined && { abortSignal }),
+      });
+
+      if (compactResult.removedCount === 0) {
+        log.info("preflight: Layer 2 returned removedCount=0 (preserveRecentTokens covered all) — no mutation");
+        return;
+      }
+
+      // P1 sync chain — 다음 step 6 PROMPT_ASSEMBLE 가 새 boundary 를 read 해야 함.
+      this.compactNum = compactResult.boundary.compactNum;
+      this.history.clear();
+      this.history.restore([...compactResult.newHistory]);
+      this.deps.systemPromptBuilder.setSummaryPreamble?.(
+        renderBoundaryAsPreamble(compactResult.boundary),
+      );
+      this.cumulativeUsage = {
+        inputTokens: compactResult.estimatedAfter,
+        outputTokens: this.cumulativeUsage.outputTokens,
+        ...(this.cumulativeUsage.cacheReadTokens !== undefined && { cacheReadTokens: 0 }),
+        ...(this.cumulativeUsage.cacheWriteTokens !== undefined && { cacheWriteTokens: 0 }),
+      };
+      log.info(
+        `preflight: APPLIED — removed=${compactResult.removedCount} estimatedAfter=${compactResult.estimatedAfter} compactNum=${this.compactNum}`,
+      );
+      callbacks?.onCompactOccurred?.({
+        removedMessages: compactResult.removedCount,
+        freedTokens: estimated - compactResult.estimatedAfter,
+      });
+    } catch (err) {
+      log.warn(`preflight: Layer 2 failed — ${(err as Error).message}. mid-loop reactive 가 safety net 으로 작동.`);
+    } finally {
+      this.isCompacting = false;
+    }
+  }
+
+  /**
    * Reactive compact — context-length 초과 시 history 를 압축한다.
    * 성공했으면 true 반환 (호출자가 stream 재시도). 실패 시 false.
    *
-   * **Diagnostic note**: 이 경로는 mid-loop 으로 history 를 *대체* 하므로
-   * LLM 의 추론 chain 을 *깨뜨릴* 수 있음 (silent failure suspect — "툴
-   * 사용 중 멈춤" incident 의 prime suspect, 2026-05-07). production 에서도
-   * 항상 log + onCompactOccurred surface 해서 사후 진단 가능하게 함.
+   * **PR-2-C 이후**: Layer 0 preflight 가 대부분 사전 차단하므로 이 경로는 estimator drift /
+   * rare race 의 *safety net* 으로 강등. PR-2-F 에서 isContextLengthError() safety net 만
+   * 남기고 본체 삭제 예정.
    */
   private tryReactiveCompact(callbacks?: TurnCallbacks): boolean {
     const before = {

@@ -45,14 +45,24 @@ export interface MessageMeta {
   stripped?: boolean;
   /** stripped 되기 전 원본 content의 문자열 길이(JS string.length — UTF-16 code units, bytes 아님) */
   originalLength?: number;
-  /** compactMessages()가 생성한 요약 경계 marker인지 여부 (idempotency) */
+  /** Layer 2 boundary marker (idempotency + revert anchor) */
   compactBoundary?: boolean;
   /** 경계 marker의 경우, 요약 대상이 된 메시지 수 */
   removedCount?: number;
   /** Layer 1 mark-stale 발생 ISO timestamp */
   strippedAt?: string;
-  /** compactMessages 실행 ISO timestamp */
+  /** Layer 2 compact 실행 ISO timestamp */
   compactedAt?: string;
+  /** Layer 2 boundary 의 #N (numbered checkpoint chain — Copilot 패턴 차용). */
+  compactNum?: number;
+  /** Layer 1 mark-stale 면제 — skill 도구 출력 또는 사용자 명시 lock. structured-compact 의 pinnedArtifacts 와 paired. */
+  lock?: boolean;
+  /**
+   * Layer 2 boundary 의 opaque-state slot. type-only import 로 cycle 회피.
+   * 단일 source of truth: src/engine/structured-compact.ts:CompactBoundary.
+   * ⑧ slot / Layer 3 storage / history[0] 3 view 가 같은 frozen reference.
+   */
+  boundary?: import("../structured-compact.js").CompactBoundary;
 }
 
 /**
