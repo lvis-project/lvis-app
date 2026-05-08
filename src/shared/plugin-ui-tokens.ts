@@ -127,18 +127,19 @@ export interface LvisHostThemeEvent {
 }
 
 /**
- * @deprecated Use {@link LvisHostThemeEvent} instead.
+ * @deprecated v2 SDK consumers — use {@link LvisHostThemeEvent} instead.
  *
- * Legacy fields `colorScheme`, `reducedMotion`, and `fonts` are no longer
- * emitted by the host. `bundleId` is kept as `string` (not narrowed to
- * {@link LvisThemeBundleId}) to preserve backward compatibility with SDK
- * consumers that forward arbitrary strings into this field. Use
- * {@link LvisHostThemeEvent} for the narrowed v2 contract.
+ * Legacy standalone payload type. Preserves the old contract exactly:
+ * only `bundleId` (as `string`), `colorScheme`, `reducedMotion`, and `fonts`.
+ * Does **not** extend `LvisHostThemeEvent` — `shell` and `tokens` are NOT
+ * part of this type, so SDK ≤ v4 consumers that pass
+ * `{ bundleId: "...", colorScheme: "dark" }` continue to compile without error.
  *
+ * v2 SDK consumers: use {@link LvisHostThemeEvent} directly.
  * Migration: replace all `LvisThemePayload` usages with `LvisHostThemeEvent`.
  * These deprecated fields will be removed in a future cleanup PR.
  */
-export interface LvisThemePayload extends Omit<LvisHostThemeEvent, "bundleId"> {
+export interface LvisThemePayload {
   /**
    * Active theme bundle identifier.
    *
