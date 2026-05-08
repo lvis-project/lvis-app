@@ -10,6 +10,8 @@ import {
   markStaleToolResults,
   compactMessages,
   decideRotation,
+  estimateTokens,
+  countHangul,
 } from "../auto-compact.js";
 import type { GenericMessage } from "../llm/types.js";
 
@@ -368,5 +370,67 @@ describe("decideRotation — 3-tier rotation decision tree", () => {
     });
     expect(r.shouldRotate).toBe(true);
     expect(r.trigger).toBe("soft-time");
+  });
+});
+
+// ─── Korean weighting (P11) ────────────────────────────
+
+describe("countHangul", () => {
+  it("counts 가-힣 characters only", () => {
+    expect(countHangul("안녕하세요")).toBe(5);
+    expect(countHangul("hello")).toBe(0);
+    expect(countHangul("안녕 hello 세계")).toBe(4); // 안녕 (2) + 세계 (2) = 4
+  });
+
+  it("ignores hangul jamo (ㄱ-ㅎ, ㅏ-ㅣ outside 가-힣 syllable block)", () => {
+    // U+3131 (ㄱ) is *outside* 가-힣 (U+AC00~U+D7A3) syllable range — not counted
+    expect(countHangul("ㄱㄴㄷ")).toBe(0);
+  });
+
+  it("returns 0 for empty string", () => {
+    expect(countHangul("")).toBe(0);
+  });
+});
+
+describe("estimateTokens — chars/4 + 1 with Korean weighting (P11)", () => {
+  it("100% English: weight 1.0", () => {
+    // length 8 / 4 + 1 = 3
+    expect(estimateTokens("hello123")).toBe(3);
+  });
+
+  it("100% Korean (ratio = 1.0): weight 1.3", () => {
+    // length 5 (안녕하세요), ratio 1.0 → ceil(5 × 1.3 / 4) + 1 = ceil(1.625) + 1 = 2 + 1 = 3
+    expect(estimateTokens("안녕하세요")).toBe(3);
+  });
+
+  it("Korean ≥ 50% triggers weight 1.3", () => {
+    // 한글 5 chars + ABC 3 chars = 8 total, ratio 5/8 = 0.625 ≥ 0.5
+    // ceil(8 × 1.3 / 4) + 1 = ceil(2.6) + 1 = 3 + 1 = 4
+    expect(estimateTokens("한글ABC글한")).toBe(4);
+  });
+
+  it("Korean < 50% does NOT trigger weight (mixed code+comment)", () => {
+    // "function 한글() { return 1; }" — 30 chars total, hangul 2 = ratio 0.067 < 0.5 → weight 1.0
+    const text = "function 한글() { return 1; }";
+    const expected = Math.ceil(text.length / 4) + 1;
+    expect(estimateTokens(text)).toBe(expected);
+  });
+
+  it("50:50 boundary edge — exactly 50% triggers weight", () => {
+    // 5 hangul + 5 ASCII = 10 chars, ratio 0.5 → weight 1.3
+    // ceil(10 × 1.3 / 4) + 1 = ceil(3.25) + 1 = 4 + 1 = 5
+    expect(estimateTokens("ABCDE안녕하세요")).toBe(5);
+  });
+
+  it("empty string returns 1 (no division by zero)", () => {
+    expect(estimateTokens("")).toBe(1);
+  });
+
+  it("Korean estimate is strictly larger than naive chars/4 for hangul-heavy", () => {
+    const longHangul = "안녕".repeat(100); // 200 hangul chars
+    const naive = Math.ceil(200 / 4) + 1; // 51
+    const weighted = estimateTokens(longHangul);
+    expect(weighted).toBeGreaterThan(naive);
+    expect(weighted).toBe(Math.ceil(200 * 1.3 / 4) + 1); // 66
   });
 });

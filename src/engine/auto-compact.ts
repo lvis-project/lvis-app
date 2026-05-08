@@ -13,7 +13,7 @@ import type { GenericMessage, TokenUsage, LLMVendor, UserContentPart } from "./l
 import { serializeMessageForEstimation, userContentText } from "./llm/types.js";
 import { shouldSkipSummary as _shouldSkipSummary } from "./summary-generator.js";
 import { lookupPricing, effectiveContextWindow } from "../shared/pricing-data.js";
-import { getUsableContext } from "../shared/context-budget.js";
+import { getUsableContext, getPreflightThreshold } from "../shared/context-budget.js";
 
 /** compactMessages()가 boundary marker 뒤에 삽입하는 assistant ACK (double-compact 감지용) */
 const POST_COMPACT_ACK = "이전 대화 내용을 확인했습니다. 계속 도와드리겠습니다.";
@@ -51,6 +51,19 @@ export function getModelContextWindow(vendor: LLMVendor, model: string): number 
  */
 export function getModelUsableContext(vendor: LLMVendor, model: string): number {
   return getUsableContext(getModelContextWindow(vendor, model));
+}
+
+/**
+ * Layer 0 pre-flight 트리거 (절대 token count). v3 §6 보수 default —
+ * 64K → 50% / 128K → 55% / 200K → 60% / 1M → 65% / other → 60%.
+ * 호출자: queryLoop 의 step 5/6 사이 (`infinity-session-redesign-v3.md` §4.1).
+ *
+ * @example
+ * // 200K Sonnet → usable 160K → 60% × 160K = 96K trigger
+ * estimateMessagesTokens(history) >= getModelPreflightThreshold("claude", "claude-sonnet-4-6");
+ */
+export function getModelPreflightThreshold(vendor: LLMVendor, model: string): number {
+  return getPreflightThreshold(getModelContextWindow(vendor, model));
 }
 
 // ─── 3-Tier Rotation Types ────────────────────────────
@@ -161,9 +174,32 @@ const DEFAULT_CONFIG: CompactConfig = {
 
 // ─── Token Estimation ───────────────────────────────
 
-/** 텍스트의 토큰 수 추정 (claw-code 방식: length/4 + 1) */
+/**
+ * 한글 음절 (가-힣 범위, U+AC00 ~ U+D7A3) 카운트 — Korean weighting helper.
+ * Anthropic/OpenAI/Gemini 토크나이저 모두 한글을 1.5~2x 비율로 토큰화하므로
+ * chars/4 공식이 한글 위주 대화에서는 underestimate. 50% 이상이면 1.3x 보정.
+ */
+export function countHangul(text: string): number {
+  let count = 0;
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    if (c >= 0xAC00 && c <= 0xD7A3) count++;
+  }
+  return count;
+}
+
+/**
+ * 텍스트의 토큰 수 추정 (claw-code 방식: length/4 + 1) + 한글 가중치 (P11).
+ *
+ * 한글 비율 ≥ 50% 면 weight 1.3 적용 (mixed-language 코드+주석 등은 ratio < 50% → weight 1.0).
+ * 보수적 fallback: 모르는 문자는 기본 4-char/token 가정.
+ */
 export function estimateTokens(text: string): number {
-  return Math.ceil(text.length / 4) + 1;
+  if (text.length === 0) return 1;
+  const hangul = countHangul(text);
+  const ratio = hangul / text.length;
+  const weight = ratio >= 0.5 ? 1.3 : 1.0;
+  return Math.ceil((text.length * weight) / 4) + 1;
 }
 
 /** 메시지 배열의 총 토큰 추정 */

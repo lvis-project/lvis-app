@@ -35,3 +35,35 @@ export function getUsableContext(contextWindow: number): number {
   if (contextWindow === 200_000) return contextWindow - 40_000;
   return Math.max(contextWindow - 40_000, Math.floor(contextWindow * 0.8));
 }
+
+/**
+ * Layer 0 pre-flight 트리거 임계 — `infinity-session-redesign-v3.md` §6.
+ *
+ * `getUsableContext()` 와 *별도 함수* — 의미가 다름:
+ *   - `getUsableContext`  = 분모 (전체 컨텍스트 윈도우의 사용 가능 portion)
+ *   - `getPreflightThreshold` = 트리거 (usable 의 conservative %, Layer 2 압축 진입점)
+ *
+ * 두 함수가 같은 구조라도 분리해야 향후 임계 비율을 모델 출시/관측치 기반으로
+ * 독립 조정 가능. v3 §6 기준 보수 default:
+ *
+ *   - 64K  context  → 50 %  of usable  (≈ 18K)   small models / 단일 라운드 비중 큼
+ *   - 128K context  → 55 %  of usable  (≈ 54K)
+ *   - 200K context  → 60 %  of usable  (≈ 96K)   Anthropic default tier
+ *   - 1M   context  → 65 %  of usable  (≈ 624K)
+ *   - other         → 60 %  of usable
+ *
+ * 근거: Gemini CLI 의 50% 추세 (PR #13517) + Codex 미검증 → 자체 보수 정책.
+ *
+ * @returns 절대 token count (Math.floor(usable × pct)). 0 if input invalid.
+ */
+export function getPreflightThreshold(contextWindow: number): number {
+  if (!Number.isFinite(contextWindow) || contextWindow <= 0) return 0;
+  const usable = getUsableContext(contextWindow);
+  let pct: number;
+  if (contextWindow <= 64_000) pct = 0.50;
+  else if (contextWindow <= 128_000) pct = 0.55;
+  else if (contextWindow <= 200_000) pct = 0.60;
+  else if (contextWindow <= 1_000_000) pct = 0.65;
+  else pct = 0.60;
+  return Math.floor(usable * pct);
+}
