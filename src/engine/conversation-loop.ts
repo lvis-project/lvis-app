@@ -579,7 +579,14 @@ export class ConversationLoop {
       };
     } catch (err) {
       log.error("manualCompact failed: %s", (err as Error).message);
-      throw err;
+      // Return safe result rather than bubbling — prevents unhandled IPC rejection.
+      // `/compact` command handler and callers get a user-visible failure message.
+      return {
+        compacted: false,
+        compactedAt: null,
+        summary: `압축 실패: ${(err as Error).message}`,
+        removedMessageCount: 0,
+      };
     } finally {
       this.isCompacting = false;
     }
@@ -1411,8 +1418,8 @@ export class ConversationLoop {
    * R14 mitigation — `isCompacting` lock per ConversationLoop instance. 동시 turn 에서
    * Layer 0 진입 race 시 두번째는 silent skip.
    *
-   * 이 경로가 활성화되면 mid-loop reactive compact 는 PR-2-F-1 에서 영구 제거됨.
-   * context_error 도달 시 early-exit + 사용자 안내로 전환.
+   * mid-loop reactive compact 는 PR-2-F-1 에서 영구 제거됨 — context_error 도달 시
+   * early-exit signal 만 전달하고 stream-collector 가 사용자 안내 처리.
    */
   private async runPreflightGuard(
     abortSignal?: AbortSignal,

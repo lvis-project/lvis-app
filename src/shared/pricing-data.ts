@@ -166,7 +166,7 @@ export const DEFAULT_PRICING: Record<PricingVendor, Record<string, ModelPricing>
   // Deployment-name routed — pricing is account-specific. Populate via env
   // override (`LVIS_PRICING_OVERRIDE`). Without an override every model on
   // these vendors falls through to FALLBACK_PRICING, which means UI ring +
-  // Layer 0 preflight denominate at 128K regardless of the actual deployment
+  // Layer 0 preflight is denominated at 128K regardless of the actual deployment
   // capability — explicit override is REQUIRED for context-window math, not
   // just cost accuracy.
   "azure-foundry": {},

@@ -1,6 +1,6 @@
 /**
- * Structured Compact tests — Layer 2 interface + parser + freeze invariant.
- * 호출자가 아직 없으므로 실제 LLM call 회귀는 PR-2-D 에서 추가.
+ * Structured Compact tests — Layer 2 interface + parser + freeze invariant + LLM call.
+ * `compactWithBoundary()` 는 `ConversationLoop.runPreflightGuard` 에서 호출됨 (PR-2-C/D 완료).
  */
 import { describe, it, expect } from "vitest";
 import {
