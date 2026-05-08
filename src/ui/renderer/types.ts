@@ -439,7 +439,7 @@ export type LvisApi = {
   plugins: {
     getPerfStats: () => Promise<Record<string, PluginPerfStats>>;
   };
-  // Workflow tools (S1+S2)
+  // Workflow tools — routines v2
   onAskUserQuestion: (
     h: (req: {
       id: string;
@@ -461,29 +461,11 @@ export type LvisApi = {
   onAskUserQuestionTimeout?: (
     h: (payload: { requestId: string }) => void,
   ) => () => void;
-  listReminders: () => Promise<
-    Array<{
-      id: string;
-      at: string;
-      title: string;
-      body?: string;
-      repeat: "daily" | "weekly" | "none";
-      createdAt: string;
-      lastFiredAt?: string;
-      dismissedAt?: string;
-    }>
-  >;
-  dismissReminder: (id: string) => Promise<{ ok: boolean }>;
-  removeReminder: (id: string) => Promise<{ ok: boolean }>;
-  onReminderFired: (
-    h: (reminder: {
-      id: string;
-      at: string;
-      title: string;
-      body?: string;
-      repeat: "daily" | "weekly" | "none";
-    }) => void,
-  ) => () => void;
+  listRoutinesV2: () => Promise<import("../../main/routines-store.js").RoutineRecord[]>;
+  dismissRoutineV2: (id: string) => Promise<{ ok: boolean }>;
+  removeRoutineV2: (id: string) => Promise<{ ok: boolean }>;
+  triggerRoutineNowV2: (id: string) => Promise<{ ok: boolean; error?: string }>;
+  onRoutineFiredV2: (h: (routine: import("../../main/routines-store.js").RoutineRecord) => void) => () => void;
   listSessionTodos: (sessionId?: string) => Promise<
     Array<{ id: string; content: string; status: string }>
   >;

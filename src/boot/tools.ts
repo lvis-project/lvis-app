@@ -16,12 +16,12 @@ import { createKnowledgeSearchTools } from "../tools/knowledge-search.js";
 import { createSearchMemoryTool, memoryManagerNotesAdapter } from "../tools/search-memory.js";
 import { createRenderHtmlTool } from "../tools/render-html.js";
 import { createAskUserQuestionTool } from "../tools/ask-user-question.js";
-import { createRemindAtTool } from "../tools/remind-at.js";
+import { createScheduleRoutineTool } from "../tools/schedule-routine.js";
 import { createTodoSessionWriteTool } from "../tools/todo-session-write.js";
 import { createAgentSpawnTool, type AgentSpawnEvent } from "../tools/agent-spawn.js";
 import { createSkillLoadTool, type SkillLoadEvent } from "../tools/skill-load.js";
 import type { AskUserQuestionGate } from "../main/ask-user-question-gate.js";
-import type { RemindersStore } from "../main/reminders-store.js";
+import type { RoutinesStore } from "../main/routines-store.js";
 import type { SessionTodoStore } from "../main/session-todo-store.js";
 import type { SubAgentRunner } from "../engine/subagent-runner.js";
 import type { SkillStore } from "../main/skill-store.js";
@@ -186,7 +186,7 @@ export async function wireKnowledgeAndIdleScheduler(opts: {
 export interface WorkflowToolDeps {
   /** Lazy-resolved gate — populated after BrowserWindow is ready. */
   getAskUserQuestionGate?: () => AskUserQuestionGate | undefined;
-  remindersStore?: RemindersStore;
+  routinesStore?: RoutinesStore;
   sessionTodoStore?: SessionTodoStore;
   /** Lazy-resolved sub-agent runner — populated after ConversationLoop wiring. */
   getSubAgentRunner?: () => SubAgentRunner | undefined;
@@ -425,8 +425,8 @@ export function registerBuiltinTools(
       }),
     );
   }
-  if (workflowDeps?.remindersStore) {
-    builtins.push(createRemindAtTool(workflowDeps.remindersStore));
+  if (workflowDeps?.routinesStore) {
+    builtins.push(createScheduleRoutineTool(workflowDeps.routinesStore));
   }
   if (workflowDeps?.sessionTodoStore) {
     builtins.push(createTodoSessionWriteTool(workflowDeps.sessionTodoStore));

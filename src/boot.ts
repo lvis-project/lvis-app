@@ -66,8 +66,8 @@ import {
   wireKnowledgeAndIdleScheduler,
   type WorkflowToolDeps,
 } from "./boot/tools.js";
-import { RemindersStore } from "./main/reminders-store.js";
-import { RemindersScheduler } from "./main/reminders-scheduler.js";
+import { RoutinesStore } from "./main/routines-store.js";
+import { RoutinesScheduler } from "./main/routines-scheduler.js";
 import { SessionTodoStore } from "./main/session-todo-store.js";
 import { AskUserQuestionGate, IPC_ASK_USER_QUESTION_REQUEST } from "./main/ask-user-question-gate.js";
 import { NotificationService } from "./main/notification-service.js";
@@ -187,11 +187,11 @@ export async function bootstrap(
   // tool registry can register them in one pass below. Late bindings
   // (subAgentRunner, askUserQuestionGate) hop through closures so the
   // ConversationLoop / BrowserWindow are available before the tool fires.
-  const remindersStore = new RemindersStore();
-  await remindersStore.load().catch((err) => {
-    log.warn("boot: reminders load failed (non-fatal): %s", (err as Error).message);
+  const routinesStore = new RoutinesStore();
+  await routinesStore.load().catch((err) => {
+    log.warn("boot: routines load failed (non-fatal): %s", (err as Error).message);
   });
-  const remindersScheduler = new RemindersScheduler(remindersStore);
+  const routinesScheduler = new RoutinesScheduler(routinesStore);
   const sessionTodoStore = new SessionTodoStore();
   const skillStore = new SkillStore();
   const skillOverlay = new SkillOverlay();
@@ -217,7 +217,7 @@ export async function bootstrap(
   // load (and only on first load).
   let approvalGateRef: { fn: import("./permissions/approval-gate.js").ApprovalGate | undefined } = { fn: approvalGate };
   const workflowDeps: WorkflowToolDeps = {
-    remindersStore,
+    routinesStore,
     sessionTodoStore,
     skillStore,
     skillOverlay,
@@ -416,19 +416,32 @@ export async function bootstrap(
   // SystemPromptBuilder via getActiveSkillsSection. See main/skill-overlay.ts
   // for the registry; src/tools/skill-load.ts for the tool entry point.
 
-  // Reminders scheduler — fires `lvis:reminder:fired` per due reminder. The
-  // renderer's RemindersList subscribes to this channel and shows a toast.
-  remindersScheduler.onFired(({ reminder }) => {
+  // RoutinesScheduler v2 — fires per due routine, branching on execution mode.
+  // llm-session routines start a ConversationLoop with prePrompt.
+  // notification-only routines fire an OS notification.
+  routinesScheduler.onLlmSession(({ routine }) => {
     try {
-      getMainWindow()?.webContents.send("lvis:reminder:fired", reminder);
+      getMainWindow()?.webContents.send("lvis:routines:v2:fired", routine);
     } catch (err) {
-      log.warn("reminder fired emit failed: %s", (err as Error).message);
+      log.warn("routines v2 llm-session emit failed: %s", (err as Error).message);
+    }
+  });
+  routinesScheduler.onNotification(({ routine }) => {
+    try {
+      notificationService?.fire({
+        kind: "routine",
+        title: routine.notificationTitle ?? routine.title ?? "루틴 알림",
+        body: routine.notificationBody ?? "",
+        contextRef: { routineId: routine.id },
+      });
+    } catch (err) {
+      log.warn("routines v2 notification emit failed: %s", (err as Error).message);
     }
   });
   // L1: NOT started here. Boot order matters — if scheduler.start() runs
   // before the renderer has its IPC listeners attached, a past-due
-  // reminder fires immediately into a void. main.ts now invokes
-  // `services.startRemindersScheduler()` AFTER `registerIpcHandlers()` to
+  // routine fires immediately into a void. main.ts now invokes
+  // `services.startRoutinesScheduler()` AFTER `registerIpcHandlers()` to
   // close that gap.
 
   // Trigger executor — spawns a fresh ConversationLoop per
@@ -541,10 +554,10 @@ export async function bootstrap(
     triggerExecutor: lateBinding.triggerExecutorRef.fn ?? undefined,
     idleScheduler, bashAstValidator, auditService, auditLogger: bootAuditLogger, postTurnHookChain,
     approvalGate, knowledgeAvailable, starredStore, feedbackStore,
-    remindersStore, remindersScheduler, sessionTodoStore, askUserQuestionGate, skillStore,
+    routinesStore, routinesScheduler, sessionTodoStore, askUserQuestionGate, skillStore,
     notificationService,
     telemetry, pluginTelemetry, autoUpdaterStop,
-    startRemindersScheduler: () => remindersScheduler.start(),
+    startRoutinesScheduler: () => routinesScheduler.start(),
     refreshPluginNotifications: () => {
       disposePluginNotifications();
       disposePluginNotifications = registerPluginNotifications(pluginRuntime, mainWindow);
@@ -562,7 +575,7 @@ export async function bootstrap(
         telemetry?.stop();
         pluginTelemetry?.stop();
         idleScheduler?.stop();
-        remindersScheduler.stop();
+        routinesScheduler.stop();
         askUserQuestionGate.disposeAll();
         mcpGovernance.stopPolicyRefresh();
         await mcpManager.disconnectAll();

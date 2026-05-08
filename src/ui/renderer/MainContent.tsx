@@ -10,7 +10,6 @@ import type { QuickAction } from "./components/CommandPopover.js";
 import { MemorySearchPanel } from "./components/MemorySearchPanel.js";
 import { RoutinePanel } from "./components/RoutinePanel.js";
 import { StarredView } from "./components/StarredView.js";
-import { RemindersList } from "./components/RemindersList.js";
 import type { SessionSummary } from "./hooks/use-sessions.js";
 
 type Api = ReturnType<typeof getApi>;
@@ -122,14 +121,6 @@ export function MainContent(props: MainContentProps): ReactNode {
     );
   }
 
-  if (activeView === "reminders") {
-    return (
-      <MainPaneShell>
-        <RemindersList api={api} />
-      </MainPaneShell>
-    );
-  }
-
   if (activeView === "starred") {
     return (
       <MainPaneShell>
@@ -145,15 +136,10 @@ export function MainContent(props: MainContentProps): ReactNode {
     );
   }
 
-  if (activeView === "routines") {
+  if (activeView === "reminders" || activeView === "routines") {
     return (
       <MainPaneShell>
-        <RoutinePanel
-          api={api}
-          onActivateHome={props.onActivateHome}
-          onJumpToSession={props.onJumpToSession}
-          onStartRoutineSession={props.onStartRoutineSession}
-        />
+        <RoutinePanel api={api} />
       </MainPaneShell>
     );
   }

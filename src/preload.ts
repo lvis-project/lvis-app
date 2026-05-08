@@ -605,22 +605,17 @@ const api = {
     return () => ipcRenderer.removeListener("lvis:ask-user-question:timeout", listener);
   },
 
-  // remind_at — persistent reminder list + lifecycle
-  listReminders: async () => ipcRenderer.invoke("lvis:reminders:list"),
-  dismissReminder: async (id: string) => ipcRenderer.invoke("lvis:reminders:dismiss", id),
-  removeReminder: async (id: string) => ipcRenderer.invoke("lvis:reminders:remove", id),
-  onReminderFired: (
-    handler: (reminder: {
-      id: string;
-      at: string;
-      title: string;
-      body?: string;
-      repeat: "daily" | "weekly" | "none";
-    }) => void,
+  // schedule_routine v2 — persistent routine list + lifecycle
+  listRoutinesV2: async () => ipcRenderer.invoke("lvis:routines:v2:list"),
+  dismissRoutineV2: async (id: string) => ipcRenderer.invoke("lvis:routines:v2:dismiss", id),
+  removeRoutineV2: async (id: string) => ipcRenderer.invoke("lvis:routines:v2:remove", id),
+  triggerRoutineNowV2: async (id: string) => ipcRenderer.invoke("lvis:routines:v2:trigger-now", id),
+  onRoutineFiredV2: (
+    handler: (routine: import("./main/routines-store.js").RoutineRecord) => void,
   ) => {
     const listener = (_e: unknown, r: Parameters<typeof handler>[0]) => handler(r);
-    ipcRenderer.on("lvis:reminder:fired", listener);
-    return () => ipcRenderer.removeListener("lvis:reminder:fired", listener);
+    ipcRenderer.on("lvis:routines:v2:fired", listener);
+    return () => ipcRenderer.removeListener("lvis:routines:v2:fired", listener);
   },
 
   // todo_session_write — assistant's per-session checklist
