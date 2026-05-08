@@ -38,33 +38,35 @@ function synth(withLargeResults = true): GenericMessage[] {
 }
 
 describe("markStaleToolResults", () => {
-  it("strips older tool_results while preserving the most recent N", () => {
+  it("marks older tool_results while preserving the most recent N (memory verbatim)", () => {
     const messages = synth();
     const { messages: out, result } = markStaleToolResults(messages, {
       preserveRecentToolResults: 4,
     });
 
-    expect(result.stripped).toBe(true);
-    expect(result.strippedCount).toBe(6); // 10 - 4
-    expect(result.freedChars).toBeGreaterThan(0);
+    expect(result.marked).toBe(true);
+    expect(result.markedCount).toBe(6); // 10 - 4
+    expect(result.freedCharsOnSerialize).toBeGreaterThan(0);
 
     const toolResults = out.filter((m) => m.role === "tool_result");
     expect(toolResults).toHaveLength(10);
 
-    // 처음 6개는 stripped, 끝 4개는 raw
+    // 처음 6개: marked (compactedAt set) + content *verbatim* — PR-3 핵심
     for (let i = 0; i < 6; i++) {
       const m = toolResults[i];
       expect(m.role).toBe("tool_result");
       if (m.role === "tool_result") {
-        expect(m.meta?.stripped).toBe(true);
-        expect(m.meta?.originalLength).toBeGreaterThan(1000);
-        expect(m.content).toContain("[tool_result stripped");
+        expect(m.meta?.compactedAt).toMatch(/^\d{4}-/); // ISO timestamp set
+        // content 는 *원본* 그대로 — wire-serialize 단계에서 stub 변환됨
+        expect(m.content.length).toBeGreaterThan(1000);
+        expect(m.content).not.toContain("[tool_result stripped");
       }
     }
+    // 끝 4개: 마킹 없음, content 그대로
     for (let i = 6; i < 10; i++) {
       const m = toolResults[i];
       if (m.role === "tool_result") {
-        expect(m.meta?.stripped).toBeUndefined();
+        expect(m.meta?.compactedAt).toBeUndefined();
         expect(m.content.length).toBeGreaterThan(1000);
       }
     }
@@ -75,13 +77,11 @@ describe("markStaleToolResults", () => {
     const first = markStaleToolResults(messages, { preserveRecentToolResults: 4 });
     const second = markStaleToolResults(first.messages, { preserveRecentToolResults: 4 });
 
-    expect(second.result.stripped).toBe(false);
-    expect(second.result.strippedCount).toBe(0);
-    // 새 객체를 만들지 않고 reference 유지 기대 (stripped 후보 없음 → early return 또는 map pass-through)
-    // 여기선 strippedCount만 확인해도 idempotency 충족
+    expect(second.result.marked).toBe(false);
+    expect(second.result.markedCount).toBe(0);
   });
 
-  it("preserves tool_use_id linkage for stripped messages", () => {
+  it("preserves tool_use_id linkage for marked messages", () => {
     const messages = synth();
     const { messages: out } = markStaleToolResults(messages, {
       preserveRecentToolResults: 4,
@@ -114,12 +114,11 @@ describe("markStaleToolResults", () => {
     const { messages: out, result } = markStaleToolResults(messages, {
       preserveRecentToolResults: 4,
     });
-    expect(result.stripped).toBe(false);
+    expect(result.marked).toBe(false);
     expect(out).toBe(messages); // reference-equal
   });
 
   it("skips tool_results below minStubThreshold (OpenCode pattern, default 200 chars)", () => {
-    // 10개 모두 100자짜리 (default threshold 200 미만). preserveRecentToolResults=4 라도 모두 skip.
     const msgs: GenericMessage[] = [{ role: "user", content: "go" }];
     for (let i = 0; i < 10; i++) {
       const id = makeToolUseId(i);
@@ -138,13 +137,12 @@ describe("markStaleToolResults", () => {
     const { messages: out, result } = markStaleToolResults(msgs, {
       preserveRecentToolResults: 4,
     });
-    expect(result.stripped).toBe(false);
-    expect(result.strippedCount).toBe(0);
+    expect(result.marked).toBe(false);
+    expect(result.markedCount).toBe(0);
     expect(out).toBe(msgs); // reference-equal — no allocation
   });
 
   it("respects custom minStubThreshold", () => {
-    // 10개 모두 50자짜리. minStubThreshold=10 이면 처음 6개는 strip 됨.
     const msgs: GenericMessage[] = [{ role: "user", content: "go" }];
     for (let i = 0; i < 10; i++) {
       const id = makeToolUseId(i);
@@ -164,8 +162,8 @@ describe("markStaleToolResults", () => {
       preserveRecentToolResults: 4,
       minStubThreshold: 10,
     });
-    expect(result.stripped).toBe(true);
-    expect(result.strippedCount).toBe(6);
+    expect(result.marked).toBe(true);
+    expect(result.markedCount).toBe(6);
   });
 });
 

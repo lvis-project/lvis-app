@@ -111,22 +111,32 @@ export function estimateMessagesTokens(messages: GenericMessage[]): number {
 }
 
 
-// ─── Layer 1: Mark Stale Tool Results (preventive, LLM-free) ──
+// ─── Layer 1: Mark Stale Tool Results (memory-verbatim, serialization-stub) ──
+//
+// PR-3 정정 — `infinity-session-redesign-v3.md` §4.2 의 *full* 패턴.
+// 이전 (PR-2 까지) 동작: content 즉시 stub 으로 교체 → memory/wire/disk 단일 source.
+// 신규 (PR-3) 동작: meta.compactedAt 만 set, content *verbatim* 보존.
+//   - memory: verbatim (UI / Layer 3 preview 가 원본 표시 가능)
+//   - wire: `wire-serialize.ts:stubMarkedToolResults` 가 provider 호출 직전 stub 변환
+//   - disk: 동일 helper 가 saveSession 직전 stub 변환 (R4 mitigation 유지)
+//
+// `meta.stripped` / `meta.strippedAt` / `meta.originalLength` 는 PR-3 에서 *완전 제거됨* (호환성 layer 없음).
+// 단일 marker `meta.compactedAt` 가 "이 message 는 wire/disk 직렬화 시 stub 으로 변환되어야 함" 을 의미.
 
 export interface MarkStaleConfig {
   /** 말단에서부터 이 개수만큼의 tool_result는 raw 유지 (기본 8) */
   preserveRecentToolResults: number;
-  /** 이 길이(자) 미만의 tool_result는 stub 대상에서 제외 (기본 200, OpenCode 패턴) */
+  /** 이 길이(자) 미만의 tool_result는 mark 대상에서 제외 (기본 200, OpenCode 패턴) */
   minStubThreshold?: number;
 }
 
 export interface MarkStaleResult {
-  /** 실제 strip이 일어났는지 여부 */
-  stripped: boolean;
-  /** strip된 tool_result 개수 */
-  strippedCount: number;
-  /** 확보된 총 문자 수 (UTF-16 code unit 기준 string.length 차이 — 바이트 아님). */
-  freedChars: number;
+  /** 실제 mark 가 일어났는지 여부 */
+  marked: boolean;
+  /** mark 된 tool_result 개수 */
+  markedCount: number;
+  /** 직렬화 시 절약될 예상 문자 수 (UTF-16 code unit) (sum of original.length − stub.length) */
+  freedCharsOnSerialize: number;
 }
 
 const DEFAULT_MARK_STALE_CONFIG: MarkStaleConfig = {
@@ -135,18 +145,21 @@ const DEFAULT_MARK_STALE_CONFIG: MarkStaleConfig = {
 };
 
 /**
- * Layer 1 — Preventive, LLM-free tool_result *stub-replace* (renamed from `microcompactMessages` in v3 PR-1b).
+ * stub 텍스트 — wire/disk 직렬화 시 marked tool_result content 를 이 패턴으로 교체.
+ * `wire-serialize.ts` 와 같은 패턴 사용 (단일 source of truth).
+ */
+export function buildToolResultStub(toolName: string | undefined, origLen: number): string {
+  return `[tool_result stripped: tool=${toolName ?? "?"}, origLen=${origLen}]`;
+}
+
+/**
+ * Layer 1 — preventive, LLM-free part marking. Memory verbatim 보존.
  *
- * 오래된 tool_result 메시지 content를 stub string으로 교체해 히스토리 크기를 낮춘다.
- * (PR-3 stamping-behavior 머지 시 이 함수는 *marking only* — `meta.compactedAt` set 만 — 로 전환되고,
- *  실제 stub 화는 wire/disk serialization 경계로 이동. 현재 PR-1c 에서는 `meta.stripped`/`meta.strippedAt` 사용,
- *  PR-3 후 `meta.compactedAt` 으로 의미 통합. 그 시점까지 content 교체 동작 유지.)
- *
- * - 최근 `preserveRecentToolResults` 개는 원본 유지 (assistant가 참조 가능성 있음)
- * - content 길이가 `minStubThreshold` 미만이면 stub 으로 교체해도 이득이 거의 없으므로 skip (OpenCode 패턴)
- * - 이미 stripped된 메시지는 skip (idempotent)
- * - `toolUseId`는 절대 변경하지 않음 — 다른 메시지 참조 무결성 보존
- * - 입력 array는 mutate하지 않고 새 배열 반환. strip된 메시지만 새 객체, 나머지는 reference-equal.
+ * - 최근 `preserveRecentToolResults` 개는 mark 면제 (assistant 가 직접 참조 가능)
+ * - content 길이가 `minStubThreshold` 미만이면 mark 면제 (직렬화 시 절약 ≈ 0)
+ * - 이미 marked (`meta.compactedAt` 존재) 메시지는 skip (idempotent)
+ * - `toolUseId`, `content`, `toolName`, `isError` 모두 *verbatim* — meta 만 추가
+ * - 입력 array 는 mutate 하지 않고 새 배열 반환. mark 된 메시지만 새 객체.
  */
 export function markStaleToolResults(
   messages: GenericMessage[],
@@ -155,7 +168,6 @@ export function markStaleToolResults(
   const preserveCount = Math.max(0, config.preserveRecentToolResults);
   const minStub = config.minStubThreshold ?? DEFAULT_MARK_STALE_CONFIG.minStubThreshold ?? 200;
 
-  // tool_result 인덱스를 순서대로 수집
   const toolResultIndices: number[] = [];
   for (let i = 0; i < messages.length; i++) {
     if (messages[i].role === "tool_result") toolResultIndices.push(i);
@@ -164,51 +176,47 @@ export function markStaleToolResults(
   if (toolResultIndices.length <= preserveCount) {
     return {
       messages,
-      result: { stripped: false, strippedCount: 0, freedChars: 0 },
+      result: { marked: false, markedCount: 0, freedCharsOnSerialize: 0 },
     };
   }
 
-  // 끝에서부터 preserveCount 개를 제외한 인덱스가 strip 후보
-  const stripCandidates = toolResultIndices.slice(0, toolResultIndices.length - preserveCount);
-  // 후보 전원이 이미 stripped이거나 threshold 미만이면 새 배열 생성 없이 early return.
-  const eligibleCandidates = stripCandidates.filter((i) => {
+  const markCandidates = toolResultIndices.slice(0, toolResultIndices.length - preserveCount);
+  const eligibleCandidates = markCandidates.filter((i) => {
     const m = messages[i];
     if (m.role !== "tool_result") return false;
-    if ((m as { meta?: { stripped?: boolean } }).meta?.stripped === true) return false;
+    if (m.meta?.compactedAt !== undefined) return false; // idempotent
     return m.content.length >= minStub;
   });
   if (eligibleCandidates.length === 0) {
     return {
       messages,
-      result: { stripped: false, strippedCount: 0, freedChars: 0 },
+      result: { marked: false, markedCount: 0, freedCharsOnSerialize: 0 },
     };
   }
-  const stripCandidateIdxSet = new Set(eligibleCandidates);
+  const markCandidateIdxSet = new Set(eligibleCandidates);
 
-  let strippedCount = 0;
-  let freedChars = 0;
+  let markedCount = 0;
+  let freedCharsOnSerialize = 0;
   const nowIso = new Date().toISOString();
 
   const out = messages.map((msg, i) => {
-    if (!stripCandidateIdxSet.has(i)) return msg;
+    if (!markCandidateIdxSet.has(i)) return msg;
     if (msg.role !== "tool_result") return msg;
 
     const origLen = msg.content.length;
-    const stub = `[tool_result stripped: tool=${msg.toolName ?? "?"}, origLen=${origLen}]`;
-    freedChars += Math.max(0, origLen - stub.length);
-    strippedCount += 1;
+    const stubLen = buildToolResultStub(msg.toolName, origLen).length;
+    freedCharsOnSerialize += Math.max(0, origLen - stubLen);
+    markedCount += 1;
 
     return {
       role: "tool_result",
       toolUseId: msg.toolUseId,
       toolName: msg.toolName,
       isError: msg.isError,
-      content: stub,
+      content: msg.content, // *verbatim* — content 보존 (PR-3 핵심)
       meta: {
         ...(msg.meta ?? {}),
-        stripped: true,
-        originalLength: origLen,
-        strippedAt: nowIso,
+        compactedAt: nowIso,
       },
     } as GenericMessage;
   });
@@ -216,9 +224,9 @@ export function markStaleToolResults(
   return {
     messages: out,
     result: {
-      stripped: strippedCount > 0,
-      strippedCount,
-      freedChars,
+      marked: markedCount > 0,
+      markedCount,
+      freedCharsOnSerialize,
     },
   };
 }
