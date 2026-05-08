@@ -309,11 +309,12 @@ export function App() {
       }
       if (mode === "default" && streaming) {
         // Issue #622: interrupt the current turn and start a new one.
-        // chatAbort signals the engine; the in-flight turn's finally block
-        // will call finishStreamingRequest with a stale requestId (the
-        // turnRequestRef counter increment below makes it stale), so it
-        // is a safe no-op. Partial response is committed to history by
-        // post-turn-hook-chain with stopReason="interrupted".
+        // chatAbort awaits until the active stream turn settles (interrupted),
+        // then returns. The in-flight turn's finally block calls
+        // finishStreamingRequest; the turnRequestRef increment below makes
+        // its requestId stale so the call is a safe no-op. Partial response
+        // is committed to history by post-turn-hook-chain with
+        // stopReason="interrupted".
         debugLog("handleAsk", "interrupt:abort-and-proceed");
         try { await api.chatAbort(); } catch { /* no-op */ }
       }
