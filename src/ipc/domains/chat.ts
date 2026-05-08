@@ -176,13 +176,12 @@ async function runStreamedTurn(
       onToolEnd: (name, toolResult, isError, meta, uiPayload, durationMs) =>
         send({ type: "tool_end", name, result: toolResult, isError, ...meta, ...(uiPayload && { uiPayload }), durationMs }),
       onError: (error) => send({ type: "error", error }),
-      onCompactOccurred: ({ removedMessages, freedTokens, tier, revertSessionId, summary }) =>
+      onCompactOccurred: ({ removedMessages, freedTokens, tier, summary }) =>
         send({
           type: "compact_notice",
           removedMessages,
           freedTokens,
           ...(tier !== undefined ? { tier } : {}),
-          ...(revertSessionId !== undefined ? { revertSessionId } : {}),
           ...(summary !== undefined ? { summary } : {}),
         }),
       onTurnSummary: ({ turnDurationMs, toolCount, cumulativeToolMs, tokensIn, freshInputTokens, tokensOut, cacheReadTokens, cacheWriteTokens, breakdown }) =>

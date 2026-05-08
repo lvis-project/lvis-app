@@ -47,17 +47,19 @@ export interface SessionListEntry {
 }
 
 /**
- * Checkpoint trigger reasons.
- * - "hard-token":  context window reached hard token threshold
- * - "semantic-llm": LLM detected a topic shift
- * - "soft-time":   time-based soft trigger (e.g. session idle)
- * - "manual":      user explicitly triggered a checkpoint
+ * Checkpoint trigger reasons (post-infinity-session-v3).
+ * - "auto-compact": Layer 0 pre-flight 가 Layer 2 compact 를 실행
+ * - "manual":      user explicitly triggered a checkpoint (e.g. /compact command)
  */
-export type CheckpointTrigger = "hard-token" | "semantic-llm" | "soft-time" | "manual";
+export type CheckpointTrigger = "auto-compact" | "manual";
 
 /**
  * A checkpoint record written into a session's metadata when context is compacted.
  * Stores enough information to reconstruct the chain and resume with prior context.
+ *
+ * PR-2-C 정정 — `summary` 는 이제 `renderBoundaryAsPreamble()` 결과 (12-section structured)
+ * 또는 raw fallback. 전체 `CompactBoundary` 객체는 module boundary (memory ⊥ engine)
+ * 준수상 *in-memory only* — `MessageMeta.boundary` 에 frozen reference 로 보존됨.
  */
 export interface Checkpoint {
   /** Unique checkpoint identifier (any non-empty string; typically a UUID) */
@@ -74,10 +76,16 @@ export interface Checkpoint {
   /**
    * Rolling summary text generated at checkpoint time.
    * null when context was below the 10% minimum — no summary needed.
+   * PR-2-C 이후 Layer 0 preflight checkpoint 의 경우 `renderBoundaryAsPreamble()` 결과.
    */
   summary: string | null;
   /** Number of messages in the session at trigger time */
   messageCountAtTrigger: number;
+  /**
+   * Layer 2 compact #N (numbered checkpoint chain — Copilot 패턴).
+   * PR-2-C 이후 auto-compact + manual compact 양쪽에서 set. legacy rotation 은 absent.
+   */
+  compactNum?: number;
 }
 
 /**
@@ -154,9 +162,7 @@ function isValidSessionId(id: unknown): id is string {
 
 /** Valid trigger values for strict narrowing. */
 const VALID_CHECKPOINT_TRIGGERS = new Set<CheckpointTrigger>([
-  "hard-token",
-  "semantic-llm",
-  "soft-time",
+  "auto-compact",
   "manual",
 ]);
 
@@ -175,6 +181,12 @@ function normalizeCheckpoint(raw: unknown): Checkpoint | null {
   if (r.summary !== null && typeof r.summary !== "string") return null;
   const msgCount = r.messageCountAtTrigger;
   if (typeof msgCount !== "number" || msgCount < 0 || !Number.isInteger(msgCount)) return null;
+  // PR-2-E (#608) — `compactNum` 은 numbered checkpoint chain 의 #N. load 시 누락되면
+  // chain 깨짐 → 신규 record 만 set 되도록 optional 유지하되 정상 read.
+  const compactNum =
+    typeof r.compactNum === "number" && r.compactNum > 0 && Number.isInteger(r.compactNum)
+      ? r.compactNum
+      : undefined;
   return {
     id: r.id,
     triggeredAt: r.triggeredAt,
@@ -182,6 +194,7 @@ function normalizeCheckpoint(raw: unknown): Checkpoint | null {
     ctxUsageAtTrigger: ctxUsage,
     summary: r.summary as string | null,
     messageCountAtTrigger: msgCount,
+    ...(compactNum !== undefined && { compactNum }),
   };
 }
 

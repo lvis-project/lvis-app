@@ -10,8 +10,8 @@
 import { ConversationHistory, normalizeToolPairInvariant } from "./conversation-history.js";
 import { ToolExecutor, type ToolUseBlock } from "../tools/executor.js";
 import { HookRunner } from "../hooks/hook-runner.js";
-import { shouldCompact, compactMessages, markStaleToolResults, estimateMessagesTokens, getModelUsableContext, decideRotation, type CheckpointTriggerType } from "./auto-compact.js";
-import { generateStructuredSummary } from "./summary-generator.js";
+import { markStaleToolResults, estimateMessagesTokens, getModelPreflightThreshold, getModelUsableContext } from "./auto-compact.js";
+import { compactWithBoundary, renderBoundaryAsPreamble } from "./structured-compact.js";
 import { createProvider, secretKeyFor } from "./llm/provider-factory.js";
 import { FallbackProvider } from "./llm/vercel/fallback-chain.js";
 import type { LLMProvider, ToolSchema, TokenUsage } from "./llm/types.js";
@@ -65,22 +65,12 @@ export interface TurnCallbacks {
     removedMessages: number;
     freedTokens: number;
     /**
-     * 3-tier rotation tier when the compact was driven by `runRotationCheck`.
-     * Absent for plain auto/reactive compaction (no rotation occurred).
-     * Lets the renderer differentiate emergency vs voluntary checkpoints.
+     * Compact tier — `"auto-compact"` (Layer 0 preflight) | `"manual"` (`/compact`).
+     * UI CheckpointDivider 가 색상/라벨 결정에 사용 (`lib/chat-stream-state.ts:CheckpointTier`).
      */
-    tier?: CheckpointTriggerType;
+    tier?: "auto-compact" | "manual";
     /**
-     * §457 Phase 3: parent session id from which the rotation forked. Allows
-     * the renderer to surface a "여기로 되돌아가기" action that resumes the
-     * pre-rotation session. Only set on rotation-driven compacts; absent for
-     * plain auto/reactive compaction (no fork occurred).
-     */
-    revertSessionId?: string;
-    /**
-     * Rolling summary generated for rotation checkpoints. Undefined means no
-     * user-facing summary is available; null summaries are intentionally not
-     * sent because there is nothing useful to render.
+     * Rolling summary — Layer 2 의 `renderBoundaryAsPreamble()` 결과. 사용자 가시성용.
      */
     summary?: string;
   }) => void;
@@ -137,7 +127,7 @@ export interface TurnResult {
   toolCalls: Array<{ name: string; input: Record<string, unknown>; result: string }>;
   route: string;
   usage?: TokenUsage;
-  stopReason?: "end_turn" | "tool_use" | "interrupted";
+  stopReason?: "end_turn" | "tool_use" | "interrupted" | "context-error";
 }
 
 export interface ConversationLoopDeps {
@@ -245,14 +235,6 @@ export class ConversationLoop {
    * 와 다른 metric.
    */
   private lastRoundInputTokens = 0;
-  /** PR-4: timestamp when the current session started (ms since epoch) — used by decideRotation */
-  private sessionStartedAt: number = Date.now();
-  // 2026-05-04 incident 후속: rotation 직후 한 turn 동안 다음 rotation 보류
-  // (OpenCode 패턴 — 회전 결과 자체가 다시 회전 트리거되는 race 방지). next
-  // runRotationCheck 가 호출되면 이 flag 를 보고 early-return + clear.
-  private justRotated: boolean = false;
-  /** PR-4: index into history marking where the last checkpoint rotation occurred */
-  private lastCheckpointMessageIndex: number = 0;
   /** B4: current turn's AbortController — abortCurrentTurn() calls .abort() */
   currentAbortController: AbortController | null = null;
   /**
@@ -263,6 +245,13 @@ export class ConversationLoop {
   private lastTurnScope: Set<string> | null = null;
   /** M2: Session-wide total of request_plugin activations (cap MAX_SESSION_PLUGIN_EXPANSION). */
   private sessionPluginExpansions = 0;
+  /**
+   * PR-2-C R14 mitigation — single in-flight Layer 2 compact lock per ConversationLoop.
+   * 같은 instance 에서 두 turn 이 동시에 Layer 0 trigger 시 두 번째는 skip (race 방지).
+   */
+  private isCompacting: boolean = false;
+  /** PR-2-C — Layer 2 compact 가 #N 번째인지 (numbered checkpoint chain, Copilot 패턴). */
+  private compactNum: number = 0;
 
   constructor(deps: ConversationLoopDeps) {
     this.deps = deps;
@@ -390,9 +379,8 @@ export class ConversationLoop {
     this.sessionRoutineId = null;
     this.history.clear();
     this.cumulativeUsage = { inputTokens: 0, outputTokens: 0 };
-    this.sessionStartedAt = Date.now();
-    this.lastCheckpointMessageIndex = 0;
     this.sessionPluginExpansions = 0;
+    this.compactNum = 0;
     this.tracer = createTracer(this.sessionId);
     // PR-4: clear rolling summary preamble for fresh session
     this.deps.systemPromptBuilder.setSummaryPreamble?.(null);
@@ -465,9 +453,8 @@ export class ConversationLoop {
     this.history.clear();
     this.history.restore(normalized.messages);
     this.cumulativeUsage = { inputTokens: 0, outputTokens: 0 };
-    this.sessionStartedAt = Date.now();
-    this.lastCheckpointMessageIndex = 0;
     this.sessionPluginExpansions = 0;
+    this.compactNum = sessionMeta?.checkpoints?.length ?? 0;
     this.tracer = createTracer(this.sessionId);
     // PR-4: inject rolling summary preamble from loaded session metadata
     const preamble = sessionMeta?.summaryPreamble ?? null;
@@ -498,75 +485,111 @@ export class ConversationLoop {
       return { ok: false, compacted: false, compactedAt: null, removedMessageCount: 0 };
     }
 
-    // loadSession resets cumulativeUsage to zero, so shouldCompact() would
-    // never fire on resume. Estimate usage from loaded history via the
-    // canonical `estimateMessagesTokens` helper — counts thinking blocks
-    // and tool fields too, not just user-text content. Known limitation:
-    // chars/4 under-estimates Korean by ~50% (Korean ≈ 1.7-2 chars/token);
-    // resumed sessions near the rotation threshold may take one extra turn
-    // to fire compact. Acceptable for the resume edge case — full real-
-    // time accounting takes over once the next provider response lands.
+    // PR-2-F-4: loadSession 후 auto-compact 제거 — Layer 0 preflight 가 next user turn
+    // 진입 시 estimateMessagesTokens 평가 + 도달 시 Layer 2 LLM compact 처리. resume-time
+    // sync compact 는 redundant. cumulativeUsage 만 추정값으로 set 하여 Layer 0 가
+    // 정확한 ratio 평가 가능하도록 함.
     this.cumulativeUsage = {
       inputTokens: estimateMessagesTokens(this.history.getMessages()),
       outputTokens: 0,
     };
 
-    let compacted = false;
-    let removedMessageCount = 0;
-    if (this.isAutoCompactEnabled()) {
-      const llmSettings = this.deps.settingsService.get("llm");
-      if (shouldCompact(this.cumulativeUsage, getModelUsableContext(llmSettings.provider, llmSettings.vendors[llmSettings.provider].model))) {
-        const { messages: compactedMsgs, result: cr } = compactMessages(this.history.getMessages());
-        if (cr.compacted) {
-          this.history.clear();
-          this.history.restore(compactedMsgs);
-          compacted = true;
-          removedMessageCount = cr.removedMessages;
-        }
-      }
-    }
-
     return {
       ok: true,
-      compacted,
-      compactedAt: compacted ? new Date().toISOString() : null,
-      removedMessageCount,
+      compacted: false,
+      compactedAt: null,
+      removedMessageCount: 0,
     };
   }
 
   /**
-   * §4.5.4 B1 — Manual compact trigger.
-   * Forces compactMessages on current history and returns result metadata.
+   * §4.5.4 — Manual compact trigger (`/compact` user command).
+   *
+   * PR-2-F-4 정정: extractive `compactMessages` → LLM-based `compactWithBoundary` 마이그레이션.
+   * 사용자가 명시적으로 trigger 한 강제 압축이므로 임계값 무시하고 진입 — 단 history 가
+   * preserveRecentTokens 보다 작으면 no-op (압축할 내용 없음).
+   *
+   * R14 lock — 동시 compact race 방지.
    */
-  manualCompact(): {
+  async manualCompact(callbacks?: Pick<TurnCallbacks, "onCompactOccurred">): Promise<{
     compacted: boolean;
     compactedAt: string | null;
     summary: string;
     removedMessageCount: number;
-  } {
-    const { messages: compactedMsgs, result: cr } = compactMessages(this.history.getMessages());
-    if (cr.compacted) {
-      this.history.clear();
-      this.history.restore(compactedMsgs);
-      // Issue 2: persist compacted state so next resume sees the compacted history.
+  }> {
+    if (!this.provider) {
+      return {
+        compacted: false,
+        compactedAt: null,
+        summary: "LLM provider 미구성 — 압축 실행 불가.",
+        removedMessageCount: 0,
+      };
+    }
+    if (this.isCompacting) {
+      return {
+        compacted: false,
+        compactedAt: null,
+        summary: "이미 다른 압축이 진행 중입니다.",
+        removedMessageCount: 0,
+      };
+    }
+
+    const llmSettings = this.deps.settingsService.get("llm");
+    const provider = llmSettings.provider;
+    const model = llmSettings.vendors[provider].model;
+    const preflight = getModelPreflightThreshold(provider, model);
+    const preserveRecentTokens = Math.max(1_000, Math.floor(preflight * 0.4));
+
+    this.isCompacting = true;
+    try {
+      const messagesBefore = this.history.getMessages();
+      const result = await compactWithBoundary({
+        messages: messagesBefore,
+        llm: this.provider,
+        model,
+        preserveRecentTokens,
+        compactNum: this.compactNum + 1,
+      });
+
+      if (result === null || result.removedCount === 0) {
+        return {
+          compacted: false,
+          compactedAt: null,
+          summary: "컴팩트 불필요: 메시지 수가 충분히 적습니다.",
+          removedMessageCount: 0,
+        };
+      }
+
+      const estimated = estimateMessagesTokens(messagesBefore);
+      await this.applyBoundaryToSession(result, "manual", estimated, callbacks, messagesBefore.length);
+
+      // 영속화 — manualCompact 완료 시점에 즉시 disk 반영. saveSession 실패는
+      // 사용자 가시 결과에 영향 X (next turn 에서도 compact 결과 보존됨).
       void Promise.resolve(
         this.deps.memoryManager?.saveSession(this.sessionId, this.history.getMessages()),
       ).catch((err: unknown) => {
         log.warn("manualCompact saveSession failed: %s", (err as Error).message);
       });
+
       return {
         compacted: true,
-        compactedAt: new Date().toISOString(),
-        summary: `${cr.removedMessages}개 메시지 요약됨, ~${cr.freedTokens} 토큰 확보`,
-        removedMessageCount: cr.removedMessages,
+        compactedAt: result.boundary.createdAt,
+        summary: `${result.removedCount}개 메시지 요약됨 (compact #${this.compactNum})`,
+        removedMessageCount: result.removedCount,
       };
+    } catch (err) {
+      log.error("manualCompact failed: %s", (err as Error).message);
+      // Return safe result rather than bubbling — prevents unhandled IPC rejection.
+      // `/compact` command handler and callers get a user-visible failure message.
+      return {
+        compacted: false,
+        compactedAt: null,
+        summary: `압축 실패: ${(err as Error).message}`,
+        removedMessageCount: 0,
+      };
+    } finally {
+      this.isCompacting = false;
     }
-    return {
-      compacted: false,
-      compactedAt: null,
-      summary: "컴팩트 불필요: 메시지 수가 충분히 적습니다.",
-      removedMessageCount: 0,
-    };
   }
 
   /**
@@ -724,6 +747,15 @@ export class ConversationLoop {
     // §4.5.2 step 5 — HISTORY_APPEND
     this.tracer.step("HISTORY_APPEND", { role: "user", historySize: this.history.length });
 
+    // ─── Layer 0 — Pre-flight Guard (`infinity-session-redesign-v3.md` §4.1) ───
+    // step 5 (HISTORY_APPEND) 직후 / step 6 (PROMPT_ASSEMBLE) 직전. estimateMessagesTokens
+    // 가 model 의 preflight threshold 도달 시 차단형으로 Layer 2 (compactWithBoundary) 실행.
+    // 결과: ⑧ slot 갱신 + history 교체 + cumulativeUsage reset → 후속 step 6 build() 가
+    // 새 compact 결과를 반영. mid-loop reactive compact 영구 예방 (R13 sync chain + R14 lock).
+    if (this.provider) {
+      await this.runPreflightGuard(turnSignal, callbacks);
+    }
+
     // Phase 1 Lazy Tool Scoping — 이 턴에서 노출할 plugin 집합 결정.
     // SystemPromptBuilder Tool Schemas 섹션도 동일 scope로 필터링되도록
     // build() 호출 전에 setToolScope 수행.
@@ -783,7 +815,6 @@ export class ConversationLoop {
       const hookResult = await this.deps.postTurnHookChain.run({
         sessionId: this.sessionId,
         messages: this.history.getMessages(),
-        cumulativeUsage: this.cumulativeUsage,
         input,
         output: result.text,
         toolCalls: result.toolCalls.map((tc) => ({ name: tc.name, isError: false })),
@@ -816,25 +847,16 @@ export class ConversationLoop {
       // PostTurnHookChain에서 이미 처리하므로 fallback에서도 호출하지 않는다.
       // PostTurnHookChain을 주입한 경우와 fallback 모두 memory 추출은
       // hook chain의 memory-extract 단계에서만 일어난다.
-      const llmSettings = this.deps.settingsService.get("llm");
       if (this.isAutoCompactEnabled()) {
-        // Stage 1a: Layer 1 part marking — 항상 실행, 저비용. child loop 에서도 작동.
+        // Layer 1 part marking — 항상 실행, 저비용. child loop 에서도 작동.
+        // PR-2-F-3: Stage 1b 제거 — Layer 0 preflight (next turn) 가 동등 압축 처리.
+        // child loop 은 fire-and-forget 이라 turn budget 짧음 → markStaleToolResults 만으로 충분.
         const { messages: afterMark, result: mr } = markStaleToolResults(this.history.getMessages());
         if (mr.stripped) {
           this.history.clear();
           this.history.restore(afterMark);
           if (process.env.NODE_ENV !== "production") {
             log.info(`mark-stale (fallback): stripped ${mr.strippedCount} tool_results, freed ~${mr.freedChars} chars`);
-          }
-        }
-        // Stage 1b: threshold-triggered full compact (기존 동작).
-        if (shouldCompact(this.cumulativeUsage, getModelUsableContext(llmSettings.provider, llmSettings.vendors[llmSettings.provider].model))) {
-          const { messages: compacted, result: cr } = compactMessages(this.history.getMessages());
-          if (cr.compacted) {
-            this.history.clear();
-            this.history.restore(compacted);
-            if (process.env.NODE_ENV !== "production") log.info(`auto-compact: removed ${cr.removedMessages} msgs, freed ~${cr.freedTokens} tokens`);
-            callbacks?.onCompactOccurred?.({ removedMessages: cr.removedMessages, freedTokens: cr.freedTokens });
           }
         }
       }
@@ -859,12 +881,9 @@ export class ConversationLoop {
       this.deps.idleScheduler?.signalConversation();
     }
 
-    // PR-4: 3-tier rotation orchestration. 2026-05-04 incident 정정: turn
-    // 이 *완전 종료* 됐을 때만 rotation. stopReason==="interrupted" /
-    // empty text / 마지막이 tool_result 인 (LLM 이 도구 후 답을 못 한)
-    // 케이스는 incomplete turn 으로 보고 회전 보류. notification (line 695-)
-    // 와 동일한 turn-completeness 판정.
-    await this.runRotationCheck(result.text, result.stopReason, callbacks);
+    // PR-2-F-2: rotation orchestration 폐지. Layer 2 의 same-session checkpoint chain
+    // (`runPreflightGuard` 안의 appendCheckpoint) 으로 대체 — fork 없음, sessionId 불변.
+    // Turn 종료 후 별도 hook 불필요: Layer 0 가 다음 turn 진입 시 다시 평가.
 
     // Turn aggregate footer — see TurnCallbacks.onTurnSummary doc above.
     // Tokens come from the LLM provider's usage report (Vercel AI SDK
@@ -879,6 +898,7 @@ export class ConversationLoop {
      // 0 표시. 어느 단계에서 끊겼는지 정확히 가시화.
     const willEmitSummary =
       result.stopReason !== "interrupted" &&
+      result.stopReason !== "context-error" &&
       typeof result.text === "string" &&
       result.text.trim().length > 0;
     log.info(
@@ -926,11 +946,12 @@ export class ConversationLoop {
     callbacks?.onTurnComplete?.(result.text);
 
     // Issue #260 — fire system notification on turn-end. Skip if the turn
-    // was interrupted (user aborted) or produced no assistant text (rare
-    // tool-only termination). Body is the leading slice of the assistant
-    // response — NotificationService caps + ellipses it.
+    // was interrupted (user aborted), hit context_error, or produced no
+    // assistant text (rare tool-only termination). Body is the leading slice
+    // of the assistant response — NotificationService caps + ellipses it.
     if (
       result.stopReason !== "interrupted" &&
+      result.stopReason !== "context-error" &&
       typeof result.text === "string" &&
       result.text.trim().length > 0
     ) {
@@ -962,7 +983,7 @@ export class ConversationLoop {
       sessionIdOverride?: string;
       spawnDepth?: number;
     },
-  ): Promise<{ text: string; toolCalls: Array<{ name: string; input: Record<string, unknown>; result: string }>; usage?: TokenUsage; stopReason?: "end_turn" | "tool_use" | "interrupted" }> {
+  ): Promise<{ text: string; toolCalls: Array<{ name: string; input: Record<string, unknown>; result: string }>; usage?: TokenUsage; stopReason?: "end_turn" | "tool_use" | "interrupted" | "context-error" }> {
     const llmSettings = this.deps.settingsService.get("llm");
     const activeBlock = llmSettings.vendors[llmSettings.provider];
     const model = activeBlock.model;
@@ -979,8 +1000,6 @@ export class ConversationLoop {
     let pluginExpansions = 0;
     let knowledgeCallCount = 0;
     let roundIndex = 0;
-    // Reactive compact recovery: turn당 1회만 허용
-    let reactiveCompacted = false;
     // C3(a): assistant-round counter — used by the maxRounds break below.
     let assistantRoundsRun = 0;
     // C3(a): effective round budget. Default = MAX_TOOL_ROUNDS (10); when a
@@ -1026,8 +1045,8 @@ export class ConversationLoop {
         );
       }
 
-      // ─── Stream 1차 시도 → context-length 에러면 reactive compact 후 재시도 ───
-      let stream = await collectRoundStream({
+      // ─── Stream attempt — Layer 0 preflight 가 사전 압축 처리하므로 mid-loop retry 없음 ───
+      const stream = await collectRoundStream({
         provider: this.provider!,
         model,
         systemPrompt,
@@ -1037,56 +1056,20 @@ export class ConversationLoop {
         abortSignal,
         onReasoningDelta: callbacks?.onReasoningDelta,
         onTextDelta: callbacks?.onTextDelta,
-        reactiveCompacted,
       });
 
-      if (stream.kind === "context_error" && !reactiveCompacted) {
+      // EARLY-EXIT (R6 safety net): Layer 0 estimator drift 로 context_error 도달 시
+      // 사용자 안내 + turn 종료. retry 없음 — mid-loop history mutation 으로 LLM tool-chain
+      // 손상되던 silent failure 패턴 영구 제거.
+      if (stream.kind === "context_error") {
         log.warn(
-          `queryLoop: context_error caught (round=${roundIndex} errMsg="${(stream.errorMessage ?? "").slice(0, 100)}") — entering reactive-compact + retry branch`,
+          `queryLoop: EARLY-EXIT(context_error after Layer 0) — round=${roundIndex} err="${(stream.errorMessage ?? "").slice(0, 100)}" (estimator drift suspected)`,
         );
-        reactiveCompacted = true;
-        const retried = this.tryReactiveCompact(callbacks);
-        if (retried) {
-          log.info(`queryLoop: reactive-compact succeeded — retrying stream (round=${roundIndex})`);
-          stream = await collectRoundStream({
-            provider: this.provider!,
-            model,
-            systemPrompt,
-            messages: this.history.getMessages(),
-            toolSchemas,
-            llmSettings: { ...activeBlock, streamSmoothing: llmSettings.streamSmoothing },
-            abortSignal,
-            onReasoningDelta: callbacks?.onReasoningDelta,
-            onTextDelta: callbacks?.onTextDelta,
-            reactiveCompacted,
-          });
-          // 재시도 결과 분류 — silent failure 의 정확한 원인 추적용.
-          log.warn(
-            `queryLoop: post-reactive-compact retry result kind="${stream.kind}" round=${roundIndex}` +
-              (stream.kind === "ok"
-                ? ` text=${stream.text.length}ch toolCalls=${stream.toolCalls.length} stopReason="${stream.stopReason}"`
-                : ""),
-          );
-          // LLM 이 retry 후 *empty + 0 tool* 응답하면 prior tool chain 이
-          // mid-flight 으로 손상되어 LLM 이 plan 잃은 경우. 사용자에게 명시.
-          if (
-            stream.kind === "ok" &&
-            stream.text.length === 0 &&
-            stream.toolCalls.length === 0
-          ) {
-            log.warn(
-              "queryLoop: reactive-compact retry returned EMPTY response — LLM 추론 chain 이 history mutation 으로 손상된 가능성 (silent failure 후보)",
-            );
-            callbacks?.onError?.(
-              "대화 이력이 길어 일부 압축됐고 그 직후 LLM 응답이 비어있습니다. 이어서 진행하려면 메시지를 다시 보내주세요.",
-            );
-          }
-        } else {
-          log.warn(
-            `queryLoop: reactive-compact failed (compactMessages no-op or threw) — propagating context_error`,
-          );
-          throw new Error(stream.errorMessage);
-        }
+        const userMsg =
+          "대화 이력이 모델 한도를 초과했습니다. 새 메시지를 보내면 자동 압축이 다시 시도됩니다.";
+        callbacks?.onError?.(userMsg);
+        this.history.append({ role: "assistant", content: userMsg });
+        return { text: userMsg, toolCalls: allToolCalls, usage: turnUsage, stopReason: "context-error" };
       }
 
       if (stream.kind === "stream_error") {
@@ -1110,11 +1093,6 @@ export class ConversationLoop {
         this.history.append({ role: "assistant", content: savedText });
         callbacks?.onTextDelta?.("\n\n[중단됨]");
         return { text: savedText, toolCalls: allToolCalls, usage: turnUsage, stopReason: "interrupted" };
-      }
-
-      // stream.kind === "context_error" 이면서 reactiveCompacted=true 인 경우는 위 재시도 분기에서 이미 재할당.
-      if (stream.kind === "context_error") {
-        throw new Error(stream.errorMessage);
       }
 
       // stream.kind === "ok" — usage 반영 + assistant round commit
@@ -1361,45 +1339,147 @@ export class ConversationLoop {
   }
 
   /**
-   * Reactive compact — context-length 초과 시 history 를 압축한다.
-   * 성공했으면 true 반환 (호출자가 stream 재시도). 실패 시 false.
+   * DRY helper — boundary 적용 공통 경로.
    *
-   * **Diagnostic note**: 이 경로는 mid-loop 으로 history 를 *대체* 하므로
-   * LLM 의 추론 chain 을 *깨뜨릴* 수 있음 (silent failure suspect — "툴
-   * 사용 중 멈춤" incident 의 prime suspect, 2026-05-07). production 에서도
-   * 항상 log + onCompactOccurred surface 해서 사후 진단 가능하게 함.
+   * `runPreflightGuard` (auto) 와 `manualCompact` (manual) 가 동일 동작을 공유:
+   *   1. `compactNum` 증가
+   *   2. `history` 교체 (boundary stub + recentVerbatim)
+   *   3. `setSummaryPreamble` 로 ⑧ slot 갱신 (P1 sync chain)
+   *   4. `cumulativeUsage.inputTokens = estimatedAfter` reset
+   *   5. Layer 3 checkpoint append + saveSessionMetadata 영속화
+   *   6. `callbacks.onCompactOccurred` surface (사용자 가시 compact_notice)
+   *
+   * Layer 3 storage 실패는 대화 차단 금지 — warn 후 계속.
    */
-  private tryReactiveCompact(callbacks?: TurnCallbacks): boolean {
-    const before = {
-      msgCount: this.history.getMessages().length,
-      lastRole: this.history.getMessages().at(-1)?.role,
-      cumulativeIn: this.cumulativeUsage.inputTokens,
+  private async applyBoundaryToSession(
+    result: import("./structured-compact.js").CompactWithBoundaryResult,
+    trigger: "auto-compact" | "manual",
+    estimatedBefore: number,
+    callbacks: TurnCallbacks | undefined,
+    /** compact 직전 history 길이 — messageCountAtTrigger 에 기록 (origin count). */
+    prevMessageCount: number,
+  ): Promise<void> {
+    this.compactNum = result.boundary.compactNum;
+    this.history.clear();
+    this.history.restore([...result.newHistory]);
+    const preamble = renderBoundaryAsPreamble(result.boundary);
+    this.deps.systemPromptBuilder.setSummaryPreamble?.(preamble);
+    this.cumulativeUsage = {
+      inputTokens: result.estimatedAfter,
+      outputTokens: this.cumulativeUsage.outputTokens,
+      ...(this.cumulativeUsage.cacheReadTokens !== undefined && { cacheReadTokens: 0 }),
+      ...(this.cumulativeUsage.cacheWriteTokens !== undefined && { cacheWriteTokens: 0 }),
     };
-    log.warn(
-      `reactive-compact: BEFORE — msgCount=${before.msgCount} lastRole=${before.lastRole} cumIn=${before.cumulativeIn}`,
-    );
+
+    // Layer 3 — same-session checkpoint chain (§4.4).
+    // PR-2-E (#608) 정정: ctxUsageAtTrigger 분모는 *usable context window* (Cline buffer 적용).
     try {
-      const { messages: compactedMsgs, result: cr } = compactMessages(this.history.getMessages(), undefined, "reactive");
-      if (!cr.compacted) {
-        log.warn("reactive-compact: compactMessages returned compacted=false (no-op) — provider context_error will propagate");
-        return false;
-      }
-      this.history.clear();
-      this.history.restore(compactedMsgs);
-      const after = {
-        msgCount: this.history.getMessages().length,
-        lastRole: this.history.getMessages().at(-1)?.role,
+      const llmSettings = this.deps.settingsService.get("llm");
+      const provider = llmSettings.provider;
+      const model = llmSettings.vendors[provider].model;
+      const usable = getModelUsableContext(provider, model);
+      const ctxUsageAtTrigger = usable > 0 ? Math.min(1.0, estimatedBefore / usable) : 0;
+      const checkpointEntry: import("../memory/memory-manager.js").Checkpoint = {
+        id: crypto.randomUUID(),
+        triggeredAt: result.boundary.createdAt,
+        trigger,
+        ctxUsageAtTrigger,
+        summary: preamble,
+        messageCountAtTrigger: prevMessageCount,
+        compactNum: this.compactNum,
       };
-      // production 에서도 항상 log — dev-only 가드 제거 (silent compact 가
-      // mid-loop incident 의 root cause 진단을 막던 패턴 정정).
-      log.warn(
-        `reactive-compact: AFTER — removed=${cr.removedMessages} freed~${cr.freedTokens} msgCount=${after.msgCount} lastRole=${after.lastRole} (history mutated mid-loop — LLM 의 prior tool_result 회상 손실 가능)`,
+      const existingMeta = this.deps.memoryManager.loadSessionMetadata(this.sessionId) ?? {};
+      const updatedMeta = this.deps.memoryManager.appendCheckpoint(existingMeta, checkpointEntry);
+      await this.deps.memoryManager.saveSessionMetadata(this.sessionId, {
+        ...updatedMeta,
+        summaryPreamble: preamble,
+      });
+    } catch (storageErr) {
+      log.warn(`applyBoundaryToSession: Layer 3 checkpoint persist 실패 — ${(storageErr as Error).message}`);
+    }
+
+    callbacks?.onCompactOccurred?.({
+      removedMessages: result.removedCount,
+      freedTokens: Math.max(0, estimatedBefore - result.estimatedAfter),
+      tier: trigger,
+      summary: preamble,
+    });
+  }
+
+  /**
+   * Layer 0 — Pre-flight Guard (`infinity-session-redesign-v3.md` §4.1, P1 sync chain).
+   *
+   * step 5 (HISTORY_APPEND) 직후 호출 — `estimateMessagesTokens(history) >= getModelPreflightThreshold()`
+   * 시 차단형 await 로 Layer 2 (`compactWithBoundary`) 실행. 결과:
+   *   1. `compactNum` 증가
+   *   2. `history` 교체 (boundary stub + recentVerbatim)
+   *   3. `setSummaryPreamble` 로 ⑧ slot 갱신 (P1 — step 6 진입 전 반드시 set)
+   *   4. `cumulativeUsage.inputTokens = estimatedAfter` (의미 정합 reset)
+   *   5. `onCompactOccurred` 콜백 surface
+   *
+   * R14 mitigation — `isCompacting` lock per ConversationLoop instance. 동시 turn 에서
+   * Layer 0 진입 race 시 두번째는 silent skip.
+   *
+   * mid-loop reactive compact 는 PR-2-F-1 에서 영구 제거됨 — context_error 도달 시
+   * early-exit signal 만 전달하고 stream-collector 가 사용자 안내 처리.
+   */
+  private async runPreflightGuard(
+    abortSignal?: AbortSignal,
+    callbacks?: TurnCallbacks,
+  ): Promise<void> {
+    if (!this.isAutoCompactEnabled()) {
+      log.debug("runPreflightGuard: skipped (autoCompact 설정 OFF)");
+      return;
+    }
+    if (this.isCompacting) {
+      log.info("preflight: SKIPPED — isCompacting lock held (concurrent turn race avoided)");
+      return;
+    }
+    if (!this.provider) return;
+
+    const llmSettings = this.deps.settingsService.get("llm");
+    const provider = llmSettings.provider;
+    const model = llmSettings.vendors[provider].model;
+    const preflight = getModelPreflightThreshold(provider, model);
+    if (preflight <= 0) return;
+
+    const messagesBefore = this.history.getMessages();
+    const estimated = estimateMessagesTokens(messagesBefore);
+    if (estimated < preflight) return;
+
+    this.isCompacting = true;
+    try {
+      log.info(
+        `preflight: TRIGGER — estimated=${estimated} >= preflight=${preflight} (model=${provider}/${model}) → Layer 2 compact #${this.compactNum + 1}`,
       );
-      callbacks?.onCompactOccurred?.({ removedMessages: cr.removedMessages, freedTokens: cr.freedTokens });
-      return true;
-    } catch (compactErr) {
-      log.warn("reactive-compact: compactMessages threw, skipping retry: %s", compactErr);
-      return false;
+      // preserve budget = preflight 의 40% — Cline preserve-recent-tokens 휴리스틱 (per-model 추가 조정 가능).
+      const preserveRecentTokens = Math.max(1_000, Math.floor(preflight * 0.4));
+      const compactResult = await compactWithBoundary({
+        messages: messagesBefore,
+        llm: this.provider,
+        model,
+        preserveRecentTokens,
+        compactNum: this.compactNum + 1,
+        ...(abortSignal !== undefined && { abortSignal }),
+      });
+
+      if (compactResult === null || compactResult.removedCount === 0) {
+        log.info("preflight: Layer 2 returned removedCount=0 (preserveRecentTokens covered all) — no mutation");
+        return;
+      }
+
+      // P1 sync chain — 다음 step 6 PROMPT_ASSEMBLE 가 새 boundary 를 read 해야 함.
+      await this.applyBoundaryToSession(compactResult, "auto-compact", estimated, callbacks, messagesBefore.length);
+
+      log.info(
+        `preflight: APPLIED — removed=${compactResult.removedCount} estimatedAfter=${compactResult.estimatedAfter} compactNum=${this.compactNum}`,
+      );
+    } catch (err) {
+      // Layer 2 실패 시 turn 자체는 계속 진행 — Layer 0 미적용 history 로 stream attempt.
+      // context_error 도달 시 stream-collector 의 safety net 이 사용자 안내 처리.
+      log.warn(`preflight: Layer 2 failed — ${(err as Error).message}. context_error safety net 으로 위임.`);
+    } finally {
+      this.isCompacting = false;
     }
   }
 
@@ -1489,16 +1569,12 @@ export class ConversationLoop {
         result = `현재 벤더: ${this.getVendor()}\n세션: ${this.sessionId.slice(0, 8)}…\n누적 토큰: 입력 ${this.cumulativeUsage.inputTokens}, 출력 ${this.cumulativeUsage.outputTokens}`;
         break;
       case "compact": {
-        const { messages: compacted, result: cr } = compactMessages(this.history.getMessages());
-        if (cr.compacted) {
-          this.history.clear();
-          this.history.restore(compacted);
-          void this.deps.memoryManager?.saveSession(this.sessionId, this.history.getMessages())
-            .catch((e: Error) => log.warn("/compact saveSession: %s", e.message));
-          result = `컴팩트 완료: ${cr.removedMessages}개 메시지 제거, ~${cr.freedTokens} 토큰 확보`;
-        } else {
-          result = "컴팩트 불필요: 메시지 수가 충분히 적습니다.";
-        }
+        // PR-2-F-4: extractive compactMessages → LLM-based compactWithBoundary 마이그레이션.
+        // manualCompact 가 Layer 2 path 를 사용 (12-section structured summary + freezeBoundary +
+        // ⑧ slot 갱신 + summaryPreamble 영속화 + Layer 3 checkpoint append 포함).
+        // callbacks 전달 — onCompactOccurred 가 renderer 에 compact_notice 이벤트 전달 가능.
+        const r = await this.manualCompact(callbacks);
+        result = r.summary;
         break;
       }
       case "tools": {
@@ -1527,189 +1603,7 @@ export class ConversationLoop {
     return { text: result, toolCalls: [], route: "command" };
   }
 
-  // ─── PR-4: 3-Tier Rotation ────────────────────────
-
-  /**
-   * 매 턴 종료 후 호출. 3-tier rotation 결정 트리를 평가하고
-   * 필요 시 summary 생성 → checkpoint 기록 → child session으로 전환.
-   */
-  private async runRotationCheck(
-    lastAssistantText: string,
-    stopReason: "end_turn" | "tool_use" | "interrupted" | undefined,
-    callbacks?: TurnCallbacks,
-  ): Promise<void> {
-    if (!this.provider) return;
-
-    // 2026-05-04 incident: turn-completeness guards. 4 케이스에서 rotation 보류:
-    //
-    //   (A1) stopReason === "interrupted": 사용자가 abort 한 turn — 이어서
-    //        하려는 작업이 아직 남아있을 가능성이 큼.
-    //   (A2) lastAssistantText.trim() === "": LLM 이 도구 호출 후 빈 답변으로
-    //        end_turn — incident 의 직접 원인. assistant 가 사용자에게 final
-    //        answer 를 못 준 상태.
-    //   (A3) 마지막 history msg.role === "tool_result": tool 후 follow-up
-    //        assistant text 가 없음 — A2 와 같은 incomplete state 의 다른
-    //        측면 (history 관점). 둘 다 잡으면 좀 더 robust.
-    //   (B)  this.justRotated === true: 직전 turn 에서 회전 → 이번 turn 은
-    //        skip (OpenCode 패턴 — 회전 직후 즉시 또 회전 트리거되는 race 방지).
-    //
-    // 어느 하나라도 hit 하면 사용자가 본 *답변 미완료 + 체크포인트 표시*
-    // incident 가 차단됨. 첫 두 가드만으로도 직접 원인 막히지만, 4 가드
-    // 묶으면 비슷한 latent 케이스 (사용자 abort, race, etc.) 까지 함께 잡힘.
-    if (this.justRotated) {
-      this.justRotated = false; // one-shot — 다음 turn 부터는 정상 검사
-      return;
-    }
-    if (stopReason === "interrupted") return;
-    if (lastAssistantText.trim().length === 0) return;
-    const messages = this.history.getMessages();
-    if (messages.at(-1)?.role === "tool_result") return;
-
-    const llmSettings = this.deps.settingsService.get("llm");
-    // ctxUsage 는 *usable* 분모 기준. UI ring / decideRotation 의 0.85 임계가
-    // raw 가 아닌 usable 의 비율이 되도록 일치시킴 — Cline 패턴.
-    const usable = getModelUsableContext(llmSettings.provider, llmSettings.vendors[llmSettings.provider].model);
-    const ctxUsage = usable > 0
-      ? Math.min(1.0, this.cumulativeUsage.inputTokens / usable)
-      : 0;
-
-    const features = this.deps.settingsService.get("features");
-    const continuousBackendEnabled = features?.experimentalContinuousBackend ?? false;
-    const devMode = process.env.LVIS_DEV === "1";
-    const sessionAgeMs = Date.now() - this.sessionStartedAt;
-    const semanticHint = lastAssistantText.includes("[checkpoint]");
-    const decision = decideRotation({
-      ctxUsage,
-      sessionAgeMs,
-      semanticHint,
-      continuousBackendEnabled,
-      devMode,
-    });
-
-    // Diagnostic: 모든 회전 결정의 input/output 을 production 에서도 log.
-    // "왜 갑자기 체크포인트 정리?" 류 사용자 의문 시 정확한 trigger + 상태 추적 가능.
-    log.info(
-      `runRotationCheck: ctxUsage=${(ctxUsage * 100).toFixed(1)}% sessionAgeMs=${sessionAgeMs} semanticHint=${semanticHint} continuousBackend=${continuousBackendEnabled} devMode=${devMode} → decision: shouldRotate=${decision.shouldRotate}${decision.trigger ? ` trigger="${decision.trigger}"` : ""} skipSummary=${decision.shouldSkipSummary}`,
-    );
-
-    if (!decision.shouldRotate) return;
-
-    try {
-      // 마지막 체크포인트 이후 메시지만 요약
-      const messagesSinceCheckpoint = messages.slice(this.lastCheckpointMessageIndex);
-
-      const userModel = llmSettings.vendors[llmSettings.provider].model;
-      const summary = decision.shouldSkipSummary
-        ? null
-        : await generateStructuredSummary(this.provider, messagesSinceCheckpoint, { model: userModel });
-
-      // 현재 세션 메타데이터에 checkpoint 기록
-      const existingMeta = this.deps.memoryManager.loadSessionMetadata(this.sessionId) ?? {};
-      const checkpointEntry = {
-        id: crypto.randomUUID(),
-        triggeredAt: new Date().toISOString(),
-        trigger: decision.trigger!,
-        ctxUsageAtTrigger: ctxUsage,
-        summary,
-        messageCountAtTrigger: messages.length,
-      };
-      const updatedMeta = this.deps.memoryManager.appendCheckpoint(existingMeta, checkpointEntry);
-      await this.deps.memoryManager.saveSessionMetadata(this.sessionId, updatedMeta);
-
-      // §457 Phase 3: capture the parent session id BEFORE rotateActive
-      // swaps `this.sessionId` to the child. The renderer's revert action
-      // resumes the parent — i.e., the pre-rotation conversation surface.
-      const parentSessionId = this.sessionId;
-      // child session으로 전환
-      const childId = await this.createChildSession(this.sessionId, summary);
-      // §457 PR-A: notify the renderer with `messagesSinceCheckpoint.length`,
-      // not `messages.length`. Only the slice since the previous checkpoint
-      // was rolled into this rotation's summary; the older portion was
-      // already summarized in a prior checkpoint and is not being "removed"
-      // again. Showing the full parent count would inflate the displayed
-      // figure on multi-rotation sessions.
-      const removedMessageCount = messagesSinceCheckpoint.length;
-      this.rotateActive(childId, summary);
-
-      // Notify renderer so the chat surface can render a CheckpointDivider with
-      // tier-aware label/color. Reuses `compact_notice` since the user-facing
-      // semantic is identical: "older messages were rolled into a summary".
-      // freedTokens is best-effort estimated using the same length/4 + 1 formula
-      // as estimateTokens() in auto-compact.ts; we keep it inline to avoid an
-      // import cycle and to keep this rotation path independent of the
-      // serialization layer.
-      const freedTokens = messagesSinceCheckpoint.reduce((sum, m) => {
-        const c = (m as { content?: unknown }).content;
-        const len = typeof c === "string" ? c.length : 0;
-        return sum + Math.ceil(len / 4) + 1;
-      }, 0);
-      callbacks?.onCompactOccurred?.({
-        removedMessages: removedMessageCount,
-        freedTokens,
-        tier: decision.trigger,
-        revertSessionId: parentSessionId,
-        ...(summary ? { summary } : {}),
-      });
-
-      if (process.env.NODE_ENV !== "production") {
-        log.info(`rotation: trigger=${decision.trigger} ctxUsage=${ctxUsage.toFixed(2)} childSession=${childId.slice(0, 8)}`);
-      }
-    } catch (err) {
-      // rotation 실패는 대화를 차단하지 않음 — 로그만 남기고 계속
-      log.warn("rotation failed: %s", (err as Error).message);
-    }
-  }
-
-  /**
-   * 부모 세션을 기반으로 새 child session을 생성하고 ID를 반환.
-   * child session의 metadata에 parentSessionId, summaryPreamble,
-   * 그리고 부모의 routineId/routineTitle을 propagate한다.
-   */
-  private async createChildSession(parentSessionId: string, summary: string | null): Promise<string> {
-    const childId = crypto.randomUUID();
-    await this.deps.memoryManager.saveSession(childId, []);
-
-    // Propagate routine context from parent so the child session remains
-    // associated with the same routine (if any).
-    const parentMeta = this.deps.memoryManager.loadSessionMetadata(parentSessionId) ?? {};
-    const routineFields: { routineId?: string; routineTitle?: string } = {};
-    if (parentMeta.routineId) routineFields.routineId = parentMeta.routineId;
-    if (parentMeta.routineTitle) routineFields.routineTitle = parentMeta.routineTitle;
-
-    const baseMeta = { parentSessionId, ...routineFields };
-    const childMeta = summary
-      ? this.deps.memoryManager.setSummaryPreamble(baseMeta, summary)
-      : baseMeta;
-    await this.deps.memoryManager.saveSessionMetadata(childId, childMeta);
-
-    return childId;
-  }
-
-  /**
-   * 현재 활성 세션을 child session으로 전환.
-   * - sessionId 교체
-   * - history 클리어 (이전 세션은 이미 영속화됨)
-   * - cumulativeUsage 리셋
-   * - sessionStartedAt 리셋
-   * - lastCheckpointMessageIndex 리셋
-   * - tracer 리셋 (session-scoped observability state)
-   * - sessionPluginExpansions 리셋
-   * - summaryPreamble 주입
-   */
-  private rotateActive(childSessionId: string, summary: string | null): void {
-    this.sessionId = childSessionId;
-    this.history.clear();
-    this.cumulativeUsage = { inputTokens: 0, outputTokens: 0 };
-    this.sessionStartedAt = Date.now();
-    this.lastCheckpointMessageIndex = 0;
-    // Reset all session-scoped helpers so the new session starts clean.
-    this.tracer = createTracer(childSessionId);
-    this.sessionPluginExpansions = 0;
-    // 2026-05-04 incident 후속: 회전 직후 한 turn 동안 다음 회전 보류 (one-shot).
-    // 막 만들어진 child session 의 첫 user turn 이 끝나도 즉시 또 회전 트리거
-    // 되는 race 방지. runRotationCheck 진입부에서 read + clear 됨.
-    this.justRotated = true;
-    // rolling summary preamble 주입 — 다음 턴부터 LLM context에 포함됨
-    this.deps.systemPromptBuilder.setSummaryPreamble?.(summary);
-  }
+  // PR-2-F-2: 3-tier rotation 폐지 — Layer 0/2/3 가 same-session checkpoint chain
+  // (Copilot 패턴) 으로 대체. `runRotationCheck`, `createChildSession`, `rotateActive`,
+  // `decideRotation` 모두 제거. fork 없음 — sessionId 불변.
 }
