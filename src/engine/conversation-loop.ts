@@ -11,7 +11,7 @@ import { ConversationHistory, normalizeToolPairInvariant } from "./conversation-
 import { ToolExecutor, type ToolUseBlock } from "../tools/executor.js";
 import { HookRunner } from "../hooks/hook-runner.js";
 import { shouldCompact, compactMessages, estimateMessagesTokens, getModelUsableContext, decideRotation, type CheckpointTriggerType } from "./auto-compact.js";
-import { generateSummary } from "./summary-generator.js";
+import { generateStructuredSummary } from "./summary-generator.js";
 import { createProvider, secretKeyFor } from "./llm/provider-factory.js";
 import { FallbackProvider } from "./llm/vercel/fallback-chain.js";
 import type { LLMProvider, ToolSchema, TokenUsage } from "./llm/types.js";
@@ -1585,7 +1585,7 @@ export class ConversationLoop {
       const userModel = llmSettings.vendors[llmSettings.provider].model;
       const summary = decision.shouldSkipSummary
         ? null
-        : await generateSummary(this.provider, messagesSinceCheckpoint, { model: userModel });
+        : await generateStructuredSummary(this.provider, messagesSinceCheckpoint, { model: userModel });
 
       // 현재 세션 메타데이터에 checkpoint 기록
       const existingMeta = this.deps.memoryManager.loadSessionMetadata(this.sessionId) ?? {};

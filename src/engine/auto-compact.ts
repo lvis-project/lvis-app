@@ -9,7 +9,7 @@
  * - 최근 N개 메시지는 보존 (기본 4)
  * - 요약은 파일 참조, 진행 중인 작업, 핵심 결정을 보존
  */
-import type { GenericMessage, TokenUsage, LLMVendor, ConversationCarryover, UserContentPart } from "./llm/types.js";
+import type { GenericMessage, TokenUsage, LLMVendor, UserContentPart } from "./llm/types.js";
 import { serializeMessageForEstimation, userContentText } from "./llm/types.js";
 import { shouldSkipSummary as _shouldSkipSummary } from "./summary-generator.js";
 import { lookupPricing, effectiveContextWindow } from "../shared/pricing-data.js";
@@ -155,7 +155,7 @@ export interface CompactResult {
 
 const DEFAULT_CONFIG: CompactConfig = {
   thresholdPct: 0.8,
-  preserveRecentMessages: 4,
+  preserveRecentMessages: 12,
   summaryBudgetTokens: 2_000,
 };
 
@@ -250,9 +250,6 @@ export function compactMessages(
   const summary = generateSummary(toCompact, config.summaryBudgetTokens);
   const freedTokens = estimateMessagesTokens(toCompact) - estimateTokens(summary);
 
-  // carryover 추출: 요약 대상 메시지에서 목표·산출물·결정사항을 추출
-  const carryover = extractCarryover(toCompact);
-
   // 요약 메시지 + 보존 메시지
   const boundaryMessage: GenericMessage = {
     role: "user",
@@ -261,7 +258,6 @@ export function compactMessages(
       compactBoundary: true,
       removedCount: toCompact.length,
       compactedAt: new Date().toISOString(),
-      carryover,
     },
   };
   const compactedMessages: GenericMessage[] = [
@@ -300,7 +296,7 @@ export interface MicrocompactResult {
 }
 
 const DEFAULT_MICROCOMPACT_CONFIG: MicrocompactConfig = {
-  preserveRecentToolResults: 4,
+  preserveRecentToolResults: 8,
 };
 
 /**
@@ -438,79 +434,6 @@ export function isContextLengthError(err: unknown): boolean {
       msg.includes("context window")) return true;
 
   return false;
-}
-
-// ─── Carryover Extraction ────────────────────────────
-
-/**
- * 메시지 배열에서 `ConversationCarryover`를 추출.
- *
- * - goals: user 메시지 중 행위 키워드(해줘/구현/작성/create/implement 등)를 포함한
- *   문장의 첫 100자. 최대 5개 — 넘치면 오래된 것부터 제거.
- * - artifacts: assistant 메시지에서 파일 경로 패턴(*.ts/js/py/…) 또는
- *   "생성/저장/created/wrote" 직후 파일명. 최대 10개.
- * - decisions: assistant 메시지에서 "결정/선택/채택/decided/chose" 이후 문장.
- *   최대 5개.
- */
-export function extractCarryover(messages: GenericMessage[]): ConversationCarryover {
-  const goals: string[] = [];
-  const artifacts: string[] = [];
-  const decisions: string[] = [];
-
-  const goalKeywords =
-    /해줘|만들어|작성|구현|수정|추가|삭제|분석|검토|배포|테스트|fix|create|implement|update|refactor|add|remove|analyze|deploy/i;
-  const artifactPathRe =
-    /(?:^|\s)((?:[\w.-]+\/)*[\w.-]+\.(?:ts|tsx|js|jsx|py|json|md|yaml|yml|sh|css|html))\b/gm;
-  const artifactPhraseRe =
-    /(?:생성|작성\s*완료|저장|created?|wrote?|saved?)\s+[`'"]?([\w./\\-]+\.\w+)[`'"]?/gi;
-  const decisionRe =
-    /(?:결정|선택|채택|→|⇒|decided?|chose?|selected?)\s*[:：]?\s*(.{5,100})/gi;
-
-  for (const msg of messages) {
-    if (msg.role === "user") {
-      const text = userContentText(msg.content);
-      if (!text.startsWith("[이전 대화 요약]") && goalKeywords.test(text)) {
-        const snippet = text.slice(0, 100).replace(/\n/g, " ").trim();
-        if (snippet && !goals.includes(snippet)) {
-          goals.push(snippet);
-          if (goals.length > 5) goals.shift();
-        }
-      }
-    } else if (msg.role === "assistant") {
-      const content = msg.content;
-
-      let m: RegExpExecArray | null;
-
-      artifactPathRe.lastIndex = 0;
-      while ((m = artifactPathRe.exec(content)) !== null) {
-        const p = m[1].trim();
-        if (p && !artifacts.includes(p)) {
-          artifacts.push(p);
-          if (artifacts.length > 10) artifacts.shift();
-        }
-      }
-
-      artifactPhraseRe.lastIndex = 0;
-      while ((m = artifactPhraseRe.exec(content)) !== null) {
-        const p = m[1].trim();
-        if (p && !artifacts.includes(p)) {
-          artifacts.push(p);
-          if (artifacts.length > 10) artifacts.shift();
-        }
-      }
-
-      decisionRe.lastIndex = 0;
-      while ((m = decisionRe.exec(content)) !== null) {
-        const dec = m[1].trim().slice(0, 100);
-        if (dec && !decisions.includes(dec)) {
-          decisions.push(dec);
-          if (decisions.length > 5) decisions.shift();
-        }
-      }
-    }
-  }
-
-  return { goals, artifacts, decisions };
 }
 
 // ─── Private Helpers ────────────────────────────────
