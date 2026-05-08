@@ -122,11 +122,11 @@ export type AppSettings = {
     realCloudBaseUrl?: string;
     realCloudAllowPrivateNetwork?: boolean;
   };
-  /** UX Track 3 — visual theme preferences (three-axis). */
+  /** UX Track 3 — visual theme preferences (v2 single bundle). */
   appearance?: {
-    theme: "system" | "light" | "dark" | "high-contrast";
-    chatTheme?: "default" | "lg" | "purple" | "orange" | "blue";
-    codeTheme?: "auto" | "light" | "dark";
+    schemaVersion?: 2;
+    bundleId?: string;
+    followSystem?: boolean;
   };
   /** §B1 — external URL viewer policy (in-app vs system browser). */
   webView?: {
@@ -201,7 +201,17 @@ export type LvisApi = {
    * renderer instead of resolving against `window.location.href`.
    */
   pluginShellUrl: string;
-  notifyPluginTheme: (payload: { theme: string; chatTheme: string; codeTheme: string; tokens?: Record<string, string> }) => Promise<{ ok: boolean; error?: string }>;
+  notifyPluginTheme: (payload: {
+    /** v2: active bundle identifier. */
+    bundleId?: string;
+    /** v2: shell polarity. */
+    shell?: "light" | "dark";
+    /** v1 compat */
+    theme: string;
+    chatTheme: string;
+    codeTheme: string;
+    tokens?: Record<string, string>;
+  }) => Promise<{ ok: boolean; error?: string }>;
   fileScanPaths: (paths: string[]) => Promise<{ ok: boolean; indexed?: number; failed?: number; jobId?: string; error?: string }>;
   getSettings: () => Promise<AppSettings>;
   updateSettings: (patch: DeepPartial<AppSettings>) => Promise<AppSettings>;
