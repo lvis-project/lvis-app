@@ -10,6 +10,8 @@
  *   - Tier C (3):  code-surface tokens (--code-bg, --code-fg, --code-border)
  *   - Action (3):  PR-4/5 reserved action tokens (--action-view, --action-branch, --action-compact)
  */
+import type { BundleId } from "../../../../shared/theme-bundles.js";
+
 export interface BundleTokens {
   /* ── Tier B: semantic shell tokens ─────────────────────────── */
   background: string;
@@ -52,7 +54,7 @@ export interface BundleTokens {
 
 export interface ThemeBundle {
   /** Unique stable identifier written to `data-theme-bundle`. */
-  id: string;
+  id: BundleId;
   /** Display name shown in the AppearanceTab card. */
   name: string;
   /** Short description used as accessible tooltip / subtitle. */
