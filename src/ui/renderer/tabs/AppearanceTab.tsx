@@ -215,6 +215,7 @@ export function AppearanceTab() {
               type="button"
               role="switch"
               aria-checked={followSystem}
+              aria-label="OS 시스템 색상 따라가기"
               data-testid="follow-system-toggle"
               onClick={() => setFollowSystem(!followSystem)}
               className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${

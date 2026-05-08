@@ -21,6 +21,17 @@ function legacyTheme(bundle: ThemeBundle): "light" | "dark" | "high-contrast" {
   return bundle.shell;
 }
 
+/**
+ * Map a ThemeBundle to the v1-compat `chatTheme` field value.
+ * LGE bundles report "lg" so existing plugins that branch on chatTheme
+ * continue to identify the LGE context correctly. All other bundles
+ * report "default" — the minimal backward-compat contract.
+ */
+function legacyChatTheme(bundle: ThemeBundle): "default" | "lg" | "purple" | "orange" | "blue" {
+  if (bundle.id === "lge-light" || bundle.id === "lge-dark") return "lg";
+  return "default";
+}
+
 export interface ThemeProviderProps {
   api?: LvisApi;
   /** Initial bundle id — lets tests skip async hydrate. */
@@ -115,7 +126,7 @@ export function ThemeProvider({
       shell: activeBundle.shell,
       // v1 compat fields — plugin-ui-shell.js and SDK plugins read `theme`
       theme: legacyTheme(activeBundle),
-      chatTheme: "default",
+      chatTheme: legacyChatTheme(activeBundle),
       codeTheme: activeBundle.shell === "light" ? "light" : "dark",
       tokens,
     }).catch((err: unknown) => {

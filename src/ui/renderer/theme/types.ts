@@ -8,7 +8,7 @@
  * `ThemeContextValue` exposes:
  *   - `bundleId`         — the active bundle id (e.g. "tokyo-night")
  *   - `setBundle`        — live-set the bundle + persist
- *   - `shell`            — derived shell ("light" | "dark") from the active bundle
+ *   - `resolved`         — derived shell ("light" | "dark") from the active bundle (`ResolvedShell`)
  *   - `followSystem`     — LGE pair only: auto-switch based on prefers-color-scheme
  *   - `setFollowSystem`  — toggle followSystem (only meaningful for LGE pair)
  *
