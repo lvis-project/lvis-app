@@ -7,6 +7,10 @@ export interface SessionSummary {
   id: string;
   modifiedAt: string;
   title: string;
+  /** §PR-5: parent session this session was branched from, if any. */
+  parentSessionId?: string;
+  /** §PR-5: compact number of the checkpoint this session was branched from. */
+  branchedFromCompactNum?: number;
 }
 
 /**

@@ -268,7 +268,7 @@ export type LvisApi = {
   ) => Promise<unknown>;
   chatGuide: (input: string) => Promise<unknown>;
   chatNew: () => Promise<{ ok: true }>;
-  chatSessions: (opts?: { limit?: number; before?: string; beforeId?: string; after?: string }) => Promise<{ current: string; sessions: Array<{ id: string; modifiedAt: string; title: string }> }>;
+  chatSessions: (opts?: { limit?: number; before?: string; beforeId?: string; after?: string }) => Promise<{ current: string; sessions: Array<{ id: string; modifiedAt: string; title: string; parentSessionId?: string; branchedFromCompactNum?: number }> }>;
   chatLoadSession: (sessionId: string) => Promise<{ ok: boolean; sessionId: string | null }>;
   onChatStream: (h: (e: StreamEvent) => void) => () => void;
   onChatFallback: (h: (payload: { from: string; to: string }) => void) => () => void;
@@ -287,6 +287,10 @@ export type LvisApi = {
   chatExport: (format: "markdown" | "json") => Promise<{ ok: boolean; filePath?: string; canceled?: boolean; error?: string }>;
   chatCompact: () => Promise<{ compacted: boolean; compactedAt: string | null; summary: string; removedMessageCount: number }>;
   chatSessionResume: (sessionId: string) => Promise<{ ok: boolean; compacted: boolean; compactedAt: string | null; removedMessageCount: number }>;
+  // §PR-5: Layer 3 View-Mode + Branch
+  chatEnterCheckpointView: (sessionId: string, compactNum: number) => Promise<{ messageIndexAtCreation: number } | { error: string }>;
+  chatExitCheckpointView: () => Promise<{ ok: boolean }>;
+  chatBranchFromCheckpoint: (sessionId: string, compactNum: number) => Promise<{ newSessionId: string } | { error: string }>;
   chatAbort: () => Promise<{ ok: boolean }>;
   /** PR-4: lazy-load in-session verbatim content for a compacted tool_result.
    * Returns null when: session has rotated, toolUseId not found, verbatim

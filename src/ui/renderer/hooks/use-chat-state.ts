@@ -299,6 +299,7 @@ export function useChatState(api: LvisApi) {
             freedTokens: freed,
             ...(ev.tier ? { tier: ev.tier } : {}),
             ...(ev.summary ? { summary: ev.summary } : {}),
+            ...(ev.compactNum !== undefined ? { compactNum: ev.compactNum } : {}),
           },
         ]);
       } else if (ev.type === "done") {
