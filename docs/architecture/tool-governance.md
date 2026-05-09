@@ -490,7 +490,7 @@ allow-always → PermissionManager.addAlwaysAllowed(toolName)
 | 4 | Config loaded (settings, CLAUDE.md) | SettingsService | ✓ |
 | 5 | **Auth checked (OAuth)** | 없음 | SSO Phase 4 |
 | 6 | **GrowthBook initialized** | 없음 | §14.4 |
-| 7 | **Tools assembled (43 built-in + MCP)** | 5 builtin + plugins | 확장 필요 |
+| 7 | **Tools assembled (43 built-in + MCP)** | core builtins + native file tools + plugins | 확장 중 |
 | 8 | **MCP servers connected** | 없음 | 이번 구현 |
 | 9 | System prompt built (10+ sources) | 6/12 sources | 확장 중 |
 | 10 | REPL launched | Electron UI ready | ✓ |
@@ -525,7 +525,9 @@ Claude Code는 6개 확장 메커니즘을 제공:
 - [ ] MCP Client (stdio transport) — §12.5 Step 8
 - [ ] MCP Client (SSE transport) — enterprise API 연동
 - [ ] Permission Prompt UI (allow once / allow always / deny) — §12.4
-- [ ] Workspace Boundary Validation — §12.2 (canonical path, symlink escape)
+- [x] Native file tools Phase 1 — `read_file`, `list_files`, `glob_files`, `grep_files`, `write_file`, `edit_file`
+- [x] Workspace Boundary Validation — §12.2 (canonical path, symlink escape, future-create parent realpath)
+- [ ] Native tools Phase 2 — `apply_patch`, `move_file`, `delete_file`, `powershell`
 - [ ] DLP PostHook (민감 데이터 마스킹)
 - [ ] Kill Switch UI
 
