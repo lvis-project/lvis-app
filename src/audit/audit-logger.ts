@@ -16,6 +16,7 @@ import {
   existsSync,
   readdirSync,
   createReadStream,
+  readFileSync,
   statSync,
 } from "node:fs";
 import { createWriteStream } from "node:fs";
@@ -26,6 +27,12 @@ import { createInterface } from "node:readline";
 import { createGzip } from "node:zlib";
 import { pipeline } from "node:stream/promises";
 import { withFileLock } from "../lib/with-file-lock.js";
+import {
+  computeLineHmac,
+  GENESIS_MARKER,
+  type SecretStore,
+} from "./hmac-chain.js";
+import type { Q12AuditEntry } from "./audit-schema.js";
 
 export interface AuditEntry {
   timestamp: string;
@@ -71,15 +78,28 @@ export interface AuditRotationOptions {
 export class AuditLogger {
   private readonly auditDir: string;
   private readonly logFile: string;
+  /**
+   * Q12 P5 — separate file for the discriminated-union HMAC-chained
+   * audit channel. Format `<date>.q12.jsonl`. Kept distinct from the
+   * legacy telemetry channel (`<date>.jsonl`) so chain verification
+   * doesn't have to filter heterogeneous shapes.
+   */
+  private readonly q12LogFile: string;
+  /** Q12 P5 — HMAC chain state. Wired via `setupQ12Chain`. Null = legacy boot. */
+  private q12Secret: string | null = null;
+  /** Memoized last serialized line so each append knows the prevHash without re-reading the file. */
+  private q12LastSerialized: string = GENESIS_MARKER;
+  private q12ChainBootstrapped = false;
 
   constructor() {
     this.auditDir = join(homedir(), ".lvis", "audit");
     if (!existsSync(this.auditDir)) {
-      mkdirSync(this.auditDir, { recursive: true });
+      mkdirSync(this.auditDir, { recursive: true, mode: 0o700 });
     }
     // 일별 로그 파일
     const date = new Date().toISOString().slice(0, 10);
     this.logFile = join(this.auditDir, `${date}.jsonl`);
+    this.q12LogFile = join(this.auditDir, `${date}.q12.jsonl`);
   }
 
   log(entry: AuditEntry): void {
@@ -89,6 +109,64 @@ export class AuditLogger {
     } catch {
       // Audit 실패가 앱 동작을 차단하면 안 됨
     }
+  }
+
+  /**
+   * Q12 P5 — wire the HMAC chain state. Call once at boot after
+   * loading the audit secret from the keychain. When unwired, all
+   * `appendQ12Entry` calls throw — fail-secure per spec §1: refuse
+   * to start the chain rather than silently downgrade.
+   */
+  setupQ12Chain(secret: string): void {
+    this.q12Secret = secret;
+    // Bootstrap: scan the existing q12 file (if any) so the next
+    // append's prevHash links to the *real* last line, not genesis.
+    this.q12LastSerialized = GENESIS_MARKER;
+    if (existsSync(this.q12LogFile)) {
+      try {
+        const raw = readFileSync(this.q12LogFile, "utf-8");
+        const lines = raw.split("\n").filter((l) => l.trim().length > 0);
+        if (lines.length > 0) {
+          this.q12LastSerialized = lines[lines.length - 1];
+        }
+      } catch {
+        // If we can't read the existing file, the chain effectively
+        // restarts from genesis. The forensics tooling will detect the
+        // discontinuity at the next verifyChain.
+      }
+    }
+    this.q12ChainBootstrapped = true;
+  }
+
+  /** Q12 P5 — accessor for tests + slash audit verify. */
+  getQ12LogFile(): string {
+    return this.q12LogFile;
+  }
+
+  /** Q12 P5 — was setupQ12Chain called? */
+  isQ12ChainReady(): boolean {
+    return this.q12ChainBootstrapped && this.q12Secret !== null;
+  }
+
+  /**
+   * Q12 P5 — append a discriminated-union audit entry with HMAC
+   * chain. Caller supplies the entry minus `prevHash`; this method
+   * computes and threads the chain link.
+   *
+   * Throws when the chain is not bootstrapped (fail-secure). The
+   * caller is responsible for catching at the boot boundary and
+   * surfacing a user-actionable error.
+   */
+  appendQ12Entry(entry: Omit<Q12AuditEntry, "prevHash">): Q12AuditEntry {
+    if (!this.q12Secret || !this.q12ChainBootstrapped) {
+      throw new Error("Q12 audit chain not initialized — call setupQ12Chain() at boot");
+    }
+    const prevHash = computeLineHmac(this.q12Secret, this.q12LastSerialized);
+    const full = { ...entry, prevHash } as Q12AuditEntry;
+    const serialized = JSON.stringify(full);
+    appendFileSync(this.q12LogFile, serialized + "\n", "utf-8");
+    this.q12LastSerialized = serialized;
+    return full;
   }
 
   /**
