@@ -1,5 +1,5 @@
 /**
- * Q12 Phase 3 — VerdictCache unit tests.
+ * Permission policy Phase 3 — VerdictCache unit tests.
  *
  * Coverage:
  *   - canonicalInputShape: shape ≠ literal (cache shared by shape)

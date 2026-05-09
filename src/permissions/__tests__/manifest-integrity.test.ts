@@ -1,7 +1,7 @@
 /**
- * Q12 P4 Area C — manifest integrity proxy tests.
+ * Permission policy P4 Area C — manifest integrity proxy tests.
  *
- * Spec ref: docs/architecture/q12-permission-policy-design.md §3.5.
+ * Spec ref: docs/architecture/permission-policy-design.md §3.5.
  */
 import { describe, expect, it, beforeEach, vi } from "vitest";
 import * as nodeFs from "node:fs";
@@ -19,7 +19,7 @@ beforeEach(() => {
   manifestIntegrityState.resetForTests();
 });
 
-describe("Q12 P4 createReadOnlyFsProxy", () => {
+describe("Permission policy P4 createReadOnlyFsProxy", () => {
   it("passes through read methods", () => {
     const proxy = createReadOnlyFsProxy(nodeFs as unknown as Record<string, unknown>, {
       pluginId: "p",
@@ -69,7 +69,7 @@ describe("Q12 P4 createReadOnlyFsProxy", () => {
   });
 });
 
-describe("Q12 P4 createReadOnlyFsPromisesProxy", () => {
+describe("Permission policy P4 createReadOnlyFsPromisesProxy", () => {
   it("passes through read methods (e.g. readFile)", () => {
     const proxy = createReadOnlyFsPromisesProxy({ readFile: () => "ok" } as Record<string, unknown>, {
       pluginId: "p",
@@ -88,7 +88,7 @@ describe("Q12 P4 createReadOnlyFsPromisesProxy", () => {
   });
 });
 
-describe("Q12 P4 ManifestIntegrityState", () => {
+describe("Permission policy P4 ManifestIntegrityState", () => {
   it("recordViolation marks a plugin disabled", () => {
     const state = new ManifestIntegrityState();
     expect(state.isDisabled("p")).toBe(false);
@@ -116,7 +116,7 @@ describe("Q12 P4 ManifestIntegrityState", () => {
   });
 });
 
-describe("Q12 P4 bindManifestIntegrityAudit", () => {
+describe("Permission policy P4 bindManifestIntegrityAudit", () => {
   it("writes an audit entry per violation", () => {
     const state = new ManifestIntegrityState();
     const audit = { log: vi.fn() } as unknown as import("../../audit/audit-logger.js").AuditLogger;
@@ -130,7 +130,7 @@ describe("Q12 P4 bindManifestIntegrityAudit", () => {
   });
 });
 
-describe("Q12 P4 deny-list completeness", () => {
+describe("Permission policy P4 deny-list completeness", () => {
   it("includes all sync write entry points", () => {
     expect(READ_ONLY_FS_DENY_METHODS.has("writeFileSync")).toBe(true);
     expect(READ_ONLY_FS_DENY_METHODS.has("appendFileSync")).toBe(true);

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -11,11 +12,14 @@ import { join } from "node:path";
 
 import { ToolRegistry } from "../registry.js";
 import {
+  ApplyPatchTool,
   createFileTools,
+  DeleteFileTool,
   EditFileTool,
   GlobFilesTool,
   GrepFilesTool,
   ListFilesTool,
+  MoveFileTool,
   ReadFileTool,
   WriteFileTool,
 } from "../file-tools.js";
@@ -135,6 +139,59 @@ describe("file native tools", () => {
     expect(result.output).toContain("matched 2 times");
   });
 
+  it("apply_patch applies multiple exact replacements atomically", async () => {
+    const result = await new ApplyPatchTool().execute(
+      {
+        path: "README.md",
+        replacements: [
+          { oldText: "# LVIS", newText: "# LVIS Project" },
+          { oldText: "needle docs", newText: "patched docs" },
+        ],
+      },
+      ctx(),
+    );
+
+    expect(result.isError).toBe(false);
+    expect(readFileSync(join(workDir, "README.md"), "utf8")).toBe("# LVIS Project\npatched docs\n");
+  });
+
+  it("apply_patch fails before writing when a later hunk is missing", async () => {
+    const result = await new ApplyPatchTool().execute(
+      {
+        path: "README.md",
+        replacements: [
+          { oldText: "# LVIS", newText: "# Changed" },
+          { oldText: "missing hunk", newText: "nope" },
+        ],
+      },
+      ctx(),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(readFileSync(join(workDir, "README.md"), "utf8")).toBe("# LVIS\nneedle docs\n");
+  });
+
+  it("move_file renames a file and creates parent directories", async () => {
+    const result = await new MoveFileTool().execute(
+      { sourcePath: "README.md", destinationPath: "docs/README.md" },
+      ctx(),
+    );
+
+    expect(result.isError).toBe(false);
+    expect(existsSync(join(workDir, "README.md"))).toBe(false);
+    expect(readFileSync(join(workDir, "docs", "README.md"), "utf8")).toBe("# LVIS\nneedle docs\n");
+  });
+
+  it("delete_file removes a regular file", async () => {
+    const result = await new DeleteFileTool().execute(
+      { path: "README.md" },
+      ctx(),
+    );
+
+    expect(result.isError).toBe(false);
+    expect(existsSync(join(workDir, "README.md"))).toBe(false);
+  });
+
   it("rejects paths outside the sandbox boundary", async () => {
     const outside = mkdtempSync(join(tmpdir(), "lvis-file-tools-outside-"));
     try {
@@ -150,24 +207,29 @@ describe("file native tools", () => {
     }
   });
 
-  it("registers first-phase tools in the canonical registry", () => {
+  it("registers native file tools in the canonical registry", () => {
     const registry = new ToolRegistry();
     for (const tool of createFileTools()) registry.register(tool);
 
-    for (const name of [
-      "read_file",
-      "list_files",
-      "glob_files",
-      "grep_files",
-      "write_file",
-      "edit_file",
-    ]) {
+    const expectedPathFields = new Map<string, readonly string[]>([
+      ["read_file", ["path"]],
+      ["list_files", ["path"]],
+      ["glob_files", ["path"]],
+      ["grep_files", ["path"]],
+      ["write_file", ["path"]],
+      ["edit_file", ["path"]],
+      ["apply_patch", ["path"]],
+      ["move_file", ["sourcePath", "destinationPath"]],
+      ["delete_file", ["path"]],
+    ]);
+    for (const [name, pathFields] of expectedPathFields) {
       const found = registry.findByName(name);
       expect(found).toBeDefined();
       expect(found?.source).toBe("builtin");
-      expect(found?.pathFields).toEqual(["path"]);
+      expect(found?.pathFields).toEqual(pathFields);
     }
     expect(registry.findByName("read_file")?.category).toBe("read");
     expect(registry.findByName("write_file")?.category).toBe("write");
+    expect(registry.findByName("apply_patch")?.category).toBe("write");
   });
 });

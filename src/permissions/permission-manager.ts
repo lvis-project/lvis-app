@@ -46,13 +46,13 @@ export interface PermissionCheckResult {
   reason: string;
   layer: number; // 어떤 단계에서 결정되었는지
   /**
-   * Q12 P2.5 §3 Layer 2 — structured deny reasons for audit forensics.
+   * Permission policy P2.5 §3 Layer 2 — structured deny reasons for audit forensics.
    * The pipeline records the *current* deny entry only (short-circuit
    * evaluation; later layers are skipped). Hypothetical other-layer
    * decisions belong to dry-run mode, not normal audit.
    *
    * Each entry: { layer, reason, source }
-   *   layer    — which Q12 layer fired (0=sensitive, 1=allowed-dir, …)
+   *   layer    — which Permission policy layer fired (0=sensitive, 1=allowed-dir, …)
    *   reason   — short machine-readable code (e.g. "out-of-allowed-dir")
    *   source   — emitter ("directory-policy", "sensitive-paths", …)
    */
@@ -69,10 +69,17 @@ export interface PermissionCheckContext {
    * still ask even when an allow rule or auto mode would otherwise permit them.
    */
   headless?: boolean;
+  /**
+   * Permission policy #634 — full approval-cache identity for authority-sensitive tools.
+   * When present, user allow rules / allow-always entries match this key
+   * instead of the bare tool name so a benign prior approval cannot silently
+   * authorize a later call with a broader argument scope.
+   */
+  approvalCacheKey?: string;
 }
 
 /**
- * Q12 P3 — input bundle for reviewer-agent dispatch. Set when the
+ * Permission policy P3 — input bundle for reviewer-agent dispatch. Set when the
  * caller wants the headless lane to consult the Layer 5 classifier
  * (rather than the temporary "reviewer → ask" mapping).
  */
@@ -84,7 +91,7 @@ export interface ReviewerDispatchInput {
   allowedDirectories: string[];
   sensitivePathsAdjacent: string[];
   /**
-   * Q12 architect round-4 finding: cache identity must include the
+   * Permission policy architect round-4 finding: cache identity must include the
    * caller's trust origin. A high-trust verdict cached for `user` origin
    * is unsafe to serve to a `agent` invocation of the same shape — the
    * underlying intent differs even when arguments match. Required so the
@@ -126,7 +133,7 @@ export class PermissionManager {
   private readonly toolModeOverrides = new Map<string, ExecutionMode>();
   /** 영구 규칙 저장 경로 (~/.lvis/permissions.json) */
   private readonly permissionsFilePath: string;
-  /** Q12 P3 — reviewer agent dispatch components. Wired at boot. */
+  /** Permission policy P3 — reviewer agent dispatch components. Wired at boot. */
   private reviewerClassifier: RiskClassifier | null = null;
   private verdictCache: VerdictCache | null = null;
   private deferredQueue: DeferredQueue | null = null;
@@ -137,10 +144,9 @@ export class PermissionManager {
   }
 
   /**
-   * Q12 P3 — wire the Layer 5 reviewer agent. Call once at boot after
-   * loading settings. When unset, {@link dispatchReviewer} returns
-   * `{ verdict: { level: "high", reason: "reviewer not wired" } }` so
-   * callers route to the deferred queue (fail-safe per design §1).
+   * Permission policy P3 — wire the Layer 5 reviewer agent. Call once at boot after
+   * loading settings. The executor checks {@link hasReviewer} before headless
+   * reviewer dispatch and fail-closes when the reviewer is absent.
    */
   setReviewer(deps: {
     classifier: RiskClassifier;
@@ -161,16 +167,16 @@ export class PermissionManager {
   }
 
   /**
-   * Q12 P3 — accessor for the deferred queue. IPC layer reads pending
+   * Permission policy P3 — accessor for the deferred queue. IPC layer reads pending
    * entries from here and resolves them on user gestures. Returns null
-   * when the reviewer is not wired (legacy boot mode).
+   * when the reviewer is not wired.
    */
   getDeferredQueue(): DeferredQueue | null {
     return this.deferredQueue;
   }
 
   /**
-   * Q12 P3 — accessor for the verdict cache. Used by the slash handler
+   * Permission policy P3 — accessor for the verdict cache. Used by the slash handler
    * when the user changes settings and we need to drop stale entries.
    */
   getVerdictCache(): VerdictCache | null {
@@ -332,8 +338,8 @@ export class PermissionManager {
    * 막는 차단막 — `<proactive-origin-guidance>` 시스템 프롬프트의 1차
    * LLM-side 검토와 짝을 이루는 hard-gate. read 도구는 영향 없음.
    *
-   * Q12 — 5-axis category model. Layer 3 의 decisionFor() 가 trust-based
-   * fallback 을 대체. `meta` category 는 descriptor 가 `"override"` 를
+   * Permission policy — 5-axis category model. Layer 3 의 decisionFor() 가 legacy
+   * trust default 분기를 대체. `meta` category 는 descriptor 가 `"override"` 를
    * 반환하므로 caller (executor) 의 decisionOverride 분기로 routing.
    */
   checkDetailed(
@@ -356,11 +362,15 @@ export class PermissionManager {
       resolvedCategory === "shell" ||
       resolvedCategory === "network";
 
+    const approvalCacheKey = normalizeApprovalCacheKey(context.approvalCacheKey);
+    const denyTargets = approvalCacheKey ? [toolName, approvalCacheKey] : [toolName];
+    const allowTarget = approvalCacheKey ?? toolName;
+
     // 1. Deny rules (최우선, 불변)
     for (const rule of this.rules) {
       if (rule.action !== "deny") continue;
       if (rule.source && rule.source !== source) continue;
-      if (matchGlob(rule.pattern, toolName)) {
+      if (denyTargets.some((target) => matchGlob(rule.pattern, target))) {
         return { decision: "deny", reason: `deny 규칙: ${rule.pattern}`, layer: 1 };
       }
     }
@@ -389,7 +399,7 @@ export class PermissionManager {
     for (const rule of this.rules) {
       if (rule.action !== "allow") continue;
       if (rule.source && rule.source !== source) continue;
-      if (matchGlob(rule.pattern, toolName)) {
+      if (matchGlob(rule.pattern, allowTarget)) {
         return { decision: "allow", reason: `allow 규칙: ${rule.pattern}`, layer: 3 };
       }
     }
@@ -399,7 +409,7 @@ export class PermissionManager {
     }
 
     // 5. Always-allowed (사용자 이전 승인)
-    if (this.alwaysAllowed.has(toolName)) {
+    if (this.alwaysAllowed.has(allowTarget)) {
       return { decision: "allow", reason: "사용자 영구 승인", layer: 5 };
     }
 
@@ -408,7 +418,7 @@ export class PermissionManager {
   }
 
   /**
-   * Q12 P3 — dispatch the Layer 5 reviewer agent for a tool invocation.
+   * Permission policy P3 — dispatch the Layer 5 reviewer agent for a tool invocation.
    *
    * Decision tree (design §3 Layer 5):
    *   1. cache lookup → on hit, skip classify + return cached verdict
@@ -418,9 +428,8 @@ export class PermissionManager {
    *   5. if LOW/MEDIUM → return verdict; caller proceeds with allow+audit
    *
    * Failure mode: if {@link setReviewer} was never called, returns
-   * HIGH + `deferredId === undefined` so callers route to the
-   * legacy "ask" path. This preserves fail-safe semantics for
-   * legacy boot configurations (Phase 4+ removes the legacy path).
+   * HIGH + `deferredId === undefined`. Production callers check
+   * {@link hasReviewer} first and fail-close before reaching this path.
    */
   async dispatchReviewer(
     toolName: string,
@@ -493,7 +502,7 @@ export class PermissionManager {
   }
 
   /**
-   * Q12 Layer 3 — Category × Source × Mode via registry descriptor.
+   * Permission policy Layer 3 — Category × Source × Mode via registry descriptor.
    *
    * The descriptor's `decisionFor()` returns one of:
    *   - "allow"    → permitted (with audit)
@@ -555,12 +564,12 @@ export class PermissionManager {
           layer: 6,
         };
       case "reviewer":
-        // Q12 P3 — when the reviewer is wired, the executor
+        // Permission policy P3 — when the reviewer is wired, the executor
         // dispatches via {@link dispatchReviewer} synchronously
         // before invoking the tool. categoryBasedDecision still
-        // returns "ask" so the legacy code path (no reviewer wired)
-        // remains fail-safe (design §1 — reviewer disabled defers
-        // to user). The "reviewer" decision is the executor's signal
+        // returns "ask" so the executor can perform the async reviewer
+        // dispatch at the single choke point. If reviewer wiring is absent,
+        // the executor fails closed. The "reviewer" decision is the signal
         // to consult dispatchReviewer; categoryBasedDecision can't
         // do it directly because it isn't async.
         if (this.hasReviewer()) {
@@ -602,14 +611,20 @@ function matchGlob(pattern: string, name: string): boolean {
   return regex.test(name);
 }
 
+function normalizeApprovalCacheKey(key: string | undefined): string | null {
+  if (!key) return null;
+  const trimmed = key.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 /**
  * Last-resort heuristic when a caller fails to thread the static manifest
  * category through. Production paths supply the manifest category
- * directly; this only fires for legacy or test-only paths that drop the
- * argument. Returns a 5-axis category — `dangerous` is gone.
+ * directly; this is retained for test-only paths that omit the argument.
+ * Returns a 5-axis category — `dangerous` is gone.
  */
 /**
- * Q12 P3 — render a deferred-queue-friendly summary of `finalInput`.
+ * Permission policy P3 — render a deferred-queue-friendly summary of `finalInput`.
  * Caller is expected to have already DLP-redacted; this is a pure
  * length-cap so the queue file stays manageable. Keys are sorted for
  * deterministic display.

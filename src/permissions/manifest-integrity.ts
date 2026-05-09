@@ -1,7 +1,7 @@
 /**
- * Q12 Phase 4 — Manifest integrity proxy (§3.5).
+ * Permission policy Phase 4 — Manifest integrity proxy (§3.5).
  *
- * Spec ref: docs/architecture/q12-permission-policy-design.md §3.5.
+ * Spec ref: docs/architecture/permission-policy-design.md §3.5.
  *
  * Plugins declare a `category` per tool in `plugin.json`. When the
  * declared category is `read`, the host expects the plugin tool to be
@@ -14,7 +14,7 @@
  * Trade-off (acknowledged):
  *   A plugin that imports `node:fs` directly (rather than reading the
  *   `fs` member off its execute context) bypasses this guard. v1 is a
- *   *partial* runtime guard — the comprehensive solution lands in Q14
+ *   *partial* runtime guard — the comprehensive solution lands in plugin-sandbox follow-up
  *   when the plugin runtime moves into a V8 isolated context.
  *
  * Disable semantics:

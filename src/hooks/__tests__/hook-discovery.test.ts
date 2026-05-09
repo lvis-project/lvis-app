@@ -1,7 +1,7 @@
 /**
- * Q12 P4 Area B — hook discovery + TOFU lockfile.
+ * Permission policy P4 Area B — hook discovery + TOFU lockfile.
  *
- * Spec ref: docs/architecture/q12-permission-policy-design.md §3 Layer 6.
+ * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 6.
  */
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import {
@@ -29,7 +29,7 @@ import {
 let tmpDir: string;
 
 beforeEach(() => {
-  tmpDir = mkdtempSync(join(tmpdir(), "q12-p4-hd-"));
+  tmpDir = mkdtempSync(join(tmpdir(), "permission-policy-p4-hd-"));
 });
 
 afterEach(() => {
@@ -43,7 +43,7 @@ function writeHook(dir: string, name: string, body: string): string {
   return path;
 }
 
-describe("Q12 P4 hook-discovery", () => {
+describe("Permission policy P4 hook-discovery", () => {
   describe("ensureHooksDirectory", () => {
     it("creates the directory when missing", () => {
       const dir = join(tmpDir, "hooks");

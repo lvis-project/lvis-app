@@ -1,11 +1,11 @@
 /**
- * Q12 Phase 2.5 — `~/.lvis/settings.json` permissions block.
+ * Permission policy Phase 2.5 — `~/.lvis/settings.json` permissions block.
  *
- * Spec ref: docs/architecture/q12-permission-policy-design.md §3 Layer 1.
+ * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 1.
  *
- * This is a focused store for the Q12 permission settings only — the
+ * This is a focused store for the Permission policy permission settings only — the
  * existing `SettingsService` (lvis-settings.json under Electron's
- * userData) is unchanged. Q12 settings live in `~/.lvis/settings.json`
+ * userData) is unchanged. Permission policy settings live in `~/.lvis/settings.json`
  * because the spec carves out a permissions namespace there:
  *
  * ```jsonc
@@ -37,7 +37,7 @@ export type ReviewerProvider = "openai" | "anthropic" | "google";
 export type ReviewerFallbackOnError = "deny" | "rule";
 
 /**
- * Q12 P3 — `permissions.reviewer` block. Defaults per spec v2.1 §11
+ * Permission policy P3 — `permissions.reviewer` block. Defaults per spec v2.1 §11
  * binding decision: provider="openai", model="gpt-4o-mini",
  * fallbackOnError="rule".
  */
@@ -134,7 +134,7 @@ export function normalizePermissionSettings(
 }
 
 /**
- * Q12 P3 — normalize `permissions.reviewer` from arbitrary JSON to the
+ * Permission policy P3 — normalize `permissions.reviewer` from arbitrary JSON to the
  * canonical block. Unknown enum values fall back to defaults with a
  * warn (per CLAUDE.md No-Fallback: this is the *external boundary* —
  * settings file may be hand-edited with bad values).
@@ -168,7 +168,7 @@ function normalizeReviewerBlock(parsed: unknown): ReviewerSettingsBlock {
  * `permissions.additionalDirectories` value. Preserves any other
  * top-level keys present in the existing file.
  *
- * Q12 P3: also accepts a `reviewer` patch (partial). Provided keys
+ * Permission policy P3: also accepts a `reviewer` patch (partial). Provided keys
  * overwrite; missing keys preserve existing values.
  */
 export async function writePermissionSettings(
@@ -247,7 +247,7 @@ function validateReviewerPatch(patch: ReviewerSettingsBlock): ReviewerSettingsBl
 }
 
 /**
- * Q12 P3 — persist a reviewer-block partial. Convenience helper for
+ * Permission policy P3 — persist a reviewer-block partial. Convenience helper for
  * `/permission reviewer ...` slash dispatchers.
  */
 export async function setReviewerSettingsPersist(

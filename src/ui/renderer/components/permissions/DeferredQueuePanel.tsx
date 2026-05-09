@@ -1,12 +1,12 @@
 /**
- * Q12 Phase 3 — DeferredQueuePanel.
+ * Permission policy Phase 3 — DeferredQueuePanel.
  *
  * Renders the list of HIGH-risk routine actions that the Layer 5
  * reviewer agent deferred during headless execution. Each entry has
  * "리뷰" / "거부" buttons; the user's click resolves the entry
  * via IPC and writes an audit record on the main side.
  *
- * Spec ref: docs/architecture/q12-permission-policy-design.md §3
+ * Spec ref: docs/architecture/permission-policy-design.md §3
  * Layer 5 — "HIGH → deferred queue, foreground 진입 시 surface".
  *
  * Mounting:

@@ -1,7 +1,7 @@
 /**
- * Q12 Phase 2.5 — Layer 1 (Path policy) — allowed directories module.
+ * Permission policy Phase 2.5 — Layer 1 (Path policy) — allowed directories module.
  *
- * Spec ref: docs/architecture/q12-permission-policy-design.md §3 Layer 1.
+ * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 1.
  *
  * Setting (~/.lvis/settings.json):
  * ```jsonc
@@ -31,7 +31,7 @@ import {
 } from "./sensitive-paths.js";
 
 /**
- * Q12 P2.5 — directory addition pre-flight result.
+ * Permission policy P2.5 — directory addition pre-flight result.
  *
  * `ok: true` ⇒ caller may persist the directory to settings.
  * `ok: false` ⇒ caller MUST surface `reason` to the user (Layer 0
@@ -57,7 +57,7 @@ const ADJACENCY_WARNING_NESTED = [
 ] as const;
 
 /**
- * Q12 P2.5 — compute the host-default allow-list at boot.
+ * Permission policy P2.5 — compute the host-default allow-list at boot.
  *
  * Default = `process.cwd()` ∪ `homedir()/.lvis` MINUS Layer 0 deny paths.
  * Returns canonicalized + case-folded entries ready to be passed to
@@ -82,7 +82,7 @@ export function computeDefaultAllowedDirectories(): string[] {
 }
 
 /**
- * Q12 P2.5 — sanitize a user-provided allow-list (e.g. from
+ * Permission policy P2.5 — sanitize a user-provided allow-list (e.g. from
  * `permissions.additionalDirectories` in settings.json).
  *
  * - Resolves `~` to `homedir()`.
@@ -112,7 +112,7 @@ export function sanitizeAllowedDirectories(input: readonly string[] | undefined)
 }
 
 /**
- * Q12 P2.5 — Layer 1 prefix check.
+ * Permission policy P2.5 — Layer 1 prefix check.
  *
  * `canonicalPath` MUST already be canonicalized + case-folded by the
  * caller (frozen-canonical contract). `scope.directories` MUST come from
@@ -144,7 +144,7 @@ export function isPathAllowed(
 }
 
 /**
- * Q12 P2.5 — pick the **leaf-parent** of `canonicalPath` for the
+ * Permission policy P2.5 — pick the **leaf-parent** of `canonicalPath` for the
  * "auto-suggest add directory" UX (§3 Layer 1 M3 strengthening).
  *
  * Spec rule: NEVER suggest the broadest common-prefix (`~/Documents/`).
@@ -172,7 +172,7 @@ export function pickClosestParent(
 }
 
 /**
- * Q12 P2.5 — pre-flight check before persisting a directory to
+ * Permission policy P2.5 — pre-flight check before persisting a directory to
  * `additionalDirectories`. Surfaces three classes of problem:
  *
  * 1. Hard reject: empty / sensitive / filesystem root → `ok: false`.
@@ -235,7 +235,7 @@ export function validateDirectoryAddition(rawPath: string): ValidateDirectoryRes
 }
 
 /**
- * Q12 P2.5 — assemble the live allow-list scope from defaults + user
+ * Permission policy P2.5 — assemble the live allow-list scope from defaults + user
  * additions, with Layer 0 sensitive paths filtered out.
  *
  * This is the canonical entry point used by the executor to construct

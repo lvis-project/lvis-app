@@ -1,5 +1,5 @@
 /**
- * Q12 P4 Area C — plugin-tool-adapter manifest integrity integration test.
+ * Permission policy P4 Area C — plugin-tool-adapter manifest integrity integration test.
  *
  * Verifies the runtime-side post-violation gate: when a plugin's tool
  * throws {@link ManifestIntegrityViolation}, the adapter records the
@@ -58,7 +58,7 @@ function makePathFieldsManifest(pathFields: unknown): PluginManifest {
   } as PluginManifest;
 }
 
-describe("Q12 P4 plugin-tool-adapter manifest integrity gate", () => {
+describe("Permission policy P4 plugin-tool-adapter manifest integrity gate", () => {
   it("records ManifestIntegrityViolation when the runtime throws it", async () => {
     const fakeRuntime = {
       call: vi.fn(async () => {

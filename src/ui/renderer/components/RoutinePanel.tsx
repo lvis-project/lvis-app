@@ -139,7 +139,7 @@ interface AddRoutineModalProps {
 }
 
 // Exported for renderer tests — the modal owns the button → scope-payload
-// mapping that we want to lock down (Q12 P5 round 2: empty selection MUST
+// mapping that we want to lock down (Permission policy P5 round 2: empty selection MUST
 // map to `{ mode: "deny-all" }`, not "inherit" / "allow all").
 export function AddRoutineModal({ api, onClose, onAdded }: AddRoutineModalProps) {
   const [tab, setTab] = useState<InputTab>("form");
@@ -267,7 +267,7 @@ export function AddRoutineModal({ api, onClose, onAdded }: AddRoutineModalProps)
       ...(execution === "llm-session"
         ? {
             prePrompt: prePrompt.trim(),
-            // Q12 Layer 4 — RoutinePanel always emits an explicit scope:
+            // Permission policy Layer 4 — RoutinePanel always emits an explicit scope:
             // empty plugin selection = deny-all (matches the panel's
             // "허용 안 함" semantic); non-empty = explicit allow-list.
             scope: {

@@ -1,7 +1,7 @@
 /**
- * Q12 — `/permission` slash parser + dispatcher helpers.
+ * Permission policy — `/permission` slash parser + dispatcher helpers.
  *
- * Spec ref: docs/architecture/q12-permission-policy-design.md §3 Layer 1
+ * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 1
  * (slash commands), §11 v2.1 binding decisions.
  *
  * This module returns structured results so callers can render command
@@ -432,7 +432,7 @@ export async function dispatchPermissionHooksCommand(
 // ─── Top-level /permission dispatcher (trust-origin gated) ─────────────
 
 /**
- * Q12 P5 — trust-origin set as defined in spec §9. Slash dispatch
+ * Permission policy P5 — trust-origin set as defined in spec §9. Slash dispatch
  * is gated on `user-keyboard` only; everything else short-circuits
  * to plain-text echo (per spec §3 Layer 8).
  */
@@ -460,7 +460,7 @@ export type PermissionSlashOutcome =
   | { kind: "parse-error"; error: string };
 
 /**
- * Q12 P5 — central dispatcher entry point. The renderer calls this
+ * Permission policy P5 — central dispatcher entry point. The renderer calls this
  * with the raw input string + the propagated trust origin. The
  * dispatcher's contract:
  *
@@ -547,7 +547,7 @@ export function dispatchPermissionSlash(
       const cmd = parsed as PermissionHooksCommand;
       // Hook trust changes are slash-based TOFU: the typed user-keyboard
       // command is the approval surface. Production intentionally has no
-      // renderer fallback prompt for untrusted hooks.
+      // renderer approval prompt for untrusted hooks.
       return { kind: "hooks", cmd, needsModal: false };
     }
     default:
