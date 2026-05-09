@@ -91,6 +91,43 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
     return loadPolicy();
   });
 
+  // ── Q12 P3 — deferred queue surface ────────────────────────────
+  // Read-only listing (UI loads on mount). Sender guard optional.
+  ipcMain.handle("lvis:permissions:deferred-list", async () => {
+    const pm = conversationLoop.permissionManager;
+    const queue = pm?.getDeferredQueue();
+    if (!queue) return { ok: true, pending: [], total: 0 };
+    return { ok: true, pending: queue.listPending(), total: queue.size() };
+  });
+
+  // Resolve a pending entry — gated. The renderer's button click
+  // dispatches with `decision` ∈ {"approved","rejected"}.
+  ipcMain.handle(
+    "lvis:permissions:deferred-resolve",
+    async (
+      e,
+      params: { id: string; decision: "approved" | "rejected"; reason?: string },
+    ) => {
+      if (!validateSender(e)) {
+        auditUnauthorized(auditLogger, "lvis:permissions:deferred-resolve", e);
+        return UNAUTHORIZED_FRAME;
+      }
+      if (
+        !params ||
+        typeof params.id !== "string" ||
+        (params.decision !== "approved" && params.decision !== "rejected")
+      ) {
+        return { ok: false, error: "invalid-params" };
+      }
+      const pm = conversationLoop.permissionManager;
+      const queue = pm?.getDeferredQueue();
+      if (!queue) return { ok: false, error: "no-deferred-queue" };
+      const resolved = await queue.resolve(params.id, params.decision, params.reason);
+      if (!resolved) return { ok: false, error: "not-found" };
+      return { ok: true, entry: resolved };
+    },
+  );
+
   ipcMain.handle("lvis:policy:set", async (e, patch: Record<string, unknown>) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:policy:set", e); return UNAUTHORIZED_FRAME; }
     if ("managed" in patch) {
