@@ -807,7 +807,7 @@ app.on("before-quit", (event) => {
                     trigger: r.trigger,
                     prePrompt: r.prePrompt ?? "",
                     title: r.title,
-                    allowedPlugins: r.allowedPlugins,
+                    scope: r.scope,
                     signal: controller.signal,
                   });
                 } catch (abortErr) {
