@@ -38,6 +38,22 @@ export interface PermissionCheckResult {
   decision: PermissionDecision;
   reason: string;
   layer: number; // 어떤 단계에서 결정되었는지
+  /**
+   * Q12 P2.5 §3 Layer 2 — structured deny reasons for audit forensics.
+   * The pipeline records the *current* deny entry only (short-circuit
+   * evaluation; later layers are skipped). Hypothetical other-layer
+   * decisions belong to dry-run mode, not normal audit.
+   *
+   * Each entry: { layer, reason, source }
+   *   layer    — which Q12 layer fired (0=sensitive, 1=allowed-dir, …)
+   *   reason   — short machine-readable code (e.g. "out-of-allowed-dir")
+   *   source   — emitter ("directory-policy", "sensitive-paths", …)
+   */
+  denyReasons?: ReadonlyArray<{
+    layer: number;
+    reason: string;
+    source: string;
+  }>;
 }
 
 export interface PermissionCheckContext {
