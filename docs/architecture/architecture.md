@@ -1485,6 +1485,66 @@ flowchart TB
 | **D3 — Approval queue cap** | `pending.size` 상한 초과 시 신규 요청 deny-once 처리. LLM 대량 tool_use 발행 시 리소스 보호. renderer 큐 깊이 UI 표시. | #131 |
 | **D4 — Parallel tool execution + bulk approval** | `ToolExecutor.executeAll()` 병렬 실행 활성화 + `ToolApprovalDialog` 다중 승인 UI (bulk approve/deny). | #133 |
 
+#### 6.3.x — Reviewer Agent (Layer 5, Q12 Phase 3)
+
+> **Phase 3 stub.** Phase 5 fully rewrites §6.3 from the legacy 3-layer
+> model to the Q12 10-layer pipeline. This subsection is the
+> placeholder so Phase 3 deliverables (PR #632 commits) are
+> arch-discoverable. Spec ref:
+> `docs/architecture/q12-permission-policy-design.md` §3 Layer 5,
+> §11 v2.1 binding decisions.
+
+The **Reviewer Agent** is the Q12 Layer 5 risk classifier consulted on
+*headless write/shell/network/read-out-of-dir* invocations. It is the
+runtime safety net that distinguishes routine tool calls (LOW/MEDIUM,
+auto-allow + audit) from suspicious ones (HIGH, deferred to user).
+
+**Three modes (configurable via `/permission reviewer mode ...`):**
+
+| Mode | Behavior | Use case |
+| --- | --- | --- |
+| `disabled` | Always returns HIGH (defer-all fail-safe). Headless lane queues every action. | Maximum caution; operators reviewing every routine action manually. |
+| `rule` | Deterministic 36-rule heuristic. Sync, no network, no cost. | Default for offline / quota-conscious deployments. |
+| `llm` | Multi-vendor LLM call (default `provider="openai"`, `model="gpt-4o-mini"`). Composition `final = max(rule, llm)` — LLM cannot downgrade. | Higher recall on novel attack shapes. |
+
+**Composition rule (security M1):** every `llm` invocation also runs the
+`RuleBasedRiskClassifier` first; the final verdict is `max(ruleVerdict,
+llmVerdict)`. The LLM can only escalate, never downgrade. This keeps
+hard-coded heuristic rules (e.g. `rm -rf` → HIGH) authoritative even
+when the LLM under-reacts.
+
+**DLP filter on input (security threat-gap #3):** `finalInput` is run
+through `maskSensitiveData` before being formatted into the prompt.
+Secrets / credentials / PII never reach the provider — covered by a
+regression test in `risk-classifier.test.ts`.
+
+**Verdict cache:** `~/.lvis/permissions/reviewer-cache.jsonl`, keyed by
+`sha256(toolName + source + category + canonicalInputShape)`. The
+shape replaces literal values with their type-name and deep-sorts
+keys, so different paths sharing the same shape collide on the same
+cache entry by design (caching keyed on *shape risk*, not literal
+arguments). HIGH verdicts cached too. Settings change invalidates only
+mismatching entries (selective per spec v2.1 §11), preserving
+cold-start hit rate.
+
+**Deferred queue:** `~/.lvis/permissions/deferred-queue.jsonl`. Append
+on HIGH verdict. The renderer's `DeferredQueuePanel` surfaces pending
+entries with "리뷰" / "거부" buttons — each click resolves the entry
+and writes an audit record.
+
+**Atomic cutover:** `mode: "llm"` without a configured provider throws
+at `createRiskClassifier()` boot — no silent fallback to rule mode
+(CLAUDE.md No-Fallback). `fallbackOnError ∈ { deny, rule }` only.
+
+**Files (Phase 3, PR #632):**
+- `src/permissions/reviewer/risk-classifier.ts` — interface + 3 impls.
+- `src/permissions/reviewer/verdict-cache.ts` — cache module.
+- `src/permissions/reviewer/deferred-queue.ts` — deferred queue.
+- `src/permissions/permission-manager.ts` — `dispatchReviewer()`.
+- `src/permissions/permission-slash.ts` — `/permission reviewer ...`.
+- `src/ui/renderer/components/permissions/DeferredQueuePanel.tsx` — UI.
+
+
 ### 6.4 Tool Registry & Taxonomy — 빌트인 도구 카탈로그
 
 > Lgenie가 호출할 수 있는 **빌트인 도구**와 **플러그인 도구**를 구분하고, 카테고리별로 분류한다.
