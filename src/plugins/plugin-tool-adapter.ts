@@ -33,6 +33,7 @@ interface ToolSchemaEntry {
   version?: string;
   deprecatedSince?: string;
   replacedBy?: string;
+  pathFields?: unknown;
   inputSchema: Record<string, unknown>;
 }
 
@@ -74,6 +75,19 @@ function normalizeToolCategory(entry: ToolSchemaEntry | undefined): ToolCategory
   return "write";
 }
 
+function normalizePathFields(pathFields: unknown): string[] | undefined {
+  if (!Array.isArray(pathFields)) return undefined;
+  const normalized = [
+    ...new Set(
+      pathFields
+        .filter((field): field is string => typeof field === "string")
+        .map((field) => field.trim())
+        .filter((field) => field.length > 0),
+    ),
+  ];
+  return normalized.length > 0 ? normalized : undefined;
+}
+
 function buildPluginTool(
   pluginRuntime: PluginRuntime,
   toolName: string,
@@ -93,6 +107,7 @@ function buildPluginTool(
     version: schemaEntry?.version ?? manifestVersion,
     deprecatedSince: schemaEntry?.deprecatedSince,
     replacedBy: schemaEntry?.replacedBy,
+    pathFields: normalizePathFields(schemaEntry?.pathFields),
     jsonSchema: typed ?? GENERIC_PAYLOAD_SCHEMA,
     isReadOnly: () => category === "read",
     execute: async (rawInput) => {

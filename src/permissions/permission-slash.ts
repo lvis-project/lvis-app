@@ -1,13 +1,11 @@
 /**
- * Q12 Phase 2.5 — `/permission dir <verb> <args>` slash handler stub.
+ * Q12 — `/permission` slash parser + dispatcher helpers.
  *
  * Spec ref: docs/architecture/q12-permission-policy-design.md §3 Layer 1
  * (slash commands), §11 v2.1 binding decisions.
  *
- * Phase 2.5 is the parsing + persistence skeleton. Phase 5 will fully
- * wire the slash dispatcher, autocomplete UI, and toast feedback. This
- * module returns structured results so the eventual UI layer can render
- * them without re-parsing.
+ * This module returns structured results so callers can render command
+ * results without re-parsing and can enforce trust origin at one boundary.
  *
  * Trust origin gate (spec C2 fix): callers MUST verify
  * `trustOrigin === "user"` before invoking. This module does NOT enforce
@@ -28,6 +26,15 @@ import {
   type ReviewerProvider,
   type ReviewerSettingsBlock,
 } from "./permission-settings-store.js";
+import {
+  acceptHookTrust,
+  disableHookTrust,
+  listHookTrustState,
+  type HookTrustCommandOptions,
+  type HookTrustCommandResult,
+} from "../hooks/hook-trust-commands.js";
+export { stripLeadingSlash } from "../shared/slash-sanitizer.js";
+import { stripLeadingSlash } from "../shared/slash-sanitizer.js";
 
 export type PermissionDirVerb = "allow" | "deny" | "list";
 
@@ -401,6 +408,15 @@ export function parsePermissionHooksCommand(
   return { ok: false, error: `unknown subcommand '${sub}' — expected list|accept|disable` };
 }
 
+export async function dispatchPermissionHooksCommand(
+  cmd: PermissionHooksCommand,
+  opts: HookTrustCommandOptions = {},
+): Promise<HookTrustCommandResult> {
+  if (cmd.sub === "list") return listHookTrustState(opts);
+  if (cmd.sub === "accept") return acceptHookTrust(cmd.name, opts);
+  return disableHookTrust(cmd.name, opts);
+}
+
 // ─── Top-level /permission dispatcher (trust-origin gated) ─────────────
 
 /**
@@ -430,15 +446,6 @@ export type PermissionSlashOutcome =
   | { kind: "rules"; cmd: PermissionRulesCommand; needsModal: false }
   | { kind: "hooks"; cmd: PermissionHooksCommand; needsModal: boolean }
   | { kind: "parse-error"; error: string };
-
-/**
- * Strip the leading slash from a non-user-origin string so the chat
- * doesn't mis-render it as a slash hint. Only the *first* `/` is
- * stripped to preserve URL-like content (`/path/to/x`).
- */
-export function stripLeadingSlash(input: string): string {
-  return input.startsWith("/") ? input.slice(1) : input;
-}
 
 /**
  * Q12 P5 — central dispatcher entry point. The renderer calls this
@@ -526,8 +533,10 @@ export function dispatchPermissionSlash(
         return { kind: "parse-error", error: parsed.error };
       }
       const cmd = parsed as PermissionHooksCommand;
-      // accept/disable mutate trust state — modal confirmation.
-      return { kind: "hooks", cmd, needsModal: cmd.sub !== "list" };
+      // Hook trust changes are slash-based TOFU: the typed user-keyboard
+      // command is the approval surface. Production intentionally has no
+      // renderer fallback prompt for untrusted hooks.
+      return { kind: "hooks", cmd, needsModal: false };
     }
     default:
       return {

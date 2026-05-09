@@ -171,6 +171,7 @@ describe("schedule_routine tool", () => {
       expect(list).toHaveLength(1);
       expect(list[0].schedule?.repeat?.kind).toBe("daily");
       expect(list[0].notificationTitle).toBe("year-end");
+      expect(list[0].scope?.pluginIds).toEqual({ mode: "deny-all" });
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }

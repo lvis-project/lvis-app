@@ -6,21 +6,20 @@
  *
  * Discovers individual `pre-*.sh`, `post-*.sh`, `perm-*.sh` files under
  * `~/.config/lvis/hooks/`. Computes sha256 hashes and compares against
- * `~/.config/lvis/hooks/.lockfile.json` to surface the diff for the
- * boot-time TOFU prompt:
+ * `~/.config/lvis/hooks/.lockfile.json` to surface the boot-time TOFU diff:
  *
  *   - **fresh install** (no lockfile, hooks present) → all hooks treated
- *     as `new` so the user sees the prompt the first time.
+ *     as `new`.
  *   - **post-install change** → hooks whose hash drifted from the
  *     lockfile show up as `changed`.
  *   - **new hook added** → hashes that aren't in the lockfile show up
  *     as `new`.
  *   - **hook removed** → entries in the lockfile that no longer exist
- *     on disk show up as `removed` (informational; no UX prompt).
+ *     on disk show up as `removed`.
  *
- * On user accept → lockfile rewritten with the current hashes.
- * On user reject → the offending file is moved to a `.disabled/`
- * subfolder so it won't run on subsequent boots.
+ * On explicit trust (`/permission hooks accept <name>`) → lockfile rewritten
+ * with the current hashes. On reject/quarantine → the offending file is moved
+ * to a `.disabled/` subfolder so it won't run on subsequent boots.
  *
  * **Atomic cutover (CLAUDE.md No-Fallback):** if `~/.config/lvis/hooks/`
  * does not exist, boot creates an empty directory and emits no warn —
@@ -96,7 +95,7 @@ export function defaultLockfilePath(): string {
 }
 
 /**
- * Default disabled subfolder. Hooks rejected by TOFU prompt are
+ * Default disabled subfolder. Hooks rejected by the TOFU workflow are
  * relocated here so they survive on disk for inspection but do not run.
  */
 export function defaultDisabledDir(): string {
@@ -167,8 +166,8 @@ export function discoverHooks(dir: string = defaultHooksDir()): DiscoveredHook[]
     }
     out.push({ path, fileName, hookType, sha256: h.sha256, size: h.size });
   }
-  // Stable order — alphabetical by fileName so the user sees the same
-  // diff order every prompt.
+  // Stable order — alphabetical by fileName so list/review surfaces show
+  // the same order every time.
   out.sort((a, b) => a.fileName.localeCompare(b.fileName));
   return out;
 }
@@ -196,7 +195,7 @@ export function readLockfile(path: string = defaultLockfilePath()): LockfileShap
 /**
  * Diff discovered hooks against the lockfile. The `removed` state is
  * informational — entries the lockfile knew about but are no longer on
- * disk. Caller may surface this in the prompt for transparency but does
+ * disk. Caller may surface this in a review surface for transparency but does
  * NOT need user action (the file is already gone).
  */
 export function diffAgainstLockfile(
@@ -247,8 +246,8 @@ export function diffAgainstLockfile(
  * Persist a new lockfile reflecting the *current* set of trusted hooks.
  * Atomic write under `withFileLock` so concurrent boots don't corrupt.
  *
- * `acceptedHooks` is the subset of discovered hooks the user said yes
- * to. Untrusted (rejected) hooks should NOT appear here; the caller
+ * `acceptedHooks` is the subset of discovered hooks explicitly trusted by
+ * user-keyboard command. Untrusted hooks should NOT appear here; the caller
  * should have already moved them to `.disabled/`.
  */
 export async function persistLockfile(

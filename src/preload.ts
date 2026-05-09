@@ -8,7 +8,7 @@ import { resolve as pathResolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { McpServerConfig } from "./mcp/types.js";
 import type { SerializedHistoryMessage } from "./shared/chat-history.js";
-import { OVERLAY_V1, ROUTINES_V2 } from "./shared/ipc-channels.js";
+import { OVERLAY_V1, PERMISSIONS_Q12, ROUTINES_V2 } from "./shared/ipc-channels.js";
 import { PLUGIN_PRIVATE_NAMESPACES } from "./plugins/capabilities.js";
 
 // ─── Deterministic plugin webview asset URLs ────────────────────────────────
@@ -461,55 +461,6 @@ const api = {
     readUiResource: async (serverId: string, uri: string) => ipcRenderer.invoke("lvis:mcp:ui-resource", serverId, uri) as Promise<string>,
   },
 
-  // ─── Hooks (Q12 P4 Layer 6 — TOFU trust prompt) ─────────────────
-  hooks: {
-    /** main → renderer push: a new trust prompt is pending. */
-    onTrustPrompt: (
-      handler: (
-        payload: {
-          id: string;
-          files: Array<{
-            fileName: string;
-            state: "new" | "changed" | "trusted" | "removed";
-            sha256: string;
-            previousSha256?: string;
-          }>;
-        },
-      ) => void,
-    ) => {
-      const listener = (_e: unknown, payload: Parameters<typeof handler>[0]) =>
-        handler(payload);
-      ipcRenderer.on("lvis:hooks:trust-prompt", listener);
-      return () => ipcRenderer.removeListener("lvis:hooks:trust-prompt", listener);
-    },
-    /** Late-mount fetch: returns the pending request when the modal mounts after boot. */
-    current: async () => ipcRenderer.invoke("lvis:hooks:current") as Promise<
-      | {
-          id: string;
-          files: Array<{
-            fileName: string;
-            state: "new" | "changed" | "trusted" | "removed";
-            sha256: string;
-            previousSha256?: string;
-          }>;
-        }
-      | null
-    >,
-    /** Per-file accept. `trustedFileNames` is the user's whitelist; everything
-     * else in the diff is implicit reject. */
-    accept: async (id: string, trustedFileNames: string[]) =>
-      ipcRenderer.invoke("lvis:hooks:accept", {
-        id,
-        trustedFileNames,
-      }) as Promise<{ ok: boolean; error?: string }>,
-    /** Reject the entire pending diff (auto-disable everything). */
-    rejectAll: async (id: string) =>
-      ipcRenderer.invoke("lvis:hooks:reject-all", { id }) as Promise<{
-        ok: boolean;
-        error?: string;
-      }>,
-  },
-
   // ─── Permission ───────────────────────────────────
   permission: {
     getMode: async () => ipcRenderer.invoke("lvis:permission:get-mode"),
@@ -520,33 +471,33 @@ const api = {
     removeRule: async (pattern: string, action: string) =>
       ipcRenderer.invoke("lvis:permission:remove-rule", pattern, action),
     /** Q12 P3 — deferred queue (Layer 5 reviewer HIGH verdicts). */
-    deferredList: async () => ipcRenderer.invoke("lvis:permissions:deferred-list"),
+    deferredList: async () => ipcRenderer.invoke(PERMISSIONS_Q12.deferredList),
     deferredResolve: async (
       id: string,
       decision: "approved" | "rejected",
       reason?: string,
     ) =>
-      ipcRenderer.invoke("lvis:permissions:deferred-resolve", { id, decision, reason }),
+      ipcRenderer.invoke(PERMISSIONS_Q12.deferredResolve, { id, decision, reason }),
     /** Foreground-entry pending notification — main→renderer event. */
     onDeferredPending: (cb: (summary: { pending: number }) => void) => {
       const listener = (_event: unknown, summary: { pending: number }) =>
         cb(summary);
-      ipcRenderer.on("lvis:permissions:deferred-pending", listener);
+      ipcRenderer.on(PERMISSIONS_Q12.deferredPending, listener);
       return () =>
-        ipcRenderer.removeListener("lvis:permissions:deferred-pending", listener);
+        ipcRenderer.removeListener(PERMISSIONS_Q12.deferredPending, listener);
     },
     /** Q12 P3 — `/permission reviewer ...` slash dispatch via IPC. */
     reviewerDispatch: async (rawArgs: string) =>
-      ipcRenderer.invoke("lvis:permissions:reviewer-dispatch", { rawArgs }),
+      ipcRenderer.invoke(PERMISSIONS_Q12.reviewerDispatch, { rawArgs }),
     /** Q12 P5 — `/permission audit show` — fetch recent Q12 entries. */
     auditShow: async (last: number) =>
-      ipcRenderer.invoke("lvis:permissions:audit-show", { last }),
+      ipcRenderer.invoke(PERMISSIONS_Q12.auditShow, { last }),
     /** Q12 P5 — `/permission audit verify` — chain integrity check. */
     auditVerify: async () =>
-      ipcRenderer.invoke("lvis:permissions:audit-verify"),
+      ipcRenderer.invoke(PERMISSIONS_Q12.auditVerify),
     /**
      * Q12 P4 §3.5 — manifest integrity violation notifier. Subscribes
-     * to `lvis:permissions:manifest-violation` so the renderer can
+     * to `PERMISSIONS_Q12.manifestViolation` so the renderer can
      * surface a "Plugin X disabled — reinstall?" prompt.
      */
     onManifestViolation: (
@@ -558,9 +509,9 @@ const api = {
     ) => {
       const listener = (_e: unknown, payload: Parameters<typeof handler>[0]) =>
         handler(payload);
-      ipcRenderer.on("lvis:permissions:manifest-violation", listener);
+      ipcRenderer.on(PERMISSIONS_Q12.manifestViolation, listener);
       return () =>
-        ipcRenderer.removeListener("lvis:permissions:manifest-violation", listener);
+        ipcRenderer.removeListener(PERMISSIONS_Q12.manifestViolation, listener);
     },
   },
 

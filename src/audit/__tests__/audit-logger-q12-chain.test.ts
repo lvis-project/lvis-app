@@ -69,9 +69,9 @@ describe("AuditLogger Q12 chain", () => {
     expect(logger.isQ12ChainReady()).toBe(true);
   });
 
-  it("appendQ12Entry throws before setupQ12Chain", () => {
+  it("appendQ12Entry throws before setupQ12Chain", async () => {
     const logger = new AuditLogger();
-    expect(() =>
+    await expect(
       logger.appendQ12Entry({
         decision: "allow",
         auditId: "id-1",
@@ -84,13 +84,13 @@ describe("AuditLogger Q12 chain", () => {
         directoryAllowed: true,
         layer: 1,
       }),
-    ).toThrow(/not initialized/);
+    ).rejects.toThrow(/not initialized/);
   });
 
-  it("appendQ12Entry on fresh file: first entry's prevHash = HMAC(genesis)", () => {
+  it("appendQ12Entry on fresh file: first entry's prevHash = HMAC(genesis)", async () => {
     const logger = new AuditLogger();
     logger.setupQ12Chain(SECRET);
-    const entry = logger.appendQ12Entry({
+    const entry = await logger.appendQ12Entry({
       decision: "allow",
       auditId: "id-1",
       ts: "2026-05-09T00:00:00.000Z",
@@ -109,10 +109,10 @@ describe("AuditLogger Q12 chain", () => {
     expect(JSON.parse(lines[0])).toEqual(entry);
   });
 
-  it("two sequential appends produce a valid chain", () => {
+  it("two sequential appends produce a valid chain", async () => {
     const logger = new AuditLogger();
     logger.setupQ12Chain(SECRET);
-    logger.appendQ12Entry({
+    await logger.appendQ12Entry({
       decision: "allow",
       auditId: "id-1",
       ts: "2026-05-09T00:00:00.000Z",
@@ -124,7 +124,7 @@ describe("AuditLogger Q12 chain", () => {
       directoryAllowed: true,
       layer: 1,
     });
-    logger.appendQ12Entry({
+    await logger.appendQ12Entry({
       decision: "deny",
       auditId: "id-2",
       ts: "2026-05-09T00:00:01.000Z",
@@ -139,7 +139,34 @@ describe("AuditLogger Q12 chain", () => {
     expect(verifyChain(SECRET, lines)).toEqual({ ok: true });
   });
 
-  it("setupQ12Chain re-bootstraps prevHash from an existing file's tail", () => {
+  it("appends deferred_resolve entries to the Q12 chain", async () => {
+    const logger = new AuditLogger();
+    logger.setupQ12Chain(SECRET);
+    await logger.appendQ12Entry({
+      decision: "deferred_resolve",
+      auditId: "resolve-1",
+      ts: "2026-05-09T00:00:02.000Z",
+      trustOrigin: "user-keyboard",
+      tool: "fs_write",
+      source: "builtin",
+      category: "write",
+      reviewerVerdict: { level: "high", reason: "outside allowed dirs" },
+      queueId: "queue-1",
+      resolution: "approved",
+      reason: "manual review",
+    });
+
+    const lines = readQ12Lines(logger.getQ12LogFile());
+    expect(lines.length).toBe(1);
+    expect(JSON.parse(lines[0])).toMatchObject({
+      decision: "deferred_resolve",
+      queueId: "queue-1",
+      resolution: "approved",
+    });
+    expect(verifyChain(SECRET, lines)).toEqual({ ok: true });
+  });
+
+  it("setupQ12Chain re-bootstraps prevHash from an existing file's tail", async () => {
     // Pre-seed a chain manually
     const existing = buildChainedEntries(SECRET, [
       { decision: "allow", auditId: "x1", ts: "t1", tool: "a", trustOrigin: "user-keyboard" },
@@ -151,7 +178,7 @@ describe("AuditLogger Q12 chain", () => {
     const logger = new AuditLogger();
     logger.setupQ12Chain(SECRET);
     // The next entry must chain off the existing tail, not genesis.
-    const entry = logger.appendQ12Entry({
+    const entry = await logger.appendQ12Entry({
       decision: "ask",
       auditId: "x3",
       ts: "t3",
@@ -172,11 +199,11 @@ describe("AuditLogger Q12 chain", () => {
     expect(verifyChain(SECRET, lines)).toEqual({ ok: true });
   });
 
-  it("ten-entry chain — tamper line 4 → verify catches at line 5", () => {
+  it("ten-entry chain — tamper line 4 → verify catches at line 5", async () => {
     const logger = new AuditLogger();
     logger.setupQ12Chain(SECRET);
     for (let i = 0; i < 10; i++) {
-      logger.appendQ12Entry({
+      await logger.appendQ12Entry({
         decision: i % 2 === 0 ? "allow" : "deny",
         auditId: `id-${i}`,
         ts: `2026-05-09T00:00:${String(i).padStart(2, "0")}.000Z`,

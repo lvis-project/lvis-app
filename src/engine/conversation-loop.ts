@@ -30,6 +30,7 @@ import type { RouteEngine } from "../core/route-engine.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { MemoryManager } from "../memory/memory-manager.js";
 import type { SettingsService } from "../data/settings-store.js";
+import type { HookTrustCommandOptions } from "../hooks/hook-trust-commands.js";
 import { AuditLogger } from "../audit/audit-logger.js";
 import type { RoutineEngine } from "../core/routine-engine.js";
 import type { IdleSchedulerService } from "../main/idle-scheduler.js";
@@ -154,12 +155,9 @@ export interface ConversationLoopDeps {
   /** B1: 승인 게이트 — "ask" 결정 시 렌더러 모달로 round-trip */
   approvalGate?: import("../permissions/approval-gate.js").ApprovalGate;
   /**
-   * Tier A4 (W3): pre-configured {@link HookRunner} — boot owns the lifecycle
-   * so external command/http hooks loaded from `~/.lvis/hooks.json` +
-   * admin-dir `hooks.json` are attached via
-   * {@link HookRunner.setExternalExecutor} BEFORE the loop is constructed.
-   * Defaults to a fresh runner with no hooks when omitted (preserves old
-   * test harnesses that instantiate ConversationLoop directly).
+   * In-process hook runner used by focused unit tests and old internal
+   * extension points. Production Q12 script hooks are carried by
+   * scriptHookManager, not by hooks.json external loading.
    */
   hookRunner?: HookRunner;
   /**
@@ -188,6 +186,17 @@ export interface ConversationLoopDeps {
   allowedPluginIds?: ReadonlySet<string>;
   /** Background/routine loop: write tools must ask and cannot rely on auto/allow cache. */
   headless?: boolean;
+  /** Additional filesystem roots explicitly granted to this loop. */
+  additionalDirectories?: readonly string[];
+  /** Live reader for foreground settings-backed additional directories. */
+  getAdditionalDirectories?: () => readonly string[];
+  /**
+   * Layer 6 script hooks. Boot owns discovery/trust and injects the manager;
+   * the executor only invokes the already-trusted generic hook contract.
+   */
+  scriptHookManager?: import("../hooks/script-hook-manager.js").ScriptHookManager;
+  /** Hook trust command storage override. Production uses default hook paths. */
+  hookTrustCommandOptions?: Omit<HookTrustCommandOptions, "manager">;
   /** Disable normal ~/.lvis/sessions persistence for isolated routine loops. */
   disableSessionPersistence?: boolean;
   /**
@@ -278,6 +287,7 @@ export class ConversationLoop {
       deps.permissionManager,
       deps.bashAstValidator,
       deps.approvalGate,
+      deps.scriptHookManager,
     );
     this.auditLogger = new AuditLogger();
     this.refreshProvider();
@@ -1389,6 +1399,9 @@ export class ConversationLoop {
           permissionContext: {
             headless: this.deps.headless,
             allowedPluginIds: new Set(scope.activePluginIds),
+            additionalDirectories:
+              this.deps.getAdditionalDirectories?.() ?? this.deps.additionalDirectories,
+            trustOrigin: this.deps.headless ? "routine" : "user",
           },
         },
       );
@@ -1630,8 +1643,12 @@ export class ConversationLoop {
     }
     const allowed = this.deps.allowedPluginIds;
     if (allowed) {
+      const effectiveAllowed = new Set(allowed);
+      for (const pluginId of this.deps.forcedActivePluginIds ?? []) {
+        effectiveAllowed.add(pluginId);
+      }
       for (const pluginId of [...activePluginIds]) {
-        if (!allowed.has(pluginId)) activePluginIds.delete(pluginId);
+        if (!effectiveAllowed.has(pluginId)) activePluginIds.delete(pluginId);
       }
     }
     return {
@@ -1643,7 +1660,12 @@ export class ConversationLoop {
 
   private filterAllowedPluginIds(pluginIds: string[]): string[] {
     const allowed = this.deps.allowedPluginIds;
-    return allowed ? pluginIds.filter((id) => allowed.has(id)) : pluginIds;
+    if (!allowed) return pluginIds;
+    const effectiveAllowed = new Set(allowed);
+    for (const pluginId of this.deps.forcedActivePluginIds ?? []) {
+      effectiveAllowed.add(pluginId);
+    }
+    return pluginIds.filter((id) => effectiveAllowed.has(id));
   }
 
   // ─── Private: Command Handler ─────────────────────
@@ -1716,6 +1738,10 @@ export class ConversationLoop {
         result = tools.map((t) => `${t.name} [${t.source}]`).join("\n") || "등록된 도구 없음";
         break;
       }
+      case "permission": {
+        result = await this.handlePermissionCommand(args);
+        break;
+      }
       case "help":
         result = `LVIS 명령어:
 /new — 새 대화 시작
@@ -1726,15 +1752,52 @@ export class ConversationLoop {
 /memory — 사용자 메모 목록
 /vendor — 현재 벤더/토큰 정보
 /tools — 등록된 도구 목록
+/permission hooks <list|accept|disable> [name] — script hook 신뢰 상태 관리
 /help — 이 도움말`;
         break;
       default:
-        result = `알 수 없는 명령어: /${command}\n사용 가능: /new, /sessions, /load, /compact, /remember, /memory, /vendor, /tools, /help`;
+        result = `알 수 없는 명령어: /${command}\n사용 가능: /new, /sessions, /load, /compact, /remember, /memory, /vendor, /tools, /permission, /help`;
     }
 
     callbacks?.onTextDelta?.(result);
     callbacks?.onTurnComplete?.(result);
     return { text: result, toolCalls: [], route: "command" };
+  }
+
+  private async handlePermissionCommand(args: string): Promise<string> {
+    const {
+      dispatchPermissionHooksCommand,
+      dispatchPermissionSlash,
+    } = await import("../permissions/permission-slash.js");
+    const raw = args.trim().length > 0 ? `/permission ${args.trim()}` : "/permission";
+    const outcome = dispatchPermissionSlash(raw, "user-keyboard");
+    if (outcome.kind === "parse-error") return `권한 명령 오류: ${outcome.error}`;
+    if (outcome.kind === "show-current") {
+      const mode = this.deps.permissionManager?.getMode() ?? "default";
+      return `현재 권한 모드: ${mode}\nHook 상태: /permission hooks list`;
+    }
+    if (outcome.kind !== "hooks") {
+      return "이 경로에서는 /permission hooks <list|accept|disable> 만 처리합니다.";
+    }
+
+    const result = await dispatchPermissionHooksCommand(outcome.cmd, {
+      ...this.deps.hookTrustCommandOptions,
+      manager: this.deps.scriptHookManager,
+    });
+    if (!result.ok) return `Hook trust 오류: ${result.error}`;
+    if (result.verb === "list") {
+      const active = result.active.length === 0
+        ? "- active: 없음"
+        : result.active.map((h) => `- active ${h.fileName} [${h.state}]`).join("\n");
+      const disabled = result.disabled.length === 0
+        ? "- disabled: 없음"
+        : result.disabled.map((h) => `- disabled ${h.fileName}`).join("\n");
+      return `Hook trust 상태\n${active}\n${disabled}`;
+    }
+    if (result.verb === "accept") {
+      return `Hook 신뢰 등록됨: ${result.accepted.fileName}\ntrusted=${result.trusted.length}`;
+    }
+    return `Hook 비활성화됨: ${result.disabled.fileName}\ntrusted=${result.trusted.length}`;
   }
 
   // PR-2-F-2: 3-tier rotation 폐지 — Layer 0/2/3 가 same-session checkpoint chain

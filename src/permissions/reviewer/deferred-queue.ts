@@ -124,6 +124,12 @@ export class DeferredQueue {
     return this.entries!.length;
   }
 
+  /** Return a queue entry by id without mutating it. */
+  get(id: string): DeferredEntry | null {
+    this.ensureLoaded();
+    return this.entries!.find((entry) => entry.id === id) ?? null;
+  }
+
   /**
    * Resolve a pending entry. Rewrites the file to persist the new
    * status. Returns the resolved entry for caller's audit-write step.
@@ -161,18 +167,15 @@ export class DeferredQueue {
     await withFileLock(this.filePath, async () => {
       mkdirSync(dirname(this.filePath), { recursive: true, mode: 0o700 });
       const line = JSON.stringify(entry) + "\n";
-      const newFile = !existsSync(this.filePath);
       // O(1) append — previous implementation read+rewrote the entire
       // file (O(n) per append). The full-rewrite path remains in
       // rewriteFromMemory() for resolve operations that mutate
       // existing entries.
       appendFileSync(this.filePath, line, { encoding: "utf-8", mode: 0o600 });
-      if (newFile) {
-        try {
-          chmodSync(this.filePath, 0o600);
-        } catch {
-          // Non-fatal — chmod failure must not block queue writes.
-        }
+      try {
+        chmodSync(this.filePath, 0o600);
+      } catch {
+        // Non-fatal — chmod failure must not block queue writes.
       }
     });
   }
@@ -184,6 +187,11 @@ export class DeferredQueue {
         this.entries!.map((e) => JSON.stringify(e)).join("\n") +
         (this.entries!.length > 0 ? "\n" : "");
       writeFileSync(this.filePath, body, { encoding: "utf-8", mode: 0o600 });
+      try {
+        chmodSync(this.filePath, 0o600);
+      } catch {
+        // Non-fatal — chmod failure must not block queue writes.
+      }
     });
   }
 }

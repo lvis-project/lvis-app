@@ -3,8 +3,10 @@
  * Covers: lvis:permission:*, lvis:approval:*, lvis:policy:*
  */
 import { ipcMain } from "electron";
+import { randomUUID } from "node:crypto";
 import { loadPolicy, savePolicy } from "../../permissions/policy-store.js";
 import type { ApprovalDecision } from "../../permissions/approval-gate.js";
+import { PERMISSIONS_Q12 } from "../../shared/ipc-channels.js";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import type { IpcDeps } from "../types.js";
 
@@ -93,10 +95,10 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
 
   // ── Q12 P3 — `/permission reviewer` slash dispatcher (IPC) ─────
   ipcMain.handle(
-    "lvis:permissions:reviewer-dispatch",
+    PERMISSIONS_Q12.reviewerDispatch,
     async (e, args: { rawArgs: string }) => {
       if (!validateSender(e)) {
-        auditUnauthorized(auditLogger, "lvis:permissions:reviewer-dispatch", e);
+        auditUnauthorized(auditLogger, PERMISSIONS_Q12.reviewerDispatch, e);
         return UNAUTHORIZED_FRAME;
       }
       const { parsePermissionReviewerCommand, dispatchPermissionReviewerCommand } =
@@ -110,9 +112,9 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
   // ── Q12 P3 — deferred queue surface ────────────────────────────
   // Returns DLP-redacted tool inputs + verdicts; gated to prevent a
   // compromised foreign frame from harvesting them (Copilot round 3).
-  ipcMain.handle("lvis:permissions:deferred-list", async (e) => {
+  ipcMain.handle(PERMISSIONS_Q12.deferredList, async (e) => {
     if (!validateSender(e)) {
-      auditUnauthorized(auditLogger, "lvis:permissions:deferred-list", e);
+      auditUnauthorized(auditLogger, PERMISSIONS_Q12.deferredList, e);
       return UNAUTHORIZED_FRAME;
     }
     const pm = conversationLoop.permissionManager;
@@ -124,13 +126,13 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
   // Resolve a pending entry — gated. The renderer's button click
   // dispatches with `decision` ∈ {"approved","rejected"}.
   ipcMain.handle(
-    "lvis:permissions:deferred-resolve",
+    PERMISSIONS_Q12.deferredResolve,
     async (
       e,
       params: { id: string; decision: "approved" | "rejected"; reason?: string },
     ) => {
       if (!validateSender(e)) {
-        auditUnauthorized(auditLogger, "lvis:permissions:deferred-resolve", e);
+        auditUnauthorized(auditLogger, PERMISSIONS_Q12.deferredResolve, e);
         return UNAUTHORIZED_FRAME;
       }
       if (
@@ -143,8 +145,27 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
       const pm = conversationLoop.permissionManager;
       const queue = pm?.getDeferredQueue();
       if (!queue) return { ok: false, error: "no-deferred-queue" };
+      const current = queue.get(params.id);
+      if (!current) return { ok: false, error: "not-found" };
+      if (current.status !== "pending") return { ok: true, entry: current };
+      if (!auditLogger.isQ12ChainReady()) {
+        return { ok: false, error: "q12-audit-not-ready" };
+      }
       const resolved = await queue.resolve(params.id, params.decision, params.reason);
       if (!resolved) return { ok: false, error: "not-found" };
+      await auditLogger.appendQ12Entry({
+        decision: "deferred_resolve",
+        auditId: randomUUID(),
+        ts: resolved.resolvedAt ?? new Date().toISOString(),
+        trustOrigin: "user-keyboard",
+        tool: resolved.toolName,
+        source: resolved.source,
+        category: resolved.category,
+        reviewerVerdict: resolved.verdict,
+        queueId: resolved.id,
+        resolution: params.decision,
+        ...(params.reason ? { reason: params.reason } : {}),
+      });
       return { ok: true, entry: resolved };
     },
   );
@@ -154,10 +175,10 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
   // metadata; gated so foreign frames cannot harvest them (Copilot
   // round 3).
   ipcMain.handle(
-    "lvis:permissions:audit-show",
+    PERMISSIONS_Q12.auditShow,
     async (e, args: { last?: number }) => {
       if (!validateSender(e)) {
-        auditUnauthorized(auditLogger, "lvis:permissions:audit-show", e);
+        auditUnauthorized(auditLogger, PERMISSIONS_Q12.auditShow, e);
         return UNAUTHORIZED_FRAME;
       }
       const last = Math.max(1, Math.min(1000, Math.floor(args?.last ?? 50)));
@@ -171,9 +192,9 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
     },
   );
 
-  ipcMain.handle("lvis:permissions:audit-verify", async (e) => {
+  ipcMain.handle(PERMISSIONS_Q12.auditVerify, async (e) => {
     if (!validateSender(e)) {
-      auditUnauthorized(auditLogger, "lvis:permissions:audit-verify", e);
+      auditUnauthorized(auditLogger, PERMISSIONS_Q12.auditVerify, e);
       return UNAUTHORIZED_FRAME;
     }
     const { verifyAllAuditFiles } = await import(
