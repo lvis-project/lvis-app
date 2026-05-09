@@ -461,6 +461,55 @@ const api = {
     readUiResource: async (serverId: string, uri: string) => ipcRenderer.invoke("lvis:mcp:ui-resource", serverId, uri) as Promise<string>,
   },
 
+  // ─── Hooks (Q12 P4 Layer 6 — TOFU trust prompt) ─────────────────
+  hooks: {
+    /** main → renderer push: a new trust prompt is pending. */
+    onTrustPrompt: (
+      handler: (
+        payload: {
+          id: string;
+          files: Array<{
+            fileName: string;
+            state: "new" | "changed" | "trusted" | "removed";
+            sha256: string;
+            previousSha256?: string;
+          }>;
+        },
+      ) => void,
+    ) => {
+      const listener = (_e: unknown, payload: Parameters<typeof handler>[0]) =>
+        handler(payload);
+      ipcRenderer.on("lvis:hooks:trust-prompt", listener);
+      return () => ipcRenderer.removeListener("lvis:hooks:trust-prompt", listener);
+    },
+    /** Late-mount fetch: returns the pending request when the modal mounts after boot. */
+    current: async () => ipcRenderer.invoke("lvis:hooks:current") as Promise<
+      | {
+          id: string;
+          files: Array<{
+            fileName: string;
+            state: "new" | "changed" | "trusted" | "removed";
+            sha256: string;
+            previousSha256?: string;
+          }>;
+        }
+      | null
+    >,
+    /** Per-file accept. `trustedFileNames` is the user's whitelist; everything
+     * else in the diff is implicit reject. */
+    accept: async (id: string, trustedFileNames: string[]) =>
+      ipcRenderer.invoke("lvis:hooks:accept", {
+        id,
+        trustedFileNames,
+      }) as Promise<{ ok: boolean; error?: string }>,
+    /** Reject the entire pending diff (auto-disable everything). */
+    rejectAll: async (id: string) =>
+      ipcRenderer.invoke("lvis:hooks:reject-all", { id }) as Promise<{
+        ok: boolean;
+        error?: string;
+      }>,
+  },
+
   // ─── Permission ───────────────────────────────────
   permission: {
     getMode: async () => ipcRenderer.invoke("lvis:permission:get-mode"),
