@@ -94,12 +94,19 @@ export interface RoutineRecord {
   /**
    * Q12 Layer 4 scope — plugin allow-list, forced plugin set, and
    * extra directories permitted during this routine's headless session.
-   * Missing means inherit-the-active-set (boot-time normalized).
+   *
+   * Missing scope → deny-all (fail-safe per Q12 design §1). The
+   * runtime normalizer in `RoutineEngineV2.normalizeScope` and the
+   * legacy migration in `migrateLegacyAllowedPlugins` both coerce a
+   * missing/undefined scope into `{ pluginIds: { mode: "deny-all" } }`
+   * rather than `inherit`, so a routine that never declared scope
+   * cannot accidentally see the user's currently-active plugin set.
    *
    * Disk format compat: a routine record persisted before Q12 Phase 2
    * may carry a flat `allowedPlugins?: string[]` instead. The store's
-   * read path normalizes legacy `[]`/non-empty/missing into the
-   * discriminated union shape on first load.
+   * read path normalizes legacy `[]`/non-empty into the discriminated
+   * union shape on first load. Missing/tampered legacy values also
+   * coerce to deny-all.
    */
   scope?: RoutineScope;
   createdAt: string;
@@ -123,7 +130,12 @@ export interface AddRoutineInput {
   /**
    * Q12 Layer 4 scope — see {@link RoutineScope}. When omitted, the
    * store fills `pluginIds: { mode: "inherit" }` and empty defaults
-   * for the rest, matching the legacy "no allowlist provided" behavior.
+   * for the rest. The runtime engine then snapshots the active plugin
+   * set at fire time. A caller that wants the safer "no plugins"
+   * default should pass `{ pluginIds: { mode: "deny-all" }, ... }`
+   * explicitly. Missing scope on a *persisted* legacy record (no
+   * input layer involved) is treated as deny-all by the migration —
+   * see RoutineRecord.scope.
    */
   scope?: RoutineScope;
 }
