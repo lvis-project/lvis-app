@@ -20,8 +20,14 @@ import type { IpcDeps } from "../types.js";
 export function registerHooksHandlers(deps: IpcDeps): void {
   const { auditLogger } = deps;
 
-  // read-only — late-mount UI fetches the current pending diff.
-  ipcMain.handle("lvis:hooks:current", () => {
+  // Returns the pending hook diff (filenames + script hashes); gated
+  // so a compromised foreign frame cannot enumerate the hook surface
+  // (Copilot round 3).
+  ipcMain.handle("lvis:hooks:current", (e) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, "lvis:hooks:current", e);
+      return UNAUTHORIZED_FRAME;
+    }
     return hookTrustResolverRegistry.current();
   });
 
