@@ -23,6 +23,10 @@ import {
   addAllowedDirectoryPersist,
   removeAllowedDirectoryPersist,
   readPermissionSettings,
+  setReviewerSettingsPersist,
+  type ReviewerMode,
+  type ReviewerProvider,
+  type ReviewerSettingsBlock,
 } from "./permission-settings-store.js";
 
 export type PermissionDirVerb = "allow" | "deny" | "list";
@@ -137,4 +141,134 @@ export async function dispatchPermissionDirCommand(
   // deny
   const next = await removeAllowedDirectoryPersist(cmd.path, pathOverride);
   return { ok: true, verb: "deny", persisted: next };
+}
+
+// ─── /permission reviewer slash ───────────────────────────────────────
+
+export type PermissionReviewerVerb = "mode" | "provider" | "model" | "show";
+
+export interface PermissionReviewerCommand {
+  verb: PermissionReviewerVerb;
+  /** For mode/provider/model: the new value. Empty string for `show`. */
+  value: string;
+}
+
+export type PermissionReviewerResult =
+  | { ok: true; verb: "show"; settings: ReviewerSettingsBlock }
+  | { ok: true; verb: "mode"; settings: ReviewerSettingsBlock }
+  | { ok: true; verb: "provider"; settings: ReviewerSettingsBlock }
+  | { ok: true; verb: "model"; settings: ReviewerSettingsBlock }
+  | { ok: false; error: string };
+
+const VALID_REVIEWER_MODES: ReadonlySet<ReviewerMode> = new Set([
+  "disabled",
+  "rule",
+  "llm",
+]);
+const VALID_REVIEWER_PROVIDERS: ReadonlySet<ReviewerProvider> = new Set([
+  "openai",
+  "anthropic",
+  "google",
+]);
+
+/**
+ * Parse `/permission reviewer ...` (the substring AFTER the prefix).
+ *
+ * Examples:
+ *   "show"
+ *   "mode disabled"
+ *   "mode rule"
+ *   "mode llm"
+ *   "provider openai"
+ *   "model gpt-4o-mini"
+ */
+export function parsePermissionReviewerCommand(
+  rawArgs: string,
+): PermissionReviewerCommand | { ok: false; error: string } {
+  const args = rawArgs.trim().split(/\s+/).filter((p) => p.length > 0);
+  if (args.length === 0) {
+    return {
+      ok: false,
+      error:
+        "missing subcommand — usage: /permission reviewer <show|mode|provider|model> [value]",
+    };
+  }
+  const verb = args[0] as PermissionReviewerVerb;
+  if (verb !== "mode" && verb !== "provider" && verb !== "model" && verb !== "show") {
+    return { ok: false, error: `unknown subcommand '${verb}' — expected show|mode|provider|model` };
+  }
+  if (verb === "show") {
+    if (args.length > 1) return { ok: false, error: "show takes no extra arguments" };
+    return { verb, value: "" };
+  }
+  if (args.length < 2) {
+    return { ok: false, error: `${verb} requires a value argument` };
+  }
+  if (args.length > 2) {
+    return { ok: false, error: `${verb} takes a single value (got ${args.length - 1})` };
+  }
+  return { verb, value: args[1] };
+}
+
+/**
+ * Dispatch a parsed reviewer command. Persists to ~/.lvis/settings.json
+ * via {@link setReviewerSettingsPersist}.
+ *
+ * `pathOverride` is for tests.
+ */
+export async function dispatchPermissionReviewerCommand(
+  cmd: PermissionReviewerCommand,
+  pathOverride?: string,
+): Promise<PermissionReviewerResult> {
+  if (cmd.verb === "show") {
+    const current = readPermissionSettings(pathOverride);
+    return { ok: true, verb: "show", settings: current.permissions.reviewer };
+  }
+  if (cmd.verb === "mode") {
+    if (!VALID_REVIEWER_MODES.has(cmd.value as ReviewerMode)) {
+      return {
+        ok: false,
+        error: `invalid mode '${cmd.value}' — expected ${[...VALID_REVIEWER_MODES].join("|")}`,
+      };
+    }
+    try {
+      const settings = await setReviewerSettingsPersist(
+        { mode: cmd.value as ReviewerMode },
+        pathOverride,
+      );
+      return { ok: true, verb: "mode", settings };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+  }
+  if (cmd.verb === "provider") {
+    if (!VALID_REVIEWER_PROVIDERS.has(cmd.value as ReviewerProvider)) {
+      return {
+        ok: false,
+        error: `invalid provider '${cmd.value}' — expected ${[...VALID_REVIEWER_PROVIDERS].join("|")}`,
+      };
+    }
+    try {
+      const settings = await setReviewerSettingsPersist(
+        { provider: cmd.value as ReviewerProvider },
+        pathOverride,
+      );
+      return { ok: true, verb: "provider", settings };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+  }
+  // model
+  if (cmd.value.length === 0) {
+    return { ok: false, error: "model name cannot be empty" };
+  }
+  try {
+    const settings = await setReviewerSettingsPersist(
+      { model: cmd.value },
+      pathOverride,
+    );
+    return { ok: true, verb: "model", settings };
+  } catch (err) {
+    return { ok: false, error: (err as Error).message };
+  }
 }
