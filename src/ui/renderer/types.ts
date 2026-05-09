@@ -574,7 +574,52 @@ export type LvisPermissionApi = {
   reviewerDispatch: (
     rawArgs: string,
   ) => Promise<{ ok: true; verb: string; settings?: unknown } | { ok: false; error: string }>;
+  /** Q12 P5 — `/permission audit show` — recent Q12 entries. */
+  auditShow: (last: number) => Promise<
+    | {
+        ok: true;
+        entries: Q12AuditEntrySummary[];
+        total: number;
+        summary: { files: number; bytes: number };
+      }
+    | { ok: false; error: string }
+  >;
+  /** Q12 P5 — `/permission audit verify` — HMAC chain integrity check. */
+  auditVerify: () => Promise<
+    | {
+        ok: true;
+        intact: boolean;
+        totalFiles: number;
+        totalEntries: number;
+        firstBrokenFile?: string;
+        perDay: Array<{
+          file: string;
+          totalLines: number;
+          chainOk: boolean;
+          firstBrokenLineIndex?: number;
+          reason?: string;
+          sealMatch: boolean | null;
+        }>;
+      }
+    | { ok: false; error: string }
+  >;
 };
+
+/**
+ * Q12 P5 — minimal audit entry shape surfaced to the renderer's
+ * `AuditPanel`. The full discriminated union (with `decision` field
+ * + per-decision payload) is sent verbatim — this type is just a
+ * structural tag the panel uses to gate the expand/filter UI.
+ */
+export interface Q12AuditEntrySummary {
+  ts: string;
+  auditId: string;
+  decision: string;
+  trustOrigin: string;
+  prevHash: string;
+  /** Anything else from the discriminated union — opaque to the renderer. */
+  [key: string]: unknown;
+}
 
 export type LvisPolicyApi = {
   get: () => Promise<{

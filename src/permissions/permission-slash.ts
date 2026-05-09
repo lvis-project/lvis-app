@@ -272,3 +272,267 @@ export async function dispatchPermissionReviewerCommand(
     return { ok: false, error: (err as Error).message };
   }
 }
+
+// ─── /permission audit ─────────────────────────────────────────────────
+
+export type PermissionAuditVerb = "show" | "verify";
+
+export interface PermissionAuditCommand {
+  verb: PermissionAuditVerb;
+  /** For `show`: how many entries to surface (default 50, max 1000). */
+  last: number;
+}
+
+/**
+ * Parse `/permission audit ...` (the substring AFTER the prefix).
+ *
+ * Examples:
+ *   "show"
+ *   "show --last=100"
+ *   "verify"
+ */
+export function parsePermissionAuditCommand(
+  rawArgs: string,
+): PermissionAuditCommand | { ok: false; error: string } {
+  const args = rawArgs.trim().split(/\s+/).filter((p) => p.length > 0);
+  if (args.length === 0) {
+    return { ok: false, error: "missing subcommand — usage: /permission audit <show|verify> [--last=N]" };
+  }
+  const verb = args[0] as PermissionAuditVerb;
+  if (verb !== "show" && verb !== "verify") {
+    return { ok: false, error: `unknown subcommand '${verb}' — expected show|verify` };
+  }
+  let last = 50;
+  for (const arg of args.slice(1)) {
+    const m = arg.match(/^--last=(\d+)$/);
+    if (m) {
+      const parsed = Number(m[1]);
+      if (!Number.isFinite(parsed) || parsed < 1) {
+        return { ok: false, error: `--last must be a positive integer (got ${m[1]})` };
+      }
+      last = Math.min(parsed, 1000);
+      continue;
+    }
+    return { ok: false, error: `unknown flag '${arg}'` };
+  }
+  if (verb === "verify" && last !== 50) {
+    return { ok: false, error: "--last is only valid for 'show'" };
+  }
+  return { verb, last };
+}
+
+// ─── /permission mode ──────────────────────────────────────────────────
+
+export type SlashPermissionMode = "strict" | "default" | "auto";
+
+export interface PermissionModeCommand {
+  verb: "mode";
+  mode: SlashPermissionMode;
+  durable: boolean;
+}
+
+const VALID_MODES: ReadonlySet<SlashPermissionMode> = new Set([
+  "strict",
+  "default",
+  "auto",
+]);
+
+export function parsePermissionModeCommand(
+  rawArgs: string,
+): PermissionModeCommand | { ok: false; error: string } {
+  const args = rawArgs.trim().split(/\s+/).filter((p) => p.length > 0);
+  if (args.length === 0) {
+    return {
+      ok: false,
+      error: "missing mode — usage: /permission mode <strict|default|auto> [--durable]",
+    };
+  }
+  const candidate = args[0] as SlashPermissionMode;
+  if (!VALID_MODES.has(candidate)) {
+    return {
+      ok: false,
+      error: `invalid mode '${candidate}' — expected ${[...VALID_MODES].join("|")}`,
+    };
+  }
+  const durable = args.includes("--durable");
+  const extra = args.slice(1).filter((a) => a !== "--durable");
+  if (extra.length > 0) {
+    return { ok: false, error: `unknown extra argument(s): ${extra.join(", ")}` };
+  }
+  return { verb: "mode", mode: candidate, durable };
+}
+
+// ─── /permission rules / hooks ─────────────────────────────────────────
+
+export type PermissionRulesCommand = { verb: "rules"; sub: "list" };
+export type PermissionHooksCommand =
+  | { verb: "hooks"; sub: "list" }
+  | { verb: "hooks"; sub: "accept"; name: string }
+  | { verb: "hooks"; sub: "disable"; name: string };
+
+export function parsePermissionRulesCommand(
+  rawArgs: string,
+): PermissionRulesCommand | { ok: false; error: string } {
+  const args = rawArgs.trim().split(/\s+/).filter((p) => p.length > 0);
+  if (args.length !== 1 || args[0] !== "list") {
+    return { ok: false, error: "usage: /permission rules list" };
+  }
+  return { verb: "rules", sub: "list" };
+}
+
+export function parsePermissionHooksCommand(
+  rawArgs: string,
+): PermissionHooksCommand | { ok: false; error: string } {
+  const args = rawArgs.trim().split(/\s+/).filter((p) => p.length > 0);
+  if (args.length === 0) {
+    return { ok: false, error: "usage: /permission hooks <list|accept|disable> [name]" };
+  }
+  const sub = args[0];
+  if (sub === "list") {
+    if (args.length > 1) return { ok: false, error: "list takes no extra arguments" };
+    return { verb: "hooks", sub: "list" };
+  }
+  if (sub === "accept" || sub === "disable") {
+    if (args.length !== 2) {
+      return { ok: false, error: `${sub} requires a hook name` };
+    }
+    return { verb: "hooks", sub, name: args[1] };
+  }
+  return { ok: false, error: `unknown subcommand '${sub}' — expected list|accept|disable` };
+}
+
+// ─── Top-level /permission dispatcher (trust-origin gated) ─────────────
+
+/**
+ * Q12 P5 — trust-origin set as defined in spec §9. Slash dispatch
+ * is gated on `user-keyboard` only; everything else short-circuits
+ * to plain-text echo (per spec §3 Layer 8).
+ */
+export type SlashTrustOrigin =
+  | "user-keyboard"
+  | "plugin-emitted"
+  | "llm-tool-arg"
+  | "file-content"
+  | "unknown";
+
+/**
+ * Top-level dispatch result. The renderer's slash handler turns
+ * this into either a parsed command + side-effect, a modal
+ * confirmation request (durable mutations), or plain-text echo.
+ */
+export type PermissionSlashOutcome =
+  | { kind: "rejected-non-user-origin"; sanitized: string }
+  | { kind: "show-current"; needsModal: false }
+  | { kind: "audit"; cmd: PermissionAuditCommand; needsModal: false }
+  | { kind: "dir"; cmd: PermissionDirCommand; needsModal: false }
+  | { kind: "reviewer"; cmd: PermissionReviewerCommand; needsModal: false }
+  | { kind: "mode"; cmd: PermissionModeCommand; needsModal: boolean }
+  | { kind: "rules"; cmd: PermissionRulesCommand; needsModal: false }
+  | { kind: "hooks"; cmd: PermissionHooksCommand; needsModal: boolean }
+  | { kind: "parse-error"; error: string };
+
+/**
+ * Strip the leading slash from a non-user-origin string so the chat
+ * doesn't mis-render it as a slash hint. Only the *first* `/` is
+ * stripped to preserve URL-like content (`/path/to/x`).
+ */
+export function stripLeadingSlash(input: string): string {
+  return input.startsWith("/") ? input.slice(1) : input;
+}
+
+/**
+ * Q12 P5 — central dispatcher entry point. The renderer calls this
+ * with the raw input string + the propagated trust origin. The
+ * dispatcher's contract:
+ *
+ *   1. If trustOrigin !== "user-keyboard" → return rejected with
+ *      a sanitized version (leading `/` stripped, per spec §3 Layer 8).
+ *   2. If the input doesn't start with `/permission` → caller-error
+ *      (the dispatcher is only reached when the prefix matched).
+ *   3. Otherwise parse the subcommand and return an outcome that
+ *      tells the caller whether a modal confirmation is required
+ *      (durable mode change, durable hook accept).
+ */
+export function dispatchPermissionSlash(
+  rawInput: string,
+  trustOrigin: SlashTrustOrigin,
+): PermissionSlashOutcome {
+  if (trustOrigin !== "user-keyboard") {
+    return {
+      kind: "rejected-non-user-origin",
+      sanitized: stripLeadingSlash(rawInput),
+    };
+  }
+  const trimmed = rawInput.trim();
+  if (trimmed === "/permission") {
+    return { kind: "show-current", needsModal: false };
+  }
+  if (!trimmed.startsWith("/permission ")) {
+    return {
+      kind: "parse-error",
+      error: "input does not match /permission ... grammar",
+    };
+  }
+  const remainder = trimmed.slice("/permission ".length).trim();
+  const head = remainder.split(/\s+/, 1)[0];
+  const tail = remainder.slice(head.length).trim();
+
+  switch (head) {
+    case "audit": {
+      const parsed = parsePermissionAuditCommand(tail);
+      if ("ok" in parsed && parsed.ok === false) {
+        return { kind: "parse-error", error: parsed.error };
+      }
+      return { kind: "audit", cmd: parsed as PermissionAuditCommand, needsModal: false };
+    }
+    case "dir": {
+      const parsed = parsePermissionDirCommand(tail);
+      if ("ok" in parsed && parsed.ok === false) {
+        return { kind: "parse-error", error: parsed.error };
+      }
+      return { kind: "dir", cmd: parsed as PermissionDirCommand, needsModal: false };
+    }
+    case "reviewer": {
+      const parsed = parsePermissionReviewerCommand(tail);
+      if ("ok" in parsed && parsed.ok === false) {
+        return { kind: "parse-error", error: parsed.error };
+      }
+      return { kind: "reviewer", cmd: parsed as PermissionReviewerCommand, needsModal: false };
+    }
+    case "mode": {
+      const parsed = parsePermissionModeCommand(tail);
+      if ("ok" in parsed && parsed.ok === false) {
+        return { kind: "parse-error", error: parsed.error };
+      }
+      // Durable mutations require modal confirmation regardless of
+      // origin (spec §3 Layer 8 — even from user-keyboard, durable
+      // changes need an explicit button click).
+      return {
+        kind: "mode",
+        cmd: parsed as PermissionModeCommand,
+        needsModal: (parsed as PermissionModeCommand).durable,
+      };
+    }
+    case "rules": {
+      const parsed = parsePermissionRulesCommand(tail);
+      if ("ok" in parsed && parsed.ok === false) {
+        return { kind: "parse-error", error: parsed.error };
+      }
+      return { kind: "rules", cmd: parsed as PermissionRulesCommand, needsModal: false };
+    }
+    case "hooks": {
+      const parsed = parsePermissionHooksCommand(tail);
+      if ("ok" in parsed && parsed.ok === false) {
+        return { kind: "parse-error", error: parsed.error };
+      }
+      const cmd = parsed as PermissionHooksCommand;
+      // accept/disable mutate trust state — modal confirmation.
+      return { kind: "hooks", cmd, needsModal: cmd.sub !== "list" };
+    }
+    default:
+      return {
+        kind: "parse-error",
+        error: `unknown subcommand '${head}' — expected mode|dir|reviewer|rules|hooks|audit`,
+      };
+  }
+}
