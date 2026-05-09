@@ -9,8 +9,11 @@ beforeEach(() => {
 });
 
 describe("PermissionModeBadge", () => {
-  it("renders unknown when no mode override and no fetcher", async () => {
-    // No window.lvis present + no fetcher → falls back to unknown.
+  it("renders the explicit unknown mode prop without invoking a fetcher", async () => {
+    // Description aligned with setup: caller passes `mode="unknown"`
+    // explicitly, exercising the prop-override branch (no fetch / no
+    // subscribe). The original copy claimed "no mode override" which
+    // contradicted the `mode="unknown"` prop being supplied.
     let component: ReturnType<typeof render>;
     await act(async () => {
       component = render(<PermissionModeBadge mode="unknown" />);
