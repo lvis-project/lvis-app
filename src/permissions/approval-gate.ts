@@ -54,9 +54,21 @@ function maskArgsForDisplay(value: unknown, detections: Set<string>): unknown {
  */
 export type ApprovalMode = "default" | "plan" | "full_auto";
 
+/**
+ * Q12 P2.5 — discriminated kinds for the approval modal. Default `"tool"`
+ * is the normal §6.3 Layer 3 ask; `"out-of-allowed-dir"` is the Layer 1
+ * directory-confirm variant which carries auto-suggest payload.
+ */
+export type ApprovalKind = "tool" | "out-of-allowed-dir";
+
 export interface ApprovalRequest {
   id: string;
   category: "tool";
+  /**
+   * Q12 P2.5 — discriminator for the renderer to pick the right card.
+   * Defaults to `"tool"` when omitted (backwards-compatible).
+   */
+  kind?: ApprovalKind;
   toolName: string;
   args: unknown;
   reason: string;
@@ -64,6 +76,23 @@ export interface ApprovalRequest {
   createdAt: number;
   /** PolicyFile.requireExplicitApproval — renderer가 dismiss 동작을 분기하는 데 사용 */
   requireExplicit: boolean;
+  /**
+   * Q12 P2.5 — Layer 1 directory-confirm payload. Present iff
+   * `kind === "out-of-allowed-dir"`. Carries the candidate parent path
+   * + adjacency warnings so the renderer can render the auto-suggest
+   * UI without re-running validation.
+   */
+  outOfAllowedDir?: {
+    candidatePath: string;
+    suggestedParent: string | null;
+    currentAllowed: readonly string[];
+    adjacencyWarnings: readonly string[];
+  };
+  /**
+   * Q12 P2.5 §9 — trust origin classification (user / system / plugin /
+   * proactive / routine / agent). Audited; renderer may surface badge.
+   */
+  trustOrigin?: string;
   /**
    * §S1: absolute filesystem path the tool intends to touch. When set and
    * matched against SENSITIVE_PATH_PATTERNS, the request is hard-blocked
@@ -303,7 +332,15 @@ export class ApprovalGate {
     // §S4: isReadOnly short-circuit — if the tool self-declares read-only
     // and we are NOT in plan mode, skip the confirmation dialog. Plan
     // mode still blocks (plan = dry-run / inspect only).
-    if (fullReq.isReadOnly === true && fullReq.mode !== "plan") {
+    //
+    // Q12 P2.5: directory-confirm requests (kind="out-of-allowed-dir")
+    // MUST NOT auto-approve via §S4 — even a read of an out-of-allowed
+    // path is a scope-grant decision the user has to make explicitly.
+    if (
+      fullReq.isReadOnly === true &&
+      fullReq.mode !== "plan" &&
+      fullReq.kind !== "out-of-allowed-dir"
+    ) {
       this.auditLogger?.log({
         timestamp: new Date().toISOString(),
         sessionId: "approval-gate",
