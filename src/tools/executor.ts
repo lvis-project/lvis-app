@@ -78,6 +78,15 @@ function resolveInvocationCategory(
   finalInput: Record<string, unknown>,
 ): ToolCategory {
   if (tool.category === "dangerous") return "dangerous";
+  // Trust boundary: plugin tools must NOT decide their own policy axis at
+  // invocation time. The plugin's `isReadOnly()` runs plugin-controlled code
+  // and could falsely classify a write operation as read to bypass approval.
+  // For plugins, the static manifest `category` (validated at install time
+  // via manifest-validation.ts) is the only authoritative signal.
+  if (tool.source === "plugin") {
+    return tool.category === "read" ? "read" : "write";
+  }
+  // Built-in tools: input-aware classification is safe — host code is trusted.
   try {
     return tool.isReadOnly(finalInput) ? "read" : "write";
   } catch (err) {
