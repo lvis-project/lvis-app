@@ -534,12 +534,46 @@ export type RemoveRuleResult =
   | { ok: true }
   | { ok: false; error: string; message?: string };
 
+/** Q12 P3 — deferred-queue entry shape mirrored from main process. */
+export interface DeferredQueueEntry {
+  id: string;
+  ts: string;
+  toolName: string;
+  source: "builtin" | "plugin" | "mcp";
+  category: "read" | "write" | "shell" | "network" | "meta";
+  inputSummary: string;
+  verdict: { level: "low" | "medium" | "high"; reason: string };
+  status: "pending" | "approved" | "rejected";
+  resolvedAt?: string;
+  resolutionReason?: string;
+}
+
 export type LvisPermissionApi = {
   getMode: () => Promise<{ mode: string }>;
   setMode: (mode: string) => Promise<{ ok: boolean; mode: string }>;
   listRules: () => Promise<PermissionRule[]>;
   addRule: (pattern: string, action: "allow" | "deny") => Promise<AddRuleResult>;
   removeRule: (pattern: string, action: "allow" | "deny") => Promise<RemoveRuleResult>;
+  /** Q12 P3 — list pending HIGH-risk deferred entries (Layer 5 reviewer). */
+  deferredList: () => Promise<
+    | { ok: true; pending: DeferredQueueEntry[]; total: number }
+    | { ok: false; error: string }
+  >;
+  /** Q12 P3 — resolve a pending entry with user gesture. */
+  deferredResolve: (
+    id: string,
+    decision: "approved" | "rejected",
+    reason?: string,
+  ) => Promise<
+    | { ok: true; entry: DeferredQueueEntry }
+    | { ok: false; error: string }
+  >;
+  /** Q12 P3 — subscribe to foreground-entry deferred-pending events. */
+  onDeferredPending: (cb: (summary: { pending: number }) => void) => () => void;
+  /** Q12 P3 — `/permission reviewer ...` slash dispatch. */
+  reviewerDispatch: (
+    rawArgs: string,
+  ) => Promise<{ ok: true; verb: string; settings?: unknown } | { ok: false; error: string }>;
 };
 
 export type LvisPolicyApi = {
