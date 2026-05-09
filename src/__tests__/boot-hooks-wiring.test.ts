@@ -1,5 +1,5 @@
 /**
- * Q12 boot hook wiring regression.
+ * Permission policy boot hook wiring regression.
  *
  * Production boot must not load legacy hooks.json command/http hooks. The
  * single external hook path is wireHookSystem() with discrete pre/post/perm

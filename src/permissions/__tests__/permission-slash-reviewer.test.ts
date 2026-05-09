@@ -1,5 +1,5 @@
 /**
- * Q12 Phase 3 — `/permission reviewer` slash + settings persistence tests.
+ * Permission policy Phase 3 — `/permission reviewer` slash + settings persistence tests.
  */
 import { describe, it, expect } from "vitest";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";

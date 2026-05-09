@@ -1,7 +1,7 @@
 /**
- * Q12 Phase 2.5 — out-of-allowed-dir approval card.
+ * Permission policy Phase 2.5 — out-of-allowed-dir approval card.
  *
- * Spec ref: docs/architecture/q12-permission-policy-design.md §3 Layer 1.
+ * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 1.
  *
  * Renderer routes here when `ApprovalRequest.kind === "out-of-allowed-dir"`.
  * UX rules (security review M3 strengthening):
@@ -41,7 +41,7 @@ interface OutOfAllowedDirCardProps {
 }
 
 /**
- * Q12 P2.5 — derive the basename for the re-typed confirmation prompt.
+ * Permission policy P2.5 — derive the basename for the re-typed confirmation prompt.
  * If `suggestedParent` is null we use the candidate path so the user
  * still has a deterministic name to confirm.
  *

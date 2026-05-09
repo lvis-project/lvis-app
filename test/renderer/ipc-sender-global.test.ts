@@ -12,7 +12,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it, expect } from "vitest";
 import { validateSender } from "../../src/ipc-bridge.js";
-import { OVERLAY_V1, PERMISSIONS_Q12, ROUTINES_V2 } from "../../src/shared/ipc-channels.js";
+import { OVERLAY_V1, PERMISSIONS, ROUTINES_V2 } from "../../src/shared/ipc-channels.js";
 import type { IpcMainInvokeEvent } from "electron";
 
 // ─── Channel manifest ────────────────────────────────────────────────────────
@@ -65,11 +65,12 @@ const CHANNEL_MANIFEST: Record<string, "tier1" | "tier2" | "tier3"> = {
   "lvis:permission:list-rules": "tier3",
   "lvis:permission:add-rule": "tier1",
   "lvis:permission:remove-rule": "tier1",
-  [PERMISSIONS_Q12.reviewerDispatch]: "tier2",
-  [PERMISSIONS_Q12.deferredList]: "tier2",
-  [PERMISSIONS_Q12.deferredResolve]: "tier1",
-  [PERMISSIONS_Q12.auditShow]: "tier2",
-  [PERMISSIONS_Q12.auditVerify]: "tier2",
+  [PERMISSIONS.reviewerDispatch]: "tier2",
+  [PERMISSIONS.deferredList]: "tier2",
+  [PERMISSIONS.deferredResolve]: "tier1",
+  [PERMISSIONS.auditShow]: "tier2",
+  [PERMISSIONS.auditVerify]: "tier2",
+  [PERMISSIONS.hookTrustList]: "tier2",
   // Approval
   "lvis:approval:respond": "tier1",
   // Policy
@@ -189,11 +190,12 @@ describe("ipc-bridge.ts — TIER 1/2 channels have validateSender guard", () => 
     "lvis:routines:v2:list-sessions": "ROUTINES_V2.listSessions",
     "lvis:routines:v2:read-session": "ROUTINES_V2.readSession",
     "lvis:overlay:primary-action": "OVERLAY_V1.primaryAction",
-    [PERMISSIONS_Q12.reviewerDispatch]: "PERMISSIONS_Q12.reviewerDispatch",
-    [PERMISSIONS_Q12.deferredList]: "PERMISSIONS_Q12.deferredList",
-    [PERMISSIONS_Q12.deferredResolve]: "PERMISSIONS_Q12.deferredResolve",
-    [PERMISSIONS_Q12.auditShow]: "PERMISSIONS_Q12.auditShow",
-    [PERMISSIONS_Q12.auditVerify]: "PERMISSIONS_Q12.auditVerify",
+    [PERMISSIONS.reviewerDispatch]: "PERMISSIONS.reviewerDispatch",
+    [PERMISSIONS.deferredList]: "PERMISSIONS.deferredList",
+    [PERMISSIONS.deferredResolve]: "PERMISSIONS.deferredResolve",
+    [PERMISSIONS.auditShow]: "PERMISSIONS.auditShow",
+    [PERMISSIONS.auditVerify]: "PERMISSIONS.auditVerify",
+    [PERMISSIONS.hookTrustList]: "PERMISSIONS.hookTrustList",
   };
   const escapeRegex = (value: string): string =>
     value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

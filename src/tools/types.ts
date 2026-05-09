@@ -16,9 +16,9 @@ export type ToolSource = "builtin" | "plugin" | "mcp";
 export type TrustLevel = "high" | "medium" | "low";
 
 /**
- * Q12 5-axis tool category. Replaces the legacy `read | write | dangerous`
+ * Permission policy 5-axis tool category. Replaces the legacy `read | write | dangerous`
  * binary-ish split with category-aware policy lanes (PermissionManager
- * Layer 3 decision matrix in q12-permission-policy-design.md):
+ * Layer 3 decision matrix in permission-policy-design.md):
  *
  * - `read`    — auto-allow for builtin, scope-checked for plugin
  * - `write`   — ask (user confirmation)
@@ -32,7 +32,7 @@ export type TrustLevel = "high" | "medium" | "low";
 export type ToolCategory = "read" | "write" | "shell" | "network" | "meta";
 
 /**
- * Q12 explicit decision override for `meta` category tools. When a tool's
+ * Permission policy explicit decision override for `meta` category tools. When a tool's
  * category is genuinely orthogonal to the standard policy lanes (a user
  * prompt is not a "write"; a sub-agent dispatch is its own primitive), the
  * tool declares `decisionOverride` and the executor takes that path
@@ -47,7 +47,7 @@ export type ToolCategory = "read" | "write" | "shell" | "network" | "meta";
 export type ToolDecisionOverride = "always-allow-with-audit" | "ask";
 
 /**
- * Q12 §9 trust origin — which actor produced the tool invocation. Carried
+ * Permission policy §9 trust origin — which actor produced the tool invocation. Carried
  * with `ToolPermissionContext` and propagated into:
  *   - audit entries (provenance evidence)
  *   - approval-request payloads (so the renderer can warn on agent/plugin)

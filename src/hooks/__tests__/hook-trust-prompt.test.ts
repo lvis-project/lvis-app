@@ -1,7 +1,7 @@
 /**
- * Q12 P4 Area B — TOFU workflow orchestrator tests.
+ * Permission policy P4 Area B — TOFU workflow orchestrator tests.
  *
- * Spec ref: docs/architecture/q12-permission-policy-design.md §3 Layer 6.
+ * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 6.
  */
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import {
@@ -29,7 +29,7 @@ let lockfilePath: string;
 let disabledDir: string;
 
 beforeEach(() => {
-  tmpDir = mkdtempSync(join(tmpdir(), "q12-p4-tofu-"));
+  tmpDir = mkdtempSync(join(tmpdir(), "permission-policy-p4-tofu-"));
   hooksDir = join(tmpDir, "hooks");
   lockfilePath = join(hooksDir, ".lockfile.json");
   disabledDir = join(hooksDir, ".disabled");
@@ -50,7 +50,7 @@ function makeDispatcher(decisions: TrustPromptDecision[]): TrustPromptDispatcher
   return { prompt: async () => decisions };
 }
 
-describe("Q12 P4 runHookTrustWorkflow", () => {
+describe("Permission policy P4 runHookTrustWorkflow", () => {
   it("creates the hooks directory when missing (atomic cutover, no warn)", async () => {
     const result = await runHookTrustWorkflow({ hooksDir, lockfilePath, disabledDir });
     expect(existsSync(hooksDir)).toBe(true);

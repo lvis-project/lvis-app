@@ -1,7 +1,7 @@
 /**
- * Q12 Phase 4 — Layer 6 hook runtime manager.
+ * Permission policy Phase 4 — Layer 6 hook runtime manager.
  *
- * Spec ref: docs/architecture/q12-permission-policy-design.md §3 Layer 6.
+ * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 6.
  *
  * Holds the trusted hook list at runtime and exposes
  * {@link runPreToolUse} / {@link runPostToolUse} / {@link runPermissionRequest}
@@ -13,7 +13,7 @@
  *     upstream layers allowed, hook deny wins.
  *   - {@link runPreToolUse} returns `decision: "allow"` when no hooks
  *     deny. Caller MUST NOT promote this allow over an upstream deny.
- *   - `modify` is **NOT** supported in v1 (Q13 once signing lands).
+ *   - `modify` is **NOT** supported in v1 (hook-signing follow-up once signing lands).
  */
 import type { DiscoveredHook } from "./hook-discovery.js";
 import { runHookChain, type RunOneHookOptions } from "./script-hook-runner.js";

@@ -38,12 +38,13 @@ export const ROUTINES_V2 = {
   failed: "lvis:routines:v2:failed",
 } as const;
 
-export const PERMISSIONS_Q12 = {
+export const PERMISSIONS = {
   reviewerDispatch: "lvis:permissions:reviewer-dispatch",
   deferredList: "lvis:permissions:deferred-list",
   deferredResolve: "lvis:permissions:deferred-resolve",
   deferredPending: "lvis:permissions:deferred-pending",
   auditShow: "lvis:permissions:audit-show",
   auditVerify: "lvis:permissions:audit-verify",
+  hookTrustList: "lvis:permissions:hook-trust-list",
   manifestViolation: "lvis:permissions:manifest-violation",
 } as const;

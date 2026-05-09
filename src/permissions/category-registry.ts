@@ -1,5 +1,5 @@
 /**
- * Q12 Layer 3 — Category Registry (Open-Closed pattern).
+ * Permission policy Layer 3 — Category Registry (Open-Closed pattern).
  *
  * Five canonical tool categories (`read | write | shell | network | meta`)
  * are described by {@link ToolCategoryDescriptor}s registered into a single
@@ -7,7 +7,7 @@
  * descriptor for the invocation's category and consults `decisionFor()`
  * for the {mode, source, headless} tuple.
  *
- * Design source: docs/architecture/q12-permission-policy-design.md §3
+ * Design source: docs/architecture/permission-policy-design.md §3
  * Layer 3 + decision matrix table.
  *
  * Why a registry instead of a giant switch — a single source of truth
@@ -75,7 +75,7 @@ export function clearCategoryRegistry(): void {
  * Standard 5-axis registration. Boot wires this once before any tool
  * registration so {@link getToolCategoryDescriptor} cannot miss.
  *
- * Decision lanes (q12-permission-policy-design.md §3 matrix table):
+ * Decision lanes (permission-policy-design.md §3 matrix table):
  *
  *   - read    — built-in: allow / plugin: allow (scope-checked elsewhere)
  *               strict mode forces ask. Headless reviewer if out-of-dir.

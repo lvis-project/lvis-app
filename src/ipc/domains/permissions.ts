@@ -6,7 +6,7 @@ import { ipcMain } from "electron";
 import { randomUUID } from "node:crypto";
 import { loadPolicy, savePolicy } from "../../permissions/policy-store.js";
 import type { ApprovalDecision } from "../../permissions/approval-gate.js";
-import { PERMISSIONS_Q12 } from "../../shared/ipc-channels.js";
+import { PERMISSIONS } from "../../shared/ipc-channels.js";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import type { IpcDeps } from "../types.js";
 
@@ -93,12 +93,12 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
     return loadPolicy();
   });
 
-  // ── Q12 P3 — `/permission reviewer` slash dispatcher (IPC) ─────
+  // ── Permission policy — `/permission reviewer` slash dispatcher (IPC) ─────
   ipcMain.handle(
-    PERMISSIONS_Q12.reviewerDispatch,
+    PERMISSIONS.reviewerDispatch,
     async (e, args: { rawArgs: string }) => {
       if (!validateSender(e)) {
-        auditUnauthorized(auditLogger, PERMISSIONS_Q12.reviewerDispatch, e);
+        auditUnauthorized(auditLogger, PERMISSIONS.reviewerDispatch, e);
         return UNAUTHORIZED_FRAME;
       }
       const { parsePermissionReviewerCommand, dispatchPermissionReviewerCommand } =
@@ -109,12 +109,12 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
     },
   );
 
-  // ── Q12 P3 — deferred queue surface ────────────────────────────
+  // ── Permission policy — deferred queue surface ────────────────────────────
   // Returns DLP-redacted tool inputs + verdicts; gated to prevent a
   // compromised foreign frame from harvesting them (Copilot round 3).
-  ipcMain.handle(PERMISSIONS_Q12.deferredList, async (e) => {
+  ipcMain.handle(PERMISSIONS.deferredList, async (e) => {
     if (!validateSender(e)) {
-      auditUnauthorized(auditLogger, PERMISSIONS_Q12.deferredList, e);
+      auditUnauthorized(auditLogger, PERMISSIONS.deferredList, e);
       return UNAUTHORIZED_FRAME;
     }
     const pm = conversationLoop.permissionManager;
@@ -123,16 +123,33 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
     return { ok: true, pending: queue.listPending(), total: queue.size() };
   });
 
+  ipcMain.handle(PERMISSIONS.hookTrustList, async (e) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, PERMISSIONS.hookTrustList, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    const { listHookTrustState } = await import(
+      "../../hooks/hook-trust-commands.js"
+    );
+    const state = listHookTrustState();
+    return {
+      ok: true,
+      active: state.active,
+      disabled: state.disabled,
+      totalDisabled: state.disabled.length,
+    };
+  });
+
   // Resolve a pending entry — gated. The renderer's button click
   // dispatches with `decision` ∈ {"approved","rejected"}.
   ipcMain.handle(
-    PERMISSIONS_Q12.deferredResolve,
+    PERMISSIONS.deferredResolve,
     async (
       e,
       params: { id: string; decision: "approved" | "rejected"; reason?: string },
     ) => {
       if (!validateSender(e)) {
-        auditUnauthorized(auditLogger, PERMISSIONS_Q12.deferredResolve, e);
+        auditUnauthorized(auditLogger, PERMISSIONS.deferredResolve, e);
         return UNAUTHORIZED_FRAME;
       }
       if (
@@ -148,12 +165,12 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
       const current = queue.get(params.id);
       if (!current) return { ok: false, error: "not-found" };
       if (current.status !== "pending") return { ok: true, entry: current };
-      if (!auditLogger.isQ12ChainReady()) {
-        return { ok: false, error: "q12-audit-not-ready" };
+      if (!auditLogger.isPermissionAuditChainReady()) {
+        return { ok: false, error: "permission-audit-not-ready" };
       }
       const resolved = await queue.resolve(params.id, params.decision, params.reason);
       if (!resolved) return { ok: false, error: "not-found" };
-      await auditLogger.appendQ12Entry({
+      await auditLogger.appendPermissionAuditEntry({
         decision: "deferred_resolve",
         auditId: randomUUID(),
         ts: resolved.resolvedAt ?? new Date().toISOString(),
@@ -170,15 +187,15 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
     },
   );
 
-  // ── Q12 P5 — `/permission audit show|verify` IPC handlers ─────
+  // ── Permission policy — `/permission audit show|verify` IPC handlers ─────
   // Audit entries can contain DLP-redacted tool inputs and decision
   // metadata; gated so foreign frames cannot harvest them (Copilot
   // round 3).
   ipcMain.handle(
-    PERMISSIONS_Q12.auditShow,
+    PERMISSIONS.auditShow,
     async (e, args: { last?: number }) => {
       if (!validateSender(e)) {
-        auditUnauthorized(auditLogger, PERMISSIONS_Q12.auditShow, e);
+        auditUnauthorized(auditLogger, PERMISSIONS.auditShow, e);
         return UNAUTHORIZED_FRAME;
       }
       const last = Math.max(1, Math.min(1000, Math.floor(args?.last ?? 50)));
@@ -192,22 +209,22 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
     },
   );
 
-  ipcMain.handle(PERMISSIONS_Q12.auditVerify, async (e) => {
+  ipcMain.handle(PERMISSIONS.auditVerify, async (e) => {
     if (!validateSender(e)) {
-      auditUnauthorized(auditLogger, PERMISSIONS_Q12.auditVerify, e);
+      auditUnauthorized(auditLogger, PERMISSIONS.auditVerify, e);
       return UNAUTHORIZED_FRAME;
     }
     const { verifyAllAuditFiles } = await import(
       "../../permissions/permission-audit-runner.js"
     );
-    const secret = auditLogger.getQ12Secret();
+    const secret = auditLogger.getPermissionAuditSecret();
     if (!secret) {
       return {
         ok: false,
         error: "audit-chain-not-initialized",
       };
     }
-    const sealStore = auditLogger.getQ12SealStore() ?? undefined;
+    const sealStore = auditLogger.getPermissionAuditSealStore() ?? undefined;
     const dir = auditLogger.getAuditDir();
     const result = verifyAllAuditFiles(dir, secret, sealStore);
     return {

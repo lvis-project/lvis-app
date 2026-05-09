@@ -50,7 +50,7 @@ export interface Tool {
   readonly source: ToolSource;
   readonly category?: ToolCategory;
   /**
-   * Q12 — declared only on `category === "meta"` tools. Tells the executor
+   * Permission policy — declared only on `category === "meta"` tools. Tells the executor
    * to take the explicit short-circuit path rather than the standard Layer 3
    * decision matrix. See {@link ToolDecisionOverride} for semantics.
    */
@@ -82,6 +82,14 @@ export interface Tool {
    * existing callers keep working through the deprecation window.
    */
   readonly replacedBy?: string;
+  /**
+   * Optional user-approval cache identity for authority-sensitive tools.
+   *
+   * The executor prefixes this with `tool.name:` before handing it to the
+   * permission manager. Tools that declare this opt out of bare tool-name
+   * "allow always" reuse because their arguments carry permission scope.
+   */
+  approvalCacheKey?(input: unknown): string;
 
   /** JSON Schema describing the input shape — sent to LLM providers. */
   toJsonSchema(): unknown;
@@ -172,6 +180,8 @@ export interface DynamicToolSpec {
   deprecatedSince?: string;
   /** §6.4 — replacement tool name; enables transparent redirect. */
   replacedBy?: string;
+  /** Permission policy #634 — per-tool approval cache identity. */
+  approvalCacheKey?: (input: unknown) => string;
   /** Raw JSON Schema — used when no Zod schema is available (plugin/MCP). */
   jsonSchema: object;
   execute: (
@@ -201,6 +211,7 @@ export function createDynamicTool(spec: DynamicToolSpec): Tool {
     version: spec.version ?? "1.0.0",
     deprecatedSince: spec.deprecatedSince,
     replacedBy: spec.replacedBy,
+    approvalCacheKey: spec.approvalCacheKey,
     toJsonSchema: () => spec.jsonSchema,
     isReadOnly: spec.isReadOnly ?? ((): boolean => false),
     execute: spec.execute,

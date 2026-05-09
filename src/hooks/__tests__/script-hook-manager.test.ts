@@ -1,7 +1,7 @@
 /**
- * Q12 P4 Area B — script-hook manager tests.
+ * Permission policy P4 Area B — script-hook manager tests.
  *
- * Spec ref: docs/architecture/q12-permission-policy-design.md §3 Layer 6.
+ * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 6.
  */
 import { describe, expect, it } from "vitest";
 import { resolve } from "node:path";
@@ -36,7 +36,7 @@ const basePayload: HookDispatchPayload = {
   trustOrigin: "user-keyboard",
 };
 
-describe("Q12 P4 ScriptHookManager", () => {
+describe("Permission policy P4 ScriptHookManager", () => {
   it("returns allow + zero hooks when nothing is loaded", async () => {
     const m = new ScriptHookManager();
     const out = await m.runPreToolUse(basePayload);
@@ -87,7 +87,7 @@ describe("Q12 P4 ScriptHookManager", () => {
   });
 });
 
-describe("Q12 P4 dlpRedactInput", () => {
+describe("Permission policy P4 dlpRedactInput", () => {
   it("masks email + phone in string fields", () => {
     const out = dlpRedactInput({
       to: "ken@lvis.example.com",

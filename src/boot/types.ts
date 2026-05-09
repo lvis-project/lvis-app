@@ -145,7 +145,7 @@ export interface AppServices {
    */
   notificationService?: NotificationService;
   /**
-   * Q12 P4 — Layer 6 hook system runtime. Holds the trusted-hook list
+   * Permission policy P4 — Layer 6 hook system runtime. Holds the trusted-hook list
    * resolved from `~/.config/lvis/hooks/` after boot-time hash verification
    * and any explicit `/permission hooks accept <name>` command. Executor /
    * approval-gate consult this for pre/post/perm hooks. Absent when the hooks

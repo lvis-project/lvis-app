@@ -66,7 +66,7 @@ function isValidRecord(r: unknown): r is RoutineRecord {
 }
 
 /**
- * Q12 Layer 4 — convert a legacy on-disk `allowedPlugins` (or absence)
+ * Permission policy Layer 4 — convert a legacy on-disk `allowedPlugins` (or absence)
  * into the canonical `scope` shape. Migration rules per design §3.4:
  *   - missing field          → `{ mode: "deny-all" }` (fail-safe)
  *   - empty array `[]`       → `{ mode: "deny-all" }`
@@ -96,7 +96,7 @@ function migrateLegacyAllowedPlugins(rec: RoutineRecord & { allowedPlugins?: unk
   const legacy = rec.allowedPlugins;
   let pluginIds: RoutineScope["pluginIds"];
   if (legacy === undefined) {
-    // Q12 §3 fail-safe: missing scope → deny-all rather than inherit
+    // Permission policy §3 fail-safe: missing scope → deny-all rather than inherit
     // (parity with normalizeScope at runtime; covers boot-time race
     // where active plugin set isn't computable yet).
     pluginIds = { mode: "deny-all" };
@@ -170,7 +170,7 @@ async function readFileOrEmpty(filePath: string): Promise<RoutinesFile> {
     }
     // Filter out tampered/corrupted records so a single bad entry cannot
     // cause the scheduler tick to throw and stall all other routines.
-    // Q12 Layer 4 — migrate legacy `allowedPlugins` to `scope` shape on read.
+    // Permission policy Layer 4 — migrate legacy `allowedPlugins` to `scope` shape on read.
     return {
       version: 2,
       routines: parsed.routines
@@ -310,7 +310,7 @@ export class RoutinesStore {
         );
       }
     }
-    // Q12 Layer 4 — `scope` is the canonical shape. When omitted, default
+    // Permission policy Layer 4 — `scope` is the canonical shape. When omitted, default
     // to deny-all so new call sites cannot accidentally expose plugins.
     const ID_RE = /^[a-z0-9][a-z0-9_.-]*$/i;
     const inputScope = input.scope;

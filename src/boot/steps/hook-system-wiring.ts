@@ -1,7 +1,7 @@
 /**
- * Q12 Phase 4 — Layer 6 hook system boot wiring.
+ * Permission policy Phase 4 — Layer 6 hook system boot wiring.
  *
- * Spec ref: docs/architecture/q12-permission-policy-design.md §3 Layer 6.
+ * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 6.
  *
  * Boot pipeline:
  *   1. {@link runHookTrustWorkflow} — ensure dir exists, diff against
@@ -22,6 +22,7 @@ import {
   type TrustPromptDispatcher,
 } from "../../hooks/hook-trust-prompt.js";
 import { createLogger } from "../../lib/logger.js";
+import type { AuditLogger } from "../../audit/audit-logger.js";
 
 const log = createLogger("hook-system-wiring");
 
@@ -37,6 +38,8 @@ export interface WireHookSystemDeps {
    * and strict-denies new or changed hooks.
    */
   promptDispatcher?: TrustPromptDispatcher;
+  /** Permission policy #633 — structured boot-time quarantine audit surface. */
+  auditLogger?: Pick<AuditLogger, "log">;
 }
 
 export interface HookSystemBootResult {
@@ -69,5 +72,33 @@ export async function wireHookSystem(
     trust.trustedHooks.length,
     trust.disabledHooks.length,
   );
+  emitHookQuarantineAudit(trust, deps.auditLogger);
   return { manager, trust };
+}
+
+function emitHookQuarantineAudit(
+  trust: RunHookTrustResult,
+  auditLogger?: Pick<AuditLogger, "log">,
+): void {
+  if (!auditLogger || trust.disabledHooks.length === 0) return;
+  const disabled = new Set(trust.disabledHooks.map((hook) => hook.fileName));
+  for (const entry of trust.diff) {
+    if (entry.state !== "new" && entry.state !== "changed") continue;
+    if (!disabled.has(entry.hook.fileName)) continue;
+    auditLogger.log({
+      timestamp: new Date().toISOString(),
+      sessionId: "boot",
+      type: "warn",
+      input: JSON.stringify({
+        kind: "hook.quarantined",
+        fileName: entry.hook.fileName,
+        hookType: entry.hook.hookType,
+        sha256: entry.hook.sha256,
+        state: entry.state,
+        previousSha256: entry.previousSha256,
+      }),
+      output: "Hook quarantined during boot trust workflow",
+      toolCalls: [{ name: "hook_trust_boot", isError: false, trust: "high" }],
+    });
+  }
 }

@@ -1397,32 +1397,32 @@ flowchart TB
 6. Internal search Fallback           → 위 모두 해당 없으면 LLM 직접 대화
 ```
 
-### 6.3 Tool Permission Model — Q12 10-Layer Pipeline
+### 6.3 Tool Permission Model — 10-Layer Pipeline
 
-> **Reference**: `docs/architecture/q12-permission-policy-design.md` v2.2
+> **Reference**: `docs/architecture/permission-policy-design.md` v2.2
 > (full spec — 10-layer evaluation, multi-agent reviewed). This section
 > is the architecture-level summary; defer to the spec for the
 > exhaustive layer detail, decision matrix, and binding decisions.
 >
 > §8 Agent Approval System은 **에이전트 행위 승인** (자율 게시 / 외부
 > 송신 / 업무 일지 공개 범위) 을 다룬다. 본 §6.3 은 **개별 도구 호출
-> 권한** 을 다룬다. Q12 Layer 3 의 `network = ask + endpoint` 결정은
+> 권한** 을 다룬다. permission policy Layer 3 의 `network = ask + endpoint` 결정은
 > §8 ApprovalGate 의 입력으로 흐른다 — 두 섹션을 *중복 승인 단계* 로
 > 오해하지 말 것 (single-decision, single-prompt).
 
 #### 6.3.0 — Current implementation posture
 
-Q12 현재 구현은 **strict single path** 이다. 레거시 호환 fallback 이나
+Permission Policy 현재 구현은 **strict single path** 이다. 레거시 호환 fallback 이나
 plugin-specific app branch 를 두지 않는다.
 
 | Surface | Current posture | Future direction |
 | --- | --- | --- |
 | Plugin categories | Plugin manifest 는 고정 allow-list `read/write/shell/network` 만 선언 가능. `meta` 및 향후 host-only category 는 plugin contract 로 자동 확장되지 않는다. | 모든 active plugin category 선언 완료 후 grace 제거 + hard fail |
-| Permission IPC | `PERMISSIONS_Q12` 가 main / preload / sender-guard test 의 단일 channel SOT. | 새 permission channel 은 반드시 `src/shared/ipc-channels.ts` 에 먼저 추가 |
+| Permission IPC | `PERMISSIONS` 가 main / preload / sender-guard test 의 단일 channel SOT. | 새 permission channel 은 반드시 `src/shared/ipc-channels.ts` 에 먼저 추가 |
 | Reviewer | `disabled/rule/llm` 3-mode. `llm` wiring 실패는 silent downgrade 없이 fail-fast. | cost/quality telemetry 로 model default 조정 가능, fallback 은 `deny|rule` 만 |
-| Deferred queue | HIGH verdict 는 user foreground 에서 approve/reject, resolution 은 Q12 audit chain 에 기록. | §8 approval timeline 과 통합 표시 |
-| Hooks | `hooks.json` command/http executor 제거. `~/.config/lvis/hooks/{pre,post,perm}-*.sh` + strict-deny quarantine + typed trust registration 만 허용. | Q13 signed hooks 전까지 `modify` action 금지 |
-| Audit | HMAC chain + daily seal. Recent view 는 tail-scan. | key rotation / archive policy 는 Q13+ |
+| Deferred queue | HIGH verdict 는 user foreground 에서 approve/reject, resolution 은 permission audit chain 에 기록. | §8 approval timeline 과 통합 표시 |
+| Hooks | `hooks.json` command/http executor 제거. `~/.config/lvis/hooks/{pre,post,perm}-*.sh` + strict-deny quarantine + typed trust registration 만 허용. | signed hooks follow-up 전까지 `modify` action 금지 |
+| Audit | HMAC chain + daily seal. Recent view 는 tail-scan. | key rotation / archive policy 는 follow-up |
 
 #### 6.3.1 — 10-layer evaluation pipeline (overview)
 
@@ -1466,7 +1466,7 @@ flowchart TB
 | 6 | Hook chain v1 (deny-only). `~/.config/lvis/hooks/{pre,post,perm}-*.sh`. Strict-deny quarantine lockfile + DLP-redacted stdin. | §3 Layer 6 | `src/hooks/script-hook-*` |
 | 7 | Discriminated-union audit (`AuditAllow`/`AuditAsk`/`AuditDeny`/`AuditDeferred`/`AuditModeChange`/`AuditManifestViolation`) + HMAC chain + daily seal. | §3 Layer 7 | `src/audit/audit-schema.ts`, `src/audit/hmac-chain.ts` |
 | 8 | `/permission` 슬래시 + user-keyboard origin gate + `--durable` modal confirm. Mode change emits `AuditModeChange`. | §3 Layer 8 | `src/permissions/permission-slash.ts` |
-| 9 | Electron preload / contextBridge 기존 sandbox — Q12 변경 없음. | §3 Layer 9 | `src/preload.ts` |
+| 9 | Electron preload / contextBridge 기존 sandbox — permission policy 변경 없음. | §3 Layer 9 | `src/preload.ts` |
 
 #### 6.3.3 — Trust origin classification
 
@@ -1480,7 +1480,7 @@ hook stdin → Layer 7 audit → Layer 8 slash dispatcher.
 | `llm-tool-arg` | LLM 가 채운 tool input | ❌ rejected | 동상 |
 | `file-content` | `read_file` 결과를 LLM 이 다시 사용 | ❌ rejected | 동상 |
 
-전체 spec: `docs/architecture/q12-permission-policy-design.md` §9.
+전체 spec: `docs/architecture/permission-policy-design.md` §9.
 
 #### 6.3.4 — Reviewer agent (multi-vendor)
 
@@ -1497,9 +1497,9 @@ openai|anthropic|google`. 변경은 settings.json 에 persist + selective
 verdict-cache invalidation.
 
 **Cost optimization:** `~/.lvis/permissions/reviewer-cache.jsonl` —
-`sha256(toolName+source+category+canonicalInputShape)` 기반. HIGH 도
-cache (반복 deny 비용 절감). cache ≠ fallback (quota 소진 시 cache
-가 circuit breaker 로 동작하지 않음 — `fallbackOnError ∈ {deny, rule}`).
+`sha256(toolName+source+category+trustOrigin+approvalCacheKey+canonicalInputShape)`
+기반. HIGH 도 cache (반복 deny 비용 절감). cache 는 동작 정책을 대체하지
+않으며, quota 소진 시 `fallbackOnError ∈ {deny, rule}` 정책만 적용한다.
 
 전체 spec: §3 Layer 5 + §11 v2.1 binding decisions.
 
@@ -1524,17 +1524,18 @@ gate.
 hook 정책 가능). DLP-redacted input — secrets / credentials / PII 가
 remote SIEM 으로 새지 않도록 `redactForLLM` 적용.
 
-**Deny-only v1 (critic M3):** `modify` action 은 Q13 hook signing
+**Deny-only v1 (critic M3):** `modify` action 은 hook-signing follow-up
 이후로 deferred. v1 의 `allow` 는 *additional approval signal* — Layer
 0/1/2/3 deny 를 upgrade 하지 못함.
 
 **Fail-safe:** exit !=0 / malformed stdout JSON / >5s timeout → deny.
 Hook trust lockfile (`.lockfile.json`) — boot 시 hash 비교 + 변경/new hook 은
-strict-deny 로 `.disabled/` 이동. Renderer 승인 fallback 없음. 사용자가
+strict-deny 로 `.disabled/` 이동. Renderer 승인 prompt/modal 은 없다. 사용자가
 `/permission hooks list` 로 확인하고 `/permission hooks accept <name>` 을
 직접 입력한 경우에만 lockfile 에 등록되어 다음 실행부터 trusted hook 으로
-동작한다. 이 typed command 가 명시적 신뢰 등록 표면이며 renderer fallback
-prompt/modal 은 없다.
+동작한다. 이 typed command 가 명시적 신뢰 등록 표면이다. Boot-time quarantine
+은 legacy `AuditLogger.log` 에 `input.kind = "hook.quarantined"` 로 남고,
+Permissions tab 은 `PERMISSIONS.hookTrustList` 를 통해 비차단 알림을 표시한다.
 
 **v1 binding decision (§11 v2.1):** 빈 디렉토리만 ship. Sample hook
 없음 — attack surface 0 부터 시작.
@@ -1552,12 +1553,12 @@ proxy 로 wrap 되어 write attempts (`writeFileSync`, `mkdirSync`,
 1. plugin id → process-wide `manifestIntegrityState.disabledPluginIds`.
 2. `AuditManifestViolation` audit entry 발행 (`pluginId`, `toolName`,
    `attemptedOperation`).
-3. `PERMISSIONS_Q12.manifestViolation` IPC → 사용자에게 reinstall
+3. `PERMISSIONS.manifestViolation` IPC → 사용자에게 reinstall
    prompt.
 4. Disabled plugin 의 read-declared tool 후속 호출 fail-deny.
 
 **Trade-off:** plugin 이 standard `node:fs` 직접 import 시 우회 가능
-— Q14 sandboxed plugin runtime (V8 isolated context) 까지는 partial
+— sandboxed plugin runtime (V8 isolated context) 도입 전까지는 partial
 guard. 사용자 docs 에 명시.
 
 **Files:** `src/permissions/manifest-integrity.ts`,
@@ -1568,7 +1569,7 @@ guard. 사용자 docs 에 명시.
 Discriminated union per `decision` field:
 
 ```typescript
-type Q12AuditEntry =
+type PermissionAuditEntry =
   | AuditAllow         // 허용 (layer + 사유)
   | AuditAsk           // 사용자 컨펌 요청
   | AuditDeny          // 거부 (denyReasons[])
@@ -1595,7 +1596,7 @@ secret 영구 저장 실패 → 감사 chain 미시작 + 사용자 actionable �
 (silent downgrade 금지).
 
 **Files:** `src/audit/audit-schema.ts`, `src/audit/hmac-chain.ts`,
-`src/audit/audit-logger.ts` (`appendQ12Entry` + `setupQ12Chain`),
+`src/audit/audit-logger.ts` (`appendPermissionAuditEntry` + `setupPermissionAuditChain`),
 `src/permissions/permission-audit-runner.ts` (show + verify 백엔드).
 
 #### 6.3.8 — `/permission` 슬래시 인터페이스
@@ -1699,9 +1700,9 @@ graph TB
 | **Plugin (동적)** | 플러그인·MCP 설치 시 추가 | 매니페스트 기반 동적 등록 | 플러그인별 매니페스트에 정의 |
 | **Feature-gated** | (Feature Flag로 제어) | 실험적 도구 — §14.4 참조 | Feature Flag 활성 시에만 Registry에 등록 |
 
-**§6.4.X Tool Category — 5-axis taxonomy (Q12 Phase 2):**
+**§6.4.X Tool Category — 5-axis taxonomy:**
 
-도구의 **policy axis** 는 5축으로 분리되며 `ToolCategoryRegistry` (Open-Closed pattern) 가 카테고리별 decision lane 을 제공한다. 자세한 의사결정 매트릭스는 `docs/architecture/q12-permission-policy-design.md` §3 Layer 3 참조.
+도구의 **policy axis** 는 5축으로 분리되며 `ToolCategoryRegistry` (Open-Closed pattern) 가 카테고리별 decision lane 을 제공한다. 자세한 의사결정 매트릭스는 `docs/architecture/permission-policy-design.md` §3 Layer 3 참조.
 
 | Category | 의미 | 의사결정 (default mode) | 헤들리스 (routine) | 비고 |
 | --- | --- | --- | --- | --- |
@@ -2166,14 +2167,14 @@ flowchart LR
 
 ## 8. Agent Approval System — 에이전트 요청 승인
 
-> **§6.3 Q12 와의 분리 (Q12 P5):** §6.3 은 *개별 도구 호출* 에 대한
+> **§6.3 Permission Policy 와의 분리:** §6.3 은 *개별 도구 호출* 에 대한
 > Layer 0–9 평가 (sensitive paths, allowed dirs, category × source ×
 > mode, reviewer agent, hook chain) 를 다룬다. 본 §8 은 *에이전트
 > 행위 전체* 에 대한 사용자 승인 모델 (자율 게시 / 외부 송신 / 업무
-> 일지 공개 범위) 을 다룬다. Q12 Layer 3 의 `network = ask + endpoint`
+> 일지 공개 범위) 을 다룬다. permission policy Layer 3 의 `network = ask + endpoint`
 > 결정은 §8 ApprovalGate 의 입력으로 흐르므로 두 섹션이 *중복 승인
 > 단계* 처럼 보일 수 있으나 실제로는 **single-decision /
-> single-prompt** — Q12 가 결정하면 §8 ApprovalGate 가 그 결정을 그대로
+> single-prompt** — permission policy 가 결정하면 §8 ApprovalGate 가 그 결정을 그대로
 > render 한다 (별도 prompt 없음).
 
 ### 8.1 설계 원칙

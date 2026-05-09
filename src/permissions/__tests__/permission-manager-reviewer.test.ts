@@ -1,5 +1,5 @@
 /**
- * Q12 Phase 3 — PermissionManager.dispatchReviewer + setReviewer wiring.
+ * Permission policy Phase 3 — PermissionManager.dispatchReviewer + setReviewer wiring.
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { mkdtempSync } from "node:fs";

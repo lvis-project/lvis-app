@@ -1,7 +1,7 @@
 /**
- * Q12 P4 Area A — reviewer-wiring boot integration tests.
+ * Permission policy P4 Area A — reviewer-wiring boot integration tests.
  *
- * Spec ref: docs/architecture/q12-permission-policy-design.md §3 Layer 5,
+ * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 5,
  * §11 v2.1 binding decisions.
  */
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
@@ -23,7 +23,7 @@ import type { LLMProvider, StreamEvent } from "../../../engine/llm/types.js";
 let tmpDir: string;
 
 beforeEach(() => {
-  tmpDir = mkdtempSync(join(tmpdir(), "q12-p4-rw-"));
+  tmpDir = mkdtempSync(join(tmpdir(), "permission-policy-p4-rw-"));
 });
 
 afterEach(() => {
@@ -40,7 +40,7 @@ function stubProvider(events: StreamEvent[]): LLMProvider {
   };
 }
 
-describe("Q12 P4 reviewer-wiring", () => {
+describe("Permission policy P4 reviewer-wiring", () => {
   it("settings mode=rule wires RuleBasedRiskClassifier", () => {
     const pm = new PermissionManager(join(tmpDir, "permissions.json"));
     const setReviewerSpy = vi.spyOn(pm, "setReviewer");
@@ -177,7 +177,7 @@ describe("Q12 P4 reviewer-wiring", () => {
   });
 });
 
-describe("Q12 P4 LlmReviewerProviderAdapter", () => {
+describe("Permission policy P4 LlmReviewerProviderAdapter", () => {
   it("collects streamTurn `text_delta` events into a single string", async () => {
     const provider = stubProvider([
       { type: "text_delta", text: '{"level":' },

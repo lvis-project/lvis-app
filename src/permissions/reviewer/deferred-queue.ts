@@ -1,7 +1,7 @@
 /**
- * Q12 Phase 3 — Layer 5 Reviewer Agent: deferred queue for HIGH verdicts.
+ * Permission policy Phase 3 — Layer 5 Reviewer Agent: deferred queue for HIGH verdicts.
  *
- * Spec ref: docs/architecture/q12-permission-policy-design.md §3 Layer 5.
+ * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 5.
  *
  * When the reviewer agent returns a HIGH verdict in headless mode, the
  * action is appended to the deferred queue rather than executed. On

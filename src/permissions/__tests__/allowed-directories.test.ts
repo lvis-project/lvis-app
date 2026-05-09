@@ -1,7 +1,7 @@
 /**
- * Q12 Phase 2.5 — Layer 1 (Path policy) — allowed directories tests.
+ * Permission policy Phase 2.5 — Layer 1 (Path policy) — allowed directories tests.
  *
- * Spec ref: docs/architecture/q12-permission-policy-design.md §3 Layer 1.
+ * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 1.
  */
 import { describe, it, expect } from "vitest";
 import { homedir } from "node:os";

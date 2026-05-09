@@ -1,7 +1,7 @@
 /**
- * Q12 Phase 3 — Layer 5 Reviewer Agent: RiskClassifier interface + impls.
+ * Permission policy Phase 3 — Layer 5 Reviewer Agent: RiskClassifier interface + impls.
  *
- * Spec ref: docs/architecture/q12-permission-policy-design.md §3 Layer 5,
+ * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 5,
  * §11 v2.1 binding decisions (default `provider="openai"`,
  * `model="gpt-4o-mini"`; `fallbackOnError ∈ {deny, rule}`; verdict
  * composition `final = max(rule, llm)`; DLP filter on classifier input).
@@ -55,7 +55,7 @@ export interface ToolInvocationContext {
   source: ToolSource;
   category: ToolCategory;
   /**
-   * Q12 §9 trust origin. Surfaced in the LLM prompt so the classifier
+   * Permission policy §9 trust origin. Surfaced in the LLM prompt so the classifier
    * can reason about prompt-injection risk: an `agent`-origin write of
    * the same shape as a `user`-keyboard write is meaningfully different.
    */
@@ -462,7 +462,7 @@ export function createRiskClassifier(settings: ReviewerSettings): RiskClassifier
         throw new Error(
           `permissions.reviewer.mode = 'llm' but no provider configured. ` +
           `Set provider via createRiskClassifier({mode:'llm', provider, model}). ` +
-          `(Q12 P3 atomic cutover — no silent fallback to rule-based.)`,
+          `(Permission policy P3 atomic cutover — no silent fallback to rule-based.)`,
         );
       }
       const fb = settings.fallbackOnError ?? "rule";

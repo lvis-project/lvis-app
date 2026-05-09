@@ -136,6 +136,24 @@ describe("ask_user_question tool", () => {
 });
 
 describe("schedule_routine tool", () => {
+  it("declares a literal-aware approval cache key for plugin scope", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "lvis-rt-"));
+    try {
+      const store = new RoutinesStore(join(tmp, "routines.json"));
+      const tool = createScheduleRoutineTool(store);
+
+      expect(tool.approvalCacheKey?.({ allowedPlugins: ["meeting", "local-indexer"] })).toBe(
+        "scope:allow:local-indexer,meeting",
+      );
+      expect(tool.approvalCacheKey?.({ allowedPlugins: ["local-indexer", "meeting"] })).toBe(
+        "scope:allow:local-indexer,meeting",
+      );
+      expect(tool.approvalCacheKey?.({ allowedPlugins: [] })).toBe("scope:deny-all");
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it("rejects missing schedule.at for non-cron", async () => {
     const tmp = mkdtempSync(join(tmpdir(), "lvis-rt-"));
     try {

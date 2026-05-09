@@ -472,7 +472,7 @@ export type LvisApi = {
 export type ApprovalChoice = "allow-once" | "allow-always" | "deny-once" | "deny-always";
 
 /**
- * Q12 P2.5 — discriminated approval kinds. Renderer routes on this to
+ * Permission policy — discriminated approval kinds. Renderer routes on this to
  * pick the right card. Default `"tool"` is the standard §6.3 dialog.
  */
 export type ApprovalKind = "tool" | "out-of-allowed-dir";
@@ -480,7 +480,7 @@ export type ApprovalKind = "tool" | "out-of-allowed-dir";
 export type ApprovalRequest = {
   id: string;
   category: "tool";
-  /** Q12 P2.5 — discriminator (defaults to "tool" when absent). */
+  /** Permission policy — discriminator (defaults to "tool" when absent). */
   kind?: ApprovalKind;
   toolName: string;
   args: unknown;
@@ -496,7 +496,7 @@ export type ApprovalRequest = {
   /** §D2: HMAC over (id, nonce, toolName, args) — echoed verbatim. */
   hmac?: string;
   /**
-   * Q12 P2.5 — present when `kind === "out-of-allowed-dir"`. Carries
+   * Permission policy — present when `kind === "out-of-allowed-dir"`. Carries
    * the auto-suggest payload so the renderer can render the directory-
    * confirm card without re-running validation.
    */
@@ -506,7 +506,7 @@ export type ApprovalRequest = {
     currentAllowed: readonly string[];
     adjacencyWarnings: readonly string[];
   };
-  /** Q12 P2.5 §9 — trust-origin classification, e.g. "user" / "agent". */
+  /** Permission policy §9 — trust-origin classification, e.g. "user" / "agent". */
   trustOrigin?: string;
 };
 export type ApprovalDecision = {
@@ -534,7 +534,7 @@ export type RemoveRuleResult =
   | { ok: true }
   | { ok: false; error: string; message?: string };
 
-/** Q12 P3 — deferred-queue entry shape mirrored from main process. */
+/** Permission policy — deferred-queue entry shape mirrored from main process. */
 export interface DeferredQueueEntry {
   id: string;
   ts: string;
@@ -548,18 +548,31 @@ export interface DeferredQueueEntry {
   resolutionReason?: string;
 }
 
+export interface HookTrustRow {
+  fileName: string;
+  hookType: "pre" | "post" | "perm";
+  sha256: string;
+  state: "trusted" | "new" | "changed" | "removed" | "disabled";
+  previousSha256?: string;
+}
+
 export type LvisPermissionApi = {
   getMode: () => Promise<{ mode: string }>;
   setMode: (mode: string) => Promise<{ ok: boolean; mode: string }>;
   listRules: () => Promise<PermissionRule[]>;
   addRule: (pattern: string, action: "allow" | "deny") => Promise<AddRuleResult>;
   removeRule: (pattern: string, action: "allow" | "deny") => Promise<RemoveRuleResult>;
-  /** Q12 P3 — list pending HIGH-risk deferred entries (Layer 5 reviewer). */
+  /** Permission policy — list pending HIGH-risk deferred entries (Layer 5 reviewer). */
   deferredList: () => Promise<
     | { ok: true; pending: DeferredQueueEntry[]; total: number }
     | { ok: false; error: string }
   >;
-  /** Q12 P3 — resolve a pending entry with user gesture. */
+  /** Permission policy issue #633 — list active + quarantined script hooks. */
+  hookTrustList: () => Promise<
+    | { ok: true; active: HookTrustRow[]; disabled: HookTrustRow[]; totalDisabled: number }
+    | { ok: false; error: string }
+  >;
+  /** Permission policy — resolve a pending entry with user gesture. */
   deferredResolve: (
     id: string,
     decision: "approved" | "rejected",
@@ -568,9 +581,9 @@ export type LvisPermissionApi = {
     | { ok: true; entry: DeferredQueueEntry }
     | { ok: false; error: string }
   >;
-  /** Q12 P3 — subscribe to foreground-entry deferred-pending events. */
+  /** Permission policy — subscribe to foreground-entry deferred-pending events. */
   onDeferredPending: (cb: (summary: { pending: number }) => void) => () => void;
-  /** Q12 P4 — subscribe to manifest-integrity violation notifications. */
+  /** Permission policy — subscribe to manifest-integrity violation notifications. */
   onManifestViolation: (
     handler: (payload: {
       pluginId: string;
@@ -578,21 +591,21 @@ export type LvisPermissionApi = {
       attempted: string;
     }) => void,
   ) => () => void;
-  /** Q12 P3 — `/permission reviewer ...` slash dispatch. */
+  /** Permission policy — `/permission reviewer ...` slash dispatch. */
   reviewerDispatch: (
     rawArgs: string,
   ) => Promise<{ ok: true; verb: string; settings?: unknown } | { ok: false; error: string }>;
-  /** Q12 P5 — `/permission audit show` — recent Q12 entries. */
+  /** Permission policy — `/permission audit show` — recent permission audit entries. */
   auditShow: (last: number) => Promise<
     | {
         ok: true;
-        entries: Q12AuditEntrySummary[];
+        entries: PermissionAuditEntrySummary[];
         total: number;
         summary: { files: number; bytes: number };
       }
     | { ok: false; error: string }
   >;
-  /** Q12 P5 — `/permission audit verify` — HMAC chain integrity check. */
+  /** Permission policy — `/permission audit verify` — HMAC chain integrity check. */
   auditVerify: () => Promise<
     | {
         ok: true;
@@ -614,12 +627,12 @@ export type LvisPermissionApi = {
 };
 
 /**
- * Q12 P5 — minimal audit entry shape surfaced to the renderer's
+ * Permission policy — minimal audit entry shape surfaced to the renderer's
  * `AuditPanel`. The full discriminated union (with `decision` field
  * + per-decision payload) is sent verbatim — this type is just a
  * structural tag the panel uses to gate the expand/filter UI.
  */
-export interface Q12AuditEntrySummary {
+export interface PermissionAuditEntrySummary {
   ts: string;
   auditId: string;
   decision: string;

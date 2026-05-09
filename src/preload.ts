@@ -8,7 +8,7 @@ import { resolve as pathResolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { McpServerConfig } from "./mcp/types.js";
 import type { SerializedHistoryMessage } from "./shared/chat-history.js";
-import { OVERLAY_V1, PERMISSIONS_Q12, ROUTINES_V2 } from "./shared/ipc-channels.js";
+import { OVERLAY_V1, PERMISSIONS, ROUTINES_V2 } from "./shared/ipc-channels.js";
 import { PLUGIN_PRIVATE_NAMESPACES } from "./plugins/capabilities.js";
 
 // ─── Deterministic plugin webview asset URLs ────────────────────────────────
@@ -470,34 +470,36 @@ const api = {
       ipcRenderer.invoke("lvis:permission:add-rule", pattern, action),
     removeRule: async (pattern: string, action: string) =>
       ipcRenderer.invoke("lvis:permission:remove-rule", pattern, action),
-    /** Q12 P3 — deferred queue (Layer 5 reviewer HIGH verdicts). */
-    deferredList: async () => ipcRenderer.invoke(PERMISSIONS_Q12.deferredList),
+    /** Permission policy — deferred queue (Layer 5 reviewer HIGH verdicts). */
+    deferredList: async () => ipcRenderer.invoke(PERMISSIONS.deferredList),
+    /** Permission policy issue #633 — hook quarantine state for non-modal settings badge. */
+    hookTrustList: async () => ipcRenderer.invoke(PERMISSIONS.hookTrustList),
     deferredResolve: async (
       id: string,
       decision: "approved" | "rejected",
       reason?: string,
     ) =>
-      ipcRenderer.invoke(PERMISSIONS_Q12.deferredResolve, { id, decision, reason }),
+      ipcRenderer.invoke(PERMISSIONS.deferredResolve, { id, decision, reason }),
     /** Foreground-entry pending notification — main→renderer event. */
     onDeferredPending: (cb: (summary: { pending: number }) => void) => {
       const listener = (_event: unknown, summary: { pending: number }) =>
         cb(summary);
-      ipcRenderer.on(PERMISSIONS_Q12.deferredPending, listener);
+      ipcRenderer.on(PERMISSIONS.deferredPending, listener);
       return () =>
-        ipcRenderer.removeListener(PERMISSIONS_Q12.deferredPending, listener);
+        ipcRenderer.removeListener(PERMISSIONS.deferredPending, listener);
     },
-    /** Q12 P3 — `/permission reviewer ...` slash dispatch via IPC. */
+    /** Permission policy — `/permission reviewer ...` slash dispatch via IPC. */
     reviewerDispatch: async (rawArgs: string) =>
-      ipcRenderer.invoke(PERMISSIONS_Q12.reviewerDispatch, { rawArgs }),
-    /** Q12 P5 — `/permission audit show` — fetch recent Q12 entries. */
+      ipcRenderer.invoke(PERMISSIONS.reviewerDispatch, { rawArgs }),
+    /** Permission policy — `/permission audit show` — fetch recent permission audit entries. */
     auditShow: async (last: number) =>
-      ipcRenderer.invoke(PERMISSIONS_Q12.auditShow, { last }),
-    /** Q12 P5 — `/permission audit verify` — chain integrity check. */
+      ipcRenderer.invoke(PERMISSIONS.auditShow, { last }),
+    /** Permission policy — `/permission audit verify` — chain integrity check. */
     auditVerify: async () =>
-      ipcRenderer.invoke(PERMISSIONS_Q12.auditVerify),
+      ipcRenderer.invoke(PERMISSIONS.auditVerify),
     /**
-     * Q12 P4 §3.5 — manifest integrity violation notifier. Subscribes
-     * to `PERMISSIONS_Q12.manifestViolation` so the renderer can
+     * Permission policy §3.5 — manifest integrity violation notifier. Subscribes
+     * to `PERMISSIONS.manifestViolation` so the renderer can
      * surface a "Plugin X disabled — reinstall?" prompt.
      */
     onManifestViolation: (
@@ -509,9 +511,9 @@ const api = {
     ) => {
       const listener = (_e: unknown, payload: Parameters<typeof handler>[0]) =>
         handler(payload);
-      ipcRenderer.on(PERMISSIONS_Q12.manifestViolation, listener);
+      ipcRenderer.on(PERMISSIONS.manifestViolation, listener);
       return () =>
-        ipcRenderer.removeListener(PERMISSIONS_Q12.manifestViolation, listener);
+        ipcRenderer.removeListener(PERMISSIONS.manifestViolation, listener);
     },
   },
 

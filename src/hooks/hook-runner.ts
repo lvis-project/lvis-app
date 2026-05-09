@@ -7,7 +7,7 @@
  * Phase 3: 인메모리 훅 등록 (설정 파일 기반은 Phase 5)
  * 향후: 플러그인이 훅을 등록하여 거버넌스/감사/변환 수행
  *
- * Q12: this runner is now in-process only. Production script hooks use
+ * Permission policy: this runner is now in-process only. Production script hooks use
  * `ScriptHookManager` + discrete `pre/post/perm-*.sh` files so every external
  * hook goes through the TOFU lockfile/quarantine path.
  */

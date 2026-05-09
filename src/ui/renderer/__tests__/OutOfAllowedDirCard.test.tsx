@@ -1,5 +1,5 @@
 /**
- * Q12 Phase 2.5 — OutOfAllowedDirCard unit tests.
+ * Permission policy Phase 2.5 — OutOfAllowedDirCard unit tests.
  *
  * Verifies the re-typed confirmation gate (M3 phishing defense), the
  * adjacency-warning blocking checkbox, and the three-button decision
