@@ -22,6 +22,40 @@ export const MAX_LLM_SESSION_ROUTINES = 10;
 
 export type RoutineExecution = "llm-session" | "notification-only";
 
+/**
+ * Q12 Layer 4 — discriminated union scoping which plugins a routine may
+ * see during its isolated session.
+ *
+ * - `deny-all`  no plugin tools exposed (legacy `allowedPlugins: []`)
+ * - `allow`     explicit allowlist (legacy non-empty `allowedPlugins`)
+ * - `inherit`   adopt the user's currently-active plugin set at fire
+ *               time (Routine v2 default; legacy `allowedPlugins?`
+ *               undefined). The boot-time normalization in
+ *               `RoutineEngineV2.runRoutine` snapshots the active set
+ *               so the loop never sees `inherit` at invocation time.
+ */
+export type RoutinePluginScope =
+  | { mode: "deny-all" }
+  | { mode: "allow"; ids: string[] }
+  | { mode: "inherit" };
+
+/**
+ * Q12 Layer 4 — `routine.scope` namespace bundling every per-routine
+ * isolation knob. Replaces the flat `allowedPlugins?: string[]` field.
+ *
+ * - `pluginIds` plugin allow-list (discriminated union — see above).
+ * - `forcedPluginIds` plugins guaranteed active for this routine even
+ *    if the user has them disabled (e.g. `agent-hub` for a routine
+ *    that depends on its work board). Defaults to `[]` — NEVER mirror
+ *    `pluginIds.ids` here; that would defeat the point of `pluginIds`.
+ * - `directories` extra Layer 1 path allow-list scoped to this run.
+ */
+export interface RoutineScope {
+  pluginIds: RoutinePluginScope;
+  forcedPluginIds: string[];
+  directories: string[];
+}
+
 export type RepeatKind =
   | "none"
   | "daily"
@@ -58,10 +92,16 @@ export interface RoutineRecord {
   /** Shown as OS notification body when execution === "notification-only". */
   notificationBody?: string;
   /**
-   * Plugin ids this routine may use during its isolated LLM session.
-   * Missing/empty means plugin tools are not exposed to the routine.
+   * Q12 Layer 4 scope — plugin allow-list, forced plugin set, and
+   * extra directories permitted during this routine's headless session.
+   * Missing means inherit-the-active-set (boot-time normalized).
+   *
+   * Disk format compat: a routine record persisted before Q12 Phase 2
+   * may carry a flat `allowedPlugins?: string[]` instead. The store's
+   * read path normalizes legacy `[]`/non-empty/missing into the
+   * discriminated union shape on first load.
    */
-  allowedPlugins?: string[];
+  scope?: RoutineScope;
   createdAt: string;
   lastFiredAt?: string;
   dismissedAt?: string;
@@ -80,7 +120,12 @@ export interface AddRoutineInput {
   title?: string;
   notificationTitle?: string;
   notificationBody?: string;
-  allowedPlugins?: string[];
+  /**
+   * Q12 Layer 4 scope — see {@link RoutineScope}. When omitted, the
+   * store fills `pluginIds: { mode: "inherit" }` and empty defaults
+   * for the rest, matching the legacy "no allowlist provided" behavior.
+   */
+  scope?: RoutineScope;
 }
 
 /**

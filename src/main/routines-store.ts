@@ -27,6 +27,8 @@ export {
   type RoutineRepeat,
   type RoutineSchedule,
   type RoutineRecord,
+  type RoutineScope,
+  type RoutinePluginScope,
   type AddRoutineInput,
 } from "../shared/routines-types.js";
 
@@ -35,6 +37,7 @@ import type {
   RoutineRepeat,
   RoutineRecord,
   RoutineSchedule,
+  RoutineScope,
   AddRoutineInput,
 } from "../shared/routines-types.js";
 import { MAX_PERSISTED_ROUTINES, MAX_LLM_SESSION_ROUTINES } from "../shared/routines-types.js";
@@ -60,6 +63,46 @@ function isValidRecord(r: unknown): r is RoutineRecord {
   if (x.execution !== "llm-session" && x.execution !== "notification-only") return false;
   if (x.lastFiredMinuteUTC !== undefined && typeof x.lastFiredMinuteUTC !== "string") return false;
   return true;
+}
+
+/**
+ * Q12 Layer 4 — convert a legacy on-disk `allowedPlugins` (or absence)
+ * into the canonical `scope` shape. Migration rules per design §3.4:
+ *   - missing field          → `{ mode: "inherit" }`
+ *   - empty array `[]`       → `{ mode: "deny-all" }`
+ *   - non-empty array        → `{ mode: "allow", ids: [...] }`
+ * The mutation is idempotent: a record that already has `scope` is
+ * returned untouched (and the legacy field, if also present, ignored).
+ */
+function migrateLegacyAllowedPlugins(rec: RoutineRecord & { allowedPlugins?: string[] }): RoutineRecord {
+  if (rec.scope) {
+    // Already the new shape — drop any stale legacy mirror.
+    if ("allowedPlugins" in rec) {
+      const cleaned = { ...rec };
+      delete (cleaned as { allowedPlugins?: unknown }).allowedPlugins;
+      return cleaned;
+    }
+    return rec;
+  }
+  const legacy = rec.allowedPlugins;
+  let pluginIds: RoutineScope["pluginIds"];
+  if (legacy === undefined) {
+    pluginIds = { mode: "inherit" };
+  } else if (legacy.length === 0) {
+    pluginIds = { mode: "deny-all" };
+  } else {
+    pluginIds = { mode: "allow", ids: [...legacy] };
+  }
+  const migrated: RoutineRecord = {
+    ...rec,
+    scope: {
+      pluginIds,
+      forcedPluginIds: [],
+      directories: [],
+    },
+  };
+  delete (migrated as { allowedPlugins?: unknown }).allowedPlugins;
+  return migrated;
 }
 
 function validateScheduleAt(at: string): { ok: true } | { ok: false; error: string } {
@@ -107,7 +150,13 @@ async function readFileOrEmpty(filePath: string): Promise<RoutinesFile> {
     }
     // Filter out tampered/corrupted records so a single bad entry cannot
     // cause the scheduler tick to throw and stall all other routines.
-    return { version: 2, routines: parsed.routines.filter(isValidRecord) };
+    // Q12 Layer 4 — migrate legacy `allowedPlugins` to `scope` shape on read.
+    return {
+      version: 2,
+      routines: parsed.routines
+        .filter(isValidRecord)
+        .map((r) => migrateLegacyAllowedPlugins(r as RoutineRecord & { allowedPlugins?: string[] })),
+    };
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
       return { version: 2, routines: [] };
@@ -136,7 +185,16 @@ function cloneRecord(r: RoutineRecord): RoutineRecord {
           repeat: r.schedule.repeat ? { ...r.schedule.repeat } : undefined,
         }
       : undefined,
-    allowedPlugins: r.allowedPlugins ? [...r.allowedPlugins] : undefined,
+    scope: r.scope
+      ? {
+          pluginIds:
+            r.scope.pluginIds.mode === "allow"
+              ? { mode: "allow", ids: [...r.scope.pluginIds.ids] }
+              : { ...r.scope.pluginIds },
+          forcedPluginIds: [...r.scope.forcedPluginIds],
+          directories: [...r.scope.directories],
+        }
+      : undefined,
   };
 }
 
@@ -232,12 +290,40 @@ export class RoutinesStore {
         );
       }
     }
-    const allowedPlugins = input.allowedPlugins?.map((p) => p.trim()).filter(Boolean) ?? [];
-    if (allowedPlugins.some((p) => !/^[a-z0-9][a-z0-9_.-]*$/i.test(p))) {
-      throw new Error(
-        "RoutinesStore.add: allowedPlugins entries must be plugin ids using letters, digits, dot, underscore, or hyphen",
-      );
+    // Q12 Layer 4 — `scope` is the canonical shape. When omitted, default
+    // to `{ pluginIds: inherit, forcedPluginIds: [], directories: [] }`.
+    const inputScope = input.scope;
+    const ID_RE = /^[a-z0-9][a-z0-9_.-]*$/i;
+    if (inputScope?.pluginIds.mode === "allow") {
+      const trimmed = inputScope.pluginIds.ids.map((p) => p.trim()).filter(Boolean);
+      if (trimmed.some((p) => !ID_RE.test(p))) {
+        throw new Error(
+          "RoutinesStore.add: scope.pluginIds.ids entries must be plugin ids using letters, digits, dot, underscore, or hyphen",
+        );
+      }
+      // Replace with normalized + deduped values inside the discriminated union.
+      inputScope.pluginIds = { mode: "allow", ids: [...new Set(trimmed)] };
     }
+    if (inputScope?.forcedPluginIds) {
+      const trimmedForced = inputScope.forcedPluginIds.map((p) => p.trim()).filter(Boolean);
+      if (trimmedForced.some((p) => !ID_RE.test(p))) {
+        throw new Error(
+          "RoutinesStore.add: scope.forcedPluginIds entries must be plugin ids using letters, digits, dot, underscore, or hyphen",
+        );
+      }
+      inputScope.forcedPluginIds = [...new Set(trimmedForced)];
+    }
+    const normalizedScope: RoutineScope = inputScope
+      ? {
+          pluginIds: inputScope.pluginIds,
+          forcedPluginIds: inputScope.forcedPluginIds ?? [],
+          directories: inputScope.directories ?? [],
+        }
+      : {
+          pluginIds: { mode: "inherit" },
+          forcedPluginIds: [],
+          directories: [],
+        };
 
     // Build schedule with normalized `at`.
     const normalizedSchedule: typeof input.schedule = input.schedule
@@ -256,7 +342,7 @@ export class RoutinesStore {
       title: input.title,
       notificationTitle: input.notificationTitle,
       notificationBody: input.notificationBody,
-      ...(allowedPlugins.length > 0 ? { allowedPlugins: [...new Set(allowedPlugins)] } : {}),
+      scope: normalizedScope,
       createdAt: new Date().toISOString(),
     };
 

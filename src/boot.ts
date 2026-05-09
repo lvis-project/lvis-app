@@ -339,8 +339,12 @@ export async function bootstrap(
   const routineEngine = createRoutineEngine({
     createConversationLoop: (input) => createRoutineConversationLoop(
       routineLoopDeps,
-      { allowedPlugins: input.allowedPlugins },
+      { scope: input.scope },
     ),
+    // Q12 Layer 4 — snapshot the live plugin runtime's active id set so
+    // routines with `scope.pluginIds.mode === "inherit"` are normalized
+    // to a concrete allow-list at fire time (never at loop-construction).
+    getActivePluginIds: () => pluginRuntime.listPluginIds(),
   });
 
   // §4.2 Step 7: manifest-driven IPC bridges.
@@ -458,7 +462,7 @@ export async function bootstrap(
           trigger: routine.trigger,
           prePrompt: routine.prePrompt ?? "",
           title: routine.title,
-          allowedPlugins: routine.allowedPlugins,
+          scope: routine.scope,
           storagePath: jsonlPath ?? undefined,
         });
         runSummary = runResult.summary;
