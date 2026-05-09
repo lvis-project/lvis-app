@@ -1,12 +1,12 @@
 /**
- * Q12 Phase 5 — `/permission audit` runtime helpers.
+ * `/permission audit` runtime helpers.
  *
- * Spec ref: docs/architecture/q12-permission-policy-design.md §3 Layer 7,
+ * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 7,
  * §3 Layer 8 (slash subcommand `/permission audit show|verify`).
  *
  * Two operations:
  *
- *   show   — surface the last N entries from the Q12 audit log so
+ *   show   — surface the last N entries from the permission audit log so
  *            the renderer's `AuditPanel` can render them. Read-only,
  *            no chain verification.
  *   verify — recompute the chain across one or more day-files, report
@@ -33,8 +33,8 @@ import {
   type SecretStore,
 } from "../audit/hmac-chain.js";
 import {
-  isQ12AuditEntry,
-  type Q12AuditEntry,
+  isPermissionAuditEntry,
+  type PermissionAuditEntry,
 } from "../audit/audit-schema.js";
 
 const TAIL_CHUNK_BYTES = 64 * 1024;
@@ -73,21 +73,21 @@ function readLastNonEmptyLines(filePath: string, limit: number): string[] {
 }
 
 /**
- * Return the most recent N audit entries across all `.q12.jsonl`
+ * Return the most recent N audit entries across all `.permission-audit.jsonl`
  * files in the audit directory. Files are processed in date-sorted
  * order; the tail of the newest file appears first in the result.
  */
 export function readRecentAuditEntries(
   auditDir: string,
   limit: number,
-): Q12AuditEntry[] {
+): PermissionAuditEntry[] {
   if (!existsSync(auditDir)) return [];
   const files = readdirSync(auditDir)
-    .filter((f) => f.endsWith(".q12.jsonl"))
+    .filter((f) => f.endsWith(".permission-audit.jsonl"))
     .sort()
     .reverse(); // newest first
 
-  const out: Q12AuditEntry[] = [];
+  const out: PermissionAuditEntry[] = [];
   for (const file of files) {
     const filePath = join(auditDir, file);
     const lines = readLastNonEmptyLines(filePath, limit - out.length);
@@ -95,7 +95,7 @@ export function readRecentAuditEntries(
     for (let i = lines.length - 1; i >= 0; i--) {
       try {
         const parsed = JSON.parse(lines[i]) as unknown;
-        if (isQ12AuditEntry(parsed)) {
+        if (isPermissionAuditEntry(parsed)) {
           out.push(parsed);
           if (out.length >= limit) return out;
         }
@@ -109,7 +109,7 @@ export function readRecentAuditEntries(
 
 /**
  * Per-file chain verification result. Verification iterates through
- * every `.q12.jsonl` file in the audit directory; each file gets
+ * every `.permission-audit.jsonl` file in the audit directory; each file gets
  * its own genesis-anchored chain because rotations create fresh
  * files.
  */
@@ -121,7 +121,7 @@ export interface DayVerifyResult {
     | { ok: false; firstBrokenLineIndex: number; reason: string };
   /**
    * Daily seal verification — present only when a seal exists for
-   * the file's date. `null` when no seal is stored (legacy boot or
+   * the file's date. `null` when no seal is stored (uninitialized chain or
    * day not yet sealed).
    */
   sealMatch: boolean | null;
@@ -137,7 +137,7 @@ export interface VerifyAllAuditResult {
 }
 
 /**
- * Verify every `.q12.jsonl` file in the audit directory. Returns a
+ * Verify every `.permission-audit.jsonl` file in the audit directory. Returns a
  * structured report for the renderer's "verify" tile.
  */
 export function verifyAllAuditFiles(
@@ -149,7 +149,7 @@ export function verifyAllAuditFiles(
     return { totalFiles: 0, totalEntries: 0, intact: true, perDay: [] };
   }
   const files = readdirSync(auditDir)
-    .filter((f) => f.endsWith(".q12.jsonl"))
+    .filter((f) => f.endsWith(".permission-audit.jsonl"))
     .sort();
 
   const perDay: DayVerifyResult[] = [];
@@ -162,7 +162,7 @@ export function verifyAllAuditFiles(
     const lines = raw.split("\n").filter((l) => l.trim().length > 0);
     const result = verifyChain(secret, lines);
     let sealMatch: boolean | null = null;
-    const dateMatch = file.match(/^(\d{4}-\d{2}-\d{2})\.q12\.jsonl$/);
+    const dateMatch = file.match(/^(\d{4}-\d{2}-\d{2})\.permission-audit\.jsonl$/);
     if (sealStore && dateMatch && lines.length > 0) {
       const stored = sealStore.read(sealKeyName(dateMatch[1]));
       if (stored) {
@@ -199,12 +199,12 @@ export function getDefaultAuditDir(home: string): string {
 }
 
 /**
- * Return total bytes occupied by `.q12.jsonl` files — used by the
+ * Return total bytes occupied by `.permission-audit.jsonl` files — used by the
  * renderer's panel header ("12 files / 1.2 MB").
  */
 export function summarizeAuditDir(auditDir: string): { files: number; bytes: number } {
   if (!existsSync(auditDir)) return { files: 0, bytes: 0 };
-  const files = readdirSync(auditDir).filter((f) => f.endsWith(".q12.jsonl"));
+  const files = readdirSync(auditDir).filter((f) => f.endsWith(".permission-audit.jsonl"));
   let bytes = 0;
   for (const f of files) {
     try {

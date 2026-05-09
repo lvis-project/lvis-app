@@ -3,9 +3,9 @@ import "../../../../../test/renderer/setup.ts";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { AuditPanel } from "../permissions/AuditPanel.js";
-import type { Q12AuditEntrySummary } from "../../types.js";
+import type { PermissionAuditEntrySummary } from "../../types.js";
 
-function makeEntry(overrides: Partial<Q12AuditEntrySummary> = {}): Q12AuditEntrySummary {
+function makeEntry(overrides: Partial<PermissionAuditEntrySummary> = {}): PermissionAuditEntrySummary {
   return {
     auditId: "id-1",
     ts: "2026-05-09T12:00:00.000Z",
@@ -19,11 +19,11 @@ function makeEntry(overrides: Partial<Q12AuditEntrySummary> = {}): Q12AuditEntry
     directoryAllowed: true,
     layer: 1,
     ...overrides,
-  } as Q12AuditEntrySummary;
+  } as PermissionAuditEntrySummary;
 }
 
 function makeFetcher(opts: {
-  entries: Q12AuditEntrySummary[];
+  entries: PermissionAuditEntrySummary[];
   verify?:
     | { ok: true; intact: boolean; totalFiles: number; totalEntries: number; firstBrokenFile?: string; perDay: Array<{ file: string; totalLines: number; chainOk: boolean; firstBrokenLineIndex?: number; reason?: string; sealMatch: boolean | null }> }
     | { ok: false; error: string };
@@ -42,7 +42,7 @@ function makeFetcher(opts: {
       totalEntries: opts.entries.length,
       perDay: [
         {
-          file: "2026-05-09.q12.jsonl",
+          file: "2026-05-09.permission-audit.jsonl",
           totalLines: opts.entries.length,
           chainOk: true,
           sealMatch: true,
@@ -98,10 +98,10 @@ describe("AuditPanel", () => {
         intact: false,
         totalFiles: 1,
         totalEntries: 5,
-        firstBrokenFile: "2026-05-09.q12.jsonl",
+        firstBrokenFile: "2026-05-09.permission-audit.jsonl",
         perDay: [
           {
-            file: "2026-05-09.q12.jsonl",
+            file: "2026-05-09.permission-audit.jsonl",
             totalLines: 5,
             chainOk: false,
             firstBrokenLineIndex: 3,
@@ -117,7 +117,7 @@ describe("AuditPanel", () => {
     await waitFor(() => {
       const banner = screen.getByTestId("audit-integrity-banner");
       expect(banner.getAttribute("data-severity")).toBe("broken");
-      expect(banner.textContent).toContain("2026-05-09.q12.jsonl");
+      expect(banner.textContent).toContain("2026-05-09.permission-audit.jsonl");
       expect(banner.textContent).toContain("line 3");
     });
   });
@@ -217,7 +217,7 @@ describe("AuditPanel", () => {
         totalEntries: 1,
         perDay: [
           {
-            file: "2026-05-09.q12.jsonl",
+            file: "2026-05-09.permission-audit.jsonl",
             totalLines: 1,
             chainOk: true,
             sealMatch: null,

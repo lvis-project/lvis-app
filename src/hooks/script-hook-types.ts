@@ -1,7 +1,7 @@
 /**
- * Q12 Phase 4 — Layer 6 hook system: shell-script hook contract.
+ * Permission policy Phase 4 — Layer 6 hook system: shell-script hook contract.
  *
- * Spec ref: docs/architecture/q12-permission-policy-design.md §3 Layer 6.
+ * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 6.
  *
  * v1 individual shell-script hooks live under `~/.config/lvis/hooks/`
  * (deliberately outside `~/.lvis/` so a compromised LVIS process cannot
@@ -19,7 +19,7 @@
  *   }
  *
  *   stdout: {
- *     action: "allow" | "deny",       // v1 — modify deferred to Q13
+ *     action: "allow" | "deny",       // v1 — modify deferred to hook-signing follow-up
  *     reason: string                   // human-readable; surfaces in audit
  *   }
  *
@@ -33,7 +33,7 @@
  *   - Layer 6 hook *can* downgrade an upstream allow into deny.
  *   - That is: deny precedence wins. The hook's "allow" output is
  *     informational/audit-only when the upstream layers said deny.
- *   - `modify` action explicitly NOT supported in v1 (Q13 once signing
+ *   - `modify` action explicitly NOT supported in v1 (hook-signing follow-up once signing
  *     lands; until then `modify` is an attack vector).
  */
 import type { ToolCategory, ToolSource } from "../tools/types.js";
@@ -74,7 +74,7 @@ export interface ScriptHookStdin {
 
 /**
  * Wire-shape parsed from a hook script's stdout. v1 enum is "allow" |
- * "deny" only (Q13 introduces "modify" once signing is in place).
+ * "deny" only (hook-signing follow-up introduces "modify" once signing is in place).
  */
 export interface ScriptHookStdout {
   action: "allow" | "deny";

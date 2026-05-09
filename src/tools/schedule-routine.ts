@@ -118,6 +118,14 @@ function parseAllowedPlugins(raw: unknown): string[] | null {
   return [...new Set(ids)];
 }
 
+export function scheduleRoutineApprovalCacheKey(rawInput: unknown): string {
+  const input = (rawInput ?? {}) as Record<string, unknown>;
+  const allowedPlugins = parseAllowedPlugins(input.allowedPlugins);
+  if (!allowedPlugins) return "scope:invalid";
+  if (allowedPlugins.length === 0) return "scope:deny-all";
+  return `scope:allow:${[...allowedPlugins].sort().join(",")}`;
+}
+
 export function createScheduleRoutineTool(store: RoutinesStore): Tool {
   return createDynamicTool({
     name: "schedule_routine",
@@ -132,6 +140,7 @@ export function createScheduleRoutineTool(store: RoutinesStore): Tool {
       "prePrompt:'오늘의 데일리 리포트 작성'",
     source: "builtin",
     category: "write",
+    approvalCacheKey: scheduleRoutineApprovalCacheKey,
     jsonSchema: {
       type: "object",
       required: ["execution", "schedule"],
@@ -245,7 +254,7 @@ export function createScheduleRoutineTool(store: RoutinesStore): Tool {
         };
       }
 
-      // Q12 Layer 4 — translate legacy LLM-facing `allowedPlugins` field
+      // Permission policy Layer 4 — translate the LLM-facing `allowedPlugins` field
       // into the canonical `scope` discriminated union. Missing or []
       // both mean explicit deny-all; non-empty means explicit allow-list.
       const pluginIds = allowedPlugins.length === 0

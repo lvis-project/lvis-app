@@ -1,7 +1,7 @@
 /**
- * Q12 Phase 5 — HMAC chain for audit log tamper-evidence.
+ * HMAC chain for audit log tamper-evidence.
  *
- * Spec ref: docs/architecture/q12-permission-policy-design.md §3 Layer 7.
+ * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 7.
  *
  * Each audit line carries `prevHash = HMAC(secret, prevLine)` where
  * `prevLine` is the previous line's *exact JSON serialization* with
@@ -156,11 +156,11 @@ export function verifyLineHmac(
 
 /**
  * Build the chain — given a list of input objects (already shaped
- * as Q12 entries minus `prevHash`), return the same objects with
+ * as permission audit entries minus `prevHash`), return the same objects with
  * `prevHash` populated. The first entry's `prevHash` is the
  * genesis-marker HMAC.
  *
- * Used by `audit-logger`'s `appendQ12Entry` and by tests that need
+ * Used by `audit-logger`'s `appendPermissionAuditEntry` and by tests that need
  * to construct a known-good fixture.
  */
 export function buildChainedEntries<T extends Record<string, unknown>>(
@@ -300,17 +300,17 @@ export function verifyDailySeal(
 }
 
 /**
- * Extract a Q12-only line subset — the audit log file mixes legacy
- * telemetry entries (with `type` field) and Q12 entries (with
- * `decision` field). Chain verification only cares about the Q12
+ * Extract a permission-audit line subset — the audit log file mixes legacy
+ * telemetry entries (with `type` field) and permission audit entries (with
+ * `decision` field). Chain verification only cares about the permission audit
  * subset; this helper filters them out.
  *
- * Note: in the v1 implementation Q12 entries are written to a
- * dedicated file (`<date>.q12.jsonl`) so this helper is unused
+ * Note: in the v1 implementation permission audit entries are written to a
+ * dedicated file (`<date>.permission-audit.jsonl`) so this helper is unused
  * in the hot path. Kept exported for forensic tooling that walks
- * legacy mixed files.
+ * mixed telemetry files.
  */
-export function filterQ12Lines(lines: string[]): string[] {
+export function filterPermissionAuditLines(lines: string[]): string[] {
   return lines.filter((l) => {
     try {
       const parsed = JSON.parse(l);

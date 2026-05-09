@@ -97,7 +97,7 @@ function resolveInvocationCategory(
   tool: import("./base.js").Tool,
   finalInput: Record<string, unknown>,
 ): ToolCategory {
-  // Q12 5-axis: meta / shell / network are first-class manifest categories
+  // Permission policy 5-axis: meta / shell / network are first-class manifest categories
   // and bypass the read/write input-aware probe. Only `write` (the default)
   // and `read` are derived from the tool's runtime self-classification.
   if (tool.category === "meta") return "meta";
@@ -203,7 +203,12 @@ export interface ToolPermissionContext {
   headless?: boolean;
   allowedPluginIds?: ReadonlySet<string>;
   /**
-   * Q12 P2.5 — Layer 1 path policy. User-configured directories from
+   * Internal per-invocation approval cache identity. The executor derives
+   * this from Tool.approvalCacheKey after hooks have finalized args.
+   */
+  approvalCacheKey?: string;
+  /**
+   * Permission policy P2.5 — Layer 1 path policy. User-configured directories from
    * `permissions.additionalDirectories` in settings.json. Boot threads
    * this through every executeAll() invocation. The executor merges with
    * computed defaults via {@link buildAllowedScope}; an `undefined` value
@@ -211,7 +216,7 @@ export interface ToolPermissionContext {
    */
   additionalDirectories?: readonly string[];
   /**
-   * Q12 P2.5 §9 — trust origin classification carried with each tool
+   * Permission policy P2.5 §9 — trust origin classification carried with each tool
    * invocation. Audited and propagated into approval-request payloads.
    * Distinguishes user-keyboard input (trusted) from system / plugin /
    * proactive (untrusted) origins. Defaults to "user" when unset.
@@ -220,7 +225,7 @@ export interface ToolPermissionContext {
 }
 
 /**
- * Q12 Phase 2 — bundled execution options for {@link ToolExecutor.executeAll}
+ * Permission policy Phase 2 — bundled execution options for {@link ToolExecutor.executeAll}
  * and {@link ToolExecutor.executeOne}. Replaces the legacy 9-positional-arg
  * shape so adding a new pipeline-wide concern (per-turn telemetry, audit
  * correlation id, …) doesn't ripple through every callsite. All fields
@@ -263,6 +268,19 @@ function maskDisplayValue(value: unknown): unknown {
 
 function maskToolInputForDisplay(input: Record<string, unknown>): Record<string, unknown> {
   return maskDisplayValue(input) as Record<string, unknown>;
+}
+
+function approvalCacheKeyFor(
+  tool: import("./base.js").Tool,
+  input: Record<string, unknown>,
+): string | undefined {
+  const rawKey = tool.approvalCacheKey?.(input);
+  if (rawKey === undefined) return undefined;
+  const key = rawKey.trim();
+  if (!key) {
+    throw new Error(`approvalCacheKey for ${tool.name} returned an empty key`);
+  }
+  return `${tool.name}:${key}`;
 }
 
 function emitToolStart(
@@ -473,7 +491,7 @@ export class ToolExecutor {
    * (PermissionManager.checkDetailed 의 새 가드). Brain 트리거가 자동
    * 실행되는 destructive 작업 차단막.
    *
-   * Q12 Phase 2: {@link ExecuteOptions} bundle replaces the legacy 7
+   * Permission policy Phase 2: {@link ExecuteOptions} bundle replaces the legacy 7
    * positional args so adding a new pipeline concern doesn't ripple
    * through every callsite.
    */
@@ -546,6 +564,11 @@ export class ToolExecutor {
     const finalInput = preResult.action === "modify" && preResult.updatedInput
       ? preResult.updatedInput
       : toolUse.input;
+    const approvalCacheKey = approvalCacheKeyFor(tool, finalInput);
+    const invocationPermissionContext = {
+      ...permissionContext,
+      ...(approvalCacheKey ? { approvalCacheKey } : {}),
+    };
 
     // ── Step 2.5: Bash AST Pre-Validator ────────────
     //
@@ -569,7 +592,7 @@ export class ToolExecutor {
 
     const invocationCategory = resolveInvocationCategory(tool, finalInput);
     const targetFilePaths = extractTargetFilePaths(tool, finalInput);
-    // Q12 P2.5 — frozen-canonical contract: canonicalize ONCE here and
+    // Permission policy P2.5 — frozen-canonical contract: canonicalize ONCE here and
     // reuse the same string for Layer 0 (sensitive-path) + Layer 1
     // (allowed-directories) checks below. No layer re-resolves the path.
     const canonicalTargets = targetFilePaths.map((filePath) => ({
@@ -616,7 +639,7 @@ export class ToolExecutor {
       return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
     }
 
-    // ── Step 2.6: Layer 1 (Q12 P2.5) — Allowed Directories ─────
+    // ── Step 2.6: Layer 1 (Permission policy P2.5) — Allowed Directories ─────
     //
     // Frozen-canonical: reuse `canonicalTargetPath` from above (already
     // realpath'd + case-folded). No re-canonicalization in this block.
@@ -737,7 +760,7 @@ export class ToolExecutor {
 
     // ── Step 3: Permission (source-aware) ───────────
     //
-    // Q12 Layer 3 — `meta` category tools take an explicit decisionOverride
+    // Permission policy Layer 3 — `meta` category tools take an explicit decisionOverride
     // path instead of running the standard matrix:
     //
     //   `always-allow-with-audit` (e.g. ask_user_question)
@@ -770,9 +793,9 @@ export class ToolExecutor {
         source,
         invocationCategory,
         proactiveOrigin,
-        permissionContext,
+        invocationPermissionContext,
       );
-      // Q12 — meta tools with decisionOverride="ask" force the approval
+      // Permission policy — meta tools with decisionOverride="ask" force the approval
       // modal regardless of the registry descriptor's "override" lane.
       // The override means "skip auto-allow lanes"; the registry already
       // returns "allow" for `meta` (override sentinel) so we must elevate
@@ -803,7 +826,7 @@ export class ToolExecutor {
             finalInput,
             buildAllowedScope(permissionContext.additionalDirectories).directories,
             sensitivePathPattern ? [sensitivePathPattern] : [],
-            permissionContext,
+            invocationPermissionContext,
           );
           if (reviewerResult.allowed) {
             permissionResult = reviewerResult.permissionResult;
@@ -874,7 +897,7 @@ export class ToolExecutor {
           if (decision.choice.startsWith("deny")) {
             // deny-always: 영구 거부 규칙 추가
             if (decision.choice === "deny-always" && this.permissionManager) {
-              const pattern = decision.rememberPattern ?? toolUse.name;
+              const pattern = approvalCacheKey ?? decision.rememberPattern ?? toolUse.name;
               await this.permissionManager.addAlwaysDeniedPersist(pattern);
             }
             const msg = `[승인 거부] 도구 '${toolUse.name}' — 사용자가 실행을 거부했습니다.`;
@@ -889,7 +912,7 @@ export class ToolExecutor {
 
           // allow-always: 영구 허용 규칙 추가
           if (decision.choice === "allow-always" && this.permissionManager) {
-            const pattern = decision.rememberPattern ?? toolUse.name;
+            const pattern = approvalCacheKey ?? decision.rememberPattern ?? toolUse.name;
             await this.permissionManager.addAlwaysAllowedPersist(pattern);
           }
           // allow-once / allow-always: 실행 계속

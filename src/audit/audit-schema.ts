@@ -1,7 +1,7 @@
 /**
- * Q12 Phase 5 — Audit schema (Layer 7).
+ * Audit schema (Layer 7).
  *
- * Spec ref: docs/architecture/q12-permission-policy-design.md §3 Layer 7,
+ * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 7,
  * §11 v2.1 binding decisions.
  *
  * Discriminated union per `decision` field. Every entry shares
@@ -9,12 +9,12 @@
  * file defines the shapes only — emission lives in `audit-logger.ts`
  * and chain construction in `hmac-chain.ts`.
  *
- * The legacy `AuditEntry` (telemetry-style turn / dlp / approval)
- * stays in `audit-logger.ts` for backward compatibility. Q12 entries
- * are a *separate channel* — written to the same JSONL file but
- * tagged via the `decision` discriminator (the legacy channel uses
- * `type` instead). Consumers that filter on `decision` get only Q12
- * permission events without seeing telemetry noise.
+ * The telemetry `AuditEntry` (turn / dlp / approval) remains the
+ * general telemetry channel in `audit-logger.ts`. Permission audit entries
+ * are a separate channel — written to their own JSONL file and
+ * tagged via the `decision` discriminator (the telemetry channel uses
+ * `type` instead). Consumers that filter on `decision` get only permission
+ * events without seeing telemetry noise.
  */
 import type { ToolCategory, ToolSource } from "../tools/types.js";
 import type { ExecutionMode } from "../permissions/permission-manager.js";
@@ -54,7 +54,7 @@ export interface HookResult {
 export type RoutineScopeSnapshot = Record<string, unknown>;
 
 /**
- * Common fields present on every Q12 audit entry. The chain link is
+ * Common fields present on every permission audit entry. The chain link is
  * the `prevHash` field — `audit-logger`'s emitter computes
  * `prevHash = HMAC(secret, prevLine)` where `prevLine` is the
  * previously-emitted line's *full JSON*. This binds each entry to
@@ -185,7 +185,7 @@ export interface AuditManifestViolation extends AuditCommon {
   attemptedOperation: string;
 }
 
-export type Q12AuditEntry =
+export type PermissionAuditEntry =
   | AuditAllow
   | AuditAsk
   | AuditDeny
@@ -194,17 +194,17 @@ export type Q12AuditEntry =
   | AuditModeChange
   | AuditManifestViolation;
 
-export type Q12AuditEntryInput = Q12AuditEntry extends infer Entry
-  ? Entry extends Q12AuditEntry
+export type PermissionAuditEntryInput = PermissionAuditEntry extends infer Entry
+  ? Entry extends PermissionAuditEntry
     ? Omit<Entry, "prevHash">
     : never
   : never;
 
 /**
- * Type guard — distinguishes Q12 entries from legacy
+ * Type guard — distinguishes permission audit entries from legacy
  * `AuditEntry` (which uses `type` instead of `decision`).
  */
-export function isQ12AuditEntry(value: unknown): value is Q12AuditEntry {
+export function isPermissionAuditEntry(value: unknown): value is PermissionAuditEntry {
   if (typeof value !== "object" || value === null) return false;
   const obj = value as Record<string, unknown>;
   return typeof obj.decision === "string" && typeof obj.auditId === "string";

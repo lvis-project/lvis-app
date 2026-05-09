@@ -1,7 +1,7 @@
 /**
- * Q12 P4 Area B — script-hook runner tests.
+ * Permission policy P4 Area B — script-hook runner tests.
  *
- * Spec ref: docs/architecture/q12-permission-policy-design.md §3 Layer 6.
+ * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 6.
  */
 import { describe, expect, it } from "vitest";
 import { resolve } from "node:path";
@@ -35,7 +35,7 @@ const samplePayload: ScriptHookStdin = {
   trustOrigin: "user-keyboard",
 };
 
-describe("Q12 P4 parseHookStdout", () => {
+describe("Permission policy P4 parseHookStdout", () => {
   it("parses {action:'allow', reason:'...'}", () => {
     expect(parseHookStdout('{"action":"allow","reason":"ok"}')).toEqual({
       action: "allow",
@@ -57,7 +57,7 @@ describe("Q12 P4 parseHookStdout", () => {
     expect(parseHookStdout('{"action":"allow"}')).toBeNull(); // missing reason
   });
 
-  it("rejects 'modify' (v1 deferred to Q13)", () => {
+  it("rejects 'modify' (v1 deferred to hook-signing follow-up)", () => {
     expect(
       parseHookStdout('{"action":"modify","reason":"x","updatedInput":{}}'),
     ).toBeNull();
@@ -75,7 +75,7 @@ describe("Q12 P4 parseHookStdout", () => {
   });
 });
 
-describe("Q12 P4 runOneHookScript", () => {
+describe("Permission policy P4 runOneHookScript", () => {
   it("runs an allow-emitting hook and parses the verdict", async () => {
     const r = await runOneHookScript(fixtureHook("pre-allow.sh"), samplePayload);
     expect(r.decision).toBe("allow");
@@ -133,7 +133,7 @@ describe("Q12 P4 runOneHookScript", () => {
   });
 });
 
-describe("Q12 P4 runHookChain", () => {
+describe("Permission policy P4 runHookChain", () => {
   it("returns allow when chain is empty", async () => {
     const r = await runHookChain([], samplePayload);
     expect(r.decision).toBe("allow");

@@ -1,5 +1,5 @@
 /**
- * Q12 Layer 8 slash-origin sanitizer.
+ * Permission policy Layer 8 slash-origin sanitizer.
  *
  * Non-user-origin text can be displayed or sent as ordinary prompt text, but
  * it must not retain a leading slash that would dispatch host commands.

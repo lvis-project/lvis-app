@@ -5,7 +5,7 @@ import { Input } from "../../../components/ui/input.js";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
 import { Separator } from "../../../components/ui/separator.js";
 import { EXEC_MODE_OPTIONS } from "../constants.js";
-import type { ExecMode, PermissionRule } from "../types.js";
+import type { ExecMode, HookTrustRow, PermissionRule } from "../types.js";
 
 export function PermissionsTab() {
   // ── 로딩 상태 ─────────────────────────────────────
@@ -38,16 +38,18 @@ export function PermissionsTab() {
   const [newPattern, setNewPattern] = useState("");
   const [newAction, setNewAction] = useState<"allow" | "deny">("allow");
   const [rulesBusy, setRulesBusy] = useState(false);
+  const [quarantinedHooks, setQuarantinedHooks] = useState<HookTrustRow[]>([]);
 
   // ── 초기 fetch (탭 진입 시) ───────────────────────
   const fetchAll = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [modeRes, policyRes, rulesRes] = await Promise.all([
+      const [modeRes, policyRes, rulesRes, hookTrustRes] = await Promise.all([
         window.lvis.permission.getMode(),
         window.lvis.policy.get(),
         window.lvis.permission.listRules(),
+        window.lvis.permission.hookTrustList(),
       ]);
       setMode((modeRes.mode as ExecMode) ?? "default");
       setRequireExplicit(policyRes.requireExplicitApproval);
@@ -55,6 +57,7 @@ export function PermissionsTab() {
       setPolicySource((policyRes.source as "defaults" | "user" | "admin" | "merged") ?? "defaults");
       setPolicyAdminPath(policyRes.adminPath as string | undefined);
       setRules(rulesRes);
+      setQuarantinedHooks(hookTrustRes.ok ? hookTrustRes.disabled : []);
     } catch (e) {
       setError((e as Error).message ?? "데이터를 불러오지 못했습니다.");
     } finally {
@@ -147,6 +150,46 @@ export function PermissionsTab() {
             <span className="mt-0.5 flex-shrink-0">{banner.type === "error" ? "⚠" : "🔒"}</span>
             <span>{banner.msg}</span>
             <button className="ml-auto flex-shrink-0 opacity-60 hover:opacity-100" onClick={() => setBanner(null)}>✕</button>
+          </div>
+        )}
+
+        {quarantinedHooks.length > 0 && (
+          <div
+            data-testid="hook-quarantine-notice"
+            className="rounded-md border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-[12px] text-yellow-700 dark:text-yellow-300"
+          >
+            <div className="flex items-start gap-2">
+              <Badge variant="secondary" className="mt-0.5 text-[10px] text-yellow-700 dark:text-yellow-300">
+                검토 대기 {quarantinedHooks.length}
+              </Badge>
+              <div className="min-w-0 flex-1">
+                <p className="font-medium">격리된 hook 파일이 있습니다.</p>
+                <p className="mt-1 text-[11px]">
+                  채팅 입력창에서 <code className="rounded bg-background/70 px-1 font-mono">/permission hooks list</code> 를 실행해
+                  파일을 확인한 뒤 accept 또는 reject 하세요.
+                </p>
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {quarantinedHooks.slice(0, 3).map((hook) => (
+                    <code key={hook.fileName} className="rounded border border-yellow-500/30 bg-background/70 px-1.5 py-0.5 font-mono text-[10px]">
+                      {hook.fileName}
+                    </code>
+                  ))}
+                  {quarantinedHooks.length > 3 && (
+                    <span className="text-[10px] text-yellow-700/80 dark:text-yellow-300/80">
+                      +{quarantinedHooks.length - 3}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2 text-[11px]"
+                onClick={() => void fetchAll()}
+              >
+                새로고침
+              </Button>
+            </div>
           </div>
         )}
 

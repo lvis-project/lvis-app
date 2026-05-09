@@ -215,7 +215,7 @@ export interface PluginManifest {
     {
       description: string;
       /**
-       * Q12 5-axis permission category used by the host executor. Omitted
+       * Permission policy 5-axis permission category used by the host executor. Omitted
        * categories are treated as "write" at registration time so plugin
        * tools fail closed until authors declare read-only intent explicitly.
        *
@@ -237,7 +237,7 @@ export interface PluginManifest {
       /** §6.4 — name of the replacement tool (transparent redirect). */
       replacedBy?: string;
       /**
-       * Q12 P2.5 advisory — ordered list of input-schema property names
+       * Permission policy P2.5 advisory — ordered list of input-schema property names
        * that contain filesystem path strings. The host executor uses
        * this hint at call-time to extract path-typed inputs for the
        * Layer 0 (sensitive-paths) and Layer 1 (allowed-directories)

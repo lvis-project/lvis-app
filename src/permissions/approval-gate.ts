@@ -55,7 +55,7 @@ function maskArgsForDisplay(value: unknown, detections: Set<string>): unknown {
 export type ApprovalMode = "default" | "plan" | "full_auto";
 
 /**
- * Q12 P2.5 — discriminated kinds for the approval modal. Default `"tool"`
+ * Permission policy P2.5 — discriminated kinds for the approval modal. Default `"tool"`
  * is the normal §6.3 Layer 3 ask; `"out-of-allowed-dir"` is the Layer 1
  * directory-confirm variant which carries auto-suggest payload.
  */
@@ -65,7 +65,7 @@ export interface ApprovalRequest {
   id: string;
   category: "tool";
   /**
-   * Q12 P2.5 — discriminator for the renderer to pick the right card.
+   * Permission policy P2.5 — discriminator for the renderer to pick the right card.
    * Defaults to `"tool"` when omitted (backwards-compatible).
    */
   kind?: ApprovalKind;
@@ -77,7 +77,7 @@ export interface ApprovalRequest {
   /** PolicyFile.requireExplicitApproval — renderer가 dismiss 동작을 분기하는 데 사용 */
   requireExplicit: boolean;
   /**
-   * Q12 P2.5 — Layer 1 directory-confirm payload. Present iff
+   * Permission policy P2.5 — Layer 1 directory-confirm payload. Present iff
    * `kind === "out-of-allowed-dir"`. Carries the candidate parent path
    * + adjacency warnings so the renderer can render the auto-suggest
    * UI without re-running validation.
@@ -89,7 +89,7 @@ export interface ApprovalRequest {
     adjacencyWarnings: readonly string[];
   };
   /**
-   * Q12 P2.5 §9 — trust origin classification (user / system / plugin /
+   * Permission policy P2.5 §9 — trust origin classification (user / system / plugin /
    * proactive / routine / agent). Audited; renderer may surface badge.
    */
   trustOrigin?: string;
@@ -333,7 +333,7 @@ export class ApprovalGate {
     // and we are NOT in plan mode, skip the confirmation dialog. Plan
     // mode still blocks (plan = dry-run / inspect only).
     //
-    // Q12 P2.5: directory-confirm requests (kind="out-of-allowed-dir")
+    // Permission policy P2.5: directory-confirm requests (kind="out-of-allowed-dir")
     // MUST NOT auto-approve via §S4 — even a read of an out-of-allowed
     // path is a scope-grant decision the user has to make explicitly.
     if (

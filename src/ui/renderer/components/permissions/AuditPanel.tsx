@@ -1,12 +1,12 @@
 /**
- * Q12 Phase 5 — AuditPanel.
+ * AuditPanel.
  *
  * Side panel surfacing the discriminated-union audit log + the HMAC
  * chain integrity verdict. Driven by:
  *   - `window.lvis.permission.auditShow(N)` — recent entries.
  *   - `window.lvis.permission.auditVerify()` — chain check.
  *
- * Spec ref: docs/architecture/q12-permission-policy-design.md §3
+ * Spec ref: docs/architecture/permission-policy-design.md §3
  * Layer 7, §3 Layer 8 (`/permission audit show|verify`).
  *
  * The panel is filterable by decision type (allow/ask/deny/deferred/
@@ -22,7 +22,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
 import { Badge } from "../../../../components/ui/badge.js";
 import { Button } from "../../../../components/ui/button.js";
-import type { Q12AuditEntrySummary } from "../../types.js";
+import type { PermissionAuditEntrySummary } from "../../types.js";
 
 type DecisionFilter = "all" | "allow" | "ask" | "deny" | "deferred" | "mode_change" | "manifest_violation";
 
@@ -49,7 +49,7 @@ interface AuditPanelProps {
   /** Override fetcher for tests. Defaults to window.lvis.permission.* */
   fetcher?: {
     show: (last: number) => Promise<
-      | { ok: true; entries: Q12AuditEntrySummary[]; total: number; summary: { files: number; bytes: number } }
+      | { ok: true; entries: PermissionAuditEntrySummary[]; total: number; summary: { files: number; bytes: number } }
       | { ok: false; error: string }
     >;
     verify: () => Promise<
@@ -67,7 +67,7 @@ export function AuditPanel({
   fetcher,
   initialLast = 50,
 }: AuditPanelProps): ReactElement | null {
-  const [entries, setEntries] = useState<Q12AuditEntrySummary[]>([]);
+  const [entries, setEntries] = useState<PermissionAuditEntrySummary[]>([]);
   const [total, setTotal] = useState(0);
   const [summary, setSummary] = useState<{ files: number; bytes: number }>({ files: 0, bytes: 0 });
   const [verify, setVerify] = useState<VerifyResult | null>(null);
@@ -322,7 +322,7 @@ function decisionBadgeClass(decision: string): string {
   }
 }
 
-function decisionSummary(entry: Q12AuditEntrySummary): string {
+function decisionSummary(entry: PermissionAuditEntrySummary): string {
   const tool = typeof entry.tool === "string" ? entry.tool : "";
   if (entry.decision === "mode_change") {
     return `${entry.fromMode ?? ""} → ${entry.toMode ?? ""}${entry.durable ? " (durable)" : ""}`;

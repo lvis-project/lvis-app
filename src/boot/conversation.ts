@@ -58,7 +58,7 @@ export function createSystemPromptBuilder(opts: {
 }
 
 export async function createPermissionManager(): Promise<PermissionManager> {
-  // Q12 — register the 5-axis ToolCategory descriptors before any
+  // Permission policy — register the 5-axis ToolCategory descriptors before any
   // PermissionManager.checkDetailed() can run. Idempotent: re-calls
   // simply overwrite the registry entries with the same values.
   registerStandardCategories();
@@ -117,7 +117,7 @@ export async function createApprovalGate(
 }
 
 export function createHookRunner(): HookRunner {
-  // Q12 single hook path: production script hooks are discovered by
+  // Permission policy single hook path: production script hooks are discovered by
   // wireHookSystem() from discrete pre/post/perm-*.sh files under
   // ~/.config/lvis/hooks/. Legacy hooks.json command/http loading is not
   // wired at boot because it bypasses the strict quarantine/accept flow.
@@ -195,7 +195,7 @@ export function createRoutineConversationLoop(
     // Skill overlay is interactive-only — routine sessions are headless.
   });
   routineSystemPromptBuilder.setRoutineMode(true);
-  // Q12 Layer 4 — translate the discriminated scope into the loop's
+  // Permission policy Layer 4 — translate the discriminated scope into the loop's
   // ConversationLoopDeps shape. The scope must already be normalized
   // (no `inherit`) by the dispatcher before this factory runs.
   const scope = opts.scope;

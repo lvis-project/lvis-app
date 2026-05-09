@@ -1,7 +1,7 @@
 /**
- * Q12 Phase 5 — HMAC chain integrity tests.
+ * HMAC chain integrity tests.
  *
- * Spec ref: docs/architecture/q12-permission-policy-design.md §3 Layer 7.
+ * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 7.
  *
  * Coverage:
  *   1. Round-trip: build chain → verify → ok.
@@ -28,7 +28,7 @@ import {
   computeLineHmac,
   ensureAuditSecret,
   FileSecretStore,
-  filterQ12Lines,
+  filterPermissionAuditLines,
   GENESIS_MARKER,
   MemorySecretStore,
   sealDayFromFile,
@@ -236,7 +236,7 @@ describe("daily seal lifecycle", () => {
     const secret = "dd".repeat(32);
     const store = new MemorySecretStore();
     const date = "2026-05-09";
-    const filePath = join(workDir, `${date}.q12.jsonl`);
+    const filePath = join(workDir, `${date}.permission-audit.jsonl`);
 
     const entries = buildChainedEntries(secret, [
       { decision: "allow", n: 1 },
@@ -252,7 +252,7 @@ describe("daily seal lifecycle", () => {
   it("sealDayFromFile returns null on empty file", () => {
     const secret = "dd".repeat(32);
     const store = new MemorySecretStore();
-    const filePath = join(workDir, "empty.q12.jsonl");
+    const filePath = join(workDir, "empty.permission-audit.jsonl");
     writeFileSync(filePath, "");
     expect(sealDayFromFile(secret, store, filePath, "2026-05-09")).toBe(null);
   });
@@ -267,7 +267,7 @@ describe("daily seal lifecycle", () => {
     const secret = "ee".repeat(32);
     const store = new MemorySecretStore();
     const date = "2026-05-09";
-    const filePath = join(workDir, `${date}.q12.jsonl`);
+    const filePath = join(workDir, `${date}.permission-audit.jsonl`);
     const entries = buildChainedEntries(secret, [
       { decision: "allow", n: 1 },
       { decision: "deny", n: 2 },
@@ -282,7 +282,7 @@ describe("daily seal lifecycle", () => {
     const secret = "ee".repeat(32);
     const store = new MemorySecretStore();
     const date = "2026-05-09";
-    const filePath = join(workDir, `${date}.q12.jsonl`);
+    const filePath = join(workDir, `${date}.permission-audit.jsonl`);
     const entries = buildChainedEntries(secret, [
       { decision: "allow", n: 1 },
       { decision: "deny", n: 2 },
@@ -311,7 +311,7 @@ describe("daily seal lifecycle", () => {
   it("verifyDailySeal — no-seal when seal was never written", () => {
     const secret = "ee".repeat(32);
     const store = new MemorySecretStore();
-    const filePath = join(workDir, "2026-05-09.q12.jsonl");
+    const filePath = join(workDir, "2026-05-09.permission-audit.jsonl");
     writeFileSync(filePath, JSON.stringify({ decision: "allow", prevHash: "x" }) + "\n");
     const result = verifyDailySeal(secret, store, filePath, "2026-05-09");
     expect(result).toEqual({ ok: false, reason: "no-seal" });
@@ -343,7 +343,7 @@ describe("daily seal lifecycle", () => {
     const oldSecret = "11".repeat(32);
     const newSecret = "22".repeat(32);
     const store = new MemorySecretStore();
-    const filePath = join(workDir, "2026-05-09.q12.jsonl");
+    const filePath = join(workDir, "2026-05-09.permission-audit.jsonl");
     const entries = buildChainedEntries(oldSecret, [{ decision: "allow", n: 1 }]);
     writeFileSync(filePath, JSON.stringify(entries[0]) + "\n");
     sealDayFromFile(oldSecret, store, filePath, "2026-05-09");
@@ -354,11 +354,11 @@ describe("daily seal lifecycle", () => {
   });
 });
 
-describe("filterQ12Lines", () => {
-  it("filters mixed legacy + Q12 lines", () => {
+describe("filterPermissionAuditLines", () => {
+  it("filters mixed legacy + permission audit lines", () => {
     const legacy = JSON.stringify({ type: "turn", sessionId: "s1" });
-    const q12 = JSON.stringify({ decision: "allow", auditId: "id-1" });
+    const permissionAudit = JSON.stringify({ decision: "allow", auditId: "id-1" });
     const broken = "<<not-json>>";
-    expect(filterQ12Lines([legacy, q12, broken])).toEqual([q12]);
+    expect(filterPermissionAuditLines([legacy, permissionAudit, broken])).toEqual([permissionAudit]);
   });
 });

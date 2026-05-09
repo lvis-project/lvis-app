@@ -1,7 +1,7 @@
 /**
- * Q12 Phase 4 — Layer 6 hook TOFU trust workflow.
+ * Permission policy Phase 4 — Layer 6 hook TOFU trust workflow.
  *
- * Spec ref: docs/architecture/q12-permission-policy-design.md §3 Layer 6.
+ * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 6.
  *
  * Boot-time flow:
  *
@@ -15,7 +15,7 @@
  *
  * Atomic cutover (CLAUDE.md No-Fallback): production boot runs in
  * **strict-deny** mode — every untrusted hook is automatically disabled.
- * There's no renderer fallback or silent allow path.
+ * There's no renderer approval prompt or silent allow path.
  */
 import { existsSync } from "node:fs";
 import {

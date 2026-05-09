@@ -1,5 +1,5 @@
 /**
- * sensitive-paths unit tests — Tier S1+S2 + Q12 P2.5 expansion
+ * sensitive-paths unit tests — Tier S1+S2 + Permission policy P2.5 expansion
  *
  * Covers SENSITIVE_PATH_PATTERNS, isSensitivePath(), policyMatchPaths(),
  * canonicalizePathForMatch (frozen-canonical + bounded walk-up), and
@@ -41,7 +41,7 @@ describe("SENSITIVE_PATH_PATTERNS", () => {
     expect(SENSITIVE_PATH_PATTERNS).toContain("**/lvis-secrets.json");
   });
 
-  it("Q12 P2.5 — contains OS sensitive paths", () => {
+  it("Permission policy P2.5 — contains OS sensitive paths", () => {
     expect(SENSITIVE_PATH_PATTERNS).toContain("**/etc/shadow");
     expect(SENSITIVE_PATH_PATTERNS).toContain("**/etc/sudoers");
     expect(SENSITIVE_PATH_PATTERNS).toContain("**/.netrc");
@@ -60,7 +60,7 @@ describe("SENSITIVE_PATH_PATTERNS", () => {
     expect(SENSITIVE_PATH_PATTERNS).toContain("**/id_ecdsa");
   });
 
-  it("Q12 P2.5 — contains LVIS-internal sensitive paths", () => {
+  it("Permission policy P2.5 — contains LVIS-internal sensitive paths", () => {
     expect(SENSITIVE_PATH_PATTERNS).toContain("**/.lvis/audit/**");
     expect(SENSITIVE_PATH_PATTERNS).toContain("**/.lvis/audit.log");
     expect(SENSITIVE_PATH_PATTERNS).toContain(
@@ -179,9 +179,9 @@ describe("isSensitivePath — negative cases", () => {
   });
 });
 
-// ─── Q12 P2.5 — Layer 0 expansion: OS + LVIS-internal hits ───────
+// ─── Permission policy P2.5 — Layer 0 expansion: OS + LVIS-internal hits ───────
 
-describe("isSensitivePath — Q12 P2.5 OS sensitive paths", () => {
+describe("isSensitivePath — Permission policy P2.5 OS sensitive paths", () => {
   it("matches /etc/shadow (and macOS /private/etc/shadow form)", () => {
     expect(isSensitivePath("/etc/shadow")).toBe("**/etc/shadow");
     expect(isSensitivePath("/private/etc/shadow")).toBe("**/etc/shadow");
@@ -232,7 +232,7 @@ describe("isSensitivePath — Q12 P2.5 OS sensitive paths", () => {
   });
 });
 
-describe("isSensitivePath — Q12 P2.5 LVIS-internal", () => {
+describe("isSensitivePath — Permission policy P2.5 LVIS-internal", () => {
   it("matches ~/.lvis/audit/today.jsonl", () => {
     expect(isSensitivePath("/Users/ken/.lvis/audit/today.jsonl")).toBe(
       "**/.lvis/audit/**",
@@ -264,7 +264,7 @@ describe("isSensitivePath — Q12 P2.5 LVIS-internal", () => {
   });
 });
 
-// ─── Q12 P2.5 — canonicalizePathForMatch (frozen-canonical) ───────
+// ─── Permission policy P2.5 — canonicalizePathForMatch (frozen-canonical) ───────
 
 describe("canonicalizePathForMatch", () => {
   it("resolves .. segments via path.resolve()", () => {

@@ -1,7 +1,7 @@
 /**
- * Q12 Phase 5 — `/permission audit` + top-level slash dispatcher tests.
+ * `/permission audit` + top-level slash dispatcher tests.
  *
- * Spec ref: docs/architecture/q12-permission-policy-design.md §3 Layer 7,
+ * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 7,
  * §3 Layer 8.
  *
  * Coverage:
@@ -138,7 +138,7 @@ describe("parsePermissionHooksCommand", () => {
     });
   });
 
-  it("parses 'reject pre-foo.sh' (Q12 architect ③ — destructive expunge)", () => {
+  it("parses 'reject pre-foo.sh' (architect ③ — destructive expunge)", () => {
     expect(parsePermissionHooksCommand("reject pre-foo.sh")).toEqual({
       verb: "hooks",
       sub: "reject",
@@ -358,11 +358,11 @@ describe("readRecentAuditEntries", () => {
       { decision: "allow", auditId: "d2-a", ts: "2026-05-09T00:00:00Z", trustOrigin: "user-keyboard", tool: "t3" },
     ]);
     writeFileSync(
-      join(auditDir, "2026-05-08.q12.jsonl"),
+      join(auditDir, "2026-05-08.permission-audit.jsonl"),
       day1.map((e) => JSON.stringify(e)).join("\n") + "\n",
     );
     writeFileSync(
-      join(auditDir, "2026-05-09.q12.jsonl"),
+      join(auditDir, "2026-05-09.permission-audit.jsonl"),
       day2.map((e) => JSON.stringify(e)).join("\n") + "\n",
     );
 
@@ -382,7 +382,7 @@ describe("readRecentAuditEntries", () => {
       { decision: "allow", auditId: "3", ts: "t3", trustOrigin: "user-keyboard", tool: "c" },
     ]);
     writeFileSync(
-      join(auditDir, "2026-05-09.q12.jsonl"),
+      join(auditDir, "2026-05-09.permission-audit.jsonl"),
       day.map((e) => JSON.stringify(e)).join("\n") + "\n",
     );
     const result = readRecentAuditEntries(auditDir, 2);
@@ -390,11 +390,11 @@ describe("readRecentAuditEntries", () => {
     expect(result.map((e) => (e as { auditId: string }).auditId)).toEqual(["3", "2"]);
   });
 
-  it("ignores legacy non-Q12 lines (no `decision` field)", () => {
+  it("ignores legacy non-permission audit lines (no `decision` field)", () => {
     const auditDir = join(workDir, "audit");
     mkdirSync(auditDir, { recursive: true });
     writeFileSync(
-      join(auditDir, "2026-05-09.q12.jsonl"),
+      join(auditDir, "2026-05-09.permission-audit.jsonl"),
       [
         JSON.stringify({ type: "turn", sessionId: "s1" }),
         JSON.stringify({ decision: "allow", auditId: "x1", ts: "t", trustOrigin: "user-keyboard", tool: "a", source: "builtin", category: "read", directory: "/tmp", directoryAllowed: true, layer: 1, prevHash: "h" }),
@@ -416,7 +416,7 @@ describe("verifyAllAuditFiles", () => {
       { decision: "allow", auditId: "1", ts: "t1", trustOrigin: "user-keyboard", tool: "a" },
       { decision: "deny", auditId: "2", ts: "t2", trustOrigin: "user-keyboard", tool: "b" },
     ]);
-    const file = join(auditDir, "2026-05-09.q12.jsonl");
+    const file = join(auditDir, "2026-05-09.permission-audit.jsonl");
     writeFileSync(file, entries.map((e) => JSON.stringify(e)).join("\n") + "\n");
     sealDayFromFile(secret, sealStore, file, "2026-05-09");
 
@@ -441,12 +441,12 @@ describe("verifyAllAuditFiles", () => {
     const obj = JSON.parse(lines[1]) as { tool: string };
     obj.tool = "TAMPERED";
     lines[1] = JSON.stringify(obj);
-    const file = join(auditDir, "2026-05-09.q12.jsonl");
+    const file = join(auditDir, "2026-05-09.permission-audit.jsonl");
     writeFileSync(file, lines.join("\n") + "\n");
 
     const result = verifyAllAuditFiles(auditDir, secret);
     expect(result.intact).toBe(false);
-    expect(result.firstBrokenFile).toBe("2026-05-09.q12.jsonl");
+    expect(result.firstBrokenFile).toBe("2026-05-09.permission-audit.jsonl");
     expect(result.perDay[0].result.ok).toBe(false);
     if (!result.perDay[0].result.ok) {
       expect(result.perDay[0].result.firstBrokenLineIndex).toBe(2);
@@ -463,7 +463,7 @@ describe("verifyAllAuditFiles", () => {
     const original = buildChainedEntries(secret, [
       { decision: "allow", auditId: "orig", ts: "t1", trustOrigin: "user-keyboard", tool: "a" },
     ]);
-    const file = join(auditDir, "2026-05-09.q12.jsonl");
+    const file = join(auditDir, "2026-05-09.permission-audit.jsonl");
     writeFileSync(file, JSON.stringify(original[0]) + "\n");
     sealDayFromFile(secret, sealStore, file, "2026-05-09");
 
@@ -490,8 +490,8 @@ describe("summarizeAuditDir", () => {
   it("counts files and bytes", () => {
     const auditDir = join(workDir, "audit");
     mkdirSync(auditDir, { recursive: true });
-    writeFileSync(join(auditDir, "2026-05-08.q12.jsonl"), "a\n");
-    writeFileSync(join(auditDir, "2026-05-09.q12.jsonl"), "bb\n");
+    writeFileSync(join(auditDir, "2026-05-08.permission-audit.jsonl"), "a\n");
+    writeFileSync(join(auditDir, "2026-05-09.permission-audit.jsonl"), "bb\n");
     // legacy file ignored
     writeFileSync(join(auditDir, "2026-05-09.jsonl"), "ignored\n");
     const result = summarizeAuditDir(auditDir);

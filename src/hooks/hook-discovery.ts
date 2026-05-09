@@ -1,7 +1,7 @@
 /**
- * Q12 Phase 4 — Layer 6 hook discovery + TOFU lockfile.
+ * Permission policy Phase 4 — Layer 6 hook discovery + TOFU lockfile.
  *
- * Spec ref: docs/architecture/q12-permission-policy-design.md §3 Layer 6
+ * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 6
  * "Boot-time hash check + TOFU".
  *
  * Discovers individual `pre-*.sh`, `post-*.sh`, `perm-*.sh` files under

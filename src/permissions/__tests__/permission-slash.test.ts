@@ -1,5 +1,5 @@
 /**
- * Q12 Phase 2.5 — `/permission dir` slash + settings persistence tests.
+ * Permission policy Phase 2.5 — `/permission dir` slash + settings persistence tests.
  */
 import { describe, it, expect } from "vitest";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";

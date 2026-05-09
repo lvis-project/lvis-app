@@ -21,7 +21,7 @@
  * trailing single-star segments. This mirrors OpenHarness's
  * `_policy_match_paths` subtle-glob-bug prevention.
  *
- * Q12 Phase 2.5 — frozen-canonical algorithm + sensitive-path expansion
+ * Permission policy Phase 2.5 — frozen-canonical algorithm + sensitive-path expansion
  * (security review M1 + M2 + M4):
  *   - bounded walk-up via realpathSync.native() → first existing ancestor
  *   - MAX_WALK_UP=64 caps adversarial symlink-cycle / deep-path attacks
@@ -63,7 +63,7 @@ export const SENSITIVE_PATH_PATTERNS: readonly string[] = Object.freeze([
   "**/.kube/config", // Kubernetes credentials
   "**/.openharness/credentials.json",
   "**/.openharness/copilot_auth.json",
-  // ── Q12 P2.5 — OS sensitive paths (security review M1) ───────
+  // ── Permission policy P2.5 — OS sensitive paths (security review M1) ───────
   // Use double-star prefix because frozen-canonical realpath() resolves
   // /etc → /private/etc on macOS. The double-star matches both forms.
   "**/etc/shadow",
@@ -96,7 +96,7 @@ export const SENSITIVE_PATH_PATTERNS: readonly string[] = Object.freeze([
   "**/.lvis/keys/**", // signing / encryption keys
   "**/.lvis/lvis-secrets.json", // legacy consolidated secrets file
   "**/lvis-secrets.json", // shallow sibling form
-  // ── Q12 P2.5 — LVIS-internal sensitive paths (M2 + M4) ───────
+  // ── Permission policy P2.5 — LVIS-internal sensitive paths (M2 + M4) ───────
   "**/.lvis/audit", // audit log directory (self-tampering)
   "**/.lvis/audit/**", // audit log files inside dir
   "**/.lvis/audit.log", // legacy audit log file
@@ -178,7 +178,7 @@ export function canonicalizePathForMatch(rawPath: string): string {
 }
 
 /**
- * Q12 P2.5 — case-fold a canonical path for matching on case-insensitive
+ * Permission policy P2.5 — case-fold a canonical path for matching on case-insensitive
  * filesystems (darwin/win32). Kept separate from
  * {@link canonicalizePathForMatch} so allow-list directories from
  * settings.json can be compared with the SAME case-fold applied to both
@@ -259,7 +259,7 @@ function normalizePath(p: string): string {
  * (it is not in package.json) and the pattern set is tiny + fully covered
  * by these metacharacters.
  *
- * Q12 P2.5: case-insensitive on darwin/win32 to align with the canonical
+ * Permission policy P2.5: case-insensitive on darwin/win32 to align with the canonical
  * case-fold contract.
  */
 function globMatch(path: string, pattern: string): boolean {
