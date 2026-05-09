@@ -1752,7 +1752,7 @@ export class ConversationLoop {
 /memory — 사용자 메모 목록
 /vendor — 현재 벤더/토큰 정보
 /tools — 등록된 도구 목록
-/permission hooks <list|accept|disable> [name] — script hook 신뢰 상태 관리
+/permission hooks <list|accept|disable|reject> [name] — script hook 신뢰 상태 관리
 /help — 이 도움말`;
         break;
       default:
@@ -1777,7 +1777,7 @@ export class ConversationLoop {
       return `현재 권한 모드: ${mode}\nHook 상태: /permission hooks list`;
     }
     if (outcome.kind !== "hooks") {
-      return "이 경로에서는 /permission hooks <list|accept|disable> 만 처리합니다.";
+      return "이 경로에서는 /permission hooks <list|accept|disable|reject> 만 처리합니다.";
     }
 
     const result = await dispatchPermissionHooksCommand(outcome.cmd, {
