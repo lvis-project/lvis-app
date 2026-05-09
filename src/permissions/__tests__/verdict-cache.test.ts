@@ -37,6 +37,7 @@ const LOOKUP: VerdictCacheLookupKey = {
   toolName: "fs_write",
   source: "builtin",
   category: "write",
+  trustOrigin: "user",
   finalInput: { path: "/Users/ken/work/a.md", count: 5 },
 };
 
@@ -89,6 +90,15 @@ describe("computeCacheKey", () => {
     const k1 = computeCacheKey(LOOKUP);
     const k2 = computeCacheKey({ ...LOOKUP, toolName: "other" });
     expect(k1).not.toBe(k2);
+  });
+
+  it("different trustOrigin → different key (architect round-4: high-trust verdict must not be served to low-trust origin)", () => {
+    const userKey = computeCacheKey({ ...LOOKUP, trustOrigin: "user" });
+    const agentKey = computeCacheKey({ ...LOOKUP, trustOrigin: "agent" });
+    const pluginKey = computeCacheKey({ ...LOOKUP, trustOrigin: "plugin" });
+    expect(userKey).not.toBe(agentKey);
+    expect(userKey).not.toBe(pluginKey);
+    expect(agentKey).not.toBe(pluginKey);
   });
 });
 

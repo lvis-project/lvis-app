@@ -26,6 +26,7 @@ import type {
   TrustLevel,
   ToolCategory,
   ToolExecutionContext,
+  ToolTrustOrigin,
 } from "./types.js";
 import { trustFromSource } from "./types.js";
 import type { PermissionManager, PermissionCheckResult } from "../permissions/permission-manager.js";
@@ -215,7 +216,7 @@ export interface ToolPermissionContext {
    * Distinguishes user-keyboard input (trusted) from system / plugin /
    * proactive (untrusted) origins. Defaults to "user" when unset.
    */
-  trustOrigin?: "user" | "system" | "plugin" | "proactive" | "routine" | "agent";
+  trustOrigin?: ToolTrustOrigin;
 }
 
 /**
@@ -432,6 +433,7 @@ export class ToolExecutor {
         finalInput,
         allowedDirectories,
         sensitivePathsAdjacent,
+        trustOrigin: context?.trustOrigin ?? "user",
       },
       {
         allowedPluginIds: context?.allowedPluginIds
