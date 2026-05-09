@@ -144,6 +144,56 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
     },
   );
 
+  // ── Q12 P5 — `/permission audit show|verify` IPC handlers ─────
+  ipcMain.handle(
+    "lvis:permissions:audit-show",
+    async (_e, args: { last?: number }) => {
+      const last = Math.max(1, Math.min(1000, Math.floor(args?.last ?? 50)));
+      const { readRecentAuditEntries, summarizeAuditDir } = await import(
+        "../../permissions/permission-audit-runner.js"
+      );
+      const dir = auditLogger.getAuditDir();
+      const entries = readRecentAuditEntries(dir, last);
+      const summary = summarizeAuditDir(dir);
+      return { ok: true, entries, total: entries.length, summary };
+    },
+  );
+
+  ipcMain.handle("lvis:permissions:audit-verify", async (e) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, "lvis:permissions:audit-verify", e);
+      return UNAUTHORIZED_FRAME;
+    }
+    const { verifyAllAuditFiles } = await import(
+      "../../permissions/permission-audit-runner.js"
+    );
+    const secret = auditLogger.getQ12Secret();
+    if (!secret) {
+      return {
+        ok: false,
+        error: "audit-chain-not-initialized",
+      };
+    }
+    const sealStore = auditLogger.getQ12SealStore() ?? undefined;
+    const dir = auditLogger.getAuditDir();
+    const result = verifyAllAuditFiles(dir, secret, sealStore);
+    return {
+      ok: true,
+      intact: result.intact,
+      totalFiles: result.totalFiles,
+      totalEntries: result.totalEntries,
+      firstBrokenFile: result.firstBrokenFile,
+      perDay: result.perDay.map((d) => ({
+        file: d.file,
+        totalLines: d.totalLines,
+        chainOk: d.result.ok,
+        firstBrokenLineIndex: d.result.ok ? undefined : d.result.firstBrokenLineIndex,
+        reason: d.result.ok ? undefined : d.result.reason,
+        sealMatch: d.sealMatch,
+      })),
+    };
+  });
+
   ipcMain.handle("lvis:policy:set", async (e, patch: Record<string, unknown>) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:policy:set", e); return UNAUTHORIZED_FRAME; }
     if ("managed" in patch) {

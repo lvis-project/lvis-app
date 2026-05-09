@@ -538,6 +538,12 @@ const api = {
     /** Q12 P3 — `/permission reviewer ...` slash dispatch via IPC. */
     reviewerDispatch: async (rawArgs: string) =>
       ipcRenderer.invoke("lvis:permissions:reviewer-dispatch", { rawArgs }),
+    /** Q12 P5 — `/permission audit show` — fetch recent Q12 entries. */
+    auditShow: async (last: number) =>
+      ipcRenderer.invoke("lvis:permissions:audit-show", { last }),
+    /** Q12 P5 — `/permission audit verify` — chain integrity check. */
+    auditVerify: async () =>
+      ipcRenderer.invoke("lvis:permissions:audit-verify"),
     /**
      * Q12 P4 §3.5 — manifest integrity violation notifier. Subscribes
      * to `lvis:permissions:manifest-violation` so the renderer can
