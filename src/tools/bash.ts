@@ -67,7 +67,7 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
   readonly name = "bash";
   readonly description = "Run a shell command in the local repository.";
   readonly inputSchema = BashToolInputSchema;
-  override readonly category: ToolCategory = "dangerous";
+  override readonly category: ToolCategory = "shell";
 
   override isReadOnly(_input: unknown): boolean {
     return false;

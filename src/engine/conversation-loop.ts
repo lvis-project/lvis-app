@@ -1366,28 +1366,30 @@ export class ConversationLoop {
       const toolResults = await this.toolExecutor.executeAll(
         capResult.allowed,
         {
-          onToolStart: callbacks?.onToolStart,
-          onToolEnd: callbacks?.onToolEnd,
-        },
-        // C3(c): sub-agents pass their childSessionId so audit attribution
-        // for tool calls flows to the child, not the parent. Falls back to
-        // this loop's sessionId for normal interactive turns.
-        bounds?.sessionIdOverride ?? this.sessionId,
-        // Forward the turn's proactive origin so write/dangerous tools
-        // bypass `allow-always` cache and force a user-confirmation
-        // modal — the hard gate for the brain's "propose-only" contract.
-        proactiveOrigin ?? null,
-        // C3(b): carry spawn depth into ToolExecutionContext.metadata.
-        // The executor uses this to refuse `agent_spawn` calls inside an
-        // already-spawned sub-agent (depth >= 1).
-        bounds?.spawnDepth,
-        // Threading the turn's abort signal lets long-blocking tools
-        // (`ask_user_question`) honor the user's 중단 button instead of
-        // hanging until their internal timeout.
-        abortSignal,
-        {
-          headless: this.deps.headless,
-          allowedPluginIds: new Set(scope.activePluginIds),
+          callbacks: {
+            onToolStart: callbacks?.onToolStart,
+            onToolEnd: callbacks?.onToolEnd,
+          },
+          // C3(c): sub-agents pass their childSessionId so audit attribution
+          // for tool calls flows to the child, not the parent. Falls back to
+          // this loop's sessionId for normal interactive turns.
+          sessionId: bounds?.sessionIdOverride ?? this.sessionId,
+          // Forward the turn's proactive origin so write/shell/network tools
+          // bypass `allow-always` cache and force a user-confirmation
+          // modal — the hard gate for the brain's "propose-only" contract.
+          proactiveOrigin: proactiveOrigin ?? null,
+          // C3(b): carry spawn depth into ToolExecutionContext.metadata.
+          // The executor uses this to refuse `agent_spawn` calls inside an
+          // already-spawned sub-agent (depth >= 1).
+          spawnDepth: bounds?.spawnDepth,
+          // Threading the turn's abort signal lets long-blocking tools
+          // (`ask_user_question`) honor the user's 중단 button instead of
+          // hanging until their internal timeout.
+          abortSignal,
+          permissionContext: {
+            headless: this.deps.headless,
+            allowedPluginIds: new Set(scope.activePluginIds),
+          },
         },
       );
 

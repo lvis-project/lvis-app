@@ -103,8 +103,7 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
           input: { path: "/Users/test/.ssh/id_rsa" },
         },
       ],
-      undefined,
-      "sess-c1",
+      { sessionId: "sess-c1" },
     );
 
     // ── Assertions ──────────────────────────────────
@@ -159,8 +158,7 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
           input: { path: "/tmp/safe-file.txt" },
         },
       ],
-      undefined,
-      "sess-c1-sanity",
+      { sessionId: "sess-c1-sanity" },
     );
 
     // Let the microtasks run so the send call happens
@@ -208,8 +206,7 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
 
     const results = await executor.executeAll(
       [{ id: "tu-dynamic", name: "dynamic_fetch_report", input: { mode: "read" } }],
-      undefined,
-      "sess-dynamic-readonly",
+      { sessionId: "sess-dynamic-readonly" },
     );
 
     expect(wc.send).not.toHaveBeenCalled();
@@ -242,8 +239,7 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
 
     const results = await executor.executeAll(
       [{ id: "tu-hook-sensitive", name: "read_file", input: { path: "/tmp/safe.txt" } }],
-      undefined,
-      "sess-hook-sensitive",
+      { sessionId: "sess-hook-sensitive" },
     );
 
     expect(executeSpy).not.toHaveBeenCalled();
@@ -273,12 +269,10 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
 
     const results = await executor.executeAll(
       [{ id: "tu-plugin-scope", name: "meeting_get", input: {} }],
-      undefined,
-      "sess-plugin-scope",
-      null,
-      undefined,
-      undefined,
-      { allowedPluginIds: new Set(["ms-graph"]) },
+      {
+        sessionId: "sess-plugin-scope",
+        permissionContext: { allowedPluginIds: new Set(["ms-graph"]) },
+      },
     );
 
     expect(executeSpy).not.toHaveBeenCalled();
@@ -312,8 +306,7 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
 
     const results = await executor.executeAll(
       [{ id: "tu-traversal", name: "read_file", input: { path: traversalPath } }],
-      undefined,
-      "sess-traversal",
+      { sessionId: "sess-traversal" },
     );
 
     expect(executeSpy).not.toHaveBeenCalled();
@@ -348,12 +341,10 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
 
     const results = await executor.executeAll(
       [{ id: "tu-empty-scope", name: "meeting_get", input: {} }],
-      undefined,
-      "sess-empty-scope",
-      null,
-      undefined,
-      undefined,
-      { allowedPluginIds: new Set<string>() },
+      {
+        sessionId: "sess-empty-scope",
+        permissionContext: { allowedPluginIds: new Set<string>() },
+      },
     );
 
     expect(executeSpy).not.toHaveBeenCalled();
@@ -398,12 +389,10 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
 
     await executor.executeAll(
       [{ id: "tu-trust", name: "meeting_post", input: {} }],
-      undefined,
-      "sess-trust",
-      null,
-      undefined,
-      undefined,
-      { allowedPluginIds: new Set(["meeting"]) },
+      {
+        sessionId: "sess-trust",
+        permissionContext: { allowedPluginIds: new Set(["meeting"]) },
+      },
     );
 
     expect(executeSpy).not.toHaveBeenCalled();
@@ -419,7 +408,7 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
       name: "bash",
       description: "bash",
       source: "builtin",
-      category: "dangerous",
+      category: "shell",
       isReadOnly: () => false,
       jsonSchema: { type: "object", properties: { command: { type: "string" } } },
       execute: async (rawInput) => ({ output: await executeSpy(rawInput), isError: false }),
@@ -443,8 +432,7 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
 
     const results = await executor.executeAll(
       [{ id: "tu-bash-hook", name: "bash", input: { command: "echo safe" } }],
-      undefined,
-      "sess-bash-hook",
+      { sessionId: "sess-bash-hook" },
     );
 
     expect(executeSpy).not.toHaveBeenCalled();
@@ -531,8 +519,7 @@ describe("ToolExecutor — D4 parallel approval (§4.5.3)", () => {
         { id: "par-1", name: "tool_a", input: { value: "x" } },
         { id: "par-2", name: "tool_b", input: { value: "y" } },
       ],
-      undefined,
-      "sess-d4-approve",
+      { sessionId: "sess-d4-approve" },
     );
 
     await waitForPending(gate, 2);
@@ -572,8 +559,7 @@ describe("ToolExecutor — D4 parallel approval (§4.5.3)", () => {
         { id: "par-3", name: "tool_c", input: { value: "a" } },
         { id: "par-4", name: "tool_d", input: { value: "b" } },
       ],
-      undefined,
-      "sess-d4-deny",
+      { sessionId: "sess-d4-deny" },
     );
 
     await waitForPending(gate, 2);
@@ -612,8 +598,7 @@ describe("ToolExecutor — D4 parallel approval (§4.5.3)", () => {
         { id: "par-5", name: "tool_e", input: { value: "x" } },
         { id: "par-6", name: "tool_f", input: { value: "y" } },
       ],
-      undefined,
-      "sess-d4-selective",
+      { sessionId: "sess-d4-selective" },
     );
 
     await waitForPending(gate, 2);
@@ -653,11 +638,12 @@ describe("ToolExecutor — C1 ask_user_question short-circuit", () => {
       name: "ask_user_question",
       description: "ask the user",
       source: "builtin",
-      // C2 / pre-fix: the tool was registered as `dangerous`, which forced
-      // a permission check. The C1 short-circuit lives in the executor and
-      // ignores PermissionManager entirely for this exact builtin name —
-      // even with category "dangerous" the gate must not be consulted.
-      category: "dangerous",
+      // Q12 — `meta` + `decisionOverride: "always-allow-with-audit"` is the
+      // category contract that earns the executor's C1 short-circuit:
+      // PermissionManager is bypassed entirely so the renderer never sees
+      // a "may I ask?" modal stacked in front of the actual question.
+      category: "meta",
+      decisionOverride: "always-allow-with-audit",
       jsonSchema: { type: "object", properties: {} },
       execute: innerExecuteSpy,
     });
@@ -695,8 +681,7 @@ describe("ToolExecutor — C1 ask_user_question short-circuit", () => {
           input: { questions: [{ question: "Continue?" }] },
         },
       ],
-      undefined,
-      "sess-c1-double-modal",
+      { sessionId: "sess-c1-double-modal" },
     );
 
     // No approval modal should have been requested.
@@ -747,8 +732,7 @@ describe("ToolExecutor — R2-CR-4 ask_user_question audit redaction is gated by
       const executor = new ToolExecutor(registry);
       const results = await executor.executeAll(
         [{ id: "tu-r2cr4", name: "ask_user_question", input: {} }],
-        undefined,
-        "sess-r2cr4-plugin",
+        { sessionId: "sess-r2cr4-plugin" },
       );
 
       expect(results).toHaveLength(1);
@@ -778,7 +762,8 @@ describe("ToolExecutor — R2-CR-4 ask_user_question audit redaction is gated by
       name: "ask_user_question",
       description: "builtin",
       source: "builtin",
-      category: "dangerous",
+      category: "meta",
+      decisionOverride: "always-allow-with-audit",
       jsonSchema: { type: "object", properties: {} },
       execute: async () => ({
         output: JSON.stringify({
@@ -803,8 +788,7 @@ describe("ToolExecutor — R2-CR-4 ask_user_question audit redaction is gated by
       const executor = new ToolExecutor(registry);
       await executor.executeAll(
         [{ id: "tu-r2cr4-b", name: "ask_user_question", input: {} }],
-        undefined,
-        "sess-r2cr4-builtin",
+        { sessionId: "sess-r2cr4-builtin" },
       );
       const toolCallEntry = logSpy.mock.calls
         .map((c) => c[0] as { type?: string; output?: string; sessionId?: string })
@@ -823,7 +807,8 @@ describe("ToolExecutor — R2-CR-4 ask_user_question audit redaction is gated by
       name: "ask_user_question",
       description: "builtin",
       source: "builtin",
-      category: "dangerous",
+      category: "meta",
+      decisionOverride: "always-allow-with-audit",
       jsonSchema: {
         type: "object",
         properties: { recipient: { type: "string" } },
@@ -854,8 +839,10 @@ describe("ToolExecutor — R2-CR-4 ask_user_question audit redaction is gated by
           name: "ask_user_question",
           input: { recipient: "input.user@gmail.com" },
         }],
-        { onToolStart, onToolEnd },
-        "sess-dlp-email-preserve",
+        {
+          callbacks: { onToolStart, onToolEnd },
+          sessionId: "sess-dlp-email-preserve",
+        },
       );
 
       expect(results).toHaveLength(1);
