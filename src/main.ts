@@ -827,9 +827,20 @@ app.on("before-quit", (event) => {
                   contextRef: { routineId: r.id },
                 });
               }
-              await svc.routinesStore.markFired(r.id);
             } catch (err) {
               log.warn("before-quit: shutdown routine failed (id=%s): %s", r.id, errorMessage(err));
+            }
+            // markFired runs in its own try/catch so a marker-write I/O error
+            // is logged distinctly from execution failure, and does NOT break
+            // the loop for the remaining shutdown routines.
+            try {
+              await svc.routinesStore.markFired(r.id);
+            } catch (markErr) {
+              log.warn(
+                "before-quit: markFired failed (id=%s): %s — routine may re-fire on next launch",
+                r.id,
+                errorMessage(markErr),
+              );
             }
           }
         } catch (e) {
