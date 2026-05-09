@@ -538,6 +538,24 @@ const api = {
     /** Q12 P3 — `/permission reviewer ...` slash dispatch via IPC. */
     reviewerDispatch: async (rawArgs: string) =>
       ipcRenderer.invoke("lvis:permissions:reviewer-dispatch", { rawArgs }),
+    /**
+     * Q12 P4 §3.5 — manifest integrity violation notifier. Subscribes
+     * to `lvis:permissions:manifest-violation` so the renderer can
+     * surface a "Plugin X disabled — reinstall?" prompt.
+     */
+    onManifestViolation: (
+      handler: (payload: {
+        pluginId: string;
+        toolName: string;
+        attempted: string;
+      }) => void,
+    ) => {
+      const listener = (_e: unknown, payload: Parameters<typeof handler>[0]) =>
+        handler(payload);
+      ipcRenderer.on("lvis:permissions:manifest-violation", listener);
+      return () =>
+        ipcRenderer.removeListener("lvis:permissions:manifest-violation", listener);
+    },
   },
 
   // ─── Policy (Governance) ─────────────────────────

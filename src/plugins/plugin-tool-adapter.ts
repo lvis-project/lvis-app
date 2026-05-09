@@ -11,6 +11,10 @@ import type { ToolCategory } from "../tools/types.js";
 import type { PluginRuntime } from "./runtime.js";
 import type { PluginManifest } from "./types.js";
 import { plog, PluginPhase } from "./lifecycle-log.js";
+import {
+  ManifestIntegrityViolation,
+  manifestIntegrityState,
+} from "../permissions/manifest-integrity.js";
 
 const GENERIC_PAYLOAD_SCHEMA = {
   type: "object",
@@ -112,6 +116,21 @@ function buildPluginTool(
           try { finalPayload = JSON.parse(finalPayload); } catch { /* leave as string */ }
         }
       }
+      // Q12 P4 §3.5 — manifest integrity guard.
+      // For read-declared tools, fail-deny if the plugin already
+      // violated its declaration (caller must reinstall). The proxy
+      // itself lives at the host→plugin fs boundary; this check is
+      // the *post-violation gate* that prevents the disabled plugin
+      // from running new calls.
+      if (category === "read" && manifestIntegrityState.isDisabled(pluginId)) {
+        return {
+          output:
+            `Plugin '${pluginId}' was disabled after violating its manifest ` +
+            `(declared category=read but attempted a write). Reinstall the plugin ` +
+            `to re-enable.`,
+          isError: true,
+        };
+      }
       try {
         const result = await pluginRuntime.call(toolName, finalPayload);
         plog("debug", { pluginId, phase: PluginPhase.INVOKE_OK, toolName }, "tool invocation ok");
@@ -120,6 +139,26 @@ function buildPluginTool(
           isError: false,
         };
       } catch (err) {
+        // Q12 P4 §3.5 — capture manifest-integrity violations: the
+        // plugin's tool used the read-only fs proxy and the proxy
+        // threw. Record the violation so subsequent calls fail closed
+        // and audit + UI emit fire.
+        if (err instanceof ManifestIntegrityViolation) {
+          manifestIntegrityState.recordViolation(
+            err.pluginId,
+            err.toolName,
+            err.attemptedMethod,
+          );
+          plog(
+            "warn",
+            { pluginId, phase: PluginPhase.INVOKE_FAIL, toolName, err },
+            "manifest integrity violation",
+          );
+          return {
+            output: err.message,
+            isError: true,
+          };
+        }
         plog("warn", { pluginId, phase: PluginPhase.INVOKE_FAIL, toolName, err }, "tool invocation failed");
         return {
           output: err instanceof Error ? err.message : String(err),
