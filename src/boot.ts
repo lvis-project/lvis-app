@@ -366,7 +366,7 @@ export async function bootstrap(
     } catch (err) {
       log.warn(
         "manifest-violation IPC emit failed (non-fatal): %s",
-        (err as Error).message,
+        err instanceof Error ? err.message : String(err),
       );
     }
   });

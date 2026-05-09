@@ -12,13 +12,14 @@
  *
  * Why a registry instead of a giant switch — a single source of truth
  * that:
- *   1. {@link ManifestValidator} consults so a plugin manifest with an
- *      unknown category fails closed (no silent default-to-write).
- *   2. The Phase 3 risk classifier (rule-based) can score against —
- *      `riskWeight` is the input to its baseline `final = max(rule, llm)`
- *      composition.
- *   3. Phase 5 audit-schema consumers can iterate to enumerate the full
- *      decision matrix for forensics.
+ *   1. PermissionManager consults for every host-side category decision.
+ *   2. Plugin manifest validation mirrors the plugin-facing subset
+ *      (`read | write | shell | network`) in `manifest-validation.ts`;
+ *      `meta` remains host-only and is not accepted from plugins.
+ *   3. The reviewer classifier can score against `riskWeight`, the input
+ *      to its baseline `final = max(rule, llm)` composition.
+ *   4. Audit-schema consumers can iterate to enumerate the full decision
+ *      matrix for forensics.
  *
  * Trust boundary: descriptor `decisionFor()` MUST be a pure function of
  * its inputs — no global state, no async I/O. Plugin code never executes

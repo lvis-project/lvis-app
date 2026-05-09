@@ -155,7 +155,11 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
       if (
         !params ||
         typeof params.id !== "string" ||
-        (params.decision !== "approved" && params.decision !== "rejected")
+        (params.decision !== "approved" && params.decision !== "rejected") ||
+        (
+          params.reason !== undefined &&
+          (typeof params.reason !== "string" || params.reason.length > 1_000)
+        )
       ) {
         return { ok: false, error: "invalid-params" };
       }
