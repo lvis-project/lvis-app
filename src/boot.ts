@@ -97,6 +97,9 @@ import type { ConversationLoop } from "./engine/conversation-loop.js";
 import { initPluginRuntime } from "./boot/steps/plugin-runtime.js";
 import { registerPluginEventBridge } from "./boot/steps/ipc-bridge.js";
 import { wireReleasePrep, wireUpdateCheck } from "./boot/steps/post-boot.js";
+import { wireReviewerAgent } from "./boot/steps/reviewer-wiring.js";
+import { createProvider, secretKeyFor } from "./engine/llm/provider-factory.js";
+import type { LLMProvider, LLMVendor } from "./engine/llm/types.js";
 import { runManagedBootstrap } from "./boot/managed-marketplace.js";
 import { createLogger } from "./lib/logger.js";
 const log = createLogger("lvis");
@@ -314,6 +317,37 @@ export async function bootstrap(
   // §6.3: PermissionManager (Layer 2-3).
   const permissionManager = await createPermissionManager();
   toolRegistry.setDenyRules(permissionManager.getVisibilityDenyRules());
+
+  // Q12 P4 — Layer 5 reviewer agent wiring (Phase 3 deferral resolution).
+  // Reads `permissions.reviewer` from `~/.lvis/settings.json` and binds the
+  // classifier + cache + deferred queue onto the live PermissionManager so
+  // `dispatchReviewer()` routes HIGH verdicts into the deferred queue.
+  // For mode=llm, build an adapter over the host's existing
+  // VercelUnifiedProvider streaming surface — the reviewer needs only a
+  // one-shot complete() call shape.
+  try {
+    wireReviewerAgent({
+      permissionManager,
+      streamProviderFor: (vendor: string): LLMProvider | null => {
+        // Reviewer settings vendor name → LLMVendor:
+        //   "openai"    → "openai"
+        //   "anthropic" → "claude"
+        //   "google"    → "gemini"
+        const vendorMap: Record<string, LLMVendor> = {
+          openai: "openai",
+          anthropic: "claude",
+          google: "gemini",
+        };
+        const llmVendor = vendorMap[vendor];
+        if (!llmVendor) return null;
+        const apiKey = settingsService.getSecret(secretKeyFor(llmVendor));
+        if (!apiKey) return null;
+        return createProvider({ vendor: llmVendor, apiKey });
+      },
+    });
+  } catch (err) {
+    log.warn("boot: reviewer wiring failed (non-fatal): %s", (err as Error).message);
+  }
 
   // Tier A4 (W3): HookRunner. Shared by interactive and routine loops so
   // every tool call traverses the same Pre/PostToolUse hook surface.
