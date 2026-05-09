@@ -1,9 +1,9 @@
 /**
- * Q12 P4 Area B — hook-system boot wiring tests.
+ * Permission policy — hook-system boot wiring tests.
  *
- * Spec ref: docs/architecture/q12-permission-policy-design.md §3 Layer 6.
+ * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 6.
  */
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import {
   chmodSync,
   existsSync,
@@ -22,7 +22,7 @@ let tmpDir: string;
 let hooksDir: string;
 
 beforeEach(() => {
-  tmpDir = mkdtempSync(join(tmpdir(), "q12-p4-hsw-"));
+  tmpDir = mkdtempSync(join(tmpdir(), "permission-hooks-"));
   hooksDir = join(tmpDir, "hooks");
 });
 
@@ -37,7 +37,7 @@ function writeHook(name: string, body: string): void {
   chmodSync(path, 0o700);
 }
 
-describe("Q12 P4 wireHookSystem", () => {
+describe("wireHookSystem permission hook policy", () => {
   it("returns a manager + trust result on empty directory", async () => {
     const result = await wireHookSystem({
       hooksDir,
@@ -87,5 +87,32 @@ describe("Q12 P4 wireHookSystem", () => {
     expect(result.trust.disabledHooks.map((h) => h.fileName)).toEqual([
       "pre-untrusted.sh",
     ]);
+  });
+
+  it("emits hook.quarantined audit entries for boot-time quarantine", async () => {
+    writeHook("pre-untrusted.sh", "#!/bin/sh\nexit 0");
+    const auditLogger = { log: vi.fn() };
+
+    await wireHookSystem({
+      hooksDir,
+      lockfilePath: join(hooksDir, ".lockfile.json"),
+      disabledDir: join(hooksDir, ".disabled"),
+      auditLogger,
+    });
+
+    expect(auditLogger.log).toHaveBeenCalledTimes(1);
+    const entry = auditLogger.log.mock.calls[0][0];
+    expect(entry.type).toBe("warn");
+    expect(entry.toolCalls).toEqual([
+      { name: "hook_trust_boot", isError: false, trust: "high" },
+    ]);
+    expect(JSON.parse(entry.input)).toEqual(
+      expect.objectContaining({
+        kind: "hook.quarantined",
+        fileName: "pre-untrusted.sh",
+        hookType: "pre",
+        state: "new",
+      }),
+    );
   });
 });

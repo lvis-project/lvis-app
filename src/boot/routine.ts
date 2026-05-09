@@ -7,7 +7,7 @@ import type { RoutineV2RunInput } from "../routines/v2/routine-engine-v2.js";
 
 export function createRoutineEngine(opts: {
   createConversationLoop: (input: RoutineV2RunInput) => ConversationLoop;
-  /** Q12 Layer 4 — snapshot host's active plugin set when scope=inherit. */
+  /** Permission policy Layer 4 — snapshot host's active plugin set when scope=inherit. */
   getActivePluginIds?: () => string[];
 }): RoutineEngine {
   return new RoutineEngine({

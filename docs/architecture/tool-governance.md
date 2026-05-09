@@ -527,7 +527,7 @@ Claude Code는 6개 확장 메커니즘을 제공:
 - [ ] Permission Prompt UI (allow once / allow always / deny) — §12.4
 - [x] Native file tools Phase 1 — `read_file`, `list_files`, `glob_files`, `grep_files`, `write_file`, `edit_file`
 - [x] Workspace Boundary Validation — §12.2 (canonical path, symlink escape, future-create parent realpath)
-- [ ] Native tools Phase 2 — `apply_patch`, `move_file`, `delete_file`, `powershell`
+- [x] Native tools Phase 2 — `apply_patch`, `move_file`, `delete_file`, `powershell`
 - [ ] DLP PostHook (민감 데이터 마스킹)
 - [ ] Kill Switch UI
 

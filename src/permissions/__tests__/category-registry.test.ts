@@ -1,5 +1,5 @@
 /**
- * Q12 Layer 3 — Category Registry coverage.
+ * Permission policy Layer 3 — Category Registry coverage.
  *
  * Pins the contract:
  *   - registerStandardCategories() populates exactly 5 axes

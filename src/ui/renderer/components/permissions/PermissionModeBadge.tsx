@@ -1,11 +1,11 @@
 /**
- * Q12 Phase 5 — PermissionModeBadge.
+ * Permission policy Phase 5 — PermissionModeBadge.
  *
  * Compact mode indicator displayed in the chat header. Shows the
  * active permission mode (default | strict | auto) with color coding
  * + tooltip explaining the mode's behavior.
  *
- * Spec ref: docs/architecture/q12-permission-policy-design.md §3
+ * Spec ref: docs/architecture/permission-policy-design.md §3
  * Layer 8 — runtime mode switching via `/permission mode ...`.
  *
  * Polls `window.lvis.permission.getMode()` on mount + on a custom

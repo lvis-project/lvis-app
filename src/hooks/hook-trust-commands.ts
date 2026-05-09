@@ -216,7 +216,7 @@ export async function disableHookTrust(
 }
 
 /**
- * Q12 architect round-4 ③ — `permission hooks reject <name>` permanently
+ * Permission policy architect round-4 ③ — `permission hooks reject <name>` permanently
  * removes a quarantined hook from `~/.config/lvis/hooks/.disabled/`.
  *
  * Two-step contract: an active (trusted) hook MUST be `disable`d first;
