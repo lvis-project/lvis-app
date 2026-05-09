@@ -647,9 +647,11 @@ export class ToolExecutor {
       if (permissionResult.decision === "deny") {
         const msg = `[권한 차단] 도구 '${toolUse.name}' (${source}, trust:${trust}) — ${permissionResult.reason}`;
         const durationMs = Date.now() - startTime;
-        emitToolStart(callbacks, toolUse.name, toolUse.input, meta);
+        // Use finalInput (post-PreToolUse hook) so audit/UI never show stale
+        // pre-hook args for a hook-modified invocation.
+        emitToolStart(callbacks, toolUse.name, finalInput, meta);
         callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-        this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, permissionResult, Infinity);
+        this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, permissionResult, Infinity);
         return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
       }
       if (permissionResult.decision === "ask") {
@@ -680,9 +682,11 @@ export class ToolExecutor {
           } catch (approvalErr) {
             const msg = `[승인 오류] 도구 '${toolUse.name}' — 승인 게이트 내부 오류: ${approvalErr instanceof Error ? approvalErr.message : String(approvalErr)}`;
             const durationMs = Date.now() - startTime;
-            emitToolStart(callbacks, toolUse.name, toolUse.input, meta);
+            // finalInput keeps audit/UI consistent with the args shown to the
+            // approval gate (which already uses finalInput in approvalRequest).
+            emitToolStart(callbacks, toolUse.name, finalInput, meta);
             callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-            this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, permissionResult, Infinity);
+            this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, permissionResult, Infinity);
             return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
           }
 
@@ -694,9 +698,11 @@ export class ToolExecutor {
             }
             const msg = `[승인 거부] 도구 '${toolUse.name}' — 사용자가 실행을 거부했습니다.`;
             const durationMs = Date.now() - startTime;
-            emitToolStart(callbacks, toolUse.name, toolUse.input, meta);
+            // finalInput matches the args the user actually saw + denied via
+            // approvalRequest — never log stale pre-hook input here.
+            emitToolStart(callbacks, toolUse.name, finalInput, meta);
             callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-            this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, permissionResult, Infinity);
+            this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, permissionResult, Infinity);
             return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
           }
 
@@ -711,9 +717,11 @@ export class ToolExecutor {
           const msg = `[승인 게이트 미연결] 도구 '${toolUse.name}' (${source}) — ask 결정이지만 승인 게이트가 없어 차단. ${permissionResult.reason}`;
           const durationMs = Date.now() - startTime;
           log.error(msg);
-          emitToolStart(callbacks, toolUse.name, toolUse.input, meta);
+          // finalInput so audit reflects post-hook args even when the gate is
+          // unavailable.
+          emitToolStart(callbacks, toolUse.name, finalInput, meta);
           callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-          this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, permissionResult, Infinity);
+          this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, permissionResult, Infinity);
           return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
         }
       }
