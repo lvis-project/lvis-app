@@ -8,6 +8,7 @@
 import { writeFile } from "node:fs/promises";
 import type { ConversationLoop } from "../../engine/conversation-loop.js";
 import { createLogger } from "../../lib/logger.js";
+import type { RoutineScope } from "../../shared/routines-types.js";
 const log = createLogger("routine-engine-v2");
 
 export interface RoutineV2RunInput {
@@ -15,7 +16,12 @@ export interface RoutineV2RunInput {
   trigger: "shutdown" | "schedule";
   prePrompt: string;
   title?: string;
-  allowedPlugins?: string[];
+  /**
+   * Q12 Layer 4 — fully resolved scope (no `inherit` left). Boot-time
+   * normalization in the dispatcher snapshots the active plugin set
+   * before this method runs.
+   */
+  scope?: RoutineScope;
   /**
    * Q9: absolute path to the pre-created JSONL file for this routine fire.
    * When provided, the engine appends history messages here so
@@ -42,6 +48,15 @@ export interface RoutineV2Result {
 export interface RoutineEngineV2Deps {
   /** Called once per routine fire to produce a fresh, isolated ConversationLoop. */
   createConversationLoop: (input: RoutineV2RunInput) => ConversationLoop;
+  /**
+   * Q12 Layer 4 — invoked at routine fire time to snapshot the
+   * currently-active plugin set. Used to translate
+   * `scope.pluginIds.mode === "inherit"` into a concrete `allow` list
+   * BEFORE the conversation loop is constructed, so the loop never
+   * sees `inherit`. When omitted, `inherit` falls back to deny-all
+   * (defensive — pre-Q12 boot wires this dep for production).
+   */
+  getActivePluginIds?: () => string[];
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -70,10 +85,45 @@ function extractSummaryTag(text: string): string {
 export class RoutineEngineV2 {
   constructor(private readonly deps: RoutineEngineV2Deps) {}
 
+  /**
+   * Q12 Layer 4 — snapshot `inherit` to a concrete allow-list at fire
+   * time. The loop must never see `inherit`; downstream
+   * `createRoutineConversationLoop` defensively coerces `inherit` to
+   * deny-all, but the principled spot is here where we still have
+   * access to the host's active plugin set.
+   */
+  private normalizeScope(scope: RoutineScope | undefined): RoutineScope {
+    if (!scope) {
+      return {
+        pluginIds: { mode: "deny-all" },
+        forcedPluginIds: [],
+        directories: [],
+      };
+    }
+    if (scope.pluginIds.mode !== "inherit") return scope;
+    const active = this.deps.getActivePluginIds?.() ?? [];
+    return {
+      pluginIds:
+        active.length > 0
+          ? { mode: "allow", ids: [...active] }
+          : { mode: "deny-all" },
+      forcedPluginIds: scope.forcedPluginIds,
+      directories: scope.directories,
+    };
+  }
+
   async runRoutine(input: RoutineV2RunInput): Promise<RoutineV2Result> {
     const generatedAt = new Date().toISOString();
+    // Q12 Layer 4 — normalize scope BEFORE building the loop so the
+    // loop never observes `inherit`. `inherit` snapshots the active
+    // plugin set at fire time; missing scope falls back to deny-all
+    // (the safe default for headless routine sessions).
+    const normalizedInput: RoutineV2RunInput = {
+      ...input,
+      scope: this.normalizeScope(input.scope),
+    };
     // Q9: each fire gets its own loop — no history sharing with main chat.
-    const loop = this.deps.createConversationLoop(input);
+    const loop = this.deps.createConversationLoop(normalizedInput);
     const sessionId = loop.getSessionId();
 
     let summary = "";

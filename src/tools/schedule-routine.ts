@@ -245,6 +245,19 @@ export function createScheduleRoutineTool(store: RoutinesStore): Tool {
         };
       }
 
+      // Q12 Layer 4 — translate legacy LLM-facing `allowedPlugins` field
+      // into the canonical `scope` discriminated union. Empty array =
+      // explicit deny-all (matches the legacy "[]" → no plugin tools
+      // semantics); non-empty = explicit allow-list. Field absence is
+      // mapped to `inherit` so the routine adopts the user's active
+      // plugin set at fire time (boot-time normalized).
+      const isLegacyFieldPresent = a.allowedPlugins !== undefined;
+      const pluginIds = !isLegacyFieldPresent
+        ? ({ mode: "inherit" } as const)
+        : allowedPlugins.length === 0
+          ? ({ mode: "deny-all" } as const)
+          : ({ mode: "allow", ids: allowedPlugins } as const);
+
       try {
         const record = await store.add({
           trigger: "schedule",
@@ -254,7 +267,11 @@ export function createScheduleRoutineTool(store: RoutinesStore): Tool {
           title,
           notificationTitle,
           notificationBody,
-          ...(allowedPlugins.length > 0 ? { allowedPlugins } : {}),
+          scope: {
+            pluginIds,
+            forcedPluginIds: [],
+            directories: [],
+          },
         });
         return {
           output: JSON.stringify({ routineId: record.id, schedule: record.schedule }),
