@@ -5,13 +5,27 @@ import {
   PowerShellTool,
   PowerShellToolInputSchema,
   validatePowerShellCommand,
+  validatePowerShellAst,
+  type PowerShellAstSummary,
 } from "../powershell.js";
 import type { ToolExecutionContext } from "../base.js";
 
 const ctx = (cwd: string = process.cwd()): ToolExecutionContext => ({
   cwd,
+  allowedDirectories: [],
   metadata: {},
 });
+
+function ast(commands: Array<Partial<PowerShellAstSummary["commands"][number]>>, errors: string[] = []): PowerShellAstSummary {
+  return {
+    errors,
+    commands: commands.map((command) => ({
+      name: command.name ?? null,
+      text: command.text ?? command.name ?? "",
+      elements: command.elements ?? (command.name ? [command.name] : []),
+    })),
+  };
+}
 
 describe("PowerShellTool — policy surface", () => {
   it("registers as a native shell-category tool", () => {
@@ -30,23 +44,35 @@ describe("PowerShellTool — policy surface", () => {
     expect(parsed.timeoutSeconds).toBe(600);
   });
 
-  it("blocks expression execution and encoded command forms before spawn", () => {
-    expect(validatePowerShellCommand("Invoke-Expression $x")).toContain("Invoke-Expression");
-    expect(validatePowerShellCommand("iex $x")).toContain("Invoke-Expression");
-    expect(validatePowerShellCommand("powershell -EncodedCommand AAAA")).toContain("encoded commands");
+  it("blocks expression execution and encoded command forms from the AST summary", () => {
+    expect(validatePowerShellAst(ast([{ name: "Invoke-Expression" }]))).toContain("Invoke-Expression");
+    expect(validatePowerShellAst(ast([{ name: "iex" }]))).toContain("Invoke-Expression");
+    expect(validatePowerShellAst(ast([{ name: "powershell", elements: ["powershell", "-EncodedCommand", "AAAA"] }]))).toContain("encoded commands");
   });
 
-  it("blocks interactive prompts before spawn", () => {
-    expect(validatePowerShellCommand("Read-Host 'secret'")).toContain("interactive prompts");
-    expect(validatePowerShellCommand("Pause")).toContain("interactive prompts");
+  it("blocks interactive prompts from the AST summary", () => {
+    expect(validatePowerShellAst(ast([{ name: "Read-Host" }]))).toContain("interactive prompts");
+    expect(validatePowerShellAst(ast([{ name: "Pause" }]))).toContain("interactive prompts");
   });
 
   it("blocks recursive forced deletion regardless of flag order", () => {
-    expect(validatePowerShellCommand("Remove-Item ./x -Recurse -Force")).toContain(
+    expect(validatePowerShellAst(ast([{ name: "Remove-Item", elements: ["Remove-Item", "./x", "-Recurse", "-Force"] }]))).toContain(
       "recursive forced deletion",
     );
-    expect(validatePowerShellCommand("Remove-Item ./x -Force -Recurse")).toContain(
+    expect(validatePowerShellAst(ast([{ name: "Remove-Item", elements: ["Remove-Item", "./x", "-Force", "-Recurse"] }]))).toContain(
       "recursive forced deletion",
+    );
+  });
+
+  it("fails closed when the parser reports syntax errors or dynamic dispatch", () => {
+    expect(validatePowerShellAst(ast([], ["Unexpected token"]))).toContain("parse error");
+    expect(validatePowerShellAst(ast([{ name: null, text: "& ($x)" }]))).toContain("dynamic command");
+  });
+
+  it("uses the AST parser result before spawn", async () => {
+    const parser = async (): Promise<PowerShellAstSummary> => ast([{ name: "Start-Process" }]);
+    await expect(validatePowerShellCommand("Start-Process calc", parser)).resolves.toContain(
+      "process detachment",
     );
   });
 

@@ -16,6 +16,7 @@ import type { ToolExecutionContext } from "../base.js";
 
 const ctx = (cwd: string = process.cwd()): ToolExecutionContext => ({
   cwd,
+  allowedDirectories: [],
   metadata: {},
 });
 

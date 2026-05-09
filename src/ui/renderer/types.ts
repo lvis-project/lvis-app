@@ -318,18 +318,18 @@ export type LvisApi = {
   onRoutineFiredV2: (
     handler: (event: import("../../shared/routines-types.js").RoutineFiredPayload) => void,
   ) => () => void;
-  // Q10 — running indicator
+  // Routine running indicator
   // C1: enriched payload includes title+firedAt so renderer can push OverlayItem immediately
   onRoutineRunningStarted: (handler: (payload: { routineId: string; firedAt: string; title: string }) => void) => () => void;
   onRoutineRunningFinished: (handler: (routineId: string) => void) => () => void;
   // failed: clears running:true stuck OverlayItem when the LLM session throws
   onRoutineFailedV2: (handler: (event: { routineId: string; error: string }) => void) => () => void;
-  // Q11 — overlay IPC bridges
+  // Overlay IPC bridges
   onOverlayShow: (handler: (item: import("./context/OverlayContext.js").OverlayItem) => void) => () => void;
   onOverlayUpdate: (handler: (id: string, patch: Partial<import("./context/OverlayContext.js").OverlayItem>) => void) => () => void;
   onOverlayDismiss: (handler: (id: string) => void) => () => void;
   notifyOverlayPrimary: (pluginId: string, eventId: string) => Promise<void>;
-  // Q9 session history
+  // Routine session history
   listRoutineSessionsV2: (
     routineId: string,
     limit?: number,
@@ -389,7 +389,7 @@ export type LvisApi = {
     answers?: Array<{ choice?: string; freeText?: string }>;
     dismissed?: boolean;
   }) => Promise<{ ok: boolean; error?: string }>;
-  /** M2: renderer is notified when the gate's 5-minute timeout fires. */
+  /** Renderer is notified when the gate's 5-minute timeout fires. */
   onAskUserQuestionTimeout?: (
     h: (payload: { requestId: string }) => void,
   ) => () => void;
@@ -570,6 +570,15 @@ export type LvisPermissionApi = {
   /** Permission policy issue #633 — list active + quarantined script hooks. */
   hookTrustList: () => Promise<
     | { ok: true; active: HookTrustRow[]; disabled: HookTrustRow[]; totalDisabled: number }
+    | { ok: false; error: string }
+  >;
+  /** Permission policy — `/permission dir ...` slash dispatch. */
+  dirDispatch: (
+    rawArgs: string,
+  ) => Promise<
+    | { ok: true; verb: "allow"; persisted: string[]; sessionOnly: boolean; warnings: string[] }
+    | { ok: true; verb: "deny"; persisted: string[] }
+    | { ok: true; verb: "list"; defaults: string[]; userAdditions: string[]; effective: string[] }
     | { ok: false; error: string }
   >;
   /** Permission policy — resolve a pending entry with user gesture. */
