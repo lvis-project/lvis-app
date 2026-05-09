@@ -21,6 +21,13 @@ import { trustFromSource } from "../tools/types.js";
 import { readPermissionsFile, updatePermissionsFile } from "./permissions-store.js";
 import { isProactiveOrigin } from "../shared/proactive-source.js";
 import { getToolCategoryDescriptor } from "./category-registry.js";
+import type {
+  RiskClassifier,
+  RiskVerdict,
+  ToolInvocationContext,
+} from "./reviewer/risk-classifier.js";
+import type { VerdictCache } from "./reviewer/verdict-cache.js";
+import type { DeferredQueue } from "./reviewer/deferred-queue.js";
 
 export type PermissionDecision = "allow" | "deny" | "ask";
 export type ExecutionMode = "default" | "strict" | "auto";
@@ -64,6 +71,43 @@ export interface PermissionCheckContext {
   headless?: boolean;
 }
 
+/**
+ * Q12 P3 — input bundle for reviewer-agent dispatch. Set when the
+ * caller wants the headless lane to consult the Layer 5 classifier
+ * (rather than the temporary "reviewer → ask" mapping).
+ */
+export interface ReviewerDispatchInput {
+  source: ToolSource;
+  category: ToolCategory;
+  /** DLP-redacted finalInput — caller is responsible for redaction. */
+  finalInput: Record<string, unknown>;
+  allowedDirectories: string[];
+  sensitivePathsAdjacent: string[];
+  /** When true, out-of-allowed-dir access also routes to the reviewer. */
+  outOfAllowedDir?: boolean;
+}
+
+/**
+ * Result returned by {@link PermissionManager.dispatchReviewer}. The
+ * caller (executor) translates this into either an immediate
+ * allow + audit (LOW/MEDIUM) or deferred-queue append (HIGH).
+ */
+export interface ReviewerDispatchResult {
+  verdict: RiskVerdict;
+  /**
+   * "hit" / "miss-stale" / "miss-expired" / "miss-not-found" — surfaces
+   * the audit-trail "from cache" hint (m1 architect MAJOR-5 cache
+   * deliverable + design v2.1 §11 selective invalidation).
+   */
+  cacheReason: "hit" | "miss-stale" | "miss-expired" | "miss-not-found";
+  /**
+   * For HIGH verdicts in headless mode: the deferred-queue id the
+   * caller should reference in its audit entry. For LOW/MEDIUM the
+   * caller proceeds without queue interaction.
+   */
+  deferredId?: string;
+}
+
 export class PermissionManager {
   private rules: PermissionRule[] = [];
   private mode: ExecutionMode = "default";
@@ -74,10 +118,55 @@ export class PermissionManager {
   private readonly toolModeOverrides = new Map<string, ExecutionMode>();
   /** 영구 규칙 저장 경로 (~/.lvis/permissions.json) */
   private readonly permissionsFilePath: string;
+  /** Q12 P3 — reviewer agent dispatch components. Wired at boot. */
+  private reviewerClassifier: RiskClassifier | null = null;
+  private verdictCache: VerdictCache | null = null;
+  private deferredQueue: DeferredQueue | null = null;
 
   constructor(permissionsFilePath?: string) {
     this.permissionsFilePath =
       permissionsFilePath ?? resolve(homedir(), ".lvis", "permissions.json");
+  }
+
+  /**
+   * Q12 P3 — wire the Layer 5 reviewer agent. Call once at boot after
+   * loading settings. When unset, {@link dispatchReviewer} returns
+   * `{ verdict: { level: "high", reason: "reviewer not wired" } }` so
+   * callers route to the deferred queue (fail-safe per design §1).
+   */
+  setReviewer(deps: {
+    classifier: RiskClassifier;
+    cache: VerdictCache;
+    deferredQueue: DeferredQueue;
+  }): void {
+    this.reviewerClassifier = deps.classifier;
+    this.verdictCache = deps.cache;
+    this.deferredQueue = deps.deferredQueue;
+  }
+
+  hasReviewer(): boolean {
+    return (
+      this.reviewerClassifier !== null &&
+      this.verdictCache !== null &&
+      this.deferredQueue !== null
+    );
+  }
+
+  /**
+   * Q12 P3 — accessor for the deferred queue. IPC layer reads pending
+   * entries from here and resolves them on user gestures. Returns null
+   * when the reviewer is not wired (legacy boot mode).
+   */
+  getDeferredQueue(): DeferredQueue | null {
+    return this.deferredQueue;
+  }
+
+  /**
+   * Q12 P3 — accessor for the verdict cache. Used by the slash handler
+   * when the user changes settings and we need to drop stale entries.
+   */
+  getVerdictCache(): VerdictCache | null {
+    return this.verdictCache;
   }
 
   // ─── 설정 ────────────────────────────────────────
@@ -314,6 +403,79 @@ export class PermissionManager {
     return this.categoryBasedDecision(toolName, trust, resolvedCategory, context);
   }
 
+  /**
+   * Q12 P3 — dispatch the Layer 5 reviewer agent for a tool invocation.
+   *
+   * Decision tree (design §3 Layer 5):
+   *   1. cache lookup → on hit, skip classify + return cached verdict
+   *   2. classify (sync or async, depending on classifier impl)
+   *   3. cache the verdict for next time (HIGH cached too)
+   *   4. if HIGH → append to deferred queue, return with `deferredId`
+   *   5. if LOW/MEDIUM → return verdict; caller proceeds with allow+audit
+   *
+   * Failure mode: if {@link setReviewer} was never called, returns
+   * HIGH + `deferredId === undefined` so callers route to the
+   * legacy "ask" path. This preserves fail-safe semantics for
+   * legacy boot configurations (Phase 4+ removes the legacy path).
+   */
+  async dispatchReviewer(
+    toolName: string,
+    input: ReviewerDispatchInput,
+    routineScope?: Record<string, unknown>,
+  ): Promise<ReviewerDispatchResult> {
+    if (!this.hasReviewer()) {
+      return {
+        verdict: { level: "high", reason: "reviewer not wired — fail-safe defer" },
+        cacheReason: "miss-not-found",
+      };
+    }
+    const classifier = this.reviewerClassifier!;
+    const cache = this.verdictCache!;
+    const queue = this.deferredQueue!;
+
+    const lookupKey = {
+      toolName,
+      source: input.source,
+      category: input.category,
+      finalInput: input.finalInput,
+    };
+    const cacheCtx = {
+      allowedDirectories: input.allowedDirectories,
+      scope: routineScope ?? {},
+    };
+
+    const cacheResult = cache.lookup(lookupKey, cacheCtx);
+    let verdict: RiskVerdict;
+    if (cacheResult.hit && cacheResult.verdict) {
+      verdict = cacheResult.verdict;
+    } else {
+      const ctx: ToolInvocationContext = {
+        toolName,
+        source: input.source,
+        category: input.category,
+        finalInput: input.finalInput,
+        allowedDirectories: input.allowedDirectories,
+        sensitivePathsAdjacent: input.sensitivePathsAdjacent,
+      };
+      const classified = classifier.classify(ctx);
+      verdict = classified instanceof Promise ? await classified : classified;
+      // Persist for next time (HIGH cached too — re-deny is fast).
+      await cache.store(lookupKey, cacheCtx, verdict);
+    }
+
+    if (verdict.level === "high") {
+      const deferredId = await queue.append({
+        toolName,
+        source: input.source,
+        category: input.category,
+        inputSummary: summariseInput(input.finalInput),
+        verdict,
+      });
+      return { verdict, cacheReason: cacheResult.reason, deferredId };
+    }
+    return { verdict, cacheReason: cacheResult.reason };
+  }
+
   // ─── Private ─────────────────────────────────────
 
   private resolveTrust(toolName: string, source?: ToolSource): TrustLevel {
@@ -387,9 +549,21 @@ export class PermissionManager {
           layer: 6,
         };
       case "reviewer":
-        // Phase 3 reviewer not yet wired — until then, surface to user.
-        // This is the documented temporary mapping per design §1
-        // ("Fail-safe defaults"); the reviewer agent ships in Phase 3.
+        // Q12 P3 — when the reviewer is wired, the executor
+        // dispatches via {@link dispatchReviewer} synchronously
+        // before invoking the tool. categoryBasedDecision still
+        // returns "ask" so the legacy code path (no reviewer wired)
+        // remains fail-safe (design §1 — reviewer disabled defers
+        // to user). The "reviewer" decision is the executor's signal
+        // to consult dispatchReviewer; categoryBasedDecision can't
+        // do it directly because it isn't async.
+        if (this.hasReviewer()) {
+          return {
+            decision: "ask",
+            reason: `headless ${category} — reviewer agent 라우팅 대상 (executor 가 dispatchReviewer 호출)`,
+            layer: 6,
+          };
+        }
         return {
           decision: "ask",
           reason: `headless ${category} — reviewer agent 미배치, 사용자 컨펌`,
@@ -428,6 +602,19 @@ function matchGlob(pattern: string, name: string): boolean {
  * directly; this only fires for legacy or test-only paths that drop the
  * argument. Returns a 5-axis category — `dangerous` is gone.
  */
+/**
+ * Q12 P3 — render a deferred-queue-friendly summary of `finalInput`.
+ * Caller is expected to have already DLP-redacted; this is a pure
+ * length-cap so the queue file stays manageable. Keys are sorted for
+ * deterministic display.
+ */
+function summariseInput(input: Record<string, unknown>): string {
+  const sorted: Record<string, unknown> = {};
+  for (const k of Object.keys(input).sort()) sorted[k] = input[k];
+  const json = JSON.stringify(sorted);
+  return json.length > 240 ? json.slice(0, 240) + "…" : json;
+}
+
 function classifyToolCategory(toolName: string): ToolCategory {
   const readPatterns = [
     /_(search|list|get|query|status|transcript|sessions|documents|preview|fetch)$/,
