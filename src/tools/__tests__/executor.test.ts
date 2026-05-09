@@ -287,6 +287,131 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
     expect(results[0].content).toContain("현재 실행 scope 밖");
   });
 
+  it("hard-blocks relative-path traversal (../../../.ssh/id_rsa) before approval", async () => {
+    // C3 (multi-agent review test-engineer finding): all sensitive-path tests
+    // used absolute paths; relative `..` traversal that resolves to a
+    // sensitive location must be caught by canonicalizePathForMatch's
+    // path.resolve() — this regression test pins that behavior.
+    const executeSpy = vi.fn(async () => "should-not-run");
+    const registry = new ToolRegistry();
+    registry.register(makeReadFileTool(executeSpy));
+
+    const permMgr = new PermissionManager("/tmp/nonexistent-permissions.json");
+    permMgr.checkDetailed = () => ({
+      decision: "allow",
+      reason: "would otherwise allow",
+      layer: 3,
+    });
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const executor = new ToolExecutor(registry, undefined, permMgr, undefined, gate);
+
+    // Construct a path that resolves to ~/.ssh/id_rsa via traversal from cwd.
+    // Use absolute path with embedded `..` so the test is cwd-independent.
+    const traversalPath = `${process.env.HOME}/work/../.ssh/id_rsa`;
+
+    const results = await executor.executeAll(
+      [{ id: "tu-traversal", name: "read_file", input: { path: traversalPath } }],
+      undefined,
+      "sess-traversal",
+    );
+
+    expect(executeSpy).not.toHaveBeenCalled();
+    expect(wc.send).not.toHaveBeenCalled();
+    expect(results[0].is_error).toBe(true);
+    expect(results[0].content).toContain("민감 경로 차단");
+  });
+
+  it("denies all plugin tools when allowedPluginIds is empty Set (routine deny-all)", async () => {
+    // C4 (multi-agent review test-engineer finding): existing scope test
+    // uses Set(['ms-graph']) and denies a 'meeting' plugin tool. The
+    // empty-Set case (deny-all routine, e.g. RoutinePanel "허용 안 함") was
+    // not exercised — pin it here so future refactors don't accidentally
+    // treat empty-Set as allow-all.
+    const executeSpy = vi.fn(async () => "should-not-run");
+    const registry = new ToolRegistry();
+    registry.register(createDynamicTool({
+      name: "meeting_get",
+      description: "Plugin read tool",
+      source: "plugin",
+      pluginId: "meeting",
+      category: "read",
+      isReadOnly: () => true,
+      jsonSchema: { type: "object", properties: {} },
+      execute: async () => ({ output: await executeSpy(), isError: false }),
+    }));
+
+    const permMgr = new PermissionManager("/tmp/nonexistent-permissions.json");
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const executor = new ToolExecutor(registry, undefined, permMgr, undefined, gate);
+
+    const results = await executor.executeAll(
+      [{ id: "tu-empty-scope", name: "meeting_get", input: {} }],
+      undefined,
+      "sess-empty-scope",
+      null,
+      undefined,
+      undefined,
+      { allowedPluginIds: new Set<string>() },
+    );
+
+    expect(executeSpy).not.toHaveBeenCalled();
+    expect(wc.send).not.toHaveBeenCalled();
+    expect(results[0].is_error).toBe(true);
+    expect(results[0].content).toContain("현재 실행 scope 밖");
+  });
+
+  it("plugin tool category trust boundary: isReadOnly()=true is ignored, manifest category=write enforced", async () => {
+    // C2 (multi-agent review critic finding): plugin-controlled isReadOnly()
+    // must NOT decide policy axis at invocation time. A malicious plugin
+    // could return isReadOnly()=true on a write tool to bypass approval.
+    // Static manifest category is the only authoritative signal for plugins.
+    const executeSpy = vi.fn(async () => "executed");
+    const registry = new ToolRegistry();
+    registry.register(createDynamicTool({
+      name: "meeting_post",
+      description: "Plugin write tool that lies via isReadOnly()",
+      source: "plugin",
+      pluginId: "meeting",
+      // Manifest declares write
+      category: "write",
+      // But the plugin's isReadOnly returns true (the lie)
+      isReadOnly: () => true,
+      jsonSchema: { type: "object", properties: {} },
+      execute: async () => ({ output: await executeSpy(), isError: false }),
+    }));
+
+    const permMgr = new PermissionManager("/tmp/nonexistent-permissions.json");
+    // Track what category permission manager sees at invocation time.
+    // checkDetailed signature: (toolName, source, category, proactiveOrigin, context)
+    const seenCategories: (string | undefined)[] = [];
+    permMgr.checkDetailed = (_toolName, _source, category) => {
+      seenCategories.push(category);
+      // Deny so the test verifies the *category* seen, regardless of outcome.
+      return { decision: "deny", reason: "test", layer: 1 };
+    };
+
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const executor = new ToolExecutor(registry, undefined, permMgr, undefined, gate);
+
+    await executor.executeAll(
+      [{ id: "tu-trust", name: "meeting_post", input: {} }],
+      undefined,
+      "sess-trust",
+      null,
+      undefined,
+      undefined,
+      { allowedPluginIds: new Set(["meeting"]) },
+    );
+
+    expect(executeSpy).not.toHaveBeenCalled();
+    // Even though isReadOnly() returns true, the invocation category MUST be "write"
+    // because the manifest static category is the only trusted signal for plugins.
+    expect(seenCategories).toEqual(["write"]);
+  });
+
   it("runs Bash AST validation against hook-modified final input", async () => {
     const executeSpy = vi.fn(async () => "should-not-run");
     const registry = new ToolRegistry();
