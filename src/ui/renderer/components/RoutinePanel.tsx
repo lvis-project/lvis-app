@@ -264,7 +264,17 @@ function AddRoutineModal({ api, onClose, onAdded }: AddRoutineModalProps) {
       ...(execution === "llm-session"
         ? {
             prePrompt: prePrompt.trim(),
-            ...(allowedPluginIds.length > 0 ? { allowedPlugins: allowedPluginIds } : {}),
+            // Q12 Layer 4 — RoutinePanel always emits an explicit scope:
+            // empty plugin selection = deny-all (matches the panel's
+            // "허용 안 함" semantic); non-empty = explicit allow-list.
+            scope: {
+              pluginIds:
+                allowedPluginIds.length > 0
+                  ? { mode: "allow", ids: allowedPluginIds }
+                  : { mode: "deny-all" },
+              forcedPluginIds: [],
+              directories: [],
+            },
           }
         : {
             ...(notificationTitle.trim() ? { notificationTitle: notificationTitle.trim() } : {}),

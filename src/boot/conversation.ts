@@ -16,6 +16,7 @@ import { SystemPromptBuilder } from "../prompts/system-prompt-builder.js";
 import { PermissionManager } from "../permissions/permission-manager.js";
 import { ApprovalGate } from "../permissions/approval-gate.js";
 import { loadPolicy } from "../permissions/policy-store.js";
+import { registerStandardCategories } from "../permissions/category-registry.js";
 import { ConversationLoop } from "../engine/conversation-loop.js";
 import { PostTurnHookChain } from "../hooks/post-turn-hook-chain.js";
 import { HookRunner } from "../hooks/hook-runner.js";
@@ -59,6 +60,10 @@ export function createSystemPromptBuilder(opts: {
 }
 
 export async function createPermissionManager(): Promise<PermissionManager> {
+  // Q12 — register the 5-axis ToolCategory descriptors before any
+  // PermissionManager.checkDetailed() can run. Idempotent: re-calls
+  // simply overwrite the registry entries with the same values.
+  registerStandardCategories();
   // §6.3: PermissionManager (Layer 2-3)
   const permissionManager = new PermissionManager();
   // 기본 allow 규칙: 조회성 도구 자동 허용
@@ -192,7 +197,7 @@ export type RoutineConversationLoopDeps = Pick<
 
 export function createRoutineConversationLoop(
   deps: RoutineConversationLoopDeps,
-  opts: { allowedPlugins?: string[] } = {},
+  opts: { scope?: import("../shared/routines-types.js").RoutineScope } = {},
 ): ConversationLoop {
   // Layer 1 (UX hot-fix v3): each routine fire gets its *own* SystemPromptBuilder
   // instance with routineMode=true so the LLM is instructed to append a
@@ -206,6 +211,22 @@ export function createRoutineConversationLoop(
     // Skill overlay is interactive-only — routine sessions are headless.
   });
   routineSystemPromptBuilder.setRoutineMode(true);
+  // Q12 Layer 4 — translate the discriminated scope into the loop's
+  // ConversationLoopDeps shape. The scope must already be normalized
+  // (no `inherit`) by the dispatcher before this factory runs.
+  const scope = opts.scope;
+  let allowedPluginIds: Set<string>;
+  if (!scope || scope.pluginIds.mode === "inherit") {
+    // Defensive default — should never hit production because the
+    // dispatcher normalizes inherit to a snapshot. Coerce to deny-all
+    // so we fail closed instead of opening up the full active set.
+    allowedPluginIds = new Set();
+  } else if (scope.pluginIds.mode === "deny-all") {
+    allowedPluginIds = new Set();
+  } else {
+    allowedPluginIds = new Set(scope.pluginIds.ids);
+  }
+  const forcedActivePluginIds = new Set(scope?.forcedPluginIds ?? []);
   return new ConversationLoop({
     settingsService: deps.settingsService,
     systemPromptBuilder: routineSystemPromptBuilder,
@@ -218,8 +239,8 @@ export function createRoutineConversationLoop(
     hookRunner: deps.hookRunner,
     bashAstValidator: deps.bashAstValidator,
     pluginRuntime: deps.pluginRuntime,
-    allowedPluginIds: new Set(opts.allowedPlugins ?? []),
-    forcedActivePluginIds: new Set(opts.allowedPlugins ?? []),
+    allowedPluginIds,
+    forcedActivePluginIds,
     headless: true,
     disableSessionPersistence: true,
     // postTurnHookChain / idleScheduler intentionally omitted — routine loops
