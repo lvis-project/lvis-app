@@ -32,19 +32,52 @@ import { createLogger } from "../lib/logger.js";
 
 const log = createLogger("permission-settings");
 
+export type ReviewerMode = "disabled" | "rule" | "llm";
+export type ReviewerProvider = "openai" | "anthropic" | "google";
+export type ReviewerFallbackOnError = "deny" | "rule";
+
+/**
+ * Q12 P3 — `permissions.reviewer` block. Defaults per spec v2.1 §11
+ * binding decision: provider="openai", model="gpt-4o-mini",
+ * fallbackOnError="rule".
+ */
+export interface ReviewerSettingsBlock {
+  mode: ReviewerMode;
+  provider: ReviewerProvider;
+  model: string;
+  fallbackOnError: ReviewerFallbackOnError;
+}
+
 export interface PermissionSettingsBlock {
   additionalDirectories: string[];
+  reviewer: ReviewerSettingsBlock;
 }
 
 export interface PermissionSettingsFile {
   permissions: PermissionSettingsBlock;
 }
 
+const DEFAULT_REVIEWER: ReviewerSettingsBlock = {
+  mode: "disabled",
+  provider: "openai",
+  model: "gpt-4o-mini",
+  fallbackOnError: "rule",
+};
+
 const DEFAULT_FILE: PermissionSettingsFile = {
   permissions: {
     additionalDirectories: [],
+    reviewer: { ...DEFAULT_REVIEWER },
   },
 };
+
+const REVIEWER_MODES: ReadonlySet<ReviewerMode> = new Set(["disabled", "rule", "llm"]);
+const REVIEWER_PROVIDERS: ReadonlySet<ReviewerProvider> = new Set([
+  "openai",
+  "anthropic",
+  "google",
+]);
+const REVIEWER_FALLBACKS: ReadonlySet<ReviewerFallbackOnError> = new Set(["deny", "rule"]);
 
 function defaultPath(): string {
   return pathResolve(homedir(), ".lvis", "settings.json");
@@ -92,16 +125,57 @@ export function normalizePermissionSettings(
     );
     dirs = aliased.filter((s): s is string => typeof s === "string" && s.length > 0);
   }
-  return { permissions: { additionalDirectories: dirs } };
+  return {
+    permissions: {
+      additionalDirectories: dirs,
+      reviewer: normalizeReviewerBlock(perm.reviewer),
+    },
+  };
+}
+
+/**
+ * Q12 P3 — normalize `permissions.reviewer` from arbitrary JSON to the
+ * canonical block. Unknown enum values fall back to defaults with a
+ * warn (per CLAUDE.md No-Fallback: this is the *external boundary* —
+ * settings file may be hand-edited with bad values).
+ */
+function normalizeReviewerBlock(parsed: unknown): ReviewerSettingsBlock {
+  if (!parsed || typeof parsed !== "object") return { ...DEFAULT_REVIEWER };
+  const obj = parsed as Record<string, unknown>;
+  const mode =
+    typeof obj.mode === "string" && REVIEWER_MODES.has(obj.mode as ReviewerMode)
+      ? (obj.mode as ReviewerMode)
+      : DEFAULT_REVIEWER.mode;
+  const provider =
+    typeof obj.provider === "string" &&
+    REVIEWER_PROVIDERS.has(obj.provider as ReviewerProvider)
+      ? (obj.provider as ReviewerProvider)
+      : DEFAULT_REVIEWER.provider;
+  const model =
+    typeof obj.model === "string" && obj.model.length > 0
+      ? obj.model
+      : DEFAULT_REVIEWER.model;
+  const fallbackOnError =
+    typeof obj.fallbackOnError === "string" &&
+    REVIEWER_FALLBACKS.has(obj.fallbackOnError as ReviewerFallbackOnError)
+      ? (obj.fallbackOnError as ReviewerFallbackOnError)
+      : DEFAULT_REVIEWER.fallbackOnError;
+  return { mode, provider, model, fallbackOnError };
 }
 
 /**
  * Atomically rewrite `~/.lvis/settings.json` with a fresh
  * `permissions.additionalDirectories` value. Preserves any other
  * top-level keys present in the existing file.
+ *
+ * Q12 P3: also accepts a `reviewer` patch (partial). Provided keys
+ * overwrite; missing keys preserve existing values.
  */
 export async function writePermissionSettings(
-  patch: { additionalDirectories: string[] },
+  patch: {
+    additionalDirectories?: string[];
+    reviewer?: Partial<ReviewerSettingsBlock>;
+  },
   pathOverride?: string,
 ): Promise<void> {
   const filePath = pathOverride ?? defaultPath();
@@ -118,11 +192,22 @@ export async function writePermissionSettings(
     // Drop the deprecated alias key on write — settings file converges
     // on the canonical name with each persist.
     delete existingPerm.allowedDirectories;
+    const existingReviewer = normalizeReviewerBlock(existingPerm.reviewer);
+    const nextReviewer: ReviewerSettingsBlock = patch.reviewer
+      ? validateReviewerPatch({ ...existingReviewer, ...patch.reviewer })
+      : existingReviewer;
+    const nextDirs =
+      patch.additionalDirectories !== undefined
+        ? [...patch.additionalDirectories]
+        : Array.isArray(existingPerm.additionalDirectories)
+          ? (existingPerm.additionalDirectories as string[])
+          : [];
     const merged = {
       ...existing,
       permissions: {
         ...existingPerm,
-        additionalDirectories: [...patch.additionalDirectories],
+        additionalDirectories: nextDirs,
+        reviewer: nextReviewer,
       },
     };
     mkdirSync(dirname(filePath), { recursive: true, mode: 0o700 });
@@ -131,6 +216,46 @@ export async function writePermissionSettings(
       mode: 0o600,
     });
   });
+}
+
+/**
+ * Strict validate a candidate reviewer block. Used by the slash
+ * handler / IPC writes — invalid input rejected with an error message
+ * (no silent default-substitution at write time, only at read time
+ * for hand-edited files).
+ */
+function validateReviewerPatch(patch: ReviewerSettingsBlock): ReviewerSettingsBlock {
+  if (!REVIEWER_MODES.has(patch.mode)) {
+    throw new Error(
+      `permissions.reviewer.mode invalid: '${patch.mode}'. Allowed: ${[...REVIEWER_MODES].join("|")}`,
+    );
+  }
+  if (!REVIEWER_PROVIDERS.has(patch.provider)) {
+    throw new Error(
+      `permissions.reviewer.provider invalid: '${patch.provider}'. Allowed: ${[...REVIEWER_PROVIDERS].join("|")}`,
+    );
+  }
+  if (!REVIEWER_FALLBACKS.has(patch.fallbackOnError)) {
+    throw new Error(
+      `permissions.reviewer.fallbackOnError invalid: '${patch.fallbackOnError}'. Allowed: ${[...REVIEWER_FALLBACKS].join("|")}`,
+    );
+  }
+  if (typeof patch.model !== "string" || patch.model.length === 0) {
+    throw new Error("permissions.reviewer.model must be a non-empty string");
+  }
+  return patch;
+}
+
+/**
+ * Q12 P3 — persist a reviewer-block partial. Convenience helper for
+ * `/permission reviewer ...` slash dispatchers.
+ */
+export async function setReviewerSettingsPersist(
+  patch: Partial<ReviewerSettingsBlock>,
+  pathOverride?: string,
+): Promise<ReviewerSettingsBlock> {
+  await writePermissionSettings({ reviewer: patch }, pathOverride);
+  return readPermissionSettings(pathOverride).permissions.reviewer;
 }
 
 /**
