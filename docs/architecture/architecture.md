@@ -1395,260 +1395,234 @@ flowchart TB
 6. Lgenie Fallback           → 위 모두 해당 없으면 LLM 직접 대화
 ```
 
-### 6.3 Tool Permission Model — 3계층 도구 권한
+### 6.3 Tool Permission Model — Q12 10-Layer Pipeline
 
-> **Reference**: ccleaks.com §05 "Permission System — 3-layer permission model"
-> §8 Agent Approval System이 **에이전트 행위 승인**을 다룬다면, 이 섹션은 **개별 도구 호출 시점의 권한 제어**를 3계층으로 정의한다.
+> **Reference**: `docs/architecture/q12-permission-policy-design.md` v2.1
+> (full spec — 10-layer evaluation, multi-agent reviewed). This section
+> is the architecture-level summary; defer to the spec for the
+> exhaustive layer detail, decision matrix, and binding decisions.
+>
+> §8 Agent Approval System은 **에이전트 행위 승인** (자율 게시 / 외부
+> 송신 / 업무 일지 공개 범위) 을 다룬다. 본 §6.3 은 **개별 도구 호출
+> 권한** 을 다룬다. Q12 Layer 3 의 `network = ask + endpoint` 결정은
+> §8 ApprovalGate 의 입력으로 흐른다 — 두 섹션을 *중복 승인 단계* 로
+> 오해하지 말 것 (single-decision, single-prompt).
+
+#### 6.3.1 — 10-layer evaluation pipeline (overview)
+
+호출 흐름은 input origin classification → numeric-order short-circuit
+→ collected `denyReasons[]`. 각 layer 는 단일 책임을 가지며,
+선행 layer 가 deny 를 반환하면 후속 layer 는 평가하지 않는다 (단
+forensics 용 `denyReasons` 는 plural shape 으로 정의되어 향후 dual-deny
+모드 호환).
 
 ```mermaid
 flowchart TB
-    subgraph "Layer 1 — Tool Registry Filter (컨텍스트 빌드 전)"
-        DENY_RULES["Deny Rules<br/>(settings.json · Governance Policy)"]
-        FILTER["filterToolsByDenyRules()"]
-        VISIBLE["Lgenie에 전달되는<br/>도구 스키마 목록"]
-    end
+    INPUT["Origin classify (§9):<br/>user-keyboard / plugin-emitted / llm-tool-arg / file-content"]
 
-    subgraph "Layer 2 — Per-call Permission Check (호출 시점)"
-        CAN_USE["canUseTool()<br/>(tool, args, context)"]
-        ALLOW_RULES["Allow/Deny 규칙 매칭<br/>(도구명 + 인자 패턴 + 경로)"]
-        RBAC["RBAC 확인<br/>(사원 역할·등급)"]
-        GOV_CHK["Governance Policy<br/>(외부 API·파일 삭제 등)"]
-    end
+    INPUT --> L0["Layer 0 — Sensitive paths<br/>(deny-list, frozen-canonical realpath)"]
+    L0 --> L1["Layer 1 — Path policy<br/>(additionalDirectories allow-list)"]
+    L1 --> L2["Layer 2 — Action<br/>(allow / ask / deny + denyReasons[])"]
+    L2 --> L3["Layer 3 — Category × Source × Mode<br/>(read/write/shell/network/meta)"]
+    L3 --> L4["Layer 4 — Subscription scope<br/>(routine.scope discriminated union)"]
+    L4 --> L5["Layer 5 — Reviewer agent<br/>(headless: rule / llm / disabled)"]
+    L5 --> L6["Layer 6 — Hook chain v1<br/>(deny-only, ~/.config/lvis/hooks/)"]
+    L6 --> L7["Layer 7 — Audit emit<br/>(discriminated union + HMAC chain)"]
+    L7 --> L8["Layer 8 — Runtime mode<br/>(/permission slash, user-keyboard gated)"]
+    L8 --> L9["Layer 9 — Sandbox (preload, unchanged)"]
 
-    subgraph "Layer 3 — Interactive User Prompt (미매칭 시)"
-        PROMPT["사용자 승인 다이얼로그"]
-        ONCE["1회 허용"]
-        ALWAYS["항상 허용<br/>(규칙 자동 추가)"]
-        DENY_ACT["거부"]
-    end
-
-    DENY_RULES --> FILTER
-    FILTER -->|"차단 도구 제거<br/>💡 Lgenie는 차단된 도구의<br/>존재 자체를 알 수 없음"| VISIBLE
-
-    VISIBLE --> CAN_USE
-    CAN_USE --> ALLOW_RULES
-    CAN_USE --> RBAC
-    CAN_USE --> GOV_CHK
-    ALLOW_RULES -->|"매칭 — 허용"| EXEC["✅ 도구 실행"]
-    ALLOW_RULES -->|"매칭 — 차단"| BLOCK["🚫 차단 + Audit"]
-    ALLOW_RULES -->|"미매칭"| PROMPT
-
-    PROMPT --> ONCE --> EXEC
-    PROMPT --> ALWAYS --> EXEC
-    PROMPT --> DENY_ACT --> BLOCK
+    L0 -.->|"deny: sensitive path"| AUDIT_DENY["Audit: AuditDeny"]
+    L1 -.->|"deny: out-of-allowed-dir"| AUDIT_DENY
+    L5 -.->|"HIGH"| DEFERRED["Deferred Queue"]
+    L6 -.->|"deny"| AUDIT_DENY
 ```
 
-**Layer별 역할과 설계 근거:**
+#### 6.3.2 — Layer reference
 
-| Layer | 시점 | 역할 | 보안 효과 |
+| Layer | 책임 | Spec § | 주요 산출물 |
 | --- | --- | --- | --- |
-| **L1 — Registry Filter** | System Prompt 빌드 전 | Governance deny 규칙으로 차단 도구를 LLM 컨텍스트에서 **제거** | Lgenie가 존재를 모르므로 할루시네이션 호출 원천 차단 |
-| **L2 — Per-call Check** | 도구 호출 시점 | allow/deny 패턴 + RBAC + Governance 정책 확인 | 인자·경로 수준의 세밀한 제어 (예: `Bash(git *)` 허용, `Bash(rm *)` 차단) |
-| **L3 — User Prompt** | L2 미매칭 시 | 사용자에게 1회/항상/거부 선택 | 새로운 도구·인자 조합에 대한 사용자 주도 정책 학습 |
+| 0 | OS / 사용자 자격증명 / LVIS 자체 보호 경로 deny-list. realpath 기반 frozen-canonical (TOCTOU 차단). | §3 Layer 0 | `src/permissions/sensitive-paths.ts` |
+| 1 | `additionalDirectories` allow-list + auto-suggest (leaf parent only, re-typed confirm, adjacency warning). | §3 Layer 1 | `src/permissions/allowed-directories.ts` |
+| 2 | Action 결정 (`allow / ask / deny`) + `denyReasons[]` 수집. `confirm` 은 `ask` 의 sub-variant — auto mode 도 silent skip 금지. | §3 Layer 2 | `PermissionCheckResult.denyReasons` |
+| 3 | 5-axis category × source × mode 매트릭스. Open-Closed `ToolCategoryRegistry`. | §3 Layer 3 | `src/permissions/category-registry.ts` |
+| 4 | Routine 의 `scope.pluginIds` discriminated union (`deny-all` / `allow` / `inherit`). Boot 시 `inherit` 은 active set 으로 normalize. | §3 Layer 4 | `routine.scope.*` |
+| 5 | Reviewer agent (multi-vendor) — headless write/shell/network 의 LOW/MED auto-allow / HIGH defer. `final = max(rule, llm)`. | §3 Layer 5 | `src/permissions/reviewer/*` |
+| 6 | Hook chain v1 (deny-only). `~/.config/lvis/hooks/{pre,post,perm}-*.sh`. TOFU lockfile + DLP-redacted stdin. | §3 Layer 6 | `src/hooks/script-hook-*` |
+| 7 | Discriminated-union audit (`AuditAllow`/`AuditAsk`/`AuditDeny`/`AuditDeferred`/`AuditModeChange`/`AuditManifestViolation`) + HMAC chain + daily seal. | §3 Layer 7 | `src/audit/audit-schema.ts`, `src/audit/hmac-chain.ts` |
+| 8 | `/permission` 슬래시 + user-keyboard origin gate + `--durable` modal confirm. Mode change emits `AuditModeChange`. | §3 Layer 8 | `src/permissions/permission-slash.ts` |
+| 9 | Electron preload / contextBridge 기존 sandbox — Q12 변경 없음. | §3 Layer 9 | `src/preload.ts` |
 
-**실행 모드:**
+#### 6.3.3 — Trust origin classification
 
-| 모드 | 설명 | 적용 상황 |
-| --- | --- | --- |
-| **Default** | 위험 도구만 승인 요청, 나머지 자동 허용 | 일반 업무 |
-| **Strict (Plan Mode)** | 모든 도구 실행 전 승인 필요 | 민감 업무·신규 플러그인 테스트 |
-| **Auto Mode** | 에이전트가 판단하여 실행 (L1·L2는 여전히 적용) | 반복 업무 자동화 |
+모든 input 에 4-tier origin 부여. 전파 경로: ToolUseEnvelope → Layer 6
+hook stdin → Layer 7 audit → Layer 8 slash dispatcher.
 
-**규칙 설정 예시:**
-
-```json
-{
-  "permissions": {
-    "allow": [
-      "FileRead(*)",
-      "Search(*)",
-      "Bash(git *)",
-      "Calendar(read)"
-    ],
-    "deny": [
-      "Bash(rm *)",
-      "Bash(sudo *)",
-      "FileWrite(/etc/*)",
-      "Email(send)",
-      "AgentHub(post scope:company)"
-    ]
-  }
-}
-```
-
-**Wave C 보안 강화 (PR #130–#133):**
-
-| 항목 | 구현 | PR |
-| --- | --- | --- |
-| **D1 — DLP filter on approval args** | `webContents.send` 전 `redactForLLM()` 로 승인 요청 args를 DLP 필터링. 기밀 데이터가 renderer payload 로 노출되지 않도록 차단. | #130 |
-| **D2 — HMAC nonce on approval response** | 승인 응답에 HMAC nonce 첨부. renderer → main IPC 경로의 confused-deputy 공격 방어. | #132 |
-| **D3 — Approval queue cap** | `pending.size` 상한 초과 시 신규 요청 deny-once 처리. LLM 대량 tool_use 발행 시 리소스 보호. renderer 큐 깊이 UI 표시. | #131 |
-| **D4 — Parallel tool execution + bulk approval** | `ToolExecutor.executeAll()` 병렬 실행 활성화 + `ToolApprovalDialog` 다중 승인 UI (bulk approve/deny). | #133 |
-
-#### 6.3.x — Reviewer Agent (Layer 5, Q12 Phase 3)
-
-> **Phase 3 stub.** Phase 5 fully rewrites §6.3 from the legacy 3-layer
-> model to the Q12 10-layer pipeline. This subsection is the
-> placeholder so Phase 3 deliverables (PR #632 commits) are
-> arch-discoverable. Spec ref:
-> `docs/architecture/q12-permission-policy-design.md` §3 Layer 5,
-> §11 v2.1 binding decisions.
-
-The **Reviewer Agent** is the Q12 Layer 5 risk classifier consulted on
-*headless write/shell/network/read-out-of-dir* invocations. It is the
-runtime safety net that distinguishes routine tool calls (LOW/MEDIUM,
-auto-allow + audit) from suspicious ones (HIGH, deferred to user).
-
-**Three modes (configurable via `/permission reviewer mode ...`):**
-
-| Mode | Behavior | Use case |
-| --- | --- | --- |
-| `disabled` | Always returns HIGH (defer-all fail-safe). Headless lane queues every action. | Maximum caution; operators reviewing every routine action manually. |
-| `rule` | Deterministic 36-rule heuristic. Sync, no network, no cost. | Default for offline / quota-conscious deployments. |
-| `llm` | Multi-vendor LLM call (default `provider="openai"`, `model="gpt-4o-mini"`). Composition `final = max(rule, llm)` — LLM cannot downgrade. | Higher recall on novel attack shapes. |
-
-**Composition rule (security M1):** every `llm` invocation also runs the
-`RuleBasedRiskClassifier` first; the final verdict is `max(ruleVerdict,
-llmVerdict)`. The LLM can only escalate, never downgrade. This keeps
-hard-coded heuristic rules (e.g. `rm -rf` → HIGH) authoritative even
-when the LLM under-reacts.
-
-**DLP filter on input (security threat-gap #3):** `finalInput` is run
-through `maskSensitiveData` before being formatted into the prompt.
-Secrets / credentials / PII never reach the provider — covered by a
-regression test in `risk-classifier.test.ts`.
-
-**Verdict cache:** `~/.lvis/permissions/reviewer-cache.jsonl`, keyed by
-`sha256(toolName + source + category + canonicalInputShape)`. The
-shape replaces literal values with their type-name and deep-sorts
-keys, so different paths sharing the same shape collide on the same
-cache entry by design (caching keyed on *shape risk*, not literal
-arguments). HIGH verdicts cached too. Settings change invalidates only
-mismatching entries (selective per spec v2.1 §11), preserving
-cold-start hit rate.
-
-**Deferred queue:** `~/.lvis/permissions/deferred-queue.jsonl`. Append
-on HIGH verdict. The renderer's `DeferredQueuePanel` surfaces pending
-entries with "리뷰" / "거부" buttons — each click resolves the entry
-and writes an audit record.
-
-**Atomic cutover:** `mode: "llm"` without a configured provider throws
-at `createRiskClassifier()` boot — no silent fallback to rule mode
-(CLAUDE.md No-Fallback). `fallbackOnError ∈ { deny, rule }` only.
-
-**Files (Phase 3, PR #632):**
-- `src/permissions/reviewer/risk-classifier.ts` — interface + 3 impls.
-- `src/permissions/reviewer/verdict-cache.ts` — cache module.
-- `src/permissions/reviewer/deferred-queue.ts` — deferred queue.
-- `src/permissions/permission-manager.ts` — `dispatchReviewer()`.
-- `src/permissions/permission-slash.ts` — `/permission reviewer ...`.
-- `src/ui/renderer/components/permissions/DeferredQueuePanel.tsx` — UI.
-
-#### 6.3.y — Hook System v1 (Layer 6, Q12 Phase 4)
-
-> **Phase 4 stub.** Phase 5 fully rewrites §6.3 from the legacy 3-layer
-> model to the Q12 10-layer pipeline. This subsection is the
-> placeholder so Phase 4 deliverables (PR #632 commits) are
-> arch-discoverable. Spec ref:
-> `docs/architecture/q12-permission-policy-design.md` §3 Layer 6.
-
-The **Hook System** is the Q12 Layer 6 user-script interception lane.
-Individual shell scripts under `~/.config/lvis/hooks/` (deliberately
-outside `~/.lvis/` so a compromised LVIS process cannot trivially
-mutate them — security review M3+M4) gate three lifecycle moments per
-tool call:
-
-| Prefix | Hook type | Fires when | Outputs |
+| Origin | 출처 | Slash dispatch | 비고 |
 | --- | --- | --- | --- |
-| `pre-*.sh` | PreToolUse | Before tool execution | `{action: "allow" \| "deny", reason}` |
-| `post-*.sh` | PostToolUse | After tool execution (observe-only in v1) | same |
-| `perm-*.sh` | PermissionRequest | When the approval gate is about to ask the user | same |
+| `user-keyboard` | 사용자가 chat 입력에 직접 타이핑 | ✅ accepted | Layer 8 의 유일한 신뢰 origin |
+| `plugin-emitted` | `triggerConversation.pendingPrompt`, plugin event | ❌ rejected | leading `/` stripped 후 plain text 처리 |
+| `llm-tool-arg` | LLM 가 채운 tool input | ❌ rejected | 동상 |
+| `file-content` | `read_file` 결과를 LLM 이 다시 사용 | ❌ rejected | 동상 |
 
-**Wire contract (stdin / stdout JSON):**
+전체 spec: `docs/architecture/q12-permission-policy-design.md` §9.
 
-```jsonc
-// stdin (line-delimited JSON sent to the script)
-{
-  "hookType": "pre",
-  "toolName": "fs_write",
-  "source": "builtin",
-  "category": "write",
-  "input": { "path": "/tmp/x" },        // DLP-redacted before delivery
-  "sessionId": "...",
-  "trustOrigin": "user-keyboard"
-}
+#### 6.3.4 — Reviewer agent (multi-vendor)
 
-// stdout
-{ "action": "allow", "reason": "ok" }
+Headless write/shell/network/read-out-of-dir 호출에 대한 risk
+classifier. 3-mode (`disabled` / `rule` / `llm`) + multi-vendor adapter
+(default OpenAI gpt-4o-mini, Anthropic / Google 도 swap 가능). 항상
+rule classifier 가 baseline 으로 함께 실행되며 `final = max(rule, llm)`
+(LLM downgrade 불가). LOW/MED 는 auto-allow + audit, HIGH 는 deferred
+queue 에 append 되어 사용자 foreground 진입 시 surface 된다.
+
+**선택 surface:** `/permission reviewer mode disabled|rule|llm` /
+`/permission reviewer model <name>` / `/permission reviewer provider
+openai|anthropic|google`. 변경은 settings.json 에 persist + selective
+verdict-cache invalidation.
+
+**Cost optimization:** `~/.lvis/permissions/reviewer-cache.jsonl` —
+`sha256(toolName+source+category+canonicalInputShape)` 기반. HIGH 도
+cache (반복 deny 비용 절감). cache ≠ fallback (quota 소진 시 cache
+가 circuit breaker 로 동작하지 않음 — `fallbackOnError ∈ {deny, rule}`).
+
+전체 spec: §3 Layer 5 + §11 v2.1 binding decisions.
+
+**Files:** `src/permissions/reviewer/risk-classifier.ts`,
+`verdict-cache.ts`, `deferred-queue.ts`,
+`src/ui/renderer/components/permissions/DeferredQueuePanel.tsx`.
+
+#### 6.3.5 — Hook chain (v1 deny-only)
+
+`~/.config/lvis/hooks/` (deliberately outside `~/.lvis/` — plugin 의
+default allowed dir 안에 hook 디렉토리 두지 않기 위해 security M4).
+세 prefix 가 각각 PreToolUse / PostToolUse / PermissionRequest 를
+gate.
+
+| Prefix | Fires when | Output |
+| --- | --- | --- |
+| `pre-*.sh` | 도구 실행 전 | `{action: "allow" \| "deny", reason}` |
+| `post-*.sh` | 도구 실행 후 (v1 observe-only) | same |
+| `perm-*.sh` | 승인 게이트가 사용자에게 묻기 직전 | same |
+
+**Wire contract:** stdin/stdout JSON. `trustOrigin` 포함 (origin 별
+hook 정책 가능). DLP-redacted input — secrets / credentials / PII 가
+remote SIEM 으로 새지 않도록 `redactForLLM` 적용.
+
+**Deny-only v1 (critic M3):** `modify` action 은 Q13 hook signing
+이후로 deferred. v1 의 `allow` 는 *additional approval signal* — Layer
+0/1/2/3 deny 를 upgrade 하지 못함.
+
+**Fail-safe:** exit !=0 / malformed stdout JSON / >5s timeout → deny.
+TOFU lockfile (`.lockfile.json`) — boot 시 hash 비교 + 변경된 hook 은
+`HookTrustModal` 로 user accept 요구.
+
+**v1 binding decision (§11 v2.1):** 빈 디렉토리만 ship. Sample hook
+없음 — attack surface 0 부터 시작.
+
+**Files:** `src/hooks/script-hook-types.ts`, `script-hook-runner.ts`,
+`script-hook-manager.ts`, `hook-discovery.ts`,
+`src/boot/steps/hook-system-wiring.ts`,
+`src/ui/renderer/components/permissions/HookTrustModal.tsx`.
+
+#### 6.3.6 — Manifest integrity proxy
+
+Plugin manifest 가 `category: "read"` 를 선언한 tool 은 boot 시 fs
+proxy 로 wrap 되어 write attempts (`writeFileSync`, `mkdirSync`,
+`rmSync`, …) 가 `ManifestIntegrityViolation` 으로 panic. 위반 시:
+
+1. plugin id → process-wide `manifestIntegrityState.disabledPluginIds`.
+2. `AuditManifestViolation` audit entry 발행 (`pluginId`, `toolName`,
+   `attemptedOperation`).
+3. `lvis:permissions:manifest-violation` IPC → 사용자에게 reinstall
+   prompt.
+4. Disabled plugin 의 read-declared tool 후속 호출 fail-deny.
+
+**Trade-off:** plugin 이 standard `node:fs` 직접 import 시 우회 가능
+— Q14 sandboxed plugin runtime (V8 isolated context) 까지는 partial
+guard. 사용자 docs 에 명시.
+
+**Files:** `src/permissions/manifest-integrity.ts`,
+`src/plugins/plugin-tool-adapter.ts`. Spec: §3.5.
+
+#### 6.3.7 — Audit schema (discriminated union + HMAC chain)
+
+Discriminated union per `decision` field:
+
+```typescript
+type Q12AuditEntry =
+  | AuditAllow         // 허용 (layer + 사유)
+  | AuditAsk           // 사용자 컨펌 요청
+  | AuditDeny          // 거부 (denyReasons[])
+  | AuditDeferred      // Layer 5 HIGH → deferred queue
+  | AuditModeChange    // /permission mode 변경
+  | AuditManifestViolation; // §3.5 위반
 ```
 
-**Deny-only v1 (critic M3):** `modify` action explicitly **NOT**
-supported in v1 — Q13 introduces it once hook signing lands. The hook
-chain enforces deny precedence: a hook `allow` is *additional approval
-signal* — it cannot upgrade a Layer 0/1/2/3 deny into allow.
+모든 entry 는 `AuditCommon` (`ts`, `auditId`, `trustOrigin`,
+`prevHash`) 를 공유한다. `prevHash = HMAC(secret, prevSerializedLine)`
+chain — line N 변조 시 line N+1 의 prevHash 가 mismatch (forensics
+로 첫 broken index 식별 가능). 첫 entry 는 `genesis` marker 에 binding.
 
-**Fail-safe semantics:** non-zero exit, malformed stdout JSON, or
-`>5s` timeout collapse to `deny`. Process-group kill on timeout reaps
-descendants (e.g. `sleep` inside the script).
+**Daily seal:** `audit-seal-YYYY-MM-DD` 키로 system keychain 에
+저장. forensics 가 일자별 로 chain + seal 비교 → 변조 시점 좁힘.
 
-**TOFU lockfile:** `.lockfile.json` lives next to the hooks. On boot
-the host hashes every `pre-*.sh` / `post-*.sh` / `perm-*.sh` and
-diffs against the lockfile. New + changed entries surface in the
-`HookTrustModal` (`lvis:hooks:trust-prompt` IPC); the user accepts or
-rejects per-file. Rejected hooks move to `.disabled/`. Strict-deny
-when no UI dispatcher (headless boot, CI smoke).
+**Path protection:** `~/.lvis/audit*` 자체가 Layer 0 sensitive
+(write 차단). compromised tool 이 *새 entry* 추가는 막지만 기존 log
+rewrite 불가능.
 
-**DLP filter on input (security threat-gap #3):** every string-valued
-`input` field is run through `redactForLLM` before reaching the hook
-stdin. Secrets / credentials / PII never leak to user scripts (which
-may forward to remote SIEM endpoints).
+**Atomic cutover (No-Fallback):** keychain 미사용 환경 (Electron
+`safeStorage` 미가용) 에서는 0o600 file fallback 만 허용. boot 시
+secret 영구 저장 실패 → 감사 chain 미시작 + 사용자 actionable 에러
+(silent downgrade 금지).
 
-**v1 binding decision (spec §11 v2.1):** ship empty directory. No
-sample hooks bundled. Attack surface is zero until the user
-deliberately writes a hook.
+**Files:** `src/audit/audit-schema.ts`, `src/audit/hmac-chain.ts`,
+`src/audit/audit-logger.ts` (`appendQ12Entry` + `setupQ12Chain`),
+`src/permissions/permission-audit-runner.ts` (show + verify 백엔드).
 
-**Files (Phase 4, PR #632):**
-- `src/hooks/script-hook-types.ts` — wire contract + timeout constants.
-- `src/hooks/hook-discovery.ts` — discoverHooks + lockfile diff +
-  disable-into-`.disabled/`.
-- `src/hooks/script-hook-runner.ts` — runOneHookScript + runHookChain.
-- `src/hooks/script-hook-manager.ts` — runtime per-type dispatch + DLP.
-- `src/hooks/hook-trust-prompt.ts` — TOFU orchestrator.
-- `src/hooks/hook-trust-resolver-registry.ts` — boot ↔ IPC bridge.
-- `src/boot/steps/hook-system-wiring.ts` — boot integration.
-- `src/ipc/domains/hooks.ts` — `lvis:hooks:current|accept|reject-all`.
-- `src/ui/renderer/components/permissions/HookTrustModal.tsx` — UI.
+#### 6.3.8 — `/permission` 슬래시 인터페이스
 
-#### 6.3.z — Manifest Integrity Proxy (§3.5, Q12 Phase 4)
+Spec §3 Layer 8 grammar (final, Phase 5):
 
-> **Phase 4 stub.** Spec ref:
-> `docs/architecture/q12-permission-policy-design.md` §3.5.
+```
+/permission                                # show current
+/permission mode strict|default|auto [--durable]
+/permission dir allow <path> [--session]
+/permission dir deny <path>
+/permission dir list
+/permission rules list
+/permission audit show [--last=N]
+/permission audit verify
+/permission reviewer mode disabled|rule|llm
+/permission reviewer model <name>
+/permission reviewer provider openai|anthropic|google
+/permission hooks list
+/permission hooks accept <name>
+/permission hooks disable <name>
+```
 
-Plugin manifest declares one of the 5-axis categories per tool. The
-**Manifest Integrity Proxy** is a runtime sanity-check on plugins
-that declare `category: "read"`: a `node:fs` Proxy whose write
-methods (`writeFileSync`, `mkdirSync`, `rmSync`, …) throw a
-`ManifestIntegrityViolation`.
+**Trust origin gate (security C2):** `dispatchPermissionSlash` 가
+`trustOrigin === "user-keyboard"` 가 아닌 입력은 reject — 호출자는
+leading `/` 를 strip 후 plain text 로 처리 (chat 에 slash hint 로
+오인되지 않도록).
 
-On violation:
-1. The plugin id is added to the process-wide
-   `manifestIntegrityState.disabledPluginIds` set.
-2. An audit entry `{kind: "manifest_integrity_violation", pluginId,
-   toolName, attempted}` lands in `~/.lvis/audit/`.
-3. The renderer receives `lvis:permissions:manifest-violation` so it
-   can prompt the user to confirm a reinstall.
-4. Subsequent calls into the disabled plugin's read-declared tools
-   fail-deny without invoking the runtime.
+**Durable mutations:** `mode --durable`, `hooks accept|disable` 는
+modal confirm 필수 (origin 무관 — 사람이 button 눌러야 함). 일반
+session-only 변경은 modal 없이 즉시 적용.
 
-**Trade-off (acknowledged):** a plugin importing `node:fs` directly
-(rather than reading the `fs` member off its execute context)
-bypasses the proxy. v1 is a partial guard. Q14 sandboxed plugin
-runtime (V8 isolated context) makes this complete.
+**Audit panel UX:** `/permission audit show` 가 side-panel
+(`AuditPanel.tsx`) 을 연다. 마지막 N entries (default 50, max 1000),
+decision-type / tool-name 필터, 행 클릭 시 full discriminated-union
+shape expand. 상단 tamper-evidence 배너 — green check (chain ok +
+seal 일치) / yellow warn (seal 미생성) / red warn (chain broken — 첫
+broken file + line 표시). `/permission audit verify` 는 keychain 의
+`audit-seal-YYYY-MM-DD` 와 chain 을 함께 검증한다.
 
-**Files (Phase 4, PR #632):**
-- `src/permissions/manifest-integrity.ts` — proxy + state singleton.
-- `src/plugins/plugin-tool-adapter.ts` — post-violation gate.
-- `src/preload.ts` — `onManifestViolation(handler)` IPC bridge.
+**Files:** `src/permissions/permission-slash.ts`
+(`dispatchPermissionSlash`, `parsePermission*Command`),
+`src/permissions/permission-audit-runner.ts` (read-only 백엔드),
+`src/ipc/domains/permissions.ts` (IPC handlers),
+`src/ui/renderer/components/permissions/AuditPanel.tsx`,
+`src/ui/renderer/components/permissions/PermissionModeBadge.tsx`.
 
 
 ### 6.4 Tool Registry & Taxonomy — 빌트인 도구 카탈로그
@@ -2172,6 +2146,16 @@ flowchart LR
 ---
 
 ## 8. Agent Approval System — 에이전트 요청 승인
+
+> **§6.3 Q12 와의 분리 (Q12 P5):** §6.3 은 *개별 도구 호출* 에 대한
+> Layer 0–9 평가 (sensitive paths, allowed dirs, category × source ×
+> mode, reviewer agent, hook chain) 를 다룬다. 본 §8 은 *에이전트
+> 행위 전체* 에 대한 사용자 승인 모델 (자율 게시 / 외부 송신 / 업무
+> 일지 공개 범위) 을 다룬다. Q12 Layer 3 의 `network = ask + endpoint`
+> 결정은 §8 ApprovalGate 의 입력으로 흐르므로 두 섹션이 *중복 승인
+> 단계* 처럼 보일 수 있으나 실제로는 **single-decision /
+> single-prompt** — Q12 가 결정하면 §8 ApprovalGate 가 그 결정을 그대로
+> render 한다 (별도 prompt 없음).
 
 ### 8.1 설계 원칙
 
