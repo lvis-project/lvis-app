@@ -42,8 +42,8 @@ describe("SENSITIVE_PATH_PATTERNS", () => {
   });
 
   it("Q12 P2.5 — contains OS sensitive paths", () => {
-    expect(SENSITIVE_PATH_PATTERNS).toContain("/etc/shadow");
-    expect(SENSITIVE_PATH_PATTERNS).toContain("/etc/sudoers");
+    expect(SENSITIVE_PATH_PATTERNS).toContain("**/etc/shadow");
+    expect(SENSITIVE_PATH_PATTERNS).toContain("**/etc/sudoers");
     expect(SENSITIVE_PATH_PATTERNS).toContain("**/.netrc");
     expect(SENSITIVE_PATH_PATTERNS).toContain("**/.pgpass");
     expect(SENSITIVE_PATH_PATTERNS).toContain("**/.npmrc");
@@ -182,8 +182,9 @@ describe("isSensitivePath — negative cases", () => {
 // ─── Q12 P2.5 — Layer 0 expansion: OS + LVIS-internal hits ───────
 
 describe("isSensitivePath — Q12 P2.5 OS sensitive paths", () => {
-  it("matches /etc/shadow exactly", () => {
-    expect(isSensitivePath("/etc/shadow")).toBe("/etc/shadow");
+  it("matches /etc/shadow (and macOS /private/etc/shadow form)", () => {
+    expect(isSensitivePath("/etc/shadow")).toBe("**/etc/shadow");
+    expect(isSensitivePath("/private/etc/shadow")).toBe("**/etc/shadow");
   });
 
   it("matches ~/.netrc anywhere", () => {
