@@ -42,14 +42,18 @@ interface OutOfAllowedDirCardProps {
 
 /**
  * Q12 P2.5 — derive the basename for the re-typed confirmation prompt.
- * If `suggestedParent` is null we fall back to the candidate path's
- * basename so the user still has a deterministic name to confirm.
+ * If `suggestedParent` is null we use the candidate path so the user
+ * still has a deterministic name to confirm.
+ *
+ * Splits on both POSIX (`/`) and Win32 (`\`) separators so a Windows
+ * path like `C:\\Users\\Alice\\Documents` correctly yields
+ * `Documents` (and the retype gate is reachable on Windows).
  */
 function deriveConfirmName(req: ApprovalRequest): string {
   const target = req.outOfAllowedDir?.suggestedParent
     ?? req.outOfAllowedDir?.candidatePath
     ?? "";
-  const segments = target.split("/").filter(Boolean);
+  const segments = target.split(/[\\/]/).filter(Boolean);
   return segments[segments.length - 1] ?? target;
 }
 
