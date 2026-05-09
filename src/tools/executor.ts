@@ -30,7 +30,13 @@ import type {
 import { trustFromSource } from "./types.js";
 import type { PermissionManager, PermissionCheckResult } from "../permissions/permission-manager.js";
 import type { ApprovalGate, ApprovalMode } from "../permissions/approval-gate.js";
-import { isSensitivePath, canonicalizePathForMatch } from "../permissions/sensitive-paths.js";
+import { isSensitivePath, canonicalizePathForMatch, caseFoldForMatch } from "../permissions/sensitive-paths.js";
+import {
+  buildAllowedScope,
+  isPathAllowed,
+  pickClosestParent,
+  validateDirectoryAddition,
+} from "../permissions/allowed-directories.js";
 import { HookRunner } from "../hooks/hook-runner.js";
 import { AuditLogger } from "../audit/audit-logger.js";
 import { maskSensitiveData } from "../audit/dlp-filter.js";
@@ -182,6 +188,21 @@ export interface ToolExecutorCallbacks {
 export interface ToolPermissionContext {
   headless?: boolean;
   allowedPluginIds?: ReadonlySet<string>;
+  /**
+   * Q12 P2.5 — Layer 1 path policy. User-configured directories from
+   * `permissions.additionalDirectories` in settings.json. Boot threads
+   * this through every executeAll() invocation. The executor merges with
+   * computed defaults via {@link buildAllowedScope}; an `undefined` value
+   * here means "use defaults only" (NOT "silent allow").
+   */
+  additionalDirectories?: readonly string[];
+  /**
+   * Q12 P2.5 §9 — trust origin classification carried with each tool
+   * invocation. Audited and propagated into approval-request payloads.
+   * Distinguishes user-keyboard input (trusted) from system / plugin /
+   * proactive (untrusted) origins. Defaults to "user" when unset.
+   */
+  trustOrigin?: "user" | "system" | "plugin" | "proactive" | "routine" | "agent";
 }
 
 /**
@@ -423,8 +444,14 @@ export class ToolExecutor {
 
     const invocationCategory = resolveInvocationCategory(tool, finalInput);
     const targetFilePath = extractTargetFilePath(toolUse.name, finalInput);
-    const sensitivePathPattern = targetFilePath
-      ? isSensitivePath(canonicalizePathForMatch(targetFilePath))
+    // Q12 P2.5 — frozen-canonical contract: canonicalize ONCE here and
+    // reuse the same string for Layer 0 (sensitive-path) + Layer 1
+    // (allowed-directories) checks below. No layer re-resolves the path.
+    const canonicalTargetPath = targetFilePath
+      ? caseFoldForMatch(canonicalizePathForMatch(targetFilePath))
+      : null;
+    const sensitivePathPattern = canonicalTargetPath
+      ? isSensitivePath(canonicalTargetPath)
       : null;
 
     if (source === "plugin" && permissionContext?.allowedPluginIds) {
@@ -451,11 +478,121 @@ export class ToolExecutor {
         decision: "deny",
         reason: `sensitive path hard-block: ${sensitivePathPattern}`,
         layer: 0,
+        denyReasons: [
+          { layer: 0, reason: "sensitive-path", source: "sensitive-paths" },
+        ],
       };
       emitToolStart(callbacks, toolUse.name, finalInput, meta);
       callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
       this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, blockedPermission, Infinity);
       return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+    }
+
+    // ── Step 2.6: Layer 1 (Q12 P2.5) — Allowed Directories ─────
+    //
+    // Frozen-canonical: reuse `canonicalTargetPath` from above (already
+    // realpath'd + case-folded). No re-canonicalization in this block.
+    //
+    // Skipped when no path-typed input was extracted (e.g. bash, MCP
+    // network calls). Phase 4 will widen `extractTargetFilePath` to
+    // honor `manifest.toolSchemas[*].pathFields`; for now the 3-field
+    // extractor (path|file_path|filePath) is the coverage frontier.
+    if (canonicalTargetPath) {
+      const allowedScope = buildAllowedScope(permissionContext?.additionalDirectories);
+      const inAllowed = isPathAllowed(canonicalTargetPath, allowedScope);
+      if (!inAllowed) {
+        const headless = permissionContext?.headless === true;
+        const trustOrigin = permissionContext?.trustOrigin ?? "user";
+        const validation = validateDirectoryAddition(canonicalTargetPath);
+        const suggestedParent = pickClosestParent(
+          canonicalTargetPath,
+          allowedScope.directories,
+        );
+        const dirLayerResult: PermissionCheckResult = {
+          decision: headless ? "ask" : "ask",
+          reason: `out-of-allowed-dir: ${targetFilePath} (not in additionalDirectories)`,
+          layer: 1,
+          denyReasons: [
+            {
+              layer: 1,
+              reason: "out-of-allowed-dir",
+              source: "directory-policy",
+            },
+          ],
+        };
+
+        if (this.approvalGate && !headless) {
+          // Interactive mode — dispatch directory-confirm modal. The
+          // renderer routes on `kind === "out-of-allowed-dir"` to the
+          // OutOfAllowedDirCard variant.
+          const adjacencyWarnings = validation.adjacencyWarnings;
+          const approvalRequest = {
+            id: randomUUID(),
+            category: "tool" as const,
+            kind: "out-of-allowed-dir" as const,
+            toolName: toolUse.name,
+            args: finalInput,
+            reason: dirLayerResult.reason,
+            source: source as "builtin" | "plugin" | "mcp",
+            createdAt: Date.now(),
+            ...(targetFilePath ? { target: { filePath: targetFilePath } } : {}),
+            isReadOnly: invocationCategory === "read",
+            mode: this.currentApprovalMode(),
+            sensitivePathPattern,
+            outOfAllowedDir: {
+              candidatePath: targetFilePath ?? canonicalTargetPath,
+              suggestedParent,
+              currentAllowed: allowedScope.directories,
+              adjacencyWarnings,
+            },
+            trustOrigin,
+          };
+
+          let decision;
+          try {
+            decision = await this.approvalGate.requestAndWait(approvalRequest);
+          } catch (approvalErr) {
+            const msg = `[디렉토리 정책 오류] 도구 '${toolUse.name}' — ${approvalErr instanceof Error ? approvalErr.message : String(approvalErr)}`;
+            const durationMs = Date.now() - startTime;
+            emitToolStart(callbacks, toolUse.name, finalInput, meta);
+            callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+            this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, dirLayerResult, Infinity);
+            return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+          }
+
+          if (decision.choice.startsWith("deny")) {
+            const msg = `[디렉토리 정책 차단] 도구 '${toolUse.name}' — 사용자가 허용 디렉토리 외부 경로 접근을 거부했습니다 (${targetFilePath}).`;
+            const durationMs = Date.now() - startTime;
+            emitToolStart(callbacks, toolUse.name, finalInput, meta);
+            callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+            this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...dirLayerResult, decision: "deny" }, Infinity);
+            return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+          }
+          // allow-once / allow-always — fall through to Step 3
+          // (full Layer 3 check still runs; Layer 1 is necessary, not
+          // sufficient).
+        } else if (headless) {
+          // Headless mode — Phase 3 will route to the reviewer agent.
+          // For Phase 2.5 we map "reviewer" to "ask" but ApprovalGate
+          // is not connected; fail-closed is the safe stance.
+          const msg = `[디렉토리 정책 차단 — headless] 도구 '${toolUse.name}' (${source}) — 허용 디렉토리 외부 경로 (${targetFilePath}). Phase 3 reviewer 미적용 단계 → fail-closed.`;
+          const durationMs = Date.now() - startTime;
+          log.warn(msg);
+          emitToolStart(callbacks, toolUse.name, finalInput, meta);
+          callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+          this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...dirLayerResult, decision: "deny" }, Infinity);
+          return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+        } else {
+          // §F4 mirror — approvalGate미연결 시 fail-closed.
+          const msg = `[승인 게이트 미연결 — Layer 1] 도구 '${toolUse.name}' (${source}) — 허용 디렉토리 외부 경로이지만 승인 게이트가 없어 차단.`;
+          const durationMs = Date.now() - startTime;
+          log.error(msg);
+          emitToolStart(callbacks, toolUse.name, finalInput, meta);
+          callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+          this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...dirLayerResult, decision: "deny" }, Infinity);
+          return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+        }
+      }
     }
 
     // ── Step 3: Permission (source-aware) ───────────
