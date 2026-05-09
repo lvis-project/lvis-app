@@ -81,7 +81,8 @@ export async function bootstrapCoreServices(mainWindow: BrowserWindow): Promise<
   const toolRegistry = new ToolRegistry();
   // Tier A1: BashTool registers directly — it implements the canonical
   // Tool contract via ZodTool and is tagged source="builtin" + category
-  // "dangerous" so the §6.3 permission stack handles approval correctly.
+  // "shell" so the §6.3 permission stack handles approval correctly
+  // (Layer 3 + Bash AST validation gate at executor Step 2.5).
   toolRegistry.register(new BashTool());
   const routeEngine = new RouteEngine({ toolRegistry });
 

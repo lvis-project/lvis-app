@@ -53,10 +53,12 @@ describe("ToolExecutor metadata", () => {
         { id: "tu-3", name: "fake_tool", input: { n: 3 } },
       ],
       {
-        onToolStart: (_name, _input, meta) => startMetas.push(meta),
-        onToolEnd: (_name, _result, _isError, meta) => endMetas.push(meta),
+        callbacks: {
+          onToolStart: (_name, _input, meta) => startMetas.push(meta),
+          onToolEnd: (_name, _result, _isError, meta) => endMetas.push(meta),
+        },
+        sessionId: "session-1",
       },
-      "session-1",
     );
 
     expect(results).toHaveLength(3);
@@ -95,10 +97,12 @@ describe("ToolExecutor metadata", () => {
     const results = await executor.executeAll(
       [{ id: "tu-1", name: "slow_tool", input: {} }],
       {
-        onToolEnd: (_name, _result, _isError, _meta, _ui, durationMs) =>
-          callbackDurations.push(durationMs),
+        callbacks: {
+          onToolEnd: (_name, _result, _isError, _meta, _ui, durationMs) =>
+            callbackDurations.push(durationMs),
+        },
+        sessionId: "session-1",
       },
-      "session-1",
     );
 
     expect(results).toHaveLength(1);
@@ -116,10 +120,12 @@ describe("ToolExecutor metadata", () => {
     const results = await executor.executeAll(
       [{ id: "tu-1", name: "nonexistent_tool", input: {} }],
       {
-        onToolEnd: (_name, _result, _isError, _meta, _ui, durationMs) =>
-          callbackDurations.push(durationMs),
+        callbacks: {
+          onToolEnd: (_name, _result, _isError, _meta, _ui, durationMs) =>
+            callbackDurations.push(durationMs),
+        },
+        sessionId: "session-1",
       },
-      "session-1",
     );
 
     expect(results).toHaveLength(1);

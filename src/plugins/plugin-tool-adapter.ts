@@ -53,10 +53,21 @@ function untypedDescription(toolName: string): string {
   return `플러그인 도구: ${toolName}. payload에 필요한 매개변수를 JSON 객체로 전달하세요.`;
 }
 
+/**
+ * Q12 — Plugin manifest declares one of the 5-axis categories. Anything
+ * else (or omitted) lands on `"write"` so plugin tools fail closed until
+ * the author declares non-mutating intent.
+ *
+ * Plugins MUST NOT register `meta` — that category is reserved for host
+ * builtins that own a control-flow short-circuit path. A plugin claiming
+ * `meta` would attempt to ride the executor's decisionOverride lane it
+ * has no authority over; coerce it to `"write"`.
+ */
 function normalizeToolCategory(entry: ToolSchemaEntry | undefined): ToolCategory {
-  return entry?.category === "read" || entry?.category === "dangerous"
-    ? entry.category
-    : "write";
+  const c = entry?.category;
+  if (c === "read" || c === "shell" || c === "network") return c;
+  if (c === "write") return "write";
+  return "write";
 }
 
 function buildPluginTool(
