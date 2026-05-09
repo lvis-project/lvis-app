@@ -103,6 +103,10 @@ import { createProvider, secretKeyFor } from "./engine/llm/provider-factory.js";
 import type { LLMProvider, LLMVendor } from "./engine/llm/types.js";
 import type { HookDiff } from "./hooks/hook-discovery.js";
 import { hookTrustResolverRegistry } from "./hooks/hook-trust-resolver-registry.js";
+import {
+  bindManifestIntegrityAudit,
+  manifestIntegrityState,
+} from "./permissions/manifest-integrity.js";
 import { runManagedBootstrap } from "./boot/managed-marketplace.js";
 import { createLogger } from "./lib/logger.js";
 const log = createLogger("lvis");
@@ -351,6 +355,26 @@ export async function bootstrap(
   } catch (err) {
     log.warn("boot: reviewer wiring failed (non-fatal): %s", (err as Error).message);
   }
+
+  // Q12 P4 §3.5 — manifest integrity proxy. Subscribes the audit
+  // logger so every read→write violation lands in `~/.lvis/audit/` +
+  // pushes an IPC notification to the renderer. Uses the live
+  // mainWindow getter so cross-restart UI keeps receiving events.
+  bindManifestIntegrityAudit(bootAuditLogger);
+  manifestIntegrityState.onViolation((pluginId, toolName, attempted) => {
+    try {
+      getMainWindow()?.webContents.send("lvis:permissions:manifest-violation", {
+        pluginId,
+        toolName,
+        attempted,
+      });
+    } catch (err) {
+      log.warn(
+        "manifest-violation IPC emit failed (non-fatal): %s",
+        (err as Error).message,
+      );
+    }
+  });
 
   // Tier A4 (W3): HookRunner. Shared by interactive and routine loops so
   // every tool call traverses the same Pre/PostToolUse hook surface.
