@@ -1161,12 +1161,14 @@ lvis-app/src/
 │
 ├── prompts/       # 시스템 프롬프트 조립
 │
-├── hooks/         # PreTool / PostTool 인터셉트
+├── hooks/         # Script hook + post-turn 인터셉트
 │   ├── hook-runner.ts
 │   ├── post-turn-hook-chain.ts
-│   ├── types.ts / schemas.ts
-│   ├── external-executor.ts
-│   └── config-loader.ts
+│   ├── script-hook-types.ts
+│   ├── script-hook-runner.ts
+│   ├── script-hook-manager.ts
+│   ├── hook-discovery.ts
+│   └── hook-trust-commands.ts
 │
 ├── permissions/   # 권한 스택
 │   ├── permission-manager.ts, permissions-store.ts, policy-store.ts,
@@ -1397,7 +1399,7 @@ flowchart TB
 
 ### 6.3 Tool Permission Model — Q12 10-Layer Pipeline
 
-> **Reference**: `docs/architecture/q12-permission-policy-design.md` v2.1
+> **Reference**: `docs/architecture/q12-permission-policy-design.md` v2.2
 > (full spec — 10-layer evaluation, multi-agent reviewed). This section
 > is the architecture-level summary; defer to the spec for the
 > exhaustive layer detail, decision matrix, and binding decisions.
@@ -1407,6 +1409,20 @@ flowchart TB
 > 권한** 을 다룬다. Q12 Layer 3 의 `network = ask + endpoint` 결정은
 > §8 ApprovalGate 의 입력으로 흐른다 — 두 섹션을 *중복 승인 단계* 로
 > 오해하지 말 것 (single-decision, single-prompt).
+
+#### 6.3.0 — Current implementation posture
+
+Q12 현재 구현은 **strict single path** 이다. 레거시 호환 fallback 이나
+plugin-specific app branch 를 두지 않는다.
+
+| Surface | Current posture | Future direction |
+| --- | --- | --- |
+| Plugin categories | Plugin manifest 는 고정 allow-list `read/write/shell/network` 만 선언 가능. `meta` 및 향후 host-only category 는 plugin contract 로 자동 확장되지 않는다. | 모든 active plugin category 선언 완료 후 grace 제거 + hard fail |
+| Permission IPC | `PERMISSIONS_Q12` 가 main / preload / sender-guard test 의 단일 channel SOT. | 새 permission channel 은 반드시 `src/shared/ipc-channels.ts` 에 먼저 추가 |
+| Reviewer | `disabled/rule/llm` 3-mode. `llm` wiring 실패는 silent downgrade 없이 fail-fast. | cost/quality telemetry 로 model default 조정 가능, fallback 은 `deny|rule` 만 |
+| Deferred queue | HIGH verdict 는 user foreground 에서 approve/reject, resolution 은 Q12 audit chain 에 기록. | §8 approval timeline 과 통합 표시 |
+| Hooks | `hooks.json` command/http executor 제거. `~/.config/lvis/hooks/{pre,post,perm}-*.sh` + strict-deny quarantine + typed trust registration 만 허용. | Q13 signed hooks 전까지 `modify` action 금지 |
+| Audit | HMAC chain + daily seal. Recent view 는 tail-scan. | key rotation / archive policy 는 Q13+ |
 
 #### 6.3.1 — 10-layer evaluation pipeline (overview)
 
@@ -1447,7 +1463,7 @@ flowchart TB
 | 3 | 5-axis category × source × mode 매트릭스. Open-Closed `ToolCategoryRegistry`. | §3 Layer 3 | `src/permissions/category-registry.ts` |
 | 4 | Routine 의 `scope.pluginIds` discriminated union (`deny-all` / `allow` / `inherit`). Boot 시 `inherit` 은 active set 으로 normalize. | §3 Layer 4 | `routine.scope.*` |
 | 5 | Reviewer agent (multi-vendor) — headless write/shell/network 의 LOW/MED auto-allow / HIGH defer. `final = max(rule, llm)`. | §3 Layer 5 | `src/permissions/reviewer/*` |
-| 6 | Hook chain v1 (deny-only). `~/.config/lvis/hooks/{pre,post,perm}-*.sh`. TOFU lockfile + DLP-redacted stdin. | §3 Layer 6 | `src/hooks/script-hook-*` |
+| 6 | Hook chain v1 (deny-only). `~/.config/lvis/hooks/{pre,post,perm}-*.sh`. Strict-deny quarantine lockfile + DLP-redacted stdin. | §3 Layer 6 | `src/hooks/script-hook-*` |
 | 7 | Discriminated-union audit (`AuditAllow`/`AuditAsk`/`AuditDeny`/`AuditDeferred`/`AuditModeChange`/`AuditManifestViolation`) + HMAC chain + daily seal. | §3 Layer 7 | `src/audit/audit-schema.ts`, `src/audit/hmac-chain.ts` |
 | 8 | `/permission` 슬래시 + user-keyboard origin gate + `--durable` modal confirm. Mode change emits `AuditModeChange`. | §3 Layer 8 | `src/permissions/permission-slash.ts` |
 | 9 | Electron preload / contextBridge 기존 sandbox — Q12 변경 없음. | §3 Layer 9 | `src/preload.ts` |
@@ -1513,16 +1529,19 @@ remote SIEM 으로 새지 않도록 `redactForLLM` 적용.
 0/1/2/3 deny 를 upgrade 하지 못함.
 
 **Fail-safe:** exit !=0 / malformed stdout JSON / >5s timeout → deny.
-TOFU lockfile (`.lockfile.json`) — boot 시 hash 비교 + 변경된 hook 은
-`HookTrustModal` 로 user accept 요구.
+Hook trust lockfile (`.lockfile.json`) — boot 시 hash 비교 + 변경/new hook 은
+strict-deny 로 `.disabled/` 이동. Renderer 승인 fallback 없음. 사용자가
+`/permission hooks list` 로 확인하고 `/permission hooks accept <name>` 을
+직접 입력한 경우에만 lockfile 에 등록되어 다음 실행부터 trusted hook 으로
+동작한다. 이 typed command 가 명시적 신뢰 등록 표면이며 renderer fallback
+prompt/modal 은 없다.
 
 **v1 binding decision (§11 v2.1):** 빈 디렉토리만 ship. Sample hook
 없음 — attack surface 0 부터 시작.
 
 **Files:** `src/hooks/script-hook-types.ts`, `script-hook-runner.ts`,
 `script-hook-manager.ts`, `hook-discovery.ts`,
-`src/boot/steps/hook-system-wiring.ts`,
-`src/ui/renderer/components/permissions/HookTrustModal.tsx`.
+`src/boot/steps/hook-system-wiring.ts`.
 
 #### 6.3.6 — Manifest integrity proxy
 
@@ -1533,7 +1552,7 @@ proxy 로 wrap 되어 write attempts (`writeFileSync`, `mkdirSync`,
 1. plugin id → process-wide `manifestIntegrityState.disabledPluginIds`.
 2. `AuditManifestViolation` audit entry 발행 (`pluginId`, `toolName`,
    `attemptedOperation`).
-3. `lvis:permissions:manifest-violation` IPC → 사용자에게 reinstall
+3. `PERMISSIONS_Q12.manifestViolation` IPC → 사용자에게 reinstall
    prompt.
 4. Disabled plugin 의 read-declared tool 후속 호출 fail-deny.
 
@@ -1688,8 +1707,8 @@ graph TB
 | --- | --- | --- | --- | --- |
 | `read` | 조회/검색 (자료를 변경하지 않음) | builtin: allow / plugin: scope-checked | allow | strict mode → ask |
 | `write` | 사용자 데이터 변경 | ask (auto mode → allow + audit) | reviewer agent | Phase 3 reviewer 미배치 시 ask |
-| `shell` | 셸 명령 실행 (Bash 등) | ask + Bash AST 검증 | reviewer (always) | requiresAst=true |
-| `network` | 외부 네트워크 호출 | ask + endpoint surface | reviewer | requiresEndpoint=true |
+| `shell` | 셸 명령 실행 (Bash 등) | ask + Bash AST 검증 | reviewer (always) | AST 검증은 executor-owned gate |
+| `network` | 외부 네트워크 호출 | ask + endpoint surface | reviewer | endpoint 추출은 executor-owned surface |
 | `meta` | 제어 흐름 / UI 프리미티브 | `decisionOverride` 따름 | 동일 | host builtin 전용; plugin 사용 금지 |
 
 **`decisionOverride` (meta 전용):** `always-allow-with-audit` (예: `ask_user_question` — 사용자에게 질문하는 도구 자체를 한번 더 승인 모달에 거는 중복 UX 차단) / `ask` (예: `agent_spawn` — `meta` 이지만 사용자 컨펌 필요).

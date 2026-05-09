@@ -16,7 +16,15 @@
  * a singleton) so unit tests can run in a tmpdir without IPC
  * scaffolding.
  */
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  openSync,
+  readFileSync,
+  readSync,
+  readdirSync,
+  statSync,
+} from "node:fs";
 import { join } from "node:path";
 import {
   computeDailySeal,
@@ -28,6 +36,41 @@ import {
   isQ12AuditEntry,
   type Q12AuditEntry,
 } from "../audit/audit-schema.js";
+
+const TAIL_CHUNK_BYTES = 64 * 1024;
+
+function readLastNonEmptyLines(filePath: string, limit: number): string[] {
+  if (limit <= 0) return [];
+  const { size } = statSync(filePath);
+  if (size === 0) return [];
+
+  const fd = openSync(filePath, "r");
+  const chunks: Buffer[] = [];
+  let remaining = size;
+  let newlineCount = 0;
+
+  try {
+    while (remaining > 0 && newlineCount <= limit) {
+      const bytesToRead = Math.min(TAIL_CHUNK_BYTES, remaining);
+      remaining -= bytesToRead;
+      const buffer = Buffer.allocUnsafe(bytesToRead);
+      const bytesRead = readSync(fd, buffer, 0, bytesToRead, remaining);
+      const chunk = bytesRead === bytesToRead ? buffer : buffer.subarray(0, bytesRead);
+      chunks.push(chunk);
+      for (const byte of chunk) {
+        if (byte === 0x0a) newlineCount += 1;
+      }
+    }
+  } finally {
+    closeSync(fd);
+  }
+
+  return Buffer.concat(chunks.reverse())
+    .toString("utf-8")
+    .split("\n")
+    .filter((line) => line.trim().length > 0)
+    .slice(-limit);
+}
 
 /**
  * Return the most recent N audit entries across all `.q12.jsonl`
@@ -47,8 +90,7 @@ export function readRecentAuditEntries(
   const out: Q12AuditEntry[] = [];
   for (const file of files) {
     const filePath = join(auditDir, file);
-    const raw = readFileSync(filePath, "utf-8");
-    const lines = raw.split("\n").filter((l) => l.trim().length > 0);
+    const lines = readLastNonEmptyLines(filePath, limit - out.length);
     // Walk in reverse so the newest entry of the file lands first.
     for (let i = lines.length - 1; i >= 0; i--) {
       try {

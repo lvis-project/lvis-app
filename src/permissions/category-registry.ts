@@ -38,10 +38,6 @@ export interface ToolCategoryDescriptor {
   name: ToolCategory;
   /** 0..1 — Phase 3 rule classifier baseline weight. */
   riskWeight: number;
-  /** When true, executor must run Bash AST validation before invocation. */
-  requiresAst?: boolean;
-  /** When true, network endpoint surface must be presented in the approval modal. */
-  requiresEndpoint?: boolean;
   /**
    * Pure function — given mode/source/headless, returns the lane the
    * executor should follow. `meta` returns the `"override"` sentinel so
@@ -84,8 +80,8 @@ export function clearCategoryRegistry(): void {
  *   - read    — built-in: allow / plugin: allow (scope-checked elsewhere)
  *               strict mode forces ask. Headless reviewer if out-of-dir.
  *   - write   — default+strict: ask / auto: allow+audit / headless: reviewer
- *   - shell   — every mode: ask + AST. Headless: reviewer (always).
- *   - network — default+strict: ask + endpoint / auto: allow+audit /
+ *   - shell   — every mode: ask. Bash AST validation is executor-owned.
+ *   - network — default+strict: ask / auto: allow+audit /
  *               headless: reviewer.
  *   - meta    — `decisionOverride` sentinel; executor short-circuits.
  */
@@ -109,14 +105,12 @@ export function registerStandardCategories(): void {
   registerToolCategory({
     name: "shell",
     riskWeight: 0.9,
-    requiresAst: true,
     decisionFor: ({ headless }) => (headless ? "reviewer" : "ask"),
   });
 
   registerToolCategory({
     name: "network",
     riskWeight: 0.7,
-    requiresEndpoint: true,
     decisionFor: ({ mode, headless }) => {
       if (headless) return "reviewer";
       if (mode === "auto") return "allow";

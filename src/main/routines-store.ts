@@ -311,9 +311,13 @@ export class RoutinesStore {
       }
     }
     // Q12 Layer 4 — `scope` is the canonical shape. When omitted, default
-    // to `{ pluginIds: inherit, forcedPluginIds: [], directories: [] }`.
-    const inputScope = input.scope;
+    // to deny-all so new call sites cannot accidentally expose plugins.
     const ID_RE = /^[a-z0-9][a-z0-9_.-]*$/i;
+    const inputScope = input.scope;
+    let normalizedPluginIds: RoutineScope["pluginIds"] =
+      inputScope?.pluginIds ?? { mode: "deny-all" };
+    let normalizedForcedPluginIds: string[] = [];
+
     if (inputScope?.pluginIds.mode === "allow") {
       const trimmed = inputScope.pluginIds.ids.map((p) => p.trim()).filter(Boolean);
       if (trimmed.some((p) => !ID_RE.test(p))) {
@@ -321,8 +325,7 @@ export class RoutinesStore {
           "RoutinesStore.add: scope.pluginIds.ids entries must be plugin ids using letters, digits, dot, underscore, or hyphen",
         );
       }
-      // Replace with normalized + deduped values inside the discriminated union.
-      inputScope.pluginIds = { mode: "allow", ids: [...new Set(trimmed)] };
+      normalizedPluginIds = { mode: "allow", ids: [...new Set(trimmed)] };
     }
     if (inputScope?.forcedPluginIds) {
       const trimmedForced = inputScope.forcedPluginIds.map((p) => p.trim()).filter(Boolean);
@@ -331,19 +334,13 @@ export class RoutinesStore {
           "RoutinesStore.add: scope.forcedPluginIds entries must be plugin ids using letters, digits, dot, underscore, or hyphen",
         );
       }
-      inputScope.forcedPluginIds = [...new Set(trimmedForced)];
+      normalizedForcedPluginIds = [...new Set(trimmedForced)];
     }
-    const normalizedScope: RoutineScope = inputScope
-      ? {
-          pluginIds: inputScope.pluginIds,
-          forcedPluginIds: inputScope.forcedPluginIds ?? [],
-          directories: inputScope.directories ?? [],
-        }
-      : {
-          pluginIds: { mode: "inherit" },
-          forcedPluginIds: [],
-          directories: [],
-        };
+    const normalizedScope: RoutineScope = {
+      pluginIds: normalizedPluginIds,
+      forcedPluginIds: normalizedForcedPluginIds,
+      directories: inputScope?.directories ? [...inputScope.directories] : [],
+    };
 
     // Build schedule with normalized `at`.
     const normalizedSchedule: typeof input.schedule = input.schedule

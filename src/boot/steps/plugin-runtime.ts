@@ -33,6 +33,7 @@ import {
 import { canEmitEvent, requiredCapabilityForEmit } from "../../plugins/capabilities.js";
 import { OVERLAY_V1 } from "../../shared/ipc-channels.js";
 import { resolvePluginPaths } from "../../plugins/plugin-paths.js";
+import { stripLeadingSlash } from "../../shared/slash-sanitizer.js";
 import {
   emitPluginConfigChange,
   subscribePluginConfigChange,
@@ -341,6 +342,15 @@ const MAX_PROMPT_LEN = 4096;
  */
 export const TRIGGER_CONVERSATION_RATE_LIMIT_WINDOW_MS = 60_000;
 export const TRIGGER_CONVERSATION_RATE_LIMIT_MAX_CALLS = 6;
+
+/**
+ * Plugin overlay prompts have plugin provenance even after the user clicks the
+ * overlay action. They must never dispatch host slash commands such as
+ * `/load`, `/compact`, or `/permission`; those are user-keyboard only.
+ */
+export function sanitizePluginPendingPrompt(prompt: string): string {
+  return stripLeadingSlash(prompt);
+}
 
 export class TriggerConversationRateLimiter {
   private readonly windowMs: number;
@@ -1247,7 +1257,7 @@ export async function initPluginRuntime(
           summary: spec.summary ?? spec.prompt.slice(0, 200),
           running: false,
           primaryActionLabel: spec.primaryActionLabel ?? "지금 답하기",
-          pendingPrompt: spec.prompt,
+          pendingPrompt: sanitizePluginPendingPrompt(spec.prompt),
           createdAt: new Date().toISOString(),
         };
         if (!mainWindow.isDestroyed()) {

@@ -187,7 +187,7 @@ describe("PermissionManager (B1 persistence)", () => {
   it("auto MCP tool override allows execution unless global mode is strict", () => {
     pm.setToolModeOverride("mcp_server__fetch", "auto");
 
-    const result = pm.checkDetailed("mcp_server__fetch", "mcp", "dangerous");
+    const result = pm.checkDetailed("mcp_server__fetch", "mcp", "network");
 
     expect(result.decision).toBe("allow");
     expect(result.reason).toBe("MCP 서버 auto 모드");
@@ -201,7 +201,7 @@ describe("PermissionManager (B1 persistence)", () => {
     expect(result.layer).toBe(6);
   });
 
-  it("headless context forces write tools to ask before allow rules or auto mode", async () => {
+  it("headless context routes write tools through reviewer before allow rules or auto mode", async () => {
     await pm.setModePersist("auto");
     await pm.addAlwaysAllowedPersist("write_report");
 
@@ -214,8 +214,8 @@ describe("PermissionManager (B1 persistence)", () => {
     );
 
     expect(result.decision).toBe("ask");
-    expect(result.reason).toContain("headless");
-    expect(result.layer).toBe(2);
+    expect(result.reason).toMatch(/reviewer agent/);
+    expect(result.layer).toBe(6);
   });
 });
 

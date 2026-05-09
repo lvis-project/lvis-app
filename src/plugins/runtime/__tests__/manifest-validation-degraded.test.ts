@@ -132,4 +132,31 @@ describe("parsePluginJson — degraded-validator warn log", () => {
       /toolSchemas\['degraded_ping'\]\.category/,
     );
   });
+
+  it("rejects host-only meta category under degraded mode", async () => {
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        id: "com.test.degraded",
+        name: "Degraded Test",
+        version: "1.0.0",
+        entry: "dist/index.js",
+        tools: ["degraded_ping"],
+        description: "Degraded validator test plugin",
+        publisher: "Test",
+        toolSchemas: {
+          degraded_ping: {
+            description: "Degraded ping test tool",
+            category: "meta",
+            inputSchema: { type: "object", properties: {} },
+          },
+        },
+      }),
+      "utf-8",
+    );
+
+    await expect(parsePluginJson(manifestPath, null)).rejects.toThrow(
+      /toolSchemas\['degraded_ping'\]\.category/,
+    );
+  });
 });

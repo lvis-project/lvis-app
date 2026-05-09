@@ -54,11 +54,11 @@ export interface HookDispatchResult {
 export class ScriptHookManager {
   private trusted: DiscoveredHook[] = [];
 
-  /**
-   * Replace the trusted hook list. Called by the boot pipeline once
-   * the TOFU prompt resolves; the executor / gate read from this
-   * snapshot for every tool call.
-   */
+   /**
+    * Replace the trusted hook list. Called by the boot pipeline once
+   * the TOFU workflow resolves; the executor / gate read from this
+    * snapshot for every tool call.
+    */
   setTrustedHooks(hooks: DiscoveredHook[]): void {
     this.trusted = [...hooks];
   }
@@ -74,10 +74,10 @@ export class ScriptHookManager {
   }
 
   /**
-   * Dispatch all PreToolUse hooks. DLP-redacts every string field of
-   * `input` before passing into the hook stdin so secrets never leave
-   * the host even when the user's hook is an HTTP webhook to a remote
-   * SIEM (security threat-gap #3 → applies to ANY external process).
+   * Dispatch all PreToolUse hooks. DLP-redacts top-level string fields
+   * and string array items in `input` before passing into hook stdin.
+   * Nested objects are passed as-is, so pathFields/category metadata must
+   * keep secret material out of nested tool arguments.
    */
   async runPreToolUse(
     payload: HookDispatchPayload,

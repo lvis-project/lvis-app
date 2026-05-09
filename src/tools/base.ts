@@ -58,6 +58,12 @@ export interface Tool {
   readonly pluginId?: string;
   readonly mcpServerId?: string;
   /**
+   * Manifest-declared filesystem path fields. Used by the executor's
+   * Layer 0/1 path policy for dynamic plugin/MCP tools whose argument names
+   * are not the built-in `path | file_path | filePath` convention.
+   */
+  readonly pathFields?: readonly string[];
+  /**
    * §6.4 Tool versioning — semver string (e.g. "1.0.0"). Required so the
    * registry can pick the latest implementation when multiple versions of the
    * same tool are registered and so deprecation metadata has a concrete
@@ -159,6 +165,7 @@ export interface DynamicToolSpec {
   decisionOverride?: ToolDecisionOverride;
   pluginId?: string;
   mcpServerId?: string;
+  pathFields?: readonly string[];
   /** §6.4 — semver. Defaults to "1.0.0" when omitted. */
   version?: string;
   /** §6.4 — semver string marking deprecation; enables warn on lookup. */
@@ -190,6 +197,7 @@ export function createDynamicTool(spec: DynamicToolSpec): Tool {
     decisionOverride: spec.decisionOverride,
     pluginId: spec.pluginId,
     mcpServerId: spec.mcpServerId,
+    pathFields: spec.pathFields,
     version: spec.version ?? "1.0.0",
     deprecatedSince: spec.deprecatedSince,
     replacedBy: spec.replacedBy,

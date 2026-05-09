@@ -32,11 +32,16 @@ export function DeferredQueuePanel(): ReactElement | null {
     setError(null);
     const api = window.lvis?.permission?.deferredList;
     if (!api) return;
-    const r = await api();
-    if (r.ok) {
-      setPending(r.pending);
-    } else {
-      setError(r.error);
+    try {
+      const r = await api();
+      if (r.ok) {
+        setPending(r.pending);
+      } else {
+        setError(r.error);
+      }
+    } catch (err) {
+      setPending([]);
+      setError(err instanceof Error ? err.message : "deferred-list failed");
     }
   }, []);
 
@@ -57,8 +62,11 @@ export function DeferredQueuePanel(): ReactElement | null {
       setBusy(true);
       try {
         const r = await api(id, decision);
-        if (!r.ok) setError(r.error);
         await refresh();
+        if (!r.ok) setError(r.error);
+      } catch (err) {
+        await refresh();
+        setError(err instanceof Error ? err.message : "deferred-resolve failed");
       } finally {
         setBusy(false);
       }
@@ -66,7 +74,7 @@ export function DeferredQueuePanel(): ReactElement | null {
     [refresh],
   );
 
-  if (pending.length === 0) return null;
+  if (pending.length === 0 && !error) return null;
 
   return (
     <section

@@ -38,6 +38,8 @@ import {
   validateDirectoryAddition,
 } from "../permissions/allowed-directories.js";
 import { HookRunner } from "../hooks/hook-runner.js";
+import type { ScriptHookManager } from "../hooks/script-hook-manager.js";
+import type { HookTrustOrigin } from "../hooks/script-hook-types.js";
 import { AuditLogger } from "../audit/audit-logger.js";
 import { maskSensitiveData } from "../audit/dlp-filter.js";
 import { BashAstValidator } from "../main/bash-ast-validator.js";
@@ -60,23 +62,34 @@ export interface ToolCallMeta {
  * field is present (e.g. bash `command`, which is handled separately
  * by the BashAstValidator).
  */
-function extractTargetFilePath(
-  _toolName: string,
+function extractTargetFilePaths(
+  tool: import("./base.js").Tool,
   input: unknown,
-): string | undefined {
-  if (!input || typeof input !== "object") return undefined;
+): string[] {
+  if (!input || typeof input !== "object") return [];
   const obj = input as Record<string, unknown>;
-  const candidate =
-    (typeof obj.path === "string" && obj.path) ||
-    (typeof obj.file_path === "string" && obj.file_path) ||
-    (typeof obj.filePath === "string" && obj.filePath) ||
-    undefined;
-  if (!candidate) return undefined;
-  try {
-    return pathResolve(candidate);
-  } catch {
-    return undefined;
+  const declaredFields = tool.pathFields ?? [];
+  const fields = new Set<string>(
+    declaredFields.length > 0
+      ? declaredFields
+      : tool.source === "builtin"
+        ? ["path", "file_path", "filePath"]
+        : [],
+  );
+  const paths: string[] = [];
+  for (const field of fields) {
+    const candidate = obj[field];
+    const values = Array.isArray(candidate) ? candidate : [candidate];
+    for (const value of values) {
+      if (typeof value !== "string" || value.length === 0) continue;
+      try {
+        paths.push(pathResolve(value));
+      } catch {
+        // Tool schema validation owns argument-type failures.
+      }
+    }
   }
+  return [...new Set(paths)];
 }
 
 function resolveInvocationCategory(
@@ -308,6 +321,7 @@ export class ToolExecutor {
   private readonly auditLogger: AuditLogger;
   private readonly rateLimiter = new RateLimiter();
   private readonly bashAstValidator?: BashAstValidator;
+  private readonly scriptHookManager?: ScriptHookManager;
 
   constructor(
     toolRegistry: ToolRegistry,
@@ -315,6 +329,7 @@ export class ToolExecutor {
     permissionManager?: PermissionManager,
     bashAstValidator?: BashAstValidator,
     approvalGate?: ApprovalGate,
+    scriptHookManager?: ScriptHookManager,
   ) {
     this.toolRegistry = toolRegistry;
     this.hookRunner = hookRunner ?? new HookRunner();
@@ -322,6 +337,7 @@ export class ToolExecutor {
     this.approvalGate = approvalGate;
     this.auditLogger = new AuditLogger();
     this.bashAstValidator = bashAstValidator;
+    this.scriptHookManager = scriptHookManager;
   }
 
   /**
@@ -339,6 +355,113 @@ export class ToolExecutor {
 
   getHookRunner(): HookRunner {
     return this.hookRunner;
+  }
+
+  private hookTrustOrigin(context?: ToolPermissionContext): HookTrustOrigin {
+    switch (context?.trustOrigin) {
+      case "plugin":
+        return "plugin-emitted";
+      case "system":
+      case "proactive":
+      case "routine":
+      case "agent":
+        return "llm-tool-arg";
+      case "user":
+      default:
+        return "user-keyboard";
+    }
+  }
+
+  private async runScriptHook(
+    hookType: "pre" | "post" | "perm",
+    toolName: string,
+    source: ToolSource,
+    category: ToolCategory,
+    input: Record<string, unknown>,
+    sessionId: string | undefined,
+    context?: ToolPermissionContext,
+    toolOutput?: string,
+    isError?: boolean,
+  ) {
+    if (!this.scriptHookManager) {
+      return { decision: "allow" as const, reason: "script hooks not wired", results: [] };
+    }
+    const payload = {
+      toolName,
+      source,
+      category,
+      input,
+      sessionId: sessionId ?? "unknown",
+      trustOrigin: this.hookTrustOrigin(context),
+      ...(toolOutput !== undefined ? { toolOutput } : {}),
+      ...(isError !== undefined ? { isError } : {}),
+    };
+    if (hookType === "pre") return this.scriptHookManager.runPreToolUse(payload);
+    if (hookType === "post") return this.scriptHookManager.runPostToolUse(payload);
+    return this.scriptHookManager.runPermissionRequest(payload);
+  }
+
+  private async dispatchReviewerForHeadless(
+    toolName: string,
+    source: ToolSource,
+    category: ToolCategory,
+    finalInput: Record<string, unknown>,
+    allowedDirectories: string[],
+    sensitivePathsAdjacent: string[],
+    context?: ToolPermissionContext,
+  ): Promise<
+    | { allowed: true; permissionResult: PermissionCheckResult }
+    | { allowed: false; message: string; permissionResult: PermissionCheckResult }
+  > {
+    if (!this.permissionManager?.hasReviewer()) {
+      return {
+        allowed: false,
+        message: `[권한 차단 — headless] 도구 '${toolName}' (${source}) — reviewer 미배치, fail-closed.`,
+        permissionResult: {
+          decision: "deny",
+          reason: "headless reviewer not wired",
+          layer: 5,
+        },
+      };
+    }
+    const reviewer = await this.permissionManager.dispatchReviewer(
+      toolName,
+      {
+        source,
+        category,
+        finalInput,
+        allowedDirectories,
+        sensitivePathsAdjacent,
+      },
+      {
+        allowedPluginIds: context?.allowedPluginIds
+          ? [...context.allowedPluginIds]
+          : undefined,
+        additionalDirectories: context?.additionalDirectories ?? [],
+      },
+    );
+    if (reviewer.verdict.level === "high") {
+      return {
+        allowed: false,
+        message:
+          `[권한 보류 — reviewer] 도구 '${toolName}' (${source}) — ` +
+          `${reviewer.verdict.reason}` +
+          (reviewer.deferredId ? ` (deferredId=${reviewer.deferredId})` : ""),
+        permissionResult: {
+          decision: "deny",
+          reason: `reviewer high: ${reviewer.verdict.reason}`,
+          layer: 5,
+        },
+      };
+    }
+    return {
+      allowed: true,
+      permissionResult: {
+        decision: "allow",
+        reason: `reviewer ${reviewer.verdict.level}: ${reviewer.verdict.reason}`,
+        layer: 5,
+      },
+    };
   }
 
   /** 복수 tool_use 병렬 실행 — 최대 5개씩 배치 처리.
@@ -443,16 +566,19 @@ export class ToolExecutor {
     }
 
     const invocationCategory = resolveInvocationCategory(tool, finalInput);
-    const targetFilePath = extractTargetFilePath(toolUse.name, finalInput);
+    const targetFilePaths = extractTargetFilePaths(tool, finalInput);
     // Q12 P2.5 — frozen-canonical contract: canonicalize ONCE here and
     // reuse the same string for Layer 0 (sensitive-path) + Layer 1
     // (allowed-directories) checks below. No layer re-resolves the path.
-    const canonicalTargetPath = targetFilePath
-      ? caseFoldForMatch(canonicalizePathForMatch(targetFilePath))
-      : null;
-    const sensitivePathPattern = canonicalTargetPath
-      ? isSensitivePath(canonicalTargetPath)
-      : null;
+    const canonicalTargets = targetFilePaths.map((filePath) => ({
+      filePath,
+      canonicalPath: caseFoldForMatch(canonicalizePathForMatch(filePath)),
+    }));
+    const sensitiveTarget = canonicalTargets
+      .map((target) => ({ ...target, pattern: isSensitivePath(target.canonicalPath) }))
+      .find((target) => target.pattern);
+    const targetFilePath = canonicalTargets[0]?.filePath;
+    const sensitivePathPattern = sensitiveTarget?.pattern ?? null;
 
     if (source === "plugin" && permissionContext?.allowedPluginIds) {
       const pluginAllowed = !!tool.pluginId && permissionContext.allowedPluginIds.has(tool.pluginId);
@@ -472,7 +598,7 @@ export class ToolExecutor {
     }
 
     if (sensitivePathPattern) {
-      const msg = `[민감 경로 차단] 도구 '${toolUse.name}' (${source}) — ${targetFilePath} matches ${sensitivePathPattern}`;
+      const msg = `[민감 경로 차단] 도구 '${toolUse.name}' (${source}) — ${sensitiveTarget?.filePath} matches ${sensitivePathPattern}`;
       const durationMs = Date.now() - startTime;
       const blockedPermission: PermissionCheckResult = {
         decision: "deny",
@@ -494,23 +620,25 @@ export class ToolExecutor {
     // realpath'd + case-folded). No re-canonicalization in this block.
     //
     // Skipped when no path-typed input was extracted (e.g. bash, MCP
-    // network calls). Phase 4 will widen `extractTargetFilePath` to
-    // honor `manifest.toolSchemas[*].pathFields`; for now the 3-field
-    // extractor (path|file_path|filePath) is the coverage frontier.
-    if (canonicalTargetPath) {
+    // network calls). Dynamic plugin tools must declare path-bearing
+    // arguments through `manifest.toolSchemas[*].pathFields`; the adapter
+    // carries that contract on Tool.pathFields.
+    if (canonicalTargets.length > 0) {
       const allowedScope = buildAllowedScope(permissionContext?.additionalDirectories);
-      const inAllowed = isPathAllowed(canonicalTargetPath, allowedScope);
-      if (!inAllowed) {
+      const outOfAllowedTarget = canonicalTargets.find(
+        (target) => !isPathAllowed(target.canonicalPath, allowedScope),
+      );
+      if (outOfAllowedTarget) {
         const headless = permissionContext?.headless === true;
         const trustOrigin = permissionContext?.trustOrigin ?? "user";
-        const validation = validateDirectoryAddition(canonicalTargetPath);
+        const validation = validateDirectoryAddition(outOfAllowedTarget.canonicalPath);
         const suggestedParent = pickClosestParent(
-          canonicalTargetPath,
+          outOfAllowedTarget.canonicalPath,
           allowedScope.directories,
         );
         const dirLayerResult: PermissionCheckResult = {
           decision: headless ? "ask" : "ask",
-          reason: `out-of-allowed-dir: ${targetFilePath} (not in additionalDirectories)`,
+          reason: `out-of-allowed-dir: ${outOfAllowedTarget.filePath} (not in additionalDirectories)`,
           layer: 1,
           denyReasons: [
             {
@@ -535,12 +663,12 @@ export class ToolExecutor {
             reason: dirLayerResult.reason,
             source: source as "builtin" | "plugin" | "mcp",
             createdAt: Date.now(),
-            ...(targetFilePath ? { target: { filePath: targetFilePath } } : {}),
+            target: { filePath: outOfAllowedTarget.filePath },
             isReadOnly: invocationCategory === "read",
             mode: this.currentApprovalMode(),
             sensitivePathPattern,
             outOfAllowedDir: {
-              candidatePath: targetFilePath ?? canonicalTargetPath,
+              candidatePath: outOfAllowedTarget.filePath,
               suggestedParent,
               currentAllowed: allowedScope.directories,
               adjacencyWarnings,
@@ -561,7 +689,7 @@ export class ToolExecutor {
           }
 
           if (decision.choice.startsWith("deny")) {
-            const msg = `[디렉토리 정책 차단] 도구 '${toolUse.name}' — 사용자가 허용 디렉토리 외부 경로 접근을 거부했습니다 (${targetFilePath}).`;
+            const msg = `[디렉토리 정책 차단] 도구 '${toolUse.name}' — 사용자가 허용 디렉토리 외부 경로 접근을 거부했습니다 (${outOfAllowedTarget.filePath}).`;
             const durationMs = Date.now() - startTime;
             emitToolStart(callbacks, toolUse.name, finalInput, meta);
             callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
@@ -572,16 +700,26 @@ export class ToolExecutor {
           // (full Layer 3 check still runs; Layer 1 is necessary, not
           // sufficient).
         } else if (headless) {
-          // Headless mode — Phase 3 will route to the reviewer agent.
-          // For Phase 2.5 we map "reviewer" to "ask" but ApprovalGate
-          // is not connected; fail-closed is the safe stance.
-          const msg = `[디렉토리 정책 차단 — headless] 도구 '${toolUse.name}' (${source}) — 허용 디렉토리 외부 경로 (${targetFilePath}). Phase 3 reviewer 미적용 단계 → fail-closed.`;
-          const durationMs = Date.now() - startTime;
-          log.warn(msg);
-          emitToolStart(callbacks, toolUse.name, finalInput, meta);
-          callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-          this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...dirLayerResult, decision: "deny" }, Infinity);
-          return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+          const reviewerResult = await this.dispatchReviewerForHeadless(
+            toolUse.name,
+            source,
+            invocationCategory,
+            finalInput,
+            allowedScope.directories,
+            sensitivePathPattern ? [sensitivePathPattern] : [],
+            permissionContext,
+          );
+          if (reviewerResult.allowed) {
+            permissionResult = reviewerResult.permissionResult;
+          } else {
+            const msg = reviewerResult.message;
+            const durationMs = Date.now() - startTime;
+            log.warn(msg);
+            emitToolStart(callbacks, toolUse.name, finalInput, meta);
+            callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+            this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...dirLayerResult, decision: "deny", reason: reviewerResult.permissionResult.reason }, Infinity);
+            return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+          }
         } else {
           // §F4 mirror — approvalGate미연결 시 fail-closed.
           const msg = `[승인 게이트 미연결 — Layer 1] 도구 '${toolUse.name}' (${source}) — 허용 디렉토리 외부 경로이지만 승인 게이트가 없어 차단.`;
@@ -655,6 +793,29 @@ export class ToolExecutor {
         return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
       }
       if (permissionResult.decision === "ask") {
+        if (permissionContext?.headless === true) {
+          const reviewerResult = await this.dispatchReviewerForHeadless(
+            toolUse.name,
+            source,
+            invocationCategory,
+            finalInput,
+            buildAllowedScope(permissionContext.additionalDirectories).directories,
+            sensitivePathPattern ? [sensitivePathPattern] : [],
+            permissionContext,
+          );
+          if (reviewerResult.allowed) {
+            permissionResult = reviewerResult.permissionResult;
+          } else {
+            const msg = reviewerResult.message;
+            const durationMs = Date.now() - startTime;
+            emitToolStart(callbacks, toolUse.name, finalInput, meta);
+            callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+            this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, reviewerResult.permissionResult, Infinity);
+            return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+          }
+        }
+      }
+      if (permissionResult.decision === "ask") {
         if (this.approvalGate) {
           // §6.3 Layer 3 + §8: 렌더러 승인 모달로 round-trip
           // C1: wire target.filePath + isReadOnly + mode so that §S1
@@ -674,6 +835,24 @@ export class ToolExecutor {
             mode: this.currentApprovalMode(),
             sensitivePathPattern,
           };
+
+          const permHook = await this.runScriptHook(
+            "perm",
+            toolUse.name,
+            source,
+            invocationCategory,
+            finalInput,
+            sessionId,
+            permissionContext,
+          );
+          if (permHook.decision === "deny") {
+            const msg = `[Hook Permission 차단] ${permHook.reason}`;
+            const durationMs = Date.now() - startTime;
+            emitToolStart(callbacks, toolUse.name, finalInput, meta);
+            callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+            this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...permissionResult, decision: "deny", reason: permHook.reason }, Infinity);
+            return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+          }
 
           // §F3: requestAndWait 실패 시 감사 로그 보장 후 deny-once 처리
           let decision;
@@ -725,6 +904,24 @@ export class ToolExecutor {
           return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
         }
       }
+    }
+
+    const scriptPre = await this.runScriptHook(
+      "pre",
+      toolUse.name,
+      source,
+      invocationCategory,
+      finalInput,
+      sessionId,
+      permissionContext,
+    );
+    if (scriptPre.decision === "deny") {
+      const msg = `[Hook 차단] ${scriptPre.reason}`;
+      const durationMs = Date.now() - startTime;
+      emitToolStart(callbacks, toolUse.name, finalInput, meta);
+      callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+      this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { decision: "deny", reason: scriptPre.reason, layer: 6 }, Infinity);
+      return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
     }
 
     // ── Step 5: Rate Limit (trust별) ────────────────
@@ -780,8 +977,22 @@ export class ToolExecutor {
       toolOutput: content,
       isError,
     });
+    const scriptPost = await this.runScriptHook(
+      "post",
+      toolUse.name,
+      source,
+      invocationCategory,
+      finalInput,
+      sessionId,
+      permissionContext,
+      content,
+      isError,
+    );
 
     if (postFeedback) content = `${content}\n\n[Hook Feedback]\n${postFeedback}`;
+    if (scriptPost.results.length > 0 && scriptPost.decision === "deny") {
+      content = `${content}\n\n[Script Hook Feedback]\n${scriptPost.reason}`;
+    }
     if (preResult.feedback) content = `${content}\n\n[Pre-Hook Note]\n${preResult.feedback}`;
 
     // ── Step 7b: DLP 민감 데이터 마스킹 ────────────
