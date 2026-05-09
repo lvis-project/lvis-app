@@ -23,7 +23,7 @@
  * model is missing, {@link createRiskClassifier} throws at boot — this
  * is the documented atomic-cutover behaviour (CLAUDE.md No-Fallback).
  */
-import type { ToolCategory, ToolSource } from "../../tools/types.js";
+import type { ToolCategory, ToolSource, ToolTrustOrigin } from "../../tools/types.js";
 import { maskSensitiveData } from "../../audit/dlp-filter.js";
 
 /** Verdict level — discrete enum. The reviewer lane never uses scalars. */
@@ -54,6 +54,12 @@ export interface ToolInvocationContext {
   toolName: string;
   source: ToolSource;
   category: ToolCategory;
+  /**
+   * Q12 §9 trust origin. Surfaced in the LLM prompt so the classifier
+   * can reason about prompt-injection risk: an `agent`-origin write of
+   * the same shape as a `user`-keyboard write is meaningfully different.
+   */
+  trustOrigin: ToolTrustOrigin;
   finalInput: Record<string, unknown>;
   allowedDirectories: string[];
   /** Adjacent sensitive entries (e.g. `.env`, `.git`) detected near the path. */
@@ -329,6 +335,7 @@ function buildUserPrompt(input: ToolInvocationContext): string {
     `tool: ${input.toolName}\n` +
     `source: ${input.source}\n` +
     `category: ${input.category}\n` +
+    `trustOrigin: ${input.trustOrigin}\n` +
     `input (DLP-redacted): ${JSON.stringify(redacted)}\n` +
     `allowedDirectories: ${JSON.stringify(input.allowedDirectories.slice(0, 8))}\n` +
     `sensitivePathsAdjacent: ${JSON.stringify(input.sensitivePathsAdjacent.slice(0, 8))}\n` +

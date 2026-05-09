@@ -47,6 +47,27 @@ export type ToolCategory = "read" | "write" | "shell" | "network" | "meta";
 export type ToolDecisionOverride = "always-allow-with-audit" | "ask";
 
 /**
+ * Q12 §9 trust origin — which actor produced the tool invocation. Carried
+ * with `ToolPermissionContext` and propagated into:
+ *   - audit entries (provenance evidence)
+ *   - approval-request payloads (so the renderer can warn on agent/plugin)
+ *   - Layer 5 reviewer cache key (a high-trust verdict cached for
+ *     `user` MUST NOT be served to an `agent` invocation of the same shape)
+ *   - Layer 5 reviewer prompt (LLM sees origin to detect prompt-injection)
+ *
+ * Distinct from `ToolSource` (which describes *where the tool came from*):
+ * a builtin tool can still be invoked with `trustOrigin: "agent"` if a
+ * sub-agent triggered it.
+ */
+export type ToolTrustOrigin =
+  | "user"
+  | "system"
+  | "plugin"
+  | "proactive"
+  | "routine"
+  | "agent";
+
+/**
  * §6.4 source → trust mapping. Builtin tools ship with the host so they
  * are trusted. Plugin tools come from signed marketplace artifacts —
  * medium trust. MCP tools come from third-party servers and are the
