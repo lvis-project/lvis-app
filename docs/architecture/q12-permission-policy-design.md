@@ -331,8 +331,8 @@ interface RoutineScope {
   "permissions": {
     "reviewer": {
       "mode": "llm",      // "disabled" | "rule" | "llm"
-      "provider": "anthropic",
-      "model": "claude-haiku-4-5",
+      "provider": "openai",       // default vendor — Anthropic 의존성 분리
+      "model": "gpt-4o-mini",     // default — ~$0.0002/call, 5x cheaper than Haiku
       "fallbackOnError": "rule"  // "deny" | "rule" 만 허용
       // "thresholds" 제거: verdict 는 discrete enum 이라 threshold 불필요
     }
@@ -709,3 +709,17 @@ Electron preload/contextBridge. Docker 불필요.
 **Volume estimate added** (15 MB/month).
 
 **Person-day estimates** for phases (TBD — Phase 5 doc rewrite 시 추가).
+
+## 11. v2 → v2.1 — User decisions during Phase 2 (2026-05-09)
+
+Phase 2 executor 작업 중 사용자가 결정한 4 항목 — spec 에 binding decision 으로 등재.
+
+| 항목 | 결정 | 함의 |
+|---|---|---|
+| Layer 5 default provider | **OpenAI gpt-4o-mini** + vendor-neutral abstraction | Anthropic 의존성 분리 (main conversation 의 quota 와 별도 budget). `LlmRiskClassifier` 는 thin adapter (provider/model/key swap 가능). 사용자가 `/permission reviewer model anthropic claude-haiku-4-5` 등으로 변경 가능 |
+| Layer 5 default model 변경 가능 surface | `/permission reviewer model <name>` slash + settings.json | Phase 5 의 slash grammar 에 이미 포함. `provider` 도 변경 가능: `/permission reviewer provider openai\|anthropic\|google` |
+| Layer 6 hook v1 ship | **빈 디렉토리** | `~/.config/lvis/hooks/` 만 mkdir. 기본 hook 없음. 사용자가 적극적으로 추가하기 전까지 attack surface 0. Sample hook 의 ergonomic value < security 이라는 trade-off |
+| Layer 5 cache invalidation | **Selective by `invalidationKey`** | `invalidationKey = hash(allowedDirectories, scope)` 의 매치만 cache hit. settings 변경 시 매치 안 되는 entry 만 무효, 동일 context 의 cache 보존. cold-start hit-rate 보존. 가정: verdict 의 settings-dependent input 은 (allowedDirectories, scope) 뿐 (Phase 4 hook chain 결과가 verdict 영향 시 hook hash 도 invalidationKey 에 포함 필요) |
+| arch.md §6.3 rewrite | **In-place rewrite** | 기존 §6.3 의 3-layer model 자리에 10-layer 으로 직접 덮어쓰기. 외부 link / anchor (`#permissions`) 호환 유지. Phase 5 deliverable |
+
+**v2 → v2.1 binding decisions** — 후속 phase implementation 은 위 4 결정에 정합 해야 함. 다른 결정 (audit panel UX, hook timeout, archive location 등) 은 implementation 시점에 decide-during-coding 가능 (low impact, no cross-component constraint).
