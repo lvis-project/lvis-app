@@ -382,6 +382,32 @@ export async function parsePluginJson(
         `"toolSchemas": { "${k}": { "description": "...", "category": "read", "inputSchema": { "type": "object", "properties": {} } } }`,
       );
     }
+    // Q12 P2.5 — advisory pathFields hint. Soft-warn only; Phase 4 will
+    // enforce that every undeclared path field is deny-by-default.
+    const pathFields = parsed.toolSchemas?.[k]?.pathFields as unknown;
+    if (pathFields !== undefined) {
+      if (!Array.isArray(pathFields)) {
+        log.warn(
+          `toolSchemas['${k}'].pathFields must be an array of strings — ignoring (Phase 4 will enforce)`,
+        );
+      } else {
+        const inputProps = parsed.toolSchemas?.[k]?.inputSchema?.properties ?? {};
+        for (let i = 0; i < pathFields.length; i += 1) {
+          const fieldName = pathFields[i];
+          if (typeof fieldName !== "string" || fieldName.length === 0) {
+            log.warn(
+              `toolSchemas['${k}'].pathFields[${i}] is not a non-empty string — ignored`,
+            );
+            continue;
+          }
+          if (!Object.prototype.hasOwnProperty.call(inputProps, fieldName)) {
+            log.warn(
+              `toolSchemas['${k}'].pathFields[${i}]='${fieldName}' is not declared in inputSchema.properties — entry has no effect`,
+            );
+          }
+        }
+      }
+    }
   }
 
   // Phase 5 §3 — notificationEvents[i].event should be in eventSubscriptions (soft warn).
