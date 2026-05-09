@@ -448,27 +448,38 @@ export function App() {
         debugLog("handleAsk", "interrupt:abort-and-proceed");
         try { await api.chatAbort(); } catch { /* no-op */ }
       }
-      if (mode === "default" && await handleCompactCommand(t)) {
-        debugLog("handleAsk", "skip:compact-command-handled");
-        return;
-      }
-      if (mode === "default" && (t === "/load" || t.startsWith("/load "))) {
-        const requested = t.slice("/load".length).trim();
-        if (requested.length === 0) {
-          setErrorWithThought("사용법: /load <세션ID>");
+      // Q12 §9 trust-origin gate for user-slash dispatch (architect round-4 ②).
+      // `/compact` and `/load` carry privileged user intent (rewrite history,
+      // load arbitrary session) so they MUST run only on user-keyboard origin.
+      // mode === "default" is the renderer's contract for "user typed this in
+      // the composer". A future non-keyboard caller of handleAsk MUST add a
+      // new mode value rather than reusing "default" — the slash dispatcher
+      // below short-circuits on any other origin.
+      const slashOrigin: "user-keyboard" | "non-keyboard" =
+        mode === "default" ? "user-keyboard" : "non-keyboard";
+      if (slashOrigin === "user-keyboard") {
+        if (await handleCompactCommand(t)) {
+          debugLog("handleAsk", "skip:compact-command-handled");
           return;
         }
-        const listed = await api.chatSessions();
-        const match = listed.sessions.find((session) => session.id.startsWith(requested));
-        if (!match) {
-          setErrorWithThought(`세션을 찾을 수 없습니다: ${requested}`);
+        if (t === "/load" || t.startsWith("/load ")) {
+          const requested = t.slice("/load".length).trim();
+          if (requested.length === 0) {
+            setErrorWithThought("사용법: /load <세션ID>");
+            return;
+          }
+          const listed = await api.chatSessions();
+          const match = listed.sessions.find((session) => session.id.startsWith(requested));
+          if (!match) {
+            setErrorWithThought(`세션을 찾을 수 없습니다: ${requested}`);
+            return;
+          }
+          await sessionLoad(match.id, false, applyLoadedSession);
+          await refreshSessionId();
+          await refreshSessions();
+          debugLog("handleAsk", "load-session:handled", { sessionId: match.id });
           return;
         }
-        await sessionLoad(match.id, false, applyLoadedSession);
-        await refreshSessionId();
-        await refreshSessions();
-        debugLog("handleAsk", "load-session:handled", { sessionId: match.id });
-        return;
       }
       if (!(await checkApiKey())) { setSettingsOpen(true); return; }
       const requestId = ++turnRequestRef.current;
