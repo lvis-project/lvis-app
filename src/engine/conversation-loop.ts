@@ -217,6 +217,8 @@ export interface ConversationLoopDeps {
    * intentionally omit this so background turns don't spam the user.
    */
   notificationService?: import("../main/notification-service.js").NotificationService;
+  /** Shared boot audit logger. Tool execution audit writes to this HMAC chain. */
+  auditLogger?: AuditLogger;
 }
 
 // 사용자가 *26 step* 작업에서 cap hit 으로 *조용히 끊긴* 사례 (2026-05-07) 후
@@ -268,7 +270,7 @@ export class ConversationLoop {
    * null = 이전 턴 없음 → builtin-only scope.
    */
   private lastTurnScope: Set<string> | null = null;
-  /** M2: Session-wide total of request_plugin activations (cap MAX_SESSION_PLUGIN_EXPANSION). */
+  /** Session-wide total of request_plugin activations (cap MAX_SESSION_PLUGIN_EXPANSION). */
   private sessionPluginExpansions = 0;
   /**
    * PR-2-C R14 mitigation — single in-flight Layer 2 compact lock per ConversationLoop.
@@ -288,8 +290,9 @@ export class ConversationLoop {
       deps.bashAstValidator,
       deps.approvalGate,
       deps.scriptHookManager,
+      deps.auditLogger,
     );
-    this.auditLogger = new AuditLogger();
+    this.auditLogger = deps.auditLogger ?? new AuditLogger();
     this.refreshProvider();
   }
 
@@ -553,7 +556,7 @@ export class ConversationLoop {
     this.history.restore(normalized.messages);
     this.cumulativeUsage = { inputTokens: 0, outputTokens: 0 };
     this.sessionPluginExpansions = 0;
-    // §M4: use max compactNum across all checkpoints (monotonic guarantee).
+    // Use max compactNum across all checkpoints (monotonic guarantee).
     // Using array length would produce a stale value when normalizeCheckpoint drops
     // invalid entries — next compact would reuse an already-used compactNum.
     this.compactNum = sessionMeta?.checkpoints?.reduce(
@@ -1603,7 +1606,7 @@ export class ConversationLoop {
       }
 
       // P1 sync chain — 다음 step 6 PROMPT_ASSEMBLE 가 새 boundary 를 read 해야 함.
-      // §M3: onCompactOccurred (compactNum 포함) 은 applyBoundaryToSession 안에서 단일 emit.
+      // onCompactOccurred (compactNum 포함) 은 applyBoundaryToSession 안에서 단일 emit.
       // 여기서 두 번째 emit 을 제거해 CheckpointDivider 중복 방지.
       await this.applyBoundaryToSession(compactResult, "auto-compact", estimated, callbacks, messagesBefore.length, messagesBefore);
 

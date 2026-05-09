@@ -35,6 +35,13 @@ function installApi(disabledBatches: HookTrustRow[][]) {
       addRule: vi.fn(async () => ({ ok: true, rule: { pattern: "x", action: "allow" } })),
       removeRule: vi.fn(async () => ({ ok: true })),
       hookTrustList,
+      dirDispatch: vi.fn(async () => ({
+        ok: true as const,
+        verb: "list" as const,
+        defaults: [],
+        userAdditions: [],
+        effective: [],
+      })),
     },
     policy: {
       get: vi.fn(async () => ({
@@ -85,10 +92,59 @@ describe("PermissionsTab hook quarantine notice", () => {
     expect(screen.getByTestId("hook-quarantine-notice")).toBeTruthy();
 
     await act(async () => {
-      fireEvent.click(screen.getByText("새로고침"));
+      fireEvent.click(screen.getAllByText("새로고침")[0]);
     });
 
     expect(api.permission.hookTrustList).toHaveBeenCalledTimes(2);
     expect(screen.queryByTestId("hook-quarantine-notice")).toBeNull();
+  });
+
+  it("adds and removes additional directories through the slash-backed IPC", async () => {
+    const api = installApi([[]]);
+    api.permission.dirDispatch.mockImplementation(async (rawArgs: string) => {
+      if (rawArgs === "list") {
+        return {
+          ok: true as const,
+          verb: "list" as const,
+          defaults: [],
+          userAdditions: [],
+          effective: [],
+        };
+      }
+      if (rawArgs === "allow /tmp/lvis-extra") {
+        return {
+          ok: true as const,
+          verb: "allow" as const,
+          persisted: ["/tmp/lvis-extra"],
+          sessionOnly: false,
+          warnings: [],
+        };
+      }
+      return {
+        ok: true as const,
+        verb: "deny" as const,
+        persisted: [],
+      };
+    });
+
+    await act(async () => {
+      render(<PermissionsTab />);
+    });
+
+    await act(async () => {
+      fireEvent.change(screen.getByPlaceholderText("경로 (예: ~/Documents/project)"), {
+        target: { value: "/tmp/lvis-extra" },
+      });
+      fireEvent.click(screen.getAllByText("추가").at(-1)!);
+    });
+
+    expect(api.permission.dirDispatch).toHaveBeenCalledWith("allow /tmp/lvis-extra");
+    expect(screen.getByText("/tmp/lvis-extra")).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(screen.getAllByText("✕").at(-1)!);
+    });
+
+    expect(api.permission.dirDispatch).toHaveBeenCalledWith("deny /tmp/lvis-extra");
   });
 });

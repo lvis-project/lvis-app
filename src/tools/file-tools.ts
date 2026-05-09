@@ -21,6 +21,7 @@ import { createInterface } from "node:readline";
 import { z } from "zod";
 
 import { validateSandboxPath } from "../sandbox/path-validator.js";
+import { globToRegExp } from "../lib/glob-matcher.js";
 import {
   ZodTool,
   type Tool,
@@ -115,7 +116,7 @@ abstract class FileTool<TSchema extends z.ZodTypeAny> extends ZodTool<TSchema> {
   }
 
   protected ensureAllowed(path: string, ctx: ToolExecutionContext): ToolResult | null {
-    const check = validateSandboxPath(path, ctx.cwd);
+    const check = validateSandboxPath(path, ctx.cwd, [...ctx.allowedDirectories]);
     if (!check.allowed) {
       return toolError(`Sandbox: ${check.reason}`);
     }
@@ -698,39 +699,6 @@ async function grepFile(
 
 function normalizeRelativePath(path: string): string {
   return path.split(sep).join("/");
-}
-
-function globToRegExp(pattern: string): RegExp {
-  const normalized = pattern.replace(/\\/g, "/");
-  let out = "^";
-  for (let i = 0; i < normalized.length; i += 1) {
-    const ch = normalized[i];
-    const next = normalized[i + 1];
-    if (ch === "*" && next === "*") {
-      if (normalized[i + 2] === "/") {
-        out += "(?:.*/)?";
-        i += 2;
-      } else {
-        out += ".*";
-        i += 1;
-      }
-      continue;
-    }
-    if (ch === "*") {
-      out += "[^/]*";
-      continue;
-    }
-    if (ch === "?") {
-      out += "[^/]";
-      continue;
-    }
-    out += escapeRegex(ch);
-  }
-  return new RegExp(`${out}$`);
-}
-
-function escapeRegex(ch: string): string {
-  return /[\\^$+?.()|[\]{}]/.test(ch) ? `\\${ch}` : ch;
 }
 
 function countOccurrences(haystack: string, needle: string): number {

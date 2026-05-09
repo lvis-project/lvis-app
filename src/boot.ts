@@ -144,7 +144,13 @@ export async function bootstrap(
 
   // Sprint 1-A A3 — shared AuditLogger instance (plugin runtime + hooks + gate).
   const { AuditLogger } = await import("./audit/audit-logger.js");
+  const { FileSecretStore, ensureAuditSecret } = await import("./audit/hmac-chain.js");
   const bootAuditLogger = new AuditLogger();
+  const permissionAuditSecretStore = new FileSecretStore();
+  bootAuditLogger.setupPermissionAuditChain(
+    ensureAuditSecret(permissionAuditSecretStore),
+    permissionAuditSecretStore,
+  );
 
   // Issue #260 — system notification service. Constructed up-front so all
   // 4 trigger sites (turn-end, routine, ask-user, approval) can call .fire().
@@ -261,7 +267,7 @@ export async function bootstrap(
     auditService,
   });
 
-  // §9.5 M4: marketplace backend selection.
+  // §9.5 marketplace backend selection.
   const marketplaceSettings = settingsService.get("marketplace");
   // Phase 2-final marketplace fetcher selection — single production path:
   //   - real-cloud + URL → RealCloudMarketplaceFetcher
@@ -400,6 +406,7 @@ export async function bootstrap(
     scriptHookManager,
     bashAstValidator,
     pluginRuntime,
+    auditLogger: bootAuditLogger,
   };
   const routineEngine = createRoutineEngine({
     createConversationLoop: (input) => createRoutineConversationLoop(
@@ -448,6 +455,7 @@ export async function bootstrap(
     pluginRuntime,
     skillOverlay,
     notificationService,
+    auditLogger: bootAuditLogger,
   });
 
   // Late-binding 주입 — ConversationLoop 생성 직후.
@@ -472,6 +480,7 @@ export async function bootstrap(
       bashAstValidator,
       hookRunner,
       scriptHookManager,
+      auditLogger: bootAuditLogger,
       getAdditionalDirectories: () => readPermissionSettings().permissions.additionalDirectories,
     },
     toolRegistry,
@@ -485,15 +494,15 @@ export async function bootstrap(
   // llm-session routines start a ConversationLoop with prePrompt.
   // notification-only routines fire an OS notification.
   routinesScheduler.onLlmSession(({ routine }) => {
-    // Q9: create an isolated session file before firing so the JSONL path
+    // Create an isolated session file before firing so the JSONL path
     // can be passed to the engine and routine turns never mix with main chat.
-    // Q10: emit running-started/finished so renderer can show progress indicator.
-    // M8: createSession runs before runningStarted — abort if it throws.
+    // Emit running-started/finished so renderer can show progress indicator.
+    // createSession runs before runningStarted — abort if it throws.
     void (async () => {
       const firedAt = new Date().toISOString();
       const title = routine.title ?? routine.notificationTitle ?? routine.id.slice(0, 8);
 
-      // M8: createSession first — if it fails, abort and emit failed event.
+      // createSession first — if it fails, abort and emit failed event.
       let jsonlPath: string | null = null;
       try {
         jsonlPath = await routineSessionStore.createSession(routine.id, firedAt);
@@ -522,7 +531,7 @@ export async function bootstrap(
         // non-fatal
       }
 
-      // Q9: pass jsonlPath to runRoutine so engine writes history to the
+      // Pass jsonlPath to runRoutine so engine writes history to the
       // isolated session file. summary comes from the LLM response directly.
       let runSummary = "";
       try {
@@ -537,7 +546,7 @@ export async function bootstrap(
         runSummary = runResult.summary;
       } catch (err) {
         log.warn("routines v2 llm-session run failed: %s", (err as Error).message);
-        // M8: emit failed so renderer knows to clear running state
+        // Emit failed so renderer knows to clear running state.
         try {
           getMainWindow()?.webContents.send(ROUTINES_V2.failed, {
             routineId: routine.id,
@@ -547,16 +556,16 @@ export async function bootstrap(
           // non-fatal
         }
       } finally {
-        // Q10: always clear running state regardless of success/failure
+      // Always clear running state regardless of success/failure.
         try {
           getMainWindow()?.webContents.send(ROUTINES_V2.runningFinished, routine.id);
         } catch {
           // non-fatal
         }
       }
-      // Q9+Q10: use LLM response summary directly — no extractSummary needed.
+      // Use LLM response summary directly — no extractSummary needed.
       const summary = runSummary;
-      // M1: explicit allowlist payload — no ...routine spread to prevent PII leak
+      // Explicit allowlist payload — no ...routine spread to prevent PII leak.
       try {
         getMainWindow()?.webContents.send(ROUTINES_V2.fired, {
           id: routine.id,
@@ -585,7 +594,7 @@ export async function bootstrap(
     }
     // Emit fired event for notification-only branch so the UI reflects the
     // fire consistently across both execution modes.
-    // M1: explicit allowlist — no ...routine spread to prevent prePrompt/notificationBody leak
+    // Explicit allowlist — no ...routine spread to prevent prePrompt/notificationBody leak.
     try {
       const firedAt = new Date().toISOString();
       const title = routine.title ?? routine.notificationTitle ?? routine.id.slice(0, 8);

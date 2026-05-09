@@ -92,6 +92,13 @@ export function trustFromSource(source: ToolSource): TrustLevel {
  */
 export interface ToolExecutionContext {
   cwd: string;
+  /**
+   * User-authorized filesystem roots for this invocation. The executor
+   * derives this once from `permissions.additionalDirectories` and every
+   * native file/shell tool reuses the same scope for its internal sandbox
+   * check.
+   */
+  allowedDirectories: readonly string[];
   metadata: Record<string, unknown>;
   /**
    * Per-turn abort signal threaded down from `ConversationLoop.runTurn`.

@@ -24,11 +24,15 @@ import {
   WriteFileTool,
 } from "../file-tools.js";
 import type { ToolExecutionContext } from "../base.js";
+import {
+  dispatchPermissionDirCommand,
+  parsePermissionDirCommand,
+} from "../../permissions/permission-slash.js";
 
 let workDir: string;
 
 function ctx(): ToolExecutionContext {
-  return { cwd: workDir, metadata: {} };
+  return { cwd: workDir, allowedDirectories: [], metadata: {} };
 }
 
 function parse(output: string): Record<string, unknown> {
@@ -202,6 +206,52 @@ describe("file native tools", () => {
 
       expect(result.isError).toBe(true);
       expect(result.output).toContain("Sandbox:");
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("honors executor-threaded additionalDirectories for extra workspace roots", async () => {
+    const outside = mkdtempSync(join(tmpdir(), "lvis-file-tools-extra-"));
+    try {
+      const target = join(outside, "allowed.txt");
+      writeFileSync(target, "outside but authorized\n", "utf8");
+
+      const result = await new ReadFileTool().execute(
+        { path: target },
+        { cwd: workDir, allowedDirectories: [outside], metadata: {} },
+      );
+
+      expect(result.isError).toBe(false);
+      expect(parse(result.output).content).toBe("outside but authorized");
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("round-trips a slash-authorized extra dir into read_file sandbox scope", async () => {
+    const outside = mkdtempSync(join(tmpdir(), "lvis-file-tools-slash-extra-"));
+    const settingsPath = join(workDir, "permissions.json");
+    try {
+      const target = join(outside, "allowed-by-slash.txt");
+      writeFileSync(target, "slash authorized\n", "utf8");
+      const parsed = parsePermissionDirCommand(`allow ${outside}`);
+      if ("ok" in parsed) throw new Error(parsed.error);
+      const dirResult = await dispatchPermissionDirCommand(
+        parsed,
+        settingsPath,
+      );
+      if (!dirResult.ok) throw new Error(dirResult.error);
+      expect(dirResult.verb).toBe("allow");
+
+      const allowedDirectories = dirResult.verb === "allow" ? dirResult.persisted : [];
+      const result = await new ReadFileTool().execute(
+        { path: target },
+        { cwd: workDir, allowedDirectories, metadata: {} },
+      );
+
+      expect(result.isError).toBe(false);
+      expect(parse(result.output).content).toBe("slash authorized");
     } finally {
       rmSync(outside, { recursive: true, force: true });
     }

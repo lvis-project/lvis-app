@@ -38,6 +38,9 @@ export function PermissionsTab() {
   const [newPattern, setNewPattern] = useState("");
   const [newAction, setNewAction] = useState<"allow" | "deny">("allow");
   const [rulesBusy, setRulesBusy] = useState(false);
+  const [directories, setDirectories] = useState<string[]>([]);
+  const [newDirectory, setNewDirectory] = useState("");
+  const [dirsBusy, setDirsBusy] = useState(false);
   const [quarantinedHooks, setQuarantinedHooks] = useState<HookTrustRow[]>([]);
 
   // ── 초기 fetch (탭 진입 시) ───────────────────────
@@ -45,11 +48,12 @@ export function PermissionsTab() {
     setLoading(true);
     setError(null);
     try {
-      const [modeRes, policyRes, rulesRes, hookTrustRes] = await Promise.all([
+      const [modeRes, policyRes, rulesRes, hookTrustRes, dirRes] = await Promise.all([
         window.lvis.permission.getMode(),
         window.lvis.policy.get(),
         window.lvis.permission.listRules(),
         window.lvis.permission.hookTrustList(),
+        window.lvis.permission.dirDispatch("list"),
       ]);
       setMode((modeRes.mode as ExecMode) ?? "default");
       setRequireExplicit(policyRes.requireExplicitApproval);
@@ -58,6 +62,7 @@ export function PermissionsTab() {
       setPolicyAdminPath(policyRes.adminPath as string | undefined);
       setRules(rulesRes);
       setQuarantinedHooks(hookTrustRes.ok ? hookTrustRes.disabled : []);
+      setDirectories(dirRes.ok && dirRes.verb === "list" ? dirRes.userAdditions : []);
     } catch (e) {
       setError((e as Error).message ?? "데이터를 불러오지 못했습니다.");
     } finally {
@@ -130,6 +135,51 @@ export function PermissionsTab() {
       showBanner("error", `규칙 삭제 중 오류: ${(e as Error).message}`);
     } finally {
       setRulesBusy(false);
+    }
+  };
+
+  const refreshDirectories = async () => {
+    const res = await window.lvis.permission.dirDispatch("list");
+    if (res.ok && res.verb === "list") {
+      setDirectories(res.userAdditions);
+    }
+  };
+
+  const handleAddDirectory = async () => {
+    const dir = newDirectory.trim();
+    if (!dir) return;
+    setDirsBusy(true);
+    try {
+      const res = await window.lvis.permission.dirDispatch(`allow ${formatPermissionDirArg(dir)}`);
+      if (res.ok && res.verb === "allow") {
+        setNewDirectory("");
+        setDirectories(res.persisted);
+        if (res.warnings.length > 0) {
+          showBanner("warn", res.warnings.join(" "));
+        }
+      } else if (!res.ok) {
+        showBanner("error", res.error);
+      }
+    } catch (e) {
+      showBanner("error", `디렉터리 추가 중 오류: ${(e as Error).message}`);
+    } finally {
+      setDirsBusy(false);
+    }
+  };
+
+  const handleRemoveDirectory = async (dir: string) => {
+    setDirsBusy(true);
+    try {
+      const res = await window.lvis.permission.dirDispatch(`deny ${formatPermissionDirArg(dir)}`);
+      if (res.ok && res.verb === "deny") {
+        setDirectories(res.persisted);
+      } else if (!res.ok) {
+        showBanner("error", res.error);
+      }
+    } catch (e) {
+      showBanner("error", `디렉터리 삭제 중 오류: ${(e as Error).message}`);
+    } finally {
+      setDirsBusy(false);
     }
   };
 
@@ -324,7 +374,74 @@ export function PermissionsTab() {
 
         <Separator />
 
-        {/* ── Section D: Audit Log Placeholder ── */}
+        {/* ── Section D: Additional Directories ── */}
+        <div className="space-y-3">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium">허용 디렉터리</p>
+              <p className="text-[11px] text-muted-foreground">작업 디렉터리 밖에서 파일 도구가 접근할 수 있는 사용자 승인 경로입니다.</p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 px-2 text-[11px]"
+              onClick={() => void refreshDirectories()}
+              disabled={dirsBusy}
+            >
+              새로고침
+            </Button>
+          </div>
+
+          {directories.length === 0 ? (
+            <p className="text-[11px] text-muted-foreground italic">추가 허용 디렉터리가 없습니다.</p>
+          ) : (
+            <div className="rounded-md border">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b bg-muted/40">
+                    <th className="px-3 py-2 text-left font-medium">경로</th>
+                    <th className="px-3 py-2" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {directories.map((dir) => (
+                    <tr key={dir} className="border-b last:border-0 hover:bg-muted/20">
+                      <td className="min-w-0 px-3 py-1.5 font-mono text-[11px]">
+                        <span className="block truncate" title={dir}>{dir}</span>
+                      </td>
+                      <td className="px-3 py-1.5 text-right">
+                        <button
+                          className="text-[10px] text-muted-foreground hover:text-destructive disabled:opacity-40"
+                          disabled={dirsBusy}
+                          onClick={() => void handleRemoveDirectory(dir)}
+                        >
+                          ✕
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <div className="flex items-center gap-2">
+            <Input
+              className="h-8 flex-1 text-xs"
+              placeholder="경로 (예: ~/Documents/project)"
+              value={newDirectory}
+              onChange={(e) => setNewDirectory(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && newDirectory.trim()) void handleAddDirectory(); }}
+            />
+            <Button size="sm" className="h-8" onClick={() => void handleAddDirectory()} disabled={dirsBusy || !newDirectory.trim()}>
+              추가
+            </Button>
+          </div>
+        </div>
+
+        <Separator />
+
+        {/* ── Section E: Audit Log Placeholder ── */}
         <div className="space-y-2">
           <div>
             <p className="text-sm font-medium">감사 로그</p>
@@ -338,4 +455,8 @@ export function PermissionsTab() {
       </div>
     </ScrollArea>
   );
+}
+
+function formatPermissionDirArg(path: string): string {
+  return /[\s"']|^-/.test(path) ? JSON.stringify(path) : path;
 }
