@@ -64,9 +64,11 @@ export const SENSITIVE_PATH_PATTERNS: readonly string[] = Object.freeze([
   "**/.openharness/credentials.json",
   "**/.openharness/copilot_auth.json",
   // ── Q12 P2.5 — OS sensitive paths (security review M1) ───────
-  "/etc/shadow",
-  "/etc/sudoers",
-  "/etc/passwd-",
+  // Use double-star prefix because frozen-canonical realpath() resolves
+  // /etc → /private/etc on macOS. The double-star matches both forms.
+  "**/etc/shadow",
+  "**/etc/sudoers",
+  "**/etc/passwd-",
   "**/.netrc",
   "**/.pgpass",
   "**/.npmrc",
