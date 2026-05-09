@@ -91,6 +91,22 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
     return loadPolicy();
   });
 
+  // ── Q12 P3 — `/permission reviewer` slash dispatcher (IPC) ─────
+  ipcMain.handle(
+    "lvis:permissions:reviewer-dispatch",
+    async (e, args: { rawArgs: string }) => {
+      if (!validateSender(e)) {
+        auditUnauthorized(auditLogger, "lvis:permissions:reviewer-dispatch", e);
+        return UNAUTHORIZED_FRAME;
+      }
+      const { parsePermissionReviewerCommand, dispatchPermissionReviewerCommand } =
+        await import("../../permissions/permission-slash.js");
+      const parsed = parsePermissionReviewerCommand(args?.rawArgs ?? "");
+      if ("ok" in parsed && parsed.ok === false) return parsed;
+      return dispatchPermissionReviewerCommand(parsed as Exclude<typeof parsed, { ok: false }>);
+    },
+  );
+
   // ── Q12 P3 — deferred queue surface ────────────────────────────
   // Read-only listing (UI loads on mount). Sender guard optional.
   ipcMain.handle("lvis:permissions:deferred-list", async () => {
