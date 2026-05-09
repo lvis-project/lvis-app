@@ -470,9 +470,18 @@ export type LvisApi = {
 
 // ─── Approval types (mirrored from approval-gate.ts — no node import in renderer) ─
 export type ApprovalChoice = "allow-once" | "allow-always" | "deny-once" | "deny-always";
+
+/**
+ * Q12 P2.5 — discriminated approval kinds. Renderer routes on this to
+ * pick the right card. Default `"tool"` is the standard §6.3 dialog.
+ */
+export type ApprovalKind = "tool" | "out-of-allowed-dir";
+
 export type ApprovalRequest = {
   id: string;
   category: "tool";
+  /** Q12 P2.5 — discriminator (defaults to "tool" when absent). */
+  kind?: ApprovalKind;
   toolName: string;
   args: unknown;
   reason: string;
@@ -486,6 +495,19 @@ export type ApprovalRequest = {
   nonce?: string;
   /** §D2: HMAC over (id, nonce, toolName, args) — echoed verbatim. */
   hmac?: string;
+  /**
+   * Q12 P2.5 — present when `kind === "out-of-allowed-dir"`. Carries
+   * the auto-suggest payload so the renderer can render the directory-
+   * confirm card without re-running validation.
+   */
+  outOfAllowedDir?: {
+    candidatePath: string;
+    suggestedParent: string | null;
+    currentAllowed: readonly string[];
+    adjacencyWarnings: readonly string[];
+  };
+  /** Q12 P2.5 §9 — trust-origin classification, e.g. "user" / "agent". */
+  trustOrigin?: string;
 };
 export type ApprovalDecision = {
   requestId: string;
