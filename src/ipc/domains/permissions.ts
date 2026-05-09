@@ -108,8 +108,13 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
   );
 
   // ── Q12 P3 — deferred queue surface ────────────────────────────
-  // Read-only listing (UI loads on mount). Sender guard optional.
-  ipcMain.handle("lvis:permissions:deferred-list", async () => {
+  // Returns DLP-redacted tool inputs + verdicts; gated to prevent a
+  // compromised foreign frame from harvesting them (Copilot round 3).
+  ipcMain.handle("lvis:permissions:deferred-list", async (e) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, "lvis:permissions:deferred-list", e);
+      return UNAUTHORIZED_FRAME;
+    }
     const pm = conversationLoop.permissionManager;
     const queue = pm?.getDeferredQueue();
     if (!queue) return { ok: true, pending: [], total: 0 };
@@ -145,9 +150,16 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
   );
 
   // ── Q12 P5 — `/permission audit show|verify` IPC handlers ─────
+  // Audit entries can contain DLP-redacted tool inputs and decision
+  // metadata; gated so foreign frames cannot harvest them (Copilot
+  // round 3).
   ipcMain.handle(
     "lvis:permissions:audit-show",
-    async (_e, args: { last?: number }) => {
+    async (e, args: { last?: number }) => {
+      if (!validateSender(e)) {
+        auditUnauthorized(auditLogger, "lvis:permissions:audit-show", e);
+        return UNAUTHORIZED_FRAME;
+      }
       const last = Math.max(1, Math.min(1000, Math.floor(args?.last ?? 50)));
       const { readRecentAuditEntries, summarizeAuditDir } = await import(
         "../../permissions/permission-audit-runner.js"
