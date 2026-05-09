@@ -1544,6 +1544,112 @@ at `createRiskClassifier()` boot — no silent fallback to rule mode
 - `src/permissions/permission-slash.ts` — `/permission reviewer ...`.
 - `src/ui/renderer/components/permissions/DeferredQueuePanel.tsx` — UI.
 
+#### 6.3.y — Hook System v1 (Layer 6, Q12 Phase 4)
+
+> **Phase 4 stub.** Phase 5 fully rewrites §6.3 from the legacy 3-layer
+> model to the Q12 10-layer pipeline. This subsection is the
+> placeholder so Phase 4 deliverables (PR #632 commits) are
+> arch-discoverable. Spec ref:
+> `docs/architecture/q12-permission-policy-design.md` §3 Layer 6.
+
+The **Hook System** is the Q12 Layer 6 user-script interception lane.
+Individual shell scripts under `~/.config/lvis/hooks/` (deliberately
+outside `~/.lvis/` so a compromised LVIS process cannot trivially
+mutate them — security review M3+M4) gate three lifecycle moments per
+tool call:
+
+| Prefix | Hook type | Fires when | Outputs |
+| --- | --- | --- | --- |
+| `pre-*.sh` | PreToolUse | Before tool execution | `{action: "allow" \| "deny", reason}` |
+| `post-*.sh` | PostToolUse | After tool execution (observe-only in v1) | same |
+| `perm-*.sh` | PermissionRequest | When the approval gate is about to ask the user | same |
+
+**Wire contract (stdin / stdout JSON):**
+
+```jsonc
+// stdin (line-delimited JSON sent to the script)
+{
+  "hookType": "pre",
+  "toolName": "fs_write",
+  "source": "builtin",
+  "category": "write",
+  "input": { "path": "/tmp/x" },        // DLP-redacted before delivery
+  "sessionId": "...",
+  "trustOrigin": "user-keyboard"
+}
+
+// stdout
+{ "action": "allow", "reason": "ok" }
+```
+
+**Deny-only v1 (critic M3):** `modify` action explicitly **NOT**
+supported in v1 — Q13 introduces it once hook signing lands. The hook
+chain enforces deny precedence: a hook `allow` is *additional approval
+signal* — it cannot upgrade a Layer 0/1/2/3 deny into allow.
+
+**Fail-safe semantics:** non-zero exit, malformed stdout JSON, or
+`>5s` timeout collapse to `deny`. Process-group kill on timeout reaps
+descendants (e.g. `sleep` inside the script).
+
+**TOFU lockfile:** `.lockfile.json` lives next to the hooks. On boot
+the host hashes every `pre-*.sh` / `post-*.sh` / `perm-*.sh` and
+diffs against the lockfile. New + changed entries surface in the
+`HookTrustModal` (`lvis:hooks:trust-prompt` IPC); the user accepts or
+rejects per-file. Rejected hooks move to `.disabled/`. Strict-deny
+when no UI dispatcher (headless boot, CI smoke).
+
+**DLP filter on input (security threat-gap #3):** every string-valued
+`input` field is run through `redactForLLM` before reaching the hook
+stdin. Secrets / credentials / PII never leak to user scripts (which
+may forward to remote SIEM endpoints).
+
+**v1 binding decision (spec §11 v2.1):** ship empty directory. No
+sample hooks bundled. Attack surface is zero until the user
+deliberately writes a hook.
+
+**Files (Phase 4, PR #632):**
+- `src/hooks/script-hook-types.ts` — wire contract + timeout constants.
+- `src/hooks/hook-discovery.ts` — discoverHooks + lockfile diff +
+  disable-into-`.disabled/`.
+- `src/hooks/script-hook-runner.ts` — runOneHookScript + runHookChain.
+- `src/hooks/script-hook-manager.ts` — runtime per-type dispatch + DLP.
+- `src/hooks/hook-trust-prompt.ts` — TOFU orchestrator.
+- `src/hooks/hook-trust-resolver-registry.ts` — boot ↔ IPC bridge.
+- `src/boot/steps/hook-system-wiring.ts` — boot integration.
+- `src/ipc/domains/hooks.ts` — `lvis:hooks:current|accept|reject-all`.
+- `src/ui/renderer/components/permissions/HookTrustModal.tsx` — UI.
+
+#### 6.3.z — Manifest Integrity Proxy (§3.5, Q12 Phase 4)
+
+> **Phase 4 stub.** Spec ref:
+> `docs/architecture/q12-permission-policy-design.md` §3.5.
+
+Plugin manifest declares one of the 5-axis categories per tool. The
+**Manifest Integrity Proxy** is a runtime sanity-check on plugins
+that declare `category: "read"`: a `node:fs` Proxy whose write
+methods (`writeFileSync`, `mkdirSync`, `rmSync`, …) throw a
+`ManifestIntegrityViolation`.
+
+On violation:
+1. The plugin id is added to the process-wide
+   `manifestIntegrityState.disabledPluginIds` set.
+2. An audit entry `{kind: "manifest_integrity_violation", pluginId,
+   toolName, attempted}` lands in `~/.lvis/audit/`.
+3. The renderer receives `lvis:permissions:manifest-violation` so it
+   can prompt the user to confirm a reinstall.
+4. Subsequent calls into the disabled plugin's read-declared tools
+   fail-deny without invoking the runtime.
+
+**Trade-off (acknowledged):** a plugin importing `node:fs` directly
+(rather than reading the `fs` member off its execute context)
+bypasses the proxy. v1 is a partial guard. Q14 sandboxed plugin
+runtime (V8 isolated context) makes this complete.
+
+**Files (Phase 4, PR #632):**
+- `src/permissions/manifest-integrity.ts` — proxy + state singleton.
+- `src/plugins/plugin-tool-adapter.ts` — post-violation gate.
+- `src/preload.ts` — `onManifestViolation(handler)` IPC bridge.
+
 
 ### 6.4 Tool Registry & Taxonomy — 빌트인 도구 카탈로그
 
