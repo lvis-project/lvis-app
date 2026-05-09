@@ -98,8 +98,11 @@ import { initPluginRuntime } from "./boot/steps/plugin-runtime.js";
 import { registerPluginEventBridge } from "./boot/steps/ipc-bridge.js";
 import { wireReleasePrep, wireUpdateCheck } from "./boot/steps/post-boot.js";
 import { wireReviewerAgent } from "./boot/steps/reviewer-wiring.js";
+import { wireHookSystem } from "./boot/steps/hook-system-wiring.js";
 import { createProvider, secretKeyFor } from "./engine/llm/provider-factory.js";
 import type { LLMProvider, LLMVendor } from "./engine/llm/types.js";
+import type { HookDiff } from "./hooks/hook-discovery.js";
+import { hookTrustResolverRegistry } from "./hooks/hook-trust-resolver-registry.js";
 import { runManagedBootstrap } from "./boot/managed-marketplace.js";
 import { createLogger } from "./lib/logger.js";
 const log = createLogger("lvis");
@@ -352,6 +355,39 @@ export async function bootstrap(
   // Tier A4 (W3): HookRunner. Shared by interactive and routine loops so
   // every tool call traverses the same Pre/PostToolUse hook surface.
   const hookRunner = createHookRunner();
+
+  // Q12 P4 — Layer 6 script-hook system (individual `pre-*.sh` /
+  // `post-*.sh` / `perm-*.sh` files under `~/.config/lvis/hooks/`).
+  // Boot-time TOFU prompt routes through `hookTrustResolverRegistry`
+  // so the renderer can accept / reject newly-discovered hooks via
+  // the `lvis:hooks:trust-prompt` IPC channel. When the dispatcher
+  // fails or there's no pending UI, the workflow strict-denies (every
+  // untrusted hook auto-moved to `.disabled/`).
+  const hookSystem = await wireHookSystem({
+    mainWindow,
+    awaitRendererDecisions: async (diff: HookDiff[]) => {
+      const { id, promise } = hookTrustResolverRegistry.registerRequest(diff);
+      try {
+        getMainWindow()?.webContents.send("lvis:hooks:trust-prompt", {
+          id,
+          files: diff.map((d) => ({
+            fileName: d.hook.fileName,
+            state: d.state,
+            sha256: d.hook.sha256,
+            previousSha256: d.previousSha256,
+          })),
+        });
+      } catch (err) {
+        log.warn(
+          "boot: hook trust IPC send failed (%s) — strict-deny applies",
+          (err as Error).message,
+        );
+        hookTrustResolverRegistry.rejectAll(id);
+      }
+      return promise;
+    },
+  });
+  const scriptHookManager = hookSystem.manager;
 
   // §7: Routine Engine — 루틴마다 독립된 ConversationLoop를 생성하는 factory를 주입.
   // interactive 채팅의 ConversationLoop 인스턴스를 공유하면 세션 히스토리 오염 및
@@ -660,6 +696,7 @@ export async function bootstrap(
     approvalGate, knowledgeAvailable, starredStore, feedbackStore,
     routinesStore, routinesScheduler, routineSessionStore, sessionTodoStore, askUserQuestionGate, skillStore,
     notificationService,
+    scriptHookManager,
     telemetry, pluginTelemetry, autoUpdaterStop,
     startRoutinesScheduler: () => routinesScheduler.start(),
     refreshPluginNotifications: () => {
