@@ -6,6 +6,7 @@ import {
   acceptHookTrust,
   disableHookTrust,
   listHookTrustState,
+  rejectHookTrust,
 } from "../hook-trust-commands.js";
 import { wireHookSystem } from "../../boot/steps/hook-system-wiring.js";
 
@@ -77,6 +78,56 @@ describe("hook trust slash command operations", () => {
 
   it("rejects hook names with path separators", async () => {
     await expect(acceptHookTrust("../pre-demo.sh", opts())).resolves.toMatchObject({
+      ok: false,
+    });
+  });
+
+  it("reject permanently removes a quarantined hook from .disabled/", async () => {
+    writeHook("pre-quarantined.sh");
+    const boot = await wireHookSystem(opts());
+    expect(boot.manager.size()).toBe(0);
+    expect(existsSync(join(disabledDir, "pre-quarantined.sh"))).toBe(true);
+
+    const result = await rejectHookTrust("pre-quarantined.sh", {
+      ...opts(),
+      manager: boot.manager,
+    });
+
+    expect(result).toMatchObject({ ok: true, verb: "reject" });
+    expect(existsSync(join(disabledDir, "pre-quarantined.sh"))).toBe(false);
+    expect(existsSync(join(hooksDir, "pre-quarantined.sh"))).toBe(false);
+  });
+
+  it("reject refuses an active (trusted) hook — must disable first", async () => {
+    writeHook("perm-active.sh");
+    const boot = await wireHookSystem({
+      ...opts(),
+      promptDispatcher: {
+        prompt: async () => [{ fileName: "perm-active.sh", trust: true }],
+      },
+    });
+    expect(boot.manager.size()).toBe(1);
+
+    const result = await rejectHookTrust("perm-active.sh", {
+      ...opts(),
+      manager: boot.manager,
+    });
+
+    expect(result).toMatchObject({ ok: false });
+    if (!result.ok) expect(result.error).toMatch(/disable it first/);
+    expect(existsSync(join(hooksDir, "perm-active.sh"))).toBe(true);
+    expect(boot.manager.size()).toBe(1);
+  });
+
+  it("reject of unknown hook name returns not-found", async () => {
+    await wireHookSystem(opts());
+    const result = await rejectHookTrust("pre-nope.sh", opts());
+    expect(result).toMatchObject({ ok: false });
+    if (!result.ok) expect(result.error).toMatch(/not found/);
+  });
+
+  it("reject rejects hook names with path separators", async () => {
+    await expect(rejectHookTrust("../escape.sh", opts())).resolves.toMatchObject({
       ok: false,
     });
   });

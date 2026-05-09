@@ -30,6 +30,7 @@ import {
   acceptHookTrust,
   disableHookTrust,
   listHookTrustState,
+  rejectHookTrust,
   type HookTrustCommandOptions,
   type HookTrustCommandResult,
 } from "../hooks/hook-trust-commands.js";
@@ -375,7 +376,8 @@ export type PermissionRulesCommand = { verb: "rules"; sub: "list" };
 export type PermissionHooksCommand =
   | { verb: "hooks"; sub: "list" }
   | { verb: "hooks"; sub: "accept"; name: string }
-  | { verb: "hooks"; sub: "disable"; name: string };
+  | { verb: "hooks"; sub: "disable"; name: string }
+  | { verb: "hooks"; sub: "reject"; name: string };
 
 export function parsePermissionRulesCommand(
   rawArgs: string,
@@ -392,29 +394,39 @@ export function parsePermissionHooksCommand(
 ): PermissionHooksCommand | { ok: false; error: string } {
   const args = rawArgs.trim().split(/\s+/).filter((p) => p.length > 0);
   if (args.length === 0) {
-    return { ok: false, error: "usage: /permission hooks <list|accept|disable> [name]" };
+    return { ok: false, error: "usage: /permission hooks <list|accept|disable|reject> [name]" };
   }
   const sub = args[0];
   if (sub === "list") {
     if (args.length > 1) return { ok: false, error: "list takes no extra arguments" };
     return { verb: "hooks", sub: "list" };
   }
-  if (sub === "accept" || sub === "disable") {
+  if (sub === "accept" || sub === "disable" || sub === "reject") {
     if (args.length !== 2) {
       return { ok: false, error: `${sub} requires a hook name` };
     }
     return { verb: "hooks", sub, name: args[1] };
   }
-  return { ok: false, error: `unknown subcommand '${sub}' — expected list|accept|disable` };
+  return {
+    ok: false,
+    error: `unknown subcommand '${sub}' — expected list|accept|disable|reject`,
+  };
 }
 
 export async function dispatchPermissionHooksCommand(
   cmd: PermissionHooksCommand,
   opts: HookTrustCommandOptions = {},
 ): Promise<HookTrustCommandResult> {
-  if (cmd.sub === "list") return listHookTrustState(opts);
-  if (cmd.sub === "accept") return acceptHookTrust(cmd.name, opts);
-  return disableHookTrust(cmd.name, opts);
+  switch (cmd.sub) {
+    case "list":
+      return listHookTrustState(opts);
+    case "accept":
+      return acceptHookTrust(cmd.name, opts);
+    case "disable":
+      return disableHookTrust(cmd.name, opts);
+    case "reject":
+      return rejectHookTrust(cmd.name, opts);
+  }
 }
 
 // ─── Top-level /permission dispatcher (trust-origin gated) ─────────────
