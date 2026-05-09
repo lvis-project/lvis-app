@@ -108,7 +108,7 @@ describe("OutOfAllowedDirCard", () => {
       },
     });
     const onDecide = vi.fn();
-    const { getByText, getByPlaceholderText, container } = render(
+    const { getByText, getByPlaceholderText } = render(
       <OutOfAllowedDirCard open={true} request={req} onDecide={onDecide} />,
     );
     const persist = getByText("디렉토리 영구 추가") as HTMLButtonElement;
