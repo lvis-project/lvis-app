@@ -21,7 +21,7 @@ import { SkillStore } from "../../main/skill-store.js";
 import { SkillOverlay } from "../../main/skill-overlay.js";
 
 function ctx(sessionId = "session-x"): ToolExecutionContext {
-  return { cwd: process.cwd(), metadata: { sessionId } };
+  return { cwd: process.cwd(), allowedDirectories: [], metadata: { sessionId } };
 }
 
 describe("ask_user_question tool", () => {

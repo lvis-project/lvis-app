@@ -91,7 +91,11 @@ describe("wireHookSystem permission hook policy", () => {
 
   it("emits hook.quarantined audit entries for boot-time quarantine", async () => {
     writeHook("pre-untrusted.sh", "#!/bin/sh\nexit 0");
-    const auditLogger = { log: vi.fn() };
+    const auditLogger = {
+      log: vi.fn(),
+      isPermissionAuditChainReady: vi.fn(() => true),
+      appendPermissionAuditEntry: vi.fn(async (entry) => ({ ...entry, prevHash: "h" })),
+    };
 
     await wireHookSystem({
       hooksDir,
@@ -101,6 +105,7 @@ describe("wireHookSystem permission hook policy", () => {
     });
 
     expect(auditLogger.log).toHaveBeenCalledTimes(1);
+    expect(auditLogger.appendPermissionAuditEntry).toHaveBeenCalledTimes(1);
     const entry = auditLogger.log.mock.calls[0][0];
     expect(entry.type).toBe("warn");
     expect(entry.toolCalls).toEqual([
@@ -114,5 +119,18 @@ describe("wireHookSystem permission hook policy", () => {
         state: "new",
       }),
     );
+    expect(auditLogger.appendPermissionAuditEntry.mock.calls[0][0]).toMatchObject({
+      decision: "deny",
+      tool: "hook_trust_boot",
+      source: "builtin",
+      category: "meta",
+      denyReasons: [
+        expect.objectContaining({
+          layer: 6,
+          reason: "hook.quarantined:pre-untrusted.sh:new",
+          source: "hook-trust-workflow",
+        }),
+      ],
+    });
   });
 });

@@ -20,6 +20,7 @@ import {
 import { buildSafeChildEnv } from "./safe-env.js";
 
 type PipedChild = ChildProcessByStdio<null, Readable, Readable>;
+type PowerShellParser = (command: string) => Promise<PowerShellAstSummary>;
 
 export const PowerShellToolInputSchema = z.object({
   command: z.string().min(1).describe("PowerShell command to execute"),
@@ -30,17 +31,31 @@ export const PowerShellToolInputSchema = z.object({
 const OUTPUT_CAP = 12_000;
 const TRUNCATION_MARKER = "\n...[truncated]...";
 
-const BLOCKED_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
-  { pattern: /\b(Invoke-Expression|iex)\b/i, reason: "Invoke-Expression is not allowed" },
-  { pattern: /(^|\s)-(EncodedCommand|enc)\b/i, reason: "encoded commands are not allowed" },
-  { pattern: /\bSet-ExecutionPolicy\b/i, reason: "execution policy changes are not allowed" },
-  { pattern: /\bStart-Process\b/i, reason: "process detachment is not allowed" },
-  { pattern: /\b(Read-Host|Pause)\b/i, reason: "interactive prompts are not allowed" },
-  {
-    pattern: /\bRemove-Item\b(?=[\s\S]*(^|\s)-(Recurse|r)\b)(?=[\s\S]*(^|\s)-(Force|fo)\b)/i,
-    reason: "recursive forced deletion is not allowed",
-  },
-];
+const BLOCKED_COMMANDS = new Map<string, string>([
+  ["invoke-expression", "Invoke-Expression is not allowed"],
+  ["iex", "Invoke-Expression is not allowed"],
+  ["set-executionpolicy", "execution policy changes are not allowed"],
+  ["start-process", "process detachment is not allowed"],
+  ["read-host", "interactive prompts are not allowed"],
+  ["pause", "interactive prompts are not allowed"],
+  ["set-alias", "alias mutation is not allowed"],
+  ["new-alias", "alias mutation is not allowed"],
+]);
+
+const ENCODED_COMMAND_FLAGS = new Set(["-encodedcommand", "-enc"]);
+const RECURSE_FLAGS = new Set(["-recurse", "-r"]);
+const FORCE_FLAGS = new Set(["-force", "-fo"]);
+
+export interface PowerShellAstCommand {
+  name: string | null;
+  elements: string[];
+  text: string;
+}
+
+export interface PowerShellAstSummary {
+  errors: string[];
+  commands: PowerShellAstCommand[];
+}
 
 export class PowerShellTool extends ZodTool<typeof PowerShellToolInputSchema> {
   readonly name = "powershell";
@@ -56,31 +71,58 @@ export class PowerShellTool extends ZodTool<typeof PowerShellToolInputSchema> {
     input: z.infer<typeof PowerShellToolInputSchema>,
     ctx: ToolExecutionContext,
   ): Promise<ToolResult> {
-    const preflightError = validatePowerShellCommand(input.command);
-    if (preflightError) {
-      return { output: preflightError, isError: true, metadata: { preflightDenied: true } };
-    }
-
     const resolvedCwd = input.cwd
       ? isAbsolute(input.cwd)
         ? pathResolve(input.cwd)
         : pathResolve(ctx.cwd, input.cwd)
       : ctx.cwd;
     if (input.cwd) {
-      const check = validateSandboxPath(resolvedCwd, ctx.cwd);
+      const check = validateSandboxPath(resolvedCwd, ctx.cwd, [...ctx.allowedDirectories]);
       if (!check.allowed) {
         return { output: `Sandbox: ${check.reason}`, isError: true };
       }
+    }
+
+    const preflightError = await validatePowerShellCommand(input.command);
+    if (preflightError) {
+      return { output: preflightError, isError: true, metadata: { preflightDenied: true } };
     }
 
     return spawnPowerShell(input.command, resolvedCwd, input.timeoutSeconds);
   }
 }
 
-export function validatePowerShellCommand(command: string): string | null {
-  for (const blocked of BLOCKED_PATTERNS) {
-    if (blocked.pattern.test(command)) {
-      return `PowerShell command blocked: ${blocked.reason}`;
+export async function validatePowerShellCommand(
+  command: string,
+  parser: PowerShellParser = parsePowerShellAst,
+): Promise<string | null> {
+  const ast = await parser(command);
+  const astError = validatePowerShellAst(ast);
+  return astError ? `PowerShell command blocked: ${astError}` : null;
+}
+
+export function validatePowerShellAst(ast: PowerShellAstSummary): string | null {
+  if (ast.errors.length > 0) {
+    return `parse error: ${ast.errors[0]}`;
+  }
+  for (const command of ast.commands) {
+    const name = command.name?.trim().toLowerCase() ?? "";
+    if (!name) {
+      return "dynamic command invocation is not allowed";
+    }
+    const blocked = BLOCKED_COMMANDS.get(name);
+    if (blocked) return blocked;
+
+    const elements = command.elements.map((element) => element.trim().toLowerCase());
+    if (elements.some((element) => ENCODED_COMMAND_FLAGS.has(element))) {
+      return "encoded commands are not allowed";
+    }
+    if (
+      name === "remove-item" &&
+      elements.some((element) => RECURSE_FLAGS.has(element)) &&
+      elements.some((element) => FORCE_FLAGS.has(element))
+    ) {
+      return "recursive forced deletion is not allowed";
     }
   }
   return null;
@@ -89,6 +131,87 @@ export function validatePowerShellCommand(command: string): string | null {
 function resolvePowerShellExecutable(): string {
   return process.platform === "win32" ? "powershell.exe" : "pwsh";
 }
+
+async function parsePowerShellAst(command: string): Promise<PowerShellAstSummary> {
+  return new Promise<PowerShellAstSummary>((resolve, reject) => {
+    const executable = resolvePowerShellExecutable();
+    const parser = spawn(
+      executable,
+      ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", POWER_SHELL_AST_PARSER],
+      {
+        stdio: ["pipe", "pipe", "pipe"],
+        env: buildSafeChildEnv(),
+      },
+    );
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+    parser.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
+    parser.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+    parser.on("error", (err) => {
+      const message = err && "code" in err && err.code === "ENOENT"
+        ? `PowerShell executable not found: ${executable}`
+        : `PowerShell parser failed: ${err.message}`;
+      reject(new Error(message));
+    });
+    parser.on("close", (code) => {
+      if (code !== 0) {
+        reject(new Error(`PowerShell parser exited with ${code}: ${Buffer.concat(stderr).toString("utf-8").trim()}`));
+        return;
+      }
+      try {
+        resolve(normalizePowerShellAstSummary(JSON.parse(Buffer.concat(stdout).toString("utf-8"))));
+      } catch (err) {
+        reject(new Error(`PowerShell parser returned invalid JSON: ${(err as Error).message}`));
+      }
+    });
+    parser.stdin.end(command);
+  }).catch((err) => ({
+    errors: [(err as Error).message],
+    commands: [],
+  }));
+}
+
+function normalizePowerShellAstSummary(raw: unknown): PowerShellAstSummary {
+  const obj = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
+  const errors = Array.isArray(obj.errors)
+    ? obj.errors.filter((item): item is string => typeof item === "string")
+    : [];
+  const commands = Array.isArray(obj.commands)
+    ? obj.commands.map((item) => {
+      const command = item && typeof item === "object" ? item as Record<string, unknown> : {};
+      return {
+        name: typeof command.name === "string" ? command.name : null,
+        text: typeof command.text === "string" ? command.text : "",
+        elements: Array.isArray(command.elements)
+          ? command.elements.filter((element): element is string => typeof element === "string")
+          : [],
+      };
+    })
+    : [];
+  return { errors, commands };
+}
+
+const POWER_SHELL_AST_PARSER = `
+$ErrorActionPreference = 'Stop'
+$cmd = [Console]::In.ReadToEnd()
+$tokens = $null
+$errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($cmd, [ref]$tokens, [ref]$errors)
+$commands = @(
+  $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.CommandAst] }, $true) |
+    ForEach-Object {
+      [ordered]@{
+        name = $_.GetCommandName()
+        text = $_.Extent.Text
+        elements = @($_.CommandElements | ForEach-Object { $_.Extent.Text })
+      }
+    }
+)
+[ordered]@{
+  errors = @($errors | ForEach-Object { $_.Message })
+  commands = $commands
+} | ConvertTo-Json -Depth 8 -Compress
+`;
 
 async function spawnPowerShell(
   command: string,

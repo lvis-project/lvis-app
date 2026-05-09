@@ -6,8 +6,15 @@
 import "../../../../test/renderer/setup.js";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, fireEvent } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { ToolGroupCard } from "../components/ToolGroupCard.js";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
+
+vi.mock("../../../components/ui/scroll-area.js", () => ({
+  ScrollArea: ({ children, className }: { children: ReactNode; className?: string }) => (
+    <div className={className}>{children}</div>
+  ),
+}));
 
 type ToolGroupEntry = Extract<ChatEntry, { kind: "tool_group" }>;
 
@@ -56,7 +63,7 @@ describe("ToolGroupCard", () => {
   it("single tool: renders tool name inline without group header", () => {
     const { container } = render(<ToolGroupCard group={makeGroup({ status: "done" })} />);
     expect(container.textContent).not.toContain("도구 사용 결과");
-    expect(container.textContent).toContain("read file"); // unmapped name: underscores → spaces fallback
+    expect(container.textContent).toContain("파일 읽기");
     expect(container.textContent).not.toContain("file content");
   });
 
@@ -65,7 +72,7 @@ describe("ToolGroupCard", () => {
       <ToolGroupCard group={makeGroup({ status: "running", tools: [{ toolUseId: "tu-1", name: "read_file", input: {}, status: "running", displayOrder: 0 }] })} />,
     );
     expect(container.textContent).not.toContain("도구 사용 중");
-    expect(container.textContent).toContain("read file"); // unmapped name: underscores → spaces fallback
+    expect(container.textContent).toContain("파일 읽기");
   });
 
   it("single tool running: keeps input collapsed by default", () => {
@@ -73,7 +80,7 @@ describe("ToolGroupCard", () => {
       <ToolGroupCard group={makeGroup({ status: "running", tools: [{ toolUseId: "tu-1", name: "read_file", input: { path: "/tmp/live.txt" }, status: "running", displayOrder: 0 }] })} />,
     );
 
-    expect(container.textContent).toContain("read file");
+    expect(container.textContent).toContain("파일 읽기");
     expect(container.textContent).not.toContain("/tmp/live.txt");
 
     fireEvent.click(container.querySelector("button") as HTMLButtonElement);
@@ -93,7 +100,7 @@ describe("ToolGroupCard", () => {
 
     rerender(<ToolGroupCard group={done} />);
 
-    expect(container.textContent).toContain("read file");
+    expect(container.textContent).toContain("파일 읽기");
     expect(container.textContent).not.toContain("live result");
   });
 
@@ -365,4 +372,3 @@ describe("ToolGroupCard", () => {
 afterEach(() => {
   vi.unstubAllGlobals();
 });
-
