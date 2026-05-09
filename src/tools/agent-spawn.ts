@@ -45,7 +45,8 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
       "결과로 요약 텍스트 + tool call 수 반환. " +
       "특정 tool/plugin 을 직접 호출하라는 요청의 대체 경로로 사용하지 마세요. Agent Hub work board 조회는 agent_hub_* 도구를 직접 호출하세요.",
     source: "builtin",
-    category: "dangerous",
+    category: "meta",
+    decisionOverride: "ask",
     jsonSchema: {
       type: "object",
       required: ["title", "instructions"],

@@ -77,7 +77,13 @@ function resolveInvocationCategory(
   tool: import("./base.js").Tool,
   finalInput: Record<string, unknown>,
 ): ToolCategory {
-  if (tool.category === "dangerous") return "dangerous";
+  // Q12 5-axis: meta / shell / network are first-class manifest categories
+  // and bypass the read/write input-aware probe. Only `write` (the default)
+  // and `read` are derived from the tool's runtime self-classification.
+  if (tool.category === "meta") return "meta";
+  if (tool.category === "shell") return "shell";
+  if (tool.category === "network") return "network";
+
   // Trust boundary: plugin tools must NOT decide their own policy axis at
   // invocation time. The plugin's `isReadOnly()` runs plugin-controlled code
   // and could falsely classify a write operation as read to bypass approval.
@@ -176,6 +182,33 @@ export interface ToolExecutorCallbacks {
 export interface ToolPermissionContext {
   headless?: boolean;
   allowedPluginIds?: ReadonlySet<string>;
+}
+
+/**
+ * Q12 Phase 2 — bundled execution options for {@link ToolExecutor.executeAll}
+ * and {@link ToolExecutor.executeOne}. Replaces the legacy 9-positional-arg
+ * shape so adding a new pipeline-wide concern (per-turn telemetry, audit
+ * correlation id, …) doesn't ripple through every callsite. All fields
+ * are optional; an empty object is the canonical "default everything"
+ * invocation.
+ */
+export interface ExecuteOptions {
+  callbacks?: ToolExecutorCallbacks;
+  sessionId?: string;
+  /**
+   * Brain proactive origin tag (e.g. `"proactive:meeting-detection"`).
+   * When set, write/shell/network tools force ApprovalGate `ask` and
+   * bypass the user's `allow-always` cache.
+   */
+  proactiveOrigin?: string | null;
+  /**
+   * Sub-agent recursion depth — `agent_spawn` refuses when ≥1 so a
+   * sub-agent cannot itself spawn (defense-in-depth on top of the
+   * SubAgentRunner registry strip).
+   */
+  spawnDepth?: number;
+  abortSignal?: AbortSignal;
+  permissionContext?: ToolPermissionContext;
 }
 
 function maskDisplayValue(value: unknown): unknown {
@@ -290,40 +323,28 @@ export class ToolExecutor {
   /** 복수 tool_use 병렬 실행 — 최대 5개씩 배치 처리.
    *
    * `proactiveOrigin` (예: `"proactive:meeting-detection"`) 가 set 이면
-   * 모든 write/dangerous 호출이 사용자 영구 승인을 우회해 ask 로 강제됨
+   * 모든 write/shell/network 호출이 사용자 영구 승인을 우회해 ask 로 강제됨
    * (PermissionManager.checkDetailed 의 새 가드). Brain 트리거가 자동
    * 실행되는 destructive 작업 차단막.
+   *
+   * Q12 Phase 2: {@link ExecuteOptions} bundle replaces the legacy 7
+   * positional args so adding a new pipeline concern doesn't ripple
+   * through every callsite.
    */
   async executeAll(
     toolUses: ToolUseBlock[],
-    callbacks?: ToolExecutorCallbacks,
-    sessionId?: string,
-    proactiveOrigin?: string | null,
-    /**
-     * C3(b): forwarded into each executeOne's ToolExecutionContext.metadata
-     * so the `agent_spawn` tool can detect it is being invoked from inside
-     * an already-spawned sub-agent and refuse to recurse.
-     */
-    spawnDepth?: number,
-    /**
-     * Per-turn abort signal. Threaded into each tool's ToolExecutionContext
-     * so long-blocking tools (e.g. `ask_user_question`) can honor the user's
-     * "중단" button. Without this the turn stays stuck on a pending tool
-     * even though the streaming side has already been aborted.
-     */
-    abortSignal?: AbortSignal,
-    permissionContext?: ToolPermissionContext,
+    opts: ExecuteOptions = {},
   ): Promise<ToolResult[]> {
     const groupId = randomUUID();
     const BATCH_SIZE = 5;
     if (toolUses.length <= BATCH_SIZE) {
-      return Promise.all(toolUses.map((tu, idx) => this.executeOne(tu, groupId, idx, callbacks, sessionId, proactiveOrigin, spawnDepth, abortSignal, permissionContext)));
+      return Promise.all(toolUses.map((tu, idx) => this.executeOne(tu, groupId, idx, opts)));
     }
 
     const results: ToolResult[] = [];
     for (let i = 0; i < toolUses.length; i += BATCH_SIZE) {
       const batch = toolUses.slice(i, i + BATCH_SIZE);
-      const batchResults = await Promise.all(batch.map((tu, batchIdx) => this.executeOne(tu, groupId, i + batchIdx, callbacks, sessionId, proactiveOrigin, spawnDepth, abortSignal, permissionContext)));
+      const batchResults = await Promise.all(batch.map((tu, batchIdx) => this.executeOne(tu, groupId, i + batchIdx, opts)));
       results.push(...batchResults);
     }
     return results;
@@ -334,13 +355,16 @@ export class ToolExecutor {
     toolUse: ToolUseBlock,
     groupId: string,
     displayOrder: number,
-    callbacks?: ToolExecutorCallbacks,
-    sessionId?: string,
-    proactiveOrigin?: string | null,
-    spawnDepth?: number,
-    abortSignal?: AbortSignal,
-    permissionContext?: ToolPermissionContext,
+    opts: ExecuteOptions = {},
   ): Promise<ToolResult> {
+    const {
+      callbacks,
+      sessionId,
+      proactiveOrigin,
+      spawnDepth,
+      abortSignal,
+      permissionContext,
+    } = opts;
     const startTime = Date.now();
     const meta: ToolCallMeta = { groupId, toolUseId: toolUse.id, displayOrder };
     let permissionResult: PermissionCheckResult | undefined;
@@ -436,22 +460,34 @@ export class ToolExecutor {
 
     // ── Step 3: Permission (source-aware) ───────────
     //
-    // C1 fix: `ask_user_question` is itself the "ask the user" intent — the
-    // tool fires its own AskUserQuestionCard on the renderer. If we route
-    // it through ApprovalGate as well, the user sees TWO modals back-to-
-    // back ("approve this tool?" then the actual question). Short-circuit
-    // permission for this single tool BEFORE PermissionManager runs so the
-    // approval modal never gets requested. Allowed because:
-    //   1. The tool only emits a renderer card and awaits user input — it
-    //      never mutates state on its own.
-    //   2. The user is always the explicit decision-maker for the tool's
-    //      effect (the question itself), so a separate "may I ask?" modal
-    //      is redundant.
-    //   3. The tool's permission category="dangerous" still applies to the
-    //      audit log (Step 8) so we keep visibility into its calls.
-    const isAskUserQuestionShortCircuit =
-      toolUse.name === "ask_user_question" && source === "builtin";
-    if (this.permissionManager && !isAskUserQuestionShortCircuit) {
+    // Q12 Layer 3 — `meta` category tools take an explicit decisionOverride
+    // path instead of running the standard matrix:
+    //
+    //   `always-allow-with-audit` (e.g. ask_user_question)
+    //     The tool IS the "ask the user" intent — it fires its own
+    //     AskUserQuestionCard. Running it through ApprovalGate would show
+    //     the user two modals back-to-back ("approve this tool?" then the
+    //     actual question). Short-circuit BEFORE PermissionManager runs.
+    //     The tool only emits a renderer card and awaits user input — it
+    //     never mutates state on its own; the user is always the explicit
+    //     decision-maker for the effect. Audit (Step 8) still records.
+    //
+    //   `ask` (e.g. agent_spawn)
+    //     Category is `meta` (control-flow primitive, not a write), but
+    //     the action is sensitive enough to warrant an approval modal.
+    //     We fall through to the standard ask path below — the override
+    //     just signals "skip auto-allow lanes".
+    //
+    // Trust boundary: only honor decisionOverride for builtin tools. A
+    // plugin or MCP tool that happens to declare `meta` does not get
+    // host-level override authority — it must satisfy the normal Layer 3
+    // matrix (which for `meta` category falls through to the regular
+    // descriptor flow via the registry).
+    const metaOverride = source === "builtin" && tool.category === "meta"
+      ? tool.decisionOverride
+      : undefined;
+    const isAlwaysAllowMeta = metaOverride === "always-allow-with-audit";
+    if (this.permissionManager && !isAlwaysAllowMeta) {
       permissionResult = this.permissionManager.checkDetailed(
         toolUse.name,
         source,
@@ -459,6 +495,18 @@ export class ToolExecutor {
         proactiveOrigin,
         permissionContext,
       );
+      // Q12 — meta tools with decisionOverride="ask" force the approval
+      // modal regardless of the registry descriptor's "override" lane.
+      // The override means "skip auto-allow lanes"; the registry already
+      // returns "allow" for `meta` (override sentinel) so we must elevate
+      // to ask here when the tool author marked it sensitive.
+      if (metaOverride === "ask" && permissionResult.decision === "allow") {
+        permissionResult = {
+          decision: "ask",
+          reason: `meta tool decisionOverride='ask' — 사용자 컨펌 필요`,
+          layer: 6,
+        };
+      }
       if (permissionResult.decision === "deny") {
         const msg = `[권한 차단] 도구 '${toolUse.name}' (${source}, trust:${trust}) — ${permissionResult.reason}`;
         const durationMs = Date.now() - startTime;

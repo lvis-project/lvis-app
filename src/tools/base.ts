@@ -19,6 +19,7 @@ import { z } from "zod";
 import type {
   ToolSource,
   ToolCategory,
+  ToolDecisionOverride,
   ToolExecutionContext,
   ToolResult,
 } from "./types.js";
@@ -28,6 +29,7 @@ import type {
 export type {
   ToolSource,
   ToolCategory,
+  ToolDecisionOverride,
   ToolExecutionContext,
   ToolResult,
 } from "./types.js";
@@ -47,6 +49,12 @@ export interface Tool {
   readonly description: string;
   readonly source: ToolSource;
   readonly category?: ToolCategory;
+  /**
+   * Q12 — declared only on `category === "meta"` tools. Tells the executor
+   * to take the explicit short-circuit path rather than the standard Layer 3
+   * decision matrix. See {@link ToolDecisionOverride} for semantics.
+   */
+  readonly decisionOverride?: ToolDecisionOverride;
   readonly pluginId?: string;
   readonly mcpServerId?: string;
   /**
@@ -101,6 +109,7 @@ export abstract class ZodTool<TSchema extends z.ZodTypeAny = z.ZodTypeAny>
 
   readonly source: ToolSource = "builtin";
   readonly category?: ToolCategory;
+  readonly decisionOverride?: ToolDecisionOverride;
   readonly pluginId?: string;
   readonly mcpServerId?: string;
   /** §6.4 — default version for hand-written builtins. Override via `override readonly version = "2.0.0"`. */
@@ -147,6 +156,7 @@ export interface DynamicToolSpec {
   description: string;
   source: ToolSource;
   category?: ToolCategory;
+  decisionOverride?: ToolDecisionOverride;
   pluginId?: string;
   mcpServerId?: string;
   /** §6.4 — semver. Defaults to "1.0.0" when omitted. */
@@ -177,6 +187,7 @@ export function createDynamicTool(spec: DynamicToolSpec): Tool {
     description: spec.description,
     source: spec.source,
     category: spec.category,
+    decisionOverride: spec.decisionOverride,
     pluginId: spec.pluginId,
     mcpServerId: spec.mcpServerId,
     version: spec.version ?? "1.0.0",

@@ -16,10 +16,11 @@
  */
 import { homedir } from "node:os";
 import { resolve } from "node:path";
-import type { DenyRule, ToolSource, TrustLevel } from "../tools/types.js";
+import type { DenyRule, ToolCategory, ToolSource, TrustLevel } from "../tools/types.js";
 import { trustFromSource } from "../tools/types.js";
 import { readPermissionsFile, updatePermissionsFile } from "./permissions-store.js";
 import { isProactiveOrigin } from "../shared/proactive-source.js";
+import { getToolCategoryDescriptor } from "./category-registry.js";
 
 export type PermissionDecision = "allow" | "deny" | "ask";
 export type ExecutionMode = "default" | "strict" | "auto";
@@ -212,16 +213,20 @@ export class PermissionManager {
    * 상세 판정 — 감사 로그용 사유 포함.
    *
    * `proactiveOrigin` (예: `"proactive:meeting-detection"`) 가 set 이면
-   * 모든 write/dangerous 도구는 **사용자 영구 승인 (`allow-always`) /
+   * 모든 write/shell/network 도구는 **사용자 영구 승인 (`allow-always`) /
    * config allow rules / auto 모드** 와 무관하게 `ask` 로 강제됨.
    * Brain 트리거가 사용자 컨펌 없이 destructive 작업 자동 실행되는 것을
    * 막는 차단막 — `<proactive-origin-guidance>` 시스템 프롬프트의 1차
    * LLM-side 검토와 짝을 이루는 hard-gate. read 도구는 영향 없음.
+   *
+   * Q12 — 5-axis category model. Layer 3 의 decisionFor() 가 trust-based
+   * fallback 을 대체. `meta` category 는 descriptor 가 `"override"` 를
+   * 반환하므로 caller (executor) 의 decisionOverride 분기로 routing.
    */
   checkDetailed(
     toolName: string,
     source?: ToolSource,
-    category?: "read" | "write" | "dangerous",
+    category?: ToolCategory,
     proactiveOrigin?: string | null,
     context: PermissionCheckContext = {},
   ): PermissionCheckResult {
@@ -232,8 +237,11 @@ export class PermissionManager {
     // upstream gate emits but a future hand-injected codepath might;
     // fail-closed on malformed input.
     const isProactive = isProactiveOrigin(proactiveOrigin ?? null);
-    const resolvedCategory = category ?? classifyToolCategory(toolName);
-    const isWrite = resolvedCategory === "write" || resolvedCategory === "dangerous";
+    const resolvedCategory: ToolCategory = category ?? classifyToolCategory(toolName);
+    const isMutating =
+      resolvedCategory === "write" ||
+      resolvedCategory === "shell" ||
+      resolvedCategory === "network";
 
     // 1. Deny rules (최우선, 불변)
     for (const rule of this.rules) {
@@ -249,7 +257,7 @@ export class PermissionManager {
       return { decision: "ask", reason: "MCP 서버 strict 모드", layer: 2 };
     }
 
-    if (context.headless && isWrite) {
+    if (context.headless && isMutating) {
       return {
         decision: "ask",
         reason: "headless 실행 컨텍스트 — 쓰기 도구는 사용자 컨펌 필수",
@@ -257,10 +265,10 @@ export class PermissionManager {
       };
     }
 
-    // Proactive origin override — write/dangerous 도구는 cached
+    // Proactive origin override — write/shell/network 도구는 cached
     // allow rules / always-allowed / auto-mode 를 모두 우회하고
     // 항상 사용자 컨펌을 받음. read 는 자동 실행 OK.
-    if (isProactive && isWrite) {
+    if (isProactive && isMutating) {
       return {
         decision: "ask",
         reason: `proactive 출처 (${proactiveOrigin}) — 쓰기 도구는 사용자 컨펌 필수`,
@@ -286,8 +294,8 @@ export class PermissionManager {
       return { decision: "allow", reason: "사용자 영구 승인", layer: 5 };
     }
 
-    // 6. Trust-based 기본 정책 (§4.1)
-    return this.trustBasedDecision(toolName, trust, category);
+    // 6. Layer 3 — Category × Source × Trust via registry descriptor
+    return this.categoryBasedDecision(toolName, trust, resolvedCategory, context);
   }
 
   // ─── Private ─────────────────────────────────────
@@ -301,52 +309,91 @@ export class PermissionManager {
   }
 
   /**
-   * Trust 기반 판정 (tool-governance.md §4.1):
+   * Q12 Layer 3 — Category × Source × Mode via registry descriptor.
    *
-   * HIGH  + read  → ALLOW
-   * HIGH  + write → ASK (default mode) / ALLOW (auto mode)
-   * MEDIUM + read → ALLOW
-   * MEDIUM + write → ASK (default mode)
-   * LOW   + any   → ASK (strict 강제)
+   * The descriptor's `decisionFor()` returns one of:
+   *   - "allow"    → permitted (with audit)
+   *   - "ask"      → ApprovalGate round-trip
+   *   - "deny"     → refused (used by future restricted categories)
+   *   - "reviewer" → defer to Phase 3 reviewer agent (headless lane)
+   *   - "override" → meta category — caller reads tool.decisionOverride
+   *
+   * The Phase 3 reviewer is not yet wired; until it lands, "reviewer"
+   * is mapped to "ask" so the user is prompted instead of silently
+   * permitting a headless write — fail-safe per design §1 principles.
+   *
+   * MCP (trust: low) tools are always asked regardless of category —
+   * the trust axis still beats the registry decision because MCP has
+   * no manifest integrity proxy yet (Phase 4).
    */
-  private trustBasedDecision(
+  private categoryBasedDecision(
     toolName: string,
     trust: TrustLevel,
-    category?: "read" | "write" | "dangerous",
+    category: ToolCategory,
+    context: PermissionCheckContext,
   ): PermissionCheckResult {
-    // auto 모드: HIGH/MEDIUM 허용, LOW(MCP)는 여전히 ask 강제 (H1 fix)
-    if (this.mode === "auto") {
-      if (trust === "low") {
-        return { decision: "ask", reason: "MCP 도구는 auto 모드에서도 승인 필요 (trust: low)", layer: 6 };
-      }
-      return { decision: "allow", reason: `auto 모드 (trust: ${trust})`, layer: 6 };
-    }
-
-    // strict 모드: 모든 것 ask
+    // strict 모드: 모든 것 ask (read 포함)
     if (this.mode === "strict") {
-      return { decision: "ask", reason: `strict 모드 (trust: ${trust})`, layer: 6 };
+      return {
+        decision: "ask",
+        reason: `strict 모드 (trust: ${trust}, category: ${category})`,
+        layer: 6,
+      };
     }
 
-    // default 모드: trust + category 기반
-    const resolvedCategory = category ?? classifyToolCategory(toolName);
-
-    // LOW trust (MCP): 항상 ask
+    // LOW trust (MCP): 항상 ask — manifest integrity guard 가 없는 동안 trust override
     if (trust === "low") {
-      return { decision: "ask", reason: `MCP 도구 strict 강제 (trust: low)`, layer: 6 };
+      return {
+        decision: "ask",
+        reason: `MCP 도구 strict 강제 (trust: low, category: ${category})`,
+        layer: 6,
+      };
     }
 
-    // dangerous: 항상 ask
-    if (resolvedCategory === "dangerous") {
-      return { decision: "ask", reason: `위험 도구 (category: dangerous)`, layer: 6 };
-    }
+    const descriptor = getToolCategoryDescriptor(category);
+    const decision = descriptor.decisionFor({
+      mode: this.mode,
+      source: trust === "high" ? "builtin" : "plugin",
+      headless: context.headless === true,
+    });
 
-    // read: 허용
-    if (resolvedCategory === "read") {
-      return { decision: "allow", reason: `조회 도구 (trust: ${trust}, category: read)`, layer: 6 };
+    switch (decision) {
+      case "allow":
+        return {
+          decision: "allow",
+          reason: `${this.mode} 모드 (category: ${category}, trust: ${trust})`,
+          layer: 6,
+        };
+      case "deny":
+        return {
+          decision: "deny",
+          reason: `정책 거부 (category: ${category})`,
+          layer: 6,
+        };
+      case "reviewer":
+        // Phase 3 reviewer not yet wired — until then, surface to user.
+        // This is the documented temporary mapping per design §1
+        // ("Fail-safe defaults"); the reviewer agent ships in Phase 3.
+        return {
+          decision: "ask",
+          reason: `headless ${category} — reviewer agent 미배치, 사용자 컨펌`,
+          layer: 6,
+        };
+      case "override":
+        // meta category — executor handles via tool.decisionOverride
+        return {
+          decision: "allow",
+          reason: `meta tool (category: ${category}) — decisionOverride 적용`,
+          layer: 6,
+        };
+      case "ask":
+      default:
+        return {
+          decision: "ask",
+          reason: `사용자 컨펌 필요 (category: ${category}, trust: ${trust})`,
+          layer: 6,
+        };
     }
-
-    // write (MEDIUM/HIGH): ask
-    return { decision: "ask", reason: `상태 변경 도구 (trust: ${trust}, category: write)`, layer: 6 };
   }
 }
 
@@ -359,8 +406,13 @@ function matchGlob(pattern: string, name: string): boolean {
   return regex.test(name);
 }
 
-/** 도구 이름에서 Read/Write 분류 추론 */
-function classifyToolCategory(toolName: string): "read" | "write" | "dangerous" {
+/**
+ * Last-resort heuristic when a caller fails to thread the static manifest
+ * category through. Production paths supply the manifest category
+ * directly; this only fires for legacy or test-only paths that drop the
+ * argument. Returns a 5-axis category — `dangerous` is gone.
+ */
+function classifyToolCategory(toolName: string): ToolCategory {
   const readPatterns = [
     /_(search|list|get|query|status|transcript|sessions|documents|preview|fetch)$/,
     /^web_search$/,
