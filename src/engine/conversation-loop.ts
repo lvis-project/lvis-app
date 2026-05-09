@@ -1797,7 +1797,10 @@ export class ConversationLoop {
     if (result.verb === "accept") {
       return `Hook 신뢰 등록됨: ${result.accepted.fileName}\ntrusted=${result.trusted.length}`;
     }
-    return `Hook 비활성화됨: ${result.disabled.fileName}\ntrusted=${result.trusted.length}`;
+    if (result.verb === "disable") {
+      return `Hook 비활성화됨: ${result.disabled.fileName}\ntrusted=${result.trusted.length}`;
+    }
+    return `Hook 영구 거부됨: ${result.rejected.fileName}\ntrusted=${result.trusted.length}`;
   }
 
   // PR-2-F-2: 3-tier rotation 폐지 — Layer 0/2/3 가 same-session checkpoint chain
