@@ -68,13 +68,22 @@ function isValidRecord(r: unknown): r is RoutineRecord {
 /**
  * Q12 Layer 4 — convert a legacy on-disk `allowedPlugins` (or absence)
  * into the canonical `scope` shape. Migration rules per design §3.4:
- *   - missing field          → `{ mode: "inherit" }`
+ *   - missing field          → `{ mode: "deny-all" }` (fail-safe)
  *   - empty array `[]`       → `{ mode: "deny-all" }`
- *   - non-empty array        → `{ mode: "allow", ids: [...] }`
+ *   - non-empty array of strings → `{ mode: "allow", ids: [...] }`
+ *   - tampered / non-string  → `{ mode: "deny-all" }` + warn
+ *
  * The mutation is idempotent: a record that already has `scope` is
  * returned untouched (and the legacy field, if also present, ignored).
+ *
+ * Round 3 hardening: explicit `Array.isArray` + every-string check
+ * before length/spread — a corrupt record with `allowedPlugins: "foo"`
+ * (string, not array) or `[1, 2]` (numbers) was previously passing
+ * `isValidRecord()` (which only validates structural fields) and
+ * crashing the migration with a runtime error. Now we coerce any
+ * shape we don't recognize to deny-all (fail-safe per spec §1).
  */
-function migrateLegacyAllowedPlugins(rec: RoutineRecord & { allowedPlugins?: string[] }): RoutineRecord {
+function migrateLegacyAllowedPlugins(rec: RoutineRecord & { allowedPlugins?: unknown }): RoutineRecord {
   if (rec.scope) {
     // Already the new shape — drop any stale legacy mirror.
     if ("allowedPlugins" in rec) {
@@ -87,11 +96,22 @@ function migrateLegacyAllowedPlugins(rec: RoutineRecord & { allowedPlugins?: str
   const legacy = rec.allowedPlugins;
   let pluginIds: RoutineScope["pluginIds"];
   if (legacy === undefined) {
-    pluginIds = { mode: "inherit" };
-  } else if (legacy.length === 0) {
+    // Q12 §3 fail-safe: missing scope → deny-all rather than inherit
+    // (parity with normalizeScope at runtime; covers boot-time race
+    // where active plugin set isn't computable yet).
     pluginIds = { mode: "deny-all" };
+  } else if (Array.isArray(legacy) && legacy.every((x): x is string => typeof x === "string")) {
+    pluginIds =
+      legacy.length === 0
+        ? { mode: "deny-all" }
+        : { mode: "allow", ids: [...legacy] };
   } else {
-    pluginIds = { mode: "allow", ids: [...legacy] };
+    // Tampered or corrupt — fail-safe to deny-all and warn.
+    log.warn(
+      "[routines-store] legacy allowedPlugins has invalid shape (id=%s); coercing to deny-all",
+      rec.id,
+    );
+    pluginIds = { mode: "deny-all" };
   }
   const migrated: RoutineRecord = {
     ...rec,
