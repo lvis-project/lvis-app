@@ -20,8 +20,6 @@ import { registerStandardCategories } from "../permissions/category-registry.js"
 import { ConversationLoop } from "../engine/conversation-loop.js";
 import { PostTurnHookChain } from "../hooks/post-turn-hook-chain.js";
 import { HookRunner } from "../hooks/hook-runner.js";
-import { loadHooksConfig } from "../hooks/config-loader.js";
-import { ExternalHookExecutor } from "../hooks/external-executor.js";
 import { AuditLogger } from "../audit/audit-logger.js";
 import type { NotificationService } from "../main/notification-service.js";
 import type { SessionTodoStore } from "../main/session-todo-store.js";
@@ -119,29 +117,11 @@ export async function createApprovalGate(
 }
 
 export function createHookRunner(): HookRunner {
-  // Tier A4 (W3): load hooks config from admin-dir + ~/.lvis/hooks.json and
-  // attach an ExternalHookExecutor to the HookRunner so every preToolUse /
-  // postToolUse event routes through it. Host owns the runner lifecycle so
-  // external hooks fire inside the ToolExecutor's 8-step pipeline.
-  const hookRunner = new HookRunner();
-  try {
-    const hooksConfig = loadHooksConfig();
-    const externalHookExecutor = new ExternalHookExecutor(hooksConfig, process.cwd());
-    hookRunner.setExternalExecutor(externalHookExecutor);
-    const preCount = hooksConfig.preToolUse.length;
-    const postCount = hooksConfig.postToolUse.length;
-    log.info(
-      "boot: external hook executor attached (pre=%d, post=%d)",
-      preCount,
-      postCount,
-    );
-  } catch (err) {
-    log.warn(
-      "boot: external hook executor setup failed (non-fatal): %s",
-      (err as Error).message,
-    );
-  }
-  return hookRunner;
+  // Q12 single hook path: production script hooks are discovered by
+  // wireHookSystem() from discrete pre/post/perm-*.sh files under
+  // ~/.config/lvis/hooks/. Legacy hooks.json command/http loading is not
+  // wired at boot because it bypasses the strict quarantine/accept flow.
+  return new HookRunner();
 }
 
 export interface ConversationDeps {
@@ -158,7 +138,10 @@ export interface ConversationDeps {
   bashAstValidator: BashAstValidator;
   approvalGate: ApprovalGate;
   hookRunner: HookRunner;
+  scriptHookManager?: import("../hooks/script-hook-manager.js").ScriptHookManager;
   pluginRuntime: PluginRuntime;
+  additionalDirectories?: readonly string[];
+  getAdditionalDirectories?: () => readonly string[];
   /** C2(c): per-session SkillOverlay handle, cleared on newConversation(). */
   skillOverlay?: { clear(sessionId: string): void };
   /** Session-scoped assistant TO-DO lifecycle. */
@@ -191,6 +174,7 @@ export type RoutineConversationLoopDeps = Pick<
   | "permissionManager"
   | "approvalGate"
   | "hookRunner"
+  | "scriptHookManager"
   | "bashAstValidator"
   | "pluginRuntime"
 >;
@@ -237,10 +221,12 @@ export function createRoutineConversationLoop(
     permissionManager: deps.permissionManager,
     approvalGate: deps.approvalGate,
     hookRunner: deps.hookRunner,
+    scriptHookManager: deps.scriptHookManager,
     bashAstValidator: deps.bashAstValidator,
     pluginRuntime: deps.pluginRuntime,
     allowedPluginIds,
     forcedActivePluginIds,
+    additionalDirectories: scope?.directories ?? [],
     headless: true,
     disableSessionPersistence: true,
     // postTurnHookChain / idleScheduler intentionally omitted — routine loops
@@ -279,6 +265,7 @@ export type TriggerConversationLoopDeps = Pick<
   | "memoryManager"
   | "permissionManager"
   | "approvalGate"
+  | "scriptHookManager"
   | "bashAstValidator"
   | "pluginRuntime"
 >;
@@ -295,6 +282,7 @@ export function createTriggerConversationLoop(
     memoryManager: deps.memoryManager,
     permissionManager: deps.permissionManager,
     approvalGate: deps.approvalGate,
+    scriptHookManager: deps.scriptHookManager,
     bashAstValidator: deps.bashAstValidator,
     pluginRuntime: deps.pluginRuntime,
     // postTurnHookChain / hookRunner / idleScheduler intentionally omitted.
@@ -317,6 +305,9 @@ export function createConversationLoop(deps: ConversationDeps): ConversationLoop
     bashAstValidator: deps.bashAstValidator,
     approvalGate: deps.approvalGate,
     hookRunner: deps.hookRunner,
+    scriptHookManager: deps.scriptHookManager,
+    additionalDirectories: deps.additionalDirectories,
+    getAdditionalDirectories: deps.getAdditionalDirectories,
     // Phase 1.5 Option C — request_plugin 메타 툴 pluginId 검증용.
     pluginRuntime: deps.pluginRuntime,
     skillOverlay: deps.skillOverlay,

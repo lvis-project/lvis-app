@@ -144,6 +144,22 @@ export interface AuditDeferred extends AuditCommon {
 }
 
 /**
+ * Foreground user resolution for a previously deferred HIGH-risk action.
+ * The queue file stores the mutable entry status; this append-only audit row
+ * preserves the user's approval/rejection action in the tamper-evident chain.
+ */
+export interface AuditDeferredResolve extends AuditCommon {
+  decision: "deferred_resolve";
+  tool: string;
+  source: ToolSource;
+  category: ToolCategory;
+  reviewerVerdict: RiskVerdict;
+  queueId: string;
+  resolution: "approved" | "rejected";
+  reason?: string;
+}
+
+/**
  * Layer 8 `/permission mode ...` slash invocation. Spec §3 Layer 8
  * mandates `trustOrigin === "user-keyboard"` — but we record the
  * origin here so forensics can spot a slash dispatcher bug if a
@@ -174,8 +190,15 @@ export type Q12AuditEntry =
   | AuditAsk
   | AuditDeny
   | AuditDeferred
+  | AuditDeferredResolve
   | AuditModeChange
   | AuditManifestViolation;
+
+export type Q12AuditEntryInput = Q12AuditEntry extends infer Entry
+  ? Entry extends Q12AuditEntry
+    ? Omit<Entry, "prevHash">
+    : never
+  : never;
 
 /**
  * Type guard — distinguishes Q12 entries from legacy

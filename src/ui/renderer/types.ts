@@ -570,6 +570,14 @@ export type LvisPermissionApi = {
   >;
   /** Q12 P3 — subscribe to foreground-entry deferred-pending events. */
   onDeferredPending: (cb: (summary: { pending: number }) => void) => () => void;
+  /** Q12 P4 — subscribe to manifest-integrity violation notifications. */
+  onManifestViolation: (
+    handler: (payload: {
+      pluginId: string;
+      toolName: string;
+      attempted: string;
+    }) => void,
+  ) => () => void;
   /** Q12 P3 — `/permission reviewer ...` slash dispatch. */
   reviewerDispatch: (
     rawArgs: string,

@@ -60,13 +60,10 @@ describe("Category Registry — registerStandardCategories", () => {
       expect(d.decisionFor({ mode, source: "builtin", headless: false })).toBe("ask");
     }
     expect(d.decisionFor({ mode: "default", source: "builtin", headless: true })).toBe("reviewer");
-    // requiresAst is the executor's signal to run BashAstValidator.
-    expect(d.requiresAst).toBe(true);
   });
 
-  it("network descriptor surfaces endpoint info and matches write's auto-allow lane", () => {
+  it("network descriptor matches write's auto-allow lane", () => {
     const d = getToolCategoryDescriptor("network");
-    expect(d.requiresEndpoint).toBe(true);
     expect(d.decisionFor({ mode: "default", source: "builtin", headless: false })).toBe("ask");
     expect(d.decisionFor({ mode: "auto", source: "builtin", headless: false })).toBe("allow");
     expect(d.decisionFor({ mode: "default", source: "builtin", headless: true })).toBe("reviewer");

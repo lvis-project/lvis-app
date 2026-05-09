@@ -156,10 +156,24 @@ describe("stripLeadingSlash", () => {
   it("strips a single leading slash", () => {
     expect(stripLeadingSlash("/permission auto")).toBe("permission auto");
   });
+  it("preserves leading whitespace while stripping command slash", () => {
+    expect(stripLeadingSlash("   /compact")).toBe("   compact");
+  });
+  it("strips every consecutive leading slash after whitespace", () => {
+    expect(stripLeadingSlash("   //permission hooks accept pre-x.sh")).toBe(
+      "   permission hooks accept pre-x.sh",
+    );
+  });
+  it("strips slash chains separated by whitespace until trimmed text is non-command", () => {
+    expect(stripLeadingSlash("/ /permission hooks accept pre-x.sh")).toBe(
+      "permission hooks accept pre-x.sh",
+    );
+    expect(stripLeadingSlash("   /   /compact")).toBe("   compact");
+  });
   it("does not affect non-slash input", () => {
     expect(stripLeadingSlash("hello")).toBe("hello");
   });
-  it("only strips the FIRST slash", () => {
+  it("strips leading slash from path-like non-user-origin text", () => {
     expect(stripLeadingSlash("/path/to/x")).toBe("path/to/x");
   });
 });
@@ -248,12 +262,12 @@ describe("dispatchPermissionSlash — subcommand routing", () => {
     expect(result).toMatchObject({ kind: "mode", needsModal: false });
   });
 
-  it("routes 'hooks accept foo.sh' with needsModal=true (mutating)", () => {
+  it("routes 'hooks accept foo.sh' with needsModal=false (typed TOFU approval)", () => {
     const result = dispatchPermissionSlash(
       "/permission hooks accept pre-foo.sh",
       "user-keyboard",
     );
-    expect(result).toMatchObject({ kind: "hooks", needsModal: true });
+    expect(result).toMatchObject({ kind: "hooks", needsModal: false });
   });
 
   it("routes 'hooks list' with needsModal=false", () => {

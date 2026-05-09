@@ -1,5 +1,5 @@
 /**
- * Q12 P4 Area B — TOFU prompt orchestrator tests.
+ * Q12 P4 Area B — TOFU workflow orchestrator tests.
  *
  * Spec ref: docs/architecture/q12-permission-policy-design.md §3 Layer 6.
  */

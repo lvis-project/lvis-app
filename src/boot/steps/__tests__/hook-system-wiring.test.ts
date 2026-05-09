@@ -76,7 +76,7 @@ describe("Q12 P4 wireHookSystem", () => {
     expect(disabledFiles).toContain("post-bad.sh");
   });
 
-  it("strict-deny when neither dispatcher nor renderer awaiter is provided", async () => {
+  it("strict-deny when no test dispatcher is provided", async () => {
     writeHook("pre-untrusted.sh", "#!/bin/sh\nexit 0");
     const result = await wireHookSystem({
       hooksDir,
@@ -87,32 +87,5 @@ describe("Q12 P4 wireHookSystem", () => {
     expect(result.trust.disabledHooks.map((h) => h.fileName)).toEqual([
       "pre-untrusted.sh",
     ]);
-  });
-
-  it("uses awaitRendererDecisions when supplied (production IPC bridge)", async () => {
-    writeHook("pre-x.sh", "#!/bin/sh\nexit 0");
-    const result = await wireHookSystem({
-      hooksDir,
-      lockfilePath: join(hooksDir, ".lockfile.json"),
-      disabledDir: join(hooksDir, ".disabled"),
-      awaitRendererDecisions: async (diff) =>
-        diff.map((d) => ({ fileName: d.hook.fileName, trust: true })),
-    });
-    expect(result.manager.size()).toBe(1);
-    expect(result.trust.trustedHooks.map((h) => h.fileName)).toEqual(["pre-x.sh"]);
-  });
-
-  it("strict-deny when renderer awaiter throws", async () => {
-    writeHook("pre-x.sh", "#!/bin/sh\nexit 0");
-    const result = await wireHookSystem({
-      hooksDir,
-      lockfilePath: join(hooksDir, ".lockfile.json"),
-      disabledDir: join(hooksDir, ".disabled"),
-      awaitRendererDecisions: async () => {
-        throw new Error("UI unavailable");
-      },
-    });
-    expect(result.manager.size()).toBe(0);
-    expect(result.trust.disabledHooks.map((h) => h.fileName)).toEqual(["pre-x.sh"]);
   });
 });

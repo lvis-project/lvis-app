@@ -34,6 +34,7 @@ function makeLoop(opts: {
   provider: LLMProvider;
   availablePluginIds: string[];
   allowedPluginIds?: string[];
+  forcedActivePluginIds?: string[];
 }): ConversationLoop {
   const toolRegistry = new ToolRegistry();
   // request_plugin builtin (source=builtin so scope filter includes it)
@@ -83,6 +84,7 @@ function makeLoop(opts: {
       listPluginIds: () => opts.availablePluginIds,
     },
     ...(opts.allowedPluginIds ? { allowedPluginIds: new Set(opts.allowedPluginIds) } : {}),
+    ...(opts.forcedActivePluginIds ? { forcedActivePluginIds: new Set(opts.forcedActivePluginIds) } : {}),
   } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
   (loop as { provider: LLMProvider | null }).provider = opts.provider;
   return loop;
@@ -191,5 +193,24 @@ describe("ConversationLoop — request_plugin meta tool (Option C)", () => {
     const toolResult = messages.find((m) => m.role === "tool_result") as { content: string; isError?: boolean } | undefined;
     expect(toolResult?.isError).toBe(true);
     expect(toolResult?.content).toContain("알 수 없는 플러그인 ID");
+  });
+
+  it("keeps forced plugins active even when allowedPluginIds is deny-all", async () => {
+    const provider = new RecordingProvider([
+      [
+        { type: "text_delta", text: "done" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const loop = makeLoop({
+      provider,
+      availablePluginIds: ["com.lge.meeting"],
+      allowedPluginIds: [],
+      forcedActivePluginIds: ["com.lge.meeting"],
+    });
+
+    await loop.runTurn("일반 질문");
+
+    expect(provider.observedToolNames[0]).toContain("meeting_start");
   });
 });

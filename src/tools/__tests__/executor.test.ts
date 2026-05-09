@@ -1036,6 +1036,68 @@ describe("ToolExecutor — Q12 P2.5 Layer 1 allowed-directories", () => {
     expect(wc.send).not.toHaveBeenCalled();
   });
 
+  it("plugin path policy uses manifest-declared pathFields", async () => {
+    const executeSpy = vi.fn(async () => "ok");
+    const registry = new ToolRegistry();
+    registry.register(createDynamicTool({
+      name: "plugin_scan",
+      description: "Scan folder",
+      source: "plugin",
+      pluginId: "local-indexer",
+      category: "read",
+      pathFields: ["folder"],
+      isReadOnly: () => true,
+      jsonSchema: {
+        type: "object",
+        properties: { folder: { type: "string" } },
+        required: ["folder"],
+      },
+      execute: async (rawInput) => {
+        const value = await executeSpy(rawInput);
+        return { output: String(value), isError: false };
+      },
+    }));
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const executor = new ToolExecutor(registry, undefined, undefined, undefined, gate);
+
+    const callPromise = executor.executeAll(
+      [{
+        id: "tu-l1-plugin-pathfields",
+        name: "plugin_scan",
+        input: { folder: "/var/tmp/plugin-folder/input" },
+      }],
+      {
+        sessionId: "sess-l1-plugin-pathfields",
+        permissionContext: {
+          allowedPluginIds: new Set(["local-indexer"]),
+        },
+      },
+    );
+
+    await new Promise((r) => setTimeout(r, 5));
+    expect(wc.send).toHaveBeenCalled();
+    const sent = wc.send.mock.calls[0][1] as {
+      id: string;
+      nonce: string;
+      hmac: string;
+      kind?: string;
+      outOfAllowedDir?: { candidatePath?: string };
+    };
+    expect(sent.kind).toBe("out-of-allowed-dir");
+    expect(sent.outOfAllowedDir?.candidatePath).toContain("plugin-folder/input");
+    gate.resolve(sent.id, {
+      requestId: sent.id,
+      choice: "deny-once",
+      nonce: sent.nonce,
+      hmac: sent.hmac,
+    });
+
+    const results = await callPromise;
+    expect(executeSpy).not.toHaveBeenCalled();
+    expect(results[0].is_error).toBe(true);
+  });
+
   it("Layer 0 still beats Layer 1 — sensitive path inside an allowed dir is denied", async () => {
     const executeSpy = vi.fn(async () => "ok");
     const registry = new ToolRegistry();
