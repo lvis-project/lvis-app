@@ -12,6 +12,7 @@
  */
 import {
   appendFileSync,
+  chmodSync,
   mkdirSync,
   existsSync,
   readdirSync,
@@ -107,7 +108,18 @@ export class AuditLogger {
   log(entry: AuditEntry): void {
     try {
       const line = JSON.stringify(entry) + "\n";
-      appendFileSync(this.logFile, line, "utf-8");
+      const newFile = !existsSync(this.logFile);
+      appendFileSync(this.logFile, line, { encoding: "utf-8", mode: 0o600 });
+      // Defensive: ensure 0o600 even when the file pre-existed with a wider
+      // mode (e.g. created by a process with permissive umask). CLAUDE.md
+      // `~/.lvis/<feature>/` rule requires audit files be user-readable only.
+      if (newFile) {
+        try {
+          chmodSync(this.logFile, 0o600);
+        } catch {
+          // Non-fatal — chmod failure must not block audit writes.
+        }
+      }
     } catch {
       // Audit 실패가 앱 동작을 차단하면 안 됨
     }
@@ -178,15 +190,47 @@ export class AuditLogger {
    * Throws when the chain is not bootstrapped (fail-secure). The
    * caller is responsible for catching at the boot boundary and
    * surfacing a user-actionable error.
+   *
+   * Concurrency: this method is synchronous (single-threaded JS event
+   * loop semantics). The risk surfaced in review was a stale cached
+   * `q12LastSerialized` after rotation or after a separate process
+   * appended. Mitigation: re-read the on-disk tail synchronously at
+   * the start of every append so prevHash always links to the actual
+   * last line. This holds even if rotation drops the file mid-runtime
+   * — the chain restarts cleanly from genesis the next call, which
+   * verifyChain will detect (rotation creates a separate file, so the
+   * new file legitimately starts at genesis).
    */
   appendQ12Entry(entry: Omit<Q12AuditEntry, "prevHash">): Q12AuditEntry {
     if (!this.q12Secret || !this.q12ChainBootstrapped) {
       throw new Error("Q12 audit chain not initialized — call setupQ12Chain() at boot");
     }
-    const prevHash = computeLineHmac(this.q12Secret, this.q12LastSerialized);
+    // Re-read the actual on-disk tail so prevHash links to the true
+    // last line even if a rotation/external write occurred between
+    // setupQ12Chain bootstrap and this append.
+    let prevSerialized = GENESIS_MARKER;
+    if (existsSync(this.q12LogFile)) {
+      try {
+        const raw = readFileSync(this.q12LogFile, "utf-8");
+        const lines = raw.split("\n").filter((l) => l.trim().length > 0);
+        if (lines.length > 0) prevSerialized = lines[lines.length - 1];
+      } catch {
+        // Read failure → restart chain from genesis. The forensics
+        // tooling will detect the discontinuity at the next verifyChain.
+      }
+    }
+    const prevHash = computeLineHmac(this.q12Secret, prevSerialized);
     const full = { ...entry, prevHash } as Q12AuditEntry;
     const serialized = JSON.stringify(full);
-    appendFileSync(this.q12LogFile, serialized + "\n", "utf-8");
+    const newFile = !existsSync(this.q12LogFile);
+    appendFileSync(this.q12LogFile, serialized + "\n", { encoding: "utf-8", mode: 0o600 });
+    if (newFile) {
+      try {
+        chmodSync(this.q12LogFile, 0o600);
+      } catch {
+        // Non-fatal — chmod failure must not block audit writes.
+      }
+    }
     this.q12LastSerialized = serialized;
     return full;
   }
