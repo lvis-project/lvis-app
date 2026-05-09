@@ -18,7 +18,7 @@
  * remain in the file as historical record (status: "approved" |
  * "rejected") so the audit chain is preserved even after queue drain.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, resolve as pathResolve } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -161,8 +161,19 @@ export class DeferredQueue {
     await withFileLock(this.filePath, async () => {
       mkdirSync(dirname(this.filePath), { recursive: true, mode: 0o700 });
       const line = JSON.stringify(entry) + "\n";
-      const existing = existsSync(this.filePath) ? readFileSync(this.filePath, "utf-8") : "";
-      writeFileSync(this.filePath, existing + line, { encoding: "utf-8", mode: 0o600 });
+      const newFile = !existsSync(this.filePath);
+      // O(1) append — previous implementation read+rewrote the entire
+      // file (O(n) per append). The full-rewrite path remains in
+      // rewriteFromMemory() for resolve operations that mutate
+      // existing entries.
+      appendFileSync(this.filePath, line, { encoding: "utf-8", mode: 0o600 });
+      if (newFile) {
+        try {
+          chmodSync(this.filePath, 0o600);
+        } catch {
+          // Non-fatal — chmod failure must not block queue writes.
+        }
+      }
     });
   }
 
