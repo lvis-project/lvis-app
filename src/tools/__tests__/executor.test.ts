@@ -124,10 +124,12 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
     expect(results[0].content).toContain("민감 경로 차단");
   });
 
-  it("tool_use read_file on a non-sensitive path: reaches the dialog", async () => {
+  it("tool_use read_file on a non-sensitive path within allowed dir: reaches the dialog (read-only auto-approve)", async () => {
     // Sanity check — executor still routes non-sensitive paths to the
     // normal approval flow so the §S1 short-circuit didn't break the
-    // happy path.
+    // happy path. Q12 P2.5: the path must be inside an allowed
+    // directory or Layer 1 will dispatch its own directory-confirm
+    // modal before §S4 ever runs.
     const executeSpy = vi.fn(async () => "hello world");
     const registry = new ToolRegistry();
     registry.register(makeReadFileTool(executeSpy));
@@ -149,7 +151,7 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
       gate,
     );
 
-    // Kick off the execution — it will hang until we resolve the gate.
+    // Q12 P2.5 — explicitly allow /tmp so Layer 1 doesn't intercept.
     const promise = executor.executeAll(
       [
         {
@@ -158,14 +160,18 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
           input: { path: "/tmp/safe-file.txt" },
         },
       ],
-      { sessionId: "sess-c1-sanity" },
+      {
+        sessionId: "sess-c1-sanity",
+        permissionContext: { additionalDirectories: ["/tmp"] },
+      },
     );
 
     // Let the microtasks run so the send call happens
     await new Promise((r) => setImmediate(r));
 
-    // For a non-sensitive path, read_file.isReadOnly(finalInput) returns true,
-    // so the §S4 short-circuit auto-approves and the tool executes without
+    // For a non-sensitive path inside an allowed dir,
+    // read_file.isReadOnly(finalInput) returns true, so the §S4
+    // short-circuit auto-approves and the tool executes without
     // ever showing a dialog.
     expect(wc.send).not.toHaveBeenCalled();
 
@@ -867,5 +873,191 @@ describe("ToolExecutor — R2-CR-4 ask_user_question audit redaction is gated by
     } finally {
       logSpy.mockRestore();
     }
+  });
+});
+
+// ─── Q12 P2.5 — Layer 1 Allowed Directories wiring ────────
+
+describe("ToolExecutor — Q12 P2.5 Layer 1 allowed-directories", () => {
+  it("path inside cwd default is allowed (no directory-confirm modal)", async () => {
+    const executeSpy = vi.fn(async () => "ok");
+    const registry = new ToolRegistry();
+    registry.register(makeReadFileTool(executeSpy));
+
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+
+    const executor = new ToolExecutor(registry, undefined, undefined, undefined, gate);
+    const cwdInside = `${process.cwd()}/sample.txt`;
+    const results = await executor.executeAll(
+      [{ id: "tu-l1-1", name: "read_file", input: { path: cwdInside } }],
+      { sessionId: "sess-l1-cwd" },
+    );
+
+    // Tool ran (Layer 1 prefix matches process.cwd()) — no out-of-allowed
+    // dispatch. No webContents.send invoked.
+    expect(executeSpy).toHaveBeenCalled();
+    expect(results[0].is_error).toBeUndefined();
+    expect(wc.send).not.toHaveBeenCalled();
+  });
+
+  it("path outside cwd + ~/.lvis dispatches out-of-allowed-dir approval (interactive)", async () => {
+    const executeSpy = vi.fn(async () => "ok");
+    const registry = new ToolRegistry();
+    registry.register(makeReadFileTool(executeSpy));
+
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+
+    const executor = new ToolExecutor(registry, undefined, undefined, undefined, gate);
+    // Kick off the call and resolve the approval after the request is
+    // dispatched.
+    const callPromise = executor.executeAll(
+      [{
+        id: "tu-l1-2",
+        name: "read_file",
+        input: { path: "/var/tmp/some-random-area/file.txt" },
+      }],
+      { sessionId: "sess-l1-out", permissionContext: { trustOrigin: "user" } },
+    );
+
+    // Wait a tick for the request to be sent through the gate.
+    await new Promise((r) => setTimeout(r, 5));
+    expect(wc.send).toHaveBeenCalled();
+    const sent = wc.send.mock.calls[0][1] as {
+      kind?: string;
+      outOfAllowedDir?: { candidatePath?: string; suggestedParent?: string };
+      trustOrigin?: string;
+    };
+    expect(sent.kind).toBe("out-of-allowed-dir");
+    expect(sent.outOfAllowedDir?.candidatePath).toContain("file.txt");
+    expect(sent.trustOrigin).toBe("user");
+
+    // Renderer denies — tool must not execute.
+    const requestId = (wc.send.mock.calls[0][1] as { id: string; nonce: string; hmac: string }).id;
+    const reqPayload = wc.send.mock.calls[0][1] as { id: string; nonce: string; hmac: string };
+    gate.resolve(requestId, {
+      requestId,
+      choice: "deny-once",
+      nonce: reqPayload.nonce,
+      hmac: reqPayload.hmac,
+    });
+
+    const results = await callPromise;
+    expect(executeSpy).not.toHaveBeenCalled();
+    expect(results[0].is_error).toBe(true);
+    expect(results[0].content).toContain("디렉토리 정책 차단");
+  });
+
+  it("user grants out-of-allowed-dir → tool proceeds to Step 3", async () => {
+    const executeSpy = vi.fn(async () => "ok");
+    const registry = new ToolRegistry();
+    registry.register(makeReadFileTool(executeSpy));
+
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const executor = new ToolExecutor(registry, undefined, undefined, undefined, gate);
+
+    const callPromise = executor.executeAll(
+      [{
+        id: "tu-l1-3",
+        name: "read_file",
+        input: { path: "/var/tmp/elsewhere/notes.md" },
+      }],
+      { sessionId: "sess-l1-allow" },
+    );
+
+    await new Promise((r) => setTimeout(r, 5));
+    const sent = wc.send.mock.calls[0][1] as { id: string; nonce: string; hmac: string };
+    gate.resolve(sent.id, {
+      requestId: sent.id,
+      choice: "allow-once",
+      nonce: sent.nonce,
+      hmac: sent.hmac,
+    });
+
+    const results = await callPromise;
+    expect(executeSpy).toHaveBeenCalled();
+    expect(results[0].is_error).toBeUndefined();
+  });
+
+  it("headless mode + out-of-allowed-dir → fail-closed (Phase 3 reviewer pending)", async () => {
+    const executeSpy = vi.fn(async () => "ok");
+    const registry = new ToolRegistry();
+    registry.register(makeReadFileTool(executeSpy));
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const executor = new ToolExecutor(registry, undefined, undefined, undefined, gate);
+
+    const results = await executor.executeAll(
+      [{
+        id: "tu-l1-4",
+        name: "read_file",
+        input: { path: "/var/tmp/headless-area/data.txt" },
+      }],
+      {
+        sessionId: "sess-l1-headless",
+        permissionContext: { headless: true },
+      },
+    );
+
+    expect(executeSpy).not.toHaveBeenCalled();
+    expect(results[0].is_error).toBe(true);
+    expect(results[0].content).toContain("headless");
+    // Headless never shows a dialog — webContents.send must not have been
+    // called for an out-of-allowed-dir request.
+    expect(wc.send).not.toHaveBeenCalled();
+  });
+
+  it("user-supplied additionalDirectories grants access without modal", async () => {
+    const executeSpy = vi.fn(async () => "ok");
+    const registry = new ToolRegistry();
+    registry.register(makeReadFileTool(executeSpy));
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const executor = new ToolExecutor(registry, undefined, undefined, undefined, gate);
+
+    const results = await executor.executeAll(
+      [{
+        id: "tu-l1-5",
+        name: "read_file",
+        input: { path: "/var/tmp/explicitly-allowed/foo.md" },
+      }],
+      {
+        sessionId: "sess-l1-grant",
+        permissionContext: {
+          additionalDirectories: ["/var/tmp/explicitly-allowed"],
+        },
+      },
+    );
+
+    expect(executeSpy).toHaveBeenCalled();
+    expect(results[0].is_error).toBeUndefined();
+    expect(wc.send).not.toHaveBeenCalled();
+  });
+
+  it("Layer 0 still beats Layer 1 — sensitive path inside an allowed dir is denied", async () => {
+    const executeSpy = vi.fn(async () => "ok");
+    const registry = new ToolRegistry();
+    registry.register(makeReadFileTool(executeSpy));
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const executor = new ToolExecutor(registry, undefined, undefined, undefined, gate);
+
+    const homedir = (await import("node:os")).homedir;
+    const sensitive = `${homedir()}/.lvis/secrets/openai.key`;
+    const results = await executor.executeAll(
+      [{ id: "tu-l1-6", name: "read_file", input: { path: sensitive } }],
+      {
+        sessionId: "sess-l1-l0win",
+        permissionContext: {
+          additionalDirectories: [`${homedir()}/.lvis`],
+        },
+      },
+    );
+
+    expect(executeSpy).not.toHaveBeenCalled();
+    expect(results[0].is_error).toBe(true);
+    expect(results[0].content).toContain("민감 경로 차단");
   });
 });
