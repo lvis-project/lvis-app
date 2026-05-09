@@ -144,4 +144,11 @@ export interface AppServices {
    * sees this — it's a passive surface called by the host at trigger sites.
    */
   notificationService?: NotificationService;
+  /**
+   * Q12 P4 — Layer 6 hook system runtime. Holds the trusted-hook list
+   * resolved from `~/.config/lvis/hooks/` after the boot-time TOFU
+   * prompt. Executor / approval-gate consult this for pre/post/perm
+   * hooks. Absent when the hooks directory cannot be created (rare).
+   */
+  scriptHookManager?: import("../hooks/script-hook-manager.js").ScriptHookManager;
 }
