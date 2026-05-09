@@ -16,7 +16,7 @@
  */
 import { homedir } from "node:os";
 import { resolve } from "node:path";
-import type { DenyRule, ToolCategory, ToolSource, TrustLevel } from "../tools/types.js";
+import type { DenyRule, ToolCategory, ToolSource, ToolTrustOrigin, TrustLevel } from "../tools/types.js";
 import { trustFromSource } from "../tools/types.js";
 import { readPermissionsFile, updatePermissionsFile } from "./permissions-store.js";
 import { isProactiveOrigin } from "../shared/proactive-source.js";
@@ -83,6 +83,14 @@ export interface ReviewerDispatchInput {
   finalInput: Record<string, unknown>;
   allowedDirectories: string[];
   sensitivePathsAdjacent: string[];
+  /**
+   * Q12 architect round-4 finding: cache identity must include the
+   * caller's trust origin. A high-trust verdict cached for `user` origin
+   * is unsafe to serve to a `agent` invocation of the same shape — the
+   * underlying intent differs even when arguments match. Required so the
+   * verdict-cache lookupKey hash always includes origin.
+   */
+  trustOrigin: ToolTrustOrigin;
   /** When true, out-of-allowed-dir access also routes to the reviewer. */
   outOfAllowedDir?: boolean;
 }
@@ -433,6 +441,7 @@ export class PermissionManager {
       toolName,
       source: input.source,
       category: input.category,
+      trustOrigin: input.trustOrigin,
       finalInput: input.finalInput,
     };
     const cacheCtx = {
@@ -449,6 +458,7 @@ export class PermissionManager {
         toolName,
         source: input.source,
         category: input.category,
+        trustOrigin: input.trustOrigin,
         finalInput: input.finalInput,
         allowedDirectories: input.allowedDirectories,
         sensitivePathsAdjacent: input.sensitivePathsAdjacent,

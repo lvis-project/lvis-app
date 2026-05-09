@@ -29,6 +29,7 @@ function ctx(overrides: Partial<ToolInvocationContext>): ToolInvocationContext {
     toolName: "test_tool",
     source: "builtin",
     category: "write",
+    trustOrigin: "user",
     finalInput: {},
     allowedDirectories: ALLOWED,
     sensitivePathsAdjacent: [],

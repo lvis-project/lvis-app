@@ -59,6 +59,7 @@ describe("PermissionManager.dispatchReviewer", () => {
       finalInput: { path: "/Users/ken/work/note.md" },
       allowedDirectories: ["/Users/ken/work"],
       sensitivePathsAdjacent: [],
+      trustOrigin: "user" as const,
     });
     expect(r.verdict.level).toBe("low");
     expect(r.deferredId).toBeUndefined();
@@ -72,6 +73,7 @@ describe("PermissionManager.dispatchReviewer", () => {
       finalInput: { path: "/etc/passwd" },
       allowedDirectories: ["/Users/ken/work"],
       sensitivePathsAdjacent: [],
+      trustOrigin: "user" as const,
     });
     expect(r.verdict.level).toBe("high");
     expect(r.deferredId).toMatch(/^[0-9a-f-]{36}$/);
@@ -88,6 +90,7 @@ describe("PermissionManager.dispatchReviewer", () => {
       finalInput: { path: "/Users/ken/work/a/b/c/d.md" },
       allowedDirectories: ["/Users/ken/work"],
       sensitivePathsAdjacent: [],
+      trustOrigin: "user" as const,
     });
     expect(r.verdict.level).toBe("medium");
     expect(r.deferredId).toBeUndefined();
@@ -101,6 +104,7 @@ describe("PermissionManager.dispatchReviewer", () => {
       finalInput: { path: "/Users/ken/work/note.md" },
       allowedDirectories: ["/Users/ken/work"],
       sensitivePathsAdjacent: [],
+      trustOrigin: "user" as const,
     };
     const first = await pm.dispatchReviewer("fs_write", input);
     expect(first.cacheReason).toBe("miss-not-found");
@@ -116,6 +120,7 @@ describe("PermissionManager.dispatchReviewer", () => {
       finalInput: { path: "/Users/ken/work/note.md" },
       allowedDirectories: ["/Users/ken/work"],
       sensitivePathsAdjacent: [],
+      trustOrigin: "user" as const,
     };
     await pm.dispatchReviewer("fs_write", ctxA);
     // Same input, different allowedDirectories context.
@@ -132,6 +137,7 @@ describe("PermissionManager.dispatchReviewer", () => {
       finalInput: { path: "/x" },
       allowedDirectories: [],
       sensitivePathsAdjacent: [],
+      trustOrigin: "user" as const,
     });
     expect(r.verdict.level).toBe("high");
     expect(r.verdict.reason).toMatch(/not wired/);
@@ -154,6 +160,7 @@ describe("PermissionManager.dispatchReviewer", () => {
       finalInput: { path: "/x" },
       allowedDirectories: ["/Users/ken/work"],
       sensitivePathsAdjacent: [],
+      trustOrigin: "user" as const,
     });
     expect(r.verdict.level).toBe("high");
     expect(r.verdict.reason).toBe("async high");
