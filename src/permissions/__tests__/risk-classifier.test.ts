@@ -1,5 +1,5 @@
 /**
- * Q12 Phase 3 — RiskClassifier unit tests.
+ * Permission policy Phase 3 — RiskClassifier unit tests.
  *
  * Coverage:
  *   - DisabledRiskClassifier always HIGH

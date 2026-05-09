@@ -1,7 +1,7 @@
 /**
- * Q12 Phase 4 — Layer 6 hook script runner.
+ * Permission policy Phase 4 — Layer 6 hook script runner.
  *
- * Spec ref: docs/architecture/q12-permission-policy-design.md §3 Layer 6.
+ * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 6.
  *
  * Executes one or more pre/post/perm hook scripts. Each script:
  *   - receives the wire-shape JSON on stdin
@@ -240,7 +240,7 @@ export async function runOneHookScript(
  * Parse a hook script's stdout into the canonical wire shape. Returns
  * null for any malformed input — caller treats null as deny.
  *
- * v1 enum is "allow" | "deny" only; "modify" deferred to Q13.
+ * v1 enum is "allow" | "deny" only; "modify" deferred to hook-signing follow-up.
  */
 export function parseHookStdout(stdout: string): ScriptHookStdout | null {
   const trimmed = stdout.trim();

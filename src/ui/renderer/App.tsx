@@ -448,7 +448,7 @@ export function App() {
         debugLog("handleAsk", "interrupt:abort-and-proceed");
         try { await api.chatAbort(); } catch { /* no-op */ }
       }
-      // Q12 §9 trust-origin gate for user-slash dispatch (architect round-4 ②).
+      // Permission policy §9 trust-origin gate for user-slash dispatch (architect round-4 ②).
       // `/compact` and `/load` carry privileged user intent (rewrite history,
       // load arbitrary session) so they MUST run only on user-keyboard origin.
       // mode === "default" is the renderer's contract for "user typed this in

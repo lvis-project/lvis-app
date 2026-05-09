@@ -57,7 +57,7 @@ import { openLinkWindow as openLinkWindowService } from "./main/link-window-serv
 import { shell } from "electron";
 
 import { type AppServices, emitEvent, onEvent } from "./boot/types.js";
-import { PERMISSIONS_Q12, ROUTINES_V2 } from "./shared/ipc-channels.js";
+import { PERMISSIONS, ROUTINES_V2 } from "./shared/ipc-channels.js";
 import { startWatcherTelemetryCollector } from "./boot/steps/watcher-telemetry-collector.js";
 import { bootstrapCoreServices } from "./boot/services.js";
 import { registerPluginNotifications } from "./boot/plugins.js";
@@ -324,7 +324,7 @@ export async function bootstrap(
   const permissionManager = await createPermissionManager();
   toolRegistry.setDenyRules(permissionManager.getVisibilityDenyRules());
 
-  // Q12 P4 — Layer 5 reviewer agent wiring (Phase 3 deferral resolution).
+  // Permission policy P4 — Layer 5 reviewer agent wiring (Phase 3 deferral resolution).
   // Reads `permissions.reviewer` from `~/.lvis/settings.json` and binds the
   // classifier + cache + deferred queue onto the live PermissionManager so
   // `dispatchReviewer()` routes HIGH verdicts into the deferred queue.
@@ -351,14 +351,14 @@ export async function bootstrap(
     },
   });
 
-  // Q12 P4 §3.5 — manifest integrity proxy. Subscribes the audit
+  // Permission policy P4 §3.5 — manifest integrity proxy. Subscribes the audit
   // logger so every read→write violation lands in `~/.lvis/audit/` +
   // pushes an IPC notification to the renderer. Uses the live
   // mainWindow getter so cross-restart UI keeps receiving events.
   bindManifestIntegrityAudit(bootAuditLogger);
   manifestIntegrityState.onViolation((pluginId, toolName, attempted) => {
     try {
-      getMainWindow()?.webContents.send(PERMISSIONS_Q12.manifestViolation, {
+      getMainWindow()?.webContents.send(PERMISSIONS.manifestViolation, {
         pluginId,
         toolName,
         attempted,
@@ -376,11 +376,11 @@ export async function bootstrap(
   // quarantine + explicit user trust registration is the single path.
   const hookRunner = createHookRunner();
 
-  // Q12 P4 — Layer 6 script-hook system (individual `pre-*.sh` /
+  // Permission policy P4 — Layer 6 script-hook system (individual `pre-*.sh` /
   // `post-*.sh` / `perm-*.sh` files under `~/.config/lvis/hooks/`).
-  // Production boot has no renderer fallback: untrusted or changed hook
+  // Production boot has no renderer approval prompt: untrusted or changed hook
   // files are strict-denied and moved to `.disabled/`.
-  const hookSystem = await wireHookSystem();
+  const hookSystem = await wireHookSystem({ auditLogger: bootAuditLogger });
   const scriptHookManager = hookSystem.manager;
 
   // §7: Routine Engine — 루틴마다 독립된 ConversationLoop를 생성하는 factory를 주입.
@@ -406,7 +406,7 @@ export async function bootstrap(
       routineLoopDeps,
       { scope: input.scope },
     ),
-    // Q12 Layer 4 — snapshot the live plugin runtime's active id set so
+    // Permission policy Layer 4 — snapshot the live plugin runtime's active id set so
     // routines with `scope.pluginIds.mode === "inherit"` are normalized
     // to a concrete allow-list at fire time (never at loop-construction).
     getActivePluginIds: () => pluginRuntime.listPluginIds(),

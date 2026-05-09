@@ -59,7 +59,7 @@ function untypedDescription(toolName: string): string {
 }
 
 /**
- * Q12 — Plugin manifest declares one of the 5-axis categories. Anything
+ * Permission policy — Plugin manifest declares one of the 5-axis categories. Anything
  * else (or omitted) lands on `"write"` so plugin tools fail closed until
  * the author declares non-mutating intent.
  *
@@ -131,7 +131,7 @@ function buildPluginTool(
           try { finalPayload = JSON.parse(finalPayload); } catch { /* leave as string */ }
         }
       }
-      // Q12 P4 §3.5 — manifest integrity guard.
+      // Permission policy P4 §3.5 — manifest integrity guard.
       // For read-declared tools, fail-deny if the plugin already
       // violated its declaration (caller must reinstall). The proxy
       // itself lives at the host→plugin fs boundary; this check is
@@ -154,7 +154,7 @@ function buildPluginTool(
           isError: false,
         };
       } catch (err) {
-        // Q12 P4 §3.5 — capture manifest-integrity violations: the
+        // Permission policy P4 §3.5 — capture manifest-integrity violations: the
         // plugin's tool used the read-only fs proxy and the proxy
         // threw. Record the violation so subsequent calls fail closed
         // and audit + UI emit fire.

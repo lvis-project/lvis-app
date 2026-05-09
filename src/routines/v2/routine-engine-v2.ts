@@ -17,7 +17,7 @@ export interface RoutineV2RunInput {
   prePrompt: string;
   title?: string;
   /**
-   * Q12 Layer 4 — fully resolved scope (no `inherit` left). Boot-time
+   * Permission policy Layer 4 — fully resolved scope (no `inherit` left). Boot-time
    * normalization in the dispatcher snapshots the active plugin set
    * before this method runs.
    */
@@ -49,12 +49,12 @@ export interface RoutineEngineV2Deps {
   /** Called once per routine fire to produce a fresh, isolated ConversationLoop. */
   createConversationLoop: (input: RoutineV2RunInput) => ConversationLoop;
   /**
-   * Q12 Layer 4 — invoked at routine fire time to snapshot the
+   * Permission policy Layer 4 — invoked at routine fire time to snapshot the
    * currently-active plugin set. Used to translate
    * `scope.pluginIds.mode === "inherit"` into a concrete `allow` list
    * BEFORE the conversation loop is constructed, so the loop never
    * sees `inherit`. When omitted, `inherit` falls back to deny-all
-   * (defensive — pre-Q12 boot wires this dep for production).
+   * (defensive — pre-Permission policy boot wires this dep for production).
    */
   getActivePluginIds?: () => string[];
 }
@@ -86,7 +86,7 @@ export class RoutineEngineV2 {
   constructor(private readonly deps: RoutineEngineV2Deps) {}
 
   /**
-   * Q12 Layer 4 — snapshot `inherit` to a concrete allow-list at fire
+   * Permission policy Layer 4 — snapshot `inherit` to a concrete allow-list at fire
    * time. The loop must never see `inherit`; downstream
    * `createRoutineConversationLoop` defensively coerces `inherit` to
    * deny-all, but the principled spot is here where we still have
@@ -114,7 +114,7 @@ export class RoutineEngineV2 {
 
   async runRoutine(input: RoutineV2RunInput): Promise<RoutineV2Result> {
     const generatedAt = new Date().toISOString();
-    // Q12 Layer 4 — normalize scope BEFORE building the loop so the
+    // Permission policy Layer 4 — normalize scope BEFORE building the loop so the
     // loop never observes `inherit`. `inherit` snapshots the active
     // plugin set at fire time; missing scope falls back to deny-all
     // (the safe default for headless routine sessions).

@@ -1,7 +1,7 @@
 /**
- * Q12 Phase 4 — Reviewer agent boot wiring (Phase 3 deferral resolution).
+ * Permission policy Phase 4 — Reviewer agent boot wiring (Phase 3 deferral resolution).
  *
- * Spec ref: docs/architecture/q12-permission-policy-design.md §3 Layer 5,
+ * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 5,
  * §11 v2.1 binding decisions (default `provider="openai"`,
  * `model="gpt-4o-mini"`, `fallbackOnError ∈ {deny, rule}`).
  *
@@ -153,14 +153,14 @@ export function wireReviewerAgent(deps: WireReviewerDeps): WireReviewerResult {
     // mode === "llm"
     if (!deps.streamProviderFor) {
       throw new Error(
-        `Q12 P4 reviewer wiring: settings.reviewer.mode='llm' but no streamProviderFor supplied. ` +
+        `Permission policy P4 reviewer wiring: settings.reviewer.mode='llm' but no streamProviderFor supplied. ` +
         `Boot caller must provide a provider factory (atomic cutover — no silent fallback).`,
       );
     }
     const upstream = deps.streamProviderFor(settings.provider);
     if (!upstream) {
       throw new Error(
-        `Q12 P4 reviewer wiring: settings.reviewer.provider='${settings.provider}' is not configured. ` +
+        `Permission policy P4 reviewer wiring: settings.reviewer.provider='${settings.provider}' is not configured. ` +
         `Add an API key for ${settings.provider} or change reviewer mode.`,
       );
     }

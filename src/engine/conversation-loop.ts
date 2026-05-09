@@ -156,7 +156,7 @@ export interface ConversationLoopDeps {
   approvalGate?: import("../permissions/approval-gate.js").ApprovalGate;
   /**
    * In-process hook runner used by focused unit tests and old internal
-   * extension points. Production Q12 script hooks are carried by
+   * extension points. Production Permission policy script hooks are carried by
    * scriptHookManager, not by hooks.json external loading.
    */
   hookRunner?: HookRunner;

@@ -16,7 +16,7 @@ let disabledDir: string;
 let lockfilePath: string;
 
 beforeEach(() => {
-  tmpDir = mkdtempSync(join(tmpdir(), "q12-hook-commands-"));
+  tmpDir = mkdtempSync(join(tmpdir(), "permission-policy-hook-commands-"));
   hooksDir = join(tmpDir, "hooks");
   disabledDir = join(hooksDir, ".disabled");
   lockfilePath = join(hooksDir, ".lockfile.json");

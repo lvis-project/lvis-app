@@ -35,7 +35,7 @@ import {
   GENESIS_MARKER,
   type SecretStore,
 } from "./hmac-chain.js";
-import type { Q12AuditEntry, Q12AuditEntryInput } from "./audit-schema.js";
+import type { PermissionAuditEntry, PermissionAuditEntryInput } from "./audit-schema.js";
 
 function readLastNonEmptyLineSync(filePath: string): string {
   if (!existsSync(filePath)) return GENESIS_MARKER;
@@ -124,19 +124,19 @@ export class AuditLogger {
   private readonly auditDir: string;
   private readonly logFile: string;
   /**
-   * Q12 P5 — separate file for the discriminated-union HMAC-chained
-   * audit channel. Format `<date>.q12.jsonl`. Kept distinct from the
-   * legacy telemetry channel (`<date>.jsonl`) so chain verification
+   * Permission policy — separate file for the discriminated-union HMAC-chained
+   * audit channel. Format `<date>.permission-audit.jsonl`. Kept distinct from the
+   * telemetry channel (`<date>.jsonl`) so chain verification
    * doesn't have to filter heterogeneous shapes.
    */
-  private readonly q12LogFile: string;
-  /** Q12 P5 — HMAC chain state. Wired via `setupQ12Chain`. Null = legacy boot. */
-  private q12Secret: string | null = null;
+  private readonly permissionAuditLogFile: string;
+  /** Permission policy — HMAC chain state. Wired via `setupPermissionAuditChain`. Null = uninitialized chain. */
+  private permissionAuditSecret: string | null = null;
   /** Memoized last serialized line so each append knows the prevHash without re-reading the file. */
-  private q12LastSerialized: string = GENESIS_MARKER;
-  private q12ChainBootstrapped = false;
-  /** Q12 P5 — secret store for daily seals. Wired alongside `setupQ12Chain`. */
-  private q12SealStore: SecretStore | null = null;
+  private permissionAuditLastSerialized: string = GENESIS_MARKER;
+  private permissionAuditChainBootstrapped = false;
+  /** Permission policy — secret store for daily seals. Wired alongside `setupPermissionAuditChain`. */
+  private permissionAuditSealStore: SecretStore | null = null;
 
   constructor() {
     this.auditDir = join(homedir(), ".lvis", "audit");
@@ -146,7 +146,7 @@ export class AuditLogger {
     // 일별 로그 파일
     const date = new Date().toISOString().slice(0, 10);
     this.logFile = join(this.auditDir, `${date}.jsonl`);
-    this.q12LogFile = join(this.auditDir, `${date}.q12.jsonl`);
+    this.permissionAuditLogFile = join(this.auditDir, `${date}.permission-audit.jsonl`);
   }
 
   log(entry: AuditEntry): void {
@@ -167,58 +167,58 @@ export class AuditLogger {
   }
 
   /**
-   * Q12 P5 — wire the HMAC chain state. Call once at boot after
+   * Permission policy — wire the HMAC chain state. Call once at boot after
    * loading the audit secret from the keychain. When unwired, all
-   * `appendQ12Entry` calls throw — fail-secure per spec §1: refuse
+   * `appendPermissionAuditEntry` calls throw — fail-secure per spec §1: refuse
    * to start the chain rather than silently downgrade.
    *
    * `sealStore` is optional but required for daily-seal verification
    * via the `/permission audit verify` slash. When omitted, the
    * verify operation reports `sealMatch: null` for all days.
    */
-  setupQ12Chain(secret: string, sealStore?: SecretStore): void {
-    this.q12Secret = secret;
-    this.q12SealStore = sealStore ?? null;
+  setupPermissionAuditChain(secret: string, sealStore?: SecretStore): void {
+    this.permissionAuditSecret = secret;
+    this.permissionAuditSealStore = sealStore ?? null;
     // Bootstrap from the existing file tail so the next append links to
     // the real last line without O(n) full-file scans.
     try {
-      this.q12LastSerialized = readLastNonEmptyLineSync(this.q12LogFile);
+      this.permissionAuditLastSerialized = readLastNonEmptyLineSync(this.permissionAuditLogFile);
     } catch {
       // If we can't read the existing file, the chain effectively
       // restarts from genesis. The forensics tooling will detect the
       // discontinuity at the next verifyChain.
-      this.q12LastSerialized = GENESIS_MARKER;
+      this.permissionAuditLastSerialized = GENESIS_MARKER;
     }
-    this.q12ChainBootstrapped = true;
+    this.permissionAuditChainBootstrapped = true;
   }
 
-  /** Q12 P5 — accessor for tests + slash audit verify. */
-  getQ12LogFile(): string {
-    return this.q12LogFile;
+  /** Permission policy — accessor for tests + slash audit verify. */
+  getPermissionAuditLogFile(): string {
+    return this.permissionAuditLogFile;
   }
 
-  /** Q12 P5 — was setupQ12Chain called? */
-  isQ12ChainReady(): boolean {
-    return this.q12ChainBootstrapped && this.q12Secret !== null;
+  /** Permission policy — was setupPermissionAuditChain called? */
+  isPermissionAuditChainReady(): boolean {
+    return this.permissionAuditChainBootstrapped && this.permissionAuditSecret !== null;
   }
 
-  /** Q12 P5 — accessor for the wired HMAC secret. Null when not bootstrapped. */
-  getQ12Secret(): string | null {
-    return this.q12Secret;
+  /** Permission policy — accessor for the wired HMAC secret. Null when not bootstrapped. */
+  getPermissionAuditSecret(): string | null {
+    return this.permissionAuditSecret;
   }
 
-  /** Q12 P5 — accessor for the wired seal store. Null when not bootstrapped or omitted. */
-  getQ12SealStore(): SecretStore | null {
-    return this.q12SealStore;
+  /** Permission policy — accessor for the wired seal store. Null when not bootstrapped or omitted. */
+  getPermissionAuditSealStore(): SecretStore | null {
+    return this.permissionAuditSealStore;
   }
 
-  /** Q12 P5 — accessor for the audit directory (used by audit-show/verify). */
+  /** Permission policy — accessor for the audit directory (used by audit-show/verify). */
   getAuditDir(): string {
     return this.auditDir;
   }
 
   /**
-   * Q12 P5 — append a discriminated-union audit entry with HMAC
+   * Permission policy — append a discriminated-union audit entry with HMAC
    * chain. Caller supplies the entry minus `prevHash`; this method
    * computes and threads the chain link.
    *
@@ -231,23 +231,23 @@ export class AuditLogger {
    * only the on-disk tail so prevHash always links to the actual last
    * line without O(n) full-file scans on every append.
    */
-  async appendQ12Entry(entry: Q12AuditEntryInput): Promise<Q12AuditEntry> {
-    if (!this.q12Secret || !this.q12ChainBootstrapped) {
-      throw new Error("Q12 audit chain not initialized — call setupQ12Chain() at boot");
+  async appendPermissionAuditEntry(entry: PermissionAuditEntryInput): Promise<PermissionAuditEntry> {
+    if (!this.permissionAuditSecret || !this.permissionAuditChainBootstrapped) {
+      throw new Error("permission audit chain not initialized — call setupPermissionAuditChain() at boot");
     }
-    const secret = this.q12Secret;
-    return withFileLock(this.q12LogFile, async () => {
-      this.q12LastSerialized = readLastNonEmptyLineSync(this.q12LogFile);
-      const prevHash = computeLineHmac(secret, this.q12LastSerialized);
-      const full = { ...entry, prevHash } as Q12AuditEntry;
+    const secret = this.permissionAuditSecret;
+    return withFileLock(this.permissionAuditLogFile, async () => {
+      this.permissionAuditLastSerialized = readLastNonEmptyLineSync(this.permissionAuditLogFile);
+      const prevHash = computeLineHmac(secret, this.permissionAuditLastSerialized);
+      const full = { ...entry, prevHash } as PermissionAuditEntry;
       const serialized = JSON.stringify(full);
-      appendFileSync(this.q12LogFile, serialized + "\n", { encoding: "utf-8", mode: 0o600 });
+      appendFileSync(this.permissionAuditLogFile, serialized + "\n", { encoding: "utf-8", mode: 0o600 });
       try {
-        chmodSync(this.q12LogFile, 0o600);
+        chmodSync(this.permissionAuditLogFile, 0o600);
       } catch {
         // Non-fatal — chmod failure must not block audit writes.
       }
-      this.q12LastSerialized = serialized;
+      this.permissionAuditLastSerialized = serialized;
       return full;
     });
   }

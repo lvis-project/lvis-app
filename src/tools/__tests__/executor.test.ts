@@ -127,7 +127,7 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
   it("tool_use read_file on a non-sensitive path within allowed dir: reaches the dialog (read-only auto-approve)", async () => {
     // Sanity check — executor still routes non-sensitive paths to the
     // normal approval flow so the §S1 short-circuit didn't break the
-    // happy path. Q12 P2.5: the path must be inside an allowed
+    // happy path. Permission policy P2.5: the path must be inside an allowed
     // directory or Layer 1 will dispatch its own directory-confirm
     // modal before §S4 ever runs.
     const executeSpy = vi.fn(async () => "hello world");
@@ -151,7 +151,7 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
       gate,
     );
 
-    // Q12 P2.5 — explicitly allow /tmp so Layer 1 doesn't intercept.
+    // Permission policy P2.5 — explicitly allow /tmp so Layer 1 doesn't intercept.
     const promise = executor.executeAll(
       [
         {
@@ -644,7 +644,7 @@ describe("ToolExecutor — C1 ask_user_question short-circuit", () => {
       name: "ask_user_question",
       description: "ask the user",
       source: "builtin",
-      // Q12 — `meta` + `decisionOverride: "always-allow-with-audit"` is the
+      // Permission policy — `meta` + `decisionOverride: "always-allow-with-audit"` is the
       // category contract that earns the executor's C1 short-circuit:
       // PermissionManager is bypassed entirely so the renderer never sees
       // a "may I ask?" modal stacked in front of the actual question.
@@ -876,9 +876,9 @@ describe("ToolExecutor — R2-CR-4 ask_user_question audit redaction is gated by
   });
 });
 
-// ─── Q12 P2.5 — Layer 1 Allowed Directories wiring ────────
+// ─── Permission policy P2.5 — Layer 1 Allowed Directories wiring ────────
 
-describe("ToolExecutor — Q12 P2.5 Layer 1 allowed-directories", () => {
+describe("ToolExecutor — Permission policy P2.5 Layer 1 allowed-directories", () => {
   it("path inside cwd default is allowed (no directory-confirm modal)", async () => {
     const executeSpy = vi.fn(async () => "ok");
     const registry = new ToolRegistry();

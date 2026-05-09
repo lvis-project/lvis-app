@@ -281,7 +281,7 @@ describe("ConversationLoop command routing", () => {
   });
 
   it("/permission hooks accept restores a boot-quarantined hook through the user-keyboard command path", async () => {
-    const tmpDir = mkdtempSync(join(tmpdir(), "q12-loop-hooks-"));
+    const tmpDir = mkdtempSync(join(tmpdir(), "permission-policy-loop-hooks-"));
     const hooksDir = join(tmpDir, "hooks");
     const disabledDir = join(hooksDir, ".disabled");
     const lockfilePath = join(hooksDir, ".lockfile.json");

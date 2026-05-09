@@ -1,5 +1,5 @@
 /**
- * Q12 P5 round 2 — RoutinePanel button label / payload mapping lock.
+ * Permission policy P5 round 2 — RoutinePanel button label / payload mapping lock.
  *
  * Asserts the contract surfaced by the panel: when the user clicks the
  * "선택 해제 (플러그인 사용 안 함)" button or leaves the plugin list empty,
@@ -48,7 +48,7 @@ function validFutureDate(): string {
   return d.toISOString().slice(0, 10);
 }
 
-describe("Q12 P5 round 2 — RoutinePanel scope payload mapping", () => {
+describe("Permission policy P5 round 2 — RoutinePanel scope payload mapping", () => {
   it("empty plugin selection submits scope.pluginIds = { mode: 'deny-all' }", async () => {
     const addRoutineV2 = vi.fn().mockResolvedValue({ ok: true, routine: makeRoutineRecord() });
     const api = makeStubApi({

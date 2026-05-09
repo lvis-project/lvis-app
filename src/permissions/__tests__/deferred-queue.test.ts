@@ -1,5 +1,5 @@
 /**
- * Q12 Phase 3 — DeferredQueue unit tests.
+ * Permission policy Phase 3 — DeferredQueue unit tests.
  */
 import { describe, it, expect } from "vitest";
 import { mkdtempSync, readFileSync } from "node:fs";

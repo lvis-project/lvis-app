@@ -23,7 +23,7 @@ export const MAX_LLM_SESSION_ROUTINES = 10;
 export type RoutineExecution = "llm-session" | "notification-only";
 
 /**
- * Q12 Layer 4 — discriminated union scoping which plugins a routine may
+ * Permission policy Layer 4 — discriminated union scoping which plugins a routine may
  * see during its isolated session.
  *
  * - `deny-all`  no plugin tools exposed (legacy `allowedPlugins: []`)
@@ -39,7 +39,7 @@ export type RoutinePluginScope =
   | { mode: "inherit" };
 
 /**
- * Q12 Layer 4 — `routine.scope` namespace bundling every per-routine
+ * Permission policy Layer 4 — `routine.scope` namespace bundling every per-routine
  * isolation knob. Replaces the flat `allowedPlugins?: string[]` field.
  *
  * - `pluginIds` plugin allow-list (discriminated union — see above).
@@ -91,17 +91,17 @@ export interface RoutineRecord {
   /** Shown as OS notification body when execution === "notification-only". */
   notificationBody?: string;
   /**
-   * Q12 Layer 4 scope — plugin allow-list, forced plugin set, and
+   * Permission policy Layer 4 scope — plugin allow-list, forced plugin set, and
    * extra directories permitted during this routine's headless session.
    *
-   * Missing scope → deny-all (fail-safe per Q12 design §1). The
+   * Missing scope → deny-all (fail-safe per Permission policy design §1). The
    * runtime normalizer in `RoutineEngineV2.normalizeScope` and the
    * legacy migration in `migrateLegacyAllowedPlugins` both coerce a
    * missing/undefined scope into `{ pluginIds: { mode: "deny-all" } }`
    * rather than `inherit`, so a routine that never declared scope
    * cannot accidentally see the user's currently-active plugin set.
    *
-   * Disk format compat: a routine record persisted before Q12 Phase 2
+   * Disk format compat: a routine record persisted before Permission policy Phase 2
    * may carry a flat `allowedPlugins?: string[]` instead. The store's
    * read path normalizes legacy `[]`/non-empty into the discriminated
    * union shape on first load. Missing/tampered legacy values also
@@ -127,7 +127,7 @@ export interface AddRoutineInput {
   notificationTitle?: string;
   notificationBody?: string;
   /**
-   * Q12 Layer 4 scope — see {@link RoutineScope}. When omitted, the
+   * Permission policy Layer 4 scope — see {@link RoutineScope}. When omitted, the
    * store fills `pluginIds: { mode: "deny-all" }` and empty defaults
    * for the rest. Callers that want active-plugin inheritance must pass
    * `{ pluginIds: { mode: "inherit" }, forcedPluginIds: [], directories: [] }`

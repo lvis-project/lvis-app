@@ -1,7 +1,7 @@
 /**
- * Q12 Phase 2.5 — `toolSchemas[*].pathFields` advisory hint tests.
+ * Permission policy Phase 2.5 — `toolSchemas[*].pathFields` advisory hint tests.
  *
- * Spec ref: docs/architecture/q12-permission-policy-design.md §3 Layer 0
+ * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 0
  * (pathFields[] declaration). Phase 2.5 is advisory — log.warn only;
  * Phase 4 will enforce.
  */

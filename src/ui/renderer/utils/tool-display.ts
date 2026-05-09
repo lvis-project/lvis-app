@@ -90,12 +90,16 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
 
   // System
   bash: "터미널 명령",
+  powershell: "PowerShell 명령",
   read_file: "파일 읽기",
   list_files: "파일 목록",
   glob_files: "파일 찾기",
   grep_files: "파일 내용 검색",
   write_file: "파일 쓰기",
   edit_file: "파일 편집",
+  apply_patch: "파일 패치",
+  move_file: "파일 이동",
+  delete_file: "파일 삭제",
   request_plugin: "플러그인 실행",
 
   // Memory (boot/tools)
@@ -112,7 +116,7 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
 
 export function getToolDisplayName(toolName: string): string {
   if (TOOL_DISPLAY_NAMES[toolName]) return TOOL_DISPLAY_NAMES[toolName];
-  // Smart fallback: unknown tool names rendered as readable text (underscores → spaces)
+  // Unknown tool names render as readable text (underscores -> spaces).
   return toolName.replace(/_/g, " ");
 }
 

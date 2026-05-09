@@ -5,6 +5,7 @@ import {
   readFile,
   rename,
   stat,
+  unlink,
   writeFile,
 } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -25,7 +26,7 @@ import {
   type Tool,
   type ToolCategory,
   type ToolExecutionContext,
-type ToolResult,
+  type ToolResult,
 } from "./base.js";
 
 type ToolErrorResult = ToolResult & { isError: true };
@@ -88,9 +89,25 @@ export const EditFileInputSchema = FilePathSchema.extend({
   replaceAll: z.boolean().default(false),
 });
 
+export const ApplyPatchInputSchema = FilePathSchema.extend({
+  replacements: z.array(z.object({
+    oldText: z.string().min(1).describe("Exact text to replace."),
+    newText: z.string().describe("Replacement text."),
+    replaceAll: z.boolean().default(false),
+  })).min(1).max(50),
+});
+
+export const MoveFileInputSchema = z.object({
+  sourcePath: z.string().min(1).describe("Source file path, absolute or relative to session cwd."),
+  destinationPath: z.string().min(1).describe("Destination file path, absolute or relative to session cwd."),
+  overwrite: z.boolean().default(false),
+});
+
+export const DeleteFileInputSchema = FilePathSchema.extend({});
+
 abstract class FileTool<TSchema extends z.ZodTypeAny> extends ZodTool<TSchema> {
   override readonly source = "builtin" as const;
-  readonly pathFields = ["path"] as const;
+  readonly pathFields: readonly string[] = ["path"];
 
   protected resolvePath(inputPath: string, ctx: ToolExecutionContext): string {
     const expanded = expandTilde(inputPath);
@@ -357,6 +374,133 @@ export class EditFileTool extends FileTool<typeof EditFileInputSchema> {
   }
 }
 
+export class ApplyPatchTool extends FileTool<typeof ApplyPatchInputSchema> {
+  readonly name = "apply_patch";
+  readonly description =
+    "Apply one or more exact text replacements to an existing UTF-8 file. Fails before writing when any hunk is missing or ambiguous.";
+  readonly inputSchema = ApplyPatchInputSchema;
+  override readonly category: ToolCategory = "write";
+
+  protected async executeTyped(
+    input: z.infer<typeof ApplyPatchInputSchema>,
+    ctx: ToolExecutionContext,
+  ): Promise<ToolResult> {
+    const target = this.resolvePath(input.path, ctx);
+    const blocked = this.ensureAllowed(target, ctx);
+    if (blocked) return blocked;
+
+    const fileStat = await statFile(target);
+    if (!fileStat.ok) return fileStat.error;
+    if (!fileStat.value.isFile()) {
+      return toolError(`apply_patch requires a regular file: ${target}`);
+    }
+    if (fileStat.value.size > MAX_TEXT_FILE_BYTES) {
+      return toolError(`apply_patch refused large file > ${MAX_TEXT_FILE_BYTES} bytes: ${target}`);
+    }
+    if (await isBinaryFile(target)) {
+      return toolError(`apply_patch refused binary file: ${target}`);
+    }
+
+    let next = await readFile(target, "utf8");
+    let totalReplacements = 0;
+    for (const replacement of input.replacements) {
+      const occurrences = countOccurrences(next, replacement.oldText);
+      if (occurrences === 0) {
+        return toolError(`apply_patch oldText not found in ${target}`);
+      }
+      if (occurrences > 1 && !replacement.replaceAll) {
+        return toolError(
+          `apply_patch oldText matched ${occurrences} times in ${target}; set replaceAll=true for intentional global replacement`,
+        );
+      }
+      totalReplacements += replacement.replaceAll ? occurrences : 1;
+      next = replacement.replaceAll
+        ? next.split(replacement.oldText).join(replacement.newText)
+        : next.replace(replacement.oldText, replacement.newText);
+    }
+
+    const temp = `${target}.lvis-tmp-${process.pid}-${Date.now()}`;
+    await writeFile(temp, next, "utf8");
+    await rename(temp, target);
+    return {
+      output: JSON.stringify({ path: target, replacements: totalReplacements }),
+      isError: false,
+      metadata: { path: target, replacements: totalReplacements },
+    };
+  }
+}
+
+export class MoveFileTool extends FileTool<typeof MoveFileInputSchema> {
+  readonly name = "move_file";
+  readonly description =
+    "Move or rename a regular file within the workspace. Parent directories are created automatically.";
+  readonly inputSchema = MoveFileInputSchema;
+  override readonly category: ToolCategory = "write";
+  override readonly pathFields = ["sourcePath", "destinationPath"] as const;
+
+  protected async executeTyped(
+    input: z.infer<typeof MoveFileInputSchema>,
+    ctx: ToolExecutionContext,
+  ): Promise<ToolResult> {
+    const source = this.resolvePath(input.sourcePath, ctx);
+    const destination = this.resolvePath(input.destinationPath, ctx);
+    const sourceBlocked = this.ensureAllowed(source, ctx);
+    if (sourceBlocked) return sourceBlocked;
+    const destinationBlocked = this.ensureAllowed(destination, ctx);
+    if (destinationBlocked) return destinationBlocked;
+
+    const sourceStat = await statFile(source);
+    if (!sourceStat.ok) return sourceStat.error;
+    if (!sourceStat.value.isFile()) {
+      return toolError(`move_file requires a regular source file: ${source}`);
+    }
+    const destinationStat = await statExistingPath(destination);
+    if (!destinationStat.ok) return destinationStat.error;
+    if (destinationStat.value && !input.overwrite) {
+      return toolError(`move_file destination exists; set overwrite=true to replace: ${destination}`);
+    }
+    if (destinationStat.value && !destinationStat.value.isFile()) {
+      return toolError(`move_file destination is not a regular file: ${destination}`);
+    }
+
+    await mkdir(dirname(destination), { recursive: true });
+    await rename(source, destination);
+    return {
+      output: JSON.stringify({ sourcePath: source, destinationPath: destination }),
+      isError: false,
+      metadata: { sourcePath: source, destinationPath: destination },
+    };
+  }
+}
+
+export class DeleteFileTool extends FileTool<typeof DeleteFileInputSchema> {
+  readonly name = "delete_file";
+  readonly description = "Delete a regular file from the workspace.";
+  readonly inputSchema = DeleteFileInputSchema;
+  override readonly category: ToolCategory = "write";
+
+  protected async executeTyped(
+    input: z.infer<typeof DeleteFileInputSchema>,
+    ctx: ToolExecutionContext,
+  ): Promise<ToolResult> {
+    const target = this.resolvePath(input.path, ctx);
+    const blocked = this.ensureAllowed(target, ctx);
+    if (blocked) return blocked;
+
+    const fileStat = await statFile(target);
+    if (!fileStat.ok) return fileStat.error;
+    if (!fileStat.value.isFile()) {
+      return toolError(`delete_file requires a regular file: ${target}`);
+    }
+    await unlink(target);
+    return {
+      output: JSON.stringify({ path: target, deleted: true }),
+      isError: false,
+      metadata: { path: target, deleted: true },
+    };
+  }
+}
+
 export function createFileTools(): Tool[] {
   return [
     new ReadFileTool(),
@@ -365,6 +509,9 @@ export function createFileTools(): Tool[] {
     new GrepFilesTool(),
     new WriteFileTool(),
     new EditFileTool(),
+    new ApplyPatchTool(),
+    new MoveFileTool(),
+    new DeleteFileTool(),
   ];
 }
 
@@ -380,6 +527,19 @@ async function statFile(path: string): Promise<
   try {
     return { ok: true, value: await stat(path) };
   } catch (err) {
+    return { ok: false, error: toolError(`File stat failed: ${(err as Error).message}`) };
+  }
+}
+
+async function statExistingPath(path: string): Promise<
+  Result<Awaited<ReturnType<typeof stat>> | null>
+> {
+  try {
+    return { ok: true, value: await stat(path) };
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      return { ok: true, value: null };
+    }
     return { ok: false, error: toolError(`File stat failed: ${(err as Error).message}`) };
   }
 }

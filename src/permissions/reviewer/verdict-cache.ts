@@ -1,7 +1,7 @@
 /**
- * Q12 Phase 3 — Layer 5 Reviewer Agent: verdict cache.
+ * Permission policy Phase 3 — Layer 5 Reviewer Agent: verdict cache.
  *
- * Spec ref: docs/architecture/q12-permission-policy-design.md §3 Layer 5
+ * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 5
  * verdict cache, §11 v2.1 binding decision (selective by invalidationKey).
  *
  * Storage: `~/.lvis/permissions/reviewer-cache.jsonl` (append-only,
@@ -53,7 +53,7 @@ export interface VerdictCacheLookupKey {
   source: ToolSource;
   category: ToolCategory;
   /**
-   * Q12 architect round-4: cache identity must include trust origin.
+   * Permission policy architect round-4: cache identity must include trust origin.
    * A `user`-keyboard verdict cached for a write must NOT be served to
    * an `agent`-origin invocation of the same shape — the underlying
    * intent (and therefore the safe verdict) differs.

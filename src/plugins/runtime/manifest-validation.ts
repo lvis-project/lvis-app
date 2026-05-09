@@ -15,7 +15,7 @@ import type { PluginManifest, InstallPolicy } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
 
 /**
- * Q12 — categories a plugin manifest may declare. Plugins are NOT allowed
+ * Permission policy — categories a plugin manifest may declare. Plugins are NOT allowed
  * to claim `meta` (host-only control-flow primitives), and future host-only
  * category additions must not automatically widen the plugin manifest contract.
  */
@@ -383,7 +383,7 @@ export async function parsePluginJson(
         `"toolSchemas": { "${k}": { "description": "...", "category": "read", "inputSchema": { "type": "object", "properties": {} } } }`,
       );
     }
-    // Q12 P2.5 — advisory pathFields hint. Soft-warn only; Phase 4 will
+    // Permission policy P2.5 — advisory pathFields hint. Soft-warn only; Phase 4 will
     // enforce that every undeclared path field is deny-by-default.
     const pathFields = parsed.toolSchemas?.[k]?.pathFields as unknown;
     if (pathFields !== undefined) {
