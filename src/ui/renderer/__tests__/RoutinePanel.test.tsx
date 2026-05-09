@@ -62,7 +62,7 @@ describe("Q12 P5 round 2 — RoutinePanel scope payload mapping", () => {
     const onClose = vi.fn();
     const onAdded = vi.fn();
 
-    const { getByTestId, getByText, getByPlaceholderText } = render(
+    const { getByTestId, getByText } = render(
       <AddRoutineModal api={api} onClose={onClose} onAdded={onAdded} />,
     );
 
