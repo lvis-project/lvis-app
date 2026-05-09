@@ -470,6 +470,22 @@ const api = {
       ipcRenderer.invoke("lvis:permission:add-rule", pattern, action),
     removeRule: async (pattern: string, action: string) =>
       ipcRenderer.invoke("lvis:permission:remove-rule", pattern, action),
+    /** Q12 P3 — deferred queue (Layer 5 reviewer HIGH verdicts). */
+    deferredList: async () => ipcRenderer.invoke("lvis:permissions:deferred-list"),
+    deferredResolve: async (
+      id: string,
+      decision: "approved" | "rejected",
+      reason?: string,
+    ) =>
+      ipcRenderer.invoke("lvis:permissions:deferred-resolve", { id, decision, reason }),
+    /** Foreground-entry pending notification — main→renderer event. */
+    onDeferredPending: (cb: (summary: { pending: number }) => void) => {
+      const listener = (_event: unknown, summary: { pending: number }) =>
+        cb(summary);
+      ipcRenderer.on("lvis:permissions:deferred-pending", listener);
+      return () =>
+        ipcRenderer.removeListener("lvis:permissions:deferred-pending", listener);
+    },
   },
 
   // ─── Policy (Governance) ─────────────────────────
