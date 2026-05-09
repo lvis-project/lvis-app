@@ -148,6 +148,7 @@ export interface ConversationDeps {
   sessionTodoStore?: SessionTodoStore;
   /** Issue #260: optional notification service for turn-end auto-fire. */
   notificationService?: NotificationService;
+  auditLogger?: AuditLogger;
 }
 
 /**
@@ -177,6 +178,7 @@ export type RoutineConversationLoopDeps = Pick<
   | "scriptHookManager"
   | "bashAstValidator"
   | "pluginRuntime"
+  | "auditLogger"
 >;
 
 export function createRoutineConversationLoop(
@@ -224,6 +226,7 @@ export function createRoutineConversationLoop(
     scriptHookManager: deps.scriptHookManager,
     bashAstValidator: deps.bashAstValidator,
     pluginRuntime: deps.pluginRuntime,
+    auditLogger: deps.auditLogger,
     allowedPluginIds,
     forcedActivePluginIds,
     additionalDirectories: scope?.directories ?? [],
@@ -268,6 +271,7 @@ export type TriggerConversationLoopDeps = Pick<
   | "scriptHookManager"
   | "bashAstValidator"
   | "pluginRuntime"
+  | "auditLogger"
 >;
 
 export function createTriggerConversationLoop(
@@ -285,6 +289,7 @@ export function createTriggerConversationLoop(
     scriptHookManager: deps.scriptHookManager,
     bashAstValidator: deps.bashAstValidator,
     pluginRuntime: deps.pluginRuntime,
+    auditLogger: deps.auditLogger,
     // postTurnHookChain / hookRunner / idleScheduler intentionally omitted.
   });
 }
@@ -313,6 +318,7 @@ export function createConversationLoop(deps: ConversationDeps): ConversationLoop
     skillOverlay: deps.skillOverlay,
     sessionTodoStore: deps.sessionTodoStore,
     notificationService: deps.notificationService,
+    auditLogger: deps.auditLogger,
   });
 }
 

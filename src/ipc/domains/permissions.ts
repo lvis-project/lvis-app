@@ -93,6 +93,22 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
     return loadPolicy();
   });
 
+  // ── Permission policy — `/permission dir` slash dispatcher (IPC) ──────────
+  ipcMain.handle(
+    PERMISSIONS.dirDispatch,
+    async (e, args: { rawArgs: string }) => {
+      if (!validateSender(e)) {
+        auditUnauthorized(auditLogger, PERMISSIONS.dirDispatch, e);
+        return UNAUTHORIZED_FRAME;
+      }
+      const { parsePermissionDirCommand, dispatchPermissionDirCommand } =
+        await import("../../permissions/permission-slash.js");
+      const parsed = parsePermissionDirCommand(args?.rawArgs ?? "");
+      if ("ok" in parsed && parsed.ok === false) return parsed;
+      return dispatchPermissionDirCommand(parsed as Exclude<typeof parsed, { ok: false }>);
+    },
+  );
+
   // ── Permission policy — `/permission reviewer` slash dispatcher (IPC) ─────
   ipcMain.handle(
     PERMISSIONS.reviewerDispatch,

@@ -262,6 +262,7 @@ describe("agent_spawn — recursive call refusal", () => {
     const ctxAsSubAgent = {
       cwd: process.cwd(),
       metadata: { sessionId: "child-1", spawnDepth: 1 },
+      allowedDirectories: [],
     };
     const r = await tool.execute(
       { title: "nested", instructions: "go deeper" },
@@ -287,6 +288,7 @@ describe("agent_spawn — recursive call refusal", () => {
     const ctxAsParent = {
       cwd: process.cwd(),
       metadata: { sessionId: "parent", spawnDepth: 0 },
+      allowedDirectories: [],
     };
     const r = await tool.execute(
       { title: "child", instructions: "do" },

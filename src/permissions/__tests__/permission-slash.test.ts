@@ -1,6 +1,3 @@
-/**
- * Permission policy Phase 2.5 — `/permission dir` slash + settings persistence tests.
- */
 import { describe, it, expect } from "vitest";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -25,6 +22,11 @@ describe("parsePermissionDirCommand", () => {
   it("parses 'allow <path>'", () => {
     const r = parsePermissionDirCommand("allow /Users/ken/work");
     expect(r).toEqual({ verb: "allow", path: "/Users/ken/work", session: false });
+  });
+
+  it("parses quoted paths with spaces", () => {
+    const r = parsePermissionDirCommand('allow "/Users/ken/My Project"');
+    expect(r).toEqual({ verb: "allow", path: "/Users/ken/My Project", session: false });
   });
 
   it("parses 'allow <path> --session'", () => {
@@ -74,6 +76,11 @@ describe("parsePermissionDirCommand", () => {
 
   it("rejects 'allow' with multiple paths", () => {
     const r = parsePermissionDirCommand("allow /foo /bar");
+    expect(r).toMatchObject({ ok: false });
+  });
+
+  it("rejects unterminated quoted paths", () => {
+    const r = parsePermissionDirCommand('allow "/foo');
     expect(r).toMatchObject({ ok: false });
   });
 });

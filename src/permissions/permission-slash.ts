@@ -67,7 +67,9 @@ export type PermissionDirResult =
 export function parsePermissionDirCommand(
   rawArgs: string,
 ): PermissionDirCommand | { ok: false; error: string } {
-  const args = rawArgs.trim().split(/\s+/).filter((p) => p.length > 0);
+  const tokenized = tokenizePermissionArgs(rawArgs);
+  if (!tokenized.ok) return tokenized;
+  const args = tokenized.tokens;
   if (args.length === 0) {
     return { ok: false, error: "missing subcommand — usage: /permission dir <allow|deny|list> [path] [--session]" };
   }
@@ -95,12 +97,54 @@ export function parsePermissionDirCommand(
   return { verb, path: remaining[0], session };
 }
 
+function tokenizePermissionArgs(rawArgs: string): { ok: true; tokens: string[] } | { ok: false; error: string } {
+  const tokens: string[] = [];
+  let token = "";
+  let quote: '"' | "'" | null = null;
+  let escaping = false;
+
+  for (const ch of rawArgs.trim()) {
+    if (escaping) {
+      token += ch;
+      escaping = false;
+      continue;
+    }
+    if (quote === '"' && ch === "\\") {
+      escaping = true;
+      continue;
+    }
+    if (quote) {
+      if (ch === quote) {
+        quote = null;
+      } else {
+        token += ch;
+      }
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      continue;
+    }
+    if (/\s/.test(ch)) {
+      if (token.length > 0) {
+        tokens.push(token);
+        token = "";
+      }
+      continue;
+    }
+    token += ch;
+  }
+
+  if (escaping) return { ok: false, error: "unterminated escape in quoted argument" };
+  if (quote) return { ok: false, error: "unterminated quoted argument" };
+  if (token.length > 0) tokens.push(token);
+  return { ok: true, tokens };
+}
+
 /**
  * Dispatch a parsed command. Side effects:
  *   - `allow` (no --session) → persist to ~/.lvis/settings.json.
- *   - `allow --session` → no persist; caller is expected to merge into
- *     the live in-memory `additionalDirectories` (Phase 5 will fully
- *     wire that channel — for Phase 2.5 we just return ok+sessionOnly).
+ *   - `allow --session` → no persist; caller owns live-scope mutation.
  *   - `deny` → remove from ~/.lvis/settings.json (settings-level).
  *     Layer 0 sensitive-paths is the actual hard-deny — `deny` here is
  *     just removing from the user's own list.
