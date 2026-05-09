@@ -90,6 +90,12 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
 
   // System
   bash: "터미널 명령",
+  read_file: "파일 읽기",
+  list_files: "파일 목록",
+  glob_files: "파일 찾기",
+  grep_files: "파일 내용 검색",
+  write_file: "파일 쓰기",
+  edit_file: "파일 편집",
   request_plugin: "플러그인 실행",
 
   // Memory (boot/tools)
