@@ -16,7 +16,7 @@
  *                                                 permission-manager,
  *                                                 post-turn-hook-chain,
  *                                                 approval-gate,
- *                                                 hook-runner,
+ *                                                 script-hook manager,
  *                                                 conversation-loop,
  *                                                 callLlm builders.
  *   Step 6          src/boot/routine.ts           routine runtime +
@@ -57,7 +57,7 @@ import { openLinkWindow as openLinkWindowService } from "./main/link-window-serv
 import { shell } from "electron";
 
 import { type AppServices, emitEvent, onEvent } from "./boot/types.js";
-import { ROUTINES_V2 } from "./shared/ipc-channels.js";
+import { PERMISSIONS_Q12, ROUTINES_V2 } from "./shared/ipc-channels.js";
 import { startWatcherTelemetryCollector } from "./boot/steps/watcher-telemetry-collector.js";
 import { bootstrapCoreServices } from "./boot/services.js";
 import { registerPluginNotifications } from "./boot/plugins.js";
@@ -99,10 +99,9 @@ import { registerPluginEventBridge } from "./boot/steps/ipc-bridge.js";
 import { wireReleasePrep, wireUpdateCheck } from "./boot/steps/post-boot.js";
 import { wireReviewerAgent } from "./boot/steps/reviewer-wiring.js";
 import { wireHookSystem } from "./boot/steps/hook-system-wiring.js";
+import { readPermissionSettings } from "./permissions/permission-settings-store.js";
 import { createProvider, secretKeyFor } from "./engine/llm/provider-factory.js";
 import type { LLMProvider, LLMVendor } from "./engine/llm/types.js";
-import type { HookDiff } from "./hooks/hook-discovery.js";
-import { hookTrustResolverRegistry } from "./hooks/hook-trust-resolver-registry.js";
 import {
   bindManifestIntegrityAudit,
   manifestIntegrityState,
@@ -332,29 +331,25 @@ export async function bootstrap(
   // For mode=llm, build an adapter over the host's existing
   // VercelUnifiedProvider streaming surface — the reviewer needs only a
   // one-shot complete() call shape.
-  try {
-    wireReviewerAgent({
-      permissionManager,
-      streamProviderFor: (vendor: string): LLMProvider | null => {
-        // Reviewer settings vendor name → LLMVendor:
-        //   "openai"    → "openai"
-        //   "anthropic" → "claude"
-        //   "google"    → "gemini"
-        const vendorMap: Record<string, LLMVendor> = {
-          openai: "openai",
-          anthropic: "claude",
-          google: "gemini",
-        };
-        const llmVendor = vendorMap[vendor];
-        if (!llmVendor) return null;
-        const apiKey = settingsService.getSecret(secretKeyFor(llmVendor));
-        if (!apiKey) return null;
-        return createProvider({ vendor: llmVendor, apiKey });
-      },
-    });
-  } catch (err) {
-    log.warn("boot: reviewer wiring failed (non-fatal): %s", (err as Error).message);
-  }
+  wireReviewerAgent({
+    permissionManager,
+    streamProviderFor: (vendor: string): LLMProvider | null => {
+      // Reviewer settings vendor name → LLMVendor:
+      //   "openai"    → "openai"
+      //   "anthropic" → "claude"
+      //   "google"    → "gemini"
+      const vendorMap: Record<string, LLMVendor> = {
+        openai: "openai",
+        anthropic: "claude",
+        google: "gemini",
+      };
+      const llmVendor = vendorMap[vendor];
+      if (!llmVendor) return null;
+      const apiKey = settingsService.getSecret(secretKeyFor(llmVendor));
+      if (!apiKey) return null;
+      return createProvider({ vendor: llmVendor, apiKey });
+    },
+  });
 
   // Q12 P4 §3.5 — manifest integrity proxy. Subscribes the audit
   // logger so every read→write violation lands in `~/.lvis/audit/` +
@@ -363,7 +358,7 @@ export async function bootstrap(
   bindManifestIntegrityAudit(bootAuditLogger);
   manifestIntegrityState.onViolation((pluginId, toolName, attempted) => {
     try {
-      getMainWindow()?.webContents.send("lvis:permissions:manifest-violation", {
+      getMainWindow()?.webContents.send(PERMISSIONS_Q12.manifestViolation, {
         pluginId,
         toolName,
         attempted,
@@ -376,41 +371,16 @@ export async function bootstrap(
     }
   });
 
-  // Tier A4 (W3): HookRunner. Shared by interactive and routine loops so
-  // every tool call traverses the same Pre/PostToolUse hook surface.
+  // In-process HookRunner kept for internal/test hook registration only.
+  // Production external hooks flow through ScriptHookManager below so strict
+  // quarantine + explicit user trust registration is the single path.
   const hookRunner = createHookRunner();
 
   // Q12 P4 — Layer 6 script-hook system (individual `pre-*.sh` /
   // `post-*.sh` / `perm-*.sh` files under `~/.config/lvis/hooks/`).
-  // Boot-time TOFU prompt routes through `hookTrustResolverRegistry`
-  // so the renderer can accept / reject newly-discovered hooks via
-  // the `lvis:hooks:trust-prompt` IPC channel. When the dispatcher
-  // fails or there's no pending UI, the workflow strict-denies (every
-  // untrusted hook auto-moved to `.disabled/`).
-  const hookSystem = await wireHookSystem({
-    mainWindow,
-    awaitRendererDecisions: async (diff: HookDiff[]) => {
-      const { id, promise } = hookTrustResolverRegistry.registerRequest(diff);
-      try {
-        getMainWindow()?.webContents.send("lvis:hooks:trust-prompt", {
-          id,
-          files: diff.map((d) => ({
-            fileName: d.hook.fileName,
-            state: d.state,
-            sha256: d.hook.sha256,
-            previousSha256: d.previousSha256,
-          })),
-        });
-      } catch (err) {
-        log.warn(
-          "boot: hook trust IPC send failed (%s) — strict-deny applies",
-          (err as Error).message,
-        );
-        hookTrustResolverRegistry.rejectAll(id);
-      }
-      return promise;
-    },
-  });
+  // Production boot has no renderer fallback: untrusted or changed hook
+  // files are strict-denied and moved to `.disabled/`.
+  const hookSystem = await wireHookSystem();
   const scriptHookManager = hookSystem.manager;
 
   // §7: Routine Engine — 루틴마다 독립된 ConversationLoop를 생성하는 factory를 주입.
@@ -427,6 +397,7 @@ export async function bootstrap(
     permissionManager,
     approvalGate,
     hookRunner,
+    scriptHookManager,
     bashAstValidator,
     pluginRuntime,
   };
@@ -472,6 +443,8 @@ export async function bootstrap(
     bashAstValidator,
     approvalGate,
     hookRunner,
+    scriptHookManager,
+    getAdditionalDirectories: () => readPermissionSettings().permissions.additionalDirectories,
     pluginRuntime,
     skillOverlay,
     notificationService,
@@ -498,6 +471,8 @@ export async function bootstrap(
       approvalGate,
       bashAstValidator,
       hookRunner,
+      scriptHookManager,
+      getAdditionalDirectories: () => readPermissionSettings().permissions.additionalDirectories,
     },
     toolRegistry,
   });

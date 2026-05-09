@@ -362,14 +362,6 @@ export class PermissionManager {
       return { decision: "ask", reason: "MCP 서버 strict 모드", layer: 2 };
     }
 
-    if (context.headless && isMutating) {
-      return {
-        decision: "ask",
-        reason: "headless 실행 컨텍스트 — 쓰기 도구는 사용자 컨펌 필수",
-        layer: 2,
-      };
-    }
-
     // Proactive origin override — write/shell/network 도구는 cached
     // allow rules / always-allowed / auto-mode 를 모두 우회하고
     // 항상 사용자 컨펌을 받음. read 는 자동 실행 OK.
@@ -379,6 +371,10 @@ export class PermissionManager {
         reason: `proactive 출처 (${proactiveOrigin}) — 쓰기 도구는 사용자 컨펌 필수`,
         layer: 2,
       };
+    }
+
+    if (context.headless === true && isMutating) {
+      return this.categoryBasedDecision(toolName, trust, resolvedCategory, context);
     }
 
     // 3. Allow rules

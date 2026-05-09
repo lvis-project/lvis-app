@@ -31,16 +31,23 @@ function makeEntry(overrides: Partial<DeferredEntry> = {}): DeferredEntry {
 
 function installApi(opts: {
   entries: DeferredEntry[];
+  listResult?: { ok: true; pending: DeferredEntry[]; total: number } | { ok: false; error: string };
+  listRejects?: Error;
   resolveResult?: { ok: true; entry: DeferredEntry } | { ok: false; error: string };
+  resolveRejects?: Error;
 }) {
-  const deferredList = vi.fn(async () => ({
-    ok: true as const,
-    pending: opts.entries,
-    total: opts.entries.length,
-  }));
-  const deferredResolve = vi.fn(async () =>
-    opts.resolveResult ?? { ok: true as const, entry: opts.entries[0] },
-  );
+  const deferredList = vi.fn(async () => {
+    if (opts.listRejects) throw opts.listRejects;
+    return opts.listResult ?? {
+      ok: true as const,
+      pending: opts.entries,
+      total: opts.entries.length,
+    };
+  });
+  const deferredResolve = vi.fn(async () => {
+    if (opts.resolveRejects) throw opts.resolveRejects;
+    return opts.resolveResult ?? { ok: true as const, entry: opts.entries[0] };
+  });
   const onDeferredPending = vi.fn(() => () => {
     /* unsubscribe noop */
   });
@@ -67,6 +74,18 @@ describe("DeferredQueuePanel", () => {
       container = r.container;
     });
     expect(container!.querySelector('[data-testid="deferred-queue-panel"]')).toBeNull();
+  });
+
+  it("renders initial deferredList failure even when queue is empty", async () => {
+    installApi({
+      entries: [],
+      listResult: { ok: false, error: "deferred-list unavailable" },
+    });
+    await act(async () => {
+      render(<DeferredQueuePanel />);
+    });
+    expect(screen.getByTestId("deferred-queue-panel")).toBeTruthy();
+    expect(screen.getByText("deferred-list unavailable")).toBeTruthy();
   });
 
   it("renders pending entries on mount", async () => {
@@ -130,5 +149,21 @@ describe("DeferredQueuePanel", () => {
     expect(screen.getByTestId("deferred-entry-a")).toBeTruthy();
     expect(screen.getByTestId("deferred-entry-b")).toBeTruthy();
     expect(screen.getByText("shell_run")).toBeTruthy();
+  });
+
+  it("surfaces deferredResolve rejection and still refreshes", async () => {
+    const api = installApi({
+      entries: [makeEntry({ id: "err-1" })],
+      resolveRejects: new Error("resolve failed"),
+    });
+    await act(async () => {
+      render(<DeferredQueuePanel />);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByText("리뷰"));
+    });
+    expect(api.deferredResolve).toHaveBeenCalledWith("err-1", "approved");
+    expect(api.deferredList.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText("resolve failed")).toBeTruthy();
   });
 });

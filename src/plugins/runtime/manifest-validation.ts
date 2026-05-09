@@ -13,15 +13,16 @@ import * as AddFormatsModule from "ajv-formats";
 import type { ValidateFunction } from "ajv";
 import type { PluginManifest, InstallPolicy } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
-import { listKnownCategories } from "../../permissions/category-registry.js";
 
 /**
  * Q12 — categories a plugin manifest may declare. Plugins are NOT allowed
- * to claim `meta` (host-only control-flow primitives), so we filter the
- * registry's known set down to the plugin-safe enum.
+ * to claim `meta` (host-only control-flow primitives), and future host-only
+ * category additions must not automatically widen the plugin manifest contract.
  */
+const PLUGIN_ACCEPTED_CATEGORIES = ["read", "write", "shell", "network"] as const;
+
 function pluginAcceptedCategories(): string[] {
-  return listKnownCategories().filter((c) => c !== "meta");
+  return [...PLUGIN_ACCEPTED_CATEGORIES];
 }
 
 /**

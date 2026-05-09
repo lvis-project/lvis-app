@@ -223,9 +223,8 @@ export interface PluginManifest {
        * - write   상태 변경
        * - shell   셸 명령 (호스트 AST 검사 대상)
        * - network 외부 네트워크 호출 (호스트 endpoint surface 표시)
-       * - meta    제어 흐름 (UI 프롬프트 등) — 호스트 builtin 만 사용
        */
-      category?: "read" | "write" | "shell" | "network" | "meta";
+      category?: "read" | "write" | "shell" | "network";
       /**
        * §6.4 Tool versioning — optional semver string for this tool. When
        * omitted, the plugin manifest's top-level `version` is used as the
@@ -244,10 +243,8 @@ export interface PluginManifest {
        * Layer 0 (sensitive-paths) and Layer 1 (allowed-directories)
        * checks instead of scanning every string field.
        *
-       * Phase 2.5: ADVISORY ONLY. The host falls back to the v1
-       * 3-field extractor (`path|file_path|filePath`) when omitted or
-       * empty. Phase 4 will enforce — undeclared path fields will be
-       * deny-by-default to close the manifest-honesty surface.
+       * Plugin tools without declared path fields are treated as
+       * pathless by policy. Builtin tools own their own path extraction.
        *
        * Example: `"pathFields": ["targetPath", "outputDir"]`.
        */

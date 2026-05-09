@@ -13,11 +13,13 @@
 import {
   appendFileSync,
   chmodSync,
+  closeSync,
   mkdirSync,
   existsSync,
+  openSync,
   readdirSync,
   createReadStream,
-  readFileSync,
+  readSync,
   statSync,
 } from "node:fs";
 import { createWriteStream } from "node:fs";
@@ -33,7 +35,49 @@ import {
   GENESIS_MARKER,
   type SecretStore,
 } from "./hmac-chain.js";
-import type { Q12AuditEntry } from "./audit-schema.js";
+import type { Q12AuditEntry, Q12AuditEntryInput } from "./audit-schema.js";
+
+function readLastNonEmptyLineSync(filePath: string): string {
+  if (!existsSync(filePath)) return GENESIS_MARKER;
+  const { size } = statSync(filePath);
+  if (size === 0) return GENESIS_MARKER;
+
+  const fd = openSync(filePath, "r");
+  try {
+    const one = Buffer.allocUnsafe(1);
+    let end = size;
+    while (end > 0) {
+      readSync(fd, one, 0, 1, end - 1);
+      if (one[0] !== 0x0a && one[0] !== 0x0d) break;
+      end -= 1;
+    }
+    if (end === 0) return GENESIS_MARKER;
+
+    const chunk = Buffer.allocUnsafe(64 * 1024);
+    let start = end;
+    while (start > 0) {
+      const readLen = Math.min(chunk.length, start);
+      const position = start - readLen;
+      const bytesRead = readSync(fd, chunk, 0, readLen, position);
+      for (let i = bytesRead - 1; i >= 0; i -= 1) {
+        if (chunk[i] === 0x0a) {
+          const lineStart = position + i + 1;
+          const lineLen = end - lineStart;
+          const line = Buffer.allocUnsafe(lineLen);
+          readSync(fd, line, 0, lineLen, lineStart);
+          return line.toString("utf-8");
+        }
+      }
+      start = position;
+    }
+
+    const line = Buffer.allocUnsafe(end);
+    readSync(fd, line, 0, end, 0);
+    return line.toString("utf-8");
+  } finally {
+    closeSync(fd);
+  }
+}
 
 export interface AuditEntry {
   timestamp: string;
@@ -108,17 +152,14 @@ export class AuditLogger {
   log(entry: AuditEntry): void {
     try {
       const line = JSON.stringify(entry) + "\n";
-      const newFile = !existsSync(this.logFile);
       appendFileSync(this.logFile, line, { encoding: "utf-8", mode: 0o600 });
       // Defensive: ensure 0o600 even when the file pre-existed with a wider
       // mode (e.g. created by a process with permissive umask). CLAUDE.md
       // `~/.lvis/<feature>/` rule requires audit files be user-readable only.
-      if (newFile) {
-        try {
-          chmodSync(this.logFile, 0o600);
-        } catch {
-          // Non-fatal — chmod failure must not block audit writes.
-        }
+      try {
+        chmodSync(this.logFile, 0o600);
+      } catch {
+        // Non-fatal — chmod failure must not block audit writes.
       }
     } catch {
       // Audit 실패가 앱 동작을 차단하면 안 됨
@@ -138,21 +179,15 @@ export class AuditLogger {
   setupQ12Chain(secret: string, sealStore?: SecretStore): void {
     this.q12Secret = secret;
     this.q12SealStore = sealStore ?? null;
-    // Bootstrap: scan the existing q12 file (if any) so the next
-    // append's prevHash links to the *real* last line, not genesis.
-    this.q12LastSerialized = GENESIS_MARKER;
-    if (existsSync(this.q12LogFile)) {
-      try {
-        const raw = readFileSync(this.q12LogFile, "utf-8");
-        const lines = raw.split("\n").filter((l) => l.trim().length > 0);
-        if (lines.length > 0) {
-          this.q12LastSerialized = lines[lines.length - 1];
-        }
-      } catch {
-        // If we can't read the existing file, the chain effectively
-        // restarts from genesis. The forensics tooling will detect the
-        // discontinuity at the next verifyChain.
-      }
+    // Bootstrap from the existing file tail so the next append links to
+    // the real last line without O(n) full-file scans.
+    try {
+      this.q12LastSerialized = readLastNonEmptyLineSync(this.q12LogFile);
+    } catch {
+      // If we can't read the existing file, the chain effectively
+      // restarts from genesis. The forensics tooling will detect the
+      // discontinuity at the next verifyChain.
+      this.q12LastSerialized = GENESIS_MARKER;
     }
     this.q12ChainBootstrapped = true;
   }
@@ -191,48 +226,30 @@ export class AuditLogger {
    * caller is responsible for catching at the boot boundary and
    * surfacing a user-actionable error.
    *
-   * Concurrency: this method is synchronous (single-threaded JS event
-   * loop semantics). The risk surfaced in review was a stale cached
-   * `q12LastSerialized` after rotation or after a separate process
-   * appended. Mitigation: re-read the on-disk tail synchronously at
-   * the start of every append so prevHash always links to the actual
-   * last line. This holds even if rotation drops the file mid-runtime
-   * — the chain restarts cleanly from genesis the next call, which
-   * verifyChain will detect (rotation creates a separate file, so the
-   * new file legitimately starts at genesis).
+   * Concurrency: withFileLock serializes cross-process writers without
+   * blocking the event loop in a spin wait. The locked section reads
+   * only the on-disk tail so prevHash always links to the actual last
+   * line without O(n) full-file scans on every append.
    */
-  appendQ12Entry(entry: Omit<Q12AuditEntry, "prevHash">): Q12AuditEntry {
+  async appendQ12Entry(entry: Q12AuditEntryInput): Promise<Q12AuditEntry> {
     if (!this.q12Secret || !this.q12ChainBootstrapped) {
       throw new Error("Q12 audit chain not initialized — call setupQ12Chain() at boot");
     }
-    // Re-read the actual on-disk tail so prevHash links to the true
-    // last line even if a rotation/external write occurred between
-    // setupQ12Chain bootstrap and this append.
-    let prevSerialized = GENESIS_MARKER;
-    if (existsSync(this.q12LogFile)) {
-      try {
-        const raw = readFileSync(this.q12LogFile, "utf-8");
-        const lines = raw.split("\n").filter((l) => l.trim().length > 0);
-        if (lines.length > 0) prevSerialized = lines[lines.length - 1];
-      } catch {
-        // Read failure → restart chain from genesis. The forensics
-        // tooling will detect the discontinuity at the next verifyChain.
-      }
-    }
-    const prevHash = computeLineHmac(this.q12Secret, prevSerialized);
-    const full = { ...entry, prevHash } as Q12AuditEntry;
-    const serialized = JSON.stringify(full);
-    const newFile = !existsSync(this.q12LogFile);
-    appendFileSync(this.q12LogFile, serialized + "\n", { encoding: "utf-8", mode: 0o600 });
-    if (newFile) {
+    const secret = this.q12Secret;
+    return withFileLock(this.q12LogFile, async () => {
+      this.q12LastSerialized = readLastNonEmptyLineSync(this.q12LogFile);
+      const prevHash = computeLineHmac(secret, this.q12LastSerialized);
+      const full = { ...entry, prevHash } as Q12AuditEntry;
+      const serialized = JSON.stringify(full);
+      appendFileSync(this.q12LogFile, serialized + "\n", { encoding: "utf-8", mode: 0o600 });
       try {
         chmodSync(this.q12LogFile, 0o600);
       } catch {
         // Non-fatal — chmod failure must not block audit writes.
       }
-    }
-    this.q12LastSerialized = serialized;
-    return full;
+      this.q12LastSerialized = serialized;
+      return full;
+    });
   }
 
   /**

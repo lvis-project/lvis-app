@@ -118,6 +118,10 @@ export async function runOneHookScript(
       if (stderrChunks.reduce((s, b) => s + b.byteLength, 0) >= MAX_HOOK_STDOUT_BYTES) return;
       stderrChunks.push(c);
     });
+    child.stdin?.on("error", (err: NodeJS.ErrnoException) => {
+      if (err.code === "EPIPE") return;
+      log.warn("hook stdin error: %s (%s)", hook.fileName, err.message);
+    });
 
     let timedOut = false;
     const timer = setTimeout(() => {
