@@ -138,8 +138,28 @@ describe("parsePermissionHooksCommand", () => {
     });
   });
 
+  it("parses 'reject pre-foo.sh' (Q12 architect ③ — destructive expunge)", () => {
+    expect(parsePermissionHooksCommand("reject pre-foo.sh")).toEqual({
+      verb: "hooks",
+      sub: "reject",
+      name: "pre-foo.sh",
+    });
+  });
+
   it("rejects 'accept' without name", () => {
     expect(parsePermissionHooksCommand("accept")).toMatchObject({ ok: false });
+  });
+
+  it("rejects 'reject' without name", () => {
+    expect(parsePermissionHooksCommand("reject")).toMatchObject({ ok: false });
+  });
+
+  it("rejects unknown subcommand with the verb hint listing reject", () => {
+    const result = parsePermissionHooksCommand("yolo pre-foo.sh");
+    expect(result).toMatchObject({ ok: false });
+    if ("error" in result) {
+      expect(result.error).toMatch(/list\|accept\|disable\|reject/);
+    }
   });
 });
 
@@ -273,6 +293,36 @@ describe("dispatchPermissionSlash — subcommand routing", () => {
   it("routes 'hooks list' with needsModal=false", () => {
     const result = dispatchPermissionSlash("/permission hooks list", "user-keyboard");
     expect(result).toMatchObject({ kind: "hooks", needsModal: false });
+  });
+
+  it("routes 'hooks reject foo.sh' (architect ③ — destructive expunge from .disabled/)", () => {
+    const result = dispatchPermissionSlash(
+      "/permission hooks reject pre-foo.sh",
+      "user-keyboard",
+    );
+    expect(result).toMatchObject({ kind: "hooks", needsModal: false });
+    if (result.kind === "hooks") {
+      expect(result.cmd).toEqual({ verb: "hooks", sub: "reject", name: "pre-foo.sh" });
+    }
+  });
+
+  it("rejects 'hooks accept' from plugin-emitted origin (architect ④ — origin gate test)", () => {
+    const result = dispatchPermissionSlash(
+      "/permission hooks accept pre-foo.sh",
+      "plugin-emitted",
+    );
+    expect(result).toEqual({
+      kind: "rejected-non-user-origin",
+      sanitized: "permission hooks accept pre-foo.sh",
+    });
+  });
+
+  it("rejects 'hooks reject' from llm-tool-arg origin (architect ④ — origin gate)", () => {
+    const result = dispatchPermissionSlash(
+      "/permission hooks reject pre-foo.sh",
+      "llm-tool-arg",
+    );
+    expect(result.kind).toBe("rejected-non-user-origin");
   });
 
   it("routes 'rules list' with needsModal=false", () => {

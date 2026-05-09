@@ -1,4 +1,4 @@
-import { existsSync, renameSync } from "node:fs";
+import { existsSync, renameSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import {
   buildAcceptedAtMap,
@@ -48,6 +48,12 @@ export type HookTrustCommandResult =
       ok: true;
       verb: "disable";
       disabled: HookTrustRow;
+      trusted: HookTrustRow[];
+    }
+  | {
+      ok: true;
+      verb: "reject";
+      rejected: HookTrustRow;
       trusted: HookTrustRow[];
     }
   | { ok: false; error: string };
@@ -205,6 +211,56 @@ export async function disableHookTrust(
     ok: true,
     verb: "disable",
     disabled: rowFromHook(active, "disabled"),
+    trusted,
+  };
+}
+
+/**
+ * Q12 architect round-4 ③ — `permission hooks reject <name>` permanently
+ * removes a quarantined hook from `~/.config/lvis/hooks/.disabled/`.
+ *
+ * Two-step contract: an active (trusted) hook MUST be `disable`d first;
+ * `reject` only operates on `.disabled/` entries. Rationale:
+ *   - destructive (unlink) — guard against single-typo data loss
+ *   - audit clarity — the `disable → reject` pair is two distinct events,
+ *     so the trail records "user removed trust, then user expunged file"
+ *   - mirrors filesystem ergonomics — you don't `rm` a running script
+ *
+ * No lockfile mutation is required: the rejected file was already in
+ * `.disabled/`, so it was already absent from `lockfile.hooks`. We
+ * still re-persist the trusted set to refresh `acceptedAt` timestamps
+ * for an audit-friendly snapshot.
+ */
+export async function rejectHookTrust(
+  fileName: string,
+  opts: HookTrustCommandOptions = {},
+): Promise<HookTrustCommandResult> {
+  const invalid = validateHookName(fileName);
+  if (invalid) return { ok: false, error: invalid };
+
+  const state = snapshot(opts);
+  const active = state.active.find((hook) => hook.fileName === fileName);
+  if (active) {
+    return {
+      ok: false,
+      error: `hook '${fileName}' is currently active — disable it first, then reject`,
+    };
+  }
+  const quarantined = state.disabled.find((hook) => hook.fileName === fileName);
+  if (!quarantined) return { ok: false, error: `hook not found: ${fileName}` };
+
+  unlinkSync(quarantined.path);
+
+  const acceptedAt = buildAcceptedAtMap(state.lockfile);
+  const trusted = await persistTrustedHooks(
+    state.diff.filter((entry) => entry.state === "trusted").map((entry) => entry.hook),
+    opts,
+    acceptedAt,
+  );
+  return {
+    ok: true,
+    verb: "reject",
+    rejected: rowFromHook(quarantined, "disabled"),
     trusted,
   };
 }
