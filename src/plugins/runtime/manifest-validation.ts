@@ -13,6 +13,16 @@ import * as AddFormatsModule from "ajv-formats";
 import type { ValidateFunction } from "ajv";
 import type { PluginManifest, InstallPolicy } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
+import { listKnownCategories } from "../../permissions/category-registry.js";
+
+/**
+ * Q12 — categories a plugin manifest may declare. Plugins are NOT allowed
+ * to claim `meta` (host-only control-flow primitives), so we filter the
+ * registry's known set down to the plugin-safe enum.
+ */
+function pluginAcceptedCategories(): string[] {
+  return listKnownCategories().filter((c) => c !== "meta");
+}
 
 /**
  * Stable SemVer pattern (MAJOR.MINOR.PATCH, no leading zeros, no pre-release,
@@ -364,15 +374,11 @@ export async function parsePluginJson(
       );
     }
     const category = parsed.toolSchemas?.[k]?.category;
-    if (
-      category !== undefined &&
-      category !== "read" &&
-      category !== "write" &&
-      category !== "dangerous"
-    ) {
+    const accepted = pluginAcceptedCategories();
+    if (category !== undefined && !accepted.includes(category as string)) {
       fail(
         `toolSchemas['${k}'].category`,
-        "must be one of read, write, dangerous",
+        `must be one of ${accepted.join(", ")}`,
         `"toolSchemas": { "${k}": { "description": "...", "category": "read", "inputSchema": { "type": "object", "properties": {} } } }`,
       );
     }

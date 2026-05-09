@@ -215,11 +215,17 @@ export interface PluginManifest {
     {
       description: string;
       /**
-       * Permission category used by the host executor. Omitted categories
-       * are treated as "write" at registration time so plugin tools fail
-       * closed until authors declare read-only intent explicitly.
+       * Q12 5-axis permission category used by the host executor. Omitted
+       * categories are treated as "write" at registration time so plugin
+       * tools fail closed until authors declare read-only intent explicitly.
+       *
+       * - read    조회/검색
+       * - write   상태 변경
+       * - shell   셸 명령 (호스트 AST 검사 대상)
+       * - network 외부 네트워크 호출 (호스트 endpoint surface 표시)
+       * - meta    제어 흐름 (UI 프롬프트 등) — 호스트 builtin 만 사용
        */
-      category?: "read" | "write" | "dangerous";
+      category?: "read" | "write" | "shell" | "network" | "meta";
       /**
        * §6.4 Tool versioning — optional semver string for this tool. When
        * omitted, the plugin manifest's top-level `version` is used as the

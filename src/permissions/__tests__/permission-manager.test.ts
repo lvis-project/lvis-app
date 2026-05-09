@@ -257,11 +257,14 @@ describe("PermissionManager — proactive-origin override (R2-1 fix)", () => {
     expect(r.reason).toMatch(/proactive 출처/);
   });
 
-  it("forces ASK on dangerous tools too", () => {
+  it("forces ASK on shell tools too", () => {
+    // Q12 — `shell` (formerly `dangerous`) is the 5-axis category for
+    // bash/script execution. The proactive override must force ask
+    // regardless of the user's allow-always cache.
     const r = pm.checkDetailed(
       "rm_anything",
       "builtin",
-      "dangerous",
+      "shell",
       "proactive:meeting-detection",
     );
     expect(r.decision).toBe("ask");

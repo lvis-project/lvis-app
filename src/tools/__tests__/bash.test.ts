@@ -140,8 +140,8 @@ describe("BashTool — ZodTool surface", () => {
     expect(resolved.properties.command).toBeDefined();
   });
 
-  it("category is 'dangerous'", () => {
-    expect(new BashTool().category).toBe("dangerous");
+  it("category is 'shell'", () => {
+    expect(new BashTool().category).toBe("shell");
   });
 
   it("registers directly into the canonical ToolRegistry", () => {
@@ -151,7 +151,7 @@ describe("BashTool — ZodTool surface", () => {
     expect(found).toBeDefined();
     expect(found?.name).toBe("bash");
     expect(found?.source).toBe("builtin");
-    expect(found?.category).toBe("dangerous");
+    expect(found?.category).toBe("shell");
   });
 });
 
