@@ -237,6 +237,21 @@ export interface PluginManifest {
       deprecatedSince?: string;
       /** §6.4 — name of the replacement tool (transparent redirect). */
       replacedBy?: string;
+      /**
+       * Q12 P2.5 advisory — ordered list of input-schema property names
+       * that contain filesystem path strings. The host executor uses
+       * this hint at call-time to extract path-typed inputs for the
+       * Layer 0 (sensitive-paths) and Layer 1 (allowed-directories)
+       * checks instead of scanning every string field.
+       *
+       * Phase 2.5: ADVISORY ONLY. The host falls back to the v1
+       * 3-field extractor (`path|file_path|filePath`) when omitted or
+       * empty. Phase 4 will enforce — undeclared path fields will be
+       * deny-by-default to close the manifest-honesty surface.
+       *
+       * Example: `"pathFields": ["targetPath", "outputDir"]`.
+       */
+      pathFields?: string[];
       inputSchema: {
         $schema?: string;
         type: "object";
