@@ -38,6 +38,26 @@ function makeManifest(category: string): PluginManifest {
   } as PluginManifest;
 }
 
+function makePathFieldsManifest(pathFields: unknown): PluginManifest {
+  return {
+    id: "path-plugin",
+    name: "path",
+    version: "1.0.0",
+    main: "x.js",
+    tools: ["path_scan"],
+    toolSchemas: {
+      path_scan: {
+        category: "read",
+        pathFields: pathFields as string[],
+        inputSchema: {
+          type: "object",
+          properties: { targetPath: { type: "string" } },
+        },
+      },
+    },
+  } as PluginManifest;
+}
+
 describe("Q12 P4 plugin-tool-adapter manifest integrity gate", () => {
   it("records ManifestIntegrityViolation when the runtime throws it", async () => {
     const fakeRuntime = {
@@ -82,11 +102,8 @@ describe("Q12 P4 plugin-tool-adapter manifest integrity gate", () => {
   });
 
   it("write-declared tools are NOT subject to the post-violation gate", async () => {
-    // Write tools never get the proxy → no violation recording. Even
-    // if the *plugin id* is disabled (e.g. a different read-tool
-    // misbehaved), write-declared tools still call through. That's by
-    // design: the disable is per-tool only via the read-only fs proxy
-    // which write tools don't use.
+    // Write tools never get the read-only fs proxy, so they cannot
+    // trigger the plugin-wide disable path for read-only violations.
     const fakeRuntime = {
       call: vi.fn(async () => "wrote ok"),
     } as unknown as PluginRuntime;
@@ -112,6 +129,18 @@ describe("Q12 P4 plugin-tool-adapter manifest integrity gate", () => {
     const result = await tools[0].execute({ q: "x" }, {} as never);
     expect(result.isError).toBe(false);
     expect(result.output).toContain("items");
+  });
+
+  it("sanitizes malformed pathFields before exposing them to ToolExecutor", () => {
+    const fakeRuntime = {
+      call: vi.fn(async () => "ok"),
+    } as unknown as PluginRuntime;
+    const tools = pluginToolsForRegistration(
+      fakeRuntime,
+      "path-plugin",
+      makePathFieldsManifest([" targetPath ", "", 123, null, "targetPath"]),
+    );
+    expect(tools[0].pathFields).toEqual(["targetPath"]);
   });
 
   it("violation IPC + audit listeners fire on first violation", async () => {

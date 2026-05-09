@@ -29,10 +29,9 @@ export type RoutineExecution = "llm-session" | "notification-only";
  * - `deny-all`  no plugin tools exposed (legacy `allowedPlugins: []`)
  * - `allow`     explicit allowlist (legacy non-empty `allowedPlugins`)
  * - `inherit`   adopt the user's currently-active plugin set at fire
- *               time (Routine v2 default; legacy `allowedPlugins?`
- *               undefined). The boot-time normalization in
- *               `RoutineEngineV2.runRoutine` snapshots the active set
- *               so the loop never sees `inherit` at invocation time.
+ *               time. This mode is explicit only; missing scope and
+ *               missing/tampered legacy `allowedPlugins` coerce to
+ *               deny-all.
  */
 export type RoutinePluginScope =
   | { mode: "deny-all" }
@@ -129,13 +128,11 @@ export interface AddRoutineInput {
   notificationBody?: string;
   /**
    * Q12 Layer 4 scope — see {@link RoutineScope}. When omitted, the
-   * store fills `pluginIds: { mode: "inherit" }` and empty defaults
-   * for the rest. The runtime engine then snapshots the active plugin
-   * set at fire time. A caller that wants the safer "no plugins"
-   * default should pass `{ pluginIds: { mode: "deny-all" }, ... }`
-   * explicitly. Missing scope on a *persisted* legacy record (no
-   * input layer involved) is treated as deny-all by the migration —
-   * see RoutineRecord.scope.
+   * store fills `pluginIds: { mode: "deny-all" }` and empty defaults
+   * for the rest. Callers that want active-plugin inheritance must pass
+   * `{ pluginIds: { mode: "inherit" }, forcedPluginIds: [], directories: [] }`
+   * explicitly so the runtime engine can snapshot the active plugin set
+   * at fire time.
    */
   scope?: RoutineScope;
 }

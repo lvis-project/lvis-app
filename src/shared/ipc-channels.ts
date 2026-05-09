@@ -37,3 +37,13 @@ export const ROUTINES_V2 = {
   // M8 — emitted when an LLM session errors out so renderer can clear running state
   failed: "lvis:routines:v2:failed",
 } as const;
+
+export const PERMISSIONS_Q12 = {
+  reviewerDispatch: "lvis:permissions:reviewer-dispatch",
+  deferredList: "lvis:permissions:deferred-list",
+  deferredResolve: "lvis:permissions:deferred-resolve",
+  deferredPending: "lvis:permissions:deferred-pending",
+  auditShow: "lvis:permissions:audit-show",
+  auditVerify: "lvis:permissions:audit-verify",
+  manifestViolation: "lvis:permissions:manifest-violation",
+} as const;

@@ -42,6 +42,12 @@ function makeRoutineRecord(): RoutineRecord {
   } as unknown as RoutineRecord;
 }
 
+function validFutureDate(): string {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
 describe("Q12 P5 round 2 — RoutinePanel scope payload mapping", () => {
   it("empty plugin selection submits scope.pluginIds = { mode: 'deny-all' }", async () => {
     const addRoutineV2 = vi.fn().mockResolvedValue({ ok: true, routine: makeRoutineRecord() });
@@ -76,7 +82,7 @@ describe("Q12 P5 round 2 — RoutinePanel scope payload mapping", () => {
     // The form tab needs at least an `atDate`. Pick a date input.
     const dateInputs = document.querySelectorAll('input[type="date"]');
     expect(dateInputs.length).toBeGreaterThan(0);
-    fireEvent.change(dateInputs[0]!, { target: { value: "2099-01-01" } });
+    fireEvent.change(dateInputs[0]!, { target: { value: validFutureDate() } });
 
     // Toggle plugin on then off — exercising the click path. Final state empty.
     const checkbox = getByTestId("routine-allowed-plugin-plugin-a") as HTMLInputElement;
@@ -132,7 +138,7 @@ describe("Q12 P5 round 2 — RoutinePanel scope payload mapping", () => {
 
     fireEvent.change(getByTestId("pre-prompt-input"), { target: { value: "do thing" } });
     const dateInputs = document.querySelectorAll('input[type="date"]');
-    fireEvent.change(dateInputs[0]!, { target: { value: "2099-01-01" } });
+    fireEvent.change(dateInputs[0]!, { target: { value: validFutureDate() } });
     fireEvent.click(getByTestId("routine-allowed-plugin-plugin-a"));
 
     const registerBtn = getByText("등록") as HTMLButtonElement;

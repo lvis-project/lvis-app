@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { auditApprovalViolation } from "../plugin-runtime.js";
+import { auditApprovalViolation, sanitizePluginPendingPrompt } from "../plugin-runtime.js";
 import { ApprovalOriginError } from "../../../permissions/agent-action-requester.js";
 
 describe("auditApprovalViolation (Group C — audit logger try-catch swallow)", () => {
@@ -57,5 +57,26 @@ describe("auditApprovalViolation (Group C — audit logger try-catch swallow)", 
     ).toThrow(unexpectedErr);
 
     expect(brokenLogger.log).toHaveBeenCalledOnce();
+  });
+});
+
+describe("sanitizePluginPendingPrompt", () => {
+  it("strips a command-leading slash from plugin-authored prompts", () => {
+    expect(sanitizePluginPendingPrompt("/load victim-session")).toBe("load victim-session");
+    expect(sanitizePluginPendingPrompt("   /compact")).toBe("   compact");
+    expect(sanitizePluginPendingPrompt("/permission hooks accept pre-x.sh")).toBe(
+      "permission hooks accept pre-x.sh",
+    );
+    expect(sanitizePluginPendingPrompt(" //permission hooks disable pre-x.sh")).toBe(
+      " permission hooks disable pre-x.sh",
+    );
+    expect(sanitizePluginPendingPrompt("/ /permission hooks disable pre-x.sh")).toBe(
+      "permission hooks disable pre-x.sh",
+    );
+  });
+
+  it("preserves non-command text", () => {
+    expect(sanitizePluginPendingPrompt("회의 요약해줘")).toBe("회의 요약해줘");
+    expect(sanitizePluginPendingPrompt("https://example.com/a")).toBe("https://example.com/a");
   });
 });

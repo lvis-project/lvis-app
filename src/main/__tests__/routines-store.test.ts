@@ -37,6 +37,7 @@ describe("RoutinesStore v2 — basic persistence", () => {
       });
       expect(r.id).toBeTruthy();
       expect(store.listActive()).toHaveLength(1);
+      expect(r.scope?.pluginIds).toEqual({ mode: "deny-all" });
     } finally {
       cleanup();
     }

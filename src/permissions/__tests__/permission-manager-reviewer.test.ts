@@ -161,20 +161,15 @@ describe("PermissionManager.dispatchReviewer", () => {
   });
 });
 
-describe("PermissionManager.checkDetailed — Layer 2 short-circuit for headless mutating", () => {
-  // checkDetailed has a Layer 2 short-circuit for headless+mutating
-  // (lines 348-353 in permission-manager.ts) that pre-empts category
-  // descriptor consultation. The reviewer is dispatched separately by
-  // the executor via dispatchReviewer(), AFTER checkDetailed returns
-  // ask. These tests confirm the short-circuit message remains stable.
-  it("headless+write returns ask with Layer 2 message", () => {
+describe("PermissionManager.checkDetailed — headless mutating reviewer lane", () => {
+  it("headless+write routes through the category reviewer lane", () => {
     const { pm } = makeManager();
     const result = pm.checkDetailed("any_write", "builtin", "write", null, {
       headless: true,
     });
     expect(result.decision).toBe("ask");
-    expect(result.layer).toBe(2);
-    expect(result.reason).toMatch(/headless/);
+    expect(result.layer).toBe(6);
+    expect(result.reason).toMatch(/reviewer agent/);
   });
 
   it("non-headless+write hits Layer 6 with category descriptor message", () => {

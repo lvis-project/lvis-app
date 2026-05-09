@@ -1,10 +1,10 @@
-# Q12 Permission Policy — Design Document (v2)
+# Q12 Permission Policy — Design Document (v2.2)
 
-> **Status:** Draft v2 — multi-agent review applied (6 reviewers: architect / security / critic / code-reviewer / test-engineer / document-specialist)
+> **Status:** Draft v2.2 — multi-agent + Copilot review loop applied
 > **Issue:** #627
 > **PR:** #632 (feat/q12-permission-policy)
 > **Last updated:** 2026-05-09
-> **v1 → v2 changes:** 8 CRITICAL + 22 MAJOR + 12 MINOR + 9 reference corrections applied (see §10 changelog)
+> **v2.2 delta:** current implementation snapshot + future direction aligned to PR #632 head
 
 ## 0. Purpose & scope
 
@@ -24,7 +24,7 @@ PR #626 (Routine v2) 의 production smoke test 에서 발견된 *headless routin
 - Network firewall (OS/Tailscale layer)
 - Plugin sandbox (§9 — 변경 없음)
 - LLM provider authentication (§15)
-- Hook signing (Q13 — v1 은 TOFU)
+- Hook signing (Q13 — v1 은 strict-deny quarantine 후 user-keyboard `/permission hooks accept` 기반 명시적 신뢰 등록)
 
 ## 1. Design principles
 
@@ -121,7 +121,8 @@ INPUT origin classification (user-keyboard | plugin-emitted | llm-tool-arg | fil
 │   ├ ~/.config/lvis/hooks/{pre,post,perm}-*.sh              │
 │   ├ Sequential, deny precedence                             │
 │   ├ v1: deny | allow 만 허용. modify 는 Q13 (signing 후)    │
-│   ├ Boot-time hash check + TOFU (changed → user prompt)     │
+│   ├ Boot-time hash check + strict-deny quarantine           │
+│   │   (changed/new → .disabled; user-keyboard accept only)  │
 │   └ exit !=0 = deny (fail-safe)                             │
 ├────────────────────────────────────────────────────────────┤
 │  Layer 7:  Audit (discriminated union + tamper-evidence)    │
@@ -248,14 +249,13 @@ export function canonicalizePathForMatch(rawPath: string): string {
 interface ToolCategoryDescriptor {
   name: string;
   riskWeight: number;       // 0..1 — rule classifier 가 사용
-  requiresAst?: boolean;     // shell only
-  requiresEndpoint?: boolean; // network only
   decisionFor: (mode: "default"|"auto"|"strict", source: "builtin"|"plugin", headless: boolean) => "allow"|"ask"|"deny"|"reviewer";
 }
 
 registerToolCategory({
-  name: "shell", riskWeight: 0.9, requiresAst: true,
-  decisionFor: () => "ask", // 모든 mode 에서 ask + AST
+  name: "shell",
+  riskWeight: 0.9,
+  decisionFor: () => "ask", // 모든 mode 에서 ask; Bash AST 검증은 executor-owned gate
 });
 ```
 
@@ -414,8 +414,8 @@ interface VerdictCacheEntry {
 
 **Hook directory:** `~/.config/lvis/hooks/` (not `~/.lvis/`! security M3).
 - `~/.lvis/` 는 plugin 의 default allowed dir 안이라 plugin write 가능 → `~/.config/lvis/hooks/` 로 이전
-- 부팅 시 hook 디렉토리 hash 체크 + TOFU model
-- Changed → 사용자에게 diff prompt + accept 버튼
+- 부팅 시 hook 디렉토리 hash 체크 + strict-deny quarantine
+- Changed/new hook → `.disabled/` 로 이동. 사용자가 `/permission hooks list` 로 확인하고 `/permission hooks accept <name>` 을 직접 입력한 경우에만 lockfile 에 등록. 이 typed command 가 명시적 신뢰 등록 표면이며 renderer fallback prompt/modal 은 없음.
 
 **Hook contract (v1):**
 ```jsonc
@@ -529,7 +529,7 @@ Electron preload/contextBridge. Docker 불필요.
 | Read/Write 분리 | 5-axis read/write/shell/network/meta + input-aware ✅ | wildcard | risk level | per-tool | tool toggles | tool-level rules | path_rules | Tirith content scan | sandbox modes | --allow-all-paths flag |
 | Reviewer agent | configurable (disabled/rule/llm) + multi-vendor ✅ | — | LLM self-annotate | — | — | — | — | Tirith (rule-based) | auto_review reviewer | — |
 | Headless | reviewer agent + deferred queue ✅ | — | NeverConfirm + Docker | YOLO + per-tool toggles | — | bypass mode | path policy | manual+timeout | sandbox modes (cwd+/tmp) | branch isolation |
-| Hook system | Pre/PostToolUse + deny-only v1 + TOFU ✅ | Question.Service | Pre/Post hooks | — | — | PreToolUse | PreToolUse / PostToolUse | — | execpolicy | — |
+| Hook system | Pre/PostToolUse + deny-only v1 + strict-deny quarantine ✅ | Question.Service | Pre/Post hooks | — | — | PreToolUse | PreToolUse / PostToolUse | — | execpolicy | — |
 | Subscription scope | routine.scope discriminated union ✅ | session approvals | — | per-tool | per-directory [unverified] | — | path-level | — | sandbox boundary | per-dir settings |
 | Persistent + runtime | settings.json + /permission slash ✅ | session approvals | dynamic | — | — | session | mode switch | /yolo | runtime config | settings.json + /yolo |
 | Allowed directories | additionalDirectories + auto-suggest ✅ | — | — | — | per-directory [unverified] | additionalDirectories | path-level | — | cwd + /tmp default | per-dir settings |
@@ -547,7 +547,25 @@ Electron preload/contextBridge. Docker 불필요.
 | **Cline** | Plan/Act mode + per-tool auto-approve toggles | Layer 8 의 strict mode 가 유사 |
 | **Aider** | git-boundary based (--read FILE, --subtree-only, --no-auto-commits) | Layer 1 directories 와 보완적 — git tree boundary 도 향후 (Q13) |
 
-## 5. Phase implementation plan (revised)
+## 5. Current implementation and forward direction
+
+### 5.0 Current implementation snapshot (PR #632 head)
+
+현재 Q12 v1 은 **single-path strict implementation** 으로 정렬한다. 레거시
+compat/fallback surface 는 제외하고, host/app/plugin contract 는 다음 경계로
+고정한다.
+
+| 영역 | 현재 구현 | SOT / 파일 |
+|---|---|---|
+| Tool category contract | Host registry 는 `read/write/shell/network/meta`; plugin manifest 는 고정 allow-list `read/write/shell/network` 만 허용. 미래 host-only category 가 추가되어도 plugin contract 는 자동 확장되지 않음. | `src/permissions/category-registry.ts`, `src/plugins/runtime/manifest-validation.ts` |
+| Permission IPC | Q12 IPC channel 은 `PERMISSIONS_Q12` 상수만 사용. main handler / preload bridge / sender-guard tests 가 같은 SOT 를 참조. | `src/shared/ipc-channels.ts`, `src/ipc/domains/permissions.ts`, `src/preload.ts` |
+| Slash origin gate | `/permission` dispatch 는 `user-keyboard` origin 만. plugin-emitted / LLM / file content 는 leading slash 를 모두 제거해 plain text 로 처리. | `src/shared/slash-sanitizer.ts`, `src/permissions/permission-slash.ts` |
+| Reviewer lane | Boot 시 `wireReviewerAgent()` 는 fail-fast. `mode=llm` 인데 provider/API key 가 없으면 silent downgrade 없이 boot 오류로 드러남. | `src/boot.ts`, `src/boot/steps/reviewer-wiring.ts` |
+| Deferred queue | HIGH verdict 는 queue append, foreground UI 에서 approve/reject, resolution 은 Q12 audit chain 에 `deferred_resolve` 로 기록. Queue file append 는 O(1), rewrite 후 chmod 보정. | `src/permissions/reviewer/deferred-queue.ts`, `src/ipc/domains/permissions.ts` |
+| Hook chain | Legacy `hooks.json` command/http executor 는 boot path 에서 제거. Script hook 은 `~/.config/lvis/hooks/{pre,post,perm}-*.sh` 단일 경로, strict-deny quarantine + explicit typed trust registration 만 허용. | `src/hooks/script-hook-*`, `src/boot/steps/hook-system-wiring.ts` |
+| Audit | Q12 audit 는 discriminated union + HMAC chain + daily seal. Recent-read path 는 tail-scan 으로 UI freeze risk 를 낮춤. | `src/audit/*`, `src/permissions/permission-audit-runner.ts` |
+
+### 5.1 Completed implementation map
 
 ### Phase 1 — Critical fix-ups (PR #632 in-place) ✅
 - C2 trust boundary fix
@@ -587,8 +605,8 @@ Electron preload/contextBridge. Docker 불필요.
 - Tests: rule classifier 36 combinations + llm with mock provider
 
 ### Phase 4 — Hook system (v1 deny-only) + manifest integrity proxy
-- HookRunner extend (Pre 이미 있음 → Post + PermissionRequest)
-- `~/.config/lvis/hooks/` discovery + boot-time hash check + TOFU
+- ScriptHookManager integration (PreToolUse / PostToolUse / PermissionRequest)
+- `~/.config/lvis/hooks/` discovery + boot-time hash check + strict-deny quarantine + `/permission hooks accept|disable|list` (typed command trust registration, no renderer fallback prompt/modal)
 - Hook invocation contract (JSON in/out, exit code)
 - Deny precedence enforcement
 - ManifestIntegrityProxy (read-declared plugin tools wrapped with read-only fs proxy)
@@ -614,9 +632,21 @@ Electron preload/contextBridge. Docker 불필요.
   - Hard removal date 후에도 미완 → CLAUDE.md grace 연장 *공식 결정* 필요 (즉 silent drift 방지)
 - 모든 plugin 머지 + grace 만료 후 manifest validation hard fail 활성화
 
+### 5.2 Forward direction
+
+후속 구현은 Q12 경계를 넓히지 않고, 별도 issue/PR 로 다음 순서만 허용한다.
+
+| 단계 | 방향 | 원칙 |
+|---|---|---|
+| Q13 hook hardening | Signed hook (minisign 또는 동등 수준), hook hash 를 reviewer cache `invalidationKey` 에 포함, `modify` action 검토 | signing 전까지 v1 hook 은 deny-only 유지 |
+| Q13 DLP depth | Hook stdin / reviewer input 의 bounded deep-redaction (cycle/size guard 포함) | "nested object 는 host 밖으로 나갈 수 있다"는 현재 contract 를 더 강하게 만드는 방향만 허용 |
+| Q14 plugin sandbox | V8 isolate / Worker thread / permissioned fs facade 비교 후 manifest integrity proxy 를 보조층으로 격하 | app 이 plugin code 를 역참조하지 않음 |
+| Q14 manifest hard fail | 모든 active plugin category 선언 완료 후 boot-warn grace 제거 | legacy shim 없이 hard fail |
+| Q15 governance integration | §8 Agent Approval 과 Q12 tool permission audit 를 공통 timeline 으로 연결 | single decision / single prompt 원칙 유지 |
+
 ## 6. Open questions
 
-- **Hook signing for Q13** — v1 은 TOFU + post-install hash check. Signed hook (e.g., minisign) 은 별도 PR
+- **Hook signing for Q13** — v1 은 strict-deny quarantine + explicit `/permission hooks accept` + post-install hash check. Signed hook (e.g., minisign) 은 별도 PR
 - **Plugin sandboxing** — Layer 9 변경 없음. Manifest integrity proxy 가 partial guard. Q14 에서 V8 isolated context / Worker thread 검토
 - **Reviewer cache 동작 측정** — 캐시 hit rate / staleness 실측 필요. Settings 변경 invalidation 시 미세 race condition 가능성
 
@@ -681,7 +711,7 @@ Electron preload/contextBridge. Docker 불필요.
 9. 5-axis category (`meta` added) + Category registry pattern
 10. Routine scope namespace + discriminated union (`deny-all | allow | inherit`)
 11. Layer 1 auto-suggest hardened (leaf parent + re-typed + adjacency warning)
-12. Hook directory moved to `~/.config/lvis/hooks/` + TOFU + boot-time hash + v1 deny-only
+12. Hook directory moved to `~/.config/lvis/hooks/` + strict-deny quarantine + boot-time hash + v1 deny-only
 13. Reviewer composition `final = max(rule, llm)` + DLP filter on input + verdict cache (Phase 3 deliverable)
 14. ExecuteOptions bundle (Phase 2)
 15. `additionalDirectories` naming (Claude Code 명명 채택)
@@ -691,7 +721,7 @@ Electron preload/contextBridge. Docker 불필요.
 19. Eval pipeline + denyReasons[] explicit
 20. Confirm = ask sub-variant (auto mode 도 ask, silent skip 금지)
 21. Slash command nested grammar (`/permission mode|dir|reviewer`)
-22. Bash AST gate via category descriptor `requiresAst`
+22. Bash AST gate is executor-owned; category registry carries policy lane/risk only
 
 **Reference matrix corrections (9):**
 - OpenCode: `ctx.ask()` → `Question.Service API`
@@ -723,3 +753,19 @@ Phase 2 executor 작업 중 사용자가 결정한 4 항목 — spec 에 binding
 | arch.md §6.3 rewrite | **In-place rewrite** | 기존 §6.3 의 3-layer model 자리에 10-layer 으로 직접 덮어쓰기. 외부 link / anchor (`#permissions`) 호환 유지. Phase 5 deliverable |
 
 **v2 → v2.1 binding decisions** — 후속 phase implementation 은 위 4 결정에 정합 해야 함. 다른 결정 (audit panel UX, hook timeout, archive location 등) 은 implementation 시점에 decide-during-coding 가능 (low impact, no cross-component constraint).
+
+## 12. v2.1 → v2.2 — Current-state realignment (2026-05-09)
+
+최신 PR #632 head 기준으로 spec 을 다시 정렬했다.
+
+- Plugin manifest category 는 registry-derived 가 아니라 fixed plugin allow-list
+  `read/write/shell/network` 로 고정했다. Host-only `meta` 및 미래 host category 는
+  plugin contract 에 자동 포함되지 않는다.
+- Q12 permission IPC 는 `PERMISSIONS_Q12` channel SOT 로 통일한다. main handler,
+  preload bridge, sender-guard tests 는 같은 상수를 참조한다.
+- Reviewer LLM wiring 은 fail-fast 로 유지한다. `mode=llm` 설정에서 provider/API key
+  가 없으면 silent downgrade 하지 않는다.
+- Hook trust 용어는 **strict-deny quarantine + explicit typed trust
+  registration** 으로 통일한다.
+- Future direction 은 Q13 signed hooks/deep DLP, Q14 plugin sandbox/hard-fail
+  manifest cutover, Q15 governance timeline integration 으로 분리한다.
