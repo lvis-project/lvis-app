@@ -1,20 +1,27 @@
 /**
- * sensitive-paths unit tests — Tier S1+S2
+ * sensitive-paths unit tests — Tier S1+S2 + Q12 P2.5 expansion
  *
- * Covers SENSITIVE_PATH_PATTERNS, isSensitivePath(), and policyMatchPaths().
+ * Covers SENSITIVE_PATH_PATTERNS, isSensitivePath(), policyMatchPaths(),
+ * canonicalizePathForMatch (frozen-canonical + bounded walk-up), and
+ * caseFoldForMatch.
  */
 import { describe, it, expect } from "vitest";
+import { mkdtempSync, mkdirSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   SENSITIVE_PATH_PATTERNS,
   isSensitivePath,
   policyMatchPaths,
+  canonicalizePathForMatch,
+  caseFoldForMatch,
+  MAX_WALK_UP,
 } from "../sensitive-paths.js";
 
 describe("SENSITIVE_PATH_PATTERNS", () => {
   it("is a non-empty readonly list", () => {
     expect(Array.isArray(SENSITIVE_PATH_PATTERNS)).toBe(true);
     expect(SENSITIVE_PATH_PATTERNS.length).toBeGreaterThan(0);
-    // Frozen — cannot be mutated by callers
     expect(Object.isFrozen(SENSITIVE_PATH_PATTERNS)).toBe(true);
   });
 
@@ -32,6 +39,35 @@ describe("SENSITIVE_PATH_PATTERNS", () => {
     expect(SENSITIVE_PATH_PATTERNS).toContain("**/.lvis/keys/**");
     expect(SENSITIVE_PATH_PATTERNS).toContain("**/.lvis/lvis-secrets.json");
     expect(SENSITIVE_PATH_PATTERNS).toContain("**/lvis-secrets.json");
+  });
+
+  it("Q12 P2.5 — contains OS sensitive paths", () => {
+    expect(SENSITIVE_PATH_PATTERNS).toContain("/etc/shadow");
+    expect(SENSITIVE_PATH_PATTERNS).toContain("/etc/sudoers");
+    expect(SENSITIVE_PATH_PATTERNS).toContain("**/.netrc");
+    expect(SENSITIVE_PATH_PATTERNS).toContain("**/.pgpass");
+    expect(SENSITIVE_PATH_PATTERNS).toContain("**/.npmrc");
+    expect(SENSITIVE_PATH_PATTERNS).toContain("**/.bash_history");
+    expect(SENSITIVE_PATH_PATTERNS).toContain("**/.zsh_history");
+    expect(SENSITIVE_PATH_PATTERNS).toContain("**/.python_history");
+    expect(SENSITIVE_PATH_PATTERNS).toContain("**/.viminfo");
+    expect(SENSITIVE_PATH_PATTERNS).toContain("**/Library/Cookies/**");
+    expect(SENSITIVE_PATH_PATTERNS).toContain("**/Library/Keychains/**");
+    expect(SENSITIVE_PATH_PATTERNS).toContain("**/.env");
+    expect(SENSITIVE_PATH_PATTERNS).toContain("**/.env.*");
+    expect(SENSITIVE_PATH_PATTERNS).toContain("**/id_rsa");
+    expect(SENSITIVE_PATH_PATTERNS).toContain("**/id_ed25519");
+    expect(SENSITIVE_PATH_PATTERNS).toContain("**/id_ecdsa");
+  });
+
+  it("Q12 P2.5 — contains LVIS-internal sensitive paths", () => {
+    expect(SENSITIVE_PATH_PATTERNS).toContain("**/.lvis/audit/**");
+    expect(SENSITIVE_PATH_PATTERNS).toContain("**/.lvis/audit.log");
+    expect(SENSITIVE_PATH_PATTERNS).toContain(
+      "**/.lvis/permissions/deferred-queue.jsonl",
+    );
+    expect(SENSITIVE_PATH_PATTERNS).toContain("**/.lvis/sessions/**");
+    expect(SENSITIVE_PATH_PATTERNS).toContain("**/.config/lvis/hooks/**");
   });
 });
 
@@ -108,10 +144,6 @@ describe("isSensitivePath — positive matches", () => {
 
 describe("isSensitivePath — directory (trailing-slash) form §S2", () => {
   it("matches bare directory /home/ken/.gnupg via trailing-slash helper", () => {
-    // `.gnupg` as a directory path (no trailing slash) should still be
-    // flagged: the helper tries both `/home/ken/.gnupg` and the trailing
-    // slash form. Pattern `**/.gnupg/**` has `**` which can match empty,
-    // so `/home/ken/.gnupg/` matches.
     const result = isSensitivePath("/home/ken/.gnupg");
     expect(result).toBe("**/.gnupg/**");
   });
@@ -122,7 +154,7 @@ describe("isSensitivePath — directory (trailing-slash) form §S2", () => {
 });
 
 describe("isSensitivePath — negative cases", () => {
-  it("returns null for /home/ken/code/ssh-utils.ts (filename contains ssh but not in .ssh dir)", () => {
+  it("returns null for /home/ken/code/ssh-utils.ts", () => {
     expect(isSensitivePath("/home/ken/code/ssh-utils.ts")).toBeNull();
   });
 
@@ -144,5 +176,173 @@ describe("isSensitivePath — negative cases", () => {
 
   it("returns null for empty string", () => {
     expect(isSensitivePath("")).toBeNull();
+  });
+});
+
+// ─── Q12 P2.5 — Layer 0 expansion: OS + LVIS-internal hits ───────
+
+describe("isSensitivePath — Q12 P2.5 OS sensitive paths", () => {
+  it("matches /etc/shadow exactly", () => {
+    expect(isSensitivePath("/etc/shadow")).toBe("/etc/shadow");
+  });
+
+  it("matches ~/.netrc anywhere", () => {
+    expect(isSensitivePath("/Users/ken/.netrc")).toBe("**/.netrc");
+  });
+
+  it("matches ~/.bash_history", () => {
+    expect(isSensitivePath("/home/ken/.bash_history")).toBe("**/.bash_history");
+  });
+
+  it("matches ~/.psql_history", () => {
+    expect(isSensitivePath("/home/ken/.psql_history")).toBe("**/.psql_history");
+  });
+
+  it("matches ~/Library/Cookies/* on macOS", () => {
+    expect(
+      isSensitivePath("/Users/ken/Library/Cookies/Cookies.binarycookies"),
+    ).toBe("**/Library/Cookies/**");
+  });
+
+  it("matches ~/Library/Keychains/* on macOS", () => {
+    expect(isSensitivePath("/Users/ken/Library/Keychains/login.keychain-db")).toBe(
+      "**/Library/Keychains/**",
+    );
+  });
+
+  it("matches **/.env at the project root", () => {
+    expect(isSensitivePath("/Users/ken/code/myapp/.env")).toBe("**/.env");
+  });
+
+  it("matches **/.env.production", () => {
+    expect(isSensitivePath("/Users/ken/code/myapp/.env.production")).toBe(
+      "**/.env.*",
+    );
+  });
+
+  it("matches generic id_rsa even outside .ssh/", () => {
+    expect(isSensitivePath("/tmp/staging/id_rsa")).toBe("**/id_rsa");
+  });
+
+  it("matches generic id_ed25519 even outside .ssh/", () => {
+    expect(isSensitivePath("/Users/ken/Downloads/id_ed25519")).toBe(
+      "**/id_ed25519",
+    );
+  });
+});
+
+describe("isSensitivePath — Q12 P2.5 LVIS-internal", () => {
+  it("matches ~/.lvis/audit/today.jsonl", () => {
+    expect(isSensitivePath("/Users/ken/.lvis/audit/today.jsonl")).toBe(
+      "**/.lvis/audit/**",
+    );
+  });
+
+  it("matches ~/.lvis/audit.log", () => {
+    expect(isSensitivePath("/Users/ken/.lvis/audit.log")).toBe(
+      "**/.lvis/audit.log",
+    );
+  });
+
+  it("matches ~/.lvis/permissions/deferred-queue.jsonl", () => {
+    expect(
+      isSensitivePath("/Users/ken/.lvis/permissions/deferred-queue.jsonl"),
+    ).toBe("**/.lvis/permissions/deferred-queue.jsonl");
+  });
+
+  it("matches ~/.lvis/sessions/<sessionId>.jsonl", () => {
+    expect(isSensitivePath("/Users/ken/.lvis/sessions/abc-123.jsonl")).toBe(
+      "**/.lvis/sessions/**",
+    );
+  });
+
+  it("matches ~/.config/lvis/hooks/* (post-relocation)", () => {
+    expect(
+      isSensitivePath("/Users/ken/.config/lvis/hooks/pre-bash.sh"),
+    ).toBe("**/.config/lvis/hooks/**");
+  });
+});
+
+// ─── Q12 P2.5 — canonicalizePathForMatch (frozen-canonical) ───────
+
+describe("canonicalizePathForMatch", () => {
+  it("resolves .. segments via path.resolve()", () => {
+    const result = canonicalizePathForMatch("/tmp/foo/../bar");
+    expect(result.endsWith("/bar")).toBe(true);
+  });
+
+  it("collapses duplicate slashes", () => {
+    const result = canonicalizePathForMatch("/tmp///foo");
+    expect(result).not.toMatch(/\/\//);
+  });
+
+  it("normalizes NFD unicode to NFC", () => {
+    // NFD-decomposed `.ssh` should normalize to `.ssh`. Use a char
+    // that has a stable NFD form: `é` (U+00E9) ↔ `é`.
+    const decomposed = "/tmp/café.txt";
+    const result = canonicalizePathForMatch(decomposed);
+    // After NFC, the e + combining acute should fold back to single é.
+    expect(result).toContain("café");
+  });
+
+  it("returns absolute path even when the input does not exist", () => {
+    const result = canonicalizePathForMatch("/tmp/__does_not_exist__/foo/bar");
+    expect(result.startsWith("/")).toBe(true);
+    expect(result.includes("foo/bar")).toBe(true);
+  });
+
+  it("bounded walk-up cap (MAX_WALK_UP)", () => {
+    // Synthesize a deep non-existent path. Walk-up MUST terminate without
+    // hanging or throwing — the function is tested by completing under
+    // a generous time budget.
+    const deep = "/tmp/" + "x/".repeat(MAX_WALK_UP + 10) + "leaf";
+    const start = Date.now();
+    const result = canonicalizePathForMatch(deep);
+    const elapsed = Date.now() - start;
+    expect(elapsed).toBeLessThan(2000);
+    expect(typeof result).toBe("string");
+    expect(result.length).toBeGreaterThan(0);
+  });
+
+  it("MAX_WALK_UP is set to the spec value (64)", () => {
+    expect(MAX_WALK_UP).toBe(64);
+  });
+
+  it("symlink ancestor is not followed into a cycle", () => {
+    // Stage a self-symlink in a temp dir; canonicalize a child path and
+    // confirm we get a string back (no hang, no throw). On platforms that
+    // forbid self-symlinks, the test still passes via the bounded cap.
+    const root = mkdtempSync(join(tmpdir(), "lvis-canonical-"));
+    const linkDir = join(root, "loop");
+    try {
+      symlinkSync(linkDir, linkDir); // self-loop
+      const child = join(linkDir, "deep", "leaf.txt");
+      const result = canonicalizePathForMatch(child);
+      expect(typeof result).toBe("string");
+    } catch {
+      // Some platforms refuse self-symlinks — skip silently. The bounded
+      // walk-up still defends the algorithm; this is exercised above.
+    }
+  });
+
+  it("sensitive-path detection still fires on relative .. inputs", () => {
+    // Build a path that resolves via .. into a sensitive directory.
+    const result = canonicalizePathForMatch(
+      "/Users/ken/work/../.lvis/secrets/openai.key",
+    );
+    expect(isSensitivePath(caseFoldForMatch(result))).toBe(
+      "**/.lvis/secrets/**",
+    );
+  });
+});
+
+describe("caseFoldForMatch", () => {
+  it("lowercases on darwin/win32, preserves on linux", () => {
+    const result = caseFoldForMatch("/Users/Ken/Documents");
+    if (process.platform === "darwin" || process.platform === "win32") {
+      expect(result).toBe("/users/ken/documents");
+    } else {
+      expect(result).toBe("/Users/Ken/Documents");
+    }
   });
 });

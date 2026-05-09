@@ -20,15 +20,36 @@
  * so directory-style accesses are still caught by glob patterns that use
  * trailing single-star segments. This mirrors OpenHarness's
  * `_policy_match_paths` subtle-glob-bug prevention.
+ *
+ * Q12 Phase 2.5 — frozen-canonical algorithm + sensitive-path expansion
+ * (security review M1 + M2 + M4):
+ *   - bounded walk-up via realpathSync.native() → first existing ancestor
+ *   - MAX_WALK_UP=64 caps adversarial symlink-cycle / deep-path attacks
+ *   - frozen-canonical contract: caller canonicalizes ONCE; downstream
+ *     layers reuse the same string (TOCTOU race window closed)
+ *   - OS sensitive paths: shell histories, browser cookies, generic
+ *     id_{rsa,ed25519,ecdsa} (not just under .ssh/), .env / .env.*
+ *   - LVIS-internal sensitive paths: secrets/, audit*, deferred-queue,
+ *     sessions/, hooks/ (relocated to ~/.config/lvis/hooks)
  */
-import { resolve as pathResolve } from "node:path";
+import { realpathSync } from "node:fs";
+import { resolve as pathResolve, relative as pathRelative } from "node:path";
+
+/**
+ * Bounded walk-up depth used by {@link canonicalizePathForMatch} when the
+ * input path does not yet exist on disk. We try `realpathSync.native()` on
+ * progressively higher ancestors until we find one that exists, then
+ * compose `<resolvedAncestor>/<remainder>`. Capped to defend against
+ * adversarial inputs (deep paths, symlink cycles).
+ */
+export const MAX_WALK_UP = 64;
 
 /**
  * Patterns use minimatch-compatible glob syntax:
  *   double-star  — matches any path (including path separators)
  *   single-star  — matches any single path segment
  *
- * Ordering: OpenHarness list first, then LGE-specific additions.
+ * Ordering: OpenHarness list first, then OS expansion, then LVIS-specific.
  */
 export const SENSITIVE_PATH_PATTERNS: readonly string[] = Object.freeze([
   // ── OpenHarness upstream ────────────────────────────
@@ -42,12 +63,45 @@ export const SENSITIVE_PATH_PATTERNS: readonly string[] = Object.freeze([
   "**/.kube/config", // Kubernetes credentials
   "**/.openharness/credentials.json",
   "**/.openharness/copilot_auth.json",
+  // ── Q12 P2.5 — OS sensitive paths (security review M1) ───────
+  "/etc/shadow",
+  "/etc/sudoers",
+  "/etc/passwd-",
+  "**/.netrc",
+  "**/.pgpass",
+  "**/.npmrc",
+  "**/.bash_history",
+  "**/.zsh_history",
+  "**/.python_history",
+  "**/.psql_history",
+  "**/.viminfo",
+  "**/Library/Cookies/**",
+  "**/Library/Keychains/**",
+  "**/.config/**/Login Data",
+  "**/.env",
+  "**/.env.*",
+  // Generic SSH key globs — catches id_rsa / id_ed25519 / id_ecdsa even
+  // if dropped outside `.ssh/` (e.g. /tmp staging, ~/Downloads).
+  "**/id_rsa",
+  "**/id_rsa.pub",
+  "**/id_ed25519",
+  "**/id_ed25519.pub",
+  "**/id_ecdsa",
+  "**/id_ecdsa.pub",
   // ── LGE / LVIS-specific additions ───────────────────
   "**/.lvis/certs/**", // corporate CA bundle + extracted certs
   "**/.lvis/secrets/**", // API keys, tokens
   "**/.lvis/keys/**", // signing / encryption keys
   "**/.lvis/lvis-secrets.json", // legacy consolidated secrets file
   "**/lvis-secrets.json", // shallow sibling form
+  // ── Q12 P2.5 — LVIS-internal sensitive paths (M2 + M4) ───────
+  "**/.lvis/audit", // audit log directory (self-tampering)
+  "**/.lvis/audit/**", // audit log files inside dir
+  "**/.lvis/audit.log", // legacy audit log file
+  "**/.lvis/audit.log.*", // rotated audit archives
+  "**/.lvis/permissions/deferred-queue.jsonl",
+  "**/.lvis/sessions/**", // chat session JSONL
+  "**/.config/lvis/hooks/**", // hook supply-chain protection
 ]);
 
 // ─── Public helpers ─────────────────────────────────
@@ -55,27 +109,82 @@ export const SENSITIVE_PATH_PATTERNS: readonly string[] = Object.freeze([
 /**
  * Canonical form of a raw filesystem path for sensitive-path matching.
  *
- * Applies the same four-step normalization used inside
- * {@link ApprovalGate.requestAndWait} so that any caller computing a
- * `sensitivePathPattern` hint sees the same result as the authoritative
- * hard-block:
+ * Applies a five-step normalization that is shared between Layer 0
+ * (sensitive-path hard-block) and Layer 1 (allowed-directories prefix
+ * match) so both layers see *bit-identical* path strings:
  *
- *   1. `path.resolve()` — expands `..`/`.` segments and makes the path absolute.
- *   2. Duplicate-slash collapse (`///Users` → `/Users`).
- *   3. Unicode NFC normalization — folds NFD-decomposed forms (e.g.
- *      `.s\u0073h` → `.ssh`).
- *   4. Case-folding on macOS/Windows — paths like ".SSH/ID_rsa" are
- *      lowercased so they match case-insensitive filesystem equivalents.
+ *   1. `path.resolve()` — expands `..`/`.` segments, makes path absolute.
+ *   2. `realpathSync.native()` walk-up to the nearest existing ancestor
+ *      (bounded by {@link MAX_WALK_UP}). Resolves symlinks for the
+ *      existing prefix; appends the remaining un-existing tail. Caps the
+ *      ancestor walk so an adversarial cycle / deep path cannot DoS.
+ *   3. Duplicate-slash collapse (`///Users` → `/Users`).
+ *   4. Unicode NFC normalization — folds NFD-decomposed forms.
+ *   5. Case-folding on macOS/Windows — case-insensitive filesystems.
  *
- * Use this helper wherever a path is compared against SENSITIVE_PATH_PATTERNS
- * to ensure consistent results across all call sites.
+ * **Frozen-canonical contract:** call this ONCE at the executor entry and
+ * pass the resulting string to every downstream layer. Re-canonicalizing
+ * mid-pipeline opens a TOCTOU race (caller could swap a symlink between
+ * Layer 0 and Layer 1).
+ *
+ * If even the filesystem root cannot be `realpath`'d within MAX_WALK_UP
+ * steps (pathological / adversarial input), we still return a *resolved*
+ * path string but it is treated as **opaque** by the allow-check (Layer 1
+ * denies opaque paths by default — see `isPathAllowed`).
  */
 export function canonicalizePathForMatch(rawPath: string): string {
   let canonical = pathResolve(rawPath);
-  canonical = canonical.replace(/\/+/g, "/");
-  canonical = canonical.normalize("NFC");
+
+  // Step 2 — realpath walk-up. Try the path itself first; if missing, walk
+  // up to the nearest existing ancestor and compose the unresolved tail.
+  try {
+    canonical = realpathSync.native(canonical);
+  } catch {
+    let parent = canonical;
+    let resolved = false;
+    for (let depth = 0; depth < MAX_WALK_UP; depth++) {
+      const next = pathResolve(parent, "..");
+      if (next === parent) break; // hit filesystem root
+      parent = next;
+      try {
+        const realParent = realpathSync.native(parent);
+        // Compose: realpath'd ancestor + remainder of original path.
+        const remainder = pathRelative(parent, canonical);
+        canonical = remainder ? pathResolve(realParent, remainder) : realParent;
+        resolved = true;
+        break;
+      } catch {
+        /* keep walking */
+      }
+    }
+    // depth == MAX_WALK_UP without resolve — leave `canonical` as the
+    // pure pathResolve() output. Layer 1 treats unresolved canonicals as
+    // opaque (deny by default in allow-check).
+    if (!resolved) {
+      // explicit no-op — canonical already equals pathResolve(rawPath)
+    }
+  }
+
+  return canonical
+    .replace(/\/+/g, "/")
+    .normalize("NFC")
+    .replace(/^([a-zA-Z]:)/, (m) =>
+      // Preserve drive-letter case sensitivity on win32 — only lowercase
+      // the drive letter (case-insensitive) but the rest is handled below.
+      process.platform === "win32" ? m.toLowerCase() : m,
+    );
+}
+
+/**
+ * Q12 P2.5 — case-fold a canonical path for matching on case-insensitive
+ * filesystems (darwin/win32). Kept separate from
+ * {@link canonicalizePathForMatch} so allow-list directories from
+ * settings.json can be compared with the SAME case-fold applied to both
+ * sides without re-running the realpath walk.
+ */
+export function caseFoldForMatch(canonical: string): string {
   if (process.platform === "darwin" || process.platform === "win32") {
-    canonical = canonical.toLowerCase();
+    return canonical.toLowerCase();
   }
   return canonical;
 }
@@ -106,6 +215,10 @@ export function policyMatchPaths(filePath: string): readonly string[] {
  *
  * Not exceptioned: the caller is expected to treat a non-null return as
  * an unconditional deny (cannot be overridden).
+ *
+ * NOTE: callers should pre-canonicalize via {@link canonicalizePathForMatch}
+ * + {@link caseFoldForMatch} before calling. The patterns themselves are
+ * lowercased for consistent darwin/win32 matching.
  */
 export function isSensitivePath(absPath: string): string | null {
   if (!absPath) return null;
@@ -143,10 +256,14 @@ function normalizePath(p: string): string {
  * Intentionally minimal: we avoid pulling in `minimatch` as a runtime dep
  * (it is not in package.json) and the pattern set is tiny + fully covered
  * by these metacharacters.
+ *
+ * Q12 P2.5: case-insensitive on darwin/win32 to align with the canonical
+ * case-fold contract.
  */
 function globMatch(path: string, pattern: string): boolean {
   const regexSource = globToRegExp(pattern);
-  const re = new RegExp("^" + regexSource + "$");
+  const flags = process.platform === "darwin" || process.platform === "win32" ? "i" : "";
+  const re = new RegExp("^" + regexSource + "$", flags);
   return re.test(path);
 }
 
