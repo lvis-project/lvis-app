@@ -138,7 +138,10 @@ interface AddRoutineModalProps {
   onAdded: () => void;
 }
 
-function AddRoutineModal({ api, onClose, onAdded }: AddRoutineModalProps) {
+// Exported for renderer tests — the modal owns the button → scope-payload
+// mapping that we want to lock down (Q12 P5 round 2: empty selection MUST
+// map to `{ mode: "deny-all" }`, not "inherit" / "allow all").
+export function AddRoutineModal({ api, onClose, onAdded }: AddRoutineModalProps) {
   const [tab, setTab] = useState<InputTab>("form");
   const [execution, setExecution] = useState<RoutineExecution>("llm-session");
   const [title, setTitle] = useState("");
@@ -499,8 +502,9 @@ function AddRoutineModal({ api, onClose, onAdded }: AddRoutineModalProps) {
                         variant="ghost"
                         className="h-7 px-2 text-[11px]"
                         onClick={() => setAllowedPluginIds([])}
+                        data-testid="routine-clear-allowed-plugins"
                       >
-                        전체 허용
+                        선택 해제 (플러그인 사용 안 함)
                       </Button>
                     )}
                   </div>
@@ -528,7 +532,7 @@ function AddRoutineModal({ api, onClose, onAdded }: AddRoutineModalProps) {
                     </div>
                   )}
                   <p className="text-[11px] text-muted-foreground">
-                    선택하지 않으면 현재 대화의 활성 플러그인 범위를 그대로 사용합니다.
+                    선택하지 않으면 이 루틴 실행 동안 플러그인 도구를 사용하지 않습니다 (deny-all).
                   </p>
                 </div>
               </div>
