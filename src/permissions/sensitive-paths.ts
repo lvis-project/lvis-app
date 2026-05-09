@@ -22,7 +22,7 @@
  * `_policy_match_paths` subtle-glob-bug prevention.
  *
  * Permission policy Phase 2.5 — frozen-canonical algorithm + sensitive-path expansion
- * (security review M1 + M2 + M4):
+ * (security review hardening):
  *   - bounded walk-up via realpathSync.native() → first existing ancestor
  *   - MAX_WALK_UP=64 caps adversarial symlink-cycle / deep-path attacks
  *   - frozen-canonical contract: caller canonicalizes ONCE; downstream
@@ -34,6 +34,7 @@
  */
 import { realpathSync } from "node:fs";
 import { resolve as pathResolve, relative as pathRelative } from "node:path";
+import { globMatch } from "../lib/glob-matcher.js";
 
 /**
  * Bounded walk-up depth used by {@link canonicalizePathForMatch} when the
@@ -63,7 +64,7 @@ export const SENSITIVE_PATH_PATTERNS: readonly string[] = Object.freeze([
   "**/.kube/config", // Kubernetes credentials
   "**/.openharness/credentials.json",
   "**/.openharness/copilot_auth.json",
-  // ── Permission policy P2.5 — OS sensitive paths (security review M1) ───────
+  // ── Permission policy P2.5 — OS sensitive paths ───────
   // Use double-star prefix because frozen-canonical realpath() resolves
   // /etc → /private/etc on macOS. The double-star matches both forms.
   "**/etc/shadow",
@@ -96,7 +97,7 @@ export const SENSITIVE_PATH_PATTERNS: readonly string[] = Object.freeze([
   "**/.lvis/keys/**", // signing / encryption keys
   "**/.lvis/lvis-secrets.json", // legacy consolidated secrets file
   "**/lvis-secrets.json", // shallow sibling form
-  // ── Permission policy P2.5 — LVIS-internal sensitive paths (M2 + M4) ───────
+  // ── Permission policy P2.5 — LVIS-internal sensitive paths ───────
   "**/.lvis/audit", // audit log directory (self-tampering)
   "**/.lvis/audit/**", // audit log files inside dir
   "**/.lvis/audit.log", // legacy audit log file
@@ -245,68 +246,4 @@ export function isSensitivePath(absPath: string): string | null {
  */
 function normalizePath(p: string): string {
   return p.replace(/\\/g, "/");
-}
-
-/**
- * Minimatch-subset glob matcher sufficient for SENSITIVE_PATH_PATTERNS.
- *
- * Supports:
- *   double-star — zero or more path segments (including separators)
- *   single-star — zero or more chars within a single segment (not `/`)
- *   ?           — single char within a segment (not `/`)
- *
- * Intentionally minimal: we avoid pulling in `minimatch` as a runtime dep
- * (it is not in package.json) and the pattern set is tiny + fully covered
- * by these metacharacters.
- *
- * Permission policy P2.5: case-insensitive on darwin/win32 to align with the canonical
- * case-fold contract.
- */
-function globMatch(path: string, pattern: string): boolean {
-  const regexSource = globToRegExp(pattern);
-  const flags = process.platform === "darwin" || process.platform === "win32" ? "i" : "";
-  const re = new RegExp("^" + regexSource + "$", flags);
-  return re.test(path);
-}
-
-function globToRegExp(pattern: string): string {
-  let out = "";
-  let i = 0;
-  while (i < pattern.length) {
-    const ch = pattern[i];
-    if (ch === "*") {
-      // Handle double-star
-      if (pattern[i + 1] === "*") {
-        // double-star followed by slash — match zero-or-more segments
-        // (including the slash). Swallow the slash so "foo/**/bar" also
-        // matches "foo/bar".
-        if (pattern[i + 2] === "/") {
-          out += "(?:.*/)?";
-          i += 3;
-          continue;
-        }
-        out += ".*";
-        i += 2;
-        continue;
-      }
-      // Single star: match zero or more non-slash chars
-      out += "[^/]*";
-      i += 1;
-      continue;
-    }
-    if (ch === "?") {
-      out += "[^/]";
-      i += 1;
-      continue;
-    }
-    // Escape regex metachars
-    if (/[.+^${}()|[\]\\]/.test(ch)) {
-      out += "\\" + ch;
-      i += 1;
-      continue;
-    }
-    out += ch;
-    i += 1;
-  }
-  return out;
 }

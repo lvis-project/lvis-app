@@ -474,6 +474,9 @@ const api = {
     deferredList: async () => ipcRenderer.invoke(PERMISSIONS.deferredList),
     /** Permission policy issue #633 — hook quarantine state for non-modal settings badge. */
     hookTrustList: async () => ipcRenderer.invoke(PERMISSIONS.hookTrustList),
+    /** Permission policy — `/permission dir ...` slash dispatch via IPC. */
+    dirDispatch: async (rawArgs: string) =>
+      ipcRenderer.invoke(PERMISSIONS.dirDispatch, { rawArgs }),
     deferredResolve: async (
       id: string,
       decision: "approved" | "rejected",
@@ -593,7 +596,7 @@ const api = {
     answers?: Array<{ choice?: string; freeText?: string }>;
     dismissed?: boolean;
   }) => ipcRenderer.invoke("lvis:ask-user-question:respond", response),
-  // M2: timeout side-channel — main process notifies the renderer when an
+  // Timeout side-channel — main process notifies the renderer when an
   // ask_user_question request expired (5 min default) so the card can drop
   // the stale prompt before the user clicks into a no-op.
   onAskUserQuestionTimeout: (
@@ -620,7 +623,7 @@ const api = {
     ipcRenderer.on(ROUTINES_V2.fired, listener);
     return () => ipcRenderer.removeListener(ROUTINES_V2.fired, listener);
   },
-  // Q10 — running indicator: emitted when a routine LLM session starts/finishes
+  // Routine running indicator: emitted when a routine LLM session starts/finishes
   // C1: runningStarted payload enriched to { routineId, firedAt, title } so the
   // renderer can push a proper OverlayItem immediately without waiting for fired.
   onRoutineRunningStarted: (handler: (payload: { routineId: string; firedAt: string; title: string }) => void) => {
@@ -641,7 +644,7 @@ const api = {
     ipcRenderer.on(ROUTINES_V2.failed, listener);
     return () => ipcRenderer.removeListener(ROUTINES_V2.failed, listener);
   },
-  // Q9 session history — read-only viewer for per-routine session JSONL files
+  // Routine session history — read-only viewer for per-routine session JSONL files
   listRoutineSessionsV2: async (routineId: string, limit?: number) =>
     ipcRenderer.invoke(ROUTINES_V2.listSessions, routineId, limit) as Promise<
       Array<{ routineId: string; firedAt: string; jsonlPath: string }>
@@ -649,7 +652,7 @@ const api = {
   readRoutineSessionV2: async (jsonlPath: string) =>
     ipcRenderer.invoke(ROUTINES_V2.readSession, jsonlPath) as Promise<string>,
 
-  // Q11 — Overlay IPC bridges (main → renderer push + renderer → main confirm)
+  // Overlay IPC bridges (main → renderer push + renderer → main confirm)
   onOverlayShow: (handler: (item: unknown) => void) => {
     const listener = (_e: unknown, item: unknown) => handler(item);
     ipcRenderer.on(OVERLAY_V1.show, listener);

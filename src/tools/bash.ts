@@ -17,7 +17,7 @@
 import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { resolveShell } from "../lib/shell-resolver.js";
 import type { Readable } from "node:stream";
-import { resolve as pathResolve } from "node:path";
+import { isAbsolute, resolve as pathResolve } from "node:path";
 import { z } from "zod";
 
 type PipedChild = ChildProcessByStdio<null, Readable, Readable>;
@@ -88,9 +88,13 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
     }
 
     // Sandbox path check on cwd (if overridden).
-    const resolvedCwd = input.cwd ? pathResolve(input.cwd) : ctx.cwd;
+    const resolvedCwd = input.cwd
+      ? isAbsolute(input.cwd)
+        ? pathResolve(input.cwd)
+        : pathResolve(ctx.cwd, input.cwd)
+      : ctx.cwd;
     if (input.cwd) {
-      const check = validateSandboxPath(resolvedCwd, ctx.cwd);
+      const check = validateSandboxPath(resolvedCwd, ctx.cwd, [...ctx.allowedDirectories]);
       if (!check.allowed) {
         return { output: `Sandbox: ${check.reason}`, isError: true };
       }

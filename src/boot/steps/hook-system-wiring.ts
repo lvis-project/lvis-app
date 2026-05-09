@@ -23,6 +23,7 @@ import {
 } from "../../hooks/hook-trust-prompt.js";
 import { createLogger } from "../../lib/logger.js";
 import type { AuditLogger } from "../../audit/audit-logger.js";
+import { randomUUID } from "node:crypto";
 
 const log = createLogger("hook-system-wiring");
 
@@ -39,7 +40,7 @@ export interface WireHookSystemDeps {
    */
   promptDispatcher?: TrustPromptDispatcher;
   /** Permission policy #633 — structured boot-time quarantine audit surface. */
-  auditLogger?: Pick<AuditLogger, "log">;
+  auditLogger?: Pick<AuditLogger, "log" | "isPermissionAuditChainReady" | "appendPermissionAuditEntry">;
 }
 
 export interface HookSystemBootResult {
@@ -72,14 +73,14 @@ export async function wireHookSystem(
     trust.trustedHooks.length,
     trust.disabledHooks.length,
   );
-  emitHookQuarantineAudit(trust, deps.auditLogger);
+  await emitHookQuarantineAudit(trust, deps.auditLogger);
   return { manager, trust };
 }
 
-function emitHookQuarantineAudit(
+async function emitHookQuarantineAudit(
   trust: RunHookTrustResult,
-  auditLogger?: Pick<AuditLogger, "log">,
-): void {
+  auditLogger?: Pick<AuditLogger, "log" | "isPermissionAuditChainReady" | "appendPermissionAuditEntry">,
+): Promise<void> {
   if (!auditLogger || trust.disabledHooks.length === 0) return;
   const disabled = new Set(trust.disabledHooks.map((hook) => hook.fileName));
   for (const entry of trust.diff) {
@@ -100,5 +101,21 @@ function emitHookQuarantineAudit(
       output: "Hook quarantined during boot trust workflow",
       toolCalls: [{ name: "hook_trust_boot", isError: false, trust: "high" }],
     });
+    if (auditLogger.isPermissionAuditChainReady()) {
+      await auditLogger.appendPermissionAuditEntry({
+        decision: "deny",
+        auditId: randomUUID(),
+        ts: new Date().toISOString(),
+        trustOrigin: "unknown",
+        tool: "hook_trust_boot",
+        source: "builtin",
+        category: "meta",
+        denyReasons: [{
+          layer: 6,
+          reason: `hook.quarantined:${entry.hook.fileName}:${entry.state}`,
+          source: "hook-trust-workflow",
+        }],
+      });
+    }
   }
 }
