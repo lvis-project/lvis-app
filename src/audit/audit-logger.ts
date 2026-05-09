@@ -90,6 +90,8 @@ export class AuditLogger {
   /** Memoized last serialized line so each append knows the prevHash without re-reading the file. */
   private q12LastSerialized: string = GENESIS_MARKER;
   private q12ChainBootstrapped = false;
+  /** Q12 P5 — secret store for daily seals. Wired alongside `setupQ12Chain`. */
+  private q12SealStore: SecretStore | null = null;
 
   constructor() {
     this.auditDir = join(homedir(), ".lvis", "audit");
@@ -116,9 +118,14 @@ export class AuditLogger {
    * loading the audit secret from the keychain. When unwired, all
    * `appendQ12Entry` calls throw — fail-secure per spec §1: refuse
    * to start the chain rather than silently downgrade.
+   *
+   * `sealStore` is optional but required for daily-seal verification
+   * via the `/permission audit verify` slash. When omitted, the
+   * verify operation reports `sealMatch: null` for all days.
    */
-  setupQ12Chain(secret: string): void {
+  setupQ12Chain(secret: string, sealStore?: SecretStore): void {
     this.q12Secret = secret;
+    this.q12SealStore = sealStore ?? null;
     // Bootstrap: scan the existing q12 file (if any) so the next
     // append's prevHash links to the *real* last line, not genesis.
     this.q12LastSerialized = GENESIS_MARKER;
@@ -146,6 +153,21 @@ export class AuditLogger {
   /** Q12 P5 — was setupQ12Chain called? */
   isQ12ChainReady(): boolean {
     return this.q12ChainBootstrapped && this.q12Secret !== null;
+  }
+
+  /** Q12 P5 — accessor for the wired HMAC secret. Null when not bootstrapped. */
+  getQ12Secret(): string | null {
+    return this.q12Secret;
+  }
+
+  /** Q12 P5 — accessor for the wired seal store. Null when not bootstrapped or omitted. */
+  getQ12SealStore(): SecretStore | null {
+    return this.q12SealStore;
+  }
+
+  /** Q12 P5 — accessor for the audit directory (used by audit-show/verify). */
+  getAuditDir(): string {
+    return this.auditDir;
   }
 
   /**
