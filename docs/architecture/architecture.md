@@ -1540,11 +1540,27 @@ graph TB
 | **Plugin (동적)** | 플러그인·MCP 설치 시 추가 | 매니페스트 기반 동적 등록 | 플러그인별 매니페스트에 정의 |
 | **Feature-gated** | (Feature Flag로 제어) | 실험적 도구 — §14.4 참조 | Feature Flag 활성 시에만 Registry에 등록 |
 
+**§6.4.X Tool Category — 5-axis taxonomy (Q12 Phase 2):**
+
+도구의 **policy axis** 는 5축으로 분리되며 `ToolCategoryRegistry` (Open-Closed pattern) 가 카테고리별 decision lane 을 제공한다. 자세한 의사결정 매트릭스는 `docs/architecture/q12-permission-policy-design.md` §3 Layer 3 참조.
+
+| Category | 의미 | 의사결정 (default mode) | 헤들리스 (routine) | 비고 |
+| --- | --- | --- | --- | --- |
+| `read` | 조회/검색 (자료를 변경하지 않음) | builtin: allow / plugin: scope-checked | allow | strict mode → ask |
+| `write` | 사용자 데이터 변경 | ask (auto mode → allow + audit) | reviewer agent | Phase 3 reviewer 미배치 시 ask |
+| `shell` | 셸 명령 실행 (Bash 등) | ask + Bash AST 검증 | reviewer (always) | requiresAst=true |
+| `network` | 외부 네트워크 호출 | ask + endpoint surface | reviewer | requiresEndpoint=true |
+| `meta` | 제어 흐름 / UI 프리미티브 | `decisionOverride` 따름 | 동일 | host builtin 전용; plugin 사용 금지 |
+
+**`decisionOverride` (meta 전용):** `always-allow-with-audit` (예: `ask_user_question` — 사용자에게 질문하는 도구 자체를 한번 더 승인 모달에 거는 중복 UX 차단) / `ask` (예: `agent_spawn` — `meta` 이지만 사용자 컨펌 필요).
+
+**Migration map:** v4 의 `dangerous` 단일 카테고리는 v5 에서 폐지됨. `bash` → `shell`, `agent_spawn` / `ask_user_question` → `meta`. 플러그인 manifest 의 `toolSchemas[*].category` enum 은 registry 가 동적으로 노출 (registry 미등록 카테고리 → manifest 검증 실패).
+
 **Tool Registry 동작:**
 
 | 시점 | 동작 |
 | --- | --- |
-| **부팅 시** | 빌트인 도구 등록 → Plugin 도구 등록 → MCP 도구 등록 → Feature Flag 평가 |
+| **부팅 시** | `registerStandardCategories()` → 빌트인 도구 등록 → Plugin 도구 등록 → MCP 도구 등록 → Feature Flag 평가 |
 | **플러그인 설치/제거** | Registry 동적 업데이트 (Hot-reload) |
 | **매 턴** | L1 Registry Filter 적용 → Lgenie에 전달할 도구 스키마 확정 |
 
