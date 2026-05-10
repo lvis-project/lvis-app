@@ -1,9 +1,10 @@
 /**
- * Permission policy Phase 2.5 — Layer 1 (Path policy) — allowed directories tests.
+ * Layer 1 path policy — allowed directories tests.
  *
  * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 1.
  */
 import { describe, it, expect } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve as pathResolve } from "node:path";
 import {
@@ -11,8 +12,11 @@ import {
   pickClosestParent,
   validateDirectoryAddition,
   sanitizeAllowedDirectories,
+  sanitizeRuntimeAllowedDirectories,
   computeDefaultAllowedDirectories,
+  computeDefaultRuntimeAllowedDirectories,
   buildAllowedScope,
+  buildRuntimeAllowedDirectories,
 } from "../allowed-directories.js";
 import {
   canonicalizePathForMatch,
@@ -226,6 +230,29 @@ describe("sanitizeAllowedDirectories", () => {
     expect(result.length).toBe(1);
     expect(result[0]).toContain("myapp");
   });
+
+  it("drops filesystem root entries", () => {
+    expect(sanitizeAllowedDirectories(["/"])).toEqual([]);
+  });
+});
+
+describe("runtime allowed directories", () => {
+  it("preserves canonical filesystem case for native sandbox validators", () => {
+    const root = mkdtempSync("/tmp/LVIS-Runtime-Scope-");
+    try {
+      const [runtime] = sanitizeRuntimeAllowedDirectories([root]);
+      expect(runtime).toBe(canonicalizePathForMatch(root));
+      if (process.platform === "darwin" || process.platform === "win32") {
+        expect(runtime).not.toBe(fold(root));
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("builds runtime scope without filesystem root entries", () => {
+    expect(buildRuntimeAllowedDirectories(["/"])).not.toContain("/");
+  });
 });
 
 describe("computeDefaultAllowedDirectories", () => {
@@ -244,6 +271,16 @@ describe("computeDefaultAllowedDirectories", () => {
       // Canonical paths never contain `..`.
       expect(dir.includes("/..")).toBe(false);
     }
+  });
+
+  it("does not include filesystem root when process cwd resolves to root", () => {
+    const result = computeDefaultAllowedDirectories("/");
+    expect(result).not.toContain("/");
+  });
+
+  it("has a runtime variant that preserves canonical filesystem case", () => {
+    const result = computeDefaultRuntimeAllowedDirectories();
+    expect(result).toContain(canonicalizePathForMatch(pathResolve(homedir(), ".lvis")));
   });
 });
 

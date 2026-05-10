@@ -62,7 +62,31 @@ function isValidRecord(r: unknown): r is RoutineRecord {
   if (x.trigger !== "schedule" && x.trigger !== "shutdown") return false;
   if (x.execution !== "llm-session" && x.execution !== "notification-only") return false;
   if (x.lastFiredMinuteUTC !== undefined && typeof x.lastFiredMinuteUTC !== "string") return false;
+  if (x.scope !== undefined && !isValidRoutineScope(x.scope)) return false;
   return true;
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function isValidRoutinePluginScope(value: unknown): value is RoutineScope["pluginIds"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const scope = value as Record<string, unknown>;
+  if (scope.mode === "deny-all" || scope.mode === "inherit") {
+    return true;
+  }
+  return scope.mode === "allow" && isStringArray(scope.ids);
+}
+
+function isValidRoutineScope(value: unknown): value is RoutineScope {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const scope = value as Record<string, unknown>;
+  return (
+    isValidRoutinePluginScope(scope.pluginIds) &&
+    isStringArray(scope.forcedPluginIds) &&
+    isStringArray(scope.directories)
+  );
 }
 
 function isCanonicalRecord(r: unknown): r is RoutineRecord {

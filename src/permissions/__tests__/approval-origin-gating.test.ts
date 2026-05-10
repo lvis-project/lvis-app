@@ -42,7 +42,7 @@ function makeGate(choice: import("../approval-gate.js").ApprovalChoice = "allow-
 }
 
 const SCOPE = "agent_external_api_call";
-const PLUGIN_A = "agent-hub";
+const PLUGIN_A = "sample-plugin";
 const PLUGIN_B = "malicious-plugin";
 
 // ─── (a) Legitimate plugin CAN respond to its own pending approval ────────────
@@ -210,7 +210,7 @@ describe("requestAgentApproval — registry integration", () => {
     const choice = await requestAgentApproval(
       gate,
       {
-        toolName: "agent_hub_decide_approval_with_host",
+        toolName: "sample_plugin_decide_approval_with_host",
         args: { approvalId: 42 },
         reason: "test approval",
         source: "plugin",
@@ -257,16 +257,4 @@ describe("requestAgentApproval — registry integration", () => {
     expect(entry.scope).toBe("agent_task_delegate");
   });
 
-  it("(f) works without registry (backward compat — registry is optional)", async () => {
-    const gate = makeGate("allow-once");
-    const choice = await requestAgentApproval(gate, {
-      toolName: "tool",
-      args: {},
-      reason: "test",
-      source: "plugin",
-      sourcePluginId: PLUGIN_A,
-      scope: SCOPE,
-    });
-    expect(choice).toBe("allow-once");
-  });
 });

@@ -1204,9 +1204,9 @@ describe("ToolExecutor — R2-CR-4 ask_user_question audit redaction is gated by
   });
 });
 
-// ─── Permission policy P2.5 — Layer 1 Allowed Directories wiring ────────
+// ─── Layer 1 Allowed Directories wiring ────────
 
-describe("ToolExecutor — Permission policy P2.5 Layer 1 allowed-directories", () => {
+describe("ToolExecutor — Layer 1 allowed-directories", () => {
   it("path inside cwd default is allowed (no directory-confirm modal)", async () => {
     const executeSpy = vi.fn(async () => "ok");
     const registry = new ToolRegistry();
@@ -1344,7 +1344,7 @@ describe("ToolExecutor — Permission policy P2.5 Layer 1 allowed-directories", 
     }
   });
 
-  it("headless mode + out-of-allowed-dir → fail-closed (Phase 3 reviewer pending)", async () => {
+  it("headless mode + out-of-allowed-dir → fail-closed when reviewer is not wired", async () => {
     const executeSpy = vi.fn(async () => "ok");
     const registry = new ToolRegistry();
     registry.register(makeReadFileTool(executeSpy));
@@ -1397,6 +1397,65 @@ describe("ToolExecutor — Permission policy P2.5 Layer 1 allowed-directories", 
     expect(executeSpy).toHaveBeenCalled();
     expect(results[0].is_error).toBeUndefined();
     expect(wc.send).not.toHaveBeenCalled();
+  });
+
+  it("filesystem root additionalDirectories is sanitized and does not grant access", async () => {
+    const executeSpy = vi.fn(async () => "ok");
+    const registry = new ToolRegistry();
+    registry.register(makeReadFileTool(executeSpy));
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const executor = new ToolExecutor(registry, undefined, undefined, undefined, gate);
+
+    const callPromise = executor.executeAll(
+      [{
+        id: "tu-l1-root-extra",
+        name: "read_file",
+        input: { path: "/var/tmp/root-extra-should-not-grant/foo.md" },
+      }],
+      {
+        sessionId: "sess-l1-root-extra",
+        permissionContext: userPermissionContext({
+          additionalDirectories: ["/"],
+        }),
+      },
+    );
+
+    await new Promise((r) => setTimeout(r, 5));
+    expect(wc.send).toHaveBeenCalled();
+    const sent = wc.send.mock.calls[0][1] as { id: string; nonce: string; hmac: string; kind?: string };
+    expect(sent.kind).toBe("out-of-allowed-dir");
+    gate.resolve(sent.id, {
+      requestId: sent.id,
+      choice: "deny-once",
+      nonce: sent.nonce,
+      hmac: sent.hmac,
+    });
+
+    const results = await callPromise;
+    expect(executeSpy).not.toHaveBeenCalled();
+    expect(results[0].is_error).toBe(true);
+  });
+
+  it("fails closed when the executor cwd is the filesystem root", async () => {
+    const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue("/");
+    try {
+      const executeSpy = vi.fn(async () => "ok");
+      const registry = new ToolRegistry();
+      registry.register(makeReadFileTool(executeSpy));
+      const executor = new ToolExecutor(registry);
+
+      const results = await executor.executeAll(
+        [{ id: "tu-root-cwd", name: "read_file", input: { path: "/var/tmp/a.txt" } }],
+        { sessionId: "sess-root-cwd", permissionContext: userPermissionContext() },
+      );
+
+      expect(executeSpy).not.toHaveBeenCalled();
+      expect(results[0].is_error).toBe(true);
+      expect(results[0].content).toContain("execution cwd is filesystem root");
+    } finally {
+      cwdSpy.mockRestore();
+    }
   });
 
   it("ToolExecutor path policy uses declared Tool.pathFields", async () => {

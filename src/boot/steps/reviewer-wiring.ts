@@ -1,13 +1,12 @@
 /**
- * Permission policy Phase 4 — Reviewer agent boot wiring (Phase 3 deferral resolution).
+ * Reviewer agent boot wiring.
  *
  * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 5,
  * §11 v2.1 binding decisions (default `provider="openai"`,
  * `model="gpt-4o-mini"`, `fallbackOnError ∈ {deny, rule}`).
  *
- * Phase 3 shipped the {@link RiskClassifier} interface + `setReviewer`
- * accessor on {@link PermissionManager}, but the boot pipeline did not
- * actually call `setReviewer`. Phase 4 closes the gap:
+ * This step wires the {@link RiskClassifier}, cache, and deferred queue into
+ * {@link PermissionManager}:
  *
  * 1. Read `permissions.reviewer` block from `~/.lvis/settings.json`.
  * 2. For `mode: "rule" | "disabled"` — sync classifier, no provider needed.
@@ -126,6 +125,8 @@ export interface WireReviewerDeps {
   verdictCachePath?: string;
   /** Test override for the deferred queue file path. */
   deferredQueuePath?: string;
+  /** Notify the foreground renderer whenever pending deferred entries change. */
+  onDeferredPendingChange?: (summary: { pending: number }) => void;
 }
 
 export interface WireReviewerResult {
@@ -143,7 +144,10 @@ export interface WireReviewerResult {
 export function wireReviewerAgent(deps: WireReviewerDeps): WireReviewerResult {
   const settings = (deps.readSettings ?? defaultReadSettings)();
   const cache = new VerdictCache(deps.verdictCachePath);
-  const deferredQueue = new DeferredQueue(deps.deferredQueuePath);
+  const deferredQueue = new DeferredQueue(
+    deps.deferredQueuePath,
+    deps.onDeferredPendingChange,
+  );
 
   let classifier: RiskClassifier;
   if (settings.mode === "disabled" || settings.mode === "rule") {
@@ -153,14 +157,14 @@ export function wireReviewerAgent(deps: WireReviewerDeps): WireReviewerResult {
     // mode === "llm"
     if (!deps.streamProviderFor) {
       throw new Error(
-        `Permission policy P4 reviewer wiring: settings.reviewer.mode='llm' but no streamProviderFor supplied. ` +
+        `Permission reviewer wiring: settings.reviewer.mode='llm' but no streamProviderFor supplied. ` +
         `Boot caller must provide a provider factory (atomic cutover — no silent fallback).`,
       );
     }
     const upstream = deps.streamProviderFor(settings.provider);
     if (!upstream) {
       throw new Error(
-        `Permission policy P4 reviewer wiring: settings.reviewer.provider='${settings.provider}' is not configured. ` +
+        `Permission reviewer wiring: settings.reviewer.provider='${settings.provider}' is not configured. ` +
         `Add an API key for ${settings.provider} or change reviewer mode.`,
       );
     }

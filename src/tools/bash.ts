@@ -104,7 +104,7 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
         ? pathResolve(input.cwd)
         : pathResolve(ctx.cwd, input.cwd)
       : ctx.cwd;
-    const cwdViolation = validateShellWorkingDirectory(resolvedCwd, ctx.cwd, ctx.allowedDirectories);
+    const cwdViolation = validateShellWorkingDirectory(resolvedCwd, ctx.cwd, ctx.extraAllowedDirectories);
     if (cwdViolation) {
       return { output: cwdViolation, isError: true };
     }
@@ -112,7 +112,7 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
       input.command,
       resolvedCwd,
       ctx.cwd,
-      ctx.allowedDirectories,
+      ctx.extraAllowedDirectories,
     );
     if (commandPathViolation) {
       return { output: commandPathViolation, isError: true };

@@ -1,5 +1,5 @@
 /**
- * Permission policy Phase 2.5 — Layer 1 (Path policy) — allowed directories module.
+ * Layer 1 path policy — allowed directories module.
  *
  * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 1.
  *
@@ -31,7 +31,7 @@ import {
 } from "./sensitive-paths.js";
 
 /**
- * Permission policy P2.5 — directory addition pre-flight result.
+ * Directory addition pre-flight result.
  *
  * `ok: true` ⇒ caller may persist the directory to settings.
  * `ok: false` ⇒ caller MUST surface `reason` to the user (Layer 0
@@ -57,32 +57,47 @@ const ADJACENCY_WARNING_NESTED = [
 ] as const;
 
 /**
- * Permission policy P2.5 — compute the host-default allow-list at boot.
+ * Compute the host-default allow-list at boot.
  *
  * Default = `process.cwd()` ∪ `homedir()/.lvis` MINUS Layer 0 deny paths.
  * Returns canonicalized + case-folded entries ready to be passed to
  * {@link isPathAllowed}.
  */
-export function computeDefaultAllowedDirectories(): string[] {
-  const candidates = [process.cwd(), pathResolve(homedir(), ".lvis")];
+export function computeDefaultAllowedDirectories(cwd: string = process.cwd()): string[] {
+  return computeDefaultAllowedDirectoryEntries(cwd, true);
+}
+
+/**
+ * Runtime filesystem roots for native tools. Unlike the Layer 1 matching
+ * scope, these keep the OS canonical case so `realpath`-based sandbox checks
+ * can validate the same directories without lowercasing path segments.
+ */
+export function computeDefaultRuntimeAllowedDirectories(cwd: string = process.cwd()): string[] {
+  return computeDefaultAllowedDirectoryEntries(cwd, false);
+}
+
+function computeDefaultAllowedDirectoryEntries(cwd: string, foldCase: boolean): string[] {
+  const candidates = [cwd, pathResolve(homedir(), ".lvis")];
   const out: string[] = [];
   const seen = new Set<string>();
   for (const raw of candidates) {
     const canonical = canonicalizePathForMatch(raw);
     const folded = caseFoldForMatch(canonical);
+    const value = foldCase ? folded : canonical;
+    if (isFilesystemRootPath(folded)) continue;
     // Layer 0 always wins — if a default candidate is itself sensitive,
     // skip it (the more-specific deny patterns inside still hard-block
     // any leaf access, so excluding the default is mostly hygiene).
     if (isSensitivePath(folded)) continue;
     if (seen.has(folded)) continue;
     seen.add(folded);
-    out.push(folded);
+    out.push(value);
   }
   return out;
 }
 
 /**
- * Permission policy P2.5 — sanitize a user-provided allow-list (e.g. from
+ * Sanitize a user-provided allow-list (e.g. from
  * `permissions.additionalDirectories` in settings.json).
  *
  * - Resolves `~` to `homedir()`.
@@ -95,6 +110,21 @@ export function computeDefaultAllowedDirectories(): string[] {
  * to assemble the final scope.
  */
 export function sanitizeAllowedDirectories(input: readonly string[] | undefined): string[] {
+  return sanitizeAllowedDirectoryEntries(input, true);
+}
+
+/**
+ * Runtime filesystem roots for native tools. Applies the same validation as
+ * {@link sanitizeAllowedDirectories} but preserves canonical OS case.
+ */
+export function sanitizeRuntimeAllowedDirectories(input: readonly string[] | undefined): string[] {
+  return sanitizeAllowedDirectoryEntries(input, false);
+}
+
+function sanitizeAllowedDirectoryEntries(
+  input: readonly string[] | undefined,
+  foldCase: boolean,
+): string[] {
   if (!input || input.length === 0) return [];
   const out: string[] = [];
   const seen = new Set<string>();
@@ -103,16 +133,18 @@ export function sanitizeAllowedDirectories(input: readonly string[] | undefined)
     const expanded = expandHomeTilde(raw);
     const canonical = canonicalizePathForMatch(expanded);
     const folded = caseFoldForMatch(canonical);
+    const value = foldCase ? folded : canonical;
+    if (isFilesystemRootPath(folded)) continue;
     if (isSensitivePath(folded)) continue;
     if (seen.has(folded)) continue;
     seen.add(folded);
-    out.push(folded);
+    out.push(value);
   }
   return out;
 }
 
 /**
- * Permission policy P2.5 — Layer 1 prefix check.
+ * Layer 1 prefix check.
  *
  * `canonicalPath` MUST already be canonicalized + case-folded by the
  * caller (frozen-canonical contract). `scope.directories` MUST come from
@@ -144,7 +176,7 @@ export function isPathAllowed(
 }
 
 /**
- * Permission policy P2.5 — pick the **leaf-parent** of `canonicalPath` for the
+ * Pick the **leaf-parent** of `canonicalPath` for the
  * "auto-suggest add directory" UX (§3 Layer 1 M3 strengthening).
  *
  * Spec rule: NEVER suggest the broadest common-prefix (`~/Documents/`).
@@ -172,7 +204,7 @@ export function pickClosestParent(
 }
 
 /**
- * Permission policy P2.5 — pre-flight check before persisting a directory to
+ * Pre-flight check before persisting a directory to
  * `additionalDirectories`. Surfaces three classes of problem:
  *
  * 1. Hard reject: empty / sensitive / filesystem root → `ok: false`.
@@ -196,7 +228,7 @@ export function validateDirectoryAddition(rawPath: string): ValidateDirectoryRes
   const folded = caseFoldForMatch(canonical);
 
   // Reject filesystem root.
-  if (folded === "/" || /^[a-z]:\/?$/i.test(folded)) {
+  if (isFilesystemRootPath(folded)) {
     return { ok: false, reason: "filesystem root is not allowed", adjacencyWarnings };
   }
   // Reject Layer 0 sensitive paths.
@@ -234,8 +266,12 @@ export function validateDirectoryAddition(rawPath: string): ValidateDirectoryRes
   return { ok: true, canonicalPath: folded, adjacencyWarnings };
 }
 
+export function isFilesystemRootPath(foldedPath: string): boolean {
+  return foldedPath === "/" || /^[a-z]:\/?$/i.test(foldedPath);
+}
+
 /**
- * Permission policy P2.5 — assemble the live allow-list scope from defaults + user
+ * Assemble the live allow-list scope from defaults + user
  * additions, with Layer 0 sensitive paths filtered out.
  *
  * This is the canonical entry point used by the executor to construct
@@ -256,6 +292,27 @@ export function buildAllowedScope(
     directories.push(dir);
   }
   return { directories };
+}
+
+/**
+ * Assemble runtime filesystem roots for native tool sandbox checks. This is
+ * intentionally separate from {@link buildAllowedScope}: Layer 1 matching uses
+ * case-folded strings, while native tools need canonical OS paths.
+ */
+export function buildRuntimeAllowedDirectories(
+  userAdditions: readonly string[] | undefined,
+): string[] {
+  const defaults = computeDefaultRuntimeAllowedDirectories();
+  const sanitized = sanitizeRuntimeAllowedDirectories(userAdditions);
+  const seen = new Set<string>();
+  const directories: string[] = [];
+  for (const dir of [...defaults, ...sanitized]) {
+    const folded = caseFoldForMatch(canonicalizePathForMatch(dir));
+    if (seen.has(folded)) continue;
+    seen.add(folded);
+    directories.push(dir);
+  }
+  return directories;
 }
 
 // ─── helpers ─────────────────────────────────────────

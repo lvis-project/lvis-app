@@ -84,7 +84,7 @@ function emptyTotals(): UsageTotals {
  * `engine/conversation-loop.ts` 의 audit emission site 는 LLM 턴에 한해
  * `${vendor}/${model}` 형태로 route 를 기록하므로 LLM 활동의 per-vendor /
  * per-model 비용 breakdown 이 정상 분류된다. 비-LLM RouteResult discriminator
- * (skill / command / agent-hub) 는 의도적으로 default vendor 로 묶여
+ * (skill / command / agent-message) 는 의도적으로 default vendor 로 묶여
  * "non-LLM" 사용량을 한 줄로 집계 — 그쪽은 토큰/비용 attribution 의미가 없다.
  */
 function parseRoute(route: string | undefined): { vendor: LLMVendor; model: string } {

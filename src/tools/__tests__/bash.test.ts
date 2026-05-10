@@ -19,7 +19,7 @@ import type { ToolExecutionContext } from "../base.js";
 
 const ctx = (cwd: string = process.cwd()): ToolExecutionContext => ({
   cwd,
-  allowedDirectories: [],
+  extraAllowedDirectories: [],
   metadata: {},
 });
 
@@ -203,6 +203,21 @@ describe("BashTool — sandbox violation", () => {
     }
   });
 
+  it("rejects bare sensitive filename operands before spawning the shell", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lvis-bash-bare-sensitive-"));
+    writeFileSync(join(root, ".env"), "SECRET=1\n", "utf8");
+    try {
+      const result = await new BashTool().execute(
+        { command: "cat .env", timeoutSeconds: 5 },
+        ctx(root),
+      );
+      expect(result.isError).toBe(true);
+      expect(result.output).toContain("Sensitive path:");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("rejects redirection-attached sensitive operands before spawning the shell", async () => {
     const result = await new BashTool().execute(
       { command: "cat<$HOME/.ssh/id_rsa", timeoutSeconds: 5 },
@@ -239,6 +254,20 @@ describe("BashTool — sandbox violation", () => {
       );
       expect(result.isError).toBe(true);
       expect(result.output).toContain("Sandbox:");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects recursive filesystem traversal before spawning the shell", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lvis-bash-recursive-traversal-"));
+    try {
+      const result = await new BashTool().execute(
+        { command: "grep -R SECRET .", timeoutSeconds: 5 },
+        ctx(root),
+      );
+      expect(result.isError).toBe(true);
+      expect(result.output).toContain("recursive shell filesystem traversal");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

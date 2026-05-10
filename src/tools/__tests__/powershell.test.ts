@@ -15,7 +15,7 @@ import type { ToolExecutionContext } from "../base.js";
 
 const ctx = (cwd: string = process.cwd()): ToolExecutionContext => ({
   cwd,
-  allowedDirectories: [],
+  extraAllowedDirectories: [],
   metadata: {},
 });
 
@@ -50,7 +50,7 @@ describe("PowerShellTool — policy surface", () => {
   it("blocks expression execution and encoded command forms from the AST summary", () => {
     expect(validatePowerShellAst(ast([{ name: "Invoke-Expression" }]))).toContain("Invoke-Expression");
     expect(validatePowerShellAst(ast([{ name: "iex" }]))).toContain("Invoke-Expression");
-    expect(validatePowerShellAst(ast([{ name: "powershell", elements: ["powershell", "-EncodedCommand", "AAAA"] }]))).toContain("encoded commands");
+    expect(validatePowerShellAst(ast([{ name: "Get-Content", elements: ["Get-Content", "-EncodedCommand", "AAAA"] }]))).toContain("encoded commands");
   });
 
   it("blocks interactive prompts from the AST summary", () => {
@@ -62,6 +62,25 @@ describe("PowerShellTool — policy surface", () => {
     expect(
       validatePowerShellAst(ast([{ name: "Join-Path", elements: ["Join-Path", "$HOME", "\"Desktop/out.txt\""] }])),
     ).toContain("dynamic path composition");
+    expect(
+      validatePowerShellAst(ast([{ name: "Set-Content", elements: ["Set-Content", "([IO.Path]::Combine($HOME,'.ssh','id_rsa'))", "x"] }])),
+    ).toContain("dynamic path argument");
+    expect(
+      validatePowerShellAst(ast([{ name: "Set-Content", elements: ["Set-Content", "($HOME + '/.ssh/id_rsa')", "x"] }])),
+    ).toContain("dynamic path argument");
+    expect(validatePowerShellAst(ast([{ name: "Resolve-Path" }]))).toContain("dynamic path resolution");
+    expect(
+      validatePowerShellAst(ast([{ name: "sc", elements: ["sc", "($HOME + '/.ssh/id_rsa')", "x"] }])),
+    ).toContain("dynamic path argument");
+    expect(
+      validatePowerShellAst(ast([{ name: "ac", elements: ["ac", "('.e' + 'nv')", "x"] }])),
+    ).toContain("dynamic path argument");
+    expect(
+      validatePowerShellAst(ast([{ name: "dir", elements: ["dir", "('.s' + 'sh')"] }])),
+    ).toContain("dynamic path argument");
+    expect(
+      validatePowerShellAst(ast([{ name: "ri", elements: ["ri", "('.e' + 'nv')"] }])),
+    ).toContain("dynamic path argument");
   });
 
   it("blocks recursive forced deletion regardless of flag order", () => {
@@ -76,6 +95,15 @@ describe("PowerShellTool — policy surface", () => {
     );
     expect(validatePowerShellAst(ast([{ name: "Remove-Item", elements: ["Remove-Item", "./x", "-Recurse:$true", "-Force:$true"] }]))).toContain(
       "recursive forced deletion",
+    );
+  });
+
+  it("blocks recursive filesystem traversal before shell execution", () => {
+    expect(validatePowerShellAst(ast([{ name: "Get-ChildItem", elements: ["Get-ChildItem", "-Recurse", "."] }]))).toContain(
+      "recursive shell filesystem traversal",
+    );
+    expect(validatePowerShellAst(ast([{ name: "dir", elements: ["dir", "-r", "."] }]))).toContain(
+      "recursive shell filesystem traversal",
     );
   });
 
@@ -131,6 +159,22 @@ describe("PowerShellTool — policy surface", () => {
     try {
       const result = await new PowerShellTool().execute(
         { command: `Get-Content ${target}`, timeoutSeconds: 5 },
+        ctx(root),
+      );
+
+      expect(result.isError).toBe(true);
+      expect(result.output).toContain("Sensitive path:");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects bare sensitive filename operands before PowerShell AST parsing", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lvis-pwsh-bare-sensitive-"));
+    writeFileSync(join(root, ".env"), "SECRET=1\n", "utf8");
+    try {
+      const result = await new PowerShellTool().execute(
+        { command: "Get-Content .env", timeoutSeconds: 5 },
         ctx(root),
       );
 

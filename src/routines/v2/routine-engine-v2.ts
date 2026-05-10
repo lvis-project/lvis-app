@@ -2,7 +2,7 @@
  * RoutineEngineV2 — v2-only routine execution engine.
  *
  * Each routine fire creates a dedicated ConversationLoop instance so routine
- * sessions are fully isolated from the main chat session (Q9 isolation).
+ * sessions are fully isolated from the main chat session.
  * The factory is called per-invocation — no shared state with main chat.
  */
 import { writeFile } from "node:fs/promises";
@@ -23,7 +23,7 @@ export interface RoutineV2RunInput {
    */
   scope?: RoutineScope;
   /**
-   * Q9: absolute path to the pre-created JSONL file for this routine fire.
+   * Absolute path to the pre-created JSONL file for this routine fire.
    * When provided, the engine appends history messages here so
    * RoutineSessionView can display the full conversation.
    * File is created by RoutineSessionStore.createSession() before runRoutine().

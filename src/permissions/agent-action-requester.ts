@@ -1,8 +1,8 @@
 /**
- * agent-action-requester.ts — §8 Agent Hub approval caller + issuer registry
+ * agent-action-requester.ts — §8 plugin approval caller + issuer registry
  *
- * Thin wrapper around ApprovalGate.requestAndWait() for plugin clients
- * (specifically lvis-plugin-agent-hub's decide-approval-with-host handler).
+ * Thin wrapper around ApprovalGate.requestAndWait() for plugin clients that
+ * need a host-signed approval verdict.
  *
  * Responsibility split:
  *   - Caller (plugin): supplies toolName, args, reason, source, sourcePluginId, scope.
@@ -14,12 +14,10 @@
  * Returns only the ApprovalChoice so callers don't need to unwrap
  * ApprovalDecision (nonce/hmac fields are verification artefacts, not outputs).
  *
- * §security P0 — IPC origin gating (issue #71):
- *   ApprovalIssuerRegistry records (requestId → { issuerPluginId, scope }) at
- *   request time. The respond path verifies:
- *     (a) sender plugin id == issuer plugin id
- *     (b) scope is listed in issuer's manifest pluginAccess.agentApprovalScopes
- *   Violations throw — no silent fallback.
+ * Security: ApprovalIssuerRegistry records
+ * (requestId -> { issuerPluginId, scope }) at request time. The respond path
+ * verifies sender plugin id and manifest-declared scope. Violations throw
+ * without downgrade.
  */
 
 import { randomUUID } from "node:crypto";
@@ -150,13 +148,16 @@ export class ApprovalIssuerRegistry {
 export async function requestAgentApproval(
   gate: ApprovalGate,
   input: AgentApprovalInput,
-  registry?: ApprovalIssuerRegistry,
+  registry: ApprovalIssuerRegistry,
 ): Promise<ApprovalChoice> {
+  if (!registry) {
+    throw new Error("ApprovalIssuerRegistry is required for plugin approval requests");
+  }
   const requestId = randomUUID();
 
   // Record issuer BEFORE gate.requestAndWait() so the respond path
   // always sees the entry regardless of how fast the user responds.
-  registry?.record(requestId, input.sourcePluginId, input.scope);
+  registry.record(requestId, input.sourcePluginId, input.scope);
 
   let settled = false;
   try {
@@ -176,7 +177,7 @@ export async function requestAgentApproval(
     // recorded, otherwise a subsequent malicious respond() with the same
     // id (replay or guessed UUID) could see a leaked issuer mapping.
     // On normal resolve we leave the entry — the respond path consumes it.
-    if (!settled) registry?.delete(requestId);
+    if (!settled) registry.delete(requestId);
   }
 }
 
@@ -188,7 +189,7 @@ export async function requestAgentApproval(
  *   (b) responderPluginId == entry.issuerPluginId
  *   (c) entry.scope is listed in allowedScopes (issuer's agentApprovalScopes)
  *
- * Throws `ApprovalOriginError` on any violation — no silent fallback (§No-Fallback).
+ * Throws `ApprovalOriginError` on any violation.
  * Consumes the entry from the registry on success.
  *
  * @param registry          - Shared ApprovalIssuerRegistry.

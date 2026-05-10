@@ -37,7 +37,7 @@ PR #626 (Routine v2) 의 production smoke test 에서 발견된 *headless routin
 | **User-in-the-loop > silent** | Headless 의 implicit allow 폐지. Reviewer agent (LOW/MED auto+audit, HIGH deferred queue) 또는 LLM-free path |
 | **Multi-vendor neutrality** | Reviewer agent provider/model 설정 가능 + LLM-free path (`rule`) + 비활성 (`disabled`) |
 | **Path-aware everywhere** | Tool 의 *모든* 선언된 path 인자 (`Tool.pathFields[]`, 향후 SDK manifest `pathFields[]`) 가 allowed directories 검사 대상. 선언이 없는 plugin tool 은 `write` category 로 ask/reviewer 경로를 탄다. |
-| **Manifest integrity** | "read" 선언 plugin tool 은 boot 시 fs proxy 로 wrap 되어 write attempts 가 panic. 신뢰 axis 는 manifest-static + runtime sanity-check |
+| **Manifest integrity** | 현재 SDK schema 는 plugin `read` category 를 선언하지 않으므로 plugin tool 은 보수적 `write` 로 등록한다. Manifest integrity state 는 host→plugin fs boundary 에서 `ManifestIntegrityViolation` 이 발생하면 plugin 을 disable 하고 audit/UI surface 로 fail-closed 한다. read-declared proxy wrapping 은 SDK authority metadata cutover 이후 활성화한다. |
 | **Audit tamper-evidence** | `~/.lvis/audit*` 자체가 Layer 0 sensitive (write 차단). HMAC-chain prevHash + daily seal hash 별도 store |
 
 ## 2. 10-Layer evaluation pipeline
@@ -67,7 +67,7 @@ INPUT origin classification (user-keyboard | plugin-emitted | llm-tool-arg | fil
 │  Layer 1:  Path policy (allow-list, confirm-gate, scope)   │
 │   ├ permissions.additionalDirectories[] (Claude Code 명명) │
 │   ├ Default: cwd + ~/.lvis (단 Layer 0 deny path 제외)      │
-│   ├ Tool 의 manifest declared `pathFields[]` 가 검사 대상   │
+│   ├ Tool.pathFields[] (native now, SDK manifest future) 검사 │
 │   ├ 외부 path → confirm + auto-suggest (단 leaf parent only,│
 │   │    re-typed dir name 확인, .env/.git/.ssh/credentials  │
 │   │    인접 시 warning)                                    │
@@ -301,12 +301,12 @@ registerToolCategory({
 
 ### §3.5 — Manifest integrity (NEW, critic C2)
 
-Plugin manifest category 가 거짓일 때 *runtime sanity check* 가 catch.
+Plugin manifest category 가 거짓일 때 *runtime sanity check* 가 catch 한다. 현재 SDK schema 는 plugin `toolSchemas[].category/pathFields` 를 정의하지 않으므로 host 는 plugin tool 을 보수적 `write` 로 등록하고, app-local authority extension 을 두지 않는다. 따라서 이 section 의 read-declared wrapping 은 SDK authority metadata cutover 후 활성화되는 host behavior 이며, 현재 구현은 `ManifestIntegrityViolation` 이 host→plugin fs boundary 에서 발생하면 plugin disable + audit/UI surface 를 fail-closed 로 수행한다.
 
 ```typescript
 class ManifestIntegrityProxy {
-  static wrapReadDeclared(tool: PluginTool): PluginTool {
-    if (tool.category !== "read") return tool;
+  static wrapSdkDeclaredReadTool(tool: PluginTool): PluginTool {
+    if (tool.sdkAuthority.category !== "read") return tool;
     return {
       ...tool,
       execute: async (input) => {
@@ -318,7 +318,9 @@ class ManifestIntegrityProxy {
 }
 ```
 
-**Boot-time:** 모든 plugin tool 의 `category === "read"` 가 boot 시 wrapping. write attempt → panic + audit + plugin disable + user notification.
+**Current host behavior:** plugin tool 은 SDK schema SOT 에 category 가 없으므로 `write` 로 등록한다. `ManifestIntegrityViolation` 이 runtime boundary 에서 발생하면 panic + audit + plugin disable + user notification. Audit append 실패는 caller 에 전파한다.
+
+**Future SDK cutover:** SDK schema/types 와 active plugin manifests 가 `category/pathFields` 를 선언한 뒤, 모든 plugin tool 의 `category === "read"` 가 boot 시 wrapping 된다.
 
 **Trade-off:** plugin 이 standard `node:fs` 직접 import 시 wrap 우회 가능 — Phase 4 sandboxed plugin runtime 까지는 본 가드가 partial. 사용자 docs 에 "manifest 가 거짓이면 plugin 신뢰 못함" 명시.
 
@@ -508,8 +510,8 @@ interface AuditModeChange extends AuditCommon {
 
 **Tamper-evidence:**
 - HMAC chain: 각 line 의 `prevHash = HMAC(secret, prevLine)`
-- secret 은 boot-time 에 system keychain 에서 읽기 (없으면 generate + persist)
-- Daily seal hash 를 *별도 location* (system keychain) 에 기록 → forensics 가 일별로 무결성 확인 가능
+- secret 은 boot-time 에 Electron `safeStorage` backing store 를 우선 사용한다. `safeStorage` 미가용 환경에서는 0o600 file secret store 를 명시적 non-keychain path 로 사용하며, secret persistence 실패는 fail-closed 로 드러낸다.
+- Daily seal hash 는 chain secret 과 분리된 seal store 에 기록 → forensics 가 일별로 무결성 확인 가능
 
 **Path protection:** `~/.lvis/audit*` 는 Layer 0 sensitive (write 차단). 즉 compromised tool 이 *새 entry 추가는 막지만* 기존 log rewrite 는 불가능.
 
@@ -555,7 +557,7 @@ Electron preload/contextBridge. Docker 불필요.
 | Persistent + runtime | settings.json + /permission slash ✅ | session approvals | dynamic | — | — | session | mode switch | /yolo | runtime config | settings.json + /yolo |
 | Allowed directories | additionalDirectories + auto-suggest ✅ | — | — | — | per-directory [unverified] | additionalDirectories | path-level | — | cwd + /tmp default | per-dir settings |
 | Path-aware (sensitive) | symlink-resolve frozen-canonical + glob ✅ | — | path traversal check | — | — | deny-list | path policy | — | path policy | — |
-| Manifest integrity | runtime fs proxy on read-declared ✅ NEW | — | — | — | — | — | — | — | — | — |
+| Manifest integrity | violation disable + audit now, SDK read-declared proxy cutover later ✅ NEW | — | — | — | — | — | — | — | — | — |
 | Audit tamper-evidence | HMAC chain + daily seal ✅ NEW | — | — | — | — | — | — | — | — | — |
 
 ✅ = LVIS 채택. **[unverified]** = document-specialist 가 source URL 404 또는 미확인.
@@ -578,7 +580,7 @@ compat/fallback surface 는 제외하고, host/app/plugin contract 는 다음 �
 
 | 영역 | 현재 구현 | SOT / 파일 |
 |---|---|---|
-| Tool category contract | Host registry 는 `read/write/shell/network/meta`; plugin manifest 는 고정 allow-list `read/write/shell/network` 만 허용. 미래 host-only category 가 추가되어도 plugin contract 는 자동 확장되지 않음. | `src/permissions/category-registry.ts`, `src/plugins/runtime/manifest-validation.ts` |
+| Tool category contract | Host registry 는 `read/write/shell/network/meta`; 현재 SDK manifest schema 는 plugin `toolSchemas[].category/pathFields` 를 정의하지 않는다. Plugin tool 은 보수적 `write` 로 등록하며, SDK schema/types + active plugin manifests + host SDK pin cutover 후에만 plugin category/pathFields hard-fail validation 을 활성화한다. | `src/permissions/category-registry.ts`, `src/plugins/runtime/manifest-validation.ts`, `@lvis/plugin-sdk/schemas/plugin-manifest.schema.json` |
 | Permission IPC | Permission IPC channel 은 `PERMISSIONS` 상수만 사용. main handler / preload bridge / sender-guard tests 가 같은 SOT 를 참조. | `src/shared/ipc-channels.ts`, `src/ipc/domains/permissions.ts`, `src/preload.ts` |
 | Slash origin gate | `/permission` dispatch 는 `user-keyboard` origin 만. plugin-emitted / LLM / file content 는 leading slash 를 모두 제거해 plain text 로 처리. | `src/shared/slash-sanitizer.ts`, `src/permissions/permission-slash.ts` |
 | Reviewer lane | Boot 시 `wireReviewerAgent()` 는 fail-fast. `mode=llm` 인데 provider/API key 가 없으면 silent downgrade 없이 boot 오류로 드러남. | `src/boot.ts`, `src/boot/steps/reviewer-wiring.ts` |
@@ -617,7 +619,7 @@ compat/fallback surface 는 제외하고, host/app/plugin contract 는 다음 �
 - Layer 0 sensitive list expansion (6 categories of paths)
 - `additionalDirectories` setting + default computation
 - Auto-suggest: leaf-parent only + re-typed confirm + adjacency warning
-- Tool manifest `pathFields[]` declaration
+- Native `Tool.pathFields[]` declaration; SDK manifest `pathFields[]` reserved for Phase 6 cutover
 - `/permission dir allow / deny / list` slash
 - Move hook directory to `~/.config/lvis/hooks/`
 
@@ -638,7 +640,7 @@ compat/fallback surface 는 제외하고, host/app/plugin contract 는 다음 �
 - Boot-time quarantine emits HMAC-chained `AuditDeny`, double-writes general telemetry `AuditLogger.log` with `input.kind = "hook.quarantined"`, and surfaces a non-modal Permissions tab notice backed by `PERMISSIONS.hookTrustList`.
 - Hook invocation contract (JSON in/out, exit code)
 - Deny precedence enforcement
-- ManifestIntegrityProxy (read-declared plugin tools wrapped with read-only fs proxy)
+- ManifestIntegrityState fail-closed disable/audit now; read-declared fs proxy wrapping after SDK authority metadata cutover
 - Tests: chain order, deny precedence, post-install hook tampering simulation
 
 ### Phase 5 — `/permission` slash + audit schema + arch.md rewrite
@@ -730,7 +732,7 @@ compat/fallback surface 는 제외하고, host/app/plugin contract 는 다음 �
 3. Atomic cutover deadlock (Phase 6) — resolved as SDK-first cutover; app-local schema extension and boot-warn grace rejected
 4. Layer 0/1 boundary (Layer 0 expand `~/.lvis/{secrets,audit*,hooks,sessions,permissions}`)
 5. `fallbackOnError` enum: `allow-and-audit` 제거
-6. Manifest honesty (NEW §3.5) — runtime fs proxy on read-declared
+6. Manifest honesty (NEW §3.5) — violation disable/audit now, SDK read-declared fs proxy cutover later
 7. RiskClassifier sync union (`RiskVerdict | Promise<RiskVerdict>`)
 8. Layer 10 collapse into Layer 1 cross-cutting
 

@@ -35,6 +35,8 @@ import type { ApprovalGate, ApprovalMode } from "../permissions/approval-gate.js
 import { isSensitivePath, canonicalizePathForMatch, caseFoldForMatch } from "../permissions/sensitive-paths.js";
 import {
   buildAllowedScope,
+  buildRuntimeAllowedDirectories,
+  isFilesystemRootPath,
   isPathAllowed,
   pickClosestParent,
   validateDirectoryAddition,
@@ -59,8 +61,6 @@ export interface ToolCallMeta {
   toolUseId: string;
   displayOrder: number;
 }
-
-// ─── C1: Sensitive-path + invocation category extraction ────────
 
 /**
  * Extract absolute filesystem target paths from a tool's declared
@@ -224,28 +224,27 @@ export interface ToolPermissionContext {
    */
   approvalCacheKey?: string;
   /**
-   * Permission policy P2.5 — Layer 1 path policy. User-configured directories from
-   * `permissions.additionalDirectories` in settings.json. Boot threads
-   * this through every executeAll() invocation. The executor merges with
-   * computed defaults via {@link buildAllowedScope}; an `undefined` value
-   * here means "use defaults only" (NOT "silent allow").
+   * Layer 1 path policy. User-configured directories from
+   * `permissions.additionalDirectories` in settings.json. Boot threads this
+   * through every executeAll() invocation. The executor merges with computed
+   * defaults via {@link buildAllowedScope}; an `undefined` value here means
+   * "use defaults only" (NOT "silent allow").
    */
   additionalDirectories?: readonly string[];
   /**
-   * Permission policy P2.5 §9 — trust origin classification carried with each tool
-   * invocation. Audited and propagated into approval-request payloads.
-   * Distinguishes user-keyboard input from plugin-emitted, LLM-tool-arg,
-   * and file-content origins.
+   * Trust origin classification carried with each tool invocation. Audited and
+   * propagated into approval-request payloads. Distinguishes user-keyboard
+   * input from plugin-emitted, LLM-tool-arg, and file-content origins.
    */
   trustOrigin: ToolTrustOrigin;
 }
 
 /**
- * Permission policy Phase 2 — bundled execution options for {@link ToolExecutor.executeAll}
- * and {@link ToolExecutor.executeOne}. Replaces the positional-arg
- * shape so adding a new pipeline-wide concern (per-turn telemetry, audit
- * correlation id, …) doesn't ripple through every callsite. A missing
- * permission context is a strict-deny condition for concrete tool execution.
+ * Bundled execution options for {@link ToolExecutor.executeAll} and
+ * {@link ToolExecutor.executeOne}. Replaces the positional-arg shape so adding
+ * a new pipeline-wide concern (per-turn telemetry, audit correlation id, ...)
+ * doesn't ripple through every callsite. A missing permission context is a
+ * strict-deny condition for concrete tool execution.
  */
 export interface ExecuteOptions {
   callbacks?: ToolExecutorCallbacks;
@@ -483,8 +482,8 @@ export class ToolExecutor {
   }
 
   /**
-   * C1: convert the PermissionManager execution mode into the ApprovalMode
-   * vocabulary understood by ApprovalGate (§S4 read-only short-circuit).
+   * Convert the PermissionManager execution mode into the ApprovalMode
+   * vocabulary understood by ApprovalGate's read-only short-circuit.
    * `strict` → `default` (show dialog); `auto` → `full_auto`; `default` → `default`.
    */
   private currentApprovalMode(): ApprovalMode {
@@ -661,6 +660,21 @@ export class ToolExecutor {
     trust = trustFromSource(source);
     let invocationCategory = resolveInvocationCategory(tool, toolUse.input);
 
+    const foldedExecutionCwd = caseFoldForMatch(canonicalizePathForMatch(executionCwd));
+    if (isFilesystemRootPath(foldedExecutionCwd)) {
+      const msg = `[권한 차단] 도구 '${toolUse.name}' (${source}) — execution cwd is filesystem root.`;
+      const durationMs = Date.now() - startTime;
+      const blockedPermission: PermissionCheckResult = {
+        decision: "deny",
+        reason: "execution cwd is filesystem root",
+        layer: 0,
+      };
+      emitToolStart(callbacks, toolUse.name, toolUse.input, meta);
+      callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+      await this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, blockedPermission, Infinity, permissionContext, invocationCategory, executionCwd);
+      return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+    }
+
     if (!permissionContext?.trustOrigin) {
       const msg = `[권한 차단] 도구 '${toolUse.name}' (${source}) — trust origin is missing.`;
       const durationMs = Date.now() - startTime;
@@ -702,10 +716,7 @@ export class ToolExecutor {
       ...(approvalCacheKey ? { approvalCacheKey } : {}),
     };
     let invocationAllowedScope = buildAllowedScope(invocationPermissionContext.additionalDirectories);
-    let invocationRuntimeAllowedDirectories = [
-      ...invocationAllowedScope.directories,
-      ...(invocationPermissionContext.additionalDirectories ?? []),
-    ];
+    let invocationRuntimeAllowedDirectories = buildRuntimeAllowedDirectories(invocationPermissionContext.additionalDirectories);
 
     if (invocationCategory === "shell") {
       const shellPathViolation = shellPathPolicyViolation(
@@ -752,8 +763,8 @@ export class ToolExecutor {
     }
 
     const targetFilePaths = extractTargetFilePaths(tool, finalInput, executionCwd);
-    // Permission policy P2.5 — frozen-canonical contract: canonicalize ONCE here and
-    // reuse the same string for Layer 0 (sensitive-path) + Layer 1
+    // Frozen-canonical contract: canonicalize once here and reuse the same
+    // string for Layer 0 (sensitive-path) + Layer 1
     // (allowed-directories) checks below. No layer re-resolves the path.
     const canonicalTargets = targetFilePaths.map((filePath) => ({
       filePath,
@@ -799,15 +810,15 @@ export class ToolExecutor {
       return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
     }
 
-    // ── Step 2.6: Layer 1 (Permission policy P2.5) — Allowed Directories ─────
+    // ── Step 2.6: Layer 1 — Allowed Directories ─────
     //
     // Frozen-canonical: reuse `canonicalTargetPath` from above (already
     // realpath'd + case-folded). No re-canonicalization in this block.
     //
     // Skipped when no path-typed input was extracted (e.g. bash, MCP
-    // network calls). Dynamic plugin tools must declare path-bearing
-    // arguments through `manifest.toolSchemas[*].pathFields`; the adapter
-    // carries that contract on Tool.pathFields.
+    // network calls). Native host tools declare path-bearing arguments on
+    // Tool.pathFields; plugin path metadata is reserved for the SDK authority
+    // metadata cutover and is not app-local today.
     if (canonicalTargets.length > 0) {
       while (true) {
         const outOfAllowedTarget = canonicalTargets.find(
@@ -915,11 +926,10 @@ export class ToolExecutor {
             ...(invocationPermissionContext.additionalDirectories ?? []),
             approvedDirectory,
           ]);
-          invocationRuntimeAllowedDirectories = [
-            ...invocationAllowedScope.directories,
+          invocationRuntimeAllowedDirectories = buildRuntimeAllowedDirectories([
             ...(invocationPermissionContext.additionalDirectories ?? []),
             approvedDirectory,
-          ];
+          ]);
           // allow-once / allow-always — fall through to Step 3
           // (full Layer 3 check still runs; Layer 1 is necessary, not
           // sufficient).
@@ -939,11 +949,10 @@ export class ToolExecutor {
               ...(invocationPermissionContext.additionalDirectories ?? []),
               outOfAllowedTarget.filePath,
             ]);
-            invocationRuntimeAllowedDirectories = [
-              ...invocationAllowedScope.directories,
+            invocationRuntimeAllowedDirectories = buildRuntimeAllowedDirectories([
               ...(invocationPermissionContext.additionalDirectories ?? []),
               outOfAllowedTarget.filePath,
-            ];
+            ]);
           } else {
             const msg = reviewerResult.message;
             const durationMs = Date.now() - startTime;
@@ -1050,11 +1059,9 @@ export class ToolExecutor {
       }
       if (permissionResult.decision === "ask") {
         if (this.approvalGate) {
-          // §6.3 Layer 3 + §8: 렌더러 승인 모달로 round-trip
-          // C1: wire target.filePath + isReadOnly + mode so that §S1
-          // sensitive-path hard-block and §S4 read-only short-circuit
-          // actually fire. Previously these were missing → §S1 check
-          // read `undefined` and was effectively dead code.
+          // Layer 3: wire target.filePath + isReadOnly + mode so the
+          // approval gate can apply sensitive-path and read-only checks to
+          // the exact invocation shown to the user.
           const approvalRequest = {
             id: randomUUID(),
             category: "tool" as const,
@@ -1233,7 +1240,7 @@ export class ToolExecutor {
 
     const executionContext: ToolExecutionContext = {
       cwd: executionCwd,
-      allowedDirectories: [...new Set(invocationRuntimeAllowedDirectories)],
+      extraAllowedDirectories: [...new Set(invocationRuntimeAllowedDirectories)],
       metadata: {
         sessionId: sessionId ?? "unknown",
         // C3(b): spawn depth visible to tools — `agent_spawn` reads this

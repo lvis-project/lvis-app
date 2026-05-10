@@ -97,12 +97,12 @@ export interface ChatViewProps {
   installingPlugins?: ReadonlyMap<string, InstallPhase>;
   onOpenMarketplace: () => void;
   marketplaceUrlReady?: boolean;
-  /** Q10 — set of routineIds currently executing (LLM session in-flight) */
+  /** Set of routineIds currently executing (LLM session in-flight). */
   runningRoutines?: Set<string>;
   // PR-2-F-2 정정: fork-based revert (revertSessionId/onRevertCheckpoint) 폐지 — Layer 3
   // same-session checkpoint chain (Copilot 패턴) 으로 대체. sessionId 불변이므로 별도 revert action
   // 불필요 — 사용자가 임의 시점으로 돌아가려면 후속 PR 의 view-mode 지원 필요.
-  /** Q11 — called when user confirms a plugin overlay item; id is the OverlayItem.id */
+  /** Called when user confirms a plugin overlay item; id is the OverlayItem.id. */
   onPluginPrimaryAction?: (overlayItemId: string) => void;
 }
 
@@ -671,7 +671,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           </Card>
         </div>
       )}
-      {/* Q10/Q11 — Routine fire + plugin (insertion-type) overlay. Q9 policy: routine items isolated from chat history. Plugin items insert via imported_trigger on confirm. */}
+      {/* Routine fire + plugin overlay. Routine items stay isolated from chat history; plugin items insert via imported_trigger on confirm. */}
       <OverlayCardRegion onPluginPrimaryAction={onPluginPrimaryAction ?? (() => {})} />
       <div className="relative min-h-0 min-w-0 max-w-full flex-1 overflow-hidden">
       {/* §PR-5: View-Mode banner — sticky at the top of the chat scroll area */}

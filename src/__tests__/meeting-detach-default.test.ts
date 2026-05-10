@@ -117,11 +117,11 @@ describe("meeting:detach-default — WindowManager.openDetachedTab", () => {
     expect(mockWindowInstances).toHaveLength(1);
   });
 
-  it("uses a larger default detached canvas for Agent Hub", () => {
-    wm.openDetachedTab("plugin:agent-hub:agent-hub-panel");
+  it("uses the generic default detached canvas for plugin views", () => {
+    wm.openDetachedTab("plugin:sample-plugin:work-board");
 
-    expect(mockWindowInstances[0].opts["width"]).toBe(960);
-    expect(mockWindowInstances[0].opts["height"]).toBe(780);
+    expect(mockWindowInstances[0].opts["width"]).toBe(800);
+    expect(mockWindowInstances[0].opts["height"]).toBe(600);
   });
 
   it("enables webviewTag for plugin detached windows", () => {

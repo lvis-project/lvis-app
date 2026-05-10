@@ -4,8 +4,6 @@
  * Instantiates services that have no plugin dependency and must exist
  * before plugin loading (settings, memory, audit, python runtime,
  * keyword/route/tool registry + native builtin tools).
- *
- * MS Graph 인증은 PR 3 이후 ms-graph 플러그인이 자체 소유 — host 에는 관련 코드 없음.
  */
 import { app } from "electron";
 import type { BrowserWindow } from "electron";
