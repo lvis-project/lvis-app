@@ -7,7 +7,7 @@ export function findLvisProtocolUri(argv: readonly string[]): string | null {
  * `lvis://plugin-auth/<pluginId>?code=<code>` parser.
  *
  * Generic OAuth-style callback route for any plugin. The plugin-specific
- * server (e.g. agent-hub, future Slack/GitHub/Notion integrations) redirects
+ * server redirects
  * the user's system browser to this URL. The host (this process) catches the
  * deep link, validates the shape, then re-emits a host event so the matching
  * plugin can exchange the code for a token. The host never inspects the

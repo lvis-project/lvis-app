@@ -6,8 +6,15 @@
 import "../../../../test/renderer/setup.js";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, fireEvent } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { ToolGroupCard } from "../components/ToolGroupCard.js";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
+
+vi.mock("../../../components/ui/scroll-area.js", () => ({
+  ScrollArea: ({ children, className }: { children: ReactNode; className?: string }) => (
+    <div className={className}>{children}</div>
+  ),
+}));
 
 type ToolGroupEntry = Extract<ChatEntry, { kind: "tool_group" }>;
 
@@ -56,7 +63,7 @@ describe("ToolGroupCard", () => {
   it("single tool: renders tool name inline without group header", () => {
     const { container } = render(<ToolGroupCard group={makeGroup({ status: "done" })} />);
     expect(container.textContent).not.toContain("도구 사용 결과");
-    expect(container.textContent).toContain("read file"); // unmapped name: underscores → spaces fallback
+    expect(container.textContent).toContain("파일 읽기");
     expect(container.textContent).not.toContain("file content");
   });
 
@@ -65,7 +72,7 @@ describe("ToolGroupCard", () => {
       <ToolGroupCard group={makeGroup({ status: "running", tools: [{ toolUseId: "tu-1", name: "read_file", input: {}, status: "running", displayOrder: 0 }] })} />,
     );
     expect(container.textContent).not.toContain("도구 사용 중");
-    expect(container.textContent).toContain("read file"); // unmapped name: underscores → spaces fallback
+    expect(container.textContent).toContain("파일 읽기");
   });
 
   it("single tool running: keeps input collapsed by default", () => {
@@ -73,7 +80,7 @@ describe("ToolGroupCard", () => {
       <ToolGroupCard group={makeGroup({ status: "running", tools: [{ toolUseId: "tu-1", name: "read_file", input: { path: "/tmp/live.txt" }, status: "running", displayOrder: 0 }] })} />,
     );
 
-    expect(container.textContent).toContain("read file");
+    expect(container.textContent).toContain("파일 읽기");
     expect(container.textContent).not.toContain("/tmp/live.txt");
 
     fireEvent.click(container.querySelector("button") as HTMLButtonElement);
@@ -93,7 +100,7 @@ describe("ToolGroupCard", () => {
 
     rerender(<ToolGroupCard group={done} />);
 
-    expect(container.textContent).toContain("read file");
+    expect(container.textContent).toContain("파일 읽기");
     expect(container.textContent).not.toContain("live result");
   });
 
@@ -166,20 +173,20 @@ describe("ToolGroupCard", () => {
     expect(container.textContent).not.toContain("hidden live input");
 
     fireEvent.click(container.querySelector("button") as HTMLButtonElement);
-    expect(container.textContent).toContain("문서 검색");
+    expect(container.textContent).toContain("knowledge search");
     expect(container.textContent).not.toContain("hidden live input");
   });
 
   it("multi-tool: shows tool display names in header", () => {
     const { container } = render(<ToolGroupCard group={makeMultiGroup()} />);
-    expect(container.textContent).toContain("문서 검색"); // knowledge_search mapped
+    expect(container.textContent).toContain("knowledge search");
   });
 
   it("multi-tool: expands tool list when clicked", () => {
     const { container } = render(<ToolGroupCard group={makeMultiGroup()} />);
     const headerBtn = container.querySelector("button") as HTMLButtonElement;
     fireEvent.click(headerBtn);
-    expect(container.textContent).toContain("문서 검색");
+    expect(container.textContent).toContain("knowledge search");
     expect(container.textContent).not.toContain("r1");
   });
 
@@ -189,7 +196,7 @@ describe("ToolGroupCard", () => {
     expect(container.textContent).not.toContain("r1");
 
     const buttons = Array.from(container.querySelectorAll("button"));
-    const firstToolButton = buttons.filter((button) => button.textContent?.includes("문서 검색")).at(-1) as HTMLButtonElement | undefined;
+    const firstToolButton = buttons.filter((button) => button.textContent?.includes("knowledge search")).at(-1) as HTMLButtonElement | undefined;
     expect(firstToolButton).toBeTruthy();
     fireEvent.click(firstToolButton!);
     expect(container.textContent).toContain("r1");
@@ -365,4 +372,3 @@ describe("ToolGroupCard", () => {
 afterEach(() => {
   vi.unstubAllGlobals();
 });
-

@@ -1,14 +1,14 @@
 /**
- * OverlayContext — Q10 routine fire overlay queue.
+ * OverlayContext — routine fire overlay queue.
  *
- * Q10 policy:
+ * Policy:
  *   - Single active card + queue navigation (prev/next)
  *   - queueIndex / queueTotal display
  *   - dismiss (permanent removal)
  *   - snooze removed (production smoke test: UX risk)
  *   - stale fire replace: new fire for same routineId replaces all prior entries
  *
- * Q9 isolation: only ~200ch summary flows here. Full content is read
+ * Isolation: only ~200ch summary flows here. Full content is read
  * directly by RoutineSessionView from the JSONL file.
  */
 import {
@@ -25,7 +25,7 @@ import {
 
 export type OverlayItemSource =
   | { kind: "routine"; routineId: string; firedAt: string }
-  // TODO(work-proactive): connect to OverlayContext via main IPC. Implement after Q10 ships.
+  // TODO(work-proactive): connect to OverlayContext via main IPC.
   | { kind: "plugin"; pluginId: string; eventId: string };
 
 export interface OverlayItem {
@@ -41,7 +41,7 @@ export interface OverlayItem {
   /** routine-specific — path to JSONL for RoutineSessionView */
   routineSessionPath?: string;
   /**
-   * Q11 plugin (insertion-type) — prompt to inject into main chat when the
+   * Plugin insertion overlay — prompt to inject into main chat when the
    * user confirms (primary action). Absent for routine-source items.
    */
   pendingPrompt?: string;

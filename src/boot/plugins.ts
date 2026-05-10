@@ -1,11 +1,10 @@
 /**
- * Boot §4.2 Step 3–5 — Plugin orchestration helpers.
+ * Plugin orchestration helpers.
  *
  * - buildPluginConfigOverrides: 범용 API key 주입
  * - registerPluginTools / runManifestStartupTools: manifest-driven wiring
  * - registerManifestEventSubscriptions / buildManifestEventHints: event hint helpers
  * - registerPluginNotifications: OS 알림 (manifest.notificationEvents)
- * - findMethodByCapability: capability → tool 이름 resolver
  */
 import { Notification } from "electron";
 import type { BrowserWindow } from "electron";
@@ -34,20 +33,15 @@ export function buildPluginConfigOverrides(settings: SettingsService): Record<st
   const overrides: Record<string, Record<string, unknown>> = {};
   const llm = settings.get("llm");
 
-  // OpenAI 키는 STT/Summary 플러그인이 공통으로 사용.
   // 글로벌 process.env 오염 금지 — configOverrides를 통한 명시적 주입만 허용.
-  // (cycle 1 LOW: process.env.OPENAI_API_KEY 글로벌 set 제거)
-  const openaiKey = settings.getSecret("llm.apiKey.openai");
   const currentKey = settings.getSecret(`llm.apiKey.${llm.provider}`);
 
-  // 모든 플러그인에 범용적으로 전달 — 각 플러그인이 필요한 키를 선택
-  const resolvedApiKey = openaiKey ?? currentKey;
-  if (resolvedApiKey) {
+  // 모든 플러그인에 범용 LLM 설정만 전달한다. 플러그인별 키 이름은
+  // HostApi 계약이 아니므로 여기서 주입하지 않는다.
+  if (currentKey) {
     overrides["*"] = {
-      llmApiKey: resolvedApiKey,
+      llmApiKey: currentKey,
       llmProvider: llm.provider,
-      apiKey: resolvedApiKey,         // Local Indexer 등 플러그인이 사용하는 키 이름
-      openaiApiKey: resolvedApiKey,   // meeting이 사용하는 키 이름
     };
   }
 
@@ -106,7 +100,7 @@ export function syncPluginToolRegistry(
 }
 
 /**
- * Phase 5 §5 — fail-soft startupTools.
+ * Fail-soft startupTools.
  * One throwing startupTool does NOT unload the plugin and does NOT abort the
  * remaining startupTools. Each failure is logged as a warning so operators
  * can diagnose, while the plugin keeps serving the rest of its handlers.
@@ -143,12 +137,12 @@ export function registerManifestEventSubscriptions(
   for (const { pluginId, manifest } of pluginRuntime.listPluginManifests()) {
     for (const entry of manifest.eventSubscriptions ?? []) {
       const eventType = typeof entry === "string" ? entry : entry.type;
-      // Phase 5 — namespace allowlist. Private namespaces (memory.private.*,
+      // Namespace allowlist. Private namespaces (memory.private.*,
       // settings.apiKey.*, audit.*, dlp.*) are never exposed to plugins;
       // neutral namespaces pass with a warn so ops can track drift.
       const verdict = classifySubscription(eventType);
       if (verdict === "private") {
-        // M4: audit-log unauthorized private namespace subscription attempts.
+        // Audit unauthorized private namespace subscription attempts.
         try {
           auditLogger?.log({
             timestamp: new Date().toISOString(),
@@ -182,10 +176,10 @@ export function buildManifestEventHints(
   for (const { manifest } of pluginRuntime.listPluginManifests()) {
     for (const entry of manifest.eventSubscriptions ?? []) {
       if (typeof entry === "string") {
-        // Backward-compatible string form: neutral fallback hint
+        // String form: neutral default hint.
         hints[entry] = { category: "system", priority: "low", title: entry };
       } else {
-        // Object form: use plugin-declared hint if present, else fallback
+        // Object form: use plugin-declared hint if present, else default hint.
         hints[entry.type] = entry.hint
           ? { category: entry.hint.category, priority: entry.hint.priority, title: entry.hint.title }
           : { category: "system", priority: "low", title: entry.type };
@@ -307,31 +301,4 @@ function getFieldByPath(data: unknown, path: string): string {
   let val: unknown = data;
   for (const p of parts) val = (val as Record<string, unknown>)?.[p];
   return typeof val === "string" ? val : "";
-}
-
-export function findMethodByCapability(
-  pluginRuntime: PluginRuntime,
-  capability: string,
-  matcher: (tool: string) => boolean,
-): string | undefined {
-  const pluginId = pluginRuntime.findPluginIdByCapability(capability);
-  if (!pluginId) return undefined;
-  const manifest = pluginRuntime.getPluginManifest(pluginId);
-  if (!manifest) return undefined;
-  return manifest.tools.find(matcher);
-}
-
-export function findPreferredMethodByCapability(
-  pluginRuntime: PluginRuntime,
-  capability: string,
-  preferredTools: readonly string[],
-): string | undefined {
-  const pluginId = pluginRuntime.findPluginIdByCapability(capability);
-  if (!pluginId) return undefined;
-  const manifest = pluginRuntime.getPluginManifest(pluginId);
-  if (!manifest) return undefined;
-  // Capability-driven callers that know a protocol payload should choose from
-  // an explicit allow-list instead of accepting every *_scan alias exposed by a
-  // provider. This keeps host routing stable across plugin/product renames.
-  return preferredTools.find((tool) => manifest.tools.includes(tool));
 }

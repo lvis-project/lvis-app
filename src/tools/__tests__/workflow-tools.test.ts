@@ -21,7 +21,7 @@ import { SkillStore } from "../../main/skill-store.js";
 import { SkillOverlay } from "../../main/skill-overlay.js";
 
 function ctx(sessionId = "session-x"): ToolExecutionContext {
-  return { cwd: process.cwd(), metadata: { sessionId } };
+  return { cwd: process.cwd(), extraAllowedDirectories: [], metadata: { sessionId } };
 }
 
 describe("ask_user_question tool", () => {
@@ -136,6 +136,24 @@ describe("ask_user_question tool", () => {
 });
 
 describe("schedule_routine tool", () => {
+  it("declares a literal-aware approval cache key for plugin scope", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "lvis-rt-"));
+    try {
+      const store = new RoutinesStore(join(tmp, "routines.json"));
+      const tool = createScheduleRoutineTool(store);
+
+      expect(tool.approvalCacheKey?.({ allowedPlugins: ["meeting", "local-indexer"] })).toBe(
+        "scope:allow:local-indexer,meeting",
+      );
+      expect(tool.approvalCacheKey?.({ allowedPlugins: ["local-indexer", "meeting"] })).toBe(
+        "scope:allow:local-indexer,meeting",
+      );
+      expect(tool.approvalCacheKey?.({ allowedPlugins: [] })).toBe("scope:deny-all");
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it("rejects missing schedule.at for non-cron", async () => {
     const tmp = mkdtempSync(join(tmpdir(), "lvis-rt-"));
     try {
@@ -171,6 +189,7 @@ describe("schedule_routine tool", () => {
       expect(list).toHaveLength(1);
       expect(list[0].schedule?.repeat?.kind).toBe("daily");
       expect(list[0].notificationTitle).toBe("year-end");
+      expect(list[0].scope?.pluginIds).toEqual({ mode: "deny-all" });
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
@@ -296,14 +315,13 @@ describe("todo_session_write tool", () => {
 });
 
 describe("agent_spawn tool", () => {
-  it("description forbids proxying direct Agent Hub tool calls", () => {
+  it("description forbids proxying direct plugin tool calls", () => {
     const tool = createAgentSpawnTool({
       getRunner: () => undefined,
       emit: () => undefined,
     });
     expect(tool.description).toContain("직접 호출");
-    expect(tool.description).toContain("Agent Hub work board");
-    expect(tool.description).toContain("agent_hub_*");
+    expect(tool.description).toContain("request_plugin");
   });
 
   it("rejects when runner is missing", async () => {

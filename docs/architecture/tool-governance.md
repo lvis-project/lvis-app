@@ -13,7 +13,7 @@ LVIS는 3개 소스에서 도구를 등록한다:
 | 소스 | 예시 | 신뢰 수준 | 위험 |
 |------|------|-----------|------|
 | **Builtin** | memory_save, web_search | 높음 (코드 리뷰됨) | 호스트 내부 동작 |
-| **Plugin** | meeting_start, index_scan | 중간 (매니페스트 검증) | HostApi 범위 내 동작 |
+| **Plugin** | meeting_start, document_search | 중간 (매니페스트 검증) | HostApi 범위 내 동작 |
 | **MCP** | mcp_hr_query, mcp_erp_read | 낮음 (외부 프로세스/서비스) | 네트워크 연결 가능 |
 
 **핵심 원칙**: 소스에 관계없이 모든 도구 호출은 **단일 실행 파이프라인**을 통과해야 하며, **모든 호출은 명시적으로 검토 가능**해야 한다.
@@ -131,7 +131,7 @@ check(toolName, source, trust) → ALLOW | DENY | ASK
 
 | 분류 | 기준 | 예시 |
 |------|------|------|
-| **Read** | 상태를 변경하지 않는 조회 | memory_search, index_documents, web_search |
+| **Read** | 상태를 변경하지 않는 조회 | memory_search, document_search, web_search |
 | **Write** | 상태를 변경하거나 외부에 영향 | memory_save, meeting_start, email_analyze |
 | **Dangerous** | 되돌리기 어려운 파괴적 동작 | (현재 없음, Bash 도구 추가 시 해당) |
 
@@ -490,7 +490,7 @@ allow-always → PermissionManager.addAlwaysAllowed(toolName)
 | 4 | Config loaded (settings, CLAUDE.md) | SettingsService | ✓ |
 | 5 | **Auth checked (OAuth)** | 없음 | SSO Phase 4 |
 | 6 | **GrowthBook initialized** | 없음 | §14.4 |
-| 7 | **Tools assembled (43 built-in + MCP)** | 5 builtin + plugins | 확장 필요 |
+| 7 | **Tools assembled (43 built-in + MCP)** | core builtins + native file tools + plugins | 확장 중 |
 | 8 | **MCP servers connected** | 없음 | 이번 구현 |
 | 9 | System prompt built (10+ sources) | 6/12 sources | 확장 중 |
 | 10 | REPL launched | Electron UI ready | ✓ |
@@ -525,7 +525,9 @@ Claude Code는 6개 확장 메커니즘을 제공:
 - [ ] MCP Client (stdio transport) — §12.5 Step 8
 - [ ] MCP Client (SSE transport) — enterprise API 연동
 - [ ] Permission Prompt UI (allow once / allow always / deny) — §12.4
-- [ ] Workspace Boundary Validation — §12.2 (canonical path, symlink escape)
+- [x] Native file tools Phase 1 — `read_file`, `list_files`, `glob_files`, `grep_files`, `write_file`, `edit_file`
+- [x] Workspace Boundary Validation — §12.2 (canonical path, symlink escape, future-create parent realpath)
+- [x] Native tools Phase 2 — `apply_patch`, `move_file`, `delete_file`, `powershell`
 - [ ] DLP PostHook (민감 데이터 마스킹)
 - [ ] Kill Switch UI
 

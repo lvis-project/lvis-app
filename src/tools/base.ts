@@ -19,6 +19,7 @@ import { z } from "zod";
 import type {
   ToolSource,
   ToolCategory,
+  ToolDecisionOverride,
   ToolExecutionContext,
   ToolResult,
 } from "./types.js";
@@ -28,6 +29,7 @@ import type {
 export type {
   ToolSource,
   ToolCategory,
+  ToolDecisionOverride,
   ToolExecutionContext,
   ToolResult,
 } from "./types.js";
@@ -46,9 +48,21 @@ export interface Tool {
   readonly name: string;
   readonly description: string;
   readonly source: ToolSource;
-  readonly category?: ToolCategory;
+  readonly category: ToolCategory;
+  /**
+   * Permission policy — declared only on `category === "meta"` tools. Tells the executor
+   * to take the explicit short-circuit path rather than the standard Layer 3
+   * decision matrix. See {@link ToolDecisionOverride} for semantics.
+   */
+  readonly decisionOverride?: ToolDecisionOverride;
   readonly pluginId?: string;
   readonly mcpServerId?: string;
+  /**
+   * Manifest-declared filesystem path fields. Used by the executor's
+   * Layer 0/1 path policy for dynamic plugin/MCP tools whose argument names
+   * are not the built-in `path | file_path | filePath` convention.
+   */
+  readonly pathFields?: readonly string[];
   /**
    * §6.4 Tool versioning — semver string (e.g. "1.0.0"). Required so the
    * registry can pick the latest implementation when multiple versions of the
@@ -68,6 +82,14 @@ export interface Tool {
    * existing callers keep working through the deprecation window.
    */
   readonly replacedBy?: string;
+  /**
+   * Optional user-approval cache identity for authority-sensitive tools.
+   *
+   * The executor prefixes this with `tool.name:` before handing it to the
+   * permission manager. Tools that declare this opt out of bare tool-name
+   * "allow always" reuse because their arguments carry permission scope.
+   */
+  approvalCacheKey?(input: unknown, ctx?: Pick<ToolExecutionContext, "cwd">): string;
 
   /** JSON Schema describing the input shape — sent to LLM providers. */
   toJsonSchema(): unknown;
@@ -100,7 +122,8 @@ export abstract class ZodTool<TSchema extends z.ZodTypeAny = z.ZodTypeAny>
   abstract readonly inputSchema: TSchema;
 
   readonly source: ToolSource = "builtin";
-  readonly category?: ToolCategory;
+  abstract readonly category: ToolCategory;
+  readonly decisionOverride?: ToolDecisionOverride;
   readonly pluginId?: string;
   readonly mcpServerId?: string;
   /** §6.4 — default version for hand-written builtins. Override via `override readonly version = "2.0.0"`. */
@@ -146,15 +169,19 @@ export interface DynamicToolSpec {
   name: string;
   description: string;
   source: ToolSource;
-  category?: ToolCategory;
+  category: ToolCategory;
+  decisionOverride?: ToolDecisionOverride;
   pluginId?: string;
   mcpServerId?: string;
+  pathFields?: readonly string[];
   /** §6.4 — semver. Defaults to "1.0.0" when omitted. */
   version?: string;
   /** §6.4 — semver string marking deprecation; enables warn on lookup. */
   deprecatedSince?: string;
   /** §6.4 — replacement tool name; enables transparent redirect. */
   replacedBy?: string;
+  /** Permission policy #634 — per-tool approval cache identity. */
+  approvalCacheKey?: (input: unknown, ctx?: Pick<ToolExecutionContext, "cwd">) => string;
   /** Raw JSON Schema — used when no Zod schema is available (plugin/MCP). */
   jsonSchema: object;
   execute: (
@@ -177,11 +204,14 @@ export function createDynamicTool(spec: DynamicToolSpec): Tool {
     description: spec.description,
     source: spec.source,
     category: spec.category,
+    decisionOverride: spec.decisionOverride,
     pluginId: spec.pluginId,
     mcpServerId: spec.mcpServerId,
+    pathFields: spec.pathFields,
     version: spec.version ?? "1.0.0",
     deprecatedSince: spec.deprecatedSince,
     replacedBy: spec.replacedBy,
+    approvalCacheKey: spec.approvalCacheKey,
     toJsonSchema: () => spec.jsonSchema,
     isReadOnly: spec.isReadOnly ?? ((): boolean => false),
     execute: spec.execute,

@@ -19,21 +19,40 @@
  * - 실패 격리: Step 6 실패가 Step 8을 건너뛰지 않음
  */
 import { randomUUID } from "node:crypto";
+import { homedir } from "node:os";
 import { resolve as pathResolve } from "node:path";
 import type { ToolRegistry } from "./registry.js";
 import type {
   ToolSource,
   TrustLevel,
+  ToolCategory,
   ToolExecutionContext,
+  ToolTrustOrigin,
 } from "./types.js";
 import { trustFromSource } from "./types.js";
 import type { PermissionManager, PermissionCheckResult } from "../permissions/permission-manager.js";
 import type { ApprovalGate, ApprovalMode } from "../permissions/approval-gate.js";
-import { isSensitivePath, canonicalizePathForMatch } from "../permissions/sensitive-paths.js";
+import { isSensitivePath, canonicalizePathForMatch, caseFoldForMatch } from "../permissions/sensitive-paths.js";
+import {
+  buildAllowedScope,
+  buildRuntimeAllowedDirectories,
+  isFilesystemRootPath,
+  isPathAllowed,
+  pickClosestParent,
+  validateDirectoryAddition,
+} from "../permissions/allowed-directories.js";
+import { dispatchPermissionDirCommand } from "../permissions/permission-slash.js";
 import { HookRunner } from "../hooks/hook-runner.js";
+import type { ScriptHookManager } from "../hooks/script-hook-manager.js";
+import type { HookTrustOrigin } from "../hooks/script-hook-types.js";
 import { AuditLogger } from "../audit/audit-logger.js";
+import type { PermissionAuditEntryInput } from "../audit/audit-schema.js";
 import { maskSensitiveData } from "../audit/dlp-filter.js";
 import { BashAstValidator } from "../main/bash-ast-validator.js";
+import {
+  validateShellCommandPathPolicy,
+  validateShellWorkingDirectory,
+} from "./shell-path-policy.js";
 import { createLogger } from "../lib/logger.js";
 const log = createLogger("executor");
 
@@ -43,49 +62,83 @@ export interface ToolCallMeta {
   displayOrder: number;
 }
 
-// ─── C1: Sensitive-path + read-only hint extraction ────────
-
 /**
- * Static list of tool names known to perform only read operations.
- * Used by {@link ToolExecutor} to set `isReadOnly` on ApprovalRequest so
- * the §S4 approval-gate short-circuit can auto-approve (except in plan mode).
- * Conservative: tools not listed here are treated as state-mutating.
- */
-const READ_ONLY_TOOL_NAMES = new Set<string>([
-  "read_file",
-  "glob",
-  "grep",
-  "knowledge_search",
-  "list_directory",
-  "file_read",
-  "web_fetch",
-]);
-
-/**
- * Extract an absolute filesystem target path from a tool's input, if one
- * can be inferred from common arg shapes. Used so {@link ApprovalGate}'s
+ * Extract absolute filesystem target paths from a tool's declared
+ * `pathFields` contract. Used so {@link ApprovalGate}'s
  * §S1 sensitive-path hard-block can actually run against the path the
- * tool is about to touch. Returns `undefined` if no recognizable path
- * field is present (e.g. bash `command`, which is handled separately
- * by the BashAstValidator).
+ * tool is about to touch. Returns an empty list when a tool declares no
+ * path fields; built-in shell tools enforce command operands inside their
+ * own native execution surface.
  */
-function extractTargetFilePath(
-  _toolName: string,
+function extractTargetFilePaths(
+  tool: import("./base.js").Tool,
   input: unknown,
-): string | undefined {
-  if (!input || typeof input !== "object") return undefined;
+  cwd: string,
+): string[] {
+  if (!input || typeof input !== "object") return [];
   const obj = input as Record<string, unknown>;
-  const candidate =
-    (typeof obj.path === "string" && obj.path) ||
-    (typeof obj.file_path === "string" && obj.file_path) ||
-    (typeof obj.filePath === "string" && obj.filePath) ||
-    undefined;
-  if (!candidate) return undefined;
-  try {
-    return pathResolve(candidate);
-  } catch {
-    return undefined;
+  const fields = new Set<string>(tool.pathFields ?? []);
+  const paths: string[] = [];
+  for (const field of fields) {
+    const candidate = obj[field];
+    const values = Array.isArray(candidate) ? candidate : [candidate];
+    for (const value of values) {
+      if (typeof value !== "string" || value.length === 0) continue;
+      try {
+        paths.push(resolveToolPathForPermission(value, cwd));
+      } catch {
+        // Tool schema validation owns argument-type failures.
+      }
+    }
   }
+  return [...new Set(paths)];
+}
+
+function resolveToolPathForPermission(value: string, cwd: string): string {
+  const expanded = value === "~"
+    ? homedir()
+    : value.startsWith("~/") || value.startsWith("~\\")
+      ? pathResolve(homedir(), value.slice(2))
+      : value;
+  return pathResolve(pathResolve(cwd), expanded);
+}
+
+function resolveInvocationCategory(
+  tool: import("./base.js").Tool,
+  finalInput: Record<string, unknown>,
+): ToolCategory {
+  void finalInput;
+  return tool.category;
+}
+
+function shellPathPolicyViolation(
+  finalInput: Record<string, unknown>,
+  sandboxRoot: string,
+  allowedDirectories: readonly string[],
+): string | null {
+  const command = finalInput.command;
+  if (typeof command !== "string" || command.length === 0) {
+    return "Shell path policy: missing command string";
+  }
+  const cwdValue = finalInput.cwd;
+  if (cwdValue !== undefined && typeof cwdValue !== "string") {
+    return "Shell path policy: cwd must be a string when provided";
+  }
+  const resolvedCwd = cwdValue
+    ? pathResolve(sandboxRoot, cwdValue)
+    : sandboxRoot;
+  const cwdViolation = validateShellWorkingDirectory(
+    resolvedCwd,
+    sandboxRoot,
+    allowedDirectories,
+  );
+  if (cwdViolation) return cwdViolation;
+  return validateShellCommandPathPolicy(
+    command,
+    resolvedCwd,
+    sandboxRoot,
+    allowedDirectories,
+  );
 }
 
 /**
@@ -162,6 +215,56 @@ export interface ToolExecutorCallbacks {
   ) => void;
 }
 
+export interface ToolPermissionContext {
+  headless?: boolean;
+  allowedPluginIds?: ReadonlySet<string>;
+  /**
+   * Internal per-invocation approval cache identity. The executor derives
+   * this from Tool.approvalCacheKey after hooks have finalized args.
+   */
+  approvalCacheKey?: string;
+  /**
+   * Layer 1 path policy. User-configured directories from
+   * `permissions.additionalDirectories` in settings.json. Boot threads this
+   * through every executeAll() invocation. The executor merges with computed
+   * defaults via {@link buildAllowedScope}; an `undefined` value here means
+   * "use defaults only" (NOT "silent allow").
+   */
+  additionalDirectories?: readonly string[];
+  /**
+   * Trust origin classification carried with each tool invocation. Audited and
+   * propagated into approval-request payloads. Distinguishes user-keyboard
+   * input from plugin-emitted, LLM-tool-arg, and file-content origins.
+   */
+  trustOrigin: ToolTrustOrigin;
+}
+
+/**
+ * Bundled execution options for {@link ToolExecutor.executeAll} and
+ * {@link ToolExecutor.executeOne}. Replaces the positional-arg shape so adding
+ * a new pipeline-wide concern (per-turn telemetry, audit correlation id, ...)
+ * doesn't ripple through every callsite. A missing permission context is a
+ * strict-deny condition for concrete tool execution.
+ */
+export interface ExecuteOptions {
+  callbacks?: ToolExecutorCallbacks;
+  sessionId?: string;
+  /**
+   * Brain proactive origin tag (e.g. `"proactive:meeting-detection"`).
+   * When set, write/shell/network tools force ApprovalGate `ask` and
+   * bypass the user's `allow-always` cache.
+   */
+  proactiveOrigin?: string | null;
+  /**
+   * Sub-agent recursion depth — `agent_spawn` refuses when ≥1 so a
+   * sub-agent cannot itself spawn (defense-in-depth on top of the
+   * SubAgentRunner registry strip).
+   */
+  spawnDepth?: number;
+  abortSignal?: AbortSignal;
+  permissionContext?: ToolPermissionContext;
+}
+
 function maskDisplayValue(value: unknown): unknown {
   if (typeof value === "string") {
     return maskSensitiveData(value).masked;
@@ -181,6 +284,20 @@ function maskToolInputForDisplay(input: Record<string, unknown>): Record<string,
   return maskDisplayValue(input) as Record<string, unknown>;
 }
 
+function approvalCacheKeyFor(
+  tool: import("./base.js").Tool,
+  input: Record<string, unknown>,
+  cwd: string,
+): string | undefined {
+  const rawKey = tool.approvalCacheKey?.(input, { cwd });
+  if (rawKey === undefined) return undefined;
+  const key = rawKey.trim();
+  if (!key) {
+    throw new Error(`approvalCacheKey for ${tool.name} returned an empty key`);
+  }
+  return `${tool.name}:${key}`;
+}
+
 function emitToolStart(
   callbacks: ToolExecutorCallbacks | undefined,
   name: string,
@@ -188,6 +305,112 @@ function emitToolStart(
   meta: ToolCallMeta,
 ): void {
   callbacks?.onToolStart?.(name, maskToolInputForDisplay(input), meta);
+}
+
+function auditTrustOrigin(context?: ToolPermissionContext): HookTrustOrigin {
+  return context?.trustOrigin ?? "unknown";
+}
+
+function auditDirectoryForInput(
+  tool: import("./base.js").Tool | undefined,
+  input: Record<string, unknown>,
+  cwd: string,
+  canonicalTargetFilePath?: string,
+): string | undefined {
+  if (tool) {
+    if (canonicalTargetFilePath) return canonicalTargetFilePath;
+    if (tool.category === "shell" && typeof input.cwd === "string" && input.cwd.length > 0) {
+      return resolveToolPathForPermission(input.cwd, cwd);
+    }
+  }
+  return undefined;
+}
+
+function permissionAuditBase(args: {
+  toolName: string;
+  tool?: import("./base.js").Tool;
+  source: ToolSource;
+  category: ToolCategory;
+  trustOrigin: HookTrustOrigin;
+}): Pick<
+  Extract<PermissionAuditEntryInput, { decision: "allow" }>,
+  "ts" | "auditId" | "trustOrigin" | "tool" | "source" | "category"
+> {
+  return {
+    ts: new Date().toISOString(),
+    auditId: randomUUID(),
+    trustOrigin: args.trustOrigin,
+    tool: args.toolName,
+    source: args.source,
+    category: args.category,
+  };
+}
+
+function permissionAuditEntryFromToolCall(args: {
+  toolName: string;
+  tool?: import("./base.js").Tool;
+  source: ToolSource;
+  category: ToolCategory;
+  input: Record<string, unknown>;
+  permission: PermissionCheckResult | undefined;
+  rateLimitRemaining: number;
+  trustOrigin: HookTrustOrigin;
+  cwd: string;
+  auditDirectory?: string;
+}): PermissionAuditEntryInput {
+  const base = permissionAuditBase(args);
+  if (args.permission?.decision === "deny") {
+    const denyReasons = args.permission.denyReasons?.length
+      ? args.permission.denyReasons
+      : [{
+        layer: args.permission.layer,
+        reason: args.permission.reason,
+        source: "tool-executor",
+      }];
+    return {
+      ...base,
+      decision: "deny",
+      denyReasons,
+    };
+  }
+  const auditDirectory = auditDirectoryForInput(args.tool, args.input, args.cwd, args.auditDirectory);
+  const allowEntry: Extract<PermissionAuditEntryInput, { decision: "allow" }> = {
+    ...base,
+    decision: "allow",
+    layer: args.permission?.layer ?? 6,
+  };
+  if (auditDirectory) {
+    allowEntry.directory = auditDirectory;
+    allowEntry.directoryAllowed = true;
+  }
+  if (Number.isFinite(args.rateLimitRemaining)) {
+    allowEntry.rateLimitRemaining = args.rateLimitRemaining;
+  }
+  return allowEntry;
+}
+
+function permissionAuditAskEntryFromToolCall(args: {
+  toolName: string;
+  tool?: import("./base.js").Tool;
+  source: ToolSource;
+  category: ToolCategory;
+  input: Record<string, unknown>;
+  permission: PermissionCheckResult;
+  trustOrigin: HookTrustOrigin;
+  cwd: string;
+  auditDirectory?: string;
+}): PermissionAuditEntryInput {
+  const auditDirectory = auditDirectoryForInput(args.tool, args.input, args.cwd, args.auditDirectory);
+  const askEntry: Extract<PermissionAuditEntryInput, { decision: "ask" }> = {
+    ...permissionAuditBase(args),
+    decision: "ask",
+    layer: args.permission.layer,
+    reason: args.permission.reason,
+  };
+  if (auditDirectory) {
+    askEntry.directory = auditDirectory;
+  }
+  return askEntry;
 }
 
 // ─── Rate Limiter (tool-governance.md §9) ──────────
@@ -236,8 +459,10 @@ export class ToolExecutor {
   private readonly permissionManager?: PermissionManager;
   private readonly approvalGate?: ApprovalGate;
   private readonly auditLogger: AuditLogger;
+  private readonly requirePermissionAuditChain: boolean;
   private readonly rateLimiter = new RateLimiter();
   private readonly bashAstValidator?: BashAstValidator;
+  private readonly scriptHookManager?: ScriptHookManager;
 
   constructor(
     toolRegistry: ToolRegistry,
@@ -245,18 +470,22 @@ export class ToolExecutor {
     permissionManager?: PermissionManager,
     bashAstValidator?: BashAstValidator,
     approvalGate?: ApprovalGate,
+    scriptHookManager?: ScriptHookManager,
+    auditLogger?: AuditLogger,
   ) {
     this.toolRegistry = toolRegistry;
     this.hookRunner = hookRunner ?? new HookRunner();
     this.permissionManager = permissionManager;
     this.approvalGate = approvalGate;
-    this.auditLogger = new AuditLogger();
+    this.auditLogger = auditLogger ?? new AuditLogger();
     this.bashAstValidator = bashAstValidator;
+    this.scriptHookManager = scriptHookManager;
+    this.requirePermissionAuditChain = auditLogger?.isPermissionAuditChainReady() === true;
   }
 
   /**
-   * C1: convert the PermissionManager execution mode into the ApprovalMode
-   * vocabulary understood by ApprovalGate (§S4 read-only short-circuit).
+   * Convert the PermissionManager execution mode into the ApprovalMode
+   * vocabulary understood by ApprovalGate's read-only short-circuit.
    * `strict` → `default` (show dialog); `auto` → `full_auto`; `default` → `default`.
    */
   private currentApprovalMode(): ApprovalMode {
@@ -271,42 +500,125 @@ export class ToolExecutor {
     return this.hookRunner;
   }
 
+  private async runScriptHook(
+    hookType: "pre" | "post" | "perm",
+    toolName: string,
+    source: ToolSource,
+    category: ToolCategory,
+    input: Record<string, unknown>,
+    sessionId: string | undefined,
+    context: ToolPermissionContext,
+    toolOutput?: string,
+    isError?: boolean,
+  ) {
+    if (!this.scriptHookManager) {
+      return { decision: "allow" as const, reason: "script hooks not wired", results: [] };
+    }
+    const payload = {
+      toolName,
+      source,
+      category,
+      input,
+      sessionId: sessionId ?? "unknown",
+      trustOrigin: context.trustOrigin as HookTrustOrigin,
+      ...(toolOutput !== undefined ? { toolOutput } : {}),
+      ...(isError !== undefined ? { isError } : {}),
+    };
+    if (hookType === "pre") return this.scriptHookManager.runPreToolUse(payload);
+    if (hookType === "post") return this.scriptHookManager.runPostToolUse(payload);
+    return this.scriptHookManager.runPermissionRequest(payload);
+  }
+
+  private async dispatchReviewerForHeadless(
+    toolName: string,
+    source: ToolSource,
+    category: ToolCategory,
+    finalInput: Record<string, unknown>,
+    allowedDirectories: string[],
+    sensitivePathsAdjacent: string[],
+    context: ToolPermissionContext,
+  ): Promise<
+    | { allowed: true; permissionResult: PermissionCheckResult }
+    | { allowed: false; message: string; permissionResult: PermissionCheckResult }
+  > {
+    if (!this.permissionManager?.hasReviewer()) {
+      return {
+        allowed: false,
+        message: `[권한 차단 — headless] 도구 '${toolName}' (${source}) — reviewer 미배치, fail-closed.`,
+        permissionResult: {
+          decision: "deny",
+          reason: "headless reviewer not wired",
+          layer: 5,
+        },
+      };
+    }
+    const reviewer = await this.permissionManager.dispatchReviewer(
+      toolName,
+      {
+        source,
+        category,
+        finalInput,
+        allowedDirectories,
+        sensitivePathsAdjacent,
+        trustOrigin: context.trustOrigin,
+        ...(context.approvalCacheKey ? { approvalCacheKey: context.approvalCacheKey } : {}),
+      },
+      {
+        allowedPluginIds: context.allowedPluginIds
+          ? [...context.allowedPluginIds]
+          : undefined,
+        additionalDirectories: context.additionalDirectories ?? [],
+      },
+    );
+    if (reviewer.verdict.level === "high") {
+      return {
+        allowed: false,
+        message:
+          `[권한 보류 — reviewer] 도구 '${toolName}' (${source}) — ` +
+          `${reviewer.verdict.reason}` +
+          (reviewer.deferredId ? ` (deferredId=${reviewer.deferredId})` : ""),
+        permissionResult: {
+          decision: "deny",
+          reason: `reviewer high: ${reviewer.verdict.reason}`,
+          layer: 5,
+        },
+      };
+    }
+    return {
+      allowed: true,
+      permissionResult: {
+        decision: "allow",
+        reason: `reviewer ${reviewer.verdict.level}: ${reviewer.verdict.reason}`,
+        layer: 5,
+      },
+    };
+  }
+
   /** 복수 tool_use 병렬 실행 — 최대 5개씩 배치 처리.
    *
    * `proactiveOrigin` (예: `"proactive:meeting-detection"`) 가 set 이면
-   * 모든 write/dangerous 호출이 사용자 영구 승인을 우회해 ask 로 강제됨
+   * 모든 write/shell/network 호출이 사용자 영구 승인을 우회해 ask 로 강제됨
    * (PermissionManager.checkDetailed 의 새 가드). Brain 트리거가 자동
    * 실행되는 destructive 작업 차단막.
+   *
+   * {@link ExecuteOptions} bundles pipeline concerns so adding a new
+   * concern doesn't ripple
+   * through every callsite.
    */
   async executeAll(
     toolUses: ToolUseBlock[],
-    callbacks?: ToolExecutorCallbacks,
-    sessionId?: string,
-    proactiveOrigin?: string | null,
-    /**
-     * C3(b): forwarded into each executeOne's ToolExecutionContext.metadata
-     * so the `agent_spawn` tool can detect it is being invoked from inside
-     * an already-spawned sub-agent and refuse to recurse.
-     */
-    spawnDepth?: number,
-    /**
-     * Per-turn abort signal. Threaded into each tool's ToolExecutionContext
-     * so long-blocking tools (e.g. `ask_user_question`) can honor the user's
-     * "중단" button. Without this the turn stays stuck on a pending tool
-     * even though the streaming side has already been aborted.
-     */
-    abortSignal?: AbortSignal,
+    opts: ExecuteOptions = {},
   ): Promise<ToolResult[]> {
     const groupId = randomUUID();
     const BATCH_SIZE = 5;
     if (toolUses.length <= BATCH_SIZE) {
-      return Promise.all(toolUses.map((tu, idx) => this.executeOne(tu, groupId, idx, callbacks, sessionId, proactiveOrigin, spawnDepth, abortSignal)));
+      return Promise.all(toolUses.map((tu, idx) => this.executeOne(tu, groupId, idx, opts)));
     }
 
     const results: ToolResult[] = [];
     for (let i = 0; i < toolUses.length; i += BATCH_SIZE) {
       const batch = toolUses.slice(i, i + BATCH_SIZE);
-      const batchResults = await Promise.all(batch.map((tu, batchIdx) => this.executeOne(tu, groupId, i + batchIdx, callbacks, sessionId, proactiveOrigin, spawnDepth, abortSignal)));
+      const batchResults = await Promise.all(batch.map((tu, batchIdx) => this.executeOne(tu, groupId, i + batchIdx, opts)));
       results.push(...batchResults);
     }
     return results;
@@ -317,13 +629,18 @@ export class ToolExecutor {
     toolUse: ToolUseBlock,
     groupId: string,
     displayOrder: number,
-    callbacks?: ToolExecutorCallbacks,
-    sessionId?: string,
-    proactiveOrigin?: string | null,
-    spawnDepth?: number,
-    abortSignal?: AbortSignal,
+    opts: ExecuteOptions = {},
   ): Promise<ToolResult> {
+    const {
+      callbacks,
+      sessionId,
+      proactiveOrigin,
+      spawnDepth,
+      abortSignal,
+      permissionContext,
+    } = opts;
     const startTime = Date.now();
+    const executionCwd = process.cwd();
     const meta: ToolCallMeta = { groupId, toolUseId: toolUse.id, displayOrder };
     let permissionResult: PermissionCheckResult | undefined;
     let source: ToolSource = "builtin";
@@ -333,12 +650,42 @@ export class ToolExecutor {
     const tool = this.toolRegistry.findByName(toolUse.name);
     if (!tool) {
       const durationMs = Date.now() - startTime;
-      this.auditToolCall(sessionId, toolUse.name, "builtin", "high", toolUse.input, "도구 없음", true, startTime, { decision: "deny", reason: "도구 없음", layer: 0 }, Infinity);
+      await this.auditToolCall(sessionId, toolUse.name, "builtin", "high", toolUse.input, "도구 없음", true, startTime, { decision: "deny", reason: "도구 없음", layer: 0 }, Infinity, permissionContext);
       callbacks?.onToolEnd?.(toolUse.name, `도구를 찾을 수 없습니다: ${toolUse.name}`, true, meta, undefined, durationMs);
       return { tool_use_id: toolUse.id, content: `도구를 찾을 수 없습니다: ${toolUse.name}`, is_error: true, durationMs };
     }
     source = tool.source;
     trust = trustFromSource(source);
+    let invocationCategory = resolveInvocationCategory(tool, toolUse.input);
+
+    const foldedExecutionCwd = caseFoldForMatch(canonicalizePathForMatch(executionCwd));
+    if (isFilesystemRootPath(foldedExecutionCwd)) {
+      const msg = `[권한 차단] 도구 '${toolUse.name}' (${source}) — execution cwd is filesystem root.`;
+      const durationMs = Date.now() - startTime;
+      const blockedPermission: PermissionCheckResult = {
+        decision: "deny",
+        reason: "execution cwd is filesystem root",
+        layer: 0,
+      };
+      emitToolStart(callbacks, toolUse.name, toolUse.input, meta);
+      callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+      await this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, blockedPermission, Infinity, permissionContext, invocationCategory, executionCwd);
+      return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+    }
+
+    if (!permissionContext?.trustOrigin) {
+      const msg = `[권한 차단] 도구 '${toolUse.name}' (${source}) — trust origin is missing.`;
+      const durationMs = Date.now() - startTime;
+      const blockedPermission: PermissionCheckResult = {
+        decision: "deny",
+        reason: "tool trust origin missing",
+        layer: 0,
+      };
+      emitToolStart(callbacks, toolUse.name, toolUse.input, meta);
+      callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+      await this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, blockedPermission, Infinity, permissionContext, invocationCategory, executionCwd);
+      return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+    }
 
     // ── Step 2: PreToolUse Hook ─────────────────────
     const preResult = await this.hookRunner.runPreHooks({
@@ -346,15 +693,66 @@ export class ToolExecutor {
       toolInput: toolUse.input,
     });
 
+    if (preResult.action === "deny") {
+      const msg = `[훅 차단] ${preResult.reason ?? "PreToolUse 훅에 의해 차단됨"}`;
+      const durationMs = Date.now() - startTime;
+      emitToolStart(callbacks, toolUse.name, toolUse.input, meta);
+      callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+      await this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, permissionResult, Infinity, permissionContext, invocationCategory, executionCwd);
+      return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+    }
+
+    const finalInput = preResult.action === "modify" && preResult.updatedInput
+      ? preResult.updatedInput
+      : toolUse.input;
+    if (finalInput !== toolUse.input) {
+      invocationCategory = resolveInvocationCategory(tool, finalInput);
+    }
+    const approvalCacheKey = approvalCacheKeyFor(tool, finalInput, executionCwd);
+    const invocationPermissionContext: ToolPermissionContext = {
+      ...permissionContext,
+      ...(approvalCacheKey ? { approvalCacheKey } : {}),
+    };
+    let invocationAllowedScope = buildAllowedScope(invocationPermissionContext.additionalDirectories);
+    let invocationRuntimeAllowedDirectories = buildRuntimeAllowedDirectories(invocationPermissionContext.additionalDirectories);
+
+    if (invocationCategory === "shell") {
+      const shellPathViolation = shellPathPolicyViolation(
+        finalInput,
+        executionCwd,
+        invocationRuntimeAllowedDirectories,
+      );
+      if (shellPathViolation) {
+        const msg = `[Shell 경로 정책 차단] 도구 '${toolUse.name}' — ${shellPathViolation}`;
+        const durationMs = Date.now() - startTime;
+        const blockedPermission: PermissionCheckResult = {
+          decision: "deny",
+          reason: shellPathViolation,
+          layer: 0,
+          denyReasons: [
+            { layer: 0, reason: "shell-path-policy", source: "directory-policy" },
+          ],
+        };
+        emitToolStart(callbacks, toolUse.name, finalInput, meta);
+        callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+        await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, blockedPermission, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
+        return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+      }
+    }
+
     // ── Step 2.5: Bash AST Pre-Validator ────────────
+    //
+    // Hooks are allowed to rewrite tool inputs. Validate the final invocation,
+    // not the original provider payload, so a hook cannot approve one command
+    // and execute another.
     if (this.bashAstValidator) {
-      const bashResult = this.bashAstValidator.validate(toolUse.name, toolUse.input);
+      const bashResult = this.bashAstValidator.validate(toolUse.name, finalInput);
       if (bashResult.decision === "deny") {
         const msg = `[Bash AST 차단] ${bashResult.reason} (pattern: ${bashResult.patternId})`;
         const durationMs = Date.now() - startTime;
-        emitToolStart(callbacks, toolUse.name, toolUse.input, meta);
+        emitToolStart(callbacks, toolUse.name, finalInput, meta);
         callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-        this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, { decision: "deny", reason: bashResult.reason ?? "bash AST", layer: 0 }, Infinity);
+        await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { decision: "deny", reason: bashResult.reason ?? "bash AST", layer: 0 }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
         return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
       }
       if (bashResult.decision === "warn") {
@@ -362,117 +760,436 @@ export class ToolExecutor {
       }
     }
 
+    const targetFilePaths = extractTargetFilePaths(tool, finalInput, executionCwd);
+    // Frozen-canonical contract: canonicalize once here and reuse the same
+    // string for Layer 0 (sensitive-path) + Layer 1
+    // (allowed-directories) checks below. No layer re-resolves the path.
+    const canonicalTargets = targetFilePaths.map((filePath) => ({
+      filePath,
+      canonicalPath: caseFoldForMatch(canonicalizePathForMatch(filePath)),
+    }));
+    const sensitiveTarget = canonicalTargets
+      .map((target) => ({ ...target, pattern: isSensitivePath(target.canonicalPath) }))
+      .find((target) => target.pattern);
+    const targetFilePath = canonicalTargets[0]?.filePath;
+    const sensitivePathPattern = sensitiveTarget?.pattern ?? null;
+
+    if (source === "plugin" && invocationPermissionContext.allowedPluginIds) {
+      const pluginAllowed = !!tool.pluginId && invocationPermissionContext.allowedPluginIds.has(tool.pluginId);
+      if (!pluginAllowed) {
+        const msg = `[권한 차단] 플러그인 도구 '${toolUse.name}' — 현재 실행 scope 밖의 pluginId=${tool.pluginId ?? "(unknown)"}`;
+        const durationMs = Date.now() - startTime;
+        const blockedPermission: PermissionCheckResult = {
+          decision: "deny",
+          reason: "plugin tool outside active allowed plugin scope",
+          layer: 0,
+        };
+        emitToolStart(callbacks, toolUse.name, finalInput, meta);
+        callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+        await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, blockedPermission, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
+        return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+      }
+    }
+
+    if (sensitivePathPattern) {
+      const msg = `[민감 경로 차단] 도구 '${toolUse.name}' (${source}) — ${sensitiveTarget?.filePath} matches ${sensitivePathPattern}`;
+      const durationMs = Date.now() - startTime;
+      const blockedPermission: PermissionCheckResult = {
+        decision: "deny",
+        reason: `sensitive path hard-block: ${sensitivePathPattern}`,
+        layer: 0,
+        denyReasons: [
+          { layer: 0, reason: "sensitive-path", source: "sensitive-paths" },
+        ],
+      };
+      emitToolStart(callbacks, toolUse.name, finalInput, meta);
+      callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+      await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, blockedPermission, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
+      return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+    }
+
+    // ── Step 2.6: Layer 1 — Allowed Directories ─────
+    //
+    // Frozen-canonical: reuse `canonicalTargetPath` from above (already
+    // realpath'd + case-folded). No re-canonicalization in this block.
+    //
+    // Skipped when no path-typed input was extracted (e.g. bash, MCP
+    // network calls). Native host tools declare path-bearing arguments on
+    // Tool.pathFields; plugin path metadata is reserved for the SDK authority
+    // metadata cutover and is not app-local today.
+    if (canonicalTargets.length > 0) {
+      while (true) {
+        const outOfAllowedTarget = canonicalTargets.find(
+          (target) => !isPathAllowed(target.canonicalPath, invocationAllowedScope),
+        );
+        if (!outOfAllowedTarget) break;
+        const headless = invocationPermissionContext.headless === true;
+        const trustOrigin = invocationPermissionContext.trustOrigin;
+        const validation = validateDirectoryAddition(outOfAllowedTarget.canonicalPath);
+        const suggestedParent = pickClosestParent(
+          outOfAllowedTarget.canonicalPath,
+          invocationAllowedScope.directories,
+        );
+        const dirLayerResult: PermissionCheckResult = {
+          decision: headless ? "ask" : "ask",
+          reason: `out-of-allowed-dir: ${outOfAllowedTarget.filePath} (not in additionalDirectories)`,
+          layer: 1,
+          denyReasons: [
+            {
+              layer: 1,
+              reason: "out-of-allowed-dir",
+              source: "directory-policy",
+            },
+          ],
+        };
+
+        if (this.approvalGate && !headless) {
+          // Interactive mode — dispatch directory-confirm modal. The
+          // renderer routes on `kind === "out-of-allowed-dir"` to the
+          // OutOfAllowedDirCard variant.
+          const adjacencyWarnings = validation.adjacencyWarnings;
+          const approvalRequest = {
+            id: randomUUID(),
+            category: "tool" as const,
+            kind: "out-of-allowed-dir" as const,
+            toolName: toolUse.name,
+            args: finalInput,
+            reason: dirLayerResult.reason,
+            source: source as "builtin" | "plugin" | "mcp",
+            createdAt: Date.now(),
+            target: { filePath: outOfAllowedTarget.filePath },
+            isReadOnly: invocationCategory === "read",
+            mode: this.currentApprovalMode(),
+            sensitivePathPattern,
+            outOfAllowedDir: {
+              candidatePath: outOfAllowedTarget.filePath,
+              suggestedParent,
+              currentAllowed: invocationAllowedScope.directories,
+              adjacencyWarnings,
+            },
+            trustOrigin,
+          };
+
+          let decision;
+          try {
+            await this.auditPermissionAsk(
+              toolUse.name,
+              source,
+              invocationCategory,
+              finalInput,
+              dirLayerResult,
+              executionCwd,
+              invocationPermissionContext,
+              outOfAllowedTarget.filePath,
+            );
+            decision = await this.approvalGate.requestAndWait(approvalRequest);
+          } catch (approvalErr) {
+            const msg = `[디렉토리 정책 오류] 도구 '${toolUse.name}' — ${approvalErr instanceof Error ? approvalErr.message : String(approvalErr)}`;
+            const durationMs = Date.now() - startTime;
+            emitToolStart(callbacks, toolUse.name, finalInput, meta);
+            callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+            await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, dirLayerResult, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
+            return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+          }
+
+          if (decision.choice.startsWith("deny")) {
+            const msg = `[디렉토리 정책 차단] 도구 '${toolUse.name}' — 사용자가 허용 디렉토리 외부 경로 접근을 거부했습니다 (${outOfAllowedTarget.filePath}).`;
+            const durationMs = Date.now() - startTime;
+            emitToolStart(callbacks, toolUse.name, finalInput, meta);
+            callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+            await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...dirLayerResult, decision: "deny" }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
+            return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+          }
+          const approvedDirectory = decision.choice === "allow-always"
+            ? (typeof decision.rememberPattern === "string" && decision.rememberPattern.length > 0
+                ? decision.rememberPattern
+                : suggestedParent ?? outOfAllowedTarget.filePath)
+            : outOfAllowedTarget.filePath;
+          if (decision.choice === "allow-always") {
+            const dirResult = await dispatchPermissionDirCommand({
+              verb: "allow",
+              path: approvedDirectory,
+              session: false,
+              acknowledgeWarnings: true,
+            });
+            if (!dirResult.ok || dirResult.verb !== "allow") {
+              const msg = `[디렉토리 정책 저장 실패] 도구 '${toolUse.name}' — ${dirResult.ok ? "unexpected result" : dirResult.error}`;
+              const durationMs = Date.now() - startTime;
+              emitToolStart(callbacks, toolUse.name, finalInput, meta);
+              callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+              await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...dirLayerResult, decision: "deny" }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
+              return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+            }
+          }
+          invocationAllowedScope = buildAllowedScope([
+            ...(invocationPermissionContext.additionalDirectories ?? []),
+            approvedDirectory,
+          ]);
+          invocationRuntimeAllowedDirectories = buildRuntimeAllowedDirectories([
+            ...(invocationPermissionContext.additionalDirectories ?? []),
+            approvedDirectory,
+          ]);
+          // allow-once / allow-always — fall through to Step 3
+          // (full Layer 3 check still runs; Layer 1 is necessary, not
+          // sufficient).
+        } else if (headless) {
+          const reviewerResult = await this.dispatchReviewerForHeadless(
+            toolUse.name,
+            source,
+            invocationCategory,
+            finalInput,
+            invocationAllowedScope.directories,
+            sensitivePathPattern ? [sensitivePathPattern] : [],
+            invocationPermissionContext,
+          );
+          if (reviewerResult.allowed) {
+            permissionResult = reviewerResult.permissionResult;
+            invocationAllowedScope = buildAllowedScope([
+              ...(invocationPermissionContext.additionalDirectories ?? []),
+              outOfAllowedTarget.filePath,
+            ]);
+            invocationRuntimeAllowedDirectories = buildRuntimeAllowedDirectories([
+              ...(invocationPermissionContext.additionalDirectories ?? []),
+              outOfAllowedTarget.filePath,
+            ]);
+          } else {
+            const msg = reviewerResult.message;
+            const durationMs = Date.now() - startTime;
+            log.warn(msg);
+            emitToolStart(callbacks, toolUse.name, finalInput, meta);
+            callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+            await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...dirLayerResult, decision: "deny", reason: reviewerResult.permissionResult.reason }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
+            return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+          }
+        } else {
+          // §F4 mirror — approvalGate미연결 시 fail-closed.
+          const msg = `[승인 게이트 미연결 — Layer 1] 도구 '${toolUse.name}' (${source}) — 허용 디렉토리 외부 경로이지만 승인 게이트가 없어 차단.`;
+          const durationMs = Date.now() - startTime;
+          log.error(msg);
+          emitToolStart(callbacks, toolUse.name, finalInput, meta);
+          callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+          await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...dirLayerResult, decision: "deny" }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
+          return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+        }
+      }
+    }
+
     // ── Step 3: Permission (source-aware) ───────────
     //
-    // C1 fix: `ask_user_question` is itself the "ask the user" intent — the
-    // tool fires its own AskUserQuestionCard on the renderer. If we route
-    // it through ApprovalGate as well, the user sees TWO modals back-to-
-    // back ("approve this tool?" then the actual question). Short-circuit
-    // permission for this single tool BEFORE PermissionManager runs so the
-    // approval modal never gets requested. Allowed because:
-    //   1. The tool only emits a renderer card and awaits user input — it
-    //      never mutates state on its own.
-    //   2. The user is always the explicit decision-maker for the tool's
-    //      effect (the question itself), so a separate "may I ask?" modal
-    //      is redundant.
-    //   3. The tool's permission category="dangerous" still applies to the
-    //      audit log (Step 8) so we keep visibility into its calls.
-    const isAskUserQuestionShortCircuit =
-      toolUse.name === "ask_user_question" && source === "builtin";
-    if (this.permissionManager && !isAskUserQuestionShortCircuit) {
-      permissionResult = this.permissionManager.checkDetailed(toolUse.name, source, tool.category, proactiveOrigin);
+    // Permission policy Layer 3 — `meta` category tools take an explicit decisionOverride
+    // path instead of running the standard matrix:
+    //
+    //   `always-allow-with-audit` (e.g. ask_user_question)
+    //     The tool IS the "ask the user" intent — it fires its own
+    //     AskUserQuestionCard. Running it through ApprovalGate would show
+    //     the user two modals back-to-back ("approve this tool?" then the
+    //     actual question). Short-circuit BEFORE PermissionManager runs.
+    //     The tool only emits a renderer card and awaits user input — it
+    //     never mutates state on its own; the user is always the explicit
+    //     decision-maker for the effect. Audit (Step 8) still records.
+    //
+    //   `ask` (e.g. agent_spawn)
+    //     Category is `meta` (control-flow primitive, not a write), but
+    //     the action is sensitive enough to warrant an approval modal.
+    //     We fall through to the standard ask path below — the override
+    //     just signals "skip auto-allow lanes".
+    //
+    // Trust boundary: only honor decisionOverride for builtin tools. A
+    // plugin or MCP tool that happens to declare `meta` does not get
+    // host-level override authority — it must satisfy the normal Layer 3
+    // matrix (which for `meta` category falls through to the regular
+    // descriptor flow via the registry).
+    const metaOverride = source === "builtin" && tool.category === "meta"
+      ? tool.decisionOverride
+      : undefined;
+    const isAlwaysAllowMeta = metaOverride === "always-allow-with-audit";
+    if (this.permissionManager && !isAlwaysAllowMeta) {
+      permissionResult = this.permissionManager.checkDetailed(
+        toolUse.name,
+        source,
+        invocationCategory,
+        proactiveOrigin,
+        invocationPermissionContext,
+      );
+      // Permission policy — meta tools with decisionOverride="ask" force the approval
+      // modal regardless of the registry descriptor's "override" lane.
+      // The override means "skip auto-allow lanes"; the registry already
+      // returns "allow" for `meta` (override sentinel) so we must elevate
+      // to ask here when the tool author marked it sensitive.
+      if (metaOverride === "ask" && permissionResult.decision === "allow") {
+        permissionResult = {
+          decision: "ask",
+          reason: `meta tool decisionOverride='ask' — 사용자 컨펌 필요`,
+          layer: 6,
+        };
+      }
       if (permissionResult.decision === "deny") {
         const msg = `[권한 차단] 도구 '${toolUse.name}' (${source}, trust:${trust}) — ${permissionResult.reason}`;
         const durationMs = Date.now() - startTime;
-        emitToolStart(callbacks, toolUse.name, toolUse.input, meta);
+        // Use finalInput (post-PreToolUse hook) so audit/UI never show stale
+        // pre-hook args for a hook-modified invocation.
+        emitToolStart(callbacks, toolUse.name, finalInput, meta);
         callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-        this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, permissionResult, Infinity);
+        await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, permissionResult, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
         return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
       }
       if (permissionResult.decision === "ask") {
+        if (invocationPermissionContext.headless === true) {
+          const reviewerResult = await this.dispatchReviewerForHeadless(
+            toolUse.name,
+            source,
+            invocationCategory,
+            finalInput,
+            invocationAllowedScope.directories,
+            sensitivePathPattern ? [sensitivePathPattern] : [],
+            invocationPermissionContext,
+          );
+          if (reviewerResult.allowed) {
+            permissionResult = reviewerResult.permissionResult;
+          } else {
+            const msg = reviewerResult.message;
+            const durationMs = Date.now() - startTime;
+            emitToolStart(callbacks, toolUse.name, finalInput, meta);
+            callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+            await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, reviewerResult.permissionResult, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
+            return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+          }
+        }
+      }
+      if (permissionResult.decision === "ask") {
         if (this.approvalGate) {
-          // §6.3 Layer 3 + §8: 렌더러 승인 모달로 round-trip
-          // C1: wire target.filePath + isReadOnly + mode so that §S1
-          // sensitive-path hard-block and §S4 read-only short-circuit
-          // actually fire. Previously these were missing → §S1 check
-          // read `undefined` and was effectively dead code.
-          const targetFilePath = extractTargetFilePath(toolUse.name, toolUse.input);
-          const sensitivePathPattern = targetFilePath
-            ? isSensitivePath(canonicalizePathForMatch(targetFilePath))
-            : null;
+          // Layer 3: wire target.filePath + isReadOnly + mode so the
+          // approval gate can apply sensitive-path and read-only checks to
+          // the exact invocation shown to the user.
           const approvalRequest = {
             id: randomUUID(),
             category: "tool" as const,
             toolName: toolUse.name,
-            args: toolUse.input,
+            args: finalInput,
             reason: permissionResult.reason,
             source: source as "builtin" | "plugin" | "mcp",
             createdAt: Date.now(),
             ...(targetFilePath ? { target: { filePath: targetFilePath } } : {}),
-            isReadOnly: READ_ONLY_TOOL_NAMES.has(toolUse.name),
+            isReadOnly: invocationCategory === "read",
             mode: this.currentApprovalMode(),
             sensitivePathPattern,
+            trustOrigin: invocationPermissionContext.trustOrigin,
           };
+
+          const permHook = await this.runScriptHook(
+            "perm",
+            toolUse.name,
+            source,
+            invocationCategory,
+            finalInput,
+            sessionId,
+            invocationPermissionContext,
+          );
+          if (permHook.decision === "deny") {
+            const msg = `[Hook Permission 차단] ${permHook.reason}`;
+            const durationMs = Date.now() - startTime;
+            emitToolStart(callbacks, toolUse.name, finalInput, meta);
+            callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+            await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...permissionResult, decision: "deny", reason: permHook.reason }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
+            return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+          }
 
           // §F3: requestAndWait 실패 시 감사 로그 보장 후 deny-once 처리
           let decision;
           try {
+            await this.auditPermissionAsk(
+              toolUse.name,
+              source,
+              invocationCategory,
+              finalInput,
+              permissionResult,
+              executionCwd,
+              invocationPermissionContext,
+              targetFilePath,
+            );
             decision = await this.approvalGate.requestAndWait(approvalRequest);
           } catch (approvalErr) {
             const msg = `[승인 오류] 도구 '${toolUse.name}' — 승인 게이트 내부 오류: ${approvalErr instanceof Error ? approvalErr.message : String(approvalErr)}`;
             const durationMs = Date.now() - startTime;
-            emitToolStart(callbacks, toolUse.name, toolUse.input, meta);
+            // finalInput keeps audit/UI consistent with the args shown to the
+            // approval gate (which already uses finalInput in approvalRequest).
+            emitToolStart(callbacks, toolUse.name, finalInput, meta);
             callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-            this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, permissionResult, Infinity);
+            await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, {
+              ...permissionResult,
+              decision: "deny",
+              reason: `approval gate error: ${approvalErr instanceof Error ? approvalErr.message : String(approvalErr)}`,
+            }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
             return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
           }
 
           if (decision.choice.startsWith("deny")) {
             // deny-always: 영구 거부 규칙 추가
             if (decision.choice === "deny-always" && this.permissionManager) {
-              const pattern = decision.rememberPattern ?? toolUse.name;
+              const pattern = approvalCacheKey ?? decision.rememberPattern ?? toolUse.name;
               await this.permissionManager.addAlwaysDeniedPersist(pattern);
             }
             const msg = `[승인 거부] 도구 '${toolUse.name}' — 사용자가 실행을 거부했습니다.`;
             const durationMs = Date.now() - startTime;
-            emitToolStart(callbacks, toolUse.name, toolUse.input, meta);
+            // finalInput matches the args the user actually saw + denied via
+            // approvalRequest — never log stale pre-hook input here.
+            emitToolStart(callbacks, toolUse.name, finalInput, meta);
             callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-            this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, permissionResult, Infinity);
+            await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, {
+              ...permissionResult,
+              decision: "deny",
+              reason: "user denied approval request",
+            }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
             return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
           }
 
           // allow-always: 영구 허용 규칙 추가
           if (decision.choice === "allow-always" && this.permissionManager) {
-            const pattern = decision.rememberPattern ?? toolUse.name;
+            const pattern = approvalCacheKey ?? decision.rememberPattern ?? toolUse.name;
             await this.permissionManager.addAlwaysAllowedPersist(pattern);
           }
+          permissionResult = {
+            decision: "allow",
+            reason: `user approved approval request (${decision.choice})`,
+            layer: permissionResult.layer,
+          };
           // allow-once / allow-always: 실행 계속
         } else {
           // §F4: approvalGate 미연결 시 fail-closed — 모든 ask 결정을 차단
           const msg = `[승인 게이트 미연결] 도구 '${toolUse.name}' (${source}) — ask 결정이지만 승인 게이트가 없어 차단. ${permissionResult.reason}`;
           const durationMs = Date.now() - startTime;
           log.error(msg);
-          emitToolStart(callbacks, toolUse.name, toolUse.input, meta);
+          // finalInput so audit reflects post-hook args even when the gate is
+          // unavailable.
+          emitToolStart(callbacks, toolUse.name, finalInput, meta);
           callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-          this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, permissionResult, Infinity);
+          await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, {
+            ...permissionResult,
+            decision: "deny",
+            reason: `approval gate missing: ${permissionResult.reason}`,
+          }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
           return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
         }
       }
     }
 
-    // ── Step 4: Hook Override ───────────────────────
-    if (preResult.action === "deny") {
-      const msg = `[훅 차단] ${preResult.reason ?? "PreToolUse 훅에 의해 차단됨"}`;
+    const scriptPre = await this.runScriptHook(
+      "pre",
+      toolUse.name,
+      source,
+      invocationCategory,
+      finalInput,
+      sessionId,
+      invocationPermissionContext,
+    );
+    if (scriptPre.decision === "deny") {
+      const msg = `[Hook 차단] ${scriptPre.reason}`;
       const durationMs = Date.now() - startTime;
-      emitToolStart(callbacks, toolUse.name, toolUse.input, meta);
+      emitToolStart(callbacks, toolUse.name, finalInput, meta);
       callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-      this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, permissionResult, Infinity);
+      await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { decision: "deny", reason: scriptPre.reason, layer: 6 }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
       return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
     }
-
-    const finalInput = preResult.action === "modify" && preResult.updatedInput
-      ? preResult.updatedInput
-      : toolUse.input;
 
     // ── Step 5: Rate Limit (trust별) ────────────────
     const rateResult = this.rateLimiter.check(toolUse.name, trust);
@@ -481,8 +1198,37 @@ export class ToolExecutor {
       const durationMs = Date.now() - startTime;
       emitToolStart(callbacks, toolUse.name, finalInput, meta);
       callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-      this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, permissionResult, 0);
+      await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, permissionResult, 0, invocationPermissionContext, invocationCategory, executionCwd);
       return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+    }
+
+    if (this.requirePermissionAuditChain) {
+      try {
+        this.auditLogger.assertPermissionAuditWritable();
+      } catch (err) {
+        const msg = `[감사 체인 차단] 도구 '${toolUse.name}' — permission audit chain is not writable: ${err instanceof Error ? err.message : String(err)}`;
+        const durationMs = Date.now() - startTime;
+        emitToolStart(callbacks, toolUse.name, finalInput, meta);
+        callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+        this.auditLogger.log({
+          timestamp: new Date().toISOString(),
+          sessionId: sessionId ?? "unknown",
+          type: "tool_call",
+          input: maskSensitiveData(JSON.stringify(finalInput)).masked.slice(0, 500),
+          output: msg.slice(0, 1024),
+          toolCalls: [{
+            name: toolUse.name,
+            isError: true,
+            source,
+            trust,
+            executionTimeMs: durationMs,
+            permissionDecision: "deny",
+            permissionReason: "permission audit chain unavailable before execution",
+            rateLimitRemaining: rateResult.remaining,
+          }],
+        });
+        return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+      }
     }
 
     emitToolStart(callbacks, toolUse.name, finalInput, meta);
@@ -493,7 +1239,8 @@ export class ToolExecutor {
     let uiPayload: import("../mcp/types.js").McpUiPayload | undefined;
 
     const executionContext: ToolExecutionContext = {
-      cwd: process.cwd(),
+      cwd: executionCwd,
+      extraAllowedDirectories: [...new Set(invocationRuntimeAllowedDirectories)],
       metadata: {
         sessionId: sessionId ?? "unknown",
         // C3(b): spawn depth visible to tools — `agent_spawn` reads this
@@ -503,6 +1250,7 @@ export class ToolExecutor {
         // 를 ToolGroupCard 옆에 join 할 때 키로 사용. agent_spawn 이 emit 하는
         // 라이프사이클 이벤트에 함께 실어 보냄.
         toolUseId: toolUse.id,
+        trustOrigin: invocationPermissionContext.trustOrigin,
       },
       abortSignal,
     };
@@ -527,8 +1275,22 @@ export class ToolExecutor {
       toolOutput: content,
       isError,
     });
+    const scriptPost = await this.runScriptHook(
+      "post",
+      toolUse.name,
+      source,
+      invocationCategory,
+      finalInput,
+      sessionId,
+      invocationPermissionContext,
+      content,
+      isError,
+    );
 
     if (postFeedback) content = `${content}\n\n[Hook Feedback]\n${postFeedback}`;
+    if (scriptPost.results.length > 0 && scriptPost.decision === "deny") {
+      content = `${content}\n\n[Script Hook Feedback]\n${scriptPost.reason}`;
+    }
     if (preResult.feedback) content = `${content}\n\n[Pre-Hook Note]\n${preResult.feedback}`;
 
     // ── Step 7b: DLP 민감 데이터 마스킹 ────────────
@@ -582,14 +1344,56 @@ export class ToolExecutor {
       toolUse.name === "ask_user_question" && source === "builtin" && !isError
         ? redactAskUserAuditOutput(displayContent)
         : displayContent;
-    this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, auditContent, isError, startTime, permissionResult, rateResult.remaining);
+    await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, auditContent, isError, startTime, permissionResult, rateResult.remaining, invocationPermissionContext, invocationCategory, executionCwd, targetFilePath);
 
     return { tool_use_id: toolUse.id, content, ...(isError && { is_error: true }), ...(uiPayload && { uiPayload }), durationMs };
   }
 
   // ─── Audit (불변 — 항상 실행) ────────────────────
 
-  private auditToolCall(
+  private async auditPermissionAsk(
+    toolName: string,
+    source: ToolSource,
+    category: ToolCategory,
+    input: Record<string, unknown>,
+    permission: PermissionCheckResult,
+    cwd: string,
+    permissionContext?: ToolPermissionContext,
+    auditDirectory?: string,
+  ): Promise<void> {
+    const tool = this.toolRegistry.findByName(toolName);
+    const entry = permissionAuditAskEntryFromToolCall({
+      toolName,
+      tool,
+      source,
+      category,
+      input,
+      permission,
+      trustOrigin: auditTrustOrigin(permissionContext),
+      cwd,
+      auditDirectory,
+    });
+    if (!this.auditLogger.isPermissionAuditChainReady()) {
+      if (this.requirePermissionAuditChain) {
+        throw new Error("permission audit chain is not initialized");
+      }
+      return;
+    }
+    try {
+      await this.auditLogger.appendPermissionAuditEntry(entry);
+    } catch (err) {
+      if (this.requirePermissionAuditChain) {
+        throw err;
+      }
+      log.warn(
+        "permission ask audit append failed for %s: %s",
+        toolName,
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  }
+
+  private async auditToolCall(
     sessionId: string | undefined,
     toolName: string,
     source: ToolSource,
@@ -600,7 +1404,11 @@ export class ToolExecutor {
     startTime: number,
     permission: PermissionCheckResult | undefined,
     rateLimitRemaining: number,
-  ): void {
+    permissionContext?: ToolPermissionContext,
+    category?: ToolCategory,
+    cwd?: string,
+    auditDirectory?: string,
+  ): Promise<void> {
     try {
       const inputText = JSON.stringify(input);
       const auditInput = maskSensitiveData(inputText).masked;
@@ -621,8 +1429,46 @@ export class ToolExecutor {
           rateLimitRemaining,
         }],
       });
-    } catch {
-      // 감사 실패가 도구 실행을 차단하면 안 됨
+    } catch (err) {
+      log.warn(
+        "general tool audit failed for %s: %s",
+        toolName,
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+    if (!category || !cwd) {
+      return;
+    }
+    const tool = this.toolRegistry.findByName(toolName);
+    const entry = permissionAuditEntryFromToolCall({
+      toolName,
+      tool,
+      source,
+      category,
+      input,
+      permission,
+      rateLimitRemaining,
+      trustOrigin: auditTrustOrigin(permissionContext),
+      cwd,
+      auditDirectory,
+    });
+    if (!this.auditLogger.isPermissionAuditChainReady()) {
+      if (this.requirePermissionAuditChain) {
+        throw new Error("permission audit chain is not initialized");
+      }
+      return;
+    }
+    try {
+      await this.auditLogger.appendPermissionAuditEntry(entry);
+    } catch (err) {
+      if (this.requirePermissionAuditChain) {
+        throw err;
+      }
+      log.warn(
+        "permission audit append failed for %s: %s",
+        toolName,
+        err instanceof Error ? err.message : String(err),
+      );
     }
   }
 }

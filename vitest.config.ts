@@ -1,5 +1,9 @@
 import { defineConfig } from "vitest/config";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const ROOT = path.dirname(fileURLToPath(import.meta.url));
+const rootPath = (p: string) => path.resolve(ROOT, p);
 
 /**
  * Phase 1 renderer split — test infrastructure.
@@ -34,14 +38,20 @@ export default defineConfig({
     ],
   },
   resolve: {
+    dedupe: ["react", "react-dom"],
     extensions: [".ts", ".tsx", ".mjs", ".js", ".jsx", ".json"],
     // SDK is installed from GitHub — its prepare (tsup) script may not run
     // in CI without trusted-dependencies. Point vitest directly at the SDK
     // TypeScript sources so the dist/ absence does not break test imports.
     alias: {
-      "@lvis/plugin-sdk/ui/tokens": path.resolve("node_modules/@lvis/plugin-sdk/src/ui/tokens/index.ts"),
-      "@lvis/plugin-sdk/ui": path.resolve("node_modules/@lvis/plugin-sdk/src/ui/index.ts"),
-      "@lvis/plugin-sdk": path.resolve("node_modules/@lvis/plugin-sdk/src/index.ts"),
+      "react/jsx-dev-runtime": rootPath("node_modules/react/jsx-dev-runtime.js"),
+      "react/jsx-runtime": rootPath("node_modules/react/jsx-runtime.js"),
+      "react-dom/client": rootPath("node_modules/react-dom/client.js"),
+      "react-dom": rootPath("node_modules/react-dom/index.js"),
+      react: rootPath("node_modules/react/index.js"),
+      "@lvis/plugin-sdk/ui/tokens": rootPath("node_modules/@lvis/plugin-sdk/src/ui/tokens/index.ts"),
+      "@lvis/plugin-sdk/ui": rootPath("node_modules/@lvis/plugin-sdk/src/ui/index.ts"),
+      "@lvis/plugin-sdk": rootPath("node_modules/@lvis/plugin-sdk/src/index.ts"),
     },
   },
 });

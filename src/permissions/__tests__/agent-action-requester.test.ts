@@ -25,13 +25,21 @@ function makeMockGate(resolveWith: ApprovalDecision) {
 }
 
 const BASE_INPUT = {
-  toolName: "agent_hub_decide_approval_with_host",
+  toolName: "sample_plugin_decide_approval_with_host",
   args: { approvalId: 42, choice: "allow-once" },
   reason: "승인 요청: 결재 ID 42",
   source: "plugin" as const,
-  sourcePluginId: "agent-hub",
+  sourcePluginId: "sample-plugin",
   scope: "agent_external_api_call",
 };
+
+function requestWithRegistry(
+  gate: ApprovalGate,
+  input = BASE_INPUT,
+  registry = new ApprovalIssuerRegistry(),
+) {
+  return requestAgentApproval(gate, input, registry);
+}
 
 // ─── Tests ────────────────────────────────────────────
 
@@ -48,7 +56,7 @@ describe("requestAgentApproval", () => {
       hmac: "deadbeef",
     });
 
-    const choice = await requestAgentApproval(gate, BASE_INPUT);
+    const choice = await requestWithRegistry(gate);
     expect(choice).toBe("allow-once");
   });
 
@@ -60,7 +68,7 @@ describe("requestAgentApproval", () => {
       hmac: "deadbeef",
     });
 
-    const choice = await requestAgentApproval(gate, BASE_INPUT);
+    const choice = await requestWithRegistry(gate);
     expect(choice).toBe("deny-once");
   });
 
@@ -72,7 +80,7 @@ describe("requestAgentApproval", () => {
       hmac: "deadbeef",
     });
 
-    const choice = await requestAgentApproval(gate, BASE_INPUT);
+    const choice = await requestWithRegistry(gate);
     expect(choice).toBe("allow-always");
   });
 
@@ -84,7 +92,7 @@ describe("requestAgentApproval", () => {
       hmac: "gate-hmac",
     });
 
-    await requestAgentApproval(gate, BASE_INPUT);
+    await requestWithRegistry(gate);
 
     const [calledReq] = (gate.requestAndWait as ReturnType<typeof vi.fn>).mock.calls[0] as [
       Parameters<ApprovalGate["requestAndWait"]>[0],
@@ -113,8 +121,8 @@ describe("requestAgentApproval", () => {
       hmac: "h",
     });
 
-    await requestAgentApproval(gate, BASE_INPUT);
-    await requestAgentApproval(gate, BASE_INPUT);
+    await requestWithRegistry(gate);
+    await requestWithRegistry(gate);
 
     const calls = (gate.requestAndWait as ReturnType<typeof vi.fn>).mock.calls as [
       Parameters<ApprovalGate["requestAndWait"]>[0],
@@ -131,7 +139,7 @@ describe("requestAgentApproval", () => {
       choice: "deny-once",
     });
 
-    const choice = await requestAgentApproval(gate, BASE_INPUT);
+    const choice = await requestWithRegistry(gate);
     expect(choice).toBe("deny-once");
   });
 
@@ -142,9 +150,20 @@ describe("requestAgentApproval", () => {
       }),
     } as unknown as ApprovalGate;
 
-    await expect(requestAgentApproval(gate, BASE_INPUT)).rejects.toThrow(
+    await expect(requestWithRegistry(gate)).rejects.toThrow(
       "gate internal error",
     );
+  });
+
+  it("requires an issuer registry", async () => {
+    const gate = makeMockGate({
+      requestId: "test-id",
+      choice: "allow-once",
+    });
+
+    await expect(
+      requestAgentApproval(gate, BASE_INPUT, undefined as unknown as ApprovalIssuerRegistry),
+    ).rejects.toThrow("ApprovalIssuerRegistry is required");
   });
 });
 
@@ -265,11 +284,11 @@ describe("requestAgentApproval try-finally cleanup", () => {
     await expect(
       requestAgentApproval(
         gate as unknown as ApprovalGate,
-        { requestId: "req-x", toolName: "t", args: {}, reason: "r", source: "plugin", sourcePluginId: "plugin-a", scope: "agent_file_share" },
+        { toolName: "t", args: {}, reason: "r", source: "plugin", sourcePluginId: "plugin-a", scope: "agent_file_share" },
         r,
       ),
     ).rejects.toThrow("gate failure");
-    expect(r.peek("req-x")).toBeUndefined(); // cleaned up via finally
+    expect(r.size).toBe(0);
   });
 
   it("does NOT delete entry on success (registry consumed by respond path)", async () => {
