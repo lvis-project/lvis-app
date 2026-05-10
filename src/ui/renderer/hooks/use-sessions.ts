@@ -18,7 +18,7 @@ export interface SessionSummary {
 }
 
 /**
- * Phase 5 — sessions hook.
+ * Sessions hook.
  * Owns session list, current session id, load/fork actions. The streaming
  * guard on load lives here; callers pass `streaming` so we don't swap
  * history mid-turn (ConversationLoop.runTurn has no concurrency guard).

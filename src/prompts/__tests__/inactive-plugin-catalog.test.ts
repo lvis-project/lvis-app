@@ -1,5 +1,5 @@
 /**
- * Phase 1.5 Option C — SystemPromptBuilder catalog section.
+ * SystemPromptBuilder inactive plugin catalog section.
  *
  * Verifies:
  *   - Inactive plugins appear under "사용 가능한 플러그인 (현재 비활성 …)"
@@ -28,7 +28,7 @@ function makeBuilder(cards: Array<{
   });
 }
 
-describe("SystemPromptBuilder — inactive plugin catalog (Option C)", () => {
+describe("SystemPromptBuilder — inactive plugin catalog", () => {
   it("renders inactive plugins with bold id + sample tools", () => {
     const builder = makeBuilder([
       {
@@ -38,10 +38,10 @@ describe("SystemPromptBuilder — inactive plugin catalog (Option C)", () => {
         sampleTools: ["meeting_start", "meeting_stop"],
       },
       {
-        id: "local-indexer",
-        name: "Local Indexer",
+        id: "docs-plugin",
+        name: "Docs Plugin",
         description: "문서 인덱스/검색",
-        sampleTools: ["index_scan", "index_search"],
+        sampleTools: ["document_scan", "document_search"],
       },
     ]);
     builder.setToolScope({
@@ -53,7 +53,7 @@ describe("SystemPromptBuilder — inactive plugin catalog (Option C)", () => {
     expect(prompt).toContain("## 사용 가능한 플러그인 (현재 비활성 — request_plugin 으로 활성화)");
     expect(prompt).toContain("**com.lge.meeting**");
     expect(prompt).toContain("meeting_start, meeting_stop");
-    expect(prompt).toContain("**local-indexer**");
+    expect(prompt).toContain("**docs-plugin**");
   });
 
   it("omits active plugin from catalog", () => {

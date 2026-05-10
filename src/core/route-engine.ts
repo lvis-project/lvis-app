@@ -5,11 +5,11 @@
  * TypeScript 구현 — 향후 Rust NAPI-RS 포팅 대비 인터페이스 분리.
  *
  * Route Resolution 우선순위 (§6.2):
- * 1. Governance Policy Check → (Phase 5)
- * 2. Permission Check → (Phase 5)
+ * 1. Governance Policy Check
+ * 2. Permission Check
  * 3. Local Skill Match → 플러그인 스킬 매칭
- * 4. Agent Hub Routing → (Phase 5)
- * 5. Marketplace API → (Phase 5)
+ * 4. Agent Message Routing
+ * 5. Marketplace API
  * 6. Lgenie Fallback → LLM 직접 대화
  */
 import type { InputClassification } from "./keyword-engine.js";
@@ -20,7 +20,7 @@ import type { ToolRegistry } from "../tools/registry.js";
 export type RouteResult =
   | { route: "command"; command: string; args: string }
   | { route: "skill"; skillId: string; input: string }
-  | { route: "agent-hub"; target: string; message: string }
+  | { route: "agent-message"; target: string; message: string }
   | { route: "llm"; input: string };
 
 export interface RouteEngineDeps {
@@ -61,10 +61,8 @@ export class RouteEngine {
       }
 
       case "mention":
-        // Phase 5: Agent Hub 라우팅
-        // 현재는 LLM fallback + 멘션 정보 유지
         return {
-          route: "agent-hub",
+          route: "agent-message",
           target: classification.target,
           message: classification.message,
         };

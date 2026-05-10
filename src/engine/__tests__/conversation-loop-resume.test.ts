@@ -8,11 +8,15 @@
  * - manualCompact returns compacted:true when history is long enough to compact
  * - manualCompact returns compacted:false when history is short
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, it, expect, vi } from "vitest";
 import { ConversationLoop } from "../conversation-loop.js";
 import type { ConversationLoopDeps } from "../conversation-loop.js";
 import type { GenericMessage } from "../llm/types.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
+import { wireHookSystem } from "../../boot/steps/hook-system-wiring.js";
 
 // ─── Minimal stubs ────────────────────────────────────────────────────────────
 
@@ -158,6 +162,32 @@ describe("ConversationLoop.resetAndResume", () => {
     // resetAndResume 자체는 더 이상 auto-compact 하지 않음 — Layer 0 가 next turn 처리
     expect(result.compacted).toBe(false);
   });
+
+  it("does not dispatch slash commands from non-keyboard origin", async () => {
+    const routeEngine = {
+      route: vi.fn().mockReturnValue({
+        route: "command",
+        command: "compact",
+        args: "",
+      }),
+    } as unknown as ConversationLoopDeps["routeEngine"];
+    const keywordEngine = {
+      classify: vi.fn().mockReturnValue({ type: "command" }),
+      matchAllPluginIds: () => new Set(),
+    } as unknown as ConversationLoopDeps["keywordEngine"];
+    const loop = new ConversationLoop(makeDeps({ routeEngine, keywordEngine }));
+    const fakeProvider = {
+      vendor: "openai" as const,
+      streamTurn: async function* () { /* unused */ },
+    };
+    (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
+
+    const result = await loop.runTurn("/compact", undefined, undefined, {
+      inputOrigin: "plugin-emitted",
+    });
+
+    expect(result.text).toContain("비키보드 출처의 slash command는 실행하지 않습니다.");
+  });
 });
 
 
@@ -270,9 +300,56 @@ describe("ConversationLoop command routing", () => {
     const loop = new ConversationLoop(makeDeps({ memoryManager: mem, routeEngine, keywordEngine }));
     (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
 
-    const result = await loop.runTurn("/memory");
+    const result = await loop.runTurn("/memory", undefined, undefined, { inputOrigin: "user-keyboard" });
 
     expect(result.text).toContain("사용자 메모");
     expect(listMemoryEntries).toHaveBeenCalledOnce();
+  });
+
+  it("/permission hooks accept restores a boot-quarantined hook through the user-keyboard command path", async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "permission-policy-loop-hooks-"));
+    const hooksDir = join(tmpDir, "hooks");
+    const disabledDir = join(hooksDir, ".disabled");
+    const lockfilePath = join(hooksDir, ".lockfile.json");
+    try {
+      mkdirSync(hooksDir, { recursive: true });
+      const hookPath = join(hooksDir, "pre-demo.sh");
+      writeFileSync(hookPath, "#!/bin/sh\necho '{}'\n");
+      chmodSync(hookPath, 0o700);
+      const boot = await wireHookSystem({ hooksDir, disabledDir, lockfilePath });
+      expect(boot.manager.size()).toBe(0);
+      expect(existsSync(join(disabledDir, "pre-demo.sh"))).toBe(true);
+
+      const routeEngine = {
+        route: vi.fn().mockReturnValue({
+          route: "command",
+          command: "permission",
+          args: "hooks accept pre-demo.sh",
+        }),
+      } as unknown as ConversationLoopDeps["routeEngine"];
+      const keywordEngine = {
+        classify: vi.fn().mockReturnValue({ type: "command" }),
+        matchAllPluginIds: () => new Set(),
+      } as unknown as ConversationLoopDeps["keywordEngine"];
+      const loop = new ConversationLoop(makeDeps({
+        routeEngine,
+        keywordEngine,
+        scriptHookManager: boot.manager,
+        hookTrustCommandOptions: { hooksDir, disabledDir, lockfilePath },
+      }));
+      const fakeProvider = {
+        vendor: "openai" as const,
+        streamTurn: async function* () { /* unused */ },
+      };
+      (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
+
+      const result = await loop.runTurn("/permission hooks accept pre-demo.sh", undefined, undefined, { inputOrigin: "user-keyboard" });
+
+      expect(result.text).toContain("Hook 신뢰 등록됨: pre-demo.sh");
+      expect(boot.manager.size()).toBe(1);
+      expect(existsSync(join(hooksDir, "pre-demo.sh"))).toBe(true);
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 });

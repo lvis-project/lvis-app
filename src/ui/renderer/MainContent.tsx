@@ -58,7 +58,7 @@ export interface MainContentProps {
   marketplaceUrlReady?: boolean;
   // plugin view
   activePluginView: PluginView | null;
-  /** Q11 — called when user confirms a plugin overlay item; id is the OverlayItem.id */
+  /** Called when user confirms a plugin overlay item; id is the OverlayItem.id. */
   onPluginPrimaryAction: (overlayItemId: string) => void;
 }
 

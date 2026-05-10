@@ -98,6 +98,7 @@ describe("createSearchMemoryTool", () => {
     const tool = createSearchMemoryTool({ getNotes: () => fixture });
     const res = await tool.execute({ query: "BM25 검색", topK: 3 }, {
       cwd: "/tmp",
+      extraAllowedDirectories: [],
       metadata: {},
     } as never);
     expect(res.isError).toBe(false);
@@ -109,7 +110,7 @@ describe("createSearchMemoryTool", () => {
 
   it("empty query returns empty array without error", async () => {
     const tool = createSearchMemoryTool({ getNotes: () => fixture });
-    const res = await tool.execute({ query: "  " }, { cwd: "/tmp", metadata: {} } as never);
+    const res = await tool.execute({ query: "  " }, { cwd: "/tmp", extraAllowedDirectories: [], metadata: {} } as never);
     expect(res.isError).toBe(false);
     expect(JSON.parse(res.output as string)).toEqual([]);
   });
@@ -120,7 +121,7 @@ describe("createSearchMemoryTool", () => {
         throw new Error("boom");
       },
     });
-    const res = await tool.execute({ query: "x" }, { cwd: "/tmp", metadata: {} } as never);
+    const res = await tool.execute({ query: "x" }, { cwd: "/tmp", extraAllowedDirectories: [], metadata: {} } as never);
     expect(res.isError).toBe(true);
   });
 });

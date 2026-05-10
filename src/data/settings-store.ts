@@ -101,7 +101,6 @@ export interface AppSettings {
   updates: UpdateSettings;
   telemetry: TelemetrySettings;
   audit: AuditSettings;
-  msGraph: MsGraphSettings;
   /** UX Track 3 — visual theme + future UI preferences. */
   appearance: AppearanceSettings;
   /** §B1 — external URL viewer policy (in-app BrowserWindow vs system browser). */
@@ -168,26 +167,14 @@ export interface AppearanceSettings {
  * and/or `hostApi.openExternalUrl(...)` — see plan
  * `.omc/plans/2026-05-04-external-url-viewer-policy.md`.
  *
- * Default `"in-app"` matches the current ms-graph OAuth UX (v0.1.23+).
+ * Default `"in-app"` keeps plugin-owned auth and link flows inside LVIS unless
+ * the plugin asks the host to open the system browser.
  * Future enum extension reserved (e.g. `"ask-each-time"`).
  */
 export type WebViewPreferredFlow = "in-app" | "system-browser";
 
 export interface WebViewSettings {
   preferredFlow: WebViewPreferredFlow;
-}
-
-/**
- * MsGraph 환경 선택 — legacy 필드.
- *
- * PR 3 이후 ms-graph 플러그인이 자체 인증을 소유하면서 환경 선택은
- * `pluginConfigs["ms-graph"].environment` 로 이전됨. 이 필드는 구 settings.json
- * 호환을 위해 잔존 (load 시 plugin config 로 1회 마이그레이션 가능). 새 코드는
- * 이 필드를 읽지 않는다.
- */
-export interface MsGraphSettings {
-  /** @deprecated PR 3 이후 plugin config (pluginConfigs["ms-graph"].environment) 로 이전 */
-  environment: "external" | "corporate";
 }
 
 /**
@@ -235,7 +222,7 @@ export interface PrivacySettings {
 /**
  * §7 Routine Engine settings — v2.
  *
- * Q4 lenient parsing: unknown keys (including all v1 fields such as
+ * Lenient parsing: unknown keys (including all prior routine fields such as
  * enableWakeupRoutine, wakeupRoutinePrompt, scheduleEntries, etc.) are
  * silently accepted so dev machines with old settings.json do not crash at
  * boot. No migration code — v1 keys are simply never read.
@@ -321,9 +308,6 @@ const DEFAULT_SETTINGS: AppSettings = {
   audit: {
     auditRotationMaxBytes: 10 * 1024 * 1024, // 10 MB
     auditRetentionDays: 30,
-  },
-  msGraph: {
-    environment: "external",
   },
   appearance: {
     schemaVersion: 2,
@@ -431,9 +415,6 @@ export class SettingsService {
     if (partial.audit) {
       this.settings.audit = { ...this.settings.audit, ...partial.audit };
     }
-    if (partial.msGraph) {
-      this.settings.msGraph = { ...this.settings.msGraph, ...partial.msGraph };
-    }
     if (partial.appearance) {
       this.settings.appearance = { ...this.settings.appearance, ...partial.appearance };
     }
@@ -534,8 +515,7 @@ export class SettingsService {
       // to the AppSettings type without preserving legacy "mock" inputs.
       marketplaceParsed.backend = "real-cloud";
       const pluginConfigs = sanitizeStoredPluginConfigs(parsed.pluginConfigs);
-      // Q4 lenient parsing: spread all on-disk keys (including any v1 keys)
-      // without normalization — v1 keys are simply never read by v2 code.
+      // Unknown routine keys are preserved in storage but never read by current code.
       const normalizedRoutine: RoutineSettings = {
         ...(parsed.routine as Record<string, unknown> | undefined ?? {}),
       };
@@ -557,7 +537,6 @@ export class SettingsService {
         updates: { ...DEFAULT_SETTINGS.updates, ...parsed.updates },
         telemetry: { ...DEFAULT_SETTINGS.telemetry, ...parsed.telemetry },
         audit: { ...DEFAULT_SETTINGS.audit, ...parsed.audit },
-        msGraph: { ...DEFAULT_SETTINGS.msGraph, ...parsed.msGraph },
         appearance,
         webView: normalizeWebView(parsed.webView),
         plugins: {},

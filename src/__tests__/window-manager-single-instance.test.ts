@@ -147,12 +147,12 @@ describe("WindowManager — single-instance detached shell", () => {
     expect(listed[0].viewKey).toBe("plugin:local-indexer:search");
   });
 
-  it("applies Agent Hub default size when reusing the detached plugin shell", () => {
+  it("applies generic plugin default size when reusing the detached plugin shell", () => {
     wm.openDetachedTab("plugin:meeting:meeting-control");
-    wm.openDetachedTab("plugin:agent-hub:agent-hub-panel");
+    wm.openDetachedTab("plugin:sample-plugin:work-board");
 
     expect(mockWindowInstances).toHaveLength(1);
-    expect(mockWindowInstances[0].setSize).toHaveBeenCalledWith(960, 780);
+    expect(mockWindowInstances[0].setSize).toHaveBeenCalledWith(800, 600);
   });
 
   it("after shell closed, next call spawns a fresh window", () => {

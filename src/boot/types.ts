@@ -90,6 +90,8 @@ export interface AppServices {
   postTurnHookChain: PostTurnHookChain;
   /** B1: 승인 게이트 — mainWindow 준비 후 생성 */
   approvalGate?: ApprovalGate;
+  /** Rebuild Layer 5 reviewer bindings after persisted reviewer settings change. */
+  rewireReviewerAgent?: () => void;
   /** Whether knowledge search tools were successfully registered. */
   knowledgeAvailable: boolean;
   /** Sprint 4.C — starred messages persistence (~/.lvis/starred.json) */
@@ -99,7 +101,7 @@ export interface AppServices {
   /** Workflow tools — exposed for IPC handlers + shutdown wiring. */
   routinesStore?: import("../main/routines-store.js").RoutinesStore;
   routinesScheduler?: import("../main/routines-scheduler.js").RoutinesScheduler;
-  /** Q9: per-routine session JSONL store (~/.lvis/routine-sessions/). */
+  /** Per-routine session JSONL store (~/.lvis/routine-sessions/). */
   routineSessionStore?: import("../main/routine-session-store.js").RoutineSessionStore;
   sessionTodoStore?: import("../main/session-todo-store.js").SessionTodoStore;
   askUserQuestionGate?: import("../main/ask-user-question-gate.js").AskUserQuestionGate;
@@ -144,4 +146,12 @@ export interface AppServices {
    * sees this — it's a passive surface called by the host at trigger sites.
    */
   notificationService?: NotificationService;
+  /**
+   * Permission policy P4 — Layer 6 hook system runtime. Holds the trusted-hook list
+   * resolved from `~/.config/lvis/hooks/` after boot-time hash verification
+   * and any explicit `/permission hooks accept <name>` command. Executor /
+   * approval-gate consult this for pre/post/perm hooks. Absent when the hooks
+   * directory cannot be created (rare).
+   */
+  scriptHookManager?: import("../hooks/script-hook-manager.js").ScriptHookManager;
 }

@@ -81,6 +81,7 @@ interface ServerCatalogRow {
   publisher?: string;
   latest_stable_version?: string | null;
   latestStableVersion?: string;
+  latest_artifact_sha256?: string | null;
   channel?: string;
   /** S14: requires.capabilities[] exposed by the server catalog. */
   requires?: { capabilities?: unknown[] } | null;
@@ -416,6 +417,9 @@ export class RealCloudMarketplaceFetcher implements MarketplaceFetcher, Marketpl
 
     // S8: expose version and channel for update detection
     if (version) item.version = version;
+    if (typeof row.latest_artifact_sha256 === "string" && /^[a-f0-9]{64}$/i.test(row.latest_artifact_sha256)) {
+      item.artifactSha256 = row.latest_artifact_sha256.toLowerCase();
+    }
     if (row.channel === "canary") item.channel = "canary";
     else if (version) item.channel = "stable";
 

@@ -54,9 +54,6 @@ console.log("[lvis:plugin-preload] loaded", {
  * carrying `{ ok: false, error }`, which silently bypasses every
  * `try/catch` plugins write.
  *
- * Forward-compat: a non-envelope reply is passed through verbatim, so
- * existing plugins that already unwrap defensively (e.g. lvis-plugin-lge-api's
- * `unwrapBridgeReply`) continue to work unchanged after this lands.
  */
 /**
  * Event types whose most recent payload should be replayed to a freshly
@@ -79,14 +76,17 @@ ipcRenderer.on("lvis:plugin:event", (_e, type: string, data: unknown) => {
 });
 
 function unwrapEnvelope(reply: unknown): unknown {
-  if (reply && typeof reply === "object" && "ok" in reply) {
-    const env = reply as { ok: unknown; result?: unknown; error?: unknown };
-    // Strict boolean check — matches getEntryUrl's `reply.ok !== true` style
-    // and refuses to treat a host-side bug emitting `{ok: "yes"}` as success.
-    if (env.ok === true) return "result" in env ? env.result : undefined;
+  if (!reply || typeof reply !== "object" || !("ok" in reply)) {
+    throw new Error("plugin-call-malformed-envelope");
+  }
+  const env = reply as { ok: unknown; result?: unknown; error?: unknown };
+  // Strict boolean check — refuses to treat a host-side bug emitting
+  // `{ok: "yes"}` as success.
+  if (env.ok === true) return "result" in env ? env.result : undefined;
+  if (env.ok === false) {
     throw new Error(typeof env.error === "string" ? env.error : "plugin-call-failed");
   }
-  return reply;
+  throw new Error("plugin-call-malformed-envelope");
 }
 
 contextBridge.exposeInMainWorld("lvisPlugin", {
@@ -140,22 +140,21 @@ contextBridge.exposeInMainWorld("lvisPlugin", {
    * right token values from frame 0 — eliminating the wc.send-vs-listener
    * race that the prior register-time replay model had.
    *
-   * Returns `null` when the host has not yet broadcast (very cold boot,
-   * or if the renderer's ThemeProvider hasn't run its first effect). The
-   * shell falls back to SDK CSS-side `:root` defaults in that case.
+   * Returns `null` only when the host has not yet broadcast. Rejected or
+   * malformed host envelopes throw so preload/main contract bugs do not get
+   * hidden as a cold-boot theme.
    */
   getTheme: async (): Promise<unknown> => {
     const reply = (await ipcRenderer.invoke("lvis:plugin:get-theme")) as
       | { ok: true; theme: unknown }
       | { ok: false; error: string };
-    if (!reply || reply.ok !== true) {
-      // Non-fatal — caller must tolerate a null theme on cold-boot. We
-      // intentionally swallow the unauthorized-frame sentinel here so a
-      // misconfigured plugin frame just paints with defaults rather than
-      // bubbling an exception that would block the entry import.
-      return null;
+    if (!reply || typeof reply !== "object" || typeof reply.ok !== "boolean") {
+      throw new Error("plugin-theme-malformed-envelope");
     }
-    return reply.theme;
+    if (reply.ok === false) {
+      throw new Error(typeof reply.error === "string" ? reply.error : "plugin-theme-failed");
+    }
+    return "theme" in reply ? reply.theme : null;
   },
 
   // ─── Config namespace (#B1) ────────────────────────────────────────────

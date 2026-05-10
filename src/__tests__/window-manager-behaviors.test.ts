@@ -515,7 +515,7 @@ describe("WindowManager — magnetic snap behaviors", () => {
       deferWm.registerMainWindow(maximizedMain as never);
 
       const bwSizeBefore = bwStore.size;
-      deferWm.openDetachedTab("plugin:agent-hub:panel");
+      deferWm.openDetachedTab("plugin:sample-plugin:panel");
 
       expect(bwStore.size).toBeGreaterThan(bwSizeBefore);
       const childId = [...bwStore.keys()].find(
@@ -553,7 +553,7 @@ describe("WindowManager — magnetic snap behaviors", () => {
       normalWm.registerMainWindow(normalMain as never);
 
       const bwSizeBefore = bwStore.size;
-      normalWm.openDetachedTab("plugin:agent-hub:panel");
+      normalWm.openDetachedTab("plugin:sample-plugin:panel");
 
       const childId = [...bwStore.keys()].find(
         (id) => id !== normalMain.id && id !== mainWin.id && id >= 301
@@ -1032,7 +1032,7 @@ describe("WindowManager — magnetic snap behaviors", () => {
         moveWm.registerMainWindow(moveMain as never);
         const moveSpy = vi.spyOn(moveWm as unknown as { _onChildMove: (id: number) => void }, "_onChildMove");
 
-        moveWm.openDetachedTab("plugin:agent-hub:agent-hub-panel");
+        moveWm.openDetachedTab("plugin:sample-plugin:work-board");
         const child = [...bwStore.values()].find((win) => win.id !== moveMain.id && win.id >= 1000)!;
         let childBounds = { x: 1000, y: 200, width: 400, height: 800 };
         (child.getBounds as ReturnType<typeof vi.fn>).mockImplementation(() => childBounds);

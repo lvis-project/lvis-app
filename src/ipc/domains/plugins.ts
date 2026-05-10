@@ -9,7 +9,6 @@ import { realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { findPreferredMethodByCapability } from "../../boot/plugins.js";
 import { emitEvent as emitHostEvent } from "../../boot/types.js";
 import { HOST_ONLY_EMIT_NAMESPACES, requiredCapabilityForEmit } from "../../plugins/capabilities.js";
 import { stripSecretFields } from "../../plugins/config-schema.js";
@@ -1238,20 +1237,9 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   // ─── File-path indexing ────────────────────────────────────────────────
   ipcMain.handle("lvis:file:scan-paths", async (e, payload: { paths: string[] }) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:file:scan-paths", e); return UNAUTHORIZED_FRAME; }
-    const method = findPreferredMethodByCapability(
-      pluginRuntime,
-      "document-indexer",
-      ["document_index_scan"],
-    );
-    if (!method) {
-      return { ok: false, error: "no-indexer" };
-    }
-    try {
-      const result = await pluginRuntime.call(method, { paths: payload.paths });
-      return { ok: true, ...(result as object) };
-    } catch (err) {
-      return { ok: false, error: (err as Error).message };
-    }
+    void payload;
+    void pluginRuntime;
+    return { ok: false, error: "no-host-file-scan-protocol" };
   });
 
   // ─── Notifications ──────────────────────────────────────────────────────

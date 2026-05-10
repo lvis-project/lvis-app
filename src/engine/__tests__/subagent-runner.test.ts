@@ -152,7 +152,7 @@ describe("SubAgentRunner — sourceTools allowlist", () => {
         name: "bash",
         description: "shell",
         source: "builtin",
-        category: "dangerous",
+        category: "shell",
         jsonSchema: { type: "object", properties: {} },
         execute: async () => ({ output: "bash-out", isError: false }),
       }),
@@ -186,12 +186,13 @@ describe("SubAgentRunner — sourceTools allowlist", () => {
   it("keeps allowlisted plugin tools visible to the child LLM schema", async () => {
     const toolRegistry = new ToolRegistry();
     const execSpy = vi.fn(async () => ({ output: "schedule", isError: false }));
+    const scheduleToolName = "plugin_today_team_schedule";
     toolRegistry.register(
       createDynamicTool({
-        name: "agent_hub_today_team_schedule",
+        name: scheduleToolName,
         description: "team schedule",
         source: "plugin",
-        pluginId: "agent-hub",
+        pluginId: "sample-plugin",
         category: "read",
         isReadOnly: () => true,
         jsonSchema: { type: "object", properties: {} },
@@ -213,7 +214,7 @@ describe("SubAgentRunner — sourceTools allowlist", () => {
 
     const provider = new ScriptedProvider([
       [
-        { type: "tool_call", id: "tu-1", name: "agent_hub_today_team_schedule", input: {} },
+        { type: "tool_call", id: "tu-1", name: scheduleToolName, input: {} },
         { type: "message_complete", stopReason: "tool_use" },
       ],
       [
@@ -236,11 +237,11 @@ describe("SubAgentRunner — sourceTools allowlist", () => {
       await runner.spawn({
         title: "team schedule",
         instructions: "오늘 팀 스케줄 조회",
-        sourceTools: ["agent_hub_today_team_schedule"],
+        sourceTools: [scheduleToolName],
         maxTurns: 2,
       });
 
-      expect(provider.observedToolNames[0]).toEqual(["agent_hub_today_team_schedule"]);
+      expect(provider.observedToolNames[0]).toEqual([scheduleToolName]);
       expect(provider.observedToolNames[0]).not.toContain("other_plugin_tool");
       expect(execSpy).toHaveBeenCalledOnce();
     } finally {
@@ -262,6 +263,7 @@ describe("agent_spawn — recursive call refusal", () => {
     const ctxAsSubAgent = {
       cwd: process.cwd(),
       metadata: { sessionId: "child-1", spawnDepth: 1 },
+      extraAllowedDirectories: [],
     };
     const r = await tool.execute(
       { title: "nested", instructions: "go deeper" },
@@ -287,6 +289,7 @@ describe("agent_spawn — recursive call refusal", () => {
     const ctxAsParent = {
       cwd: process.cwd(),
       metadata: { sessionId: "parent", spawnDepth: 0 },
+      extraAllowedDirectories: [],
     };
     const r = await tool.execute(
       { title: "child", instructions: "do" },
@@ -306,7 +309,8 @@ describe("SubAgentRunner — agent_spawn always stripped", () => {
         name: "agent_spawn",
         description: "spawn",
         source: "builtin",
-        category: "dangerous",
+        category: "meta",
+        decisionOverride: "ask",
         jsonSchema: { type: "object", properties: {} },
         execute: async () => ({ output: "would-spawn", isError: false }),
       }),

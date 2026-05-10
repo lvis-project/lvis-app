@@ -246,6 +246,79 @@ describe("PluginMarketplaceService install()", () => {
     expect(fetchSignatureEnvelope).toHaveBeenCalled();
   });
 
+  it("reinstalls the same marketplace version when the catalog artifact hash changes", async () => {
+    const signingKey = freshEd25519();
+    mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({
+      "test-v1": signingKey.publicKey,
+    });
+    const v1Zip = makePluginZip({
+      id: "hash-repair-plugin",
+      name: "Hash Repair Plugin",
+      version: "1.2.3",
+      entry: "./dist/hostPlugin.js",
+      tools: ["ping"],
+    });
+    const v2Zip = makePluginZip({
+      id: "hash-repair-plugin",
+      name: "Hash Repair Plugin",
+      version: "1.2.3",
+      entry: "./dist/hostPlugin.js",
+      tools: ["ping"],
+      description: "Rebuilt artifact",
+    });
+    const plugin: PluginMarketplaceItem = {
+      id: "hash-repair-plugin",
+      slug: "hash-repair-plugin",
+      name: "Hash Repair Plugin",
+      description: "A test plugin",
+      version: "1.2.3",
+      packageSpec: "@lvis/hash-repair-plugin@1.2.3",
+      packageName: "@lvis/hash-repair-plugin",
+      tools: ["ping"],
+      artifactSha256: createHash("sha256").update(v1Zip).digest("hex"),
+    };
+    const downloadArtifact = vi
+      .fn()
+      .mockResolvedValueOnce({
+        body: v1Zip,
+        sha256Header: createHash("sha256").update(v1Zip).digest("hex"),
+        status: 200,
+      })
+      .mockResolvedValueOnce({
+        body: v2Zip,
+        sha256Header: createHash("sha256").update(v2Zip).digest("hex"),
+        status: 200,
+      });
+    const fetchSignatureEnvelope = vi
+      .fn()
+      .mockResolvedValueOnce(makeEnvelope(v1Zip, signingKey.privateKey))
+      .mockResolvedValueOnce(makeEnvelope(v2Zip, signingKey.privateKey));
+    const fetcher: MarketplaceFetcher & {
+      downloadArtifact: typeof downloadArtifact;
+      fetchSignatureEnvelope: typeof fetchSignatureEnvelope;
+    } = {
+      listPlugins: async () => [plugin],
+      getPluginDetail: async () => plugin,
+      downloadVersion: async () => {
+        throw new Error("downloadVersion should not be called for signed installs");
+      },
+      downloadArtifact,
+      fetchSignatureEnvelope,
+    };
+
+    const { service } = makeService(fetcher);
+    await service.install("hash-repair-plugin");
+    plugin.artifactSha256 = createHash("sha256").update(v2Zip).digest("hex");
+    await service.install("hash-repair-plugin");
+
+    const receipt = JSON.parse(
+      await readFile(join(cacheRoot, "hash-repair-plugin", "install-receipt.json"), "utf-8"),
+    ) as { artifactSha256: string | null };
+    expect(receipt.artifactSha256).toBe(plugin.artifactSha256);
+    expect(downloadArtifact).toHaveBeenCalledTimes(2);
+    expect(fetchSignatureEnvelope).toHaveBeenCalledTimes(2);
+  });
+
   it("rejects zip-slip entries from signed marketplace artifacts", async () => {
     const signingKey = freshEd25519();
     mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({

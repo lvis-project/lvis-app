@@ -7,7 +7,7 @@
  * 감지 우선순위 (§6.1):
  * 1. 명시적 명령어 (/command)
  * 2. 스킬 키워드 (플러그인 등록)
- * 3. 에이전트 멘션 (@사람) — Phase 5
+ * 3. 에이전트 멘션 (@사람)
  * 4. 의도 + 엔티티 — Phase 4
  * 5. 일반 대화 (fallback)
  */
@@ -109,7 +109,7 @@ export class KeywordEngine {
       }
     }
 
-    // 3. @멘션 (Phase 5 — Agent Hub 의존)
+    // 3. @멘션
     const mentionMatch = trimmed.match(/^@(\S+)\s+(.+)$/s);
     if (mentionMatch) {
       return {

@@ -4,16 +4,14 @@
  * 도구 실행 전후에 인터셉션 포인트를 제공.
  * Hook은 deny(차단), modify(입력 변경), feedback(결과에 메시지 추가) 가능.
  *
- * Phase 3: 인메모리 훅 등록 (설정 파일 기반은 Phase 5)
+ * In-memory hook registration.
  * 향후: 플러그인이 훅을 등록하여 거버넌스/감사/변환 수행
  *
- * Tier A4: external hook types (command / http) via optional
- * {@link ExternalHookExecutor}. Function-based registrations remain the primary
- * path; external hooks run AFTER function hooks and can block or append
- * feedback. No existing caller behaviour changes.
+ * Permission policy: this runner is now in-process only. Production script hooks use
+ * `ScriptHookManager` + discrete `pre/post/perm-*.sh` files so every external
+ * hook goes through the TOFU lockfile/quarantine path.
  */
 
-import type { ExternalHookExecutor } from "./external-executor.js";
 import { createLogger } from "../lib/logger.js";
 const log = createLogger("hook");
 
@@ -54,7 +52,6 @@ export class HookRunner {
   private readonly preHooks: Array<{ name: string; handler: PreToolUseHook }> = [];
   private readonly postHooks: Array<{ name: string; handler: PostToolUseHook }> = [];
   private readonly failureHooks: Array<{ name: string; handler: PostToolUseHook }> = [];
-  private externalExecutor?: ExternalHookExecutor;
 
   /** PreToolUse 훅 등록 */
   registerPreHook(name: string, handler: PreToolUseHook): void {
@@ -69,14 +66,6 @@ export class HookRunner {
   /** PostToolUseFailure 훅 등록 */
   registerFailureHook(name: string, handler: PostToolUseHook): void {
     this.failureHooks.push({ name, handler });
-  }
-
-  /**
-   * Tier A4: attach an optional external hook executor (command + http).
-   * Runs AFTER in-process function hooks. A later call replaces the previous.
-   */
-  setExternalExecutor(executor: ExternalHookExecutor): void {
-    this.externalExecutor = executor;
   }
 
   /**
@@ -114,26 +103,6 @@ export class HookRunner {
       }
     }
 
-    // Tier A4: external hooks run after function hooks. If any external hook
-    // blocks, we override to deny and merge its reason into feedback.
-    if (this.externalExecutor) {
-      try {
-        const ext = await this.externalExecutor.run("preToolUse", ctx.toolName, currentInput);
-        for (const r of ext.results) {
-          if (r.output) feedbacks.push(`[${r.hookType} hook] ${r.output}`);
-        }
-        if (ext.blocked) {
-          return {
-            action: "deny",
-            reason: ext.reason || "external PreToolUse hook blocked",
-            feedback: feedbacks.length > 0 ? feedbacks.join("\n") : undefined,
-          };
-        }
-      } catch (err) {
-        log.warn("external PreToolUse failed: %s", (err as Error).message);
-      }
-    }
-
     return {
       action: modified ? "modify" : "allow",
       updatedInput: currentInput,
@@ -152,25 +121,6 @@ export class HookRunner {
         if (result?.feedback) feedbacks.push(result.feedback);
       } catch (err) {
         log.warn(`PostToolUse '${hook.name}' failed: %s`, (err as Error).message);
-      }
-    }
-
-    // Tier A4: external hooks run after function hooks. Blocked results are
-    // non-fatal on the post path (tool already executed), but we surface them
-    // as feedback for auditing.
-    if (this.externalExecutor) {
-      try {
-        const ext = await this.externalExecutor.run("postToolUse", ctx.toolName, {
-          toolInput: ctx.toolInput,
-          toolOutput: ctx.toolOutput,
-          isError: ctx.isError,
-        });
-        for (const r of ext.results) {
-          if (r.output) feedbacks.push(`[${r.hookType} hook] ${r.output}`);
-          else if (r.reason) feedbacks.push(`[${r.hookType} hook] ${r.reason}`);
-        }
-      } catch (err) {
-        log.warn("external PostToolUse failed: %s", (err as Error).message);
       }
     }
 

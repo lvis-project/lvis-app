@@ -6,6 +6,7 @@ import type { StreamEvent } from "../../lib/chat-stream-state.js";
 import type { McpServerConfig, McpServerConfigDto, McpServerState } from "../../mcp/types.js";
 import type { SerializedHistoryMessage } from "../../shared/chat-history.js";
 import type { PluginConfigRecord } from "../../shared/plugin-config.js";
+import type { ChatSendInputOrigin } from "../../shared/chat-origin.js";
 
 // Re-export MCP types for renderer-side consumers (type-only, no main-process runtime)
 export type { McpServerConfig, McpServerConfigDto, McpServerState };
@@ -166,6 +167,11 @@ export type LvisApi = {
    * can be mounted with a stable preload regardless of `window.location.href`.
    */
   pluginPreloadUrl: string;
+  permission: LvisPermissionApi;
+  approval: LvisApprovalApi;
+  policy: LvisPolicyApi;
+  mcp: LvisMcpApi;
+  attach: LvisAttachApi;
   /**
    * Deterministic file:// URL of the bundled `plugin-ui-shell.html`. Same
    * stability guarantee as `pluginPreloadUrl` — read directly from the host
@@ -235,11 +241,12 @@ export type LvisApi = {
       }
     | { ok: false; error: string }
   >;
-  // PR 3c: msGraph* bridge methods removed — ms-graph plugin owns auth.
+  // Provider-auth bridge methods are plugin-owned.
   chatHasProvider: () => Promise<boolean>;
   chatSend: (
     input: string,
-    attachments?: import("../../engine/llm/types.js").UserContentPart[],
+    attachments: import("../../engine/llm/types.js").UserContentPart[] | undefined,
+    inputOrigin: ChatSendInputOrigin,
   ) => Promise<unknown>;
   chatGuide: (input: string) => Promise<unknown>;
   chatNew: () => Promise<{ ok: true }>;
@@ -318,18 +325,18 @@ export type LvisApi = {
   onRoutineFiredV2: (
     handler: (event: import("../../shared/routines-types.js").RoutineFiredPayload) => void,
   ) => () => void;
-  // Q10 — running indicator
+  // Routine running indicator
   // C1: enriched payload includes title+firedAt so renderer can push OverlayItem immediately
   onRoutineRunningStarted: (handler: (payload: { routineId: string; firedAt: string; title: string }) => void) => () => void;
   onRoutineRunningFinished: (handler: (routineId: string) => void) => () => void;
   // failed: clears running:true stuck OverlayItem when the LLM session throws
   onRoutineFailedV2: (handler: (event: { routineId: string; error: string }) => void) => () => void;
-  // Q11 — overlay IPC bridges
+  // Overlay IPC bridges
   onOverlayShow: (handler: (item: import("./context/OverlayContext.js").OverlayItem) => void) => () => void;
   onOverlayUpdate: (handler: (id: string, patch: Partial<import("./context/OverlayContext.js").OverlayItem>) => void) => () => void;
   onOverlayDismiss: (handler: (id: string) => void) => () => void;
   notifyOverlayPrimary: (pluginId: string, eventId: string) => Promise<void>;
-  // Q9 session history
+  // Routine session history
   listRoutineSessionsV2: (
     routineId: string,
     limit?: number,
@@ -389,7 +396,7 @@ export type LvisApi = {
     answers?: Array<{ choice?: string; freeText?: string }>;
     dismissed?: boolean;
   }) => Promise<{ ok: boolean; error?: string }>;
-  /** M2: renderer is notified when the gate's 5-minute timeout fires. */
+  /** Renderer is notified when the gate's 5-minute timeout fires. */
   onAskUserQuestionTimeout?: (
     h: (payload: { requestId: string }) => void,
   ) => () => void;
@@ -470,9 +477,18 @@ export type LvisApi = {
 
 // ─── Approval types (mirrored from approval-gate.ts — no node import in renderer) ─
 export type ApprovalChoice = "allow-once" | "allow-always" | "deny-once" | "deny-always";
+
+/**
+ * Permission policy — discriminated approval kinds. Renderer routes on this to
+ * pick the right card. Default `"tool"` is the standard §6.3 dialog.
+ */
+export type ApprovalKind = "tool" | "out-of-allowed-dir";
+
 export type ApprovalRequest = {
   id: string;
   category: "tool";
+  /** Permission policy — discriminator (defaults to "tool" when absent). */
+  kind?: ApprovalKind;
   toolName: string;
   args: unknown;
   reason: string;
@@ -486,6 +502,19 @@ export type ApprovalRequest = {
   nonce?: string;
   /** §D2: HMAC over (id, nonce, toolName, args) — echoed verbatim. */
   hmac?: string;
+  /**
+   * Permission policy — present when `kind === "out-of-allowed-dir"`. Carries
+   * the auto-suggest payload so the renderer can render the directory-
+   * confirm card without re-running validation.
+   */
+  outOfAllowedDir?: {
+    candidatePath: string;
+    suggestedParent: string | null;
+    currentAllowed: readonly string[];
+    adjacencyWarnings: readonly string[];
+  };
+  /** Permission policy §9 — trust-origin classification, e.g. "user" / "agent". */
+  trustOrigin?: string;
 };
 export type ApprovalDecision = {
   requestId: string;
@@ -512,13 +541,125 @@ export type RemoveRuleResult =
   | { ok: true }
   | { ok: false; error: string; message?: string };
 
+/** Permission policy — deferred-queue entry shape mirrored from main process. */
+export interface DeferredQueueEntry {
+  id: string;
+  ts: string;
+  toolName: string;
+  source: "builtin" | "plugin" | "mcp";
+  category: "read" | "write" | "shell" | "network" | "meta";
+  inputSummary: string;
+  verdict: { level: "low" | "medium" | "high"; reason: string };
+  status: "pending" | "approved" | "rejected";
+  resolvedAt?: string;
+  resolutionReason?: string;
+}
+
+export interface HookTrustRow {
+  fileName: string;
+  hookType: "pre" | "post" | "perm";
+  sha256: string;
+  state: "trusted" | "new" | "changed" | "removed" | "disabled";
+  previousSha256?: string;
+}
+
 export type LvisPermissionApi = {
   getMode: () => Promise<{ mode: string }>;
-  setMode: (mode: string) => Promise<{ ok: boolean; mode: string }>;
+  setMode: (mode: string) => Promise<
+    | { ok: true; mode: string }
+    | { ok: false; error: string; message?: string }
+  >;
   listRules: () => Promise<PermissionRule[]>;
   addRule: (pattern: string, action: "allow" | "deny") => Promise<AddRuleResult>;
   removeRule: (pattern: string, action: "allow" | "deny") => Promise<RemoveRuleResult>;
+  /** Permission policy — list pending HIGH-risk deferred entries (Layer 5 reviewer). */
+  deferredList: () => Promise<
+    | { ok: true; pending: DeferredQueueEntry[]; total: number }
+    | { ok: false; error: string }
+  >;
+  /** Permission policy issue #633 — list active + quarantined script hooks. */
+  hookTrustList: () => Promise<
+    | { ok: true; active: HookTrustRow[]; disabled: HookTrustRow[]; totalDisabled: number }
+    | { ok: false; error: string }
+  >;
+  /** Permission policy — `/permission dir ...` slash dispatch. */
+  dirDispatch: (
+    rawArgs: string,
+  ) => Promise<
+    | { ok: true; verb: "allow"; persisted: string[]; sessionOnly: boolean; warnings: string[] }
+    | { ok: true; verb: "deny"; persisted: string[] }
+    | { ok: true; verb: "list"; defaults: string[]; userAdditions: string[]; effective: string[] }
+    | { ok: false; error: string }
+  >;
+  /** Permission policy — resolve a pending entry with user gesture. */
+  deferredResolve: (
+    id: string,
+    decision: "approved" | "rejected",
+    reason?: string,
+  ) => Promise<
+    | { ok: true; entry: DeferredQueueEntry }
+    | { ok: false; error: string }
+  >;
+  /** Permission policy — subscribe to foreground-entry deferred-pending events. */
+  onDeferredPending: (cb: (summary: { pending: number }) => void) => () => void;
+  /** Permission policy — subscribe to manifest-integrity violation notifications. */
+  onManifestViolation: (
+    handler: (payload: {
+      pluginId: string;
+      toolName: string;
+      attempted: string;
+    }) => void,
+  ) => () => void;
+  /** Permission policy — `/permission reviewer ...` slash dispatch. */
+  reviewerDispatch: (
+    rawArgs: string,
+  ) => Promise<{ ok: true; verb: string; settings?: unknown } | { ok: false; error: string }>;
+  /** Permission policy — `/permission audit show` — recent permission audit entries. */
+  auditShow: (last: number) => Promise<
+    | {
+        ok: true;
+        entries: PermissionAuditEntrySummary[];
+        total: number;
+        summary: { files: number; bytes: number };
+      }
+    | { ok: false; error: string }
+  >;
+  /** Permission policy — `/permission audit verify` — HMAC chain integrity check. */
+  auditVerify: () => Promise<
+    | {
+        ok: true;
+        intact: boolean;
+        totalFiles: number;
+        totalEntries: number;
+        firstBrokenFile?: string;
+        perDay: Array<{
+          file: string;
+          totalLines: number;
+          chainOk: boolean;
+          firstBrokenLineIndex?: number;
+          reason?: string;
+          sealMatch: boolean | null;
+        }>;
+      }
+    | { ok: false; error: string }
+  >;
 };
+
+/**
+ * Permission policy — minimal audit entry shape surfaced to the renderer's
+ * `AuditPanel`. The full discriminated union (with `decision` field
+ * + per-decision payload) is sent verbatim — this type is just a
+ * structural tag the panel uses to gate the expand/filter UI.
+ */
+export interface PermissionAuditEntrySummary {
+  ts: string;
+  auditId: string;
+  decision: string;
+  trustOrigin: string;
+  prevHash: string;
+  /** Anything else from the discriminated union — opaque to the renderer. */
+  [key: string]: unknown;
+}
 
 export type LvisPolicyApi = {
   get: () => Promise<{

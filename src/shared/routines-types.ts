@@ -2,25 +2,56 @@
  * Shared routine type definitions and constants — safe to import from both
  * main-process and renderer (no Node.js built-in imports).
  *
- * The main-process `RoutinesStore` re-exports these for backwards compatibility.
+ * The main-process `RoutinesStore` re-exports these as its public type boundary.
  * The renderer imports from here to avoid pulling in Node.js `fs/path/os/crypto`
  * modules into the webpack renderer bundle.
  */
 
 /**
- * Hard cap on persisted routines (Q6). Hitting the cap means add() throws —
+ * Hard cap on persisted routines. Hitting the cap means add() throws —
  * the LLM receives a clear error and can prompt the user to dismiss old routines.
  */
 export const MAX_PERSISTED_ROUTINES = 50;
 
 /**
- * Sub-cap on llm-session routines (Q8). LLM session routines invoke a
+ * Sub-cap on llm-session routines. LLM session routines invoke a
  * ConversationLoop per fire — an unbounded count risks LLM cost runaway.
  * The sub-cap (10) is intentionally tighter than the total cap (50).
  */
 export const MAX_LLM_SESSION_ROUTINES = 10;
 
 export type RoutineExecution = "llm-session" | "notification-only";
+
+/**
+ * Permission policy Layer 4 — discriminated union scoping which plugins a routine may
+ * see during its isolated session.
+ *
+ * - `deny-all`  no plugin tools exposed
+ * - `allow`     explicit allowlist
+ * - `inherit`   adopt the user's currently-active plugin set at fire
+ *               time. This mode is explicit only; missing scope normalizes
+ *               to deny-all.
+ */
+export type RoutinePluginScope =
+  | { mode: "deny-all" }
+  | { mode: "allow"; ids: string[] }
+  | { mode: "inherit" };
+
+/**
+ * Permission policy Layer 4 — `routine.scope` namespace bundling every per-routine
+ * isolation knob. Replaces the flat `allowedPlugins?: string[]` field.
+ *
+ * - `pluginIds` plugin allow-list (discriminated union — see above).
+ * - `forcedPluginIds` plugins guaranteed active for this routine even
+ *    if the user has them disabled. Defaults to `[]` — NEVER mirror
+ *    `pluginIds.ids` here; that would defeat the point of `pluginIds`.
+ * - `directories` extra Layer 1 path allow-list scoped to this run.
+ */
+export interface RoutineScope {
+  pluginIds: RoutinePluginScope;
+  forcedPluginIds: string[];
+  directories: string[];
+}
 
 export type RepeatKind =
   | "none"
@@ -46,7 +77,7 @@ export interface RoutineSchedule {
 
 export interface RoutineRecord {
   id: string;
-  /** wakeup trigger is removed (Q1) — only schedule and shutdown remain. */
+  /** wakeup trigger is removed — only schedule and shutdown remain. */
   trigger: "shutdown" | "schedule";
   schedule?: RoutineSchedule;
   execution: RoutineExecution;
@@ -57,6 +88,18 @@ export interface RoutineRecord {
   notificationTitle?: string;
   /** Shown as OS notification body when execution === "notification-only". */
   notificationBody?: string;
+  /**
+   * Permission policy Layer 4 scope — plugin allow-list, forced plugin set, and
+   * extra directories permitted during this routine's headless session.
+   *
+ * Missing scope → deny-all (fail-safe per Permission policy design §1). The
+   * runtime normalizer in `RoutineEngineV2.normalizeScope` coerces a
+   * missing/undefined scope into `{ pluginIds: { mode: "deny-all" } }`
+   * rather than `inherit`, so a routine that never declared scope cannot
+   * accidentally see the user's currently-active plugin set. Records with
+   * non-canonical plugin scope fields are rejected by the store read path.
+   */
+  scope?: RoutineScope;
   createdAt: string;
   lastFiredAt?: string;
   dismissedAt?: string;
@@ -75,6 +118,15 @@ export interface AddRoutineInput {
   title?: string;
   notificationTitle?: string;
   notificationBody?: string;
+  /**
+   * Permission policy Layer 4 scope — see {@link RoutineScope}. When omitted, the
+   * store fills `pluginIds: { mode: "deny-all" }` and empty defaults
+   * for the rest. Callers that want active-plugin inheritance must pass
+   * `{ pluginIds: { mode: "inherit" }, forcedPluginIds: [], directories: [] }`
+   * explicitly so the runtime engine can snapshot the active plugin set
+   * at fire time.
+   */
+  scope?: RoutineScope;
 }
 
 /**
@@ -89,4 +141,6 @@ export interface RoutineFiredPayload {
   firedAt: string;
   title: string;
   summary: string;
+  /** Present for llm-session routines so the overlay can open the captured JSONL. */
+  routineSessionPath?: string;
 }

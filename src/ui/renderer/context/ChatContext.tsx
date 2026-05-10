@@ -34,7 +34,7 @@ export interface ChatContextValue {
 
   // API state
   hasApiKey: boolean | null;
-  onOpenSettings: () => void;
+  onOpenSettings: (tab?: string) => void;
 
   // Search
   searchOpen: boolean;

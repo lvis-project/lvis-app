@@ -45,7 +45,7 @@ describe("ConversationLoop currentAbortController lifecycle", () => {
     };
 
     const errors: string[] = [];
-    const result = await loop.runTurn("ask", { onError: (message) => errors.push(message) });
+    const result = await loop.runTurn("ask", { onError: (message) => errors.push(message) }, undefined, { inputOrigin: "user-keyboard" });
     expect(result.text).toContain("synthetic provider failure");
     expect(errors[0]).toContain("synthetic provider failure");
     expect(loop.currentAbortController).toBeNull();
@@ -62,7 +62,7 @@ describe("ConversationLoop currentAbortController lifecycle", () => {
     };
 
     const errors: string[] = [];
-    const result = await loop.runTurn("ask", { onError: (message) => errors.push(message) });
+    const result = await loop.runTurn("ask", { onError: (message) => errors.push(message) }, undefined, { inputOrigin: "user-keyboard" });
 
     expect(result.stopReason).not.toBe("tool_use");
     expect(result.text).toContain("도구 호출 완료 신호 없이 종료");
@@ -98,7 +98,7 @@ describe("ConversationLoop abort (B4)", () => {
     const textDeltas: string[] = [];
     const result = await loop.runTurn("hi", {
       onTextDelta: (t) => textDeltas.push(t),
-    }, ac.signal);
+    }, ac.signal, { inputOrigin: "user-keyboard" });
 
     expect(result.stopReason).toBe("interrupted");
     expect(result.text).toContain("[중단됨]");
@@ -127,7 +127,7 @@ describe("ConversationLoop abort (B4)", () => {
     const ac = new AbortController();
     ac.abort();
 
-    const result = await loop.runTurn("go", undefined, ac.signal);
+    const result = await loop.runTurn("go", undefined, ac.signal, { inputOrigin: "user-keyboard" });
     expect(result.stopReason).toBe("interrupted");
     expect(toolExecuted).toBe(false);
   });
@@ -143,7 +143,7 @@ describe("ConversationLoop abort (B4)", () => {
       },
     };
 
-    const result = await loop.runTurn("hi");
+    const result = await loop.runTurn("hi", undefined, undefined, { inputOrigin: "user-keyboard" });
     // abort after — no-op
     loop.abortCurrentTurn(); // currentAbortController is null here
 
@@ -164,7 +164,7 @@ describe("ConversationLoop abort (B4)", () => {
       },
     };
 
-    const result = await loop.runTurn("hi");
+    const result = await loop.runTurn("hi", undefined, undefined, { inputOrigin: "user-keyboard" });
     // Should be treated as interrupt, not a hard error
     expect(result.stopReason).toBe("interrupted");
     expect(result.text).toContain("[중단됨]");
@@ -184,7 +184,7 @@ describe("ConversationLoop abort (B4)", () => {
     };
 
     let errorCalled = false;
-    const result = await loop.runTurn("hi", { onError: () => { errorCalled = true; } });
+    const result = await loop.runTurn("hi", { onError: () => { errorCalled = true; } }, undefined, { inputOrigin: "user-keyboard" });
     expect(result.stopReason).not.toBe("interrupted");
     expect(result.text).toContain("네트워크 연결 문제");
     expect(errorCalled).toBe(true);

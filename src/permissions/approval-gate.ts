@@ -54,9 +54,21 @@ function maskArgsForDisplay(value: unknown, detections: Set<string>): unknown {
  */
 export type ApprovalMode = "default" | "plan" | "full_auto";
 
+/**
+ * Permission policy P2.5 — discriminated kinds for the approval modal. Default `"tool"`
+ * is the normal §6.3 Layer 3 ask; `"out-of-allowed-dir"` is the Layer 1
+ * directory-confirm variant which carries auto-suggest payload.
+ */
+export type ApprovalKind = "tool" | "out-of-allowed-dir";
+
 export interface ApprovalRequest {
   id: string;
   category: "tool";
+  /**
+   * Permission policy P2.5 — discriminator for the renderer to pick the right card.
+   * Defaults to `"tool"` when omitted (backwards-compatible).
+   */
+  kind?: ApprovalKind;
   toolName: string;
   args: unknown;
   reason: string;
@@ -64,6 +76,24 @@ export interface ApprovalRequest {
   createdAt: number;
   /** PolicyFile.requireExplicitApproval — renderer가 dismiss 동작을 분기하는 데 사용 */
   requireExplicit: boolean;
+  /**
+   * Permission policy P2.5 — Layer 1 directory-confirm payload. Present iff
+   * `kind === "out-of-allowed-dir"`. Carries the candidate parent path
+   * + adjacency warnings so the renderer can render the auto-suggest
+   * UI without re-running validation.
+   */
+  outOfAllowedDir?: {
+    candidatePath: string;
+    suggestedParent: string | null;
+    currentAllowed: readonly string[];
+    adjacencyWarnings: readonly string[];
+  };
+  /**
+   * Permission policy P2.5 §9 — trust origin classification
+   * (user-keyboard / plugin-emitted / llm-tool-arg / file-content).
+   * Audited; renderer may surface badge.
+   */
+  trustOrigin?: string;
   /**
    * §S1: absolute filesystem path the tool intends to touch. When set and
    * matched against SENSITIVE_PATH_PATTERNS, the request is hard-blocked
@@ -148,6 +178,8 @@ interface PendingEntry {
   resolve: (decision: ApprovalDecision) => void;
   reject: (err: Error) => void;
   timer: ReturnType<typeof setTimeout>;
+  /** Permission origin captured with the approval prompt. */
+  trustOrigin: string;
   /** §D2: nonce issued for this request (echoed back verbatim) */
   nonce: string;
   /** §D2: expected HMAC for this request */
@@ -290,7 +322,7 @@ export class ApprovalGate {
           timestamp: new Date().toISOString(),
           sessionId: "approval-gate",
           type: "approval",
-          output: `[approval:sensitive-path-blocked] ${fullReq.id} toolName=${fullReq.toolName} raw=${rawCandidate} canonical=${caseFolded} pattern=${matchedPattern} → deny-once (hard-block)`,
+          output: `[approval:sensitive-path-blocked] ${fullReq.id} toolName=${fullReq.toolName} trustOrigin=${fullReq.trustOrigin ?? "unknown"} raw=${rawCandidate} canonical=${caseFolded} pattern=${matchedPattern} → deny-once (hard-block)`,
         });
         return {
           requestId: fullReq.id,
@@ -303,12 +335,20 @@ export class ApprovalGate {
     // §S4: isReadOnly short-circuit — if the tool self-declares read-only
     // and we are NOT in plan mode, skip the confirmation dialog. Plan
     // mode still blocks (plan = dry-run / inspect only).
-    if (fullReq.isReadOnly === true && fullReq.mode !== "plan") {
+    //
+    // Permission policy P2.5: directory-confirm requests (kind="out-of-allowed-dir")
+    // MUST NOT auto-approve via §S4 — even a read of an out-of-allowed
+    // path is a scope-grant decision the user has to make explicitly.
+    if (
+      fullReq.isReadOnly === true &&
+      fullReq.mode !== "plan" &&
+      fullReq.kind !== "out-of-allowed-dir"
+    ) {
       this.auditLogger?.log({
         timestamp: new Date().toISOString(),
         sessionId: "approval-gate",
         type: "approval",
-        output: `[approval:read-only-auto-approve] ${fullReq.id} toolName=${fullReq.toolName} mode=${fullReq.mode ?? "default"} → allow-once`,
+        output: `[approval:read-only-auto-approve] ${fullReq.id} toolName=${fullReq.toolName} trustOrigin=${fullReq.trustOrigin ?? "unknown"} mode=${fullReq.mode ?? "default"} → allow-once`,
       });
       return {
         requestId: fullReq.id,
@@ -323,7 +363,7 @@ export class ApprovalGate {
         timestamp: new Date().toISOString(),
         sessionId: "approval-gate",
         type: "approval",
-        output: `[approval:send-failed] ${fullReq.id} toolName=${fullReq.toolName} — webContents already destroyed → deny-once`,
+        output: `[approval:send-failed] ${fullReq.id} toolName=${fullReq.toolName} trustOrigin=${fullReq.trustOrigin ?? "unknown"} — webContents already destroyed → deny-once`,
       });
       return { requestId: fullReq.id, choice: "deny-once" };
     }
@@ -333,7 +373,7 @@ export class ApprovalGate {
       timestamp: new Date().toISOString(),
       sessionId: "approval-gate",
       type: "approval",
-      input: `[approval:requested] ${fullReq.id} toolName=${fullReq.toolName} category=${fullReq.category} source=${fullReq.source ?? "unknown"}`,
+      input: `[approval:requested] ${fullReq.id} toolName=${fullReq.toolName} category=${fullReq.category} source=${fullReq.source ?? "unknown"} trustOrigin=${fullReq.trustOrigin ?? "unknown"}`,
     });
 
     // Issue #260 — surface a system notification when an approval is about
@@ -373,7 +413,7 @@ export class ApprovalGate {
           timestamp: new Date().toISOString(),
           sessionId: "approval-gate",
           type: "approval",
-          output: `[approval:timeout] ${fullReq.id} toolName=${fullReq.toolName} → deny-once`,
+          output: `[approval:timeout] ${fullReq.id} toolName=${fullReq.toolName} trustOrigin=${fullReq.trustOrigin ?? "unknown"} → deny-once`,
         });
         resolve({
           requestId: fullReq.id,
@@ -385,6 +425,7 @@ export class ApprovalGate {
         resolve,
         reject,
         timer,
+        trustOrigin: fullReq.trustOrigin ?? "unknown",
         nonce,
         expectedHmac,
       });
@@ -403,7 +444,7 @@ export class ApprovalGate {
           timestamp: new Date().toISOString(),
           sessionId: "approval-gate",
           type: "approval",
-          output: `[approval:args-dlp-masked] ${fullReq.id} toolName=${fullReq.toolName} detections=${[...dlpHits].join(",")}`,
+          output: `[approval:args-dlp-masked] ${fullReq.id} toolName=${fullReq.toolName} trustOrigin=${fullReq.trustOrigin ?? "unknown"} detections=${[...dlpHits].join(",")}`,
         });
       }
       // §F2: send 실패(webContents 소멸 race) 시 pending 정리 후 deny-once
@@ -417,7 +458,7 @@ export class ApprovalGate {
           timestamp: new Date().toISOString(),
           sessionId: "approval-gate",
           type: "approval",
-          output: `[approval:send-failed] ${fullReq.id} toolName=${fullReq.toolName} error=${sendErr instanceof Error ? sendErr.message : String(sendErr)} → deny-once`,
+          output: `[approval:send-failed] ${fullReq.id} toolName=${fullReq.toolName} trustOrigin=${fullReq.trustOrigin ?? "unknown"} error=${sendErr instanceof Error ? sendErr.message : String(sendErr)} → deny-once`,
         });
         resolve({ requestId: fullReq.id, choice: "deny-once" });
       }
@@ -443,7 +484,7 @@ export class ApprovalGate {
         timestamp: new Date().toISOString(),
         sessionId: "approval-gate",
         type: "approval",
-        output: `[approval:nonce-mismatch] ${requestId} choice=${decision.choice} nonceProvided=${decision.nonce ? "yes" : "no"} hmacProvided=${decision.hmac ? "yes" : "no"} → deny-once (forced)`,
+        output: `[approval:nonce-mismatch] ${requestId} trustOrigin=${entry.trustOrigin} choice=${decision.choice} nonceProvided=${decision.nonce ? "yes" : "no"} hmacProvided=${decision.hmac ? "yes" : "no"} → deny-once (forced)`,
       });
       entry.resolve({
         requestId,
@@ -460,7 +501,7 @@ export class ApprovalGate {
       timestamp: new Date().toISOString(),
       sessionId: "approval-gate",
       type: "approval",
-      output: `[approval:decided] ${requestId} choice=${decision.choice} rememberPattern=${decision.rememberPattern ?? "none"}`,
+      output: `[approval:decided] ${requestId} trustOrigin=${entry.trustOrigin} choice=${decision.choice} rememberPattern=${decision.rememberPattern ?? "none"}`,
     });
     entry.resolve(decision);
   }
