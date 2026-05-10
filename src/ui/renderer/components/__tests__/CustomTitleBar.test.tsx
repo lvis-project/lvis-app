@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import "../../../../../test/renderer/setup.ts";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, fireEvent } from "@testing-library/react";
+import { act, render, fireEvent } from "@testing-library/react";
 import { CustomTitleBar } from "../CustomTitleBar.js";
 
 // ─── Window bridge mocks ──────────────────────────────────────────────────
@@ -109,9 +109,9 @@ describe("CustomTitleBar", () => {
       const { queryByTestId } = render(<CustomTitleBar />);
       expect(queryByTestId("custom-titlebar")).toBeTruthy();
       // Simulate fullscreen broadcast from main process
-      fullscreenListener?.(true);
-      // Re-render happens via state update — query again
-      await new Promise((r) => setTimeout(r, 0));
+      await act(async () => {
+        fullscreenListener?.(true);
+      });
       expect(queryByTestId("custom-titlebar")).toBeNull();
     });
 
@@ -119,8 +119,9 @@ describe("CustomTitleBar", () => {
       const { getByTestId } = render(<CustomTitleBar />);
       // Not maximized initially — Maximize2 icon (title = 최대화)
       expect(getByTestId("titlebar-maximize").title).toBe("최대화");
-      maxListener?.(true);
-      await new Promise((r) => setTimeout(r, 0));
+      await act(async () => {
+        maxListener?.(true);
+      });
       // After maximized — Minimize2 icon (title = 이전 크기로)
       expect(getByTestId("titlebar-maximize").title).toBe("이전 크기로");
     });
