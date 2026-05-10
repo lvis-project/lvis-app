@@ -139,6 +139,25 @@ function isHostPublicPreferenceKey(key: string): key is HostPublicPreferenceKey 
  * runtime — prevents log floods when a plugin polls a denied key.
  */
 /**
+ * §B3 — Stable persistent partition for the in-app external-link viewer.
+ *
+ * Without `persist:`, every link window starts with empty cookies, so SSO
+ * portals (outlook.office.com, calendar webLinks, etc.) re-prompt for login
+ * on every open. A shared `persist:` partition lets the user log in once
+ * per external service and keep the session across the app's lifetime.
+ *
+ * A SHARED partition (not per-plugin) is intentional: cookies are
+ * origin-scoped by the browser, so two plugins both opening
+ * outlook.office.com SHOULD see the same logged-in session — that's the
+ * whole point. Per-plugin partitions would force re-login each time a
+ * different plugin opened the same host. The viewer is sandboxed
+ * (`sandbox: true`, `contextIsolation: true`, `nodeIntegration: false`)
+ * and cookies are never read back into plugin code, so a plugin cannot
+ * exfiltrate another service's session through this partition.
+ */
+export const EXTERNAL_LINK_PARTITION = "persist:lvis-external-link";
+
+/**
  * §B3 — Internal routing for `hostApi.openExternalUrl`. Extracted so it can
  * be unit-tested with stubbed services without standing up a full
  * initPluginRuntime context.
@@ -148,7 +167,8 @@ function isHostPublicPreferenceKey(key: string): key is HostPublicPreferenceKey 
  *  - Reads `settings.webView.preferredFlow` LIVE on every call.
  *  - Audits with origin+path only (no full URL — query may carry secrets).
  *  - `"system-browser"` → `shellOpenExternal`.
- *  - anything else (default `"in-app"`) → light viewer.
+ *  - anything else (default `"in-app"`) → light viewer with a stable
+ *    persistent partition so SSO sessions survive between opens.
  */
 export async function routeExternalUrl(input: {
   url: string;
@@ -191,7 +211,7 @@ export async function routeExternalUrl(input: {
     await shellOpenExternal(url);
     return;
   }
-  await openLinkWindowService({ url });
+  await openLinkWindowService({ url, persistPartition: EXTERNAL_LINK_PARTITION });
 }
 
 export function buildAppPreferenceReader(
