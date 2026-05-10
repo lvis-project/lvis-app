@@ -124,6 +124,7 @@ const TRUSTED_NETWORK_HOSTS: ReadonlySet<string> = new Set([
   "api.anthropic.com",
   "generativelanguage.googleapis.com",
   "models.github.ai",
+  "graph.microsoft.com",
 ]);
 
 /** Localhost / loopback variants. */

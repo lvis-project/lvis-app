@@ -1,13 +1,13 @@
 /**
- * Layer 5 reviewer queue for HIGH verdicts.
+ * Layer 5 reviewer queue for MED/HIGH headless verdicts.
  *
  * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 5.
  *
- * When the reviewer agent returns a HIGH verdict in headless mode, the
+ * When the reviewer agent returns a MEDIUM/HIGH verdict in headless mode, the
  * action is appended to the deferred queue rather than executed. On
- * foreground entry (UI mount) the host emits
+ * pending-count changes the host emits
  * `lvis:permissions:deferred-pending` with a queue summary; the renderer
- * surfaces a DeferredQueuePanel with "리뷰" / "거부" buttons. Each click
+ * lets the user open a DeferredQueuePanel with "승인" / "거부" buttons. Each click
  * resolves the entry and writes an audit record.
  *
  * Storage: ~/.lvis/permissions/deferred-queue.jsonl (per-feature

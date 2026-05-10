@@ -101,6 +101,28 @@ describe("PermissionManager.dispatchReviewer", () => {
     expect(queue.listPending()).toHaveLength(0);
   });
 
+  it("MEDIUM verdict — headless defer policy creates a queue entry", async () => {
+    const r = await pm.dispatchReviewer(
+      "fs_write",
+      {
+        source: "builtin",
+        category: "write",
+        pathFields: ["path"],
+        finalInput: { path: "/Users/ken/work/a/b/c/d.md" },
+        allowedDirectories: ["/Users/ken/work"],
+        sensitivePathsAdjacent: [],
+        trustOrigin: "llm-tool-arg" as const,
+      },
+      undefined,
+      { defer: "medium-high" },
+    );
+    expect(r.verdict.level).toBe("medium");
+    expect(r.deferredId).toMatch(/^[0-9a-f-]{36}$/);
+    const pending = queue.listPending();
+    expect(pending).toHaveLength(1);
+    expect(pending[0].verdict.level).toBe("medium");
+  });
+
   it("second dispatch hits cache", async () => {
     const input = {
       source: "builtin" as const,

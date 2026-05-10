@@ -511,7 +511,7 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
       }),
     }));
     const permMgr = new PermissionManager("/tmp/nonexistent-permissions.json");
-    permMgr.setMode("auto");
+    permMgr.setMode("allow");
     const appendPermissionAuditEntry = vi.fn(async (entry: Record<string, unknown>) => ({
       ...entry,
       prevHash: "h",
@@ -564,7 +564,7 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
       }),
     }));
     const permMgr = new PermissionManager("/tmp/nonexistent-permissions.json");
-    permMgr.setMode("auto");
+    permMgr.setMode("allow");
     const appendPermissionAuditEntry = vi.fn(async (entry: Record<string, unknown>) => ({
       ...entry,
       prevHash: "h",

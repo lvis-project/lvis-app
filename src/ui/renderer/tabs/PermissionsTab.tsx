@@ -15,7 +15,6 @@ import type {
   PermissionRule,
 } from "../types.js";
 import { AuditPanel } from "../components/permissions/AuditPanel.js";
-import { DeferredQueuePanel } from "../components/permissions/DeferredQueuePanel.js";
 
 const DEFAULT_REVIEWER_SETTINGS: PermissionReviewerSettings = {
   mode: "disabled",
@@ -355,8 +354,6 @@ export function PermissionsTab() {
             <button className="ml-auto flex-shrink-0 opacity-60 hover:opacity-100" onClick={() => setBanner(null)}>✕</button>
           </div>
         )}
-
-        <DeferredQueuePanel />
 
         {quarantinedHooks.length > 0 && (
           <div
