@@ -65,64 +65,16 @@ function isValidRecord(r: unknown): r is RoutineRecord {
   return true;
 }
 
-/**
- * Permission policy Layer 4 — convert a legacy on-disk `allowedPlugins` (or absence)
- * into the canonical `scope` shape. Migration rules per design §3.4:
- *   - missing field          → `{ mode: "deny-all" }` (fail-safe)
- *   - empty array `[]`       → `{ mode: "deny-all" }`
- *   - non-empty array of strings → `{ mode: "allow", ids: [...] }`
- *   - tampered / non-string  → `{ mode: "deny-all" }` + warn
- *
- * The mutation is idempotent: a record that already has `scope` is
- * returned untouched (and the legacy field, if also present, ignored).
- *
- * Round 3 hardening: explicit `Array.isArray` + every-string check
- * before length/spread — a corrupt record with `allowedPlugins: "foo"`
- * (string, not array) or `[1, 2]` (numbers) was previously passing
- * `isValidRecord()` (which only validates structural fields) and
- * crashing the migration with a runtime error. Now we coerce any
- * shape we don't recognize to deny-all (fail-safe per spec §1).
- */
-function migrateLegacyAllowedPlugins(rec: RoutineRecord & { allowedPlugins?: unknown }): RoutineRecord {
-  if (rec.scope) {
-    // Already the new shape — drop any stale legacy mirror.
-    if ("allowedPlugins" in rec) {
-      const cleaned = { ...rec };
-      delete (cleaned as { allowedPlugins?: unknown }).allowedPlugins;
-      return cleaned;
-    }
-    return rec;
-  }
-  const legacy = rec.allowedPlugins;
-  let pluginIds: RoutineScope["pluginIds"];
-  if (legacy === undefined) {
-    // Permission policy §3 fail-safe: missing scope → deny-all rather than inherit
-    // (parity with normalizeScope at runtime; covers boot-time race
-    // where active plugin set isn't computable yet).
-    pluginIds = { mode: "deny-all" };
-  } else if (Array.isArray(legacy) && legacy.every((x): x is string => typeof x === "string")) {
-    pluginIds =
-      legacy.length === 0
-        ? { mode: "deny-all" }
-        : { mode: "allow", ids: [...legacy] };
-  } else {
-    // Tampered or corrupt — fail-safe to deny-all and warn.
+function isCanonicalRecord(r: unknown): r is RoutineRecord {
+  if (!isValidRecord(r)) return false;
+  if ("allowedPlugins" in r) {
     log.warn(
-      "[routines-store] legacy allowedPlugins has invalid shape (id=%s); coercing to deny-all",
-      rec.id,
+      "[routines-store] rejecting non-canonical routine record with allowedPlugins (id=%s)",
+      r.id,
     );
-    pluginIds = { mode: "deny-all" };
+    return false;
   }
-  const migrated: RoutineRecord = {
-    ...rec,
-    scope: {
-      pluginIds,
-      forcedPluginIds: [],
-      directories: [],
-    },
-  };
-  delete (migrated as { allowedPlugins?: unknown }).allowedPlugins;
-  return migrated;
+  return true;
 }
 
 function validateScheduleAt(at: string): { ok: true } | { ok: false; error: string } {
@@ -141,7 +93,7 @@ export interface RoutinesFile {
   routines: RoutineRecord[];
 }
 
-// Q9: consolidated under ~/.lvis/routine/ namespace (single directory for all routine data)
+// Consolidated under ~/.lvis/routine/ namespace (single directory for all routine data).
 const DEFAULT_PATH = resolve(homedir(), ".lvis", "routine", "routines.json");
 
 const fileLocks = new Map<string, Promise<void>>();
@@ -168,14 +120,11 @@ async function readFileOrEmpty(filePath: string): Promise<RoutinesFile> {
     if (!Array.isArray(parsed.routines)) {
       return { version: 2, routines: [] };
     }
-    // Filter out tampered/corrupted records so a single bad entry cannot
-    // cause the scheduler tick to throw and stall all other routines.
-    // Permission policy Layer 4 — migrate legacy `allowedPlugins` to `scope` shape on read.
+    // Filter out tampered/corrupted or non-canonical records so a single bad
+    // entry cannot cause the scheduler tick to throw and stall all routines.
     return {
       version: 2,
-      routines: parsed.routines
-        .filter(isValidRecord)
-        .map((r) => migrateLegacyAllowedPlugins(r as RoutineRecord & { allowedPlugins?: string[] })),
+      routines: parsed.routines.filter(isCanonicalRecord),
     };
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
@@ -365,7 +314,7 @@ export class RoutinesStore {
 
     return withFileLock(this.filePath, async () => {
       const file = await readFileOrEmpty(this.filePath);
-      // Q8: llm-session sub-cap check (before total cap to give a specific error).
+      // llm-session sub-cap check (before total cap to give a specific error).
       if (record.execution === "llm-session") {
         const llmCount = file.routines.filter(
           (r) => r.execution === "llm-session" && !r.dismissedAt,
@@ -516,7 +465,7 @@ function advanceWeekly(atIso: string): string {
 
 /**
  * Advance by one calendar month, clamping to the last day of the target month
- * so 31-day routines don't skip February (Q5).
+ * so 31-day routines don't skip February.
  *
  * originalDay is captured once before the loop so that multi-month advances
  * (e.g. Jan 31 skipped while app was offline) correctly restore the original

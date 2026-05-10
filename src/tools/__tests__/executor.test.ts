@@ -332,6 +332,7 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
     ["sensitive quoted operand", "Get-Content '~/.ssh/id_rsa'"],
     ["sensitive redirection target", "Get-Content package.json > ~/.ssh/leak"],
     ["relative traversal", "Get-Content ../outside.txt"],
+    ["dynamic path composition", "Set-Content (Join-Path $HOME \"Desktop/out.txt\") hi"],
   ])("runs PowerShell path policy before approval prompts or allow-always persistence: %s", async (_label, command) => {
     const registry = new ToolRegistry();
     registry.register(new PowerShellTool());
@@ -489,6 +490,62 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
         directory: pathResolve("reports/out.md"),
       }),
     );
+  });
+
+  it("does not synthesize permission audit directory without a declared path surface", async () => {
+    const executeSpy = vi.fn(async () => "write without path surface");
+    const registry = new ToolRegistry();
+    registry.register(createDynamicTool({
+      name: "pathless_write_probe",
+      description: "pathless write probe",
+      source: "builtin",
+      category: "write",
+      jsonSchema: {
+        type: "object",
+        properties: { payload: { type: "string" } },
+      },
+      execute: async (rawInput) => ({
+        output: await executeSpy(rawInput),
+        isError: false,
+      }),
+    }));
+    const permMgr = new PermissionManager("/tmp/nonexistent-permissions.json");
+    permMgr.setMode("auto");
+    const appendPermissionAuditEntry = vi.fn(async (entry: Record<string, unknown>) => ({
+      ...entry,
+      prevHash: "h",
+    }));
+    const auditLogger = {
+      log: vi.fn(),
+      isPermissionAuditChainReady: vi.fn(() => true),
+      assertPermissionAuditWritable: vi.fn(),
+      appendPermissionAuditEntry,
+    };
+    const executor = new ToolExecutor(
+      registry,
+      undefined,
+      permMgr,
+      undefined,
+      undefined,
+      undefined,
+      auditLogger as never,
+    );
+
+    const result = await executor.executeAll(
+      [{ id: "tu-pathless-write", name: "pathless_write_probe", input: { payload: "ok" } }],
+      { sessionId: "sess-pathless-write", permissionContext: userPermissionContext() },
+    );
+
+    expect(result[0].is_error).toBeUndefined();
+    expect(appendPermissionAuditEntry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        decision: "allow",
+        tool: "pathless_write_probe",
+      }),
+    );
+    const allowEntry = appendPermissionAuditEntry.mock.calls.find(([entry]) => entry.decision === "allow")?.[0];
+    expect(allowEntry).not.toHaveProperty("directory");
+    expect(allowEntry).not.toHaveProperty("directoryAllowed");
   });
 
   it("hard-blocks sensitive paths after pre-hook input modification and before read-only auto approval", async () => {
@@ -1342,14 +1399,13 @@ describe("ToolExecutor — Permission policy P2.5 Layer 1 allowed-directories", 
     expect(wc.send).not.toHaveBeenCalled();
   });
 
-  it("plugin path policy uses manifest-declared pathFields", async () => {
+  it("ToolExecutor path policy uses declared Tool.pathFields", async () => {
     const executeSpy = vi.fn(async () => "ok");
     const registry = new ToolRegistry();
     registry.register(createDynamicTool({
       name: "plugin_scan",
       description: "Scan folder",
-      source: "plugin",
-      pluginId: "local-indexer",
+      source: "builtin",
       category: "read",
       pathFields: ["folder"],
       isReadOnly: () => true,
@@ -1373,12 +1429,7 @@ describe("ToolExecutor — Permission policy P2.5 Layer 1 allowed-directories", 
         name: "plugin_scan",
         input: { folder: "/var/tmp/plugin-folder/input" },
       }],
-      {
-        sessionId: "sess-l1-plugin-pathfields",
-        permissionContext: userPermissionContext({
-          allowedPluginIds: new Set(["local-indexer"]),
-        }),
-      },
+      { sessionId: "sess-l1-plugin-pathfields", permissionContext: userPermissionContext() },
     );
 
     await new Promise((r) => setTimeout(r, 5));

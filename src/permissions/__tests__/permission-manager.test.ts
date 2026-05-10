@@ -3,6 +3,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PermissionManager } from "../permission-manager.js";
+import { updatePermissionsFile } from "../permissions-store.js";
 
 // ─── Mock permissions-store ───────────────────────────
 // We mock the store module so tests don't touch the real filesystem.
@@ -67,6 +68,16 @@ describe("PermissionManager (B1 persistence)", () => {
 
     // 영구: store에 rule이 추가됐는지
     expect(mockStore.rules).toContainEqual({ pattern: "my_tool", action: "allow" });
+  });
+
+  it("does not add in-memory allow when durable allow persistence fails", async () => {
+    vi.mocked(updatePermissionsFile).mockRejectedValueOnce(new Error("persist failed"));
+
+    await expect(pm.addAlwaysAllowedPersist("volatile_tool")).rejects.toThrow("persist failed");
+
+    const result = pm.checkDetailed("volatile_tool", "builtin", "write");
+    expect(result.decision).toBe("ask");
+    expect(mockStore.rules).toEqual([]);
   });
 
   it("addAlwaysAllowedPersist is idempotent — no duplicate rules", async () => {

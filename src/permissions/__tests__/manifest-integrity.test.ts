@@ -89,35 +89,35 @@ describe("Permission policy P4 createReadOnlyFsPromisesProxy", () => {
 });
 
 describe("Permission policy P4 ManifestIntegrityState", () => {
-  it("recordViolation marks a plugin disabled", () => {
+  it("recordViolation marks a plugin disabled", async () => {
     const state = new ManifestIntegrityState();
     expect(state.isDisabled("p")).toBe(false);
-    state.recordViolation("p", "t", "writeFileSync");
+    await state.recordViolation("p", "t", "writeFileSync");
     expect(state.isDisabled("p")).toBe(true);
     expect(state.listDisabled()).toEqual(["p"]);
   });
 
-  it("recordViolation is idempotent", () => {
+  it("recordViolation is idempotent", async () => {
     const state = new ManifestIntegrityState();
-    state.recordViolation("p", "t", "writeFileSync");
-    state.recordViolation("p", "t", "writeFileSync");
+    await state.recordViolation("p", "t", "writeFileSync");
+    await state.recordViolation("p", "t", "writeFileSync");
     expect(state.listDisabled()).toEqual(["p"]);
   });
 
-  it("onViolation listeners fire", () => {
+  it("onViolation listeners fire", async () => {
     const state = new ManifestIntegrityState();
     const fn = vi.fn();
     const dispose = state.onViolation(fn);
-    state.recordViolation("p", "t", "rmSync");
+    await state.recordViolation("p", "t", "rmSync");
     expect(fn).toHaveBeenCalledWith("p", "t", "rmSync");
     dispose();
-    state.recordViolation("p2", "t2", "writeFileSync");
+    await state.recordViolation("p2", "t2", "writeFileSync");
     expect(fn).toHaveBeenCalledTimes(1);
   });
 });
 
 describe("Permission policy P4 bindManifestIntegrityAudit", () => {
-  it("writes an audit entry per violation", () => {
+  it("writes an audit entry per violation", async () => {
     const state = new ManifestIntegrityState();
     const audit = {
       log: vi.fn(),
@@ -125,7 +125,7 @@ describe("Permission policy P4 bindManifestIntegrityAudit", () => {
       appendPermissionAuditEntry: vi.fn(),
     } as unknown as import("../../audit/audit-logger.js").AuditLogger;
     bindManifestIntegrityAudit(audit, state);
-    state.recordViolation("p", "tool_x", "writeFileSync");
+    await state.recordViolation("p", "tool_x", "writeFileSync");
     expect(audit.log).toHaveBeenCalledOnce();
     const entry = (audit.log as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(entry.type).toBe("error");
@@ -146,7 +146,7 @@ describe("Permission policy P4 bindManifestIntegrityAudit", () => {
     } as unknown as import("../../audit/audit-logger.js").AuditLogger;
 
     bindManifestIntegrityAudit(audit, state);
-    state.recordViolation("p", "tool_x", "writeFileSync");
+    await state.recordViolation("p", "tool_x", "writeFileSync");
     expect(appendPermissionAuditEntry).toHaveBeenCalledOnce();
     expect(appendPermissionAuditEntry).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -157,6 +157,22 @@ describe("Permission policy P4 bindManifestIntegrityAudit", () => {
         trustOrigin: "plugin-emitted",
       }),
     );
+  });
+
+  it("surfaces permission audit append failures to the violation caller", async () => {
+    const state = new ManifestIntegrityState();
+    const audit = {
+      log: vi.fn(),
+      isPermissionAuditChainReady: vi.fn(() => true),
+      appendPermissionAuditEntry: vi.fn(async () => {
+        throw new Error("append failed");
+      }),
+    } as unknown as import("../../audit/audit-logger.js").AuditLogger;
+
+    bindManifestIntegrityAudit(audit, state);
+
+    await expect(state.recordViolation("p", "tool_x", "writeFileSync")).rejects.toThrow("append failed");
+    expect(state.isDisabled("p")).toBe(true);
   });
 });
 
