@@ -50,6 +50,15 @@ export interface PermissionCheckResult {
   reason: string;
   layer: number; // 어떤 단계에서 결정되었는지
   /**
+   * Layer 5 reviewer routing marker. Only PermissionManager may set this.
+   * Executor must not infer reviewer eligibility from `decision: "ask"` because
+   * overlay-trigger, strict, and low-trust MCP asks are hard user-approval gates.
+   */
+  reviewer?: {
+    route: "foreground-auto" | "headless";
+    verdict?: RiskVerdict;
+  };
+  /**
    * Layer 5 headless reviewer queue metadata. The execution result is still a
    * blocked tool call, but the audit decision must be `deferred` rather than a
    * plain deny so forensics can link it to the manual approval queue entry.
@@ -423,6 +432,9 @@ export class PermissionManager {
         decision: "ask",
         reason: `strict 모드 (trust: ${trust}, category: ${resolvedCategory})`,
         layer: 2,
+        ...(context.headless === true && isMutating
+          ? { reviewer: { route: "headless" as const } }
+          : {}),
       };
     }
 
@@ -644,12 +656,14 @@ export class PermissionManager {
             decision: "ask",
             reason: `headless ${category} — reviewer agent 라우팅 대상 (executor 가 dispatchReviewer 호출)`,
             layer: 6,
+            reviewer: { route: "headless" },
           };
         }
         return {
           decision: "ask",
           reason: `headless ${category} — reviewer agent 미배치, 사용자 컨펌`,
           layer: 6,
+          reviewer: { route: "headless" },
         };
       case "override":
         // meta category — executor handles via tool.decisionOverride
@@ -664,6 +678,10 @@ export class PermissionManager {
           decision: "ask",
           reason: `사용자 컨펌 필요 (category: ${category}, trust: ${trust})`,
           layer: 6,
+          ...(this.mode === "auto" && context.headless !== true &&
+            (category === "write" || category === "shell" || category === "network")
+            ? { reviewer: { route: "foreground-auto" as const } }
+            : {}),
         };
     }
   }
