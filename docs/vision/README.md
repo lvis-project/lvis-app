@@ -42,7 +42,7 @@ LVIS는 개인에게는 회사 생활을 위한 맞춤 비서로,
 
 | 가치 | 설명 | 근거 |
 |------|------|------|
-| **선제성** | 사용자가 묻기 전에 먼저 제안·정리 | Proactive Engine, Daily Briefing |
+| **선제성** | 사용자가 묻기 전에 먼저 제안·정리 | Overlay Trigger Surface |
 | **거버넌스** | 보안·감사·정책이 1등 시민 — 통제된 환경에서의 AI | L5 전담 레이어, internal search 제어 환경 |
 | **점진적 신뢰** | 에이전트 자율성을 단계적으로 확대 | Agent Approval System, Feature Flag 점진 배포 |
 | **로컬 주권** | 사용자 데이터·맥락이 개인 PC에 상주 | 설치형 로컬 기반, Memory(LVIS.md) |

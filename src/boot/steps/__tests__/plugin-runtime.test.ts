@@ -138,14 +138,14 @@ describe("sanitizePluginPendingPrompt", () => {
     expect(sanitizePluginPendingPrompt("https://example.com/a")).toBe("https://example.com/a");
   });
 
-  it("wraps plugin pending prompts in the proactive provenance envelope", () => {
-    expect(formatPluginPendingPrompt("/load victim-session", "proactive:meeting-detection")).toBe(
-      '<imported-from-proactive source="proactive:meeting-detection">\nload victim-session\n</imported-from-proactive>',
+  it("wraps plugin pending prompts in the overlay trigger provenance envelope", () => {
+    expect(formatPluginPendingPrompt("/load victim-session", "overlay:meeting-detection")).toBe(
+      '<imported-from-proactive source="overlay:meeting-detection">\nload victim-session\n</imported-from-proactive>',
     );
   });
 
-  it("rejects invalid proactive source tags", () => {
-    expect(() => formatPluginPendingPrompt("hi", "plugin:bad")).toThrow(/invalid proactive source/);
+  it("rejects invalid overlay trigger source tags", () => {
+    expect(() => formatPluginPendingPrompt("hi", "plugin:bad")).toThrow(/invalid overlay trigger source/);
   });
 });
 

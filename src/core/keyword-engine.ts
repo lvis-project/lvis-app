@@ -12,7 +12,7 @@
  * 5. 일반 대화 (fallback)
  */
 
-import { parseImportedTriggerEnvelope } from "../shared/proactive-source.js";
+import { parseImportedTriggerEnvelope } from "../shared/overlay-trigger-source.js";
 
 // ─── Types ──────────────────────────────────────────
 
@@ -76,10 +76,10 @@ export class KeywordEngine {
   classify(input: string): InputClassification {
     const trimmed = input.trim();
 
-    // 0. Brain proactive trigger envelope — bypass skill-keyword
+    // 0. Imported overlay trigger envelope — bypass skill-keyword
     // matching. Shares its pattern with ipc-bridge.ts's
     // originSource detection, the host gate, and the trigger
-    // executor's wrap (see shared/proactive-source.ts) so all
+    // executor's wrap (see shared/overlay-trigger-source.ts) so all
     // gates agree on what counts as a valid envelope.
     if (parseImportedTriggerEnvelope(trimmed) !== null) {
       return { type: "general", input: trimmed };

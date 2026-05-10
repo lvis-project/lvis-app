@@ -5,7 +5,7 @@
  *
  * 1. Lookup       — ToolRegistry.findByName() + source/trust 확인
  * 2. PreHook      — HookRunner.preToolUse() — 입력 검사/변환
- * 3. Permission   — PermissionManager.checkDetailed(name, source, category, proactiveOrigin)
+ * 3. Permission   — PermissionManager.checkDetailed(name, source, category, overlayTriggerOrigin)
  * 4. HookOverride — PreHook deny 결과 적용
  * 5. RateLimit    — Trust별 호출 빈도 제한
  * 6. Execute      — tool.execute(args)
@@ -270,11 +270,11 @@ export interface ExecuteOptions {
   callbacks?: ToolExecutorCallbacks;
   sessionId?: string;
   /**
-   * Brain proactive origin tag (e.g. `"proactive:meeting-detection"`).
+   * Overlay trigger origin tag (e.g. `"overlay:meeting-detection"`).
    * When set, write/shell/network tools force ApprovalGate `ask` and
    * bypass the user's `allow-always` cache.
    */
-  proactiveOrigin?: string | null;
+  overlayTriggerOrigin?: string | null;
   /**
    * Sub-agent recursion depth — `agent_spawn` refuses when ≥1 so a
    * sub-agent cannot itself spawn (defense-in-depth on top of the
@@ -642,10 +642,10 @@ export class ToolExecutor {
 
   /** 복수 tool_use 병렬 실행 — 최대 5개씩 배치 처리.
    *
-   * `proactiveOrigin` (예: `"proactive:meeting-detection"`) 가 set 이면
+   * `overlayTriggerOrigin` (예: `"overlay:meeting-detection"`) 가 set 이면
    * 모든 write/shell/network 호출이 사용자 영구 승인을 우회해 ask 로 강제됨
-   * (PermissionManager.checkDetailed 의 새 가드). Brain 트리거가 자동
-   * 실행되는 destructive 작업 차단막.
+   * (PermissionManager.checkDetailed 의 새 가드). Overlay trigger가 자동
+   * 실행하는 destructive 작업 차단막.
    *
    * {@link ExecuteOptions} bundles pipeline concerns so adding a new
    * concern doesn't ripple
@@ -680,7 +680,7 @@ export class ToolExecutor {
     const {
       callbacks,
       sessionId,
-      proactiveOrigin,
+      overlayTriggerOrigin,
       spawnDepth,
       abortSignal,
       permissionContext,
@@ -1055,7 +1055,7 @@ export class ToolExecutor {
         toolUse.name,
         source,
         invocationCategory,
-        proactiveOrigin,
+        overlayTriggerOrigin,
         invocationPermissionContext,
       );
       // Permission policy — meta tools with decisionOverride="ask" force the approval

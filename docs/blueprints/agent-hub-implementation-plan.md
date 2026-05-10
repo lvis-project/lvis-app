@@ -12,7 +12,7 @@
 1. v3 mockup 의 6 영역 (마이워크 3 row + 팀보드 3 row) 을 plugin UI 로 구현해 host viewport slot 안에 mount 한다.
 2. `lvis-plugin-ms-graph` 의 `msgraph_calendar_today` / `msgraph_calendar_list` 를 HostApi `callTool` 로 호출해 일정 카드를 채운다 (자체 SDK 금지).
 3. 승인 요청 카드 + 컨펌 모달은 host §8 ApprovalGate 와 bridge 한다 — plugin 자체 approval queue 를 만들지 않는다.
-4. LLM 5줄 분석 카드는 plugin 진입 시 1회 trigger 한다 (Proactive Engine 연계 X).
+4. LLM 5줄 분석 카드는 plugin 진입 시 1회 overlay 제안으로 staged 한다.
 5. 9 lane × 4 wave 격리 dispatch 가 가능한 산출물 단위로 쪼갠 task 를 정의한다.
 6. 모든 worker 는 canonical `lvis-plugin-agent-hub/` 에 직접 쓰지 않고 `/tmp/agent-hub/L<n>/` fresh clone 에서 작업한다.
 7. CLAUDE.md 의 No-Fallback / Research-First / parallel agent isolation 규율을 모든 lane prompt 에 명시한다.
@@ -22,7 +22,7 @@
 - 새로운 plugin repo 생성 금지 (D4: 기존 `lvis-plugin-agent-hub` 활용 확정).
 - detached BrowserWindow 모드 추가 금지 (D1: host viewport slot 만). 기존 manifest 의 `"window.defaultMode": "detached"` 설정은 본 계획 안에서 `"embedded"` 로 변경하거나 제거한다.
 - ms-graph 외 외부 calendar/email source 추가 금지.
-- Proactive Engine 의 5 signal coordinator 연동 금지.
+- 별도 background coordinator 연동 금지. 필요한 제안은 `host:overlay` 경로만 사용한다.
 - backend hub server (Agent Hub FastAPI) 의 endpoint / contract 변경 금지 — 본 plan 은 client side only.
 - 새 LLM provider 통합 금지 — `hostApi.callLlm` 사용.
 - v3 mockup 에 없는 UI 요소 (예: notification toast, pagination dot indicator) 추가 금지. v3 의 "합의 필요 항목" 6건 은 별도 follow-up.
@@ -388,7 +388,7 @@ export type ApprovalChoice = "allow-once" | "allow-always" | "deny-once" | "deny
   },
 
   "capabilities": [
-    "conversation-trigger",                  // 기존 — proactive 미사용이지만 capability 남겨둠
+    "host:overlay",
     "external-auth-consumer"                 // 기존
   ],
 
