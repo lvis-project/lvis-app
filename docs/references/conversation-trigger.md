@@ -1,15 +1,15 @@
 # Conversation Trigger — Proactive Brain HostApi
 
 **Status**: P0 implemented · 2026-04-26
-**Capability**: `conversation-trigger` (enforced)
+**Capability**: `host:overlay` (enforced), `conversation-trigger` (advisory self-identification label)
 **HostApi method**: `triggerConversation(spec)`
-**Related**: [`plugin-tool-schema-design.md`](./plugin-tool-schema-design.md) §2.3 / §4 · `lvis-plugin-work-proactive` [DESIGN.md](https://github.com/lvis-project/lvis-plugin-work-proactive/blob/main/DESIGN.md) · `architecture.md` §6.3 (Source-aware Permissions)
+**Related**: [`plugin-tool-schema-design.md`](./plugin-tool-schema-design.md) §2.3 / §4 · `architecture.md` §6.3 (Source-aware Permissions)
 
 ## Why
 
-LVIS 의 본질적 차별화 — 사용자가 먼저 묻기를 기다리지 않고, **신호를 본 plugin 이 ConversationLoop 를 능동적으로 발사**한다. 회의 요청 메일 도착 → "회의실 예약과 캘린더 등록을 도와드릴까요?" 채팅창에 *먼저* 띄움.
+LVIS 의 본질적 차별화 — 사용자가 먼저 묻기를 기다리지 않고, **신호를 본 plugin 이 host overlay 에 제안을 staged** 한다. 회의 요청 메일 도착 → "회의실 예약과 캘린더 등록을 도와드릴까요?" 오버레이를 *먼저* 띄우고, 사용자가 확인하면 main chat 에 imported proactive prompt 로 들어간다.
 
-이 surface 는 **read-only brain plugin (proactive)** 만 사용한다. 일반 plugin 은 capability 를 부여받지 않으므로 호출 자체가 거부된다.
+이 surface 는 **read-only brain plugin** 만 사용한다. 일반 plugin 은 enforced `host:overlay` capability 를 부여받지 않으므로 호출 자체가 거부된다. `conversation-trigger` 는 자기 식별/advisory label 로만 남긴다.
 
 ## Signature
 
@@ -32,7 +32,7 @@ interface ConversationTriggerResult {
 }
 ```
 
-`spec.prompt` 는 caller 가 ConversationLoop 에 흘릴 templated 문자열 — 이게 그대로 user message 가 되어 분류·라우팅·LLM 호출까지 흘러간다.
+`spec.prompt` 는 caller 가 host overlay 에 staged 할 templated 문자열이다. Host 는 이를 `<imported-from-proactive source="...">` envelope 로 감싼 pending prompt 로 보관하고, 사용자가 오버레이 CTA 를 누른 뒤에만 main chat user message 로 삽입한다.
 
 ## Safety contract — caller MUST honor
 
@@ -48,7 +48,7 @@ interface ConversationTriggerResult {
 
 | 거부 사유 | 조건 | 동작 |
 |----------|------|------|
-| `capability_denied` | manifest 에 `conversation-trigger` 없음 | 즉시 reject + audit (`trigger_conversation_denied reason=capability_denied`) |
+| `capability_denied` | manifest 에 enforced `host:overlay` 없음 | 즉시 reject + audit (`trigger_conversation_denied reason=capability_denied`) |
 | `invalid_source` | source 가 `^proactive:[a-z][a-z0-9-]*$` 패턴 미일치 / 길이 > 128 / 빈 prompt / prompt > 4096 chars | reject + audit. 잘못된 input 은 자동 정정하지 않고 거부 (slice-before-validate 금지) |
 | `rate_limited` | per-plugin 호출 cap (60초 / 6회) 초과 | reject + audit. denial 은 cap 사용 안 함 |
 | `duplicate` | `dedupeKey` 가 5분 이내 매칭 | reject + audit |
@@ -66,13 +66,13 @@ interface ConversationTriggerResult {
 
 > Audit row 의 필드 순서는 contract — 새 필드는 항상 끝에 append. 기존 필드 사이에 끼워넣으면 `/source=\S+ visibility=/` 같은 부분 정규식이 깨질 수 있음.
 
-`pluginId` 가 모든 row 에 포함되므로 `grep "pluginId:work-proactive"` 한 번으로 lifecycle 전체 추적 가능. 실패 detail 은 `errorId` 로 같은 audit log 에 join.
+`pluginId` 가 모든 row 에 포함되므로 특정 brain plugin id 로 lifecycle 전체 추적 가능. 실패 detail 은 `errorId` 로 같은 audit log 에 join.
 
 ### Reason 분류 — caller 가 어떻게 처리해야 하나
 
 | Reason | 분류 | Caller 권장 동작 |
 |--------|------|----------------|
-| `capability_denied` | **permanent (config)** | log + give up. manifest 가 cap 없음 — 코드 수정 외 회복 불가 |
+| `capability_denied` | **permanent (config)** | log + give up. manifest 가 `host:overlay` 없음 — 코드 수정 외 회복 불가 |
 | `invalid_source` | **permanent (bug)** | log + give up. caller 의 spec 자체가 잘못됨 |
 | `duplicate` | **expected** | swallow. 같은 관찰이 두 번 emit 된 정상 흐름 |
 | `rate_limited` | **backpressure** | plugin 의 cooldown 유지. host 의 sliding window 가 풀릴 때까지 기다림 (다음 *새로운* 관찰에서 자연스럽게 재시도) |
@@ -80,16 +80,16 @@ interface ConversationTriggerResult {
 
 `rate_limited` 를 transient 로 분류하면 host 의 backpressure 신호가 무력화되므로 caller 는 cooldown 을 유지해야 한다. plugin 이 자체 rate-limit 도 가지고 있다면 host 의 cap 이 풀리는 동안 plugin cap 도 같이 sleep 됨.
 
-성공 시 fire-and-forget 으로 ConversationLoop.runTriggerTurn() 호출. 실패한 turn 은 loop 의 자체 audit 에 기록.
+성공 시 host 는 fresh ConversationLoop 를 시작하지 않고 OverlayContext 에 항목을 staged 한다. 사용자가 오버레이 CTA 를 누르면 pending prompt 가 main chat 에 삽입되고, 그 turn 의 permission path 는 source-aware policy 를 따른다.
 
 ## Manifest 예시
 
 ```json
 {
-  "id": "work-proactive",
+  "id": "brain-plugin",
   "deployment": "bundled",
   "capabilities": [
-    "conversation-trigger",
+    "host:overlay",
     "calendar-source",
     "mail-source"
   ],
@@ -133,33 +133,26 @@ context.hostApi.onEvent("email.action.needed", async (payload) => {
 ## Lifecycle
 
 ```
-plugin                   host gate                executor                  renderer
-  │                          │                       │                         │
-  │ triggerConversation(spec)│                       │                         │
-  ├─────────────────────────►│  evaluateTriggerSpec  │                         │
-  │                          │  (capability/source/  │                         │
-  │                          │   prompt/rate/dedupe) │                         │
-  │                          │                       │                         │
-  │                          ├──────────► run(spec) ─►│                         │
-  │ {accepted, source}       │                       │ createLoop()            │
-  │◄─────────────────────────┤                       │ ─── fresh ConvLoop ──── │
-  │  (returns synchronously) │                       │                         │
-  │                          │                       │ emitStarted ───────────►│
-  │                          │                       │ loop.runTurn(prompt)    │
-  │                          │                       │ ...                     │
-  │                          │                       │ emitCompleted ─────────►│ TriggerCard
-  │                          │                       │                         │   shown
-  │                          │                       │                         │
-  │                          │                       │   ◄── dismiss(id) ──────│
-  │                          │                       │   or                    │
-  │                          │                       │   ◄── import(id) ───────│
-  │                          │                       │       (chat history     │
-  │                          │                       │        gets <imported-  │
-  │                          │                       │        from-proactive>  │
-  │                          │                       │        wrapped turn)    │
+plugin                   host gate/stage           renderer/main chat
+  │                          │                         │
+  │ triggerConversation(spec)│                         │
+  ├─────────────────────────►│  evaluateTriggerSpec    │
+  │                          │  (host:overlay/source/  │
+  │                          │   prompt/rate/dedupe)   │
+  │                          │                         │
+  │                          │  create OverlayItem     │
+  │ {accepted, source,       │  with pendingPrompt     │
+  │  eventId}                ├────────────────────────►│ OverlayCard shown
+  │◄─────────────────────────┤                         │
+  │                          │                         │
+  │                          │   ◄── dismiss(id) ──────│ remove staged item
+  │                          │   or                    │
+  │                          │   ◄── primary action ───│ insert pendingPrompt
+  │                          │                         │ as user message in
+  │                          │                         │ main chat
 ```
 
-Trigger turn does **NOT** mutate the user's chat ConversationHistory. Only after the user clicks "지금 답하기" on the TriggerCard does the host wrap the captured turn (leading user message into `<imported-from-proactive source="...">…</imported-from-proactive>`) and append to chat. Any destructive tool calls during the trigger turn already passed §8 ApprovalGate; importing does NOT replay approvals.
+`triggerConversation()` 자체는 사용자의 chat ConversationHistory 를 변경하지 않는다. 사용자가 "지금 답하기" 를 누른 뒤에만 host 가 pending prompt (`<imported-from-proactive source="...">…</imported-from-proactive>`) 를 main chat 에 삽입한다. 이후 실행되는 tool call 은 일반 `runTurn` permission path 를 통과하며, proactive source 는 mutating tool 의 allow-cache 우회를 강제한다.
 
 ## Reason classes — caller 처리 가이드
 
@@ -167,7 +160,7 @@ Trigger turn does **NOT** mutate the user's chat ConversationHistory. Only after
 
 | Reason | 분류 | Caller 권장 동작 |
 |--------|------|----------------|
-| `capability_denied` | **permanent (config)** | log + give up. manifest 가 cap 없음 — 코드 수정 외 회복 불가 |
+| `capability_denied` | **permanent (config)** | log + give up. manifest 가 `host:overlay` 없음 — 코드 수정 외 회복 불가 |
 | `invalid_source` | **permanent (bug)** | log + give up. caller 의 spec 자체가 잘못됨 |
 | `duplicate` | **expected** | swallow. 같은 관찰이 두 번 emit 된 정상 흐름 |
 | `rate_limited` | **backpressure** | plugin 의 cooldown 유지. host 의 sliding window 가 풀릴 때까지 기다림 (다음 *새로운* 관찰에서 자연스럽게 재시도) |
@@ -207,7 +200,7 @@ Renderer 는 이걸 받아 `kind: "imported_trigger"` 단일 entry 를 chat 의 
 
 ## Visibility — P0 / P2 분리
 
-P0 는 **plumbing**: `visibility` 를 spec 에 받고 audit / runTriggerTurn 에 전달. UI 분기는 **P2 에서 구현 (✅ 2026-04-26)**.
+P0 는 **plumbing**: `visibility` 를 spec 에 받고 audit / overlay item 에 전달. UI 분기는 **P2 에서 구현 (✅ 2026-04-26)**.
 
 P2 행동:
 
@@ -227,7 +220,8 @@ Audit row 도 visibility 를 일관되게 기록:
 
 | 장치 | P0 상태 |
 |------|------|
-| Capability gate (`conversation-trigger`) | ✅ enforced |
+| Capability gate (`host:overlay`) | ✅ enforced |
+| Advisory label (`conversation-trigger`) | ✅ 자기 식별 라벨 |
 | Source pattern (`^proactive:[a-z][a-z0-9-]*$`, 길이 cap 128) — **slice-before-validate 안 함** | ✅ enforced |
 | Prompt 길이 cap (4096 chars) — raw 본문 dump 방어 | ✅ enforced |
 | Dedupe (5분 TTL, per-pluginId, true LRU eviction) | ✅ enforced |
@@ -239,18 +233,17 @@ Audit row 도 visibility 를 일관되게 기록:
 | Origin source set/clear lifecycle | ✅ enforced — `runTurn` 내부에서 synchronous 하게 설정 후 `build()` 직후 즉시 clear (instance race 불가) |
 | Destructive op 의 hard gate | ✅ 기존 §8 ApprovalGate 가 모든 destructive op 에 적용 |
 | Visibility UI 분기 (silent 필터 / summary-only toast / user-visible 모달) | ✅ enforced (P2 — 2026-04-26) |
-| **Source-aware permission policy 통합 (§6.3)** | ⏭️ P1 — `originSource` 가 ToolExecutor → PermissionManager / ApprovalGate 까지 plumb 되어야 함. `runTurn` 옵션에는 들어왔지만 (P0) 실제 permission system 으로의 plumbing 은 P1 작업. 자세한 위치는 `conversation-loop.ts:runTriggerTurn` 의 P1 TODO 코멘트 참조 |
+| **Source-aware permission policy 통합 (§6.3)** | ✅ enforced — proactive origin 이 `ConversationLoop.runTurn()` → `ToolExecutor` → `PermissionManager` 로 전달되어 mutating tool 은 allow-cache 를 우회하고 사용자 확인을 요구한다. |
 | **Hard LLM validation gate (별도 cheap-LLM 호출)** | ⏭️ P2 옵션 B — soft gate 만으로 부족하다는 신호 발생 시 |
 
 ## 참고 구현
 
 | 위치 | 역할 |
 |------|----|
-| `src/plugins/capabilities.ts` | `conversation-trigger` enforcement 등록 |
+| `src/plugins/capabilities.ts` | `host:overlay` enforcement 등록 (`conversation-trigger` 는 advisory self-identification label) |
 | `src/plugins/types.ts` | `PluginHostApi.triggerConversation` + Spec/Result 타입 |
-| `src/engine/conversation-loop.ts` (`runTriggerTurn`) | host-side ConversationLoop 진입점. `SystemPromptBuilder.setOriginSource()` 로 LLM-side soft gate 활성화 후 turn 종료 시 항상 clear |
+| `src/boot/steps/plugin-runtime.ts` (`createHostApi`) | gate 로직 + dedupe + audit + OverlayContext staging |
+| `src/engine/conversation-loop.ts` (`runTurn`) | imported proactive prompt 실행 시 proactive origin 을 ToolExecutor 에 전달 |
 | `src/prompts/system-prompt-builder.ts` (id 4.6 — Proactive Origin Guidance) | `proactive:*` source 일 때만 "first 합당성 판단" 가이드 emit |
-| `src/boot/steps/plugin-runtime.ts` (`createHostApi`) | gate 로직 + dedupe + audit |
-| `src/boot/__tests__/proactive-trigger.test.ts` | gate / dedupe 단위 테스트 |
-| `src/engine/__tests__/conversation-loop-trigger.test.ts` | runTriggerTurn 단위 + origin source set/clear |
+| `src/boot/steps/__tests__/trigger-conversation-capability.test.ts` | `host:overlay` capability gate 단위 테스트 |
 | `src/prompts/__tests__/proactive-origin-guidance.test.ts` | guidance section 출력 / 비출력 / clear |

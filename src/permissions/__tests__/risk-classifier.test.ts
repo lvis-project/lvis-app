@@ -29,6 +29,7 @@ function ctx(overrides: Partial<ToolInvocationContext>): ToolInvocationContext {
     toolName: "test_tool",
     source: "builtin",
     category: "write",
+    pathFields: ["path"],
     trustOrigin: "user-keyboard",
     finalInput: {},
     allowedDirectories: ALLOWED,
@@ -130,6 +131,7 @@ describe("RuleBasedRiskClassifier", () => {
   it("move_file destination outside allowed dirs → HIGH", () => {
     const v = rb.classify(ctx({
       category: "write",
+      pathFields: ["sourcePath", "destinationPath"],
       finalInput: {
         sourcePath: "/Users/ken/work/a.md",
         destinationPath: "/etc/a.md",
@@ -146,6 +148,16 @@ describe("RuleBasedRiskClassifier", () => {
   it("write deep inside allowed dir → MEDIUM", () => {
     const v = rb.classify(ctx({ category: "write", finalInput: { path: "/Users/ken/work/a/b/c/d.md" } }));
     expect(v.level).toBe("medium");
+  });
+
+  it("write dotted pathField outside allowed dirs → HIGH", () => {
+    const v = rb.classify(ctx({
+      category: "write",
+      pathFields: ["opts.output"],
+      finalInput: { opts: { output: "/etc/passwd" } },
+    }));
+    expect(v.level).toBe("high");
+    expect(v.reason).toMatch(/outside allowed/);
   });
 
   // ── read ─────────────────────────────────

@@ -98,6 +98,7 @@ export interface TurnCallbacks {
     hasToolCalls: boolean;
   }) => void;
   onTurnComplete?: (fullText: string) => void;
+  onPermissionModeChanged?: (mode: "default" | "strict" | "auto" | "allow") => void;
   onError?: (error: string) => void;
   onCompactOccurred?: (result: {
     removedMessages: number;
@@ -1815,7 +1816,7 @@ export class ConversationLoop {
         break;
       }
       case "permission": {
-        result = await this.handlePermissionCommand(args, inputOrigin);
+        result = await this.handlePermissionCommand(args, inputOrigin, callbacks);
         break;
       }
       case "help":
@@ -1829,9 +1830,9 @@ export class ConversationLoop {
 /vendor — 현재 벤더/토큰 정보
 /tools — 등록된 도구 목록
 /permission — 현재 권한 모드
-/permission mode <strict|default|auto> --durable — 권한 모드 변경
+/permission mode <strict|default|auto|allow> --durable — 권한 모드 변경
 /permission dir <list|allow|deny> [path] — 허용 디렉터리 관리
-/permission reviewer <show|mode|provider|model> [value] — 리뷰어 설정
+/permission reviewer <show|mode|provider|model|fallback> [value] — 리뷰어 설정
 /permission audit <show|verify> — 권한 감사 조회/검증
 /permission hooks <list|accept|disable|reject> [name] — script hook 신뢰 상태 관리
 /help — 이 도움말`;
@@ -1845,12 +1846,16 @@ export class ConversationLoop {
     return { text: result, toolCalls: [], route: "command" };
   }
 
-  private async handlePermissionCommand(args: string, inputOrigin: ChatInputOrigin): Promise<string> {
+  private async handlePermissionCommand(
+    args: string,
+    inputOrigin: ChatInputOrigin,
+    callbacks?: TurnCallbacks,
+  ): Promise<string> {
     const {
       dispatchPermissionAuditCommand,
       dispatchPermissionDirCommand,
       dispatchPermissionHooksCommand,
-      dispatchPermissionReviewerCommand,
+      dispatchPermissionReviewerCommandWithRewire,
       dispatchPermissionSlash,
     } = await import("../permissions/permission-slash.js");
     const raw = args.trim().length > 0 ? `/permission ${args.trim()}` : "/permission";
@@ -1888,11 +1893,11 @@ export class ConversationLoop {
       return `허용 디렉토리 제거됨:\n${result.persisted.length ? result.persisted.map((d) => `- ${d}`).join("\n") : "- 없음"}`;
     }
     if (outcome.kind === "reviewer") {
-      const result = await dispatchPermissionReviewerCommand(outcome.cmd);
+      const result = await dispatchPermissionReviewerCommandWithRewire(
+        outcome.cmd,
+        this.deps.rewireReviewerAgent,
+      );
       if (!result.ok) return `Reviewer 설정 오류: ${result.error}`;
-      if (outcome.cmd.verb !== "show") {
-        this.deps.rewireReviewerAgent?.();
-      }
       const { mode, provider, model, fallbackOnError } = result.settings;
       return `Reviewer 설정\nmode=${mode}\nprovider=${provider}\nmodel=${model}\nfallbackOnError=${fallbackOnError}`;
     }
@@ -1928,6 +1933,7 @@ export class ConversationLoop {
         auditLogger: this.deps.auditLogger,
       });
       if (!result.ok) return `권한 모드 변경 취소: ${result.message ?? result.error}`;
+      callbacks?.onPermissionModeChanged?.(result.mode);
       return `권한 모드 변경됨: ${result.previous} -> ${result.mode}${result.durable ? " (durable)" : " (session)"}`;
     }
     if (outcome.kind === "rules") {

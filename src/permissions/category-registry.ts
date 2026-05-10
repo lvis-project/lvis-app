@@ -13,9 +13,8 @@
  * Why a registry instead of a giant switch — a single source of truth
  * that:
  *   1. PermissionManager consults for every host-side category decision.
- *   2. Plugin manifest validation mirrors the plugin-facing subset
- *      (`read | write | shell | network`) in `manifest-validation.ts`;
- *      `meta` remains host-only and is not accepted from plugins.
+ *   2. Plugin category metadata is accepted only through the SDK manifest
+ *      schema (`toolSchemas[].category/pathFields`). `meta` remains host-only.
  *   3. The reviewer classifier can score against `riskWeight`, the input
  *      to its baseline `final = max(rule, llm)` composition.
  *   4. Audit-schema consumers can iterate to enumerate the full decision
@@ -30,7 +29,7 @@ import type { ToolCategory, ToolSource } from "../tools/types.js";
 export type CategoryDecision = "allow" | "ask" | "deny" | "reviewer" | "override";
 
 export interface CategoryDecisionInput {
-  mode: "default" | "auto" | "strict";
+  mode: "default" | "auto" | "strict" | "allow";
   source: ToolSource;
   headless: boolean;
 }
@@ -79,11 +78,13 @@ export function clearCategoryRegistry(): void {
  * Decision lanes (permission-policy-design.md §3 matrix table):
  *
  *   - read    — built-in: allow / plugin: allow (scope-checked elsewhere)
- *               strict mode forces ask. Headless reviewer if out-of-dir.
- *   - write   — default+strict: ask / auto: allow+audit / headless: reviewer
- *   - shell   — every mode: ask. Bash AST validation is executor-owned.
- *   - network — default+strict: ask / auto: allow+audit /
- *               headless: reviewer.
+ *               strict mode forces ask, including headless.
+ *   - write   — default+strict: ask / auto+allow: allow+audit /
+ *               default+auto headless: reviewer / strict headless: ask
+ *   - shell   — default+strict+auto: ask / allow: allow. Bash AST validation is executor-owned.
+ *               default+auto headless: reviewer / strict headless: ask
+ *   - network — default+strict: ask / auto+allow: allow+audit /
+ *               default+auto headless: reviewer / strict headless: ask.
  *   - meta    — `decisionOverride` sentinel; executor short-circuits.
  */
 export function registerStandardCategories(): void {
@@ -97,6 +98,8 @@ export function registerStandardCategories(): void {
     name: "write",
     riskWeight: 0.6,
     decisionFor: ({ mode, headless }) => {
+      if (mode === "allow") return "allow";
+      if (mode === "strict") return "ask";
       if (headless) return "reviewer";
       if (mode === "auto") return "allow";
       return "ask";
@@ -106,13 +109,20 @@ export function registerStandardCategories(): void {
   registerToolCategory({
     name: "shell",
     riskWeight: 0.9,
-    decisionFor: ({ headless }) => (headless ? "reviewer" : "ask"),
+    decisionFor: ({ mode, headless }) => {
+      if (mode === "allow") return "allow";
+      if (mode === "strict") return "ask";
+      if (headless) return "reviewer";
+      return "ask";
+    },
   });
 
   registerToolCategory({
     name: "network",
     riskWeight: 0.7,
     decisionFor: ({ mode, headless }) => {
+      if (mode === "allow") return "allow";
+      if (mode === "strict") return "ask";
       if (headless) return "reviewer";
       if (mode === "auto") return "allow";
       return "ask";
