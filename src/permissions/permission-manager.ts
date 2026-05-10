@@ -28,6 +28,7 @@ import type {
 } from "./reviewer/risk-classifier.js";
 import type { VerdictCache } from "./reviewer/verdict-cache.js";
 import type { DeferredQueue } from "./reviewer/deferred-queue.js";
+import { globMatch } from "../lib/glob-matcher.js";
 
 export type PermissionDecision = "allow" | "deny" | "ask";
 export type ExecutionMode = "default" | "strict" | "auto";
@@ -92,12 +93,14 @@ export interface ReviewerDispatchInput {
   sensitivePathsAdjacent: string[];
   /**
    * Permission policy architect round-4 finding: cache identity must include the
-   * caller's trust origin. A high-trust verdict cached for `user` origin
-   * is unsafe to serve to a `agent` invocation of the same shape — the
+   * caller's trust origin. A high-trust verdict cached for `user-keyboard`
+   * is unsafe to serve to an `llm-tool-arg` invocation of the same shape — the
    * underlying intent differs even when arguments match. Required so the
    * verdict-cache lookupKey hash always includes origin.
    */
   trustOrigin: ToolTrustOrigin;
+  /** Tool-declared authority cache identity, when present. */
+  approvalCacheKey?: string;
   /** When true, out-of-allowed-dir access also routes to the reviewer. */
   outOfAllowedDir?: boolean;
 }
@@ -137,6 +140,7 @@ export class PermissionManager {
   private reviewerClassifier: RiskClassifier | null = null;
   private verdictCache: VerdictCache | null = null;
   private deferredQueue: DeferredQueue | null = null;
+  private reviewerCacheScope: Record<string, unknown> = {};
 
   constructor(permissionsFilePath?: string) {
     this.permissionsFilePath =
@@ -152,10 +156,12 @@ export class PermissionManager {
     classifier: RiskClassifier;
     cache: VerdictCache;
     deferredQueue: DeferredQueue;
+    cacheScope?: Record<string, unknown>;
   }): void {
     this.reviewerClassifier = deps.classifier;
     this.verdictCache = deps.cache;
     this.deferredQueue = deps.deferredQueue;
+    this.reviewerCacheScope = deps.cacheScope ?? {};
   }
 
   hasReviewer(): boolean {
@@ -317,13 +323,15 @@ export class PermissionManager {
   }
 
   /**
-   * mode를 변경하고 permissions.json에 영구 저장.
+   * mode를 permissions.json에 영구 저장한 뒤 인메모리 상태를 갱신.
+   * 감사 entry 는 호출자가 먼저 append 하므로, 파일 저장 실패 시 runtime
+   * mode 까지 바뀌지 않아야 한다.
    */
   async setModePersist(mode: ExecutionMode): Promise<void> {
-    this.mode = mode;
     await updatePermissionsFile(this.permissionsFilePath, (file) => {
       file.mode = mode;
     });
+    this.mode = mode;
   }
 
   // ─── 판정 (§4.1) ────────────────────────────────
@@ -370,7 +378,7 @@ export class PermissionManager {
     for (const rule of this.rules) {
       if (rule.action !== "deny") continue;
       if (rule.source && rule.source !== source) continue;
-      if (denyTargets.some((target) => matchGlob(rule.pattern, target))) {
+      if (denyTargets.some((target) => globMatch(target, rule.pattern))) {
         return { decision: "deny", reason: `deny 규칙: ${rule.pattern}`, layer: 1 };
       }
     }
@@ -399,7 +407,7 @@ export class PermissionManager {
     for (const rule of this.rules) {
       if (rule.action !== "allow") continue;
       if (rule.source && rule.source !== source) continue;
-      if (matchGlob(rule.pattern, allowTarget)) {
+      if (globMatch(allowTarget, rule.pattern)) {
         return { decision: "allow", reason: `allow 규칙: ${rule.pattern}`, layer: 3 };
       }
     }
@@ -451,11 +459,15 @@ export class PermissionManager {
       source: input.source,
       category: input.category,
       trustOrigin: input.trustOrigin,
+      approvalCacheKey: input.approvalCacheKey,
       finalInput: input.finalInput,
     };
     const cacheCtx = {
       allowedDirectories: input.allowedDirectories,
-      scope: routineScope ?? {},
+      scope: {
+        ...(routineScope ?? {}),
+        reviewer: this.reviewerCacheScope,
+      },
     };
 
     const cacheResult = cache.lookup(lookupKey, cacheCtx);
@@ -603,13 +615,6 @@ export class PermissionManager {
 }
 
 // ─── Helpers ────────────────────────────────────────
-
-function matchGlob(pattern: string, name: string): boolean {
-  const regex = new RegExp(
-    "^" + pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*") + "$",
-  );
-  return regex.test(name);
-}
 
 function normalizeApprovalCacheKey(key: string | undefined): string | null {
   if (!key) return null;

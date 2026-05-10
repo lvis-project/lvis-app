@@ -90,6 +90,8 @@ export interface AppServices {
   postTurnHookChain: PostTurnHookChain;
   /** B1: 승인 게이트 — mainWindow 준비 후 생성 */
   approvalGate?: ApprovalGate;
+  /** Rebuild Layer 5 reviewer bindings after persisted reviewer settings change. */
+  rewireReviewerAgent?: () => void;
   /** Whether knowledge search tools were successfully registered. */
   knowledgeAvailable: boolean;
   /** Sprint 4.C — starred messages persistence (~/.lvis/starred.json) */

@@ -1417,7 +1417,7 @@ plugin-specific app branch 를 두지 않는다.
 
 | Surface | Current posture | Future direction |
 | --- | --- | --- |
-| Plugin categories | Plugin manifest 는 고정 allow-list `read/write/shell/network` 만 선언 가능. `meta` 및 향후 host-only category 는 plugin contract 로 자동 확장되지 않는다. | 모든 active plugin category 선언 완료 후 grace 제거 + hard fail |
+| Plugin categories | 현재 SDK manifest schema 에 per-tool `category/pathFields` 가 없다. Host 는 SDK schema 를 SOT 로 검증하고, category 가 없는 plugin tool 은 보수적으로 `write` 로 등록한다. `meta` 및 향후 host-only category 는 plugin contract 로 자동 확장되지 않는다. | SDK schema + active plugin category/pathFields 선언 완료 후 host SDK pin 상향, 그 시점부터 SDK schema hard fail |
 | Permission IPC | `PERMISSIONS` 가 main / preload / sender-guard test 의 단일 channel SOT. | 새 permission channel 은 반드시 `src/shared/ipc-channels.ts` 에 먼저 추가 |
 | Reviewer | `disabled/rule/llm` 3-mode. `llm` wiring 실패는 silent downgrade 없이 fail-fast. | cost/quality telemetry 로 model default 조정 가능, fallback 은 `deny|rule` 만 |
 | Deferred queue | HIGH verdict 는 user foreground 에서 approve/reject, resolution 은 permission audit chain 에 기록. | §8 approval timeline 과 통합 표시 |
@@ -1497,9 +1497,12 @@ openai|anthropic|google`. 변경은 settings.json 에 persist + selective
 verdict-cache invalidation.
 
 **Cost optimization:** `~/.lvis/permissions/reviewer-cache.jsonl` —
-`sha256(toolName+source+category+trustOrigin+approvalCacheKey+canonicalInputShape)`
-기반. HIGH 도 cache (반복 deny 비용 절감). cache 는 동작 정책을 대체하지
-않으며, quota 소진 시 `fallbackOnError ∈ {deny, rule}` 정책만 적용한다.
+`sha256(toolName+source+category+trustOrigin+approvalCacheKey+canonicalInputIdentity)`
+기반. `shell` / `network` / `read` / `write` 는 command literal, host,
+path 값이 deterministic risk 를 바꾸므로 sorted literal JSON 을 identity 로
+사용하고, 값에 의존하지 않는 category 만 canonical shape 를 사용한다. HIGH 도
+cache (반복 deny 비용 절감). cache 는 동작 정책을 대체하지 않으며, quota 소진
+시 `fallbackOnError ∈ {deny, rule}` 정책만 적용한다.
 
 전체 spec: §3 Layer 5 + §11 v2.1 binding decisions.
 
@@ -1597,7 +1600,7 @@ HMAC-chained channel 에 기록한다. General telemetry `AuditLogger.log`
 tool_call 은 renderer/ops parity 검증이 끝날 때까지 유지한다.
 
 **Atomic cutover (No-Fallback):** keychain 미사용 환경 (Electron
-`safeStorage` 미가용) 에서는 0o600 file fallback 만 허용. boot 시
+`safeStorage` 미가용) 에서는 0o600 file secret store 만 허용. boot 시
 secret 영구 저장 실패 → 감사 chain 미시작 + 사용자 actionable 에러
 (silent downgrade 금지).
 

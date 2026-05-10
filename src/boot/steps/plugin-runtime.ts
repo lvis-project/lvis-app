@@ -352,6 +352,13 @@ export function sanitizePluginPendingPrompt(prompt: string): string {
   return stripLeadingSlash(prompt);
 }
 
+export function formatPluginPendingPrompt(prompt: string, source: string): string {
+  if (!isProactiveOrigin(source)) {
+    throw new Error(`invalid proactive source for pending prompt: ${source}`);
+  }
+  return `<imported-from-proactive source="${source}">\n${sanitizePluginPendingPrompt(prompt)}\n</imported-from-proactive>`;
+}
+
 export class TriggerConversationRateLimiter {
   private readonly windowMs: number;
   private readonly maxCalls: number;
@@ -1257,7 +1264,7 @@ export async function initPluginRuntime(
           summary: spec.summary ?? spec.prompt.slice(0, 200),
           running: false,
           primaryActionLabel: spec.primaryActionLabel ?? "지금 답하기",
-          pendingPrompt: sanitizePluginPendingPrompt(spec.prompt),
+          pendingPrompt: formatPluginPendingPrompt(spec.prompt, decision.source),
           createdAt: new Date().toISOString(),
         };
         if (!mainWindow.isDestroyed()) {

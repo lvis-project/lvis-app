@@ -149,6 +149,8 @@ export interface ConversationDeps {
   /** Issue #260: optional notification service for turn-end auto-fire. */
   notificationService?: NotificationService;
   auditLogger?: AuditLogger;
+  /** Rebuild the Layer 5 reviewer after persisted reviewer settings change. */
+  rewireReviewerAgent?: () => void;
 }
 
 /**
@@ -319,6 +321,7 @@ export function createConversationLoop(deps: ConversationDeps): ConversationLoop
     sessionTodoStore: deps.sessionTodoStore,
     notificationService: deps.notificationService,
     auditLogger: deps.auditLogger,
+    rewireReviewerAgent: deps.rewireReviewerAgent,
   });
 }
 

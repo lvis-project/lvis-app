@@ -10,12 +10,10 @@
  * stored "previous". Tampering with any line N forces the recomputed
  * prevHash at line N+1 to mismatch — exposing the tampered region.
  *
- * The HMAC secret lives in the system keychain when Electron's
- * `safeStorage` is available; otherwise it falls back to a 0o600
- * file at `~/.lvis/secrets/audit-hmac.key`. CLAUDE.md No-Fallback
- * rule covers external boundaries (OS keychain unavailability is
- * exactly that), so the file fallback is the *only* persistence
- * path — there is no in-memory-only mode.
+ * The HMAC secret lives behind Electron's OS-backed `safeStorage`
+ * when encryption is available. On platforms where that external OS
+ * facility is unavailable, the app uses a 0o600 file at
+ * `~/.lvis/secrets/audit-hmac.key`. There is no in-memory-only mode.
  *
  * Daily seal: `sealDay(date)` walks the day's audit JSONL,
  * recomputes the chain, and writes the final hash to a separate
@@ -39,6 +37,8 @@ import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 
 export const GENESIS_MARKER = "genesis";
+const AUDIT_HMAC_SECRET_NAME = "audit-hmac.key";
+const SAFE_STORAGE_SECRET_PREFIX = "safe:v1:";
 
 /**
  * Stable storage interface — abstracts keychain vs file persistence.
@@ -49,6 +49,12 @@ export interface SecretStore {
   read(name: string): string | null;
   /** Write a secret by name. Throws on permission/IO errors. */
   write(name: string, value: string): void;
+}
+
+export interface SafeStorageLike {
+  isEncryptionAvailable(): boolean;
+  encryptString(value: string): Buffer;
+  decryptString(value: Buffer): string;
 }
 
 /**
@@ -93,6 +99,62 @@ export class FileSecretStore implements SecretStore {
 }
 
 /**
+ * Electron safeStorage-backed secret store. Ciphertext is persisted under
+ * `~/.lvis/secrets/` with 0600 mode; the secret material is encrypted by
+ * the OS-backed Electron safeStorage facility before it touches disk.
+ */
+export class SafeStorageSecretStore implements SecretStore {
+  private readonly dir: string;
+
+  constructor(
+    private readonly safeStorage: SafeStorageLike,
+    dir?: string,
+  ) {
+    this.dir = dir ?? join(homedir(), ".lvis", "secrets");
+    if (!existsSync(this.dir)) {
+      mkdirSync(this.dir, { recursive: true, mode: 0o700 });
+    }
+  }
+
+  private path(name: string): string {
+    if (/[\/\\]|\.\./.test(name)) {
+      throw new Error(`invalid secret name: ${name}`);
+    }
+    return join(this.dir, `${name}.safe-storage`);
+  }
+
+  private assertAvailable(): void {
+    if (!this.safeStorage.isEncryptionAvailable()) {
+      throw new Error("Electron safeStorage encryption is not available");
+    }
+  }
+
+  read(name: string): string | null {
+    this.assertAvailable();
+    const p = this.path(name);
+    if (!existsSync(p)) return null;
+    const encrypted = readFileSync(p, "utf-8").replace(/\n$/, "");
+    if (!encrypted.startsWith(SAFE_STORAGE_SECRET_PREFIX)) {
+      throw new Error(`safeStorage secret '${name}' has invalid ciphertext format`);
+    }
+    return this.safeStorage.decryptString(
+      Buffer.from(encrypted.slice(SAFE_STORAGE_SECRET_PREFIX.length), "base64"),
+    );
+  }
+
+  write(name: string, value: string): void {
+    this.assertAvailable();
+    const p = this.path(name);
+    if (existsSync(this.dir)) {
+      try { chmodSync(this.dir, 0o700); } catch { /* non-fatal */ }
+    }
+    const encrypted = SAFE_STORAGE_SECRET_PREFIX + this.safeStorage.encryptString(value).toString("base64");
+    writeFileSync(p, encrypted, { encoding: "utf-8", mode: 0o600 });
+    try { chmodSync(p, 0o600); } catch { /* non-fatal */ }
+  }
+}
+
+/**
  * In-memory store — for tests. NOT a production fallback.
  */
 export class MemorySecretStore implements SecretStore {
@@ -114,13 +176,12 @@ export class MemorySecretStore implements SecretStore {
  * audit chain rather than silently downgrade to no-tamper-evidence.
  */
 export function ensureAuditSecret(store: SecretStore): string {
-  const name = "audit-hmac.key";
-  const existing = store.read(name);
+  const existing = store.read(AUDIT_HMAC_SECRET_NAME);
   if (existing && existing.length >= 32) {
     return existing;
   }
   const generated = randomBytes(32).toString("hex");
-  store.write(name, generated);
+  store.write(AUDIT_HMAC_SECRET_NAME, generated);
   return generated;
 }
 

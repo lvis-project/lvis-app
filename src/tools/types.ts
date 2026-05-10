@@ -11,6 +11,7 @@
  *   - Describe the per-invocation execution context / result shape.
  *   - Carry §6.3 Layer 1 deny rules through the registry.
  */
+import type { ChatInputOrigin } from "../shared/chat-origin.js";
 
 export type ToolSource = "builtin" | "plugin" | "mcp";
 export type TrustLevel = "high" | "medium" | "low";
@@ -47,25 +48,21 @@ export type ToolCategory = "read" | "write" | "shell" | "network" | "meta";
 export type ToolDecisionOverride = "always-allow-with-audit" | "ask";
 
 /**
- * Permission policy §9 trust origin — which actor produced the tool invocation. Carried
+ * Permission policy §9 trust origin — which content boundary produced the invocation. Carried
  * with `ToolPermissionContext` and propagated into:
  *   - audit entries (provenance evidence)
- *   - approval-request payloads (so the renderer can warn on agent/plugin)
+ *   - approval-request payloads (so the renderer can warn on non-keyboard origins)
  *   - Layer 5 reviewer cache key (a high-trust verdict cached for
- *     `user` MUST NOT be served to an `agent` invocation of the same shape)
+ *     `user-keyboard` MUST NOT be served to an `llm-tool-arg` invocation of the same shape)
  *   - Layer 5 reviewer prompt (LLM sees origin to detect prompt-injection)
  *
- * Distinct from `ToolSource` (which describes *where the tool came from*):
- * a builtin tool can still be invoked with `trustOrigin: "agent"` if a
- * sub-agent triggered it.
+ * Distinct from both `ToolSource` (where the tool came from) and the outer
+ * chat input origin. The conversation loop must derive this at the concrete
+ * model/tool boundary: a typed user prompt that causes a model-generated bash
+ * input is `llm-tool-arg`, while later tool calls influenced by read_file
+ * output are `file-content`.
  */
-export type ToolTrustOrigin =
-  | "user"
-  | "system"
-  | "plugin"
-  | "proactive"
-  | "routine"
-  | "agent";
+export type ToolTrustOrigin = ChatInputOrigin;
 
 /**
  * §6.4 source → trust mapping. Builtin tools ship with the host so they

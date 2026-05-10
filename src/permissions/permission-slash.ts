@@ -7,16 +7,15 @@
  * This module returns structured results so callers can render command
  * results without re-parsing and can enforce trust origin at one boundary.
  *
- * Trust origin gate (spec C2 fix): callers MUST verify
- * `trustOrigin === "user"` before invoking. This module does NOT enforce
- * trust origin internally — it would be plausibly mistaken for the
- * authoritative gate. Callers up-stack (the slash dispatcher) own the
- * trust check.
+ * Trust origin gate (spec C2 fix): only `user-keyboard` may dispatch
+ * `/permission` mutations. This module enforces that boundary and returns
+ * structured outcomes so callers do not re-parse command text.
  */
 import {
   validateDirectoryAddition,
   buildAllowedScope,
 } from "./allowed-directories.js";
+import type { ChatInputOrigin } from "../shared/chat-origin.js";
 import {
   addAllowedDirectoryPersist,
   removeAllowedDirectoryPersist,
@@ -36,6 +35,13 @@ import {
 } from "../hooks/hook-trust-commands.js";
 export { stripLeadingSlash } from "../shared/slash-sanitizer.js";
 import { stripLeadingSlash } from "../shared/slash-sanitizer.js";
+import {
+  readRecentAuditEntries,
+  summarizeAuditDir,
+  verifyAllAuditFiles,
+} from "./permission-audit-runner.js";
+import type { PermissionAuditEntry } from "../audit/audit-schema.js";
+import type { SecretStore } from "../audit/hmac-chain.js";
 
 export type PermissionDirVerb = "allow" | "deny" | "list";
 
@@ -45,13 +51,15 @@ export interface PermissionDirCommand {
   path: string;
   /** `--session` flag for in-memory-only allow (allow-once). */
   session: boolean;
+  /** Required before persisting paths with adjacency warnings. */
+  acknowledgeWarnings: boolean;
 }
 
 export type PermissionDirResult =
-  | { ok: true; verb: "allow"; persisted: string[]; sessionOnly: boolean; warnings: string[] }
+  | { ok: true; verb: "allow"; persisted: string[]; sessionOnly: boolean; warnings: string[]; sessionDirectory?: string }
   | { ok: true; verb: "deny"; persisted: string[] }
   | { ok: true; verb: "list"; defaults: string[]; userAdditions: string[]; effective: string[] }
-  | { ok: false; error: string };
+  | { ok: false; error: string; warnings?: string[]; requiresAcknowledgement?: boolean };
 
 /**
  * Parse a `/permission dir ...` invocation. Accepts the full subcommand
@@ -81,10 +89,11 @@ export function parsePermissionDirCommand(
     if (args.length > 1) {
       return { ok: false, error: "list takes no extra arguments" };
     }
-    return { verb, path: "", session: false };
+    return { verb, path: "", session: false, acknowledgeWarnings: false };
   }
   const session = args.includes("--session");
-  const remaining = args.slice(1).filter((a) => a !== "--session");
+  const acknowledgeWarnings = args.includes("--ack-warnings");
+  const remaining = args.slice(1).filter((a) => a !== "--session" && a !== "--ack-warnings");
   if (remaining.length === 0) {
     return { ok: false, error: `${verb} requires a path argument` };
   }
@@ -94,7 +103,10 @@ export function parsePermissionDirCommand(
   if (verb === "deny" && session) {
     return { ok: false, error: "--session is not valid for deny" };
   }
-  return { verb, path: remaining[0], session };
+  if (verb === "deny" && acknowledgeWarnings) {
+    return { ok: false, error: "--ack-warnings is not valid for deny" };
+  }
+  return { verb, path: remaining[0], session, acknowledgeWarnings };
 }
 
 function tokenizePermissionArgs(rawArgs: string): { ok: true; tokens: string[] } | { ok: false; error: string } {
@@ -169,6 +181,14 @@ export async function dispatchPermissionDirCommand(
   if (cmd.verb === "allow") {
     const validation = validateDirectoryAddition(cmd.path);
     if (!validation.ok) return { ok: false, error: validation.reason };
+    if (validation.adjacencyWarnings.length > 0 && !cmd.acknowledgeWarnings) {
+      return {
+        ok: false,
+        error: "directory has adjacency warnings; explicit acknowledgement required",
+        warnings: validation.adjacencyWarnings,
+        requiresAcknowledgement: true,
+      };
+    }
     if (cmd.session) {
       // Phase 5 will plumb this into the in-memory scope. For now we
       // surface a structured response so the dispatcher can update the
@@ -179,6 +199,7 @@ export async function dispatchPermissionDirCommand(
         persisted: [],
         sessionOnly: true,
         warnings: validation.adjacencyWarnings,
+        sessionDirectory: validation.canonicalPath,
       };
     }
     const next = await addAllowedDirectoryPersist(cmd.path, pathOverride);
@@ -373,6 +394,52 @@ export function parsePermissionAuditCommand(
   return { verb, last };
 }
 
+export type PermissionAuditResult =
+  | {
+      ok: true;
+      verb: "show";
+      entries: PermissionAuditEntry[];
+      total: number;
+      summary: { files: number; bytes: number };
+    }
+  | {
+      ok: true;
+      verb: "verify";
+      intact: boolean;
+      totalFiles: number;
+      totalEntries: number;
+      firstBrokenFile?: string;
+    }
+  | { ok: false; error: string };
+
+export function dispatchPermissionAuditCommand(
+  cmd: PermissionAuditCommand,
+  opts: { auditDir: string; secret: string | null; sealStore?: SecretStore },
+): PermissionAuditResult {
+  if (cmd.verb === "show") {
+    const entries = readRecentAuditEntries(opts.auditDir, cmd.last);
+    return {
+      ok: true,
+      verb: "show",
+      entries,
+      total: entries.length,
+      summary: summarizeAuditDir(opts.auditDir),
+    };
+  }
+  if (!opts.secret) {
+    return { ok: false, error: "audit-chain-not-initialized" };
+  }
+  const result = verifyAllAuditFiles(opts.auditDir, opts.secret, opts.sealStore);
+  return {
+    ok: true,
+    verb: "verify",
+    intact: result.intact,
+    totalFiles: result.totalFiles,
+    totalEntries: result.totalEntries,
+    ...(result.firstBrokenFile ? { firstBrokenFile: result.firstBrokenFile } : {}),
+  };
+}
+
 // ─── /permission mode ──────────────────────────────────────────────────
 
 export type SlashPermissionMode = "strict" | "default" | "auto";
@@ -416,7 +483,9 @@ export function parsePermissionModeCommand(
 
 // ─── /permission rules / hooks ─────────────────────────────────────────
 
-export type PermissionRulesCommand = { verb: "rules"; sub: "list" };
+export type PermissionRulesCommand =
+  | { verb: "rules"; sub: "list" }
+  | { verb: "rules"; sub: "add" | "remove"; action: "allow" | "deny"; pattern: string };
 export type PermissionHooksCommand =
   | { verb: "hooks"; sub: "list" }
   | { verb: "hooks"; sub: "accept"; name: string }
@@ -426,11 +495,28 @@ export type PermissionHooksCommand =
 export function parsePermissionRulesCommand(
   rawArgs: string,
 ): PermissionRulesCommand | { ok: false; error: string } {
-  const args = rawArgs.trim().split(/\s+/).filter((p) => p.length > 0);
-  if (args.length !== 1 || args[0] !== "list") {
-    return { ok: false, error: "usage: /permission rules list" };
+  const tokenized = tokenizePermissionArgs(rawArgs);
+  if (!tokenized.ok) return tokenized;
+  const args = tokenized.tokens;
+  if (args.length === 1 && args[0] === "list") {
+    return { verb: "rules", sub: "list" };
   }
-  return { verb: "rules", sub: "list" };
+  const sub = args[0];
+  if (sub !== "add" && sub !== "remove") {
+    return { ok: false, error: "usage: /permission rules <list|add|remove> [allow|deny] [pattern]" };
+  }
+  const action = args[1];
+  if (action !== "allow" && action !== "deny") {
+    return { ok: false, error: `${sub} requires action allow|deny` };
+  }
+  const pattern = args[2];
+  if (!pattern) {
+    return { ok: false, error: `${sub} requires a pattern` };
+  }
+  if (args.length > 3) {
+    return { ok: false, error: `${sub} takes a single pattern` };
+  }
+  return { verb: "rules", sub, action, pattern };
 }
 
 export function parsePermissionHooksCommand(
@@ -480,12 +566,7 @@ export async function dispatchPermissionHooksCommand(
  * is gated on `user-keyboard` only; everything else short-circuits
  * to plain-text echo (per spec §3 Layer 8).
  */
-export type SlashTrustOrigin =
-  | "user-keyboard"
-  | "plugin-emitted"
-  | "llm-tool-arg"
-  | "file-content"
-  | "unknown";
+export type SlashTrustOrigin = ChatInputOrigin | "unknown";
 
 /**
  * Top-level dispatch result. The renderer's slash handler turns

@@ -119,7 +119,11 @@ describe("Permission policy P4 ManifestIntegrityState", () => {
 describe("Permission policy P4 bindManifestIntegrityAudit", () => {
   it("writes an audit entry per violation", () => {
     const state = new ManifestIntegrityState();
-    const audit = { log: vi.fn() } as unknown as import("../../audit/audit-logger.js").AuditLogger;
+    const audit = {
+      log: vi.fn(),
+      isPermissionAuditChainReady: vi.fn(() => false),
+      appendPermissionAuditEntry: vi.fn(),
+    } as unknown as import("../../audit/audit-logger.js").AuditLogger;
     bindManifestIntegrityAudit(audit, state);
     state.recordViolation("p", "tool_x", "writeFileSync");
     expect(audit.log).toHaveBeenCalledOnce();
@@ -127,6 +131,32 @@ describe("Permission policy P4 bindManifestIntegrityAudit", () => {
     expect(entry.type).toBe("error");
     expect(entry.input).toContain("manifest_integrity_violation");
     expect(entry.input).toContain("tool_x");
+  });
+
+  it("appends manifest_violation to the permission audit chain when ready", async () => {
+    const state = new ManifestIntegrityState();
+    const appendPermissionAuditEntry = vi.fn(async (entry: Record<string, unknown>) => ({
+      ...entry,
+      prevHash: "h",
+    }));
+    const audit = {
+      log: vi.fn(),
+      isPermissionAuditChainReady: vi.fn(() => true),
+      appendPermissionAuditEntry,
+    } as unknown as import("../../audit/audit-logger.js").AuditLogger;
+
+    bindManifestIntegrityAudit(audit, state);
+    state.recordViolation("p", "tool_x", "writeFileSync");
+    expect(appendPermissionAuditEntry).toHaveBeenCalledOnce();
+    expect(appendPermissionAuditEntry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        decision: "manifest_violation",
+        pluginId: "p",
+        toolName: "tool_x",
+        attemptedOperation: "writeFileSync",
+        trustOrigin: "plugin-emitted",
+      }),
+    );
   });
 });
 

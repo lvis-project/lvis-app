@@ -3,7 +3,7 @@
 > **Status:** Draft v2.2 — multi-agent + Copilot review loop applied
 > **Issue:** #627
 > **PR:** #632
-> **Last updated:** 2026-05-09
+> **Last updated:** 2026-05-10
 > **v2.2 delta:** current implementation snapshot + future direction aligned to PR #632 head
 
 ## 0. Purpose & scope
@@ -30,13 +30,13 @@ PR #626 (Routine v2) 의 production smoke test 에서 발견된 *headless routin
 
 | 원칙 | 적용 |
 |---|---|
-| **Fail-safe defaults** | 미선언 category → manifest 검증 fail. plugin 의 `isReadOnly()` 무시 (trust boundary). `fallbackOnError` enum: `deny | rule` 만 (allow-and-audit 폐지) |
+| **Fail-safe defaults** | SDK manifest schema 가 SOT. 현재 SDK schema 에 `toolSchemas[].category/pathFields` 가 없으므로 host 는 app-local 확장 검증을 만들지 않고, plugin tool 은 보수적으로 `write` 로 등록한다. plugin 의 `isReadOnly()` 무시 (trust boundary). `fallbackOnError` enum: `deny | rule` 만 (allow-and-audit 폐지) |
 | **Defense in depth (eval pipeline + collected denyReasons)** | 평가는 numeric 순서 short-circuit, 단 *모든 적용 가능 deny 이유*는 `denyReasons[]` 로 audit. 한 layer 의 deny 가 다른 layer 의 forensics 를 가리지 않음 |
 | **Trust origin classification** | 모든 입력에 4-tier origin 부여 (user-keyboard / plugin-emitted / llm-tool-arg / file-content). Slash + durable mutation 은 user-keyboard 만 |
-| **Atomic cutover with documented grace** | Backward-compat shim 금지 (CLAUDE.md No-Fallback). 단 plugin manifest category 미선언은 *2-week boot-warn grace* + CLAUDE.md 명시 *hard removal date* (No-Fallback 룰 의 escape hatch: "deprecation plan + 제거 일정") |
+| **Atomic cutover through SDK SOT** | Backward-compat shim 금지 (CLAUDE.md No-Fallback). `category/pathFields` 는 SDK schema 에 먼저 추가하고 active plugin 을 맞춘 뒤 host hard-fail 로 전환한다. 앱 로컬 schema extension 이나 boot-warn grace 는 두지 않는다. |
 | **User-in-the-loop > silent** | Headless 의 implicit allow 폐지. Reviewer agent (LOW/MED auto+audit, HIGH deferred queue) 또는 LLM-free path |
 | **Multi-vendor neutrality** | Reviewer agent provider/model 설정 가능 + LLM-free path (`rule`) + 비활성 (`disabled`) |
-| **Path-aware everywhere** | Tool 의 *모든* path 인자 (manifest declared `pathFields[]`) 가 allowed directories 검사 |
+| **Path-aware everywhere** | Tool 의 *모든* 선언된 path 인자 (`Tool.pathFields[]`, 향후 SDK manifest `pathFields[]`) 가 allowed directories 검사 대상. 선언이 없는 plugin tool 은 `write` category 로 ask/reviewer 경로를 탄다. |
 | **Manifest integrity** | "read" 선언 plugin tool 은 boot 시 fs proxy 로 wrap 되어 write attempts 가 panic. 신뢰 axis 는 manifest-static + runtime sanity-check |
 | **Audit tamper-evidence** | `~/.lvis/audit*` 자체가 Layer 0 sensitive (write 차단). HMAC-chain prevHash + daily seal hash 별도 store |
 
@@ -203,7 +203,7 @@ export function canonicalizePathForMatch(rawPath: string): string {
 }
 ```
 
-(Claude Code `permissions.additionalDirectories` 명명 채택. 1 cycle alias `allowedDirectories` 도 accept.)
+(Claude Code `permissions.additionalDirectories` 명명 채택. `allowedDirectories` alias/shim 은 두지 않는다.)
 
 **Default (computed at runtime):** `process.cwd()` ∪ `~/.lvis/` *minus* Layer 0 deny 경로 (즉 `~/.lvis/secrets/` 는 allowed dir 안에 있어도 Layer 0 deny 가 우선).
 
@@ -260,6 +260,8 @@ export function canonicalizePathForMatch(rawPath: string): string {
 `write_file` intentionally does not absorb `edit` or `apply` semantics. Full-file write, exact edit, and patch application are distinct intent/permission surfaces, so each ships as a separate `write` category tool with its own schema and validation.
 
 **Native PowerShell:** `powershell` is a separate `shell` tool, not a `bash` alias. Bash can launch `pwsh` when installed, but cannot validate PowerShell grammar, execution policy/profile behavior, object-pipeline semantics, or Windows path rules with the Bash AST validator. The PowerShell tool uses the platform PowerShell parser (`pwsh` on non-Windows, `powershell.exe` on Windows) to inspect command AST before spawn. Parser unavailability or parse failure is fail-closed; there is no regex compatibility fallback.
+
+Shell tools also run Layer 0/1 path policy over their working directory and path-like command operands before spawn. Native shell validation is therefore not limited to schema-declared `pathFields`; `bash`/`powershell` command strings are their own execution surface.
 
 **Category registry (Open-Closed):**
 
@@ -415,7 +417,7 @@ sensitivePathsAdjacent: $ADJACENT_BRIEF
 
 ```typescript
 interface VerdictCacheEntry {
-  key: string;          // sha256(toolName+source+category+canonicalInputShape)
+  key: string;          // sha256(toolName+source+category+trustOrigin+approvalCacheKey+canonicalInputIdentity)
   verdict: RiskVerdict;
   expiresAt: number;     // now + 24h
   invalidationKey: string; // hash of (allowedDirectories, scope)
@@ -424,6 +426,7 @@ interface VerdictCacheEntry {
 
 - 저장 위치: `~/.lvis/permissions/reviewer-cache.jsonl`
 - HIGH verdict 도 cache (반복 deny 비용 절감)
+- `shell` / `network` / `read` / `write` 는 command literal, host, path 값이 deterministic risk 를 바꾸므로 sorted literal JSON 을 cache identity 로 사용한다. 값에 의존하지 않는 category 만 canonical shape 를 사용한다.
 - 설정 변경 (`allowedDirectories`, `scope`) → invalidationKey 미스매치 → cache miss
 - TTL 24h
 - **Caching ≠ fallback** (Code-reviewer m2): cost optimization 만. Quota exhaustion 시 cache 가 *circuit breaker* 처럼 동작 안 함 — `fallbackOnError` 정책 (`rule | deny`) 이 적용
@@ -598,14 +601,15 @@ compat/fallback surface 는 제외하고, host/app/plugin contract 는 다음 �
 - 기존 `dangerous` 마이그레이션 (bash → shell, agent-spawn/ask-user → meta + decisionOverride)
 - Native file tools Phase 1: `read_file`, `list_files`, `glob_files`, `grep_files`, `write_file`, `edit_file`
 - Native tools Phase 2: `apply_patch`, `move_file`, `delete_file`, `powershell`
-- Authority-sensitive tool approval identity: tools may publish `approvalCacheKey(input)` so allow/deny rules bind to the exact capability scope, not only the tool name. `schedule_routine` keys include the normalized `allowedPlugins` scope so high-trust approvals cannot authorize a lower-trust or broader plugin scope.
+- Authority-sensitive tool approval identity: tools may publish `approvalCacheKey(input, ctx)` so allow/deny rules bind to the exact capability scope, not only the tool name. `schedule_routine` keys include the normalized `allowedPlugins` scope, shell tools key command+cwd, and write-capable native file tools key canonical target path(s) so one approval cannot authorize unrelated plugin scope, shell command, or filesystem target.
 - Native tools receive `ToolExecutionContext.allowedDirectories` from the executor and use that single scope for internal sandbox checks. `permissions.additionalDirectories` therefore affects Layer 1 and tool-local validation identically.
+- `glob_files` and `grep_files` scan within the bounded traversal budget, then apply include/content filtering before the user-visible result limit so late valid matches are not skipped by early non-matching files.
 - Per-tool allow/deny audit decisions and hook quarantine events are double-written to the HMAC-chained permission audit channel while the general telemetry channel remains during parity verification.
 - `src/lib/glob-matcher.ts` is the shared minimatch-subset implementation for Layer 0 sensitive paths and native file glob/include matching.
 - PermissionManager rules → registry-driven
 - `executeOne(invocation, scope, options)` ExecuteOptions bundling (9 → 3 args)
 - `routine.scope.{pluginIds, forcedPluginIds, directories}` rename + discriminated union
-- Manifest validation: registry enum + missing → fail (with 2-week boot-warn grace per CLAUDE.md hard removal date)
+- Manifest validation: built-in category registry is closed; plugin authority metadata waits for SDK schema SOT before host hard-fail
 - Tests + arch.md §6.4 update
 
 ### Phase 2.5 — Path policy (Layer 0 expand + Layer 1 + frozen-canonical)
@@ -648,14 +652,12 @@ compat/fallback surface 는 제외하고, host/app/plugin contract 는 다음 �
 - CLAUDE.md "Permission Policy (REQUIRED)" rule entry + hard removal date for category grace
 - Tests: slash injection regression, audit tamper detection, mode change durability
 
-### Phase 6 — Plugin manifest category cutover (cross-repo)
-- 6 plugin (agent-hub, work-proactive, meeting, local-indexer, ms-graph, ep-api) plugin.json `toolSchemas[*].category` 추가
-- Each plugin PR includes: category declaration + sanity test (manifest claim ↔ runtime fs proxy 결과 일치)
-- **Deadlock recovery procedure (architect CRITICAL-3):**
-  - Boot-warn grace 2 weeks: missing category → boot-warn + entry in `permissions.knownLagPlugins[]` (CLAUDE.md 에 hard removal date 명시)
-  - 1 plugin PR stuck > 1 week → orchestrator 가 plugin 의 maintainer 에 escalation + 임시 fork 권한
-  - Hard removal date 후에도 미완 → CLAUDE.md grace 연장 *공식 결정* 필요 (즉 silent drift 방지)
-- 모든 plugin 머지 + grace 만료 후 manifest validation hard fail 활성화
+### Phase 6 — SDK-first plugin manifest authority cutover (cross-repo)
+- SDK schema 에 `toolSchemas[*].category` 와 `toolSchemas[*].pathFields` 를 추가한다.
+- 6 plugin (agent-hub, work-proactive, meeting, local-indexer, ms-graph, ep-api) plugin.json 에 authority metadata 를 추가한다.
+- Each plugin PR includes: category/pathFields declaration + sanity test (manifest claim ↔ runtime fs proxy 결과 일치).
+- App host 는 SDK schema 를 그대로 사용한다. SDK 및 active plugin merge 전까지 app-local category schema extension, boot-warn grace, legacy alias 를 두지 않는다.
+- 모든 plugin 머지 후 host 가 missing category/pathFields 를 SDK schema hard-fail 로 받도록 SDK pin 을 올린다.
 
 ### 5.2 Forward direction
 
@@ -666,7 +668,7 @@ compat/fallback surface 는 제외하고, host/app/plugin contract 는 다음 �
 | Hook hardening follow-up | Signed hook (minisign 또는 동등 수준), hook hash 를 reviewer cache `invalidationKey` 에 포함, `modify` action 검토 | signing 전까지 v1 hook 은 deny-only 유지 |
 | DLP depth follow-up | Hook stdin / reviewer input 의 bounded deep-redaction (cycle/size guard 포함) | "nested object 는 host 밖으로 나갈 수 있다"는 현재 contract 를 더 강하게 만드는 방향만 허용 |
 | Plugin sandbox follow-up | V8 isolate / Worker thread / permissioned fs facade 비교 후 manifest integrity proxy 를 보조층으로 격하 | app 이 plugin code 를 역참조하지 않음 |
-| Manifest hard-fail follow-up | 모든 active plugin category 선언 완료 후 boot-warn grace 제거 | legacy shim 없이 hard fail |
+| Manifest authority hard-fail follow-up | SDK schema + active plugin category/pathFields 선언 완료 후 host SDK pin 상향 | legacy shim 없이 hard fail |
 | Governance integration follow-up | §8 Agent Approval 과 permission tool audit 를 공통 timeline 으로 연결 | single decision / single prompt 원칙 유지 |
 
 ## 6. Open questions
@@ -684,7 +686,7 @@ compat/fallback surface 는 제외하고, host/app/plugin contract 는 다음 �
 | Single Mega PR (PR #632 누적 push) | ✅ "Single Mega PR" | 사용자 |
 | Allowed directories (Layer 1, additionalDirectories naming) | ✅ "디렉토리 지정 따로 취급" + code-reviewer 명명 | 사용자 + reviewer |
 | 100% 구현 + 이슈 종료 | ✅ "30% 가 아닌 100%" | 사용자 |
-| 2-week grace for plugin category | △ atomic-cutover 와 No-Fallback 룰의 escape hatch | architect + critic 합의 |
+| SDK-first category/pathFields cutover | ✅ app-local manifest 확장과 boot-warn grace 를 폐기하고 SDK schema 를 SOT 로 유지 | #636 재검토 |
 | Plugin trust boundary (manifest static only) | ✅ critic finding | review |
 | Audit log Layer 0 sensitive | ✅ security review | review |
 | `/permission` user-keyboard origin gate | ✅ security C2 + critic C1 + architect C2 (3-confirm) | review |
@@ -725,7 +727,7 @@ compat/fallback surface 는 제외하고, host/app/plugin contract 는 다음 �
 **Critical changes:**
 1. Slash injection via `pendingPrompt` (Layer 8) — trust origin gate + leading `/` strip
 2. Audit log self-tampering (Layer 7) — `~/.lvis/audit*` Layer 0 sensitive + HMAC chain + daily seal
-3. Atomic cutover deadlock (Phase 6) — 2-week boot-warn grace + CLAUDE.md hard removal date
+3. Atomic cutover deadlock (Phase 6) — resolved as SDK-first cutover; app-local schema extension and boot-warn grace rejected
 4. Layer 0/1 boundary (Layer 0 expand `~/.lvis/{secrets,audit*,hooks,sessions,permissions}`)
 5. `fallbackOnError` enum: `allow-and-audit` 제거
 6. Manifest honesty (NEW §3.5) — runtime fs proxy on read-declared

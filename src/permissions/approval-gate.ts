@@ -89,8 +89,9 @@ export interface ApprovalRequest {
     adjacencyWarnings: readonly string[];
   };
   /**
-   * Permission policy P2.5 §9 — trust origin classification (user / system / plugin /
-   * proactive / routine / agent). Audited; renderer may surface badge.
+   * Permission policy P2.5 §9 — trust origin classification
+   * (user-keyboard / plugin-emitted / llm-tool-arg / file-content).
+   * Audited; renderer may surface badge.
    */
   trustOrigin?: string;
   /**
@@ -177,6 +178,8 @@ interface PendingEntry {
   resolve: (decision: ApprovalDecision) => void;
   reject: (err: Error) => void;
   timer: ReturnType<typeof setTimeout>;
+  /** Permission origin captured with the approval prompt. */
+  trustOrigin: string;
   /** §D2: nonce issued for this request (echoed back verbatim) */
   nonce: string;
   /** §D2: expected HMAC for this request */
@@ -319,7 +322,7 @@ export class ApprovalGate {
           timestamp: new Date().toISOString(),
           sessionId: "approval-gate",
           type: "approval",
-          output: `[approval:sensitive-path-blocked] ${fullReq.id} toolName=${fullReq.toolName} raw=${rawCandidate} canonical=${caseFolded} pattern=${matchedPattern} → deny-once (hard-block)`,
+          output: `[approval:sensitive-path-blocked] ${fullReq.id} toolName=${fullReq.toolName} trustOrigin=${fullReq.trustOrigin ?? "unknown"} raw=${rawCandidate} canonical=${caseFolded} pattern=${matchedPattern} → deny-once (hard-block)`,
         });
         return {
           requestId: fullReq.id,
@@ -345,7 +348,7 @@ export class ApprovalGate {
         timestamp: new Date().toISOString(),
         sessionId: "approval-gate",
         type: "approval",
-        output: `[approval:read-only-auto-approve] ${fullReq.id} toolName=${fullReq.toolName} mode=${fullReq.mode ?? "default"} → allow-once`,
+        output: `[approval:read-only-auto-approve] ${fullReq.id} toolName=${fullReq.toolName} trustOrigin=${fullReq.trustOrigin ?? "unknown"} mode=${fullReq.mode ?? "default"} → allow-once`,
       });
       return {
         requestId: fullReq.id,
@@ -360,7 +363,7 @@ export class ApprovalGate {
         timestamp: new Date().toISOString(),
         sessionId: "approval-gate",
         type: "approval",
-        output: `[approval:send-failed] ${fullReq.id} toolName=${fullReq.toolName} — webContents already destroyed → deny-once`,
+        output: `[approval:send-failed] ${fullReq.id} toolName=${fullReq.toolName} trustOrigin=${fullReq.trustOrigin ?? "unknown"} — webContents already destroyed → deny-once`,
       });
       return { requestId: fullReq.id, choice: "deny-once" };
     }
@@ -370,7 +373,7 @@ export class ApprovalGate {
       timestamp: new Date().toISOString(),
       sessionId: "approval-gate",
       type: "approval",
-      input: `[approval:requested] ${fullReq.id} toolName=${fullReq.toolName} category=${fullReq.category} source=${fullReq.source ?? "unknown"}`,
+      input: `[approval:requested] ${fullReq.id} toolName=${fullReq.toolName} category=${fullReq.category} source=${fullReq.source ?? "unknown"} trustOrigin=${fullReq.trustOrigin ?? "unknown"}`,
     });
 
     // Issue #260 — surface a system notification when an approval is about
@@ -410,7 +413,7 @@ export class ApprovalGate {
           timestamp: new Date().toISOString(),
           sessionId: "approval-gate",
           type: "approval",
-          output: `[approval:timeout] ${fullReq.id} toolName=${fullReq.toolName} → deny-once`,
+          output: `[approval:timeout] ${fullReq.id} toolName=${fullReq.toolName} trustOrigin=${fullReq.trustOrigin ?? "unknown"} → deny-once`,
         });
         resolve({
           requestId: fullReq.id,
@@ -422,6 +425,7 @@ export class ApprovalGate {
         resolve,
         reject,
         timer,
+        trustOrigin: fullReq.trustOrigin ?? "unknown",
         nonce,
         expectedHmac,
       });
@@ -440,7 +444,7 @@ export class ApprovalGate {
           timestamp: new Date().toISOString(),
           sessionId: "approval-gate",
           type: "approval",
-          output: `[approval:args-dlp-masked] ${fullReq.id} toolName=${fullReq.toolName} detections=${[...dlpHits].join(",")}`,
+          output: `[approval:args-dlp-masked] ${fullReq.id} toolName=${fullReq.toolName} trustOrigin=${fullReq.trustOrigin ?? "unknown"} detections=${[...dlpHits].join(",")}`,
         });
       }
       // §F2: send 실패(webContents 소멸 race) 시 pending 정리 후 deny-once
@@ -454,7 +458,7 @@ export class ApprovalGate {
           timestamp: new Date().toISOString(),
           sessionId: "approval-gate",
           type: "approval",
-          output: `[approval:send-failed] ${fullReq.id} toolName=${fullReq.toolName} error=${sendErr instanceof Error ? sendErr.message : String(sendErr)} → deny-once`,
+          output: `[approval:send-failed] ${fullReq.id} toolName=${fullReq.toolName} trustOrigin=${fullReq.trustOrigin ?? "unknown"} error=${sendErr instanceof Error ? sendErr.message : String(sendErr)} → deny-once`,
         });
         resolve({ requestId: fullReq.id, choice: "deny-once" });
       }
@@ -480,7 +484,7 @@ export class ApprovalGate {
         timestamp: new Date().toISOString(),
         sessionId: "approval-gate",
         type: "approval",
-        output: `[approval:nonce-mismatch] ${requestId} choice=${decision.choice} nonceProvided=${decision.nonce ? "yes" : "no"} hmacProvided=${decision.hmac ? "yes" : "no"} → deny-once (forced)`,
+        output: `[approval:nonce-mismatch] ${requestId} trustOrigin=${entry.trustOrigin} choice=${decision.choice} nonceProvided=${decision.nonce ? "yes" : "no"} hmacProvided=${decision.hmac ? "yes" : "no"} → deny-once (forced)`,
       });
       entry.resolve({
         requestId,
@@ -497,7 +501,7 @@ export class ApprovalGate {
       timestamp: new Date().toISOString(),
       sessionId: "approval-gate",
       type: "approval",
-      output: `[approval:decided] ${requestId} choice=${decision.choice} rememberPattern=${decision.rememberPattern ?? "none"}`,
+      output: `[approval:decided] ${requestId} trustOrigin=${entry.trustOrigin} choice=${decision.choice} rememberPattern=${decision.rememberPattern ?? "none"}`,
     });
     entry.resolve(decision);
   }

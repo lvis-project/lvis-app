@@ -31,6 +31,8 @@ import {
   filterPermissionAuditLines,
   GENESIS_MARKER,
   MemorySecretStore,
+  SafeStorageSecretStore,
+  type SafeStorageLike,
   sealDayFromFile,
   sealKeyName,
   verifyChain,
@@ -93,6 +95,34 @@ describe("FileSecretStore", () => {
   it("read returns null for absent secret", () => {
     const store = new FileSecretStore(join(workDir, "secrets"));
     expect(store.read("missing")).toBe(null);
+  });
+});
+
+describe("SafeStorageSecretStore", () => {
+  function makeSafeStorage(): SafeStorageLike {
+    return {
+      isEncryptionAvailable: () => true,
+      encryptString: (value: string) => Buffer.from(`enc:${value}`, "utf-8"),
+      decryptString: (value: Buffer) => value.toString("utf-8").replace(/^enc:/, ""),
+    };
+  }
+
+  it("persists encrypted ciphertext with 0o600 mode", () => {
+    const store = new SafeStorageSecretStore(makeSafeStorage(), join(workDir, "secrets"));
+    store.write("audit-hmac.key", "hello-secret");
+    const filePath = join(workDir, "secrets", "audit-hmac.key.safe-storage");
+    const mode = statSync(filePath).mode & 0o777;
+    expect(mode).toBe(0o600);
+    expect(store.read("audit-hmac.key")).toBe("hello-secret");
+  });
+
+  it("throws when safeStorage becomes unavailable", () => {
+    const store = new SafeStorageSecretStore({
+      isEncryptionAvailable: () => false,
+      encryptString: () => Buffer.from(""),
+      decryptString: () => "",
+    }, join(workDir, "secrets"));
+    expect(() => store.write("audit-hmac.key", "x")).toThrow(/safeStorage/);
   });
 });
 

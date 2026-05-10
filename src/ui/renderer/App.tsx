@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { debugLog } from "../../lib/debug-stream.js";
-import { composeOutgoing as composeOutgoingUtil } from "./utils/compose.js";
+import {
+  composeImportedTriggerOutgoing,
+  composeOutgoing as composeOutgoingUtil,
+} from "./utils/compose.js";
 import { vendorSupportsThinking as vendorSupportsThinkingShared } from "../../shared/vendor-capabilities.js";
 import { supportsVision } from "../../engine/llm/vendor-capabilities.js";
 import { TooltipProvider } from "../../components/ui/tooltip.js";
@@ -448,16 +451,9 @@ export function App() {
         debugLog("handleAsk", "interrupt:abort-and-proceed");
         try { await api.chatAbort(); } catch { /* no-op */ }
       }
-      // Permission policy §9 trust-origin gate for user-slash dispatch (architect round-4 ②).
-      // `/compact` and `/load` carry privileged user intent (rewrite history,
-      // load arbitrary session) so they MUST run only on user-keyboard origin.
-      // mode === "default" is the renderer's contract for "user typed this in
-      // the composer". A future non-keyboard caller of handleAsk MUST add a
-      // new mode value rather than reusing "default" — the slash dispatcher
-      // below short-circuits on any other origin.
-      const slashOrigin: "user-keyboard" | "non-keyboard" =
-        mode === "default" ? "user-keyboard" : "non-keyboard";
-      if (slashOrigin === "user-keyboard") {
+      // Renderer only performs UX-level shortcuts for typed composer input.
+      // Main owns the authoritative trust-origin classification.
+      if (mode === "default") {
         if (await handleCompactCommand(t)) {
           debugLog("handleAsk", "skip:compact-command-handled");
           return;
@@ -486,7 +482,9 @@ export function App() {
       const streamingRequestId = beginStreamingRequest();
       debugLog("handleAsk", "begin", { requestId, streamingRequestId });
       setQuestion("");
-      const composed = composeOutgoing(t);
+      const composed = mode === "trigger-import"
+        ? composeImportedTriggerOutgoing(t)
+        : composeOutgoing(t);
       const outgoing = composed.text;
       let outgoingAttachments = composed.attachments;
       // Vendor vision capability gate. The composer accepts images
