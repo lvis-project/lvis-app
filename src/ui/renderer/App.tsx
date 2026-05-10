@@ -15,6 +15,7 @@ import { getApi, getPluginViewLabel, toViewKey } from "./api-client.js";
 import type { PluginEntry } from "./components/PluginGridButton.js";
 import { ApprovalDialog } from "./dialogs/ApprovalDialog.js";
 import { ApprovalQueueStatus } from "./components/ApprovalQueueStatus.js";
+import { DeferredQueueDialog } from "./dialogs/DeferredQueueDialog.js";
 import { GlobalSearchDialog } from "./dialogs/GlobalSearchDialog.js";
 import { buildQuickActions } from "./components/CommandPopover.js";
 import { MainToolbar } from "./MainToolbar.js";
@@ -90,6 +91,7 @@ export function App() {
   const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState("llm");
+  const [deferredQueueOpen, setDeferredQueueOpen] = useState(false);
   const [activeView, setActiveView] = useState("home");
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
   const [commandPopoverOpen, setCommandPopoverOpen] = useState(false);
@@ -797,6 +799,7 @@ export function App() {
             marketplaceUrlReady={marketplaceUrlReady}
             activePluginView={activePluginView ?? null}
             onPluginPrimaryAction={(id) => { void handlePluginPrimaryAction(id); }}
+            onOpenPermissionQueue={() => setDeferredQueueOpen(true)}
           />
         </main>
         </div>
@@ -808,6 +811,7 @@ export function App() {
           so the previous App-level FloatingQuestionPanel mount is gone.
           See <AskUserQuestionCard> + ChatView ask-question slot. */}
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} api={api} onSaved={() => { void checkApiKey(); void refreshLlmSettings(); }} initialTab={settingsInitialTab} />
+      <DeferredQueueDialog open={deferredQueueOpen} onOpenChange={setDeferredQueueOpen} />
       <ApprovalDialog queue={approvalQueue} onDecide={handleApprovalDecide} />
       <ApprovalQueueStatus queue={approvalQueue} />
       {/* Conditional mount: avoids useMemorySearch IPC calls while dialog is closed.
