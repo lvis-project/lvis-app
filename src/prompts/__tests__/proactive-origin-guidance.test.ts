@@ -5,8 +5,8 @@
  * when the per-turn origin source starts with `proactive:`. Default
  * (user-initiated) turns must NOT see this section.
  *
- * Pairs with ConversationLoop.runTriggerTurn which sets/clears the source
- * around the delegated runTurn so subsequent user turns are unaffected.
+ * Pairs with imported proactive prompts, where ConversationLoop.runTurn
+ * sets/clears the source so subsequent user turns are unaffected.
  */
 import { describe, it, expect } from "vitest";
 

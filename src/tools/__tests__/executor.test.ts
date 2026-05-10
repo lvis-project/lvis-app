@@ -32,8 +32,15 @@ import { PowerShellTool } from "../powershell.js";
 import { ReadFileTool } from "../file-tools.js";
 import { PermissionManager } from "../../permissions/permission-manager.js";
 import { ApprovalGate } from "../../permissions/approval-gate.js";
+import { DeferredQueue } from "../../permissions/reviewer/deferred-queue.js";
+import { VerdictCache } from "../../permissions/reviewer/verdict-cache.js";
+import type { RiskClassifier } from "../../permissions/reviewer/risk-classifier.js";
 import { HookRunner } from "../../hooks/hook-runner.js";
 import { BashAstValidator } from "../../main/bash-ast-validator.js";
+import { pluginToolsForRegistration } from "../../plugins/plugin-tool-adapter.js";
+import type { PluginManifest } from "../../plugins/types.js";
+import type { PluginRuntime } from "../../plugins/runtime.js";
+import { mcpToolToTool } from "../../mcp/mcp-tool-adapter.js";
 
 // ─── Helpers ─────────────────────────────────────────
 
@@ -219,6 +226,53 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
     expect(executeSpy).toHaveBeenCalledTimes(1);
     expect(results[0].is_error).toBeUndefined();
     expect(results[0].content).toBe("hello world");
+  });
+
+  it("strict execution mode asks before running read-only tools", async () => {
+    const executeSpy = vi.fn(async () => "hello strict");
+    const registry = new ToolRegistry();
+    registry.register(makeReadFileTool(executeSpy));
+
+    const permMgr = new PermissionManager("/tmp/nonexistent-permissions.json");
+    permMgr.setMode("strict");
+
+    const wc = makeMockWebContents();
+    const sent: import("../../permissions/approval-gate.js").ApprovalRequest[] = [];
+    (wc.send as ReturnType<typeof vi.fn>).mockImplementation(
+      (_ch: string, req: import("../../permissions/approval-gate.js").ApprovalRequest) => {
+        sent.push(req);
+      },
+    );
+    const gate = new ApprovalGate(wc as never);
+    const executor = new ToolExecutor(registry, undefined, permMgr, undefined, gate);
+
+    const promise = executor.executeAll(
+      [{ id: "tu-strict-read", name: "read_file", input: { path: "/tmp/strict-read.txt" } }],
+      {
+        sessionId: "sess-strict-read",
+        permissionContext: userPermissionContext({ additionalDirectories: ["/tmp"] }),
+      },
+    );
+
+    const deadline = Date.now() + 1000;
+    while (gate.pendingCount < 1 && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    expect(gate.pendingCount).toBe(1);
+    expect(executeSpy).not.toHaveBeenCalled();
+    expect(sent[0].mode).toBe("ask_all");
+
+    gate.resolve(sent[0].id, {
+      requestId: sent[0].id,
+      choice: "allow-once",
+      nonce: sent[0].nonce,
+      hmac: sent[0].hmac,
+    });
+    const results = await promise;
+
+    expect(executeSpy).toHaveBeenCalledTimes(1);
+    expect(results[0].is_error).toBeUndefined();
+    expect(results[0].content).toBe("hello strict");
   });
 
   it("uses Tool.isReadOnly(finalInput), not a static tool-name allowlist", async () => {
@@ -1372,6 +1426,52 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
     expect(wc.send).not.toHaveBeenCalled();
   });
 
+  it("strict headless read defers even when reviewer would allow", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "lvis-executor-strict-headless-"));
+    try {
+      const executeSpy = vi.fn(async () => "ok");
+      const registry = new ToolRegistry();
+      registry.register(makeReadFileTool(executeSpy));
+
+      const classifier: RiskClassifier = {
+        classify: vi.fn(() => ({ level: "low", reason: "reviewer would allow" })),
+      };
+      const queue = new DeferredQueue(join(dir, "deferred-queue.jsonl"));
+      const permMgr = new PermissionManager(join(dir, "permissions.json"));
+      permMgr.setMode("strict");
+      permMgr.setReviewer({
+        classifier,
+        cache: new VerdictCache(join(dir, "reviewer-cache.jsonl")),
+        deferredQueue: queue,
+      });
+
+      const wc = makeMockWebContents();
+      const gate = new ApprovalGate(wc as never);
+      const executor = new ToolExecutor(registry, undefined, permMgr, undefined, gate);
+
+      const results = await executor.executeAll(
+        [{
+          id: "tu-strict-headless-read",
+          name: "read_file",
+          input: { path: "/var/tmp/strict-headless/data.txt" },
+        }],
+        {
+          sessionId: "sess-strict-headless-read",
+          permissionContext: userPermissionContext({ headless: true }),
+        },
+      );
+
+      expect(executeSpy).not.toHaveBeenCalled();
+      expect(classifier.classify).not.toHaveBeenCalled();
+      expect(wc.send).not.toHaveBeenCalled();
+      expect(results[0].is_error).toBe(true);
+      expect(results[0].content).toContain("strict headless");
+      expect(queue.listPending()).toHaveLength(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("user-supplied additionalDirectories grants access without modal", async () => {
     const executeSpy = vi.fn(async () => "ok");
     const registry = new ToolRegistry();
@@ -1458,6 +1558,132 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
     }
   });
 
+  it("routes builtin, plugin, and MCP sources through the same permission decision path", async () => {
+    const executeSpy = vi.fn(async () => "ok");
+    const registry = new ToolRegistry();
+    const registerWriteTool = (
+      name: string,
+      source: "builtin" | "plugin" | "mcp",
+      ids: { pluginId?: string; mcpServerId?: string } = {},
+    ) => {
+      registry.register(createDynamicTool({
+        name,
+        description: `${source} write surface`,
+        source,
+        category: "write",
+        ...ids,
+        isReadOnly: () => false,
+        jsonSchema: {
+          type: "object",
+          properties: { value: { type: "string" } },
+        },
+        execute: async (rawInput) => {
+          const value = await executeSpy(rawInput);
+          return { output: String(value), isError: false };
+        },
+      }));
+    };
+    registerWriteTool("native_write_surface", "builtin");
+    registerWriteTool("plugin_write_surface", "plugin", { pluginId: "generic-plugin" });
+    registerWriteTool("mcp_write_surface", "mcp", { mcpServerId: "generic-mcp" });
+
+    const permMgr = new PermissionManager("/tmp/nonexistent-permissions.json");
+    const checkSpy = vi.spyOn(permMgr, "checkDetailed").mockImplementation(
+      (_toolName, source, category) => ({
+        decision: "deny",
+        reason: `blocked by unified policy: ${source}/${category}`,
+        layer: 3,
+      }),
+    );
+    const executor = new ToolExecutor(registry, undefined, permMgr);
+
+    const results = await executor.executeAll(
+      [
+        { id: "tu-native", name: "native_write_surface", input: { value: "a" } },
+        { id: "tu-plugin", name: "plugin_write_surface", input: { value: "b" } },
+        { id: "tu-mcp", name: "mcp_write_surface", input: { value: "c" } },
+      ],
+      { sessionId: "sess-unified-tool-sources", permissionContext: userPermissionContext() },
+    );
+
+    expect(executeSpy).not.toHaveBeenCalled();
+    expect(results.map((result) => result.is_error)).toEqual([true, true, true]);
+    expect(checkSpy.mock.calls.map(([toolName, source, category]) => [toolName, source, category])).toEqual([
+      ["native_write_surface", "builtin", "write"],
+      ["plugin_write_surface", "plugin", "write"],
+      ["mcp_write_surface", "mcp", "write"],
+    ]);
+  });
+
+  it("routes actual plugin and MCP adapters through ToolExecutor before invoking handlers", async () => {
+    const pluginCall = vi.fn(async () => ({ ok: true }));
+    const mcpCall = vi.fn(async () => ({ text: "ok" }));
+    const manifest = {
+      id: "adapter-plugin",
+      name: "adapter-plugin",
+      version: "1.0.0",
+      main: "entry.js",
+      tools: ["adapter_write"],
+      toolSchemas: {
+        adapter_write: {
+          description: "Adapter write fixture",
+          category: "write",
+          inputSchema: {
+            type: "object",
+            properties: { value: { type: "string" } },
+          },
+        },
+      },
+    } as PluginManifest;
+    const registry = new ToolRegistry();
+    for (const tool of pluginToolsForRegistration(
+      { call: pluginCall } as unknown as PluginRuntime,
+      "adapter-plugin",
+      manifest,
+    )) {
+      registry.register(tool);
+    }
+    registry.register(mcpToolToTool(
+      "adapter-mcp",
+      "mcp_adapter_write",
+      {
+        name: "write",
+        description: "MCP adapter write fixture",
+        inputSchema: {
+          type: "object",
+          properties: { value: { type: "string" } },
+        },
+      },
+      mcpCall,
+    ));
+
+    const permMgr = new PermissionManager("/tmp/nonexistent-permissions.json");
+    const checkSpy = vi.spyOn(permMgr, "checkDetailed").mockImplementation(
+      (_toolName, source, category) => ({
+        decision: "deny",
+        reason: `blocked by unified policy: ${source}/${category}`,
+        layer: 3,
+      }),
+    );
+    const executor = new ToolExecutor(registry, undefined, permMgr);
+
+    const results = await executor.executeAll(
+      [
+        { id: "tu-plugin-adapter", name: "adapter_write", input: { value: "p" } },
+        { id: "tu-mcp-adapter", name: "mcp_adapter_write", input: { value: "m" } },
+      ],
+      { sessionId: "sess-adapter-unified", permissionContext: userPermissionContext() },
+    );
+
+    expect(pluginCall).not.toHaveBeenCalled();
+    expect(mcpCall).not.toHaveBeenCalled();
+    expect(results.map((result) => result.is_error)).toEqual([true, true]);
+    expect(checkSpy.mock.calls.map(([toolName, source, category]) => [toolName, source, category])).toEqual([
+      ["adapter_write", "plugin", "write"],
+      ["mcp_adapter_write", "mcp", "network"],
+    ]);
+  });
+
   it("ToolExecutor path policy uses declared Tool.pathFields", async () => {
     const executeSpy = vi.fn(async () => "ok");
     const registry = new ToolRegistry();
@@ -1502,6 +1728,69 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
     };
     expect(sent.kind).toBe("out-of-allowed-dir");
     expect(sent.outOfAllowedDir?.candidatePath).toContain("plugin-folder/input");
+    gate.resolve(sent.id, {
+      requestId: sent.id,
+      choice: "deny-once",
+      nonce: sent.nonce,
+      hmac: sent.hmac,
+    });
+
+    const results = await callPromise;
+    expect(executeSpy).not.toHaveBeenCalled();
+    expect(results[0].is_error).toBe(true);
+  });
+
+  it("ToolExecutor path policy follows dotted Tool.pathFields", async () => {
+    const executeSpy = vi.fn(async () => "ok");
+    const registry = new ToolRegistry();
+    registry.register(createDynamicTool({
+      name: "plugin_nested_scan",
+      description: "Scan nested target",
+      source: "plugin",
+      pluginId: "nested-plugin",
+      category: "read",
+      pathFields: ["target.path"],
+      isReadOnly: () => true,
+      jsonSchema: {
+        type: "object",
+        properties: {
+          target: {
+            type: "object",
+            properties: { path: { type: "string" } },
+            required: ["path"],
+          },
+        },
+        required: ["target"],
+      },
+      execute: async (rawInput) => {
+        const value = await executeSpy(rawInput);
+        return { output: String(value), isError: false };
+      },
+    }));
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const executor = new ToolExecutor(registry, undefined, undefined, undefined, gate);
+
+    const callPromise = executor.executeAll(
+      [{
+        id: "tu-l1-plugin-dotted-pathfields",
+        name: "plugin_nested_scan",
+        input: { target: { path: "/var/tmp/plugin-folder/nested/input" } },
+      }],
+      { sessionId: "sess-l1-plugin-dotted-pathfields", permissionContext: userPermissionContext() },
+    );
+
+    await new Promise((r) => setTimeout(r, 5));
+    expect(wc.send).toHaveBeenCalled();
+    const sent = wc.send.mock.calls[0][1] as {
+      id: string;
+      nonce: string;
+      hmac: string;
+      kind?: string;
+      outOfAllowedDir?: { candidatePath?: string };
+    };
+    expect(sent.kind).toBe("out-of-allowed-dir");
+    expect(sent.outOfAllowedDir?.candidatePath).toContain("plugin-folder/nested/input");
     gate.resolve(sent.id, {
       requestId: sent.id,
       choice: "deny-once",

@@ -47,12 +47,12 @@ function maskArgsForDisplay(value: unknown, detections: Set<string>): unknown {
 
 /**
  * Permission mode hint passed alongside an ApprovalRequest. Drives the
- * §S4 isReadOnly short-circuit: in "plan" mode even read-only tools must
- * still be blocked (plan mode is a dry-run / review stance).
+ * §S4 isReadOnly short-circuit: in "ask_all" and "plan" modes even
+ * read-only tools must still show the approval dialog.
  *
  * `undefined` → treat as "default" (standard read-only auto-approve).
  */
-export type ApprovalMode = "default" | "plan" | "full_auto";
+export type ApprovalMode = "default" | "ask_all" | "plan" | "full_auto";
 
 /**
  * Permission policy P2.5 — discriminated kinds for the approval modal. Default `"tool"`
@@ -111,7 +111,7 @@ export interface ApprovalRequest {
   /**
    * §S4: current permission mode. Drives the isReadOnly short-circuit:
    *   - "default" / "full_auto" / undefined → read-only tools auto-approve
-   *   - "plan" → still block (plan mode inspects without executing)
+   *   - "ask_all" / "plan" → still show the approval dialog
    */
   mode?: ApprovalMode;
   /**
@@ -341,6 +341,7 @@ export class ApprovalGate {
     // path is a scope-grant decision the user has to make explicitly.
     if (
       fullReq.isReadOnly === true &&
+      fullReq.mode !== "ask_all" &&
       fullReq.mode !== "plan" &&
       fullReq.kind !== "out-of-allowed-dir"
     ) {

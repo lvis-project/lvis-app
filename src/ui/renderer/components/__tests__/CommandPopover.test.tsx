@@ -73,7 +73,7 @@ describe("CommandPopover", () => {
       "/new", "/sessions", "/load", "/compact",
       "/remember", "/memory", "/vendor", "/tools",
       "/permission", "/permission dir list",
-      "/permission mode strict", "/permission mode default", "/permission mode auto",
+      "/permission mode strict", "/permission mode default", "/permission mode auto", "/permission mode allow",
       "/permission hooks list", "/permission audit verify", "/help",
     ];
     await waitFor(() => {

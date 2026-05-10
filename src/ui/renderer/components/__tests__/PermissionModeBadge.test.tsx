@@ -26,7 +26,7 @@ describe("PermissionModeBadge", () => {
     const { getByTestId } = render(<PermissionModeBadge mode="strict" />);
     const badge = getByTestId("permission-mode-badge");
     expect(badge.getAttribute("data-mode")).toBe("strict");
-    expect(badge.textContent).toContain("strict");
+    expect(badge.textContent).toContain("전체 물어보기");
   });
 
   it("calls fetcher and reflects 'auto' on mount", async () => {
@@ -37,8 +37,63 @@ describe("PermissionModeBadge", () => {
     await waitFor(() => {
       const badge = screen.getByTestId("permission-mode-badge");
       expect(badge.getAttribute("data-mode")).toBe("auto");
+      expect(badge.textContent).toContain("자동 검증");
+      expect(badge.textContent).not.toContain("LLM");
+      expect(badge.getAttribute("aria-label")).toContain("백그라운드 리뷰어");
     });
     expect(fetcher).toHaveBeenCalled();
+  });
+
+  it("calls fetcher and reflects 'allow' on mount", async () => {
+    const fetcher = vi.fn(async () => ({ mode: "allow" }));
+    await act(async () => {
+      render(<PermissionModeBadge fetcher={fetcher} />);
+    });
+    await waitFor(() => {
+      const badge = screen.getByTestId("permission-mode-badge");
+      expect(badge.getAttribute("data-mode")).toBe("allow");
+      expect(badge.textContent).toContain("외부경로 승인");
+    });
+  });
+
+  it("surfaces deferred approvals in the header badge", async () => {
+    const deferredFetcher = vi.fn(async () => ({
+      ok: true,
+      pending: [{ id: "p1" }, { id: "p2" }],
+    }));
+    await act(async () => {
+      render(<PermissionModeBadge mode="auto" deferredFetcher={deferredFetcher} />);
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("permission-pending-badge").textContent).toContain("승인 2");
+    });
+    const badge = screen.getByTestId("permission-mode-badge");
+    expect(badge.getAttribute("aria-label")).toContain("대기 승인 2건");
+  });
+
+  it("subscribes to deferred approval changes", async () => {
+    let capturedHandler: ((summary: { pending: number }) => void) | null = null;
+    const deferredSubscriber = vi.fn((handler) => {
+      capturedHandler = handler;
+      return () => {};
+    });
+    await act(async () => {
+      render(
+        <PermissionModeBadge
+          mode="default"
+          deferredFetcher={async () => ({ ok: true, pending: [] })}
+          deferredSubscriber={deferredSubscriber}
+        />,
+      );
+    });
+
+    await act(async () => {
+      capturedHandler!({ pending: 3 });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("permission-pending-badge").textContent).toContain("승인 3");
+    });
   });
 
   it("normalizes invalid mode strings to unknown", async () => {
@@ -54,7 +109,7 @@ describe("PermissionModeBadge", () => {
 
   it("subscribes to mode-change events and updates", async () => {
     const fetcher = vi.fn(async () => ({ mode: "default" }));
-    let capturedHandler: ((m: "default" | "strict" | "auto" | "unknown") => void) | null = null;
+    let capturedHandler: ((m: "default" | "strict" | "auto" | "allow" | "unknown") => void) | null = null;
     const subscribe = vi.fn((handler) => {
       capturedHandler = handler;
       return () => {};
@@ -101,6 +156,6 @@ describe("PermissionModeBadge", () => {
   it("shows description in title attribute (tooltip)", () => {
     const { getByTestId } = render(<PermissionModeBadge mode="strict" />);
     const badge = getByTestId("permission-mode-badge");
-    expect(badge.getAttribute("title")).toContain("엄격");
+    expect(badge.getAttribute("title")).toContain("전체 물어보기");
   });
 });

@@ -57,6 +57,7 @@ describe("PermissionManager.dispatchReviewer", () => {
     const r = await pm.dispatchReviewer("fs_write", {
       source: "builtin",
       category: "write",
+      pathFields: ["path"],
       finalInput: { path: "/Users/example/work/note.md" },
       allowedDirectories: ["/Users/example/work"],
       sensitivePathsAdjacent: [],
@@ -71,6 +72,7 @@ describe("PermissionManager.dispatchReviewer", () => {
     const r = await pm.dispatchReviewer("fs_write", {
       source: "builtin",
       category: "write",
+      pathFields: ["path"],
       finalInput: { path: "/etc/passwd" },
       allowedDirectories: ["/Users/example/work"],
       sensitivePathsAdjacent: [],
@@ -88,6 +90,7 @@ describe("PermissionManager.dispatchReviewer", () => {
     const r = await pm.dispatchReviewer("fs_write", {
       source: "builtin",
       category: "write",
+      pathFields: ["path"],
       finalInput: { path: "/Users/example/work/a/b/c/d.md" },
       allowedDirectories: ["/Users/example/work"],
       sensitivePathsAdjacent: [],
@@ -102,6 +105,7 @@ describe("PermissionManager.dispatchReviewer", () => {
     const input = {
       source: "builtin" as const,
       category: "write" as const,
+      pathFields: ["path"],
       finalInput: { path: "/Users/example/work/note.md" },
       allowedDirectories: ["/Users/example/work"],
       sensitivePathsAdjacent: [],
@@ -125,6 +129,7 @@ describe("PermissionManager.dispatchReviewer", () => {
     const base = {
       source: "builtin" as const,
       category: "write" as const,
+      pathFields: ["path"],
       finalInput: { path: "/Users/example/work/note.md" },
       allowedDirectories: ["/Users/example/work"],
       sensitivePathsAdjacent: [],
@@ -166,6 +171,7 @@ describe("PermissionManager.dispatchReviewer", () => {
     const first = await pm.dispatchReviewer("bash", {
       source: "builtin",
       category: "shell",
+      pathFields: [],
       finalInput: firstInput,
       allowedDirectories,
       sensitivePathsAdjacent: [],
@@ -175,6 +181,7 @@ describe("PermissionManager.dispatchReviewer", () => {
     const second = await pm.dispatchReviewer("bash", {
       source: "builtin",
       category: "shell",
+      pathFields: [],
       finalInput: destructiveInput,
       allowedDirectories,
       sensitivePathsAdjacent: [],
@@ -193,6 +200,7 @@ describe("PermissionManager.dispatchReviewer", () => {
     const ctxA = {
       source: "builtin" as const,
       category: "write" as const,
+      pathFields: ["path"],
       finalInput: { path: "/Users/example/work/note.md" },
       allowedDirectories: ["/Users/example/work"],
       sensitivePathsAdjacent: [],
@@ -221,6 +229,7 @@ describe("PermissionManager.dispatchReviewer", () => {
     const input = {
       source: "builtin" as const,
       category: "write" as const,
+      pathFields: ["path"],
       finalInput: { path: "/Users/example/work/note.md" },
       allowedDirectories: ["/Users/example/work"],
       sensitivePathsAdjacent: [],
@@ -246,6 +255,7 @@ describe("PermissionManager.dispatchReviewer", () => {
     const r = await fresh.dispatchReviewer("fs_write", {
       source: "builtin",
       category: "write",
+      pathFields: ["path"],
       finalInput: { path: "/x" },
       allowedDirectories: [],
       sensitivePathsAdjacent: [],
@@ -269,6 +279,7 @@ describe("PermissionManager.dispatchReviewer", () => {
     const r = await pm.dispatchReviewer("any_tool", {
       source: "builtin",
       category: "write",
+      pathFields: ["path"],
       finalInput: { path: "/x" },
       allowedDirectories: ["/Users/example/work"],
       sensitivePathsAdjacent: [],

@@ -151,7 +151,7 @@ export const ENFORCED_CAPABILITIES: ReadonlyMap<string, CapabilityPolicy> = new 
     "conversation-trigger",
     {
       description:
-        "Schema-reserved capability token. It does not grant hostApi.triggerConversation(); runtime gating uses host:overlay only.",
+        "Advisory self-identification capability token. It does not grant hostApi.triggerConversation(); runtime gating uses host:overlay only.",
       enforcement: "advisory",
       gates: [],
     },
@@ -203,8 +203,8 @@ export const EVENT_NAMESPACE_CAPABILITY: ReadonlyMap<string, string> = new Map([
  * gating lets a plugin emit *its own* events (mail-source plugin emits
  * `email.new`). Host-only namespaces have no legitimate plugin-side emitter
  * — letting any plugin spoof `plugin.installed` (or in future `host.*`)
- * would let one plugin trick subscribers (work-proactive, telemetry) into
- * reacting to fake lifecycle.
+ * would let one plugin trick lifecycle subscribers into reacting to fake
+ * install/uninstall events.
  */
 export const HOST_ONLY_EMIT_NAMESPACES: ReadonlySet<string> = new Set([
   "plugin",
