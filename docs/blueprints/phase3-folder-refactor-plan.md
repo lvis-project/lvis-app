@@ -11,7 +11,7 @@
 Pre-refactor `src/` had two structural overloads identified during OpenHarness comparison (OpenHarness has 30 focused subdirs vs LVIS's 7):
 
 - `src/agent/` — 11 files across 7 distinct concerns (conversation loop, hooks, prompts, tool executor, LLM providers, DLP, audit, knowledge search, agent-action-requester)
-- `src/core/` — engines (keyword/route/memory/tool-registry/proactive) mixed with the entire permission stack (permission-manager, permissions-store, policy-store, approval-gate)
+- `src/core/` — engines (keyword/route/memory/tool-registry) mixed with the entire permission stack (permission-manager, permissions-store, policy-store, approval-gate)
 
 New Tier S/A borrowed modules (`sensitive-paths`, `BaseTool`, `path-validator`, `network-guard`, `bash.ts`, etc.) had no dedicated home. Refactor is the precondition that creates those homes.
 
@@ -31,7 +31,7 @@ src/
 ├── sandbox/    (NEW — path-validator leaf module)
 ├── memory/     (memory-manager)
 ├── audit/      (audit-logger, dlp-filter)
-├── core/       (remaining: keyword/route/proactive engines + tool-registry legacy + network-guard)
+├── core/       (remaining: keyword/route engines + tool-registry legacy + network-guard)
 ├── mcp/        (unchanged)
 ├── plugins/    (renamed from plugin-runtime/)
 ├── data/, main/, lib/, components/ui/, ui/, __tests__/
@@ -73,7 +73,6 @@ Every `git mv` preserved git history. Tests moved together with their source.
 | `src/core/memory-manager.ts` | `src/memory/memory-manager.ts` |
 | `src/core/keyword-engine.ts` | **STAYS** |
 | `src/core/route-engine.ts` | **STAYS** |
-| `src/core/proactive-engine.ts` | **STAYS** |
 | `src/core/tool-registry.ts` | **STAYS** (legacy, deprecated by Tier S3 `src/tools/base.ts BaseToolRegistry`) |
 
 ### 3.3 `src/plugin-runtime/` → `src/plugins/`

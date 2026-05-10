@@ -204,7 +204,7 @@ export function App() {
         // audit is best-effort; do not block the chat insert
       }
 
-      // Insert as imported_trigger entry — proactive provenance preserved,
+      // Insert as imported_trigger entry — overlay trigger provenance preserved,
       // NOT a plain user bubble (architecture §9 plugin provenance contract)
       insertImportedTriggerEntry({
         sessionId: source.eventId,
@@ -516,7 +516,7 @@ export function App() {
         outgoingAttachments = outgoingAttachments.filter((p) => p.type !== "image");
       }
       // trigger-import: skip the user-bubble append. The
-      // ImportedTriggerCard already represents the brain's question
+      // ImportedTriggerCard already represents the overlay-trigger prompt
       // visibly, and rendering the wrapped envelope as a user bubble
       // would misattribute authorship.
       if (mode !== "trigger-import") {

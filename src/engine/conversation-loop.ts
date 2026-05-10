@@ -760,7 +760,7 @@ export class ConversationLoop {
    * @param abortSignal  B4: optional external abort signal; if omitted a fresh
    *                     AbortController is created and stored in
    *                     `currentAbortController` so `abortCurrentTurn()` works.
-   * @param options      P0 Brain: `originSource` enables the Proactive Origin
+   * @param options      `originSource` enables the Overlay Trigger Origin
    *                     Guidance prompt section for this single turn. Set/
    *                     cleared synchronously around `build()` so concurrent
    *                     turns do not corrupt one another's guidance state.
@@ -932,7 +932,7 @@ export class ConversationLoop {
     const scope = this.resolveToolScope(input);
     // Guard: test mocks may stub SystemPromptBuilder without this method.
     this.deps.systemPromptBuilder.setToolScope?.(scope);
-    // Brain origin: set + clear synchronously around build() so concurrent
+    // Overlay trigger origin: set + clear synchronously around build() so concurrent
     // turns do not see each other's flag. SystemPromptBuilder has a single
     // `originSource` slot; if we straddled an await we'd race.
     this.deps.systemPromptBuilder.setOriginSource?.(options?.originSource ?? null);
@@ -1151,7 +1151,7 @@ export class ConversationLoop {
     scope: ToolScope,
     callbacks: TurnCallbacks | undefined,
     abortSignal: AbortSignal | undefined,
-    proactiveOrigin: string | null,
+    overlayTriggerOrigin: string | null,
     bounds: {
       maxRounds?: number;
       sessionIdOverride?: string;
@@ -1454,10 +1454,10 @@ export class ConversationLoop {
           // for tool calls flows to the child, not the parent. Falls back to
           // this loop's sessionId for normal interactive turns.
           sessionId: bounds?.sessionIdOverride ?? this.sessionId,
-          // Forward the turn's proactive origin so write/shell/network tools
+          // Forward the turn's overlay trigger origin so write/shell/network tools
           // bypass `allow-always` cache and force a user-confirmation
-          // modal — the hard gate for the brain's "propose-only" contract.
-          proactiveOrigin: proactiveOrigin ?? null,
+          // modal — the hard gate for the overlay trigger's propose-only contract.
+          overlayTriggerOrigin: overlayTriggerOrigin ?? null,
           // C3(b): carry spawn depth into ToolExecutionContext.metadata.
           // The executor uses this to refuse `agent_spawn` calls inside an
           // already-spawned sub-agent (depth >= 1).

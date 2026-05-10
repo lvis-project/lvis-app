@@ -94,7 +94,7 @@ export function composeOutgoing(params: {
 
 /**
  * Compose a plugin-imported trigger exactly as the plugin runtime emitted it.
- * Imported triggers already carry their proactive provenance envelope; adding
+ * Imported triggers already carry their overlay trigger provenance envelope; adding
  * role presets or the user's current composer attachments would change both
  * authorship and trust-origin classification.
  */

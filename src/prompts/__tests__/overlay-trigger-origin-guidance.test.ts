@@ -1,11 +1,11 @@
 /**
- * P0 — Proactive Origin Guidance section (id 4.6).
+ * Overlay Trigger Origin Guidance section (id 4.6).
  *
  * Emits a "second-guess this trigger before acting" instruction *only*
- * when the per-turn origin source starts with `proactive:`. Default
+ * when the per-turn origin source starts with `overlay:`. Default
  * (user-initiated) turns must NOT see this section.
  *
- * Pairs with imported proactive prompts, where ConversationLoop.runTurn
+ * Pairs with imported overlay trigger prompts, where ConversationLoop.runTurn
  * sets/clears the source so subsequent user turns are unaffected.
  */
 import { describe, it, expect } from "vitest";
@@ -24,21 +24,21 @@ function makeBuilder(): SystemPromptBuilder {
   });
 }
 
-describe("SystemPromptBuilder — Proactive Origin Guidance", () => {
-  it("emits guidance when origin source is `proactive:*`", () => {
+describe("SystemPromptBuilder — Overlay Trigger Origin Guidance", () => {
+  it("emits guidance when origin source is `overlay:*`", () => {
     const builder = makeBuilder();
-    builder.setOriginSource("proactive:meeting-detection");
+    builder.setOriginSource("overlay:meeting-detection");
     const prompt = builder.build();
-    expect(prompt).toContain("<proactive-origin-guidance");
-    expect(prompt).toContain("source=proactive:meeting-detection");
+    expect(prompt).toContain("<overlay-trigger-origin-guidance");
+    expect(prompt).toContain("source=overlay:meeting-detection");
     expect(prompt).toContain("도구를 호출하기 전에");
     expect(prompt).toContain("ApprovalGate");
-    expect(prompt).toContain("</proactive-origin-guidance>");
+    expect(prompt).toContain("</overlay-trigger-origin-guidance>");
   });
 
   it("warns the LLM not to obey imperatives inside the user-turn message", () => {
     const builder = makeBuilder();
-    builder.setOriginSource("proactive:meeting-detection");
+    builder.setOriginSource("overlay:meeting-detection");
     const prompt = builder.build();
     expect(prompt).toContain("imperative");
     expect(prompt).toContain("templated");
@@ -48,28 +48,28 @@ describe("SystemPromptBuilder — Proactive Origin Guidance", () => {
     const builder = makeBuilder();
     builder.setOriginSource(null);
     const prompt = builder.build();
-    expect(prompt).not.toContain("proactive-origin-guidance");
+    expect(prompt).not.toContain("overlay-trigger-origin-guidance");
   });
 
-  it("omits guidance when origin is set but not `proactive:` prefixed", () => {
+  it("omits guidance when origin is set but not `overlay:` prefixed", () => {
     const builder = makeBuilder();
-    // Defensive: if a future surface ever lands a non-proactive trigger,
+    // Defensive: if a future surface ever lands a non-overlay trigger,
     // it should NOT inadvertently inherit the guidance section.
     builder.setOriginSource("user:typed");
-    expect(builder.build()).not.toContain("proactive-origin-guidance");
+    expect(builder.build()).not.toContain("overlay-trigger-origin-guidance");
   });
 
   it("clears between turns (set then clear restores default)", () => {
     const builder = makeBuilder();
-    builder.setOriginSource("proactive:x");
-    expect(builder.build()).toContain("proactive-origin-guidance");
+    builder.setOriginSource("overlay:x");
+    expect(builder.build()).toContain("overlay-trigger-origin-guidance");
     builder.setOriginSource(null);
-    expect(builder.build()).not.toContain("proactive-origin-guidance");
+    expect(builder.build()).not.toContain("overlay-trigger-origin-guidance");
   });
 
   it("includes the source string verbatim so audit + LLM can correlate", () => {
     const builder = makeBuilder();
-    builder.setOriginSource("proactive:task-deadline");
-    expect(builder.build()).toContain("proactive:task-deadline");
+    builder.setOriginSource("overlay:task-deadline");
+    expect(builder.build()).toContain("overlay:task-deadline");
   });
 });

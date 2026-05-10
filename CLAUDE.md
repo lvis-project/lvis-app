@@ -80,7 +80,7 @@ src/
     keyword-engine.ts         — §6.1 Input classification
     route-engine.ts           — §6.2 Routing resolution
     tool-registry.ts          — §6.4 Unified tool registry (deprecated by tools/base.ts eventually)
-    proactive-engine.ts       — §7 Proactive briefing
+    overlay-trigger-source.ts — overlay trigger source contract
 
   mcp/                        — Model Context Protocol client (unchanged)
 
