@@ -236,7 +236,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     onRoutineFailedV2: vi.fn((_handler: (event: { routineId: string; error: string }) => void) => () => {}),
     listRoutineSessionsV2: vi.fn(async () => []),
     readRoutineSessionV2: vi.fn(async () => ""),
-    // Brain — proactive trigger lifecycle. Tests that don't exercise the
+    // Overlay trigger lifecycle. Tests that don't exercise the
     // trigger card just need these to be callable subscribe/no-op functions.
     onTriggerStarted: vi.fn((_h: (p: unknown) => void) => () => {}),
     onTriggerCompleted: vi.fn((_h: (r: unknown) => void) => () => {}),

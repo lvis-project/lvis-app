@@ -126,8 +126,8 @@ export function useChatState(api: LvisApi) {
       }
       if (ev.type === "text_delta" && ev.text) {
         setEntries((p) => {
-          // Brain trigger flow — when the LLM is responding to an
-          // accepted proactive trigger, redirect deltas INTO the
+          // Overlay trigger import flow — when the LLM is responding to an
+          // accepted overlay trigger, redirect deltas INTO the
           // imported_trigger card's response field so the whole
           // interaction stays visually grouped. Falls back to the
           // normal streaming-assistant path for ordinary user turns.
@@ -165,7 +165,7 @@ export function useChatState(api: LvisApi) {
           });
         }
         setEntries((p) => {
-          // Brain trigger flow — DO NOT finalize the imported_trigger
+          // Overlay trigger import flow — DO NOT finalize the imported_trigger
           // card here. assistant_round fires once per LLM round
           // (tool_use → next round → end_turn). Finalizing on the
           // first round (stopReason="tool_use") would close the card
@@ -224,11 +224,11 @@ export function useChatState(api: LvisApi) {
         setEntries((p) => applyToolEnd(p, { groupId, toolUseId, result, isError, uiPayload, durationMs }));
       } else if (ev.type === "error") {
         setEntries((p) => {
-          // Error during a brain-trigger import turn: also close the
+          // Error during an overlay-trigger import turn: also close the
           // card's streaming indicator so the spinner doesn't hang
           // forever. The error message itself still surfaces via the
           // normal setAssistantError sibling path — surfacing it inside
-          // the card would conflate the proactive interaction with a
+          // the card would conflate the overlay-trigger interaction with a
           // host-level error and is likely more confusing than helpful.
           const closed = isImportedTriggerStreaming(p)
             ? finalizeImportedTriggerResponse(p)
@@ -313,7 +313,7 @@ export function useChatState(api: LvisApi) {
             route: ev.route,
           });
         }
-        // Brain trigger flow — close the card's streaming indicator.
+        // Overlay trigger import flow — close the card's streaming indicator.
         // Independent of the regular streaming-assistant finalize; the
         // card may have absorbed every text_delta of this turn so
         // streamRef.current can be empty even though the card has
@@ -391,7 +391,7 @@ export function useChatState(api: LvisApi) {
    * Plugin overlay confirm → main chat insert.
    *
    * Inserts an imported_trigger entry (kind="imported_trigger") so the
-   * plugin-authored prompt is visible in chat history with proper proactive
+   * plugin-authored prompt is visible in chat history with proper overlay-trigger
    * provenance — NOT as a plain user bubble. The user's next send turn (or
    * an auto-fired handleAsk) will pick up from there.
    *
@@ -646,7 +646,7 @@ export function useChatState(api: LvisApi) {
     applyInitialSession,
     applyLoadedSession,
     truncateToEntry,
-    // Trigger import methods (brain trigger + plugin overlay).
+    // Trigger import methods.
     addImportedTriggerEntry,
     closeOpenImportedTrigger,
     insertImportedTriggerEntry,

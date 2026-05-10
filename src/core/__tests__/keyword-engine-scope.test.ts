@@ -64,10 +64,10 @@ describe("KeywordEngine — pluginId propagation (Phase 1 scoping)", () => {
   });
 });
 
-describe("KeywordEngine — imported-from-proactive envelope bypass", () => {
-  it("envelope with valid proactive: source is classified as `general`, NOT `skill`", () => {
+describe("KeywordEngine — imported overlay trigger envelope bypass", () => {
+  it("envelope with valid overlay: source is classified as `general`, NOT `skill`", () => {
     // Ensures the trigger-import path doesn't get tagged with
-    // "[스킬: msgraph_email_list]" just because the brain prompt happens to
+    // "[스킬: msgraph_email_list]" just because the overlay prompt happens to
     // mention the word "이메일/메일/email" (which it always does for
     // the meeting-detection detector). Regression cover for the
     // "[스킬: msgraph_email_list] 회의 요청 이메일이 도착했습니다…" bug.
@@ -77,7 +77,7 @@ describe("KeywordEngine — imported-from-proactive envelope bypass", () => {
       { keyword: "메일", skillId: "msgraph_msgraph_email_list", pluginId: "ms-graph" },
     ]);
     const envelope =
-      `<imported-from-proactive source="proactive:meeting-detection">\n` +
+      `<imported-from-proactive source="overlay:meeting-detection">\n` +
       `회의 요청 이메일이 도착했습니다.\n- 제목: 라이코펜 회의요청\n` +
       `</imported-from-proactive>`;
     const r = eng.classify(envelope);
@@ -89,7 +89,7 @@ describe("KeywordEngine — imported-from-proactive envelope bypass", () => {
     // ipc-bridge.ts' detectImportedTriggerSource accepts. A pasted
     // envelope with non-conforming source must NOT skip skill
     // routing here while ALSO failing to activate
-    // <proactive-origin-guidance> over there — that asymmetry would
+    // <overlay-trigger-origin-guidance> over there — that asymmetry would
     // be a security gap (plugin-supplied imperatives reach the LLM
     // with no guard).
     const eng = new KeywordEngine();
@@ -110,7 +110,7 @@ describe("KeywordEngine — imported-from-proactive envelope bypass", () => {
       { keyword: "이메일", skillId: "msgraph_msgraph_email_list", pluginId: "ms-graph" },
     ]);
     const r = eng.classify(
-      `이메일 정리 부탁: <imported-from-proactive source="proactive:x">…`,
+      `이메일 정리 부탁: <imported-from-proactive source="overlay:x">…`,
     );
     expect(r.type).toBe("skill");
   });

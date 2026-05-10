@@ -1,5 +1,5 @@
 /**
- * buildManifestEventHints — manifest-driven proactive hint resolution.
+ * buildManifestEventHints — manifest-driven event hint resolution.
  *
  * Tests:
  *  1. Old string form → neutral fallback hint {category:"system",priority:"low",title:eventType}

@@ -319,7 +319,7 @@ t=1.30s  [boot 완료]
 │    │     ├── ToolExecutor (8+1 step, Bash-AST Step 2.5)         │
 │    │     │     └─▶ knowledge_search → HybridRetriever           │
 │    │     └── PostTurnHookChain                                  │
-│    └── ProactiveEngine (Daily Briefing)                         │
+│    └── Overlay Trigger Surface                                  │
 └─────────────────── HTTP 127.0.0.1:43129 ───────────────────────┘
                           │
 ┌──── Python Worker (FastAPI + uvicorn) ─────────────────────────┐

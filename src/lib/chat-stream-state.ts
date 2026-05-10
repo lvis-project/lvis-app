@@ -141,35 +141,35 @@ export type ChatEntry =
       preambleChars: number;
       parentSessionId?: string;
     }
-  // Brain proactive trigger that the user accepted ("지금 답하기"). The
+  // Overlay trigger that the user accepted ("지금 답하기"). The
   // trigger session ran in an isolated ConversationLoop; once imported,
   // its messages live in the chat loop's history (so the LLM has
   // context for the user's next turn) but the renderer collapses the
   // whole interaction into ONE card. Rendering as a user-message
   // bubble would be wrong on two axes:
-  //   1. The brain wrote that prompt, not the user — showing "나" /
+  //   1. The plugin authored that prompt, not the user — showing "나" /
   //      keyword-routing prefix misattributes authorship.
   //   2. The trigger session is intentionally distinct from chat —
-  //      flattening it to user→assistant pair erases the proactive
+  //      flattening it to user→assistant pair erases the overlay-trigger
   //      provenance the user needs to triage what just happened.
   | {
       kind: "imported_trigger";
       /** Trigger session id (from the isolated loop). */
       sessionId: string;
-      /** Origin tag, e.g. "proactive:meeting-detection". */
+      /** Origin tag, e.g. "overlay:meeting-detection". */
       source: string;
       /** Plugin-authored templated prompt — shown collapsed by default. */
       prompt: string;
-      /** Brain prompt summary (toast preview). */
+      /** Overlay prompt summary (toast preview). */
       summary: string;
       /** Number of tool calls the trigger session made (0+). */
       toolCallCount: number;
       /** Wall-clock timestamp the import landed. */
       importedAt: string;
       /**
-       * Chat LLM's response to the brain prompt, streamed in after the
+       * Chat LLM's response to the overlay prompt, streamed in after the
        * user clicks 확인하기. Lives inside the imported card so the
-       * proactive flow stays visually grouped — separate user/assistant
+       * overlay trigger flow stays visually grouped — separate user/assistant
        * bubbles would scatter the interaction across the chat.
        */
       response?: string;
@@ -226,7 +226,7 @@ export function appendUserEntry(entries: ChatEntry[], text: string): ChatEntry[]
 }
 
 /**
- * Append the consolidated card for an accepted brain trigger. Idempotent
+ * Append the consolidated card for an accepted overlay trigger. Idempotent
  * on `sessionId` so a re-emitted import event (renderer reload, IPC
  * retry) doesn't insert two cards for the same trigger.
  */
@@ -273,7 +273,7 @@ function findStreamingImportedTriggerIndex(entries: ChatEntry[]): number {
 
 /**
  * Stream a delta into the open imported_trigger entry's response —
- * keeps the chat LLM's reply inside the proactive card instead of
+ * keeps the chat LLM's reply inside the imported-trigger card instead of
  * spawning a sibling assistant bubble. No-op when no streaming
  * imported_trigger exists (regular chat turn).
  */

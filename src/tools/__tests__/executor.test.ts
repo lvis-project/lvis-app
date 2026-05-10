@@ -762,7 +762,7 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
 
     const permMgr = new PermissionManager("/tmp/nonexistent-permissions.json");
     // Track what category permission manager sees at invocation time.
-    // checkDetailed signature: (toolName, source, category, proactiveOrigin, context)
+    // checkDetailed signature: (toolName, source, category, overlayTriggerOrigin, context)
     const seenCategories: (string | undefined)[] = [];
     permMgr.checkDetailed = (_toolName, _source, category) => {
       seenCategories.push(category);

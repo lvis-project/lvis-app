@@ -46,9 +46,6 @@ export const KNOWN_CAPABILITIES: ReadonlySet<string> = new Set([
   "background-watcher",
   "worker-client",
   "document-indexer",
-  // SDK schema still recognizes this token for manifest validation parity,
-  // but runtime gating for triggerConversation is `host:overlay` only.
-  "conversation-trigger",
   "lifecycle-observer",
   // host:overlay — plugin may call triggerConversation() as overlay runner.
   // triggerConversation() now routes to OverlayContext staging instead of spawning
@@ -143,15 +140,6 @@ export const ENFORCED_CAPABILITIES: ReadonlyMap<string, CapabilityPolicy> = new 
     {
       description:
         "Advisory — signals the plugin can accept on-demand file paths for indexing via a supported scan tool. Used by host capability resolver for drag & drop IPC routing.",
-      enforcement: "advisory",
-      gates: [],
-    },
-  ],
-  [
-    "conversation-trigger",
-    {
-      description:
-        "Advisory self-identification capability token. It does not grant hostApi.triggerConversation(); runtime gating uses host:overlay only.",
       enforcement: "advisory",
       gates: [],
     },
