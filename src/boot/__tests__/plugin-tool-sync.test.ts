@@ -7,7 +7,16 @@
  * ghost entries linger across uninstall, no duplicate-registration throw
  * on reinstall of the same name@version.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("electron", () => ({
+  Notification: class {
+    static isSupported(): boolean {
+      return false;
+    }
+  },
+}));
+
 import { syncPluginToolRegistry } from "../plugins.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import { createDynamicTool } from "../../tools/base.js";
@@ -33,6 +42,15 @@ function manifest(id: string, tools: string[], version = "1.0.0"): PluginManifes
     description: "",
     entry: "dist/main.js",
     tools,
+    toolSchemas: Object.fromEntries(
+      tools.map((tool) => [
+        tool,
+        {
+          description: `Execute ${tool} test tool`,
+          inputSchema: { type: "object", properties: {} },
+        },
+      ]),
+    ),
   } as unknown as PluginManifest;
 }
 
@@ -126,5 +144,59 @@ describe("syncPluginToolRegistry — plugin lifecycle sync", () => {
     syncPluginToolRegistry(stubRuntime([]), registry);
     expect(registry.findByName("builtin_thing")).toBeDefined();
     expect(registry.findByName("alpha_run")).toBeUndefined();
+  });
+
+  it("registers plugin tools as conservative write-category calls under the current SDK schema", () => {
+    const registry = new ToolRegistry();
+    const runtime = stubRuntime([
+      {
+        pluginId: "alpha",
+        manifest: {
+          ...manifest("alpha", ["alpha_read", "alpha_write"]),
+          toolSchemas: {
+            alpha_read: {
+              description: "Read-only alpha lookup tool",
+              inputSchema: { type: "object", properties: {} },
+            },
+            alpha_write: {
+              description: "Alpha mutating tool without category",
+              inputSchema: { type: "object", properties: {} },
+            },
+          },
+        },
+      },
+    ]);
+
+    syncPluginToolRegistry(runtime, registry);
+    expect(registry.findByName("alpha_read")?.category).toBe("write");
+    expect(registry.findByName("alpha_write")?.category).toBe("write");
+
+    const validRuntime = stubRuntime([
+      {
+        pluginId: "alpha",
+        manifest: {
+          ...manifest("alpha", ["alpha_read", "alpha_write"]),
+          toolSchemas: {
+            alpha_read: {
+              description: "Read-only alpha lookup tool",
+              inputSchema: { type: "object", properties: {} },
+            },
+            alpha_write: {
+              description: "Alpha mutating tool",
+              inputSchema: { type: "object", properties: {} },
+            },
+          },
+        },
+      },
+    ]);
+
+    syncPluginToolRegistry(validRuntime, registry);
+
+    const read = registry.findByName("alpha_read");
+    const write = registry.findByName("alpha_write");
+    expect(read?.category).toBe("write");
+    expect(read?.isReadOnly({})).toBe(false);
+    expect(write?.category).toBe("write");
+    expect(write?.isReadOnly({})).toBe(false);
   });
 });

@@ -9,6 +9,9 @@
  * {@link ../registry.js ToolRegistry} uses in production — no adapter.
  */
 import { describe, it, expect } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { ToolRegistry } from "../registry.js";
 import { BashTool, BashToolInputSchema } from "../bash.js";
@@ -16,6 +19,7 @@ import type { ToolExecutionContext } from "../base.js";
 
 const ctx = (cwd: string = process.cwd()): ToolExecutionContext => ({
   cwd,
+  extraAllowedDirectories: [],
   metadata: {},
 });
 
@@ -140,8 +144,8 @@ describe("BashTool — ZodTool surface", () => {
     expect(resolved.properties.command).toBeDefined();
   });
 
-  it("category is 'dangerous'", () => {
-    expect(new BashTool().category).toBe("dangerous");
+  it("category is 'shell'", () => {
+    expect(new BashTool().category).toBe("shell");
   });
 
   it("registers directly into the canonical ToolRegistry", () => {
@@ -151,7 +155,7 @@ describe("BashTool — ZodTool surface", () => {
     expect(found).toBeDefined();
     expect(found?.name).toBe("bash");
     expect(found?.source).toBe("builtin");
-    expect(found?.category).toBe("dangerous");
+    expect(found?.category).toBe("shell");
   });
 });
 
@@ -164,6 +168,109 @@ describe("BashTool — sandbox violation", () => {
     );
     expect(result.isError).toBe(true);
     expect(result.output).toContain("Sandbox:");
+  });
+
+  it("rejects sensitive cwd even when it is inside the sandbox boundary", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lvis-bash-sensitive-cwd-"));
+    const sensitive = join(root, ".lvis", "secrets");
+    mkdirSync(sensitive, { recursive: true });
+    try {
+      const result = await new BashTool().execute(
+        { command: "echo hi", cwd: sensitive, timeoutSeconds: 5 },
+        ctx(root),
+      );
+      expect(result.isError).toBe(true);
+      expect(result.output).toContain("Sensitive path:");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects sensitive path operands before spawning the shell", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lvis-bash-sensitive-operand-"));
+    const target = join(root, ".ssh", "id_rsa");
+    mkdirSync(join(root, ".ssh"), { recursive: true });
+    writeFileSync(target, "secret", "utf8");
+    try {
+      const result = await new BashTool().execute(
+        { command: `cat ${target}`, timeoutSeconds: 5 },
+        ctx(root),
+      );
+      expect(result.isError).toBe(true);
+      expect(result.output).toContain("Sensitive path:");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects bare sensitive filename operands before spawning the shell", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lvis-bash-bare-sensitive-"));
+    writeFileSync(join(root, ".env"), "SECRET=1\n", "utf8");
+    try {
+      const result = await new BashTool().execute(
+        { command: "cat .env", timeoutSeconds: 5 },
+        ctx(root),
+      );
+      expect(result.isError).toBe(true);
+      expect(result.output).toContain("Sensitive path:");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects redirection-attached sensitive operands before spawning the shell", async () => {
+    const result = await new BashTool().execute(
+      { command: "cat<$HOME/.ssh/id_rsa", timeoutSeconds: 5 },
+      ctx(),
+    );
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain("Sensitive path:");
+  });
+
+  it("rejects unsupported ~user operands instead of validating a fake cwd-relative path", async () => {
+    const result = await new BashTool().execute(
+      { command: "cat ~ken/Documents/not-in-sandbox.txt", timeoutSeconds: 5 },
+      ctx(),
+    );
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain("unsupported user-home expansion");
+  });
+
+  it("rejects bare ~user operands before shell expansion", async () => {
+    const result = await new BashTool().execute(
+      { command: "ls ~ken", timeoutSeconds: 5 },
+      ctx(),
+    );
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain("unsupported user-home expansion");
+  });
+
+  it("rejects redirection targets outside the sandbox before spawning the shell", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lvis-bash-redirection-"));
+    try {
+      const result = await new BashTool().execute(
+        { command: "printf x>/private/tmp/lvis-outside-redirection", timeoutSeconds: 5 },
+        ctx(root),
+      );
+      expect(result.isError).toBe(true);
+      expect(result.output).toContain("Sandbox:");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects recursive filesystem traversal before spawning the shell", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lvis-bash-recursive-traversal-"));
+    try {
+      const result = await new BashTool().execute(
+        { command: "grep -R SECRET .", timeoutSeconds: 5 },
+        ctx(root),
+      );
+      expect(result.isError).toBe(true);
+      expect(result.output).toContain("recursive shell filesystem traversal");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

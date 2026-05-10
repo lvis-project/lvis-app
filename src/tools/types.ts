@@ -11,10 +11,58 @@
  *   - Describe the per-invocation execution context / result shape.
  *   - Carry §6.3 Layer 1 deny rules through the registry.
  */
+import type { ChatInputOrigin } from "../shared/chat-origin.js";
 
 export type ToolSource = "builtin" | "plugin" | "mcp";
 export type TrustLevel = "high" | "medium" | "low";
-export type ToolCategory = "read" | "write" | "dangerous";
+
+/**
+ * Permission policy 5-axis tool category. Replaces the legacy `read | write | dangerous`
+ * binary-ish split with category-aware policy lanes (PermissionManager
+ * Layer 3 decision matrix in permission-policy-design.md):
+ *
+ * - `read`    — auto-allow for builtin, scope-checked for plugin
+ * - `write`   — ask (user confirmation)
+ * - `shell`   — ask + Bash AST validation (subset of write where command
+ *               structure must be parsed)
+ * - `network` — ask + endpoint surface (HTTP/IPC writes to external hosts)
+ * - `meta`    — control-flow / UI primitives (`ask_user_question`,
+ *               `agent_spawn`). Decision delegated to {@link ToolDecisionOverride}
+ *               so executor short-circuit paths stay explicit.
+ */
+export type ToolCategory = "read" | "write" | "shell" | "network" | "meta";
+
+/**
+ * Permission policy explicit decision override for `meta` category tools. When a tool's
+ * category is genuinely orthogonal to the standard policy lanes (a user
+ * prompt is not a "write"; a sub-agent dispatch is its own primitive), the
+ * tool declares `decisionOverride` and the executor takes that path
+ * directly rather than running the Layer 3 matrix.
+ *
+ * - `always-allow-with-audit` — execute without permission check, but
+ *   audit-log every invocation (used by `ask_user_question` so the user
+ *   prompt itself never needs another permission prompt)
+ * - `ask` — same as `write` (sub-agent dispatch creates state, so warrants
+ *   an approval modal but not Bash AST)
+ */
+export type ToolDecisionOverride = "always-allow-with-audit" | "ask";
+
+/**
+ * Permission policy §9 trust origin — which content boundary produced the invocation. Carried
+ * with `ToolPermissionContext` and propagated into:
+ *   - audit entries (provenance evidence)
+ *   - approval-request payloads (so the renderer can warn on non-keyboard origins)
+ *   - Layer 5 reviewer cache key (a high-trust verdict cached for
+ *     `user-keyboard` MUST NOT be served to an `llm-tool-arg` invocation of the same shape)
+ *   - Layer 5 reviewer prompt (LLM sees origin to detect prompt-injection)
+ *
+ * Distinct from both `ToolSource` (where the tool came from) and the outer
+ * chat input origin. The conversation loop must derive this at the concrete
+ * model/tool boundary: a typed user prompt that causes a model-generated bash
+ * input is `llm-tool-arg`, while later tool calls influenced by read_file
+ * output are `file-content`.
+ */
+export type ToolTrustOrigin = ChatInputOrigin;
 
 /**
  * §6.4 source → trust mapping. Builtin tools ship with the host so they
@@ -41,6 +89,13 @@ export function trustFromSource(source: ToolSource): TrustLevel {
  */
 export interface ToolExecutionContext {
   cwd: string;
+  /**
+   * User-authorized filesystem roots beyond `cwd` for this invocation. The
+   * executor derives this once from `permissions.additionalDirectories` and
+   * every native file/shell tool reuses the same extra scope for its internal
+   * sandbox check. The full allow-list is `cwd ∪ extraAllowedDirectories`.
+   */
+  extraAllowedDirectories: readonly string[];
   metadata: Record<string, unknown>;
   /**
    * Per-turn abort signal threaded down from `ConversationLoop.runTurn`.

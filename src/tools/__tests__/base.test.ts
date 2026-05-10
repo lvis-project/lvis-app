@@ -49,7 +49,7 @@ class PluginEchoTool extends EchoTool {
   override readonly source = "plugin" as const;
 }
 
-const ctx = (): ToolExecutionContext => ({ cwd: "/tmp", metadata: {} });
+const ctx = (): ToolExecutionContext => ({ cwd: "/tmp", extraAllowedDirectories: [], metadata: {} });
 
 // ─── ZodTool ──────────────────────────────────────────
 

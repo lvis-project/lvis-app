@@ -6,7 +6,7 @@
  */
 
 /**
- * Q11 — Overlay IPC channels for main↔renderer overlay state sync.
+ * Overlay IPC channels for main↔renderer overlay state sync.
  *
  * main → renderer: show / update / dismiss (pushed from plugin-runtime overlay runner)
  * renderer → main: primaryAction (user confirm — audit log + plugin notification)
@@ -31,9 +31,29 @@ export const ROUTINES_V2 = {
   fired: "lvis:routines:v2:fired",
   listSessions: "lvis:routines:v2:list-sessions",
   readSession: "lvis:routines:v2:read-session",
-  // Q10 — running indicator events (renderer reflects LLM session progress)
+  // Running indicator events (renderer reflects LLM session progress)
   runningStarted: "lvis:routines:v2:running-started",
   runningFinished: "lvis:routines:v2:running-finished",
-  // M8 — emitted when an LLM session errors out so renderer can clear running state
+  // Emitted when an LLM session errors out so renderer can clear running state
   failed: "lvis:routines:v2:failed",
+} as const;
+
+export const PERMISSIONS = {
+  getMode: "lvis:permission:get-mode",
+  setMode: "lvis:permission:set-mode",
+  listRules: "lvis:permission:list-rules",
+  addRule: "lvis:permission:add-rule",
+  removeRule: "lvis:permission:remove-rule",
+  approvalRespond: "lvis:approval:respond",
+  policyGet: "lvis:policy:get",
+  policySet: "lvis:policy:set",
+  dirDispatch: "lvis:permissions:dir-dispatch",
+  reviewerDispatch: "lvis:permissions:reviewer-dispatch",
+  deferredList: "lvis:permissions:deferred-list",
+  deferredResolve: "lvis:permissions:deferred-resolve",
+  deferredPending: "lvis:permissions:deferred-pending",
+  auditShow: "lvis:permissions:audit-show",
+  auditVerify: "lvis:permissions:audit-verify",
+  hookTrustList: "lvis:permissions:hook-trust-list",
+  manifestViolation: "lvis:permissions:manifest-violation",
 } as const;

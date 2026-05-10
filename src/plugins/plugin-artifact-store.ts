@@ -160,8 +160,9 @@ export class PluginArtifactStore {
       publicKeys: this.publicKeys,
       downloadRoot: resolve(this.cacheRoot, "verified-downloads"),
       cacheBase: this.tarballCacheBase,
-        onProgress,
-      });
+      expectedArtifactSha256: plugin.artifactSha256,
+      onProgress,
+    });
     return {
       zipBuffer: await readFile(verified.tarballPath),
       artifactSha256: verified.sha256,

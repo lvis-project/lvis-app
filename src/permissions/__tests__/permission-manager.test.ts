@@ -3,6 +3,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PermissionManager } from "../permission-manager.js";
+import { updatePermissionsFile } from "../permissions-store.js";
 
 // ─── Mock permissions-store ───────────────────────────
 // We mock the store module so tests don't touch the real filesystem.
@@ -69,6 +70,16 @@ describe("PermissionManager (B1 persistence)", () => {
     expect(mockStore.rules).toContainEqual({ pattern: "my_tool", action: "allow" });
   });
 
+  it("does not add in-memory allow when durable allow persistence fails", async () => {
+    vi.mocked(updatePermissionsFile).mockRejectedValueOnce(new Error("persist failed"));
+
+    await expect(pm.addAlwaysAllowedPersist("volatile_tool")).rejects.toThrow("persist failed");
+
+    const result = pm.checkDetailed("volatile_tool", "builtin", "write");
+    expect(result.decision).toBe("ask");
+    expect(mockStore.rules).toEqual([]);
+  });
+
   it("addAlwaysAllowedPersist is idempotent — no duplicate rules", async () => {
     await pm.addAlwaysAllowedPersist("dup_tool");
     await pm.addAlwaysAllowedPersist("dup_tool");
@@ -90,6 +101,23 @@ describe("PermissionManager (B1 persistence)", () => {
 
     expect(mockStore.rules).toContainEqual({ pattern: "dangerous_tool", action: "deny" });
     expect(pm.getVisibilityDenyRules()).toEqual([{ pattern: "dangerous_tool" }]);
+  });
+
+  it("uses shared glob matcher for allow/deny rules", async () => {
+    pm.setRules([
+      { pattern: "path:/work/**/*.md", action: "allow" },
+      { pattern: "path:/work/private/**", action: "deny" },
+    ]);
+
+    const allowed = pm.checkDetailed("write_file", "builtin", "write", null, {
+      approvalCacheKey: "path:/work/docs/readme.md",
+    });
+    const denied = pm.checkDetailed("write_file", "builtin", "write", null, {
+      approvalCacheKey: "path:/work/private/secret.md",
+    });
+
+    expect(allowed.decision).toBe("allow");
+    expect(denied.decision).toBe("deny");
   });
 
   // ── loadRulesFromFile ────────────────────────────
@@ -187,17 +215,73 @@ describe("PermissionManager (B1 persistence)", () => {
   it("auto MCP tool override allows execution unless global mode is strict", () => {
     pm.setToolModeOverride("mcp_server__fetch", "auto");
 
-    const result = pm.checkDetailed("mcp_server__fetch", "mcp", "dangerous");
+    const result = pm.checkDetailed("mcp_server__fetch", "mcp", "network");
 
     expect(result.decision).toBe("allow");
     expect(result.reason).toBe("MCP 서버 auto 모드");
     expect(result.layer).toBe(4);
   });
 
-  it("trust-based fallback uses a unique terminal layer number", () => {
+  it("trust-based terminal decision uses a unique layer number", () => {
     const result = pm.checkDetailed("builtin_read_tool", "builtin", "read");
 
     expect(result.decision).toBe("allow");
+    expect(result.layer).toBe(6);
+  });
+
+  it("headless context routes write tools through reviewer before allow rules or auto mode", async () => {
+    await pm.setModePersist("auto");
+    await pm.addAlwaysAllowedPersist("write_report");
+
+    const result = pm.checkDetailed(
+      "write_report",
+      "builtin",
+      "write",
+      null,
+      { headless: true },
+    );
+
+    expect(result.decision).toBe("ask");
+    expect(result.reason).toMatch(/reviewer agent/);
+    expect(result.layer).toBe(6);
+  });
+
+  it("uses approvalCacheKey for authority-sensitive allow-always cache hits", async () => {
+    await pm.addAlwaysAllowedPersist("schedule_routine:scope:allow:meeting");
+
+    const sameScope = pm.checkDetailed(
+      "schedule_routine",
+      "builtin",
+      "write",
+      null,
+      { approvalCacheKey: "schedule_routine:scope:allow:meeting" },
+    );
+    const widerScope = pm.checkDetailed(
+      "schedule_routine",
+      "builtin",
+      "write",
+      null,
+      { approvalCacheKey: "schedule_routine:scope:allow:local-indexer,work-proactive" },
+    );
+
+    expect(sameScope.decision).toBe("allow");
+    expect(sameScope.layer).toBe(5);
+    expect(widerScope.decision).toBe("ask");
+    expect(widerScope.layer).toBe(6);
+  });
+
+  it("does not reuse bare tool-name allow rules when approvalCacheKey is present", async () => {
+    await pm.addAlwaysAllowedPersist("schedule_routine");
+
+    const result = pm.checkDetailed(
+      "schedule_routine",
+      "builtin",
+      "write",
+      null,
+      { approvalCacheKey: "schedule_routine:scope:allow:meeting" },
+    );
+
+    expect(result.decision).toBe("ask");
     expect(result.layer).toBe(6);
   });
 });
@@ -240,11 +324,14 @@ describe("PermissionManager — proactive-origin override (R2-1 fix)", () => {
     expect(r.reason).toMatch(/proactive 출처/);
   });
 
-  it("forces ASK on dangerous tools too", () => {
+  it("forces ASK on shell tools too", () => {
+    // Permission policy — `shell` (formerly `dangerous`) is the 5-axis category for
+    // bash/script execution. The proactive override must force ask
+    // regardless of the user's allow-always cache.
     const r = pm.checkDetailed(
       "rm_anything",
       "builtin",
-      "dangerous",
+      "shell",
       "proactive:meeting-detection",
     );
     expect(r.decision).toBe("ask");

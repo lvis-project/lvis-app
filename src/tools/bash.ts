@@ -15,9 +15,10 @@
  * (Step 2.5 of the tool executor pipeline) prevents dangerous syntax.
  */
 import { spawn, type ChildProcessByStdio } from "node:child_process";
+import { createHash } from "node:crypto";
 import { resolveShell } from "../lib/shell-resolver.js";
 import type { Readable } from "node:stream";
-import { resolve as pathResolve } from "node:path";
+import { isAbsolute, resolve as pathResolve } from "node:path";
 import { z } from "zod";
 
 type PipedChild = ChildProcessByStdio<null, Readable, Readable>;
@@ -28,8 +29,11 @@ import {
   type ToolExecutionContext,
   type ToolResult,
 } from "./base.js";
-import { validateSandboxPath } from "../sandbox/path-validator.js";
 import { buildSafeChildEnv } from "./safe-env.js";
+import {
+  validateShellCommandPathPolicy,
+  validateShellWorkingDirectory,
+} from "./shell-path-policy.js";
 
 export const BashToolInputSchema = z.object({
   command: z.string().min(1).describe("Shell command to execute"),
@@ -67,10 +71,17 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
   readonly name = "bash";
   readonly description = "Run a shell command in the local repository.";
   readonly inputSchema = BashToolInputSchema;
-  override readonly category: ToolCategory = "dangerous";
+  override readonly category: ToolCategory = "shell";
 
   override isReadOnly(_input: unknown): boolean {
     return false;
+  }
+
+  approvalCacheKey(input: unknown): string {
+    const parsed = BashToolInputSchema.parse(input);
+    return createHash("sha256")
+      .update(JSON.stringify({ command: parsed.command, cwd: parsed.cwd ?? null }))
+      .digest("hex");
   }
 
   protected async executeTyped(
@@ -88,12 +99,23 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
     }
 
     // Sandbox path check on cwd (if overridden).
-    const resolvedCwd = input.cwd ? pathResolve(input.cwd) : ctx.cwd;
-    if (input.cwd) {
-      const check = validateSandboxPath(resolvedCwd, ctx.cwd);
-      if (!check.allowed) {
-        return { output: `Sandbox: ${check.reason}`, isError: true };
-      }
+    const resolvedCwd = input.cwd
+      ? isAbsolute(input.cwd)
+        ? pathResolve(input.cwd)
+        : pathResolve(ctx.cwd, input.cwd)
+      : ctx.cwd;
+    const cwdViolation = validateShellWorkingDirectory(resolvedCwd, ctx.cwd, ctx.extraAllowedDirectories);
+    if (cwdViolation) {
+      return { output: cwdViolation, isError: true };
+    }
+    const commandPathViolation = validateShellCommandPathPolicy(
+      input.command,
+      resolvedCwd,
+      ctx.cwd,
+      ctx.extraAllowedDirectories,
+    );
+    if (commandPathViolation) {
+      return { output: commandPathViolation, isError: true };
     }
 
     return await spawnWithTimeout(input.command, resolvedCwd, input.timeoutSeconds); // Uses shared shell resolver

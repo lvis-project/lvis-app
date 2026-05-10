@@ -75,11 +75,11 @@ describe("plugin-preload bridge", () => {
     const bridge = exposed.get("lvisPlugin") as { callTool: (name: string, args?: unknown) => Promise<unknown> };
     mockInvoke.mockResolvedValueOnce({ ok: true, result: "pong" });
 
-    await bridge.callTool("agent_hub_status", { verbose: true });
+    await bridge.callTool("sample_plugin_status", { verbose: true });
 
     expect(mockInvoke).toHaveBeenCalledWith(
       "lvis:plugin:call-tool",
-      "agent_hub_status",
+      "sample_plugin_status",
       { verbose: true },
     );
   });
@@ -99,12 +99,18 @@ describe("plugin-preload bridge", () => {
     await expect(bridge.callTool("forbidden_tool", {})).rejects.toThrow(/cross-plugin-call-denied/);
   });
 
-  it("callTool passes through non-envelope replies verbatim (forward compat)", async () => {
-    // Tolerates a future host change that emits raw values directly.
+  it("callTool rejects non-envelope replies", async () => {
     const bridge = exposed.get("lvisPlugin") as { callTool: (name: string, args?: unknown) => Promise<unknown> };
     mockInvoke.mockResolvedValueOnce({ authenticated: true });
 
-    expect(await bridge.callTool("status", {})).toEqual({ authenticated: true });
+    await expect(bridge.callTool("status", {})).rejects.toThrow(/plugin-call-malformed-envelope/);
+  });
+
+  it("callTool rejects non-boolean ok envelopes", async () => {
+    const bridge = exposed.get("lvisPlugin") as { callTool: (name: string, args?: unknown) => Promise<unknown> };
+    mockInvoke.mockResolvedValueOnce({ ok: "yes", result: "pong" });
+
+    await expect(bridge.callTool("status", {})).rejects.toThrow(/plugin-call-malformed-envelope/);
   });
 
   it("emitEvent invokes lvis:plugin:emit-event IPC channel without pluginId arg", async () => {
@@ -143,13 +149,13 @@ describe("plugin-preload bridge", () => {
     const bridge = exposed.get("lvisPlugin") as { getEntryUrl: () => Promise<string> };
     mockInvoke.mockResolvedValueOnce({
       ok: true,
-      entryUrl: "lvis-plugin://asset/dist/ui/agent-hub-panel.js",
+      entryUrl: "lvis-plugin://asset/dist/ui/sample-panel.js",
     });
 
     const url = await bridge.getEntryUrl();
 
     expect(mockInvoke).toHaveBeenCalledWith("lvis:plugin:get-entry-url");
-    expect(url).toBe("lvis-plugin://asset/dist/ui/agent-hub-panel.js");
+    expect(url).toBe("lvis-plugin://asset/dist/ui/sample-panel.js");
   });
 
   it("getEntryUrl throws when main returns a rejection sentinel", async () => {
@@ -193,14 +199,18 @@ describe("plugin-preload bridge", () => {
     expect(theme).toBeNull();
   });
 
-  it("getTheme returns null when main rejects (unauthorized frame) — non-fatal for shell", async () => {
-    // Per `getTheme` JSDoc: a misconfigured plugin frame paints with
-    // defaults rather than throwing. Validates the swallow-and-null path.
+  it("getTheme throws when main rejects the request", async () => {
     const bridge = exposed.get("lvisPlugin") as { getTheme: () => Promise<unknown> };
     mockInvoke.mockResolvedValueOnce({ ok: false, error: "unauthorized-frame" });
 
-    const theme = await bridge.getTheme();
-    expect(theme).toBeNull();
+    await expect(bridge.getTheme()).rejects.toThrow(/unauthorized-frame/);
+  });
+
+  it("getTheme rejects malformed envelopes", async () => {
+    const bridge = exposed.get("lvisPlugin") as { getTheme: () => Promise<unknown> };
+    mockInvoke.mockResolvedValueOnce({ ok: "yes", theme: null });
+
+    await expect(bridge.getTheme()).rejects.toThrow(/plugin-theme-malformed-envelope/);
   });
 
   it("onEvent registers listener on lvis:plugin:event IPC channel and returns unsubscribe", () => {

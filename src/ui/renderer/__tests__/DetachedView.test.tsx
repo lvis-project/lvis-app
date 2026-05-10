@@ -3,12 +3,12 @@ import { getDetachedMainClassName, getDetachedShellClassName } from "../Detached
 
 describe("DetachedView layout contract", () => {
   it("renders plugin detached views full-bleed without host padding", () => {
-    const className = getDetachedMainClassName("plugin:agent-hub:agent-hub-panel");
+    const className = getDetachedMainClassName("plugin:sample-plugin:work-board");
 
     expect(className).toContain("overflow-hidden");
     expect(className).not.toMatch(/\bp-4\b/);
     expect(className).not.toMatch(/\bbg-background\b/);
-    expect(getDetachedShellClassName("plugin:agent-hub:agent-hub-panel")).not.toMatch(
+    expect(getDetachedShellClassName("plugin:sample-plugin:work-board")).not.toMatch(
       /\bbg-background\b/,
     );
   });

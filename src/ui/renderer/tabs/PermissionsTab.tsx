@@ -5,7 +5,9 @@ import { Input } from "../../../components/ui/input.js";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
 import { Separator } from "../../../components/ui/separator.js";
 import { EXEC_MODE_OPTIONS } from "../constants.js";
-import type { ExecMode, PermissionRule } from "../types.js";
+import type { ExecMode, HookTrustRow, PermissionRule } from "../types.js";
+import { AuditPanel } from "../components/permissions/AuditPanel.js";
+import { DeferredQueuePanel } from "../components/permissions/DeferredQueuePanel.js";
 
 export function PermissionsTab() {
   // ── 로딩 상태 ─────────────────────────────────────
@@ -22,10 +24,11 @@ export function PermissionsTab() {
     bannerTimerRef.current = setTimeout(() => setBanner(null), 5000);
   }, []);
 
-  // ── Section A: Execution Mode ─────────────────────
+  // ── Execution Mode ────────────────────────────────
   const [mode, setMode] = useState<ExecMode>("default");
+  const [modeBusy, setModeBusy] = useState(false);
 
-  // ── Section B: Explicit Approval Policy ──────────
+  // ── Explicit Approval Policy ──────────────────────
   const [requireExplicit, setRequireExplicit] = useState(true);
   const [policyManaged, setPolicyManaged] = useState(false);
   const [policyBusy, setPolicyBusy] = useState(false);
@@ -33,21 +36,32 @@ export function PermissionsTab() {
   const [policySource, setPolicySource] = useState<"defaults" | "user" | "admin" | "merged">("defaults");
   const [policyAdminPath, setPolicyAdminPath] = useState<string | undefined>(undefined);
 
-  // ── Section C: Rule Editor ────────────────────────
+  // ── Rule Editor ───────────────────────────────────
   const [rules, setRules] = useState<PermissionRule[]>([]);
   const [newPattern, setNewPattern] = useState("");
   const [newAction, setNewAction] = useState<"allow" | "deny">("allow");
   const [rulesBusy, setRulesBusy] = useState(false);
+  const [directories, setDirectories] = useState<string[]>([]);
+  const [newDirectory, setNewDirectory] = useState("");
+  const [dirsBusy, setDirsBusy] = useState(false);
+  const [pendingDirectoryWarning, setPendingDirectoryWarning] = useState<{
+    path: string;
+    warnings: string[];
+  } | null>(null);
+  const [quarantinedHooks, setQuarantinedHooks] = useState<HookTrustRow[]>([]);
+  const [auditOpen, setAuditOpen] = useState(false);
 
   // ── 초기 fetch (탭 진입 시) ───────────────────────
   const fetchAll = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [modeRes, policyRes, rulesRes] = await Promise.all([
+      const [modeRes, policyRes, rulesRes, hookTrustRes, dirRes] = await Promise.all([
         window.lvis.permission.getMode(),
         window.lvis.policy.get(),
         window.lvis.permission.listRules(),
+        window.lvis.permission.hookTrustList(),
+        window.lvis.permission.dirDispatch("list"),
       ]);
       setMode((modeRes.mode as ExecMode) ?? "default");
       setRequireExplicit(policyRes.requireExplicitApproval);
@@ -55,6 +69,8 @@ export function PermissionsTab() {
       setPolicySource((policyRes.source as "defaults" | "user" | "admin" | "merged") ?? "defaults");
       setPolicyAdminPath(policyRes.adminPath as string | undefined);
       setRules(rulesRes);
+      setQuarantinedHooks(hookTrustRes.ok ? hookTrustRes.disabled : []);
+      setDirectories(dirRes.ok && dirRes.verb === "list" ? dirRes.userAdditions : []);
     } catch (e) {
       setError((e as Error).message ?? "데이터를 불러오지 못했습니다.");
     } finally {
@@ -66,8 +82,21 @@ export function PermissionsTab() {
 
   // ── Section A handler ─────────────────────────────
   const handleModeChange = async (m: ExecMode) => {
-    setMode(m);
-    await window.lvis.permission.setMode(m);
+    if (m === mode || modeBusy) return;
+    setModeBusy(true);
+    try {
+      const res = await window.lvis.permission.setMode(m);
+      if (res.ok) {
+        setMode(res.mode as ExecMode);
+        window.dispatchEvent(new CustomEvent("lvis:permissions:mode-changed", { detail: { mode: res.mode } }));
+      } else {
+        showBanner("error", res.message ?? res.error ?? "실행 모드 변경에 실패했습니다.");
+      }
+    } catch (e) {
+      showBanner("error", `실행 모드 변경 중 오류: ${(e as Error).message}`);
+    } finally {
+      setModeBusy(false);
+    }
   };
 
   // ── Section B handler ─────────────────────────────
@@ -130,6 +159,68 @@ export function PermissionsTab() {
     }
   };
 
+  const refreshDirectories = async () => {
+    const res = await window.lvis.permission.dirDispatch("list");
+    if (res.ok && res.verb === "list") {
+      setDirectories(res.userAdditions);
+    }
+  };
+
+  const handleAddDirectory = async (acknowledgeWarnings = false) => {
+    const dir = newDirectory.trim();
+    if (!dir) return;
+    setDirsBusy(true);
+    try {
+      const command = acknowledgeWarnings
+        ? `allow --ack-warnings ${formatPermissionDirArg(dir)}`
+        : `allow ${formatPermissionDirArg(dir)}`;
+      const res = await window.lvis.permission.dirDispatch(command);
+      if (res.ok && res.verb === "allow") {
+        setNewDirectory("");
+        setPendingDirectoryWarning(null);
+        setDirectories(res.persisted);
+        if (res.warnings.length > 0) {
+          showBanner("warn", res.warnings.join(" "));
+        }
+      } else if (!res.ok) {
+        const failed = res as {
+          ok: false;
+          error: string;
+          warnings?: string[];
+          requiresAcknowledgement?: boolean;
+        };
+        if (failed.requiresAcknowledgement && failed.warnings?.length) {
+          setPendingDirectoryWarning({ path: dir, warnings: failed.warnings });
+          showBanner("warn", "디렉터리 경고를 확인한 뒤 다시 승인해야 저장됩니다.");
+        } else {
+          setPendingDirectoryWarning(null);
+          showBanner("error", failed.error);
+        }
+      }
+    } catch (e) {
+      setPendingDirectoryWarning(null);
+      showBanner("error", `디렉터리 추가 중 오류: ${(e as Error).message}`);
+    } finally {
+      setDirsBusy(false);
+    }
+  };
+
+  const handleRemoveDirectory = async (dir: string) => {
+    setDirsBusy(true);
+    try {
+      const res = await window.lvis.permission.dirDispatch(`deny ${formatPermissionDirArg(dir)}`);
+      if (res.ok && res.verb === "deny") {
+        setDirectories(res.persisted);
+      } else if (!res.ok) {
+        showBanner("error", res.error);
+      }
+    } catch (e) {
+      showBanner("error", `디렉터리 삭제 중 오류: ${(e as Error).message}`);
+    } finally {
+      setDirsBusy(false);
+    }
+  };
+
   if (loading) {
     return <div className="py-8 text-center text-sm text-muted-foreground">로딩 중...</div>;
   }
@@ -150,6 +241,48 @@ export function PermissionsTab() {
           </div>
         )}
 
+        <DeferredQueuePanel />
+
+        {quarantinedHooks.length > 0 && (
+          <div
+            data-testid="hook-quarantine-notice"
+            className="rounded-md border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-[12px] text-yellow-700 dark:text-yellow-300"
+          >
+            <div className="flex items-start gap-2">
+              <Badge variant="secondary" className="mt-0.5 text-[10px] text-yellow-700 dark:text-yellow-300">
+                검토 대기 {quarantinedHooks.length}
+              </Badge>
+              <div className="min-w-0 flex-1">
+                <p className="font-medium">격리된 hook 파일이 있습니다.</p>
+                <p className="mt-1 text-[11px]">
+                  채팅 입력창에서 <code className="rounded bg-background/70 px-1 font-mono">/permission hooks list</code> 를 실행해
+                  파일을 확인한 뒤 accept 또는 reject 하세요.
+                </p>
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {quarantinedHooks.slice(0, 3).map((hook) => (
+                    <code key={hook.fileName} className="rounded border border-yellow-500/30 bg-background/70 px-1.5 py-0.5 font-mono text-[10px]">
+                      {hook.fileName}
+                    </code>
+                  ))}
+                  {quarantinedHooks.length > 3 && (
+                    <span className="text-[10px] text-yellow-700/80 dark:text-yellow-300/80">
+                      +{quarantinedHooks.length - 3}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2 text-[11px]"
+                onClick={() => void fetchAll()}
+              >
+                새로고침
+              </Button>
+            </div>
+          </div>
+        )}
+
         {/* ── Section A: Execution Mode ── */}
         <div className="space-y-2">
           <div>
@@ -161,6 +294,7 @@ export function PermissionsTab() {
               <button
                 key={opt.value}
                 className={`flex w-full items-start gap-2.5 rounded-md border px-3 py-2 text-left text-sm transition-colors ${mode === opt.value ? "border-primary bg-primary/10" : "border-muted hover:border-muted-foreground/40"}`}
+                disabled={modeBusy}
                 onClick={() => void handleModeChange(opt.value)}
               >
                 <span className={`mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full border-2 ${mode === opt.value ? "border-primary" : "border-muted-foreground"}`}>
@@ -281,18 +415,128 @@ export function PermissionsTab() {
 
         <Separator />
 
-        {/* ── Section D: Audit Log Placeholder ── */}
-        <div className="space-y-2">
-          <div>
-            <p className="text-sm font-medium">감사 로그</p>
-            <p className="text-[11px] text-muted-foreground">도구 실행 감사 로그 뷰어는 Phase 2 이후 추가됩니다.</p>
+        {/* ── Section D: Additional Directories ── */}
+        <div className="space-y-3">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium">허용 디렉터리</p>
+              <p className="text-[11px] text-muted-foreground">작업 디렉터리 밖에서 파일 도구가 접근할 수 있는 사용자 승인 경로입니다.</p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 px-2 text-[11px]"
+              onClick={() => void refreshDirectories()}
+              disabled={dirsBusy}
+            >
+              새로고침
+            </Button>
           </div>
-          <div className="rounded-md border border-dashed p-4 text-center text-sm text-muted-foreground">
-            곧 추가 예정
+
+          {directories.length === 0 ? (
+            <p className="text-[11px] text-muted-foreground italic">추가 허용 디렉터리가 없습니다.</p>
+          ) : (
+            <div className="rounded-md border">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b bg-muted/40">
+                    <th className="px-3 py-2 text-left font-medium">경로</th>
+                    <th className="px-3 py-2" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {directories.map((dir) => (
+                    <tr key={dir} className="border-b last:border-0 hover:bg-muted/20">
+                      <td className="min-w-0 px-3 py-1.5 font-mono text-[11px]">
+                        <span className="block truncate" title={dir}>{dir}</span>
+                      </td>
+                      <td className="px-3 py-1.5 text-right">
+                        <button
+                          className="text-[10px] text-muted-foreground hover:text-destructive disabled:opacity-40"
+                          disabled={dirsBusy}
+                          onClick={() => void handleRemoveDirectory(dir)}
+                        >
+                          ✕
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <div className="flex items-center gap-2">
+            <Input
+              className="h-8 flex-1 text-xs"
+              placeholder="경로 (예: ~/Documents/project)"
+              value={newDirectory}
+              onChange={(e) => {
+                setNewDirectory(e.target.value);
+                setPendingDirectoryWarning(null);
+              }}
+              onKeyDown={(e) => { if (e.key === "Enter" && newDirectory.trim()) void handleAddDirectory(); }}
+            />
+            <Button size="sm" className="h-8" onClick={() => void handleAddDirectory()} disabled={dirsBusy || !newDirectory.trim()}>
+              추가
+            </Button>
+          </div>
+
+          {pendingDirectoryWarning && pendingDirectoryWarning.path === newDirectory.trim() && (
+            <div
+              data-testid="directory-warning-confirmation"
+              className="rounded-md border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-[12px] text-yellow-700 dark:text-yellow-300"
+            >
+              <p className="font-medium">경고 확인 필요</p>
+              <ul className="mt-1 list-disc space-y-1 pl-4">
+                {pendingDirectoryWarning.warnings.map((warning) => (
+                  <li key={warning}>{warning}</li>
+                ))}
+              </ul>
+              <div className="mt-2 flex gap-2">
+                <Button
+                  size="sm"
+                  className="h-7 px-2 text-[11px]"
+                  onClick={() => void handleAddDirectory(true)}
+                  disabled={dirsBusy}
+                >
+                  경고 확인 후 추가
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 px-2 text-[11px]"
+                  onClick={() => setPendingDirectoryWarning(null)}
+                  disabled={dirsBusy}
+                >
+                  취소
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <Separator />
+
+        {/* ── Audit Log ── */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+            <p className="text-sm font-medium">감사 로그</p>
+            <p className="text-[11px] text-muted-foreground">최근 권한 감사 기록과 체인 검증 상태를 확인합니다.</p>
+            </div>
+            <Button size="sm" variant="outline" className="h-8 px-3 text-[12px]" onClick={() => setAuditOpen(true)}>
+              열기
+            </Button>
           </div>
         </div>
 
       </div>
+      <AuditPanel open={auditOpen} onClose={() => setAuditOpen(false)} />
     </ScrollArea>
   );
+}
+
+function formatPermissionDirArg(path: string): string {
+  return /[\s"']|^-/.test(path) ? JSON.stringify(path) : path;
 }

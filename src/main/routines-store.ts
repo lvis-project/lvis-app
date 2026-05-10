@@ -27,6 +27,8 @@ export {
   type RoutineRepeat,
   type RoutineSchedule,
   type RoutineRecord,
+  type RoutineScope,
+  type RoutinePluginScope,
   type AddRoutineInput,
 } from "../shared/routines-types.js";
 
@@ -35,6 +37,7 @@ import type {
   RoutineRepeat,
   RoutineRecord,
   RoutineSchedule,
+  RoutineScope,
   AddRoutineInput,
 } from "../shared/routines-types.js";
 import { MAX_PERSISTED_ROUTINES, MAX_LLM_SESSION_ROUTINES } from "../shared/routines-types.js";
@@ -59,6 +62,42 @@ function isValidRecord(r: unknown): r is RoutineRecord {
   if (x.trigger !== "schedule" && x.trigger !== "shutdown") return false;
   if (x.execution !== "llm-session" && x.execution !== "notification-only") return false;
   if (x.lastFiredMinuteUTC !== undefined && typeof x.lastFiredMinuteUTC !== "string") return false;
+  if (x.scope !== undefined && !isValidRoutineScope(x.scope)) return false;
+  return true;
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function isValidRoutinePluginScope(value: unknown): value is RoutineScope["pluginIds"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const scope = value as Record<string, unknown>;
+  if (scope.mode === "deny-all" || scope.mode === "inherit") {
+    return true;
+  }
+  return scope.mode === "allow" && isStringArray(scope.ids);
+}
+
+function isValidRoutineScope(value: unknown): value is RoutineScope {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const scope = value as Record<string, unknown>;
+  return (
+    isValidRoutinePluginScope(scope.pluginIds) &&
+    isStringArray(scope.forcedPluginIds) &&
+    isStringArray(scope.directories)
+  );
+}
+
+function isCanonicalRecord(r: unknown): r is RoutineRecord {
+  if (!isValidRecord(r)) return false;
+  if ("allowedPlugins" in r) {
+    log.warn(
+      "[routines-store] rejecting non-canonical routine record with allowedPlugins (id=%s)",
+      r.id,
+    );
+    return false;
+  }
   return true;
 }
 
@@ -78,7 +117,7 @@ export interface RoutinesFile {
   routines: RoutineRecord[];
 }
 
-// Q9: consolidated under ~/.lvis/routine/ namespace (single directory for all routine data)
+// Consolidated under ~/.lvis/routine/ namespace (single directory for all routine data).
 const DEFAULT_PATH = resolve(homedir(), ".lvis", "routine", "routines.json");
 
 const fileLocks = new Map<string, Promise<void>>();
@@ -105,9 +144,12 @@ async function readFileOrEmpty(filePath: string): Promise<RoutinesFile> {
     if (!Array.isArray(parsed.routines)) {
       return { version: 2, routines: [] };
     }
-    // Filter out tampered/corrupted records so a single bad entry cannot
-    // cause the scheduler tick to throw and stall all other routines.
-    return { version: 2, routines: parsed.routines.filter(isValidRecord) };
+    // Filter out tampered/corrupted or non-canonical records so a single bad
+    // entry cannot cause the scheduler tick to throw and stall all routines.
+    return {
+      version: 2,
+      routines: parsed.routines.filter(isCanonicalRecord),
+    };
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
       return { version: 2, routines: [] };
@@ -134,6 +176,16 @@ function cloneRecord(r: RoutineRecord): RoutineRecord {
       ? {
           ...r.schedule,
           repeat: r.schedule.repeat ? { ...r.schedule.repeat } : undefined,
+        }
+      : undefined,
+    scope: r.scope
+      ? {
+          pluginIds:
+            r.scope.pluginIds.mode === "allow"
+              ? { mode: "allow", ids: [...r.scope.pluginIds.ids] }
+              : { ...r.scope.pluginIds },
+          forcedPluginIds: [...r.scope.forcedPluginIds],
+          directories: [...r.scope.directories],
         }
       : undefined,
   };
@@ -231,6 +283,37 @@ export class RoutinesStore {
         );
       }
     }
+    // Permission policy Layer 4 — `scope` is the canonical shape. When omitted, default
+    // to deny-all so new call sites cannot accidentally expose plugins.
+    const ID_RE = /^[a-z0-9][a-z0-9_.-]*$/i;
+    const inputScope = input.scope;
+    let normalizedPluginIds: RoutineScope["pluginIds"] =
+      inputScope?.pluginIds ?? { mode: "deny-all" };
+    let normalizedForcedPluginIds: string[] = [];
+
+    if (inputScope?.pluginIds.mode === "allow") {
+      const trimmed = inputScope.pluginIds.ids.map((p) => p.trim()).filter(Boolean);
+      if (trimmed.some((p) => !ID_RE.test(p))) {
+        throw new Error(
+          "RoutinesStore.add: scope.pluginIds.ids entries must be plugin ids using letters, digits, dot, underscore, or hyphen",
+        );
+      }
+      normalizedPluginIds = { mode: "allow", ids: [...new Set(trimmed)] };
+    }
+    if (inputScope?.forcedPluginIds) {
+      const trimmedForced = inputScope.forcedPluginIds.map((p) => p.trim()).filter(Boolean);
+      if (trimmedForced.some((p) => !ID_RE.test(p))) {
+        throw new Error(
+          "RoutinesStore.add: scope.forcedPluginIds entries must be plugin ids using letters, digits, dot, underscore, or hyphen",
+        );
+      }
+      normalizedForcedPluginIds = [...new Set(trimmedForced)];
+    }
+    const normalizedScope: RoutineScope = {
+      pluginIds: normalizedPluginIds,
+      forcedPluginIds: normalizedForcedPluginIds,
+      directories: inputScope?.directories ? [...inputScope.directories] : [],
+    };
 
     // Build schedule with normalized `at`.
     const normalizedSchedule: typeof input.schedule = input.schedule
@@ -249,12 +332,13 @@ export class RoutinesStore {
       title: input.title,
       notificationTitle: input.notificationTitle,
       notificationBody: input.notificationBody,
+      scope: normalizedScope,
       createdAt: new Date().toISOString(),
     };
 
     return withFileLock(this.filePath, async () => {
       const file = await readFileOrEmpty(this.filePath);
-      // Q8: llm-session sub-cap check (before total cap to give a specific error).
+      // llm-session sub-cap check (before total cap to give a specific error).
       if (record.execution === "llm-session") {
         const llmCount = file.routines.filter(
           (r) => r.execution === "llm-session" && !r.dismissedAt,
@@ -405,7 +489,7 @@ function advanceWeekly(atIso: string): string {
 
 /**
  * Advance by one calendar month, clamping to the last day of the target month
- * so 31-day routines don't skip February (Q5).
+ * so 31-day routines don't skip February.
  *
  * originalDay is captured once before the loop so that multi-month advances
  * (e.g. Jan 31 skipped while app was offline) correctly restore the original
