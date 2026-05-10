@@ -48,6 +48,7 @@ import type { HookTrustOrigin } from "../hooks/script-hook-types.js";
 import { AuditLogger } from "../audit/audit-logger.js";
 import type { PermissionAuditEntryInput } from "../audit/audit-schema.js";
 import { maskSensitiveData } from "../audit/dlp-filter.js";
+import type { RiskVerdict } from "../permissions/reviewer/risk-classifier.js";
 import { BashAstValidator } from "../main/bash-ast-validator.js";
 import {
   validateShellCommandPathPolicy,
@@ -379,6 +380,14 @@ function permissionAuditEntryFromToolCall(args: {
   auditDirectory?: string;
 }): PermissionAuditEntryInput {
   const base = permissionAuditBase(args);
+  if (args.permission?.deferred) {
+    return {
+      ...base,
+      decision: "deferred",
+      reviewerVerdict: args.permission.deferred.reviewerVerdict,
+      queueId: args.permission.deferred.queueId,
+    };
+  }
   if (args.permission?.decision === "deny") {
     const denyReasons = args.permission.denyReasons?.length
       ? args.permission.denyReasons
@@ -565,12 +574,13 @@ export class ToolExecutor {
   > {
     if (this.permissionManager?.getMode() === "strict") {
       const reason = "strict mode requires explicit user approval";
+      const verdict: RiskVerdict = { level: "high", reason };
       const deferredId = await this.permissionManager.getDeferredQueue()?.append({
         toolName,
         source,
         category,
         inputSummary: summarizeInputForDeferred(finalInput),
-        verdict: { level: "high", reason },
+        verdict,
       });
       return {
         allowed: false,
@@ -582,6 +592,7 @@ export class ToolExecutor {
           decision: "deny",
           reason: "strict headless requires explicit approval",
           layer: 5,
+          ...(deferredId ? { deferred: { queueId: deferredId, reviewerVerdict: verdict } } : {}),
         },
       };
     }
@@ -628,6 +639,9 @@ export class ToolExecutor {
           decision: "deny",
           reason: `reviewer ${reviewer.verdict.level}: ${reviewer.verdict.reason}`,
           layer: 5,
+          ...(reviewer.deferredId
+            ? { deferred: { queueId: reviewer.deferredId, reviewerVerdict: reviewer.verdict } }
+            : {}),
         },
       };
     }
@@ -1064,7 +1078,7 @@ export class ToolExecutor {
             log.warn(msg);
             emitToolStart(callbacks, toolUse.name, finalInput, meta);
             callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-            await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...dirLayerResult, decision: "deny", reason: reviewerResult.permissionResult.reason }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
+            await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, reviewerResult.permissionResult, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
             return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
           }
         } else {
@@ -1129,7 +1143,7 @@ export class ToolExecutor {
           layer: 6,
         };
       }
-      if (permissionResult.decision !== "deny") {
+      if (permissionResult.decision === "ask") {
         const reviewerResult = await this.dispatchReviewerForInteractiveAuto(
           toolUse.name,
           source,
@@ -1557,7 +1571,7 @@ export class ToolExecutor {
           source,
           trust,
           executionTimeMs: Date.now() - startTime,
-          permissionDecision: permission?.decision ?? "allow",
+          permissionDecision: permission?.deferred ? "deferred" : permission?.decision ?? "allow",
           permissionReason: permission?.reason,
           rateLimitRemaining,
         }],
