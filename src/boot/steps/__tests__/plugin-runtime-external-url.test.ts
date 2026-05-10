@@ -5,7 +5,7 @@
  * branch between in-app viewer vs system browser.
  */
 import { describe, it, expect, vi } from "vitest";
-import { routeExternalUrl } from "../plugin-runtime.js";
+import { EXTERNAL_LINK_PARTITION, routeExternalUrl } from "../plugin-runtime.js";
 import type { SettingsService } from "../../../data/settings-store.js";
 
 function makeStub(initial: "in-app" | "system-browser" = "in-app") {
@@ -39,8 +39,34 @@ describe("routeExternalUrl (§B3)", () => {
     expect(stub.openLinkWindowService).toHaveBeenCalledOnce();
     expect(stub.openLinkWindowService.mock.calls[0][0]).toMatchObject({
       url: "https://example.com/foo",
+      persistPartition: EXTERNAL_LINK_PARTITION,
     });
     expect(stub.shellOpenExternal).not.toHaveBeenCalled();
+  });
+
+  it("uses a stable persistPartition across calls so SSO cookies survive between opens", async () => {
+    const stub = makeStub("in-app");
+    await routeExternalUrl({
+      url: "https://outlook.office.com/mail/deeplink/compose?to=a@b.com",
+      pluginId: "p-msgraph",
+      ...stub,
+    });
+    await routeExternalUrl({
+      url: "https://outlook.office.com/mail/deeplink/compose?to=c@d.com",
+      pluginId: "p-msgraph",
+      ...stub,
+    });
+
+    expect(stub.openLinkWindowService).toHaveBeenCalledTimes(2);
+    const firstPartition = (
+      stub.openLinkWindowService.mock.calls[0][0] as { persistPartition?: string }
+    ).persistPartition;
+    const secondPartition = (
+      stub.openLinkWindowService.mock.calls[1][0] as { persistPartition?: string }
+    ).persistPartition;
+    expect(firstPartition).toBe(EXTERNAL_LINK_PARTITION);
+    expect(secondPartition).toBe(EXTERNAL_LINK_PARTITION);
+    expect(firstPartition).toMatch(/^persist:/);
   });
 
   it("routes to shell.openExternal when preferredFlow is 'system-browser'", async () => {
