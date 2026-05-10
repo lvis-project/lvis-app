@@ -1,5 +1,5 @@
 /**
- * Phase 5 — Capability policy + event namespace allowlist.
+ * Capability policy + event namespace allowlist.
  *
  * Two concerns:
  *  1. `KNOWN_CAPABILITIES` — closed vocabulary for manifest.capabilities[].
@@ -9,12 +9,11 @@
  *  2. `PUBLIC_EVENT_NAMESPACES` / `PLUGIN_PRIVATE_NAMESPACES` — restrict
  *     which host events a plugin may subscribe to and emit.
  *
- * Sources of truth re-exported for docs (Phase 6 plugin-development.md
- * follow-up) — do not fork.
+ * Sources of truth re-exported for plugin-development docs — do not fork.
  */
 
 /**
- * Capability status summary used by host policy and Phase 6 docs.
+ * Capability status summary used by host policy and governance docs.
  *
  * - `enforced`: runtime check exists (HostApi method refuses / event dropped
  *   when capability is missing).
@@ -47,9 +46,11 @@ export const KNOWN_CAPABILITIES: ReadonlySet<string> = new Set([
   "background-watcher",
   "worker-client",
   "document-indexer",
+  // SDK schema still recognizes this token for manifest validation parity,
+  // but runtime gating for triggerConversation is `host:overlay` only.
   "conversation-trigger",
   "lifecycle-observer",
-  // Q11: host:overlay — plugin may call triggerConversation() as overlay runner.
+  // host:overlay — plugin may call triggerConversation() as overlay runner.
   // triggerConversation() now routes to OverlayContext staging instead of spawning
   // a fresh ConversationLoop. Capability gates the same method as before.
   "host:overlay",
@@ -64,7 +65,7 @@ export const ENFORCED_CAPABILITIES: ReadonlyMap<string, CapabilityPolicy> = new 
     "ms-graph-consumer",
     {
       description:
-        "Self-identification label for plugins that consume Microsoft Graph (Outlook mail / calendar). PR 3c 이후 host 측 MS HostApi 메서드는 모두 제거되어 강제할 게이트가 없으므로 advisory 로 강등. ms-graph 플러그인이 자체 MSAL + safeStorage 로 직접 인증을 처리한다.",
+        "Self-identification label for plugins that consume Microsoft Graph. Host-side provider-auth HostApi methods are not part of the app contract, so this capability is advisory only.",
       enforcement: "advisory",
       gates: [],
     },
@@ -150,9 +151,9 @@ export const ENFORCED_CAPABILITIES: ReadonlyMap<string, CapabilityPolicy> = new 
     "conversation-trigger",
     {
       description:
-        "Required to call hostApi.triggerConversation(). Lets a (read-only) brain plugin make LVIS speak first when an observed signal warrants action — the differentiating 'proactive assistant' surface. The host runs the trigger on a *fresh, isolated* ConversationLoop with its own sessionId; the user's chat history is NOT mutated unless the user explicitly clicks '지금 답하기' on the resulting TriggerCard. Reserved for plugins curated as proactive brains; granting it to general plugins lets them inject prompts users did not type.",
-      enforcement: "enforced",
-      gates: ["triggerConversation"],
+        "Schema-reserved capability token. It does not grant hostApi.triggerConversation(); runtime gating uses host:overlay only.",
+      enforcement: "advisory",
+      gates: [],
     },
   ],
   [
@@ -168,7 +169,7 @@ export const ENFORCED_CAPABILITIES: ReadonlyMap<string, CapabilityPolicy> = new 
     "host:overlay",
     {
       description:
-        "Q11 — Plugin may call hostApi.triggerConversation() as an Overlay Runner. The host holds the spec in OverlayContext staging (fresh ConversationLoop is NOT started). User confirm inserts the prompt as a user message into main chat via the imported_trigger mechanism. Required because the overlay surface lets plugins inject text the user sees before any LLM turn — must be curated.",
+        "Plugin may call hostApi.triggerConversation() as an Overlay Runner. The host holds the spec in OverlayContext staging (fresh ConversationLoop is NOT started). User confirm inserts the prompt as a user message into main chat via the imported_trigger mechanism. Required because the overlay surface lets plugins inject text the user sees before any LLM turn — must be curated.",
       enforcement: "enforced",
       gates: ["triggerConversation"],
     },
@@ -181,7 +182,7 @@ export const ENFORCED_CAPABILITIES: ReadonlyMap<string, CapabilityPolicy> = new 
  * (log.warn + no fan-out).
  *
  * `task` namespace is absent — host-side TaskDeadlinePoller and TaskService
- * were removed in Phase 4 (2026-05-05). task ownership is now fully in agent-hub.
+ * were removed in 2026-05. Task ownership now lives in plugins.
  * If a plugin ever emits `task.*`, add a `tasks-source` capability here.
  */
 export const EVENT_NAMESPACE_CAPABILITY: ReadonlyMap<string, string> = new Map([

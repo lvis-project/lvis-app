@@ -15,6 +15,8 @@ vi.mock("../audit/audit-logger.js", () => ({
   AuditLogger: vi.fn().mockImplementation(() => ({
     log: auditLog,
     logTurn: vi.fn(),
+    isPermissionAuditChainReady: vi.fn(() => false),
+    assertPermissionAuditWritable: vi.fn(),
   })),
 }));
 
@@ -25,6 +27,8 @@ vi.mock("../audit/dlp-filter.js", () => ({
 import { ToolExecutor } from "../tools/executor.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { createDynamicTool } from "../tools/base.js";
+
+const userPermissionContext = { trustOrigin: "user-keyboard" as const };
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -53,10 +57,13 @@ describe("ToolExecutor metadata", () => {
         { id: "tu-3", name: "fake_tool", input: { n: 3 } },
       ],
       {
-        onToolStart: (_name, _input, meta) => startMetas.push(meta),
-        onToolEnd: (_name, _result, _isError, meta) => endMetas.push(meta),
+        callbacks: {
+          onToolStart: (_name, _input, meta) => startMetas.push(meta),
+          onToolEnd: (_name, _result, _isError, meta) => endMetas.push(meta),
+        },
+        sessionId: "session-1",
+        permissionContext: userPermissionContext,
       },
-      "session-1",
     );
 
     expect(results).toHaveLength(3);
@@ -95,10 +102,13 @@ describe("ToolExecutor metadata", () => {
     const results = await executor.executeAll(
       [{ id: "tu-1", name: "slow_tool", input: {} }],
       {
-        onToolEnd: (_name, _result, _isError, _meta, _ui, durationMs) =>
-          callbackDurations.push(durationMs),
+        callbacks: {
+          onToolEnd: (_name, _result, _isError, _meta, _ui, durationMs) =>
+            callbackDurations.push(durationMs),
+        },
+        sessionId: "session-1",
+        permissionContext: userPermissionContext,
       },
-      "session-1",
     );
 
     expect(results).toHaveLength(1);
@@ -116,10 +126,13 @@ describe("ToolExecutor metadata", () => {
     const results = await executor.executeAll(
       [{ id: "tu-1", name: "nonexistent_tool", input: {} }],
       {
-        onToolEnd: (_name, _result, _isError, _meta, _ui, durationMs) =>
-          callbackDurations.push(durationMs),
+        callbacks: {
+          onToolEnd: (_name, _result, _isError, _meta, _ui, durationMs) =>
+            callbackDurations.push(durationMs),
+        },
+        sessionId: "session-1",
+        permissionContext: userPermissionContext,
       },
-      "session-1",
     );
 
     expect(results).toHaveLength(1);

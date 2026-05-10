@@ -33,7 +33,8 @@ export function createAskUserQuestionTool(deps: AskUserQuestionToolDeps): Tool {
       "placeholder 는 자유입력 단서(한국어 ≤ 20자), summaryHint 는 confirm 단계 표 row label (≤ 10자). " +
       "5분 안에 확인이 없으면 dismissed=true 로 반환.",
     source: "builtin",
-    category: "dangerous",
+    category: "meta",
+    decisionOverride: "always-allow-with-audit",
     jsonSchema: {
       type: "object",
       required: ["questions"],

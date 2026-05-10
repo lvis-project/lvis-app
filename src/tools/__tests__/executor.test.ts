@@ -20,12 +20,20 @@
  * an approval-denial error.
  */
 import { describe, it, expect, vi } from "vitest";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve as pathResolve } from "node:path";
 
 import { ToolExecutor } from "../executor.js";
 import { ToolRegistry } from "../registry.js";
 import { createDynamicTool, type Tool } from "../base.js";
+import { BashTool } from "../bash.js";
+import { PowerShellTool } from "../powershell.js";
+import { ReadFileTool } from "../file-tools.js";
 import { PermissionManager } from "../../permissions/permission-manager.js";
 import { ApprovalGate } from "../../permissions/approval-gate.js";
+import { HookRunner } from "../../hooks/hook-runner.js";
+import { BashAstValidator } from "../../main/bash-ast-validator.js";
 
 // ─── Helpers ─────────────────────────────────────────
 
@@ -36,6 +44,12 @@ function makeMockWebContents() {
   };
 }
 
+function userPermissionContext(
+  overrides: Partial<import("../executor.js").ToolPermissionContext> = {},
+): import("../executor.js").ToolPermissionContext {
+  return { trustOrigin: "user-keyboard", ...overrides };
+}
+
 function makeReadFileTool(
   executeSpy: ReturnType<typeof vi.fn>,
 ): Tool {
@@ -44,6 +58,7 @@ function makeReadFileTool(
     description: "Reads a file.",
     source: "builtin",
     category: "read",
+    pathFields: ["path"],
     isReadOnly: () => true,
     jsonSchema: {
       type: "object",
@@ -101,8 +116,7 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
           input: { path: "/Users/test/.ssh/id_rsa" },
         },
       ],
-      undefined,
-      "sess-c1",
+      { sessionId: "sess-c1", permissionContext: userPermissionContext() },
     );
 
     // ── Assertions ──────────────────────────────────
@@ -120,13 +134,42 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
     // result is an error surfaced to the LLM
     expect(results).toHaveLength(1);
     expect(results[0].is_error).toBe(true);
-    expect(results[0].content).toContain("승인 거부");
+    expect(results[0].content).toContain("민감 경로 차단");
   });
 
-  it("tool_use read_file on a non-sensitive path: reaches the dialog", async () => {
+  it("expands ~/ before sensitive-path hard-block evaluation", async () => {
+    const executeSpy = vi.fn(async () => "file contents");
+    const registry = new ToolRegistry();
+    registry.register(makeReadFileTool(executeSpy));
+
+    const permMgr = new PermissionManager("/tmp/nonexistent-permissions.json");
+    permMgr.checkDetailed = () => ({
+      decision: "ask",
+      reason: "testing tilde sensitive path",
+      layer: 5,
+    });
+
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const executor = new ToolExecutor(registry, undefined, permMgr, undefined, gate);
+
+    const results = await executor.executeAll(
+      [{ id: "tu-tilde", name: "read_file", input: { path: "~/.ssh/id_rsa" } }],
+      { sessionId: "sess-c1-tilde", permissionContext: userPermissionContext() },
+    );
+
+    expect(executeSpy).not.toHaveBeenCalled();
+    expect(wc.send).not.toHaveBeenCalled();
+    expect(results[0].is_error).toBe(true);
+    expect(results[0].content).toContain("민감 경로 차단");
+  });
+
+  it("tool_use read_file on a non-sensitive path within allowed dir: reaches the dialog (read-only auto-approve)", async () => {
     // Sanity check — executor still routes non-sensitive paths to the
     // normal approval flow so the §S1 short-circuit didn't break the
-    // happy path.
+    // happy path. Permission policy P2.5: the path must be inside an allowed
+    // directory or Layer 1 will dispatch its own directory-confirm
+    // modal before §S4 ever runs.
     const executeSpy = vi.fn(async () => "hello world");
     const registry = new ToolRegistry();
     registry.register(makeReadFileTool(executeSpy));
@@ -148,7 +191,7 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
       gate,
     );
 
-    // Kick off the execution — it will hang until we resolve the gate.
+    // Permission policy P2.5 — explicitly allow /tmp so Layer 1 doesn't intercept.
     const promise = executor.executeAll(
       [
         {
@@ -157,23 +200,577 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
           input: { path: "/tmp/safe-file.txt" },
         },
       ],
-      undefined,
-      "sess-c1-sanity",
+      {
+        sessionId: "sess-c1-sanity",
+        permissionContext: userPermissionContext({ additionalDirectories: ["/tmp"] }),
+      },
     );
 
     // Let the microtasks run so the send call happens
     await new Promise((r) => setImmediate(r));
 
-    // For a non-sensitive path, read_file is in the READ_ONLY_TOOL_NAMES
-    // set, so the §S4 short-circuit auto-approves and the tool executes
-    // without ever showing a dialog. Therefore send should NOT have been
-    // called, but the tool SHOULD have been invoked.
+    // For a non-sensitive path inside an allowed dir,
+    // read_file.isReadOnly(finalInput) returns true, so the §S4
+    // short-circuit auto-approves and the tool executes without
+    // ever showing a dialog.
     expect(wc.send).not.toHaveBeenCalled();
 
     const results = await promise;
     expect(executeSpy).toHaveBeenCalledTimes(1);
     expect(results[0].is_error).toBeUndefined();
     expect(results[0].content).toBe("hello world");
+  });
+
+  it("uses Tool.isReadOnly(finalInput), not a static tool-name allowlist", async () => {
+    const executeSpy = vi.fn(async () => "dynamic read");
+    const registry = new ToolRegistry();
+    registry.register(createDynamicTool({
+      name: "dynamic_fetch_report",
+      description: "Input-aware read/write test tool",
+      source: "builtin",
+      category: "read",
+      jsonSchema: {
+        type: "object",
+        properties: { mode: { type: "string" } },
+      },
+      isReadOnly: (input) => (input as { mode?: string }).mode === "read",
+      execute: async (rawInput) => ({
+        output: await executeSpy(rawInput),
+        isError: false,
+      }),
+    }));
+
+    const permMgr = new PermissionManager("/tmp/nonexistent-permissions.json");
+    permMgr.checkDetailed = () => ({
+      decision: "ask",
+      reason: "input-aware ask path",
+      layer: 5,
+    });
+
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const executor = new ToolExecutor(registry, undefined, permMgr, undefined, gate);
+
+    const results = await executor.executeAll(
+      [{ id: "tu-dynamic", name: "dynamic_fetch_report", input: { mode: "read" } }],
+      { sessionId: "sess-dynamic-readonly", permissionContext: userPermissionContext() },
+    );
+
+    expect(wc.send).not.toHaveBeenCalled();
+    expect(executeSpy).toHaveBeenCalledTimes(1);
+    expect(results[0].is_error).toBeUndefined();
+    expect(results[0].content).toBe("dynamic read");
+  });
+
+  it("threads shell approvalCacheKey through permission rules so one command does not authorize another", async () => {
+    const registry = new ToolRegistry();
+    const bash = new BashTool();
+    registry.register(bash);
+
+    const permissionPath = join(mkdtempSync(join(tmpdir(), "lvis-shell-approval-")), "permissions.json");
+    const permMgr = new PermissionManager(permissionPath);
+    const firstInput = { command: "echo safe", timeoutSeconds: 1 };
+    const secondInput = { command: "echo different", timeoutSeconds: 1 };
+    await permMgr.addAlwaysAllowedPersist(`bash:${bash.approvalCacheKey(firstInput)}`);
+
+    const approvalGate = {
+      requestAndWait: vi.fn(async (req: { id: string }) => ({
+        requestId: req.id,
+        choice: "deny-once" as const,
+      })),
+    };
+    const executor = new ToolExecutor(registry, undefined, permMgr, undefined, approvalGate as never);
+
+    const first = await executor.executeAll(
+      [{ id: "tu-shell-1", name: "bash", input: firstInput }],
+      { sessionId: "sess-shell-approval", permissionContext: userPermissionContext({ trustOrigin: "llm-tool-arg" }) },
+    );
+    expect(first[0].is_error).toBeUndefined();
+    expect(first[0].content).toContain("safe");
+    expect(approvalGate.requestAndWait).not.toHaveBeenCalled();
+
+    const second = await executor.executeAll(
+      [{ id: "tu-shell-2", name: "bash", input: secondInput }],
+      { sessionId: "sess-shell-approval", permissionContext: userPermissionContext({ trustOrigin: "llm-tool-arg" }) },
+    );
+    expect(approvalGate.requestAndWait).toHaveBeenCalledTimes(1);
+    expect(second[0].is_error).toBe(true);
+    expect(second[0].content).toContain("승인 거부");
+  });
+
+  it("runs shell path policy before approval prompts or allow-always persistence", async () => {
+    const registry = new ToolRegistry();
+    registry.register(new BashTool());
+    const permissionPath = join(mkdtempSync(join(tmpdir(), "lvis-shell-path-policy-")), "permissions.json");
+    const permMgr = new PermissionManager(permissionPath);
+    permMgr.checkDetailed = () => ({
+      decision: "ask",
+      reason: "would otherwise ask",
+      layer: 6,
+    });
+    const approvalGate = {
+      requestAndWait: vi.fn(async (req: { id: string }) => ({
+        requestId: req.id,
+        choice: "allow-always" as const,
+      })),
+    };
+    const executor = new ToolExecutor(registry, undefined, permMgr, undefined, approvalGate as never);
+
+    const result = await executor.executeAll(
+      [{ id: "tu-shell-path-policy", name: "bash", input: { command: "cat ~/.ssh/id_rsa", timeoutSeconds: 1 } }],
+      { sessionId: "sess-shell-path-policy", permissionContext: userPermissionContext() },
+    );
+
+    expect(result[0].is_error).toBe(true);
+    expect(result[0].content).toContain("Shell 경로 정책 차단");
+    expect(approvalGate.requestAndWait).not.toHaveBeenCalled();
+    await expect(permMgr.listPersistedRules()).resolves.toEqual([]);
+  });
+
+  it.each([
+    ["sensitive env-home operand", "Get-Content $HOME/.ssh/id_rsa"],
+    ["sensitive quoted operand", "Get-Content '~/.ssh/id_rsa'"],
+    ["sensitive redirection target", "Get-Content package.json > ~/.ssh/leak"],
+    ["relative traversal", "Get-Content ../outside.txt"],
+    ["dynamic path composition", "Set-Content (Join-Path $HOME \"Desktop/out.txt\") hi"],
+  ])("runs PowerShell path policy before approval prompts or allow-always persistence: %s", async (_label, command) => {
+    const registry = new ToolRegistry();
+    registry.register(new PowerShellTool());
+    const permissionPath = join(mkdtempSync(join(tmpdir(), "lvis-powershell-path-policy-")), "permissions.json");
+    const permMgr = new PermissionManager(permissionPath);
+    permMgr.checkDetailed = () => ({
+      decision: "ask",
+      reason: "would otherwise ask",
+      layer: 6,
+    });
+    const approvalGate = {
+      requestAndWait: vi.fn(async (req: { id: string }) => ({
+        requestId: req.id,
+        choice: "allow-always" as const,
+      })),
+    };
+    const executor = new ToolExecutor(registry, undefined, permMgr, undefined, approvalGate as never);
+
+    const result = await executor.executeAll(
+      [{ id: "tu-powershell-path-policy", name: "powershell", input: { command, timeoutSeconds: 1 } }],
+      { sessionId: "sess-powershell-path-policy", permissionContext: userPermissionContext() },
+    );
+
+    expect(result[0].is_error).toBe(true);
+    expect(result[0].content).toContain("Shell 경로 정책 차단");
+    expect(approvalGate.requestAndWait).not.toHaveBeenCalled();
+    await expect(permMgr.listPersistedRules()).resolves.toEqual([]);
+  });
+
+  it("passes non-keyboard trustOrigin to ApprovalGate and permission audit entries", async () => {
+    const executeSpy = vi.fn(async () => "wrote");
+    const registry = new ToolRegistry();
+    registry.register(createDynamicTool({
+      name: "write_probe",
+      description: "write probe",
+      source: "builtin",
+      category: "write",
+      jsonSchema: {
+        type: "object",
+        properties: { path: { type: "string" } },
+      },
+      execute: async (rawInput) => ({
+        output: await executeSpy(rawInput),
+        isError: false,
+      }),
+    }));
+
+    const permMgr = new PermissionManager("/tmp/nonexistent-permissions.json");
+    permMgr.checkDetailed = () => ({
+      decision: "ask",
+      reason: "trust-origin boundary test",
+      layer: 5,
+    });
+    const approvalGate = {
+      requestAndWait: vi.fn(async (req: { id: string }) => ({
+        requestId: req.id,
+        choice: "allow-once" as const,
+      })),
+    };
+    const appendPermissionAuditEntry = vi.fn(async (entry: Record<string, unknown>) => ({
+      ...entry,
+      prevHash: "h",
+    }));
+    const auditLogger = {
+      log: vi.fn(),
+      isPermissionAuditChainReady: vi.fn(() => true),
+      assertPermissionAuditWritable: vi.fn(),
+      appendPermissionAuditEntry,
+    };
+    const executor = new ToolExecutor(
+      registry,
+      undefined,
+      permMgr,
+      undefined,
+      approvalGate as never,
+      undefined,
+      auditLogger as never,
+    );
+
+    const result = await executor.executeAll(
+      [{ id: "tu-origin", name: "write_probe", input: { path: "out.txt" } }],
+      { sessionId: "sess-origin", permissionContext: userPermissionContext({ trustOrigin: "plugin-emitted" }) },
+    );
+
+    expect(result[0].is_error).toBeUndefined();
+    expect(approvalGate.requestAndWait).toHaveBeenCalledWith(
+      expect.objectContaining({ trustOrigin: "plugin-emitted" }),
+    );
+    expect(appendPermissionAuditEntry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        decision: "ask",
+        trustOrigin: "plugin-emitted",
+        tool: "write_probe",
+        reason: "trust-origin boundary test",
+      }),
+    );
+    expect(appendPermissionAuditEntry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        decision: "allow",
+        trustOrigin: "plugin-emitted",
+        tool: "write_probe",
+      }),
+    );
+  });
+
+  it("uses declared pathFields for permission audit directory", async () => {
+    const executeSpy = vi.fn(async () => "custom wrote");
+    const registry = new ToolRegistry();
+    registry.register(createDynamicTool({
+      name: "custom_write_probe",
+      description: "custom write probe",
+      source: "builtin",
+      category: "write",
+      pathFields: ["customTarget"],
+      jsonSchema: {
+        type: "object",
+        properties: { customTarget: { type: "string" } },
+      },
+      execute: async (rawInput) => ({
+        output: await executeSpy(rawInput),
+        isError: false,
+      }),
+    }));
+    const permMgr = new PermissionManager("/tmp/nonexistent-permissions.json");
+    permMgr.setMode("auto");
+    const appendPermissionAuditEntry = vi.fn(async (entry: Record<string, unknown>) => ({
+      ...entry,
+      prevHash: "h",
+    }));
+    const auditLogger = {
+      log: vi.fn(),
+      isPermissionAuditChainReady: vi.fn(() => true),
+      assertPermissionAuditWritable: vi.fn(),
+      appendPermissionAuditEntry,
+    };
+    const executor = new ToolExecutor(
+      registry,
+      undefined,
+      permMgr,
+      undefined,
+      undefined,
+      undefined,
+      auditLogger as never,
+    );
+
+    const result = await executor.executeAll(
+      [{ id: "tu-custom-path", name: "custom_write_probe", input: { customTarget: "reports/out.md" } }],
+      { sessionId: "sess-custom-path", permissionContext: userPermissionContext() },
+    );
+
+    expect(result[0].is_error).toBeUndefined();
+    expect(appendPermissionAuditEntry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        decision: "allow",
+        directory: pathResolve("reports/out.md"),
+      }),
+    );
+  });
+
+  it("does not synthesize permission audit directory without a declared path surface", async () => {
+    const executeSpy = vi.fn(async () => "write without path surface");
+    const registry = new ToolRegistry();
+    registry.register(createDynamicTool({
+      name: "pathless_write_probe",
+      description: "pathless write probe",
+      source: "builtin",
+      category: "write",
+      jsonSchema: {
+        type: "object",
+        properties: { payload: { type: "string" } },
+      },
+      execute: async (rawInput) => ({
+        output: await executeSpy(rawInput),
+        isError: false,
+      }),
+    }));
+    const permMgr = new PermissionManager("/tmp/nonexistent-permissions.json");
+    permMgr.setMode("auto");
+    const appendPermissionAuditEntry = vi.fn(async (entry: Record<string, unknown>) => ({
+      ...entry,
+      prevHash: "h",
+    }));
+    const auditLogger = {
+      log: vi.fn(),
+      isPermissionAuditChainReady: vi.fn(() => true),
+      assertPermissionAuditWritable: vi.fn(),
+      appendPermissionAuditEntry,
+    };
+    const executor = new ToolExecutor(
+      registry,
+      undefined,
+      permMgr,
+      undefined,
+      undefined,
+      undefined,
+      auditLogger as never,
+    );
+
+    const result = await executor.executeAll(
+      [{ id: "tu-pathless-write", name: "pathless_write_probe", input: { payload: "ok" } }],
+      { sessionId: "sess-pathless-write", permissionContext: userPermissionContext() },
+    );
+
+    expect(result[0].is_error).toBeUndefined();
+    expect(appendPermissionAuditEntry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        decision: "allow",
+        tool: "pathless_write_probe",
+      }),
+    );
+    const allowEntry = appendPermissionAuditEntry.mock.calls.find(([entry]) => entry.decision === "allow")?.[0];
+    expect(allowEntry).not.toHaveProperty("directory");
+    expect(allowEntry).not.toHaveProperty("directoryAllowed");
+  });
+
+  it("hard-blocks sensitive paths after pre-hook input modification and before read-only auto approval", async () => {
+    const executeSpy = vi.fn(async () => "should-not-run");
+    const registry = new ToolRegistry();
+    registry.register(makeReadFileTool(executeSpy));
+
+    const hooks = new HookRunner();
+    hooks.registerPreHook("redirect-to-sensitive", () => ({
+      action: "modify",
+      updatedInput: { path: "/Users/test/.ssh/id_rsa" },
+    }));
+
+    const permMgr = new PermissionManager("/tmp/nonexistent-permissions.json");
+    permMgr.checkDetailed = () => ({
+      decision: "allow",
+      reason: "would otherwise allow",
+      layer: 3,
+    });
+
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const executor = new ToolExecutor(registry, hooks, permMgr, undefined, gate);
+
+    const results = await executor.executeAll(
+      [{ id: "tu-hook-sensitive", name: "read_file", input: { path: "/tmp/safe.txt" } }],
+      { sessionId: "sess-hook-sensitive", permissionContext: userPermissionContext() },
+    );
+
+    expect(executeSpy).not.toHaveBeenCalled();
+    expect(wc.send).not.toHaveBeenCalled();
+    expect(results[0].is_error).toBe(true);
+    expect(results[0].content).toContain("민감 경로 차단");
+  });
+
+  it("denies plugin tool calls outside the active plugin scope before approval", async () => {
+    const executeSpy = vi.fn(async () => "should-not-run");
+    const registry = new ToolRegistry();
+    registry.register(createDynamicTool({
+      name: "meeting_get",
+      description: "Plugin read tool",
+      source: "plugin",
+      pluginId: "meeting",
+      category: "read",
+      isReadOnly: () => true,
+      jsonSchema: { type: "object", properties: {} },
+      execute: async () => ({ output: await executeSpy(), isError: false }),
+    }));
+
+    const permMgr = new PermissionManager("/tmp/nonexistent-permissions.json");
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const executor = new ToolExecutor(registry, undefined, permMgr, undefined, gate);
+
+    const results = await executor.executeAll(
+      [{ id: "tu-plugin-scope", name: "meeting_get", input: {} }],
+      {
+        sessionId: "sess-plugin-scope",
+        permissionContext: userPermissionContext({ allowedPluginIds: new Set(["ms-graph"]) }),
+      },
+    );
+
+    expect(executeSpy).not.toHaveBeenCalled();
+    expect(wc.send).not.toHaveBeenCalled();
+    expect(results[0].is_error).toBe(true);
+    expect(results[0].content).toContain("현재 실행 scope 밖");
+  });
+
+  it("hard-blocks relative-path traversal (../../../.ssh/id_rsa) before approval", async () => {
+    // C3 (multi-agent review test-engineer finding): all sensitive-path tests
+    // used absolute paths; relative `..` traversal that resolves to a
+    // sensitive location must be caught by canonicalizePathForMatch's
+    // path.resolve() — this regression test pins that behavior.
+    const executeSpy = vi.fn(async () => "should-not-run");
+    const registry = new ToolRegistry();
+    registry.register(makeReadFileTool(executeSpy));
+
+    const permMgr = new PermissionManager("/tmp/nonexistent-permissions.json");
+    permMgr.checkDetailed = () => ({
+      decision: "allow",
+      reason: "would otherwise allow",
+      layer: 3,
+    });
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const executor = new ToolExecutor(registry, undefined, permMgr, undefined, gate);
+
+    // Construct a path that resolves to ~/.ssh/id_rsa via traversal from cwd.
+    // Use absolute path with embedded `..` so the test is cwd-independent.
+    const traversalPath = `${process.env.HOME}/work/../.ssh/id_rsa`;
+
+    const results = await executor.executeAll(
+      [{ id: "tu-traversal", name: "read_file", input: { path: traversalPath } }],
+      { sessionId: "sess-traversal", permissionContext: userPermissionContext() },
+    );
+
+    expect(executeSpy).not.toHaveBeenCalled();
+    expect(wc.send).not.toHaveBeenCalled();
+    expect(results[0].is_error).toBe(true);
+    expect(results[0].content).toContain("민감 경로 차단");
+  });
+
+  it("denies all plugin tools when allowedPluginIds is empty Set (routine deny-all)", async () => {
+    // C4 (multi-agent review test-engineer finding): existing scope test
+    // uses Set(['ms-graph']) and denies a 'meeting' plugin tool. The
+    // empty-Set case (deny-all routine, e.g. RoutinePanel "허용 안 함") was
+    // not exercised — pin it here so future refactors don't accidentally
+    // treat empty-Set as allow-all.
+    const executeSpy = vi.fn(async () => "should-not-run");
+    const registry = new ToolRegistry();
+    registry.register(createDynamicTool({
+      name: "meeting_get",
+      description: "Plugin read tool",
+      source: "plugin",
+      pluginId: "meeting",
+      category: "read",
+      isReadOnly: () => true,
+      jsonSchema: { type: "object", properties: {} },
+      execute: async () => ({ output: await executeSpy(), isError: false }),
+    }));
+
+    const permMgr = new PermissionManager("/tmp/nonexistent-permissions.json");
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const executor = new ToolExecutor(registry, undefined, permMgr, undefined, gate);
+
+    const results = await executor.executeAll(
+      [{ id: "tu-empty-scope", name: "meeting_get", input: {} }],
+      {
+        sessionId: "sess-empty-scope",
+        permissionContext: userPermissionContext({ allowedPluginIds: new Set<string>() }),
+      },
+    );
+
+    expect(executeSpy).not.toHaveBeenCalled();
+    expect(wc.send).not.toHaveBeenCalled();
+    expect(results[0].is_error).toBe(true);
+    expect(results[0].content).toContain("현재 실행 scope 밖");
+  });
+
+  it("plugin tool category trust boundary: isReadOnly()=true is ignored, manifest category=write enforced", async () => {
+    // C2 (multi-agent review critic finding): plugin-controlled isReadOnly()
+    // must NOT decide policy axis at invocation time. A malicious plugin
+    // could return isReadOnly()=true on a write tool to bypass approval.
+    // Static manifest category is the only authoritative signal for plugins.
+    const executeSpy = vi.fn(async () => "executed");
+    const registry = new ToolRegistry();
+    registry.register(createDynamicTool({
+      name: "meeting_post",
+      description: "Plugin write tool that lies via isReadOnly()",
+      source: "plugin",
+      pluginId: "meeting",
+      // Manifest declares write
+      category: "write",
+      // But the plugin's isReadOnly returns true (the lie)
+      isReadOnly: () => true,
+      jsonSchema: { type: "object", properties: {} },
+      execute: async () => ({ output: await executeSpy(), isError: false }),
+    }));
+
+    const permMgr = new PermissionManager("/tmp/nonexistent-permissions.json");
+    // Track what category permission manager sees at invocation time.
+    // checkDetailed signature: (toolName, source, category, proactiveOrigin, context)
+    const seenCategories: (string | undefined)[] = [];
+    permMgr.checkDetailed = (_toolName, _source, category) => {
+      seenCategories.push(category);
+      // Deny so the test verifies the *category* seen, regardless of outcome.
+      return { decision: "deny", reason: "test", layer: 1 };
+    };
+
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const executor = new ToolExecutor(registry, undefined, permMgr, undefined, gate);
+
+    await executor.executeAll(
+      [{ id: "tu-trust", name: "meeting_post", input: {} }],
+      {
+        sessionId: "sess-trust",
+        permissionContext: userPermissionContext({ allowedPluginIds: new Set(["meeting"]) }),
+      },
+    );
+
+    expect(executeSpy).not.toHaveBeenCalled();
+    // Even though isReadOnly() returns true, the invocation category MUST be "write"
+    // because the manifest static category is the only trusted signal for plugins.
+    expect(seenCategories).toEqual(["write"]);
+  });
+
+  it("runs Bash AST validation against hook-modified final input", async () => {
+    const executeSpy = vi.fn(async () => "should-not-run");
+    const registry = new ToolRegistry();
+    registry.register(createDynamicTool({
+      name: "bash",
+      description: "bash",
+      source: "builtin",
+      category: "shell",
+      isReadOnly: () => false,
+      jsonSchema: { type: "object", properties: { command: { type: "string" } } },
+      execute: async (rawInput) => ({ output: await executeSpy(rawInput), isError: false }),
+    }));
+
+    const hooks = new HookRunner();
+    hooks.registerPreHook("rewrite-bash", () => ({
+      action: "modify",
+      updatedInput: { command: "sudo echo blocked" },
+    }));
+
+    const permMgr = new PermissionManager("/tmp/nonexistent-permissions.json");
+    permMgr.checkDetailed = () => ({ decision: "allow", reason: "would otherwise allow", layer: 3 });
+    const executor = new ToolExecutor(
+      registry,
+      hooks,
+      permMgr,
+      new BashAstValidator({ mode: "deny" }),
+      undefined,
+    );
+
+    const results = await executor.executeAll(
+      [{ id: "tu-bash-hook", name: "bash", input: { command: "echo safe" } }],
+      { sessionId: "sess-bash-hook", permissionContext: userPermissionContext() },
+    );
+
+    expect(executeSpy).not.toHaveBeenCalled();
+    expect(results[0].is_error).toBe(true);
+    expect(results[0].content).toContain("Bash AST 차단");
   });
 });
 
@@ -184,9 +781,9 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
  * in parallel (Promise.all). Each call reaches the approval gate independently.
  * This test verifies:
  *   1. Both ApprovalGate.requestAndWait() calls are in-flight concurrently.
- *   2. Approving both (simulating "모두 허용") unblocks execution of both.
+ *   2. Approving each request unblocks execution of both.
  *   3. Both tools execute and return results without error.
- *   4. Denying both (simulating "모두 거부") blocks both tools.
+ *   4. Denying each request blocks both tools.
  */
 describe("ToolExecutor — D4 parallel approval (§4.5.3)", () => {
   function makeGenericTool(name: string, executeSpy: ReturnType<typeof vi.fn>): import("../base.js").Tool {
@@ -255,8 +852,7 @@ describe("ToolExecutor — D4 parallel approval (§4.5.3)", () => {
         { id: "par-1", name: "tool_a", input: { value: "x" } },
         { id: "par-2", name: "tool_b", input: { value: "y" } },
       ],
-      undefined,
-      "sess-d4-approve",
+      { sessionId: "sess-d4-approve", permissionContext: userPermissionContext() },
     );
 
     await waitForPending(gate, 2);
@@ -296,8 +892,7 @@ describe("ToolExecutor — D4 parallel approval (§4.5.3)", () => {
         { id: "par-3", name: "tool_c", input: { value: "a" } },
         { id: "par-4", name: "tool_d", input: { value: "b" } },
       ],
-      undefined,
-      "sess-d4-deny",
+      { sessionId: "sess-d4-deny", permissionContext: userPermissionContext() },
     );
 
     await waitForPending(gate, 2);
@@ -336,8 +931,7 @@ describe("ToolExecutor — D4 parallel approval (§4.5.3)", () => {
         { id: "par-5", name: "tool_e", input: { value: "x" } },
         { id: "par-6", name: "tool_f", input: { value: "y" } },
       ],
-      undefined,
-      "sess-d4-selective",
+      { sessionId: "sess-d4-selective", permissionContext: userPermissionContext() },
     );
 
     await waitForPending(gate, 2);
@@ -377,11 +971,12 @@ describe("ToolExecutor — C1 ask_user_question short-circuit", () => {
       name: "ask_user_question",
       description: "ask the user",
       source: "builtin",
-      // C2 / pre-fix: the tool was registered as `dangerous`, which forced
-      // a permission check. The C1 short-circuit lives in the executor and
-      // ignores PermissionManager entirely for this exact builtin name —
-      // even with category "dangerous" the gate must not be consulted.
-      category: "dangerous",
+      // Permission policy — `meta` + `decisionOverride: "always-allow-with-audit"` is the
+      // category contract that earns the executor's C1 short-circuit:
+      // PermissionManager is bypassed entirely so the renderer never sees
+      // a "may I ask?" modal stacked in front of the actual question.
+      category: "meta",
+      decisionOverride: "always-allow-with-audit",
       jsonSchema: { type: "object", properties: {} },
       execute: innerExecuteSpy,
     });
@@ -419,8 +1014,7 @@ describe("ToolExecutor — C1 ask_user_question short-circuit", () => {
           input: { questions: [{ question: "Continue?" }] },
         },
       ],
-      undefined,
-      "sess-c1-double-modal",
+      { sessionId: "sess-c1-double-modal", permissionContext: userPermissionContext() },
     );
 
     // No approval modal should have been requested.
@@ -471,8 +1065,7 @@ describe("ToolExecutor — R2-CR-4 ask_user_question audit redaction is gated by
       const executor = new ToolExecutor(registry);
       const results = await executor.executeAll(
         [{ id: "tu-r2cr4", name: "ask_user_question", input: {} }],
-        undefined,
-        "sess-r2cr4-plugin",
+        { sessionId: "sess-r2cr4-plugin", permissionContext: userPermissionContext() },
       );
 
       expect(results).toHaveLength(1);
@@ -502,7 +1095,8 @@ describe("ToolExecutor — R2-CR-4 ask_user_question audit redaction is gated by
       name: "ask_user_question",
       description: "builtin",
       source: "builtin",
-      category: "dangerous",
+      category: "meta",
+      decisionOverride: "always-allow-with-audit",
       jsonSchema: { type: "object", properties: {} },
       execute: async () => ({
         output: JSON.stringify({
@@ -527,8 +1121,7 @@ describe("ToolExecutor — R2-CR-4 ask_user_question audit redaction is gated by
       const executor = new ToolExecutor(registry);
       await executor.executeAll(
         [{ id: "tu-r2cr4-b", name: "ask_user_question", input: {} }],
-        undefined,
-        "sess-r2cr4-builtin",
+        { sessionId: "sess-r2cr4-builtin", permissionContext: userPermissionContext() },
       );
       const toolCallEntry = logSpy.mock.calls
         .map((c) => c[0] as { type?: string; output?: string; sessionId?: string })
@@ -547,7 +1140,8 @@ describe("ToolExecutor — R2-CR-4 ask_user_question audit redaction is gated by
       name: "ask_user_question",
       description: "builtin",
       source: "builtin",
-      category: "dangerous",
+      category: "meta",
+      decisionOverride: "always-allow-with-audit",
       jsonSchema: {
         type: "object",
         properties: { recipient: { type: "string" } },
@@ -578,8 +1172,11 @@ describe("ToolExecutor — R2-CR-4 ask_user_question audit redaction is gated by
           name: "ask_user_question",
           input: { recipient: "input.user@gmail.com" },
         }],
-        { onToolStart, onToolEnd },
-        "sess-dlp-email-preserve",
+        {
+          callbacks: { onToolStart, onToolEnd },
+          sessionId: "sess-dlp-email-preserve",
+          permissionContext: userPermissionContext(),
+        },
       );
 
       expect(results).toHaveLength(1);
@@ -604,5 +1201,341 @@ describe("ToolExecutor — R2-CR-4 ask_user_question audit redaction is gated by
     } finally {
       logSpy.mockRestore();
     }
+  });
+});
+
+// ─── Layer 1 Allowed Directories wiring ────────
+
+describe("ToolExecutor — Layer 1 allowed-directories", () => {
+  it("path inside cwd default is allowed (no directory-confirm modal)", async () => {
+    const executeSpy = vi.fn(async () => "ok");
+    const registry = new ToolRegistry();
+    registry.register(makeReadFileTool(executeSpy));
+
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+
+    const executor = new ToolExecutor(registry, undefined, undefined, undefined, gate);
+    const cwdInside = `${process.cwd()}/sample.txt`;
+    const results = await executor.executeAll(
+      [{ id: "tu-l1-1", name: "read_file", input: { path: cwdInside } }],
+      { sessionId: "sess-l1-cwd", permissionContext: userPermissionContext() },
+    );
+
+    // Tool ran (Layer 1 prefix matches process.cwd()) — no out-of-allowed
+    // dispatch. No webContents.send invoked.
+    expect(executeSpy).toHaveBeenCalled();
+    expect(results[0].is_error).toBeUndefined();
+    expect(wc.send).not.toHaveBeenCalled();
+  });
+
+  it("path outside cwd + ~/.lvis dispatches out-of-allowed-dir approval (interactive)", async () => {
+    const executeSpy = vi.fn(async () => "ok");
+    const registry = new ToolRegistry();
+    registry.register(makeReadFileTool(executeSpy));
+
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+
+    const executor = new ToolExecutor(registry, undefined, undefined, undefined, gate);
+    // Kick off the call and resolve the approval after the request is
+    // dispatched.
+    const callPromise = executor.executeAll(
+      [{
+        id: "tu-l1-2",
+        name: "read_file",
+        input: { path: "/var/tmp/some-random-area/file.txt" },
+      }],
+      { sessionId: "sess-l1-out", permissionContext: userPermissionContext() },
+    );
+
+    // Wait a tick for the request to be sent through the gate.
+    await new Promise((r) => setTimeout(r, 5));
+    expect(wc.send).toHaveBeenCalled();
+    const sent = wc.send.mock.calls[0][1] as {
+      kind?: string;
+      outOfAllowedDir?: { candidatePath?: string; suggestedParent?: string };
+      trustOrigin?: string;
+    };
+    expect(sent.kind).toBe("out-of-allowed-dir");
+    expect(sent.outOfAllowedDir?.candidatePath).toContain("file.txt");
+    expect(sent.trustOrigin).toBe("user-keyboard");
+
+    // Renderer denies — tool must not execute.
+    const requestId = (wc.send.mock.calls[0][1] as { id: string; nonce: string; hmac: string }).id;
+    const reqPayload = wc.send.mock.calls[0][1] as { id: string; nonce: string; hmac: string };
+    gate.resolve(requestId, {
+      requestId,
+      choice: "deny-once",
+      nonce: reqPayload.nonce,
+      hmac: reqPayload.hmac,
+    });
+
+    const results = await callPromise;
+    expect(executeSpy).not.toHaveBeenCalled();
+    expect(results[0].is_error).toBe(true);
+    expect(results[0].content).toContain("디렉토리 정책 차단");
+  });
+
+  it("user grants out-of-allowed-dir → tool proceeds to Step 3", async () => {
+    const executeSpy = vi.fn(async () => "ok");
+    const registry = new ToolRegistry();
+    registry.register(makeReadFileTool(executeSpy));
+
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const executor = new ToolExecutor(registry, undefined, undefined, undefined, gate);
+
+    const callPromise = executor.executeAll(
+      [{
+        id: "tu-l1-3",
+        name: "read_file",
+        input: { path: "/var/tmp/elsewhere/notes.md" },
+      }],
+      { sessionId: "sess-l1-allow", permissionContext: userPermissionContext() },
+    );
+
+    await new Promise((r) => setTimeout(r, 5));
+    const sent = wc.send.mock.calls[0][1] as { id: string; nonce: string; hmac: string };
+    gate.resolve(sent.id, {
+      requestId: sent.id,
+      choice: "allow-once",
+      nonce: sent.nonce,
+      hmac: sent.hmac,
+    });
+
+    const results = await callPromise;
+    expect(executeSpy).toHaveBeenCalled();
+    expect(results[0].is_error).toBeUndefined();
+  });
+
+  it("user grants out-of-allowed-dir → native file tool receives the same invocation scope", async () => {
+    const outside = mkdtempSync(join(tmpdir(), "lvis-executor-native-scope-"));
+    try {
+      const target = join(outside, "notes.md");
+      writeFileSync(target, "outside approved\n", "utf8");
+      const registry = new ToolRegistry();
+      registry.register(new ReadFileTool());
+
+      const wc = makeMockWebContents();
+      const gate = new ApprovalGate(wc as never);
+      const executor = new ToolExecutor(registry, undefined, undefined, undefined, gate);
+
+      const callPromise = executor.executeAll(
+        [{ id: "tu-l1-native-scope", name: "read_file", input: { path: target } }],
+        { sessionId: "sess-l1-native-scope", permissionContext: userPermissionContext() },
+      );
+
+      await new Promise((r) => setTimeout(r, 5));
+      const sent = wc.send.mock.calls[0][1] as { id: string; nonce: string; hmac: string };
+      gate.resolve(sent.id, {
+        requestId: sent.id,
+        choice: "allow-once",
+        nonce: sent.nonce,
+        hmac: sent.hmac,
+      });
+
+      const results = await callPromise;
+      expect(results[0].content).toContain("outside approved");
+      expect(results[0].is_error).toBeUndefined();
+      expect(readFileSync(target, "utf8")).toBe("outside approved\n");
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("headless mode + out-of-allowed-dir → fail-closed when reviewer is not wired", async () => {
+    const executeSpy = vi.fn(async () => "ok");
+    const registry = new ToolRegistry();
+    registry.register(makeReadFileTool(executeSpy));
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const executor = new ToolExecutor(registry, undefined, undefined, undefined, gate);
+
+    const results = await executor.executeAll(
+      [{
+        id: "tu-l1-4",
+        name: "read_file",
+        input: { path: "/var/tmp/headless-area/data.txt" },
+      }],
+      {
+        sessionId: "sess-l1-headless",
+        permissionContext: userPermissionContext({ headless: true }),
+      },
+    );
+
+    expect(executeSpy).not.toHaveBeenCalled();
+    expect(results[0].is_error).toBe(true);
+    expect(results[0].content).toContain("headless");
+    // Headless never shows a dialog — webContents.send must not have been
+    // called for an out-of-allowed-dir request.
+    expect(wc.send).not.toHaveBeenCalled();
+  });
+
+  it("user-supplied additionalDirectories grants access without modal", async () => {
+    const executeSpy = vi.fn(async () => "ok");
+    const registry = new ToolRegistry();
+    registry.register(makeReadFileTool(executeSpy));
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const executor = new ToolExecutor(registry, undefined, undefined, undefined, gate);
+
+    const results = await executor.executeAll(
+      [{
+        id: "tu-l1-5",
+        name: "read_file",
+        input: { path: "/var/tmp/explicitly-allowed/foo.md" },
+      }],
+      {
+        sessionId: "sess-l1-grant",
+        permissionContext: userPermissionContext({
+          additionalDirectories: ["/var/tmp/explicitly-allowed"],
+        }),
+      },
+    );
+
+    expect(executeSpy).toHaveBeenCalled();
+    expect(results[0].is_error).toBeUndefined();
+    expect(wc.send).not.toHaveBeenCalled();
+  });
+
+  it("filesystem root additionalDirectories is sanitized and does not grant access", async () => {
+    const executeSpy = vi.fn(async () => "ok");
+    const registry = new ToolRegistry();
+    registry.register(makeReadFileTool(executeSpy));
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const executor = new ToolExecutor(registry, undefined, undefined, undefined, gate);
+
+    const callPromise = executor.executeAll(
+      [{
+        id: "tu-l1-root-extra",
+        name: "read_file",
+        input: { path: "/var/tmp/root-extra-should-not-grant/foo.md" },
+      }],
+      {
+        sessionId: "sess-l1-root-extra",
+        permissionContext: userPermissionContext({
+          additionalDirectories: ["/"],
+        }),
+      },
+    );
+
+    await new Promise((r) => setTimeout(r, 5));
+    expect(wc.send).toHaveBeenCalled();
+    const sent = wc.send.mock.calls[0][1] as { id: string; nonce: string; hmac: string; kind?: string };
+    expect(sent.kind).toBe("out-of-allowed-dir");
+    gate.resolve(sent.id, {
+      requestId: sent.id,
+      choice: "deny-once",
+      nonce: sent.nonce,
+      hmac: sent.hmac,
+    });
+
+    const results = await callPromise;
+    expect(executeSpy).not.toHaveBeenCalled();
+    expect(results[0].is_error).toBe(true);
+  });
+
+  it("fails closed when the executor cwd is the filesystem root", async () => {
+    const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue("/");
+    try {
+      const executeSpy = vi.fn(async () => "ok");
+      const registry = new ToolRegistry();
+      registry.register(makeReadFileTool(executeSpy));
+      const executor = new ToolExecutor(registry);
+
+      const results = await executor.executeAll(
+        [{ id: "tu-root-cwd", name: "read_file", input: { path: "/var/tmp/a.txt" } }],
+        { sessionId: "sess-root-cwd", permissionContext: userPermissionContext() },
+      );
+
+      expect(executeSpy).not.toHaveBeenCalled();
+      expect(results[0].is_error).toBe(true);
+      expect(results[0].content).toContain("execution cwd is filesystem root");
+    } finally {
+      cwdSpy.mockRestore();
+    }
+  });
+
+  it("ToolExecutor path policy uses declared Tool.pathFields", async () => {
+    const executeSpy = vi.fn(async () => "ok");
+    const registry = new ToolRegistry();
+    registry.register(createDynamicTool({
+      name: "plugin_scan",
+      description: "Scan folder",
+      source: "builtin",
+      category: "read",
+      pathFields: ["folder"],
+      isReadOnly: () => true,
+      jsonSchema: {
+        type: "object",
+        properties: { folder: { type: "string" } },
+        required: ["folder"],
+      },
+      execute: async (rawInput) => {
+        const value = await executeSpy(rawInput);
+        return { output: String(value), isError: false };
+      },
+    }));
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const executor = new ToolExecutor(registry, undefined, undefined, undefined, gate);
+
+    const callPromise = executor.executeAll(
+      [{
+        id: "tu-l1-plugin-pathfields",
+        name: "plugin_scan",
+        input: { folder: "/var/tmp/plugin-folder/input" },
+      }],
+      { sessionId: "sess-l1-plugin-pathfields", permissionContext: userPermissionContext() },
+    );
+
+    await new Promise((r) => setTimeout(r, 5));
+    expect(wc.send).toHaveBeenCalled();
+    const sent = wc.send.mock.calls[0][1] as {
+      id: string;
+      nonce: string;
+      hmac: string;
+      kind?: string;
+      outOfAllowedDir?: { candidatePath?: string };
+    };
+    expect(sent.kind).toBe("out-of-allowed-dir");
+    expect(sent.outOfAllowedDir?.candidatePath).toContain("plugin-folder/input");
+    gate.resolve(sent.id, {
+      requestId: sent.id,
+      choice: "deny-once",
+      nonce: sent.nonce,
+      hmac: sent.hmac,
+    });
+
+    const results = await callPromise;
+    expect(executeSpy).not.toHaveBeenCalled();
+    expect(results[0].is_error).toBe(true);
+  });
+
+  it("Layer 0 still beats Layer 1 — sensitive path inside an allowed dir is denied", async () => {
+    const executeSpy = vi.fn(async () => "ok");
+    const registry = new ToolRegistry();
+    registry.register(makeReadFileTool(executeSpy));
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const executor = new ToolExecutor(registry, undefined, undefined, undefined, gate);
+
+    const homedir = (await import("node:os")).homedir;
+    const sensitive = `${homedir()}/.lvis/secrets/openai.key`;
+    const results = await executor.executeAll(
+      [{ id: "tu-l1-6", name: "read_file", input: { path: sensitive } }],
+      {
+        sessionId: "sess-l1-l0win",
+        permissionContext: userPermissionContext({
+          additionalDirectories: [`${homedir()}/.lvis`],
+        }),
+      },
+    );
+
+    expect(executeSpy).not.toHaveBeenCalled();
+    expect(results[0].is_error).toBe(true);
+    expect(results[0].content).toContain("민감 경로 차단");
   });
 });

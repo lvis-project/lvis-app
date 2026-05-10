@@ -12,7 +12,7 @@ export interface StarredItem {
 }
 
 /**
- * Phase 5 — starred messages hook.
+ * Starred messages hook.
  * Owns the starred list, refresh, and toggle action. `handleToggleStar`
  * needs the current entries/sessionId/map to resolve which history index
  * is being toggled, so callers pass those in at call time.

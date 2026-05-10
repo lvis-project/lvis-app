@@ -1,14 +1,14 @@
 // OverlayCardRegion — mounts the single active OverlayCard from OverlayContext.
 //
 // Renders in a separate z-layer inside ChatView above the scroll area.
-// Never injects entries into chat history (Q9 isolation maintained for routine source).
+// Never injects entries into chat history; routine sources remain isolated.
 //
 // Active item is resolved from OverlayContext queue. App.tsx also maintains an
 // overlayItemsRef Map for items that persist after dismiss — e.g. to keep the
 // routine session path available for RoutineSessionView modal after the overlay card
 // is removed from the queue (notification-only routines omit routineSessionPath).
 //
-// Q11: Two source variants:
+// Two source variants:
 //   - routine: primary action opens RoutineSessionView modal ("결과 보기")
 //     — only shown when routineSessionPath is present (notification-only routines hide the button)
 //   - plugin (insertion-type): primary action deferred to onPluginPrimaryAction prop
@@ -18,7 +18,7 @@ import { OverlayCard } from "./OverlayCard.js";
 
 export interface OverlayCardRegionProps {
   /**
-   * Q11 — called when the user confirms a plugin overlay item.
+   * Called when the user confirms a plugin overlay item.
    * Receives the overlay item id; App.tsx resolves it to the full item
    * via OverlayContext and inserts pendingPrompt into main chat.
    */
@@ -61,7 +61,7 @@ export function OverlayCardRegion({ onPluginPrimaryAction }: OverlayCardRegionPr
   }
 
   if (active.source.kind === "plugin") {
-    // Q11 plugin (insertion-type) variant — user confirm → main chat insert
+    // Plugin insertion variant — user confirm → main chat insert.
     const pluginFiredAt = active.createdAt ?? new Date().toISOString();
     return (
       <div

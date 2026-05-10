@@ -16,10 +16,19 @@
  */
 import { homedir } from "node:os";
 import { resolve } from "node:path";
-import type { DenyRule, ToolSource, TrustLevel } from "../tools/types.js";
+import type { DenyRule, ToolCategory, ToolSource, ToolTrustOrigin, TrustLevel } from "../tools/types.js";
 import { trustFromSource } from "../tools/types.js";
 import { readPermissionsFile, updatePermissionsFile } from "./permissions-store.js";
 import { isProactiveOrigin } from "../shared/proactive-source.js";
+import { getToolCategoryDescriptor } from "./category-registry.js";
+import type {
+  RiskClassifier,
+  RiskVerdict,
+  ToolInvocationContext,
+} from "./reviewer/risk-classifier.js";
+import type { VerdictCache } from "./reviewer/verdict-cache.js";
+import type { DeferredQueue } from "./reviewer/deferred-queue.js";
+import { globMatch } from "../lib/glob-matcher.js";
 
 export type PermissionDecision = "allow" | "deny" | "ask";
 export type ExecutionMode = "default" | "strict" | "auto";
@@ -37,6 +46,84 @@ export interface PermissionCheckResult {
   decision: PermissionDecision;
   reason: string;
   layer: number; // 어떤 단계에서 결정되었는지
+  /**
+   * Permission policy P2.5 §3 Layer 2 — structured deny reasons for audit forensics.
+   * The pipeline records the *current* deny entry only (short-circuit
+   * evaluation; later layers are skipped). Hypothetical other-layer
+   * decisions belong to dry-run mode, not normal audit.
+   *
+   * Each entry: { layer, reason, source }
+   *   layer    — which Permission policy layer fired (0=sensitive, 1=allowed-dir, …)
+   *   reason   — short machine-readable code (e.g. "out-of-allowed-dir")
+   *   source   — emitter ("directory-policy", "sensitive-paths", …)
+   */
+  denyReasons?: ReadonlyArray<{
+    layer: number;
+    reason: string;
+    source: string;
+  }>;
+}
+
+export interface PermissionCheckContext {
+  /**
+   * Background/routine turns are not direct user gestures. Mutating tools must
+   * still ask even when an allow rule or auto mode would otherwise permit them.
+   */
+  headless?: boolean;
+  /**
+   * Permission policy #634 — full approval-cache identity for authority-sensitive tools.
+   * When present, user allow rules / allow-always entries match this key
+   * instead of the bare tool name so a benign prior approval cannot silently
+   * authorize a later call with a broader argument scope.
+   */
+  approvalCacheKey?: string;
+}
+
+/**
+ * Permission policy P3 — input bundle for reviewer-agent dispatch. Set when the
+ * caller wants the headless lane to consult the Layer 5 classifier
+ * (rather than the temporary "reviewer → ask" mapping).
+ */
+export interface ReviewerDispatchInput {
+  source: ToolSource;
+  category: ToolCategory;
+  /** DLP-redacted finalInput — caller is responsible for redaction. */
+  finalInput: Record<string, unknown>;
+  allowedDirectories: string[];
+  sensitivePathsAdjacent: string[];
+  /**
+   * Permission policy architect round-4 finding: cache identity must include the
+   * caller's trust origin. A high-trust verdict cached for `user-keyboard`
+   * is unsafe to serve to an `llm-tool-arg` invocation of the same shape — the
+   * underlying intent differs even when arguments match. Required so the
+   * verdict-cache lookupKey hash always includes origin.
+   */
+  trustOrigin: ToolTrustOrigin;
+  /** Tool-declared authority cache identity, when present. */
+  approvalCacheKey?: string;
+  /** When true, out-of-allowed-dir access also routes to the reviewer. */
+  outOfAllowedDir?: boolean;
+}
+
+/**
+ * Result returned by {@link PermissionManager.dispatchReviewer}. The
+ * caller (executor) translates this into either an immediate
+ * allow + audit (LOW/MEDIUM) or deferred-queue append (HIGH).
+ */
+export interface ReviewerDispatchResult {
+  verdict: RiskVerdict;
+  /**
+   * "hit" / "miss-stale" / "miss-expired" / "miss-not-found" — surfaces
+   * the audit-trail "from cache" hint (m1 architect MAJOR-5 cache
+   * deliverable + design v2.1 §11 selective invalidation).
+   */
+  cacheReason: "hit" | "miss-stale" | "miss-expired" | "miss-not-found";
+  /**
+   * For HIGH verdicts in headless mode: the deferred-queue id the
+   * caller should reference in its audit entry. For LOW/MEDIUM the
+   * caller proceeds without queue interaction.
+   */
+  deferredId?: string;
 }
 
 export class PermissionManager {
@@ -49,10 +136,57 @@ export class PermissionManager {
   private readonly toolModeOverrides = new Map<string, ExecutionMode>();
   /** 영구 규칙 저장 경로 (~/.lvis/permissions.json) */
   private readonly permissionsFilePath: string;
+  /** Permission policy P3 — reviewer agent dispatch components. Wired at boot. */
+  private reviewerClassifier: RiskClassifier | null = null;
+  private verdictCache: VerdictCache | null = null;
+  private deferredQueue: DeferredQueue | null = null;
+  private reviewerCacheScope: Record<string, unknown> = {};
 
   constructor(permissionsFilePath?: string) {
     this.permissionsFilePath =
       permissionsFilePath ?? resolve(homedir(), ".lvis", "permissions.json");
+  }
+
+  /**
+   * Permission policy P3 — wire the Layer 5 reviewer agent. Call once at boot after
+   * loading settings. The executor checks {@link hasReviewer} before headless
+   * reviewer dispatch and fail-closes when the reviewer is absent.
+   */
+  setReviewer(deps: {
+    classifier: RiskClassifier;
+    cache: VerdictCache;
+    deferredQueue: DeferredQueue;
+    cacheScope?: Record<string, unknown>;
+  }): void {
+    this.reviewerClassifier = deps.classifier;
+    this.verdictCache = deps.cache;
+    this.deferredQueue = deps.deferredQueue;
+    this.reviewerCacheScope = deps.cacheScope ?? {};
+  }
+
+  hasReviewer(): boolean {
+    return (
+      this.reviewerClassifier !== null &&
+      this.verdictCache !== null &&
+      this.deferredQueue !== null
+    );
+  }
+
+  /**
+   * Permission policy P3 — accessor for the deferred queue. IPC layer reads pending
+   * entries from here and resolves them on user gestures. Returns null
+   * when the reviewer is not wired.
+   */
+  getDeferredQueue(): DeferredQueue | null {
+    return this.deferredQueue;
+  }
+
+  /**
+   * Permission policy P3 — accessor for the verdict cache. Used by the slash handler
+   * when the user changes settings and we need to drop stale entries.
+   */
+  getVerdictCache(): VerdictCache | null {
+    return this.verdictCache;
   }
 
   // ─── 설정 ────────────────────────────────────────
@@ -95,11 +229,9 @@ export class PermissionManager {
 
   /**
    * 도구 이름(패턴)을 영구 allow 규칙으로 추가.
-   * 인메모리 + permissions.json 동시 업데이트.
+   * permissions.json 저장이 성공한 뒤에만 인메모리 allow cache를 갱신한다.
    */
   async addAlwaysAllowedPersist(pattern: string): Promise<void> {
-    // 인메모리: alwaysAllowed Set (checkDetailed layer 5)
-    this.alwaysAllowed.add(pattern);
     // 영구: rules 배열에 allow 규칙 추가 (중복 방지)
     await updatePermissionsFile(this.permissionsFilePath, (file) => {
       const exists = file.rules.some(
@@ -109,6 +241,8 @@ export class PermissionManager {
         file.rules.push({ pattern, action: "allow" });
       }
     });
+    // 인메모리: durable write 성공 후 alwaysAllowed Set (checkDetailed layer 5)
+    this.alwaysAllowed.add(pattern);
   }
 
   /**
@@ -189,13 +323,15 @@ export class PermissionManager {
   }
 
   /**
-   * mode를 변경하고 permissions.json에 영구 저장.
+   * mode를 permissions.json에 영구 저장한 뒤 인메모리 상태를 갱신.
+   * 감사 entry 는 호출자가 먼저 append 하므로, 파일 저장 실패 시 runtime
+   * mode 까지 바뀌지 않아야 한다.
    */
   async setModePersist(mode: ExecutionMode): Promise<void> {
-    this.mode = mode;
     await updatePermissionsFile(this.permissionsFilePath, (file) => {
       file.mode = mode;
     });
+    this.mode = mode;
   }
 
   // ─── 판정 (§4.1) ────────────────────────────────
@@ -204,17 +340,22 @@ export class PermissionManager {
    * 상세 판정 — 감사 로그용 사유 포함.
    *
    * `proactiveOrigin` (예: `"proactive:meeting-detection"`) 가 set 이면
-   * 모든 write/dangerous 도구는 **사용자 영구 승인 (`allow-always`) /
+   * 모든 write/shell/network 도구는 **사용자 영구 승인 (`allow-always`) /
    * config allow rules / auto 모드** 와 무관하게 `ask` 로 강제됨.
    * Brain 트리거가 사용자 컨펌 없이 destructive 작업 자동 실행되는 것을
    * 막는 차단막 — `<proactive-origin-guidance>` 시스템 프롬프트의 1차
    * LLM-side 검토와 짝을 이루는 hard-gate. read 도구는 영향 없음.
+   *
+   * Permission policy — 5-axis category model. Layer 3 의 decisionFor() 가
+   * old trust-default 분기를 대체. `meta` category 는 descriptor 가 `"override"` 를
+   * 반환하므로 caller (executor) 의 decisionOverride 분기로 routing.
    */
   checkDetailed(
     toolName: string,
     source?: ToolSource,
-    category?: "read" | "write" | "dangerous",
+    category?: ToolCategory,
     proactiveOrigin?: string | null,
+    context: PermissionCheckContext = {},
   ): PermissionCheckResult {
     const trust = this.resolveTrust(toolName, source);
     // Strict pattern (shared with the rest of the proactive flow —
@@ -223,14 +364,21 @@ export class PermissionManager {
     // upstream gate emits but a future hand-injected codepath might;
     // fail-closed on malformed input.
     const isProactive = isProactiveOrigin(proactiveOrigin ?? null);
-    const resolvedCategory = category ?? classifyToolCategory(toolName);
-    const isWrite = resolvedCategory === "write" || resolvedCategory === "dangerous";
+    const resolvedCategory: ToolCategory = category ?? classifyToolCategory(toolName);
+    const isMutating =
+      resolvedCategory === "write" ||
+      resolvedCategory === "shell" ||
+      resolvedCategory === "network";
+
+    const approvalCacheKey = normalizeApprovalCacheKey(context.approvalCacheKey);
+    const denyTargets = approvalCacheKey ? [toolName, approvalCacheKey] : [toolName];
+    const allowTarget = approvalCacheKey ?? toolName;
 
     // 1. Deny rules (최우선, 불변)
     for (const rule of this.rules) {
       if (rule.action !== "deny") continue;
       if (rule.source && rule.source !== source) continue;
-      if (matchGlob(rule.pattern, toolName)) {
+      if (denyTargets.some((target) => globMatch(target, rule.pattern))) {
         return { decision: "deny", reason: `deny 규칙: ${rule.pattern}`, layer: 1 };
       }
     }
@@ -240,10 +388,10 @@ export class PermissionManager {
       return { decision: "ask", reason: "MCP 서버 strict 모드", layer: 2 };
     }
 
-    // Proactive origin override — write/dangerous 도구는 cached
+    // Proactive origin override — write/shell/network 도구는 cached
     // allow rules / always-allowed / auto-mode 를 모두 우회하고
     // 항상 사용자 컨펌을 받음. read 는 자동 실행 OK.
-    if (isProactive && isWrite) {
+    if (isProactive && isMutating) {
       return {
         decision: "ask",
         reason: `proactive 출처 (${proactiveOrigin}) — 쓰기 도구는 사용자 컨펌 필수`,
@@ -251,11 +399,15 @@ export class PermissionManager {
       };
     }
 
+    if (context.headless === true && isMutating) {
+      return this.categoryBasedDecision(toolName, trust, resolvedCategory, context);
+    }
+
     // 3. Allow rules
     for (const rule of this.rules) {
       if (rule.action !== "allow") continue;
       if (rule.source && rule.source !== source) continue;
-      if (matchGlob(rule.pattern, toolName)) {
+      if (globMatch(allowTarget, rule.pattern)) {
         return { decision: "allow", reason: `allow 규칙: ${rule.pattern}`, layer: 3 };
       }
     }
@@ -265,12 +417,90 @@ export class PermissionManager {
     }
 
     // 5. Always-allowed (사용자 이전 승인)
-    if (this.alwaysAllowed.has(toolName)) {
+    if (this.alwaysAllowed.has(allowTarget)) {
       return { decision: "allow", reason: "사용자 영구 승인", layer: 5 };
     }
 
-    // 6. Trust-based 기본 정책 (§4.1)
-    return this.trustBasedDecision(toolName, trust, category);
+    // 6. Layer 3 — Category × Source × Trust via registry descriptor
+    return this.categoryBasedDecision(toolName, trust, resolvedCategory, context);
+  }
+
+  /**
+   * Permission policy P3 — dispatch the Layer 5 reviewer agent for a tool invocation.
+   *
+   * Decision tree (design §3 Layer 5):
+   *   1. cache lookup → on hit, skip classify + return cached verdict
+   *   2. classify (sync or async, depending on classifier impl)
+   *   3. cache the verdict for next time (HIGH cached too)
+   *   4. if HIGH → append to deferred queue, return with `deferredId`
+   *   5. if LOW/MEDIUM → return verdict; caller proceeds with allow+audit
+   *
+   * Failure mode: if {@link setReviewer} was never called, returns
+   * HIGH + `deferredId === undefined`. Production callers check
+   * {@link hasReviewer} first and fail-close before reaching this path.
+   */
+  async dispatchReviewer(
+    toolName: string,
+    input: ReviewerDispatchInput,
+    routineScope?: Record<string, unknown>,
+  ): Promise<ReviewerDispatchResult> {
+    if (!this.hasReviewer()) {
+      return {
+        verdict: { level: "high", reason: "reviewer not wired — fail-safe defer" },
+        cacheReason: "miss-not-found",
+      };
+    }
+    const classifier = this.reviewerClassifier!;
+    const cache = this.verdictCache!;
+    const queue = this.deferredQueue!;
+
+    const lookupKey = {
+      toolName,
+      source: input.source,
+      category: input.category,
+      trustOrigin: input.trustOrigin,
+      approvalCacheKey: input.approvalCacheKey,
+      finalInput: input.finalInput,
+    };
+    const cacheCtx = {
+      allowedDirectories: input.allowedDirectories,
+      scope: {
+        ...(routineScope ?? {}),
+        reviewer: this.reviewerCacheScope,
+      },
+    };
+
+    const cacheResult = cache.lookup(lookupKey, cacheCtx);
+    let verdict: RiskVerdict;
+    if (cacheResult.hit && cacheResult.verdict) {
+      verdict = cacheResult.verdict;
+    } else {
+      const ctx: ToolInvocationContext = {
+        toolName,
+        source: input.source,
+        category: input.category,
+        trustOrigin: input.trustOrigin,
+        finalInput: input.finalInput,
+        allowedDirectories: input.allowedDirectories,
+        sensitivePathsAdjacent: input.sensitivePathsAdjacent,
+      };
+      const classified = classifier.classify(ctx);
+      verdict = classified instanceof Promise ? await classified : classified;
+      // Persist for next time (HIGH cached too — re-deny is fast).
+      await cache.store(lookupKey, cacheCtx, verdict);
+    }
+
+    if (verdict.level === "high") {
+      const deferredId = await queue.append({
+        toolName,
+        source: input.source,
+        category: input.category,
+        inputSummary: summariseInput(input.finalInput),
+        verdict,
+      });
+      return { verdict, cacheReason: cacheResult.reason, deferredId };
+    }
+    return { verdict, cacheReason: cacheResult.reason };
   }
 
   // ─── Private ─────────────────────────────────────
@@ -284,66 +514,134 @@ export class PermissionManager {
   }
 
   /**
-   * Trust 기반 판정 (tool-governance.md §4.1):
+   * Permission policy Layer 3 — Category × Source × Mode via registry descriptor.
    *
-   * HIGH  + read  → ALLOW
-   * HIGH  + write → ASK (default mode) / ALLOW (auto mode)
-   * MEDIUM + read → ALLOW
-   * MEDIUM + write → ASK (default mode)
-   * LOW   + any   → ASK (strict 강제)
+   * The descriptor's `decisionFor()` returns one of:
+   *   - "allow"    → permitted (with audit)
+   *   - "ask"      → ApprovalGate round-trip
+   *   - "deny"     → refused (used by future restricted categories)
+   *   - "reviewer" → defer to Phase 3 reviewer agent (headless lane)
+   *   - "override" → meta category — caller reads tool.decisionOverride
+   *
+   * The Phase 3 reviewer is not yet wired; until it lands, "reviewer"
+   * is mapped to "ask" so the user is prompted instead of silently
+   * permitting a headless write — fail-safe per design §1 principles.
+   *
+   * MCP (trust: low) tools are always asked regardless of category —
+   * the trust axis still beats the registry decision because MCP has
+   * no manifest integrity proxy yet (Phase 4).
    */
-  private trustBasedDecision(
+  private categoryBasedDecision(
     toolName: string,
     trust: TrustLevel,
-    category?: "read" | "write" | "dangerous",
+    category: ToolCategory,
+    context: PermissionCheckContext,
   ): PermissionCheckResult {
-    // auto 모드: HIGH/MEDIUM 허용, LOW(MCP)는 여전히 ask 강제 (H1 fix)
-    if (this.mode === "auto") {
-      if (trust === "low") {
-        return { decision: "ask", reason: "MCP 도구는 auto 모드에서도 승인 필요 (trust: low)", layer: 6 };
-      }
-      return { decision: "allow", reason: `auto 모드 (trust: ${trust})`, layer: 6 };
-    }
-
-    // strict 모드: 모든 것 ask
+    // strict 모드: 모든 것 ask (read 포함)
     if (this.mode === "strict") {
-      return { decision: "ask", reason: `strict 모드 (trust: ${trust})`, layer: 6 };
+      return {
+        decision: "ask",
+        reason: `strict 모드 (trust: ${trust}, category: ${category})`,
+        layer: 6,
+      };
     }
 
-    // default 모드: trust + category 기반
-    const resolvedCategory = category ?? classifyToolCategory(toolName);
-
-    // LOW trust (MCP): 항상 ask
+    // LOW trust (MCP): 항상 ask — manifest integrity guard 가 없는 동안 trust override
     if (trust === "low") {
-      return { decision: "ask", reason: `MCP 도구 strict 강제 (trust: low)`, layer: 6 };
+      return {
+        decision: "ask",
+        reason: `MCP 도구 strict 강제 (trust: low, category: ${category})`,
+        layer: 6,
+      };
     }
 
-    // dangerous: 항상 ask
-    if (resolvedCategory === "dangerous") {
-      return { decision: "ask", reason: `위험 도구 (category: dangerous)`, layer: 6 };
-    }
+    const descriptor = getToolCategoryDescriptor(category);
+    const decision = descriptor.decisionFor({
+      mode: this.mode,
+      source: trust === "high" ? "builtin" : "plugin",
+      headless: context.headless === true,
+    });
 
-    // read: 허용
-    if (resolvedCategory === "read") {
-      return { decision: "allow", reason: `조회 도구 (trust: ${trust}, category: read)`, layer: 6 };
+    switch (decision) {
+      case "allow":
+        return {
+          decision: "allow",
+          reason: `${this.mode} 모드 (category: ${category}, trust: ${trust})`,
+          layer: 6,
+        };
+      case "deny":
+        return {
+          decision: "deny",
+          reason: `정책 거부 (category: ${category})`,
+          layer: 6,
+        };
+      case "reviewer":
+        // Permission policy P3 — when the reviewer is wired, the executor
+        // dispatches via {@link dispatchReviewer} synchronously
+        // before invoking the tool. categoryBasedDecision still
+        // returns "ask" so the executor can perform the async reviewer
+        // dispatch at the single choke point. If reviewer wiring is absent,
+        // the executor fails closed. The "reviewer" decision is the signal
+        // to consult dispatchReviewer; categoryBasedDecision can't
+        // do it directly because it isn't async.
+        if (this.hasReviewer()) {
+          return {
+            decision: "ask",
+            reason: `headless ${category} — reviewer agent 라우팅 대상 (executor 가 dispatchReviewer 호출)`,
+            layer: 6,
+          };
+        }
+        return {
+          decision: "ask",
+          reason: `headless ${category} — reviewer agent 미배치, 사용자 컨펌`,
+          layer: 6,
+        };
+      case "override":
+        // meta category — executor handles via tool.decisionOverride
+        return {
+          decision: "allow",
+          reason: `meta tool (category: ${category}) — decisionOverride 적용`,
+          layer: 6,
+        };
+      case "ask":
+      default:
+        return {
+          decision: "ask",
+          reason: `사용자 컨펌 필요 (category: ${category}, trust: ${trust})`,
+          layer: 6,
+        };
     }
-
-    // write (MEDIUM/HIGH): ask
-    return { decision: "ask", reason: `상태 변경 도구 (trust: ${trust}, category: write)`, layer: 6 };
   }
 }
 
 // ─── Helpers ────────────────────────────────────────
 
-function matchGlob(pattern: string, name: string): boolean {
-  const regex = new RegExp(
-    "^" + pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*") + "$",
-  );
-  return regex.test(name);
+function normalizeApprovalCacheKey(key: string | undefined): string | null {
+  if (!key) return null;
+  const trimmed = key.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
-/** 도구 이름에서 Read/Write 분류 추론 */
-function classifyToolCategory(toolName: string): "read" | "write" | "dangerous" {
+/**
+ * Last-resort heuristic when a caller fails to thread the static manifest
+ * category through. Production paths supply the manifest category
+ * directly; this is retained for test-only paths that omit the argument.
+ * Returns a 5-axis category — `dangerous` is gone.
+ */
+/**
+ * Permission policy P3 — render a deferred-queue-friendly summary of `finalInput`.
+ * Caller is expected to have already DLP-redacted; this is a pure
+ * length-cap so the queue file stays manageable. Keys are sorted for
+ * deterministic display.
+ */
+function summariseInput(input: Record<string, unknown>): string {
+  const sorted: Record<string, unknown> = {};
+  for (const k of Object.keys(input).sort()) sorted[k] = input[k];
+  const json = JSON.stringify(sorted);
+  return json.length > 240 ? json.slice(0, 240) + "…" : json;
+}
+
+function classifyToolCategory(toolName: string): ToolCategory {
   const readPatterns = [
     /_(search|list|get|query|status|transcript|sessions|documents|preview|fetch)$/,
     /^web_search$/,

@@ -4,7 +4,7 @@
  * Composes the 8-step boot pipeline from focused modules under `src/boot/`:
  *
  *   Step 0-1 + 4-5  src/boot/services.ts          core services (python,
- *                                                 ms-graph, audit, settings,
+ *                                                 audit, settings,
  *                                                 memory, keyword/route,
  *                                                 tool-registry)
  *   Step 3 + 5      src/boot/steps/plugin-runtime — PluginRuntime + per-plugin
@@ -16,7 +16,7 @@
  *                                                 permission-manager,
  *                                                 post-turn-hook-chain,
  *                                                 approval-gate,
- *                                                 hook-runner,
+ *                                                 script-hook manager,
  *                                                 conversation-loop,
  *                                                 callLlm builders.
  *   Step 6          src/boot/routine.ts           routine runtime +
@@ -57,7 +57,7 @@ import { openLinkWindow as openLinkWindowService } from "./main/link-window-serv
 import { shell } from "electron";
 
 import { type AppServices, emitEvent, onEvent } from "./boot/types.js";
-import { ROUTINES_V2 } from "./shared/ipc-channels.js";
+import { PERMISSIONS, ROUTINES_V2 } from "./shared/ipc-channels.js";
 import { startWatcherTelemetryCollector } from "./boot/steps/watcher-telemetry-collector.js";
 import { bootstrapCoreServices } from "./boot/services.js";
 import { registerPluginNotifications } from "./boot/plugins.js";
@@ -97,6 +97,15 @@ import type { ConversationLoop } from "./engine/conversation-loop.js";
 import { initPluginRuntime } from "./boot/steps/plugin-runtime.js";
 import { registerPluginEventBridge } from "./boot/steps/ipc-bridge.js";
 import { wireReleasePrep, wireUpdateCheck } from "./boot/steps/post-boot.js";
+import { wireReviewerAgent } from "./boot/steps/reviewer-wiring.js";
+import { wireHookSystem } from "./boot/steps/hook-system-wiring.js";
+import { readPermissionSettings } from "./permissions/permission-settings-store.js";
+import { createProvider, secretKeyFor } from "./engine/llm/provider-factory.js";
+import type { LLMProvider, LLMVendor } from "./engine/llm/types.js";
+import {
+  bindManifestIntegrityAudit,
+  manifestIntegrityState,
+} from "./permissions/manifest-integrity.js";
 import { runManagedBootstrap } from "./boot/managed-marketplace.js";
 import { createLogger } from "./lib/logger.js";
 const log = createLogger("lvis");
@@ -135,7 +144,20 @@ export async function bootstrap(
 
   // Sprint 1-A A3 — shared AuditLogger instance (plugin runtime + hooks + gate).
   const { AuditLogger } = await import("./audit/audit-logger.js");
+  const { safeStorage } = await import("electron");
+  const {
+    FileSecretStore,
+    SafeStorageSecretStore,
+    ensureAuditSecret,
+  } = await import("./audit/hmac-chain.js");
   const bootAuditLogger = new AuditLogger();
+  const permissionAuditSecretStore = safeStorage.isEncryptionAvailable()
+    ? new SafeStorageSecretStore(safeStorage)
+    : new FileSecretStore();
+  bootAuditLogger.setupPermissionAuditChain(
+    ensureAuditSecret(permissionAuditSecretStore),
+    permissionAuditSecretStore,
+  );
 
   // Issue #260 — system notification service. Constructed up-front so all
   // 4 trigger sites (turn-end, routine, ask-user, approval) can call .fire().
@@ -252,7 +274,7 @@ export async function bootstrap(
     auditService,
   });
 
-  // §9.5 M4: marketplace backend selection.
+  // §9.5 marketplace backend selection.
   const marketplaceSettings = settingsService.get("marketplace");
   // Phase 2-final marketplace fetcher selection — single production path:
   //   - real-cloud + URL → RealCloudMarketplaceFetcher
@@ -315,6 +337,72 @@ export async function bootstrap(
   const permissionManager = await createPermissionManager();
   toolRegistry.setDenyRules(permissionManager.getVisibilityDenyRules());
 
+  // Permission policy P4 — Layer 5 reviewer agent wiring (Phase 3 deferral resolution).
+  // Reads `permissions.reviewer` from `~/.lvis/settings.json` and binds the
+  // classifier + cache + deferred queue onto the live PermissionManager so
+  // `dispatchReviewer()` routes HIGH verdicts into the deferred queue.
+  // For mode=llm, build an adapter over the host's existing
+  // VercelUnifiedProvider streaming surface — the reviewer needs only a
+  // one-shot complete() call shape.
+  const reviewerStreamProviderFor = (vendor: string): LLMProvider | null => {
+    // Reviewer settings vendor name → LLMVendor:
+    //   "openai"    → "openai"
+    //   "anthropic" → "claude"
+    //   "google"    → "gemini"
+    const vendorMap: Record<string, LLMVendor> = {
+      openai: "openai",
+      anthropic: "claude",
+      google: "gemini",
+    };
+    const llmVendor = vendorMap[vendor];
+    if (!llmVendor) return null;
+    const apiKey = settingsService.getSecret(secretKeyFor(llmVendor));
+    if (!apiKey) return null;
+    return createProvider({ vendor: llmVendor, apiKey });
+  };
+  const rewireReviewerAgent = (): void => {
+    wireReviewerAgent({
+      permissionManager,
+      streamProviderFor: reviewerStreamProviderFor,
+      onDeferredPendingChange: (summary) => {
+        getMainWindow()?.webContents.send(PERMISSIONS.deferredPending, summary);
+      },
+    });
+  };
+  rewireReviewerAgent();
+
+  // Manifest integrity proxy. Subscribes the audit logger so every read→write
+  // violation lands in `~/.lvis/audit/` and pushes an IPC notification to the
+  // renderer. Uses the live mainWindow getter so cross-restart UI keeps
+  // receiving events.
+  bindManifestIntegrityAudit(bootAuditLogger);
+  manifestIntegrityState.onViolation((pluginId, toolName, attempted) => {
+    try {
+      getMainWindow()?.webContents.send(PERMISSIONS.manifestViolation, {
+        pluginId,
+        toolName,
+        attempted,
+      });
+    } catch (err) {
+      log.warn(
+        "manifest-violation IPC emit failed (non-fatal): %s",
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  });
+
+  // In-process HookRunner kept for internal/test hook registration only.
+  // Production external hooks flow through ScriptHookManager below so strict
+  // quarantine + explicit user trust registration is the single path.
+  const hookRunner = createHookRunner();
+
+  // Permission policy P4 — Layer 6 script-hook system (individual `pre-*.sh` /
+  // `post-*.sh` / `perm-*.sh` files under `~/.config/lvis/hooks/`).
+  // Production boot has no renderer approval prompt: untrusted or changed hook
+  // files are strict-denied and moved to `.disabled/`.
+  const hookSystem = await wireHookSystem({ auditLogger: bootAuditLogger });
+  const scriptHookManager = hookSystem.manager;
+
   // §7: Routine Engine — 루틴마다 독립된 ConversationLoop를 생성하는 factory를 주입.
   // interactive 채팅의 ConversationLoop 인스턴스를 공유하면 세션 히스토리 오염 및
   // concurrent IPC 채팅 턴과의 race condition이 발생한다. factory는 stateless deps만
@@ -327,10 +415,22 @@ export async function bootstrap(
     toolRegistry,
     memoryManager,
     permissionManager,
+    approvalGate,
+    hookRunner,
+    scriptHookManager,
+    bashAstValidator,
     pluginRuntime,
+    auditLogger: bootAuditLogger,
   };
   const routineEngine = createRoutineEngine({
-    createConversationLoop: () => createRoutineConversationLoop(routineLoopDeps),
+    createConversationLoop: (input) => createRoutineConversationLoop(
+      routineLoopDeps,
+      { scope: input.scope },
+    ),
+    // Permission policy Layer 4 — snapshot the live plugin runtime's active id set so
+    // routines with `scope.pluginIds.mode === "inherit"` are normalized
+    // to a concrete allow-list at fire time (never at loop-construction).
+    getActivePluginIds: () => pluginRuntime.listPluginIds(),
   });
 
   // §4.2 Step 7: manifest-driven IPC bridges.
@@ -349,9 +449,6 @@ export async function bootstrap(
   // plugin HostApi factory could wire `agentApproval` to the live gate.
   // approvalGateRef was bound at construction time.
 
-  // Tier A4 (W3): HookRunner.
-  const hookRunner = createHookRunner();
-
   // §4.5: ConversationLoop.
   const conversationLoop = createConversationLoop({
     settingsService,
@@ -367,9 +464,13 @@ export async function bootstrap(
     bashAstValidator,
     approvalGate,
     hookRunner,
+    scriptHookManager,
+    getAdditionalDirectories: () => readPermissionSettings().permissions.additionalDirectories,
     pluginRuntime,
     skillOverlay,
     notificationService,
+    auditLogger: bootAuditLogger,
+    rewireReviewerAgent,
   });
 
   // Late-binding 주입 — ConversationLoop 생성 직후.
@@ -393,6 +494,10 @@ export async function bootstrap(
       approvalGate,
       bashAstValidator,
       hookRunner,
+      scriptHookManager,
+      auditLogger: bootAuditLogger,
+      getAdditionalDirectories: () => readPermissionSettings().permissions.additionalDirectories,
+      rewireReviewerAgent,
     },
     toolRegistry,
   });
@@ -405,15 +510,15 @@ export async function bootstrap(
   // llm-session routines start a ConversationLoop with prePrompt.
   // notification-only routines fire an OS notification.
   routinesScheduler.onLlmSession(({ routine }) => {
-    // Q9: create an isolated session file before firing so the JSONL path
+    // Create an isolated session file before firing so the JSONL path
     // can be passed to the engine and routine turns never mix with main chat.
-    // Q10: emit running-started/finished so renderer can show progress indicator.
-    // M8: createSession runs before runningStarted — abort if it throws.
+    // Emit running-started/finished so renderer can show progress indicator.
+    // createSession runs before runningStarted — abort if it throws.
     void (async () => {
       const firedAt = new Date().toISOString();
       const title = routine.title ?? routine.notificationTitle ?? routine.id.slice(0, 8);
 
-      // M8: createSession first — if it fails, abort and emit failed event.
+      // createSession first — if it fails, abort and emit failed event.
       let jsonlPath: string | null = null;
       try {
         jsonlPath = await routineSessionStore.createSession(routine.id, firedAt);
@@ -442,7 +547,7 @@ export async function bootstrap(
         // non-fatal
       }
 
-      // Q9: pass jsonlPath to runRoutine so engine writes history to the
+      // Pass jsonlPath to runRoutine so engine writes history to the
       // isolated session file. summary comes from the LLM response directly.
       let runSummary = "";
       try {
@@ -451,12 +556,13 @@ export async function bootstrap(
           trigger: routine.trigger,
           prePrompt: routine.prePrompt ?? "",
           title: routine.title,
+          scope: routine.scope,
           storagePath: jsonlPath ?? undefined,
         });
         runSummary = runResult.summary;
       } catch (err) {
         log.warn("routines v2 llm-session run failed: %s", (err as Error).message);
-        // M8: emit failed so renderer knows to clear running state
+        // Emit failed so renderer knows to clear running state.
         try {
           getMainWindow()?.webContents.send(ROUTINES_V2.failed, {
             routineId: routine.id,
@@ -466,16 +572,16 @@ export async function bootstrap(
           // non-fatal
         }
       } finally {
-        // Q10: always clear running state regardless of success/failure
+      // Always clear running state regardless of success/failure.
         try {
           getMainWindow()?.webContents.send(ROUTINES_V2.runningFinished, routine.id);
         } catch {
           // non-fatal
         }
       }
-      // Q9+Q10: use LLM response summary directly — no extractSummary needed.
+      // Use LLM response summary directly — no extractSummary needed.
       const summary = runSummary;
-      // M1: explicit allowlist payload — no ...routine spread to prevent PII leak
+      // Explicit allowlist payload — no ...routine spread to prevent PII leak.
       try {
         getMainWindow()?.webContents.send(ROUTINES_V2.fired, {
           id: routine.id,
@@ -484,6 +590,7 @@ export async function bootstrap(
           firedAt,
           title,
           summary,
+          ...(jsonlPath ? { routineSessionPath: jsonlPath } : {}),
         } satisfies import("./shared/routines-types.js").RoutineFiredPayload);
       } catch (err) {
         log.warn("routines v2 llm-session emit failed: %s", (err as Error).message);
@@ -503,7 +610,7 @@ export async function bootstrap(
     }
     // Emit fired event for notification-only branch so the UI reflects the
     // fire consistently across both execution modes.
-    // M1: explicit allowlist — no ...routine spread to prevent prePrompt/notificationBody leak
+    // Explicit allowlist — no ...routine spread to prevent prePrompt/notificationBody leak.
     try {
       const firedAt = new Date().toISOString();
       const title = routine.title ?? routine.notificationTitle ?? routine.id.slice(0, 8);
@@ -563,16 +670,11 @@ export async function bootstrap(
     });
   })();
 
-  // Backlog #3: surface degraded-validator state at boot-ready so it's
-  // prominent in the operator log alongside the tool/plugin/mcp counts.
-  const validationStatus = pluginRuntime.isValidatorDegraded() ? " validation:degraded" : "";
-  log.info("boot: ready (%d tools, %d plugins, %d mcp%s)", toolRegistry.size, pluginRuntime.listPluginIds().length, mcpManager.listServers().filter(s => s.status === "connected").length, validationStatus);
+  log.info("boot: ready (%d tools, %d plugins, %d mcp)", toolRegistry.size, pluginRuntime.listPluginIds().length, mcpManager.listServers().filter(s => s.status === "connected").length);
 
-  // Watcher telemetry consumer — ms-graph (v0.1.27+) 가 발행하는
-  // `email.watcher.poll.completed` 이벤트를 ~/.lvis/logs/watcher-poll.jsonl
-  // 에 적재. 정식 metrics pipeline 도입 전 단계 — 사용자 머신의 cold-seed
-  // latency / payload 분포를 raw 로 모아 사후 jq 분석. 향후 ms-graph 의
-  // chunked-seed / interval 튜닝 의사결정 데이터 소스.
+  // Watcher telemetry consumer — plugin-emitted watcher poll events are
+  // appended to ~/.lvis/logs/watcher-poll.jsonl. This is the pre-metrics
+  // pipeline raw source for cold-seed latency / payload distribution tuning.
   const watcherTelemetryLogPath = resolve(homedir(), ".lvis", "logs", "watcher-poll.jsonl");
   const watcherTelemetryCollector = startWatcherTelemetryCollector({
     filePath: watcherTelemetryLogPath,
@@ -610,9 +712,10 @@ export async function bootstrap(
     memoryManager, keywordEngine, routeEngine, toolRegistry,
     systemPromptBuilder, conversationLoop, routineEngine, mcpManager, mcpArtifactStore,
     idleScheduler, bashAstValidator, auditService, auditLogger: bootAuditLogger, postTurnHookChain,
-    approvalGate, knowledgeAvailable, starredStore, feedbackStore,
+    approvalGate, rewireReviewerAgent, knowledgeAvailable, starredStore, feedbackStore,
     routinesStore, routinesScheduler, routineSessionStore, sessionTodoStore, askUserQuestionGate, skillStore,
     notificationService,
+    scriptHookManager,
     telemetry, pluginTelemetry, autoUpdaterStop,
     startRoutinesScheduler: () => routinesScheduler.start(),
     refreshPluginNotifications: () => {

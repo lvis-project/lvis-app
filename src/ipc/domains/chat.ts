@@ -6,6 +6,8 @@
  */
 import { ipcMain } from "electron";
 import type { WebContents } from "electron";
+import type { ChatInputOrigin, ChatSendPayload } from "../../shared/chat-origin.js";
+import { isChatSendInputOrigin } from "../../shared/chat-origin.js";
 import { redactForLLM } from "../../audit/dlp-filter.js";
 import type { GenericMessage } from "../../engine/llm/types.js";
 import { userContentText } from "../../engine/llm/types.js";
@@ -116,20 +118,23 @@ async function runStreamedTurn(
   webContents: WebContents | undefined,
   channel: string,
   streamId: number,
-  options?: {
+  options: {
     shouldSuppressInterruptedTail?: () => boolean;
     clearInterruptedTailSuppression?: () => void;
     attachments?: import("../../engine/llm/types.js").UserContentPart[];
+    inputOrigin: ChatInputOrigin;
   },
 ): Promise<TurnResult> {
   const send = (payload: unknown) => webContents?.send(channel, { streamId, ...((payload as Record<string, unknown>) ?? {}) });
-  const originSource = parseImportedTriggerEnvelope(input);
+  const originSource = options.inputOrigin === "plugin-emitted"
+    ? parseImportedTriggerEnvelope(input)
+    : null;
   const result = await conversationLoop.runTurn(
     input,
     {
       onReasoningDelta: (text) => send({ type: "reasoning_delta", text }),
       onTextDelta: (text) => {
-        if (options?.shouldSuppressInterruptedTail?.() && text === "\n\n[중단됨]") return;
+        if (options.shouldSuppressInterruptedTail?.() && text === "\n\n[중단됨]") return;
         send({ type: "text_delta", text });
       },
       onAssistantRound: ({ roundIndex, text, thought, stopReason, hasToolCalls }) =>
@@ -166,12 +171,13 @@ async function runStreamedTurn(
     undefined,
     {
       ...(originSource ? { originSource } : {}),
-      ...(options?.attachments && options.attachments.length > 0
+      ...(options.attachments && options.attachments.length > 0
         ? { attachments: options.attachments }
         : {}),
+      inputOrigin: options.inputOrigin,
     },
   );
-  if (options?.shouldSuppressInterruptedTail?.() && result.stopReason === "interrupted") {
+  if (options.shouldSuppressInterruptedTail?.() && result.stopReason === "interrupted") {
     options.clearInterruptedTailSuppression?.();
     return result;
   }
@@ -209,6 +215,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
     clearInterruptedTailSuppression: () => {
       suppressInterruptedTail = false;
     },
+    inputOrigin: "user-keyboard" as const,
   };
   const allocateStreamId = () => ++nextStreamId;
   const sanitizeOutgoingInput = (input: string, webContents: WebContents | undefined) => {
@@ -252,13 +259,50 @@ ${input}`;
     ));
   };
 
+  const parseChatSendPayload = (
+    payload: unknown,
+  ): { ok: true; payload: ChatSendPayload } | { ok: false; error: string } => {
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      return { ok: false, error: "invalid-payload" };
+    }
+    const candidate = payload as {
+      input?: unknown;
+      attachments?: unknown;
+      inputOrigin?: unknown;
+      userActivation?: unknown;
+    };
+    if (typeof candidate.input !== "string") {
+      return { ok: false, error: "invalid-input" };
+    }
+    if (!isChatSendInputOrigin(candidate.inputOrigin)) {
+      return { ok: false, error: "missing-input-origin" };
+    }
+    if (candidate.inputOrigin === "user-keyboard" && candidate.userActivation !== true) {
+      return { ok: false, error: "user-keyboard-required" };
+    }
+    const originSource = parseImportedTriggerEnvelope(candidate.input);
+    if (candidate.inputOrigin === "plugin-emitted" && !originSource) {
+      return { ok: false, error: "missing-plugin-envelope" };
+    }
+    return {
+      ok: true,
+      payload: {
+        input: candidate.input,
+        attachments: candidate.attachments,
+        inputOrigin: candidate.inputOrigin,
+        ...(candidate.userActivation === true ? { userActivation: true } : {}),
+      },
+    };
+  };
+
   ipcMain.handle("lvis:chat:send", async (
     e,
-    input: unknown,
-    attachments?: unknown,
+    payload: unknown,
   ) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:send", e); return UNAUTHORIZED_FRAME; }
-    if (typeof input !== "string") return { ok: false, error: "invalid-input" };
+    const parsed = parseChatSendPayload(payload);
+    if (!parsed.ok) return { ok: false, error: parsed.error };
+    const { input, attachments, inputOrigin } = parsed.payload;
     // IPC payload validation — the renderer is trusted but a corrupt
     // preload bridge or a stray `unknown[]` cast could deliver malformed
     // parts. We validate the shape here so the conversation loop never
@@ -273,7 +317,7 @@ ${input}`;
       win?.webContents,
       "lvis:chat:stream",
       streamId,
-      { ...streamTurnOptions, attachments: validated },
+      { ...streamTurnOptions, attachments: validated, inputOrigin },
     ));
   });
 

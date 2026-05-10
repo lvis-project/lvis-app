@@ -69,6 +69,39 @@ describe("SettingsService marketplace defaults", () => {
 
 });
 
+describe("SettingsService removes plugin-specific legacy host settings", () => {
+  let userDataPath: string;
+
+  beforeEach(() => {
+    userDataPath = mkdtempSync(join(tmpdir(), "settings-store-legacy-plugin-"));
+    mockedElectron.safeStorage.isEncryptionAvailable.mockReturnValue(false);
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    rmSync(userDataPath, { recursive: true, force: true });
+  });
+
+  it("drops legacy msGraph blocks from loaded and saved settings", async () => {
+    const settingsPath = join(userDataPath, "lvis-settings.json");
+    writeFileSync(
+      settingsPath,
+      JSON.stringify({
+        msGraph: { enabled: true, tenantId: "legacy" },
+        chat: { systemPrompt: "preserved", autoCompact: false },
+      }),
+      "utf-8",
+    );
+
+    const service = new SettingsService({ userDataPath });
+    expect(service.getAll()).not.toHaveProperty("msGraph");
+
+    await service.patch({ msGraph: { enabled: true } } as never);
+    expect(service.getAll()).not.toHaveProperty("msGraph");
+    expect(JSON.parse(readFileSync(settingsPath, "utf-8"))).not.toHaveProperty("msGraph");
+  });
+});
+
 describe("SettingsService LLM per-vendor patching", () => {
   let userDataPath: string;
 
@@ -208,31 +241,6 @@ describe("SettingsService webView (B1 — external URL viewer policy)", () => {
     );
     const service = new SettingsService({ userDataPath });
     expect(service.get("webView")).toEqual({ preferredFlow: "in-app" });
-  });
-});
-
-describe("SettingsService msGraph patching", () => {
-  let userDataPath: string;
-
-  beforeEach(() => {
-
-    userDataPath = mkdtempSync(join(tmpdir(), "settings-store-msgraph-"));
-    mockedElectron.safeStorage.isEncryptionAvailable.mockReturnValue(false);
-  });
-
-  afterEach(() => {
-    vi.clearAllMocks();
-    rmSync(userDataPath, { recursive: true, force: true });
-  });
-
-  it("patch() persists msGraph environment changes across restart", async () => {
-    const service = new SettingsService({ userDataPath });
-
-    await service.patch({ msGraph: { environment: "corporate" } });
-    expect(service.get("msGraph")).toEqual({ environment: "corporate" });
-
-    const reloaded = new SettingsService({ userDataPath });
-    expect(reloaded.get("msGraph")).toEqual({ environment: "corporate" });
   });
 });
 

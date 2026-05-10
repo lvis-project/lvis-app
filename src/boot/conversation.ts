@@ -16,11 +16,10 @@ import { SystemPromptBuilder } from "../prompts/system-prompt-builder.js";
 import { PermissionManager } from "../permissions/permission-manager.js";
 import { ApprovalGate } from "../permissions/approval-gate.js";
 import { loadPolicy } from "../permissions/policy-store.js";
+import { registerStandardCategories } from "../permissions/category-registry.js";
 import { ConversationLoop } from "../engine/conversation-loop.js";
 import { PostTurnHookChain } from "../hooks/post-turn-hook-chain.js";
 import { HookRunner } from "../hooks/hook-runner.js";
-import { loadHooksConfig } from "../hooks/config-loader.js";
-import { ExternalHookExecutor } from "../hooks/external-executor.js";
 import { AuditLogger } from "../audit/audit-logger.js";
 import type { NotificationService } from "../main/notification-service.js";
 import type { SessionTodoStore } from "../main/session-todo-store.js";
@@ -59,6 +58,10 @@ export function createSystemPromptBuilder(opts: {
 }
 
 export async function createPermissionManager(): Promise<PermissionManager> {
+  // Permission policy — register the 5-axis ToolCategory descriptors before any
+  // PermissionManager.checkDetailed() can run. Idempotent: re-calls
+  // simply overwrite the registry entries with the same values.
+  registerStandardCategories();
   // §6.3: PermissionManager (Layer 2-3)
   const permissionManager = new PermissionManager();
   // 기본 allow 규칙: 조회성 도구 자동 허용
@@ -114,29 +117,11 @@ export async function createApprovalGate(
 }
 
 export function createHookRunner(): HookRunner {
-  // Tier A4 (W3): load hooks config from admin-dir + ~/.lvis/hooks.json and
-  // attach an ExternalHookExecutor to the HookRunner so every preToolUse /
-  // postToolUse event routes through it. Host owns the runner lifecycle so
-  // external hooks fire inside the ToolExecutor's 8-step pipeline.
-  const hookRunner = new HookRunner();
-  try {
-    const hooksConfig = loadHooksConfig();
-    const externalHookExecutor = new ExternalHookExecutor(hooksConfig, process.cwd());
-    hookRunner.setExternalExecutor(externalHookExecutor);
-    const preCount = hooksConfig.preToolUse.length;
-    const postCount = hooksConfig.postToolUse.length;
-    log.info(
-      "boot: external hook executor attached (pre=%d, post=%d)",
-      preCount,
-      postCount,
-    );
-  } catch (err) {
-    log.warn(
-      "boot: external hook executor setup failed (non-fatal): %s",
-      (err as Error).message,
-    );
-  }
-  return hookRunner;
+  // Permission policy single hook path: production script hooks are discovered by
+  // wireHookSystem() from discrete pre/post/perm-*.sh files under
+  // ~/.config/lvis/hooks/. Legacy hooks.json command/http loading is not
+  // wired at boot because it bypasses the strict quarantine/accept flow.
+  return new HookRunner();
 }
 
 export interface ConversationDeps {
@@ -153,13 +138,19 @@ export interface ConversationDeps {
   bashAstValidator: BashAstValidator;
   approvalGate: ApprovalGate;
   hookRunner: HookRunner;
+  scriptHookManager?: import("../hooks/script-hook-manager.js").ScriptHookManager;
   pluginRuntime: PluginRuntime;
+  additionalDirectories?: readonly string[];
+  getAdditionalDirectories?: () => readonly string[];
   /** C2(c): per-session SkillOverlay handle, cleared on newConversation(). */
   skillOverlay?: { clear(sessionId: string): void };
   /** Session-scoped assistant TO-DO lifecycle. */
   sessionTodoStore?: SessionTodoStore;
   /** Issue #260: optional notification service for turn-end auto-fire. */
   notificationService?: NotificationService;
+  auditLogger?: AuditLogger;
+  /** Rebuild the Layer 5 reviewer after persisted reviewer settings change. */
+  rewireReviewerAgent?: () => void;
 }
 
 /**
@@ -171,10 +162,9 @@ export interface ConversationDeps {
  *
  * Each call returns a *fresh* ConversationLoop that shares stateless deps
  * (toolRegistry, settings, etc.) but owns its own ConversationHistory so
- * routine turns never appear in the user's chat transcript. The heavier
- * interactive-only deps (postTurnHookChain, approvalGate, hookRunner,
- * idleScheduler, bashAstValidator) are intentionally omitted — routines run
- * headlessly and do not need approval modals or idle-poke side-effects.
+ * routine turns never appear in the user's chat transcript. Routine loops
+ * still receive the approval gate + pre-tool hooks so background writes cannot
+ * bypass the normal tool policy.
  */
 export type RoutineConversationLoopDeps = Pick<
   ConversationDeps,
@@ -185,10 +175,18 @@ export type RoutineConversationLoopDeps = Pick<
   | "toolRegistry"
   | "memoryManager"
   | "permissionManager"
+  | "approvalGate"
+  | "hookRunner"
+  | "scriptHookManager"
+  | "bashAstValidator"
   | "pluginRuntime"
+  | "auditLogger"
 >;
 
-export function createRoutineConversationLoop(deps: RoutineConversationLoopDeps): ConversationLoop {
+export function createRoutineConversationLoop(
+  deps: RoutineConversationLoopDeps,
+  opts: { scope?: import("../shared/routines-types.js").RoutineScope } = {},
+): ConversationLoop {
   // Layer 1 (UX hot-fix v3): each routine fire gets its *own* SystemPromptBuilder
   // instance with routineMode=true so the LLM is instructed to append a
   // <summary>…</summary> tag. A dedicated instance (not the shared main-chat
@@ -201,6 +199,22 @@ export function createRoutineConversationLoop(deps: RoutineConversationLoopDeps)
     // Skill overlay is interactive-only — routine sessions are headless.
   });
   routineSystemPromptBuilder.setRoutineMode(true);
+  // Permission policy Layer 4 — translate the discriminated scope into the loop's
+  // ConversationLoopDeps shape. The scope must already be normalized
+  // (no `inherit`) by the dispatcher before this factory runs.
+  const scope = opts.scope;
+  let allowedPluginIds: Set<string>;
+  if (!scope || scope.pluginIds.mode === "inherit") {
+    // Defensive default — should never hit production because the
+    // dispatcher normalizes inherit to a snapshot. Coerce to deny-all
+    // so we fail closed instead of opening up the full active set.
+    allowedPluginIds = new Set();
+  } else if (scope.pluginIds.mode === "deny-all") {
+    allowedPluginIds = new Set();
+  } else {
+    allowedPluginIds = new Set(scope.pluginIds.ids);
+  }
+  const forcedActivePluginIds = new Set(scope?.forcedPluginIds ?? []);
   return new ConversationLoop({
     settingsService: deps.settingsService,
     systemPromptBuilder: routineSystemPromptBuilder,
@@ -209,9 +223,19 @@ export function createRoutineConversationLoop(deps: RoutineConversationLoopDeps)
     toolRegistry: deps.toolRegistry,
     memoryManager: deps.memoryManager,
     permissionManager: deps.permissionManager,
+    approvalGate: deps.approvalGate,
+    hookRunner: deps.hookRunner,
+    scriptHookManager: deps.scriptHookManager,
+    bashAstValidator: deps.bashAstValidator,
     pluginRuntime: deps.pluginRuntime,
-    // postTurnHookChain / approvalGate / hookRunner / idleScheduler / bashAstValidator
-    // intentionally omitted — routine loops are headless and isolated.
+    auditLogger: deps.auditLogger,
+    allowedPluginIds,
+    forcedActivePluginIds,
+    additionalDirectories: scope?.directories ?? [],
+    headless: true,
+    disableSessionPersistence: true,
+    // postTurnHookChain / idleScheduler intentionally omitted — routine loops
+    // are isolated from normal chat persistence and idle-poke side effects.
   });
 }
 
@@ -246,8 +270,10 @@ export type TriggerConversationLoopDeps = Pick<
   | "memoryManager"
   | "permissionManager"
   | "approvalGate"
+  | "scriptHookManager"
   | "bashAstValidator"
   | "pluginRuntime"
+  | "auditLogger"
 >;
 
 export function createTriggerConversationLoop(
@@ -262,8 +288,10 @@ export function createTriggerConversationLoop(
     memoryManager: deps.memoryManager,
     permissionManager: deps.permissionManager,
     approvalGate: deps.approvalGate,
+    scriptHookManager: deps.scriptHookManager,
     bashAstValidator: deps.bashAstValidator,
     pluginRuntime: deps.pluginRuntime,
+    auditLogger: deps.auditLogger,
     // postTurnHookChain / hookRunner / idleScheduler intentionally omitted.
   });
 }
@@ -284,11 +312,16 @@ export function createConversationLoop(deps: ConversationDeps): ConversationLoop
     bashAstValidator: deps.bashAstValidator,
     approvalGate: deps.approvalGate,
     hookRunner: deps.hookRunner,
+    scriptHookManager: deps.scriptHookManager,
+    additionalDirectories: deps.additionalDirectories,
+    getAdditionalDirectories: deps.getAdditionalDirectories,
     // Phase 1.5 Option C — request_plugin 메타 툴 pluginId 검증용.
     pluginRuntime: deps.pluginRuntime,
     skillOverlay: deps.skillOverlay,
     sessionTodoStore: deps.sessionTodoStore,
     notificationService: deps.notificationService,
+    auditLogger: deps.auditLogger,
+    rewireReviewerAgent: deps.rewireReviewerAgent,
   });
 }
 

@@ -101,7 +101,7 @@ describe("ConversationLoop onTurnSummary", () => {
       onTurnSummary: (s) => {
         summary = s;
       },
-    });
+    }, undefined, { inputOrigin: "user-keyboard" });
 
     expect(summary).not.toBeNull();
     expect(summary!.toolCount).toBe(3);
@@ -140,7 +140,7 @@ describe("ConversationLoop onTurnSummary", () => {
       onTurnSummary: () => {
         calls += 1;
       },
-    });
+    }, undefined, { inputOrigin: "user-keyboard" });
 
     // Turn produced no assistant text → footer suppressed (mirrors the
     // notification-gate so dropped/aborted turns don't render footers).
@@ -166,7 +166,7 @@ describe("ConversationLoop onTurnSummary", () => {
       onTurnSummary: () => {
         summaryCallCount += 1;
       },
-    });
+    }, undefined, { inputOrigin: "user-keyboard" });
 
     // stopReason must be "context-error" (not undefined / "end_turn")
     expect(result.stopReason).toBe("context-error");
@@ -194,7 +194,7 @@ describe("ConversationLoop onTurnSummary", () => {
       onTurnSummary: (s) => {
         summary = s;
       },
-    });
+    }, undefined, { inputOrigin: "user-keyboard" });
 
     expect(summary).not.toBeNull();
     expect(summary!.tokensIn).toBe(0);

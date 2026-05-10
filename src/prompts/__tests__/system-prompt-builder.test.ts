@@ -32,10 +32,10 @@ describe("SystemPromptBuilder — Conversation Meta Output", () => {
   it("prioritizes direct plugin tool calls over agent_spawn", () => {
     const builder = makeBuilder();
     const prompt = builder.build();
-    expect(prompt).toContain("Agent Hub work board 직접 조회");
+    expect(prompt).toContain("플러그인 UI/업무보드 직접 조회");
     expect(prompt).toContain("agent_spawn 을 쓰지 마세요");
     expect(prompt).toContain("request_plugin");
-    expect(prompt).toContain("agent_hub_* 도구를 직접 호출하세요");
+    expect(prompt).toContain("해당 도구가 현재 보이면 직접 호출");
   });
 
   it("always emits the <title> emit instruction in the prompt", () => {
