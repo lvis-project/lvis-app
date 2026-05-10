@@ -41,6 +41,16 @@ describe("ApprovalDialog", () => {
     });
   });
 
+  it("warns when approval trust origin is missing", async () => {
+    render(
+      <ApprovalDialog queue={[makeRequest()]} onDecide={vi.fn()} />,
+    );
+    await waitFor(() => {
+      expect(document.body.textContent).toContain("출처 미확인");
+      expect(document.body.textContent).toContain("사용자가 직접 입력한 명령이 아니라");
+    });
+  });
+
   it("calls onDecide when 허용 button clicked", async () => {
     const onDecide = vi.fn();
     render(
@@ -77,6 +87,8 @@ describe("ApprovalDialog", () => {
     await waitFor(() => {
       expect(document.body.textContent).toContain("read_file");
     });
+    expect(document.body.textContent).toContain("대기 중 1개");
+    expect(document.body.textContent).not.toContain("모두 허용");
   });
 
   it("routes out-of-allowed-dir requests to the directory access card", async () => {

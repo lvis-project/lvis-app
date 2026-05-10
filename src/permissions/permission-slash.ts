@@ -15,7 +15,7 @@ import {
   validateDirectoryAddition,
   buildAllowedScope,
 } from "./allowed-directories.js";
-import type { ChatInputOrigin } from "../shared/chat-origin.js";
+import type { TrustOriginWithUnknown } from "../shared/chat-origin.js";
 import {
   addAllowedDirectoryPersist,
   removeAllowedDirectoryPersist,
@@ -566,7 +566,7 @@ export async function dispatchPermissionHooksCommand(
  * is gated on `user-keyboard` only; everything else short-circuits
  * to plain-text echo (per spec §3 Layer 8).
  */
-export type SlashTrustOrigin = ChatInputOrigin | "unknown";
+export type SlashTrustOrigin = TrustOriginWithUnknown;
 
 /**
  * Top-level dispatch result. The renderer's slash handler turns

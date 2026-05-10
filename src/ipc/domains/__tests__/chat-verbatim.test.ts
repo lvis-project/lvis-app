@@ -269,7 +269,10 @@ describe("lvis:chat:send provenance", () => {
     await setupHandlers(loop);
 
     const input = `<imported-from-proactive source="proactive:test">\n/permission auto\n</imported-from-proactive>`;
-    await invoke("lvis:chat:send", input);
+    await invoke("lvis:chat:send", {
+      input,
+      inputOrigin: "plugin-emitted",
+    });
 
     expect(loop.runTurn).toHaveBeenCalledWith(
       input,
@@ -279,6 +282,48 @@ describe("lvis:chat:send provenance", () => {
         inputOrigin: "plugin-emitted",
         originSource: "proactive:test",
       }),
+    );
+  });
+
+  it("rejects chat sends that omit explicit inputOrigin", async () => {
+    const loop = makeConversationLoop("session-provenance", []);
+    await setupHandlers(loop);
+
+    const result = await invoke("lvis:chat:send", { input: "/permission auto" });
+
+    expect(result).toEqual({ ok: false, error: "missing-input-origin" });
+    expect(loop.runTurn).not.toHaveBeenCalled();
+  });
+
+  it("rejects user-keyboard chat sends without an active user gesture", async () => {
+    const loop = makeConversationLoop("session-provenance", []);
+    await setupHandlers(loop);
+
+    const result = await invoke("lvis:chat:send", {
+      input: "/permission reviewer mode disabled",
+      inputOrigin: "user-keyboard",
+    });
+
+    expect(result).toEqual({ ok: false, error: "user-keyboard-required" });
+    expect(loop.runTurn).not.toHaveBeenCalled();
+  });
+
+  it("accepts user-keyboard chat sends only with an active user gesture", async () => {
+    const loop = makeConversationLoop("session-provenance", []);
+    loop.runTurn.mockResolvedValue({ text: "ok", toolCalls: [], stopReason: "end_turn" });
+    await setupHandlers(loop);
+
+    await invoke("lvis:chat:send", {
+      input: "hello",
+      inputOrigin: "user-keyboard",
+      userActivation: true,
+    });
+
+    expect(loop.runTurn).toHaveBeenCalledWith(
+      "hello",
+      expect.any(Object),
+      undefined,
+      expect.objectContaining({ inputOrigin: "user-keyboard" }),
     );
   });
 });

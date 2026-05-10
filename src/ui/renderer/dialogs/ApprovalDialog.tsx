@@ -5,12 +5,6 @@ import type { ApprovalChoice, ApprovalRequest } from "../types.js";
 export interface ApprovalDialogProps {
   queue: ApprovalRequest[];
   onDecide: (choice: ApprovalChoice, pattern?: string) => void | Promise<void>;
-  /**
-   * Bulk approve/deny every pending request at once. When the LLM emits
-   * multiple tool calls in one round, the dialog surfaces "모두 허용" /
-   * "모두 거부" buttons that route here.
-   */
-  onDecideAll?: (choice: "allow-once" | "deny-once") => void | Promise<void>;
 }
 
 /**
@@ -18,7 +12,7 @@ export interface ApprovalDialogProps {
  * request and forwards the decide handler. Keeps App.tsx free of inline
  * queue-shift plumbing.
  */
-export function ApprovalDialog({ queue, onDecide, onDecideAll }: ApprovalDialogProps) {
+export function ApprovalDialog({ queue, onDecide }: ApprovalDialogProps) {
   const request = queue[0] ?? null;
 
   if (request?.kind === "out-of-allowed-dir") {
@@ -37,7 +31,6 @@ export function ApprovalDialog({ queue, onDecide, onDecideAll }: ApprovalDialogP
       request={request}
       pendingCount={queue.length}
       onDecide={(choice, pattern) => void onDecide(choice, pattern)}
-      onDecideAll={onDecideAll ? (choice) => void onDecideAll(choice) : undefined}
     />
   );
 }

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { PERMISSIONS } from "../../../shared/ipc-channels.js";
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
+const USER_INTENT = { inputOrigin: "user-keyboard", userActivation: true };
 
 vi.mock("electron", () => ({
   ipcMain: {
@@ -101,7 +102,7 @@ describe("permissions IPC handlers", () => {
   it("setMode routes through durable slash confirmation before persisting", async () => {
     const { deps, permissionManager } = await setup({ approvalChoice: "allow-once" });
 
-    const result = await invoke(PERMISSIONS.setMode, "auto");
+    const result = await invoke(PERMISSIONS.setMode, { mode: "auto", intent: USER_INTENT });
 
     expect(result).toEqual({ ok: true, mode: "auto" });
     expect(deps.approvalGate.requestAndWait).toHaveBeenCalledWith(
@@ -120,7 +121,7 @@ describe("permissions IPC handlers", () => {
   it("setMode does not persist when durable confirmation is denied", async () => {
     const { permissionManager } = await setup({ approvalChoice: "deny-once" });
 
-    const result = await invoke(PERMISSIONS.setMode, "strict");
+    const result = await invoke(PERMISSIONS.setMode, { mode: "strict", intent: USER_INTENT });
 
     expect(result).toMatchObject({ ok: false, error: "durable-mode-denied" });
     expect(permissionManager.setModePersist).not.toHaveBeenCalled();
@@ -132,7 +133,7 @@ describe("permissions IPC handlers", () => {
       auditAppendError: new Error("audit disk full"),
     });
 
-    const result = await invoke(PERMISSIONS.setMode, "auto");
+    const result = await invoke(PERMISSIONS.setMode, { mode: "auto", intent: USER_INTENT });
 
     expect(result).toMatchObject({ ok: false, error: "permission-audit-write-failed" });
     expect(permissionManager.setModePersist).not.toHaveBeenCalled();
@@ -141,8 +142,16 @@ describe("permissions IPC handlers", () => {
   it("addRule and removeRule mutate only through parsed rule commands", async () => {
     const { deps, permissionManager } = await setup();
 
-    await invoke(PERMISSIONS.addRule, "write_file:path:/tmp/a.md", "allow");
-    await invoke(PERMISSIONS.removeRule, "write_file:path:/tmp/a.md", "allow");
+    await invoke(PERMISSIONS.addRule, {
+      pattern: "write_file:path:/tmp/a.md",
+      action: "allow",
+      intent: USER_INTENT,
+    });
+    await invoke(PERMISSIONS.removeRule, {
+      pattern: "write_file:path:/tmp/a.md",
+      action: "allow",
+      intent: USER_INTENT,
+    });
 
     expect(permissionManager.addAlwaysAllowedPersist).toHaveBeenCalledWith("write_file:path:/tmp/a.md");
     expect(permissionManager.removeRule).toHaveBeenCalledWith("write_file:path:/tmp/a.md", "allow");
@@ -153,12 +162,26 @@ describe("permissions IPC handlers", () => {
     const { deps } = await setup();
     const dir = mkdtempSync(join(tmpdir(), "lvis-session-dir-"));
 
-    const result = await invoke(PERMISSIONS.dirDispatch, { rawArgs: `allow --session ${dir}` });
+    const result = await invoke(PERMISSIONS.dirDispatch, {
+      rawArgs: `allow --session ${dir}`,
+      intent: USER_INTENT,
+    });
 
     expect(result).toMatchObject({ ok: true, verb: "allow", sessionOnly: true });
     expect(deps.conversationLoop.addSessionAdditionalDirectory).toHaveBeenCalledWith(
       (result as { sessionDirectory: string }).sessionDirectory,
     );
+  });
+
+  it("permission mutations reject missing user-keyboard intent", async () => {
+    await setup();
+
+    const result = await invoke(PERMISSIONS.addRule, {
+      pattern: "write_file:path:/tmp/a.md",
+      action: "allow",
+    });
+
+    expect(result).toMatchObject({ ok: false, error: "user-keyboard-required" });
   });
 
   it("reviewerDispatch rejects invalid reviewer slash grammar without mutating local deps", async () => {
@@ -190,6 +213,7 @@ describe("permissions IPC handlers", () => {
     const result = await invoke(PERMISSIONS.deferredResolve, {
       id: "deferred-1",
       decision: "approved",
+      intent: USER_INTENT,
     });
 
     expect(result).toEqual({ ok: false, error: "permission-audit-not-ready" });
@@ -203,6 +227,7 @@ describe("permissions IPC handlers", () => {
     const result = await invoke(PERMISSIONS.deferredResolve, {
       id: "deferred-1",
       decision: "rejected",
+      intent: USER_INTENT,
     });
 
     expect(result).toEqual({ ok: false, error: "no-deferred-queue" });
@@ -223,6 +248,7 @@ describe("permissions IPC handlers", () => {
     const result = await invoke(PERMISSIONS.deferredResolve, {
       id: "deferred-1",
       decision: "approved",
+      intent: USER_INTENT,
     });
 
     expect(result).toMatchObject({ ok: false, error: "permission-audit-write-failed" });

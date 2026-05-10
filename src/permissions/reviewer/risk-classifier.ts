@@ -89,8 +89,21 @@ export class DisabledRiskClassifier implements RiskClassifier {
  * Destructive shell verbs (HIGH). Word-boundary match so `rmdir` is
  * caught and `farmer` is not.
  */
-const DESTRUCTIVE_SHELL_RE =
-  /\b(rm\s+-r|rm\s+-f|rm\s+-rf|sudo\b|curl[^|]*\|\s*sh|wget[^|]*\|\s*sh|dd\s+if=|mkfs|chmod\s+777)/i;
+const DESTRUCTIVE_SHELL_RE = new RegExp([
+  String.raw`\brm\s+-r`,
+  String.raw`\brm\s+-f`,
+  String.raw`\brm\s+-rf`,
+  String.raw`\bsudo\b`,
+  String.raw`\bcurl[^|]*\|\s*sh`,
+  String.raw`\bwget[^|]*\|\s*sh`,
+  String.raw`\bdd\s+if=`,
+  String.raw`\bmkfs\b`,
+  String.raw`\bchmod\s+777`,
+  String.raw`\bRemove-Item\b[^\n\r;|&]*\s-(?:Recurse|Force)\b`,
+  String.raw`\brmdir\b[^\n\r;|&]*/s\b`,
+  String.raw`\brd\b[^\n\r;|&]*/s\b`,
+  String.raw`\bdel\b[^\n\r;|&]*/s\b`,
+].join("|"), "i");
 
 /**
  * Reversible shell verbs (LOW). Read-only or trivially undoable.

@@ -22,6 +22,7 @@ import { SessionResumeDivider } from "./components/SessionResumeDivider.js";
 import { SessionTodoPanel } from "./components/SessionTodoPanel.js";
 import { SubAgentCard } from "./components/SubAgentCard.js";
 import { TokenCostBadge } from "./components/TokenCostBadge.js";
+import { PermissionModeBadge } from "./components/permissions/PermissionModeBadge.js";
 import { SkillBadge } from "./components/SkillBadge.js";
 import { WorkGroup } from "./components/WorkGroup.js";
 import { TurnActionBar } from "./components/TurnActionBar.js";
@@ -667,7 +668,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
       {hasApiKey === false && (
         <div className="absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2">
           <Card className="w-[400px]"><CardHeader className="text-center"><KeyRound className="mx-auto mb-2 h-10 w-10 text-muted-foreground" /><CardTitle>API 키 설정 필요</CardTitle><CardDescription>채팅을 시작하려면 Claude API 키를 설정해 주세요.</CardDescription></CardHeader>
-            <CardContent className="flex justify-center"><Button onClick={onOpenSettings}><KeyRound className="mr-2 h-4 w-4" />설정 열기</Button></CardContent>
+            <CardContent className="flex justify-center"><Button onClick={() => onOpenSettings()}><KeyRound className="mr-2 h-4 w-4" />설정 열기</Button></CardContent>
           </Card>
         </div>
       )}
@@ -1202,7 +1203,12 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           to the count so the user always sees what step is running. */}
       <div className="relative z-30 w-full max-w-full min-w-0 overflow-visible bg-background">
         <div className="w-full max-w-full min-w-0 px-3">
-          <SessionTodoPanel api={workflowApi} sessionId={currentSessionId} />
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              <SessionTodoPanel api={workflowApi} sessionId={currentSessionId} />
+            </div>
+            <PermissionModeBadge onClick={() => onOpenSettings("permissions")} />
+          </div>
         </div>
         <div className="w-full max-w-full min-w-0 overflow-x-hidden pb-1 space-y-2">
           <InputActionBar

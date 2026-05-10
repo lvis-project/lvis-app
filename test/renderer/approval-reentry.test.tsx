@@ -103,8 +103,8 @@ describe("useApproval — Copilot HIGH #2 re-entrancy", () => {
     });
   });
 
-  it("bulk decide echoes nonce and hmac for every queued request", async () => {
-    const { emit, respond, drainAll } = installMockNs();
+  it("sequential decide echoes nonce and hmac for each queued request", async () => {
+    const { emit, respond, drainOne } = installMockNs();
     const { result } = renderHook(() => useApproval());
 
     act(() => {
@@ -132,18 +132,30 @@ describe("useApproval — Copilot HIGH #2 re-entrancy", () => {
       });
     });
 
-    let bulk!: Promise<void>;
+    let first!: Promise<void>;
     act(() => {
-      bulk = result.current.decideAll("allow-once");
+      first = result.current.decide("allow-once");
     });
 
-    expect(respond).toHaveBeenCalledTimes(2);
+    expect(respond).toHaveBeenCalledTimes(1);
     expect(respond.mock.calls[0]?.[0]).toMatchObject({
       requestId: "req-1",
       choice: "allow-once",
       nonce: "nonce-1",
       hmac: "hmac-1",
     });
+
+    await act(async () => {
+      drainOne();
+      await first;
+    });
+
+    let second!: Promise<void>;
+    act(() => {
+      second = result.current.decide("allow-once");
+    });
+
+    expect(respond).toHaveBeenCalledTimes(2);
     expect(respond.mock.calls[1]?.[0]).toMatchObject({
       requestId: "req-2",
       choice: "allow-once",
@@ -152,8 +164,8 @@ describe("useApproval — Copilot HIGH #2 re-entrancy", () => {
     });
 
     await act(async () => {
-      drainAll();
-      await bulk;
+      drainOne();
+      await second;
     });
   });
 });
