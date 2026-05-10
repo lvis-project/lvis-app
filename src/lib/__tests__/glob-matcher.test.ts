@@ -20,6 +20,6 @@ describe("glob-matcher", () => {
   });
 
   it("supports explicit case-insensitive matching for sensitive path policy", () => {
-    expect(globMatch("/Users/me/.SSH/id_rsa", "**/.ssh/*", { caseInsensitive: true })).toBe(true);
+    expect(globMatch("/Users/me/.SSH/id_rsa", "**/.ssh/**", { caseInsensitive: true })).toBe(true);
   });
 });

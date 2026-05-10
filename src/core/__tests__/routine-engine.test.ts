@@ -29,7 +29,12 @@ describe("RoutineEngine.runRoutine", () => {
     expect(result.routineId).toBe("schedule-daily");
     expect(result.trigger).toBe("schedule");
     expect(typeof result.generatedAt).toBe("string");
-    expect(loop.runTurn).toHaveBeenCalledWith("오늘 하루 알려줘.", undefined, undefined);
+    expect(loop.runTurn).toHaveBeenCalledWith(
+      "오늘 하루 알려줘.",
+      undefined,
+      undefined,
+      { inputOrigin: "plugin-emitted" },
+    );
   });
 
   it("uses <summary> tag content as summary", async () => {

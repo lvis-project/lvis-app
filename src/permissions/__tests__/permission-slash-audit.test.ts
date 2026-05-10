@@ -167,6 +167,20 @@ describe("parsePermissionRulesCommand", () => {
   it("parses 'list'", () => {
     expect(parsePermissionRulesCommand("list")).toEqual({ verb: "rules", sub: "list" });
   });
+  it("parses add/remove rule commands", () => {
+    expect(parsePermissionRulesCommand("add allow bash:*")).toEqual({
+      verb: "rules",
+      sub: "add",
+      action: "allow",
+      pattern: "bash:*",
+    });
+    expect(parsePermissionRulesCommand("remove deny mcp_*")).toEqual({
+      verb: "rules",
+      sub: "remove",
+      action: "deny",
+      pattern: "mcp_*",
+    });
+  });
   it("rejects extra args", () => {
     expect(parsePermissionRulesCommand("list foo")).toMatchObject({ ok: false });
   });
@@ -328,6 +342,15 @@ describe("dispatchPermissionSlash — subcommand routing", () => {
   it("routes 'rules list' with needsModal=false", () => {
     const result = dispatchPermissionSlash("/permission rules list", "user-keyboard");
     expect(result).toMatchObject({ kind: "rules", needsModal: false });
+  });
+
+  it("routes 'rules add' through the same slash origin gate", () => {
+    const result = dispatchPermissionSlash("/permission rules add allow bash:*", "user-keyboard");
+    expect(result).toMatchObject({
+      kind: "rules",
+      needsModal: false,
+      cmd: { sub: "add", action: "allow", pattern: "bash:*" },
+    });
   });
 
   it("rejects unknown subcommand with parse-error", () => {

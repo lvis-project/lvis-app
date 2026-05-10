@@ -215,14 +215,9 @@ export interface PluginManifest {
     {
       description: string;
       /**
-       * Permission policy 5-axis permission category used by the host executor. Omitted
-       * categories are treated as "write" at registration time so plugin
-       * tools fail closed until authors declare read-only intent explicitly.
-       *
-       * - read    조회/검색
-       * - write   상태 변경
-       * - shell   셸 명령 (호스트 AST 검사 대상)
-       * - network 외부 네트워크 호출 (호스트 endpoint surface 표시)
+       * Future SDK manifest authority category. The current SDK schema does
+       * not define this field, so production plugin manifests cannot rely on
+       * it yet; host policy treats plugin tools as mutating by default.
        */
       category?: "read" | "write" | "shell" | "network";
       /**
@@ -237,16 +232,8 @@ export interface PluginManifest {
       /** §6.4 — name of the replacement tool (transparent redirect). */
       replacedBy?: string;
       /**
-       * Permission policy P2.5 advisory — ordered list of input-schema property names
-       * that contain filesystem path strings. The host executor uses
-       * this hint at call-time to extract path-typed inputs for the
-       * Layer 0 (sensitive-paths) and Layer 1 (allowed-directories)
-       * checks instead of scanning every string field.
-       *
-       * Plugin tools without declared path fields are treated as
-       * pathless by policy. Builtin tools own their own path extraction.
-       *
-       * Example: `"pathFields": ["targetPath", "outputDir"]`.
+       * Future SDK manifest path-field hint. Current SDK schema does not
+       * define this field; native tools use `Tool.pathFields` directly.
        */
       pathFields?: string[];
       inputSchema: {

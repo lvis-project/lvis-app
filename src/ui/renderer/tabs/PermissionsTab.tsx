@@ -24,6 +24,7 @@ export function PermissionsTab() {
 
   // ── Section A: Execution Mode ─────────────────────
   const [mode, setMode] = useState<ExecMode>("default");
+  const [modeBusy, setModeBusy] = useState(false);
 
   // ── Section B: Explicit Approval Policy ──────────
   const [requireExplicit, setRequireExplicit] = useState(true);
@@ -41,6 +42,10 @@ export function PermissionsTab() {
   const [directories, setDirectories] = useState<string[]>([]);
   const [newDirectory, setNewDirectory] = useState("");
   const [dirsBusy, setDirsBusy] = useState(false);
+  const [pendingDirectoryWarning, setPendingDirectoryWarning] = useState<{
+    path: string;
+    warnings: string[];
+  } | null>(null);
   const [quarantinedHooks, setQuarantinedHooks] = useState<HookTrustRow[]>([]);
 
   // ── 초기 fetch (탭 진입 시) ───────────────────────
@@ -74,8 +79,20 @@ export function PermissionsTab() {
 
   // ── Section A handler ─────────────────────────────
   const handleModeChange = async (m: ExecMode) => {
-    setMode(m);
-    await window.lvis.permission.setMode(m);
+    if (m === mode || modeBusy) return;
+    setModeBusy(true);
+    try {
+      const res = await window.lvis.permission.setMode(m);
+      if (res.ok) {
+        setMode(res.mode as ExecMode);
+      } else {
+        showBanner("error", res.message ?? res.error ?? "실행 모드 변경에 실패했습니다.");
+      }
+    } catch (e) {
+      showBanner("error", `실행 모드 변경 중 오류: ${(e as Error).message}`);
+    } finally {
+      setModeBusy(false);
+    }
   };
 
   // ── Section B handler ─────────────────────────────
@@ -145,22 +162,39 @@ export function PermissionsTab() {
     }
   };
 
-  const handleAddDirectory = async () => {
+  const handleAddDirectory = async (acknowledgeWarnings = false) => {
     const dir = newDirectory.trim();
     if (!dir) return;
     setDirsBusy(true);
     try {
-      const res = await window.lvis.permission.dirDispatch(`allow ${formatPermissionDirArg(dir)}`);
+      const command = acknowledgeWarnings
+        ? `allow --ack-warnings ${formatPermissionDirArg(dir)}`
+        : `allow ${formatPermissionDirArg(dir)}`;
+      const res = await window.lvis.permission.dirDispatch(command);
       if (res.ok && res.verb === "allow") {
         setNewDirectory("");
+        setPendingDirectoryWarning(null);
         setDirectories(res.persisted);
         if (res.warnings.length > 0) {
           showBanner("warn", res.warnings.join(" "));
         }
       } else if (!res.ok) {
-        showBanner("error", res.error);
+        const failed = res as {
+          ok: false;
+          error: string;
+          warnings?: string[];
+          requiresAcknowledgement?: boolean;
+        };
+        if (failed.requiresAcknowledgement && failed.warnings?.length) {
+          setPendingDirectoryWarning({ path: dir, warnings: failed.warnings });
+          showBanner("warn", "디렉터리 경고를 확인한 뒤 다시 승인해야 저장됩니다.");
+        } else {
+          setPendingDirectoryWarning(null);
+          showBanner("error", failed.error);
+        }
       }
     } catch (e) {
+      setPendingDirectoryWarning(null);
       showBanner("error", `디렉터리 추가 중 오류: ${(e as Error).message}`);
     } finally {
       setDirsBusy(false);
@@ -254,6 +288,7 @@ export function PermissionsTab() {
               <button
                 key={opt.value}
                 className={`flex w-full items-start gap-2.5 rounded-md border px-3 py-2 text-left text-sm transition-colors ${mode === opt.value ? "border-primary bg-primary/10" : "border-muted hover:border-muted-foreground/40"}`}
+                disabled={modeBusy}
                 onClick={() => void handleModeChange(opt.value)}
               >
                 <span className={`mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full border-2 ${mode === opt.value ? "border-primary" : "border-muted-foreground"}`}>
@@ -430,13 +465,49 @@ export function PermissionsTab() {
               className="h-8 flex-1 text-xs"
               placeholder="경로 (예: ~/Documents/project)"
               value={newDirectory}
-              onChange={(e) => setNewDirectory(e.target.value)}
+              onChange={(e) => {
+                setNewDirectory(e.target.value);
+                setPendingDirectoryWarning(null);
+              }}
               onKeyDown={(e) => { if (e.key === "Enter" && newDirectory.trim()) void handleAddDirectory(); }}
             />
             <Button size="sm" className="h-8" onClick={() => void handleAddDirectory()} disabled={dirsBusy || !newDirectory.trim()}>
               추가
             </Button>
           </div>
+
+          {pendingDirectoryWarning && pendingDirectoryWarning.path === newDirectory.trim() && (
+            <div
+              data-testid="directory-warning-confirmation"
+              className="rounded-md border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-[12px] text-yellow-700 dark:text-yellow-300"
+            >
+              <p className="font-medium">경고 확인 필요</p>
+              <ul className="mt-1 list-disc space-y-1 pl-4">
+                {pendingDirectoryWarning.warnings.map((warning) => (
+                  <li key={warning}>{warning}</li>
+                ))}
+              </ul>
+              <div className="mt-2 flex gap-2">
+                <Button
+                  size="sm"
+                  className="h-7 px-2 text-[11px]"
+                  onClick={() => void handleAddDirectory(true)}
+                  disabled={dirsBusy}
+                >
+                  경고 확인 후 추가
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 px-2 text-[11px]"
+                  onClick={() => setPendingDirectoryWarning(null)}
+                  disabled={dirsBusy}
+                >
+                  취소
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
 
         <Separator />

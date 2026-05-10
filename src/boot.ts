@@ -144,9 +144,16 @@ export async function bootstrap(
 
   // Sprint 1-A A3 — shared AuditLogger instance (plugin runtime + hooks + gate).
   const { AuditLogger } = await import("./audit/audit-logger.js");
-  const { FileSecretStore, ensureAuditSecret } = await import("./audit/hmac-chain.js");
+  const { safeStorage } = await import("electron");
+  const {
+    FileSecretStore,
+    SafeStorageSecretStore,
+    ensureAuditSecret,
+  } = await import("./audit/hmac-chain.js");
   const bootAuditLogger = new AuditLogger();
-  const permissionAuditSecretStore = new FileSecretStore();
+  const permissionAuditSecretStore = safeStorage.isEncryptionAvailable()
+    ? new SafeStorageSecretStore(safeStorage)
+    : new FileSecretStore();
   bootAuditLogger.setupPermissionAuditChain(
     ensureAuditSecret(permissionAuditSecretStore),
     permissionAuditSecretStore,
@@ -337,25 +344,29 @@ export async function bootstrap(
   // For mode=llm, build an adapter over the host's existing
   // VercelUnifiedProvider streaming surface — the reviewer needs only a
   // one-shot complete() call shape.
-  wireReviewerAgent({
-    permissionManager,
-    streamProviderFor: (vendor: string): LLMProvider | null => {
-      // Reviewer settings vendor name → LLMVendor:
-      //   "openai"    → "openai"
-      //   "anthropic" → "claude"
-      //   "google"    → "gemini"
-      const vendorMap: Record<string, LLMVendor> = {
-        openai: "openai",
-        anthropic: "claude",
-        google: "gemini",
-      };
-      const llmVendor = vendorMap[vendor];
-      if (!llmVendor) return null;
-      const apiKey = settingsService.getSecret(secretKeyFor(llmVendor));
-      if (!apiKey) return null;
-      return createProvider({ vendor: llmVendor, apiKey });
-    },
-  });
+  const reviewerStreamProviderFor = (vendor: string): LLMProvider | null => {
+    // Reviewer settings vendor name → LLMVendor:
+    //   "openai"    → "openai"
+    //   "anthropic" → "claude"
+    //   "google"    → "gemini"
+    const vendorMap: Record<string, LLMVendor> = {
+      openai: "openai",
+      anthropic: "claude",
+      google: "gemini",
+    };
+    const llmVendor = vendorMap[vendor];
+    if (!llmVendor) return null;
+    const apiKey = settingsService.getSecret(secretKeyFor(llmVendor));
+    if (!apiKey) return null;
+    return createProvider({ vendor: llmVendor, apiKey });
+  };
+  const rewireReviewerAgent = (): void => {
+    wireReviewerAgent({
+      permissionManager,
+      streamProviderFor: reviewerStreamProviderFor,
+    });
+  };
+  rewireReviewerAgent();
 
   // Permission policy P4 §3.5 — manifest integrity proxy. Subscribes the audit
   // logger so every read→write violation lands in `~/.lvis/audit/` +
@@ -456,6 +467,7 @@ export async function bootstrap(
     skillOverlay,
     notificationService,
     auditLogger: bootAuditLogger,
+    rewireReviewerAgent,
   });
 
   // Late-binding 주입 — ConversationLoop 생성 직후.
@@ -482,6 +494,7 @@ export async function bootstrap(
       scriptHookManager,
       auditLogger: bootAuditLogger,
       getAdditionalDirectories: () => readPermissionSettings().permissions.additionalDirectories,
+      rewireReviewerAgent,
     },
     toolRegistry,
   });
@@ -654,10 +667,7 @@ export async function bootstrap(
     });
   })();
 
-  // Backlog #3: surface degraded-validator state at boot-ready so it's
-  // prominent in the operator log alongside the tool/plugin/mcp counts.
-  const validationStatus = pluginRuntime.isValidatorDegraded() ? " validation:degraded" : "";
-  log.info("boot: ready (%d tools, %d plugins, %d mcp%s)", toolRegistry.size, pluginRuntime.listPluginIds().length, mcpManager.listServers().filter(s => s.status === "connected").length, validationStatus);
+  log.info("boot: ready (%d tools, %d plugins, %d mcp)", toolRegistry.size, pluginRuntime.listPluginIds().length, mcpManager.listServers().filter(s => s.status === "connected").length);
 
   // Watcher telemetry consumer — ms-graph (v0.1.27+) 가 발행하는
   // `email.watcher.poll.completed` 이벤트를 ~/.lvis/logs/watcher-poll.jsonl
@@ -701,7 +711,7 @@ export async function bootstrap(
     memoryManager, keywordEngine, routeEngine, toolRegistry,
     systemPromptBuilder, conversationLoop, routineEngine, mcpManager, mcpArtifactStore,
     idleScheduler, bashAstValidator, auditService, auditLogger: bootAuditLogger, postTurnHookChain,
-    approvalGate, knowledgeAvailable, starredStore, feedbackStore,
+    approvalGate, rewireReviewerAgent, knowledgeAvailable, starredStore, feedbackStore,
     routinesStore, routinesScheduler, routineSessionStore, sessionTodoStore, askUserQuestionGate, skillStore,
     notificationService,
     scriptHookManager,

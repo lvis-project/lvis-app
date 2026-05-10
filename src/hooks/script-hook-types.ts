@@ -37,6 +37,7 @@
  *     lands; until then `modify` is an attack vector).
  */
 import type { ToolCategory, ToolSource } from "../tools/types.js";
+import type { ChatInputOrigin } from "../shared/chat-origin.js";
 
 /**
  * Trust-origin propagated from upstream into hook stdin. Mirrors the
@@ -44,12 +45,7 @@ import type { ToolCategory, ToolSource } from "../tools/types.js";
  * boundary survives JSON round-trip and forward-compatibility doesn't
  * break old hooks if we add a 5th origin.
  */
-export type HookTrustOrigin =
-  | "user-keyboard"
-  | "plugin-emitted"
-  | "llm-tool-arg"
-  | "file-content"
-  | "unknown";
+export type HookTrustOrigin = ChatInputOrigin | "unknown";
 
 /**
  * v1 hook types. Three discrete prefixes; spec §3 §6 talks of more

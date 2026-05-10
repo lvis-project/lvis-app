@@ -6,11 +6,11 @@
  * use `pwsh`. Missing executables are reported as tool errors.
  */
 import { spawn, type ChildProcessByStdio } from "node:child_process";
+import { createHash } from "node:crypto";
 import { isAbsolute, resolve as pathResolve } from "node:path";
 import type { Readable } from "node:stream";
 import { z } from "zod";
 
-import { validateSandboxPath } from "../sandbox/path-validator.js";
 import {
   ZodTool,
   type ToolCategory,
@@ -18,6 +18,10 @@ import {
   type ToolResult,
 } from "./base.js";
 import { buildSafeChildEnv } from "./safe-env.js";
+import {
+  validateShellCommandPathPolicy,
+  validateShellWorkingDirectory,
+} from "./shell-path-policy.js";
 
 type PipedChild = ChildProcessByStdio<null, Readable, Readable>;
 type PowerShellParser = (command: string) => Promise<PowerShellAstSummary>;
@@ -36,6 +40,8 @@ const BLOCKED_COMMANDS = new Map<string, string>([
   ["iex", "Invoke-Expression is not allowed"],
   ["set-executionpolicy", "execution policy changes are not allowed"],
   ["start-process", "process detachment is not allowed"],
+  ["saps", "process detachment is not allowed"],
+  ["start", "process detachment is not allowed"],
   ["read-host", "interactive prompts are not allowed"],
   ["pause", "interactive prompts are not allowed"],
   ["set-alias", "alias mutation is not allowed"],
@@ -43,7 +49,8 @@ const BLOCKED_COMMANDS = new Map<string, string>([
 ]);
 
 const ENCODED_COMMAND_FLAGS = new Set(["-encodedcommand", "-enc"]);
-const RECURSE_FLAGS = new Set(["-recurse", "-r"]);
+const REMOVE_ITEM_COMMANDS = new Set(["remove-item", "rm", "del", "erase", "rd", "rmdir", "ri"]);
+const RECURSE_FLAGS = new Set(["-recurse", "-r", "-rec"]);
 const FORCE_FLAGS = new Set(["-force", "-fo"]);
 
 export interface PowerShellAstCommand {
@@ -67,6 +74,13 @@ export class PowerShellTool extends ZodTool<typeof PowerShellToolInputSchema> {
     return false;
   }
 
+  approvalCacheKey(input: unknown): string {
+    const parsed = PowerShellToolInputSchema.parse(input);
+    return createHash("sha256")
+      .update(JSON.stringify({ command: parsed.command, cwd: parsed.cwd ?? null }))
+      .digest("hex");
+  }
+
   protected async executeTyped(
     input: z.infer<typeof PowerShellToolInputSchema>,
     ctx: ToolExecutionContext,
@@ -76,11 +90,18 @@ export class PowerShellTool extends ZodTool<typeof PowerShellToolInputSchema> {
         ? pathResolve(input.cwd)
         : pathResolve(ctx.cwd, input.cwd)
       : ctx.cwd;
-    if (input.cwd) {
-      const check = validateSandboxPath(resolvedCwd, ctx.cwd, [...ctx.allowedDirectories]);
-      if (!check.allowed) {
-        return { output: `Sandbox: ${check.reason}`, isError: true };
-      }
+    const cwdViolation = validateShellWorkingDirectory(resolvedCwd, ctx.cwd, ctx.allowedDirectories);
+    if (cwdViolation) {
+      return { output: cwdViolation, isError: true };
+    }
+    const commandPathViolation = validateShellCommandPathPolicy(
+      input.command,
+      resolvedCwd,
+      ctx.cwd,
+      ctx.allowedDirectories,
+    );
+    if (commandPathViolation) {
+      return { output: commandPathViolation, isError: true };
     }
 
     const preflightError = await validatePowerShellCommand(input.command);
@@ -117,15 +138,24 @@ export function validatePowerShellAst(ast: PowerShellAstSummary): string | null 
     if (elements.some((element) => ENCODED_COMMAND_FLAGS.has(element))) {
       return "encoded commands are not allowed";
     }
-    if (
-      name === "remove-item" &&
-      elements.some((element) => RECURSE_FLAGS.has(element)) &&
-      elements.some((element) => FORCE_FLAGS.has(element))
-    ) {
+    if (REMOVE_ITEM_COMMANDS.has(name) && hasRecursiveForcedDeletion(elements)) {
       return "recursive forced deletion is not allowed";
     }
   }
   return null;
+}
+
+function hasRecursiveForcedDeletion(elements: string[]): boolean {
+  return (
+    elements.some((element) => isSwitchEnabled(element, RECURSE_FLAGS)) &&
+    elements.some((element) => isSwitchEnabled(element, FORCE_FLAGS))
+  );
+}
+
+function isSwitchEnabled(element: string, switches: ReadonlySet<string>): boolean {
+  const [name, value] = element.split(":", 2);
+  if (!switches.has(name)) return false;
+  return value === undefined || value === "" || value === "true" || value === "$true";
 }
 
 function resolvePowerShellExecutable(): string {

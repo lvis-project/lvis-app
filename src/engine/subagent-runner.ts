@@ -206,6 +206,7 @@ export class SubAgentRunner {
           maxRounds: cappedTurns,
           sessionIdOverride: childSessionId,
           spawnDepth: 1,
+          inputOrigin: "llm-tool-arg",
         },
       );
       totalToolCalls = result.toolCalls.length;

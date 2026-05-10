@@ -558,7 +558,10 @@ export interface HookTrustRow {
 
 export type LvisPermissionApi = {
   getMode: () => Promise<{ mode: string }>;
-  setMode: (mode: string) => Promise<{ ok: boolean; mode: string }>;
+  setMode: (mode: string) => Promise<
+    | { ok: true; mode: string }
+    | { ok: false; error: string; message?: string }
+  >;
   listRules: () => Promise<PermissionRule[]>;
   addRule: (pattern: string, action: "allow" | "deny") => Promise<AddRuleResult>;
   removeRule: (pattern: string, action: "allow" | "deny") => Promise<RemoveRuleResult>;

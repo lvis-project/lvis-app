@@ -138,8 +138,8 @@ export class AuditLogger {
   /** Permission policy — secret store for daily seals. Wired alongside `setupPermissionAuditChain`. */
   private permissionAuditSealStore: SecretStore | null = null;
 
-  constructor() {
-    this.auditDir = join(homedir(), ".lvis", "audit");
+  constructor(auditDirOverride?: string) {
+    this.auditDir = auditDirOverride ?? join(homedir(), ".lvis", "audit");
     if (!existsSync(this.auditDir)) {
       mkdirSync(this.auditDir, { recursive: true, mode: 0o700 });
     }
@@ -200,6 +200,23 @@ export class AuditLogger {
   /** Permission policy — was setupPermissionAuditChain called? */
   isPermissionAuditChainReady(): boolean {
     return this.permissionAuditChainBootstrapped && this.permissionAuditSecret !== null;
+  }
+
+  /**
+   * Permission policy — preflight used before mutating tool execution.
+   * Verifies the HMAC chain is initialized and the active audit file can
+   * be opened for append before side effects run.
+   */
+  assertPermissionAuditWritable(): void {
+    if (!this.isPermissionAuditChainReady()) {
+      throw new Error("permission audit chain not initialized");
+    }
+    const fd = openSync(this.permissionAuditLogFile, "a", 0o600);
+    try {
+      chmodSync(this.permissionAuditLogFile, 0o600);
+    } finally {
+      closeSync(fd);
+    }
   }
 
   /** Permission policy — accessor for the wired HMAC secret. Null when not bootstrapped. */

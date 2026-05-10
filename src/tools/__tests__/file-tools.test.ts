@@ -7,7 +7,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { ToolRegistry } from "../registry.js";
@@ -110,6 +110,59 @@ describe("file native tools", () => {
     expect(matches.map((m) => m.text)).toEqual(["needle one", "needle two"]);
   });
 
+  it("write-capable file tools scope approval cache keys to canonical paths", () => {
+    expect(new WriteFileTool().approvalCacheKey({ path: "src/a.ts" }, { cwd: workDir })).toBe(
+      `path:${join(workDir, "src", "a.ts")}`,
+    );
+    expect(new EditFileTool().approvalCacheKey({ path: "~/notes.md" }, { cwd: workDir })).toBe(
+      `path:${join(homedir(), "notes.md")}`,
+    );
+    expect(new ApplyPatchTool().approvalCacheKey({ path: "README.md" }, { cwd: workDir })).toBe(
+      `path:${join(workDir, "README.md")}`,
+    );
+    expect(new DeleteFileTool().approvalCacheKey({ path: "README.md" }, { cwd: workDir })).toBe(
+      `path:${join(workDir, "README.md")}`,
+    );
+    expect(new MoveFileTool().approvalCacheKey(
+      { sourcePath: "README.md", destinationPath: "docs/README.md" },
+      { cwd: workDir },
+    )).toBe(`source:${join(workDir, "README.md")}:destination:${join(workDir, "docs", "README.md")}`);
+  });
+
+  it("glob_files filters before applying the result limit", async () => {
+    for (let i = 0; i < 8; i += 1) {
+      writeFileSync(join(workDir, `aaa-${i}.txt`), "noise\n", "utf8");
+    }
+    writeFileSync(join(workDir, "zzz-target.ts"), "late\n", "utf8");
+
+    const result = await new GlobFilesTool().execute(
+      { path: ".", pattern: "**/*target.ts", limit: 1 },
+      ctx(),
+    );
+
+    expect(result.isError).toBe(false);
+    const body = parse(result.output);
+    expect(body.matches).toEqual([expect.stringContaining("zzz-target.ts")]);
+  });
+
+  it("grep_files scans beyond early non-matching files before applying the match limit", async () => {
+    for (let i = 0; i < 8; i += 1) {
+      writeFileSync(join(workDir, `aaa-${i}.txt`), "noise\n", "utf8");
+    }
+    writeFileSync(join(workDir, "zzz-target.txt"), "needle late\n", "utf8");
+
+    const result = await new GrepFilesTool().execute(
+      { path: ".", pattern: "needle late", limit: 1 },
+      ctx(),
+    );
+
+    expect(result.isError).toBe(false);
+    const body = parse(result.output);
+    const matches = body.matches as Array<{ path: string; line: number; text: string }>;
+    expect(matches).toHaveLength(1);
+    expect(matches[0].path).toContain("zzz-target.txt");
+  });
+
   it("write_file creates parent directories and writes full content", async () => {
     const target = join("generated", "out.txt");
     const result = await new WriteFileTool().execute(
@@ -119,6 +172,18 @@ describe("file native tools", () => {
 
     expect(result.isError).toBe(false);
     expect(readFileSync(join(workDir, target), "utf8")).toBe("created\n");
+  });
+
+  it("write_file uses unique temp files under parallel writes to the same target", async () => {
+    const tool = new WriteFileTool();
+    const [a, b] = await Promise.all([
+      tool.execute({ path: "generated/race.txt", content: "one\n" }, ctx()),
+      tool.execute({ path: "generated/race.txt", content: "two\n" }, ctx()),
+    ]);
+
+    expect(a.isError).toBe(false);
+    expect(b.isError).toBe(false);
+    expect(["one\n", "two\n"]).toContain(readFileSync(join(workDir, "generated", "race.txt"), "utf8"));
   });
 
   it("edit_file replaces a single exact match", async () => {

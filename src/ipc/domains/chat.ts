@@ -6,6 +6,7 @@
  */
 import { ipcMain } from "electron";
 import type { WebContents } from "electron";
+import type { ChatInputOrigin } from "../../shared/chat-origin.js";
 import { redactForLLM } from "../../audit/dlp-filter.js";
 import type { GenericMessage } from "../../engine/llm/types.js";
 import { userContentText } from "../../engine/llm/types.js";
@@ -116,10 +117,11 @@ async function runStreamedTurn(
   webContents: WebContents | undefined,
   channel: string,
   streamId: number,
-  options?: {
+  options: {
     shouldSuppressInterruptedTail?: () => boolean;
     clearInterruptedTailSuppression?: () => void;
     attachments?: import("../../engine/llm/types.js").UserContentPart[];
+    inputOrigin: ChatInputOrigin;
   },
 ): Promise<TurnResult> {
   const send = (payload: unknown) => webContents?.send(channel, { streamId, ...((payload as Record<string, unknown>) ?? {}) });
@@ -129,7 +131,7 @@ async function runStreamedTurn(
     {
       onReasoningDelta: (text) => send({ type: "reasoning_delta", text }),
       onTextDelta: (text) => {
-        if (options?.shouldSuppressInterruptedTail?.() && text === "\n\n[중단됨]") return;
+        if (options.shouldSuppressInterruptedTail?.() && text === "\n\n[중단됨]") return;
         send({ type: "text_delta", text });
       },
       onAssistantRound: ({ roundIndex, text, thought, stopReason, hasToolCalls }) =>
@@ -166,12 +168,13 @@ async function runStreamedTurn(
     undefined,
     {
       ...(originSource ? { originSource } : {}),
-      ...(options?.attachments && options.attachments.length > 0
+      ...(options.attachments && options.attachments.length > 0
         ? { attachments: options.attachments }
         : {}),
+      inputOrigin: options.inputOrigin,
     },
   );
-  if (options?.shouldSuppressInterruptedTail?.() && result.stopReason === "interrupted") {
+  if (options.shouldSuppressInterruptedTail?.() && result.stopReason === "interrupted") {
     options.clearInterruptedTailSuppression?.();
     return result;
   }
@@ -209,6 +212,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
     clearInterruptedTailSuppression: () => {
       suppressInterruptedTail = false;
     },
+    inputOrigin: "user-keyboard" as const,
   };
   const allocateStreamId = () => ++nextStreamId;
   const sanitizeOutgoingInput = (input: string, webContents: WebContents | undefined) => {
@@ -265,6 +269,9 @@ ${input}`;
     // sees garbage.
     const validated = validateUserContentParts(attachments);
     const win = getMainWindow();
+    const inputOrigin: ChatInputOrigin = parseImportedTriggerEnvelope(input)
+      ? "plugin-emitted"
+      : "user-keyboard";
     const effective = sanitizeOutgoingInput(input, win?.webContents);
     const streamId = allocateStreamId();
     return trackStreamTurn(() => runStreamedTurn(
@@ -273,7 +280,7 @@ ${input}`;
       win?.webContents,
       "lvis:chat:stream",
       streamId,
-      { ...streamTurnOptions, attachments: validated },
+      { ...streamTurnOptions, attachments: validated, inputOrigin },
     ));
   });
 
