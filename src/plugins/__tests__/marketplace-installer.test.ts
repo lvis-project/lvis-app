@@ -717,6 +717,47 @@ describe("installFromMarketplace — onProgress callback", () => {
   });
 });
 
+describe("installFromMarketplace — artifact cache invalidation", () => {
+  it("ignores a same-version cached tarball when catalog artifact sha changed", async () => {
+    const originalCacheFlag = process.env.LVIS_MARKETPLACE_USE_CACHE;
+    process.env.LVIS_MARKETPLACE_USE_CACHE = "true";
+    const staleTarball = Buffer.from("stale-same-version-bytes");
+    const freshTarball = Buffer.from("fresh-same-version-bytes");
+    const { privateKey, pubBuf } = freshEd25519();
+    const staleEnvelope = makeEnvelope(staleTarball, [{ key_id: "prod-v1", privateKey }]);
+    const freshEnvelope = makeEnvelope(freshTarball, [{ key_id: "prod-v1", privateKey }]);
+    const freshSha = createHash("sha256").update(freshTarball).digest("hex");
+    const root = tmpDownloadRoot();
+    const cacheBase = join(root, "offline-cache");
+    try {
+      const staleHttp = fakeHttp(staleTarball, staleEnvelope);
+      await installFromMarketplace("acme-notes", "1.0.0", {
+        http: staleHttp,
+        publicKeys: { "prod-v1": pubBuf },
+        downloadRoot: root,
+        cacheBase,
+      });
+      expect(staleHttp.downloadCalls).toBe(1);
+
+      const freshHttp = fakeHttp(freshTarball, freshEnvelope);
+      const out = await installFromMarketplace("acme-notes", "1.0.0", {
+        http: freshHttp,
+        publicKeys: { "prod-v1": pubBuf },
+        downloadRoot: root,
+        cacheBase,
+        expectedArtifactSha256: freshSha,
+      });
+
+      expect(freshHttp.downloadCalls).toBe(1);
+      await expect(readFile(out.tarballPath)).resolves.toEqual(freshTarball);
+    } finally {
+      if (originalCacheFlag === undefined) delete process.env.LVIS_MARKETPLACE_USE_CACHE;
+      else process.env.LVIS_MARKETPLACE_USE_CACHE = originalCacheFlag;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("feature flags", () => {
   it("isMarketplaceDirectPreferred defaults to false and respects truthy envs", () => {
     expect(isMarketplaceDirectPreferred({} as NodeJS.ProcessEnv)).toBe(false);

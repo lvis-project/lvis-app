@@ -18,7 +18,13 @@
  * external dependencies.
  */
 import { existsSync, realpathSync } from "node:fs";
-import { resolve as pathResolve, sep } from "node:path";
+import {
+  basename,
+  dirname,
+  join,
+  resolve as pathResolve,
+  sep,
+} from "node:path";
 import { homedir } from "node:os";
 
 export interface SandboxValidationResult {
@@ -32,9 +38,8 @@ export interface SandboxValidationResult {
  * Returns `{ allowed: true, reason: "" }` on success, or
  * `{ allowed: false, reason: <explanation> }` on failure.
  *
- * Non-existent paths are still validated via pure absolute-path
- * resolution (no realpath call) so that "future create" paths can be
- * checked before writing.
+ * Non-existent paths are validated through the nearest existing parent
+ * so future-create paths still inherit symlink boundary checks.
  */
 export function validateSandboxPath(
   path: string,
@@ -66,7 +71,20 @@ function canonicalize(path: string): string {
   if (existsSync(absolute)) {
     return realpathSync(absolute);
   }
-  return absolute;
+
+  const suffix: string[] = [];
+  let cursor = absolute;
+  while (!existsSync(cursor)) {
+    const parent = dirname(cursor);
+    if (parent === cursor) {
+      return absolute;
+    }
+    suffix.unshift(basename(cursor));
+    cursor = parent;
+  }
+
+  const canonicalParent = realpathSync(cursor);
+  return suffix.length > 0 ? join(canonicalParent, ...suffix) : canonicalParent;
 }
 
 function expandTilde(path: string): string {

@@ -13,6 +13,7 @@
 import { Badge } from "../../../components/ui/badge.js";
 import { DEFAULT_APPROVAL_QUEUE_MAX } from "../../../lib/approval-queue-reducer.js";
 import type { ApprovalRequest } from "../types.js";
+import { trustOriginLabel } from "../utils/trust-origin-label.js";
 
 export interface ApprovalQueueStatusProps {
   queue: ApprovalRequest[];
@@ -51,19 +52,29 @@ export function ApprovalQueueStatus({
           Queue full — new approval requests will be rejected.
         </p>
       ) : null}
-      <ul className="max-h-48 space-y-1 overflow-y-auto text-xs">
+      <ul className="max-h-56 space-y-1 overflow-y-auto text-xs">
         {waiting.map((req) => (
           <li
             key={req.id}
             data-testid="approval-queue-item"
-            className="flex items-center justify-between rounded border border-border/50 bg-muted/40 px-2 py-1"
+            className="rounded border border-border/50 bg-muted/40 px-2 py-1"
           >
-            <span className="truncate font-mono">{req.toolName}</span>
-            {req.source ? (
-              <Badge variant="outline" className="ml-2 text-[10px]">
-                {req.source}
-              </Badge>
-            ) : null}
+            <div className="flex items-center justify-between gap-2">
+              <span className="truncate font-mono">{req.toolName}</span>
+              <div className="flex shrink-0 gap-1">
+                {req.source ? (
+                  <Badge variant="outline" className="text-[10px]">
+                    {req.source}
+                  </Badge>
+                ) : null}
+                <Badge variant="outline" className="text-[10px]">
+                  {trustOriginLabel(req.trustOrigin)}
+                </Badge>
+              </div>
+            </div>
+            <p className="mt-1 line-clamp-2 text-[11px] text-muted-foreground">
+              {req.reason}
+            </p>
           </li>
         ))}
       </ul>

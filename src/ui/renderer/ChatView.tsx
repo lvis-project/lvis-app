@@ -22,6 +22,7 @@ import { SessionResumeDivider } from "./components/SessionResumeDivider.js";
 import { SessionTodoPanel } from "./components/SessionTodoPanel.js";
 import { SubAgentCard } from "./components/SubAgentCard.js";
 import { TokenCostBadge } from "./components/TokenCostBadge.js";
+import { PermissionModeBadge } from "./components/permissions/PermissionModeBadge.js";
 import { SkillBadge } from "./components/SkillBadge.js";
 import { WorkGroup } from "./components/WorkGroup.js";
 import { TurnActionBar } from "./components/TurnActionBar.js";
@@ -97,12 +98,12 @@ export interface ChatViewProps {
   installingPlugins?: ReadonlyMap<string, InstallPhase>;
   onOpenMarketplace: () => void;
   marketplaceUrlReady?: boolean;
-  /** Q10 — set of routineIds currently executing (LLM session in-flight) */
+  /** Set of routineIds currently executing (LLM session in-flight). */
   runningRoutines?: Set<string>;
   // PR-2-F-2 정정: fork-based revert (revertSessionId/onRevertCheckpoint) 폐지 — Layer 3
   // same-session checkpoint chain (Copilot 패턴) 으로 대체. sessionId 불변이므로 별도 revert action
   // 불필요 — 사용자가 임의 시점으로 돌아가려면 후속 PR 의 view-mode 지원 필요.
-  /** Q11 — called when user confirms a plugin overlay item; id is the OverlayItem.id */
+  /** Called when user confirms a plugin overlay item; id is the OverlayItem.id. */
   onPluginPrimaryAction?: (overlayItemId: string) => void;
 }
 
@@ -667,11 +668,11 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
       {hasApiKey === false && (
         <div className="absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2">
           <Card className="w-[400px]"><CardHeader className="text-center"><KeyRound className="mx-auto mb-2 h-10 w-10 text-muted-foreground" /><CardTitle>API 키 설정 필요</CardTitle><CardDescription>채팅을 시작하려면 Claude API 키를 설정해 주세요.</CardDescription></CardHeader>
-            <CardContent className="flex justify-center"><Button onClick={onOpenSettings}><KeyRound className="mr-2 h-4 w-4" />설정 열기</Button></CardContent>
+            <CardContent className="flex justify-center"><Button onClick={() => onOpenSettings()}><KeyRound className="mr-2 h-4 w-4" />설정 열기</Button></CardContent>
           </Card>
         </div>
       )}
-      {/* Q10/Q11 — Routine fire + plugin (insertion-type) overlay. Q9 policy: routine items isolated from chat history. Plugin items insert via imported_trigger on confirm. */}
+      {/* Routine fire + plugin overlay. Routine items stay isolated from chat history; plugin items insert via imported_trigger on confirm. */}
       <OverlayCardRegion onPluginPrimaryAction={onPluginPrimaryAction ?? (() => {})} />
       <div className="relative min-h-0 min-w-0 max-w-full flex-1 overflow-hidden">
       {/* §PR-5: View-Mode banner — sticky at the top of the chat scroll area */}
@@ -1202,7 +1203,12 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           to the count so the user always sees what step is running. */}
       <div className="relative z-30 w-full max-w-full min-w-0 overflow-visible bg-background">
         <div className="w-full max-w-full min-w-0 px-3">
-          <SessionTodoPanel api={workflowApi} sessionId={currentSessionId} />
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              <SessionTodoPanel api={workflowApi} sessionId={currentSessionId} />
+            </div>
+            <PermissionModeBadge onClick={() => onOpenSettings("permissions")} />
+          </div>
         </div>
         <div className="w-full max-w-full min-w-0 overflow-x-hidden pb-1 space-y-2">
           <InputActionBar

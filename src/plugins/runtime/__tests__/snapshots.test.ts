@@ -2,11 +2,18 @@
  * Tests for readEnabledManifestSnapshots — edge cases.
  */
 
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readEnabledManifestSnapshots, resolveManifestLoadPlan } from "../snapshots.js";
+import { buildManifestValidator } from "../manifest-validation.js";
+
+let validator: Awaited<ReturnType<typeof buildManifestValidator>>;
+
+beforeAll(async () => {
+  validator = await buildManifestValidator();
+});
 
 const VALID_MANIFEST = {
   id: "com.test.snap",
@@ -26,13 +33,13 @@ describe("readEnabledManifestSnapshots", () => {
   it("returns empty map when all plans are disabled", async () => {
     const result = await readEnabledManifestSnapshots(
       [{ manifestPath: "/nonexistent/plugin.json", enabled: false }],
-      null,
+      validator,
     );
     expect(result.size).toBe(0);
   });
 
   it("returns empty map for empty plan", async () => {
-    const result = await readEnabledManifestSnapshots([], null);
+    const result = await readEnabledManifestSnapshots([], validator);
     expect(result.size).toBe(0);
   });
 
@@ -44,7 +51,7 @@ describe("readEnabledManifestSnapshots", () => {
 
       const result = await readEnabledManifestSnapshots(
         [{ manifestPath, enabled: true, pluginIdHint: "override-id" }],
-        null,
+        validator,
       );
       expect(result.has("override-id")).toBe(true);
       expect(result.get("override-id")?.manifest.id).toBe("com.test.snap");
@@ -61,7 +68,7 @@ describe("readEnabledManifestSnapshots", () => {
 
       const result = await readEnabledManifestSnapshots(
         [{ manifestPath, enabled: true }],
-        null,
+        validator,
       );
       expect(result.has("com.test.snap")).toBe(true);
     } finally {
@@ -82,7 +89,7 @@ describe("readEnabledManifestSnapshots", () => {
           { manifestPath: badPath, enabled: true, pluginIdHint: "bad-plugin" },
           { manifestPath: goodPath, enabled: true, pluginIdHint: "good-plugin" },
         ],
-        null,
+        validator,
       );
       expect(result.has("bad-plugin")).toBe(false);
       expect(result.has("good-plugin")).toBe(true);
@@ -94,7 +101,7 @@ describe("readEnabledManifestSnapshots", () => {
   it("skips missing manifest files with a warning", async () => {
     const result = await readEnabledManifestSnapshots(
       [{ manifestPath: "/tmp/does-not-exist/plugin.json", enabled: true, pluginIdHint: "missing" }],
-      null,
+      validator,
     );
     expect(result.has("missing")).toBe(false);
   });
@@ -108,7 +115,7 @@ describe("readEnabledManifestSnapshots", () => {
 
       const result = await readEnabledManifestSnapshots(
         [{ manifestPath, enabled: true, approvedPluginAccess: access as never }],
-        null,
+        validator,
       );
       const snap = result.get("com.test.snap");
       expect(snap?.approvedPluginAccess).toEqual(access);

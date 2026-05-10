@@ -106,11 +106,32 @@ describe("validateSandboxPath", () => {
     expect(result.reason).toContain("outside the sandbox boundary");
   });
 
-  it("validates a non-existent path via absolute resolution (no realpath)", () => {
+  it("validates a non-existent path via nearest existing parent realpath", () => {
     // Path does not exist, but the absolute-path form is inside cwd → allowed.
     const phantom = join(sandboxCwd, "does-not-exist-yet", "file.txt");
     const result = validateSandboxPath(phantom, sandboxCwd);
     expect(result.allowed).toBe(true);
+  });
+
+  it("allows a non-existent path when cwd is reached through a symlink alias", () => {
+    const alias = join(outsideDir, "sandbox-alias");
+    symlinkSync(sandboxCwd, alias, "dir");
+
+    const phantom = join(alias, "generated", "file.txt");
+    const result = validateSandboxPath(phantom, alias);
+    expect(result.allowed).toBe(true);
+  });
+
+  it("blocks a non-existent path under an escaping symlink directory", () => {
+    const outsideTarget = join(outsideDir, "target-dir");
+    mkdirSync(outsideTarget);
+    const symlinkInside = join(sandboxCwd, "escape-dir");
+    symlinkSync(outsideTarget, symlinkInside, "dir");
+
+    const phantom = join(symlinkInside, "future.txt");
+    const result = validateSandboxPath(phantom, sandboxCwd);
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toContain("outside the sandbox boundary");
   });
 
   it("denies a non-existent path that resolves outside cwd", () => {

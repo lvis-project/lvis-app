@@ -67,9 +67,9 @@ describe("Chat stream sequencing (Phase 3.2 regression net)", () => {
       });
     });
     // Single tool renders inline with display name (no group header).
-    // "문서 검색" = display name for knowledge_search.
+    // Unknown plugin tool names are rendered generically.
     await waitFor(() => {
-      expect(container.textContent).toContain("문서 검색");
+      expect(container.textContent).toContain("knowledge search");
     });
   });
 

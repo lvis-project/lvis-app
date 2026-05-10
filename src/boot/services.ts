@@ -3,9 +3,7 @@
  *
  * Instantiates services that have no plugin dependency and must exist
  * before plugin loading (settings, memory, audit, python runtime,
- * keyword/route/tool registry + BashTool).
- *
- * MS Graph 인증은 PR 3 이후 ms-graph 플러그인이 자체 소유 — host 에는 관련 코드 없음.
+ * keyword/route/tool registry + native builtin tools).
  */
 import { app } from "electron";
 import type { BrowserWindow } from "electron";
@@ -15,6 +13,8 @@ import { KeywordEngine } from "../core/keyword-engine.js";
 import { RouteEngine } from "../core/route-engine.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { BashTool } from "../tools/bash.js";
+import { createFileTools } from "../tools/file-tools.js";
+import { PowerShellTool } from "../tools/powershell.js";
 import { BashAstValidator } from "../main/bash-ast-validator.js";
 import { AuditService } from "../main/audit-service.js";
 import { AuditLogger } from "../audit/audit-logger.js";
@@ -81,8 +81,13 @@ export async function bootstrapCoreServices(mainWindow: BrowserWindow): Promise<
   const toolRegistry = new ToolRegistry();
   // Tier A1: BashTool registers directly — it implements the canonical
   // Tool contract via ZodTool and is tagged source="builtin" + category
-  // "dangerous" so the §6.3 permission stack handles approval correctly.
+  // "shell" so the §6.3 permission stack handles approval correctly
+  // (Layer 3 + Bash AST validation gate at executor Step 2.5).
   toolRegistry.register(new BashTool());
+  toolRegistry.register(new PowerShellTool());
+  for (const tool of createFileTools()) {
+    toolRegistry.register(tool);
+  }
   const routeEngine = new RouteEngine({ toolRegistry });
 
   return {

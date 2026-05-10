@@ -3,11 +3,11 @@
  * scheduled time (one-off or repeating). The routine survives app restart
  * (persisted to `~/.lvis/routine/routines.json`) and fires via the RoutinesScheduler.
  *
- * Execution modes (Q2):
+ * Execution modes:
  *   - "llm-session"       → starts a ConversationLoop with prePrompt
  *   - "notification-only" → fires an OS notification
  *
- * 3 input styles (Q4):
+ * 3 input styles:
  *   1. Form:           at + repeat.kind + repeat fields
  *   2. Cron:           repeat.kind="cron" + repeat.expression
  *   3. Natural language: LLM fills the structured fields after parsing user intent
@@ -110,6 +110,22 @@ function parseSchedule(raw: unknown): RoutineSchedule | null {
   };
 }
 
+function parseAllowedPlugins(raw: unknown): string[] | null {
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw)) return null;
+  const ids = raw.map((v) => (typeof v === "string" ? v.trim() : ""));
+  if (ids.some((v) => !v || !/^[a-z0-9][a-z0-9_.-]*$/i.test(v))) return null;
+  return [...new Set(ids)];
+}
+
+export function scheduleRoutineApprovalCacheKey(rawInput: unknown): string {
+  const input = (rawInput ?? {}) as Record<string, unknown>;
+  const allowedPlugins = parseAllowedPlugins(input.allowedPlugins);
+  if (!allowedPlugins) return "scope:invalid";
+  if (allowedPlugins.length === 0) return "scope:deny-all";
+  return `scope:allow:${[...allowedPlugins].sort().join(",")}`;
+}
+
 export function createScheduleRoutineTool(store: RoutinesStore): Tool {
   return createDynamicTool({
     name: "schedule_routine",
@@ -124,6 +140,7 @@ export function createScheduleRoutineTool(store: RoutinesStore): Tool {
       "prePrompt:'오늘의 데일리 리포트 작성'",
     source: "builtin",
     category: "write",
+    approvalCacheKey: scheduleRoutineApprovalCacheKey,
     jsonSchema: {
       type: "object",
       required: ["execution", "schedule"],
@@ -167,6 +184,12 @@ export function createScheduleRoutineTool(store: RoutinesStore): Tool {
         notificationBody: {
           type: "string",
           description: "execution=notification-only 시 알림 본문",
+        },
+        allowedPlugins: {
+          type: "array",
+          description:
+            "execution=llm-session 루틴에서 노출할 플러그인 id 목록. 미지정 또는 []이면 플러그인 도구를 사용하지 않습니다.",
+          items: { type: "string" },
         },
       },
     },
@@ -223,6 +246,20 @@ export function createScheduleRoutineTool(store: RoutinesStore): Tool {
         : undefined;
 
       const title = typeof a.title === "string" ? a.title.trim() : undefined;
+      const allowedPlugins = parseAllowedPlugins(a.allowedPlugins);
+      if (!allowedPlugins) {
+        return {
+          output: JSON.stringify({ error: "allowedPlugins must be an array of valid plugin id strings" }),
+          isError: true,
+        };
+      }
+
+      // Permission policy Layer 4 — translate the LLM-facing `allowedPlugins` field
+      // into the canonical `scope` discriminated union. Missing or []
+      // both mean explicit deny-all; non-empty means explicit allow-list.
+      const pluginIds = allowedPlugins.length === 0
+        ? ({ mode: "deny-all" } as const)
+        : ({ mode: "allow", ids: allowedPlugins } as const);
 
       try {
         const record = await store.add({
@@ -233,6 +270,11 @@ export function createScheduleRoutineTool(store: RoutinesStore): Tool {
           title,
           notificationTitle,
           notificationBody,
+          scope: {
+            pluginIds,
+            forcedPluginIds: [],
+            directories: [],
+          },
         });
         return {
           output: JSON.stringify({ routineId: record.id, schedule: record.schedule }),

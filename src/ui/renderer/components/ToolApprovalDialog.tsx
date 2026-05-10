@@ -11,45 +11,31 @@ import {
 } from "../../../components/ui/dialog.js";
 import { SOURCE_BADGE } from "../constants.js";
 import type { ApprovalChoice, ApprovalRequest } from "../types.js";
+import { isNonUserTrustOrigin, trustOriginLabel } from "../utils/trust-origin-label.js";
 
 export function ToolApprovalDialog({
   open,
   request,
   pendingCount = 1,
   onDecide,
-  onDecideAll,
 }: {
   open: boolean;
   request: ApprovalRequest | null;
   pendingCount?: number;
   onDecide: (choice: ApprovalChoice, pattern?: string) => void;
-  /**
-   * D4 §4.5.3 — bulk approve/deny all pending requests at once.
-   * Only surfaces when pendingCount > 1 (parallel tool execution).
-   */
-  onDecideAll?: (choice: "allow-once" | "deny-once") => void;
 }) {
   const [expanded, setExpanded] = useState(false);
 
   // 키보드 단축키
-  // D4: Shift+A / Shift+D bulk-decide all pending when there are multiple.
   useEffect(() => {
     if (!open || !request) return;
     const handler = (e: KeyboardEvent) => {
       if (e.key.toLowerCase() === "a" && !e.metaKey && !e.ctrlKey) {
         e.preventDefault();
-        if (e.shiftKey && pendingCount > 1 && onDecideAll) {
-          onDecideAll("allow-once");
-        } else {
-          onDecide("allow-once");
-        }
+        onDecide("allow-once");
       } else if (e.key.toLowerCase() === "d" && !e.metaKey && !e.ctrlKey) {
         e.preventDefault();
-        if (e.shiftKey && pendingCount > 1 && onDecideAll) {
-          onDecideAll("deny-once");
-        } else {
-          onDecide("deny-once");
-        }
+        onDecide("deny-once");
       } else if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         onDecide("allow-once");
@@ -57,7 +43,7 @@ export function ToolApprovalDialog({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [open, request, onDecide, onDecideAll, pendingCount]);
+  }, [open, request, onDecide]);
 
   if (!request) return null;
 
@@ -67,6 +53,8 @@ export function ToolApprovalDialog({
   const argsDisplay = argsTruncated ? argsStr.slice(0, 500) + "\n…" : argsStr;
   const sourceBadge = request.source ? SOURCE_BADGE[request.source] ?? request.source : "알 수 없음";
   const hasPending = pendingCount > 1;
+  const originLabel = trustOriginLabel(request.trustOrigin);
+  const warnOrigin = isNonUserTrustOrigin(request.trustOrigin);
 
   return (
     <Dialog open={open} onOpenChange={() => {}}>
@@ -108,7 +96,14 @@ export function ToolApprovalDialog({
               {request.toolName}
             </code>
             <Badge variant="outline" className="text-[11px]">{sourceBadge}</Badge>
+            <Badge variant="outline" className="text-[11px]">{originLabel}</Badge>
           </div>
+
+          {warnOrigin && (
+            <div className="rounded border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-xs text-yellow-700 dark:text-yellow-300">
+              이 요청은 사용자가 직접 입력한 명령이 아니라 {originLabel}에서 시작되었습니다. 도구 인자와 대상 경로를 확인한 뒤 승인하세요.
+            </div>
+          )}
 
           {/* 사유 */}
           <div>
@@ -164,30 +159,6 @@ export function ToolApprovalDialog({
           >
             항상 거부
           </Button>
-
-          {/* D4 §4.5.3 — bulk buttons surface only when multiple tools are pending */}
-          {hasPending && onDecideAll && (
-            <>
-              <Button
-                size="sm"
-                variant="default"
-                className="border border-primary/40 bg-primary/10 text-primary hover:bg-primary/20"
-                onClick={() => onDecideAll("allow-once")}
-                title={`대기 중인 ${pendingCount}개 도구 모두 허용 (단축키: Shift+A)`}
-              >
-                모두 허용 ({pendingCount})
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                className="border-destructive/40 text-destructive hover:bg-destructive/10"
-                onClick={() => onDecideAll("deny-once")}
-                title={`대기 중인 ${pendingCount}개 도구 모두 거부 (단축키: Shift+D)`}
-              >
-                모두 거부 ({pendingCount})
-              </Button>
-            </>
-          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -270,7 +270,7 @@ export function PluginUiHostView({
       // 돌아가도 동일 webview 가 깨진 채라 그것도 같이 안 보인다.
       // pluginId 를 key 로 주면 React 가 강제 unmount → mount 라
       // Electron 도 fresh attach 사이클을 받는다.
-      // 같은 pluginId 의 다른 extension (예: ms-graph 의 email vs calendar) 으로
+      // 같은 pluginId 의 다른 extension 으로
       // 전환 시 webview 가 reuse 되면서 이전 entry 의 IPC 매핑이 남거나
       // 이전 frame 이 잠시 보이는 문제 → key 를 extension.id 까지 포함시켜
       // extension 단위로 fresh attach 보장.

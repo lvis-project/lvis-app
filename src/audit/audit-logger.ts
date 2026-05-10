@@ -12,10 +12,14 @@
  */
 import {
   appendFileSync,
+  chmodSync,
+  closeSync,
   mkdirSync,
   existsSync,
+  openSync,
   readdirSync,
   createReadStream,
+  readSync,
   statSync,
 } from "node:fs";
 import { createWriteStream } from "node:fs";
@@ -26,6 +30,54 @@ import { createInterface } from "node:readline";
 import { createGzip } from "node:zlib";
 import { pipeline } from "node:stream/promises";
 import { withFileLock } from "../lib/with-file-lock.js";
+import {
+  computeLineHmac,
+  GENESIS_MARKER,
+  type SecretStore,
+} from "./hmac-chain.js";
+import type { PermissionAuditEntry, PermissionAuditEntryInput } from "./audit-schema.js";
+
+function readLastNonEmptyLineSync(filePath: string): string {
+  if (!existsSync(filePath)) return GENESIS_MARKER;
+  const { size } = statSync(filePath);
+  if (size === 0) return GENESIS_MARKER;
+
+  const fd = openSync(filePath, "r");
+  try {
+    const one = Buffer.allocUnsafe(1);
+    let end = size;
+    while (end > 0) {
+      readSync(fd, one, 0, 1, end - 1);
+      if (one[0] !== 0x0a && one[0] !== 0x0d) break;
+      end -= 1;
+    }
+    if (end === 0) return GENESIS_MARKER;
+
+    const chunk = Buffer.allocUnsafe(64 * 1024);
+    let start = end;
+    while (start > 0) {
+      const readLen = Math.min(chunk.length, start);
+      const position = start - readLen;
+      const bytesRead = readSync(fd, chunk, 0, readLen, position);
+      for (let i = bytesRead - 1; i >= 0; i -= 1) {
+        if (chunk[i] === 0x0a) {
+          const lineStart = position + i + 1;
+          const lineLen = end - lineStart;
+          const line = Buffer.allocUnsafe(lineLen);
+          readSync(fd, line, 0, lineLen, lineStart);
+          return line.toString("utf-8");
+        }
+      }
+      start = position;
+    }
+
+    const line = Buffer.allocUnsafe(end);
+    readSync(fd, line, 0, end, 0);
+    return line.toString("utf-8");
+  } finally {
+    closeSync(fd);
+  }
+}
 
 export interface AuditEntry {
   timestamp: string;
@@ -71,24 +123,150 @@ export interface AuditRotationOptions {
 export class AuditLogger {
   private readonly auditDir: string;
   private readonly logFile: string;
+  /**
+   * Permission policy — separate file for the discriminated-union HMAC-chained
+   * audit channel. Format `<date>.permission-audit.jsonl`. Kept distinct from the
+   * telemetry channel (`<date>.jsonl`) so chain verification
+   * doesn't have to filter heterogeneous shapes.
+   */
+  private readonly permissionAuditLogFile: string;
+  /** Permission policy — HMAC chain state. Wired via `setupPermissionAuditChain`. Null = uninitialized chain. */
+  private permissionAuditSecret: string | null = null;
+  /** Memoized last serialized line so each append knows the prevHash without re-reading the file. */
+  private permissionAuditLastSerialized: string = GENESIS_MARKER;
+  private permissionAuditChainBootstrapped = false;
+  /** Permission policy — secret store for daily seals. Wired alongside `setupPermissionAuditChain`. */
+  private permissionAuditSealStore: SecretStore | null = null;
 
-  constructor() {
-    this.auditDir = join(homedir(), ".lvis", "audit");
+  constructor(auditDirOverride?: string) {
+    this.auditDir = auditDirOverride ?? join(homedir(), ".lvis", "audit");
     if (!existsSync(this.auditDir)) {
-      mkdirSync(this.auditDir, { recursive: true });
+      mkdirSync(this.auditDir, { recursive: true, mode: 0o700 });
     }
     // 일별 로그 파일
     const date = new Date().toISOString().slice(0, 10);
     this.logFile = join(this.auditDir, `${date}.jsonl`);
+    this.permissionAuditLogFile = join(this.auditDir, `${date}.permission-audit.jsonl`);
   }
 
   log(entry: AuditEntry): void {
     try {
       const line = JSON.stringify(entry) + "\n";
-      appendFileSync(this.logFile, line, "utf-8");
+      appendFileSync(this.logFile, line, { encoding: "utf-8", mode: 0o600 });
+      // Defensive: ensure 0o600 even when the file pre-existed with a wider
+      // mode (e.g. created by a process with permissive umask). CLAUDE.md
+      // `~/.lvis/<feature>/` rule requires audit files be user-readable only.
+      try {
+        chmodSync(this.logFile, 0o600);
+      } catch {
+        // Non-fatal — chmod failure must not block audit writes.
+      }
     } catch {
       // Audit 실패가 앱 동작을 차단하면 안 됨
     }
+  }
+
+  /**
+   * Permission policy — wire the HMAC chain state. Call once at boot after
+   * loading the audit secret from the keychain. When unwired, all
+   * `appendPermissionAuditEntry` calls throw — fail-secure per spec §1: refuse
+   * to start the chain rather than silently downgrade.
+   *
+   * `sealStore` is optional but required for daily-seal verification
+   * via the `/permission audit verify` slash. When omitted, the
+   * verify operation reports `sealMatch: null` for all days.
+   */
+  setupPermissionAuditChain(secret: string, sealStore?: SecretStore): void {
+    this.permissionAuditSecret = secret;
+    this.permissionAuditSealStore = sealStore ?? null;
+    // Bootstrap from the existing file tail so the next append links to
+    // the real last line without O(n) full-file scans.
+    try {
+      this.permissionAuditLastSerialized = readLastNonEmptyLineSync(this.permissionAuditLogFile);
+    } catch {
+      // If we can't read the existing file, the chain effectively
+      // restarts from genesis. The forensics tooling will detect the
+      // discontinuity at the next verifyChain.
+      this.permissionAuditLastSerialized = GENESIS_MARKER;
+    }
+    this.permissionAuditChainBootstrapped = true;
+  }
+
+  /** Permission policy — accessor for tests + slash audit verify. */
+  getPermissionAuditLogFile(): string {
+    return this.permissionAuditLogFile;
+  }
+
+  /** Permission policy — was setupPermissionAuditChain called? */
+  isPermissionAuditChainReady(): boolean {
+    return this.permissionAuditChainBootstrapped && this.permissionAuditSecret !== null;
+  }
+
+  /**
+   * Permission policy — preflight used before mutating tool execution.
+   * Verifies the HMAC chain is initialized and the active audit file can
+   * be opened for append before side effects run.
+   */
+  assertPermissionAuditWritable(): void {
+    if (!this.isPermissionAuditChainReady()) {
+      throw new Error("permission audit chain not initialized");
+    }
+    const fd = openSync(this.permissionAuditLogFile, "a", 0o600);
+    try {
+      chmodSync(this.permissionAuditLogFile, 0o600);
+    } finally {
+      closeSync(fd);
+    }
+  }
+
+  /** Permission policy — accessor for the wired HMAC secret. Null when not bootstrapped. */
+  getPermissionAuditSecret(): string | null {
+    return this.permissionAuditSecret;
+  }
+
+  /** Permission policy — accessor for the wired seal store. Null when not bootstrapped or omitted. */
+  getPermissionAuditSealStore(): SecretStore | null {
+    return this.permissionAuditSealStore;
+  }
+
+  /** Permission policy — accessor for the audit directory (used by audit-show/verify). */
+  getAuditDir(): string {
+    return this.auditDir;
+  }
+
+  /**
+   * Permission policy — append a discriminated-union audit entry with HMAC
+   * chain. Caller supplies the entry minus `prevHash`; this method
+   * computes and threads the chain link.
+   *
+   * Throws when the chain is not bootstrapped (fail-secure). The
+   * caller is responsible for catching at the boot boundary and
+   * surfacing a user-actionable error.
+   *
+   * Concurrency: withFileLock serializes cross-process writers without
+   * blocking the event loop in a spin wait. The locked section reads
+   * only the on-disk tail so prevHash always links to the actual last
+   * line without O(n) full-file scans on every append.
+   */
+  async appendPermissionAuditEntry(entry: PermissionAuditEntryInput): Promise<PermissionAuditEntry> {
+    if (!this.permissionAuditSecret || !this.permissionAuditChainBootstrapped) {
+      throw new Error("permission audit chain not initialized — call setupPermissionAuditChain() at boot");
+    }
+    const secret = this.permissionAuditSecret;
+    return withFileLock(this.permissionAuditLogFile, async () => {
+      this.permissionAuditLastSerialized = readLastNonEmptyLineSync(this.permissionAuditLogFile);
+      const prevHash = computeLineHmac(secret, this.permissionAuditLastSerialized);
+      const full = { ...entry, prevHash } as PermissionAuditEntry;
+      const serialized = JSON.stringify(full);
+      appendFileSync(this.permissionAuditLogFile, serialized + "\n", { encoding: "utf-8", mode: 0o600 });
+      try {
+        chmodSync(this.permissionAuditLogFile, 0o600);
+      } catch {
+        // Non-fatal — chmod failure must not block audit writes.
+      }
+      this.permissionAuditLastSerialized = serialized;
+      return full;
+    });
   }
 
   /**

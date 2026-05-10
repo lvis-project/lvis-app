@@ -8,8 +8,9 @@ import { resolve as pathResolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { McpServerConfig } from "./mcp/types.js";
 import type { SerializedHistoryMessage } from "./shared/chat-history.js";
-import { OVERLAY_V1, ROUTINES_V2 } from "./shared/ipc-channels.js";
+import { OVERLAY_V1, PERMISSIONS, ROUTINES_V2 } from "./shared/ipc-channels.js";
 import { PLUGIN_PRIVATE_NAMESPACES } from "./plugins/capabilities.js";
+import type { ChatSendInputOrigin, UserKeyboardIntent } from "./shared/chat-origin.js";
 
 // ─── Deterministic plugin webview asset URLs ────────────────────────────────
 // `__dirname` here resolves to the host preload's bundled location
@@ -70,6 +71,17 @@ function normalizePluginActionResult(result: unknown): PluginActionResult {
   return normalized;
 }
 
+function hasActiveUserGesture(): boolean {
+  return globalThis.navigator?.userActivation?.isActive === true;
+}
+
+function ipcUserKeyboardIntent(): UserKeyboardIntent | { inputOrigin: "user-keyboard"; userActivation: false } {
+  return {
+    inputOrigin: "user-keyboard",
+    userActivation: hasActiveUserGesture(),
+  };
+}
+
 const api = {
   // ─── Plugin webview asset URLs (deterministic file://) ────────────────────
   // Static strings, NOT functions — the host renderer reads these directly
@@ -116,13 +128,22 @@ const api = {
   }) =>
     ipcRenderer.invoke("lvis:host:plugin-theme-notify", payload),
 
-  // PR 3c: lvis:ms-graph:* IPC 채널 + bridge 메서드 제거 — ms-graph
+  // Plugin-owned OAuth removed host-owned provider auth IPC bridges.
   // 플러그인이 자체 인증을 소유한다.
 
   // ─── Chat (ConversationLoop) ─────────────────────
   chatHasProvider: async () => ipcRenderer.invoke("lvis:chat:has-provider") as Promise<boolean>,
-  chatSend: async (input: string, attachments?: unknown[]) =>
-    ipcRenderer.invoke("lvis:chat:send", input, attachments),
+  chatSend: async (
+    input: string,
+    attachments: unknown[] | undefined,
+    inputOrigin: ChatSendInputOrigin,
+  ) =>
+    ipcRenderer.invoke("lvis:chat:send", {
+      input,
+      attachments,
+      inputOrigin,
+      ...(inputOrigin === "user-keyboard" ? { userActivation: hasActiveUserGesture() } : {}),
+    }),
   chatGuide: async (input: string) => ipcRenderer.invoke("lvis:chat:guide", input),
   chatNew: async () => ipcRenderer.invoke("lvis:chat:new"),
   chatSessions: async (opts?: { limit?: number; before?: string; beforeId?: string; after?: string }) =>
@@ -463,19 +484,76 @@ const api = {
 
   // ─── Permission ───────────────────────────────────
   permission: {
-    getMode: async () => ipcRenderer.invoke("lvis:permission:get-mode"),
-    setMode: async (mode: string) => ipcRenderer.invoke("lvis:permission:set-mode", mode),
-    listRules: async () => ipcRenderer.invoke("lvis:permission:list-rules"),
+    getMode: async () => ipcRenderer.invoke(PERMISSIONS.getMode),
+    setMode: async (mode: string) => ipcRenderer.invoke(PERMISSIONS.setMode, {
+      mode,
+      intent: ipcUserKeyboardIntent(),
+    }),
+    listRules: async () => ipcRenderer.invoke(PERMISSIONS.listRules),
     addRule: async (pattern: string, action: string) =>
-      ipcRenderer.invoke("lvis:permission:add-rule", pattern, action),
+      ipcRenderer.invoke(PERMISSIONS.addRule, { pattern, action, intent: ipcUserKeyboardIntent() }),
     removeRule: async (pattern: string, action: string) =>
-      ipcRenderer.invoke("lvis:permission:remove-rule", pattern, action),
+      ipcRenderer.invoke(PERMISSIONS.removeRule, { pattern, action, intent: ipcUserKeyboardIntent() }),
+    /** Permission policy — deferred queue (Layer 5 reviewer HIGH verdicts). */
+    deferredList: async () => ipcRenderer.invoke(PERMISSIONS.deferredList),
+    /** Permission policy issue #633 — hook quarantine state for non-modal settings badge. */
+    hookTrustList: async () => ipcRenderer.invoke(PERMISSIONS.hookTrustList),
+    /** Permission policy — `/permission dir ...` slash dispatch via IPC. */
+    dirDispatch: async (rawArgs: string) =>
+      ipcRenderer.invoke(PERMISSIONS.dirDispatch, { rawArgs, intent: ipcUserKeyboardIntent() }),
+    deferredResolve: async (
+      id: string,
+      decision: "approved" | "rejected",
+      reason?: string,
+    ) =>
+      ipcRenderer.invoke(PERMISSIONS.deferredResolve, {
+        id,
+        decision,
+        reason,
+        intent: ipcUserKeyboardIntent(),
+      }),
+    /** Foreground-entry pending notification — main→renderer event. */
+    onDeferredPending: (cb: (summary: { pending: number }) => void) => {
+      const listener = (_event: unknown, summary: { pending: number }) =>
+        cb(summary);
+      ipcRenderer.on(PERMISSIONS.deferredPending, listener);
+      return () =>
+        ipcRenderer.removeListener(PERMISSIONS.deferredPending, listener);
+    },
+    /** Permission policy — `/permission reviewer ...` slash dispatch via IPC. */
+    reviewerDispatch: async (rawArgs: string) =>
+      ipcRenderer.invoke(PERMISSIONS.reviewerDispatch, { rawArgs, intent: ipcUserKeyboardIntent() }),
+    /** Permission policy — `/permission audit show` — fetch recent permission audit entries. */
+    auditShow: async (last: number) =>
+      ipcRenderer.invoke(PERMISSIONS.auditShow, { last }),
+    /** Permission policy — `/permission audit verify` — chain integrity check. */
+    auditVerify: async () =>
+      ipcRenderer.invoke(PERMISSIONS.auditVerify),
+    /**
+     * Permission policy §3.5 — manifest integrity violation notifier. Subscribes
+     * to `PERMISSIONS.manifestViolation` so the renderer can
+     * surface a "Plugin X disabled — reinstall?" prompt.
+     */
+    onManifestViolation: (
+      handler: (payload: {
+        pluginId: string;
+        toolName: string;
+        attempted: string;
+      }) => void,
+    ) => {
+      const listener = (_e: unknown, payload: Parameters<typeof handler>[0]) =>
+        handler(payload);
+      ipcRenderer.on(PERMISSIONS.manifestViolation, listener);
+      return () =>
+        ipcRenderer.removeListener(PERMISSIONS.manifestViolation, listener);
+    },
   },
 
   // ─── Policy (Governance) ─────────────────────────
   policy: {
-    get: async () => ipcRenderer.invoke("lvis:policy:get"),
-    set: async (patch: unknown) => ipcRenderer.invoke("lvis:policy:set", patch),
+    get: async () => ipcRenderer.invoke(PERMISSIONS.policyGet),
+    set: async (patch: unknown) =>
+      ipcRenderer.invoke(PERMISSIONS.policySet, { patch, intent: ipcUserKeyboardIntent() }),
   },
 
   // ─── Approval Gate (§6.3 Layer 3 + §8) ─────────
@@ -488,7 +566,7 @@ const api = {
     },
     /** 사용자 결정을 main으로 전송 */
     respond: async (decision: unknown) =>
-      ipcRenderer.invoke("lvis:approval:respond", decision),
+      ipcRenderer.invoke(PERMISSIONS.approvalRespond, decision),
   },
 
   // ─── DLP Hit Statistics (Observability) ─────────
@@ -548,7 +626,7 @@ const api = {
     answers?: Array<{ choice?: string; freeText?: string }>;
     dismissed?: boolean;
   }) => ipcRenderer.invoke("lvis:ask-user-question:respond", response),
-  // M2: timeout side-channel — main process notifies the renderer when an
+  // Timeout side-channel — main process notifies the renderer when an
   // ask_user_question request expired (5 min default) so the card can drop
   // the stale prompt before the user clicks into a no-op.
   onAskUserQuestionTimeout: (
@@ -575,7 +653,7 @@ const api = {
     ipcRenderer.on(ROUTINES_V2.fired, listener);
     return () => ipcRenderer.removeListener(ROUTINES_V2.fired, listener);
   },
-  // Q10 — running indicator: emitted when a routine LLM session starts/finishes
+  // Routine running indicator: emitted when a routine LLM session starts/finishes
   // C1: runningStarted payload enriched to { routineId, firedAt, title } so the
   // renderer can push a proper OverlayItem immediately without waiting for fired.
   onRoutineRunningStarted: (handler: (payload: { routineId: string; firedAt: string; title: string }) => void) => {
@@ -596,7 +674,7 @@ const api = {
     ipcRenderer.on(ROUTINES_V2.failed, listener);
     return () => ipcRenderer.removeListener(ROUTINES_V2.failed, listener);
   },
-  // Q9 session history — read-only viewer for per-routine session JSONL files
+  // Routine session history — read-only viewer for per-routine session JSONL files
   listRoutineSessionsV2: async (routineId: string, limit?: number) =>
     ipcRenderer.invoke(ROUTINES_V2.listSessions, routineId, limit) as Promise<
       Array<{ routineId: string; firedAt: string; jsonlPath: string }>
@@ -604,7 +682,7 @@ const api = {
   readRoutineSessionV2: async (jsonlPath: string) =>
     ipcRenderer.invoke(ROUTINES_V2.readSession, jsonlPath) as Promise<string>,
 
-  // Q11 — Overlay IPC bridges (main → renderer push + renderer → main confirm)
+  // Overlay IPC bridges (main → renderer push + renderer → main confirm)
   onOverlayShow: (handler: (item: unknown) => void) => {
     const listener = (_e: unknown, item: unknown) => handler(item);
     ipcRenderer.on(OVERLAY_V1.show, listener);

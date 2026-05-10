@@ -167,7 +167,7 @@ export function buildPluginContext(opts: {
     pluginDataDir: opts.pluginDataDir,
     // configSchema defaults backfill keys missing from `manifest.config`
     // and the override layers — without this, plugins that document a
-    // `default` for a config key (e.g. agent-hub's `hubServerUrl`) would
+    // `default` for a config key would
     // see `undefined` whenever the user hasn't explicitly set the key,
     // forcing every plugin to reimplement default-handling. Override
     // precedence is preserved: plugin-specific > wildcard > manifest.config

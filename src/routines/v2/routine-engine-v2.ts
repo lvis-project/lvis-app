@@ -2,12 +2,13 @@
  * RoutineEngineV2 — v2-only routine execution engine.
  *
  * Each routine fire creates a dedicated ConversationLoop instance so routine
- * sessions are fully isolated from the main chat session (Q9 isolation).
+ * sessions are fully isolated from the main chat session.
  * The factory is called per-invocation — no shared state with main chat.
  */
 import { writeFile } from "node:fs/promises";
 import type { ConversationLoop } from "../../engine/conversation-loop.js";
 import { createLogger } from "../../lib/logger.js";
+import type { RoutineScope } from "../../shared/routines-types.js";
 const log = createLogger("routine-engine-v2");
 
 export interface RoutineV2RunInput {
@@ -16,7 +17,13 @@ export interface RoutineV2RunInput {
   prePrompt: string;
   title?: string;
   /**
-   * Q9: absolute path to the pre-created JSONL file for this routine fire.
+   * Permission policy Layer 4 — fully resolved scope (no `inherit` left). Boot-time
+   * normalization in the dispatcher snapshots the active plugin set
+   * before this method runs.
+   */
+  scope?: RoutineScope;
+  /**
+   * Absolute path to the pre-created JSONL file for this routine fire.
    * When provided, the engine appends history messages here so
    * RoutineSessionView can display the full conversation.
    * File is created by RoutineSessionStore.createSession() before runRoutine().
@@ -40,7 +47,16 @@ export interface RoutineV2Result {
 
 export interface RoutineEngineV2Deps {
   /** Called once per routine fire to produce a fresh, isolated ConversationLoop. */
-  createConversationLoop: () => ConversationLoop;
+  createConversationLoop: (input: RoutineV2RunInput) => ConversationLoop;
+  /**
+   * Permission policy Layer 4 — invoked at routine fire time to snapshot the
+   * currently-active plugin set. Used to translate
+   * `scope.pluginIds.mode === "inherit"` into a concrete `allow` list
+   * BEFORE the conversation loop is constructed, so the loop never
+   * sees `inherit`. When omitted, `inherit` falls back to deny-all
+   * (defensive — pre-Permission policy boot wires this dep for production).
+   */
+  getActivePluginIds?: () => string[];
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -69,22 +85,59 @@ function extractSummaryTag(text: string): string {
 export class RoutineEngineV2 {
   constructor(private readonly deps: RoutineEngineV2Deps) {}
 
+  /**
+   * Permission policy Layer 4 — snapshot `inherit` to a concrete allow-list at fire
+   * time. The loop must never see `inherit`; downstream
+   * `createRoutineConversationLoop` defensively coerces `inherit` to
+   * deny-all, but the principled spot is here where we still have
+   * access to the host's active plugin set.
+   */
+  private normalizeScope(scope: RoutineScope | undefined): RoutineScope {
+    if (!scope) {
+      return {
+        pluginIds: { mode: "deny-all" },
+        forcedPluginIds: [],
+        directories: [],
+      };
+    }
+    if (scope.pluginIds.mode !== "inherit") return scope;
+    const active = this.deps.getActivePluginIds?.() ?? [];
+    return {
+      pluginIds:
+        active.length > 0
+          ? { mode: "allow", ids: [...active] }
+          : { mode: "deny-all" },
+      forcedPluginIds: scope.forcedPluginIds,
+      directories: scope.directories,
+    };
+  }
+
   async runRoutine(input: RoutineV2RunInput): Promise<RoutineV2Result> {
     const generatedAt = new Date().toISOString();
-    // Q9: each fire gets its own loop — no history sharing with main chat.
-    const loop = this.deps.createConversationLoop();
+    // Permission policy Layer 4 — normalize scope BEFORE building the loop so the
+    // loop never observes `inherit`. `inherit` snapshots the active
+    // plugin set at fire time; missing scope falls back to deny-all
+    // (the safe default for headless routine sessions).
+    const normalizedInput: RoutineV2RunInput = {
+      ...input,
+      scope: this.normalizeScope(input.scope),
+    };
+    // Each fire gets its own loop — no history sharing with main chat.
+    const loop = this.deps.createConversationLoop(normalizedInput);
     const sessionId = loop.getSessionId();
 
     let summary = "";
     try {
-      const result = await loop.runTurn(input.prePrompt, undefined, input.signal);
+      const result = await loop.runTurn(input.prePrompt, undefined, input.signal, {
+        inputOrigin: "plugin-emitted",
+      });
       summary = extractSummaryTag(result.text ?? "");
     } catch (err) {
       log.warn("runRoutine error (id=%s): %s", input.id, err instanceof Error ? err.message : String(err));
       summary = `루틴 실행 중 오류: ${err instanceof Error ? err.message : String(err)}`;
     }
 
-    // Q9: write history to the isolated session JSONL file so RoutineSessionView
+    // Write history to the isolated session JSONL file so RoutineSessionView
     // can display the full conversation. The ConversationLoop's own memoryManager
     // saves to ~/.lvis/sessions/ (main chat area) — we write the routine-specific
     // copy to storagePath so the two paths stay isolated.

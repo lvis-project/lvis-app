@@ -20,7 +20,7 @@ import { debugLog, isDebugStreamEnabled } from "../../../lib/debug-stream.js";
 import type { LvisApi } from "../types.js";
 
 /**
- * Phase 5 — chat state + stream hook.
+ * Chat state + stream hook.
  *
  * Owns everything chat-lifecycle: entries, streaming flag, the IPC
  * stream subscription (finalize/tool/error/redact/compact/done), edit state,
@@ -65,7 +65,7 @@ export function useChatState(api: LvisApi) {
     return map;
   }, [entries]);
 
-  // Stream subscription — Phase 5: absorbed from App.tsx.
+  // Stream subscription absorbed from App.tsx.
   useEffect(() => {
     const unsub = api.onChatStream((ev) => {
       if (!aliveRef.current) return;
@@ -384,7 +384,7 @@ export function useChatState(api: LvisApi) {
   );
 
   /**
-   * Q11 — Plugin overlay confirm → main chat insert.
+   * Plugin overlay confirm → main chat insert.
    *
    * Inserts an imported_trigger entry (kind="imported_trigger") so the
    * plugin-authored prompt is visible in chat history with proper proactive
@@ -642,7 +642,7 @@ export function useChatState(api: LvisApi) {
     applyInitialSession,
     applyLoadedSession,
     truncateToEntry,
-    // trigger import methods (brain trigger + Q11 plugin overlay)
+    // Trigger import methods (brain trigger + plugin overlay).
     addImportedTriggerEntry,
     closeOpenImportedTrigger,
     insertImportedTriggerEntry,
