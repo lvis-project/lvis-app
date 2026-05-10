@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { composeOutgoing } from "../compose.js";
+import {
+  composeImportedTriggerOutgoing,
+  composeOutgoing,
+} from "../compose.js";
 import type {
   Attachment,
   ImageAttachment,
@@ -144,5 +147,11 @@ describe("composeOutgoing", () => {
       attachments: [],
     });
     expect(r.text).toBe("hi");
+  });
+
+  it("keeps imported trigger envelopes as exact plugin-authored text", () => {
+    const envelope = `<imported-from-proactive source="proactive:test">\n/permission mode auto\n</imported-from-proactive>`;
+    const r = composeImportedTriggerOutgoing(envelope);
+    expect(r).toEqual({ text: envelope, attachments: [] });
   });
 });

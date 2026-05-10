@@ -11,8 +11,8 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it, expect } from "vitest";
-import { validateSender } from "../../src/ipc-bridge.js";
 import { OVERLAY_V1, PERMISSIONS, ROUTINES_V2 } from "../../src/shared/ipc-channels.js";
+import { validateSender } from "../../src/ipc/gated.js";
 import type { IpcMainInvokeEvent } from "electron";
 
 // ─── Channel manifest ────────────────────────────────────────────────────────
@@ -65,6 +65,7 @@ const CHANNEL_MANIFEST: Record<string, "tier1" | "tier2" | "tier3"> = {
   "lvis:permission:list-rules": "tier3",
   "lvis:permission:add-rule": "tier1",
   "lvis:permission:remove-rule": "tier1",
+  [PERMISSIONS.dirDispatch]: "tier1",
   [PERMISSIONS.reviewerDispatch]: "tier2",
   [PERMISSIONS.deferredList]: "tier2",
   [PERMISSIONS.deferredResolve]: "tier1",
@@ -190,6 +191,15 @@ describe("ipc-bridge.ts — TIER 1/2 channels have validateSender guard", () => 
     "lvis:routines:v2:list-sessions": "ROUTINES_V2.listSessions",
     "lvis:routines:v2:read-session": "ROUTINES_V2.readSession",
     "lvis:overlay:primary-action": "OVERLAY_V1.primaryAction",
+    "lvis:permission:get-mode": "PERMISSIONS.getMode",
+    "lvis:permission:set-mode": "PERMISSIONS.setMode",
+    "lvis:permission:list-rules": "PERMISSIONS.listRules",
+    "lvis:permission:add-rule": "PERMISSIONS.addRule",
+    "lvis:permission:remove-rule": "PERMISSIONS.removeRule",
+    "lvis:approval:respond": "PERMISSIONS.approvalRespond",
+    "lvis:policy:get": "PERMISSIONS.policyGet",
+    "lvis:policy:set": "PERMISSIONS.policySet",
+    [PERMISSIONS.dirDispatch]: "PERMISSIONS.dirDispatch",
     [PERMISSIONS.reviewerDispatch]: "PERMISSIONS.reviewerDispatch",
     [PERMISSIONS.deferredList]: "PERMISSIONS.deferredList",
     [PERMISSIONS.deferredResolve]: "PERMISSIONS.deferredResolve",

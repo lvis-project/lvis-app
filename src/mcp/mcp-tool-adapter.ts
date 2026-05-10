@@ -38,6 +38,7 @@ export function mcpToolToTool(
     name: namespacedName,
     description: schema.description,
     source: "mcp",
+    category: "network",
     mcpServerId: serverId,
     jsonSchema: {
       type: "object",

@@ -10,68 +10,109 @@ import { PERMISSIONS } from "../../shared/ipc-channels.js";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import type { IpcDeps } from "../types.js";
 
+function validateRulePatternInput(pattern: unknown): { ok: true; pattern: string } | { ok: false; error: string; message: string } {
+  if (typeof pattern !== "string") {
+    return { ok: false, error: "invalid-pattern", message: "패턴은 문자열이어야 합니다." };
+  }
+  const normalized = pattern.trim();
+  if (normalized.length === 0) {
+    return { ok: false, error: "invalid-pattern", message: "패턴은 빈 문자열일 수 없습니다." };
+  }
+  if (normalized.length > 128) {
+    return { ok: false, error: "invalid-pattern", message: "패턴은 128자를 초과할 수 없습니다." };
+  }
+  if (/\s/.test(normalized)) {
+    return { ok: false, error: "invalid-pattern", message: "패턴에는 공백을 포함할 수 없습니다." };
+  }
+  return { ok: true, pattern: normalized };
+}
+
 export function registerPermissionsHandlers(deps: IpcDeps): void {
   const { conversationLoop, approvalGate, auditLogger } = deps;
 
   // read-only, sender guard optional
-  ipcMain.handle("lvis:permission:get-mode", () => {
+  ipcMain.handle(PERMISSIONS.getMode, () => {
     const mode = conversationLoop.permissionManager?.getMode() ?? "default";
     return { mode };
   });
 
-  ipcMain.handle("lvis:permission:set-mode", async (e, mode: string) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:permission:set-mode", e); return UNAUTHORIZED_FRAME; }
-    const VALID_MODES = ["default", "strict", "auto"] as const;
-    if (!VALID_MODES.includes(mode as typeof VALID_MODES[number])) {
-      return { ok: false, error: "invalid-mode", message: `유효하지 않은 실행 모드: '${mode}'. 허용값: ${VALID_MODES.join(", ")}` };
+  ipcMain.handle(PERMISSIONS.setMode, async (e, mode: string) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, PERMISSIONS.setMode, e); return UNAUTHORIZED_FRAME; }
+    const { dispatchPermissionSlash } = await import("../../permissions/permission-slash.js");
+    const outcome = dispatchPermissionSlash(`/permission mode ${mode} --durable`, "user-keyboard");
+    if (outcome.kind === "parse-error") {
+      return { ok: false, error: "invalid-mode", message: outcome.error };
+    }
+    if (outcome.kind !== "mode") {
+      return { ok: false, error: "invalid-command", message: "permission mode command dispatch failed" };
+    }
+    if (outcome.needsModal !== true) {
+      return { ok: false, error: "missing-durable-confirm", message: "durable mode command must require modal confirmation" };
     }
     const pm = conversationLoop.permissionManager;
-    if (pm) {
-      await pm.setModePersist(mode as import("../../permissions/permission-manager.js").ExecutionMode);
-    }
-    return { ok: true, mode };
+    if (!pm) return { ok: false, error: "no-permission-manager", message: "권한 매니저가 초기화되지 않았습니다." };
+    const { applyPermissionModeCommand } = await import("../../permissions/permission-mode-apply.js");
+    const result = await applyPermissionModeCommand(outcome.cmd, {
+      permissionManager: pm,
+      approvalGate,
+      auditLogger,
+    });
+    if (!result.ok) return result;
+    return { ok: true, mode: result.mode };
   });
 
   // read-only, sender guard optional
-  ipcMain.handle("lvis:permission:list-rules", async () => {
+  ipcMain.handle(PERMISSIONS.listRules, async () => {
     const pm = conversationLoop.permissionManager;
     if (!pm) return [];
     return pm.listPersistedRules();
   });
 
-  ipcMain.handle("lvis:permission:add-rule", async (e, pattern: string, action: "allow" | "deny") => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:permission:add-rule", e); return UNAUTHORIZED_FRAME; }
-    const normalized = pattern.trim();
-    if (typeof pattern !== "string" || normalized.length === 0) {
-      return { ok: false, error: "invalid-pattern", message: "패턴은 빈 문자열일 수 없습니다." };
-    }
-    if (normalized.length > 128) {
-      return { ok: false, error: "invalid-pattern", message: "패턴은 128자를 초과할 수 없습니다." };
-    }
+  ipcMain.handle(PERMISSIONS.addRule, async (e, pattern: string, action: "allow" | "deny") => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, PERMISSIONS.addRule, e); return UNAUTHORIZED_FRAME; }
     if (action !== "allow" && action !== "deny") {
       return { ok: false, error: "invalid-action", message: `유효하지 않은 action: '${action}'. 허용값: allow, deny` };
+    }
+    const validated = validateRulePatternInput(pattern);
+    if (!validated.ok) return validated;
+    const { dispatchPermissionSlash } = await import("../../permissions/permission-slash.js");
+    const outcome = dispatchPermissionSlash(`/permission rules add ${action} ${validated.pattern}`, "user-keyboard");
+    if (outcome.kind === "parse-error") return { ok: false, error: "parse-error", message: outcome.error };
+    if (outcome.kind !== "rules" || outcome.cmd.sub !== "add") {
+      return { ok: false, error: "invalid-command", message: "permission rules add command dispatch failed" };
     }
     const pm = conversationLoop.permissionManager;
     if (!pm) return { ok: false, error: "no-permission-manager", message: "권한 매니저가 초기화되지 않았습니다." };
     try {
-      if (action === "allow") {
-        await pm.addAlwaysAllowedPersist(normalized);
+      if (outcome.cmd.action === "allow") {
+        await pm.addAlwaysAllowedPersist(outcome.cmd.pattern);
       } else {
-        await pm.addAlwaysDeniedPersist(normalized);
+        await pm.addAlwaysDeniedPersist(outcome.cmd.pattern);
       }
       deps.toolRegistry.setDenyRules(pm.getVisibilityDenyRules());
-      return { ok: true, rule: { pattern: normalized, action } };
+      return { ok: true, rule: { pattern: outcome.cmd.pattern, action: outcome.cmd.action } };
     } catch (err) {
       return { ok: false, error: "add-failed", message: (err as Error).message };
     }
   });
 
-  ipcMain.handle("lvis:permission:remove-rule", async (e, pattern: string, action: "allow" | "deny") => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:permission:remove-rule", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(PERMISSIONS.removeRule, async (e, pattern: string, action: "allow" | "deny") => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, PERMISSIONS.removeRule, e); return UNAUTHORIZED_FRAME; }
+    if (action !== "allow" && action !== "deny") {
+      return { ok: false, error: "invalid-action", message: `유효하지 않은 action: '${action}'. 허용값: allow, deny` };
+    }
+    const validated = validateRulePatternInput(pattern);
+    if (!validated.ok) return validated;
+    const { dispatchPermissionSlash } = await import("../../permissions/permission-slash.js");
+    const outcome = dispatchPermissionSlash(`/permission rules remove ${action} ${validated.pattern}`, "user-keyboard");
+    if (outcome.kind === "parse-error") return { ok: false, error: "parse-error", message: outcome.error };
+    if (outcome.kind !== "rules" || outcome.cmd.sub !== "remove") {
+      return { ok: false, error: "invalid-command", message: "permission rules remove command dispatch failed" };
+    }
     const pm = conversationLoop.permissionManager;
     if (!pm) return { ok: false, error: "no-permission-manager", message: "권한 매니저가 초기화되지 않았습니다." };
     try {
-      await pm.removeRule(pattern, action);
+      await pm.removeRule(outcome.cmd.pattern, outcome.cmd.action);
       deps.toolRegistry.setDenyRules(pm.getVisibilityDenyRules());
       return { ok: true };
     } catch (err) {
@@ -80,8 +121,8 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
   });
 
   // lvis:approval:request direction is main→renderer (webContents.send) — no ipcMain.handle needed
-  ipcMain.handle("lvis:approval:respond", (e, decision: ApprovalDecision) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:approval:respond", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(PERMISSIONS.approvalRespond, (e, decision: ApprovalDecision) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, PERMISSIONS.approvalRespond, e); return UNAUTHORIZED_FRAME; }
     if (approvalGate) {
       approvalGate.resolve(decision.requestId, decision);
     }
@@ -89,7 +130,7 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
   });
 
   // read-only, sender guard optional
-  ipcMain.handle("lvis:policy:get", async () => {
+  ipcMain.handle(PERMISSIONS.policyGet, async () => {
     return loadPolicy();
   });
 
@@ -101,11 +142,16 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
         auditUnauthorized(auditLogger, PERMISSIONS.dirDispatch, e);
         return UNAUTHORIZED_FRAME;
       }
-      const { parsePermissionDirCommand, dispatchPermissionDirCommand } =
+      const { dispatchPermissionSlash, dispatchPermissionDirCommand } =
         await import("../../permissions/permission-slash.js");
-      const parsed = parsePermissionDirCommand(args?.rawArgs ?? "");
-      if ("ok" in parsed && parsed.ok === false) return parsed;
-      return dispatchPermissionDirCommand(parsed as Exclude<typeof parsed, { ok: false }>);
+      const outcome = dispatchPermissionSlash(`/permission dir ${args?.rawArgs ?? ""}`, "user-keyboard");
+      if (outcome.kind === "parse-error") return { ok: false, error: outcome.error };
+      if (outcome.kind !== "dir") return { ok: false, error: "invalid permission dir command" };
+      const result = await dispatchPermissionDirCommand(outcome.cmd);
+      if (result.ok && result.verb === "allow" && result.sessionOnly && result.sessionDirectory) {
+        conversationLoop.addSessionAdditionalDirectory(result.sessionDirectory);
+      }
+      return result;
     },
   );
 
@@ -117,11 +163,16 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
         auditUnauthorized(auditLogger, PERMISSIONS.reviewerDispatch, e);
         return UNAUTHORIZED_FRAME;
       }
-      const { parsePermissionReviewerCommand, dispatchPermissionReviewerCommand } =
+      const { dispatchPermissionSlash, dispatchPermissionReviewerCommand } =
         await import("../../permissions/permission-slash.js");
-      const parsed = parsePermissionReviewerCommand(args?.rawArgs ?? "");
-      if ("ok" in parsed && parsed.ok === false) return parsed;
-      return dispatchPermissionReviewerCommand(parsed as Exclude<typeof parsed, { ok: false }>);
+      const outcome = dispatchPermissionSlash(`/permission reviewer ${args?.rawArgs ?? ""}`, "user-keyboard");
+      if (outcome.kind === "parse-error") return { ok: false, error: outcome.error };
+      if (outcome.kind !== "reviewer") return { ok: false, error: "invalid permission reviewer command" };
+      const result = await dispatchPermissionReviewerCommand(outcome.cmd);
+      if (result.ok && outcome.cmd.verb !== "show") {
+        deps.rewireReviewerAgent?.();
+      }
+      return result;
     },
   );
 
@@ -188,21 +239,29 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
       if (!auditLogger.isPermissionAuditChainReady()) {
         return { ok: false, error: "permission-audit-not-ready" };
       }
+      try {
+        await auditLogger.appendPermissionAuditEntry({
+          decision: "deferred_resolve",
+          auditId: randomUUID(),
+          ts: new Date().toISOString(),
+          trustOrigin: "user-keyboard",
+          tool: current.toolName,
+          source: current.source,
+          category: current.category,
+          reviewerVerdict: current.verdict,
+          queueId: current.id,
+          resolution: params.decision,
+          ...(params.reason ? { reason: params.reason } : {}),
+        });
+      } catch (err) {
+        return {
+          ok: false,
+          error: "permission-audit-write-failed",
+          message: (err as Error).message,
+        };
+      }
       const resolved = await queue.resolve(params.id, params.decision, params.reason);
       if (!resolved) return { ok: false, error: "not-found" };
-      await auditLogger.appendPermissionAuditEntry({
-        decision: "deferred_resolve",
-        auditId: randomUUID(),
-        ts: resolved.resolvedAt ?? new Date().toISOString(),
-        trustOrigin: "user-keyboard",
-        tool: resolved.toolName,
-        source: resolved.source,
-        category: resolved.category,
-        reviewerVerdict: resolved.verdict,
-        queueId: resolved.id,
-        resolution: params.decision,
-        ...(params.reason ? { reason: params.reason } : {}),
-      });
       return { ok: true, entry: resolved };
     },
   );
@@ -264,8 +323,8 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
     };
   });
 
-  ipcMain.handle("lvis:policy:set", async (e, patch: Record<string, unknown>) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:policy:set", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(PERMISSIONS.policySet, async (e, patch: Record<string, unknown>) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, PERMISSIONS.policySet, e); return UNAUTHORIZED_FRAME; }
     if ("managed" in patch) {
       return { ok: false, error: "invalid-patch", message: "'managed' 필드는 사용자가 변경할 수 없습니다." };
     }

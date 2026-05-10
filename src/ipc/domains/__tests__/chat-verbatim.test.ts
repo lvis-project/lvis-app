@@ -256,3 +256,29 @@ describe("lvis:chat:get-verbatim-tool-result", () => {
     expect((resultB as any).content).toBe("content-B");
   });
 });
+
+describe("lvis:chat:send provenance", () => {
+  it("classifies imported trigger envelopes as plugin-emitted and forwards originSource", async () => {
+    const proactive = await import("../../../shared/proactive-source.js");
+    const parseImportedTriggerEnvelope = proactive.parseImportedTriggerEnvelope as unknown as ReturnType<typeof vi.fn>;
+    parseImportedTriggerEnvelope.mockImplementation((input: string) =>
+      input.includes("<imported-from-proactive") ? "proactive:test" : null,
+    );
+    const loop = makeConversationLoop("session-provenance", []);
+    loop.runTurn.mockResolvedValue({ text: "ok", toolCalls: [], stopReason: "end_turn" });
+    await setupHandlers(loop);
+
+    const input = `<imported-from-proactive source="proactive:test">\n/permission auto\n</imported-from-proactive>`;
+    await invoke("lvis:chat:send", input);
+
+    expect(loop.runTurn).toHaveBeenCalledWith(
+      input,
+      expect.any(Object),
+      undefined,
+      expect.objectContaining({
+        inputOrigin: "plugin-emitted",
+        originSource: "proactive:test",
+      }),
+    );
+  });
+});

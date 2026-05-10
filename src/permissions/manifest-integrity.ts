@@ -30,6 +30,7 @@
  */
 import type { AuditLogger } from "../audit/audit-logger.js";
 import { createLogger } from "../lib/logger.js";
+import { randomUUID } from "node:crypto";
 
 const log = createLogger("manifest-integrity");
 
@@ -223,6 +224,22 @@ export function bindManifestIntegrityAudit(
           attempted: attemptedMethod,
         }),
       });
+      if (audit.isPermissionAuditChainReady()) {
+        void audit.appendPermissionAuditEntry({
+          ts: new Date().toISOString(),
+          auditId: randomUUID(),
+          trustOrigin: "plugin-emitted",
+          decision: "manifest_violation",
+          pluginId,
+          toolName,
+          attemptedOperation: attemptedMethod,
+        }).catch((err) => {
+          log.warn(
+            "manifest-integrity permission audit write failed: %s",
+            (err as Error).message,
+          );
+        });
+      }
     } catch (err) {
       log.warn(
         "manifest-integrity audit write failed: %s",

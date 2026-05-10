@@ -162,6 +162,32 @@ describe("ConversationLoop.resetAndResume", () => {
     // resetAndResume 자체는 더 이상 auto-compact 하지 않음 — Layer 0 가 next turn 처리
     expect(result.compacted).toBe(false);
   });
+
+  it("does not dispatch slash commands from non-keyboard origin", async () => {
+    const routeEngine = {
+      route: vi.fn().mockReturnValue({
+        route: "command",
+        command: "compact",
+        args: "",
+      }),
+    } as unknown as ConversationLoopDeps["routeEngine"];
+    const keywordEngine = {
+      classify: vi.fn().mockReturnValue({ type: "command" }),
+      matchAllPluginIds: () => new Set(),
+    } as unknown as ConversationLoopDeps["keywordEngine"];
+    const loop = new ConversationLoop(makeDeps({ routeEngine, keywordEngine }));
+    const fakeProvider = {
+      vendor: "openai" as const,
+      streamTurn: async function* () { /* unused */ },
+    };
+    (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
+
+    const result = await loop.runTurn("/compact", undefined, undefined, {
+      inputOrigin: "plugin-emitted",
+    });
+
+    expect(result.text).toContain("비키보드 출처의 slash command는 실행하지 않습니다.");
+  });
 });
 
 
@@ -274,7 +300,7 @@ describe("ConversationLoop command routing", () => {
     const loop = new ConversationLoop(makeDeps({ memoryManager: mem, routeEngine, keywordEngine }));
     (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
 
-    const result = await loop.runTurn("/memory");
+    const result = await loop.runTurn("/memory", undefined, undefined, { inputOrigin: "user-keyboard" });
 
     expect(result.text).toContain("사용자 메모");
     expect(listMemoryEntries).toHaveBeenCalledOnce();
@@ -317,7 +343,7 @@ describe("ConversationLoop command routing", () => {
       };
       (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
 
-      const result = await loop.runTurn("/permission hooks accept pre-demo.sh");
+      const result = await loop.runTurn("/permission hooks accept pre-demo.sh", undefined, undefined, { inputOrigin: "user-keyboard" });
 
       expect(result.text).toContain("Hook 신뢰 등록됨: pre-demo.sh");
       expect(boot.manager.size()).toBe(1);

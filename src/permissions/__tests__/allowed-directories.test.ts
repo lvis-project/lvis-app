@@ -100,10 +100,10 @@ describe("pickClosestParent — leaf-parent UX rule", () => {
     // not be sensitive but a deeper one inside .ssh is.
     const leaf = fold("/Users/ken/.ssh/id_rsa");
     // The leaf-parent is `~/.ssh` which is NOT itself a sensitive
-    // *directory pattern* in the list (only `**/.ssh/*` files are).
+    // *directory pattern* in the list (only `**/.ssh/**` entries are).
     // The parent's parent (`~`) is fine. So the immediate parent is the
     // .ssh dir — and isSensitivePath('/Users/ken/.ssh') matches
-    // `**/.ssh/*` via the directory-form trailing-slash trick.
+    // `**/.ssh/**` via the directory-form trailing-slash trick.
     expect(pickClosestParent(leaf, [])).toBeNull();
   });
 

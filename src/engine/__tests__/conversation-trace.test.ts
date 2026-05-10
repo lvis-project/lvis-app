@@ -100,7 +100,7 @@ describe("ConversationTracer — §4.5 11-step", () => {
     const rec = new RecordingTracer();
     loop.setTracer(rec);
 
-    await loop.runTurn("디렉토리 보여줘");
+    await loop.runTurn("디렉토리 보여줘", undefined, undefined, { inputOrigin: "user-keyboard" });
 
     const names = new Set(rec.steps.map((s) => s.name));
     const expected: TraceStepName[] = [

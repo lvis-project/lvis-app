@@ -14,6 +14,7 @@ import {
   type ToolInvocationContext,
   type RiskVerdict,
 } from "../reviewer/risk-classifier.js";
+import { BashTool } from "../../tools/bash.js";
 
 function tmpFile(name: string): string {
   const dir = mkdtempSync(join(tmpdir(), "lvis-pm-reviewer-"));
@@ -59,7 +60,7 @@ describe("PermissionManager.dispatchReviewer", () => {
       finalInput: { path: "/Users/ken/work/note.md" },
       allowedDirectories: ["/Users/ken/work"],
       sensitivePathsAdjacent: [],
-      trustOrigin: "user" as const,
+      trustOrigin: "user-keyboard" as const,
     });
     expect(r.verdict.level).toBe("low");
     expect(r.deferredId).toBeUndefined();
@@ -73,7 +74,7 @@ describe("PermissionManager.dispatchReviewer", () => {
       finalInput: { path: "/etc/passwd" },
       allowedDirectories: ["/Users/ken/work"],
       sensitivePathsAdjacent: [],
-      trustOrigin: "user" as const,
+      trustOrigin: "user-keyboard" as const,
     });
     expect(r.verdict.level).toBe("high");
     expect(r.deferredId).toMatch(/^[0-9a-f-]{36}$/);
@@ -90,7 +91,7 @@ describe("PermissionManager.dispatchReviewer", () => {
       finalInput: { path: "/Users/ken/work/a/b/c/d.md" },
       allowedDirectories: ["/Users/ken/work"],
       sensitivePathsAdjacent: [],
-      trustOrigin: "user" as const,
+      trustOrigin: "user-keyboard" as const,
     });
     expect(r.verdict.level).toBe("medium");
     expect(r.deferredId).toBeUndefined();
@@ -104,13 +105,88 @@ describe("PermissionManager.dispatchReviewer", () => {
       finalInput: { path: "/Users/ken/work/note.md" },
       allowedDirectories: ["/Users/ken/work"],
       sensitivePathsAdjacent: [],
-      trustOrigin: "user" as const,
+      trustOrigin: "user-keyboard" as const,
     };
     const first = await pm.dispatchReviewer("fs_write", input);
     expect(first.cacheReason).toBe("miss-not-found");
     const second = await pm.dispatchReviewer("fs_write", input);
     expect(second.cacheReason).toBe("hit");
     expect(second.verdict).toEqual(first.verdict);
+  });
+
+  it("partitions reviewer cache by trustOrigin and approvalCacheKey", async () => {
+    const classifier: RiskClassifier = {
+      classify: vi.fn((_ctx: ToolInvocationContext): RiskVerdict => ({
+        level: "low",
+        reason: "classifier called",
+      })),
+    };
+    pm.setReviewer({ classifier, cache, deferredQueue: queue });
+    const base = {
+      source: "builtin" as const,
+      category: "write" as const,
+      finalInput: { path: "/Users/ken/work/note.md" },
+      allowedDirectories: ["/Users/ken/work"],
+      sensitivePathsAdjacent: [],
+    };
+
+    const first = await pm.dispatchReviewer("fs_write", {
+      ...base,
+      trustOrigin: "user-keyboard" as const,
+      approvalCacheKey: "fs_write:scope-a",
+    });
+    const same = await pm.dispatchReviewer("fs_write", {
+      ...base,
+      trustOrigin: "user-keyboard" as const,
+      approvalCacheKey: "fs_write:scope-a",
+    });
+    const originChanged = await pm.dispatchReviewer("fs_write", {
+      ...base,
+      trustOrigin: "llm-tool-arg" as const,
+      approvalCacheKey: "fs_write:scope-a",
+    });
+    const keyChanged = await pm.dispatchReviewer("fs_write", {
+      ...base,
+      trustOrigin: "llm-tool-arg" as const,
+      approvalCacheKey: "fs_write:scope-b",
+    });
+
+    expect(first.cacheReason).toBe("miss-not-found");
+    expect(same.cacheReason).toBe("hit");
+    expect(originChanged.cacheReason).toBe("miss-not-found");
+    expect(keyChanged.cacheReason).toBe("miss-not-found");
+    expect(classifier.classify).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not reuse reversible shell reviewer cache for destructive shell commands", async () => {
+    const bash = new BashTool();
+    const allowedDirectories = ["/Users/ken/work"];
+    const firstInput = { command: "echo ok" };
+    const destructiveInput = { command: "rm -rf ./build" };
+    const first = await pm.dispatchReviewer("bash", {
+      source: "builtin",
+      category: "shell",
+      finalInput: firstInput,
+      allowedDirectories,
+      sensitivePathsAdjacent: [],
+      trustOrigin: "llm-tool-arg",
+      approvalCacheKey: `bash:${bash.approvalCacheKey(firstInput)}`,
+    });
+    const second = await pm.dispatchReviewer("bash", {
+      source: "builtin",
+      category: "shell",
+      finalInput: destructiveInput,
+      allowedDirectories,
+      sensitivePathsAdjacent: [],
+      trustOrigin: "llm-tool-arg",
+      approvalCacheKey: `bash:${bash.approvalCacheKey(destructiveInput)}`,
+    });
+
+    expect(first.verdict.level).toBe("low");
+    expect(first.cacheReason).toBe("miss-not-found");
+    expect(second.cacheReason).toBe("miss-not-found");
+    expect(second.verdict.level).toBe("high");
+    expect(second.verdict.reason).toContain("destructive");
   });
 
   it("settings change invalidates stale cache (different allowedDirectories)", async () => {
@@ -120,13 +196,49 @@ describe("PermissionManager.dispatchReviewer", () => {
       finalInput: { path: "/Users/ken/work/note.md" },
       allowedDirectories: ["/Users/ken/work"],
       sensitivePathsAdjacent: [],
-      trustOrigin: "user" as const,
+      trustOrigin: "user-keyboard" as const,
     };
     await pm.dispatchReviewer("fs_write", ctxA);
     // Same input, different allowedDirectories context.
     const ctxB = { ...ctxA, allowedDirectories: ["/different"] };
     const r = await pm.dispatchReviewer("fs_write", ctxB);
     expect(r.cacheReason).toBe("miss-stale");
+  });
+
+  it("reviewer cache is partitioned by reviewer wiring settings", async () => {
+    const classifierA: RiskClassifier = {
+      classify: vi.fn(() => ({ level: "low", reason: "classifier A" })),
+    };
+    const classifierB: RiskClassifier = {
+      classify: vi.fn(() => ({ level: "medium", reason: "classifier B" })),
+    };
+    pm.setReviewer({
+      classifier: classifierA,
+      cache,
+      deferredQueue: queue,
+      cacheScope: { mode: "rule", model: "a" },
+    });
+    const input = {
+      source: "builtin" as const,
+      category: "write" as const,
+      finalInput: { path: "/Users/ken/work/note.md" },
+      allowedDirectories: ["/Users/ken/work"],
+      sensitivePathsAdjacent: [],
+      trustOrigin: "user-keyboard" as const,
+    };
+    const first = await pm.dispatchReviewer("fs_write", input);
+    pm.setReviewer({
+      classifier: classifierB,
+      cache,
+      deferredQueue: queue,
+      cacheScope: { mode: "llm", model: "b" },
+    });
+    const second = await pm.dispatchReviewer("fs_write", input);
+
+    expect(first.cacheReason).toBe("miss-not-found");
+    expect(second.cacheReason).toBe("miss-stale");
+    expect(second.verdict.reason).toBe("classifier B");
+    expect(classifierB.classify).toHaveBeenCalledOnce();
   });
 
   it("returns HIGH + no deferredId when reviewer not wired", async () => {
@@ -137,7 +249,7 @@ describe("PermissionManager.dispatchReviewer", () => {
       finalInput: { path: "/x" },
       allowedDirectories: [],
       sensitivePathsAdjacent: [],
-      trustOrigin: "user" as const,
+      trustOrigin: "user-keyboard" as const,
     });
     expect(r.verdict.level).toBe("high");
     expect(r.verdict.reason).toMatch(/not wired/);
@@ -160,7 +272,7 @@ describe("PermissionManager.dispatchReviewer", () => {
       finalInput: { path: "/x" },
       allowedDirectories: ["/Users/ken/work"],
       sensitivePathsAdjacent: [],
-      trustOrigin: "user" as const,
+      trustOrigin: "user-keyboard" as const,
     });
     expect(r.verdict.level).toBe("high");
     expect(r.verdict.reason).toBe("async high");

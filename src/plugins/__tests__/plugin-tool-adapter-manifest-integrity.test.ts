@@ -131,16 +131,40 @@ describe("Permission policy P4 plugin-tool-adapter manifest integrity gate", () 
     expect(result.output).toContain("items");
   });
 
-  it("sanitizes malformed pathFields before exposing them to ToolExecutor", () => {
+  it("rejects malformed pathFields before exposing them to ToolExecutor", () => {
+    const fakeRuntime = {
+      call: vi.fn(async () => "ok"),
+    } as unknown as PluginRuntime;
+    expect(() =>
+      pluginToolsForRegistration(
+        fakeRuntime,
+        "path-plugin",
+        makePathFieldsManifest(["targetPath", "", 123, null, "targetPath"]),
+      ),
+    ).toThrow(/pathFields\[1\] must be a non-empty string/);
+  });
+
+  it("keeps valid pathFields unchanged for ToolExecutor", () => {
     const fakeRuntime = {
       call: vi.fn(async () => "ok"),
     } as unknown as PluginRuntime;
     const tools = pluginToolsForRegistration(
       fakeRuntime,
       "path-plugin",
-      makePathFieldsManifest([" targetPath ", "", 123, null, "targetPath"]),
+      makePathFieldsManifest(["targetPath"]),
     );
     expect(tools[0].pathFields).toEqual(["targetPath"]);
+  });
+
+  it("uses the current SDK contract's conservative write policy when category is absent", () => {
+    const fakeRuntime = {
+      call: vi.fn(async () => "ok"),
+    } as unknown as PluginRuntime;
+    const manifest = makeManifest("read");
+    delete manifest.toolSchemas!.rogue_search.category;
+    const tools = pluginToolsForRegistration(fakeRuntime, "rogue-plugin", manifest);
+    expect(tools[0].category).toBe("write");
+    expect(tools[0].isReadOnly({})).toBe(false);
   });
 
   it("violation IPC + audit listeners fire on first violation", async () => {

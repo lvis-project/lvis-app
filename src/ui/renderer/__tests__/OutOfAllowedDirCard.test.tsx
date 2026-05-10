@@ -32,7 +32,7 @@ function makeReq(overrides: Partial<ApprovalRequest> = {}): ApprovalRequest {
       currentAllowed: ["/Users/ken/work"],
       adjacencyWarnings: [],
     },
-    trustOrigin: "user",
+    trustOrigin: "user-keyboard",
     ...overrides,
   };
 }
@@ -128,8 +128,8 @@ describe("OutOfAllowedDirCard", () => {
 
   it("trustOrigin badge renders when present", () => {
     render(
-      <OutOfAllowedDirCard open={true} request={makeReq({ trustOrigin: "agent" })} onDecide={() => {}} />,
+      <OutOfAllowedDirCard open={true} request={makeReq({ trustOrigin: "llm-tool-arg" })} onDecide={() => {}} />,
     );
-    expect(document.body.textContent).toContain("agent");
+    expect(document.body.textContent).toContain("llm-tool-arg");
   });
 });
