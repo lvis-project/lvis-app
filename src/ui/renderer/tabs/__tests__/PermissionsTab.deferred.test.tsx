@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import "../../../../../test/renderer/setup.ts";
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { PermissionsTab } from "../PermissionsTab.js";
 
 function installLvisApi() {
@@ -67,31 +67,27 @@ beforeEach(() => {
 });
 
 describe("PermissionsTab deferred queue surface", () => {
-  it("mounts the deferred queue panel inside the permissions tab", async () => {
+  it("does not mount the deferred queue approval surface inside settings", async () => {
     installLvisApi();
 
     render(<PermissionsTab />);
 
     await waitFor(() => {
-      expect(screen.getByTestId("deferred-queue-panel")).toBeTruthy();
+      expect(screen.getByText("현재 권한 정책")).toBeTruthy();
     });
-    expect(screen.getByText("write_file")).toBeTruthy();
-    expect(screen.getByText(/outside allowed directory/)).toBeTruthy();
+    expect(screen.queryByTestId("deferred-queue-panel")).toBeNull();
   });
 
-  it("resolves the visible deferred entry through the tab-mounted panel", async () => {
+  it("leaves deferred approval actions to the chat queue modal", async () => {
     const permission = installLvisApi();
 
     render(<PermissionsTab />);
 
     await waitFor(() => {
-      expect(screen.getByText("write_file")).toBeTruthy();
+      expect(screen.getByText("현재 권한 정책")).toBeTruthy();
     });
-    fireEvent.click(screen.getByText("승인"));
 
-    await waitFor(() => {
-      expect(permission.deferredResolve).toHaveBeenCalledWith("dq-1", "approved");
-    });
-    expect(permission.deferredList.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(screen.queryByText("write_file")).toBeNull();
+    expect(permission.deferredResolve).not.toHaveBeenCalled();
   });
 });

@@ -56,7 +56,7 @@ describe("PermissionModeBadge", () => {
     });
   });
 
-  it("surfaces deferred approvals in the header badge", async () => {
+  it("surfaces deferred approvals as a separate queue button", async () => {
     const deferredFetcher = vi.fn(async () => ({
       ok: true,
       pending: [{ id: "p1" }, { id: "p2" }],
@@ -68,7 +68,55 @@ describe("PermissionModeBadge", () => {
       expect(screen.getByTestId("permission-pending-badge").textContent).toContain("승인 2");
     });
     const badge = screen.getByTestId("permission-mode-badge");
-    expect(badge.getAttribute("aria-label")).toContain("대기 승인 2건");
+    expect(badge.getAttribute("aria-label")).not.toContain("대기 승인 2건");
+    const queueButton = screen.getByTestId("permission-queue-button");
+    expect(queueButton.getAttribute("aria-label")).toContain("대기 승인 2건");
+    expect(queueButton).toBeDisabled();
+  });
+
+  it("surfaces deferred queue load failures instead of hiding the queue state", async () => {
+    const deferredFetcher = vi.fn(async () => ({
+      ok: false,
+      error: "deferred-list unavailable",
+    }));
+    await act(async () => {
+      render(<PermissionModeBadge mode="auto" deferredFetcher={deferredFetcher} />);
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("permission-pending-badge").textContent).toContain("승인 확인 실패");
+    });
+    expect(screen.getByTestId("permission-queue-button").getAttribute("aria-label")).toContain(
+      "deferred-list unavailable",
+    );
+  });
+
+  it("clears deferred queue failure state when a pending-count event arrives", async () => {
+    let capturedHandler: ((summary: { pending: number }) => void) | null = null;
+    const deferredSubscriber = vi.fn((handler) => {
+      capturedHandler = handler;
+      return () => {};
+    });
+    await act(async () => {
+      render(
+        <PermissionModeBadge
+          mode="default"
+          deferredFetcher={async () => ({ ok: false, error: "down" })}
+          deferredSubscriber={deferredSubscriber}
+        />,
+      );
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("permission-pending-badge").textContent).toContain("승인 확인 실패");
+    });
+
+    await act(async () => {
+      capturedHandler!({ pending: 1 });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("permission-pending-badge").textContent).toContain("승인 1");
+    });
+    expect(screen.getByTestId("permission-queue-button").getAttribute("aria-label")).not.toContain("down");
   });
 
   it("subscribes to deferred approval changes", async () => {
@@ -138,6 +186,28 @@ describe("PermissionModeBadge", () => {
     });
     fireEvent.click(screen.getByTestId("permission-mode-badge"));
     expect(onClick).toHaveBeenCalled();
+  });
+
+  it("invokes queue click handler independently from mode settings", async () => {
+    const onClick = vi.fn();
+    const onQueueClick = vi.fn();
+    await act(async () => {
+      render(
+        <PermissionModeBadge
+          mode="auto"
+          deferredFetcher={async () => ({ ok: true, pending: [{ id: "p1" }] })}
+          onClick={onClick}
+          onQueueClick={onQueueClick}
+        />,
+      );
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("permission-queue-button")).toBeTruthy();
+    });
+    expect(screen.getByTestId("permission-queue-button")).not.toBeDisabled();
+    fireEvent.click(screen.getByTestId("permission-queue-button"));
+    expect(onQueueClick).toHaveBeenCalledTimes(1);
+    expect(onClick).not.toHaveBeenCalled();
   });
 
   it("falls back to 'unknown' when fetcher rejects", async () => {
