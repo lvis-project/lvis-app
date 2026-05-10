@@ -615,8 +615,9 @@ export class ToolExecutor {
           : undefined,
         additionalDirectories: context.additionalDirectories ?? [],
       },
+      { defer: "medium-high" },
     );
-    if (reviewer.verdict.level === "high") {
+    if (reviewer.verdict.level !== "low") {
       return {
         allowed: false,
         message:
@@ -625,7 +626,7 @@ export class ToolExecutor {
           (reviewer.deferredId ? ` (deferredId=${reviewer.deferredId})` : ""),
         permissionResult: {
           decision: "deny",
-          reason: `reviewer high: ${reviewer.verdict.reason}`,
+          reason: `reviewer ${reviewer.verdict.level}: ${reviewer.verdict.reason}`,
           layer: 5,
         },
       };
@@ -637,6 +638,64 @@ export class ToolExecutor {
         reason: `reviewer ${reviewer.verdict.level}: ${reviewer.verdict.reason}`,
         layer: 5,
       },
+    };
+  }
+
+  private async dispatchReviewerForInteractiveAuto(
+    toolName: string,
+    source: ToolSource,
+    category: ToolCategory,
+    pathFields: readonly string[],
+    finalInput: Record<string, unknown>,
+    allowedDirectories: string[],
+    sensitivePathsAdjacent: string[],
+    context: ToolPermissionContext,
+  ): Promise<PermissionCheckResult | null> {
+    if (context.headless === true) return null;
+    if (this.permissionManager?.getMode() !== "auto") return null;
+    if (category !== "write" && category !== "shell" && category !== "network") {
+      return null;
+    }
+    if (!this.permissionManager.hasReviewer()) {
+      return {
+        decision: "ask",
+        reason: "auto-review reviewer unavailable — explicit user approval required",
+        layer: 5,
+      };
+    }
+
+    const reviewer = await this.permissionManager.dispatchReviewer(
+      toolName,
+      {
+        source,
+        category,
+        pathFields,
+        finalInput,
+        allowedDirectories,
+        sensitivePathsAdjacent,
+        trustOrigin: context.trustOrigin,
+        ...(context.approvalCacheKey ? { approvalCacheKey: context.approvalCacheKey } : {}),
+      },
+      {
+        allowedPluginIds: context.allowedPluginIds
+          ? [...context.allowedPluginIds]
+          : undefined,
+        additionalDirectories: context.additionalDirectories ?? [],
+      },
+      { defer: "none" },
+    );
+
+    if (reviewer.verdict.level === "low") {
+      return {
+        decision: "allow",
+        reason: `reviewer low: ${reviewer.verdict.reason}`,
+        layer: 5,
+      };
+    }
+    return {
+      decision: "ask",
+      reason: `reviewer ${reviewer.verdict.level}: ${reviewer.verdict.reason}`,
+      layer: 5,
     };
   }
 
@@ -1069,6 +1128,21 @@ export class ToolExecutor {
           reason: `meta tool decisionOverride='ask' — 사용자 컨펌 필요`,
           layer: 6,
         };
+      }
+      if (permissionResult.decision !== "deny") {
+        const reviewerResult = await this.dispatchReviewerForInteractiveAuto(
+          toolUse.name,
+          source,
+          invocationCategory,
+          tool.pathFields ?? [],
+          finalInput,
+          invocationAllowedScope.directories,
+          sensitivePathPattern ? [sensitivePathPattern] : [],
+          invocationPermissionContext,
+        );
+        if (reviewerResult) {
+          permissionResult = reviewerResult;
+        }
       }
       if (permissionResult.decision === "deny") {
         const msg = `[권한 차단] 도구 '${toolUse.name}' (${source}, trust:${trust}) — ${permissionResult.reason}`;

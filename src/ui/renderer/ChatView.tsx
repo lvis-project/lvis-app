@@ -105,6 +105,8 @@ export interface ChatViewProps {
   // 불필요 — 사용자가 임의 시점으로 돌아가려면 후속 PR 의 view-mode 지원 필요.
   /** Called when user confirms a plugin overlay item; id is the OverlayItem.id. */
   onPluginPrimaryAction?: (overlayItemId: string) => void;
+  /** Opens the non-interruptive deferred permission queue modal. */
+  onOpenPermissionQueue?: () => void;
 }
 
 function HistoricalSessionMarker({ title, sessionId }: { title: string; sessionId: string }) {
@@ -384,7 +386,7 @@ function HistoricalEntriesList({
   return <div className="min-w-0 w-full max-w-full space-y-3 overflow-x-hidden">{rendered}</div>;
 }
 
-export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, installingPlugins, onOpenMarketplace, marketplaceUrlReady, onPluginPrimaryAction }: ChatViewProps) {
+export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, installingPlugins, onOpenMarketplace, marketplaceUrlReady, onPluginPrimaryAction, onOpenPermissionQueue }: ChatViewProps) {
   // We still need the api for SessionTodoPanel; obtain it via singleton.
   const workflowApi = getApi();
   const debugStreamEnabled = isDebugStreamEnabled();
@@ -1207,7 +1209,10 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             <div className="min-w-0 flex-1">
               <SessionTodoPanel api={workflowApi} sessionId={currentSessionId} />
             </div>
-            <PermissionModeBadge onClick={() => onOpenSettings("permissions")} />
+            <PermissionModeBadge
+              onClick={() => onOpenSettings("permissions")}
+              onQueueClick={onOpenPermissionQueue}
+            />
           </div>
         </div>
         <div className="w-full max-w-full min-w-0 overflow-x-hidden pb-1 space-y-2">
