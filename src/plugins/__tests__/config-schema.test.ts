@@ -139,6 +139,70 @@ describe("US-B1 — host plugin.schema.json declares configSchema", () => {
   });
 });
 
+describe("toolSchemas authority metadata", () => {
+  function manifestWithToolSchema(toolSchema: Record<string, unknown>) {
+    return {
+      id: "test.plugin",
+      name: "Test",
+      version: "1.0.0",
+      description: "Test fixture.",
+      publisher: "Test fixture",
+      entry: "index.js",
+      tools: ["test_ping"],
+      toolSchemas: {
+        test_ping: toolSchema,
+      },
+    };
+  }
+
+  it("AJV strict accepts category and dotted pathFields from the SDK schema", async () => {
+    const ajv = buildAjv();
+    const validate = ajv.compile(await loadHostManifestSchema());
+    const ok = validate(manifestWithToolSchema({
+      description: "Test ping reads a nested path for permission checks.",
+      category: "read",
+      pathFields: ["opts.output"],
+      inputSchema: {
+        type: "object",
+        properties: {
+          opts: {
+            type: "object",
+            properties: { output: { type: "string" } },
+            required: ["output"],
+          },
+        },
+      },
+    }));
+    if (!ok) {
+      // eslint-disable-next-line no-console
+      console.error("AJV errors:", validate.errors);
+    }
+    expect(ok).toBe(true);
+  });
+
+  it("AJV strict rejects toolSchemas without a category", async () => {
+    const ajv = buildAjv();
+    const validate = ajv.compile(await loadHostManifestSchema());
+    const ok = validate(manifestWithToolSchema({
+      description: "Test ping has no permission category.",
+      inputSchema: { type: "object", properties: {} },
+    }));
+    expect(ok).toBe(false);
+  });
+
+  it("AJV strict rejects invalid category and malformed pathFields", async () => {
+    const ajv = buildAjv();
+    const validate = ajv.compile(await loadHostManifestSchema());
+    const ok = validate(manifestWithToolSchema({
+      description: "Test ping has invalid authority metadata.",
+      category: "dangerous",
+      pathFields: ["opts..output"],
+      inputSchema: { type: "object", properties: {} },
+    }));
+    expect(ok).toBe(false);
+  });
+});
+
 describe("US-B2 / US-B6 — config-schema helpers", () => {
   const schema: PluginConfigSchema = {
     properties: {
@@ -214,6 +278,7 @@ describe("US-B1 regression — baseline manifest WITHOUT configSchema still vali
       toolSchemas: {
         meeting_start: {
           description: "Begin a new recording session and stream chunks.",
+          category: "write",
           inputSchema: {
             type: "object",
             properties: { sessionId: { type: "string" } },
@@ -222,6 +287,7 @@ describe("US-B1 regression — baseline manifest WITHOUT configSchema still vali
         },
         meeting_stop: {
           description: "Stop the current recording session and finalize.",
+          category: "write",
           inputSchema: {
             type: "object",
             properties: { sessionId: { type: "string" } },

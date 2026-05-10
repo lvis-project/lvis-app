@@ -6,8 +6,8 @@
  *   • builds the per-plugin HostApi factory (registerKeywords / emitEvent /
  *     onEvent / getSecret / callLlm /
  *     logEvent / onShutdown)
- *   • creates the PluginRuntime, starts plugins, wires manifest startupTools
- *     and the dev hot-reload watcher
+ *   • creates the PluginRuntime, starts plugins, registers plugin tools,
+ *     and wires the dev hot-reload watcher
  *   • returns the runtime + late-binding refs (llmCallerRef / pluginCallLlmRef /
  *     conversationLoopRef) that boot.ts injects once ConversationLoop exists.
  *
@@ -57,7 +57,6 @@ import { emitEvent, onEvent } from "../types.js";
 import {
   buildPluginConfigOverrides,
   registerPluginTools,
-  runManifestStartupTools,
   syncPluginToolRegistry,
 } from "../plugins.js";
 import { createLogger } from "../../lib/logger.js";
@@ -334,9 +333,9 @@ const MAX_PROMPT_LEN = 4096;
 
 /**
  * Per-plugin rate limit for `triggerConversation()`. A plugin that omits
- * `dedupeKey` (or rotates it per call) is otherwise unbounded — fire-and-
- * forget into runTriggerTurn could spawn N concurrent LLM streams. Token
- * bucket capped at 6 calls / 60 seconds per plugin (sustained), with
+ * `dedupeKey` (or rotates it per call) is otherwise unbounded and could
+ * stage N concurrent overlay prompts. Token bucket capped at 6 calls / 60
+ * seconds per plugin (sustained), with
  * burst of 3 — picked so the demo scenarios (one-meeting-mail, one-task-
  * deadline) do not throttle but a tight loop adversary is stopped early.
  */
@@ -463,7 +462,7 @@ const triggerDenyAuditThrottle = new TriggerDenyAuditThrottle();
  *   { kind: "deny", result }      — fully-formed ConversationTriggerResult
  *                                   the host should return; audit row has
  *                                   already been written.
- *   { kind: "allow", result, ... } — caller should dispatch runTriggerTurn
+ *   { kind: "allow", result, ... } — caller should stage an overlay item
  *                                   with the normalized fields.
  *
  * The function ALSO writes the success / deny audit rows so the caller
@@ -689,6 +688,15 @@ export interface LateBindingRefs {
   conversationLoopRef: {
     fn: import("../../engine/conversation-loop.js").ConversationLoop | null;
   };
+  pluginToolInvokerRef: {
+    fn:
+      | ((
+          toolName: string,
+          payload: unknown,
+          context: { origin: "startup" | "plugin" | "ui"; callerPluginId?: string; ownerPluginId?: string },
+        ) => Promise<unknown>)
+      | null;
+  };
   /**
    * Trigger executor ref — kept for future use; currently always null since
    * TriggerExecutor was removed. triggerConversation() returns loop_unavailable
@@ -837,6 +845,7 @@ export async function initPluginRuntime(
     llmCallerRef: { fn: null },
     pluginCallLlmRef: { fn: null },
     conversationLoopRef: { fn: null },
+    pluginToolInvokerRef: { fn: null },
     triggerExecutorRef: { fn: null },
   };
 
@@ -1025,7 +1034,15 @@ export async function initPluginRuntime(
       },
       callTool: async <T = unknown>(toolName: string, payload?: unknown): Promise<T> => {
         pluginRuntime.assertPluginToolAccess(pluginId, toolName);
-        return pluginRuntime.call(toolName, payload) as Promise<T>;
+        const invoker = lateBinding.pluginToolInvokerRef.fn;
+        if (!invoker) {
+          throw new Error("Plugin tool executor is not wired; plugin callTool denied");
+        }
+        return invoker(toolName, payload, {
+          origin: "plugin",
+          callerPluginId: pluginId,
+          ownerPluginId: pluginRuntime.resolveToolOwner(toolName),
+        }) as Promise<T>;
       },
       callLlm: async (prompt, opts) => {
         if (lateBinding.pluginCallLlmRef.fn) {
@@ -1348,9 +1365,6 @@ export async function initPluginRuntime(
       );
     }
   });
-
-  // 선언형 startupTools 자동 실행
-  runManifestStartupTools(pluginRuntime);
 
   // 플러그인 메서드를 ToolRegistry에 등록
   registerPluginTools(pluginRuntime, toolRegistry);
