@@ -74,6 +74,7 @@ function makeTool(args: {
       properties: {
         path: { type: "string" },
         endpoint: { type: "string" },
+        method: { type: "string" },
         command: { type: "string" },
         payload: { type: "string" },
       },
@@ -385,7 +386,7 @@ describe("permission-review-scenario-board-v2.html contract", () => {
   });
 
   it("S14 network data egress asks with reviewer impact", async () => {
-    const { pm, cleanup } = makeManager("auto", fixedClassifier({ level: "medium", reason: "meeting summary leaves device" }));
+    const { pm, cleanup } = makeManager("auto");
     try {
       const { tool } = makeTool({ name: "teams_send", category: "network", source: "plugin" });
       const gate = makeGate("deny-once");
@@ -393,11 +394,15 @@ describe("permission-review-scenario-board-v2.html contract", () => {
         tool,
         pm,
         gate,
-        input: { endpoint: "https://teams.microsoft.com/webhook", payload: "2.4KB meeting summary" },
+        input: {
+          endpoint: "https://graph.microsoft.com/v1.0/teams/team/channels/channel/messages",
+          method: "POST",
+          payload: "2.4KB meeting summary",
+        },
       });
       expect(result[0].is_error).toBe(true);
       expect(gate.requestAndWait).toHaveBeenCalledWith(expect.objectContaining({
-        reason: expect.stringContaining("meeting summary leaves device"),
+        reason: expect.stringContaining("reviewer medium: network graph data operation"),
       }));
     } finally {
       cleanup();
