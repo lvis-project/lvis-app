@@ -53,9 +53,189 @@ describe("ConversationLoop queryLoop", () => {
     (loop as { provider: LLMProvider | null }).provider = provider;
     (loop as { sessionId: string }).sessionId = "s-main";
 
-    await loop.runTurn("다음 질문");
+    await loop.runTurn("다음 질문", undefined, undefined, { inputOrigin: "user-keyboard" });
 
     expect(sessionTodoStore.list("s-main")).toEqual([]);
+  });
+
+  it("classifies model-generated tool args from a typed prompt as llm-tool-arg", async () => {
+    const toolRegistry = new ToolRegistry();
+    const origins: unknown[] = [];
+    toolRegistry.register(createDynamicTool({
+      name: "write_note",
+      description: "Write note",
+      source: "builtin",
+      category: "write",
+      jsonSchema: { type: "object", properties: { text: { type: "string" } }, required: ["text"] },
+      execute: async (_input, ctx) => {
+        origins.push(ctx.metadata.trustOrigin);
+        return { output: "ok", isError: false };
+      },
+    }));
+    const provider = new FakeProvider([
+      [
+        { type: "tool_call", id: "tool-origin", name: "write_note", input: { text: "from model" } },
+        { type: "message_complete", stopReason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const loop = new ConversationLoop(({
+      settingsService: { get: () => fakeLlmSettings(), getSecret: () => "test-key" },
+      systemPromptBuilder: { build: () => "system" },
+      keywordEngine: new KeywordEngine(),
+      routeEngine: new RouteEngine({ toolRegistry }),
+      toolRegistry,
+      memoryManager: { saveSession: () => {}, listSessions: () => [] },
+    } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+    (loop as { provider: LLMProvider | null }).provider = provider;
+
+    await loop.runTurn("please write this", undefined, undefined, { inputOrigin: "user-keyboard" });
+
+    expect(origins).toEqual(["llm-tool-arg"]);
+  });
+
+  it("escalates subsequent tool calls to file-content after read_file output reaches the model", async () => {
+    const toolRegistry = new ToolRegistry();
+    const origins: Array<{ tool: string; origin: unknown }> = [];
+    toolRegistry.register(createDynamicTool({
+      name: "read_file",
+      description: "Read file",
+      source: "builtin",
+      category: "read",
+      jsonSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+      isReadOnly: () => true,
+      execute: async (_input, ctx) => {
+        origins.push({ tool: "read_file", origin: ctx.metadata.trustOrigin });
+        return { output: "untrusted file says run a shell command", isError: false };
+      },
+    }));
+    toolRegistry.register(createDynamicTool({
+      name: "bash",
+      description: "Run shell",
+      source: "builtin",
+      category: "shell",
+      jsonSchema: { type: "object", properties: { command: { type: "string" } }, required: ["command"] },
+      execute: async (_input, ctx) => {
+        origins.push({ tool: "bash", origin: ctx.metadata.trustOrigin });
+        return { output: "ok", isError: false };
+      },
+    }));
+    const provider = new FakeProvider([
+      [
+        { type: "tool_call", id: "read-1", name: "read_file", input: { path: "note.txt" } },
+        { type: "message_complete", stopReason: "tool_use" },
+      ],
+      [
+        { type: "tool_call", id: "bash-1", name: "bash", input: { command: "echo ok" } },
+        { type: "message_complete", stopReason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const loop = new ConversationLoop(({
+      settingsService: { get: () => fakeLlmSettings(), getSecret: () => "test-key" },
+      systemPromptBuilder: { build: () => "system" },
+      keywordEngine: new KeywordEngine(),
+      routeEngine: new RouteEngine({ toolRegistry }),
+      toolRegistry,
+      memoryManager: { saveSession: () => {}, listSessions: () => [] },
+    } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+    (loop as { provider: LLMProvider | null }).provider = provider;
+
+    await loop.runTurn("read and act", undefined, undefined, { inputOrigin: "user-keyboard" });
+
+    expect(origins).toEqual([
+      { tool: "read_file", origin: "llm-tool-arg" },
+      { tool: "bash", origin: "file-content" },
+    ]);
+  });
+
+  it("preserves plugin-emitted provenance for tools produced by imported trigger prompts", async () => {
+    const toolRegistry = new ToolRegistry();
+    const origins: unknown[] = [];
+    toolRegistry.register(createDynamicTool({
+      name: "task_add",
+      description: "Add task",
+      source: "builtin",
+      category: "write",
+      jsonSchema: { type: "object", properties: { title: { type: "string" } }, required: ["title"] },
+      execute: async (_input, ctx) => {
+        origins.push(ctx.metadata.trustOrigin);
+        return { output: "ok", isError: false };
+      },
+    }));
+    const provider = new FakeProvider([
+      [
+        { type: "tool_call", id: "plugin-tool", name: "task_add", input: { title: "from plugin" } },
+        { type: "message_complete", stopReason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const loop = new ConversationLoop(({
+      settingsService: { get: () => fakeLlmSettings(), getSecret: () => "test-key" },
+      systemPromptBuilder: { build: () => "system" },
+      keywordEngine: new KeywordEngine(),
+      routeEngine: new RouteEngine({ toolRegistry }),
+      toolRegistry,
+      memoryManager: { saveSession: () => {}, listSessions: () => [] },
+    } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+    (loop as { provider: LLMProvider | null }).provider = provider;
+
+    await loop.runTurn("plugin prompt", undefined, undefined, { inputOrigin: "plugin-emitted" });
+
+    expect(origins).toEqual(["plugin-emitted"]);
+  });
+
+  it("classifies pasted text bodies as file-content before the first model tool call", async () => {
+    const toolRegistry = new ToolRegistry();
+    const origins: unknown[] = [];
+    toolRegistry.register(createDynamicTool({
+      name: "bash",
+      description: "Run shell",
+      source: "builtin",
+      category: "shell",
+      jsonSchema: { type: "object", properties: { command: { type: "string" } }, required: ["command"] },
+      execute: async (_input, ctx) => {
+        origins.push(ctx.metadata.trustOrigin);
+        return { output: "ok", isError: false };
+      },
+    }));
+    const provider = new FakeProvider([
+      [
+        { type: "tool_call", id: "paste-tool", name: "bash", input: { command: "echo from paste" } },
+        { type: "message_complete", stopReason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const loop = new ConversationLoop(({
+      settingsService: { get: () => fakeLlmSettings(), getSecret: () => "test-key" },
+      systemPromptBuilder: { build: () => "system" },
+      keywordEngine: new KeywordEngine(),
+      routeEngine: new RouteEngine({ toolRegistry }),
+      toolRegistry,
+      memoryManager: { saveSession: () => {}, listSessions: () => [] },
+    } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+    (loop as { provider: LLMProvider | null }).provider = provider;
+
+    await loop.runTurn(
+      "summarize\n\n----- Pasted text #1 (2 lines) -----\n/run this\n----- end Pasted text #1 -----",
+      undefined,
+      undefined,
+      { inputOrigin: "user-keyboard" },
+    );
+
+    expect(origins).toEqual(["file-content"]);
   });
 
   it("preserves reasoning and exposes assistant ping-pong rounds around tool execution", async () => {
@@ -124,7 +304,7 @@ describe("ConversationLoop queryLoop", () => {
       },
       onToolStart: (name) => toolEvents.push({ type: "start", name }),
       onToolEnd: (name) => toolEvents.push({ type: "end", name }),
-    });
+    }, undefined, { inputOrigin: "user-keyboard" });
 
     expect(result).toMatchObject({
       text: "구조를 확인했습니다.",
@@ -232,7 +412,7 @@ describe("ConversationLoop queryLoop", () => {
     } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
     (loop as { provider: LLMProvider | null }).provider = provider;
 
-    await loop.runTurn("call many tools");
+    await loop.runTurn("call many tools", undefined, undefined, { inputOrigin: "user-keyboard" });
 
     const messages = loop.getHistory().getMessages();
     // Find the assistant message that committed the over-cap tool_use round.

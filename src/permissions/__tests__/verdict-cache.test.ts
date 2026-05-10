@@ -37,7 +37,7 @@ const LOOKUP: VerdictCacheLookupKey = {
   toolName: "fs_write",
   source: "builtin",
   category: "write",
-  trustOrigin: "user",
+  trustOrigin: "user-keyboard",
   finalInput: { path: "/Users/ken/work/a.md", count: 5 },
 };
 
@@ -68,16 +68,66 @@ describe("canonicalInputShape", () => {
 });
 
 describe("computeCacheKey", () => {
-  it("same input shape, different literal → same key", () => {
+  it("same input shape, different literal → same key for shape-only categories", () => {
     const k1 = computeCacheKey({
       ...LOOKUP,
+      toolName: "ask_user_question",
+      category: "meta",
       finalInput: { path: "/Users/ken/work/x.md", count: 1 },
     });
     const k2 = computeCacheKey({
       ...LOOKUP,
+      toolName: "ask_user_question",
+      category: "meta",
       finalInput: { path: "/etc/passwd", count: 999 },
     });
     expect(k1).toBe(k2);
+  });
+
+  it("shell inputs are value-sensitive because command literals drive risk", () => {
+    const k1 = computeCacheKey({
+      ...LOOKUP,
+      toolName: "bash",
+      category: "shell",
+      finalInput: { command: "echo ok" },
+    });
+    const k2 = computeCacheKey({
+      ...LOOKUP,
+      toolName: "bash",
+      category: "shell",
+      finalInput: { command: "rm -rf ./build" },
+    });
+    expect(k1).not.toBe(k2);
+  });
+
+  it("network inputs are value-sensitive because host literals drive risk", () => {
+    const trusted = computeCacheKey({
+      ...LOOKUP,
+      toolName: "mcp_fetch",
+      category: "network",
+      finalInput: { url: "https://api.github.com/repos/lvis-project/lvis-app" },
+    });
+    const untrusted = computeCacheKey({
+      ...LOOKUP,
+      toolName: "mcp_fetch",
+      category: "network",
+      finalInput: { url: "https://evil.example.test/repos/lvis-project/lvis-app" },
+    });
+    expect(trusted).not.toBe(untrusted);
+  });
+
+  it("write inputs are value-sensitive because target paths drive risk", () => {
+    const allowedLeaf = computeCacheKey({
+      ...LOOKUP,
+      category: "write",
+      finalInput: { path: "/Users/ken/work/file.md" },
+    });
+    const outside = computeCacheKey({
+      ...LOOKUP,
+      category: "write",
+      finalInput: { path: "/etc/passwd" },
+    });
+    expect(allowedLeaf).not.toBe(outside);
   });
 
   it("different category → different key", () => {
@@ -93,9 +143,9 @@ describe("computeCacheKey", () => {
   });
 
   it("different trustOrigin → different key (architect round-4: high-trust verdict must not be served to low-trust origin)", () => {
-    const userKey = computeCacheKey({ ...LOOKUP, trustOrigin: "user" });
-    const agentKey = computeCacheKey({ ...LOOKUP, trustOrigin: "agent" });
-    const pluginKey = computeCacheKey({ ...LOOKUP, trustOrigin: "plugin" });
+    const userKey = computeCacheKey({ ...LOOKUP, trustOrigin: "user-keyboard" });
+    const agentKey = computeCacheKey({ ...LOOKUP, trustOrigin: "llm-tool-arg" });
+    const pluginKey = computeCacheKey({ ...LOOKUP, trustOrigin: "plugin-emitted" });
     expect(userKey).not.toBe(agentKey);
     expect(userKey).not.toBe(pluginKey);
     expect(agentKey).not.toBe(pluginKey);

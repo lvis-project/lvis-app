@@ -7,11 +7,13 @@
  * Storage: `~/.lvis/permissions/reviewer-cache.jsonl` (append-only,
  * per-feature namespace per CLAUDE.md storage rule).
  *
- * Cache key: sha256(toolName + source + category + canonicalInputShape).
+ * Cache key: sha256(toolName + source + category + trustOrigin + approvalCacheKey + canonicalInputIdentity).
  *   - canonicalInputShape replaces every value with its type-name and
- *     deep-sorts keys, so different paths sharing the same shape share
- *     a cache entry. This is the architectural design — caching is
- *     keyed on *shape risk* not *literal arguments*.
+ *     deep-sorts keys for categories whose deterministic reviewer rules
+ *     do not inspect literal values.
+ *   - shell/network/read/write are value-sensitive: command literals,
+ *     hosts, and target paths drive the deterministic risk classifier, so
+ *     those keys use sorted literal JSON.
  *
  * invalidationKey: sha256(allowedDirectories.sorted ‖ scope.json.sorted).
  *   - When settings change (additionalDirectories, scope) the cached
@@ -39,7 +41,7 @@ const log = createLogger("reviewer-cache");
 const TTL_MS = 24 * 60 * 60 * 1000;
 
 export interface VerdictCacheEntry {
-  /** sha256(toolName+source+category+canonicalInputShape) */
+  /** sha256(toolName+source+category+trustOrigin+approvalCacheKey+canonicalInputIdentity) */
   key: string;
   verdict: RiskVerdict;
   /** Unix ms, expiresAt = createdAt + TTL_MS */
@@ -54,11 +56,12 @@ export interface VerdictCacheLookupKey {
   category: ToolCategory;
   /**
    * Permission policy architect round-4: cache identity must include trust origin.
-   * A `user`-keyboard verdict cached for a write must NOT be served to
-   * an `agent`-origin invocation of the same shape — the underlying
+   * A `user-keyboard` verdict cached for a write must NOT be served to
+   * an `llm-tool-arg` invocation of the same shape — the underlying
    * intent (and therefore the safe verdict) differs.
    */
   trustOrigin: ToolTrustOrigin;
+  approvalCacheKey?: string;
   finalInput: Record<string, unknown>;
 }
 
@@ -86,6 +89,10 @@ function defaultPath(): string {
  */
 export function canonicalInputShape(input: Record<string, unknown>): string {
   return JSON.stringify(shapeOf(input));
+}
+
+function canonicalInputValue(input: Record<string, unknown>): string {
+  return JSON.stringify(input, sortedReplacer);
 }
 
 function shapeOf(v: unknown): unknown {
@@ -116,8 +123,14 @@ function sha256(text: string): string {
 }
 
 export function computeCacheKey(lookup: VerdictCacheLookupKey): string {
-  const shape = canonicalInputShape(lookup.finalInput);
-  return sha256(`${lookup.toolName}\x1f${lookup.source}\x1f${lookup.category}\x1f${lookup.trustOrigin}\x1f${shape}`);
+  const shape = isValueSensitiveCategory(lookup.category)
+    ? canonicalInputValue(lookup.finalInput)
+    : canonicalInputShape(lookup.finalInput);
+  return sha256(`${lookup.toolName}\x1f${lookup.source}\x1f${lookup.category}\x1f${lookup.trustOrigin}\x1f${lookup.approvalCacheKey ?? ""}\x1f${shape}`);
+}
+
+function isValueSensitiveCategory(category: ToolCategory): boolean {
+  return category === "shell" || category === "network" || category === "write" || category === "read";
 }
 
 export function computeInvalidationKey(ctx: VerdictCacheContext): string {

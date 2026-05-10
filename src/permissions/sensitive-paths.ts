@@ -54,7 +54,7 @@ export const MAX_WALK_UP = 64;
  */
 export const SENSITIVE_PATH_PATTERNS: readonly string[] = Object.freeze([
   // ── OpenHarness upstream ────────────────────────────
-  "**/.ssh/*", // SSH keys and config
+  "**/.ssh/**", // SSH keys and config
   "**/.aws/credentials", // AWS static credentials
   "**/.aws/config", // AWS profile/region config
   "**/.config/gcloud/**", // GCP credentials

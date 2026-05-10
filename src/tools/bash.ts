@@ -15,6 +15,7 @@
  * (Step 2.5 of the tool executor pipeline) prevents dangerous syntax.
  */
 import { spawn, type ChildProcessByStdio } from "node:child_process";
+import { createHash } from "node:crypto";
 import { resolveShell } from "../lib/shell-resolver.js";
 import type { Readable } from "node:stream";
 import { isAbsolute, resolve as pathResolve } from "node:path";
@@ -28,8 +29,11 @@ import {
   type ToolExecutionContext,
   type ToolResult,
 } from "./base.js";
-import { validateSandboxPath } from "../sandbox/path-validator.js";
 import { buildSafeChildEnv } from "./safe-env.js";
+import {
+  validateShellCommandPathPolicy,
+  validateShellWorkingDirectory,
+} from "./shell-path-policy.js";
 
 export const BashToolInputSchema = z.object({
   command: z.string().min(1).describe("Shell command to execute"),
@@ -73,6 +77,13 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
     return false;
   }
 
+  approvalCacheKey(input: unknown): string {
+    const parsed = BashToolInputSchema.parse(input);
+    return createHash("sha256")
+      .update(JSON.stringify({ command: parsed.command, cwd: parsed.cwd ?? null }))
+      .digest("hex");
+  }
+
   protected async executeTyped(
     input: z.infer<typeof BashToolInputSchema>,
     ctx: ToolExecutionContext,
@@ -93,11 +104,18 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
         ? pathResolve(input.cwd)
         : pathResolve(ctx.cwd, input.cwd)
       : ctx.cwd;
-    if (input.cwd) {
-      const check = validateSandboxPath(resolvedCwd, ctx.cwd, [...ctx.allowedDirectories]);
-      if (!check.allowed) {
-        return { output: `Sandbox: ${check.reason}`, isError: true };
-      }
+    const cwdViolation = validateShellWorkingDirectory(resolvedCwd, ctx.cwd, ctx.allowedDirectories);
+    if (cwdViolation) {
+      return { output: cwdViolation, isError: true };
+    }
+    const commandPathViolation = validateShellCommandPathPolicy(
+      input.command,
+      resolvedCwd,
+      ctx.cwd,
+      ctx.allowedDirectories,
+    );
+    if (commandPathViolation) {
+      return { output: commandPathViolation, isError: true };
     }
 
     return await spawnWithTimeout(input.command, resolvedCwd, input.timeoutSeconds); // Uses shared shell resolver

@@ -56,8 +56,8 @@ export interface ToolInvocationContext {
   category: ToolCategory;
   /**
    * Permission policy §9 trust origin. Surfaced in the LLM prompt so the classifier
-   * can reason about prompt-injection risk: an `agent`-origin write of
-   * the same shape as a `user`-keyboard write is meaningfully different.
+   * can reason about prompt-injection risk: an `llm-tool-arg` write of
+   * the same shape as a `user-keyboard` write is meaningfully different.
    */
   trustOrigin: ToolTrustOrigin;
   finalInput: Record<string, unknown>;
@@ -144,13 +144,23 @@ function extractNetworkHost(input: Record<string, unknown>): string | null {
   return null;
 }
 
-function extractWritePath(input: Record<string, unknown>): string | null {
-  const candidates = ["path", "filePath", "file", "target", "dest", "destination"];
+function extractWritePaths(input: Record<string, unknown>): string[] {
+  const candidates = [
+    "path",
+    "filePath",
+    "file",
+    "target",
+    "sourcePath",
+    "destinationPath",
+    "dest",
+    "destination",
+  ];
+  const paths: string[] = [];
   for (const k of candidates) {
     const v = input[k];
-    if (typeof v === "string" && v.length > 0) return v;
+    if (typeof v === "string" && v.length > 0) paths.push(v);
   }
-  return null;
+  return [...new Set(paths)];
 }
 
 /**
@@ -229,16 +239,19 @@ const RULES: Array<(ctx: ToolInvocationContext) => RiskVerdict | null> = [
   // ── write rules (3) ────────────────────────────────────
   (ctx) => {
     if (ctx.category !== "write") return null;
-    const p = extractWritePath(ctx.finalInput);
-    if (p && !isInsideAllowed(p, ctx.allowedDirectories)) {
+    const paths = extractWritePaths(ctx.finalInput);
+    if (paths.length === 0) {
+      return { level: "high", reason: "write path not declared" };
+    }
+    if (paths.some((p) => !isInsideAllowed(p, ctx.allowedDirectories))) {
       return { level: "high", reason: "write outside allowed dirs" };
     }
     return null;
   },
   (ctx) => {
     if (ctx.category !== "write") return null;
-    const p = extractWritePath(ctx.finalInput);
-    if (p && isDeepInsideAllowed(p, ctx.allowedDirectories)) {
+    const paths = extractWritePaths(ctx.finalInput);
+    if (paths.some((p) => isDeepInsideAllowed(p, ctx.allowedDirectories))) {
       return { level: "medium", reason: "write deep inside allowed" };
     }
     return null;
@@ -251,8 +264,8 @@ const RULES: Array<(ctx: ToolInvocationContext) => RiskVerdict | null> = [
   // ── read rules (2) — read shouldn't usually reach reviewer ──
   (ctx) => {
     if (ctx.category !== "read") return null;
-    const p = extractWritePath(ctx.finalInput);
-    if (p && !isInsideAllowed(p, ctx.allowedDirectories)) {
+    const paths = extractWritePaths(ctx.finalInput);
+    if (paths.some((p) => !isInsideAllowed(p, ctx.allowedDirectories))) {
       return { level: "high", reason: "read outside allowed dirs" };
     }
     return null;

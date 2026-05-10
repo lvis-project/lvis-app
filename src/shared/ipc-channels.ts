@@ -39,6 +39,14 @@ export const ROUTINES_V2 = {
 } as const;
 
 export const PERMISSIONS = {
+  getMode: "lvis:permission:get-mode",
+  setMode: "lvis:permission:set-mode",
+  listRules: "lvis:permission:list-rules",
+  addRule: "lvis:permission:add-rule",
+  removeRule: "lvis:permission:remove-rule",
+  approvalRespond: "lvis:approval:respond",
+  policyGet: "lvis:policy:get",
+  policySet: "lvis:policy:set",
   dirDispatch: "lvis:permissions:dir-dispatch",
   reviewerDispatch: "lvis:permissions:reviewer-dispatch",
   deferredList: "lvis:permissions:deferred-list",

@@ -92,6 +92,23 @@ describe("PermissionManager (B1 persistence)", () => {
     expect(pm.getVisibilityDenyRules()).toEqual([{ pattern: "dangerous_tool" }]);
   });
 
+  it("uses shared glob matcher for allow/deny rules", async () => {
+    pm.setRules([
+      { pattern: "path:/work/**/*.md", action: "allow" },
+      { pattern: "path:/work/private/**", action: "deny" },
+    ]);
+
+    const allowed = pm.checkDetailed("write_file", "builtin", "write", null, {
+      approvalCacheKey: "path:/work/docs/readme.md",
+    });
+    const denied = pm.checkDetailed("write_file", "builtin", "write", null, {
+      approvalCacheKey: "path:/work/private/secret.md",
+    });
+
+    expect(allowed.decision).toBe("allow");
+    expect(denied.decision).toBe("deny");
+  });
+
   // ── loadRulesFromFile ────────────────────────────
 
   it("loadRulesFromFile rehydrates allow rules into in-memory", async () => {
