@@ -1,6 +1,24 @@
 export type InstallPolicy = "admin" | "user";
 
 /**
+ * Q12 permission-policy classification declared per tool in
+ * `PluginManifest.toolSchemas[*].category`. Single source of truth for the
+ * closed enum shared with `lvis-plugin-sdk/schemas/plugin-manifest.schema.json`
+ * so a typo (`"reads"`, `"meta-data"`) fails both the type-check and the
+ * AJV validator.
+ *
+ * Distinct from the host-side built-in tool category
+ * (`read | write | dangerous` in `permissions/permission-manager.ts`) — that
+ * vocabulary covers built-in / system tools and uses `dangerous` as its
+ * highest-risk bucket; the plugin-side enum here splits the high-risk bucket
+ * into `network` (external API call) + `meta` (UI / window / clipboard /
+ * lifecycle) so the permission UI can group plugin tools at finer
+ * granularity.
+ */
+export const KNOWN_TOOL_CATEGORIES = ["read", "write", "network", "meta"] as const;
+export type ToolCategory = (typeof KNOWN_TOOL_CATEGORIES)[number];
+
+/**
  * Single source of truth for how a registry entry arrived on this device.
  * Supersedes the legacy combination of `installedBy` + `_devLinked`.
  *
@@ -214,6 +232,13 @@ export interface PluginManifest {
     string,
     {
       description: string;
+      /**
+       * Q12 permission-policy classification — one of `KNOWN_TOOL_CATEGORIES`.
+       * Optional for backward-compatibility with manifests authored before
+       * Q12, but newly-added tools should declare it so the host permission UI
+       * can group them.
+       */
+      category?: ToolCategory;
       /**
        * §6.4 Tool versioning — optional semver string for this tool. When
        * omitted, the plugin manifest's top-level `version` is used as the
