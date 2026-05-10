@@ -50,6 +50,15 @@ export interface PermissionCheckResult {
   reason: string;
   layer: number; // 어떤 단계에서 결정되었는지
   /**
+   * Layer 5 headless reviewer queue metadata. The execution result is still a
+   * blocked tool call, but the audit decision must be `deferred` rather than a
+   * plain deny so forensics can link it to the manual approval queue entry.
+   */
+  deferred?: {
+    queueId: string;
+    reviewerVerdict: RiskVerdict;
+  };
+  /**
    * Permission policy P2.5 §3 Layer 2 — structured deny reasons for audit forensics.
    * The pipeline records the *current* deny entry only (short-circuit
    * evaluation; later layers are skipped). Hypothetical other-layer
@@ -112,8 +121,9 @@ export interface ReviewerDispatchInput {
 
 /**
  * Result returned by {@link PermissionManager.dispatchReviewer}. The
- * caller (executor) translates this into either an immediate
- * allow + audit (LOW/MEDIUM) or deferred-queue append (HIGH).
+ * caller (executor) translates this according to its lane: foreground
+ * auto-review asks for MED/HIGH, while headless lanes queue any verdict
+ * selected by their defer policy.
  */
 export interface ReviewerDispatchResult {
   verdict: RiskVerdict;
@@ -124,9 +134,8 @@ export interface ReviewerDispatchResult {
    */
   cacheReason: "hit" | "miss-stale" | "miss-expired" | "miss-not-found";
   /**
-   * For HIGH verdicts in headless mode: the deferred-queue id the
-   * caller should reference in its audit entry. For LOW/MEDIUM the
-   * caller proceeds without queue interaction.
+   * Deferred-queue id created when the caller's defer policy routed the verdict
+   * to the manual queue. Foreground reviewer calls use `defer: "none"`.
    */
   deferredId?: string;
 }

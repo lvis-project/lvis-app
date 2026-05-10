@@ -130,9 +130,9 @@ export interface AuditDeny extends AuditCommon {
 
 /**
  * Layer 5 routed to deferred queue — the reviewer agent classified
- * the call as HIGH and the user must surface the entry from the
- * `DeferredQueuePanel`. The `queueId` ties this audit row to a
- * specific entry in `~/.lvis/permissions/deferred-queue.jsonl`.
+ * the call at the caller-selected deferred threshold and the user must
+ * surface the entry from the `DeferredQueuePanel`. The `queueId` ties this
+ * audit row to a specific entry in `~/.lvis/permissions/deferred-queue.jsonl`.
  */
 export interface AuditDeferred extends AuditCommon {
   decision: "deferred";
