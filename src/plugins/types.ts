@@ -215,12 +215,6 @@ export interface PluginManifest {
     {
       description: string;
       /**
-       * Future SDK manifest authority category. The current SDK schema does
-       * not define this field, so production plugin manifests cannot rely on
-       * it yet; host policy treats plugin tools as mutating by default.
-       */
-      category?: "read" | "write" | "shell" | "network";
-      /**
        * §6.4 Tool versioning — optional semver string for this tool. When
        * omitted, the plugin manifest's top-level `version` is used as the
        * tool version so plugins that ship tools in lock-step with their
@@ -231,11 +225,6 @@ export interface PluginManifest {
       deprecatedSince?: string;
       /** §6.4 — name of the replacement tool (transparent redirect). */
       replacedBy?: string;
-      /**
-       * Future SDK manifest path-field hint. Current SDK schema does not
-       * define this field; native tools use `Tool.pathFields` directly.
-       */
-      pathFields?: string[];
       inputSchema: {
         $schema?: string;
         type: "object";
@@ -795,7 +784,7 @@ export interface PluginHostApi {
    *   await context.hostApi.agentApproval.respond(approvalId, choice, nonce, hmac)
    */
   /**
-   * M6: Q10 overlay extensibility — show an overlay card from a plugin.
+   * Overlay extensibility — show an overlay card from a plugin.
    * Returns an OverlayHandle with a dismiss() disposer.
    * Advisory: `host:overlay` capability should be declared in manifest.capabilities[].
    *
@@ -897,17 +886,17 @@ export interface ConversationTriggerSpec {
   /** Suppress duplicate triggers for the same observation (window enforced by host). */
   dedupeKey?: string;
   /**
-   * Q11 Overlay Runner — display title for the OverlayCard.
+   * Overlay Runner — display title for the OverlayCard.
    * Defaults to the source tag with the `proactive:` prefix stripped.
    */
   title?: string;
   /**
-   * Q11 Overlay Runner — one-line summary shown in the OverlayCard body.
+   * Overlay Runner — one-line summary shown in the OverlayCard body.
    * Defaults to the first 200 chars of `prompt`.
    */
   summary?: string;
   /**
-   * Q11 Overlay Runner — label for the OverlayCard primary action button.
+   * Overlay Runner — label for the OverlayCard primary action button.
    * Defaults to "지금 답하기".
    */
   primaryActionLabel?: string;
@@ -934,7 +923,7 @@ export interface ConversationTriggerResult {
   /** Echoed back so callers can correlate logs across plugin/host. */
   source: string;
   /**
-   * Q11 Overlay Runner — present when `accepted=true` and the trigger was
+   * Overlay Runner — present when `accepted=true` and the trigger was
    * staged as an OverlayItem instead of starting a fresh ConversationLoop.
    * Callers can use this to correlate the overlay item (e.g. for dismiss).
    */

@@ -46,6 +46,7 @@ const BLOCKED_COMMANDS = new Map<string, string>([
   ["pause", "interactive prompts are not allowed"],
   ["set-alias", "alias mutation is not allowed"],
   ["new-alias", "alias mutation is not allowed"],
+  ["join-path", "dynamic path composition is not allowed"],
 ]);
 
 const ENCODED_COMMAND_FLAGS = new Set(["-encodedcommand", "-enc"]);

@@ -229,11 +229,9 @@ export class PermissionManager {
 
   /**
    * 도구 이름(패턴)을 영구 allow 규칙으로 추가.
-   * 인메모리 + permissions.json 동시 업데이트.
+   * permissions.json 저장이 성공한 뒤에만 인메모리 allow cache를 갱신한다.
    */
   async addAlwaysAllowedPersist(pattern: string): Promise<void> {
-    // 인메모리: alwaysAllowed Set (checkDetailed layer 5)
-    this.alwaysAllowed.add(pattern);
     // 영구: rules 배열에 allow 규칙 추가 (중복 방지)
     await updatePermissionsFile(this.permissionsFilePath, (file) => {
       const exists = file.rules.some(
@@ -243,6 +241,8 @@ export class PermissionManager {
         file.rules.push({ pattern, action: "allow" });
       }
     });
+    // 인메모리: durable write 성공 후 alwaysAllowed Set (checkDetailed layer 5)
+    this.alwaysAllowed.add(pattern);
   }
 
   /**
@@ -346,8 +346,8 @@ export class PermissionManager {
    * 막는 차단막 — `<proactive-origin-guidance>` 시스템 프롬프트의 1차
    * LLM-side 검토와 짝을 이루는 hard-gate. read 도구는 영향 없음.
    *
-   * Permission policy — 5-axis category model. Layer 3 의 decisionFor() 가 legacy
-   * trust default 분기를 대체. `meta` category 는 descriptor 가 `"override"` 를
+   * Permission policy — 5-axis category model. Layer 3 의 decisionFor() 가
+   * old trust-default 분기를 대체. `meta` category 는 descriptor 가 `"override"` 를
    * 반환하므로 caller (executor) 의 decisionOverride 분기로 routing.
    */
   checkDetailed(

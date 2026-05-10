@@ -19,39 +19,18 @@ beforeEach(() => {
   manifestIntegrityState.resetForTests();
 });
 
-function makeManifest(category: string): PluginManifest {
+function makeManifest(pluginId = "rogue-plugin"): PluginManifest {
   return {
-    id: "rogue-plugin",
+    id: pluginId,
     name: "rogue",
     version: "1.0.0",
     main: "x.js",
     tools: ["rogue_search"],
     toolSchemas: {
       rogue_search: {
-        category: category as PluginManifest["toolSchemas"][string]["category"],
         inputSchema: {
           type: "object",
           properties: { q: { type: "string" } },
-        },
-      },
-    },
-  } as PluginManifest;
-}
-
-function makePathFieldsManifest(pathFields: unknown): PluginManifest {
-  return {
-    id: "path-plugin",
-    name: "path",
-    version: "1.0.0",
-    main: "x.js",
-    tools: ["path_scan"],
-    toolSchemas: {
-      path_scan: {
-        category: "read",
-        pathFields: pathFields as string[],
-        inputSchema: {
-          type: "object",
-          properties: { targetPath: { type: "string" } },
         },
       },
     },
@@ -72,17 +51,17 @@ describe("Permission policy P4 plugin-tool-adapter manifest integrity gate", () 
     const tools = pluginToolsForRegistration(
       fakeRuntime,
       "rogue-plugin",
-      makeManifest("read"),
+      makeManifest(),
     );
     expect(tools).toHaveLength(1);
     const result = await tools[0].execute({ q: "x" }, {} as never);
     expect(result.isError).toBe(true);
-    expect(result.output).toContain("declared category=read");
+    expect(result.output).toContain("manifest integrity");
     expect(manifestIntegrityState.isDisabled("rogue-plugin")).toBe(true);
   });
 
   it("subsequent calls fail-deny without invoking pluginRuntime", async () => {
-    manifestIntegrityState.recordViolation(
+    await manifestIntegrityState.recordViolation(
       "rogue-plugin",
       "rogue_search",
       "writeFileSync",
@@ -93,7 +72,7 @@ describe("Permission policy P4 plugin-tool-adapter manifest integrity gate", () 
     const tools = pluginToolsForRegistration(
       fakeRuntime,
       "rogue-plugin",
-      makeManifest("read"),
+      makeManifest(),
     );
     const result = await tools[0].execute({ q: "x" }, {} as never);
     expect(result.isError).toBe(true);
@@ -101,70 +80,21 @@ describe("Permission policy P4 plugin-tool-adapter manifest integrity gate", () 
     expect(fakeRuntime.call).not.toHaveBeenCalled();
   });
 
-  it("write-declared tools are NOT subject to the post-violation gate", async () => {
-    // Write tools never get the read-only fs proxy, so they cannot
-    // trigger the plugin-wide disable path for read-only violations.
-    const fakeRuntime = {
-      call: vi.fn(async () => "wrote ok"),
-    } as unknown as PluginRuntime;
-    const tools = pluginToolsForRegistration(
-      fakeRuntime,
-      "rogue-plugin",
-      makeManifest("write"),
-    );
-    const result = await tools[0].execute({ q: "x" }, {} as never);
-    expect(result.isError).toBe(false);
-    expect(result.output).toContain("wrote ok");
-  });
-
-  it("read tools that read normally pass through unchanged", async () => {
+  it("normal tools pass through as conservative write-category plugin calls", async () => {
     const fakeRuntime = {
       call: vi.fn(async () => ({ items: ["a", "b"] })),
     } as unknown as PluginRuntime;
     const tools = pluginToolsForRegistration(
       fakeRuntime,
       "good-plugin",
-      makeManifest("read"),
+      makeManifest("good-plugin"),
     );
+    expect(tools[0].category).toBe("write");
+    expect(tools[0].isReadOnly({})).toBe(false);
+    expect(tools[0].pathFields).toBeUndefined();
     const result = await tools[0].execute({ q: "x" }, {} as never);
     expect(result.isError).toBe(false);
     expect(result.output).toContain("items");
-  });
-
-  it("rejects malformed pathFields before exposing them to ToolExecutor", () => {
-    const fakeRuntime = {
-      call: vi.fn(async () => "ok"),
-    } as unknown as PluginRuntime;
-    expect(() =>
-      pluginToolsForRegistration(
-        fakeRuntime,
-        "path-plugin",
-        makePathFieldsManifest(["targetPath", "", 123, null, "targetPath"]),
-      ),
-    ).toThrow(/pathFields\[1\] must be a non-empty string/);
-  });
-
-  it("keeps valid pathFields unchanged for ToolExecutor", () => {
-    const fakeRuntime = {
-      call: vi.fn(async () => "ok"),
-    } as unknown as PluginRuntime;
-    const tools = pluginToolsForRegistration(
-      fakeRuntime,
-      "path-plugin",
-      makePathFieldsManifest(["targetPath"]),
-    );
-    expect(tools[0].pathFields).toEqual(["targetPath"]);
-  });
-
-  it("uses the current SDK contract's conservative write policy when category is absent", () => {
-    const fakeRuntime = {
-      call: vi.fn(async () => "ok"),
-    } as unknown as PluginRuntime;
-    const manifest = makeManifest("read");
-    delete manifest.toolSchemas!.rogue_search.category;
-    const tools = pluginToolsForRegistration(fakeRuntime, "rogue-plugin", manifest);
-    expect(tools[0].category).toBe("write");
-    expect(tools[0].isReadOnly({})).toBe(false);
   });
 
   it("violation IPC + audit listeners fire on first violation", async () => {
@@ -178,7 +108,7 @@ describe("Permission policy P4 plugin-tool-adapter manifest integrity gate", () 
     const tools = pluginToolsForRegistration(
       fakeRuntime,
       "p1",
-      makeManifest("read"),
+      makeManifest("p1"),
     );
     await tools[0].execute({ q: "x" }, {} as never);
     expect(auditSpy).toHaveBeenCalledWith("p1", "t1", "rmSync");
@@ -193,7 +123,7 @@ describe("Permission policy P4 plugin-tool-adapter manifest integrity gate", () 
     const tools = pluginToolsForRegistration(
       fakeRuntime,
       "ok-plugin",
-      makeManifest("read"),
+      makeManifest("ok-plugin"),
     );
     const result = await tools[0].execute({ q: "x" }, {} as never);
     expect(result.isError).toBe(true);
