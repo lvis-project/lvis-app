@@ -30,6 +30,13 @@ const SLASH_COMMANDS: { cmd: string; label: string }[] = [
   { cmd: "/memory",   label: "메모리 조회" },
   { cmd: "/vendor",   label: "벤더 변경" },
   { cmd: "/tools",    label: "도구 목록" },
+  { cmd: "/permission", label: "권한 상태" },
+  { cmd: "/permission dir list", label: "허용 디렉터리 목록" },
+  { cmd: "/permission mode strict", label: "권한 모드: strict" },
+  { cmd: "/permission mode default", label: "권한 모드: default" },
+  { cmd: "/permission mode auto", label: "권한 모드: auto" },
+  { cmd: "/permission hooks list", label: "Hook 신뢰 상태" },
+  { cmd: "/permission audit verify", label: "권한 감사 검증" },
   { cmd: "/help",     label: "도움말" },
 ];
 
@@ -210,19 +217,19 @@ export function CommandPopover({ actions, onInsert, open, onOpenChange }: Comman
  */
 export function buildQuickActions({
   setActiveView,
-  setSettingsOpen,
+  openSettings,
   handleNewChat,
   pluginViews,
 }: {
   setActiveView: (key: string) => void;
-  setSettingsOpen: (open: boolean) => void;
+  openSettings: () => void;
   handleNewChat: () => void | Promise<void>;
   pluginViews: PluginUiExtension[];
 }): QuickAction[] {
   return [
     { id: "home",      label: "홈으로 이동",   run: () => setActiveView("home") },
     { id: "routines",  label: "루틴 보기",     run: () => setActiveView("routines") },
-    { id: "settings",  label: "설정 열기",     run: () => setSettingsOpen(true) },
+    { id: "settings",  label: "설정 열기",     run: openSettings },
     { id: "new-chat",  label: "새 대화 시작",  run: handleNewChat },
     ...pluginViews.map((i) => {
       const viewKey = toViewKey(i);

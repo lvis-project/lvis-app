@@ -88,6 +88,7 @@ export function PermissionsTab() {
       const res = await window.lvis.permission.setMode(m);
       if (res.ok) {
         setMode(res.mode as ExecMode);
+        window.dispatchEvent(new CustomEvent("lvis:permissions:mode-changed", { detail: { mode: res.mode } }));
       } else {
         showBanner("error", res.message ?? res.error ?? "실행 모드 변경에 실패했습니다.");
       }
@@ -239,6 +240,8 @@ export function PermissionsTab() {
             <button className="ml-auto flex-shrink-0 opacity-60 hover:opacity-100" onClick={() => setBanner(null)}>✕</button>
           </div>
         )}
+
+        <DeferredQueuePanel />
 
         {quarantinedHooks.length > 0 && (
           <div
@@ -512,10 +515,6 @@ export function PermissionsTab() {
             </div>
           )}
         </div>
-
-        <Separator />
-
-        <DeferredQueuePanel />
 
         <Separator />
 

@@ -313,6 +313,7 @@ export function AddRoutineModal({ api, onClose, onAdded }: AddRoutineModalProps)
           fencedInput +
           "\n</루틴_요청>",
         undefined,
+        "user-keyboard",
       );
       onAdded();
       onClose();

@@ -1,5 +1,5 @@
 /**
- * Manifest validation must use the SDK schema as the single source of truth.
+ * Manifest loading must use the SDK schema validator as the single source of truth.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
