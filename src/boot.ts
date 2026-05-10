@@ -9,7 +9,6 @@
  *                                                 tool-registry)
  *   Step 3 + 5      src/boot/steps/plugin-runtime — PluginRuntime + per-plugin
  *                                                 HostApi factory + startAll
- *                                                 + manifest startupTools +
  *                                                 ToolRegistry registration +
  *                                                 dev hot-reload watcher.
  *   Step 2 + 5 + 6  src/boot/conversation.ts      system-prompt,
@@ -27,7 +26,7 @@
  *                                                 request_plugin meta-tool +
  *                                                 knowledge/idle wiring.
  *   Step 3 + 7      src/boot/plugins.ts           manifest → notification +
- *                                                 event/tool helpers.
+ *                                                 event/tool/startup helpers.
  *   Step 7          src/boot/steps/ipc-bridge     manifest-driven plugin →
  *                                                 renderer event forwarder
  *                                                 (with transcript coalescing).
@@ -40,6 +39,7 @@
  */
 import { app, powerMonitor } from "electron";
 import type { BrowserWindow } from "electron";
+import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { homedir } from "node:os";
 import { adaptPowerMonitor } from "./main/idle-scheduler.js";
@@ -60,7 +60,7 @@ import { type AppServices, emitEvent, onEvent } from "./boot/types.js";
 import { PERMISSIONS, ROUTINES_V2 } from "./shared/ipc-channels.js";
 import { startWatcherTelemetryCollector } from "./boot/steps/watcher-telemetry-collector.js";
 import { bootstrapCoreServices } from "./boot/services.js";
-import { registerPluginNotifications } from "./boot/plugins.js";
+import { registerPluginNotifications, runManifestStartupTools } from "./boot/plugins.js";
 import {
   registerBuiltinTools,
   registerRequestPluginMetaTool,
@@ -94,6 +94,8 @@ import {
   createCallLlmForPlugin,
 } from "./boot/conversation.js";
 import type { ConversationLoop } from "./engine/conversation-loop.js";
+import { ToolExecutor } from "./tools/executor.js";
+import type { PluginToolInvocationContext } from "./plugins/runtime.js";
 import { initPluginRuntime } from "./boot/steps/plugin-runtime.js";
 import { registerPluginEventBridge } from "./boot/steps/ipc-bridge.js";
 import { wireReleasePrep, wireUpdateCheck } from "./boot/steps/post-boot.js";
@@ -111,6 +113,19 @@ import { createLogger } from "./lib/logger.js";
 const log = createLogger("lvis");
 
 export type { AppServices } from "./boot/types.js";
+
+function toPluginToolInput(payload: unknown): Record<string, unknown> {
+  if (payload === undefined || payload === null) return {};
+  if (typeof payload === "object" && !Array.isArray(payload)) {
+    return payload as Record<string, unknown>;
+  }
+  return { payload };
+}
+
+function pluginInvocationSessionId(context: PluginToolInvocationContext): string {
+  const subject = context.callerPluginId ?? context.ownerPluginId ?? "host";
+  return `plugin-${context.origin}-${subject}`;
+}
 
 /**
  * @param getMainWindow Live BrowserWindow getter — must read the current
@@ -402,6 +417,50 @@ export async function bootstrap(
   // files are strict-denied and moved to `.disabled/`.
   const hookSystem = await wireHookSystem({ auditLogger: bootAuditLogger });
   const scriptHookManager = hookSystem.manager;
+
+  const pluginSurfaceExecutor = new ToolExecutor(
+    toolRegistry,
+    hookRunner,
+    permissionManager,
+    bashAstValidator,
+    approvalGate,
+    scriptHookManager,
+    bootAuditLogger,
+  );
+  const invokePluginTool = async (
+    toolName: string,
+    payload: unknown,
+    context: PluginToolInvocationContext,
+  ): Promise<unknown> => {
+    const [result] = await pluginSurfaceExecutor.executeAll(
+      [{
+        id: randomUUID(),
+        name: toolName,
+        input: toPluginToolInput(payload),
+      }],
+      {
+        sessionId: pluginInvocationSessionId(context),
+        permissionContext: {
+          headless: context.origin !== "ui",
+          additionalDirectories: readPermissionSettings().permissions.additionalDirectories,
+          trustOrigin: "plugin-emitted",
+        },
+      },
+    );
+    if (!result) {
+      throw new Error(`Plugin tool '${toolName}' produced no executor result`);
+    }
+    if (result.is_error) {
+      throw new Error(result.content);
+    }
+    if (Object.prototype.hasOwnProperty.call(result, "rawResult")) {
+      return result.rawResult;
+    }
+    return result.content;
+  };
+  lateBinding.pluginToolInvokerRef.fn = invokePluginTool;
+  pluginRuntime.setToolInvocationDelegate(invokePluginTool);
+  runManifestStartupTools(pluginRuntime, invokePluginTool);
 
   // §7: Routine Engine — 루틴마다 독립된 ConversationLoop를 생성하는 factory를 주입.
   // interactive 채팅의 ConversationLoop 인스턴스를 공유하면 세션 히스토리 오염 및

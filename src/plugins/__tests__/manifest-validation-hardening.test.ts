@@ -112,6 +112,7 @@ describe("runtime manifest validation hardening", () => {
       toolSchemas: {
         p_ts_ghost: {
           description: "ghost tool description here",
+          category: "read",
           inputSchema: { type: "object", properties: {} },
         },
       },
@@ -204,7 +205,7 @@ describe("runtime manifest validation hardening", () => {
 
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    runManifestStartupTools(runtime);
+    runManifestStartupTools(runtime, (tool, payload) => runtime.call(tool, payload));
 
     // Drain the microtask queue: runtime.call() is async so its .catch()
     // handler fires after at least one await turn per promise in the chain.

@@ -202,6 +202,52 @@ describe("permissions IPC handlers", () => {
     expect(deps.rewireReviewerAgent).not.toHaveBeenCalled();
   });
 
+  it("reviewerDispatch rejects valid mutations without user-keyboard intent", async () => {
+    const { deps } = await setup();
+
+    const result = await invoke(PERMISSIONS.reviewerDispatch, { rawArgs: "mode rule" });
+
+    expect(result).toMatchObject({ ok: false, error: "user-keyboard-required" });
+    expect(deps.rewireReviewerAgent).not.toHaveBeenCalled();
+  });
+
+  it("reviewerDispatch restores reviewer settings when runtime rewire fails", async () => {
+    const oldHome = process.env.HOME;
+    process.env.HOME = mkdtempSync(join(tmpdir(), "lvis-reviewer-ipc-home-"));
+    try {
+      const { deps } = await setup();
+      await invoke(PERMISSIONS.reviewerDispatch, {
+        rawArgs: "mode rule",
+        intent: USER_INTENT,
+      });
+      deps.rewireReviewerAgent.mockImplementation(() => {
+        throw new Error("rewire failed");
+      });
+
+      const result = await invoke(PERMISSIONS.reviewerDispatch, {
+        rawArgs: "mode llm",
+        intent: USER_INTENT,
+      });
+      const current = await invoke(PERMISSIONS.reviewerDispatch, { rawArgs: "show" });
+
+      expect(result).toMatchObject({
+        ok: false,
+        error: expect.stringContaining("reviewer-rewire-failed"),
+      });
+      expect(current).toMatchObject({
+        ok: true,
+        settings: expect.objectContaining({ mode: "rule" }),
+      });
+      expect(deps.rewireReviewerAgent).toHaveBeenCalledTimes(3);
+    } finally {
+      if (oldHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = oldHome;
+      }
+    }
+  });
+
   it("deferredResolve fails closed before queue mutation when audit chain is not ready", async () => {
     const entry = makeDeferredEntry();
     const queue = {

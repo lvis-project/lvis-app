@@ -1,13 +1,14 @@
 /**
  * Permission policy Phase 3 — `/permission reviewer` slash + settings persistence tests.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   parsePermissionReviewerCommand,
   dispatchPermissionReviewerCommand,
+  dispatchPermissionReviewerCommandWithRewire,
 } from "../permission-slash.js";
 import {
   readPermissionSettings,
@@ -61,6 +62,13 @@ describe("parsePermissionReviewerCommand", () => {
     });
   });
 
+  it("parses 'fallback deny'", () => {
+    expect(parsePermissionReviewerCommand("fallback deny")).toEqual({
+      verb: "fallback",
+      value: "deny",
+    });
+  });
+
   it("rejects empty input", () => {
     const r = parsePermissionReviewerCommand("");
     expect(r).toEqual({ ok: false, error: expect.stringMatching(/missing subcommand/) });
@@ -91,7 +99,7 @@ describe("dispatchPermissionReviewerCommand — persistence", () => {
       expect(r.settings.mode).toBe("disabled");
       expect(r.settings.provider).toBe("openai");
       expect(r.settings.model).toBe("gpt-4o-mini");
-      expect(r.settings.fallbackOnError).toBe("rule");
+      expect(r.settings.fallbackOnError).toBe("deny");
     }
   });
 
@@ -119,6 +127,13 @@ describe("dispatchPermissionReviewerCommand — persistence", () => {
     expect(settings.permissions.reviewer.model).toBe("claude-haiku-4-5");
   });
 
+  it("fallback rule persists when explicitly selected", async () => {
+    const path = tmpSettingsPath();
+    await dispatchPermissionReviewerCommand({ verb: "fallback", value: "rule" }, path);
+    const settings = readPermissionSettings(path);
+    expect(settings.permissions.reviewer.fallbackOnError).toBe("rule");
+  });
+
   it("invalid mode returns ok:false", async () => {
     const path = tmpSettingsPath();
     const r = await dispatchPermissionReviewerCommand(
@@ -139,6 +154,16 @@ describe("dispatchPermissionReviewerCommand — persistence", () => {
     if (!r.ok) expect(r.error).toMatch(/invalid provider/);
   });
 
+  it("invalid fallback returns ok:false", async () => {
+    const path = tmpSettingsPath();
+    const r = await dispatchPermissionReviewerCommand(
+      { verb: "fallback", value: "allow" },
+      path,
+    );
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/invalid fallback/);
+  });
+
   it("empty model returns ok:false", async () => {
     const path = tmpSettingsPath();
     const r = await dispatchPermissionReviewerCommand({ verb: "model", value: "" }, path);
@@ -155,6 +180,27 @@ describe("dispatchPermissionReviewerCommand — persistence", () => {
     expect(settings.permissions.additionalDirectories).toEqual(["/foo"]);
     expect(settings.permissions.reviewer.mode).toBe("rule");
   });
+
+  it("rolls back reviewer settings when runtime rewire fails", async () => {
+    const path = tmpSettingsPath();
+    await setReviewerSettingsPersist({ mode: "rule" }, path);
+    const rewire = vi.fn(() => {
+      throw new Error("missing provider");
+    });
+
+    const result = await dispatchPermissionReviewerCommandWithRewire(
+      { verb: "mode", value: "llm" },
+      rewire,
+      path,
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("reviewer-rewire-failed"),
+    });
+    expect(readPermissionSettings(path).permissions.reviewer.mode).toBe("rule");
+    expect(rewire).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("normalizePermissionSettings — reviewer block", () => {
@@ -164,7 +210,7 @@ describe("normalizePermissionSettings — reviewer block", () => {
       mode: "disabled",
       provider: "openai",
       model: "gpt-4o-mini",
-      fallbackOnError: "rule",
+      fallbackOnError: "deny",
     });
   });
 
@@ -181,7 +227,7 @@ describe("normalizePermissionSettings — reviewer block", () => {
     });
     expect(settings.permissions.reviewer.mode).toBe("disabled");
     expect(settings.permissions.reviewer.provider).toBe("openai");
-    expect(settings.permissions.reviewer.fallbackOnError).toBe("rule");
+    expect(settings.permissions.reviewer.fallbackOnError).toBe("deny");
     expect(settings.permissions.reviewer.model).toBe("gpt-4o-mini");
   });
 

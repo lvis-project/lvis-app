@@ -17,7 +17,7 @@ vi.mock("electron", () => ({
   },
 }));
 
-import { syncPluginToolRegistry } from "../plugins.js";
+import { runManifestStartupTools, syncPluginToolRegistry } from "../plugins.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import { createDynamicTool } from "../../tools/base.js";
 import type { PluginRuntime } from "../../plugins/runtime.js";
@@ -47,6 +47,7 @@ function manifest(id: string, tools: string[], version = "1.0.0"): PluginManifes
         tool,
         {
           description: `Execute ${tool} test tool`,
+          category: "write",
           inputSchema: { type: "object", properties: {} },
         },
       ]),
@@ -129,6 +130,7 @@ describe("syncPluginToolRegistry — plugin lifecycle sync", () => {
       source: "builtin",
       version: "1.0.0",
       jsonSchema: { type: "object", properties: {} },
+      category: "read",
       execute: async () => ({ output: "", isError: false }),
     }));
 
@@ -146,7 +148,7 @@ describe("syncPluginToolRegistry — plugin lifecycle sync", () => {
     expect(registry.findByName("alpha_run")).toBeUndefined();
   });
 
-  it("registers plugin tools as conservative write-category calls under the current SDK schema", () => {
+  it("requires SDK-backed plugin authority metadata before registering tools", () => {
     const registry = new ToolRegistry();
     const runtime = stubRuntime([
       {
@@ -167,9 +169,7 @@ describe("syncPluginToolRegistry — plugin lifecycle sync", () => {
       },
     ]);
 
-    syncPluginToolRegistry(runtime, registry);
-    expect(registry.findByName("alpha_read")?.category).toBe("write");
-    expect(registry.findByName("alpha_write")?.category).toBe("write");
+    expect(() => syncPluginToolRegistry(runtime, registry)).toThrow(/category is required/);
 
     const validRuntime = stubRuntime([
       {
@@ -179,10 +179,13 @@ describe("syncPluginToolRegistry — plugin lifecycle sync", () => {
           toolSchemas: {
             alpha_read: {
               description: "Read-only alpha lookup tool",
+              category: "read",
               inputSchema: { type: "object", properties: {} },
             },
             alpha_write: {
               description: "Alpha mutating tool",
+              category: "write",
+              pathFields: ["path"],
               inputSchema: { type: "object", properties: {} },
             },
           },
@@ -194,9 +197,40 @@ describe("syncPluginToolRegistry — plugin lifecycle sync", () => {
 
     const read = registry.findByName("alpha_read");
     const write = registry.findByName("alpha_write");
-    expect(read?.category).toBe("write");
-    expect(read?.isReadOnly({})).toBe(false);
+    expect(read?.category).toBe("read");
+    expect(read?.isReadOnly({})).toBe(true);
     expect(write?.category).toBe("write");
+    expect(write?.pathFields).toEqual(["path"]);
     expect(write?.isReadOnly({})).toBe(false);
+  });
+});
+
+describe("runManifestStartupTools", () => {
+  it("delegates startup tools through the shared plugin tool invoker", async () => {
+    const runtime = {
+      listToolNames: vi.fn(() => ["owner_boot"]),
+      listPluginManifests: vi.fn(() => [
+        {
+          pluginId: "caller",
+          manifest: {
+            ...manifest("caller", ["owner_boot"]),
+            startupTools: ["owner_boot"],
+          },
+        },
+      ]),
+      assertPluginToolAccess: vi.fn(),
+      resolveToolOwner: vi.fn(() => "owner"),
+    } as unknown as PluginRuntime;
+    const invoker = vi.fn(async () => ({ ok: true }));
+
+    runManifestStartupTools(runtime, invoker);
+    await Promise.resolve();
+
+    expect(runtime.assertPluginToolAccess).toHaveBeenCalledWith("caller", "owner_boot");
+    expect(invoker).toHaveBeenCalledWith("owner_boot", {}, {
+      origin: "startup",
+      callerPluginId: "caller",
+      ownerPluginId: "owner",
+    });
   });
 });

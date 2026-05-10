@@ -105,7 +105,16 @@ export function syncPluginToolRegistry(
  * remaining startupTools. Each failure is logged as a warning so operators
  * can diagnose, while the plugin keeps serving the rest of its handlers.
  */
-export function runManifestStartupTools(pluginRuntime: PluginRuntime): void {
+export type PluginToolInvoker = (
+  toolName: string,
+  payload: unknown,
+  context: { origin: "startup" | "plugin" | "ui"; callerPluginId?: string; ownerPluginId?: string },
+) => Promise<unknown>;
+
+export function runManifestStartupTools(
+  pluginRuntime: PluginRuntime,
+  invokeTool: PluginToolInvoker,
+): void {
   const loadedTools = new Set(pluginRuntime.listToolNames());
   for (const { pluginId, manifest } of pluginRuntime.listPluginManifests()) {
     for (const tool of manifest.startupTools ?? []) {
@@ -115,9 +124,23 @@ export function runManifestStartupTools(pluginRuntime: PluginRuntime): void {
         );
         continue;
       }
+      try {
+        pluginRuntime.assertPluginToolAccess(pluginId, tool);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        log.warn(
+          `boot: startup-tool-access-denied (plugin=${pluginId}, tool=${tool}): %s`,
+          msg,
+        );
+        continue;
+      }
       // fail-soft: catch + warn, never unload the plugin, never abort sibling
       // startupTools. The loaded plugin list is unaffected.
-      pluginRuntime.call(tool, {}).catch((e: unknown) => {
+      invokeTool(tool, {}, {
+        origin: "startup",
+        callerPluginId: pluginId,
+        ownerPluginId: pluginRuntime.resolveToolOwner(tool),
+      }).catch((e: unknown) => {
         const msg = e instanceof Error ? e.message : String(e);
         log.warn(
           `boot: startup-tool-failed (non-fatal, plugin=${pluginId}, tool=${tool}): %s`,

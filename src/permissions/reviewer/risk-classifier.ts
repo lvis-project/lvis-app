@@ -3,7 +3,8 @@
  *
  * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 5,
  * §11 v2.1 binding decisions (default `provider="openai"`,
- * `model="gpt-4o-mini"`; `fallbackOnError ∈ {deny, rule}`; verdict
+ * `model="gpt-4o-mini"`; `fallbackOnError ∈ {deny, rule}`; default fail-closed;
+ * verdict
  * composition `final = max(rule, llm)`; DLP filter on classifier input).
  *
  * Three implementations selected by mode:
@@ -54,6 +55,8 @@ export interface ToolInvocationContext {
   toolName: string;
   source: ToolSource;
   category: ToolCategory;
+  /** Manifest-declared path-bearing argument selectors. Dotted selectors are supported. */
+  pathFields: readonly string[];
   /**
    * Permission policy §9 trust origin. Surfaced in the LLM prompt so the classifier
    * can reason about prompt-injection risk: an `llm-tool-arg` write of
@@ -157,21 +160,24 @@ function extractNetworkHost(input: Record<string, unknown>): string | null {
   return null;
 }
 
-function extractWritePaths(input: Record<string, unknown>): string[] {
-  const candidates = [
-    "path",
-    "filePath",
-    "file",
-    "target",
-    "sourcePath",
-    "destinationPath",
-    "dest",
-    "destination",
-  ];
+function getDottedFieldValue(input: Record<string, unknown>, field: string): unknown {
+  let current: unknown = input;
+  for (const segment of field.split(".")) {
+    if (segment.length === 0) return undefined;
+    if (!current || typeof current !== "object" || Array.isArray(current)) return undefined;
+    current = (current as Record<string, unknown>)[segment];
+  }
+  return current;
+}
+
+function extractDeclaredPaths(ctx: ToolInvocationContext): string[] {
   const paths: string[] = [];
-  for (const k of candidates) {
-    const v = input[k];
-    if (typeof v === "string" && v.length > 0) paths.push(v);
+  for (const field of ctx.pathFields) {
+    const candidate = getDottedFieldValue(ctx.finalInput, field);
+    const values = Array.isArray(candidate) ? candidate : [candidate];
+    for (const value of values) {
+      if (typeof value === "string" && value.length > 0) paths.push(value);
+    }
   }
   return [...new Set(paths)];
 }
@@ -252,7 +258,7 @@ const RULES: Array<(ctx: ToolInvocationContext) => RiskVerdict | null> = [
   // ── write rules (3) ────────────────────────────────────
   (ctx) => {
     if (ctx.category !== "write") return null;
-    const paths = extractWritePaths(ctx.finalInput);
+    const paths = extractDeclaredPaths(ctx);
     if (paths.length === 0) {
       return { level: "high", reason: "write path not declared" };
     }
@@ -263,7 +269,7 @@ const RULES: Array<(ctx: ToolInvocationContext) => RiskVerdict | null> = [
   },
   (ctx) => {
     if (ctx.category !== "write") return null;
-    const paths = extractWritePaths(ctx.finalInput);
+    const paths = extractDeclaredPaths(ctx);
     if (paths.some((p) => isDeepInsideAllowed(p, ctx.allowedDirectories))) {
       return { level: "medium", reason: "write deep inside allowed" };
     }
@@ -277,7 +283,7 @@ const RULES: Array<(ctx: ToolInvocationContext) => RiskVerdict | null> = [
   // ── read rules (2) — read shouldn't usually reach reviewer ──
   (ctx) => {
     if (ctx.category !== "read") return null;
-    const paths = extractWritePaths(ctx.finalInput);
+    const paths = extractDeclaredPaths(ctx);
     if (paths.some((p) => !isInsideAllowed(p, ctx.allowedDirectories))) {
       return { level: "high", reason: "read outside allowed dirs" };
     }
@@ -361,6 +367,7 @@ function buildUserPrompt(input: ToolInvocationContext): string {
     `tool: ${input.toolName}\n` +
     `source: ${input.source}\n` +
     `category: ${input.category}\n` +
+    `pathFields: ${JSON.stringify(input.pathFields)}\n` +
     `trustOrigin: ${input.trustOrigin}\n` +
     `input (DLP-redacted): ${JSON.stringify(redacted)}\n` +
     `allowedDirectories: ${JSON.stringify(input.allowedDirectories.slice(0, 8))}\n` +
@@ -413,7 +420,7 @@ export class LlmRiskClassifier implements RiskClassifier {
   constructor(
     private readonly provider: LlmReviewerProvider,
     private readonly model: string,
-    private readonly fallbackOnError: FallbackOnError = "rule",
+    private readonly fallbackOnError: FallbackOnError = "deny",
     private readonly telemetry: LlmRiskClassifierTelemetry = {},
   ) {}
 
@@ -468,7 +475,7 @@ export interface ReviewerSettings {
   provider?: LlmReviewerProvider;
   /** Required when mode === "llm". Defaults to "gpt-4o-mini" per v2.1. */
   model?: string;
-  /** Defaults to "rule" per v2.1 (NOT "allow-and-audit" — that enum is gone). */
+  /** Defaults to "deny" so reviewer provider failures fail closed. */
   fallbackOnError?: FallbackOnError;
   telemetry?: LlmRiskClassifierTelemetry;
 }
@@ -491,7 +498,7 @@ export function createRiskClassifier(settings: ReviewerSettings): RiskClassifier
           `(Permission policy P3 atomic cutover — no silent fallback to rule-based.)`,
         );
       }
-      const fb = settings.fallbackOnError ?? "rule";
+      const fb = settings.fallbackOnError ?? "deny";
       if (fb !== "deny" && fb !== "rule") {
         throw new Error(
           `permissions.reviewer.fallbackOnError must be 'deny' or 'rule' — got '${fb}'. ` +
