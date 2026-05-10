@@ -497,7 +497,7 @@ export type ApprovalRequest = {
   requireExplicit: boolean;
   target?: { filePath?: string };
   isReadOnly?: boolean;
-  mode?: "default" | "plan" | "full_auto";
+  mode?: "default" | "ask_all" | "plan" | "full_auto";
   /** §D2: nonce issued by the main process; renderer echoes verbatim. */
   nonce?: string;
   /** §D2: HMAC over (id, nonce, toolName, args) — echoed verbatim. */
@@ -563,6 +563,25 @@ export interface HookTrustRow {
   previousSha256?: string;
 }
 
+export type PermissionReviewerMode = "disabled" | "rule" | "llm";
+export type PermissionReviewerProvider = "openai" | "anthropic" | "google";
+export type PermissionReviewerFallbackOnError = "deny" | "rule";
+
+export interface PermissionReviewerSettings {
+  mode: PermissionReviewerMode;
+  provider: PermissionReviewerProvider;
+  model: string;
+  fallbackOnError: PermissionReviewerFallbackOnError;
+}
+
+export type PermissionReviewerDispatchResult =
+  | {
+      ok: true;
+      verb: "show" | "mode" | "provider" | "model" | "fallback";
+      settings: PermissionReviewerSettings;
+    }
+  | { ok: false; error: string };
+
 export type LvisPermissionApi = {
   getMode: () => Promise<{ mode: string }>;
   setMode: (mode: string) => Promise<
@@ -613,7 +632,7 @@ export type LvisPermissionApi = {
   /** Permission policy — `/permission reviewer ...` slash dispatch. */
   reviewerDispatch: (
     rawArgs: string,
-  ) => Promise<{ ok: true; verb: string; settings?: unknown } | { ok: false; error: string }>;
+  ) => Promise<PermissionReviewerDispatchResult>;
   /** Permission policy — `/permission audit show` — recent permission audit entries. */
   auditShow: (last: number) => Promise<
     | {
@@ -734,7 +753,7 @@ export type LvisMcpApi = {
   readUiResource: (serverId: string, uri: string) => Promise<string>;
 };
 
-export type ExecMode = "default" | "strict" | "auto";
+export type ExecMode = "default" | "strict" | "auto" | "allow";
 
 export type RenderHtmlPayload = {
   kind: "lvis.render_html";

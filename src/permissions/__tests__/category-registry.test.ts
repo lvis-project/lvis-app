@@ -39,34 +39,47 @@ describe("Category Registry — registerStandardCategories", () => {
     expect(known).toEqual(["meta", "network", "read", "shell", "write"].sort());
   });
 
-  it("read descriptor allows in default/auto, asks in strict", () => {
+  it("read descriptor allows in default/auto/allow, asks in strict", () => {
     const d = getToolCategoryDescriptor("read");
     expect(d.decisionFor({ mode: "default", source: "builtin", headless: false })).toBe("allow");
     expect(d.decisionFor({ mode: "auto", source: "builtin", headless: false })).toBe("allow");
+    expect(d.decisionFor({ mode: "allow", source: "builtin", headless: false })).toBe("allow");
     expect(d.decisionFor({ mode: "strict", source: "builtin", headless: false })).toBe("ask");
   });
 
-  it("write descriptor asks in default/strict, allows in auto, defers to reviewer when headless", () => {
+  it("write descriptor asks in default/strict, allows in auto/allow, and defers default/auto headless to reviewer", () => {
     const d = getToolCategoryDescriptor("write");
     expect(d.decisionFor({ mode: "default", source: "builtin", headless: false })).toBe("ask");
     expect(d.decisionFor({ mode: "auto", source: "builtin", headless: false })).toBe("allow");
+    expect(d.decisionFor({ mode: "allow", source: "builtin", headless: false })).toBe("allow");
     expect(d.decisionFor({ mode: "strict", source: "builtin", headless: false })).toBe("ask");
     expect(d.decisionFor({ mode: "default", source: "builtin", headless: true })).toBe("reviewer");
+    expect(d.decisionFor({ mode: "auto", source: "builtin", headless: true })).toBe("reviewer");
+    expect(d.decisionFor({ mode: "strict", source: "builtin", headless: true })).toBe("ask");
+    expect(d.decisionFor({ mode: "allow", source: "builtin", headless: true })).toBe("allow");
   });
 
-  it("shell descriptor asks in every interactive mode and routes headless to reviewer", () => {
+  it("shell descriptor asks in default/auto/strict, allows in allow mode, and routes non-strict headless to reviewer", () => {
     const d = getToolCategoryDescriptor("shell");
     for (const mode of ["default", "auto", "strict"] as const) {
       expect(d.decisionFor({ mode, source: "builtin", headless: false })).toBe("ask");
     }
+    expect(d.decisionFor({ mode: "allow", source: "builtin", headless: false })).toBe("allow");
     expect(d.decisionFor({ mode: "default", source: "builtin", headless: true })).toBe("reviewer");
+    expect(d.decisionFor({ mode: "auto", source: "builtin", headless: true })).toBe("reviewer");
+    expect(d.decisionFor({ mode: "strict", source: "builtin", headless: true })).toBe("ask");
+    expect(d.decisionFor({ mode: "allow", source: "builtin", headless: true })).toBe("allow");
   });
 
-  it("network descriptor matches write's auto-allow lane", () => {
+  it("network descriptor matches write's auto/allow lane", () => {
     const d = getToolCategoryDescriptor("network");
     expect(d.decisionFor({ mode: "default", source: "builtin", headless: false })).toBe("ask");
     expect(d.decisionFor({ mode: "auto", source: "builtin", headless: false })).toBe("allow");
+    expect(d.decisionFor({ mode: "allow", source: "builtin", headless: false })).toBe("allow");
     expect(d.decisionFor({ mode: "default", source: "builtin", headless: true })).toBe("reviewer");
+    expect(d.decisionFor({ mode: "auto", source: "builtin", headless: true })).toBe("reviewer");
+    expect(d.decisionFor({ mode: "strict", source: "builtin", headless: true })).toBe("ask");
+    expect(d.decisionFor({ mode: "allow", source: "builtin", headless: true })).toBe("allow");
   });
 
   it("meta descriptor returns the override sentinel — executor reads decisionOverride", () => {
