@@ -90,8 +90,8 @@ export class ManifestIntegrityViolation extends Error {
     public readonly attemptedMethod: string,
   ) {
     super(
-      `Plugin '${pluginId}' tool '${toolName}' declared category=read but ` +
-      `attempted '${attemptedMethod}'. Plugin disabled — reinstall required.`,
+      `Plugin '${pluginId}' tool '${toolName}' violated manifest integrity by ` +
+      `attempting '${attemptedMethod}'. Plugin disabled — reinstall required.`,
     );
     this.name = "ManifestIntegrityViolation";
   }
@@ -159,30 +159,35 @@ export function createReadOnlyFsPromisesProxy(
  */
 export class ManifestIntegrityState {
   private readonly disabledPluginIds = new Set<string>();
-  private readonly listeners = new Set<(pluginId: string, toolName: string, attemptedMethod: string) => void>();
+  private readonly listeners = new Set<(pluginId: string, toolName: string, attemptedMethod: string) => void | Promise<void>>();
 
   isDisabled(pluginId: string): boolean {
     return this.disabledPluginIds.has(pluginId);
   }
 
   /** Add a violator. Idempotent. */
-  recordViolation(pluginId: string, toolName: string, attemptedMethod: string): void {
+  async recordViolation(pluginId: string, toolName: string, attemptedMethod: string): Promise<void> {
     this.disabledPluginIds.add(pluginId);
+    const failures: unknown[] = [];
     for (const listener of this.listeners) {
       try {
-        listener(pluginId, toolName, attemptedMethod);
+        await listener(pluginId, toolName, attemptedMethod);
       } catch (err) {
         log.warn(
           "manifest-integrity: listener threw: %s",
           (err as Error).message,
         );
+        failures.push(err);
       }
+    }
+    if (failures.length > 0) {
+      throw failures[0];
     }
   }
 
   /** Subscribe to violation events. Returns disposer. */
   onViolation(
-    listener: (pluginId: string, toolName: string, attemptedMethod: string) => void,
+    listener: (pluginId: string, toolName: string, attemptedMethod: string) => void | Promise<void>,
   ): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
@@ -211,7 +216,7 @@ export function bindManifestIntegrityAudit(
   audit: AuditLogger,
   state: ManifestIntegrityState = manifestIntegrityState,
 ): () => void {
-  return state.onViolation((pluginId, toolName, attemptedMethod) => {
+  return state.onViolation(async (pluginId, toolName, attemptedMethod) => {
     try {
       audit.log({
         timestamp: new Date().toISOString(),
@@ -224,27 +229,23 @@ export function bindManifestIntegrityAudit(
           attempted: attemptedMethod,
         }),
       });
-      if (audit.isPermissionAuditChainReady()) {
-        void audit.appendPermissionAuditEntry({
-          ts: new Date().toISOString(),
-          auditId: randomUUID(),
-          trustOrigin: "plugin-emitted",
-          decision: "manifest_violation",
-          pluginId,
-          toolName,
-          attemptedOperation: attemptedMethod,
-        }).catch((err) => {
-          log.warn(
-            "manifest-integrity permission audit write failed: %s",
-            (err as Error).message,
-          );
-        });
-      }
     } catch (err) {
       log.warn(
         "manifest-integrity audit write failed: %s",
         (err as Error).message,
       );
+      throw err;
+    }
+    if (audit.isPermissionAuditChainReady()) {
+      await audit.appendPermissionAuditEntry({
+        ts: new Date().toISOString(),
+        auditId: randomUUID(),
+        trustOrigin: "plugin-emitted",
+        decision: "manifest_violation",
+        pluginId,
+        toolName,
+        attemptedOperation: attemptedMethod,
+      });
     }
   });
 }

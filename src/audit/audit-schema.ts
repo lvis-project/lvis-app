@@ -80,16 +80,16 @@ export interface AuditCommon {
 
 /**
  * Layer N → "allow" — the tool call was permitted at layer `layer`.
- * `directoryAllowed` is always `true` — included for forensic
- * symmetry with `AuditDeny` whose `denyReasons[]` carries the layer.
+ * `directory` and `directoryAllowed` are present only when the tool
+ * invocation declares an explicit path or directory surface.
  */
 export interface AuditAllow extends AuditCommon {
   decision: "allow";
   tool: string;
   source: ToolSource;
   category: ToolCategory;
-  directory: string;
-  directoryAllowed: true;
+  directory?: string;
+  directoryAllowed?: true;
   scope?: RoutineScopeSnapshot;
   layer: number;
   reviewer?: RiskVerdict;
@@ -107,7 +107,7 @@ export interface AuditAsk extends AuditCommon {
   tool: string;
   source: ToolSource;
   category: ToolCategory;
-  directory: string;
+  directory?: string;
   layer: number;
   reason: string;
   hookChain?: HookResult[];
@@ -201,7 +201,7 @@ export type PermissionAuditEntryInput = PermissionAuditEntry extends infer Entry
   : never;
 
 /**
- * Type guard — distinguishes permission audit entries from legacy
+ * Type guard — distinguishes permission audit entries from older
  * `AuditEntry` (which uses `type` instead of `decision`).
  */
 export function isPermissionAuditEntry(value: unknown): value is PermissionAuditEntry {
