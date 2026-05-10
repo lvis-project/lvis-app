@@ -27,7 +27,7 @@
  * NOT a circuit breaker: provider quota exhaustion routes through
  * `fallbackOnError` (rule | deny), NOT through cache.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, resolve as pathResolve } from "node:path";
 import { createHash } from "node:crypto";
@@ -39,6 +39,7 @@ import { createLogger } from "../../lib/logger.js";
 const log = createLogger("reviewer-cache");
 
 const TTL_MS = 24 * 60 * 60 * 1000;
+export const MAX_VERDICT_CACHE_ENTRIES = 500;
 
 export interface VerdictCacheEntry {
   /** sha256(toolName+source+category+trustOrigin+approvalCacheKey+canonicalInputIdentity) */
@@ -224,19 +225,29 @@ export class VerdictCache {
     const key = computeCacheKey(lookup);
     const ivk = computeInvalidationKey(ctx);
     const now = Date.now();
+    let pruned = false;
+    let missReason: VerdictCacheLookupResult["reason"] | null = null;
     // Iterate newest-last so latest-write wins on duplicates.
     for (let i = this.entries!.length - 1; i >= 0; i--) {
       const entry = this.entries![i];
       if (entry.key !== key) continue;
       if (entry.invalidationKey !== ivk) {
-        return { hit: false, reason: "miss-stale" };
+        this.entries!.splice(i, 1);
+        pruned = true;
+        missReason ??= "miss-stale";
+        continue;
       }
       if (entry.expiresAt < now) {
-        return { hit: false, reason: "miss-expired" };
+        this.entries!.splice(i, 1);
+        pruned = true;
+        missReason ??= "miss-expired";
+        continue;
       }
+      if (pruned) this.scheduleRewrite();
       return { hit: true, verdict: entry.verdict, reason: "hit" };
     }
-    return { hit: false, reason: "miss-not-found" };
+    if (pruned) this.scheduleRewrite();
+    return { hit: false, reason: missReason ?? "miss-not-found" };
   }
 
   /**
@@ -256,7 +267,12 @@ export class VerdictCache {
       invalidationKey: computeInvalidationKey(ctx),
     };
     this.entries!.push(entry);
-    await this.appendLine(entry);
+    const pruned = this.pruneExpiredAndCap(Date.now());
+    if (pruned) {
+      await this.rewriteFromMemory();
+    } else {
+      await this.appendLine(entry);
+    }
   }
 
   /**
@@ -282,14 +298,26 @@ export class VerdictCache {
     this.entries = null;
   }
 
+  private pruneExpiredAndCap(now: number): boolean {
+    const before = this.entries!.length;
+    this.entries = this.entries!.filter((entry) => entry.expiresAt >= now);
+    if (this.entries.length > MAX_VERDICT_CACHE_ENTRIES) {
+      this.entries = this.entries.slice(this.entries.length - MAX_VERDICT_CACHE_ENTRIES);
+    }
+    return this.entries.length !== before;
+  }
+
+  private scheduleRewrite(): void {
+    void this.rewriteFromMemory().catch((err) => {
+      log.warn(`failed to rewrite pruned cache: %s`, (err as Error).message);
+    });
+  }
+
   private async appendLine(entry: VerdictCacheEntry): Promise<void> {
     await withFileLock(this.filePath, async () => {
       mkdirSync(dirname(this.filePath), { recursive: true, mode: 0o700 });
       const line = JSON.stringify(entry) + "\n";
-      // Append by reading-then-writing under the lock — no fs.appendFile
-      // in deps; this is fine for the expected volume (≤1 line/tool call).
-      const existing = existsSync(this.filePath) ? readFileSync(this.filePath, "utf-8") : "";
-      writeFileSync(this.filePath, existing + line, { encoding: "utf-8", mode: 0o600 });
+      appendFileSync(this.filePath, line, { encoding: "utf-8", mode: 0o600 });
     });
   }
 

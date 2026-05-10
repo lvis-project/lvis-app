@@ -89,12 +89,13 @@ export function App() {
   // App state
   const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsInitialTab, setSettingsInitialTab] = useState("llm");
   const [activeView, setActiveView] = useState("home");
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
   const [commandPopoverOpen, setCommandPopoverOpen] = useState(false);
   const { updates: marketplaceUpdates, dismiss: dismissMarketplaceUpdates } = useMarketplaceUpdates(api);
   const { status: bootstrapStatus, dismiss: dismissBootstrapStatus, retry: retryBootstrap } = useBootstrapStatus(api);
-  const { queue: approvalQueue, decide: handleApprovalDecide, decideAll: handleApprovalDecideAll } = useApproval();
+  const { queue: approvalQueue, decide: handleApprovalDecide } = useApproval();
 
   // runningRoutines tracks in-flight LLM sessions.
   const [runningRoutines, setRunningRoutines] = useState<Set<string>>(new Set());
@@ -477,7 +478,11 @@ export function App() {
           return;
         }
       }
-      if (!(await checkApiKey())) { setSettingsOpen(true); return; }
+      if (!(await checkApiKey())) {
+        setSettingsInitialTab("llm");
+        setSettingsOpen(true);
+        return;
+      }
       const requestId = ++turnRequestRef.current;
       const streamingRequestId = beginStreamingRequest();
       debugLog("handleAsk", "begin", { requestId, streamingRequestId });
@@ -519,7 +524,11 @@ export function App() {
       }
       resetStreamAccumulators();
       try {
-        await api.chatSend(outgoing, outgoingAttachments);
+        await api.chatSend(
+          outgoing,
+          outgoingAttachments,
+          mode === "trigger-import" ? "plugin-emitted" : "user-keyboard",
+        );
         debugLog("handleAsk", "chatSend:resolved", { requestId });
         // After successful send, clear attachments — the textarea was
         // already cleared by setQuestion(""). N counter persists across
@@ -642,18 +651,22 @@ export function App() {
     if (activeView !== "home") setCommandPopoverOpen(false);
   }, [activeView]);
 
+  const onOpenSettings = useCallback((tab = "llm") => {
+    setSettingsInitialTab(tab);
+    setSettingsOpen(true);
+  }, []);
+
   const commandActions = useMemo(
     () =>
       buildQuickActions({
         setActiveView: handleSidebarSelect,
-        setSettingsOpen,
+        openSettings: onOpenSettings,
         handleNewChat,
         pluginViews,
       }),
-    [pluginViews, handleNewChat, handleSidebarSelect],
+    [pluginViews, handleNewChat, handleSidebarSelect, onOpenSettings],
   );
 
-  const onOpenSettings = useCallback(() => setSettingsOpen(true), []);
   const onNewChat = useCallback(() => { void handleNewChat(); }, [handleNewChat]);
 
   // ChatView context bundle — avoids drilling ~40 props through the tree.
@@ -745,7 +758,7 @@ export function App() {
             onToggleSessionStar={handleToggleSessionStar}
             isSessionStarred={(sessionId) => Boolean(isSessionStarred(sessionId))}
             onExport={handleExport}
-            onOpenSettings={() => setSettingsOpen(true)}
+            onOpenSettings={() => onOpenSettings()}
             onOpenGlobalSearch={() => { refreshSessions(); setGlobalSearchOpen(true); }}
             onOpenStarredView={() => setActiveView("starred")}
           />
@@ -794,8 +807,8 @@ export function App() {
           (immediately after the active turn's entries),
           so the previous App-level FloatingQuestionPanel mount is gone.
           See <AskUserQuestionCard> + ChatView ask-question slot. */}
-      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} api={api} onSaved={() => { void checkApiKey(); void refreshLlmSettings(); }} />
-      <ApprovalDialog queue={approvalQueue} onDecide={handleApprovalDecide} onDecideAll={handleApprovalDecideAll} />
+      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} api={api} onSaved={() => { void checkApiKey(); void refreshLlmSettings(); }} initialTab={settingsInitialTab} />
+      <ApprovalDialog queue={approvalQueue} onDecide={handleApprovalDecide} />
       <ApprovalQueueStatus queue={approvalQueue} />
       {/* Conditional mount: avoids useMemorySearch IPC calls while dialog is closed.
           Re-mounts on every open → catalog reloaded each time. If that proves slow,
