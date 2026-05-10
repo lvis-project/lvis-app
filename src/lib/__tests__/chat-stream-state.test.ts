@@ -347,10 +347,10 @@ describe("chat-stream-state", () => {
   });
 });
 
-describe("imported_trigger helpers (brain-import card lifecycle)", () => {
+describe("imported_trigger helpers (overlay import card lifecycle)", () => {
   const trigger = {
     sessionId: "s1",
-    source: "proactive:meeting-detection",
+    source: "overlay:meeting-detection",
     prompt: "p",
     summary: "s",
     toolCallCount: 0,

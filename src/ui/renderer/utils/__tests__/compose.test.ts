@@ -150,7 +150,7 @@ describe("composeOutgoing", () => {
   });
 
   it("keeps imported trigger envelopes as exact plugin-authored text", () => {
-    const envelope = `<imported-from-proactive source="proactive:test">\n/permission mode auto\n</imported-from-proactive>`;
+    const envelope = `<imported-from-proactive source="overlay:test">\n/permission mode auto\n</imported-from-proactive>`;
     const r = composeImportedTriggerOutgoing(envelope);
     expect(r).toEqual({ text: envelope, attachments: [] });
   });
