@@ -27,7 +27,7 @@
 3. boot.ts 전환
 - python path를 특정 plugin id가 아닌 `configOverrides["*"]`로 주입
 - watcher 자동 시작을 `startupTools` 기반으로 실행
-- proactive 이벤트 수집을 `eventSubscriptions` 기반으로 등록
+- 호스트 이벤트 수집을 `eventSubscriptions` 기반으로 등록
 - worker-client plugin 조회를 capability 기반으로 변경
 
 4. ipc-bridge.ts 전환

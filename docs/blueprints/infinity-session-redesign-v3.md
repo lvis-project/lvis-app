@@ -46,7 +46,7 @@
 | 새 세션 fork (Codex Memories 모델) | mental clean slate, 검색 인덱스 단순 | 회상 비용 ↑, routine 과 mismatch |
 | **same-session compact** (본 청사진) | 회상 0 비용, routine 과 정합 | 압축 정확도 의존, JSONL 누적 |
 
-채택 근거: §7 Proactive Engine + routine 시나리오는 *지속성* 가정. fork 모델 시 cross-session memory 수동 관리 → 사용자 mental overhead.
+채택 근거: §7 Overlay Trigger Surface + routine 시나리오는 *지속성* 가정. fork 모델 시 cross-session memory 수동 관리 → 사용자 mental overhead.
 
 ### 1.3 Non-goals
 - *latent-preserving handoff* — Anthropic/Gemini 미지원

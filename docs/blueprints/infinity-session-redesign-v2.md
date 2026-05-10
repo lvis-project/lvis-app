@@ -55,9 +55,9 @@
 | 옵션 | 장점 | 단점 |
 |---|---|---|
 | **새 세션 fork** (Codex Memories 모델) | mental clean slate, 검색 인덱스 단순, 압축 이슈 회피 | 회상 비용 (이전 결정/파일 재발견) ↑, *routine* 같은 지속 task 와 mismatch |
-| **same-session compact** (Copilot/OpenCode 모델, 본 청사진) | 회상 0 비용, routine/proactive engine 과 정합 | 압축 정확도 의존, JSONL 누적, 측정 복잡 |
+| **same-session compact** (Copilot/OpenCode 모델, 본 청사진) | 회상 0 비용, routine/overlay trigger 흐름과 정합 | 압축 정확도 의존, JSONL 누적, 측정 복잡 |
 
-채택 근거: LVIS 의 §7 Proactive Engine + 사용자 routine 시나리오는 *지속성* 을 가정. 매일 아침 routine 이 어제 컨텍스트를 회상해야 함. fork 모델 시 routine 마다 cross-session memory 수동 관리 필요 → 사용자 입장 mental overhead. same-session 의 압축 정확도 리스크는 §1.1 KPI + R1-R12 mitigation 으로 관리.
+채택 근거: LVIS 의 §7 Overlay Trigger Surface + 사용자 routine 시나리오는 *지속성* 을 가정. 사용자가 수락한 overlay 제안은 이전 컨텍스트를 회상해야 함. fork 모델 시 routine 마다 cross-session memory 수동 관리 필요 → 사용자 입장 mental overhead. same-session 의 압축 정확도 리스크는 §1.1 KPI + R1-R12 mitigation 으로 관리.
 
 ### 1.3 Non-goals
 - *latent-preserving handoff* — Anthropic/Gemini 는 OpenAI 의 reasoning `encrypted_content` 동등 API 미제공 (Non-goal 는 *적용 불가* 의 의미)

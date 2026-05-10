@@ -251,7 +251,7 @@ const api = {
   getUsageRange: async (opts: { dateFrom: string; dateTo: string }) => ipcRenderer.invoke("lvis:usage:range", opts),
   exportUsageCsv: async (rows: Array<Record<string, string | number>>) => ipcRenderer.invoke("lvis:usage:export-csv", rows),
 
-  // ─── Brain — proactive trigger lifecycle ────────────────────────────────
+  // ─── Overlay trigger lifecycle ────────────────────────────────────────
   onTriggerStarted: (
     handler: (payload: {
       sessionId: string;

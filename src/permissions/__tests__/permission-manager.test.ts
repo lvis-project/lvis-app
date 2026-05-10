@@ -327,12 +327,12 @@ describe("PermissionManager (B1 persistence)", () => {
   });
 });
 
-describe("PermissionManager — proactive-origin override (R2-1 fix)", () => {
+describe("PermissionManager — overlay-trigger origin override", () => {
   // Background: a user who once clicks "allow-always" on a write tool
   // (e.g. task_add) effectively delegated all future calls to that
-  // tool. For the brain proactive flow we want EVERY destructive
+  // tool. For the overlay trigger flow we want EVERY destructive
   // call to ask again — the user explicitly said "한번 더 체크할 수
-  // 있도록". This guard wires a `proactiveOrigin` parameter through
+  // 있도록". This guard wires a `overlayTriggerOrigin` parameter through
   // the executor so it's checked here BEFORE allow-rules / always-
   // allowed cache.
   let pm: PermissionManager;
@@ -348,51 +348,51 @@ describe("PermissionManager — proactive-origin override (R2-1 fix)", () => {
     vi.clearAllMocks();
   });
 
-  it("forces ASK on a write tool when proactive origin is set, even if always-allowed", async () => {
+  it("forces ASK on a write tool when overlay trigger origin is set, even if always-allowed", async () => {
     await pm.addAlwaysAllowedPersist("task_add");
     // sanity: allow-always wins on a normal turn
     expect(
       pm.checkDetailed("task_add", "builtin", "write").decision,
     ).toBe("allow");
-    // proactive turn → forced ask, regardless of the cached allow
+    // overlay trigger turn -> forced ask, regardless of the cached allow
     const r = pm.checkDetailed(
       "task_add",
       "builtin",
       "write",
-      "proactive:meeting-detection",
+      "overlay:meeting-detection",
     );
     expect(r.decision).toBe("ask");
-    expect(r.reason).toMatch(/proactive 출처/);
+    expect(r.reason).toMatch(/overlay trigger 출처/);
   });
 
   it("forces ASK on shell tools too", () => {
     // Permission policy — `shell` (formerly `dangerous`) is the 5-axis category for
-    // bash/script execution. The proactive override must force ask
+    // bash/script execution. The overlay-trigger override must force ask
     // regardless of the user's allow-always cache.
     const r = pm.checkDetailed(
       "rm_anything",
       "builtin",
       "shell",
-      "proactive:meeting-detection",
+      "overlay:meeting-detection",
     );
     expect(r.decision).toBe("ask");
   });
 
-  it("does NOT force ASK on read tools (those are safe to auto-run for proactive)", async () => {
+  it("does NOT force ASK on read tools", async () => {
     await pm.addAlwaysAllowedPersist("email_read");
     const r = pm.checkDetailed(
       "email_read",
       "plugin",
       "read",
-      "proactive:meeting-detection",
+      "overlay:meeting-detection",
     );
     expect(r.decision).toBe("allow");
   });
 
-  it("ignores non-proactive originSource strings (forward-compat)", async () => {
+  it("ignores non-overlay originSource strings (forward-compat)", async () => {
     await pm.addAlwaysAllowedPersist("task_add");
     // A future origin tag like "user-paste:x" must not trigger the
-    // override — only "proactive:*" does.
+    // override — only "overlay:*" does.
     const r = pm.checkDetailed(
       "task_add",
       "builtin",
@@ -402,13 +402,13 @@ describe("PermissionManager — proactive-origin override (R2-1 fix)", () => {
     expect(r.decision).toBe("allow");
   });
 
-  it("deny rules still beat the proactive override (defense in depth)", async () => {
+  it("deny rules still beat the overlay-trigger override (defense in depth)", async () => {
     await pm.addAlwaysDeniedPersist("task_add");
     const r = pm.checkDetailed(
       "task_add",
       "builtin",
       "write",
-      "proactive:meeting-detection",
+      "overlay:meeting-detection",
     );
     expect(r.decision).toBe("deny");
   });

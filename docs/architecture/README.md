@@ -27,7 +27,7 @@ LVIS 프로젝트의 **시스템 구조 및 기술 설계** 문서입니다.
 | Layer | 이름 | 핵심 역할 |
 |-------|------|-----------|
 | **L1** | 사용자·단말 | Electron UI + Plugin Slots |
-| **L2** | 클라이언트 인텔리전스 | 키워드 감지, 에이전트 라우팅, 인덱싱, 기억, Proactive |
+| **L2** | 클라이언트 인텔리전스 | 키워드 감지, 에이전트 라우팅, 인덱싱, 기억, overlay trigger |
 | **L3** | 실행·추론 | Lgenie(사내 LLM) 세션 + Agent Loop + Tool 실행 |
 | **L4** | 연동 | Agent Hub, Marketplace, 서버 인덱스, 사내 시스템 |
 | **L5** | 거버넌스 | 인증, 정책, 감사, 암호화 |
@@ -39,8 +39,8 @@ LVIS 프로젝트의 **시스템 구조 및 기술 설계** 문서입니다.
 │              LVIS Agent Platform (Electron)          │
 │                                                     │
 │  ┌──────────────┐  ┌─────────────┐  ┌────────────┐ │
-│  │ Chat UI      │  │ Daily       │  │ Plugin     │ │
-│  │ + Streaming  │  │ Briefing    │  │ Slots      │ │
+│  │ Chat UI      │  │ Overlay     │  │ Plugin     │ │
+│  │ + Streaming  │  │ Trigger     │  │ Slots      │ │
 │  └──────┬───────┘  └──────┬──────┘  └─────┬──────┘ │
 │         │                 │               │         │
 │  ┌──────┴─────────────────┴───────────────┴──────┐  │
@@ -73,7 +73,7 @@ LVIS 프로젝트의 **시스템 구조 및 기술 설계** 문서입니다.
 4. Low-Level Design (LLD) — Client · Boot · Agent Loop · Local Index · **Conversation Query Loop**
 5. Memory — 경량 기억 구조
 6. Client Core Engines — KW Engine · Route Engine · **Tool Permission** · **Tool Taxonomy** · **Command Safety**
-7. Proactive Engine — Daily Briefing
+7. Overlay Trigger Surface
 8. Agent Approval System — 에이전트 승인 체계
 9. Plugin System — UI Extension · **MCP Protocol Architecture**
 10. Agent Hub — 사원 레플리카 메시지 보드

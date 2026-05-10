@@ -53,7 +53,7 @@ import type { SessionSummary } from "./hooks/use-sessions.js";
 import { useContinuousHistory, type ContinuousHistorySession } from "./hooks/use-continuous-history.js";
 import ReactMarkdown from "react-markdown";
 import { MARKDOWN_REMARK_PLUGINS } from "./utils/markdown-plugins.js";
-import { parseImportedTriggerEnvelope } from "../../shared/proactive-source.js";
+import { parseImportedTriggerEnvelope } from "../../shared/overlay-trigger-source.js";
 
 const CHAT_BOTTOM_THRESHOLD_PX = 96;
 
@@ -347,7 +347,7 @@ function HistoricalEntriesList({
     }
 
     if (entry.kind === "imported_trigger") {
-      // Parse envelope source tag to confirm proactive provenance.
+      // Parse envelope source tag to confirm overlay trigger provenance.
       // title + summary fields are already clean (set at insert time).
       const envelopeSource = parseImportedTriggerEnvelope(entry.prompt);
       rendered.push(
@@ -961,7 +961,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             }
 
             if (entry.kind === "imported_trigger") {
-              // Parse envelope source tag to confirm proactive provenance.
+              // Parse envelope source tag to confirm overlay trigger provenance.
               // title + summary fields are already clean (set at insert time).
               const envelopeSource = parseImportedTriggerEnvelope(entry.prompt);
               rendered.push(

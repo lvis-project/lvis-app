@@ -14,7 +14,7 @@ import { userContentText } from "../../engine/llm/types.js";
 import { stubMarkedToolResults } from "../../engine/wire-serialize.js";
 import { serializeHistoryMessage } from "../../shared/chat-history.js";
 import type { ConversationLoop, TurnResult } from "../../engine/conversation-loop.js";
-import { parseImportedTriggerEnvelope } from "../../shared/proactive-source.js";
+import { parseImportedTriggerEnvelope } from "../../shared/overlay-trigger-source.js";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import type { IpcDeps } from "../types.js";
 import { createLogger } from "../../lib/logger.js";

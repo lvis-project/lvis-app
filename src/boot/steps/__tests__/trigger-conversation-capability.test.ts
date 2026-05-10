@@ -6,7 +6,7 @@ import {
 } from "../plugin-runtime.js";
 
 const spec = {
-  source: "proactive:test",
+  source: "overlay:test",
   prompt: "검토가 필요한 항목이 있습니다.",
 };
 
@@ -23,13 +23,13 @@ function run(capabilities: string[]) {
   });
 }
 
-describe("triggerConversation capability gate", () => {
+describe("triggerConversation overlay capability gate", () => {
   it("accepts host:overlay as the canonical capability", () => {
     expect(run(["host:overlay"]).kind).toBe("allow");
   });
 
-  it("does not treat conversation-trigger as a runtime alias", () => {
-    const outcome = run(["conversation-trigger"]);
+  it("rejects non-overlay capability labels", () => {
+    const outcome = run(["mail-source"]);
     expect(outcome.kind).toBe("deny");
     expect(outcome.result.reason).toBe("capability_denied");
   });
