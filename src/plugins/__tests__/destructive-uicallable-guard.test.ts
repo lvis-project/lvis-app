@@ -176,9 +176,33 @@ describe("callFromUi scope enforcement", () => {
       pluginId: "test.plugin",
       handler: async () => "ok",
     });
+    rt.setToolInvocationDelegate((method, payload) => {
+      const entry = internals.methodMap.get(method);
+      if (!entry) throw new Error(`Plugin method not found: ${method}`);
+      return entry.handler(payload);
+    });
 
     await expect(rt.callFromUi("foo_delete")).rejects.toThrow(/not UI-callable/);
     await expect(rt.callFromUi("foo_get")).resolves.toBe("ok");
   });
-});
 
+  it("fails closed when a UI-callable method has no executor delegate", async () => {
+    const rt = new PluginRuntime({
+      hostRoot: resolve(__dirname, "..", "..", ".."),
+      manifestPaths: [],
+    });
+    const internals = rt as unknown as {
+      plugins: Map<string, { manifest: { uiCallable: string[] } }>;
+      methodMap: Map<string, { pluginId: string; handler: (p?: unknown) => Promise<unknown> }>;
+    };
+    internals.plugins.set("test.plugin", {
+      manifest: { uiCallable: ["foo_get"] },
+    } as unknown as never);
+    internals.methodMap.set("foo_get", {
+      pluginId: "test.plugin",
+      handler: async () => "should-never-run",
+    });
+
+    await expect(rt.callFromUi("foo_get")).rejects.toThrow(/executor is not wired/);
+  });
+});

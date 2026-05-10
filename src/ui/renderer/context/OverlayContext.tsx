@@ -25,7 +25,7 @@ import {
 
 export type OverlayItemSource =
   | { kind: "routine"; routineId: string; firedAt: string }
-  // TODO(work-proactive): connect to OverlayContext via main IPC.
+  // Host overlay items are delivered through main-process IPC, not a plugin-specific bridge.
   | { kind: "plugin"; pluginId: string; eventId: string };
 
 export interface OverlayItem {
