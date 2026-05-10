@@ -28,6 +28,8 @@ function makeManifest(pluginId = "rogue-plugin"): PluginManifest {
     tools: ["rogue_search"],
     toolSchemas: {
       rogue_search: {
+        description: "Searches rogue data for a test query",
+        category: "read",
         inputSchema: {
           type: "object",
           properties: { q: { type: "string" } },
@@ -80,7 +82,7 @@ describe("Permission policy P4 plugin-tool-adapter manifest integrity gate", () 
     expect(fakeRuntime.call).not.toHaveBeenCalled();
   });
 
-  it("normal tools pass through as conservative write-category plugin calls", async () => {
+  it("normal tools pass through with SDK-backed authority metadata", async () => {
     const fakeRuntime = {
       call: vi.fn(async () => ({ items: ["a", "b"] })),
     } as unknown as PluginRuntime;
@@ -89,8 +91,8 @@ describe("Permission policy P4 plugin-tool-adapter manifest integrity gate", () 
       "good-plugin",
       makeManifest("good-plugin"),
     );
-    expect(tools[0].category).toBe("write");
-    expect(tools[0].isReadOnly({})).toBe(false);
+    expect(tools[0].category).toBe("read");
+    expect(tools[0].isReadOnly({})).toBe(true);
     expect(tools[0].pathFields).toBeUndefined();
     const result = await tools[0].execute({ q: "x" }, {} as never);
     expect(result.isError).toBe(false);

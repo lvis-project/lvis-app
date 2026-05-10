@@ -2,9 +2,8 @@
 
 > **Status:** Draft v2.2 — multi-agent + Copilot review loop applied
 > **Issue:** #627
-> **PR:** #632
 > **Last updated:** 2026-05-10
-> **v2.2 delta:** current implementation snapshot + future direction aligned to PR #632 head
+> **v2.2 delta:** current implementation snapshot + future direction aligned to the permission-policy implementation
 
 ## 0. Purpose & scope
 
@@ -30,15 +29,27 @@ PR #626 (Routine v2) 의 production smoke test 에서 발견된 *headless routin
 
 | 원칙 | 적용 |
 |---|---|
-| **Fail-safe defaults** | SDK manifest schema 가 SOT. 현재 SDK schema 에 `toolSchemas[].category/pathFields` 가 없으므로 host 는 app-local 확장 검증을 만들지 않고, plugin tool 은 보수적으로 `write` 로 등록한다. plugin 의 `isReadOnly()` 무시 (trust boundary). `fallbackOnError` enum: `deny | rule` 만 (allow-and-audit 폐지) |
-| **Defense in depth (eval pipeline + collected denyReasons)** | 평가는 numeric 순서 short-circuit, 단 *모든 적용 가능 deny 이유*는 `denyReasons[]` 로 audit. 한 layer 의 deny 가 다른 layer 의 forensics 를 가리지 않음 |
+| **Fail-safe defaults** | SDK manifest schema 가 SOT. `toolSchemas[].category/pathFields` 는 SDK `v5.0.3+` manifest schema 에서만 선언되며, host 는 app-local 확장 검증이나 tool-name 추론을 만들지 않는다. `category` 누락 manifest 는 hard-fail 하고 plugin 의 `isReadOnly()` 는 신뢰하지 않는다. `fallbackOnError` enum: `deny | rule` 만 (allow-and-audit 폐지), 기본값은 `deny` |
+| **Defense in depth (eval pipeline + explicit deny reason)** | 평가는 numeric 순서 short-circuit. audit 는 실행 시점의 현재 deny 이유 1건을 `denyReasons[]` 에 기록하며, 가상 dry-run 결과를 섞지 않는다. |
 | **Trust origin classification** | 모든 입력에 4-tier origin 부여 (user-keyboard / plugin-emitted / llm-tool-arg / file-content). Slash + durable mutation 은 user-keyboard 만 |
 | **Atomic cutover through SDK SOT** | Backward-compat shim 금지 (CLAUDE.md No-Fallback). `category/pathFields` 는 SDK schema 에 먼저 추가하고 active plugin 을 맞춘 뒤 host hard-fail 로 전환한다. 앱 로컬 schema extension 이나 boot-warn grace 는 두지 않는다. |
 | **User-in-the-loop > silent** | Headless 의 implicit allow 폐지. Reviewer agent (LOW/MED auto+audit, HIGH deferred queue) 또는 LLM-free path |
 | **Multi-vendor neutrality** | Reviewer agent provider/model 설정 가능 + LLM-free path (`rule`) + 비활성 (`disabled`) |
-| **Path-aware everywhere** | Tool 의 *모든* 선언된 path 인자 (`Tool.pathFields[]`, 향후 SDK manifest `pathFields[]`) 가 allowed directories 검사 대상. 선언이 없는 plugin tool 은 `write` category 로 ask/reviewer 경로를 탄다. |
-| **Manifest integrity** | 현재 SDK schema 는 plugin `read` category 를 선언하지 않으므로 plugin tool 은 보수적 `write` 로 등록한다. Manifest integrity state 는 host→plugin fs boundary 에서 `ManifestIntegrityViolation` 이 발생하면 plugin 을 disable 하고 audit/UI surface 로 fail-closed 한다. read-declared proxy wrapping 은 SDK authority metadata cutover 이후 활성화한다. |
+| **Path-aware everywhere** | Tool 의 *모든* 선언된 path 인자 (`Tool.pathFields[]`, SDK manifest `pathFields[]`) 가 allowed directories 검사 대상. plugin manifest 에서 path-bearing tool 이 `pathFields` 를 누락하면 해당 plugin PR 을 schema/리뷰 단계에서 수정한다. |
+| **Manifest integrity** | plugin tool authority 는 SDK schema-backed static manifest metadata 만 사용한다. `category` 누락, invalid category, manifest integrity 위반은 host→plugin fs boundary 에서 fail-closed 로 처리하고 audit/UI surface 로 노출한다. |
 | **Audit tamper-evidence** | `~/.lvis/audit*` 자체가 Layer 0 sensitive (write 차단). HMAC-chain prevHash + daily seal hash 별도 store |
+
+### 1.1 Tool invocation SSOT
+
+모든 실행 가능한 도구 surface 는 먼저 `ToolRegistry` 의 `Tool` 계약으로 normalize 된 뒤, 단 하나의 실행 검증 경로를 통과한다.
+
+| Source | Registry 진입 | 실행 검증 |
+|--------|---------------|-----------|
+| Built-in/native | hand-written `Tool` / `createDynamicTool()` | `ToolExecutor.executeAll()` → Layer 0/1 path policy → `PermissionManager.checkDetailed(source, category, ...)` → reviewer/hooks/audit |
+| Plugin | SDK manifest `toolSchemas[]` → `plugin-tool-adapter.ts` | 위와 동일. manifest `category/pathFields` 는 static authority metadata 이며, plugin code 의 `isReadOnly()` 나 tool-name 추론으로 보정하지 않는다. |
+| MCP | MCP `tools/list` → `mcp-tool-adapter.ts` (`source="mcp"`) | 위와 동일. MCP server governance 는 등록/연결 게이트일 뿐, 실행 위험도 평가는 별도 경로가 아니다. |
+
+`source` 는 risk matrix 와 audit 에 쓰이는 metadata 이며, source 별 우회 권한 경로를 만들지 않는다. plugin/MCP/native 모두 Layer 0/1/3/5/6 을 같은 순서로 통과해야 한다.
 
 ## 2. 10-Layer evaluation pipeline
 
@@ -67,7 +78,7 @@ INPUT origin classification (user-keyboard | plugin-emitted | llm-tool-arg | fil
 │  Layer 1:  Path policy (allow-list, confirm-gate, scope)   │
 │   ├ permissions.additionalDirectories[] (Claude Code 명명) │
 │   ├ Default: cwd + ~/.lvis (단 Layer 0 deny path 제외)      │
-│   ├ Tool.pathFields[] (native now, SDK manifest future) 검사 │
+│   ├ Tool.pathFields[] (native + SDK manifest) 검사          │
 │   ├ 외부 path → confirm + auto-suggest (단 leaf parent only,│
 │   │    re-typed dir name 확인, .env/.git/.ssh/credentials  │
 │   │    인접 시 warning)                                    │
@@ -133,7 +144,7 @@ INPUT origin classification (user-keyboard | plugin-emitted | llm-tool-arg | fil
 │   └ ~/.lvis/audit* 자체가 Layer 0 sensitive (write 불가)    │
 ├────────────────────────────────────────────────────────────┤
 │  Layer 8:  Runtime mode (`/permission` slash)               │
-│   ├ Modes: strict / default / auto                          │
+│   ├ Modes: default / strict / auto / allow                  │
 │   ├ Origin gate: user-keyboard 만 dispatch                   │
 │   │    (pendingPrompt 의 leading `/` 는 stripped)           │
 │   ├ --durable 변경은 별도 confirm modal 필수                │
@@ -188,7 +199,7 @@ export function canonicalizePathForMatch(rawPath: string): string {
 - SSH keys outside `.ssh/`: `**/id_{rsa,ed25519,ecdsa}` (generic glob)
 - **LVIS 자체:** `~/.lvis/secrets/**`, `~/.lvis/audit*`, `~/.lvis/permissions/deferred-queue.jsonl`, `~/.lvis/sessions/**`, `~/.config/lvis/hooks/**`
 
-**`pathFields[]` declaration (current + cutover):** native host tools declare path-typed input fields through the `Tool.pathFields[]` contract. `extractTargetFilePath` scans declared fields only, not every string field. Current SDK manifest schema does not expose plugin `toolSchemas[].pathFields`, so plugin tools without SDK-backed path metadata are registered as conservative `write` calls and go through ask/reviewer rather than path-target auto-allow. Future plugin `pathFields[]` requires SDK schema/types first, then active plugin manifests, then host SDK pin update.
+**`pathFields[]` declaration:** native host tools and plugin tools declare path-typed input fields through the `Tool.pathFields[]` contract. `extractTargetFilePaths` scans declared fields only, not every string field. Plugin `pathFields[]` comes from SDK manifest `toolSchemas[].pathFields`, supports dotted selectors, and is used by Layer 0/1 and the reviewer.
 
 ### Layer 1 — Path policy (NEW, collapsed from Layer 1+10)
 
@@ -227,7 +238,9 @@ export function canonicalizePathForMatch(rawPath: string): string {
 
 **Eval pipeline:** numeric order short-circuit. Layer N deny → Layer N+1 ~ skip. **단 audit 에는 `denyReasons: [{layer, reason}]` 으로 *현재 deny 이유 1건* 만 기록** (forensics 가 다른 hypothetical 결정을 보고 싶으면 별도 dry-run 모드로).
 
-**Auto mode 의 silent skip 금지:** `confirm` (Layer 1 외부 path) 은 auto mode 에서도 ask. Auto mode 의 자동 허용 대상은 Layer 3 의 *write/network only* (shell/dir-confirm 제외).
+**Runtime mode semantics:** `default` 는 read 허용 + write/shell/network ask. `strict` 는 read 포함 모든 도구 실행을 ask. `auto` 는 user-visible write/network 의 allow+audit 를 허용하지만 headless 는 reviewer 로 보낸다. `allow` 는 명시적 전체허용 opt-in 이며 Layer 0 sensitive path, Layer 1 directory scope, deny rules, proactive-origin mutation guard 는 우회하지 않는다.
+
+**Auto mode 의 silent skip 금지:** `confirm` (Layer 1 외부 path) 은 auto mode 에서도 ask. Auto mode 의 자동 허용 대상은 Layer 3 의 *user-visible write/network only* (shell/dir-confirm/headless 제외).
 
 ### Layer 3 — Category × Source × Registry pattern
 
@@ -269,39 +282,41 @@ Shell tools also run Layer 0/1 path policy over their working directory and path
 interface ToolCategoryDescriptor {
   name: string;
   riskWeight: number;       // 0..1 — rule classifier 가 사용
-  decisionFor: (mode: "default"|"auto"|"strict", source: "builtin"|"plugin", headless: boolean) => "allow"|"ask"|"deny"|"reviewer";
+  decisionFor: (mode: "default"|"strict"|"auto"|"allow", source: "builtin"|"plugin", headless: boolean) => "allow"|"ask"|"deny"|"reviewer";
 }
 
 registerToolCategory({
   name: "shell",
   riskWeight: 0.9,
-  decisionFor: () => "ask", // 모든 mode 에서 ask; Bash AST 검증은 executor-owned gate
+  decisionFor: ({ mode }) => mode === "allow" ? "allow" : "ask", // Bash AST 검증은 executor-owned gate
 });
 ```
 
-**Manifest validation:** category enum 은 host `ToolRegistry` 내부 contract 에서만 사용한다. Current SDK manifest schema does not define `toolSchemas[].category`, so plugin manifests cannot declare it and host plugin tools register as `write`. SDK schema/types and active plugin manifests must land before plugin category hard-fail validation is enabled.
+**Manifest validation:** category enum 은 SDK `toolSchemas[].category` contract 에서 정의되며 host `ToolRegistry` 가 그대로 소비한다. SDK schema 는 `category/pathFields` 를 hard-fail 검증하고, host 는 app-local extension/name inference 없이 plugin manifests 를 등록한다.
 
 **Trust boundary (review C2):** `source === "plugin"` 인 invocation 의 카테고리 결정 시 *static manifest category* 만 사용. plugin 의 `isReadOnly()` 호출 금지. `source === "builtin"` 만 input-aware (`isReadOnly(input)`).
 
 **Decision matrix (full grid with layer traversal):**
 
-| source × cat | default | auto | strict | headless |
-|---|---|---|---|---|
-| builtin × read | L0/L1 → allow | L0/L1 → allow | L0/L1 → ask | L0/L1 → allow |
-| builtin × write | L0/L1 → ask | L0/L1 → allow + audit | L0/L1 → ask | L0/L1 → reviewer (L5) |
-| builtin × shell | L0/L1 → ask + AST | L0/L1 → ask + AST | L0/L1 → ask + AST | L0/L1 → reviewer (always) |
-| builtin × network | L0/L1 → ask + endpoint | L0/L1 → ask + endpoint | L0/L1 → ask | L0/L1 → reviewer (L5) |
-| plugin × read | L0/L1/L4 → allow | 동 | L0/L1/L4 → ask | 동 + reviewer if out-of-dir |
-| plugin × write | L0/L1/L4 → ask | L0/L1/L4 → allow + audit | L0/L1/L4 → ask | L0/L1/L4 → reviewer |
-| plugin × shell | L0/L1/L4 → ask + AST | 동 | 동 | reviewer (always) |
-| plugin × network | L0/L1/L4 → ask + endpoint | L0/L1/L4 → allow + audit | L0/L1/L4 → ask | reviewer |
-| any × meta | decisionOverride 따름 | 동 | 동 | 동 (단 deferred 후보 = override 가 ask 인 경우) |
+| source × cat | default | strict | auto interactive | auto headless | allow |
+|---|---|---|---|---|---|
+| builtin × read | L0/L1 → allow | L0/L1 → ask | L0/L1 → allow | L0/L1 → allow | L0/L1 → allow |
+| builtin × write | L0/L1 → ask | L0/L1 → ask | L0/L1 → allow + audit | L0/L1 → reviewer (L5) | L0/L1 → allow + audit |
+| builtin × shell | L0/L1 → ask + AST | L0/L1 → ask + AST | L0/L1 → ask + AST | L0/L1 → reviewer | L0/L1 → allow + AST |
+| builtin × network | L0/L1 → ask + endpoint | L0/L1 → ask | L0/L1 → allow + audit | L0/L1 → reviewer (L5) | L0/L1 → allow + audit |
+| plugin × read | L0/L1/L4 → allow | L0/L1/L4 → ask | L0/L1/L4 → allow | L0/L1/L4 → allow, reviewer if out-of-dir | L0/L1/L4 → allow |
+| plugin × write | L0/L1/L4 → ask | L0/L1/L4 → ask | L0/L1/L4 → allow + audit | L0/L1/L4 → reviewer | L0/L1/L4 → allow + audit |
+| plugin × shell | L0/L1/L4 → ask + AST | L0/L1/L4 → ask + AST | L0/L1/L4 → ask + AST | reviewer | L0/L1/L4 → allow + AST |
+| plugin × network | L0/L1/L4 → ask + endpoint | L0/L1/L4 → ask | L0/L1/L4 → allow + audit | reviewer | L0/L1/L4 → allow + audit |
+| any × meta | decisionOverride 따름 | 동 | 동 | 동 (단 deferred 후보 = override 가 ask 인 경우) | 동 |
 
-**Note on auto-mode network:** `network = allow + audit` 가 SSRF/data-exfil risk 가 있다는 architect 지적 — 이 mode 는 *명시 opt-in* (사용자가 "this conversation only" mode 설정 시) 이라는 명시적 trust 가정. `/permission auto session` 으로 한정.
+Strict mode is mode-first: it asks for `read` as well, including headless read invocations. Headless reviewer routing applies to non-read mutation categories in default/auto unless `allow` mode was explicitly selected.
+
+**Note on auto/allow network:** `network = allow + audit` 가 SSRF/data-exfil risk 가 있다는 architect 지적 — 이 mode 는 *명시 opt-in* 이라는 명시적 trust 가정 위에서만 동작한다. `allow` 는 더 강한 opt-in 이며 Layer 0/1/deny/proactive guard 를 우회하지 않는다.
 
 ### §3.5 — Manifest integrity (NEW, critic C2)
 
-Plugin manifest category 가 거짓일 때 *runtime sanity check* 가 catch 한다. 현재 SDK schema 는 plugin `toolSchemas[].category/pathFields` 를 정의하지 않으므로 host 는 plugin tool 을 보수적 `write` 로 등록하고, app-local authority extension 을 두지 않는다. 따라서 이 section 의 read-declared wrapping 은 SDK authority metadata cutover 후 활성화되는 host behavior 이며, 현재 구현은 `ManifestIntegrityViolation` 이 host→plugin fs boundary 에서 발생하면 plugin disable + audit/UI surface 를 fail-closed 로 수행한다.
+Plugin manifest category 가 거짓일 때 *runtime sanity check* 가 catch 한다. SDK schema 는 plugin `toolSchemas[].category/pathFields` 를 정의하며, host 는 이 manifest metadata 를 그대로 Tool Registry authority 로 등록한다. app-local tool-name inference 나 plugin-id mapping extension 은 두지 않는다. `ManifestIntegrityViolation` 이 host→plugin fs boundary 에서 발생하면 plugin disable + audit/UI surface 를 fail-closed 로 수행한다.
 
 ```typescript
 class ManifestIntegrityProxy {
@@ -318,9 +333,9 @@ class ManifestIntegrityProxy {
 }
 ```
 
-**Current host behavior:** plugin tool 은 SDK schema SOT 에 category 가 없으므로 `write` 로 등록한다. `ManifestIntegrityViolation` 이 runtime boundary 에서 발생하면 panic + audit + plugin disable + user notification. Audit append 실패는 caller 에 전파한다.
+**Current host behavior:** plugin tool 은 SDK schema SOT 의 `category/pathFields` 로 등록한다. `category` 누락은 boot-time manifest rejection/fail-closed 로 처리하며, `pathFields` 는 Layer 0 sensitive path + Layer 1 allowed-directory + Layer 5 reviewer 에 동일하게 전달한다. `ManifestIntegrityViolation` 이 runtime boundary 에서 발생하면 panic + audit + plugin disable + user notification. Audit append 실패는 caller 에 전파한다.
 
-**Future SDK cutover:** SDK schema/types 와 active plugin manifests 가 `category/pathFields` 를 선언한 뒤, 모든 plugin tool 의 `category === "read"` 가 boot 시 wrapping 된다.
+**Future direction:** sandboxed plugin runtime 이 도입되면 `category === "read"` 도구의 fs boundary 를 runtime capability 로 더 강하게 격리한다. 현재는 SDK manifest authority + host boundary guard 가 SOT 이다.
 
 **Trade-off:** plugin 이 standard `node:fs` 직접 import 시 wrap 우회 가능 — Phase 4 sandboxed plugin runtime 까지는 본 가드가 partial. 사용자 docs 에 "manifest 가 거짓이면 plugin 신뢰 못함" 명시.
 
@@ -355,7 +370,7 @@ interface RoutineScope {
       "mode": "llm",      // "disabled" | "rule" | "llm"
       "provider": "openai",       // default vendor — Anthropic 의존성 분리
       "model": "gpt-4o-mini",     // default — ~$0.0002/call, 5x cheaper than Haiku
-      "fallbackOnError": "rule"  // "deny" | "rule" 만 허용
+      "fallbackOnError": "deny"  // "deny" | "rule" 만 허용
       // "thresholds" 제거: verdict 는 discrete enum 이라 threshold 불필요
     }
   }
@@ -524,7 +539,8 @@ interface AuditModeChange extends AuditCommon {
 ```
 /permission                              # show current
 /permission mode strict                  # session
-/permission mode auto durable            # persist
+/permission mode auto --durable          # persist
+/permission mode allow                   # explicit full allow, hard blocks remain
 /permission dir allow <path>             # session unless --durable
 /permission dir deny <path>
 /permission dir list
@@ -572,7 +588,7 @@ Electron preload/contextBridge. Docker 불필요.
 
 ## 5. Current implementation and forward direction
 
-### 5.0 Current implementation snapshot (PR #632 head)
+### 5.0 Current implementation snapshot
 
 현재 Permission Policy v1 은 **single-path strict implementation** 으로 정렬한다. 레거시
 compat/fallback surface 는 제외하고, host/app/plugin contract 는 다음 경계로
@@ -580,7 +596,7 @@ compat/fallback surface 는 제외하고, host/app/plugin contract 는 다음 �
 
 | 영역 | 현재 구현 | SOT / 파일 |
 |---|---|---|
-| Tool category contract | Host registry 는 `read/write/shell/network/meta`; 현재 SDK manifest schema 는 plugin `toolSchemas[].category/pathFields` 를 정의하지 않는다. Plugin tool 은 보수적 `write` 로 등록하며, SDK schema/types + active plugin manifests + host SDK pin cutover 후에만 plugin category/pathFields hard-fail validation 을 활성화한다. | `src/permissions/category-registry.ts`, `src/plugins/runtime/manifest-validation.ts`, `@lvis/plugin-sdk/schemas/plugin-manifest.schema.json` |
+| Tool category contract | Host registry 는 `read/write/shell/network/meta`; plugin tool authority 는 SDK manifest `toolSchemas[].category/pathFields` 로 등록한다. Missing/invalid category 는 SDK schema validation 에서 hard-fail 되며, app-local name inference 나 compatibility grace 는 없다. | `src/permissions/category-registry.ts`, `src/plugins/runtime/manifest-validation.ts`, `@lvis/plugin-sdk/schemas/plugin-manifest.schema.json` |
 | Permission IPC | Permission IPC channel 은 `PERMISSIONS` 상수만 사용. main handler / preload bridge / sender-guard tests 가 같은 SOT 를 참조. | `src/shared/ipc-channels.ts`, `src/ipc/domains/permissions.ts`, `src/preload.ts` |
 | Slash origin gate | `/permission` dispatch 는 `user-keyboard` origin 만. plugin-emitted / LLM / file content 는 leading slash 를 모두 제거해 plain text 로 처리. | `src/shared/slash-sanitizer.ts`, `src/permissions/permission-slash.ts` |
 | Reviewer lane | Boot 시 `wireReviewerAgent()` 는 fail-fast. `mode=llm` 인데 provider/API key 가 없으면 silent downgrade 없이 boot 오류로 드러남. | `src/boot.ts`, `src/boot/steps/reviewer-wiring.ts` |
@@ -590,12 +606,12 @@ compat/fallback surface 는 제외하고, host/app/plugin contract 는 다음 �
 
 ### 5.1 Completed implementation map
 
-### Phase 1 — Critical fix-ups (PR #632 in-place) ✅
+### Phase 1 — Critical fix-ups ✅
 - C2 trust boundary fix
 - C3 path traversal regression test
 - C4 routine `scope.pluginIds={mode:"deny-all"}` test
 - C5 SDK schema host:overlay sync (PR sdk#125)
-- (deferred to Phase 6) C1 6 plugin manifests category 선언
+- Active plugin manifests declare SDK-backed category/pathFields authority metadata
 
 ### Phase 2 — 5-axis category model + ExecuteOptions bundle + naming refactor
 - ToolCategory: `read | write | shell | network | meta`
@@ -611,7 +627,7 @@ compat/fallback surface 는 제외하고, host/app/plugin contract 는 다음 �
 - PermissionManager rules → registry-driven
 - `executeOne(invocation, scope, options)` ExecuteOptions bundling (9 → 3 args)
 - `routine.scope.{pluginIds, forcedPluginIds, directories}` rename + discriminated union
-- Manifest validation: built-in category registry is closed; plugin authority metadata waits for SDK schema SOT before host hard-fail
+- Manifest validation: built-in category registry is closed; plugin authority metadata comes from SDK schema SOT and host rejects missing category metadata
 - Tests + arch.md §6.4 update
 
 ### Phase 2.5 — Path policy (Layer 0 expand + Layer 1 + frozen-canonical)
@@ -619,7 +635,7 @@ compat/fallback surface 는 제외하고, host/app/plugin contract 는 다음 �
 - Layer 0 sensitive list expansion (6 categories of paths)
 - `additionalDirectories` setting + default computation
 - Auto-suggest: leaf-parent only + re-typed confirm + adjacency warning
-- Native `Tool.pathFields[]` declaration; SDK manifest `pathFields[]` reserved for Phase 6 cutover
+- Native `Tool.pathFields[]` and SDK manifest `pathFields[]` declarations feed the same Layer 0/1/5 path checks
 - `/permission dir allow / deny / list` slash
 - Move hook directory to `~/.config/lvis/hooks/`
 
@@ -640,7 +656,7 @@ compat/fallback surface 는 제외하고, host/app/plugin contract 는 다음 �
 - Boot-time quarantine emits HMAC-chained `AuditDeny`, double-writes general telemetry `AuditLogger.log` with `input.kind = "hook.quarantined"`, and surfaces a non-modal Permissions tab notice backed by `PERMISSIONS.hookTrustList`.
 - Hook invocation contract (JSON in/out, exit code)
 - Deny precedence enforcement
-- ManifestIntegrityState fail-closed disable/audit now; read-declared fs proxy wrapping after SDK authority metadata cutover
+- ManifestIntegrityState fail-closed disable/audit; read-declared fs proxy wrapping remains a sandbox-hardening follow-up, not an app-local manifest fallback
 - Tests: chain order, deny precedence, post-install hook tampering simulation
 
 ### Phase 5 — `/permission` slash + audit schema + arch.md rewrite
@@ -654,12 +670,12 @@ compat/fallback surface 는 제외하고, host/app/plugin contract 는 다음 �
 - CLAUDE.md "Permission Policy (REQUIRED)" rule entry + hard removal date for category grace
 - Tests: slash injection regression, audit tamper detection, mode change durability
 
-### Phase 6 — SDK-first plugin manifest authority cutover (cross-repo)
-- SDK schema 에 `toolSchemas[*].category` 와 `toolSchemas[*].pathFields` 를 추가한다.
-- 6 plugin (agent-hub, work-proactive, meeting, local-indexer, ms-graph, lge-api) plugin.json 에 authority metadata 를 추가한다.
+### Phase 6 — SDK-first plugin manifest authority cutover (cross-repo) ✅
+- SDK schema 는 `toolSchemas[*].category` 와 `toolSchemas[*].pathFields` 를 제공한다.
+- Active plugin manifests 는 authority metadata 를 선언한다.
 - Each plugin PR includes: category/pathFields declaration + sanity test (manifest claim ↔ runtime fs proxy 결과 일치).
-- App host 는 SDK schema 를 그대로 사용한다. SDK 및 active plugin merge 전까지 app-local category schema extension, boot-warn grace, compatibility alias 를 두지 않는다.
-- 모든 plugin 머지 후 host 가 missing category/pathFields 를 SDK schema hard-fail 로 받도록 SDK pin 을 올린다.
+- App host 는 SDK schema 를 그대로 사용한다. app-local category schema extension, boot-warn grace, compatibility alias 를 두지 않는다.
+- Host SDK pin 은 missing category/pathFields 를 SDK schema hard-fail 로 받는 버전으로 고정한다.
 
 ### 5.2 Forward direction
 
@@ -670,7 +686,7 @@ compat/fallback surface 는 제외하고, host/app/plugin contract 는 다음 �
 | Hook hardening follow-up | Signed hook (minisign 또는 동등 수준), hook hash 를 reviewer cache `invalidationKey` 에 포함, `modify` action 검토 | signing 전까지 v1 hook 은 deny-only 유지 |
 | DLP depth follow-up | Hook stdin / reviewer input 의 bounded deep-redaction (cycle/size guard 포함) | "nested object 는 host 밖으로 나갈 수 있다"는 현재 contract 를 더 강하게 만드는 방향만 허용 |
 | Plugin sandbox follow-up | V8 isolate / Worker thread / permissioned fs facade 비교 후 manifest integrity proxy 를 보조층으로 격하 | app 이 plugin code 를 역참조하지 않음 |
-| Manifest authority hard-fail follow-up | SDK schema + active plugin category/pathFields 선언 완료 후 host SDK pin 상향 | compatibility shim 없이 hard fail |
+| Manifest authority follow-up | 추가 plugin 도입 시 SDK schema category/pathFields 선언과 plugin sanity test 를 PR merge gate 로 유지 | compatibility shim 없이 hard fail |
 | Governance integration follow-up | §8 Agent Approval 과 permission tool audit 를 공통 timeline 으로 연결 | single decision / single prompt 원칙 유지 |
 
 ## 6. Open questions
@@ -685,10 +701,11 @@ compat/fallback surface 는 제외하고, host/app/plugin contract 는 다음 �
 |---|---|---|
 | 5-axis category (read/write/shell/network/meta) | △ 6-axis 답변 + code-review meta 권장 합의 | 사용자 + reviewer |
 | Reviewer agent multi-vendor + on/off + LLM-free | ✅ "온오프 가능, 모델 선택 가능" | 사용자 |
-| Single Mega PR (PR #632 누적 push) | ✅ "Single Mega PR" | 사용자 |
+| Permission-policy PR series | ✅ "Single Mega PR" + follow-up PRs for review findings | 사용자 |
 | Allowed directories (Layer 1, additionalDirectories naming) | ✅ "디렉토리 지정 따로 취급" + code-reviewer 명명 | 사용자 + reviewer |
 | 100% 구현 + 이슈 종료 | ✅ "30% 가 아닌 100%" | 사용자 |
 | SDK-first category/pathFields cutover | ✅ app-local manifest 확장과 boot-warn grace 를 폐기하고 SDK schema 를 SOT 로 유지 | #636 재검토 |
+| Reviewer error policy UI | ✅ LLM reviewer / rule reviewer / explicit-only 와 오류 처리(`deny|rule`)를 Settings 에 표시 | #643 UX review |
 | Plugin trust boundary (manifest static only) | ✅ critic finding | review |
 | Audit log Layer 0 sensitive | ✅ security review | review |
 | `/permission` user-keyboard origin gate | ✅ security C2 + critic C1 + architect C2 (3-confirm) | review |
@@ -785,7 +802,7 @@ Phase 2 executor 작업 중 사용자가 결정한 4 항목 — spec 에 binding
 
 ## 12. v2.1 → v2.2 — Current-state realignment (2026-05-09)
 
-최신 PR #632 head 기준으로 spec 을 다시 정렬했다.
+현재 permission-policy implementation 기준으로 spec 을 다시 정렬했다.
 
 - Plugin manifest category 는 registry-derived 가 아니라 fixed plugin allow-list
   `read/write/shell/network` 로 고정했다. Host-only `meta` 및 미래 host category 는
@@ -796,5 +813,5 @@ Phase 2 executor 작업 중 사용자가 결정한 4 항목 — spec 에 binding
   가 없으면 silent downgrade 하지 않는다.
 - Hook trust 용어는 **strict-deny quarantine + explicit typed trust
   registration** 으로 통일한다.
-- Future direction 은 signed hooks/deep DLP, plugin sandbox/hard-fail
-  manifest cutover, governance timeline integration 으로 분리한다.
+- Future direction 은 signed hooks/deep DLP, plugin sandbox hardening,
+  governance timeline integration 으로 분리한다.

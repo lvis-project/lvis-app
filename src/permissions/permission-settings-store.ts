@@ -36,7 +36,7 @@ export type ReviewerFallbackOnError = "deny" | "rule";
 /**
  * Permission policy P3 — `permissions.reviewer` block. Defaults per spec v2.1 §11
  * binding decision: provider="openai", model="gpt-4o-mini",
- * fallbackOnError="rule".
+ * fallbackOnError="deny".
  */
 export interface ReviewerSettingsBlock {
   mode: ReviewerMode;
@@ -58,7 +58,7 @@ const DEFAULT_REVIEWER: ReviewerSettingsBlock = {
   mode: "disabled",
   provider: "openai",
   model: "gpt-4o-mini",
-  fallbackOnError: "rule",
+  fallbackOnError: "deny",
 };
 
 const DEFAULT_FILE: PermissionSettingsFile = {

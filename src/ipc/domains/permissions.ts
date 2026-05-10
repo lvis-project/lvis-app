@@ -200,7 +200,7 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
         auditUnauthorized(auditLogger, PERMISSIONS.reviewerDispatch, e);
         return UNAUTHORIZED_FRAME;
       }
-      const { parsePermissionReviewerCommand, dispatchPermissionReviewerCommand } =
+      const { parsePermissionReviewerCommand, dispatchPermissionReviewerCommandWithRewire } =
         await import("../../permissions/permission-slash.js");
       const parsed = parsePermissionReviewerCommand(args?.rawArgs ?? "");
       if (isParseError<PermissionReviewerCommand>(parsed)) return { ok: false, error: parsed.error };
@@ -208,11 +208,7 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
         const intent = requireUserKeyboardIntent((args as { intent?: unknown } | undefined)?.intent);
         if (!intent.ok) return intent;
       }
-      const result = await dispatchPermissionReviewerCommand(parsed);
-      if (result.ok && parsed.verb !== "show") {
-        deps.rewireReviewerAgent?.();
-      }
-      return result;
+      return dispatchPermissionReviewerCommandWithRewire(parsed, deps.rewireReviewerAgent);
     },
   );
 

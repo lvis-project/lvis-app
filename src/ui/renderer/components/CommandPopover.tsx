@@ -35,6 +35,7 @@ const SLASH_COMMANDS: { cmd: string; label: string }[] = [
   { cmd: "/permission mode strict", label: "권한 모드: strict" },
   { cmd: "/permission mode default", label: "권한 모드: default" },
   { cmd: "/permission mode auto", label: "권한 모드: auto" },
+  { cmd: "/permission mode allow", label: "권한 모드: allow" },
   { cmd: "/permission hooks list", label: "Hook 신뢰 상태" },
   { cmd: "/permission audit verify", label: "권한 감사 검증" },
   { cmd: "/help",     label: "도움말" },

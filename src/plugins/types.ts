@@ -15,6 +15,8 @@ export type InstallPolicy = "admin" | "user";
  */
 export type PluginRegistryEntryInstallSource = "admin" | "user" | "local-dev";
 
+export type PluginToolCategory = "read" | "write" | "shell" | "network";
+
 export type AuthWindowCookie = {
   name: string;
   value: string;
@@ -206,13 +208,17 @@ export interface PluginManifest {
    */
   startupTimeoutMs?: number;
   /**
-   * LLM이 도구를 호출할 때 사용하는 JSON Schema (draft-07).
-   * 키: tool 이름 (tools 배열 내 값과 동일), 값: { description, inputSchema }
+   * LLM이 도구를 호출할 때 사용하는 JSON Schema (draft-07)와
+   * 권한 정책 메타데이터. 키: tool 이름 (tools 배열 내 값과 동일).
    */
   toolSchemas?: Record<
     string,
     {
       description: string;
+      /** Permission category declared by the SDK manifest schema. `meta` is host-only. */
+      category: PluginToolCategory;
+      /** Filesystem argument names that must be checked against allowed directories. */
+      pathFields?: string[];
       /**
        * §6.4 Tool versioning — optional semver string for this tool. When
        * omitted, the plugin manifest's top-level `version` is used as the
