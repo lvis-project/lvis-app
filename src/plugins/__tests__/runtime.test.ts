@@ -628,15 +628,15 @@ describe("PluginRuntime.disable", () => {
 
   it("allows work-proactive to subscribe to granted calendar events (P4 detector grants)", async () => {
     // Regression net for the host catalog ↔ registry grants paired
-    // with the brain plugin's calendar-* detectors:
+    // with the overlay-trigger plugin's calendar-* detectors:
     //   - `calendar-event-detector` (PR #7) → `calendar.event.upcoming`
     //   - `calendar-conflict-detector` (PR-C) → `calendar.event.conflict.detected`
-    // Without these grants the brain plugin throws on boot at the
+    // Without these grants the overlay-trigger plugin throws on boot at the
     // first `hostApi.onEvent("calendar.event.<name>", ...)` call.
     // Locks both the positive (granted) and negative (event not in
     // scope, e.g. `calendar.event.starting`) paths so a future catalog
     // edit that drops events from the array doesn't silently break the
-    // proactive flow.
+    // overlay trigger flow.
     const writePlugin = async (
       id: string,
       methodName: string,

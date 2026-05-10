@@ -20,7 +20,7 @@
    - 5.1 설계 원칙 · 5.2 Memory 파일 구조
 6. [Client Core Engines](#6-client-core-engines)
    - 6.1 Keyword Detecting Engine · 6.2 Agent Route Engine · **6.3 Tool Permission Model** · **6.4 Tool Registry & Taxonomy** · **6.5 Command Safety** · **6.6 Observability & Audit** · **6.7 Theme & Design Tokens** · **6.8 Floating Question Panel** · **6.9 Settings Dialog Tab Layout**
-7. [Proactive Engine — Daily Briefing (Core)](#7-proactive-engine--daily-briefing-core)
+7. [Overlay Trigger Surface](#7-overlay-trigger-surface)
 8. [Agent Approval System — 에이전트 요청 승인](#8-agent-approval-system--에이전트-요청-승인)
 9. [Plugin System & UI Extension](#9-plugin-system--ui-extension)
    - 9.1 Plugin Architecture · 9.2 Manifest · 9.3 UI Slot · 9.4 Scenario · **9.5 MCP Protocol Architecture** · **9.6 Deployment Model**
@@ -55,7 +55,7 @@ mindmap
       notes/ — 사용자 축적 메모
       사용할수록 나를 더 잘 아는 비서
       Memory Files
-      Proactive Engine
+      Overlay Trigger Surface
     에이전트 네트워크
       전 사원 디지털 레플리카
       에이전트 간 비동기 협업 A2A
@@ -77,7 +77,7 @@ mindmap
 | 철학 원칙              | 아키텍처 구현체                                    | 철학이 구조가 되는 이유                                                      |
 | ---------------------- | -------------------------------------------------- | ---------------------------------------------------------------------------- |
 | **설치형·로컬 기반**   | Client Core Engines + Local Index                  | J.A.R.V.I.S.처럼 내 PC에 상주. 선배 5명에게 물어보던 것을 로컬에서 즉시 검색 |
-| **기억 중심 개인화**   | Memory Files (LVIS.md + notes/) + Proactive Engine | 출근하면 "오늘 뭐부터?" 대신 AI가 먼저 브리핑. 메모가 쌓일수록 맞춤도 ↑      |
+| **기억 중심 개인화**   | Memory Files (LVIS.md + notes/) + Overlay Trigger Surface | 사용자가 수락한 플러그인 제안을 main chat 의 정상 권한 경로로 가져온다. 메모가 쌓일수록 맞춤도 ↑      |
 | **에이전트 네트워크**  | Agent Hub (Message Board) + A2A                    | "이영희님 이거 확인해주세요" → 본인 부재 중에도 레플리카가 대응              |
 | **기업 프로세스 통합** | Internal search + Marketplace + Governance                  | 50~60장 문서 대신 "필수 조항·승인 단계"만 추출. 회사 허용 경로만 사용        |
 
@@ -94,7 +94,7 @@ graph TB
         LOCAL_IDX["Local Index Engine<br/>(문서·파일·메일 인덱싱)"]
         LOCAL_STORE["Local Knowledge Store<br/>(SQLite + PageIndex Tree)"]
         MEMORY["Memory<br/>(LVIS.md + notes/)"]
-        PROACTIVE["Proactive Engine<br/>(Daily Briefing · Core)"]
+        OVERLAY["Overlay Trigger Surface<br/>(host:overlay)"]
     end
 
     subgraph "🏢 Enterprise Infrastructure"
@@ -135,7 +135,7 @@ graph TB
     CLIENT -->|"Hybrid Query"| SRV_IDX
     CLIENT --- LOCAL_IDX
     CLIENT --- MEMORY
-    CLIENT --- PROACTIVE
+    CLIENT --- OVERLAY
     LOCAL_IDX --- LOCAL_STORE
     MSG_BOARD --- AGENT_REG
     MSG_BOARD --- AGENT_RT
@@ -163,7 +163,7 @@ graph LR
         P1B["Core Engines<br/>(Keyword·Route·Index)"]
         P1C["Plugin Host"]
         P1D["Memory (File-based)"]
-        P1E["Proactive Engine"]
+        P1E["Overlay Trigger Surface"]
         P1A --> P1B --> P1C --> P1D --> P1E
     end
 
@@ -227,7 +227,7 @@ graph TB
         L1_PLUGIN_UI["🧩 Plugin UI Slots"]
         L1_FILE["📁 File Explorer"]
         L1_MEM["🧠 Memory / Notes"]
-        L1_BRIEF["📋 Daily Briefing"]
+        L1_OVERLAY["Overlay Prompt"]
         L1_NOTIFY["🔔 Notification"]
     end
 
@@ -238,7 +238,7 @@ graph TB
         L2_IDX["Local<br/>Index"]
         L2_PLUGIN["Plugin<br/>Lifecycle"]
         L2_MEMORY["Memory<br/>Manager"]
-        L2_PROACTIVE["Proactive<br/>Engine"]
+        L2_OVERLAY["Overlay<br/>Trigger"]
     end
 
     subgraph "Layer 3 — 실행·추론 Execution and Inference"
@@ -269,12 +269,12 @@ graph TB
     L1_PLUGIN_UI --> L2_PLUGIN
     L1_FILE --> L2_IDX
     L1_MEM --> L2_MEMORY
-    L1_BRIEF --> L2_PROACTIVE
+    L1_OVERLAY --> L2_OVERLAY
 
     L2_KW --> L3_AGENT_LOOP
     L2_ROUTE --> L3_AGENT_LOOP
     L2_MEMORY --> L3_SESSION
-    L2_PROACTIVE --> L3_SESSION
+    L2_OVERLAY --> L3_SESSION
     L3_AGENT_LOOP --> L3_SESSION
     L3_AGENT_LOOP --> L3_TOOL
 
@@ -296,7 +296,7 @@ graph TB
 | Layer  | 이름                  | philosophy.md 대응 | 핵심 역할                                                                     |
 | ------ | --------------------- | ------------------ | ----------------------------------------------------------------------------- |
 | **L1** | 사용자·단말           | 사용자·단말 층     | Electron UI + Plugin Slots. 사용자가 보고 만지는 모든 것                      |
-| **L2** | 클라이언트 인텔리전스 | 사용자·단말 내부   | 로컬에서 돌아가는 지능. 키워드 감지, 에이전트 라우팅, 인덱싱, 기억, Proactive |
+| **L2** | 클라이언트 인텔리전스 | 사용자·단말 내부   | 로컬에서 돌아가는 지능. 키워드 감지, 에이전트 라우팅, 인덱싱, 기억, overlay trigger |
 | **L3** | 실행·추론             | 실행·추론 층       | **Internal search(사내 LLM)** 세션 + claw harness 기반 Agent Loop + Tool 실행          |
 | **L4** | 연동                  | 연동 층            | Agent Hub, Marketplace, 서버 인덱스, 사내 시스템 커넥터                       |
 | **L5** | 거버넌스              | 거버넌스 층        | 인증, 정책, 감사, 암호화. 회사가 허용한 경로만 사용                           |
@@ -319,7 +319,7 @@ graph TB
     subgraph "Electron Renderer Process"
         SHELL["App Shell"]
         CHAT_VIEW["Chat View"]
-        BRIEFING_VIEW["Daily Briefing View"]
+        OVERLAY_VIEW["Overlay Prompt View"]
         PLUGIN_SLOTS["Dynamic Plugin Slots<br/>(Sidebar·Toolbar·Panel·Widget)"]
         FILE_VIEW["File Explorer"]
         MEM_VIEW["Memory / Notes"]
@@ -330,7 +330,7 @@ graph TB
         ROUTE_ENGINE["Agent Route Engine"]
         IDX_ENGINE["Local Index Engine"]
         MEM_ENGINE["Memory Reader<br/>(LVIS.md / notes/ 로드)"]
-        PROACTIVE_ENGINE["Proactive Engine"]
+        OVERLAY_TRIGGER["Overlay Trigger Surface"]
         TOOL_EXEC["Tool Executor"]
         HOOK_RUNNER["Hook Runner<br/>(Pre/PostToolUse)"]
         PERMISSION["Permission Manager"]
@@ -348,7 +348,7 @@ graph TB
     IPC <--> KW_ENGINE
 
     SHELL --> CHAT_VIEW
-    SHELL --> BRIEFING_VIEW
+    SHELL --> OVERLAY_VIEW
     SHELL --> PLUGIN_SLOTS
     SHELL --> FILE_VIEW
     SHELL --> MEM_VIEW
@@ -357,7 +357,7 @@ graph TB
     ROUTE_ENGINE --> TOOL_EXEC
     TOOL_EXEC --> HOOK_RUNNER
     PERMISSION --> TOOL_EXEC
-    PROACTIVE_ENGINE --> MEM_ENGINE
+    OVERLAY_TRIGGER --> MEM_ENGINE
 
     IDX_ENGINE --> SQLITE
     IDX_ENGINE --> TREE_CACHE
@@ -368,7 +368,7 @@ graph TB
 ### 4.2 Boot Sequence — 부팅 시 동적 업데이트
 
 > **Phase 1 갱신 (2026-04-13)**: Step 0 (Python Runtime Bootstrap) 추가. `SettingsService` 초기화 이전 맨 첫 단계로 실행된다.
-> **Wave B/C 갱신 (2026-04-19)**: 세부 로직은 `src/boot/*.ts` 모듈로 분리 완료 (`services.ts`, `plugins.ts`, `proactive.ts`, `conversation.ts`, `tools.ts`, `types.ts`). Step 7은 `createProactiveTriggerCoordinator()` — **5개 신호** (idle / schedule / meeting / task-deadline / **post-turn**) 를 평가하는 coordinator를 구성한다 (`src/boot/proactive.ts`). PostTurnHookChain은 **6단계** (compact → saveSession → extractMemory → auditLog → idle-poke → **proactive-notify**) 를 순차 실행한다 (`src/hooks/post-turn-hook-chain.ts`).
+> **Wave B/C 정렬 (2026-05-11)**: 세부 로직은 `src/boot/*.ts` 모듈로 분리되어 있으며 (`services.ts`, `plugins.ts`, `conversation.ts`, `tools.ts`, `types.ts`), overlay trigger 는 별도 background engine 이 아니다. `host:overlay` capability 를 가진 플러그인이 `hostApi.triggerConversation()` 으로 overlay item staging 을 요청하고, 사용자가 CTA 를 수락한 뒤에만 main chat 으로 import 된다. PostTurnHookChain 은 세션 저장, memory extraction, title/checkpoint, audit, idle-poke 를 처리하며 overlay prompt 를 자동 생성하지 않는다.
 
 **부팅 소요 시간 (Phase 1 실측 추정):**
 
@@ -388,7 +388,6 @@ sequenceDiagram
     participant Market as Marketplace Hub
     participant AgentHub as Agent Hub
     participant Internal search as Internal search (LLM)
-    participant Proactive as Proactive Engine
 
     App->>PythonRT: 0. Python Runtime Bootstrap (python-runtime.ts)
     Note over PythonRT: ~/.lvis/runtime/venv/.ready 존재?
@@ -423,9 +422,7 @@ sequenceDiagram
     PluginMgr->>App: 5. Register plugin UI slots + Skills + Tools + Keywords
     App->>App: 6. Initialize Core Engines (KW · Route · Index · Memory)
 
-    App->>Proactive: 7. Generate Daily Briefing
-    Proactive->>Proactive: Collect: 이메일·미팅·태스크·알림
-    Proactive-->>App: 오늘의 브리핑 렌더링
+    App->>App: 7. Wire OverlayContext + host:overlay gate
 
     App->>App: 8. Ready — UI 렌더링 완료
 ```
@@ -724,16 +721,14 @@ flowchart TB
     ROUND["assistant_round finalize<br/>(thought + text 저장)"]
     POST["PostTurnHookChain.run()"]
     SAVE["saveSession / audit / idle"]
-    PROACTIVE["Proactive Trigger<br/>(heartbeat / 조건 평가)"]
 
     USER --> IPC --> KEYWORD --> ROUTE --> LOOP --> HISTORY --> PROMPT --> PROVIDER --> REASON --> TOOL_CHECK
     TOOL_CHECK -->|"Yes"| POLICY_CHK -->|"허용"| PERM --> TOOL_EXEC --> TOOL_RESULT --> PROVIDER
     TOOL_CHECK -->|"No"| ROUND --> POST --> SAVE
-    POST --> PROACTIVE
     POLICY_CHK -->|"차단"| TOOL_RESULT
 ```
 
-> **문서 원칙**: 이 섹션은 `ConversationLoop`의 현재 구현을 기준으로 설명하되, 아직 미구현인 목표 설계(Keyword disambiguation, Governance sync, Proactive heartbeat, richer session history)도 함께 유지한다.
+> **문서 원칙**: 이 섹션은 `ConversationLoop`의 현재 구현을 기준으로 설명하되, 아직 미구현인 목표 설계(Keyword disambiguation, Governance sync, richer session history)도 함께 유지한다.
 > `GovernancePolicy`는 도구 호출이 생길 때마다 **루프 내부에서 반드시 통과하는 필수 게이트**이며, 바깥에서 한 번만 거르는 보조 체크가 아니다.
 
 #### 4.5.2 메시지 라이프사이클 — 한 턴의 상세 단계
@@ -751,7 +746,7 @@ flowchart TB
 | **9. 거버넌스/도구 실행** | `GovernancePolicy` → `PermissionManager` → `ToolExecutor.executeAll()` | 도구 호출 전 정책 차단, 승인 판단, 실행을 순서대로 수행 | GovernancePolicy는 로컬 정책 캐시를 보고, 상위 동기화 서버 broadcast로 갱신되는 설계를 유지 |
 | **10. 라운드 확정** | `onAssistantRound` callback | tool 호출 전후의 assistant 텍스트/생각을 라운드 단위로 확정 | `thought` 필드로 세션에 저장 |
 | **11. 렌더링 반영** | `ipc-bridge.ts` → `ui/renderer/App.tsx` (composition root) | reasoning, tool_start/tool_end, assistant_round를 UI 타임라인으로 변환 | 도구 묶음은 시각적으로만 병합 가능 |
-| **12. 턴 후처리** | `PostTurnHookChain.run()` | auto-compact, saveSession, memory extraction, audit, idle-poke, proactive-notify 6단계 조율 | **B4**: `runTurn(input, callbacks, abortSignal?)` — Ctrl/Cmd+C IPC → AbortSignal 전파로 스트리밍 중단 지원 (PR #129). **B1**: `manualCompact()` / `resetAndResume(sessionId)` IPC 구현 (PR #125). |
+| **12. 턴 후처리** | `PostTurnHookChain.run()` | auto-compact, saveSession, memory extraction, title/checkpoint, audit, idle-poke 조율 | **B4**: `runTurn(input, callbacks, abortSignal?)` — Ctrl/Cmd+C IPC → AbortSignal 전파로 스트리밍 중단 지원 (PR #129). **B1**: `manualCompact()` / `resetAndResume(sessionId)` IPC 구현 (PR #125). |
 
 #### 4.5.3 스트리밍 아키텍처
 
@@ -854,7 +849,7 @@ flowchart LR
 
 #### 4.5.5 Post-Turn Hooks
 
-매 assistant 턴 완료 후 실행되는 후처리 파이프라인이다. **B5 이후 현재 구현은 6단계 순차 chain** 이고, 목표 설계는 여기에 **Plugin PostTurn** 을 포함한 coordinator를 유지한다.
+매 assistant 턴 완료 후 실행되는 후처리 파이프라인이다. 현재 구현은 세션 저장, memory extraction, title/checkpoint, audit, idle-poke 를 순차 처리한다. Overlay trigger 는 이 chain 에서 자동 생성되지 않고, 플러그인이 `hostApi.triggerConversation()` 으로 명시 요청한 overlay item 만 사용자 수락 후 main chat 으로 들어온다.
 
 ```mermaid
 flowchart LR
@@ -865,8 +860,7 @@ flowchart LR
     SAVE --> MEM_EXT["3. Memory Extraction<br/>(기억해 패턴)"]
     MEM_EXT --> AUDIT_LOG["4. Audit Log"]
     AUDIT_LOG --> IDLE["5. Idle poke<br/>(idleScheduler.signalConversation)"]
-    IDLE --> PROACTIVE_NOTIFY["6. Proactive coordinator notify<br/>(post-turn signal — B5)"]
-    PROACTIVE_NOTIFY --> PLUGIN_HOOK["7. Plugin PostTurn Hook<br/>(목표 설계)"]
+    IDLE --> PLUGIN_HOOK["6. Plugin PostTurn Hook<br/>(목표 설계)"]
 ```
 
 | Hook | 목표 설계 | 현재 구현 단계 |
@@ -876,7 +870,6 @@ flowchart LR
 | **Memory Extraction** | 대화/도구 결과에서 기억할 내용을 구조화 저장 | `"기억해"`류 요청을 notes/로 자동 저장 |
 | **Audit Log** | 대화·도구·정책 차단·승인 이력을 기록 | 구현됨 |
 | **Idle poke** | 다음 입력 대기 전 상태 갱신과 조용한 heartbeat 보조 신호 | idle scheduler 신호 전달 구현 |
-| **Proactive notify (B5)** | post-turn 후 ProactiveTriggerCoordinator에 신호 전달 | `coordinator.notify("post-turn")` — 10분 cooldown. PR #134 (B5) |
 | **Plugin PostTurn** | 활성 플러그인의 후처리 훅 실행 | 문서상 목표 설계 유지 |
 
 #### 4.5.6 도구 실행 파이프라인 상세
@@ -955,14 +948,14 @@ sequenceDiagram
 | --- | --- | --- |
 | `createUserMessage()` | renderer input → `ipcMain.handle("lvis:chat:send")` | Electron IPC + 조기 keyword preflight |
 | Append to conversation history | `ConversationHistory.append()` | + assistant `thought` 보존 |
-| Build system prompt | system prompt assembly | + LVIS.md · notes/ · 조직 컨텍스트 · tool schema · proactive context |
+| Build system prompt | system prompt assembly | + LVIS.md · notes/ · 조직 컨텍스트 · tool schema · overlay trigger context |
 | Stream to Claude API | `provider.streamTurn(...)` | provider 공통 인터페이스로 Claude/Gemini/OpenAI 수용 |
 | `findToolByName()` | `ToolRegistry.findByName()` | + Plugin · MCP 동적 등록 통합 레지스트리 |
 | `canUseTool()` | `GovernancePolicy` + `PermissionManager.checkDetailed()` | + source/trust aware approval gate + 정책 동기화 전제 |
 | `StreamingToolExecutor` | `ToolExecutor.executeAll()` | + groupId, displayOrder, bash validator, rate limit |
-| Post-sampling hooks | `PostTurnHookChain.run()` | 현재: compact(2-stage) + saveSession + memory extraction + audit + idle-poke + proactive-notify(B5). 목표: plugin post-turn 확장 |
+| Post-sampling hooks | `PostTurnHookChain.run()` | 현재: compact(2-stage) + saveSession + memory extraction + title/checkpoint + audit + idle-poke. 목표: plugin post-turn 확장 |
 | Auto-compact | `AutoCompact` | 목표: 40% 기본값/20% 단위 설정, 현재: 80k token threshold + on/off |
-| Wait for next input | renderer idle state | + reasoning/tool/assistant 타임라인 유지 + proactive heartbeat 예정 |
+| Wait for next input | renderer idle state | + reasoning/tool/assistant 타임라인 유지 |
 
 #### 4.5.9 System Prompt 조립 상세 — 12개 소스
 
@@ -988,7 +981,7 @@ flowchart LR
     subgraph "Contextual Sources (상황별)"
         S9["⑨ OS / Environment<br/>OS 종류·경로·시간대"]
         S10["⑩ Active Session Context<br/>현재 열린 파일·위치"]
-        S11["⑪ Proactive Context<br/>브리핑·알림·대기 승인 건"]
+        S11["⑪ Overlay Trigger Context<br/>브리핑·알림·대기 승인 건"]
         S12["⑫ Feature Flags<br/>활성 실험 기능 (§14.4)"]
     end
 
@@ -1020,7 +1013,7 @@ flowchart LR
 | ⑧ | Compact Summary | Compact 후 | 2~5K | 이전 대화 요약 (Auto-Compact 실행 시에만) |
 | ⑨ | OS / Environment | 부팅 시 | 0.3~0.5K | OS 종류, 홈 디렉터리, 시간대, 현재 시각 |
 | ⑩ | Session Context | 매 턴 | 0.5~1K | 현재 열린 파일, 작업 디렉터리 등 |
-| ⑪ | Proactive Context | 매 턴 (조건부) | 0.5~2K | 대기 중인 승인 건수, 임박 일정, 브리핑 요약 |
+| ⑪ | Overlay Trigger Context | 매 턴 (조건부) | 0.5~2K | 대기 중인 승인 건수, 임박 일정, 브리핑 요약 |
 | ⑫ | Feature Flags | 부팅 시 | 0.2~0.5K | 활성 실험 기능 목록 (§14.4 Feature Flag 참조) |
 
 **총 토큰 예산**: 약 15~35K tokens (Internal search 컨텍스트 윈도우의 3~7%)
@@ -1184,7 +1177,7 @@ lvis-app/src/
 │   └── audit-logger.ts, dlp-filter.ts
 │
 ├── core/          # 남은 cross-cutting
-│   ├── keyword-engine.ts, route-engine.ts, proactive-engine.ts,
+│   ├── keyword-engine.ts, route-engine.ts,
 │   │   tool-registry.ts
 │   └── network-guard.ts
 │
@@ -1418,7 +1411,7 @@ plugin-specific app branch 를 두지 않는다.
 | Surface | Current posture | Future direction |
 | --- | --- | --- |
 | Plugin categories | SDK manifest schema 의 per-tool `category/pathFields` 가 plugin tool authority SOT 이다. Host 는 SDK schema 를 그대로 검증하고, category 가 없는 plugin tool 은 hard-fail 한다. `meta` 및 향후 host-only category 는 plugin contract 로 자동 확장되지 않는다. | 추가 plugin 도입 시 SDK schema category/pathFields 선언과 plugin sanity test 를 PR merge gate 로 유지 |
-| Runtime modes | 사용자-facing 정책은 `default`(read 허용), `strict`(read 포함 전체 ask), `auto`(백그라운드 리뷰어 기반 자동 검증), `allow`(하드 차단 밖 전체 허용) 4개다. | allow mode 는 Layer 0/1/deny/proactive guard 를 우회하지 않는 opt-in 으로 유지 |
+| Runtime modes | 사용자-facing 정책은 `default`(read 허용), `strict`(read 포함 전체 ask), `auto`(백그라운드 리뷰어 기반 자동 검증), `allow`(하드 차단 밖 전체 허용) 4개다. | allow mode 는 Layer 0/1/deny/overlay-trigger guard 를 우회하지 않는 opt-in 으로 유지 |
 | Permission IPC | `PERMISSIONS` 가 main / preload / sender-guard test 의 단일 channel SOT. | 새 permission channel 은 반드시 `src/shared/ipc-channels.ts` 에 먼저 추가 |
 | Reviewer | `disabled/rule/llm` 3-mode. `llm` wiring 실패는 silent downgrade 없이 fail-fast. | cost/quality telemetry 로 model default 조정 가능, fallback 은 `deny|rule` 만 |
 | Deferred queue | HIGH verdict 는 user foreground 에서 approve/reject, resolution 은 permission audit chain 에 기록. | §8 approval timeline 과 통합 표시 |
@@ -2094,88 +2087,40 @@ broadcast 만 처리.
 
 ---
 
-## 7. Proactive Engine — Daily Briefing (Core)
+## 7. Overlay Trigger Surface
 
-philosophy.md: _"플러그인이 아니라 코어에 가까운 기능으로 두는 것이 맞을 수 있습니다."_
+Overlay Trigger Surface 는 **사용자가 직접 입력하지 않은 플러그인 제안**을 main chat 에 넣기 전, 호스트가 반드시 사용자에게 보여주고 수락을 받는 staging surface 다. 플러그인은 대화를 직접 시작하지 않는다. `host:overlay` capability 를 가진 플러그인이 `hostApi.triggerConversation(spec)` 으로 overlay item 생성을 요청하고, 호스트는 source / prompt / dedupe / rate-limit / capability gate 를 통과한 항목만 renderer overlay 에 올린다.
 
-Proactive Engine은 플러그인이 아닌 **클라이언트 코어**에 위치한다. 목표 설계는 단순 아침 브리핑을 넘어, **설정 값 기반 heartbeat** 와 **조건 기반 heartbeat** 로 브리핑/알림을 발생시키는 것이다. 현재 구현 단계는 `generateBriefing()` 중심의 브리핑 생성과 관련 데이터 수집 경로를 갖고 있다.
+사용자가 overlay CTA 를 수락하기 전까지 ConversationHistory 는 변경되지 않는다. 수락 후 host 는 pending prompt 를 `<imported-from-proactive source="overlay:...">` envelope 로 감싸 main chat 의 다음 user turn 으로 삽입한다. 이 envelope tag 이름은 기존 플러그인 작성 계약 때문에 유지하지만, source namespace 의 SOT 는 `overlay:*` 하나다. 이후 도구 호출은 일반 `ConversationLoop.runTurn()` → `ToolExecutor` → `PermissionManager` 경로를 통과하며, mutating tool 은 overlay-trigger origin guard 에 의해 사용자 확인을 다시 요구한다.
 
 ```mermaid
 flowchart TB
-    subgraph "Data Collection from Plugin Events"
-        EMAIL["📧 이메일 플러그인<br/>(미처리 메일, 액션 필요)"]
-        CALENDAR["📅 캘린더 플러그인<br/>(오늘 미팅, 일정)"]
-        TASK["✅ 태스크 매니저<br/>(기한 임박, 진행 중)"]
-        AGENT_MSG["🤖 Agent Hub<br/>(내 에이전트 수신 메시지)"]
-        MEMORY_CTX["🧠 Memory<br/>(어제 마무리 못한 일)"]
-    end
+    PLUGIN["Overlay-capable plugin<br/>observes its own signal"]
+    HOST_API["hostApi.triggerConversation(spec)"]
+    GATE{"Host gate<br/>host:overlay + source + prompt + dedupe + rate"}
+    OVERLAY["Renderer overlay item"]
+    USER{"User accepts CTA?"}
+    CHAT["Main chat user turn<br/>&lt;imported-from-proactive source=&quot;overlay:*&quot;&gt;"]
+    PERMISSION["Single permission path<br/>ToolExecutor -> PermissionManager"]
 
-    subgraph "Proactive Engine Core"
-        COLLECTOR["Event Collector<br/>(플러그인 이벤트 수집)"]
-        PRIORITIZER["Priority Ranker<br/>(긴급도·중요도 판단)"]
-        corporateNIE_SUM["Internal search 요약<br/>(자연어 브리핑 생성)"]
-        ACTION_SUGGEST["Action Suggester<br/>(다음 행동 제안)"]
-    end
-
-    subgraph "Output"
-        BRIEFING["📋 Daily Briefing UI"]
-        NOTIFICATION["🔔 알림"]
-        TASK_CREATE["✅ 자동 태스크 생성"]
-    end
-
-    EMAIL --> COLLECTOR
-    CALENDAR --> COLLECTOR
-    TASK --> COLLECTOR
-    AGENT_MSG --> COLLECTOR
-    MEMORY_CTX --> COLLECTOR
-
-    COLLECTOR --> PRIORITIZER
-    PRIORITIZER --> corporateNIE_SUM
-    corporateNIE_SUM --> ACTION_SUGGEST
-
-    ACTION_SUGGEST --> BRIEFING
-    ACTION_SUGGEST --> NOTIFICATION
-    ACTION_SUGGEST --> TASK_CREATE
+    PLUGIN --> HOST_API --> GATE
+    GATE -->|"allow"| OVERLAY --> USER
+    GATE -->|"deny"| AUDIT["Audit deny"]
+    USER -->|"accept"| CHAT --> PERMISSION
+    USER -->|"dismiss"| END["Overlay removed"]
 ```
 
-**트리거 모델 — ProactiveTriggerCoordinator (Wave B/C 완료)**
+| 계약 | 값 |
+| --- | --- |
+| Runtime capability | `host:overlay` only |
+| Source pattern | `^overlay:[a-z][a-z0-9-]*$` |
+| Plugin role | Overlay item staging 요청자. 직접 chat 시작 없음 |
+| Host role | Gate, dedupe, rate-limit, overlay staging, import envelope 생성 |
+| User role | Overlay CTA 수락/거절 |
+| Permission path | Native / MCP / plugin tool 모두 단일 ToolExecutor + PermissionManager 경로 |
+| Forbidden | non-`overlay:*` source namespace, background engine 자동 생성, post-turn 자동 overlay 생성, plugin-specific app reverse reference |
 
-`ProactiveTriggerCoordinator` (`src/core/proactive-trigger-coordinator.ts`) 가 60s tick + 외부 이벤트 poke 로 아래 **5개 신호**를 평가해 `generateDailyBriefing()` 를 발동한다. 30분 debounce 내장.
-
-```mermaid
-flowchart LR
-    SETTINGS["사용자 설정<br/>(출근 시각 · heartbeat 간격 · quiet hours)"]
-    EVENTS["이메일 · 캘린더 · 태스크 · Agent Hub · Approval Queue"]
-    SCHEDULED["설정 값 기반 heartbeat"]
-    CONDITIONAL["조건 기반 heartbeat"]
-    TRIGGER["ProactiveTriggerCoordinator"]
-    OUTPUT["Briefing / Notification / Reminder"]
-
-    SETTINGS --> SCHEDULED
-    EVENTS --> CONDITIONAL
-    SCHEDULED --> TRIGGER
-    CONDITIONAL --> TRIGGER
-    TRIGGER --> OUTPUT
-```
-
-| 신호 | 팩토리 함수 | 동작 |
-| --- | --- | --- |
-| **idle** | `createIdleSignal()` | IdleScheduler 가 IDLE_SCAN 상태일 때 fire |
-| **schedule** | `createScheduleSignal()` | KST 08:30 (기본) 5분 윈도우 내 1일 1회 fire |
-| **meeting** | `createMeetingSignal()` | calendar-source capability 플러그인 이벤트 — 미팅 10분 전 fire |
-| **task-deadline** | ~~host `TaskDeadlinePoller`~~ **(2026-05-05 host Tasks removal Phase 4)** host-side poller 제거됨 — `task.deadline.approaching` 이벤트는 더 이상 host 에서 발행되지 않음. task 소유권이 agent-hub 플러그인으로 이전 완료 (Phase 1–4 참조). | 폐기됨 (agent-hub PR #94 + Phase 4 app PR). |
-| **post-turn** ✅ | `createPostTurnSignal()` | 대화 턴 완료 후 `PostTurnHookChain` → `coordinator.notify("post-turn")`. 10분 cooldown. (B5 PR #134) |
-
-**Detector lifecycle (reactive registration).** 각 detector 는 `requires?: string[]` 로 의존하는 provider id 또는 capability 를 선언한다. Brain plugin 은 boot 시 + `hostApi.onPluginsChanged()` 발사 시마다 현재 설치 snapshot 을 기준으로 satisfied detector 만 `onEvent(source, ...)` 등록한다. provider 미설치 시 해당 detector 는 자동으로 잠자고, 사용자가 provider 를 설치하면 host 재시작 없이 detector 가 활성화된다. audit 채널은 plugin-owned namespace 로 `{active, missing, sources}` 를 기록해 "왜 이 detector 가 조용한가" 를 추적한다.
-
-| 트리거 유형 | 예시 | 의도 |
-| --- | --- | --- |
-| **설정 값 기반 heartbeat** | 출근 직후, 30분 간격, 점심 이후 재알림 | 사용자가 기대하는 리듬으로 브리핑/리마인드 제공 |
-| **조건 기반 heartbeat** | 승인 대기 증가, 마감 임박, 긴급 메일, Agent Hub 중요 게시물 | 이벤트가 생겼을 때만 필요한 알림 발생 |
-
-**브리핑 예시:**
-
-> 「오늘 미팅 3건 (10:00 디자인리뷰, 14:00 스프린트, 16:00 1:1), 미처리 이메일 5통 중 2통은 액션 필요 (파트너사 계약서 검토, 출장비 정산 확인), 기한 임박 태스크 1건 (분기 보고서 초안 — 내일 마감), **에이전트 요청 승인 2건** (이영희 Agent → 분기 보고서 공유 요청, 박민수 Agent → 코드리뷰 결과 전달 요청)」
+**Detector lifecycle (reactive registration).** overlay-capable plugin 내부 detector 는 `requires?: string[]` 로 의존하는 provider id 또는 capability 를 선언할 수 있다. Plugin 은 boot 시 + `hostApi.onPluginsChanged()` 발생 시마다 현재 설치 snapshot 을 기준으로 satisfied detector 만 자기 내부 event handler 로 등록한다. provider 미설치 시 해당 detector 는 조용히 비활성화되고, 사용자가 provider 를 설치하면 host 재시작 없이 detector 가 활성화된다. audit 채널은 plugin-owned namespace 로 `{active, missing, sources}` 를 기록해 "왜 이 detector 가 조용한가" 를 추적한다.
 
 ### 7.X Routine v2 (PR #626)
 
@@ -2285,7 +2230,7 @@ sequenceDiagram
     participant AgentA as 김철수 Agent
     participant Approval as Approval Queue
     participant UserA as 김철수 (사원)
-    participant Briefing as Daily Briefing
+    participant ApprovalPanel as Approval Panel
 
     AgentB->>Hub: "김철수님 분기 보고서 공유 요청"
     Hub->>AgentA: Direct Message 수신
@@ -2298,9 +2243,9 @@ sequenceDiagram
         UserA->>Approval: ✅ 승인 (또는 ❌ 거부)
     else 김철수 오프라인
         Approval->>Approval: 대기열에 보관
-        Note over Briefing: 다음 출근 시
-        Approval->>Briefing: 대기 중인 승인 건수 집계
-        Briefing->>UserA: Daily Briefing에 표시
+        Note over ApprovalPanel: 다음 실행 시
+        Approval->>ApprovalPanel: 대기 중인 승인 건수 표시
+        ApprovalPanel->>UserA: 승인 큐에 표시
         UserA->>Approval: ✅ 승인 (또는 ❌ 거부)
     end
 
@@ -2317,7 +2262,7 @@ sequenceDiagram
 
 ### 8.4 승인 큐 UI
 
-에이전트 요청 승인은 Daily Briefing과 별도의 **Approval Queue** UI에서 관리된다.
+에이전트 요청 승인은 별도의 **Approval Queue** UI에서 관리된다.
 
 ```mermaid
 graph TB
@@ -2390,7 +2335,7 @@ graph TB
         UI_MOUNT["UI Slot Mount"]
         HOOK_REG["Hook Runner"]
         KW_REG["Keyword Registry"]
-        EVENT_REG["Event Emitter<br/>(Proactive Engine 연동)"]
+        EVENT_REG["Event Emitter<br/>(Overlay Trigger Surface 연동)"]
     end
 
     ACTIVATE --> SKILL_REG
@@ -2503,7 +2448,7 @@ graph TB
 | `tools` | **`string[]` (flat 이름 배열, snake_case 강제)** | LLM 에 노출되는 tool name. `^[a-zA-Z_][a-zA-Z0-9_]*$` — 도트·하이픈 금지. 호스트는 이 배열을 그대로 Tool Registry 에 등록한다 (런타임 변환 없음). |
 | `toolSchemas` | **`Record<string, { description, category, pathFields?, inputSchema, $schema? }>` (map form)** | LLM 파라미터 추론용 JSON Schema draft-07 + 권한 정책 authority metadata. `description` minLength 10, `category ∈ read/write/shell/network` 필수, `pathFields[]` 는 dotted selector 를 허용한다. `inputSchema.type` const `"object"` 필수. 런타임 payload 재검증은 수행하지 않는다. |
 | `uiCallable` | `string[]` (subset of `tools[]`) | Renderer `lvis:plugins:call` IPC 허용 allowlist. 구조적 `⊂ tools[]` 제약을 먼저 강제한 뒤, 실제 호출은 ToolRegistry → ToolExecutor → PermissionManager/ApprovalGate 단일 경로로 위임된다. 플러그인은 별도 IPC 채널이나 직접 handler 호출 경로를 선언할 수 없다. |
-| `capabilities` | **closed enum** (`src/plugins/capabilities.ts`) | `mail-source` / `calendar-source` / `meeting-recorder` / `knowledge-index` (emit namespace 게이트), `host:overlay` (HostApi `triggerConversation` 게이트) 는 enforced. `ms-graph-consumer`, `background-watcher`, `worker-client`, `conversation-trigger` 는 advisory/self-identification label. |
+| `capabilities` | **closed enum** (`src/plugins/capabilities.ts`) | `mail-source` / `calendar-source` / `meeting-recorder` / `knowledge-index` (emit namespace 게이트), `host:overlay` (HostApi `triggerConversation` 게이트) 는 enforced. `ms-graph-consumer`, `background-watcher`, `worker-client` 는 advisory/self-identification label. |
 | `deployment` | `"managed" \| "user"` | managed 는 ed25519 서명 필수 (fail-closed); user 는 warn-on-missing. |
 | `startupTimeoutMs` | integer (1~60000) | `Promise.race` 기반 start() 하드 타임아웃. 초과 시 fail-soft drop. |
 | `startupTools` | `string[]` (subset of `tools[]`) | boot 시 자동 호출되는 tool 이름 (백그라운드 watcher 등). |
@@ -2552,7 +2497,7 @@ graph TB
                 SIDEBAR_SLOT["🧩 Sidebar Slot"]
             end
             subgraph "Center Content"
-                BRIEFING_AREA["📋 Daily Briefing"]
+                OVERLAY_AREA["Overlay Prompt"]
                 CHAT_AREA["💬 Chat Area"]
                 CHAT_WIDGET_SLOT["🧩 Chat Widget Slot"]
             end
@@ -2654,7 +2599,7 @@ stateDiagram-v2
         Translate --> ShareToHub
 
         ShareToHub --> AgentHub: 참석자 에이전트에 공유
-        ShareToHub --> ProactiveEvent: 태스크 이벤트 발행
+        ShareToHub --> HostEvent: 태스크 이벤트 발행
     end
 
     BEFORE --> AFTER: 플러그인 설치
@@ -2667,20 +2612,20 @@ stateDiagram-v2
 | 메서드 | 설명 | 소비 플러그인 |
 |--------|------|--------------|
 | `registerKeywords(keywords)` | KeywordEngine에 트리거 키워드 등록 (boot 시 1회) | 전체 |
-| `emitEvent(name, payload)` | 다른 플러그인·ProactiveEngine에 이벤트 발행 | 전체 |
+| `emitEvent(name, payload)` | 다른 플러그인·호스트 이벤트 버스에 이벤트 발행 | 전체 |
 | `onEvent(name, handler)` | 이벤트 구독 | 전체 |
 | ~~`addTask(task)`~~ | **(2026-05-05 Phase 4 제거)** host `TaskService` + SQLite 경로 삭제. task 소유권은 agent-hub 플러그인으로 완전 이전 (Phase 1–4). `agent_hub.notification.surfaced` 이벤트가 일반 알림 채널 역할, `meeting.summary.created.actionItems` 가 액션아이템 캐리어. | 제거됨 |
 | `saveNote(title, content)` | 플러그인 자기 dir 안에 메모 저장 (`~/.lvis/plugins/<id>/notes/`) | meeting |
 | `getSecret(key)` | 암호화된 API 키 조회 | meeting, ms-graph |
 | `logEvent(level, message, data?)` | **[Phase 2]** 호스트 감사 로그에 플러그인 이벤트 기록. `level`: `"info"\|"warn"\|"error"` | 전체 |
 | `onShutdown(handler)` | **[Phase 2]** Electron `before-quit` 체인에 정리 핸들러 등록. 5s timeout. | 전체 |
-| `triggerConversation(spec)` | **[Brain P0]** 관찰 신호로부터 host overlay 에 proactive prompt 를 staged 하는 surface ("먼저 말 거는 비서" 차별화). 런타임 게이트는 `host:overlay` 단일 capability 이며, `conversation-trigger` 는 advisory self-identification label 이다. 자세한 사양: [`conversation-trigger.md`](../references/conversation-trigger.md). Brain track 은 §7 Proactive Engine 의 sub-phase 로 P0~P5 진행. | capability-bearing brain plugin |
+| `triggerConversation(spec)` | 관찰 신호로부터 host overlay 에 plugin-authored prompt 를 staged 하는 surface. 런타임 게이트는 `host:overlay` 단일 capability 이다. 자세한 사양: [`overlay-trigger.md`](../references/overlay-trigger.md). | `host:overlay` 보유 plugin |
 | `getInstalledPluginIds()` | 현재 로드된 plugin id snapshot (caller 자기 자신 제외, load order). 플러그인 의존성 체크용. 무게이트 — 향후 capability-filtered 변종 (`getProvidersFor(capability)`) 으로 진화 예정. | dependency-aware plugin |
 | `onPluginsChanged(handler)` | 플러그인 install/uninstall 이벤트 구독. handler 는 `PluginLifecycleEvent` 받음 (`{type: "installed", pluginId, source: "marketplace"\|"local-dev"} \| {type: "uninstalled", pluginId} \| { type: "_future"; readonly __exhaustive: never }`). Self-event 자동 필터. P0 는 `installed`/`uninstalled` 만 — `updated` 는 별도 spec. `_future` sentinel 은 type-level only (런타임에 발생 안 함) — exhaustive `switch` 를 강제하기 위한 forward-compat 가드. | lifecycle subscriber plugin |
 
 **`plugin.*` host-only event namespace (lifecycle 이벤트 spoof 차단)**
 
-`plugin.installed` / `plugin.uninstalled` 두 이벤트는 호스트가 발행자다. plugin 측에서 spoof 발사하지 못하도록 `plugin.*` namespace 가 **host-only** 로 예약되어 있다 (`src/plugins/capabilities.ts` 의 `HOST_ONLY_EMIT_NAMESPACES`).
+`plugin.installed` / `plugin.uninstalled` 두 이벤트는 호스트가 발행자다. plugin 측에서 spoof emit 하지 못하도록 `plugin.*` namespace 가 **host-only** 로 예약되어 있다 (`src/plugins/capabilities.ts` 의 `HOST_ONLY_EMIT_NAMESPACES`).
 
 - **호스트 emit (허용)**: `boot/types.ts:emitEvent` — install/uninstall 처리 끝난 직후 `ipc/domains/plugins.ts` (`lvis:plugins:install`, `lvis:plugins:uninstall`, `lvis:plugins:install-local`) 와 `main.ts` (`lvis://` deep-link install) 에서 발행. 게이트 우회는 의도된 호스트 권한.
 - **plugin emit (거부)**: `hostApi.emitEvent("plugin.installed", …)` 는 `boot/steps/plugin-runtime.ts` 의 `canEmitEvent` 가 호스트-only namespace 매칭 시 발행 무시 + warn. plugin webview 의 IPC bridge (`lvis:plugin:emit-event`) 도 동일 set 을 체크해서 `host-only-namespace:plugin` 으로 reject.
@@ -2725,9 +2670,9 @@ PR 3 에서 Microsoft Graph 인증이 호스트에서 플러그인으로 이전�
 
 **ms-graph 한정 escape hatch — `loginInExternalBrowser` 토글 (v0.1.29 +)**: 기본은 in-app `BrowserWindow` (PR #44, agent-hub mirror) 이지만, 사용자가 configSchema 로 `loginInExternalBrowser=true` 를 설정하면 `shell.openExternal` 로 시스템 기본 브라우저에 IdP 페이지를 띄우는 옛 흐름으로 전환할 수 있다 — corp-CA / WebView2 GPO / SSO 쿠키 격리 같은 환경 회귀의 안전망. MSAL loopback redirect 가 양쪽 모드에서 동일하게 동작하기 때문에 가능한 우연이며, **다른 OAuth 플러그인이 일반화하지 말 것** (Slack/Notion/Google 등은 redirect 메커니즘이 다를 수 있음). default off 라 §9.4a "agent-hub mirror" 정책은 그대로 유효.
 
-**Capability 네이밍**: `ms-graph-consumer` 는 kebab-case capability 네이밍 컨벤션을 따르며, 동일 컨벤션으로 `mail-source`, `calendar-source`, `meeting-recorder`, `background-watcher`, `worker-client`, `knowledge-index`, `conversation-trigger` 가 사용된다. HostApi overlay gate 는 reserved host namespace 인 `host:overlay` 를 사용한다.
+**Capability 네이밍**: `ms-graph-consumer` 는 kebab-case capability 네이밍 컨벤션을 따르며, 동일 컨벤션으로 `mail-source`, `calendar-source`, `meeting-recorder`, `background-watcher`, `worker-client`, `knowledge-index` 가 사용된다. HostApi overlay gate 는 reserved host namespace 인 `host:overlay` 를 사용한다.
 
-**Proactive Brain — `host:overlay` capability:** read-only "두뇌" plugin 이 신호 관찰 후 host overlay 에 proactive prompt 를 staged 하는 surface. `hostApi.triggerConversation()` 호출 권한은 `host:overlay` 로만 부여한다. `conversation-trigger` 는 문서화/분류용 advisory label 이며 런타임 권한을 부여하지 않는다. 일반 plugin 에 `host:overlay` 를 부여하지 말 것 — 사용자가 입력하지 않은 prompt 를 사용자에게 보여주고 확인 시 main chat 에 삽입할 수 있는 권한이므로. 안전 계약 / spec / gate 는 [`conversation-trigger.md`](../references/conversation-trigger.md) 참조.
+**Overlay Trigger — `host:overlay` capability:** plugin 이 신호 관찰 후 host overlay 에 plugin-authored prompt 를 staged 하도록 요청하는 surface. `hostApi.triggerConversation()` 호출 권한은 `host:overlay` 로만 부여한다. 일반 plugin 에 `host:overlay` 를 부여하지 말 것 — 사용자가 입력하지 않은 prompt 를 사용자에게 보여주고 확인 시 main chat 에 삽입할 수 있는 권한이므로. 안전 계약 / spec / gate 는 [`overlay-trigger.md`](../references/overlay-trigger.md) 참조.
 
 **HostApi 확장 원칙 ("3+ 플러그인 규칙"):** 새 메서드는 3개 이상의 플러그인이 동일 기능을 필요로 하거나, 보안·감사 제어가 필요한 경우에만 추가한다. 상세: `docs/references/plugin-tool-schema-design.md` §6
 
@@ -3178,7 +3123,7 @@ graph LR
 Agent Hub는 모든 사원 레플리카 에이전트가 모인 비동기 메시지 보드이다. 두 가지 축으로 작동한다:
 
 1. **범위 지정 게시** (Future) — 업무 일지·팁·인사이트는 사원이 **공개 범위를 승인**한 뒤 게시된다 (개인 보관 / 팀 / 상위 조직 / 전체). 기본값은 팀 레벨이다.
-2. **수시 열람** (Partial: read-only) — 에이전트는 자기 권한 범위 내의 게시물(팀 채널, Knowledge Board 등)을 **수시로 탐색**하며, 자기 사원에게 유용한 인사이트를 능동적으로 수집한다. 현재는 개인/팀 읽기만 가능하며, Daily Briefing에 "오늘 우리 팀에서 이런 일이 있었습니다"가 포함되는 근거이다.
+2. **수시 열람** (Partial: read-only) — 에이전트는 자기 권한 범위 내의 게시물(팀 채널, Knowledge Board 등)을 **수시로 탐색**하며, 자기 사원에게 유용한 인사이트를 능동적으로 수집한다. 현재는 개인/팀 읽기만 가능하며, 사용자가 수락한 overlay 제안에 "오늘 우리 팀에서 이런 일이 있었습니다"가 포함되는 근거이다.
 
 > 1:1 Direct Message는 현재 POC로 존재하지만, 파일 첨부·위임 수락·외부 API 실행 같은 **민감 행위**는 Section 8의 승인 원칙을 따른다. 현재 구현된 승인 POC는 verdict 기록까지이며, 승인 후 실제 행위 실행은 아직 연결하지 않는다.
 
@@ -3235,7 +3180,7 @@ graph TB
 
 ### 10.2 A2A Communication Flow (Full Agent Hub Target — Not Yet Implemented)
 
-**주의**: 다음은 승인 체계 및 A2A 런타임이 완성된 Phase 5 이후 상태이다. 현재 POC는 Direct Message 저장/조회와 ApprovalRequest verdict 상태 전이까지만 제공하며, 에이전트 간 자동 위임·파일 응답·Briefing 승인 UI는 아직 없다.
+**주의**: 다음은 승인 체계 및 A2A 런타임이 완성된 Phase 5 이후 상태이다. 현재 POC는 Direct Message 저장/조회와 ApprovalRequest verdict 상태 전이까지만 제공하며, 에이전트 간 자동 위임·파일 응답·overlay 승인 UI는 아직 없다.
 
 ```mermaid
 sequenceDiagram
@@ -3245,7 +3190,7 @@ sequenceDiagram
     participant AgentB as 이영희 Agent
     participant ApprovalB as 이영희 Approval Queue
     participant UserB as 이영희 (Client)
-    participant Briefing as Daily Briefing
+    participant ApprovalPanel as Approval Panel
 
     UserA->>AgentA: @이영희 분기 마케팅 보고서 공유 가능?
     AgentA->>Hub: Direct Message → 이영희 Agent
@@ -3261,9 +3206,9 @@ sequenceDiagram
         AgentB->>Hub: 파일 첨부 응답
     else 이영희 오프라인
         ApprovalB->>ApprovalB: 대기열 보관
-        Note over Briefing: 이영희 다음 출근 시
-        ApprovalB->>Briefing: "에이전트 요청 승인 1건"
-        Briefing->>UserB: Daily Briefing에 표시
+        Note over ApprovalPanel: 이영희 다음 실행 시
+        ApprovalB->>ApprovalPanel: "에이전트 요청 승인 1건"
+        ApprovalPanel->>UserB: 승인 큐에 표시
         UserB->>ApprovalB: ✅ 승인
         ApprovalB->>AgentB: 승인 확인
         AgentB->>Hub: 파일 첨부 응답
@@ -3348,7 +3293,7 @@ flowchart LR
         S3["3. API Connector 구현<br/>(사업부 시스템 REST/gRPC)"]
         S4["4. Skill 정의<br/>(트리거 키워드 + 실행 로직)"]
         S5["5. UI 컴포넌트<br/>(React, Slot 기반 — 선택)"]
-        S6["6. Event 연동<br/>(Proactive Engine 이벤트 — 선택)"]
+        S6["6. Event 연동<br/>(Overlay Trigger Surface 이벤트 — 선택)"]
         S7["7. Sandbox 테스트"]
         S8["8. 보안 심사 제출"]
         S9["9. Marketplace 배포"]
@@ -3420,25 +3365,25 @@ flowchart TB
         LG3 --> RESULT3["✅ 업무 현황 보고서 + 시너지 후보 제안"]
     end
 
-    subgraph "예시 4~6: 메일·태스크·브리핑"
-        U4["출근 → 클라이언트 부팅"]
-        U4 --> PROACTIVE["Proactive Engine Core"]
-        PROACTIVE --> COLLECT["이메일·캘린더·태스크·Agent Hub 수집"]
-        COLLECT --> LG4["Internal search: 우선순위 판단 + 자연어 브리핑"]
-        LG4 --> RESULT4["✅ Daily Briefing<br/>미팅 3건·액션 이메일 2통·기한 임박 태스크 1건"]
+    subgraph "예시 4~6: 메일·태스크·overlay 제안"
+        U4["플러그인이 업무 신호 감지"]
+        U4 --> OVERLAY["hostApi.triggerConversation()"]
+        OVERLAY --> CTA["사용자 overlay CTA 수락"]
+        CTA --> LG4["Internal search: main chat 정상 턴 실행"]
+        LG4 --> RESULT4["✅ 제안 검토 + 필요한 도구 권한 확인"]
     end
 ```
 
 ### 12.2 시나리오 → 컴포넌트 매핑 테이블
 
-| 시나리오       | KW Engine | Notes | Local Index | Server Index |   Internal search    | Agent Hub |    Plugin     |  Proactive  |   Agent Approval    |
+| 시나리오       | KW Engine | Notes | Local Index | Server Index |   Internal search    | Agent Hub |    Plugin     | Overlay Trigger |   Agent Approval    |
 | -------------- | :-------: | :---: | :---------: | :----------: | :---------: | :-------: | :-----------: | :---------: | :-----------------: |
 | 출장 품의      |    ✅     |  ✅   |   ✅ 양식   |   ✅ 규정    |   ✅ 초안   |     -     |   HR Plugin   |      -      |          -          |
 | SW 도입        |    ✅     |   -   |  ✅ 가이드  |  ✅ 가이드   |   ✅ 요약   | ✅ 담당자 |   IT Plugin   |      -      |          -          |
 | 팀 보고        |    ✅     |   -   |      -      |      -       |  ✅ 보고서  |  ✅ 팀원  |       -       |      -      | ✅ 데이터 수집 승인 |
 | 이메일 처리    |    ✅     |  ✅   |   ✅ 문서   |      -       |   ✅ 답장   |     -     | Email Plugin  |  ✅ 태스크  |          -          |
 | 태스크 관리    |     -     |  ✅   |      -      |      -       | ✅ 우선순위 |     -     |       -       | ✅ 리마인더 |          -          |
-| Daily Briefing |     -     |  ✅   |      -      |      -       |   ✅ 요약   |  ✅ 수신  |  이벤트 수집  |   ✅ 코어   |   ✅ 대기 건 표시   |
+| Overlay 제안    |     -     |  ✅   |      -      |      -       |   ✅ 판단   |  ✅ 수신  |  이벤트 수집  |   ✅ gate   |   ✅ mutating tool 확인 |
 | 회의록         |    ✅     |  ✅   | ✅ 관련문서 |      -       |   ✅ 요약   |  ✅ 공유  | 회의록 Plugin |  ✅ 태스크  |    ✅ 공유 승인     |
 
 ---
@@ -3875,15 +3820,15 @@ Electron 윈도우 전체에 드래그 앤 드롭 오버레이를 제공한다. 
 | `GlobalToolRegistry`             | Tool Registry         | + Plugin 동적 등록·해제          |
 | `PermissionPolicy`               | Permission Manager    | + RBAC + Governance Policy 통합  |
 | `Session` persistence            | Session Manager       | + 세션 히스토리 저장·복구 + Memory System 연동 |
-| `HookRunner`                     | Hook Runner           | + Event Emitter (Proactive) 추가 |
-| Query Loop (Core Cycle)          | Conversation Query Loop (§4.5) | + 승인 큐 분기 + Proactive Trigger + Memory Extraction |
+| `HookRunner`                     | Hook Runner           | + Event Emitter 추가 |
+| Query Loop (Core Cycle)          | Conversation Query Loop (§4.5) | + 승인 큐 분기 + Overlay Trigger + Memory Extraction |
 | `StreamingToolExecutor`          | StreamingToolExecutor | + Governance Policy 차단 + Approval Queue 연동 |
 | Auto-compact                     | AutoCompact           | 목표: 40% 기본값/20% 단위 설정, 현재: 80k token threshold + on/off |
-| Post-sampling hooks              | Post-Turn Hooks       | 현재 chain 유지 + Proactive Trigger + Plugin PostTurn 목표 설계 병행 |
+| Post-sampling hooks              | Post-Turn Hooks       | 현재 chain 유지 + Plugin PostTurn 목표 설계 병행 |
 | 3-layer permission model         | Tool Permission Model (§6.3) | + L1 Registry Filter (LLM에서 도구 은닉) + Governance 통합 |
 | Tool categorization (43 tools)   | Tool Registry & Taxonomy (§6.4) | LVIS 도메인 도구 + 플러그인·MCP 동적 등록 |
 | Bash AST safety analysis         | Command Safety (§6.5) | + 위험 등급 4단계 + Governance 불변 경계 |
-| System prompt (10+ sources)      | SystemPromptBuilder (§4.5.9) | 12개 소스 — + 조직 컨텍스트·Feature Flag·Proactive |
+| System prompt (10+ sources)      | SystemPromptBuilder (§4.5.9) | 12개 소스 — + 조직 컨텍스트·Feature Flag·overlay trigger origin guidance |
 | GrowthBook feature flags         | Feature Flag Service (§14.4) | + 부서·사업부·역할 타겟팅 + 킬 스위치 |
 | MCP architecture (24 files)      | MCP Protocol Architecture (§9.5) | + 사내 SSO 인증 + Governance 연동 |
 
@@ -4063,7 +4008,7 @@ v4 §14 배포·거버넌스 체계는 유지된다. v5 는 개발 조직 운영
 | Plugin Sandbox (V8/WASM)     | 플러그인 격리로 보안 확보                    | 플러그인 기능 일부 제한 |
 | Message Board 기반 Agent Hub | 비동기 협업, 사원 부재 시에도 동작           | 실시간성 다소 부족      |
 | API Gateway 기반 Marketplace | 사업부별 독립 배포 가능                      | Gateway 단일 장애점     |
-| Proactive Engine을 코어로    | Daily Briefing은 플러그인이 아닌 필수 기능   | 코어 복잡도 ↑           |
+| Overlay Trigger Surface을 코어로    | 사용자가 수락한 plugin-authored prompt 만 main chat 으로 import | 코어 gate 유지 필요     |
 | **파일 기반 경량 메모리**    | 단순·투명·사용자 제어 가능. 점진적 확장 여지 | 자동 기억 축적 부족     |
 | **에이전트 행위 승인 필수**  | 사원 대리 행위의 신뢰·보안 보장              | 응답 지연 가능성        |
 | **SSE 스트리밍 + Agentic Loop** | 체감 응답 속도 극대화 + 복잡 작업 자동 반복 | 네트워크 불안정 시 스트림 끊김 가능 |
@@ -4084,7 +4029,7 @@ v4 §14 배포·거버넌스 체계는 유지된다. v5 는 개발 조직 운영
 > - [ ] 각 엔진의 상세 인터페이스 정의 (IDL/Proto)
 > - [ ] Plugin SDK 상세 가이드 작성
 > - [ ] Internal search 세션 프로토콜 상세 정의
-> - [ ] Proactive Engine 이벤트 스펙 정의
+> - [ ] Overlay Trigger Surface 이벤트 스펙 정의
 > - [ ] 거버넌스 정책 스키마 정의 (OPA rule 포맷)
 > - [ ] Agent Approval 정책 스키마 정의
 > - [ ] 자동 승인 규칙 DSL 설계

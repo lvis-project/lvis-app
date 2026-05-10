@@ -239,63 +239,6 @@ export function createRoutineConversationLoop(
   });
 }
 
-/**
- * Trigger-isolated ConversationLoop factory.
- *
- * Proactive triggers (`hostApi.triggerConversation()`) must NOT execute on
- * the interactive chat's loop — doing so pushes templated proactive turns
- * into the user's session history and pollutes the LLM context for the
- * user's next direct message. We mirror the routine isolation pattern:
- * fresh ConversationLoop per trigger, own ConversationHistory, own
- * sessionId.
- *
- * Where this differs from {@link createRoutineConversationLoop}:
- *   - keeps `approvalGate` — destructive ops (mail send, calendar write)
- *     must still surface a user-confirmation modal even when the turn was
- *     started by a brain plugin; proactive autonomy ≠ permission grant.
- *   - keeps `bashAstValidator` — the LLM may legitimately call bash tools
- *     and the validator gate must still run.
- *   - `permissionManager` retained (source-aware policies on `proactive:*`
- *     origins are the eventual P-next deliverable; the slot must be live).
- *   - `postTurnHookChain` / `hookRunner` / `idleScheduler` omitted — those
- *     mutate the user's chat session/history; trigger loops are headless.
- */
-export type TriggerConversationLoopDeps = Pick<
-  ConversationDeps,
-  | "settingsService"
-  | "systemPromptBuilder"
-  | "keywordEngine"
-  | "routeEngine"
-  | "toolRegistry"
-  | "memoryManager"
-  | "permissionManager"
-  | "approvalGate"
-  | "scriptHookManager"
-  | "bashAstValidator"
-  | "pluginRuntime"
-  | "auditLogger"
->;
-
-export function createTriggerConversationLoop(
-  deps: TriggerConversationLoopDeps,
-): ConversationLoop {
-  return new ConversationLoop({
-    settingsService: deps.settingsService,
-    systemPromptBuilder: deps.systemPromptBuilder,
-    keywordEngine: deps.keywordEngine,
-    routeEngine: deps.routeEngine,
-    toolRegistry: deps.toolRegistry,
-    memoryManager: deps.memoryManager,
-    permissionManager: deps.permissionManager,
-    approvalGate: deps.approvalGate,
-    scriptHookManager: deps.scriptHookManager,
-    bashAstValidator: deps.bashAstValidator,
-    pluginRuntime: deps.pluginRuntime,
-    auditLogger: deps.auditLogger,
-    // postTurnHookChain / hookRunner / idleScheduler intentionally omitted.
-  });
-}
-
 export function createConversationLoop(deps: ConversationDeps): ConversationLoop {
   // §4.5: ConversationLoop
   return new ConversationLoop({
