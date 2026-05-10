@@ -408,6 +408,9 @@ function permissionAuditEntryFromToolCall(args: {
     decision: "allow",
     layer: args.permission?.layer ?? 6,
   };
+  if (args.permission?.reviewer?.verdict) {
+    allowEntry.reviewer = args.permission.reviewer.verdict;
+  }
   if (auditDirectory) {
     allowEntry.directory = auditDirectory;
     allowEntry.directoryAllowed = true;
@@ -592,6 +595,7 @@ export class ToolExecutor {
           decision: "deny",
           reason: "strict headless requires explicit approval",
           layer: 5,
+          reviewer: { route: "headless", verdict },
           ...(deferredId ? { deferred: { queueId: deferredId, reviewerVerdict: verdict } } : {}),
         },
       };
@@ -639,6 +643,7 @@ export class ToolExecutor {
           decision: "deny",
           reason: `reviewer ${reviewer.verdict.level}: ${reviewer.verdict.reason}`,
           layer: 5,
+          reviewer: { route: "headless", verdict: reviewer.verdict },
           ...(reviewer.deferredId
             ? { deferred: { queueId: reviewer.deferredId, reviewerVerdict: reviewer.verdict } }
             : {}),
@@ -651,6 +656,7 @@ export class ToolExecutor {
         decision: "allow",
         reason: `reviewer ${reviewer.verdict.level}: ${reviewer.verdict.reason}`,
         layer: 5,
+        reviewer: { route: "headless", verdict: reviewer.verdict },
       },
     };
   }
@@ -704,12 +710,14 @@ export class ToolExecutor {
         decision: "allow",
         reason: `reviewer low: ${reviewer.verdict.reason}`,
         layer: 5,
+        reviewer: { route: "foreground-auto", verdict: reviewer.verdict },
       };
     }
     return {
       decision: "ask",
       reason: `reviewer ${reviewer.verdict.level}: ${reviewer.verdict.reason}`,
       layer: 5,
+      reviewer: { route: "foreground-auto", verdict: reviewer.verdict },
     };
   }
 
@@ -1143,7 +1151,7 @@ export class ToolExecutor {
           layer: 6,
         };
       }
-      if (permissionResult.decision === "ask") {
+      if (permissionResult.decision === "ask" && permissionResult.reviewer?.route === "foreground-auto") {
         const reviewerResult = await this.dispatchReviewerForInteractiveAuto(
           toolUse.name,
           source,
@@ -1170,6 +1178,19 @@ export class ToolExecutor {
       }
       if (permissionResult.decision === "ask") {
         if (invocationPermissionContext.headless === true) {
+          if (permissionResult.reviewer?.route !== "headless") {
+            const headlessDeny: PermissionCheckResult = {
+              decision: "deny",
+              reason: `headless explicit approval unavailable: ${permissionResult.reason}`,
+              layer: permissionResult.layer,
+            };
+            const msg = `[권한 차단 — headless] 도구 '${toolUse.name}' (${source}) — ${headlessDeny.reason}`;
+            const durationMs = Date.now() - startTime;
+            emitToolStart(callbacks, toolUse.name, finalInput, meta);
+            callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+            await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, headlessDeny, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
+            return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+          }
           const reviewerResult = await this.dispatchReviewerForHeadless(
             toolUse.name,
             source,
