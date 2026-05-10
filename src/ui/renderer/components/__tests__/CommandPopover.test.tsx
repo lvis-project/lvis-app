@@ -67,11 +67,14 @@ describe("CommandPopover", () => {
     });
   });
 
-  it("renders all 9 slash commands when open", async () => {
+  it("renders runnable slash commands when open", async () => {
     renderPopover({ open: true });
     const EXPECTED = [
       "/new", "/sessions", "/load", "/compact",
-      "/remember", "/memory", "/vendor", "/tools", "/help",
+      "/remember", "/memory", "/vendor", "/tools",
+      "/permission", "/permission dir list",
+      "/permission mode strict", "/permission mode default", "/permission mode auto",
+      "/permission hooks list", "/permission audit verify", "/help",
     ];
     await waitFor(() => {
       const group = document.querySelector("[data-testid='command-group-slash']");
@@ -79,6 +82,7 @@ describe("CommandPopover", () => {
       for (const cmd of EXPECTED) {
         expect(group!.textContent).toContain(cmd);
       }
+      expect(group!.textContent).not.toContain("/permission mode권한 모드 변경");
     });
   });
 

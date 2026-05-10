@@ -1,7 +1,7 @@
 /**
  * Renders the list of HIGH-risk routine actions that the Layer 5
  * reviewer agent deferred during headless execution. Each entry has
- * "리뷰" / "거부" buttons; the user's click resolves the entry
+ * "승인" / "거부" buttons; the user's click resolves the entry
  * via IPC and writes an audit record on the main side.
  *
  * Spec ref: docs/architecture/permission-policy-design.md §3
@@ -89,7 +89,7 @@ export function DeferredQueuePanel(): ReactElement | null {
       </header>
       <p className="mb-2 text-xs text-muted-foreground">
         루틴 실행 중 리뷰어 에이전트가 HIGH 위험으로 분류해 자동 실행을
-        보류한 도구 호출입니다. 각 항목을 검토 후 승인하거나 거부하세요.
+        보류한 도구 호출입니다. 각 항목을 확인한 뒤 승인하거나 거부하세요.
       </p>
       {error && (
         <p className="mb-2 rounded bg-red-500/10 px-2 py-1 text-xs text-red-700 dark:text-red-400">
@@ -137,7 +137,7 @@ export function DeferredQueuePanel(): ReactElement | null {
                 disabled={busy}
                 onClick={() => handle(entry.id, "approved")}
               >
-                리뷰
+                승인
               </Button>
             </div>
           </li>

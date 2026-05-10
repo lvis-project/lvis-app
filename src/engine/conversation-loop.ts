@@ -1828,6 +1828,11 @@ export class ConversationLoop {
 /memory — 사용자 메모 목록
 /vendor — 현재 벤더/토큰 정보
 /tools — 등록된 도구 목록
+/permission — 현재 권한 모드
+/permission mode <strict|default|auto> --durable — 권한 모드 변경
+/permission dir <list|allow|deny> [path] — 허용 디렉터리 관리
+/permission reviewer <show|mode|provider|model> [value] — 리뷰어 설정
+/permission audit <show|verify> — 권한 감사 조회/검증
 /permission hooks <list|accept|disable|reject> [name] — script hook 신뢰 상태 관리
 /help — 이 도움말`;
         break;

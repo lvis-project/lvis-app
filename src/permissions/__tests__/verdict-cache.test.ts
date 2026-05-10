@@ -14,6 +14,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  MAX_VERDICT_CACHE_ENTRIES,
   VerdictCache,
   canonicalInputShape,
   computeCacheKey,
@@ -229,6 +230,19 @@ describe("VerdictCache lookup states", () => {
     expect(r.hit).toBe(false);
     expect(r.reason).toBe("miss-expired");
   });
+
+  it("prunes stale entries and can still hit an older current entry", async () => {
+    const staleCtx: VerdictCacheContext = {
+      allowedDirectories: ["/stale"],
+      scope: { mode: "deny-all" },
+    };
+    await cache.store(LOOKUP, CTX, { level: "low", reason: "current" });
+    await cache.store(LOOKUP, staleCtx, { level: "high", reason: "stale" });
+
+    const r = cache.lookup(LOOKUP, CTX);
+    expect(r.hit).toBe(true);
+    expect(r.verdict?.reason).toBe("current");
+  });
 });
 
 describe("VerdictCache persistence", () => {
@@ -256,6 +270,21 @@ describe("VerdictCache persistence", () => {
       expect(parsed).toHaveProperty("expiresAt");
       expect(parsed).toHaveProperty("invalidationKey");
     }
+  });
+
+  it("caps stored entries to the newest cache window", async () => {
+    const path = tmpCachePath();
+    const cache = new VerdictCache(path);
+    for (let i = 0; i < MAX_VERDICT_CACHE_ENTRIES + 3; i += 1) {
+      await cache.store({ ...LOOKUP, toolName: `tool_${i}` }, CTX, {
+        level: "low",
+        reason: String(i),
+      });
+    }
+    const lines = readFileSync(path, "utf-8").trim().split("\n");
+    expect(lines).toHaveLength(MAX_VERDICT_CACHE_ENTRIES);
+    expect(cache.lookup({ ...LOOKUP, toolName: "tool_0" }, CTX).hit).toBe(false);
+    expect(cache.lookup({ ...LOOKUP, toolName: `tool_${MAX_VERDICT_CACHE_ENTRIES + 2}` }, CTX).hit).toBe(true);
   });
 });
 

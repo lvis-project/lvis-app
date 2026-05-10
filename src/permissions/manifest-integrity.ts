@@ -1,5 +1,5 @@
 /**
- * Permission policy Phase 4 — Manifest integrity proxy (§3.5).
+ * Permission policy — Manifest integrity proxy (§3.5).
  *
  * Spec ref: docs/architecture/permission-policy-design.md §3.5.
  *
@@ -20,8 +20,7 @@
  * Disable semantics:
  *   - On violation, the plugin id is added to the
  *     {@link ManifestIntegrityState.disabledPluginIds} set so the next
- *     tool dispatch refuses the call (categoryBasedDecision sees the
- *     disabled flag and returns deny).
+ *     plugin tool adapter refuses the call before tool dispatch.
  *   - The renderer IPC `lvis:permissions:manifest-violation` channel
  *     surfaces the violation with the plugin id so the user can
  *     confirm a reinstall.
@@ -236,16 +235,14 @@ export function bindManifestIntegrityAudit(
       );
       throw err;
     }
-    if (audit.isPermissionAuditChainReady()) {
-      await audit.appendPermissionAuditEntry({
-        ts: new Date().toISOString(),
-        auditId: randomUUID(),
-        trustOrigin: "plugin-emitted",
-        decision: "manifest_violation",
-        pluginId,
-        toolName,
-        attemptedOperation: attemptedMethod,
-      });
-    }
+    await audit.appendPermissionAuditEntry({
+      ts: new Date().toISOString(),
+      auditId: randomUUID(),
+      trustOrigin: "plugin-emitted",
+      decision: "manifest_violation",
+      pluginId,
+      toolName,
+      attemptedOperation: attemptedMethod,
+    });
   });
 }

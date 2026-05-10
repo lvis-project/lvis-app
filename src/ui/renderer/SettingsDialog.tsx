@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "../../components/ui/button.js";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../../components/ui/tabs.js";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../components/ui/dialog.js";
@@ -18,9 +18,47 @@ import { PluginConfigTab } from "./tabs/PluginConfigTab.js";
 import { MarketplaceTab } from "./tabs/MarketplaceTab.js";
 import { useSettingsOrchestration } from "./hooks/use-settings-orchestration.js";
 
-export function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; onOpenChange: (o: boolean) => void; api: LvisApi; onSaved: () => void }) {
-  const [tab, setTab] = useState("llm");
+export function SettingsDialog({
+  open,
+  onOpenChange,
+  api,
+  onSaved,
+  initialTab = "llm",
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  api: LvisApi;
+  onSaved: () => void;
+  initialTab?: string;
+}) {
+  const [tab, setTab] = useState(initialTab);
+  const [pendingPermissions, setPendingPermissions] = useState(0);
   const s = useSettingsOrchestration(open, api, onSaved, onOpenChange);
+
+  useEffect(() => {
+    if (open) setTab(initialTab);
+  }, [initialTab, open]);
+
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    const refreshPending = async () => {
+      try {
+        const result = await api.permission.deferredList();
+        if (alive && result.ok) setPendingPermissions(result.pending.length);
+      } catch {
+        if (alive) setPendingPermissions(0);
+      }
+    };
+    void refreshPending();
+    const unsubscribe = api.permission.onDeferredPending((summary) => {
+      setPendingPermissions(summary.pending);
+    });
+    return () => {
+      alive = false;
+      unsubscribe();
+    };
+  }, [api, open]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -33,7 +71,14 @@ export function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boo
             <TabsTrigger value="chat">채팅</TabsTrigger>
             <TabsTrigger value="web">검색 (Web)</TabsTrigger>
             <TabsTrigger value="privacy">프라이버시</TabsTrigger>
-            <TabsTrigger value="permissions">권한</TabsTrigger>
+            <TabsTrigger value="permissions" className="gap-1.5">
+              권한
+              {pendingPermissions > 0 && (
+                <span className="rounded-full bg-destructive px-1.5 py-0.5 text-[10px] leading-none text-destructive-foreground">
+                  {pendingPermissions}
+                </span>
+              )}
+            </TabsTrigger>
             <TabsTrigger value="roles">역할</TabsTrigger>
             <TabsTrigger value="usage">사용량</TabsTrigger>
             <TabsTrigger value="audit">감사</TabsTrigger>

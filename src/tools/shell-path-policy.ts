@@ -315,9 +315,10 @@ function resolveCandidatePath(value: string, cwd: string): string {
     : expandedVars.startsWith("~/") || expandedVars.startsWith("~\\")
       ? pathResolve(homedir(), expandedVars.slice(2))
       : expandedVars;
-  return isAbsolute(expanded) || /^[A-Za-z]:[\\/]/.test(expanded)
+  const resolved = isAbsolute(expanded) || /^[A-Za-z]:[\\/]/.test(expanded)
     ? pathResolve(expanded)
     : pathResolve(cwd, expanded);
+  return canonicalizePathForMatch(resolved);
 }
 
 function expandShellPathVariables(value: string, cwd: string): string {

@@ -10,6 +10,7 @@ import type { McpServerConfig } from "./mcp/types.js";
 import type { SerializedHistoryMessage } from "./shared/chat-history.js";
 import { OVERLAY_V1, PERMISSIONS, ROUTINES_V2 } from "./shared/ipc-channels.js";
 import { PLUGIN_PRIVATE_NAMESPACES } from "./plugins/capabilities.js";
+import type { ChatSendInputOrigin, UserKeyboardIntent } from "./shared/chat-origin.js";
 
 // ─── Deterministic plugin webview asset URLs ────────────────────────────────
 // `__dirname` here resolves to the host preload's bundled location
@@ -70,6 +71,17 @@ function normalizePluginActionResult(result: unknown): PluginActionResult {
   return normalized;
 }
 
+function hasActiveUserGesture(): boolean {
+  return globalThis.navigator?.userActivation?.isActive === true;
+}
+
+function ipcUserKeyboardIntent(): UserKeyboardIntent | { inputOrigin: "user-keyboard"; userActivation: false } {
+  return {
+    inputOrigin: "user-keyboard",
+    userActivation: hasActiveUserGesture(),
+  };
+}
+
 const api = {
   // ─── Plugin webview asset URLs (deterministic file://) ────────────────────
   // Static strings, NOT functions — the host renderer reads these directly
@@ -121,8 +133,17 @@ const api = {
 
   // ─── Chat (ConversationLoop) ─────────────────────
   chatHasProvider: async () => ipcRenderer.invoke("lvis:chat:has-provider") as Promise<boolean>,
-  chatSend: async (input: string, attachments?: unknown[]) =>
-    ipcRenderer.invoke("lvis:chat:send", input, attachments),
+  chatSend: async (
+    input: string,
+    attachments: unknown[] | undefined,
+    inputOrigin: ChatSendInputOrigin,
+  ) =>
+    ipcRenderer.invoke("lvis:chat:send", {
+      input,
+      attachments,
+      inputOrigin,
+      ...(inputOrigin === "user-keyboard" ? { userActivation: hasActiveUserGesture() } : {}),
+    }),
   chatGuide: async (input: string) => ipcRenderer.invoke("lvis:chat:guide", input),
   chatNew: async () => ipcRenderer.invoke("lvis:chat:new"),
   chatSessions: async (opts?: { limit?: number; before?: string; beforeId?: string; after?: string }) =>
@@ -464,25 +485,33 @@ const api = {
   // ─── Permission ───────────────────────────────────
   permission: {
     getMode: async () => ipcRenderer.invoke(PERMISSIONS.getMode),
-    setMode: async (mode: string) => ipcRenderer.invoke(PERMISSIONS.setMode, mode),
+    setMode: async (mode: string) => ipcRenderer.invoke(PERMISSIONS.setMode, {
+      mode,
+      intent: ipcUserKeyboardIntent(),
+    }),
     listRules: async () => ipcRenderer.invoke(PERMISSIONS.listRules),
     addRule: async (pattern: string, action: string) =>
-      ipcRenderer.invoke(PERMISSIONS.addRule, pattern, action),
+      ipcRenderer.invoke(PERMISSIONS.addRule, { pattern, action, intent: ipcUserKeyboardIntent() }),
     removeRule: async (pattern: string, action: string) =>
-      ipcRenderer.invoke(PERMISSIONS.removeRule, pattern, action),
+      ipcRenderer.invoke(PERMISSIONS.removeRule, { pattern, action, intent: ipcUserKeyboardIntent() }),
     /** Permission policy — deferred queue (Layer 5 reviewer HIGH verdicts). */
     deferredList: async () => ipcRenderer.invoke(PERMISSIONS.deferredList),
     /** Permission policy issue #633 — hook quarantine state for non-modal settings badge. */
     hookTrustList: async () => ipcRenderer.invoke(PERMISSIONS.hookTrustList),
     /** Permission policy — `/permission dir ...` slash dispatch via IPC. */
     dirDispatch: async (rawArgs: string) =>
-      ipcRenderer.invoke(PERMISSIONS.dirDispatch, { rawArgs }),
+      ipcRenderer.invoke(PERMISSIONS.dirDispatch, { rawArgs, intent: ipcUserKeyboardIntent() }),
     deferredResolve: async (
       id: string,
       decision: "approved" | "rejected",
       reason?: string,
     ) =>
-      ipcRenderer.invoke(PERMISSIONS.deferredResolve, { id, decision, reason }),
+      ipcRenderer.invoke(PERMISSIONS.deferredResolve, {
+        id,
+        decision,
+        reason,
+        intent: ipcUserKeyboardIntent(),
+      }),
     /** Foreground-entry pending notification — main→renderer event. */
     onDeferredPending: (cb: (summary: { pending: number }) => void) => {
       const listener = (_event: unknown, summary: { pending: number }) =>
@@ -493,7 +522,7 @@ const api = {
     },
     /** Permission policy — `/permission reviewer ...` slash dispatch via IPC. */
     reviewerDispatch: async (rawArgs: string) =>
-      ipcRenderer.invoke(PERMISSIONS.reviewerDispatch, { rawArgs }),
+      ipcRenderer.invoke(PERMISSIONS.reviewerDispatch, { rawArgs, intent: ipcUserKeyboardIntent() }),
     /** Permission policy — `/permission audit show` — fetch recent permission audit entries. */
     auditShow: async (last: number) =>
       ipcRenderer.invoke(PERMISSIONS.auditShow, { last }),
@@ -523,7 +552,8 @@ const api = {
   // ─── Policy (Governance) ─────────────────────────
   policy: {
     get: async () => ipcRenderer.invoke(PERMISSIONS.policyGet),
-    set: async (patch: unknown) => ipcRenderer.invoke(PERMISSIONS.policySet, patch),
+    set: async (patch: unknown) =>
+      ipcRenderer.invoke(PERMISSIONS.policySet, { patch, intent: ipcUserKeyboardIntent() }),
   },
 
   // ─── Approval Gate (§6.3 Layer 3 + §8) ─────────

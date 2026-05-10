@@ -105,7 +105,7 @@ describe("DeferredQueuePanel", () => {
     await act(async () => {
       render(<DeferredQueuePanel />);
     });
-    const button = screen.getByText("리뷰");
+    const button = screen.getByText("승인");
     await act(async () => {
       fireEvent.click(button);
     });
@@ -160,7 +160,7 @@ describe("DeferredQueuePanel", () => {
       render(<DeferredQueuePanel />);
     });
     await act(async () => {
-      fireEvent.click(screen.getByText("리뷰"));
+      fireEvent.click(screen.getByText("승인"));
     });
     expect(api.deferredResolve).toHaveBeenCalledWith("err-1", "approved");
     expect(api.deferredList.mock.calls.length).toBeGreaterThanOrEqual(2);

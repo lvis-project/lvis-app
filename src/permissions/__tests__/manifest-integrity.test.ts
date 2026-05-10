@@ -117,20 +117,25 @@ describe("Permission policy P4 ManifestIntegrityState", () => {
 });
 
 describe("Permission policy P4 bindManifestIntegrityAudit", () => {
-  it("writes an audit entry per violation", async () => {
+  it("fails closed when the permission audit chain is not ready", async () => {
     const state = new ManifestIntegrityState();
     const audit = {
       log: vi.fn(),
       isPermissionAuditChainReady: vi.fn(() => false),
-      appendPermissionAuditEntry: vi.fn(),
+      appendPermissionAuditEntry: vi.fn(async () => {
+        throw new Error("permission audit chain not initialized");
+      }),
     } as unknown as import("../../audit/audit-logger.js").AuditLogger;
     bindManifestIntegrityAudit(audit, state);
-    await state.recordViolation("p", "tool_x", "writeFileSync");
+    await expect(state.recordViolation("p", "tool_x", "writeFileSync")).rejects.toThrow(
+      "permission audit chain not initialized",
+    );
     expect(audit.log).toHaveBeenCalledOnce();
     const entry = (audit.log as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(entry.type).toBe("error");
     expect(entry.input).toContain("manifest_integrity_violation");
     expect(entry.input).toContain("tool_x");
+    expect(audit.appendPermissionAuditEntry).toHaveBeenCalledOnce();
   });
 
   it("appends manifest_violation to the permission audit chain when ready", async () => {

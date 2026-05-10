@@ -315,10 +315,10 @@ function auditDirectoryForInput(
   tool: import("./base.js").Tool | undefined,
   input: Record<string, unknown>,
   cwd: string,
+  canonicalTargetFilePath?: string,
 ): string | undefined {
   if (tool) {
-    const [targetPath] = extractTargetFilePaths(tool, input, cwd);
-    if (targetPath) return targetPath;
+    if (canonicalTargetFilePath) return canonicalTargetFilePath;
     if (tool.category === "shell" && typeof input.cwd === "string" && input.cwd.length > 0) {
       return resolveToolPathForPermission(input.cwd, cwd);
     }
@@ -356,6 +356,7 @@ function permissionAuditEntryFromToolCall(args: {
   rateLimitRemaining: number;
   trustOrigin: HookTrustOrigin;
   cwd: string;
+  auditDirectory?: string;
 }): PermissionAuditEntryInput {
   const base = permissionAuditBase(args);
   if (args.permission?.decision === "deny") {
@@ -372,7 +373,7 @@ function permissionAuditEntryFromToolCall(args: {
       denyReasons,
     };
   }
-  const auditDirectory = auditDirectoryForInput(args.tool, args.input, args.cwd);
+  const auditDirectory = auditDirectoryForInput(args.tool, args.input, args.cwd, args.auditDirectory);
   const allowEntry: Extract<PermissionAuditEntryInput, { decision: "allow" }> = {
     ...base,
     decision: "allow",
@@ -397,8 +398,9 @@ function permissionAuditAskEntryFromToolCall(args: {
   permission: PermissionCheckResult;
   trustOrigin: HookTrustOrigin;
   cwd: string;
+  auditDirectory?: string;
 }): PermissionAuditEntryInput {
-  const auditDirectory = auditDirectoryForInput(args.tool, args.input, args.cwd);
+  const auditDirectory = auditDirectoryForInput(args.tool, args.input, args.cwd, args.auditDirectory);
   const askEntry: Extract<PermissionAuditEntryInput, { decision: "ask" }> = {
     ...permissionAuditBase(args),
     decision: "ask",
@@ -498,10 +500,6 @@ export class ToolExecutor {
     return this.hookRunner;
   }
 
-  private hookTrustOrigin(context: ToolPermissionContext): HookTrustOrigin {
-    return context.trustOrigin;
-  }
-
   private async runScriptHook(
     hookType: "pre" | "post" | "perm",
     toolName: string,
@@ -522,7 +520,7 @@ export class ToolExecutor {
       category,
       input,
       sessionId: sessionId ?? "unknown",
-      trustOrigin: this.hookTrustOrigin(context),
+      trustOrigin: context.trustOrigin as HookTrustOrigin,
       ...(toolOutput !== undefined ? { toolOutput } : {}),
       ...(isError !== undefined ? { isError } : {}),
     };
@@ -882,6 +880,7 @@ export class ToolExecutor {
               dirLayerResult,
               executionCwd,
               invocationPermissionContext,
+              outOfAllowedTarget.filePath,
             );
             decision = await this.approvalGate.requestAndWait(approvalRequest);
           } catch (approvalErr) {
@@ -1106,6 +1105,7 @@ export class ToolExecutor {
               permissionResult,
               executionCwd,
               invocationPermissionContext,
+              targetFilePath,
             );
             decision = await this.approvalGate.requestAndWait(approvalRequest);
           } catch (approvalErr) {
@@ -1344,7 +1344,7 @@ export class ToolExecutor {
       toolUse.name === "ask_user_question" && source === "builtin" && !isError
         ? redactAskUserAuditOutput(displayContent)
         : displayContent;
-    await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, auditContent, isError, startTime, permissionResult, rateResult.remaining, invocationPermissionContext, invocationCategory, executionCwd);
+    await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, auditContent, isError, startTime, permissionResult, rateResult.remaining, invocationPermissionContext, invocationCategory, executionCwd, targetFilePath);
 
     return { tool_use_id: toolUse.id, content, ...(isError && { is_error: true }), ...(uiPayload && { uiPayload }), durationMs };
   }
@@ -1359,6 +1359,7 @@ export class ToolExecutor {
     permission: PermissionCheckResult,
     cwd: string,
     permissionContext?: ToolPermissionContext,
+    auditDirectory?: string,
   ): Promise<void> {
     const tool = this.toolRegistry.findByName(toolName);
     const entry = permissionAuditAskEntryFromToolCall({
@@ -1370,6 +1371,7 @@ export class ToolExecutor {
       permission,
       trustOrigin: auditTrustOrigin(permissionContext),
       cwd,
+      auditDirectory,
     });
     if (!this.auditLogger.isPermissionAuditChainReady()) {
       if (this.requirePermissionAuditChain) {
@@ -1405,6 +1407,7 @@ export class ToolExecutor {
     permissionContext?: ToolPermissionContext,
     category?: ToolCategory,
     cwd?: string,
+    auditDirectory?: string,
   ): Promise<void> {
     try {
       const inputText = JSON.stringify(input);
@@ -1447,6 +1450,7 @@ export class ToolExecutor {
       rateLimitRemaining,
       trustOrigin: auditTrustOrigin(permissionContext),
       cwd,
+      auditDirectory,
     });
     if (!this.auditLogger.isPermissionAuditChainReady()) {
       if (this.requirePermissionAuditChain) {

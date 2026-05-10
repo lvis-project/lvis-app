@@ -63,12 +63,12 @@ describe("DeferredQueue", () => {
 
   it("entries persist across instances", async () => {
     const path = tmpQueuePath();
-    const q1 = new DeferredQueue(path);
-    const id = await q1.append(SAMPLE);
-    await q1.resolve(id, "approved");
-    const q2 = new DeferredQueue(path);
-    expect(q2.size()).toBe(1);
-    expect(q2.listPending()).toHaveLength(0);
+    const firstQueue = new DeferredQueue(path);
+    const id = await firstQueue.append(SAMPLE);
+    await firstQueue.resolve(id, "approved");
+    const secondQueue = new DeferredQueue(path);
+    expect(secondQueue.size()).toBe(1);
+    expect(secondQueue.listPending()).toHaveLength(0);
   });
 
   it("file format is JSONL", async () => {

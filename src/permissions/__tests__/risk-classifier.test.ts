@@ -65,6 +65,15 @@ describe("RuleBasedRiskClassifier", () => {
     expect(v.level).toBe("high");
   });
 
+  it("PowerShell Remove-Item -Recurse → HIGH", () => {
+    const v = rb.classify(ctx({
+      category: "shell",
+      finalInput: { command: "Remove-Item -LiteralPath $env:USERPROFILE\\Desktop\\old -Recurse -Force" },
+    }));
+    expect(v.level).toBe("high");
+    expect(v.reason).toMatch(/destructive/);
+  });
+
   it("shell with reversible verb (echo) → LOW", () => {
     const v = rb.classify(ctx({ category: "shell", finalInput: { command: "echo hi" } }));
     expect(v.level).toBe("low");
