@@ -15,6 +15,8 @@ vi.mock("../audit/audit-logger.js", () => ({
   AuditLogger: vi.fn().mockImplementation(() => ({
     log: auditLog,
     logTurn: vi.fn(),
+    isPermissionAuditChainReady: vi.fn(() => false),
+    assertPermissionAuditWritable: vi.fn(),
   })),
 }));
 
@@ -25,6 +27,8 @@ vi.mock("../audit/dlp-filter.js", () => ({
 import { ToolExecutor } from "../tools/executor.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { createDynamicTool } from "../tools/base.js";
+
+const userPermissionContext = { trustOrigin: "user-keyboard" as const };
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -58,6 +62,7 @@ describe("ToolExecutor metadata", () => {
           onToolEnd: (_name, _result, _isError, meta) => endMetas.push(meta),
         },
         sessionId: "session-1",
+        permissionContext: userPermissionContext,
       },
     );
 
@@ -102,6 +107,7 @@ describe("ToolExecutor metadata", () => {
             callbackDurations.push(durationMs),
         },
         sessionId: "session-1",
+        permissionContext: userPermissionContext,
       },
     );
 
@@ -125,6 +131,7 @@ describe("ToolExecutor metadata", () => {
             callbackDurations.push(durationMs),
         },
         sessionId: "session-1",
+        permissionContext: userPermissionContext,
       },
     );
 

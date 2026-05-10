@@ -180,7 +180,17 @@ export function wireReviewerAgent(deps: WireReviewerDeps): WireReviewerResult {
     );
   }
 
-  deps.permissionManager.setReviewer({ classifier, cache, deferredQueue });
+  deps.permissionManager.setReviewer({
+    classifier,
+    cache,
+    deferredQueue,
+    cacheScope: {
+      mode: settings.mode,
+      provider: settings.provider,
+      model: settings.model,
+      fallbackOnError: settings.fallbackOnError,
+    },
+  });
   return { classifier, cache, deferredQueue, appliedSettings: settings };
 }
 

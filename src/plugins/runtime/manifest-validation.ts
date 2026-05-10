@@ -1,5 +1,5 @@
 /**
- * Manifest validation — AJV schema validation + hand-rolled MUST/SHOULD checks.
+ * Manifest validation — SDK schema SOT + host cross-field MUST/SHOULD checks.
  *
  * Exported for unit testing and reuse by the PluginRuntime class.
  */
@@ -13,17 +13,6 @@ import * as AddFormatsModule from "ajv-formats";
 import type { ValidateFunction } from "ajv";
 import type { PluginManifest, InstallPolicy } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
-
-/**
- * Permission policy — categories a plugin manifest may declare. Plugins are NOT allowed
- * to claim `meta` (host-only control-flow primitives), and future host-only
- * category additions must not automatically widen the plugin manifest contract.
- */
-const PLUGIN_ACCEPTED_CATEGORIES = ["read", "write", "shell", "network"] as const;
-
-function pluginAcceptedCategories(): string[] {
-  return [...PLUGIN_ACCEPTED_CATEGORIES];
-}
 
 /**
  * Stable SemVer pattern (MAJOR.MINOR.PATCH, no leading zeros, no pre-release,
@@ -53,42 +42,16 @@ export function getDeclaredEmittedEvents(manifest: PluginManifest): string[] {
 }
 
 /**
- * Sprint 4-B §B-1 — lazy-load + compile plugin.schema.json into an AJV
- * validator. AJV is configured with `strict: true` + `allErrors: true` so
- * every violation surfaces in one pass. Compilation failure is logged and
- * returns `null`; readManifest falls back to hand-rolled checks to stay
- * operational.
+ * Lazy-load + compile the SDK plugin manifest schema into an AJV validator.
+ * The SDK schema is the manifest shape SOT; if it cannot be resolved or
+ * compiled, plugin loading must fail closed instead of switching validators.
  */
-export async function buildManifestValidator(): Promise<ValidateFunction | null> {
+export async function buildManifestValidator(): Promise<ValidateFunction> {
   try {
-    // Phase-2 SDK-as-SoT: schema is sourced from the `@lvis/plugin-sdk`
-    // npm package (file: dependency in the monorepo). The host stopped
-    // maintaining its own copy — there is no schemas/ directory on the
-    // host side anymore. We use `createRequire(import.meta.url).resolve`
-    // (not `import.meta.resolve`) because vitest's SSR runtime does not
-    // implement `import.meta.resolve` — `createRequire` works in both
-    // production Node and the test runner. Single resolution path; no
-    // fallback chain — if `@lvis/plugin-sdk` cannot be resolved, the
-    // outer try/catch returns `null` and `parsePluginJson` falls back to
-    // hand-rolled MUST/SHOULD checks (degraded but still operational).
-    const candidates = [
-      createRequire(import.meta.url).resolve(
-        "@lvis/plugin-sdk/schemas/plugin-manifest.schema.json",
-      ),
-    ];
-    let schemaBytes: string | null = null;
-    for (const candidate of candidates) {
-      try {
-        schemaBytes = await readFile(candidate, "utf-8");
-        break;
-      } catch {
-        // try next
-      }
-    }
-    if (!schemaBytes) {
-      log.warn("plugin.schema.json not found — AJV validation disabled");
-      return null;
-    }
+    const schemaPath = createRequire(import.meta.url).resolve(
+      "@lvis/plugin-sdk/schemas/plugin-manifest.schema.json",
+    );
+    const schemaBytes = await readFile(schemaPath, "utf-8");
     const schema = JSON.parse(schemaBytes);
     // Ajv default export compat for ESM/CJS interop.
     const AjvAny = AjvModule as unknown as { default?: unknown };
@@ -109,23 +72,19 @@ export async function buildManifestValidator(): Promise<ValidateFunction | null>
     addFormatsFn(ajv);
     return ajv.compile(schema);
   } catch (err) {
-    log.warn(
-      "AJV compile failed — falling back to hand-rolled checks: %s",
-      (err as Error).message,
-    );
-    return null;
+    throw new Error(`SDK plugin manifest schema unavailable: ${(err as Error).message}`);
   }
 }
 
 /**
  * Parse and fully validate a plugin.json manifest file.
  *
- * Runs AJV schema validation (when available) followed by hand-rolled
- * cross-field MUST checks. Throws with a descriptive message on any failure.
+ * Runs SDK AJV schema validation followed by host cross-field MUST checks.
+ * Throws with a descriptive message on any failure.
  */
 export async function parsePluginJson(
   path: string,
-  validator: ValidateFunction | null,
+  validator: ValidateFunction,
 ): Promise<PluginManifest> {
   // Sprint 1-A A4 — detailed, per-field error messages shaped as
   //   "Invalid plugin manifest '<pluginId>' at '<fieldPath>': <reason>. Example: <correction>"
@@ -147,18 +106,17 @@ export async function parsePluginJson(
     );
   };
 
-  // Phase 5 §4 — ui[] kind-specific required-field soft fallback.
-  // Runs BEFORE AJV so a single bad ui entry does not drop the whole
-  // plugin. Each invalid entry is stripped out + log.warn'd; other ui
-  // entries survive.
+  if (!validator) {
+    throw new Error("SDK plugin manifest validator is required");
+  }
+
   if (Array.isArray(parsed.ui)) {
-    const keep: typeof parsed.ui = [];
     for (let i = 0; i < parsed.ui.length; i += 1) {
-      const ext = parsed.ui[i] as unknown as Record<string, unknown> | undefined;
-      if (!ext || typeof ext !== "object" || Array.isArray(ext)) {
-        log.warn(`ui[${i}] is not an object — dropped`);
-        continue;
+      const rawExt = parsed.ui[i] as unknown;
+      if (!rawExt || typeof rawExt !== "object" || Array.isArray(rawExt)) {
+        fail(`ui[${i}]`, "must be an object", `"ui": [{ "slot": "settings", "kind": "embedded-page", "page": "settings" }]`);
       }
+      const ext = rawExt as Record<string, unknown>;
       const kind = ext.kind;
       const missing: string[] = [];
       if (kind === "embedded-module") {
@@ -168,29 +126,18 @@ export async function parsePluginJson(
         if (typeof ext.page !== "string" || ext.page.length === 0) missing.push("page");
       }
       if (missing.length > 0) {
-        for (const f of missing) {
-          log.warn(
-            `ui[${i}] kind="${String(kind)}" missing required field "${f}" — dropped`,
-          );
-        }
-        continue;
+        fail(
+          `ui[${i}]`,
+          `kind="${String(kind)}" missing required field(s): ${missing.join(", ")}`,
+          kind === "embedded-module"
+            ? `"ui": [{ "kind": "embedded-module", "entry": "dist/ui.js", "exportName": "PluginUi" }]`
+            : `"ui": [{ "kind": "embedded-page", "page": "settings" }]`,
+        );
       }
-      keep.push(parsed.ui[i]);
     }
-    parsed.ui = keep;
   }
 
-  // Sprint 4-B §B-1 — AJV validation against schemas/plugin.schema.json.
-  // Backlog #3: surface degraded-mode entry per-manifest so operators can
-  // detect that AJV was unavailable at load time.
-  if (!validator) {
-    log.warn(
-      { event: "plugin_validator_degraded", pluginId: pid, path },
-      "plugin '%s' loaded under degraded validation (AJV unavailable — hand-rolled checks only)",
-      pid,
-    );
-  }
-  if (validator && !validator(parsed)) {
+  if (!validator(parsed)) {
     const errs = (validator.errors ?? [])
       .map((e) => `${e.instancePath || "/"} ${e.message ?? ""}`.trim())
       .join("; ");
@@ -373,41 +320,6 @@ export async function parsePluginJson(
         `key not in tools[]`,
         `remove the key or add '${k}' to tools[]`,
       );
-    }
-    const category = parsed.toolSchemas?.[k]?.category;
-    const accepted = pluginAcceptedCategories();
-    if (category !== undefined && !accepted.includes(category as string)) {
-      fail(
-        `toolSchemas['${k}'].category`,
-        `must be one of ${accepted.join(", ")}`,
-        `"toolSchemas": { "${k}": { "description": "...", "category": "read", "inputSchema": { "type": "object", "properties": {} } } }`,
-      );
-    }
-    // Permission policy P2.5 — advisory pathFields hint. Soft-warn only; Phase 4 will
-    // enforce that every undeclared path field is deny-by-default.
-    const pathFields = parsed.toolSchemas?.[k]?.pathFields as unknown;
-    if (pathFields !== undefined) {
-      if (!Array.isArray(pathFields)) {
-        log.warn(
-          `toolSchemas['${k}'].pathFields must be an array of strings — ignoring (Phase 4 will enforce)`,
-        );
-      } else {
-        const inputProps = parsed.toolSchemas?.[k]?.inputSchema?.properties ?? {};
-        for (let i = 0; i < pathFields.length; i += 1) {
-          const fieldName = pathFields[i];
-          if (typeof fieldName !== "string" || fieldName.length === 0) {
-            log.warn(
-              `toolSchemas['${k}'].pathFields[${i}] is not a non-empty string — ignored`,
-            );
-            continue;
-          }
-          if (!Object.prototype.hasOwnProperty.call(inputProps, fieldName)) {
-            log.warn(
-              `toolSchemas['${k}'].pathFields[${i}]='${fieldName}' is not declared in inputSchema.properties — entry has no effect`,
-            );
-          }
-        }
-      }
     }
   }
 

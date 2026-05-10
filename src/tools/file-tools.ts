@@ -1,4 +1,5 @@
 import { createReadStream } from "node:fs";
+import { randomUUID } from "node:crypto";
 import {
   mkdir,
   readdir,
@@ -40,6 +41,8 @@ const MAX_SEARCH_FILE_BYTES = 1_000_000;
 const BINARY_SAMPLE_BYTES = 8_192;
 const DEFAULT_RESULT_LIMIT = 200;
 const MAX_RESULT_LIMIT = 1_000;
+const MAX_SCAN_FILES = 50_000;
+const MAX_SCAN_ENTRIES = 75_000;
 const DEFAULT_LIST_DEPTH = 1;
 const MAX_LIST_DEPTH = 8;
 const DEFAULT_SKIP_DIRS = new Set([
@@ -121,6 +124,22 @@ abstract class FileTool<TSchema extends z.ZodTypeAny> extends ZodTool<TSchema> {
       return toolError(`Sandbox: ${check.reason}`);
     }
     return null;
+  }
+
+  protected resolveApprovalPath(inputPath: string, ctx?: Pick<ToolExecutionContext, "cwd">): string {
+    const expanded = expandTilde(inputPath);
+    return isAbsolute(expanded) ? pathResolve(expanded) : pathResolve(ctx?.cwd ?? process.cwd(), expanded);
+  }
+
+  protected requireStringField(input: unknown, field: string): string {
+    if (!input || typeof input !== "object") {
+      throw new Error(`${this.name} approvalCacheKey requires object input`);
+    }
+    const value = (input as Record<string, unknown>)[field];
+    if (typeof value !== "string" || value.length === 0) {
+      throw new Error(`${this.name} approvalCacheKey requires '${field}' string`);
+    }
+    return value;
   }
 }
 
@@ -224,17 +243,18 @@ export class GlobFilesTool extends FileTool<typeof GlobFilesInputSchema> {
     if (blocked) return blocked;
 
     const regex = globToRegExp(input.pattern);
-    const listed = await collectFiles(root, input.limit);
+    const listed = await collectFiles(root, MAX_SCAN_FILES);
     if (!listed.ok) return listed.error;
-    const matches = listed.value.files
+    const allMatches = listed.value.files
       .filter((entry) => regex.test(entry.relativePath))
       .map((entry) => entry.path);
+    const matches = allMatches.slice(0, input.limit);
     return {
       output: JSON.stringify({
         path: root,
         pattern: input.pattern,
         matches,
-        truncated: listed.value.truncated,
+        truncated: listed.value.truncated || allMatches.length > input.limit,
       }),
       isError: false,
       metadata: { path: root, pattern: input.pattern, matchCount: matches.length },
@@ -269,7 +289,7 @@ export class GrepFilesTool extends FileTool<typeof GrepFilesInputSchema> {
     }
 
     const include = input.include ? globToRegExp(input.include) : null;
-    const listed = await collectFiles(root, input.limit * 20);
+    const listed = await collectFiles(root, MAX_SCAN_FILES);
     if (!listed.ok) return listed.error;
 
     const matches: Array<{ path: string; line: number; text: string }> = [];
@@ -302,6 +322,10 @@ export class WriteFileTool extends FileTool<typeof WriteFileInputSchema> {
   readonly inputSchema = WriteFileInputSchema;
   override readonly category: ToolCategory = "write";
 
+  approvalCacheKey(input: unknown, ctx?: Pick<ToolExecutionContext, "cwd">): string {
+    return `path:${this.resolveApprovalPath(this.requireStringField(input, "path"), ctx)}`;
+  }
+
   protected async executeTyped(
     input: z.infer<typeof WriteFileInputSchema>,
     ctx: ToolExecutionContext,
@@ -311,9 +335,7 @@ export class WriteFileTool extends FileTool<typeof WriteFileInputSchema> {
     if (blocked) return blocked;
 
     await mkdir(dirname(target), { recursive: true });
-    const temp = `${target}.lvis-tmp-${process.pid}-${Date.now()}`;
-    await writeFile(temp, input.content, "utf8");
-    await rename(temp, target);
+    await atomicTextWrite(target, input.content);
     return {
       output: JSON.stringify({ path: target, bytes: Buffer.byteLength(input.content, "utf8") }),
       isError: false,
@@ -328,6 +350,10 @@ export class EditFileTool extends FileTool<typeof EditFileInputSchema> {
     "Replace exact text in an existing UTF-8 file. Fails when the match is missing or ambiguous.";
   readonly inputSchema = EditFileInputSchema;
   override readonly category: ToolCategory = "write";
+
+  approvalCacheKey(input: unknown, ctx?: Pick<ToolExecutionContext, "cwd">): string {
+    return `path:${this.resolveApprovalPath(this.requireStringField(input, "path"), ctx)}`;
+  }
 
   protected async executeTyped(
     input: z.infer<typeof EditFileInputSchema>,
@@ -364,9 +390,7 @@ export class EditFileTool extends FileTool<typeof EditFileInputSchema> {
     const next = input.replaceAll
       ? current.split(input.oldText).join(input.newText)
       : current.replace(input.oldText, input.newText);
-    const temp = `${target}.lvis-tmp-${process.pid}-${Date.now()}`;
-    await writeFile(temp, next, "utf8");
-    await rename(temp, target);
+    await atomicTextWrite(target, next);
     return {
       output: JSON.stringify({ path: target, replacements: input.replaceAll ? occurrences : 1 }),
       isError: false,
@@ -381,6 +405,10 @@ export class ApplyPatchTool extends FileTool<typeof ApplyPatchInputSchema> {
     "Apply one or more exact text replacements to an existing UTF-8 file. Fails before writing when any hunk is missing or ambiguous.";
   readonly inputSchema = ApplyPatchInputSchema;
   override readonly category: ToolCategory = "write";
+
+  approvalCacheKey(input: unknown, ctx?: Pick<ToolExecutionContext, "cwd">): string {
+    return `path:${this.resolveApprovalPath(this.requireStringField(input, "path"), ctx)}`;
+  }
 
   protected async executeTyped(
     input: z.infer<typeof ApplyPatchInputSchema>,
@@ -420,9 +448,7 @@ export class ApplyPatchTool extends FileTool<typeof ApplyPatchInputSchema> {
         : next.replace(replacement.oldText, replacement.newText);
     }
 
-    const temp = `${target}.lvis-tmp-${process.pid}-${Date.now()}`;
-    await writeFile(temp, next, "utf8");
-    await rename(temp, target);
+    await atomicTextWrite(target, next);
     return {
       output: JSON.stringify({ path: target, replacements: totalReplacements }),
       isError: false,
@@ -438,6 +464,12 @@ export class MoveFileTool extends FileTool<typeof MoveFileInputSchema> {
   readonly inputSchema = MoveFileInputSchema;
   override readonly category: ToolCategory = "write";
   override readonly pathFields = ["sourcePath", "destinationPath"] as const;
+
+  approvalCacheKey(input: unknown, ctx?: Pick<ToolExecutionContext, "cwd">): string {
+    const source = this.resolveApprovalPath(this.requireStringField(input, "sourcePath"), ctx);
+    const destination = this.resolveApprovalPath(this.requireStringField(input, "destinationPath"), ctx);
+    return `source:${source}:destination:${destination}`;
+  }
 
   protected async executeTyped(
     input: z.infer<typeof MoveFileInputSchema>,
@@ -479,6 +511,10 @@ export class DeleteFileTool extends FileTool<typeof DeleteFileInputSchema> {
   readonly description = "Delete a regular file from the workspace.";
   readonly inputSchema = DeleteFileInputSchema;
   override readonly category: ToolCategory = "write";
+
+  approvalCacheKey(input: unknown, ctx?: Pick<ToolExecutionContext, "cwd">): string {
+    return `path:${this.resolveApprovalPath(this.requireStringField(input, "path"), ctx)}`;
+  }
 
   protected async executeTyped(
     input: z.infer<typeof DeleteFileInputSchema>,
@@ -598,8 +634,10 @@ async function listEntries(
       return { ok: false, error: toolError(`list_files requires a directory: ${root}`) };
     }
     const entries: ListedEntry[] = [];
-    await walk(root, root, depth, limit, entries, { filesOnly: false });
-    return { ok: true, value: { entries, truncated: entries.length >= limit } };
+    const state = { visited: 0, truncated: false };
+    await walk(root, root, depth, limit, entries, { filesOnly: false }, state);
+    const truncated = entries.length >= limit || state.truncated;
+    return { ok: true, value: { entries, truncated } };
   } catch (err) {
     return { ok: false, error: toolError(`list_files failed: ${(err as Error).message}`) };
   }
@@ -612,6 +650,7 @@ async function collectFiles(
   try {
     const rootStat = await stat(root);
     const files: ListedEntry[] = [];
+    const state = { visited: 0, truncated: false };
     if (rootStat.isFile()) {
       files.push({
         path: root,
@@ -621,11 +660,11 @@ async function collectFiles(
         mtimeMs: rootStat.mtimeMs,
       });
     } else if (rootStat.isDirectory()) {
-      await walk(root, root, MAX_LIST_DEPTH, limit, files, { filesOnly: true });
+      await walk(root, root, MAX_LIST_DEPTH, limit, files, { filesOnly: true }, state);
     } else {
       return { ok: false, error: toolError(`file search requires a file or directory: ${root}`) };
     }
-    return { ok: true, value: { files, truncated: files.length >= limit } };
+    return { ok: true, value: { files, truncated: files.length >= limit || state.truncated } };
   } catch (err) {
     return { ok: false, error: toolError(`file search failed: ${(err as Error).message}`) };
   }
@@ -638,12 +677,18 @@ async function walk(
   limit: number,
   output: ListedEntry[],
   opts: { filesOnly: boolean },
+  state: { visited: number; truncated: boolean },
 ): Promise<void> {
-  if (output.length >= limit || remainingDepth < 1) return;
+  if (output.length >= limit || remainingDepth < 1 || state.truncated) return;
   const dirents = await readdir(current, { withFileTypes: true });
   dirents.sort((a, b) => a.name.localeCompare(b.name));
   for (const dirent of dirents) {
-    if (output.length >= limit) return;
+    if (output.length >= limit || state.truncated) return;
+    state.visited += 1;
+    if (state.visited > MAX_SCAN_ENTRIES) {
+      state.truncated = true;
+      return;
+    }
     const full = join(current, dirent.name);
     const rel = normalizeRelativePath(relative(root, full));
     const type = dirent.isDirectory()
@@ -663,7 +708,7 @@ async function walk(
       });
     }
     if (dirent.isDirectory() && remainingDepth > 1 && !DEFAULT_SKIP_DIRS.has(dirent.name)) {
-      await walk(root, full, remainingDepth - 1, limit, output, opts);
+      await walk(root, full, remainingDepth - 1, limit, output, opts, state);
     }
   }
 }
@@ -709,6 +754,25 @@ function countOccurrences(haystack: string, needle: string): number {
     if (found === -1) return count;
     count += 1;
     index = found + needle.length;
+  }
+}
+
+function temporaryWritePath(target: string): string {
+  return `${target}.lvis-tmp-${process.pid}-${randomUUID()}`;
+}
+
+async function atomicTextWrite(target: string, content: string): Promise<void> {
+  const temp = temporaryWritePath(target);
+  try {
+    await writeFile(temp, content, "utf8");
+    await rename(temp, target);
+  } catch (err) {
+    try {
+      await unlink(temp);
+    } catch {
+      // Best effort cleanup: preserve the original write/rename failure.
+    }
+    throw err;
   }
 }
 

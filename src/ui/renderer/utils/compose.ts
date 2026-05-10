@@ -10,7 +10,7 @@ export interface ComposedOutgoing {
   /**
    * Multimodal user content parts (vision images today; reserved for inline
    * file payloads later). Empty array when no images were attached. The
-   * caller passes this as the second argument to `api.chatSend(text, parts)`
+   * caller passes this through the appropriate chat IPC surface
    * — the IPC layer forwards it to `runTurn(input, { attachments })`.
    */
   attachments: UserContentPart[];
@@ -89,5 +89,18 @@ export function composeOutgoing(params: {
   return {
     text: parts.join("\n\n"),
     attachments: imageParts,
+  };
+}
+
+/**
+ * Compose a plugin-imported trigger exactly as the plugin runtime emitted it.
+ * Imported triggers already carry their proactive provenance envelope; adding
+ * role presets or the user's current composer attachments would change both
+ * authorship and trust-origin classification.
+ */
+export function composeImportedTriggerOutgoing(raw: string): ComposedOutgoing {
+  return {
+    text: raw,
+    attachments: [],
   };
 }

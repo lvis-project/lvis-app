@@ -8,7 +8,7 @@
  * claw-code harness 패턴 기반.
  */
 import { ConversationHistory, normalizeToolPairInvariant } from "./conversation-history.js";
-import { ToolExecutor, type ToolUseBlock } from "../tools/executor.js";
+import { ToolExecutor, type ToolResult, type ToolUseBlock } from "../tools/executor.js";
 import { HookRunner } from "../hooks/hook-runner.js";
 import { markStaleToolResults, estimateMessagesTokens, getModelPreflightThreshold, getModelUsableContext } from "./auto-compact.js";
 import { compactWithBoundary, renderBoundaryAsPreamble } from "./structured-compact.js";
@@ -28,6 +28,7 @@ import type { SystemPromptBuilder } from "../prompts/system-prompt-builder.js";
 import type { KeywordEngine } from "../core/keyword-engine.js";
 import type { RouteEngine } from "../core/route-engine.js";
 import type { ToolRegistry } from "../tools/registry.js";
+import type { ToolTrustOrigin } from "../tools/types.js";
 import type { MemoryManager } from "../memory/memory-manager.js";
 import type { SettingsService } from "../data/settings-store.js";
 import type { HookTrustCommandOptions } from "../hooks/hook-trust-commands.js";
@@ -36,9 +37,44 @@ import type { RoutineEngine } from "../core/routine-engine.js";
 import type { IdleSchedulerService } from "../main/idle-scheduler.js";
 import { PostTurnHookChain } from "../hooks/post-turn-hook-chain.js";
 import type { ToolCallMeta } from "../tools/executor.js";
+import type { ChatInputOrigin } from "../shared/chat-origin.js";
+import { isUserKeyboardOrigin } from "../shared/chat-origin.js";
+import { stripLeadingSlash } from "../shared/slash-sanitizer.js";
 import { createTracer, type ConversationTracer } from "../observability/conversation-trace.js";
 import { createLogger } from "../lib/logger.js";
 const log = createLogger("lvis");
+
+const INLINE_PASTED_TEXT_RE = /(^|\n)-{5} Pasted text #\d+ \(\d+ lines\) -{5}\n/;
+const FILE_CONTENT_RESULT_TOOLS = new Set([
+  "read_file",
+  "grep_files",
+]);
+
+function initialToolTrustOrigin(inputOrigin: ChatInputOrigin, turnInput: string): ToolTrustOrigin {
+  if (inputOrigin === "file-content" || INLINE_PASTED_TEXT_RE.test(turnInput)) {
+    return "file-content";
+  }
+  if (inputOrigin === "plugin-emitted") {
+    return "plugin-emitted";
+  }
+  return "llm-tool-arg";
+}
+
+function nextToolTrustOrigin(
+  current: ToolTrustOrigin,
+  toolUses: readonly ToolUseBlock[],
+  toolResults: readonly ToolResult[],
+): ToolTrustOrigin {
+  if (current === "file-content") return current;
+  const successful = new Set(
+    toolResults
+      .filter((result) => !result.is_error)
+      .map((result) => result.tool_use_id),
+  );
+  return toolUses.some((toolUse) => successful.has(toolUse.id) && FILE_CONTENT_RESULT_TOOLS.has(toolUse.name))
+    ? "file-content"
+    : current;
+}
 
 // ─── Types ──────────────────────────────────────────
 
@@ -219,6 +255,8 @@ export interface ConversationLoopDeps {
   notificationService?: import("../main/notification-service.js").NotificationService;
   /** Shared boot audit logger. Tool execution audit writes to this HMAC chain. */
   auditLogger?: AuditLogger;
+  /** Rebuilds reviewer classifier/cache bindings after `/permission reviewer ...`. */
+  rewireReviewerAgent?: () => void;
 }
 
 // 사용자가 *26 step* 작업에서 cap hit 으로 *조용히 끊긴* 사례 (2026-05-07) 후
@@ -272,6 +310,7 @@ export class ConversationLoop {
   private lastTurnScope: Set<string> | null = null;
   /** Session-wide total of request_plugin activations (cap MAX_SESSION_PLUGIN_EXPANSION). */
   private sessionPluginExpansions = 0;
+  private sessionAdditionalDirectories: string[] = [];
   /**
    * PR-2-C R14 mitigation — single in-flight Layer 2 compact lock per ConversationLoop.
    * 같은 instance 에서 두 turn 이 동시에 Layer 0 trigger 시 두 번째는 skip (race 방지).
@@ -406,6 +445,7 @@ export class ConversationLoop {
     this.deps.skillOverlay?.clear(this.sessionId);
     this.sessionId = crypto.randomUUID();
     this.sessionRoutineId = null;
+    this.sessionAdditionalDirectories = [];
     this.history.clear();
     this.cumulativeUsage = { inputTokens: 0, outputTokens: 0 };
     this.sessionPluginExpansions = 0;
@@ -413,6 +453,19 @@ export class ConversationLoop {
     this.tracer = createTracer(this.sessionId);
     // PR-4: clear rolling summary preamble for fresh session
     this.deps.systemPromptBuilder.setSummaryPreamble?.(null);
+  }
+
+  addSessionAdditionalDirectory(path: string): void {
+    if (!this.sessionAdditionalDirectories.includes(path)) {
+      this.sessionAdditionalDirectories.push(path);
+    }
+  }
+
+  private getTurnAdditionalDirectories(): readonly string[] {
+    return [
+      ...(this.deps.getAdditionalDirectories?.() ?? this.deps.additionalDirectories ?? []),
+      ...this.sessionAdditionalDirectories,
+    ];
   }
 
   getHistory(): ConversationHistory {
@@ -556,6 +609,7 @@ export class ConversationLoop {
     this.history.restore(normalized.messages);
     this.cumulativeUsage = { inputTokens: 0, outputTokens: 0 };
     this.sessionPluginExpansions = 0;
+    this.sessionAdditionalDirectories = [];
     // Use max compactNum across all checkpoints (monotonic guarantee).
     // Using array length would produce a stale value when normalizeCheckpoint drops
     // invalid entries — next compact would reuse an already-used compactNum.
@@ -744,13 +798,20 @@ export class ConversationLoop {
        * before it reaches the LLM-visible registry.
        */
       spawnDepth?: number;
+      inputOrigin: ChatInputOrigin;
     },
   ): Promise<TurnResult> {
     const effectiveSessionId = options?.sessionIdOverride ?? this.sessionId;
+    if (!options?.inputOrigin) {
+      throw new Error("ConversationLoop.runTurn requires an explicit inputOrigin");
+    }
+    const inputOrigin: ChatInputOrigin = options.inputOrigin;
+    const turnInput = isUserKeyboardOrigin(inputOrigin) ? input : stripLeadingSlash(input);
+    const toolTrustOrigin = initialToolTrustOrigin(inputOrigin, turnInput);
     this.deps.sessionTodoStore?.clearIfAllCompleted(effectiveSessionId);
 
     // §4.5.2 step 1 — REQUEST_ENTRY (main process 도달 시점)
-    this.tracer.step("REQUEST_ENTRY", { inputLen: input.length });
+    this.tracer.step("REQUEST_ENTRY", { inputLen: turnInput.length, inputOrigin });
     if (!this.provider) {
       const err = "LLM 프로바이더가 설정되지 않았습니다. 설정에서 벤더와 API 키를 확인해 주세요.";
       callbacks?.onError?.(err);
@@ -777,7 +838,7 @@ export class ConversationLoop {
 
     // §4.3 Step 1-2: 분류 + 라우팅
     // §4.5.2 step 2 — KEYWORD_CLASSIFY
-    const classification = this.deps.keywordEngine.classify(input);
+    const classification = this.deps.keywordEngine.classify(turnInput);
     this.tracer.step("KEYWORD_CLASSIFY", { type: classification.type });
     // §4.5.2 step 3 — ROUTE_RESOLVE
     const routeResult = this.deps.routeEngine.route(classification);
@@ -785,7 +846,7 @@ export class ConversationLoop {
 
     if (routeResult.route === "command") {
       this.currentAbortController = null;
-      return this.handleCommand(routeResult.command, routeResult.args, callbacks);
+      return this.handleCommand(routeResult.command, routeResult.args, inputOrigin, callbacks);
     }
 
     // §4.5.2 step 4 — TURN_ORCHESTRATE
@@ -843,8 +904,8 @@ export class ConversationLoop {
     const callbacksForLoop = wrappedCallbacks ?? callbacks;
 
     const baseText = routeResult.route === "skill"
-      ? `[스킬: ${routeResult.skillId}] ${input}`
-      : input;
+      ? `[스킬: ${routeResult.skillId}] ${turnInput}`
+      : turnInput;
     const attachmentParts = options?.attachments ?? [];
     const userContent: string | import("./llm/types.js").UserContentPart[] =
       attachmentParts.length > 0
@@ -899,6 +960,8 @@ export class ConversationLoop {
           maxRounds: options?.maxRounds,
           sessionIdOverride: options?.sessionIdOverride,
           spawnDepth: options?.spawnDepth,
+          inputOrigin,
+          toolTrustOrigin,
         },
       );
     } finally {
@@ -1085,13 +1148,15 @@ export class ConversationLoop {
   private async queryLoop(
     systemPrompt: string,
     scope: ToolScope,
-    callbacks?: TurnCallbacks,
-    abortSignal?: AbortSignal,
-    proactiveOrigin?: string | null,
-    bounds?: {
+    callbacks: TurnCallbacks | undefined,
+    abortSignal: AbortSignal | undefined,
+    proactiveOrigin: string | null,
+    bounds: {
       maxRounds?: number;
       sessionIdOverride?: string;
       spawnDepth?: number;
+      inputOrigin: ChatInputOrigin;
+      toolTrustOrigin: ToolTrustOrigin;
     },
   ): Promise<{ text: string; toolCalls: Array<{ name: string; input: Record<string, unknown>; result: string }>; usage?: TokenUsage; stopReason?: "end_turn" | "tool_use" | "interrupted" | "context-error" }> {
     const llmSettings = this.deps.settingsService.get("llm");
@@ -1110,6 +1175,7 @@ export class ConversationLoop {
     let pluginExpansions = 0;
     let knowledgeCallCount = 0;
     let roundIndex = 0;
+    let toolTrustOrigin = bounds.toolTrustOrigin;
     // C3(a): assistant-round counter — used by the maxRounds break below.
     let assistantRoundsRun = 0;
     // C3(a): effective round budget. Default = MAX_TOOL_ROUNDS (10); when a
@@ -1402,12 +1468,12 @@ export class ConversationLoop {
           permissionContext: {
             headless: this.deps.headless,
             allowedPluginIds: new Set(scope.activePluginIds),
-            additionalDirectories:
-              this.deps.getAdditionalDirectories?.() ?? this.deps.additionalDirectories,
-            trustOrigin: this.deps.headless ? "routine" : "user",
+            additionalDirectories: this.getTurnAdditionalDirectories(),
+            trustOrigin: toolTrustOrigin,
           },
         },
       );
+      toolTrustOrigin = nextToolTrustOrigin(toolTrustOrigin, capResult.allowed, toolResults);
 
       for (let i = 0; i < capResult.allowed.length; i++) {
         allToolCalls.push({
@@ -1676,8 +1742,15 @@ export class ConversationLoop {
   private async handleCommand(
     command: string,
     args: string,
+    inputOrigin: ChatInputOrigin,
     callbacks?: TurnCallbacks,
   ): Promise<TurnResult> {
+    if (!isUserKeyboardOrigin(inputOrigin)) {
+      const result = "비키보드 출처의 slash command는 실행하지 않습니다.";
+      callbacks?.onTextDelta?.(result);
+      callbacks?.onTurnComplete?.(result);
+      return { text: result, toolCalls: [], route: "command" };
+    }
     let result: string;
 
     switch (command) {
@@ -1742,7 +1815,7 @@ export class ConversationLoop {
         break;
       }
       case "permission": {
-        result = await this.handlePermissionCommand(args);
+        result = await this.handlePermissionCommand(args, inputOrigin);
         break;
       }
       case "help":
@@ -1767,20 +1840,115 @@ export class ConversationLoop {
     return { text: result, toolCalls: [], route: "command" };
   }
 
-  private async handlePermissionCommand(args: string): Promise<string> {
+  private async handlePermissionCommand(args: string, inputOrigin: ChatInputOrigin): Promise<string> {
     const {
+      dispatchPermissionAuditCommand,
+      dispatchPermissionDirCommand,
       dispatchPermissionHooksCommand,
+      dispatchPermissionReviewerCommand,
       dispatchPermissionSlash,
     } = await import("../permissions/permission-slash.js");
     const raw = args.trim().length > 0 ? `/permission ${args.trim()}` : "/permission";
-    const outcome = dispatchPermissionSlash(raw, "user-keyboard");
+    const outcome = dispatchPermissionSlash(
+      raw,
+      inputOrigin,
+    );
     if (outcome.kind === "parse-error") return `권한 명령 오류: ${outcome.error}`;
     if (outcome.kind === "show-current") {
       const mode = this.deps.permissionManager?.getMode() ?? "default";
       return `현재 권한 모드: ${mode}\nHook 상태: /permission hooks list`;
     }
+    if (outcome.kind === "dir") {
+      const result = await dispatchPermissionDirCommand(outcome.cmd);
+      if (!result.ok) {
+        const warnings = result.warnings?.length ? `\n경고:\n${result.warnings.map((w) => `- ${w}`).join("\n")}` : "";
+        const ack = result.requiresAcknowledgement ? "\n다시 실행하려면 --ack-warnings 를 명시하세요." : "";
+        return `디렉토리 권한 오류: ${result.error}${warnings}${ack}`;
+      }
+      if (result.verb === "list") {
+        return [
+          "허용 디렉토리",
+          `기본: ${result.defaults.length ? result.defaults.join(", ") : "없음"}`,
+          `사용자 추가: ${result.userAdditions.length ? result.userAdditions.join(", ") : "없음"}`,
+          `유효 범위: ${result.effective.length ? result.effective.join(", ") : "없음"}`,
+        ].join("\n");
+      }
+      if (result.verb === "allow") {
+        if (result.sessionOnly && result.sessionDirectory) {
+          this.addSessionAdditionalDirectory(result.sessionDirectory);
+          return `세션 한정 허용 디렉토리 추가됨: ${result.sessionDirectory}`;
+        }
+        return `허용 디렉토리 저장됨:\n${result.persisted.map((d) => `- ${d}`).join("\n")}`;
+      }
+      return `허용 디렉토리 제거됨:\n${result.persisted.length ? result.persisted.map((d) => `- ${d}`).join("\n") : "- 없음"}`;
+    }
+    if (outcome.kind === "reviewer") {
+      const result = await dispatchPermissionReviewerCommand(outcome.cmd);
+      if (!result.ok) return `Reviewer 설정 오류: ${result.error}`;
+      if (outcome.cmd.verb !== "show") {
+        this.deps.rewireReviewerAgent?.();
+      }
+      const { mode, provider, model, fallbackOnError } = result.settings;
+      return `Reviewer 설정\nmode=${mode}\nprovider=${provider}\nmodel=${model}\nfallbackOnError=${fallbackOnError}`;
+    }
+    if (outcome.kind === "audit") {
+      const auditLogger = this.deps.auditLogger;
+      if (!auditLogger) return "Audit 로거가 초기화되지 않았습니다.";
+      const result = dispatchPermissionAuditCommand(outcome.cmd, {
+        auditDir: auditLogger.getAuditDir(),
+        secret: auditLogger.getPermissionAuditSecret(),
+        sealStore: auditLogger.getPermissionAuditSealStore() ?? undefined,
+      });
+      if (!result.ok) return `Audit 오류: ${result.error}`;
+      if (result.verb === "verify") {
+        return [
+          `Audit verify: ${result.intact ? "intact" : "broken"}`,
+          `files=${result.totalFiles}`,
+          `entries=${result.totalEntries}`,
+          ...(result.firstBrokenFile ? [`firstBrokenFile=${result.firstBrokenFile}`] : []),
+        ].join("\n");
+      }
+      return [
+        `Audit 최근 ${result.entries.length}개`,
+        ...result.entries.map((entry) => JSON.stringify(entry)),
+      ].join("\n");
+    }
+    if (outcome.kind === "mode") {
+      const pm = this.deps.permissionManager;
+      if (!pm) return "권한 매니저가 초기화되지 않았습니다.";
+      const { applyPermissionModeCommand } = await import("../permissions/permission-mode-apply.js");
+      const result = await applyPermissionModeCommand(outcome.cmd, {
+        permissionManager: pm,
+        approvalGate: this.deps.approvalGate,
+        auditLogger: this.deps.auditLogger,
+      });
+      if (!result.ok) return `권한 모드 변경 취소: ${result.message ?? result.error}`;
+      return `권한 모드 변경됨: ${result.previous} -> ${result.mode}${result.durable ? " (durable)" : " (session)"}`;
+    }
+    if (outcome.kind === "rules") {
+      const pm = this.deps.permissionManager;
+      if (!pm) return "권한 매니저가 초기화되지 않았습니다.";
+      if (outcome.cmd.sub === "add") {
+        if (outcome.cmd.action === "allow") {
+          await pm.addAlwaysAllowedPersist(outcome.cmd.pattern);
+        } else {
+          await pm.addAlwaysDeniedPersist(outcome.cmd.pattern);
+        }
+        this.deps.toolRegistry.setDenyRules(pm.getVisibilityDenyRules());
+        return `권한 규칙 추가됨: ${outcome.cmd.action} ${outcome.cmd.pattern}`;
+      }
+      if (outcome.cmd.sub === "remove") {
+        await pm.removeRule(outcome.cmd.pattern, outcome.cmd.action);
+        this.deps.toolRegistry.setDenyRules(pm.getVisibilityDenyRules());
+        return `권한 규칙 삭제됨: ${outcome.cmd.action} ${outcome.cmd.pattern}`;
+      }
+      const rules = await pm.listPersistedRules();
+      return rules.length
+        ? rules.map((rule) => `- ${rule.action} ${rule.pattern}${rule.source ? ` [${rule.source}]` : ""}`).join("\n")
+        : "권한 규칙 없음";
+    }
     if (outcome.kind !== "hooks") {
-      return "이 경로에서는 /permission hooks <list|accept|disable|reject> 만 처리합니다.";
+      return `처리되지 않은 권한 명령: ${outcome.kind}`;
     }
 
     const result = await dispatchPermissionHooksCommand(outcome.cmd, {

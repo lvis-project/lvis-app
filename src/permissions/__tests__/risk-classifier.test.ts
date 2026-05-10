@@ -29,7 +29,7 @@ function ctx(overrides: Partial<ToolInvocationContext>): ToolInvocationContext {
     toolName: "test_tool",
     source: "builtin",
     category: "write",
-    trustOrigin: "user",
+    trustOrigin: "user-keyboard",
     finalInput: {},
     allowedDirectories: ALLOWED,
     sensitivePathsAdjacent: [],
@@ -109,6 +109,23 @@ describe("RuleBasedRiskClassifier", () => {
   // ── write ───────────────────────────────────
   it("write outside allowed dirs → HIGH", () => {
     const v = rb.classify(ctx({ category: "write", finalInput: { path: "/etc/foo" } }));
+    expect(v.level).toBe("high");
+  });
+
+  it("write without a declared target path → HIGH", () => {
+    const v = rb.classify(ctx({ category: "write", finalInput: { payload: { path: "/etc/foo" } } }));
+    expect(v.level).toBe("high");
+    expect(v.reason).toMatch(/path not declared/);
+  });
+
+  it("move_file destination outside allowed dirs → HIGH", () => {
+    const v = rb.classify(ctx({
+      category: "write",
+      finalInput: {
+        sourcePath: "/Users/ken/work/a.md",
+        destinationPath: "/etc/a.md",
+      },
+    }));
     expect(v.level).toBe("high");
   });
 

@@ -10,7 +10,23 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { auditApprovalViolation, sanitizePluginPendingPrompt } from "../plugin-runtime.js";
+
+vi.mock("electron", () => ({
+  app: {
+    getPath: vi.fn(() => "/tmp/lvis-test"),
+    isPackaged: false,
+  },
+  BrowserWindow: vi.fn(),
+  shell: {
+    openExternal: vi.fn(),
+  },
+}));
+
+import {
+  auditApprovalViolation,
+  formatPluginPendingPrompt,
+  sanitizePluginPendingPrompt,
+} from "../plugin-runtime.js";
 import { ApprovalOriginError } from "../../../permissions/agent-action-requester.js";
 
 describe("auditApprovalViolation (Group C — audit logger try-catch swallow)", () => {
@@ -78,5 +94,15 @@ describe("sanitizePluginPendingPrompt", () => {
   it("preserves non-command text", () => {
     expect(sanitizePluginPendingPrompt("회의 요약해줘")).toBe("회의 요약해줘");
     expect(sanitizePluginPendingPrompt("https://example.com/a")).toBe("https://example.com/a");
+  });
+
+  it("wraps plugin pending prompts in the proactive provenance envelope", () => {
+    expect(formatPluginPendingPrompt("/load victim-session", "proactive:meeting-detection")).toBe(
+      '<imported-from-proactive source="proactive:meeting-detection">\nload victim-session\n</imported-from-proactive>',
+    );
+  });
+
+  it("rejects invalid proactive source tags", () => {
+    expect(() => formatPluginPendingPrompt("hi", "plugin:bad")).toThrow(/invalid proactive source/);
   });
 });

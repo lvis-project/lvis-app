@@ -26,7 +26,7 @@ describe("SENSITIVE_PATH_PATTERNS", () => {
   });
 
   it("contains core OpenHarness patterns", () => {
-    expect(SENSITIVE_PATH_PATTERNS).toContain("**/.ssh/*");
+    expect(SENSITIVE_PATH_PATTERNS).toContain("**/.ssh/**");
     expect(SENSITIVE_PATH_PATTERNS).toContain("**/.aws/credentials");
     expect(SENSITIVE_PATH_PATTERNS).toContain("**/.aws/config");
     expect(SENSITIVE_PATH_PATTERNS).toContain("**/.gnupg/**");
@@ -90,9 +90,13 @@ describe("policyMatchPaths", () => {
 });
 
 describe("isSensitivePath — positive matches", () => {
-  it("matches /home/ken/.ssh/id_rsa against **/.ssh/*", () => {
+  it("matches /home/ken/.ssh/id_rsa against **/.ssh/**", () => {
     const result = isSensitivePath("/home/ken/.ssh/id_rsa");
-    expect(result).toBe("**/.ssh/*");
+    expect(result).toBe("**/.ssh/**");
+  });
+
+  it("matches nested files under .ssh", () => {
+    expect(isSensitivePath("/home/ken/.ssh/private/id_rsa")).toBe("**/.ssh/**");
   });
 
   it("matches /Users/ken/.aws/credentials", () => {

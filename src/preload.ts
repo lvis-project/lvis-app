@@ -463,13 +463,13 @@ const api = {
 
   // ─── Permission ───────────────────────────────────
   permission: {
-    getMode: async () => ipcRenderer.invoke("lvis:permission:get-mode"),
-    setMode: async (mode: string) => ipcRenderer.invoke("lvis:permission:set-mode", mode),
-    listRules: async () => ipcRenderer.invoke("lvis:permission:list-rules"),
+    getMode: async () => ipcRenderer.invoke(PERMISSIONS.getMode),
+    setMode: async (mode: string) => ipcRenderer.invoke(PERMISSIONS.setMode, mode),
+    listRules: async () => ipcRenderer.invoke(PERMISSIONS.listRules),
     addRule: async (pattern: string, action: string) =>
-      ipcRenderer.invoke("lvis:permission:add-rule", pattern, action),
+      ipcRenderer.invoke(PERMISSIONS.addRule, pattern, action),
     removeRule: async (pattern: string, action: string) =>
-      ipcRenderer.invoke("lvis:permission:remove-rule", pattern, action),
+      ipcRenderer.invoke(PERMISSIONS.removeRule, pattern, action),
     /** Permission policy — deferred queue (Layer 5 reviewer HIGH verdicts). */
     deferredList: async () => ipcRenderer.invoke(PERMISSIONS.deferredList),
     /** Permission policy issue #633 — hook quarantine state for non-modal settings badge. */
@@ -522,8 +522,8 @@ const api = {
 
   // ─── Policy (Governance) ─────────────────────────
   policy: {
-    get: async () => ipcRenderer.invoke("lvis:policy:get"),
-    set: async (patch: unknown) => ipcRenderer.invoke("lvis:policy:set", patch),
+    get: async () => ipcRenderer.invoke(PERMISSIONS.policyGet),
+    set: async (patch: unknown) => ipcRenderer.invoke(PERMISSIONS.policySet, patch),
   },
 
   // ─── Approval Gate (§6.3 Layer 3 + §8) ─────────
@@ -536,7 +536,7 @@ const api = {
     },
     /** 사용자 결정을 main으로 전송 */
     respond: async (decision: unknown) =>
-      ipcRenderer.invoke("lvis:approval:respond", decision),
+      ipcRenderer.invoke(PERMISSIONS.approvalRespond, decision),
   },
 
   // ─── DLP Hit Statistics (Observability) ─────────

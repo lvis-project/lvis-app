@@ -20,9 +20,6 @@
  * defaults only" (NOT silent allow). Callers compose with
  * `buildAllowedScope(...)` which adds the host defaults.
  *
- * §11 alias rule: `allowedDirectories` (the v1 working name) is also
- * accepted for one cycle with a deprecation warning. New writes use
- * `additionalDirectories`.
  */
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
@@ -107,23 +104,17 @@ export function readPermissionSettings(pathOverride?: string): PermissionSetting
 
 /**
  * Normalize an arbitrary parsed JSON value into a valid
- * PermissionSettingsFile. Honors the `allowedDirectories` alias for one
- * cycle with a one-shot deprecation warning.
+ * PermissionSettingsFile. Only `permissions.additionalDirectories` is
+ * accepted as the persisted directory SOT.
  */
 export function normalizePermissionSettings(
   parsed: Record<string, unknown>,
 ): PermissionSettingsFile {
   const perm = (parsed.permissions ?? {}) as Record<string, unknown>;
   const additional = perm.additionalDirectories;
-  const aliased = perm.allowedDirectories;
   let dirs: string[] = [];
   if (Array.isArray(additional)) {
     dirs = additional.filter((s): s is string => typeof s === "string" && s.length > 0);
-  } else if (Array.isArray(aliased)) {
-    log.warn(
-      "permissions.allowedDirectories is deprecated — rename to permissions.additionalDirectories. Aliased entry will be honored for one cycle only.",
-    );
-    dirs = aliased.filter((s): s is string => typeof s === "string" && s.length > 0);
   }
   return {
     permissions: {

@@ -42,6 +42,15 @@ function manifest(id: string, tools: string[], version = "1.0.0"): PluginManifes
     description: "",
     entry: "dist/main.js",
     tools,
+    toolSchemas: Object.fromEntries(
+      tools.map((tool) => [
+        tool,
+        {
+          description: `Execute ${tool} test tool`,
+          inputSchema: { type: "object", properties: {} },
+        },
+      ]),
+    ),
   } as unknown as PluginManifest;
 }
 
@@ -137,7 +146,7 @@ describe("syncPluginToolRegistry — plugin lifecycle sync", () => {
     expect(registry.findByName("alpha_run")).toBeUndefined();
   });
 
-  it("registers plugin tool permission category and fails closed when omitted", () => {
+  it("registers plugin tool permission category and treats omitted category as conservative write", () => {
     const registry = new ToolRegistry();
     const runtime = stubRuntime([
       {
@@ -160,6 +169,31 @@ describe("syncPluginToolRegistry — plugin lifecycle sync", () => {
     ]);
 
     syncPluginToolRegistry(runtime, registry);
+    expect(registry.findByName("alpha_read")?.category).toBe("read");
+    expect(registry.findByName("alpha_write")?.category).toBe("write");
+
+    const validRuntime = stubRuntime([
+      {
+        pluginId: "alpha",
+        manifest: {
+          ...manifest("alpha", ["alpha_read", "alpha_write"]),
+          toolSchemas: {
+            alpha_read: {
+              description: "Read-only alpha lookup tool",
+              category: "read",
+              inputSchema: { type: "object", properties: {} },
+            },
+            alpha_write: {
+              description: "Alpha mutating tool",
+              category: "write",
+              inputSchema: { type: "object", properties: {} },
+            },
+          },
+        },
+      },
+    ]);
+
+    syncPluginToolRegistry(validRuntime, registry);
 
     const read = registry.findByName("alpha_read");
     const write = registry.findByName("alpha_write");

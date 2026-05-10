@@ -110,7 +110,7 @@ describe("ConversationLoop — request_plugin meta tool (Option C)", () => {
       ],
     ]);
     const loop = makeLoop({ provider, availablePluginIds: ["com.lge.meeting"] });
-    const result = await loop.runTurn("일반 질문");
+    const result = await loop.runTurn("일반 질문", undefined, undefined, { inputOrigin: "user-keyboard" });
     expect(result.text).toBe("회의를 시작했습니다.");
     // Round 0 should NOT have meeting_start available.
     expect(provider.observedToolNames[0]).not.toContain("meeting_start");
@@ -130,7 +130,7 @@ describe("ConversationLoop — request_plugin meta tool (Option C)", () => {
       ],
     ]);
     const loop = makeLoop({ provider, availablePluginIds: ["com.lge.meeting"] });
-    const result = await loop.runTurn("아무거나");
+    const result = await loop.runTurn("아무거나", undefined, undefined, { inputOrigin: "user-keyboard" });
     expect(result.text).toBe("미등록 플러그인입니다.");
     const messages = loop.getHistory().getMessages();
     const toolResult = messages.find((m) => m.role === "tool_result") as { content: string; isError?: boolean } | undefined;
@@ -159,7 +159,7 @@ describe("ConversationLoop — request_plugin meta tool (Option C)", () => {
       ],
     ]);
     const loop = makeLoop({ provider, availablePluginIds: ["p1", "p2", "p3"] });
-    await loop.runTurn("trigger");
+    await loop.runTurn("trigger", undefined, undefined, { inputOrigin: "user-keyboard" });
     const messages = loop.getHistory().getMessages();
     const toolResults = messages.filter((m) => m.role === "tool_result") as Array<{ content: string; isError?: boolean }>;
     expect(toolResults.length).toBe(3);
@@ -186,7 +186,7 @@ describe("ConversationLoop — request_plugin meta tool (Option C)", () => {
       allowedPluginIds: [],
     });
 
-    await loop.runTurn("일반 질문");
+    await loop.runTurn("일반 질문", undefined, undefined, { inputOrigin: "user-keyboard" });
 
     expect(provider.observedToolNames[0]).not.toContain("meeting_start");
     const messages = loop.getHistory().getMessages();
@@ -209,7 +209,7 @@ describe("ConversationLoop — request_plugin meta tool (Option C)", () => {
       forcedActivePluginIds: ["com.lge.meeting"],
     });
 
-    await loop.runTurn("일반 질문");
+    await loop.runTurn("일반 질문", undefined, undefined, { inputOrigin: "user-keyboard" });
 
     expect(provider.observedToolNames[0]).toContain("meeting_start");
   });
