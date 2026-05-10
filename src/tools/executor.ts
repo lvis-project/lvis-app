@@ -80,7 +80,7 @@ function extractTargetFilePaths(
   const fields = new Set<string>(tool.pathFields ?? []);
   const paths: string[] = [];
   for (const field of fields) {
-    const candidate = obj[field];
+    const candidate = getDottedFieldValue(obj, field);
     const values = Array.isArray(candidate) ? candidate : [candidate];
     for (const value of values) {
       if (typeof value !== "string" || value.length === 0) continue;
@@ -94,6 +94,16 @@ function extractTargetFilePaths(
   return [...new Set(paths)];
 }
 
+function getDottedFieldValue(input: Record<string, unknown>, field: string): unknown {
+  let current: unknown = input;
+  for (const segment of field.split(".")) {
+    if (segment.length === 0) return undefined;
+    if (!current || typeof current !== "object" || Array.isArray(current)) return undefined;
+    current = (current as Record<string, unknown>)[segment];
+  }
+  return current;
+}
+
 function resolveToolPathForPermission(value: string, cwd: string): string {
   const expanded = value === "~"
     ? homedir()
@@ -101,6 +111,14 @@ function resolveToolPathForPermission(value: string, cwd: string): string {
       ? pathResolve(homedir(), value.slice(2))
       : value;
   return pathResolve(pathResolve(cwd), expanded);
+}
+
+function summarizeInputForDeferred(input: Record<string, unknown>): string {
+  try {
+    return maskSensitiveData(JSON.stringify(input)).masked.slice(0, 1000);
+  } catch {
+    return "[unserializable input]";
+  }
 }
 
 function resolveInvocationCategory(
@@ -185,6 +203,8 @@ export interface ToolResult {
   is_error?: boolean;
   /** MCP Apps spec §3.2 — optional UI payload from MCP tool response. */
   uiPayload?: import("../mcp/types.js").McpUiPayload;
+  /** Host-internal raw tool result for non-LLM plugin invocation surfaces. */
+  rawResult?: unknown;
   /**
    * Wall-clock time spent inside this tool's handler (Step 6) plus any
    * pipeline overhead measured from Step 1's start. Surfaced on every
@@ -486,13 +506,14 @@ export class ToolExecutor {
   /**
    * Convert the PermissionManager execution mode into the ApprovalMode
    * vocabulary understood by ApprovalGate's read-only short-circuit.
-   * `strict` → `default` (show dialog); `auto` → `full_auto`; `default` → `default`.
+   * `strict` → `ask_all` (show dialog even for read-only);
+   * `auto` / `allow` → `full_auto`;
+   * `default` → `default`.
    */
   private currentApprovalMode(): ApprovalMode {
     const pm = this.permissionManager?.getMode?.();
-    if (pm === "auto") return "full_auto";
-    // strict + default both map to "default" — plan mode is not yet wired
-    // through the PermissionManager and must be requested explicitly.
+    if (pm === "strict") return "ask_all";
+    if (pm === "auto" || pm === "allow") return "full_auto";
     return "default";
   }
 
@@ -533,6 +554,7 @@ export class ToolExecutor {
     toolName: string,
     source: ToolSource,
     category: ToolCategory,
+    pathFields: readonly string[],
     finalInput: Record<string, unknown>,
     allowedDirectories: string[],
     sensitivePathsAdjacent: string[],
@@ -541,6 +563,29 @@ export class ToolExecutor {
     | { allowed: true; permissionResult: PermissionCheckResult }
     | { allowed: false; message: string; permissionResult: PermissionCheckResult }
   > {
+    if (this.permissionManager?.getMode() === "strict") {
+      const reason = "strict mode requires explicit user approval";
+      const deferredId = await this.permissionManager.getDeferredQueue()?.append({
+        toolName,
+        source,
+        category,
+        inputSummary: summarizeInputForDeferred(finalInput),
+        verdict: { level: "high", reason },
+      });
+      return {
+        allowed: false,
+        message:
+          `[권한 보류 — strict headless] 도구 '${toolName}' (${source}) — ` +
+          "strict 모드는 headless 자동 리뷰를 허용하지 않습니다." +
+          (deferredId ? ` (deferredId=${deferredId})` : ""),
+        permissionResult: {
+          decision: "deny",
+          reason: "strict headless requires explicit approval",
+          layer: 5,
+        },
+      };
+    }
+
     if (!this.permissionManager?.hasReviewer()) {
       return {
         allowed: false,
@@ -557,6 +602,7 @@ export class ToolExecutor {
       {
         source,
         category,
+        pathFields,
         finalInput,
         allowedDirectories,
         sensitivePathsAdjacent,
@@ -814,9 +860,9 @@ export class ToolExecutor {
     // realpath'd + case-folded). No re-canonicalization in this block.
     //
     // Skipped when no path-typed input was extracted (e.g. bash, MCP
-    // network calls). Native host tools declare path-bearing arguments on
-    // Tool.pathFields; plugin path metadata is reserved for the SDK authority
-    // metadata cutover and is not app-local today.
+    // network calls). Native host tools and plugin tools both declare
+    // path-bearing arguments on Tool.pathFields; plugin entries are copied
+    // from SDK manifest authority metadata by plugin-tool-adapter.
     if (canonicalTargets.length > 0) {
       while (true) {
         const outOfAllowedTarget = canonicalTargets.find(
@@ -937,6 +983,7 @@ export class ToolExecutor {
             toolUse.name,
             source,
             invocationCategory,
+            tool.pathFields ?? [],
             finalInput,
             invocationAllowedScope.directories,
             sensitivePathPattern ? [sensitivePathPattern] : [],
@@ -1039,6 +1086,7 @@ export class ToolExecutor {
             toolUse.name,
             source,
             invocationCategory,
+            tool.pathFields ?? [],
             finalInput,
             invocationAllowedScope.directories,
             sensitivePathPattern ? [sensitivePathPattern] : [],
@@ -1237,6 +1285,7 @@ export class ToolExecutor {
     let content: string;
     let isError = false;
     let uiPayload: import("../mcp/types.js").McpUiPayload | undefined;
+    let rawResult: unknown;
 
     const executionContext: ToolExecutionContext = {
       cwd: executionCwd,
@@ -1262,6 +1311,9 @@ export class ToolExecutor {
       // MCP Apps §3.2 — propagate uiPayload from tool metadata
       if (result.metadata?.uiPayload) {
         uiPayload = result.metadata.uiPayload as import("../mcp/types.js").McpUiPayload;
+      }
+      if (Object.prototype.hasOwnProperty.call(result.metadata ?? {}, "rawResult")) {
+        rawResult = result.metadata?.rawResult;
       }
     } catch (err) {
       content = err instanceof Error ? err.message : "알 수 없는 도구 실행 오류";
@@ -1346,7 +1398,14 @@ export class ToolExecutor {
         : displayContent;
     await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, auditContent, isError, startTime, permissionResult, rateResult.remaining, invocationPermissionContext, invocationCategory, executionCwd, targetFilePath);
 
-    return { tool_use_id: toolUse.id, content, ...(isError && { is_error: true }), ...(uiPayload && { uiPayload }), durationMs };
+    return {
+      tool_use_id: toolUse.id,
+      content,
+      ...(isError && { is_error: true }),
+      ...(uiPayload && { uiPayload }),
+      ...(rawResult !== undefined && { rawResult }),
+      durationMs,
+    };
   }
 
   // ─── Audit (불변 — 항상 실행) ────────────────────

@@ -371,6 +371,7 @@ describe("PluginRuntime.disable", () => {
     await writeRegistry([{ id: "ui-callable", manifestPath, enabled: true }]);
     const runtime = makeRuntime();
     await runtime.load();
+    runtime.setToolInvocationDelegate((method, payload) => runtime.call(method, payload));
 
     await expect(runtime.callFromUi("uic_get")).resolves.toBe("public-ok");
     await expect(runtime.callFromUi("uic_private")).rejects.toThrow(

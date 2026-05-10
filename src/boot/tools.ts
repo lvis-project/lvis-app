@@ -82,7 +82,7 @@ export async function wireKnowledgeAndIdleScheduler(opts: {
     // Public accessor (runtime.getPluginInstance) replaces the previous
     // `(pluginRuntime as any).plugins?.get(...)` private reach-through.
     const workerClientPluginId = pluginRuntime.findPluginIdByCapability("worker-client");
-    const pageIndexPlugin = workerClientPluginId
+    const knowledgePlugin = workerClientPluginId
       ? pluginRuntime.getPluginInstance<{
       getWorkerClient?: () => {
         listDocuments: () => Promise<unknown>;
@@ -95,7 +95,7 @@ export async function wireKnowledgeAndIdleScheduler(opts: {
       setIdleScheduler?: (scheduler: IdleSchedulerService) => void;
     }>(workerClientPluginId)
       : undefined;
-    const workerClient = pageIndexPlugin?.getWorkerClient?.() as
+    const workerClient = knowledgePlugin?.getWorkerClient?.() as
       | {
           listDocuments: () => Promise<unknown>;
           getStructure: (docId: string) => Promise<unknown>;
@@ -141,10 +141,9 @@ export async function wireKnowledgeAndIdleScheduler(opts: {
           powerMonitor: adaptPowerMonitor(powerMonitor),
         });
         idleScheduler.start();
-        // folderIndexer에 stub 주입 (Agent 4의 setIdleScheduler 경로)
-        if (typeof pageIndexPlugin?.setIdleScheduler === "function") {
-          pageIndexPlugin.setIdleScheduler(idleScheduler);
-          log.info("boot: idle-scheduler wired to folderIndexer");
+        if (typeof knowledgePlugin?.setIdleScheduler === "function") {
+          knowledgePlugin.setIdleScheduler(idleScheduler);
+          log.info("boot: idle-scheduler wired to worker-client plugin");
         } else {
           log.warn("boot: worker-client plugin setIdleScheduler() not available");
         }
