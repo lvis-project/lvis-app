@@ -173,20 +173,20 @@ describe("ToolGroupCard", () => {
     expect(container.textContent).not.toContain("hidden live input");
 
     fireEvent.click(container.querySelector("button") as HTMLButtonElement);
-    expect(container.textContent).toContain("문서 검색");
+    expect(container.textContent).toContain("knowledge search");
     expect(container.textContent).not.toContain("hidden live input");
   });
 
   it("multi-tool: shows tool display names in header", () => {
     const { container } = render(<ToolGroupCard group={makeMultiGroup()} />);
-    expect(container.textContent).toContain("문서 검색"); // knowledge_search mapped
+    expect(container.textContent).toContain("knowledge search");
   });
 
   it("multi-tool: expands tool list when clicked", () => {
     const { container } = render(<ToolGroupCard group={makeMultiGroup()} />);
     const headerBtn = container.querySelector("button") as HTMLButtonElement;
     fireEvent.click(headerBtn);
-    expect(container.textContent).toContain("문서 검색");
+    expect(container.textContent).toContain("knowledge search");
     expect(container.textContent).not.toContain("r1");
   });
 
@@ -196,7 +196,7 @@ describe("ToolGroupCard", () => {
     expect(container.textContent).not.toContain("r1");
 
     const buttons = Array.from(container.querySelectorAll("button"));
-    const firstToolButton = buttons.filter((button) => button.textContent?.includes("문서 검색")).at(-1) as HTMLButtonElement | undefined;
+    const firstToolButton = buttons.filter((button) => button.textContent?.includes("knowledge search")).at(-1) as HTMLButtonElement | undefined;
     expect(firstToolButton).toBeTruthy();
     fireEvent.click(firstToolButton!);
     expect(container.textContent).toContain("r1");

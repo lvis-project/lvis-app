@@ -98,7 +98,6 @@ export async function parsePluginJson(
       `Example: {"id":"com.lge.sample","name":"Sample","version":"1.0.0","entry":"dist/index.js","tools":["sample_ping"]}`,
     );
   }
-  parsed.installPolicy = normalizeInstallPolicy(parsed);
   const pid = typeof parsed?.id === "string" && parsed.id.length > 0 ? parsed.id : "<unknown>";
   const fail = (fieldPath: string, reason: string, example: string): never => {
     throw new Error(
@@ -145,6 +144,7 @@ export async function parsePluginJson(
       `[manifest:${pid}] schema validation failed (${path}): ${errs}`,
     );
   }
+  parsed.installPolicy = normalizeInstallPolicy(parsed);
 
   if (typeof parsed.id !== "string" || parsed.id.length === 0) {
     fail("id", "must be a non-empty string", `"id": "com.lge.meeting-recorder"`);
@@ -182,15 +182,13 @@ export async function parsePluginJson(
   for (let i = 0; i < parsed.tools.length; i += 1) {
     const method = parsed.tools[i];
     if (typeof method !== "string") {
-      fail(`tools[${i}]`, "must be a string", `"tools": ["meeting_start"]`);
+      fail(`tools[${i}]`, "must be a string", `"tools": ["sample_tool"]`);
     }
     if (!TOOL_NAME_PATTERN.test(method)) {
-      // Backwards-compat: older tests match /Invalid tool name '...'/ — keep that
-      // substring so the fresh error message still triggers the same assertion.
       throw new Error(
         `Invalid tool name '${method}' in plugin '${pid}' at 'tools[${i}]' (${path}): ` +
         `tool names must match ^[a-zA-Z_][a-zA-Z0-9_]*$ (start with letter/underscore, then letters/digits/underscores). ` +
-        `Example: "tools": ["meeting_start"] (not "meeting.start")`,
+        `Example: "tools": ["sample_tool"] (not "sample.tool")`,
       );
     }
   }
@@ -199,7 +197,7 @@ export async function parsePluginJson(
     fail(
       "startupTools",
       "must be an array of strings (each value must appear in tools[])",
-      `"startupTools": ["meeting_watch"]`,
+      `"startupTools": ["startup_watch"]`,
     );
   }
   const startupTools = parsed.startupTools ?? [];
@@ -209,7 +207,7 @@ export async function parsePluginJson(
       fail(
         `startupTools[${i}]`,
         "must be a string",
-        `"startupTools": ["meeting_watch"]`,
+        `"startupTools": ["startup_watch"]`,
       );
     }
     if (!parsed.tools.includes(startupMethod)) {
@@ -256,7 +254,7 @@ export async function parsePluginJson(
       fail(
         `uiCallable[${i}]`,
         "must be a string",
-        `"uiCallable": ["meeting_summary_get"]`,
+        `"uiCallable": ["summary_get"]`,
       );
     }
     if (!parsed.tools.includes(method)) {
@@ -298,7 +296,7 @@ export async function parsePluginJson(
     }
   }
 
-  // Phase 5 §1 — keywords[].skillId must be in tools[].
+  // keywords[].skillId must be in tools[].
   const kw = Array.isArray(parsed.keywords) ? parsed.keywords : [];
   for (let i = 0; i < kw.length; i += 1) {
     const sk = kw[i]?.skillId;
@@ -311,7 +309,7 @@ export async function parsePluginJson(
     }
   }
 
-  // Phase 5 §2 — toolSchemas keys must be a subset of tools[].
+  // toolSchemas keys must be a subset of tools[].
   const schemaKeys = parsed.toolSchemas ? Object.keys(parsed.toolSchemas) : [];
   for (const k of schemaKeys) {
     if (!parsed.tools.includes(k)) {
@@ -323,7 +321,7 @@ export async function parsePluginJson(
     }
   }
 
-  // Phase 5 §3 — notificationEvents[i].event should be in eventSubscriptions (soft warn).
+  // notificationEvents[i].event should be in eventSubscriptions (soft warn).
   const subs = Array.isArray(parsed.eventSubscriptions) ? parsed.eventSubscriptions : [];
   const subsTypes = new Set(
     subs.map((s) => (typeof s === "string" ? s : (s as { type: string }).type)),

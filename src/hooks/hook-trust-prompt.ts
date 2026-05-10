@@ -1,5 +1,5 @@
 /**
- * Permission policy Phase 4 — Layer 6 hook TOFU trust workflow.
+ * Permission policy Layer 6 hook trust quarantine workflow.
  *
  * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 6.
  *
@@ -81,7 +81,7 @@ export interface RunHookTrustResult {
 export async function runHookTrustWorkflow(
   options: RunHookTrustOptions = {},
 ): Promise<RunHookTrustResult> {
-  // Always ensure the directory exists — Phase 4 v1 ships an empty
+  // Always ensure the directory exists — hook trust ships an empty
   // directory on fresh installs (spec §11 v2.1 binding decision).
   ensureHooksDirectory(options.hooksDir);
 

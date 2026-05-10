@@ -116,7 +116,7 @@ const api = {
   }) =>
     ipcRenderer.invoke("lvis:host:plugin-theme-notify", payload),
 
-  // PR 3c: lvis:ms-graph:* IPC 채널 + bridge 메서드 제거 — ms-graph
+  // Plugin-owned OAuth removed host-owned provider auth IPC bridges.
   // 플러그인이 자체 인증을 소유한다.
 
   // ─── Chat (ConversationLoop) ─────────────────────

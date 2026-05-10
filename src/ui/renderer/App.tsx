@@ -96,10 +96,10 @@ export function App() {
   const { status: bootstrapStatus, dismiss: dismissBootstrapStatus, retry: retryBootstrap } = useBootstrapStatus(api);
   const { queue: approvalQueue, decide: handleApprovalDecide, decideAll: handleApprovalDecideAll } = useApproval();
 
-  // Q10 — runningRoutines: tracks in-flight LLM sessions
+  // runningRoutines tracks in-flight LLM sessions.
   const [runningRoutines, setRunningRoutines] = useState<Set<string>>(new Set());
 
-  // Q10 — addFire ref: populated by OverlayContextProvider during render
+  // addFire ref is populated by OverlayContextProvider during render
   // so the IPC subscription below can call it without prop-drilling
   const addFireRef = useRef<import("./context/OverlayContext.js").OverlayContextValue["addFire"] | null>(null);
 
@@ -161,12 +161,12 @@ export function App() {
     return () => { unsubStarted(); unsubFinished(); unsubFailed(); unsubFired(); };
   }, [api]);
 
-  // Q11 — overlay items ref: tracks all items pushed via onOverlayShow so
+  // Overlay items ref tracks all items pushed via onOverlayShow so
   // handlePluginPrimaryAction can look up pendingPrompt by id without needing
   // to reach into OverlayContext (App.tsx is the parent of OverlayContextProvider).
   const overlayItemsRef = useRef<Map<string, import("./context/OverlayContext.js").OverlayItem>>(new Map());
 
-  // Q11 — overlay IPC subscriptions: main pushes plugin OverlayItems via OVERLAY_V1.show
+  // Overlay IPC subscriptions: main pushes plugin OverlayItems via OVERLAY_V1.show.
   useEffect(() => {
     if (typeof api.onOverlayShow !== "function") return;
     const unsubShow = api.onOverlayShow((item) => {
@@ -182,7 +182,7 @@ export function App() {
     return () => { unsubShow(); unsubDismiss(); };
   }, [api]);
 
-  // Q11 — plugin overlay primary action handler (user confirm → main chat insert).
+  // Plugin overlay primary action handler (user confirm → main chat insert).
   // Called from OverlayCardRegion with the OverlayItem.id after OverlayContext.dismiss()
   // has already removed the item from the queue. overlayItemsRef still holds it.
   const handlePluginPrimaryAction = useCallback(
@@ -213,7 +213,7 @@ export function App() {
         title,
       });
 
-      // Start the main ConversationLoop turn immediately (Q11 user-in-the-loop
+      // Start the main ConversationLoop turn immediately (user-in-the-loop
       // confirm → auto-process). trigger-import mode skips the user-bubble
       // append since the imported_trigger card already represents the prompt.
       void handleAskRef.current(pendingPrompt, "trigger-import");
@@ -221,7 +221,7 @@ export function App() {
     [api, insertImportedTriggerEntry],
   );
 
-  // Q10 — routine session modal (opened from OverlayCard "결과 보기")
+  // Routine session modal opened from OverlayCard "결과 보기".
   const [routineSessionModal, setRoutineSessionModal] = useState<{ jsonlPath: string } | null>(null);
   const handleOpenRoutineSession = useCallback(
     async (routineId: string, firedAt: string) => {
@@ -815,7 +815,7 @@ export function App() {
       <DevConsoleToggle />
       {/* Snap edge highlight — shown when a detached child window enters the snap zone */}
       <SnapEdgeHighlight />
-      {/* Q10 — routine session modal opened from OverlayCard "결과 보기" */}
+      {/* Routine session modal opened from OverlayCard "결과 보기" */}
       {routineSessionModal && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"

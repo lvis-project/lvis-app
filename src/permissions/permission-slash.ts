@@ -190,7 +190,7 @@ export async function dispatchPermissionDirCommand(
       };
     }
     if (cmd.session) {
-      // Phase 5 will plumb this into the in-memory scope. For now we
+      // Directory additions are plumbed into the in-memory scope. For now we
       // surface a structured response so the dispatcher can update the
       // live executor context.
       return {
@@ -562,7 +562,7 @@ export async function dispatchPermissionHooksCommand(
 // ─── Top-level /permission dispatcher (trust-origin gated) ─────────────
 
 /**
- * Permission policy P5 — trust-origin set as defined in spec §9. Slash dispatch
+ * Permission policy trust-origin set as defined in spec §9. Slash dispatch
  * is gated on `user-keyboard` only; everything else short-circuits
  * to plain-text echo (per spec §3 Layer 8).
  */
@@ -585,7 +585,7 @@ export type PermissionSlashOutcome =
   | { kind: "parse-error"; error: string };
 
 /**
- * Permission policy P5 — central dispatcher entry point. The renderer calls this
+ * Permission policy central dispatcher entry point. The renderer calls this
  * with the raw input string + the propagated trust origin. The
  * dispatcher's contract:
  *

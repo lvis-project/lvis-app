@@ -141,16 +141,15 @@ export interface PluginManifest {
    * kebab-case 컨벤션을 따른다.
    *
    * 현재 사용 중인 capability:
-   * - `meeting-recorder` — 실시간 음성 캡처 및 STT (meeting)
-   * - `mail-source` — 이메일 소스 연결 (email)
-   * - `calendar-source` — 캘린더 소스 연결 (calendar)
-   * - `background-watcher` — `startupTools` 로 백그라운드 폴러/감시자 기동 (ms-graph)
-   * - `worker-client` — 외부 프로세스(Python 등) 워커 래퍼 (local-indexer)
-   * - `knowledge-index` — 문서 인덱스/검색 기능 제공 (local-indexer)
+   * - `meeting-recorder` — 실시간 음성 캡처 및 STT
+   * - `mail-source` — 이메일 소스 연결
+   * - `calendar-source` — 캘린더 소스 연결
+   * - `background-watcher` — `startupTools` 로 백그라운드 폴러/감시자 기동
+   * - `worker-client` — 외부 프로세스(Python 등) 워커 래퍼
+   * - `knowledge-index` — 문서 인덱스/검색 기능 제공
    * - `ms-graph-consumer` — Microsoft Graph 를 사용하는 플러그인의 자기-식별
-   *   라벨 (advisory). PR 3 이후 host 측 MS Graph HostApi 메서드는 모두 제거되어
-   *   강제할 게이트가 없음 — ms-graph 플러그인이 자체 MSAL + safeStorage 로
-   *   인증 처리. §9.4a "Plugin-Owned OAuth Authentication" 참고.
+   *   라벨 (advisory). Host 측 provider-auth HostApi 메서드는 없으므로
+   *   강제할 게이트가 없다. §9.4a "Plugin-Owned OAuth Authentication" 참고.
    */
   capabilities?: string[];
   startupTools?: string[];
@@ -659,10 +658,8 @@ export interface PluginHostApi {
   onPluginsChanged(handler: (event: PluginLifecycleEvent) => void): () => void;
   getSecret(key: string): string | null;
 
-  // PR 3 이후: Microsoft Graph 인증은 ms-graph 플러그인이 자체 소유한다.
-  // host 측 HostApi 메서드 (getMsGraphToken, startMsGraphAuth, signOutMsGraph,
-  // withMsGraphRetry 등) 는 모두 제거됨. ms-graph plugin 은 자체 MSAL 인스턴스 +
-  // safeStorage 토큰 캐시 + loopback HTTP redirect 로 직접 처리.
+  // Plugin-owned OAuth keeps provider-specific auth inside plugins; the host
+  // exposes only generic HostApi surfaces.
   callTool<T = unknown>(toolName: string, payload?: unknown): Promise<T>;
 
   // ─── LLM 접근 (선제성 기능용) ────────────────────────────────────────
@@ -754,8 +751,8 @@ export interface PluginHostApi {
    * "brain" plugin make LVIS speak first when an event warrants action
    * (e.g., a meeting-request mail arrives).
    *
-   * Capability gate: `conversation-trigger`. The plugin's manifest must
-   * declare it; otherwise the host returns `{ accepted: false, reason:
+   * Capability gate: `host:overlay`. The plugin's manifest must declare it;
+   * otherwise the host returns `{ accepted: false, reason:
    * "capability_denied" }`. Callers should branch on `accepted` rather than
    * expecting an exception for this condition.
    *
@@ -780,13 +777,13 @@ export interface PluginHostApi {
    * responses. The renderer-only preload bridge (`context.bridge.approval`)
    * is NOT accessible from plugin handlers running in the main process.
    *
-   * Usage pattern (lvis-plugin-agent-hub decide-approval-with-host):
+   * Usage pattern:
    *   await context.hostApi.agentApproval.respond(approvalId, choice, nonce, hmac)
    */
   /**
    * Overlay extensibility — show an overlay card from a plugin.
    * Returns an OverlayHandle with a dismiss() disposer.
-   * Advisory: `host:overlay` capability should be declared in manifest.capabilities[].
+   * `host:overlay` capability must be declared in manifest.capabilities[].
    *
    * running=true shows spinner + "진행 중…"; false (default) shows summary + actions.
    */
@@ -876,12 +873,11 @@ export interface ConversationTriggerSpec {
    * - `summary-only`   — show one-line completion notice (default).
    * - `user-visible`   — surface as if the user opened a turn, modal-style.
    *
-   * **P0 limitation:** all three values currently produce identical UI
-   * behaviour — the field is recorded into audit only. P2 will add the
-   * actual UI branching.
+   * Current limitation: all three values currently produce identical UI
+   * behaviour; the field is recorded into audit only.
    */
   visibility?: "silent" | "summary-only" | "user-visible";
-  /** Routing hint for queueing when multiple triggers compete (audit-only in P0). */
+  /** Routing hint for queueing when multiple triggers compete (audit-only today). */
   priority?: "low" | "normal" | "high";
   /** Suppress duplicate triggers for the same observation (window enforced by host). */
   dedupeKey?: string;
@@ -907,7 +903,7 @@ export interface ConversationTriggerResult {
   accepted: boolean;
   /**
    * When `accepted=false`, why:
-   *   `capability_denied` — plugin lacks `conversation-trigger` or `host:overlay`.
+   *   `capability_denied` — plugin lacks `host:overlay`.
    *   `invalid_source`    — `source` does not match `^proactive:[a-z][a-z0-9-]*$`,
    *                         `prompt` empty, or other shape problem.
    *   `duplicate`         — `dedupeKey` matched a recent trigger.

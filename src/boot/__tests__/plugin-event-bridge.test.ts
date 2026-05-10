@@ -12,6 +12,7 @@
 import { describe, it, expect } from "vitest";
 import { emitEvent, onEvent } from "../types.js";
 import { classifySubscription } from "../../plugins/capabilities.js";
+import { registerPluginEventBridge } from "../steps/ipc-bridge.js";
 import type { PluginManifest } from "../../plugins/types.js";
 
 // ─── Stubs ───────────────────────────────────────────────────────────────────
@@ -25,6 +26,7 @@ function makeFakeWindow() {
         sent.push({ channel, eventType, data });
       },
     },
+    once: () => undefined,
     _sent: sent,
   };
 }
@@ -78,6 +80,17 @@ function registerBridge(runtime: FakeRuntime, win: FakeWindow): () => void {
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 describe("plugin event bridge — manifest.emittedEvents", () => {
+  it("production bridge does not register undeclared legacy event literals", () => {
+    const win = makeFakeWindow();
+    const runtime = makeRuntime([]);
+    const dispose = registerPluginEventBridge(runtime as unknown as never, win as unknown as never);
+
+    emitEvent("meeting.transcript.updated", { chunk: "hello" });
+
+    expect(win._sent).toHaveLength(0);
+    dispose();
+  });
+
   it("forwards public events from two plugins with distinct emittedEvents", () => {
     const win = makeFakeWindow();
     const runtime = makeRuntime([

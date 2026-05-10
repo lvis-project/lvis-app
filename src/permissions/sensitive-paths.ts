@@ -98,11 +98,14 @@ export const SENSITIVE_PATH_PATTERNS: readonly string[] = Object.freeze([
   "**/.lvis/lvis-secrets.json", // legacy consolidated secrets file
   "**/lvis-secrets.json", // shallow sibling form
   // ── Permission policy P2.5 — LVIS-internal sensitive paths ───────
+  "**/.lvis/settings.json", // app settings and permission configuration
+  "**/.lvis/permissions.json", // legacy/current permission settings file
+  "**/.lvis/policy.json", // policy SOT
+  "**/.lvis/permissions/**", // reviewer cache, deferred queue, permission state
   "**/.lvis/audit", // audit log directory (self-tampering)
   "**/.lvis/audit/**", // audit log files inside dir
   "**/.lvis/audit.log", // legacy audit log file
   "**/.lvis/audit.log.*", // rotated audit archives
-  "**/.lvis/permissions/deferred-queue.jsonl",
   "**/.lvis/sessions/**", // chat session JSONL
   "**/.config/lvis/hooks/**", // hook supply-chain protection
 ]);

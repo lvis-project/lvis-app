@@ -35,22 +35,83 @@ export const PowerShellToolInputSchema = z.object({
 const OUTPUT_CAP = 12_000;
 const TRUNCATION_MARKER = "\n...[truncated]...";
 
+const POWERSHELL_ALIASES = new Map<string, string>([
+  ["ac", "add-content"],
+  ["cat", "get-content"],
+  ["clc", "clear-content"],
+  ["copy", "copy-item"],
+  ["cp", "copy-item"],
+  ["cpi", "copy-item"],
+  ["del", "remove-item"],
+  ["dir", "get-childitem"],
+  ["erase", "remove-item"],
+  ["gc", "get-content"],
+  ["gci", "get-childitem"],
+  ["gi", "get-item"],
+  ["iex", "invoke-expression"],
+  ["ls", "get-childitem"],
+  ["mkdir", "new-item"],
+  ["md", "new-item"],
+  ["mi", "move-item"],
+  ["move", "move-item"],
+  ["mv", "move-item"],
+  ["ni", "new-item"],
+  ["rd", "remove-item"],
+  ["ren", "rename-item"],
+  ["ri", "remove-item"],
+  ["rm", "remove-item"],
+  ["rmdir", "remove-item"],
+  ["rni", "rename-item"],
+  ["saps", "start-process"],
+  ["sc", "set-content"],
+  ["si", "set-item"],
+  ["sp", "set-itemproperty"],
+  ["start", "start-process"],
+  ["type", "get-content"],
+]);
+
 const BLOCKED_COMMANDS = new Map<string, string>([
   ["invoke-expression", "Invoke-Expression is not allowed"],
-  ["iex", "Invoke-Expression is not allowed"],
   ["set-executionpolicy", "execution policy changes are not allowed"],
   ["start-process", "process detachment is not allowed"],
-  ["saps", "process detachment is not allowed"],
-  ["start", "process detachment is not allowed"],
   ["read-host", "interactive prompts are not allowed"],
   ["pause", "interactive prompts are not allowed"],
   ["set-alias", "alias mutation is not allowed"],
   ["new-alias", "alias mutation is not allowed"],
   ["join-path", "dynamic path composition is not allowed"],
+  ["resolve-path", "dynamic path resolution is not allowed"],
+  ["convert-path", "dynamic path resolution is not allowed"],
+  ["new-psdrive", "dynamic filesystem drive mapping is not allowed"],
+  ["start-job", "background jobs are not allowed"],
+  ["start-threadjob", "background jobs are not allowed"],
+  ["invoke-command", "remote command invocation is not allowed"],
+  ["get-wmiobject", "WMI command invocation is not allowed"],
+  ["invoke-wmimethod", "WMI command invocation is not allowed"],
+  ["invoke-cimmethod", "CIM command invocation is not allowed"],
+  ["powershell", "nested PowerShell shells are not allowed"],
+  ["powershell.exe", "nested PowerShell shells are not allowed"],
+  ["pwsh", "nested PowerShell shells are not allowed"],
 ]);
 
 const ENCODED_COMMAND_FLAGS = new Set(["-encodedcommand", "-enc"]);
-const REMOVE_ITEM_COMMANDS = new Set(["remove-item", "rm", "del", "erase", "rd", "rmdir", "ri"]);
+const REMOVE_ITEM_COMMANDS = new Set(["remove-item"]);
+const FILESYSTEM_COMMANDS = new Set([
+  "add-content",
+  "clear-content",
+  "copy-item",
+  "get-childitem",
+  "get-content",
+  "get-item",
+  "move-item",
+  "new-item",
+  "out-file",
+  "remove-item",
+  "rename-item",
+  "set-content",
+  "set-item",
+  "set-itemproperty",
+  "test-path",
+]);
 const RECURSE_FLAGS = new Set(["-recurse", "-r", "-rec"]);
 const FORCE_FLAGS = new Set(["-force", "-fo"]);
 
@@ -91,7 +152,7 @@ export class PowerShellTool extends ZodTool<typeof PowerShellToolInputSchema> {
         ? pathResolve(input.cwd)
         : pathResolve(ctx.cwd, input.cwd)
       : ctx.cwd;
-    const cwdViolation = validateShellWorkingDirectory(resolvedCwd, ctx.cwd, ctx.allowedDirectories);
+    const cwdViolation = validateShellWorkingDirectory(resolvedCwd, ctx.cwd, ctx.extraAllowedDirectories);
     if (cwdViolation) {
       return { output: cwdViolation, isError: true };
     }
@@ -99,7 +160,7 @@ export class PowerShellTool extends ZodTool<typeof PowerShellToolInputSchema> {
       input.command,
       resolvedCwd,
       ctx.cwd,
-      ctx.allowedDirectories,
+      ctx.extraAllowedDirectories,
     );
     if (commandPathViolation) {
       return { output: commandPathViolation, isError: true };
@@ -128,7 +189,8 @@ export function validatePowerShellAst(ast: PowerShellAstSummary): string | null 
     return `parse error: ${ast.errors[0]}`;
   }
   for (const command of ast.commands) {
-    const name = command.name?.trim().toLowerCase() ?? "";
+    const rawName = command.name?.trim().toLowerCase() ?? "";
+    const name = canonicalPowerShellCommandName(rawName);
     if (!name) {
       return "dynamic command invocation is not allowed";
     }
@@ -142,8 +204,33 @@ export function validatePowerShellAst(ast: PowerShellAstSummary): string | null 
     if (REMOVE_ITEM_COMMANDS.has(name) && hasRecursiveForcedDeletion(elements)) {
       return "recursive forced deletion is not allowed";
     }
+    if (FILESYSTEM_COMMANDS.has(name)) {
+      if (elements.some((element) => isSwitchEnabled(element, RECURSE_FLAGS))) {
+        return "recursive shell filesystem traversal is not allowed";
+      }
+      const dynamic = elements.slice(1).find(isDynamicPowerShellPathArgument);
+      if (dynamic) {
+        return `dynamic path argument is not allowed: ${dynamic}`;
+      }
+    }
   }
   return null;
+}
+
+function canonicalPowerShellCommandName(name: string): string {
+  return POWERSHELL_ALIASES.get(name) ?? name;
+}
+
+function isDynamicPowerShellPathArgument(element: string): boolean {
+  if (element.length === 0 || element.startsWith("-")) return false;
+  return (
+    element.includes("$") ||
+    element.includes("[") ||
+    element.includes("]") ||
+    element.includes("(") ||
+    element.includes(")") ||
+    element.includes("+")
+  );
 }
 
 function hasRecursiveForcedDeletion(elements: string[]): boolean {

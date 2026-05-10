@@ -3,7 +3,7 @@ import { approvalQueueReducer } from "../../../lib/approval-queue-reducer.js";
 import type { ApprovalChoice, ApprovalRequest } from "../types.js";
 
 /**
- * Phase 3.4 — approval queue hook.
+ * Approval queue hook.
  *
  * Owns: FIFO approval queue state (via approvalQueueReducer), the
  * window.lvis.approval.onRequest subscription, and the decide handler which
@@ -16,8 +16,8 @@ export function useApproval() {
   // In-flight guard — prevents double-click from dropping the pending item
   // between shift() and respond(). See Copilot HIGH #2.
   const inFlightRef = useRef<boolean>(false);
-  // Fix 5 (PR #97) — aliveRef pattern: guard late setQueue
-  // from async `respond()` callbacks resolving after unmount.
+  // Guard late setQueue from async `respond()` callbacks resolving after
+  // unmount.
   const aliveRef = useRef(true);
   useEffect(() => {
     queueRef.current = queue;
@@ -25,10 +25,10 @@ export function useApproval() {
 
   useEffect(() => {
     aliveRef.current = true;
-    // Round-3 §8: surface preload init bugs explicitly. The approval queue is
-    // a load-bearing UX path (every tool call routes through it); silently
-    // no-op'ing here when `window.lvis` is missing makes the bug present as
-    // "tools never resolve" instead of "preload didn't run".
+    // Surface preload init bugs explicitly. The approval queue is a
+    // load-bearing UX path; silently no-op'ing here when `window.lvis` is
+    // missing makes the bug present as "tools never resolve" instead of
+    // "preload didn't run".
     if (!window.lvis) {
       console.error("[use-approval] window.lvis is undefined — preload missing or failed to load");
       return () => {
@@ -58,11 +58,10 @@ export function useApproval() {
       if (inFlightRef.current) return;
       const current = queueRef.current[0];
       if (!current) return;
-      // Round-3 §8: assert preload availability explicitly. If the user
-      // landed on this code path with no preload, the queue would never
-      // surface a request anyway (the subscription in the effect above is
-      // skipped); reaching here means the early-return safeguard exists
-      // in two places and one of them is stale. Surface it loudly.
+      // Assert preload availability explicitly. If the user landed on this
+      // code path with no preload, the queue would never surface a request
+      // anyway; reaching here means the early-return safeguard exists in two
+      // places and one of them is stale.
       if (!window.lvis) {
         console.error("[use-approval] decide: window.lvis is undefined — preload missing");
         return;
@@ -93,24 +92,18 @@ export function useApproval() {
   );
 
   /**
-   * D4 §4.5.3 — bulk decide all currently-pending approval requests.
-   *
-   * Issues the same `choice` (typically "allow-once" or "deny-once") to every
-   * queued request in parallel, then clears the queue. Used by the "모두 허용"
-   * / "모두 거부" buttons that surface in {@link ToolApprovalDialog} whenever
-   * the LLM emits multiple tool_calls in one round (§4.5.3 parallel tool
-   * execution). "always" variants are intentionally excluded here because
-   * each pending request may target a different tool name, and blanket
-   * persistence across heterogeneous tools is a footgun — users must still
-   * pick "항상 허용" / "항상 거부" per-request.
+   * Bulk decide all currently-pending approval requests. Issues the same
+   * `choice` to every queued request in parallel, then clears the queue. The
+   * "always" variants are intentionally excluded here because each pending
+   * request may target a different tool name, and blanket persistence across
+   * heterogeneous tools is a footgun.
    */
   const decideAll = useCallback(
     async (choice: "allow-once" | "deny-once") => {
       if (inFlightRef.current) return;
       const snapshot = queueRef.current.slice();
       if (snapshot.length === 0) return;
-      // Round-3 §8: surface preload init bugs explicitly (same rationale as
-      // `decide()` above).
+      // Surface preload init bugs explicitly (same rationale as `decide()`).
       if (!window.lvis) {
         console.error("[use-approval] decideAll: window.lvis is undefined — preload missing");
         return;
@@ -122,7 +115,12 @@ export function useApproval() {
       try {
         await Promise.all(
           snapshot.map((req) =>
-            lvis.approval.respond({ requestId: req.id, choice }).catch((err) => {
+            lvis.approval.respond({
+              requestId: req.id,
+              choice,
+              nonce: req.nonce,
+              hmac: req.hmac,
+            }).catch((err) => {
               console.warn(
                 `[lvis] approval.respond failed for ${req.id}:`,
                 (err as Error).message,

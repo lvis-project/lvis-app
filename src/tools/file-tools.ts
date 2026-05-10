@@ -1,6 +1,7 @@
-import { createReadStream } from "node:fs";
+import { constants, createReadStream } from "node:fs";
 import { randomUUID } from "node:crypto";
 import {
+  copyFile,
   mkdir,
   readdir,
   readFile,
@@ -23,6 +24,11 @@ import { z } from "zod";
 
 import { validateSandboxPath } from "../sandbox/path-validator.js";
 import { globToRegExp } from "../lib/glob-matcher.js";
+import {
+  canonicalizePathForMatch,
+  caseFoldForMatch,
+  isSensitivePath,
+} from "../permissions/sensitive-paths.js";
 import {
   ZodTool,
   type Tool,
@@ -119,16 +125,23 @@ abstract class FileTool<TSchema extends z.ZodTypeAny> extends ZodTool<TSchema> {
   }
 
   protected ensureAllowed(path: string, ctx: ToolExecutionContext): ToolResult | null {
-    const check = validateSandboxPath(path, ctx.cwd, [...ctx.allowedDirectories]);
+    const sensitive = sensitivePatternForPath(path);
+    if (sensitive) {
+      return toolError(`Sensitive path: ${path} matches ${sensitive}`);
+    }
+    const check = validateSandboxPath(path, ctx.cwd, [...ctx.extraAllowedDirectories]);
     if (!check.allowed) {
       return toolError(`Sandbox: ${check.reason}`);
     }
     return null;
   }
 
-  protected resolveApprovalPath(inputPath: string, ctx?: Pick<ToolExecutionContext, "cwd">): string {
+  protected resolveApprovalPath(inputPath: string, ctx: Pick<ToolExecutionContext, "cwd"> | undefined): string {
+    if (!ctx?.cwd) {
+      throw new Error(`${this.name} approvalCacheKey requires explicit cwd`);
+    }
     const expanded = expandTilde(inputPath);
-    return isAbsolute(expanded) ? pathResolve(expanded) : pathResolve(ctx?.cwd ?? process.cwd(), expanded);
+    return isAbsolute(expanded) ? pathResolve(expanded) : pathResolve(ctx.cwd, expanded);
   }
 
   protected requireStringField(input: unknown, field: string): string {
@@ -487,17 +500,18 @@ export class MoveFileTool extends FileTool<typeof MoveFileInputSchema> {
     if (!sourceStat.value.isFile()) {
       return toolError(`move_file requires a regular source file: ${source}`);
     }
-    const destinationStat = await statExistingPath(destination);
-    if (!destinationStat.ok) return destinationStat.error;
-    if (destinationStat.value && !input.overwrite) {
-      return toolError(`move_file destination exists; set overwrite=true to replace: ${destination}`);
-    }
-    if (destinationStat.value && !destinationStat.value.isFile()) {
-      return toolError(`move_file destination is not a regular file: ${destination}`);
-    }
-
     await mkdir(dirname(destination), { recursive: true });
-    await rename(source, destination);
+    if (input.overwrite) {
+      const destinationStat = await statExistingPath(destination);
+      if (!destinationStat.ok) return destinationStat.error;
+      if (destinationStat.value && !destinationStat.value.isFile()) {
+        return toolError(`move_file destination is not a regular file: ${destination}`);
+      }
+      await rename(source, destination);
+    } else {
+      const moved = await noClobberMoveFile(source, destination);
+      if (!moved.ok) return moved.error;
+    }
     return {
       output: JSON.stringify({ sourcePath: source, destinationPath: destination }),
       isError: false,
@@ -556,6 +570,10 @@ function expandTilde(path: string): string {
   if (path === "~") return homedir();
   if (path.startsWith("~/")) return join(homedir(), path.slice(2));
   return path;
+}
+
+function sensitivePatternForPath(path: string): string | null {
+  return isSensitivePath(caseFoldForMatch(canonicalizePathForMatch(path)));
 }
 
 async function statFile(path: string): Promise<
@@ -651,6 +669,9 @@ async function collectFiles(
     const rootStat = await stat(root);
     const files: ListedEntry[] = [];
     const state = { visited: 0, truncated: false };
+    if (sensitivePatternForPath(root)) {
+      return { ok: true, value: { files, truncated: false } };
+    }
     if (rootStat.isFile()) {
       files.push({
         path: root,
@@ -690,6 +711,9 @@ async function walk(
       return;
     }
     const full = join(current, dirent.name);
+    if (sensitivePatternForPath(full)) {
+      continue;
+    }
     const rel = normalizeRelativePath(relative(root, full));
     const type = dirent.isDirectory()
       ? "directory"
@@ -710,6 +734,20 @@ async function walk(
     if (dirent.isDirectory() && remainingDepth > 1 && !DEFAULT_SKIP_DIRS.has(dirent.name)) {
       await walk(root, full, remainingDepth - 1, limit, output, opts, state);
     }
+  }
+}
+
+async function noClobberMoveFile(source: string, destination: string): Promise<Result<null>> {
+  try {
+    await copyFile(source, destination, constants.COPYFILE_EXCL);
+    await unlink(source);
+    return { ok: true, value: null };
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "EEXIST") {
+      return { ok: false, error: toolError(`move_file destination exists; set overwrite=true to replace: ${destination}`) };
+    }
+    return { ok: false, error: toolError(`move_file failed: ${(err as Error).message}`) };
   }
 }
 

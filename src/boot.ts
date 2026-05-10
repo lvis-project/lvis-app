@@ -4,7 +4,7 @@
  * Composes the 8-step boot pipeline from focused modules under `src/boot/`:
  *
  *   Step 0-1 + 4-5  src/boot/services.ts          core services (python,
- *                                                 ms-graph, audit, settings,
+ *                                                 audit, settings,
  *                                                 memory, keyword/route,
  *                                                 tool-registry)
  *   Step 3 + 5      src/boot/steps/plugin-runtime — PluginRuntime + per-plugin
@@ -364,14 +364,17 @@ export async function bootstrap(
     wireReviewerAgent({
       permissionManager,
       streamProviderFor: reviewerStreamProviderFor,
+      onDeferredPendingChange: (summary) => {
+        getMainWindow()?.webContents.send(PERMISSIONS.deferredPending, summary);
+      },
     });
   };
   rewireReviewerAgent();
 
-  // Permission policy P4 §3.5 — manifest integrity proxy. Subscribes the audit
-  // logger so every read→write violation lands in `~/.lvis/audit/` +
-  // pushes an IPC notification to the renderer. Uses the live
-  // mainWindow getter so cross-restart UI keeps receiving events.
+  // Manifest integrity proxy. Subscribes the audit logger so every read→write
+  // violation lands in `~/.lvis/audit/` and pushes an IPC notification to the
+  // renderer. Uses the live mainWindow getter so cross-restart UI keeps
+  // receiving events.
   bindManifestIntegrityAudit(bootAuditLogger);
   manifestIntegrityState.onViolation((pluginId, toolName, attempted) => {
     try {
@@ -669,11 +672,9 @@ export async function bootstrap(
 
   log.info("boot: ready (%d tools, %d plugins, %d mcp)", toolRegistry.size, pluginRuntime.listPluginIds().length, mcpManager.listServers().filter(s => s.status === "connected").length);
 
-  // Watcher telemetry consumer — ms-graph (v0.1.27+) 가 발행하는
-  // `email.watcher.poll.completed` 이벤트를 ~/.lvis/logs/watcher-poll.jsonl
-  // 에 적재. 정식 metrics pipeline 도입 전 단계 — 사용자 머신의 cold-seed
-  // latency / payload 분포를 raw 로 모아 사후 jq 분석. 향후 ms-graph 의
-  // chunked-seed / interval 튜닝 의사결정 데이터 소스.
+  // Watcher telemetry consumer — plugin-emitted watcher poll events are
+  // appended to ~/.lvis/logs/watcher-poll.jsonl. This is the pre-metrics
+  // pipeline raw source for cold-seed latency / payload distribution tuning.
   const watcherTelemetryLogPath = resolve(homedir(), ".lvis", "logs", "watcher-poll.jsonl");
   const watcherTelemetryCollector = startWatcherTelemetryCollector({
     filePath: watcherTelemetryLogPath,

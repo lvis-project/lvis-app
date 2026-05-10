@@ -1,5 +1,5 @@
 /**
- * Phase 5 — runtime manifest validation hardening.
+ * Runtime manifest validation hardening.
  *
  * Covers 5 cross-field / fail-soft rules:
  *   1) keywords[].skillId ⊂ tools[]             (hard fail-load)
@@ -16,13 +16,13 @@ import { PluginRuntime } from "../runtime.js";
 import { runManifestStartupTools } from "../../boot/plugins.js";
 import { mkdtempSync } from "node:fs";
 
-describe("Phase 5 — runtime validation hardening", () => {
+describe("runtime manifest validation hardening", () => {
   let testDir: string;
   let installedDir: string;
   let registryPath: string;
 
   beforeEach(async () => {
-    testDir = mkdtempSync(join(tmpdir(), "lvis-p5-"));
+    testDir = mkdtempSync(join(tmpdir(), "lvis-manifest-hardening-"));
     installedDir = join(testDir, "plugins", "installed");
     await mkdir(installedDir, { recursive: true });
     registryPath = join(testDir, "plugins", "registry.json");
