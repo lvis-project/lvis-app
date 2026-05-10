@@ -1,5 +1,5 @@
 /**
- * Manifest validation — AJV schema validation + hand-rolled MUST/SHOULD checks.
+ * Manifest validation — SDK schema SOT + host cross-field MUST/SHOULD checks.
  *
  * Exported for unit testing and reuse by the PluginRuntime class.
  */
@@ -42,42 +42,16 @@ export function getDeclaredEmittedEvents(manifest: PluginManifest): string[] {
 }
 
 /**
- * Sprint 4-B §B-1 — lazy-load + compile plugin.schema.json into an AJV
- * validator. AJV is configured with `strict: true` + `allErrors: true` so
- * every violation surfaces in one pass. Compilation failure is logged and
- * returns `null`; readManifest falls back to hand-rolled checks to stay
- * operational.
+ * Lazy-load + compile the SDK plugin manifest schema into an AJV validator.
+ * The SDK schema is the manifest shape SOT; if it cannot be resolved or
+ * compiled, plugin loading must fail closed instead of switching validators.
  */
-export async function buildManifestValidator(): Promise<ValidateFunction | null> {
+export async function buildManifestValidator(): Promise<ValidateFunction> {
   try {
-    // Phase-2 SDK-as-SoT: schema is sourced from the `@lvis/plugin-sdk`
-    // npm package (file: dependency in the monorepo). The host stopped
-    // maintaining its own copy — there is no schemas/ directory on the
-    // host side anymore. We use `createRequire(import.meta.url).resolve`
-    // (not `import.meta.resolve`) because vitest's SSR runtime does not
-    // implement `import.meta.resolve` — `createRequire` works in both
-    // production Node and the test runner. Single resolution path; no
-    // fallback chain — if `@lvis/plugin-sdk` cannot be resolved, the
-    // outer try/catch returns `null` and `parsePluginJson` falls back to
-    // hand-rolled MUST/SHOULD checks (degraded but still operational).
-    const candidates = [
-      createRequire(import.meta.url).resolve(
-        "@lvis/plugin-sdk/schemas/plugin-manifest.schema.json",
-      ),
-    ];
-    let schemaBytes: string | null = null;
-    for (const candidate of candidates) {
-      try {
-        schemaBytes = await readFile(candidate, "utf-8");
-        break;
-      } catch {
-        // try next
-      }
-    }
-    if (!schemaBytes) {
-      log.warn("plugin.schema.json not found — AJV validation disabled");
-      return null;
-    }
+    const schemaPath = createRequire(import.meta.url).resolve(
+      "@lvis/plugin-sdk/schemas/plugin-manifest.schema.json",
+    );
+    const schemaBytes = await readFile(schemaPath, "utf-8");
     const schema = JSON.parse(schemaBytes);
     // Ajv default export compat for ESM/CJS interop.
     const AjvAny = AjvModule as unknown as { default?: unknown };
@@ -98,23 +72,19 @@ export async function buildManifestValidator(): Promise<ValidateFunction | null>
     addFormatsFn(ajv);
     return ajv.compile(schema);
   } catch (err) {
-    log.warn(
-      "AJV compile failed — falling back to hand-rolled checks: %s",
-      (err as Error).message,
-    );
-    return null;
+    throw new Error(`SDK plugin manifest schema unavailable: ${(err as Error).message}`);
   }
 }
 
 /**
  * Parse and fully validate a plugin.json manifest file.
  *
- * Runs AJV schema validation (when available) followed by hand-rolled
- * cross-field MUST checks. Throws with a descriptive message on any failure.
+ * Runs SDK AJV schema validation followed by host cross-field MUST checks.
+ * Throws with a descriptive message on any failure.
  */
 export async function parsePluginJson(
   path: string,
-  validator: ValidateFunction | null,
+  validator: ValidateFunction,
 ): Promise<PluginManifest> {
   // Sprint 1-A A4 — detailed, per-field error messages shaped as
   //   "Invalid plugin manifest '<pluginId>' at '<fieldPath>': <reason>. Example: <correction>"
@@ -128,7 +98,6 @@ export async function parsePluginJson(
       `Example: {"id":"com.lge.sample","name":"Sample","version":"1.0.0","entry":"dist/index.js","tools":["sample_ping"]}`,
     );
   }
-  parsed.installPolicy = normalizeInstallPolicy(parsed);
   const pid = typeof parsed?.id === "string" && parsed.id.length > 0 ? parsed.id : "<unknown>";
   const fail = (fieldPath: string, reason: string, example: string): never => {
     throw new Error(
@@ -136,18 +105,17 @@ export async function parsePluginJson(
     );
   };
 
-  // Phase 5 §4 — ui[] kind-specific required-field soft fallback.
-  // Runs BEFORE AJV so a single bad ui entry does not drop the whole
-  // plugin. Each invalid entry is stripped out + log.warn'd; other ui
-  // entries survive.
+  if (!validator) {
+    throw new Error("SDK plugin manifest validator is required");
+  }
+
   if (Array.isArray(parsed.ui)) {
-    const keep: typeof parsed.ui = [];
     for (let i = 0; i < parsed.ui.length; i += 1) {
-      const ext = parsed.ui[i] as unknown as Record<string, unknown> | undefined;
-      if (!ext || typeof ext !== "object" || Array.isArray(ext)) {
-        log.warn(`ui[${i}] is not an object — dropped`);
-        continue;
+      const rawExt = parsed.ui[i] as unknown;
+      if (!rawExt || typeof rawExt !== "object" || Array.isArray(rawExt)) {
+        fail(`ui[${i}]`, "must be an object", `"ui": [{ "slot": "settings", "kind": "embedded-page", "page": "settings" }]`);
       }
+      const ext = rawExt as Record<string, unknown>;
       const kind = ext.kind;
       const missing: string[] = [];
       if (kind === "embedded-module") {
@@ -157,29 +125,18 @@ export async function parsePluginJson(
         if (typeof ext.page !== "string" || ext.page.length === 0) missing.push("page");
       }
       if (missing.length > 0) {
-        for (const f of missing) {
-          log.warn(
-            `ui[${i}] kind="${String(kind)}" missing required field "${f}" — dropped`,
-          );
-        }
-        continue;
+        fail(
+          `ui[${i}]`,
+          `kind="${String(kind)}" missing required field(s): ${missing.join(", ")}`,
+          kind === "embedded-module"
+            ? `"ui": [{ "kind": "embedded-module", "entry": "dist/ui.js", "exportName": "PluginUi" }]`
+            : `"ui": [{ "kind": "embedded-page", "page": "settings" }]`,
+        );
       }
-      keep.push(parsed.ui[i]);
     }
-    parsed.ui = keep;
   }
 
-  // Sprint 4-B §B-1 — AJV validation against schemas/plugin.schema.json.
-  // Backlog #3: surface degraded-mode entry per-manifest so operators can
-  // detect that AJV was unavailable at load time.
-  if (!validator) {
-    log.warn(
-      { event: "plugin_validator_degraded", pluginId: pid, path },
-      "plugin '%s' loaded under degraded validation (AJV unavailable — hand-rolled checks only)",
-      pid,
-    );
-  }
-  if (validator && !validator(parsed)) {
+  if (!validator(parsed)) {
     const errs = (validator.errors ?? [])
       .map((e) => `${e.instancePath || "/"} ${e.message ?? ""}`.trim())
       .join("; ");
@@ -187,6 +144,7 @@ export async function parsePluginJson(
       `[manifest:${pid}] schema validation failed (${path}): ${errs}`,
     );
   }
+  parsed.installPolicy = normalizeInstallPolicy(parsed);
 
   if (typeof parsed.id !== "string" || parsed.id.length === 0) {
     fail("id", "must be a non-empty string", `"id": "com.lge.meeting-recorder"`);
@@ -224,15 +182,13 @@ export async function parsePluginJson(
   for (let i = 0; i < parsed.tools.length; i += 1) {
     const method = parsed.tools[i];
     if (typeof method !== "string") {
-      fail(`tools[${i}]`, "must be a string", `"tools": ["meeting_start"]`);
+      fail(`tools[${i}]`, "must be a string", `"tools": ["sample_tool"]`);
     }
     if (!TOOL_NAME_PATTERN.test(method)) {
-      // Backwards-compat: older tests match /Invalid tool name '...'/ — keep that
-      // substring so the fresh error message still triggers the same assertion.
       throw new Error(
         `Invalid tool name '${method}' in plugin '${pid}' at 'tools[${i}]' (${path}): ` +
         `tool names must match ^[a-zA-Z_][a-zA-Z0-9_]*$ (start with letter/underscore, then letters/digits/underscores). ` +
-        `Example: "tools": ["meeting_start"] (not "meeting.start")`,
+        `Example: "tools": ["sample_tool"] (not "sample.tool")`,
       );
     }
   }
@@ -241,7 +197,7 @@ export async function parsePluginJson(
     fail(
       "startupTools",
       "must be an array of strings (each value must appear in tools[])",
-      `"startupTools": ["meeting_watch"]`,
+      `"startupTools": ["startup_watch"]`,
     );
   }
   const startupTools = parsed.startupTools ?? [];
@@ -251,7 +207,7 @@ export async function parsePluginJson(
       fail(
         `startupTools[${i}]`,
         "must be a string",
-        `"startupTools": ["meeting_watch"]`,
+        `"startupTools": ["startup_watch"]`,
       );
     }
     if (!parsed.tools.includes(startupMethod)) {
@@ -298,7 +254,7 @@ export async function parsePluginJson(
       fail(
         `uiCallable[${i}]`,
         "must be a string",
-        `"uiCallable": ["meeting_summary_get"]`,
+        `"uiCallable": ["summary_get"]`,
       );
     }
     if (!parsed.tools.includes(method)) {
@@ -340,7 +296,7 @@ export async function parsePluginJson(
     }
   }
 
-  // Phase 5 §1 — keywords[].skillId must be in tools[].
+  // keywords[].skillId must be in tools[].
   const kw = Array.isArray(parsed.keywords) ? parsed.keywords : [];
   for (let i = 0; i < kw.length; i += 1) {
     const sk = kw[i]?.skillId;
@@ -353,7 +309,7 @@ export async function parsePluginJson(
     }
   }
 
-  // Phase 5 §2 — toolSchemas keys must be a subset of tools[].
+  // toolSchemas keys must be a subset of tools[].
   const schemaKeys = parsed.toolSchemas ? Object.keys(parsed.toolSchemas) : [];
   for (const k of schemaKeys) {
     if (!parsed.tools.includes(k)) {
@@ -365,7 +321,7 @@ export async function parsePluginJson(
     }
   }
 
-  // Phase 5 §3 — notificationEvents[i].event should be in eventSubscriptions (soft warn).
+  // notificationEvents[i].event should be in eventSubscriptions (soft warn).
   const subs = Array.isArray(parsed.eventSubscriptions) ? parsed.eventSubscriptions : [];
   const subsTypes = new Set(
     subs.map((s) => (typeof s === "string" ? s : (s as { type: string }).type)),

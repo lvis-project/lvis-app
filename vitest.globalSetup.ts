@@ -16,15 +16,11 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * This runs BEFORE any test file, catching schema drift introduced alongside
  * a schema change without requiring every test to opt in.
  *
- * Silently skips if schemas/plugin.schema.json is missing (non-standard build
- * layout) — this is intentional and logged so the skip is visible in CI.
+ * Fails closed if the SDK schema cannot be resolved. The host does not keep an
+ * app-local schema copy.
  */
 async function validateJsonFixtures(): Promise<void> {
-  const validate = await buildManifestValidator(import.meta.url);
-  if (!validate) {
-    console.warn("[fixture-validator] schemas/plugin.schema.json not found — fixture validation skipped");
-    return;
-  }
+  const validate = await buildManifestValidator();
 
   const jsonFixtures = await collectJsonFixtures(join(HERE, "src"));
 

@@ -1,0 +1,203 @@
+/**
+ * Reviewer agent boot wiring.
+ *
+ * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 5,
+ * §11 v2.1 binding decisions (default `provider="openai"`,
+ * `model="gpt-4o-mini"`, `fallbackOnError ∈ {deny, rule}`).
+ *
+ * This step wires the {@link RiskClassifier}, cache, and deferred queue into
+ * {@link PermissionManager}:
+ *
+ * 1. Read `permissions.reviewer` block from `~/.lvis/settings.json`.
+ * 2. For `mode: "rule" | "disabled"` — sync classifier, no provider needed.
+ * 3. For `mode: "llm"` — wrap host's existing LLMProvider in a thin
+ *    {@link LlmReviewerProviderAdapter} that translates the provider's
+ *    chunked `streamTurn` interface into the one-shot `complete` shape
+ *    {@link LlmRiskClassifier} expects.
+ * 4. Construct the cache + deferred queue (default file paths under
+ *    `~/.lvis/permissions/`).
+ * 5. Call {@link PermissionManager.setReviewer} so {@link
+ *    PermissionManager.dispatchReviewer} can route HIGH verdicts into the
+ *    deferred queue and LOW/MEDIUM verdicts into the audit-trail allow.
+ *
+ * Atomic cutover (CLAUDE.md No-Fallback): if `mode: "llm"` is configured
+ * but the boot caller fails to supply a provider factory, this module
+ * throws — there's no silent fallback to rule-based.
+ */
+import {
+  createRiskClassifier,
+  type LlmCompletionResult,
+  type LlmReviewerProvider,
+  type RiskClassifier,
+  type ReviewerSettings,
+} from "../../permissions/reviewer/risk-classifier.js";
+import { VerdictCache } from "../../permissions/reviewer/verdict-cache.js";
+import { DeferredQueue } from "../../permissions/reviewer/deferred-queue.js";
+import { PermissionManager } from "../../permissions/permission-manager.js";
+import {
+  readPermissionSettings,
+  type ReviewerSettingsBlock,
+} from "../../permissions/permission-settings-store.js";
+import type { LLMProvider } from "../../engine/llm/types.js";
+import { createLogger } from "../../lib/logger.js";
+
+const log = createLogger("reviewer-wiring");
+
+/**
+ * Adapt a host {@link LLMProvider} (the one running interactive chat)
+ * to the reviewer's one-shot `complete` shape. Collects the streamed
+ * `text_delta` events into a single string and surfaces token + cost
+ * telemetry from the final `message_complete` event.
+ *
+ * The reviewer prompt is short and the response is a small JSON object,
+ * so a buffered collect (rather than incremental parse) is the simplest
+ * correct shape.
+ */
+export class LlmReviewerProviderAdapter implements LlmReviewerProvider {
+  constructor(private readonly provider: LLMProvider) {}
+
+  async complete(params: {
+    model: string;
+    systemPrompt: string;
+    userPrompt: string;
+    abortSignal?: AbortSignal;
+  }): Promise<LlmCompletionResult> {
+    let text = "";
+    let tokensIn = 0;
+    let tokensOut = 0;
+    const stream = this.provider.streamTurn({
+      model: params.model,
+      systemPrompt: params.systemPrompt,
+      messages: [{ role: "user", content: params.userPrompt }],
+      abortSignal: params.abortSignal,
+    });
+    for await (const event of stream) {
+      if (params.abortSignal?.aborted) {
+        throw new Error("reviewer LLM call aborted");
+      }
+      switch (event.type) {
+        case "text_delta":
+          text += event.text;
+          break;
+        case "message_complete":
+          if (event.usage) {
+            tokensIn = event.usage.inputTokens;
+            tokensOut = event.usage.outputTokens;
+          }
+          break;
+        case "error":
+          throw new Error(`reviewer provider error: ${event.error}`);
+        default:
+          // reasoning_delta / tool_call ignored — reviewer prompt
+          // never asks for tools and reasoning text is not used.
+          break;
+      }
+    }
+    // costUsd is not surfaced on StreamEvent — let the upstream
+    // pricing layer compute it offline if needed; reviewer telemetry
+    // tolerates 0 here.
+    return { text, tokensIn, tokensOut, costUsd: 0 };
+  }
+}
+
+/**
+ * Inputs to the reviewer-wiring boot step.
+ *
+ * `streamProviderFor` resolves a host {@link LLMProvider} for a given
+ * vendor name. Boot calls this only when `settings.reviewer.mode === "llm"`.
+ * Returning `null` indicates the vendor is not configured; the caller
+ * then fails the boot step (atomic cutover, no silent fallback).
+ */
+export interface WireReviewerDeps {
+  permissionManager: PermissionManager;
+  /**
+   * Settings reader — defaults to {@link readPermissionSettings} which
+   * pulls from `~/.lvis/settings.json`. Override in tests.
+   */
+  readSettings?: () => ReviewerSettingsBlock;
+  /**
+   * Provider factory for `mode: "llm"`. Test override returns a stub
+   * implementing {@link LLMProvider}. Returning `null` means "vendor not
+   * configured" — wiring fails closed.
+   */
+  streamProviderFor?: (vendor: string) => LLMProvider | null;
+  /** Test override for the cache file path. */
+  verdictCachePath?: string;
+  /** Test override for the deferred queue file path. */
+  deferredQueuePath?: string;
+  /** Notify the foreground renderer whenever pending deferred entries change. */
+  onDeferredPendingChange?: (summary: { pending: number }) => void;
+}
+
+export interface WireReviewerResult {
+  classifier: RiskClassifier;
+  cache: VerdictCache;
+  deferredQueue: DeferredQueue;
+  /** Reviewer block actually applied (post-normalisation). */
+  appliedSettings: ReviewerSettingsBlock;
+}
+
+/**
+ * Wire the reviewer agent. Idempotent — calling twice replaces the
+ * previously-installed classifier on `permissionManager`.
+ */
+export function wireReviewerAgent(deps: WireReviewerDeps): WireReviewerResult {
+  const settings = (deps.readSettings ?? defaultReadSettings)();
+  const cache = new VerdictCache(deps.verdictCachePath);
+  const deferredQueue = new DeferredQueue(
+    deps.deferredQueuePath,
+    deps.onDeferredPendingChange,
+  );
+
+  let classifier: RiskClassifier;
+  if (settings.mode === "disabled" || settings.mode === "rule") {
+    classifier = createRiskClassifier({ mode: settings.mode });
+    log.info("boot: reviewer wired (mode=%s)", settings.mode);
+  } else {
+    // mode === "llm"
+    if (!deps.streamProviderFor) {
+      throw new Error(
+        `Permission reviewer wiring: settings.reviewer.mode='llm' but no streamProviderFor supplied. ` +
+        `Boot caller must provide a provider factory (atomic cutover — no silent fallback).`,
+      );
+    }
+    const upstream = deps.streamProviderFor(settings.provider);
+    if (!upstream) {
+      throw new Error(
+        `Permission reviewer wiring: settings.reviewer.provider='${settings.provider}' is not configured. ` +
+        `Add an API key for ${settings.provider} or change reviewer mode.`,
+      );
+    }
+    const adapter = new LlmReviewerProviderAdapter(upstream);
+    const reviewerSettings: ReviewerSettings = {
+      mode: "llm",
+      provider: adapter,
+      model: settings.model,
+      fallbackOnError: settings.fallbackOnError,
+    };
+    classifier = createRiskClassifier(reviewerSettings);
+    log.info(
+      "boot: reviewer wired (mode=llm provider=%s model=%s fallback=%s)",
+      settings.provider,
+      settings.model,
+      settings.fallbackOnError,
+    );
+  }
+
+  deps.permissionManager.setReviewer({
+    classifier,
+    cache,
+    deferredQueue,
+    cacheScope: {
+      mode: settings.mode,
+      provider: settings.provider,
+      model: settings.model,
+      fallbackOnError: settings.fallbackOnError,
+    },
+  });
+  return { classifier, cache, deferredQueue, appliedSettings: settings };
+}
+
+function defaultReadSettings(): ReviewerSettingsBlock {
+  return readPermissionSettings().permissions.reviewer;
+}

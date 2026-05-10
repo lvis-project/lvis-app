@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { debugLog } from "../../lib/debug-stream.js";
-import { composeOutgoing as composeOutgoingUtil } from "./utils/compose.js";
+import {
+  composeImportedTriggerOutgoing,
+  composeOutgoing as composeOutgoingUtil,
+} from "./utils/compose.js";
 import { vendorSupportsThinking as vendorSupportsThinkingShared } from "../../shared/vendor-capabilities.js";
 import { supportsVision } from "../../engine/llm/vendor-capabilities.js";
 import { TooltipProvider } from "../../components/ui/tooltip.js";
@@ -86,17 +89,18 @@ export function App() {
   // App state
   const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsInitialTab, setSettingsInitialTab] = useState("llm");
   const [activeView, setActiveView] = useState("home");
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
   const [commandPopoverOpen, setCommandPopoverOpen] = useState(false);
   const { updates: marketplaceUpdates, dismiss: dismissMarketplaceUpdates } = useMarketplaceUpdates(api);
   const { status: bootstrapStatus, dismiss: dismissBootstrapStatus, retry: retryBootstrap } = useBootstrapStatus(api);
-  const { queue: approvalQueue, decide: handleApprovalDecide, decideAll: handleApprovalDecideAll } = useApproval();
+  const { queue: approvalQueue, decide: handleApprovalDecide } = useApproval();
 
-  // Q10 — runningRoutines: tracks in-flight LLM sessions
+  // runningRoutines tracks in-flight LLM sessions.
   const [runningRoutines, setRunningRoutines] = useState<Set<string>>(new Set());
 
-  // Q10 — addFire ref: populated by OverlayContextProvider during render
+  // addFire ref is populated by OverlayContextProvider during render
   // so the IPC subscription below can call it without prop-drilling
   const addFireRef = useRef<import("./context/OverlayContext.js").OverlayContextValue["addFire"] | null>(null);
 
@@ -151,18 +155,19 @@ export function App() {
         title: evt.title,
         summary: evt.summary,
         running: false,
+        routineSessionPath: evt.routineSessionPath,
       });
     });
 
     return () => { unsubStarted(); unsubFinished(); unsubFailed(); unsubFired(); };
   }, [api]);
 
-  // Q11 — overlay items ref: tracks all items pushed via onOverlayShow so
+  // Overlay items ref tracks all items pushed via onOverlayShow so
   // handlePluginPrimaryAction can look up pendingPrompt by id without needing
   // to reach into OverlayContext (App.tsx is the parent of OverlayContextProvider).
   const overlayItemsRef = useRef<Map<string, import("./context/OverlayContext.js").OverlayItem>>(new Map());
 
-  // Q11 — overlay IPC subscriptions: main pushes plugin OverlayItems via OVERLAY_V1.show
+  // Overlay IPC subscriptions: main pushes plugin OverlayItems via OVERLAY_V1.show.
   useEffect(() => {
     if (typeof api.onOverlayShow !== "function") return;
     const unsubShow = api.onOverlayShow((item) => {
@@ -178,7 +183,7 @@ export function App() {
     return () => { unsubShow(); unsubDismiss(); };
   }, [api]);
 
-  // Q11 — plugin overlay primary action handler (user confirm → main chat insert).
+  // Plugin overlay primary action handler (user confirm → main chat insert).
   // Called from OverlayCardRegion with the OverlayItem.id after OverlayContext.dismiss()
   // has already removed the item from the queue. overlayItemsRef still holds it.
   const handlePluginPrimaryAction = useCallback(
@@ -209,7 +214,7 @@ export function App() {
         title,
       });
 
-      // Start the main ConversationLoop turn immediately (Q11 user-in-the-loop
+      // Start the main ConversationLoop turn immediately (user-in-the-loop
       // confirm → auto-process). trigger-import mode skips the user-bubble
       // append since the imported_trigger card already represents the prompt.
       void handleAskRef.current(pendingPrompt, "trigger-import");
@@ -217,7 +222,7 @@ export function App() {
     [api, insertImportedTriggerEntry],
   );
 
-  // Q10 — routine session modal (opened from OverlayCard "결과 보기")
+  // Routine session modal opened from OverlayCard "결과 보기".
   const [routineSessionModal, setRoutineSessionModal] = useState<{ jsonlPath: string } | null>(null);
   const handleOpenRoutineSession = useCallback(
     async (routineId: string, firedAt: string) => {
@@ -447,34 +452,44 @@ export function App() {
         debugLog("handleAsk", "interrupt:abort-and-proceed");
         try { await api.chatAbort(); } catch { /* no-op */ }
       }
-      if (mode === "default" && await handleCompactCommand(t)) {
-        debugLog("handleAsk", "skip:compact-command-handled");
-        return;
-      }
-      if (mode === "default" && (t === "/load" || t.startsWith("/load "))) {
-        const requested = t.slice("/load".length).trim();
-        if (requested.length === 0) {
-          setErrorWithThought("사용법: /load <세션ID>");
+      // Renderer only performs UX-level shortcuts for typed composer input.
+      // Main owns the authoritative trust-origin classification.
+      if (mode === "default") {
+        if (await handleCompactCommand(t)) {
+          debugLog("handleAsk", "skip:compact-command-handled");
           return;
         }
-        const listed = await api.chatSessions();
-        const match = listed.sessions.find((session) => session.id.startsWith(requested));
-        if (!match) {
-          setErrorWithThought(`세션을 찾을 수 없습니다: ${requested}`);
+        if (t === "/load" || t.startsWith("/load ")) {
+          const requested = t.slice("/load".length).trim();
+          if (requested.length === 0) {
+            setErrorWithThought("사용법: /load <세션ID>");
+            return;
+          }
+          const listed = await api.chatSessions();
+          const match = listed.sessions.find((session) => session.id.startsWith(requested));
+          if (!match) {
+            setErrorWithThought(`세션을 찾을 수 없습니다: ${requested}`);
+            return;
+          }
+          await sessionLoad(match.id, false, applyLoadedSession);
+          await refreshSessionId();
+          await refreshSessions();
+          debugLog("handleAsk", "load-session:handled", { sessionId: match.id });
           return;
         }
-        await sessionLoad(match.id, false, applyLoadedSession);
-        await refreshSessionId();
-        await refreshSessions();
-        debugLog("handleAsk", "load-session:handled", { sessionId: match.id });
+      }
+      if (!(await checkApiKey())) {
+        setSettingsInitialTab("llm");
+        setSettingsOpen(true);
         return;
       }
-      if (!(await checkApiKey())) { setSettingsOpen(true); return; }
       const requestId = ++turnRequestRef.current;
       const streamingRequestId = beginStreamingRequest();
       debugLog("handleAsk", "begin", { requestId, streamingRequestId });
       setQuestion("");
-      const composed = composeOutgoing(t);
+      const composed = mode === "trigger-import"
+        ? composeImportedTriggerOutgoing(t)
+        : composeOutgoing(t);
       const outgoing = composed.text;
       let outgoingAttachments = composed.attachments;
       // Vendor vision capability gate. The composer accepts images
@@ -509,7 +524,11 @@ export function App() {
       }
       resetStreamAccumulators();
       try {
-        await api.chatSend(outgoing, outgoingAttachments);
+        await api.chatSend(
+          outgoing,
+          outgoingAttachments,
+          mode === "trigger-import" ? "plugin-emitted" : "user-keyboard",
+        );
         debugLog("handleAsk", "chatSend:resolved", { requestId });
         // After successful send, clear attachments — the textarea was
         // already cleared by setQuestion(""). N counter persists across
@@ -632,18 +651,22 @@ export function App() {
     if (activeView !== "home") setCommandPopoverOpen(false);
   }, [activeView]);
 
+  const onOpenSettings = useCallback((tab = "llm") => {
+    setSettingsInitialTab(tab);
+    setSettingsOpen(true);
+  }, []);
+
   const commandActions = useMemo(
     () =>
       buildQuickActions({
         setActiveView: handleSidebarSelect,
-        setSettingsOpen,
+        openSettings: onOpenSettings,
         handleNewChat,
         pluginViews,
       }),
-    [pluginViews, handleNewChat, handleSidebarSelect],
+    [pluginViews, handleNewChat, handleSidebarSelect, onOpenSettings],
   );
 
-  const onOpenSettings = useCallback(() => setSettingsOpen(true), []);
   const onNewChat = useCallback(() => { void handleNewChat(); }, [handleNewChat]);
 
   // ChatView context bundle — avoids drilling ~40 props through the tree.
@@ -735,7 +758,7 @@ export function App() {
             onToggleSessionStar={handleToggleSessionStar}
             isSessionStarred={(sessionId) => Boolean(isSessionStarred(sessionId))}
             onExport={handleExport}
-            onOpenSettings={() => setSettingsOpen(true)}
+            onOpenSettings={() => onOpenSettings()}
             onOpenGlobalSearch={() => { refreshSessions(); setGlobalSearchOpen(true); }}
             onOpenStarredView={() => setActiveView("starred")}
           />
@@ -784,8 +807,8 @@ export function App() {
           (immediately after the active turn's entries),
           so the previous App-level FloatingQuestionPanel mount is gone.
           See <AskUserQuestionCard> + ChatView ask-question slot. */}
-      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} api={api} onSaved={() => { void checkApiKey(); void refreshLlmSettings(); }} />
-      <ApprovalDialog queue={approvalQueue} onDecide={handleApprovalDecide} onDecideAll={handleApprovalDecideAll} />
+      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} api={api} onSaved={() => { void checkApiKey(); void refreshLlmSettings(); }} initialTab={settingsInitialTab} />
+      <ApprovalDialog queue={approvalQueue} onDecide={handleApprovalDecide} />
       <ApprovalQueueStatus queue={approvalQueue} />
       {/* Conditional mount: avoids useMemorySearch IPC calls while dialog is closed.
           Re-mounts on every open → catalog reloaded each time. If that proves slow,
@@ -805,7 +828,7 @@ export function App() {
       <DevConsoleToggle />
       {/* Snap edge highlight — shown when a detached child window enters the snap zone */}
       <SnapEdgeHighlight />
-      {/* Q10 — routine session modal opened from OverlayCard "결과 보기" */}
+      {/* Routine session modal opened from OverlayCard "결과 보기" */}
       {routineSessionModal && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"

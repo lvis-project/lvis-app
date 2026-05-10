@@ -41,6 +41,16 @@ describe("ApprovalDialog", () => {
     });
   });
 
+  it("warns when approval trust origin is missing", async () => {
+    render(
+      <ApprovalDialog queue={[makeRequest()]} onDecide={vi.fn()} />,
+    );
+    await waitFor(() => {
+      expect(document.body.textContent).toContain("출처 미확인");
+      expect(document.body.textContent).toContain("사용자가 직접 입력한 명령이 아니라");
+    });
+  });
+
   it("calls onDecide when 허용 button clicked", async () => {
     const onDecide = vi.fn();
     render(
@@ -77,6 +87,43 @@ describe("ApprovalDialog", () => {
     await waitFor(() => {
       expect(document.body.textContent).toContain("read_file");
     });
+    expect(document.body.textContent).toContain("대기 중 1개");
+    expect(document.body.textContent).not.toContain("모두 허용");
+  });
+
+  it("routes out-of-allowed-dir requests to the directory access card", async () => {
+    const onDecide = vi.fn();
+    render(
+      <ApprovalDialog
+        queue={[
+          makeRequest({
+            kind: "out-of-allowed-dir",
+            toolName: "read_file",
+            reason: "out-of-allowed-dir",
+            requireExplicit: true,
+            outOfAllowedDir: {
+              candidatePath: "/Users/ken/Documents/project/notes.md",
+              suggestedParent: "/Users/ken/Documents/project",
+              currentAllowed: ["/Users/ken/workspace/GIT/github/lvis-project"],
+              adjacencyWarnings: [],
+            },
+          }),
+        ]}
+        onDecide={onDecide}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(document.body.textContent).toContain("허용 디렉토리 외부 접근");
+      expect(document.body.textContent).toContain("/Users/ken/Documents/project/notes.md");
+    });
+
+    const allowOnce = Array.from(document.body.querySelectorAll("button")).find(
+      (button) => button.textContent === "한 번만 허용",
+    );
+    expect(allowOnce).toBeTruthy();
+    fireEvent.click(allowOnce!);
+    expect(onDecide).toHaveBeenCalledWith("allow-once", undefined);
   });
 });
 

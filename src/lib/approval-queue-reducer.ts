@@ -39,9 +39,8 @@ export function approvalQueueReducer(
     case "shift":
       return state.slice(1);
     case "clear":
-      // D4 §4.5.3 — bulk approve/deny all pending approvals at once.
-      // Consumed by use-approval.decideAll() which respond()s every pending
-      // request with the same choice before emptying the queue.
+      // Administrative queue reset only. User-facing approvals are decided
+      // one request at a time so unseen requests are never bulk-approved.
       return [];
   }
   // Copilot review fix: TypeScript discriminated union 이 모든 case 를 cover

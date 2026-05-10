@@ -289,7 +289,7 @@ describe("ApprovalGate", () => {
     expect(gate.pendingCount).toBe(0);
     // The pattern that triggered the block is surfaced to the caller
     expect(result.rememberPattern).toContain("Sensitive credential path blocked");
-    expect(result.rememberPattern).toContain("**/.ssh/*");
+    expect(result.rememberPattern).toContain("**/.ssh/**");
   });
 
   // ── S4: isReadOnly short-circuit ──────────────────
@@ -360,7 +360,7 @@ describe("ApprovalGate", () => {
 
     expect(result.choice).toBe("deny-once");
     expect(result.rememberPattern).toContain("Sensitive credential path blocked");
-    expect(result.rememberPattern).toContain("**/.ssh/*");
+    expect(result.rememberPattern).toContain("**/.ssh/**");
     expect(wc.send).not.toHaveBeenCalled();
   });
 
@@ -384,7 +384,7 @@ describe("ApprovalGate", () => {
     const result = await gate.requestAndWait(req);
 
     expect(result.choice).toBe("deny-once");
-    expect(result.rememberPattern).toContain("**/.ssh/*");
+    expect(result.rememberPattern).toContain("**/.ssh/**");
     expect(wc.send).not.toHaveBeenCalled();
   });
 
@@ -407,7 +407,7 @@ describe("ApprovalGate", () => {
     const result = await gate.requestAndWait(req);
 
     expect(result.choice).toBe("deny-once");
-    expect(result.rememberPattern).toContain("**/.ssh/*");
+    expect(result.rememberPattern).toContain("**/.ssh/**");
     expect(wc.send).not.toHaveBeenCalled();
   });
 
@@ -616,7 +616,7 @@ describe("ApprovalGate", () => {
     const result = await gate.requestAndWait(req);
 
     expect(result.choice).toBe("deny-once");
-    expect(result.rememberPattern).toContain("**/.ssh/*");
+    expect(result.rememberPattern).toContain("**/.ssh/**");
     expect(wc.send).not.toHaveBeenCalled();
   });
 });

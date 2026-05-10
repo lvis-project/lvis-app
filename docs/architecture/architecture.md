@@ -1161,12 +1161,14 @@ lvis-app/src/
 │
 ├── prompts/       # 시스템 프롬프트 조립
 │
-├── hooks/         # PreTool / PostTool 인터셉트
+├── hooks/         # Script hook + post-turn 인터셉트
 │   ├── hook-runner.ts
 │   ├── post-turn-hook-chain.ts
-│   ├── types.ts / schemas.ts
-│   ├── external-executor.ts
-│   └── config-loader.ts
+│   ├── script-hook-types.ts
+│   ├── script-hook-runner.ts
+│   ├── script-hook-manager.ts
+│   ├── hook-discovery.ts
+│   └── hook-trust-commands.ts
 │
 ├── permissions/   # 권한 스택
 │   ├── permission-manager.ts, permissions-store.ts, policy-store.ts,
@@ -1284,7 +1286,7 @@ artifact 와 save data 를 함께 보관한다 (호스트 root 에 끼어들지 
 ├── user-preferences.md  # 사용자 개인 선호 (보고 스타일, 자주 쓰는 도구 등)
 ├── notes/               # 호스트 메모 ("이거 기억해" 명령 — 플러그인 자체 메모는
 │   ├── 출장-절차.md     # 각 플러그인의 ~/.lvis/plugins/<id>/notes/ 안에 둔다)
-│   └── Q1-보고서-템플릿.md
+│   └── 분기-보고서-템플릿.md
 ├── sessions/            # 세션 이력 (claw Session 패턴)
 │   └── <session-id>.jsonl
 ├── audit/               # AuditLogger (회전·retention)
@@ -1395,95 +1397,273 @@ flowchart TB
 6. Lgenie Fallback           → 위 모두 해당 없으면 LLM 직접 대화
 ```
 
-### 6.3 Tool Permission Model — 3계층 도구 권한
+### 6.3 Tool Permission Model — 10-Layer Pipeline
 
-> **Reference**: ccleaks.com §05 "Permission System — 3-layer permission model"
-> §8 Agent Approval System이 **에이전트 행위 승인**을 다룬다면, 이 섹션은 **개별 도구 호출 시점의 권한 제어**를 3계층으로 정의한다.
+> **Reference**: `docs/architecture/permission-policy-design.md` v2.2
+> (full spec — 10-layer evaluation, multi-agent reviewed). This section
+> is the architecture-level summary; defer to the spec for the
+> exhaustive layer detail, decision matrix, and binding decisions.
+>
+> §8 Agent Approval System은 **에이전트 행위 승인** (자율 게시 / 외부
+> 송신 / 업무 일지 공개 범위) 을 다룬다. 본 §6.3 은 **개별 도구 호출
+> 권한** 을 다룬다. permission policy Layer 3 의 `network = ask + endpoint` 결정은
+> §8 ApprovalGate 의 입력으로 흐른다 — 두 섹션을 *중복 승인 단계* 로
+> 오해하지 말 것 (single-decision, single-prompt).
+
+#### 6.3.0 — Current implementation posture
+
+Permission Policy 현재 구현은 **strict single path** 이다. 레거시 호환 fallback 이나
+plugin-specific app branch 를 두지 않는다.
+
+| Surface | Current posture | Future direction |
+| --- | --- | --- |
+| Plugin categories | 현재 SDK manifest schema 에 per-tool `category/pathFields` 가 없다. Host 는 SDK schema 를 SOT 로 검증하고, category 가 없는 plugin tool 은 보수적으로 `write` 로 등록한다. `meta` 및 향후 host-only category 는 plugin contract 로 자동 확장되지 않는다. | SDK schema + active plugin category/pathFields 선언 완료 후 host SDK pin 상향, 그 시점부터 SDK schema hard fail |
+| Permission IPC | `PERMISSIONS` 가 main / preload / sender-guard test 의 단일 channel SOT. | 새 permission channel 은 반드시 `src/shared/ipc-channels.ts` 에 먼저 추가 |
+| Reviewer | `disabled/rule/llm` 3-mode. `llm` wiring 실패는 silent downgrade 없이 fail-fast. | cost/quality telemetry 로 model default 조정 가능, fallback 은 `deny|rule` 만 |
+| Deferred queue | HIGH verdict 는 user foreground 에서 approve/reject, resolution 은 permission audit chain 에 기록. | §8 approval timeline 과 통합 표시 |
+| Hooks | `hooks.json` command/http executor 제거. `~/.config/lvis/hooks/{pre,post,perm}-*.sh` + strict-deny quarantine + typed trust registration 만 허용. | signed hooks follow-up 전까지 `modify` action 금지 |
+| Audit | HMAC chain + daily seal. Recent view 는 tail-scan. | key rotation / archive policy 는 follow-up |
+
+#### 6.3.1 — 10-layer evaluation pipeline (overview)
+
+호출 흐름은 input origin classification → numeric-order short-circuit
+→ collected `denyReasons[]`. 각 layer 는 단일 책임을 가지며,
+선행 layer 가 deny 를 반환하면 후속 layer 는 평가하지 않는다 (단
+forensics 용 `denyReasons` 는 plural shape 으로 정의되어 향후 dual-deny
+모드 호환).
 
 ```mermaid
 flowchart TB
-    subgraph "Layer 1 — Tool Registry Filter (컨텍스트 빌드 전)"
-        DENY_RULES["Deny Rules<br/>(settings.json · Governance Policy)"]
-        FILTER["filterToolsByDenyRules()"]
-        VISIBLE["Lgenie에 전달되는<br/>도구 스키마 목록"]
-    end
+    INPUT["Origin classify (§9):<br/>user-keyboard / plugin-emitted / llm-tool-arg / file-content"]
 
-    subgraph "Layer 2 — Per-call Permission Check (호출 시점)"
-        CAN_USE["canUseTool()<br/>(tool, args, context)"]
-        ALLOW_RULES["Allow/Deny 규칙 매칭<br/>(도구명 + 인자 패턴 + 경로)"]
-        RBAC["RBAC 확인<br/>(사원 역할·등급)"]
-        GOV_CHK["Governance Policy<br/>(외부 API·파일 삭제 등)"]
-    end
+    INPUT --> L0["Layer 0 — Sensitive paths<br/>(deny-list, frozen-canonical realpath)"]
+    L0 --> L1["Layer 1 — Path policy<br/>(additionalDirectories allow-list)"]
+    L1 --> L2["Layer 2 — Action<br/>(allow / ask / deny + denyReasons[])"]
+    L2 --> L3["Layer 3 — Category × Source × Mode<br/>(read/write/shell/network/meta)"]
+    L3 --> L4["Layer 4 — Subscription scope<br/>(routine.scope discriminated union)"]
+    L4 --> L5["Layer 5 — Reviewer agent<br/>(headless: rule / llm / disabled)"]
+    L5 --> L6["Layer 6 — Hook chain v1<br/>(deny-only, ~/.config/lvis/hooks/)"]
+    L6 --> L7["Layer 7 — Audit emit<br/>(discriminated union + HMAC chain)"]
+    L7 --> L8["Layer 8 — Runtime mode<br/>(/permission slash, user-keyboard gated)"]
+    L8 --> L9["Layer 9 — Sandbox (preload, unchanged)"]
 
-    subgraph "Layer 3 — Interactive User Prompt (미매칭 시)"
-        PROMPT["사용자 승인 다이얼로그"]
-        ONCE["1회 허용"]
-        ALWAYS["항상 허용<br/>(규칙 자동 추가)"]
-        DENY_ACT["거부"]
-    end
-
-    DENY_RULES --> FILTER
-    FILTER -->|"차단 도구 제거<br/>💡 Lgenie는 차단된 도구의<br/>존재 자체를 알 수 없음"| VISIBLE
-
-    VISIBLE --> CAN_USE
-    CAN_USE --> ALLOW_RULES
-    CAN_USE --> RBAC
-    CAN_USE --> GOV_CHK
-    ALLOW_RULES -->|"매칭 — 허용"| EXEC["✅ 도구 실행"]
-    ALLOW_RULES -->|"매칭 — 차단"| BLOCK["🚫 차단 + Audit"]
-    ALLOW_RULES -->|"미매칭"| PROMPT
-
-    PROMPT --> ONCE --> EXEC
-    PROMPT --> ALWAYS --> EXEC
-    PROMPT --> DENY_ACT --> BLOCK
+    L0 -.->|"deny: sensitive path"| AUDIT_DENY["Audit: AuditDeny"]
+    L1 -.->|"deny: out-of-allowed-dir"| AUDIT_DENY
+    L5 -.->|"HIGH"| DEFERRED["Deferred Queue"]
+    L6 -.->|"deny"| AUDIT_DENY
 ```
 
-**Layer별 역할과 설계 근거:**
+#### 6.3.2 — Layer reference
 
-| Layer | 시점 | 역할 | 보안 효과 |
+| Layer | 책임 | Spec § | 주요 산출물 |
 | --- | --- | --- | --- |
-| **L1 — Registry Filter** | System Prompt 빌드 전 | Governance deny 규칙으로 차단 도구를 LLM 컨텍스트에서 **제거** | Lgenie가 존재를 모르므로 할루시네이션 호출 원천 차단 |
-| **L2 — Per-call Check** | 도구 호출 시점 | allow/deny 패턴 + RBAC + Governance 정책 확인 | 인자·경로 수준의 세밀한 제어 (예: `Bash(git *)` 허용, `Bash(rm *)` 차단) |
-| **L3 — User Prompt** | L2 미매칭 시 | 사용자에게 1회/항상/거부 선택 | 새로운 도구·인자 조합에 대한 사용자 주도 정책 학습 |
+| 0 | OS / 사용자 자격증명 / LVIS 자체 보호 경로 deny-list. realpath 기반 frozen-canonical (TOCTOU 차단). | §3 Layer 0 | `src/permissions/sensitive-paths.ts` |
+| 1 | `additionalDirectories` allow-list + auto-suggest (leaf parent only, re-typed confirm, adjacency warning). | §3 Layer 1 | `src/permissions/allowed-directories.ts` |
+| 2 | Action 결정 (`allow / ask / deny`) + `denyReasons[]` 수집. `confirm` 은 `ask` 의 sub-variant — auto mode 도 silent skip 금지. | §3 Layer 2 | `PermissionCheckResult.denyReasons` |
+| 3 | 5-axis category × source × mode 매트릭스. Open-Closed `ToolCategoryRegistry`. | §3 Layer 3 | `src/permissions/category-registry.ts` |
+| 4 | Routine 의 `scope.pluginIds` discriminated union (`deny-all` / `allow` / `inherit`). Boot 시 `inherit` 은 active set 으로 normalize. | §3 Layer 4 | `routine.scope.*` |
+| 5 | Reviewer agent (multi-vendor) — headless write/shell/network 의 LOW/MED auto-allow / HIGH defer. `final = max(rule, llm)`. | §3 Layer 5 | `src/permissions/reviewer/*` |
+| 6 | Hook chain v1 (deny-only). `~/.config/lvis/hooks/{pre,post,perm}-*.sh`. Strict-deny quarantine lockfile + DLP-redacted stdin. | §3 Layer 6 | `src/hooks/script-hook-*` |
+| 7 | Discriminated-union audit (`AuditAllow`/`AuditAsk`/`AuditDeny`/`AuditDeferred`/`AuditModeChange`/`AuditManifestViolation`) + HMAC chain + daily seal. | §3 Layer 7 | `src/audit/audit-schema.ts`, `src/audit/hmac-chain.ts` |
+| 8 | `/permission` 슬래시 + user-keyboard origin gate + `--durable` modal confirm. Mode change emits `AuditModeChange`. | §3 Layer 8 | `src/permissions/permission-slash.ts` |
+| 9 | Electron preload / contextBridge 기존 sandbox — permission policy 변경 없음. | §3 Layer 9 | `src/preload.ts` |
 
-**실행 모드:**
+#### 6.3.3 — Trust origin classification
 
-| 모드 | 설명 | 적용 상황 |
+모든 input 에 4-tier origin 부여. 전파 경로: ToolUseEnvelope → Layer 6
+hook stdin → Layer 7 audit → Layer 8 slash dispatcher.
+
+| Origin | 출처 | Slash dispatch | 비고 |
+| --- | --- | --- | --- |
+| `user-keyboard` | 사용자가 chat 입력에 직접 타이핑 | ✅ accepted | Layer 8 의 유일한 신뢰 origin |
+| `plugin-emitted` | `triggerConversation.pendingPrompt`, plugin event | ❌ rejected | leading `/` stripped 후 plain text 처리 |
+| `llm-tool-arg` | LLM 가 채운 tool input | ❌ rejected | 동상 |
+| `file-content` | `read_file` 결과를 LLM 이 다시 사용 | ❌ rejected | 동상 |
+
+전체 spec: `docs/architecture/permission-policy-design.md` §9.
+
+#### 6.3.4 — Reviewer agent (multi-vendor)
+
+Headless write/shell/network/read-out-of-dir 호출에 대한 risk
+classifier. 3-mode (`disabled` / `rule` / `llm`) + multi-vendor adapter
+(default OpenAI gpt-4o-mini, Anthropic / Google 도 swap 가능). 항상
+rule classifier 가 baseline 으로 함께 실행되며 `final = max(rule, llm)`
+(LLM downgrade 불가). LOW/MED 는 auto-allow + audit, HIGH 는 deferred
+queue 에 append 되어 사용자 foreground 진입 시 surface 된다.
+
+**선택 surface:** `/permission reviewer mode disabled|rule|llm` /
+`/permission reviewer model <name>` / `/permission reviewer provider
+openai|anthropic|google`. 변경은 settings.json 에 persist + selective
+verdict-cache invalidation.
+
+**Cost optimization:** `~/.lvis/permissions/reviewer-cache.jsonl` —
+`sha256(toolName+source+category+trustOrigin+approvalCacheKey+canonicalInputIdentity)`
+기반. `shell` / `network` / `read` / `write` 는 command literal, host,
+path 값이 deterministic risk 를 바꾸므로 sorted literal JSON 을 identity 로
+사용하고, 값에 의존하지 않는 category 만 canonical shape 를 사용한다. HIGH 도
+cache (반복 deny 비용 절감). cache 는 동작 정책을 대체하지 않으며, quota 소진
+시 `fallbackOnError ∈ {deny, rule}` 정책만 적용한다.
+
+전체 spec: §3 Layer 5 + §11 v2.1 binding decisions.
+
+**Files:** `src/permissions/reviewer/risk-classifier.ts`,
+`verdict-cache.ts`, `deferred-queue.ts`,
+`src/ui/renderer/components/permissions/DeferredQueuePanel.tsx`.
+
+#### 6.3.5 — Hook chain (v1 deny-only)
+
+`~/.config/lvis/hooks/` (deliberately outside `~/.lvis/` — plugin 의
+default allowed dir 안에 hook 디렉토리 두지 않기 위해).
+세 prefix 가 각각 PreToolUse / PostToolUse / PermissionRequest 를
+gate.
+
+| Prefix | Fires when | Output |
 | --- | --- | --- |
-| **Default** | 위험 도구만 승인 요청, 나머지 자동 허용 | 일반 업무 |
-| **Strict (Plan Mode)** | 모든 도구 실행 전 승인 필요 | 민감 업무·신규 플러그인 테스트 |
-| **Auto Mode** | 에이전트가 판단하여 실행 (L1·L2는 여전히 적용) | 반복 업무 자동화 |
+| `pre-*.sh` | 도구 실행 전 | `{action: "allow" \| "deny", reason}` |
+| `post-*.sh` | 도구 실행 후 (v1 observe-only) | same |
+| `perm-*.sh` | 승인 게이트가 사용자에게 묻기 직전 | same |
 
-**규칙 설정 예시:**
+**Wire contract:** stdin/stdout JSON. `trustOrigin` 포함 (origin 별
+hook 정책 가능). DLP-redacted input — secrets / credentials / PII 가
+remote SIEM 으로 새지 않도록 `redactForLLM` 적용.
 
-```json
-{
-  "permissions": {
-    "allow": [
-      "FileRead(*)",
-      "Search(*)",
-      "Bash(git *)",
-      "Calendar(read)"
-    ],
-    "deny": [
-      "Bash(rm *)",
-      "Bash(sudo *)",
-      "FileWrite(/etc/*)",
-      "Email(send)",
-      "AgentHub(post scope:company)"
-    ]
-  }
-}
+**Deny-only v1:** `modify` action 은 hook-signing follow-up
+이후로 deferred. v1 의 `allow` 는 *additional approval signal* — Layer
+0/1/2/3 deny 를 upgrade 하지 못함.
+
+**Fail-safe:** exit !=0 / malformed stdout JSON / >5s timeout → deny.
+Hook trust lockfile (`.lockfile.json`) — boot 시 hash 비교 + 변경/new hook 은
+strict-deny 로 `.disabled/` 이동. Renderer 승인 prompt/modal 은 없다. 사용자가
+`/permission hooks list` 로 확인하고 `/permission hooks accept <name>` 을
+직접 입력한 경우에만 lockfile 에 등록되어 다음 실행부터 trusted hook 으로
+동작한다. 이 typed command 가 명시적 신뢰 등록 표면이다. Boot-time quarantine
+은 HMAC-chained `AuditDeny` 로 남으며, general telemetry `AuditLogger.log`
+에도 전환기 관측용 `input.kind = "hook.quarantined"` 를 double-write 한다.
+Permissions tab 은 `PERMISSIONS.hookTrustList` 를 통해 비차단 알림을 표시한다.
+
+**v1 binding decision (§11 v2.1):** 빈 디렉토리만 ship. Sample hook
+없음 — attack surface 0 부터 시작.
+
+**Files:** `src/hooks/script-hook-types.ts`, `script-hook-runner.ts`,
+`script-hook-manager.ts`, `hook-discovery.ts`,
+`src/boot/steps/hook-system-wiring.ts`.
+
+#### 6.3.6 — Manifest integrity proxy
+
+현재 SDK manifest schema 는 plugin `toolSchemas[].category/pathFields` 를
+정의하지 않는다. 따라서 host 는 plugin tool 을 보수적 `write` 로
+등록하고, app-local authority extension 없이 SDK schema 를 SOT 로
+사용한다. Host→plugin fs boundary 에서 `ManifestIntegrityViolation` 이
+발생하면 fail-closed 로 처리한다:
+
+1. plugin id → process-wide `manifestIntegrityState.disabledPluginIds`.
+2. `AuditManifestViolation` audit entry 발행 (`pluginId`, `toolName`,
+   `attemptedOperation`).
+3. `PERMISSIONS.manifestViolation` IPC → 사용자에게 reinstall
+   prompt.
+4. Disabled plugin 의 후속 tool 호출 fail-deny.
+
+SDK schema/types 와 active plugin manifests 가 `category/pathFields` 를
+선언한 뒤에만 read-declared plugin tool 을 boot 시 fs proxy 로 wrap 한다.
+그 전에는 호환 shim 이나 boot-warn grace 를 두지 않는다.
+
+**Trade-off:** plugin 이 standard `node:fs` 직접 import 시 우회 가능
+— sandboxed plugin runtime (V8 isolated context) 도입 전까지는 partial
+guard. 사용자 docs 에 명시.
+
+**Files:** `src/permissions/manifest-integrity.ts`,
+`src/plugins/plugin-tool-adapter.ts`. Spec: §3.5.
+
+#### 6.3.7 — Audit schema (discriminated union + HMAC chain)
+
+Discriminated union per `decision` field:
+
+```typescript
+type PermissionAuditEntry =
+  | AuditAllow         // 허용 (layer + 사유)
+  | AuditAsk           // 사용자 컨펌 요청
+  | AuditDeny          // 거부 (denyReasons[])
+  | AuditDeferred      // Layer 5 HIGH → deferred queue
+  | AuditDeferredResolve // foreground 사용자 resolution
+  | AuditModeChange    // /permission mode 변경
+  | AuditManifestViolation; // §3.5 위반
 ```
 
-**Wave C 보안 강화 (PR #130–#133):**
+모든 entry 는 `AuditCommon` (`ts`, `auditId`, `trustOrigin`,
+`prevHash`) 를 공유한다. `prevHash = HMAC(secret, prevSerializedLine)`
+chain — line N 변조 시 line N+1 의 prevHash 가 mismatch (forensics
+로 첫 broken index 식별 가능). 첫 entry 는 `genesis` marker 에 binding.
 
-| 항목 | 구현 | PR |
-| --- | --- | --- |
-| **D1 — DLP filter on approval args** | `webContents.send` 전 `redactForLLM()` 로 승인 요청 args를 DLP 필터링. 기밀 데이터가 renderer payload 로 노출되지 않도록 차단. | #130 |
-| **D2 — HMAC nonce on approval response** | 승인 응답에 HMAC nonce 첨부. renderer → main IPC 경로의 confused-deputy 공격 방어. | #132 |
-| **D3 — Approval queue cap** | `pending.size` 상한 초과 시 신규 요청 deny-once 처리. LLM 대량 tool_use 발행 시 리소스 보호. renderer 큐 깊이 UI 표시. | #131 |
-| **D4 — Parallel tool execution + bulk approval** | `ToolExecutor.executeAll()` 병렬 실행 활성화 + `ToolApprovalDialog` 다중 승인 UI (bulk approve/deny). | #133 |
+**Daily seal:** `audit-seal-YYYY-MM-DD` 키로 system keychain 에
+저장. forensics 가 일자별 로 chain + seal 비교 → 변조 시점 좁힘.
+
+**Path protection:** `~/.lvis/audit*` 자체가 Layer 0 sensitive
+(write 차단). compromised tool 이 *새 entry* 추가는 막지만 기존 log
+rewrite 불가능.
+
+**Tool-call channel:** executor hot path 는 tool allow/deny 결정을
+HMAC-chained channel 에 기록한다. General telemetry `AuditLogger.log`
+tool_call 은 renderer/ops parity 검증이 끝날 때까지 유지한다.
+
+**Atomic cutover (No-Fallback):** keychain 미사용 환경 (Electron
+`safeStorage` 미가용) 에서는 0o600 file secret store 만 허용. boot 시
+secret 영구 저장 실패 → 감사 chain 미시작 + 사용자 actionable 에러
+(silent downgrade 금지).
+
+**Files:** `src/audit/audit-schema.ts`, `src/audit/hmac-chain.ts`,
+`src/audit/audit-logger.ts` (`appendPermissionAuditEntry` + `setupPermissionAuditChain`),
+`src/permissions/permission-audit-runner.ts` (show + verify 백엔드).
+
+#### 6.3.8 — `/permission` 슬래시 인터페이스
+
+Spec §3 Layer 8 grammar (final, Phase 5):
+
+```
+/permission                                # show current
+/permission mode strict|default|auto [--durable]
+/permission dir allow <path> [--session]
+/permission dir deny <path>
+/permission dir list
+/permission rules list
+/permission audit show [--last=N]
+/permission audit verify
+/permission reviewer mode disabled|rule|llm
+/permission reviewer model <name>
+/permission reviewer provider openai|anthropic|google
+/permission hooks list
+/permission hooks accept <name>
+/permission hooks disable <name>
+/permission hooks reject <name>
+```
+
+**Trust origin gate (security C2):** `dispatchPermissionSlash` 가
+`trustOrigin === "user-keyboard"` 가 아닌 입력은 reject — 호출자는
+leading `/` 를 strip 후 plain text 로 처리 (chat 에 slash hint 로
+오인되지 않도록).
+
+**Hook trust mutations:** `hooks accept|disable|reject` 는 typed
+user-keyboard command 자체가 approval surface 이다. Renderer fallback
+prompt/modal 은 만들지 않는다.
+
+**Directory UI parity:** Permissions tab exposes CRUD for
+`permissions.additionalDirectories` through the same `/permission dir`
+dispatcher IPC path, so slash and settings UI share one mutation path.
+
+**Audit panel UX:** `/permission audit show` 가 side-panel
+(`AuditPanel.tsx`) 을 연다. 마지막 N entries (default 50, max 1000),
+decision-type / tool-name 필터, 행 클릭 시 full discriminated-union
+shape expand. 상단 tamper-evidence 배너 — green check (chain ok +
+seal 일치) / yellow warn (seal 미생성) / red warn (chain broken — 첫
+broken file + line 표시). `/permission audit verify` 는 keychain 의
+`audit-seal-YYYY-MM-DD` 와 chain 을 함께 검증한다.
+
+**Files:** `src/permissions/permission-slash.ts`
+(`dispatchPermissionSlash`, `parsePermission*Command`),
+`src/permissions/permission-audit-runner.ts` (read-only 백엔드),
+`src/ipc/domains/permissions.ts` (IPC handlers),
+`src/ui/renderer/components/permissions/AuditPanel.tsx`,
+`src/ui/renderer/components/permissions/PermissionModeBadge.tsx`.
+
 
 ### 6.4 Tool Registry & Taxonomy — 빌트인 도구 카탈로그
 
@@ -1540,11 +1720,27 @@ graph TB
 | **Plugin (동적)** | 플러그인·MCP 설치 시 추가 | 매니페스트 기반 동적 등록 | 플러그인별 매니페스트에 정의 |
 | **Feature-gated** | (Feature Flag로 제어) | 실험적 도구 — §14.4 참조 | Feature Flag 활성 시에만 Registry에 등록 |
 
+**§6.4.X Tool Category — 5-axis taxonomy:**
+
+도구의 **policy axis** 는 5축으로 분리되며 `ToolCategoryRegistry` (Open-Closed pattern) 가 카테고리별 decision lane 을 제공한다. 자세한 의사결정 매트릭스는 `docs/architecture/permission-policy-design.md` §3 Layer 3 참조.
+
+| Category | 의미 | 의사결정 (default mode) | 헤들리스 (routine) | 비고 |
+| --- | --- | --- | --- | --- |
+| `read` | 조회/검색 (자료를 변경하지 않음) | builtin: allow / plugin: scope-checked | allow | strict mode → ask |
+| `write` | 사용자 데이터 변경 | ask (auto mode → allow + audit) | reviewer agent | Phase 3 reviewer 미배치 시 ask |
+| `shell` | 셸 명령 실행 (Bash 등) | ask + Bash AST 검증 | reviewer (always) | AST 검증은 executor-owned gate |
+| `network` | 외부 네트워크 호출 | ask + endpoint surface | reviewer | endpoint 추출은 executor-owned surface |
+| `meta` | 제어 흐름 / UI 프리미티브 | `decisionOverride` 따름 | 동일 | host builtin 전용; plugin 사용 금지 |
+
+**`decisionOverride` (meta 전용):** `always-allow-with-audit` (예: `ask_user_question` — 사용자에게 질문하는 도구 자체를 한번 더 승인 모달에 거는 중복 UX 차단) / `ask` (예: `agent_spawn` — `meta` 이지만 사용자 컨펌 필요).
+
+**Migration map:** v4 의 `dangerous` 단일 카테고리는 v5 에서 폐지됨. `bash` → `shell`, `agent_spawn` / `ask_user_question` → `meta`. Current SDK manifest schema does not define plugin `toolSchemas[*].category/pathFields`, so host plugin tools register as conservative `write`. Plugin category/pathFields hard-fail validation starts only after SDK schema/types, active plugin manifests, and the host SDK pin are updated together.
+
 **Tool Registry 동작:**
 
 | 시점 | 동작 |
 | --- | --- |
-| **부팅 시** | 빌트인 도구 등록 → Plugin 도구 등록 → MCP 도구 등록 → Feature Flag 평가 |
+| **부팅 시** | `registerStandardCategories()` → 빌트인 도구 등록 → Plugin 도구 등록 → MCP 도구 등록 → Feature Flag 평가 |
 | **플러그인 설치/제거** | Registry 동적 업데이트 (Hot-reload) |
 | **매 턴** | L1 Registry Filter 적용 → Lgenie에 전달할 도구 스키마 확정 |
 
@@ -1975,14 +2171,14 @@ flowchart LR
 
 **브리핑 예시:**
 
-> 「오늘 미팅 3건 (10:00 디자인리뷰, 14:00 스프린트, 16:00 1:1), 미처리 이메일 5통 중 2통은 액션 필요 (파트너사 계약서 검토, 출장비 정산 확인), 기한 임박 태스크 1건 (Q2 보고서 초안 — 내일 마감), **에이전트 요청 승인 2건** (이영희 Agent → Q1 보고서 공유 요청, 박민수 Agent → 코드리뷰 결과 전달 요청)」
+> 「오늘 미팅 3건 (10:00 디자인리뷰, 14:00 스프린트, 16:00 1:1), 미처리 이메일 5통 중 2통은 액션 필요 (파트너사 계약서 검토, 출장비 정산 확인), 기한 임박 태스크 1건 (분기 보고서 초안 — 내일 마감), **에이전트 요청 승인 2건** (이영희 Agent → 분기 보고서 공유 요청, 박민수 Agent → 코드리뷰 결과 전달 요청)」
 
 ### 7.X Routine v2 (PR #626)
 
 - **Storage**: `~/.lvis/routines.json` (mode 0o600, dir 0o700, cap 50)
 - **Scheduler**: 30s polling (RoutinesScheduler), cron minute-key dedup via `lastFiredMinuteUTC`
 - **Execution modes**: `llm-session` (RoutineEngine 호출, prePrompt 로 conversation 시작) / `notification-only` (OS notification, conversation 영향 0)
-- **Repeat kinds**: `none / daily / weekly / monthly / interval / cron` — Q5 monthly day-of-month clamping
+- **Repeat kinds**: `none / daily / weekly / monthly / interval / cron` — monthly day-of-month clamping
 - **LLM tool**: `schedule_routine` (자연어 입력 → struct payload, 4 vendor 호환)
 - **UI**: 단일 RoutinePanel 의 통합 list (Reminder 흡수), execution mode badge, 3-tab 입력 모달 (form / cron / 자연어)
 - **Reminder 폐지**: PR #626 atomic cutover 로 `RemindersStore`, `RemindersScheduler`, `remind_at` tool, `RemindersList` 컴포넌트 모두 제거
@@ -1990,6 +2186,16 @@ flowchart LR
 ---
 
 ## 8. Agent Approval System — 에이전트 요청 승인
+
+> **§6.3 Permission Policy 와의 분리:** §6.3 은 *개별 도구 호출* 에 대한
+> Layer 0–9 평가 (sensitive paths, allowed dirs, category × source ×
+> mode, reviewer agent, hook chain) 를 다룬다. 본 §8 은 *에이전트
+> 행위 전체* 에 대한 사용자 승인 모델 (자율 게시 / 외부 송신 / 업무
+> 일지 공개 범위) 을 다룬다. permission policy Layer 3 의 `network = ask + endpoint`
+> 결정은 §8 ApprovalGate 의 입력으로 흐르므로 두 섹션이 *중복 승인
+> 단계* 처럼 보일 수 있으나 실제로는 **single-decision /
+> single-prompt** — permission policy 가 결정하면 §8 ApprovalGate 가 그 결정을 그대로
+> render 한다 (별도 prompt 없음).
 
 ### 8.1 설계 원칙
 
@@ -2077,14 +2283,14 @@ sequenceDiagram
     participant UserA as 김철수 (사원)
     participant Briefing as Daily Briefing
 
-    AgentB->>Hub: "김철수님 Q1 보고서 공유 요청"
+    AgentB->>Hub: "김철수님 분기 보고서 공유 요청"
     Hub->>AgentA: Direct Message 수신
 
     AgentA->>AgentA: 승인 필요 행위 판단<br/>(파일 공유 = 승인 대상)
     AgentA->>Approval: 승인 요청 생성
 
     alt 김철수 온라인 (클라이언트 활성)
-        Approval->>UserA: 🔔 실시간 알림<br/>"이영희 Agent가 Q1 보고서 공유를 요청합니다"
+        Approval->>UserA: 🔔 실시간 알림<br/>"이영희 Agent가 분기 보고서 공유를 요청합니다"
         UserA->>Approval: ✅ 승인 (또는 ❌ 거부)
     else 김철수 오프라인
         Approval->>Approval: 대기열에 보관
@@ -2096,7 +2302,7 @@ sequenceDiagram
 
     alt 승인됨
         Approval->>AgentA: 승인 확인
-        AgentA->>Hub: Q1 보고서 파일 전달
+        AgentA->>Hub: 분기 보고서 파일 전달
         Hub->>AgentB: 파일 수신 완료
     else 거부됨
         Approval->>AgentA: 거부 사유
@@ -2117,7 +2323,7 @@ graph TB
         subgraph "요청 1"
             REQ1_FROM["요청자: 이영희 Agent"]
             REQ1_ACTION["행위: 📄 파일 공유"]
-            REQ1_TARGET["대상: Q1-마케팅-보고서.pptx"]
+    REQ1_TARGET["대상: 분기-마케팅-보고서.pptx"]
             REQ1_REASON["사유: 김철수님이 요청한 보고서입니다"]
             REQ1_BTN["✅ 승인  |  ❌ 거부  |  👁️ 미리보기"]
         end
@@ -2735,12 +2941,12 @@ graph TB
 
 ```json
 {
-  "id": "lvis-plugin-local-indexer",
-  "name": "LVIS Local Indexer",
+  "id": "lvis-plugin-docs",
+  "name": "LVIS Docs Plugin",
   "version": "0.2.0",
   "entry": "dist/index.js",
-  "tools": ["index_scan", "chat_preview", "..."],
-  "description": "Document indexing and semantic search plugin.",
+  "tools": ["document_scan", "document_search", "..."],
+  "description": "Document processing and semantic search plugin.",
   "installPolicy": "admin",
   "publisher": "LG Electronics IT"
 }
@@ -2995,12 +3201,12 @@ sequenceDiagram
     participant UserB as 이영희 (Client)
     participant Briefing as Daily Briefing
 
-    UserA->>AgentA: @이영희 Q1 마케팅 보고서 공유 가능?
+    UserA->>AgentA: @이영희 분기 마케팅 보고서 공유 가능?
     AgentA->>Hub: Direct Message → 이영희 Agent
     Hub->>AgentB: 메시지 전달
 
     AgentB->>AgentB: 승인 필요 행위 판단<br/>(파일 공유 = 승인 대상)
-    AgentB->>ApprovalB: 승인 요청 생성<br/>"김철수 Agent가 Q1 보고서 공유 요청"
+    AgentB->>ApprovalB: 승인 요청 생성<br/>"김철수 Agent가 분기 보고서 공유 요청"
 
     alt 이영희 온라인
         ApprovalB->>UserB: 🔔 실시간 알림
@@ -3018,7 +3224,7 @@ sequenceDiagram
     end
 
     Hub->>AgentA: 응답 전달
-    AgentA->>UserA: 이영희님이 Q1 보고서를 공유했습니다
+    AgentA->>UserA: 이영희님이 분기 보고서를 공유했습니다
 ```
 
 > 에이전트는 사원을 대리하되, 민감한 행위는 사원이 최종 결정한다.
@@ -3775,7 +3981,7 @@ v4 §8 "승인이 기본" 모델을 강화한다.
 
 v4 §9 의 manifest 스키마 / HostApi / 도구·이벤트 네임스페이스 규칙은 런타임 검증에 의존했다. v5 는 CI 레벨로 끌어올린다.
 
-- **Manifest JSON Schema (AJV)**: `lvis-app/schemas/plugin-manifest.schema.json` 을 단일 source of truth 로 정의. CI 에서 AJV 로 각 플러그인 `plugin.json` 을 검증. 스키마 위반 시 빌드 실패.
+- **Manifest JSON Schema (AJV)**: `@lvis/plugin-sdk/schemas/plugin-manifest.schema.json` 을 단일 source of truth 로 정의. 앱은 SDK schema 를 resolve/compile 하지 못하면 fail-closed 하고, CI 에서도 같은 SDK schema 로 각 플러그인 `plugin.json` 을 검증한다. 스키마 위반 시 빌드 실패.
 - **HostApi contract CI**: 호스트가 내보내는 `HostApi` 타입 정의를 플러그인 repo 들이 `devDependency` 로 import. CI 에서 `tsc --noEmit` 으로 계약 불일치(사라진 메서드 등) 를 조기 검출.
 - **Tool namespace CI**: 도구 이름 정규식 `^[a-z][a-z0-9_]*$`, 첫 토큰은 플러그인 slug prefix. 중복/충돌은 CI 거부.
 - **Event namespace CI**: 이벤트 이름 `^[a-z][a-z0-9_.]*$`, 최상위 prefix 는 플러그인 slug 또는 `core.`. 외부 플러그인의 `core.*` 발행은 CI 거부.

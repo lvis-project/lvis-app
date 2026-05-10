@@ -93,7 +93,7 @@ export async function resolveManifestLoadPlan(opts: {
  */
 export async function readEnabledManifestSnapshots(
   loadPlan: ManifestLoadPlan[],
-  validator: ValidateFunction | null,
+  validator: ValidateFunction,
 ): Promise<Map<string, ManifestSnapshot>> {
   const snapshots = new Map<string, ManifestSnapshot>();
   for (const plan of loadPlan) {

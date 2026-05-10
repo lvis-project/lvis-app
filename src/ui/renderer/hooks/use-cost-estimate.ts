@@ -5,7 +5,7 @@ import { lookupPricing } from "../../../shared/pricing-data.js";
 import type { ComposedOutgoing } from "../utils/compose.js";
 
 /**
- * Phase 5 — cost estimate hook.
+ * Cost estimate hook.
  *
  * Returns the pre-send cost estimate + badge color for the draft input.
  * The expensive history serialization only depends on `entries`, so we

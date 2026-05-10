@@ -173,7 +173,7 @@ export interface McpHttpServerConfig extends McpServerConfigBase {
    * Opt-in escape hatch for on-prem / localhost deployments. When true,
    * NetworkGuard's private-IP check is skipped for this server — the governance
    * `allowedUrls` allowlist is still the primary gate. Defaults to false.
-   * Mirrors the external-executor SSRF-protection pattern.
+   * Mirrors the host-wide NetworkGuard SSRF-protection pattern.
    */
   allowPrivateNetworks?: boolean;
   command?: never;

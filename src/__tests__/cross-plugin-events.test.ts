@@ -17,7 +17,7 @@
  * Scenarios 6–9 and 11 removed: they tested locally-defined helpers (HTML
  * escape, OData escape, idempotency, PATCH-vs-POST, namespace duplicates) that
  * live in plugin repos and are already covered by calendar plugin PR #9 and
- * phase5-event-namespace.test.ts. True cross-plugin integration lives in
+ * event-namespace-policy.test.ts. True cross-plugin integration lives in
  * plugin repos' own test suites.
  */
 
@@ -75,7 +75,7 @@ describe("Sprint 4-D T4 — cross-plugin event flow (host event bus)", () => {
 
     const payload = {
       sessionId: "sess-001",
-      title: "Q2 Planning",
+      title: "Quarterly Planning",
       summary: "Discussed roadmap.",
       highlights: ["Milestone A"],
       actionItems: ["Follow up with design team"],
@@ -88,7 +88,7 @@ describe("Sprint 4-D T4 — cross-plugin event flow (host event bus)", () => {
       expect.objectContaining({
         pluginId: "meeting",
         sessionId: "sess-001",
-        title: "Q2 Planning",
+        title: "Quarterly Planning",
       }),
     );
   });

@@ -61,7 +61,14 @@ function makeMockLoop(pm: ReturnType<typeof makeMockPM>) {
 // ─── Mock ApprovalGate ───────────────────────────────
 
 function makeMockGate() {
-  return { resolve: vi.fn(), setPolicy: vi.fn() };
+  return {
+    resolve: vi.fn(),
+    requestAndWait: vi.fn(async (req: { id: string }) => ({
+      requestId: req.id,
+      choice: "allow-once",
+    })),
+    setPolicy: vi.fn(),
+  };
 }
 
 // ─── Build minimal AppServices stub ──────────────────
@@ -99,7 +106,11 @@ function makeServices(pm: ReturnType<typeof makeMockPM>, gate = makeMockGate()) 
     approvalGate: gate as any,
     mcpManager: { listServers: vi.fn(() => []), killSwitch: vi.fn() } as any,
     toolRegistry: { setDenyRules: vi.fn() } as any,
-    auditLogger: { log: vi.fn() } as any,
+    auditLogger: {
+      log: vi.fn(),
+      isPermissionAuditChainReady: vi.fn(() => true),
+      appendPermissionAuditEntry: vi.fn(async (entry: Record<string, unknown>) => entry),
+    } as any,
     idleScheduler: undefined,
     bashAstValidator: {} as any,
     auditService: {} as any,
@@ -132,12 +143,17 @@ function invokeWithEvent(channel: string, event: unknown, ...args: unknown[]): u
   return fn(event, ...args);
 }
 
+const USER_INTENT = { inputOrigin: "user-keyboard", userActivation: true };
+const modePayload = (mode: string) => ({ mode, intent: USER_INTENT });
+const rulePayload = (pattern: string, action: string) => ({ pattern, action, intent: USER_INTENT });
+const policyPayload = (patch: Record<string, unknown>) => ({ patch, intent: USER_INTENT });
+
 // ─── Tests ───────────────────────────────────────────
 
 describe("lvis:permission:add-rule", () => {
   it("action=allow → calls addAlwaysAllowedPersist with pattern", async () => {
     const { pm } = await setupHandlers();
-    const result = await invoke("lvis:permission:add-rule", "my_tool", "allow") as { ok: boolean };
+    const result = await invoke("lvis:permission:add-rule", rulePayload("my_tool", "allow")) as { ok: boolean };
     expect(pm.addAlwaysAllowedPersist).toHaveBeenCalledWith("my_tool");
     expect(pm.addAlwaysDeniedPersist).not.toHaveBeenCalled();
     expect(result.ok).toBe(true);
@@ -145,7 +161,7 @@ describe("lvis:permission:add-rule", () => {
 
   it("action=deny → calls addAlwaysDeniedPersist with pattern", async () => {
     const { pm } = await setupHandlers();
-    const result = await invoke("lvis:permission:add-rule", "dangerous_*", "deny") as { ok: boolean };
+    const result = await invoke("lvis:permission:add-rule", rulePayload("dangerous_*", "deny")) as { ok: boolean };
     expect(pm.addAlwaysDeniedPersist).toHaveBeenCalledWith("dangerous_*");
     expect(pm.addAlwaysAllowedPersist).not.toHaveBeenCalled();
     expect(result.ok).toBe(true);
@@ -159,7 +175,7 @@ describe("lvis:permission:add-rule", () => {
     const services = makeServices(pm);
     registerIpcHandlers(services, () => null);
 
-    await invoke("lvis:permission:add-rule", "dangerous_*", "deny");
+    await invoke("lvis:permission:add-rule", rulePayload("dangerous_*", "deny"));
 
     expect(pm.getVisibilityDenyRules).toHaveBeenCalled();
     expect(services.toolRegistry.setDenyRules).toHaveBeenCalledWith([{ pattern: "dangerous_*" }]);
@@ -174,7 +190,7 @@ describe("lvis:permission:add-rule", () => {
     const services = makeServices(pm);
     (services.conversationLoop as any).permissionManager = undefined;
     registerIpcHandlers(services, () => null);
-    const result = await invoke("lvis:permission:add-rule", "tool", "allow") as { ok: boolean };
+    const result = await invoke("lvis:permission:add-rule", rulePayload("tool", "allow")) as { ok: boolean };
     expect(result.ok).toBe(false);
   });
 });
@@ -182,14 +198,14 @@ describe("lvis:permission:add-rule", () => {
 describe("lvis:permission:remove-rule", () => {
   it("calls removeRule with pattern and action", async () => {
     const { pm } = await setupHandlers();
-    const result = await invoke("lvis:permission:remove-rule", "my_tool", "allow") as { ok: boolean };
+    const result = await invoke("lvis:permission:remove-rule", rulePayload("my_tool", "allow")) as { ok: boolean };
     expect(pm.removeRule).toHaveBeenCalledWith("my_tool", "allow");
     expect(result.ok).toBe(true);
   });
 
   it("deny action passes deny to removeRule", async () => {
     const { pm } = await setupHandlers();
-    await invoke("lvis:permission:remove-rule", "mcp_*", "deny");
+    await invoke("lvis:permission:remove-rule", rulePayload("mcp_*", "deny"));
     expect(pm.removeRule).toHaveBeenCalledWith("mcp_*", "deny");
   });
 
@@ -201,7 +217,7 @@ describe("lvis:permission:remove-rule", () => {
     const services = makeServices(pm);
     registerIpcHandlers(services, () => null);
 
-    await invoke("lvis:permission:remove-rule", "mcp_*", "deny");
+    await invoke("lvis:permission:remove-rule", rulePayload("mcp_*", "deny"));
 
     expect(pm.getVisibilityDenyRules).toHaveBeenCalled();
     expect(services.toolRegistry.setDenyRules).toHaveBeenCalledWith([{ pattern: "dangerous_*" }]);
@@ -487,7 +503,7 @@ describe("lvis:policy:set", () => {
     const updatedPolicy = { version: 1, requireExplicitApproval: false, managed: false, updatedAt: "2026-01-02" };
     mockSavePolicy.mockResolvedValue(updatedPolicy);
     const { gate } = await setupHandlers();
-    const result = await invoke("lvis:policy:set", { requireExplicitApproval: false }) as { ok: boolean; policy: unknown };
+    const result = await invoke("lvis:policy:set", policyPayload({ requireExplicitApproval: false })) as { ok: boolean; policy: unknown };
     expect(mockSavePolicy).toHaveBeenCalledWith({ requireExplicitApproval: false });
     expect(gate.setPolicy).toHaveBeenCalledWith(updatedPolicy);
     expect(result.ok).toBe(true);
@@ -497,7 +513,7 @@ describe("lvis:policy:set", () => {
   it("managed error → returns { ok: false, error: 'managed' } without throwing", async () => {
     mockSavePolicy.mockRejectedValue(new Error("IT 관리 정책은 사용자가 변경할 수 없습니다."));
     const { gate } = await setupHandlers();
-    const result = await invoke("lvis:policy:set", { requireExplicitApproval: false }) as { ok: boolean; error: string; message: string };
+    const result = await invoke("lvis:policy:set", policyPayload({ requireExplicitApproval: false })) as { ok: boolean; error: string; message: string };
     expect(result.ok).toBe(false);
     expect(result.error).toBe("managed");
     expect(result.message).toContain("IT 관리");
@@ -515,7 +531,7 @@ describe("lvis:policy:set", () => {
     services.approvalGate = undefined as any;
     registerIpcHandlers(services, () => null);
     // Should not throw even with no gate
-    const result = await invoke("lvis:policy:set", {}) as { ok: boolean };
+    const result = await invoke("lvis:policy:set", policyPayload({})) as { ok: boolean };
     expect(result.ok).toBe(true);
   });
 });
@@ -533,14 +549,14 @@ describe("lvis:permission:get-mode", () => {
 describe("lvis:permission:set-mode", () => {
   it("calls setModePersist with given mode", async () => {
     const { pm } = await setupHandlers();
-    await invoke("lvis:permission:set-mode", "auto");
+    await invoke("lvis:permission:set-mode", modePayload("auto"));
     expect(pm.setModePersist).toHaveBeenCalledWith("auto");
   });
 
   // §F8: whitelist validation
   it("invalid mode → returns { ok: false, error: 'invalid-mode' } without calling setModePersist", async () => {
     const { pm } = await setupHandlers();
-    const result = await invoke("lvis:permission:set-mode", "turbo") as { ok: boolean; error: string };
+    const result = await invoke("lvis:permission:set-mode", modePayload("turbo")) as { ok: boolean; error: string };
     expect(result.ok).toBe(false);
     expect(result.error).toBe("invalid-mode");
     expect(pm.setModePersist).not.toHaveBeenCalled();
@@ -548,7 +564,7 @@ describe("lvis:permission:set-mode", () => {
 
   it("empty string mode → returns { ok: false, error: 'invalid-mode' }", async () => {
     const { pm } = await setupHandlers();
-    const result = await invoke("lvis:permission:set-mode", "") as { ok: boolean; error: string };
+    const result = await invoke("lvis:permission:set-mode", modePayload("")) as { ok: boolean; error: string };
     expect(result.ok).toBe(false);
     expect(result.error).toBe("invalid-mode");
   });
@@ -558,7 +574,7 @@ describe("lvis:permission:set-mode", () => {
 describe("lvis:permission:add-rule — F8 validation", () => {
   it("empty pattern → returns { ok: false, error: 'invalid-pattern' }", async () => {
     const { pm } = await setupHandlers();
-    const result = await invoke("lvis:permission:add-rule", "", "allow") as { ok: boolean; error: string };
+    const result = await invoke("lvis:permission:add-rule", rulePayload("", "allow")) as { ok: boolean; error: string };
     expect(result.ok).toBe(false);
     expect(result.error).toBe("invalid-pattern");
     expect(pm.addAlwaysAllowedPersist).not.toHaveBeenCalled();
@@ -567,7 +583,7 @@ describe("lvis:permission:add-rule — F8 validation", () => {
   it("pattern > 128 chars → returns { ok: false, error: 'invalid-pattern' }", async () => {
     const { pm } = await setupHandlers();
     const longPattern = "a".repeat(129);
-    const result = await invoke("lvis:permission:add-rule", longPattern, "allow") as { ok: boolean; error: string };
+    const result = await invoke("lvis:permission:add-rule", rulePayload(longPattern, "allow")) as { ok: boolean; error: string };
     expect(result.ok).toBe(false);
     expect(result.error).toBe("invalid-pattern");
     expect(pm.addAlwaysAllowedPersist).not.toHaveBeenCalled();
@@ -575,7 +591,7 @@ describe("lvis:permission:add-rule — F8 validation", () => {
 
   it("invalid action → returns { ok: false, error: 'invalid-action' }", async () => {
     const { pm } = await setupHandlers();
-    const result = await invoke("lvis:permission:add-rule", "my_tool", "permit") as { ok: boolean; error: string };
+    const result = await invoke("lvis:permission:add-rule", rulePayload("my_tool", "permit")) as { ok: boolean; error: string };
     expect(result.ok).toBe(false);
     expect(result.error).toBe("invalid-action");
     expect(pm.addAlwaysAllowedPersist).not.toHaveBeenCalled();
@@ -587,7 +603,7 @@ describe("lvis:permission:add-rule — F8 validation", () => {
 describe("lvis:policy:set — F8 validation", () => {
   it("patch with 'managed' key → returns { ok: false, error: 'invalid-patch' } without calling savePolicy", async () => {
     await setupHandlers();
-    const result = await invoke("lvis:policy:set", { managed: true }) as { ok: boolean; error: string };
+    const result = await invoke("lvis:policy:set", policyPayload({ managed: true })) as { ok: boolean; error: string };
     expect(result.ok).toBe(false);
     expect(result.error).toBe("invalid-patch");
     expect(mockSavePolicy).not.toHaveBeenCalled();
@@ -595,7 +611,7 @@ describe("lvis:policy:set — F8 validation", () => {
 
   it("requireExplicitApproval as non-boolean → returns { ok: false, error: 'invalid-patch' }", async () => {
     await setupHandlers();
-    const result = await invoke("lvis:policy:set", { requireExplicitApproval: "yes" }) as { ok: boolean; error: string };
+    const result = await invoke("lvis:policy:set", policyPayload({ requireExplicitApproval: "yes" })) as { ok: boolean; error: string };
     expect(result.ok).toBe(false);
     expect(result.error).toBe("invalid-patch");
     expect(mockSavePolicy).not.toHaveBeenCalled();
