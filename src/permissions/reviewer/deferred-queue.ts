@@ -1,5 +1,5 @@
 /**
- * Permission policy Phase 3 — Layer 5 Reviewer Agent: deferred queue for HIGH verdicts.
+ * Layer 5 reviewer queue for HIGH verdicts.
  *
  * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 5.
  *
@@ -53,10 +53,15 @@ function defaultPath(): string {
 
 export class DeferredQueue {
   private readonly filePath: string;
+  private readonly onPendingChange?: (summary: { pending: number }) => void;
   private entries: DeferredEntry[] | null = null;
 
-  constructor(filePath?: string) {
+  constructor(
+    filePath?: string,
+    onPendingChange?: (summary: { pending: number }) => void,
+  ) {
     this.filePath = filePath ?? defaultPath();
+    this.onPendingChange = onPendingChange;
   }
 
   private ensureLoaded(): void {
@@ -106,6 +111,7 @@ export class DeferredQueue {
     };
     this.entries!.push(entry);
     await this.appendLine(entry);
+    this.emitPendingChange();
     return id;
   }
 
@@ -155,6 +161,7 @@ export class DeferredQueue {
     };
     this.entries![idx] = next;
     await this.rewriteFromMemory();
+    this.emitPendingChange();
     return next;
   }
 
@@ -193,5 +200,14 @@ export class DeferredQueue {
         // Non-fatal — chmod failure must not block queue writes.
       }
     });
+  }
+
+  private emitPendingChange(): void {
+    if (!this.onPendingChange) return;
+    try {
+      this.onPendingChange({ pending: this.listPending().length });
+    } catch (err) {
+      log.warn(`failed to emit deferred-queue pending summary: %s`, (err as Error).message);
+    }
   }
 }

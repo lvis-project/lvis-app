@@ -504,9 +504,7 @@ export function PluginConfigTab() {
                       // user switches between plugins in the list. Without
                       // it the same instance is reused across plugin
                       // selections and stale internal state (`working`,
-                      // `localError`) carries over — e.g. a failed login on
-                      // ms-graph would still display its error banner when
-                      // the user clicks lge-api in the list.
+                      // `localError`) carries over between plugins.
                       key={selectedPlugin.id}
                       api={apiForAuthHook}
                       pluginId={selectedPlugin.id}

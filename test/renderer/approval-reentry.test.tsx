@@ -33,6 +33,11 @@ function installMockNs() {
     emit: (r: unknown) => handlers.forEach((h) => h(r)),
     respond,
     drainOne: () => resolvers.shift()?.({ ok: true }),
+    drainAll: () => {
+      for (const resolve of resolvers.splice(0)) {
+        resolve({ ok: true });
+      }
+    },
   };
 }
 
@@ -95,6 +100,60 @@ describe("useApproval — Copilot HIGH #2 re-entrancy", () => {
     await act(async () => {
       drainOne();
       await third;
+    });
+  });
+
+  it("bulk decide echoes nonce and hmac for every queued request", async () => {
+    const { emit, respond, drainAll } = installMockNs();
+    const { result } = renderHook(() => useApproval());
+
+    act(() => {
+      emit({
+        id: "req-1",
+        category: "tool",
+        toolName: "read_file",
+        args: {},
+        reason: "r",
+        createdAt: 0,
+        requireExplicit: false,
+        nonce: "nonce-1",
+        hmac: "hmac-1",
+      });
+      emit({
+        id: "req-2",
+        category: "tool",
+        toolName: "write_file",
+        args: {},
+        reason: "r",
+        createdAt: 0,
+        requireExplicit: false,
+        nonce: "nonce-2",
+        hmac: "hmac-2",
+      });
+    });
+
+    let bulk!: Promise<void>;
+    act(() => {
+      bulk = result.current.decideAll("allow-once");
+    });
+
+    expect(respond).toHaveBeenCalledTimes(2);
+    expect(respond.mock.calls[0]?.[0]).toMatchObject({
+      requestId: "req-1",
+      choice: "allow-once",
+      nonce: "nonce-1",
+      hmac: "hmac-1",
+    });
+    expect(respond.mock.calls[1]?.[0]).toMatchObject({
+      requestId: "req-2",
+      choice: "allow-once",
+      nonce: "nonce-2",
+      hmac: "hmac-2",
+    });
+
+    await act(async () => {
+      drainAll();
+      await bulk;
     });
   });
 });

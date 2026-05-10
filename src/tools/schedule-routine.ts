@@ -3,11 +3,11 @@
  * scheduled time (one-off or repeating). The routine survives app restart
  * (persisted to `~/.lvis/routine/routines.json`) and fires via the RoutinesScheduler.
  *
- * Execution modes (Q2):
+ * Execution modes:
  *   - "llm-session"       → starts a ConversationLoop with prePrompt
  *   - "notification-only" → fires an OS notification
  *
- * 3 input styles (Q4):
+ * 3 input styles:
  *   1. Form:           at + repeat.kind + repeat fields
  *   2. Cron:           repeat.kind="cron" + repeat.expression
  *   3. Natural language: LLM fills the structured fields after parsing user intent

@@ -153,9 +153,9 @@ export function createReadOnlyFsPromisesProxy(
 }
 
 /**
- * Process-wide state — set of plugin ids that violated their
- * declared `read` category. Disabled plugins fail-deny on every
- * subsequent tool dispatch.
+ * Process-wide state for plugin manifest-integrity violations. Current SDK
+ * metadata keeps plugin tools conservative-write; future read-declared tools
+ * will enter through the same disable/audit state.
  */
 export class ManifestIntegrityState {
   private readonly disabledPluginIds = new Set<string>();

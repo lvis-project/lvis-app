@@ -13,7 +13,7 @@ LVIS는 3개 소스에서 도구를 등록한다:
 | 소스 | 예시 | 신뢰 수준 | 위험 |
 |------|------|-----------|------|
 | **Builtin** | memory_save, web_search | 높음 (코드 리뷰됨) | 호스트 내부 동작 |
-| **Plugin** | meeting_start, index_scan | 중간 (매니페스트 검증) | HostApi 범위 내 동작 |
+| **Plugin** | meeting_start, document_search | 중간 (매니페스트 검증) | HostApi 범위 내 동작 |
 | **MCP** | mcp_hr_query, mcp_erp_read | 낮음 (외부 프로세스/서비스) | 네트워크 연결 가능 |
 
 **핵심 원칙**: 소스에 관계없이 모든 도구 호출은 **단일 실행 파이프라인**을 통과해야 하며, **모든 호출은 명시적으로 검토 가능**해야 한다.
@@ -131,7 +131,7 @@ check(toolName, source, trust) → ALLOW | DENY | ASK
 
 | 분류 | 기준 | 예시 |
 |------|------|------|
-| **Read** | 상태를 변경하지 않는 조회 | memory_search, index_documents, web_search |
+| **Read** | 상태를 변경하지 않는 조회 | memory_search, document_search, web_search |
 | **Write** | 상태를 변경하거나 외부에 영향 | memory_save, meeting_start, email_analyze |
 | **Dangerous** | 되돌리기 어려운 파괴적 동작 | (현재 없음, Bash 도구 추가 시 해당) |
 

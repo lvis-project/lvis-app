@@ -1,7 +1,4 @@
-/**
- * Permission policy Phase 3 — DeferredQueue unit tests.
- */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -87,5 +84,14 @@ describe("DeferredQueue", () => {
       expect(parsed).toHaveProperty("toolName");
       expect(parsed).toHaveProperty("status");
     }
+  });
+
+  it("emits pending-count updates on append and resolve", async () => {
+    const onPendingChange = vi.fn();
+    const q = new DeferredQueue(tmpQueuePath(), onPendingChange);
+    const id = await q.append(SAMPLE);
+    await q.resolve(id, "approved");
+    expect(onPendingChange).toHaveBeenNthCalledWith(1, { pending: 1 });
+    expect(onPendingChange).toHaveBeenNthCalledWith(2, { pending: 0 });
   });
 });

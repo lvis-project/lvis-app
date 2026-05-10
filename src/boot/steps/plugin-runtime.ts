@@ -536,7 +536,7 @@ export function evaluateTriggerSpec(
     } catch { /* audit must not break host */ }
   };
 
-  if (!capabilities.includes("conversation-trigger")) {
+  if (!capabilities.includes("host:overlay")) {
     auditDeny("reason=capability_denied");
     return {
       kind: "deny",
@@ -853,9 +853,8 @@ export async function initPluginRuntime(
     log.error(`LVIS_DEV* ignored in packaged build: ${names.join(", ")}`);
   }
 
-  // PR 3c: ms-graph 자체 인증으로 이전 후 host 측 MS HostApi 메서드 / capability gate 제거.
-  // ms-graph-consumer capability 는 plugin 자기 식별 라벨로 plugin.json 에 남지만
-  // host 의 capability 검증 게이트는 더 이상 존재하지 않는다 (plugin 이 자체 MSAL 소유).
+  // Plugin-owned OAuth removed host-owned provider auth APIs. The related
+  // capability is advisory metadata only; there is no host-side auth gate.
   let pluginRuntime!: PluginRuntime;
 
   // Phase 1 §Step 1 + §Step 2 — thread the user-installed dir as a second
@@ -1215,36 +1214,22 @@ export async function initPluginRuntime(
         },
       },
 
-      // ─── Proactive Brain — hostApi.triggerConversation() ───────────────
-      // Q11 Overlay Runner: gate body lives in evaluateTriggerSpec() so prod
+      // ─── Overlay runner — hostApi.triggerConversation() ────────────────
+      // Overlay runner: gate body lives in evaluateTriggerSpec() so prod
       // and tests share one implementation. On allow, the host holds the spec
       // in OverlayContext staging via IPC (fresh ConversationLoop is NOT
       // started). The user's confirm action inserts the prompt as a user
       // message into main chat via the imported_trigger mechanism.
       //
-      // Capability gate: plugins must declare "host:overlay" (enforced) OR
-      // the legacy "conversation-trigger". evaluateTriggerSpec checks for
-      // "conversation-trigger"; we also accept "host:overlay" by injecting it
-      // into the effective capability list so the same gate logic applies.
       triggerConversation: async (spec: ConversationTriggerSpec) => {
-        const effectiveCapabilities = [
-          ...(manifest.capabilities ?? []),
-          // If the plugin has host:overlay but not conversation-trigger, treat
-          // host:overlay as satisfying the trigger gate — they are semantically
-          // equivalent for the overlay runner path.
-          ...((manifest.capabilities ?? []).includes("host:overlay") &&
-          !(manifest.capabilities ?? []).includes("conversation-trigger")
-            ? ["conversation-trigger"]
-            : []),
-        ];
         const decision = evaluateTriggerSpec({
           spec,
           pluginId,
-          capabilities: effectiveCapabilities,
+          capabilities: manifest.capabilities ?? [],
           dedupe: triggerConversationDedupe,
           rateLimiter: triggerConversationRateLimiter,
           denyAuditThrottle: triggerDenyAuditThrottle,
-          // Q11: overlay runner does not need a ConversationLoop — always bound.
+          // Overlay runner does not need a ConversationLoop — always bound.
           loopBound: true,
           auditLogger: bootAuditLogger,
         });

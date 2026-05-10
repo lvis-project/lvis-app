@@ -1324,7 +1324,7 @@ export default async function createPlugin(ctx) {
   });
 
   it("addPlugin throws when the entry module fails to import (atomic-install rollback signal)", async () => {
-    // Regression test for Phase 5: pre-fix, an entry that throws at import
+    // Regression test: pre-fix, an entry that throws at import
     // time was silently markFailed-then-return — install-IPC handler had no
     // way to know the install half-committed. Now addPlugin throws so the
     // handler can roll back the registry/dir state via marketplace.uninstall().

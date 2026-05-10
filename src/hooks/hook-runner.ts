@@ -4,7 +4,7 @@
  * 도구 실행 전후에 인터셉션 포인트를 제공.
  * Hook은 deny(차단), modify(입력 변경), feedback(결과에 메시지 추가) 가능.
  *
- * Phase 3: 인메모리 훅 등록 (설정 파일 기반은 Phase 5)
+ * In-memory hook registration.
  * 향후: 플러그인이 훅을 등록하여 거버넌스/감사/변환 수행
  *
  * Permission policy: this runner is now in-process only. Production script hooks use

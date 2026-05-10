@@ -61,11 +61,12 @@ describe("SENSITIVE_PATH_PATTERNS", () => {
   });
 
   it("Permission policy P2.5 — contains LVIS-internal sensitive paths", () => {
+    expect(SENSITIVE_PATH_PATTERNS).toContain("**/.lvis/settings.json");
+    expect(SENSITIVE_PATH_PATTERNS).toContain("**/.lvis/permissions.json");
+    expect(SENSITIVE_PATH_PATTERNS).toContain("**/.lvis/policy.json");
+    expect(SENSITIVE_PATH_PATTERNS).toContain("**/.lvis/permissions/**");
     expect(SENSITIVE_PATH_PATTERNS).toContain("**/.lvis/audit/**");
     expect(SENSITIVE_PATH_PATTERNS).toContain("**/.lvis/audit.log");
-    expect(SENSITIVE_PATH_PATTERNS).toContain(
-      "**/.lvis/permissions/deferred-queue.jsonl",
-    );
     expect(SENSITIVE_PATH_PATTERNS).toContain("**/.lvis/sessions/**");
     expect(SENSITIVE_PATH_PATTERNS).toContain("**/.config/lvis/hooks/**");
   });
@@ -125,6 +126,13 @@ describe("isSensitivePath — positive matches", () => {
     expect(isSensitivePath("/Users/ken/.lvis/secrets/openai.key")).toBe(
       "**/.lvis/secrets/**",
     );
+  });
+
+  it("matches LVIS permission control-plane files", () => {
+    expect(isSensitivePath("/Users/ken/.lvis/settings.json")).toBe("**/.lvis/settings.json");
+    expect(isSensitivePath("/Users/ken/.lvis/permissions.json")).toBe("**/.lvis/permissions.json");
+    expect(isSensitivePath("/Users/ken/.lvis/policy.json")).toBe("**/.lvis/policy.json");
+    expect(isSensitivePath("/Users/ken/.lvis/permissions/reviewer-cache.jsonl")).toBe("**/.lvis/permissions/**");
   });
 
   it("matches /Users/ken/.lvis/lvis-secrets.json (LGE addition)", () => {
@@ -252,7 +260,7 @@ describe("isSensitivePath — Permission policy P2.5 LVIS-internal", () => {
   it("matches ~/.lvis/permissions/deferred-queue.jsonl", () => {
     expect(
       isSensitivePath("/Users/ken/.lvis/permissions/deferred-queue.jsonl"),
-    ).toBe("**/.lvis/permissions/deferred-queue.jsonl");
+    ).toBe("**/.lvis/permissions/**");
   });
 
   it("matches ~/.lvis/sessions/<sessionId>.jsonl", () => {

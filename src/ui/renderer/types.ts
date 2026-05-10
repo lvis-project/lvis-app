@@ -235,7 +235,7 @@ export type LvisApi = {
       }
     | { ok: false; error: string }
   >;
-  // PR 3c: msGraph* bridge methods removed — ms-graph plugin owns auth.
+  // Provider-auth bridge methods are plugin-owned.
   chatHasProvider: () => Promise<boolean>;
   chatSend: (
     input: string,
