@@ -642,7 +642,7 @@ export interface PluginHostApi {
    * The calling plugin's own id is excluded. Order is insertion-stable but
    * MUST NOT be treated as priority — use `.includes(id)` for membership
    * checks. Pair with `onPluginsChanged` to react to plugin lifecycle (e.g.
-   * proactive detectors that depend on a specific plugin being installed).
+   * overlay-trigger detectors that depend on a specific plugin being installed).
    */
   getInstalledPluginIds(): string[];
   /**
@@ -754,10 +754,9 @@ export interface PluginHostApi {
   getAppPreference?<T = unknown>(key: string): T | undefined;
 
   /**
-   * Proactive Brain — start a host ConversationLoop turn from a plugin-observed
-   * signal. Unlike chat which is user-initiated, this lets a (read-only)
-   * "brain" plugin make LVIS speak first when an event warrants action
-   * (e.g., a meeting-request mail arrives).
+   * Overlay trigger — ask the host to stage a plugin-authored suggestion in
+   * the overlay. The plugin does not start a conversation turn; only a user's
+   * overlay confirmation imports the prompt into the normal chat loop.
    *
    * Capability gate: `host:overlay`. The plugin's manifest must declare it;
    * otherwise the host returns `{ accepted: false, reason:
@@ -769,7 +768,7 @@ export interface PluginHostApi {
    *   attachment text, etc.). The host has no way to validate this; injecting
    *   raw bodies makes prompt-injection trivial. Pass IDs in `context` and let
    *   the loop fetch raw content via tools.
-   * - `source` MUST start with `proactive:` to keep the source-aware
+   * - `source` MUST start with `overlay:` to keep the source-aware
    *   permission model (§6.3) able to enforce per-origin policies.
    * - `dedupeKey` should be set when the same observation can fire multiple
    *   times (e.g., the same mail re-emitting events) — host will reject the
@@ -856,13 +855,13 @@ export type ApprovalChoice =
   | "deny-always";
 
 /**
- * Spec for `hostApi.triggerConversation()`. Passed by a brain plugin when it
- * decides a signal warrants starting a conversation.
+ * Spec for `hostApi.triggerConversation()`. Passed by a plugin when it decides
+ * a signal warrants staging a host overlay suggestion.
  */
 export interface ConversationTriggerSpec {
   /** Templated message — NEVER raw third-party content. See safety contract. */
   prompt: string;
-  /** Origin tag, must start with `proactive:` (e.g. `proactive:meeting-detection`). */
+  /** Origin tag, must start with `overlay:` (e.g. `overlay:meeting-detection`). */
   source: string;
   /**
    * Side-channel metadata (IDs, references) recorded with the trigger.
@@ -891,7 +890,7 @@ export interface ConversationTriggerSpec {
   dedupeKey?: string;
   /**
    * Overlay Runner — display title for the OverlayCard.
-   * Defaults to the source tag with the `proactive:` prefix stripped.
+   * Defaults to the source tag with the `overlay:` prefix stripped.
    */
   title?: string;
   /**
@@ -912,7 +911,7 @@ export interface ConversationTriggerResult {
   /**
    * When `accepted=false`, why:
    *   `capability_denied` — plugin lacks `host:overlay`.
-   *   `invalid_source`    — `source` does not match `^proactive:[a-z][a-z0-9-]*$`,
+   *   `invalid_source`    — `source` does not match `^overlay:[a-z][a-z0-9-]*$`,
    *                         `prompt` empty, or other shape problem.
    *   `duplicate`         — `dedupeKey` matched a recent trigger.
    *   `rate_limited`      — per-plugin call cap exceeded (sliding window).

@@ -3,13 +3,13 @@
  *
  * 통합 도구 거버넌스:
  * - 모든 도구(Builtin/Plugin/MCP)에 대해 source + trust 기반 판정
- * - Global strict mode is mode-first after immutable deny/proactive guards
+ * - Global strict mode is mode-first after immutable deny/overlay-trigger guards
  * - 감사 로그 연동을 위한 판정 사유 추적
  *
  * 판정 우선순위 (§4.1 + MCP per-tool override):
  * 1. deny 규칙
  * 2. MCP strict override
- * 3. proactive mutating origin guard
+ * 3. overlay-trigger mutating origin guard
  * 4. global strict mode
  * 5. headless mutating reviewer lane
  * 6. allow 규칙
@@ -22,7 +22,7 @@ import { resolve } from "node:path";
 import type { DenyRule, ToolCategory, ToolSource, ToolTrustOrigin, TrustLevel } from "../tools/types.js";
 import { trustFromSource } from "../tools/types.js";
 import { readPermissionsFile, updatePermissionsFile } from "./permissions-store.js";
-import { isProactiveOrigin } from "../shared/proactive-source.js";
+import { isOverlayTriggerOrigin } from "../shared/overlay-trigger-source.js";
 import { getToolCategoryDescriptor } from "./category-registry.js";
 import type {
   RiskClassifier,
@@ -344,12 +344,12 @@ export class PermissionManager {
   /**
    * 상세 판정 — 감사 로그용 사유 포함.
    *
-   * `proactiveOrigin` (예: `"proactive:meeting-detection"`) 가 set 이면
+   * `overlayTriggerOrigin` (예: `"overlay:meeting-detection"`) 가 set 이면
    * 모든 write/shell/network 도구는 **사용자 영구 승인 (`allow-always`) /
    * config allow rules / auto 모드** 와 무관하게 `ask` 로 강제됨.
-   * Brain 트리거가 사용자 컨펌 없이 destructive 작업 자동 실행되는 것을
-   * 막는 차단막 — `<proactive-origin-guidance>` 시스템 프롬프트의 1차
-   * LLM-side 검토와 짝을 이루는 hard-gate. read 도구는 영향 없음.
+   * overlay trigger가 사용자 컨펌 없이 destructive 작업 자동 실행되는 것을
+   * 막는 차단막 — `<overlay-trigger-origin-guidance>` 시스템 프롬프트의 1차
+   * LLM-side 검토와 짝을 이루는 hard gate. read 도구는 영향 없음.
    *
    * Permission policy — 5-axis category model. Layer 3 의 decisionFor() 가
    * old trust-default 분기를 대체. `meta` category 는 descriptor 가 `"override"` 를
@@ -359,16 +359,16 @@ export class PermissionManager {
     toolName: string,
     source: ToolSource,
     category: ToolCategory,
-    proactiveOrigin?: string | null,
+    overlayTriggerOrigin?: string | null,
     context: PermissionCheckContext = {},
   ): PermissionCheckResult {
     const trust = this.resolveTrust(toolName, source);
-    // Strict pattern (shared with the rest of the proactive flow —
-    // see shared/proactive-source.ts). Loose `startsWith` would
-    // accept malformed values like "proactive:Bad/Path" that no
+    // Strict pattern (shared with the rest of the overlay trigger flow —
+    // see shared/overlay-trigger-source.ts). Loose `startsWith` would
+    // accept malformed values like "overlay:Bad/Path" that no
     // upstream gate emits but a future hand-injected codepath might;
     // fail-closed on malformed input.
-    const isProactive = isProactiveOrigin(proactiveOrigin ?? null);
+    const isOverlayTrigger = isOverlayTriggerOrigin(overlayTriggerOrigin ?? null);
     const resolvedCategory: ToolCategory = category;
     const isMutating =
       resolvedCategory === "write" ||
@@ -393,18 +393,18 @@ export class PermissionManager {
       return { decision: "ask", reason: "MCP 서버 strict 모드", layer: 2 };
     }
 
-    // Proactive origin override — write/shell/network 도구는 cached
+    // Overlay-trigger origin override — write/shell/network 도구는 cached
     // allow rules / always-allowed / auto-mode 를 모두 우회하고
     // 항상 사용자 컨펌을 받음. read 는 자동 실행 OK.
-    if (isProactive && isMutating) {
+    if (isOverlayTrigger && isMutating) {
       return {
         decision: "ask",
-        reason: `proactive 출처 (${proactiveOrigin}) — 쓰기 도구는 사용자 컨펌 필수`,
+        reason: `overlay trigger 출처 (${overlayTriggerOrigin}) — 쓰기 도구는 사용자 컨펌 필수`,
         layer: 2,
       };
     }
 
-    // strict mode is mode-first after immutable deny/proactive guards:
+    // strict mode is mode-first after immutable deny/overlay-trigger guards:
     // allow rules, always-allowed cache, MCP auto overrides, and reviewer
     // auto-allow lanes must not downgrade it.
     if (this.mode === "strict") {
@@ -566,7 +566,7 @@ export class PermissionManager {
 
     // allow mode: explicit user opt-in to allow every non-hard-blocked tool.
     // Layer 0 sensitive paths, Layer 1 allowed-directory checks, deny rules,
-    // and proactive-origin mutation guards run before this point.
+    // and overlay-trigger mutation guards run before this point.
     if (this.mode === "allow") {
       return {
         decision: "allow",

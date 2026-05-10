@@ -38,7 +38,7 @@ import {
   emitPluginConfigChange,
   subscribePluginConfigChange,
 } from "../../plugins/config-change-bus.js";
-import { PROACTIVE_SOURCE_PATTERN, isProactiveOrigin } from "../../shared/proactive-source.js";
+import { OVERLAY_TRIGGER_SOURCE_PATTERN, isOverlayTriggerOrigin } from "../../shared/overlay-trigger-source.js";
 import type {
   ApprovalChoice,
   AuthWindowCookie,
@@ -262,7 +262,7 @@ export function buildAppPreferenceReader(
 }
 
 /**
- * In-memory dedupe for `hostApi.triggerConversation()`. A brain plugin can set
+ * In-memory dedupe for `hostApi.triggerConversation()`. A plugin can set
  * `dedupeKey` on a trigger spec to suppress repeats from the same observation
  * (e.g., the same mail re-emitting events). Keyed per pluginId so two plugins
  * cannot collide. TTL is intentionally short — long-term suppression should
@@ -323,12 +323,12 @@ const MAX_SOURCE_LEN = 128;
  */
 const MAX_PROMPT_LEN = 4096;
 // `SOURCE_PATTERN` is the strict shape required for the `source` field
-// of every proactive trigger spec. It's the SAME pattern used by the
+// of every overlay trigger spec. It's the SAME pattern used by the
 // keyword engine, the trigger executor envelope, the IPC bridge's
-// originSource detection, and the permission manager's proactive-
-// origin override — see `shared/proactive-source.ts` for the single
-// definition. Without this gate, malformed sources (`proactive:`,
-// `proactive:_x`, `proactive:Bad/Path`) could flow into audit logs and
+// originSource detection, and the permission manager's overlay-trigger
+// origin override — see `shared/overlay-trigger-source.ts` for the single
+// definition. Without this gate, malformed sources (`overlay:`,
+// `overlay:_x`, `overlay:Bad/Path`) could flow into audit logs and
 // system prompts where loose substrings would be confusing.
 
 /**
@@ -352,8 +352,8 @@ export function sanitizePluginPendingPrompt(prompt: string): string {
 }
 
 export function formatPluginPendingPrompt(prompt: string, source: string): string {
-  if (!isProactiveOrigin(source)) {
-    throw new Error(`invalid proactive source for pending prompt: ${source}`);
+  if (!isOverlayTriggerOrigin(source)) {
+    throw new Error(`invalid overlay trigger source for pending prompt: ${source}`);
   }
   return `<imported-from-proactive source="${source}">\n${sanitizePluginPendingPrompt(prompt)}\n</imported-from-proactive>`;
 }
@@ -554,7 +554,7 @@ export function evaluateTriggerSpec(
   }
   // A too-long source is rejected outright; the regex sees the original
   // string (no slice-before-validate). Same for prompt length.
-  if (source.length > MAX_SOURCE_LEN || !PROACTIVE_SOURCE_PATTERN.test(source)) {
+  if (source.length > MAX_SOURCE_LEN || !OVERLAY_TRIGGER_SOURCE_PATTERN.test(source)) {
     auditDeny(`reason=invalid_source source=${source.slice(0, 32) || "<empty>"}`);
     return {
       kind: "deny",
@@ -1262,7 +1262,7 @@ export async function initPluginRuntime(
         const overlayItem = {
           id: overlayId,
           source: { kind: "plugin" as const, pluginId, eventId },
-          title: spec.title ?? spec.source.replace(/^proactive:/, ""),
+          title: spec.title ?? spec.source.replace(/^overlay:/, ""),
           summary: spec.summary ?? spec.prompt.slice(0, 200),
           running: false,
           primaryActionLabel: spec.primaryActionLabel ?? "지금 답하기",
