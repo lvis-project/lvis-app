@@ -94,6 +94,12 @@ export interface MarketplaceInstallerOptions {
    */
   cacheBase?: string | null;
   /**
+   * Expected artifact digest from the marketplace catalog/detail row.
+   * When present, same-version cache entries with a different digest are
+   * ignored and replaced by a fresh download.
+   */
+  expectedArtifactSha256?: string;
+  /**
    * Optional granular progress callback. Fired at natural phase boundaries
    * during download → verify → persist. The `registering` event fires just
    * before the final atomic rename so callers can show a "등록 중…" label.
@@ -174,6 +180,13 @@ export async function installFromMarketplace(
   const maxSkewSec = opts.maxClockSkewSec ?? DEFAULT_MAX_SKEW_SEC;
   const nowSec = opts.nowSec ?? (() => Date.now() / 1000);
   const maxRetries = opts.maxRetries ?? DEFAULT_MAX_RETRIES;
+  const expectedArtifactSha256 = opts.expectedArtifactSha256?.trim().toLowerCase();
+  if (expectedArtifactSha256 && !/^[a-f0-9]{64}$/.test(expectedArtifactSha256)) {
+    throw new MarketplaceInstallerError(
+      "CATALOG_SHA256_INVALID",
+      `marketplace catalog has invalid artifact sha256 for ${slug}@${version}`,
+    );
+  }
 
   // 1. Check offline tarball cache; fall back to network download.
   // Tarball cache is only active when opts.cacheBase is provided as a non-null
@@ -189,8 +202,11 @@ export async function installFromMarketplace(
   if (useCache && cacheBase) {
     const cached = await getCachedTarball(slug, version, cacheBase);
     if (cached) {
-      body = cached;
-      fromCache = true;
+      const cachedSha256 = createHash("sha256").update(cached).digest("hex");
+      if (!expectedArtifactSha256 || cachedSha256 === expectedArtifactSha256) {
+        body = cached;
+        fromCache = true;
+      }
     }
   }
 
@@ -217,6 +233,12 @@ export async function installFromMarketplace(
     throw new MarketplaceInstallerError(
       "SHA256_HEADER_MISMATCH",
       `X-Plugin-SHA256 header mismatch for ${slug}@${version}: header=${sha256Header} computed=${computedSha256}`,
+    );
+  }
+  if (expectedArtifactSha256 && expectedArtifactSha256 !== computedSha256) {
+    throw new MarketplaceInstallerError(
+      "CATALOG_SHA256_MISMATCH",
+      `marketplace artifact sha mismatch for ${slug}@${version}: catalog=${expectedArtifactSha256} computed=${computedSha256}`,
     );
   }
 

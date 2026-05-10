@@ -431,6 +431,8 @@ export interface PluginMarketplaceItem {
   tools: string[];
   /** Latest stable version string (semver). Present in remote catalog; may be absent in local mock. */
   version?: string;
+  /** SHA-256 of the latest stable marketplace artifact. Used to invalidate stale same-version cache entries. */
+  artifactSha256?: string;
   /** S8 — release channel. "stable" (default) or "canary". */
   channel?: "stable" | "canary";
   defaultConfig?: Record<string, unknown>;
