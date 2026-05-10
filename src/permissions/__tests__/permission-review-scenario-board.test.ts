@@ -346,9 +346,10 @@ describe("permission-review-scenario-board-v2.html contract", () => {
   });
 
   it("S12 MCP remote tools use the same category policy with MCP source", async () => {
-    const { pm, cleanup } = makeManager("auto", fixedClassifier({ level: "medium", reason: "remote issue create" }));
+    const classify = vi.fn((): RiskVerdict => ({ level: "low", reason: "reviewer would allow" }));
+    const { pm, cleanup } = makeManager("auto", { classify });
     try {
-      const { tool } = makeTool({ name: "mcp.repo_create_issue", category: "network", source: "mcp" });
+      const { tool, execute } = makeTool({ name: "mcp.repo_create_issue", category: "network", source: "mcp" });
       const gate = makeGate("deny-once");
       const result = await runProbe({
         tool,
@@ -357,9 +358,14 @@ describe("permission-review-scenario-board-v2.html contract", () => {
         input: { endpoint: "https://github.com/repos/lvis-project/lvis-app/issues" },
       });
       expect(result[0].is_error).toBe(true);
+      expect(execute).not.toHaveBeenCalled();
+      expect(classify).not.toHaveBeenCalled();
       expect(gate.requestAndWait).toHaveBeenCalledWith(expect.objectContaining({
         source: "mcp",
-        reason: expect.stringContaining("reviewer medium"),
+        reason: expect.stringContaining("MCP 도구 strict 강제"),
+      }));
+      expect(gate.requestAndWait).toHaveBeenCalledWith(expect.objectContaining({
+        reason: expect.not.stringContaining("reviewer"),
       }));
     } finally {
       cleanup();
