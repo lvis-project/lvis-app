@@ -109,7 +109,16 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
       onDeferredPending: vi.fn(() => () => undefined),
       hookTrustList: vi.fn(async () => ({ ok: true, active: [], disabled: [], totalDisabled: 0 })),
       dirDispatch: vi.fn(async () => ({ ok: true, verb: "list", defaults: [], userAdditions: [], effective: [] })),
-      reviewerDispatch: vi.fn(async () => ({ ok: true, verb: "show" })),
+      reviewerDispatch: vi.fn(async () => ({
+        ok: true,
+        verb: "show",
+        settings: {
+          mode: "disabled",
+          provider: "openai",
+          model: "gpt-4o-mini",
+          fallbackOnError: "deny",
+        },
+      })),
       auditShow: vi.fn(async () => ({ ok: true, entries: [], total: 0, summary: { files: 0, bytes: 0 } })),
       auditVerify: vi.fn(async () => ({ ok: true, intact: true, totalFiles: 0, totalEntries: 0, perDay: [] })),
       onManifestViolation: vi.fn(() => () => undefined),

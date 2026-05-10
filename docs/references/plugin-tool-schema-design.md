@@ -13,7 +13,7 @@
 **핵심 원칙:**
 
 1. **Capability gate = HostApi + 선언적 capability** — HostApi 자체가 1차 게이트이며, `capabilities[]`/`uiCallable[]` 는 MS Graph · 이벤트 namespace · renderer IPC allowlist 등 HostApi 단독으로 표현 불가능한 2차 게이트를 보강한다.
-2. **implement-first, declare-incrementally** — 메서드를 먼저 구현하고, LLM 파라미터 추론이 불충분할 때 `toolSchemas`를 추가한다. 빈 스키마 선언은 의미 없다.
+2. **SDK schema first** — 모든 `tools[]` 항목은 SDK manifest schema 의 `toolSchemas[tool]` 로 `description`, `category`, `pathFields?`, `inputSchema` 를 선언한다. `category` 는 권한 정책 authority metadata 이며 LLM 추론 보조 필드가 아니다.
 3. **In-process + try/catch** — worker_threads 격리 없이 95% 장애를 커버. 런타임 복잡도를 낮게 유지.
 4. **플러그인 저자가 스키마 수기 작성** — zod 자동추출 금지. 번들 크기·버전 충돌 없음.
 5. **JSON Schema draft-07 + `type: "object"` 필수** — OpenAI/Claude/Gemini 모두 top-level object 요구.
@@ -46,12 +46,16 @@ interface PluginManifest {
    */
   tools: string[];
   /**
-   * 메서드별 JSON Schema. runtime 은 LLM system prompt 에 삽입.
-   * `description` 필수 (minLength 10), `inputSchema.type === "object"` 필수.
+   * 메서드별 JSON Schema + 권한 authority metadata. runtime 은
+   * LLM system prompt 와 ToolRegistry registration 에 동일 데이터를 사용한다.
+   * `description` 필수 (minLength 10), `category` 필수,
+   * `inputSchema.type === "object"` 필수.
    * `$schema` 필드는 선택 — draft-07 URI 권장.
    */
-  toolSchemas?: Record<string, {
+  toolSchemas: Record<string, {
     description: string;                       // REQUIRED, minLength 10
+    category: "read" | "write" | "shell" | "network"; // REQUIRED
+    pathFields?: string[];                     // OPTIONAL dotted selectors
     inputSchema: {
       $schema?: string;                        // OPTIONAL ("http://json-schema.org/draft-07/schema#")
       type: "object";                          // REQUIRED, const "object"
@@ -87,6 +91,11 @@ interface PluginManifest {
   dependencies?: Array<string | { pluginId: string; versionRange?: string; required?: boolean }>;
   pluginAccess?: {
     plugins: Array<{ pluginId: string; tools?: string[]; events?: string[] }>;
+    /**
+     * Approval scopes this plugin may issue through HostApi agentApproval.
+     * Omitted means no approval scopes are granted.
+     */
+    agentApprovalScopes?: string[];
   };
   publisher?: string;
   /**
@@ -108,16 +117,15 @@ interface PluginManifest {
 >
 > 이전에는 CI 의 `bump_version.py` 가 `catalog 의 latest + 1` 으로 in-place rewrite 했지만, source `plugin.json` 과 catalog 가 갈라져서 사이드로드 (`Settings → 로컬 폴더에서 설치`) 한 플러그인에 false-positive "업데이트 있음" 배너가 떴음. **tag-as-SoT** 로 source manifest 와 catalog 가 항상 동일 — 사이드로드와 마켓플레이스 install 결과는 같은 `plugin.json` + `dist/` 레이아웃을 공유한다 (install-receipt 의 `installSource` / `signerKeyId` / `artifactSha256` 은 의도적으로 다르며 trust 표면 분리 목적).
 >
-> 이 룰의 enforcement 는 **각 plugin repo 의 `publish.yml` 워크플로우 안에서만** 일어난다. 호스트와 마켓플레이스 backend 는 catalog 상태를 trust 할 뿐 tag↔manifest 일치를 직접 강제하지 않는다 — discipline 은 publisher CI 에 있다 (`assertInstalledManifestMatchesCatalog` 는 호스트의 defense-in-depth 일 뿐 정문이 아님). 따라서 이 룰은 `lvis-plugin-*` 레포 전반에 적용되는 contract 이며, 모든 신규 플러그인 repo 의 `publish.yml` 이 이 패턴을 따라야 한다 (work-proactive 가 첫 도입; calendar/meeting/ms-graph/ep-api/local-indexer 순차 fan-out).
+> 이 룰의 enforcement 는 **각 plugin repo 의 `publish.yml` 워크플로우 안에서만** 일어난다. 호스트와 마켓플레이스 backend 는 catalog 상태를 trust 할 뿐 tag↔manifest 일치를 직접 강제하지 않는다 — discipline 은 publisher CI 에 있다 (`assertInstalledManifestMatchesCatalog` 는 호스트의 defense-in-depth 일 뿐 정문이 아님). 따라서 이 룰은 `lvis-plugin-*` 레포 전반에 적용되는 contract 이며, 모든 신규 플러그인 repo 의 `publish.yml` 이 이 패턴을 따라야 한다.
 >
 > branch push 는 publish 트리거 안 함 (`on.push.tags: ['v*.*.*']` 만 listen). dev 중 main 으로 머지해도 catalog 는 가만히 있음 — 의도된 release 시점에만 tag 로 트리거.
 >
-> **Format strictness — 5 곳에서 동일 regex** `^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`:
+> **Format strictness — 4 곳에서 동일 regex** `^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`:
 > 1. `lvis-plugin-sdk/schemas/plugin-manifest.schema.json` — AJV 가 manifest 작성 시점에 거절
-> 2. `lvis-app/schemas/plugin.schema.json` — 호스트 AJV 가 사이드로드 시점에 거절 (SDK schema 의 byte-mirror, sync-from-host 로 자동 동기화)
-> 3. `lvis-app/src/plugins/runtime/manifest-validation.ts` (`STABLE_SEMVER_RE`) — TS validator fallback (AJV schema 가 missing 일 때만 동작; 실 운영에선 AJV 가 정문)
-> 4. 각 plugin repo (6 개) + `lvis-plugin-template` 의 `.github/workflows/publish.yml` — tag 푸시 시점에 거절
-> 5. `lvis-marketplace/server/.../publisher.py` (`_SEMVER_RE`) + `schemas/plugin.schema.template.json` — POST `/api/v1/plugins/{slug}/versions` 거절
+> 2. `lvis-app/src/plugins/runtime/manifest-validation.ts` — 호스트가 SDK schema 를 resolve 해 사이드로드 시점에 거절
+> 3. 각 plugin repo (6 개) + `lvis-plugin-template` 의 `.github/workflows/publish.yml` — tag 푸시 시점에 거절
+> 4. `lvis-marketplace/server/.../publisher.py` (`_SEMVER_RE`) + `schemas/plugin.schema.template.json` — POST `/api/v1/plugins/{slug}/versions` 거절
 >
 > Pre-release (`1.2.3-rc1`) / build-metadata (`1.2.3+abc`) / leading-zero (`01.2.3`) 모두 5 곳에서 거절. 한 곳 풀어주려면 5 곳 같이 풀어야 (`host-plugin-contract-sync` 룰 적용).
 >
@@ -132,7 +140,7 @@ interface PluginManifest {
 | `icon` | plugin grid v3 popover (Lucide named-export 동적 lookup, 누락/매치 실패 시 `Plug` fallback). 옵션 필드 — 없으면 default 아이콘 | UI 렌더 |
 | `entry` | runtime.ts `require()` | boot |
 | `tools[]` | Tool Registry 등록 | boot |
-| `toolSchemas` | LLM system prompt 에 tool schema 로 삽입 | system prompt 빌드 시 |
+| `toolSchemas` | SDK manifest authority metadata + LLM system prompt tool schema | boot ToolRegistry 등록 + system prompt 빌드 |
 | `description` | 비활성 플러그인 카탈로그 (`listPluginCards`) | system prompt · UI |
 | `keywords[]` | KeywordEngine 등록 | boot |
 | `ui[]` | plugin-ui-host.tsx 마운트 | boot + UI 렌더 |
@@ -143,18 +151,18 @@ interface PluginManifest {
 | `capabilities[]` | HostApi MS Graph 게이트 + `emitEvent` namespace 게이트 | 런타임 전반 |
 | `installPolicy` | Install-policy guard + signature gate policy | install + uninstall + load |
 | `dependencies` | Marketplace dependency resolver | install |
-| `pluginAccess` | Cross-plugin tool/event access gate | runtime |
+| `pluginAccess` | Cross-plugin tool/event access gate + agent approval scope grant | runtime |
 | `publisher` | 감사 로그 · 마켓플레이스 카드 | install + 표시 |
 
-**plugin.json 전체 예시 (meeting 플러그인):**
+**plugin.json 권한 메타데이터 예시 (meeting 플러그인의 핵심 도구 발췌):**
 
 ```json
 {
-  "id": "lvis-plugin-meeting",
-  "name": "회의록 녹음",
-  "version": "1.3.0",
-  "description": "마이크 입력을 실시간으로 전사하고 요약해 회의록을 자동 생성합니다.",
-  "entry": "dist/index.js",
+  "id": "meeting",
+  "name": "LVIS Meeting",
+  "version": "0.3.2",
+  "description": "회의 녹음·음성 전사(STT)·요약 생성 플러그인.",
+  "entry": "dist/hostPlugin.js",
   "tools": [
     "meeting_start",
     "meeting_push_chunk",
@@ -167,6 +175,7 @@ interface PluginManifest {
   "toolSchemas": {
     "meeting_start": {
       "description": "회의 녹음 세션을 시작한다. 이후 meeting_push_chunk 로 오디오를 push 하고 meeting_stop 으로 종료한다.",
+      "category": "write",
       "inputSchema": {
         "type": "object",
         "required": ["sessionId"],
@@ -181,14 +190,56 @@ interface PluginManifest {
           }
         }
       }
+    },
+    "meeting_push_chunk": {
+      "description": "PCM16LE 오디오 청크를 세션에 추가. STT는 비동기 처리.",
+      "category": "write",
+      "inputSchema": {
+        "type": "object",
+        "required": ["sessionId", "chunk"],
+        "properties": {
+          "sessionId": { "type": "string" },
+          "chunk": { "type": "object" }
+        }
+      }
+    },
+    "meeting_stop": {
+      "description": "회의 녹음 세션을 종료하고 최종 전사 요약 생성을 요청한다.",
+      "category": "write",
+      "inputSchema": {
+        "type": "object",
+        "required": ["sessionId"],
+        "properties": {
+          "sessionId": { "type": "string" }
+        }
+      }
+    },
+    "meeting_transcript": {
+      "description": "저장된 회의 세션의 전사 텍스트를 조회한다.",
+      "category": "read",
+      "inputSchema": {
+        "type": "object",
+        "required": ["sessionId"],
+        "properties": {
+          "sessionId": { "type": "string" }
+        }
+      }
+    },
+    "meeting_sessions": {
+      "description": "사용 가능한 회의 세션 목록을 조회한다.",
+      "category": "read",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
     }
   },
   "keywords": [
     { "keyword": "회의록", "skillId": "meeting" },
     { "keyword": "녹음", "skillId": "meeting" }
   ],
-  "installPolicy": "admin",
-  "publisher": "the organization DX Platform Team"
+  "installPolicy": "user",
+  "publisher": "the organization's IT"
 }
 ```
 
@@ -216,13 +267,13 @@ interface PluginManifest {
 
 ### 2.2 uiCallable 보안 경계
 
-Renderer UI 는 `lvis:plugins:call` IPC 를 통해 플러그인 메서드를 직접 호출할 수 있다. 이 경로는 ConversationLoop 의 permission/scope/expansion cap 을 **우회**하므로 매니페스트 allowlist 로 좁혀야 한다. (AI 가 개시한 도구 호출은 별개로 `ApprovalGate` / `PermissionManager` 확인 UX 를 그대로 거친다.)
+Renderer UI 는 `lvis:plugins:call` IPC 를 통해 allowlist 된 플러그인 tool 호출을 요청할 수 있다. 이 IPC 는 handler 직접 호출 경로가 아니며, `PluginRuntime.callFromUi()` 의 `uiCallable ⊂ tools[]` 확인 후 ToolRegistry → ToolExecutor → PermissionManager/ApprovalGate 단일 검증 경로로 위임된다. AI 가 개시한 도구 호출과 UI 가 개시한 도구 호출은 같은 권한 정책을 통과한다.
 
 **규칙:**
 
-1. **`uiCallable ⊂ tools[]`** — allowlist 에 들어간 이름은 반드시 `tools[]` 에 선언된 이름이어야 한다. 어긋나면 매니페스트 로드 거부. 이 구조적 제약만 런타임에서 강제된다.
-2. **도구 이름 제한 없음** — 어떤 접미사든 `uiCallable` 에 넣을 수 있다. 파괴적 동작의 사용자 확인은 플러그인 UI 가 자체 구현한다 (예: 삭제 버튼 → "정말 삭제?" 다이얼로그). 보안은 코드 리뷰·마켓플레이스 심사·서명 검증으로 보장한다. 실제 위험 작업(민감 파일 경로 접근, 샌드박스 탈출 등)은 호스트의 `sensitive-paths.ts`·샌드박스 계층에서 이름이 아닌 작업의 실체로 차단한다.
-3. **Renderer IPC 게이트** — `PluginRuntime.callFromUi(method, payload)` 는 매번 `manifest.uiCallable` 을 재확인한다. allowlist 바깥 호출은 throw.
+1. **`uiCallable ⊂ tools[]`** — allowlist 에 들어간 이름은 반드시 `tools[]` 에 선언된 이름이어야 한다. 어긋나면 매니페스트 로드 거부.
+2. **권한 경로 통합** — `PluginRuntime.callFromUi(method, payload)` 는 매번 `manifest.uiCallable` 을 재확인한 뒤 host delegate 로 넘긴다. delegate 는 ToolExecutor 를 호출하므로 sensitive path, allowed directories, reviewer, hooks, audit 정책이 동일하게 적용된다.
+3. **도구 이름 제한 없음** — 어떤 접미사든 `uiCallable` 에 넣을 수 있다. 실제 위험 작업은 이름이 아니라 SDK manifest `category/pathFields` 와 host 권한 정책으로 평가한다.
 
 **예시:**
 
@@ -251,7 +302,8 @@ Renderer UI 는 `lvis:plugins:call` IPC 를 통해 플러그인 메서드를 직
 | `knowledge-index` | **enforced** | `index.*` emit 게이트. |
 | `background-watcher` | advisory | `startupTools` 기반 폴러/감시자 사용 선언. 런타임 게이트 없음 (향후 enforce 예정). |
 | `worker-client` | advisory | 외부 프로세스(Python uv 등) 워커 래퍼 선언. |
-| `conversation-trigger` | **enforced** | `triggerConversation()` 호출 필수. 사용자가 입력하지 않은 prompt 로 ConversationLoop 를 발사하는 차별화 surface — 일반 plugin 에 부여하지 말 것. proactive 두뇌 plugin 전용. 자세한 설계는 [`conversation-trigger.md`](./conversation-trigger.md) 참조. |
+| `host:overlay` | **enforced** | `triggerConversation()` 호출 필수. 사용자가 입력하지 않은 prompt 를 host overlay 에 staged 하고, 사용자 확인 후 main chat 에 삽입하는 surface — 일반 plugin 에 부여하지 말 것. proactive 두뇌 plugin 전용. 자세한 설계는 [`conversation-trigger.md`](./conversation-trigger.md) 참조. |
+| `conversation-trigger` | advisory | `triggerConversation()` 사용 의도를 표시하는 자기 식별 라벨. 런타임 게이트는 `host:overlay` 가 담당한다. |
 
 **이벤트 subscription 정책** (`classifySubscription`):
 
@@ -263,7 +315,7 @@ Renderer UI 는 `lvis:plugins:call` IPC 를 통해 플러그인 메서드를 직
 
 | Namespace | 발행자 | 비고 |
 |----------|-------|------|
-| `plugin.*` | host (`emitEvent` from `boot/types.ts`) | `plugin.installed` / `plugin.uninstalled` lifecycle. plugin 의 `hostApi.emitEvent` 와 plugin webview IPC bridge 양쪽 모두 거부. work-proactive 의 `onPluginsChanged` 가 self-event filter + `source` discriminator 로 구독. 자세한 contract 는 architecture.md §9.4a. |
+| `plugin.*` | host (`emitEvent` from `boot/types.ts`) | `plugin.installed` / `plugin.uninstalled` lifecycle. plugin 의 `hostApi.emitEvent` 와 plugin webview IPC bridge 양쪽 모두 거부. plugin lifecycle subscriber 는 `onPluginsChanged` self-event filter + `source` discriminator 로만 구독한다. 자세한 contract 는 architecture.md §9.4a. |
 | `host.*` | host main process | UI / 환경 상태 broadcast. plugin 측 emit 거부. plugin webview SDK 가 `bridge.onEvent("host.<axis>", h)` 로 구독. 현재 발행 이벤트: `host.theme.changed` (theme/chatTheme/codeTheme + computed `--lvis-*` tokens) — register 시점에 preload 가 sticky-buffer 로 1회 replay 보장 (자세한 흐름은 architecture.md §6.7.1). 추후 `host.locale.changed`, `host.online.changed` 등 추가 가능. |
 
 `task.*` 도 사실상 host-only 지만 별도 set 에 등록하지 않음 — plugin 측 emit 이 owner-mismatch 로 이미 거부되기 때문 (tasks-plugin-split paused 상태에서 plugin 측 emitter 부재).
@@ -332,7 +384,7 @@ plugin.json
    │
    ▼
 ┌──────────────────────────────────┐
-│ 2. AJV schema validation         │  schemas/plugin.schema.json
+│ 2. AJV schema validation         │  @lvis/plugin-sdk/schemas/plugin-manifest.schema.json
 │    (strict, allErrors, formats)  │  → 실패 시
 │                                  │     [manifest:<pid>] schema validation failed: <errs>
 └──────────────────────────────────┘
@@ -370,11 +422,11 @@ plugin.json
 
 ```
 [manifest:<unknown>] JSON parse error (Unexpected token ...). Example: {"id":"com.ep.sample",...}
-[manifest:lvis-plugin-meeting] schema validation failed (/path/to/plugin.json): /uiCallable/0 must match pattern "^[a-zA-Z_][a-zA-Z0-9_]*$"
-Invalid plugin manifest 'lvis-plugin-meeting' at 'startupTools[0]' (/path/to/plugin.json): entry 'meeting_watch' is not declared in tools[]. Example: add "meeting_watch" to tools[] or remove it from startupTools[]
-Invalid tool name 'meeting.start' in plugin 'lvis-plugin-meeting' at 'tools[0]' (/path/to/plugin.json): tool names must match ^[a-zA-Z_][a-zA-Z0-9_]*$ (start with letter/underscore, then letters/digits/underscores). Example: "tools": ["meeting_start"] (not "meeting.start")
+[manifest:meeting] schema validation failed (/path/to/plugin.json): /uiCallable/0 must match pattern "^[a-zA-Z_][a-zA-Z0-9_]*$"
+Invalid plugin manifest 'meeting' at 'startupTools[0]' (/path/to/plugin.json): entry 'meeting_watch' is not declared in tools[]. Example: add "meeting_watch" to tools[] or remove it from startupTools[]
+Invalid tool name 'meeting.start' in plugin 'meeting' at 'tools[0]' (/path/to/plugin.json): tool names must match ^[a-zA-Z_][a-zA-Z0-9_]*$ (start with letter/underscore, then letters/digits/underscores). Example: "tools": ["meeting_start"] (not "meeting.start")
 [plugin-runtime] managed plugin 'lvis-plugin-ms-graph' rejected — signature invalid
-[plugin-runtime] managed plugin 'lvis-plugin-meeting' rejected — signature file missing
+[plugin-runtime] managed plugin 'meeting' rejected — signature file missing
 ```
 
 각 단계는 fail-soft drop (해당 플러그인만 제외하고 나머지는 계속 로드).
@@ -464,8 +516,7 @@ import { Stack, Toggle } from "@lvis/plugin-sdk/ui";
 
 ## 3. toolSchemas 작성 가이드
 
-`toolSchemas` 는 LLM 이 파라미터를 잘못 추론하는 메서드에만 추가한다.
-top-level 은 반드시 `"type": "object"` — 모든 LLM vendor 공통 요구사항.
+`toolSchemas` 는 모든 `tools[]` 항목에 필수다. `category` 는 권한 정책의 static authority metadata 이고, `pathFields[]` 는 Layer 0/1/5 path 검사의 입력이다. top-level 은 반드시 `"type": "object"` — 모든 LLM vendor 공통 요구사항.
 `description` 은 **필수** (`minLength: 10`) — 10자 미만이면 AJV 가 거부한다.
 
 ### 예시 1: meeting_push_chunk (바이너리 데이터 포함)
@@ -474,6 +525,7 @@ top-level 은 반드시 `"type": "object"` — 모든 LLM vendor 공통 요구�
 {
   "meeting_push_chunk": {
     "description": "PCM16LE 오디오 청크를 세션에 추가. STT는 비동기 처리.",
+    "category": "write",
     "inputSchema": {
       "type": "object",
       "required": ["sessionId", "chunk"],
@@ -507,6 +559,7 @@ top-level 은 반드시 `"type": "object"` — 모든 LLM vendor 공통 요구�
 {
   "msgraph_calendar_create": {
     "description": "Microsoft Graph를 통해 캘린더 일정 생성. 참석자 이메일 배열을 지원한다.",
+    "category": "network",
     "inputSchema": {
       "type": "object",
       "required": ["title", "start", "end"],
@@ -534,6 +587,7 @@ top-level 은 반드시 `"type": "object"` — 모든 LLM vendor 공통 요구�
 {
   "msgraph_email_reply": {
     "description": "지정 이메일에 답장. msgraph_email_list 또는 msgraph_email_read로 id를 먼저 획득해야 함.",
+    "category": "network",
     "inputSchema": {
       "type": "object",
       "required": ["id", "body"],
@@ -552,6 +606,8 @@ top-level 은 반드시 `"type": "object"` — 모든 LLM vendor 공통 요구�
 
 - [ ] top-level `"type": "object"` 선언
 - [ ] `description` 10자 이상 (AJV `minLength: 10`)
+- [ ] `category` 를 `read | write | shell | network` 중 하나로 선언
+- [ ] 파일 경로 인자가 있으면 `pathFields[]` 에 dotted selector 로 선언
 - [ ] `required` 배열에 필수 파라미터 명시
 - [ ] `description`으로 LLM에 사전 조건 전달 (예: "먼저 X를 호출해야 함")
 - [ ] enum 값이 있으면 `enum` 키 사용 (LLM 환각 방지)
@@ -571,11 +627,12 @@ top-level 은 반드시 `"type": "object"` — 모든 LLM vendor 공통 요구�
 | `addTask(task)` | 액션 아이템 → LVIS 태스크 자동 생성 (host `taskService` → `~/.lvis/tasks/lvis-tasks.db` SQLite). | UI 직접 조작 대체 |
 | `saveNote(title, content)` | `~/.lvis/notes/`에 회의록·요약 저장 | 대용량 바이너리 저장 |
 | `getSecret(key)` | 암호화된 API 키 조회 | 키를 메모리에 캐시 후 재사용 (매번 호출) |
+| `callTool(toolName, payload?)` | manifest `pluginAccess.tools[]` 로 허용한 다른 플러그인 tool 을 호출. Host 가 PluginRuntime access check 후 ToolExecutor 권한 경로로 위임 | peer plugin module import, handler 직접 호출, 권한 우회 |
 <!-- PR 3c: getMsGraphToken / startMsGraphAuth / isMsGraphAuthenticated / getMsGraphAccount / onMsGraphAuthChange / withMsGraphRetry — host HostApi 에서 제거됨. ms-graph 플러그인이 자체 MSAL 소유. architecture.md §9.4a "Plugin-Owned OAuth Authentication" 참조. -->
 | `callLlm(prompt, options?)` | 호스트 LLM 으로 단발 텍스트 생성 (선제성 본문·분류·요약) | 대화 히스토리·streaming·tool_use 필요 시 (플러그인이 직접 SDK 사용) |
 | `openAuthWindow(options)` ([external-auth-consumer] 필요) | 외부 포털 interactive 로그인 창을 띄우고 지정 도메인 쿠키 수집 (Selenium/webdriver 대체) | OAuth-style localhost callback이 되는 표준 플로우 (→ MS Graph 패턴 사용) |
-| `triggerConversation(spec)` ([conversation-trigger] 필요) | 관찰된 신호를 바탕으로 ConversationLoop 를 능동적으로 발사 ("먼저 말 거는 비서" 차별화) | 사용자 input → tool 결과 패턴 (chat 으로 충분) — 자세한 사용 패턴 / 안전 계약은 [`conversation-trigger.md`](./conversation-trigger.md) |
-| `getInstalledPluginIds()` | 다른 플러그인 설치 여부 체크 — 의존성-인식 detector / 조건부 UI (예: work-proactive 가 ms-graph 설치 시에만 메일 detector 등록) | 우선순위 추론 (insertion order ≠ priority). 향후 capability-filtered 변종 (`getProvidersFor(capability)`) 가 superseding 예정 — Phase 1 은 unscoped |
+| `triggerConversation(spec)` ([host:overlay] 필요) | 관찰된 신호를 바탕으로 proactive prompt 를 host overlay 에 staged ("먼저 말 거는 비서" 차별화) | 사용자 input → tool 결과 패턴 (chat 으로 충분) — 자세한 사용 패턴 / 안전 계약은 [`conversation-trigger.md`](./conversation-trigger.md) |
+| `getInstalledPluginIds()` | 다른 플러그인 설치 여부 체크 — 의존성-인식 detector / 조건부 UI | 우선순위 추론 (insertion order ≠ priority). 향후 capability-filtered 변종 (`getProvidersFor(capability)`) 가 superseding 예정 — Phase 1 은 unscoped |
 | `onPluginsChanged(handler)` | install/uninstall 발생 시 reactive 재구성 (예: detector list rebuild). handler 는 `PluginLifecycleEvent` 받음 (`{type, pluginId, source}` discriminated union, self-event 자동 필터). production consumer 는 `source: "local-dev"` 무시 권장 | `updated` (버전 bump) — 별도 spec 진행 중 (P0 미지원). handler 는 forward-compat 위해 `default:` 분기 필수 |
 | `logEvent(level, message, data?)` | 호스트 감사 로그에 플러그인 이벤트 기록 | 디버그 전용 고빈도 로깅 (성능) |
 | `onShutdown(handler)` | 앱 종료 전 정리 작업 (DB flush, 파일 저장 등) | 긴 비동기 작업 (5s 제한) |
@@ -677,7 +734,7 @@ LVIS 는 IPC/RPC 를 **시스템 레벨 전용**으로 확정한다. 플러그�
 - **LLM → plugin tool**: `ToolRegistry` 경유. manifest `tools[]` 에 선언된 이름이 LLM 에 노출, 호출 시 `handlers[toolName]` 로 라우팅. IPC 채널 없음.
 - **Renderer UI → plugin tool**: 호스트가 제공하는 generic 핸들러 `lvis:plugins:call(toolName, payload)` 단 하나 경유. `manifest.uiCallable` allowlist 로 구조적 gating (§2.2) — 이름 패턴 차단은 없으며, 확인 UX 는 플러그인이 자체 UI 로 구현한다. 플러그인이 채널을 직접 선언하지 않는다.
 - **Plugin → host service**: `PluginHostApi` 메서드 직접 호출 (in-process).
-- **Plugin → plugin**: 이벤트 버스(`hostApi.emitEvent` / `onEvent`) 만. 직접 호출 불가. emit 은 capability 로, subscribe 는 namespace 분류로 gating.
+- **Plugin → plugin**: broadcast 는 이벤트 버스(`hostApi.emitEvent` / `onEvent`) 를 사용한다. 특정 tool 호출은 caller manifest 의 `pluginAccess.tools[]` 허가가 있을 때만 `hostApi.callTool()` 로 요청하며, Host 는 ToolExecutor 권한 경로를 다시 통과시킨다. peer module import 나 handler 직접 호출은 불가.
 
 매니페스트에 IPC 바인딩 필드는 존재하지 않으며, 플러그인 번들에서도 Electron `ipcRenderer`/`ipcMain` 을 직접 사용하면 안 된다.
 
@@ -685,43 +742,41 @@ LVIS 는 IPC/RPC 를 **시스템 레벨 전용**으로 확정한다. 플러그�
 
 ## 5. 번들 플러그인 케이스스터디
 
-### 5.1 Meeting Recorder (`lvis-plugin-meeting`)
+### 5.1 Meeting Recorder (`meeting`)
 
-**파일:** `lvis-plugin-meeting/src/hostPlugin.ts:128-200`
+**파일:** `lvis-plugin-meeting/src/hostPlugin.ts`
 
 **주요 handler:** `meeting_start` / `meeting_push_chunk` / `meeting_stop` / `meeting_transcript` / `meeting_sessions`.
 
 - `capabilities: ["meeting-recorder"]` — `meeting.*` emit 게이트 통과.
-- `uiCallable: ["meeting_transcript", "meeting_sessions"]` — 렌더러에서 직접 호출해도 안전한 조회용 메서드를 노출. (파괴적 도구를 추가할 수도 있으며, 그 경우 플러그인 UI 가 확인 다이얼로그를 책임진다.)
-- `toolSchemas` 는 `meeting_push_chunk` 에 추가 (PCM `number[]` 추론 실패 방지).
+- `uiCallable: ["meeting_transcript", "meeting_sessions"]` — 렌더러에서 호출 가능한 조회용 메서드를 노출. 호출 자체는 host delegate 를 통해 ToolExecutor 권한 경로를 통과한다.
+- `toolSchemas` 는 모든 tool 에 선언하며, `meeting_push_chunk` 는 PCM `number[]` 추론 보조와 `category` 권한 metadata 를 함께 제공한다.
 - `meeting_stop` 반환값이 크므로 LLM context 소비 주의 — 요약만 반환.
 
-### 5.2 Local Indexer (`lvis-plugin-local-indexer`)
+### 5.2 Local Indexer (`local-indexer`)
 
 **파일:** `lvis-plugin-local-indexer/src/hostPlugin.ts:210-303`
 
 - `capabilities: ["knowledge-index", "worker-client"]`.
 - Python subprocess (30s 폴링) 로 FileWatcher 대신 운영 — `index_scan` 은 멱등 설계.
 - `index_add_folder` 는 `/etc`, `/usr`, `~/.ssh` 등 위험 경로를 플러그인이 스스로 차단 — HostApi 레벨 제어 없음.
-- `toolSchemas` 권고: `index_add_folder` 에 추가.
+- `toolSchemas` 필수: `index_add_folder` 는 `category` 와 path 인자를 `pathFields[]` 로 선언한다.
 
-### 5.3 Email (`lvis-plugin-email`)
+### 5.3 MS Graph (`ms-graph`)
 
-**파일:** `lvis-plugin-email/src/hostPlugin.ts:90-191`
+**파일:** `lvis-plugin-ms-graph/src/hostPlugin.ts`
 
-- `capabilities: ["mail-source", "ms-graph-consumer", "background-watcher"]`.
-- ms-graph 플러그인 내부에서 모든 인증 필요 handler 진입부의 `if (!isAuthed()) throw` 패턴 — plugin 자체 MsalClient 가 일관 게이트 (PR 3 이후).
-- `email_analyze` 는 내부적으로 LLM 을 직접 호출하거나 `hostApi.callLlm` 으로 전환 가능.
-- `email_start_watcher`/`email_stop_watcher` 는 `startupTools` 나 UI 에서 호출하는 것이 자연스럽다.
-- `email_send` 같은 파괴적 메서드도 `uiCallable` 에 넣을 수 있다 (§2.2) — 플러그인이 전송 전 확인 다이얼로그를 자체 UI 로 구현해야 한다.
+- `capabilities: ["mail-source", "calendar-source", "ms-graph-consumer"]`.
+- 인증은 플러그인 자체 MSAL + safeStorage 경로가 소유한다. Host 는 provider-specific token HostApi 를 제공하지 않는다.
+- 메일/캘린더 mutation tool 은 `toolSchemas` 에 `category: "write" | "network"` 를 명시하고, UI 호출이 필요하면 `uiCallable` 에 선언한다.
 
-### 5.4 Calendar (`lvis-plugin-calendar`)
+### 5.4 Agent Hub (`agent-hub`)
 
-**파일:** `lvis-plugin-calendar/src/hostPlugin.ts:92-188`
+**파일:** `lvis-plugin-agent-hub/src/hostPlugin.ts`
 
-- `capabilities: ["calendar-source", "ms-graph-consumer"]`.
-- `calendar_create.attendees` 는 LLM 이 단일 문자열로 전달하는 경우가 있음 — `toolSchemas` 에 `type: "array"` 명시 필수.
-- `calendar_open_url` 은 URL scheme 검증 (https 만 허용) 을 플러그인이 직접 수행.
+- `capabilities: ["host:overlay"]` — proactive overlay staging 호출의 단일 런타임 게이트.
+- `conversation-trigger` 는 자기 식별 라벨일 뿐이며, `hostApi.triggerConversation()` 권한은 `host:overlay` 로만 부여된다.
+- 다른 플러그인 tool 호출은 `pluginAccess.tools[]` 선언 + `hostApi.callTool()` 위임 경로만 사용한다.
 
 ---
 
@@ -757,7 +812,7 @@ HostApi 에 새 메서드를 추가하려면:
 | **`toolSchemas` output schema (Phase 1)** | ❌ 기각 | 응답은 LLM 이 string 으로 재소비 가능. Phase 2 에서 재검토. |
 | **Full capability grant system** | ❌ 기각 | 현행 capability taxonomy (§2.3) + HostApi boundary 로 충분. |
 | **Hot reload (Phase 1)** | ❌ 기각 | 개발 편의 기능. GA 블로커 아님. |
-| **`triggerConversation` HostApi + `conversation-trigger` capability** | ✅ **승인** (Brain P0) | §6.1 예외 #2 — proactive trigger 는 사용자 입력 없이 ConversationLoop 를 발사하므로 audit / source-aware permission / capability gate / per-plugin rate limit (60s/6) / dedupe / source-pattern + length cap / prompt-length cap 같은 통제가 필수. 단일 consumer 라도 host 에 둠 (plugin-side 재구현 시 통제 일관성 X). 안전 계약 / spec / gate 는 [`conversation-trigger.md`](./conversation-trigger.md). |
+| **`triggerConversation` HostApi + `host:overlay` capability** | ✅ **승인** (Brain P0) | §6.1 예외 #2 — proactive trigger 는 사용자 입력 없이 host overlay 에 prompt 를 staged 하므로 audit / source-aware permission / capability gate / per-plugin rate limit (60s/6) / dedupe / source-pattern + length cap / prompt-length cap 같은 통제가 필수. 단일 consumer 라도 host 에 둠 (plugin-side 재구현 시 통제 일관성 X). `conversation-trigger` 는 advisory self-identification label 이며 런타임 권한을 부여하지 않는다. 안전 계약 / spec / gate 는 [`conversation-trigger.md`](./conversation-trigger.md). |
 
 ---
 
@@ -789,7 +844,7 @@ HostApi 에 새 메서드를 추가하려면:
 | `PluginManifest` 타입 | `src/plugins/types.ts` |
 | `PluginHostApi` 인터페이스 | `src/plugins/types.ts` |
 | 플러그인 런타임 (로딩·주입·AJV·설치 영수증 검증) | `src/plugins/runtime.ts` |
-| Manifest JSON Schema | `schemas/plugin.schema.json` |
+| Manifest JSON Schema | `@lvis/plugin-sdk/schemas/plugin-manifest.schema.json` |
 | Capability taxonomy | `src/plugins/capabilities.ts` |
 | Marketplace artifact verifier | `src/plugins/envelope-verifier.ts` |
 | Marketplace keys (host-owned) | `src/plugins/marketplace-keys.ts` |
@@ -856,6 +911,19 @@ export const createPlugin: RuntimePluginFactory = async (context) => {
   "description": "입력을 대문자로 변환하는 샘플 플러그인.",
   "entry": "dist/index.js",
   "tools": ["my_action"],
+  "toolSchemas": {
+    "my_action": {
+      "description": "입력 문자열을 대문자로 변환한다.",
+      "category": "read",
+      "inputSchema": {
+        "type": "object",
+        "required": ["input"],
+        "properties": {
+          "input": { "type": "string" }
+        }
+      }
+    }
+  },
   "installPolicy": "user"
 }
 ```
@@ -867,20 +935,18 @@ export const createPlugin: RuntimePluginFactory = async (context) => {
 - [ ] 필수 파라미터 누락 시 `throw new Error()` 로 명확한 에러 메시지
 - [ ] `dist/index.js` 가 `RuntimePluginFactory` 를 default export
 - [ ] `plugin.json` 의 `entry` 가 실제 빌드 산출물 경로
-- [ ] LLM 파라미터 추론 테스트 후 필요시 `toolSchemas` 추가 (`description` 10자 이상)
+- [ ] 모든 `tools[]` 항목에 SDK schema 기준 `toolSchemas` 추가 (`description` 10자 이상, `category`, 필요 시 `pathFields[]`)
 - [ ] marketplace publish/upload 경로로 artifact를 게시
 
 ### @lvis/plugin-sdk (현행)
 
-번들 플러그인 (`lvis-plugin-meeting` / `lvis-plugin-local-indexer` / `lvis-plugin-email` / `lvis-plugin-calendar`) 은 이미 `node_modules/@lvis/plugin-sdk` 경유로 타입/팩토리 시그니처를 공유한다. SDK 는 `src/plugins/types.ts` 의 공개 타입을 재배포한다. npm publish 파이프라인은 4개 번들 플러그인 안정화 후 확정 예정이지만, 로컬 workspace 링크는 이미 운영 중이다.
+호스트와 활성 플러그인 (`meeting` / `local-indexer` / `ms-graph` / `ep-api` / `work-proactive` / `agent-hub`) 은 released git tag 로 고정한 `@lvis/plugin-sdk` 를 사용한다. 호스트는 SDK 패키지의 `schemas/plugin-manifest.schema.json` 을 런타임에 resolve 하며, app-local schema extension 이나 플러그인별 path alias 를 두지 않는다. SDK 태그는 manifest schema, 공개 타입, `host:overlay` capability enum 의 단일 배포 단위다.
 
 ```jsonc
-// tsconfig.json (플러그인)
+// package.json
 {
-  "compilerOptions": {
-    "paths": {
-      "@lvis/plugin-sdk": ["../../lvis-app/src/plugins/types"]
-    }
+  "dependencies": {
+    "@lvis/plugin-sdk": "github:lvis-project/lvis-plugin-sdk#v5.0.3"
   }
 }
 ```

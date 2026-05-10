@@ -3,16 +3,19 @@
  *
  * 통합 도구 거버넌스:
  * - 모든 도구(Builtin/Plugin/MCP)에 대해 source + trust 기반 판정
- * - Deny-by-default: MCP 도구는 strict 모드 강제
+ * - Global strict mode is mode-first after immutable deny/proactive guards
  * - 감사 로그 연동을 위한 판정 사유 추적
  *
  * 판정 우선순위 (§4.1 + MCP per-tool override):
  * 1. deny 규칙
  * 2. MCP strict override
- * 3. allow 규칙
- * 4. MCP auto override
- * 5. 사용자 "항상 허용" 규칙
- * 6. Trust-based 기본 정책
+ * 3. proactive mutating origin guard
+ * 4. global strict mode
+ * 5. headless mutating reviewer lane
+ * 6. allow 규칙
+ * 7. MCP auto override
+ * 8. 사용자 "항상 허용" 규칙
+ * 9. Trust/category 기본 정책
  */
 import { homedir } from "node:os";
 import { resolve } from "node:path";
@@ -31,7 +34,7 @@ import type { DeferredQueue } from "./reviewer/deferred-queue.js";
 import { globMatch } from "../lib/glob-matcher.js";
 
 export type PermissionDecision = "allow" | "deny" | "ask";
-export type ExecutionMode = "default" | "strict" | "auto";
+export type ExecutionMode = "default" | "strict" | "auto" | "allow";
 
 export interface PermissionRule {
   /** 도구 이름 패턴 (glob: "memory_*", "mcp_*", "*") */
@@ -87,6 +90,8 @@ export interface PermissionCheckContext {
 export interface ReviewerDispatchInput {
   source: ToolSource;
   category: ToolCategory;
+  /** Manifest-declared path-bearing argument selectors. Dotted selectors are supported. */
+  pathFields: readonly string[];
   /** DLP-redacted finalInput — caller is responsible for redaction. */
   finalInput: Record<string, unknown>;
   allowedDirectories: string[];
@@ -352,8 +357,8 @@ export class PermissionManager {
    */
   checkDetailed(
     toolName: string,
-    source?: ToolSource,
-    category?: ToolCategory,
+    source: ToolSource,
+    category: ToolCategory,
     proactiveOrigin?: string | null,
     context: PermissionCheckContext = {},
   ): PermissionCheckResult {
@@ -364,7 +369,7 @@ export class PermissionManager {
     // upstream gate emits but a future hand-injected codepath might;
     // fail-closed on malformed input.
     const isProactive = isProactiveOrigin(proactiveOrigin ?? null);
-    const resolvedCategory: ToolCategory = category ?? classifyToolCategory(toolName);
+    const resolvedCategory: ToolCategory = category;
     const isMutating =
       resolvedCategory === "write" ||
       resolvedCategory === "shell" ||
@@ -399,6 +404,17 @@ export class PermissionManager {
       };
     }
 
+    // strict mode is mode-first after immutable deny/proactive guards:
+    // allow rules, always-allowed cache, MCP auto overrides, and reviewer
+    // auto-allow lanes must not downgrade it.
+    if (this.mode === "strict") {
+      return {
+        decision: "ask",
+        reason: `strict 모드 (trust: ${trust}, category: ${resolvedCategory})`,
+        layer: 2,
+      };
+    }
+
     if (context.headless === true && isMutating) {
       return this.categoryBasedDecision(toolName, trust, resolvedCategory, context);
     }
@@ -412,7 +428,7 @@ export class PermissionManager {
       }
     }
 
-    if (toolModeOverride === "auto" && this.mode !== "strict") {
+    if (toolModeOverride === "auto") {
       return { decision: "allow", reason: "MCP 서버 auto 모드", layer: 4 };
     }
 
@@ -458,6 +474,7 @@ export class PermissionManager {
       toolName,
       source: input.source,
       category: input.category,
+      pathFields: input.pathFields,
       trustOrigin: input.trustOrigin,
       approvalCacheKey: input.approvalCacheKey,
       finalInput: input.finalInput,
@@ -479,6 +496,7 @@ export class PermissionManager {
         toolName,
         source: input.source,
         category: input.category,
+        pathFields: input.pathFields,
         trustOrigin: input.trustOrigin,
         finalInput: input.finalInput,
         allowedDirectories: input.allowedDirectories,
@@ -527,9 +545,9 @@ export class PermissionManager {
    * is mapped to "ask" so the user is prompted instead of silently
    * permitting a headless write — fail-safe per design §1 principles.
    *
-   * MCP (trust: low) tools are always asked regardless of category —
-   * the trust axis still beats the registry decision because MCP has
-   * no manifest integrity proxy yet (Phase 4).
+   * MCP (trust: low) tools are asked in default/auto modes regardless of
+   * category; explicit allow mode is the only mode that bypasses this
+   * trust-axis prompt after Layer 0/1 hard gates.
    */
   private categoryBasedDecision(
     toolName: string,
@@ -542,6 +560,17 @@ export class PermissionManager {
       return {
         decision: "ask",
         reason: `strict 모드 (trust: ${trust}, category: ${category})`,
+        layer: 6,
+      };
+    }
+
+    // allow mode: explicit user opt-in to allow every non-hard-blocked tool.
+    // Layer 0 sensitive paths, Layer 1 allowed-directory checks, deny rules,
+    // and proactive-origin mutation guards run before this point.
+    if (this.mode === "allow") {
+      return {
+        decision: "allow",
+        reason: `전체 허용 모드 (trust: ${trust}, category: ${category})`,
         layer: 6,
       };
     }
@@ -623,12 +652,6 @@ function normalizeApprovalCacheKey(key: string | undefined): string | null {
 }
 
 /**
- * Last-resort heuristic when a caller fails to thread the static manifest
- * category through. Production paths supply the manifest category
- * directly; this is retained for test-only paths that omit the argument.
- * Returns a 5-axis category — `dangerous` is gone.
- */
-/**
  * Permission policy P3 — render a deferred-queue-friendly summary of `finalInput`.
  * Caller is expected to have already DLP-redacted; this is a pure
  * length-cap so the queue file stays manageable. Keys are sorted for
@@ -639,14 +662,4 @@ function summariseInput(input: Record<string, unknown>): string {
   for (const k of Object.keys(input).sort()) sorted[k] = input[k];
   const json = JSON.stringify(sorted);
   return json.length > 240 ? json.slice(0, 240) + "…" : json;
-}
-
-function classifyToolCategory(toolName: string): ToolCategory {
-  const readPatterns = [
-    /_(search|list|get|query|status|transcript|sessions|documents|preview|fetch)$/,
-    /^web_search$/,
-    /^web_fetch$/,
-  ];
-  if (readPatterns.some((p) => p.test(toolName))) return "read";
-  return "write";
 }

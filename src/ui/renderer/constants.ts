@@ -96,9 +96,10 @@ export function budgetToEffortIndex(budget: number): number {
 }
 
 export const EXEC_MODE_OPTIONS: { value: ExecMode; label: string; description: string }[] = [
-  { value: "default", label: "기본 (Default)", description: "위험한 도구만 승인 요구" },
-  { value: "strict", label: "엄격 (Strict)", description: "모든 도구 승인 요구" },
-  { value: "auto", label: "자동 (Auto)", description: "신뢰도 기반 자동 허용 (builtin 자동, plugin 승인, mcp 차단)" },
+  { value: "default", label: "기본", description: "읽기 도구는 허용하고 변경·셸·네트워크는 승인 요청" },
+  { value: "strict", label: "전체 물어보기", description: "읽기까지 포함해 모든 도구 실행 전 승인 요청" },
+  { value: "auto", label: "자동 검증", description: "저위험 작업은 감사 기록으로 처리하고 헤드리스 작업은 백그라운드 리뷰어가 검증" },
+  { value: "allow", label: "전체 허용", description: "하드 차단 밖 도구는 자동 허용하고 허용 디렉터리 밖 접근은 별도 승인" },
 ];
 
 // Keep in sync with src/tools/render-html.ts — the server already clamps,
@@ -109,4 +110,3 @@ export const RENDER_HTML_MAX_HEIGHT = 1200;
 export const RENDER_HTML_DEFAULT_HEIGHT = 400;
 
 export const formatTaskSource = (source: string): string => SOURCE_LABEL[source] ?? source;
-

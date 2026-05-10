@@ -201,6 +201,18 @@ describe("PermissionManager (B1 persistence)", () => {
     expect(mockStore.mode).toBe("auto");
   });
 
+  it("allow mode permits non-hard-blocked shell and MCP tools", async () => {
+    await pm.setModePersist("allow");
+
+    const shell = pm.checkDetailed("bash", "builtin", "shell");
+    const mcp = pm.checkDetailed("mcp_server__fetch", "mcp", "network");
+
+    expect(shell.decision).toBe("allow");
+    expect(shell.reason).toContain("전체 허용 모드");
+    expect(mcp.decision).toBe("allow");
+    expect(mcp.reason).toContain("전체 허용 모드");
+  });
+
   it("strict MCP tool override forces ask regardless of global auto mode", async () => {
     await pm.setModePersist("auto");
     pm.setToolModeOverride("mcp_server__write_note", "strict");
@@ -220,6 +232,35 @@ describe("PermissionManager (B1 persistence)", () => {
     expect(result.decision).toBe("allow");
     expect(result.reason).toBe("MCP 서버 auto 모드");
     expect(result.layer).toBe(4);
+
+    pm.setMode("strict");
+    const strictResult = pm.checkDetailed("mcp_server__fetch", "mcp", "network");
+
+    expect(strictResult.decision).toBe("ask");
+    expect(strictResult.reason).toContain("strict 모드");
+    expect(strictResult.layer).toBe(2);
+  });
+
+  it("strict mode asks even when an allow rule matches", () => {
+    pm.setRules([{ pattern: "read_file", action: "allow" }]);
+    pm.setMode("strict");
+
+    const result = pm.checkDetailed("read_file", "builtin", "read");
+
+    expect(result.decision).toBe("ask");
+    expect(result.reason).toContain("strict 모드");
+    expect(result.layer).toBe(2);
+  });
+
+  it("strict mode asks even when always-allowed cache matches", async () => {
+    await pm.addAlwaysAllowedPersist("write_report");
+    pm.setMode("strict");
+
+    const result = pm.checkDetailed("write_report", "builtin", "write");
+
+    expect(result.decision).toBe("ask");
+    expect(result.reason).toContain("strict 모드");
+    expect(result.layer).toBe(2);
   });
 
   it("trust-based terminal decision uses a unique layer number", () => {

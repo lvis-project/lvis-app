@@ -1417,7 +1417,8 @@ plugin-specific app branch 를 두지 않는다.
 
 | Surface | Current posture | Future direction |
 | --- | --- | --- |
-| Plugin categories | 현재 SDK manifest schema 에 per-tool `category/pathFields` 가 없다. Host 는 SDK schema 를 SOT 로 검증하고, category 가 없는 plugin tool 은 보수적으로 `write` 로 등록한다. `meta` 및 향후 host-only category 는 plugin contract 로 자동 확장되지 않는다. | SDK schema + active plugin category/pathFields 선언 완료 후 host SDK pin 상향, 그 시점부터 SDK schema hard fail |
+| Plugin categories | SDK manifest schema 의 per-tool `category/pathFields` 가 plugin tool authority SOT 이다. Host 는 SDK schema 를 그대로 검증하고, category 가 없는 plugin tool 은 hard-fail 한다. `meta` 및 향후 host-only category 는 plugin contract 로 자동 확장되지 않는다. | 추가 plugin 도입 시 SDK schema category/pathFields 선언과 plugin sanity test 를 PR merge gate 로 유지 |
+| Runtime modes | 사용자-facing 정책은 `default`(read 허용), `strict`(read 포함 전체 ask), `auto`(백그라운드 리뷰어 기반 자동 검증), `allow`(하드 차단 밖 전체 허용) 4개다. | allow mode 는 Layer 0/1/deny/proactive guard 를 우회하지 않는 opt-in 으로 유지 |
 | Permission IPC | `PERMISSIONS` 가 main / preload / sender-guard test 의 단일 channel SOT. | 새 permission channel 은 반드시 `src/shared/ipc-channels.ts` 에 먼저 추가 |
 | Reviewer | `disabled/rule/llm` 3-mode. `llm` wiring 실패는 silent downgrade 없이 fail-fast. | cost/quality telemetry 로 model default 조정 가능, fallback 은 `deny|rule` 만 |
 | Deferred queue | HIGH verdict 는 user foreground 에서 approve/reject, resolution 은 permission audit chain 에 기록. | §8 approval timeline 과 통합 표시 |
@@ -1465,7 +1466,7 @@ flowchart TB
 | 5 | Reviewer agent (multi-vendor) — headless write/shell/network 의 LOW/MED auto-allow / HIGH defer. `final = max(rule, llm)`. | §3 Layer 5 | `src/permissions/reviewer/*` |
 | 6 | Hook chain v1 (deny-only). `~/.config/lvis/hooks/{pre,post,perm}-*.sh`. Strict-deny quarantine lockfile + DLP-redacted stdin. | §3 Layer 6 | `src/hooks/script-hook-*` |
 | 7 | Discriminated-union audit (`AuditAllow`/`AuditAsk`/`AuditDeny`/`AuditDeferred`/`AuditModeChange`/`AuditManifestViolation`) + HMAC chain + daily seal. | §3 Layer 7 | `src/audit/audit-schema.ts`, `src/audit/hmac-chain.ts` |
-| 8 | `/permission` 슬래시 + user-keyboard origin gate + `--durable` modal confirm. Mode change emits `AuditModeChange`. | §3 Layer 8 | `src/permissions/permission-slash.ts` |
+| 8 | `/permission` 슬래시 + user-keyboard origin gate + `--durable` modal confirm. Modes: `default`, `strict`, `auto`, `allow`. Mode change emits `AuditModeChange`. | §3 Layer 8 | `src/permissions/permission-slash.ts` |
 | 9 | Electron preload / contextBridge 기존 sandbox — permission policy 변경 없음. | §3 Layer 9 | `src/preload.ts` |
 
 #### 6.3.3 — Trust origin classification
@@ -1550,11 +1551,11 @@ Permissions tab 은 `PERMISSIONS.hookTrustList` 를 통해 비차단 알림을 �
 
 #### 6.3.6 — Manifest integrity proxy
 
-현재 SDK manifest schema 는 plugin `toolSchemas[].category/pathFields` 를
-정의하지 않는다. 따라서 host 는 plugin tool 을 보수적 `write` 로
-등록하고, app-local authority extension 없이 SDK schema 를 SOT 로
-사용한다. Host→plugin fs boundary 에서 `ManifestIntegrityViolation` 이
-발생하면 fail-closed 로 처리한다:
+SDK manifest schema 는 plugin `toolSchemas[].category/pathFields` 를
+정의한다. 따라서 host 는 SDK manifest authority 를 그대로 Tool Registry 에
+등록하고, app-local authority extension 이나 tool-name inference 없이
+SDK schema 를 SOT 로 사용한다. Host→plugin fs boundary 에서
+`ManifestIntegrityViolation` 이 발생하면 fail-closed 로 처리한다:
 
 1. plugin id → process-wide `manifestIntegrityState.disabledPluginIds`.
 2. `AuditManifestViolation` audit entry 발행 (`pluginId`, `toolName`,
@@ -1563,9 +1564,10 @@ Permissions tab 은 `PERMISSIONS.hookTrustList` 를 통해 비차단 알림을 �
    prompt.
 4. Disabled plugin 의 후속 tool 호출 fail-deny.
 
-SDK schema/types 와 active plugin manifests 가 `category/pathFields` 를
-선언한 뒤에만 read-declared plugin tool 을 boot 시 fs proxy 로 wrap 한다.
-그 전에는 호환 shim 이나 boot-warn grace 를 두지 않는다.
+SDK schema/types 와 active plugin manifests 는 `category/pathFields` 를
+선언한다. read-declared plugin tool 은 이 manifest authority 로 등록하고,
+향후 sandboxed runtime 에서 fs proxy 를 더 강하게 적용한다.
+호환 shim 이나 boot-warn grace 를 두지 않는다.
 
 **Trade-off:** plugin 이 standard `node:fs` 직접 import 시 우회 가능
 — sandboxed plugin runtime (V8 isolated context) 도입 전까지는 partial
@@ -1620,7 +1622,7 @@ Spec §3 Layer 8 grammar (final, Phase 5):
 
 ```
 /permission                                # show current
-/permission mode strict|default|auto [--durable]
+/permission mode strict|default|auto|allow [--durable]
 /permission dir allow <path> [--session]
 /permission dir deny <path>
 /permission dir list
@@ -1727,14 +1729,16 @@ graph TB
 | Category | 의미 | 의사결정 (default mode) | 헤들리스 (routine) | 비고 |
 | --- | --- | --- | --- | --- |
 | `read` | 조회/검색 (자료를 변경하지 않음) | builtin: allow / plugin: scope-checked | allow | strict mode → ask |
-| `write` | 사용자 데이터 변경 | ask (auto mode → allow + audit) | reviewer agent | Phase 3 reviewer 미배치 시 ask |
-| `shell` | 셸 명령 실행 (Bash 등) | ask + Bash AST 검증 | reviewer (always) | AST 검증은 executor-owned gate |
-| `network` | 외부 네트워크 호출 | ask + endpoint surface | reviewer | endpoint 추출은 executor-owned surface |
+| `write` | 사용자 데이터 변경 | ask (auto/allow mode → allow + audit) | reviewer agent unless allow mode | reviewer 미배치 시 fail-closed or user ask |
+| `shell` | 셸 명령 실행 (Bash 등) | ask + Bash AST 검증 (allow mode → allow + AST) | reviewer unless allow mode | AST 검증은 executor-owned gate |
+| `network` | 외부 네트워크 호출 | ask + endpoint surface (auto/allow mode → allow + audit) | reviewer unless allow mode | endpoint 추출은 executor-owned surface |
 | `meta` | 제어 흐름 / UI 프리미티브 | `decisionOverride` 따름 | 동일 | host builtin 전용; plugin 사용 금지 |
+
+`strict` 는 mode-first 정책이다. Headless 여부와 무관하게 `read` 포함 모든 도구가 ask 로 승격되며, reviewer routing 은 default/auto 의 mutation category 에만 적용된다.
 
 **`decisionOverride` (meta 전용):** `always-allow-with-audit` (예: `ask_user_question` — 사용자에게 질문하는 도구 자체를 한번 더 승인 모달에 거는 중복 UX 차단) / `ask` (예: `agent_spawn` — `meta` 이지만 사용자 컨펌 필요).
 
-**Migration map:** v4 의 `dangerous` 단일 카테고리는 v5 에서 폐지됨. `bash` → `shell`, `agent_spawn` / `ask_user_question` → `meta`. Current SDK manifest schema does not define plugin `toolSchemas[*].category/pathFields`, so host plugin tools register as conservative `write`. Plugin category/pathFields hard-fail validation starts only after SDK schema/types, active plugin manifests, and the host SDK pin are updated together.
+**Migration map:** v4 의 `dangerous` 단일 카테고리는 v5 에서 폐지됨. `bash` → `shell`, `agent_spawn` / `ask_user_question` → `meta`. Plugin `toolSchemas[*].category/pathFields` 는 SDK manifest schema 의 authority metadata 이며, host plugin tools 는 이 metadata 없이는 등록되지 않는다.
 
 **Tool Registry 동작:**
 
@@ -2162,7 +2166,7 @@ flowchart LR
 | **task-deadline** | ~~host `TaskDeadlinePoller`~~ **(2026-05-05 host Tasks removal Phase 4)** host-side poller 제거됨 — `task.deadline.approaching` 이벤트는 더 이상 host 에서 발행되지 않음. task 소유권이 agent-hub 플러그인으로 이전 완료 (Phase 1–4 참조). | 폐기됨 (agent-hub PR #94 + Phase 4 app PR). |
 | **post-turn** ✅ | `createPostTurnSignal()` | 대화 턴 완료 후 `PostTurnHookChain` → `coordinator.notify("post-turn")`. 10분 cooldown. (B5 PR #134) |
 
-**Detector lifecycle (reactive registration).** 각 detector 는 `requires?: string[]` 로 의존하는 plugin id 를 선언한다 (예: 메일/캘린더 detector 는 `["ms-graph"]`). work-proactive 는 boot 시 + `hostApi.onPluginsChanged()` 발사 시마다 `partitionByDeps(DEFAULT_DETECTORS, getInstalledPluginIds())` 로 satisfied detector 만 `onEvent(source, ...)` 등록 → ms-graph 미설치 시 메일/캘린더 detector 는 자동으로 잠자고, 사용자가 ms-graph 를 설치하면 host 재시작 없이 detector 가 활성화된다. audit 채널 `work-proactive:detectors:active` 에 `{active, missing, sources}` 로 기록되어 "왜 이 detector 가 조용한가" 를 추적할 수 있다.
+**Detector lifecycle (reactive registration).** 각 detector 는 `requires?: string[]` 로 의존하는 provider id 또는 capability 를 선언한다. Brain plugin 은 boot 시 + `hostApi.onPluginsChanged()` 발사 시마다 현재 설치 snapshot 을 기준으로 satisfied detector 만 `onEvent(source, ...)` 등록한다. provider 미설치 시 해당 detector 는 자동으로 잠자고, 사용자가 provider 를 설치하면 host 재시작 없이 detector 가 활성화된다. audit 채널은 plugin-owned namespace 로 `{active, missing, sources}` 를 기록해 "왜 이 detector 가 조용한가" 를 추적한다.
 
 | 트리거 유형 | 예시 | 의도 |
 | --- | --- | --- |
@@ -2399,17 +2403,17 @@ graph TB
 
 ### 9.2 Plugin Manifest Spec
 
-현행 매니페스트 스키마는 `schemas/plugin.schema.json` (AJV strict, `additionalProperties: false`) 이 단일 진실 소스다. 검증 플로우·에러 포맷·capability taxonomy·uiCallable 보안 경계 등 상세 규격은 `docs/references/plugin-tool-schema-design.md` (v4) 에 정의되어 있으며, 아래는 호스트-측 구조와 필드 관계 요약이다.
+현행 매니페스트 스키마는 `@lvis/plugin-sdk/schemas/plugin-manifest.schema.json` (AJV strict, `additionalProperties: false`) 이 단일 진실 소스다. 호스트는 SDK 패키지의 스키마를 런타임에 resolve 하며 app-local schema extension, tool-name inference, compatibility grace 를 두지 않는다. 검증 플로우·에러 포맷·capability taxonomy·uiCallable 보안 경계 등 상세 규격은 `docs/references/plugin-tool-schema-design.md` (v4) 에 정의되어 있으며, 아래는 호스트-측 구조와 필드 관계 요약이다.
 
 ```json
 {
-  "id": "lvis-plugin-meeting",
-  "name": "회의록 녹음",
-  "version": "1.3.0",
-  "description": "마이크 입력을 실시간으로 전사하고 요약해 회의록을 자동 생성합니다.",
-  "entry": "dist/index.js",
-  "publisher": "the organization DX Platform Team",
-  "installPolicy": "admin",
+  "id": "meeting",
+  "name": "LVIS Meeting",
+  "version": "0.3.2",
+  "description": "회의 녹음·음성 전사(STT)·요약 생성 플러그인.",
+  "entry": "dist/hostPlugin.js",
+  "publisher": "the organization's IT",
+  "installPolicy": "user",
   "startupTimeoutMs": 8000,
 
   "tools": ["meeting_start", "meeting_push_chunk", "meeting_stop", "meeting_transcript", "meeting_sessions"],
@@ -2428,8 +2432,20 @@ graph TB
   ],
 
   "toolSchemas": {
+    "meeting_start": {
+      "description": "회의 녹음 세션을 시작한다. 이후 meeting_push_chunk 로 오디오를 push 하고 meeting_stop 으로 종료한다.",
+      "category": "write",
+      "inputSchema": {
+        "type": "object",
+        "required": ["sessionId"],
+        "properties": {
+          "sessionId": { "type": "string" }
+        }
+      }
+    },
     "meeting_push_chunk": {
       "description": "PCM16LE 오디오 청크를 세션에 추가. STT는 비동기 처리.",
+      "category": "write",
       "inputSchema": {
         "type": "object",
         "required": ["sessionId", "chunk"],
@@ -2437,6 +2453,36 @@ graph TB
           "sessionId": { "type": "string" },
           "chunk": { "type": "object" }
         }
+      }
+    },
+    "meeting_stop": {
+      "description": "회의 녹음 세션을 종료하고 최종 전사 요약 생성을 요청한다.",
+      "category": "write",
+      "inputSchema": {
+        "type": "object",
+        "required": ["sessionId"],
+        "properties": {
+          "sessionId": { "type": "string" }
+        }
+      }
+    },
+    "meeting_transcript": {
+      "description": "저장된 회의 세션의 전사 텍스트를 조회한다.",
+      "category": "read",
+      "inputSchema": {
+        "type": "object",
+        "required": ["sessionId"],
+        "properties": {
+          "sessionId": { "type": "string" }
+        }
+      }
+    },
+    "meeting_sessions": {
+      "description": "사용 가능한 회의 세션 목록을 조회한다.",
+      "category": "read",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
       }
     }
   },
@@ -2455,9 +2501,9 @@ graph TB
 | `id` | string (`^[a-zA-Z][a-zA-Z0-9._-]*$`, 3~128자) | 플러그인 식별자. **flat form 권장** (번들 플러그인은 모두 flat); dot form 허용. |
 | `name`, `version`, `entry`, `description` | string | 메타데이터. `description` ≤ 280자, `version` anchored semver. |
 | `tools` | **`string[]` (flat 이름 배열, snake_case 강제)** | LLM 에 노출되는 tool name. `^[a-zA-Z_][a-zA-Z0-9_]*$` — 도트·하이픈 금지. 호스트는 이 배열을 그대로 Tool Registry 에 등록한다 (런타임 변환 없음). |
-| `toolSchemas` | **`Record<string, { description, inputSchema, $schema? }>` (map form)** | LLM 파라미터 추론용 JSON Schema draft-07. `description` minLength 10, `inputSchema.type` const `"object"` 필수. 런타임 payload 재검증은 수행하지 않는다. |
-| `uiCallable` | `string[]` (subset of `tools[]`) | Renderer `lvis:plugins:call` IPC 허용 allowlist. 구조적 `⊂ tools[]` 제약만 런타임에서 강제되며, 도구 이름 접미사에 의한 차단은 없다. 파괴적 동작의 사용자 확인 UX 는 플러그인이 자체 UI 로 구현하고, 보안은 코드 리뷰·마켓플레이스 심사·서명 검증으로 보장한다. |
-| `capabilities` | **closed enum** (`src/plugins/capabilities.ts`) | `ms-graph-consumer` (MS Graph HostApi 게이트), `mail-source` / `calendar-source` / `meeting-recorder` / `knowledge-index` (emit namespace 게이트) — 이상 5종 **enforced**. `background-watcher`, `worker-client` — advisory. |
+| `toolSchemas` | **`Record<string, { description, category, pathFields?, inputSchema, $schema? }>` (map form)** | LLM 파라미터 추론용 JSON Schema draft-07 + 권한 정책 authority metadata. `description` minLength 10, `category ∈ read/write/shell/network` 필수, `pathFields[]` 는 dotted selector 를 허용한다. `inputSchema.type` const `"object"` 필수. 런타임 payload 재검증은 수행하지 않는다. |
+| `uiCallable` | `string[]` (subset of `tools[]`) | Renderer `lvis:plugins:call` IPC 허용 allowlist. 구조적 `⊂ tools[]` 제약을 먼저 강제한 뒤, 실제 호출은 ToolRegistry → ToolExecutor → PermissionManager/ApprovalGate 단일 경로로 위임된다. 플러그인은 별도 IPC 채널이나 직접 handler 호출 경로를 선언할 수 없다. |
+| `capabilities` | **closed enum** (`src/plugins/capabilities.ts`) | `mail-source` / `calendar-source` / `meeting-recorder` / `knowledge-index` (emit namespace 게이트), `host:overlay` (HostApi `triggerConversation` 게이트) 는 enforced. `ms-graph-consumer`, `background-watcher`, `worker-client`, `conversation-trigger` 는 advisory/self-identification label. |
 | `deployment` | `"managed" \| "user"` | managed 는 ed25519 서명 필수 (fail-closed); user 는 warn-on-missing. |
 | `startupTimeoutMs` | integer (1~60000) | `Promise.race` 기반 start() 하드 타임아웃. 초과 시 fail-soft drop. |
 | `startupTools` | `string[]` (subset of `tools[]`) | boot 시 자동 호출되는 tool 이름 (백그라운드 watcher 등). |
@@ -2472,7 +2518,7 @@ graph TB
 
 **마켓플레이스 검증:** 플러그인 repo는 sidecar signature를 만들지 않는다. Marketplace upload API가 zip/manifest/schema/version/policy/dependency/access를 검증하고 최종 artifact envelope에 서명한다. Host는 설치 시 envelope를 검증하고 install receipt를 저장한다.
 
-**검증 플로우:** marketplace envelope verification → install receipt file-hash verification → JSON.parse → AJV (`schemas/plugin.schema.json`) → cross-field (tool-name regex, `startupTools ⊂ tools`, `uiCallable ⊂ tools`, `startupTimeoutMs > 0`) → capability enforcement → entry import. 각 단계 실패 시 해당 플러그인 fail-soft drop. 에러 포맷 상세는 `docs/references/plugin-tool-schema-design.md` §2.5.
+**검증 플로우:** marketplace envelope verification → install receipt file-hash verification → JSON.parse → AJV (`@lvis/plugin-sdk/schemas/plugin-manifest.schema.json`) → cross-field (tool-name regex, `startupTools ⊂ tools`, `uiCallable ⊂ tools`, `startupTimeoutMs > 0`) → capability enforcement → entry import. 각 단계 실패 시 해당 플러그인 fail-soft drop. 에러 포맷 상세는 `docs/references/plugin-tool-schema-design.md` §2.5.
 
 규칙:
 - top-level `"type": "object"` 필수 (OpenAI / Claude / Gemini 공통 요구사항)
@@ -2628,9 +2674,9 @@ stateDiagram-v2
 | `getSecret(key)` | 암호화된 API 키 조회 | meeting, ms-graph |
 | `logEvent(level, message, data?)` | **[Phase 2]** 호스트 감사 로그에 플러그인 이벤트 기록. `level`: `"info"\|"warn"\|"error"` | 전체 |
 | `onShutdown(handler)` | **[Phase 2]** Electron `before-quit` 체인에 정리 핸들러 등록. 5s timeout. | 전체 |
-| `triggerConversation(spec)` | **[Brain P0]** 관찰 신호로부터 ConversationLoop 능동 발사 ("먼저 말 거는 비서" 차별화). `conversation-trigger` capability gated — 일반 plugin 차단. 자세한 사양: [`conversation-trigger.md`](../references/conversation-trigger.md). Brain track 은 §7 Proactive Engine 의 sub-phase 로 P0~P5 진행. | proactive (work-proactive) |
-| `getInstalledPluginIds()` | 현재 로드된 plugin id snapshot (caller 자기 자신 제외, load order). 플러그인 의존성 체크용 (예: work-proactive 가 ms-graph 설치 여부 확인). 무게이트 — 향후 capability-filtered 변종 (`getProvidersFor(capability)`) 으로 진화 예정. | proactive (work-proactive) |
-| `onPluginsChanged(handler)` | 플러그인 install/uninstall 이벤트 구독. handler 는 `PluginLifecycleEvent` 받음 (`{type: "installed", pluginId, source: "marketplace"\|"local-dev"} \| {type: "uninstalled", pluginId} \| { type: "_future"; readonly __exhaustive: never }`). Self-event 자동 필터. P0 는 `installed`/`uninstalled` 만 — `updated` 는 별도 spec. `_future` sentinel 은 type-level only (런타임에 발생 안 함) — exhaustive `switch` 를 강제하기 위한 forward-compat 가드. | proactive (work-proactive) |
+| `triggerConversation(spec)` | **[Brain P0]** 관찰 신호로부터 host overlay 에 proactive prompt 를 staged 하는 surface ("먼저 말 거는 비서" 차별화). 런타임 게이트는 `host:overlay` 단일 capability 이며, `conversation-trigger` 는 advisory self-identification label 이다. 자세한 사양: [`conversation-trigger.md`](../references/conversation-trigger.md). Brain track 은 §7 Proactive Engine 의 sub-phase 로 P0~P5 진행. | capability-bearing brain plugin |
+| `getInstalledPluginIds()` | 현재 로드된 plugin id snapshot (caller 자기 자신 제외, load order). 플러그인 의존성 체크용. 무게이트 — 향후 capability-filtered 변종 (`getProvidersFor(capability)`) 으로 진화 예정. | dependency-aware plugin |
+| `onPluginsChanged(handler)` | 플러그인 install/uninstall 이벤트 구독. handler 는 `PluginLifecycleEvent` 받음 (`{type: "installed", pluginId, source: "marketplace"\|"local-dev"} \| {type: "uninstalled", pluginId} \| { type: "_future"; readonly __exhaustive: never }`). Self-event 자동 필터. P0 는 `installed`/`uninstalled` 만 — `updated` 는 별도 spec. `_future` sentinel 은 type-level only (런타임에 발생 안 함) — exhaustive `switch` 를 강제하기 위한 forward-compat 가드. | lifecycle subscriber plugin |
 
 **`plugin.*` host-only event namespace (lifecycle 이벤트 spoof 차단)**
 
@@ -2638,7 +2684,7 @@ stateDiagram-v2
 
 - **호스트 emit (허용)**: `boot/types.ts:emitEvent` — install/uninstall 처리 끝난 직후 `ipc/domains/plugins.ts` (`lvis:plugins:install`, `lvis:plugins:uninstall`, `lvis:plugins:install-local`) 와 `main.ts` (`lvis://` deep-link install) 에서 발행. 게이트 우회는 의도된 호스트 권한.
 - **plugin emit (거부)**: `hostApi.emitEvent("plugin.installed", …)` 는 `boot/steps/plugin-runtime.ts` 의 `canEmitEvent` 가 호스트-only namespace 매칭 시 발행 무시 + warn. plugin webview 의 IPC bridge (`lvis:plugin:emit-event`) 도 동일 set 을 체크해서 `host-only-namespace:plugin` 으로 reject.
-- **subscriber**: 일반 plugin 은 `hostApi.onPluginsChanged(handler)` 로만 구독. handler 는 self-event (자기 자신이 subject 인 경우) 가 자동 필터된 상태로 받는다. 현재 work-proactive 의 detector lifecycle 재계산이 유일한 consumer (§7 detector lifecycle 참조).
+- **subscriber**: 일반 plugin 은 `hostApi.onPluginsChanged(handler)` 로만 구독. handler 는 self-event (자기 자신이 subject 인 경우) 가 자동 필터된 상태로 받는다. consumer 는 host 에 등록된 plugin id 를 역참조하지 않고 capability/manifest 계약만 사용한다.
 - **`source` discriminator**: install 시 `marketplace` / `local-dev` 구분. production consumer 는 `local-dev` 무시 권장 — 개발자의 로컬 테스트 플러그인이 downstream cascade 를 trigger 하지 않도록.
 
 **(2026-05-05 Phase 4)** `task.*` namespace 는 host-side owner 삭제로 함께 폐기됨. `TaskService`, `TaskDeadlinePoller`, `TaskView`, sidebar Tasks 탭, `lvis:tasks:*` IPC 채널, preload bridge 메서드 전체 제거 완료. tasks-plugin-split 은 COMPLETE (host out, agent-hub in).
@@ -2679,9 +2725,9 @@ PR 3 에서 Microsoft Graph 인증이 호스트에서 플러그인으로 이전�
 
 **ms-graph 한정 escape hatch — `loginInExternalBrowser` 토글 (v0.1.29 +)**: 기본은 in-app `BrowserWindow` (PR #44, agent-hub mirror) 이지만, 사용자가 configSchema 로 `loginInExternalBrowser=true` 를 설정하면 `shell.openExternal` 로 시스템 기본 브라우저에 IdP 페이지를 띄우는 옛 흐름으로 전환할 수 있다 — corp-CA / WebView2 GPO / SSO 쿠키 격리 같은 환경 회귀의 안전망. MSAL loopback redirect 가 양쪽 모드에서 동일하게 동작하기 때문에 가능한 우연이며, **다른 OAuth 플러그인이 일반화하지 말 것** (Slack/Notion/Google 등은 redirect 메커니즘이 다를 수 있음). default off 라 §9.4a "agent-hub mirror" 정책은 그대로 유효.
 
-**Capability 네이밍**: `ms-graph-consumer` 는 kebab-case capability 네이밍 컨벤션을 따르며, 동일 컨벤션으로 `mail-source`, `calendar-source`, `meeting-recorder`, `background-watcher`, `worker-client`, `knowledge-index`, `conversation-trigger` 가 사용된다.
+**Capability 네이밍**: `ms-graph-consumer` 는 kebab-case capability 네이밍 컨벤션을 따르며, 동일 컨벤션으로 `mail-source`, `calendar-source`, `meeting-recorder`, `background-watcher`, `worker-client`, `knowledge-index`, `conversation-trigger` 가 사용된다. HostApi overlay gate 는 reserved host namespace 인 `host:overlay` 를 사용한다.
 
-**Proactive Brain — `conversation-trigger` capability:** read-only "두뇌" plugin 이 신호 관찰 후 ConversationLoop 를 *능동적*으로 시작하는 surface. 이 capability 가 부여된 plugin 만 `hostApi.triggerConversation()` 호출 가능. 일반 plugin 에 부여하지 말 것 — 사용자가 입력하지 않은 prompt 를 LLM 에 흘리는 권한이므로. 안전 계약 / spec / gate 는 [`conversation-trigger.md`](../references/conversation-trigger.md) 참조.
+**Proactive Brain — `host:overlay` capability:** read-only "두뇌" plugin 이 신호 관찰 후 host overlay 에 proactive prompt 를 staged 하는 surface. `hostApi.triggerConversation()` 호출 권한은 `host:overlay` 로만 부여한다. `conversation-trigger` 는 문서화/분류용 advisory label 이며 런타임 권한을 부여하지 않는다. 일반 plugin 에 `host:overlay` 를 부여하지 말 것 — 사용자가 입력하지 않은 prompt 를 사용자에게 보여주고 확인 시 main chat 에 삽입할 수 있는 권한이므로. 안전 계약 / spec / gate 는 [`conversation-trigger.md`](../references/conversation-trigger.md) 참조.
 
 **HostApi 확장 원칙 ("3+ 플러그인 규칙"):** 새 메서드는 3개 이상의 플러그인이 동일 기능을 필요로 하거나, 보안·감사 제어가 필요한 경우에만 추가한다. 상세: `docs/references/plugin-tool-schema-design.md` §6
 
@@ -2691,7 +2737,7 @@ PR 3 에서 Microsoft Graph 인증이 호스트에서 플러그인으로 이전�
 
 호스트는 OAuth 코드를 모르며 다만 manifest 의 *선언*에 따라 plugin tool 을 dispatch 하고 standardized event 를 listen 한다.
 
-**Manifest 선언 (`schemas/plugin.schema.json`)**
+**Manifest 선언 (`@lvis/plugin-sdk/schemas/plugin-manifest.schema.json`)**
 
 ```jsonc
 {
@@ -2744,7 +2790,7 @@ hostApi.emitEvent(`${pluginId}.auth.changed`);  // 예: "ms-graph.auth.changed"
 호스트 PR landing 후 다음을 같은 sync 사이클에 맞춤:
 - `lvis-plugin-ms-graph`: `auth: { statusTool: "msgraph_status", loginTool: "msgraph_auth", logoutTool: "msgraph_signout" }` + `emittedEvents` 에 `"ms-graph.auth.changed"` + MSAL 상태 전이에서 emit
 - `lvis-plugin-ep-api`: `auth: { statusTool: "lge_status", loginTool: "lge_login" }` + `emittedEvents` 에 `"ep-api.auth.changed"` + 쿠키 auth 흐름에서 emit
-- `agent-hub`, `meeting`, `local-indexer`, `work-proactive`: auth 무관 — manifest 변경 없음.
+- auth 를 선언하지 않는 플러그인: manifest 변경 없음.
 
 **의도적으로 deferred 된 항목** — 별 PR 로 추적:
 - `auth.statusTool` 의 `outputSchema` 강제 검증 (toolSchemas 전체 outputSchema 인프라 큰 작업)
@@ -3911,7 +3957,7 @@ v5 는 v4 Final 의 설계를 그대로 유지한 상태에서, **실구현 머�
 
 v4 §4.2 의 8-step 부팅 시퀀스는 그대로 유지된다. v5 에서는 다음 두 가지 운영 보강을 덧붙인다.
 
-1. **`ensure-submodules` postinstall 훅**: 루트 `package.json`의 `postinstall` 에서 필수 플러그인 서브모듈(`lvis-plugin-meeting`, `lvis-plugin-local-indexer`, `lvis-plugin-email`)의 초기화 상태를 검증하고, 누락 시 `git submodule update --init --recursive` 를 실행한다. 누락 상태로 부팅하면 플러그인 로드 단계(§4.2 Step 6)가 침묵 실패할 수 있던 문제를 부팅 이전에 차단한다.
+1. **Managed plugin bootstrap 검증**: marketplace managed source 와 로컬 개발 설치본은 부팅 전 manifest/schema/build artifact 상태를 검증한다. 활성 플러그인 집합은 marketplace bootstrap source 와 각 플러그인 manifest 가 SOT 이며, host app 은 archived 플러그인 checkout 존재 여부에 의존하지 않는다. 누락·무결성 실패 상태로 부팅하면 플러그인 로드 단계(§4.2 Step 6)에서 해당 플러그인을 fail-closed 로 제외한다.
 2. **Dev 모드 플러그인 live-reload**: 개발 환경(`NODE_ENV !== 'production'`)에서 각 플러그인 `dist/` 를 감시하여, 빌드 산출물이 변경되면 PluginManager 에 `reloadPlugin(slug)` 이벤트를 전송한다. 프로덕션 경로는 변경 없음(매니페스트 버전 변경시에만 업데이트, §9 참조).
 
 #### §4.5.X Conversation Trace Logger (K4, 신규 v5)
