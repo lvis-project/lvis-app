@@ -1472,6 +1472,101 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
     }
   });
 
+  it("audits headless reviewer queue decisions as deferred with queue id", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "lvis-executor-headless-audit-"));
+    try {
+      const executeSpy = vi.fn(async () => ({ output: "sent", isError: false }));
+      const registry = new ToolRegistry();
+      registry.register(createDynamicTool({
+        name: "teams_send",
+        description: "Sends a Teams message.",
+        source: "plugin",
+        category: "network",
+        jsonSchema: {
+          type: "object",
+          properties: {
+            endpoint: { type: "string" },
+            method: { type: "string" },
+            payload: { type: "string" },
+          },
+        },
+        execute: executeSpy,
+      }));
+
+      const classifier: RiskClassifier = {
+        classify: vi.fn(() => ({ level: "medium", reason: "headless graph data operation" })),
+      };
+      const queue = new DeferredQueue(join(dir, "deferred-queue.jsonl"));
+      const permMgr = new PermissionManager(join(dir, "permissions.json"));
+      permMgr.setMode("auto");
+      permMgr.setReviewer({
+        classifier,
+        cache: new VerdictCache(join(dir, "reviewer-cache.jsonl")),
+        deferredQueue: queue,
+      });
+
+      const appendPermissionAuditEntry = vi.fn(async (entry: Record<string, unknown>) => ({
+        ...entry,
+        prevHash: "h",
+      }));
+      const auditLogger = {
+        log: vi.fn(),
+        isPermissionAuditChainReady: vi.fn(() => true),
+        assertPermissionAuditWritable: vi.fn(),
+        appendPermissionAuditEntry,
+      };
+      const executor = new ToolExecutor(
+        registry,
+        undefined,
+        permMgr,
+        undefined,
+        undefined,
+        undefined,
+        auditLogger as never,
+      );
+
+      const results = await executor.executeAll(
+        [{
+          id: "tu-headless-deferred-audit",
+          name: "teams_send",
+          input: {
+            endpoint: "https://graph.microsoft.com/v1.0/teams/t/channels/c/messages",
+            method: "POST",
+            payload: "meeting summary",
+          },
+        }],
+        {
+          sessionId: "sess-headless-deferred-audit",
+          permissionContext: userPermissionContext({
+            headless: true,
+            trustOrigin: "llm-tool-arg",
+          }),
+        },
+      );
+
+      const pending = queue.listPending();
+      expect(results[0].is_error).toBe(true);
+      expect(executeSpy).not.toHaveBeenCalled();
+      expect(pending).toHaveLength(1);
+      expect(auditLogger.log).toHaveBeenCalledWith(expect.objectContaining({
+        toolCalls: [expect.objectContaining({ permissionDecision: "deferred" })],
+      }));
+      expect(appendPermissionAuditEntry).toHaveBeenCalledWith(expect.objectContaining({
+        decision: "deferred",
+        tool: "teams_send",
+        source: "plugin",
+        category: "network",
+        queueId: pending[0].id,
+        reviewerVerdict: expect.objectContaining({
+          level: "medium",
+          reason: "headless graph data operation",
+        }),
+      }));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("user-supplied additionalDirectories grants access without modal", async () => {
     const executeSpy = vi.fn(async () => "ok");
     const registry = new ToolRegistry();
