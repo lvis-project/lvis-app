@@ -40,7 +40,10 @@ describe("createRoutineEngine", () => {
       prePrompt: "오늘 업무 맥락 정리",
     });
 
-    expect(mockLoop.runTurn).toHaveBeenCalledWith("오늘 업무 맥락 정리");
+    // routine-engine-v2 calls loop.runTurn(prePrompt, undefined, signal) —
+    // the second/third args are the model-override and AbortSignal slots
+    // (RoutineEngine doesn't pass either, so both default to undefined).
+    expect(mockLoop.runTurn).toHaveBeenCalledWith("오늘 업무 맥락 정리", undefined, undefined);
     expect(result.routineId).toBe("schedule-daily");
     expect(result.trigger).toBe("schedule");
   });
