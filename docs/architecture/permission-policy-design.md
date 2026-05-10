@@ -188,7 +188,7 @@ export function canonicalizePathForMatch(rawPath: string): string {
 - SSH keys outside `.ssh/`: `**/id_{rsa,ed25519,ecdsa}` (generic glob)
 - **LVIS 자체:** `~/.lvis/secrets/**`, `~/.lvis/audit*`, `~/.lvis/permissions/deferred-queue.jsonl`, `~/.lvis/sessions/**`, `~/.config/lvis/hooks/**`
 
-**`pathFields[]` declaration (security review m1):** 각 tool 의 manifest 에 path-typed input fields 명시. `extractTargetFilePath` 가 모든 string field scan 하지 않고 declared 만 검사. 미선언 field → deny-by-default 또는 manifest validation fail.
+**`pathFields[]` declaration (current + cutover):** native host tools declare path-typed input fields through the `Tool.pathFields[]` contract. `extractTargetFilePath` scans declared fields only, not every string field. Current SDK manifest schema does not expose plugin `toolSchemas[].pathFields`, so plugin tools without SDK-backed path metadata are registered as conservative `write` calls and go through ask/reviewer rather than path-target auto-allow. Future plugin `pathFields[]` requires SDK schema/types first, then active plugin manifests, then host SDK pin update.
 
 ### Layer 1 — Path policy (NEW, collapsed from Layer 1+10)
 
@@ -279,7 +279,7 @@ registerToolCategory({
 });
 ```
 
-**Manifest validation:** category enum 은 registry 에서 동적으로 추출 (`Array.from(registry.keys())`). 미선언 category → manifest 검증 fail.
+**Manifest validation:** category enum 은 host `ToolRegistry` 내부 contract 에서만 사용한다. Current SDK manifest schema does not define `toolSchemas[].category`, so plugin manifests cannot declare it and host plugin tools register as `write`. SDK schema/types and active plugin manifests must land before plugin category hard-fail validation is enabled.
 
 **Trust boundary (review C2):** `source === "plugin"` 인 invocation 의 카테고리 결정 시 *static manifest category* 만 사용. plugin 의 `isReadOnly()` 호출 금지. `source === "builtin"` 만 input-aware (`isReadOnly(input)`).
 
@@ -591,7 +591,7 @@ compat/fallback surface 는 제외하고, host/app/plugin contract 는 다음 �
 ### Phase 1 — Critical fix-ups (PR #632 in-place) ✅
 - C2 trust boundary fix
 - C3 path traversal regression test
-- C4 `allowedPlugins=[]` deny-all test
+- C4 routine `scope.pluginIds={mode:"deny-all"}` test
 - C5 SDK schema host:overlay sync (PR sdk#125)
 - (deferred to Phase 6) C1 6 plugin manifests category 선언
 
@@ -601,7 +601,7 @@ compat/fallback surface 는 제외하고, host/app/plugin contract 는 다음 �
 - 기존 `dangerous` 마이그레이션 (bash → shell, agent-spawn/ask-user → meta + decisionOverride)
 - Native file tools Phase 1: `read_file`, `list_files`, `glob_files`, `grep_files`, `write_file`, `edit_file`
 - Native tools Phase 2: `apply_patch`, `move_file`, `delete_file`, `powershell`
-- Authority-sensitive tool approval identity: tools may publish `approvalCacheKey(input, ctx)` so allow/deny rules bind to the exact capability scope, not only the tool name. `schedule_routine` keys include the normalized `allowedPlugins` scope, shell tools key command+cwd, and write-capable native file tools key canonical target path(s) so one approval cannot authorize unrelated plugin scope, shell command, or filesystem target.
+- Authority-sensitive tool approval identity: tools may publish `approvalCacheKey(input, ctx)` so allow/deny rules bind to the exact capability scope, not only the tool name. `schedule_routine` keys include the normalized routine plugin scope, shell tools key command+cwd, and write-capable native file tools key canonical target path(s) so one approval cannot authorize unrelated plugin scope, shell command, or filesystem target.
 - Native tools receive `ToolExecutionContext.allowedDirectories` from the executor and use that single scope for internal sandbox checks. `permissions.additionalDirectories` therefore affects Layer 1 and tool-local validation identically.
 - `glob_files` and `grep_files` scan within the bounded traversal budget, then apply include/content filtering before the user-visible result limit so late valid matches are not skipped by early non-matching files.
 - Per-tool allow/deny audit decisions and hook quarantine events are double-written to the HMAC-chained permission audit channel while the general telemetry channel remains during parity verification.
@@ -656,7 +656,7 @@ compat/fallback surface 는 제외하고, host/app/plugin contract 는 다음 �
 - SDK schema 에 `toolSchemas[*].category` 와 `toolSchemas[*].pathFields` 를 추가한다.
 - 6 plugin (agent-hub, work-proactive, meeting, local-indexer, ms-graph, ep-api) plugin.json 에 authority metadata 를 추가한다.
 - Each plugin PR includes: category/pathFields declaration + sanity test (manifest claim ↔ runtime fs proxy 결과 일치).
-- App host 는 SDK schema 를 그대로 사용한다. SDK 및 active plugin merge 전까지 app-local category schema extension, boot-warn grace, legacy alias 를 두지 않는다.
+- App host 는 SDK schema 를 그대로 사용한다. SDK 및 active plugin merge 전까지 app-local category schema extension, boot-warn grace, compatibility alias 를 두지 않는다.
 - 모든 plugin 머지 후 host 가 missing category/pathFields 를 SDK schema hard-fail 로 받도록 SDK pin 을 올린다.
 
 ### 5.2 Forward direction
@@ -668,7 +668,7 @@ compat/fallback surface 는 제외하고, host/app/plugin contract 는 다음 �
 | Hook hardening follow-up | Signed hook (minisign 또는 동등 수준), hook hash 를 reviewer cache `invalidationKey` 에 포함, `modify` action 검토 | signing 전까지 v1 hook 은 deny-only 유지 |
 | DLP depth follow-up | Hook stdin / reviewer input 의 bounded deep-redaction (cycle/size guard 포함) | "nested object 는 host 밖으로 나갈 수 있다"는 현재 contract 를 더 강하게 만드는 방향만 허용 |
 | Plugin sandbox follow-up | V8 isolate / Worker thread / permissioned fs facade 비교 후 manifest integrity proxy 를 보조층으로 격하 | app 이 plugin code 를 역참조하지 않음 |
-| Manifest authority hard-fail follow-up | SDK schema + active plugin category/pathFields 선언 완료 후 host SDK pin 상향 | legacy shim 없이 hard fail |
+| Manifest authority hard-fail follow-up | SDK schema + active plugin category/pathFields 선언 완료 후 host SDK pin 상향 | compatibility shim 없이 hard fail |
 | Governance integration follow-up | §8 Agent Approval 과 permission tool audit 를 공통 timeline 으로 연결 | single decision / single prompt 원칙 유지 |
 
 ## 6. Open questions

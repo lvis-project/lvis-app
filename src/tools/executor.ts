@@ -73,6 +73,7 @@ export interface ToolCallMeta {
 function extractTargetFilePaths(
   tool: import("./base.js").Tool,
   input: unknown,
+  cwd: string,
 ): string[] {
   if (!input || typeof input !== "object") return [];
   const obj = input as Record<string, unknown>;
@@ -84,7 +85,7 @@ function extractTargetFilePaths(
     for (const value of values) {
       if (typeof value !== "string" || value.length === 0) continue;
       try {
-        paths.push(resolveToolPathForPermission(value, process.cwd()));
+        paths.push(resolveToolPathForPermission(value, cwd));
       } catch {
         // Tool schema validation owns argument-type failures.
       }
@@ -241,7 +242,7 @@ export interface ToolPermissionContext {
 
 /**
  * Permission policy Phase 2 — bundled execution options for {@link ToolExecutor.executeAll}
- * and {@link ToolExecutor.executeOne}. Replaces the legacy 9-positional-arg
+ * and {@link ToolExecutor.executeOne}. Replaces the positional-arg
  * shape so adding a new pipeline-wide concern (per-turn telemetry, audit
  * correlation id, …) doesn't ripple through every callsite. A missing
  * permission context is a strict-deny condition for concrete tool execution.
@@ -287,8 +288,9 @@ function maskToolInputForDisplay(input: Record<string, unknown>): Record<string,
 function approvalCacheKeyFor(
   tool: import("./base.js").Tool,
   input: Record<string, unknown>,
+  cwd: string,
 ): string | undefined {
-  const rawKey = tool.approvalCacheKey?.(input, { cwd: process.cwd() });
+  const rawKey = tool.approvalCacheKey?.(input, { cwd });
   if (rawKey === undefined) return undefined;
   const key = rawKey.trim();
   if (!key) {
@@ -313,15 +315,16 @@ function auditTrustOrigin(context?: ToolPermissionContext): HookTrustOrigin {
 function auditDirectoryForInput(
   tool: import("./base.js").Tool | undefined,
   input: Record<string, unknown>,
-): string {
+  cwd: string,
+): string | undefined {
   if (tool) {
-    const [targetPath] = extractTargetFilePaths(tool, input);
+    const [targetPath] = extractTargetFilePaths(tool, input, cwd);
     if (targetPath) return targetPath;
     if (tool.category === "shell" && typeof input.cwd === "string" && input.cwd.length > 0) {
-      return pathResolve(input.cwd);
+      return resolveToolPathForPermission(input.cwd, cwd);
     }
   }
-  return process.cwd();
+  return undefined;
 }
 
 function permissionAuditBase(args: {
@@ -353,6 +356,7 @@ function permissionAuditEntryFromToolCall(args: {
   permission: PermissionCheckResult | undefined;
   rateLimitRemaining: number;
   trustOrigin: HookTrustOrigin;
+  cwd: string;
 }): PermissionAuditEntryInput {
   const base = permissionAuditBase(args);
   if (args.permission?.decision === "deny") {
@@ -369,13 +373,16 @@ function permissionAuditEntryFromToolCall(args: {
       denyReasons,
     };
   }
+  const auditDirectory = auditDirectoryForInput(args.tool, args.input, args.cwd);
   const allowEntry: Extract<PermissionAuditEntryInput, { decision: "allow" }> = {
     ...base,
     decision: "allow",
-    directory: auditDirectoryForInput(args.tool, args.input),
-    directoryAllowed: true,
     layer: args.permission?.layer ?? 6,
   };
+  if (auditDirectory) {
+    allowEntry.directory = auditDirectory;
+    allowEntry.directoryAllowed = true;
+  }
   if (Number.isFinite(args.rateLimitRemaining)) {
     allowEntry.rateLimitRemaining = args.rateLimitRemaining;
   }
@@ -390,14 +397,19 @@ function permissionAuditAskEntryFromToolCall(args: {
   input: Record<string, unknown>;
   permission: PermissionCheckResult;
   trustOrigin: HookTrustOrigin;
+  cwd: string;
 }): PermissionAuditEntryInput {
-  return {
+  const auditDirectory = auditDirectoryForInput(args.tool, args.input, args.cwd);
+  const askEntry: Extract<PermissionAuditEntryInput, { decision: "ask" }> = {
     ...permissionAuditBase(args),
     decision: "ask",
-    directory: auditDirectoryForInput(args.tool, args.input),
     layer: args.permission.layer,
     reason: args.permission.reason,
   };
+  if (auditDirectory) {
+    askEntry.directory = auditDirectory;
+  }
+  return askEntry;
 }
 
 // ─── Rate Limiter (tool-governance.md §9) ──────────
@@ -631,6 +643,7 @@ export class ToolExecutor {
       permissionContext,
     } = opts;
     const startTime = Date.now();
+    const executionCwd = process.cwd();
     const meta: ToolCallMeta = { groupId, toolUseId: toolUse.id, displayOrder };
     let permissionResult: PermissionCheckResult | undefined;
     let source: ToolSource = "builtin";
@@ -658,7 +671,7 @@ export class ToolExecutor {
       };
       emitToolStart(callbacks, toolUse.name, toolUse.input, meta);
       callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-      await this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, blockedPermission, Infinity, permissionContext, invocationCategory);
+      await this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, blockedPermission, Infinity, permissionContext, invocationCategory, executionCwd);
       return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
     }
 
@@ -673,7 +686,7 @@ export class ToolExecutor {
       const durationMs = Date.now() - startTime;
       emitToolStart(callbacks, toolUse.name, toolUse.input, meta);
       callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-      await this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, permissionResult, Infinity, permissionContext, invocationCategory);
+      await this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, permissionResult, Infinity, permissionContext, invocationCategory, executionCwd);
       return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
     }
 
@@ -683,7 +696,7 @@ export class ToolExecutor {
     if (finalInput !== toolUse.input) {
       invocationCategory = resolveInvocationCategory(tool, finalInput);
     }
-    const approvalCacheKey = approvalCacheKeyFor(tool, finalInput);
+    const approvalCacheKey = approvalCacheKeyFor(tool, finalInput, executionCwd);
     const invocationPermissionContext: ToolPermissionContext = {
       ...permissionContext,
       ...(approvalCacheKey ? { approvalCacheKey } : {}),
@@ -697,7 +710,7 @@ export class ToolExecutor {
     if (invocationCategory === "shell") {
       const shellPathViolation = shellPathPolicyViolation(
         finalInput,
-        process.cwd(),
+        executionCwd,
         invocationRuntimeAllowedDirectories,
       );
       if (shellPathViolation) {
@@ -713,7 +726,7 @@ export class ToolExecutor {
         };
         emitToolStart(callbacks, toolUse.name, finalInput, meta);
         callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-        await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, blockedPermission, Infinity, invocationPermissionContext, invocationCategory);
+        await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, blockedPermission, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
         return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
       }
     }
@@ -730,7 +743,7 @@ export class ToolExecutor {
         const durationMs = Date.now() - startTime;
         emitToolStart(callbacks, toolUse.name, finalInput, meta);
         callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-        await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { decision: "deny", reason: bashResult.reason ?? "bash AST", layer: 0 }, Infinity, invocationPermissionContext, invocationCategory);
+        await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { decision: "deny", reason: bashResult.reason ?? "bash AST", layer: 0 }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
         return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
       }
       if (bashResult.decision === "warn") {
@@ -738,7 +751,7 @@ export class ToolExecutor {
       }
     }
 
-    const targetFilePaths = extractTargetFilePaths(tool, finalInput);
+    const targetFilePaths = extractTargetFilePaths(tool, finalInput, executionCwd);
     // Permission policy P2.5 — frozen-canonical contract: canonicalize ONCE here and
     // reuse the same string for Layer 0 (sensitive-path) + Layer 1
     // (allowed-directories) checks below. No layer re-resolves the path.
@@ -764,7 +777,7 @@ export class ToolExecutor {
         };
         emitToolStart(callbacks, toolUse.name, finalInput, meta);
         callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-        await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, blockedPermission, Infinity, invocationPermissionContext, invocationCategory);
+        await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, blockedPermission, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
         return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
       }
     }
@@ -782,7 +795,7 @@ export class ToolExecutor {
       };
       emitToolStart(callbacks, toolUse.name, finalInput, meta);
       callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-      await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, blockedPermission, Infinity, invocationPermissionContext, invocationCategory);
+      await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, blockedPermission, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
       return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
     }
 
@@ -856,6 +869,7 @@ export class ToolExecutor {
               invocationCategory,
               finalInput,
               dirLayerResult,
+              executionCwd,
               invocationPermissionContext,
             );
             decision = await this.approvalGate.requestAndWait(approvalRequest);
@@ -864,7 +878,7 @@ export class ToolExecutor {
             const durationMs = Date.now() - startTime;
             emitToolStart(callbacks, toolUse.name, finalInput, meta);
             callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-            await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, dirLayerResult, Infinity, invocationPermissionContext, invocationCategory);
+            await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, dirLayerResult, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
             return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
           }
 
@@ -873,7 +887,7 @@ export class ToolExecutor {
             const durationMs = Date.now() - startTime;
             emitToolStart(callbacks, toolUse.name, finalInput, meta);
             callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-            await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...dirLayerResult, decision: "deny" }, Infinity, invocationPermissionContext, invocationCategory);
+            await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...dirLayerResult, decision: "deny" }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
             return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
           }
           const approvedDirectory = decision.choice === "allow-always"
@@ -893,7 +907,7 @@ export class ToolExecutor {
               const durationMs = Date.now() - startTime;
               emitToolStart(callbacks, toolUse.name, finalInput, meta);
               callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-              await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...dirLayerResult, decision: "deny" }, Infinity, invocationPermissionContext, invocationCategory);
+              await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...dirLayerResult, decision: "deny" }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
               return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
             }
           }
@@ -936,7 +950,7 @@ export class ToolExecutor {
             log.warn(msg);
             emitToolStart(callbacks, toolUse.name, finalInput, meta);
             callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-            await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...dirLayerResult, decision: "deny", reason: reviewerResult.permissionResult.reason }, Infinity, invocationPermissionContext, invocationCategory);
+            await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...dirLayerResult, decision: "deny", reason: reviewerResult.permissionResult.reason }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
             return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
           }
         } else {
@@ -946,7 +960,7 @@ export class ToolExecutor {
           log.error(msg);
           emitToolStart(callbacks, toolUse.name, finalInput, meta);
           callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-          await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...dirLayerResult, decision: "deny" }, Infinity, invocationPermissionContext, invocationCategory);
+          await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...dirLayerResult, decision: "deny" }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
           return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
         }
       }
@@ -1008,7 +1022,7 @@ export class ToolExecutor {
         // pre-hook args for a hook-modified invocation.
         emitToolStart(callbacks, toolUse.name, finalInput, meta);
         callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-        await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, permissionResult, Infinity, invocationPermissionContext, invocationCategory);
+        await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, permissionResult, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
         return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
       }
       if (permissionResult.decision === "ask") {
@@ -1029,7 +1043,7 @@ export class ToolExecutor {
             const durationMs = Date.now() - startTime;
             emitToolStart(callbacks, toolUse.name, finalInput, meta);
             callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-            await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, reviewerResult.permissionResult, Infinity, invocationPermissionContext, invocationCategory);
+            await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, reviewerResult.permissionResult, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
             return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
           }
         }
@@ -1070,7 +1084,7 @@ export class ToolExecutor {
             const durationMs = Date.now() - startTime;
             emitToolStart(callbacks, toolUse.name, finalInput, meta);
             callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-            await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...permissionResult, decision: "deny", reason: permHook.reason }, Infinity, invocationPermissionContext, invocationCategory);
+            await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...permissionResult, decision: "deny", reason: permHook.reason }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
             return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
           }
 
@@ -1083,6 +1097,7 @@ export class ToolExecutor {
               invocationCategory,
               finalInput,
               permissionResult,
+              executionCwd,
               invocationPermissionContext,
             );
             decision = await this.approvalGate.requestAndWait(approvalRequest);
@@ -1097,7 +1112,7 @@ export class ToolExecutor {
               ...permissionResult,
               decision: "deny",
               reason: `approval gate error: ${approvalErr instanceof Error ? approvalErr.message : String(approvalErr)}`,
-            }, Infinity, invocationPermissionContext, invocationCategory);
+            }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
             return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
           }
 
@@ -1117,7 +1132,7 @@ export class ToolExecutor {
               ...permissionResult,
               decision: "deny",
               reason: "user denied approval request",
-            }, Infinity, invocationPermissionContext, invocationCategory);
+            }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
             return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
           }
 
@@ -1145,7 +1160,7 @@ export class ToolExecutor {
             ...permissionResult,
             decision: "deny",
             reason: `approval gate missing: ${permissionResult.reason}`,
-          }, Infinity, invocationPermissionContext, invocationCategory);
+          }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
           return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
         }
       }
@@ -1165,7 +1180,7 @@ export class ToolExecutor {
       const durationMs = Date.now() - startTime;
       emitToolStart(callbacks, toolUse.name, finalInput, meta);
       callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-      await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { decision: "deny", reason: scriptPre.reason, layer: 6 }, Infinity, invocationPermissionContext, invocationCategory);
+      await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { decision: "deny", reason: scriptPre.reason, layer: 6 }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
       return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
     }
 
@@ -1176,7 +1191,7 @@ export class ToolExecutor {
       const durationMs = Date.now() - startTime;
       emitToolStart(callbacks, toolUse.name, finalInput, meta);
       callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-      await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, permissionResult, 0, invocationPermissionContext, invocationCategory);
+      await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, permissionResult, 0, invocationPermissionContext, invocationCategory, executionCwd);
       return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
     }
 
@@ -1217,7 +1232,7 @@ export class ToolExecutor {
     let uiPayload: import("../mcp/types.js").McpUiPayload | undefined;
 
     const executionContext: ToolExecutionContext = {
-      cwd: process.cwd(),
+      cwd: executionCwd,
       allowedDirectories: [...new Set(invocationRuntimeAllowedDirectories)],
       metadata: {
         sessionId: sessionId ?? "unknown",
@@ -1322,7 +1337,7 @@ export class ToolExecutor {
       toolUse.name === "ask_user_question" && source === "builtin" && !isError
         ? redactAskUserAuditOutput(displayContent)
         : displayContent;
-    await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, auditContent, isError, startTime, permissionResult, rateResult.remaining, invocationPermissionContext, invocationCategory);
+    await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, auditContent, isError, startTime, permissionResult, rateResult.remaining, invocationPermissionContext, invocationCategory, executionCwd);
 
     return { tool_use_id: toolUse.id, content, ...(isError && { is_error: true }), ...(uiPayload && { uiPayload }), durationMs };
   }
@@ -1335,6 +1350,7 @@ export class ToolExecutor {
     category: ToolCategory,
     input: Record<string, unknown>,
     permission: PermissionCheckResult,
+    cwd: string,
     permissionContext?: ToolPermissionContext,
   ): Promise<void> {
     const tool = this.toolRegistry.findByName(toolName);
@@ -1346,6 +1362,7 @@ export class ToolExecutor {
       input,
       permission,
       trustOrigin: auditTrustOrigin(permissionContext),
+      cwd,
     });
     if (!this.auditLogger.isPermissionAuditChainReady()) {
       if (this.requirePermissionAuditChain) {
@@ -1380,6 +1397,7 @@ export class ToolExecutor {
     rateLimitRemaining: number,
     permissionContext?: ToolPermissionContext,
     category?: ToolCategory,
+    cwd?: string,
   ): Promise<void> {
     try {
       const inputText = JSON.stringify(input);
@@ -1408,7 +1426,7 @@ export class ToolExecutor {
         err instanceof Error ? err.message : String(err),
       );
     }
-    if (!category) {
+    if (!category || !cwd) {
       return;
     }
     const tool = this.toolRegistry.findByName(toolName);
@@ -1421,6 +1439,7 @@ export class ToolExecutor {
       permission,
       rateLimitRemaining,
       trustOrigin: auditTrustOrigin(permissionContext),
+      cwd,
     });
     if (!this.auditLogger.isPermissionAuditChainReady()) {
       if (this.requirePermissionAuditChain) {

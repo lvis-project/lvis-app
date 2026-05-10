@@ -1728,7 +1728,7 @@ graph TB
 
 **`decisionOverride` (meta 전용):** `always-allow-with-audit` (예: `ask_user_question` — 사용자에게 질문하는 도구 자체를 한번 더 승인 모달에 거는 중복 UX 차단) / `ask` (예: `agent_spawn` — `meta` 이지만 사용자 컨펌 필요).
 
-**Migration map:** v4 의 `dangerous` 단일 카테고리는 v5 에서 폐지됨. `bash` → `shell`, `agent_spawn` / `ask_user_question` → `meta`. 플러그인 manifest 의 `toolSchemas[*].category` enum 은 registry 가 동적으로 노출 (registry 미등록 카테고리 → manifest 검증 실패).
+**Migration map:** v4 의 `dangerous` 단일 카테고리는 v5 에서 폐지됨. `bash` → `shell`, `agent_spawn` / `ask_user_question` → `meta`. Current SDK manifest schema does not define plugin `toolSchemas[*].category/pathFields`, so host plugin tools register as conservative `write`. Plugin category/pathFields hard-fail validation starts only after SDK schema/types, active plugin manifests, and the host SDK pin are updated together.
 
 **Tool Registry 동작:**
 

@@ -3,11 +3,11 @@
  * canonical {@link Tool} contract used by the §6.4 ToolRegistry.
  *
  * Uses `manifest.toolSchemas[tool]` so the LLM sees typed parameter fields.
- * Permission category and pathFields integrity are enforced here as the
- * runtime registration choke point.
+ * Plugin authority remains SDK-schema-first: the current SDK manifest does
+ * not define per-tool category/pathFields, so every plugin tool registers as
+ * a conservative mutating call.
  */
 import { createDynamicTool, type Tool } from "../tools/base.js";
-import type { ToolCategory } from "../tools/types.js";
 import type { PluginRuntime } from "./runtime.js";
 import type { PluginManifest } from "./types.js";
 import { plog, PluginPhase } from "./lifecycle-log.js";
@@ -18,12 +18,10 @@ import {
 
 interface ToolSchemaEntry {
   description?: string;
-  category?: ToolCategory;
   /** §6.4 Tool versioning — optional per-tool semver. Falls back to manifest.version. */
   version?: string;
   deprecatedSince?: string;
   replacedBy?: string;
-  pathFields?: unknown;
   inputSchema: Record<string, unknown>;
 }
 
@@ -44,46 +42,6 @@ function typedDescription(toolName: string): string {
   return `플러그인 도구: ${toolName}. inputSchema에 선언된 필드를 평면 객체로 전달하세요.`;
 }
 
-/**
- * Permission policy — current SDK manifests do not expose a tool authority
- * category. Until the SDK schema grows that SOT field, plugin tools are treated
- * as mutating host-boundary calls. If an in-memory test/future manifest object
- * supplies a category, enforce the closed plugin-owned set.
- */
-function normalizeToolCategory(toolName: string, entry: ToolSchemaEntry | undefined): ToolCategory {
-  const c = entry?.category;
-  if (c === undefined) return "write";
-  if (c === "read" || c === "shell" || c === "network") return c;
-  if (c === "write") return "write";
-  throw new Error(
-    `Invalid plugin tool schema for '${toolName}': category must be one of read, write, shell, network`,
-  );
-}
-
-function normalizePathFields(toolName: string, pathFields: unknown): string[] | undefined {
-  if (pathFields === undefined) return undefined;
-  if (!Array.isArray(pathFields)) {
-    throw new Error(
-      `Invalid plugin tool schema for '${toolName}': pathFields must be an array of inputSchema property names`,
-    );
-  }
-  const seen = new Set<string>();
-  const normalized: string[] = [];
-  for (let i = 0; i < pathFields.length; i += 1) {
-    const field = pathFields[i];
-    if (typeof field !== "string" || field.length === 0) {
-      throw new Error(
-        `Invalid plugin tool schema for '${toolName}': pathFields[${i}] must be a non-empty string`,
-      );
-    }
-    if (!seen.has(field)) {
-      seen.add(field);
-      normalized.push(field);
-    }
-  }
-  return normalized.length > 0 ? normalized : undefined;
-}
-
 function buildPluginTool(
   pluginRuntime: PluginRuntime,
   toolName: string,
@@ -98,19 +56,17 @@ function buildPluginTool(
   }
   const typed = schemaEntry.inputSchema;
   const description = schemaEntry.description ?? typedDescription(toolName);
-  const category = normalizeToolCategory(toolName, schemaEntry);
   return createDynamicTool({
     name: toolName,
     description,
     source: "plugin",
-    category,
+    category: "write",
     pluginId,
     version: schemaEntry?.version ?? manifestVersion,
     deprecatedSince: schemaEntry?.deprecatedSince,
     replacedBy: schemaEntry?.replacedBy,
-    pathFields: normalizePathFields(toolName, schemaEntry?.pathFields),
     jsonSchema: typed,
-    isReadOnly: () => category === "read",
+    isReadOnly: () => false,
     execute: async (rawInput) => {
       plog("debug", { pluginId, phase: PluginPhase.INVOKE_START, toolName, inputType: typeof rawInput, inputKeys: rawInput !== null && typeof rawInput === "object" ? Object.keys(rawInput as object).length : 0 }, "tool invocation start");
       // Some provider paths deliver tool arguments pre-serialized. Parse once
@@ -128,11 +84,10 @@ function buildPluginTool(
       // itself lives at the host→plugin fs boundary; this check is
       // the *post-violation gate* that prevents the disabled plugin
       // from running new calls.
-      if (category === "read" && manifestIntegrityState.isDisabled(pluginId)) {
+      if (manifestIntegrityState.isDisabled(pluginId)) {
         return {
           output:
-            `Plugin '${pluginId}' was disabled after violating its manifest ` +
-            `(declared category=read but attempted a write). Reinstall the plugin ` +
+            `Plugin '${pluginId}' was disabled after a manifest integrity violation. Reinstall the plugin ` +
             `to re-enable.`,
           isError: true,
         };
@@ -150,18 +105,25 @@ function buildPluginTool(
         // threw. Record the violation so subsequent calls fail closed
         // and audit + UI emit fire.
         if (err instanceof ManifestIntegrityViolation) {
-          manifestIntegrityState.recordViolation(
-            err.pluginId,
-            err.toolName,
-            err.attemptedMethod,
-          );
+          let violationAuditError: unknown;
+          try {
+            await manifestIntegrityState.recordViolation(
+              err.pluginId,
+              err.toolName,
+              err.attemptedMethod,
+            );
+          } catch (auditErr) {
+            violationAuditError = auditErr;
+          }
           plog(
             "warn",
-            { pluginId, phase: PluginPhase.INVOKE_FAIL, toolName, err },
+            { pluginId, phase: PluginPhase.INVOKE_FAIL, toolName, err, auditErr: violationAuditError },
             "manifest integrity violation",
           );
           return {
-            output: err.message,
+            output: violationAuditError
+              ? `${err.message}\nManifest violation audit failed: ${violationAuditError instanceof Error ? violationAuditError.message : String(violationAuditError)}`
+              : err.message,
             isError: true,
           };
         }

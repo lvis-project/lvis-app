@@ -146,7 +146,7 @@ describe("syncPluginToolRegistry — plugin lifecycle sync", () => {
     expect(registry.findByName("alpha_run")).toBeUndefined();
   });
 
-  it("registers plugin tool permission category and treats omitted category as conservative write", () => {
+  it("registers plugin tools as conservative write-category calls under the current SDK schema", () => {
     const registry = new ToolRegistry();
     const runtime = stubRuntime([
       {
@@ -156,7 +156,6 @@ describe("syncPluginToolRegistry — plugin lifecycle sync", () => {
           toolSchemas: {
             alpha_read: {
               description: "Read-only alpha lookup tool",
-              category: "read",
               inputSchema: { type: "object", properties: {} },
             },
             alpha_write: {
@@ -169,7 +168,7 @@ describe("syncPluginToolRegistry — plugin lifecycle sync", () => {
     ]);
 
     syncPluginToolRegistry(runtime, registry);
-    expect(registry.findByName("alpha_read")?.category).toBe("read");
+    expect(registry.findByName("alpha_read")?.category).toBe("write");
     expect(registry.findByName("alpha_write")?.category).toBe("write");
 
     const validRuntime = stubRuntime([
@@ -180,12 +179,10 @@ describe("syncPluginToolRegistry — plugin lifecycle sync", () => {
           toolSchemas: {
             alpha_read: {
               description: "Read-only alpha lookup tool",
-              category: "read",
               inputSchema: { type: "object", properties: {} },
             },
             alpha_write: {
               description: "Alpha mutating tool",
-              category: "write",
               inputSchema: { type: "object", properties: {} },
             },
           },
@@ -197,8 +194,8 @@ describe("syncPluginToolRegistry — plugin lifecycle sync", () => {
 
     const read = registry.findByName("alpha_read");
     const write = registry.findByName("alpha_write");
-    expect(read?.category).toBe("read");
-    expect(read?.isReadOnly({})).toBe(true);
+    expect(read?.category).toBe("write");
+    expect(read?.isReadOnly({})).toBe(false);
     expect(write?.category).toBe("write");
     expect(write?.isReadOnly({})).toBe(false);
   });

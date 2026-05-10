@@ -8,6 +8,8 @@ import {
   isSensitivePath,
 } from "../permissions/sensitive-paths.js";
 
+const DYNAMIC_PATH_COMPOSITION_COMMANDS = new Set(["join-path"]);
+
 export function validateShellWorkingDirectory(
   cwd: string,
   sandboxRoot: string,
@@ -27,6 +29,10 @@ export function validateShellCommandPathPolicy(
   sandboxRoot: string,
   allowedDirectories: readonly string[],
 ): string | null {
+  const dynamicPathComposition = findDynamicPathComposition(command);
+  if (dynamicPathComposition) {
+    return dynamicPathComposition;
+  }
   const candidates = extractPathCandidates(command);
   for (const candidate of candidates) {
     let absolute: string;
@@ -42,6 +48,20 @@ export function validateShellCommandPathPolicy(
     const check = validateSandboxPath(absolute, sandboxRoot, [...allowedDirectories]);
     if (!check.allowed) {
       return `Sandbox: ${check.reason}`;
+    }
+  }
+  return null;
+}
+
+function findDynamicPathComposition(command: string): string | null {
+  for (const token of tokenizeCommand(command)) {
+    const normalized = token
+      .replace(/^[({]+/g, "")
+      .replace(/[),]+$/g, "")
+      .trim()
+      .toLowerCase();
+    if (DYNAMIC_PATH_COMPOSITION_COMMANDS.has(normalized)) {
+      return `Sandbox: dynamic path composition is not allowed: ${token}`;
     }
   }
   return null;

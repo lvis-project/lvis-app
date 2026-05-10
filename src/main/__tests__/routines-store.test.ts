@@ -2,14 +2,14 @@
  * RoutinesStore v2 — coverage mirrors RemindersStore H4 tests.
  *
  * - Invalid `at` rejection.
- * - 50-record cap enforcement (Q6).
+ * - 50-record cap enforcement.
  * - Atomic write (tmp file replaced, no half-write).
  * - File mode 0o600 on POSIX.
- * - Monthly clamping (Q5) — Feb 28/29, April 30.
+ * - Monthly clamping — Feb 28/29, April 30.
  * - markFired advances daily/weekly/monthly/interval repeat.
  */
 import { describe, it, expect } from "vitest";
-import { mkdtempSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir, platform } from "node:os";
 import { RoutinesStore, MAX_PERSISTED_ROUTINES, MAX_LLM_SESSION_ROUTINES } from "../routines-store.js";
@@ -59,9 +59,34 @@ describe("RoutinesStore v2 — basic persistence", () => {
       cleanup();
     }
   });
+
+  it("rejects non-canonical routine records with flat plugin scope fields", async () => {
+    const { store, dir, cleanup } = tempStore();
+    try {
+      writeFileSync(
+        join(dir, "routines.json"),
+        JSON.stringify({
+          version: 2,
+          routines: [{
+            id: "legacy-scope",
+            trigger: "schedule",
+            execution: "notification-only",
+            notificationTitle: "legacy",
+            allowedPlugins: ["meeting"],
+          }],
+        }),
+      );
+
+      await store.load();
+
+      expect(store.list()).toEqual([]);
+    } finally {
+      cleanup();
+    }
+  });
 });
 
-describe("RoutinesStore v2 — cap enforcement (Q6)", () => {
+describe("RoutinesStore v2 — cap enforcement", () => {
   it("rejects after the 50-record cap is reached", async () => {
     const { store, cleanup } = tempStore();
     try {
@@ -241,7 +266,7 @@ describe("RoutinesStore v2 — markFired repeat advancement", () => {
     }
   });
 
-  it("monthly clamping: Jan 31 → Feb stays within Feb (Q5)", async () => {
+  it("monthly clamping: Jan 31 → Feb stays within Feb", async () => {
     const { store, cleanup } = tempStore();
     try {
       // Use a past date: Jan 31, 2026
@@ -386,7 +411,7 @@ describe("RoutinesStore v2 — execution validation", () => {
   });
 });
 
-describe("RoutinesStore v2 — Q8 LLM session sub-cap", () => {
+describe("RoutinesStore v2 — LLM session sub-cap", () => {
   it(`rejects LLM session routine after ${MAX_LLM_SESSION_ROUTINES} active LLM routines`, async () => {
     const { store, cleanup } = tempStore();
     try {
