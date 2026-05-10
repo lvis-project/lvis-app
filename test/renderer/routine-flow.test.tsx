@@ -1,7 +1,8 @@
 /**
  * Phase 3.3 safety net — routine result card lifecycle.
  *
- * onRoutineFiredV2 delivery, dismiss IPC, snooze IPC.
+ * onRoutineFiredV2 delivery + dismiss IPC. Snooze IPC was removed in PR
+ * #626 (Routine v2) — see OverlayCard.tsx comment.
  */
 import "./setup.js";
 import { describe, it, expect, vi, afterEach } from "vitest";
@@ -86,24 +87,11 @@ describe("Routine flow (Phase 3.3 regression net)", () => {
     });
   });
 
-  it("snooze trigger button is rendered with the new label", async () => {
-    // The dropdown menu pop-open + item-click flow is exercised at the hook
-    // level (hook unit tests) where we can drive timers without Radix
-    // portal/pointer-event friction.
-    // Here we only assert that the trigger exists with the redesigned label.
-    const { container, emitRoutineFiredV2 } = await renderApp();
-    await act(async () => {
-      emitRoutineFiredV2(makeRoutineResult());
-    });
-    const card = await waitFor(() => {
-      const el = container.querySelector('[data-testid="routine-card"]');
-      if (!el) throw new Error("card not rendered");
-      return el;
-    });
-    const trigger = card.querySelector('[data-testid="routine-card-snooze-trigger"]');
-    expect(trigger).toBeTruthy();
-    expect(trigger?.textContent).toContain("나중에 다시");
-  });
+  // Snooze was removed from RoutineV2 in PR #626 ("production smoke test:
+  // UX risk" — see comment in OverlayContext.tsx and OverlayCard.tsx). The
+  // previous "snooze trigger button is rendered with the new label" test
+  // pointed at a `routine-card-snooze-trigger` data-testid that no longer
+  // exists; deleting the orphan rather than leaving it to fail every run.
 
   it("stacks results with distinct routineIds and shows the index indicator", async () => {
     const { container, emitRoutineFiredV2 } = await renderApp();

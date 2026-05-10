@@ -12,6 +12,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it, expect } from "vitest";
 import { validateSender } from "../../src/ipc-bridge.js";
+import { OVERLAY_V1, ROUTINES_V2 } from "../../src/shared/ipc-channels.js";
 import type { IpcMainInvokeEvent } from "electron";
 
 // ─── Channel manifest ────────────────────────────────────────────────────────
@@ -142,9 +143,30 @@ describe("ipc-bridge.ts — TIER 1/2 channels have validateSender guard", () => 
   // remain valid against the actual implementation files.
   const domainDir = join(__dirname, "../../src/ipc/domains");
   const domainFiles = ["settings.ts", "chat.ts", "plugins.ts", "usage.ts", "audit.ts", "permissions.ts", "window.ts", "misc.ts"];
-  const source = domainFiles
+  // Inline IPC channel SoT constants (`shared/ipc-channels.ts`) into the
+  // aggregated source so handlers written as `ipcMain.handle(ROUTINES_V2.list,
+  // ...)` are matched by the same `ipcMain.handle("lvis:routines:v2:list"`
+  // pattern the test runs for the other channels. Without this, Routine v2 +
+  // Overlay V1 channels read as "not found in source" even though their
+  // handlers live in `misc.ts`.
+  const constInlinePairs: Array<[string, string]> = [];
+  for (const [key, value] of Object.entries(ROUTINES_V2)) {
+    constInlinePairs.push([`ROUTINES_V2.${key}`, `"${value}"`]);
+  }
+  for (const [key, value] of Object.entries(OVERLAY_V1)) {
+    constInlinePairs.push([`OVERLAY_V1.${key}`, `"${value}"`]);
+  }
+  // Substitute longer reference strings first so prefix collisions don't
+  // corrupt later replacements (e.g. `ROUTINES_V2.list` would otherwise
+  // partially rewrite `ROUTINES_V2.listSessions`).
+  constInlinePairs.sort((a, b) => b[0].length - a[0].length);
+  const rawSource = domainFiles
     .map((f) => readFileSync(join(domainDir, f), "utf-8"))
     .join("\n");
+  let source = rawSource;
+  for (const [ref, literal] of constInlinePairs) {
+    source = source.split(ref).join(literal);
+  }
 
   const gatedChannels = Object.entries(CHANNEL_MANIFEST)
     .filter(([, tier]) => tier === "tier1" || tier === "tier2")
@@ -159,7 +181,9 @@ describe("ipc-bridge.ts — TIER 1/2 channels have validateSender guard", () => 
       // Find the ipcMain.handle block for this channel and check that
       // validateSender appears between this channel registration and the next.
       const channelPattern = new RegExp(
-        `ipcMain\\.handle\\("${channel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`,
+        // Tolerate multi-line `ipcMain.handle(\n    "<channel>"` form too —
+        // some handlers are written across lines for readability.
+        `ipcMain\\.handle\\(\\s*"${channel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`,
       );
       const channelIdx = source.search(channelPattern);
       expect(channelIdx, `channel "${channel}" not found in ipc-bridge.ts`).toBeGreaterThan(-1);
@@ -182,7 +206,9 @@ describe("ipc-bridge.ts — TIER 1/2 channels have validateSender guard", () => 
   for (const channel of tier3Channels) {
     it(`${channel} is classified read-only (TIER 3)`, () => {
       const channelPattern = new RegExp(
-        `ipcMain\\.handle\\("${channel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`,
+        // Tolerate multi-line `ipcMain.handle(\n    "<channel>"` form too —
+        // some handlers are written across lines for readability.
+        `ipcMain\\.handle\\(\\s*"${channel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`,
       );
       const channelIdx = source.search(channelPattern);
       expect(channelIdx, `channel "${channel}" not found in ipc-bridge.ts`).toBeGreaterThan(-1);
