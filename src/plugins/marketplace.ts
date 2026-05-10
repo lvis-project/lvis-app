@@ -15,6 +15,7 @@ import type { InstallerProgressEvent } from "./marketplace-installer.js";
 import { getBundledPublicKeys } from "./publisher-keys.js";
 import { PluginArtifactStore } from "./plugin-artifact-store.js";
 import { listFilesRecursive, verifyInstallReceipt } from "./plugin-install-receipt.js";
+import type { PluginInstallReceipt } from "./plugin-install-receipt.js";
 import { STABLE_SEMVER_RE } from "./runtime/manifest-validation.js";
 import type { InstallPolicy, PluginRegistryEntry } from "./types.js";
 import { createLogger } from "../lib/logger.js";
@@ -71,6 +72,7 @@ type InstallOperationState = {
 type InstallReceiptValidation = {
   ok: boolean;
   reason?: string;
+  receipt?: PluginInstallReceipt;
 };
 
 export interface MarketplaceListItem extends PluginMarketplaceItem {
@@ -368,12 +370,9 @@ export class PluginMarketplaceService {
 
     const existingEntry = await this.getInstalledRegistryEntry(plugin.id);
     if (existingEntry) {
-      // If the requested version matches the currently-installed version (or
-      // neither specifies a concrete semver version) treat this as a no-op so
-      // repeated installs of the same release are idempotent.  When the catalog
-      // advertises a DIFFERENT version we fall through to re-install so that an
-      // "install" call can act as an in-place upgrade and stale files from the
-      // old release do not survive.
+      // Same-version installs are idempotent only when the install receipt is
+      // valid and the installed artifact hash still matches the catalog.
+      // Otherwise reinstall so cache residue cannot mask a repaired artifact.
       const installedVersion = await this.getInstalledVersion(plugin.id);
       const isSameVersion =
         !plugin.version ||
@@ -383,13 +382,19 @@ export class PluginMarketplaceService {
         ? existingEntry.manifestPath
         : resolve(dirname(this.registryPath), existingEntry.manifestPath);
       const receiptValidation = await this.getInstallReceiptValidation(plugin.id, manifestPath);
-      if (isSameVersion && receiptValidation.ok) {
+      const isSameArtifact = this.installedArtifactMatchesCatalog(plugin, receiptValidation);
+      if (isSameVersion && receiptValidation.ok && isSameArtifact) {
         await this.touchInstalledRegistryEntry(plugin.id, activeBundleRootId, actor, plugin.pluginAccess, state);
         return { pluginId: plugin.id, installed: true };
       }
       if (isSameVersion && !receiptValidation.ok) {
         log.warn(
           `installed plugin '${plugin.id}' has invalid install receipt (${receiptValidation.reason ?? "unknown"}) — reinstalling from marketplace`,
+        );
+      }
+      if (isSameVersion && receiptValidation.ok && !isSameArtifact) {
+        log.warn(
+          `installed plugin '${plugin.id}' artifact hash differs from marketplace catalog — reinstalling same version`,
         );
       }
     }
@@ -1103,9 +1108,19 @@ export class PluginMarketplaceService {
       this.installReceiptValidationCache.set(cacheKey, validation);
       return validation;
     }
-    const validation = { ok: true };
+    const validation: InstallReceiptValidation = { ok: true, receipt: result.receipt };
     this.installReceiptValidationCache.set(cacheKey, validation);
     return validation;
+  }
+
+  private installedArtifactMatchesCatalog(
+    plugin: PluginMarketplaceItem,
+    validation: InstallReceiptValidation,
+  ): boolean {
+    if (!validation.ok || !validation.receipt) return false;
+    if (validation.receipt.installSource !== "marketplace") return false;
+    if (!plugin.artifactSha256) return true;
+    return validation.receipt.artifactSha256 === plugin.artifactSha256;
   }
 
   private clearInstallReceiptValidation(pluginId: string, manifestPath: string): void {

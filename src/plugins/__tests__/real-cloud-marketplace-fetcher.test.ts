@@ -263,6 +263,7 @@ describe("RealCloudMarketplaceFetcher — actual server response shape", () => {
     latest_stable_version: "0.1.0",
     install_policy: "admin",
     dependencies: ["calendar", "email", "meeting"],
+    latest_artifact_sha256: "A".repeat(64),
     created_at: "2026-01-01T00:00:00",
     updated_at: "2026-01-01T00:00:00",
   };
@@ -292,6 +293,7 @@ describe("RealCloudMarketplaceFetcher — actual server response shape", () => {
     expect(p.installPolicy).toBe("admin");
     expect(p.dependencies).toEqual(["calendar", "email", "meeting"]);
     expect(p.version).toBe("0.1.0");
+    expect(p.artifactSha256).toBe("a".repeat(64));
     expect(p.channel).toBe("stable");
   });
 
