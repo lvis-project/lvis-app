@@ -58,6 +58,12 @@ describe("PowerShellTool — policy surface", () => {
     expect(validatePowerShellAst(ast([{ name: "Pause" }]))).toContain("interactive prompts");
   });
 
+  it("blocks dynamic path composition from the AST summary", () => {
+    expect(
+      validatePowerShellAst(ast([{ name: "Join-Path", elements: ["Join-Path", "$HOME", "\"Desktop/out.txt\""] }])),
+    ).toContain("dynamic path composition");
+  });
+
   it("blocks recursive forced deletion regardless of flag order", () => {
     expect(validatePowerShellAst(ast([{ name: "Remove-Item", elements: ["Remove-Item", "./x", "-Recurse", "-Force"] }]))).toContain(
       "recursive forced deletion",
