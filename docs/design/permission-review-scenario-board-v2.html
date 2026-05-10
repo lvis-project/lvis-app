@@ -879,10 +879,10 @@
       <article class="scenario">
         <div class="scenario-head"><span class="tag blue">S12</span><h2>MCP remote tool</h2></div>
         <div class="scenario-body">
-          <p class="scenario-copy">MCP 도구도 source chip 만 다르고 같은 category policy 를 탑니다. network/write/shell 위험도는 동일하게 reviewer 또는 ask 입니다.</p>
+          <p class="scenario-copy">MCP 도구도 같은 category policy 경로를 탑니다. 단, low-trust MCP floor 는 LLM reviewer 가 LOW 로 낮출 수 없고 명시 승인으로 유지됩니다.</p>
           <div class="scenario-list">
             <div class="scenario-row"><b>도구</b><span><code>mcp.repo_create_issue</code> · source=MCP</span></div>
-            <div class="scenario-row"><b>결정</b><span>default ask, auto-review reviewer</span></div>
+            <div class="scenario-row"><b>결정</b><span>default/auto ask, allow mode only bypasses after hard gates</span></div>
             <div class="scenario-row"><b>UX</b><span>서버 이름, endpoint/action, 요청 payload 요약 표시.</span></div>
           </div>
         </div>

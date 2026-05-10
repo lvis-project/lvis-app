@@ -602,6 +602,74 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
     expect(allowEntry).not.toHaveProperty("directoryAllowed");
   });
 
+  it("records reviewer verdict on auto-reviewed LOW allow audit entries", async () => {
+    const executeSpy = vi.fn(async () => "reviewed write");
+    const registry = new ToolRegistry();
+    registry.register(createDynamicTool({
+      name: "reviewed_write_probe",
+      description: "reviewed write probe",
+      source: "plugin",
+      category: "write",
+      jsonSchema: {
+        type: "object",
+        properties: { payload: { type: "string" } },
+      },
+      execute: async (rawInput) => ({
+        output: await executeSpy(rawInput),
+        isError: false,
+      }),
+    }));
+    const dir = mkdtempSync(join(tmpdir(), "lvis-executor-reviewer-audit-"));
+    try {
+      const permMgr = new PermissionManager(join(dir, "permissions.json"));
+      permMgr.setMode("auto");
+      permMgr.setReviewer({
+        classifier: {
+          classify: vi.fn(() => ({ level: "low", reason: "reviewer says safe" })),
+        },
+        cache: new VerdictCache(join(dir, "reviewer-cache.jsonl")),
+        deferredQueue: new DeferredQueue(join(dir, "deferred-queue.jsonl")),
+      });
+      const appendPermissionAuditEntry = vi.fn(async (entry: Record<string, unknown>) => ({
+        ...entry,
+        prevHash: "h",
+      }));
+      const auditLogger = {
+        log: vi.fn(),
+        isPermissionAuditChainReady: vi.fn(() => true),
+        assertPermissionAuditWritable: vi.fn(),
+        appendPermissionAuditEntry,
+      };
+      const executor = new ToolExecutor(
+        registry,
+        undefined,
+        permMgr,
+        undefined,
+        undefined,
+        undefined,
+        auditLogger as never,
+      );
+
+      const result = await executor.executeAll(
+        [{ id: "tu-reviewed-write", name: "reviewed_write_probe", input: { payload: "ok" } }],
+        { sessionId: "sess-reviewed-write", permissionContext: userPermissionContext() },
+      );
+
+      expect(result[0].is_error).toBeUndefined();
+      expect(executeSpy).toHaveBeenCalledOnce();
+      expect(appendPermissionAuditEntry).toHaveBeenCalledWith(expect.objectContaining({
+        decision: "allow",
+        tool: "reviewed_write_probe",
+        reviewer: expect.objectContaining({
+          level: "low",
+          reason: "reviewer says safe",
+        }),
+      }));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("hard-blocks sensitive paths after pre-hook input modification and before read-only auto approval", async () => {
     const executeSpy = vi.fn(async () => "should-not-run");
     const registry = new ToolRegistry();
@@ -1561,6 +1629,96 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
           level: "medium",
           reason: "headless graph data operation",
         }),
+      }));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not let reviewer LOW downgrade hard overlay or low-trust MCP asks", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "lvis-executor-hard-ask-"));
+    try {
+      const executeSpy = vi.fn(async () => ({ output: "ran", isError: false }));
+      const registry = new ToolRegistry();
+      registry.register(createDynamicTool({
+        name: "overlay_write",
+        description: "Overlay write probe.",
+        source: "plugin",
+        category: "write",
+        jsonSchema: {
+          type: "object",
+          properties: { value: { type: "string" } },
+        },
+        execute: executeSpy,
+      }));
+      registry.register(createDynamicTool({
+        name: "mcp_network",
+        description: "MCP network probe.",
+        source: "mcp",
+        category: "network",
+        jsonSchema: {
+          type: "object",
+          properties: { endpoint: { type: "string" } },
+        },
+        execute: executeSpy,
+      }));
+
+      const classify = vi.fn(() => ({ level: "low" as const, reason: "reviewer would allow" }));
+      const queue = new DeferredQueue(join(dir, "deferred-queue.jsonl"));
+      const permMgr = new PermissionManager(join(dir, "permissions.json"));
+      permMgr.setMode("auto");
+      permMgr.setReviewer({
+        classifier: { classify },
+        cache: new VerdictCache(join(dir, "reviewer-cache.jsonl")),
+        deferredQueue: queue,
+      });
+      const approvalGate = {
+        requestAndWait: vi.fn(async (req: { id: string }) => ({
+          requestId: req.id,
+          choice: "deny-once" as const,
+        })),
+      };
+      const executor = new ToolExecutor(
+        registry,
+        undefined,
+        permMgr,
+        undefined,
+        approvalGate as never,
+      );
+
+      const overlayResult = await executor.executeAll(
+        [{ id: "tu-overlay-hard-ask", name: "overlay_write", input: { value: "x" } }],
+        {
+          sessionId: "sess-overlay-hard-ask",
+          overlayTriggerOrigin: "overlay:meeting-detection",
+          permissionContext: userPermissionContext({ trustOrigin: "plugin-emitted" }),
+        },
+      );
+
+      const mcpHeadlessResult = await executor.executeAll(
+        [{
+          id: "tu-mcp-headless-hard-ask",
+          name: "mcp_network",
+          input: { endpoint: "https://github.com/repos/lvis-project/lvis-app/issues" },
+        }],
+        {
+          sessionId: "sess-mcp-headless-hard-ask",
+          permissionContext: userPermissionContext({
+            headless: true,
+            trustOrigin: "llm-tool-arg",
+          }),
+        },
+      );
+
+      expect(overlayResult[0].is_error).toBe(true);
+      expect(mcpHeadlessResult[0].is_error).toBe(true);
+      expect(mcpHeadlessResult[0].content).toContain("headless explicit approval unavailable");
+      expect(executeSpy).not.toHaveBeenCalled();
+      expect(classify).not.toHaveBeenCalled();
+      expect(queue.listPending()).toHaveLength(0);
+      expect(approvalGate.requestAndWait).toHaveBeenCalledOnce();
+      expect(approvalGate.requestAndWait).toHaveBeenCalledWith(expect.objectContaining({
+        reason: expect.stringContaining("overlay trigger 출처"),
       }));
     } finally {
       rmSync(dir, { recursive: true, force: true });
