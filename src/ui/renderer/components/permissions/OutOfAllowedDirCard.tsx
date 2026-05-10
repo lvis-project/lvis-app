@@ -1,5 +1,5 @@
 /**
- * Permission policy Phase 2.5 — out-of-allowed-dir approval card.
+ * Out-of-allowed-dir approval card.
  *
  * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 1.
  *
@@ -16,9 +16,8 @@
  * Layered IPC: this component does NOT directly write settings. The
  * "디렉토리 영구 추가" choice is surfaced as
  * `choice: "allow-always" + rememberPattern: <suggestedParent>` so the
- * existing approval-respond pipeline carries the persist intent
- * back to main, where the slash dispatcher rules run (Phase 5 will fully
- * wire — Phase 2.5 includes the data model only).
+ * existing approval-respond pipeline carries the persist intent back to main,
+ * where the permission-rule dispatcher validates and persists the directory.
  */
 import { useEffect, useState } from "react";
 import { Badge } from "../../../../components/ui/badge.js";
@@ -41,9 +40,9 @@ interface OutOfAllowedDirCardProps {
 }
 
 /**
- * Permission policy P2.5 — derive the basename for the re-typed confirmation prompt.
- * If `suggestedParent` is null we use the candidate path so the user
- * still has a deterministic name to confirm.
+ * Derive the basename for the re-typed confirmation prompt. If
+ * `suggestedParent` is null we use the candidate path so the user still has a
+ * deterministic name to confirm.
  *
  * Splits on both POSIX (`/`) and Win32 (`\`) separators so a Windows
  * path like `C:\\Users\\Alice\\Documents` correctly yields

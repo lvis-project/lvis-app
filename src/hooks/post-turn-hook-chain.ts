@@ -202,7 +202,7 @@ export class PostTurnHookChain {
 
     // 6. Audit Log (§14.2)
     //    Emit `${provider}/${model}` for "llm" routes (usage-stats.parseRoute
-    //    splits on `/`); non-LLM routes (skill/command/agent-hub) keep the
+    //    splits on `/`); non-LLM routes (skill/command/agent-message) keep the
     //    classification verbatim. Snapshot fields on ctx win over live
     //    settings — see PostTurnHookContext docs for the drift rationale.
     try {

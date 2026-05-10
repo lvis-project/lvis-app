@@ -1,8 +1,8 @@
 /**
  * Watcher telemetry collector — JSONL appender for `email.watcher.poll.completed`.
  *
- * 플러그인 (ms-graph v0.1.27+) 이 발행하는 poll 단위 텔레메트리 이벤트를 호스트
- * 가 시계열로 적재하기 위한 *최소* consumer. 정식 metrics pipeline (Sentry /
+ * 플러그인이 발행하는 poll 단위 텔레메트리 이벤트를 호스트가 시계열로
+ * 적재하기 위한 *최소* consumer. 정식 metrics pipeline (Sentry /
  * OTel / 사내 시계열 DB) 이 들어오기 전 단계 — 운영 중인 사용자 머신의 raw
  * 데이터를 디스크에 모아 로컬에서 `jq` 분석 가능하게.
  *

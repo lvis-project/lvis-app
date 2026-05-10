@@ -1,5 +1,5 @@
 /**
- * Permission policy Phase 5 — PermissionModeBadge.
+ * Permission policy mode badge.
  *
  * Compact mode indicator displayed in the chat header. Shows the
  * active permission mode (default | strict | auto) with color coding

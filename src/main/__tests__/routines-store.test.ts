@@ -84,6 +84,35 @@ describe("RoutinesStore v2 — basic persistence", () => {
       cleanup();
     }
   });
+
+  it("rejects non-canonical routine records with malformed scope shape", async () => {
+    const { store, dir, cleanup } = tempStore();
+    try {
+      writeFileSync(
+        join(dir, "routines.json"),
+        JSON.stringify({
+          version: 2,
+          routines: [{
+            id: "bad-scope",
+            trigger: "schedule",
+            execution: "notification-only",
+            notificationTitle: "bad",
+            scope: {
+              pluginIds: { mode: "allow", ids: "meeting" },
+              forcedPluginIds: [],
+              directories: [],
+            },
+          }],
+        }),
+      );
+
+      await store.load();
+
+      expect(store.list()).toEqual([]);
+    } finally {
+      cleanup();
+    }
+  });
 });
 
 describe("RoutinesStore v2 — cap enforcement", () => {

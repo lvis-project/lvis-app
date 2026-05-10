@@ -1286,7 +1286,7 @@ artifact 와 save data 를 함께 보관한다 (호스트 root 에 끼어들지 
 ├── user-preferences.md  # 사용자 개인 선호 (보고 스타일, 자주 쓰는 도구 등)
 ├── notes/               # 호스트 메모 ("이거 기억해" 명령 — 플러그인 자체 메모는
 │   ├── 출장-절차.md     # 각 플러그인의 ~/.lvis/plugins/<id>/notes/ 안에 둔다)
-│   └── Q1-보고서-템플릿.md
+│   └── 분기-보고서-템플릿.md
 ├── sessions/            # 세션 이력 (claw Session 패턴)
 │   └── <session-id>.jsonl
 ├── audit/               # AuditLogger (회전·retention)
@@ -1550,16 +1550,22 @@ Permissions tab 은 `PERMISSIONS.hookTrustList` 를 통해 비차단 알림을 �
 
 #### 6.3.6 — Manifest integrity proxy
 
-Plugin manifest 가 `category: "read"` 를 선언한 tool 은 boot 시 fs
-proxy 로 wrap 되어 write attempts (`writeFileSync`, `mkdirSync`,
-`rmSync`, …) 가 `ManifestIntegrityViolation` 으로 panic. 위반 시:
+현재 SDK manifest schema 는 plugin `toolSchemas[].category/pathFields` 를
+정의하지 않는다. 따라서 host 는 plugin tool 을 보수적 `write` 로
+등록하고, app-local authority extension 없이 SDK schema 를 SOT 로
+사용한다. Host→plugin fs boundary 에서 `ManifestIntegrityViolation` 이
+발생하면 fail-closed 로 처리한다:
 
 1. plugin id → process-wide `manifestIntegrityState.disabledPluginIds`.
 2. `AuditManifestViolation` audit entry 발행 (`pluginId`, `toolName`,
    `attemptedOperation`).
 3. `PERMISSIONS.manifestViolation` IPC → 사용자에게 reinstall
    prompt.
-4. Disabled plugin 의 read-declared tool 후속 호출 fail-deny.
+4. Disabled plugin 의 후속 tool 호출 fail-deny.
+
+SDK schema/types 와 active plugin manifests 가 `category/pathFields` 를
+선언한 뒤에만 read-declared plugin tool 을 boot 시 fs proxy 로 wrap 한다.
+그 전에는 호환 shim 이나 boot-warn grace 를 두지 않는다.
 
 **Trade-off:** plugin 이 standard `node:fs` 직접 import 시 우회 가능
 — sandboxed plugin runtime (V8 isolated context) 도입 전까지는 partial
@@ -2165,14 +2171,14 @@ flowchart LR
 
 **브리핑 예시:**
 
-> 「오늘 미팅 3건 (10:00 디자인리뷰, 14:00 스프린트, 16:00 1:1), 미처리 이메일 5통 중 2통은 액션 필요 (파트너사 계약서 검토, 출장비 정산 확인), 기한 임박 태스크 1건 (Q2 보고서 초안 — 내일 마감), **에이전트 요청 승인 2건** (이영희 Agent → Q1 보고서 공유 요청, 박민수 Agent → 코드리뷰 결과 전달 요청)」
+> 「오늘 미팅 3건 (10:00 디자인리뷰, 14:00 스프린트, 16:00 1:1), 미처리 이메일 5통 중 2통은 액션 필요 (파트너사 계약서 검토, 출장비 정산 확인), 기한 임박 태스크 1건 (분기 보고서 초안 — 내일 마감), **에이전트 요청 승인 2건** (이영희 Agent → 분기 보고서 공유 요청, 박민수 Agent → 코드리뷰 결과 전달 요청)」
 
 ### 7.X Routine v2 (PR #626)
 
 - **Storage**: `~/.lvis/routines.json` (mode 0o600, dir 0o700, cap 50)
 - **Scheduler**: 30s polling (RoutinesScheduler), cron minute-key dedup via `lastFiredMinuteUTC`
 - **Execution modes**: `llm-session` (RoutineEngine 호출, prePrompt 로 conversation 시작) / `notification-only` (OS notification, conversation 영향 0)
-- **Repeat kinds**: `none / daily / weekly / monthly / interval / cron` — Q5 monthly day-of-month clamping
+- **Repeat kinds**: `none / daily / weekly / monthly / interval / cron` — monthly day-of-month clamping
 - **LLM tool**: `schedule_routine` (자연어 입력 → struct payload, 4 vendor 호환)
 - **UI**: 단일 RoutinePanel 의 통합 list (Reminder 흡수), execution mode badge, 3-tab 입력 모달 (form / cron / 자연어)
 - **Reminder 폐지**: PR #626 atomic cutover 로 `RemindersStore`, `RemindersScheduler`, `remind_at` tool, `RemindersList` 컴포넌트 모두 제거
@@ -2277,14 +2283,14 @@ sequenceDiagram
     participant UserA as 김철수 (사원)
     participant Briefing as Daily Briefing
 
-    AgentB->>Hub: "김철수님 Q1 보고서 공유 요청"
+    AgentB->>Hub: "김철수님 분기 보고서 공유 요청"
     Hub->>AgentA: Direct Message 수신
 
     AgentA->>AgentA: 승인 필요 행위 판단<br/>(파일 공유 = 승인 대상)
     AgentA->>Approval: 승인 요청 생성
 
     alt 김철수 온라인 (클라이언트 활성)
-        Approval->>UserA: 🔔 실시간 알림<br/>"이영희 Agent가 Q1 보고서 공유를 요청합니다"
+        Approval->>UserA: 🔔 실시간 알림<br/>"이영희 Agent가 분기 보고서 공유를 요청합니다"
         UserA->>Approval: ✅ 승인 (또는 ❌ 거부)
     else 김철수 오프라인
         Approval->>Approval: 대기열에 보관
@@ -2296,7 +2302,7 @@ sequenceDiagram
 
     alt 승인됨
         Approval->>AgentA: 승인 확인
-        AgentA->>Hub: Q1 보고서 파일 전달
+        AgentA->>Hub: 분기 보고서 파일 전달
         Hub->>AgentB: 파일 수신 완료
     else 거부됨
         Approval->>AgentA: 거부 사유
@@ -2317,7 +2323,7 @@ graph TB
         subgraph "요청 1"
             REQ1_FROM["요청자: 이영희 Agent"]
             REQ1_ACTION["행위: 📄 파일 공유"]
-            REQ1_TARGET["대상: Q1-마케팅-보고서.pptx"]
+    REQ1_TARGET["대상: 분기-마케팅-보고서.pptx"]
             REQ1_REASON["사유: 김철수님이 요청한 보고서입니다"]
             REQ1_BTN["✅ 승인  |  ❌ 거부  |  👁️ 미리보기"]
         end
@@ -2935,12 +2941,12 @@ graph TB
 
 ```json
 {
-  "id": "lvis-plugin-local-indexer",
-  "name": "LVIS Local Indexer",
+  "id": "lvis-plugin-docs",
+  "name": "LVIS Docs Plugin",
   "version": "0.2.0",
   "entry": "dist/index.js",
-  "tools": ["index_scan", "chat_preview", "..."],
-  "description": "Document indexing and semantic search plugin.",
+  "tools": ["document_scan", "document_search", "..."],
+  "description": "Document processing and semantic search plugin.",
   "installPolicy": "admin",
   "publisher": "the organization's IT"
 }
@@ -3195,12 +3201,12 @@ sequenceDiagram
     participant UserB as 이영희 (Client)
     participant Briefing as Daily Briefing
 
-    UserA->>AgentA: @이영희 Q1 마케팅 보고서 공유 가능?
+    UserA->>AgentA: @이영희 분기 마케팅 보고서 공유 가능?
     AgentA->>Hub: Direct Message → 이영희 Agent
     Hub->>AgentB: 메시지 전달
 
     AgentB->>AgentB: 승인 필요 행위 판단<br/>(파일 공유 = 승인 대상)
-    AgentB->>ApprovalB: 승인 요청 생성<br/>"김철수 Agent가 Q1 보고서 공유 요청"
+    AgentB->>ApprovalB: 승인 요청 생성<br/>"김철수 Agent가 분기 보고서 공유 요청"
 
     alt 이영희 온라인
         ApprovalB->>UserB: 🔔 실시간 알림
@@ -3218,7 +3224,7 @@ sequenceDiagram
     end
 
     Hub->>AgentA: 응답 전달
-    AgentA->>UserA: 이영희님이 Q1 보고서를 공유했습니다
+    AgentA->>UserA: 이영희님이 분기 보고서를 공유했습니다
 ```
 
 > 에이전트는 사원을 대리하되, 민감한 행위는 사원이 최종 결정한다.
@@ -3975,7 +3981,7 @@ v4 §8 "승인이 기본" 모델을 강화한다.
 
 v4 §9 의 manifest 스키마 / HostApi / 도구·이벤트 네임스페이스 규칙은 런타임 검증에 의존했다. v5 는 CI 레벨로 끌어올린다.
 
-- **Manifest JSON Schema (AJV)**: `lvis-app/schemas/plugin-manifest.schema.json` 을 단일 source of truth 로 정의. CI 에서 AJV 로 각 플러그인 `plugin.json` 을 검증. 스키마 위반 시 빌드 실패.
+- **Manifest JSON Schema (AJV)**: `@lvis/plugin-sdk/schemas/plugin-manifest.schema.json` 을 단일 source of truth 로 정의. 앱은 SDK schema 를 resolve/compile 하지 못하면 fail-closed 하고, CI 에서도 같은 SDK schema 로 각 플러그인 `plugin.json` 을 검증한다. 스키마 위반 시 빌드 실패.
 - **HostApi contract CI**: 호스트가 내보내는 `HostApi` 타입 정의를 플러그인 repo 들이 `devDependency` 로 import. CI 에서 `tsc --noEmit` 으로 계약 불일치(사라진 메서드 등) 를 조기 검출.
 - **Tool namespace CI**: 도구 이름 정규식 `^[a-z][a-z0-9_]*$`, 첫 토큰은 플러그인 slug prefix. 중복/충돌은 CI 거부.
 - **Event namespace CI**: 이벤트 이름 `^[a-z][a-z0-9_.]*$`, 최상위 prefix 는 플러그인 slug 또는 `core.`. 외부 플러그인의 `core.*` 발행은 CI 거부.

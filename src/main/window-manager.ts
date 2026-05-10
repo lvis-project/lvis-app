@@ -63,10 +63,7 @@ function viewKeyLabel(viewKey: string): string {
 const SNAP_THRESHOLD_DIP = 20;
 const SNAP_GAP_DIP = 12;
 
-function defaultDetachedBounds(viewKey: string): { width: number; height: number } {
-  if (viewKey === "plugin:agent-hub:agent-hub-panel") {
-    return { width: 960, height: 780 };
-  }
+function defaultDetachedBounds(_viewKey: string): { width: number; height: number } {
   return { width: 800, height: 600 };
 }
 

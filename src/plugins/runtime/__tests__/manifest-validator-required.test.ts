@@ -46,5 +46,26 @@ describe("parsePluginJson — SDK schema validator required", () => {
     const validator = await buildManifestValidator();
     const manifest = await parsePluginJson(manifestPath, validator);
     expect(manifest.id).toBe("com.test.validator");
+    expect(manifest.installPolicy).toBe("user");
+  });
+
+  it("fails closed instead of normalizing invalid installPolicy before SDK validation", async () => {
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        id: "com.test.validator",
+        name: "Validator Test",
+        version: "1.0.0",
+        entry: "dist/index.js",
+        tools: ["validator_ping"],
+        description: "Validator required test plugin",
+        publisher: "Test",
+        installPolicy: "root",
+      }),
+      "utf-8",
+    );
+
+    const validator = await buildManifestValidator();
+    await expect(parsePluginJson(manifestPath, validator)).rejects.toThrow(/schema validation failed/);
   });
 });

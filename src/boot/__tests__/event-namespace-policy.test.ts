@@ -1,5 +1,5 @@
 /**
- * Phase 5 — eventSubscriptions namespace allowlist + capability emit gate.
+ * Event subscription namespace allowlist + capability emit gate.
  *
  * Covers:
  *  1. private namespace subscription is rejected (memory.private.*)
@@ -25,7 +25,7 @@ import {
 import { registerManifestEventSubscriptions } from "../plugins.js";
 import { mkdtempSync } from "node:fs";
 
-describe("Phase 5 — capabilities module", () => {
+describe("capabilities module namespace policy", () => {
   it("classifies private namespaces as 'private'", () => {
     expect(classifySubscription("memory.private.user_doc")).toBe("private");
     expect(classifySubscription("settings.apiKey.openai")).toBe("private");
@@ -94,13 +94,13 @@ describe("Phase 5 — capabilities module", () => {
   });
 });
 
-describe("Phase 5 — registerManifestEventSubscriptions namespace gate", () => {
+describe("registerManifestEventSubscriptions namespace gate", () => {
   let testDir: string;
   let installedDir: string;
   let registryPath: string;
 
   beforeEach(async () => {
-    testDir = mkdtempSync(join(tmpdir(), "lvis-p5-ns-"));
+    testDir = mkdtempSync(join(tmpdir(), "lvis-event-ns-"));
     installedDir = join(testDir, "plugins", "installed");
     await mkdir(installedDir, { recursive: true });
     registryPath = join(testDir, "plugins", "registry.json");
@@ -193,7 +193,7 @@ describe("Phase 5 — registerManifestEventSubscriptions namespace gate", () => 
     } finally {
       console.warn = orig;
     }
-    // No Phase 5 warn for email.new (public namespace)
+    // No namespace warning for email.new (public namespace).
     expect(warns.some((w) => /email\.new/.test(w))).toBe(false);
   });
 
@@ -217,13 +217,13 @@ describe("Phase 5 — registerManifestEventSubscriptions namespace gate", () => 
   });
 });
 
-describe("Phase 5 — capability emit gate", () => {
+describe("capability emit gate", () => {
   let testDir: string;
   let installedDir: string;
   let registryPath: string;
 
   beforeEach(async () => {
-    testDir = mkdtempSync(join(tmpdir(), "lvis-p5-emit-"));
+    testDir = mkdtempSync(join(tmpdir(), "lvis-event-emit-"));
     installedDir = join(testDir, "plugins", "installed");
     await mkdir(installedDir, { recursive: true });
     registryPath = join(testDir, "plugins", "registry.json");

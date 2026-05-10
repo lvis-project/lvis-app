@@ -6,6 +6,8 @@ import { ScrollArea } from "../../../components/ui/scroll-area.js";
 import { Separator } from "../../../components/ui/separator.js";
 import { EXEC_MODE_OPTIONS } from "../constants.js";
 import type { ExecMode, HookTrustRow, PermissionRule } from "../types.js";
+import { AuditPanel } from "../components/permissions/AuditPanel.js";
+import { DeferredQueuePanel } from "../components/permissions/DeferredQueuePanel.js";
 
 export function PermissionsTab() {
   // ── 로딩 상태 ─────────────────────────────────────
@@ -22,11 +24,11 @@ export function PermissionsTab() {
     bannerTimerRef.current = setTimeout(() => setBanner(null), 5000);
   }, []);
 
-  // ── Section A: Execution Mode ─────────────────────
+  // ── Execution Mode ────────────────────────────────
   const [mode, setMode] = useState<ExecMode>("default");
   const [modeBusy, setModeBusy] = useState(false);
 
-  // ── Section B: Explicit Approval Policy ──────────
+  // ── Explicit Approval Policy ──────────────────────
   const [requireExplicit, setRequireExplicit] = useState(true);
   const [policyManaged, setPolicyManaged] = useState(false);
   const [policyBusy, setPolicyBusy] = useState(false);
@@ -34,7 +36,7 @@ export function PermissionsTab() {
   const [policySource, setPolicySource] = useState<"defaults" | "user" | "admin" | "merged">("defaults");
   const [policyAdminPath, setPolicyAdminPath] = useState<string | undefined>(undefined);
 
-  // ── Section C: Rule Editor ────────────────────────
+  // ── Rule Editor ───────────────────────────────────
   const [rules, setRules] = useState<PermissionRule[]>([]);
   const [newPattern, setNewPattern] = useState("");
   const [newAction, setNewAction] = useState<"allow" | "deny">("allow");
@@ -47,6 +49,7 @@ export function PermissionsTab() {
     warnings: string[];
   } | null>(null);
   const [quarantinedHooks, setQuarantinedHooks] = useState<HookTrustRow[]>([]);
+  const [auditOpen, setAuditOpen] = useState(false);
 
   // ── 초기 fetch (탭 진입 시) ───────────────────────
   const fetchAll = useCallback(async () => {
@@ -512,18 +515,25 @@ export function PermissionsTab() {
 
         <Separator />
 
-        {/* ── Section E: Audit Log Placeholder ── */}
+        <DeferredQueuePanel />
+
+        <Separator />
+
+        {/* ── Audit Log ── */}
         <div className="space-y-2">
-          <div>
+          <div className="flex items-center justify-between gap-3">
+            <div>
             <p className="text-sm font-medium">감사 로그</p>
-            <p className="text-[11px] text-muted-foreground">도구 실행 감사 로그 뷰어는 Phase 2 이후 추가됩니다.</p>
-          </div>
-          <div className="rounded-md border border-dashed p-4 text-center text-sm text-muted-foreground">
-            곧 추가 예정
+            <p className="text-[11px] text-muted-foreground">최근 권한 감사 기록과 체인 검증 상태를 확인합니다.</p>
+            </div>
+            <Button size="sm" variant="outline" className="h-8 px-3 text-[12px]" onClick={() => setAuditOpen(true)}>
+              열기
+            </Button>
           </div>
         </div>
 
       </div>
+      <AuditPanel open={auditOpen} onClose={() => setAuditOpen(false)} />
     </ScrollArea>
   );
 }

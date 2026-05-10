@@ -1,11 +1,8 @@
 /**
- * System Prompt Builder — §4.5.9 12개 소스 조립
+ * System Prompt Builder — prompt source assembly
  *
  * Internal search(또는 Claude)에 전송되는 시스템 프롬프트를 매 턴마다 조립.
- * 12개 소스에서 컨텍스트를 수집하여 하나의 프롬프트로 결합.
- *
- * Phase 3 구현: ①②⑤⑥⑦⑨ (6개)
- * Phase 4+ 추가: ③④⑧⑩⑪⑫ (서버 인프라 의존)
+ * 여러 컨텍스트 소스에서 정보를 수집하여 하나의 프롬프트로 결합.
  */
 import { hostname, platform, homedir, userInfo } from "node:os";
 import type { MemoryManager } from "../memory/memory-manager.js";
@@ -34,8 +31,8 @@ export interface SystemPromptBuilderDeps {
   /** 플러그인 스킬 스키마 (PluginRuntime에서 주입) */
   getPluginSchemas?: () => string;
   /**
-   * Phase 1.5 Option C — 비활성 plugin 카탈로그 공급자.
-   * 빈 배열이거나 undefined면 섹션이 생략된다.
+   * 비활성 plugin 카탈로그 공급자. 빈 배열이거나 undefined면 섹션이
+   * 생략된다.
    */
   getPluginCards?: () => Array<{
     id: string;
@@ -137,7 +134,7 @@ export class SystemPromptBuilder {
     return sections.join("\n\n");
   }
 
-  /** 외부에서 소스 추가 (Phase 4+ 확장용) */
+  /** 외부에서 소스 추가 */
   addSource(source: PromptSource): void {
     this.sources.push(source);
     this.sources.sort((a, b) => a.id - b.id);
@@ -154,7 +151,7 @@ export class SystemPromptBuilder {
   }
 
   /**
-   * Phase 1 Lazy Tool Scoping — 매 턴 직전 호출되어 Tool Schemas 섹션(⑤)이
+   * 매 턴 직전 호출되어 Tool Schemas 섹션이
    * 노출할 tool 집합을 제한한다. null → 모든 도구 노출 (legacy 동작).
    */
   setToolScope(scope: {
@@ -276,8 +273,8 @@ export class SystemPromptBuilder {
       },
     });
 
-    // ③ Employee Profile — Phase 4 (SSO/LDAP 의존)
-    // ④ Org Context — Phase 4
+    // Employee Profile — SSO/LDAP 의존
+    // Org Context — 서버 인프라 의존
 
     // ④-b Tool Use Strategy (정적) — 모델이 도구를 어떻게 쓸지에 대한
     // Think→Act→Observe→Reflect 가이드. 특히 소형 reasoning 모델에서 도구
@@ -285,8 +282,8 @@ export class SystemPromptBuilder {
     // 병렬/순차 전략은 하드코딩 플래그로 강제하지 않고 LLM이 문맥에 맞게
     // 스스로 선택하도록 한다 (lever 1 — LLM 결정 사항).
     //
-    // id=4.5: 장래 Phase 4 의 ④ Org Context (id=4) 와 충돌하지 않도록 분수형 id
-    // 사용. 정렬은 1 < 2 < 3 < 4 < 4.5 < 5 < 6 < ... 로 자연스럽게 ⑤ 앞에 삽입된다.
+    // id=4.5: Org Context (id=4) 와 충돌하지 않도록 분수형 id 사용.
+    // 정렬은 1 < 2 < 3 < 4 < 4.5 < 5 < 6 ... 로 자연스럽게 삽입된다.
     this.sources.push({
       id: 4.5,
       name: "Tool Use Strategy",
@@ -302,8 +299,7 @@ export class SystemPromptBuilder {
     //
     // The guidance asks the LLM to second-guess the proactive suggestion
     // before invoking tools — soft validation gate that complements the
-    // hard §8 ApprovalGate for destructive operations. See
-    // docs/references/conversation-trigger.md for the full safety story.
+    // hard §8 ApprovalGate for destructive operations.
     this.sources.push({
       id: 4.6,
       name: "Proactive Origin Guidance",
@@ -327,7 +323,7 @@ export class SystemPromptBuilder {
           "3. 제안에 환각이 섞이진 않았는가? (예: 받은 메일과 무관한 내용)",
           "합당하지 않다고 판단하면 도구 호출 없이 짧게 패스 사유를 알리고 끝내세요.",
           // 사용자가 트리거를 수락하면 (UI 의 \"확인하기\" 버튼) 다음 절차를 따르세요. 이 행동 가이드는 *시스템* 이 정의하므로 trigger 본문에 다시 적힐 필요가 없습니다 — 본문은 (제목/발신자/emailId 같은) 메타정보 위주로만 짧게 옵니다.
-          `합당하다고 판단하면, 메타정보 (예: emailId) 를 단서 삼아 read-only 도구 (msgraph_email_read 등) 로 본문/맥락을 fetch 하고, 사용자에게 보여줄 정보를 먼저 정리해서 답하세요 (예: "회의 정보: 제목 / 일시 / 장소 / 참석자"). 그 다음 사용자에게 "진행할까요?" 같은 컨펌을 받고, 사용자의 동의가 있을 때만 destructive 도구 (msgraph_calendar_create, msgraph_email_create_event 등) 를 호출하세요. 모든 destructive 호출은 ApprovalGate 의 hard 사용자 확인을 추가로 거칩니다 (이 가이드의 LLM 1차 검토 + ApprovalGate 가 2단 안전망).`,
+          `합당하다고 판단하면, 메타정보의 안정 식별자와 현재 노출된 read-only 도구를 사용해 본문/맥락을 fetch 하고, 사용자에게 보여줄 정보를 먼저 정리해서 답하세요. 그 다음 사용자에게 "진행할까요?" 같은 컨펌을 받고, 사용자의 동의가 있을 때만 destructive 도구를 호출하세요. 모든 destructive 호출은 ApprovalGate 의 hard 사용자 확인을 추가로 거칩니다 (이 가이드의 LLM 1차 검토 + ApprovalGate 가 2단 안전망).`,
           "</proactive-origin-guidance>",
         ].join("\n");
       },
@@ -384,7 +380,7 @@ export class SystemPromptBuilder {
       build: () => getPluginSchemas?.() ?? "",
     });
 
-    // ⑥-b Phase 1.5 Option C — 비활성 plugin 카탈로그.
+    // 비활성 plugin 카탈로그.
     // LLM이 "이 턴에 필요한 플러그인"을 판단해 request_plugin 호출 가능하도록
     // system prompt에 힌트를 노출. 활성 plugin은 제외.
     const { getPluginCards } = deps;
@@ -547,9 +543,9 @@ export class SystemPromptBuilder {
       },
     });
 
-    // ⑩ Active Session Context — Phase 4
-    // ⑪ Proactive Context — Phase 4
-    // ⑫ Feature Flags — Phase 4
+    // Active Session Context — 서버 인프라 의존
+    // Proactive Context — 서버 인프라 의존
+    // Feature Flags — 서버 인프라 의존
 
     this.sources.sort((a, b) => a.id - b.id);
   }
@@ -562,14 +558,14 @@ const ROLE_DEFINITION = `당신은 LVIS — 사원 개인을 위한 초지능형
 ## 사고 과정 (Ultrathink)
 - 사용자의 질문을 받으면 즉시 답변하지 않고, 먼저 '지식의 출처'를 자문하세요.
 - 정보 탐색 우선순위:
-  1. **로컬 지식 베이스 (Index):** 사내 가이드라인, 프로젝트 기술 문서 등 구조화된 데이터 (index_documents, chat_preview 활용)
+  1. **로컬 지식 베이스 (Index):** 사내 가이드라인, 프로젝트 기술 문서 등 구조화된 데이터. 현재 노출된 문서/지식 검색 도구를 활용하세요.
   2. **사용자 메모 (Memory):** 사용자 개인의 선호도, 과거의 특정 기록, 명시적으로 저장한 메모 (memory_list, memory_search, search_memory 활용)
   3. **웹 검색 (Web):** 최신 뉴스, 일반 상식, 외부 기술 트렌드 (web_search, web_fetch 활용)
 - 각 출처에서 얻은 정보를 논리적으로 연결하여 결론을 도출하세요.
 
 ## 핵심 원칙
 - **지식과 메모리의 구분:** 사용자가 "이거 기억해"라고 한 것은 '메모리'에, 시스템이 파일로부터 읽어온 것은 '인덱스'에 있습니다. 두 영역을 혼동하지 마세요.
-- **백그라운드 인덱싱:** 인덱싱은 백그라운드에서 자동으로 수행됩니다. 만약 최신 문서가 반영되지 않은 것 같다면 사용자에게 index_scan 호출을 제안하거나 직접 실행하세요.
+- **백그라운드 인덱싱:** 인덱싱은 백그라운드에서 자동으로 수행됩니다. 만약 최신 문서가 반영되지 않은 것 같다면 현재 노출된 인덱싱/문서 갱신 도구를 제안하거나 직접 실행하세요.
 - **정확성 및 근거:** 답변 시 어떤 문서나 메모리를 참고했는지 명시할 수 있다면 좋습니다.
 
 ## 기억 및 지식
@@ -645,7 +641,7 @@ const TOOL_USE_STRATEGY = `## 도구 사용 전략
 - 도구가 실패하면 입력을 조정해 재시도하되, 동일 입력으로 2회 이상 반복하지 마세요.
 - 같은 질문에 여러 번 호출해야 한다는 판단이 들면, 지금까지 모은 정보로 잠정 답을 먼저 정리하고 추가 조사 필요 여부를 다시 판단하세요.
 - 최종 답변에는 어떤 도구/자료를 근거로 결론에 도달했는지 간단히 밝히세요.
-- 사용자가 특정 플러그인 도구나 Agent Hub work board 직접 조회를 요청하면 **agent_spawn 을 쓰지 마세요**. 해당 도구가 현재 보이면 직접 호출하고, 보이지 않으면 먼저 request_plugin 으로 플러그인을 활성화한 뒤 같은 턴에서 직접 도구를 호출하세요.
+- 사용자가 특정 플러그인 도구나 플러그인 UI/업무보드 직접 조회를 요청하면 **agent_spawn 을 쓰지 마세요**. 해당 도구가 현재 보이면 직접 호출하고, 보이지 않으면 먼저 request_plugin 으로 플러그인을 활성화한 뒤 같은 턴에서 직접 도구를 호출하세요.
 
 ### 워크플로우 시스템 툴 (S1+S2)
 - **ask_user_question**: 분기점에서 가정에 의존하지 말고 사용자에게 직접 질문하세요. 관련된 질문 1~4개를 한 번에 묶어 questions[] 배열로 전달하면 사용자가 한 카드에서 차례로 답하고 마지막 컨펌 페이지에서 일괄 제출합니다 — 같은 카드에 묶을 수 있는 질문을 여러 번 호출로 쪼개지 마세요. 각 질문 형식 규칙:
@@ -670,12 +666,12 @@ const TOOL_USE_STRATEGY = `## 도구 사용 전략
   **올바른 호출 순서 예시** (3단계 작업):
   - [1] todo_session_write → 3개 항목 전체 pending 으로 등록
   - [2] todo_session_write → 항목 1 을 in_progress 로 업데이트 (도구 호출 전)
-  - [3] msgraph_email_list → 실제 작업 수행
+  - [3] 필요한 도구 호출 → 실제 작업 수행
   - [4] todo_session_write → 항목 1 completed + 항목 2 in_progress 로 업데이트
-  - [5] index_search → 다음 작업 수행
+  - [5] 필요한 도구 호출 → 다음 작업 수행
   - [6] todo_session_write → 항목 2 completed + 항목 3 in_progress 로 업데이트
   - [7] ... 최종 단계 완료 후 항목 3 completed
 
   사용자 task_* 와 다른 임시(세션) 체크리스트입니다.
-- **agent_spawn**: 본 대화 흐름과 분리해서 처리해도 되는 부분 작업(독립 검색, 부수 분석 등)을 sub-agent 로 위임. sourceTools 로 노출 도구를 제한하세요. 특정 tool/plugin 직접 호출 요청의 대체 경로로 쓰지 마세요. Agent Hub work board 조회는 agent_hub_* 도구를 직접 호출하세요.
+- **agent_spawn**: 본 대화 흐름과 분리해서 처리해도 되는 부분 작업(독립 검색, 부수 분석 등)을 sub-agent 로 위임. sourceTools 로 노출 도구를 제한하세요. 특정 tool/plugin 직접 호출 요청의 대체 경로로 쓰지 마세요. 해당 도구가 현재 보이면 직접 호출하고, 보이지 않으면 request_plugin 으로 활성화하세요.
 - **skill_load**: 특정 작업 패턴(예: 보고서 작성)이 매칭될 때 미리 정의된 skill 을 로드하면 응답 품질이 안정됩니다.`;

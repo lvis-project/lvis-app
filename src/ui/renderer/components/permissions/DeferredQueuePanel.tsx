@@ -1,6 +1,4 @@
 /**
- * Permission policy Phase 3 — DeferredQueuePanel.
- *
  * Renders the list of HIGH-risk routine actions that the Layer 5
  * reviewer agent deferred during headless execution. Each entry has
  * "리뷰" / "거부" buttons; the user's click resolves the entry

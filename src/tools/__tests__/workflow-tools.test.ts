@@ -21,7 +21,7 @@ import { SkillStore } from "../../main/skill-store.js";
 import { SkillOverlay } from "../../main/skill-overlay.js";
 
 function ctx(sessionId = "session-x"): ToolExecutionContext {
-  return { cwd: process.cwd(), allowedDirectories: [], metadata: { sessionId } };
+  return { cwd: process.cwd(), extraAllowedDirectories: [], metadata: { sessionId } };
 }
 
 describe("ask_user_question tool", () => {
@@ -315,14 +315,13 @@ describe("todo_session_write tool", () => {
 });
 
 describe("agent_spawn tool", () => {
-  it("description forbids proxying direct Agent Hub tool calls", () => {
+  it("description forbids proxying direct plugin tool calls", () => {
     const tool = createAgentSpawnTool({
       getRunner: () => undefined,
       emit: () => undefined,
     });
     expect(tool.description).toContain("직접 호출");
-    expect(tool.description).toContain("Agent Hub work board");
-    expect(tool.description).toContain("agent_hub_*");
+    expect(tool.description).toContain("request_plugin");
   });
 
   it("rejects when runner is missing", async () => {

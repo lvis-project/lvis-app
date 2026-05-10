@@ -43,7 +43,7 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
       "지정한 sourceTools 만 사용 가능. maxTurns (기본 30, 최대 60) — task 복잡도를 직접 판단해서 명시하세요: " +
       "단일 lookup/요약은 5-10, 표준 multi-step 작업은 20-30, 깊은 코드 탐색·다중 파일 분석·복합 디버깅은 40-60. " +
       "결과로 요약 텍스트 + tool call 수 반환. " +
-      "특정 tool/plugin 을 직접 호출하라는 요청의 대체 경로로 사용하지 마세요. Agent Hub work board 조회는 agent_hub_* 도구를 직접 호출하세요.",
+      "특정 tool/plugin 을 직접 호출하라는 요청의 대체 경로로 사용하지 마세요. 요청 대상 도구가 현재 보이면 직접 호출하고, 보이지 않으면 request_plugin 으로 활성화하세요.",
     source: "builtin",
     category: "meta",
     decisionOverride: "ask",

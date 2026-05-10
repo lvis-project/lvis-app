@@ -43,8 +43,7 @@ export type RoutinePluginScope =
  *
  * - `pluginIds` plugin allow-list (discriminated union — see above).
  * - `forcedPluginIds` plugins guaranteed active for this routine even
- *    if the user has them disabled (e.g. `agent-hub` for a routine
- *    that depends on its work board). Defaults to `[]` — NEVER mirror
+ *    if the user has them disabled. Defaults to `[]` — NEVER mirror
  *    `pluginIds.ids` here; that would defeat the point of `pluginIds`.
  * - `directories` extra Layer 1 path allow-list scoped to this run.
  */

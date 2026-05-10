@@ -78,12 +78,10 @@ function buildPluginTool(
       const args = (typeof parsed === "object" && parsed !== null ? parsed : {}) as Record<string, unknown>;
 
       const finalPayload = Object.keys(args).length > 0 ? args : undefined;
-      // Permission policy P4 §3.5 — manifest integrity guard.
-      // For read-declared tools, fail-deny if the plugin already
-      // violated its declaration (caller must reinstall). The proxy
-      // itself lives at the host→plugin fs boundary; this check is
-      // the *post-violation gate* that prevents the disabled plugin
-      // from running new calls.
+      // Permission policy P4 §3.5 — manifest integrity guard. Current SDK
+      // schema keeps plugin tools conservative-write; if any host→plugin fs
+      // boundary reports a manifest-integrity violation, this post-violation
+      // gate prevents the disabled plugin from running new calls.
       if (manifestIntegrityState.isDisabled(pluginId)) {
         return {
           output:
