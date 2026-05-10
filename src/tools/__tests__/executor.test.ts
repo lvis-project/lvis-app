@@ -781,9 +781,9 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
  * in parallel (Promise.all). Each call reaches the approval gate independently.
  * This test verifies:
  *   1. Both ApprovalGate.requestAndWait() calls are in-flight concurrently.
- *   2. Approving both (simulating "모두 허용") unblocks execution of both.
+ *   2. Approving each request unblocks execution of both.
  *   3. Both tools execute and return results without error.
- *   4. Denying both (simulating "모두 거부") blocks both tools.
+ *   4. Denying each request blocks both tools.
  */
 describe("ToolExecutor — D4 parallel approval (§4.5.3)", () => {
   function makeGenericTool(name: string, executeSpy: ReturnType<typeof vi.fn>): import("../base.js").Tool {

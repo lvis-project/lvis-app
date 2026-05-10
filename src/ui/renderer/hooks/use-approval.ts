@@ -91,49 +91,5 @@ export function useApproval() {
     [],
   );
 
-  /**
-   * Bulk decide all currently-pending approval requests. Issues the same
-   * `choice` to every queued request in parallel, then clears the queue. The
-   * "always" variants are intentionally excluded here because each pending
-   * request may target a different tool name, and blanket persistence across
-   * heterogeneous tools is a footgun.
-   */
-  const decideAll = useCallback(
-    async (choice: "allow-once" | "deny-once") => {
-      if (inFlightRef.current) return;
-      const snapshot = queueRef.current.slice();
-      if (snapshot.length === 0) return;
-      // Surface preload init bugs explicitly (same rationale as `decide()`).
-      if (!window.lvis) {
-        console.error("[use-approval] decideAll: window.lvis is undefined — preload missing");
-        return;
-      }
-      const lvis = window.lvis;
-      inFlightRef.current = true;
-      // Clear first — respond 완료 전에 대기 UI 치워서 재클릭 방지
-      setQueue((q) => approvalQueueReducer(q, { type: "clear" }));
-      try {
-        await Promise.all(
-          snapshot.map((req) =>
-            lvis.approval.respond({
-              requestId: req.id,
-              choice,
-              nonce: req.nonce,
-              hmac: req.hmac,
-            }).catch((err) => {
-              console.warn(
-                `[lvis] approval.respond failed for ${req.id}:`,
-                (err as Error).message,
-              );
-            }),
-          ),
-        );
-      } finally {
-        inFlightRef.current = false;
-      }
-    },
-    [],
-  );
-
-  return { queue, decide, decideAll };
+  return { queue, decide };
 }

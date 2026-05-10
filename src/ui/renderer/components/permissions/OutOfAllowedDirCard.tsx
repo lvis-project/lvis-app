@@ -32,6 +32,7 @@ import {
 } from "../../../../components/ui/dialog.js";
 import { Input } from "../../../../components/ui/input.js";
 import type { ApprovalChoice, ApprovalRequest } from "../../types.js";
+import { isNonUserTrustOrigin, trustOriginLabel } from "../../utils/trust-origin-label.js";
 
 interface OutOfAllowedDirCardProps {
   open: boolean;
@@ -81,6 +82,8 @@ export function OutOfAllowedDirCard({
   const adjacencyBlocking =
     adjacencyWarnings.length > 0 && !acknowledgedAdjacency;
   const persistEnabled = retypeOk && !adjacencyBlocking;
+  const originLabel = trustOriginLabel(request.trustOrigin);
+  const warnOrigin = isNonUserTrustOrigin(request.trustOrigin);
 
   return (
     <Dialog open={open} onOpenChange={() => { /* require explicit choice */ }}>
@@ -98,11 +101,9 @@ export function OutOfAllowedDirCard({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             허용 디렉토리 외부 접근
-            {request.trustOrigin && (
-              <Badge variant="outline" className="ml-2 text-[11px]">
-                {request.trustOrigin}
-              </Badge>
-            )}
+            <Badge variant="outline" className="ml-2 text-[11px]">
+              {originLabel}
+            </Badge>
           </DialogTitle>
           <DialogDescription>
             도구 <code className="rounded bg-muted px-1 py-0.5 font-mono">{request.toolName}</code>{" "}
@@ -112,11 +113,17 @@ export function OutOfAllowedDirCard({
         </DialogHeader>
 
         <div className="space-y-3 py-2">
+          {warnOrigin && (
+            <section className="rounded border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-xs text-yellow-700 dark:text-yellow-300">
+              이 디렉토리 접근은 {originLabel}에서 시작되었습니다. 영구 허용은 이후 같은 범위의 파일 접근을 계속 허용합니다.
+            </section>
+          )}
+
           <section>
             <p className="mb-1 text-xs font-medium text-muted-foreground">
               요청 경로
             </p>
-            <p className="rounded bg-muted px-2 py-1 text-sm font-mono">
+            <p className="rounded bg-muted px-2 py-1 text-sm font-mono break-all">
               {candidatePath}
             </p>
           </section>
@@ -125,7 +132,7 @@ export function OutOfAllowedDirCard({
             <p className="mb-1 text-xs font-medium text-muted-foreground">
               현재 허용 디렉토리 ({currentAllowed.length}개)
             </p>
-            <ul className="max-h-24 overflow-y-auto rounded border bg-muted/50 p-2 text-xs font-mono">
+            <ul className="max-h-24 overflow-y-auto rounded border bg-muted/50 p-2 text-xs font-mono break-all">
               {currentAllowed.length === 0 ? (
                 <li className="text-muted-foreground">— 없음 —</li>
               ) : (
@@ -139,7 +146,7 @@ export function OutOfAllowedDirCard({
               <p className="mb-1 text-xs font-medium text-muted-foreground">
                 추천 추가 위치 (leaf-parent)
               </p>
-              <p className="rounded bg-blue-500/10 px-2 py-1 text-sm font-mono text-blue-700 dark:text-blue-400">
+              <p className="rounded bg-blue-500/10 px-2 py-1 text-sm font-mono text-blue-700 break-all dark:text-blue-400">
                 {suggestedParent}
               </p>
             </section>

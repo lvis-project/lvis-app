@@ -6,6 +6,7 @@ import type { StreamEvent } from "../../lib/chat-stream-state.js";
 import type { McpServerConfig, McpServerConfigDto, McpServerState } from "../../mcp/types.js";
 import type { SerializedHistoryMessage } from "../../shared/chat-history.js";
 import type { PluginConfigRecord } from "../../shared/plugin-config.js";
+import type { ChatSendInputOrigin } from "../../shared/chat-origin.js";
 
 // Re-export MCP types for renderer-side consumers (type-only, no main-process runtime)
 export type { McpServerConfig, McpServerConfigDto, McpServerState };
@@ -166,6 +167,11 @@ export type LvisApi = {
    * can be mounted with a stable preload regardless of `window.location.href`.
    */
   pluginPreloadUrl: string;
+  permission: LvisPermissionApi;
+  approval: LvisApprovalApi;
+  policy: LvisPolicyApi;
+  mcp: LvisMcpApi;
+  attach: LvisAttachApi;
   /**
    * Deterministic file:// URL of the bundled `plugin-ui-shell.html`. Same
    * stability guarantee as `pluginPreloadUrl` — read directly from the host
@@ -239,7 +245,8 @@ export type LvisApi = {
   chatHasProvider: () => Promise<boolean>;
   chatSend: (
     input: string,
-    attachments?: import("../../engine/llm/types.js").UserContentPart[],
+    attachments: import("../../engine/llm/types.js").UserContentPart[] | undefined,
+    inputOrigin: ChatSendInputOrigin,
   ) => Promise<unknown>;
   chatGuide: (input: string) => Promise<unknown>;
   chatNew: () => Promise<{ ok: true }>;

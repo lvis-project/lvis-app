@@ -126,10 +126,28 @@ describe("OutOfAllowedDirCard", () => {
     expect(persist.disabled).toBe(false);
   });
 
-  it("trustOrigin badge renders when present", () => {
+  it("trustOrigin badge renders as a user-facing label when present", () => {
     render(
       <OutOfAllowedDirCard open={true} request={makeReq({ trustOrigin: "llm-tool-arg" })} onDecide={() => {}} />,
     );
-    expect(document.body.textContent).toContain("llm-tool-arg");
+    expect(document.body.textContent).toContain("모델 생성 인자");
+  });
+
+  it("warns when trustOrigin is missing", () => {
+    const req = makeReq();
+    delete req.trustOrigin;
+    render(
+      <OutOfAllowedDirCard open={true} request={req} onDecide={() => {}} />,
+    );
+    expect(document.body.textContent).toContain("출처 미확인");
+    expect(document.body.textContent).toContain("영구 허용은 이후 같은 범위의 파일 접근을 계속 허용합니다");
+  });
+
+  it("wraps long path fields inside the dialog", () => {
+    render(
+      <OutOfAllowedDirCard open={true} request={makeReq()} onDecide={() => {}} />,
+    );
+    expect(document.body.querySelector("p.font-mono.break-all")?.textContent).toContain("foo.md");
+    expect(document.body.querySelector("ul.font-mono.break-all")?.textContent).toContain("/Users/ken/work");
   });
 });

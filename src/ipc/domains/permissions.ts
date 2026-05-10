@@ -7,8 +7,15 @@ import { randomUUID } from "node:crypto";
 import { loadPolicy, savePolicy } from "../../permissions/policy-store.js";
 import type { ApprovalDecision } from "../../permissions/approval-gate.js";
 import { PERMISSIONS } from "../../shared/ipc-channels.js";
+import { hasUserKeyboardIntent } from "../../shared/chat-origin.js";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import type { IpcDeps } from "../types.js";
+import type {
+  PermissionDirCommand,
+  PermissionModeCommand,
+  PermissionReviewerCommand,
+  PermissionRulesCommand,
+} from "../../permissions/permission-slash.js";
 
 function validateRulePatternInput(pattern: unknown): { ok: true; pattern: string } | { ok: false; error: string; message: string } {
   if (typeof pattern !== "string") {
@@ -27,6 +34,25 @@ function validateRulePatternInput(pattern: unknown): { ok: true; pattern: string
   return { ok: true, pattern: normalized };
 }
 
+function requireUserKeyboardIntent(payload: unknown): { ok: true } | { ok: false; error: string; message: string } {
+  if (hasUserKeyboardIntent(payload)) return { ok: true };
+  return {
+    ok: false,
+    error: "user-keyboard-required",
+    message: "이 권한 변경은 활성 사용자 제스처에서만 실행할 수 있습니다.",
+  };
+}
+
+function payloadRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function isParseError<T>(value: T | { ok: false; error: string }): value is { ok: false; error: string } {
+  return "ok" in (value as Record<string, unknown>) && (value as { ok?: unknown }).ok === false;
+}
+
 export function registerPermissionsHandlers(deps: IpcDeps): void {
   const { conversationLoop, approvalGate, auditLogger } = deps;
 
@@ -36,23 +62,27 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
     return { mode };
   });
 
-  ipcMain.handle(PERMISSIONS.setMode, async (e, mode: string) => {
+  ipcMain.handle(PERMISSIONS.setMode, async (e, payload: unknown) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, PERMISSIONS.setMode, e); return UNAUTHORIZED_FRAME; }
-    const { dispatchPermissionSlash } = await import("../../permissions/permission-slash.js");
-    const outcome = dispatchPermissionSlash(`/permission mode ${mode} --durable`, "user-keyboard");
-    if (outcome.kind === "parse-error") {
-      return { ok: false, error: "invalid-mode", message: outcome.error };
+    const body = payloadRecord(payload);
+    const intent = requireUserKeyboardIntent(body.intent);
+    if (!intent.ok) return intent;
+    const mode = body.mode;
+    if (typeof mode !== "string") {
+      return { ok: false, error: "invalid-mode", message: "mode must be a string" };
     }
-    if (outcome.kind !== "mode") {
-      return { ok: false, error: "invalid-command", message: "permission mode command dispatch failed" };
+    const { parsePermissionModeCommand } = await import("../../permissions/permission-slash.js");
+    const parsed = parsePermissionModeCommand(`${mode} --durable`);
+    if (isParseError<PermissionModeCommand>(parsed)) {
+      return { ok: false, error: "invalid-mode", message: parsed.error };
     }
-    if (outcome.needsModal !== true) {
+    if (parsed.durable !== true) {
       return { ok: false, error: "missing-durable-confirm", message: "durable mode command must require modal confirmation" };
     }
     const pm = conversationLoop.permissionManager;
     if (!pm) return { ok: false, error: "no-permission-manager", message: "권한 매니저가 초기화되지 않았습니다." };
     const { applyPermissionModeCommand } = await import("../../permissions/permission-mode-apply.js");
-    const result = await applyPermissionModeCommand(outcome.cmd, {
+    const result = await applyPermissionModeCommand(parsed, {
       permissionManager: pm,
       approvalGate,
       auditLogger,
@@ -68,51 +98,55 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
     return pm.listPersistedRules();
   });
 
-  ipcMain.handle(PERMISSIONS.addRule, async (e, pattern: string, action: "allow" | "deny") => {
+  ipcMain.handle(PERMISSIONS.addRule, async (e, payload: unknown) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, PERMISSIONS.addRule, e); return UNAUTHORIZED_FRAME; }
+    const body = payloadRecord(payload);
+    const intent = requireUserKeyboardIntent(body.intent);
+    if (!intent.ok) return intent;
+    const action = body.action;
     if (action !== "allow" && action !== "deny") {
       return { ok: false, error: "invalid-action", message: `유효하지 않은 action: '${action}'. 허용값: allow, deny` };
     }
-    const validated = validateRulePatternInput(pattern);
+    const validated = validateRulePatternInput(body.pattern);
     if (!validated.ok) return validated;
-    const { dispatchPermissionSlash } = await import("../../permissions/permission-slash.js");
-    const outcome = dispatchPermissionSlash(`/permission rules add ${action} ${validated.pattern}`, "user-keyboard");
-    if (outcome.kind === "parse-error") return { ok: false, error: "parse-error", message: outcome.error };
-    if (outcome.kind !== "rules" || outcome.cmd.sub !== "add") {
-      return { ok: false, error: "invalid-command", message: "permission rules add command dispatch failed" };
-    }
+    const { parsePermissionRulesCommand } = await import("../../permissions/permission-slash.js");
+    const parsed = parsePermissionRulesCommand(`add ${action} ${validated.pattern}`);
+    if (isParseError<PermissionRulesCommand>(parsed)) return { ok: false, error: "parse-error", message: parsed.error };
+    if (parsed.sub !== "add") return { ok: false, error: "parse-error", message: "add rule command did not parse as add" };
     const pm = conversationLoop.permissionManager;
     if (!pm) return { ok: false, error: "no-permission-manager", message: "권한 매니저가 초기화되지 않았습니다." };
     try {
-      if (outcome.cmd.action === "allow") {
-        await pm.addAlwaysAllowedPersist(outcome.cmd.pattern);
+      if (parsed.action === "allow") {
+        await pm.addAlwaysAllowedPersist(parsed.pattern);
       } else {
-        await pm.addAlwaysDeniedPersist(outcome.cmd.pattern);
+        await pm.addAlwaysDeniedPersist(parsed.pattern);
       }
       deps.toolRegistry.setDenyRules(pm.getVisibilityDenyRules());
-      return { ok: true, rule: { pattern: outcome.cmd.pattern, action: outcome.cmd.action } };
+      return { ok: true, rule: { pattern: parsed.pattern, action: parsed.action } };
     } catch (err) {
       return { ok: false, error: "add-failed", message: (err as Error).message };
     }
   });
 
-  ipcMain.handle(PERMISSIONS.removeRule, async (e, pattern: string, action: "allow" | "deny") => {
+  ipcMain.handle(PERMISSIONS.removeRule, async (e, payload: unknown) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, PERMISSIONS.removeRule, e); return UNAUTHORIZED_FRAME; }
+    const body = payloadRecord(payload);
+    const intent = requireUserKeyboardIntent(body.intent);
+    if (!intent.ok) return intent;
+    const action = body.action;
     if (action !== "allow" && action !== "deny") {
       return { ok: false, error: "invalid-action", message: `유효하지 않은 action: '${action}'. 허용값: allow, deny` };
     }
-    const validated = validateRulePatternInput(pattern);
+    const validated = validateRulePatternInput(body.pattern);
     if (!validated.ok) return validated;
-    const { dispatchPermissionSlash } = await import("../../permissions/permission-slash.js");
-    const outcome = dispatchPermissionSlash(`/permission rules remove ${action} ${validated.pattern}`, "user-keyboard");
-    if (outcome.kind === "parse-error") return { ok: false, error: "parse-error", message: outcome.error };
-    if (outcome.kind !== "rules" || outcome.cmd.sub !== "remove") {
-      return { ok: false, error: "invalid-command", message: "permission rules remove command dispatch failed" };
-    }
+    const { parsePermissionRulesCommand } = await import("../../permissions/permission-slash.js");
+    const parsed = parsePermissionRulesCommand(`remove ${action} ${validated.pattern}`);
+    if (isParseError<PermissionRulesCommand>(parsed)) return { ok: false, error: "parse-error", message: parsed.error };
+    if (parsed.sub !== "remove") return { ok: false, error: "parse-error", message: "remove rule command did not parse as remove" };
     const pm = conversationLoop.permissionManager;
     if (!pm) return { ok: false, error: "no-permission-manager", message: "권한 매니저가 초기화되지 않았습니다." };
     try {
-      await pm.removeRule(outcome.cmd.pattern, outcome.cmd.action);
+      await pm.removeRule(parsed.pattern, parsed.action);
       deps.toolRegistry.setDenyRules(pm.getVisibilityDenyRules());
       return { ok: true };
     } catch (err) {
@@ -142,12 +176,15 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
         auditUnauthorized(auditLogger, PERMISSIONS.dirDispatch, e);
         return UNAUTHORIZED_FRAME;
       }
-      const { dispatchPermissionSlash, dispatchPermissionDirCommand } =
+      const { parsePermissionDirCommand, dispatchPermissionDirCommand } =
         await import("../../permissions/permission-slash.js");
-      const outcome = dispatchPermissionSlash(`/permission dir ${args?.rawArgs ?? ""}`, "user-keyboard");
-      if (outcome.kind === "parse-error") return { ok: false, error: outcome.error };
-      if (outcome.kind !== "dir") return { ok: false, error: "invalid permission dir command" };
-      const result = await dispatchPermissionDirCommand(outcome.cmd);
+      const parsed = parsePermissionDirCommand(args?.rawArgs ?? "");
+      if (isParseError<PermissionDirCommand>(parsed)) return { ok: false, error: parsed.error };
+      if (parsed.verb !== "list") {
+        const intent = requireUserKeyboardIntent((args as { intent?: unknown } | undefined)?.intent);
+        if (!intent.ok) return intent;
+      }
+      const result = await dispatchPermissionDirCommand(parsed);
       if (result.ok && result.verb === "allow" && result.sessionOnly && result.sessionDirectory) {
         conversationLoop.addSessionAdditionalDirectory(result.sessionDirectory);
       }
@@ -163,13 +200,16 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
         auditUnauthorized(auditLogger, PERMISSIONS.reviewerDispatch, e);
         return UNAUTHORIZED_FRAME;
       }
-      const { dispatchPermissionSlash, dispatchPermissionReviewerCommand } =
+      const { parsePermissionReviewerCommand, dispatchPermissionReviewerCommand } =
         await import("../../permissions/permission-slash.js");
-      const outcome = dispatchPermissionSlash(`/permission reviewer ${args?.rawArgs ?? ""}`, "user-keyboard");
-      if (outcome.kind === "parse-error") return { ok: false, error: outcome.error };
-      if (outcome.kind !== "reviewer") return { ok: false, error: "invalid permission reviewer command" };
-      const result = await dispatchPermissionReviewerCommand(outcome.cmd);
-      if (result.ok && outcome.cmd.verb !== "show") {
+      const parsed = parsePermissionReviewerCommand(args?.rawArgs ?? "");
+      if (isParseError<PermissionReviewerCommand>(parsed)) return { ok: false, error: parsed.error };
+      if (parsed.verb !== "show") {
+        const intent = requireUserKeyboardIntent((args as { intent?: unknown } | undefined)?.intent);
+        if (!intent.ok) return intent;
+      }
+      const result = await dispatchPermissionReviewerCommand(parsed);
+      if (result.ok && parsed.verb !== "show") {
         deps.rewireReviewerAgent?.();
       }
       return result;
@@ -213,12 +253,14 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
     PERMISSIONS.deferredResolve,
     async (
       e,
-      params: { id: string; decision: "approved" | "rejected"; reason?: string },
+      params: { id: string; decision: "approved" | "rejected"; reason?: string; intent?: unknown },
     ) => {
       if (!validateSender(e)) {
         auditUnauthorized(auditLogger, PERMISSIONS.deferredResolve, e);
         return UNAUTHORIZED_FRAME;
       }
+      const intent = requireUserKeyboardIntent(params?.intent);
+      if (!intent.ok) return intent;
       if (
         !params ||
         typeof params.id !== "string" ||
@@ -323,8 +365,12 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
     };
   });
 
-  ipcMain.handle(PERMISSIONS.policySet, async (e, patch: Record<string, unknown>) => {
+  ipcMain.handle(PERMISSIONS.policySet, async (e, payload: unknown) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, PERMISSIONS.policySet, e); return UNAUTHORIZED_FRAME; }
+    const body = payloadRecord(payload);
+    const intent = requireUserKeyboardIntent(body.intent);
+    if (!intent.ok) return intent;
+    const patch = payloadRecord(body.patch);
     if ("managed" in patch) {
       return { ok: false, error: "invalid-patch", message: "'managed' 필드는 사용자가 변경할 수 없습니다." };
     }
