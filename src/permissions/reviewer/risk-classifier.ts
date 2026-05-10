@@ -124,7 +124,6 @@ const TRUSTED_NETWORK_HOSTS: ReadonlySet<string> = new Set([
   "api.anthropic.com",
   "generativelanguage.googleapis.com",
   "models.github.ai",
-  "graph.microsoft.com",
 ]);
 
 /** Localhost / loopback variants. */
@@ -145,20 +144,74 @@ function extractShellCommand(input: Record<string, unknown>): string | null {
   return null;
 }
 
-function extractNetworkHost(input: Record<string, unknown>): string | null {
+interface NetworkTarget {
+  host: string;
+  path: string;
+}
+
+function extractNetworkTarget(input: Record<string, unknown>): NetworkTarget | null {
   const candidates = ["url", "endpoint", "host", "uri"];
   for (const k of candidates) {
     const v = input[k];
     if (typeof v !== "string" || v.length === 0) continue;
     try {
       const u = new URL(v);
-      return u.hostname.toLowerCase();
+      return { host: u.hostname.toLowerCase(), path: u.pathname };
     } catch {
       // Not a URL — try direct host
-      if (/^[a-zA-Z0-9.-]+$/.test(v)) return v.toLowerCase();
+      if (/^[a-zA-Z0-9.-]+$/.test(v)) return { host: v.toLowerCase(), path: "" };
     }
   }
   return null;
+}
+
+function extractNetworkHost(input: Record<string, unknown>): string | null {
+  return extractNetworkTarget(input)?.host ?? null;
+}
+
+function extractNetworkMethod(input: Record<string, unknown>): string | null {
+  for (const key of ["method", "httpMethod", "verb"]) {
+    const value = input[key];
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value.trim().toUpperCase();
+    }
+  }
+  return null;
+}
+
+function hasMeaningfulPayload(value: unknown): boolean {
+  if (value === null || value === undefined) return false;
+  if (typeof value === "string") return value.trim().length > 0;
+  if (typeof value === "number" || typeof value === "boolean") return true;
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === "object") return Object.keys(value).length > 0;
+  return false;
+}
+
+function hasNetworkPayload(input: Record<string, unknown>): boolean {
+  for (const key of [
+    "payload",
+    "body",
+    "data",
+    "content",
+    "message",
+    "text",
+    "summary",
+    "file",
+    "files",
+    "attachment",
+    "attachments",
+  ]) {
+    if (hasMeaningfulPayload(input[key])) return true;
+  }
+  return false;
+}
+
+function isGraphMetadataRead(input: Record<string, unknown>, target: NetworkTarget): boolean {
+  const method = extractNetworkMethod(input) ?? "GET";
+  if (method !== "GET" || hasNetworkPayload(input)) return false;
+  const normalizedPath = target.path.replace(/\/+$/, "");
+  return normalizedPath === "/v1.0/me" || normalizedPath === "/beta/me" || normalizedPath === "/me";
 }
 
 function getDottedFieldValue(input: Record<string, unknown>, field: string): unknown {
@@ -234,10 +287,17 @@ const RULES: Array<(ctx: ToolInvocationContext) => RiskVerdict | null> = [
     return { level: "medium", reason: "shell unclassified" };
   },
 
-  // ── network rules (3) ──────────────────────────────────
+  // ── network rules ──────────────────────────────────────
   (ctx) => {
     if (ctx.category !== "network") return null;
-    const host = extractNetworkHost(ctx.finalInput);
+    const target = extractNetworkTarget(ctx.finalInput);
+    if (target?.host === "graph.microsoft.com") {
+      if (isGraphMetadataRead(ctx.finalInput, target)) {
+        return { level: "low", reason: "network graph metadata read" };
+      }
+      return { level: "medium", reason: "network graph data operation" };
+    }
+    const host = target?.host ?? null;
     if (host && TRUSTED_NETWORK_HOSTS.has(host)) {
       return { level: "low", reason: `network trusted host (${host})` };
     }
