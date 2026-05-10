@@ -61,7 +61,14 @@ function makeMockLoop(pm: ReturnType<typeof makeMockPM>) {
 // ─── Mock ApprovalGate ───────────────────────────────
 
 function makeMockGate() {
-  return { resolve: vi.fn(), setPolicy: vi.fn() };
+  return {
+    resolve: vi.fn(),
+    requestAndWait: vi.fn(async (req: { id: string }) => ({
+      requestId: req.id,
+      choice: "allow-once",
+    })),
+    setPolicy: vi.fn(),
+  };
 }
 
 // ─── Build minimal AppServices stub ──────────────────
@@ -99,7 +106,11 @@ function makeServices(pm: ReturnType<typeof makeMockPM>, gate = makeMockGate()) 
     approvalGate: gate as any,
     mcpManager: { listServers: vi.fn(() => []), killSwitch: vi.fn() } as any,
     toolRegistry: { setDenyRules: vi.fn() } as any,
-    auditLogger: { log: vi.fn() } as any,
+    auditLogger: {
+      log: vi.fn(),
+      isPermissionAuditChainReady: vi.fn(() => true),
+      appendPermissionAuditEntry: vi.fn(async (entry: Record<string, unknown>) => entry),
+    } as any,
     idleScheduler: undefined,
     bashAstValidator: {} as any,
     auditService: {} as any,

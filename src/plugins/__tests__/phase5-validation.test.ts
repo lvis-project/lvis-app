@@ -5,7 +5,7 @@
  *   1) keywords[].skillId ⊂ tools[]             (hard fail-load)
  *   2) toolSchemas keys    ⊂ tools[]             (hard fail-load)
  *   3) notificationEvents.event ⊂ eventSubscriptions (soft warn)
- *   4) ui[] kind-specific required fields (soft drop per entry)
+ *   4) ui[] kind-specific required fields (hard fail-load)
  *   5) startupTools fail-soft (one throws, others run, plugin stays loaded)
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -149,14 +149,12 @@ describe("Phase 5 — runtime validation hardening", () => {
     ).toBe(true);
   });
 
-  it("4) ui[] invalid entry dropped, other entries survive, plugin loads", async () => {
+  it("4) ui[] invalid entry fails load instead of dropping entries", async () => {
     await writePlugin("p_ui", {
       ui: [
-        // bad embedded-module (missing exportName) — should drop
+        // bad embedded-module (missing exportName) — should fail the manifest
         { id: "a", slot: "sidebar", kind: "embedded-module", title: "A", entry: "dist/a.js" },
-        // good info-card — should keep
         { id: "b", slot: "sidebar", kind: "info-card", title: "B" },
-        // good embedded-page — should keep
         { id: "c", slot: "sidebar", kind: "embedded-page", title: "C", page: "dist/c.html" },
       ],
     });
@@ -167,23 +165,20 @@ describe("Phase 5 — runtime validation hardening", () => {
     } finally {
       cap.restore();
     }
-    expect(runtime.listPluginIds()).toContain("p_ui");
-    const manifest = runtime.getPluginManifest("p_ui");
-    expect(manifest?.ui?.map((u) => u.id).sort()).toEqual(["b", "c"]);
+    expect(runtime.listPluginIds()).not.toContain("p_ui");
     expect(
-      cap.warns.some((w) =>
-        /ui\[0\] kind="embedded-module" missing required field "exportName" — dropped/.test(w),
+      cap.errors.some((e) =>
+        /ui\[0\].*kind="embedded-module" missing required field\(s\): exportName/.test(e),
       ),
     ).toBe(true);
   });
 
-  it("4b) ui[] non-plain-object entries (array, number, null) are dropped, plugin loads", async () => {
+  it("4b) ui[] non-plain-object entries fail load instead of being dropped", async () => {
     await writePlugin("p_ui_bad", {
       ui: [
-        [], // array — must be dropped
-        123, // number — must be dropped
-        null, // null — must be dropped
-        // good entry should survive
+        [], // array — must fail
+        123,
+        null,
         { id: "z", slot: "sidebar", kind: "info-card", title: "Z" },
       ],
     });
@@ -194,12 +189,8 @@ describe("Phase 5 — runtime validation hardening", () => {
     } finally {
       cap.restore();
     }
-    expect(runtime.listPluginIds()).toContain("p_ui_bad");
-    const manifest = runtime.getPluginManifest("p_ui_bad");
-    expect(manifest?.ui?.map((u) => u.id)).toEqual(["z"]);
-    // Each bad entry should have emitted a warn.
-    const droppedWarns = cap.warns.filter((w) => /ui\[\d+\] is not an object — dropped/.test(w));
-    expect(droppedWarns.length).toBeGreaterThanOrEqual(3);
+    expect(runtime.listPluginIds()).not.toContain("p_ui_bad");
+    expect(cap.errors.some((e) => /ui\[0\].*must be an object/.test(e))).toBe(true);
   });
 
   it("5) startupTools fail-soft: one throws, others run, plugin stays loaded", async () => {
