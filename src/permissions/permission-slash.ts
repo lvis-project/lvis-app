@@ -21,6 +21,7 @@ import {
   removeAllowedDirectoryPersist,
   readPermissionSettings,
   setReviewerSettingsPersist,
+  type ReviewerFallbackOnError,
   type ReviewerMode,
   type ReviewerProvider,
   type ReviewerSettingsBlock,
@@ -218,7 +219,7 @@ export async function dispatchPermissionDirCommand(
 
 // ─── /permission reviewer slash ───────────────────────────────────────
 
-export type PermissionReviewerVerb = "mode" | "provider" | "model" | "show";
+export type PermissionReviewerVerb = "mode" | "provider" | "model" | "fallback" | "show";
 
 export interface PermissionReviewerCommand {
   verb: PermissionReviewerVerb;
@@ -231,6 +232,7 @@ export type PermissionReviewerResult =
   | { ok: true; verb: "mode"; settings: ReviewerSettingsBlock }
   | { ok: true; verb: "provider"; settings: ReviewerSettingsBlock }
   | { ok: true; verb: "model"; settings: ReviewerSettingsBlock }
+  | { ok: true; verb: "fallback"; settings: ReviewerSettingsBlock }
   | { ok: false; error: string };
 
 const VALID_REVIEWER_MODES: ReadonlySet<ReviewerMode> = new Set([
@@ -243,6 +245,10 @@ const VALID_REVIEWER_PROVIDERS: ReadonlySet<ReviewerProvider> = new Set([
   "anthropic",
   "google",
 ]);
+const VALID_REVIEWER_FALLBACKS: ReadonlySet<ReviewerFallbackOnError> = new Set([
+  "deny",
+  "rule",
+]);
 
 /**
  * Parse `/permission reviewer ...` (the substring AFTER the prefix).
@@ -254,6 +260,7 @@ const VALID_REVIEWER_PROVIDERS: ReadonlySet<ReviewerProvider> = new Set([
  *   "mode llm"
  *   "provider openai"
  *   "model gpt-4o-mini"
+ *   "fallback deny"
  */
 export function parsePermissionReviewerCommand(
   rawArgs: string,
@@ -263,12 +270,18 @@ export function parsePermissionReviewerCommand(
     return {
       ok: false,
       error:
-        "missing subcommand — usage: /permission reviewer <show|mode|provider|model> [value]",
+        "missing subcommand — usage: /permission reviewer <show|mode|provider|model|fallback> [value]",
     };
   }
   const verb = args[0] as PermissionReviewerVerb;
-  if (verb !== "mode" && verb !== "provider" && verb !== "model" && verb !== "show") {
-    return { ok: false, error: `unknown subcommand '${verb}' — expected show|mode|provider|model` };
+  if (
+    verb !== "mode" &&
+    verb !== "provider" &&
+    verb !== "model" &&
+    verb !== "fallback" &&
+    verb !== "show"
+  ) {
+    return { ok: false, error: `unknown subcommand '${verb}' — expected show|mode|provider|model|fallback` };
   }
   if (verb === "show") {
     if (args.length > 1) return { ok: false, error: "show takes no extra arguments" };
@@ -331,6 +344,23 @@ export async function dispatchPermissionReviewerCommand(
       return { ok: false, error: (err as Error).message };
     }
   }
+  if (cmd.verb === "fallback") {
+    if (!VALID_REVIEWER_FALLBACKS.has(cmd.value as ReviewerFallbackOnError)) {
+      return {
+        ok: false,
+        error: `invalid fallback '${cmd.value}' — expected ${[...VALID_REVIEWER_FALLBACKS].join("|")}`,
+      };
+    }
+    try {
+      const settings = await setReviewerSettingsPersist(
+        { fallbackOnError: cmd.value as ReviewerFallbackOnError },
+        pathOverride,
+      );
+      return { ok: true, verb: "fallback", settings };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+  }
   // model
   if (cmd.value.length === 0) {
     return { ok: false, error: "model name cannot be empty" };
@@ -343,6 +373,39 @@ export async function dispatchPermissionReviewerCommand(
     return { ok: true, verb: "model", settings };
   } catch (err) {
     return { ok: false, error: (err as Error).message };
+  }
+}
+
+export async function dispatchPermissionReviewerCommandWithRewire(
+  cmd: PermissionReviewerCommand,
+  rewireReviewerAgent?: () => void,
+  pathOverride?: string,
+): Promise<PermissionReviewerResult> {
+  if (cmd.verb === "show") {
+    return dispatchPermissionReviewerCommand(cmd, pathOverride);
+  }
+  const previous = await dispatchPermissionReviewerCommand(
+    { verb: "show", value: "" },
+    pathOverride,
+  );
+  const result = await dispatchPermissionReviewerCommand(cmd, pathOverride);
+  if (!result.ok) return result;
+  try {
+    rewireReviewerAgent?.();
+    return result;
+  } catch (err) {
+    if (previous.ok) {
+      await setReviewerSettingsPersist({ ...previous.settings }, pathOverride);
+      try {
+        rewireReviewerAgent?.();
+      } catch {
+        // The original rewire failure is the actionable error for callers.
+      }
+    }
+    return {
+      ok: false,
+      error: `reviewer-rewire-failed: ${(err as Error).message}`,
+    };
   }
 }
 
@@ -442,7 +505,7 @@ export function dispatchPermissionAuditCommand(
 
 // ─── /permission mode ──────────────────────────────────────────────────
 
-export type SlashPermissionMode = "strict" | "default" | "auto";
+export type SlashPermissionMode = "strict" | "default" | "auto" | "allow";
 
 export interface PermissionModeCommand {
   verb: "mode";
@@ -454,6 +517,7 @@ const VALID_MODES: ReadonlySet<SlashPermissionMode> = new Set([
   "strict",
   "default",
   "auto",
+  "allow",
 ]);
 
 export function parsePermissionModeCommand(
@@ -463,7 +527,7 @@ export function parsePermissionModeCommand(
   if (args.length === 0) {
     return {
       ok: false,
-      error: "missing mode — usage: /permission mode <strict|default|auto> [--durable]",
+      error: "missing mode — usage: /permission mode <strict|default|auto|allow> [--durable]",
     };
   }
   const candidate = args[0] as SlashPermissionMode;
@@ -670,9 +734,9 @@ export function dispatchPermissionSlash(
         return { kind: "parse-error", error: parsed.error };
       }
       const cmd = parsed as PermissionHooksCommand;
-      // Hook trust changes are slash-based TOFU: the typed user-keyboard
-      // command is the approval surface. Production intentionally has no
-      // renderer approval prompt for untrusted hooks.
+      // Hook trust changes are explicit typed trust registration: the
+      // user-keyboard slash command is the approval surface. Production
+      // intentionally has no renderer approval prompt for untrusted hooks.
       return { kind: "hooks", cmd, needsModal: false };
     }
     default:

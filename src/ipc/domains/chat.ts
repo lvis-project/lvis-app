@@ -144,6 +144,7 @@ async function runStreamedTurn(
       onToolEnd: (name, toolResult, isError, meta, uiPayload, durationMs) =>
         send({ type: "tool_end", name, result: toolResult, isError, ...meta, ...(uiPayload && { uiPayload }), durationMs }),
       onError: (error) => send({ type: "error", error }),
+      onPermissionModeChanged: (mode) => send({ type: "permission_mode_changed", mode }),
       onCompactOccurred: ({ removedMessages, freedTokens, tier, summary, compactNum }) =>
         send({
           type: "compact_notice",

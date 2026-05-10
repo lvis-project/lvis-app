@@ -1,12 +1,12 @@
 /**
- * Permission policy Phase 4 — Layer 6 hook discovery + TOFU lockfile.
+ * Permission policy Phase 4 — Layer 6 hook discovery + trust lockfile.
  *
  * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 6
- * "Boot-time hash check + TOFU".
+ * "Boot-time hash check + explicit trust registration".
  *
  * Discovers individual `pre-*.sh`, `post-*.sh`, `perm-*.sh` files under
  * `~/.config/lvis/hooks/`. Computes sha256 hashes and compares against
- * `~/.config/lvis/hooks/.lockfile.json` to surface the boot-time TOFU diff:
+ * `~/.config/lvis/hooks/.lockfile.json` to surface the boot-time trust diff:
  *
  *   - **fresh install** (no lockfile, hooks present) → all hooks treated
  *     as `new`.
@@ -95,8 +95,9 @@ export function defaultLockfilePath(): string {
 }
 
 /**
- * Default disabled subfolder. Hooks rejected by the TOFU workflow are
- * relocated here so they survive on disk for inspection but do not run.
+ * Default disabled subfolder. Hooks rejected by the trust-registration
+ * workflow are relocated here so they survive on disk for inspection but do
+ * not run.
  */
 export function defaultDisabledDir(): string {
   return pathResolve(defaultHooksDir(), ".disabled");

@@ -104,6 +104,14 @@ describe("parsePermissionModeCommand", () => {
     });
   });
 
+  it("parses 'allow --durable'", () => {
+    expect(parsePermissionModeCommand("allow --durable")).toEqual({
+      verb: "mode",
+      mode: "allow",
+      durable: true,
+    });
+  });
+
   it("rejects invalid mode", () => {
     expect(parsePermissionModeCommand("yolo")).toMatchObject({ ok: false });
   });
@@ -296,7 +304,12 @@ describe("dispatchPermissionSlash — subcommand routing", () => {
     expect(result).toMatchObject({ kind: "mode", needsModal: false });
   });
 
-  it("routes 'hooks accept foo.sh' with needsModal=false (typed TOFU approval)", () => {
+  it("routes 'mode allow' (session) with needsModal=false", () => {
+    const result = dispatchPermissionSlash("/permission mode allow", "user-keyboard");
+    expect(result).toMatchObject({ kind: "mode", needsModal: false });
+  });
+
+  it("routes 'hooks accept foo.sh' with needsModal=false (typed trust registration)", () => {
     const result = dispatchPermissionSlash(
       "/permission hooks accept pre-foo.sh",
       "user-keyboard",

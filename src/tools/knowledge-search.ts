@@ -2,7 +2,7 @@
  * Knowledge Search Tool — LLM agentic 검색 루프
  *
  * 청사진 §1 C1: Phase 1에서 검색 주체는 LVIS agentic 루프.
- *   PageIndex 0.2.8은 데이터 소스일 뿐 `search()`가 없음.
+ *   Local indexer는 데이터 소스일 뿐 `search()`가 없음.
  *   → LVIS가 OpenAI function calling 4개 도구를 노출하여 LLM이 직접 트리를 탐색.
  *
  * 청사진 §6.1: `lvis-app/src/tools/knowledge-search.ts`
@@ -12,7 +12,7 @@
  * 4 tools를 ToolRegistry에 등록:
  *   1. knowledge_search(query, topK?)        — HybridRetriever 호출, top 결과 반환
  *   2. document_list()                        — 인덱싱된 문서 목록
- *   3. document_structure(docId)              — PageIndex 트리 (agentic)
+ *   3. document_structure(docId)              — local index tree (agentic)
  *   4. document_page_content(docId, pages)    — 특정 페이지 내용 (agentic)
  *
  * LLM은 knowledge_search로 후보 chunk를 받고, document_structure /
@@ -51,12 +51,12 @@ export interface KnowledgeWorkerClient {
     }>
   >;
 
-  /** GET /structure — PageIndex 트리 구조 (PageIndex 0.2.8 format) */
+  /** GET /structure — local index tree structure */
   getStructure(docId: string): Promise<unknown>;
 
   /**
    * GET /page-content — 특정 페이지 범위의 본문.
-   * pages는 PageIndex 관행에 따라 "5" / "5-7" / "1,3,5-7" 같은 표현식.
+   * pages는 local indexer 관행에 따라 "5" / "5-7" / "1,3,5-7" 같은 표현식.
    */
   getPageContent(
     docId: string,
@@ -198,7 +198,7 @@ export function createKnowledgeSearchTools(
   const documentStructureTool = createDynamicTool({
     name: "document_structure",
     description:
-      "특정 문서의 PageIndex 트리 구조를 반환합니다. 트리의 노드 제목을 보고 관련 페이지 범위를 추론한 다음, document_page_content로 그 범위를 읽으세요. 이는 agentic 루프의 2-hop 탐색에 사용됩니다.",
+      "특정 문서의 로컬 인덱스 트리 구조를 반환합니다. 트리의 노드 제목을 보고 관련 페이지 범위를 추론한 다음, document_page_content로 그 범위를 읽으세요. 이는 agentic 루프의 2-hop 탐색에 사용됩니다.",
     source: "builtin",
     category: "read",
     isReadOnly: () => true,
@@ -239,7 +239,7 @@ export function createKnowledgeSearchTools(
   const documentPageContentTool = createDynamicTool({
     name: "document_page_content",
     description:
-      "특정 문서의 페이지 범위 내용을 반환합니다. pages 파라미터는 PageIndex 표현식으로, '5' (단일 페이지), '5-7' (범위), '1,3,5-7' (복합)의 세 형식을 지원합니다. knowledge_search의 결과 또는 document_structure의 노드를 본 뒤 정확한 페이지 본문을 얻기 위해 호출하세요.",
+      "특정 문서의 페이지 범위 내용을 반환합니다. pages 파라미터는 local indexer 표현식으로, '5' (단일 페이지), '5-7' (범위), '1,3,5-7' (복합)의 세 형식을 지원합니다. knowledge_search의 결과 또는 document_structure의 노드를 본 뒤 정확한 페이지 본문을 얻기 위해 호출하세요.",
     source: "builtin",
     category: "read",
     isReadOnly: () => true,

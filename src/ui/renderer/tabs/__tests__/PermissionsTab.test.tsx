@@ -45,6 +45,69 @@ function installApi(disabledBatches: HookTrustRow[][]) {
         userAdditions: [],
         effective: [],
       })),
+      reviewerDispatch: vi.fn(async (rawArgs: string) => {
+        if (rawArgs === "show") {
+          return {
+            ok: true as const,
+            verb: "show" as const,
+            settings: {
+              mode: "disabled" as const,
+              provider: "openai" as const,
+              model: "gpt-4o-mini",
+              fallbackOnError: "deny" as const,
+            },
+          };
+        }
+        if (rawArgs === "mode llm") {
+          return {
+            ok: true as const,
+            verb: "mode" as const,
+            settings: {
+              mode: "llm" as const,
+              provider: "openai" as const,
+              model: "gpt-4o-mini",
+              fallbackOnError: "deny" as const,
+            },
+          };
+        }
+        if (rawArgs === "mode disabled") {
+          return {
+            ok: true as const,
+            verb: "mode" as const,
+            settings: {
+              mode: "disabled" as const,
+              provider: "openai" as const,
+              model: "gpt-4o-mini",
+              fallbackOnError: "deny" as const,
+            },
+          };
+        }
+        if (rawArgs === "fallback rule") {
+          return {
+            ok: true as const,
+            verb: "fallback" as const,
+            settings: {
+              mode: "llm" as const,
+              provider: "openai" as const,
+              model: "gpt-4o-mini",
+              fallbackOnError: "rule" as const,
+            },
+          };
+        }
+        if (rawArgs === "model gpt-5.5-mini") {
+          return {
+            ok: true as const,
+            verb: "model" as const,
+            settings: {
+              mode: "llm" as const,
+              provider: "openai" as const,
+              model: "gpt-5.5-mini",
+              fallbackOnError: "deny" as const,
+            },
+          };
+        }
+        throw new Error(`unexpected reviewerDispatch: ${rawArgs}`);
+      }),
     },
     policy: {
       get: vi.fn(async () => ({
@@ -64,6 +127,22 @@ beforeEach(() => {
 });
 
 describe("PermissionsTab hook quarantine notice", () => {
+  it("shows the four user-facing permission policy choices and their read behavior", async () => {
+    installApi([[]]);
+
+    await act(async () => {
+      render(<PermissionsTab />);
+    });
+
+    expect(screen.getByTestId("exec-mode-default")).toHaveTextContent("기본");
+    expect(screen.getByText(/읽기 도구는 허용/)).toBeTruthy();
+    expect(screen.getByTestId("exec-mode-strict")).toHaveTextContent("전체 물어보기");
+    expect(screen.getByText(/읽기까지 포함해 모든 도구/)).toBeTruthy();
+    expect(screen.getByTestId("exec-mode-auto")).toHaveTextContent("자동 검증");
+    expect(screen.getByText(/헤드리스 작업은 백그라운드 리뷰어가 검증/)).toBeTruthy();
+    expect(screen.getByTestId("exec-mode-allow")).toHaveTextContent("전체 허용");
+  });
+
   it("keeps the rendered mode unchanged when durable mode confirmation fails", async () => {
     const api = installApi([[]]);
     api.permission.setMode.mockResolvedValueOnce({
@@ -76,16 +155,17 @@ describe("PermissionsTab hook quarantine notice", () => {
       render(<PermissionsTab />);
     });
 
-    expect(screen.getByText("기본 (Default)")).toBeTruthy();
+    expect(screen.getByTestId("exec-mode-default")).toBeTruthy();
 
     await act(async () => {
-      fireEvent.click(screen.getByText("자동 (Auto)").closest("button")!);
+      fireEvent.click(screen.getByTestId("exec-mode-auto"));
     });
 
     expect(api.permission.setMode).toHaveBeenCalledWith("auto");
+    expect(api.permission.reviewerDispatch).not.toHaveBeenCalledWith("mode llm");
     expect(screen.getByText("사용자가 모드 변경을 거부했습니다.")).toBeTruthy();
-    const defaultButton = screen.getByText("기본 (Default)").closest("button")!;
-    const autoButton = screen.getByText("자동 (Auto)").closest("button")!;
+    const defaultButton = screen.getByTestId("exec-mode-default");
+    const autoButton = screen.getByTestId("exec-mode-auto");
     expect(defaultButton.className).toContain("border-primary");
     expect(autoButton.className).not.toContain("border-primary");
   });
@@ -98,12 +178,62 @@ describe("PermissionsTab hook quarantine notice", () => {
     });
 
     await act(async () => {
-      fireEvent.click(screen.getByText("자동 (Auto)").closest("button")!);
+      fireEvent.click(screen.getByTestId("exec-mode-auto"));
     });
 
+    expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("mode llm");
     expect(api.permission.setMode).toHaveBeenCalledWith("auto");
-    const autoButton = screen.getByText("자동 (Auto)").closest("button")!;
+    expect(api.permission.setMode.mock.invocationCallOrder[0]).toBeLessThan(
+      api.permission.reviewerDispatch.mock.invocationCallOrder.at(-1)!,
+    );
+    const autoButton = screen.getByTestId("exec-mode-auto");
     expect(autoButton.className).toContain("border-primary");
+  });
+
+  it("maps full allow policy to allow mode and disables background reviewer", async () => {
+    const api = installApi([[]]);
+    api.permission.getMode.mockResolvedValueOnce({ mode: "auto" });
+    api.permission.reviewerDispatch.mockImplementation(async (rawArgs: string) => {
+      if (rawArgs === "show") {
+        return {
+          ok: true as const,
+          verb: "show" as const,
+          settings: {
+            mode: "llm" as const,
+            provider: "openai" as const,
+            model: "gpt-4o-mini",
+            fallbackOnError: "deny" as const,
+          },
+        };
+      }
+      if (rawArgs === "mode disabled") {
+        return {
+          ok: true as const,
+          verb: "mode" as const,
+          settings: {
+            mode: "disabled" as const,
+            provider: "openai" as const,
+            model: "gpt-4o-mini",
+            fallbackOnError: "deny" as const,
+          },
+        };
+      }
+      throw new Error(`unexpected reviewerDispatch: ${rawArgs}`);
+    });
+
+    await act(async () => {
+      render(<PermissionsTab />);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("exec-mode-allow"));
+    });
+
+    expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("mode disabled");
+    expect(api.permission.setMode).toHaveBeenCalledWith("allow");
+    expect(api.permission.setMode.mock.invocationCallOrder[0]).toBeLessThan(
+      api.permission.reviewerDispatch.mock.invocationCallOrder.at(-1)!,
+    );
+    expect(screen.getByTestId("exec-mode-allow").className).toContain("border-primary");
   });
 
   it("hydrates the active mode from durable settings on mount", async () => {
@@ -114,7 +244,7 @@ describe("PermissionsTab hook quarantine notice", () => {
       render(<PermissionsTab />);
     });
 
-    const autoButton = screen.getByText("자동 (Auto)").closest("button")!;
+    const autoButton = screen.getByTestId("exec-mode-auto");
     expect(autoButton.className).toContain("border-primary");
   });
 
@@ -154,6 +284,99 @@ describe("PermissionsTab hook quarantine notice", () => {
 
     expect(api.permission.hookTrustList).toHaveBeenCalledTimes(2);
     expect(screen.queryByTestId("hook-quarantine-notice")).toBeNull();
+  });
+
+  it("hydrates reviewer settings and switches background review to LLM mode", async () => {
+    const api = installApi([[]]);
+
+    await act(async () => {
+      render(<PermissionsTab />);
+    });
+
+    expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("show");
+    expect(screen.getAllByText("명시 승인만").length).toBeGreaterThan(0);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("reviewer-mode-llm"));
+    });
+
+    expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("mode llm");
+    expect(screen.getByTestId("reviewer-provider-select")).toBeTruthy();
+    expect(screen.getByTestId("reviewer-fallback-select")).toBeTruthy();
+    expect(screen.getByTestId("reviewer-model-input")).toBeTruthy();
+  });
+
+  it("exposes the LLM reviewer fallback policy instead of hiding fail-open behavior", async () => {
+    const api = installApi([[]]);
+
+    await act(async () => {
+      render(<PermissionsTab />);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("reviewer-mode-llm"));
+    });
+    await act(async () => {
+      fireEvent.change(screen.getByTestId("reviewer-fallback-select"), {
+        target: { value: "rule" },
+      });
+    });
+
+    expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("fallback rule");
+    expect((screen.getByTestId("reviewer-fallback-select") as HTMLSelectElement).value).toBe("rule");
+  });
+
+  it("persists reviewer model changes through reviewerDispatch", async () => {
+    const api = installApi([[]]);
+
+    await act(async () => {
+      render(<PermissionsTab />);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("reviewer-mode-llm"));
+    });
+    await act(async () => {
+      fireEvent.change(screen.getByTestId("reviewer-model-input"), {
+        target: { value: "gpt-5.5-mini" },
+      });
+      fireEvent.click(screen.getByText("적용"));
+    });
+
+    expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("model gpt-5.5-mini");
+    expect((screen.getByTestId("reviewer-model-input") as HTMLInputElement).value).toBe("gpt-5.5-mini");
+  });
+
+  it("keeps the prior reviewer mode when runtime rewire fails", async () => {
+    const api = installApi([[]]);
+    api.permission.reviewerDispatch.mockImplementation(async (rawArgs: string) => {
+      if (rawArgs === "show") {
+        return {
+          ok: true as const,
+          verb: "show" as const,
+          settings: {
+            mode: "disabled" as const,
+            provider: "openai" as const,
+            model: "gpt-4o-mini",
+            fallbackOnError: "deny" as const,
+          },
+        };
+      }
+      if (rawArgs === "mode llm") {
+        return { ok: false as const, error: "reviewer-rewire-failed: missing provider" };
+      }
+      throw new Error(`unexpected reviewerDispatch: ${rawArgs}`);
+    });
+
+    await act(async () => {
+      render(<PermissionsTab />);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("reviewer-mode-llm"));
+    });
+
+    expect(screen.getByText(/이전 설정으로 복원했습니다/)).toBeTruthy();
+    expect(screen.getByText(/상세: missing provider/)).toBeTruthy();
+    expect(screen.getByTestId("reviewer-mode-disabled").className).toContain("border-primary");
+    expect(screen.getByTestId("reviewer-mode-llm").className).not.toContain("border-primary");
   });
 
   it("adds and removes additional directories through the slash-backed IPC", async () => {
