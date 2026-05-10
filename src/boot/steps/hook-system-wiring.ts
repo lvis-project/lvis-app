@@ -1,5 +1,5 @@
 /**
- * Permission policy Phase 4 — Layer 6 hook system boot wiring.
+ * Permission policy Layer 6 hook system boot wiring.
  *
  * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 6.
  *
@@ -12,7 +12,7 @@
  *      `runPreToolUse` / `runPostToolUse` / `runPermissionRequest`.
  *
  * Atomic cutover (CLAUDE.md No-Fallback): no single-file hooks.json path.
- * Phase 4 uses only per-script files so every executable hook goes through
+ * The runtime uses only per-script files so every executable hook goes through
  * the lockfile + `.disabled/` quarantine path.
  */
 import { ScriptHookManager } from "../../hooks/script-hook-manager.js";
@@ -39,14 +39,14 @@ export interface WireHookSystemDeps {
    * and strict-denies new or changed hooks.
    */
   promptDispatcher?: TrustPromptDispatcher;
-  /** Permission policy #633 — structured boot-time quarantine audit surface. */
+  /** Structured boot-time quarantine audit surface. */
   auditLogger?: Pick<AuditLogger, "log" | "isPermissionAuditChainReady" | "appendPermissionAuditEntry">;
 }
 
 export interface HookSystemBootResult {
   /** Live runtime manager. Pass to executor + approval-gate. */
   manager: ScriptHookManager;
-  /** TOFU workflow result — for audit + diagnostics. */
+  /** Trust workflow result — for audit + diagnostics. */
   trust: RunHookTrustResult;
 }
 

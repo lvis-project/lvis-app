@@ -173,7 +173,7 @@ describe("buildChainedEntries", () => {
 describe("verifyChain", () => {
   /**
    * Build a 12-entry fixture so the tampered-mid-line test has plenty
-   * of context. ≥10 entries with one mid-line tampered (per Phase 5 hard
+   * of context. ≥10 entries with one mid-line tampered (per hard
    * rules).
    */
   function buildFixture(secret: string, n = 12): { entries: Array<Record<string, unknown>>; lines: string[] } {

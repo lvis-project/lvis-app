@@ -78,6 +78,41 @@ describe("ApprovalDialog", () => {
       expect(document.body.textContent).toContain("read_file");
     });
   });
+
+  it("routes out-of-allowed-dir requests to the directory access card", async () => {
+    const onDecide = vi.fn();
+    render(
+      <ApprovalDialog
+        queue={[
+          makeRequest({
+            kind: "out-of-allowed-dir",
+            toolName: "read_file",
+            reason: "out-of-allowed-dir",
+            requireExplicit: true,
+            outOfAllowedDir: {
+              candidatePath: "/Users/ken/Documents/project/notes.md",
+              suggestedParent: "/Users/ken/Documents/project",
+              currentAllowed: ["/Users/ken/workspace/GIT/github/lvis-project"],
+              adjacencyWarnings: [],
+            },
+          }),
+        ]}
+        onDecide={onDecide}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(document.body.textContent).toContain("허용 디렉토리 외부 접근");
+      expect(document.body.textContent).toContain("/Users/ken/Documents/project/notes.md");
+    });
+
+    const allowOnce = Array.from(document.body.querySelectorAll("button")).find(
+      (button) => button.textContent === "한 번만 허용",
+    );
+    expect(allowOnce).toBeTruthy();
+    fireEvent.click(allowOnce!);
+    expect(onDecide).toHaveBeenCalledWith("allow-once", undefined);
+  });
 });
 
 afterEach(() => {

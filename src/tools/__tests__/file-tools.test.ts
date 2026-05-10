@@ -32,7 +32,7 @@ import {
 let workDir: string;
 
 function ctx(): ToolExecutionContext {
-  return { cwd: workDir, allowedDirectories: [], metadata: {} };
+  return { cwd: workDir, extraAllowedDirectories: [], metadata: {} };
 }
 
 function parse(output: string): Record<string, unknown> {
@@ -110,6 +110,30 @@ describe("file native tools", () => {
     expect(matches.map((m) => m.text)).toEqual(["needle one", "needle two"]);
   });
 
+  it("list/glob/grep skip sensitive descendants under an allowed root", async () => {
+    mkdirSync(join(workDir, ".ssh"), { recursive: true });
+    mkdirSync(join(workDir, ".lvis", "secrets"), { recursive: true });
+    writeFileSync(join(workDir, ".env"), "needle secret\n", "utf8");
+    writeFileSync(join(workDir, ".ssh", "id_rsa"), "needle key\n", "utf8");
+    writeFileSync(join(workDir, ".lvis", "secrets", "token.txt"), "needle token\n", "utf8");
+
+    const listed = await new ListFilesTool().execute({ path: ".", depth: 4, limit: 50 }, ctx());
+    expect(listed.isError).toBe(false);
+    const entries = parse(listed.output).entries as Array<{ relativePath: string }>;
+    expect(entries.map((entry) => entry.relativePath)).not.toEqual(
+      expect.arrayContaining([".env", ".ssh", ".ssh/id_rsa", ".lvis/secrets/token.txt"]),
+    );
+
+    const globbed = await new GlobFilesTool().execute({ path: ".", pattern: "**/.env", limit: 50 }, ctx());
+    expect(globbed.isError).toBe(false);
+    expect(parse(globbed.output).matches).toEqual([]);
+
+    const grepped = await new GrepFilesTool().execute({ path: ".", pattern: "needle", limit: 50 }, ctx());
+    expect(grepped.isError).toBe(false);
+    const matches = parse(grepped.output).matches as Array<{ path: string; text: string }>;
+    expect(matches.some((match) => match.text.includes("secret") || match.text.includes("key") || match.text.includes("token"))).toBe(false);
+  });
+
   it("write-capable file tools scope approval cache keys to canonical paths", () => {
     expect(new WriteFileTool().approvalCacheKey({ path: "src/a.ts" }, { cwd: workDir })).toBe(
       `path:${join(workDir, "src", "a.ts")}`,
@@ -127,6 +151,10 @@ describe("file native tools", () => {
       { sourcePath: "README.md", destinationPath: "docs/README.md" },
       { cwd: workDir },
     )).toBe(`source:${join(workDir, "README.md")}:destination:${join(workDir, "docs", "README.md")}`);
+  });
+
+  it("write-capable approval cache keys require explicit cwd", () => {
+    expect(() => new WriteFileTool().approvalCacheKey({ path: "src/a.ts" })).toThrow("explicit cwd");
   });
 
   it("glob_files filters before applying the result limit", async () => {
@@ -251,6 +279,21 @@ describe("file native tools", () => {
     expect(readFileSync(join(workDir, "docs", "README.md"), "utf8")).toBe("# LVIS\nneedle docs\n");
   });
 
+  it("move_file overwrite=false does not clobber a concurrently-created destination", async () => {
+    writeFileSync(join(workDir, "one.txt"), "one\n", "utf8");
+    writeFileSync(join(workDir, "two.txt"), "two\n", "utf8");
+    const tool = new MoveFileTool();
+
+    const results = await Promise.all([
+      tool.execute({ sourcePath: "one.txt", destinationPath: "race/out.txt" }, ctx()),
+      tool.execute({ sourcePath: "two.txt", destinationPath: "race/out.txt" }, ctx()),
+    ]);
+
+    expect(results.filter((result) => !result.isError)).toHaveLength(1);
+    expect(results.filter((result) => result.isError && result.output.includes("destination exists"))).toHaveLength(1);
+    expect(["one\n", "two\n"]).toContain(readFileSync(join(workDir, "race", "out.txt"), "utf8"));
+  });
+
   it("delete_file removes a regular file", async () => {
     const result = await new DeleteFileTool().execute(
       { path: "README.md" },
@@ -284,7 +327,7 @@ describe("file native tools", () => {
 
       const result = await new ReadFileTool().execute(
         { path: target },
-        { cwd: workDir, allowedDirectories: [outside], metadata: {} },
+        { cwd: workDir, extraAllowedDirectories: [outside], metadata: {} },
       );
 
       expect(result.isError).toBe(false);
@@ -309,10 +352,10 @@ describe("file native tools", () => {
       if (!dirResult.ok) throw new Error(dirResult.error);
       expect(dirResult.verb).toBe("allow");
 
-      const allowedDirectories = dirResult.verb === "allow" ? dirResult.persisted : [];
+      const extraAllowedDirectories = dirResult.verb === "allow" ? dirResult.persisted : [];
       const result = await new ReadFileTool().execute(
         { path: target },
-        { cwd: workDir, allowedDirectories, metadata: {} },
+        { cwd: workDir, extraAllowedDirectories, metadata: {} },
       );
 
       expect(result.isError).toBe(false);

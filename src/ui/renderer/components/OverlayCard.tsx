@@ -1,16 +1,16 @@
 // OverlayCard — overlay card for routine fire and plugin (insertion-type) triggers.
 //
 // Two source variants share the same card shell:
-//   - routine (Q9): running=true shows spinner, false shows "결과 보기" (only when jsonl exists)
-//   - plugin (Q11, insertion-type): running=false shows primaryActionLabel ("지금 답하기")
+//   - routine: running=true shows spinner, false shows "결과 보기" (only when jsonl exists)
+//   - plugin insertion: running=false shows primaryActionLabel ("지금 답하기")
 //
-// Q10 policy:
+// Policy:
 //   - Single active card with prev/next queue navigation
 //   - queueIndex / queueTotal counter (shown when queue ≥ 2)
 //   - dismiss (X) — permanent removal
 //   - snooze removed (production smoke test: UX risk)
 //
-// Q9 isolation: only ~200ch summary flows here. Full content
+// Isolation: only ~200ch summary flows here. Full content
 // lives in RoutineSessionView which reads the JSONL directly.
 //
 // C1: running phase — when running=true shows spinner + "진행 중…" instead of

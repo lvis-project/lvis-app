@@ -1,9 +1,8 @@
 /**
- * Boot §4.2 Step 7 — IPC bridge (plugin event → renderer).
+ * IPC bridge (plugin event -> renderer).
  *
  * Extracted from boot.ts. Responsibilities:
- *   • Collect event types declared by manifest.emittedEvents (+ always include
- *     the legacy meeting.transcript.updated literal for back-compat).
+ *   • Collect event types declared by manifest.emittedEvents.
  *   • For each type, register a main→renderer forwarder on the host event bus.
  *     High-frequency *.transcript.updated events are coalesced (100ms debounce;
  *     final events flush immediately).
@@ -61,9 +60,9 @@ export function makeCoalescingSend(
   };
 }
 
-/** Collect plugin emitted event types — manifest.emittedEvents + legacy literal. */
+/** Collect plugin emitted event types from manifest.emittedEvents. */
 function collectPluginEventTypes(pluginRuntime: PluginRuntime): Set<string> {
-  const types = new Set<string>(["meeting.transcript.updated"]);
+  const types = new Set<string>();
   for (const { manifest } of pluginRuntime.listPluginManifests()) {
     const raw = manifest as unknown as Record<string, unknown>;
     if (Array.isArray(raw["emittedEvents"])) {

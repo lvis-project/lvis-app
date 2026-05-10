@@ -1,11 +1,8 @@
 /**
  * RoutinePanel v2 — unified routine management UI.
  *
- * Q2: single list with execution mode badge per row.
- * Q4: Add Routine modal with 3 input tabs (Form / Cron / Natural language).
- * Q6: MAX_PERSISTED_ROUTINES = 50 (enforced by store; shown in UI).
- *
- * RemindersList absorbed — removed (atomic cutover, Q3).
+ * Single list with execution mode badge per row, 3 input styles, and the
+ * store-enforced persisted routine cap.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Badge } from "../../../components/ui/badge.js";
@@ -139,7 +136,7 @@ interface AddRoutineModalProps {
 }
 
 // Exported for renderer tests — the modal owns the button → scope-payload
-// mapping that we want to lock down (Permission policy P5 round 2: empty selection MUST
+// mapping that we want to lock down (empty selection MUST
 // map to `{ mode: "deny-all" }`, not "inherit" / "allow all").
 export function AddRoutineModal({ api, onClose, onAdded }: AddRoutineModalProps) {
   const [tab, setTab] = useState<InputTab>("form");
@@ -337,7 +334,7 @@ export function AddRoutineModal({ api, onClose, onAdded }: AddRoutineModalProps)
           <Button size="sm" variant="ghost" onClick={onClose}>✕</Button>
         </div>
 
-        {/* Tab selector (Q4: 3 input types) */}
+        {/* Tab selector for the three routine input styles. */}
         <div className="mb-4 flex gap-1 rounded-md border p-1 bg-muted/30" role="tablist">
           {(["form", "cron", "natural"] as InputTab[]).map((t) => (
             <button

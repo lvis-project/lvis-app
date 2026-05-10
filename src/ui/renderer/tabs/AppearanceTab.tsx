@@ -241,7 +241,7 @@ export function AppearanceTab() {
           </span>
         </div>
         <p className="text-[11px] text-muted-foreground">
-          이 설정은 ms-graph 의 외부 URL 표시에 적용됩니다 (agent-hub 는 별도 사이클 예정).
+          이 설정은 플러그인이 호스트에 위임한 외부 URL 표시에 적용됩니다.
         </p>
         <div
           role="radiogroup"
