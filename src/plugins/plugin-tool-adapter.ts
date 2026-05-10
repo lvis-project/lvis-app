@@ -3,11 +3,12 @@
  * canonical {@link Tool} contract used by the §6.4 ToolRegistry.
  *
  * Uses `manifest.toolSchemas[tool]` so the LLM sees typed parameter fields.
- * Plugin authority remains SDK-schema-first: the current SDK manifest does
- * not define per-tool category/pathFields, so every plugin tool registers as
- * a conservative mutating call.
+ * Plugin authority is SDK-schema-first: category and pathFields are read only
+ * from the manifest schema contract. The app does not infer plugin authority
+ * from plugin ids, tool names, or legacy helper maps.
  */
 import { createDynamicTool, type Tool } from "../tools/base.js";
+import type { ToolCategory } from "../tools/types.js";
 import type { PluginRuntime } from "./runtime.js";
 import type { PluginManifest } from "./types.js";
 import { plog, PluginPhase } from "./lifecycle-log.js";
@@ -18,6 +19,8 @@ import {
 
 interface ToolSchemaEntry {
   description?: string;
+  category?: Exclude<ToolCategory, "meta">;
+  pathFields?: string[];
   /** §6.4 Tool versioning — optional per-tool semver. Falls back to manifest.version. */
   version?: string;
   deprecatedSince?: string;
@@ -54,19 +57,25 @@ function buildPluginTool(
       `Invalid plugin tool schema for '${toolName}': inputSchema must be an object schema with properties`,
     );
   }
+  if (!schemaEntry.category) {
+    throw new Error(
+      `Invalid plugin tool schema for '${toolName}': category is required by the SDK authority metadata contract`,
+    );
+  }
   const typed = schemaEntry.inputSchema;
   const description = schemaEntry.description ?? typedDescription(toolName);
   return createDynamicTool({
     name: toolName,
     description,
     source: "plugin",
-    category: "write",
+    category: schemaEntry.category,
     pluginId,
+    pathFields: schemaEntry.pathFields,
     version: schemaEntry?.version ?? manifestVersion,
     deprecatedSince: schemaEntry?.deprecatedSince,
     replacedBy: schemaEntry?.replacedBy,
     jsonSchema: typed,
-    isReadOnly: () => false,
+    isReadOnly: () => schemaEntry.category === "read",
     execute: async (rawInput) => {
       plog("debug", { pluginId, phase: PluginPhase.INVOKE_START, toolName, inputType: typeof rawInput, inputKeys: rawInput !== null && typeof rawInput === "object" ? Object.keys(rawInput as object).length : 0 }, "tool invocation start");
       // Some provider paths deliver tool arguments pre-serialized. Parse once
@@ -78,10 +87,10 @@ function buildPluginTool(
       const args = (typeof parsed === "object" && parsed !== null ? parsed : {}) as Record<string, unknown>;
 
       const finalPayload = Object.keys(args).length > 0 ? args : undefined;
-      // Permission policy P4 §3.5 — manifest integrity guard. Current SDK
-      // schema keeps plugin tools conservative-write; if any host→plugin fs
-      // boundary reports a manifest-integrity violation, this post-violation
-      // gate prevents the disabled plugin from running new calls.
+      // Permission policy P4 §3.5 — manifest integrity guard. SDK manifest
+      // metadata is the authority for category/pathFields; if any host→plugin
+      // fs boundary reports a manifest-integrity violation, this
+      // post-violation gate prevents the disabled plugin from running new calls.
       if (manifestIntegrityState.isDisabled(pluginId)) {
         return {
           output:
@@ -96,6 +105,7 @@ function buildPluginTool(
         return {
           output: typeof result === "string" ? result : JSON.stringify(result, null, 2),
           isError: false,
+          metadata: { rawResult: result },
         };
       } catch (err) {
         // Permission policy P4 §3.5 — capture manifest-integrity violations: the

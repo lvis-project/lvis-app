@@ -97,6 +97,18 @@ export interface PluginPerfStats {
   lastCallAt: number | null;
 }
 
+export interface PluginToolInvocationContext {
+  origin: "startup" | "plugin" | "ui";
+  callerPluginId?: string;
+  ownerPluginId?: string;
+}
+
+export type PluginToolInvocationDelegate = (
+  method: string,
+  payload: unknown,
+  context: PluginToolInvocationContext,
+) => Promise<unknown>;
+
 export interface PluginRuntimeOptions {
   hostRoot: string;
   manifestPaths?: string[];
@@ -133,6 +145,7 @@ export class PluginRuntime {
   private readonly failedPluginIds = new Set<string>();
   private readonly failedPluginStubs = new Map<string, { name: string; description: string }>();
   private readonly disabledPluginIds = new Set<string>();
+  private toolInvocationDelegate: PluginToolInvocationDelegate | null = null;
   private loaded = false;
   /** Sprint 4-B §B-1 — lazily-compiled AJV validator for plugin.schema.json. */
   private manifestValidator: ValidateFunction | null = null;
@@ -1096,6 +1109,14 @@ export class PluginRuntime {
 
   // ─── Dispatcher / Bridge ───────────────────────────────────────────────────
 
+  setToolInvocationDelegate(delegate: PluginToolInvocationDelegate): void {
+    this.toolInvocationDelegate = delegate;
+  }
+
+  clearToolInvocationDelegate(): void {
+    this.toolInvocationDelegate = null;
+  }
+
   async call(method: string, payload?: unknown): Promise<unknown> {
     const entry = this.methodMap.get(method);
     if (!entry) {
@@ -1183,7 +1204,13 @@ export class PluginRuntime {
         `Declare it in manifest.uiCallable[] to allow renderer invocation.`,
       );
     }
-    return entry.handler(payload);
+    if (!this.toolInvocationDelegate) {
+      throw new Error("Plugin tool executor is not wired; UI plugin call denied");
+    }
+    return this.toolInvocationDelegate(method, payload, {
+      origin: "ui",
+      ownerPluginId: entry.pluginId,
+    });
   }
 
   getMethodMap(): ReadonlyMap<string, { pluginId: string; handler: PluginToolHandler }> {

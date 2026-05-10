@@ -3,7 +3,8 @@
  *
  * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 5,
  * §11 v2.1 binding decisions (default `provider="openai"`,
- * `model="gpt-4o-mini"`, `fallbackOnError ∈ {deny, rule}`).
+ * `model="gpt-4o-mini"`, `fallbackOnError ∈ {deny, rule}` with
+ * fail-closed default).
  *
  * This step wires the {@link RiskClassifier}, cache, and deferred queue into
  * {@link PermissionManager}:

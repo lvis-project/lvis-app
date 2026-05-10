@@ -36,6 +36,8 @@ export type StreamEvent = {
   compactNum?: number;
   /** Set to "command" on `done` events when the turn was a slash command. */
   route?: "command";
+  /** Permission mode changed by slash command; renderer fans this into the badge event bus. */
+  mode?: "default" | "strict" | "auto" | "allow";
   /** MCP Apps spec §3.2 — optional UI payload emitted with tool_end events. */
   uiPayload?: {
     serverId: string;

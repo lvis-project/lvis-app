@@ -5,9 +5,64 @@ import { Input } from "../../../components/ui/input.js";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
 import { Separator } from "../../../components/ui/separator.js";
 import { EXEC_MODE_OPTIONS } from "../constants.js";
-import type { ExecMode, HookTrustRow, PermissionRule } from "../types.js";
+import type {
+  ExecMode,
+  HookTrustRow,
+  PermissionReviewerFallbackOnError,
+  PermissionReviewerMode,
+  PermissionReviewerProvider,
+  PermissionReviewerSettings,
+  PermissionRule,
+} from "../types.js";
 import { AuditPanel } from "../components/permissions/AuditPanel.js";
 import { DeferredQueuePanel } from "../components/permissions/DeferredQueuePanel.js";
+
+const DEFAULT_REVIEWER_SETTINGS: PermissionReviewerSettings = {
+  mode: "disabled",
+  provider: "openai",
+  model: "gpt-4o-mini",
+  fallbackOnError: "deny",
+};
+
+const REVIEWER_MODE_OPTIONS: Array<{
+  value: PermissionReviewerMode;
+  label: string;
+  description: string;
+}> = [
+  { value: "disabled", label: "명시 승인만", description: "백그라운드 자동 승인을 끄고 검토 대기열로 보냅니다." },
+  { value: "rule", label: "규칙 기반 검증", description: "로컬 규칙으로 저위험 작업만 통과시키고 고위험은 대기시킵니다." },
+  { value: "llm", label: "LLM 검증", description: "규칙 검증 뒤 LLM이 위험도를 올릴 수 있습니다. 낮출 수는 없습니다." },
+];
+
+const REVIEWER_PROVIDER_OPTIONS: Array<{ value: PermissionReviewerProvider; label: string }> = [
+  { value: "openai", label: "OpenAI" },
+  { value: "anthropic", label: "Anthropic Claude" },
+  { value: "google", label: "Google Gemini" },
+];
+
+const REVIEWER_FALLBACK_OPTIONS: Array<{
+  value: PermissionReviewerFallbackOnError;
+  label: string;
+  description: string;
+}> = [
+  { value: "deny", label: "차단", description: "LLM 오류나 응답 파싱 실패 시 검토 대기열로 보냅니다." },
+  { value: "rule", label: "규칙 결과 사용", description: "LLM 실패 시 로컬 규칙 결과를 그대로 적용합니다." },
+];
+
+function formatReviewerDispatchError(error: string): string {
+  if (error.startsWith("reviewer-rewire-failed:")) {
+    const detail = error.slice("reviewer-rewire-failed:".length).trim();
+    return [
+      "리뷰어 런타임 재연결에 실패해 이전 설정으로 복원했습니다.",
+      "공급자 API 키, 모델 이름, 오류 처리 정책을 확인한 뒤 다시 적용하세요.",
+      detail ? `상세: ${detail}` : "",
+    ].filter(Boolean).join(" ");
+  }
+  if (error === "user-keyboard-required") {
+    return "리뷰어 설정 변경은 활성 사용자 입력에서만 실행할 수 있습니다.";
+  }
+  return error;
+}
 
 export function PermissionsTab() {
   // ── 로딩 상태 ─────────────────────────────────────
@@ -50,19 +105,26 @@ export function PermissionsTab() {
   } | null>(null);
   const [quarantinedHooks, setQuarantinedHooks] = useState<HookTrustRow[]>([]);
   const [auditOpen, setAuditOpen] = useState(false);
+  const [reviewer, setReviewer] = useState<PermissionReviewerSettings>(DEFAULT_REVIEWER_SETTINGS);
+  const [reviewerModelDraft, setReviewerModelDraft] = useState(DEFAULT_REVIEWER_SETTINGS.model);
+  const [reviewerBusy, setReviewerBusy] = useState(false);
 
   // ── 초기 fetch (탭 진입 시) ───────────────────────
   const fetchAll = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [modeRes, policyRes, rulesRes, hookTrustRes, dirRes] = await Promise.all([
+      const [modeRes, policyRes, rulesRes, hookTrustRes, dirRes, reviewerRes] = await Promise.all([
         window.lvis.permission.getMode(),
         window.lvis.policy.get(),
         window.lvis.permission.listRules(),
         window.lvis.permission.hookTrustList(),
         window.lvis.permission.dirDispatch("list"),
+        window.lvis.permission.reviewerDispatch("show"),
       ]);
+      if (!reviewerRes.ok) {
+        throw new Error(reviewerRes.error);
+      }
       setMode((modeRes.mode as ExecMode) ?? "default");
       setRequireExplicit(policyRes.requireExplicitApproval);
       setPolicyManaged(policyRes.managed);
@@ -71,6 +133,8 @@ export function PermissionsTab() {
       setRules(rulesRes);
       setQuarantinedHooks(hookTrustRes.ok ? hookTrustRes.disabled : []);
       setDirectories(dirRes.ok && dirRes.verb === "list" ? dirRes.userAdditions : []);
+      setReviewer(reviewerRes.settings);
+      setReviewerModelDraft(reviewerRes.settings.model);
     } catch (e) {
       setError((e as Error).message ?? "데이터를 불러오지 못했습니다.");
     } finally {
@@ -81,16 +145,36 @@ export function PermissionsTab() {
   useEffect(() => { void fetchAll(); }, [fetchAll]);
 
   // ── Section A handler ─────────────────────────────
+  const reviewerModeForExecMode = (m: ExecMode): PermissionReviewerMode =>
+    m === "auto" ? "llm" : "disabled";
+
   const handleModeChange = async (m: ExecMode) => {
-    if (m === mode || modeBusy) return;
+    const targetReviewerMode = reviewerModeForExecMode(m);
+    if ((m === mode && reviewer.mode === targetReviewerMode) || modeBusy) return;
     setModeBusy(true);
     try {
-      const res = await window.lvis.permission.setMode(m);
-      if (res.ok) {
-        setMode(res.mode as ExecMode);
-        window.dispatchEvent(new CustomEvent("lvis:permissions:mode-changed", { detail: { mode: res.mode } }));
-      } else {
-        showBanner("error", res.message ?? res.error ?? "실행 모드 변경에 실패했습니다.");
+      let modeChanged = m === mode;
+      if (m !== mode) {
+        const res = await window.lvis.permission.setMode(m);
+        if (res.ok) {
+          setMode(res.mode as ExecMode);
+          window.dispatchEvent(new CustomEvent("lvis:permissions:mode-changed", { detail: { mode: res.mode } }));
+          modeChanged = true;
+        } else {
+          showBanner("error", res.message ?? res.error ?? "실행 모드 변경에 실패했습니다.");
+          return;
+        }
+      }
+      if (reviewer.mode !== targetReviewerMode) {
+        if (!modeChanged) return;
+        const reviewerRes = await window.lvis.permission.reviewerDispatch(`mode ${targetReviewerMode}`);
+        if (reviewerRes.ok) {
+          setReviewer(reviewerRes.settings);
+          setReviewerModelDraft(reviewerRes.settings.model);
+        } else {
+          showBanner("error", formatReviewerDispatchError(reviewerRes.error));
+          return;
+        }
       }
     } catch (e) {
       showBanner("error", `실행 모드 변경 중 오류: ${(e as Error).message}`);
@@ -116,6 +200,37 @@ export function PermissionsTab() {
     } finally {
       setPolicyBusy(false);
     }
+  };
+
+  const applyReviewerCommand = async (rawArgs: string) => {
+    if (reviewerBusy) return;
+    setReviewerBusy(true);
+    try {
+      const res = await window.lvis.permission.reviewerDispatch(rawArgs);
+      if (res.ok) {
+        setReviewer(res.settings);
+        setReviewerModelDraft(res.settings.model);
+      } else {
+        showBanner("error", formatReviewerDispatchError(res.error));
+      }
+    } catch (e) {
+      showBanner("error", `리뷰어 설정 변경 중 오류: ${(e as Error).message}`);
+    } finally {
+      setReviewerBusy(false);
+    }
+  };
+
+  const handleReviewerModelApply = async () => {
+    const model = reviewerModelDraft.trim();
+    if (!model) {
+      showBanner("error", "리뷰어 모델 이름을 입력하세요.");
+      return;
+    }
+    if (/\s/.test(model)) {
+      showBanner("error", "리뷰어 모델 이름에는 공백을 사용할 수 없습니다.");
+      return;
+    }
+    await applyReviewerCommand(`model ${model}`);
   };
 
   // ── Section C handlers ────────────────────────────
@@ -283,16 +398,45 @@ export function PermissionsTab() {
           </div>
         )}
 
-        {/* ── Section A: Execution Mode ── */}
+        <div className="space-y-3">
+          <div>
+            <p className="text-sm font-medium">현재 권한 정책</p>
+            <p className="text-[11px] text-muted-foreground">
+              기본, 전체 물어보기, 자동 검증, 전체 허용 중 하나를 선택하고 세부 리뷰어 설정을 조정합니다.
+            </p>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-3">
+            <div className="rounded-md border px-3 py-2">
+              <p className="text-[11px] font-medium text-muted-foreground">정책 프리셋</p>
+              <p className="mt-1 text-sm font-medium">{EXEC_MODE_OPTIONS.find((opt) => opt.value === mode)?.label ?? mode}</p>
+            </div>
+            <div className="rounded-md border px-3 py-2">
+              <p className="text-[11px] font-medium text-muted-foreground">백그라운드 리뷰</p>
+              <p className="mt-1 text-sm font-medium">{REVIEWER_MODE_OPTIONS.find((opt) => opt.value === reviewer.mode)?.label ?? reviewer.mode}</p>
+            </div>
+            <div className="rounded-md border px-3 py-2">
+              <p className="text-[11px] font-medium text-muted-foreground">승인 대화상자</p>
+              <p className="mt-1 text-sm font-medium">{requireExplicit ? "명시 액션 필수" : "닫기 동작은 거부 처리"}</p>
+            </div>
+          </div>
+        </div>
+
+        <Separator />
+
+        {/* ── Section A: Permission Policy Preset ── */}
         <div className="space-y-2">
           <div>
-            <p className="text-sm font-medium">실행 모드</p>
-            <p className="text-[11px] text-muted-foreground">AI 에이전트가 도구를 실행할 때 어떤 수준의 권한을 적용할지 결정합니다.</p>
+            <p className="text-sm font-medium">권한 정책</p>
+            <p className="text-[11px] text-muted-foreground">
+              기본은 읽기 도구를 허용하고, 전체 물어보기는 읽기까지 확인합니다. 자동 검증은 헤드리스 작업을 백그라운드 리뷰어 설정으로 검증하고, 전체 허용은 하드 차단 범위 밖의 도구를 자동 허용하되 허용 디렉터리 밖 접근은 별도 승인합니다.
+            </p>
           </div>
           <div className="space-y-1.5">
             {EXEC_MODE_OPTIONS.map((opt) => (
               <button
                 key={opt.value}
+                data-testid={`exec-mode-${opt.value}`}
+                aria-pressed={mode === opt.value}
                 className={`flex w-full items-start gap-2.5 rounded-md border px-3 py-2 text-left text-sm transition-colors ${mode === opt.value ? "border-primary bg-primary/10" : "border-muted hover:border-muted-foreground/40"}`}
                 disabled={modeBusy}
                 onClick={() => void handleModeChange(opt.value)}
@@ -311,16 +455,112 @@ export function PermissionsTab() {
 
         <Separator />
 
+        <div className="space-y-3">
+          <div>
+            <p className="text-sm font-medium">백그라운드 권한 리뷰어</p>
+            <p className="text-[11px] text-muted-foreground">
+              루틴·헤드리스 실행을 어떻게 검증할지 선택합니다. LLM 검증은 로컬 규칙 뒤에 실행되며 위험도를 낮출 수 없습니다.
+            </p>
+          </div>
+
+          <div className="space-y-1.5">
+            {REVIEWER_MODE_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                data-testid={`reviewer-mode-${opt.value}`}
+                aria-pressed={reviewer.mode === opt.value}
+                className={`flex w-full items-start gap-2.5 rounded-md border px-3 py-2 text-left text-sm transition-colors ${reviewer.mode === opt.value ? "border-primary bg-primary/10" : "border-muted hover:border-muted-foreground/40"}`}
+                disabled={reviewerBusy}
+                onClick={() => void applyReviewerCommand(`mode ${opt.value}`)}
+              >
+                <span className={`mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full border-2 ${reviewer.mode === opt.value ? "border-primary" : "border-muted-foreground"}`}>
+                  {reviewer.mode === opt.value && <span className="h-2 w-2 rounded-full bg-primary" />}
+                </span>
+                <span className="min-w-0">
+                  <span className="font-medium">{opt.label}</span>
+                  <span className="ml-1.5 text-[11px] text-muted-foreground">{opt.description}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+
+          <div className="space-y-3 rounded-md border bg-muted/20 px-3 py-3">
+            <div>
+              <p className="text-xs font-medium">LLM 검증 설정</p>
+              <p className="text-[11px] text-muted-foreground">LLM 검증을 선택하기 전에 공급자, 모델, 오류 처리 정책을 미리 정합니다.</p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="space-y-1 text-xs">
+                <span className="font-medium">LLM 공급자</span>
+                <select
+                  data-testid="reviewer-provider-select"
+                  className="h-8 w-full rounded-md border bg-background px-2 text-xs"
+                  value={reviewer.provider}
+                  disabled={reviewerBusy}
+                  onChange={(e) => void applyReviewerCommand(`provider ${e.target.value}`)}
+                >
+                  {REVIEWER_PROVIDER_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-1 text-xs">
+                <span className="font-medium">오류 처리</span>
+                <select
+                  data-testid="reviewer-fallback-select"
+                  className="h-8 w-full rounded-md border bg-background px-2 text-xs"
+                  value={reviewer.fallbackOnError}
+                  disabled={reviewerBusy}
+                  onChange={(e) => void applyReviewerCommand(`fallback ${e.target.value}`)}
+                >
+                  {REVIEWER_FALLBACK_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label} - {opt.description}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <label className="space-y-1 text-xs">
+              <span className="font-medium">리뷰어 모델</span>
+              <div className="flex gap-2">
+                <Input
+                  data-testid="reviewer-model-input"
+                  className="h-8 flex-1 text-xs"
+                  value={reviewerModelDraft}
+                  disabled={reviewerBusy}
+                  onChange={(e) => setReviewerModelDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void handleReviewerModelApply();
+                  }}
+                />
+                <Button
+                  size="sm"
+                  className="h-8 px-3"
+                  disabled={reviewerBusy || reviewerModelDraft.trim() === reviewer.model}
+                  onClick={() => void handleReviewerModelApply()}
+                >
+                  적용
+                </Button>
+              </div>
+            </label>
+            <p className="text-[11px] text-muted-foreground">
+              LLM API 키는 지능 설정의 공급자 키를 사용합니다. 키가 없거나 재연결에 실패하면 설정은 저장되지 않습니다.
+            </p>
+          </div>
+        </div>
+
+        <Separator />
+
         {/* ── Section B: Explicit Approval Policy ── */}
         <div className="space-y-2">
           <div>
-            <p className="text-sm font-medium">명시적 승인 요구</p>
-            <p className="text-[11px] text-muted-foreground">체크 시 승인 대화상자에서 모달 외부 클릭과 Escape 키가 차단되어 사용자가 반드시 명시적 버튼을 눌러야 합니다.</p>
+            <p className="text-sm font-medium">승인 대화상자 동작</p>
+            <p className="text-[11px] text-muted-foreground">체크 시 승인 대화상자에서 모달 외부 클릭과 Escape 키가 차단되어 버튼 또는 승인 단축키로 명시적으로 결정해야 합니다.</p>
           </div>
           <div className="flex items-center gap-3">
             <button
               role="checkbox"
               aria-checked={requireExplicit}
+              aria-label="승인 대화상자에서 버튼 또는 단축키로 명시적 승인 또는 거부를 요구"
               disabled={policyManaged || policyBusy}
               className={`relative h-5 w-5 flex-shrink-0 rounded border-2 transition-colors ${requireExplicit ? "border-primary bg-primary" : "border-muted-foreground"} ${policyManaged ? "cursor-not-allowed opacity-50" : "cursor-pointer hover:border-primary/60"}`}
               onClick={() => void handleExplicitToggle()}
@@ -355,7 +595,7 @@ export function PermissionsTab() {
             <p className="text-[11px] text-muted-foreground italic">저장된 규칙이 없습니다.</p>
           ) : (
             <div className="rounded-md border">
-              <table className="w-full text-xs">
+              <table className="w-full table-fixed text-xs">
                 <thead>
                   <tr className="border-b bg-muted/40">
                     <th className="px-3 py-2 text-left font-medium">패턴</th>
@@ -448,7 +688,7 @@ export function PermissionsTab() {
                   {directories.map((dir) => (
                     <tr key={dir} className="border-b last:border-0 hover:bg-muted/20">
                       <td className="min-w-0 px-3 py-1.5 font-mono text-[11px]">
-                        <span className="block truncate" title={dir}>{dir}</span>
+                        <span className="block whitespace-normal break-all" title={dir}>{dir}</span>
                       </td>
                       <td className="px-3 py-1.5 text-right">
                         <button
