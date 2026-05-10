@@ -19,6 +19,8 @@ export {
 export type {
   PluginCard,
   PluginPerfStats,
+  PluginToolInvocationContext,
+  PluginToolInvocationDelegate,
   PluginRuntimeOptions,
 } from "./runtime/index.js";
 

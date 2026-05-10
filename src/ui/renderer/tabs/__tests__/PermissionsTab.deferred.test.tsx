@@ -37,6 +37,16 @@ function installLvisApi() {
     })),
     deferredResolve: vi.fn(async () => ({ ok: true })),
     onDeferredPending: vi.fn(() => () => {}),
+    reviewerDispatch: vi.fn(async () => ({
+      ok: true,
+      verb: "show",
+      settings: {
+        mode: "disabled",
+        provider: "openai",
+        model: "gpt-4o-mini",
+        fallbackOnError: "deny",
+      },
+    })),
   };
   (window as unknown as { lvis: unknown }).lvis = {
     permission,

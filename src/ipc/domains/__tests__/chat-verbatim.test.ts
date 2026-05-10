@@ -80,7 +80,10 @@ function makeConversationLoop(
   };
 }
 
-function makeMinimalDeps(loop: ReturnType<typeof makeConversationLoop>) {
+function makeMinimalDeps(
+  loop: ReturnType<typeof makeConversationLoop>,
+  opts: { getMainWindow?: () => unknown } = {},
+) {
   return {
     conversationLoop: loop as any,
     settingsService: {
@@ -110,17 +113,18 @@ function makeMinimalDeps(loop: ReturnType<typeof makeConversationLoop>) {
     auditLogger: { log: vi.fn() } as any,
     askUserQuestionGate: undefined,
     notificationService: undefined,
-    getMainWindow: vi.fn(() => null),
+    getMainWindow: opts.getMainWindow ?? vi.fn(() => null),
   };
 }
 
 async function setupHandlers(
   loop: ReturnType<typeof makeConversationLoop>,
+  opts: { getMainWindow?: () => unknown } = {},
 ) {
   handlers.clear();
   vi.clearAllMocks();
   const { registerChatHandlers } = await import("../chat.js");
-  registerChatHandlers(makeMinimalDeps(loop) as any);
+  registerChatHandlers(makeMinimalDeps(loop, opts) as any);
 }
 
 function invoke(channel: string, ...args: unknown[]): unknown {
@@ -325,5 +329,36 @@ describe("lvis:chat:send provenance", () => {
       undefined,
       expect.objectContaining({ inputOrigin: "user-keyboard" }),
     );
+  });
+
+  it("forwards permission mode change callbacks to the chat stream", async () => {
+    const sent: Array<{ channel: string; payload: unknown }> = [];
+    const loop = makeConversationLoop("session-provenance", []);
+    loop.runTurn.mockImplementation(async (_input, callbacks) => {
+      callbacks.onPermissionModeChanged("allow");
+      return { text: "ok", toolCalls: [], stopReason: "end_turn" };
+    });
+    await setupHandlers(loop, {
+      getMainWindow: () => ({
+        webContents: {
+          send: (channel: string, payload: unknown) => sent.push({ channel, payload }),
+        },
+      }),
+    });
+
+    await invoke("lvis:chat:send", {
+      input: "/permission mode allow",
+      inputOrigin: "user-keyboard",
+      userActivation: true,
+    });
+
+    expect(sent).toContainEqual({
+      channel: "lvis:chat:stream",
+      payload: expect.objectContaining({
+        type: "permission_mode_changed",
+        mode: "allow",
+        streamId: 1,
+      }),
+    });
   });
 });

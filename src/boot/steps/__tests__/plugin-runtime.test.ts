@@ -10,11 +10,29 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
+import { mkdtempSync } from "node:fs";
+
+const runtimeTestState = vi.hoisted(() => ({
+  appPrependOnceListener: vi.fn(),
+  capturedRuntimeOptions: null as Record<string, unknown> | null,
+  runtime: {
+    startAll: vi.fn(async () => {}),
+    listToolNames: vi.fn(() => [] as string[]),
+    listPluginIds: vi.fn(() => [] as string[]),
+    listPluginManifests: vi.fn(() => [] as Array<{ pluginId: string; manifest: unknown }>),
+    getPluginRoot: vi.fn((pluginId: string) => `/tmp/lvis-test/plugins/${pluginId}`),
+    getPluginManifest: vi.fn(() => null),
+    registerDisposer: vi.fn(),
+    assertPluginToolAccess: vi.fn(),
+    resolveToolOwner: vi.fn((toolName: string) => `${toolName}-owner`),
+  },
+}));
 
 vi.mock("electron", () => ({
   app: {
     getPath: vi.fn(() => "/tmp/lvis-test"),
     isPackaged: false,
+    prependOnceListener: runtimeTestState.appPrependOnceListener,
   },
   BrowserWindow: vi.fn(),
   shell: {
@@ -22,9 +40,33 @@ vi.mock("electron", () => ({
   },
 }));
 
+vi.mock("../../../plugins/runtime.js", () => ({
+  PluginRuntime: vi.fn().mockImplementation((options: Record<string, unknown>) => {
+    runtimeTestState.capturedRuntimeOptions = options;
+    return runtimeTestState.runtime;
+  }),
+}));
+
+vi.mock("../../../plugins/dev-watcher.js", () => ({
+  startPluginDevWatcher: vi.fn(() => ({ stop: vi.fn() })),
+}));
+
+vi.mock("../../../main/html-preview-partition.js", () => ({
+  installPluginPartitionPolicy: vi.fn(),
+}));
+
+vi.mock("../../../plugins/plugin-paths.js", () => ({
+  resolvePluginPaths: vi.fn(() => ({
+    pluginsRoot: "/tmp/lvis-test/plugins",
+    registryPath: "/tmp/lvis-test/registry.json",
+    cacheRoot: "/tmp/lvis-test/cache",
+  })),
+}));
+
 import {
   auditApprovalViolation,
   formatPluginPendingPrompt,
+  initPluginRuntime,
   sanitizePluginPendingPrompt,
 } from "../plugin-runtime.js";
 import { ApprovalOriginError } from "../../../permissions/agent-action-requester.js";
@@ -104,5 +146,69 @@ describe("sanitizePluginPendingPrompt", () => {
 
   it("rejects invalid proactive source tags", () => {
     expect(() => formatPluginPendingPrompt("hi", "plugin:bad")).toThrow(/invalid proactive source/);
+  });
+});
+
+describe("initPluginRuntime HostApi factory", () => {
+  it("delegates plugin callTool through the production invoker after access assertion", async () => {
+    runtimeTestState.capturedRuntimeOptions = null;
+    runtimeTestState.runtime.assertPluginToolAccess.mockClear();
+    runtimeTestState.runtime.resolveToolOwner.mockClear();
+    runtimeTestState.runtime.resolveToolOwner.mockReturnValue("owner-plugin");
+
+    const output = await initPluginRuntime({
+      projectRoot: "/tmp/lvis-test/project",
+      settingsService: {
+        get: vi.fn((key: string) => {
+          if (key === "llm") return { provider: "openai" };
+          if (key === "pluginConfigs") return {};
+          return undefined;
+        }),
+        getSecret: vi.fn(() => undefined),
+        getPluginConfig: vi.fn(() => ({})),
+        setPluginConfig: vi.fn(),
+      } as never,
+      memoryManager: {} as never,
+      keywordEngine: {
+        registerKeywords: vi.fn(),
+        unregisterByPlugin: vi.fn(),
+      } as never,
+      toolRegistry: {
+        unregisterByPlugin: vi.fn(),
+        register: vi.fn(),
+        listAll: vi.fn(() => []),
+      } as never,
+      pythonPath: undefined,
+      bootAuditLogger: { log: vi.fn() } as never,
+      mainWindow: {} as never,
+      openAuthWindowService: vi.fn(),
+      openLinkWindowService: vi.fn(),
+      shellOpenExternal: vi.fn(),
+      approvalGate: {} as never,
+    });
+
+    const createHostApi = runtimeTestState.capturedRuntimeOptions?.createHostApi as
+      | ((pluginId: string, manifest: { id: string; config?: Record<string, unknown> }, pluginDataDir: string) => {
+          callTool: <T = unknown>(toolName: string, payload?: unknown) => Promise<T>;
+        })
+      | undefined;
+    expect(createHostApi).toBeDefined();
+
+    const invoker = vi.fn(async () => ({ ok: true }));
+    output.lateBinding.pluginToolInvokerRef.fn = invoker;
+
+    const pluginDataDir = mkdtempSync("/tmp/lvis-hostapi-data-");
+    const api = createHostApi!("caller-plugin", { id: "caller-plugin", config: {} }, pluginDataDir);
+    await expect(api.callTool("owner_tool", { value: 1 })).resolves.toEqual({ ok: true });
+
+    expect(runtimeTestState.runtime.assertPluginToolAccess).toHaveBeenCalledWith(
+      "caller-plugin",
+      "owner_tool",
+    );
+    expect(invoker).toHaveBeenCalledWith("owner_tool", { value: 1 }, {
+      origin: "plugin",
+      callerPluginId: "caller-plugin",
+      ownerPluginId: "owner-plugin",
+    });
   });
 });

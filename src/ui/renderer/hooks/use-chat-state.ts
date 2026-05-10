@@ -105,6 +105,10 @@ export function useChatState(api: LvisApi) {
         });
         return;
       }
+      if (ev.type === "permission_mode_changed" && ev.mode) {
+        window.dispatchEvent(new CustomEvent("lvis:permissions:mode-changed", { detail: { mode: ev.mode } }));
+        return;
+      }
       if (streamId !== null) {
         if (activeStreamIdRef.current === null) {
           activeStreamIdRef.current = streamId;

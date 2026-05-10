@@ -16,7 +16,11 @@ import { PluginRuntime } from "../runtime.js";
 function writePlugin(root: string, id: string, opts: {
   name: string;
   tools: string[];
-  toolSchemas?: Record<string, { description: string; inputSchema: { type: "object"; properties: Record<string, unknown> } }>;
+  toolSchemas?: Record<string, {
+    description: string;
+    category: "read" | "write" | "shell" | "network";
+    inputSchema: { type: "object"; properties: Record<string, unknown> };
+  }>;
 }) {
   const dir = join(root, id);
   mkdirSync(dir, { recursive: true });
@@ -65,9 +69,9 @@ describe("PluginRuntime.listPluginCards — Phase 1.5 Option C catalog", () => {
       name: "Meeting",
       tools: ["meeting_start", "meeting_push_chunk", "meeting_stop", "meeting_extra"],
       toolSchemas: {
-        meeting_start: { description: "회의 시작 명령 — 녹음 개시", inputSchema: { type: "object", properties: {} } },
-        meeting_push_chunk: { description: "오디오 청크 전송 (스트리밍)", inputSchema: { type: "object", properties: {} } },
-        meeting_stop: { description: "회의 종료 명령 — 녹음 중단", inputSchema: { type: "object", properties: {} } },
+        meeting_start: { description: "회의 시작 명령 — 녹음 개시", category: "write", inputSchema: { type: "object", properties: {} } },
+        meeting_push_chunk: { description: "오디오 청크 전송 (스트리밍)", category: "write", inputSchema: { type: "object", properties: {} } },
+        meeting_stop: { description: "회의 종료 명령 — 녹음 중단", category: "write", inputSchema: { type: "object", properties: {} } },
       },
     });
 
