@@ -12,6 +12,7 @@ import {
   addAllowedDirectoryPersist,
   normalizePermissionSettings,
 } from "../permission-settings-store.js";
+import { validateDirectoryAddition } from "../allowed-directories.js";
 
 function tmpSettingsPath(): string {
   const dir = mkdtempSync(join(tmpdir(), "lvis-perm-slash-"));
@@ -118,11 +119,17 @@ describe("dispatchPermissionDirCommand — allow", () => {
 
   it("--session does NOT persist to disk", async () => {
     const path = tmpSettingsPath();
+    const validation = validateDirectoryAddition("/Users/ken/work");
+    expect(validation.ok).toBe(true);
     const r = await dispatchPermissionDirCommand(
       { verb: "allow", path: "/Users/ken/work", session: true, acknowledgeWarnings: false },
       path,
     );
-    expect(r).toMatchObject({ ok: true, sessionOnly: true, sessionDirectory: "/users/ken/work" });
+    expect(r).toMatchObject({
+      ok: true,
+      sessionOnly: true,
+      sessionDirectory: validation.ok ? validation.canonicalPath : "",
+    });
     const onDisk = readPermissionSettings(path);
     expect(onDisk.permissions.additionalDirectories).toEqual([]);
   });
