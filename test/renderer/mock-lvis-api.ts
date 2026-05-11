@@ -10,13 +10,19 @@ import { fakeLlmSettings } from "../../src/shared/__tests__/fake-llm-settings.js
 
 export type MockLvisApi = Record<string, Mock>;
 
+type HistoryMock = {
+  sessionId?: string;
+  messages: unknown[];
+  estimatedInputTokens?: number;
+};
+
 type ApiOverrides = {
   settings?: unknown;
   sessions?: Array<{ id: string; modifiedAt: string; title?: string }>;
   currentSession?: string;
   starred?: unknown[];
-  history?: { sessionId: string; messages: unknown[] } | Promise<{ sessionId: string; messages: unknown[] }>;
-  historyBySession?: Record<string, { messages: unknown[] } | Promise<{ messages: unknown[] }>>;
+  history?: ({ sessionId: string } & HistoryMock) | Promise<{ sessionId: string } & HistoryMock>;
+  historyBySession?: Record<string, HistoryMock | Promise<HistoryMock>>;
   hasApiKey?: boolean;
   hasProvider?: boolean;
   usage?: unknown;
@@ -165,10 +171,22 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
       const sessionHistory = historyBySession[sessionId];
       if (sessionHistory) {
         const resolvedSessionHistory = await sessionHistory;
-        return { ok: true, messages: resolvedSessionHistory.messages };
+        return {
+          ok: true,
+          messages: resolvedSessionHistory.messages,
+          ...(resolvedSessionHistory.estimatedInputTokens !== undefined
+            ? { estimatedInputTokens: resolvedSessionHistory.estimatedInputTokens }
+            : {}),
+        };
       }
       const resolvedHistory = await history;
-      return { ok: true, messages: resolvedHistory.messages };
+      return {
+        ok: true,
+        messages: resolvedHistory.messages,
+        ...(resolvedHistory.estimatedInputTokens !== undefined
+          ? { estimatedInputTokens: resolvedHistory.estimatedInputTokens }
+          : {}),
+      };
     }),
     chatEditResend: vi.fn(async () => ({ ok: true })),
     chatFork: vi.fn(async () => ({ ok: true, sessionId: currentSession })),
