@@ -136,6 +136,7 @@ export function AskUserQuestionCard({
     () => request.questions.map(() => ({})),
   );
   const [submitting, setSubmitting] = useState(false);
+  const submitButtonRef = useRef<HTMLButtonElement | null>(null);
 
   // New request → reset all internal state. The id is the discriminator
   // so re-rendering the same card with the same questions keeps state.
@@ -152,6 +153,12 @@ export function AskUserQuestionCard({
     () => request.questions.every((item, i) => isAnswerComplete(item, drafts[i])),
     [request.questions, drafts],
   );
+
+  useEffect(() => {
+    if (onConfirmStep && allAnswered && !submitting) {
+      submitButtonRef.current?.focus();
+    }
+  }, [allAnswered, onConfirmStep, submitting]);
 
   const setAnswer = (index: number, next: DraftAnswer) => {
     setDrafts((prev) => prev.map((d, i) => (i === index ? next : d)));
@@ -235,6 +242,12 @@ export function AskUserQuestionCard({
         if (e.key === "Escape" && !submitting) {
           e.preventDefault();
           dismiss();
+          return;
+        }
+        if (onConfirmStep && e.key === "Enter" && !submitting && allAnswered) {
+          e.preventDefault();
+          e.stopPropagation();
+          submitAll();
           return;
         }
         if (e.key === "ArrowLeft") {
@@ -341,6 +354,7 @@ export function AskUserQuestionCard({
             )}
             {isMulti && onConfirmStep && (
               <Button
+                ref={submitButtonRef}
                 size="sm"
                 disabled={submitting || !allAnswered}
                 onClick={submitAll}

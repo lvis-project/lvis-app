@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import "../../../../../test/renderer/setup.ts";
 import { describe, it, expect, vi } from "vitest";
-import { render, fireEvent, act } from "@testing-library/react";
+import { render, fireEvent, act, waitFor } from "@testing-library/react";
 import { AskUserQuestionCard } from "../AskUserQuestionCard.js";
 import type { AskUserQuestionRequest } from "../AskUserQuestionCard.js";
 
@@ -170,6 +170,42 @@ describe("AskUserQuestionCard — multi-step keyboard Enter (intermediate step)"
     const submitBtn = getByRole("button", { name: "보내기" });
     await act(async () => {
       fireEvent.click(submitBtn);
+    });
+
+    expect(api.respondAskUserQuestion).toHaveBeenCalledTimes(1);
+    expect(api.respondAskUserQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestId: "req-1",
+        answers: [{ choice: "A" }, { choice: "X" }],
+      }),
+    );
+  });
+
+  it("focuses the send button on the confirm step and submits with Enter", async () => {
+    const api = makeApi();
+    const onResolved = vi.fn();
+    const request = makeRequest({
+      questions: [
+        { question: "Q1", choices: ["A", "B"], allowFreeText: false },
+        { question: "Q2", choices: ["X", "Y"], allowFreeText: false },
+      ],
+    });
+
+    const { getByRole, getByText } = render(
+      <AskUserQuestionCard api={api as never} request={request} onResolved={onResolved} />,
+    );
+
+    await act(async () => {
+      fireEvent.keyDown(getByText("A").closest("button")!, { key: "Enter" });
+    });
+    await act(async () => {
+      fireEvent.keyDown(getByText("X").closest("button")!, { key: "Enter" });
+    });
+
+    const submitBtn = getByRole("button", { name: "보내기" });
+    await waitFor(() => expect(document.activeElement).toBe(submitBtn));
+    await act(async () => {
+      fireEvent.keyDown(submitBtn, { key: "Enter" });
     });
 
     expect(api.respondAskUserQuestion).toHaveBeenCalledTimes(1);
