@@ -201,7 +201,7 @@ describe("AskUserQuestionCard — multi-question", () => {
   it("paginates 1→2→confirm and submits all answers at once", async () => {
     const respond = vi.fn().mockResolvedValue({ ok: true });
     const api = fakeApi({ respondAskUserQuestion: respond as never });
-    const { getByText, getByTestId, queryByTestId, container } = render(
+    const { getByRole, getByText, getByTestId, queryByTestId, container } = render(
       <AskUserQuestionCard
         api={api}
         request={{
@@ -240,7 +240,7 @@ describe("AskUserQuestionCard — multi-question", () => {
     expect(queryByTestId("ask-confirm-review")).not.toBeNull();
     expect(getByTestId("ask-step-label").textContent).toBe("· 검토");
     await act(async () => {
-      fireEvent.click(getByText("보내기"));
+      fireEvent.click(getByRole("button", { name: "보내기" }));
     });
     expect(respond).toHaveBeenCalledWith({
       requestId: "multi",
