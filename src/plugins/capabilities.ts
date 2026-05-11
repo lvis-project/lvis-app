@@ -170,8 +170,15 @@ export const ENFORCED_CAPABILITIES: ReadonlyMap<string, CapabilityPolicy> = new 
  * (log.warn + no fan-out).
  *
  * `task` namespace is absent — host-side TaskDeadlinePoller and TaskService
- * were removed in 2026-05. Task ownership now lives in plugins.
- * If a plugin ever emits `task.*`, add a `tasks-source` capability here.
+ * were removed in 2026-05 (Phase 4). Task domain now lives in
+ * `agent_hub.work_item.*` events owned by `lvis-plugin-agent-hub`.
+ *
+ * `agent_hub` namespace is intentionally NOT gated by a capability
+ * here — only the agent-hub plugin emits it (no other plugin has a
+ * legitimate reason to spoof these events) and HostApi-level identity
+ * (`pluginId` of the emitting runtime) prevents cross-plugin
+ * impersonation. Add a `agent-hub-source` capability if a second
+ * publisher ever needs to share the namespace.
  */
 export const EVENT_NAMESPACE_CAPABILITY: ReadonlyMap<string, string> = new Map([
   ["email", "mail-source"],
@@ -204,13 +211,25 @@ export const HOST_ONLY_EMIT_NAMESPACES: ReadonlySet<string> = new Set([
  * manifest.eventSubscriptions). Anything outside this list is not explicitly
  * published for plugin consumption; subscriptions are allowed with a warn
  * (namespace drift tracking) unless it falls under PLUGIN_PRIVATE_NAMESPACES.
+ *
+ * `task.*` was retired here on 2026-05-11 — host-side owner
+ * (`TaskDeadlinePoller`, `TaskService`) was removed in Phase 4
+ * (2026-05-05, architecture.md §"task-deadline" row). No plugin emits
+ * the namespace today; new task-domain signals flow through
+ * `agent_hub.work_item.*` instead.
+ *
+ * `agent_hub` was promoted on 2026-05-11 once `lvis-plugin-agent-hub`
+ * v0.3.7 added the `agent_hub.work_item.due_soon` plugin-bus event
+ * (consumed by `work-proactive` brain detector v0.2.5+). Promotion
+ * silences the load-time "neutral namespace drift" warn without
+ * changing wiring — the host still validates pluginAccess.events.
  */
 export const PUBLIC_EVENT_NAMESPACES: ReadonlySet<string> = new Set([
   "meeting",
   "calendar",
   "email",
   "index",
-  "task",
+  "agent_hub",
 ]);
 
 /**

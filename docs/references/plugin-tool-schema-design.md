@@ -307,7 +307,7 @@ Renderer UI 는 `lvis:plugins:call` IPC 를 통해 allowlist 된 플러그인 to
 **이벤트 subscription 정책** (`classifySubscription`):
 
 - `memory.private.*`, `settings.apiKey.*`, `audit.*`, `dlp.*` → `PLUGIN_PRIVATE_NAMESPACES` 에 매칭되어 **subscription 거부** (wiring 시 throw).
-- `meeting`, `calendar`, `email`, `index`, `task`, `briefing` → public. 조용히 허용. `task.*` namespace 는 host 의 `TaskDeadlinePoller` (`src/main/task-deadline-poller.ts`) 가 owner — 현재 `task.deadline.approaching` 발행 (msUntilDeadline 포함). 추가 task lifecycle 이벤트 는 향후 확장.
+- `meeting`, `calendar`, `email`, `index`, `agent_hub` → public. 조용히 허용. `agent_hub.*` namespace 는 `lvis-plugin-agent-hub` 가 owner — 대표 이벤트는 `agent_hub.work_item.due_soon` (work-proactive brain detector 가 24h pre-due 알림으로 소비). `task.*` namespace 는 host owner (`TaskDeadlinePoller` / `TaskService`) 가 2026-05-05 Phase 4 에서 제거되며 함께 폐기되었고, 도메인은 `agent_hub.work_item.*` 으로 이전되었다.
 - 그 외 → neutral. 허용하되 namespace drift 추적 warn.
 
 **이벤트 emit 측 host-only 예약** (`HOST_ONLY_EMIT_NAMESPACES` in `src/plugins/capabilities.ts`):
@@ -317,7 +317,7 @@ Renderer UI 는 `lvis:plugins:call` IPC 를 통해 allowlist 된 플러그인 to
 | `plugin.*` | host (`emitEvent` from `boot/types.ts`) | `plugin.installed` / `plugin.uninstalled` lifecycle. plugin 의 `hostApi.emitEvent` 와 plugin webview IPC bridge 양쪽 모두 거부. plugin lifecycle subscriber 는 `onPluginsChanged` self-event filter + `source` discriminator 로만 구독한다. 자세한 contract 는 architecture.md §9.4a. |
 | `host.*` | host main process | UI / 환경 상태 broadcast. plugin 측 emit 거부. plugin webview SDK 가 `bridge.onEvent("host.<axis>", h)` 로 구독. 현재 발행 이벤트: `host.theme.changed` (theme/chatTheme/codeTheme + computed `--lvis-*` tokens) — register 시점에 preload 가 sticky-buffer 로 1회 replay 보장 (자세한 흐름은 architecture.md §6.7.1). 추후 `host.locale.changed`, `host.online.changed` 등 추가 가능. |
 
-`task.*` 도 사실상 host-only 지만 별도 set 에 등록하지 않음 — plugin 측 emit 이 owner-mismatch 로 이미 거부되기 때문 (tasks-plugin-split paused 상태에서 plugin 측 emitter 부재).
+~~`task.*` 도 사실상 host-only 지만 별도 set 에 등록하지 않음~~ **(2026-05-11 stale)** `task.*` 는 PUBLIC_EVENT_NAMESPACES 에서 제거됨 (host owner Phase 4 폐기). 후속 task-도메인 신호는 `agent_hub.work_item.*` 위에서 fan-out 한다 (agent-hub plugin 이 owner, `agent_hub.work_item.due_soon` 발행, work-proactive `work-item-due-soon` detector 가 소비).
 
 `onPluginsChanged` 의 `PluginLifecycleEvent` union 에는 `_future` sentinel variant (`{type: "_future"; readonly __exhaustive: never}`) 가 포함된다. 런타임에는 절대 발생하지 않으며, 향후 `"updated"` 같은 신규 variant 추가 시 exhaustive `switch (event.type)` consumer 가 silently 누락되지 않도록 `default:` branch 를 강제하는 type-level forward-compat 가드다.
 
