@@ -39,7 +39,7 @@ describe("DeferredQueueDialog", () => {
     rerender(<DeferredQueueDialog open onOpenChange={() => {}} />);
     await waitFor(() => {
       expect(screen.getByTestId("deferred-queue-dialog")).toBeTruthy();
-      expect(screen.getByText("write_file")).toBeTruthy();
+      expect(screen.getAllByText("write_file").length).toBeGreaterThan(0);
     });
   });
 
@@ -59,7 +59,7 @@ describe("DeferredQueueDialog", () => {
     render(<DeferredQueueDialog open onOpenChange={() => {}} />);
 
     await waitFor(() => {
-      expect(screen.getByText("write_file")).toBeTruthy();
+      expect(screen.getAllByText("write_file").length).toBeGreaterThan(0);
     });
     fireEvent.click(screen.getByText("허용"));
 

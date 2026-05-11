@@ -21,11 +21,9 @@ export function DeferredQueueDialog({ open, onOpenChange }: DeferredQueueDialogP
         className="flex max-h-[calc(100dvh-48px)] w-[calc(100vw-32px)] max-w-[760px] min-w-0 flex-col gap-0 overflow-hidden p-0"
         data-testid="deferred-queue-dialog"
       >
-        <DialogHeader className="border-b px-5 py-4 text-left">
-          <DialogTitle className="text-base">보류된 승인 큐</DialogTitle>
-          <DialogDescription className="leading-relaxed">
-            사용자가 보지 않는 실행에서 보류된 도구 호출입니다. 현재 채팅 권한 요청과 달리 자동으로 전면에 뜨지 않습니다.
-          </DialogDescription>
+        <DialogHeader className="sr-only">
+          <DialogTitle>보류된 권한 요청 검토</DialogTitle>
+          <DialogDescription>사용자가 권한 큐 버튼에서 직접 연 보류 승인 목록입니다.</DialogDescription>
         </DialogHeader>
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
           <DeferredQueuePanel showEmpty />
