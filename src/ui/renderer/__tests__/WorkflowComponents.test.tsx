@@ -5,7 +5,7 @@
  */
 import "../../../../test/renderer/setup.js";
 import { describe, it, expect, vi } from "vitest";
-import { render, fireEvent, act, waitFor } from "@testing-library/react";
+import { render, fireEvent, act, waitFor, within } from "@testing-library/react";
 import { TooltipProvider } from "../../../components/ui/tooltip.js";
 import { AskUserQuestionCard } from "../components/AskUserQuestionCard.js";
 import { RoutinePanel } from "../components/RoutinePanel.js";
@@ -23,6 +23,8 @@ function fakeApi(overrides: Partial<LvisApi> = {}): LvisApi {
     listRoutinesV2: () => Promise.resolve([]),
     dismissRoutineV2: stub as never,
     removeRoutineV2: stub as never,
+    listRoutineSessionsV2: () => Promise.resolve([]),
+    readRoutineSessionV2: () => Promise.resolve(""),
     onRoutineFiredV2: noopUnsub as never,
     listSessionTodos: () => Promise.resolve([]),
     onSessionTodoChanged: noopUnsub as never,
@@ -199,7 +201,7 @@ describe("AskUserQuestionCard — multi-question", () => {
   it("paginates 1→2→confirm and submits all answers at once", async () => {
     const respond = vi.fn().mockResolvedValue({ ok: true });
     const api = fakeApi({ respondAskUserQuestion: respond as never });
-    const { getByText, getByTestId, queryByTestId, container } = render(
+    const { getByRole, getByText, getByTestId, queryByTestId, container } = render(
       <AskUserQuestionCard
         api={api}
         request={{
@@ -238,7 +240,7 @@ describe("AskUserQuestionCard — multi-question", () => {
     expect(queryByTestId("ask-confirm-review")).not.toBeNull();
     expect(getByTestId("ask-step-label").textContent).toBe("· 검토");
     await act(async () => {
-      fireEvent.click(getByText("보내기"));
+      fireEvent.click(getByRole("button", { name: "보내기" }));
     });
     expect(respond).toHaveBeenCalledWith({
       requestId: "multi",
@@ -270,6 +272,48 @@ describe("RoutinePanel", () => {
     });
     const { findByText } = render(<RoutinePanel api={api} />);
     expect(await findByText("year-end")).toBeInTheDocument();
+  });
+
+  it("renders past LLM routine sessions beside the routine list", async () => {
+    const listRoutineSessionsV2 = vi.fn(async () => [
+      {
+        routineId: "r-llm",
+        firedAt: "2026-05-11T04:00:00.003Z",
+        jsonlPath: "/tmp/routine-session.jsonl",
+      },
+    ]);
+    const readRoutineSessionV2 = vi.fn(async () =>
+      JSON.stringify({ role: "assistant", content: "루틴 본문\n<summary>뉴스 요약 완료</summary>" }) + "\n",
+    );
+    const api = fakeApi({
+      listRoutinesV2: () =>
+        Promise.resolve([
+          {
+            id: "r-llm",
+            trigger: "schedule" as const,
+            execution: "llm-session" as const,
+            schedule: { at: "2099-01-01T00:00:00.000Z", repeat: { kind: "daily" as const } },
+            title: "뉴스 요약",
+            createdAt: "2024-01-01T00:00:00.000Z",
+          },
+        ]),
+      listRoutineSessionsV2: listRoutineSessionsV2 as never,
+      readRoutineSessionV2: readRoutineSessionV2 as never,
+    });
+    const { findByTestId } = render(<RoutinePanel api={api} />);
+
+    const sessionList = await findByTestId("routine-session-list");
+    await waitFor(() => {
+      expect(sessionList.textContent).toContain("과거 루틴 세션");
+      expect(sessionList.textContent).toContain("뉴스 요약");
+    });
+    expect(listRoutineSessionsV2).toHaveBeenCalledWith("r-llm", 10);
+
+    fireEvent.click(within(sessionList).getByText("열기"));
+    await waitFor(() => {
+      expect(readRoutineSessionV2).toHaveBeenCalledWith("/tmp/routine-session.jsonl");
+    });
+    expect(await findByTestId("routine-panel-session-dialog")).toBeInTheDocument();
   });
 });
 

@@ -21,7 +21,7 @@ export type TrustLevel = "high" | "medium" | "low";
  * binary-ish split with category-aware policy lanes (PermissionManager
  * Layer 3 decision matrix in permission-policy-design.md):
  *
- * - `read`    — auto-allow for builtin, scope-checked for plugin
+ * - `read`    — automatically allowed for builtin, scope-checked for plugin
  * - `write`   — ask (user confirmation)
  * - `shell`   — ask + Bash AST validation (subset of write where command
  *               structure must be parsed)

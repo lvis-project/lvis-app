@@ -47,10 +47,10 @@ describe("Category Registry — registerStandardCategories", () => {
     expect(d.decisionFor({ mode: "strict", source: "builtin", headless: false })).toBe("ask");
   });
 
-  it("write descriptor asks in default/strict, allows in auto/allow, and defers default/auto headless to reviewer", () => {
+  it("write descriptor asks in default/strict/auto, allows in allow, and defers default/auto headless to reviewer", () => {
     const d = getToolCategoryDescriptor("write");
     expect(d.decisionFor({ mode: "default", source: "builtin", headless: false })).toBe("ask");
-    expect(d.decisionFor({ mode: "auto", source: "builtin", headless: false })).toBe("allow");
+    expect(d.decisionFor({ mode: "auto", source: "builtin", headless: false })).toBe("ask");
     expect(d.decisionFor({ mode: "allow", source: "builtin", headless: false })).toBe("allow");
     expect(d.decisionFor({ mode: "strict", source: "builtin", headless: false })).toBe("ask");
     expect(d.decisionFor({ mode: "default", source: "builtin", headless: true })).toBe("reviewer");
@@ -71,10 +71,10 @@ describe("Category Registry — registerStandardCategories", () => {
     expect(d.decisionFor({ mode: "allow", source: "builtin", headless: true })).toBe("allow");
   });
 
-  it("network descriptor matches write's auto/allow lane", () => {
+  it("network descriptor asks in default/auto, allows in allow, and defers default/auto headless to reviewer", () => {
     const d = getToolCategoryDescriptor("network");
     expect(d.decisionFor({ mode: "default", source: "builtin", headless: false })).toBe("ask");
-    expect(d.decisionFor({ mode: "auto", source: "builtin", headless: false })).toBe("allow");
+    expect(d.decisionFor({ mode: "auto", source: "builtin", headless: false })).toBe("ask");
     expect(d.decisionFor({ mode: "allow", source: "builtin", headless: false })).toBe("allow");
     expect(d.decisionFor({ mode: "default", source: "builtin", headless: true })).toBe("reviewer");
     expect(d.decisionFor({ mode: "auto", source: "builtin", headless: true })).toBe("reviewer");

@@ -15,6 +15,7 @@ function makeRequest(overrides: Partial<ApprovalRequest> = {}): ApprovalRequest 
     id: "req-1",
     category: "tool",
     toolName: "read_file",
+    toolCategory: "read",
     args: { path: "/tmp/test.txt" },
     reason: "파일 읽기 요청",
     createdAt: Date.now(),
@@ -38,6 +39,8 @@ describe("ApprovalDialog", () => {
     // Radix Dialog portals to document.body
     await waitFor(() => {
       expect(document.body.textContent).toContain("read_file");
+      expect(document.body.textContent).toContain("도구 / 출처");
+      expect(document.body.textContent).toContain("읽기 판단근거");
     });
   });
 
@@ -79,7 +82,7 @@ describe("ApprovalDialog", () => {
   it("shows first item when multiple items in queue", async () => {
     const queue = [
       makeRequest({ id: "req-1" }),
-      makeRequest({ id: "req-2", toolName: "write_file" }),
+      makeRequest({ id: "req-2", toolName: "write_file", toolCategory: "write" }),
     ];
     render(
       <ApprovalDialog queue={queue} onDecide={vi.fn()} />,

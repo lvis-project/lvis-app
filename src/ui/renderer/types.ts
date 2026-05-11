@@ -254,10 +254,11 @@ export type LvisApi = {
   chatLoadSession: (sessionId: string) => Promise<{ ok: boolean; sessionId: string | null }>;
   onChatStream: (h: (e: StreamEvent) => void) => () => void;
   onChatFallback: (h: (payload: { from: string; to: string }) => void) => () => void;
-  chatGetHistory: () => Promise<{ sessionId: string; messages: SerializedHistoryMessage[] }>;
+  chatGetHistory: () => Promise<{ sessionId: string; messages: SerializedHistoryMessage[]; estimatedInputTokens?: number }>;
   chatSessionHistory: (sessionId: string) => Promise<{
     ok: boolean;
     messages: SerializedHistoryMessage[];
+    estimatedInputTokens?: number;
     /** §457 PR-A: chars in the rolling summary preamble inherited from parent. 0 = no preamble. */
     preambleChars?: number;
     /** §457 PR-A: parent session id when this session is a rotation child. */
@@ -316,6 +317,8 @@ export type LvisApi = {
   dismissRoutineV2: (id: string) => Promise<{ ok: boolean; error?: string }>;
   removeRoutineV2: (id: string) => Promise<{ ok: boolean; error?: string }>;
   triggerRoutineNowV2: (id: string) => Promise<{ ok: boolean; error?: string }>;
+  listPendingRoutineResultsV2: () => Promise<import("../../shared/routines-types.js").RoutineFiredPayload[]>;
+  acknowledgeRoutineResultV2: (routineId: string, firedAt: string) => Promise<{ ok: boolean; error?: string }>;
   addRoutineV2: (
     input: import("../../shared/routines-types.js").AddRoutineInput,
   ) => Promise<
@@ -490,6 +493,10 @@ export type ApprovalRequest = {
   /** Permission policy — discriminator (defaults to "tool" when absent). */
   kind?: ApprovalKind;
   toolName: string;
+  /** Permission policy category for the invocation shown in the UI. */
+  toolCategory?: "read" | "write" | "shell" | "network" | "meta";
+  /** Layer 5 reviewer verdict when the ask came from auto-review. */
+  reviewerVerdict?: { level: "low" | "medium" | "high"; reason: string };
   args: unknown;
   reason: string;
   source?: "builtin" | "plugin" | "mcp";

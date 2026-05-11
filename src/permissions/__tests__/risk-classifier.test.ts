@@ -101,6 +101,48 @@ describe("RuleBasedRiskClassifier", () => {
     expect(v.level).toBe("low");
   });
 
+  it("network Graph profile metadata read → LOW", () => {
+    const v = rb.classify(ctx({
+      category: "network",
+      finalInput: { endpoint: "https://graph.microsoft.com/v1.0/me", method: "GET" },
+    }));
+    expect(v.level).toBe("low");
+    expect(v.reason).toMatch(/graph metadata/);
+  });
+
+  it("network Graph profile fields without explicit payload are still data operations → MEDIUM", () => {
+    const v = rb.classify(ctx({
+      category: "network",
+      finalInput: {
+        endpoint: "https://graph.microsoft.com/v1.0/me",
+        displayName: "Changed Name",
+      },
+    }));
+    expect(v.level).toBe("medium");
+    expect(v.reason).toMatch(/graph data operation/);
+  });
+
+  it("network Graph POST with payload → MEDIUM", () => {
+    const v = rb.classify(ctx({
+      category: "network",
+      finalInput: {
+        endpoint: "https://graph.microsoft.com/v1.0/teams/t/channels/c/messages",
+        method: "POST",
+        payload: "meeting summary",
+      },
+    }));
+    expect(v.level).toBe("medium");
+    expect(v.reason).toMatch(/graph data operation/);
+  });
+
+  it("network Graph data endpoint without payload → MEDIUM", () => {
+    const v = rb.classify(ctx({
+      category: "network",
+      finalInput: { endpoint: "https://graph.microsoft.com/v1.0/me/messages" },
+    }));
+    expect(v.level).toBe("medium");
+  });
+
   it("network to localhost → MEDIUM", () => {
     const v = rb.classify(ctx({ category: "network", finalInput: { url: "http://localhost:8080/x" } }));
     expect(v.level).toBe("medium");
