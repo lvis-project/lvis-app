@@ -141,6 +141,14 @@ export type ChatEntry =
       preambleChars: number;
       parentSessionId?: string;
     }
+  // Hidden carrier for session replay context usage. Unlike turn_summary,
+  // this is an estimate rebuilt from persisted messages, not provider-reported
+  // per-turn billing data.
+  | {
+      kind: "context_usage";
+      tokensIn: number;
+      source: "session-estimate";
+    }
   // Overlay trigger that the user accepted ("지금 답하기"). The
   // trigger session ran in an isolated ConversationLoop; once imported,
   // its messages live in the chat loop's history (so the LLM has

@@ -327,6 +327,38 @@ describe("useContextBudget (deterministic math)", () => {
     expect(a).toBe(10_000);
     expect(b).toBe(5_000); // compact 후 감소가 정상 — Phase 3 의 핵심 동작.
   });
+
+  it("usedTokens reflects a loaded session context estimate until a live turn summary arrives", () => {
+    const loaded: ChatEntry[] = [
+      { kind: "user", text: "이전 질문" },
+      { kind: "assistant", text: "이전 답변", streaming: false },
+      { kind: "context_usage", tokensIn: 12_345, source: "session-estimate" },
+    ];
+    const liveAfterLoaded: ChatEntry[] = [
+      ...loaded,
+      { kind: "user", text: "새 질문" },
+      { kind: "assistant", text: "새 답변" },
+      {
+        kind: "turn_summary",
+        turnDurationMs: 1000,
+        toolCount: 0,
+        cumulativeToolMs: 0,
+        tokensIn: 6_789,
+        freshInputTokens: 6_789,
+        tokensOut: 100,
+      },
+    ];
+
+    const a = renderHook(() =>
+      useContextBudget({ entries: loaded, llmVendor: "openai", llmModel: "gpt-4o-mini" }),
+    ).result.current.usedTokens;
+    const b = renderHook(() =>
+      useContextBudget({ entries: liveAfterLoaded, llmVendor: "openai", llmModel: "gpt-4o-mini" }),
+    ).result.current.usedTokens;
+
+    expect(a).toBe(12_345);
+    expect(b).toBe(6_789);
+  });
 });
 
 describe("useCostEstimate (memo invariants)", () => {
@@ -418,6 +450,31 @@ describe("useSessions (streaming guard)", () => {
     expect(result.current.currentSessionId).toBe("other-sess");
   });
 
+  it("handleLoadSession carries the persisted session context token estimate", async () => {
+    const { api } = makeMockLvisApi();
+    const { result } = renderHook(() => useSessions(api as unknown as LvisApi));
+    const setEntries = vi.fn();
+    api.chatSessionHistory.mockClear();
+    api.chatSessionHistory.mockResolvedValueOnce({
+      ok: true,
+      estimatedInputTokens: 4321,
+      messages: [
+        { index: 0, role: "user", content: "이전 질문" },
+        { index: 1, role: "assistant", content: "이전 답변" },
+      ],
+    });
+
+    await act(async () => {
+      await result.current.handleLoadSession("other-sess", false, setEntries);
+    });
+
+    expect(setEntries).toHaveBeenCalledWith([
+      { kind: "user", text: "이전 질문" },
+      { kind: "assistant", text: "이전 답변", streaming: false, route: undefined },
+      { kind: "context_usage", tokensIn: 4321, source: "session-estimate" },
+    ]);
+  });
+
   it("handleLoadSession cancels a late startup hydrate before it can overwrite the loaded session", async () => {
     const { api } = makeMockLvisApi();
     const startupHistory = deferred<{ sessionId: string; messages: unknown[] }>();
@@ -484,6 +541,91 @@ describe("useSessions (streaming guard)", () => {
       ]);
     });
     expect(result.current.currentSessionId).toBe("persisted-sess");
+  });
+
+  it("hydrates active in-memory history with its context token estimate", async () => {
+    const { api } = makeMockLvisApi({
+      currentSession: "active-sess",
+      history: {
+        sessionId: "active-sess",
+        estimatedInputTokens: 2468,
+        messages: [
+          { index: 0, role: "user", content: "진행 중 질문" },
+          { index: 1, role: "assistant", content: "진행 중 답변" },
+        ],
+      },
+    });
+    const applyInitial = vi.fn();
+
+    renderHook(() => useSessions(api as unknown as LvisApi, applyInitial));
+
+    await waitFor(() => {
+      expect(applyInitial).toHaveBeenCalledWith([
+        { kind: "user", text: "진행 중 질문" },
+        { kind: "assistant", text: "진행 중 답변", streaming: false, route: undefined },
+        { kind: "context_usage", tokensIn: 2468, source: "session-estimate" },
+      ]);
+    });
+  });
+
+  it("hydrates today's latest persisted session on startup when active loop is empty", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2026-05-11T03:00:00.000Z"));
+      const { api } = makeMockLvisApi({
+        currentSession: "fresh-empty",
+        history: { sessionId: "fresh-empty", messages: [] },
+        sessions: [
+          { id: "today-early", modifiedAt: "2026-05-10T23:00:00.000Z", title: "Today early" },
+          { id: "yesterday-late", modifiedAt: "2026-05-10T14:59:59.000Z", title: "Yesterday late" },
+          { id: "today-late", modifiedAt: "2026-05-11T02:30:00.000Z", title: "Today late" },
+        ],
+      });
+      api.chatSessionHistory.mockResolvedValueOnce({
+        ok: true,
+        messages: [
+          { index: 0, role: "user", content: "오늘 마지막 질문" },
+          { index: 1, role: "assistant", content: "오늘 마지막 답변" },
+        ],
+      });
+      const applyInitial = vi.fn();
+
+      const { result } = renderHook(() =>
+        useSessions(api as unknown as LvisApi, applyInitial),
+      );
+
+      await waitFor(() => expect(api.chatSessionResume).toHaveBeenCalledWith("today-late"));
+      expect(api.chatSessionResume).not.toHaveBeenCalledWith("yesterday-late");
+      expect(result.current.currentSessionId).toBe("today-late");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not resume a prior-day session on startup when today has no persisted session", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2026-05-11T03:00:00.000Z"));
+      const { api } = makeMockLvisApi({
+        currentSession: "fresh-empty",
+        history: { sessionId: "fresh-empty", messages: [] },
+        sessions: [
+          { id: "yesterday-late", modifiedAt: "2026-05-10T14:59:59.000Z", title: "Yesterday late" },
+        ],
+      });
+      const applyInitial = vi.fn();
+
+      const { result } = renderHook(() =>
+        useSessions(api as unknown as LvisApi, applyInitial),
+      );
+
+      await waitFor(() => expect(api.chatSessions).toHaveBeenCalled());
+      expect(api.chatSessionResume).not.toHaveBeenCalled();
+      expect(applyInitial).toHaveBeenCalledWith([]);
+      expect(result.current.currentSessionId).toBe("fresh-empty");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

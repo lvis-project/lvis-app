@@ -254,10 +254,11 @@ export type LvisApi = {
   chatLoadSession: (sessionId: string) => Promise<{ ok: boolean; sessionId: string | null }>;
   onChatStream: (h: (e: StreamEvent) => void) => () => void;
   onChatFallback: (h: (payload: { from: string; to: string }) => void) => () => void;
-  chatGetHistory: () => Promise<{ sessionId: string; messages: SerializedHistoryMessage[] }>;
+  chatGetHistory: () => Promise<{ sessionId: string; messages: SerializedHistoryMessage[]; estimatedInputTokens?: number }>;
   chatSessionHistory: (sessionId: string) => Promise<{
     ok: boolean;
     messages: SerializedHistoryMessage[];
+    estimatedInputTokens?: number;
     /** §457 PR-A: chars in the rolling summary preamble inherited from parent. 0 = no preamble. */
     preambleChars?: number;
     /** §457 PR-A: parent session id when this session is a rotation child. */
