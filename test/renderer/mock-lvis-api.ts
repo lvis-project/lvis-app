@@ -24,6 +24,7 @@ type ApiOverrides = {
   marketplace?: unknown[];
   pluginUiExtensions?: unknown[];
   latestRoutineResult?: unknown;
+  pendingRoutineResults?: unknown[];
 };
 
 const DEFAULT_SETTINGS = {
@@ -68,6 +69,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   const marketplace = overrides.marketplace ?? [];
   const pluginUiExtensions = overrides.pluginUiExtensions ?? [];
   const latestRoutineResult = overrides.latestRoutineResult ?? null;
+  const pendingRoutineResults = overrides.pendingRoutineResults ?? [];
 
   const chatStreamHandlers = new Set<(ev: unknown) => void>();
   const routineFiredV2Handlers = new Set<(r: unknown) => void>();
@@ -220,6 +222,8 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     dismissRoutineV2: vi.fn(async () => ({ ok: true })),
     removeRoutineV2: vi.fn(async () => ({ ok: true })),
     triggerRoutineNowV2: vi.fn(async () => ({ ok: true })),
+    listPendingRoutineResultsV2: vi.fn(async () => pendingRoutineResults),
+    acknowledgeRoutineResultV2: vi.fn(async () => ({ ok: true })),
     addRoutineV2: vi.fn(async () => ({ ok: true, routine: {} })),
     onRoutineFiredV2: vi.fn((h: (r: unknown) => void) => {
       routineFiredV2Handlers.add(h);

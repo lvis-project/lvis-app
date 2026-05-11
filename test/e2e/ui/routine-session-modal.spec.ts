@@ -33,10 +33,30 @@ test.describe("routine session modal", () => {
     tempHome = mkdtempSync(resolve(tmpdir(), "lvis-routine-modal-home-"));
     const sessionDir = resolve(tempHome, ".lvis", "routine", "sessions", ROUTINE_ID);
     mkdirSync(sessionDir, { recursive: true });
+    mkdirSync(resolve(tempHome, ".lvis", "routine"), { recursive: true });
+    writeFileSync(
+      resolve(tempHome, ".lvis", "routine", "routines.json"),
+      JSON.stringify({
+        version: 2,
+        routines: [
+          {
+            id: ROUTINE_ID,
+            trigger: "schedule",
+            execution: "llm-session",
+            title: "Layout probe",
+            createdAt: "2026-05-10T00:00:00.000Z",
+            lastFiredAt: FIRED_AT,
+            dismissedAt: FIRED_AT,
+            schedule: { at: FIRED_AT, repeat: { kind: "none" } },
+          },
+        ],
+      }),
+      "utf-8",
+    );
     writeFileSync(
       resolve(sessionDir, SESSION_FILE),
       [
-        JSON.stringify({ role: "assistant", content: "루틴 결과를 확인합니다." }),
+        JSON.stringify({ role: "assistant", content: "루틴 결과를 확인합니다.\n<summary>routine summary</summary>" }),
         JSON.stringify({ role: "tool_result", toolName: "web_search", content: LONG_RESULT }),
       ].join("\n") + "\n",
       "utf-8",
@@ -68,19 +88,8 @@ test.describe("routine session modal", () => {
     if (tempHome) rmSync(tempHome, { recursive: true, force: true });
   });
 
-  test("keeps long LLM tool results inside the routine result modal", async () => {
+  test("rehydrates unacknowledged results and keeps long tool output inside the modal", async () => {
     await page.setViewportSize({ width: 560, height: 900 });
-    await app.evaluate(({ BrowserWindow }, payload) => {
-      BrowserWindow.getAllWindows()[0]?.webContents.send("lvis:routines:v2:fired", payload);
-    }, {
-      id: ROUTINE_ID,
-      trigger: "schedule",
-      firedAt: FIRED_AT,
-      title: "Layout probe",
-      summary: "routine summary",
-      routineSessionPath: "present",
-    });
-
     await page.locator('[data-testid="routine-card"]').waitFor({
       state: "visible",
       timeout: 15_000,

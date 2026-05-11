@@ -316,6 +316,8 @@ export type LvisApi = {
   dismissRoutineV2: (id: string) => Promise<{ ok: boolean; error?: string }>;
   removeRoutineV2: (id: string) => Promise<{ ok: boolean; error?: string }>;
   triggerRoutineNowV2: (id: string) => Promise<{ ok: boolean; error?: string }>;
+  listPendingRoutineResultsV2: () => Promise<import("../../shared/routines-types.js").RoutineFiredPayload[]>;
+  acknowledgeRoutineResultV2: (routineId: string, firedAt: string) => Promise<{ ok: boolean; error?: string }>;
   addRoutineV2: (
     input: import("../../shared/routines-types.js").AddRoutineInput,
   ) => Promise<

@@ -60,6 +60,8 @@ export interface MainContentProps {
   activePluginView: PluginView | null;
   /** Called when user confirms a plugin overlay item; id is the OverlayItem.id. */
   onPluginPrimaryAction: (overlayItemId: string) => void;
+  /** Called when a completed routine overlay result has been seen or dismissed. */
+  onRoutineAcknowledge?: (routineId: string, firedAt: string) => void;
   /** Opens the non-interruptive deferred permission queue modal. */
   onOpenPermissionQueue?: () => void;
 }
@@ -105,6 +107,7 @@ function HomeChatPane(props: MainContentProps) {
         onOpenMarketplace={props.onOpenMarketplace}
         marketplaceUrlReady={props.marketplaceUrlReady}
         onPluginPrimaryAction={props.onPluginPrimaryAction}
+        onRoutineAcknowledge={props.onRoutineAcknowledge}
         onOpenPermissionQueue={props.onOpenPermissionQueue}
       />
     </ChatContextProvider>
