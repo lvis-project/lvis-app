@@ -70,7 +70,7 @@ LVIS 마켓플레이스는 **git-based publish** (Go 모듈 프록시 스타일)
 | `local-indexer` | `lvis-plugin-local-indexer` | admin (fallback) | `install_policy`/`deployment` 키 생략 → fallback 룰로 admin |
 | `ms-graph` | `lvis-plugin-ms-graph` | user (명시) | 구 email + calendar 플러그인 합본 |
 | `lge-api` | `lvis-plugin-lge-api` | admin (fallback) | 위 local-indexer 와 동일 |
-| `work-proactive` | `lvis-plugin-work-proactive` | user (명시) | |
+| `work-assistant` | `lvis-plugin-work-assistant` | user (명시) | |
 | `agent-hub` | `lvis-plugin-agent-hub` | user (명시) | |
 | `hello-world` (합성) | (코드 안에 dummy zip) | free | 부팅 시 자동 publish — install-flow 테스트용 |
 
@@ -99,7 +99,7 @@ lvis-project/
 ├── lvis-plugin-email/
 ├── lvis-plugin-calendar/
 ├── lvis-plugin-lge-api/
-├── lvis-plugin-work-proactive/
+├── lvis-plugin-work-assistant/
 └── lvis-plugin-agent-hub/
 ```
 

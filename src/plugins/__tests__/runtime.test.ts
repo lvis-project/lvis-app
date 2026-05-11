@@ -583,8 +583,8 @@ describe("PluginRuntime.disable", () => {
     };
 
     const workManifestPath = await writePlugin(
-      "work-proactive",
-      "work_proactive_ping",
+      "work-assistant",
+      "work_assistant_ping",
       {
         pluginAccess: {
           plugins: [
@@ -600,7 +600,7 @@ describe("PluginRuntime.disable", () => {
     const meetingManifestPath = await writePlugin("meeting", "meeting_ping");
     await writeRegistry([
       {
-        id: "work-proactive",
+        id: "work-assistant",
         manifestPath: workManifestPath,
         enabled: true,
         approvedPluginAccess: {
@@ -619,14 +619,14 @@ describe("PluginRuntime.disable", () => {
     const runtime = makeRuntime();
     await runtime.load();
 
-    expect(() => runtime.assertPluginToolAccess("work-proactive", "calendar_today")).not.toThrow();
-    expect(() => runtime.assertPluginEventAccess("work-proactive", "email.action.needed")).not.toThrow();
-    expect(() => runtime.assertPluginEventAccess("work-proactive", "meeting.summary.created")).not.toThrow();
-    expect(() => runtime.assertPluginToolAccess("calendar", "work_proactive_ping")).toThrow(/not allowed/i);
+    expect(() => runtime.assertPluginToolAccess("work-assistant", "calendar_today")).not.toThrow();
+    expect(() => runtime.assertPluginEventAccess("work-assistant", "email.action.needed")).not.toThrow();
+    expect(() => runtime.assertPluginEventAccess("work-assistant", "meeting.summary.created")).not.toThrow();
+    expect(() => runtime.assertPluginToolAccess("calendar", "work_assistant_ping")).toThrow(/not allowed/i);
     expect(() => runtime.assertPluginEventAccess("calendar", "email.action.needed")).toThrow(/not allowed/i);
   });
 
-  it("allows work-proactive to subscribe to granted calendar events (P4 detector grants)", async () => {
+  it("allows work-assistant to subscribe to granted calendar events (P4 detector grants)", async () => {
     // Regression net for the host catalog ↔ registry grants paired
     // with the overlay-trigger plugin's calendar-* detectors:
     //   - `calendar-event-detector` (PR #7) → `calendar.event.upcoming`
@@ -670,7 +670,7 @@ describe("PluginRuntime.disable", () => {
       "calendar.event.upcoming",
       "calendar.event.conflict.detected",
     ];
-    const workManifestPath = await writePlugin("work-proactive", "work_proactive_ping", {
+    const workManifestPath = await writePlugin("work-assistant", "work_assistant_ping", {
       pluginAccess: {
         plugins: [
           {
@@ -684,7 +684,7 @@ describe("PluginRuntime.disable", () => {
     const calendarManifestPath = await writePlugin("calendar", "calendar_today");
     await writeRegistry([
       {
-        id: "work-proactive",
+        id: "work-assistant",
         manifestPath: workManifestPath,
         enabled: true,
         approvedPluginAccess: {
@@ -706,14 +706,14 @@ describe("PluginRuntime.disable", () => {
     // Granted path: each event in the grant is allowed.
     for (const ev of grantedEvents) {
       expect(() =>
-        runtime.assertPluginEventAccess("work-proactive", ev),
+        runtime.assertPluginEventAccess("work-assistant", ev),
       ).not.toThrow();
     }
     // Negative path — least-privilege: only the events explicitly
     // listed in the grant pass. `calendar.event.starting` is also a
     // calendar event but NOT in the grant, so the runtime denies.
     expect(() =>
-      runtime.assertPluginEventAccess("work-proactive", "calendar.event.starting"),
+      runtime.assertPluginEventAccess("work-assistant", "calendar.event.starting"),
     ).toThrow(/not allowed/i);
   });
 
