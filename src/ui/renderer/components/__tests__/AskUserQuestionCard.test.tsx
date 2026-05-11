@@ -214,7 +214,7 @@ describe("AskUserQuestionCard — multi-step free-text keyboard navigation", () 
     expect((getByTestId("ask-freetext-input") as HTMLInputElement).value).toBe("");
   });
 
-  it("moves between questions with ArrowDown and ArrowUp and exposes keyboard guidance", async () => {
+  it("keeps ArrowUp/ArrowDown on the answer field and moves questions with ArrowRight/ArrowLeft", async () => {
     const api = makeApi();
     const request = makeRequest({
       questions: [
@@ -236,14 +236,61 @@ describe("AskUserQuestionCard — multi-step free-text keyboard navigation", () 
       fireEvent.keyDown(firstInput, { key: "ArrowDown" });
     });
 
+    expect(getByText("참석자")).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.keyDown(firstInput, { key: "ArrowRight" });
+    });
+
     expect(getByText("의제")).toBeTruthy();
 
     const secondInput = getByTestId("ask-freetext-input") as HTMLInputElement;
     await act(async () => {
-      fireEvent.keyDown(secondInput, { key: "ArrowUp" });
+      fireEvent.keyDown(secondInput, { key: "ArrowLeft" });
     });
 
     expect(getByText("참석자")).toBeTruthy();
+  });
+
+  it("moves choice answers with ArrowUp and ArrowDown before ArrowRight changes question", async () => {
+    const api = makeApi();
+    const request = makeRequest({
+      questions: [
+        { question: "첫 번째 질문", choices: ["A", "B"], allowFreeText: false },
+        { question: "두 번째 질문", choices: ["X", "Y"], allowFreeText: false },
+      ],
+    });
+
+    const { getByTestId, getByText, queryByText } = render(
+      <AskUserQuestionCard api={api as never} request={request} onResolved={vi.fn()} />,
+    );
+
+    expect(getByTestId("ask-keyboard-hint").textContent).toContain("답변 이동");
+    expect(getByTestId("ask-keyboard-hint").textContent).toContain("질문 이동");
+
+    const answerA = getByText("A").closest("button")!;
+    answerA.focus();
+    await act(async () => {
+      fireEvent.keyDown(answerA, { key: "ArrowDown" });
+    });
+
+    expect(document.activeElement?.textContent).toContain("B");
+    expect(queryByText("두 번째 질문")).toBeNull();
+
+    await act(async () => {
+      fireEvent.keyDown(document.activeElement!, { key: "ArrowUp" });
+    });
+
+    expect(document.activeElement?.textContent).toContain("A");
+
+    await act(async () => {
+      fireEvent.click(answerA);
+    });
+    await act(async () => {
+      fireEvent.keyDown(answerA, { key: "ArrowRight" });
+    });
+
+    expect(getByText("두 번째 질문")).toBeTruthy();
   });
 });
 
