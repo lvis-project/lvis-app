@@ -54,7 +54,7 @@ export function MarketplaceUpdateBanner({
 
   return (
     <div
-      className="flex items-center justify-between gap-2 bg-info/15 border border-info/40 text-info text-sm px-4 py-2 rounded-md mx-2 mt-2"
+      className="flex items-center justify-between gap-2 bg-info/15 border border-info/40 text-info text-sm px-4 py-2 rounded-md mx-2 mt-2 lvis-anim-slide-down"
       data-testid="marketplace-update-banner"
     >
       <span>

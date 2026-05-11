@@ -67,7 +67,7 @@ export function TurnActionBar({
         <Tooltip>
           <TooltipTrigger asChild>
             <button className="rounded p-0.5 hover:bg-muted hover:text-foreground transition-colors" onClick={actions.onToggleStar}>
-              <Star className={`h-3 w-3 ${isStarred ? "fill-emphasis text-emphasis" : ""}`} />
+              <Star key={isStarred ? "on" : "off"} className={`h-3 w-3 ${isStarred ? "fill-emphasis text-emphasis lvis-anim-star" : ""}`} />
             </button>
           </TooltipTrigger>
           <TooltipContent>즐겨찾기</TooltipContent>
@@ -88,7 +88,7 @@ export function TurnActionBar({
                 }}
                 aria-label="도움이 됐어요"
               >
-                <ThumbsUp className={`h-3 w-3 ${feedbackRating === "up" ? "fill-success" : ""}`} />
+                <ThumbsUp key={feedbackRating === "up" ? "on" : "off"} className={`h-3 w-3 ${feedbackRating === "up" ? "fill-success lvis-anim-pop" : ""}`} />
               </button>
             </TooltipTrigger>
             <TooltipContent>도움이 됐어요</TooltipContent>
@@ -103,7 +103,7 @@ export function TurnActionBar({
                 }}
                 aria-label="개선이 필요해요"
               >
-                <ThumbsDown className={`h-3 w-3 ${feedbackRating === "down" ? "fill-destructive" : ""}`} />
+                <ThumbsDown key={feedbackRating === "down" ? "on" : "off"} className={`h-3 w-3 ${feedbackRating === "down" ? "fill-destructive lvis-anim-pop" : ""}`} />
               </button>
             </TooltipTrigger>
             <TooltipContent>개선이 필요해요</TooltipContent>

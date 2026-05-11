@@ -128,6 +128,7 @@ export function DropZoneOverlay({ onResult }: DropZoneOverlayProps) {
     <>
       {visible && (
         <div
+          className="lvis-anim-fade-in"
           style={{
             position: "fixed",
             inset: 0,
@@ -141,6 +142,7 @@ export function DropZoneOverlay({ onResult }: DropZoneOverlayProps) {
           }}
         >
           <div
+            className="lvis-anim-zoom-in"
             style={{
               background: "hsl(var(--popover) / 0.92)",
               color: "hsl(var(--popover-foreground))",
@@ -157,6 +159,7 @@ export function DropZoneOverlay({ onResult }: DropZoneOverlayProps) {
       )}
       {toast && (
         <div
+          className="lvis-anim-slide-up"
           style={{
             position: "fixed",
             bottom: 24,

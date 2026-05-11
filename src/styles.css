@@ -163,6 +163,130 @@
   }
 }
 
+/* ─── lvis-anim-* — shared micro-interaction primitives ────────────────────
+   Reusable keyframes + utility classes for chat message entry, toggle pops,
+   star throbs, banner slides, modal stagger, and expand/collapse height
+   transitions. All animations are ≤200ms and use the same easing curve
+   (cubic-bezier(0.22, 1, 0.36, 1) — "ease-out-quart") so motion feels
+   coherent across surfaces.
+
+   Re-trigger pattern: components apply these classes via React `key` props
+   so the same DOM element gets unmounted/remounted on state change,
+   restarting the CSS animation. See AssistantCard / TurnActionBar / Star
+   button usage for the canonical pattern.
+
+   prefers-reduced-motion: collapses every variant into a 150ms opacity
+   fade-in so the surface still acknowledges the change without translate
+   or scale jumps. */
+@keyframes lvis-message-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes lvis-pop {
+  0%   { transform: scale(1); }
+  45%  { transform: scale(1.18); }
+  100% { transform: scale(1); }
+}
+@keyframes lvis-star-throb {
+  0%   { transform: scale(1); opacity: 1; }
+  45%  { transform: scale(1.22); opacity: 0.88; }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes lvis-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes lvis-slide-down {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes lvis-slide-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes lvis-zoom-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@layer components {
+  .lvis-anim-message-in  { animation: lvis-message-in 180ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+  .lvis-anim-pop         { animation: lvis-pop 180ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+  .lvis-anim-star        { animation: lvis-star-throb 200ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+  .lvis-anim-fade-in     { animation: lvis-fade-in 150ms ease-out both; }
+  .lvis-anim-slide-down  { animation: lvis-slide-down 180ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+  .lvis-anim-slide-up    { animation: lvis-slide-up 180ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+  .lvis-anim-zoom-in     { animation: lvis-zoom-in 180ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+  /* Height expand/collapse: works by toggling `data-expanded`. Consumer sets
+     `max-height: var(--expand-max-h, 1200px)` upper bound; animation
+     interpolates between 0 and that bound. opacity tracks so collapsed
+     content fades out instead of clipping. */
+  .lvis-anim-expand {
+    overflow: hidden;
+    max-height: 0;
+    opacity: 0;
+    transition:
+      max-height 200ms cubic-bezier(0.22, 1, 0.36, 1),
+      opacity 180ms ease-out;
+  }
+  .lvis-anim-expand[data-expanded="true"] {
+    max-height: var(--expand-max-h, 1200px);
+    opacity: 1;
+  }
+
+  /* Hover overlay smoothing — Radix data-state and bare hover targets get
+     a 150ms color transition by default so theme-bound surface swaps don't
+     pop. Components that already declare `transition-colors` get the same
+     duration. */
+  .lvis-anim-hover {
+    transition-property: background-color, color, border-color, opacity;
+    transition-duration: 150ms;
+    transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  }
+}
+
+/* Radix Dialog state-driven entry/exit — DialogContent fades + zoom-in on
+   open, fades + zoom-out on close. The DialogOverlay (theme backdrop) fades
+   independently so the backdrop blur appears before the card content lands. */
+[data-radix-dialog-overlay][data-state="open"] {
+  animation: lvis-fade-in 150ms ease-out both;
+}
+[data-radix-dialog-overlay][data-state="closed"] {
+  animation: lvis-fade-in 150ms ease-out reverse both;
+}
+[data-radix-dialog-content][data-state="open"] {
+  animation: lvis-zoom-in 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+[data-radix-dialog-content][data-state="closed"] {
+  animation: lvis-zoom-in 150ms cubic-bezier(0.22, 1, 0.36, 1) reverse both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lvis-anim-message-in,
+  .lvis-anim-pop,
+  .lvis-anim-star,
+  .lvis-anim-slide-down,
+  .lvis-anim-slide-up,
+  .lvis-anim-zoom-in {
+    animation: lvis-fade-in 150ms ease-out both;
+  }
+  .lvis-anim-expand {
+    transition: opacity 150ms ease-out;
+  }
+  .lvis-anim-hover {
+    transition-duration: 0ms;
+  }
+  [data-radix-dialog-overlay][data-state="open"],
+  [data-radix-dialog-content][data-state="open"] {
+    animation: lvis-fade-in 150ms ease-out both;
+  }
+  [data-radix-dialog-overlay][data-state="closed"],
+  [data-radix-dialog-content][data-state="closed"] {
+    animation: lvis-fade-in 150ms ease-out reverse both;
+  }
+}
+
 /*
  * ─────────────────────────────────────────────────────────────────────────────
  *  LVIS theme system v2 — bundle-based semantic design tokens

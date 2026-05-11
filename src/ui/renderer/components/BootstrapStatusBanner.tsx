@@ -25,7 +25,7 @@ export function BootstrapStatusBanner({ status, onDismiss, onRetry }: Props): Re
 
   if (status.phase === "start") {
     return (
-      <div className="flex items-center justify-between gap-2 bg-muted border border-border text-muted-foreground text-sm px-4 py-2 rounded-md mx-2 mt-2">
+      <div className="flex items-center justify-between gap-2 bg-muted border border-border text-muted-foreground text-sm px-4 py-2 rounded-md mx-2 mt-2 lvis-anim-slide-down">
         <span>매니지드 플러그인 설치 중…</span>
       </div>
     );
@@ -33,7 +33,7 @@ export function BootstrapStatusBanner({ status, onDismiss, onRetry }: Props): Re
 
   if (status.phase === "error") {
     return (
-      <div className="flex items-center justify-between gap-2 bg-destructive/15 border border-destructive/40 text-destructive text-sm px-4 py-2 rounded-md mx-2 mt-2">
+      <div className="flex items-center justify-between gap-2 bg-destructive/15 border border-destructive/40 text-destructive text-sm px-4 py-2 rounded-md mx-2 mt-2 lvis-anim-slide-down">
         <span>플러그인 부트스트랩 실패: {status.message}</span>
         <div className="flex items-center gap-1">
           <Button
@@ -61,7 +61,7 @@ export function BootstrapStatusBanner({ status, onDismiss, onRetry }: Props): Re
   // phase === "complete"
   if (status.skippedReason) {
     return (
-      <div className="flex items-center justify-between gap-2 bg-warning/15 border border-warning/40 text-warning text-sm px-4 py-2 rounded-md mx-2 mt-2">
+      <div className="flex items-center justify-between gap-2 bg-warning/15 border border-warning/40 text-warning text-sm px-4 py-2 rounded-md mx-2 mt-2 lvis-anim-slide-down">
         <span>마켓플레이스 부트스트랩 건너뜀: {status.skippedReason}</span>
         <Button
           variant="ghost"
@@ -86,7 +86,7 @@ export function BootstrapStatusBanner({ status, onDismiss, onRetry }: Props): Re
         ? `플러그인 ${status.failed[0].id} 설치 실패: ${truncate(status.failed[0].error)}`
         : `${status.failed.length}개 플러그인 설치 실패`;
     return (
-      <div className="flex items-center justify-between gap-2 bg-destructive/15 border border-destructive/40 text-destructive text-sm px-4 py-2 rounded-md mx-2 mt-2">
+      <div className="flex items-center justify-between gap-2 bg-destructive/15 border border-destructive/40 text-destructive text-sm px-4 py-2 rounded-md mx-2 mt-2 lvis-anim-slide-down">
         <span>{summary}</span>
         <div className="flex items-center gap-1">
           <Button

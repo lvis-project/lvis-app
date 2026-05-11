@@ -79,7 +79,7 @@ export function MainToolbar({
               aria-label={isCurrentSessionStarred ? "현재 세션 즐겨찾기 해제" : "현재 세션 즐겨찾기"}
               aria-pressed={isCurrentSessionStarred}
             >
-              <Star className={`h-3.5 w-3.5 ${isCurrentSessionStarred ? "fill-emphasis text-emphasis" : ""}`} />
+              <Star key={isCurrentSessionStarred ? "on" : "off"} className={`h-3.5 w-3.5 ${isCurrentSessionStarred ? "fill-emphasis text-emphasis lvis-anim-star" : ""}`} />
             </Button>
           </TooltipTrigger>
           <TooltipContent>{isCurrentSessionStarred ? "현재 세션 즐겨찾기 해제" : "현재 세션 즐겨찾기"}</TooltipContent>

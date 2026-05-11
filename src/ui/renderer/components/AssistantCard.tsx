@@ -39,7 +39,7 @@ export function AssistantCard({
         <div className="mb-1 flex items-center gap-2 text-[11px] text-muted-foreground">
           {title}
           {entry.streaming ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
-          {isStarred ? <Star className="h-3 w-3 fill-emphasis text-emphasis" /> : null}
+          {isStarred ? <Star key="starred" className="h-3 w-3 fill-emphasis text-emphasis lvis-anim-star" /> : null}
           {actions && !entry.streaming ? (
             <div className={`ml-auto gap-1 ${isFinal !== false ? "flex" : "hidden group-hover:flex"}`}>
               {actions.onRetry && (
@@ -54,7 +54,7 @@ export function AssistantCard({
               )}
               {actions.onToggleStar && (
                 <button className="rounded p-0.5 hover:bg-muted" onClick={actions.onToggleStar} title="즐겨찾기">
-                  <Star className={`h-3 w-3 ${isStarred ? "fill-emphasis text-emphasis" : ""}`} />
+                  <Star key={isStarred ? "on" : "off"} className={`h-3 w-3 ${isStarred ? "fill-emphasis text-emphasis lvis-anim-star" : ""}`} />
                 </button>
               )}
             </div>
@@ -87,7 +87,7 @@ export function AssistantCard({
                 }}
                 aria-label="도움이 됐어요"
               >
-                <ThumbsUp className={`h-3.5 w-3.5 ${feedbackRating === "up" ? "fill-success" : ""}`} />
+                <ThumbsUp key={feedbackRating === "up" ? "on" : "off"} className={`h-3.5 w-3.5 ${feedbackRating === "up" ? "fill-success lvis-anim-pop" : ""}`} />
               </button>
             </TooltipTrigger>
             <TooltipContent>도움이 됐어요</TooltipContent>
@@ -102,7 +102,7 @@ export function AssistantCard({
                 }}
                 aria-label="개선이 필요해요"
               >
-                <ThumbsDown className={`h-3.5 w-3.5 ${feedbackRating === "down" ? "fill-destructive" : ""}`} />
+                <ThumbsDown key={feedbackRating === "down" ? "on" : "off"} className={`h-3.5 w-3.5 ${feedbackRating === "down" ? "fill-destructive lvis-anim-pop" : ""}`} />
               </button>
             </TooltipTrigger>
             <TooltipContent>개선이 필요해요</TooltipContent>

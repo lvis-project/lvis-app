@@ -889,7 +889,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
                         actions float top-right via absolute positioning so
                         the bubble has no header chrome. */}
                     {starActive ? (
-                      <Star className="absolute right-2 top-2 h-3 w-3 fill-emphasis text-emphasis" />
+                      <Star key="active" className="absolute right-2 top-2 h-3 w-3 fill-emphasis text-emphasis lvis-anim-star" />
                     ) : null}
                     {/* §PR-5: hide mutating actions in view-mode (read-only slice) */}
                     {!viewMode && (
@@ -897,7 +897,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
                         <button className="rounded p-0.5 hover:bg-[hsl(var(--hover-overlay)/0.2)]" title="편집" onClick={() => setEditingEntryIdx(idx)}><Pencil className="h-3 w-3" /></button>
                         <button className="rounded p-0.5 hover:bg-[hsl(var(--hover-overlay)/0.2)]" title="분기" onClick={() => void onFork(idx)}><GitBranch className="h-3 w-3" /></button>
                         <button className="rounded p-0.5 hover:bg-[hsl(var(--hover-overlay)/0.2)]" title="즐겨찾기" onClick={() => void onToggleStar(idx)}>
-                          <Star className={`h-3 w-3 ${starActive ? "fill-emphasis text-emphasis" : ""}`} />
+                          <Star key={starActive ? "on" : "off"} className={`h-3 w-3 ${starActive ? "fill-emphasis text-emphasis lvis-anim-star" : ""}`} />
                         </button>
                       </div>
                     )}

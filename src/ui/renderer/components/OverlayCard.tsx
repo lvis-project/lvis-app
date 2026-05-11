@@ -105,7 +105,7 @@ export function OverlayCard({
   return (
     <Card
       data-testid="routine-card"
-      className="flex flex-col border-action-view/40 bg-action-view/5 shadow-md backdrop-blur"
+      className="flex flex-col border-action-view/40 bg-action-view/5 shadow-md backdrop-blur lvis-anim-slide-down"
       role="status"
       aria-live="polite"
       aria-atomic
