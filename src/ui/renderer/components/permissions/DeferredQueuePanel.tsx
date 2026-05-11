@@ -1,7 +1,7 @@
 /**
  * Renders the list of MED/HIGH-risk headless actions that the Layer 5
  * reviewer agent deferred during headless execution. Each entry has
- * "승인" / "거부" buttons; the user's click resolves the entry
+ * "허용" / "거부" buttons; the user's click resolves the entry
  * via IPC and writes an audit record on the main side.
  *
  * Spec ref: docs/architecture/permission-policy-design.md §3
@@ -78,26 +78,41 @@ export function DeferredQueuePanel({ showEmpty = false }: DeferredQueuePanelProp
 
   if (pending.length === 0 && !error && !showEmpty) return null;
 
+  const hasPending = pending.length > 0;
   const highest = pending.some((entry) => entry.verdict.level === "high") ? "high" : "medium";
-  const severityLabel = highest === "high" ? "HIGH/MEDIUM 위험" : "MEDIUM 위험";
+  const severityLabel = hasPending
+    ? highest === "high"
+      ? "HIGH/MEDIUM 위험"
+      : "MEDIUM 위험"
+    : "대기 없음";
+  const panelClassName = hasPending || error
+    ? "rounded-lg border border-red-500/40 bg-red-500/5 p-3"
+    : "rounded-lg border bg-background p-3";
+  const badgeClassName = hasPending || error
+    ? "border-red-500 text-red-700 dark:text-red-400"
+    : "text-muted-foreground";
 
   return (
     <section
-      className="rounded-lg border border-red-500/40 bg-red-500/5 p-3"
+      className={panelClassName}
       data-testid="deferred-queue-panel"
     >
       <header className="mb-2 flex items-center gap-2">
-        <Badge variant="outline" className="border-red-500 text-red-700 dark:text-red-400">
+        <Badge variant="outline" className={badgeClassName}>
           {severityLabel}
         </Badge>
         <h3 className="text-sm font-medium">
-          백그라운드에서 보류된 작업 ({pending.length})
+          {hasPending
+            ? `백그라운드에서 보류된 작업 (${pending.length})`
+            : "보류된 승인 요청 없음"}
         </h3>
       </header>
-      <p className="mb-2 text-xs text-muted-foreground">
-        사용자가 보지 않는 실행에서 리뷰어가 MEDIUM 이상으로 분류해 자동 실행을
-        보류한 도구 호출입니다. 각 항목의 영향범위를 확인한 뒤 승인하거나 거부하세요.
-      </p>
+      {hasPending && (
+        <p className="mb-2 text-xs text-muted-foreground">
+          사용자가 보지 않는 실행에서 리뷰어가 MEDIUM 이상으로 분류해 자동 실행을
+          보류한 도구 호출입니다. 각 항목의 영향범위를 확인한 뒤 허용하거나 거부하세요.
+        </p>
+      )}
       {error && (
         <p className="mb-2 rounded bg-red-500/10 px-2 py-1 text-xs text-red-700 dark:text-red-400">
           {error}
@@ -155,7 +170,7 @@ export function DeferredQueuePanel({ showEmpty = false }: DeferredQueuePanelProp
                   disabled={busy}
                   onClick={() => handle(entry.id, "approved")}
                 >
-                  승인
+                  허용
                 </Button>
               </div>
             </li>

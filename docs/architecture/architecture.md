@@ -1579,8 +1579,8 @@ type PermissionAuditEntry =
   | AuditAllow         // 허용 (layer + 사유)
   | AuditAsk           // 사용자 컨펌 요청
   | AuditDeny          // 거부 (denyReasons[])
-  | AuditDeferred      // Layer 5 HIGH → deferred queue
-  | AuditDeferredResolve // foreground 사용자 resolution
+  | AuditDeferred      // Layer 5 MED/HIGH → deferred queue
+  | AuditDeferredResolve // user-opened queue resolution
   | AuditModeChange    // /permission mode 변경
   | AuditManifestViolation; // §3.5 위반
 ```
