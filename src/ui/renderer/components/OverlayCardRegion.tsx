@@ -23,9 +23,10 @@ export interface OverlayCardRegionProps {
    * via OverlayContext and inserts pendingPrompt into main chat.
    */
   onPluginPrimaryAction: (overlayItemId: string) => void;
+  onRoutineAcknowledge?: (routineId: string, firedAt: string) => void;
 }
 
-export function OverlayCardRegion({ onPluginPrimaryAction }: OverlayCardRegionProps) {
+export function OverlayCardRegion({ onPluginPrimaryAction, onRoutineAcknowledge }: OverlayCardRegionProps) {
   const { active, queueIndex, queueTotal, prev, next, dismiss, openSession } =
     useOverlayContext();
 
@@ -50,8 +51,14 @@ export function OverlayCardRegion({ onPluginPrimaryAction }: OverlayCardRegionPr
             queueTotal={queueTotal}
             onPrev={prev}
             onNext={next}
-            onDismiss={() => dismiss(active.id)}
-            onPrimaryAction={hasJsonl ? () => openSession(routineId, firedAt) : undefined}
+            onDismiss={() => {
+              if (!active.running) onRoutineAcknowledge?.(routineId, firedAt);
+              dismiss(active.id);
+            }}
+            onPrimaryAction={hasJsonl ? () => {
+              onRoutineAcknowledge?.(routineId, firedAt);
+              openSession(routineId, firedAt);
+            } : undefined}
             primaryActionLabel="결과 보기"
             kind="routine"
           />
