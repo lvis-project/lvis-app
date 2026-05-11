@@ -13,7 +13,7 @@
  * Card surface (compact, in-stream):
  *   - Single-line `placeholder` Input for free-text answer (no Textarea
  *     to avoid the prior popup's vertical bloat).
- *   - Recommend / 대안 badges are rendered by the UI based on the model's
+ *   - 추천 / 대안 badges are rendered by the UI based on the model's
  *     `recommendedIndex` / `altIndices`. Models do NOT inline these
  *     markers in the choice label itself, which lets the 20-char anchor
  *     apply to the actual answer text.
@@ -235,8 +235,11 @@ export function AskUserQuestionCard({
 
   return (
     <Card
-      className="w-full max-w-none border border-l-4 border-l-message-user bg-card shadow-none"
+      aria-label="질문 응답 카드"
+      className="w-full max-w-none border border-l-4 border-l-message-user bg-card shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
       data-testid="ask-user-question-card"
+      role="group"
+      tabIndex={0}
       onKeyDown={(e) => {
         if (e.defaultPrevented || isComposingKeyEvent(e)) return;
         if (e.key === "Escape" && !submitting) {
@@ -250,11 +253,12 @@ export function AskUserQuestionCard({
           submitAll();
           return;
         }
-        if (e.key === "ArrowLeft") {
+        const textEditingTarget = isTextEditingTarget(e.target);
+        if (e.key === "ArrowLeft" && !textEditingTarget) {
           if (goPrevByKeyboard()) e.preventDefault();
           return;
         }
-        if (e.key === "ArrowRight") {
+        if (e.key === "ArrowRight" && !textEditingTarget) {
           if (goNextByKeyboard()) e.preventDefault();
         }
       }}
@@ -441,6 +445,12 @@ function isComposingKeyEvent(e: React.KeyboardEvent<HTMLElement>) {
   );
 }
 
+function isTextEditingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement;
+}
+
 /**
  * ChoiceBadge — visible in ALL button states (default/outline/selected).
  *
@@ -460,7 +470,7 @@ function ChoiceBadge({ kind }: { kind: "recommend" | "alt" }) {
       className={`flex-shrink-0 rounded px-1.5 py-[1px] text-[9.5px] font-semibold tracking-wider ${cls}`}
       data-testid={`ask-badge-${kind}`}
     >
-      {kind === "recommend" ? "Recommend" : "대안"}
+      {kind === "recommend" ? "추천" : "대안"}
     </span>
   );
 }
