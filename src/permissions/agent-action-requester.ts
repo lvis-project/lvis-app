@@ -165,6 +165,7 @@ export async function requestAgentApproval(
       id: requestId,
       category: "tool",
       toolName: input.toolName,
+      toolCategory: "meta",
       args: input.args,
       reason: input.reason,
       source: input.source,

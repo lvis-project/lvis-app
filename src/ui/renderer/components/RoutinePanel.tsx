@@ -15,6 +15,7 @@ import type { LvisApi, PluginCardSummary } from "../types.js";
 import type { AddRoutineInput, RoutineRecord, RoutineExecution, RepeatKind, RoutineSchedule } from "../../../shared/routines-types.js";
 import { MAX_PERSISTED_ROUTINES, MAX_LLM_SESSION_ROUTINES } from "../../../shared/routines-types.js";
 import { isValidCronExpression } from "../../../routines/cron-evaluator.js";
+import { RoutineSessionView } from "./RoutineSessionView.js";
 
 export interface RoutinePanelProps {
   api: LvisApi;
@@ -38,6 +39,13 @@ interface RoutineRowProps {
   onRemove: (id: string) => void;
   onTriggerNow: (id: string) => void;
   recentlyFired: boolean;
+}
+
+interface RoutineSessionListItem {
+  routineId: string;
+  routineTitle: string;
+  firedAt: string;
+  jsonlPath: string;
 }
 
 function describeSchedule(routine: RoutineRecord): string {
@@ -115,6 +123,33 @@ function RoutineRow({ routine, onDismiss, onRemove, onTriggerNow, recentlyFired 
       </div>
     </div>
   );
+}
+
+function RoutineSessionRow({ session, onOpen }: { session: RoutineSessionListItem; onOpen: (jsonlPath: string) => void }) {
+  return (
+    <button
+      type="button"
+      className="w-full rounded-md border px-3 py-2 text-left transition hover:bg-muted/60"
+      data-testid="routine-session-row"
+      onClick={() => onOpen(session.jsonlPath)}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="truncate text-sm font-medium">{session.routineTitle}</div>
+          <div className="mt-0.5 text-[11px] text-muted-foreground">
+            {formatSessionTime(session.firedAt)}
+          </div>
+        </div>
+        <Badge variant="outline">열기</Badge>
+      </div>
+    </button>
+  );
+}
+
+function formatSessionTime(firedAt: string): string {
+  const parsed = new Date(firedAt);
+  if (Number.isNaN(parsed.getTime())) return firedAt;
+  return parsed.toLocaleString("ko-KR");
 }
 
 // ─── Add Routine Modal ────────────────────────────────────────────────────────
@@ -579,9 +614,11 @@ export function AddRoutineModal({ api, onClose, onAdded }: AddRoutineModalProps)
 
 export function RoutinePanel({ api }: RoutinePanelProps) {
   const [routines, setRoutines] = useState<RoutineRecord[]>([]);
+  const [routineSessions, setRoutineSessions] = useState<RoutineSessionListItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [recentlyFired, setRecentlyFired] = useState<string[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [selectedSessionPath, setSelectedSessionPath] = useState<string | null>(null);
   const mountedRef = useRef(true);
   useEffect(() => () => { mountedRef.current = false; }, []);
 
@@ -590,8 +627,29 @@ export function RoutinePanel({ api }: RoutinePanelProps) {
     setLoading(true);
     try {
       const list = await api.listRoutinesV2();
+      const sessions = (
+        await Promise.all(
+          list
+            .filter((routine) => routine.execution === "llm-session")
+            .map(async (routine) => {
+              const records = await api.listRoutineSessionsV2(routine.id, 10);
+              const routineTitle =
+                routine.title ?? routine.notificationTitle ?? routine.prePrompt?.slice(0, 30) ?? routine.id.slice(0, 8);
+              return records.map((record) => ({
+                routineId: record.routineId,
+                routineTitle,
+                firedAt: record.firedAt,
+                jsonlPath: record.jsonlPath,
+              }));
+            }),
+        )
+      )
+        .flat()
+        .sort((a, b) => b.firedAt.localeCompare(a.firedAt))
+        .slice(0, 30);
       if (!mountedRef.current) return;
       setRoutines(list);
+      setRoutineSessions(sessions);
     } finally {
       if (mountedRef.current) setLoading(false);
     }
@@ -672,30 +730,83 @@ export function RoutinePanel({ api }: RoutinePanelProps) {
           </div>
         </CardHeader>
         <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
-          <ScrollArea className="flex-1">
-            {loading ? (
-              <div className="py-8 text-center text-sm text-muted-foreground">로딩 중...</div>
-            ) : routines.length === 0 ? (
-              <div className="py-8 text-center text-sm text-muted-foreground">
-                등록된 루틴이 없습니다.
+          <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(240px,0.72fr)]">
+            <section className="flex min-h-0 flex-col gap-2" data-testid="routine-list-section">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-medium">루틴 목록</h3>
+                <span className="text-[11px] text-muted-foreground">{routines.length}개</span>
               </div>
-            ) : (
-              <div className="space-y-2 pr-2">
-                {routines.map((r) => (
-                  <RoutineRow
-                    key={r.id}
-                    routine={r}
-                    onDismiss={(id) => void handleDismiss(id)}
-                    onRemove={(id) => void handleRemove(id)}
-                    onTriggerNow={(id) => void handleTriggerNow(id)}
-                    recentlyFired={recentlyFired.includes(r.id)}
-                  />
-                ))}
+              <ScrollArea className="min-h-[220px] flex-1">
+                {loading ? (
+                  <div className="py-8 text-center text-sm text-muted-foreground">로딩 중...</div>
+                ) : routines.length === 0 ? (
+                  <div className="py-8 text-center text-sm text-muted-foreground">
+                    등록된 루틴이 없습니다.
+                  </div>
+                ) : (
+                  <div className="space-y-2 pr-2">
+                    {routines.map((r) => (
+                      <RoutineRow
+                        key={r.id}
+                        routine={r}
+                        onDismiss={(id) => void handleDismiss(id)}
+                        onRemove={(id) => void handleRemove(id)}
+                        onTriggerNow={(id) => void handleTriggerNow(id)}
+                        recentlyFired={recentlyFired.includes(r.id)}
+                      />
+                    ))}
+                  </div>
+                )}
+              </ScrollArea>
+            </section>
+
+            <section className="flex min-h-0 flex-col gap-2" data-testid="routine-session-list">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-medium">과거 루틴 세션</h3>
+                <span className="text-[11px] text-muted-foreground">{routineSessions.length}개</span>
               </div>
-            )}
-          </ScrollArea>
+              <ScrollArea className="min-h-[220px] flex-1">
+                {loading ? (
+                  <div className="py-8 text-center text-sm text-muted-foreground">로딩 중...</div>
+                ) : routineSessions.length === 0 ? (
+                  <div className="py-8 text-center text-sm text-muted-foreground">
+                    저장된 LLM 루틴 세션이 없습니다.
+                  </div>
+                ) : (
+                  <div className="space-y-2 pr-2">
+                    {routineSessions.map((session) => (
+                      <RoutineSessionRow
+                        key={`${session.routineId}:${session.firedAt}:${session.jsonlPath}`}
+                        session={session}
+                        onOpen={setSelectedSessionPath}
+                      />
+                    ))}
+                  </div>
+                )}
+              </ScrollArea>
+            </section>
+          </div>
         </CardContent>
       </Card>
+
+      {selectedSessionPath && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          data-testid="routine-panel-session-dialog"
+        >
+          <div className="flex max-h-[85dvh] w-[min(760px,calc(100vw-32px))] min-w-0 flex-col overflow-hidden rounded-xl border bg-card shadow-xl">
+            <div className="flex items-center justify-between border-b px-4 py-3">
+              <div className="text-sm font-semibold">루틴 세션 기록</div>
+              <Button size="sm" variant="ghost" onClick={() => setSelectedSessionPath(null)}>
+                닫기
+              </Button>
+            </div>
+            <div className="min-h-0 overflow-auto p-4">
+              <RoutineSessionView api={api} jsonlPath={selectedSessionPath} />
+            </div>
+          </div>
+        </div>
+      )}
 
       {showAddModal && (
         <AddRoutineModal

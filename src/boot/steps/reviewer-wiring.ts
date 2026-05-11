@@ -18,8 +18,8 @@
  * 4. Construct the cache + deferred queue (default file paths under
  *    `~/.lvis/permissions/`).
  * 5. Call {@link PermissionManager.setReviewer} so {@link
- *    PermissionManager.dispatchReviewer} can route HIGH verdicts into the
- *    deferred queue and LOW/MEDIUM verdicts into the audit-trail allow.
+ *    PermissionManager.dispatchReviewer} can support foreground auto-review
+ *    approval prompts and headless MED/HIGH queue deferral.
  *
  * Atomic cutover (CLAUDE.md No-Fallback): if `mode: "llm"` is configured
  * but the boot caller fails to supply a provider factory, this module

@@ -3,6 +3,11 @@ import type { ChatEntry } from "../../../lib/chat-stream-state.js";
 import type { LvisApi } from "../types.js";
 import { historyToEntries } from "../utils/history.js";
 
+type UsageEstimatedHistory = {
+  messages: Parameters<typeof historyToEntries>[0];
+  estimatedInputTokens?: number;
+};
+
 export interface SessionSummary {
   id: string;
   modifiedAt: string;
@@ -58,31 +63,31 @@ export function useSessions(
         // persisted session replay both enter ChatView as ChatEntry[].  Hydrate
         // the current session at startup, but let the chat-state owner reject a
         // late result if the user already started a live turn.
-        applyInitialSession?.(historyToEntries(h.messages));
+        applyInitialSession?.(historyWithUsageToEntries(h));
         return;
       }
 
-      const latest = listed.sessions[0];
-      if (!latest) {
+      const latestToday = latestSessionForKoreaDate(listed.sessions, new Date());
+      if (!latestToday) {
         setCurrentSessionId(h.sessionId);
         applyInitialSession?.([]);
         return;
       }
-      const resumed = await api.chatSessionResume(latest.id);
+      const resumed = await api.chatSessionResume(latestToday.id);
       if (token !== sessionReadTokenRef.current) return;
       if (!resumed?.ok) {
         setCurrentSessionId(h.sessionId);
         applyInitialSession?.([]);
         return;
       }
-      const persisted = await api.chatSessionHistory(latest.id);
+      const persisted = await api.chatSessionHistory(latestToday.id);
       if (token !== sessionReadTokenRef.current) return;
       if (!persisted.ok) {
         setCurrentSessionId(h.sessionId);
         applyInitialSession?.([]);
         return;
       }
-      setCurrentSessionId(latest.id);
+      setCurrentSessionId(latestToday.id);
       applyInitialSession?.(sessionHistoryToEntries(persisted));
     } catch { /* ignore */ }
   }, [api, applyInitialSession]);
@@ -157,7 +162,7 @@ export function useSessions(
 }
 
 export function sessionHistoryToEntries(history: Awaited<ReturnType<LvisApi["chatSessionHistory"]>>): ChatEntry[] {
-  const entries = historyToEntries(history.messages);
+  const entries = historyWithUsageToEntries(history);
   if ((history.preambleChars ?? 0) <= 0) return entries;
   return [
     {
@@ -167,4 +172,50 @@ export function sessionHistoryToEntries(history: Awaited<ReturnType<LvisApi["cha
     },
     ...entries,
   ];
+}
+
+function historyWithUsageToEntries(history: UsageEstimatedHistory): ChatEntry[] {
+  const entries = historyToEntries(history.messages);
+  const tokensIn = normalizeEstimatedInputTokens(history.estimatedInputTokens);
+  if (tokensIn <= 0) return entries;
+  return [
+    ...entries,
+    { kind: "context_usage", tokensIn, source: "session-estimate" },
+  ];
+}
+
+function normalizeEstimatedInputTokens(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 0;
+  return Math.max(0, Math.floor(value));
+}
+
+export function latestSessionForKoreaDate(
+  sessions: SessionSummary[],
+  date: Date,
+): SessionSummary | undefined {
+  const targetDayKey = koreaDateKey(date);
+  let latest: SessionSummary | undefined;
+  let latestTime = Number.NEGATIVE_INFINITY;
+  for (const session of sessions) {
+    const sessionDate = new Date(session.modifiedAt);
+    if (Number.isNaN(sessionDate.getTime())) continue;
+    if (koreaDateKey(sessionDate) !== targetDayKey) continue;
+    const time = sessionDate.getTime();
+    if (time > latestTime) {
+      latest = session;
+      latestTime = time;
+    }
+  }
+  return latest;
+}
+
+function koreaDateKey(date: Date): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const get = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
+  return `${get("year")}-${get("month")}-${get("day")}`;
 }

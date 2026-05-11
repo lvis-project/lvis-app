@@ -20,7 +20,7 @@
  * an approval-denial error.
  */
 import { describe, it, expect, vi } from "vitest";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve as pathResolve } from "node:path";
 
@@ -49,6 +49,19 @@ function makeMockWebContents() {
     send: vi.fn(),
     isDestroyed: vi.fn(() => false),
   };
+}
+
+async function waitForApprovalPayload<T>(
+  wc: ReturnType<typeof makeMockWebContents>,
+  index = 0,
+): Promise<T> {
+  const deadline = Date.now() + 1000;
+  while (Date.now() < deadline) {
+    const payload = wc.send.mock.calls[index]?.[1];
+    if (payload) return payload as T;
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+  throw new Error("approval request was not sent");
 }
 
 function userPermissionContext(
@@ -352,7 +365,7 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
     expect(second[0].content).toContain("승인 거부");
   });
 
-  it("runs shell path policy before approval prompts or allow-always persistence", async () => {
+  it("hard-blocks sensitive shell paths before approval prompts or allow-always persistence", async () => {
     const registry = new ToolRegistry();
     registry.register(new BashTool());
     const permissionPath = join(mkdtempSync(join(tmpdir(), "lvis-shell-path-policy-")), "permissions.json");
@@ -381,11 +394,77 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
     await expect(permMgr.listPersistedRules()).resolves.toEqual([]);
   });
 
+  it("queues headless shell out-of-allowed-dir access instead of executing after a LOW reviewer verdict", async () => {
+    const registry = new ToolRegistry();
+    const bash = new BashTool();
+    const executeSpy = vi.spyOn(bash, "execute");
+    registry.register(bash);
+    const dir = mkdtempSync(join(tmpdir(), "lvis-headless-outdir-"));
+    const outsideDir = mkdtempSync(join(tmpdir(), "lvis-headless-outside-"));
+    const outsideFile = join(outsideDir, "probe.txt");
+    writeFileSync(outsideFile, "blocked", "utf-8");
+
+    try {
+      const permMgr = new PermissionManager(join(dir, "permissions.json"));
+      permMgr.setMode("auto");
+      const deferredQueue = new DeferredQueue(join(dir, "deferred-queue.jsonl"));
+      permMgr.setReviewer({
+        classifier: {
+          classify: vi.fn(() => ({ level: "low", reason: "reviewer would otherwise allow" })),
+        },
+        cache: new VerdictCache(join(dir, "reviewer-cache.jsonl")),
+        deferredQueue,
+      });
+      const appendPermissionAuditEntry = vi.fn(async (entry: Record<string, unknown>) => ({
+        ...entry,
+        prevHash: "h",
+      }));
+      const auditLogger = {
+        log: vi.fn(),
+        isPermissionAuditChainReady: vi.fn(() => true),
+        assertPermissionAuditWritable: vi.fn(),
+        appendPermissionAuditEntry,
+      };
+      const executor = new ToolExecutor(
+        registry,
+        undefined,
+        permMgr,
+        undefined,
+        undefined,
+        undefined,
+        auditLogger as never,
+      );
+
+      const result = await executor.executeAll(
+        [{ id: "tu-headless-outdir", name: "bash", input: { command: `cat ${outsideFile}`, timeoutSeconds: 1 } }],
+        { sessionId: "sess-headless-outdir", permissionContext: userPermissionContext({ headless: true, trustOrigin: "llm-tool-arg" }) },
+      );
+
+      expect(result[0].is_error).toBe(true);
+      expect(result[0].content).toContain("권한 보류");
+      expect(result[0].content).toContain("허용 디렉토리 외부 경로 접근");
+      expect(executeSpy).not.toHaveBeenCalled();
+      const pending = deferredQueue.listPending();
+      expect(pending).toHaveLength(1);
+      expect(pending[0]).toMatchObject({
+        toolName: "bash",
+        source: "builtin",
+        category: "shell",
+        verdict: expect.objectContaining({
+          level: "high",
+          reason: "headless out-of-allowed-dir requires manual directory approval",
+        }),
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(outsideDir, { recursive: true, force: true });
+    }
+  });
+
   it.each([
     ["sensitive env-home operand", "Get-Content $HOME/.ssh/id_rsa"],
     ["sensitive quoted operand", "Get-Content '~/.ssh/id_rsa'"],
     ["sensitive redirection target", "Get-Content package.json > ~/.ssh/leak"],
-    ["relative traversal", "Get-Content ../outside.txt"],
     ["dynamic path composition", "Set-Content (Join-Path $HOME \"Desktop/out.txt\") hi"],
   ])("runs PowerShell path policy before approval prompts or allow-always persistence: %s", async (_label, command) => {
     const registry = new ToolRegistry();
@@ -511,7 +590,7 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
       }),
     }));
     const permMgr = new PermissionManager("/tmp/nonexistent-permissions.json");
-    permMgr.setMode("auto");
+    permMgr.setMode("allow");
     const appendPermissionAuditEntry = vi.fn(async (entry: Record<string, unknown>) => ({
       ...entry,
       prevHash: "h",
@@ -564,7 +643,7 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
       }),
     }));
     const permMgr = new PermissionManager("/tmp/nonexistent-permissions.json");
-    permMgr.setMode("auto");
+    permMgr.setMode("allow");
     const appendPermissionAuditEntry = vi.fn(async (entry: Record<string, unknown>) => ({
       ...entry,
       prevHash: "h",
@@ -600,6 +679,74 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
     const allowEntry = appendPermissionAuditEntry.mock.calls.find(([entry]) => entry.decision === "allow")?.[0];
     expect(allowEntry).not.toHaveProperty("directory");
     expect(allowEntry).not.toHaveProperty("directoryAllowed");
+  });
+
+  it("records reviewer verdict on auto-reviewed LOW allow audit entries", async () => {
+    const executeSpy = vi.fn(async () => "reviewed write");
+    const registry = new ToolRegistry();
+    registry.register(createDynamicTool({
+      name: "reviewed_write_probe",
+      description: "reviewed write probe",
+      source: "plugin",
+      category: "write",
+      jsonSchema: {
+        type: "object",
+        properties: { payload: { type: "string" } },
+      },
+      execute: async (rawInput) => ({
+        output: await executeSpy(rawInput),
+        isError: false,
+      }),
+    }));
+    const dir = mkdtempSync(join(tmpdir(), "lvis-executor-reviewer-audit-"));
+    try {
+      const permMgr = new PermissionManager(join(dir, "permissions.json"));
+      permMgr.setMode("auto");
+      permMgr.setReviewer({
+        classifier: {
+          classify: vi.fn(() => ({ level: "low", reason: "reviewer says safe" })),
+        },
+        cache: new VerdictCache(join(dir, "reviewer-cache.jsonl")),
+        deferredQueue: new DeferredQueue(join(dir, "deferred-queue.jsonl")),
+      });
+      const appendPermissionAuditEntry = vi.fn(async (entry: Record<string, unknown>) => ({
+        ...entry,
+        prevHash: "h",
+      }));
+      const auditLogger = {
+        log: vi.fn(),
+        isPermissionAuditChainReady: vi.fn(() => true),
+        assertPermissionAuditWritable: vi.fn(),
+        appendPermissionAuditEntry,
+      };
+      const executor = new ToolExecutor(
+        registry,
+        undefined,
+        permMgr,
+        undefined,
+        undefined,
+        undefined,
+        auditLogger as never,
+      );
+
+      const result = await executor.executeAll(
+        [{ id: "tu-reviewed-write", name: "reviewed_write_probe", input: { payload: "ok" } }],
+        { sessionId: "sess-reviewed-write", permissionContext: userPermissionContext() },
+      );
+
+      expect(result[0].is_error).toBeUndefined();
+      expect(executeSpy).toHaveBeenCalledOnce();
+      expect(appendPermissionAuditEntry).toHaveBeenCalledWith(expect.objectContaining({
+        decision: "allow",
+        tool: "reviewed_write_probe",
+        reviewer: expect.objectContaining({
+          level: "low",
+          reason: "reviewer says safe",
+        }),
+      }));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("hard-blocks sensitive paths after pre-hook input modification and before read-only auto approval", async () => {
@@ -1303,26 +1450,24 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
       { sessionId: "sess-l1-out", permissionContext: userPermissionContext() },
     );
 
-    // Wait a tick for the request to be sent through the gate.
-    await new Promise((r) => setTimeout(r, 5));
-    expect(wc.send).toHaveBeenCalled();
-    const sent = wc.send.mock.calls[0][1] as {
+    const sent = await waitForApprovalPayload<{
+      id: string;
+      nonce: string;
+      hmac: string;
       kind?: string;
       outOfAllowedDir?: { candidatePath?: string; suggestedParent?: string };
       trustOrigin?: string;
-    };
+    }>(wc);
     expect(sent.kind).toBe("out-of-allowed-dir");
     expect(sent.outOfAllowedDir?.candidatePath).toContain("file.txt");
     expect(sent.trustOrigin).toBe("user-keyboard");
 
     // Renderer denies — tool must not execute.
-    const requestId = (wc.send.mock.calls[0][1] as { id: string; nonce: string; hmac: string }).id;
-    const reqPayload = wc.send.mock.calls[0][1] as { id: string; nonce: string; hmac: string };
-    gate.resolve(requestId, {
-      requestId,
+    gate.resolve(sent.id, {
+      requestId: sent.id,
       choice: "deny-once",
-      nonce: reqPayload.nonce,
-      hmac: reqPayload.hmac,
+      nonce: sent.nonce,
+      hmac: sent.hmac,
     });
 
     const results = await callPromise;
@@ -1349,8 +1494,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
       { sessionId: "sess-l1-allow", permissionContext: userPermissionContext() },
     );
 
-    await new Promise((r) => setTimeout(r, 5));
-    const sent = wc.send.mock.calls[0][1] as { id: string; nonce: string; hmac: string };
+    const sent = await waitForApprovalPayload<{ id: string; nonce: string; hmac: string }>(wc);
     gate.resolve(sent.id, {
       requestId: sent.id,
       choice: "allow-once",
@@ -1380,8 +1524,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
         { sessionId: "sess-l1-native-scope", permissionContext: userPermissionContext() },
       );
 
-      await new Promise((r) => setTimeout(r, 5));
-      const sent = wc.send.mock.calls[0][1] as { id: string; nonce: string; hmac: string };
+      const sent = await waitForApprovalPayload<{ id: string; nonce: string; hmac: string }>(wc);
       gate.resolve(sent.id, {
         requestId: sent.id,
         choice: "allow-once",
@@ -1393,6 +1536,213 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
       expect(results[0].content).toContain("outside approved");
       expect(results[0].is_error).toBeUndefined();
       expect(readFileSync(target, "utf8")).toBe("outside approved\n");
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("shell operand outside cwd dispatches out-of-allowed-dir approval and denial prevents execution", async () => {
+    const outside = mkdtempSync(join(tmpdir(), "lvis-executor-shell-deny-"));
+    try {
+      const target = join(outside, "hello.txt");
+      writeFileSync(target, "outside shell denied\n", "utf8");
+      const canonicalTarget = realpathSync(target);
+      const registry = new ToolRegistry();
+      registry.register(new BashTool());
+
+      const wc = makeMockWebContents();
+      const gate = new ApprovalGate(wc as never);
+      const executor = new ToolExecutor(registry, undefined, undefined, undefined, gate);
+
+      const callPromise = executor.executeAll(
+        [{ id: "tu-l1-shell-deny", name: "bash", input: { command: `cat ${target}`, timeoutSeconds: 1 } }],
+        { sessionId: "sess-l1-shell-deny", permissionContext: userPermissionContext() },
+      );
+
+      const sent = await waitForApprovalPayload<{
+        id: string;
+        nonce: string;
+        hmac: string;
+        kind?: string;
+        toolCategory?: string;
+        outOfAllowedDir?: { candidatePath?: string };
+      }>(wc);
+      expect(sent.kind).toBe("out-of-allowed-dir");
+      expect(sent.toolCategory).toBe("shell");
+      expect(sent.outOfAllowedDir?.candidatePath).toBe(canonicalTarget);
+
+      gate.resolve(sent.id, {
+        requestId: sent.id,
+        choice: "deny-once",
+        nonce: sent.nonce,
+        hmac: sent.hmac,
+      });
+
+      const results = await callPromise;
+      expect(results[0].is_error).toBe(true);
+      expect(results[0].content).toContain("디렉토리 정책 차단");
+      expect(results[0].content).toContain(canonicalTarget);
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("shell operand outside cwd executes after out-of-allowed-dir approval", async () => {
+    const outside = mkdtempSync(join(tmpdir(), "lvis-executor-shell-allow-"));
+    try {
+      const target = join(outside, "hello.txt");
+      writeFileSync(target, "outside shell approved\n", "utf8");
+      const canonicalTarget = realpathSync(target);
+      const registry = new ToolRegistry();
+      registry.register(new BashTool());
+
+      const wc = makeMockWebContents();
+      const gate = new ApprovalGate(wc as never);
+      const executor = new ToolExecutor(registry, undefined, undefined, undefined, gate);
+
+      const callPromise = executor.executeAll(
+        [{ id: "tu-l1-shell-allow", name: "bash", input: { command: `cat ${target}`, timeoutSeconds: 5 } }],
+        { sessionId: "sess-l1-shell-allow", permissionContext: userPermissionContext() },
+      );
+
+      const sent = await waitForApprovalPayload<{
+        id: string;
+        nonce: string;
+        hmac: string;
+        kind?: string;
+        toolCategory?: string;
+        outOfAllowedDir?: { candidatePath?: string };
+      }>(wc);
+      expect(sent.kind).toBe("out-of-allowed-dir");
+      expect(sent.toolCategory).toBe("shell");
+      expect(sent.outOfAllowedDir?.candidatePath).toBe(canonicalTarget);
+
+      gate.resolve(sent.id, {
+        requestId: sent.id,
+        choice: "allow-once",
+        nonce: sent.nonce,
+        hmac: sent.hmac,
+      });
+
+      const results = await callPromise;
+      expect(results[0].is_error).toBeUndefined();
+      expect(results[0].content).toContain("outside shell approved");
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("shell one-time approval covers the requested operand without prompting for /dev/null", async () => {
+    const outside = mkdtempSync(join(tmpdir(), "lvis-executor-shell-null-device-"));
+    try {
+      const target = join(outside, "hello.txt");
+      writeFileSync(target, "outside shell approved with null device\n", "utf8");
+      const canonicalTarget = realpathSync(target);
+      const registry = new ToolRegistry();
+      registry.register(new BashTool());
+
+      const wc = makeMockWebContents();
+      const gate = new ApprovalGate(wc as never);
+      const executor = new ToolExecutor(registry, undefined, undefined, undefined, gate);
+
+      const callPromise = executor.executeAll(
+        [{ id: "tu-l1-shell-null-device", name: "bash", input: { command: `test -e ${target} >/dev/null && cat ${target}`, timeoutSeconds: 1 } }],
+        { sessionId: "sess-l1-shell-null-device", permissionContext: userPermissionContext() },
+      );
+
+      const sent = await waitForApprovalPayload<{
+        id: string;
+        nonce: string;
+        hmac: string;
+        kind?: string;
+        toolCategory?: string;
+        outOfAllowedDir?: { candidatePath?: string };
+      }>(wc);
+      expect(sent.kind).toBe("out-of-allowed-dir");
+      expect(sent.toolCategory).toBe("shell");
+      expect(sent.outOfAllowedDir?.candidatePath).toBe(canonicalTarget);
+
+      gate.resolve(sent.id, {
+        requestId: sent.id,
+        choice: "allow-once",
+        nonce: sent.nonce,
+        hmac: sent.hmac,
+      });
+
+      const results = await callPromise;
+      expect(wc.send).toHaveBeenCalledTimes(1);
+      expect(results[0].is_error).toBeUndefined();
+      expect(results[0].content).toContain("outside shell approved with null device");
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("shell filesystem root operand is denied before out-of-allowed-dir approval", async () => {
+    const registry = new ToolRegistry();
+    registry.register(new BashTool());
+
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const executor = new ToolExecutor(registry, undefined, undefined, undefined, gate);
+
+    const results = await executor.executeAll(
+      [{ id: "tu-l1-shell-root", name: "bash", input: { command: "cat /", timeoutSeconds: 1 } }],
+      { sessionId: "sess-l1-shell-root", permissionContext: userPermissionContext() },
+    );
+
+    expect(wc.send).not.toHaveBeenCalled();
+    expect(results[0].is_error).toBe(true);
+    expect(results[0].content).toContain("디렉토리 정책 차단");
+    expect(results[0].content).toContain("filesystem root is not allowed");
+  });
+
+  it("shell rm -f outside cwd executes after directory approval without rm-rf-root false positive", async () => {
+    const outside = mkdtempSync(join(tmpdir(), "lvis-executor-shell-rm-"));
+    try {
+      const target = join(outside, "hello.txt");
+      writeFileSync(target, "remove me\n", "utf8");
+      const canonicalTarget = realpathSync(target);
+      const registry = new ToolRegistry();
+      registry.register(new BashTool());
+
+      const wc = makeMockWebContents();
+      const gate = new ApprovalGate(wc as never);
+      const executor = new ToolExecutor(
+        registry,
+        undefined,
+        undefined,
+        new BashAstValidator({ mode: "deny" }),
+        gate,
+      );
+
+      const callPromise = executor.executeAll(
+        [{ id: "tu-l1-shell-rm", name: "bash", input: { command: `rm -f ${target}`, timeoutSeconds: 1 } }],
+        { sessionId: "sess-l1-shell-rm", permissionContext: userPermissionContext() },
+      );
+
+      const sent = await waitForApprovalPayload<{
+        id: string;
+        nonce: string;
+        hmac: string;
+        kind?: string;
+        toolCategory?: string;
+        outOfAllowedDir?: { candidatePath?: string };
+      }>(wc);
+      expect(sent.kind).toBe("out-of-allowed-dir");
+      expect(sent.toolCategory).toBe("shell");
+      expect(sent.outOfAllowedDir?.candidatePath).toBe(canonicalTarget);
+
+      gate.resolve(sent.id, {
+        requestId: sent.id,
+        choice: "allow-once",
+        nonce: sent.nonce,
+        hmac: sent.hmac,
+      });
+
+      const results = await callPromise;
+      expect(results[0].is_error).toBeUndefined();
+      expect(existsSync(target)).toBe(false);
     } finally {
       rmSync(outside, { recursive: true, force: true });
     }
@@ -1453,7 +1803,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
         [{
           id: "tu-strict-headless-read",
           name: "read_file",
-          input: { path: "/var/tmp/strict-headless/data.txt" },
+          input: { path: join(process.cwd(), "package.json") },
         }],
         {
           sessionId: "sess-strict-headless-read",
@@ -1465,8 +1815,194 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
       expect(classifier.classify).not.toHaveBeenCalled();
       expect(wc.send).not.toHaveBeenCalled();
       expect(results[0].is_error).toBe(true);
-      expect(results[0].content).toContain("strict headless");
+      expect(results[0].content).toContain("headless");
+      expect(results[0].content).toContain("strict 모드");
       expect(queue.listPending()).toHaveLength(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("audits headless reviewer queue decisions as deferred with queue id", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "lvis-executor-headless-audit-"));
+    try {
+      const executeSpy = vi.fn(async () => ({ output: "sent", isError: false }));
+      const registry = new ToolRegistry();
+      registry.register(createDynamicTool({
+        name: "teams_send",
+        description: "Sends a Teams message.",
+        source: "plugin",
+        category: "network",
+        jsonSchema: {
+          type: "object",
+          properties: {
+            endpoint: { type: "string" },
+            method: { type: "string" },
+            payload: { type: "string" },
+          },
+        },
+        execute: executeSpy,
+      }));
+
+      const classifier: RiskClassifier = {
+        classify: vi.fn(() => ({ level: "medium", reason: "headless graph data operation" })),
+      };
+      const queue = new DeferredQueue(join(dir, "deferred-queue.jsonl"));
+      const permMgr = new PermissionManager(join(dir, "permissions.json"));
+      permMgr.setMode("auto");
+      permMgr.setReviewer({
+        classifier,
+        cache: new VerdictCache(join(dir, "reviewer-cache.jsonl")),
+        deferredQueue: queue,
+      });
+
+      const appendPermissionAuditEntry = vi.fn(async (entry: Record<string, unknown>) => ({
+        ...entry,
+        prevHash: "h",
+      }));
+      const auditLogger = {
+        log: vi.fn(),
+        isPermissionAuditChainReady: vi.fn(() => true),
+        assertPermissionAuditWritable: vi.fn(),
+        appendPermissionAuditEntry,
+      };
+      const executor = new ToolExecutor(
+        registry,
+        undefined,
+        permMgr,
+        undefined,
+        undefined,
+        undefined,
+        auditLogger as never,
+      );
+
+      const results = await executor.executeAll(
+        [{
+          id: "tu-headless-deferred-audit",
+          name: "teams_send",
+          input: {
+            endpoint: "https://graph.microsoft.com/v1.0/teams/t/channels/c/messages",
+            method: "POST",
+            payload: "meeting summary",
+          },
+        }],
+        {
+          sessionId: "sess-headless-deferred-audit",
+          permissionContext: userPermissionContext({
+            headless: true,
+            trustOrigin: "llm-tool-arg",
+          }),
+        },
+      );
+
+      const pending = queue.listPending();
+      expect(results[0].is_error).toBe(true);
+      expect(executeSpy).not.toHaveBeenCalled();
+      expect(pending).toHaveLength(1);
+      expect(auditLogger.log).toHaveBeenCalledWith(expect.objectContaining({
+        toolCalls: [expect.objectContaining({ permissionDecision: "deferred" })],
+      }));
+      expect(appendPermissionAuditEntry).toHaveBeenCalledWith(expect.objectContaining({
+        decision: "deferred",
+        tool: "teams_send",
+        source: "plugin",
+        category: "network",
+        queueId: pending[0].id,
+        reviewerVerdict: expect.objectContaining({
+          level: "medium",
+          reason: "headless graph data operation",
+        }),
+      }));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not let reviewer LOW downgrade hard overlay or low-trust MCP asks", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "lvis-executor-hard-ask-"));
+    try {
+      const executeSpy = vi.fn(async () => ({ output: "ran", isError: false }));
+      const registry = new ToolRegistry();
+      registry.register(createDynamicTool({
+        name: "overlay_write",
+        description: "Overlay write probe.",
+        source: "plugin",
+        category: "write",
+        jsonSchema: {
+          type: "object",
+          properties: { value: { type: "string" } },
+        },
+        execute: executeSpy,
+      }));
+      registry.register(createDynamicTool({
+        name: "mcp_network",
+        description: "MCP network probe.",
+        source: "mcp",
+        category: "network",
+        jsonSchema: {
+          type: "object",
+          properties: { endpoint: { type: "string" } },
+        },
+        execute: executeSpy,
+      }));
+
+      const classify = vi.fn(() => ({ level: "low" as const, reason: "reviewer would allow" }));
+      const queue = new DeferredQueue(join(dir, "deferred-queue.jsonl"));
+      const permMgr = new PermissionManager(join(dir, "permissions.json"));
+      permMgr.setMode("auto");
+      permMgr.setReviewer({
+        classifier: { classify },
+        cache: new VerdictCache(join(dir, "reviewer-cache.jsonl")),
+        deferredQueue: queue,
+      });
+      const approvalGate = {
+        requestAndWait: vi.fn(async (req: { id: string }) => ({
+          requestId: req.id,
+          choice: "deny-once" as const,
+        })),
+      };
+      const executor = new ToolExecutor(
+        registry,
+        undefined,
+        permMgr,
+        undefined,
+        approvalGate as never,
+      );
+
+      const overlayResult = await executor.executeAll(
+        [{ id: "tu-overlay-hard-ask", name: "overlay_write", input: { value: "x" } }],
+        {
+          sessionId: "sess-overlay-hard-ask",
+          overlayTriggerOrigin: "overlay:meeting-detection",
+          permissionContext: userPermissionContext({ trustOrigin: "plugin-emitted" }),
+        },
+      );
+
+      const mcpHeadlessResult = await executor.executeAll(
+        [{
+          id: "tu-mcp-headless-hard-ask",
+          name: "mcp_network",
+          input: { endpoint: "https://github.com/repos/lvis-project/lvis-app/issues" },
+        }],
+        {
+          sessionId: "sess-mcp-headless-hard-ask",
+          permissionContext: userPermissionContext({
+            headless: true,
+            trustOrigin: "llm-tool-arg",
+          }),
+        },
+      );
+
+      expect(overlayResult[0].is_error).toBe(true);
+      expect(mcpHeadlessResult[0].is_error).toBe(true);
+      expect(mcpHeadlessResult[0].content).toContain("headless explicit approval unavailable");
+      expect(executeSpy).not.toHaveBeenCalled();
+      expect(classify).not.toHaveBeenCalled();
+      expect(queue.listPending()).toHaveLength(0);
+      expect(approvalGate.requestAndWait).toHaveBeenCalledOnce();
+      expect(approvalGate.requestAndWait).toHaveBeenCalledWith(expect.objectContaining({
+        reason: expect.stringContaining("overlay trigger 출처"),
+      }));
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -1521,9 +2057,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
       },
     );
 
-    await new Promise((r) => setTimeout(r, 5));
-    expect(wc.send).toHaveBeenCalled();
-    const sent = wc.send.mock.calls[0][1] as { id: string; nonce: string; hmac: string; kind?: string };
+    const sent = await waitForApprovalPayload<{ id: string; nonce: string; hmac: string; kind?: string }>(wc);
     expect(sent.kind).toBe("out-of-allowed-dir");
     gate.resolve(sent.id, {
       requestId: sent.id,
@@ -1717,15 +2251,13 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
       { sessionId: "sess-l1-plugin-pathfields", permissionContext: userPermissionContext() },
     );
 
-    await new Promise((r) => setTimeout(r, 5));
-    expect(wc.send).toHaveBeenCalled();
-    const sent = wc.send.mock.calls[0][1] as {
+    const sent = await waitForApprovalPayload<{
       id: string;
       nonce: string;
       hmac: string;
       kind?: string;
       outOfAllowedDir?: { candidatePath?: string };
-    };
+    }>(wc);
     expect(sent.kind).toBe("out-of-allowed-dir");
     expect(sent.outOfAllowedDir?.candidatePath).toContain("plugin-folder/input");
     gate.resolve(sent.id, {
@@ -1780,15 +2312,13 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
       { sessionId: "sess-l1-plugin-dotted-pathfields", permissionContext: userPermissionContext() },
     );
 
-    await new Promise((r) => setTimeout(r, 5));
-    expect(wc.send).toHaveBeenCalled();
-    const sent = wc.send.mock.calls[0][1] as {
+    const sent = await waitForApprovalPayload<{
       id: string;
       nonce: string;
       hmac: string;
       kind?: string;
       outOfAllowedDir?: { candidatePath?: string };
-    };
+    }>(wc);
     expect(sent.kind).toBe("out-of-allowed-dir");
     expect(sent.outOfAllowedDir?.candidatePath).toContain("plugin-folder/nested/input");
     gate.resolve(sent.id, {

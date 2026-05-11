@@ -15,6 +15,7 @@ import { getApi, getPluginViewLabel, toViewKey } from "./api-client.js";
 import type { PluginEntry } from "./components/PluginGridButton.js";
 import { ApprovalDialog } from "./dialogs/ApprovalDialog.js";
 import { ApprovalQueueStatus } from "./components/ApprovalQueueStatus.js";
+import { DeferredQueueDialog } from "./dialogs/DeferredQueueDialog.js";
 import { GlobalSearchDialog } from "./dialogs/GlobalSearchDialog.js";
 import { buildQuickActions } from "./components/CommandPopover.js";
 import { MainToolbar } from "./MainToolbar.js";
@@ -90,6 +91,7 @@ export function App() {
   const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState("llm");
+  const [deferredQueueOpen, setDeferredQueueOpen] = useState(false);
   const [activeView, setActiveView] = useState("home");
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
   const [commandPopoverOpen, setCommandPopoverOpen] = useState(false);
@@ -103,6 +105,16 @@ export function App() {
   // addFire ref is populated by OverlayContextProvider during render
   // so the IPC subscription below can call it without prop-drilling
   const addFireRef = useRef<import("./context/OverlayContext.js").OverlayContextValue["addFire"] | null>(null);
+  const pushRoutineResult = useCallback((evt: import("../../shared/routines-types.js").RoutineFiredPayload) => {
+    addFireRef.current?.({
+      id: `${evt.id}-${evt.firedAt}`,
+      source: { kind: "routine", routineId: evt.id, firedAt: evt.firedAt },
+      title: evt.title,
+      summary: evt.summary,
+      running: false,
+      routineSessionPath: evt.routineSessionPath,
+    });
+  }, []);
 
   // C1+M4: single subscription for routine IPC events. runningStarted pushes a
   // running OverlayItem immediately (running:true); fired replaces it with the
@@ -147,20 +159,20 @@ export function App() {
       });
     });
 
+    void (async () => {
+      try {
+        const pending = await api.listPendingRoutineResultsV2();
+        for (const result of pending) pushRoutineResult(result);
+      } catch (err) {
+        console.warn("[lvis] listPendingRoutineResults failed:", (err as Error).message);
+      }
+    })();
+
     // M1: fired payload uses explicit allowlist fields only (no ...routine spread)
-    const unsubFired = api.onRoutineFiredV2((evt) => {
-      addFireRef.current?.({
-        id: `${evt.id}-${evt.firedAt}`,
-        source: { kind: "routine", routineId: evt.id, firedAt: evt.firedAt },
-        title: evt.title,
-        summary: evt.summary,
-        running: false,
-        routineSessionPath: evt.routineSessionPath,
-      });
-    });
+    const unsubFired = api.onRoutineFiredV2(pushRoutineResult);
 
     return () => { unsubStarted(); unsubFinished(); unsubFailed(); unsubFired(); };
-  }, [api]);
+  }, [api, pushRoutineResult]);
 
   // Overlay items ref tracks all items pushed via onOverlayShow so
   // handlePluginPrimaryAction can look up pendingPrompt by id without needing
@@ -220,6 +232,15 @@ export function App() {
       void handleAskRef.current(pendingPrompt, "trigger-import");
     },
     [api, insertImportedTriggerEntry],
+  );
+
+  const handleRoutineAcknowledge = useCallback(
+    (routineId: string, firedAt: string) => {
+      void api.acknowledgeRoutineResultV2(routineId, firedAt).catch((err) => {
+        console.warn("[lvis] acknowledgeRoutineResult failed:", (err as Error).message);
+      });
+    },
+    [api],
   );
 
   // Routine session modal opened from OverlayCard "결과 보기".
@@ -797,6 +818,8 @@ export function App() {
             marketplaceUrlReady={marketplaceUrlReady}
             activePluginView={activePluginView ?? null}
             onPluginPrimaryAction={(id) => { void handlePluginPrimaryAction(id); }}
+            onRoutineAcknowledge={handleRoutineAcknowledge}
+            onOpenPermissionQueue={() => setDeferredQueueOpen(true)}
           />
         </main>
         </div>
@@ -808,6 +831,7 @@ export function App() {
           so the previous App-level FloatingQuestionPanel mount is gone.
           See <AskUserQuestionCard> + ChatView ask-question slot. */}
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} api={api} onSaved={() => { void checkApiKey(); void refreshLlmSettings(); }} initialTab={settingsInitialTab} />
+      <DeferredQueueDialog open={deferredQueueOpen} onOpenChange={setDeferredQueueOpen} />
       <ApprovalDialog queue={approvalQueue} onDecide={handleApprovalDecide} />
       <ApprovalQueueStatus queue={approvalQueue} />
       {/* Conditional mount: avoids useMemorySearch IPC calls while dialog is closed.
@@ -835,7 +859,8 @@ export function App() {
           onClick={() => setRoutineSessionModal(null)}
         >
           <div
-            className="relative w-full max-w-2xl max-h-[80vh] overflow-hidden rounded-lg shadow-xl"
+            className="relative flex h-[80dvh] max-h-[80dvh] w-[calc(100vw-32px)] max-w-2xl min-w-0 flex-col overflow-hidden rounded-lg bg-card text-card-foreground shadow-xl"
+            data-testid="routine-session-dialog"
             onClick={(e) => e.stopPropagation()}
           >
             <RoutineSessionView

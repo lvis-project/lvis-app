@@ -7,7 +7,7 @@ import { ipcMain } from "electron";
 import { readFile } from "node:fs/promises";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import type { IpcDeps } from "../types.js";
-import type { RoutineExecution, RoutineSchedule } from "../../main/routines-store.js";
+import type { RoutineExecution, RoutineFiredPayload, RoutineSchedule } from "../../shared/routines-types.js";
 import { ROUTINES_V2, OVERLAY_V1 } from "../../shared/ipc-channels.js";
 import { createLogger } from "../../lib/logger.js";
 const log = createLogger("lvis");
@@ -61,6 +61,50 @@ export function registerMiscHandlers(deps: IpcDeps): void {
     // scheduled trigger — no separate renderer-only event path.
     const dispatched = await routinesScheduler.dispatchNow(id);
     if (!dispatched) return { ok: false, error: "routine-not-found" };
+    return { ok: true };
+  });
+
+  ipcMain.handle(ROUTINES_V2.pendingResults, async (e) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, ROUTINES_V2.pendingResults, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    if (!routinesStore) return [];
+    const pending = routinesStore
+      .list()
+      .filter((routine) => routine.lastFiredAt && routine.lastResultAcknowledgedAt !== routine.lastFiredAt);
+    const results: RoutineFiredPayload[] = [];
+    for (const routine of pending) {
+      const firedAt = routine.lastFiredAt!;
+      const title = routine.title ?? routine.notificationTitle ?? routine.id.slice(0, 8);
+      const result: RoutineFiredPayload = {
+        id: routine.id,
+        trigger: routine.trigger,
+        execution: routine.execution,
+        firedAt,
+        title,
+        summary: "",
+      };
+      if (routine.execution === "llm-session" && routineSessionStore) {
+        const session = await routineSessionStore.findForFiredAt(routine.id, firedAt);
+        if (session) {
+          result.routineSessionPath = session.jsonlPath;
+          result.summary = await routineSessionStore.extractSummary(session.jsonlPath);
+        }
+      }
+      results.push(result);
+    }
+    return results;
+  });
+
+  ipcMain.handle(ROUTINES_V2.acknowledgeResult, async (e, routineId: string, firedAt: string) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, ROUTINES_V2.acknowledgeResult, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    if (!routinesStore) return { ok: false, error: "no-store" };
+    const updated = await routinesStore.update(routineId, { lastResultAcknowledgedAt: firedAt });
+    if (!updated) return { ok: false, error: "routine-not-found" };
     return { ok: true };
   });
 

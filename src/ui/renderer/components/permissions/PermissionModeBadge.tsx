@@ -15,6 +15,7 @@
  * Keep this component visual-only. Mode mutation lives in the slash
  * dispatcher + Settings tab; the badge is read-only.
  */
+import { Inbox } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
 import { Badge } from "../../../../components/ui/badge.js";
 
@@ -26,11 +27,13 @@ export interface PermissionModeBadgeProps {
   /** Override fetcher. Defaults to window.lvis.permission.getMode(). */
   fetcher?: () => Promise<{ mode: string }>;
   /** Override deferred approval fetcher for tests/storybook. */
-  deferredFetcher?: () => Promise<{ ok: boolean; pending?: unknown[] }>;
+  deferredFetcher?: () => Promise<{ ok: boolean; pending?: unknown[]; error?: string }>;
   /** Override deferred approval subscription for tests/storybook. */
   deferredSubscriber?: (handler: (summary: { pending: number }) => void) => () => void;
   /** Optional click handler — typically opens the Settings → Permissions tab. */
   onClick?: () => void;
+  /** Opens the deferred approval queue modal. Kept separate from mode settings. */
+  onQueueClick?: () => void;
   /** Test hook for the change-event subscription. */
   subscribe?: (handler: (mode: ModeBadgeVariant) => void) => () => void;
 }
@@ -70,10 +73,12 @@ export function PermissionModeBadge({
   deferredFetcher,
   deferredSubscriber,
   onClick,
+  onQueueClick,
   subscribe,
 }: PermissionModeBadgeProps): ReactElement {
   const [mode, setMode] = useState<ModeBadgeVariant>(modeOverride ?? "unknown");
   const [pendingPermissions, setPendingPermissions] = useState(0);
+  const [pendingError, setPendingError] = useState<string | null>(null);
 
   const apiFetch = useMemo(
     () => fetcher ?? (() => window.lvis!.permission!.getMode()),
@@ -112,15 +117,26 @@ export function PermissionModeBadge({
     const refreshPending = async () => {
       try {
         const result = await apiFetchDeferred();
-        if (alive && result.ok) setPendingPermissions(result.pending?.length ?? 0);
+        if (!alive) return;
+        if (result.ok) {
+          setPendingPermissions(result.pending?.length ?? 0);
+          setPendingError(null);
+        } else {
+          setPendingPermissions(0);
+          setPendingError(result.error ?? "deferred-list failed");
+        }
       } catch {
-        if (alive) setPendingPermissions(0);
+        if (alive) {
+          setPendingPermissions(0);
+          setPendingError("deferred-list failed");
+        }
       }
     };
     void refreshPending();
     const sub = deferredSubscriber ?? window.lvis?.permission?.onDeferredPending;
     const unsubscribe = sub?.((summary) => {
       setPendingPermissions(Math.max(0, summary.pending));
+      setPendingError(null);
     });
     return () => {
       alive = false;
@@ -132,31 +148,50 @@ export function PermissionModeBadge({
     if (onClick) onClick();
   }, [onClick]);
 
-  const pendingText = pendingPermissions > 0 ? `, 대기 승인 ${pendingPermissions}건` : "";
+  const queueVisible = pendingPermissions > 0 || pendingError !== null;
+  const pendingText = pendingError
+    ? `, 큐 상태 확인 실패: ${pendingError}`
+    : pendingPermissions > 0
+      ? `, 대기 승인 ${pendingPermissions}건`
+      : "";
+  const queueLabel = pendingError ? "승인 확인 실패" : `승인 ${pendingPermissions}`;
 
   return (
-    <button
-      type="button"
-      onClick={handleClick}
-      className="inline-flex items-center gap-1 rounded-full focus:outline-none focus:ring-2 focus:ring-ring"
-      title={`${MODE_DESCRIPTIONS[mode]}${pendingText}`}
-      aria-label={`현재 권한 정책: ${MODE_DESCRIPTIONS[mode]}${pendingText}`}
-      data-testid="permission-mode-badge"
-      data-mode={mode}
-    >
-      <Badge variant="outline" className={`text-[10px] ${MODE_COLOR_CLASSES[mode]}`}>
-        {MODE_LABELS[mode]}
-      </Badge>
-      {pendingPermissions > 0 && (
-        <Badge
-          variant="outline"
-          className="border-destructive bg-destructive/10 px-1.5 text-[10px] text-destructive"
-          data-testid="permission-pending-badge"
-        >
-          승인 {pendingPermissions}
+    <div className="inline-flex items-center gap-1" data-testid="permission-policy-controls">
+      <button
+        type="button"
+        onClick={handleClick}
+        className="inline-flex items-center rounded-full focus:outline-none focus:ring-2 focus:ring-ring"
+        title={MODE_DESCRIPTIONS[mode]}
+        aria-label={`현재 권한 정책: ${MODE_DESCRIPTIONS[mode]}`}
+        data-testid="permission-mode-badge"
+        data-mode={mode}
+      >
+        <Badge variant="outline" className={`text-[10px] ${MODE_COLOR_CLASSES[mode]}`}>
+          {MODE_LABELS[mode]}
         </Badge>
+      </button>
+      {queueVisible && (
+        <button
+          type="button"
+          onClick={onQueueClick}
+          disabled={!onQueueClick}
+          className="inline-flex items-center rounded-full focus:outline-none focus:ring-2 focus:ring-ring"
+          title={`보류된 승인 큐 열기${pendingText}`}
+          aria-label={`보류된 승인 큐 열기${pendingText}`}
+          data-testid="permission-queue-button"
+        >
+          <Badge
+            variant="outline"
+            className="inline-flex items-center gap-1 border-destructive bg-destructive/10 px-2 text-[10px] text-destructive"
+            data-testid="permission-pending-badge"
+          >
+            <Inbox className="h-3 w-3" aria-hidden="true" />
+            {queueLabel}
+          </Badge>
+        </button>
       )}
-    </button>
+    </div>
   );
 }
 

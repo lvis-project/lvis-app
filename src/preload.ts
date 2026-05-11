@@ -165,11 +165,12 @@ const api = {
     }>,
   // Sprint 4.C — conversation UX
   chatGetHistory: async () =>
-    ipcRenderer.invoke("lvis:chat:get-history") as Promise<{ sessionId: string; messages: SerializedHistoryMessage[] }>,
+    ipcRenderer.invoke("lvis:chat:get-history") as Promise<{ sessionId: string; messages: SerializedHistoryMessage[]; estimatedInputTokens?: number }>,
   chatSessionHistory: async (sessionId: string) =>
     ipcRenderer.invoke("lvis:chat:session-history", sessionId) as Promise<{
       ok: boolean;
       messages: SerializedHistoryMessage[];
+      estimatedInputTokens?: number;
       /** §457 PR-A: chars in the rolling summary preamble inherited from parent. 0 = no preamble. */
       preambleChars?: number;
       /** §457 PR-A: parent session id when this session is a rotation child. */
@@ -642,6 +643,12 @@ const api = {
   dismissRoutineV2: async (id: string) => ipcRenderer.invoke(ROUTINES_V2.dismiss, id),
   removeRoutineV2: async (id: string) => ipcRenderer.invoke(ROUTINES_V2.remove, id),
   triggerRoutineNowV2: async (id: string) => ipcRenderer.invoke(ROUTINES_V2.triggerNow, id),
+  listPendingRoutineResultsV2: async () =>
+    ipcRenderer.invoke(ROUTINES_V2.pendingResults) as Promise<
+      import("./shared/routines-types.js").RoutineFiredPayload[]
+    >,
+  acknowledgeRoutineResultV2: async (routineId: string, firedAt: string) =>
+    ipcRenderer.invoke(ROUTINES_V2.acknowledgeResult, routineId, firedAt) as Promise<{ ok: boolean; error?: string }>,
   addRoutineV2: async (input: import("./shared/routines-types.js").AddRoutineInput) =>
     ipcRenderer.invoke(ROUTINES_V2.add, input) as Promise<
       { ok: true; routine: import("./shared/routines-types.js").RoutineRecord } | { ok: false; error: string }

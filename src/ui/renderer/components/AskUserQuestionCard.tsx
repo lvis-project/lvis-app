@@ -13,7 +13,7 @@
  * Card surface (compact, in-stream):
  *   - Single-line `placeholder` Input for free-text answer (no Textarea
  *     to avoid the prior popup's vertical bloat).
- *   - Recommend / 대안 badges are rendered by the UI based on the model's
+ *   - 추천 / 대안 badges are rendered by the UI based on the model's
  *     `recommendedIndex` / `altIndices`. Models do NOT inline these
  *     markers in the choice label itself, which lets the 20-char anchor
  *     apply to the actual answer text.
@@ -136,6 +136,7 @@ export function AskUserQuestionCard({
     () => request.questions.map(() => ({})),
   );
   const [submitting, setSubmitting] = useState(false);
+  const submitButtonRef = useRef<HTMLButtonElement | null>(null);
 
   // New request → reset all internal state. The id is the discriminator
   // so re-rendering the same card with the same questions keeps state.
@@ -152,6 +153,12 @@ export function AskUserQuestionCard({
     () => request.questions.every((item, i) => isAnswerComplete(item, drafts[i])),
     [request.questions, drafts],
   );
+
+  useEffect(() => {
+    if (onConfirmStep && allAnswered && !submitting) {
+      submitButtonRef.current?.focus();
+    }
+  }, [allAnswered, onConfirmStep, submitting]);
 
   const setAnswer = (index: number, next: DraftAnswer) => {
     setDrafts((prev) => prev.map((d, i) => (i === index ? next : d)));
@@ -197,6 +204,19 @@ export function AskUserQuestionCard({
   };
   const goPrev = () => setStep((s) => Math.max(s - 1, 0));
 
+  const goNextByKeyboard = () => {
+    if (submitting || !isMulti || onConfirmStep || !currentItem) return false;
+    if (!isAnswerComplete(currentItem, currentDraft)) return false;
+    setStep((s) => Math.min(s + 1, total));
+    return true;
+  };
+
+  const goPrevByKeyboard = () => {
+    if (submitting || !isMulti || step === 0) return false;
+    setStep((s) => Math.max(s - 1, 0));
+    return true;
+  };
+
   // Always-defined submit handler: validates against the *current* draft at
   // call time rather than at render time. This prevents the stale-closure bug
   // where onSubmit was only passed when isAnswerComplete was true at render,
@@ -215,24 +235,55 @@ export function AskUserQuestionCard({
 
   return (
     <Card
-      className="w-full max-w-none border border-l-4 border-l-message-user bg-card shadow-none"
+      aria-label="질문 응답 카드"
+      className="w-full max-w-none border border-l-4 border-l-message-user bg-card shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
       data-testid="ask-user-question-card"
+      role="group"
+      tabIndex={0}
       onKeyDown={(e) => {
+        if (e.defaultPrevented || isComposingKeyEvent(e)) return;
         if (e.key === "Escape" && !submitting) {
           e.preventDefault();
           dismiss();
+          return;
+        }
+        if (onConfirmStep && e.key === "Enter" && !submitting && allAnswered) {
+          e.preventDefault();
+          e.stopPropagation();
+          submitAll();
+          return;
+        }
+        const textEditingTarget = isTextEditingTarget(e.target);
+        if (e.key === "ArrowLeft" && !textEditingTarget) {
+          if (goPrevByKeyboard()) e.preventDefault();
+          return;
+        }
+        if (e.key === "ArrowRight" && !textEditingTarget) {
+          if (goNextByKeyboard()) e.preventDefault();
         }
       }}
     >
-      <CardHeader className="flex flex-row items-center justify-between gap-2 px-3 pt-3 pb-1.5 space-y-0">
-        <CardTitle className="text-[12px] font-medium text-muted-foreground">
-          ❓ 질문
-        </CardTitle>
-        {stepLabel && (
-          <span className="text-[10px] text-muted-foreground/70" data-testid="ask-step-label">
-            · {stepLabel}
-          </span>
-        )}
+      <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-x-3 gap-y-1 px-3 pt-3 pb-1.5 space-y-0">
+        <div className="flex min-w-0 items-center gap-2">
+          <CardTitle className="text-[12px] font-medium text-muted-foreground">
+            ❓ 질문
+          </CardTitle>
+          {stepLabel && (
+            <span className="text-[10px] text-muted-foreground/70" data-testid="ask-step-label">
+              · {stepLabel}
+            </span>
+          )}
+        </div>
+        <KeyboardHint
+          hasAnswerNavigation={Boolean(
+            currentItem &&
+              effectiveChoices(currentItem).length +
+                (currentItem.allowFreeText ? 1 : 0) >
+                1,
+          )}
+          isMulti={isMulti}
+          onConfirmStep={onConfirmStep}
+        />
       </CardHeader>
       <CardContent className="space-y-2 px-3 pb-3">
         {currentItem ? (
@@ -307,6 +358,7 @@ export function AskUserQuestionCard({
             )}
             {isMulti && onConfirmStep && (
               <Button
+                ref={submitButtonRef}
                 size="sm"
                 disabled={submitting || !allAnswered}
                 onClick={submitAll}
@@ -332,6 +384,73 @@ export function AskUserQuestionCard({
   );
 }
 
+function KeyboardHint({
+  hasAnswerNavigation,
+  isMulti,
+  onConfirmStep,
+}: {
+  hasAnswerNavigation: boolean;
+  isMulti: boolean;
+  onConfirmStep: boolean;
+}) {
+  const enterLabel = onConfirmStep
+    ? "보내기"
+    : isMulti
+      ? "다음/검토"
+      : "보내기";
+  return (
+    <div
+      className="flex items-center gap-1.5 text-[10px] text-muted-foreground/70"
+      data-testid="ask-keyboard-hint"
+    >
+      <kbd className="rounded border bg-muted/50 px-1 py-[1px] font-mono text-[9px]">
+        Enter
+      </kbd>
+      <span>{enterLabel}</span>
+      {hasAnswerNavigation && (
+        <>
+          <span aria-hidden="true">·</span>
+          <kbd className="rounded border bg-muted/50 px-1 py-[1px] font-mono text-[9px]">
+            ↑↓
+          </kbd>
+          <span>답변/수동입력 이동</span>
+        </>
+      )}
+      {isMulti && (
+        <>
+          <span aria-hidden="true">·</span>
+          <kbd className="rounded border bg-muted/50 px-1 py-[1px] font-mono text-[9px]">
+            ←→
+          </kbd>
+          <span>질문 이동</span>
+        </>
+      )}
+    </div>
+  );
+}
+
+function isComposingKeyEvent(e: React.KeyboardEvent<HTMLElement>) {
+  const reactEvent = e as React.KeyboardEvent<HTMLElement> & {
+    isComposing?: boolean;
+  };
+  const nativeEvent = e.nativeEvent as KeyboardEvent & {
+    isComposing?: boolean;
+    keyCode?: number;
+  };
+  return Boolean(
+    reactEvent.isComposing ||
+      nativeEvent.isComposing ||
+      nativeEvent.keyCode === 229 ||
+      e.key === "Process",
+  );
+}
+
+function isTextEditingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement;
+}
+
 /**
  * ChoiceBadge — visible in ALL button states (default/outline/selected).
  *
@@ -351,7 +470,7 @@ function ChoiceBadge({ kind }: { kind: "recommend" | "alt" }) {
       className={`flex-shrink-0 rounded px-1.5 py-[1px] text-[9.5px] font-semibold tracking-wider ${cls}`}
       data-testid={`ask-badge-${kind}`}
     >
-      {kind === "recommend" ? "Recommend" : "대안"}
+      {kind === "recommend" ? "추천" : "대안"}
     </span>
   );
 }
@@ -401,39 +520,54 @@ function QuestionForm({
   const choices = effectiveChoices(item);
   const recommend = recommendIndex(item);
   const alts = altIndices(item);
+  const freeTextIndex = item.allowFreeText ? choices.length : -1;
+  const answerCount = choices.length + (item.allowFreeText ? 1 : 0);
   // Roving tabIndex: track which choice button has the "tab stop".
   const [focusedIdx, setFocusedIdx] = useState<number>(
     () => draft.choiceIndex ?? (recommendIndex(item) ?? 0),
   );
   const buttonRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  const focusAnswerAt = useCallback(
+    (nextIndex: number) => {
+      if (answerCount <= 0) return;
+      const next = (nextIndex + answerCount) % answerCount;
+      setFocusedIdx(next);
+      if (next === freeTextIndex) {
+        inputRef.current?.focus();
+        return;
+      }
+      buttonRefs.current[next]?.focus();
+    },
+    [answerCount, freeTextIndex],
+  );
 
   // Reset focused idx when the question item changes (step transition).
   // Prevents out-of-range focusedIdx when the new step has fewer choices,
   // which would leave all option buttons with tabIndex={-1} (keyboard nav broken).
   useEffect(() => {
-    setFocusedIdx(recommendIndex(item) ?? 0);
-  }, [item]);
+    setFocusedIdx(recommendIndex(item) ?? (choices.length > 0 ? 0 : freeTextIndex));
+  }, [choices.length, freeTextIndex, item]);
 
   // Sync focused idx when the draft's selected choice changes externally.
   useEffect(() => {
     if (typeof draft.choiceIndex === "number") {
       setFocusedIdx(draft.choiceIndex);
+    } else if (item.allowFreeText && draft.freeText) {
+      setFocusedIdx(freeTextIndex);
     }
-  }, [draft.choiceIndex]);
+  }, [draft.choiceIndex, draft.freeText, freeTextIndex, item.allowFreeText]);
 
   const handleChoiceKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLButtonElement>, i: number) => {
       if (disabled) return;
-      if (e.key === "ArrowDown" || e.key === "ArrowRight") {
+      if (e.key === "ArrowDown") {
         e.preventDefault();
-        const next = (i + 1) % choices.length;
-        setFocusedIdx(next);
-        buttonRefs.current[next]?.focus();
-      } else if (e.key === "ArrowUp" || e.key === "ArrowLeft") {
+        focusAnswerAt(i + 1);
+      } else if (e.key === "ArrowUp") {
         e.preventDefault();
-        const prev = (i - 1 + choices.length) % choices.length;
-        setFocusedIdx(prev);
-        buttonRefs.current[prev]?.focus();
+        focusAnswerAt(i - 1);
       } else if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
         // onChoose returns a ChoiceResult enum:
@@ -445,7 +579,7 @@ function QuestionForm({
         if (result.kind === "advance") onAdvance();
       }
     },
-    [disabled, choices, onChoose, onAdvance],
+    [disabled, choices, focusAnswerAt, onChoose, onAdvance],
   );
 
   return (
@@ -498,14 +632,30 @@ function QuestionForm({
       )}
       {item.allowFreeText && (
         <Input
+          ref={inputRef}
           value={draft.freeText ?? ""}
           onChange={(e) => onFreeText(e.target.value)}
           onKeyDown={(e) => {
+            if (isComposingKeyEvent(e)) return;
+            if (e.key === "ArrowDown" && answerCount > 1) {
+              e.preventDefault();
+              e.stopPropagation();
+              focusAnswerAt(freeTextIndex + 1);
+              return;
+            }
+            if (e.key === "ArrowUp" && answerCount > 1) {
+              e.preventDefault();
+              e.stopPropagation();
+              focusAnswerAt(freeTextIndex - 1);
+              return;
+            }
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
+              e.stopPropagation();
               onSubmit();
             }
           }}
+          onFocus={() => setFocusedIdx(freeTextIndex)}
           placeholder={item.placeholder ?? "직접입력하기"}
           className="h-8 text-[12px]"
           disabled={disabled}
@@ -528,7 +678,7 @@ function ConfirmReview({
   return (
     <div className="space-y-1.5" data-testid="ask-confirm-review">
       <div className="text-[10.5px] text-muted-foreground">
-        모든 답변을 확인한 뒤 보내기를 누르세요. 항목을 클릭하면 해당 질문으로 돌아갑니다.
+        모든 답변을 확인한 뒤 보내기를 누르세요. 항목 클릭 또는 ←/→로 질문을 이동할 수 있습니다.
       </div>
       <ul className="space-y-1">
         {request.questions.map((item, i) => {
