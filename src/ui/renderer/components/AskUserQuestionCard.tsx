@@ -197,6 +197,19 @@ export function AskUserQuestionCard({
   };
   const goPrev = () => setStep((s) => Math.max(s - 1, 0));
 
+  const goNextByKeyboard = () => {
+    if (submitting || !isMulti || onConfirmStep || !currentItem) return false;
+    if (!isAnswerComplete(currentItem, currentDraft)) return false;
+    setStep((s) => Math.min(s + 1, total));
+    return true;
+  };
+
+  const goPrevByKeyboard = () => {
+    if (submitting || !isMulti || step === 0) return false;
+    setStep((s) => Math.max(s - 1, 0));
+    return true;
+  };
+
   // Always-defined submit handler: validates against the *current* draft at
   // call time rather than at render time. This prevents the stale-closure bug
   // where onSubmit was only passed when isAnswerComplete was true at render,
@@ -218,21 +231,33 @@ export function AskUserQuestionCard({
       className="w-full max-w-none border border-l-4 border-l-message-user bg-card shadow-none"
       data-testid="ask-user-question-card"
       onKeyDown={(e) => {
+        if (e.defaultPrevented || isComposingKeyEvent(e)) return;
         if (e.key === "Escape" && !submitting) {
           e.preventDefault();
           dismiss();
+          return;
+        }
+        if (e.key === "ArrowUp") {
+          if (goPrevByKeyboard()) e.preventDefault();
+          return;
+        }
+        if (e.key === "ArrowDown") {
+          if (goNextByKeyboard()) e.preventDefault();
         }
       }}
     >
-      <CardHeader className="flex flex-row items-center justify-between gap-2 px-3 pt-3 pb-1.5 space-y-0">
-        <CardTitle className="text-[12px] font-medium text-muted-foreground">
-          ❓ 질문
-        </CardTitle>
-        {stepLabel && (
-          <span className="text-[10px] text-muted-foreground/70" data-testid="ask-step-label">
-            · {stepLabel}
-          </span>
-        )}
+      <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-x-3 gap-y-1 px-3 pt-3 pb-1.5 space-y-0">
+        <div className="flex min-w-0 items-center gap-2">
+          <CardTitle className="text-[12px] font-medium text-muted-foreground">
+            ❓ 질문
+          </CardTitle>
+          {stepLabel && (
+            <span className="text-[10px] text-muted-foreground/70" data-testid="ask-step-label">
+              · {stepLabel}
+            </span>
+          )}
+        </div>
+        <KeyboardHint isMulti={isMulti} onConfirmStep={onConfirmStep} />
       </CardHeader>
       <CardContent className="space-y-2 px-3 pb-3">
         {currentItem ? (
@@ -329,6 +354,56 @@ export function AskUserQuestionCard({
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function KeyboardHint({
+  isMulti,
+  onConfirmStep,
+}: {
+  isMulti: boolean;
+  onConfirmStep: boolean;
+}) {
+  const enterLabel = onConfirmStep
+    ? "보내기"
+    : isMulti
+      ? "다음/검토"
+      : "보내기";
+  return (
+    <div
+      className="flex items-center gap-1.5 text-[10px] text-muted-foreground/70"
+      data-testid="ask-keyboard-hint"
+    >
+      <kbd className="rounded border bg-muted/50 px-1 py-[1px] font-mono text-[9px]">
+        Enter
+      </kbd>
+      <span>{enterLabel}</span>
+      {isMulti && (
+        <>
+          <span aria-hidden="true">·</span>
+          <kbd className="rounded border bg-muted/50 px-1 py-[1px] font-mono text-[9px]">
+            ↑↓
+          </kbd>
+          <span>질문 이동</span>
+        </>
+      )}
+    </div>
+  );
+}
+
+function isComposingKeyEvent(e: React.KeyboardEvent<HTMLElement>) {
+  const reactEvent = e as React.KeyboardEvent<HTMLElement> & {
+    isComposing?: boolean;
+  };
+  const nativeEvent = e.nativeEvent as KeyboardEvent & {
+    isComposing?: boolean;
+    keyCode?: number;
+  };
+  return Boolean(
+    reactEvent.isComposing ||
+      nativeEvent.isComposing ||
+      nativeEvent.keyCode === 229 ||
+      e.key === "Process",
   );
 }
 
@@ -501,8 +576,10 @@ function QuestionForm({
           value={draft.freeText ?? ""}
           onChange={(e) => onFreeText(e.target.value)}
           onKeyDown={(e) => {
+            if (isComposingKeyEvent(e)) return;
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
+              e.stopPropagation();
               onSubmit();
             }
           }}
@@ -528,7 +605,7 @@ function ConfirmReview({
   return (
     <div className="space-y-1.5" data-testid="ask-confirm-review">
       <div className="text-[10.5px] text-muted-foreground">
-        모든 답변을 확인한 뒤 보내기를 누르세요. 항목을 클릭하면 해당 질문으로 돌아갑니다.
+        모든 답변을 확인한 뒤 보내기를 누르세요. 항목 클릭 또는 ↑/↓로 질문을 이동할 수 있습니다.
       </div>
       <ul className="space-y-1">
         {request.questions.map((item, i) => {
