@@ -176,7 +176,7 @@ export function ToolApprovalDialog({
             <Button
               size="sm"
               variant="outline"
-              className="border-red-500 text-red-700 hover:bg-red-500/10 dark:text-red-400"
+              className="border-destructive text-destructive hover:bg-destructive/15"
               onClick={() => onDecide("deny-always", request.toolName)}
             >
               항상 거부

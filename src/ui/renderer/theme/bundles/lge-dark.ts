@@ -34,16 +34,40 @@ export const lgeDarkBundle: ThemeBundle = {
     warning:                  "48 97% 77%",
     "warning-foreground":     "30 80% 25%",
     success:                  "142 71% 45%",
+    "success-foreground":     "0 0% 5%",
+    /* ── Tier B': status / state ──────────────────────────────── */
+    info:                     "210 90% 60%",
+    "info-foreground":        "0 0% 100%",
+    emphasis:                 "48 96% 60%",
+    "emphasis-foreground":    "0 0% 5%",
     border:                   "0 0% 28%",
     input:                    "0 0% 28%",
     ring:                     "263 70% 50%",
     "message-user-bg":        "271 76% 76%",   /* #c497ef — lilac user bubble */
     "message-user-fg":        "0 0% 100%",
     "input-bar-bg":           "0 0% 22%",      /* elevated composer */
+    /* ── Tier B'': surface overlay + interaction ───────────────── */
+    overlay:                  "0 0% 0%",
+    "hover-overlay":          "44 37% 94%",    /* warm-grey-7 tint for warm dark shell */
+    "focus-ring":             "263 70% 65%",
+    "link-fg":                "253 100% 75%",
+    /* ── Tier B''': peripheral system ──────────────────────────── */
+    "selection-bg":           "271 76% 76%",
+    "selection-fg":           "0 0% 15%",
+    "scrollbar-thumb":        "0 0% 32%",
+    "scrollbar-track":        "0 0% 22%",
+    "kbd-bg":                 "0 0% 20%",
+    "kbd-border":             "0 0% 28%",
     /* ── Tier C: code surface ──────────────────────────────────── */
     "code-bg":                "222 47% 9%",
     "code-fg":                "210 40% 96%",
     "code-border":            "217 33% 22%",
+    /* ── Tier D: chart palette ─────────────────────────────────── */
+    "chart-1":                "253 100% 65%",
+    "chart-2":                "271 76% 76%",
+    "chart-3":                "1 98% 59%",
+    "chart-4":                "142 71% 45%",
+    "chart-5":                "44 90% 60%",
     /* ── Action tokens (PR-4/5) ────────────────────────────────── */
     "action-view":            "263 70% 50%",
     "action-branch":          "25 95% 53%",

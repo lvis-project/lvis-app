@@ -150,7 +150,7 @@ export function InputActionBar({
         <label className="flex items-center gap-1.5 text-muted-foreground cursor-pointer select-none">
           <input
             type="checkbox"
-            className="h-3.5 w-3.5 appearance-none rounded-sm border-0 bg-white checked:appearance-auto checked:accent-[#FD312E]"
+            className="h-3.5 w-3.5 appearance-none rounded-sm border-0 bg-muted checked:appearance-auto checked:accent-primary"
             checked={enableThinkingChat}
             onChange={(e) => void onToggleThinking(e.target.checked)}
           />

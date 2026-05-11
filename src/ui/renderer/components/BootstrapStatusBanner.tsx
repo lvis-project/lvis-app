@@ -25,7 +25,7 @@ export function BootstrapStatusBanner({ status, onDismiss, onRetry }: Props): Re
 
   if (status.phase === "start") {
     return (
-      <div className="flex items-center justify-between gap-2 bg-slate-50 border border-slate-200 text-slate-700 text-sm px-4 py-2 rounded-md mx-2 mt-2">
+      <div className="flex items-center justify-between gap-2 bg-muted border border-border text-muted-foreground text-sm px-4 py-2 rounded-md mx-2 mt-2">
         <span>매니지드 플러그인 설치 중…</span>
       </div>
     );
@@ -33,14 +33,14 @@ export function BootstrapStatusBanner({ status, onDismiss, onRetry }: Props): Re
 
   if (status.phase === "error") {
     return (
-      <div className="flex items-center justify-between gap-2 bg-red-50 border border-red-200 text-red-800 text-sm px-4 py-2 rounded-md mx-2 mt-2">
+      <div className="flex items-center justify-between gap-2 bg-destructive/15 border border-destructive/40 text-destructive text-sm px-4 py-2 rounded-md mx-2 mt-2">
         <span>플러그인 부트스트랩 실패: {status.message}</span>
         <div className="flex items-center gap-1">
           <Button
             variant="outline"
             size="sm"
             onClick={onRetry}
-            className="h-auto px-2 py-0.5 text-xs text-red-700 border-red-300 hover:bg-red-100"
+            className="h-auto px-2 py-0.5 text-xs text-destructive border-destructive/40 hover:bg-destructive/15"
           >
             다시 시도
           </Button>
@@ -49,7 +49,7 @@ export function BootstrapStatusBanner({ status, onDismiss, onRetry }: Props): Re
             size="sm"
             onClick={onDismiss}
             aria-label="알림 닫기"
-            className="text-red-700 hover:text-red-900 h-auto p-1"
+            className="text-destructive hover:text-destructive/80 h-auto p-1"
           >
             ✕
           </Button>
@@ -61,14 +61,14 @@ export function BootstrapStatusBanner({ status, onDismiss, onRetry }: Props): Re
   // phase === "complete"
   if (status.skippedReason) {
     return (
-      <div className="flex items-center justify-between gap-2 bg-amber-50 border border-amber-200 text-amber-800 text-sm px-4 py-2 rounded-md mx-2 mt-2">
+      <div className="flex items-center justify-between gap-2 bg-warning/15 border border-warning/40 text-warning text-sm px-4 py-2 rounded-md mx-2 mt-2">
         <span>마켓플레이스 부트스트랩 건너뜀: {status.skippedReason}</span>
         <Button
           variant="ghost"
           size="sm"
           onClick={onDismiss}
           aria-label="알림 닫기"
-          className="text-amber-700 hover:text-amber-900 h-auto p-1"
+          className="text-warning hover:text-warning/80 h-auto p-1"
         >
           ✕
         </Button>
@@ -86,14 +86,14 @@ export function BootstrapStatusBanner({ status, onDismiss, onRetry }: Props): Re
         ? `플러그인 ${status.failed[0].id} 설치 실패: ${truncate(status.failed[0].error)}`
         : `${status.failed.length}개 플러그인 설치 실패`;
     return (
-      <div className="flex items-center justify-between gap-2 bg-red-50 border border-red-200 text-red-800 text-sm px-4 py-2 rounded-md mx-2 mt-2">
+      <div className="flex items-center justify-between gap-2 bg-destructive/15 border border-destructive/40 text-destructive text-sm px-4 py-2 rounded-md mx-2 mt-2">
         <span>{summary}</span>
         <div className="flex items-center gap-1">
           <Button
             variant="outline"
             size="sm"
             onClick={onRetry}
-            className="h-auto px-2 py-0.5 text-xs text-red-700 border-red-300 hover:bg-red-100"
+            className="h-auto px-2 py-0.5 text-xs text-destructive border-destructive/40 hover:bg-destructive/15"
           >
             다시 시도
           </Button>
@@ -102,7 +102,7 @@ export function BootstrapStatusBanner({ status, onDismiss, onRetry }: Props): Re
             size="sm"
             onClick={onDismiss}
             aria-label="알림 닫기"
-            className="text-red-700 hover:text-red-900 h-auto p-1"
+            className="text-destructive hover:text-destructive/80 h-auto p-1"
           >
             ✕
           </Button>

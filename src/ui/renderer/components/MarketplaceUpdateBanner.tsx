@@ -54,12 +54,12 @@ export function MarketplaceUpdateBanner({
 
   return (
     <div
-      className="flex items-center justify-between gap-2 bg-blue-50 border border-blue-200 text-blue-800 text-sm px-4 py-2 rounded-md mx-2 mt-2"
+      className="flex items-center justify-between gap-2 bg-info/15 border border-info/40 text-info text-sm px-4 py-2 rounded-md mx-2 mt-2"
       data-testid="marketplace-update-banner"
     >
       <span>
         {label}
-        {error ? <span className="ml-2 text-rose-700">— 일부 실패: {error}</span> : null}
+        {error ? <span className="ml-2 text-destructive">— 일부 실패: {error}</span> : null}
       </span>
       <div className="flex items-center gap-1">
         <Button
@@ -77,7 +77,7 @@ export function MarketplaceUpdateBanner({
           size="sm"
           onClick={onDismiss}
           aria-label="업데이트 알림 닫기"
-          className="text-blue-700 hover:text-blue-900 h-auto p-1"
+          className="text-info hover:text-info/80 h-auto p-1"
         >
           ✕
         </Button>

@@ -142,8 +142,8 @@ export function DropZoneOverlay({ onResult }: DropZoneOverlayProps) {
         >
           <div
             style={{
-              background: "rgba(0,0,0,0.7)",
-              color: "#fff",
+              background: "hsl(var(--popover) / 0.92)",
+              color: "hsl(var(--popover-foreground))",
               borderRadius: 12,
               padding: "16px 32px",
               fontSize: 18,
@@ -163,8 +163,8 @@ export function DropZoneOverlay({ onResult }: DropZoneOverlayProps) {
             left: "50%",
             transform: "translateX(-50%)",
             zIndex: 10000,
-            background: "rgba(0,0,0,0.8)",
-            color: "#fff",
+            background: "hsl(var(--popover) / 0.95)",
+            color: "hsl(var(--popover-foreground))",
             borderRadius: 8,
             padding: "10px 24px",
             fontSize: 14,

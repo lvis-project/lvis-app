@@ -9,7 +9,7 @@ function ToolPayloadBlock({ value, isError = false }: { value: string; isError?:
   const pre = (
     <pre
       className={`max-w-full whitespace-pre-wrap break-words px-2 py-1.5 font-mono text-[10px] leading-[1.35rem] [overflow-wrap:anywhere] ${
-        isError ? "text-red-400" : "text-muted-foreground"
+        isError ? "text-destructive" : "text-muted-foreground"
       }`}
     >
       {formatted}
@@ -144,7 +144,7 @@ function SingleToolInline({
         {isRunning ? (
           <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
         ) : (
-          <Badge variant={isError ? "secondary" : "default"} className={`shrink-0 px-1 py-0 text-[10px] ${isError ? "text-red-400" : ""}`}>
+          <Badge variant={isError ? "secondary" : "default"} className={`shrink-0 px-1 py-0 text-[10px] ${isError ? "text-destructive" : ""}`}>
             {isError ? "실패" : "완료"}
           </Badge>
         )}
@@ -160,7 +160,7 @@ function SingleToolInline({
           )}
           {tool.result !== undefined && (
             <div>
-              <div className={`mb-0.5 text-[9px] uppercase opacity-60 ${isError ? "text-red-400" : ""}`}>{isError ? "오류" : "결과"}</div>
+              <div className={`mb-0.5 text-[9px] uppercase opacity-60 ${isError ? "text-destructive" : ""}`}>{isError ? "오류" : "결과"}</div>
               <ToolPayloadBlock value={tool.result} isError={isError} />
             </div>
           )}
@@ -236,7 +236,7 @@ export function ToolGroupCard({
         ) : (
           <Badge
             variant={groupStatus === "error" ? "secondary" : "default"}
-            className={`px-1 py-0 text-[10px] flex-shrink-0 ${groupStatus === "error" ? "text-red-400" : ""}`}
+            className={`px-1 py-0 text-[10px] flex-shrink-0 ${groupStatus === "error" ? "text-destructive" : ""}`}
           >
             {groupStatus === "error" ? "오류 있음" : "완료"}
           </Badge>
@@ -261,7 +261,7 @@ export function ToolGroupCard({
                   ) : (
                     <Badge
                       variant={tool.status === "error" ? "secondary" : "default"}
-                      className={`shrink-0 px-1 py-0 text-[10px] ${tool.status === "error" ? "text-red-400" : ""}`}
+                      className={`shrink-0 px-1 py-0 text-[10px] ${tool.status === "error" ? "text-destructive" : ""}`}
                     >
                       {tool.status === "error" ? "실패" : "완료"}
                     </Badge>
@@ -277,7 +277,7 @@ export function ToolGroupCard({
                     )}
                     {tool.result !== undefined && (
                       <div>
-                        <div className={`mb-0.5 text-[9px] uppercase opacity-60 ${tool.status === "error" ? "text-red-400" : ""}`}>
+                        <div className={`mb-0.5 text-[9px] uppercase opacity-60 ${tool.status === "error" ? "text-destructive" : ""}`}>
                           {tool.status === "error" ? "오류" : "결과"}
                         </div>
                         {/* PR-4: stub results render as collapsible CompactedToolResult */}

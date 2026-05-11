@@ -67,7 +67,7 @@ export function TurnActionBar({
         <Tooltip>
           <TooltipTrigger asChild>
             <button className="rounded p-0.5 hover:bg-muted hover:text-foreground transition-colors" onClick={actions.onToggleStar}>
-              <Star className={`h-3 w-3 ${isStarred ? "fill-yellow-400 text-yellow-400" : ""}`} />
+              <Star className={`h-3 w-3 ${isStarred ? "fill-emphasis text-emphasis" : ""}`} />
             </button>
           </TooltipTrigger>
           <TooltipContent>즐겨찾기</TooltipContent>
@@ -79,7 +79,7 @@ export function TurnActionBar({
           <Tooltip>
             <TooltipTrigger asChild>
               <button
-                className={`rounded p-0.5 hover:bg-muted transition-colors ${feedbackRating === "up" ? "text-green-500" : "hover:text-foreground"}`}
+                className={`rounded p-0.5 hover:bg-muted transition-colors ${feedbackRating === "up" ? "text-success" : "hover:text-foreground"}`}
                 onClick={() => {
                   if (feedbackRating === "up") return;
                   setFeedbackRating("up");
@@ -88,7 +88,7 @@ export function TurnActionBar({
                 }}
                 aria-label="도움이 됐어요"
               >
-                <ThumbsUp className={`h-3 w-3 ${feedbackRating === "up" ? "fill-green-500" : ""}`} />
+                <ThumbsUp className={`h-3 w-3 ${feedbackRating === "up" ? "fill-success" : ""}`} />
               </button>
             </TooltipTrigger>
             <TooltipContent>도움이 됐어요</TooltipContent>
@@ -96,14 +96,14 @@ export function TurnActionBar({
           <Tooltip>
             <TooltipTrigger asChild>
               <button
-                className={`rounded p-0.5 hover:bg-muted transition-colors ${feedbackRating === "down" ? "text-red-500" : "hover:text-foreground"}`}
+                className={`rounded p-0.5 hover:bg-muted transition-colors ${feedbackRating === "down" ? "text-destructive" : "hover:text-foreground"}`}
                 onClick={() => {
                   if (feedbackRating === "down") return;
                   setShowReasonBox(true);
                 }}
                 aria-label="개선이 필요해요"
               >
-                <ThumbsDown className={`h-3 w-3 ${feedbackRating === "down" ? "fill-red-500" : ""}`} />
+                <ThumbsDown className={`h-3 w-3 ${feedbackRating === "down" ? "fill-destructive" : ""}`} />
               </button>
             </TooltipTrigger>
             <TooltipContent>개선이 필요해요</TooltipContent>

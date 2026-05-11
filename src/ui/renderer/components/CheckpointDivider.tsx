@@ -16,20 +16,20 @@ const TIER_VARIANTS: Record<CheckpointTier | "default", { label: string; icon: s
   "auto-compact": {
     label: "자동 정리",
     icon: "📌",
-    lineCls: "bg-blue-500/30",
-    textCls: "text-blue-400/65",
+    lineCls: "bg-action-compact/30",
+    textCls: "text-action-compact/80",
   },
   "manual": {
     label: "수동 정리",
     icon: "✋",
-    lineCls: "bg-slate-500/35",
-    textCls: "text-slate-300/80",
+    lineCls: "bg-muted-foreground/35",
+    textCls: "text-muted-foreground/80",
   },
   default: {
     label: "자동 정리",
     icon: "📌",
-    lineCls: "bg-blue-500/30",
-    textCls: "text-blue-400/65",
+    lineCls: "bg-action-compact/30",
+    textCls: "text-action-compact/80",
   },
 };
 

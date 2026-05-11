@@ -27,16 +27,40 @@ export const forestBundle: ThemeBundle = {
     warning:                  "48 96% 89%",
     "warning-foreground":     "30 80% 25%",
     success:                  "142 71% 45%",
+    "success-foreground":     "0 0% 100%",
+    /* ── Tier B': status / state ──────────────────────────────── */
+    info:                     "199 89% 48%",
+    "info-foreground":        "0 0% 100%",
+    emphasis:                 "40 96% 50%",       /* amber-gold for star on light shell */
+    "emphasis-foreground":    "0 0% 10%",
     border:                   "214 32% 91%",
     input:                    "214 32% 91%",
     ring:                     "170 70% 35%",
     "message-user-bg":        "170 70% 45%",
     "message-user-fg":        "210 40% 98%",
     "input-bar-bg":           "0 0% 100%",
+    /* ── Tier B'': surface overlay + interaction ───────────────── */
+    overlay:                  "222 47% 11%",      /* dark dim on light shell */
+    "hover-overlay":          "222 47% 11%",      /* black tint dimmer */
+    "focus-ring":             "170 70% 35%",
+    "link-fg":                "170 70% 38%",
+    /* ── Tier B''': peripheral system ──────────────────────────── */
+    "selection-bg":           "170 70% 45%",
+    "selection-fg":           "210 40% 98%",
+    "scrollbar-thumb":        "214 32% 78%",
+    "scrollbar-track":        "210 40% 96%",
+    "kbd-bg":                 "210 40% 96%",
+    "kbd-border":             "214 32% 78%",
     /* ── Tier C: code surface ──────────────────────────────────── */
     "code-bg":                "210 40% 98%",
     "code-fg":                "222 47% 11%",
     "code-border":            "214 32% 88%",
+    /* ── Tier D: chart palette ─────────────────────────────────── */
+    "chart-1":                "170 70% 45%",      /* teal (primary) */
+    "chart-2":                "25 95% 53%",       /* orange */
+    "chart-3":                "262 83% 58%",      /* violet */
+    "chart-4":                "330 81% 60%",      /* pink */
+    "chart-5":                "48 96% 50%",       /* yellow */
     /* ── Action tokens (PR-4/5) ────────────────────────────────── */
     "action-view":            "170 70% 35%",
     "action-branch":          "25 95% 53%",

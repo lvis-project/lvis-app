@@ -21,6 +21,12 @@ export const BUNDLE_IDS = [
   "lge-light",
   "lge-dark",
   "high-contrast",
+  "catppuccin-mocha",
+  "catppuccin-latte",
+  "nord",
+  "gruvbox-dark-hard",
+  "solarized-light",
+  "rose-pine",
 ] as const;
 
 export type BundleId = (typeof BUNDLE_IDS)[number];

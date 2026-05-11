@@ -125,7 +125,7 @@ export function DeferredQueuePanel({ showEmpty = false, onClose }: DeferredQueue
         </header>
       )}
       {error && (
-        <p className="mb-2 rounded bg-red-500/10 px-2 py-1 text-xs text-red-700 dark:text-red-400">
+        <p className="mb-2 rounded bg-destructive/10 px-2 py-1 text-xs text-destructive">
           {error}
         </p>
       )}
@@ -215,7 +215,7 @@ export function DeferredQueuePanel({ showEmpty = false, onClose }: DeferredQueue
                 <Button
                   size="sm"
                   variant="outline"
-                  className="border-red-500 text-red-700 hover:bg-red-500/10 dark:text-red-400"
+                  className="border-destructive text-destructive hover:bg-destructive/15"
                   disabled={busy}
                   onClick={() => handle(activeEntry.id, "rejected")}
                 >

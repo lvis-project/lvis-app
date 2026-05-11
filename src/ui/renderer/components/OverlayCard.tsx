@@ -105,7 +105,7 @@ export function OverlayCard({
   return (
     <Card
       data-testid="routine-card"
-      className="flex flex-col border-violet-500/40 bg-violet-500/5 shadow-md backdrop-blur"
+      className="flex flex-col border-action-view/40 bg-action-view/5 shadow-md backdrop-blur"
       role="status"
       aria-live="polite"
       aria-atomic
@@ -115,9 +115,9 @@ export function OverlayCard({
           <div className="min-w-0 flex-1">
             <CardTitle className="flex items-center gap-1.5 text-sm">
               {running ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin text-violet-500" />
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-action-view" />
               ) : (
-                <span className="text-violet-500">●</span>
+                <span className="text-action-view">●</span>
               )}
               <span className="truncate">{title}</span>
             </CardTitle>
@@ -139,7 +139,7 @@ export function OverlayCard({
                   <span>·</span>
                   <span
                     data-testid="routine-card-indicator"
-                    className="text-violet-600 dark:text-violet-400"
+                    className="text-action-view"
                   >
                     {queueIndex}/{queueTotal}
                   </span>

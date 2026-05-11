@@ -34,16 +34,40 @@ export const lgeLightBundle: ThemeBundle = {
     warning:                  "48 96% 89%",
     "warning-foreground":     "30 80% 25%",
     success:                  "142 71% 45%",
+    "success-foreground":     "0 0% 100%",
+    /* ── Tier B': status / state ──────────────────────────────── */
+    info:                     "210 90% 50%",
+    "info-foreground":        "0 0% 100%",
+    emphasis:                 "40 96% 50%",     /* amber-gold for star on warm-grey shell */
+    "emphasis-foreground":    "0 0% 10%",
     border:                   "40 10% 78%",    /* Grey 4  #CBC8C2 */
     input:                    "40 10% 78%",
     ring:                     "263 70% 50%",
     "message-user-bg":        "271 76% 76%",   /* #c497ef — lilac user bubble */
     "message-user-fg":        "0 0% 100%",
     "input-bar-bg":           "0 0% 100%",     /* white composer */
+    /* ── Tier B'': surface overlay + interaction ───────────────── */
+    overlay:                  "0 0% 0%",
+    "hover-overlay":          "0 0% 0%",       /* black tint dimmer for light shell */
+    "focus-ring":             "263 70% 50%",
+    "link-fg":                "253 100% 55%",
+    /* ── Tier B''': peripheral system ──────────────────────────── */
+    "selection-bg":           "271 76% 76%",
+    "selection-fg":           "0 0% 15%",
+    "scrollbar-thumb":        "40 10% 65%",
+    "scrollbar-track":        "40 25% 88%",
+    "kbd-bg":                 "44 37% 94%",
+    "kbd-border":             "40 10% 78%",
     /* ── Tier C: code surface ──────────────────────────────────── */
     "code-bg":                "210 40% 98%",
     "code-fg":                "222 47% 11%",
     "code-border":            "214 32% 88%",
+    /* ── Tier D: chart palette ─────────────────────────────────── */
+    "chart-1":                "253 100% 65%",   /* vivid purple */
+    "chart-2":                "1 98% 59%",      /* LG red */
+    "chart-3":                "271 76% 76%",    /* lilac */
+    "chart-4":                "142 71% 45%",    /* green */
+    "chart-5":                "25 95% 53%",     /* orange */
     /* ── Action tokens (PR-4/5) ────────────────────────────────── */
     "action-view":            "263 70% 50%",
     "action-branch":          "25 95% 53%",

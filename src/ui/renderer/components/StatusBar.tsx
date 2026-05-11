@@ -34,17 +34,17 @@ export interface StatusBarProps {
 }
 
 const SEVERITY_DOT: Record<StatusBarSeverity, string> = {
-  info: "bg-blue-400",
-  success: "bg-green-500",
-  warning: "bg-amber-400",
-  error: "bg-red-500",
+  info: "bg-info",
+  success: "bg-success",
+  warning: "bg-warning",
+  error: "bg-destructive",
 };
 
 const SEVERITY_TEXT: Record<StatusBarSeverity, string> = {
   info: "text-muted-foreground",
-  success: "text-green-700 dark:text-green-300",
-  warning: "text-amber-700 dark:text-amber-300",
-  error: "text-red-700 dark:text-red-300",
+  success: "text-success",
+  warning: "text-warning",
+  error: "text-destructive",
 };
 
 export function StatusBar(props: StatusBarProps) {

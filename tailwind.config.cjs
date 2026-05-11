@@ -49,14 +49,28 @@ module.exports = {
           foreground: "hsl(var(--accent-foreground))",
         },
         destructive: {
-          DEFAULT: "hsl(var(--destructive))",
+          DEFAULT: "hsl(var(--destructive) / <alpha-value>)",
           foreground: "hsl(var(--destructive-foreground))",
         },
         warning: {
-          DEFAULT: "hsl(var(--warning))",
+          DEFAULT: "hsl(var(--warning) / <alpha-value>)",
           foreground: "hsl(var(--warning-foreground))",
         },
-        success: "hsl(var(--success))",
+        success: {
+          DEFAULT: "hsl(var(--success) / <alpha-value>)",
+          foreground: "hsl(var(--success-foreground))",
+        },
+        info: {
+          DEFAULT: "hsl(var(--info) / <alpha-value>)",
+          foreground: "hsl(var(--info-foreground))",
+        },
+        emphasis: {
+          DEFAULT: "hsl(var(--emphasis) / <alpha-value>)",
+          foreground: "hsl(var(--emphasis-foreground))",
+        },
+        "action-view": "hsl(var(--action-view) / <alpha-value>)",
+        "action-branch": "hsl(var(--action-branch) / <alpha-value>)",
+        "action-compact": "hsl(var(--action-compact) / <alpha-value>)",
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",

@@ -872,7 +872,7 @@ export function App() {
       {/* Routine session modal opened from OverlayCard "결과 보기" */}
       {routineSessionModal && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-[hsl(var(--overlay)/0.5)] backdrop-blur-sm"
           onClick={() => setRoutineSessionModal(null)}
         >
           <div

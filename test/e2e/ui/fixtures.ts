@@ -50,12 +50,19 @@ export const test = base.extend<ElectronFixtures>({
     }
     // Kill any leftover local-indexer worker from a previous run before launching
     killLocalIndexerWorkers();
+    /* Isolate LVIS user-data state under the per-test temp dir so encrypted
+       secret blobs from a previous dev run on `~/.lvis/secrets/` do not bleed
+       into the test (their Keychain key may have rotated, decryption fails,
+       bootstrap dies). Resolved via the shared `lvisHome()` helper. */
+    const lvisHomeForTest = path.join(userDataDir, 'lvis-state');
+    fs.mkdirSync(lvisHomeForTest, { recursive: true, mode: 0o700 });
     const app = await electron.launch({
       args: [mainEntry, `--user-data-dir=${userDataDir}`, '--no-sandbox'],
       env: {
         ...process.env,
         LVIS_DEV: '1',
         LVIS_E2E: '1',
+        LVIS_HOME: lvisHomeForTest,
         NODE_ENV: 'test',
         ELECTRON_DISABLE_SECURITY_WARNINGS: '1',
       },

@@ -6,9 +6,13 @@
  * applied by writing `data-theme-bundle=<id>` on `<html>`.
  *
  * Token groups:
- *   - Tier B (25): semantic shell + chat surface tokens
- *   - Tier C (3):  code-surface tokens (--code-bg, --code-fg, --code-border)
- *   - Action (3):  PR-4/5 reserved action tokens (--action-view, --action-branch, --action-compact)
+ *   - Tier B  : semantic shell + chat surface tokens
+ *   - Tier B' : status + state tokens (info/success-fg/warning/emphasis)
+ *   - Tier B'': surface overlay + interaction tokens (overlay, hover-overlay, focus-ring, link)
+ *   - Tier B''': peripheral system tokens (selection, scrollbar, kbd)
+ *   - Tier C  : code-surface tokens (--code-bg, --code-fg, --code-border)
+ *   - Tier D  : chart palette (--chart-1..--chart-5) for SVG visualizations
+ *   - Action  : PR-4/5 reserved action tokens (--action-view/-branch/-compact)
  */
 import type { BundleId } from "../../../../shared/theme-bundles.js";
 
@@ -33,18 +37,44 @@ export interface BundleTokens {
   warning: string;
   "warning-foreground": string;
   success: string;
+  "success-foreground": string;
+  /* ── Tier B': status / state ──────────────────────────────── */
+  info: string;
+  "info-foreground": string;
+  emphasis: string;            /* star / pin / highlight (yellow/gold per theme) */
+  "emphasis-foreground": string;
   border: string;
   input: string;
   ring: string;
   "message-user-bg": string;
   "message-user-fg": string;
   "input-bar-bg": string;
-  /* success-fg is intentionally absent from Tier B — no component uses it directly */
+
+  /* ── Tier B'': surface overlay + interaction ───────────────── */
+  overlay: string;             /* modal backdrop dimmer, opacity applied per call */
+  "hover-overlay": string;     /* inline hover dimmer (white on dark / black on light) */
+  "focus-ring": string;        /* keyboard focus outline */
+  "link-fg": string;           /* hyperlink color (may equal primary or differ) */
+
+  /* ── Tier B''': peripheral system tokens ───────────────────── */
+  "selection-bg": string;
+  "selection-fg": string;
+  "scrollbar-thumb": string;
+  "scrollbar-track": string;
+  "kbd-bg": string;
+  "kbd-border": string;
 
   /* ── Tier C: code-surface tokens ────────────────────────────── */
   "code-bg": string;
   "code-fg": string;
   "code-border": string;
+
+  /* ── Tier D: chart palette ──────────────────────────────────── */
+  "chart-1": string;
+  "chart-2": string;
+  "chart-3": string;
+  "chart-4": string;
+  "chart-5": string;
 
   /* ── Action tokens (PR-4/5 reserved) ────────────────────────── */
   "action-view": string;

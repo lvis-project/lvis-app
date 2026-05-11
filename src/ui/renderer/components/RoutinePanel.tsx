@@ -71,7 +71,7 @@ function describeSchedule(routine: RoutineRecord): string {
 function RoutineRow({ routine, onDismiss, onRemove, onTriggerNow, recentlyFired }: RoutineRowProps) {
   return (
     <div
-      className={`rounded-md border p-3 ${recentlyFired ? "border-amber-500/60 bg-amber-500/5" : ""}`}
+      className={`rounded-md border p-3 ${recentlyFired ? "border-warning/60 bg-warning/10" : ""}`}
       data-testid="routine-row"
     >
       <div className="flex items-start justify-between gap-2">
@@ -361,7 +361,7 @@ export function AddRoutineModal({ api, onClose, onAdded }: AddRoutineModalProps)
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[hsl(var(--overlay)/0.5)]"
       data-testid="add-routine-modal"
     >
       <div className="w-full max-w-lg rounded-lg border bg-background p-6 shadow-lg">
@@ -791,7 +791,7 @@ export function RoutinePanel({ api }: RoutinePanelProps) {
 
       {selectedSessionPath && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-[hsl(var(--overlay)/0.4)] p-4"
           data-testid="routine-panel-session-dialog"
         >
           <div className="flex max-h-[85dvh] w-[min(760px,calc(100vw-32px))] min-w-0 flex-col overflow-hidden rounded-xl border bg-card shadow-xl">

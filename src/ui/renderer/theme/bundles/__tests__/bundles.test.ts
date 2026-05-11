@@ -4,7 +4,7 @@ import type { BundleTokens } from "../types.js";
 
 /** All keys required in a BundleTokens object. */
 const REQUIRED_TOKEN_KEYS: ReadonlyArray<keyof BundleTokens> = [
-  /* Tier B — semantic shell (25 tokens) */
+  /* Tier B — semantic shell */
   "background", "foreground",
   "card", "card-foreground",
   "popover", "popover-foreground",
@@ -14,13 +14,25 @@ const REQUIRED_TOKEN_KEYS: ReadonlyArray<keyof BundleTokens> = [
   "accent", "accent-foreground",
   "destructive", "destructive-foreground",
   "warning", "warning-foreground",
-  "success",
+  "success", "success-foreground",
   "border", "input", "ring",
   "message-user-bg", "message-user-fg",
   "input-bar-bg",
-  /* Tier C — code surface (3 tokens) */
+  /* Tier B' — status / state */
+  "info", "info-foreground",
+  "emphasis", "emphasis-foreground",
+  /* Tier B'' — surface overlay + interaction */
+  "overlay", "hover-overlay",
+  "focus-ring", "link-fg",
+  /* Tier B''' — peripheral system */
+  "selection-bg", "selection-fg",
+  "scrollbar-thumb", "scrollbar-track",
+  "kbd-bg", "kbd-border",
+  /* Tier C — code surface */
   "code-bg", "code-fg", "code-border",
-  /* Action tokens PR-4/5 (3 tokens) */
+  /* Tier D — chart palette */
+  "chart-1", "chart-2", "chart-3", "chart-4", "chart-5",
+  /* Action tokens PR-4/5 */
   "action-view", "action-branch", "action-compact",
 ];
 
@@ -28,8 +40,8 @@ const REQUIRED_TOKEN_KEYS: ReadonlyArray<keyof BundleTokens> = [
 const HSL_TRIPLE_RE = /^\d+(?:\.\d+)?\s+\d+(?:\.\d+)?%\s+\d+(?:\.\d+)?%/;
 
 describe("bundle registry", () => {
-  it("exports exactly 6 bundles", () => {
-    expect(BUNDLES).toHaveLength(6);
+  it("exports exactly 12 bundles", () => {
+    expect(BUNDLES).toHaveLength(12);
   });
 
   it("all bundle IDs are unique", () => {

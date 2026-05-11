@@ -356,9 +356,9 @@ function HistoricalEntriesList({
       rendered.push(
         <div
           key={`trigger:${entry.sessionId}`}
-          className="mx-3 my-1 rounded border border-violet-500/20 bg-violet-500/5 px-3 py-2 text-xs"
+          className="mx-3 my-1 rounded border border-action-view/20 bg-action-view/5 px-3 py-2 text-xs"
         >
-          <div className="flex items-center gap-1 text-violet-500 font-medium">
+          <div className="flex items-center gap-1 text-action-view font-medium">
             <span>●</span>
             <span>{envelopeSource ?? entry.summary.slice(0, 60)}</span>
           </div>
@@ -889,15 +889,15 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
                         actions float top-right via absolute positioning so
                         the bubble has no header chrome. */}
                     {starActive ? (
-                      <Star className="absolute right-2 top-2 h-3 w-3 fill-yellow-400 text-yellow-400" />
+                      <Star className="absolute right-2 top-2 h-3 w-3 fill-emphasis text-emphasis" />
                     ) : null}
                     {/* §PR-5: hide mutating actions in view-mode (read-only slice) */}
                     {!viewMode && (
                       <div className="absolute right-2 top-2 hidden gap-1 group-hover:flex bg-message-user/95 rounded">
-                        <button className="rounded p-0.5 hover:bg-black/20" title="편집" onClick={() => setEditingEntryIdx(idx)}><Pencil className="h-3 w-3" /></button>
-                        <button className="rounded p-0.5 hover:bg-black/20" title="분기" onClick={() => void onFork(idx)}><GitBranch className="h-3 w-3" /></button>
-                        <button className="rounded p-0.5 hover:bg-black/20" title="즐겨찾기" onClick={() => void onToggleStar(idx)}>
-                          <Star className={`h-3 w-3 ${starActive ? "fill-yellow-400 text-yellow-400" : ""}`} />
+                        <button className="rounded p-0.5 hover:bg-[hsl(var(--hover-overlay)/0.2)]" title="편집" onClick={() => setEditingEntryIdx(idx)}><Pencil className="h-3 w-3" /></button>
+                        <button className="rounded p-0.5 hover:bg-[hsl(var(--hover-overlay)/0.2)]" title="분기" onClick={() => void onFork(idx)}><GitBranch className="h-3 w-3" /></button>
+                        <button className="rounded p-0.5 hover:bg-[hsl(var(--hover-overlay)/0.2)]" title="즐겨찾기" onClick={() => void onToggleStar(idx)}>
+                          <Star className={`h-3 w-3 ${starActive ? "fill-emphasis text-emphasis" : ""}`} />
                         </button>
                       </div>
                     )}
@@ -971,9 +971,9 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
               rendered.push(
                 <div
                   key={`trigger:${entry.sessionId}`}
-                  className="mx-3 my-1 rounded border border-violet-500/20 bg-violet-500/5 px-3 py-2 text-xs"
+                  className="mx-3 my-1 rounded border border-action-view/20 bg-action-view/5 px-3 py-2 text-xs"
                 >
-                  <div className="flex items-center gap-1 text-violet-500 font-medium">
+                  <div className="flex items-center gap-1 text-action-view font-medium">
                     <span>●</span>
                     <span>{envelopeSource ?? entry.summary.slice(0, 60)}</span>
                   </div>
@@ -1199,7 +1199,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
         </div>
       )}
       {contextOverflowPct >= 0.80 && contextOverflowPct < 0.95 && (
-        <div className="flex w-full max-w-full items-center gap-2 border-t bg-amber-500/10 px-3 py-1.5 text-xs text-amber-600 dark:text-amber-400">
+        <div className="flex w-full max-w-full items-center gap-2 border-t bg-warning/15 px-3 py-1.5 text-xs text-warning">
           <span className="font-semibold">컨텍스트 {Math.round(contextOverflowPct * 100)}% 사용</span>
           <span>— 곧 자동 압축됩니다.</span>
         </div>

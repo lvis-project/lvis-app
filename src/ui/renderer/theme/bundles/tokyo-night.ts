@@ -27,16 +27,40 @@ export const tokyoNightBundle: ThemeBundle = {
     warning:                  "48 97% 77%",
     "warning-foreground":     "30 80% 25%",
     success:                  "142 71% 45%",
+    "success-foreground":     "0 0% 5%",
+    /* ── Tier B': status / state ──────────────────────────────── */
+    info:                     "199 89% 55%",
+    "info-foreground":        "210 40% 98%",
+    emphasis:                 "48 96% 60%",      /* yellow-gold for star/pin */
+    "emphasis-foreground":    "0 0% 5%",
     border:                   "217 33% 17%",
     input:                    "217 33% 17%",
     ring:                     "224.3 76.3% 48%",
     "message-user-bg":        "217.2 91.2% 59.8%",
     "message-user-fg":        "210 40% 98%",
     "input-bar-bg":           "222.2 84% 7%",
+    /* ── Tier B'': surface overlay + interaction ───────────────── */
+    overlay:                  "222 47% 4%",      /* modal backdrop base */
+    "hover-overlay":          "210 40% 98%",     /* white tint for dark shell */
+    "focus-ring":             "217.2 91.2% 70%",
+    "link-fg":                "199 89% 65%",
+    /* ── Tier B''': peripheral system ──────────────────────────── */
+    "selection-bg":           "217.2 91.2% 59.8%",
+    "selection-fg":           "210 40% 98%",
+    "scrollbar-thumb":        "217 33% 28%",
+    "scrollbar-track":        "222.2 84% 7%",
+    "kbd-bg":                 "217 33% 17%",
+    "kbd-border":             "217 33% 28%",
     /* ── Tier C: code surface ──────────────────────────────────── */
     "code-bg":                "222 47% 9%",
     "code-fg":                "210 40% 96%",
     "code-border":            "217 33% 22%",
+    /* ── Tier D: chart palette ─────────────────────────────────── */
+    "chart-1":                "217.2 91.2% 59.8%",  /* blue (primary) */
+    "chart-2":                "142 71% 45%",         /* green */
+    "chart-3":                "25 95% 53%",          /* orange */
+    "chart-4":                "262 83% 58%",         /* violet */
+    "chart-5":                "330 81% 60%",         /* pink */
     /* ── Action tokens (PR-4/5) ────────────────────────────────── */
     "action-view":            "262 83% 58%",
     "action-branch":          "25 95% 53%",

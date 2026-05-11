@@ -58,7 +58,7 @@ export function highlightText(
     parts.push(
       React.createElement(
         "mark",
-        { key: found, className: "bg-yellow-300/60 text-foreground" },
+        { key: found, className: "bg-emphasis/60 text-foreground" },
         text.slice(found, found + query.length),
       ),
     );
