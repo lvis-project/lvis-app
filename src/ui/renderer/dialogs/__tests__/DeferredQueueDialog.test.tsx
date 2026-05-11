@@ -68,12 +68,15 @@ describe("DeferredQueueDialog", () => {
     });
   });
 
-  it("offers an explicit close action", async () => {
-    installDeferredApi(0);
+  it("offers an explicit close action beside decision controls", async () => {
+    installDeferredApi(1);
     const onOpenChange = vi.fn();
 
     render(<DeferredQueueDialog open onOpenChange={onOpenChange} />);
 
+    await waitFor(() => {
+      expect(screen.getAllByText("write_file").length).toBeGreaterThan(0);
+    });
     fireEvent.click(screen.getByText("닫기"));
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
