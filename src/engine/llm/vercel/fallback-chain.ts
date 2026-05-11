@@ -2,9 +2,9 @@
  * D1a — Multi-model fallback chain for transient LLM errors.
  *
  * Wraps any LLMProvider's streamTurn so that on a transient failure (5xx,
- * 429, network-level errors, or first-event timeout) the caller retries the
- * same provider up to five times before being handed events from the next
- * entry in the fallback chain.
+ * 429, or network-level errors) the caller retries the same provider up to
+ * five times before being handed events from the next entry in the fallback
+ * chain.
  *
  * Design constraints:
  *   - AbortError is NOT retried — user cancellation must propagate immediately.
@@ -24,6 +24,9 @@ const log = createLogger("fallback-chain");
 export interface FallbackEntry {
   provider: LLMVendor;
   model: string;
+  baseUrl?: string;
+  vertexProject?: string;
+  vertexLocation?: string;
 }
 
 export interface FallbackAuditLogger {
@@ -49,15 +52,8 @@ export interface FallbackStatus {
   reason?: string;
 }
 
-const FIRST_EVENT_TIMEOUT_MS = 1_000;
+const MIN_RETRY_WINDOW_MS = 1_000;
 const MAX_ATTEMPTS_PER_PROVIDER = 5;
-
-class FirstEventTimeoutError extends Error {
-  constructor(label: string) {
-    super(`${label} first response timed out after ${FIRST_EVENT_TIMEOUT_MS}ms`);
-    this.name = "TimeoutError";
-  }
-}
 
 /** Error categories that must NOT trigger fallback (config bugs → fail fast). */
 function isNonRetryable(err: unknown): boolean {
@@ -69,6 +65,7 @@ function isNonRetryable(err: unknown): boolean {
   // Auth errors (401/403), validation errors (400), model-not-found (404).
   if (/\b(400|401|403|404)\b/.test(msg)) return true;
   if (/api_key|authentication|unauthorized|forbidden|invalid_model|model_not_found/.test(lower)) return true;
+  if (/baseurl is required|project is required|location is required/.test(lower)) return true;
   return false;
 }
 
@@ -80,67 +77,21 @@ function isNonRetryable(err: unknown): boolean {
 async function* attemptStream(
   provider: LLMProvider,
   params: StreamTurnParams,
-  label: string,
 ): AsyncIterable<StreamEvent> {
-  const controller = new AbortController();
-  const abortFromParent = () => controller.abort(params.abortSignal?.reason);
-  if (params.abortSignal?.aborted) {
-    controller.abort(params.abortSignal.reason);
-  } else {
-    params.abortSignal?.addEventListener("abort", abortFromParent, { once: true });
-  }
-
   let firstEvent = true;
-  const iterator = provider.streamTurn({
-    ...params,
-    abortSignal: controller.signal,
-  })[Symbol.asyncIterator]();
-
-  try {
-    while (true) {
-      const nextPromise = iterator.next();
-      let result: IteratorResult<StreamEvent>;
-      if (firstEvent) {
-        let timeout: ReturnType<typeof setTimeout> | undefined;
-        try {
-          result = await Promise.race([
-            nextPromise,
-            new Promise<never>((_, reject) => {
-              timeout = setTimeout(() => reject(new FirstEventTimeoutError(label)), FIRST_EVENT_TIMEOUT_MS);
-            }),
-          ]);
-        } catch (err) {
-          if (err instanceof FirstEventTimeoutError) {
-            controller.abort(err);
-            nextPromise.catch(() => undefined);
-            const closePromise = iterator.return?.();
-            await closePromise?.catch(() => undefined);
-          }
-          throw err;
-        } finally {
-          if (timeout) clearTimeout(timeout);
-        }
-      } else {
-        result = await nextPromise;
+  for await (const ev of provider.streamTurn(params)) {
+    if (firstEvent && ev.type === "error") {
+      // classification "api-key" or "model" = non-retryable
+      const cls = (ev as { type: "error"; classification?: string }).classification ?? "";
+      if (cls === "api-key" || cls === "model") {
+        yield ev;
+        return;
       }
-      if (result.done) return;
-
-      const ev = result.value;
-      if (firstEvent && ev.type === "error") {
-        // classification "api-key" or "model" = non-retryable
-        const cls = (ev as { type: "error"; classification?: string }).classification ?? "";
-        if (cls === "api-key" || cls === "model") {
-          yield ev;
-          return;
-        }
-        // Retryable error event (network / rate-limit / unknown) — throw to trigger retry/fallback.
-        throw Object.assign(new Error(ev.error), { _lvisRetryable: true });
-      }
-      firstEvent = false;
-      yield ev;
+      // Retryable error event (network / rate-limit / unknown) — throw to trigger retry/fallback.
+      throw Object.assign(new Error(ev.error), { _lvisRetryable: true });
     }
-  } finally {
-    params.abortSignal?.removeEventListener("abort", abortFromParent);
+    firstEvent = false;
+    yield ev;
   }
 }
 
@@ -160,7 +111,7 @@ async function* attemptStreamWithRetries(
       maxAttempts: MAX_ATTEMPTS_PER_PROVIDER,
     });
     try {
-      yield* attemptStream(provider, params, label);
+      yield* attemptStream(provider, params);
       return;
     } catch (err) {
       if (isNonRetryable(err)) throw err;
@@ -190,8 +141,7 @@ function waitForAttemptWindow(
   err: unknown,
   abortSignal?: AbortSignal,
 ): Promise<void> {
-  if (err instanceof FirstEventTimeoutError) return Promise.resolve();
-  const remainingMs = Math.max(0, FIRST_EVENT_TIMEOUT_MS - (Date.now() - startedAt));
+  const remainingMs = Math.max(0, MIN_RETRY_WINDOW_MS - (Date.now() - startedAt));
   if (remainingMs <= 0) return Promise.resolve();
   if (abortSignal?.aborted) return Promise.reject(makeAbortError());
   return new Promise((resolve, reject) => {
@@ -269,7 +219,14 @@ export async function* streamWithFallback(
     const entry = chain[i - 1]!;
     const apiKey = getApiKey(entry.provider);
     return {
-      provider: _createProvider({ vendor: entry.provider, apiKey }),
+      provider: _createProvider({
+        vendor: entry.provider,
+        apiKey,
+        model: entry.model,
+        ...(entry.baseUrl ? { baseUrl: entry.baseUrl } : {}),
+        ...(entry.vertexProject ? { vertexProject: entry.vertexProject } : {}),
+        ...(entry.vertexLocation ? { vertexLocation: entry.vertexLocation } : {}),
+      }),
       label: `${entry.provider}/${entry.model}`,
       attemptParams: { ...params, model: entry.model },
     };

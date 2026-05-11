@@ -82,6 +82,34 @@ describe("(a) primary succeeds — no fallback", () => {
     // Factory must not be called — primary succeeded.
     expect(factorySpy).not.toHaveBeenCalled();
   });
+
+  it("waits for a slow first event instead of aborting the primary provider", async () => {
+    vi.useFakeTimers();
+    const primary: LLMProvider = {
+      vendor: "openai" as any,
+      streamTurn: vi.fn(async function* () {
+        await new Promise((resolve) => setTimeout(resolve, 1_500));
+        yield* GOOD_EVENTS;
+      }),
+    };
+    const factorySpy: ProviderFactory = vi.fn(() => makeProvider("azure-foundry", [
+      { type: "text_delta", text: "fallback should not appear" },
+    ]));
+
+    const pending = collect(
+      streamWithFallback(primary, BASE_PARAMS, CHAIN, getApiKey, undefined, factorySpy),
+    );
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(primary.streamTurn).toHaveBeenCalledTimes(1);
+    expect(factorySpy).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(500);
+    const events = await pending;
+
+    expect(events).toEqual(GOOD_EVENTS);
+    expect(factorySpy).not.toHaveBeenCalled();
+  });
 });
 
 // ─── (b) Primary transient error → fallback succeeds ─────────────
@@ -166,27 +194,32 @@ describe("(b) primary transient error → fallback succeeds", () => {
     ]));
   });
 
-  it("first-event timeout follows the same five-attempt retry policy", async () => {
+  it("passes vendor-specific endpoint settings to the fallback provider", async () => {
     vi.useFakeTimers();
     const primary: LLMProvider = {
-      vendor: "claude" as any,
-      streamTurn: vi.fn((params) => (async function* () {
-        await new Promise<never>((_resolve, reject) => {
-          params.abortSignal?.addEventListener("abort", () => {
-            reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
-          }, { once: true });
-        });
-      })()),
+      vendor: "openai" as any,
+      streamTurn: vi.fn(async function* () {
+        yield { type: "error" as const, error: "500 internal server error", classification: "network" };
+      }),
     };
-    const fallbackProvider = makeProvider("openai", GOOD_EVENTS);
+    const fallbackProvider = makeProvider("azure-foundry", GOOD_EVENTS);
     const factory: ProviderFactory = vi.fn(() => fallbackProvider);
+    const chain: FallbackEntry[] = [{
+      provider: "azure-foundry",
+      model: "gpt-5.4-nano",
+      baseUrl: "https://example.openai.azure.com/openai/deployments/gpt/",
+    }];
 
-    const pending = collect(streamWithFallback(primary, BASE_PARAMS, CHAIN, getApiKey, undefined, factory));
+    const pending = collect(streamWithFallback(primary, BASE_PARAMS, chain, getApiKey, undefined, factory));
     await vi.advanceTimersByTimeAsync(5_000);
     const events = await pending;
 
-    expect(primary.streamTurn).toHaveBeenCalledTimes(5);
-    expect(factory).toHaveBeenCalledOnce();
+    expect(factory).toHaveBeenCalledWith({
+      vendor: "azure-foundry",
+      apiKey: "test-key",
+      model: "gpt-5.4-nano",
+      baseUrl: "https://example.openai.azure.com/openai/deployments/gpt/",
+    });
     expect(events).toEqual(GOOD_EVENTS);
   });
 });
@@ -220,6 +253,20 @@ describe("(c) auth error → no fallback, re-throws", () => {
     await expect(
       collect(streamWithFallback(primary, BASE_PARAMS, CHAIN, getApiKey, undefined, factory)),
     ).rejects.toThrow("401 unauthorized");
+
+    expect(factory).not.toHaveBeenCalled();
+  });
+
+  it("configuration errors such as missing baseUrl are not retried", async () => {
+    const primary = makeThrowingProvider(
+      "azure-foundry",
+      new Error("VercelUnifiedProvider(azure-foundry): baseUrl is required"),
+    );
+    const factory: ProviderFactory = vi.fn(() => makeProvider("openai", GOOD_EVENTS));
+
+    await expect(
+      collect(streamWithFallback(primary, BASE_PARAMS, CHAIN, getApiKey, undefined, factory)),
+    ).rejects.toThrow("baseUrl is required");
 
     expect(factory).not.toHaveBeenCalled();
   });

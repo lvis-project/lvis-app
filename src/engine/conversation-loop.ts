@@ -382,9 +382,17 @@ export class ConversationLoop {
         ...(block.vertexProject ? { vertexProject: block.vertexProject } : {}),
         ...(block.vertexLocation ? { vertexLocation: block.vertexLocation } : {}),
       });
-      const chain = llmSettings.fallbackChain.filter(
-        (e) => e.provider && e.model,
-      );
+      const chain = llmSettings.fallbackChain
+        .filter((e) => e.provider && e.model)
+        .map((entry) => {
+          const fallbackBlock = llmSettings.vendors[entry.provider];
+          return {
+            ...entry,
+            ...(fallbackBlock?.baseUrl ? { baseUrl: fallbackBlock.baseUrl } : {}),
+            ...(fallbackBlock?.vertexProject ? { vertexProject: fallbackBlock.vertexProject } : {}),
+            ...(fallbackBlock?.vertexLocation ? { vertexLocation: fallbackBlock.vertexLocation } : {}),
+          };
+        });
       this.provider = new FallbackProvider(
         primary,
         chain,
