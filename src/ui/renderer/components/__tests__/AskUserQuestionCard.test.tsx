@@ -265,7 +265,7 @@ describe("AskUserQuestionCard — multi-step free-text keyboard navigation", () 
       <AskUserQuestionCard api={api as never} request={request} onResolved={vi.fn()} />,
     );
 
-    expect(getByTestId("ask-keyboard-hint").textContent).toContain("답변 이동");
+    expect(getByTestId("ask-keyboard-hint").textContent).toContain("답변/수동입력 이동");
     expect(getByTestId("ask-keyboard-hint").textContent).toContain("질문 이동");
 
     const answerA = getByText("A").closest("button")!;
@@ -291,6 +291,52 @@ describe("AskUserQuestionCard — multi-step free-text keyboard navigation", () 
     });
 
     expect(getByText("두 번째 질문")).toBeTruthy();
+  });
+
+  it("includes free-text input in the answer arrow loop and commits it with Enter", async () => {
+    const api = makeApi();
+    const request = makeRequest({
+      questions: [
+        {
+          question: "참석자",
+          choices: ["알루우", "지수"],
+          allowFreeText: true,
+          placeholder: "직접입력",
+        },
+        { question: "의제", allowFreeText: true },
+      ],
+    });
+
+    const { getByPlaceholderText, getByText } = render(
+      <AskUserQuestionCard api={api as never} request={request} onResolved={vi.fn()} />,
+    );
+
+    const firstChoice = getByText("알루우").closest("button")!;
+    firstChoice.focus();
+    await act(async () => {
+      fireEvent.keyDown(firstChoice, { key: "ArrowUp" });
+    });
+
+    const manualInput = getByPlaceholderText("직접입력") as HTMLInputElement;
+    expect(document.activeElement).toBe(manualInput);
+
+    await act(async () => {
+      fireEvent.keyDown(manualInput, { key: "ArrowUp" });
+    });
+
+    expect(document.activeElement?.textContent).toContain("지수");
+
+    await act(async () => {
+      fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
+    });
+
+    expect(document.activeElement).toBe(manualInput);
+    fireEvent.change(manualInput, { target: { value: "찬우" } });
+    await act(async () => {
+      fireEvent.keyDown(manualInput, { key: "Enter" });
+    });
+
+    expect(getByText("의제")).toBeTruthy();
   });
 });
 
