@@ -134,6 +134,7 @@ export function createSkillLoadTool(deps: SkillLoadToolDeps): Tool {
             id: randomUUID(),
             category: "tool",
             toolName: "skill_load",
+            toolCategory: "meta",
             args: { skillName: skill.name, source: skill.source },
             reason: `사용자 작성 skill '${skill.name}' 을 시스템 프롬프트에 주입합니다. 승인 시 영구적으로 허용됩니다. (현재 본문 sha256 에 바인딩됩니다 — 본문이 변경되면 다시 확인합니다.)`,
             source: "builtin",
