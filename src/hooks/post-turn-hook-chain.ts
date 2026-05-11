@@ -57,7 +57,7 @@ export interface PostTurnHookChainDeps {
    */
   llmProvider?: LLMProvider;
   /**
-   * §PR-3: optional callback invoked when [checkpoint] is detected.
+   * §PR-3: optional callback invoked when a legacy [checkpoint] marker is detected.
    * Caller (typically conversation-loop or IPC bridge) can trigger PR-4 summary.
    */
   onCheckpointSuggested?: (sessionId: string, cleanedOutput: string) => void;
@@ -105,7 +105,7 @@ export class PostTurnHookChain {
       log.warn({ err }, "mark-stale failed");
     }
 
-    // 2. §PR-3: Detect Checkpoint — detectFromStream 호출
+    // 2. §PR-3: Detect legacy checkpoint/title markers — detectFromStream 호출
     //    Run before persistence so durable session history stores the same
     //    cleaned assistant output that the caller and renderer receive.
     let detector: DetectorResult = { cleanedText: ctx.output, newTitle: null, checkpointSuggested: false };
@@ -115,7 +115,7 @@ export class PostTurnHookChain {
       try {
         detector = detectFromStream(ctx.output);
         if (detector.checkpointSuggested) {
-          log.info(`detect-checkpoint: [checkpoint] detected for session ${ctx.sessionId}`);
+          log.info(`detect-checkpoint: legacy [checkpoint] marker stripped for session ${ctx.sessionId}`);
           try {
             this.deps.onCheckpointSuggested?.(ctx.sessionId, detector.cleanedText);
           } catch (cbErr) {
