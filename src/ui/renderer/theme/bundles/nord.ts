@@ -29,7 +29,7 @@ export const nordBundle: ThemeBundle = {
     accent:                   "210 34% 63%",   /* nord9 #81a1c1 */
     "accent-foreground":      "220 16% 22%",
     destructive:              "354 68% 62%",   /* lifted nord11 — original 42% sat read as muddy */
-    "destructive-foreground": "219 28% 92%",
+    "destructive-foreground": "220 16% 8%",
     warning:                  "40 71% 73%",    /* nord13 #ebcb8b */
     "warning-foreground":     "220 16% 22%",
     success:                  "92 28% 65%",    /* nord14 #a3be8c */

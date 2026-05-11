@@ -37,13 +37,13 @@ export const cherryBlossomBundle: ThemeBundle = {
     destructive:              "0 100% 50%",    /* #FF0000 — splash gradient start */
     "destructive-foreground": "0 0% 100%",
     warning:                  "35 91% 45%",
-    "warning-foreground":     "0 0% 100%",
+    "warning-foreground":     "0 0% 5%",
     success:                  "142 65% 50%",
-    "success-foreground":     "0 0% 100%",
+    "success-foreground":     "0 0% 5%",
     info:                     "220 90% 55%",
     "info-foreground":        "0 0% 100%",
     emphasis:                 "35 91% 50%",    /* gold star on white shell */
-    "emphasis-foreground":    "0 0% 100%",
+    "emphasis-foreground":    "0 0% 5%",
     border:                   "340 20% 88%",
     input:                    "340 20% 88%",
     ring:                     "343 92% 49%",

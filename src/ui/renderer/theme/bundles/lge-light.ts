@@ -27,15 +27,15 @@ export const lgeLightBundle: ThemeBundle = {
     secondary:                "30 22% 86%",    /* deeper warm beige — secondary buttons / sidebar */
     "secondary-foreground":   "0 0% 15%",
     muted:                    "40 22% 89%",    /* between card and secondary — muted blocks */
-    "muted-foreground":       "43 3% 43%",     /* Grey 3  #716F6A */
+    "muted-foreground":       "43 8% 28%",     /* darkened for body contrast on 89% L muted */
     accent:                   "25 35% 82%",    /* warmer + deeper — hover / active accent surface */
     "accent-foreground":      "0 0% 15%",
     destructive:              "1 98% 59%",     /* #FD312E — LG red STOP */
     "destructive-foreground": "0 0% 100%",
     warning:                  "35 91% 45%",     /* saturated amber — visible on warm-beige shell */
-    "warning-foreground":     "0 0% 100%",
+    "warning-foreground":     "0 0% 5%",
     success:                  "142 71% 45%",
-    "success-foreground":     "0 0% 100%",
+    "success-foreground":     "0 0% 5%",
     /* ── Tier B': status / state ──────────────────────────────── */
     info:                     "210 90% 50%",
     "info-foreground":        "0 0% 100%",
@@ -45,7 +45,7 @@ export const lgeLightBundle: ThemeBundle = {
     input:                    "30 14% 75%",
     ring:                     "263 70% 50%",
     "message-user-bg":        "271 76% 76%",   /* #c497ef — lilac user bubble */
-    "message-user-fg":        "0 0% 100%",
+    "message-user-fg":        "0 0% 15%",      /* dark on light lilac (was white → contrast ~1.5 fail) */
     "input-bar-bg":           "0 0% 100%",     /* white composer */
     /* ── Tier B'': surface overlay + interaction ───────────────── */
     overlay:                  "0 0% 0%",

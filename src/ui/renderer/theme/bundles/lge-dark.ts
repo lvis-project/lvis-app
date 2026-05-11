@@ -40,14 +40,14 @@ export const lgeDarkBundle: ThemeBundle = {
     "success-foreground":     "0 0% 5%",
     /* ── Tier B': status / state ──────────────────────────────── */
     info:                     "210 90% 60%",
-    "info-foreground":        "0 0% 100%",
+    "info-foreground":        "0 0% 5%",
     emphasis:                 "48 96% 60%",
     "emphasis-foreground":    "0 0% 5%",
     border:                   "25 10% 30%",    /* warm dark border — picks up bundle hue */
     input:                    "25 10% 30%",
     ring:                     "263 70% 50%",
     "message-user-bg":        "271 76% 76%",   /* #c497ef — lilac user bubble */
-    "message-user-fg":        "0 0% 100%",
+    "message-user-fg":        "0 0% 15%",      /* dark on light lilac (was white → contrast ~1.5 fail) */
     "input-bar-bg":           "35 12% 26%",    /* warm elevated composer — matches popover */
     /* ── Tier B'': surface overlay + interaction ───────────────── */
     overlay:                  "0 0% 0%",

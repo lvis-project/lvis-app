@@ -24,19 +24,19 @@ export const catppuccinLatteBundle: ThemeBundle = {
     secondary:                "223 16% 83%",   /* surface0 #ccd0da */
     "secondary-foreground":   "234 16% 35%",
     muted:                    "223 16% 88%",
-    "muted-foreground":       "233 10% 47%",   /* subtext0 #6c6f85 */
+    "muted-foreground":       "233 15% 28%",   /* darkened for body contrast */
     accent:                   "225 14% 77%",   /* surface1 #bcc0cc */
     "accent-foreground":      "234 16% 35%",
     destructive:              "347 87% 56%",   /* brighter latte red — original #d20f39 was muddy on warm cream */
     "destructive-foreground": "0 0% 100%",
     warning:                  "35 77% 49%",    /* yellow #df8e1d */
-    "warning-foreground":     "0 0% 100%",
+    "warning-foreground":     "234 16% 5%",
     success:                  "109 62% 48%",   /* lifted latte green */
-    "success-foreground":     "0 0% 100%",
+    "success-foreground":     "234 16% 5%",
     info:                     "220 91% 54%",   /* blue #1e66f5 */
     "info-foreground":        "0 0% 100%",
     emphasis:                 "35 77% 49%",    /* warmer yellow for light shell */
-    "emphasis-foreground":    "0 0% 100%",
+    "emphasis-foreground":    "234 16% 5%",
     border:                   "225 14% 77%",
     input:                    "225 14% 77%",
     ring:                     "266 85% 58%",

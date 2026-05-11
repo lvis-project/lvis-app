@@ -30,14 +30,14 @@ export const tokyoNightBundle: ThemeBundle = {
     "success-foreground":     "0 0% 5%",
     /* ── Tier B': status / state ──────────────────────────────── */
     info:                     "199 89% 55%",
-    "info-foreground":        "210 40% 98%",
+    "info-foreground":        "0 0% 5%",
     emphasis:                 "48 96% 60%",      /* yellow-gold for star/pin */
     "emphasis-foreground":    "0 0% 5%",
     border:                   "217 33% 17%",
     input:                    "217 33% 17%",
     ring:                     "224.3 76.3% 48%",
     "message-user-bg":        "217.2 91.2% 59.8%",
-    "message-user-fg":        "210 40% 98%",
+    "message-user-fg":        "0 0% 5%",
     "input-bar-bg":           "222.2 84% 7%",
     /* ── Tier B'': surface overlay + interaction ───────────────── */
     overlay:                  "222 47% 4%",      /* modal backdrop base */
