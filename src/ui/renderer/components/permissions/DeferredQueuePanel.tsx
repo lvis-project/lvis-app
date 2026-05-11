@@ -23,9 +23,10 @@ import type { DeferredQueueEntry } from "../../types.js";
 
 export interface DeferredQueuePanelProps {
   showEmpty?: boolean;
+  onClose?: () => void;
 }
 
-export function DeferredQueuePanel({ showEmpty = false }: DeferredQueuePanelProps): ReactElement | null {
+export function DeferredQueuePanel({ showEmpty = false, onClose }: DeferredQueuePanelProps): ReactElement | null {
   const [pending, setPending] = useState<DeferredQueueEntry[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -96,21 +97,16 @@ export function DeferredQueuePanel({ showEmpty = false }: DeferredQueuePanelProp
 
   return (
     <section className="min-w-0 space-y-3" data-testid="deferred-queue-panel">
-      <header className="flex min-w-0 flex-wrap items-center gap-2">
-        <Badge variant="outline" className={`${badgeClassName} shrink-0`}>
-          {queueBadge}
-        </Badge>
-        <h3 className="min-w-0 flex-1 text-sm font-medium">
-          {hasPending
-            ? "백그라운드 변경 승인"
-            : "보류된 승인 요청 없음"}
-        </h3>
-        {hasPending && (
-          <Badge variant="outline" className="shrink-0 text-[11px] text-muted-foreground">
-            {pending.length} pending · {activeIndex + 1} / {pending.length}
+      {!hasPending && (
+        <header className="flex min-w-0 flex-wrap items-center gap-2 pb-1">
+          <Badge variant="outline" className={`${badgeClassName} shrink-0`}>
+            {queueBadge}
           </Badge>
-        )}
-      </header>
+          <h3 className="min-w-0 flex-1 text-base font-semibold">
+            보류된 승인 요청 없음
+          </h3>
+        </header>
+      )}
       {error && (
         <p className="mb-2 rounded bg-red-500/10 px-2 py-1 text-xs text-red-700 dark:text-red-400">
           {error}
@@ -128,22 +124,25 @@ export function DeferredQueuePanel({ showEmpty = false }: DeferredQueuePanelProp
           {activeEntry && (
             <li
               key={activeEntry.id}
-              className="min-w-0 overflow-hidden rounded-lg border bg-background text-sm shadow-sm"
+              className="min-w-0 overflow-hidden text-sm"
               data-testid={`deferred-entry-${activeEntry.id}`}
             >
-              <div className="flex min-w-0 items-start border-b px-3 py-3">
+              <div className="flex min-w-0 items-start pb-3">
                 <div className="min-w-0 flex-1">
                   <div className="flex min-w-0 flex-wrap items-center gap-2">
-                    <h4 className="min-w-0 text-sm font-semibold">
-                      <code>{activeEntry.toolName}</code>
+                    <Badge variant="outline" className={`${badgeClassName} shrink-0`}>
+                      {queueBadge}
+                    </Badge>
+                    <h4 className="min-w-0 flex-1 text-base font-semibold">
+                      백그라운드 변경 승인
                     </h4>
-                    <Badge variant="outline" className={`${levelBadgeClass(activeEntry.verdict.level)} shrink-0`}>
-                      {activeEntry.verdict.level.toUpperCase()}
+                    <Badge variant="outline" className="shrink-0 text-[11px] text-muted-foreground">
+                      {pending.length} pending · {activeIndex + 1} / {pending.length}
                     </Badge>
                   </div>
                 </div>
               </div>
-              <div className="space-y-3 px-3 py-3">
+              <div className="space-y-3">
                 <div className="grid min-w-0 gap-2 sm:grid-cols-2">
                   <SummaryTile label="도구 / 출처">
                     <code>{activeEntry.toolName}</code>
@@ -160,17 +159,20 @@ export function DeferredQueuePanel({ showEmpty = false }: DeferredQueuePanelProp
                   <h4 className="border-b px-3 py-2 text-xs font-semibold">
                     {reviewTitle(activeEntry)}
                   </h4>
-                  <ReviewRow label="사유">
-                    {activeEntry.verdict.level.toUpperCase()} · {activeEntry.verdict.reason}
-                  </ReviewRow>
-                  <ReviewRow label={activeEntry.category === "shell" ? "명령/인자" : "입력"}>
-                    <pre
-                      className="max-h-24 max-w-full overflow-hidden whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed"
-                      data-testid="deferred-entry-input"
-                    >
-                      {activeEntry.inputSummary}
-                    </pre>
-                  </ReviewRow>
+                  {reviewRows(activeEntry).map((row) => (
+                    <ReviewRow key={row.label} label={row.label}>
+                      {row.monospace ? (
+                        <pre
+                          className="max-h-24 max-w-full overflow-hidden whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed"
+                          data-testid={row.testId}
+                        >
+                          {row.value}
+                        </pre>
+                      ) : (
+                        row.value
+                      )}
+                    </ReviewRow>
+                  ))}
                 </div>
                 <details className="min-w-0 rounded-md border bg-muted/20">
                   <summary className="cursor-pointer px-3 py-2 text-xs font-semibold">
@@ -181,7 +183,18 @@ export function DeferredQueuePanel({ showEmpty = false }: DeferredQueuePanelProp
                   </pre>
                 </details>
               </div>
-              <div className="flex flex-wrap justify-end gap-2 border-t px-3 py-3">
+              <div className="mt-4 flex flex-wrap justify-end gap-2 border-t pt-3">
+                {onClose && (
+                  <Button
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                    disabled={busy}
+                    onClick={onClose}
+                  >
+                    닫기
+                  </Button>
+                )}
                 <Button
                   size="sm"
                   variant="outline"
@@ -242,15 +255,119 @@ function reviewBoxClass(level: "low" | "medium" | "high") {
 }
 
 function reviewTitle(entry: DeferredQueueEntry) {
+  if (entry.category === "read") return "읽기 판단근거";
   if (entry.category === "network") return "네트워크 영향범위";
   if (entry.category === "shell") return "명령 영향범위";
   return "작업 영향범위";
 }
 
 function categoryLabel(category: DeferredQueueEntry["category"]) {
-  if (category === "network") return "external send";
-  if (category === "shell") return "command";
-  if (category === "write") return "mutation";
-  if (category === "read") return "read access";
-  return "policy";
+  if (category === "network") return "외부 전송";
+  if (category === "shell") return "명령 실행";
+  if (category === "write") return "변경";
+  if (category === "read") return "읽기";
+  return "정책";
+}
+
+type ReviewBasisRow = {
+  label: string;
+  value: string;
+  monospace?: boolean;
+  testId?: string;
+};
+
+type ParsedSummary = Record<string, unknown>;
+
+function reviewRows(entry: DeferredQueueEntry): ReviewBasisRow[] {
+  const parsed = parseInputSummary(entry.inputSummary);
+  const verdict = `${entry.verdict.level.toUpperCase()} · ${entry.verdict.reason}`;
+  const common = { label: "판단", value: verdict };
+  if (entry.category === "read") {
+    return [
+      { label: "대상", value: pickSummary(parsed, ["path", "paths", "target", "targets", "file", "directory", "resource", "query", "url", "uri"], entry.inputSummary), monospace: true, testId: "deferred-entry-input" },
+      { label: "범위", value: `${entry.source} · ${entry.category} · ${scopeLabel(parsed)}` },
+      { label: "민감도", value: sensitivityLabel(parsed) },
+      { label: "양", value: inputVolumeLabel(entry.inputSummary) },
+      common,
+      { label: "선택", value: "큐에서는 이번 항목 허용 또는 거부만 처리합니다." },
+    ];
+  }
+  if (entry.category === "write") {
+    return [
+      { label: "대상", value: pickSummary(parsed, ["path", "paths", "target", "targets", "file", "configKey", "taskId", "id"], entry.inputSummary), monospace: true, testId: "deferred-entry-input" },
+      { label: "변경", value: pickSummary(parsed, ["operation", "action", "mode", "patch", "content", "body", "text"], "변경 내용은 입력 요약 기준으로 확인합니다."), monospace: true },
+      { label: "영향", value: `${entry.source} write · 파일/설정/사용자 데이터 변경 가능성` },
+      { label: "복구", value: pickSummary(parsed, ["diff", "backup", "rollback", "undo"], "복구 정보는 입력 요약에 명시되지 않음") },
+      common,
+      { label: "선택", value: "큐에서는 이번 항목 허용 또는 거부만 처리합니다." },
+    ];
+  }
+  if (entry.category === "network") {
+    return [
+      { label: "endpoint", value: pickSummary(parsed, ["endpoint", "url", "uri", "host", "baseUrl"], "endpoint 정보는 입력 요약에 명시되지 않음"), monospace: true, testId: "deferred-entry-input" },
+      { label: "method", value: pickSummary(parsed, ["method", "httpMethod"], "method 정보는 입력 요약에 명시되지 않음") },
+      { label: "payload", value: pickSummary(parsed, ["payload", "body", "message", "text", "input", "params", "args"], payloadLabel(entry.inputSummary)), monospace: true },
+      { label: "auth", value: pickSummary(parsed, ["auth", "scope", "scopes", "tenant", "account"], "auth scope 정보는 입력 요약에 명시되지 않음") },
+      common,
+      { label: "선택", value: "큐에서는 이번 항목 허용 또는 거부만 처리합니다." },
+    ];
+  }
+  if (entry.category === "shell") {
+    return [
+      { label: "명령", value: pickSummary(parsed, ["command", "cmd", "args", "script", "argv"], entry.inputSummary), monospace: true, testId: "deferred-entry-input" },
+      { label: "cwd/env", value: pickSummary(parsed, ["cwd", "workingDirectory", "env", "environment"], "cwd/env 정보는 입력 요약에 명시되지 않음"), monospace: true },
+      { label: "부작용", value: "파일 변경, 네트워크 호출, dependency install, background process 가능성을 명령 기준으로 확인합니다." },
+      { label: "제한", value: pickSummary(parsed, ["timeout", "sandbox", "allowedDirectories", "allowedDir"], "제한 정보는 입력 요약에 명시되지 않음") },
+      common,
+      { label: "선택", value: "큐에서는 이번 항목 허용 또는 거부만 처리합니다." },
+    ];
+  }
+  return [
+    { label: "입력", value: entry.inputSummary, monospace: true, testId: "deferred-entry-input" },
+    common,
+    { label: "선택", value: "큐에서는 이번 항목 허용 또는 거부만 처리합니다." },
+  ];
+}
+
+function parseInputSummary(summary: string): ParsedSummary | null {
+  try {
+    const parsed = JSON.parse(summary) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    return parsed as ParsedSummary;
+  } catch {
+    return null;
+  }
+}
+
+function pickSummary(parsed: ParsedSummary | null, keys: string[], emptyText: string): string {
+  if (!parsed) return emptyText;
+  for (const key of keys) {
+    const value = parsed[key];
+    if (value === undefined || value === null || value === "") continue;
+    return formatSummaryValue(value);
+  }
+  return emptyText;
+}
+
+function formatSummaryValue(value: unknown): string {
+  if (typeof value === "string") return value;
+  return JSON.stringify(value);
+}
+
+function scopeLabel(parsed: ParsedSummary | null): string {
+  const scope = pickSummary(parsed, ["scope", "pathScope", "allowedDir", "allowedDirectories"], "");
+  return scope || "scope 정보는 입력 요약 기준";
+}
+
+function sensitivityLabel(parsed: ParsedSummary | null): string {
+  const explicit = pickSummary(parsed, ["sensitivity", "dataClass", "classification"], "");
+  return explicit || "소스 코드, 설정, 토큰, 개인/업무 데이터 포함 가능성";
+}
+
+function inputVolumeLabel(summary: string): string {
+  return `입력 요약 ${summary.length}자`;
+}
+
+function payloadLabel(summary: string): string {
+  return `payload class 는 입력 요약 기준으로 확인 · ${summary.length}자`;
 }
