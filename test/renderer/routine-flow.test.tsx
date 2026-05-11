@@ -41,6 +41,26 @@ describe("Routine flow (Phase 3.3 regression net)", () => {
     });
   });
 
+  it("rehydrates an unacknowledged routine result on mount after restart", async () => {
+    const routineResult = {
+      ...makeRoutineResult(),
+      routineSessionPath: "/tmp/routine-session.jsonl",
+    };
+    const { container, api } = await renderApp({ pendingRoutineResults: [routineResult] });
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="routine-card"]')).toBeTruthy();
+      expect(container.textContent).toContain("daily summary");
+      expect(container.textContent).toContain("결과 보기");
+    });
+    const primary = container.querySelector('[data-testid="overlay-card-primary-action"]') as HTMLButtonElement;
+    await act(async () => {
+      fireEvent.click(primary);
+    });
+    await waitFor(() => {
+      expect(api.acknowledgeRoutineResultV2).toHaveBeenCalledWith(routineResult.id, routineResult.firedAt);
+    });
+  });
+
   it("does not let a delayed replay overwrite a newer live result", async () => {
     let resolveLatest: ((value: unknown) => void) | null = null;
     const stale = { ...makeRoutineResult(), firedAt: new Date(Date.now() - 10_000).toISOString(), summary: "stale summary" };
