@@ -151,7 +151,7 @@ function SingleToolInline({
         {open ? <ChevronDown className="h-3 w-3 flex-shrink-0" /> : <ChevronRight className="h-3 w-3 flex-shrink-0" />}
       </button>
       {open && (
-        <div className="min-w-0 space-y-1 border-t px-3 py-1.5 font-mono text-[10px]">
+        <div className="min-w-0 space-y-1 border-t px-3 py-1.5 font-mono text-[10px] lvis-anim-fade-in">
           {tool.input && (
             <div>
               <div className="mb-0.5 text-[9px] uppercase opacity-60">입력</div>
@@ -220,7 +220,7 @@ export function ToolGroupCard({
   }
 
   return (
-    <div className="min-w-0 w-full max-w-full rounded-md text-[11px] text-muted-foreground">
+    <div className="min-w-0 w-full max-w-full rounded-md text-[11px] text-muted-foreground lvis-anim-message-in">
       <button
         className="flex w-full min-w-0 items-center gap-2 px-3 py-1.5 hover:bg-muted/30"
         onClick={() => setOpen((o) => !o)}
@@ -244,7 +244,7 @@ export function ToolGroupCard({
         {open ? <ChevronDown className="h-3 w-3 flex-shrink-0" /> : <ChevronRight className="h-3 w-3 flex-shrink-0" />}
       </button>
       {open && (
-        <div className="min-w-0 space-y-1 border-t px-3 py-1.5">
+        <div className="min-w-0 space-y-1 border-t px-3 py-1.5 lvis-anim-fade-in">
           {tools.map((tool) => {
             const isExpanded = expandedTools.has(tool.toolUseId);
             return (
@@ -268,7 +268,7 @@ export function ToolGroupCard({
                   )}
                 </button>
                 {isExpanded && (
-                  <div className="min-w-0 space-y-1 border-t px-2 py-1 font-mono text-[10px]">
+                  <div className="min-w-0 space-y-1 border-t px-2 py-1 font-mono text-[10px] lvis-anim-fade-in">
                     {tool.input && (
                       <div>
                         <div className="mb-0.5 text-[9px] uppercase opacity-60">입력</div>

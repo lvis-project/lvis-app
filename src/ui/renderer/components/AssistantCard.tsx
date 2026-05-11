@@ -34,7 +34,7 @@ export function AssistantCard({
   // 가 provider-reported 값을 단일 source 로 표시. 카드 헤더의 ~tok 배지는
   // 한국어 2-3× under-estimate 거짓 정보였음.
   return (
-    <div className="group relative min-w-0 w-full max-w-full overflow-visible rounded-md px-3 py-2 text-sm">
+    <div className="group relative min-w-0 w-full max-w-full overflow-visible rounded-md px-3 py-2 text-sm lvis-anim-message-in">
       {(actions !== undefined || entry.streaming) && (
         <div className="mb-1 flex items-center gap-2 text-[11px] text-muted-foreground">
           {title}

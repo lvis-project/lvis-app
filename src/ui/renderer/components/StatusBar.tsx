@@ -82,7 +82,7 @@ export function StatusBar(props: StatusBarProps) {
         {visibleToast !== null && (() => {
           const toast = visibleToast;
           const clickable = toast.notification !== undefined && typeof onToastClick === "function";
-          const baseClass = `flex min-w-0 items-center gap-1.5 truncate ${SEVERITY_TEXT[toast.severity]}`;
+          const baseClass = `flex min-w-0 items-center gap-1.5 truncate lvis-anim-slide-up ${SEVERITY_TEXT[toast.severity]}`;
           const dot = (
             <span
               className={`h-1.5 w-1.5 shrink-0 rounded-full ${SEVERITY_DOT[toast.severity]}`}
