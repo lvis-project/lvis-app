@@ -105,6 +105,16 @@ export function App() {
   // addFire ref is populated by OverlayContextProvider during render
   // so the IPC subscription below can call it without prop-drilling
   const addFireRef = useRef<import("./context/OverlayContext.js").OverlayContextValue["addFire"] | null>(null);
+  const pushRoutineResult = useCallback((evt: import("../../shared/routines-types.js").RoutineFiredPayload) => {
+    addFireRef.current?.({
+      id: `${evt.id}-${evt.firedAt}`,
+      source: { kind: "routine", routineId: evt.id, firedAt: evt.firedAt },
+      title: evt.title,
+      summary: evt.summary,
+      running: false,
+      routineSessionPath: evt.routineSessionPath,
+    });
+  }, []);
 
   // C1+M4: single subscription for routine IPC events. runningStarted pushes a
   // running OverlayItem immediately (running:true); fired replaces it with the
@@ -149,20 +159,20 @@ export function App() {
       });
     });
 
+    void (async () => {
+      try {
+        const pending = await api.listPendingRoutineResultsV2();
+        for (const result of pending) pushRoutineResult(result);
+      } catch (err) {
+        console.warn("[lvis] listPendingRoutineResults failed:", (err as Error).message);
+      }
+    })();
+
     // M1: fired payload uses explicit allowlist fields only (no ...routine spread)
-    const unsubFired = api.onRoutineFiredV2((evt) => {
-      addFireRef.current?.({
-        id: `${evt.id}-${evt.firedAt}`,
-        source: { kind: "routine", routineId: evt.id, firedAt: evt.firedAt },
-        title: evt.title,
-        summary: evt.summary,
-        running: false,
-        routineSessionPath: evt.routineSessionPath,
-      });
-    });
+    const unsubFired = api.onRoutineFiredV2(pushRoutineResult);
 
     return () => { unsubStarted(); unsubFinished(); unsubFailed(); unsubFired(); };
-  }, [api]);
+  }, [api, pushRoutineResult]);
 
   // Overlay items ref tracks all items pushed via onOverlayShow so
   // handlePluginPrimaryAction can look up pendingPrompt by id without needing
@@ -222,6 +232,15 @@ export function App() {
       void handleAskRef.current(pendingPrompt, "trigger-import");
     },
     [api, insertImportedTriggerEntry],
+  );
+
+  const handleRoutineAcknowledge = useCallback(
+    (routineId: string, firedAt: string) => {
+      void api.acknowledgeRoutineResultV2(routineId, firedAt).catch((err) => {
+        console.warn("[lvis] acknowledgeRoutineResult failed:", (err as Error).message);
+      });
+    },
+    [api],
   );
 
   // Routine session modal opened from OverlayCard "결과 보기".
@@ -799,6 +818,7 @@ export function App() {
             marketplaceUrlReady={marketplaceUrlReady}
             activePluginView={activePluginView ?? null}
             onPluginPrimaryAction={(id) => { void handlePluginPrimaryAction(id); }}
+            onRoutineAcknowledge={handleRoutineAcknowledge}
             onOpenPermissionQueue={() => setDeferredQueueOpen(true)}
           />
         </main>

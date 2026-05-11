@@ -642,6 +642,12 @@ const api = {
   dismissRoutineV2: async (id: string) => ipcRenderer.invoke(ROUTINES_V2.dismiss, id),
   removeRoutineV2: async (id: string) => ipcRenderer.invoke(ROUTINES_V2.remove, id),
   triggerRoutineNowV2: async (id: string) => ipcRenderer.invoke(ROUTINES_V2.triggerNow, id),
+  listPendingRoutineResultsV2: async () =>
+    ipcRenderer.invoke(ROUTINES_V2.pendingResults) as Promise<
+      import("./shared/routines-types.js").RoutineFiredPayload[]
+    >,
+  acknowledgeRoutineResultV2: async (routineId: string, firedAt: string) =>
+    ipcRenderer.invoke(ROUTINES_V2.acknowledgeResult, routineId, firedAt) as Promise<{ ok: boolean; error?: string }>,
   addRoutineV2: async (input: import("./shared/routines-types.js").AddRoutineInput) =>
     ipcRenderer.invoke(ROUTINES_V2.add, input) as Promise<
       { ok: true; routine: import("./shared/routines-types.js").RoutineRecord } | { ok: false; error: string }

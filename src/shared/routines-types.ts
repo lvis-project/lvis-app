@@ -102,6 +102,12 @@ export interface RoutineRecord {
   scope?: RoutineScope;
   createdAt: string;
   lastFiredAt?: string;
+  /**
+   * Last routine result the user explicitly acknowledged in the overlay UI.
+   * When this differs from `lastFiredAt`, the renderer must rehydrate the
+   * routine result card on next launch so completed-but-unseen runs are not lost.
+   */
+  lastResultAcknowledgedAt?: string;
   dismissedAt?: string;
   /**
    * Persistent cron dedup key — ISO string of the UTC minute that last fired.
