@@ -270,6 +270,8 @@ export class MemoryManager {
   private readonly sessionsDir: string;
   private persistentContextWatchers: FSWatcher[] = [];
   private persistentContextReloadTimer: ReturnType<typeof setTimeout> | undefined;
+  private persistentContextPollTimer: ReturnType<typeof setInterval> | undefined;
+  private persistentContextFileState = new Map<string, number>();
   /** §PR-5: Pre-compact snapshots stored here to avoid polluting listSessions scan. */
   private get checkpointsDir(): string {
     return join(this.sessionsDir, ".checkpoints");
@@ -295,15 +297,21 @@ export class MemoryManager {
 
   /** Watch AGENTS.md and MEMORY.md so direct file edits affect the next prompt. */
   startPersistentContextWatcher(): void {
-    if (this.persistentContextWatchers.length > 0) return;
+    if (this.persistentContextWatchers.length > 0 || this.persistentContextPollTimer !== undefined) return;
+    this.snapshotPersistentContextFiles();
     this.watchDirectoryForPersistentContext(this.lvisDir, new Set(["AGENTS.md", "user-preferences.md"]));
     this.watchDirectoryForPersistentContext(this.memoryDir, new Set(["MEMORY.md"]));
+    this.startPersistentContextPoller();
   }
 
   stopPersistentContextWatcher(): void {
     if (this.persistentContextReloadTimer !== undefined) {
       clearTimeout(this.persistentContextReloadTimer);
       this.persistentContextReloadTimer = undefined;
+    }
+    if (this.persistentContextPollTimer !== undefined) {
+      clearInterval(this.persistentContextPollTimer);
+      this.persistentContextPollTimer = undefined;
     }
     for (const watcher of this.persistentContextWatchers) {
       try {
@@ -313,6 +321,7 @@ export class MemoryManager {
       }
     }
     this.persistentContextWatchers = [];
+    this.persistentContextFileState.clear();
   }
 
   // ─── Read API (SystemPromptBuilder에서 사용) ──────
@@ -424,8 +433,10 @@ export class MemoryManager {
 
   /** 기억 삭제 */
   deleteMemory(filename: string): void {
-    const path = join(this.memoryDir, filename);
+    const safeFilename = this.validateDeletableMemoryFilename(filename);
+    const path = join(this.memoryDir, safeFilename);
     if (existsSync(path)) unlinkSync(path);
+    this.removeMemoryIndexEntry(safeFilename);
   }
 
   /** AGENTS.md 업데이트 */
@@ -772,10 +783,53 @@ export class MemoryManager {
       });
       watcher.on("error", (err) => {
         log.warn({ dir, err }, "persistent context watcher failed");
+        this.schedulePersistentContextReload(`${dir}:watcher-error`);
       });
       this.persistentContextWatchers.push(watcher);
     } catch (err) {
       log.warn({ dir, err }, "persistent context watcher unavailable");
+    }
+  }
+
+  private persistentContextFiles(): string[] {
+    return [
+      join(this.lvisDir, "AGENTS.md"),
+      join(this.lvisDir, "user-preferences.md"),
+      join(this.memoryDir, "MEMORY.md"),
+    ];
+  }
+
+  private snapshotPersistentContextFiles(): void {
+    this.persistentContextFileState.clear();
+    for (const path of this.persistentContextFiles()) {
+      this.persistentContextFileState.set(path, this.getFileMtimeMs(path));
+    }
+  }
+
+  private startPersistentContextPoller(): void {
+    if (this.persistentContextPollTimer !== undefined) return;
+    const timer = setInterval(() => {
+      let changed = false;
+      for (const path of this.persistentContextFiles()) {
+        const previous = this.persistentContextFileState.get(path);
+        const current = this.getFileMtimeMs(path);
+        if (previous !== current) {
+          this.persistentContextFileState.set(path, current);
+          changed = true;
+        }
+      }
+      if (changed) this.schedulePersistentContextReload("persistent-context-poll");
+    }, 500);
+    const maybeNodeTimer = timer as ReturnType<typeof setInterval> & { unref?: () => void };
+    maybeNodeTimer.unref?.();
+    this.persistentContextPollTimer = timer;
+  }
+
+  private getFileMtimeMs(path: string): number {
+    try {
+      return existsSync(path) ? statSync(path).mtimeMs : -1;
+    } catch {
+      return -1;
     }
   }
 
@@ -894,6 +948,35 @@ export class MemoryManager {
       writeFileSync(targetPath, lines.join("\n").replace(/\n{4,}/g, "\n\n\n"), "utf-8");
     });
     this.memoryIndex = this.readMemoryIndex();
+  }
+
+  private removeMemoryIndexEntry(filename: string): void {
+    const targetPath = join(this.memoryDir, "MEMORY.md");
+    if (!existsSync(targetPath)) {
+      this.memoryIndex = "";
+      return;
+    }
+    const existing = readFileSync(targetPath, "utf-8");
+    const linkNeedle = `](./${filename})`;
+    const lines = existing.split(/\r?\n/).filter((line) => !line.includes(linkNeedle));
+    writeFileSync(targetPath, lines.join("\n"), "utf-8");
+    this.memoryIndex = this.readMemoryIndex();
+  }
+
+  private validateDeletableMemoryFilename(filename: string): string {
+    if (
+      typeof filename !== "string" ||
+      filename.trim() === "" ||
+      filename.includes("\0") ||
+      basename(filename) !== filename ||
+      !filename.endsWith(".md")
+    ) {
+      throw new Error("deleteMemory: invalid memory filename");
+    }
+    if (filename.toLowerCase() === "memory.md") {
+      throw new Error("deleteMemory: MEMORY.md is an index file and cannot be deleted as a memory entry");
+    }
+    return filename;
   }
 
   private truncateMemoryIndex(content: string): string {

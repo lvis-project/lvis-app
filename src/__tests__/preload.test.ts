@@ -137,4 +137,13 @@ describe("preload — plugin webview asset URLs", () => {
 
     expect(env["debugStream"]).toBe(true);
   });
+
+  it("exposes memoryGetIndex and invokes the memory index IPC channel", async () => {
+    const api = await loadLvisApi();
+
+    expect(typeof api["memoryGetIndex"]).toBe("function");
+    await (api["memoryGetIndex"] as () => Promise<unknown>)();
+
+    expect(mockInvoke).toHaveBeenCalledWith("lvis:memory:index:get");
+  });
 });

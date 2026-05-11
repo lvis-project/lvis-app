@@ -82,6 +82,22 @@ describe("MemoryManager AGENTS.md and MEMORY.md layout", () => {
     expect(mm.getMemoryIndex()).toContain("weekly sync discussion");
   });
 
+  it("removes deleted memories from MEMORY.md and the cached index", async () => {
+    await mm.saveMemory("Meeting Notes", "weekly sync discussion");
+
+    mm.deleteMemory("meeting-notes.md");
+
+    expect(existsSync(join(dir, "memories", "meeting-notes.md"))).toBe(false);
+    const index = readFileSync(join(dir, "memories", "MEMORY.md"), "utf-8");
+    expect(index).not.toContain("[Meeting Notes](./meeting-notes.md)");
+    expect(mm.getMemoryIndex()).not.toContain("weekly sync discussion");
+  });
+
+  it("does not allow MEMORY.md to be deleted as a normal memory entry", () => {
+    expect(() => mm.deleteMemory("MEMORY.md")).toThrow(/MEMORY\.md is an index file/);
+    expect(existsSync(join(dir, "memories", "MEMORY.md"))).toBe(true);
+  });
+
   it("reloads AGENTS.md and MEMORY.md after direct file edits", async () => {
     mm.load();
     mm.startPersistentContextWatcher();

@@ -56,7 +56,7 @@ export function useMemorySearch(api: LvisApi) {
       setLoading(true);
       try {
         const [memoryIndex, notes, sessions] = await Promise.all([
-          api.memoryGetIndex?.() ?? Promise.resolve(""),
+          api.memoryGetIndex(),
           api.memoryListEntries(),
           api.memoryListSessions(),
         ]);
@@ -96,7 +96,7 @@ export function useMemorySearch(api: LvisApi) {
       setLoading(true);
       try {
         const [memoryIndex, notes, sessions] = await Promise.all([
-          api.memoryGetIndex?.() ?? Promise.resolve(""),
+          api.memoryGetIndex(),
           api.memorySearchEntries(query),
           api.memorySearchSessions(query),
         ]);
