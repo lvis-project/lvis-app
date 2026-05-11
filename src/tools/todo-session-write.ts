@@ -28,9 +28,8 @@ export function createTodoSessionWriteTool(store: SessionTodoStore): Tool {
       "status: pending | in_progress | completed | deleted. " +
       "사용자가 본인의 업무·할 일·태스크를 등록·기록·추가해달라는 요청에는 " +
       "이 도구를 사용하지 마세요 — 영구 업무 항목 등록을 지원하는 플러그인 " +
-      "도구 또는 `task_*` 빌트인이 노출되어 있으면 그쪽을 우선 호출하세요. " +
-      "본 도구는 어시스턴트가 다단계 응답을 풀어가는 *내부 단계 추적* " +
-      "용도로만 사용합니다.",
+      "도구가 노출되어 있으면 그쪽을 우선 호출하세요. 본 도구는 어시스턴트가 " +
+      "다단계 응답을 풀어가는 *내부 단계 추적* 용도로만 사용합니다.",
     source: "builtin",
     // H1: category="read" — the assistant's own per-session checklist lives
     // entirely in an in-memory store this conversation owns; there is no
