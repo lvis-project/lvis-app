@@ -101,5 +101,5 @@ export function inputVolumeLabel(summary: string): string {
 }
 
 export function payloadLabel(summary: string): string {
-  return `payload class 는 입력 요약 기준으로 확인 · ${summary.length}자`;
+  return `전송 내용 분류는 입력 요약 기준으로 확인 · ${summary.length}자`;
 }

@@ -8,7 +8,7 @@
  *
  *   1. Three-button choice — "한 번만 허용" / "디렉토리 영구 추가" / "거부".
  *   2. "디렉토리 영구 추가" requires re-typed confirmation (phishing
- *      defense): user must re-type the suggested-parent directory name
+ *      defense): user must re-type the suggested-parent directory path
  *      before the persist button is enabled.
  *   3. Adjacency warnings rendered as a red banner with explicit opt-in.
  *   4. Auto-suggest leaf-parent only — never the broadest common-prefix.
@@ -41,20 +41,13 @@ interface OutOfAllowedDirCardProps {
 }
 
 /**
- * Derive the basename for the re-typed confirmation prompt. If
- * `suggestedParent` is null we use the candidate path so the user still has a
- * deterministic name to confirm.
- *
- * Splits on both POSIX (`/`) and Win32 (`\`) separators so a Windows
- * path like `C:\\Users\\Alice\\Documents` correctly yields
- * `Documents` (and the retype gate is reachable on Windows).
+ * Derive the full path for the re-typed confirmation prompt. A basename-only
+ * gate is ambiguous across unrelated directories with the same leaf name.
  */
 function deriveConfirmName(req: ApprovalRequest): string {
-  const target = req.outOfAllowedDir?.suggestedParent
+  return req.outOfAllowedDir?.suggestedParent
     ?? req.outOfAllowedDir?.candidatePath
     ?? "";
-  const segments = target.split(/[\\/]/).filter(Boolean);
-  return segments[segments.length - 1] ?? target;
 }
 
 export function OutOfAllowedDirCard({
@@ -144,7 +137,7 @@ export function OutOfAllowedDirCard({
           {suggestedParent && (
             <section>
               <p className="mb-1 text-xs font-medium text-muted-foreground">
-                추천 추가 위치 (leaf-parent)
+                추천 추가 디렉토리
               </p>
               <p className="rounded bg-blue-500/10 px-2 py-1 text-sm font-mono text-blue-700 break-all dark:text-blue-400">
                 {suggestedParent}
@@ -184,14 +177,15 @@ export function OutOfAllowedDirCard({
           </section>
         </div>
 
-        <DialogFooter className="flex flex-row justify-end gap-2">
-          <Button variant="ghost" onClick={() => onDecide("deny-once")}>
+        <DialogFooter className="gap-2 sm:gap-2">
+          <Button className="w-full sm:w-auto" variant="ghost" onClick={() => onDecide("deny-once")}>
             거부
           </Button>
-          <Button variant="outline" onClick={() => onDecide("allow-once")}>
+          <Button className="w-full sm:w-auto" variant="outline" onClick={() => onDecide("allow-once")}>
             한 번만 허용
           </Button>
           <Button
+            className="w-full sm:w-auto"
             disabled={!persistEnabled || !suggestedParent}
             onClick={() => {
               if (!suggestedParent) return;

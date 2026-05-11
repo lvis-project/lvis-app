@@ -224,14 +224,14 @@ describe("PermissionManager (B1 persistence)", () => {
     expect(result.layer).toBe(2);
   });
 
-  it("auto MCP tool override allows execution unless global mode is strict", () => {
+  it("auto MCP tool override stays on the category policy path", () => {
     pm.setToolModeOverride("mcp_server__fetch", "auto");
 
     const result = pm.checkDetailed("mcp_server__fetch", "mcp", "network");
 
-    expect(result.decision).toBe("allow");
-    expect(result.reason).toBe("MCP 서버 auto 모드");
-    expect(result.layer).toBe(4);
+    expect(result.decision).toBe("ask");
+    expect(result.reason).toContain("MCP 도구 strict 강제");
+    expect(result.layer).toBe(6);
 
     pm.setMode("strict");
     const strictResult = pm.checkDetailed("mcp_server__fetch", "mcp", "network");

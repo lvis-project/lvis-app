@@ -941,29 +941,36 @@ export class ToolExecutor {
       }
 
       if (headless) {
-        const reviewerResult = await this.dispatchReviewerForHeadless(
-          toolUse.name,
-          source,
-          invocationCategory,
-          reviewerPathFields,
-          finalInput,
-          invocationAllowedScope.directories,
-          requestSensitivePathPattern ? [requestSensitivePathPattern] : [],
-          invocationPermissionContext,
-        );
-        if (reviewerResult.allowed) {
-          return {
-            allowed: true,
-            approvedDirectory: outOfAllowedTarget.filePath,
-            permissionResult: reviewerResult.permissionResult,
-          };
-        }
-        const msg = reviewerResult.message;
+        const deferredQueue = this.permissionManager?.getDeferredQueue();
+        const verdict: RiskVerdict = {
+          level: "high",
+          reason: "headless out-of-allowed-dir requires manual directory approval",
+        };
+        const deferredId = deferredQueue
+          ? await deferredQueue.append({
+            toolName: toolUse.name,
+            source,
+            category: invocationCategory,
+            inputSummary: summarizeInputForDeferred(finalInput),
+            verdict,
+          })
+          : undefined;
+        const permissionResult: PermissionCheckResult = {
+          decision: "deny",
+          reason: "headless out-of-allowed-dir requires manual directory approval",
+          layer: 1,
+          reviewer: { route: "headless", verdict },
+          ...(deferredId ? { deferred: { queueId: deferredId, reviewerVerdict: verdict } } : {}),
+        };
+        const msg =
+          `[권한 보류 — directory] 도구 '${toolUse.name}' (${source}) — ` +
+          "headless 실행 중 허용 디렉토리 외부 경로 접근은 수동 디렉토리 승인 전 실행하지 않습니다." +
+          (deferredId ? ` (deferredId=${deferredId})` : "");
         const durationMs = Date.now() - startTime;
         log.warn(msg);
         emitToolStart(callbacks, toolUse.name, finalInput, meta);
         callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-        await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, reviewerResult.permissionResult, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
+        await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, permissionResult, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
         return { allowed: false, result: { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs } };
       }
 
@@ -1227,7 +1234,10 @@ export class ToolExecutor {
       }
       if (permissionResult.decision === "ask") {
         if (invocationPermissionContext.headless === true) {
-          if (permissionResult.reviewer?.route !== "headless") {
+          const headlessReviewerRoute =
+            permissionResult.reviewer?.route === "headless" ||
+            this.permissionManager?.getMode() === "strict";
+          if (!headlessReviewerRoute) {
             const headlessDeny: PermissionCheckResult = {
               decision: "deny",
               reason: `headless explicit approval unavailable: ${permissionResult.reason}`,
