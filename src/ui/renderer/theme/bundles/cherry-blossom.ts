@@ -38,7 +38,7 @@ export const cherryBlossomBundle: ThemeBundle = {
     "destructive-foreground": "0 0% 100%",
     warning:                  "35 91% 45%",
     "warning-foreground":     "0 0% 100%",
-    success:                  "142 55% 42%",
+    success:                  "142 65% 50%",
     "success-foreground":     "0 0% 100%",
     info:                     "220 90% 55%",
     "info-foreground":        "0 0% 100%",

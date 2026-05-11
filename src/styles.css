@@ -278,7 +278,7 @@
     --muted-foreground:         215 20% 65%;
     --accent:                   217 33% 17%;
     --accent-foreground:        210 40% 98%;
-    --destructive:              0 62.8% 30.6%;
+    --destructive:              0 78% 58%;
     --destructive-foreground:   210 40% 98%;
     --warning:                  38 92% 62%;
     --warning-foreground:       0 0% 10%;
@@ -334,7 +334,7 @@
     --muted-foreground:         215 20% 65%;
     --accent:                   217 33% 17%;
     --accent-foreground:        210 40% 98%;
-    --destructive:              0 62.8% 30.6%;
+    --destructive:              0 78% 58%;
     --destructive-foreground:   210 40% 98%;
     --warning:                  38 92% 62%;
     --warning-foreground:       0 0% 10%;
@@ -432,19 +432,19 @@
 
   /* ── 4. lge-light ─ light + LG warm-grey + vivid purple + LG red ─── */
   :root[data-theme-bundle="lge-light"] {
-    --background:               40 25% 92%;    /* Grey 6  #F0ECE4 */
+    --background:               40 25% 92%;    /* Grey 6  #F0ECE4 — canvas */
     --foreground:               0 0% 15%;      /* Grey 1  #262626 */
-    --card:                     40 25% 92%;
+    --card:                     40 35% 96%;    /* lifted warm ivory */
     --card-foreground:          0 0% 15%;
     --popover:                  0 0% 100%;
     --popover-foreground:       0 0% 15%;
     --primary:                  253 100% 65%;  /* #734dff — SEND */
     --primary-foreground:       0 0% 100%;
-    --secondary:                44 37% 94%;    /* Grey 7  #F6F3EB */
+    --secondary:                30 22% 86%;
     --secondary-foreground:     0 0% 15%;
-    --muted:                    44 37% 94%;
+    --muted:                    40 22% 89%;
     --muted-foreground:         43 3% 43%;     /* Grey 3  #716F6A */
-    --accent:                   44 37% 94%;
+    --accent:                   25 35% 82%;
     --accent-foreground:        0 0% 15%;
     --destructive:              1 98% 59%;     /* #FD312E — LG red STOP */
     --destructive-foreground:   0 0% 100%;
@@ -456,22 +456,22 @@
     --info-foreground:          0 0% 100%;
     --emphasis:                 40 96% 50%;
     --emphasis-foreground:      0 0% 10%;
-    --border:                   40 10% 78%;    /* Grey 4  #CBC8C2 */
-    --input:                    40 10% 78%;
+    --border:                   30 14% 75%;
+    --input:                    30 14% 75%;
     --ring:                     263 70% 50%;
     --message-user-bg:          271 76% 76%;   /* #c497ef — lilac user bubble */
     --message-user-fg:          0 0% 100%;
-    --input-bar-bg:             0 0% 100%;     /* white composer */
+    --input-bar-bg:             0 0% 100%;
     --overlay:                  0 0% 0%;
     --hover-overlay:            0 0% 0%;
     --focus-ring:               263 70% 50%;
     --link-fg:                  253 100% 55%;
     --selection-bg:             271 76% 76%;
     --selection-fg:             0 0% 15%;
-    --scrollbar-thumb:          40 10% 65%;
-    --scrollbar-track:          40 25% 88%;
-    --kbd-bg:                   44 37% 94%;
-    --kbd-border:               40 10% 78%;
+    --scrollbar-thumb:          30 14% 65%;
+    --scrollbar-track:          40 22% 89%;
+    --kbd-bg:                   40 22% 89%;
+    --kbd-border:               30 14% 75%;
     --code-bg:                  210 40% 98%;
     --code-fg:                  222 47% 11%;
     --code-border:              214 32% 88%;
@@ -488,19 +488,19 @@
 
   /* ── 5. lge-dark ── dark + LG warm-grey-1 + vivid purple + LG red ── */
   :root[data-theme-bundle="lge-dark"] {
-    --background:               0 0% 15%;      /* Grey 1  #262626 */
+    --background:               0 0% 15%;      /* Grey 1  #262626 — canvas */
     --foreground:               44 37% 94%;    /* Grey 7  #F6F3EB */
-    --card:                     0 0% 18%;
+    --card:                     30 8% 20%;     /* warm-grey lifted card */
     --card-foreground:          44 37% 94%;
-    --popover:                  0 0% 22%;
+    --popover:                  35 12% 26%;    /* warmest, most elevated */
     --popover-foreground:       44 37% 94%;
     --primary:                  253 100% 65%;  /* #734dff — SEND */
     --primary-foreground:       0 0% 100%;
-    --secondary:                0 0% 20%;
+    --secondary:                20 6% 23%;
     --secondary-foreground:     44 37% 94%;
-    --muted:                    0 0% 20%;
-    --muted-foreground:         40 5% 60%;
-    --accent:                   0 0% 20%;
+    --muted:                    15 5% 19%;
+    --muted-foreground:         40 8% 64%;
+    --accent:                   30 15% 28%;
     --accent-foreground:        44 37% 94%;
     --destructive:              1 98% 59%;     /* #FD312E — LG red STOP */
     --destructive-foreground:   0 0% 100%;
@@ -512,22 +512,22 @@
     --info-foreground:          0 0% 100%;
     --emphasis:                 48 96% 60%;
     --emphasis-foreground:      0 0% 5%;
-    --border:                   0 0% 28%;
-    --input:                    0 0% 28%;
+    --border:                   25 10% 30%;
+    --input:                    25 10% 30%;
     --ring:                     263 70% 50%;
     --message-user-bg:          271 76% 76%;   /* #c497ef — lilac user bubble */
     --message-user-fg:          0 0% 100%;
-    --input-bar-bg:             0 0% 22%;      /* elevated composer */
+    --input-bar-bg:             35 12% 26%;
     --overlay:                  0 0% 0%;
     --hover-overlay:            44 37% 94%;
     --focus-ring:               263 70% 65%;
     --link-fg:                  253 100% 75%;
     --selection-bg:             271 76% 76%;
     --selection-fg:             0 0% 15%;
-    --scrollbar-thumb:          0 0% 32%;
-    --scrollbar-track:          0 0% 22%;
-    --kbd-bg:                   0 0% 20%;
-    --kbd-border:               0 0% 28%;
+    --scrollbar-thumb:          25 8% 34%;
+    --scrollbar-track:          30 8% 20%;
+    --kbd-bg:                   15 5% 19%;
+    --kbd-border:               25 10% 30%;
     --code-bg:                  222 47% 9%;
     --code-fg:                  210 40% 96%;
     --code-border:              217 33% 22%;
@@ -670,11 +670,11 @@
     --muted-foreground:         233 10% 47%;
     --accent:                   225 14% 77%;
     --accent-foreground:        234 16% 35%;
-    --destructive:              347 87% 44%;
+    --destructive:              347 87% 56%;
     --destructive-foreground:   0 0% 100%;
     --warning:                  35 77% 49%;
     --warning-foreground:       0 0% 100%;
-    --success:                  109 58% 40%;
+    --success:                  109 62% 48%;
     --success-foreground:       0 0% 100%;
     --info:                     220 91% 54%;
     --info-foreground:          0 0% 100%;
@@ -726,7 +726,7 @@
     --muted-foreground:         219 28% 75%;
     --accent:                   210 34% 63%;
     --accent-foreground:        220 16% 22%;
-    --destructive:              354 42% 56%;
+    --destructive:              354 68% 62%;
     --destructive-foreground:   219 28% 92%;
     --warning:                  40 71% 73%;
     --warning-foreground:       220 16% 22%;
@@ -788,7 +788,7 @@
     --warning-foreground:       195 7% 12%;
     --success:                  61 66% 44%;
     --success-foreground:       195 7% 12%;
-    --info:                     175 15% 58%;
+    --info:                     195 55% 62%;
     --info-foreground:          195 7% 12%;
     --emphasis:                 41 95% 58%;
     --emphasis-foreground:      195 7% 12%;
@@ -840,9 +840,9 @@
     --accent-foreground:        44 87% 94%;
     --destructive:              1 71% 52%;
     --destructive-foreground:   44 87% 94%;
-    --warning:                  45 100% 35%;
+    --warning:                  42 95% 45%;
     --warning-foreground:       44 87% 94%;
-    --success:                  68 100% 30%;
+    --success:                  78 78% 42%;
     --success-foreground:       44 87% 94%;
     --info:                     205 69% 49%;
     --info-foreground:          44 87% 94%;
@@ -954,7 +954,7 @@
     --destructive-foreground:   0 0% 100%;
     --warning:                  35 91% 45%;
     --warning-foreground:       0 0% 100%;
-    --success:                  142 55% 42%;
+    --success:                  142 65% 50%;
     --success-foreground:       0 0% 100%;
     --info:                     220 90% 55%;
     --info-foreground:          0 0% 100%;
@@ -1006,7 +1006,7 @@
     --muted-foreground:         215 20% 65%;
     --accent:                   217 33% 17%;
     --accent-foreground:        210 40% 98%;
-    --destructive:              0 62.8% 30.6%;
+    --destructive:              0 78% 58%;
     --destructive-foreground:   210 40% 98%;
     --warning:                  38 92% 62%;
     --warning-foreground:       0 0% 10%;

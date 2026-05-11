@@ -30,9 +30,9 @@ export const solarizedLightBundle: ThemeBundle = {
     "accent-foreground":      "44 87% 94%",
     destructive:              "1 71% 52%",     /* red #dc322f */
     "destructive-foreground": "44 87% 94%",
-    warning:                  "45 100% 35%",   /* yellow #b58900 */
+    warning:                  "42 95% 45%",    /* lifted Schoonover yellow */
     "warning-foreground":     "44 87% 94%",
-    success:                  "68 100% 30%",   /* green #859900 */
+    success:                  "78 78% 42%",    /* lifted out of olive territory */
     "success-foreground":     "44 87% 94%",
     info:                     "205 69% 49%",   /* blue */
     "info-foreground":        "44 87% 94%",

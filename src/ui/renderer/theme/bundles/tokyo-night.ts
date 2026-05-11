@@ -22,7 +22,7 @@ export const tokyoNightBundle: ThemeBundle = {
     "muted-foreground":       "215 20% 65%",
     accent:                   "217 33% 17%",
     "accent-foreground":      "210 40% 98%",
-    destructive:              "0 62.8% 30.6%",
+    destructive:              "0 78% 58%",
     "destructive-foreground": "210 40% 98%",
     warning:                  "38 92% 62%",     /* amber-400 ish — vivid on dark navy */
     "warning-foreground":     "0 0% 10%",

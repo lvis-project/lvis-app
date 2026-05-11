@@ -34,7 +34,7 @@ export const gruvboxDarkHardBundle: ThemeBundle = {
     "warning-foreground":     "195 7% 12%",
     success:                  "61 66% 44%",    /* green #b8bb26 */
     "success-foreground":     "195 7% 12%",
-    info:                     "175 15% 58%",   /* blue #83a598 */
+    info:                     "195 55% 62%",   /* warmer cyan — original gruvbox blue was washed out */
     "info-foreground":        "195 7% 12%",
     emphasis:                 "41 95% 58%",
     "emphasis-foreground":    "195 7% 12%",

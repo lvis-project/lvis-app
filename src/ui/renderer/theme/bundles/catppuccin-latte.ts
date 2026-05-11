@@ -27,11 +27,11 @@ export const catppuccinLatteBundle: ThemeBundle = {
     "muted-foreground":       "233 10% 47%",   /* subtext0 #6c6f85 */
     accent:                   "225 14% 77%",   /* surface1 #bcc0cc */
     "accent-foreground":      "234 16% 35%",
-    destructive:              "347 87% 44%",   /* red #d20f39 */
+    destructive:              "347 87% 56%",   /* brighter latte red — original #d20f39 was muddy on warm cream */
     "destructive-foreground": "0 0% 100%",
     warning:                  "35 77% 49%",    /* yellow #df8e1d */
     "warning-foreground":     "0 0% 100%",
-    success:                  "109 58% 40%",   /* green #40a02b */
+    success:                  "109 62% 48%",   /* lifted latte green */
     "success-foreground":     "0 0% 100%",
     info:                     "220 91% 54%",   /* blue #1e66f5 */
     "info-foreground":        "0 0% 100%",

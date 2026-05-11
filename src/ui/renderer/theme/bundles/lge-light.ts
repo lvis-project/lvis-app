@@ -15,19 +15,20 @@ export const lgeLightBundle: ThemeBundle = {
   highContrast: false,
   tokens: {
     /* ── Tier B: semantic shell ──────────────────────────────────── */
-    background:               "40 25% 92%",    /* Grey 6  #F0ECE4 */
+    /* Surface elevation (5-tier richness — was flat single-shade before) */
+    background:               "40 25% 92%",    /* Grey 6  #F0ECE4 — canvas */
     foreground:               "0 0% 15%",      /* Grey 1  #262626 */
-    card:                     "40 25% 92%",
+    card:                     "40 35% 96%",    /* lifted warm ivory — chat bubble + panel surface */
     "card-foreground":        "0 0% 15%",
-    popover:                  "0 0% 100%",
+    popover:                  "0 0% 100%",     /* pure white — dropdowns / floating */
     "popover-foreground":     "0 0% 15%",
     primary:                  "253 100% 65%",  /* #734dff — SEND */
     "primary-foreground":     "0 0% 100%",
-    secondary:                "44 37% 94%",    /* Grey 7  #F6F3EB */
+    secondary:                "30 22% 86%",    /* deeper warm beige — secondary buttons / sidebar */
     "secondary-foreground":   "0 0% 15%",
-    muted:                    "44 37% 94%",
+    muted:                    "40 22% 89%",    /* between card and secondary — muted blocks */
     "muted-foreground":       "43 3% 43%",     /* Grey 3  #716F6A */
-    accent:                   "44 37% 94%",
+    accent:                   "25 35% 82%",    /* warmer + deeper — hover / active accent surface */
     "accent-foreground":      "0 0% 15%",
     destructive:              "1 98% 59%",     /* #FD312E — LG red STOP */
     "destructive-foreground": "0 0% 100%",
@@ -40,8 +41,8 @@ export const lgeLightBundle: ThemeBundle = {
     "info-foreground":        "0 0% 100%",
     emphasis:                 "40 96% 50%",     /* amber-gold for star on warm-grey shell */
     "emphasis-foreground":    "0 0% 10%",
-    border:                   "40 10% 78%",    /* Grey 4  #CBC8C2 */
-    input:                    "40 10% 78%",
+    border:                   "30 14% 75%",    /* warm Grey 4 — visible against 92% bg */
+    input:                    "30 14% 75%",
     ring:                     "263 70% 50%",
     "message-user-bg":        "271 76% 76%",   /* #c497ef — lilac user bubble */
     "message-user-fg":        "0 0% 100%",
@@ -54,10 +55,10 @@ export const lgeLightBundle: ThemeBundle = {
     /* ── Tier B''': peripheral system ──────────────────────────── */
     "selection-bg":           "271 76% 76%",
     "selection-fg":           "0 0% 15%",
-    "scrollbar-thumb":        "40 10% 65%",
-    "scrollbar-track":        "40 25% 88%",
-    "kbd-bg":                 "44 37% 94%",
-    "kbd-border":             "40 10% 78%",
+    "scrollbar-thumb":        "30 14% 65%",
+    "scrollbar-track":        "40 22% 89%",
+    "kbd-bg":                 "40 22% 89%",
+    "kbd-border":             "30 14% 75%",
     /* ── Tier C: code surface ──────────────────────────────────── */
     "code-bg":                "210 40% 98%",
     "code-fg":                "222 47% 11%",
