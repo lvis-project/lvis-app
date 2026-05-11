@@ -2635,6 +2635,8 @@ stateDiagram-v2
 
 **(2026-05-05 Phase 4)** `task.*` namespace 는 host-side owner 삭제로 함께 폐기됨. `TaskService`, `TaskDeadlinePoller`, `TaskView`, sidebar Tasks 탭, `lvis:tasks:*` IPC 채널, preload bridge 메서드 전체 제거 완료. tasks-plugin-split 은 COMPLETE (host out, agent-hub in).
 
+**(2026-05-11 follow-up)** `task.*` 는 `PUBLIC_EVENT_NAMESPACES` 에서도 제거되었고, 그 자리에 `agent_hub` 가 승격됐다. 후속 task-도메인 시그널 (마감 임박 등) 은 agent-hub 의 plugin-bus 이벤트 `agent_hub.work_item.due_soon` (v0.3.7+) 으로 발행되어 `lvis-plugin-work-proactive` 의 `work-item-due-soon` brain detector (v0.2.5+) 가 소비한다. 새 owner 가 plugin 인 만큼 publisher 사이드 capability 도 `agent_hub` 에 대해 별도 gating 하지 않는다 — HostApi pluginId 식별로 cross-plugin spoof 가 차단됨.
+
 **Plugin-Owned OAuth Authentication (PR 3 — 신 정책)**
 
 PR 3 에서 Microsoft Graph 인증이 호스트에서 플러그인으로 이전되었다. 이는 §9.4a 의 일반 정책 — *플러그인은 HostApi 만으로 호스트 자원 접근* — 에 대한 정당한 예외이며, 이후 다른 OAuth-기반 플러그인 (Slack / Notion / Google 등) 도 동일 패턴을 따른다.
