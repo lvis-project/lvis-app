@@ -574,7 +574,7 @@ export async function bootstrap(
     // Emit running-started/finished so renderer can show progress indicator.
     // createSession runs before runningStarted — abort if it throws.
     void (async () => {
-      const firedAt = new Date().toISOString();
+      const firedAt = routine.lastFiredAt ?? new Date().toISOString();
       const title = routine.title ?? routine.notificationTitle ?? routine.id.slice(0, 8);
 
       // createSession first — if it fails, abort and emit failed event.
@@ -671,7 +671,7 @@ export async function bootstrap(
     // fire consistently across both execution modes.
     // Explicit allowlist — no ...routine spread to prevent prePrompt/notificationBody leak.
     try {
-      const firedAt = new Date().toISOString();
+      const firedAt = routine.lastFiredAt ?? new Date().toISOString();
       const title = routine.title ?? routine.notificationTitle ?? routine.id.slice(0, 8);
       getMainWindow()?.webContents.send(ROUTINES_V2.fired, {
         id: routine.id,
