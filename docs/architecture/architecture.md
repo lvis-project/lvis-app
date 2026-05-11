@@ -2453,7 +2453,7 @@ graph TB
 | `deployment` | `"managed" \| "user"` | managed 는 ed25519 서명 필수 (fail-closed); user 는 warn-on-missing. |
 | `startupTimeoutMs` | integer (1~60000) | `Promise.race` 기반 start() 하드 타임아웃. 초과 시 fail-soft drop. |
 | `startupTools` | `string[]` (subset of `tools[]`) | boot 시 자동 호출되는 tool 이름 (백그라운드 watcher 등). |
-| `eventSubscriptions` | `string[]` | 호스트 이벤트 구독 대상. `memory.private.*` / `settings.apiKey.*` / `audit.*` / `dlp.*` (`PLUGIN_PRIVATE_NAMESPACES`) 는 **거부**. public namespace (`meeting` / `calendar` / `email` / `index` / `agent_hub`) 는 허용, 그 외는 warn. (2026-05-11: `task` 는 host owner 폐기로 retire, `agent_hub` 가 첫 plugin-owned public namespace 로 승격.) |
+| `eventSubscriptions` | `string[]` | 호스트 이벤트 구독 대상. `memory.private.*` / `settings.apiKey.*` / `audit.*` / `dlp.*` (`PLUGIN_PRIVATE_NAMESPACES`) 는 **거부**. public namespace (`meeting` / `calendar` / `email` / `index`) 는 허용, 그 외는 warn. (2026-05-11: `task` 는 host owner 폐기로 retire. 플러그인-소유 namespace 는 host 가 의도적으로 알지 않으므로 신규 추가 안 함 — open-source-readiness 룰.) |
 | `notificationEvents` | `Array<{ event, titleField?, bodyField? }>` | `registerPluginNotifications()` 가 manifest 만 읽어 OS 알림 핸들러를 자동 배선. |
 | `keywords` | `Array<{ keyword, skillId }>` | boot 시 KeywordEngine 에 등록. |
 | `ui` | `PluginUiExtension[]` | UI slot 마운트 명세. slot 현재 `"sidebar"` 만 지원. |
@@ -2635,7 +2635,7 @@ stateDiagram-v2
 
 **(2026-05-05 Phase 4)** `task.*` namespace 는 host-side owner 삭제로 함께 폐기됨. `TaskService`, `TaskDeadlinePoller`, `TaskView`, sidebar Tasks 탭, `lvis:tasks:*` IPC 채널, preload bridge 메서드 전체 제거 완료. tasks-plugin-split 은 COMPLETE (host out, agent-hub in).
 
-**(2026-05-11 follow-up)** `task.*` 는 `PUBLIC_EVENT_NAMESPACES` 에서도 제거되었고, 그 자리에 `agent_hub` 가 승격됐다. 후속 task-도메인 시그널 (마감 임박 등) 은 agent-hub 의 plugin-bus 이벤트 `agent_hub.work_item.due_soon` (v0.3.7+) 으로 발행되어 `lvis-plugin-work-proactive` 의 `work-item-due-soon` brain detector (v0.2.5+) 가 소비한다. 새 owner 가 plugin 인 만큼 publisher 사이드 capability 도 `agent_hub` 에 대해 별도 gating 하지 않는다 — HostApi pluginId 식별로 cross-plugin spoof 가 차단됨.
+**(2026-05-11 follow-up)** `task.*` 는 `PUBLIC_EVENT_NAMESPACES` 에서도 제거되었다. 후속 task-도메인 시그널 (마감 임박 등) 은 플러그인 측 plugin-bus 이벤트로 발행되어 다른 플러그인 (예: brain detector) 이 소비한다. 플러그인-소유 namespace 는 host 가 의도적으로 모르므로 (`open-source-readiness` — 회사/벤더 specifics 는 host source 가 아닌 플러그인/매니페스트에) `PUBLIC_EVENT_NAMESPACES` 에 별도 등록하지 않는다. 구독 측 플러그인은 load-time 에 `namespace drift` warn 한 줄을 받는데, 이는 기능 결함이 아니라 의도된 "host 가 이 namespace 를 별도로 보증하지 않는다" 신호이다 (HostApi pluginId 식별로 emit 측 cross-plugin spoof 는 별도로 차단됨 — `boot/steps/plugin-runtime.ts` 의 emitEvent).
 
 **Plugin-Owned OAuth Authentication (PR 3 — 신 정책)**
 
