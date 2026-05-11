@@ -51,8 +51,8 @@ import { maskSensitiveData } from "../audit/dlp-filter.js";
 import type { RiskVerdict } from "../permissions/reviewer/risk-classifier.js";
 import { BashAstValidator } from "../main/bash-ast-validator.js";
 import {
-  validateShellCommandPathPolicy,
-  validateShellWorkingDirectory,
+  findShellPathPolicyViolation,
+  type ShellPathPolicyViolation,
 } from "./shell-path-policy.js";
 import { createLogger } from "../lib/logger.js";
 const log = createLogger("executor");
@@ -134,25 +134,19 @@ function shellPathPolicyViolation(
   finalInput: Record<string, unknown>,
   sandboxRoot: string,
   allowedDirectories: readonly string[],
-): string | null {
+): ShellPathPolicyViolation | null {
   const command = finalInput.command;
   if (typeof command !== "string" || command.length === 0) {
-    return "Shell path policy: missing command string";
+    return { kind: "invalid-path", reason: "Shell path policy: missing command string" };
   }
   const cwdValue = finalInput.cwd;
   if (cwdValue !== undefined && typeof cwdValue !== "string") {
-    return "Shell path policy: cwd must be a string when provided";
+    return { kind: "invalid-path", reason: "Shell path policy: cwd must be a string when provided" };
   }
   const resolvedCwd = cwdValue
     ? pathResolve(sandboxRoot, cwdValue)
     : sandboxRoot;
-  const cwdViolation = validateShellWorkingDirectory(
-    resolvedCwd,
-    sandboxRoot,
-    allowedDirectories,
-  );
-  if (cwdViolation) return cwdViolation;
-  return validateShellCommandPathPolicy(
+  return findShellPathPolicyViolation(
     command,
     resolvedCwd,
     sandboxRoot,
@@ -843,18 +837,188 @@ export class ToolExecutor {
     let invocationAllowedScope = buildAllowedScope(invocationPermissionContext.additionalDirectories);
     let invocationRuntimeAllowedDirectories = buildRuntimeAllowedDirectories(invocationPermissionContext.additionalDirectories);
 
-    if (invocationCategory === "shell") {
-      const shellPathViolation = shellPathPolicyViolation(
-        finalInput,
-        executionCwd,
-        invocationRuntimeAllowedDirectories,
+    const requestOutOfAllowedDirectoryAccess = async (
+      outOfAllowedTarget: { filePath: string; canonicalPath: string },
+      dirLayerResult: PermissionCheckResult,
+      requestSensitivePathPattern: string | null,
+      reviewerPathFields: readonly string[],
+    ): Promise<
+      | { allowed: true; approvedDirectory: string; permissionResult?: PermissionCheckResult }
+      | { allowed: false; result: ToolResult }
+    > => {
+      const headless = invocationPermissionContext.headless === true;
+      const trustOrigin = invocationPermissionContext.trustOrigin;
+      const validation = validateDirectoryAddition(outOfAllowedTarget.canonicalPath);
+      const suggestedParent = pickClosestParent(
+        outOfAllowedTarget.canonicalPath,
+        invocationAllowedScope.directories,
       );
-      if (shellPathViolation) {
-        const msg = `[Shell 경로 정책 차단] 도구 '${toolUse.name}' — ${shellPathViolation}`;
+
+      if (this.approvalGate && !headless) {
+        const approvalRequest = {
+          id: randomUUID(),
+          category: "tool" as const,
+          kind: "out-of-allowed-dir" as const,
+          toolName: toolUse.name,
+          toolCategory: invocationCategory,
+          args: finalInput,
+          reason: dirLayerResult.reason,
+          source: source as "builtin" | "plugin" | "mcp",
+          createdAt: Date.now(),
+          target: { filePath: outOfAllowedTarget.filePath },
+          isReadOnly: invocationCategory === "read",
+          mode: this.currentApprovalMode(),
+          sensitivePathPattern: requestSensitivePathPattern,
+          outOfAllowedDir: {
+            candidatePath: outOfAllowedTarget.filePath,
+            suggestedParent,
+            currentAllowed: invocationAllowedScope.directories,
+            adjacencyWarnings: validation.adjacencyWarnings,
+          },
+          trustOrigin,
+        };
+
+        let decision;
+        try {
+          await this.auditPermissionAsk(
+            toolUse.name,
+            source,
+            invocationCategory,
+            finalInput,
+            dirLayerResult,
+            executionCwd,
+            invocationPermissionContext,
+            outOfAllowedTarget.filePath,
+          );
+          decision = await this.approvalGate.requestAndWait(approvalRequest);
+        } catch (approvalErr) {
+          const msg = `[디렉토리 정책 오류] 도구 '${toolUse.name}' — ${approvalErr instanceof Error ? approvalErr.message : String(approvalErr)}`;
+          const durationMs = Date.now() - startTime;
+          emitToolStart(callbacks, toolUse.name, finalInput, meta);
+          callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+          await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, dirLayerResult, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
+          return { allowed: false, result: { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs } };
+        }
+
+        if (decision.choice.startsWith("deny")) {
+          const msg = `[디렉토리 정책 차단] 도구 '${toolUse.name}' — 사용자가 허용 디렉토리 외부 경로 접근을 거부했습니다 (${outOfAllowedTarget.filePath}).`;
+          const durationMs = Date.now() - startTime;
+          emitToolStart(callbacks, toolUse.name, finalInput, meta);
+          callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+          await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...dirLayerResult, decision: "deny" }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
+          return { allowed: false, result: { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs } };
+        }
+        const approvedDirectory = decision.choice === "allow-always"
+          ? (typeof decision.rememberPattern === "string" && decision.rememberPattern.length > 0
+              ? decision.rememberPattern
+              : suggestedParent ?? outOfAllowedTarget.filePath)
+          : outOfAllowedTarget.filePath;
+        if (decision.choice === "allow-always") {
+          const dirResult = await dispatchPermissionDirCommand({
+            verb: "allow",
+            path: approvedDirectory,
+            session: false,
+            acknowledgeWarnings: true,
+          });
+          if (!dirResult.ok || dirResult.verb !== "allow") {
+            const msg = `[디렉토리 정책 저장 실패] 도구 '${toolUse.name}' — ${dirResult.ok ? "unexpected result" : dirResult.error}`;
+            const durationMs = Date.now() - startTime;
+            emitToolStart(callbacks, toolUse.name, finalInput, meta);
+            callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+            await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...dirLayerResult, decision: "deny" }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
+            return { allowed: false, result: { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs } };
+          }
+        }
+        return { allowed: true, approvedDirectory };
+      }
+
+      if (headless) {
+        const reviewerResult = await this.dispatchReviewerForHeadless(
+          toolUse.name,
+          source,
+          invocationCategory,
+          reviewerPathFields,
+          finalInput,
+          invocationAllowedScope.directories,
+          requestSensitivePathPattern ? [requestSensitivePathPattern] : [],
+          invocationPermissionContext,
+        );
+        if (reviewerResult.allowed) {
+          return {
+            allowed: true,
+            approvedDirectory: outOfAllowedTarget.filePath,
+            permissionResult: reviewerResult.permissionResult,
+          };
+        }
+        const msg = reviewerResult.message;
+        const durationMs = Date.now() - startTime;
+        log.warn(msg);
+        emitToolStart(callbacks, toolUse.name, finalInput, meta);
+        callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+        await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, reviewerResult.permissionResult, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
+        return { allowed: false, result: { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs } };
+      }
+
+      const msg = `[승인 게이트 미연결 — Layer 1] 도구 '${toolUse.name}' (${source}) — 허용 디렉토리 외부 경로이지만 승인 게이트가 없어 차단.`;
+      const durationMs = Date.now() - startTime;
+      log.error(msg);
+      emitToolStart(callbacks, toolUse.name, finalInput, meta);
+      callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+      await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...dirLayerResult, decision: "deny" }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
+      return { allowed: false, result: { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs } };
+    };
+
+    const applyApprovedDirectory = (approvedDirectory: string): void => {
+      invocationAllowedScope = buildAllowedScope([
+        ...(invocationPermissionContext.additionalDirectories ?? []),
+        approvedDirectory,
+      ]);
+      invocationRuntimeAllowedDirectories = buildRuntimeAllowedDirectories([
+        ...(invocationPermissionContext.additionalDirectories ?? []),
+        approvedDirectory,
+      ]);
+    };
+
+    if (invocationCategory === "shell") {
+      while (true) {
+        const shellPathViolation = shellPathPolicyViolation(
+          finalInput,
+          executionCwd,
+          invocationRuntimeAllowedDirectories,
+        );
+        if (!shellPathViolation) break;
+
+        if (shellPathViolation.kind === "sandbox-boundary" && shellPathViolation.path) {
+          const canonicalPath = caseFoldForMatch(canonicalizePathForMatch(shellPathViolation.path));
+          const dirLayerResult: PermissionCheckResult = {
+            decision: "ask",
+            reason: `out-of-allowed-dir: ${shellPathViolation.path} (not in additionalDirectories)`,
+            layer: 1,
+            denyReasons: [
+              {
+                layer: 1,
+                reason: "out-of-allowed-dir",
+                source: "directory-policy",
+              },
+            ],
+          };
+          const resolution = await requestOutOfAllowedDirectoryAccess(
+            { filePath: shellPathViolation.path, canonicalPath },
+            dirLayerResult,
+            null,
+            [],
+          );
+          if (!resolution.allowed) return resolution.result;
+          if (resolution.permissionResult) permissionResult = resolution.permissionResult;
+          applyApprovedDirectory(resolution.approvedDirectory);
+          continue;
+        }
+
+        const msg = `[Shell 경로 정책 차단] 도구 '${toolUse.name}' — ${shellPathViolation.reason}`;
         const durationMs = Date.now() - startTime;
         const blockedPermission: PermissionCheckResult = {
           decision: "deny",
-          reason: shellPathViolation,
+          reason: shellPathViolation.reason,
           layer: 0,
           denyReasons: [
             { layer: 0, reason: "shell-path-policy", source: "directory-policy" },
@@ -940,8 +1104,10 @@ export class ToolExecutor {
     // Frozen-canonical: reuse `canonicalTargetPath` from above (already
     // realpath'd + case-folded). No re-canonicalization in this block.
     //
-    // Skipped when no path-typed input was extracted (e.g. bash, MCP
-    // network calls). Native host tools and plugin tools both declare
+    // Skipped when no path-typed input was extracted (e.g. MCP network
+    // calls). Shell tools run the same Layer 1 request path above because
+    // their filesystem operands are parsed from the command string. Native
+    // host tools and plugin tools both declare
     // path-bearing arguments on Tool.pathFields; plugin entries are copied
     // from SDK manifest authority metadata by plugin-tool-adapter.
     if (canonicalTargets.length > 0) {
@@ -950,15 +1116,8 @@ export class ToolExecutor {
           (target) => !isPathAllowed(target.canonicalPath, invocationAllowedScope),
         );
         if (!outOfAllowedTarget) break;
-        const headless = invocationPermissionContext.headless === true;
-        const trustOrigin = invocationPermissionContext.trustOrigin;
-        const validation = validateDirectoryAddition(outOfAllowedTarget.canonicalPath);
-        const suggestedParent = pickClosestParent(
-          outOfAllowedTarget.canonicalPath,
-          invocationAllowedScope.directories,
-        );
         const dirLayerResult: PermissionCheckResult = {
-          decision: headless ? "ask" : "ask",
+          decision: "ask",
           reason: `out-of-allowed-dir: ${outOfAllowedTarget.filePath} (not in additionalDirectories)`,
           layer: 1,
           denyReasons: [
@@ -969,137 +1128,18 @@ export class ToolExecutor {
             },
           ],
         };
-
-        if (this.approvalGate && !headless) {
-          // Interactive mode — dispatch directory-confirm modal. The
-          // renderer routes on `kind === "out-of-allowed-dir"` to the
-          // OutOfAllowedDirCard variant.
-          const adjacencyWarnings = validation.adjacencyWarnings;
-          const approvalRequest = {
-            id: randomUUID(),
-            category: "tool" as const,
-            kind: "out-of-allowed-dir" as const,
-            toolName: toolUse.name,
-            toolCategory: invocationCategory,
-            args: finalInput,
-            reason: dirLayerResult.reason,
-            source: source as "builtin" | "plugin" | "mcp",
-            createdAt: Date.now(),
-            target: { filePath: outOfAllowedTarget.filePath },
-            isReadOnly: invocationCategory === "read",
-            mode: this.currentApprovalMode(),
-            sensitivePathPattern,
-            outOfAllowedDir: {
-              candidatePath: outOfAllowedTarget.filePath,
-              suggestedParent,
-              currentAllowed: invocationAllowedScope.directories,
-              adjacencyWarnings,
-            },
-            trustOrigin,
-          };
-
-          let decision;
-          try {
-            await this.auditPermissionAsk(
-              toolUse.name,
-              source,
-              invocationCategory,
-              finalInput,
-              dirLayerResult,
-              executionCwd,
-              invocationPermissionContext,
-              outOfAllowedTarget.filePath,
-            );
-            decision = await this.approvalGate.requestAndWait(approvalRequest);
-          } catch (approvalErr) {
-            const msg = `[디렉토리 정책 오류] 도구 '${toolUse.name}' — ${approvalErr instanceof Error ? approvalErr.message : String(approvalErr)}`;
-            const durationMs = Date.now() - startTime;
-            emitToolStart(callbacks, toolUse.name, finalInput, meta);
-            callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-            await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, dirLayerResult, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
-            return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
-          }
-
-          if (decision.choice.startsWith("deny")) {
-            const msg = `[디렉토리 정책 차단] 도구 '${toolUse.name}' — 사용자가 허용 디렉토리 외부 경로 접근을 거부했습니다 (${outOfAllowedTarget.filePath}).`;
-            const durationMs = Date.now() - startTime;
-            emitToolStart(callbacks, toolUse.name, finalInput, meta);
-            callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-            await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...dirLayerResult, decision: "deny" }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
-            return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
-          }
-          const approvedDirectory = decision.choice === "allow-always"
-            ? (typeof decision.rememberPattern === "string" && decision.rememberPattern.length > 0
-                ? decision.rememberPattern
-                : suggestedParent ?? outOfAllowedTarget.filePath)
-            : outOfAllowedTarget.filePath;
-          if (decision.choice === "allow-always") {
-            const dirResult = await dispatchPermissionDirCommand({
-              verb: "allow",
-              path: approvedDirectory,
-              session: false,
-              acknowledgeWarnings: true,
-            });
-            if (!dirResult.ok || dirResult.verb !== "allow") {
-              const msg = `[디렉토리 정책 저장 실패] 도구 '${toolUse.name}' — ${dirResult.ok ? "unexpected result" : dirResult.error}`;
-              const durationMs = Date.now() - startTime;
-              emitToolStart(callbacks, toolUse.name, finalInput, meta);
-              callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-              await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...dirLayerResult, decision: "deny" }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
-              return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
-            }
-          }
-          invocationAllowedScope = buildAllowedScope([
-            ...(invocationPermissionContext.additionalDirectories ?? []),
-            approvedDirectory,
-          ]);
-          invocationRuntimeAllowedDirectories = buildRuntimeAllowedDirectories([
-            ...(invocationPermissionContext.additionalDirectories ?? []),
-            approvedDirectory,
-          ]);
-          // allow-once / allow-always — fall through to Step 3
-          // (full Layer 3 check still runs; Layer 1 is necessary, not
-          // sufficient).
-        } else if (headless) {
-          const reviewerResult = await this.dispatchReviewerForHeadless(
-            toolUse.name,
-            source,
-            invocationCategory,
-            tool.pathFields ?? [],
-            finalInput,
-            invocationAllowedScope.directories,
-            sensitivePathPattern ? [sensitivePathPattern] : [],
-            invocationPermissionContext,
-          );
-          if (reviewerResult.allowed) {
-            permissionResult = reviewerResult.permissionResult;
-            invocationAllowedScope = buildAllowedScope([
-              ...(invocationPermissionContext.additionalDirectories ?? []),
-              outOfAllowedTarget.filePath,
-            ]);
-            invocationRuntimeAllowedDirectories = buildRuntimeAllowedDirectories([
-              ...(invocationPermissionContext.additionalDirectories ?? []),
-              outOfAllowedTarget.filePath,
-            ]);
-          } else {
-            const msg = reviewerResult.message;
-            const durationMs = Date.now() - startTime;
-            log.warn(msg);
-            emitToolStart(callbacks, toolUse.name, finalInput, meta);
-            callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-            await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, reviewerResult.permissionResult, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
-            return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
-          }
-        } else {
-          // §F4 mirror — approvalGate미연결 시 fail-closed.
-          const msg = `[승인 게이트 미연결 — Layer 1] 도구 '${toolUse.name}' (${source}) — 허용 디렉토리 외부 경로이지만 승인 게이트가 없어 차단.`;
-          const durationMs = Date.now() - startTime;
-          log.error(msg);
-          emitToolStart(callbacks, toolUse.name, finalInput, meta);
-          callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-          await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...dirLayerResult, decision: "deny" }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
-          return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
-        }
+        const resolution = await requestOutOfAllowedDirectoryAccess(
+          outOfAllowedTarget,
+          dirLayerResult,
+          sensitivePathPattern,
+          tool.pathFields ?? [],
+        );
+        if (!resolution.allowed) return resolution.result;
+        if (resolution.permissionResult) permissionResult = resolution.permissionResult;
+        applyApprovedDirectory(resolution.approvedDirectory);
+        // allow-once / allow-always — fall through to Step 3
+        // (full Layer 3 check still runs; Layer 1 is necessary, not
+        // sufficient).
       }
     }
 

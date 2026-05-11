@@ -20,7 +20,7 @@
  * an approval-denial error.
  */
 import { describe, it, expect, vi } from "vitest";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve as pathResolve } from "node:path";
 
@@ -352,7 +352,7 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
     expect(second[0].content).toContain("승인 거부");
   });
 
-  it("runs shell path policy before approval prompts or allow-always persistence", async () => {
+  it("hard-blocks sensitive shell paths before approval prompts or allow-always persistence", async () => {
     const registry = new ToolRegistry();
     registry.register(new BashTool());
     const permissionPath = join(mkdtempSync(join(tmpdir(), "lvis-shell-path-policy-")), "permissions.json");
@@ -385,7 +385,6 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
     ["sensitive env-home operand", "Get-Content $HOME/.ssh/id_rsa"],
     ["sensitive quoted operand", "Get-Content '~/.ssh/id_rsa'"],
     ["sensitive redirection target", "Get-Content package.json > ~/.ssh/leak"],
-    ["relative traversal", "Get-Content ../outside.txt"],
     ["dynamic path composition", "Set-Content (Join-Path $HOME \"Desktop/out.txt\") hi"],
   ])("runs PowerShell path policy before approval prompts or allow-always persistence: %s", async (_label, command) => {
     const registry = new ToolRegistry();
@@ -1461,6 +1460,100 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
       expect(results[0].content).toContain("outside approved");
       expect(results[0].is_error).toBeUndefined();
       expect(readFileSync(target, "utf8")).toBe("outside approved\n");
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("shell operand outside cwd dispatches out-of-allowed-dir approval and denial prevents execution", async () => {
+    const outside = mkdtempSync(join(tmpdir(), "lvis-executor-shell-deny-"));
+    try {
+      const target = join(outside, "hello.txt");
+      writeFileSync(target, "outside shell denied\n", "utf8");
+      const canonicalTarget = realpathSync(target);
+      const registry = new ToolRegistry();
+      registry.register(new BashTool());
+
+      const wc = makeMockWebContents();
+      const gate = new ApprovalGate(wc as never);
+      const executor = new ToolExecutor(registry, undefined, undefined, undefined, gate);
+
+      const callPromise = executor.executeAll(
+        [{ id: "tu-l1-shell-deny", name: "bash", input: { command: `cat ${target}`, timeoutSeconds: 1 } }],
+        { sessionId: "sess-l1-shell-deny", permissionContext: userPermissionContext() },
+      );
+
+      await new Promise((r) => setTimeout(r, 5));
+      expect(wc.send).toHaveBeenCalled();
+      const sent = wc.send.mock.calls[0][1] as {
+        id: string;
+        nonce: string;
+        hmac: string;
+        kind?: string;
+        toolCategory?: string;
+        outOfAllowedDir?: { candidatePath?: string };
+      };
+      expect(sent.kind).toBe("out-of-allowed-dir");
+      expect(sent.toolCategory).toBe("shell");
+      expect(sent.outOfAllowedDir?.candidatePath).toBe(canonicalTarget);
+
+      gate.resolve(sent.id, {
+        requestId: sent.id,
+        choice: "deny-once",
+        nonce: sent.nonce,
+        hmac: sent.hmac,
+      });
+
+      const results = await callPromise;
+      expect(results[0].is_error).toBe(true);
+      expect(results[0].content).toContain("디렉토리 정책 차단");
+      expect(results[0].content).toContain(canonicalTarget);
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("shell operand outside cwd executes after out-of-allowed-dir approval", async () => {
+    const outside = mkdtempSync(join(tmpdir(), "lvis-executor-shell-allow-"));
+    try {
+      const target = join(outside, "hello.txt");
+      writeFileSync(target, "outside shell approved\n", "utf8");
+      const canonicalTarget = realpathSync(target);
+      const registry = new ToolRegistry();
+      registry.register(new BashTool());
+
+      const wc = makeMockWebContents();
+      const gate = new ApprovalGate(wc as never);
+      const executor = new ToolExecutor(registry, undefined, undefined, undefined, gate);
+
+      const callPromise = executor.executeAll(
+        [{ id: "tu-l1-shell-allow", name: "bash", input: { command: `cat ${target}`, timeoutSeconds: 1 } }],
+        { sessionId: "sess-l1-shell-allow", permissionContext: userPermissionContext() },
+      );
+
+      await new Promise((r) => setTimeout(r, 5));
+      const sent = wc.send.mock.calls[0][1] as {
+        id: string;
+        nonce: string;
+        hmac: string;
+        kind?: string;
+        toolCategory?: string;
+        outOfAllowedDir?: { candidatePath?: string };
+      };
+      expect(sent.kind).toBe("out-of-allowed-dir");
+      expect(sent.toolCategory).toBe("shell");
+      expect(sent.outOfAllowedDir?.candidatePath).toBe(canonicalTarget);
+
+      gate.resolve(sent.id, {
+        requestId: sent.id,
+        choice: "allow-once",
+        nonce: sent.nonce,
+        hmac: sent.hmac,
+      });
+
+      const results = await callPromise;
+      expect(results[0].is_error).toBeUndefined();
+      expect(results[0].content).toContain("outside shell approved");
     } finally {
       rmSync(outside, { recursive: true, force: true });
     }
