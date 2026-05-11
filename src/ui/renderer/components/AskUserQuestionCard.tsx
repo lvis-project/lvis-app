@@ -258,7 +258,12 @@ export function AskUserQuestionCard({
           )}
         </div>
         <KeyboardHint
-          hasChoices={Boolean(currentItem && effectiveChoices(currentItem).length > 0)}
+          hasAnswerNavigation={Boolean(
+            currentItem &&
+              effectiveChoices(currentItem).length +
+                (currentItem.allowFreeText ? 1 : 0) >
+                1,
+          )}
           isMulti={isMulti}
           onConfirmStep={onConfirmStep}
         />
@@ -362,11 +367,11 @@ export function AskUserQuestionCard({
 }
 
 function KeyboardHint({
-  hasChoices,
+  hasAnswerNavigation,
   isMulti,
   onConfirmStep,
 }: {
-  hasChoices: boolean;
+  hasAnswerNavigation: boolean;
   isMulti: boolean;
   onConfirmStep: boolean;
 }) {
@@ -384,13 +389,13 @@ function KeyboardHint({
         Enter
       </kbd>
       <span>{enterLabel}</span>
-      {hasChoices && (
+      {hasAnswerNavigation && (
         <>
           <span aria-hidden="true">·</span>
           <kbd className="rounded border bg-muted/50 px-1 py-[1px] font-mono text-[9px]">
             ↑↓
           </kbd>
-          <span>답변 이동</span>
+          <span>답변/수동입력 이동</span>
         </>
       )}
       {isMulti && (
@@ -491,39 +496,54 @@ function QuestionForm({
   const choices = effectiveChoices(item);
   const recommend = recommendIndex(item);
   const alts = altIndices(item);
+  const freeTextIndex = item.allowFreeText ? choices.length : -1;
+  const answerCount = choices.length + (item.allowFreeText ? 1 : 0);
   // Roving tabIndex: track which choice button has the "tab stop".
   const [focusedIdx, setFocusedIdx] = useState<number>(
     () => draft.choiceIndex ?? (recommendIndex(item) ?? 0),
   );
   const buttonRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  const focusAnswerAt = useCallback(
+    (nextIndex: number) => {
+      if (answerCount <= 0) return;
+      const next = (nextIndex + answerCount) % answerCount;
+      setFocusedIdx(next);
+      if (next === freeTextIndex) {
+        inputRef.current?.focus();
+        return;
+      }
+      buttonRefs.current[next]?.focus();
+    },
+    [answerCount, freeTextIndex],
+  );
 
   // Reset focused idx when the question item changes (step transition).
   // Prevents out-of-range focusedIdx when the new step has fewer choices,
   // which would leave all option buttons with tabIndex={-1} (keyboard nav broken).
   useEffect(() => {
-    setFocusedIdx(recommendIndex(item) ?? 0);
-  }, [item]);
+    setFocusedIdx(recommendIndex(item) ?? (choices.length > 0 ? 0 : freeTextIndex));
+  }, [choices.length, freeTextIndex, item]);
 
   // Sync focused idx when the draft's selected choice changes externally.
   useEffect(() => {
     if (typeof draft.choiceIndex === "number") {
       setFocusedIdx(draft.choiceIndex);
+    } else if (item.allowFreeText && draft.freeText) {
+      setFocusedIdx(freeTextIndex);
     }
-  }, [draft.choiceIndex]);
+  }, [draft.choiceIndex, draft.freeText, freeTextIndex, item.allowFreeText]);
 
   const handleChoiceKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLButtonElement>, i: number) => {
       if (disabled) return;
       if (e.key === "ArrowDown") {
         e.preventDefault();
-        const next = (i + 1) % choices.length;
-        setFocusedIdx(next);
-        buttonRefs.current[next]?.focus();
+        focusAnswerAt(i + 1);
       } else if (e.key === "ArrowUp") {
         e.preventDefault();
-        const prev = (i - 1 + choices.length) % choices.length;
-        setFocusedIdx(prev);
-        buttonRefs.current[prev]?.focus();
+        focusAnswerAt(i - 1);
       } else if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
         // onChoose returns a ChoiceResult enum:
@@ -535,7 +555,7 @@ function QuestionForm({
         if (result.kind === "advance") onAdvance();
       }
     },
-    [disabled, choices, onChoose, onAdvance],
+    [disabled, choices, focusAnswerAt, onChoose, onAdvance],
   );
 
   return (
@@ -588,16 +608,30 @@ function QuestionForm({
       )}
       {item.allowFreeText && (
         <Input
+          ref={inputRef}
           value={draft.freeText ?? ""}
           onChange={(e) => onFreeText(e.target.value)}
           onKeyDown={(e) => {
             if (isComposingKeyEvent(e)) return;
+            if (e.key === "ArrowDown" && answerCount > 1) {
+              e.preventDefault();
+              e.stopPropagation();
+              focusAnswerAt(freeTextIndex + 1);
+              return;
+            }
+            if (e.key === "ArrowUp" && answerCount > 1) {
+              e.preventDefault();
+              e.stopPropagation();
+              focusAnswerAt(freeTextIndex - 1);
+              return;
+            }
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
               e.stopPropagation();
               onSubmit();
             }
           }}
+          onFocus={() => setFocusedIdx(freeTextIndex)}
           placeholder={item.placeholder ?? "직접입력하기"}
           className="h-8 text-[12px]"
           disabled={disabled}
