@@ -89,6 +89,25 @@ describe("AskUserQuestionCard — single question keyboard Enter", () => {
       expect.objectContaining({ answers: [{ choice: "파랑" }] }),
     );
   });
+
+  it("dismisses the current question on Escape", async () => {
+    const api = makeApi();
+    const onResolved = vi.fn();
+    const request = makeRequest();
+
+    const { getByTestId } = render(
+      <AskUserQuestionCard api={api as never} request={request} onResolved={onResolved} />,
+    );
+
+    await act(async () => {
+      fireEvent.keyDown(getByTestId("ask-user-question-card"), { key: "Escape" });
+    });
+
+    expect(api.respondAskUserQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: "req-1", dismissed: true }),
+    );
+    await waitFor(() => expect(onResolved).toHaveBeenCalledWith("req-1"));
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -250,7 +269,7 @@ describe("AskUserQuestionCard — multi-step free-text keyboard navigation", () 
     expect((getByTestId("ask-freetext-input") as HTMLInputElement).value).toBe("");
   });
 
-  it("keeps ArrowUp/ArrowDown on the answer field and moves questions with ArrowRight/ArrowLeft", async () => {
+  it("keeps arrow keys inside free-text editing and moves questions from the card surface", async () => {
     const api = makeApi();
     const request = makeRequest({
       questions: [
@@ -278,11 +297,28 @@ describe("AskUserQuestionCard — multi-step free-text keyboard navigation", () 
       fireEvent.keyDown(firstInput, { key: "ArrowRight" });
     });
 
+    expect(getByText("참석자")).toBeTruthy();
+
+    const card = getByTestId("ask-user-question-card");
+    card.focus();
+    expect(document.activeElement).toBe(card);
+    await act(async () => {
+      fireEvent.keyDown(card, { key: "ArrowRight" });
+    });
+
     expect(getByText("의제")).toBeTruthy();
 
     const secondInput = getByTestId("ask-freetext-input") as HTMLInputElement;
     await act(async () => {
       fireEvent.keyDown(secondInput, { key: "ArrowLeft" });
+    });
+
+    expect(getByText("의제")).toBeTruthy();
+
+    card.focus();
+    expect(document.activeElement).toBe(card);
+    await act(async () => {
+      fireEvent.keyDown(card, { key: "ArrowLeft" });
     });
 
     expect(getByText("참석자")).toBeTruthy();

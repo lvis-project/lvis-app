@@ -19,6 +19,7 @@
 import { useEffect, useState, useCallback, type ReactElement } from "react";
 import { Badge } from "../../../../components/ui/badge.js";
 import { Button } from "../../../../components/ui/button.js";
+import { SOURCE_BADGE } from "../../constants.js";
 import type { DeferredQueueEntry } from "../../types.js";
 import {
   SummaryTile,
@@ -153,7 +154,7 @@ export function DeferredQueuePanel({ showEmpty = false, onClose }: DeferredQueue
                       백그라운드 변경 승인
                     </h4>
                     <Badge variant="outline" className="shrink-0 text-[11px] text-muted-foreground">
-                      {pending.length} pending · {activeIndex + 1} / {pending.length}
+                      {pending.length} 대기 · {activeIndex + 1} / {pending.length}
                     </Badge>
                   </div>
                 </div>
@@ -163,12 +164,12 @@ export function DeferredQueuePanel({ showEmpty = false, onClose }: DeferredQueue
                   <SummaryTile label="도구 / 출처">
                     <code>{activeEntry.toolName}</code>
                     <br />
-                    source={activeEntry.source}
+                    출처: {sourceLabel(activeEntry.source)}
                   </SummaryTile>
-                  <SummaryTile label="권한 category">
-                    {activeEntry.category}
-                    <br />
+                  <SummaryTile label="권한 분류">
                     {categoryLabel(activeEntry.category)}
+                    <br />
+                    {activeEntry.category}
                   </SummaryTile>
                 </div>
                 <div className={`min-w-0 overflow-hidden rounded-md border ${reviewBoxClass(activeEntry.verdict.level)}`}>
@@ -243,7 +244,7 @@ function reviewRows(entry: DeferredQueueEntry): ReviewBasisRow[] {
   if (entry.category === "read") {
     return [
       { label: "대상", value: pickSummary(parsed, ["path", "paths", "target", "targets", "file", "directory", "resource", "query", "url", "uri"], entry.inputSummary), monospace: true, testId: "deferred-entry-input" },
-      { label: "범위", value: `${entry.source} · ${entry.category} · ${scopeLabel(parsed)}` },
+      { label: "범위", value: `${sourceLabel(entry.source)} · ${categoryLabel(entry.category)} · ${scopeLabel(parsed)}` },
       { label: "민감도", value: sensitivityLabel(parsed) },
       { label: "양", value: inputVolumeLabel(entry.inputSummary) },
       common,
@@ -254,7 +255,7 @@ function reviewRows(entry: DeferredQueueEntry): ReviewBasisRow[] {
     return [
       { label: "대상", value: pickSummary(parsed, ["path", "paths", "target", "targets", "file", "configKey", "taskId", "id"], entry.inputSummary), monospace: true, testId: "deferred-entry-input" },
       { label: "변경", value: pickSummary(parsed, ["operation", "action", "mode", "patch", "content", "body", "text"], "변경 내용은 입력 요약 기준으로 확인합니다."), monospace: true },
-      { label: "영향", value: `${entry.source} write · 파일/설정/사용자 데이터 변경 가능성` },
+      { label: "영향", value: `${sourceLabel(entry.source)} · ${categoryLabel(entry.category)} · 파일/설정/사용자 데이터 변경 가능성` },
       { label: "복구", value: pickSummary(parsed, ["diff", "backup", "rollback", "undo"], "복구 정보는 입력 요약에 명시되지 않음") },
       common,
       { label: "선택", value: "큐에서는 이번 항목 허용 또는 거부만 처리합니다." },
@@ -262,10 +263,10 @@ function reviewRows(entry: DeferredQueueEntry): ReviewBasisRow[] {
   }
   if (entry.category === "network") {
     return [
-      { label: "endpoint", value: pickSummary(parsed, ["endpoint", "url", "uri", "host", "baseUrl"], "endpoint 정보는 입력 요약에 명시되지 않음"), monospace: true, testId: "deferred-entry-input" },
-      { label: "method", value: pickSummary(parsed, ["method", "httpMethod"], "method 정보는 입력 요약에 명시되지 않음") },
-      { label: "payload", value: pickSummary(parsed, ["payload", "body", "message", "text", "input", "params", "args"], payloadLabel(entry.inputSummary)), monospace: true },
-      { label: "auth", value: pickSummary(parsed, ["auth", "scope", "scopes", "tenant", "account"], "auth scope 정보는 입력 요약에 명시되지 않음") },
+      { label: "엔드포인트", value: pickSummary(parsed, ["endpoint", "url", "uri", "host", "baseUrl"], "엔드포인트 정보는 입력 요약에 명시되지 않음"), monospace: true, testId: "deferred-entry-input" },
+      { label: "메서드", value: pickSummary(parsed, ["method", "httpMethod"], "메서드 정보는 입력 요약에 명시되지 않음") },
+      { label: "전송 내용", value: pickSummary(parsed, ["payload", "body", "message", "text", "input", "params", "args"], payloadLabel(entry.inputSummary)), monospace: true },
+      { label: "인증 범위", value: pickSummary(parsed, ["auth", "scope", "scopes", "tenant", "account"], "인증 범위 정보는 입력 요약에 명시되지 않음") },
       common,
       { label: "선택", value: "큐에서는 이번 항목 허용 또는 거부만 처리합니다." },
     ];
@@ -273,7 +274,7 @@ function reviewRows(entry: DeferredQueueEntry): ReviewBasisRow[] {
   if (entry.category === "shell") {
     return [
       { label: "명령", value: pickSummary(parsed, ["command", "cmd", "args", "script", "argv"], entry.inputSummary), monospace: true, testId: "deferred-entry-input" },
-      { label: "cwd/env", value: pickSummary(parsed, ["cwd", "workingDirectory", "env", "environment"], "cwd/env 정보는 입력 요약에 명시되지 않음"), monospace: true },
+      { label: "작업 디렉토리/환경", value: pickSummary(parsed, ["cwd", "workingDirectory", "env", "environment"], "작업 디렉토리/환경 정보는 입력 요약에 명시되지 않음"), monospace: true },
       { label: "부작용", value: "파일 변경, 네트워크 호출, dependency install, background process 가능성을 명령 기준으로 확인합니다." },
       { label: "제한", value: pickSummary(parsed, ["timeout", "sandbox", "allowedDirectories", "allowedDir"], "제한 정보는 입력 요약에 명시되지 않음") },
       common,
@@ -285,4 +286,8 @@ function reviewRows(entry: DeferredQueueEntry): ReviewBasisRow[] {
     common,
     { label: "선택", value: "큐에서는 이번 항목 허용 또는 거부만 처리합니다." },
   ];
+}
+
+function sourceLabel(source: DeferredQueueEntry["source"]): string {
+  return SOURCE_BADGE[source] ?? source;
 }
