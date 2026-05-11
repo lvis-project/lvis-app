@@ -19,6 +19,14 @@ const LONG_RESULT = JSON.stringify({
     snippet: "긴 검색 결과 본문입니다. ".repeat(20),
   })),
 });
+const LONG_FINAL_RESULT = [
+  "## Routine result",
+  "",
+  "- **Summary** routine summary",
+  ...Array.from({ length: 24 }, (_, i) => `- Full result line ${i + 1}: ${"visible routine result content ".repeat(5)}`),
+  "",
+  "<summary>routine summary</summary>",
+].join("\n");
 
 test.describe("routine session modal", () => {
   test.skip(!existsSync(MAIN_ENTRY), "dist/src/main.js not built; run bun run build first");
@@ -70,7 +78,7 @@ test.describe("routine session modal", () => {
         JSON.stringify({ role: "tool_result", toolName: "web_search", content: LONG_RESULT }),
         JSON.stringify({
           role: "assistant",
-          content: "## Routine result\n\n- **Summary** routine summary\n\n<summary>routine summary</summary>",
+          content: LONG_FINAL_RESULT,
         }),
       ].join("\n") + "\n",
       "utf-8",
@@ -114,6 +122,7 @@ test.describe("routine session modal", () => {
       state: "visible",
       timeout: 15_000,
     });
+    await expect(page.getByText(/^Full result line 1:/)).toBeVisible();
     await expect(page.getByText("TOOL_RESULT")).toHaveCount(0);
     await expect(page.getByText("very-long-unbroken-path-segment")).toHaveCount(0);
 
@@ -132,12 +141,18 @@ test.describe("routine session modal", () => {
           backgroundColor,
         };
       };
+      const scrollRoot = document.querySelector('[data-testid="routine-session-scroll"]') as HTMLElement | null;
+      const scrollViewport = scrollRoot?.querySelector("[data-radix-scroll-area-viewport]") as HTMLElement | null;
       return {
         viewportWidth: window.innerWidth,
         docWidth: document.documentElement.scrollWidth,
         bodyWidth: document.body.scrollWidth,
         dialog: box('[data-testid="routine-session-dialog"]'),
         assistantBody: box('[data-testid="assistant-message-body"]'),
+        scrollViewport: scrollViewport ? {
+          clientHeight: scrollViewport.clientHeight,
+          scrollHeight: scrollViewport.scrollHeight,
+        } : null,
       };
     });
 
@@ -149,5 +164,7 @@ test.describe("routine session modal", () => {
     expect(metrics.assistantBody!.right).toBeLessThanOrEqual(metrics.dialog!.right + 1);
     expect(metrics.assistantBody!.scrollWidth).toBeLessThanOrEqual(metrics.assistantBody!.clientWidth + 1);
     expect(metrics.dialog!.backgroundColor).not.toBe("rgba(0, 0, 0, 0)");
+    expect(metrics.scrollViewport).not.toBeNull();
+    expect(metrics.scrollViewport!.scrollHeight).toBeGreaterThan(metrics.scrollViewport!.clientHeight);
   });
 });
