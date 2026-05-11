@@ -4,13 +4,20 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "../../lib/utils.js";
 
 /**
- * Modal v1 — "Glass" surface
+ * Modal v1 — solid card surface
  * ─────────────────────────────────────────────────────────────────────────
- *  Visual contract is ported from OverlayCard (the routine-fire notification
- *  card) so every centered modal in the app shares the same look:
+ *  Centered modals use a solid `bg-card` body so body text remains readable
+ *  against the dimmed + blurred overlay behind. The earlier "glass" variant
+ *  (`bg-action-view/5`) only worked for OverlayCard which floats directly
+ *  over the chat surface — over a darkened backdrop, the 5% accent tint
+ *  let the dim bleed through and washed out the content.
+ *
+ *  Visual contract:
  *    - DialogOverlay: themed --overlay backdrop + soft blur
- *    - DialogContent: accent-tinted glass surface (border-action-view/40 +
- *      bg-action-view/5 + backdrop-blur + shadow-md)
+ *    - DialogContent: solid `bg-card` + subtle accent border so the modal
+ *      still picks up the bundle accent without sacrificing legibility.
+ *      OverlayCard keeps its own glass styling (still applies to routine
+ *      notification cards which never compete with a backdrop).
  *
  *  Size variants:
  *    sm  max-w-md  (448px) — confirmations
@@ -21,7 +28,7 @@ import { cn } from "../../lib/utils.js";
  *  Consumers normally just write `<DialogContent size="lg">`. Specialized
  *  dialogs (e.g. ToolApprovalDialog) that need edge-to-edge inner sections
  *  can pass `className="p-0"` to drop the outer padding while keeping the
- *  glass surface intact.
+ *  card surface intact.
  */
 
 const Dialog = DialogPrimitive.Root;
@@ -48,7 +55,7 @@ const dialogContentVariants = cva(
   [
     "fixed left-[50%] top-[50%] z-50 grid translate-x-[-50%] translate-y-[-50%] gap-4",
     "w-[calc(100vw-32px)] max-h-[90dvh] overflow-y-auto",
-    "border border-action-view/40 bg-action-view/5 backdrop-blur shadow-md rounded-lg",
+    "border border-action-view/30 bg-card text-card-foreground shadow-lg rounded-lg",
     "p-6 duration-200",
   ].join(" "),
   {
