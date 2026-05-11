@@ -34,5 +34,8 @@ describe("categorizeEvent", () => {
   it("handles bare event names without dots", () => {
     expect(categorizeEvent("email")).toBe("email");
     expect(categorizeEvent("unknown")).toBe("other");
+    // Lock the underscore-in-namespace path — regression risk if
+    // someone replaces `split(".")[0]` with a `[a-z]+` regex.
+    expect(categorizeEvent("agent_hub")).toBe("agent_hub");
   });
 });
