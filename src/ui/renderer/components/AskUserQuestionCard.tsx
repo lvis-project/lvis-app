@@ -237,11 +237,11 @@ export function AskUserQuestionCard({
           dismiss();
           return;
         }
-        if (e.key === "ArrowUp") {
+        if (e.key === "ArrowLeft") {
           if (goPrevByKeyboard()) e.preventDefault();
           return;
         }
-        if (e.key === "ArrowDown") {
+        if (e.key === "ArrowRight") {
           if (goNextByKeyboard()) e.preventDefault();
         }
       }}
@@ -257,7 +257,11 @@ export function AskUserQuestionCard({
             </span>
           )}
         </div>
-        <KeyboardHint isMulti={isMulti} onConfirmStep={onConfirmStep} />
+        <KeyboardHint
+          hasChoices={Boolean(currentItem && effectiveChoices(currentItem).length > 0)}
+          isMulti={isMulti}
+          onConfirmStep={onConfirmStep}
+        />
       </CardHeader>
       <CardContent className="space-y-2 px-3 pb-3">
         {currentItem ? (
@@ -358,9 +362,11 @@ export function AskUserQuestionCard({
 }
 
 function KeyboardHint({
+  hasChoices,
   isMulti,
   onConfirmStep,
 }: {
+  hasChoices: boolean;
   isMulti: boolean;
   onConfirmStep: boolean;
 }) {
@@ -378,11 +384,20 @@ function KeyboardHint({
         Enter
       </kbd>
       <span>{enterLabel}</span>
-      {isMulti && (
+      {hasChoices && (
         <>
           <span aria-hidden="true">·</span>
           <kbd className="rounded border bg-muted/50 px-1 py-[1px] font-mono text-[9px]">
             ↑↓
+          </kbd>
+          <span>답변 이동</span>
+        </>
+      )}
+      {isMulti && (
+        <>
+          <span aria-hidden="true">·</span>
+          <kbd className="rounded border bg-muted/50 px-1 py-[1px] font-mono text-[9px]">
+            ←→
           </kbd>
           <span>질문 이동</span>
         </>
@@ -499,12 +514,12 @@ function QuestionForm({
   const handleChoiceKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLButtonElement>, i: number) => {
       if (disabled) return;
-      if (e.key === "ArrowDown" || e.key === "ArrowRight") {
+      if (e.key === "ArrowDown") {
         e.preventDefault();
         const next = (i + 1) % choices.length;
         setFocusedIdx(next);
         buttonRefs.current[next]?.focus();
-      } else if (e.key === "ArrowUp" || e.key === "ArrowLeft") {
+      } else if (e.key === "ArrowUp") {
         e.preventDefault();
         const prev = (i - 1 + choices.length) % choices.length;
         setFocusedIdx(prev);
@@ -605,7 +620,7 @@ function ConfirmReview({
   return (
     <div className="space-y-1.5" data-testid="ask-confirm-review">
       <div className="text-[10.5px] text-muted-foreground">
-        모든 답변을 확인한 뒤 보내기를 누르세요. 항목 클릭 또는 ↑/↓로 질문을 이동할 수 있습니다.
+        모든 답변을 확인한 뒤 보내기를 누르세요. 항목 클릭 또는 ←/→로 질문을 이동할 수 있습니다.
       </div>
       <ul className="space-y-1">
         {request.questions.map((item, i) => {
