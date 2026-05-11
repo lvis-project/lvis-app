@@ -10,7 +10,7 @@ const REPO_ROOT = resolve(HERE, "../../..");
 const MAIN_ENTRY = resolve(REPO_ROOT, "dist/src/main.js");
 const ROUTINE_ID = "layout-probe";
 const FIRED_AT = "2026-05-11T04:00:00.000Z";
-const SESSION_FILE = "2026-05-11T04-00-00-000Z.jsonl";
+const SESSION_FILE = "2026-05-11T04-00-00-003Z.jsonl";
 const LONG_RESULT = JSON.stringify({
   query: "May 11 2026 Reuters technology AI regulation headlines",
   results: Array.from({ length: 10 }, (_, i) => ({
@@ -94,6 +94,7 @@ test.describe("routine session modal", () => {
       state: "visible",
       timeout: 15_000,
     });
+    await expect(page.getByText("routine summary")).toBeVisible();
     await page.locator('[data-testid="overlay-card-primary-action"]').click();
     await page.locator('[data-testid="routine-session-tool-result"]').waitFor({
       state: "visible",
