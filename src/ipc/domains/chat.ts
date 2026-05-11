@@ -18,6 +18,7 @@ import type { ConversationLoop, TurnResult } from "../../engine/conversation-loo
 import { parseImportedTriggerEnvelope } from "../../shared/overlay-trigger-source.js";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import type { IpcDeps } from "../types.js";
+import { sendToWebContents } from "../safe-send.js";
 import { createLogger } from "../../lib/logger.js";
 const log = createLogger("chat");
 
@@ -126,7 +127,7 @@ async function runStreamedTurn(
     inputOrigin: ChatInputOrigin;
   },
 ): Promise<TurnResult> {
-  const send = (payload: unknown) => webContents?.send(channel, { streamId, ...((payload as Record<string, unknown>) ?? {}) });
+  const send = (payload: unknown) => sendToWebContents(webContents, channel, { streamId, ...((payload as Record<string, unknown>) ?? {}) }, log);
   const originSource = options.inputOrigin === "plugin-emitted"
     ? parseImportedTriggerEnvelope(input)
     : null;
@@ -168,7 +169,7 @@ async function runStreamedTurn(
           ...(cacheWriteTokens !== undefined ? { cacheWriteTokens } : {}),
           ...(breakdown ? { breakdown } : {}),
         }),
-      onFallback: (from, to) => webContents?.send("lvis:chat:fallback", { from, to }),
+      onFallback: (from, to) => sendToWebContents(webContents, "lvis:chat:fallback", { from, to }, log),
     },
     undefined,
     {
@@ -227,11 +228,11 @@ export function registerChatHandlers(deps: IpcDeps): void {
       const r = redactForLLM(input);
       if (r.totalCount > 0) {
         effective = r.redacted;
-        webContents?.send("lvis:chat:stream", {
+        sendToWebContents(webContents, "lvis:chat:stream", {
           type: "redact_notice",
           count: r.totalCount,
           byKind: r.counts,
-        });
+        }, log);
         log.warn({ counts: r.counts }, `user draft redacted — count=${r.totalCount}`);
       }
     }
@@ -328,7 +329,7 @@ ${input}`;
     if (typeof input !== "string" || input.trim().length === 0) return { ok: false, error: "empty-text" };
     const win = getMainWindow();
     const streamId = allocateStreamId();
-    win?.webContents.send("lvis:chat:stream", { type: "guidance_reset", streamId });
+    sendToWebContents(win?.webContents, "lvis:chat:stream", { type: "guidance_reset", streamId }, log);
     suppressInterruptedTail = true;
     conversationLoop.abortCurrentTurn();
     if (activeStreamTurn) {
