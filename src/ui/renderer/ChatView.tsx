@@ -13,7 +13,6 @@ import { AssistantCard } from "./components/AssistantCard.js";
 import { UserMessageEditor } from "./components/UserMessageEditor.js";
 import { ReasoningCard } from "./components/ReasoningCard.js";
 import { ToolGroupCard } from "./components/ToolGroupCard.js";
-import { ChatSearchOverlay } from "./components/ChatSearchOverlay.js";
 import { DayDivider } from "./components/DayDivider.js";
 import { CheckpointDivider } from "./components/CheckpointDivider.js";
 import { SummaryToast } from "./components/SummaryToast.js";
@@ -397,8 +396,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
     question, setQuestion, chatEndRef, currentSessionId,
     hasApiKey, onOpenSettings,
-    searchOpen, searchQuery, searchCase, searchMatches, searchMatchSet, searchIdx, searchHighlight,
-    searchChangeQuery, searchToggleCase, searchNext, searchPrev, searchCloseOverlay, searchToggleOverlay,
+    searchOpen, searchMatches, searchMatchSet, searchIdx, searchHighlight,
     contextOverflowPct, usedTokens, contextBudget,
     rolePresets, activePreset, activePresetId, setActivePresetId,
     attachments, setAttachments, attachmentNCounter,
@@ -551,6 +549,19 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     await onLoadSession?.(sessionId);
   }, [onLoadSession, scrollToSessionMarker]);
 
+  useEffect(() => {
+    if (!searchOpen || searchMatches.length === 0) return;
+    const entryIndex = searchMatches[searchIdx];
+    if (entryIndex === undefined) return;
+    const viewport = scrollViewportRef.current;
+    if (!viewport) return;
+    const frame = window.requestAnimationFrame(() => {
+      const target = viewport.querySelector<HTMLElement>(`[data-chat-entry-index="${entryIndex}"]`);
+      target?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [searchIdx, searchMatches, searchOpen, scrollViewportRef]);
+
   // §PR-5: View-Mode handlers
   const handleEnterView = useCallback(async (compactNum: number) => {
     const result = await api.chatEnterCheckpointView?.(currentSessionId, compactNum);
@@ -667,8 +678,6 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
 
   return (
     <div className="relative flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden">
-      {/* ChatSearchOverlay moved INSIDE ScrollArea below so its sticky top-0
-          attaches to the chat scroll viewport instead of floating above it. */}
       {hasApiKey === false && (
         <div className="absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2">
           <Card className="w-[400px]"><CardHeader className="text-center"><KeyRound className="mx-auto mb-2 h-10 w-10 text-muted-foreground" /><CardTitle>API 키 설정 필요</CardTitle><CardDescription>채팅을 시작하려면 Claude API 키를 설정해 주세요.</CardDescription></CardHeader>
@@ -728,18 +737,6 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             ))}
           </Fragment>
         ))}
-        <ChatSearchOverlay
-          open={searchOpen}
-          query={searchQuery}
-          caseSensitive={searchCase}
-          matchCount={searchMatches.length}
-          currentIdx={searchIdx}
-          onChangeQuery={searchChangeQuery}
-          onToggleCase={searchToggleCase}
-          onNext={searchNext}
-          onPrev={searchPrev}
-          onClose={searchCloseOverlay}
-        />
         {/* Today's date badge — always shown above the active conversation.
             Even when historical sessions already rendered today's date, the
             active turn boundary must remain the same calendar-enabled divider
@@ -887,7 +884,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
                 const starId = isEntryStarred(idx);
                 const starActive = !!starId;
                 rendered.push(
-                  <div key={idx} className={`group relative ml-auto w-fit min-w-0 max-w-[75%] overflow-hidden rounded-md bg-message-user px-3.5 py-2 text-sm text-message-user-foreground ${userGapCls} ${ringCls}`}>
+                  <div key={idx} data-chat-entry-index={idx} className={`group relative ml-auto w-fit min-w-0 max-w-[75%] overflow-hidden rounded-md bg-message-user px-3.5 py-2 text-sm text-message-user-foreground ${userGapCls} ${ringCls}`}>
                     {/* "나" label removed — sender is implicit. Star + hover
                         actions float top-right via absolute positioning so
                         the bubble has no header chrome. */}
@@ -1103,7 +1100,11 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
                     streaming={groupIsActiveTurn}
                     turnDurationMs={groupSummary?.turnDurationMs}
                   >
-                    {groupEntries.map((ge) => ge.node)}
+                    {groupEntries.map((ge) => (
+                      <div key={ge.idx} data-chat-entry-index={ge.idx}>
+                        {ge.node}
+                      </div>
+                    ))}
                   </WorkGroup>
                 );
               }
@@ -1119,7 +1120,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
                 for (const node of renderSpawnsForGroup(entry)) rendered.push(node);
               } else if (entry.kind === "assistant") {
                 rendered.push(
-                  <div key={idx} className={ringCls || undefined}>
+                  <div key={idx} data-chat-entry-index={idx} className={ringCls || undefined}>
                     <AssistantCard
                       entry={entry}
                       highlightQuery={searchHighlight}
@@ -1138,7 +1139,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
               const turnStartIdx = finalTurnStartMap.get(i) ?? 0;
               const summary = turnSummaryByTurnStart.get(turnStartIdx);
               rendered.push(
-                  <div key={idx} className={`${ringCls} min-w-0 w-full max-w-full overflow-x-hidden rounded-md`}>
+                  <div key={idx} data-chat-entry-index={idx} className={`${ringCls} min-w-0 w-full max-w-full overflow-x-hidden rounded-md`}>
                   <AssistantCard
                     entry={entry}
                     highlightQuery={searchHighlight}
@@ -1230,7 +1231,6 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             onOpenMarketplace={onOpenMarketplace}
             marketplaceUrlReady={marketplaceUrlReady}
             onInsertSlashCommand={(cmd) => setQuestion(question ? question + cmd + " " : cmd + " ")}
-            onToggleChatSearch={searchToggleOverlay}
             commandActions={commandActions}
             commandPopoverOpen={commandPopoverOpen}
             onCommandPopoverOpenChange={onCommandPopoverOpenChange}

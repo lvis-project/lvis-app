@@ -2,8 +2,9 @@
  * D1a — Multi-model fallback chain for transient LLM errors.
  *
  * Wraps any LLMProvider's streamTurn so that on a transient failure (5xx,
- * 429, or network-level errors) the caller is transparently handed events
- * from the next entry in the fallback chain.
+ * 429, network-level errors, or first-event timeout) the caller retries the
+ * same provider up to five times before being handed events from the next
+ * entry in the fallback chain.
  *
  * Design constraints:
  *   - AbortError is NOT retried — user cancellation must propagate immediately.
@@ -35,6 +36,27 @@ export interface FallbackAuditLogger {
 
 export interface FallbackCallbacks {
   onFallback?: (from: string, to: string) => void;
+  onStatus?: (status: FallbackStatus) => void;
+}
+
+export interface FallbackStatus {
+  phase: "attempt" | "retry" | "fallback";
+  label?: string;
+  attempt?: number;
+  maxAttempts?: number;
+  from?: string;
+  to?: string;
+  reason?: string;
+}
+
+const FIRST_EVENT_TIMEOUT_MS = 1_000;
+const MAX_ATTEMPTS_PER_PROVIDER = 5;
+
+class FirstEventTimeoutError extends Error {
+  constructor(label: string) {
+    super(`${label} first response timed out after ${FIRST_EVENT_TIMEOUT_MS}ms`);
+    this.name = "TimeoutError";
+  }
 }
 
 /** Error categories that must NOT trigger fallback (config bugs → fail fast). */
@@ -58,22 +80,132 @@ function isNonRetryable(err: unknown): boolean {
 async function* attemptStream(
   provider: LLMProvider,
   params: StreamTurnParams,
+  label: string,
 ): AsyncIterable<StreamEvent> {
-  let firstEvent = true;
-  for await (const ev of provider.streamTurn(params)) {
-    if (firstEvent && ev.type === "error") {
-      // classification "api-key" or "model" = non-retryable
-      const cls = (ev as { type: "error"; classification?: string }).classification ?? "";
-      if (cls === "api-key" || cls === "model") {
-        yield ev;
-        return;
-      }
-      // Retryable error event (network / rate-limit / unknown) — throw to trigger fallback.
-      throw Object.assign(new Error(ev.error), { _lvisRetryable: true });
-    }
-    firstEvent = false;
-    yield ev;
+  const controller = new AbortController();
+  const abortFromParent = () => controller.abort(params.abortSignal?.reason);
+  if (params.abortSignal?.aborted) {
+    controller.abort(params.abortSignal.reason);
+  } else {
+    params.abortSignal?.addEventListener("abort", abortFromParent, { once: true });
   }
+
+  let firstEvent = true;
+  const iterator = provider.streamTurn({
+    ...params,
+    abortSignal: controller.signal,
+  })[Symbol.asyncIterator]();
+
+  try {
+    while (true) {
+      const nextPromise = iterator.next();
+      let result: IteratorResult<StreamEvent>;
+      if (firstEvent) {
+        let timeout: ReturnType<typeof setTimeout> | undefined;
+        try {
+          result = await Promise.race([
+            nextPromise,
+            new Promise<never>((_, reject) => {
+              timeout = setTimeout(() => reject(new FirstEventTimeoutError(label)), FIRST_EVENT_TIMEOUT_MS);
+            }),
+          ]);
+        } catch (err) {
+          if (err instanceof FirstEventTimeoutError) {
+            controller.abort(err);
+            nextPromise.catch(() => undefined);
+            const closePromise = iterator.return?.();
+            await closePromise?.catch(() => undefined);
+          }
+          throw err;
+        } finally {
+          if (timeout) clearTimeout(timeout);
+        }
+      } else {
+        result = await nextPromise;
+      }
+      if (result.done) return;
+
+      const ev = result.value;
+      if (firstEvent && ev.type === "error") {
+        // classification "api-key" or "model" = non-retryable
+        const cls = (ev as { type: "error"; classification?: string }).classification ?? "";
+        if (cls === "api-key" || cls === "model") {
+          yield ev;
+          return;
+        }
+        // Retryable error event (network / rate-limit / unknown) — throw to trigger retry/fallback.
+        throw Object.assign(new Error(ev.error), { _lvisRetryable: true });
+      }
+      firstEvent = false;
+      yield ev;
+    }
+  } finally {
+    params.abortSignal?.removeEventListener("abort", abortFromParent);
+  }
+}
+
+async function* attemptStreamWithRetries(
+  provider: LLMProvider,
+  params: StreamTurnParams,
+  label: string,
+  callbacks?: FallbackCallbacks,
+): AsyncIterable<StreamEvent> {
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS_PER_PROVIDER; attempt += 1) {
+    const attemptStartedAt = Date.now();
+    callbacks?.onStatus?.({
+      phase: "attempt",
+      label,
+      attempt,
+      maxAttempts: MAX_ATTEMPTS_PER_PROVIDER,
+    });
+    try {
+      yield* attemptStream(provider, params, label);
+      return;
+    } catch (err) {
+      if (isNonRetryable(err)) throw err;
+      lastErr = err;
+      await waitForAttemptWindow(attemptStartedAt, err, params.abortSignal);
+      if (attempt >= MAX_ATTEMPTS_PER_PROVIDER) break;
+      callbacks?.onStatus?.({
+        phase: "retry",
+        label,
+        attempt: attempt + 1,
+        maxAttempts: MAX_ATTEMPTS_PER_PROVIDER,
+        reason: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  throw lastErr;
+}
+
+function makeAbortError(): Error {
+  const err = new Error("The operation was aborted");
+  err.name = "AbortError";
+  return err;
+}
+
+function waitForAttemptWindow(
+  startedAt: number,
+  err: unknown,
+  abortSignal?: AbortSignal,
+): Promise<void> {
+  if (err instanceof FirstEventTimeoutError) return Promise.resolve();
+  const remainingMs = Math.max(0, FIRST_EVENT_TIMEOUT_MS - (Date.now() - startedAt));
+  if (remainingMs <= 0) return Promise.resolve();
+  if (abortSignal?.aborted) return Promise.reject(makeAbortError());
+  return new Promise((resolve, reject) => {
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const onAbort = () => {
+      if (timeout) clearTimeout(timeout);
+      reject(makeAbortError());
+    };
+    timeout = setTimeout(() => {
+      abortSignal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, remainingMs);
+    abortSignal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 /**
@@ -147,7 +279,7 @@ export async function* streamWithFallback(
   for (let i = 0; i < totalAttempts; i++) {
     const { provider, label, attemptParams } = getAttempt(i);
     try {
-      yield* attemptStream(provider, attemptParams);
+      yield* attemptStreamWithRetries(provider, attemptParams, label, callbacks);
       return;
     } catch (err) {
       if (isNonRetryable(err)) throw err;
@@ -164,6 +296,7 @@ export async function* streamWithFallback(
         // audit failure must never block the fallback path
       }
       callbacks?.onFallback?.(label, nextLabel);
+      callbacks?.onStatus?.({ phase: "fallback", from: label, to: nextLabel, reason });
     }
   }
   throw lastErr;

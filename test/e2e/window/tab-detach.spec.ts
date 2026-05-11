@@ -4,7 +4,7 @@
  * Exercises the full tab-detach + magnetic-snap lifecycle using playwright-electron:
  *
  *  1. Launch the app and wait for boot.
- *  2. Right-click the sidebar "Tasks" tab → click "새 창으로 열기" → assert a
+ *  2. Right-click a detachable built-in view → click "새 창으로 열기" → assert a
  *     second BrowserWindow opens.
  *  3. Move the detached window within SNAP_THRESHOLD_DIP (20 px) of the main
  *     window's right edge → verify the detached window's x-position locks to
@@ -104,10 +104,10 @@ test.describe('tab-detach + magnetic snap', () => {
   test('right-click Tasks → "새 창으로 열기" opens a second window', async () => {
     test.skip(!fs.existsSync(MAIN_ENTRY), 'Built app absent — run bun run build first');
 
-    // Find the Tasks button in the sidebar.
+    // Find a legacy Tasks button if the build still exposes it.
     const tasksButton = mainWindow.locator('button:has-text("태스크"), button:has-text("Tasks")').first();
     const visible = await tasksButton.waitFor({ state: 'visible', timeout: 10_000 }).then(() => true).catch(() => false);
-    test.skip(!visible, 'Tasks sidebar button not found — sidebar may not be present in this build');
+    test.skip(!visible, 'Legacy Tasks button not found — skipping detach context-menu path');
 
     // Listen for a new window before triggering the context menu.
     const newWindowPromise = app.waitForEvent('window', { timeout: 15_000 });

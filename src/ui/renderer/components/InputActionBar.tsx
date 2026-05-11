@@ -1,4 +1,4 @@
-import { ChevronDown, Paperclip, Search, User } from "lucide-react";
+import { ChevronDown, Paperclip, User } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
 import {
   DropdownMenu,
@@ -6,7 +6,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../../../components/ui/dropdown-menu.js";
-import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
 import { TokenProgressRing } from "./TokenProgressRing.js";
 import { PluginGridButton, type PluginEntry } from "./PluginGridButton.js";
 import type { InstallPhase } from "../hooks/use-plugin-marketplace.js";
@@ -23,7 +22,6 @@ export interface InputActionBarProps {
   onOpenMarketplace: () => void;
   marketplaceUrlReady?: boolean;
   onInsertSlashCommand: (cmd: string) => void;
-  onToggleChatSearch: () => void;
   commandActions: QuickAction[];
   commandPopoverOpen: boolean;
   onCommandPopoverOpenChange: (open: boolean) => void;
@@ -70,7 +68,6 @@ export function InputActionBar({
   onOpenMarketplace,
   marketplaceUrlReady,
   onInsertSlashCommand,
-  onToggleChatSearch,
   commandActions,
   commandPopoverOpen,
   onCommandPopoverOpenChange,
@@ -90,21 +87,6 @@ export function InputActionBar({
       {/* Leading cluster */}
       <div className="flex min-w-0 items-center gap-0.5" data-testid="iab-leading">
         <TokenProgressRing used={usedTokens} budget={contextBudget} />
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 w-7 p-0"
-              onClick={onToggleChatSearch}
-              title="대화 검색 (Cmd/Ctrl+F)"
-              aria-label="대화 검색 (Cmd/Ctrl+F)"
-            >
-              <Search className="h-3.5 w-3.5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>대화 검색 (Cmd/Ctrl+F)</TooltipContent>
-        </Tooltip>
         <PluginGridButton
           plugins={plugins}
           onSelect={onSelectPlugin}

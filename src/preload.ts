@@ -206,7 +206,7 @@ const api = {
     ipcRenderer.invoke("lvis:starred:add", entry),
   starredRemove: async (opts: { id?: string; sessionId?: string; messageIndex?: number }) =>
     ipcRenderer.invoke("lvis:starred:remove", opts),
-  onChatStream: (handler: (event: { type: string; text?: string; thought?: string; name?: string; error?: string; result?: string; isError?: boolean; input?: Record<string, unknown>; groupId?: string; toolUseId?: string; displayOrder?: number; roundIndex?: number; stopReason?: "end_turn" | "tool_use"; hasToolCalls?: boolean; removedMessages?: number; freedTokens?: number; tier?: "auto-compact" | "manual"; summary?: string; compactNum?: number; mode?: "default" | "strict" | "auto" | "allow"; turnDurationMs?: number; toolCount?: number; cumulativeToolMs?: number; tokensIn?: number; tokensOut?: number; breakdown?: Record<string, { count: number; ms: number }> }) => void) => {
+  onChatStream: (handler: (event: { type: string; text?: string; thought?: string; name?: string; error?: string; result?: string; isError?: boolean; input?: Record<string, unknown>; groupId?: string; toolUseId?: string; displayOrder?: number; roundIndex?: number; stopReason?: "end_turn" | "tool_use"; hasToolCalls?: boolean; removedMessages?: number; freedTokens?: number; tier?: "auto-compact" | "manual"; summary?: string; compactNum?: number; mode?: "default" | "strict" | "auto" | "allow"; phase?: "attempt" | "retry" | "fallback"; label?: string; attempt?: number; maxAttempts?: number; from?: string; to?: string; reason?: string; turnDurationMs?: number; toolCount?: number; cumulativeToolMs?: number; tokensIn?: number; tokensOut?: number; breakdown?: Record<string, { count: number; ms: number }> }) => void) => {
     const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
     ipcRenderer.on("lvis:chat:stream", listener);
     return () => ipcRenderer.removeListener("lvis:chat:stream", listener);
@@ -366,7 +366,7 @@ const api = {
   // ─── lvis:// deep-link install lifecycle ─────────
   // Fires when a marketplace install triggered via lvis://install/{slug} has
   // finished installing + restartAll() in the main process. Renderer uses
-  // this to refresh its plugin UI list so newly-installed sidebar views
+  // this to refresh its plugin UI list so newly-installed plugin views
   // appear without requiring an app restart.
   onPluginInstallResult: (handler: (payload: { slug: string; success: boolean; error?: string }) => void) => {
     const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
@@ -400,7 +400,7 @@ const api = {
 
   // Sibling of onPluginInstallResult — fires after PluginConfigTab or any
   // other surface drives uninstall through the IPC handler. Renderer uses
-  // this to drop the removed plugin's sidebar tab + marketplace card.
+  // this to drop the removed plugin view + marketplace card.
   onPluginUninstallResult: (handler: (payload: { slug: string; success: boolean; error?: string }) => void) => {
     const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
     ipcRenderer.on("lvis:plugins:uninstall-result", listener);
@@ -411,7 +411,7 @@ const api = {
   // installFromMarketplace: downloading (byte-level) → verifying → registering.
   // The callers (handleLvisUri, lvis:plugins:install) emit `installing` at the
   // start and `restarting` after the install completes. The result event clears
-  // the in-flight state. Renderer renders a skeleton card / sidebar placeholder.
+  // the in-flight state. Renderer renders a skeleton card.
   onPluginInstallProgress: (handler: (payload:
     | { slug: string; phase: "installing" | "restarting" | "verifying" | "registering" }
     | { slug: string; phase: "downloading"; bytesDownloaded: number; bytesTotal: number | null }

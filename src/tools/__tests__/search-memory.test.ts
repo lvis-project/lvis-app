@@ -23,12 +23,12 @@ const fixture: SearchMemoryNote[] = [
     updatedAt: "2026-04-11T00:00:00Z",
   },
   {
-    title: "검색 아키텍처 메모",
+    title: "검색 아키텍처 메모리",
     content: "BM25 hybrid retrieval, RRF k=60, 벡터 검색 결합.",
     updatedAt: "2026-04-12T00:00:00Z",
   },
   {
-    title: "빈 메모",
+    title: "빈 메모리",
     content: "",
   },
 ];
@@ -67,7 +67,7 @@ describe("rankNotes", () => {
   it("returns top-K results sorted by score, truncates snippet, drops zero-score", () => {
     const results = rankNotes("검색 BM25", fixture, 5, 40);
     expect(results.length).toBeGreaterThan(0);
-    expect(results[0].title).toBe("검색 아키텍처 메모");
+    expect(results[0].title).toBe("검색 아키텍처 메모리");
     // sorted descending
     for (let i = 1; i < results.length; i++) {
       expect(results[i - 1].score).toBeGreaterThanOrEqual(results[i].score);
@@ -105,7 +105,7 @@ describe("createSearchMemoryTool", () => {
     const parsed = JSON.parse(res.output as string) as Array<{ title: string; score: number }>;
     expect(Array.isArray(parsed)).toBe(true);
     expect(parsed.length).toBeGreaterThan(0);
-    expect(parsed[0].title).toBe("검색 아키텍처 메모");
+    expect(parsed[0].title).toBe("검색 아키텍처 메모리");
   });
 
   it("empty query returns empty array without error", async () => {
@@ -132,8 +132,8 @@ describe("memoryManagerNotesAdapter", () => {
       listMemoryEntries: () => [
         {
           filename: "m1.md",
-          title: "메모",
-          content: "# 메모\n\n본문",
+          title: "메모리",
+          content: "# 메모리\n\n본문",
           updatedAt: "2026-04-20T00:00:00Z",
         },
       ],
@@ -141,8 +141,8 @@ describe("memoryManagerNotesAdapter", () => {
 
     expect(getNotes()).toEqual([
       {
-        title: "메모",
-        content: "# 메모\n\n본문",
+        title: "메모리",
+        content: "# 메모리\n\n본문",
         updatedAt: "2026-04-20T00:00:00Z",
       },
     ]);

@@ -8,7 +8,7 @@
  *   (d) AbortError from primary → no fallback, re-throws (user cancel sacred).
  *   (e) All chain entries exhausted → throws last error.
  */
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import type { LLMProvider, StreamEvent } from "../../types.js";
 import { streamWithFallback } from "../fallback-chain.js";
 import type { FallbackEntry, ProviderFactory } from "../fallback-chain.js";
@@ -58,6 +58,11 @@ const CHAIN: FallbackEntry[] = [
 
 const getApiKey = (_v: any) => "test-key";
 
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
+
 // ─── (a) Primary succeeds → no fallback ─────────────────────────
 
 describe("(a) primary succeeds — no fallback", () => {
@@ -83,6 +88,7 @@ describe("(a) primary succeeds — no fallback", () => {
 
 describe("(b) primary transient error → fallback succeeds", () => {
   it("retryable error event triggers fallback; fallback yields good events", async () => {
+    vi.useFakeTimers();
     const primary: LLMProvider = {
       vendor: "claude" as any,
       streamTurn: async function* () {
@@ -93,17 +99,19 @@ describe("(b) primary transient error → fallback succeeds", () => {
     const factory: ProviderFactory = vi.fn(() => fallbackProvider);
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    const events = await collect(
+    const pending = collect(
       streamWithFallback(primary, BASE_PARAMS, CHAIN, getApiKey, undefined, factory),
     );
+    await vi.advanceTimersByTimeAsync(5_000);
+    const events = await pending;
 
     expect(factory).toHaveBeenCalledOnce();
     expect(events).toEqual(GOOD_EVENTS);
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("fallback:"));
-    warnSpy.mockRestore();
   });
 
   it("rate-limit (429) error event also triggers fallback", async () => {
+    vi.useFakeTimers();
     const primary: LLMProvider = {
       vendor: "claude" as any,
       streamTurn: async function* () {
@@ -113,10 +121,71 @@ describe("(b) primary transient error → fallback succeeds", () => {
     const fallbackProvider = makeProvider("openai", GOOD_EVENTS);
     const factory: ProviderFactory = vi.fn(() => fallbackProvider);
 
-    const events = await collect(
+    const pending = collect(
       streamWithFallback(primary, BASE_PARAMS, CHAIN, getApiKey, undefined, factory),
     );
+    await vi.advanceTimersByTimeAsync(5_000);
+    const events = await pending;
 
+    expect(factory).toHaveBeenCalledOnce();
+    expect(events).toEqual(GOOD_EVENTS);
+  });
+
+  it("retries a provider five times before moving to the fallback model", async () => {
+    vi.useFakeTimers();
+    const statuses: unknown[] = [];
+    const primary: LLMProvider = {
+      vendor: "claude" as any,
+      streamTurn: vi.fn(async function* () {
+        yield { type: "error" as const, error: "500 internal server error", classification: "network" };
+      }),
+    };
+    const fallbackProvider = makeProvider("openai", GOOD_EVENTS);
+    const factory: ProviderFactory = vi.fn(() => fallbackProvider);
+
+    const pending = collect(
+      streamWithFallback(primary, BASE_PARAMS, CHAIN, getApiKey, undefined, factory, {
+        onStatus: (status) => statuses.push(status),
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(4_999);
+
+    expect(primary.streamTurn).toHaveBeenCalledTimes(5);
+    expect(factory).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1);
+    const events = await pending;
+
+    expect(primary.streamTurn).toHaveBeenCalledTimes(5);
+    expect(factory).toHaveBeenCalledOnce();
+    expect(events).toEqual(GOOD_EVENTS);
+    expect(statuses).toEqual(expect.arrayContaining([
+      expect.objectContaining({ phase: "retry", attempt: 2, maxAttempts: 5 }),
+      expect.objectContaining({ phase: "retry", attempt: 5, maxAttempts: 5 }),
+      expect.objectContaining({ phase: "fallback", from: "claude/primary-model", to: "openai/fallback-model" }),
+    ]));
+  });
+
+  it("first-event timeout follows the same five-attempt retry policy", async () => {
+    vi.useFakeTimers();
+    const primary: LLMProvider = {
+      vendor: "claude" as any,
+      streamTurn: vi.fn((params) => (async function* () {
+        await new Promise<never>((_resolve, reject) => {
+          params.abortSignal?.addEventListener("abort", () => {
+            reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+          }, { once: true });
+        });
+      })()),
+    };
+    const fallbackProvider = makeProvider("openai", GOOD_EVENTS);
+    const factory: ProviderFactory = vi.fn(() => fallbackProvider);
+
+    const pending = collect(streamWithFallback(primary, BASE_PARAMS, CHAIN, getApiKey, undefined, factory));
+    await vi.advanceTimersByTimeAsync(5_000);
+    const events = await pending;
+
+    expect(primary.streamTurn).toHaveBeenCalledTimes(5);
     expect(factory).toHaveBeenCalledOnce();
     expect(events).toEqual(GOOD_EVENTS);
   });
@@ -176,6 +245,7 @@ describe("(d) AbortError → no fallback, re-throws (user cancel sacred)", () =>
 
 describe("(e) all chain exhausted → throws last error", () => {
   it("throws when every entry in the chain fails", async () => {
+    vi.useFakeTimers();
     const primary: LLMProvider = {
       vendor: "claude" as any,
       streamTurn: async function* () {
@@ -190,12 +260,15 @@ describe("(e) all chain exhausted → throws last error", () => {
     };
     const factory: ProviderFactory = vi.fn(() => alsoFailing);
 
-    await expect(
+    const pending = expect(
       collect(streamWithFallback(primary, BASE_PARAMS, CHAIN, getApiKey, undefined, factory)),
     ).rejects.toThrow("second failure");
+    await vi.advanceTimersByTimeAsync(10_000);
+    await pending;
   });
 
   it("throws with no chain — just primary failure", async () => {
+    vi.useFakeTimers();
     const primary: LLMProvider = {
       vendor: "claude" as any,
       streamTurn: async function* () {
@@ -203,8 +276,10 @@ describe("(e) all chain exhausted → throws last error", () => {
       },
     };
 
-    await expect(
+    const pending = expect(
       collect(streamWithFallback(primary, BASE_PARAMS, [], getApiKey)),
     ).rejects.toThrow("network error");
+    await vi.advanceTimersByTimeAsync(5_000);
+    await pending;
   });
 });

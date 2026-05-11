@@ -2,7 +2,7 @@
  * Phase 3 safety net — star / unstar flow on chat messages.
  *
  * Covers: addStarred fires with correct payload, toggle-off calls
- * starredRemove, and the starred sidebar tab lists saved entries.
+ * starredRemove, and the starred view lists saved entries.
  */
 import "./setup.js";
 import { describe, it, expect, vi, afterEach } from "vitest";
@@ -108,7 +108,7 @@ describe("Star flow (Phase 3 regression net)", () => {
     await waitFor(() => expect(api.addStarred).toHaveBeenCalledTimes(2));
   });
 
-  it("starred tab in sidebar exposes the saved entries", async () => {
+  it("starred view from hamburger menu exposes the saved entries", async () => {
     const userEvent = (await import("@testing-library/user-event")).default;
     const user = userEvent.setup();
     const starred = [
@@ -126,14 +126,19 @@ describe("Star flow (Phase 3 regression net)", () => {
       starred,
     });
     await waitFor(() => expect(api.starredList).toHaveBeenCalled());
-    const starredButton = await waitFor(() => {
-      const el = Array.from(container.querySelectorAll("button")).find((button) =>
-        button.textContent?.includes("즐겨찾기"),
-      );
-      if (!el) throw new Error("starred sidebar button not found");
+    const menuButton = await waitFor(() => {
+      const el = container.querySelector('button[title="더 많은 메뉴"]');
+      if (!el) throw new Error("hamburger menu button not found");
       return el as HTMLButtonElement;
     });
-    await user.click(starredButton);
+    await user.click(menuButton);
+    await user.click(await waitFor(() => {
+      const el = Array.from(document.body.querySelectorAll('[role="menuitem"]')).find((item) =>
+        item.textContent?.trim() === "즐겨찾기",
+      );
+      if (!el) throw new Error("starred view menu item not found");
+      return el as HTMLElement;
+    }));
     await waitFor(() => {
       expect(container.textContent).toContain("remembered answer");
     });
@@ -157,14 +162,19 @@ describe("Star flow (Phase 3 regression net)", () => {
       starred,
     });
     await waitFor(() => expect(api.starredList).toHaveBeenCalled());
-    const starredButton = await waitFor(() => {
-      const el = Array.from(container.querySelectorAll("button")).find((button) =>
-        button.textContent?.includes("즐겨찾기"),
-      );
-      if (!el) throw new Error("starred sidebar button not found");
+    const menuButton = await waitFor(() => {
+      const el = container.querySelector('button[title="더 많은 메뉴"]');
+      if (!el) throw new Error("hamburger menu button not found");
       return el as HTMLButtonElement;
     });
-    await user.click(starredButton);
+    await user.click(menuButton);
+    await user.click(await waitFor(() => {
+      const el = Array.from(document.body.querySelectorAll('[role="menuitem"]')).find((item) =>
+        item.textContent?.trim() === "즐겨찾기",
+      );
+      if (!el) throw new Error("starred view menu item not found");
+      return el as HTMLElement;
+    }));
 
     const entryButton = await waitFor(() => {
       const el = Array.from(container.querySelectorAll("button")).find((button) =>

@@ -206,7 +206,7 @@ export function PluginGridButton({
               // Use explicit pluginId from PluginEntry when available; fall back
               // to deriving from viewKey for cases where the caller omits it.
               // pluginId drives the install-phase lookup; viewKey drives the
-              // testid so a single plugin exposing multiple sidebar UI
+              // testid so a single plugin exposing multiple plugin UI
               // extensions still gets unique cells.
               const pluginId = p.pluginId ?? p.viewKey.split(":")[1] ?? "";
               const cellTestId = p.viewKey.replace(/:/g, "-");

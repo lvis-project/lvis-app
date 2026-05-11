@@ -73,11 +73,11 @@ export const test = base.extend<ElectronFixtures>({
   mainWindow: async ({ app }, use) => {
     const win = await app.firstWindow();
     // The app first loads a data: splash URL, then boots and replaces it with
-    // the real index.html. Wait for the Sidebar root via data-testid — this
-    // is the first persistent element after React mounts and survives view
-    // changes. Locale-independent: previously we matched on the Korean
-    // "메뉴" header text, which would break the moment the UI is localized.
-    await win.locator('[data-testid="sidebar"]').first().waitFor({
+    // the real index.html. Wait for the top action bar root via data-testid —
+    // this is the first persistent element after React mounts and survives
+    // view changes. Locale-independent: previously we matched on Korean
+    // header text, which would break the moment the UI is localized.
+    await win.locator('[data-testid="main-toolbar"]').first().waitFor({
       state: 'visible',
       timeout: 60_000,
     });

@@ -191,7 +191,7 @@ When in doubt, copy from `<Button>` or `<Card>`.
 | Component | File | Notes |
 |-----------|------|-------|
 | App shell | `src/index.html`, `src/ui/renderer/App.tsx` | already uses `bg-background`/`text-foreground` |
-| Sidebar | `src/ui/renderer/Sidebar.tsx` | already `bg-background border-r border-border` |
+| Top action bar | `src/ui/renderer/MainToolbar.tsx` | uses `bg-card border-b border-border` |
 | Top bar | `src/ui/renderer/MainToolbar.tsx` | already `border-b` semantic |
 | StatusBar | `src/ui/renderer/components/StatusBar.tsx` | already semantic |
 | Buttons | `src/components/ui/button.tsx` | semantic via `cva` |

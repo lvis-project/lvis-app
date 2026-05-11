@@ -16,11 +16,9 @@ import type { PluginEntry } from "./components/PluginGridButton.js";
 import { ApprovalDialog } from "./dialogs/ApprovalDialog.js";
 import { ApprovalQueueStatus } from "./components/ApprovalQueueStatus.js";
 import { DeferredQueueDialog } from "./dialogs/DeferredQueueDialog.js";
-import { GlobalSearchDialog } from "./dialogs/GlobalSearchDialog.js";
 import { buildQuickActions } from "./components/CommandPopover.js";
 import { MainToolbar } from "./MainToolbar.js";
 import { MainContent } from "./MainContent.js";
-import { Sidebar } from "./Sidebar.js";
 import { SettingsDialog } from "./SettingsDialog.js";
 import { StatusBar } from "./components/StatusBar.js";
 import { useStatusBar, type NotificationToastMeta } from "./hooks/use-status-bar.js";
@@ -53,6 +51,7 @@ import { useInstallingPlugins } from "./hooks/use-installing-plugins.js";
 import { useMarketplaceUrl } from "./hooks/use-marketplace-url.js";
 import { OverlayContextProvider } from "./context/OverlayContext.js";
 import { RoutineSessionView } from "./components/RoutineSessionView.js";
+import { UnifiedSearchPanel } from "./components/UnifiedSearchPanel.js";
 
 // ─── App ────────────────────────────────────────────
 
@@ -60,7 +59,7 @@ export function App() {
   const api = useMemo(() => getApi(), []);
 
   // Workflow tools (S1+S2) — lifted to App level so FloatingQuestionPanel
-  // survives sidebar navigation (question state persists across view changes).
+  // survives view navigation (question state persists across view changes).
   const {
     askQuestions,
     subAgentSpawns,
@@ -74,7 +73,7 @@ export function App() {
     entries, streaming, beginStreamingRequest, finishStreamingRequest, editingEntryIdx, setEditingEntryIdx, editBusy,
     entryIndexToHistoryIndex, handleEditSave, handleRetryEffort,
     resetStreamAccumulators, setErrorWithThought, handleCompactCommand,
-    clearForNewChat, appendUserEntry, applyInitialSession, applyLoadedSession, truncateToEntry,
+    clearForNewChat, appendUserEntry, appendAssistantStatus, applyInitialSession, applyLoadedSession, truncateToEntry,
     fallbackToast,
     insertImportedTriggerEntry,
   } = useChatState(api);
@@ -93,7 +92,6 @@ export function App() {
   const [settingsInitialTab, setSettingsInitialTab] = useState("llm");
   const [deferredQueueOpen, setDeferredQueueOpen] = useState(false);
   const [activeView, setActiveView] = useState("home");
-  const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
   const [commandPopoverOpen, setCommandPopoverOpen] = useState(false);
   const { updates: marketplaceUpdates, dismiss: dismissMarketplaceUpdates } = useMarketplaceUpdates(api);
   const { status: bootstrapStatus, dismiss: dismissBootstrapStatus, retry: retryBootstrap } = useBootstrapStatus(api);
@@ -288,8 +286,8 @@ export function App() {
     open: searchOpen, query: searchQuery, caseSensitive: searchCase,
     matches: searchMatches, matchSet: searchMatchSet, matchIdx: searchIdx, highlight: searchHighlight,
     changeQuery: searchChangeQuery, toggleCase: searchToggleCase,
-    toggleOverlay: searchToggleOverlay, closeOverlay: searchCloseOverlay,
-    nextMatch: searchNext, prevMatch: searchPrev,
+    openOverlay: searchOpenOverlay, toggleOverlay: searchToggleOverlay, closeOverlay: searchCloseOverlay,
+    nextMatch: searchNext, prevMatch: searchPrev, jumpToMatch: searchJumpToMatch,
   } = useSearch(entries);
   const {
     starred,
@@ -373,8 +371,8 @@ export function App() {
     [api, setErrorWithThought],
   );
 
-  // When a plugin view declares `window.defaultMode: "detached"`, a sidebar
-  // click opens it in a separate magnetic-snap BrowserWindow instead of
+  // When a plugin view declares `window.defaultMode: "detached"`, selecting
+  // it opens a separate magnetic-snap BrowserWindow instead of
   // switching the main window's active view.
   //
   // If the owning plugin declares `manifest.auth` AND its current state is
@@ -382,7 +380,7 @@ export function App() {
   // views open directly so plugin-owned login UIs can collect their own
   // credentials through the plugin surface instead of the host calling
   // loginTool with no arguments.
-  const handleSidebarSelect = useCallback(
+  const handleViewSelect = useCallback(
     (key: string) => {
       if (key.startsWith("plugin:")) {
         const view = pluginViews.find((v) => toViewKey(v) === key);
@@ -436,7 +434,7 @@ export function App() {
     [api, pluginViews, pluginAuthStatuses, pluginCards, openDetachedPluginView],
   );
 
-  // If the currently-open sidebar view belongs to a plugin that just got
+  // If the currently-open plugin view belongs to a plugin that just got
   // uninstalled, fall back to home so the renderer doesn't render a "view
   // not found" placeholder for a stale plugin id.
   useEffect(() => {
@@ -544,6 +542,9 @@ export function App() {
         appendUserEntry(t);
       }
       resetStreamAccumulators();
+      if (mode !== "trigger-import") {
+        appendAssistantStatus("생각 중...");
+      }
       try {
         await api.chatSend(
           outgoing,
@@ -580,6 +581,7 @@ export function App() {
       checkApiKey,
       composeOutgoing,
       appendUserEntry,
+      appendAssistantStatus,
       resetStreamAccumulators,
       beginStreamingRequest,
       finishStreamingRequest,
@@ -638,7 +640,7 @@ export function App() {
   }, [entries]);
 
   // Refresh plugin views + marketplace catalog when a lvis:// deep-link
-  // install completes in the main process, so new sidebar tabs appear
+  // install completes in the main process, so new plugin entries appear
   // (and uninstalled ones disappear) without requiring an app restart.
   useEffect(() => {
     if (typeof api.onPluginInstallResult !== "function") return;
@@ -653,8 +655,8 @@ export function App() {
 
   // Same lifecycle for uninstall — PluginConfigTab and any other surface
   // drive uninstall through the IPC handler which now broadcasts a result
-  // event. Without this subscription the sidebar would keep the removed
-  // plugin's tab until the app reloads.
+  // event. Without this subscription plugin entry state would stay stale
+  // until the app reloads.
   useEffect(() => {
     if (typeof api.onPluginUninstallResult !== "function") return;
     const unsubscribe = api.onPluginUninstallResult(({ success }) => {
@@ -680,12 +682,12 @@ export function App() {
   const commandActions = useMemo(
     () =>
       buildQuickActions({
-        setActiveView: handleSidebarSelect,
+        setActiveView: handleViewSelect,
         openSettings: onOpenSettings,
         handleNewChat,
         pluginViews,
       }),
-    [pluginViews, handleNewChat, handleSidebarSelect, onOpenSettings],
+    [pluginViews, handleNewChat, handleViewSelect, onOpenSettings],
   );
 
   const onNewChat = useCallback(() => { void handleNewChat(); }, [handleNewChat]);
@@ -743,14 +745,6 @@ export function App() {
         <div className="flex h-screen flex-col overflow-hidden">
           <CustomTitleBar />
         <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
-          <Sidebar
-            activeView={activeView}
-            setActiveView={handleSidebarSelect}
-            starredCount={starred.length}
-            sessions={sessions}
-            onLoadSession={handleLoadSession}
-          />
-
         <main className="flex min-h-0 min-w-0 flex-1 flex-col">
           <BootstrapStatusBanner status={bootstrapStatus} onDismiss={dismissBootstrapStatus} onRetry={() => void retryBootstrap()} />
           <MarketplaceUpdateBanner
@@ -764,25 +758,58 @@ export function App() {
             </div>
           )}
           <MainToolbar
+            activeView={activeView}
             streaming={streaming}
             hasApiKey={hasApiKey}
-            sessions={sessions}
-            currentSessionId={currentSessionId}
             isCurrentSessionStarred={Boolean(currentSessionId && isSessionStarred(currentSessionId))}
             onNewChat={onNewChat}
-            onRefreshSessions={refreshSessions}
-            onRefreshStarred={refreshStarred}
-            onLoadSession={handleLoadSession}
             onToggleCurrentSessionStar={() => currentSessionId
               ? handleToggleSessionStar(currentSessionId, sessions.find((s) => s.id === currentSessionId)?.title)
               : Promise.resolve()}
-            onToggleSessionStar={handleToggleSessionStar}
-            isSessionStarred={(sessionId) => Boolean(isSessionStarred(sessionId))}
             onExport={handleExport}
+            onOpenHome={() => setActiveView("home")}
+            onOpenRoutinesView={() => setActiveView("routines")}
+            onOpenMemoryView={() => setActiveView("memory")}
             onOpenSettings={() => onOpenSettings()}
-            onOpenGlobalSearch={() => { refreshSessions(); setGlobalSearchOpen(true); }}
+            onOpenUnifiedSearch={() => {
+              void refreshSessions();
+              void refreshStarred();
+              searchOpenOverlay();
+            }}
             onOpenStarredView={() => setActiveView("starred")}
           />
+          {searchOpen && (
+            <UnifiedSearchPanel
+              api={api}
+              open={searchOpen}
+              query={searchQuery}
+              caseSensitive={searchCase}
+              entries={entries}
+              conversationMatches={searchMatches}
+              currentConversationMatch={searchIdx}
+              sessions={sessions}
+              starred={starred}
+              onChangeQuery={searchChangeQuery}
+              onToggleCase={searchToggleCase}
+              onNextConversationMatch={searchNext}
+              onPrevConversationMatch={searchPrev}
+              onJumpToConversationMatch={(matchIndex) => {
+                setActiveView("home");
+                searchJumpToMatch(matchIndex);
+              }}
+              onOpen={searchOpenOverlay}
+              onClose={searchCloseOverlay}
+              onLoadSession={handleLoadSession}
+              onOpenMemoryView={() => {
+                setActiveView("memory");
+                searchCloseOverlay();
+              }}
+              onOpenRoutinesView={() => {
+                setActiveView("routines");
+                searchCloseOverlay();
+              }}
+            />
+          )}
 
           <MainContent
             activeView={activeView}
@@ -809,7 +836,7 @@ export function App() {
             askQuestions={askQuestions}
             onResolveAskQuestion={dismissAskQuestion}
             plugins={pluginEntries}
-            onSelectPlugin={handleSidebarSelect}
+            onSelectPlugin={handleViewSelect}
             commandActions={commandActions}
             commandPopoverOpen={commandPopoverOpen}
             onCommandPopoverOpenChange={setCommandPopoverOpen}
@@ -834,20 +861,6 @@ export function App() {
       <DeferredQueueDialog open={deferredQueueOpen} onOpenChange={setDeferredQueueOpen} />
       <ApprovalDialog queue={approvalQueue} onDecide={handleApprovalDecide} />
       <ApprovalQueueStatus queue={approvalQueue} />
-      {/* Conditional mount: avoids useMemorySearch IPC calls while dialog is closed.
-          Re-mounts on every open → catalog reloaded each time. If that proves slow,
-          introduce a persistent cache hook in a separate PR. */}
-      {globalSearchOpen && (
-        <GlobalSearchDialog
-          open={globalSearchOpen}
-          onOpenChange={setGlobalSearchOpen}
-          api={api}
-          sessions={sessions}
-          starred={starred}
-          onLoadSession={handleLoadSession}
-          onOpenMemoryView={() => setActiveView("memory")}
-        />
-      )}
       <DropZoneOverlay />
       <DevConsoleToggle />
       {/* Snap edge highlight — shown when a detached child window enters the snap zone */}

@@ -14,7 +14,7 @@ import { markStaleToolResults, estimateMessagesTokens, getModelPreflightThreshol
 import { compactWithBoundary, renderBoundaryAsPreamble } from "./structured-compact.js";
 import { stubMarkedToolResults } from "./wire-serialize.js";
 import { createProvider, secretKeyFor } from "./llm/provider-factory.js";
-import { FallbackProvider } from "./llm/vercel/fallback-chain.js";
+import { FallbackProvider, type FallbackStatus } from "./llm/vercel/fallback-chain.js";
 import type { LLMProvider, ToolSchema, TokenUsage } from "./llm/types.js";
 import { collectRoundStream } from "./turn/stream-collector.js";
 import {
@@ -119,6 +119,7 @@ export interface TurnCallbacks {
     compactNum?: number;
   }) => void;
   onFallback?: (from: string, to: string) => void;
+  onLlmStatus?: (status: FallbackStatus) => void;
   /**
    * Turn aggregate footer (§ chat transcript per-turn footer) — fires once
    * after the turn fully resolves with cumulative wall-clock / step-count /
@@ -384,14 +385,11 @@ export class ConversationLoop {
       const chain = llmSettings.fallbackChain.filter(
         (e) => e.provider && e.model,
       );
-      this.provider =
-        chain.length > 0
-          ? new FallbackProvider(
-              primary,
-              chain,
-              (v) => this.deps.settingsService.getSecret(secretKeyFor(v)) ?? "",
-            )
-          : primary;
+      this.provider = new FallbackProvider(
+        primary,
+        chain,
+        (v) => this.deps.settingsService.getSecret(secretKeyFor(v)) ?? "",
+      );
     } catch {
       this.provider = null;
     }
@@ -1165,7 +1163,10 @@ export class ConversationLoop {
     const model = activeBlock.model;
     // Wire per-turn onFallback callback into FallbackProvider when available.
     if (this.provider instanceof FallbackProvider) {
-      this.provider.setCallbacks({ onFallback: callbacks?.onFallback });
+      this.provider.setCallbacks({
+        onFallback: callbacks?.onFallback,
+        onStatus: callbacks?.onLlmStatus,
+      });
     }
     // Phase 1.5 Option C: scope is mutable within the turn. Mutating the
     // caller's Set directly means the next turn's fallback sees every plugin
@@ -1763,13 +1764,13 @@ export class ConversationLoop {
         if (!args.trim()) { result = "사용법: /remember 기억할 내용"; break; }
         const title = args.slice(0, 40).replace(/\n/g, " ");
         await this.deps.memoryManager.saveMemory(title, args);
-        result = `메모 저장됨: ${title}`;
+        result = `메모리 저장됨: ${title}`;
         break;
       }
       case "memory": {
         const memories = this.deps.memoryManager.listMemoryEntries();
         result = memories.length === 0
-          ? "저장된 메모 없음."
+          ? "저장된 메모리 없음."
           : memories.map((n) => `- ${n.title} (${n.filename})`).join("\n");
         break;
       }
@@ -1825,8 +1826,8 @@ export class ConversationLoop {
 /sessions — 저장된 세션 목록
 /load <ID> — 세션 복원
 /compact — 대화 이력 압축
-/remember <내용> — 메모 저장
-/memory — 사용자 메모 목록
+/remember <내용> — 메모리 저장
+/memory — 사용자 메모리 목록
 /vendor — 현재 벤더/토큰 정보
 /tools — 등록된 도구 목록
 /permission — 현재 권한 모드

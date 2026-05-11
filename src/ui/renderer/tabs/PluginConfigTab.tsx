@@ -76,8 +76,8 @@ export function PluginConfigTab() {
   // Load plugin list — extracted so install/uninstall result events can
   // re-fetch without remounting the tab. Without this, the settings dialog
   // would still display the pre-install plugin set after a `lvis://install`
-  // deep-link landed (sidebar refreshes via the same event but the settings
-  // tab's local `plugins` state was a one-shot mount-time snapshot).
+  // deep-link landed (other plugin surfaces refresh via the same event but
+  // the settings tab's local `plugins` state was a one-shot mount-time snapshot).
   const refreshPlugins = useCallback(async () => {
     try {
       const cards = await window.lvis.plugins.cards();
@@ -99,7 +99,7 @@ export function PluginConfigTab() {
 
   // Sync with main-process lifecycle events. Both install (via `lvis://`
   // deep link) and uninstall (via this tab or any other surface) emit
-  // result events that the renderer subscribes to in App.tsx for sidebar
+  // result events that the renderer subscribes to in App.tsx for plugin view
   // refresh — wire the same hooks here so the settings list stays in sync.
   useEffect(() => {
     // `getApi()` throws if `window.lvisApi` isn't initialized — that path is

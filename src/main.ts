@@ -264,8 +264,8 @@ async function handleLvisUri(url: string) {
   lvisDevLog("[lvis] handleLvisUri: dialog response", { slug: params.slug, response });
   if (response !== 0) return;
   lvisDevLog("[lvis] handleLvisUri: starting install", { slug: params.slug });
-  // Renderer renders a skeleton card / sidebar placeholder while these
-  // phase events fire — see PluginConfigTab + Sidebar progress UI.
+  // Renderer renders a skeleton card while these phase events fire — see
+  // PluginConfigTab + plugin grid progress UI.
   mainWindow?.webContents.send("lvis:plugins:install-progress", { slug: params.slug, phase: "installing" });
   void services.pluginMarketplace
     .install(params.slug, "user", (evt) => {
