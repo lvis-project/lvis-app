@@ -426,7 +426,7 @@ export class PermissionManager {
 
     // strict mode is mode-first after immutable deny/overlay-trigger guards:
     // allow rules, always-allowed cache, MCP auto overrides, and reviewer
-    // auto-allow lanes must not downgrade it.
+    // automatic approval lanes must not downgrade it.
     if (this.mode === "strict") {
       return {
         decision: "ask",

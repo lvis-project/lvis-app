@@ -1120,7 +1120,7 @@ export class ToolExecutor {
     //     Category is `meta` (control-flow primitive, not a write), but
     //     the action is sensitive enough to warrant an approval modal.
     //     We fall through to the standard ask path below — the override
-    //     just signals "skip auto-allow lanes".
+    //     just signals "skip automatic approval lanes".
     //
     // Trust boundary: only honor decisionOverride for builtin tools. A
     // plugin or MCP tool that happens to declare `meta` does not get
@@ -1141,7 +1141,7 @@ export class ToolExecutor {
       );
       // Permission policy — meta tools with decisionOverride="ask" force the approval
       // modal regardless of the registry descriptor's "override" lane.
-      // The override means "skip auto-allow lanes"; the registry already
+      // The override means "skip automatic approval lanes"; the registry already
       // returns "allow" for `meta` (override sentinel) so we must elevate
       // to ask here when the tool author marked it sensitive.
       if (metaOverride === "ask" && permissionResult.decision === "allow") {
