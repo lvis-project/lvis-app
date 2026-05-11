@@ -108,6 +108,8 @@ describe("DeferredQueuePanel", () => {
     expect(screen.getByTestId("deferred-queue-panel")).toBeTruthy();
     expect(screen.getAllByText("fs_write").length).toBeGreaterThan(0);
     expect(screen.getByText(/write outside allowed dirs/)).toBeTruthy();
+    expect(screen.getByText("백그라운드 변경 승인")).toBeTruthy();
+    expect(screen.queryByText(/Reviewer 가/)).toBeNull();
   });
 
   it("resolve('approved') invokes IPC then refreshes", async () => {
@@ -148,7 +150,7 @@ describe("DeferredQueuePanel", () => {
     expect(api.onDeferredPending).toHaveBeenCalled();
   });
 
-  it("renders multiple entries with stable testids", async () => {
+  it("renders one active card for multiple pending entries", async () => {
     installApi({
       entries: [
         makeEntry({ id: "a" }),
@@ -159,8 +161,9 @@ describe("DeferredQueuePanel", () => {
       render(<DeferredQueuePanel />);
     });
     expect(screen.getByTestId("deferred-entry-a")).toBeTruthy();
-    expect(screen.getByTestId("deferred-entry-b")).toBeTruthy();
-    expect(screen.getAllByText("shell_run").length).toBeGreaterThan(0);
+    expect(screen.queryByTestId("deferred-entry-b")).toBeNull();
+    expect(screen.queryByText("shell_run")).toBeNull();
+    expect(screen.getByText("2 pending · 1 / 2")).toBeTruthy();
   });
 
   it("surfaces deferredResolve rejection and still refreshes", async () => {

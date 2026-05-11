@@ -27,6 +27,7 @@ export interface DeferredQueuePanelProps {
 
 export function DeferredQueuePanel({ showEmpty = false }: DeferredQueuePanelProps): ReactElement | null {
   const [pending, setPending] = useState<DeferredQueueEntry[]>([]);
+  const [activeIndex, setActiveIndex] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -57,6 +58,13 @@ export function DeferredQueuePanel({ showEmpty = false }: DeferredQueuePanelProp
     };
   }, [refresh]);
 
+  useEffect(() => {
+    setActiveIndex((current) => {
+      if (pending.length === 0) return 0;
+      return Math.min(current, pending.length - 1);
+    });
+  }, [pending.length]);
+
   const handle = useCallback(
     async (id: string, decision: "approved" | "rejected") => {
       const api = window.lvis?.permission?.deferredResolve;
@@ -79,13 +87,12 @@ export function DeferredQueuePanel({ showEmpty = false }: DeferredQueuePanelProp
   if (pending.length === 0 && !error && !showEmpty) return null;
 
   const hasPending = pending.length > 0;
-  const highest = pending.some((entry) => entry.verdict.level === "high") ? "high" : "medium";
+  const activeEntry = pending[activeIndex] ?? pending[0];
+  const activeLevel = activeEntry?.verdict.level ?? "low";
   const queueBadge = hasPending
-    ? highest === "high"
-      ? "HIGH/MEDIUM"
-      : "MEDIUM"
+    ? activeLevel.toUpperCase()
     : "대기 없음";
-  const badgeClassName = levelBadgeClass(highest);
+  const badgeClassName = levelBadgeClass(activeLevel);
 
   return (
     <section className="min-w-0 space-y-3" data-testid="deferred-queue-panel">
@@ -95,9 +102,14 @@ export function DeferredQueuePanel({ showEmpty = false }: DeferredQueuePanelProp
         </Badge>
         <h3 className="min-w-0 flex-1 text-sm font-medium">
           {hasPending
-            ? `수동 검토 대기 (${pending.length})`
+            ? "백그라운드 변경 승인"
             : "보류된 승인 요청 없음"}
         </h3>
+        {hasPending && (
+          <Badge variant="outline" className="shrink-0 text-[11px] text-muted-foreground">
+            {pending.length} pending · {activeIndex + 1} / {pending.length}
+          </Badge>
+        )}
       </header>
       {error && (
         <p className="mb-2 rounded bg-red-500/10 px-2 py-1 text-xs text-red-700 dark:text-red-400">
@@ -112,68 +124,62 @@ export function DeferredQueuePanel({ showEmpty = false }: DeferredQueuePanelProp
           보류된 승인 요청이 없습니다.
         </div>
       ) : (
-        <ul className="min-w-0 space-y-2">
-          {pending.map((entry) => (
+        <ul className="min-w-0">
+          {activeEntry && (
             <li
-              key={entry.id}
+              key={activeEntry.id}
               className="min-w-0 overflow-hidden rounded-lg border bg-background text-sm shadow-sm"
-              data-testid={`deferred-entry-${entry.id}`}
+              data-testid={`deferred-entry-${activeEntry.id}`}
             >
               <div className="flex min-w-0 items-start border-b px-3 py-3">
                 <div className="min-w-0 flex-1">
                   <div className="flex min-w-0 flex-wrap items-center gap-2">
                     <h4 className="min-w-0 text-sm font-semibold">
-                      {entryTitle(entry)}
+                      <code>{activeEntry.toolName}</code>
                     </h4>
-                    <Badge variant="outline" className={`${levelBadgeClass(entry.verdict.level)} shrink-0`}>
-                      {entry.verdict.level.toUpperCase()}
+                    <Badge variant="outline" className={`${levelBadgeClass(activeEntry.verdict.level)} shrink-0`}>
+                      {activeEntry.verdict.level.toUpperCase()}
                     </Badge>
                   </div>
-                  <p className="mt-1 break-words text-xs text-muted-foreground">
-                    {entrySubtitle(entry)}
-                  </p>
                 </div>
               </div>
               <div className="space-y-3 px-3 py-3">
-                <div className="grid min-w-0 gap-2 sm:grid-cols-3">
+                <div className="grid min-w-0 gap-2 sm:grid-cols-2">
                   <SummaryTile label="도구 / 출처">
-                    <code>{entry.toolName}</code>
+                    <code>{activeEntry.toolName}</code>
                     <br />
-                    source={entry.source}
+                    source={activeEntry.source}
                   </SummaryTile>
                   <SummaryTile label="권한 category">
-                    {entry.category}
+                    {activeEntry.category}
                     <br />
-                    {categoryLabel(entry.category)}
-                  </SummaryTile>
-                  <SummaryTile label="큐 상태">
-                    not executed
-                    <br />
-                    pending approval
+                    {categoryLabel(activeEntry.category)}
                   </SummaryTile>
                 </div>
-                <div className={`min-w-0 overflow-hidden rounded-md border ${reviewBoxClass(entry.verdict.level)}`}>
+                <div className={`min-w-0 overflow-hidden rounded-md border ${reviewBoxClass(activeEntry.verdict.level)}`}>
                   <h4 className="border-b px-3 py-2 text-xs font-semibold">
-                    {reviewTitle(entry)}
+                    {reviewTitle(activeEntry)}
                   </h4>
-                  <ReviewRow label="도구">
-                    <code>{entry.toolName}</code> · source={entry.source} · category={entry.category}
+                  <ReviewRow label="사유">
+                    {activeEntry.verdict.level.toUpperCase()} · {activeEntry.verdict.reason}
                   </ReviewRow>
-                  <ReviewRow label="Reviewer">
-                    {entry.verdict.level.toUpperCase()}: {entry.verdict.reason}
-                  </ReviewRow>
-                  <ReviewRow label={entry.category === "shell" ? "명령/인자" : "입력 요약"}>
+                  <ReviewRow label={activeEntry.category === "shell" ? "명령/인자" : "입력"}>
                     <pre
-                      className="max-w-full overflow-x-hidden whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed"
+                      className="max-h-24 max-w-full overflow-hidden whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed"
                       data-testid="deferred-entry-input"
                     >
-                      {entry.inputSummary}
+                      {activeEntry.inputSummary}
                     </pre>
                   </ReviewRow>
-                  <ReviewRow label="큐 처리">
-                    허용 또는 거부하면 이 보류 항목과 audit 이 닫힙니다.
-                  </ReviewRow>
                 </div>
+                <details className="min-w-0 rounded-md border bg-muted/20">
+                  <summary className="cursor-pointer px-3 py-2 text-xs font-semibold">
+                    전체 입력 보기
+                  </summary>
+                  <pre className="max-h-56 max-w-full overflow-auto border-t px-3 py-2 whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed">
+                    {activeEntry.inputSummary}
+                  </pre>
+                </details>
               </div>
               <div className="flex flex-wrap justify-end gap-2 border-t px-3 py-3">
                 <Button
@@ -181,20 +187,20 @@ export function DeferredQueuePanel({ showEmpty = false }: DeferredQueuePanelProp
                   variant="outline"
                   className="border-red-500 text-red-700 hover:bg-red-500/10 dark:text-red-400"
                   disabled={busy}
-                  onClick={() => handle(entry.id, "rejected")}
+                  onClick={() => handle(activeEntry.id, "rejected")}
                 >
                   거부
                 </Button>
                 <Button
                   size="sm"
                   disabled={busy}
-                  onClick={() => handle(entry.id, "approved")}
+                  onClick={() => handle(activeEntry.id, "approved")}
                 >
                   허용
                 </Button>
               </div>
             </li>
-          ))}
+          )}
         </ul>
       )}
     </section>
@@ -233,20 +239,6 @@ function reviewBoxClass(level: "low" | "medium" | "high") {
   if (level === "high") return "border-red-500/50 bg-red-500/5";
   if (level === "medium") return "border-amber-500/50 bg-amber-500/5";
   return "border-primary/40 bg-primary/5";
-}
-
-function entryTitle(entry: DeferredQueueEntry) {
-  if (entry.category === "network") return "외부 서비스로 데이터 전송 승인 필요";
-  if (entry.category === "shell") return "백그라운드 명령 실행 승인 필요";
-  if (entry.category === "write") return "백그라운드 변경 작업 승인 필요";
-  return "보류된 도구 호출 승인 필요";
-}
-
-function entrySubtitle(entry: DeferredQueueEntry) {
-  if (entry.category === "network") {
-    return "LLM reviewer 가 endpoint, payload class, auth scope, retention risk 를 평가했습니다.";
-  }
-  return "사용자가 보지 않는 실행에서 reviewer 가 MEDIUM 이상으로 분류해 자동 실행을 보류했습니다.";
 }
 
 function reviewTitle(entry: DeferredQueueEntry) {
