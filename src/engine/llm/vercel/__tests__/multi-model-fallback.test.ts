@@ -10,7 +10,7 @@
  */
 import { afterEach, describe, it, expect, vi } from "vitest";
 import type { LLMProvider, StreamEvent } from "../../types.js";
-import { streamWithFallback } from "../fallback-chain.js";
+import { FallbackProvider, streamWithFallback } from "../fallback-chain.js";
 import type { FallbackEntry, ProviderFactory } from "../fallback-chain.js";
 
 // ─── helpers ────────────────────────────────────────────────────
@@ -221,6 +221,34 @@ describe("(b) primary transient error → fallback succeeds", () => {
       baseUrl: "https://example.openai.azure.com/openai/deployments/gpt/",
     });
     expect(events).toEqual(GOOD_EVENTS);
+  });
+
+  it("does not persist scoped status callbacks onto later plain provider calls", async () => {
+    vi.useFakeTimers();
+    const statuses: unknown[] = [];
+    const primary: LLMProvider = {
+      vendor: "claude" as any,
+      streamTurn: vi.fn(async function* () {
+        yield { type: "error" as const, error: "500 internal server error", classification: "network" };
+      }),
+    };
+    const fallbackProvider = makeProvider("openai", GOOD_EVENTS);
+    const factory: ProviderFactory = vi.fn(() => fallbackProvider);
+    const provider = new FallbackProvider(primary, CHAIN, getApiKey, undefined, factory);
+
+    const scoped = collect(provider.streamTurnWithCallbacks(BASE_PARAMS, {
+      onStatus: (status) => statuses.push(status),
+    }));
+    await vi.advanceTimersByTimeAsync(5_000);
+    await scoped;
+    const scopedStatusCount = statuses.length;
+    expect(scopedStatusCount).toBeGreaterThan(0);
+
+    const plain = collect(provider.streamTurn(BASE_PARAMS));
+    await vi.advanceTimersByTimeAsync(5_000);
+    await plain;
+
+    expect(statuses).toHaveLength(scopedStatusCount);
   });
 });
 

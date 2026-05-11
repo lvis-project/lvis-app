@@ -171,7 +171,6 @@ export type ProviderFactory = (config: ProviderConfig) => LLMProvider;
  */
 export class FallbackProvider implements LLMProvider {
   readonly vendor: LLMVendor;
-  private callbacks?: FallbackCallbacks;
   constructor(
     private readonly primary: LLMProvider,
     private readonly chain: FallbackEntry[],
@@ -182,11 +181,17 @@ export class FallbackProvider implements LLMProvider {
     this.vendor = primary.vendor;
   }
 
-  setCallbacks(callbacks: FallbackCallbacks): void {
-    this.callbacks = callbacks;
+  withCallbacks(callbacks: FallbackCallbacks): LLMProvider {
+    return {
+      vendor: this.vendor,
+      streamTurn: (params) => this.streamTurnWithCallbacks(params, callbacks),
+    };
   }
 
-  streamTurn(params: StreamTurnParams): AsyncIterable<StreamEvent> {
+  streamTurnWithCallbacks(
+    params: StreamTurnParams,
+    callbacks?: FallbackCallbacks,
+  ): AsyncIterable<StreamEvent> {
     return streamWithFallback(
       this.primary,
       params,
@@ -194,8 +199,12 @@ export class FallbackProvider implements LLMProvider {
       this.getApiKey,
       this.auditLogger,
       this.factory,
-      this.callbacks,
+      callbacks,
     );
+  }
+
+  streamTurn(params: StreamTurnParams): AsyncIterable<StreamEvent> {
+    return this.streamTurnWithCallbacks(params);
   }
 }
 

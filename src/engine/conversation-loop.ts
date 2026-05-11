@@ -1169,13 +1169,12 @@ export class ConversationLoop {
     const llmSettings = this.deps.settingsService.get("llm");
     const activeBlock = llmSettings.vendors[llmSettings.provider];
     const model = activeBlock.model;
-    // Wire per-turn onFallback callback into FallbackProvider when available.
-    if (this.provider instanceof FallbackProvider) {
-      this.provider.setCallbacks({
+    const turnProvider = this.provider instanceof FallbackProvider
+      ? this.provider.withCallbacks({
         onFallback: callbacks?.onFallback,
         onStatus: callbacks?.onLlmStatus,
-      });
-    }
+      })
+      : this.provider!;
     // Phase 1.5 Option C: scope is mutable within the turn. Mutating the
     // caller's Set directly means the next turn's fallback sees every plugin
     // that was activated here.
@@ -1233,7 +1232,7 @@ export class ConversationLoop {
 
       // ─── Stream attempt — Layer 0 preflight 가 사전 압축 처리하므로 mid-loop retry 없음 ───
       const stream = await collectRoundStream({
-        provider: this.provider!,
+        provider: turnProvider,
         model,
         systemPrompt,
         messages: this.history.getMessages(),
