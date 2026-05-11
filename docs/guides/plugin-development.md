@@ -370,7 +370,7 @@ hostApi.addTask({
 
 ### 5. saveNote()
 
-`~/.lvis/notes/` 하위에 마크다운 메모를 저장합니다. 동일 제목은 덮어씁니다.
+`~/.lvis/plugins/<plugin-id>/notes/` 하위에 마크다운 메모를 저장합니다. 동일 제목은 덮어씁니다.
 
 ```typescript
 hostApi.saveNote(`미팅-${sessionId.slice(0,8)}`, `# ${title}\n\n${summary}`);

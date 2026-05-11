@@ -2,16 +2,17 @@
  * Memory Manager — §5 경량 기억 구조
  *
  * ~/.lvis/ 파일 기반 메모리 시스템.
- * - LVIS.md: 프로젝트·조직 컨텍스트 (관리자 배포 가능)
+ * - AGENTS.md: 프로젝트·조직 컨텍스트 (관리자 배포 가능)
  * - user-preferences.md: 사용자 개인 선호
- * - memory/: 사용자 축적 메모 ("이거 기억해")
+ * - memories/MEMORY.md: 부팅 시 적극 주입되는 메모리 인덱스
+ * - memories/: 사용자 축적 메모 ("이거 기억해")
  * - sessions/: 대화 세션 JSONL *
  * 설계 원칙 (§5.1):
  * - 단순함 우선: 별도 기억 엔진·승격·만료 로직 없음
  * - 사용자 제어: 직접 확인·편집·삭제 가능
  * - 세션 독립: 파일은 영속, 인메모리는 휘발
  */
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, unlinkSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, unlinkSync, statSync, renameSync } from "node:fs";
 import { join, resolve, basename } from "node:path";
 import { homedir } from "node:os";
 import { withFileLock } from "../lib/with-file-lock.js";
@@ -135,7 +136,7 @@ export interface SessionMetadata {
 
 const MEMORY_MARKER = "<!-- lvis:kind=memory -->";
 
-const DEFAULT_LVIS_MD = `# LVIS 컨텍스트
+const DEFAULT_AGENTS_MD = `# LVIS 에이전트 컨텍스트
 
 > 이 파일은 LVIS 에이전트에게 프로젝트·조직·팀 컨텍스트를 전달합니다.
 > 관리자가 배포하거나, 사용자가 직접 편집할 수 있습니다.
@@ -147,6 +148,15 @@ const DEFAULT_LVIS_MD = `# LVIS 컨텍스트
 ## 업무 규칙
 
 (반복적으로 지켜야 하는 규칙이나 가이드라인)
+`;
+
+const DEFAULT_MEMORY_INDEX = `# LVIS Memory Index
+
+> 이 파일은 LVIS가 세션 시작 시 적극적으로 읽는 장기 메모리 인덱스입니다.
+> 상세 메모는 같은 폴더의 개별 Markdown 파일로 분리하고, 이 파일에는 다음에 다시 찾기 쉬운 짧은 링크와 요약만 유지하세요.
+
+## Saved Memories
+
 `;
 
 const DEFAULT_USER_PREFS = `# 사용자 선호
@@ -263,38 +273,49 @@ export class MemoryManager {
     return join(this.sessionsDir, ".checkpoints");
   }
   // 부팅 시 로드되어 캐시되는 영속 기억
-  private lvisMd: string = "";
+  private agentsMd: string = "";
+  private memoryIndex: string = "";
   private userPreferences: string = "";
 
   constructor(options?: MemoryManagerOptions) {
     this.lvisDir = resolve(options?.lvisDir ?? join(homedir(), ".lvis"));
-    this.memoryDir = join(this.lvisDir, "memory");
+    this.memoryDir = join(this.lvisDir, "memories");
     this.sessionsDir = join(this.lvisDir, "sessions");
     this.ensureStructure();
   }
 
   /** 부팅 시 호출 — 영속 기억을 메모리에 로드 */
   load(): void {
-    this.lvisMd = this.readFile("LVIS.md");
+    this.agentsMd = this.readFile("AGENTS.md");
+    this.memoryIndex = this.readMemoryIndex();
     this.userPreferences = this.readFile("user-preferences.md");
   }
 
   // ─── Read API (SystemPromptBuilder에서 사용) ──────
 
+  getAgentsMd(): string {
+    return this.agentsMd;
+  }
+
+  /** @deprecated Storage has moved to AGENTS.md; kept for legacy IPC/tests. */
   getLvisMd(): string {
-    return this.lvisMd;
+    return this.getAgentsMd();
+  }
+
+  getMemoryIndex(): string {
+    return this.memoryIndex;
   }
 
   getUserPreferences(): string {
     return this.userPreferences;
   }
 
-  /** memory/ 전체 목록 반환 */
+  /** memories/ 전체 목록 반환 */
   listMemoryEntries(): NoteEntry[] {
     return this.readMarkdownEntries(this.memoryDir);
   }
 
-  /** memory/ 키워드 검색 — Agent Loop에서 on-demand 참조 (§5 참조 방식). Cap 50. */
+  /** memories/ 키워드 검색 — Agent Loop에서 on-demand 참조 (§5 참조 방식). Cap 50. */
   searchMemoryEntries(query: string): NoteEntry[] {
     return this.searchEntries(this.listMemoryEntries(), query);
   }
@@ -345,7 +366,7 @@ export class MemoryManager {
     return results;
   }
 
-  /** memory/ 전체를 하나의 문자열로 — SystemPromptBuilder에서 사용 */
+  /** memories/ 전체를 하나의 문자열로 — SystemPromptBuilder에서 사용 */
   getMemoryContext(): string {
     return this.buildMarkdownContext(this.listMemoryEntries());
   }
@@ -364,7 +385,7 @@ export class MemoryManager {
 
   // ─── Write API ("이거 기억해" 명령) ───────────────
 
-  /** 메모 저장 — 사용자가 "기억해" 하면 memory/에 저장 */
+  /** 메모 저장 — 사용자가 "기억해" 하면 memories/에 저장 */
   async saveMemory(title: string, content: string): Promise<NoteEntry> {
     const filename = this.slugify(title) + ".md";
     const visibleContent = `# ${title}\n\n${content}\n`;
@@ -373,6 +394,7 @@ export class MemoryManager {
     await withFileLock(targetPath, async () => {
       writeFileSync(targetPath, storedContent, "utf-8");
     });
+    await this.updateMemoryIndex(filename, title, content);
     return { filename, title, content: visibleContent, updatedAt: new Date().toISOString() };
   }
 
@@ -382,13 +404,18 @@ export class MemoryManager {
     if (existsSync(path)) unlinkSync(path);
   }
 
-  /** LVIS.md 업데이트 */
-  async updateLvisMd(content: string): Promise<void> {
-    const targetPath = join(this.lvisDir, "LVIS.md");
+  /** AGENTS.md 업데이트 */
+  async updateAgentsMd(content: string): Promise<void> {
+    const targetPath = join(this.lvisDir, "AGENTS.md");
     await withFileLock(targetPath, async () => {
       writeFileSync(targetPath, content, "utf-8");
     });
-    this.lvisMd = content;
+    this.agentsMd = content;
+  }
+
+  /** @deprecated Storage has moved to AGENTS.md; kept for legacy IPC/tests. */
+  async updateLvisMd(content: string): Promise<void> {
+    return this.updateAgentsMd(content);
   }
 
   /** user-preferences.md 업데이트 */
@@ -677,17 +704,26 @@ export class MemoryManager {
   }
 
   private ensureStructure(): void {
+    mkdirSync(this.lvisDir, { recursive: true });
+    this.migrateLegacyFile("LVIS.md", "AGENTS.md");
+    this.migrateLegacyDirectory("memory", "memories");
+
     mkdirSync(this.memoryDir, { recursive: true });
     mkdirSync(this.sessionsDir, { recursive: true });
 
-    const lvisMdPath = join(this.lvisDir, "LVIS.md");
-    if (!existsSync(lvisMdPath)) {
-      writeFileSync(lvisMdPath, DEFAULT_LVIS_MD, "utf-8");
+    const agentsMdPath = join(this.lvisDir, "AGENTS.md");
+    if (!existsSync(agentsMdPath)) {
+      writeFileSync(agentsMdPath, DEFAULT_AGENTS_MD, "utf-8");
     }
 
     const userPrefsPath = join(this.lvisDir, "user-preferences.md");
     if (!existsSync(userPrefsPath)) {
       writeFileSync(userPrefsPath, DEFAULT_USER_PREFS, "utf-8");
+    }
+
+    const memoryIndexPath = join(this.memoryDir, "MEMORY.md");
+    if (!existsSync(memoryIndexPath)) {
+      writeFileSync(memoryIndexPath, DEFAULT_MEMORY_INDEX, "utf-8");
     }
   }
 
@@ -695,6 +731,12 @@ export class MemoryManager {
     const path = join(this.lvisDir, name);
     if (!existsSync(path)) return "";
     return readFileSync(path, "utf-8");
+  }
+
+  private readMemoryIndex(): string {
+    const path = join(this.memoryDir, "MEMORY.md");
+    if (!existsSync(path)) return "";
+    return this.truncateMemoryIndex(readFileSync(path, "utf-8"));
   }
 
   private buildMarkdownContext(entries: NoteEntry[]): string {
@@ -710,6 +752,7 @@ export class MemoryManager {
       .filter((f) => f.endsWith(".md"))
       .flatMap((filename) => {
         const path = join(dir, filename);
+        if (filename.toLowerCase() === "memory.md") return [];
         const stat = statSync(path);
         const rawContent = readFileSync(path, "utf-8");
         if (options?.excludeMarkedMemory && this.hasMemoryMarker(rawContent)) return [];
@@ -740,6 +783,66 @@ export class MemoryManager {
 
   private stripInternalMarkers(content: string): string {
     return content.replace(/^<!--\s*lvis:kind=memory\s*-->\r?\n?/, "");
+  }
+
+  private migrateLegacyFile(legacyName: string, currentName: string): void {
+    const legacyPath = join(this.lvisDir, legacyName);
+    const currentPath = join(this.lvisDir, currentName);
+    if (!existsSync(legacyPath)) return;
+    if (existsSync(currentPath)) {
+      log.warn(`${legacyName} exists but ${currentName} is already present; keeping ${currentName}`);
+      return;
+    }
+    renameSync(legacyPath, currentPath);
+  }
+
+  private migrateLegacyDirectory(legacyName: string, currentName: string): void {
+    const legacyPath = join(this.lvisDir, legacyName);
+    const currentPath = join(this.lvisDir, currentName);
+    if (!existsSync(legacyPath)) return;
+    if (!existsSync(currentPath)) {
+      renameSync(legacyPath, currentPath);
+      return;
+    }
+    for (const entry of readdirSync(legacyPath)) {
+      const source = join(legacyPath, entry);
+      const target = join(currentPath, entry);
+      if (existsSync(target)) continue;
+      renameSync(source, target);
+    }
+    log.warn(`${legacyName}/ exists alongside ${currentName}/; moved non-conflicting entries into ${currentName}/`);
+  }
+
+  private async updateMemoryIndex(filename: string, title: string, content: string): Promise<void> {
+    const targetPath = join(this.memoryDir, "MEMORY.md");
+    const safeTitle = title.replace(/[\r\n\[\]]/g, " ").trim() || filename.replace(".md", "");
+    const excerpt = content.replace(/\s+/g, " ").trim().slice(0, 140);
+    const line = `- [${safeTitle}](./${filename}) — ${excerpt}`;
+    await withFileLock(targetPath, async () => {
+      const existing = existsSync(targetPath)
+        ? readFileSync(targetPath, "utf-8")
+        : DEFAULT_MEMORY_INDEX;
+      const lines = existing.split(/\r?\n/);
+      const linkNeedle = `](./${filename})`;
+      const idx = lines.findIndex((l) => l.includes(linkNeedle));
+      if (idx >= 0) {
+        lines[idx] = line;
+      } else {
+        if (!existing.includes("## Saved Memories")) {
+          lines.push("", "## Saved Memories", "");
+        }
+        lines.push(line);
+      }
+      writeFileSync(targetPath, lines.join("\n").replace(/\n{4,}/g, "\n\n\n"), "utf-8");
+    });
+    this.memoryIndex = this.readMemoryIndex();
+  }
+
+  private truncateMemoryIndex(content: string): string {
+    const byLines = content.split(/\r?\n/).slice(0, 200).join("\n");
+    const buf = Buffer.from(byLines, "utf-8");
+    if (buf.byteLength <= 25 * 1024) return byLines;
+    return buf.subarray(0, 25 * 1024).toString("utf-8");
   }
 
   private readSessionSummary(sessionId: string): { title: string; preview: string } {

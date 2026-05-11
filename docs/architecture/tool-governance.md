@@ -503,9 +503,9 @@ Claude Code는 6개 확장 메커니즘을 제공:
 | 메커니즘 | Claude Code | LVIS 대응 | 상태 |
 |---------|------------|-----------|------|
 | MCP Servers | 24파일 구현 | mcp/ 모듈 | 거버넌스 완료, Client 구현 중 |
-| Custom Agents | ~/.claude/agents/*.md | 없음 | Phase 3 |
-| Skills | ~/.claude/skills/ | KeywordEngine skill routing | ✓ |
-| CLAUDE.md | @import 합성 | LVIS.md + notes/ | ✓ |
+| Custom Agents | ~/.claude/agents/*.md | ~/.lvis/agents/*.md 또는 ~/.lvis/agents/<name>/AGENTS.md | ✓ |
+| Skills | ~/.claude/skills/<name>/SKILL.md | ~/.lvis/skills/<name>/SKILL.md + skill_load/skill_list | ✓ |
+| CLAUDE.md | @import 합성 | AGENTS.md + memories/MEMORY.md | ✓ |
 | Plugins | Marketplace | PluginRuntime | ✓ |
 | Hooks | Pre/Post ToolUse | HookRunner | ✓ |
 

@@ -2,7 +2,7 @@
  * D5 — MemoryManager search tests.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MemoryManager } from "../memory-manager.js";
@@ -49,6 +49,36 @@ describe("MemoryManager.searchMemoryEntries", () => {
     }
     const results = mm.searchMemoryEntries("hello");
     expect(results.length).toBe(50);
+  });
+});
+
+describe("MemoryManager AGENTS.md and MEMORY.md layout", () => {
+  it("creates AGENTS.md and memories/MEMORY.md on first boot", () => {
+    expect(existsSync(join(dir, "AGENTS.md"))).toBe(true);
+    expect(existsSync(join(dir, "memories", "MEMORY.md"))).toBe(true);
+    expect(existsSync(join(dir, "memory"))).toBe(false);
+  });
+
+  it("migrates legacy LVIS.md and memory/ into the new layout", () => {
+    rmSync(dir, { recursive: true, force: true });
+    mkdirSync(join(dir, "memory"), { recursive: true });
+    writeFileSync(join(dir, "LVIS.md"), "# Legacy LVIS", "utf-8");
+    writeFileSync(join(dir, "memory", "old-note.md"), "# Old Note\n\nbody", "utf-8");
+
+    const migrated = new MemoryManager({ lvisDir: dir });
+    migrated.load();
+
+    expect(existsSync(join(dir, "AGENTS.md"))).toBe(true);
+    expect(existsSync(join(dir, "LVIS.md"))).toBe(false);
+    expect(existsSync(join(dir, "memories", "old-note.md"))).toBe(true);
+    expect(migrated.getAgentsMd()).toContain("Legacy LVIS");
+  });
+
+  it("updates MEMORY.md when saving a memory and injects it via getMemoryIndex", async () => {
+    await mm.saveMemory("Meeting Notes", "weekly sync discussion");
+    const index = readFileSync(join(dir, "memories", "MEMORY.md"), "utf-8");
+    expect(index).toContain("[Meeting Notes](./meeting-notes.md)");
+    expect(mm.getMemoryIndex()).toContain("weekly sync discussion");
   });
 });
 

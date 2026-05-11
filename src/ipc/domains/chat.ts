@@ -678,10 +678,15 @@ ${input}`;
     return memoryManager.searchSessions(query);
   });
   // read-only, sender guard optional
-  ipcMain.handle("lvis:memory:lvis-md:get", () => memoryManager.getLvisMd());
+  ipcMain.handle("lvis:memory:agents-md:get", () => memoryManager.getAgentsMd());
+  ipcMain.handle("lvis:memory:lvis-md:get", () => memoryManager.getAgentsMd());
+  ipcMain.handle("lvis:memory:agents-md:update", async (e, content: string) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:agents-md:update", e); return UNAUTHORIZED_FRAME; }
+    return memoryManager.updateAgentsMd(content);
+  });
   ipcMain.handle("lvis:memory:lvis-md:update", async (e, content: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:lvis-md:update", e); return UNAUTHORIZED_FRAME; }
-    return memoryManager.updateLvisMd(content);
+    return memoryManager.updateAgentsMd(content);
   });
   // read-only, sender guard optional
   ipcMain.handle("lvis:memory:user-prefs:get", () => memoryManager.getUserPreferences());

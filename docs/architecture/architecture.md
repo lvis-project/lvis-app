@@ -51,8 +51,9 @@ mindmap
       Local Index Engine (local-indexer)
       Client Core Engines
     기억 중심 개인화
-      LVIS.md — 조직·프로젝트 컨텍스트
-      notes/ — 사용자 축적 메모
+      AGENTS.md — 조직·프로젝트 컨텍스트
+      memories/MEMORY.md — 기억 인덱스
+      memories/ — 사용자 축적 메모
       사용할수록 나를 더 잘 아는 비서
       Memory Files
       Overlay Trigger Surface
@@ -77,7 +78,7 @@ mindmap
 | 철학 원칙              | 아키텍처 구현체                                    | 철학이 구조가 되는 이유                                                      |
 | ---------------------- | -------------------------------------------------- | ---------------------------------------------------------------------------- |
 | **설치형·로컬 기반**   | Client Core Engines + Local Index                  | J.A.R.V.I.S.처럼 내 PC에 상주. 선배 5명에게 물어보던 것을 로컬에서 즉시 검색 |
-| **기억 중심 개인화**   | Memory Files (LVIS.md + notes/) + Overlay Trigger Surface | 사용자가 수락한 플러그인 제안을 main chat 의 정상 권한 경로로 가져온다. 메모가 쌓일수록 맞춤도 ↑      |
+| **기억 중심 개인화**   | Memory Files (AGENTS.md + MEMORY.md + memories/) + Overlay Trigger Surface | 사용자가 수락한 플러그인 제안을 main chat 의 정상 권한 경로로 가져온다. 메모가 쌓일수록 맞춤도 ↑      |
 | **에이전트 네트워크**  | Agent Hub (Message Board) + A2A                    | "이영희님 이거 확인해주세요" → 본인 부재 중에도 레플리카가 대응              |
 | **기업 프로세스 통합** | Lgenie + Marketplace + Governance                  | 50~60장 문서 대신 "필수 조항·승인 단계"만 추출. 회사 허용 경로만 사용        |
 
@@ -93,7 +94,7 @@ graph TB
         CLIENT["LVIS Client<br/>(Electron + Rust Core)"]
         LOCAL_IDX["Local Index Engine<br/>(문서·파일·메일 인덱싱)"]
         LOCAL_STORE["Local Knowledge Store<br/>(SQLite + PageIndex Tree)"]
-        MEMORY["Memory<br/>(LVIS.md + notes/)"]
+        MEMORY["Memory<br/>(AGENTS.md + MEMORY.md + memories/)"]
         OVERLAY["Overlay Trigger Surface<br/>(host:overlay)"]
     end
 
@@ -329,7 +330,7 @@ graph TB
         KW_ENGINE["Keyword Detecting Engine"]
         ROUTE_ENGINE["Agent Route Engine"]
         IDX_ENGINE["Local Index Engine"]
-        MEM_ENGINE["Memory Reader<br/>(LVIS.md / notes/ 로드)"]
+        MEM_ENGINE["Memory Reader<br/>(AGENTS.md / MEMORY.md 로드)"]
         OVERLAY_TRIGGER["Overlay Trigger Surface"]
         TOOL_EXEC["Tool Executor"]
         HOOK_RUNNER["Hook Runner<br/>(Pre/PostToolUse)"]
@@ -339,7 +340,7 @@ graph TB
     subgraph "Local Storage"
         SQLITE["SQLite<br/>(메타데이터 + FTS5)"]
         TREE_CACHE["PageIndex Tree Cache<br/>(JSON)"]
-        MEM_DIR["Memory Files<br/>(LVIS.md · notes/)"]
+        MEM_DIR["Memory Files<br/>(AGENTS.md · memories/MEMORY.md · memories/)"]
         PLUGIN_DIR["Plugin Directory<br/>(설치된 플러그인)"]
     end
 
@@ -434,7 +435,7 @@ sequenceDiagram
 ```mermaid
 flowchart TB
     INPUT["👤 사용자 입력"]
-    MEMORY["Memory / Context Load<br/>(LVIS.md + notes/ + 로컬 컨텍스트)"]
+    MEMORY["Memory / Context Load<br/>(AGENTS.md + MEMORY.md + 로컬 컨텍스트)"]
     DETECT["Keyword Detecting Engine<br/>(builtin + plugin keyword groups)"]
     DISAMBIG{"명확한 매칭인가?"}
     RECOMMEND["Lgenie Keyword Recommender<br/>(최적 후보 추천 / 애매하면 사용자 문의)"]
@@ -477,7 +478,7 @@ graph LR
         LOCAL_FILES["📁 로컬 파일<br/>(문서·이미지·코드)"]
         SERVER_DOCS["🔄 서버 문서<br/>(권한 기반 동기화)"]
         CHAT_HISTORY["💬 대화 이력"]
-        NOTES["📝 notes/ 메모"]
+        NOTES["📝 memories/ 메모"]
     end
 
     subgraph "Layer A — 기본 파싱"
@@ -740,7 +741,7 @@ flowchart TB
 | **3. 실행 경로 결정** | `RouteEngine.route()` | `command` / `skill` / `agent-hub` / `llm` 중 하나로 경로 확정 | Agent Hub 경로는 메시지 보드/A2A 상호작용 경로 |
 | **4. 턴 오케스트레이션** | `ConversationLoop.runTurn()` | 한 턴 전체를 관리하고 provider/tool/post-turn 훅을 묶는다 | 턴 경계의 canonical 구현 |
 | **5. 히스토리 적재** | `ConversationHistory.append()` | user 메시지를 인메모리 히스토리에 추가 | assistant/tool_result도 동일 히스토리에 누적 |
-| **6. 프롬프트 조립** | system prompt assembly | LVIS.md, notes/, 설정, 도구 스키마, 환경 정보를 합쳐 provider 입력 생성 | 매 턴 재조립 |
+| **6. 프롬프트 조립** | system prompt assembly | AGENTS.md, memories/MEMORY.md, 설정, 도구 스키마, 환경 정보를 합쳐 provider 입력 생성 | 매 턴 재조립 |
 | **7. LLM 스트리밍** | `provider.streamTurn(...)` | provider가 `text_delta`, `reasoning_delta`, `tool_call`, `done` 이벤트를 순차 발생 | Claude / Gemini / OpenAI 공통 인터페이스 |
 | **8. reasoning 누적** | `reasoning_delta` | 중간 생각은 별도 스트림 이벤트로 누적되고, assistant round와 분리해 UI에 표시 | OpenAI reasoning 모델도 replay 지원 |
 | **9. 거버넌스/도구 실행** | `GovernancePolicy` → `PermissionManager` → `ToolExecutor.executeAll()` | 도구 호출 전 정책 차단, 승인 판단, 실행을 순서대로 수행 | GovernancePolicy는 로컬 정책 캐시를 보고, 상위 동기화 서버 broadcast로 갱신되는 설계를 유지 |
@@ -867,7 +868,7 @@ flowchart LR
 | --- | --- | --- |
 | **Auto-Compact** | 사용률 40% 기본값 + 20% 단위 설정 기반 자동 압축 | `chat.autoCompact` + 80k token threshold. microcompact(항상) + full compact(임계치) 2-stage 구현 |
 | **saveSession** | 매 턴 세션 히스토리 저장 및 복구 포인트 생성 | `~/.lvis/sessions/<id>.jsonl`에 저장 |
-| **Memory Extraction** | 대화/도구 결과에서 기억할 내용을 구조화 저장 | `"기억해"`류 요청을 notes/로 자동 저장 |
+| **Memory Extraction** | 대화/도구 결과에서 기억할 내용을 구조화 저장 | `"기억해"`류 요청을 memories/로 저장하고 MEMORY.md 인덱스 갱신 |
 | **Audit Log** | 대화·도구·정책 차단·승인 이력을 기록 | 구현됨 |
 | **Idle poke** | 다음 입력 대기 전 상태 갱신과 조용한 heartbeat 보조 신호 | idle scheduler 신호 전달 구현 |
 | **Plugin PostTurn** | 활성 플러그인의 후처리 훅 실행 | 문서상 목표 설계 유지 |
@@ -948,7 +949,7 @@ sequenceDiagram
 | --- | --- | --- |
 | `createUserMessage()` | renderer input → `ipcMain.handle("lvis:chat:send")` | Electron IPC + 조기 keyword preflight |
 | Append to conversation history | `ConversationHistory.append()` | + assistant `thought` 보존 |
-| Build system prompt | system prompt assembly | + LVIS.md · notes/ · 조직 컨텍스트 · tool schema · overlay trigger context |
+| Build system prompt | system prompt assembly | + AGENTS.md · MEMORY.md · 조직 컨텍스트 · tool schema · overlay trigger context |
 | Stream to Claude API | `provider.streamTurn(...)` | provider 공통 인터페이스로 Claude/Gemini/OpenAI 수용 |
 | `findToolByName()` | `ToolRegistry.findByName()` | + Plugin · MCP 동적 등록 통합 레지스트리 |
 | `canUseTool()` | `GovernancePolicy` + `PermissionManager.checkDetailed()` | + source/trust aware approval gate + 정책 동기화 전제 |
@@ -966,7 +967,7 @@ sequenceDiagram
 flowchart LR
     subgraph "Static Sources (부팅 시 로드)"
         S1["① Role Definition<br/>LVIS 에이전트 역할 정의"]
-        S2["② LVIS.md<br/>프로젝트·조직 컨텍스트"]
+        S2["② AGENTS.md<br/>프로젝트·조직 컨텍스트"]
         S3["③ Employee Profile<br/>사원 프로필·역할·부서"]
         S4["④ Org Context<br/>조직 구조·정책 요약"]
     end
@@ -974,7 +975,7 @@ flowchart LR
     subgraph "Dynamic Sources (매 턴 갱신)"
         S5["⑤ Tool Schemas<br/>L1 Filter 통과한 도구 스키마"]
         S6["⑥ Active Plugin Schemas<br/>활성 플러그인 도구·스킬"]
-        S7["⑦ Memory / notes/<br/>사용자 축적 메모"]
+        S7["⑦ Memory / MEMORY.md<br/>사용자 축적 메모 인덱스"]
         S8["⑧ Conversation Summary<br/>Auto-Compact 요약 (있을 경우)"]
     end
 
@@ -1004,12 +1005,12 @@ flowchart LR
 | # | 소스 | 갱신 주기 | 토큰 예상 | 설명 |
 | --- | --- | --- | --- | --- |
 | ① | Role Definition | 부팅 시 (정적) | 1~2K | LVIS 에이전트의 기본 역할·행동 원칙 정의 |
-| ② | LVIS.md | 파일 변경 시 | 2~5K | 프로젝트·조직 레벨 컨텍스트 (사용자 편집 가능) |
+| ② | AGENTS.md | 파일 변경 시 | 2~5K | 프로젝트·조직 레벨 컨텍스트 (사용자 편집 가능) |
 | ③ | Employee Profile | 부팅 시 | 0.5~1K | 사원 이름·직급·부서·역할 |
 | ④ | Org Context | 부팅 시 | 1~2K | 조직 구조 요약, 팀원 목록, 보고 라인 |
 | ⑤ | Tool Schemas | 매 턴 | 3~8K | L1 Filter 통과 후 Lgenie에 노출할 도구 JSON 스키마 |
 | ⑥ | Plugin Schemas | 플러그인 변경 시 | 1~5K | 활성 플러그인의 도구·스킬 스키마 |
-| ⑦ | Memory / notes/ | 파일 변경 시 | 1~3K | 사용자 축적 메모 — 선호, 루틴, 프로젝트 정보 |
+| ⑦ | MEMORY.md | 파일 변경 시 | 1~3K | 사용자 축적 메모 인덱스 — 선호, 루틴, 프로젝트 정보 |
 | ⑧ | Compact Summary | Compact 후 | 2~5K | 이전 대화 요약 (Auto-Compact 실행 시에만) |
 | ⑨ | OS / Environment | 부팅 시 | 0.3~0.5K | OS 종류, 홈 디렉터리, 시간대, 현재 시각 |
 | ⑩ | Session Context | 매 턴 | 0.5~1K | 현재 열린 파일, 작업 디렉터리 등 |
@@ -1243,9 +1244,10 @@ Claude Code / Copilot이 채택한 **파일 기반 경량 메모리** 모델을 
 graph LR
     subgraph "Memory 구조"
         subgraph "영속 기억 (파일 기반)"
-            LVIS_MD["LVIS.md<br/>(프로젝트·조직 컨텍스트)"]
+            AGENTS_MD["AGENTS.md<br/>(프로젝트·조직/에이전트 컨텍스트)"]
             USER_MD["user-preferences.md<br/>(사용자 선호·프로필)"]
-            NOTES_DIR["notes/<br/>(사용자가 저장한 메모)"]
+            MEMORY_INDEX["memories/MEMORY.md<br/>(장기 메모리 인덱스)"]
+            MEMORIES_DIR["memories/<br/>(사용자가 저장한 상세 메모)"]
         end
 
         subgraph "세션 기억 (인메모리)"
@@ -1255,14 +1257,15 @@ graph LR
     end
 
     subgraph "참조 방식"
-        BOOT_LOAD["부팅 시 LVIS.md 로드<br/>(시스템 프롬프트에 주입)"]
-        ON_DEMAND["필요 시 notes/ 참조<br/>(Agent Loop에서 검색)"]
+        BOOT_LOAD["부팅 시 AGENTS.md + MEMORY.md 로드<br/>(시스템 프롬프트에 주입)"]
+        ON_DEMAND["필요 시 memories/ 참조<br/>(Agent Loop에서 검색)"]
         SESSION_AUTO["세션 내 자동 축적<br/>(대화·도구 결과)"]
     end
 
-    LVIS_MD --> BOOT_LOAD
+    AGENTS_MD --> BOOT_LOAD
     USER_MD --> BOOT_LOAD
-    NOTES_DIR --> ON_DEMAND
+    MEMORY_INDEX --> BOOT_LOAD
+    MEMORIES_DIR --> ON_DEMAND
     SESSION_CTX --> SESSION_AUTO
     TOOL_HISTORY --> SESSION_AUTO
 ```
@@ -1275,11 +1278,18 @@ artifact 와 save data 를 함께 보관한다 (호스트 root 에 끼어들지 
 
 ```
 ~/.lvis/
-├── LVIS.md              # 프로젝트·팀·조직 컨텍스트 (관리자 배포 가능)
+├── AGENTS.md            # 프로젝트·팀·조직/에이전트 컨텍스트 (관리자 배포 가능)
+├── agents/              # 사용자 정의 sub-agent profile
+│   ├── reviewer.md      # flat profile
+│   └── explorer/AGENTS.md
+├── skills/              # on-demand skill packages
+│   └── report/SKILL.md
 ├── user-preferences.md  # 사용자 개인 선호 (보고 스타일, 자주 쓰는 도구 등)
-├── notes/               # 호스트 메모 ("이거 기억해" 명령 — 플러그인 자체 메모는
-│   ├── 출장-절차.md     # 각 플러그인의 ~/.lvis/plugins/<id>/notes/ 안에 둔다)
+├── memories/            # 호스트 메모 ("이거 기억해" 명령)
+│   ├── MEMORY.md        # 부팅 시 읽는 장기 메모리 인덱스
+│   ├── 출장-절차.md     # 개별 메모 파일
 │   └── 분기-보고서-템플릿.md
+├── plugins/<id>/notes/  # 플러그인 자체 메모는 자기 디렉토리에 격리
 ├── sessions/            # 세션 이력 (claw Session 패턴)
 │   └── <session-id>.jsonl
 ├── audit/               # AuditLogger (회전·retention)
@@ -1296,9 +1306,12 @@ artifact 와 save data 를 함께 보관한다 (호스트 root 에 끼어들지 
 
 | 구분                    | 저장소    | 수명             | 제어 주체                |
 | ----------------------- | --------- | ---------------- | ------------------------ |
-| **LVIS.md**             | 로컬 파일 | 영구 (수동 관리) | 관리자 + 사용자          |
+| **AGENTS.md**           | 로컬 파일 | 영구 (수동 관리) | 관리자 + 사용자          |
 | **user-preferences.md** | 로컬 파일 | 영구 (수동 관리) | 사용자                   |
-| **notes/**              | 로컬 파일 | 영구 (수동 관리) | 사용자 ("기억해" 명령)   |
+| **memories/MEMORY.md**  | 로컬 파일 | 영구 (자동+수동) | 호스트 + 사용자          |
+| **memories/**           | 로컬 파일 | 영구 (수동 관리) | 사용자 ("기억해" 명령)   |
+| **agents/**             | 로컬 파일 | 영구 (수동 관리) | 사용자                   |
+| **skills/**             | 로컬 파일 | 영구 (수동 관리) | 사용자                   |
 | **Session Context**     | In-memory | 현재 세션        | 자동 (대화 종료 시 소멸) |
 
 > **v2 대비 변경 이유**: v2의 4계층 기억(Session→Working→Episodic→Semantic)과 자동 승격·만료·연결 로직은 현 단계에서 과도한 복잡도를 유발한다. Copilot의 `.github/copilot-instructions.md`, Claude Code의 `CLAUDE.md` 패턴처럼 파일 기반으로 시작하고, 필요가 검증되면 점진적으로 확장한다.
@@ -1693,8 +1706,8 @@ graph TB
     end
 
     subgraph "📋 System & Utility"
-        MEMORY_READ["MemoryRead<br/>LVIS.md · notes/ 조회"]
-        MEMORY_WRITE["MemoryWrite<br/>notes/ 저장"]
+        MEMORY_READ["MemoryRead<br/>AGENTS.md · MEMORY.md 조회"]
+        MEMORY_WRITE["MemoryWrite<br/>memories/ 저장"]
         TODO["TodoWrite<br/>태스크 목록 관리"]
         ASK_USER["AskUser<br/>사용자 확인 요청"]
         CALENDAR["Calendar<br/>일정 조회·생성"]

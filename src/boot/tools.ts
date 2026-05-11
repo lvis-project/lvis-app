@@ -20,6 +20,8 @@ import { createScheduleRoutineTool } from "../tools/schedule-routine.js";
 import { createTodoSessionWriteTool } from "../tools/todo-session-write.js";
 import { createAgentSpawnTool, type AgentSpawnEvent } from "../tools/agent-spawn.js";
 import { createSkillLoadTool, type SkillLoadEvent } from "../tools/skill-load.js";
+import { createSkillListTool } from "../tools/skill-list.js";
+import { createAgentListTool } from "../tools/agent-list.js";
 import type { AskUserQuestionGate } from "../main/ask-user-question-gate.js";
 import type { RoutinesStore } from "../main/routines-store.js";
 import type { SessionTodoStore } from "../main/session-todo-store.js";
@@ -27,6 +29,7 @@ import type { SubAgentRunner } from "../engine/subagent-runner.js";
 import type { SkillStore } from "../main/skill-store.js";
 import type { SkillOverlay } from "../main/skill-overlay.js";
 import type { SkillApprovalsStore } from "../main/skill-approvals-store.js";
+import type { AgentProfileStore } from "../main/agent-profile-store.js";
 import type { ApprovalGate } from "../permissions/approval-gate.js";
 import { HybridRetriever } from "../main/hybrid-retriever.js";
 import { MockCloudIndexAdapter } from "../main/cloud-index-adapter.js";
@@ -190,6 +193,7 @@ export interface WorkflowToolDeps {
   /** Lazy-resolved sub-agent runner — populated after ConversationLoop wiring. */
   getSubAgentRunner?: () => SubAgentRunner | undefined;
   skillStore?: SkillStore;
+  agentProfileStore?: AgentProfileStore;
   /** C2(c): per-session skill overlay registry. */
   skillOverlay?: SkillOverlay;
   /** C2(d): persistent skill-approval allowlist. */
@@ -209,7 +213,7 @@ export function registerBuiltinTools(
   const builtins: Tool[] = [
     createDynamicTool({
       name: "memory_save",
-      description: "사용자가 기억해달라고 한 내용을 memory/에 저장합니다.",
+      description: "사용자가 기억해달라고 한 내용을 memories/에 저장하고 MEMORY.md 인덱스를 갱신합니다.",
       source: "builtin",
       category: "write",
       jsonSchema: {
@@ -234,7 +238,7 @@ export function registerBuiltinTools(
     }),
     createDynamicTool({
       name: "memory_search",
-      description: "사용자의 memory/ 메모를 키워드로 검색합니다.",
+      description: "사용자의 memories/ 메모를 키워드로 검색합니다.",
       source: "builtin",
       category: "read",
       isReadOnly: () => true,
@@ -434,9 +438,15 @@ export function registerBuiltinTools(
     builtins.push(
       createAgentSpawnTool({
         getRunner: workflowDeps.getSubAgentRunner,
+        getAgentProfile: workflowDeps.agentProfileStore
+          ? (name) => workflowDeps.agentProfileStore?.load(name) ?? Promise.resolve(null)
+          : undefined,
         emit: workflowDeps.emitAgentSpawn,
       }),
     );
+  }
+  if (workflowDeps?.agentProfileStore) {
+    builtins.push(createAgentListTool(workflowDeps.agentProfileStore));
   }
   if (
     workflowDeps?.skillStore &&
@@ -454,6 +464,7 @@ export function registerBuiltinTools(
         emit: workflowDeps.emitSkillLoad,
       }),
     );
+    builtins.push(createSkillListTool(workflowDeps.skillStore));
   }
 
   toolRegistry.registerBatch(builtins);

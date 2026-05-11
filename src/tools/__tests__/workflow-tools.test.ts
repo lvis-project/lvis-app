@@ -6,7 +6,7 @@
  * `execute(rawInput, ctx)` contract directly — no Electron / IPC.
  */
 import { describe, expect, it, vi } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { ToolExecutionContext } from "../base.js";
@@ -15,10 +15,13 @@ import { createScheduleRoutineTool } from "../schedule-routine.js";
 import { createTodoSessionWriteTool } from "../todo-session-write.js";
 import { createAgentSpawnTool } from "../agent-spawn.js";
 import { createSkillLoadTool } from "../skill-load.js";
+import { createSkillListTool } from "../skill-list.js";
+import { createAgentListTool } from "../agent-list.js";
 import { RoutinesStore } from "../../main/routines-store.js";
 import { SessionTodoStore } from "../../main/session-todo-store.js";
 import { SkillStore } from "../../main/skill-store.js";
 import { SkillOverlay } from "../../main/skill-overlay.js";
+import { AgentProfileStore } from "../../main/agent-profile-store.js";
 
 function ctx(sessionId = "session-x"): ToolExecutionContext {
   return { cwd: process.cwd(), extraAllowedDirectories: [], metadata: { sessionId } };
@@ -367,6 +370,48 @@ describe("agent_spawn tool", () => {
     expect(types).toContain("done");
   });
 
+  it("loads agent profile instructions and default tools when agentName is provided", async () => {
+    const agentDir = mkdtempSync(join(tmpdir(), "lvis-agents-"));
+    try {
+      writeFileSync(
+        join(agentDir, "reviewer.md"),
+        "---\nname: reviewer\ndescription: Reviews code\ntools: [memory_search]\n---\nYou are a reviewer.",
+        "utf-8",
+      );
+      const store = new AgentProfileStore({ userDir: agentDir });
+      let captured: { instructions: string; sourceTools?: string[] } | null = null;
+      const tool = createAgentSpawnTool({
+        getRunner: () => ({
+          spawn: async (input) => {
+            captured = {
+              instructions: input.instructions,
+              sourceTools: input.sourceTools,
+            };
+            return {
+              summary: "reviewed",
+              toolCallCount: 0,
+              turnCount: 1,
+              childSessionId: "child-1",
+            };
+          },
+        }) as never,
+        getAgentProfile: (name) => store.load(name),
+        emit: () => undefined,
+      });
+      const r = await tool.execute(
+        { agentName: "reviewer", instructions: "check this diff" },
+        ctx(),
+      );
+      expect(r.isError).toBe(false);
+      expect(captured?.instructions).toContain("<lvis-agent-profile");
+      expect(captured?.instructions).toContain("You are a reviewer.");
+      expect(captured?.instructions).toContain("check this diff");
+      expect(captured?.sourceTools).toEqual(["memory_search"]);
+    } finally {
+      rmSync(agentDir, { recursive: true, force: true });
+    }
+  });
+
   it("rejects missing title or instructions", async () => {
     const tool = createAgentSpawnTool({
       getRunner: () => ({ spawn: async () => ({}) }) as never,
@@ -374,6 +419,53 @@ describe("agent_spawn tool", () => {
     });
     const r = await tool.execute({ title: "", instructions: "" }, ctx());
     expect(r.isError).toBe(true);
+  });
+});
+
+describe("skill_list and agent_list tools", () => {
+  it("lists directory skills without loading their body into the prompt", async () => {
+    const skillDir = mkdtempSync(join(tmpdir(), "lvis-skills-"));
+    try {
+      mkdirSync(join(skillDir, "deploy"), { recursive: true });
+      writeFileSync(
+        join(skillDir, "deploy", "SKILL.md"),
+        "---\nname: deploy\ndescription: Deploy workflow\ntriggers: [deploy]\n---\nsecret body",
+        "utf-8",
+      );
+      const tool = createSkillListTool(new SkillStore({ userDir: skillDir }));
+      const r = await tool.execute({}, ctx());
+      const parsed = JSON.parse(r.output);
+      expect(parsed.skills).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ name: "deploy", description: "Deploy workflow" }),
+        ]),
+      );
+      expect(r.output).not.toContain("secret body");
+    } finally {
+      rmSync(skillDir, { recursive: true, force: true });
+    }
+  });
+
+  it("lists agent profiles without exposing body text", async () => {
+    const agentDir = mkdtempSync(join(tmpdir(), "lvis-agents-"));
+    try {
+      writeFileSync(
+        join(agentDir, "explorer.md"),
+        "---\nname: explorer\ndescription: Map repo\ntools: [memory_search]\n---\nsecret profile body",
+        "utf-8",
+      );
+      const tool = createAgentListTool(new AgentProfileStore({ userDir: agentDir }));
+      const r = await tool.execute({}, ctx());
+      const parsed = JSON.parse(r.output);
+      expect(parsed.agents).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ name: "explorer", description: "Map repo" }),
+        ]),
+      );
+      expect(r.output).not.toContain("secret profile body");
+    } finally {
+      rmSync(agentDir, { recursive: true, force: true });
+    }
   });
 });
 

@@ -77,6 +77,7 @@ import { NotificationService } from "./main/notification-service.js";
 import { SkillStore } from "./main/skill-store.js";
 import { SkillOverlay } from "./main/skill-overlay.js";
 import { SkillApprovalsStore } from "./main/skill-approvals-store.js";
+import { AgentProfileStore } from "./main/agent-profile-store.js";
 import { SubAgentRunner } from "./engine/subagent-runner.js";
 import type { AgentSpawnEvent } from "./tools/agent-spawn.js";
 import type { SkillLoadEvent } from "./tools/skill-load.js";
@@ -232,6 +233,7 @@ export async function bootstrap(
   const routineSessionStore = new RoutineSessionStore();
   const sessionTodoStore = new SessionTodoStore();
   const skillStore = new SkillStore();
+  const agentProfileStore = new AgentProfileStore();
   const skillOverlay = new SkillOverlay();
   const skillApprovalsStore = new SkillApprovalsStore();
   await skillApprovalsStore.load().catch((err) => {
@@ -258,6 +260,7 @@ export async function bootstrap(
     routinesStore,
     sessionTodoStore,
     skillStore,
+    agentProfileStore,
     skillOverlay,
     skillApprovalsStore,
     getAskUserQuestionGate: () => askUserQuestionGate,

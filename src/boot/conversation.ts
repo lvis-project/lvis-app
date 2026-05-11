@@ -68,6 +68,8 @@ export async function createPermissionManager(): Promise<PermissionManager> {
   permissionManager.setRules([
     { pattern: "memory_search", action: "allow" },
     { pattern: "memory_list", action: "allow" },
+    { pattern: "skill_list", action: "allow" },
+    { pattern: "agent_list", action: "allow" },
     { pattern: "web_search", action: "allow" },
     { pattern: "web_fetch", action: "allow" },
   ]);
