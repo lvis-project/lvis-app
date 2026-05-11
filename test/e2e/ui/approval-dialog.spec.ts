@@ -36,7 +36,7 @@ test('approval dialog renders approve/deny/bulk controls, or skips', async ({
   test.skip(!dialogVisible, 'No approval dialog reachable — skipping.');
 
   const approve = dialog
-    .locator('button:has-text("Approve"), button:has-text("승인")')
+    .locator('button:has-text("Approve"), button:has-text("승인"), button:has-text("허용")')
     .first();
   const deny = dialog
     .locator('button:has-text("Deny"), button:has-text("Reject"), button:has-text("거부")')

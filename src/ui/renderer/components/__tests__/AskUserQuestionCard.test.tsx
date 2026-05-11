@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import "../../../../../test/renderer/setup.ts";
 import { describe, it, expect, vi } from "vitest";
-import { render, fireEvent, act } from "@testing-library/react";
+import { render, fireEvent, act, waitFor } from "@testing-library/react";
 import { AskUserQuestionCard } from "../AskUserQuestionCard.js";
 import type { AskUserQuestionRequest } from "../AskUserQuestionCard.js";
 
@@ -89,6 +89,25 @@ describe("AskUserQuestionCard — single question keyboard Enter", () => {
       expect.objectContaining({ answers: [{ choice: "파랑" }] }),
     );
   });
+
+  it("dismisses the current question on Escape", async () => {
+    const api = makeApi();
+    const onResolved = vi.fn();
+    const request = makeRequest();
+
+    const { getByTestId } = render(
+      <AskUserQuestionCard api={api as never} request={request} onResolved={onResolved} />,
+    );
+
+    await act(async () => {
+      fireEvent.keyDown(getByTestId("ask-user-question-card"), { key: "Escape" });
+    });
+
+    expect(api.respondAskUserQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: "req-1", dismissed: true }),
+    );
+    await waitFor(() => expect(onResolved).toHaveBeenCalledWith("req-1"));
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -145,7 +164,7 @@ describe("AskUserQuestionCard — multi-step keyboard Enter (intermediate step)"
       ],
     });
 
-    const { getByText } = render(
+    const { getByRole, getByText } = render(
       <AskUserQuestionCard api={api as never} request={request} onResolved={onResolved} />,
     );
 
@@ -167,7 +186,7 @@ describe("AskUserQuestionCard — multi-step keyboard Enter (intermediate step)"
     expect(api.respondAskUserQuestion).not.toHaveBeenCalled();
 
     // User clicks 보내기 on the confirm step.
-    const submitBtn = getByText("보내기");
+    const submitBtn = getByRole("button", { name: "보내기" });
     await act(async () => {
       fireEvent.click(submitBtn);
     });
@@ -179,6 +198,217 @@ describe("AskUserQuestionCard — multi-step keyboard Enter (intermediate step)"
         answers: [{ choice: "A" }, { choice: "X" }],
       }),
     );
+  });
+
+  it("focuses the send button on the confirm step and submits with Enter", async () => {
+    const api = makeApi();
+    const onResolved = vi.fn();
+    const request = makeRequest({
+      questions: [
+        { question: "Q1", choices: ["A", "B"], allowFreeText: false },
+        { question: "Q2", choices: ["X", "Y"], allowFreeText: false },
+      ],
+    });
+
+    const { getByRole, getByText } = render(
+      <AskUserQuestionCard api={api as never} request={request} onResolved={onResolved} />,
+    );
+
+    await act(async () => {
+      fireEvent.keyDown(getByText("A").closest("button")!, { key: "Enter" });
+    });
+    await act(async () => {
+      fireEvent.keyDown(getByText("X").closest("button")!, { key: "Enter" });
+    });
+
+    const submitBtn = getByRole("button", { name: "보내기" });
+    await waitFor(() => expect(document.activeElement).toBe(submitBtn));
+    await act(async () => {
+      fireEvent.keyDown(submitBtn, { key: "Enter" });
+    });
+
+    expect(api.respondAskUserQuestion).toHaveBeenCalledTimes(1);
+    expect(api.respondAskUserQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestId: "req-1",
+        answers: [{ choice: "A" }, { choice: "X" }],
+      }),
+    );
+  });
+});
+
+describe("AskUserQuestionCard — multi-step free-text keyboard navigation", () => {
+  it("does not advance while Korean IME composition is being committed", async () => {
+    const api = makeApi();
+    const request = makeRequest({
+      questions: [
+        { question: "참석자", allowFreeText: true },
+        { question: "의제", allowFreeText: true },
+      ],
+    });
+
+    const { getByTestId, getByText, queryByText } = render(
+      <AskUserQuestionCard api={api as never} request={request} onResolved={vi.fn()} />,
+    );
+
+    const input = getByTestId("ask-freetext-input") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "알루우" } });
+    await act(async () => {
+      fireEvent.keyDown(input, { key: "Enter", keyCode: 229 });
+    });
+
+    expect(getByText("참석자")).toBeTruthy();
+    expect(queryByText("의제")).toBeNull();
+    expect(input.value).toBe("알루우");
+
+    await act(async () => {
+      fireEvent.keyDown(input, { key: "Enter" });
+    });
+
+    expect(getByText("의제")).toBeTruthy();
+    expect((getByTestId("ask-freetext-input") as HTMLInputElement).value).toBe("");
+  });
+
+  it("keeps arrow keys inside free-text editing and moves questions from the card surface", async () => {
+    const api = makeApi();
+    const request = makeRequest({
+      questions: [
+        { question: "참석자", allowFreeText: true },
+        { question: "의제", allowFreeText: true },
+      ],
+    });
+
+    const { getByTestId, getByText } = render(
+      <AskUserQuestionCard api={api as never} request={request} onResolved={vi.fn()} />,
+    );
+
+    expect(getByTestId("ask-keyboard-hint").textContent).toContain("Enter");
+    expect(getByTestId("ask-keyboard-hint").textContent).toContain("질문 이동");
+
+    const firstInput = getByTestId("ask-freetext-input") as HTMLInputElement;
+    fireEvent.change(firstInput, { target: { value: "알루우" } });
+    await act(async () => {
+      fireEvent.keyDown(firstInput, { key: "ArrowDown" });
+    });
+
+    expect(getByText("참석자")).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.keyDown(firstInput, { key: "ArrowRight" });
+    });
+
+    expect(getByText("참석자")).toBeTruthy();
+
+    const card = getByTestId("ask-user-question-card");
+    card.focus();
+    expect(document.activeElement).toBe(card);
+    await act(async () => {
+      fireEvent.keyDown(card, { key: "ArrowRight" });
+    });
+
+    expect(getByText("의제")).toBeTruthy();
+
+    const secondInput = getByTestId("ask-freetext-input") as HTMLInputElement;
+    await act(async () => {
+      fireEvent.keyDown(secondInput, { key: "ArrowLeft" });
+    });
+
+    expect(getByText("의제")).toBeTruthy();
+
+    card.focus();
+    expect(document.activeElement).toBe(card);
+    await act(async () => {
+      fireEvent.keyDown(card, { key: "ArrowLeft" });
+    });
+
+    expect(getByText("참석자")).toBeTruthy();
+  });
+
+  it("moves choice answers with ArrowUp and ArrowDown before ArrowRight changes question", async () => {
+    const api = makeApi();
+    const request = makeRequest({
+      questions: [
+        { question: "첫 번째 질문", choices: ["A", "B"], allowFreeText: false },
+        { question: "두 번째 질문", choices: ["X", "Y"], allowFreeText: false },
+      ],
+    });
+
+    const { getByTestId, getByText, queryByText } = render(
+      <AskUserQuestionCard api={api as never} request={request} onResolved={vi.fn()} />,
+    );
+
+    expect(getByTestId("ask-keyboard-hint").textContent).toContain("답변/수동입력 이동");
+    expect(getByTestId("ask-keyboard-hint").textContent).toContain("질문 이동");
+
+    const answerA = getByText("A").closest("button")!;
+    answerA.focus();
+    await act(async () => {
+      fireEvent.keyDown(answerA, { key: "ArrowDown" });
+    });
+
+    expect(document.activeElement?.textContent).toContain("B");
+    expect(queryByText("두 번째 질문")).toBeNull();
+
+    await act(async () => {
+      fireEvent.keyDown(document.activeElement!, { key: "ArrowUp" });
+    });
+
+    expect(document.activeElement?.textContent).toContain("A");
+
+    await act(async () => {
+      fireEvent.click(answerA);
+    });
+    await act(async () => {
+      fireEvent.keyDown(answerA, { key: "ArrowRight" });
+    });
+
+    expect(getByText("두 번째 질문")).toBeTruthy();
+  });
+
+  it("includes free-text input in the answer arrow loop and commits it with Enter", async () => {
+    const api = makeApi();
+    const request = makeRequest({
+      questions: [
+        {
+          question: "참석자",
+          choices: ["알루우", "지수"],
+          allowFreeText: true,
+          placeholder: "직접입력",
+        },
+        { question: "의제", allowFreeText: true },
+      ],
+    });
+
+    const { getByPlaceholderText, getByText } = render(
+      <AskUserQuestionCard api={api as never} request={request} onResolved={vi.fn()} />,
+    );
+
+    const firstChoice = getByText("알루우").closest("button")!;
+    firstChoice.focus();
+    await act(async () => {
+      fireEvent.keyDown(firstChoice, { key: "ArrowUp" });
+    });
+
+    const manualInput = getByPlaceholderText("직접입력") as HTMLInputElement;
+    expect(document.activeElement).toBe(manualInput);
+
+    await act(async () => {
+      fireEvent.keyDown(manualInput, { key: "ArrowUp" });
+    });
+
+    expect(document.activeElement?.textContent).toContain("지수");
+
+    await act(async () => {
+      fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
+    });
+
+    expect(document.activeElement).toBe(manualInput);
+    fireEvent.change(manualInput, { target: { value: "찬우" } });
+    await act(async () => {
+      fireEvent.keyDown(manualInput, { key: "Enter" });
+    });
+
+    expect(getByText("의제")).toBeTruthy();
   });
 });
 

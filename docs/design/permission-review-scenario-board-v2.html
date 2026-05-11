@@ -1,0 +1,1149 @@
+<!DOCTYPE html>
+<!--
+  LVIS Permission Review Scenario Board v2
+
+  Purpose:
+  - Agreement mockup only. Not production code.
+  - Covers the full user-visible scenario set before implementation.
+  - Preserves the permission path as a single SSOT for builtin, plugin, and MCP tools.
+  - Keeps pending deferred reviewer queue items non-interruptive and reachable
+    from the chat permission controls through an explicit queue button.
+-->
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LVIS Permission Review Scenario Board v2</title>
+<style>
+  :root {
+    --ink: #f3f0e8;
+    --ink-soft: #cfc8ba;
+    --muted: #8f887c;
+    --bg: #10100e;
+    --surface: #171714;
+    --surface-2: #202019;
+    --surface-3: #29281f;
+    --line: #3b382d;
+    --line-soft: #2d2b23;
+    --blue: #77a7ff;
+    --blue-bg: rgba(119, 167, 255, .13);
+    --green: #74d99f;
+    --green-bg: rgba(116, 217, 159, .13);
+    --amber: #f6c763;
+    --amber-bg: rgba(246, 199, 99, .14);
+    --red: #ff8585;
+    --red-bg: rgba(255, 133, 133, .13);
+    --violet: #d2a7ff;
+    --violet-bg: rgba(210, 167, 255, .13);
+    --shadow: 0 20px 60px rgba(0, 0, 0, .42);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background:
+      linear-gradient(180deg, rgba(246, 199, 99, .06), transparent 320px),
+      var(--bg);
+    color: var(--ink);
+    font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    letter-spacing: 0;
+  }
+
+  h1, h2, h3, p { margin: 0; }
+  code { color: #d9e6ff; word-break: break-word; }
+  button { font: inherit; }
+
+  .page {
+    width: min(1500px, calc(100vw - 44px));
+    margin: 0 auto;
+    padding: 24px 0 52px;
+  }
+
+  .hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1.1fr) minmax(370px, .9fr);
+    gap: 14px;
+    margin-bottom: 14px;
+  }
+
+  .panel,
+  .mode-card,
+  .chat-shell,
+  .scenario,
+  .matrix,
+  .modal,
+  .mini,
+  .queue-list,
+  .setting-shell {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: linear-gradient(180deg, rgba(23, 23, 20, .98), rgba(17, 17, 15, .98));
+  }
+
+  .panel { padding: 16px; }
+  .hero h1 { font-size: 25px; line-height: 1.18; font-weight: 760; }
+  .hero p { margin-top: 8px; color: var(--ink-soft); font-size: 14px; line-height: 1.55; }
+
+  .principles {
+    display: grid;
+    gap: 8px;
+  }
+
+  .principle {
+    display: grid;
+    grid-template-columns: 132px 1fr;
+    gap: 10px;
+    align-items: start;
+    border-top: 1px solid var(--line-soft);
+    padding-top: 8px;
+    color: var(--ink-soft);
+    font-size: 12px;
+    line-height: 1.45;
+  }
+  .principle:first-child { border-top: 0; padding-top: 0; }
+
+  .tag {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 22px;
+    width: fit-content;
+    padding: 2px 8px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    color: var(--ink-soft);
+    background: var(--surface-2);
+    font-size: 11px;
+    font-weight: 730;
+    white-space: nowrap;
+  }
+  .tag.blue { color: #d4e3ff; border-color: rgba(119, 167, 255, .48); background: var(--blue-bg); }
+  .tag.green { color: #d2ffe4; border-color: rgba(116, 217, 159, .48); background: var(--green-bg); }
+  .tag.amber { color: #ffe8ad; border-color: rgba(246, 199, 99, .5); background: var(--amber-bg); }
+  .tag.red { color: #ffd5d5; border-color: rgba(255, 133, 133, .5); background: var(--red-bg); }
+  .tag.violet { color: #eedbff; border-color: rgba(210, 167, 255, .48); background: var(--violet-bg); }
+
+  .modes {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+
+  .mode-card {
+    min-height: 146px;
+    padding: 13px;
+    display: grid;
+    gap: 8px;
+  }
+  .mode-card h2 { font-size: 13px; }
+  .mode-card p { color: var(--muted); font-size: 12px; line-height: 1.45; }
+  .mode-card.active { border-color: rgba(119, 167, 255, .72); box-shadow: inset 0 0 0 1px rgba(119, 167, 255, .2); }
+  .mode-row { display: flex; flex-wrap: wrap; gap: 6px; }
+
+  .layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1.15fr) minmax(380px, .85fr);
+    gap: 14px;
+    margin-bottom: 14px;
+  }
+
+  .chat-shell {
+    min-height: 640px;
+    overflow: hidden;
+  }
+  .bar {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 13px;
+    border-bottom: 1px solid var(--line);
+    background: var(--surface-2);
+  }
+  .bar h2 { font-size: 14px; line-height: 1.35; }
+  .chat-body {
+    position: relative;
+    min-height: 596px;
+    padding: 15px;
+    background: #11110f;
+  }
+
+  .chat-frame {
+    min-height: 564px;
+    border: 1px solid var(--line-soft);
+    border-radius: 8px;
+    display: grid;
+    grid-template-rows: 1fr 58px;
+    overflow: hidden;
+    background: #12120f;
+  }
+  .messages { padding: 16px; overflow: hidden; }
+  .bubble {
+    max-width: 76%;
+    margin-bottom: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--line-soft);
+    border-radius: 8px;
+    background: var(--surface-2);
+    color: var(--ink-soft);
+    font-size: 13px;
+    line-height: 1.48;
+  }
+  .bubble.user {
+    margin-left: auto;
+    background: #2a3027;
+    color: var(--ink);
+  }
+  .composer {
+    border-top: 1px solid var(--line-soft);
+    padding: 10px 12px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .tool-stack {
+    max-width: 84%;
+    margin-bottom: 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--surface);
+  }
+  .tool-stack-head {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    min-height: 36px;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--line-soft);
+    color: var(--ink-soft);
+    font-size: 12px;
+  }
+  .tool-line {
+    display: grid;
+    grid-template-columns: 132px 1fr auto;
+    gap: 8px;
+    align-items: center;
+    padding: 8px 10px;
+    border-top: 1px solid var(--line-soft);
+    color: var(--ink-soft);
+    font-size: 12px;
+  }
+  .tool-line:first-child { border-top: 0; }
+  .tool-line b { color: var(--ink); }
+
+  .permission-controls-row {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 8px;
+    padding: 0 16px 10px;
+  }
+  .mode-pill,
+  .queue-pill {
+    border-radius: 999px;
+    padding: 8px 13px;
+    font-size: 12px;
+    font-weight: 700;
+    background: rgba(18, 18, 16, .92);
+  }
+  .mode-pill {
+    border: 1px solid rgba(77, 166, 255, .75);
+    color: #69b5ff;
+  }
+  .queue-pill {
+    border: 1px solid rgba(255, 91, 91, .85);
+    color: #ff8585;
+  }
+
+  .overlay {
+    position: absolute;
+    inset: 15px;
+    display: grid;
+    place-items: center;
+    padding: 18px;
+    border-radius: 8px;
+    background: rgba(3, 3, 3, .66);
+  }
+
+  .modal {
+    width: min(760px, 100%);
+    overflow: hidden;
+    box-shadow: var(--shadow);
+  }
+  .modal.wide { width: min(900px, 100%); }
+  .modal-head {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    padding: 14px;
+    border-bottom: 1px solid var(--line);
+    background: var(--surface-2);
+  }
+  .glyph {
+    width: 34px;
+    height: 34px;
+    border: 1px solid rgba(119, 167, 255, .5);
+    border-radius: 8px;
+    display: grid;
+    place-items: center;
+    background: var(--blue-bg);
+    color: #dce8ff;
+    font-weight: 840;
+  }
+  .modal-title { flex: 1; min-width: 0; }
+  .modal-title h3 { font-size: 15px; margin-bottom: 5px; }
+  .modal-title p { color: var(--ink-soft); font-size: 12px; line-height: 1.5; }
+  .modal-body { display: grid; gap: 11px; padding: 14px; }
+  .modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 12px 14px;
+    border-top: 1px solid var(--line);
+    background: rgba(23, 23, 20, .72);
+  }
+
+  .button {
+    min-height: 32px;
+    padding: 0 12px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--surface-3);
+    color: var(--ink-soft);
+    font-size: 12px;
+    font-weight: 760;
+  }
+  .button.primary { border-color: rgba(119, 167, 255, .72); background: #254067; color: #e4eeff; }
+  .button.danger { border-color: rgba(255, 133, 133, .62); background: var(--red-bg); color: #ffd6d6; }
+  .button.safe { border-color: rgba(116, 217, 159, .6); background: var(--green-bg); color: #d3ffe5; }
+
+  .mini-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .mini {
+    min-height: 78px;
+    padding: 10px;
+    background: var(--surface-2);
+  }
+  .mini .label { color: var(--muted); font-size: 11px; margin-bottom: 5px; }
+  .mini .value { color: var(--ink); font-size: 12px; line-height: 1.42; word-break: break-word; }
+
+  .review-box {
+    border: 1px solid rgba(119, 167, 255, .45);
+    border-radius: 8px;
+    background: var(--blue-bg);
+    padding: 11px;
+  }
+  .review-box.amber { border-color: rgba(246, 199, 99, .45); background: var(--amber-bg); }
+  .review-box.red { border-color: rgba(255, 133, 133, .45); background: var(--red-bg); }
+  .review-box.green { border-color: rgba(116, 217, 159, .45); background: var(--green-bg); }
+  .review-box h4 { margin: 0 0 7px; font-size: 12px; }
+  .review-row {
+    display: grid;
+    grid-template-columns: 116px 1fr;
+    gap: 8px;
+    padding: 6px 0;
+    border-top: 1px solid rgba(255, 255, 255, .08);
+    color: var(--ink-soft);
+    font-size: 12px;
+    line-height: 1.42;
+  }
+  .review-row:first-of-type { border-top: 0; padding-top: 0; }
+  .review-row b { color: var(--ink); }
+
+  .side {
+    display: grid;
+    gap: 14px;
+  }
+
+  .timeline { padding: 14px; }
+  .timeline h2 { font-size: 14px; margin-bottom: 10px; }
+  .step {
+    display: grid;
+    grid-template-columns: 26px 1fr;
+    gap: 9px;
+    padding: 0 0 12px;
+  }
+  .dot {
+    width: 22px;
+    height: 22px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    display: grid;
+    place-items: center;
+    background: var(--surface-2);
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 800;
+  }
+  .step h3 { font-size: 12px; margin-bottom: 4px; }
+  .step p { color: var(--muted); font-size: 12px; line-height: 1.45; }
+
+  .queue-list {
+    padding: 12px;
+    display: grid;
+    gap: 9px;
+  }
+  .queue-list h2 { font-size: 14px; }
+  .queue-item {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 10px;
+    align-items: start;
+    border: 1px solid var(--line-soft);
+    border-radius: 8px;
+    padding: 10px;
+    background: var(--surface-2);
+  }
+  .queue-item h3 { font-size: 12px; margin-bottom: 5px; }
+  .queue-item p { color: var(--muted); font-size: 12px; line-height: 1.42; }
+
+  .scenario-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+  .scenario {
+    overflow: hidden;
+    min-height: 264px;
+  }
+  .scenario-head {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    min-height: 42px;
+    padding: 9px 11px;
+    border-bottom: 1px solid var(--line);
+    background: var(--surface-2);
+  }
+  .scenario-head h2 { font-size: 13px; line-height: 1.3; }
+  .scenario-body { padding: 11px; display: grid; gap: 9px; }
+  .scenario-copy { color: var(--ink-soft); font-size: 12px; line-height: 1.5; }
+  .scenario-list {
+    display: grid;
+    gap: 7px;
+  }
+  .scenario-row {
+    display: grid;
+    grid-template-columns: 96px 1fr;
+    gap: 8px;
+    border-top: 1px solid var(--line-soft);
+    padding-top: 7px;
+    color: var(--ink-soft);
+    font-size: 12px;
+    line-height: 1.42;
+  }
+  .scenario-row:first-child { border-top: 0; padding-top: 0; }
+  .scenario-row b { color: var(--ink); }
+
+  .matrix {
+    overflow: hidden;
+    margin-bottom: 14px;
+  }
+  .matrix-head {
+    padding: 13px 15px;
+    border-bottom: 1px solid var(--line);
+    background: var(--surface-2);
+  }
+  .matrix-head h2 { font-size: 14px; margin-bottom: 4px; }
+  .matrix-head p { color: var(--muted); font-size: 12px; line-height: 1.45; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--line-soft);
+    text-align: left;
+    vertical-align: top;
+    line-height: 1.45;
+  }
+  th { color: var(--muted); background: rgba(32, 32, 25, .78); }
+  td { color: var(--ink-soft); }
+  tr:last-child td { border-bottom: 0; }
+
+  .setting-shell {
+    display: grid;
+    grid-template-columns: 210px 1fr;
+    overflow: hidden;
+  }
+  .setting-nav {
+    border-right: 1px solid var(--line);
+    background: var(--surface-2);
+    padding: 12px;
+    display: grid;
+    align-content: start;
+    gap: 8px;
+  }
+  .nav-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 34px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    padding: 0 10px;
+    color: var(--ink-soft);
+    font-size: 12px;
+  }
+  .nav-item.active { border-color: rgba(119, 167, 255, .55); background: var(--blue-bg); color: var(--ink); }
+  .setting-main { padding: 14px; display: grid; gap: 10px; }
+  .setting-card {
+    border: 1px solid var(--line-soft);
+    border-radius: 8px;
+    padding: 11px;
+    background: var(--surface-2);
+  }
+  .setting-card h3 { font-size: 13px; margin-bottom: 5px; }
+  .setting-card p { color: var(--muted); font-size: 12px; line-height: 1.45; }
+  .segmented {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 7px;
+    margin-top: 10px;
+  }
+  .seg {
+    min-height: 40px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    display: grid;
+    place-items: center;
+    text-align: center;
+    padding: 6px;
+    color: var(--muted);
+    background: var(--surface);
+    font-size: 11px;
+    font-weight: 760;
+  }
+  .seg.active { border-color: rgba(119, 167, 255, .68); background: var(--blue-bg); color: #dce9ff; }
+
+  @media (max-width: 1120px) {
+    .hero, .layout, .scenario-grid, .modes { grid-template-columns: 1fr; }
+    .mini-grid { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 780px) {
+    .page { width: min(100vw - 22px, 1500px); }
+    .principle, .review-row, .scenario-row, .tool-line, .queue-item, .permission-controls-row, .setting-shell {
+      grid-template-columns: 1fr;
+    }
+    .setting-nav { display: none; }
+    .segmented { grid-template-columns: 1fr 1fr; }
+  }
+</style>
+</head>
+<body>
+  <main class="page">
+    <section class="hero">
+      <div class="panel">
+        <h1>Permission Review Scenario Board v2</h1>
+        <p>
+          권한 UX 를 정책 모드, 실행 표면, tool source, LLM reviewer 상태, deferred queue 상태별로 빠짐없이 비교하기 위한 합의용 목업입니다.
+          plugin/native/MCP 는 모두 같은 검증 경로로 들어오고, source 는 표시와 감사 metadata 로만 사용됩니다.
+        </p>
+      </div>
+      <div class="panel principles">
+        <div class="principle"><span class="tag blue">Single path</span><span>ToolRegistry → ToolExecutor → PermissionManager → reviewer/audit/ApprovalGate 한 경로만 사용합니다.</span></div>
+        <div class="principle"><span class="tag amber">LLM optional</span><span>LLM reviewer 가 없는 모드는 명시 승인 UI 로 묻습니다. 조용한 허용이나 숨은 규칙 대체는 없습니다.</span></div>
+        <div class="principle"><span class="tag red">Manual queue</span><span>headless deferred queue 는 작업을 자동 방해하지 않습니다. 권한 버튼 옆 큐 버튼에 count 를 표시하고 사용자가 직접 열 때만 모달을 띄웁니다.</span></div>
+        <div class="principle"><span class="tag green">No reverse ref</span><span>플러그인 이름/기능별 앱 분기는 만들지 않습니다. 도구 정의와 manifest metadata 만 표시합니다.</span></div>
+      </div>
+    </section>
+
+    <section class="modes">
+      <div class="mode-card">
+        <div class="mode-row"><span class="tag">default</span><span class="tag">LLM off</span></div>
+        <h2>기본</h2>
+        <p>read 는 허용합니다. write/network/shell 은 source 와 무관하게 승인 모달로 묻습니다. out-of-dir read 는 디렉터리 권한 UI 로 갑니다.</p>
+      </div>
+      <div class="mode-card">
+        <div class="mode-row"><span class="tag amber">strict</span><span class="tag">read ask</span></div>
+        <h2>전체 물어보기</h2>
+        <p>read 포함 모든 도구가 승인 대상입니다. reviewer LLM 을 호출하지 않고, 사용자가 직접 확인합니다.</p>
+      </div>
+      <div class="mode-card active">
+        <div class="mode-row"><span class="tag blue">auto-review</span><span class="tag violet">LLM on</span></div>
+        <h2>LLM 자동 검토</h2>
+        <p>write/network/shell 은 reviewer 가 영향범위를 계산합니다. LOW 는 inline 통과, 현재 채팅 MED/HIGH 는 승인 모달, headless 는 수동 deferred queue 입니다.</p>
+      </div>
+      <div class="mode-card">
+        <div class="mode-row"><span class="tag green">allow</span><span class="tag">hard gates</span></div>
+        <h2>전체 허용</h2>
+        <p>하드 차단, 민감 경로, deny rule, overlay mutation guard 는 유지합니다. 나머지는 감사와 함께 허용합니다.</p>
+      </div>
+    </section>
+
+    <section class="layout">
+      <article class="chat-shell">
+        <div class="bar">
+          <span class="tag amber">network</span>
+          <h2>네트워크 전송 승인 모달</h2>
+        </div>
+        <div class="chat-body">
+          <div class="modal">
+            <div class="modal-head">
+              <div class="glyph">N</div>
+              <div class="modal-title">
+                <h3>외부 서비스로 데이터 전송 승인 필요</h3>
+                <p>LLM reviewer 가 endpoint, auth scope, payload class, retention risk 를 평가했습니다. 실행 전 전송 대상을 확인하세요.</p>
+              </div>
+              <span class="tag amber">MEDIUM</span>
+            </div>
+            <div class="modal-body">
+              <div class="mini-grid">
+                <div class="mini"><div class="label">도구 / 출처</div><div class="value"><code>teams_send</code><br>source=plugin</div></div>
+                <div class="mini"><div class="label">권한 category</div><div class="value">network<br>external send</div></div>
+                <div class="mini"><div class="label">auth scope</div><div class="value">ChatMessage.Send<br>tenant account</div></div>
+              </div>
+              <div class="review-box amber">
+                <h4>네트워크 영향범위</h4>
+                <div class="review-row"><b>endpoint</b><span><code>https://graph.microsoft.com/v1.0/teams/{team}/channels/{channel}/messages</code></span></div>
+                <div class="review-row"><b>method</b><span><code>POST</code> · TLS endpoint · known provider</span></div>
+                <div class="review-row"><b>payload</b><span>회의 요약 2.4KB, 참석자 이름 포함, 첨부 파일 없음.</span></div>
+                <div class="review-row"><b>Reviewer</b><span>MEDIUM: 사용자가 요청한 공유 작업과 일치하지만 외부 서비스에 대화 내용이 저장됩니다.</span></div>
+                <div class="review-row"><b>선택</b><span>이번만 보내기, 같은 endpoint 세션 허용, 거부. 항상 허용은 endpoint + payload class 단위로만 제안.</span></div>
+              </div>
+            </div>
+            <div class="modal-actions">
+              <button class="button danger">거부</button>
+              <button class="button">같은 endpoint 세션 허용</button>
+              <button class="button primary">이번만 보내기</button>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="chat-shell">
+        <div class="bar">
+          <span class="tag red">network deferred</span>
+          <h2>Headless 네트워크 전송 보류</h2>
+        </div>
+        <div class="chat-body">
+          <div class="modal">
+            <div class="modal-head">
+              <div class="glyph">승</div>
+              <div class="modal-title">
+                <h3>사용자가 보지 않는 외부 전송이 보류되었습니다</h3>
+                <p>루틴 실행 중 네트워크 전송 요청이 발생했습니다. 승인 전에는 전송하지 않고 큐 버튼의 pending count 로만 알립니다.</p>
+              </div>
+              <span class="tag red">pending</span>
+            </div>
+            <div class="modal-body">
+              <div class="review-box red">
+                <h4>보류된 전송</h4>
+                <div class="review-row"><b>surface</b><span>headless routine · source=plugin · category=network</span></div>
+                <div class="review-row"><b>endpoint</b><span><code>https://hooks.example.com/lvis-summary</code></span></div>
+                <div class="review-row"><b>payload</b><span>daily summary, task ids, meeting excerpts. 민감 데이터 포함 가능.</span></div>
+                <div class="review-row"><b>Reviewer</b><span>HIGH: 사용자가 현재 보고 있지 않은 상태에서 외부 webhook 으로 데이터가 전송됩니다.</span></div>
+                <div class="review-row"><b>큐 처리</b><span>권한 정책 버튼 옆 큐 버튼에서 사용자가 직접 열 때만 모달을 노출합니다. 승인/거부는 보류 항목과 audit 을 닫고, 실제 실행은 현재 채팅에서 다시 요청합니다.</span></div>
+              </div>
+              <div class="mini-grid">
+                <div class="mini"><div class="label">전송 상태</div><div class="value">not sent<br>pending approval</div></div>
+                <div class="mini"><div class="label">Settings</div><div class="value">policy/history<br>approval surface 아님</div></div>
+                <div class="mini"><div class="label">허용 범위</div><div class="value">endpoint + payload class<br>narrow rule only</div></div>
+              </div>
+            </div>
+            <div class="modal-actions">
+              <button class="button">나중에 보기</button>
+              <button class="button danger">전송 거부</button>
+              <button class="button primary">검토 후 전송</button>
+            </div>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <section class="layout">
+      <article class="chat-shell">
+        <div class="bar">
+          <span class="tag red">manual queue</span>
+          <h2>미처리 deferred queue 를 사용자가 직접 여는 경우</h2>
+        </div>
+        <div class="chat-body">
+          <div class="chat-frame">
+            <div class="messages">
+              <div class="bubble user">오늘 회의록 정리하고 공유 준비해줘.</div>
+              <div class="tool-stack">
+                <div class="tool-stack-head"><span class="tag blue">same path</span><span>현재 채팅 요청의 도구 호출도 같은 권한 경로로 평가됩니다.</span></div>
+                <div class="tool-line"><b>read_file</b><span>source=builtin, category=read, workspace 내부</span><span class="tag green">allow</span></div>
+                <div class="tool-line"><b>teams_send</b><span>source=plugin, category=network, 외부 전송</span><span class="tag amber">ask</span></div>
+                <div class="tool-line"><b>bash</b><span>source=builtin, category=shell, archive 생성</span><span class="tag red">HIGH</span></div>
+              </div>
+              <div class="bubble">현재 요청과 별개로, headless 보류 항목은 권한 큐 버튼에서 나중에 확인할 수 있습니다.</div>
+            </div>
+            <div class="permission-controls-row" aria-label="권한 정책과 승인 큐">
+              <button class="mode-pill">기본 · 읽기 허용</button>
+              <button class="queue-pill">승인 3</button>
+            </div>
+            <div class="composer">메시지 입력...</div>
+          </div>
+
+          <div class="overlay">
+            <div class="modal wide">
+              <div class="modal-head">
+                <div class="glyph">승</div>
+                <div class="modal-title">
+                  <h3>보류된 권한 요청 검토</h3>
+                  <p>사용자가 권한 큐 버튼을 눌렀을 때만 열리는 모달입니다. 작업 중 자동으로 전면 노출되지 않습니다.</p>
+                </div>
+                <span class="tag red">3 pending</span>
+              </div>
+              <div class="modal-body">
+                <div class="mini-grid">
+                  <div class="mini"><div class="label">주 승인 표면</div><div class="value">권한 큐 버튼<br>수동 모달</div></div>
+                  <div class="mini"><div class="label">Settings 역할</div><div class="value">정책/LLM 설정<br>처리 이력 조회</div></div>
+                  <div class="mini"><div class="label">처리 결과</div><div class="value">승인 시 기록 완료<br>거부/만료 시 audit close</div></div>
+                </div>
+                <div class="review-box red">
+                  <h4>대표 보류 항목</h4>
+                  <div class="review-row"><b>도구</b><span><code>bash</code> · source=builtin · category=shell · surface=headless routine</span></div>
+                  <div class="review-row"><b>Reviewer</b><span>HIGH: repository mutation, network fetch, dependency install 가능성이 있어 사용자 승인 필요.</span></div>
+                  <div class="review-row"><b>명령</b><span><code>./update-all.sh --no-prompt</code></span></div>
+                  <div class="review-row"><b>선택</b><span>첫 항목 검토, 모두 거부, 닫기. 닫기는 새 tool 실행을 막지 않고 큐 count 를 유지합니다.</span></div>
+                </div>
+              </div>
+              <div class="modal-actions">
+                <button class="button">나중에 보기</button>
+                <button class="button danger">모두 거부</button>
+                <button class="button primary">첫 항목 검토</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <aside class="side">
+        <div class="timeline panel">
+          <h2>단일 검증 흐름</h2>
+          <div class="step"><div class="dot">1</div><div><h3>도구 호출 수집</h3><p>source 는 builtin/plugin/MCP 중 하나지만 경로는 갈라지지 않습니다.</p></div></div>
+          <div class="step"><div class="dot">2</div><div><h3>하드 레이어</h3><p>deny rule, 민감 경로, overlay mutation guard, invalid manifest 는 reviewer 보다 먼저 fail-closed 입니다.</p></div></div>
+          <div class="step"><div class="dot">3</div><div><h3>정책 모드</h3><p>default/strict 는 명시 승인, auto-review 는 reviewer, allow 는 하드 차단 후 감사 허용입니다.</p></div></div>
+          <div class="step"><div class="dot">4</div><div><h3>표면 선택</h3><p>현재 채팅의 승인 요청만 즉시 모달입니다. headless 는 deferred queue 로 보내고 큐 버튼 count 로만 표시합니다.</p></div></div>
+          <div class="step"><div class="dot">5</div><div><h3>감사</h3><p>allow, ask, deny, deferred, reviewer-unavailable 모두 audit event 로 남깁니다.</p></div></div>
+        </div>
+
+        <div class="queue-list">
+          <h2>Queue 상태 목업</h2>
+          <div class="queue-item">
+            <div><h3>pending</h3><p>미처리. 권한 큐 버튼 count 와 수동 모달 대상입니다.</p></div>
+            <span class="tag red">manual</span>
+          </div>
+          <div class="queue-item">
+            <div><h3>closed</h3><p>사용자가 모달을 닫음. 큐 count 는 유지되고 새 요청을 막지는 않습니다.</p></div>
+            <span class="tag amber">visible</span>
+          </div>
+          <div class="queue-item">
+            <div><h3>expired</h3><p>재개 불가능. 설정 이력과 audit 에서만 확인합니다.</p></div>
+            <span class="tag">history</span>
+          </div>
+        </div>
+      </aside>
+    </section>
+
+    <section class="scenario-grid">
+      <article class="scenario">
+        <div class="scenario-head"><span class="tag green">S1</span><h2>default read inside workspace</h2></div>
+        <div class="scenario-body">
+          <p class="scenario-copy">기본 모드에서 workspace 내부 read 는 사용자 승인 없이 실행됩니다. 단 tool card 에 읽은 파일과 audit 링크를 남깁니다.</p>
+          <div class="scenario-list">
+            <div class="scenario-row"><b>도구</b><span><code>read_file</code> · builtin/read</span></div>
+            <div class="scenario-row"><b>결정</b><span>allow + audit</span></div>
+            <div class="scenario-row"><b>UX</b><span>모달 없음. work card 에 파일 경로와 read-only badge 표시.</span></div>
+          </div>
+        </div>
+      </article>
+
+      <article class="scenario">
+        <div class="scenario-head"><span class="tag amber">S2</span><h2>strict read ask</h2></div>
+        <div class="scenario-body">
+          <p class="scenario-copy">전체 물어보기 모드에서는 read 도 권한 요청입니다. LLM reviewer 는 쓰지 않고 경로와 도구 정의를 직접 표시합니다.</p>
+          <div class="scenario-list">
+            <div class="scenario-row"><b>도구</b><span><code>read_file</code> · plugin/native/MCP 모두 동일</span></div>
+            <div class="scenario-row"><b>결정</b><span>ask</span></div>
+            <div class="scenario-row"><b>UX</b><span>“읽히는 파일이 맞습니까?” 중심의 경량 승인 모달.</span></div>
+          </div>
+        </div>
+      </article>
+
+      <article class="scenario">
+        <div class="scenario-head"><span class="tag red">S3</span><h2>out-of-dir read access</h2></div>
+        <div class="scenario-body">
+          <p class="scenario-copy">허용 디렉터리 밖 접근은 read 라도 별도 디렉터리 접근권한 요청 UI 로 전환합니다.</p>
+          <div class="scenario-list">
+            <div class="scenario-row"><b>도구</b><span><code>grep_files</code> · path=<code>~/Downloads</code></span></div>
+            <div class="scenario-row"><b>결정</b><span>ask directory scope</span></div>
+            <div class="scenario-row"><b>UX</b><span>이번만 허용, 디렉터리 추가, 거부. 민감 경로 경고 포함.</span></div>
+          </div>
+        </div>
+      </article>
+
+      <article class="scenario">
+        <div class="scenario-head"><span class="tag blue">S4</span><h2>auto-review LOW allow</h2></div>
+        <div class="scenario-body">
+          <p class="scenario-copy">LLM reviewer 가 낮은 위험으로 판단한 foreground mutation 은 inline 으로 통과 사실을 보여주고 실행합니다.</p>
+          <div class="scenario-list">
+            <div class="scenario-row"><b>도구</b><span><code>write_file</code> · small generated note</span></div>
+            <div class="scenario-row"><b>Reviewer</b><span>LOW: workspace 내부 새 파일 생성, no overwrite</span></div>
+            <div class="scenario-row"><b>UX</b><span>모달 없음. tool card 에 “LLM reviewed LOW”와 audit 링크.</span></div>
+          </div>
+        </div>
+      </article>
+
+      <article class="scenario">
+        <div class="scenario-head"><span class="tag amber">S5</span><h2>auto-review MED ask</h2></div>
+        <div class="scenario-body">
+          <p class="scenario-copy">데이터 전송, overwrite, 다중 파일 변경처럼 사용자가 알아야 하는 영향범위는 MEDIUM 승인 모달로 올립니다.</p>
+          <div class="scenario-list">
+            <div class="scenario-row"><b>도구</b><span><code>teams_send</code> · plugin/network</span></div>
+            <div class="scenario-row"><b>Reviewer</b><span>MEDIUM: 요약 내용 외부 전송 가능</span></div>
+            <div class="scenario-row"><b>UX</b><span>대상 endpoint, 전송되는 데이터 종류, 승인 범위 표시.</span></div>
+          </div>
+        </div>
+      </article>
+
+      <article class="scenario">
+        <div class="scenario-head"><span class="tag red">S6</span><h2>auto-review HIGH ask</h2></div>
+        <div class="scenario-body">
+          <p class="scenario-copy">shell, 삭제, 대량 변경, 민감 데이터 전송 가능성은 HIGH 승인 모달로 차단 후 사용자 결정을 받습니다.</p>
+          <div class="scenario-list">
+            <div class="scenario-row"><b>도구</b><span><code>bash</code> 또는 <code>powershell</code></span></div>
+            <div class="scenario-row"><b>Reviewer</b><span>HIGH: destructive pattern or broad mutation</span></div>
+            <div class="scenario-row"><b>UX</b><span>명령 원문, working directory, path policy, reviewer reason 표시.</span></div>
+          </div>
+        </div>
+      </article>
+
+      <article class="scenario">
+        <div class="scenario-head"><span class="tag amber">S7</span><h2>LLM reviewer disabled</h2></div>
+        <div class="scenario-body">
+          <p class="scenario-copy">default/strict 처럼 LLM 을 쓰지 않는 모드는 reviewer reason 이 없습니다. 대신 도구 정의와 인자를 더 명확히 보여줍니다.</p>
+          <div class="scenario-list">
+            <div class="scenario-row"><b>도구</b><span><code>write_file</code> · category=write</span></div>
+            <div class="scenario-row"><b>결정</b><span>ask, no reviewer</span></div>
+            <div class="scenario-row"><b>UX</b><span>“LLM 검토 미사용” badge, 실행 인자, 파일 overwrite 여부 표시.</span></div>
+          </div>
+        </div>
+      </article>
+
+      <article class="scenario">
+        <div class="scenario-head"><span class="tag red">S8</span><h2>auto-review but LLM missing</h2></div>
+        <div class="scenario-body">
+          <p class="scenario-copy">자동 검토 모드인데 provider/model/key 가 없으면 조용히 허용하지 않습니다. foreground 는 명시 승인, headless 는 보류/실패로 갑니다.</p>
+          <div class="scenario-list">
+            <div class="scenario-row"><b>상태</b><span>reviewer-unavailable</span></div>
+            <div class="scenario-row"><b>결정</b><span>foreground ask, headless deferred or deny by configured failure action</span></div>
+            <div class="scenario-row"><b>UX</b><span>LLM 설정 열기 CTA, no silent fallback 문구, audit 표시.</span></div>
+          </div>
+        </div>
+      </article>
+
+      <article class="scenario">
+        <div class="scenario-head"><span class="tag red">S9</span><h2>reviewer timeout/error</h2></div>
+        <div class="scenario-body">
+          <p class="scenario-copy">LLM 호출 실패는 외부 경계 오류입니다. 사용자가 정한 failure action 을 UI 에 노출하고 audit 합니다.</p>
+          <div class="scenario-list">
+            <div class="scenario-row"><b>오류</b><span>timeout, provider error, malformed verdict</span></div>
+            <div class="scenario-row"><b>결정</b><span>deny 또는 explicit ask. 허용은 별도 명시 설정 없이는 불가.</span></div>
+            <div class="scenario-row"><b>UX</b><span>“검토 실패”와 실제 오류 요약, 재시도, 설정 열기.</span></div>
+          </div>
+        </div>
+      </article>
+
+      <article class="scenario">
+        <div class="scenario-head"><span class="tag red">S10</span><h2>invalid tool definition</h2></div>
+        <div class="scenario-body">
+          <p class="scenario-copy">도구 정의가 category/pathFields/source contract 를 충족하지 않으면 권한 요청으로 가리지 않고 fail-closed 로 표시합니다.</p>
+          <div class="scenario-list">
+            <div class="scenario-row"><b>예시</b><span>manifest category missing, path field undeclared</span></div>
+            <div class="scenario-row"><b>결정</b><span>deny + manifest violation audit</span></div>
+            <div class="scenario-row"><b>UX</b><span>사용자에게 “플러그인 정의 오류”로 표시하고 실행 버튼은 제공하지 않음.</span></div>
+          </div>
+        </div>
+      </article>
+
+      <article class="scenario">
+        <div class="scenario-head"><span class="tag green">S11</span><h2>overlay prompt enters chat</h2></div>
+        <div class="scenario-body">
+          <p class="scenario-copy">플러그인 overlay 요청은 별도 permission lane 이 아닙니다. 사용자가 prompt 삽입을 승인하면 main chat 으로 들어오고 이후 도구 권한은 같은 경로입니다.</p>
+          <div class="scenario-list">
+            <div class="scenario-row"><b>source</b><span><code>overlay:...</code></span></div>
+            <div class="scenario-row"><b>결정</b><span>prompt import approval, then normal tool permission</span></div>
+            <div class="scenario-row"><b>UX</b><span>항상 overlay-trigger 로 표시하고, 별도 발화 주체처럼 보이는 명칭은 사용하지 않습니다.</span></div>
+          </div>
+        </div>
+      </article>
+
+      <article class="scenario">
+        <div class="scenario-head"><span class="tag blue">S12</span><h2>MCP remote tool</h2></div>
+        <div class="scenario-body">
+          <p class="scenario-copy">MCP 도구도 같은 category policy 경로를 탑니다. 단, low-trust MCP floor 는 LLM reviewer 가 LOW 로 낮출 수 없고 명시 승인으로 유지됩니다.</p>
+          <div class="scenario-list">
+            <div class="scenario-row"><b>도구</b><span><code>mcp.repo_create_issue</code> · source=MCP</span></div>
+            <div class="scenario-row"><b>결정</b><span>default/auto ask, allow mode only bypasses after hard gates</span></div>
+            <div class="scenario-row"><b>UX</b><span>서버 이름, endpoint/action, 요청 payload 요약 표시.</span></div>
+          </div>
+        </div>
+      </article>
+
+      <article class="scenario">
+        <div class="scenario-head"><span class="tag blue">S13</span><h2>network trusted metadata</h2></div>
+        <div class="scenario-body">
+          <p class="scenario-copy">신뢰된 endpoint 에 대한 read-only metadata 조회는 auto-review 에서 LOW 로 통과할 수 있지만, default/strict 에서는 명시 승인입니다.</p>
+          <div class="scenario-list">
+            <div class="scenario-row"><b>endpoint</b><span><code>https://graph.microsoft.com/v1.0/me</code></span></div>
+            <div class="scenario-row"><b>데이터</b><span>사용자 profile metadata 조회. 파일/대화 내용 전송 없음.</span></div>
+            <div class="scenario-row"><b>UX</b><span>endpoint, method, auth scope, 전송 데이터 없음 badge 를 inline 표시.</span></div>
+          </div>
+        </div>
+      </article>
+
+      <article class="scenario">
+        <div class="scenario-head"><span class="tag amber">S14</span><h2>network data egress ask</h2></div>
+        <div class="scenario-body">
+          <p class="scenario-copy">외부 서비스로 요약, 파일 내용, 회의록, 사용자 데이터가 전송되는 경우에는 reviewer 가 영향범위를 설명하고 승인 모달로 올립니다.</p>
+          <div class="scenario-list">
+            <div class="scenario-row"><b>도구</b><span><code>teams_send</code> · plugin/network</span></div>
+            <div class="scenario-row"><b>전송</b><span>회의 요약 2.4KB, 수신 채널 1개, 첨부 없음.</span></div>
+            <div class="scenario-row"><b>UX</b><span>destination, payload class, auth scope, retention risk 를 함께 표시.</span></div>
+          </div>
+        </div>
+      </article>
+
+      <article class="scenario">
+        <div class="scenario-head"><span class="tag red">S15</span><h2>network unknown or sensitive</h2></div>
+        <div class="scenario-body">
+          <p class="scenario-copy">unknown host, non-HTTPS, credential 포함 payload, 광범위 token scope, 민감 파일 전송 가능성은 HIGH 로 차단 후 사용자 판단을 받습니다.</p>
+          <div class="scenario-list">
+            <div class="scenario-row"><b>endpoint</b><span><code>http://example-upload.local/ingest</code></span></div>
+            <div class="scenario-row"><b>Reviewer</b><span>HIGH: plaintext endpoint + workspace archive upload 가능성.</span></div>
+            <div class="scenario-row"><b>UX</b><span>전송 대상, 프로토콜, payload 추정, auth header 포함 여부를 붉은 경고로 표시.</span></div>
+          </div>
+        </div>
+      </article>
+
+      <article class="scenario">
+        <div class="scenario-head"><span class="tag red">S16</span><h2>network headless deferred</h2></div>
+        <div class="scenario-body">
+          <p class="scenario-copy">사용자가 보지 않는 루틴이 네트워크 전송을 시도하면 LOW 가 아닌 호출은 deferred queue 로 보내고 권한 큐 버튼 count 로만 표시합니다.</p>
+          <div class="scenario-list">
+            <div class="scenario-row"><b>surface</b><span>headless routine · category=network</span></div>
+            <div class="scenario-row"><b>결정</b><span>MED/HIGH deferred, 승인 전 전송 없음.</span></div>
+            <div class="scenario-row"><b>UX</b><span>권한 큐 버튼에서 사용자가 직접 열면 endpoint/payload 를 먼저 보여줌.</span></div>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <section class="matrix">
+      <div class="matrix-head">
+        <h2>정책 × 표면 × 위험도 매트릭스</h2>
+        <p>이 표는 구현 시 테스트 케이스로도 사용할 수 있는 UX 계약입니다. plugin/native/MCP 는 같은 행을 공유합니다.</p>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>상황</th>
+            <th>default</th>
+            <th>strict</th>
+            <th>auto-review</th>
+            <th>allow</th>
+            <th>headless 처리</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>workspace read</td>
+            <td>allow + inline audit</td>
+            <td>ask modal</td>
+            <td>allow + inline audit</td>
+            <td>allow + audit</td>
+            <td>allow unless strict asks</td>
+          </tr>
+          <tr>
+            <td>out-of-dir read</td>
+            <td>directory access UI</td>
+            <td>directory access UI + read ask copy</td>
+            <td>directory access UI</td>
+            <td>directory access UI if not previously approved</td>
+            <td>deferred scope approval</td>
+          </tr>
+          <tr>
+            <td>write LOW</td>
+            <td>ask modal</td>
+            <td>ask modal</td>
+            <td>allow + “LLM reviewed LOW” inline</td>
+            <td>allow + audit</td>
+            <td>allow + audit if reviewer LOW</td>
+          </tr>
+          <tr>
+            <td>write MED</td>
+            <td>ask modal</td>
+            <td>ask modal</td>
+            <td>ask modal with impact summary</td>
+            <td>allow + audit</td>
+            <td>deferred queue</td>
+          </tr>
+          <tr>
+            <td>network trusted metadata</td>
+            <td>endpoint ask modal</td>
+            <td>endpoint ask modal</td>
+            <td>LOW allow with endpoint/auth-scope audit</td>
+            <td>allow + endpoint audit</td>
+            <td>LOW allow; otherwise deferred</td>
+          </tr>
+          <tr>
+            <td>network data egress</td>
+            <td>endpoint + payload ask modal</td>
+            <td>endpoint + payload ask modal</td>
+            <td>MED ask with reviewer impact summary</td>
+            <td>allow + payload-class audit</td>
+            <td>deferred queue before transmission</td>
+          </tr>
+          <tr>
+            <td>network unknown/sensitive</td>
+            <td>HIGH ask or hard deny</td>
+            <td>HIGH ask or hard deny</td>
+            <td>reviewer HIGH approval modal or deny if hard gate trips</td>
+            <td>hard gates then allow only when policy permits</td>
+            <td>deferred or deny, no background send</td>
+          </tr>
+          <tr>
+            <td>shell/HIGH</td>
+            <td>AST/path checks then ask</td>
+            <td>AST/path checks then ask</td>
+            <td>reviewer HIGH approval modal</td>
+            <td>hard gates then allow + audit</td>
+            <td>deferred queue</td>
+          </tr>
+          <tr>
+            <td>reviewer unavailable</td>
+            <td>not applicable</td>
+            <td>not applicable</td>
+            <td>foreground ask; headless deferred/deny</td>
+            <td>not applicable</td>
+            <td>manual queue count or audit failure</td>
+          </tr>
+          <tr>
+            <td>invalid tool definition</td>
+            <td>deny</td>
+            <td>deny</td>
+            <td>deny before reviewer</td>
+            <td>deny before allow</td>
+            <td>audit manifest violation</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="layout">
+      <article class="chat-shell">
+        <div class="bar">
+          <span class="tag amber">no LLM</span>
+          <h2>LLM reviewer 없이 발생한 권한 요청 상세 모달</h2>
+        </div>
+        <div class="chat-body">
+          <div class="modal">
+            <div class="modal-head">
+              <div class="glyph">!</div>
+              <div class="modal-title">
+                <h3>도구 승인 필요</h3>
+                <p>현재 정책은 LLM reviewer 를 사용하지 않습니다. 자동 영향범위 판단 없이 도구 정의와 실제 인자를 직접 확인합니다.</p>
+              </div>
+              <span class="tag amber">explicit ask</span>
+            </div>
+            <div class="modal-body">
+              <div class="mini-grid">
+                <div class="mini"><div class="label">정책</div><div class="value">default<br>write 는 승인 필요</div></div>
+                <div class="mini"><div class="label">도구</div><div class="value"><code>write_file</code><br>source=builtin</div></div>
+                <div class="mini"><div class="label">trust origin</div><div class="value">llm-tool-arg<br>사용자 직접 입력 아님</div></div>
+              </div>
+              <div class="review-box amber">
+                <h4>실행 정보</h4>
+                <div class="review-row"><b>도구 정의</b><span>파일을 생성하거나 덮어쓸 수 있는 쓰기 도구입니다.</span></div>
+                <div class="review-row"><b>대상 경로</b><span><code>/Users/ken/workspace/GIT/github/lvis-project/lvis-app/docs/meeting-summary.md</code></span></div>
+                <div class="review-row"><b>변경 범위</b><span>신규 파일 생성 또는 기존 파일 overwrite 여부를 명확히 표시합니다.</span></div>
+                <div class="review-row"><b>LLM 상태</b><span>reviewer disabled. 영향범위 요약은 제공되지 않습니다.</span></div>
+              </div>
+            </div>
+            <div class="modal-actions">
+              <button class="button danger">거부</button>
+              <button class="button">이번 세션에서 같은 경로 허용</button>
+              <button class="button primary">이번만 허용</button>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="chat-shell">
+        <div class="bar">
+          <span class="tag red">definition</span>
+          <h2>도구 정의/행동 결과가 불일치한 경우</h2>
+        </div>
+        <div class="chat-body">
+          <div class="modal">
+            <div class="modal-head">
+              <div class="glyph">X</div>
+              <div class="modal-title">
+                <h3>도구 정의 오류로 실행 차단</h3>
+                <p>이 호출은 사용자 승인을 받아도 실행하지 않습니다. 플러그인 또는 MCP 도구 정의가 권한 SOT 를 만족하지 않습니다.</p>
+              </div>
+              <span class="tag red">blocked</span>
+            </div>
+            <div class="modal-body">
+              <div class="review-box red">
+                <h4>차단 사유</h4>
+                <div class="review-row"><b>도구</b><span><code>plugin_export_report</code> · source=plugin</span></div>
+                <div class="review-row"><b>문제</b><span>manifest 가 read 로 선언했지만 실행 인자에 outputPath 가 있고 파일 쓰기 동작을 수행하려 합니다.</span></div>
+                <div class="review-row"><b>결정</b><span>deny + manifest-violation audit. 레거시 fallback 이나 사용자 승인 우회 없음.</span></div>
+                <div class="review-row"><b>다음 단계</b><span>플러그인 manifest 의 category/pathFields 를 수정해야 합니다.</span></div>
+              </div>
+            </div>
+            <div class="modal-actions">
+              <button class="button">감사 이력 보기</button>
+              <button class="button primary">닫기</button>
+            </div>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <section class="matrix">
+      <div class="matrix-head">
+        <h2>Settings 는 주 승인 표면이 아니라 구성/이력 표면</h2>
+        <p>Pending 항목이 Settings 에만 숨어 있으면 사용자 인지가 늦습니다. Settings 는 상태를 설명하고 다시 열 수 있게만 둡니다.</p>
+      </div>
+      <div class="setting-shell">
+        <nav class="setting-nav">
+          <div class="nav-item">LLM</div>
+          <div class="nav-item active">권한 <span class="tag red">3</span></div>
+          <div class="nav-item">감사</div>
+          <div class="nav-item">플러그인</div>
+        </nav>
+        <div class="setting-main">
+          <div class="setting-card">
+            <h3>권한 정책</h3>
+            <p>사용자는 기본 / 전체 물어보기 / LLM 자동 검토 / 전체 허용 중 하나를 선택합니다. strict 는 read 도 묻습니다.</p>
+            <div class="segmented">
+              <div class="seg">기본<br>read 허용</div>
+              <div class="seg">전체 물어보기<br>read ask</div>
+              <div class="seg active">LLM 자동 검토<br>mutation review</div>
+              <div class="seg">전체 허용<br>hard gates</div>
+            </div>
+          </div>
+          <div class="setting-card">
+            <h3>LLM reviewer 상태</h3>
+            <p>provider/model/key, reviewer mode, failure action 을 노출합니다. auto-review 에서 reviewer 가 꺼져 있으면 foreground 권한 요청은 explicit ask 로 전환됩니다.</p>
+          </div>
+          <div class="setting-card">
+            <h3>Deferred queue 이력</h3>
+            <p>Settings 는 정책과 처리 이력 확인만 담당합니다. pending 승인은 채팅 권한 버튼 옆 큐 버튼에서 수동 모달로 엽니다.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

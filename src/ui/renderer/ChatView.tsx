@@ -105,6 +105,10 @@ export interface ChatViewProps {
   // 불필요 — 사용자가 임의 시점으로 돌아가려면 후속 PR 의 view-mode 지원 필요.
   /** Called when user confirms a plugin overlay item; id is the OverlayItem.id. */
   onPluginPrimaryAction?: (overlayItemId: string) => void;
+  /** Called when a completed routine overlay result has been seen or dismissed. */
+  onRoutineAcknowledge?: (routineId: string, firedAt: string) => void;
+  /** Opens the non-interruptive deferred permission queue modal. */
+  onOpenPermissionQueue?: () => void;
 }
 
 function HistoricalSessionMarker({ title, sessionId }: { title: string; sessionId: string }) {
@@ -199,8 +203,8 @@ function HistoricalEntriesList({
     if (entry.kind === "ask_user_answer") {
       return <AskUserAnswerBubble key={entry.sourceToolUseId || idx} entry={entry} />;
     }
-    if (entry.kind === "turn_summary") {
-      // Historical: turn_summary 는 데이터 carrier 로만 — standalone 표시 X.
+    if (entry.kind === "turn_summary" || entry.kind === "context_usage") {
+      // Historical: usage carriers are data only — standalone 표시 X.
       // duration 정보는 WorkGroup 헤더가 표시. token 정보는 historical 의
       // final assistant 위치엔 ActionBar 가 없어 이번 phase 에서 미노출;
       // 필요 시 후속에서 historical-footer 컴포넌트 추가 가능.
@@ -316,8 +320,8 @@ function HistoricalEntriesList({
       continue;
     }
 
-    if (entry.kind === "turn_summary") {
-      // Historical: turn_summary 는 데이터 carrier 로만 — standalone 표시 X.
+    if (entry.kind === "turn_summary" || entry.kind === "context_usage") {
+      // Historical: usage carriers are data only — standalone 표시 X.
       // (See note in renderEntry above.)
       i++;
       continue;
@@ -384,7 +388,7 @@ function HistoricalEntriesList({
   return <div className="min-w-0 w-full max-w-full space-y-3 overflow-x-hidden">{rendered}</div>;
 }
 
-export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, installingPlugins, onOpenMarketplace, marketplaceUrlReady, onPluginPrimaryAction }: ChatViewProps) {
+export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, installingPlugins, onOpenMarketplace, marketplaceUrlReady, onPluginPrimaryAction, onRoutineAcknowledge, onOpenPermissionQueue }: ChatViewProps) {
   // We still need the api for SessionTodoPanel; obtain it via singleton.
   const workflowApi = getApi();
   const debugStreamEnabled = isDebugStreamEnabled();
@@ -673,7 +677,10 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
         </div>
       )}
       {/* Routine fire + plugin overlay. Routine items stay isolated from chat history; plugin items insert via imported_trigger on confirm. */}
-      <OverlayCardRegion onPluginPrimaryAction={onPluginPrimaryAction ?? (() => {})} />
+      <OverlayCardRegion
+        onPluginPrimaryAction={onPluginPrimaryAction ?? (() => {})}
+        onRoutineAcknowledge={onRoutineAcknowledge}
+      />
       <div className="relative min-h-0 min-w-0 max-w-full flex-1 overflow-hidden">
       {/* §PR-5: View-Mode banner — sticky at the top of the chat scroll area */}
       <ViewModeBanner viewMode={viewMode} onExit={() => { void handleExitView(); }} />
@@ -920,7 +927,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             // turn_summary entry — 데이터 carrier 로 history 에 남기되 standalone
             // 렌더링 안 함. 같은 turn 의 final AssistantCard / WorkGroup 이
             // turnSummaryByTurnStart 에서 lookup 해 inline 으로 표시한다.
-            if (entry.kind === "turn_summary") {
+            if (entry.kind === "turn_summary" || entry.kind === "context_usage") {
               i++;
               continue;
             }
@@ -1207,7 +1214,10 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             <div className="min-w-0 flex-1">
               <SessionTodoPanel api={workflowApi} sessionId={currentSessionId} />
             </div>
-            <PermissionModeBadge onClick={() => onOpenSettings("permissions")} />
+            <PermissionModeBadge
+              onClick={() => onOpenSettings("permissions")}
+              onQueueClick={onOpenPermissionQueue}
+            />
           </div>
         </div>
         <div className="w-full max-w-full min-w-0 overflow-x-hidden pb-1 space-y-2">
