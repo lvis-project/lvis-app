@@ -110,6 +110,18 @@ describe("RuleBasedRiskClassifier", () => {
     expect(v.reason).toMatch(/graph metadata/);
   });
 
+  it("network Graph profile fields without explicit payload are still data operations → MEDIUM", () => {
+    const v = rb.classify(ctx({
+      category: "network",
+      finalInput: {
+        endpoint: "https://graph.microsoft.com/v1.0/me",
+        displayName: "Changed Name",
+      },
+    }));
+    expect(v.level).toBe("medium");
+    expect(v.reason).toMatch(/graph data operation/);
+  });
+
   it("network Graph POST with payload → MEDIUM", () => {
     const v = rb.classify(ctx({
       category: "network",
