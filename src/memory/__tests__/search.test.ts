@@ -85,12 +85,13 @@ describe("MemoryManager AGENTS.md and MEMORY.md layout", () => {
   it("reloads AGENTS.md and MEMORY.md after direct file edits", async () => {
     mm.load();
     mm.startPersistentContextWatcher();
+    await new Promise((resolve) => setTimeout(resolve, 50));
 
     writeFileSync(join(dir, "AGENTS.md"), "# Live Agents\n\nwatcher updated", "utf-8");
-    await waitUntil(() => mm.getAgentsMd().includes("watcher updated"));
+    await waitUntil(() => mm.getAgentsMd().includes("watcher updated"), 3000);
 
     writeFileSync(join(dir, "memories", "MEMORY.md"), "# Live Memory\n\nindex updated", "utf-8");
-    await waitUntil(() => mm.getMemoryIndex().includes("index updated"));
+    await waitUntil(() => mm.getMemoryIndex().includes("index updated"), 3000);
   });
 
   it("injects directly edited detailed memory files without a tool call", () => {

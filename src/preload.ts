@@ -222,6 +222,7 @@ const api = {
   memorySaveEntry: async (title: string, content: string) => ipcRenderer.invoke("lvis:memory:entries:save", title, content),
   memoryDeleteEntry: async (filename: string) => ipcRenderer.invoke("lvis:memory:entries:delete", filename),
   memorySearchEntries: async (query: string) => ipcRenderer.invoke("lvis:memory:entries:search", query),
+  memoryGetIndex: async () => ipcRenderer.invoke("lvis:memory:index:get") as Promise<string>,
   memoryListSessions: async () => ipcRenderer.invoke("lvis:memory:sessions:list"),
   memorySearchSessions: async (query: string) => ipcRenderer.invoke("lvis:memory:sessions:search", query),
   memoryGetAgentsMd: async () => ipcRenderer.invoke("lvis:memory:agents-md:get") as Promise<string>,

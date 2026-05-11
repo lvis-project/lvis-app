@@ -26,9 +26,10 @@ describe("useMemorySearch", () => {
     vi.useFakeTimers();
     const api = {
       memoryListEntries: vi.fn().mockResolvedValue([]),
+      memoryGetIndex: vi.fn().mockResolvedValue("# LVIS Memory Index\n\n## Saved Memories\n- indexed 기억"),
       memoryListSessions: vi.fn().mockResolvedValue([]),
       memorySearchEntries: vi.fn().mockResolvedValue([
-        { title: "사용자 메모", excerpt: "본문", updatedAt: "2026-04-20T00:00:00Z" },
+        { title: "사용자 기억", excerpt: "본문", updatedAt: "2026-04-20T00:00:00Z" },
       ]),
       memorySearchSessions: vi.fn().mockResolvedValue([
         { sessionId: "session-1", matchedMessage: "본문", timestamp: "2026-04-20T00:00:00Z" },
@@ -45,7 +46,7 @@ describe("useMemorySearch", () => {
     });
 
     await act(async () => {
-      fireEvent.change(screen.getByLabelText("query"), { target: { value: "메모" } });
+      fireEvent.change(screen.getByLabelText("query"), { target: { value: "기억" } });
     });
 
     // Advance past the 200 ms search debounce
@@ -54,9 +55,10 @@ describe("useMemorySearch", () => {
       await Promise.resolve();
     });
 
-    expect(api.memorySearchEntries).toHaveBeenCalledWith("메모");
+    expect(api.memorySearchEntries).toHaveBeenCalledWith("기억");
     expect(api.memorySearchNotes).not.toHaveBeenCalled();
-    expect(screen.getByTestId("notes").textContent).toContain("사용자 메모");
+    expect(screen.getByTestId("notes").textContent).toContain("메모리 인덱스");
+    expect(screen.getByTestId("notes").textContent).toContain("사용자 기억");
     expect(screen.getByTestId("sessions").textContent).toContain("session-1");
   });
 
@@ -64,6 +66,7 @@ describe("useMemorySearch", () => {
     vi.useFakeTimers();
     const api = {
       memoryListEntries: vi.fn().mockResolvedValue([]),
+      memoryGetIndex: vi.fn().mockResolvedValue(""),
       memoryListSessions: vi.fn().mockResolvedValue([]),
       memorySearchEntries: vi.fn().mockResolvedValue([]),
       memorySearchSessions: vi.fn().mockResolvedValue([]),
@@ -73,7 +76,7 @@ describe("useMemorySearch", () => {
     render(<Harness api={api} />);
 
     await act(async () => {
-      fireEvent.change(screen.getByLabelText("query"), { target: { value: "메모" } });
+      fireEvent.change(screen.getByLabelText("query"), { target: { value: "기억" } });
     });
 
     // Advance only 100 ms — before the 200 ms debounce

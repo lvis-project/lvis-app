@@ -3,7 +3,7 @@
  */
 import "../setup.js";
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { renderHook, act } from "@testing-library/react";
+import { renderHook, act, waitFor } from "@testing-library/react";
 import { makeMockLvisApi } from "../mock-lvis-api.js";
 import { useMemorySearch } from "../../../src/ui/renderer/hooks/use-memory-search.js";
 import type { LvisApi } from "../../../src/ui/renderer/types.js";
@@ -13,6 +13,18 @@ afterEach(() => {
 });
 
 describe("useMemorySearch", () => {
+  it("loads MEMORY.md into the memory result catalog", async () => {
+    const { api } = makeMockLvisApi({
+      memoryIndex: "# LVIS Memory Index\n\n- direct file-backed 기억",
+    });
+    const { result } = renderHook(() => useMemorySearch(api as unknown as LvisApi));
+
+    await waitFor(() => {
+      expect(api.memoryGetIndex).toHaveBeenCalled();
+      expect(result.current.noteResults.map((note) => note.title)).toContain("메모리 인덱스");
+    });
+  });
+
   it("debounce: fires IPC only once after 200 ms idle", async () => {
     vi.useFakeTimers();
     const { api } = makeMockLvisApi();

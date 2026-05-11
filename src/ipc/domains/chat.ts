@@ -672,6 +672,7 @@ ${input}`;
       updatedAt: note.updatedAt ?? new Date().toISOString(),
     }));
   });
+  ipcMain.handle("lvis:memory:index:get", () => memoryManager.getMemoryIndex());
   ipcMain.handle("lvis:memory:sessions:list", () => memoryManager.listSessionEntries());
   ipcMain.handle("lvis:memory:sessions:search", (e, query: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:sessions:search", e); return UNAUTHORIZED_FRAME; }
