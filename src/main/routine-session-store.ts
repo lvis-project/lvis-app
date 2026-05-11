@@ -67,6 +67,11 @@ export class RoutineSessionStore {
     }));
   }
 
+  async findForFiredAt(routineId: string, firedAt: string): Promise<RoutineSessionRecord | undefined> {
+    const records = await this.listRecent(routineId, 20);
+    return findSessionForFiredAt(records, firedAt);
+  }
+
   /**
    * Delete all JSONL files for a routine (called when routine is removed).
    */
@@ -168,3 +173,25 @@ function sanitizeId(id: string): string {
 function fileNameToFiredAt(filename: string): string {
   return filename.replace(".jsonl", "").replace(/-(\d{3})Z$/, ".$1Z").replace(/T(\d{2})-(\d{2})-(\d{2})/, "T$1:$2:$3");
 }
+
+function findSessionForFiredAt(records: RoutineSessionRecord[], firedAt: string): RoutineSessionRecord | undefined {
+  const exact = records.find((record) => record.firedAt === firedAt);
+  if (exact) return exact;
+
+  const targetTime = Date.parse(firedAt);
+  if (!Number.isFinite(targetTime)) return undefined;
+
+  let best: { record: RoutineSessionRecord; deltaMs: number } | undefined;
+  for (const record of records) {
+    const candidateTime = Date.parse(record.firedAt);
+    if (!Number.isFinite(candidateTime)) continue;
+    const deltaMs = Math.abs(candidateTime - targetTime);
+    if (deltaMs > ROUTINE_SESSION_FIRE_CLOCK_SKEW_MS) continue;
+    if (!best || deltaMs < best.deltaMs) {
+      best = { record, deltaMs };
+    }
+  }
+  return best?.record;
+}
+
+const ROUTINE_SESSION_FIRE_CLOCK_SKEW_MS = 5_000;

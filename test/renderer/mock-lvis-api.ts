@@ -25,6 +25,7 @@ type ApiOverrides = {
   pluginUiExtensions?: unknown[];
   latestRoutineResult?: unknown;
   pendingRoutineResults?: unknown[];
+  routineSessionsByRoutine?: Record<string, unknown[]>;
 };
 
 const DEFAULT_SETTINGS = {
@@ -70,6 +71,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   const pluginUiExtensions = overrides.pluginUiExtensions ?? [];
   const latestRoutineResult = overrides.latestRoutineResult ?? null;
   const pendingRoutineResults = overrides.pendingRoutineResults ?? [];
+  const routineSessionsByRoutine = overrides.routineSessionsByRoutine ?? {};
 
   const chatStreamHandlers = new Set<(ev: unknown) => void>();
   const routineFiredV2Handlers = new Set<(r: unknown) => void>();
@@ -238,7 +240,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     onRoutineRunningStarted: vi.fn((_h: (p: unknown) => void) => () => {}),
     onRoutineRunningFinished: vi.fn((_h: (id: string) => void) => () => {}),
     onRoutineFailedV2: vi.fn((_handler: (event: { routineId: string; error: string }) => void) => () => {}),
-    listRoutineSessionsV2: vi.fn(async () => []),
+    listRoutineSessionsV2: vi.fn(async (routineId: string) => routineSessionsByRoutine[routineId] ?? []),
     readRoutineSessionV2: vi.fn(async () => ""),
     // Overlay trigger lifecycle. Tests that don't exercise the
     // trigger card just need these to be callable subscribe/no-op functions.
