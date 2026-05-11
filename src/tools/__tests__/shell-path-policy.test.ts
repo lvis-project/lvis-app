@@ -113,6 +113,18 @@ describe("shell-path-policy", () => {
     });
   });
 
+  it("ignores /dev/null as a shell null device rather than an approvable path", () => {
+    withRoot((root) => {
+      expect(validateShellCommandPathPolicy("test -e ./missing >/dev/null || echo missing", root, root, [])).toBeNull();
+    });
+  });
+
+  it("does not treat the shell OR operator as a filesystem root operand", () => {
+    withRoot((root) => {
+      expect(validateShellCommandPathPolicy("false || echo ok", root, root, [])).toBeNull();
+    });
+  });
+
   it("allows explicit extra directories but still applies sensitive-path policy", () => {
     withRoot((root) => {
       const outside = realpathSync(tmpdir());

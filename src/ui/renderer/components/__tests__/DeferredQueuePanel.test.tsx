@@ -88,14 +88,71 @@ describe("DeferredQueuePanel", () => {
     expect(screen.getByText("deferred-list unavailable")).toBeTruthy();
   });
 
+  it("renders a neutral empty state when manually opened", async () => {
+    installApi({ entries: [] });
+    await act(async () => {
+      render(<DeferredQueuePanel showEmpty />);
+    });
+    expect(screen.getByTestId("deferred-queue-empty")).toBeTruthy();
+    expect(screen.getByText("대기 없음")).toBeTruthy();
+    expect(screen.getByText("보류된 승인 요청 없음")).toBeTruthy();
+    expect(screen.queryByText("MEDIUM 위험")).toBeNull();
+    expect(screen.queryByText(/백그라운드에서 보류된 작업/)).toBeNull();
+  });
+
   it("renders pending entries on mount", async () => {
     installApi({ entries: [makeEntry()] });
     await act(async () => {
       render(<DeferredQueuePanel />);
     });
     expect(screen.getByTestId("deferred-queue-panel")).toBeTruthy();
-    expect(screen.getByText("fs_write")).toBeTruthy();
+    expect(screen.getAllByText("fs_write").length).toBeGreaterThan(0);
     expect(screen.getByText(/write outside allowed dirs/)).toBeTruthy();
+    expect(screen.getByText("백그라운드 변경 승인")).toBeTruthy();
+    expect(screen.queryByText(/Reviewer 가/)).toBeNull();
+  });
+
+  it.each([
+    [
+      "read",
+      makeEntry({
+        category: "read",
+        inputSummary: '{"path":"/workspace/a.txt","scope":"workspace"}',
+      }),
+      ["대상", "범위", "민감도", "양", "판단", "선택"],
+    ],
+    [
+      "write",
+      makeEntry({
+        category: "write",
+        inputSummary: '{"path":"/workspace/a.txt","operation":"append"}',
+      }),
+      ["대상", "변경", "영향", "복구", "판단", "선택"],
+    ],
+    [
+      "network",
+      makeEntry({
+        category: "network",
+        inputSummary: '{"endpoint":"https://graph.microsoft.com/v1.0/me","method":"GET","scope":"User.Read"}',
+      }),
+      ["엔드포인트", "메서드", "전송 내용", "인증 범위", "판단", "선택"],
+    ],
+    [
+      "shell",
+      makeEntry({
+        category: "shell",
+        inputSummary: '{"command":"./update-all.sh --no-prompt","cwd":"/workspace"}',
+      }),
+      ["명령", "작업 디렉토리/환경", "부작용", "제한", "판단", "선택"],
+    ],
+  ] as const)("renders %s-specific decision basis rows", async (_category, entry, labels) => {
+    installApi({ entries: [entry] });
+    await act(async () => {
+      render(<DeferredQueuePanel />);
+    });
+    for (const label of labels) {
+      expect(screen.getByText(label)).toBeTruthy();
+    }
   });
 
   it("resolve('approved') invokes IPC then refreshes", async () => {
@@ -105,7 +162,7 @@ describe("DeferredQueuePanel", () => {
     await act(async () => {
       render(<DeferredQueuePanel />);
     });
-    const button = screen.getByText("승인");
+    const button = screen.getByText("허용");
     await act(async () => {
       fireEvent.click(button);
     });
@@ -136,7 +193,7 @@ describe("DeferredQueuePanel", () => {
     expect(api.onDeferredPending).toHaveBeenCalled();
   });
 
-  it("renders multiple entries with stable testids", async () => {
+  it("renders one active card for multiple pending entries", async () => {
     installApi({
       entries: [
         makeEntry({ id: "a" }),
@@ -147,8 +204,9 @@ describe("DeferredQueuePanel", () => {
       render(<DeferredQueuePanel />);
     });
     expect(screen.getByTestId("deferred-entry-a")).toBeTruthy();
-    expect(screen.getByTestId("deferred-entry-b")).toBeTruthy();
-    expect(screen.getByText("shell_run")).toBeTruthy();
+    expect(screen.queryByTestId("deferred-entry-b")).toBeNull();
+    expect(screen.queryByText("shell_run")).toBeNull();
+    expect(screen.getByText("2 대기 · 1 / 2")).toBeTruthy();
   });
 
   it("surfaces deferredResolve rejection and still refreshes", async () => {
@@ -160,7 +218,7 @@ describe("DeferredQueuePanel", () => {
       render(<DeferredQueuePanel />);
     });
     await act(async () => {
-      fireEvent.click(screen.getByText("승인"));
+      fireEvent.click(screen.getByText("허용"));
     });
     expect(api.deferredResolve).toHaveBeenCalledWith("err-1", "approved");
     expect(api.deferredList.mock.calls.length).toBeGreaterThanOrEqual(2);

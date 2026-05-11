@@ -43,17 +43,20 @@ async function openHamburger() {
 }
 
 describe("MainToolbar", () => {
-  it("renders 새 대화 button and hamburger trigger", () => {
+  it("renders hamburger trigger and keeps 새 대화 inside the menu", async () => {
     renderWithProvider(defaultProps());
-    expect(screen.getByText("새 대화")).toBeTruthy();
     expect(screen.getByTitle("더 많은 메뉴")).toBeTruthy();
+    expect(screen.queryByText("새 대화")).toBeNull();
+    await openHamburger();
+    expect(screen.getByText("새 대화")).toBeTruthy();
     // TokenProgressRing is now in InputActionBar, not MainToolbar
     expect(document.querySelector("[data-testid='token-progress-ring']")).toBeNull();
   });
 
-  it("calls onNewChat when 새 대화 button clicked", () => {
+  it("calls onNewChat when 새 대화 menu item clicked", async () => {
     const onNewChat = vi.fn();
     renderWithProvider(defaultProps({ onNewChat }));
+    await openHamburger();
     fireEvent.click(screen.getByText("새 대화"));
     expect(onNewChat).toHaveBeenCalledTimes(1);
   });

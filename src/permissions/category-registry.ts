@@ -79,11 +79,12 @@ export function clearCategoryRegistry(): void {
  *
  *   - read    — built-in: allow / plugin: allow (scope-checked elsewhere)
  *               strict mode forces ask, including headless.
- *   - write   — default+strict: ask / auto+allow: allow+audit /
+ *   - write   — default+strict: ask / auto: reviewer at executor / allow: allow+audit /
  *               default+auto headless: reviewer / strict headless: ask
- *   - shell   — default+strict+auto: ask / allow: allow. Bash AST validation is executor-owned.
+ *   - shell   — default+strict: ask / auto: reviewer at executor / allow: allow.
+ *               Bash AST validation is executor-owned.
  *               default+auto headless: reviewer / strict headless: ask
- *   - network — default+strict: ask / auto+allow: allow+audit /
+ *   - network — default+strict: ask / auto: reviewer at executor / allow: allow+audit /
  *               default+auto headless: reviewer / strict headless: ask.
  *   - meta    — `decisionOverride` sentinel; executor short-circuits.
  */
@@ -101,7 +102,7 @@ export function registerStandardCategories(): void {
       if (mode === "allow") return "allow";
       if (mode === "strict") return "ask";
       if (headless) return "reviewer";
-      if (mode === "auto") return "allow";
+      if (mode === "auto") return "ask";
       return "ask";
     },
   });
@@ -124,7 +125,7 @@ export function registerStandardCategories(): void {
       if (mode === "allow") return "allow";
       if (mode === "strict") return "ask";
       if (headless) return "reviewer";
-      if (mode === "auto") return "allow";
+      if (mode === "auto") return "ask";
       return "ask";
     },
   });
