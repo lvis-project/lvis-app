@@ -177,8 +177,10 @@ export const ENFORCED_CAPABILITIES: ReadonlyMap<string, CapabilityPolicy> = new 
  * here — only the agent-hub plugin emits it (no other plugin has a
  * legitimate reason to spoof these events) and HostApi-level identity
  * (`pluginId` of the emitting runtime) prevents cross-plugin
- * impersonation. Add a `agent-hub-source` capability if a second
- * publisher ever needs to share the namespace.
+ * impersonation (see `boot/steps/plugin-runtime.ts` emitEvent — the
+ * runtime overwrites payload.pluginId with the bound runtime id).
+ * Add an `agent-hub-source` capability if a second publisher ever
+ * needs to share the namespace.
  */
 export const EVENT_NAMESPACE_CAPABILITY: ReadonlyMap<string, string> = new Map([
   ["email", "mail-source"],

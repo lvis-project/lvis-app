@@ -314,7 +314,11 @@ describe("capability emit gate", () => {
     expect(warns).toEqual([]);
   });
 
-  it("does not gate events outside namespaced capabilities (e.g. agent_hub.*)", async () => {
+  it("does not gate emit when the namespace has no EVENT_NAMESPACE_CAPABILITY entry (e.g. agent_hub.*)", async () => {
+    // agent_hub is in PUBLIC_EVENT_NAMESPACES but absent from
+    // EVENT_NAMESPACE_CAPABILITY — emit gate is a no-op. Trust comes
+    // from HostApi pluginId binding (only agent-hub emits these), not
+    // from a manifest-declared capability.
     await writePlugin("p_agent_hub", []);
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
