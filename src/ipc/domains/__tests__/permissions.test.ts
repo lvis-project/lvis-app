@@ -248,6 +248,68 @@ describe("permissions IPC handlers", () => {
     }
   });
 
+  it("deferredResolve rejects missing user-keyboard intent before queue lookup", async () => {
+    const entry = makeDeferredEntry();
+    const queue = {
+      get: vi.fn(() => entry),
+      resolve: vi.fn(async () => ({ ...entry, status: "approved", resolvedAt: "2026-05-10T00:00:01Z" })),
+    };
+    const { deps } = await setup({ queue });
+
+    const result = await invoke(PERMISSIONS.deferredResolve, {
+      id: "deferred-1",
+      decision: "approved",
+    });
+
+    expect(result).toMatchObject({ ok: false, error: "user-keyboard-required" });
+    expect(queue.get).not.toHaveBeenCalled();
+    expect(queue.resolve).not.toHaveBeenCalled();
+    expect(deps.auditLogger.appendPermissionAuditEntry).not.toHaveBeenCalled();
+  });
+
+  it.each(["approved", "rejected"] as const)(
+    "deferredResolve audits before queue mutation on %s",
+    async (decision) => {
+      const entry = makeDeferredEntry();
+      const order: string[] = [];
+      const queue = {
+        get: vi.fn(() => entry),
+        resolve: vi.fn(async (_id: string, status: string) => {
+          order.push("resolve");
+          return { ...entry, status, resolvedAt: "2026-05-10T00:00:01Z" };
+        }),
+      };
+      const { deps } = await setup({ queue });
+      deps.auditLogger.appendPermissionAuditEntry.mockImplementation(async (auditEntry: Record<string, unknown>) => {
+        order.push("audit");
+        return { ...auditEntry, prevHash: "h" };
+      });
+
+      const result = await invoke(PERMISSIONS.deferredResolve, {
+        id: "deferred-1",
+        decision,
+        reason: "reviewed by user",
+        intent: USER_INTENT,
+      });
+
+      expect(result).toMatchObject({
+        ok: true,
+        entry: expect.objectContaining({ id: "deferred-1", status: decision }),
+      });
+      expect(order).toEqual(["audit", "resolve"]);
+      expect(queue.resolve).toHaveBeenCalledWith("deferred-1", decision, "reviewed by user");
+      expect(deps.auditLogger.appendPermissionAuditEntry).toHaveBeenCalledWith(
+        expect.objectContaining({
+          decision: "deferred_resolve",
+          resolution: decision,
+          reason: "reviewed by user",
+          queueId: "deferred-1",
+          reviewerVerdict: entry.verdict,
+        }),
+      );
+    },
+  );
+
   it("deferredResolve fails closed before queue mutation when audit chain is not ready", async () => {
     const entry = makeDeferredEntry();
     const queue = {

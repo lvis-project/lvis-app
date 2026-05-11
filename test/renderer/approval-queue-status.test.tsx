@@ -35,7 +35,7 @@ describe("ApprovalQueueStatus", () => {
   });
 
   it("renders depth badge and waiting list in FIFO order (skipping head-of-queue)", () => {
-    const queue = ["a", "b", "c"].map((id) => makeReq(id));
+    const queue = [makeReq("a"), makeReq("b", "plugin"), makeReq("c", "mcp")];
     const { getByTestId, getAllByTestId } = render(
       <ApprovalQueueStatus queue={queue} max={50} />,
     );
@@ -44,7 +44,9 @@ describe("ApprovalQueueStatus", () => {
     // head-of-queue ("a") is NOT listed; only "b" and "c" in order.
     expect(items).toHaveLength(2);
     expect(items[0].textContent).toContain("tool_b");
+    expect(items[0].textContent).toContain("플러그인");
     expect(items[1].textContent).toContain("tool_c");
+    expect(items[1].textContent).toContain("MCP");
   });
 
   it("shows queue-full message and destructive badge when at cap", () => {
@@ -53,6 +55,6 @@ describe("ApprovalQueueStatus", () => {
       <ApprovalQueueStatus queue={queue} max={3} />,
     );
     expect(getByTestId("approval-queue-depth").textContent).toBe("3 / 3");
-    expect(getByText(/queue full/i)).toBeTruthy();
+    expect(getByText("승인 큐가 가득 차 새 요청은 거부됩니다.")).toBeTruthy();
   });
 });

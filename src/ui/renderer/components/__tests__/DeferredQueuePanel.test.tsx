@@ -135,7 +135,7 @@ describe("DeferredQueuePanel", () => {
         category: "network",
         inputSummary: '{"endpoint":"https://graph.microsoft.com/v1.0/me","method":"GET","scope":"User.Read"}',
       }),
-      ["endpoint", "method", "payload", "auth", "판단", "선택"],
+      ["엔드포인트", "메서드", "전송 내용", "인증 범위", "판단", "선택"],
     ],
     [
       "shell",
@@ -143,7 +143,7 @@ describe("DeferredQueuePanel", () => {
         category: "shell",
         inputSummary: '{"command":"./update-all.sh --no-prompt","cwd":"/workspace"}',
       }),
-      ["명령", "cwd/env", "부작용", "제한", "판단", "선택"],
+      ["명령", "작업 디렉토리/환경", "부작용", "제한", "판단", "선택"],
     ],
   ] as const)("renders %s-specific decision basis rows", async (_category, entry, labels) => {
     installApi({ entries: [entry] });
@@ -206,7 +206,7 @@ describe("DeferredQueuePanel", () => {
     expect(screen.getByTestId("deferred-entry-a")).toBeTruthy();
     expect(screen.queryByTestId("deferred-entry-b")).toBeNull();
     expect(screen.queryByText("shell_run")).toBeNull();
-    expect(screen.getByText("2 pending · 1 / 2")).toBeTruthy();
+    expect(screen.getByText("2 대기 · 1 / 2")).toBeTruthy();
   });
 
   it("surfaces deferredResolve rejection and still refreshes", async () => {
