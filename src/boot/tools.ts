@@ -371,11 +371,12 @@ export function registerBuiltinTools(
     builtins.push(createTodoSessionWriteTool(workflowDeps.sessionTodoStore));
   }
   if (workflowDeps?.getSubAgentRunner && workflowDeps.emitAgentSpawn) {
+    const agentProfileStore = workflowDeps.agentProfileStore;
     builtins.push(
       createAgentSpawnTool({
         getRunner: workflowDeps.getSubAgentRunner,
-        getAgentProfile: workflowDeps.agentProfileStore
-          ? (name) => workflowDeps.agentProfileStore?.load(name) ?? Promise.resolve(null)
+        getAgentProfile: agentProfileStore
+          ? async (name) => await agentProfileStore.load(name)
           : undefined,
         emit: workflowDeps.emitAgentSpawn,
       }),
