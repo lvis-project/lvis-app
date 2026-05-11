@@ -50,6 +50,8 @@ export class BashAstValidator {
     // BEFORE the simpler rm-rf-root pattern so that commands hidden inside
     // compound/backtick/expansion shells are attributed to the correct
     // bypass id rather than rm-rf-root.
+    const dangerousRmTarget = String.raw`(?:(?:['"]?/{1,}['"]?)|(?:['"]?~/?['"]?)|(?:['"]?\$HOME/?['"]?)|(?:['"]?\*['"]?))`;
+    const commandBoundary = String.raw`(?=$|[\s;&|])`;
     const patterns: Array<{ id: string; regex: RegExp; reason: string }> = [
       {
         id: "ifs-command-injection",
@@ -66,14 +68,14 @@ export class BashAstValidator {
       {
         id: "subshell-command-exec",
         // e.g. `$(echo rm) -rf /` — subshell 결과로 위험 명령 실행
-        regex: /\$\([^)]+\)\s+-[rfRF]+\s+(\/|~|\$HOME|\*)/,
+        regex: new RegExp(String.raw`\$\([^)]+\)\s+-[rfRF]+\s+${dangerousRmTarget}${commandBoundary}`, "i"),
         reason: "subshell 결과로 위험 명령 실행",
       },
       {
         id: "variable-expansion-exec",
         // e.g. `X=rm; $X -rf /`, `${CMD} -rf ~`, `$FOO -Rf $HOME`
         // 중괄호 형태 `${VAR}`와 단순 `$VAR` 모두 캡처
-        regex: /\$\{?\w+\}?\s+-[rfRF]+\s+(\/|~|\$HOME|\*)/,
+        regex: new RegExp(String.raw`\$\{?\w+\}?\s+-[rfRF]+\s+${dangerousRmTarget}${commandBoundary}`, "i"),
         reason: "변수 확장으로 위험 명령 실행",
       },
       {
@@ -86,12 +88,12 @@ export class BashAstValidator {
         id: "rm-rf-compound",
         // rm -rf preceded by ; && || | or newline (복합 명령 내 실행)
         // Does NOT use ^ so that a bare "rm -rf /" falls through to rm-rf-root.
-        regex: /[;&|\n]\s*rm\s+(-[rfRF]+\s+)+(\/|~|\$HOME|\*)/i,
+        regex: new RegExp(String.raw`[;&|\n]\s*rm\s+(?:-[rfRF]+\s+)+${dangerousRmTarget}${commandBoundary}`, "i"),
         reason: "복합 명령 내 rm -rf 위험 경로",
       },
       {
         id: "rm-rf-root",
-        regex: /\brm\s+(-[rfRF]+\s+)+(\/|~|\$HOME|\*)/i,
+        regex: new RegExp(String.raw`\brm\s+(?:-[rfRF]+\s+)+${dangerousRmTarget}${commandBoundary}`, "i"),
         reason: "rm -rf 위험 경로",
       },
       {
