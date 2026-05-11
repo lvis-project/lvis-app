@@ -73,6 +73,28 @@ describe("listRecent", () => {
   });
 });
 
+describe("findForFiredAt", () => {
+  it("returns the exact session when firedAt matches the session filename", async () => {
+    const path = await store.createSession("r-exact", "2026-05-10T07:06:02.698Z");
+    const record = await store.findForFiredAt("r-exact", "2026-05-10T07:06:02.698Z");
+    expect(record?.jsonlPath).toBe(path);
+    expect(record?.firedAt).toBe("2026-05-10T07:06:02.698Z");
+  });
+
+  it("returns the same fire tick session when file creation differs by milliseconds", async () => {
+    const path = await store.createSession("r-skew", "2026-05-10T07:06:02.701Z");
+    const record = await store.findForFiredAt("r-skew", "2026-05-10T07:06:02.698Z");
+    expect(record?.jsonlPath).toBe(path);
+    expect(record?.firedAt).toBe("2026-05-10T07:06:02.701Z");
+  });
+
+  it("does not attach an unrelated session outside the routine fire tick", async () => {
+    await store.createSession("r-far", "2026-05-10T07:06:12.000Z");
+    const record = await store.findForFiredAt("r-far", "2026-05-10T07:06:02.000Z");
+    expect(record).toBeUndefined();
+  });
+});
+
 describe("purgeRoutine", () => {
   it("removes routine session directory", async () => {
     await store.createSession("r-purge", "2026-05-08T09:00:00.000Z");
