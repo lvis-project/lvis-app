@@ -361,4 +361,45 @@ describe("lvis:chat:send provenance", () => {
       }),
     });
   });
+
+  it("keeps chat send alive when the renderer stream target is destroyed mid-turn", async () => {
+    const sent: Array<{ channel: string; payload: unknown }> = [];
+    const loop = makeConversationLoop("session-provenance", []);
+    loop.runTurn.mockImplementation(async (_input, callbacks) => {
+      callbacks.onTextDelta("before");
+      callbacks.onError("permission deferred");
+      return { text: "ok", toolCalls: [], stopReason: "end_turn" };
+    });
+    const send = vi.fn((channel: string, payload: unknown) => {
+      if ((payload as { type?: string }).type === "error") {
+        throw new TypeError("Object has been destroyed");
+      }
+      sent.push({ channel, payload });
+    });
+    await setupHandlers(loop, {
+      getMainWindow: () => ({
+        webContents: {
+          isDestroyed: () => false,
+          send,
+        },
+      }),
+    });
+
+    await expect(invoke("lvis:chat:send", {
+      input: "hello",
+      inputOrigin: "user-keyboard",
+      userActivation: true,
+    }) as Promise<unknown>).resolves.toEqual({ text: "ok", toolCalls: [], stopReason: "end_turn" });
+
+    expect(sent).toEqual([
+      {
+        channel: "lvis:chat:stream",
+        payload: expect.objectContaining({ type: "text_delta", text: "before", streamId: 1 }),
+      },
+      {
+        channel: "lvis:chat:stream",
+        payload: expect.objectContaining({ type: "done", streamId: 1 }),
+      },
+    ]);
+  });
 });
