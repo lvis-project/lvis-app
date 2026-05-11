@@ -20,7 +20,7 @@
  * an approval-denial error.
  */
 import { describe, it, expect, vi } from "vitest";
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve as pathResolve } from "node:path";
 
@@ -1554,6 +1554,58 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
       const results = await callPromise;
       expect(results[0].is_error).toBeUndefined();
       expect(results[0].content).toContain("outside shell approved");
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("shell rm -f outside cwd executes after directory approval without rm-rf-root false positive", async () => {
+    const outside = mkdtempSync(join(tmpdir(), "lvis-executor-shell-rm-"));
+    try {
+      const target = join(outside, "hello.txt");
+      writeFileSync(target, "remove me\n", "utf8");
+      const canonicalTarget = realpathSync(target);
+      const registry = new ToolRegistry();
+      registry.register(new BashTool());
+
+      const wc = makeMockWebContents();
+      const gate = new ApprovalGate(wc as never);
+      const executor = new ToolExecutor(
+        registry,
+        undefined,
+        undefined,
+        new BashAstValidator({ mode: "deny" }),
+        gate,
+      );
+
+      const callPromise = executor.executeAll(
+        [{ id: "tu-l1-shell-rm", name: "bash", input: { command: `rm -f ${target}`, timeoutSeconds: 1 } }],
+        { sessionId: "sess-l1-shell-rm", permissionContext: userPermissionContext() },
+      );
+
+      await new Promise((r) => setTimeout(r, 5));
+      const sent = wc.send.mock.calls[0][1] as {
+        id: string;
+        nonce: string;
+        hmac: string;
+        kind?: string;
+        toolCategory?: string;
+        outOfAllowedDir?: { candidatePath?: string };
+      };
+      expect(sent.kind).toBe("out-of-allowed-dir");
+      expect(sent.toolCategory).toBe("shell");
+      expect(sent.outOfAllowedDir?.candidatePath).toBe(canonicalTarget);
+
+      gate.resolve(sent.id, {
+        requestId: sent.id,
+        choice: "allow-once",
+        nonce: sent.nonce,
+        hmac: sent.hmac,
+      });
+
+      const results = await callPromise;
+      expect(results[0].is_error).toBeUndefined();
+      expect(existsSync(target)).toBe(false);
     } finally {
       rmSync(outside, { recursive: true, force: true });
     }
