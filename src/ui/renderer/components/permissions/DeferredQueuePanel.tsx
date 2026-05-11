@@ -16,10 +16,26 @@
  * "approved" / "rejected" terminal feedback (entry disappears from
  * pending; the underlying JSONL keeps the resolution record).
  */
-import { useEffect, useState, useCallback, type ReactElement, type ReactNode } from "react";
+import { useEffect, useState, useCallback, type ReactElement } from "react";
 import { Badge } from "../../../../components/ui/badge.js";
 import { Button } from "../../../../components/ui/button.js";
 import type { DeferredQueueEntry } from "../../types.js";
+import {
+  SummaryTile,
+  ReviewRow,
+  categoryLabel,
+  inputVolumeLabel,
+  levelBadgeClass,
+  parseInputSummary,
+  payloadLabel,
+  pickSummary,
+  reviewBoxClass,
+  reviewTitleForCategory,
+  scopeLabel,
+  sensitivityLabel,
+  type ParsedSummary,
+  type ReviewBasisRow,
+} from "./PermissionDecisionCard.js";
 
 export interface DeferredQueuePanelProps {
   showEmpty?: boolean;
@@ -157,7 +173,7 @@ export function DeferredQueuePanel({ showEmpty = false, onClose }: DeferredQueue
                 </div>
                 <div className={`min-w-0 overflow-hidden rounded-md border ${reviewBoxClass(activeEntry.verdict.level)}`}>
                   <h4 className="border-b px-3 py-2 text-xs font-semibold">
-                    {reviewTitle(activeEntry)}
+                    {reviewTitleForCategory(activeEntry.category)}
                   </h4>
                   {reviewRows(activeEntry).map((row) => (
                     <ReviewRow key={row.label} label={row.label}>
@@ -220,64 +236,6 @@ export function DeferredQueuePanel({ showEmpty = false, onClose }: DeferredQueue
   );
 }
 
-function SummaryTile({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="min-w-0 rounded-md border bg-muted/20 px-3 py-2">
-      <div className="text-[11px] text-muted-foreground">{label}</div>
-      <div className="mt-1 break-words text-xs font-medium leading-relaxed">
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function ReviewRow({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="grid min-w-0 grid-cols-[88px_minmax(0,1fr)] gap-3 border-b px-3 py-2 last:border-b-0">
-      <b className="text-xs">{label}</b>
-      <div className="min-w-0 break-words text-xs leading-relaxed">
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function levelBadgeClass(level: "low" | "medium" | "high") {
-  if (level === "high") return "border-red-500 text-red-700 dark:text-red-400";
-  if (level === "medium") return "border-amber-500 text-amber-700 dark:text-amber-300";
-  return "border-primary text-primary";
-}
-
-function reviewBoxClass(level: "low" | "medium" | "high") {
-  if (level === "high") return "border-red-500/50 bg-red-500/5";
-  if (level === "medium") return "border-amber-500/50 bg-amber-500/5";
-  return "border-primary/40 bg-primary/5";
-}
-
-function reviewTitle(entry: DeferredQueueEntry) {
-  if (entry.category === "read") return "읽기 판단근거";
-  if (entry.category === "network") return "네트워크 영향범위";
-  if (entry.category === "shell") return "명령 영향범위";
-  return "작업 영향범위";
-}
-
-function categoryLabel(category: DeferredQueueEntry["category"]) {
-  if (category === "network") return "외부 전송";
-  if (category === "shell") return "명령 실행";
-  if (category === "write") return "변경";
-  if (category === "read") return "읽기";
-  return "정책";
-}
-
-type ReviewBasisRow = {
-  label: string;
-  value: string;
-  monospace?: boolean;
-  testId?: string;
-};
-
-type ParsedSummary = Record<string, unknown>;
-
 function reviewRows(entry: DeferredQueueEntry): ReviewBasisRow[] {
   const parsed = parseInputSummary(entry.inputSummary);
   const verdict = `${entry.verdict.level.toUpperCase()} · ${entry.verdict.reason}`;
@@ -327,47 +285,4 @@ function reviewRows(entry: DeferredQueueEntry): ReviewBasisRow[] {
     common,
     { label: "선택", value: "큐에서는 이번 항목 허용 또는 거부만 처리합니다." },
   ];
-}
-
-function parseInputSummary(summary: string): ParsedSummary | null {
-  try {
-    const parsed = JSON.parse(summary) as unknown;
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
-    return parsed as ParsedSummary;
-  } catch {
-    return null;
-  }
-}
-
-function pickSummary(parsed: ParsedSummary | null, keys: string[], emptyText: string): string {
-  if (!parsed) return emptyText;
-  for (const key of keys) {
-    const value = parsed[key];
-    if (value === undefined || value === null || value === "") continue;
-    return formatSummaryValue(value);
-  }
-  return emptyText;
-}
-
-function formatSummaryValue(value: unknown): string {
-  if (typeof value === "string") return value;
-  return JSON.stringify(value);
-}
-
-function scopeLabel(parsed: ParsedSummary | null): string {
-  const scope = pickSummary(parsed, ["scope", "pathScope", "allowedDir", "allowedDirectories"], "");
-  return scope || "scope 정보는 입력 요약 기준";
-}
-
-function sensitivityLabel(parsed: ParsedSummary | null): string {
-  const explicit = pickSummary(parsed, ["sensitivity", "dataClass", "classification"], "");
-  return explicit || "소스 코드, 설정, 토큰, 개인/업무 데이터 포함 가능성";
-}
-
-function inputVolumeLabel(summary: string): string {
-  return `입력 요약 ${summary.length}자`;
-}
-
-function payloadLabel(summary: string): string {
-  return `payload class 는 입력 요약 기준으로 확인 · ${summary.length}자`;
 }

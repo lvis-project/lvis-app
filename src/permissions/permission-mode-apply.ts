@@ -39,6 +39,7 @@ export async function applyPermissionModeCommand(
       id: randomUUID(),
       category: "tool",
       toolName: "/permission mode",
+      toolCategory: "meta",
       args: { fromMode: previous, toMode: cmd.mode, durable: true },
       reason: `권한 모드를 '${cmd.mode}'로 영구 저장합니다.`,
       source: "builtin",
