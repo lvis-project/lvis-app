@@ -221,8 +221,8 @@ describe("readPluginRegistry — legacy installedBy/_devLinked migration", () =>
         version: 1,
         plugins: [
           {
-            id: "work-proactive",
-            manifestPath: "work-proactive/plugin.json",
+            id: "work-assistant",
+            manifestPath: "work-assistant/plugin.json",
             enabled: true,
             installedBy: "user",
             bundleRefs: ["x-bundle"],
@@ -235,8 +235,8 @@ describe("readPluginRegistry — legacy installedBy/_devLinked migration", () =>
 
     const registry = await readPluginRegistry(registryPath);
     expect(registry.plugins[0]).toEqual({
-      id: "work-proactive",
-      manifestPath: "work-proactive/plugin.json",
+      id: "work-assistant",
+      manifestPath: "work-assistant/plugin.json",
       enabled: true,
       installSource: "user",
       bundleRefs: ["x-bundle"],

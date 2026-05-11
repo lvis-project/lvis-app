@@ -186,11 +186,11 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             installPolicy: "admin",
           },
           {
-            id: "work-proactive",
+            id: "work-assistant",
             name: "Work Proactive",
             description: "fixture",
-            packageSpec: "file:../lvis-plugin-work-proactive",
-            packageName: "@lvis/plugin-work-proactive",
+            packageSpec: "file:../lvis-plugin-work-assistant",
+            packageName: "@lvis/plugin-work-assistant",
             tools: [],
             installPolicy: "user",
             dependencies: ["calendar", "email", "meeting"],
@@ -212,14 +212,14 @@ describe("PluginMarketplaceService managed bootstrap", () => {
       .spyOn((service as unknown as { artifactStore: { cacheVersionFromManifest: (...args: unknown[]) => Promise<void> } }).artifactStore, "cacheVersionFromManifest")
       .mockResolvedValue();
 
-    const result = await service.install("work-proactive", "it-admin");
+    const result = await service.install("work-assistant", "it-admin");
 
-    expect(result).toEqual({ pluginId: "work-proactive", installed: true });
+    expect(result).toEqual({ pluginId: "work-assistant", installed: true });
     expect(installSpy.mock.calls.map(([plugin]) => (plugin as { id: string }).id)).toEqual([
       "calendar",
       "email",
       "meeting",
-      "work-proactive",
+      "work-assistant",
     ]);
     expect(cacheSpy).toHaveBeenCalledTimes(4);
   });
@@ -241,11 +241,11 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             capabilities: ["calendar-source"],
           },
           {
-            id: "work-proactive",
+            id: "work-assistant",
             name: "Work Proactive",
             description: "fixture",
-            packageSpec: "file:../lvis-plugin-work-proactive",
-            packageName: "@lvis/plugin-work-proactive",
+            packageSpec: "file:../lvis-plugin-work-assistant",
+            packageName: "@lvis/plugin-work-assistant",
             tools: [],
             installPolicy: "user",
             dependencies: ["calendar"],
@@ -282,8 +282,8 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     vi
       .spyOn((service as unknown as { artifactStore: { cacheVersionFromManifest: (...args: unknown[]) => Promise<void> } }).artifactStore, "cacheVersionFromManifest")
       .mockResolvedValue();
-    await expect(service.install("work-proactive", "it-admin")).resolves.toEqual({
-      pluginId: "work-proactive",
+    await expect(service.install("work-assistant", "it-admin")).resolves.toEqual({
+      pluginId: "work-assistant",
       installed: true,
     });
   });
@@ -323,11 +323,11 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             installPolicy: "user",
           },
           {
-            id: "work-proactive",
+            id: "work-assistant",
             name: "Work Proactive",
             description: "fixture",
-            packageSpec: "file:../lvis-plugin-work-proactive",
-            packageName: "@lvis/plugin-work-proactive",
+            packageSpec: "file:../lvis-plugin-work-assistant",
+            packageName: "@lvis/plugin-work-assistant",
             tools: [],
             installPolicy: "user",
             dependencies: ["calendar", "email", "meeting"],
@@ -349,15 +349,15 @@ describe("PluginMarketplaceService managed bootstrap", () => {
       .spyOn((service as unknown as { artifactStore: { cacheVersionFromManifest: (...args: unknown[]) => Promise<void> } }).artifactStore, "cacheVersionFromManifest")
       .mockResolvedValue();
 
-    await expect(service.install("work-proactive", "user")).resolves.toEqual({
-      pluginId: "work-proactive",
+    await expect(service.install("work-assistant", "user")).resolves.toEqual({
+      pluginId: "work-assistant",
       installed: true,
     });
     expect(installSpy.mock.calls.map(([plugin]) => (plugin as { id: string }).id)).toEqual([
       "calendar",
       "email",
       "meeting",
-      "work-proactive",
+      "work-assistant",
     ]);
   });
 
@@ -370,7 +370,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     await mkdir(join(testDir, "plugin-src", "calendar"), { recursive: true });
     await mkdir(join(testDir, "plugin-src", "email"), { recursive: true });
     await mkdir(join(testDir, "plugin-src", "meeting"), { recursive: true });
-    await mkdir(join(testDir, "plugin-src", "work-proactive"), { recursive: true });
+    await mkdir(join(testDir, "plugin-src", "work-assistant"), { recursive: true });
     const providerDir = join(testDir, "plugins", "installed", "calendar");
     await mkdir(providerDir, { recursive: true });
     await writeFile(
@@ -420,12 +420,12 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             installPolicy: "user",
           },
           {
-            id: "work-proactive",
+            id: "work-assistant",
             name: "Work Proactive",
             description: "fixture",
-            packageSpec: "file:./plugin-src/work-proactive",
-            packageName: "@lvis/plugin-work-proactive",
-            tools: ["work_proactive_generate_wakeup_briefing"],
+            packageSpec: "file:./plugin-src/work-assistant",
+            packageName: "@lvis/plugin-work-assistant",
+            tools: ["work_assistant_generate_wakeup_briefing"],
             installPolicy: "user",
             dependencies: [
               { pluginId: "calendar", required: true },
@@ -439,10 +439,10 @@ describe("PluginMarketplaceService managed bootstrap", () => {
                 { pluginId: "meeting", events: ["meeting.summary.created", "meeting.ended"] },
               ],
             },
-            capabilities: ["work-proactive-provider"],
+            capabilities: ["work-assistant-provider"],
             requires: { capabilities: ["calendar-source"] },
             toolSchemas: {
-              work_proactive_generate_wakeup_briefing: {
+              work_assistant_generate_wakeup_briefing: {
                 description: "Generate wakeup briefing",
                 inputSchema: {
                   type: "object",
@@ -469,15 +469,15 @@ describe("PluginMarketplaceService managed bootstrap", () => {
       .spyOn(service as unknown as { runNpmInstall: (spec: string) => Promise<void> }, "runNpmInstall")
       .mockResolvedValue();
 
-    await expect(service.install("work-proactive", "it-admin")).resolves.toEqual({
-      pluginId: "work-proactive",
+    await expect(service.install("work-assistant", "it-admin")).resolves.toEqual({
+      pluginId: "work-assistant",
       installed: true,
     });
 
     const registry = JSON.parse(await readFile(registryPath, "utf-8")) as {
       plugins: Array<{ id: string; manifestPath: string }>;
     };
-    const manifestPath = registry.plugins.find((entry) => entry.id === "work-proactive")?.manifestPath;
+    const manifestPath = registry.plugins.find((entry) => entry.id === "work-assistant")?.manifestPath;
     expect(manifestPath).toBeTruthy();
     // Phase 2a: registry entries hold manifest paths relative to
     // dirname(registryPath). Resolve to absolute before reading the file.
@@ -497,8 +497,8 @@ describe("PluginMarketplaceService managed bootstrap", () => {
       ],
     });
     expect(manifest.requires).toEqual({ capabilities: ["calendar-source"] });
-    expect(manifest.capabilities).toEqual(["work-proactive-provider"]);
-    expect(manifest.toolSchemas?.work_proactive_generate_wakeup_briefing?.description).toBe(
+    expect(manifest.capabilities).toEqual(["work-assistant-provider"]);
+    expect(manifest.toolSchemas?.work_assistant_generate_wakeup_briefing?.description).toBe(
       "Generate wakeup briefing",
     );
   });
@@ -598,7 +598,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             manifestPath: "installed/email/plugin.json",
             enabled: true,
             installSource: "user",
-            bundleRefs: ["work-proactive"],
+            bundleRefs: ["work-assistant"],
           },
         ],
       }),
@@ -647,7 +647,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
   });
 
   it("removes bundle members only when explicitly requested and still unreferenced", async () => {
-    for (const pluginId of ["work-proactive", "email", "meeting", "calendar"]) {
+    for (const pluginId of ["work-assistant", "email", "meeting", "calendar"]) {
       const pluginDir = join(testDir, "plugins", "installed", pluginId);
       await mkdir(pluginDir, { recursive: true });
       await writeFile(
@@ -669,8 +669,8 @@ describe("PluginMarketplaceService managed bootstrap", () => {
         version: 1,
         plugins: [
           {
-            id: "work-proactive",
-            manifestPath: "installed/work-proactive/plugin.json",
+            id: "work-assistant",
+            manifestPath: "installed/work-assistant/plugin.json",
             enabled: true,
             installSource: "user",
           },
@@ -679,21 +679,21 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             manifestPath: "installed/email/plugin.json",
             enabled: true,
             installSource: "user",
-            bundleRefs: ["work-proactive"],
+            bundleRefs: ["work-assistant"],
           },
           {
             id: "meeting",
             manifestPath: "installed/meeting/plugin.json",
             enabled: true,
             installSource: "user",
-            bundleRefs: ["work-proactive", "other-bundle"],
+            bundleRefs: ["work-assistant", "other-bundle"],
           },
           {
             id: "calendar",
             manifestPath: "installed/calendar/plugin.json",
             enabled: true,
             installSource: "admin",
-            bundleRefs: ["work-proactive"],
+            bundleRefs: ["work-assistant"],
           },
         ],
       }),
@@ -701,8 +701,8 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     );
 
     const service = makeManagedService(testDir, marketplacePath);
-    await expect(service.uninstall("work-proactive", { removeBundleMembers: true })).resolves.toEqual({
-      pluginId: "work-proactive",
+    await expect(service.uninstall("work-assistant", { removeBundleMembers: true })).resolves.toEqual({
+      pluginId: "work-assistant",
       uninstalled: true,
     });
 

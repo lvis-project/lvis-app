@@ -214,7 +214,7 @@ cd ..\lvis-plugin-local-indexer      ; git pull
 cd ..\lvis-plugin-meeting        ; git pull
 cd ..\lvis-plugin-ms-graph       ; git pull
 cd ..\lvis-plugin-lge-api        ; git pull
-cd ..\lvis-plugin-work-proactive ; git pull
+cd ..\lvis-plugin-work-assistant ; git pull
 cd ..\lvis-plugin-agent-hub      ; git pull
 
 cd ..\lvis-app

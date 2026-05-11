@@ -274,7 +274,7 @@ git stash pop  # 필요 시
 # 모든 sibling 플러그인 최신화
 cd ..
 for r in lvis-plugin-meeting lvis-plugin-local-indexer lvis-plugin-lge-api \
-         lvis-plugin-work-proactive lvis-plugin-ms-graph \
+         lvis-plugin-work-assistant lvis-plugin-ms-graph \
          lvis-plugin-agent-hub lvis-plugin-template lvis-plugin-sdk \
          lvis-marketplace lvis-agent-hub; do
   (cd "$r" && git checkout main && git pull origin main)

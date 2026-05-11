@@ -240,7 +240,7 @@ describe("PluginMarketplaceService install → update → rollback", () => {
     await svc.installPlugin("com.lge.sample", "1.1.0");
 
     const registry = JSON.parse(await readFile(registryPath, "utf-8"));
-    registry.plugins[0].bundleRefs = ["work-proactive"];
+    registry.plugins[0].bundleRefs = ["work-assistant"];
     await writeFile(registryPath, JSON.stringify(registry), "utf-8");
 
     await svc.rollbackPlugin("com.lge.sample");
@@ -250,7 +250,7 @@ describe("PluginMarketplaceService install → update → rollback", () => {
     // rollback is blocked upstream by deploymentGuard, so the rolled-back
     // entry always lands on installSource="user".
     expect(restored.plugins[0].installSource).toBe("user");
-    expect(restored.plugins[0].bundleRefs).toEqual(["work-proactive"]);
+    expect(restored.plugins[0].bundleRefs).toEqual(["work-assistant"]);
   });
 
   it("rollback fails for unknown plugin", async () => {

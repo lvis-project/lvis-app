@@ -204,7 +204,7 @@ describe("PluginMarketplaceService.installLocal", () => {
   it("mirrors manifest.pluginAccess into registry approvedPluginAccess (parity with marketplace install)", async () => {
     // Without this, assertPluginEventAccess / assertPluginToolAccess find no
     // grant for a dev-sideloaded plugin and any cross-plugin event subscribe
-    // (e.g. work-proactive listening to ms-graph email.new) throws at startup.
+    // (e.g. work-assistant listening to ms-graph email.new) throws at startup.
     const accessSpec = {
       plugins: [
         { pluginId: "ms-graph", events: ["email.new", "calendar.event.upcoming"], tools: ["msgraph_calendar_today"] },

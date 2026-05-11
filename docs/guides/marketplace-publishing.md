@@ -359,7 +359,7 @@ lvis-publish reject <publish-id> --reason <text> [--json]  # admin: 거절
 
 ## 채널 3 — Per-plugin CI publish (git tag SoT)
 
-> **요약**: 채널 1/2 와 같은 `POST /api/v1/plugins/<slug>/versions` 엔드포인트를 쓰지만 **트리거 surface 와 SoT 가 다름** — 마켓플레이스 폴링도 없고 사람이 CLI 를 돌리지도 않고, plugin repo 의 tag-push 가 직접 publish 를 일으킨다. 모든 `lvis-plugin-*` 레포에 동일하게 적용되는 contract (work-proactive 가 첫 도입, calendar/meeting/ms-graph/lge-api/local-indexer 순차 fan-out).
+> **요약**: 채널 1/2 와 같은 `POST /api/v1/plugins/<slug>/versions` 엔드포인트를 쓰지만 **트리거 surface 와 SoT 가 다름** — 마켓플레이스 폴링도 없고 사람이 CLI 를 돌리지도 않고, plugin repo 의 tag-push 가 직접 publish 를 일으킨다. 모든 `lvis-plugin-*` 레포에 동일하게 적용되는 contract (work-assistant 가 첫 도입, calendar/meeting/ms-graph/lge-api/local-indexer 순차 fan-out).
 >
 > **이 룰의 enforcement 위치**: 각 plugin repo 의 `.github/workflows/publish.yml` 워크플로우. 호스트와 마켓플레이스 backend 는 catalog 만 trust 할 뿐 tag↔manifest 일치를 직접 강제하지 않는다 — discipline 은 publisher CI 에 있다.
 
@@ -384,10 +384,10 @@ lvis-publish reject <publish-id> --reason <text> [--json]  # admin: 거절
 - 플러그인 저자가 release 의도 시 plugin.json 을 PR 으로 올림 → main 머지 → 매칭 tag 푸시
 - 결과: source manifest 와 catalog version 항상 일치, 사이드로드 (`Settings → 로컬 폴더에서 설치`) 와 마켓플레이스 install 은 같은 `plugin.json` + `dist/` 레이아웃을 공유 (install-receipt 의 `installSource` / `signerKeyId` / `artifactSha256` 은 의도적으로 다르며 trust 표면 분리 목적)
 
-### 3-3. release 절차 예시 (work-proactive 0.1.25)
+### 3-3. release 절차 예시 (work-assistant 0.1.25)
 
 ```bash
-cd lvis-plugin-work-proactive
+cd lvis-plugin-work-assistant
 # (a) plugin.json (+ package.json) 의 version 을 0.1.25 로 PR
 git checkout -b release/0.1.25
 # 직접 수정하든, 아래 스니펫이든 무방 — 핵심은 plugin.json.version 이 0.1.25

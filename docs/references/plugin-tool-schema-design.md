@@ -938,7 +938,7 @@ export const createPlugin: RuntimePluginFactory = async (context) => {
 
 ### @lvis/plugin-sdk (현행)
 
-호스트와 활성 플러그인 (`meeting` / `local-indexer` / `ms-graph` / `lge-api` / `work-proactive` / `agent-hub`) 은 released git tag 로 고정한 `@lvis/plugin-sdk` 를 사용한다. 호스트는 SDK 패키지의 `schemas/plugin-manifest.schema.json` 을 런타임에 resolve 하며, app-local schema extension 이나 플러그인별 path alias 를 두지 않는다. SDK 태그는 manifest schema, 공개 타입, `host:overlay` capability enum 의 단일 배포 단위다.
+호스트와 활성 플러그인 (`meeting` / `local-indexer` / `ms-graph` / `lge-api` / `work-assistant` / `agent-hub`) 은 released git tag 로 고정한 `@lvis/plugin-sdk` 를 사용한다. 호스트는 SDK 패키지의 `schemas/plugin-manifest.schema.json` 을 런타임에 resolve 하며, app-local schema extension 이나 플러그인별 path alias 를 두지 않는다. SDK 태그는 manifest schema, 공개 타입, `host:overlay` capability enum 의 단일 배포 단위다.
 
 ```jsonc
 // package.json
