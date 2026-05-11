@@ -1559,6 +1559,72 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
     }
   });
 
+  it("shell one-time approval covers the requested operand without prompting for /dev/null", async () => {
+    const outside = mkdtempSync(join(tmpdir(), "lvis-executor-shell-null-device-"));
+    try {
+      const target = join(outside, "hello.txt");
+      writeFileSync(target, "outside shell approved with null device\n", "utf8");
+      const canonicalTarget = realpathSync(target);
+      const registry = new ToolRegistry();
+      registry.register(new BashTool());
+
+      const wc = makeMockWebContents();
+      const gate = new ApprovalGate(wc as never);
+      const executor = new ToolExecutor(registry, undefined, undefined, undefined, gate);
+
+      const callPromise = executor.executeAll(
+        [{ id: "tu-l1-shell-null-device", name: "bash", input: { command: `test -e ${target} >/dev/null && cat ${target}`, timeoutSeconds: 1 } }],
+        { sessionId: "sess-l1-shell-null-device", permissionContext: userPermissionContext() },
+      );
+
+      await new Promise((r) => setTimeout(r, 5));
+      const sent = wc.send.mock.calls[0][1] as {
+        id: string;
+        nonce: string;
+        hmac: string;
+        kind?: string;
+        toolCategory?: string;
+        outOfAllowedDir?: { candidatePath?: string };
+      };
+      expect(sent.kind).toBe("out-of-allowed-dir");
+      expect(sent.toolCategory).toBe("shell");
+      expect(sent.outOfAllowedDir?.candidatePath).toBe(canonicalTarget);
+
+      gate.resolve(sent.id, {
+        requestId: sent.id,
+        choice: "allow-once",
+        nonce: sent.nonce,
+        hmac: sent.hmac,
+      });
+
+      const results = await callPromise;
+      expect(wc.send).toHaveBeenCalledTimes(1);
+      expect(results[0].is_error).toBeUndefined();
+      expect(results[0].content).toContain("outside shell approved with null device");
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("shell filesystem root operand is denied before out-of-allowed-dir approval", async () => {
+    const registry = new ToolRegistry();
+    registry.register(new BashTool());
+
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const executor = new ToolExecutor(registry, undefined, undefined, undefined, gate);
+
+    const results = await executor.executeAll(
+      [{ id: "tu-l1-shell-root", name: "bash", input: { command: "cat /", timeoutSeconds: 1 } }],
+      { sessionId: "sess-l1-shell-root", permissionContext: userPermissionContext() },
+    );
+
+    expect(wc.send).not.toHaveBeenCalled();
+    expect(results[0].is_error).toBe(true);
+    expect(results[0].content).toContain("디렉토리 정책 차단");
+    expect(results[0].content).toContain("filesystem root is not allowed");
+  });
+
   it("shell rm -f outside cwd executes after directory approval without rm-rf-root false positive", async () => {
     const outside = mkdtempSync(join(tmpdir(), "lvis-executor-shell-rm-"));
     try {

@@ -66,6 +66,8 @@ const RECURSIVE_FLAG_COMMANDS = new Map<string, readonly string[]>([
   ["mv", ["-r", "-R", "--recursive"]],
 ]);
 
+const SHELL_NULL_DEVICE_PATH = "/dev/null";
+
 export function validateShellWorkingDirectory(
   cwd: string,
   sandboxRoot: string,
@@ -122,6 +124,9 @@ export function findShellPathPolicyViolation(
         candidate,
       };
     }
+    if (isIgnoredShellDevicePath(absolute)) {
+      continue;
+    }
     const sensitive = isSensitivePath(caseFoldForMatch(canonicalizePathForMatch(absolute)));
     if (sensitive) {
       return {
@@ -142,6 +147,10 @@ export function findShellPathPolicyViolation(
     }
   }
   return null;
+}
+
+function isIgnoredShellDevicePath(canonicalPath: string): boolean {
+  return canonicalPath === SHELL_NULL_DEVICE_PATH;
 }
 
 export function validateShellCommandPathPolicy(
