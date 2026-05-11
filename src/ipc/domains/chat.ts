@@ -9,6 +9,7 @@ import type { WebContents } from "electron";
 import type { ChatInputOrigin, ChatSendPayload } from "../../shared/chat-origin.js";
 import { isChatSendInputOrigin } from "../../shared/chat-origin.js";
 import { redactForLLM } from "../../audit/dlp-filter.js";
+import { estimateMessagesTokens } from "../../engine/auto-compact.js";
 import type { GenericMessage } from "../../engine/llm/types.js";
 import { userContentText } from "../../engine/llm/types.js";
 import { stubMarkedToolResults } from "../../engine/wire-serialize.js";
@@ -416,6 +417,7 @@ ${input}`;
     return {
       sessionId: conversationLoop.getSessionId(),
       messages: messages.map(serializeHistoryMessage),
+      estimatedInputTokens: estimateMessagesTokens(messages),
     };
   });
 
@@ -466,6 +468,7 @@ ${input}`;
     return {
       ok: true,
       messages: raw.map(serializeHistoryMessage),
+      estimatedInputTokens: estimateMessagesTokens(raw),
       preambleChars,
       ...(parentSessionId !== undefined ? { parentSessionId } : {}),
     };
