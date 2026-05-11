@@ -381,13 +381,64 @@ const BOOTSTRAP_SPLASH = `<!DOCTYPE html>
 <style>
   html,body{margin:0;height:100%;background:#f3f3f3;color:#2c2c2c;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Malgun Gothic",sans-serif}
   body{overflow:hidden}
-  .wrap{box-sizing:border-box;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:28px;background:radial-gradient(circle at 62% 34%,rgba(255,255,255,.94),rgba(255,220,228,.74) 34%,rgba(255,180,198,.68) 68%,rgba(255,255,255,.82));background-size:cover}
-  .panel{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px}
-  .logo{width:104px;height:auto;transform:translateY(-26px);filter:drop-shadow(0 8px 18px rgba(217,0,255,.16))}
-  .name{margin:-20px 0 0;color:#ef0b4c;font-size:26px;font-weight:650;line-height:1;letter-spacing:0}
-  .status{min-height:18px;margin:2px 0 0;color:rgba(239,11,76,.52);font-size:12px;line-height:18px;text-align:center;transition:opacity .25s ease}
-  .fade{animation:fade 1.35s ease-in-out infinite}
-  @keyframes fade{0%,100%{opacity:.28}45%{opacity:.72}}
+
+  /* Light shell (default) — cherry-blossom radial gradient + LG vivid red wordmark */
+  .wrap{
+    box-sizing:border-box;display:flex;align-items:center;justify-content:center;
+    min-height:100vh;padding:28px;
+    background:radial-gradient(circle at 62% 34%,rgba(255,255,255,.94),rgba(255,220,228,.74) 34%,rgba(255,180,198,.68) 68%,rgba(255,255,255,.82));
+    background-size:cover;
+    opacity:0;
+    animation:lvis-splash-enter 220ms ease-out 60ms both;
+  }
+  .panel{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0}
+  /* Single source of truth for logo↔wordmark vertical overlap — replaces the
+     previous fragile combo of translateY(-26px) on the logo + margin:-20px
+     on the wordmark. */
+  .logo{
+    width:104px;height:auto;
+    margin-bottom:-14px;
+    filter:drop-shadow(0 8px 18px rgba(217,0,255,.18));
+    animation:lvis-splash-breathing 2.6s ease-in-out infinite;
+    transform-origin:center;
+  }
+  .name{margin:0;color:#ef0b4c;font-size:26px;font-weight:650;line-height:1;letter-spacing:0}
+  .status{min-height:18px;margin:8px 0 0;color:rgba(239,11,76,.62);font-size:12px;line-height:18px;text-align:center;transition:opacity .25s ease}
+  .dots{display:flex;gap:6px;margin-top:10px}
+  .dot{
+    width:6px;height:6px;border-radius:999px;background:#ef0b4c;opacity:.32;
+    animation:lvis-splash-bounce 1.1s ease-in-out infinite;
+  }
+  .dot:nth-child(2){animation-delay:.18s}
+  .dot:nth-child(3){animation-delay:.36s}
+  .version{
+    position:fixed;right:14px;bottom:10px;
+    color:rgba(44,44,44,.34);font-size:10.5px;
+    font-variant-numeric:tabular-nums;letter-spacing:.02em;
+  }
+
+  @keyframes lvis-splash-enter{from{opacity:0}to{opacity:1}}
+  @keyframes lvis-splash-breathing{0%,100%{transform:scale(1)}50%{transform:scale(1.035)}}
+  @keyframes lvis-splash-bounce{0%,100%{opacity:.32;transform:translateY(0)}45%{opacity:1;transform:translateY(-4px)}}
+
+  /* Dark OS preference — keeps the brand red mark but swaps the gradient
+     to a deep plum so the splash doesn't flash bright before a dark
+     bundle paints in the renderer. */
+  @media (prefers-color-scheme: dark){
+    html,body{background:#0d0a14;color:#f0e6ff}
+    .wrap{background:radial-gradient(circle at 62% 34%,rgba(70,28,52,.92),rgba(80,30,55,.82) 34%,rgba(50,18,42,.86) 68%,rgba(18,10,28,.96))}
+    .name{color:#ff5b8f}
+    .status{color:rgba(255,141,178,.72)}
+    .dot{background:#ff5b8f}
+    .version{color:rgba(240,230,255,.32)}
+  }
+
+  /* Reduced motion — disable scale, breathing, bounce; keep entrance fade only */
+  @media (prefers-reduced-motion: reduce){
+    .wrap{animation:lvis-splash-enter 150ms ease-out both}
+    .logo{animation:none}
+    .dot{animation:none;opacity:.5}
+  }
 </style></head><body>
   <div class="wrap">
     <div class="panel" role="status" aria-live="polite">
@@ -401,19 +452,51 @@ const BOOTSTRAP_SPLASH = `<!DOCTYPE html>
         </defs>
       </svg>
       <h1 class="name">LVIS</h1>
-      <p id="status" class="status fade">런타임을 준비하는 중...</p>
+      <p id="status" class="status">${BOOTSTRAP_STATUS_MESSAGES[0]}</p>
+      <div class="dots" aria-hidden="true"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
     </div>
   </div>
+  <div class="version">v${app.getVersion()}</div>
   <script>
     const messages = ${JSON.stringify(BOOTSTRAP_STATUS_MESSAGES)};
-    const status = document.getElementById("status");
-    let i = 0;
-    setInterval(() => {
-      i = (i + 1) % messages.length;
-      if (status) status.textContent = messages[i];
+    const statusEl = document.getElementById("status");
+    let cycleI = 0;
+    let cycleTimer = null;
+    let overridden = false;
+
+    /* Main process can drive status directly at real boot-phase transitions.
+       When called, the idle cycle stops so the splash text never "jitters"
+       backwards once the bootstrap pipeline starts reporting. */
+    window.__lvisSetSplashStatus = (msg) => {
+      overridden = true;
+      if (statusEl && typeof msg === "string") statusEl.textContent = msg;
+      if (cycleTimer) { clearInterval(cycleTimer); cycleTimer = null; }
+    };
+
+    /* Fallback idle cycle for the gap between main()'s phase emits.
+       Bounded so it doesn't outlive the splash. */
+    cycleTimer = setInterval(() => {
+      if (overridden) return;
+      cycleI = (cycleI + 1) % messages.length;
+      if (statusEl) statusEl.textContent = messages[cycleI];
     }, ${BOOTSTRAP_MESSAGE_MIN_VISIBLE_MS});
+
+    window.addEventListener("beforeunload", () => {
+      if (cycleTimer) clearInterval(cycleTimer);
+    });
   </script>
 </body></html>`;
+
+/** Push a status message to the splash window from the main process.
+ *  Best-effort — silently no-ops if the splash has already navigated away
+ *  to the real renderer or if executeJavaScript rejects. */
+function updateSplashStatus(message: string): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const escaped = JSON.stringify(message);
+  mainWindow.webContents
+    .executeJavaScript(`window.__lvisSetSplashStatus && window.__lvisSetSplashStatus(${escaped})`)
+    .catch(() => { /* splash window already replaced or page is mid-navigation */ });
+}
 
 function createWindow() {
   const preloadPath = resolve(__dirname, "preload.cjs");
@@ -550,8 +633,16 @@ async function main() {
   // §4.2 Step 8: window 생성 (splash 표시) — bootstrap이 mainWindow를 필요로 함
   createWindow();
 
+  // Drive splash status from the real bootstrap pipeline so the text below
+  // the wordmark matches what's actually happening rather than cycling
+  // through a setInterval list. The fallback idle cycle inside the splash
+  // still runs until the first explicit update lands.
+  updateSplashStatus("사용자 설정과 메모리를 불러오는 중...");
+
   // §4.2 Boot Sequence (mainWindow 전달 — PythonRuntimeBootstrapper IPC 사용)
   services = await bootstrap(projectRoot, mainWindow!, () => mainWindow);
+
+  updateSplashStatus("작업 화면을 여는 중...");
 
   // W1.0 — `--plugin-smoke=<id,...>` exits early after verifying that the
   // named plugins mounted + initialized. Boot already awaited
