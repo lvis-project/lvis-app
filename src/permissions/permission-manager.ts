@@ -13,9 +13,8 @@
  * 4. global strict mode
  * 5. headless mutating reviewer lane
  * 6. allow 규칙
- * 7. MCP auto override
- * 8. 사용자 "항상 허용" 규칙
- * 9. Trust/category 기본 정책
+ * 7. 사용자 "항상 허용" 규칙
+ * 8. Trust/category 기본 정책 (MCP auto 는 별도 우회 없이 여기로 합류)
  */
 import { homedir } from "node:os";
 import { resolve } from "node:path";
@@ -49,6 +48,24 @@ export interface PermissionCheckResult {
   decision: PermissionDecision;
   reason: string;
   layer: number; // 어떤 단계에서 결정되었는지
+  /**
+   * Layer 5 reviewer routing marker. Only PermissionManager may set this.
+   * Executor must not infer reviewer eligibility from `decision: "ask"` because
+   * overlay-trigger, strict, and low-trust MCP asks are hard user-approval gates.
+   */
+  reviewer?: {
+    route: "foreground-auto" | "headless";
+    verdict?: RiskVerdict;
+  };
+  /**
+   * Layer 5 headless reviewer queue metadata. The execution result is still a
+   * blocked tool call, but the audit decision must be `deferred` rather than a
+   * plain deny so forensics can link it to the manual approval queue entry.
+   */
+  deferred?: {
+    queueId: string;
+    reviewerVerdict: RiskVerdict;
+  };
   /**
    * Permission policy P2.5 §3 Layer 2 — structured deny reasons for audit forensics.
    * The pipeline records the *current* deny entry only (short-circuit
@@ -112,8 +129,9 @@ export interface ReviewerDispatchInput {
 
 /**
  * Result returned by {@link PermissionManager.dispatchReviewer}. The
- * caller (executor) translates this into either an immediate
- * allow + audit (LOW/MEDIUM) or deferred-queue append (HIGH).
+ * caller (executor) translates this according to its lane: foreground
+ * auto-review asks for MED/HIGH, while headless lanes queue any verdict
+ * selected by their defer policy.
  */
 export interface ReviewerDispatchResult {
   verdict: RiskVerdict;
@@ -124,12 +142,13 @@ export interface ReviewerDispatchResult {
    */
   cacheReason: "hit" | "miss-stale" | "miss-expired" | "miss-not-found";
   /**
-   * For HIGH verdicts in headless mode: the deferred-queue id the
-   * caller should reference in its audit entry. For LOW/MEDIUM the
-   * caller proceeds without queue interaction.
+   * Deferred-queue id created when the caller's defer policy routed the verdict
+   * to the manual queue. Foreground reviewer calls use `defer: "none"`.
    */
   deferredId?: string;
 }
+
+export type ReviewerDeferPolicy = "none" | "high" | "medium-high";
 
 export class PermissionManager {
   private rules: PermissionRule[] = [];
@@ -405,13 +424,16 @@ export class PermissionManager {
     }
 
     // strict mode is mode-first after immutable deny/overlay-trigger guards:
-    // allow rules, always-allowed cache, MCP auto overrides, and reviewer
-    // auto-allow lanes must not downgrade it.
+    // allow rules, always-allowed cache, per-tool overrides, and reviewer
+    // automatic approval lanes must not downgrade it.
     if (this.mode === "strict") {
       return {
         decision: "ask",
         reason: `strict 모드 (trust: ${trust}, category: ${resolvedCategory})`,
         layer: 2,
+        ...(context.headless === true && isMutating
+          ? { reviewer: { route: "headless" as const } }
+          : {}),
       };
     }
 
@@ -426,10 +448,6 @@ export class PermissionManager {
       if (globMatch(allowTarget, rule.pattern)) {
         return { decision: "allow", reason: `allow 규칙: ${rule.pattern}`, layer: 3 };
       }
-    }
-
-    if (toolModeOverride === "auto") {
-      return { decision: "allow", reason: "MCP 서버 auto 모드", layer: 4 };
     }
 
     // 5. Always-allowed (사용자 이전 승인)
@@ -448,8 +466,9 @@ export class PermissionManager {
    *   1. cache lookup → on hit, skip classify + return cached verdict
    *   2. classify (sync or async, depending on classifier impl)
    *   3. cache the verdict for next time (HIGH cached too)
-   *   4. if HIGH → append to deferred queue, return with `deferredId`
-   *   5. if LOW/MEDIUM → return verdict; caller proceeds with allow+audit
+   *   4. append to deferred queue only when the caller's defer policy asks for
+   *      this verdict level; foreground auto-review uses `"none"`, while
+   *      headless review uses `"medium-high"`.
    *
    * Failure mode: if {@link setReviewer} was never called, returns
    * HIGH + `deferredId === undefined`. Production callers check
@@ -459,6 +478,7 @@ export class PermissionManager {
     toolName: string,
     input: ReviewerDispatchInput,
     routineScope?: Record<string, unknown>,
+    options?: { defer?: ReviewerDeferPolicy },
   ): Promise<ReviewerDispatchResult> {
     if (!this.hasReviewer()) {
       return {
@@ -502,13 +522,26 @@ export class PermissionManager {
         allowedDirectories: input.allowedDirectories,
         sensitivePathsAdjacent: input.sensitivePathsAdjacent,
       };
-      const classified = classifier.classify(ctx);
-      verdict = classified instanceof Promise ? await classified : classified;
-      // Persist for next time (HIGH cached too — re-deny is fast).
-      await cache.store(lookupKey, cacheCtx, verdict);
+      try {
+        const classified = classifier.classify(ctx);
+        verdict = classified instanceof Promise ? await classified : classified;
+        // Persist for next time (HIGH cached too — re-deny is fast).
+        await cache.store(lookupKey, cacheCtx, verdict);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        verdict = { level: "high", reason: `reviewer error — ${message}` };
+      }
     }
 
-    if (verdict.level === "high") {
+    const deferPolicy = options?.defer ?? "high";
+    const shouldDefer =
+      deferPolicy === "medium-high"
+        ? verdict.level !== "low"
+        : deferPolicy === "high"
+          ? verdict.level === "high"
+          : false;
+
+    if (shouldDefer) {
       const deferredId = await queue.append({
         toolName,
         source: input.source,
@@ -618,12 +651,14 @@ export class PermissionManager {
             decision: "ask",
             reason: `headless ${category} — reviewer agent 라우팅 대상 (executor 가 dispatchReviewer 호출)`,
             layer: 6,
+            reviewer: { route: "headless" },
           };
         }
         return {
           decision: "ask",
           reason: `headless ${category} — reviewer agent 미배치, 사용자 컨펌`,
           layer: 6,
+          reviewer: { route: "headless" },
         };
       case "override":
         // meta category — executor handles via tool.decisionOverride
@@ -638,6 +673,10 @@ export class PermissionManager {
           decision: "ask",
           reason: `사용자 컨펌 필요 (category: ${category}, trust: ${trust})`,
           layer: 6,
+          ...(this.mode === "auto" && context.headless !== true &&
+            (category === "write" || category === "shell" || category === "network")
+            ? { reviewer: { route: "foreground-auto" as const } }
+            : {}),
         };
     }
   }

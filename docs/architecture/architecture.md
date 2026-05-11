@@ -1414,7 +1414,7 @@ plugin-specific app branch 를 두지 않는다.
 | Runtime modes | 사용자-facing 정책은 `default`(read 허용), `strict`(read 포함 전체 ask), `auto`(백그라운드 리뷰어 기반 자동 검증), `allow`(하드 차단 밖 전체 허용) 4개다. | allow mode 는 Layer 0/1/deny/overlay-trigger guard 를 우회하지 않는 opt-in 으로 유지 |
 | Permission IPC | `PERMISSIONS` 가 main / preload / sender-guard test 의 단일 channel SOT. | 새 permission channel 은 반드시 `src/shared/ipc-channels.ts` 에 먼저 추가 |
 | Reviewer | `disabled/rule/llm` 3-mode. `llm` wiring 실패는 silent downgrade 없이 fail-fast. | cost/quality telemetry 로 model default 조정 가능, fallback 은 `deny|rule` 만 |
-| Deferred queue | HIGH verdict 는 user foreground 에서 approve/reject, resolution 은 permission audit chain 에 기록. | §8 approval timeline 과 통합 표시 |
+| Deferred queue | Headless MED/HIGH verdict 는 사용자가 큐 버튼을 열 때 approve/reject, resolution 은 permission audit chain 에 기록. | §8 approval timeline 과 통합 표시 |
 | Hooks | `hooks.json` command/http executor 제거. `~/.config/lvis/hooks/{pre,post,perm}-*.sh` + strict-deny quarantine + typed trust registration 만 허용. | signed hooks follow-up 전까지 `modify` action 금지 |
 | Audit | HMAC chain + daily seal. Recent view 는 tail-scan. | key rotation / archive policy 는 follow-up |
 
@@ -1443,7 +1443,7 @@ flowchart TB
 
     L0 -.->|"deny: sensitive path"| AUDIT_DENY["Audit: AuditDeny"]
     L1 -.->|"deny: out-of-allowed-dir"| AUDIT_DENY
-    L5 -.->|"HIGH"| DEFERRED["Deferred Queue"]
+    L5 -.->|"headless MED/HIGH"| DEFERRED["Deferred Queue"]
     L6 -.->|"deny"| AUDIT_DENY
 ```
 
@@ -1456,7 +1456,7 @@ flowchart TB
 | 2 | Action 결정 (`allow / ask / deny`) + `denyReasons[]` 수집. `confirm` 은 `ask` 의 sub-variant — auto mode 도 silent skip 금지. | §3 Layer 2 | `PermissionCheckResult.denyReasons` |
 | 3 | 5-axis category × source × mode 매트릭스. Open-Closed `ToolCategoryRegistry`. | §3 Layer 3 | `src/permissions/category-registry.ts` |
 | 4 | Routine 의 `scope.pluginIds` discriminated union (`deny-all` / `allow` / `inherit`). Boot 시 `inherit` 은 active set 으로 normalize. | §3 Layer 4 | `routine.scope.*` |
-| 5 | Reviewer agent (multi-vendor) — headless write/shell/network 의 LOW/MED auto-allow / HIGH defer. `final = max(rule, llm)`. | §3 Layer 5 | `src/permissions/reviewer/*` |
+| 5 | Reviewer agent (multi-vendor) — foreground auto-review LOW allow / MED-HIGH ask, headless MED-HIGH defer. `final = max(rule, llm)`. | §3 Layer 5 | `src/permissions/reviewer/*` |
 | 6 | Hook chain v1 (deny-only). `~/.config/lvis/hooks/{pre,post,perm}-*.sh`. Strict-deny quarantine lockfile + DLP-redacted stdin. | §3 Layer 6 | `src/hooks/script-hook-*` |
 | 7 | Discriminated-union audit (`AuditAllow`/`AuditAsk`/`AuditDeny`/`AuditDeferred`/`AuditModeChange`/`AuditManifestViolation`) + HMAC chain + daily seal. | §3 Layer 7 | `src/audit/audit-schema.ts`, `src/audit/hmac-chain.ts` |
 | 8 | `/permission` 슬래시 + user-keyboard origin gate + `--durable` modal confirm. Modes: `default`, `strict`, `auto`, `allow`. Mode change emits `AuditModeChange`. | §3 Layer 8 | `src/permissions/permission-slash.ts` |
@@ -1478,12 +1478,13 @@ hook stdin → Layer 7 audit → Layer 8 slash dispatcher.
 
 #### 6.3.4 — Reviewer agent (multi-vendor)
 
-Headless write/shell/network/read-out-of-dir 호출에 대한 risk
+Foreground auto-review 및 headless write/shell/network/read-out-of-dir 호출에 대한 risk
 classifier. 3-mode (`disabled` / `rule` / `llm`) + multi-vendor adapter
 (default OpenAI gpt-4o-mini, Anthropic / Google 도 swap 가능). 항상
 rule classifier 가 baseline 으로 함께 실행되며 `final = max(rule, llm)`
-(LLM downgrade 불가). LOW/MED 는 auto-allow + audit, HIGH 는 deferred
-queue 에 append 되어 사용자 foreground 진입 시 surface 된다.
+(LLM downgrade 불가). Foreground auto-review 는 LOW 만 allow + audit 하고
+MED/HIGH 는 approval modal 로 승격한다. Headless reviewer 는 LOW 만 실행하고
+MED/HIGH 는 deferred queue 에 append 되어 사용자가 큐 버튼을 열 때 surface 된다.
 
 **선택 surface:** `/permission reviewer mode disabled|rule|llm` /
 `/permission reviewer model <name>` / `/permission reviewer provider
@@ -1578,8 +1579,8 @@ type PermissionAuditEntry =
   | AuditAllow         // 허용 (layer + 사유)
   | AuditAsk           // 사용자 컨펌 요청
   | AuditDeny          // 거부 (denyReasons[])
-  | AuditDeferred      // Layer 5 HIGH → deferred queue
-  | AuditDeferredResolve // foreground 사용자 resolution
+  | AuditDeferred      // Layer 5 MED/HIGH → deferred queue
+  | AuditDeferredResolve // user-opened queue resolution
   | AuditModeChange    // /permission mode 변경
   | AuditManifestViolation; // §3.5 위반
 ```
@@ -1722,9 +1723,9 @@ graph TB
 | Category | 의미 | 의사결정 (default mode) | 헤들리스 (routine) | 비고 |
 | --- | --- | --- | --- | --- |
 | `read` | 조회/검색 (자료를 변경하지 않음) | builtin: allow / plugin: scope-checked | allow | strict mode → ask |
-| `write` | 사용자 데이터 변경 | ask (auto/allow mode → allow + audit) | reviewer agent unless allow mode | reviewer 미배치 시 fail-closed or user ask |
-| `shell` | 셸 명령 실행 (Bash 등) | ask + Bash AST 검증 (allow mode → allow + AST) | reviewer unless allow mode | AST 검증은 executor-owned gate |
-| `network` | 외부 네트워크 호출 | ask + endpoint surface (auto/allow mode → allow + audit) | reviewer unless allow mode | endpoint 추출은 executor-owned surface |
+| `write` | 사용자 데이터 변경 | ask (auto → reviewer LOW allow + audit / MED-HIGH ask, allow → allow + audit) | reviewer agent unless allow mode | reviewer 미배치 시 fail-closed or user ask |
+| `shell` | 셸 명령 실행 (Bash 등) | ask + Bash AST 검증 (auto → reviewer LOW allow + AST + audit / MED-HIGH ask, allow → allow + AST) | reviewer unless allow mode | AST 검증은 executor-owned gate |
+| `network` | 외부 네트워크 호출 | ask + endpoint surface (auto → reviewer LOW allow + audit / MED-HIGH ask, allow → allow + audit) | reviewer unless allow mode | endpoint 추출은 executor-owned surface |
 | `meta` | 제어 흐름 / UI 프리미티브 | `decisionOverride` 따름 | 동일 | host builtin 전용; plugin 사용 금지 |
 
 `strict` 는 mode-first 정책이다. Headless 여부와 무관하게 `read` 포함 모든 도구가 ask 로 승격되며, reviewer routing 은 default/auto 의 mutation category 에만 적용된다.

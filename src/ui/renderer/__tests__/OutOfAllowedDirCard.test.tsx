@@ -77,7 +77,7 @@ describe("OutOfAllowedDirCard", () => {
     expect(onDecide).toHaveBeenCalledWith("allow-once");
   });
 
-  it("'디렉토리 영구 추가' is DISABLED until user re-types the leaf-parent name", () => {
+  it("'디렉토리 영구 추가' is DISABLED until user re-types the full suggested directory", () => {
     const onDecide = vi.fn();
     const { getByText, getByPlaceholderText } = render(
       <OutOfAllowedDirCard open={true} request={makeReq()} onDecide={onDecide} />,
@@ -85,11 +85,11 @@ describe("OutOfAllowedDirCard", () => {
     const persist = getByText("디렉토리 영구 추가") as HTMLButtonElement;
     expect(persist.disabled).toBe(true);
     // typing wrong name keeps it disabled
-    const input = getByPlaceholderText("today") as HTMLInputElement;
+    const input = getByPlaceholderText("/Users/ken/Documents/old-project/notes/today") as HTMLInputElement;
     fireEvent.change(input, { target: { value: "wrong-name" } });
     expect(persist.disabled).toBe(true);
-    // typing the exact basename enables it
-    fireEvent.change(input, { target: { value: "today" } });
+    // typing the exact full directory enables it
+    fireEvent.change(input, { target: { value: "/Users/ken/Documents/old-project/notes/today" } });
     expect(persist.disabled).toBe(false);
     fireEvent.click(persist);
     expect(onDecide).toHaveBeenCalledWith(
@@ -116,8 +116,8 @@ describe("OutOfAllowedDirCard", () => {
     expect(document.body.textContent).toContain(".git");
 
     // Type the correct name — still disabled until acknowledged.
-    const input = getByPlaceholderText(".git") as HTMLInputElement;
-    fireEvent.change(input, { target: { value: ".git" } });
+    const input = getByPlaceholderText("/Users/ken/work/proj/.git") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "/Users/ken/work/proj/.git" } });
     expect(persist.disabled).toBe(true);
 
     // Acknowledge → now enabled.
