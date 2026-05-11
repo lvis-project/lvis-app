@@ -391,13 +391,13 @@ const BOOTSTRAP_SPLASH = `<!DOCTYPE html>
     opacity:0;
     animation:lvis-splash-enter 220ms ease-out 60ms both;
   }
-  .panel{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0}
-  /* Single source of truth for logo↔wordmark vertical overlap — replaces the
-     previous fragile combo of translateY(-26px) on the logo + margin:-20px
-     on the wordmark. */
+  .panel{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px}
+  /* Logo sits cleanly above the wordmark — no overlap. (The previous
+     translateY(-26px) + margin:-20px combo, and the first cleanup that
+     used margin-bottom:-14px, both produced too much overlap with the
+     "LVIS" wordmark passing through the logo's chin area.) */
   .logo{
-    width:104px;height:auto;
-    margin-bottom:-14px;
+    width:96px;height:auto;
     filter:drop-shadow(0 8px 18px rgba(217,0,255,.18));
     animation:lvis-splash-breathing 2.6s ease-in-out infinite;
     transform-origin:center;
