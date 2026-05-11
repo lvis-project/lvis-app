@@ -16,6 +16,8 @@ import type { WebContents } from "electron";
 import type { PolicyFile } from "./policy-store.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
 import type { NotificationService } from "../main/notification-service.js";
+import type { ToolCategory } from "../tools/types.js";
+import type { RiskVerdict } from "./reviewer/risk-classifier.js";
 import { isSensitivePath, canonicalizePathForMatch } from "./sensitive-paths.js";
 import { maskSensitiveData } from "../audit/dlp-filter.js";
 
@@ -70,6 +72,10 @@ export interface ApprovalRequest {
    */
   kind?: ApprovalKind;
   toolName: string;
+  /** Permission policy category for the invocation shown in the UI. */
+  toolCategory?: ToolCategory;
+  /** Layer 5 reviewer verdict when the ask came from auto-review. */
+  reviewerVerdict?: RiskVerdict;
   args: unknown;
   reason: string;
   source?: "builtin" | "plugin" | "mcp";

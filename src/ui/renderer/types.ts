@@ -492,6 +492,10 @@ export type ApprovalRequest = {
   /** Permission policy — discriminator (defaults to "tool" when absent). */
   kind?: ApprovalKind;
   toolName: string;
+  /** Permission policy category for the invocation shown in the UI. */
+  toolCategory?: "read" | "write" | "shell" | "network" | "meta";
+  /** Layer 5 reviewer verdict when the ask came from auto-review. */
+  reviewerVerdict?: { level: "low" | "medium" | "high"; reason: string };
   args: unknown;
   reason: string;
   source?: "builtin" | "plugin" | "mcp";
