@@ -66,8 +66,6 @@ export async function createPermissionManager(): Promise<PermissionManager> {
   const permissionManager = new PermissionManager();
   // 기본 allow 규칙: 조회성 도구 자동 허용
   permissionManager.setRules([
-    { pattern: "memory_search", action: "allow" },
-    { pattern: "memory_list", action: "allow" },
     { pattern: "skill_list", action: "allow" },
     { pattern: "agent_list", action: "allow" },
     { pattern: "web_search", action: "allow" },

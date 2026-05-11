@@ -12,16 +12,11 @@ import { ToolRegistry } from "../../tools/registry.js";
 describe("web_fetch SSRF guard", () => {
   function makeWebFetchTool() {
     const registry = new ToolRegistry();
-    const memoryStub = {
-      saveMemory: async () => {},
-      searchMemoryEntries: () => [],
-      listMemoryEntries: () => [],
-    } as unknown as Parameters<typeof registerBuiltinTools>[0];
     const settingsStub = {
       get: () => ({ provider: "duckduckgo" }),
       getSecret: () => null,
-    } as unknown as Parameters<typeof registerBuiltinTools>[2];
-    registerBuiltinTools(memoryStub, registry, settingsStub);
+    } as unknown as Parameters<typeof registerBuiltinTools>[1];
+    registerBuiltinTools(registry, settingsStub);
     const tool = registry
       .getVisibleTools()
       .find((t) => t.name === "web_fetch");

@@ -75,6 +75,8 @@ export async function bootstrapCoreServices(mainWindow: BrowserWindow): Promise<
   // §4.2 Step 5: Core Engines
   const memoryManager = new MemoryManager();
   memoryManager.load();
+  memoryManager.startPersistentContextWatcher();
+  app.once("before-quit", () => memoryManager.stopPersistentContextWatcher());
   log.info("boot: memory loaded from %s", memoryManager.getDir());
 
   const keywordEngine = new KeywordEngine();

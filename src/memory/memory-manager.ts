@@ -5,14 +5,14 @@
  * - AGENTS.md: 프로젝트·조직 컨텍스트 (관리자 배포 가능)
  * - user-preferences.md: 사용자 개인 선호
  * - memories/MEMORY.md: 부팅 시 적극 주입되는 메모리 인덱스
- * - memories/: 사용자 축적 메모 ("이거 기억해")
+ * - memories/: 사용자 축적 기억
  * - sessions/: 대화 세션 JSONL *
  * 설계 원칙 (§5.1):
  * - 단순함 우선: 별도 기억 엔진·승격·만료 로직 없음
  * - 사용자 제어: 직접 확인·편집·삭제 가능
  * - 세션 독립: 파일은 영속, 인메모리는 휘발
  */
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, unlinkSync, statSync, renameSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, unlinkSync, statSync, renameSync, watch, type FSWatcher } from "node:fs";
 import { join, resolve, basename } from "node:path";
 import { homedir } from "node:os";
 import { withFileLock } from "../lib/with-file-lock.js";
@@ -153,7 +153,7 @@ const DEFAULT_AGENTS_MD = `# LVIS 에이전트 컨텍스트
 const DEFAULT_MEMORY_INDEX = `# LVIS Memory Index
 
 > 이 파일은 LVIS가 세션 시작 시 적극적으로 읽는 장기 메모리 인덱스입니다.
-> 상세 메모는 같은 폴더의 개별 Markdown 파일로 분리하고, 이 파일에는 다음에 다시 찾기 쉬운 짧은 링크와 요약만 유지하세요.
+> 상세 기억은 같은 폴더의 개별 Markdown 파일로 분리하고, 이 파일에는 다음에 다시 찾기 쉬운 짧은 링크와 요약만 유지하세요.
 
 ## Saved Memories
 
@@ -268,6 +268,8 @@ export class MemoryManager {
   private readonly lvisDir: string;
   private readonly memoryDir: string;
   private readonly sessionsDir: string;
+  private persistentContextWatchers: FSWatcher[] = [];
+  private persistentContextReloadTimer: ReturnType<typeof setTimeout> | undefined;
   /** §PR-5: Pre-compact snapshots stored here to avoid polluting listSessions scan. */
   private get checkpointsDir(): string {
     return join(this.sessionsDir, ".checkpoints");
@@ -289,6 +291,28 @@ export class MemoryManager {
     this.agentsMd = this.readFile("AGENTS.md");
     this.memoryIndex = this.readMemoryIndex();
     this.userPreferences = this.readFile("user-preferences.md");
+  }
+
+  /** Watch AGENTS.md and MEMORY.md so direct file edits affect the next prompt. */
+  startPersistentContextWatcher(): void {
+    if (this.persistentContextWatchers.length > 0) return;
+    this.watchDirectoryForPersistentContext(this.lvisDir, new Set(["AGENTS.md", "user-preferences.md"]));
+    this.watchDirectoryForPersistentContext(this.memoryDir, new Set(["MEMORY.md"]));
+  }
+
+  stopPersistentContextWatcher(): void {
+    if (this.persistentContextReloadTimer !== undefined) {
+      clearTimeout(this.persistentContextReloadTimer);
+      this.persistentContextReloadTimer = undefined;
+    }
+    for (const watcher of this.persistentContextWatchers) {
+      try {
+        watcher.close();
+      } catch {
+        /* ignore close races */
+      }
+    }
+    this.persistentContextWatchers = [];
   }
 
   // ─── Read API (SystemPromptBuilder에서 사용) ──────
@@ -385,7 +409,7 @@ export class MemoryManager {
 
   // ─── Write API ("이거 기억해" 명령) ───────────────
 
-  /** 메모 저장 — 사용자가 "기억해" 하면 memories/에 저장 */
+  /** 기억 저장 — 사용자가 "기억해" 하면 memories/에 저장 */
   async saveMemory(title: string, content: string): Promise<NoteEntry> {
     const filename = this.slugify(title) + ".md";
     const visibleContent = `# ${title}\n\n${content}\n`;
@@ -398,7 +422,7 @@ export class MemoryManager {
     return { filename, title, content: visibleContent, updatedAt: new Date().toISOString() };
   }
 
-  /** 메모 삭제 */
+  /** 기억 삭제 */
   deleteMemory(filename: string): void {
     const path = join(this.memoryDir, filename);
     if (existsSync(path)) unlinkSync(path);
@@ -737,6 +761,40 @@ export class MemoryManager {
     const path = join(this.memoryDir, "MEMORY.md");
     if (!existsSync(path)) return "";
     return this.truncateMemoryIndex(readFileSync(path, "utf-8"));
+  }
+
+  private watchDirectoryForPersistentContext(dir: string, filenames: Set<string>): void {
+    try {
+      const watcher = watch(dir, { persistent: false }, (_eventType, changedName) => {
+        const name = typeof changedName === "string" ? basename(changedName) : "";
+        if (name !== "" && !filenames.has(name)) return;
+        this.schedulePersistentContextReload(name || dir);
+      });
+      watcher.on("error", (err) => {
+        log.warn({ dir, err }, "persistent context watcher failed");
+      });
+      this.persistentContextWatchers.push(watcher);
+    } catch (err) {
+      log.warn({ dir, err }, "persistent context watcher unavailable");
+    }
+  }
+
+  private schedulePersistentContextReload(reason: string): void {
+    if (this.persistentContextReloadTimer !== undefined) {
+      clearTimeout(this.persistentContextReloadTimer);
+    }
+    const timer = setTimeout(() => {
+      this.persistentContextReloadTimer = undefined;
+      try {
+        this.load();
+        log.info({ reason }, "persistent context reloaded");
+      } catch (err) {
+        log.warn({ reason, err }, "persistent context reload failed");
+      }
+    }, 75);
+    const maybeNodeTimer = timer as ReturnType<typeof setTimeout> & { unref?: () => void };
+    maybeNodeTimer.unref?.();
+    this.persistentContextReloadTimer = timer;
   }
 
   private buildMarkdownContext(entries: NoteEntry[]): string {

@@ -375,7 +375,7 @@ describe("agent_spawn tool", () => {
     try {
       writeFileSync(
         join(agentDir, "reviewer.md"),
-        "---\nname: reviewer\ndescription: Reviews code\ntools: [memory_search]\n---\nYou are a reviewer.",
+        "---\nname: reviewer\ndescription: Reviews code\ntools: [web_search]\n---\nYou are a reviewer.",
         "utf-8",
       );
       const store = new AgentProfileStore({ userDir: agentDir });
@@ -406,7 +406,7 @@ describe("agent_spawn tool", () => {
       expect(captured?.instructions).toContain("<lvis-agent-profile");
       expect(captured?.instructions).toContain("You are a reviewer.");
       expect(captured?.instructions).toContain("check this diff");
-      expect(captured?.sourceTools).toEqual(["memory_search"]);
+      expect(captured?.sourceTools).toEqual(["web_search"]);
     } finally {
       rmSync(agentDir, { recursive: true, force: true });
     }
@@ -451,7 +451,7 @@ describe("skill_list and agent_list tools", () => {
     try {
       writeFileSync(
         join(agentDir, "explorer.md"),
-        "---\nname: explorer\ndescription: Map repo\ntools: [memory_search]\n---\nsecret profile body",
+        "---\nname: explorer\ndescription: Map repo\ntools: [agent_list]\n---\nsecret profile body",
         "utf-8",
       );
       const tool = createAgentListTool(new AgentProfileStore({ userDir: agentDir }));

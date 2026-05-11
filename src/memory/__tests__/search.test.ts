@@ -16,6 +16,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  mm.stopPersistentContextWatcher();
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -36,16 +37,16 @@ describe("MemoryManager.searchMemoryEntries", () => {
   });
 
   it("matches body substring", async () => {
-    await mm.saveMemory("기타 메모", "quarterly review 내용 정리");
-    await mm.saveMemory("다른 메모", "무관한 내용");
+    await mm.saveMemory("기타 기억", "quarterly review 내용 정리");
+    await mm.saveMemory("다른 기억", "무관한 내용");
     const results = mm.searchMemoryEntries("quarterly");
     expect(results.length).toBe(1);
-    expect(results[0].title).toBe("기타 메모");
+    expect(results[0].title).toBe("기타 기억");
   });
 
   it("caps results at 50", async () => {
     for (let i = 0; i < 60; i++) {
-      await mm.saveMemory(`메모 ${i}`, "공통 키워드 hello");
+      await mm.saveMemory(`기억 ${i}`, "공통 키워드 hello");
     }
     const results = mm.searchMemoryEntries("hello");
     expect(results.length).toBe(50);
@@ -80,7 +81,38 @@ describe("MemoryManager AGENTS.md and MEMORY.md layout", () => {
     expect(index).toContain("[Meeting Notes](./meeting-notes.md)");
     expect(mm.getMemoryIndex()).toContain("weekly sync discussion");
   });
+
+  it("reloads AGENTS.md and MEMORY.md after direct file edits", async () => {
+    mm.load();
+    mm.startPersistentContextWatcher();
+
+    writeFileSync(join(dir, "AGENTS.md"), "# Live Agents\n\nwatcher updated", "utf-8");
+    await waitUntil(() => mm.getAgentsMd().includes("watcher updated"));
+
+    writeFileSync(join(dir, "memories", "MEMORY.md"), "# Live Memory\n\nindex updated", "utf-8");
+    await waitUntil(() => mm.getMemoryIndex().includes("index updated"));
+  });
+
+  it("injects directly edited detailed memory files without a tool call", () => {
+    mm.load();
+    writeFileSync(
+      join(dir, "memories", "direct-memory.md"),
+      "# Direct Memory\n\nfile-backed context",
+      "utf-8",
+    );
+
+    expect(mm.getMemoryContext()).toContain("file-backed context");
+  });
 });
+
+async function waitUntil(predicate: () => boolean, timeoutMs = 1500): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  expect(predicate()).toBe(true);
+}
 
 describe("MemoryManager.searchSessions", () => {
   it("returns empty array when no sessions exist", () => {
