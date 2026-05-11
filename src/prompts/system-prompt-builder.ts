@@ -76,9 +76,9 @@ export class SystemPromptBuilder {
    */
   private overlaySessionId: string | null = null;
   /**
-   * PR-2: current session title injected into the Conversation Meta Output
-   * section so the LLM can produce evolved titles grounded in the existing
-   * session context. Null when no title has been assigned yet (first turn).
+   * PR-2: current session title injected as inert continuity context.
+   * Title mutation is host-managed after the turn; the final answer must not
+   * emit hidden title tags. Null when no title has been assigned yet.
    */
   private sessionTitle: string | null = null;
   /**
@@ -91,7 +91,7 @@ export class SystemPromptBuilder {
   /**
    * Safety flag: experimentalContinuousBackend (default false).
    * When false, Section 8 (Rolling Summary Preamble) and Section 9.9
-   * (Conversation Meta Output) are omitted from the built prompt to prevent
+   * (Conversation Continuity Guard) are omitted from the built prompt to prevent
    * system prompt contamination and silent LLM instruction issues.
    */
   private continuousBackendEnabled: boolean = false;
@@ -187,9 +187,8 @@ export class SystemPromptBuilder {
 
   /**
    * PR-2: per-turn session title. ConversationLoop sets this before
-   * `build()` so the LLM can produce an evolved title grounded in the
-   * existing session context. Pass `null` to clear (no title yet — first
-   * turn of a new session).
+   * `build()` so the LLM can use the title as inert continuity context.
+   * Pass `null` to clear (no title yet — first turn of a new session).
    */
   setSessionTitle(title: string | null): void {
     if (title === null) {
@@ -232,7 +231,7 @@ export class SystemPromptBuilder {
 
   /**
    * Safety gate: sets whether the continuous-backend prompt sections
-   * (Section 8 Rolling Summary Preamble and Section 9.9 Conversation Meta Output)
+   * (Section 8 Rolling Summary Preamble and Section 9.9 Conversation Continuity Guard)
    * are included. Default false — caller must explicitly enable.
    */
   setContinuousBackendEnabled(enabled: boolean): void {
@@ -504,24 +503,24 @@ export class SystemPromptBuilder {
       },
     });
 
-    // ⑨-b Conversation Meta Output (per-turn)
+    // ⑨-b Conversation Continuity Guard (per-turn)
     //
-    // Instructs the LLM to emit <title>…</title> and optionally [checkpoint]
-    // at the end of every final answer. The session title (if set) is injected
-    // so the LLM can produce an evolved, cumulative title grounded in the
-    // existing context. Gated by experimentalContinuousBackend flag — skipped
-    // when false to prevent LLM instructions that produce markers which can
-    // contaminate UI output.
+    // Earlier continuous-backend builds asked the LLM to append hidden
+    // <title>...</title> and [checkpoint] markers to the streamed final answer.
+    // That made title/checkpoint extraction depend on user-visible text and
+    // could truncate the answer when the model emitted metadata before closing
+    // Markdown. Checkpoints are now host-managed at the next turn's preflight
+    // boundary, so this section explicitly forbids those markers instead.
     this.sources.push({
       id: 9.9,
-      name: "Conversation Meta Output",
+      name: "Conversation Continuity Guard",
       refresh: "per-turn",
       build: () => {
         if (!this.continuousBackendEnabled) return "";
         const titleLine = this.sessionTitle
           ? `현재 세션 제목: "${this.sessionTitle}"\n\n`
           : "";
-        return `${titleLine}${CONVERSATION_META_OUTPUT}`;
+        return `${titleLine}${CONVERSATION_CONTINUITY_GUARD}`;
       },
     });
 
@@ -531,8 +530,8 @@ export class SystemPromptBuilder {
     // <summary>…</summary> tag at the end of its final answer so the host can
     // extract a clean one-sentence summary for OverlayCard display without
     // truncating the full response body. id=9.8 sits between Conversation Meta
-    // Output (9.9) guard block and the environment section (9), ordered just
-    // before meta output so the LLM processes the annotation rule last.
+    // Guard (9.9) block and the environment section (9), ordered just
+    // before the guard so the LLM processes the annotation rule last.
     this.sources.push({
       id: 9.8,
       name: "Routine Summary Tag Instruction",
@@ -572,37 +571,13 @@ const ROLE_DEFINITION = `당신은 LVIS — 사원 개인을 위한 초지능형
 - <user-memory>에 사용자가 수동으로 기록한 메모 목록이 포함될 수 있습니다.
 - 사외 지식 탐색을 위해 web_search 도구를 적극 활용하세요.`;
 
-const CONVERSATION_META_OUTPUT = `## 대화 메타 출력 (final answer 끝에 추가)
+const CONVERSATION_CONTINUITY_GUARD = `## 대화 연속성 출력 규칙
 
-매 final answer 의 가장 마지막에 다음 형식으로 메타 정보를 출력하세요:
-
-<title>10-20자 한국어 제목</title>
-[checkpoint]
-
-### Title 정책 (항상 포함)
-- 길이: 10-20자 (한국어 기준)
-- 내용: 기존 세션 제목 + 이번 답변을 종합한 누적 진화 제목
-- 토픽 전환 시 새 토픽 반영
-- 메타 정보 — 후속 처리에서 stripped 됨 (사용자에게 보이지 않음)
-
-### Checkpoint 마커 — *제안이 아니라 당신의 결정*
-\`[checkpoint]\` 는 *suggestion* 이 아닙니다. 당신이 **이 턴이 하나의 작업 단위로 종료되었다**고 *판단* 했을 때 직접 결정해서 삽입하세요. 시스템은 이 마커를 보면 즉시 새 세션으로 회전시키고 현재 컨텍스트를 요약 정리합니다 — 사용자 confirm 단계는 없습니다.
-
-#### 마커를 *반드시* 삽입해야 하는 경우 (모두 LLM 자체 판단)
-1. **명시적 도메인 전환** — "다음으로 X 하자", "이제 Y 작업", 완전히 다른 주제 질문
-2. **하나의 작업 사이클 완료** — 디버그/구현/리서치 등 한 덩어리 task 가 결론 (PR 머지, 배포, 검증 완료, 답변 수렴) 에 도달
-3. **컨텍스트 누적이 큰 답변 직후** — 길게 누적된 도구 결과/분석을 정리해서 최종 답변을 마쳤고, 다음 턴은 신선한 컨텍스트가 더 효율적이라고 판단되는 시점
-4. **명시적 마무리 단어** — "끝내자", "여기까지", "정리됐다", "마치자", "wrap up", "그만" 등
-
-#### 마커를 *생략*해야 하는 경우
-- 이번 답변이 진행 중인 작업의 *중간* 상태 (도구 호출 더 필요, 후속 질문 예상)
-- 같은 task 의 단순 follow-up question (e.g. "그럼 X 도 알려줘")
-- 한 턴짜리 짧은 질의응답이 누적되지 않은 초기 컨텍스트
-
-#### 의사결정 원칙
-- "사용자가 다음에 같은 작업을 이어갈까, 아니면 새 작업으로 넘어갈까?" — 후자에 더 가까우면 마커.
-- 애매하면 *생략* 보다 *삽입* 이 안전 (회전이 trivial 비용, 누락은 컨텍스트 폭주 비용 큼).
-- 한 세션 안에 여러 번 발화 가능 — 매번 task boundary 마다.`;
+- 최종 답변에는 사용자에게 보여줄 본문만 작성하세요.
+- 숨은 메타데이터, XML/HTML 태그, 세션 제목 태그, 체크포인트 마커를 출력하지 마세요.
+- 특히 \`<title>...</title>\`, \`[checkpoint]\`, \`[checkpoint-suggested]\` 문자열은 출력 금지입니다.
+- 체크포인트와 세션 요약은 host 가 다음 턴 시작 전 context preflight 에서 자동 처리합니다.
+- 답변을 마칠 때는 Markdown 문법을 닫고, 본문이 완성된 뒤 종료하세요.`;
 
 const ROUTINE_SUMMARY_TAG_INSTRUCTION = `## 루틴 세션 — 결과 요약 태그 강제
 
