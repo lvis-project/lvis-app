@@ -849,6 +849,14 @@ export class ToolExecutor {
       const headless = invocationPermissionContext.headless === true;
       const trustOrigin = invocationPermissionContext.trustOrigin;
       const validation = validateDirectoryAddition(outOfAllowedTarget.canonicalPath);
+      if (!validation.ok) {
+        const msg = `[디렉토리 정책 차단] 도구 '${toolUse.name}' — ${validation.reason} (${outOfAllowedTarget.filePath}).`;
+        const durationMs = Date.now() - startTime;
+        emitToolStart(callbacks, toolUse.name, finalInput, meta);
+        callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+        await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...dirLayerResult, decision: "deny" }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
+        return { allowed: false, result: { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs } };
+      }
       const suggestedParent = pickClosestParent(
         outOfAllowedTarget.canonicalPath,
         invocationAllowedScope.directories,
