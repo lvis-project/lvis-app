@@ -19,13 +19,16 @@ describe("categorizeEvent", () => {
     expect(categorizeEvent("index.document.added")).toBe("index");
   });
 
-  it("categorizes task events", () => {
-    expect(categorizeEvent("task.created")).toBe("task");
+  it("categorizes agent_hub events", () => {
+    expect(categorizeEvent("agent_hub.work_item.due_soon")).toBe("agent_hub");
+    expect(categorizeEvent("agent_hub.work_log.posted")).toBe("agent_hub");
   });
 
   it("returns 'other' for unknown namespaces", () => {
     expect(categorizeEvent("unknown.event")).toBe("other");
     expect(categorizeEvent("system.boot")).toBe("other");
+    // task.* retired 2026-05-11 — host owner removed in Phase 4
+    expect(categorizeEvent("task.created")).toBe("other");
   });
 
   it("handles bare event names without dots", () => {
