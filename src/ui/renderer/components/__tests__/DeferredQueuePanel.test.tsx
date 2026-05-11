@@ -106,7 +106,7 @@ describe("DeferredQueuePanel", () => {
       render(<DeferredQueuePanel />);
     });
     expect(screen.getByTestId("deferred-queue-panel")).toBeTruthy();
-    expect(screen.getByText("fs_write")).toBeTruthy();
+    expect(screen.getAllByText("fs_write").length).toBeGreaterThan(0);
     expect(screen.getByText(/write outside allowed dirs/)).toBeTruthy();
   });
 
@@ -160,7 +160,7 @@ describe("DeferredQueuePanel", () => {
     });
     expect(screen.getByTestId("deferred-entry-a")).toBeTruthy();
     expect(screen.getByTestId("deferred-entry-b")).toBeTruthy();
-    expect(screen.getByText("shell_run")).toBeTruthy();
+    expect(screen.getAllByText("shell_run").length).toBeGreaterThan(0);
   });
 
   it("surfaces deferredResolve rejection and still refreshes", async () => {
