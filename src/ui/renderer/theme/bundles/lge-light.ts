@@ -31,8 +31,8 @@ export const lgeLightBundle: ThemeBundle = {
     "accent-foreground":      "0 0% 15%",
     destructive:              "1 98% 59%",     /* #FD312E — LG red STOP */
     "destructive-foreground": "0 0% 100%",
-    warning:                  "48 96% 89%",
-    "warning-foreground":     "30 80% 25%",
+    warning:                  "35 91% 45%",     /* saturated amber — visible on warm-beige shell */
+    "warning-foreground":     "0 0% 100%",
     success:                  "142 71% 45%",
     "success-foreground":     "0 0% 100%",
     /* ── Tier B': status / state ──────────────────────────────── */

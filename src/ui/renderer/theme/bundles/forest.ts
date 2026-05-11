@@ -24,8 +24,8 @@ export const forestBundle: ThemeBundle = {
     "accent-foreground":      "222 47% 11%",
     destructive:              "0 84% 60%",
     "destructive-foreground": "210 40% 98%",
-    warning:                  "48 96% 89%",
-    "warning-foreground":     "30 80% 25%",
+    warning:                  "35 91% 45%",     /* saturated amber — visible on white shell */
+    "warning-foreground":     "0 0% 100%",
     success:                  "142 71% 45%",
     "success-foreground":     "0 0% 100%",
     /* ── Tier B': status / state ──────────────────────────────── */

@@ -24,8 +24,8 @@ export const midnightBundle: ThemeBundle = {
     "accent-foreground":      "210 40% 98%",
     destructive:              "0 62.8% 30.6%",
     "destructive-foreground": "210 40% 98%",
-    warning:                  "48 97% 77%",
-    "warning-foreground":     "30 80% 25%",
+    warning:                  "38 92% 62%",
+    "warning-foreground":     "0 0% 10%",
     success:                  "142 71% 45%",
     "success-foreground":     "0 0% 5%",
     /* ── Tier B': status / state ──────────────────────────────── */

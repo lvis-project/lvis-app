@@ -1,7 +1,7 @@
 /**
  * AppearanceTab v2 — bundle picker tests.
  *
- * The tab now shows 6 bundle cards (one per ThemeBundle) in a single grid.
+ * The tab shows one bundle card per ThemeBundle in a single grid.
  * Clicking a card sets the active bundle and writes data-theme-bundle to <html>.
  *
  * followSystem toggle is shown only when the LGE pair (lge-light / lge-dark)
@@ -34,13 +34,13 @@ function renderWithBundle(initialBundleId = "tokyo-night") {
 }
 
 describe("AppearanceTab — bundle card grid", () => {
-  it("renders exactly 6 bundle cards (one per ThemeBundle)", () => {
+  it("renders exactly one card per ThemeBundle", () => {
     const { getAllByRole } = renderWithBundle();
     // All cards have role="radio" with aria-label "테마: <name>"
     const cards = getAllByRole("radio").filter((el) =>
       el.getAttribute("aria-label")?.startsWith("테마:"),
     );
-    expect(cards).toHaveLength(6);
+    expect(cards).toHaveLength(BUNDLES.length);
   });
 
   it("renders a card for each bundle in BUNDLES", () => {

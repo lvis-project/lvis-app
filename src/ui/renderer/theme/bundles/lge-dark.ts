@@ -31,8 +31,8 @@ export const lgeDarkBundle: ThemeBundle = {
     "accent-foreground":      "44 37% 94%",
     destructive:              "1 98% 59%",     /* #FD312E — LG red STOP */
     "destructive-foreground": "0 0% 100%",
-    warning:                  "48 97% 77%",
-    "warning-foreground":     "30 80% 25%",
+    warning:                  "38 92% 62%",     /* amber-400 ish — vivid on warm-dark grey */
+    "warning-foreground":     "0 0% 10%",
     success:                  "142 71% 45%",
     "success-foreground":     "0 0% 5%",
     /* ── Tier B': status / state ──────────────────────────────── */
