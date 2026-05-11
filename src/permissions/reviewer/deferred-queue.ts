@@ -7,8 +7,8 @@
  * action is appended to the deferred queue rather than executed. On
  * pending-count changes the host emits
  * `lvis:permissions:deferred-pending` with a queue summary; the renderer
- * lets the user open a DeferredQueuePanel with "승인" / "거부" buttons. Each click
- * resolves the entry and writes an audit record.
+ * lets the user open a DeferredQueuePanel with "허용" / "거부" buttons. Each
+ * click resolves the entry and writes an audit record.
  *
  * Storage: ~/.lvis/permissions/deferred-queue.jsonl (per-feature
  * namespace; Layer 0 sensitive — no plugin can read or write it

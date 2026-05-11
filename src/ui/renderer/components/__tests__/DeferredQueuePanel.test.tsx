@@ -88,6 +88,18 @@ describe("DeferredQueuePanel", () => {
     expect(screen.getByText("deferred-list unavailable")).toBeTruthy();
   });
 
+  it("renders a neutral empty state when manually opened", async () => {
+    installApi({ entries: [] });
+    await act(async () => {
+      render(<DeferredQueuePanel showEmpty />);
+    });
+    expect(screen.getByTestId("deferred-queue-empty")).toBeTruthy();
+    expect(screen.getByText("대기 없음")).toBeTruthy();
+    expect(screen.getByText("보류된 승인 요청 없음")).toBeTruthy();
+    expect(screen.queryByText("MEDIUM 위험")).toBeNull();
+    expect(screen.queryByText(/백그라운드에서 보류된 작업/)).toBeNull();
+  });
+
   it("renders pending entries on mount", async () => {
     installApi({ entries: [makeEntry()] });
     await act(async () => {
@@ -105,7 +117,7 @@ describe("DeferredQueuePanel", () => {
     await act(async () => {
       render(<DeferredQueuePanel />);
     });
-    const button = screen.getByText("승인");
+    const button = screen.getByText("허용");
     await act(async () => {
       fireEvent.click(button);
     });
@@ -160,7 +172,7 @@ describe("DeferredQueuePanel", () => {
       render(<DeferredQueuePanel />);
     });
     await act(async () => {
-      fireEvent.click(screen.getByText("승인"));
+      fireEvent.click(screen.getByText("허용"));
     });
     expect(api.deferredResolve).toHaveBeenCalledWith("err-1", "approved");
     expect(api.deferredList.mock.calls.length).toBeGreaterThanOrEqual(2);
