@@ -39,14 +39,17 @@ describe("capabilities module namespace policy", () => {
     expect(classifySubscription("email.new")).toBe("public");
     expect(classifySubscription("calendar.event")).toBe("public");
     expect(classifySubscription("index.scan_done")).toBe("public");
-    expect(classifySubscription("agent_hub.work_item.due_soon")).toBe("public");
   });
 
   it("classifies everything else as 'neutral'", () => {
     expect(classifySubscription("random.event")).toBe("neutral");
     expect(classifySubscription("foobar")).toBe("neutral");
-    // task.* was retired 2026-05-11 — host owner removed, agent_hub.work_item.* replaces it
+    // task.* was retired 2026-05-11 — host owner removed in Phase 4
     expect(classifySubscription("task.created")).toBe("neutral");
+    // Plugin-owned namespaces stay neutral by design — host is
+    // intentionally agnostic to plugin ids (open-source-readiness).
+    // A subscribing plugin pays a one-line load-time drift warn.
+    expect(classifySubscription("agent_hub.work_item.due_soon")).toBe("neutral");
   });
 
   it("maps event namespace → required capability for emit", () => {
@@ -55,7 +58,6 @@ describe("capabilities module namespace policy", () => {
     expect(requiredCapabilityForEmit("meeting.transcript.updated")).toBe("meeting-recorder");
     expect(requiredCapabilityForEmit("calendar.event")).toBe("calendar-source");
     expect(requiredCapabilityForEmit("index.scan_done")).toBe("knowledge-index");
-    expect(requiredCapabilityForEmit("agent_hub.work_item.due_soon")).toBeUndefined();
     expect(requiredCapabilityForEmit("random.event")).toBeUndefined();
   });
 
@@ -314,19 +316,19 @@ describe("capability emit gate", () => {
     expect(warns).toEqual([]);
   });
 
-  it("does not gate emit when the namespace has no EVENT_NAMESPACE_CAPABILITY entry (e.g. agent_hub.*)", async () => {
-    // agent_hub is in PUBLIC_EVENT_NAMESPACES but absent from
-    // EVENT_NAMESPACE_CAPABILITY — emit gate is a no-op. Trust comes
-    // from HostApi pluginId binding (only agent-hub emits these), not
-    // from a manifest-declared capability.
-    await writePlugin("p_agent_hub", []);
+  it("does not gate emit when the namespace has no EVENT_NAMESPACE_CAPABILITY entry", async () => {
+    // Random plugin-owned namespace (neutral) — capability emit gate
+    // is a no-op. Trust comes from HostApi pluginId binding (the
+    // runtime overwrites payload.pluginId with the bound runtime id),
+    // not from a manifest-declared capability.
+    await writePlugin("p_custom", []);
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
 
-    const { guardedEmit, emitted, warns } = makeEmitGate(runtime, "p_agent_hub");
-    guardedEmit("agent_hub.work_item.due_soon", { itemId: 1 });
+    const { guardedEmit, emitted, warns } = makeEmitGate(runtime, "p_custom");
+    guardedEmit("custom.event", { foo: 1 });
 
-    expect(emitted).toEqual([{ type: "agent_hub.work_item.due_soon", data: { itemId: 1 } }]);
+    expect(emitted).toEqual([{ type: "custom.event", data: { foo: 1 } }]);
     expect(warns).toEqual([]);
   });
 });

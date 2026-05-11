@@ -19,23 +19,18 @@ describe("categorizeEvent", () => {
     expect(categorizeEvent("index.document.added")).toBe("index");
   });
 
-  it("categorizes agent_hub events", () => {
-    expect(categorizeEvent("agent_hub.work_item.due_soon")).toBe("agent_hub");
-    expect(categorizeEvent("agent_hub.work_log.posted")).toBe("agent_hub");
-  });
-
-  it("returns 'other' for unknown namespaces", () => {
+  it("returns 'other' for unknown / plugin-owned namespaces (host stays agnostic to plugin ids)", () => {
     expect(categorizeEvent("unknown.event")).toBe("other");
     expect(categorizeEvent("system.boot")).toBe("other");
     // task.* retired 2026-05-11 — host owner removed in Phase 4
     expect(categorizeEvent("task.created")).toBe("other");
+    // Plugin-owned namespaces are NOT in PUBLIC_EVENT_NAMESPACES
+    // (open-source-readiness) — categorized as "other".
+    expect(categorizeEvent("agent_hub.work_item.due_soon")).toBe("other");
   });
 
   it("handles bare event names without dots", () => {
     expect(categorizeEvent("email")).toBe("email");
     expect(categorizeEvent("unknown")).toBe("other");
-    // Lock the underscore-in-namespace path — regression risk if
-    // someone replaces `split(".")[0]` with a `[a-z]+` regex.
-    expect(categorizeEvent("agent_hub")).toBe("agent_hub");
   });
 });
