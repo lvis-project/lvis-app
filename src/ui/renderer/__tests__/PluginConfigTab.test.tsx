@@ -299,7 +299,7 @@ describe("PluginConfigSchemaForm — values prop sync", () => {
 
     const { rerender } = render(
       <PluginConfigSchemaForm
-        pluginId="work-proactive"
+        pluginId="work-assistant"
         schema={schema}
         values={{}}
         secretsPresent={{}}
@@ -308,14 +308,14 @@ describe("PluginConfigSchemaForm — values prop sync", () => {
       />,
     );
     const input = document.querySelector(
-      '[id="pcfg:work-proactive:meetingDetectorAllowedSenderDomains"]',
+      '[id="pcfg:work-assistant:meetingDetectorAllowedSenderDomains"]',
     ) as HTMLInputElement;
     expect(input).not.toBeNull();
     expect(input.value).toBe("");
 
     rerender(
       <PluginConfigSchemaForm
-        pluginId="work-proactive"
+        pluginId="work-assistant"
         schema={schema}
         values={{ meetingDetectorAllowedSenderDomains: ["outlook.com"] }}
         secretsPresent={{}}
