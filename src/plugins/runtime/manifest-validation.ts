@@ -294,6 +294,26 @@ export async function parsePluginJson(
         );
       }
     }
+
+    // architecture.md §9.4a: when `auth` is declared, the host's
+    // `usePluginAuthStatuses` hook subscribes to `${manifest.id}.auth.changed`
+    // (literal id, no _↔- normalization). The plugin must therefore declare
+    // and emit that exact event name — otherwise the badge stays stuck on the
+    // boot-time `unauthed` snapshot even after a successful login.
+    //
+    // Soft warn (not hard fail) to match the `notificationEvents` drift
+    // pattern below: catches the bug class without breaking already-installed
+    // plugins that haven't migrated. Surfaced by lvis-plugin-agent-hub#131
+    // (v0.4.1) — same plugin had emitted `agent_hub.auth.changed` (underscore)
+    // for months while the host subscribed to `agent-hub.auth.changed` (dash
+    // from manifest id).
+    const expectedAuthEvent = `${parsed.id}.auth.changed`;
+    const declaredEmits = Array.isArray(parsed.emittedEvents) ? parsed.emittedEvents : [];
+    if (!declaredEmits.includes(expectedAuthEvent)) {
+      log.warn(
+        `manifest declares 'auth' but emittedEvents[] is missing '${expectedAuthEvent}' — host badge will not refresh after login. Add "${expectedAuthEvent}" to emittedEvents[] and emit it from the loginTool/logoutTool/auth-state-change paths.`,
+      );
+    }
   }
 
   // keywords[].skillId must be in tools[].

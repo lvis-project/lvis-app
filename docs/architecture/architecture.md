@@ -2720,6 +2720,8 @@ hostApi.emitEvent(`${pluginId}.auth.changed`);  // 예: "ms-graph.auth.changed"
 ```
 
 - `manifest.emittedEvents[]` 에 같은 이름을 등록해야 호스트 event-bridge 가 renderer 로 전달 (`boot/steps/ipc-bridge.ts`).
+- **이름의 `${pluginId}` 부분은 manifest `id` 필드를 그대로 사용** — `_`↔`-` 변환/정규화 없음. 호스트 hook (`use-plugin-auth-status.ts`) 이 `${manifest.id}.auth.changed` 로 strict subscribe 하므로 plugin 이 `agent_hub.auth.changed` (underscore) 로 emit 하면 manifest id `agent-hub` (dash) 와 mismatch 되어 badge refresh 가 안 걸린다 (lvis-plugin-agent-hub#131 회귀 사례).
+- `manifest-validation.ts` 의 cross-field check 가 `auth` 선언 시 `emittedEvents[]` 에 `${id}.auth.changed` 가 빠져있으면 load-time `log.warn` 발행 — drift 신호 (soft warn, hard fail 은 grace 후 별 PR 에서 전환 검토).
 - 네임스페이스는 plugin id prefix 라 `classifySubscription` 에서 `neutral` 로 떨어지지만 (private 아님), `boot/steps/ipc-bridge.ts` 가 neutral / public 둘 다 forward.
 - 호스트 `usePluginAuthStatuses` 훅이 이벤트를 받아 statusTool 를 재호출 → 뱃지 갱신. **폴링 안 함** — 폐기된 `onMsGraphAuthChange` host-callback 안티패턴 회귀 방지.
 
