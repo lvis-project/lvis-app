@@ -234,9 +234,11 @@ describe("todo_session_write tool", () => {
   it("description anti-claims user task registration requests (issue #648)", () => {
     const store = new SessionTodoStore();
     const tool = createTodoSessionWriteTool(store);
-    expect(tool.description).toContain("agent_hub_create_work_item");
+    expect(tool.description).toContain("영구 업무 항목 등록");
     expect(tool.description).toContain("내부 단계 추적");
     expect(tool.description).toContain("사용하지 마세요");
+    // host must not name specific plugin tools — kept generic.
+    expect(tool.description).not.toContain("agent_hub");
   });
 
   it("rejects empty items array", async () => {
