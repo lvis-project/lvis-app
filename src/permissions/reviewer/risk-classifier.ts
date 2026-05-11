@@ -207,9 +207,27 @@ function hasNetworkPayload(input: Record<string, unknown>): boolean {
   return false;
 }
 
+const NETWORK_DESCRIPTOR_FIELDS: ReadonlySet<string> = new Set([
+  "url",
+  "endpoint",
+  "host",
+  "uri",
+  "method",
+  "httpMethod",
+  "verb",
+]);
+
+function hasNonDescriptorGraphInput(input: Record<string, unknown>): boolean {
+  for (const [key, value] of Object.entries(input)) {
+    if (NETWORK_DESCRIPTOR_FIELDS.has(key)) continue;
+    if (hasMeaningfulPayload(value)) return true;
+  }
+  return false;
+}
+
 function isGraphMetadataRead(input: Record<string, unknown>, target: NetworkTarget): boolean {
   const method = extractNetworkMethod(input) ?? "GET";
-  if (method !== "GET" || hasNetworkPayload(input)) return false;
+  if (method !== "GET" || hasNetworkPayload(input) || hasNonDescriptorGraphInput(input)) return false;
   const normalizedPath = target.path.replace(/\/+$/, "");
   return normalizedPath === "/v1.0/me" || normalizedPath === "/beta/me" || normalizedPath === "/me";
 }
