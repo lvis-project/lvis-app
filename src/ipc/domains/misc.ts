@@ -86,8 +86,7 @@ export function registerMiscHandlers(deps: IpcDeps): void {
         summary: "",
       };
       if (routine.execution === "llm-session" && routineSessionStore) {
-        const sessions = await routineSessionStore.listRecent(routine.id, 20);
-        const session = sessions.find((candidate) => candidate.firedAt === firedAt);
+        const session = await routineSessionStore.findForFiredAt(routine.id, firedAt);
         if (session) {
           result.routineSessionPath = session.jsonlPath;
           result.summary = await routineSessionStore.extractSummary(session.jsonlPath);
