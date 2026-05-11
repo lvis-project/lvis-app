@@ -46,11 +46,6 @@ export function MainToolbar({
         {/* ── Spacer pushes remaining items to the right ─────────────── */}
         <div className="flex-1" />
 
-        {/* ── New chat — stays outside hamburger (frequent action) ─────── */}
-        <Button variant="outline" size="sm" className="h-7 gap-1 text-[11px] bg-input-bar" onClick={onNewChat}>
-          <Plus className="h-3.5 w-3.5" />새 대화
-        </Button>
-
         {/* ── Global search — opens GlobalSearchDialog ─────────────────── */}
         <Tooltip>
           <TooltipTrigger asChild>
@@ -76,6 +71,14 @@ export function MainToolbar({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-[280px]">
+            {/* ── New chat ── */}
+            <DropdownMenuItem disabled={streaming} onClick={onNewChat}>
+              <Plus className="mr-2 h-3.5 w-3.5" />
+              <span>새 대화</span>
+            </DropdownMenuItem>
+
+            <DropdownMenuSeparator />
+
             {/* ── Settings ── */}
             <DropdownMenuItem onClick={onOpenSettings}>
               <KeyRound className="mr-2 h-3.5 w-3.5" />
