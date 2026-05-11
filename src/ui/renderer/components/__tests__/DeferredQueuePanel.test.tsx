@@ -112,6 +112,49 @@ describe("DeferredQueuePanel", () => {
     expect(screen.queryByText(/Reviewer 가/)).toBeNull();
   });
 
+  it.each([
+    [
+      "read",
+      makeEntry({
+        category: "read",
+        inputSummary: '{"path":"/workspace/a.txt","scope":"workspace"}',
+      }),
+      ["대상", "범위", "민감도", "양", "판단", "선택"],
+    ],
+    [
+      "write",
+      makeEntry({
+        category: "write",
+        inputSummary: '{"path":"/workspace/a.txt","operation":"append"}',
+      }),
+      ["대상", "변경", "영향", "복구", "판단", "선택"],
+    ],
+    [
+      "network",
+      makeEntry({
+        category: "network",
+        inputSummary: '{"endpoint":"https://graph.microsoft.com/v1.0/me","method":"GET","scope":"User.Read"}',
+      }),
+      ["endpoint", "method", "payload", "auth", "판단", "선택"],
+    ],
+    [
+      "shell",
+      makeEntry({
+        category: "shell",
+        inputSummary: '{"command":"./update-all.sh --no-prompt","cwd":"/workspace"}',
+      }),
+      ["명령", "cwd/env", "부작용", "제한", "판단", "선택"],
+    ],
+  ] as const)("renders %s-specific decision basis rows", async (_category, entry, labels) => {
+    installApi({ entries: [entry] });
+    await act(async () => {
+      render(<DeferredQueuePanel />);
+    });
+    for (const label of labels) {
+      expect(screen.getByText(label)).toBeTruthy();
+    }
+  });
+
   it("resolve('approved') invokes IPC then refreshes", async () => {
     const api = installApi({
       entries: [makeEntry({ id: "abc-123" })],
