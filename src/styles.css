@@ -1,6 +1,60 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+/* Tailwind v4 — CSS-first config.
+ * - @import replaces v3's @tailwind base/components/utilities trio.
+ * - @plugin loads the JS-side typography plugin (its `.prose` defaults are
+ *   then re-bound to semantic tokens by the `.lvis-prose` wrapper below).
+ * - @source explicitly scopes content detection to the renderer tree;
+ *   v4 auto-detects most files but an explicit glob makes the contract
+ *   robust against future repo restructures.
+ * - @theme inline rebinds Tailwind's color/radius slots to the existing
+ *   semantic tokens (`hsl(var(--background))`, etc.) so utilities like
+ *   `bg-background`, `text-muted-foreground`, `bg-success/15`, and
+ *   `rounded-md` keep their existing class names but resolve to the
+ *   per-bundle CSS-variable values defined below. */
+@import "tailwindcss";
+
+@plugin "@tailwindcss/typography";
+
+@source "./**/*.{ts,tsx,html}";
+
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-warning: hsl(var(--warning));
+  --color-warning-foreground: hsl(var(--warning-foreground));
+  --color-success: hsl(var(--success));
+  --color-success-foreground: hsl(var(--success-foreground));
+  --color-info: hsl(var(--info));
+  --color-info-foreground: hsl(var(--info-foreground));
+  --color-emphasis: hsl(var(--emphasis));
+  --color-emphasis-foreground: hsl(var(--emphasis-foreground));
+  --color-action-view: hsl(var(--action-view));
+  --color-action-branch: hsl(var(--action-branch));
+  --color-action-compact: hsl(var(--action-compact));
+  --color-message-user: hsl(var(--message-user-bg));
+  --color-message-user-foreground: hsl(var(--message-user-fg));
+  --color-input-bar: hsl(var(--input-bar-bg));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+}
 
 /* ─── §PR-5: View-Mode + Branch action tokens ───────────────────────────────
    Semantic action color tokens used by CheckpointDivider buttons and

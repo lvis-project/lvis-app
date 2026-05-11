@@ -366,7 +366,7 @@ function HistoricalEntriesList({
             <p className="mt-1 text-muted-foreground">{entry.summary}</p>
           )}
           {entry.response && (
-            <div className="mt-2 text-foreground/80 prose prose-sm dark:prose-invert max-w-none">
+            <div className="mt-2 text-foreground/80 prose prose-sm lvis-prose max-w-none">
               <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>
                 {entry.response}
               </ReactMarkdown>
@@ -981,7 +981,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
                     <p className="mt-1 text-muted-foreground">{entry.summary}</p>
                   )}
                   {entry.response && (
-                    <div className="mt-2 text-foreground/80 prose prose-sm dark:prose-invert max-w-none">
+                    <div className="mt-2 text-foreground/80 prose prose-sm lvis-prose max-w-none">
                       <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>
                         {entry.response}
                       </ReactMarkdown>
