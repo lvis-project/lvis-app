@@ -203,8 +203,8 @@ function HistoricalEntriesList({
     if (entry.kind === "ask_user_answer") {
       return <AskUserAnswerBubble key={entry.sourceToolUseId || idx} entry={entry} />;
     }
-    if (entry.kind === "turn_summary") {
-      // Historical: turn_summary 는 데이터 carrier 로만 — standalone 표시 X.
+    if (entry.kind === "turn_summary" || entry.kind === "context_usage") {
+      // Historical: usage carriers are data only — standalone 표시 X.
       // duration 정보는 WorkGroup 헤더가 표시. token 정보는 historical 의
       // final assistant 위치엔 ActionBar 가 없어 이번 phase 에서 미노출;
       // 필요 시 후속에서 historical-footer 컴포넌트 추가 가능.
@@ -320,8 +320,8 @@ function HistoricalEntriesList({
       continue;
     }
 
-    if (entry.kind === "turn_summary") {
-      // Historical: turn_summary 는 데이터 carrier 로만 — standalone 표시 X.
+    if (entry.kind === "turn_summary" || entry.kind === "context_usage") {
+      // Historical: usage carriers are data only — standalone 표시 X.
       // (See note in renderEntry above.)
       i++;
       continue;
@@ -927,7 +927,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             // turn_summary entry — 데이터 carrier 로 history 에 남기되 standalone
             // 렌더링 안 함. 같은 turn 의 final AssistantCard / WorkGroup 이
             // turnSummaryByTurnStart 에서 lookup 해 inline 으로 표시한다.
-            if (entry.kind === "turn_summary") {
+            if (entry.kind === "turn_summary" || entry.kind === "context_usage") {
               i++;
               continue;
             }

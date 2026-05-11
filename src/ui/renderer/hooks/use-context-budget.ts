@@ -6,12 +6,15 @@ import { getUsableContext } from "../../../shared/context-budget.js";
 /**
  * Context budget hook — provider-truth based (Phase 3, 2026-05-07).
  *
- * `usedTokens` = the most recent `turn_summary` entry's `tokensIn` — the
- * *last round's raw input* (includes cache reads). This is the right
- * denominator for the context-fill ring because cache reads still occupy
- * context-window slots even though they're billed at 1/10 the rate. The
- * billing-weight number lives on `freshInputTokens` (TokenCostBadge),
- * which is a different question.
+ * `usedTokens` = the most recent usage carrier:
+ *   - live turn: `turn_summary.tokensIn` from the provider's last raw input;
+ *   - loaded session: `context_usage.tokensIn`, the main-process estimate
+ *     rebuilt from persisted messages.
+ *
+ * This is the right denominator for the context-fill ring because cache reads
+ * still occupy context-window slots even though they're billed at 1/10 the
+ * rate. The billing-weight number lives on `freshInputTokens`
+ * (TokenCostBadge), which is a different question.
  *
  * Replaces the old `entries.map(chars/4).sum()` heuristic which:
  *   - missed system prompt (12-source assembly), tool schemas, memory
@@ -21,7 +24,7 @@ import { getUsableContext } from "../../../shared/context-budget.js";
  *   - did not shrink after compact since entries persisted in UI.
  *
  * Pre-first-turn: returns 0 (no usage yet). Streaming: still uses the
- * *previous* turn_summary until the new one lands at turn end.
+ * *previous* usage carrier until the new live turn_summary lands at turn end.
  *
  * Context window source: `src/shared/pricing-data.ts` →
  * `effectiveContextWindow()` (picks 1M-beta tier for Sonnet/Opus 4.6) →
@@ -47,7 +50,7 @@ export function useContextBudget(params: {
   const usedTokens = useMemo(() => {
     for (let i = entries.length - 1; i >= 0; i--) {
       const e = entries[i];
-      if (e?.kind === "turn_summary") {
+      if (e?.kind === "turn_summary" || e?.kind === "context_usage") {
         return Math.max(0, e.tokensIn);
       }
     }
