@@ -8,6 +8,20 @@ import {
   isSensitivePath,
 } from "../permissions/sensitive-paths.js";
 
+export type ShellPathPolicyViolationKind =
+  | "dynamic-path"
+  | "invalid-path"
+  | "recursive-traversal"
+  | "sandbox-boundary"
+  | "sensitive-path";
+
+export interface ShellPathPolicyViolation {
+  kind: ShellPathPolicyViolationKind;
+  reason: string;
+  candidate?: string;
+  path?: string;
+}
+
 const DYNAMIC_PATH_COMPOSITION_COMMANDS = new Set([
   "join-path",
   "resolve-path",
@@ -52,6 +66,8 @@ const RECURSIVE_FLAG_COMMANDS = new Map<string, readonly string[]>([
   ["mv", ["-r", "-R", "--recursive"]],
 ]);
 
+const SHELL_NULL_DEVICE_PATH = "/dev/null";
+
 export function validateShellWorkingDirectory(
   cwd: string,
   sandboxRoot: string,
@@ -65,19 +81,36 @@ export function validateShellWorkingDirectory(
   return check.allowed ? null : `Sandbox: ${check.reason}`;
 }
 
-export function validateShellCommandPathPolicy(
+export function findShellPathPolicyViolation(
   command: string,
   cwd: string,
   sandboxRoot: string,
   extraAllowedDirectories: readonly string[],
-): string | null {
+): ShellPathPolicyViolation | null {
+  const cwdSensitive = isSensitivePath(caseFoldForMatch(canonicalizePathForMatch(cwd)));
+  if (cwdSensitive) {
+    return {
+      kind: "sensitive-path",
+      reason: `Sensitive path: cwd ${cwd} matches ${cwdSensitive}`,
+      path: cwd,
+    };
+  }
+  const cwdCheck = validateSandboxPath(cwd, sandboxRoot, [...extraAllowedDirectories]);
+  if (!cwdCheck.allowed) {
+    return {
+      kind: "sandbox-boundary",
+      reason: `Sandbox: ${cwdCheck.reason}`,
+      path: cwd,
+    };
+  }
+
   const recursiveTraversal = findUnsafeRecursiveTraversal(command);
   if (recursiveTraversal) {
-    return recursiveTraversal;
+    return { kind: "recursive-traversal", reason: recursiveTraversal };
   }
   const dynamicPathComposition = findDynamicPathComposition(command);
   if (dynamicPathComposition) {
-    return dynamicPathComposition;
+    return { kind: "dynamic-path", reason: dynamicPathComposition };
   }
   const candidates = extractPathCandidates(command);
   for (const candidate of candidates) {
@@ -85,18 +118,48 @@ export function validateShellCommandPathPolicy(
     try {
       absolute = resolveCandidatePath(candidate, cwd);
     } catch (err) {
-      return err instanceof Error ? err.message : String(err);
+      return {
+        kind: "invalid-path",
+        reason: err instanceof Error ? err.message : String(err),
+        candidate,
+      };
+    }
+    if (isIgnoredShellDevicePath(absolute)) {
+      continue;
     }
     const sensitive = isSensitivePath(caseFoldForMatch(canonicalizePathForMatch(absolute)));
     if (sensitive) {
-      return `Sensitive path: command operand ${candidate} matches ${sensitive}`;
+      return {
+        kind: "sensitive-path",
+        reason: `Sensitive path: command operand ${candidate} matches ${sensitive}`,
+        candidate,
+        path: absolute,
+      };
     }
     const check = validateSandboxPath(absolute, sandboxRoot, [...extraAllowedDirectories]);
     if (!check.allowed) {
-      return `Sandbox: ${check.reason}`;
+      return {
+        kind: "sandbox-boundary",
+        reason: `Sandbox: ${check.reason}`,
+        candidate,
+        path: absolute,
+      };
     }
   }
   return null;
+}
+
+function isIgnoredShellDevicePath(canonicalPath: string): boolean {
+  return canonicalPath === SHELL_NULL_DEVICE_PATH;
+}
+
+export function validateShellCommandPathPolicy(
+  command: string,
+  cwd: string,
+  sandboxRoot: string,
+  extraAllowedDirectories: readonly string[],
+): string | null {
+  return findShellPathPolicyViolation(command, cwd, sandboxRoot, extraAllowedDirectories)?.reason ?? null;
 }
 
 function findUnsafeRecursiveTraversal(command: string): string | null {
