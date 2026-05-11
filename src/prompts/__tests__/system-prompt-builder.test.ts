@@ -1,8 +1,8 @@
 /**
- * PR-2 — Conversation Meta Output section (id 9.9).
+ * PR-2 — Conversation Continuity Guard section (id 9.9).
  *
  * Verifies:
- *   - Title + checkpoint instructions are emitted when experimentalContinuousBackend is ON
+ *   - Hidden title/checkpoint markers are forbidden when experimentalContinuousBackend is ON
  *   - Session title is injected when set
  *   - No session title line emitted when title is null
  *   - setSessionTitle("") normalises to null (no injection)
@@ -28,7 +28,7 @@ function makeBuilder({ continuousBackend = true }: { continuousBackend?: boolean
   return builder;
 }
 
-describe("SystemPromptBuilder — Conversation Meta Output", () => {
+describe("SystemPromptBuilder — Conversation Continuity Guard", () => {
   it("prioritizes direct plugin tool calls over agent_spawn", () => {
     const builder = makeBuilder();
     const prompt = builder.build();
@@ -38,22 +38,23 @@ describe("SystemPromptBuilder — Conversation Meta Output", () => {
     expect(prompt).toContain("해당 도구가 현재 보이면 직접 호출");
   });
 
-  it("always emits the <title> emit instruction in the prompt", () => {
+  it("emits the continuity guard instead of hidden marker output instructions", () => {
     const builder = makeBuilder();
     const prompt = builder.build();
-    expect(prompt).toContain("## 대화 메타 출력 (final answer 끝에 추가)");
-    expect(prompt).toContain("<title>10-20자 한국어 제목</title>");
-    expect(prompt).toContain("[checkpoint]");
+    expect(prompt).toContain("## 대화 연속성 출력 규칙");
+    expect(prompt).toContain("최종 답변에는 사용자에게 보여줄 본문만 작성하세요");
+    expect(prompt).toContain("`<title>...</title>`, `[checkpoint]`, `[checkpoint-suggested]` 문자열은 출력 금지입니다");
+    expect(prompt).not.toContain("## 대화 메타 출력 (final answer 끝에 추가)");
+    expect(prompt).not.toContain("<title>10-20자 한국어 제목</title>");
   });
 
-  it("always emits Title 정책 and Checkpoint 마커 sections", () => {
+  it("describes checkpoint handling as host-owned next-turn preflight", () => {
     const builder = makeBuilder();
     const prompt = builder.build();
-    expect(prompt).toContain("### Title 정책");
-    expect(prompt).toContain("### Checkpoint 마커");
-    expect(prompt).toContain("제안이 아니라 당신의 결정");
-    expect(prompt).toContain("누적 진화 제목");
-    expect(prompt).toContain("즉시 새 세션으로 회전");
+    expect(prompt).toContain("체크포인트와 세션 요약은 host 가 다음 턴 시작 전 context preflight 에서 자동 처리합니다");
+    expect(prompt).not.toContain("### Title 정책");
+    expect(prompt).not.toContain("### Checkpoint 마커");
+    expect(prompt).not.toContain("즉시 새 세션으로 회전");
   });
 
   it("injects current session title when set", () => {
@@ -92,8 +93,8 @@ describe("SystemPromptBuilder — Conversation Meta Output", () => {
     expect(builder.build()).toContain("현재 세션 제목:");
     builder.setSessionTitle(null);
     expect(builder.build()).not.toContain("현재 세션 제목:");
-    // Meta output instructions must still be present after clearing
-    expect(builder.build()).toContain("## 대화 메타 출력 (final answer 끝에 추가)");
+    // Continuity guard must still be present after clearing
+    expect(builder.build()).toContain("## 대화 연속성 출력 규칙");
   });
 });
 
@@ -166,7 +167,7 @@ describe("SystemPromptBuilder — safety flag (experimentalContinuousBackend)", 
   it("Section 9.9 is absent when flag is OFF (default)", () => {
     const builder = makeBuilder({ continuousBackend: false });
     const prompt = builder.build();
-    expect(prompt).not.toContain("## 대화 메타 출력 (final answer 끝에 추가)");
+    expect(prompt).not.toContain("## 대화 연속성 출력 규칙");
     expect(prompt).not.toContain("<title>10-20자 한국어 제목</title>");
     expect(prompt).not.toContain("[checkpoint-suggested]");
   });
@@ -182,8 +183,9 @@ describe("SystemPromptBuilder — safety flag (experimentalContinuousBackend)", 
   it("Section 9.9 appears when flag is turned ON", () => {
     const builder = makeBuilder({ continuousBackend: true });
     const prompt = builder.build();
-    expect(prompt).toContain("## 대화 메타 출력 (final answer 끝에 추가)");
-    expect(prompt).toContain("<title>10-20자 한국어 제목</title>");
+    expect(prompt).toContain("## 대화 연속성 출력 규칙");
+    expect(prompt).toContain("체크포인트 마커를 출력하지 마세요");
+    expect(prompt).not.toContain("<title>10-20자 한국어 제목</title>");
   });
 
   it("Section 8 appears when flag is ON and preamble is set", () => {
