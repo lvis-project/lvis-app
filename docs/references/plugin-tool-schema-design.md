@@ -354,6 +354,8 @@ interface PluginAuthStatusResult {
 
 **`<pluginId>.auth.changed` 이벤트** — 인증 전이 시 plugin 이 emit. `manifest.emittedEvents[]` 등록 필수. 호스트 `usePluginAuthStatuses` 훅이 받아 statusTool 재호출 → 뱃지 갱신. **폴링 안 함.** `lvis-plugin-ms-graph` / `lvis-plugin-lge-api` 가 PR 와 함께 emit 흐름 추가.
 
+> **이름 규칙**: `<pluginId>` 는 manifest `id` 필드 literal — `_`↔`-` 정규화 없음. tool 이름 prefix (`meeting_*`, `agent_hub_*`) 와 다른 형식이라 mirror 하지 말 것. 예) `id: "foo-bar"` (dash) 인 플러그인의 auth 이벤트는 정확히 `foo-bar.auth.changed` 여야 하며, `foo_bar.auth.changed` (underscore) 는 host hook 의 strict subscribe 와 매치 안 되어 뱃지 stuck. `manifest-validation.ts` 의 cross-field check 가 `auth` 선언 시 `emittedEvents[]` 에 `${id}.auth.changed` 가 빠져있으면 load-time `log.warn` 발행 — 같은 룰이 architecture.md §9.4a 에 명시됨.
+
 **예시 (ms-graph 플러그인)**
 
 ```jsonc
