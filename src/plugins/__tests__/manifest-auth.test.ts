@@ -245,6 +245,48 @@ describe("manifest validation — auth cross-field", () => {
     }
   });
 
+  it("warns when emittedEvents declares the WRONG transformed name (the literal #131 regression)", async () => {
+    // Pin the exact bug class: manifest id contains a dash but author
+    // mirrors their tool prefix (underscore) in the event declaration.
+    // Validator must still warn that the dash form is missing.
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      await writeManifest({
+        auth: {
+          statusTool: "test_status",
+          loginTool: "test_login",
+        },
+        // Note the underscore — this would PASS a naive "any auth.changed
+        // entry exists" check but still leave the host hook silent because
+        // the host subscribes to the literal manifest id (`test-plugin`).
+        emittedEvents: ["test_plugin.auth.changed"],
+      });
+      const validator = TEST_VALIDATOR;
+      await parsePluginJson(manifestPath, validator);
+      const warnMessages = warnSpy.mock.calls.map((c) => c.join(" "));
+      expect(warnMessages.some((m) => m.includes("test-plugin.auth.changed"))).toBe(true);
+      expect(warnMessages.some((m) => m.includes("emittedEvents[] is missing"))).toBe(true);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("does NOT warn when manifest does not declare auth (don't pollute non-auth plugins)", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      await writeManifest({
+        // no `auth` key at all + no emittedEvents — most plugins look
+        // like this. The new check must be silent for them.
+      });
+      const validator = TEST_VALIDATOR;
+      await parsePluginJson(manifestPath, validator);
+      const warnMessages = warnSpy.mock.calls.map((c) => c.join(" "));
+      expect(warnMessages.some((m) => m.includes("auth.changed"))).toBe(false);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
   // Defense-in-depth — security review MED #1.
   // The cross-field validator only enforces `auth.{statusTool,loginTool,
   // logoutTool} ⊂ uiCallable[]`, which means a manifest could route an
