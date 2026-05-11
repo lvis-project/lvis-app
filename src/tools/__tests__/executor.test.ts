@@ -51,6 +51,19 @@ function makeMockWebContents() {
   };
 }
 
+async function waitForApprovalPayload<T>(
+  wc: ReturnType<typeof makeMockWebContents>,
+  index = 0,
+): Promise<T> {
+  const deadline = Date.now() + 1000;
+  while (Date.now() < deadline) {
+    const payload = wc.send.mock.calls[index]?.[1];
+    if (payload) return payload as T;
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+  throw new Error("approval request was not sent");
+}
+
 function userPermissionContext(
   overrides: Partial<import("../executor.js").ToolPermissionContext> = {},
 ): import("../executor.js").ToolPermissionContext {
@@ -379,6 +392,73 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
     expect(result[0].content).toContain("Shell 경로 정책 차단");
     expect(approvalGate.requestAndWait).not.toHaveBeenCalled();
     await expect(permMgr.listPersistedRules()).resolves.toEqual([]);
+  });
+
+  it("queues headless shell out-of-allowed-dir access instead of executing after a LOW reviewer verdict", async () => {
+    const registry = new ToolRegistry();
+    const bash = new BashTool();
+    const executeSpy = vi.spyOn(bash, "execute");
+    registry.register(bash);
+    const dir = mkdtempSync(join(tmpdir(), "lvis-headless-outdir-"));
+    const outsideDir = mkdtempSync(join(tmpdir(), "lvis-headless-outside-"));
+    const outsideFile = join(outsideDir, "probe.txt");
+    writeFileSync(outsideFile, "blocked", "utf-8");
+
+    try {
+      const permMgr = new PermissionManager(join(dir, "permissions.json"));
+      permMgr.setMode("auto");
+      const deferredQueue = new DeferredQueue(join(dir, "deferred-queue.jsonl"));
+      permMgr.setReviewer({
+        classifier: {
+          classify: vi.fn(() => ({ level: "low", reason: "reviewer would otherwise allow" })),
+        },
+        cache: new VerdictCache(join(dir, "reviewer-cache.jsonl")),
+        deferredQueue,
+      });
+      const appendPermissionAuditEntry = vi.fn(async (entry: Record<string, unknown>) => ({
+        ...entry,
+        prevHash: "h",
+      }));
+      const auditLogger = {
+        log: vi.fn(),
+        isPermissionAuditChainReady: vi.fn(() => true),
+        assertPermissionAuditWritable: vi.fn(),
+        appendPermissionAuditEntry,
+      };
+      const executor = new ToolExecutor(
+        registry,
+        undefined,
+        permMgr,
+        undefined,
+        undefined,
+        undefined,
+        auditLogger as never,
+      );
+
+      const result = await executor.executeAll(
+        [{ id: "tu-headless-outdir", name: "bash", input: { command: `cat ${outsideFile}`, timeoutSeconds: 1 } }],
+        { sessionId: "sess-headless-outdir", permissionContext: userPermissionContext({ headless: true, trustOrigin: "llm-tool-arg" }) },
+      );
+
+      expect(result[0].is_error).toBe(true);
+      expect(result[0].content).toContain("권한 보류");
+      expect(result[0].content).toContain("허용 디렉토리 외부 경로 접근");
+      expect(executeSpy).not.toHaveBeenCalled();
+      const pending = deferredQueue.listPending();
+      expect(pending).toHaveLength(1);
+      expect(pending[0]).toMatchObject({
+        toolName: "bash",
+        source: "builtin",
+        category: "shell",
+        verdict: expect.objectContaining({
+          level: "high",
+          reason: "headless out-of-allowed-dir requires manual directory approval",
+        }),
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(outsideDir, { recursive: true, force: true });
+    }
   });
 
   it.each([
@@ -1370,26 +1450,24 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
       { sessionId: "sess-l1-out", permissionContext: userPermissionContext() },
     );
 
-    // Wait a tick for the request to be sent through the gate.
-    await new Promise((r) => setTimeout(r, 5));
-    expect(wc.send).toHaveBeenCalled();
-    const sent = wc.send.mock.calls[0][1] as {
+    const sent = await waitForApprovalPayload<{
+      id: string;
+      nonce: string;
+      hmac: string;
       kind?: string;
       outOfAllowedDir?: { candidatePath?: string; suggestedParent?: string };
       trustOrigin?: string;
-    };
+    }>(wc);
     expect(sent.kind).toBe("out-of-allowed-dir");
     expect(sent.outOfAllowedDir?.candidatePath).toContain("file.txt");
     expect(sent.trustOrigin).toBe("user-keyboard");
 
     // Renderer denies — tool must not execute.
-    const requestId = (wc.send.mock.calls[0][1] as { id: string; nonce: string; hmac: string }).id;
-    const reqPayload = wc.send.mock.calls[0][1] as { id: string; nonce: string; hmac: string };
-    gate.resolve(requestId, {
-      requestId,
+    gate.resolve(sent.id, {
+      requestId: sent.id,
       choice: "deny-once",
-      nonce: reqPayload.nonce,
-      hmac: reqPayload.hmac,
+      nonce: sent.nonce,
+      hmac: sent.hmac,
     });
 
     const results = await callPromise;
@@ -1416,8 +1494,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
       { sessionId: "sess-l1-allow", permissionContext: userPermissionContext() },
     );
 
-    await new Promise((r) => setTimeout(r, 5));
-    const sent = wc.send.mock.calls[0][1] as { id: string; nonce: string; hmac: string };
+    const sent = await waitForApprovalPayload<{ id: string; nonce: string; hmac: string }>(wc);
     gate.resolve(sent.id, {
       requestId: sent.id,
       choice: "allow-once",
@@ -1447,8 +1524,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
         { sessionId: "sess-l1-native-scope", permissionContext: userPermissionContext() },
       );
 
-      await new Promise((r) => setTimeout(r, 5));
-      const sent = wc.send.mock.calls[0][1] as { id: string; nonce: string; hmac: string };
+      const sent = await waitForApprovalPayload<{ id: string; nonce: string; hmac: string }>(wc);
       gate.resolve(sent.id, {
         requestId: sent.id,
         choice: "allow-once",
@@ -1483,16 +1559,14 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
         { sessionId: "sess-l1-shell-deny", permissionContext: userPermissionContext() },
       );
 
-      await new Promise((r) => setTimeout(r, 5));
-      expect(wc.send).toHaveBeenCalled();
-      const sent = wc.send.mock.calls[0][1] as {
+      const sent = await waitForApprovalPayload<{
         id: string;
         nonce: string;
         hmac: string;
         kind?: string;
         toolCategory?: string;
         outOfAllowedDir?: { candidatePath?: string };
-      };
+      }>(wc);
       expect(sent.kind).toBe("out-of-allowed-dir");
       expect(sent.toolCategory).toBe("shell");
       expect(sent.outOfAllowedDir?.candidatePath).toBe(canonicalTarget);
@@ -1527,19 +1601,18 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
       const executor = new ToolExecutor(registry, undefined, undefined, undefined, gate);
 
       const callPromise = executor.executeAll(
-        [{ id: "tu-l1-shell-allow", name: "bash", input: { command: `cat ${target}`, timeoutSeconds: 1 } }],
+        [{ id: "tu-l1-shell-allow", name: "bash", input: { command: `cat ${target}`, timeoutSeconds: 5 } }],
         { sessionId: "sess-l1-shell-allow", permissionContext: userPermissionContext() },
       );
 
-      await new Promise((r) => setTimeout(r, 5));
-      const sent = wc.send.mock.calls[0][1] as {
+      const sent = await waitForApprovalPayload<{
         id: string;
         nonce: string;
         hmac: string;
         kind?: string;
         toolCategory?: string;
         outOfAllowedDir?: { candidatePath?: string };
-      };
+      }>(wc);
       expect(sent.kind).toBe("out-of-allowed-dir");
       expect(sent.toolCategory).toBe("shell");
       expect(sent.outOfAllowedDir?.candidatePath).toBe(canonicalTarget);
@@ -1577,15 +1650,14 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
         { sessionId: "sess-l1-shell-null-device", permissionContext: userPermissionContext() },
       );
 
-      await new Promise((r) => setTimeout(r, 5));
-      const sent = wc.send.mock.calls[0][1] as {
+      const sent = await waitForApprovalPayload<{
         id: string;
         nonce: string;
         hmac: string;
         kind?: string;
         toolCategory?: string;
         outOfAllowedDir?: { candidatePath?: string };
-      };
+      }>(wc);
       expect(sent.kind).toBe("out-of-allowed-dir");
       expect(sent.toolCategory).toBe("shell");
       expect(sent.outOfAllowedDir?.candidatePath).toBe(canonicalTarget);
@@ -1649,15 +1721,14 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
         { sessionId: "sess-l1-shell-rm", permissionContext: userPermissionContext() },
       );
 
-      await new Promise((r) => setTimeout(r, 5));
-      const sent = wc.send.mock.calls[0][1] as {
+      const sent = await waitForApprovalPayload<{
         id: string;
         nonce: string;
         hmac: string;
         kind?: string;
         toolCategory?: string;
         outOfAllowedDir?: { candidatePath?: string };
-      };
+      }>(wc);
       expect(sent.kind).toBe("out-of-allowed-dir");
       expect(sent.toolCategory).toBe("shell");
       expect(sent.outOfAllowedDir?.candidatePath).toBe(canonicalTarget);
@@ -1732,7 +1803,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
         [{
           id: "tu-strict-headless-read",
           name: "read_file",
-          input: { path: "/var/tmp/strict-headless/data.txt" },
+          input: { path: join(process.cwd(), "package.json") },
         }],
         {
           sessionId: "sess-strict-headless-read",
@@ -1744,7 +1815,8 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
       expect(classifier.classify).not.toHaveBeenCalled();
       expect(wc.send).not.toHaveBeenCalled();
       expect(results[0].is_error).toBe(true);
-      expect(results[0].content).toContain("strict headless");
+      expect(results[0].content).toContain("headless");
+      expect(results[0].content).toContain("strict 모드");
       expect(queue.listPending()).toHaveLength(1);
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -1985,9 +2057,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
       },
     );
 
-    await new Promise((r) => setTimeout(r, 5));
-    expect(wc.send).toHaveBeenCalled();
-    const sent = wc.send.mock.calls[0][1] as { id: string; nonce: string; hmac: string; kind?: string };
+    const sent = await waitForApprovalPayload<{ id: string; nonce: string; hmac: string; kind?: string }>(wc);
     expect(sent.kind).toBe("out-of-allowed-dir");
     gate.resolve(sent.id, {
       requestId: sent.id,
@@ -2181,15 +2251,13 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
       { sessionId: "sess-l1-plugin-pathfields", permissionContext: userPermissionContext() },
     );
 
-    await new Promise((r) => setTimeout(r, 5));
-    expect(wc.send).toHaveBeenCalled();
-    const sent = wc.send.mock.calls[0][1] as {
+    const sent = await waitForApprovalPayload<{
       id: string;
       nonce: string;
       hmac: string;
       kind?: string;
       outOfAllowedDir?: { candidatePath?: string };
-    };
+    }>(wc);
     expect(sent.kind).toBe("out-of-allowed-dir");
     expect(sent.outOfAllowedDir?.candidatePath).toContain("plugin-folder/input");
     gate.resolve(sent.id, {
@@ -2244,15 +2312,13 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
       { sessionId: "sess-l1-plugin-dotted-pathfields", permissionContext: userPermissionContext() },
     );
 
-    await new Promise((r) => setTimeout(r, 5));
-    expect(wc.send).toHaveBeenCalled();
-    const sent = wc.send.mock.calls[0][1] as {
+    const sent = await waitForApprovalPayload<{
       id: string;
       nonce: string;
       hmac: string;
       kind?: string;
       outOfAllowedDir?: { candidatePath?: string };
-    };
+    }>(wc);
     expect(sent.kind).toBe("out-of-allowed-dir");
     expect(sent.outOfAllowedDir?.candidatePath).toContain("plugin-folder/nested/input");
     gate.resolve(sent.id, {

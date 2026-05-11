@@ -13,9 +13,8 @@
  * 4. global strict mode
  * 5. headless mutating reviewer lane
  * 6. allow 규칙
- * 7. MCP auto override
- * 8. 사용자 "항상 허용" 규칙
- * 9. Trust/category 기본 정책
+ * 7. 사용자 "항상 허용" 규칙
+ * 8. Trust/category 기본 정책 (MCP auto 는 별도 우회 없이 여기로 합류)
  */
 import { homedir } from "node:os";
 import { resolve } from "node:path";
@@ -425,7 +424,7 @@ export class PermissionManager {
     }
 
     // strict mode is mode-first after immutable deny/overlay-trigger guards:
-    // allow rules, always-allowed cache, MCP auto overrides, and reviewer
+    // allow rules, always-allowed cache, per-tool overrides, and reviewer
     // automatic approval lanes must not downgrade it.
     if (this.mode === "strict") {
       return {
@@ -449,10 +448,6 @@ export class PermissionManager {
       if (globMatch(allowTarget, rule.pattern)) {
         return { decision: "allow", reason: `allow 규칙: ${rule.pattern}`, layer: 3 };
       }
-    }
-
-    if (toolModeOverride === "auto") {
-      return { decision: "allow", reason: "MCP 서버 auto 모드", layer: 4 };
     }
 
     // 5. Always-allowed (사용자 이전 승인)

@@ -125,12 +125,12 @@ export function ToolApprovalDialog({
               <SummaryTile label="도구 / 출처">
                 <code>{request.toolName}</code>
                 <br />
-                source={source}
+                출처: {sourceLabel(source)}
               </SummaryTile>
-              <SummaryTile label="권한 category">
-                {category}
-                <br />
+              <SummaryTile label="권한 분류">
                 {categoryLabel(category)}
+                <br />
+                {category}
               </SummaryTile>
             </div>
 
@@ -250,7 +250,7 @@ function approvalReviewRows(
   if (category === "read") {
     rows.push(
       { label: "대상", value: request.target?.filePath ?? pickSummary(parsed, ["path", "paths", "target", "targets", "file", "directory", "resource", "query", "url", "uri"], inputSummary), monospace: true, testId: "tool-approval-input" },
-      { label: "범위", value: `${source} · ${category} · ${scopeLabel(parsed)}` },
+      { label: "범위", value: `${sourceLabel(source)} · ${categoryLabel(category)} · ${scopeLabel(parsed)}` },
       { label: "민감도", value: sensitivityLabel(parsed) },
       { label: "양", value: inputVolumeLabel(inputSummary) },
     );
@@ -258,20 +258,20 @@ function approvalReviewRows(
     rows.push(
       { label: "대상", value: request.target?.filePath ?? pickSummary(parsed, ["path", "paths", "target", "targets", "file", "configKey", "taskId", "id"], inputSummary), monospace: true, testId: "tool-approval-input" },
       { label: "변경", value: pickSummary(parsed, ["operation", "action", "mode", "patch", "content", "body", "text"], "변경 내용은 입력 요약 기준으로 확인합니다."), monospace: true },
-      { label: "영향", value: `${source} write · 파일/설정/사용자 데이터 변경 가능성` },
+      { label: "영향", value: `${sourceLabel(source)} · ${categoryLabel(category)} · 파일/설정/사용자 데이터 변경 가능성` },
       { label: "복구", value: pickSummary(parsed, ["diff", "backup", "rollback", "undo"], "복구 정보는 입력 요약에 명시되지 않음") },
     );
   } else if (category === "network") {
     rows.push(
-      { label: "endpoint", value: pickSummary(parsed, ["endpoint", "url", "uri", "host", "baseUrl"], "endpoint 정보는 입력 요약에 명시되지 않음"), monospace: true, testId: "tool-approval-input" },
-      { label: "method", value: pickSummary(parsed, ["method", "httpMethod"], "method 정보는 입력 요약에 명시되지 않음") },
-      { label: "payload", value: pickSummary(parsed, ["payload", "body", "message", "text", "input", "params", "args"], payloadLabel(inputSummary)), monospace: true },
-      { label: "auth", value: pickSummary(parsed, ["auth", "scope", "scopes", "tenant", "account"], "auth scope 정보는 입력 요약에 명시되지 않음") },
+      { label: "엔드포인트", value: pickSummary(parsed, ["endpoint", "url", "uri", "host", "baseUrl"], "엔드포인트 정보는 입력 요약에 명시되지 않음"), monospace: true, testId: "tool-approval-input" },
+      { label: "메서드", value: pickSummary(parsed, ["method", "httpMethod"], "메서드 정보는 입력 요약에 명시되지 않음") },
+      { label: "전송 내용", value: pickSummary(parsed, ["payload", "body", "message", "text", "input", "params", "args"], payloadLabel(inputSummary)), monospace: true },
+      { label: "인증 범위", value: pickSummary(parsed, ["auth", "scope", "scopes", "tenant", "account"], "인증 범위 정보는 입력 요약에 명시되지 않음") },
     );
   } else if (category === "shell") {
     rows.push(
       { label: "명령", value: pickSummary(parsed, ["command", "cmd", "args", "script", "argv"], inputSummary), monospace: true, testId: "tool-approval-input" },
-      { label: "cwd/env", value: pickSummary(parsed, ["cwd", "workingDirectory", "env", "environment"], "cwd/env 정보는 입력 요약에 명시되지 않음"), monospace: true },
+      { label: "작업 디렉토리/환경", value: pickSummary(parsed, ["cwd", "workingDirectory", "env", "environment"], "작업 디렉토리/환경 정보는 입력 요약에 명시되지 않음"), monospace: true },
       { label: "부작용", value: "파일 변경, 네트워크 호출, dependency install, background process 가능성을 명령 기준으로 확인합니다." },
       { label: "제한", value: pickSummary(parsed, ["timeout", "sandbox", "allowedDirectories", "allowedDir"], "제한 정보는 입력 요약에 명시되지 않음") },
     );
@@ -289,4 +289,8 @@ function approvalReviewRows(
     { label: "선택", value: "이번만 허용, 항상 허용, 거부, 항상 거부를 선택할 수 있습니다." },
   );
   return rows;
+}
+
+function sourceLabel(source: string): string {
+  return SOURCE_BADGE[source] ?? source;
 }
