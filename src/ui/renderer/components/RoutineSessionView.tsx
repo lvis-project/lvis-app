@@ -11,11 +11,9 @@
  * lvis:routines:v2:read-session IPC (path traversal guard enforced main-side).
  */
 import { useEffect, useState } from "react";
-import ReactMarkdown from "react-markdown";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
 import type { ChatEntry, ToolEntryItem } from "../../../lib/chat-stream-state.js";
 import type { LvisApi } from "../types.js";
-import { MARKDOWN_REMARK_PLUGINS } from "../utils/markdown-plugins.js";
 import { AssistantCard } from "./AssistantCard.js";
 import { ToolGroupCard } from "./ToolGroupCard.js";
 import { WorkGroup } from "./WorkGroup.js";
@@ -51,7 +49,7 @@ type RoutineSessionEntry =
 
 interface RoutineSessionModel {
   userEntries: Array<Extract<ChatEntry, { kind: "user" }>>;
-  summary: string | null;
+  resultEntry: Extract<ChatEntry, { kind: "assistant" }> | null;
   workEntries: Array<
     Extract<ChatEntry, { kind: "assistant" }>
     | Extract<ChatEntry, { kind: "tool_group" }>
@@ -87,8 +85,10 @@ function toRoutineSessionModel(lines: SessionLine[]): RoutineSessionModel {
   const pendingToolInputs = new Map<string, { name: string; input?: Record<string, unknown> }>();
   let pendingTools: ToolEntryItem[] = [];
   let pendingGroupIndex = 0;
-  let summary: string | null = null;
-  let sawAssistantText = false;
+  let resultCandidate: {
+    entry: Extract<ChatEntry, { kind: "assistant" }>;
+    workIndex: number;
+  } | null = null;
 
   const flushTools = () => {
     if (pendingTools.length === 0) return;
@@ -104,26 +104,35 @@ function toRoutineSessionModel(lines: SessionLine[]): RoutineSessionModel {
     pendingGroupIndex += 1;
   };
 
-  lines.forEach((line, index) => {
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]!;
     const role = line.role ?? "unknown";
     if (role === "assistant") {
       flushTools();
-      for (const toolCall of line.toolCalls ?? []) {
+      const toolCalls = line.toolCalls ?? [];
+      for (const toolCall of toolCalls) {
         if (!toolCall.id || !toolCall.name) continue;
         pendingToolInputs.set(toolCall.id, { name: toolCall.name, input: toolCall.input });
       }
       const rawText = normalizeContent(line.content ?? line.text ?? "");
-      const extractedSummary = extractSummaryText(rawText);
-      if (extractedSummary) summary = extractedSummary;
       const text = cleanAssistantText(rawText);
       if (text.trim().length > 0) {
-        sawAssistantText = true;
-        workEntries.push({ kind: "assistant", text, streaming: false, phase: "work" });
+        const entry: Extract<ChatEntry, { kind: "assistant" }> = {
+          kind: "assistant",
+          text,
+          streaming: false,
+          phase: "work",
+        };
+        workEntries.push(entry);
+        resultCandidate = toolCalls.length === 0
+          ? { entry, workIndex: workEntries.length - 1 }
+          : null;
       }
-      return;
+      continue;
     }
 
     if (role === "tool_result") {
+      resultCandidate = null;
       const toolUseId = line.toolUseId ?? `routine-tool-${index}`;
       const previousToolCall = pendingToolInputs.get(toolUseId);
       pendingTools.push({
@@ -134,22 +143,27 @@ function toRoutineSessionModel(lines: SessionLine[]): RoutineSessionModel {
         input: previousToolCall?.input,
         result: normalizeContent(line.content ?? line.text ?? ""),
       });
-      return;
+      continue;
     }
 
     flushTools();
+    resultCandidate = null;
     if (role === "user") {
       const text = normalizeContent(line.content ?? line.text ?? "");
       if (text.trim().length > 0) {
         userEntries.push({ kind: "user", text });
       }
     }
-  });
+  }
 
   flushTools();
+  const resultEntry = resultCandidate?.entry ?? null;
+  if (resultCandidate) {
+    workEntries.splice(resultCandidate.workIndex, 1);
+  }
   return {
     userEntries,
-    summary: summary ?? (sawAssistantText ? "[요약 형식 누락]" : null),
+    resultEntry,
     workEntries,
   };
 }
@@ -158,16 +172,10 @@ function cleanAssistantText(text: string): string {
   return text.replace(/\n?\s*<summary>[\s\S]*?<\/summary>\s*$/i, "").trim();
 }
 
-function extractSummaryText(text: string): string | null {
-  const match = text.match(/<summary>([\s\S]*?)<\/summary>\s*$/i);
-  const summary = match?.[1]?.trim();
-  return summary && summary.length > 0 ? summary : null;
-}
-
 export function RoutineSessionView({ jsonlPath, api, onClose }: RoutineSessionViewProps) {
   const [model, setModel] = useState<RoutineSessionModel>({
     userEntries: [],
-    summary: null,
+    resultEntry: null,
     workEntries: [],
   });
   const [loading, setLoading] = useState(true);
@@ -212,14 +220,14 @@ export function RoutineSessionView({ jsonlPath, api, onClose }: RoutineSessionVi
         )}
       </div>
 
-      <ScrollArea className="min-h-0 flex-1 px-4 py-3">
+      <ScrollArea className="min-h-0 flex-1 px-4 py-3" data-testid="routine-session-scroll">
         {loading && (
           <p className="text-sm text-muted-foreground py-4 text-center">로딩 중...</p>
         )}
         {error && (
           <p className="text-sm text-destructive py-4 text-center">{error}</p>
         )}
-        {!loading && !error && model.userEntries.length === 0 && !model.summary && model.workEntries.length === 0 && (
+        {!loading && !error && model.userEntries.length === 0 && !model.resultEntry && model.workEntries.length === 0 && (
           <p className="text-sm text-muted-foreground py-4 text-center">기록 없음</p>
         )}
         {!loading && !error && (
@@ -236,8 +244,8 @@ function RoutineSessionTimeline({ model }: { model: RoutineSessionModel }) {
       {model.userEntries.map((entry, i) => (
         <RoutineSessionEntryCard key={`user-${i}`} entry={entry} />
       ))}
-      {model.summary && (
-        <RoutineResultSummary summary={model.summary} />
+      {model.resultEntry && (
+        <RoutineResult entry={model.resultEntry} />
       )}
       {model.workEntries.length > 0 && (
         <div className="min-w-0 rounded-lg bg-secondary/30 px-2 py-1" data-testid="routine-session-workgroup">
@@ -252,17 +260,13 @@ function RoutineSessionTimeline({ model }: { model: RoutineSessionModel }) {
   );
 }
 
-function RoutineResultSummary({ summary }: { summary: string }) {
+function RoutineResult({ entry }: { entry: Extract<ChatEntry, { kind: "assistant" }> }) {
   return (
     <section
       className="min-w-0 rounded-lg bg-primary/10 px-3 py-3 text-sm"
-      data-testid="routine-session-summary"
+      data-testid="routine-session-result"
     >
-      <div className="prose prose-sm lvis-prose max-w-none break-words [overflow-wrap:anywhere]">
-        <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>
-          {summary}
-        </ReactMarkdown>
-      </div>
+      <AssistantCard entry={entry} isFinal />
     </section>
   );
 }
