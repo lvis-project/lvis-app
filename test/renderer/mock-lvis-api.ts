@@ -222,6 +222,12 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     memoryGetIndex: vi.fn(async () => memoryIndex),
     memoryListSessions: vi.fn(async () => []),
     memorySearchSessions: vi.fn(async () => []),
+    memoryGetAgentsMd: vi.fn(async () => "# Agents"),
+    memoryUpdateAgentsMd: vi.fn(async () => undefined),
+    memoryGetLvisMd: vi.fn(async () => "# Agents"),
+    memoryUpdateLvisMd: vi.fn(async () => undefined),
+    memoryGetUserPrefs: vi.fn(async () => "# Preferences"),
+    memoryUpdateUserPrefs: vi.fn(async () => undefined),
 
     listMarketplacePlugins: vi.fn(async () => marketplace),
     installMarketplacePlugin: vi.fn(async () => ({ ok: true })),

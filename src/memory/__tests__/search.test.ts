@@ -82,10 +82,20 @@ describe("MemoryManager AGENTS.md and MEMORY.md layout", () => {
     expect(mm.getMemoryIndex()).toContain("weekly sync discussion");
   });
 
+  it("does not allow saved memory titles to overwrite MEMORY.md", async () => {
+    const entry = await mm.saveMemory("MEMORY", "reserved index collision");
+
+    expect(entry.filename.toLowerCase()).not.toBe("memory.md");
+    expect(existsSync(join(dir, "memories", entry.filename))).toBe(true);
+    const index = readFileSync(join(dir, "memories", "MEMORY.md"), "utf-8");
+    expect(index).toContain(`# LVIS Memory Index`);
+    expect(index).toContain(`](./${entry.filename})`);
+  });
+
   it("removes deleted memories from MEMORY.md and the cached index", async () => {
     await mm.saveMemory("Meeting Notes", "weekly sync discussion");
 
-    mm.deleteMemory("meeting-notes.md");
+    await mm.deleteMemory("meeting-notes.md");
 
     expect(existsSync(join(dir, "memories", "meeting-notes.md"))).toBe(false);
     const index = readFileSync(join(dir, "memories", "MEMORY.md"), "utf-8");
@@ -93,8 +103,8 @@ describe("MemoryManager AGENTS.md and MEMORY.md layout", () => {
     expect(mm.getMemoryIndex()).not.toContain("weekly sync discussion");
   });
 
-  it("does not allow MEMORY.md to be deleted as a normal memory entry", () => {
-    expect(() => mm.deleteMemory("MEMORY.md")).toThrow(/MEMORY\.md is an index file/);
+  it("does not allow MEMORY.md to be deleted as a normal memory entry", async () => {
+    await expect(mm.deleteMemory("MEMORY.md")).rejects.toThrow(/MEMORY\.md is an index file/);
     expect(existsSync(join(dir, "memories", "MEMORY.md"))).toBe(true);
   });
 

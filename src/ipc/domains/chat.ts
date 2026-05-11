@@ -658,9 +658,10 @@ ${input}`;
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:entries:save", e); return UNAUTHORIZED_FRAME; }
     return memoryManager.saveMemory(title, content);
   });
-  ipcMain.handle("lvis:memory:entries:delete", (e, filename: string) => {
+  ipcMain.handle("lvis:memory:entries:delete", async (e, filename: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:entries:delete", e); return UNAUTHORIZED_FRAME; }
-    return memoryManager.deleteMemory(filename);
+    await memoryManager.deleteMemory(filename);
+    return undefined;
   });
   ipcMain.handle("lvis:memory:entries:search", (e, query: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:entries:search", e); return UNAUTHORIZED_FRAME; }

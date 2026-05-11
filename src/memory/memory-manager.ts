@@ -420,23 +420,29 @@ export class MemoryManager {
 
   /** 기억 저장 — 사용자가 "기억해" 하면 memories/에 저장 */
   async saveMemory(title: string, content: string): Promise<NoteEntry> {
-    const filename = this.slugify(title) + ".md";
+    const filename = this.memoryFilenameForTitle(title);
     const visibleContent = `# ${title}\n\n${content}\n`;
     const storedContent = `${MEMORY_MARKER}\n${visibleContent}`;
     const targetPath = join(this.memoryDir, filename);
-    await withFileLock(targetPath, async () => {
+    const indexPath = join(this.memoryDir, "MEMORY.md");
+    await withFileLock(indexPath, async () => {
       writeFileSync(targetPath, storedContent, "utf-8");
+      this.updateMemoryIndexLocked(indexPath, filename, title, content);
     });
-    await this.updateMemoryIndex(filename, title, content);
+    this.memoryIndex = this.readMemoryIndex();
     return { filename, title, content: visibleContent, updatedAt: new Date().toISOString() };
   }
 
   /** 기억 삭제 */
-  deleteMemory(filename: string): void {
+  async deleteMemory(filename: string): Promise<void> {
     const safeFilename = this.validateDeletableMemoryFilename(filename);
     const path = join(this.memoryDir, safeFilename);
-    if (existsSync(path)) unlinkSync(path);
-    this.removeMemoryIndexEntry(safeFilename);
+    const indexPath = join(this.memoryDir, "MEMORY.md");
+    await withFileLock(indexPath, async () => {
+      if (existsSync(path)) unlinkSync(path);
+      this.removeMemoryIndexEntryLocked(safeFilename, indexPath);
+    });
+    this.memoryIndex = this.readMemoryIndex();
   }
 
   /** AGENTS.md 업데이트 */
@@ -925,33 +931,33 @@ export class MemoryManager {
     log.warn(`${legacyName}/ exists alongside ${currentName}/; moved non-conflicting entries into ${currentName}/`);
   }
 
-  private async updateMemoryIndex(filename: string, title: string, content: string): Promise<void> {
-    const targetPath = join(this.memoryDir, "MEMORY.md");
+  private updateMemoryIndexLocked(targetPath: string, filename: string, title: string, content: string): void {
     const safeTitle = title.replace(/[\r\n\[\]]/g, " ").trim() || filename.replace(".md", "");
     const excerpt = content.replace(/\s+/g, " ").trim().slice(0, 140);
     const line = `- [${safeTitle}](./${filename}) — ${excerpt}`;
-    await withFileLock(targetPath, async () => {
-      const existing = existsSync(targetPath)
-        ? readFileSync(targetPath, "utf-8")
-        : DEFAULT_MEMORY_INDEX;
-      const lines = existing.split(/\r?\n/);
-      const linkNeedle = `](./${filename})`;
-      const idx = lines.findIndex((l) => l.includes(linkNeedle));
-      if (idx >= 0) {
-        lines[idx] = line;
-      } else {
-        if (!existing.includes("## Saved Memories")) {
-          lines.push("", "## Saved Memories", "");
-        }
-        lines.push(line);
+    const existing = existsSync(targetPath)
+      ? readFileSync(targetPath, "utf-8")
+      : DEFAULT_MEMORY_INDEX;
+    const lines = existing.split(/\r?\n/);
+    const linkNeedle = `](./${filename})`;
+    const idx = lines.findIndex((l) => l.includes(linkNeedle));
+    if (idx >= 0) {
+      lines[idx] = line;
+    } else {
+      if (!existing.includes("## Saved Memories")) {
+        lines.push("", "## Saved Memories", "");
       }
-      writeFileSync(targetPath, lines.join("\n").replace(/\n{4,}/g, "\n\n\n"), "utf-8");
-    });
-    this.memoryIndex = this.readMemoryIndex();
+      lines.push(line);
+    }
+    writeFileSync(targetPath, lines.join("\n").replace(/\n{4,}/g, "\n\n\n"), "utf-8");
   }
 
-  private removeMemoryIndexEntry(filename: string): void {
-    const targetPath = join(this.memoryDir, "MEMORY.md");
+  private memoryFilenameForTitle(title: string): string {
+    const filename = `${this.slugify(title)}.md`;
+    return this.isMemoryIndexFilename(filename) ? "memory-entry.md" : filename;
+  }
+
+  private removeMemoryIndexEntryLocked(filename: string, targetPath: string): void {
     if (!existsSync(targetPath)) {
       this.memoryIndex = "";
       return;
@@ -960,7 +966,6 @@ export class MemoryManager {
     const linkNeedle = `](./${filename})`;
     const lines = existing.split(/\r?\n/).filter((line) => !line.includes(linkNeedle));
     writeFileSync(targetPath, lines.join("\n"), "utf-8");
-    this.memoryIndex = this.readMemoryIndex();
   }
 
   private validateDeletableMemoryFilename(filename: string): string {
@@ -973,10 +978,14 @@ export class MemoryManager {
     ) {
       throw new Error("deleteMemory: invalid memory filename");
     }
-    if (filename.toLowerCase() === "memory.md") {
+    if (this.isMemoryIndexFilename(filename)) {
       throw new Error("deleteMemory: MEMORY.md is an index file and cannot be deleted as a memory entry");
     }
     return filename;
+  }
+
+  private isMemoryIndexFilename(filename: string): boolean {
+    return filename.toLowerCase() === "memory.md";
   }
 
   private truncateMemoryIndex(content: string): string {
