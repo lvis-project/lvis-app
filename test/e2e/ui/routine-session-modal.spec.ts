@@ -56,8 +56,22 @@ test.describe("routine session modal", () => {
     writeFileSync(
       resolve(sessionDir, SESSION_FILE),
       [
-        JSON.stringify({ role: "assistant", content: "루틴 결과를 확인합니다.\n<summary>routine summary</summary>" }),
+        JSON.stringify({
+          role: "assistant",
+          content: "루틴 결과를 확인합니다.",
+          toolCalls: [
+            {
+              id: "tool-1",
+              name: "web_search",
+              input: { query: "May 11 2026 Reuters technology AI regulation headlines" },
+            },
+          ],
+        }),
         JSON.stringify({ role: "tool_result", toolName: "web_search", content: LONG_RESULT }),
+        JSON.stringify({
+          role: "assistant",
+          content: "## Routine result\n\n- **Summary** routine summary\n\n<summary>routine summary</summary>",
+        }),
       ].join("\n") + "\n",
       "utf-8",
     );
@@ -96,10 +110,12 @@ test.describe("routine session modal", () => {
     });
     await expect(page.getByText("routine summary")).toBeVisible();
     await page.locator('[data-testid="overlay-card-primary-action"]').click();
-    await page.locator('[data-testid="routine-session-tool-result"]').waitFor({
+    await page.locator('[data-testid="assistant-message-body"]').filter({ hasText: "Routine result" }).waitFor({
       state: "visible",
       timeout: 15_000,
     });
+    await expect(page.getByText("TOOL_RESULT")).toHaveCount(0);
+    await expect(page.getByText("very-long-unbroken-path-segment")).toHaveCount(0);
 
     const metrics = await page.evaluate(() => {
       const box = (selector: string) => {
@@ -121,17 +137,17 @@ test.describe("routine session modal", () => {
         docWidth: document.documentElement.scrollWidth,
         bodyWidth: document.body.scrollWidth,
         dialog: box('[data-testid="routine-session-dialog"]'),
-        toolResult: box('[data-testid="routine-session-tool-result"]'),
+        assistantBody: box('[data-testid="assistant-message-body"]'),
       };
     });
 
     expect(metrics.docWidth).toBeLessThanOrEqual(metrics.viewportWidth + 1);
     expect(metrics.bodyWidth).toBeLessThanOrEqual(metrics.viewportWidth + 1);
     expect(metrics.dialog).not.toBeNull();
-    expect(metrics.toolResult).not.toBeNull();
+    expect(metrics.assistantBody).not.toBeNull();
     expect(metrics.dialog!.right).toBeLessThanOrEqual(metrics.viewportWidth + 1);
-    expect(metrics.toolResult!.right).toBeLessThanOrEqual(metrics.dialog!.right + 1);
-    expect(metrics.toolResult!.scrollWidth).toBeLessThanOrEqual(metrics.toolResult!.clientWidth + 1);
+    expect(metrics.assistantBody!.right).toBeLessThanOrEqual(metrics.dialog!.right + 1);
+    expect(metrics.assistantBody!.scrollWidth).toBeLessThanOrEqual(metrics.assistantBody!.clientWidth + 1);
     expect(metrics.dialog!.backgroundColor).not.toBe("rgba(0, 0, 0, 0)");
   });
 });
