@@ -37,6 +37,7 @@ function normalizeContent(content: unknown): string {
       return "";
     }).join("\n");
   }
+  if (content !== null && content !== undefined) return JSON.stringify(content);
   return "";
 }
 
@@ -77,9 +78,9 @@ export function RoutineSessionView({ jsonlPath, api, onClose }: RoutineSessionVi
   }, [jsonlPath, api]);
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between px-4 py-2 border-b">
-        <span className="text-sm font-medium text-muted-foreground">루틴 세션 기록</span>
+    <div className="flex h-full min-h-0 min-w-0 flex-col bg-card text-card-foreground" data-testid="routine-session-view">
+      <div className="flex shrink-0 items-center justify-between gap-3 border-b px-4 py-2">
+        <span className="min-w-0 text-sm font-medium text-muted-foreground">루틴 세션 기록</span>
         {onClose && (
           <button
             type="button"
@@ -92,7 +93,7 @@ export function RoutineSessionView({ jsonlPath, api, onClose }: RoutineSessionVi
         )}
       </div>
 
-      <ScrollArea className="flex-1 px-4 py-2">
+      <ScrollArea className="min-h-0 flex-1 px-4 py-3">
         {loading && (
           <p className="text-sm text-muted-foreground py-4 text-center">로딩 중...</p>
         )}
@@ -109,15 +110,16 @@ export function RoutineSessionView({ jsonlPath, api, onClose }: RoutineSessionVi
           return (
             <div
               key={i}
-              className={`mb-3 rounded-lg px-3 py-2 text-sm ${
+              className={`mb-3 min-w-0 overflow-hidden rounded-lg px-3 py-2 text-sm ${
                 role === "user"
-                  ? "bg-muted ml-8"
+                  ? "bg-muted sm:ml-8"
                   : role === "assistant"
-                    ? "bg-primary/10 mr-8"
+                    ? "bg-primary/10 sm:mr-8"
                     : "bg-secondary/50"
               }`}
+              data-testid={`routine-session-line-${role}`}
             >
-              <div className="flex items-center gap-2 mb-1">
+              <div className="mb-1 flex min-w-0 items-center gap-2">
                 <span className="text-xs font-semibold uppercase text-muted-foreground">
                   {role}
                 </span>
@@ -129,11 +131,32 @@ export function RoutineSessionView({ jsonlPath, api, onClose }: RoutineSessionVi
                   ) : null;
                 })()}
               </div>
-              <p className="whitespace-pre-wrap break-words">{text}</p>
+              <SessionLineContent role={role} text={text} />
             </div>
           );
         })}
       </ScrollArea>
     </div>
+  );
+}
+
+function SessionLineContent({ role, text }: { role: string; text: string }) {
+  if (role === "tool_result") {
+    return (
+      <pre
+        className="max-h-72 max-w-full overflow-auto whitespace-pre-wrap break-all rounded-md bg-background/70 p-2 font-mono text-xs leading-relaxed"
+        data-testid="routine-session-tool-result"
+      >
+        {text}
+      </pre>
+    );
+  }
+  return (
+    <p
+      className="min-w-0 whitespace-pre-wrap break-words text-sm leading-relaxed [overflow-wrap:anywhere]"
+      data-testid="routine-session-text"
+    >
+      {text}
+    </p>
   );
 }

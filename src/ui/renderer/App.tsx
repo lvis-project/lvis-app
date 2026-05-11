@@ -839,7 +839,8 @@ export function App() {
           onClick={() => setRoutineSessionModal(null)}
         >
           <div
-            className="relative w-full max-w-2xl max-h-[80vh] overflow-hidden rounded-lg shadow-xl"
+            className="relative max-h-[80dvh] w-[calc(100vw-32px)] max-w-2xl min-w-0 overflow-hidden rounded-lg bg-card text-card-foreground shadow-xl"
+            data-testid="routine-session-dialog"
             onClick={(e) => e.stopPropagation()}
           >
             <RoutineSessionView
