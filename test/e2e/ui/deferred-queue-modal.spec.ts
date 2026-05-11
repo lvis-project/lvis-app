@@ -83,7 +83,8 @@ test.describe("deferred queue modal", () => {
 
     const dialog = page.getByTestId("deferred-queue-dialog");
     await expect(dialog).toBeVisible();
-    await expect(dialog.locator("code", { hasText: "schedule_routine" })).toBeVisible();
+    const entry = dialog.getByTestId("deferred-entry-dq-e2e-long-input");
+    await expect(entry.locator("code", { hasText: "schedule_routine" }).first()).toBeVisible();
     await expect(dialog.getByRole("button", { name: "허용" })).toBeVisible();
     await expect(dialog.getByRole("button", { name: "거부" })).toBeVisible();
 
