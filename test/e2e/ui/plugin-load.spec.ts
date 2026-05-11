@@ -27,4 +27,12 @@ test('plugins with UI extensions appear in the composer plugin grid', async ({ m
   }
 
   await expect(grid.locator('[data-testid="plugin-cell-add"]').first()).toBeVisible();
+
+  const localIndexerCell = grid.locator('[data-testid="plugin-cell-plugin-local-indexer-main"]').first();
+  await expect(localIndexerCell, 'local-indexer grid cell must be clickable after sidebar removal').toBeVisible();
+  await localIndexerCell.click();
+
+  await expect(mainWindow.locator('webview').first(), 'plugin grid click should activate an embedded plugin UI').toBeVisible({
+    timeout: 30_000,
+  });
 });

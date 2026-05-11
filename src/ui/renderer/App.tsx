@@ -302,6 +302,12 @@ export function App() {
     handleLoadSession: sessionLoad, handleFork: sessionFork,
   } = useSessions(api, applyInitialSession);
 
+  useEffect(() => {
+    if (!searchOpen) return;
+    void refreshSessions();
+    void refreshStarred();
+  }, [refreshSessions, refreshStarred, searchOpen]);
+
   // Small adapter callbacks that bridge hook outputs to ChatView / MainToolbar.
   const {
     handleLoadSession, isEntryStarred, handleFork, handleToggleStar,
@@ -772,8 +778,6 @@ export function App() {
             onOpenMemoryView={() => setActiveView("memory")}
             onOpenSettings={() => onOpenSettings()}
             onOpenUnifiedSearch={() => {
-              void refreshSessions();
-              void refreshStarred();
               searchOpenOverlay();
             }}
             onOpenStarredView={() => setActiveView("starred")}

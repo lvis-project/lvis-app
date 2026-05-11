@@ -116,6 +116,12 @@ describe("MainToolbar", () => {
     expect(onToggleCurrentSessionStar).toHaveBeenCalledTimes(1);
   });
 
+  it("exposes semantic state for compact icon actions", () => {
+    renderWithProvider(defaultProps({ isCurrentSessionStarred: true }));
+    expect(screen.getByTitle("더 많은 메뉴")).toHaveAttribute("aria-label", "더 많은 메뉴");
+    expect(screen.getByTitle("현재 세션 즐겨찾기 해제")).toHaveAttribute("aria-pressed", "true");
+  });
+
   it("keeps hamburger enabled while streaming", () => {
     renderWithProvider(defaultProps({ streaming: true }));
     expect(screen.getByTitle("더 많은 메뉴")).not.toBeDisabled();

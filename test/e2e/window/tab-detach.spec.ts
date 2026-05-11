@@ -87,8 +87,9 @@ test.describe('tab-detach + magnetic snap', () => {
     app.process().stderr?.on('data', (d: Buffer) => process.stdout.write(`[electron:stderr] ${d}`));
 
     mainWindow = await app.firstWindow();
-    // Wait for the app to finish booting (toolbar tablist signals React mounted).
-    await mainWindow.waitForSelector('[role="tablist"]', { timeout: 60_000 });
+    // Wait for the app to finish booting. The top action bar is the first
+    // persistent shell element after React mounts.
+    await mainWindow.waitForSelector('[data-testid="main-toolbar"]', { timeout: 60_000 });
   });
 
   test.afterAll(async () => {

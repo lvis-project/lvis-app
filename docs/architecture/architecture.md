@@ -93,7 +93,7 @@ graph TB
         CLIENT["LVIS Client<br/>(Electron + Rust Core)"]
         LOCAL_IDX["Local Index Engine<br/>(문서·파일·메일 인덱싱)"]
         LOCAL_STORE["Local Knowledge Store<br/>(SQLite + PageIndex Tree)"]
-        MEMORY["Memory<br/>(LVIS.md + notes/)"]
+        MEMORY["Memory<br/>(LVIS.md + memory/)"]
         OVERLAY["Overlay Trigger Surface<br/>(host:overlay)"]
     end
 
@@ -322,14 +322,14 @@ graph TB
         OVERLAY_VIEW["Overlay Prompt View"]
         PLUGIN_SLOTS["Dynamic Plugin Slots<br/>(Plugin View·Toolbar·Panel·Widget)"]
         FILE_VIEW["File Explorer"]
-        MEM_VIEW["Memory / Notes"]
+        MEM_VIEW["Memory"]
     end
 
     subgraph "Rust Native Module via NAPI-RS"
         KW_ENGINE["Keyword Detecting Engine"]
         ROUTE_ENGINE["Agent Route Engine"]
         IDX_ENGINE["Local Index Engine"]
-        MEM_ENGINE["Memory Reader<br/>(LVIS.md / notes/ 로드)"]
+        MEM_ENGINE["Memory Reader<br/>(LVIS.md / memory/ 로드)"]
         OVERLAY_TRIGGER["Overlay Trigger Surface"]
         TOOL_EXEC["Tool Executor"]
         HOOK_RUNNER["Hook Runner<br/>(Pre/PostToolUse)"]
@@ -339,7 +339,7 @@ graph TB
     subgraph "Local Storage"
         SQLITE["SQLite<br/>(메타데이터 + FTS5)"]
         TREE_CACHE["PageIndex Tree Cache<br/>(JSON)"]
-        MEM_DIR["Memory Files<br/>(LVIS.md · notes/)"]
+        MEM_DIR["Memory Files<br/>(LVIS.md · memory/)"]
         PLUGIN_DIR["Plugin Directory<br/>(설치된 플러그인)"]
     end
 
@@ -434,7 +434,7 @@ sequenceDiagram
 ```mermaid
 flowchart TB
     INPUT["👤 사용자 입력"]
-    MEMORY["Memory / Context Load<br/>(LVIS.md + notes/ + 로컬 컨텍스트)"]
+    MEMORY["Memory / Context Load<br/>(LVIS.md + memory/ + 로컬 컨텍스트)"]
     DETECT["Keyword Detecting Engine<br/>(builtin + plugin keyword groups)"]
     DISAMBIG{"명확한 매칭인가?"}
     RECOMMEND["Lgenie Keyword Recommender<br/>(최적 후보 추천 / 애매하면 사용자 문의)"]
@@ -867,7 +867,7 @@ flowchart LR
 | --- | --- | --- |
 | **Auto-Compact** | 사용률 40% 기본값 + 20% 단위 설정 기반 자동 압축 | `chat.autoCompact` + 80k token threshold. microcompact(항상) + full compact(임계치) 2-stage 구현 |
 | **saveSession** | 매 턴 세션 히스토리 저장 및 복구 포인트 생성 | `~/.lvis/sessions/<id>.jsonl`에 저장 |
-| **Memory Extraction** | 대화/도구 결과에서 기억할 내용을 구조화 저장 | `"기억해"`류 요청을 notes/로 자동 저장 |
+| **Memory Extraction** | 대화/도구 결과에서 기억할 내용을 구조화 저장 | `"기억해"`류 요청을 memory/로 자동 저장 |
 | **Audit Log** | 대화·도구·정책 차단·승인 이력을 기록 | 구현됨 |
 | **Idle poke** | 다음 입력 대기 전 상태 갱신과 조용한 heartbeat 보조 신호 | idle scheduler 신호 전달 구현 |
 | **Plugin PostTurn** | 활성 플러그인의 후처리 훅 실행 | 문서상 목표 설계 유지 |
@@ -948,7 +948,7 @@ sequenceDiagram
 | --- | --- | --- |
 | `createUserMessage()` | renderer input → `ipcMain.handle("lvis:chat:send")` | Electron IPC + 조기 keyword preflight |
 | Append to conversation history | `ConversationHistory.append()` | + assistant `thought` 보존 |
-| Build system prompt | system prompt assembly | + LVIS.md · notes/ · 조직 컨텍스트 · tool schema · overlay trigger context |
+| Build system prompt | system prompt assembly | + LVIS.md · memory/ · 조직 컨텍스트 · tool schema · overlay trigger context |
 | Stream to Claude API | `provider.streamTurn(...)` | provider 공통 인터페이스로 Claude/Gemini/OpenAI 수용 |
 | `findToolByName()` | `ToolRegistry.findByName()` | + Plugin · MCP 동적 등록 통합 레지스트리 |
 | `canUseTool()` | `GovernancePolicy` + `PermissionManager.checkDetailed()` | + source/trust aware approval gate + 정책 동기화 전제 |
@@ -1298,7 +1298,7 @@ artifact 와 save data 를 함께 보관한다 (호스트 root 에 끼어들지 
 | ----------------------- | --------- | ---------------- | ------------------------ |
 | **LVIS.md**             | 로컬 파일 | 영구 (수동 관리) | 관리자 + 사용자          |
 | **user-preferences.md** | 로컬 파일 | 영구 (수동 관리) | 사용자                   |
-| **notes/**              | 로컬 파일 | 영구 (수동 관리) | 사용자 ("기억해" 명령)   |
+| **memory/**             | 로컬 파일 | 영구 (수동 관리) | 사용자 ("기억해" 명령)   |
 | **Session Context**     | In-memory | 현재 세션        | 자동 (대화 종료 시 소멸) |
 
 > **v2 대비 변경 이유**: v2의 4계층 기억(Session→Working→Episodic→Semantic)과 자동 승격·만료·연결 로직은 현 단계에서 과도한 복잡도를 유발한다. Copilot의 `.github/copilot-instructions.md`, Claude Code의 `CLAUDE.md` 패턴처럼 파일 기반으로 시작하고, 필요가 검증되면 점진적으로 확장한다.
@@ -1693,8 +1693,8 @@ graph TB
     end
 
     subgraph "📋 System & Utility"
-        MEMORY_READ["MemoryRead<br/>LVIS.md · notes/ 조회"]
-        MEMORY_WRITE["MemoryWrite<br/>notes/ 저장"]
+        MEMORY_READ["MemoryRead<br/>LVIS.md · memory/ 조회"]
+        MEMORY_WRITE["MemoryWrite<br/>memory/ 저장"]
         TODO["TodoWrite<br/>태스크 목록 관리"]
         ASK_USER["AskUser<br/>사용자 확인 요청"]
         CALENDAR["Calendar<br/>일정 조회·생성"]

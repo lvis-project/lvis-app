@@ -86,7 +86,7 @@ test('R5: stale v0.1.x cached manifest has old entry path', async ({ mainWindow 
   expect(minor).toBeLessThan(2);
 
   // Verify that the main window loaded at all (Electron booted)
-  await expect(mainWindow.locator('[data-testid="sidebar"]').first()).toBeVisible({
+  await expect(mainWindow.locator('[data-testid="main-toolbar"]').first()).toBeVisible({
     timeout: 30_000,
   });
 });
@@ -105,7 +105,7 @@ test('R5: v0.2.0 manifest entry path is dist/ui/agent-hub-panel-v3.js', async ({
   expect(major).toBe(0);
   expect(minor).toBe(2);
 
-  await expect(mainWindow.locator('[data-testid="sidebar"]').first()).toBeVisible({
+  await expect(mainWindow.locator('[data-testid="main-toolbar"]').first()).toBeVisible({
     timeout: 30_000,
   });
 });
@@ -257,7 +257,7 @@ test('R5: no silent mount failure — v3 panel is reachable after cache bust', a
   }, PLUGIN_ID);
 
   // Main window must still be alive
-  await expect(mainWindow.locator('[data-testid="sidebar"]').first()).toBeVisible({
+  await expect(mainWindow.locator('[data-testid="main-toolbar"]').first()).toBeVisible({
     timeout: 15_000,
   });
 

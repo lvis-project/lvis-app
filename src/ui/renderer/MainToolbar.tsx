@@ -77,6 +77,7 @@ export function MainToolbar({
               onClick={() => void onToggleCurrentSessionStar()}
               title={isCurrentSessionStarred ? "현재 세션 즐겨찾기 해제" : "현재 세션 즐겨찾기"}
               aria-label={isCurrentSessionStarred ? "현재 세션 즐겨찾기 해제" : "현재 세션 즐겨찾기"}
+              aria-pressed={isCurrentSessionStarred}
             >
               <Star className={`h-3.5 w-3.5 ${isCurrentSessionStarred ? "fill-yellow-400 text-yellow-400" : ""}`} />
             </Button>
@@ -86,11 +87,22 @@ export function MainToolbar({
 
         {/* ── Hamburger — wraps infrequent actions ────────────────────── */}
         <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="더 많은 메뉴">
-              <Menu className="h-3.5 w-3.5" />
-            </Button>
-          </DropdownMenuTrigger>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 p-0"
+                  title="더 많은 메뉴"
+                  aria-label="더 많은 메뉴"
+                >
+                  <Menu className="h-3.5 w-3.5" />
+                </Button>
+              </DropdownMenuTrigger>
+            </TooltipTrigger>
+            <TooltipContent>더 많은 메뉴</TooltipContent>
+          </Tooltip>
           <DropdownMenuContent align="end" className="w-[280px]">
             {/* ── New chat ── */}
             <DropdownMenuItem disabled={streaming} onClick={onNewChat}>
