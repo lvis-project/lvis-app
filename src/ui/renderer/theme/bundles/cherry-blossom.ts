@@ -15,7 +15,7 @@ import type { ThemeBundle } from "./types.js";
  */
 export const cherryBlossomBundle: ThemeBundle = {
   id: "cherry-blossom",
-  name: "체리 블라썸",
+  name: "Cherry Blossom",
   description: "라이트 셸 + 체리 레드 액센트 + 스플래시 브랜드 팔레트",
   shell: "light",
   highContrast: false,

@@ -8,7 +8,7 @@ import type { ThemeBundle } from "./types.js";
  */
 export const highContrastBundle: ThemeBundle = {
   id: "high-contrast",
-  name: "고대비",
+  name: "High Contrast",
   description: "블랙 배경 + 옐로우 액센트 — 접근성 최우선",
   shell: "dark",
   highContrast: true,

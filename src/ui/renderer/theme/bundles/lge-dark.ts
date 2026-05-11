@@ -9,7 +9,7 @@ import type { ThemeBundle } from "./types.js";
  */
 export const lgeDarkBundle: ThemeBundle = {
   id: "lge-dark",
-  name: "LGE 다크",
+  name: "LGE Dark",
   description: "다크 셸 + LG 웜그레이 서피스 + 비비드 퍼플 액센트",
   shell: "dark",
   highContrast: false,

@@ -2,7 +2,7 @@ import type { ThemeBundle } from "./types.js";
 
 export const midnightBundle: ThemeBundle = {
   id: "midnight",
-  name: "미드나잇",
+  name: "Midnight",
   description: "다크 셸 + 마젠타 액센트 + 다크 코드",
   shell: "dark",
   highContrast: false,

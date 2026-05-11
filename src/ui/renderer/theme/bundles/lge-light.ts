@@ -9,7 +9,7 @@ import type { ThemeBundle } from "./types.js";
  */
 export const lgeLightBundle: ThemeBundle = {
   id: "lge-light",
-  name: "LGE 라이트",
+  name: "LGE Light",
   description: "라이트 셸 + LG 웜그레이 서피스 + 비비드 퍼플 액센트",
   shell: "light",
   highContrast: false,

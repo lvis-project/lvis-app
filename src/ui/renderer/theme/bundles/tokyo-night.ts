@@ -2,7 +2,7 @@ import type { ThemeBundle } from "./types.js";
 
 export const tokyoNightBundle: ThemeBundle = {
   id: "tokyo-night",
-  name: "도쿄나이트",
+  name: "Tokyo Night",
   description: "다크 셸 + 블루 액센트 + 다크 코드",
   shell: "dark",
   highContrast: false,

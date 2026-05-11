@@ -2,7 +2,7 @@ import type { ThemeBundle } from "./types.js";
 
 export const forestBundle: ThemeBundle = {
   id: "forest",
-  name: "포레스트",
+  name: "Forest",
   description: "라이트 셸 + 틸 액센트 + 라이트 코드",
   shell: "light",
   highContrast: false,
