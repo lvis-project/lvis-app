@@ -81,7 +81,7 @@ export function OutOfAllowedDirCard({
   return (
     <Dialog open={open} onOpenChange={() => { /* require explicit choice */ }}>
       <DialogContent
-        className="max-w-xl"
+        size="lg"
         onInteractOutside={(e) => {
           if (request.requireExplicit) e.preventDefault();
           else onDecide("deny-once");

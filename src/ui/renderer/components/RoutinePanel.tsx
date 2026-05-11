@@ -11,6 +11,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../..
 import { Input } from "../../../components/ui/input.js";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
 import { Textarea } from "../../../components/ui/textarea.js";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "../../../components/ui/dialog.js";
 import type { LvisApi, PluginCardSummary } from "../types.js";
 import type { AddRoutineInput, RoutineRecord, RoutineExecution, RepeatKind, RoutineSchedule } from "../../../shared/routines-types.js";
 import { MAX_PERSISTED_ROUTINES, MAX_LLM_SESSION_ROUTINES } from "../../../shared/routines-types.js";
@@ -360,15 +368,14 @@ export function AddRoutineModal({ api, onClose, onAdded }: AddRoutineModalProps)
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[hsl(var(--overlay)/0.5)]"
-      data-testid="add-routine-modal"
-    >
-      <div className="w-full max-w-lg rounded-lg border bg-background p-6 shadow-lg">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-base font-semibold">루틴 추가</h2>
-          <Button size="sm" variant="ghost" onClick={onClose}>✕</Button>
-        </div>
+    <Dialog open onOpenChange={(next) => { if (!next) onClose(); }}>
+      <DialogContent size="md" data-testid="add-routine-modal">
+        <DialogHeader className="flex flex-row items-center justify-between space-y-0">
+          <DialogTitle className="text-base">루틴 추가</DialogTitle>
+          <DialogClose asChild>
+            <Button size="sm" variant="ghost" className="-mr-2 h-7 w-7 p-0" aria-label="닫기">✕</Button>
+          </DialogClose>
+        </DialogHeader>
 
         {/* Tab selector for the three routine input styles. */}
         <div className="mb-4 flex gap-1 rounded-md border p-1 bg-muted/30" role="tablist">
@@ -605,8 +612,8 @@ export function AddRoutineModal({ api, onClose, onAdded }: AddRoutineModalProps)
             </div>
           </div>
         )}
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -789,24 +796,31 @@ export function RoutinePanel({ api }: RoutinePanelProps) {
         </CardContent>
       </Card>
 
-      {selectedSessionPath && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-[hsl(var(--overlay)/0.4)] p-4"
+      <Dialog
+        open={selectedSessionPath !== null}
+        onOpenChange={(next) => { if (!next) setSelectedSessionPath(null); }}
+      >
+        <DialogContent
+          size="lg"
+          className="flex max-h-[85dvh] min-w-0 flex-col gap-0 overflow-hidden p-0"
           data-testid="routine-panel-session-dialog"
         >
-          <div className="flex max-h-[85dvh] w-[min(760px,calc(100vw-32px))] min-w-0 flex-col overflow-hidden rounded-xl border bg-card shadow-xl">
-            <div className="flex items-center justify-between border-b px-4 py-3">
-              <div className="text-sm font-semibold">루틴 세션 기록</div>
-              <Button size="sm" variant="ghost" onClick={() => setSelectedSessionPath(null)}>
-                닫기
-              </Button>
-            </div>
-            <div className="min-h-0 overflow-auto p-4">
+          <DialogHeader className="flex flex-row items-center justify-between space-y-0 border-b px-4 py-3">
+            <DialogTitle className="text-sm">루틴 세션 기록</DialogTitle>
+            <DialogClose asChild>
+              <Button size="sm" variant="ghost" aria-label="닫기">닫기</Button>
+            </DialogClose>
+          </DialogHeader>
+          <DialogDescription className="sr-only">
+            선택한 루틴 실행 기록을 봅니다.
+          </DialogDescription>
+          <div className="min-h-0 flex-1 overflow-auto p-4">
+            {selectedSessionPath && (
               <RoutineSessionView api={api} jsonlPath={selectedSessionPath} />
-            </div>
+            )}
           </div>
-        </div>
-      )}
+        </DialogContent>
+      </Dialog>
 
       {showAddModal && (
         <AddRoutineModal

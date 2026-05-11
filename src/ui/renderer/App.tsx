@@ -20,6 +20,13 @@ import { buildQuickActions } from "./components/CommandPopover.js";
 import { MainToolbar } from "./MainToolbar.js";
 import { MainContent } from "./MainContent.js";
 import { SettingsDialog } from "./SettingsDialog.js";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "../../components/ui/dialog.js";
 import { StatusBar } from "./components/StatusBar.js";
 import { useStatusBar, type NotificationToastMeta } from "./hooks/use-status-bar.js";
 import { useSettings } from "./hooks/use-settings.js";
@@ -869,25 +876,36 @@ export function App() {
       <DevConsoleToggle />
       {/* Snap edge highlight — shown when a detached child window enters the snap zone */}
       <SnapEdgeHighlight />
-      {/* Routine session modal opened from OverlayCard "결과 보기" */}
-      {routineSessionModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-[hsl(var(--overlay)/0.5)] backdrop-blur-sm"
-          onClick={() => setRoutineSessionModal(null)}
+      {/* Routine session modal opened from OverlayCard "결과 보기".
+          Migrated to Radix Dialog so it inherits the unified Modal v1 glass
+          surface + themed overlay/blur. RoutineSessionView still owns its
+          own internal header + close button. */}
+      <Dialog
+        open={routineSessionModal !== null}
+        onOpenChange={(next) => {
+          if (!next) setRoutineSessionModal(null);
+        }}
+      >
+        <DialogContent
+          size="lg"
+          className="flex h-[80dvh] min-w-0 flex-col gap-0 overflow-hidden p-0"
+          data-testid="routine-session-dialog"
         >
-          <div
-            className="relative flex h-[80dvh] max-h-[80dvh] w-[calc(100vw-32px)] max-w-2xl min-w-0 flex-col overflow-hidden rounded-lg bg-card text-card-foreground shadow-xl"
-            data-testid="routine-session-dialog"
-            onClick={(e) => e.stopPropagation()}
-          >
+          <DialogHeader className="sr-only">
+            <DialogTitle>루틴 세션 기록</DialogTitle>
+            <DialogDescription>
+              루틴 실행에 의해 저장된 메시지 기록을 봅니다.
+            </DialogDescription>
+          </DialogHeader>
+          {routineSessionModal && (
             <RoutineSessionView
               jsonlPath={routineSessionModal.jsonlPath}
               api={api}
               onClose={() => setRoutineSessionModal(null)}
             />
-          </div>
-        </div>
-      )}
+          )}
+        </DialogContent>
+      </Dialog>
     </OverlayContextProvider>
     </TooltipProvider>
     </ThemeProvider>
