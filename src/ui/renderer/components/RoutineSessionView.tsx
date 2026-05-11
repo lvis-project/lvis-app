@@ -1,16 +1,21 @@
 /**
  * RoutineSessionView — read-only viewer for a single routine session.
  *
- * Renders JSONL lines from a routine session file as a simple timeline.
+ * Renders JSONL messages from a routine session file as a read-only
+ * conversation timeline.
  * Deliberately does NOT reuse ChatView — routine sessions are read-only
- * history, not interactive chat windows.
+ * history, not interactive chat windows — but assistant/tool_result rendering
+ * follows the same components used by the main conversation loop.
  *
  * Q9 isolation: reads only from ~/.lvis/routine/sessions/ via the
  * lvis:routines:v2:read-session IPC (path traversal guard enforced main-side).
  */
 import { useEffect, useState } from "react";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
+import type { ChatEntry, ToolEntryItem } from "../../../lib/chat-stream-state.js";
 import type { LvisApi } from "../types.js";
+import { AssistantCard } from "./AssistantCard.js";
+import { ToolGroupCard } from "./ToolGroupCard.js";
 
 export interface RoutineSessionViewProps {
   /** Path to the JSONL file (returned by list-sessions IPC). */
@@ -24,7 +29,22 @@ interface SessionLine {
   content?: unknown;
   text?: string;
   timestamp?: string;
+  thought?: string;
+  toolUseId?: string;
+  toolName?: string;
+  isError?: boolean;
+  meta?: unknown;
+  toolCalls?: Array<{
+    id?: string;
+    name?: string;
+    input?: Record<string, unknown>;
+  }>;
 }
+
+type RoutineSessionEntry =
+  | Extract<ChatEntry, { kind: "assistant" }>
+  | Extract<ChatEntry, { kind: "user" }>
+  | Extract<ChatEntry, { kind: "tool_group" }>;
 
 function normalizeContent(content: unknown): string {
   if (typeof content === "string") return content;
@@ -49,8 +69,74 @@ function parseSessionLine(raw: string): SessionLine | null {
   }
 }
 
+function toRoutineSessionEntries(lines: SessionLine[]): RoutineSessionEntry[] {
+  const entries: RoutineSessionEntry[] = [];
+  const pendingToolInputs = new Map<string, { name: string; input?: Record<string, unknown> }>();
+  let pendingTools: ToolEntryItem[] = [];
+  let pendingGroupIndex = 0;
+
+  const flushTools = () => {
+    if (pendingTools.length === 0) return;
+    const groupId = `routine-tools-${pendingGroupIndex}`;
+    entries.push({
+      kind: "tool_group",
+      groupId,
+      groupIds: [groupId],
+      status: pendingTools.some((tool) => tool.status === "error") ? "error" : "done",
+      tools: pendingTools,
+    });
+    pendingTools = [];
+    pendingGroupIndex += 1;
+  };
+
+  lines.forEach((line, index) => {
+    const role = line.role ?? "unknown";
+    if (role === "assistant") {
+      flushTools();
+      for (const toolCall of line.toolCalls ?? []) {
+        if (!toolCall.id || !toolCall.name) continue;
+        pendingToolInputs.set(toolCall.id, { name: toolCall.name, input: toolCall.input });
+      }
+      const text = cleanAssistantText(normalizeContent(line.content ?? line.text ?? ""));
+      if (text.trim().length > 0) {
+        entries.push({ kind: "assistant", text, streaming: false });
+      }
+      return;
+    }
+
+    if (role === "tool_result") {
+      const toolUseId = line.toolUseId ?? `routine-tool-${index}`;
+      const previousToolCall = pendingToolInputs.get(toolUseId);
+      pendingTools.push({
+        toolUseId,
+        name: line.toolName ?? previousToolCall?.name ?? "tool",
+        displayOrder: pendingTools.length,
+        status: line.isError ? "error" : "done",
+        input: previousToolCall?.input,
+        result: normalizeContent(line.content ?? line.text ?? ""),
+      });
+      return;
+    }
+
+    flushTools();
+    if (role === "user") {
+      const text = normalizeContent(line.content ?? line.text ?? "");
+      if (text.trim().length > 0) {
+        entries.push({ kind: "user", text });
+      }
+    }
+  });
+
+  flushTools();
+  return entries;
+}
+
+function cleanAssistantText(text: string): string {
+  return text.replace(/\n?\s*<summary>[\s\S]*?<\/summary>\s*$/i, "").trim();
+}
+
 export function RoutineSessionView({ jsonlPath, api, onClose }: RoutineSessionViewProps) {
-  const [lines, setLines] = useState<SessionLine[]>([]);
+  const [entries, setEntries] = useState<RoutineSessionEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -67,7 +153,7 @@ export function RoutineSessionView({ jsonlPath, api, onClose }: RoutineSessionVi
           .filter((l) => l.trim().length > 0)
           .map(parseSessionLine)
           .filter((l): l is SessionLine => l !== null);
-        setLines(parsed);
+        setEntries(toRoutineSessionEntries(parsed));
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err));
       } finally {
@@ -100,63 +186,39 @@ export function RoutineSessionView({ jsonlPath, api, onClose }: RoutineSessionVi
         {error && (
           <p className="text-sm text-destructive py-4 text-center">{error}</p>
         )}
-        {!loading && !error && lines.length === 0 && (
+        {!loading && !error && entries.length === 0 && (
           <p className="text-sm text-muted-foreground py-4 text-center">기록 없음</p>
         )}
-        {!loading && !error && lines.map((line, i) => {
-          const role = line.role ?? "unknown";
-          const text = line.content !== undefined ? normalizeContent(line.content) : (line.text ?? "");
-          const ts = line.timestamp;
-          return (
-            <div
-              key={i}
-              className={`mb-3 min-w-0 overflow-hidden rounded-lg px-3 py-2 text-sm ${
-                role === "user"
-                  ? "bg-muted sm:ml-8"
-                  : role === "assistant"
-                    ? "bg-primary/10 sm:mr-8"
-                    : "bg-secondary/50"
-              }`}
-              data-testid={`routine-session-line-${role}`}
-            >
-              <div className="mb-1 flex min-w-0 items-center gap-2">
-                <span className="text-xs font-semibold uppercase text-muted-foreground">
-                  {role}
-                </span>
-                {ts && (() => {
-                  const d = new Date(ts);
-                  const timeStr = isNaN(d.getTime()) ? "" : d.toLocaleTimeString("ko-KR");
-                  return timeStr ? (
-                    <span className="text-xs text-muted-foreground">{timeStr}</span>
-                  ) : null;
-                })()}
-              </div>
-              <SessionLineContent role={role} text={text} />
-            </div>
-          );
-        })}
+        {!loading && !error && entries.map((entry, i) => (
+          <RoutineSessionEntryCard key={i} entry={entry} />
+        ))}
       </ScrollArea>
     </div>
   );
 }
 
-function SessionLineContent({ role, text }: { role: string; text: string }) {
-  if (role === "tool_result") {
+function RoutineSessionEntryCard({ entry }: { entry: RoutineSessionEntry }) {
+  if (entry.kind === "assistant") {
     return (
-      <pre
-        className="max-h-72 max-w-full overflow-auto whitespace-pre-wrap break-all rounded-md bg-background/70 p-2 font-mono text-xs leading-relaxed"
-        data-testid="routine-session-tool-result"
-      >
-        {text}
-      </pre>
+      <div className="mb-3 min-w-0 overflow-hidden rounded-lg bg-primary/10 px-1 py-1 sm:mr-8" data-testid="routine-session-line-assistant">
+        <AssistantCard entry={entry} isFinal />
+      </div>
     );
   }
+
+  if (entry.kind === "tool_group") {
+    return (
+      <div className="mb-3 min-w-0 overflow-hidden rounded-lg bg-secondary/50 px-2 py-1" data-testid="routine-session-line-tool_result">
+        <ToolGroupCard group={entry} />
+      </div>
+    );
+  }
+
   return (
-    <p
-      className="min-w-0 whitespace-pre-wrap break-words text-sm leading-relaxed [overflow-wrap:anywhere]"
-      data-testid="routine-session-text"
-    >
-      {text}
-    </p>
+    <div className="mb-3 min-w-0 overflow-hidden rounded-lg bg-muted px-3 py-2 text-sm sm:ml-8" data-testid="routine-session-line-user">
+      <p className="min-w-0 whitespace-pre-wrap break-words leading-relaxed [overflow-wrap:anywhere]" data-testid="routine-session-text">
+        {entry.text}
+      </p>
+    </div>
   );
 }
