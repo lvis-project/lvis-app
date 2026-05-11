@@ -61,7 +61,7 @@ describe("DeferredQueueDialog", () => {
     await waitFor(() => {
       expect(screen.getByText("write_file")).toBeTruthy();
     });
-    fireEvent.click(screen.getByText("승인"));
+    fireEvent.click(screen.getByText("허용"));
 
     await waitFor(() => {
       expect(permission.deferredResolve).toHaveBeenCalledWith("dq-1", "approved");

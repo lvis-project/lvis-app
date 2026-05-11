@@ -126,7 +126,7 @@ INPUT origin classification (user-keyboard | plugin-emitted | llm-tool-arg | fil
 │   │   invalidate; HIGH도 cache 됨                           │
 │   ├ Triggered on: routine headless write/shell/network/     │
 │   │   read-out-of-dir                                       │
-│   └ HIGH → deferred queue, foreground 진입 시 surface       │
+│   └ MED/HIGH → deferred queue, user-opened queue surface    │
 ├────────────────────────────────────────────────────────────┤
 │  Layer 6:  Hook chain (v1 deny-only baseline)               │
 │   ├ ~/.config/lvis/hooks/{pre,post,perm}-*.sh              │
