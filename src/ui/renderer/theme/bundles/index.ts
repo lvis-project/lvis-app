@@ -17,6 +17,7 @@ import { nordBundle } from "./nord.js";
 import { gruvboxDarkHardBundle } from "./gruvbox-dark-hard.js";
 import { solarizedLightBundle } from "./solarized-light.js";
 import { rosePineBundle } from "./rose-pine.js";
+import { cherryBlossomBundle } from "./cherry-blossom.js";
 import { DEFAULT_BUNDLE_ID as _SHARED_DEFAULT_BUNDLE_ID } from "../../../../shared/theme-bundles.js";
 
 export type { ThemeBundle, BundleTokens } from "./types.js";
@@ -39,6 +40,7 @@ export const BUNDLES = [
   gruvboxDarkHardBundle,
   solarizedLightBundle,
   rosePineBundle,
+  cherryBlossomBundle,
   highContrastBundle,
 ] as const satisfies readonly ThemeBundle[];
 

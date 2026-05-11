@@ -27,6 +27,7 @@ export const BUNDLE_IDS = [
   "gruvbox-dark-hard",
   "solarized-light",
   "rose-pine",
+  "cherry-blossom",
 ] as const;
 
 export type BundleId = (typeof BUNDLE_IDS)[number];

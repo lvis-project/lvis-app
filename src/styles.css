@@ -934,6 +934,62 @@
     color-scheme: dark;
   }
 
+  /* ── 13. cherry-blossom ── light + splash key red + brand magenta ───── */
+  :root[data-theme-bundle="cherry-blossom"] {
+    --background:               0 0% 100%;
+    --foreground:               0 0% 10%;
+    --card:                     340 60% 99%;
+    --card-foreground:          0 0% 10%;
+    --popover:                  0 0% 100%;
+    --popover-foreground:       0 0% 10%;
+    --primary:                  343 92% 49%;
+    --primary-foreground:       0 0% 100%;
+    --secondary:                340 50% 95%;
+    --secondary-foreground:     0 0% 10%;
+    --muted:                    340 30% 96%;
+    --muted-foreground:         340 10% 45%;
+    --accent:                   340 40% 92%;
+    --accent-foreground:        0 0% 10%;
+    --destructive:              0 100% 50%;
+    --destructive-foreground:   0 0% 100%;
+    --warning:                  35 91% 45%;
+    --warning-foreground:       0 0% 100%;
+    --success:                  142 55% 42%;
+    --success-foreground:       0 0% 100%;
+    --info:                     220 90% 55%;
+    --info-foreground:          0 0% 100%;
+    --emphasis:                 35 91% 50%;
+    --emphasis-foreground:      0 0% 100%;
+    --border:                   340 20% 88%;
+    --input:                    340 20% 88%;
+    --ring:                     343 92% 49%;
+    --message-user-bg:          321 65% 78%;
+    --message-user-fg:          0 0% 10%;
+    --input-bar-bg:             0 0% 100%;
+    --overlay:                  340 30% 12%;
+    --hover-overlay:            0 0% 0%;
+    --focus-ring:               343 92% 49%;
+    --link-fg:                  291 100% 45%;
+    --selection-bg:             321 65% 78%;
+    --selection-fg:             0 0% 10%;
+    --scrollbar-thumb:          340 25% 75%;
+    --scrollbar-track:          340 30% 96%;
+    --kbd-bg:                   340 30% 96%;
+    --kbd-border:               340 20% 88%;
+    --code-bg:                  340 50% 98%;
+    --code-fg:                  0 0% 10%;
+    --code-border:              340 20% 88%;
+    --chart-1:                  343 92% 49%;
+    --chart-2:                  291 100% 50%;
+    --chart-3:                  142 55% 42%;
+    --chart-4:                  220 90% 55%;
+    --chart-5:                  35 91% 50%;
+    --action-view:              291 100% 50%;
+    --action-branch:            35 91% 45%;
+    --action-compact:           343 92% 49%;
+    color-scheme: light;
+  }
+
   /* ── Default (no bundle set) → tokyo-night tokens for pre-hydration ── */
   :root {
     --background:               222.2 84% 4.9%;

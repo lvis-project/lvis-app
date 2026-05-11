@@ -40,8 +40,8 @@ const REQUIRED_TOKEN_KEYS: ReadonlyArray<keyof BundleTokens> = [
 const HSL_TRIPLE_RE = /^\d+(?:\.\d+)?\s+\d+(?:\.\d+)?%\s+\d+(?:\.\d+)?%/;
 
 describe("bundle registry", () => {
-  it("exports exactly 12 bundles", () => {
-    expect(BUNDLES).toHaveLength(12);
+  it("exports exactly 13 bundles", () => {
+    expect(BUNDLES).toHaveLength(13);
   });
 
   it("all bundle IDs are unique", () => {
