@@ -86,8 +86,8 @@ export function DeferredQueuePanel({ showEmpty = false }: DeferredQueuePanelProp
       : "MEDIUM 위험"
     : "대기 없음";
   const panelClassName = hasPending || error
-    ? "rounded-lg border border-red-500/40 bg-red-500/5 p-3"
-    : "rounded-lg border bg-background p-3";
+    ? "min-w-0 overflow-hidden rounded-lg border border-red-500/40 bg-red-500/5 p-3"
+    : "min-w-0 overflow-hidden rounded-lg border bg-background p-3";
   const badgeClassName = hasPending || error
     ? "border-red-500 text-red-700 dark:text-red-400"
     : "text-muted-foreground";
@@ -97,11 +97,11 @@ export function DeferredQueuePanel({ showEmpty = false }: DeferredQueuePanelProp
       className={panelClassName}
       data-testid="deferred-queue-panel"
     >
-      <header className="mb-2 flex items-center gap-2">
-        <Badge variant="outline" className={badgeClassName}>
+      <header className="mb-2 flex min-w-0 flex-wrap items-center gap-2">
+        <Badge variant="outline" className={`${badgeClassName} shrink-0`}>
           {severityLabel}
         </Badge>
-        <h3 className="text-sm font-medium">
+        <h3 className="min-w-0 flex-1 text-sm font-medium">
           {hasPending
             ? `백그라운드에서 보류된 작업 (${pending.length})`
             : "보류된 승인 요청 없음"}
@@ -126,34 +126,37 @@ export function DeferredQueuePanel({ showEmpty = false }: DeferredQueuePanelProp
           보류된 승인 요청이 없습니다.
         </div>
       ) : (
-        <ul className="space-y-2">
+        <ul className="min-w-0 space-y-2">
           {pending.map((entry) => (
             <li
               key={entry.id}
-              className="rounded border bg-background p-2 text-sm"
+              className="min-w-0 overflow-hidden rounded border bg-background p-3 text-sm"
               data-testid={`deferred-entry-${entry.id}`}
             >
-              <div className="mb-1 flex items-center gap-2">
-                <code className="rounded bg-muted px-1 py-0.5 text-xs font-mono">
+              <div className="mb-2 flex min-w-0 flex-wrap items-center gap-2">
+                <code className="max-w-full truncate rounded bg-muted px-2 py-1 font-mono text-xs">
                   {entry.toolName}
                 </code>
-                <Badge variant="outline" className="text-[11px]">
+                <Badge variant="outline" className="shrink-0 text-[11px]">
                   {entry.source}
                 </Badge>
-                <Badge variant="outline" className="text-[11px]">
+                <Badge variant="outline" className="shrink-0 text-[11px]">
                   {entry.category}
                 </Badge>
-                <Badge variant="outline" className="text-[11px]">
+                <Badge variant="outline" className="shrink-0 text-[11px]">
                   {entry.verdict.level.toUpperCase()}
                 </Badge>
-                <time className="ml-auto text-[11px] text-muted-foreground">
+                <time className="text-[11px] text-muted-foreground sm:ml-auto">
                   {entry.ts.slice(0, 19).replace("T", " ")}
                 </time>
               </div>
-              <p className="mb-1 text-xs text-muted-foreground">
+              <p className="mb-2 break-words text-xs text-muted-foreground">
                 {entry.verdict.reason}
               </p>
-              <pre className="mb-2 overflow-x-auto rounded bg-muted/50 px-2 py-1 text-[11px]">
+              <pre
+                className="mb-3 max-w-full overflow-x-hidden whitespace-pre-wrap break-all rounded bg-muted/50 px-2 py-1 font-mono text-[11px] leading-relaxed"
+                data-testid="deferred-entry-input"
+              >
                 {entry.inputSummary}
               </pre>
               <div className="flex justify-end gap-2">
