@@ -24,19 +24,10 @@ function tripleToHsl(triple: string): string {
 
 // Theme-invariant tokens — same across all bundles.
 //
-// Values intentionally mirror `@lvis/plugin-sdk/src/ui/tokens/fallback-dark.json`
-// (the SDK's offline fallback SoT). Both must stay in lockstep so plugins
-// see the same invariant tokens whether the host has broadcast yet or not.
-// The drift gate is `__tests__/host-sdk-token-lockstep.test.ts`, which reads
-// the SDK JSON via Node fs and asserts each key here matches. A direct
-// JSON-subpath import was attempted but Vite/Rollup's resolver rejects
-// non-JS subpath exports without a heavy SDK shim — the test-based gate is
-// strictly equivalent operationally and avoids the bundler dance.
-//
-// Note: the SDK's `fallback-dark.json` is legacy from before commit 1696f92
-// closed the cold-boot race via webPreferences.additionalArguments. Cleanup
-// to drop the SDK fallback is tracked in lvis-app#667; until that SDK PR
-// ships and we bump past it, this lockstep is the contract we maintain.
+// These values reach plugin webviews via the primed token payload that
+// `main.ts:initialThemeArgs` ships on every `BrowserWindow` (commit 1696f92,
+// closes lvis-app#667). The SDK no longer carries a fallback stylesheet; the
+// host is the single source for what plugins paint.
 const _INVARIANT: Partial<Record<LvisTokenName, string>> = {
   "--lvis-radius-xs":       "0.15rem",
   "--lvis-radius-lg":       "0.75rem",
@@ -55,17 +46,6 @@ const _INVARIANT: Partial<Record<LvisTokenName, string>> = {
   "--lvis-motion-fast":     "150ms",
   "--lvis-motion-normal":   "200ms",
 };
-
-/**
- * Internal export — single SoT for the invariant key list.
- *
- * The drift gate (`__tests__/host-sdk-token-lockstep.test.ts`) imports
- * this instead of hand-mirroring a parallel `INVARIANT_KEYS` array, so
- * adding a key to `_INVARIANT` automatically subjects it to the
- * lockstep check against `@lvis/plugin-sdk/.../fallback-dark.json` —
- * no second list to keep in sync, no false-negative drift.
- */
-export const _INVARIANT_KEYS = Object.keys(_INVARIANT) as LvisTokenName[];
 
 /**
  * Derive the full --lvis-* plugin token map from an active ThemeBundle.

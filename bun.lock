@@ -11,7 +11,7 @@
         "@ai-sdk/openai": "^3.0.53",
         "@ai-sdk/openai-compatible": "~2.0.41",
         "@azure/msal-node": "^5.1.2",
-        "@lvis/plugin-sdk": "github:lvis-project/lvis-plugin-sdk#v5.3.0",
+        "@lvis/plugin-sdk": "github:lvis-project/lvis-plugin-sdk#v5.4.0",
         "@radix-ui/react-dialog": "^1.1.15",
         "@radix-ui/react-dropdown-menu": "^2.1.16",
         "@radix-ui/react-popover": "^1.1.15",
@@ -281,7 +281,7 @@
 
     "@jridgewell/trace-mapping": ["@jridgewell/trace-mapping@0.3.31", "", { "dependencies": { "@jridgewell/resolve-uri": "^3.1.0", "@jridgewell/sourcemap-codec": "^1.4.14" } }, "sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw=="],
 
-    "@lvis/plugin-sdk": ["@lvis/plugin-sdk@github:lvis-project/lvis-plugin-sdk#e83649a", { "dependencies": { "focus-trap": "^8.2.0", "lucide-react": "^1.14.0" }, "peerDependencies": { "react": ">=18.0.0", "react-dom": ">=18.0.0", "tsup": ">=8.0.0" }, "optionalPeers": ["react", "react-dom", "tsup"] }, "lvis-project-lvis-plugin-sdk-e83649a", "sha512-Vfzdlr38SwpcJXxVwVpk6WHngpYuCne2AzQvGgJwfzyX/eaFOmi/FgbAGreDTK2lR8EcRgCrdEMakxV7Gw4QJQ=="],
+    "@lvis/plugin-sdk": ["@lvis/plugin-sdk@github:lvis-project/lvis-plugin-sdk#deb61d2", { "dependencies": { "focus-trap": "^8.2.0", "lucide-react": "^1.14.0" }, "peerDependencies": { "react": ">=18.0.0", "react-dom": ">=18.0.0", "tsup": ">=8.0.0" }, "optionalPeers": ["react", "react-dom", "tsup"] }, "lvis-project-lvis-plugin-sdk-deb61d2", "sha512-E1p5fsy524doUjEaSoi6LpPZ6Nc6I7QVaohjx9GpG/Y7XsafDQ+QO8uEudc3MQ9jiMWTLm7xSG/CLnc8HCCrKw=="],
 
     "@malept/cross-spawn-promise": ["@malept/cross-spawn-promise@2.0.0", "", { "dependencies": { "cross-spawn": "^7.0.1" } }, "sha512-1DpKU0Z5ThltBwjNySMC14g0CkbyhCaz9FkhxqNsZI6uAPJXFS8cMXlBKo26FJ8ZuW6S9GCMcR9IO5k2X5/9Fg=="],
 

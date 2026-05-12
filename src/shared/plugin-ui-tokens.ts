@@ -51,19 +51,6 @@ export type LvisTokenMap = { readonly [K in LvisTokenName]: string };
 /** @deprecated Use LvisTokenMap instead. */
 export type LvisThemeTokens = LvisTokenMap;
 
-/**
- * CSS-only static tokens — defined in the SDK fallback stylesheet as offline
- * defaults, but not sent over IPC because their value syntax is broader than
- * the host's safe token-value allowlist.
- */
-export const LVIS_CSS_ONLY_TOKEN_NAMES = [
-  "--lvis-shadow-sm",
-  "--lvis-shadow-md",
-  "--lvis-easing",
-] as const;
-
-export type LvisCssOnlyTokenName = typeof LVIS_CSS_ONLY_TOKEN_NAMES[number];
-
 import { BUNDLE_IDS, type BundleId } from "./theme-bundles.js";
 
 /**
