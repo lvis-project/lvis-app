@@ -1,3 +1,5 @@
+import { PrivacyTab } from "./PrivacyTab.js";
+
 export interface ChatTabProps {
   autoCompact: boolean;
   setAutoCompact: (updater: boolean | ((prev: boolean) => boolean)) => void;
@@ -5,9 +7,20 @@ export interface ChatTabProps {
   setStreamSmoothing: (v: "none" | "word" | "char") => void;
   experimentalContinuousBackend?: boolean;
   setExperimentalContinuousBackend?: (v: boolean) => void;
+  piiRedactEnabled: boolean;
+  onPiiRedactToggle: () => void;
 }
 
-export function ChatTab({ autoCompact, setAutoCompact, streamSmoothing, setStreamSmoothing, experimentalContinuousBackend, setExperimentalContinuousBackend }: ChatTabProps) {
+export function ChatTab({
+  autoCompact,
+  setAutoCompact,
+  streamSmoothing,
+  setStreamSmoothing,
+  experimentalContinuousBackend,
+  setExperimentalContinuousBackend,
+  piiRedactEnabled,
+  onPiiRedactToggle,
+}: ChatTabProps) {
   return (
     <div className="space-y-4 pt-4">
       <div className="space-y-2">
@@ -55,7 +68,9 @@ export function ChatTab({ autoCompact, setAutoCompact, streamSmoothing, setStrea
         <div className="space-y-2">
           <div>
             <p className="text-sm font-medium">실험적 기능</p>
-            <p className="text-[11px] text-muted-foreground">기본값 OFF — 설정 후 앱 재시작 없이 전환됩니다.</p>
+            <p className="text-[11px] text-muted-foreground">
+              기본값 OFF — 설정 후 앱 재시작 없이 전환됩니다. 자동 압축은 위 설정에서 제어됩니다.
+            </p>
           </div>
           <div className="flex items-center gap-3 rounded-md border px-3 py-3">
               <button
@@ -72,11 +87,23 @@ export function ChatTab({ autoCompact, setAutoCompact, streamSmoothing, setStrea
               </button>
               <div className="space-y-0.5">
                 <p className="text-sm font-medium">Experimental: 연속 백엔드 (continuous backend)</p>
-                <p className="text-[11px] text-muted-foreground">타이틀 자동 생성 + 체크포인트 압축을 활성화합니다. 기본값 OFF — 프로덕션에서 검증 중.</p>
+                <p className="text-[11px] text-muted-foreground">
+                  세션 제목 자동 갱신, 연속성 가드, 요약 프리앰블을 활성화합니다. 체크포인트 압축은 자동 컴팩트 설정을 따릅니다.
+                </p>
               </div>
             </div>
         </div>
       )}
+      <section className="space-y-3 border-t border-border pt-4">
+        <div>
+          <p className="text-sm font-medium">프라이버시</p>
+          <p className="text-[11px] text-muted-foreground">채팅 전송 전 개인정보 보호 동작을 설정합니다.</p>
+        </div>
+        <PrivacyTab
+          piiRedactEnabled={piiRedactEnabled}
+          onToggle={onPiiRedactToggle}
+        />
+      </section>
     </div>
   );
 }

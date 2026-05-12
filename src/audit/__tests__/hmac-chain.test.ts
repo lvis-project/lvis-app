@@ -18,6 +18,7 @@ import {
   rmSync,
   writeFileSync,
   existsSync,
+  readdirSync,
   statSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -123,6 +124,41 @@ describe("SafeStorageSecretStore", () => {
       decryptString: () => "",
     }, join(workDir, "secrets"));
     expect(() => store.write("audit-hmac.key", "x")).toThrow(/safeStorage/);
+  });
+
+  it("quarantines undecryptable ciphertext before boot rotates the secret", () => {
+    const store = new SafeStorageSecretStore({
+      isEncryptionAvailable: () => true,
+      encryptString: (value: string) => Buffer.from(`enc:${value}`, "utf-8"),
+      decryptString: (value: Buffer) => {
+        const raw = value.toString("utf-8");
+        if (raw === "bad-ciphertext") throw new Error("decrypt failed");
+        return raw.replace(/^enc:/, "");
+      },
+    }, join(workDir, "secrets"));
+    const secretPath = join(workDir, "secrets", "audit-hmac.key.safe-storage");
+    writeFileSync(
+      secretPath,
+      "safe:v1:YmFkLWNpcGhlcnRleHQ=",
+    );
+
+    const secret = ensureAuditSecret(store);
+
+    expect(secret).toMatch(/^[0-9a-f]{64}$/);
+    expect(store.read("audit-hmac.key")).toBe(secret);
+    const files = readdirSync(join(workDir, "secrets"));
+    expect(files.some((file) => file.startsWith("audit-hmac.key.safe-storage.quarantined-"))).toBe(true);
+    expect(files.some((file) => file.startsWith("audit-hmac.key.safe-storage.recovery-"))).toBe(true);
+  });
+
+  it("quarantines malformed safeStorage files as missing", () => {
+    const store = new SafeStorageSecretStore(makeSafeStorage(), join(workDir, "secrets"));
+    const secretPath = join(workDir, "secrets", "audit-hmac.key.safe-storage");
+    writeFileSync(secretPath, "plain-secret");
+    expect(store.read("audit-hmac.key")).toBe(null);
+    const files = readdirSync(join(workDir, "secrets"));
+    expect(files.some((file) => file.startsWith("audit-hmac.key.safe-storage.quarantined-"))).toBe(true);
+    expect(files.some((file) => file.startsWith("audit-hmac.key.safe-storage.recovery-"))).toBe(true);
   });
 });
 

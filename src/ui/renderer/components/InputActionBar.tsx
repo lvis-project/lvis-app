@@ -6,7 +6,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../../../components/ui/dropdown-menu.js";
-import { TokenProgressRing } from "./TokenProgressRing.js";
 import { PluginGridButton, type PluginEntry } from "./PluginGridButton.js";
 import type { InstallPhase } from "../hooks/use-plugin-marketplace.js";
 import { CommandPopover, type QuickAction } from "./CommandPopover.js";
@@ -14,8 +13,6 @@ import type { RolePreset } from "../../../data/role-presets.js";
 
 export interface InputActionBarProps {
   // Leading
-  usedTokens: number;
-  contextBudget: number;
   plugins: PluginEntry[];
   onSelectPlugin: (viewKey: string) => void;
   installingPlugins?: ReadonlyMap<string, InstallPhase>;
@@ -60,8 +57,6 @@ function attachButtonLabel(
 }
 
 export function InputActionBar({
-  usedTokens,
-  contextBudget,
   plugins,
   onSelectPlugin,
   installingPlugins,
@@ -86,7 +81,6 @@ export function InputActionBar({
     <div data-testid="input-action-bar" className="flex min-w-0 items-center justify-between gap-2 px-3 pt-2">
       {/* Leading cluster */}
       <div className="flex min-w-0 items-center gap-0.5" data-testid="iab-leading">
-        <TokenProgressRing used={usedTokens} budget={contextBudget} />
         <PluginGridButton
           plugins={plugins}
           onSelect={onSelectPlugin}

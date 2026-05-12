@@ -47,7 +47,7 @@ describe("SettingsDialog (smoke)", () => {
     });
   });
 
-  it("calls getSettings when dialog opens", async () => {
+  it("loads settings once and batches key presence checks when dialog opens", async () => {
     const api = makeApi();
     vi.stubGlobal("lvisApi", api);
     render(
@@ -59,7 +59,12 @@ describe("SettingsDialog (smoke)", () => {
       />,
     );
     await waitFor(() => {
-      expect(api.getSettings).toHaveBeenCalled();
+      expect(api.getSettings).toHaveBeenCalledTimes(1);
+    });
+    await waitFor(() => {
+      expect(api.hasApiKey).toHaveBeenCalledTimes(1);
+      expect(api.hasWebApiKey).toHaveBeenCalledTimes(1);
+      expect(api.hasMarketplaceApiKey).toHaveBeenCalledTimes(1);
     });
   });
 
