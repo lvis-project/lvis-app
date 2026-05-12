@@ -24,12 +24,12 @@ function isoDateOffset(days: number): string {
 const PAGE_SIZE = 50;
 
 const TYPE_BADGE: Record<string, string> = {
-  turn: "bg-blue-500/15 text-blue-600 dark:text-blue-400",
-  tool_call: "bg-green-500/15 text-green-600 dark:text-green-400",
-  approval: "bg-yellow-500/15 text-yellow-600 dark:text-yellow-400",
-  warn: "bg-orange-500/15 text-orange-600 dark:text-orange-400",
-  error: "bg-red-500/15 text-red-600 dark:text-red-400",
-  mcp_connect: "bg-purple-500/15 text-purple-600 dark:text-purple-400",
+  turn: "bg-info/15 text-info",
+  tool_call: "bg-success/15 text-success",
+  approval: "bg-warning/15 text-warning",
+  warn: "bg-warning/15 text-warning",
+  error: "bg-destructive/15 text-destructive",
+  mcp_connect: "bg-emphasis/15 text-emphasis",
   kill_switch: "bg-destructive/15 text-destructive",
 };
 

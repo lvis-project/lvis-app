@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { IpcMainInvokeEvent } from "electron";
+import type { IpcMainInvokeEvent, WebContents } from "electron";
 
 const handleMap = new Map<string, (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown>();
 const fromWebContents = vi.fn();
@@ -18,6 +18,13 @@ vi.mock("electron", () => ({
 function trustedEvent(sender: object = {}): IpcMainInvokeEvent {
   return {
     senderFrame: { url: "file:///Applications/Lvis.app/dist/index.html" },
+    sender,
+  } as unknown as IpcMainInvokeEvent;
+}
+
+function dataShellEvent(sender: object): IpcMainInvokeEvent {
+  return {
+    senderFrame: { url: "data:text/html;charset=utf-8,%3Chtml%3E%3C/html%3E" },
     sender,
   } as unknown as IpcMainInvokeEvent;
 }
@@ -79,6 +86,19 @@ describe("window domain IPC", () => {
     expect(detachedWindow.maximize).toHaveBeenCalledOnce();
     expect(mainWindow.minimize).not.toHaveBeenCalled();
     expect(mainWindow.maximize).not.toHaveBeenCalled();
+  });
+
+  it("allows explicitly marked data-url shells to control their own window", async () => {
+    const { markAsWindowControlOwned } = await import("../window-control-registry.js");
+    const shellContents = { id: 42, once: vi.fn() } as unknown as WebContents;
+    const shellWindow = makeWindow();
+    markAsWindowControlOwned(shellContents);
+    fromWebContents.mockReturnValueOnce(shellWindow);
+
+    await handleMap.get("window:close")!(dataShellEvent(shellContents));
+
+    expect(shellWindow.close).toHaveBeenCalledOnce();
+    expect(mainWindow.close).not.toHaveBeenCalled();
   });
 
   it("ignores titlebar theme sync when overlay is disabled", async () => {

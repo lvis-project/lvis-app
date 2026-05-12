@@ -127,7 +127,7 @@ export function PluginGridButton({
         <span
           aria-label="미인증 플러그인 있음"
           data-testid="plugin-grid-unauthed-dot"
-          className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-red-500 ring-1 ring-background"
+          className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-destructive ring-1 ring-background"
         />
       )}
     </span>
@@ -206,7 +206,7 @@ export function PluginGridButton({
               // Use explicit pluginId from PluginEntry when available; fall back
               // to deriving from viewKey for cases where the caller omits it.
               // pluginId drives the install-phase lookup; viewKey drives the
-              // testid so a single plugin exposing multiple sidebar UI
+              // testid so a single plugin exposing multiple plugin UI
               // extensions still gets unique cells.
               const pluginId = p.pluginId ?? p.viewKey.split(":")[1] ?? "";
               const cellTestId = p.viewKey.replace(/:/g, "-");
@@ -259,7 +259,7 @@ export function PluginGridButton({
                       <span
                         id={`${p.viewKey}-unauthed`}
                         aria-label="미인증"
-                        className="absolute -right-0.5 -top-0.5 inline-flex items-center justify-center rounded-full bg-red-500 px-1 py-px text-[8px] font-medium text-white shadow"
+                        className="absolute -right-0.5 -top-0.5 inline-flex items-center justify-center rounded-full bg-destructive px-1 py-px text-[8px] font-medium text-destructive-foreground shadow"
                       >
                         🔒
                       </span>

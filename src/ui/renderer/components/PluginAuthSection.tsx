@@ -155,21 +155,21 @@ export function PluginAuthSection({
 function renderBadge(state: PluginAuthState) {
   if (state.kind === "authed") {
     return (
-      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-green-100 px-1.5 py-px text-[10px] font-medium text-green-700">
+      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-success/15 px-1.5 py-px text-[10px] font-medium text-success">
         ✓ 인증됨
       </span>
     );
   }
   if (state.kind === "unauthed") {
     return (
-      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-red-100 px-1.5 py-px text-[10px] font-medium text-red-700">
+      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-destructive/15 px-1.5 py-px text-[10px] font-medium text-destructive">
         🔒 미인증
       </span>
     );
   }
   if (state.kind === "error") {
     return (
-      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-100 px-1.5 py-px text-[10px] font-medium text-amber-700">
+      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-warning/15 px-1.5 py-px text-[10px] font-medium text-warning">
         ⚠ 오류
       </span>
     );

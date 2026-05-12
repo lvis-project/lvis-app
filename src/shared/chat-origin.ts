@@ -14,6 +14,11 @@ export interface ChatSendPayload {
   userActivation?: boolean;
 }
 
+export interface UserKeyboardIntentSnapshot {
+  inputOrigin: "user-keyboard";
+  token: string;
+}
+
 export interface UserKeyboardIntent {
   inputOrigin: "user-keyboard";
   userActivation: true;

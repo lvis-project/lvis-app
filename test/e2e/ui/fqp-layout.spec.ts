@@ -11,8 +11,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
  *   1. Panel center is within ±10 px of the chat-column center.
  *   2. `[data-testid="fqp-chips-row"]` is between `[data-testid="fqp-question-text"]`
  *      and the <textarea> in DOM order.
- *   3. Screenshots captured at 1100×720 (default) and 1440×900 viewports with
- *      sidebar collapsed and expanded states.
+ *   3. Screenshots captured at 1100×720 (default) and 1440×900 viewports.
  *
  * Trigger strategy:
  *   The FQP only appears when an agent fires `ask_user_question` via IPC.
@@ -274,19 +273,11 @@ test.describe('FQP layout — chip placement and margin symmetry', () => {
     await expect(firstChoiceBtn).toBeVisible();
   });
 
-  test('layout stays symmetric with sidebar visible', async ({ mainWindow }) => {
+  test('layout stays symmetric in the main content area', async ({ mainWindow }) => {
     await mainWindow.setViewportSize({ width: 1100, height: 720 });
 
-    // Verify sidebar is visible (it has a fixed w-32 / 128px).
-    const sidebar = mainWindow.locator('aside');
-    const sidebarVisible = await sidebar
-      .waitFor({ state: 'visible', timeout: 5_000 })
-      .then(() => true)
-      .catch(() => false);
-    expect(sidebarVisible, 'Sidebar must be visible for sidebar-visible layout check').toBe(true);
-
     const panelVisible = await ensurePanelVisible(mainWindow);
-    expect(panelVisible, 'FQP injection must succeed for sidebar layout assertion').toBe(true);
+    expect(panelVisible, 'FQP injection must succeed for main layout assertion').toBe(true);
 
     const panel = mainWindow.locator('[data-testid="floating-question-panel"]');
     await panel.waitFor({ state: 'visible', timeout: 5_000 });
@@ -308,7 +299,7 @@ test.describe('FQP layout — chip placement and margin symmetry', () => {
     }
 
     await mainWindow.screenshot({
-      path: `${SCREENSHOT_DIR}/fqp-layout-sidebar-visible.png`,
+      path: `${SCREENSHOT_DIR}/fqp-layout-main-content.png`,
     });
   });
 });

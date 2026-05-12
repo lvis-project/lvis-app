@@ -19,7 +19,7 @@ export interface StarredViewProps {
   starred: StarredItem[];
   currentSessionId: string;
   refreshStarred: () => void | Promise<void>;
-  onJumpToSession: (sessionId: string) => void | Promise<void>;
+  onJumpToSession: (sessionId: string) => boolean | void | Promise<boolean | void>;
   onActivateHome: () => void;
 }
 
@@ -60,7 +60,8 @@ export function StarredView({
                     className="w-full whitespace-pre-wrap break-words text-left text-sm hover:opacity-80"
                     onClick={async () => {
                       if (s.sessionId !== currentSessionId) {
-                        await onJumpToSession(s.sessionId);
+                        const jumped = await onJumpToSession(s.sessionId);
+                        if (jumped === false) return;
                       }
                       onActivateHome();
                     }}

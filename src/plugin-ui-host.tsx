@@ -1,7 +1,7 @@
 /**
  * Plugin UI Host — #237 Option B
  *
- * Mounts a plugin's sidebar UI inside an Electron <webview> running in its
+ * Mounts a plugin UI inside an Electron <webview> running in its
  * own renderer process + session partition. Security boundary:
  *   • contextIsolation=true, nodeIntegration=false, sandbox=true.
  *   • window.lvisApi is NOT exposed; only window.lvisPlugin from
@@ -37,8 +37,8 @@ export type PluginUiExtensionView = {
     page?: string;
     /**
      * Window placement preference. When `defaultMode` is `"detached"` the
-     * host opens the extension in a magnetic-snap BrowserWindow on sidebar
-     * click rather than rendering it inline.
+     * host opens the extension in a magnetic-snap BrowserWindow rather than
+     * rendering it inline.
      */
     window?: {
       defaultMode?: "embedded" | "detached";
@@ -321,7 +321,7 @@ export function PluginUiHostView({
     );
   }
 
-  // Default: render with Card chrome (for inline/sidebar views)
+  // Default: render with Card chrome (for inline plugin views)
   return (
     <Card className="mx-auto flex min-h-0 min-w-0 flex-1 w-full max-w-6xl flex-col overflow-hidden">
       <CardHeader>

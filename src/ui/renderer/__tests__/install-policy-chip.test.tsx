@@ -118,7 +118,7 @@ describe("PluginConfigTab — install_policy chip", () => {
     render(<PluginConfigTab />);
 
     await waitFor(() => {
-      // "Calendar" appears in both sidebar list and detail header — use the h3
+      // "Calendar" appears in the detail header.
       expect(screen.getAllByText("Calendar").length).toBeGreaterThan(0);
     });
 

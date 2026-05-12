@@ -13,21 +13,40 @@ jobs:
         with:
           path: lvis-app
       - name: Clone sibling plugin repos
-        # Self-hosted runner has gh CLI authenticated as ubuntu user (repo scope).
-        # We use that token instead of GitHub App auth — the App is install-pinned
-        # to a different repo set and cannot be modified without org-owner UI access.
+        env:
+          LVIS_REPO_READ_TOKEN: ${{ secrets.LVIS_REPO_READ_TOKEN }}
         run: |
           set -euo pipefail
-          GH_TOKEN=$(gh auth token)
+          repo_token="${LVIS_REPO_READ_TOKEN:-}"
+          if [ -z "$repo_token" ] && gh auth status --hostname github.com >/dev/null 2>&1; then
+            repo_token="$(gh auth token)"
+          fi
+          if [ -z "$repo_token" ]; then
+            echo "::warning::No LVIS_REPO_READ_TOKEN or gh auth token available; attempting unauthenticated sibling clones."
+          fi
+          sibling_ref="${LVIS_SIBLING_REPO_REF:-${GITHUB_HEAD_REF:-${GITHUB_REF_NAME:-}}}"
           for slug in lvis-plugin-meeting lvis-plugin-local-indexer lvis-plugin-lge-api lvis-plugin-work-proactive lvis-plugin-agent-hub lvis-plugin-ms-graph; do
             if [ -d "$slug" ]; then rm -rf "$slug"; fi
-            git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/lvis-project/${slug}.git" "$slug"
+            clone_url="https://github.com/lvis-project/${slug}.git"
+            if [ -n "$repo_token" ]; then
+              clone_url="https://x-access-token:${repo_token}@github.com/lvis-project/${slug}.git"
+            fi
+            if [ -n "$sibling_ref" ] && git ls-remote --exit-code --heads "$clone_url" "$sibling_ref" >/dev/null 2>&1; then
+              echo "Cloning ${slug}@${sibling_ref}"
+              git clone --depth 1 --branch "$sibling_ref" "$clone_url" "$slug"
+            else
+              echo "Cloning ${slug}@default"
+              git clone --depth 1 "$clone_url" "$slug"
+            fi
           done
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
         working-directory: lvis-app
       - run: bun run build
         working-directory: lvis-app
-      - run: bunx vitest run
+      - name: Remove root-level Bun binary shims before Vitest
+        working-directory: lvis-app
+        run: rm -f ajv pino
+      - run: bun run test
         working-directory: lvis-app
 
