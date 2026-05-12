@@ -1,10 +1,10 @@
 # Permission Policy — Design Document (v2.2)
 
-> **Status:** Accepted v2.2 — implementation landed via PR #643; this document is the operating reference for the live permission stack
+> **Status:** Accepted v2.2 — implementation landed via PR #643; this document is the operating reference for the live permission stack. (Not "Ratified" because §15 hook-signing path is still a v1 deny-only baseline pending follow-up.)
 > **Issue:** #627 (implementation, closed) · #644 (this ratification)
 > **Owner:** Permissions stack maintainers (`src/permissions/`, `src/boot/steps/reviewer-wiring.ts`)
 > **Last updated:** 2026-05-13
-> **Change condition:** Material changes to the 4-axis matrix (`src/permissions/category-registry.ts`), reviewer agent contract (`src/permissions/reviewer/`), or hook v1 deny model require a new revision bump (v2.3+) with an accompanying design PR; minor wording / link / typo edits do not.
+> **Change condition:** Material changes to the **5-category decision matrix** (`src/permissions/category-registry.ts` — `read | write | shell | network | meta` with `decisionFor({ mode, source, headless })`), the reviewer agent contract (`src/permissions/reviewer/`), or the hook v1 deny model require a new revision bump (v2.3+) with an accompanying design PR; minor wording / link / typo edits do not.
 > **v2.2 delta:** current implementation snapshot + future direction aligned to the permission-policy implementation
 
 ## 0. Purpose & scope
