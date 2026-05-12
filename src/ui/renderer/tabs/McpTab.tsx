@@ -13,10 +13,10 @@ import type { McpServerConfig, McpServerConfigDto, McpServerState } from "../typ
 type Transport = "stdio" | "http";
 
 const STATUS_BADGE: Record<McpServerState["status"], string> = {
-  connected: "bg-green-100 text-green-800",
-  connecting: "bg-yellow-100 text-yellow-800",
-  disconnected: "bg-gray-100 text-gray-600",
-  error: "bg-red-100 text-red-800",
+  connected: "bg-success/15 text-success",
+  connecting: "bg-warning/15 text-warning",
+  disconnected: "bg-muted text-muted-foreground",
+  error: "bg-destructive/15 text-destructive",
 };
 
 const STATUS_LABEL: Record<McpServerState["status"], string> = {
@@ -349,7 +349,7 @@ export function McpTab() {
       {banner && (
         <div
           className={`rounded-md px-3 py-2 text-sm ${
-            banner.type === "error" ? "bg-red-50 text-red-700" : "bg-green-50 text-green-700"
+            banner.type === "error" ? "bg-destructive/15 text-destructive" : "bg-success/15 text-success"
           }`}
         >
           {banner.msg}
@@ -358,7 +358,7 @@ export function McpTab() {
 
       {/* 에러 */}
       {error && (
-        <div className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
+        <div className="rounded-md bg-destructive/15 px-3 py-2 text-sm text-destructive">{error}</div>
       )}
 
       {/* ── Section A: 서버 목록 ────────────────────── */}
@@ -417,7 +417,7 @@ export function McpTab() {
                         </p>
                       ) : null}
                       {st?.lastError && (
-                        <p className="mt-1 text-[11px] text-red-600 truncate">{st.lastError}</p>
+                        <p className="mt-1 text-[11px] text-destructive truncate">{st.lastError}</p>
                       )}
                       {st?.connectedAt && (
                         <p className="mt-0.5 text-[10px] text-muted-foreground">
@@ -440,7 +440,7 @@ export function McpTab() {
                         <Button
                           variant="outline"
                           size="sm"
-                          className="h-6 text-xs px-2 text-orange-600 border-orange-300"
+                          className="h-6 text-xs px-2 text-warning border-warning/40"
                           onClick={() => void handleKill(id)}
                         >
                           킬
@@ -449,7 +449,7 @@ export function McpTab() {
                       <Button
                         variant="outline"
                         size="sm"
-                        className="h-6 text-xs px-2 text-red-600 border-red-300"
+                        className="h-6 text-xs px-2 text-destructive border-destructive/40"
                         disabled={loading || removingId !== null}
                         onClick={() => void handleRemove(id)}
                       >

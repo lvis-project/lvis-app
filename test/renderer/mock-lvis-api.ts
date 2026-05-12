@@ -145,6 +145,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     },
 
     chatHasProvider: vi.fn(async () => hasProvider),
+    captureUserKeyboardIntent: vi.fn(() => ({ inputOrigin: "user-keyboard", token: "mock-user-intent" })),
     chatSend: vi.fn(async () => ({ ok: true })),
     chatGuide: vi.fn(async () => ({ ok: true })),
     chatNew: vi.fn(async () => ({ ok: true })),

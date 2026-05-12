@@ -11,6 +11,7 @@ import { MemorySearchPanel } from "./components/MemorySearchPanel.js";
 import { RoutinePanel } from "./components/RoutinePanel.js";
 import { StarredView } from "./components/StarredView.js";
 import type { SessionSummary } from "./hooks/use-sessions.js";
+import type { UserKeyboardIntentSnapshot } from "../../shared/chat-origin.js";
 
 type Api = ReturnType<typeof getApi>;
 type PluginView = Parameters<typeof PluginUiHostView>[0]["view"];
@@ -30,7 +31,7 @@ export interface MainContentProps {
   onRefreshSessions: () => void | Promise<void>;
   // chat
   chatContextValue: ChatContextValue;
-  onAsk: (q: string) => Promise<void>;
+  onAsk: (q: string, intent?: UserKeyboardIntentSnapshot) => Promise<void>;
   onEditSave: Parameters<typeof ChatView>[0]["onEditSave"];
   onFork: (entryIdx: number) => Promise<void>;
   onToggleStar: (entryIdx: number) => void;

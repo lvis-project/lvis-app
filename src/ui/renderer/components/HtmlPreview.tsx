@@ -79,7 +79,7 @@ export function HtmlPreview({
         },
       })}
       {payload.warnings && payload.warnings.length > 0 && (
-        <div className="border-t px-2 py-1 text-[10px] text-amber-500">
+        <div className="border-t px-2 py-1 text-[10px] text-warning">
           정제됨: {payload.warnings.join(", ")}
         </div>
       )}

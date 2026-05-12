@@ -6,22 +6,20 @@ import { MainToolbar } from "../MainToolbar.js";
 
 function defaultProps(overrides: Partial<Parameters<typeof MainToolbar>[0]> = {}) {
   return {
+    activeView: "home",
     streaming: false,
     hasApiKey: true as boolean | null,
-    sessions: [],
-    currentSessionId: "sess-1",
     isCurrentSessionStarred: false,
     onNewChat: vi.fn(),
-    onRefreshSessions: vi.fn(),
-    onRefreshStarred: vi.fn(),
-    onLoadSession: vi.fn(),
     onToggleCurrentSessionStar: vi.fn(),
-    onToggleSessionStar: vi.fn(),
-    isSessionStarred: vi.fn(() => false),
     onExport: vi.fn(),
+    onOpenHome: vi.fn(),
+    onOpenRoutinesView: vi.fn(),
+    onOpenMemoryView: vi.fn(),
     onOpenSettings: vi.fn(),
-    onOpenGlobalSearch: vi.fn(),
+    onOpenUnifiedSearch: vi.fn(),
     onOpenStarredView: vi.fn(),
+    onOpenDetachedView: vi.fn(),
     ...overrides,
   };
 }
@@ -45,6 +43,7 @@ async function openHamburger() {
 describe("MainToolbar", () => {
   it("renders hamburger trigger and keeps 새 대화 inside the menu", async () => {
     renderWithProvider(defaultProps());
+    expect(screen.getByTitle("홈")).toBeTruthy();
     expect(screen.getByTitle("더 많은 메뉴")).toBeTruthy();
     expect(screen.queryByText("새 대화")).toBeNull();
     await openHamburger();
@@ -61,25 +60,62 @@ describe("MainToolbar", () => {
     expect(onNewChat).toHaveBeenCalledTimes(1);
   });
 
-  it("calls onOpenGlobalSearch when global search button clicked", () => {
-    const onOpenGlobalSearch = vi.fn();
-    renderWithProvider(defaultProps({ onOpenGlobalSearch }));
-    fireEvent.click(screen.getByTitle("전체 검색 (메모리·세션·즐겨찾기)"));
-    expect(onOpenGlobalSearch).toHaveBeenCalledTimes(1);
+  it("calls onOpenHome when the home action is clicked", () => {
+    const onOpenHome = vi.fn();
+    renderWithProvider(defaultProps({ onOpenHome, activeView: "memory" }));
+    fireEvent.click(screen.getByTitle("홈"));
+    expect(onOpenHome).toHaveBeenCalledTimes(1);
   });
 
-  it("hamburger does not contain 대화 검색 item (moved to InputActionBar)", async () => {
+  it("calls built-in view handlers from the hamburger menu", async () => {
+    const onOpenRoutinesView = vi.fn();
+    const onOpenMemoryView = vi.fn();
+    renderWithProvider(defaultProps({ onOpenRoutinesView, onOpenMemoryView }));
+
+    await openHamburger();
+    fireEvent.click(screen.getByText("루틴"));
+    await openHamburger();
+    fireEvent.click(screen.getByText("메모리"));
+
+    expect(onOpenRoutinesView).toHaveBeenCalledTimes(1);
+    expect(onOpenMemoryView).toHaveBeenCalledTimes(1);
+  });
+
+  it("calls onOpenUnifiedSearch when unified search button clicked", () => {
+    const onOpenUnifiedSearch = vi.fn();
+    renderWithProvider(defaultProps({ onOpenUnifiedSearch }));
+    fireEvent.click(screen.getByTitle("통합 검색 (Cmd/Ctrl+F)"));
+    expect(onOpenUnifiedSearch).toHaveBeenCalledTimes(1);
+  });
+
+  it("hamburger does not contain a duplicate search item", async () => {
     renderWithProvider(defaultProps());
     await openHamburger();
-    expect(screen.queryByText("대화 검색")).toBeNull();
+    expect(screen.queryByText("통합 검색")).toBeNull();
   });
 
-  it("calls onOpenStarredView when 즐겨찾기 보기 menu item clicked", async () => {
+  it("calls onOpenStarredView when 즐겨찾기 menu item clicked", async () => {
     const onOpenStarredView = vi.fn();
     renderWithProvider(defaultProps({ onOpenStarredView }));
     await openHamburger();
-    fireEvent.click(screen.getByText("즐겨찾기 보기"));
+    fireEvent.click(screen.getByText("즐겨찾기"));
     expect(onOpenStarredView).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens built-in views in detached windows from the hamburger menu", async () => {
+    const onOpenDetachedView = vi.fn();
+    renderWithProvider(defaultProps({ onOpenDetachedView }));
+
+    await openHamburger();
+    fireEvent.click(screen.getByTestId("toolbar-detach-routines"));
+    await openHamburger();
+    fireEvent.click(screen.getByTestId("toolbar-detach-memory"));
+    await openHamburger();
+    fireEvent.click(screen.getByTestId("toolbar-detach-starred"));
+
+    expect(onOpenDetachedView).toHaveBeenNthCalledWith(1, "routines");
+    expect(onOpenDetachedView).toHaveBeenNthCalledWith(2, "memory");
+    expect(onOpenDetachedView).toHaveBeenNthCalledWith(3, "starred");
   });
 
   it("calls onOpenSettings when 설정 menu item clicked", async () => {
@@ -90,34 +126,22 @@ describe("MainToolbar", () => {
     expect(onOpenSettings).toHaveBeenCalledTimes(1);
   });
 
-  it("calls onToggleCurrentSessionStar when star menu item clicked", async () => {
+  it("calls onToggleCurrentSessionStar when top star action clicked", () => {
     const onToggleCurrentSessionStar = vi.fn();
     renderWithProvider(defaultProps({ onToggleCurrentSessionStar }));
-    await openHamburger();
-    fireEvent.click(screen.getByText("현재 세션 즐겨찾기"));
+    fireEvent.click(screen.getByTitle("현재 세션 즐겨찾기"));
     expect(onToggleCurrentSessionStar).toHaveBeenCalledTimes(1);
+  });
+
+  it("exposes semantic state for compact icon actions", () => {
+    renderWithProvider(defaultProps({ isCurrentSessionStarred: true }));
+    expect(screen.getByTitle("더 많은 메뉴")).toHaveAttribute("aria-label", "더 많은 메뉴");
+    expect(screen.getByTitle("현재 세션 즐겨찾기 해제")).toHaveAttribute("aria-pressed", "true");
   });
 
   it("keeps hamburger enabled while streaming", () => {
     renderWithProvider(defaultProps({ streaming: true }));
     expect(screen.getByTitle("더 많은 메뉴")).not.toBeDisabled();
-  });
-
-  it("does not load the current session from history", async () => {
-    const onLoadSession = vi.fn();
-    renderWithProvider(defaultProps({
-      currentSessionId: "sess-1",
-      sessions: [
-        { id: "sess-1", modifiedAt: new Date().toISOString(), title: "현재 세션" },
-      ],
-      onLoadSession,
-    }));
-
-    await openHamburger();
-
-    await waitFor(() => expect(screen.queryByText("현재 세션")).toBeTruthy());
-    fireEvent.click(screen.getByText("현재 세션"));
-    expect(onLoadSession).not.toHaveBeenCalled();
   });
 
   // SEV-2-A regression: 내보내기 trigger must be a DropdownMenuSubTrigger (not a nested DropdownMenu).
@@ -132,27 +156,6 @@ describe("MainToolbar", () => {
     // It must NOT be a DropdownMenu root (no aria-expanded on the trigger — Sub handles it differently)
     // The key correctness signal: the element role is "menuitem" not "button"
     expect(subTrigger?.getAttribute("role")).toBe("menuitem");
-  });
-
-  it("starring a history session does not also load it", async () => {
-    const onLoadSession = vi.fn();
-    const onToggleSessionStar = vi.fn();
-    renderWithProvider(defaultProps({
-      currentSessionId: "sess-current",
-      sessions: [
-        { id: "sess-other", modifiedAt: new Date().toISOString(), title: "다른 세션" },
-      ],
-      onLoadSession,
-      onToggleSessionStar,
-    }));
-
-    await openHamburger();
-
-    await waitFor(() => expect(screen.getByText("다른 세션")).toBeTruthy());
-    fireEvent.click(screen.getByTitle("세션 즐겨찾기"));
-
-    expect(onToggleSessionStar).toHaveBeenCalledWith("sess-other", "다른 세션");
-    expect(onLoadSession).not.toHaveBeenCalled();
   });
 });
 

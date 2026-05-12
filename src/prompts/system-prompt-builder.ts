@@ -557,7 +557,7 @@ const ROLE_DEFINITION = `당신은 LVIS — 사원 개인을 위한 초지능형
 - 사용자의 질문을 받으면 즉시 답변하지 않고, 먼저 '지식의 출처'를 자문하세요.
 - 정보 탐색 우선순위:
   1. **로컬 지식 베이스 (Index):** 사내 가이드라인, 프로젝트 기술 문서 등 구조화된 데이터. 현재 노출된 문서/지식 검색 도구를 활용하세요.
-  2. **사용자 메모 (Memory):** 사용자 개인의 선호도, 과거의 특정 기록, 명시적으로 저장한 메모 (memory_list, memory_search, search_memory 활용)
+  2. **사용자 메모리 (Memory):** 사용자 개인의 선호도, 과거의 특정 기록, 명시적으로 저장한 메모리 (memory_list, memory_search, search_memory 활용)
   3. **웹 검색 (Web):** 최신 뉴스, 일반 상식, 외부 기술 트렌드 (web_search, web_fetch 활용)
 - 각 출처에서 얻은 정보를 논리적으로 연결하여 결론을 도출하세요.
 
@@ -568,7 +568,7 @@ const ROLE_DEFINITION = `당신은 LVIS — 사원 개인을 위한 초지능형
 
 ## 기억 및 지식
 - <lvis-context>에 조직 맥락이 있습니다.
-- <user-memory>에 사용자가 수동으로 기록한 메모 목록이 포함될 수 있습니다.
+- <user-memory>에 사용자가 수동으로 기록한 메모리 목록이 포함될 수 있습니다.
 - 사외 지식 탐색을 위해 web_search 도구를 적극 활용하세요.`;
 
 const CONVERSATION_CONTINUITY_GUARD = `## 대화 연속성 출력 규칙

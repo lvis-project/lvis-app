@@ -4,13 +4,18 @@
 // contexts fail silently when the bundled output goes through
 // `__toESM(require("electron"), 1).default.contextBridge`.
 import { contextBridge, ipcRenderer } from "electron";
+import { randomUUID } from "node:crypto";
 import { resolve as pathResolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { McpServerConfig } from "./mcp/types.js";
 import type { SerializedHistoryMessage } from "./shared/chat-history.js";
 import { OVERLAY_V1, PERMISSIONS, ROUTINES_V2 } from "./shared/ipc-channels.js";
 import { PLUGIN_PRIVATE_NAMESPACES } from "./plugins/capabilities.js";
-import type { ChatSendInputOrigin, UserKeyboardIntent } from "./shared/chat-origin.js";
+import type {
+  ChatSendInputOrigin,
+  UserKeyboardIntent,
+  UserKeyboardIntentSnapshot,
+} from "./shared/chat-origin.js";
 
 // ─── Deterministic plugin webview asset URLs ────────────────────────────────
 // `__dirname` here resolves to the host preload's bundled location
@@ -75,6 +80,36 @@ function hasActiveUserGesture(): boolean {
   return globalThis.navigator?.userActivation?.isActive === true;
 }
 
+const USER_KEYBOARD_INTENT_TTL_MS = 5_000;
+const userKeyboardIntentTokens = new Map<string, number>();
+
+function pruneExpiredUserKeyboardIntents(now = Date.now()): void {
+  for (const [token, expiresAt] of userKeyboardIntentTokens) {
+    if (expiresAt <= now) userKeyboardIntentTokens.delete(token);
+  }
+}
+
+function captureUserKeyboardIntent(): UserKeyboardIntentSnapshot {
+  if (!hasActiveUserGesture()) {
+    return { inputOrigin: "user-keyboard", token: "" };
+  }
+  const now = Date.now();
+  pruneExpiredUserKeyboardIntents(now);
+  const token = randomUUID();
+  userKeyboardIntentTokens.set(token, now + USER_KEYBOARD_INTENT_TTL_MS);
+  return { inputOrigin: "user-keyboard", token };
+}
+
+function consumeUserKeyboardIntent(userIntent?: UserKeyboardIntentSnapshot): boolean {
+  const activeGesture = hasActiveUserGesture();
+  if (userIntent && userIntent.inputOrigin === "user-keyboard" && typeof userIntent.token === "string") {
+    const expiresAt = userKeyboardIntentTokens.get(userIntent.token);
+    userKeyboardIntentTokens.delete(userIntent.token);
+    if (typeof expiresAt === "number" && expiresAt > Date.now()) return true;
+  }
+  return activeGesture;
+}
+
 function ipcUserKeyboardIntent(): UserKeyboardIntent | { inputOrigin: "user-keyboard"; userActivation: false } {
   return {
     inputOrigin: "user-keyboard",
@@ -133,16 +168,20 @@ const api = {
 
   // ─── Chat (ConversationLoop) ─────────────────────
   chatHasProvider: async () => ipcRenderer.invoke("lvis:chat:has-provider") as Promise<boolean>,
+  captureUserKeyboardIntent,
   chatSend: async (
     input: string,
     attachments: unknown[] | undefined,
     inputOrigin: ChatSendInputOrigin,
+    userIntent?: UserKeyboardIntentSnapshot,
   ) =>
     ipcRenderer.invoke("lvis:chat:send", {
       input,
       attachments,
       inputOrigin,
-      ...(inputOrigin === "user-keyboard" ? { userActivation: hasActiveUserGesture() } : {}),
+      ...(inputOrigin === "user-keyboard"
+        ? { userActivation: consumeUserKeyboardIntent(userIntent) }
+        : {}),
     }),
   chatGuide: async (input: string) => ipcRenderer.invoke("lvis:chat:guide", input),
   chatNew: async () => ipcRenderer.invoke("lvis:chat:new"),
@@ -206,7 +245,7 @@ const api = {
     ipcRenderer.invoke("lvis:starred:add", entry),
   starredRemove: async (opts: { id?: string; sessionId?: string; messageIndex?: number }) =>
     ipcRenderer.invoke("lvis:starred:remove", opts),
-  onChatStream: (handler: (event: { type: string; text?: string; thought?: string; name?: string; error?: string; result?: string; isError?: boolean; input?: Record<string, unknown>; groupId?: string; toolUseId?: string; displayOrder?: number; roundIndex?: number; stopReason?: "end_turn" | "tool_use"; hasToolCalls?: boolean; removedMessages?: number; freedTokens?: number; tier?: "auto-compact" | "manual"; summary?: string; compactNum?: number; mode?: "default" | "strict" | "auto" | "allow"; turnDurationMs?: number; toolCount?: number; cumulativeToolMs?: number; tokensIn?: number; tokensOut?: number; breakdown?: Record<string, { count: number; ms: number }> }) => void) => {
+  onChatStream: (handler: (event: { type: string; text?: string; thought?: string; name?: string; error?: string; result?: string; isError?: boolean; input?: Record<string, unknown>; groupId?: string; toolUseId?: string; displayOrder?: number; roundIndex?: number; stopReason?: "end_turn" | "tool_use"; hasToolCalls?: boolean; removedMessages?: number; freedTokens?: number; tier?: "auto-compact" | "manual"; summary?: string; compactNum?: number; mode?: "default" | "strict" | "auto" | "allow"; phase?: "attempt" | "retry" | "fallback"; label?: string; attempt?: number; maxAttempts?: number; from?: string; to?: string; reason?: string; turnDurationMs?: number; toolCount?: number; cumulativeToolMs?: number; tokensIn?: number; tokensOut?: number; breakdown?: Record<string, { count: number; ms: number }> }) => void) => {
     const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
     ipcRenderer.on("lvis:chat:stream", listener);
     return () => ipcRenderer.removeListener("lvis:chat:stream", listener);
@@ -366,7 +405,7 @@ const api = {
   // ─── lvis:// deep-link install lifecycle ─────────
   // Fires when a marketplace install triggered via lvis://install/{slug} has
   // finished installing + restartAll() in the main process. Renderer uses
-  // this to refresh its plugin UI list so newly-installed sidebar views
+  // this to refresh its plugin UI list so newly-installed plugin views
   // appear without requiring an app restart.
   onPluginInstallResult: (handler: (payload: { slug: string; success: boolean; error?: string }) => void) => {
     const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
@@ -400,7 +439,7 @@ const api = {
 
   // Sibling of onPluginInstallResult — fires after PluginConfigTab or any
   // other surface drives uninstall through the IPC handler. Renderer uses
-  // this to drop the removed plugin's sidebar tab + marketplace card.
+  // this to drop the removed plugin view + marketplace card.
   onPluginUninstallResult: (handler: (payload: { slug: string; success: boolean; error?: string }) => void) => {
     const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
     ipcRenderer.on("lvis:plugins:uninstall-result", listener);
@@ -411,7 +450,7 @@ const api = {
   // installFromMarketplace: downloading (byte-level) → verifying → registering.
   // The callers (handleLvisUri, lvis:plugins:install) emit `installing` at the
   // start and `restarting` after the install completes. The result event clears
-  // the in-flight state. Renderer renders a skeleton card / sidebar placeholder.
+  // the in-flight state. Renderer renders a skeleton card.
   onPluginInstallProgress: (handler: (payload:
     | { slug: string; phase: "installing" | "restarting" | "verifying" | "registering" }
     | { slug: string; phase: "downloading"; bytesDownloaded: number; bytesTotal: number | null }
@@ -816,6 +855,10 @@ const api = {
       ipcRenderer.invoke("lvis:window:list-detached") as Promise<
         Array<{ windowId: number; viewKey: string; snapped: boolean }>
       >,
+    loadSessionInMain: async (sessionId: string) =>
+      ipcRenderer.invoke("lvis:window:load-session-in-main", sessionId) as Promise<
+        { ok: true } | { ok: false; error: string }
+      >,
     /**
      * Subscribe to snap-edge highlight events sent from the main process
      * when a child window enters/exits the snap zone.
@@ -838,6 +881,13 @@ const api = {
       };
       ipcRenderer.on("lvis:detached:navigate", listener);
       return () => ipcRenderer.removeListener("lvis:detached:navigate", listener);
+    },
+    onLoadSessionInMain: (handler: (sessionId: string) => void) => {
+      const listener = (_event: unknown, payload: { sessionId?: unknown }) => {
+        if (typeof payload?.sessionId === "string") handler(payload.sessionId);
+      };
+      ipcRenderer.on("lvis:window:load-session-in-main", listener);
+      return () => ipcRenderer.removeListener("lvis:window:load-session-in-main", listener);
     },
   },
 };

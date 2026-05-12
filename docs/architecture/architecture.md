@@ -52,7 +52,7 @@ mindmap
       Client Core Engines
     기억 중심 개인화
       LVIS.md — 조직·프로젝트 컨텍스트
-      notes/ — 사용자 축적 메모
+      memory/ — 사용자 축적 메모리
       사용할수록 나를 더 잘 아는 비서
       Memory Files
       Overlay Trigger Surface
@@ -77,7 +77,7 @@ mindmap
 | 철학 원칙              | 아키텍처 구현체                                    | 철학이 구조가 되는 이유                                                      |
 | ---------------------- | -------------------------------------------------- | ---------------------------------------------------------------------------- |
 | **설치형·로컬 기반**   | Client Core Engines + Local Index                  | J.A.R.V.I.S.처럼 내 PC에 상주. 선배 5명에게 물어보던 것을 로컬에서 즉시 검색 |
-| **기억 중심 개인화**   | Memory Files (LVIS.md + notes/) + Overlay Trigger Surface | 사용자가 수락한 플러그인 제안을 main chat 의 정상 권한 경로로 가져온다. 메모가 쌓일수록 맞춤도 ↑      |
+| **기억 중심 개인화**   | Memory Files (LVIS.md + memory/) + Overlay Trigger Surface | 사용자가 수락한 플러그인 제안을 main chat 의 정상 권한 경로로 가져온다. 메모리가 쌓일수록 맞춤도 ↑      |
 | **에이전트 네트워크**  | Agent Hub (Message Board) + A2A                    | "이영희님 이거 확인해주세요" → 본인 부재 중에도 레플리카가 대응              |
 | **기업 프로세스 통합** | Internal search + Marketplace + Governance                  | 50~60장 문서 대신 "필수 조항·승인 단계"만 추출. 회사 허용 경로만 사용        |
 
@@ -93,7 +93,7 @@ graph TB
         CLIENT["LVIS Client<br/>(Electron + Rust Core)"]
         LOCAL_IDX["Local Index Engine<br/>(문서·파일·메일 인덱싱)"]
         LOCAL_STORE["Local Knowledge Store<br/>(SQLite + PageIndex Tree)"]
-        MEMORY["Memory<br/>(LVIS.md + notes/)"]
+        MEMORY["Memory<br/>(LVIS.md + memory/)"]
         OVERLAY["Overlay Trigger Surface<br/>(host:overlay)"]
     end
 
@@ -320,16 +320,16 @@ graph TB
         SHELL["App Shell"]
         CHAT_VIEW["Chat View"]
         OVERLAY_VIEW["Overlay Prompt View"]
-        PLUGIN_SLOTS["Dynamic Plugin Slots<br/>(Sidebar·Toolbar·Panel·Widget)"]
+        PLUGIN_SLOTS["Dynamic Plugin Slots<br/>(Plugin View·Toolbar·Panel·Widget)"]
         FILE_VIEW["File Explorer"]
-        MEM_VIEW["Memory / Notes"]
+        MEM_VIEW["Memory"]
     end
 
     subgraph "Rust Native Module via NAPI-RS"
         KW_ENGINE["Keyword Detecting Engine"]
         ROUTE_ENGINE["Agent Route Engine"]
         IDX_ENGINE["Local Index Engine"]
-        MEM_ENGINE["Memory Reader<br/>(LVIS.md / notes/ 로드)"]
+        MEM_ENGINE["Memory Reader<br/>(LVIS.md / memory/ 로드)"]
         OVERLAY_TRIGGER["Overlay Trigger Surface"]
         TOOL_EXEC["Tool Executor"]
         HOOK_RUNNER["Hook Runner<br/>(Pre/PostToolUse)"]
@@ -339,7 +339,7 @@ graph TB
     subgraph "Local Storage"
         SQLITE["SQLite<br/>(메타데이터 + FTS5)"]
         TREE_CACHE["PageIndex Tree Cache<br/>(JSON)"]
-        MEM_DIR["Memory Files<br/>(LVIS.md · notes/)"]
+        MEM_DIR["Memory Files<br/>(LVIS.md · memory/)"]
         PLUGIN_DIR["Plugin Directory<br/>(설치된 플러그인)"]
     end
 
@@ -434,7 +434,7 @@ sequenceDiagram
 ```mermaid
 flowchart TB
     INPUT["👤 사용자 입력"]
-    MEMORY["Memory / Context Load<br/>(LVIS.md + notes/ + 로컬 컨텍스트)"]
+    MEMORY["Memory / Context Load<br/>(LVIS.md + memory/ + 로컬 컨텍스트)"]
     DETECT["Keyword Detecting Engine<br/>(builtin + plugin keyword groups)"]
     DISAMBIG{"명확한 매칭인가?"}
     RECOMMEND["Internal search Keyword Recommender<br/>(최적 후보 추천 / 애매하면 사용자 문의)"]
@@ -461,7 +461,7 @@ flowchart TB
 | **에이전트 상호작용** | Agent Hub message board / A2A | 다른 에이전트에게 메시지·게시물·요청을 전달하는 경로. 백그라운드 자율 수행 서버를 뜻하지 않음 |
 | **일반 대화** | `ConversationLoop.runTurn()` | 본 문서의 상세 턴 사이클은 §4.5에 정의 |
 
-**설계 메모**
+**설계 노트**
 
 - 플러그인은 설치/활성화 시 **키워드 그룹**을 동적으로 등록한다.
 - 동일 입력이 여러 그룹에 걸리면 Internal search가 가장 적합한 후보를 추천하고, 확신이 낮으면 사용자에게 확인을 요청한다.
@@ -477,7 +477,7 @@ graph LR
         LOCAL_FILES["📁 로컬 파일<br/>(문서·이미지·코드)"]
         SERVER_DOCS["🔄 서버 문서<br/>(권한 기반 동기화)"]
         CHAT_HISTORY["💬 대화 이력"]
-        NOTES["📝 notes/ 메모"]
+        NOTES["memory/ 메모리"]
     end
 
     subgraph "Layer A — 기본 파싱"
@@ -867,7 +867,7 @@ flowchart LR
 | --- | --- | --- |
 | **Auto-Compact** | 사용률 40% 기본값 + 20% 단위 설정 기반 자동 압축 | `chat.autoCompact` + 80k token threshold. microcompact(항상) + full compact(임계치) 2-stage 구현 |
 | **saveSession** | 매 턴 세션 히스토리 저장 및 복구 포인트 생성 | `~/.lvis/sessions/<id>.jsonl`에 저장 |
-| **Memory Extraction** | 대화/도구 결과에서 기억할 내용을 구조화 저장 | `"기억해"`류 요청을 notes/로 자동 저장 |
+| **Memory Extraction** | 대화/도구 결과에서 기억할 내용을 구조화 저장 | `"기억해"`류 요청을 memory/로 자동 저장 |
 | **Audit Log** | 대화·도구·정책 차단·승인 이력을 기록 | 구현됨 |
 | **Idle poke** | 다음 입력 대기 전 상태 갱신과 조용한 heartbeat 보조 신호 | idle scheduler 신호 전달 구현 |
 | **Plugin PostTurn** | 활성 플러그인의 후처리 훅 실행 | 문서상 목표 설계 유지 |
@@ -928,7 +928,7 @@ sequenceDiagram
 | **8** | PostToolUse Hook | 결과 후처리 및 차단 |
 | **9** | Audit + tool_result | 감사 로그 기록 후 LLM loop에 결과 반환 |
 
-> **Governance 설계 메모**: `GovernancePolicy`는 로컬 정책 캐시에서 평가되고, 상위 **거버넌스 정책 동기화 서버**가 브로드캐스팅하는 delta를 받아 갱신되는 구조를 목표로 한다. 따라서 대화 루프는 매 호출마다 네트워크 왕복이 아니라 **최신 로컬 정책 스냅샷**을 조회한다.
+> **Governance 설계 노트**: `GovernancePolicy`는 로컬 정책 캐시에서 평가되고, 상위 **거버넌스 정책 동기화 서버**가 브로드캐스팅하는 delta를 받아 갱신되는 구조를 목표로 한다. 따라서 대화 루프는 매 호출마다 네트워크 왕복이 아니라 **최신 로컬 정책 스냅샷**을 조회한다.
 
 #### 4.5.7 대화 세션 관리
 
@@ -948,7 +948,7 @@ sequenceDiagram
 | --- | --- | --- |
 | `createUserMessage()` | renderer input → `ipcMain.handle("lvis:chat:send")` | Electron IPC + 조기 keyword preflight |
 | Append to conversation history | `ConversationHistory.append()` | + assistant `thought` 보존 |
-| Build system prompt | system prompt assembly | + LVIS.md · notes/ · 조직 컨텍스트 · tool schema · overlay trigger context |
+| Build system prompt | system prompt assembly | + LVIS.md · memory/ · 조직 컨텍스트 · tool schema · overlay trigger context |
 | Stream to Claude API | `provider.streamTurn(...)` | provider 공통 인터페이스로 Claude/Gemini/OpenAI 수용 |
 | `findToolByName()` | `ToolRegistry.findByName()` | + Plugin · MCP 동적 등록 통합 레지스트리 |
 | `canUseTool()` | `GovernancePolicy` + `PermissionManager.checkDetailed()` | + source/trust aware approval gate + 정책 동기화 전제 |
@@ -974,7 +974,7 @@ flowchart LR
     subgraph "Dynamic Sources (매 턴 갱신)"
         S5["⑤ Tool Schemas<br/>L1 Filter 통과한 도구 스키마"]
         S6["⑥ Active Plugin Schemas<br/>활성 플러그인 도구·스킬"]
-        S7["⑦ Memory / notes/<br/>사용자 축적 메모"]
+        S7["⑦ Memory / memory/<br/>사용자 축적 메모리"]
         S8["⑧ Conversation Summary<br/>Auto-Compact 요약 (있을 경우)"]
     end
 
@@ -1009,7 +1009,7 @@ flowchart LR
 | ④ | Org Context | 부팅 시 | 1~2K | 조직 구조 요약, 팀원 목록, 보고 라인 |
 | ⑤ | Tool Schemas | 매 턴 | 3~8K | L1 Filter 통과 후 Internal search에 노출할 도구 JSON 스키마 |
 | ⑥ | Plugin Schemas | 플러그인 변경 시 | 1~5K | 활성 플러그인의 도구·스킬 스키마 |
-| ⑦ | Memory / notes/ | 파일 변경 시 | 1~3K | 사용자 축적 메모 — 선호, 루틴, 프로젝트 정보 |
+| ⑦ | Memory / memory/ | 파일 변경 시 | 1~3K | 사용자 축적 메모리 — 선호, 루틴, 프로젝트 정보 |
 | ⑧ | Compact Summary | Compact 후 | 2~5K | 이전 대화 요약 (Auto-Compact 실행 시에만) |
 | ⑨ | OS / Environment | 부팅 시 | 0.3~0.5K | OS 종류, 홈 디렉터리, 시간대, 현재 시각 |
 | ⑩ | Session Context | 매 턴 | 0.5~1K | 현재 열린 파일, 작업 디렉터리 등 |
@@ -1120,7 +1120,7 @@ lvis-app/src/
 ├── renderer.tsx   # minimal entry — mounts ui/renderer/App.tsx
 ├── ui/renderer/   # Renderer composition root (Phase 1~4.6 split 완료)
 │   ├── App.tsx                  # composition root
-│   ├── ChatView.tsx, Sidebar.tsx, SettingsDialog.tsx, MainToolbar.tsx
+│   ├── ChatView.tsx, SettingsDialog.tsx, MainToolbar.tsx
 │   ├── context/                 # ChatContext (state provider for ChatView subtree)
 │   ├── hooks/                   # 14 domain hooks (settings, chat-state, briefing,
 │   │                            #  approval, search, context-budget, cost-estimate,
@@ -1128,7 +1128,7 @@ lvis-app/src/
 │   │                            #  app-bootstrap, indexed-docs, marketplace-updates)
 │   ├── components/              # BriefingCard, AssistantCard, UserMessageEditor,
 │   │                            #  ReasoningCard, ToolApprovalDialog, ToolGroupCard,
-│   │                            #  ChatSearchOverlay, Sparkline, UsageDashboard,
+│   │                            #  UnifiedSearchPanel, Sparkline, UsageDashboard,
 │   │                            #  HtmlPreview, StarredView,
 │   │                            #  MarketplaceUpdateBanner
 │   ├── dialogs/                 # ApprovalDialog, PluginInstallDialog,
@@ -1137,7 +1137,7 @@ lvis-app/src/
 │   │                            #  PrivacyTab, PermissionsTab,
 │   │                            #  RolesTab, AuditTab, PluginPerfTab,
 │   │                            #  McpTab, PluginConfigTab, MarketplaceTab
-│   │                            #  (RoutinePanel → components/ as sidebar view)
+│   │                            #  (RoutinePanel → components/ as built-in view)
 │   ├── utils/                   # cost-format, html-preview, history, compose
 │   └── types.ts, constants.ts, api-client.ts
 │
@@ -1245,7 +1245,7 @@ graph LR
         subgraph "영속 기억 (파일 기반)"
             LVIS_MD["LVIS.md<br/>(프로젝트·조직 컨텍스트)"]
             USER_MD["user-preferences.md<br/>(사용자 선호·프로필)"]
-            NOTES_DIR["notes/<br/>(사용자가 저장한 메모)"]
+            NOTES_DIR["memory/<br/>(사용자가 저장한 메모리)"]
         end
 
         subgraph "세션 기억 (인메모리)"
@@ -1256,7 +1256,7 @@ graph LR
 
     subgraph "참조 방식"
         BOOT_LOAD["부팅 시 LVIS.md 로드<br/>(시스템 프롬프트에 주입)"]
-        ON_DEMAND["필요 시 notes/ 참조<br/>(Agent Loop에서 검색)"]
+        ON_DEMAND["필요 시 memory/ 참조<br/>(Agent Loop에서 검색)"]
         SESSION_AUTO["세션 내 자동 축적<br/>(대화·도구 결과)"]
     end
 
@@ -1277,7 +1277,7 @@ artifact 와 save data 를 함께 보관한다 (호스트 root 에 끼어들지 
 ~/.lvis/
 ├── LVIS.md              # 프로젝트·팀·조직 컨텍스트 (관리자 배포 가능)
 ├── user-preferences.md  # 사용자 개인 선호 (보고 스타일, 자주 쓰는 도구 등)
-├── notes/               # 호스트 메모 ("이거 기억해" 명령 — 플러그인 자체 메모는
+├── memory/              # 호스트 메모리 ("이거 기억해" 명령 — 플러그인 자체 기록은
 │   ├── 출장-절차.md     # 각 플러그인의 ~/.lvis/plugins/<id>/notes/ 안에 둔다)
 │   └── 분기-보고서-템플릿.md
 ├── sessions/            # 세션 이력 (claw Session 패턴)
@@ -1298,7 +1298,7 @@ artifact 와 save data 를 함께 보관한다 (호스트 root 에 끼어들지 
 | ----------------------- | --------- | ---------------- | ------------------------ |
 | **LVIS.md**             | 로컬 파일 | 영구 (수동 관리) | 관리자 + 사용자          |
 | **user-preferences.md** | 로컬 파일 | 영구 (수동 관리) | 사용자                   |
-| **notes/**              | 로컬 파일 | 영구 (수동 관리) | 사용자 ("기억해" 명령)   |
+| **memory/**             | 로컬 파일 | 영구 (수동 관리) | 사용자 ("기억해" 명령)   |
 | **Session Context**     | In-memory | 현재 세션        | 자동 (대화 종료 시 소멸) |
 
 > **v2 대비 변경 이유**: v2의 4계층 기억(Session→Working→Episodic→Semantic)과 자동 승격·만료·연결 로직은 현 단계에서 과도한 복잡도를 유발한다. Copilot의 `.github/copilot-instructions.md`, Claude Code의 `CLAUDE.md` 패턴처럼 파일 기반으로 시작하고, 필요가 검증되면 점진적으로 확장한다.
@@ -1346,7 +1346,7 @@ flowchart LR
 | 4    | 의도 + 엔티티 | "출장 품의 작성해줘"    | Route Engine → Internal search + 관련 도구 |
 | 5    | 일반 대화     | "안녕하세요"            | Internal search 직접 세션                  |
 
-**확장 설계 메모**
+**확장 설계 노트**
 
 - 플러그인은 manifest/skill 등록 시 **keyword group** 을 동적으로 추가한다.
 - 동일 입력이 여러 스킬 그룹에 걸리면 Internal search가 가장 적합한 후보를 추천한다.
@@ -1693,8 +1693,8 @@ graph TB
     end
 
     subgraph "📋 System & Utility"
-        MEMORY_READ["MemoryRead<br/>LVIS.md · notes/ 조회"]
-        MEMORY_WRITE["MemoryWrite<br/>notes/ 저장"]
+        MEMORY_READ["MemoryRead<br/>LVIS.md · memory/ 조회"]
+        MEMORY_WRITE["MemoryWrite<br/>memory/ 저장"]
         TODO["TodoWrite<br/>태스크 목록 관리"]
         ASK_USER["AskUser<br/>사용자 확인 요청"]
         CALENDAR["Calendar<br/>일정 조회·생성"]
@@ -2074,7 +2074,7 @@ broadcast 만 처리.
 | `plugin-config` | 플러그인 설정 | `PluginConfigTab.tsx` | 플러그인별 설정 (configSchema 기반 폼 또는 raw key-value) |
 | `marketplace` | 마켓플레이스 | `MarketplaceTab.tsx` | 마켓플레이스 URL·API 키·private network 허용 |
 
-> **Note (Routine v2):** `RoutinePanel.tsx` 는 SettingsDialog 탭이 **아니다**. Routine v2 도입(feat/routine-v2-unified) 이후 RoutinePanel 은 `Sidebar.tsx` 의 `routines` 사이드바 엔트리(`Repeat2` 아이콘)로 이동하여 **사이드바 메인 뷰**로 동작한다. SettingsDialog 에는 더 이상 routine 탭이 존재하지 않는다.
+> **Note (Routine v2):** `RoutinePanel.tsx` 는 SettingsDialog 탭이 **아니다**. Routine v2 도입 이후 RoutinePanel 은 상단 액션바 햄버거 메뉴의 `루틴` 항목에서 여는 내장 메인 뷰로 동작한다. SettingsDialog 에는 더 이상 routine 탭이 존재하지 않는다.
 
 ### PR #342 재배치 요약
 
@@ -2164,7 +2164,7 @@ flowchart TB
 
 | 레벨 | 범위 | 열람 가능 에이전트 | 예시 |
 |------|------|-------------------|------|
-| 🔒 **개인 보관** | 나만 | 없음 (내 에이전트만) | 개인 메모 성격의 일지 |
+| 🔒 **개인 보관** | 나만 | 없음 (내 에이전트만) | 개인 기록 성격의 일지 |
 | 👥 **팀 레벨** (기본값) | 소속 팀 | 같은 팀 에이전트 | 일상 업무 보고 |
 | 🏢 **상위 조직** | 실/본부 단위 | 상위 조직 소속 에이전트 | 크로스팀 프로젝트 공유 |
 | 🌐 **전체 공개** | 전사 | 모든 에이전트 | 전사 차원 인사이트·팁 |
@@ -2434,8 +2434,8 @@ graph TB
   },
 
   "ui": [
-    { "id": "meeting-sidebar", "slot": "sidebar", "kind": "embedded-module",
-      "title": "회의록", "entry": "ui/sidebar.js", "exportName": "MeetingSidebar" }
+    { "id": "plugin-panel", "slot": "sidebar", "kind": "embedded-module",
+      "title": "플러그인 패널", "entry": "ui/panel.js", "exportName": "PluginPanel" }
   ]
 }
 ```
@@ -2456,7 +2456,7 @@ graph TB
 | `eventSubscriptions` | `string[]` | 호스트 이벤트 구독 대상. `memory.private.*` / `settings.apiKey.*` / `audit.*` / `dlp.*` (`PLUGIN_PRIVATE_NAMESPACES`) 는 **거부**. public namespace (`meeting` / `calendar` / `email` / `index`) 는 허용, 그 외는 warn. (2026-05-11: `task` 는 host owner 폐기로 retire. 플러그인-소유 namespace 는 host 가 의도적으로 알지 않으므로 신규 추가 안 함 — open-source-readiness 룰.) |
 | `notificationEvents` | `Array<{ event, titleField?, bodyField? }>` | `registerPluginNotifications()` 가 manifest 만 읽어 OS 알림 핸들러를 자동 배선. |
 | `keywords` | `Array<{ keyword, skillId }>` | boot 시 KeywordEngine 에 등록. |
-| `ui` | `PluginUiExtension[]` | UI slot 마운트 명세. slot 현재 `"sidebar"` 만 지원. |
+| `ui` | `PluginUiExtension[]` | UI slot 마운트 명세. manifest slot key 는 현재 historical `"sidebar"` 값을 사용하지만, 렌더링 표면은 플러그인 뷰/분리 창 경로가 담당한다. |
 | `publisher` | string | 감사 로그·마켓플레이스 표시. |
 | `configSchema` | `PluginConfigSchema` (선택) | **§9.2 Track B** — VSCode-style 선언형 설정 스키마. JSON Schema draft-07 subset (`toolSchemas` 와 동일 dialect) 으로 `properties` map 을 선언하면 호스트가 `PluginConfigTab` 에 typed form (string / number / boolean / enum / string[] ) 을 자동 렌더링한다. 미선언 시 기존 raw key/value 편집기로 fallback (legacy plugin back-compat 보장). UI 라우팅 hint 는 `format: "secret"` 한 종류 — `setSecret` (Electron `safeStorage` 암호화) 로 라우팅되어 cleartext `settings.json` 에 저장되지 **않는다**. `customPanel` (entry/exportName) 은 escape hatch — schema 필드로 표현하기 어려운 expressive UI 를 plugin 이 자체 React 컴포넌트로 마운트할 수 있다 (UI Slot System §9.3 호환). 상세: `docs/references/plugin-tool-schema-design.md` (track B). |
 
@@ -2493,9 +2493,9 @@ graph TB
 
         subgraph "Main Area"
             direction LR
-            subgraph "Left Sidebar"
-                NAV["Navigation"]
-                SIDEBAR_SLOT["🧩 Sidebar Slot"]
+            subgraph "Plugin Views"
+                NAV["Plugin Grid / Menu"]
+                SIDEBAR_SLOT["🧩 Plugin View Slot"]
             end
             subgraph "Center Content"
                 OVERLAY_AREA["Overlay Prompt"]
@@ -2513,14 +2513,14 @@ graph TB
     end
 
     subgraph "회의록 플러그인 설치 후"
-        MEETING_TOOLBAR["🎙️ Recording 버튼<br/>→ Toolbar Slot"]
-        MEETING_SIDEBAR["📝 회의록 목록<br/>→ Sidebar Slot"]
-        MEETING_WIDGET["실시간 자막<br/>→ Chat Widget Slot"]
+        PLUGIN_TOOLBAR["플러그인 액션<br/>→ Toolbar Slot"]
+        PLUGIN_PANEL["플러그인 패널<br/>→ Plugin View Slot"]
+        PLUGIN_WIDGET["실시간 상태<br/>→ Chat Widget Slot"]
     end
 
-    MEETING_TOOLBAR -.-> TOOLBAR_SLOT
-    MEETING_SIDEBAR -.-> SIDEBAR_SLOT
-    MEETING_WIDGET -.-> CHAT_WIDGET_SLOT
+    PLUGIN_TOOLBAR -.-> TOOLBAR_SLOT
+    PLUGIN_PANEL -.-> SIDEBAR_SLOT
+    PLUGIN_WIDGET -.-> CHAT_WIDGET_SLOT
 ```
 
 ### 9.3a Plugin Runtime — Startup 정책 (현행)
@@ -2531,7 +2531,7 @@ boot 시 `PluginRuntime.startAll()`은 로드된 플러그인을 순차 `await`�
 
 ### 9.3b Plugin Webview Registration Protocol (#237 Option B)
 
-Sidebar/panel 슬롯에 마운트되는 플러그인 UI는 Electron `<webview>` 안에서 실행된다 (contextIsolation=yes, nodeIntegration=no, sandbox=yes). 플러그인 코드는 `window.lvisPlugin` 브릿지(`plugin-preload.ts`)만 접근할 수 있으며, `window.lvisApi`는 미노출이다.
+Plugin UI 슬롯에 마운트되는 플러그인 UI는 Electron `<webview>` 안에서 실행된다 (contextIsolation=yes, nodeIntegration=no, sandbox=yes). 플러그인 코드는 `window.lvisPlugin` 브릿지(`plugin-preload.ts`)만 접근할 수 있으며, `window.lvisApi`는 미노출이다.
 
 **등록 흐름 (register-before-attach, #447)**
 
@@ -2616,8 +2616,8 @@ stateDiagram-v2
 | `emitEvent(name, payload)` | 다른 플러그인·호스트 이벤트 버스에 이벤트 발행 | 전체 |
 | `onEvent(name, handler)` | 이벤트 구독 | 전체 |
 | ~~`addTask(task)`~~ | **(2026-05-05 Phase 4 제거)** host `TaskService` + SQLite 경로 삭제. task 소유권은 agent-hub 플러그인으로 완전 이전 (Phase 1–4). `agent_hub.notification.surfaced` 이벤트가 일반 알림 채널 역할, `meeting.summary.created.actionItems` 가 액션아이템 캐리어. | 제거됨 |
-| `saveNote(title, content)` | 플러그인 자기 dir 안에 메모 저장 (`~/.lvis/plugins/<id>/notes/`) | meeting |
-| `getSecret(key)` | 암호화된 API 키 조회 | meeting, ms-graph |
+| `saveNote(title, content)` | 플러그인 자기 dir 안에 메모리 항목 저장 (`~/.lvis/plugins/<id>/notes/`) | 전체 |
+| `getSecret(key)` | 암호화된 API 키 조회 | 인증/외부 API 플러그인 |
 | `logEvent(level, message, data?)` | **[Phase 2]** 호스트 감사 로그에 플러그인 이벤트 기록. `level`: `"info"\|"warn"\|"error"` | 전체 |
 | `onShutdown(handler)` | **[Phase 2]** Electron `before-quit` 체인에 정리 핸들러 등록. 5s timeout. | 전체 |
 | `triggerConversation(spec)` | 관찰 신호로부터 host overlay 에 plugin-authored prompt 를 staged 하는 surface. 런타임 게이트는 `host:overlay` 단일 capability 이다. 자세한 사양: [`overlay-trigger.md`](../references/overlay-trigger.md). | `host:overlay` 보유 plugin |
@@ -2633,7 +2633,7 @@ stateDiagram-v2
 - **subscriber**: 일반 plugin 은 `hostApi.onPluginsChanged(handler)` 로만 구독. handler 는 self-event (자기 자신이 subject 인 경우) 가 자동 필터된 상태로 받는다. consumer 는 host 에 등록된 plugin id 를 역참조하지 않고 capability/manifest 계약만 사용한다.
 - **`source` discriminator**: install 시 `marketplace` / `local-dev` 구분. production consumer 는 `local-dev` 무시 권장 — 개발자의 로컬 테스트 플러그인이 downstream cascade 를 trigger 하지 않도록.
 
-**(2026-05-05 Phase 4)** `task.*` namespace 는 host-side owner 삭제로 함께 폐기됨. `TaskService`, `TaskDeadlinePoller`, `TaskView`, sidebar Tasks 탭, `lvis:tasks:*` IPC 채널, preload bridge 메서드 전체 제거 완료. tasks-plugin-split 은 COMPLETE (host out, agent-hub in).
+**(2026-05-05 Phase 4)** `task.*` namespace 는 host-side owner 삭제로 함께 폐기됨. `TaskService`, `TaskDeadlinePoller`, `TaskView`, Tasks 탭, `lvis:tasks:*` IPC 채널, preload bridge 메서드 전체 제거 완료. tasks-plugin-split 은 COMPLETE (host out, agent-hub in).
 
 **(2026-05-11 follow-up)** `task.*` 는 `PUBLIC_EVENT_NAMESPACES` 에서도 제거되었다. 후속 task-도메인 시그널 (마감 임박 등) 은 플러그인 측 plugin-bus 이벤트로 발행되어 다른 플러그인 (예: brain detector) 이 소비한다. 플러그인-소유 namespace 는 host 가 의도적으로 모르므로 (`open-source-readiness` — 회사/벤더 specifics 는 host source 가 아닌 플러그인/매니페스트에) `PUBLIC_EVENT_NAMESPACES` 에 별도 등록하지 않는다. 구독 측 플러그인은 load-time 에 `namespace drift` warn 한 줄을 받는데, 이는 기능 결함이 아니라 의도된 "host 가 이 namespace 를 별도로 보증하지 않는다" 신호이다 (HostApi pluginId 식별로 emit 측 cross-plugin spoof 는 별도로 차단됨 — `boot/steps/plugin-runtime.ts` 의 emitEvent).
 
@@ -2647,7 +2647,7 @@ PR 3 에서 Microsoft Graph 인증이 호스트에서 플러그인으로 이전�
   - 시스템 브라우저 호출 (`shell.openExternal`)
   - loopback HTTP redirect 또는 custom protocol 핸들러
   - `safeStorage` 토큰 캐시 (플러그인 namespace 안)
-  - 자체 settings UI (host `PluginConfigTab` 의 key-value 또는 sidebar embedded module)
+  - 자체 settings UI (host `PluginConfigTab` 의 key-value 또는 plugin-view embedded module)
 - 플러그인 manifest 에 `capabilities` 자기-식별 라벨을 선언한다 (예: `ms-graph-consumer`). 이 capability 는 PR 3 이후 advisory — host 측 게이트가 아니라 플러그인 분류·문서화 목적.
 - 호스트는 **OAuth-specific 코드를 포함하지 않는다**. MS Graph / Slack / Notion 등 외부 ID provider 는 모두 해당 플러그인이 소유.
 
@@ -2669,7 +2669,7 @@ PR 3 에서 Microsoft Graph 인증이 호스트에서 플러그인으로 이전�
 - `src/auth/token-store.ts` — Electron `safeStorage` 암호화, `<hostRoot>/plugins/ms-graph/tokens/token-{env}.json`
 - `src/auth/migrator.ts` — 구 host `~/.lvis/ms-graph-token-{env}.json` 1회 자동 이전 (PR 3b 호환 유틸)
 - 환경 (external / corporate) 선택은 PluginConfigTab 의 `pluginConfigs["ms-graph"].environment` key
-- v0.1.30 부터 sidebar embedded-module UI (`msgraph-calendar-control` / `msgraph-email-control`) 제거 — settings 는 host `PluginConfigTab` 단독, sidebar 모듈 reference 는 `meeting` 플러그인으로 이전. 이 결정은 CLAUDE.md 의 "dumb pipe" identity (LLM-free fetch + 폴링 + 이벤트 발행만) 와 align.
+- v0.1.30 부터 embedded-module UI (`msgraph-calendar-control` / `msgraph-email-control`) 제거 — settings 는 host `PluginConfigTab` 단독, embedded 모듈 reference 는 플러그인 소유 UI 로 이전. 이 결정은 CLAUDE.md 의 "dumb pipe" identity (LLM-free fetch + 폴링 + 이벤트 발행만) 와 align.
 
 **ms-graph 한정 escape hatch — `loginInExternalBrowser` 토글 (v0.1.29 +)**: 기본은 in-app `BrowserWindow` (PR #44, agent-hub mirror) 이지만, 사용자가 configSchema 로 `loginInExternalBrowser=true` 를 설정하면 `shell.openExternal` 로 시스템 기본 브라우저에 IdP 페이지를 띄우는 옛 흐름으로 전환할 수 있다 — corp-CA / WebView2 GPO / SSO 쿠키 격리 같은 환경 회귀의 안전망. MSAL loopback redirect 가 양쪽 모드에서 동일하게 동작하기 때문에 가능한 우연이며, **다른 OAuth 플러그인이 일반화하지 말 것** (Slack/Notion/Google 등은 redirect 메커니즘이 다를 수 있음). default off 라 §9.4a "agent-hub mirror" 정책은 그대로 유효.
 

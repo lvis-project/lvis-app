@@ -73,7 +73,7 @@ describe("ensureAuditSecret", () => {
 });
 
 describe("FileSecretStore", () => {
-  it("writes secrets with 0o600 mode", () => {
+  it.skipIf(process.platform === "win32")("writes secrets with 0o600 mode", () => {
     const store = new FileSecretStore(join(workDir, "secrets"));
     store.write("audit-hmac.key", "deadbeef");
     const filePath = join(workDir, "secrets", "audit-hmac.key");
@@ -107,7 +107,7 @@ describe("SafeStorageSecretStore", () => {
     };
   }
 
-  it("persists encrypted ciphertext with 0o600 mode", () => {
+  it.skipIf(process.platform === "win32")("persists encrypted ciphertext with 0o600 mode", () => {
     const store = new SafeStorageSecretStore(makeSafeStorage(), join(workDir, "secrets"));
     store.write("audit-hmac.key", "hello-secret");
     const filePath = join(workDir, "secrets", "audit-hmac.key.safe-storage");

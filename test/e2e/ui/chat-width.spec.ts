@@ -47,8 +47,7 @@ test.describe('chat column width constraints', () => {
     const box = await chatOuter.boundingBox();
     expect(box).not.toBeNull();
     // At 1024px viewport max-w-3xl (768px) is not reached; w-full kicks in.
-    // Sidebar is ~200px; remaining main area is ~824px (desktop) → but at 1024 the
-    // sidebar may collapse; the chat should fill to at least 600px.
+    // The chat should fill to at least 600px.
     expect(box!.width).toBeGreaterThan(600);
   });
 

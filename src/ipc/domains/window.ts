@@ -7,6 +7,7 @@
 import { BrowserWindow, ipcMain, type BrowserWindow as ElectronBrowserWindow, type IpcMainInvokeEvent } from "electron";
 import { validateSender, auditUnauthorized } from "../gated.js";
 import type { IpcDeps } from "../types.js";
+import { isWindowControlOwned } from "../window-control-registry.js";
 
 /**
  * Attach maximize / fullscreen state-broadcast listeners to a BrowserWindow.
@@ -36,26 +37,28 @@ export function registerWindowHandlers(deps: IpcDeps): void {
     BrowserWindow.fromWebContents(e.sender);
   const getSenderWindowOrMain = (e: IpcMainInvokeEvent): ElectronBrowserWindow | null =>
     getSenderWindow(e) ?? getMainWindow();
+  const canUseWindowControl = (e: IpcMainInvokeEvent): boolean =>
+    validateSender(e) || isWindowControlOwned(e.sender);
 
   ipcMain.handle("window:minimize", (e) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "window:minimize", e); return; }
+    if (!canUseWindowControl(e)) { auditUnauthorized(auditLogger, "window:minimize", e); return; }
     getSenderWindowOrMain(e)?.minimize();
   });
 
   ipcMain.handle("window:toggleMaximize", (e) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "window:toggleMaximize", e); return; }
+    if (!canUseWindowControl(e)) { auditUnauthorized(auditLogger, "window:toggleMaximize", e); return; }
     const win = getSenderWindowOrMain(e);
     if (!win) return;
     win.isMaximized() ? win.unmaximize() : win.maximize();
   });
 
   ipcMain.handle("window:close", (e) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "window:close", e); return; }
+    if (!canUseWindowControl(e)) { auditUnauthorized(auditLogger, "window:close", e); return; }
     getSenderWindow(e)?.close();
   });
 
   ipcMain.handle("window:syncTitleBarTheme", (e, payload: { color: string; symbolColor: string }) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "window:syncTitleBarTheme", e); return; }
+    if (!canUseWindowControl(e)) { auditUnauthorized(auditLogger, "window:syncTitleBarTheme", e); return; }
     if (process.platform === "darwin") return;
     const win = getSenderWindowOrMain(e);
     if (!win || typeof win.setTitleBarOverlay !== "function") return;

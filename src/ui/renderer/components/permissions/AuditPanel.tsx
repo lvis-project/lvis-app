@@ -176,10 +176,10 @@ export function AuditPanel({
       <section
         className={`flex items-center gap-2 border-b px-3 py-2 text-xs ${
           integrityStatus.severity === "ok"
-            ? "bg-green-500/10 text-green-700 dark:text-green-400"
+            ? "bg-success/10 text-success"
             : integrityStatus.severity === "warn"
-              ? "bg-yellow-500/10 text-yellow-700 dark:text-yellow-400"
-              : "bg-red-500/10 text-red-700 dark:text-red-400"
+              ? "bg-warning/10 text-warning"
+              : "bg-destructive/10 text-destructive"
         }`}
         data-testid="audit-integrity-banner"
         data-severity={integrityStatus.severity}
@@ -250,7 +250,7 @@ export function AuditPanel({
       </section>
 
       {error && (
-        <p className="border-b bg-red-500/10 px-3 py-1 text-xs text-red-700 dark:text-red-400">
+        <p className="border-b bg-destructive/10 px-3 py-1 text-xs text-destructive">
           {error}
         </p>
       )}
@@ -306,17 +306,17 @@ export function AuditPanel({
 function decisionBadgeClass(decision: string): string {
   switch (decision) {
     case "allow":
-      return "border-green-500 text-green-700 dark:text-green-400";
+      return "border-success text-success";
     case "deny":
-      return "border-red-500 text-red-700 dark:text-red-400";
+      return "border-destructive text-destructive";
     case "ask":
-      return "border-blue-500 text-blue-700 dark:text-blue-400";
+      return "border-info text-info";
     case "deferred":
-      return "border-orange-500 text-orange-700 dark:text-orange-400";
+      return "border-warning text-warning";
     case "mode_change":
-      return "border-purple-500 text-purple-700 dark:text-purple-400";
+      return "border-action-view text-action-view";
     case "manifest_violation":
-      return "border-pink-500 text-pink-700 dark:text-pink-400";
+      return "border-emphasis text-emphasis";
     default:
       return "";
   }

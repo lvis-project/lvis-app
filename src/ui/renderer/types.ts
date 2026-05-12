@@ -243,10 +243,12 @@ export type LvisApi = {
   >;
   // Provider-auth bridge methods are plugin-owned.
   chatHasProvider: () => Promise<boolean>;
+  captureUserKeyboardIntent: () => import("../../shared/chat-origin.js").UserKeyboardIntentSnapshot;
   chatSend: (
     input: string,
     attachments: import("../../engine/llm/types.js").UserContentPart[] | undefined,
     inputOrigin: ChatSendInputOrigin,
+    userIntent?: import("../../shared/chat-origin.js").UserKeyboardIntentSnapshot,
   ) => Promise<unknown>;
   chatGuide: (input: string) => Promise<unknown>;
   chatNew: () => Promise<{ ok: true }>;
@@ -472,9 +474,11 @@ export type LvisApi = {
     openDetached: (viewKey: string) => Promise<{ ok: true; windowId: number } | { ok: false; error: string }>;
     closeDetached: () => Promise<{ ok: true } | { ok: false; error: string }>;
     listDetached: () => Promise<Array<{ windowId: number; viewKey: string; snapped: boolean }>>;
+    loadSessionInMain: (sessionId: string) => Promise<{ ok: true } | { ok: false; error: string }>;
     onSnapEdge: (handler: (edge: "n" | "s" | "e" | "w" | null) => void) => () => void;
     /** Subscribe to in-place navigation (single-instance shell content swap). */
     onDetachedNavigate: (handler: (viewKey: string) => void) => () => void;
+    onLoadSessionInMain: (handler: (sessionId: string) => void) => () => void;
   };
 };
 

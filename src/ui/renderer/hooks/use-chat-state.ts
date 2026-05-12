@@ -124,7 +124,16 @@ export function useChatState(api: LvisApi) {
           return;
         }
       }
-      if (ev.type === "text_delta" && ev.text) {
+      if (ev.type === "llm_status") {
+        const message = formatLlmStatusMessage(ev);
+        if (!message) return;
+        setEntries((p) => {
+          if (isImportedTriggerStreaming(p)) return p;
+          const base = guidanceResetPendingRef.current ? reopenLastAssistant(p).entries : p;
+          guidanceResetPendingRef.current = false;
+          return upsertStreamingAssistant(base, message);
+        });
+      } else if (ev.type === "text_delta" && ev.text) {
         setEntries((p) => {
           // Overlay trigger import flow — when the LLM is responding to an
           // accepted overlay trigger, redirect deltas INTO the
@@ -150,7 +159,7 @@ export function useChatState(api: LvisApi) {
         setEntries((p) => {
           const base = guidanceResetPendingRef.current ? reopenLastAssistant(p).entries : p;
           guidanceResetPendingRef.current = false;
-          return upsertStreamingReasoning(base, thoughtRef.current);
+          return upsertStreamingReasoning(dropPendingLlmStatusAssistant(base), thoughtRef.current);
         });
       } else if (ev.type === "assistant_round") {
         if (debugStreamEnabled) {
@@ -218,7 +227,7 @@ export function useChatState(api: LvisApi) {
         thoughtRef.current = "";
       } else if (ev.type === "tool_start" && ev.name && ev.groupId && ev.toolUseId !== undefined) {
         const { groupId, toolUseId, displayOrder = 0, name, input } = ev;
-        setEntries((p) => applyToolStart(p, { groupId, toolUseId, displayOrder, name, input }));
+        setEntries((p) => applyToolStart(dropPendingLlmStatusAssistant(p), { groupId, toolUseId, displayOrder, name, input }));
       } else if (ev.type === "tool_end" && ev.name && ev.groupId && ev.toolUseId !== undefined) {
         const { groupId, toolUseId, result, isError, uiPayload, durationMs } = ev;
         setEntries((p) => applyToolEnd(p, { groupId, toolUseId, result, isError, uiPayload, durationMs }));
@@ -356,6 +365,7 @@ export function useChatState(api: LvisApi) {
           streamRef.current = "";
           thoughtRef.current = "";
         } else {
+          setEntries((p) => dropPendingLlmStatusAssistant(p));
           if (debugStreamEnabled) {
             debugLog("stream", "done:skip-finalize", {
               reason: "streamRef and thoughtRef both empty",
@@ -589,6 +599,10 @@ export function useChatState(api: LvisApi) {
     setEntries((p) => appendUserEntry(p, content));
   }, []);
 
+  const appendAssistantStatus = useCallback((content: string): void => {
+    setEntries((p) => upsertStreamingAssistant(p, content));
+  }, []);
+
   const applyLoadedSession = useCallback((loaded: ChatEntry[]) => {
     setEntries(loaded);
   }, []);
@@ -643,6 +657,7 @@ export function useChatState(api: LvisApi) {
     seedRoutineEntries,
     clearForNewChat,
     appendUserEntry: appendUserMessage,
+    appendAssistantStatus,
     applyInitialSession,
     applyLoadedSession,
     truncateToEntry,
@@ -659,4 +674,52 @@ function visibleAssistantText(text: string): string {
   // decides whether to preserve or splice the entry based on surrounding
   // context (tool_group / checkpoint siblings), not on placeholder text.
   return text.trim().length > 0 ? text : "";
+}
+
+function formatLlmStatusMessage(ev: {
+  phase?: "attempt" | "retry" | "fallback";
+  label?: string;
+  attempt?: number;
+  maxAttempts?: number;
+  from?: string;
+  to?: string;
+}): string {
+  if (ev.phase === "fallback") {
+    const to = ev.to ? ` (${ev.to})` : "";
+    return `생각 중... 기본 모델 응답이 지연되어 백업 모델로 전환 중입니다${to}.`;
+  }
+  if (ev.phase === "retry") {
+    const attempt = ev.attempt ?? 1;
+    const max = ev.maxAttempts ?? 5;
+    return `생각 중... 모델 응답이 지연되어 재시도 중입니다. (${attempt}/${max})`;
+  }
+  if (ev.phase === "attempt") {
+    const attempt = ev.attempt ?? 1;
+    const max = ev.maxAttempts ?? 5;
+    return attempt <= 1
+      ? "생각 중..."
+      : `생각 중... 모델 응답을 다시 기다리는 중입니다. (${attempt}/${max})`;
+  }
+  return "";
+}
+
+function dropPendingLlmStatusAssistant(entries: ChatEntry[]): ChatEntry[] {
+  let idx = -1;
+  for (let i = entries.length - 1; i >= 0; i -= 1) {
+    const entry = entries[i];
+    if (
+      entry.kind === "assistant" &&
+      entry.streaming === true &&
+      isLlmStatusAssistantText(entry.text)
+    ) {
+      idx = i;
+      break;
+    }
+  }
+  if (idx < 0) return entries;
+  return [...entries.slice(0, idx), ...entries.slice(idx + 1)];
+}
+
+function isLlmStatusAssistantText(text: string): boolean {
+  return text === "생각 중..." || text.startsWith("생각 중... ");
 }

@@ -5,7 +5,7 @@ import { getHostMarketplaceApi } from "../host-marketplace-api.js";
 
 /**
  * Phase reported by `lvis:plugins:install-progress` IPC events. Renderer
- * surfaces (sidebar placeholder + settings tab skeleton) read this map to
+ * surfaces (plugin grid placeholder + settings tab skeleton) read this map to
  * render an in-flight indicator while the main process drives the install.
  */
 export type InstallPhase = "installing" | "downloading" | "verifying" | "registering" | "restarting";
@@ -19,7 +19,7 @@ export function usePluginMarketplace(api: LvisApi) {
   const [marketplace, setMarketplace] = useState<MarketplaceItem[]>([]);
   const [pluginViews, setPluginViews] = useState<PluginUiExtension[]>([]);
   // Plugin manifest summaries — needed alongside the slot-bound view list so
-  // surfaces (sidebar grid, settings tab, etc.) can read manifest-level
+  // surfaces (plugin grid, settings tab, etc.) can read manifest-level
   // metadata like `auth` without going through their own card fetch.
   const [pluginCards, setPluginCards] = useState<PluginCardSummary[]>([]);
   const [marketStatus, setMarketStatus] = useState("로딩 중...");

@@ -56,6 +56,10 @@ const ADJACENCY_WARNING_NESTED = [
   "node_modules/.cache",
 ] as const;
 
+function normalizePolicySeparators(p: string): string {
+  return p.replace(/\\/g, "/");
+}
+
 /**
  * Compute the host-default allow-list at boot.
  *
@@ -131,6 +135,7 @@ function sanitizeAllowedDirectoryEntries(
   for (const raw of input) {
     if (typeof raw !== "string" || raw.length === 0) continue;
     const expanded = expandHomeTilde(raw);
+    if (isFilesystemRootPath(expanded)) continue;
     const canonical = canonicalizePathForMatch(expanded);
     const folded = caseFoldForMatch(canonical);
     const value = foldCase ? folded : canonical;
@@ -224,6 +229,9 @@ export function validateDirectoryAddition(rawPath: string): ValidateDirectoryRes
     return { ok: false, reason: "directory path is empty", adjacencyWarnings };
   }
   const expanded = expandHomeTilde(rawPath.trim());
+  if (isFilesystemRootPath(expanded)) {
+    return { ok: false, reason: "filesystem root is not allowed", adjacencyWarnings };
+  }
   const canonical = canonicalizePathForMatch(expanded);
   const folded = caseFoldForMatch(canonical);
 
@@ -244,7 +252,7 @@ export function validateDirectoryAddition(rawPath: string): ValidateDirectoryRes
   // Adjacency hints — pure string heuristics on the basename / path
   // segments. We don't `readdir` the target; that is a renderer concern
   // (preview) and would also be a TOCTOU surface.
-  const lowerFolded = folded.toLowerCase();
+  const lowerFolded = normalizePolicySeparators(folded).toLowerCase();
   for (const basename of ADJACENCY_WARNING_BASENAMES) {
     if (
       lowerFolded.endsWith("/" + basename) ||
@@ -267,7 +275,16 @@ export function validateDirectoryAddition(rawPath: string): ValidateDirectoryRes
 }
 
 export function isFilesystemRootPath(foldedPath: string): boolean {
-  return foldedPath === "/" || /^[a-z]:\/?$/i.test(foldedPath);
+  const normalized = normalizePolicySeparators(foldedPath);
+  if (normalized === "/") return true;
+
+  const trimmed = normalized.replace(/\/+$/g, "");
+  if (/^[a-z]:$/i.test(trimmed)) return true;
+  if (/^\/\/[?.]\/[a-z]:$/i.test(trimmed)) return true;
+  if (/^\/\/[?.]\/unc\/[^/]+\/[^/]+$/i.test(trimmed)) return true;
+  if (/^\/\/[?.]\/volume\{[^/]+}(?:\/|$)/i.test(normalized)) return true;
+  if (/^\/\/[?.]\/globalroot\/device\//i.test(normalized)) return true;
+  return /^\/\/(?![?.]\/)[^/]+\/[^/]+$/i.test(trimmed);
 }
 
 /**

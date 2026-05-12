@@ -39,6 +39,10 @@ function parse(output: string): Record<string, unknown> {
   return JSON.parse(output) as Record<string, unknown>;
 }
 
+function portablePath(path: string): string {
+  return path.replace(/\\/g, "/");
+}
+
 beforeEach(() => {
   workDir = mkdtempSync(join(tmpdir(), "lvis-file-tools-"));
   mkdirSync(join(workDir, "src", "nested"), { recursive: true });
@@ -93,8 +97,8 @@ describe("file native tools", () => {
     const body = parse(result.output);
     const matches = body.matches as string[];
     expect(matches).toHaveLength(2);
-    expect(matches.some((p) => p.endsWith("src/a.ts"))).toBe(true);
-    expect(matches.some((p) => p.endsWith("src/nested/b.ts"))).toBe(true);
+    expect(matches.some((p) => portablePath(p).endsWith("src/a.ts"))).toBe(true);
+    expect(matches.some((p) => portablePath(p).endsWith("src/nested/b.ts"))).toBe(true);
   });
 
   it("grep_files matches content lines with file and line", async () => {
