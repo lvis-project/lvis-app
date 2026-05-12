@@ -511,4 +511,60 @@ describe("SettingsService appearance.font — Track A user-configurable font", (
     const s = new SettingsService({ userDataPath });
     expect(s.get("appearance").font).toBeUndefined();
   });
+
+  it("patch family-only preserves a previously patched sizeScale (PR #672 review HIGH#1)", async () => {
+    const s = new SettingsService({ userDataPath });
+    await s.patch({ appearance: { schemaVersion: 2, bundleId: "tokyo-night", font: { sizeScale: 1.125 } } });
+    await s.patch({ appearance: { schemaVersion: 2, bundleId: "tokyo-night", font: { family: "Pretendard, system-ui, sans-serif" } } });
+    expect(s.get("appearance").font).toEqual({
+      sizeScale: 1.125,
+      family: "Pretendard, system-ui, sans-serif",
+    });
+  });
+
+  it("patch sizeScale-only preserves a previously patched family (PR #672 review HIGH#1, reverse order)", async () => {
+    const s = new SettingsService({ userDataPath });
+    await s.patch({ appearance: { schemaVersion: 2, bundleId: "tokyo-night", font: { family: "Pretendard, sans-serif" } } });
+    await s.patch({ appearance: { schemaVersion: 2, bundleId: "tokyo-night", font: { sizeScale: 1.25 } } });
+    expect(s.get("appearance").font).toEqual({
+      family: "Pretendard, sans-serif",
+      sizeScale: 1.25,
+    });
+  });
+
+  it("validates font.family at patch time — drops injection metachars (PR #672 review MAJOR#4)", async () => {
+    const s = new SettingsService({ userDataPath });
+    await s.patch({
+      appearance: {
+        schemaVersion: 2,
+        bundleId: "tokyo-night",
+        font: { family: 'Arial; color: red; url(http://evil)' },
+      },
+    });
+    expect(s.get("appearance").font?.family).toBeUndefined();
+  });
+
+  it("patch accepts unquoted Hangul family names with Unicode-aware validator (PR #672 review CRITICAL#3)", async () => {
+    const s = new SettingsService({ userDataPath });
+    await s.patch({
+      appearance: {
+        schemaVersion: 2,
+        bundleId: "tokyo-night",
+        font: { family: "맑은 고딕, sans-serif" },
+      },
+    });
+    expect(s.get("appearance").font?.family).toBe("맑은 고딕, sans-serif");
+  });
+
+  it("rejects font.family containing embedded newlines (PR #672 review MAJOR#6)", async () => {
+    const s = new SettingsService({ userDataPath });
+    await s.patch({
+      appearance: {
+        schemaVersion: 2,
+        bundleId: "tokyo-night",
+        font: { family: "Arial\nevil" },
+      },
+    });
+    expect(s.get("appearance").font?.family).toBeUndefined();
+  });
 });

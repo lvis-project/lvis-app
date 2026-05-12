@@ -154,27 +154,43 @@ function presetForStack(stack: string | undefined): string {
   return hit ? hit.value : "custom";
 }
 
+const FONT_SIZE_VALUES: ReadonlyArray<0.875 | 1 | 1.125 | 1.25> = FONT_SIZE_OPTIONS.map((o) => o.value);
+
 function useFontPreferences() {
   const [family, setFamilyState] = useState<string>("system");
   const [sizeScale, setSizeScaleState] = useState<0.875 | 1 | 1.125 | 1.25>(1);
 
+  // Initial load + cross-window broadcast subscription. Without the subscription
+  // the radio buttons drift from the canonical state when the user changes the
+  // font in another window (native settings BrowserWindow or sibling).
   useEffect(() => {
     let cancelled = false;
+    let unsub: (() => void) | undefined;
     void (async () => {
       try {
         const api = getApi();
         const settings = await api.getSettings();
         if (cancelled) return;
-        const font = settings.appearance?.font;
-        if (font?.family && font.family !== "system") setFamilyState(font.family);
-        if (font?.sizeScale && [0.875, 1, 1.125, 1.25].includes(font.sizeScale)) {
-          setSizeScaleState(font.sizeScale);
-        }
+        applyFromSettings(settings);
+        unsub = api.onSettingsUpdated((next) => {
+          if (cancelled) return;
+          applyFromSettings(next);
+        });
       } catch {
         /* ignore — defaults remain */
       }
     })();
-    return () => { cancelled = true; };
+    function applyFromSettings(s: { appearance?: { font?: { family?: string; sizeScale?: number } } }) {
+      const font = s.appearance?.font;
+      if (font?.family && font.family !== "system") setFamilyState(font.family);
+      else setFamilyState("system");
+      if (font?.sizeScale && (FONT_SIZE_VALUES as readonly number[]).includes(font.sizeScale)) {
+        setSizeScaleState(font.sizeScale as 0.875 | 1 | 1.125 | 1.25);
+      } else {
+        setSizeScaleState(1);
+      }
+    }
+    return () => { cancelled = true; unsub?.(); };
   }, []);
 
   const setFamily = (next: string) => {
@@ -252,6 +268,62 @@ function useWebViewPreferredFlow(): {
   };
 
   return { flow, setFlow };
+}
+
+/**
+ * Free-form CSS font-family input with commit-on-blur semantics.
+ *
+ * `initial` syncs the React state when the upstream value changes (other window,
+ * preset click). Local state is the raw typed text (no per-keystroke trim — that
+ * would strip trailing whitespace as the user types, sabotaging cursor stability
+ * and turning `"Arial, Helvetica"` into `"Arial,Helvetica"`). Commit happens on
+ * blur or Enter — trim once, send the validated string to settings, broadcast
+ * once. Empty input commits as `"system"` (revert to default).
+ */
+function FontFamilyCustomInput({
+  initial,
+  onCommit,
+}: {
+  initial: string;
+  onCommit: (value: string) => void;
+}) {
+  const [raw, setRaw] = useState(initial);
+  // Re-sync when upstream changes (preset click, cross-window broadcast, …).
+  useEffect(() => { setRaw(initial); }, [initial]);
+
+  const commit = () => {
+    const trimmed = raw.trim();
+    onCommit(trimmed);
+  };
+
+  return (
+    <details className="text-[11px] text-muted-foreground">
+      <summary className="cursor-pointer select-none">직접 입력 (CSS font-family stack)</summary>
+      <input
+        type="text"
+        value={raw}
+        placeholder='예: "Spoqa Han Sans Neo", system-ui, sans-serif'
+        maxLength={200}
+        onChange={(e) => setRaw(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            commit();
+          } else if (e.key === "Escape") {
+            setRaw(initial);
+            (e.target as HTMLInputElement).blur();
+          }
+        }}
+        className="mt-2 w-full rounded border border-input bg-background px-2 py-1 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+        aria-label="사용자 정의 폰트 stack"
+      />
+      <p className="mt-1 text-[10px]">
+        한글/영문/숫자 폰트 이름, 콤마, 따옴표, 하이픈만 허용 (최대 200자). 입력 후 Enter 또는 포커스를 벗어나면 저장됩니다.
+        잘못된 입력은 자동으로 시스템 기본으로 되돌아갑니다. 플러그인 자체 창은 호스트 설정과 별도로 자체 폰트를 사용합니다.
+      </p>
+    </details>
+  );
 }
 
 export function AppearanceTab() {
@@ -366,22 +438,15 @@ export function AppearanceTab() {
             })}
           </div>
 
-          {/* 사용자 stack 직접 입력 */}
-          <details className="text-[11px] text-muted-foreground">
-            <summary className="cursor-pointer select-none">직접 입력 (CSS font-family stack)</summary>
-            <input
-              type="text"
-              value={customStack}
-              placeholder='예: "Spoqa Han Sans Neo", system-ui, sans-serif'
-              maxLength={200}
-              onChange={(e) => setFamily(e.target.value.trim())}
-              className="mt-2 w-full rounded border border-input bg-background px-2 py-1 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-              aria-label="사용자 정의 폰트 stack"
-            />
-            <p className="mt-1 text-[10px]">
-              영문/한글 폰트 이름, 콤마, 따옴표, 하이픈만 허용 (최대 200자). 잘못된 입력은 자동으로 시스템 기본으로 되돌아갑니다.
-            </p>
-          </details>
+          {/* 사용자 stack 직접 입력 — commit on blur / Enter only.
+              `onChange` 마다 updateSettings 를 invoke 하면 disk write + 모든 윈도우에
+              SETTINGS.updated broadcast + ThemeProvider 의 CSS variable setProperty 가
+              키스트로크당 fire — 60자 stack 입력 시 60 disk write + 60 broadcast.
+              로컬 raw 값으로만 추적하다가 commit 시점에만 trim + updateSettings. */}
+          <FontFamilyCustomInput
+            initial={customStack}
+            onCommit={(value) => setFamily(value)}
+          />
         </div>
 
         {/* 폰트 크기 */}
