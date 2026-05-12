@@ -616,7 +616,9 @@ async function waitForMinimumBootstrapSplash() {
 const BOOTSTRAP_SPLASH = `<!DOCTYPE html>
 <html lang="ko"><head><meta charset="utf-8"><title>LVIS</title>
 <style>
-  /* font-family mirrors HOST_FONT_STACK (src/shared/host-font-stack.ts) — issue #556 */
+  /* font-family mirrors HOST_FONT_STACK (src/shared/host-font-stack.ts) — issue #556. Inline minified
+     form (no space after comma) is intentional for splash byte-budget; test invariant
+     whitespace-normalizes before equality check. */
   html,body{margin:0;height:100%;background:#f3f3f3;color:#2c2c2c;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Apple SD Gothic Neo","Noto Sans KR","Malgun Gothic",sans-serif}
   body{overflow:hidden}
 
