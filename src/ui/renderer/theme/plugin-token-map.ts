@@ -5,17 +5,21 @@ import type { LvisTokenName } from "../../../shared/plugin-ui-tokens.js";
 // Values are literal HSL strings so plugins can apply them without needing any of
 // the host's --p-* palette or var() chain.
 const _H = (h: number, s: number, l: number) => `hsl(${h}, ${s}%, ${l}%)`;
-const _HSL_RE = /^(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)%\s+(\d+(?:\.\d+)?)%$/;
+// Tailwind alpha syntax: "H S% L% / A" or "H S% L% / A%". Capture alpha
+// optionally so bundle tokens that opt into translucent values still wrap to a
+// valid `hsl()` for plugin webviews (which cannot consume bare triples).
+const _HSL_RE = /^(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)%\s+(\d+(?:\.\d+)?)%(?:\s*\/\s*(\d+(?:\.\d+)?%?))?$/;
 
 /**
- * Convert an HSL triple string ("H S% L%") to an `hsl(H, S%, L%)` value.
- * Bundle tokens are stored as bare HSL triples (Tailwind format); plugin
- * webviews need the full `hsl()` wrapper.
+ * Convert an HSL triple string ("H S% L%" or "H S% L% / A%") to a CSS
+ * `hsl(H, S%, L%)` / `hsla(H, S%, L%, A%)` value. Bundle tokens are stored as
+ * bare HSL triples (Tailwind format); plugin webviews need the full wrapper.
  */
 function tripleToHsl(triple: string): string {
   const m = _HSL_RE.exec(triple.trim());
   if (!m) return triple; // already formatted or raw value
-  return `hsl(${m[1]}, ${m[2]}%, ${m[3]}%)`;
+  if (m[4] === undefined) return `hsl(${m[1]}, ${m[2]}%, ${m[3]}%)`;
+  return `hsla(${m[1]}, ${m[2]}%, ${m[3]}%, ${m[4]})`;
 }
 
 // Theme-invariant tokens — same across all bundles.
