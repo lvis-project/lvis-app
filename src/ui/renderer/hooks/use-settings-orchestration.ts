@@ -132,6 +132,20 @@ export function useSettingsOrchestration(
     return () => { cancelled = true; };
   }, [open, api]);
 
+  // Stay in sync with cross-window settings broadcasts. Without this, a sibling
+  // window (e.g. the native settings BrowserWindow) saving while this dialog
+  // is open would leave `settingsSnapshot` stale — the vendor-switch path
+  // below reads `settingsSnapshot.llm.vendors[vendor]` and would hydrate the
+  // form back to pre-save values. The `userTouchedRef`-style guards in this
+  // hook protect in-flight form edits; updating the snapshot only refreshes
+  // the cached source that the vendor-switch effect consults.
+  useEffect(() => {
+    if (!open) return;
+    return api.onSettingsUpdated((next) => {
+      setSettingsSnapshot(next);
+    });
+  }, [open, api]);
+
   // Re-hydrate every vendor-specific field when the active vendor changes.
   useEffect(() => {
     if (!open) return;

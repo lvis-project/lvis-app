@@ -129,6 +129,11 @@ await injectCorporateCa();
 
 let mainWindow: BrowserWindow | null = null;
 let settingsWindow: BrowserWindow | null = null;
+// Holds the most-recently requested tab while the settings window's renderer
+// is still loading. Flushed once on `did-finish-load`; any later tab requests
+// after the renderer is ready are sent immediately via IPC. See the rapid
+// second-invoke race the renderer review surfaced.
+let settingsWindowPendingTab: string | null = null;
 let services: AppServices | null = null;
 let pendingLvisUri: string | null = null;
 let lastRendererReloadAt = 0;
@@ -456,7 +461,14 @@ function openSettingsWindow(initialTabInput: unknown = "llm"): BrowserWindow {
   }
 
   if (settingsWindow && !settingsWindow.isDestroyed()) {
-    settingsWindow.webContents.send("lvis:settings-window:tab", { initialTab });
+    // If the renderer is still loading, the IPC listener isn't attached yet
+    // and `webContents.send` would be lost. Park the tab so the existing
+    // `did-finish-load` flusher can deliver it; otherwise send immediately.
+    if (settingsWindow.webContents.isLoading()) {
+      settingsWindowPendingTab = initialTab;
+    } else {
+      settingsWindow.webContents.send("lvis:settings-window:tab", { initialTab });
+    }
     if (settingsWindow.isMinimized()) settingsWindow.restore();
     settingsWindow.show();
     settingsWindow.focus();
@@ -495,9 +507,20 @@ function openSettingsWindow(initialTabInput: unknown = "llm"): BrowserWindow {
   });
   win.on("closed", () => {
     if (settingsWindow === win) settingsWindow = null;
+    settingsWindowPendingTab = null;
   });
   win.webContents.on("did-fail-load", (_e, code, desc, url) => {
     log.error({ code, desc, url }, "settings window failed to load");
+  });
+  // Drain any tab requests queued while the renderer was loading. The initial
+  // URL fragment already lands us on the right tab for the FIRST open; this
+  // covers a rapid second `openSettingsWindow(differentTab)` invocation before
+  // the renderer's IPC listener has attached.
+  win.webContents.once("did-finish-load", () => {
+    if (settingsWindowPendingTab && !win.isDestroyed()) {
+      win.webContents.send("lvis:settings-window:tab", { initialTab: settingsWindowPendingTab });
+      settingsWindowPendingTab = null;
+    }
   });
   win.webContents.setWindowOpenHandler(({ url }) => {
     try {
