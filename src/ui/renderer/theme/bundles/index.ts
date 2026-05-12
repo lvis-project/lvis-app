@@ -5,6 +5,7 @@
  *   `import { BUNDLES, findBundle } from "../theme/bundles/index.js"`
  */
 import type { ThemeBundle } from "./types.js";
+import type { BundleId } from "../../../../shared/theme-bundles.js";
 import { tokyoNightBundle } from "./tokyo-night.js";
 import { midnightBundle } from "./midnight.js";
 import { forestBundle } from "./forest.js";
@@ -43,6 +44,17 @@ export const BUNDLES = [
   cherryBlossomBundle,
   highContrastBundle,
 ] as const satisfies readonly ThemeBundle[];
+
+// §C3 (continued): cross-direction compile-time guard. `satisfies` only proves
+// every BUNDLES entry's id is a valid BundleId. This dummy assignment also
+// proves the reverse — every BundleId in BUNDLE_IDS has a BUNDLES entry. If
+// someone adds a new id to BUNDLE_IDS without registering the bundle here,
+// `BundleId` will contain a literal that `BUNDLES[number]["id"]` does not, and
+// the assignment fails at compile time. The variable is `void`'d so emit is
+// erased and there is no runtime cost.
+type _BundleIdCoverage = (typeof BUNDLES)[number]["id"];
+const _bundleIdCoverageCheck: BundleId extends _BundleIdCoverage ? true : never = true;
+void _bundleIdCoverageCheck;
 
 /** Default bundle applied on fresh installs. §C3: sourced from shared/theme-bundles.ts. */
 export const DEFAULT_BUNDLE_ID = _SHARED_DEFAULT_BUNDLE_ID;
