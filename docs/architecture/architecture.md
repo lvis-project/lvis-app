@@ -2035,6 +2035,39 @@ broadcast 만 처리.
   plugin-agnostic (UI 토큰 + 테마 enum) 이라 plugin install/uninstall/hot-reload
   시 따로 invalidate 할 필요가 없다
 
+**Plugin-side API 표준 (Decision 2026-05-12)** — SDK `primeTheme(bridge, opts?)`
+한 헬퍼가 `getTheme()` pull + `applyThemeFromHostEvent` paint + `host.theme.changed`
+구독 3 경로 모두를 캡슐화한다. React 측 `useTheme(bridge, opts?)` 는 `primeTheme`
+위의 얇은 wrapper로 재구현되고, `opts.target` 으로 detached BrowserWindow / scoped
+sidebar 의 별도 document/element 를 가리킬 수 있다. `opts.onPayload` 콜백이 sidebar
+custom 토큰 매핑 같은 use-case 를 흡수해, 같은 `host.theme.changed` 를 두 번
+구독할 필요가 사라진다. 모든 플러그인의 `mount()` contract 는 **첫 await 가
+`primeTheme(bridge, opts?)`** 호출이다 (`docs/references/plugin-tool-schema-design.md`
+§2.6 참조).
+
+Token SoT 는 `lvis-plugin-sdk/src/ui/tokens/fallback-dark.json` 한 곳이고, SDK
+의 `_FALLBACK_CSS` / `lvis-tokens.css :root` / host `_DARK_BASE` 3 artifact 가
+빌드타임 generate 또는 re-import 로 동기화된다. 손-lockstep 부담은 단위 테스트 1
+개 (3-artifact snapshot) 로 가드한다. 후보 비교 + plugin-별 변경 범위 +
+마이그레이션 시퀀스는 [`proposals/2026-05-12-plugin-theme-unification.md`](proposals/2026-05-12-plugin-theme-unification.md)
+참조.
+
+### 6.7.2 Token SoT 표
+
+플러그인 webview 에 전파되는 디자인 토큰의 lockstep 관계.
+
+| Artifact | 위치 | 역할 | 갱신 방식 |
+|---|---|---|---|
+| **SoT** `fallback-dark.json` | `lvis-plugin-sdk/src/ui/tokens/fallback-dark.json` | 17 개 `--lvis-*` 토큰의 다크 1차 정의. 디자인 팔레트가 바뀔 때 **여기 하나만** 수정 | 손-편집 |
+| SDK `_FALLBACK_CSS` | `lvis-plugin-sdk/src/ui/tokens/inject.ts` | host broadcast 도착 전 `:root` 다크 fallback `<style>` 주입 | SDK 빌드 스크립트가 JSON → TS const 로 generate |
+| SDK `lvis-tokens.css :root` | `lvis-plugin-sdk/src/ui/tokens/lvis-tokens.css` | 플러그인 CSS 의 `var(--lvis-*)` 기본값 | SDK 빌드 스크립트가 JSON → CSS rule 로 generate |
+| Host `_DARK_BASE` | `lvis-app/src/ui/renderer/theme/plugin-token-map.ts` | host ThemeProvider 가 broadcast 보내기 전 토큰 기준값 | SDK 패키지에서 JSON 직접 `import` (re-export) |
+
+CI 단위 테스트 1개 (3-artifact snapshot vs JSON SoT) 로 drift 차단. 토큰
+화이트리스트 `LVIS_TOKEN_NAMES` / host `PLUGIN_TOKEN_NAMES` 동기화는 별개
+트랙 — `docs/references/plugin-tool-schema-design.md` §2.6 "SoT 동기화 정책"
+참조.
+
 ---
 
 ## 6.8 Floating Question Panel (PR #334)
