@@ -41,18 +41,18 @@ const STATUS_BADGE: Record<string, { label: string; cls: string; dot: string }> 
   },
   in_progress: {
     label: "진행",
-    cls: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
-    dot: "bg-amber-500",
+    cls: "bg-warning/15 text-warning",
+    dot: "bg-warning",
   },
   completed: {
     label: "완료",
-    cls: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
-    dot: "bg-emerald-500",
+    cls: "bg-success/15 text-success",
+    dot: "bg-success",
   },
   failed: {
     label: "실패",
-    cls: "bg-rose-500/15 text-rose-600 dark:text-rose-400",
-    dot: "bg-rose-500",
+    cls: "bg-destructive/15 text-destructive",
+    dot: "bg-destructive",
   },
   deleted: {
     label: "취소",
@@ -162,12 +162,12 @@ export function SessionTodoPanel({
       // The input cluster below us already draws its own `border-t bg-card`
       // — we don't double up. Side borders + dashed amber tint signal "this
       // is the assistant's running plan" without a redundant horizontal rule.
-      className="border-x border-dashed border-amber-500/40 bg-amber-500/5 text-xs transition-colors"
+      className="border-x border-dashed border-warning/40 bg-warning/5 text-xs transition-colors"
       data-testid="session-todo-panel"
       data-session-id={sessionId ?? ""}
     >
       <button
-        className="flex w-full items-center gap-2 px-3 py-1.5 hover:bg-amber-500/10"
+        className="flex w-full items-center gap-2 px-3 py-1.5 hover:bg-warning/10"
         onClick={() => setOpen((o) => !o)}
       >
         {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
@@ -182,7 +182,7 @@ export function SessionTodoPanel({
             means the first fetch hasn't resolved yet, so show nothing. */}
         {resumed === true && (
           <span
-            className="ml-1 inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-1.5 py-0 text-[10px] text-amber-600 dark:text-amber-400"
+            className="ml-1 inline-flex items-center gap-1 rounded-full bg-warning/15 px-1.5 py-0 text-[10px] text-warning"
             data-testid="session-todo-continuation"
             title="이전 턴의 TO-DO 를 이어서 진행 중"
           >
@@ -192,7 +192,7 @@ export function SessionTodoPanel({
         )}
         {resumed === false && (
           <span
-            className="ml-1 inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-1.5 py-0 text-[10px] text-emerald-600 dark:text-emerald-400"
+            className="ml-1 inline-flex items-center gap-1 rounded-full bg-success/15 px-1.5 py-0 text-[10px] text-success"
             data-testid="session-todo-fresh"
             title="새 세션에서 TO-DO 를 새로 작성"
           >
@@ -205,7 +205,7 @@ export function SessionTodoPanel({
             without expanding the panel. */}
         {!open && inProgress && (
           <span
-            className={`ml-2 min-w-0 flex-1 truncate text-left text-amber-600 dark:text-amber-400 ${activePulse}`}
+            className={`ml-2 min-w-0 flex-1 truncate text-left text-warning ${activePulse}`}
             data-testid="session-todo-collapsed-active"
             title={inProgress.content}
           >

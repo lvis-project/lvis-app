@@ -34,17 +34,17 @@ export interface StatusBarProps {
 }
 
 const SEVERITY_DOT: Record<StatusBarSeverity, string> = {
-  info: "bg-blue-400",
-  success: "bg-green-500",
-  warning: "bg-amber-400",
-  error: "bg-red-500",
+  info: "bg-info",
+  success: "bg-success",
+  warning: "bg-warning",
+  error: "bg-destructive",
 };
 
 const SEVERITY_TEXT: Record<StatusBarSeverity, string> = {
   info: "text-muted-foreground",
-  success: "text-green-700 dark:text-green-300",
-  warning: "text-amber-700 dark:text-amber-300",
-  error: "text-red-700 dark:text-red-300",
+  success: "text-success",
+  warning: "text-warning",
+  error: "text-destructive",
 };
 
 export function StatusBar(props: StatusBarProps) {
@@ -82,7 +82,7 @@ export function StatusBar(props: StatusBarProps) {
         {visibleToast !== null && (() => {
           const toast = visibleToast;
           const clickable = toast.notification !== undefined && typeof onToastClick === "function";
-          const baseClass = `flex min-w-0 items-center gap-1.5 truncate ${SEVERITY_TEXT[toast.severity]}`;
+          const baseClass = `flex min-w-0 items-center gap-1.5 truncate lvis-anim-slide-up ${SEVERITY_TEXT[toast.severity]}`;
           const dot = (
             <span
               className={`h-1.5 w-1.5 shrink-0 rounded-full ${SEVERITY_DOT[toast.severity]}`}

@@ -167,7 +167,7 @@ test.describe("chat layout overflow", () => {
       timeout: 30_000,
     });
     page = await app.firstWindow();
-    await page.locator('[data-testid="sidebar"]').first().waitFor({
+    await page.locator('[data-testid="main-toolbar"]').first().waitFor({
       state: "visible",
       timeout: 60_000,
     });
@@ -175,7 +175,7 @@ test.describe("chat layout overflow", () => {
       await window.lvisApi.setApiKey("claude", "sk-e2e-layout-placeholder");
     });
     await page.reload();
-    await page.locator('[data-testid="sidebar"]').first().waitFor({
+    await page.locator('[data-testid="main-toolbar"]').first().waitFor({
       state: "visible",
       timeout: 60_000,
     });
@@ -187,7 +187,7 @@ test.describe("chat layout overflow", () => {
     if (tempHome) rmSync(tempHome, { recursive: true, force: true });
   });
 
-  test("sidebar + historical WorkGroup tools do not clip chat horizontally", async () => {
+  test("historical WorkGroup tools do not clip chat horizontally", async () => {
     await page.setViewportSize({ width: 560, height: 900 });
     const workGroup = page.locator("[data-wg-id]").filter({ hasText: /단계/ }).first();
     await workGroup.waitFor({
@@ -240,7 +240,7 @@ test.describe("chat layout overflow", () => {
         bodyWidth: document.body.scrollWidth,
         chatViewport: viewportBox,
         chatContentWrapper: contentWrapperBox,
-        sidebar: toBox(document.querySelector('[data-testid="sidebar"]')),
+        toolbar: toBox(document.querySelector('[data-testid="main-toolbar"]')),
         workGroup: toBox(document.querySelector("[data-wg-id]")),
         composer: toBox(document.querySelector('[data-testid="composer-input-bar"]')),
         overflowing: elementBoxes.filter((box) => {
@@ -254,13 +254,12 @@ test.describe("chat layout overflow", () => {
 
     expect(metrics.docWidth).toBeLessThanOrEqual(metrics.viewportWidth + 1);
     expect(metrics.bodyWidth).toBeLessThanOrEqual(metrics.viewportWidth + 1);
-    for (const box of [metrics.chatViewport, metrics.chatContentWrapper, metrics.sidebar, metrics.workGroup, metrics.composer]) {
+    for (const box of [metrics.chatViewport, metrics.chatContentWrapper, metrics.toolbar, metrics.workGroup, metrics.composer]) {
       expect(box).not.toBeNull();
     }
     expect(metrics.chatViewport!.right).toBeLessThanOrEqual(metrics.viewportWidth + 1);
     expect(metrics.chatContentWrapper!.right).toBeLessThanOrEqual(metrics.chatViewport!.right + 1);
     expect(metrics.chatContentWrapper!.scrollWidth).toBeLessThanOrEqual(metrics.chatContentWrapper!.clientWidth + 1);
-    expect(metrics.sidebar!.right).toBeLessThanOrEqual(metrics.chatViewport!.left + 1);
     expect(metrics.workGroup!.right).toBeLessThanOrEqual(metrics.chatViewport!.right + 1);
     expect(metrics.composer!.right).toBeLessThanOrEqual(metrics.chatViewport!.right + 1);
     expect(metrics.composer!.left).toBeGreaterThanOrEqual(metrics.chatViewport!.left - 1);

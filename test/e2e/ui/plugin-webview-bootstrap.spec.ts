@@ -33,7 +33,7 @@ test('embedded plugin view creates a plugin shell webview guest', async ({ app, 
   const pluginViews = await listPluginViews(mainWindow);
   const embeddedView = pluginViews.find((view) => view.defaultMode !== 'detached');
 
-  test.skip(!embeddedView, 'No embedded sidebar plugin view available in this build');
+  test.skip(!embeddedView, 'No embedded plugin view available in this build');
 
   await app.evaluate(({ BrowserWindow }, viewKey) => {
     const win = BrowserWindow.getAllWindows()[0];
@@ -71,7 +71,7 @@ test('detached plugin view creates a detached host window plus plugin shell gues
   const pluginViews = await listPluginViews(mainWindow);
   const detachedTarget = pluginViews.find((view) => view.defaultMode === 'detached');
 
-  test.skip(!detachedTarget, 'No detached sidebar plugin view available in this build');
+  test.skip(!detachedTarget, 'No detached plugin view available in this build');
 
   const detachedWindowPromise = app.waitForEvent('window');
   const openResult = await mainWindow.evaluate(

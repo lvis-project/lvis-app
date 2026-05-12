@@ -29,14 +29,14 @@ describe("createSession", () => {
     expect(path.endsWith(".jsonl")).toBe(true);
   });
 
-  it("created file has mode 0o600", async () => {
+  it.skipIf(process.platform === "win32")("created file has mode 0o600", async () => {
     const path = await store.createSession("routine-abc", "2026-05-08T09:00:00.000Z");
     const s = await stat(path);
     // On macOS/Linux the mode includes file type bits, mask to permission bits.
     expect(s.mode & 0o777).toBe(0o600);
   });
 
-  it("parent directory has mode 0o700", async () => {
+  it.skipIf(process.platform === "win32")("parent directory has mode 0o700", async () => {
     const path = await store.createSession("routine-abc", "2026-05-08T09:00:00.000Z");
     const dir = join(tmpRoot, "routine-abc");
     const s = await stat(dir);

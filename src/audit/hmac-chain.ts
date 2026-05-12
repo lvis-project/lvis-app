@@ -33,8 +33,8 @@ import {
   writeFileSync,
   chmodSync,
 } from "node:fs";
-import { homedir } from "node:os";
 import { join, dirname } from "node:path";
+import { lvisHome } from "../shared/lvis-home.js";
 
 export const GENESIS_MARKER = "genesis";
 const AUDIT_HMAC_SECRET_NAME = "audit-hmac.key";
@@ -66,7 +66,7 @@ export class FileSecretStore implements SecretStore {
   private readonly dir: string;
 
   constructor(dir?: string) {
-    this.dir = dir ?? join(homedir(), ".lvis", "secrets");
+    this.dir = dir ?? join(lvisHome(), "secrets");
     if (!existsSync(this.dir)) {
       mkdirSync(this.dir, { recursive: true, mode: 0o700 });
     }
@@ -110,7 +110,7 @@ export class SafeStorageSecretStore implements SecretStore {
     private readonly safeStorage: SafeStorageLike,
     dir?: string,
   ) {
-    this.dir = dir ?? join(homedir(), ".lvis", "secrets");
+    this.dir = dir ?? join(lvisHome(), "secrets");
     if (!existsSync(this.dir)) {
       mkdirSync(this.dir, { recursive: true, mode: 0o700 });
     }

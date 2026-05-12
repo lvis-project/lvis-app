@@ -55,10 +55,10 @@ const MODE_DESCRIPTIONS: Record<ModeBadgeVariant, string> = {
 };
 
 const MODE_COLOR_CLASSES: Record<ModeBadgeVariant, string> = {
-  default: "border-blue-500 text-blue-700 dark:text-blue-400",
-  strict: "border-red-500 text-red-700 dark:text-red-400",
-  auto: "border-amber-500 text-amber-700 dark:text-amber-400",
-  allow: "border-emerald-500 text-emerald-700 dark:text-emerald-400",
+  default: "border-info text-info",
+  strict: "border-destructive text-destructive",
+  auto: "border-warning text-warning",
+  allow: "border-success text-success",
   unknown: "border-muted-foreground text-muted-foreground",
 };
 

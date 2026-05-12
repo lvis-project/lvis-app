@@ -692,7 +692,7 @@ function ConfirmReview({
               >
                 <div className="text-[10.5px] text-muted-foreground">{label}</div>
                 <div
-                  className={`text-[12px] ${isAnswerComplete(item, drafts[i]) ? "" : "text-amber-600 dark:text-amber-400"}`}
+                  className={`text-[12px] ${isAnswerComplete(item, drafts[i]) ? "" : "text-warning"}`}
                 >
                   {describeAnswer(item, drafts[i])}
                 </div>

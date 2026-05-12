@@ -9,41 +9,66 @@ import type { ThemeBundle } from "./types.js";
  */
 export const lgeLightBundle: ThemeBundle = {
   id: "lge-light",
-  name: "LGE 라이트",
+  name: "LGE Light",
   description: "라이트 셸 + LG 웜그레이 서피스 + 비비드 퍼플 액센트",
   shell: "light",
   highContrast: false,
   tokens: {
     /* ── Tier B: semantic shell ──────────────────────────────────── */
-    background:               "40 25% 92%",    /* Grey 6  #F0ECE4 */
+    /* Surface elevation (5-tier richness — was flat single-shade before) */
+    background:               "40 25% 92%",    /* Grey 6  #F0ECE4 — canvas */
     foreground:               "0 0% 15%",      /* Grey 1  #262626 */
-    card:                     "40 25% 92%",
+    card:                     "40 35% 96%",    /* lifted warm ivory — chat bubble + panel surface */
     "card-foreground":        "0 0% 15%",
-    popover:                  "0 0% 100%",
+    popover:                  "0 0% 100%",     /* pure white — dropdowns / floating */
     "popover-foreground":     "0 0% 15%",
     primary:                  "253 100% 65%",  /* #734dff — SEND */
     "primary-foreground":     "0 0% 100%",
-    secondary:                "44 37% 94%",    /* Grey 7  #F6F3EB */
+    secondary:                "30 22% 86%",    /* deeper warm beige — secondary buttons / sidebar */
     "secondary-foreground":   "0 0% 15%",
-    muted:                    "44 37% 94%",
-    "muted-foreground":       "43 3% 43%",     /* Grey 3  #716F6A */
-    accent:                   "44 37% 94%",
+    muted:                    "40 22% 89%",    /* between card and secondary — muted blocks */
+    "muted-foreground":       "43 8% 28%",     /* darkened for body contrast on 89% L muted */
+    accent:                   "25 35% 82%",    /* warmer + deeper — hover / active accent surface */
     "accent-foreground":      "0 0% 15%",
     destructive:              "1 98% 59%",     /* #FD312E — LG red STOP */
     "destructive-foreground": "0 0% 100%",
-    warning:                  "48 96% 89%",
-    "warning-foreground":     "30 80% 25%",
+    warning:                  "35 91% 45%",     /* saturated amber — visible on warm-beige shell */
+    "warning-foreground":     "0 0% 5%",
     success:                  "142 71% 45%",
-    border:                   "40 10% 78%",    /* Grey 4  #CBC8C2 */
-    input:                    "40 10% 78%",
+    "success-foreground":     "0 0% 5%",
+    /* ── Tier B': status / state ──────────────────────────────── */
+    info:                     "210 90% 50%",
+    "info-foreground":        "0 0% 100%",
+    emphasis:                 "40 96% 50%",     /* amber-gold for star on warm-grey shell */
+    "emphasis-foreground":    "0 0% 10%",
+    border:                   "30 14% 75%",    /* warm Grey 4 — visible against 92% bg */
+    input:                    "30 14% 75%",
     ring:                     "263 70% 50%",
     "message-user-bg":        "271 76% 76%",   /* #c497ef — lilac user bubble */
-    "message-user-fg":        "0 0% 100%",
+    "message-user-fg":        "0 0% 15%",      /* dark on light lilac (was white → contrast ~1.5 fail) */
     "input-bar-bg":           "0 0% 100%",     /* white composer */
+    /* ── Tier B'': surface overlay + interaction ───────────────── */
+    overlay:                  "0 0% 0%",
+    "hover-overlay":          "0 0% 0%",       /* black tint dimmer for light shell */
+    "focus-ring":             "263 70% 50%",
+    "link-fg":                "253 100% 55%",
+    /* ── Tier B''': peripheral system ──────────────────────────── */
+    "selection-bg":           "271 76% 76%",
+    "selection-fg":           "0 0% 15%",
+    "scrollbar-thumb":        "30 14% 65%",
+    "scrollbar-track":        "40 22% 89%",
+    "kbd-bg":                 "40 22% 89%",
+    "kbd-border":             "30 14% 75%",
     /* ── Tier C: code surface ──────────────────────────────────── */
     "code-bg":                "210 40% 98%",
     "code-fg":                "222 47% 11%",
     "code-border":            "214 32% 88%",
+    /* ── Tier D: chart palette ─────────────────────────────────── */
+    "chart-1":                "253 100% 65%",   /* vivid purple */
+    "chart-2":                "1 98% 59%",      /* LG red */
+    "chart-3":                "271 76% 76%",    /* lilac */
+    "chart-4":                "142 71% 45%",    /* green */
+    "chart-5":                "25 95% 53%",     /* orange */
     /* ── Action tokens (PR-4/5) ────────────────────────────────── */
     "action-view":            "263 70% 50%",
     "action-branch":          "25 95% 53%",

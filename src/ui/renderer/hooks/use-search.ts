@@ -2,12 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
 
 /**
- * Phase 3.5 — chat search overlay hook.
+ * Unified search hook.
  *
- * Owns: Ctrl/Cmd+F overlay open state, query + case toggle, match index list
- * (with O(1) Set for per-entry highlight lookup), current match index, and
- * navigation callbacks. Global keydown listener registers on mount / cleans up
- * on unmount.
+ * Owns: Ctrl/Cmd+F open state, query + case toggle, current-conversation
+ * match index list, and navigation callbacks. Global keydown listener
+ * registers on mount / cleans up on unmount.
  */
 export function useSearch(entries: ChatEntry[]) {
   const [open, setOpen] = useState(false);
@@ -15,7 +14,7 @@ export function useSearch(entries: ChatEntry[]) {
   const [caseSensitive, setCaseSensitive] = useState(false);
   const [matchIdx, setMatchIdx] = useState(0);
 
-  // Ctrl/Cmd+F opens in-conversation search
+  // Ctrl/Cmd+F opens the unified search surface.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
@@ -70,6 +69,16 @@ export function useSearch(entries: ChatEntry[]) {
     setMatchIdx((i) => (matches.length === 0 ? 0 : (i - 1 + matches.length) % matches.length));
   }, [matches.length]);
 
+  const jumpToMatch = useCallback((index: number) => {
+    if (matches.length === 0) {
+      setMatchIdx(0);
+      return;
+    }
+    const next = Math.max(0, Math.min(index, matches.length - 1));
+    setMatchIdx(next);
+    setOpen(true);
+  }, [matches.length]);
+
   return {
     open,
     query,
@@ -85,5 +94,6 @@ export function useSearch(entries: ChatEntry[]) {
     closeOverlay,
     nextMatch,
     prevMatch,
+    jumpToMatch,
   };
 }

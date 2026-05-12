@@ -35,14 +35,14 @@ export function ReviewRow({ label, children }: { label: string; children: ReactN
 }
 
 export function levelBadgeClass(level: RiskLevel) {
-  if (level === "high") return "border-red-500 text-red-700 dark:text-red-400";
-  if (level === "medium") return "border-amber-500 text-amber-700 dark:text-amber-300";
+  if (level === "high") return "border-destructive text-destructive";
+  if (level === "medium") return "border-warning text-warning";
   return "border-primary text-primary";
 }
 
 export function reviewBoxClass(level: RiskLevel) {
-  if (level === "high") return "border-red-500/50 bg-red-500/5";
-  if (level === "medium") return "border-amber-500/50 bg-amber-500/5";
+  if (level === "high") return "border-destructive/50 bg-destructive/10";
+  if (level === "medium") return "border-warning/50 bg-warning/10";
   return "border-primary/40 bg-primary/5";
 }
 

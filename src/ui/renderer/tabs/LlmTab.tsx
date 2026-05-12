@@ -191,7 +191,7 @@ export function LlmTab(props: LlmTabProps) {
         </button>
         {fallbackOpen && (
           <div className="space-y-2 px-3 pb-3">
-            <p className="text-[11px] text-muted-foreground">기본 모델이 5xx/429/네트워크 오류를 반환할 때 순서대로 시도할 벤더·모델 목록입니다.</p>
+            <p className="text-[11px] text-muted-foreground">첫 응답이 1초 안에 오지 않거나 5xx/429/네트워크 오류가 나면 같은 모델을 5회 시도한 뒤 순서대로 전환할 벤더·모델 목록입니다.</p>
             {fallbackChain.map((entry, idx) => (
               <div key={idx} className="flex gap-2">
                 <select

@@ -8,7 +8,7 @@
 import { describe, it, expect } from "vitest";
 import { mkdtempSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import {
   SENSITIVE_PATH_PATTERNS,
   isSensitivePath,
@@ -279,9 +279,13 @@ describe("isSensitivePath — Permission policy P2.5 LVIS-internal", () => {
 // ─── Permission policy P2.5 — canonicalizePathForMatch (frozen-canonical) ───────
 
 describe("canonicalizePathForMatch", () => {
+  function portableMatchPath(value: string): string {
+    return value.replace(/\\/g, "/");
+  }
+
   it("resolves .. segments via path.resolve()", () => {
     const result = canonicalizePathForMatch("/tmp/foo/../bar");
-    expect(result.endsWith("/bar")).toBe(true);
+    expect(portableMatchPath(result).endsWith("/bar")).toBe(true);
   });
 
   it("collapses duplicate slashes", () => {
@@ -300,8 +304,8 @@ describe("canonicalizePathForMatch", () => {
 
   it("returns absolute path even when the input does not exist", () => {
     const result = canonicalizePathForMatch("/tmp/__does_not_exist__/foo/bar");
-    expect(result.startsWith("/")).toBe(true);
-    expect(result.includes("foo/bar")).toBe(true);
+    expect(isAbsolute(result)).toBe(true);
+    expect(portableMatchPath(result).includes("foo/bar")).toBe(true);
   });
 
   it("bounded walk-up cap (MAX_WALK_UP)", () => {

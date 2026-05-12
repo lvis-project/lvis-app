@@ -1,7 +1,7 @@
 /**
  * AppearanceTab v2 — bundle picker tests.
  *
- * The tab now shows 6 bundle cards (one per ThemeBundle) in a single grid.
+ * The tab shows one bundle card per ThemeBundle in a single grid.
  * Clicking a card sets the active bundle and writes data-theme-bundle to <html>.
  *
  * followSystem toggle is shown only when the LGE pair (lge-light / lge-dark)
@@ -34,13 +34,13 @@ function renderWithBundle(initialBundleId = "tokyo-night") {
 }
 
 describe("AppearanceTab — bundle card grid", () => {
-  it("renders exactly 6 bundle cards (one per ThemeBundle)", () => {
+  it("renders exactly one card per ThemeBundle", () => {
     const { getAllByRole } = renderWithBundle();
     // All cards have role="radio" with aria-label "테마: <name>"
     const cards = getAllByRole("radio").filter((el) =>
       el.getAttribute("aria-label")?.startsWith("테마:"),
     );
-    expect(cards).toHaveLength(6);
+    expect(cards).toHaveLength(BUNDLES.length);
   });
 
   it("renders a card for each bundle in BUNDLES", () => {
@@ -52,19 +52,19 @@ describe("AppearanceTab — bundle card grid", () => {
 
   it("the default bundle card has aria-checked=true", () => {
     const { getByRole } = renderWithBundle("tokyo-night");
-    const card = getByRole("radio", { name: /테마: 도쿄나이트/ });
+    const card = getByRole("radio", { name: /테마: Tokyo Night/ });
     expect(card.getAttribute("aria-checked")).toBe("true");
   });
 
   it("other cards have aria-checked=false initially", () => {
     const { getByRole } = renderWithBundle("tokyo-night");
-    const forest = getByRole("radio", { name: /테마: 포레스트/ });
+    const forest = getByRole("radio", { name: /테마: Forest/ });
     expect(forest.getAttribute("aria-checked")).toBe("false");
   });
 
   it("clicking a bundle card writes data-theme-bundle to <html>", async () => {
     const { getByRole } = renderWithBundle("tokyo-night");
-    fireEvent.click(getByRole("radio", { name: /테마: 포레스트/ }));
+    fireEvent.click(getByRole("radio", { name: /테마: Forest/ }));
     await waitFor(() => {
       expect(document.documentElement.getAttribute("data-theme-bundle")).toBe("forest");
     });
@@ -72,7 +72,7 @@ describe("AppearanceTab — bundle card grid", () => {
 
   it("clicking lge-dark card writes data-theme-bundle=lge-dark", async () => {
     const { getByRole } = renderWithBundle("tokyo-night");
-    fireEvent.click(getByRole("radio", { name: /테마: LGE 다크/ }));
+    fireEvent.click(getByRole("radio", { name: /테마: LGE Dark/ }));
     await waitFor(() => {
       expect(document.documentElement.getAttribute("data-theme-bundle")).toBe("lge-dark");
     });
@@ -80,7 +80,7 @@ describe("AppearanceTab — bundle card grid", () => {
 
   it("clicking high-contrast card writes data-theme-bundle=high-contrast", async () => {
     const { getByRole } = renderWithBundle("tokyo-night");
-    fireEvent.click(getByRole("radio", { name: /테마: 고대비/ }));
+    fireEvent.click(getByRole("radio", { name: /테마: High Contrast/ }));
     await waitFor(() => {
       expect(document.documentElement.getAttribute("data-theme-bundle")).toBe("high-contrast");
     });
@@ -88,12 +88,12 @@ describe("AppearanceTab — bundle card grid", () => {
 
   it("selected card updates aria-checked after click", async () => {
     const { getByRole } = renderWithBundle("tokyo-night");
-    const forest = getByRole("radio", { name: /테마: 포레스트/ });
+    const forest = getByRole("radio", { name: /테마: Forest/ });
     fireEvent.click(forest);
     await waitFor(() => {
       expect(forest.getAttribute("aria-checked")).toBe("true");
     });
-    expect(getByRole("radio", { name: /테마: 도쿄나이트/ }).getAttribute("aria-checked")).toBe("false");
+    expect(getByRole("radio", { name: /테마: Tokyo Night/ }).getAttribute("aria-checked")).toBe("false");
   });
 });
 
@@ -105,7 +105,7 @@ describe("AppearanceTab — followSystem toggle (LGE pair only)", () => {
 
   it("followSystem toggle is shown when lge-light is active", async () => {
     const { getByRole, getByTestId } = renderWithBundle("tokyo-night");
-    fireEvent.click(getByRole("radio", { name: /테마: LGE 라이트/ }));
+    fireEvent.click(getByRole("radio", { name: /테마: LGE Light/ }));
     await waitFor(() => {
       expect(getByTestId("follow-system-toggle")).toBeTruthy();
     });
@@ -121,7 +121,7 @@ describe("AppearanceTab — followSystem toggle (LGE pair only)", () => {
 
   it("high-contrast card has no followSystem toggle", async () => {
     const { getByRole, queryByTestId } = renderWithBundle("tokyo-night");
-    fireEvent.click(getByRole("radio", { name: /테마: 고대비/ }));
+    fireEvent.click(getByRole("radio", { name: /테마: High Contrast/ }));
     await waitFor(() => {
       expect(document.documentElement.getAttribute("data-theme-bundle")).toBe("high-contrast");
     });

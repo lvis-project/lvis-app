@@ -36,16 +36,16 @@ describe("MemoryManager.searchMemoryEntries", () => {
   });
 
   it("matches body substring", async () => {
-    await mm.saveMemory("기타 메모", "quarterly review 내용 정리");
-    await mm.saveMemory("다른 메모", "무관한 내용");
+    await mm.saveMemory("기타 메모리", "quarterly review 내용 정리");
+    await mm.saveMemory("다른 메모리", "무관한 내용");
     const results = mm.searchMemoryEntries("quarterly");
     expect(results.length).toBe(1);
-    expect(results[0].title).toBe("기타 메모");
+    expect(results[0].title).toBe("기타 메모리");
   });
 
   it("caps results at 50", async () => {
     for (let i = 0; i < 60; i++) {
-      await mm.saveMemory(`메모 ${i}`, "공통 키워드 hello");
+      await mm.saveMemory(`메모리 ${i}`, "공통 키워드 hello");
     }
     const results = mm.searchMemoryEntries("hello");
     expect(results.length).toBe(50);

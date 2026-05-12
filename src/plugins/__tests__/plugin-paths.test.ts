@@ -1,7 +1,7 @@
 /**
  * plugin-paths SoT helper.
  *
- * Locks the layout (rooted at `~/.lvis/plugins/`) and the registry-relative
+ * Locks the layout (rooted at `lvisHome()/plugins/`) and the registry-relative
  * manifestPath helper used by every marketplace install path.
  *
  * Round-3: env-tier override removed. Tests now exercise constructor
@@ -9,9 +9,9 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { resolve } from "node:path";
-import { homedir } from "node:os";
 import { resolvePluginPaths, toRegistryRelativeManifestPath } from "../plugin-paths.js";
 import { setIsPackaged, _resetForTest as resetDevFlags } from "../../boot/dev-flags.js";
+import { lvisHome } from "../../shared/lvis-home.js";
 
 describe("resolvePluginPaths", () => {
   beforeEach(() => {
@@ -21,9 +21,9 @@ describe("resolvePluginPaths", () => {
     resetDevFlags();
   });
 
-  it("defaults pluginsRoot to ~/.lvis/plugins/ with registry + cache derived under it", () => {
+  it("defaults pluginsRoot to lvisHome()/plugins/ with registry + cache derived under it", () => {
     const paths = resolvePluginPaths();
-    const expected = resolve(homedir(), ".lvis", "plugins");
+    const expected = resolve(lvisHome(), "plugins");
     expect(paths.pluginsRoot).toBe(expected);
     expect(paths.registryPath).toBe(resolve(expected, "registry.json"));
     expect(paths.cacheRoot).toBe(resolve(expected, ".cache"));
@@ -77,7 +77,7 @@ describe("resolvePluginPaths", () => {
   it("packaged build with no input falls back to canonical homedir layout", () => {
     setIsPackaged(true);
     const paths = resolvePluginPaths();
-    expect(paths.pluginsRoot).toBe(resolve(homedir(), ".lvis", "plugins"));
+    expect(paths.pluginsRoot).toBe(resolve(lvisHome(), "plugins"));
   });
 });
 

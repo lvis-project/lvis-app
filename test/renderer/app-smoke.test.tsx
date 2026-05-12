@@ -45,12 +45,16 @@ describe("App smoke (Phase 1 infra)", () => {
     });
   });
 
-  it("Ctrl+F keydown does not throw on App root", async () => {
-    await renderApp();
+  it("Ctrl+F keydown opens unified search with fresh sessions and starred data", async () => {
+    const { api } = await renderApp();
+    await waitFor(() => expect(api.chatSessions).toHaveBeenCalled());
+    api.chatSessions.mockClear();
+    api.starredList.mockClear();
     await act(async () => {
       fireEvent.keyDown(window, { key: "f", ctrlKey: true });
     });
-    expect(true).toBe(true);
+    await waitFor(() => expect(api.chatSessions).toHaveBeenCalledTimes(1));
+    expect(api.starredList).toHaveBeenCalledTimes(1);
   });
 
   it("addStarred / listStarred mock surface is spy-able", async () => {

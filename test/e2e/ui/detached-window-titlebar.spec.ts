@@ -7,9 +7,9 @@ import { test, expect } from './fixtures';
  * (the same mechanism used by WindowManager.openDetached) and asserts that
  * the drag region provided by <CustomTitleBar /> is present.
  *
- * The test uses a second Electron window rather than right-clicking the
- * sidebar because the Tasks context-menu path requires a fully booted Python
- * runtime. Instead we load index.html#detached/tasks in a new BrowserWindow
+ * The test uses a second Electron window rather than an in-app context menu
+ * because that path requires a fully booted Python runtime. Instead we load
+ * index.html#detached/tasks in a new BrowserWindow
  * via the Playwright `waitForEvent('window')` pattern.
  */
 

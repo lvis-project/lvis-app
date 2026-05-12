@@ -19,10 +19,10 @@
 
 import { BrowserWindow, ipcMain, screen, type IpcMainInvokeEvent } from "electron";
 import { existsSync, readFileSync, writeFileSync, renameSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { validateSender, auditUnauthorized, UNAUTHORIZED_FRAME } from "../ipc-bridge.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
+import { lvisHome } from "../shared/lvis-home.js";
 
 /**
  * Allowlist for viewKey values accepted by the detach IPC handlers.
@@ -116,7 +116,7 @@ type WindowState = {
 // ─── Persistence ────────────────────────────────────────────────────────────
 
 function windowStatePath(): string {
-  return join(homedir(), ".lvis", "window-state.json");
+  return join(lvisHome(), "window-state.json");
 }
 
 function loadWindowState(): WindowState {
@@ -828,6 +828,22 @@ export class WindowManager {
         return UNAUTHORIZED_FRAME;
       }
       return this.listChildren();
+    });
+
+    ipcMain.handle("lvis:window:load-session-in-main", (event: IpcMainInvokeEvent, sessionId: unknown) => {
+      if (!validateSender(event)) {
+        auditUnauthorized(auditLogger, "lvis:window:load-session-in-main", event);
+        return UNAUTHORIZED_FRAME;
+      }
+      if (typeof sessionId !== "string" || !/^[a-zA-Z0-9_-]+$/.test(sessionId)) {
+        return { ok: false, error: "invalid-session-id" };
+      }
+      const main = this._mainWindowId === null ? null : BrowserWindow.fromId(this._mainWindowId);
+      if (!main || main.isDestroyed()) return { ok: false, error: "main-window-not-found" };
+      main.show();
+      main.focus();
+      main.webContents.send("lvis:window:load-session-in-main", { sessionId });
+      return { ok: true };
     });
   }
 }

@@ -215,8 +215,8 @@ export function registerBuiltinTools(
       jsonSchema: {
         type: "object",
         properties: {
-          title: { type: "string", description: "메모 제목 (40자 이내)" },
-          content: { type: "string", description: "메모 내용" },
+          title: { type: "string", description: "메모리 제목 (40자 이내)" },
+          content: { type: "string", description: "메모리 내용" },
         },
         required: ["title", "content"],
       },
@@ -234,7 +234,7 @@ export function registerBuiltinTools(
     }),
     createDynamicTool({
       name: "memory_search",
-      description: "사용자의 memory/ 메모를 키워드로 검색합니다.",
+      description: "사용자의 memory/ 메모리를 키워드로 검색합니다.",
       source: "builtin",
       category: "read",
       isReadOnly: () => true,
@@ -256,7 +256,7 @@ export function registerBuiltinTools(
     }),
     createDynamicTool({
       name: "memory_list",
-      description: "저장된 모든 메모 목록을 반환합니다.",
+      description: "저장된 모든 메모리 목록을 반환합니다.",
       source: "builtin",
       category: "read",
       isReadOnly: () => true,

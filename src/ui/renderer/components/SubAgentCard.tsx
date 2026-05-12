@@ -54,11 +54,11 @@ export function SubAgentCard({ spawn }: { spawn: SubAgentSpawn }) {
   const displayTitle = clipTitle(spawn.title);
   return (
     <div
-      className={`w-full max-w-full min-w-0 rounded-md border text-xs ${isError ? "border-destructive/40 bg-destructive/5" : "border-blue-500/40 bg-blue-500/5"}`}
+      className={`w-full max-w-full min-w-0 rounded-md border text-xs ${isError ? "border-destructive/40 bg-destructive/5" : "border-info/40 bg-info/5"}`}
       data-testid="sub-agent-card"
     >
       <button
-        className="flex w-full min-w-0 items-center gap-2 px-3 py-1.5 hover:bg-blue-500/10"
+        className="flex w-full min-w-0 items-center gap-2 px-3 py-1.5 hover:bg-info/10"
         onClick={() => setOpen((o) => !o)}
       >
         {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}

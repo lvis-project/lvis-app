@@ -4,9 +4,14 @@
  * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 1.
  */
 import { describe, it, expect } from "vitest";
+import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
-import { resolve as pathResolve } from "node:path";
+import {
+  parse as pathParse,
+  relative as pathRelative,
+  resolve as pathResolve,
+} from "node:path";
 import {
   isPathAllowed,
   pickClosestParent,
@@ -17,6 +22,7 @@ import {
   computeDefaultRuntimeAllowedDirectories,
   buildAllowedScope,
   buildRuntimeAllowedDirectories,
+  isFilesystemRootPath,
 } from "../allowed-directories.js";
 import {
   canonicalizePathForMatch,
@@ -25,6 +31,39 @@ import {
 
 function fold(raw: string): string {
   return caseFoldForMatch(canonicalizePathForMatch(raw));
+}
+
+function mountedVolumeNamespacePathFor(existingPath: string): string | null {
+  if (process.platform !== "win32") return null;
+
+  const absolutePath = pathResolve(existingPath);
+  const driveRoot = pathParse(absolutePath).root;
+  if (!/^[a-z]:\\$/i.test(driveRoot)) return null;
+
+  let output: string;
+  try {
+    output = execFileSync("mountvol", [], {
+      encoding: "utf-8",
+      windowsHide: true,
+    });
+  } catch {
+    return null;
+  }
+
+  let currentVolumeRoot: string | null = null;
+  for (const line of output.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (/^\\\\\?\\Volume\{[^}]+}\\$/i.test(trimmed)) {
+      currentVolumeRoot = trimmed;
+      continue;
+    }
+    if (currentVolumeRoot && trimmed.toLowerCase() === driveRoot.toLowerCase()) {
+      const rel = pathRelative(driveRoot, absolutePath);
+      return rel ? currentVolumeRoot + rel : currentVolumeRoot;
+    }
+  }
+
+  return null;
 }
 
 describe("isPathAllowed — prefix match", () => {
@@ -233,6 +272,81 @@ describe("sanitizeAllowedDirectories", () => {
 
   it("drops filesystem root entries", () => {
     expect(sanitizeAllowedDirectories(["/"])).toEqual([]);
+  });
+
+  it("recognizes Windows drive roots with either separator", () => {
+    expect(isFilesystemRootPath("c:/")).toBe(true);
+    expect(isFilesystemRootPath("c:\\")).toBe(true);
+    expect(isFilesystemRootPath("C:")).toBe(true);
+  });
+
+  it("recognizes Windows UNC share roots without rejecting share children", () => {
+    expect(isFilesystemRootPath("\\\\server\\share\\")).toBe(true);
+    expect(isFilesystemRootPath("//server/share")).toBe(true);
+    expect(isFilesystemRootPath("\\\\server\\share\\project")).toBe(false);
+    expect(isFilesystemRootPath("//server/share/project")).toBe(false);
+  });
+
+  it("recognizes Windows device namespace roots without rejecting children", () => {
+    expect(isFilesystemRootPath("\\\\?\\C:\\")).toBe(true);
+    expect(isFilesystemRootPath("//?/c:")).toBe(true);
+    expect(isFilesystemRootPath("//?/c:/Users")).toBe(false);
+    expect(isFilesystemRootPath("//?/UNC/server/share/")).toBe(true);
+    expect(isFilesystemRootPath("//?/UNC/server/share/project")).toBe(false);
+    expect(isFilesystemRootPath("//?/Volume{11111111-2222-3333-4444-555555555555}/")).toBe(true);
+    expect(isFilesystemRootPath("//./Volume{11111111-2222-3333-4444-555555555555}/")).toBe(true);
+    expect(isFilesystemRootPath("//?/Volume{11111111-2222-3333-4444-555555555555}/project")).toBe(true);
+    expect(isFilesystemRootPath("//?/GLOBALROOT/Device/HarddiskVolume1/")).toBe(true);
+    expect(isFilesystemRootPath("//?/GLOBALROOT/Device/HarddiskVolume1/Users")).toBe(true);
+  });
+
+  it.runIf(process.platform === "win32")("drops Windows drive roots after canonicalization", () => {
+    expect(sanitizeAllowedDirectories(["C:\\"])).toEqual([]);
+    expect(sanitizeRuntimeAllowedDirectories(["C:\\"])).toEqual([]);
+  });
+
+  it.runIf(process.platform === "win32")("drops Windows UNC share roots after canonicalization", () => {
+    expect(validateDirectoryAddition("\\\\server\\share\\").ok).toBe(false);
+    expect(sanitizeAllowedDirectories(["\\\\server\\share\\"])).toEqual([]);
+    expect(sanitizeRuntimeAllowedDirectories(["\\\\server\\share\\"])).toEqual([]);
+  });
+
+  it.runIf(process.platform === "win32")("drops Windows volume and device namespace paths", () => {
+    const volumeRoot = "\\\\?\\Volume{11111111-2222-3333-4444-555555555555}\\";
+    const volumeChild = `${volumeRoot}project`;
+    const globalRootChild = "\\\\?\\GLOBALROOT\\Device\\HarddiskVolume1\\Users";
+
+    expect(validateDirectoryAddition(volumeRoot).ok).toBe(false);
+    expect(validateDirectoryAddition(volumeChild).ok).toBe(false);
+    expect(validateDirectoryAddition(globalRootChild).ok).toBe(false);
+    expect(sanitizeAllowedDirectories([volumeRoot, volumeChild, globalRootChild])).toEqual([]);
+    expect(sanitizeRuntimeAllowedDirectories([volumeRoot, volumeChild, globalRootChild])).toEqual([]);
+  });
+
+  it.runIf(process.platform === "win32")("drops mounted volume namespace children before realpath canonicalization", () => {
+    const namespaceHome = mountedVolumeNamespacePathFor(homedir());
+    if (!namespaceHome) return;
+
+    const dotNamespaceHome = namespaceHome.replace(/^\\\\\?\\/, "\\\\.\\");
+    const cases = [namespaceHome, dotNamespaceHome];
+
+    for (const namespacePath of cases) {
+      const validation = validateDirectoryAddition(namespacePath);
+      expect(validation.ok).toBe(false);
+      if (!validation.ok) expect(validation.reason).toContain("root");
+    }
+    expect(sanitizeAllowedDirectories(cases)).toEqual([]);
+    expect(sanitizeRuntimeAllowedDirectories(cases)).toEqual([]);
+  });
+
+  it.runIf(process.platform === "win32")("warns for Windows backslash adjacency segments", () => {
+    const git = validateDirectoryAddition("C:\\Users\\ken\\work\\proj\\.git");
+    expect(git.ok).toBe(true);
+    if (git.ok) expect(git.adjacencyWarnings.some((w) => w.includes(".git"))).toBe(true);
+
+    const cache = validateDirectoryAddition("C:\\Users\\ken\\work\\proj\\node_modules\\.cache");
+    expect(cache.ok).toBe(true);
+    if (cache.ok) expect(cache.adjacencyWarnings.some((w) => w.includes("node_modules"))).toBe(true);
   });
 });
 

@@ -4,7 +4,7 @@
  * ~/.lvis/ 파일 기반 메모리 시스템.
  * - LVIS.md: 프로젝트·조직 컨텍스트 (관리자 배포 가능)
  * - user-preferences.md: 사용자 개인 선호
- * - memory/: 사용자 축적 메모 ("이거 기억해")
+ * - memory/: 사용자 축적 메모리 ("이거 기억해")
  * - sessions/: 대화 세션 JSONL *
  * 설계 원칙 (§5.1):
  * - 단순함 우선: 별도 기억 엔진·승격·만료 로직 없음
@@ -13,13 +13,13 @@
  */
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, unlinkSync, statSync } from "node:fs";
 import { join, resolve, basename } from "node:path";
-import { homedir } from "node:os";
 import { withFileLock } from "../lib/with-file-lock.js";
 import { createLogger } from "../lib/logger.js";
+import { lvisHome } from "../shared/lvis-home.js";
 const log = createLogger("memory");
 
 export interface MemoryManagerOptions {
-  /** ~/.lvis 기본, 테스트 시 override */
+  /** lvisHome() 기본, 테스트 시 override */
   lvisDir?: string;
 }
 
@@ -267,7 +267,7 @@ export class MemoryManager {
   private userPreferences: string = "";
 
   constructor(options?: MemoryManagerOptions) {
-    this.lvisDir = resolve(options?.lvisDir ?? join(homedir(), ".lvis"));
+    this.lvisDir = resolve(options?.lvisDir ?? lvisHome());
     this.memoryDir = join(this.lvisDir, "memory");
     this.sessionsDir = join(this.lvisDir, "sessions");
     this.ensureStructure();
@@ -364,7 +364,7 @@ export class MemoryManager {
 
   // ─── Write API ("이거 기억해" 명령) ───────────────
 
-  /** 메모 저장 — 사용자가 "기억해" 하면 memory/에 저장 */
+  /** 메모리 저장 — 사용자가 "기억해" 하면 memory/에 저장 */
   async saveMemory(title: string, content: string): Promise<NoteEntry> {
     const filename = this.slugify(title) + ".md";
     const visibleContent = `# ${title}\n\n${content}\n`;
@@ -376,7 +376,7 @@ export class MemoryManager {
     return { filename, title, content: visibleContent, updatedAt: new Date().toISOString() };
   }
 
-  /** 메모 삭제 */
+  /** 메모리 삭제 */
   deleteMemory(filename: string): void {
     const path = join(this.memoryDir, filename);
     if (existsSync(path)) unlinkSync(path);

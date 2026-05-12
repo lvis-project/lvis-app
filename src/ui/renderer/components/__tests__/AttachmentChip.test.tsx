@@ -55,7 +55,7 @@ describe("AttachmentChip (single)", () => {
   it("uses warn class at total=4", () => {
     render(<AttachmentChip attachment={img1} total={4} />);
     const badge = screen.getByTestId("chip-count-badge");
-    expect(badge.className).toMatch(/amber/);
+    expect(badge.className).toMatch(/text-warning/);
   });
 
   it("uses full class at total=5", () => {
