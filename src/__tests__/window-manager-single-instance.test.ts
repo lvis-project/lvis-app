@@ -38,6 +38,9 @@ const mockWindowInstances: Array<{
   sentMessages: Array<[string, unknown]>;
   events: Map<string, Array<() => void>>;
   setSize: ReturnType<typeof vi.fn>;
+  setMinimumSize: ReturnType<typeof vi.fn>;
+  setResizable: ReturnType<typeof vi.fn>;
+  setAlwaysOnTop: ReturnType<typeof vi.fn>;
 }> = [];
 
 let nextWindowId = 1;
@@ -59,6 +62,9 @@ vi.mock("electron", () => {
       focus: vi.fn(() => { instance.focused = true; }),
       setTitle: vi.fn((t: string) => { instance.title = t; }),
       setSize: vi.fn(),
+      setMinimumSize: vi.fn(),
+      setResizable: vi.fn(),
+      setAlwaysOnTop: vi.fn(),
       show: vi.fn(),
       close: vi.fn(() => {
         instance.destroyed = true;
@@ -163,6 +169,61 @@ describe("WindowManager — single-instance detached shell", () => {
 
     expect(mockWindowInstances).toHaveLength(1);
     expect(mockWindowInstances[0].setSize).toHaveBeenCalledWith(800, 600);
+  });
+
+  it("applies manifest detached window options when creating a plugin shell", () => {
+    const configured = new WindowManager({
+      preloadPath: "/fake/preload.cjs",
+      distRoot: "/fake/dist",
+      resolveDetachedWindowOptions: (viewKey) =>
+        viewKey === "plugin:agent-hub:work-board"
+          ? {
+              width: 980,
+              height: 980,
+              minWidth: 480,
+              minHeight: 560,
+              resizable: true,
+              alwaysOnTop: true,
+            }
+          : undefined,
+    });
+
+    configured.openDetachedTab("plugin:agent-hub:work-board");
+
+    const opts = mockWindowInstances[0].opts;
+    expect(opts["width"]).toBe(980);
+    expect(opts["height"]).toBe(980);
+    expect(opts["minWidth"]).toBe(480);
+    expect(opts["minHeight"]).toBe(560);
+    expect(opts["resizable"]).toBe(true);
+    expect(opts["alwaysOnTop"]).toBe(true);
+  });
+
+  it("applies next plugin manifest options when reusing the detached plugin shell", () => {
+    const configured = new WindowManager({
+      preloadPath: "/fake/preload.cjs",
+      distRoot: "/fake/dist",
+      resolveDetachedWindowOptions: (viewKey) =>
+        viewKey === "plugin:agent-hub:team-board"
+          ? {
+              width: 1040,
+              height: 900,
+              minWidth: 520,
+              minHeight: 600,
+              resizable: false,
+              alwaysOnTop: true,
+            }
+          : undefined,
+    });
+
+    configured.openDetachedTab("plugin:meeting:meeting-control");
+    configured.openDetachedTab("plugin:agent-hub:team-board");
+
+    expect(mockWindowInstances).toHaveLength(1);
+    expect(mockWindowInstances[0].setMinimumSize).toHaveBeenCalledWith(520, 600);
+    expect(mockWindowInstances[0].setResizable).toHaveBeenCalledWith(false);
+    expect(mockWindowInstances[0].setAlwaysOnTop).toHaveBeenCalledWith(true);
+    expect(mockWindowInstances[0].setSize).toHaveBeenCalledWith(1040, 900);
   });
 
   it("after shell closed, next call spawns a fresh window", () => {
