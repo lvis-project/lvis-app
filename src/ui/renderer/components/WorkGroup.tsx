@@ -29,10 +29,13 @@ export function WorkGroup({ stepCount, streaming, children, turnDurationMs }: Wo
   const [open, setOpen] = useState(streaming);
   const prevStreaming = useRef(streaming);
 
-  // Diagnostic: stable per-instance id (mount-time only). Lets the user
+  // Diagnostic-only: stable per-instance id (mount-time only). Lets the user
   // correlate "WG[3] mount", "WG[3] render", "WG[3] effect" across logs.
+  // Skip allocation + `data-wg-id` attribute when diagnostics are off (#566
+  // item 3) — keeps the disabled-mode renderer free of debug-only side
+  // effects.
   const idRef = useRef<number | null>(null);
-  if (idRef.current === null) {
+  if (debugStreamEnabled && idRef.current === null) {
     idRef.current = ++__wgInstanceCounter;
   }
   const wgId = idRef.current;
@@ -72,7 +75,7 @@ export function WorkGroup({ stepCount, streaming, children, turnDurationMs }: Wo
   }
 
   return (
-    <div className="min-w-0 w-full max-w-full overflow-x-hidden text-xs text-muted-foreground" data-wg-id={wgId}>
+    <div className="min-w-0 w-full max-w-full overflow-x-hidden text-xs text-muted-foreground" data-testid="work-group" {...(wgId !== null ? { "data-wg-id": wgId } : {})}>
       <button
         type="button"
         className="flex max-w-full min-w-0 items-center gap-1.5 px-1 py-1 hover:opacity-80"
