@@ -1360,16 +1360,35 @@ export async function initPluginRuntime(
         // Strip plugin-authored `<untrusted-*>` wrap tags from the user-visible
         // summary preview (the prompt itself, forwarded to chat LLM via
         // `pendingPrompt` below, keeps the tags for prompt-injection defense).
+        //
         // Cap at 2KB so the renderer can offer a "더 보기" expand without
-        // shoveling megabytes through IPC.
+        // shoveling megabytes through IPC. SUMMARY_DISPLAY_CAP must remain
+        // <= the SDK §Safety contract MAX_PROMPT_LEN (4096) — if prompt cap
+        // changes, lockstep this constant.
+        //
+        // When the stripped prompt overflows the cap, append a marker so the
+        // user knows expand is not the whole story (full content reachable
+        // via "확인하기" → chat). Without the marker, expand reveals a hard
+        // cut that re-introduces the very "안 보임" bug this PR fixes.
         const SUMMARY_DISPLAY_CAP = 2_000;
+        const SUMMARY_TRUNCATION_MARKER = "\n…[잘림 — 확인하기 후 채팅에서 전체 보기]";
+        let derivedSummary: string;
+        if (spec.summary != null) {
+          derivedSummary = spec.summary;
+        } else {
+          const stripped = stripUntrustedTags(spec.prompt);
+          if (stripped.length > SUMMARY_DISPLAY_CAP) {
+            const cap = SUMMARY_DISPLAY_CAP - SUMMARY_TRUNCATION_MARKER.length;
+            derivedSummary = stripped.slice(0, cap) + SUMMARY_TRUNCATION_MARKER;
+          } else {
+            derivedSummary = stripped;
+          }
+        }
         const overlayItem = {
           id: overlayId,
           source: { kind: "plugin" as const, pluginId, eventId },
           title: spec.title ?? spec.source.replace(/^overlay:/, ""),
-          summary:
-            spec.summary ??
-            stripUntrustedTags(spec.prompt).slice(0, SUMMARY_DISPLAY_CAP),
+          summary: derivedSummary,
           running: false,
           primaryActionLabel: spec.primaryActionLabel ?? "확인하기",
           pendingPrompt: formatPluginPendingPrompt(spec.prompt, decision.source),
