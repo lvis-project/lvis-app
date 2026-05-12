@@ -76,8 +76,8 @@ export function PluginConfigTab() {
   // Load plugin list — extracted so install/uninstall result events can
   // re-fetch without remounting the tab. Without this, the settings dialog
   // would still display the pre-install plugin set after a `lvis://install`
-  // deep-link landed (sidebar refreshes via the same event but the settings
-  // tab's local `plugins` state was a one-shot mount-time snapshot).
+  // deep-link landed (other plugin surfaces refresh via the same event but
+  // the settings tab's local `plugins` state was a one-shot mount-time snapshot).
   const refreshPlugins = useCallback(async () => {
     try {
       const cards = await window.lvis.plugins.cards();
@@ -99,7 +99,7 @@ export function PluginConfigTab() {
 
   // Sync with main-process lifecycle events. Both install (via `lvis://`
   // deep link) and uninstall (via this tab or any other surface) emit
-  // result events that the renderer subscribes to in App.tsx for sidebar
+  // result events that the renderer subscribes to in App.tsx for plugin view
   // refresh — wire the same hooks here so the settings list stays in sync.
   useEffect(() => {
     // `getApi()` throws if `window.lvisApi` isn't initialized — that path is
@@ -319,7 +319,7 @@ export function PluginConfigTab() {
       {banner && (
         <div
           className={`rounded-md px-3 py-2 text-sm ${
-            banner.type === "error" ? "bg-red-50 text-red-700" : "bg-green-50 text-green-700"
+            banner.type === "error" ? "bg-destructive/15 text-destructive" : "bg-success/15 text-success"
           }`}
         >
           {banner.msg}
@@ -327,17 +327,17 @@ export function PluginConfigTab() {
       )}
 
       {isDevMode && (
-        <div className="flex items-center justify-between rounded-md border border-amber-200 bg-amber-50 px-3 py-2">
+        <div className="flex items-center justify-between rounded-md border border-warning/40 bg-warning/15 px-3 py-2">
           <div className="space-y-0.5">
-            <p className="text-xs font-medium text-amber-900">개발자 도구</p>
-            <p className="text-[11px] text-amber-700">
+            <p className="text-xs font-medium text-warning">개발자 도구</p>
+            <p className="text-[11px] text-warning/80">
               로컬 빌드 폴더에서 플러그인을 직접 설치합니다 (개발 모드 필요).
             </p>
           </div>
           <Button
             size="sm"
             variant="outline"
-            className="h-7 shrink-0 text-xs border-amber-400 text-amber-900 hover:bg-amber-100"
+            className="h-7 shrink-0 text-xs border-warning/50 text-warning hover:bg-warning/20"
             onClick={() => void handleInstallLocal()}
             disabled={localInstalling}
           >
@@ -373,13 +373,13 @@ export function PluginConfigTab() {
                     </div>
                     <div className="flex items-center gap-1 mt-0.5">
                       {p.loadStatus === "loaded" && (
-                        <span className="inline-block rounded-full bg-green-100 px-1.5 py-px text-[9px] font-medium text-green-700">로드됨</span>
+                        <span className="inline-block rounded-full bg-success/15 px-1.5 py-px text-[9px] font-medium text-success">로드됨</span>
                       )}
                       {p.loadStatus === "failed" && (
-                        <span className="inline-block rounded-full bg-red-100 px-1.5 py-px text-[9px] font-medium text-red-700">실패</span>
+                        <span className="inline-block rounded-full bg-destructive/15 px-1.5 py-px text-[9px] font-medium text-destructive">실패</span>
                       )}
                       {p.loadStatus === "disabled" && (
-                        <span className="inline-block rounded-full bg-gray-100 px-1.5 py-px text-[9px] font-medium text-gray-600">비활성</span>
+                        <span className="inline-block rounded-full bg-muted px-1.5 py-px text-[9px] font-medium text-muted-foreground">비활성</span>
                       )}
                       {/* Auth status — only when manifest declares `auth` AND the plugin is
                           actually loaded (skip failed/disabled rows whose runtime can't be
@@ -388,7 +388,7 @@ export function PluginConfigTab() {
                           quiet for the happy-path. Click → detail panel handles login flow. */}
                       {p.auth && p.loadStatus === "loaded" && authStatuses.get(p.id)?.kind === "unauthed" && (
                         <span
-                          className="inline-block rounded-full bg-red-100 px-1.5 py-px text-[9px] font-medium text-red-700"
+                          className="inline-block rounded-full bg-destructive/15 px-1.5 py-px text-[9px] font-medium text-destructive"
                           title="이 플러그인은 로그인이 필요합니다"
                         >
                           🔒 미인증
@@ -435,7 +435,7 @@ export function PluginConfigTab() {
                     <div className="flex flex-wrap items-center gap-1">
                       <h3 className="text-sm font-semibold">{selectedPlugin.name}</h3>
                       {selectedPlugin.isManaged && (
-                        <span className="inline-flex items-center gap-0.5 rounded-full bg-blue-100 px-1.5 py-px text-[9px] font-medium text-blue-700">🔒 관리형</span>
+                        <span className="inline-flex items-center gap-0.5 rounded-full bg-info/15 px-1.5 py-px text-[9px] font-medium text-info">🔒 관리형</span>
                       )}
                       {selectedPlugin.installPolicy === "admin" && (
                         <span
@@ -457,11 +457,11 @@ export function PluginConfigTab() {
                       )}
                       {selectedPlugin.loadStatus && (
                         selectedPlugin.loadStatus === "loaded" ? (
-                          <span className="inline-block rounded-full bg-green-100 px-1.5 py-px text-[9px] font-medium text-green-700">로드됨</span>
+                          <span className="inline-block rounded-full bg-success/15 px-1.5 py-px text-[9px] font-medium text-success">로드됨</span>
                         ) : selectedPlugin.loadStatus === "failed" ? (
-                          <span className="inline-block rounded-full bg-red-100 px-1.5 py-px text-[9px] font-medium text-red-700">실패</span>
+                          <span className="inline-block rounded-full bg-destructive/15 px-1.5 py-px text-[9px] font-medium text-destructive">실패</span>
                         ) : (
-                          <span className="inline-block rounded-full bg-gray-100 px-1.5 py-px text-[9px] font-medium text-gray-600">비활성</span>
+                          <span className="inline-block rounded-full bg-muted px-1.5 py-px text-[9px] font-medium text-muted-foreground">비활성</span>
                         )
                       )}
                     </div>
@@ -613,7 +613,7 @@ export function PluginConfigTab() {
                             <Button
                               variant="outline"
                               size="sm"
-                              className="h-7 text-xs px-2 text-red-600 border-red-300"
+                              className="h-7 text-xs px-2 text-destructive border-destructive/40"
                               onClick={() => handleRemoveEntry(entry.key)}
                             >
                               삭제

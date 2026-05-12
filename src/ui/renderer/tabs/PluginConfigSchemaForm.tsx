@@ -158,7 +158,7 @@ export function PluginConfigSchemaForm({
           <div key={key} className="flex flex-col gap-1">
             <label htmlFor={fieldId} className="text-xs font-medium">
               {label}
-              {required.has(key) && <span className="ml-1 text-red-500">*</span>}
+              {required.has(key) && <span className="ml-1 text-destructive">*</span>}
               <span className="ml-2 font-mono text-[10px] text-muted-foreground">{key}</span>
             </label>
             {prop.description && (
@@ -270,7 +270,7 @@ export function PluginConfigSchemaForm({
                 maxLength={prop.maxLength}
               />
             )}
-            {error && <p className="text-[11px] text-red-600">{error}</p>}
+            {error && <p className="text-[11px] text-destructive">{error}</p>}
           </div>
         );
       })}

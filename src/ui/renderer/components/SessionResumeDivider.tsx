@@ -16,11 +16,11 @@ export function SessionResumeDivider({ preambleChars }: { preambleChars: number 
       data-testid="session-resume-divider"
       className="flex items-center gap-2 py-2 my-2"
     >
-      <span className="h-px flex-1 bg-emerald-500/30" />
-      <span className="text-[10px] text-emerald-400/75 font-medium">
+      <span className="h-px flex-1 bg-success/30" />
+      <span className="text-[10px] text-success/75 font-medium">
         ↩ 이전 대화 이어서 시작 (요약 {preambleChars}자 적용)
       </span>
-      <span className="h-px flex-1 bg-emerald-500/30" />
+      <span className="h-px flex-1 bg-success/30" />
     </div>
   );
 }

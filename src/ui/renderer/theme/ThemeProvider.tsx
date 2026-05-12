@@ -148,9 +148,20 @@ export function ThemeProvider({
       userTouchedRef.current = true;
       const safeId = findBundle(id) ? id : DEFAULT_BUNDLE_ID;
       setBundleIdState(safeId);
-      persistAppearance({ bundleId: safeId });
+      /* When the user explicitly picks one of the LGE pair while followSystem
+       * is on, the pick would otherwise be silently overridden by the OS
+       * preference resolution (resolveSystemPair). Treat the explicit pick as
+       * "I want this exact bundle" and turn followSystem off so the click is
+       * honored. Re-enabling the toggle continues to work normally. */
+      const isLgePairPick = LGE_PAIR_IDS.includes(safeId);
+      if (isLgePairPick && followSystem) {
+        setFollowSystemState(false);
+        persistAppearance({ bundleId: safeId, followSystem: false });
+      } else {
+        persistAppearance({ bundleId: safeId });
+      }
     },
-    [persistAppearance],
+    [persistAppearance, followSystem],
   );
 
   const setFollowSystem = useCallback(

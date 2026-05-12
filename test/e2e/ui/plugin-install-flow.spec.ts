@@ -8,30 +8,20 @@ import { test, expect } from './fixtures';
 test('plugin install flow renders install/uninstall affordance, or skips', async ({
   mainWindow,
 }) => {
-  const pluginsTab = mainWindow
-    .locator(
-      [
-        '[data-testid="sidebar-tab-plugins"]',
-        '[data-testid="tab-plugins"]',
-        'button[role="tab"]:has-text("Plugins")',
-        'button[role="tab"]:has-text("플러그인")',
-        'button:has-text("Marketplace")',
-      ].join(', '),
-    )
-    .first();
-
-  const tabVisible = await pluginsTab
+  const pluginGridButton = mainWindow.locator('[data-testid="plugin-grid-button"]').first();
+  const gridVisible = await pluginGridButton
     .waitFor({ state: 'visible', timeout: 10_000 })
     .then(() => true)
     .catch(() => false);
 
-  test.skip(!tabVisible, 'No plugins/marketplace tab — skipping install flow.');
+  test.skip(!gridVisible, 'No plugin grid entry point — skipping install flow.');
 
-  await pluginsTab.click();
+  await pluginGridButton.click();
 
   const actionButton = mainWindow
     .locator(
       [
+        '[data-testid="plugin-cell-add"]',
         '[data-testid="plugin-install"]',
         '[data-testid="plugin-uninstall"]',
         'button:has-text("Install")',

@@ -34,12 +34,12 @@ export function AssistantCard({
   // 가 provider-reported 값을 단일 source 로 표시. 카드 헤더의 ~tok 배지는
   // 한국어 2-3× under-estimate 거짓 정보였음.
   return (
-    <div className="group relative min-w-0 w-full max-w-full overflow-visible rounded-md px-3 py-2 text-sm">
+    <div className="group relative min-w-0 w-full max-w-full overflow-visible rounded-md px-3 py-2 text-sm lvis-anim-message-in">
       {(actions !== undefined || entry.streaming) && (
         <div className="mb-1 flex items-center gap-2 text-[11px] text-muted-foreground">
           {title}
           {entry.streaming ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
-          {isStarred ? <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" /> : null}
+          {isStarred ? <Star key="starred" className="h-3 w-3 fill-emphasis text-emphasis lvis-anim-star" /> : null}
           {actions && !entry.streaming ? (
             <div className={`ml-auto gap-1 ${isFinal !== false ? "flex" : "hidden group-hover:flex"}`}>
               {actions.onRetry && (
@@ -54,7 +54,7 @@ export function AssistantCard({
               )}
               {actions.onToggleStar && (
                 <button className="rounded p-0.5 hover:bg-muted" onClick={actions.onToggleStar} title="즐겨찾기">
-                  <Star className={`h-3 w-3 ${isStarred ? "fill-yellow-400 text-yellow-400" : ""}`} />
+                  <Star key={isStarred ? "on" : "off"} className={`h-3 w-3 ${isStarred ? "fill-emphasis text-emphasis lvis-anim-star" : ""}`} />
                 </button>
               )}
             </div>
@@ -78,7 +78,7 @@ export function AssistantCard({
           <Tooltip>
             <TooltipTrigger asChild>
               <button
-                className={`rounded p-0.5 hover:bg-muted transition-colors ${feedbackRating === "up" ? "text-green-500" : "text-muted-foreground"}`}
+                className={`rounded p-0.5 hover:bg-muted transition-colors ${feedbackRating === "up" ? "text-success" : "text-muted-foreground"}`}
                 onClick={() => {
                   if (feedbackRating === "up") return;
                   setFeedbackRating("up");
@@ -87,7 +87,7 @@ export function AssistantCard({
                 }}
                 aria-label="도움이 됐어요"
               >
-                <ThumbsUp className={`h-3.5 w-3.5 ${feedbackRating === "up" ? "fill-green-500" : ""}`} />
+                <ThumbsUp key={feedbackRating === "up" ? "on" : "off"} className={`h-3.5 w-3.5 ${feedbackRating === "up" ? "fill-success lvis-anim-pop" : ""}`} />
               </button>
             </TooltipTrigger>
             <TooltipContent>도움이 됐어요</TooltipContent>
@@ -95,14 +95,14 @@ export function AssistantCard({
           <Tooltip>
             <TooltipTrigger asChild>
               <button
-                className={`rounded p-0.5 hover:bg-muted transition-colors ${feedbackRating === "down" ? "text-red-500" : "text-muted-foreground"}`}
+                className={`rounded p-0.5 hover:bg-muted transition-colors ${feedbackRating === "down" ? "text-destructive" : "text-muted-foreground"}`}
                 onClick={() => {
                   if (feedbackRating === "down") return;
                   setShowReasonBox(true);
                 }}
                 aria-label="개선이 필요해요"
               >
-                <ThumbsDown className={`h-3.5 w-3.5 ${feedbackRating === "down" ? "fill-red-500" : ""}`} />
+                <ThumbsDown key={feedbackRating === "down" ? "on" : "off"} className={`h-3.5 w-3.5 ${feedbackRating === "down" ? "fill-destructive lvis-anim-pop" : ""}`} />
               </button>
             </TooltipTrigger>
             <TooltipContent>개선이 필요해요</TooltipContent>

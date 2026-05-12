@@ -196,7 +196,7 @@ export function __resetLastThemePayloadForTests(): void {
  *
  * Restored in 2026-05-04 after PR #447 removed it on the assumption that
  * register-before-attach was airtight; the assumption broke in the plugin
- * update lifecycle (sidebar webview re-attach with a fresh wcId), where the
+ * update lifecycle (plugin webview re-attach with a fresh wcId), where the
  * shell's first paint raced ahead of the host's register IPC.
  */
 const PENDING_ENTRY_URL_DEADLINE_MS = 5_000;
@@ -971,7 +971,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     }
     // Race-tolerant path: the shell can call get-entry-url before the host
     // renderer's `did-attach → registerPluginWebview` round-trip completes
-    // (e.g. plugin update lifecycle where the sidebar webview re-attaches
+    // (e.g. plugin update lifecycle where the plugin webview re-attaches
     // with a fresh wcId). Queue this resolver and let the matching register
     // call flush it. If no register lands within the deadline, fall back to
     // the original "not-registered" sentinel so a genuinely absent

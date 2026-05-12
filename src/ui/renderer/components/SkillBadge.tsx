@@ -30,7 +30,7 @@ export function SkillBadge({ name, description, source }: SkillBadgeProps) {
       <TooltipTrigger asChild>
         <span
           data-testid="skill-badge"
-          className="inline-flex items-center gap-1 rounded-full border border-purple-500/40 bg-purple-500/10 px-2 py-0.5 text-[11px] text-purple-700 dark:text-purple-300"
+          className="inline-flex items-center gap-1 rounded-full border border-action-view/40 bg-action-view/10 px-2 py-0.5 text-[11px] text-action-view"
         >
           <Sparkles className="h-3 w-3" />
           Skill loaded: {displayName}

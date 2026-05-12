@@ -1,8 +1,10 @@
 /**
  * AppearanceTab — theme bundle picker (v2 single-bundle redesign).
  *
- * Single section: a 6-card grid where each card represents a ThemeBundle
- * (도쿄나이트 / 미드나잇 / 포레스트 / LGE라이트 / LGE다크 / 고대비).
+ * Single section: a card grid where each card represents a ThemeBundle
+ * (Tokyo Night / Midnight / Forest / LGE Light / LGE Dark / High Contrast
+ * plus the community bundles — Catppuccin Mocha/Latte, Nord, Gruvbox Dark
+ * Hard, Solarized Light, Rosé Pine, Cherry Blossom).
  *
  * Clicking a card calls `setBundle(bundle.id)` and applies the bundle to
  * `<html data-theme-bundle>` immediately via ThemeProvider.
@@ -208,7 +210,7 @@ export function AppearanceTab() {
             <div>
               <h3 className="text-sm font-semibold">시스템 테마 따르기</h3>
               <p className="text-[11px] text-muted-foreground">
-                OS 라이트/다크 모드에 맞춰 LGE 라이트/다크를 자동 전환합니다.
+                OS 라이트/다크 모드에 맞춰 LGE Light / LGE Dark 를 자동 전환합니다.
               </p>
             </div>
             <button
@@ -223,7 +225,7 @@ export function AppearanceTab() {
               }`}
             >
               <span
-                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                className={`inline-block h-4 w-4 transform rounded-full bg-primary-foreground transition-transform ${
                   followSystem ? "translate-x-4" : "translate-x-1"
                 }`}
               />
