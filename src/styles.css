@@ -56,10 +56,10 @@
   --radius-sm: calc(var(--radius) - 4px);
 }
 
-/* ─── §PR-5: View-Mode + Branch action tokens ───────────────────────────────
+/* ─── Action color tokens (introduced in PR-4, also consumed by PR-5) ───────
    Semantic action color tokens used by CheckpointDivider buttons and
-   ViewModeBanner. Defined here so PR-4 (feat/pr4-ui-lazyload) can reference
-   the same tokens without duplication.
+   ViewModeBanner. Originated with PR-4 (feat/pr4-ui-lazyload) and reused by
+   PR-5 (view-mode) without duplication — single SoT for both surfaces.
 
    --action-view:    "view this point" — violet (reading / passive)
    --action-branch:  "restart from here" — orange (destructive-adjacent / active)
