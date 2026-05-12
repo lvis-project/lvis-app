@@ -260,10 +260,26 @@ export class WindowManager {
   private _mainMoveTimer: ReturnType<typeof setTimeout> | null = null;
   private _preloadPath: string;
   private _distRoot: string;
+  private _getInitialThemeArgs: () => string[];
 
-  constructor(opts: { preloadPath: string; distRoot: string }) {
+  constructor(opts: {
+    preloadPath: string;
+    distRoot: string;
+    /**
+     * Returns `additionalArguments` strings to inject into every detached
+     * BrowserWindow at creation time. Used by the theme-prime path to pass
+     * the host's cached `lastThemePayload` so the preload + ThemeProvider
+     * can initialize from frame 0 instead of racing the renderer's first
+     * `notifyPluginTheme` broadcast.
+     *
+     * Default returns `[]` — safe when main has no cached payload yet
+     * (cold-boot first window) or when the consumer doesn't wire it.
+     */
+    getInitialThemeArgs?: () => string[];
+  }) {
     this._preloadPath = opts.preloadPath;
     this._distRoot = opts.distRoot;
+    this._getInitialThemeArgs = opts.getInitialThemeArgs ?? (() => []);
   }
 
   // ── Registration ──────────────────────────────────────────────────────────
@@ -374,6 +390,12 @@ export class WindowManager {
         sandbox: false,
         webviewTag: isPluginViewKey(viewKey),
         preload: this._preloadPath,
+        // Theme race-window-zero: main's cached `lastThemePayload` is passed
+        // here so the preload can apply tokens to documentElement at
+        // document-start (before React mounts) and expose
+        // `window.__lvisInitialTheme` for ThemeProvider's sync init. See
+        // architecture.md §6.7.1.
+        additionalArguments: this._getInitialThemeArgs(),
       },
     });
     if (typeof child.setMenu === "function") child.setMenu(null);
