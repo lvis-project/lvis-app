@@ -31,7 +31,9 @@
     <style>
       * { box-sizing: border-box; margin: 0; padding: 0; }
       html, body, #root { height: 100%; width: 100%; }
-      body { font-family: "Noto Sans KR", "Noto Sans CJK KR", "NanumGothic", "Malgun Gothic", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      /* Mirrors HOST_FONT_STACK from src/shared/host-font-stack.ts —
+         keeps plugin webview letterforms identical to host body. Issue #556. */
+      body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif; }
     </style>
   </head>
   <body>

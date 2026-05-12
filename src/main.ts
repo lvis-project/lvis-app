@@ -616,7 +616,8 @@ async function waitForMinimumBootstrapSplash() {
 const BOOTSTRAP_SPLASH = `<!DOCTYPE html>
 <html lang="ko"><head><meta charset="utf-8"><title>LVIS</title>
 <style>
-  html,body{margin:0;height:100%;background:#f3f3f3;color:#2c2c2c;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Malgun Gothic",sans-serif}
+  /* font-family mirrors HOST_FONT_STACK (src/shared/host-font-stack.ts) — issue #556 */
+  html,body{margin:0;height:100%;background:#f3f3f3;color:#2c2c2c;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Apple SD Gothic Neo","Noto Sans KR","Malgun Gothic",sans-serif}
   body{overflow:hidden}
 
   /* Light shell (default) — cherry-blossom radial gradient + LG vivid red wordmark */

@@ -256,6 +256,7 @@ const api = {
     bundleId: string;
     shell: "light" | "dark";
     tokens: Record<string, string>;
+    fonts?: { family: string };
   }) =>
     ipcRenderer.invoke("lvis:host:plugin-theme-notify", payload),
 
