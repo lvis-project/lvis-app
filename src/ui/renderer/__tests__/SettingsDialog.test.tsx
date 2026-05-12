@@ -7,7 +7,7 @@
  */
 import "../../../../test/renderer/setup.js";
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { SettingsDialog } from "../SettingsDialog.js";
 import { makeMockLvisApi } from "../../../../test/renderer/mock-lvis-api.js";
 
@@ -99,6 +99,39 @@ describe("SettingsDialog (smoke)", () => {
     await waitFor(() => {
       expect(screen.getByRole("tab", { name: /권한/ }).getAttribute("data-state")).toBe("active");
     });
+  });
+
+  it("persists the continuous backend toggle immediately without pressing save", async () => {
+    const api = makeApi();
+    const onSaved = vi.fn();
+    vi.stubGlobal("lvisApi", api);
+    render(
+      <SettingsDialog
+        open={true}
+        onOpenChange={vi.fn()}
+        api={api as never}
+        onSaved={onSaved}
+        initialTab="chat"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(api.getSettings).toHaveBeenCalledTimes(1);
+    });
+    const toggle = screen.getByTestId("continuous-backend-toggle");
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+
+    fireEvent.click(toggle);
+
+    await waitFor(() => {
+      expect(api.updateSettings).toHaveBeenCalledWith({
+        features: { experimentalContinuousBackend: true },
+      });
+    });
+    await waitFor(() => {
+      expect(toggle).toHaveAttribute("aria-checked", "true");
+    });
+    expect(onSaved).toHaveBeenCalledTimes(1);
   });
 
   it("uses pending entry count for the permissions badge", async () => {
