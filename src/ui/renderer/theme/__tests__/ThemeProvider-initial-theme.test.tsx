@@ -86,6 +86,9 @@ describe("ThemeProvider — initial theme (race-window-zero)", () => {
       }),
       updateSettings: vi.fn(),
       notifyPluginTheme: vi.fn().mockResolvedValue(undefined),
+      // ThemeProvider subscribes to cross-window settings broadcasts to stay
+      // in sync with sibling BrowserWindows. The mock returns a no-op cleanup.
+      onSettingsUpdated: vi.fn(() => () => {}),
     };
     const { getByTestId } = render(
       <ThemeProvider api={fakeApi as never}><Probe /></ThemeProvider>
