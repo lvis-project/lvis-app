@@ -117,6 +117,13 @@ export type AppSettings = {
     schemaVersion?: 2;
     bundleId?: string;
     followSystem?: boolean;
+    /** User-configurable font family + size (Track A scope extension). */
+    font?: {
+      /** `"system"` = HOST_FONT_STACK default; otherwise a validated raw stack. */
+      family?: "system" | string;
+      /** Multiplier on `1rem` base. Allowed: 0.875 / 1 / 1.125 / 1.25. */
+      sizeScale?: 0.875 | 1 | 1.125 | 1.25;
+    };
   };
   /** §B1 — external URL viewer policy (in-app vs system browser). */
   webView?: {

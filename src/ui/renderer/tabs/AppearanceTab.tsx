@@ -118,6 +118,91 @@ function BundleCard({ bundle, selected, onSelect }: BundleCardProps) {
   );
 }
 
+/* ─── Font family + size presets ─────────────────────────────────────────── */
+
+type FontSizeOption = { value: 0.875 | 1 | 1.125 | 1.25; label: string };
+const FONT_SIZE_OPTIONS: ReadonlyArray<FontSizeOption> = [
+  { value: 0.875, label: "작게" },
+  { value: 1, label: "보통" },
+  { value: 1.125, label: "크게" },
+  { value: 1.25, label: "매우 크게" },
+];
+
+type FontFamilyPreset = { value: string; label: string; stack: string };
+const FONT_FAMILY_PRESETS: ReadonlyArray<FontFamilyPreset> = [
+  { value: "system", label: "시스템 기본", stack: "" /* unset → HOST_FONT_STACK */ },
+  {
+    value: "pretendard",
+    label: "Pretendard",
+    stack: "Pretendard, system-ui, -apple-system, \"Segoe UI\", \"Apple SD Gothic Neo\", \"Noto Sans KR\", \"Malgun Gothic\", sans-serif",
+  },
+  {
+    value: "noto-sans-kr",
+    label: "Noto Sans KR",
+    stack: "\"Noto Sans KR\", \"Apple SD Gothic Neo\", \"Malgun Gothic\", system-ui, sans-serif",
+  },
+  {
+    value: "ibm-plex",
+    label: "IBM Plex Sans",
+    stack: "\"IBM Plex Sans KR\", \"IBM Plex Sans\", system-ui, -apple-system, sans-serif",
+  },
+];
+
+function presetForStack(stack: string | undefined): string {
+  if (!stack || stack === "system") return "system";
+  const hit = FONT_FAMILY_PRESETS.find((p) => p.stack === stack);
+  return hit ? hit.value : "custom";
+}
+
+function useFontPreferences() {
+  const [family, setFamilyState] = useState<string>("system");
+  const [sizeScale, setSizeScaleState] = useState<0.875 | 1 | 1.125 | 1.25>(1);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const api = getApi();
+        const settings = await api.getSettings();
+        if (cancelled) return;
+        const font = settings.appearance?.font;
+        if (font?.family && font.family !== "system") setFamilyState(font.family);
+        if (font?.sizeScale && [0.875, 1, 1.125, 1.25].includes(font.sizeScale)) {
+          setSizeScaleState(font.sizeScale);
+        }
+      } catch {
+        /* ignore — defaults remain */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const setFamily = (next: string) => {
+    setFamilyState(next || "system");
+    try {
+      const api = getApi();
+      void api
+        .updateSettings({ appearance: { font: { family: next || "system" } } })
+        .catch(() => { /* ignore — local state already reflects */ });
+    } catch {
+      /* ignore */
+    }
+  };
+  const setSizeScale = (next: 0.875 | 1 | 1.125 | 1.25) => {
+    setSizeScaleState(next);
+    try {
+      const api = getApi();
+      void api
+        .updateSettings({ appearance: { font: { sizeScale: next } } })
+        .catch(() => { /* ignore */ });
+    } catch {
+      /* ignore */
+    }
+  };
+
+  return { family, sizeScale, setFamily, setSizeScale };
+}
+
 /* ─── webView preferredFlow options ──────────────────────────────────────── */
 const WEBVIEW_OPTIONS: ReadonlyArray<{ value: WebViewPreferredFlow; label: string; hint: string }> = [
   { value: "in-app", label: "인앱 표시", hint: "외부 URL 을 LVIS 창 안에 표시합니다." },
@@ -172,8 +257,11 @@ function useWebViewPreferredFlow(): {
 export function AppearanceTab() {
   const { bundleId, setBundle, followSystem, setFollowSystem } = useTheme();
   const { flow: webViewFlow, setFlow: setWebViewFlow } = useWebViewPreferredFlow();
+  const { family, sizeScale, setFamily, setSizeScale } = useFontPreferences();
 
   const isLgePair = LGE_PAIR_IDS.includes(bundleId);
+  const activePreset = presetForStack(family);
+  const customStack = activePreset === "custom" ? family : "";
 
   return (
     <div className="space-y-6 pt-4">
@@ -233,6 +321,102 @@ export function AppearanceTab() {
           </div>
         </section>
       )}
+
+      {/* ── 폰트 (사용자 자율화) ────────────────────────────────────── */}
+      <section className="space-y-3 border-t border-border pt-4">
+        <div className="flex items-baseline justify-between">
+          <h3 className="text-sm font-semibold">폰트</h3>
+          <span className="text-[11px] text-muted-foreground">
+            크기 미리보기:{" "}
+            <span className="font-mono text-foreground">{Math.round(sizeScale * 16)}px</span>
+          </span>
+        </div>
+        <p className="text-[11px] text-muted-foreground">
+          호스트 본체 / 채팅 / 설정 창 전체에 적용됩니다. 시스템 기본은 OS 의 sans-serif 와 한글 폰트 fallback 체인을 사용합니다.
+        </p>
+
+        {/* 폰트 패밀리 */}
+        <div className="space-y-2">
+          <label className="text-[11px] text-muted-foreground">패밀리</label>
+          <div
+            role="radiogroup"
+            aria-label="폰트 패밀리 선택"
+            data-testid="font-family-presets"
+            className="flex flex-wrap gap-2"
+          >
+            {FONT_FAMILY_PRESETS.map((opt) => {
+              const checked = activePreset === opt.value;
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={checked}
+                  data-value={opt.value}
+                  onClick={() => setFamily(opt.stack)}
+                  className={`rounded-full border px-3 py-1 text-xs transition-colors ${
+                    checked
+                      ? "border-primary bg-primary text-primary-foreground"
+                      : "border-border text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* 사용자 stack 직접 입력 */}
+          <details className="text-[11px] text-muted-foreground">
+            <summary className="cursor-pointer select-none">직접 입력 (CSS font-family stack)</summary>
+            <input
+              type="text"
+              value={customStack}
+              placeholder='예: "Spoqa Han Sans Neo", system-ui, sans-serif'
+              maxLength={200}
+              onChange={(e) => setFamily(e.target.value.trim())}
+              className="mt-2 w-full rounded border border-input bg-background px-2 py-1 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+              aria-label="사용자 정의 폰트 stack"
+            />
+            <p className="mt-1 text-[10px]">
+              영문/한글 폰트 이름, 콤마, 따옴표, 하이픈만 허용 (최대 200자). 잘못된 입력은 자동으로 시스템 기본으로 되돌아갑니다.
+            </p>
+          </details>
+        </div>
+
+        {/* 폰트 크기 */}
+        <div className="space-y-2">
+          <label className="text-[11px] text-muted-foreground">크기</label>
+          <div
+            role="radiogroup"
+            aria-label="폰트 크기 선택"
+            data-testid="font-size-scale"
+            className="flex flex-wrap gap-2"
+          >
+            {FONT_SIZE_OPTIONS.map((opt) => {
+              const checked = sizeScale === opt.value;
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={checked}
+                  data-value={String(opt.value)}
+                  onClick={() => setSizeScale(opt.value)}
+                  className={`rounded-full border px-3 py-1 transition-colors ${
+                    checked
+                      ? "border-primary bg-primary text-primary-foreground"
+                      : "border-border text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                  }`}
+                  style={{ fontSize: `${opt.value * 0.75}rem` }}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </section>
 
       {/* ── 외부 URL 표시 정책 (B1) ─────────────────────────────────── */}
       <section className="space-y-2 border-t border-border pt-4">
