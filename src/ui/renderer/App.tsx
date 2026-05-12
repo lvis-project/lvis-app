@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { debugLog } from "../../lib/debug-stream.js";
+import { debugLog, isDebugStreamEnabled } from "../../lib/debug-stream.js";
 import {
   composeImportedTriggerOutgoing,
   composeOutgoing as composeOutgoingUtil,
@@ -508,10 +508,15 @@ export function App() {
       mode: "default" | "trigger-import" = "default",
       userIntent?: UserKeyboardIntentSnapshot,
     ) => {
-      debugLog("handleAsk", "enter", { mode, qLen: q.length, streaming });
+      // Cache once per invocation — `window.lvis.env.debugStream` is fixed at
+      // preload bootstrap, so reading it again per debugLog call is wasted
+      // work. Guarding each call site with the cached flag also skips the
+      // payload object allocation when diagnostics are off (#566 item 1).
+      const debugStreamEnabled = isDebugStreamEnabled();
+      if (debugStreamEnabled) debugLog("handleAsk", "enter", { mode, qLen: q.length, streaming });
       const t = q.trim();
       if (!t) {
-        debugLog("handleAsk", "skip:empty");
+        if (debugStreamEnabled) debugLog("handleAsk", "skip:empty");
         return;
       }
       if (mode === "default" && streaming) {
@@ -522,14 +527,14 @@ export function App() {
         // its requestId stale so the call is a safe no-op. Partial response
         // is committed to history by post-turn-hook-chain with
         // stopReason="interrupted".
-        debugLog("handleAsk", "interrupt:abort-and-proceed");
+        if (debugStreamEnabled) debugLog("handleAsk", "interrupt:abort-and-proceed");
         try { await api.chatAbort(); } catch { /* no-op */ }
       }
       // Renderer only performs UX-level shortcuts for typed composer input.
       // Main owns the authoritative trust-origin classification.
       if (mode === "default") {
         if (await handleCompactCommand(t)) {
-          debugLog("handleAsk", "skip:compact-command-handled");
+          if (debugStreamEnabled) debugLog("handleAsk", "skip:compact-command-handled");
           return;
         }
         if (t === "/load" || t.startsWith("/load ")) {
@@ -547,7 +552,7 @@ export function App() {
           await sessionLoad(match.id, false, applyLoadedSession);
           await refreshSessionId();
           await refreshSessions();
-          debugLog("handleAsk", "load-session:handled", { sessionId: match.id });
+          if (debugStreamEnabled) debugLog("handleAsk", "load-session:handled", { sessionId: match.id });
           return;
         }
       }
@@ -557,7 +562,7 @@ export function App() {
       }
       const requestId = ++turnRequestRef.current;
       const streamingRequestId = beginStreamingRequest();
-      debugLog("handleAsk", "begin", { requestId, streamingRequestId });
+      if (debugStreamEnabled) debugLog("handleAsk", "begin", { requestId, streamingRequestId });
       setQuestion("");
       const composed = mode === "trigger-import"
         ? composeImportedTriggerOutgoing(t)
@@ -605,7 +610,7 @@ export function App() {
           mode === "trigger-import" ? "plugin-emitted" : "user-keyboard",
           mode === "default" ? userIntent : undefined,
         );
-        debugLog("handleAsk", "chatSend:resolved", { requestId });
+        if (debugStreamEnabled) debugLog("handleAsk", "chatSend:resolved", { requestId });
         // After successful send, clear attachments — the textarea was
         // already cleared by setQuestion(""). N counter persists across
         // turns so re-attached items get fresh numbers.
@@ -613,19 +618,23 @@ export function App() {
           setAttachments([]);
         }
       } catch (err) {
-        debugLog("handleAsk", "chatSend:rejected", {
-          requestId,
-          err: (err as Error)?.message,
-        });
+        if (debugStreamEnabled) {
+          debugLog("handleAsk", "chatSend:rejected", {
+            requestId,
+            err: (err as Error)?.message,
+          });
+        }
         setErrorWithThought(`오류: ${(err as Error).message}`);
       } finally {
         const turnMatch = turnRequestRef.current === requestId;
-        debugLog("handleAsk", "finally", {
-          requestId,
-          currentTurnRef: turnRequestRef.current,
-          turnMatch,
-          willCallFinish: turnMatch,
-        });
+        if (debugStreamEnabled) {
+          debugLog("handleAsk", "finally", {
+            requestId,
+            currentTurnRef: turnRequestRef.current,
+            turnMatch,
+            willCallFinish: turnMatch,
+          });
+        }
         if (turnMatch) finishStreamingRequest(streamingRequestId);
       }
     },

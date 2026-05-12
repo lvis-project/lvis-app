@@ -164,7 +164,7 @@ describe("ChatView", () => {
     });
 
     await act(async () => {
-      fireEvent.click(container.querySelector("[data-wg-id] button")!);
+      fireEvent.click(container.querySelector("[data-testid=\"work-group\"] button")!);
     });
 
     await waitFor(() => {
@@ -216,7 +216,7 @@ describe("ChatView", () => {
     });
 
     await act(async () => {
-      fireEvent.click(container.querySelector("[data-wg-id] button")!);
+      fireEvent.click(container.querySelector("[data-testid=\"work-group\"] button")!);
     });
 
     for (const button of Array.from(container.querySelectorAll("button"))) {
@@ -288,7 +288,7 @@ describe("ChatView", () => {
     });
 
     await waitFor(() => {
-      const workGroup = container.querySelector("[data-wg-id]");
+      const workGroup = container.querySelector("[data-testid=\"work-group\"]");
       expect(workGroup).toBeTruthy();
       expect(workGroup!.textContent).toContain("작업 중...");
       expect(workGroup!.textContent).toContain("도구를 바로 호출하겠습니다");
@@ -594,7 +594,7 @@ describe("ChatView", () => {
     });
 
     await waitFor(() => {
-      const workGroup = container.querySelector("[data-wg-id]");
+      const workGroup = container.querySelector("[data-testid=\"work-group\"]");
       expect(workGroup).toBeTruthy();
       expect(workGroup!.textContent).toContain("작업 중...");
       expect(workGroup!.textContent).toContain("도구를 바로 호출하겠습니다");
@@ -659,7 +659,7 @@ describe("ChatView", () => {
       expect(container.textContent).not.toContain("__calendar_result__");
     });
     await act(async () => {
-      fireEvent.click(container.querySelector("[data-wg-id] button")!);
+      fireEvent.click(container.querySelector("[data-testid=\"work-group\"] button")!);
     });
     await waitFor(() => {
       expect(container.textContent).toContain("calendar list");
@@ -715,11 +715,11 @@ describe("ChatView", () => {
       expect(transcriptText).not.toContain("웹 페이지 가져오기");
       expect(transcriptText).not.toContain("본문");
       expect(transcriptText).not.toContain("중간 확인 내용은 사용자에게 보여야 합니다.");
-      expect(container.querySelectorAll("[data-wg-id]")).toHaveLength(1);
+      expect(container.querySelectorAll("[data-testid=\"work-group\"]")).toHaveLength(1);
     });
 
     await act(async () => {
-      fireEvent.click(container.querySelector("[data-wg-id] button")!);
+      fireEvent.click(container.querySelector("[data-testid=\"work-group\"] button")!);
     });
 
     await waitFor(() => {
