@@ -59,6 +59,7 @@ import { useMarketplaceUrl } from "./hooks/use-marketplace-url.js";
 import { OverlayContextProvider } from "./context/OverlayContext.js";
 import { RoutineSessionView } from "./components/RoutineSessionView.js";
 import { UnifiedSearchPanel } from "./components/UnifiedSearchPanel.js";
+import type { UserKeyboardIntentSnapshot } from "../../shared/chat-origin.js";
 
 // ─── App ────────────────────────────────────────────
 
@@ -89,7 +90,11 @@ export function App() {
   const turnRequestRef = useRef(0);
   // Ref so handlePluginPrimaryAction (defined before handleAsk) can call
   // handleAsk without a forward-declaration TS error. Updated each render.
-  const handleAskRef = useRef<(q: string, mode?: "default" | "trigger-import") => Promise<void>>(
+  const handleAskRef = useRef<(
+    q: string,
+    mode?: "default" | "trigger-import",
+    userIntent?: UserKeyboardIntentSnapshot,
+  ) => Promise<void>>(
     async () => { /* populated below */ },
   );
 
@@ -492,6 +497,7 @@ export function App() {
     async (
       q: string,
       mode: "default" | "trigger-import" = "default",
+      userIntent?: UserKeyboardIntentSnapshot,
     ) => {
       debugLog("handleAsk", "enter", { mode, qLen: q.length, streaming });
       const t = q.trim();
@@ -589,6 +595,7 @@ export function App() {
           outgoing,
           outgoingAttachments,
           mode === "trigger-import" ? "plugin-emitted" : "user-keyboard",
+          mode === "default" ? userIntent : undefined,
         );
         debugLog("handleAsk", "chatSend:resolved", { requestId });
         // After successful send, clear attachments — the textarea was
@@ -865,7 +872,7 @@ export function App() {
             onJumpToSession={handleLoadSession}
             onRefreshSessions={refreshSessions}
             chatContextValue={chatContextValue}
-            onAsk={(q) => handleAsk(q, "default")}
+            onAsk={(q, intent) => handleAsk(q, "default", intent)}
             onEditSave={handleEditSave}
             onFork={handleFork}
             onToggleStar={handleToggleStar}

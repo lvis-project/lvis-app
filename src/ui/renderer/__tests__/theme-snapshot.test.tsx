@@ -128,7 +128,8 @@ describe("Renderer source has no hardcoded color escapes", async () => {
     const files = await walk(RENDERER_ROOT);
     const violations: string[] = [];
     for (const file of files) {
-      if (ALLOW.some((a) => file.includes(a))) continue;
+      const normalizedFile = file.replace(/\\/g, "/");
+      if (ALLOW.some((a) => normalizedFile.includes(a))) continue;
       const content = await readFile(file, "utf8");
       // Strip line/block comments before scanning so issue refs like
       // "#260" inside `// Issue #260` don't false-positive. We strip /* … */
@@ -155,7 +156,8 @@ describe("Renderer source has no hardcoded color escapes", async () => {
     const files = (await walk(RENDERER_ROOT)).filter((f) => f.endsWith(".tsx"));
     const violations: string[] = [];
     for (const file of files) {
-      if (ALLOW.some((a) => file.includes(a))) continue;
+      const normalizedFile = file.replace(/\\/g, "/");
+      if (ALLOW.some((a) => normalizedFile.includes(a))) continue;
       const content = await readFile(file, "utf8");
       const stripped = content
         .replace(/\/\*[\s\S]*?\*\//g, "")

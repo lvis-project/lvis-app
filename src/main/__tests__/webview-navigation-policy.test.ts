@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { shouldBlockGlobalWebviewNavigation } from "../webview-navigation-policy.js";
 
-const distRoot = "/Applications/LVIS.app/Contents/Resources/app.asar/dist";
+const distRoot = resolve("fixtures/LVIS.app/Contents/Resources/app.asar/dist");
+const distSrcRoot = resolve(distRoot, "src");
+const distSrcUrl = pathToFileURL(`${distSrcRoot}/`).toString();
+const fileUrlInDistSrc = (name: string) => new URL(name, distSrcUrl).toString();
 
 function decision(overrides: Partial<Parameters<typeof shouldBlockGlobalWebviewNavigation>[0]>) {
   return shouldBlockGlobalWebviewNavigation({
@@ -27,11 +32,11 @@ describe("global webview navigation policy", () => {
 
   it("allows plugin shell file navigations only inside dist/src", () => {
     expect(decision({
-      currentUrl: "file:///Applications/LVIS.app/Contents/Resources/app.asar/dist/src/plugin-ui-shell.html",
-      url: "file:///Applications/LVIS.app/Contents/Resources/app.asar/dist/src/plugin-entry.js",
+      currentUrl: fileUrlInDistSrc("plugin-ui-shell.html"),
+      url: fileUrlInDistSrc("plugin-entry.js"),
     })).toBe(false);
     expect(decision({
-      currentUrl: "file:///Applications/LVIS.app/Contents/Resources/app.asar/dist/src/plugin-ui-shell.html",
+      currentUrl: fileUrlInDistSrc("plugin-ui-shell.html"),
       url: "file:///etc/passwd",
     })).toBe(true);
   });

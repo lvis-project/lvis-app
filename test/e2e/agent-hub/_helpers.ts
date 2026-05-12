@@ -6,8 +6,10 @@
  * Page / Locator types — no fixture state is imported here.
  */
 
-import type { Page, Locator } from 'playwright';
+import type { ElectronApplication, Page, Locator } from 'playwright';
 import type { AgentHubMockServer } from './fixtures/agent-hub-mock-server';
+
+const AGENT_HUB_PANEL_SELECTORS = ['[data-testid="work-board-panel"]'];
 
 // ---------------------------------------------------------------------------
 // Navigation helpers
@@ -67,6 +69,74 @@ export async function openAgentHubTab(page: Page): Promise<boolean> {
   return false;
 }
 
+export async function openAgentHubView(
+  page: Page,
+  app: ElectronApplication,
+): Promise<Page | null> {
+  const knownPages = new Set(app.windows());
+  const detachedWindowPromise = app
+    .waitForEvent('window', { timeout: 10_000 })
+    .catch(() => null);
+
+  const opened = await openAgentHubTab(page);
+  if (!opened) return null;
+
+  const embeddedVisible = await page
+    .locator('webview')
+    .first()
+    .waitFor({ state: 'visible', timeout: 2_000 })
+    .then(() => true)
+    .catch(() => false);
+  if (embeddedVisible) return page;
+
+  const detachedWindow = await detachedWindowPromise;
+  if (detachedWindow) {
+    await detachedWindow.waitForLoadState('domcontentloaded').catch(() => {});
+    await detachedWindow
+      .locator('webview')
+      .first()
+      .waitFor({ state: 'visible', timeout: 15_000 })
+      .catch(() => {});
+    return detachedWindow;
+  }
+
+  for (const candidate of app.windows()) {
+    if (knownPages.has(candidate)) continue;
+    const hasWebview = await candidate
+      .locator('webview')
+      .first()
+      .isVisible()
+      .catch(() => false);
+    if (hasWebview) return candidate;
+  }
+
+  return null;
+}
+
+export async function isAgentHubPanelMounted(app: ElectronApplication): Promise<boolean> {
+  return app.evaluate(async ({ webContents }, selectors) => {
+    const script = `
+      (() => {
+        const selectors = ${JSON.stringify(selectors)};
+        return selectors.some((selector) => {
+          const el = document.querySelector(selector);
+          if (!el) return false;
+          const style = window.getComputedStyle(el);
+          return style.visibility !== "hidden" && style.display !== "none";
+        });
+      })()
+    `;
+
+    for (const contents of webContents.getAllWebContents()) {
+      if (contents.getType() !== 'webview') continue;
+      const mounted = await contents.executeJavaScript(script, true).catch(() => false);
+      if (mounted) return true;
+    }
+
+    return false;
+  }, AGENT_HUB_PANEL_SELECTORS);
+}
+
 /**
  * Wait for the agent-hub v3 panel to be visible.
  * Returns the panel Locator, or null when the panel is not present.
@@ -75,12 +145,29 @@ export async function waitForV3Panel(
   page: Page,
   timeout = 20_000,
 ): Promise<Locator | null> {
-  const panel = page.locator('[data-testid="agent-hub-panel-v3"]').first();
-  const found = await panel
-    .waitFor({ state: 'visible', timeout })
-    .then(() => true)
-    .catch(() => false);
-  return found ? panel : null;
+  const deadline = Date.now() + timeout;
+
+  while (Date.now() <= deadline) {
+    for (const selector of AGENT_HUB_PANEL_SELECTORS) {
+      const panel = page.locator(selector).first();
+      if (await panel.isVisible().catch(() => false)) {
+        return panel;
+      }
+    }
+
+    for (const frame of page.frames()) {
+      for (const selector of AGENT_HUB_PANEL_SELECTORS) {
+        const panel = frame.locator(selector).first();
+        if (await panel.isVisible().catch(() => false)) {
+          return panel;
+        }
+      }
+    }
+
+    await page.waitForTimeout(250);
+  }
+
+  return null;
 }
 
 /**
@@ -93,6 +180,11 @@ export async function waitForAuthS3(
   timeout = 30_000,
 ): Promise<boolean> {
   const { expect } = await import('@playwright/test');
+  const isHostWebview = await panel
+    .evaluate((el) => el.tagName.toLowerCase() === 'webview')
+    .catch(() => false);
+  if (isHostWebview) return false;
+
   const myworkBtn = panel
     .locator('[data-testid="agent-hub-toggle-mywork"]')
     .first();

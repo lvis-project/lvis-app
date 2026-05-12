@@ -4,13 +4,18 @@
 // contexts fail silently when the bundled output goes through
 // `__toESM(require("electron"), 1).default.contextBridge`.
 import { contextBridge, ipcRenderer } from "electron";
+import { randomUUID } from "node:crypto";
 import { resolve as pathResolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { McpServerConfig } from "./mcp/types.js";
 import type { SerializedHistoryMessage } from "./shared/chat-history.js";
 import { OVERLAY_V1, PERMISSIONS, ROUTINES_V2 } from "./shared/ipc-channels.js";
 import { PLUGIN_PRIVATE_NAMESPACES } from "./plugins/capabilities.js";
-import type { ChatSendInputOrigin, UserKeyboardIntent } from "./shared/chat-origin.js";
+import type {
+  ChatSendInputOrigin,
+  UserKeyboardIntent,
+  UserKeyboardIntentSnapshot,
+} from "./shared/chat-origin.js";
 
 // ─── Deterministic plugin webview asset URLs ────────────────────────────────
 // `__dirname` here resolves to the host preload's bundled location
@@ -75,6 +80,36 @@ function hasActiveUserGesture(): boolean {
   return globalThis.navigator?.userActivation?.isActive === true;
 }
 
+const USER_KEYBOARD_INTENT_TTL_MS = 5_000;
+const userKeyboardIntentTokens = new Map<string, number>();
+
+function pruneExpiredUserKeyboardIntents(now = Date.now()): void {
+  for (const [token, expiresAt] of userKeyboardIntentTokens) {
+    if (expiresAt <= now) userKeyboardIntentTokens.delete(token);
+  }
+}
+
+function captureUserKeyboardIntent(): UserKeyboardIntentSnapshot {
+  if (!hasActiveUserGesture()) {
+    return { inputOrigin: "user-keyboard", token: "" };
+  }
+  const now = Date.now();
+  pruneExpiredUserKeyboardIntents(now);
+  const token = randomUUID();
+  userKeyboardIntentTokens.set(token, now + USER_KEYBOARD_INTENT_TTL_MS);
+  return { inputOrigin: "user-keyboard", token };
+}
+
+function consumeUserKeyboardIntent(userIntent?: UserKeyboardIntentSnapshot): boolean {
+  const activeGesture = hasActiveUserGesture();
+  if (userIntent && userIntent.inputOrigin === "user-keyboard" && typeof userIntent.token === "string") {
+    const expiresAt = userKeyboardIntentTokens.get(userIntent.token);
+    userKeyboardIntentTokens.delete(userIntent.token);
+    if (typeof expiresAt === "number" && expiresAt > Date.now()) return true;
+  }
+  return activeGesture;
+}
+
 function ipcUserKeyboardIntent(): UserKeyboardIntent | { inputOrigin: "user-keyboard"; userActivation: false } {
   return {
     inputOrigin: "user-keyboard",
@@ -133,16 +168,20 @@ const api = {
 
   // ─── Chat (ConversationLoop) ─────────────────────
   chatHasProvider: async () => ipcRenderer.invoke("lvis:chat:has-provider") as Promise<boolean>,
+  captureUserKeyboardIntent,
   chatSend: async (
     input: string,
     attachments: unknown[] | undefined,
     inputOrigin: ChatSendInputOrigin,
+    userIntent?: UserKeyboardIntentSnapshot,
   ) =>
     ipcRenderer.invoke("lvis:chat:send", {
       input,
       attachments,
       inputOrigin,
-      ...(inputOrigin === "user-keyboard" ? { userActivation: hasActiveUserGesture() } : {}),
+      ...(inputOrigin === "user-keyboard"
+        ? { userActivation: consumeUserKeyboardIntent(userIntent) }
+        : {}),
     }),
   chatGuide: async (input: string) => ipcRenderer.invoke("lvis:chat:guide", input),
   chatNew: async () => ipcRenderer.invoke("lvis:chat:new"),

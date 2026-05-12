@@ -49,6 +49,7 @@ import type { LvisApi } from "./types.js";
 import type { SubAgentSpawn } from "./components/SubAgentCard.js";
 import type { SkillBadgeProps } from "./components/SkillBadge.js";
 import type { SessionSummary } from "./hooks/use-sessions.js";
+import type { UserKeyboardIntentSnapshot } from "../../shared/chat-origin.js";
 import { useContinuousHistory, type ContinuousHistorySession } from "./hooks/use-continuous-history.js";
 import ReactMarkdown from "react-markdown";
 import { MARKDOWN_REMARK_PLUGINS } from "./utils/markdown-plugins.js";
@@ -63,7 +64,7 @@ const CHAT_BOTTOM_THRESHOLD_PX = 96;
  */
 export interface ChatViewProps {
   api: LvisApi;
-  onAsk: (q: string) => void | Promise<void>;
+  onAsk: (q: string, intent?: UserKeyboardIntentSnapshot) => void | Promise<void>;
   onEditSave: (idx: number, text: string) => void | Promise<void>;
   onFork: (idx: number) => void | Promise<void>;
   onToggleStar: (idx: number) => void | Promise<void>;
@@ -1354,7 +1355,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             allocateN={() => ++attachmentNCounter.current}
             saveClipboardImage={(b64) => window.lvis.attach.saveClipboardImage(b64)}
             openExternal={(p) => window.lvis.attach.openExternal(p)}
-            onSend={() => void onAsk(question)}
+            onSend={(intent) => void onAsk(question, intent)}
             onAbort={() => void onAbort()}
             streaming={streaming}
             disabled={hasApiKey === false || contextOverflowPct >= 0.95 || viewMode !== null}

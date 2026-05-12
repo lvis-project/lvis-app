@@ -22,6 +22,8 @@ const E2E_PLUGIN_REPOS = [
 
 /** Kill any processes occupying the local-indexer worker port so E2E runs cleanly. */
 function killLocalIndexerWorkers(): void {
+  if (process.platform === 'win32') return;
+
   try {
     const raw = execSync('lsof -ti :43129 2>/dev/null || true').toString().trim();
     const pids = raw.split('\n').filter(Boolean);
@@ -59,7 +61,8 @@ async function seedE2ePlugins(repoRoot: string, lvisHomeForTest: string): Promis
       continue;
     }
 
-    const manifest = JSON.parse(fs.readFileSync(sourceManifest, 'utf-8')) as {
+    const sourceManifestText = fs.readFileSync(sourceManifest, 'utf-8');
+    const manifest = JSON.parse(sourceManifestText) as {
       id?: unknown;
       version?: unknown;
       pluginAccess?: unknown;
@@ -71,7 +74,7 @@ async function seedE2ePlugins(repoRoot: string, lvisHomeForTest: string): Promis
     const pluginDir = path.join(pluginsRoot, manifest.id);
     fs.rmSync(pluginDir, { recursive: true, force: true });
     fs.mkdirSync(pluginDir, { recursive: true, mode: 0o700 });
-    fs.copyFileSync(sourceManifest, path.join(pluginDir, 'plugin.json'));
+    fs.writeFileSync(path.join(pluginDir, 'plugin.json'), sourceManifestText, 'utf-8');
 
     const targetDist = path.join(pluginDir, 'dist');
     if (manifest.id === 'agent-hub') {

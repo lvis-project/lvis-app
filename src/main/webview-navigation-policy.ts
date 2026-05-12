@@ -1,4 +1,5 @@
-import { resolve } from "node:path";
+import { isAbsolute, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 export interface GlobalWebviewNavigationDecisionInput {
   url: string;
@@ -15,10 +16,18 @@ export function shouldBlockGlobalWebviewNavigation(
 
   const isPluginShellFrame = input.currentUrl.includes("plugin-ui-shell.html");
   if (isPluginShellFrame && input.url.startsWith("file://")) {
-    const distSrc = resolve(input.distRoot, "src").replace(/\\/g, "/");
-    const allowedPrefix = `file:///${distSrc.replace(/^\//, "")}/`;
-    if (input.url.toLowerCase().startsWith(allowedPrefix.toLowerCase())) {
-      return false;
+    const distSrc = resolve(input.distRoot, "src");
+    let targetPath: string | null = null;
+    try {
+      targetPath = resolve(fileURLToPath(input.url));
+    } catch {
+      targetPath = null;
+    }
+    if (targetPath) {
+      const rel = relative(distSrc, targetPath);
+      if (rel === "" || (!rel.startsWith("..") && !isAbsolute(rel))) {
+        return false;
+      }
     }
   }
 

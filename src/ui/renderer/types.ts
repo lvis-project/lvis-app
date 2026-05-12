@@ -243,10 +243,12 @@ export type LvisApi = {
   >;
   // Provider-auth bridge methods are plugin-owned.
   chatHasProvider: () => Promise<boolean>;
+  captureUserKeyboardIntent: () => import("../../shared/chat-origin.js").UserKeyboardIntentSnapshot;
   chatSend: (
     input: string,
     attachments: import("../../engine/llm/types.js").UserContentPart[] | undefined,
     inputOrigin: ChatSendInputOrigin,
+    userIntent?: import("../../shared/chat-origin.js").UserKeyboardIntentSnapshot,
   ) => Promise<unknown>;
   chatGuide: (input: string) => Promise<unknown>;
   chatNew: () => Promise<{ ok: true }>;

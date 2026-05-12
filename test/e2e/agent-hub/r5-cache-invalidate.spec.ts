@@ -10,8 +10,8 @@
  *
  * What this test verifies:
  *   1. A stale v0.1.x manifest pointing to the old entry path is present
- *   2. The plugin loader force-reloads and detects the new v0.2.0 manifest
- *   3. The resolved entry path is `dist/ui/agent-hub-panel-v3.js` (NOT the old one)
+ *   2. The plugin loader force-reloads and detects the installed current manifest
+ *   3. The resolved entry path is `dist/ui/work-board-panel.js` (NOT the old one)
  *   4. No silent fallback to the stale entry occurs
  *
  * Strategy:
@@ -23,6 +23,8 @@
  * inject and inspect state without needing the real marketplace server.
  */
 
+import fs from 'node:fs';
+import path from 'node:path';
 import { test, expect } from '../ui/fixtures';
 
 // ---------------------------------------------------------------------------
@@ -34,8 +36,8 @@ const PLUGIN_ID = 'agent-hub';
 /** Old entry path (pre-v3, should NOT be used after v0.2.0 force-reload) */
 const STALE_ENTRY_PATH = 'dist/ui/agent-hub-panel.js';
 
-/** New entry path (v3, must be resolved after force-reload) */
-const V3_ENTRY_PATH = 'dist/ui/agent-hub-panel-v3.js';
+/** Current work-board entry path (v3, must be resolved after force-reload) */
+const V3_ENTRY_PATH = 'dist/ui/work-board-panel.js';
 
 /** Stale v0.1.x manifest shape that would be present in a cold cache */
 const STALE_MANIFEST = {
@@ -52,20 +54,16 @@ const STALE_MANIFEST = {
   ],
 };
 
-/** Up-to-date v0.2.0 manifest that the marketplace would serve after publish */
-const V2_MANIFEST = {
-  id: PLUGIN_ID,
-  name: 'LVIS Agent Hub',
-  version: '0.2.0',
-  main: 'dist/index.js',
-  ui: [
-    {
-      slot: 'sidebar',
-      entry: V3_ENTRY_PATH,
-      displayName: 'Agent Hub',
-    },
-  ],
-};
+function readInstalledAgentHubManifest(userDataDir: string): any {
+  const manifestPath = path.join(
+    userDataDir,
+    'lvis-state',
+    'plugins',
+    PLUGIN_ID,
+    'plugin.json',
+  );
+  return JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+}
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -91,26 +89,25 @@ test('R5: stale v0.1.x cached manifest has old entry path', async ({ mainWindow 
   });
 });
 
-test('R5: v0.2.0 manifest entry path is dist/ui/agent-hub-panel-v3.js', async ({ mainWindow }) => {
+test('R5: installed manifest entry path is dist/ui/work-board-panel.js', async ({ mainWindow, userDataDir }) => {
   /**
-   * Verify that the NEW manifest (v0.2.0) correctly points to the v3 entry.
+   * Verify that the installed manifest fixture correctly points to the v3 entry.
    * This guards against a typo or misconfiguration in the plugin.json when
-   * publishing v0.2.0 to the marketplace.
+   * publishing to the marketplace.
    */
-  const v2EntryPath = V2_MANIFEST.ui[0].entry;
-  expect(v2EntryPath).toBe(V3_ENTRY_PATH);
-  expect(v2EntryPath).not.toBe(STALE_ENTRY_PATH);
+  const installedManifest = readInstalledAgentHubManifest(userDataDir);
+  const installedEntryPath = installedManifest.ui?.[0]?.entry;
+  expect(installedEntryPath).toBe(V3_ENTRY_PATH);
+  expect(installedEntryPath).not.toBe(STALE_ENTRY_PATH);
 
-  const [major, minor] = V2_MANIFEST.version.split('.').map(Number);
-  expect(major).toBe(0);
-  expect(minor).toBe(2);
+  expect(installedManifest.id).toBe(PLUGIN_ID);
 
   await expect(mainWindow.locator('[data-testid="main-toolbar"]').first()).toBeVisible({
     timeout: 30_000,
   });
 });
 
-test('R5: plugin loader resolves v3 entry path after force-reload', async ({ mainWindow }) => {
+test('R5: plugin loader resolves installed v3 entry path after force-reload', async ({ mainWindow, userDataDir }) => {
   /**
    * Inject the stale manifest into the plugin loader's cache simulation,
    * then trigger a force-reload and assert that the resolved entry path
@@ -120,8 +117,11 @@ test('R5: plugin loader resolves v3 entry path after force-reload', async ({ mai
    * mode. If not available, we fall back to inspecting the loaded plugin
    * registry for the correct entry.
    */
+  const installedManifest = readInstalledAgentHubManifest(userDataDir);
+  expect(installedManifest.ui?.[0]?.entry).toBe(V3_ENTRY_PATH);
+
   const result = await mainWindow.evaluate(
-    ({ pluginId, staleManifest, v2Manifest, staleEntry, v3Entry }) => {
+    ({ pluginId, staleManifest, installedManifest, staleEntry, v3Entry }) => {
       const win = window as any;
 
       // --- Path A: plugin loader test API available ---
@@ -135,7 +135,7 @@ test('R5: plugin loader resolves v3 entry path after force-reload', async ({ mai
 
         // Trigger force-reload
         if (typeof loader.forceReload === 'function') {
-          loader.forceReload(pluginId, v2Manifest);
+          loader.forceReload(pluginId, installedManifest);
         }
 
         // Read resolved entry
@@ -175,11 +175,12 @@ test('R5: plugin loader resolves v3 entry path after force-reload', async ({ mai
 
       // --- Path C: inspect loaded plugin frames ---
       // Plugin UI iframes/webviews expose their src attribute.
-      // The v3 panel frame URL should contain the v3 entry filename.
+      // The current work-board frame URL should contain the current entry filename.
       const frames = Array.from(document.querySelectorAll('iframe, webview'));
       const agentHubFrame = frames.find(
         (f) =>
           f.getAttribute('src')?.includes('agent-hub') ||
+          f.getAttribute('src')?.includes('work-board-panel') ||
           f.getAttribute('data-plugin-id') === pluginId,
       );
       const frameSrc = agentHubFrame?.getAttribute('src') ?? null;
@@ -187,12 +188,12 @@ test('R5: plugin loader resolves v3 entry path after force-reload', async ({ mai
       return {
         path: 'frame-src',
         resolvedEntry: frameSrc,
-        isV3: frameSrc?.includes('agent-hub-panel-v3') ?? false,
+        isV3: frameSrc?.includes('work-board-panel') ?? false,
         isStale: frameSrc?.includes('agent-hub-panel.js') ?? false,
         frameFound: !!agentHubFrame,
       };
     },
-    { pluginId: PLUGIN_ID, staleManifest: STALE_MANIFEST, v2Manifest: V2_MANIFEST, staleEntry: STALE_ENTRY_PATH, v3Entry: V3_ENTRY_PATH },
+    { pluginId: PLUGIN_ID, staleManifest: STALE_MANIFEST, installedManifest, staleEntry: STALE_ENTRY_PATH, v3Entry: V3_ENTRY_PATH },
   );
 
   // If no plugin loader API was found at all, skip gracefully
