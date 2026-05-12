@@ -289,6 +289,12 @@ function FontFamilyCustomInput({
 }) {
   const [raw, setRaw] = useState(initial);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  // `escapingRef` blocks the `onBlur=commit()` call that fires synchronously
+  // when an Escape handler calls `inputElement.blur()`. Without this flag,
+  // React 18+ batches `setRaw(initial)`, then `blur()` runs `onBlur` with
+  // the still-typed `raw` closure → commit("user typed text") → the very
+  // bug Escape was meant to cancel (PR #672 3차 critic MAJOR M1).
+  const escapingRef = useRef(false);
   // Re-sync when upstream changes (preset click, cross-window broadcast, …).
   // Guard against overwriting in-progress typing — if the input is currently
   // focused, the user is editing and we must not stomp their text with a
@@ -298,14 +304,11 @@ function FontFamilyCustomInput({
     setRaw(initial);
   }, [initial]);
 
-  // `commit` accepts an explicit `override` so Escape can pass the canonical
-  // `initial` value directly (React 18 batches `setRaw(initial)` so an Escape
-  // → setRaw → blur path would otherwise fire `onBlur` with the stale `raw`
-  // closure and confirm the typed text — exactly inverse of Escape's intent
-  // (PR #672 2차 critic MAJOR N1). Dedupe against `initial.trim()` so the
-  // explicit-revert path stays a no-op end-to-end.
-  const commit = (override?: string) => {
-    const value = (override ?? raw).trim();
+  // Dedupe against `initial.trim()` so a self-echo from cross-window broadcast
+  // (the user committed "Foo" here, the broadcast arrived, parent re-rendered
+  // with `initial = "Foo"`, an unfocused blur is a no-op anyway) stays silent.
+  const commit = () => {
+    const value = raw.trim();
     if (value === initial.trim()) return;
     onCommit(value);
   };
@@ -320,15 +323,20 @@ function FontFamilyCustomInput({
         placeholder='예: "Spoqa Han Sans Neo", system-ui, sans-serif'
         maxLength={200}
         onChange={(e) => setRaw(e.target.value)}
-        onBlur={() => commit()}
+        onBlur={() => {
+          // Escape sets this flag and then calls blur(); skip the cascaded
+          // commit so the typed-but-cancelled value never reaches onCommit.
+          if (escapingRef.current) { escapingRef.current = false; return; }
+          commit();
+        }}
         onKeyDown={(e) => {
           if (e.key === "Enter") {
             e.preventDefault();
             commit();
           } else if (e.key === "Escape") {
             e.preventDefault();
+            escapingRef.current = true;
             setRaw(initial);
-            commit(initial); // dedupes via the `value === initial.trim()` guard above.
             (e.target as HTMLInputElement).blur();
           }
         }}
