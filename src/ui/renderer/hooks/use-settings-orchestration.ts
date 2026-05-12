@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { AppSettings, LvisApi } from "../types.js";
 import { VENDORS } from "../constants.js";
 import type { FallbackEntry } from "../tabs/LlmTab.js";
@@ -248,6 +248,21 @@ export function useSettingsOrchestration(
     } finally { setSaving(false); }
   };
 
+  const setExperimentalContinuousBackendLive = useCallback((next: boolean) => {
+    const previous = experimentalContinuousBackend;
+    setExperimentalContinuousBackend(next);
+    if (!settingsLoaded) return;
+    void api
+      .updateSettings({ features: { experimentalContinuousBackend: next } })
+      .then((updated) => {
+        setSettingsSnapshot(updated);
+        onSaved();
+      })
+      .catch(() => {
+        setExperimentalContinuousBackend(previous);
+      });
+  }, [api, experimentalContinuousBackend, onSaved, settingsLoaded]);
+
   return {
     vendor, setVendor,
     keyInput, setKeyInput,
@@ -266,7 +281,7 @@ export function useSettingsOrchestration(
     webKeyInput, setWebKeyInput,
     hasWebKey, setHasWebKey,
     piiRedactEnabled, setPiiRedactEnabled,
-    experimentalContinuousBackend, setExperimentalContinuousBackend,
+    experimentalContinuousBackend, setExperimentalContinuousBackend: setExperimentalContinuousBackendLive,
     marketplaceBaseUrl, setMarketplaceBaseUrl,
     marketplaceAllowPrivateNetwork, setMarketplaceAllowPrivateNetwork,
     hasMarketplaceApiKey, setHasMarketplaceApiKey,
