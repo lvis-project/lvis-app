@@ -183,6 +183,7 @@ describe("initPluginRuntime HostApi factory", () => {
       mainWindow: {} as never,
       openAuthWindowService: vi.fn(),
       openLinkWindowService: vi.fn(),
+      openAuthPartitionViewerService: vi.fn(),
       shellOpenExternal: vi.fn(),
       approvalGate: {} as never,
     });
@@ -210,5 +211,111 @@ describe("initPluginRuntime HostApi factory", () => {
       callerPluginId: "caller-plugin",
       ownerPluginId: "owner-plugin",
     });
+  });
+
+  /**
+   * Issue #649 security review HIGH#1 — `callerPluginId` invariant.
+   *
+   * The HostApi instance given to plugin A must only ever invoke tools as
+   * plugin A. A malicious or compromised plugin must NOT be able to spoof a
+   * different `callerPluginId` by:
+   *   - smuggling an extra positional arg
+   *   - embedding a `_callerPluginId` in the payload
+   *   - shadowing factory closures with a forged manifest
+   *
+   * The binding lives in the HostApi factory closure (`pluginId` param of
+   * `createHostApi`). If a future refactor accidentally reads pluginId from
+   * the payload or arguments, this test catches it. Adding new HostApi
+   * methods that take auth-sensitive identity must follow the same closure-
+   * binding pattern, never an argument.
+   */
+  it("HIGH#1 — callerPluginId is bound from HostApi factory closure, ignores caller-supplied identity claims", async () => {
+    runtimeTestState.capturedRuntimeOptions = null;
+    runtimeTestState.runtime.assertPluginToolAccess.mockClear();
+    runtimeTestState.runtime.resolveToolOwner.mockClear();
+    runtimeTestState.runtime.resolveToolOwner.mockReturnValue("ms-graph");
+
+    const invoker = vi.fn(async () => ({ ok: true }));
+    const output = await initPluginRuntime({
+      projectRoot: "/tmp/lvis-test/project",
+      settingsService: {
+        get: vi.fn((key: string) => {
+          if (key === "llm") return { provider: "openai" };
+          if (key === "pluginConfigs") return {};
+          return undefined;
+        }),
+        getSecret: vi.fn(() => undefined),
+        getPluginConfig: vi.fn(() => ({})),
+        setPluginConfig: vi.fn(),
+      } as never,
+      memoryManager: {} as never,
+      keywordEngine: {
+        registerKeywords: vi.fn(),
+        unregisterByPlugin: vi.fn(),
+      } as never,
+      toolRegistry: {
+        unregisterByPlugin: vi.fn(),
+        register: vi.fn(),
+        listAll: vi.fn(() => []),
+      } as never,
+      pythonPath: undefined,
+      bootAuditLogger: { log: vi.fn() } as never,
+      mainWindow: {} as never,
+      openAuthWindowService: vi.fn(),
+      openLinkWindowService: vi.fn(),
+      openAuthPartitionViewerService: vi.fn(),
+      shellOpenExternal: vi.fn(),
+      approvalGate: {} as never,
+    });
+    output.lateBinding.pluginToolInvokerRef.fn = invoker;
+
+    const createHostApi = runtimeTestState.capturedRuntimeOptions?.createHostApi as
+      | ((pluginId: string, manifest: { id: string; config?: Record<string, unknown> }, pluginDataDir: string) => {
+          callTool: (toolName: string, payload?: unknown, ...rest: unknown[]) => Promise<unknown>;
+        })
+      | undefined;
+    expect(createHostApi).toBeDefined();
+
+    const pluginDataDir = mkdtempSync("/tmp/lvis-hostapi-data-");
+    // HostApi for the *evil* plugin "evil-plugin" — pretends in manifest to
+    // be "ms-graph" via shadowed id. Closure should still bind "evil-plugin".
+    const evilApi = createHostApi!(
+      "evil-plugin",
+      { id: "ms-graph", config: {} },
+      pluginDataDir,
+    );
+
+    // Attempt 1: positional smuggling — extra arg after payload.
+    await evilApi.callTool("msgraph_open_outlook_calendar", { url: "x" }, {
+      callerPluginId: "ms-graph",
+      origin: "plugin",
+    });
+
+    // Attempt 2: payload-embedded identity claim.
+    await evilApi.callTool("msgraph_open_outlook_calendar", {
+      url: "x",
+      _callerPluginId: "ms-graph",
+      origin: "plugin",
+    });
+
+    // Attempt 3: control — plain call, still rebinds to evil-plugin.
+    await evilApi.callTool("msgraph_open_outlook_calendar");
+
+    // The runtime must have asserted access as evil-plugin every time —
+    // not as the spoofed "ms-graph".
+    expect(runtimeTestState.runtime.assertPluginToolAccess).toHaveBeenCalledTimes(3);
+    for (const call of runtimeTestState.runtime.assertPluginToolAccess.mock.calls) {
+      expect(call[0]).toBe("evil-plugin");
+    }
+
+    // The invoker context's callerPluginId is closure-bound, not lifted
+    // from any caller-supplied position or payload field.
+    expect(invoker).toHaveBeenCalledTimes(3);
+    for (const call of invoker.mock.calls) {
+      const ctx = call[2] as { origin: string; callerPluginId: string; ownerPluginId: string };
+      expect(ctx.callerPluginId).toBe("evil-plugin");
+      expect(ctx.origin).toBe("plugin");
+      expect(ctx.ownerPluginId).toBe("ms-graph");
+    }
   });
 });
