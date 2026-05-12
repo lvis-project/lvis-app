@@ -17,7 +17,7 @@
  * BrowserWindow.getBounds() always returns DIP values.
  */
 
-import { BrowserWindow, ipcMain, screen, type IpcMainInvokeEvent } from "electron";
+import { BrowserWindow, ipcMain, screen, type BrowserWindowConstructorOptions, type IpcMainInvokeEvent } from "electron";
 import { existsSync, readFileSync, writeFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { validateSender, auditUnauthorized, UNAUTHORIZED_FRAME } from "../ipc-bridge.js";
@@ -63,17 +63,62 @@ function viewKeyLabel(viewKey: string): string {
 const SNAP_THRESHOLD_DIP = 20;
 const SNAP_GAP_DIP = 12;
 
-function defaultDetachedBounds(_viewKey: string): { width: number; height: number } {
-  return { width: 800, height: 600 };
+export type DetachedWindowOptions = {
+  width?: number;
+  height?: number;
+  minWidth?: number;
+  minHeight?: number;
+  resizable?: boolean;
+  alwaysOnTop?: boolean;
+};
+
+type NormalizedDetachedWindowOptions = DetachedWindowOptions;
+type DetachedWindowOptionsResolver = (viewKey: string) => DetachedWindowOptions | undefined;
+
+const DEFAULT_DETACHED_BOUNDS = { width: 800, height: 600 } as const;
+const DETACHED_WINDOW_LIMITS = {
+  width: { min: 120, max: 3840 },
+  height: { min: 80, max: 2160 },
+  minWidth: { min: 80, max: 3840 },
+  minHeight: { min: 60, max: 2160 },
+} as const;
+
+function integerInRange(value: unknown, min: number, max: number): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value) || !Number.isInteger(value)) return undefined;
+  return Math.max(min, Math.min(max, value));
 }
 
-function detachedBoundsForViewKey(viewKey: string): { width: number; height: number } {
-  const saved = loadWindowState().detached.find((d) => d.viewKey === viewKey);
-  const defaults = defaultDetachedBounds(viewKey);
+function normalizeDetachedWindowOptions(options: DetachedWindowOptions | undefined): NormalizedDetachedWindowOptions {
   return {
-    width: saved?.bounds.width ?? defaults.width,
-    height: saved?.bounds.height ?? defaults.height,
+    width: integerInRange(options?.width, DETACHED_WINDOW_LIMITS.width.min, DETACHED_WINDOW_LIMITS.width.max),
+    height: integerInRange(options?.height, DETACHED_WINDOW_LIMITS.height.min, DETACHED_WINDOW_LIMITS.height.max),
+    minWidth: integerInRange(options?.minWidth, DETACHED_WINDOW_LIMITS.minWidth.min, DETACHED_WINDOW_LIMITS.minWidth.max),
+    minHeight: integerInRange(options?.minHeight, DETACHED_WINDOW_LIMITS.minHeight.min, DETACHED_WINDOW_LIMITS.minHeight.max),
+    resizable: typeof options?.resizable === "boolean" ? options.resizable : undefined,
+    alwaysOnTop: typeof options?.alwaysOnTop === "boolean" ? options.alwaysOnTop : undefined,
   };
+}
+
+function defaultDetachedBounds(options: NormalizedDetachedWindowOptions): { width: number; height: number } {
+  return {
+    width: options.width ?? DEFAULT_DETACHED_BOUNDS.width,
+    height: options.height ?? DEFAULT_DETACHED_BOUNDS.height,
+  };
+}
+
+function detachedBoundsForViewKey(viewKey: string, options: NormalizedDetachedWindowOptions): { width: number; height: number } {
+  const saved = loadWindowState().detached.find((d) => d.viewKey === viewKey);
+  const defaults = defaultDetachedBounds(options);
+  return {
+    width: Math.max(saved?.bounds.width ?? defaults.width, options.minWidth ?? 0),
+    height: Math.max(saved?.bounds.height ?? defaults.height, options.minHeight ?? 0),
+  };
+}
+
+function applyDetachedWindowOptions(win: BrowserWindow, options: NormalizedDetachedWindowOptions): void {
+  win.setMinimumSize(options.minWidth ?? 0, options.minHeight ?? 0);
+  win.setResizable(options.resizable ?? true);
+  win.setAlwaysOnTop(options.alwaysOnTop ?? false);
 }
 
 // Throttle move-event IPC sends: max one per MOVE_THROTTLE_MS.
@@ -261,6 +306,7 @@ export class WindowManager {
   private _preloadPath: string;
   private _distRoot: string;
   private _getInitialThemeArgs: () => string[];
+  private _resolveDetachedWindowOptions?: DetachedWindowOptionsResolver;
 
   constructor(opts: {
     preloadPath: string;
@@ -276,10 +322,17 @@ export class WindowManager {
      * (cold-boot first window) or when the consumer doesn't wire it.
      */
     getInitialThemeArgs?: () => string[];
+    /**
+     * Resolves a detached `viewKey` to plugin-supplied window options
+     * (width / height / minWidth / minHeight). Returning `undefined` falls
+     * back to the generic detached canvas defaults.
+     */
+    resolveDetachedWindowOptions?: DetachedWindowOptionsResolver;
   }) {
     this._preloadPath = opts.preloadPath;
     this._distRoot = opts.distRoot;
     this._getInitialThemeArgs = opts.getInitialThemeArgs ?? (() => []);
+    this._resolveDetachedWindowOptions = opts.resolveDetachedWindowOptions;
   }
 
   // ── Registration ──────────────────────────────────────────────────────────
@@ -355,7 +408,9 @@ export class WindowManager {
       } else {
         if (this._detachedShellViewKey !== viewKey) {
           this._detachedShellViewKey = viewKey;
-          const nextBounds = detachedBoundsForViewKey(viewKey);
+          const nextOptions = normalizeDetachedWindowOptions(this._resolveDetachedWindowOptions?.(viewKey));
+          const nextBounds = detachedBoundsForViewKey(viewKey, nextOptions);
+          applyDetachedWindowOptions(shell, nextOptions);
           shell.setSize(nextBounds.width, nextBounds.height);
           // Update the entry's viewKey so listChildren() reflects the live viewKey.
           const entry = this._children.get(shell.id);
@@ -375,10 +430,15 @@ export class WindowManager {
     // ready-to-show before it becomes visible, so any saved x/y would be
     // immediately overwritten and would only create a misleading impression
     // that the persisted position matters.
-    const bounds = detachedBoundsForViewKey(viewKey);
-    const child = new BrowserWindow({
+    const windowOptions = normalizeDetachedWindowOptions(this._resolveDetachedWindowOptions?.(viewKey));
+    const bounds = detachedBoundsForViewKey(viewKey, windowOptions);
+    const childOptions: BrowserWindowConstructorOptions = {
       width: bounds.width,
       height: bounds.height,
+      minWidth: windowOptions.minWidth,
+      minHeight: windowOptions.minHeight,
+      resizable: windowOptions.resizable ?? true,
+      alwaysOnTop: windowOptions.alwaysOnTop ?? false,
       show: false,
       title: `LVIS — ${viewKeyLabel(viewKey)}`,
       autoHideMenuBar: true,
@@ -397,7 +457,8 @@ export class WindowManager {
         // architecture.md §6.7.1.
         additionalArguments: this._getInitialThemeArgs(),
       },
-    });
+    };
+    const child = new BrowserWindow(childOptions);
     if (typeof child.setMenu === "function") child.setMenu(null);
 
     this._detachedShell = child;
