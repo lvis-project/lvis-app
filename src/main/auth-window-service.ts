@@ -19,6 +19,11 @@ import { fileURLToPath } from "node:url";
 import { BrowserWindow, type Cookie, type Session, type WebContents } from "electron";
 import { registerWindowEventListeners } from "../ipc/domains/window.js";
 import { markAsAuthOwned } from "./auth-window-registry.js";
+import {
+  buildTitlebarCss,
+  buildTitlebarHtml,
+  buildTitlebarButtonScript,
+} from "./window-titlebar-shell.js";
 
 const requireFromHere = createRequire(import.meta.url);
 
@@ -122,30 +127,11 @@ export function buildAuthWindowShellHtml(input: {
   devConsole?: boolean;
 }): string {
   const platform: NodeJS.Platform = input.platform ?? process.platform;
-  const isMac = platform === "darwin";
   const title = JSON.stringify(input.title);
   const url = JSON.stringify(input.url);
   const partition = JSON.stringify(input.partition);
   const erudaScript = input.devConsole === true ? buildErudaInlineScript() : "";
-  // macOS: render an empty 28px draggable strip so the user can still drag the
-  // window, but no title text and no buttons (the OS traffic lights occupy
-  // this space). Win/Linux: full titlebar with title text + control buttons.
-  const titleBarHtml = isMac
-    ? `<div class="titlebar titlebar-mac" id="titlebar"></div>`
-    : `<div class="titlebar" id="titlebar">
-    <div class="title" id="title"></div>
-    <div class="controls">
-      <button class="titlebar-btn" id="minimize" title="최소화" aria-label="최소화">
-        <svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg>
-      </button>
-      <button class="titlebar-btn" id="maximize" title="최대화" aria-label="최대화">
-        <svg id="max-icon" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
-      </button>
-      <button class="titlebar-btn titlebar-btn-close" id="close" title="닫기" aria-label="닫기">
-        <svg viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
-      </button>
-    </div>
-  </div>`;
+  const titleBarHtml = buildTitlebarHtml({ platform, title: input.title });
   return `<!doctype html>
 <html lang="ko">
 <head>
@@ -153,72 +139,7 @@ export function buildAuthWindowShellHtml(input: {
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; frame-src http: https:;" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>${escapeHtml(input.title)}</title>
-  <style>
-    * { box-sizing: border-box; }
-    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
-    body {
-      display: flex;
-      flex-direction: column;
-      background: hsl(48 20% 94%);
-      color: hsl(24 10% 10%);
-      font-family: "Malgun Gothic", "Noto Sans KR", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    }
-    .titlebar {
-      height: 36px;
-      flex: 0 0 36px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      border-bottom: 1px solid hsl(35 14% 80% / 0.7);
-      background: hsl(48 20% 94%);
-      color: hsl(24 10% 10%);
-      user-select: none;
-      -webkit-app-region: drag;
-    }
-    .titlebar-mac {
-      height: 28px;
-      flex: 0 0 28px;
-      border-bottom: 0;
-      background: transparent;
-    }
-    .title {
-      min-width: 0;
-      padding-left: 12px;
-      overflow: hidden;
-      white-space: nowrap;
-      text-overflow: ellipsis;
-      font-size: 12px;
-      font-weight: 600;
-      opacity: .82;
-    }
-    .controls {
-      height: 100%;
-      display: flex;
-      align-items: stretch;
-      -webkit-app-region: no-drag;
-    }
-    .titlebar-btn {
-      width: 44px;
-      height: 36px;
-      border: 0;
-      border-radius: 0;
-      display: grid;
-      place-items: center;
-      background: transparent;
-      color: hsl(24 8% 32%);
-      cursor: default;
-    }
-    .titlebar-btn:hover { background: hsl(35 14% 84% / 0.8); color: hsl(24 10% 10%); }
-    .titlebar-btn-close:hover { background: hsl(0 72% 51%); color: white; }
-    .titlebar-btn svg { width: 14px; height: 14px; stroke: currentColor; stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
-    webview {
-      flex: 1 1 auto;
-      width: 100%;
-      min-height: 0;
-      border: 0;
-      background: white;
-    }
-  </style>
+  <style>${buildTitlebarCss()}</style>
 </head>
 <body>
   ${titleBarHtml}
@@ -227,27 +148,13 @@ export function buildAuthWindowShellHtml(input: {
     const title = ${title};
     const url = ${url};
     const partition = ${partition};
-    const isMac = ${JSON.stringify(isMac)};
     document.title = title;
     const titleEl = document.getElementById("title");
     if (titleEl) titleEl.textContent = title;
     const view = document.getElementById("auth-view");
     view.setAttribute("partition", partition);
     view.setAttribute("src", url);
-    if (!isMac) {
-      document.getElementById("minimize").addEventListener("click", () => window.lvisWindow?.minimize());
-      document.getElementById("maximize").addEventListener("click", () => window.lvisWindow?.toggleMaximize());
-      document.getElementById("close").addEventListener("click", () => window.lvisWindow?.close());
-      window.lvisWindow?.onMaximizedChanged?.((maximized) => {
-        const btn = document.getElementById("maximize");
-        btn.title = maximized ? "이전 크기로" : "최대화";
-        btn.setAttribute("aria-label", btn.title);
-      });
-    }
-    document.getElementById("titlebar").addEventListener("dblclick", (event) => {
-      if (event.target.closest && event.target.closest("button")) return;
-      window.lvisWindow?.toggleMaximize();
-    });
+    ${buildTitlebarButtonScript({ platform, title: input.title })}
   </script>
   ${erudaScript}
 </body>

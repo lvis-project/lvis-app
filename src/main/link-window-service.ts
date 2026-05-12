@@ -32,6 +32,72 @@
  *     `cookies.flushStore()` to force the auth cookie to disk before teardown.
  */
 import { BrowserWindow, session as electronSession } from "electron";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { existsSync } from "node:fs";
+import {
+  buildTitlebarCss,
+  buildTitlebarHtml,
+  buildTitlebarButtonScript,
+} from "./window-titlebar-shell.js";
+
+function escapeHtmlAttr(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function escapeHtmlText(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function buildLinkWindowShellHtml(opts: {
+  url: string;
+  title: string;
+  partition?: string;
+  platform: NodeJS.Platform;
+}): string {
+  const platform = opts.platform;
+  const url = JSON.stringify(opts.url);
+  const partition = JSON.stringify(opts.partition ?? "");
+  const titleAttr = escapeHtmlAttr(opts.title);
+  const titleText = escapeHtmlText(opts.title);
+  const titleBarHtml = buildTitlebarHtml({ platform, title: opts.title });
+  return `<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; frame-src http: https:;" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${titleAttr}</title>
+  <style>${buildTitlebarCss()}</style>
+</head>
+<body>
+  ${titleBarHtml}
+  <webview id="link-view" src="" partition=""></webview>
+  <script>
+    const url = ${url};
+    const partition = ${partition};
+    document.title = ${JSON.stringify(titleText)};
+    const titleEl = document.getElementById("title");
+    if (titleEl) titleEl.textContent = ${JSON.stringify(titleText)};
+    const view = document.getElementById("link-view");
+    if (partition) view.setAttribute("partition", partition);
+    view.setAttribute("src", url);
+    ${buildTitlebarButtonScript({ platform, title: opts.title })}
+  </script>
+</body>
+</html>`;
+}
+
+function linkShellPreloadPath(): string {
+  return join(dirname(fileURLToPath(import.meta.url)), "../preload.cjs");
+}
 
 export interface OpenLinkWindowOptions {
   /** URL to load. MUST be `http(s):` — caller should validate before passing. */
@@ -146,18 +212,33 @@ export async function openLinkWindow(
     applyPersistentBrowserUserAgent(opts.persistPartition);
   }
 
+  const preloadPath = linkShellPreloadPath();
+  const preloadExists = existsSync(preloadPath);
+  const shellTitle = opts.windowTitle ?? "External Link";
+  /* Frame settings mirror the main app window so traffic-light spacing
+     stays uniform on macOS and Win/Linux gets the same frameless shell
+     with our own titlebar buttons. */
   const win = new BrowserWindow({
     parent: parent ?? undefined,
     width: opts.width ?? 1024,
     height: opts.height ?? 768,
-    title: opts.windowTitle ?? "External Link",
+    title: shellTitle,
     autoHideMenuBar: true,
+    frame: process.platform !== "darwin" ? false : undefined,
+    titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "hidden",
+    trafficLightPosition: process.platform === "darwin" ? { x: 14, y: 14 } : undefined,
     webPreferences: {
-      partition: opts.persistPartition,
+      /* Shell loads a `data:` URL that hosts a sandboxed `<webview>` for
+         the external content. The webviewTag flag enables the embedded
+         viewer; the actual cross-origin loading and cookie persistence
+         happen inside the webview's own partition (passed through via
+         the shell-side JS that wires the webview's `partition=` attr). */
+      webviewTag: true,
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,
       webSecurity: true,
+      preload: preloadExists ? preloadPath : undefined,
     },
   });
 
@@ -195,8 +276,16 @@ export async function openLinkWindow(
       settle(() => reject(new Error(`link-window load failed (${code}): ${desc}`)));
     });
 
-    win.loadURL(opts.url).catch((err) => {
-      settle(() => reject(err));
+    const shellHtml = buildLinkWindowShellHtml({
+      url: opts.url,
+      title: shellTitle,
+      partition: opts.persistPartition,
+      platform: process.platform,
     });
+    win
+      .loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(shellHtml)}`)
+      .catch((err) => {
+        settle(() => reject(err));
+      });
   });
 }
