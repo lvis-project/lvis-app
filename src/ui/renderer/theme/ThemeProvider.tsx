@@ -8,6 +8,7 @@ import { bundleToPluginTokens } from "./plugin-token-map.js";
 export { bundleToPluginTokens };
 import type { ThemeContextValue, BundleId, ResolvedShell } from "./types.js";
 import { LGE_PAIR_IDS } from "./types.js";
+import type { InitialThemePrime } from "../../../shared/initial-theme.js";
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
@@ -19,17 +20,13 @@ const ThemeContext = createContext<ThemeContextValue | null>(null);
  * mounts, so reading bundleId here lets ThemeProvider's first render agree
  * with what's already on screen — eliminating the async hydrate race that
  * left detached BrowserWindows with the wrong tokens.
+ *
+ * Type imported from `src/shared/initial-theme.ts` (single SoT shared with
+ * `main.ts` + `preload.ts`).
  */
-type InitialThemeGlobal = Readonly<{
-  bundleId: string;
-  shell: "light" | "dark";
-  tokens?: Readonly<Record<string, string>>;
-}>;
-
 declare global {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   interface Window {
-    __lvisInitialTheme?: InitialThemeGlobal | null;
+    __lvisInitialTheme?: Readonly<InitialThemePrime> | null;
   }
 }
 
