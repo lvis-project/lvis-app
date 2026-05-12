@@ -1,13 +1,13 @@
 /**
  * search_memory — Sprint E agentic memory search tool.
  *
- * LLM이 과거 memory/에서 현재 질의와 관련된 메모를 찾을 수 있도록 노출되는
+ * LLM이 과거 memory/에서 현재 질의와 관련된 메모리를 찾을 수 있도록 노출되는
  * builtin 도구. MemoryManager.listMemoryEntries() 의 (title, content, updatedAt)
  * 를 BM25-lite 로 스코어링하여 top-K 결과를 반환한다.
  *
  * 반환 shape: [{ title, snippet (≤200자), updatedAt, score }]
  *
- * 구현 메모:
+ * 구현 참고:
  * - BM25 lite: term freq × idf × length-normalize (k1=1.2, b=0.75)
  * - title 은 content 보다 2x 가중
  * - 한국어 분절은 단순 whitespace + 비단어 분리 (kiwi 등 미사용, Phase1 단순성)
@@ -147,7 +147,7 @@ export function createSearchMemoryTool(deps: SearchMemoryDeps): Tool {
   return createDynamicTool({
     name: "search_memory",
     description:
-      "과거 사용자 메모(memory/)에서 현재 질의와 관련된 항목을 BM25-lite 로 검색합니다. " +
+      "과거 사용자 메모리(memory/)에서 현재 질의와 관련된 항목을 BM25-lite 로 검색합니다. " +
       "키 기반 단순 검색(memory_search) 대비 의미적 관련성을 랭킹에 반영합니다. " +
       "결과는 [{ title, snippet(≤200자), updatedAt, score }] 형식.",
     source: "builtin",

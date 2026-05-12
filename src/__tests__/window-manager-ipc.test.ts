@@ -11,10 +11,12 @@ import type { IpcMainInvokeEvent } from "electron";
 // ── Electron mock ──────────────────────────────────────────────────────────
 
 const handleMap = new Map<string, (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown>();
+const fromId = vi.hoisted(() => vi.fn());
 
 vi.mock("electron", () => ({
   BrowserWindow: {
     fromWebContents: vi.fn(() => null),
+    fromId,
   },
   ipcMain: {
     handle: vi.fn((channel: string, fn: (e: IpcMainInvokeEvent, ...a: unknown[]) => unknown) => {
@@ -98,15 +100,17 @@ describe("ALLOWED_VIEW_KEYS", () => {
 describe("WindowManager IPC — validateSender guard", () => {
   let WindowManager: typeof import("../main/window-manager.js").WindowManager;
   let auditLogger: ReturnType<typeof makeAuditLogger>;
+  let wm: InstanceType<typeof WindowManager>;
 
   beforeEach(async () => {
     handleMap.clear();
+    fromId.mockReset();
     vi.resetModules();
     // Re-import so handleMap gets freshly registered handlers
     const mod = await import("../main/window-manager.js?t=" + Date.now());
     WindowManager = mod.WindowManager;
     auditLogger = makeAuditLogger();
-    const wm = new WindowManager({ preloadPath: "/fake/preload.cjs", distRoot: "/fake/dist" });
+    wm = new WindowManager({ preloadPath: "/fake/preload.cjs", distRoot: "/fake/dist" });
     wm.registerIpc(auditLogger as never);
   });
 
@@ -146,6 +150,39 @@ describe("WindowManager IPC — validateSender guard", () => {
       const result = await handler(unauthorizedEvent());
       expect(result).toEqual(UNAUTHORIZED_FRAME);
       expect(auditLogger.log).toHaveBeenCalledOnce();
+    });
+  });
+
+  describe("lvis:window:load-session-in-main", () => {
+    it("forwards a valid session id to the registered main window", async () => {
+      const mainWebContents = { send: vi.fn() };
+      const mainWindow = {
+        id: 7,
+        on: vi.fn(),
+        isDestroyed: vi.fn(() => false),
+        show: vi.fn(),
+        focus: vi.fn(),
+        webContents: mainWebContents,
+      };
+      wm.registerMainWindow(mainWindow as never);
+      fromId.mockReturnValueOnce(mainWindow);
+
+      const handler = handleMap.get("lvis:window:load-session-in-main")!;
+      const result = await handler(trustedEvent(), "sess_star-1");
+
+      expect(result).toEqual({ ok: true });
+      expect(mainWindow.show).toHaveBeenCalledOnce();
+      expect(mainWindow.focus).toHaveBeenCalledOnce();
+      expect(mainWebContents.send).toHaveBeenCalledWith(
+        "lvis:window:load-session-in-main",
+        { sessionId: "sess_star-1" },
+      );
+    });
+
+    it("rejects malformed session ids", async () => {
+      const handler = handleMap.get("lvis:window:load-session-in-main")!;
+      const result = await handler(trustedEvent(), "../session");
+      expect(result).toEqual({ ok: false, error: "invalid-session-id" });
     });
   });
 });

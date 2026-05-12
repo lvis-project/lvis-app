@@ -224,7 +224,7 @@ export function McpAppView({ payload }: { payload: McpUiPayload }) {
         </span>
       </div>
       {error ? (
-        <div className="flex items-center gap-2 px-3 py-3 text-[11px] text-red-400">
+        <div className="flex items-center gap-2 px-3 py-3 text-[11px] text-destructive">
           <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />
           <span>{error}</span>
         </div>

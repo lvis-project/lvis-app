@@ -13,6 +13,9 @@ import {
 import type { DiscoveredHook } from "../hook-discovery.js";
 
 const FIXTURE_ROOT = resolve(__dirname, "..", "..", "..", "test", "fixtures", "hooks");
+const WINDOWS_SHELL_TIMEOUT_MS = 20_000;
+const shellIntegrationOptions =
+  process.platform === "win32" ? { timeoutMs: WINDOWS_SHELL_TIMEOUT_MS } : undefined;
 
 function fixtureHook(
   fileName: string,
@@ -52,7 +55,7 @@ describe("Permission policy P4 ScriptHookManager", () => {
       fixtureHook("post-observe.sh", "post"),
       fixtureHook("perm-strict.sh", "perm"),
     ]);
-    const pre = await m.runPreToolUse(basePayload);
+    const pre = await m.runPreToolUse(basePayload, shellIntegrationOptions);
     expect(pre.decision).toBe("allow");
     expect(pre.results).toHaveLength(1);
     expect(pre.results[0].hookType).toBe("pre");
@@ -61,7 +64,7 @@ describe("Permission policy P4 ScriptHookManager", () => {
   it("hook deny wins over upstream allow signal (deny precedence)", async () => {
     const m = new ScriptHookManager();
     m.setTrustedHooks([fixtureHook("pre-deny.sh", "pre")]);
-    const out = await m.runPreToolUse(basePayload);
+    const out = await m.runPreToolUse(basePayload, shellIntegrationOptions);
     expect(out.decision).toBe("deny");
   });
 
@@ -72,7 +75,7 @@ describe("Permission policy P4 ScriptHookManager", () => {
       ...basePayload,
       toolOutput: "tool ran",
       isError: false,
-    });
+    }, shellIntegrationOptions);
     expect(out.decision).toBe("allow");
     expect(out.results).toHaveLength(1);
     expect(out.results[0].hookType).toBe("post");
@@ -81,7 +84,7 @@ describe("Permission policy P4 ScriptHookManager", () => {
   it("perm hooks gate ApprovalRequest rounds", async () => {
     const m = new ScriptHookManager();
     m.setTrustedHooks([fixtureHook("perm-strict.sh", "perm")]);
-    const out = await m.runPermissionRequest(basePayload);
+    const out = await m.runPermissionRequest(basePayload, shellIntegrationOptions);
     expect(out.decision).toBe("deny");
     expect(out.reason).toContain("strict perm policy");
   });

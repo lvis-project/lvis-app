@@ -13,7 +13,6 @@ import { AssistantCard } from "./components/AssistantCard.js";
 import { UserMessageEditor } from "./components/UserMessageEditor.js";
 import { ReasoningCard } from "./components/ReasoningCard.js";
 import { ToolGroupCard } from "./components/ToolGroupCard.js";
-import { ChatSearchOverlay } from "./components/ChatSearchOverlay.js";
 import { DayDivider } from "./components/DayDivider.js";
 import { CheckpointDivider } from "./components/CheckpointDivider.js";
 import { SummaryToast } from "./components/SummaryToast.js";
@@ -50,6 +49,7 @@ import type { LvisApi } from "./types.js";
 import type { SubAgentSpawn } from "./components/SubAgentCard.js";
 import type { SkillBadgeProps } from "./components/SkillBadge.js";
 import type { SessionSummary } from "./hooks/use-sessions.js";
+import type { UserKeyboardIntentSnapshot } from "../../shared/chat-origin.js";
 import { useContinuousHistory, type ContinuousHistorySession } from "./hooks/use-continuous-history.js";
 import ReactMarkdown from "react-markdown";
 import { MARKDOWN_REMARK_PLUGINS } from "./utils/markdown-plugins.js";
@@ -64,7 +64,7 @@ const CHAT_BOTTOM_THRESHOLD_PX = 96;
  */
 export interface ChatViewProps {
   api: LvisApi;
-  onAsk: (q: string) => void | Promise<void>;
+  onAsk: (q: string, intent?: UserKeyboardIntentSnapshot) => void | Promise<void>;
   onEditSave: (idx: number, text: string) => void | Promise<void>;
   onFork: (idx: number) => void | Promise<void>;
   onToggleStar: (idx: number) => void | Promise<void>;
@@ -357,9 +357,9 @@ function HistoricalEntriesList({
       rendered.push(
         <div
           key={`trigger:${entry.sessionId}`}
-          className="mx-3 my-1 rounded border border-violet-500/20 bg-violet-500/5 px-3 py-2 text-xs"
+          className="mx-3 my-1 rounded border border-action-view/20 bg-action-view/5 px-3 py-2 text-xs"
         >
-          <div className="flex items-center gap-1 text-violet-500 font-medium">
+          <div className="flex items-center gap-1 text-action-view font-medium">
             <span>●</span>
             <span>{envelopeSource ?? entry.summary.slice(0, 60)}</span>
           </div>
@@ -367,7 +367,7 @@ function HistoricalEntriesList({
             <p className="mt-1 text-muted-foreground">{entry.summary}</p>
           )}
           {entry.response && (
-            <div className="mt-2 text-foreground/80 prose prose-sm dark:prose-invert max-w-none">
+            <div className="mt-2 text-foreground/80 prose prose-sm lvis-prose max-w-none">
               <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>
                 {entry.response}
               </ReactMarkdown>
@@ -397,8 +397,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
     question, setQuestion, chatEndRef, currentSessionId,
     hasApiKey, onOpenSettings,
-    searchOpen, searchQuery, searchCase, searchMatches, searchMatchSet, searchIdx, searchHighlight,
-    searchChangeQuery, searchToggleCase, searchNext, searchPrev, searchCloseOverlay, searchToggleOverlay,
+    searchOpen, searchMatches, searchMatchSet, searchIdx, searchHighlight,
     contextOverflowPct, usedTokens, contextBudget,
     rolePresets, activePreset, activePresetId, setActivePresetId,
     attachments, setAttachments, attachmentNCounter,
@@ -551,6 +550,19 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     await onLoadSession?.(sessionId);
   }, [onLoadSession, scrollToSessionMarker]);
 
+  useEffect(() => {
+    if (!searchOpen || searchMatches.length === 0) return;
+    const entryIndex = searchMatches[searchIdx];
+    if (entryIndex === undefined) return;
+    const viewport = scrollViewportRef.current;
+    if (!viewport) return;
+    const frame = window.requestAnimationFrame(() => {
+      const target = viewport.querySelector<HTMLElement>(`[data-chat-entry-index="${entryIndex}"]`);
+      target?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [searchIdx, searchMatches, searchOpen, scrollViewportRef]);
+
   // §PR-5: View-Mode handlers
   const handleEnterView = useCallback(async (compactNum: number) => {
     const result = await api.chatEnterCheckpointView?.(currentSessionId, compactNum);
@@ -667,8 +679,6 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
 
   return (
     <div className="relative flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden">
-      {/* ChatSearchOverlay moved INSIDE ScrollArea below so its sticky top-0
-          attaches to the chat scroll viewport instead of floating above it. */}
       {hasApiKey === false && (
         <div className="absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2">
           <Card className="w-[400px]"><CardHeader className="text-center"><KeyRound className="mx-auto mb-2 h-10 w-10 text-muted-foreground" /><CardTitle>API 키 설정 필요</CardTitle><CardDescription>채팅을 시작하려면 Claude API 키를 설정해 주세요.</CardDescription></CardHeader>
@@ -728,18 +738,6 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             ))}
           </Fragment>
         ))}
-        <ChatSearchOverlay
-          open={searchOpen}
-          query={searchQuery}
-          caseSensitive={searchCase}
-          matchCount={searchMatches.length}
-          currentIdx={searchIdx}
-          onChangeQuery={searchChangeQuery}
-          onToggleCase={searchToggleCase}
-          onNext={searchNext}
-          onPrev={searchPrev}
-          onClose={searchCloseOverlay}
-        />
         {/* Today's date badge — always shown above the active conversation.
             Even when historical sessions already rendered today's date, the
             active turn boundary must remain the same calendar-enabled divider
@@ -887,20 +885,20 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
                 const starId = isEntryStarred(idx);
                 const starActive = !!starId;
                 rendered.push(
-                  <div key={idx} className={`group relative ml-auto w-fit min-w-0 max-w-[75%] overflow-hidden rounded-md bg-message-user px-3.5 py-2 text-sm text-message-user-foreground ${userGapCls} ${ringCls}`}>
+                  <div key={idx} data-chat-entry-index={idx} className={`group relative ml-auto w-fit min-w-0 max-w-[75%] overflow-hidden rounded-md bg-message-user px-3.5 py-2 text-sm text-message-user-foreground ${userGapCls} ${ringCls}`}>
                     {/* "나" label removed — sender is implicit. Star + hover
                         actions float top-right via absolute positioning so
                         the bubble has no header chrome. */}
                     {starActive ? (
-                      <Star className="absolute right-2 top-2 h-3 w-3 fill-yellow-400 text-yellow-400" />
+                      <Star key="active" className="absolute right-2 top-2 h-3 w-3 fill-emphasis text-emphasis lvis-anim-star" />
                     ) : null}
                     {/* §PR-5: hide mutating actions in view-mode (read-only slice) */}
                     {!viewMode && (
                       <div className="absolute right-2 top-2 hidden gap-1 group-hover:flex bg-message-user/95 rounded">
-                        <button className="rounded p-0.5 hover:bg-black/20" title="편집" onClick={() => setEditingEntryIdx(idx)}><Pencil className="h-3 w-3" /></button>
-                        <button className="rounded p-0.5 hover:bg-black/20" title="분기" onClick={() => void onFork(idx)}><GitBranch className="h-3 w-3" /></button>
-                        <button className="rounded p-0.5 hover:bg-black/20" title="즐겨찾기" onClick={() => void onToggleStar(idx)}>
-                          <Star className={`h-3 w-3 ${starActive ? "fill-yellow-400 text-yellow-400" : ""}`} />
+                        <button className="rounded p-0.5 hover:bg-[hsl(var(--hover-overlay)/0.2)]" title="편집" onClick={() => setEditingEntryIdx(idx)}><Pencil className="h-3 w-3" /></button>
+                        <button className="rounded p-0.5 hover:bg-[hsl(var(--hover-overlay)/0.2)]" title="분기" onClick={() => void onFork(idx)}><GitBranch className="h-3 w-3" /></button>
+                        <button className="rounded p-0.5 hover:bg-[hsl(var(--hover-overlay)/0.2)]" title="즐겨찾기" onClick={() => void onToggleStar(idx)}>
+                          <Star key={starActive ? "on" : "off"} className={`h-3 w-3 ${starActive ? "fill-emphasis text-emphasis lvis-anim-star" : ""}`} />
                         </button>
                       </div>
                     )}
@@ -974,9 +972,9 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
               rendered.push(
                 <div
                   key={`trigger:${entry.sessionId}`}
-                  className="mx-3 my-1 rounded border border-violet-500/20 bg-violet-500/5 px-3 py-2 text-xs"
+                  className="mx-3 my-1 rounded border border-action-view/20 bg-action-view/5 px-3 py-2 text-xs"
                 >
-                  <div className="flex items-center gap-1 text-violet-500 font-medium">
+                  <div className="flex items-center gap-1 text-action-view font-medium">
                     <span>●</span>
                     <span>{envelopeSource ?? entry.summary.slice(0, 60)}</span>
                   </div>
@@ -984,7 +982,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
                     <p className="mt-1 text-muted-foreground">{entry.summary}</p>
                   )}
                   {entry.response && (
-                    <div className="mt-2 text-foreground/80 prose prose-sm dark:prose-invert max-w-none">
+                    <div className="mt-2 text-foreground/80 prose prose-sm lvis-prose max-w-none">
                       <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>
                         {entry.response}
                       </ReactMarkdown>
@@ -1103,7 +1101,11 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
                     streaming={groupIsActiveTurn}
                     turnDurationMs={groupSummary?.turnDurationMs}
                   >
-                    {groupEntries.map((ge) => ge.node)}
+                    {groupEntries.map((ge) => (
+                      <div key={ge.idx} data-chat-entry-index={ge.idx}>
+                        {ge.node}
+                      </div>
+                    ))}
                   </WorkGroup>
                 );
               }
@@ -1119,7 +1121,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
                 for (const node of renderSpawnsForGroup(entry)) rendered.push(node);
               } else if (entry.kind === "assistant") {
                 rendered.push(
-                  <div key={idx} className={ringCls || undefined}>
+                  <div key={idx} data-chat-entry-index={idx} className={ringCls || undefined}>
                     <AssistantCard
                       entry={entry}
                       highlightQuery={searchHighlight}
@@ -1138,7 +1140,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
               const turnStartIdx = finalTurnStartMap.get(i) ?? 0;
               const summary = turnSummaryByTurnStart.get(turnStartIdx);
               rendered.push(
-                  <div key={idx} className={`${ringCls} min-w-0 w-full max-w-full overflow-x-hidden rounded-md`}>
+                  <div key={idx} data-chat-entry-index={idx} className={`${ringCls} min-w-0 w-full max-w-full overflow-x-hidden rounded-md`}>
                   <AssistantCard
                     entry={entry}
                     highlightQuery={searchHighlight}
@@ -1198,7 +1200,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
         </div>
       )}
       {contextOverflowPct >= 0.80 && contextOverflowPct < 0.95 && (
-        <div className="flex w-full max-w-full items-center gap-2 border-t bg-amber-500/10 px-3 py-1.5 text-xs text-amber-600 dark:text-amber-400">
+        <div className="flex w-full max-w-full items-center gap-2 border-t bg-warning/15 px-3 py-1.5 text-xs text-warning">
           <span className="font-semibold">컨텍스트 {Math.round(contextOverflowPct * 100)}% 사용</span>
           <span>— 곧 자동 압축됩니다.</span>
         </div>
@@ -1230,7 +1232,6 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             onOpenMarketplace={onOpenMarketplace}
             marketplaceUrlReady={marketplaceUrlReady}
             onInsertSlashCommand={(cmd) => setQuestion(question ? question + cmd + " " : cmd + " ")}
-            onToggleChatSearch={searchToggleOverlay}
             commandActions={commandActions}
             commandPopoverOpen={commandPopoverOpen}
             onCommandPopoverOpenChange={onCommandPopoverOpenChange}
@@ -1354,7 +1355,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             allocateN={() => ++attachmentNCounter.current}
             saveClipboardImage={(b64) => window.lvis.attach.saveClipboardImage(b64)}
             openExternal={(p) => window.lvis.attach.openExternal(p)}
-            onSend={() => void onAsk(question)}
+            onSend={(intent) => void onAsk(question, intent)}
             onAbort={() => void onAbort()}
             streaming={streaming}
             disabled={hasApiKey === false || contextOverflowPct >= 0.95 || viewMode !== null}

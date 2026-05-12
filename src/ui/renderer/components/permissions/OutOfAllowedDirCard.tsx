@@ -81,7 +81,7 @@ export function OutOfAllowedDirCard({
   return (
     <Dialog open={open} onOpenChange={() => { /* require explicit choice */ }}>
       <DialogContent
-        className="max-w-xl"
+        size="lg"
         onInteractOutside={(e) => {
           if (request.requireExplicit) e.preventDefault();
           else onDecide("deny-once");
@@ -107,7 +107,7 @@ export function OutOfAllowedDirCard({
 
         <div className="space-y-3 py-2">
           {warnOrigin && (
-            <section className="rounded border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-xs text-yellow-700 dark:text-yellow-300">
+            <section className="rounded border border-warning/40 bg-warning/15 px-3 py-2 text-xs text-warning">
               이 디렉토리 접근은 {originLabel}에서 시작되었습니다. 영구 허용은 이후 같은 범위의 파일 접근을 계속 허용합니다.
             </section>
           )}
@@ -139,18 +139,18 @@ export function OutOfAllowedDirCard({
               <p className="mb-1 text-xs font-medium text-muted-foreground">
                 추천 추가 디렉토리
               </p>
-              <p className="rounded bg-blue-500/10 px-2 py-1 text-sm font-mono text-blue-700 break-all dark:text-blue-400">
+              <p className="rounded bg-info/10 px-2 py-1 text-sm font-mono text-info break-all">
                 {suggestedParent}
               </p>
             </section>
           )}
 
           {adjacencyWarnings.length > 0 && (
-            <section className="rounded border border-red-500/40 bg-red-500/10 p-2 text-sm">
-              <p className="mb-1 font-medium text-red-700 dark:text-red-400">
+            <section className="rounded border border-destructive/40 bg-destructive/10 p-2 text-sm">
+              <p className="mb-1 font-medium text-destructive">
                 주의 — 인접 경고
               </p>
-              <ul className="ml-4 list-disc text-xs text-red-700 dark:text-red-400">
+              <ul className="ml-4 list-disc text-xs text-destructive">
                 {adjacencyWarnings.map((w, i) => <li key={i}>{w}</li>)}
               </ul>
               <label className="mt-2 flex items-center gap-2 text-xs">

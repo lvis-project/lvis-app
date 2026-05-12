@@ -16,12 +16,17 @@ import type { PluginEntry } from "./components/PluginGridButton.js";
 import { ApprovalDialog } from "./dialogs/ApprovalDialog.js";
 import { ApprovalQueueStatus } from "./components/ApprovalQueueStatus.js";
 import { DeferredQueueDialog } from "./dialogs/DeferredQueueDialog.js";
-import { GlobalSearchDialog } from "./dialogs/GlobalSearchDialog.js";
 import { buildQuickActions } from "./components/CommandPopover.js";
 import { MainToolbar } from "./MainToolbar.js";
 import { MainContent } from "./MainContent.js";
-import { Sidebar } from "./Sidebar.js";
 import { SettingsDialog } from "./SettingsDialog.js";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "../../components/ui/dialog.js";
 import { StatusBar } from "./components/StatusBar.js";
 import { useStatusBar, type NotificationToastMeta } from "./hooks/use-status-bar.js";
 import { useSettings } from "./hooks/use-settings.js";
@@ -53,6 +58,8 @@ import { useInstallingPlugins } from "./hooks/use-installing-plugins.js";
 import { useMarketplaceUrl } from "./hooks/use-marketplace-url.js";
 import { OverlayContextProvider } from "./context/OverlayContext.js";
 import { RoutineSessionView } from "./components/RoutineSessionView.js";
+import { UnifiedSearchPanel } from "./components/UnifiedSearchPanel.js";
+import type { UserKeyboardIntentSnapshot } from "../../shared/chat-origin.js";
 
 // ─── App ────────────────────────────────────────────
 
@@ -60,7 +67,7 @@ export function App() {
   const api = useMemo(() => getApi(), []);
 
   // Workflow tools (S1+S2) — lifted to App level so FloatingQuestionPanel
-  // survives sidebar navigation (question state persists across view changes).
+  // survives view navigation (question state persists across view changes).
   const {
     askQuestions,
     subAgentSpawns,
@@ -74,7 +81,7 @@ export function App() {
     entries, streaming, beginStreamingRequest, finishStreamingRequest, editingEntryIdx, setEditingEntryIdx, editBusy,
     entryIndexToHistoryIndex, handleEditSave, handleRetryEffort,
     resetStreamAccumulators, setErrorWithThought, handleCompactCommand,
-    clearForNewChat, appendUserEntry, applyInitialSession, applyLoadedSession, truncateToEntry,
+    clearForNewChat, appendUserEntry, appendAssistantStatus, applyInitialSession, applyLoadedSession, truncateToEntry,
     fallbackToast,
     insertImportedTriggerEntry,
   } = useChatState(api);
@@ -83,7 +90,11 @@ export function App() {
   const turnRequestRef = useRef(0);
   // Ref so handlePluginPrimaryAction (defined before handleAsk) can call
   // handleAsk without a forward-declaration TS error. Updated each render.
-  const handleAskRef = useRef<(q: string, mode?: "default" | "trigger-import") => Promise<void>>(
+  const handleAskRef = useRef<(
+    q: string,
+    mode?: "default" | "trigger-import",
+    userIntent?: UserKeyboardIntentSnapshot,
+  ) => Promise<void>>(
     async () => { /* populated below */ },
   );
 
@@ -93,7 +104,6 @@ export function App() {
   const [settingsInitialTab, setSettingsInitialTab] = useState("llm");
   const [deferredQueueOpen, setDeferredQueueOpen] = useState(false);
   const [activeView, setActiveView] = useState("home");
-  const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
   const [commandPopoverOpen, setCommandPopoverOpen] = useState(false);
   const { updates: marketplaceUpdates, dismiss: dismissMarketplaceUpdates } = useMarketplaceUpdates(api);
   const { status: bootstrapStatus, dismiss: dismissBootstrapStatus, retry: retryBootstrap } = useBootstrapStatus(api);
@@ -288,8 +298,8 @@ export function App() {
     open: searchOpen, query: searchQuery, caseSensitive: searchCase,
     matches: searchMatches, matchSet: searchMatchSet, matchIdx: searchIdx, highlight: searchHighlight,
     changeQuery: searchChangeQuery, toggleCase: searchToggleCase,
-    toggleOverlay: searchToggleOverlay, closeOverlay: searchCloseOverlay,
-    nextMatch: searchNext, prevMatch: searchPrev,
+    openOverlay: searchOpenOverlay, toggleOverlay: searchToggleOverlay, closeOverlay: searchCloseOverlay,
+    nextMatch: searchNext, prevMatch: searchPrev, jumpToMatch: searchJumpToMatch,
   } = useSearch(entries);
   const {
     starred,
@@ -304,6 +314,12 @@ export function App() {
     handleLoadSession: sessionLoad, handleFork: sessionFork,
   } = useSessions(api, applyInitialSession);
 
+  useEffect(() => {
+    if (!searchOpen) return;
+    void refreshSessions();
+    void refreshStarred();
+  }, [refreshSessions, refreshStarred, searchOpen]);
+
   // Small adapter callbacks that bridge hook outputs to ChatView / MainToolbar.
   const {
     handleLoadSession, isEntryStarred, handleFork, handleToggleStar,
@@ -313,6 +329,14 @@ export function App() {
     applyLoadedSession, truncateToEntry, sessionLoad, sessionFork,
     starredIsEntry, starredToggle,
   });
+
+  useEffect(() => {
+    const unsubscribe = api.window?.onLoadSessionInMain?.((sessionId) => {
+      setActiveView("home");
+      void handleLoadSession(sessionId);
+    });
+    return unsubscribe;
+  }, [api, handleLoadSession]);
 
   // LLM settings + context budget (single source of truth: src/shared/pricing-data.ts)
   const { llmVendor, llmModel, enableThinkingChat, refresh: refreshLlmSettings, toggleThinking } = useSettings(api);
@@ -373,8 +397,26 @@ export function App() {
     [api, setErrorWithThought],
   );
 
-  // When a plugin view declares `window.defaultMode: "detached"`, a sidebar
-  // click opens it in a separate magnetic-snap BrowserWindow instead of
+  const openDetachedBuiltInView = useCallback(
+    async (viewKey: "routines" | "memory" | "starred"): Promise<boolean> => {
+      const openDetached = api.window?.openDetached;
+      if (!openDetached) {
+        setErrorWithThought("오류: 새 창을 열 수 없습니다.");
+        return false;
+      }
+      const result = await openDetached(viewKey);
+      if (!result.ok) {
+        console.warn(`[window] detached built-in view ${viewKey} did not open`, result.error);
+        setErrorWithThought(`오류: 새 창을 열 수 없습니다. ${result.error}`);
+        return false;
+      }
+      return true;
+    },
+    [api, setErrorWithThought],
+  );
+
+  // When a plugin view declares `window.defaultMode: "detached"`, selecting
+  // it opens a separate magnetic-snap BrowserWindow instead of
   // switching the main window's active view.
   //
   // If the owning plugin declares `manifest.auth` AND its current state is
@@ -382,7 +424,7 @@ export function App() {
   // views open directly so plugin-owned login UIs can collect their own
   // credentials through the plugin surface instead of the host calling
   // loginTool with no arguments.
-  const handleSidebarSelect = useCallback(
+  const handleViewSelect = useCallback(
     (key: string) => {
       if (key.startsWith("plugin:")) {
         const view = pluginViews.find((v) => toViewKey(v) === key);
@@ -436,7 +478,7 @@ export function App() {
     [api, pluginViews, pluginAuthStatuses, pluginCards, openDetachedPluginView],
   );
 
-  // If the currently-open sidebar view belongs to a plugin that just got
+  // If the currently-open plugin view belongs to a plugin that just got
   // uninstalled, fall back to home so the renderer doesn't render a "view
   // not found" placeholder for a stale plugin id.
   useEffect(() => {
@@ -455,6 +497,7 @@ export function App() {
     async (
       q: string,
       mode: "default" | "trigger-import" = "default",
+      userIntent?: UserKeyboardIntentSnapshot,
     ) => {
       debugLog("handleAsk", "enter", { mode, qLen: q.length, streaming });
       const t = q.trim();
@@ -544,11 +587,15 @@ export function App() {
         appendUserEntry(t);
       }
       resetStreamAccumulators();
+      if (mode !== "trigger-import") {
+        appendAssistantStatus("생각 중...");
+      }
       try {
         await api.chatSend(
           outgoing,
           outgoingAttachments,
           mode === "trigger-import" ? "plugin-emitted" : "user-keyboard",
+          mode === "default" ? userIntent : undefined,
         );
         debugLog("handleAsk", "chatSend:resolved", { requestId });
         // After successful send, clear attachments — the textarea was
@@ -580,6 +627,7 @@ export function App() {
       checkApiKey,
       composeOutgoing,
       appendUserEntry,
+      appendAssistantStatus,
       resetStreamAccumulators,
       beginStreamingRequest,
       finishStreamingRequest,
@@ -638,7 +686,7 @@ export function App() {
   }, [entries]);
 
   // Refresh plugin views + marketplace catalog when a lvis:// deep-link
-  // install completes in the main process, so new sidebar tabs appear
+  // install completes in the main process, so new plugin entries appear
   // (and uninstalled ones disappear) without requiring an app restart.
   useEffect(() => {
     if (typeof api.onPluginInstallResult !== "function") return;
@@ -653,8 +701,8 @@ export function App() {
 
   // Same lifecycle for uninstall — PluginConfigTab and any other surface
   // drive uninstall through the IPC handler which now broadcasts a result
-  // event. Without this subscription the sidebar would keep the removed
-  // plugin's tab until the app reloads.
+  // event. Without this subscription plugin entry state would stay stale
+  // until the app reloads.
   useEffect(() => {
     if (typeof api.onPluginUninstallResult !== "function") return;
     const unsubscribe = api.onPluginUninstallResult(({ success }) => {
@@ -680,12 +728,12 @@ export function App() {
   const commandActions = useMemo(
     () =>
       buildQuickActions({
-        setActiveView: handleSidebarSelect,
+        setActiveView: handleViewSelect,
         openSettings: onOpenSettings,
         handleNewChat,
         pluginViews,
       }),
-    [pluginViews, handleNewChat, handleSidebarSelect, onOpenSettings],
+    [pluginViews, handleNewChat, handleViewSelect, onOpenSettings],
   );
 
   const onNewChat = useCallback(() => { void handleNewChat(); }, [handleNewChat]);
@@ -743,14 +791,6 @@ export function App() {
         <div className="flex h-screen flex-col overflow-hidden">
           <CustomTitleBar />
         <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
-          <Sidebar
-            activeView={activeView}
-            setActiveView={handleSidebarSelect}
-            starredCount={starred.length}
-            sessions={sessions}
-            onLoadSession={handleLoadSession}
-          />
-
         <main className="flex min-h-0 min-w-0 flex-1 flex-col">
           <BootstrapStatusBanner status={bootstrapStatus} onDismiss={dismissBootstrapStatus} onRetry={() => void retryBootstrap()} />
           <MarketplaceUpdateBanner
@@ -764,25 +804,62 @@ export function App() {
             </div>
           )}
           <MainToolbar
+            activeView={activeView}
             streaming={streaming}
             hasApiKey={hasApiKey}
-            sessions={sessions}
-            currentSessionId={currentSessionId}
             isCurrentSessionStarred={Boolean(currentSessionId && isSessionStarred(currentSessionId))}
             onNewChat={onNewChat}
-            onRefreshSessions={refreshSessions}
-            onRefreshStarred={refreshStarred}
-            onLoadSession={handleLoadSession}
             onToggleCurrentSessionStar={() => currentSessionId
               ? handleToggleSessionStar(currentSessionId, sessions.find((s) => s.id === currentSessionId)?.title)
               : Promise.resolve()}
-            onToggleSessionStar={handleToggleSessionStar}
-            isSessionStarred={(sessionId) => Boolean(isSessionStarred(sessionId))}
             onExport={handleExport}
+            onOpenHome={() => setActiveView("home")}
+            onOpenRoutinesView={() => setActiveView("routines")}
+            onOpenMemoryView={() => setActiveView("memory")}
             onOpenSettings={() => onOpenSettings()}
-            onOpenGlobalSearch={() => { refreshSessions(); setGlobalSearchOpen(true); }}
+            onOpenUnifiedSearch={() => {
+              searchOpenOverlay();
+            }}
             onOpenStarredView={() => setActiveView("starred")}
+            onOpenDetachedView={(viewKey) => {
+              void openDetachedBuiltInView(viewKey);
+            }}
           />
+          {searchOpen && (
+            <UnifiedSearchPanel
+              api={api}
+              open={searchOpen}
+              query={searchQuery}
+              caseSensitive={searchCase}
+              entries={entries}
+              conversationMatches={searchMatches}
+              currentConversationMatch={searchIdx}
+              sessions={sessions}
+              starred={starred}
+              onChangeQuery={searchChangeQuery}
+              onToggleCase={searchToggleCase}
+              onNextConversationMatch={searchNext}
+              onPrevConversationMatch={searchPrev}
+              onJumpToConversationMatch={(matchIndex) => {
+                setActiveView("home");
+                searchJumpToMatch(matchIndex);
+              }}
+              onOpen={searchOpenOverlay}
+              onClose={searchCloseOverlay}
+              onLoadSession={(sessionId) => {
+                setActiveView("home");
+                return handleLoadSession(sessionId);
+              }}
+              onOpenMemoryView={() => {
+                setActiveView("memory");
+                searchCloseOverlay();
+              }}
+              onOpenRoutinesView={() => {
+                setActiveView("routines");
+                searchCloseOverlay();
+              }}
+            />
+          )}
 
           <MainContent
             activeView={activeView}
@@ -795,7 +872,7 @@ export function App() {
             onJumpToSession={handleLoadSession}
             onRefreshSessions={refreshSessions}
             chatContextValue={chatContextValue}
-            onAsk={(q) => handleAsk(q, "default")}
+            onAsk={(q, intent) => handleAsk(q, "default", intent)}
             onEditSave={handleEditSave}
             onFork={handleFork}
             onToggleStar={handleToggleStar}
@@ -809,7 +886,7 @@ export function App() {
             askQuestions={askQuestions}
             onResolveAskQuestion={dismissAskQuestion}
             plugins={pluginEntries}
-            onSelectPlugin={handleSidebarSelect}
+            onSelectPlugin={handleViewSelect}
             commandActions={commandActions}
             commandPopoverOpen={commandPopoverOpen}
             onCommandPopoverOpenChange={setCommandPopoverOpen}
@@ -834,43 +911,40 @@ export function App() {
       <DeferredQueueDialog open={deferredQueueOpen} onOpenChange={setDeferredQueueOpen} />
       <ApprovalDialog queue={approvalQueue} onDecide={handleApprovalDecide} />
       <ApprovalQueueStatus queue={approvalQueue} />
-      {/* Conditional mount: avoids useMemorySearch IPC calls while dialog is closed.
-          Re-mounts on every open → catalog reloaded each time. If that proves slow,
-          introduce a persistent cache hook in a separate PR. */}
-      {globalSearchOpen && (
-        <GlobalSearchDialog
-          open={globalSearchOpen}
-          onOpenChange={setGlobalSearchOpen}
-          api={api}
-          sessions={sessions}
-          starred={starred}
-          onLoadSession={handleLoadSession}
-          onOpenMemoryView={() => setActiveView("memory")}
-        />
-      )}
       <DropZoneOverlay />
       <DevConsoleToggle />
       {/* Snap edge highlight — shown when a detached child window enters the snap zone */}
       <SnapEdgeHighlight />
-      {/* Routine session modal opened from OverlayCard "결과 보기" */}
-      {routineSessionModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
-          onClick={() => setRoutineSessionModal(null)}
+      {/* Routine session modal opened from OverlayCard "결과 보기".
+          Migrated to Radix Dialog so it inherits the unified Modal v1 glass
+          surface + themed overlay/blur. RoutineSessionView still owns its
+          own internal header + close button. */}
+      <Dialog
+        open={routineSessionModal !== null}
+        onOpenChange={(next) => {
+          if (!next) setRoutineSessionModal(null);
+        }}
+      >
+        <DialogContent
+          size="lg"
+          className="flex h-[80dvh] min-w-0 flex-col gap-0 overflow-hidden p-0"
+          data-testid="routine-session-dialog"
         >
-          <div
-            className="relative flex h-[80dvh] max-h-[80dvh] w-[calc(100vw-32px)] max-w-2xl min-w-0 flex-col overflow-hidden rounded-lg bg-card text-card-foreground shadow-xl"
-            data-testid="routine-session-dialog"
-            onClick={(e) => e.stopPropagation()}
-          >
+          <DialogHeader className="sr-only">
+            <DialogTitle>루틴 세션 기록</DialogTitle>
+            <DialogDescription>
+              루틴 실행에 의해 저장된 메시지 기록을 봅니다.
+            </DialogDescription>
+          </DialogHeader>
+          {routineSessionModal && (
             <RoutineSessionView
               jsonlPath={routineSessionModal.jsonlPath}
               api={api}
               onClose={() => setRoutineSessionModal(null)}
             />
-          </div>
-        </div>
-      )}
+          )}
+        </DialogContent>
+      </Dialog>
     </OverlayContextProvider>
     </TooltipProvider>
     </ThemeProvider>

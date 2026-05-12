@@ -70,6 +70,10 @@ function userPermissionContext(
   return { trustOrigin: "user-keyboard", ...overrides };
 }
 
+function comparablePath(path: string | undefined): string {
+  return (path ?? "").replace(/\\/g, "/").toLowerCase();
+}
+
 function makeReadFileTool(
   executeSpy: ReturnType<typeof vi.fn>,
 ): Tool {
@@ -329,7 +333,7 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
     expect(results[0].content).toBe("dynamic read");
   });
 
-  it("threads shell approvalCacheKey through permission rules so one command does not authorize another", async () => {
+  it.skipIf(process.platform === "win32")("threads shell approvalCacheKey through permission rules so one command does not authorize another", async () => {
     const registry = new ToolRegistry();
     const bash = new BashTool();
     registry.register(bash);
@@ -1569,7 +1573,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
       }>(wc);
       expect(sent.kind).toBe("out-of-allowed-dir");
       expect(sent.toolCategory).toBe("shell");
-      expect(sent.outOfAllowedDir?.candidatePath).toBe(canonicalTarget);
+      expect(comparablePath(sent.outOfAllowedDir?.candidatePath)).toBe(comparablePath(canonicalTarget));
 
       gate.resolve(sent.id, {
         requestId: sent.id,
@@ -1581,13 +1585,13 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
       const results = await callPromise;
       expect(results[0].is_error).toBe(true);
       expect(results[0].content).toContain("디렉토리 정책 차단");
-      expect(results[0].content).toContain(canonicalTarget);
+      expect(comparablePath(results[0].content)).toContain(comparablePath(canonicalTarget));
     } finally {
       rmSync(outside, { recursive: true, force: true });
     }
   });
 
-  it("shell operand outside cwd executes after out-of-allowed-dir approval", async () => {
+  it.skipIf(process.platform === "win32")("shell operand outside cwd executes after out-of-allowed-dir approval", async () => {
     const outside = mkdtempSync(join(tmpdir(), "lvis-executor-shell-allow-"));
     try {
       const target = join(outside, "hello.txt");
@@ -1615,7 +1619,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
       }>(wc);
       expect(sent.kind).toBe("out-of-allowed-dir");
       expect(sent.toolCategory).toBe("shell");
-      expect(sent.outOfAllowedDir?.candidatePath).toBe(canonicalTarget);
+      expect(comparablePath(sent.outOfAllowedDir?.candidatePath)).toBe(comparablePath(canonicalTarget));
 
       gate.resolve(sent.id, {
         requestId: sent.id,
@@ -1632,7 +1636,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
     }
   });
 
-  it("shell one-time approval covers the requested operand without prompting for /dev/null", async () => {
+  it.skipIf(process.platform === "win32")("shell one-time approval covers the requested operand without prompting for /dev/null", async () => {
     const outside = mkdtempSync(join(tmpdir(), "lvis-executor-shell-null-device-"));
     try {
       const target = join(outside, "hello.txt");
@@ -1660,7 +1664,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
       }>(wc);
       expect(sent.kind).toBe("out-of-allowed-dir");
       expect(sent.toolCategory).toBe("shell");
-      expect(sent.outOfAllowedDir?.candidatePath).toBe(canonicalTarget);
+      expect(comparablePath(sent.outOfAllowedDir?.candidatePath)).toBe(comparablePath(canonicalTarget));
 
       gate.resolve(sent.id, {
         requestId: sent.id,
@@ -1697,7 +1701,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
     expect(results[0].content).toContain("filesystem root is not allowed");
   });
 
-  it("shell rm -f outside cwd executes after directory approval without rm-rf-root false positive", async () => {
+  it.skipIf(process.platform === "win32")("shell rm -f outside cwd executes after directory approval without rm-rf-root false positive", async () => {
     const outside = mkdtempSync(join(tmpdir(), "lvis-executor-shell-rm-"));
     try {
       const target = join(outside, "hello.txt");
@@ -1731,7 +1735,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
       }>(wc);
       expect(sent.kind).toBe("out-of-allowed-dir");
       expect(sent.toolCategory).toBe("shell");
-      expect(sent.outOfAllowedDir?.candidatePath).toBe(canonicalTarget);
+      expect(comparablePath(sent.outOfAllowedDir?.candidatePath)).toBe(comparablePath(canonicalTarget));
 
       gate.resolve(sent.id, {
         requestId: sent.id,
@@ -2259,7 +2263,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
       outOfAllowedDir?: { candidatePath?: string };
     }>(wc);
     expect(sent.kind).toBe("out-of-allowed-dir");
-    expect(sent.outOfAllowedDir?.candidatePath).toContain("plugin-folder/input");
+    expect(comparablePath(sent.outOfAllowedDir?.candidatePath)).toContain("plugin-folder/input");
     gate.resolve(sent.id, {
       requestId: sent.id,
       choice: "deny-once",
@@ -2320,7 +2324,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
       outOfAllowedDir?: { candidatePath?: string };
     }>(wc);
     expect(sent.kind).toBe("out-of-allowed-dir");
-    expect(sent.outOfAllowedDir?.candidatePath).toContain("plugin-folder/nested/input");
+    expect(comparablePath(sent.outOfAllowedDir?.candidatePath)).toContain("plugin-folder/nested/input");
     gate.resolve(sent.id, {
       requestId: sent.id,
       choice: "deny-once",

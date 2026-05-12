@@ -12,6 +12,7 @@ const exposed = new Map<string, unknown>();
 const mockInvoke = vi.fn();
 const mockOn = vi.fn();
 const mockRemoveListener = vi.fn();
+const mockUserActivation = { isActive: false };
 const originalDebugStreamEnv = process.env.VITE_DEBUG_STREAM;
 const originalLvisDevEnv = process.env.LVIS_DEV;
 const originalLvisDevConsoleEnv = process.env.LVIS_DEV_CONSOLE;
@@ -31,6 +32,11 @@ vi.mock("electron", () => ({
     removeListener: mockRemoveListener,
   },
 }));
+
+Object.defineProperty(globalThis.navigator, "userActivation", {
+  configurable: true,
+  value: mockUserActivation,
+});
 
 async function loadLvisApi(): Promise<Record<string, unknown>> {
   await import("../preload.js");
@@ -56,6 +62,7 @@ describe("preload — plugin webview asset URLs", () => {
     mockInvoke.mockReset();
     mockOn.mockReset();
     mockRemoveListener.mockReset();
+    mockUserActivation.isActive = false;
     vi.resetModules();
     delete process.env.VITE_DEBUG_STREAM;
     delete process.env.LVIS_DEV;
@@ -108,6 +115,59 @@ describe("preload — plugin webview asset URLs", () => {
     expect(typeof api["pluginShellUrl"]).toBe("string");
     expect(typeof api["pluginPreloadUrl"]).not.toBe("function");
     expect(typeof api["pluginShellUrl"]).not.toBe("function");
+  });
+
+  it("exposes chat user-intent capture through preload", async () => {
+    const api = await loadLvisApi();
+
+    expect(typeof api["captureUserKeyboardIntent"]).toBe("function");
+  });
+
+  it("does not trust renderer-minted chat userActivation flags", async () => {
+    const api = await loadLvisApi();
+    const chatSend = api["chatSend"] as (
+      input: string,
+      attachments: unknown[] | undefined,
+      inputOrigin: string,
+      userIntent?: unknown,
+    ) => Promise<unknown>;
+
+    await chatSend("hello", undefined, "user-keyboard", {
+      inputOrigin: "user-keyboard",
+      userActivation: true,
+    });
+
+    expect(mockInvoke).toHaveBeenCalledWith("lvis:chat:send", expect.objectContaining({
+      input: "hello",
+      inputOrigin: "user-keyboard",
+      userActivation: false,
+    }));
+  });
+
+  it("consumes captured chat user-intent tokens exactly once", async () => {
+    mockUserActivation.isActive = true;
+    const api = await loadLvisApi();
+    const capture = api["captureUserKeyboardIntent"] as () => unknown;
+    const chatSend = api["chatSend"] as (
+      input: string,
+      attachments: unknown[] | undefined,
+      inputOrigin: string,
+      userIntent?: unknown,
+    ) => Promise<unknown>;
+    const token = capture();
+
+    await chatSend("first", undefined, "user-keyboard", token);
+    mockUserActivation.isActive = false;
+    await chatSend("second", undefined, "user-keyboard", token);
+
+    expect(mockInvoke).toHaveBeenNthCalledWith(1, "lvis:chat:send", expect.objectContaining({
+      input: "first",
+      userActivation: true,
+    }));
+    expect(mockInvoke).toHaveBeenNthCalledWith(2, "lvis:chat:send", expect.objectContaining({
+      input: "second",
+      userActivation: false,
+    }));
   });
 
   it("exposes renderer env flags including debugStream", async () => {

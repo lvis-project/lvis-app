@@ -18,9 +18,9 @@ function avgExecMs(stats: PluginPerfStats): number {
 }
 
 function errorRateBadgeClass(rate: number): string {
-  if (rate > 5) return "text-red-600 font-semibold";
-  if (rate >= 1) return "text-amber-500 font-semibold";
-  return "text-green-600";
+  if (rate > 5) return "text-destructive font-semibold";
+  if (rate >= 1) return "text-warning font-semibold";
+  return "text-success";
 }
 
 /** Simple SVG bar chart — avg exec ms per plugin (max width 80px). */
@@ -33,7 +33,7 @@ function BarChart({ rows }: { rows: Row[] }) {
         const barWidth = (avg / maxAvg) * 80;
         return (
           <g key={r.pluginId} transform={`translate(0,${i * 20})`}>
-            <rect x={0} y={4} width={Math.max(barWidth, 1)} height={12} fill="#6366f1" rx={2} />
+            <rect x={0} y={4} width={Math.max(barWidth, 1)} height={12} fill="hsl(var(--chart-1))" rx={2} />
             <text x={barWidth + 4} y={14} fontSize={10} fill="currentColor">
               {avg.toFixed(1)}ms
             </text>
