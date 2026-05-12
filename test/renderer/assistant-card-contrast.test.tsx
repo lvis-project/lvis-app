@@ -165,6 +165,25 @@ describe("lvis-prose CSS coverage — markdown tables stay readable", () => {
     expect(css).toContain(".lvis-prose :is(th, td) :is(p, span, strong, em)");
   });
 
+  it("body font-family leads with system-ui so host letterforms match plugin webview UA default", () => {
+    /*
+     * Regression guard for issue #556. Plugin webviews paint with the
+     * Chromium/WebContents UA default font stack (`system-ui` first), and
+     * the host previously led with `"Noto Sans KR", "Noto Sans CJK KR", ...`
+     * so Latin codepoints rendered in the Noto KR Latin glyphs while the
+     * plugin side showed SF / Segoe UI. The two surfaces lived a few px
+     * apart and the mismatch was visible.
+     *
+     * Pin the body stack to `system-ui` first; the Korean entries that
+     * follow are unicode-range fallback (CSS font matching), NOT regression
+     * recovery — Hangul codepoints have no glyph in `system-ui` itself so
+     * a Hangul-capable fallback is required by spec.
+     */
+    expect(css).toMatch(/body\s*\{[^}]*font-family:\s*system-ui\s*,/);
+    // Sanity: still has a Korean fallback so Hangul renders on Windows / macOS.
+    expect(css).toMatch(/body\s*\{[^}]*font-family:[^}]*("Noto Sans KR"|"Malgun Gothic"|"Apple SD Gothic Neo")/);
+  });
+
   it("keeps lvis-prose rules UNLAYERED so they beat Tailwind Typography's @layer utilities", () => {
     /*
      * Regression guard for the 2026-05-13 dark-theme bold/strong/th issue

@@ -8,10 +8,10 @@
       Google Fonts CDN (fonts.googleapis.com) 를 제거함.
       LG 사내망처럼 해당 도메인이 차단된 환경에서는 매 stylesheet fetch 가
       30–60초 timeout 을 대기해서 UI 클릭마다 freeze 가 발생했다.
-      styles.css 의 font-family 는 이미 `"Noto Sans KR", "Noto Sans CJK KR",
-      "NanumGothic", "Malgun Gothic", Inter, ...` fallback 체인을 갖고 있어서
-      Windows 10+ (Malgun Gothic 기본 설치) / macOS / Linux 어디서든 한글
-      렌더링이 정상 동작한다. CDN 폰트를 쓰려면 향후 로컬 번들로 전환할 것.
+      styles.css 의 font-family 는 `system-ui` first stack 으로, 라틴은 OS
+      기본 (SF / Segoe UI / Roboto / Cantarell) 을 잡고 한글은 unicode-range
+      fallback (Apple SD Gothic Neo / Noto Sans KR / Malgun Gothic) 으로 처리.
+      plugin webview 의 UA default 와 letterform 이 정합 — 이슈 #556.
     -->
     <link rel="stylesheet" href="./styles.css" />
   </head>
