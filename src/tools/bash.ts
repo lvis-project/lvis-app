@@ -16,7 +16,7 @@
  */
 import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { createHash } from "node:crypto";
-import { resolveShell } from "../lib/shell-resolver.js";
+import { resolveShell, shellEnvForChild } from "../lib/shell-resolver.js";
 import type { Readable } from "node:stream";
 import { isAbsolute, resolve as pathResolve } from "node:path";
 import { z } from "zod";
@@ -157,7 +157,7 @@ async function spawnWithTimeout(
       stdio: ["ignore", "pipe", "pipe"],
       // H2: strip secrets (LVIS_*, *_API_KEY, GITHUB_TOKEN, AWS_*, etc.)
       // from the child's environment. Only generic shell/locale vars.
-      env: buildSafeChildEnv(),
+      env: shellEnvForChild(shell, buildSafeChildEnv()),
     });
 
     const chunks: Buffer[] = [];

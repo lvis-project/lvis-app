@@ -13,10 +13,13 @@ export function QuestionOverlay({ api, requests, onResolved }: QuestionOverlayPr
 
   return (
     <div
-      className="pointer-events-auto absolute inset-x-0 bottom-0 z-40 flex justify-center px-3 pb-3"
+      className="pointer-events-auto absolute inset-x-0 bottom-0 z-40 flex justify-center pb-3"
       data-testid="question-overlay"
     >
-      <div className="max-h-[min(360px,calc(100%_+_20dvh))] w-full max-w-[720px] min-w-0 overflow-y-auto rounded-lg">
+      {/* Edge-to-edge horizontally so the chat surface behind the overlay
+         doesn't peek through the padding; vertical spacing is preserved via
+         the outer `pb-3`. */}
+      <div className="max-h-[min(360px,calc(100%_+_20dvh))] w-full min-w-0 overflow-y-auto rounded-t-lg">
         <AskUserQuestionCard
           api={api}
           request={current}

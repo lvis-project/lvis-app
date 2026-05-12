@@ -28,6 +28,7 @@ storybook-static/
 packages/hello-world/
 
 .claude/worktrees/
+.claude/scheduled_tasks.lock
 
 # Dev runtime: plugin manifests written by scripts/run-electron-dev.mjs into the user-data dir.
 .lvis-dev/

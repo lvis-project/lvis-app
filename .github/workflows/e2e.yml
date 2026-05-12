@@ -15,10 +15,43 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
           path: lvis-app
+      - name: Clone sibling plugin repos
+        env:
+          LVIS_REPO_READ_TOKEN: ${{ secrets.LVIS_REPO_READ_TOKEN }}
+          LVIS_SIBLING_REPO_REF: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          repo_token="${LVIS_REPO_READ_TOKEN:-}"
+          if [ -z "$repo_token" ] && gh auth status --hostname github.com >/dev/null 2>&1; then
+            repo_token="$(gh auth token)"
+          fi
+          if [ -z "$repo_token" ]; then
+            echo "::warning::No LVIS_REPO_READ_TOKEN or gh auth token available; attempting unauthenticated sibling clones."
+          fi
+          sibling_ref="${LVIS_SIBLING_REPO_REF:-${GITHUB_HEAD_REF:-${GITHUB_REF_NAME:-}}}"
+          for slug in lvis-plugin-local-indexer lvis-plugin-meeting lvis-plugin-work-proactive lvis-plugin-agent-hub; do
+            if [ -d "$slug" ]; then rm -rf "$slug"; fi
+            clone_url="https://github.com/lvis-project/${slug}.git"
+            if [ -n "$repo_token" ]; then
+              clone_url="https://x-access-token:${repo_token}@github.com/lvis-project/${slug}.git"
+            fi
+            if [ -n "$sibling_ref" ] && git ls-remote --exit-code --heads "$clone_url" "$sibling_ref" >/dev/null 2>&1; then
+              echo "Cloning ${slug}@${sibling_ref}"
+              git clone --depth 1 --branch "$sibling_ref" "$clone_url" "$slug"
+            else
+              echo "Cloning ${slug}@default"
+              git clone --depth 1 "$clone_url" "$slug"
+            fi
+          done
       - uses: oven-sh/setup-bun@v2
       - name: Install app dependencies
         run: bun install --frozen-lockfile
         working-directory: lvis-app
+      - name: Build Agent Hub plugin fixture
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+        working-directory: lvis-plugin-agent-hub
       - name: Build app
         run: bun run build
         working-directory: lvis-app

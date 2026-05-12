@@ -16,7 +16,8 @@ export function DeferredQueueDialog({ open, onOpenChange }: DeferredQueueDialogP
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="flex max-h-[calc(100dvh-48px)] w-[calc(100vw-32px)] max-w-[760px] min-w-0 flex-col gap-0 overflow-hidden rounded-lg border-0 bg-card p-0 shadow-2xl outline-none ring-0"
+        size="lg"
+        className="flex min-w-0 flex-col gap-0 overflow-hidden p-0"
         data-testid="deferred-queue-dialog"
       >
         <DialogHeader className="sr-only">

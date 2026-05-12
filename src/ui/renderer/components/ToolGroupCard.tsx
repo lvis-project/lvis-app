@@ -9,7 +9,7 @@ function ToolPayloadBlock({ value, isError = false }: { value: string; isError?:
   const pre = (
     <pre
       className={`max-w-full whitespace-pre-wrap break-words px-2 py-1.5 font-mono text-[10px] leading-[1.35rem] [overflow-wrap:anywhere] ${
-        isError ? "text-red-400" : "text-muted-foreground"
+        isError ? "text-destructive" : "text-muted-foreground"
       }`}
     >
       {formatted}
@@ -144,14 +144,14 @@ function SingleToolInline({
         {isRunning ? (
           <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
         ) : (
-          <Badge variant={isError ? "secondary" : "default"} className={`shrink-0 px-1 py-0 text-[10px] ${isError ? "text-red-400" : ""}`}>
+          <Badge variant={isError ? "secondary" : "default"} className={`shrink-0 px-1 py-0 text-[10px] ${isError ? "text-destructive" : ""}`}>
             {isError ? "실패" : "완료"}
           </Badge>
         )}
         {open ? <ChevronDown className="h-3 w-3 flex-shrink-0" /> : <ChevronRight className="h-3 w-3 flex-shrink-0" />}
       </button>
       {open && (
-        <div className="min-w-0 space-y-1 border-t px-3 py-1.5 font-mono text-[10px]">
+        <div className="min-w-0 space-y-1 border-t px-3 py-1.5 font-mono text-[10px] lvis-anim-fade-in">
           {tool.input && (
             <div>
               <div className="mb-0.5 text-[9px] uppercase opacity-60">입력</div>
@@ -160,7 +160,7 @@ function SingleToolInline({
           )}
           {tool.result !== undefined && (
             <div>
-              <div className={`mb-0.5 text-[9px] uppercase opacity-60 ${isError ? "text-red-400" : ""}`}>{isError ? "오류" : "결과"}</div>
+              <div className={`mb-0.5 text-[9px] uppercase opacity-60 ${isError ? "text-destructive" : ""}`}>{isError ? "오류" : "결과"}</div>
               <ToolPayloadBlock value={tool.result} isError={isError} />
             </div>
           )}
@@ -220,7 +220,7 @@ export function ToolGroupCard({
   }
 
   return (
-    <div className="min-w-0 w-full max-w-full rounded-md text-[11px] text-muted-foreground">
+    <div className="min-w-0 w-full max-w-full rounded-md text-[11px] text-muted-foreground lvis-anim-message-in">
       <button
         className="flex w-full min-w-0 items-center gap-2 px-3 py-1.5 hover:bg-muted/30"
         onClick={() => setOpen((o) => !o)}
@@ -236,7 +236,7 @@ export function ToolGroupCard({
         ) : (
           <Badge
             variant={groupStatus === "error" ? "secondary" : "default"}
-            className={`px-1 py-0 text-[10px] flex-shrink-0 ${groupStatus === "error" ? "text-red-400" : ""}`}
+            className={`px-1 py-0 text-[10px] flex-shrink-0 ${groupStatus === "error" ? "text-destructive" : ""}`}
           >
             {groupStatus === "error" ? "오류 있음" : "완료"}
           </Badge>
@@ -244,7 +244,7 @@ export function ToolGroupCard({
         {open ? <ChevronDown className="h-3 w-3 flex-shrink-0" /> : <ChevronRight className="h-3 w-3 flex-shrink-0" />}
       </button>
       {open && (
-        <div className="min-w-0 space-y-1 border-t px-3 py-1.5">
+        <div className="min-w-0 space-y-1 border-t px-3 py-1.5 lvis-anim-fade-in">
           {tools.map((tool) => {
             const isExpanded = expandedTools.has(tool.toolUseId);
             return (
@@ -261,14 +261,14 @@ export function ToolGroupCard({
                   ) : (
                     <Badge
                       variant={tool.status === "error" ? "secondary" : "default"}
-                      className={`shrink-0 px-1 py-0 text-[10px] ${tool.status === "error" ? "text-red-400" : ""}`}
+                      className={`shrink-0 px-1 py-0 text-[10px] ${tool.status === "error" ? "text-destructive" : ""}`}
                     >
                       {tool.status === "error" ? "실패" : "완료"}
                     </Badge>
                   )}
                 </button>
                 {isExpanded && (
-                  <div className="min-w-0 space-y-1 border-t px-2 py-1 font-mono text-[10px]">
+                  <div className="min-w-0 space-y-1 border-t px-2 py-1 font-mono text-[10px] lvis-anim-fade-in">
                     {tool.input && (
                       <div>
                         <div className="mb-0.5 text-[9px] uppercase opacity-60">입력</div>
@@ -277,7 +277,7 @@ export function ToolGroupCard({
                     )}
                     {tool.result !== undefined && (
                       <div>
-                        <div className={`mb-0.5 text-[9px] uppercase opacity-60 ${tool.status === "error" ? "text-red-400" : ""}`}>
+                        <div className={`mb-0.5 text-[9px] uppercase opacity-60 ${tool.status === "error" ? "text-destructive" : ""}`}>
                           {tool.status === "error" ? "오류" : "결과"}
                         </div>
                         {/* PR-4: stub results render as collapsible CompactedToolResult */}

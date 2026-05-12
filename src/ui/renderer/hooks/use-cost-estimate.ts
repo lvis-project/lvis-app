@@ -51,9 +51,9 @@ export function useCostEstimate(params: {
   const costBadgeClass = useMemo(() => {
     const t = costTier(costEstimate.total);
     if (t === "trivial") return "text-muted-foreground";
-    if (t === "low") return "text-emerald-500";
-    if (t === "medium") return "text-amber-500";
-    return "text-red-500";
+    if (t === "low") return "text-success";
+    if (t === "medium") return "text-warning";
+    return "text-destructive";
   }, [costEstimate.total]);
 
   return { costEstimate, costBadgeClass };

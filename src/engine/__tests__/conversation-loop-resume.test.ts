@@ -281,7 +281,7 @@ describe("ConversationLoop.manualCompact — Major Fix callbacks", () => {
 
 describe("ConversationLoop command routing", () => {
   it("/memory lists memory entries only", async () => {
-    const listMemoryEntries = vi.fn(() => [{ title: "사용자 메모", filename: "memory-note.md", content: "# 사용자 메모" }]);
+    const listMemoryEntries = vi.fn(() => [{ title: "사용자 메모리", filename: "memory-note.md", content: "# 사용자 메모리" }]);
     const mem = {
       ...makeMemoryManager(),
       listMemoryEntries,
@@ -302,7 +302,7 @@ describe("ConversationLoop command routing", () => {
 
     const result = await loop.runTurn("/memory", undefined, undefined, { inputOrigin: "user-keyboard" });
 
-    expect(result.text).toContain("사용자 메모");
+    expect(result.text).toContain("사용자 메모리");
     expect(listMemoryEntries).toHaveBeenCalledOnce();
   });
 

@@ -4,8 +4,8 @@
  * Exercises the full tab-detach + magnetic-snap lifecycle using playwright-electron:
  *
  *  1. Launch the app and wait for boot.
- *  2. Right-click the sidebar "Tasks" tab → click "새 창으로 열기" → assert a
- *     second BrowserWindow opens.
+ *  2. Toolbar menu → click a built-in "새 창으로 열기" item → assert a second
+ *     BrowserWindow opens.
  *  3. Move the detached window within SNAP_THRESHOLD_DIP (20 px) of the main
  *     window's right edge → verify the detached window's x-position locks to
  *     the main window edge (snapped).
@@ -69,6 +69,8 @@ test.describe('tab-detach + magnetic snap', () => {
     }
 
     userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lvis-e2e-detach-'));
+    const lvisHomeForTest = path.join(userDataDir, 'lvis-state');
+    fs.mkdirSync(lvisHomeForTest, { recursive: true, mode: 0o700 });
     killPageindexWorkers();
 
     app = await electron.launch({
@@ -77,6 +79,7 @@ test.describe('tab-detach + magnetic snap', () => {
         ...process.env,
         LVIS_DEV: '1',
         LVIS_E2E: '1',
+        LVIS_HOME: lvisHomeForTest,
         NODE_ENV: 'test',
         ELECTRON_DISABLE_SECURITY_WARNINGS: '1',
       },
@@ -87,8 +90,9 @@ test.describe('tab-detach + magnetic snap', () => {
     app.process().stderr?.on('data', (d: Buffer) => process.stdout.write(`[electron:stderr] ${d}`));
 
     mainWindow = await app.firstWindow();
-    // Wait for the app to finish booting (toolbar tablist signals React mounted).
-    await mainWindow.waitForSelector('[role="tablist"]', { timeout: 60_000 });
+    // Wait for the app to finish booting. The top action bar is the first
+    // persistent shell element after React mounts.
+    await mainWindow.waitForSelector('[data-testid="main-toolbar"]', { timeout: 60_000 });
   });
 
   test.afterAll(async () => {
@@ -101,24 +105,14 @@ test.describe('tab-detach + magnetic snap', () => {
     }
   });
 
-  test('right-click Tasks → "새 창으로 열기" opens a second window', async () => {
+  test('toolbar menu → "루틴 새 창으로 열기" opens a second window', async () => {
     test.skip(!fs.existsSync(MAIN_ENTRY), 'Built app absent — run bun run build first');
-
-    // Find the Tasks button in the sidebar.
-    const tasksButton = mainWindow.locator('button:has-text("태스크"), button:has-text("Tasks")').first();
-    const visible = await tasksButton.waitFor({ state: 'visible', timeout: 10_000 }).then(() => true).catch(() => false);
-    test.skip(!visible, 'Tasks sidebar button not found — sidebar may not be present in this build');
 
     // Listen for a new window before triggering the context menu.
     const newWindowPromise = app.waitForEvent('window', { timeout: 15_000 });
 
-    // Right-click the Tasks button to open the context menu.
-    await tasksButton.click({ button: 'right' });
-
-    // Click "새 창으로 열기".
-    const menuItem = mainWindow.locator('[role="menuitem"]:has-text("새 창으로 열기")');
-    await menuItem.waitFor({ state: 'visible', timeout: 5_000 });
-    await menuItem.click();
+    await mainWindow.getByLabel('더 많은 메뉴').click();
+    await mainWindow.getByTestId('toolbar-detach-routines').click();
 
     // Wait for the second window.
     const detachedPage = await newWindowPromise;

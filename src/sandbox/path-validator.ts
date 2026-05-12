@@ -98,6 +98,16 @@ function expandTilde(path: string): string {
 }
 
 function isWithin(child: string, parent: string): boolean {
-  const normalizedParent = parent.endsWith(sep) ? parent : parent + sep;
-  return child === parent || child.startsWith(normalizedParent);
+  const normalizedChild = normalizeForBoundaryCompare(child);
+  const normalizedParentBase = normalizeForBoundaryCompare(parent);
+  const normalizedParent = normalizedParentBase.endsWith(sep)
+    ? normalizedParentBase
+    : normalizedParentBase + sep;
+  return normalizedChild === normalizedParentBase || normalizedChild.startsWith(normalizedParent);
+}
+
+function normalizeForBoundaryCompare(path: string): string {
+  return process.platform === "win32" || process.platform === "darwin"
+    ? path.toLowerCase()
+    : path;
 }

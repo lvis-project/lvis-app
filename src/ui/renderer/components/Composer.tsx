@@ -22,6 +22,7 @@ import {
 } from "../types/attachments.js";
 import { findMarkerAt, parseMarkers } from "../utils/attachment-markers.js";
 import { handleClipboardPaste } from "../utils/clipboard-paste.js";
+import type { UserKeyboardIntentSnapshot } from "../../../shared/chat-origin.js";
 
 export interface ComposerHandle {
   focus(): void;
@@ -61,7 +62,7 @@ export interface ComposerProps {
   }>;
   /** Open via OS default app — for the overlay's open button. */
   openExternal?: (path: string) => Promise<unknown>;
-  onSend: () => void;
+  onSend: (intent: UserKeyboardIntentSnapshot) => void;
   onAbort?: () => void;
   streaming?: boolean;
   disabled?: boolean;
@@ -97,6 +98,13 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   ref,
 ) {
   const taRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const captureUserKeyboardIntent = useCallback((): UserKeyboardIntentSnapshot => {
+    const api = (globalThis as typeof globalThis & {
+      window?: { lvisApi?: { captureUserKeyboardIntent?: () => UserKeyboardIntentSnapshot } };
+    }).window?.lvisApi;
+    return api?.captureUserKeyboardIntent?.() ?? { inputOrigin: "user-keyboard", token: "" };
+  }, []);
 
   // Live-derive attachments from textarea body (single source of truth).
   // Drop any whose N is no longer present in the body.
@@ -242,10 +250,10 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         if (disabled) return;
-        onSend();
+        onSend(captureUserKeyboardIntent());
       }
     },
-    [disabled, streaming, onSend, text, onTextChange],
+    [captureUserKeyboardIntent, disabled, streaming, onSend, text, onTextChange],
   );
 
   const isFull = liveAttachments.length >= ATTACH_MAX_COUNT;
@@ -306,7 +314,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           </Button>
         )}
         <Button
-          onClick={onSend}
+          onClick={() => onSend(captureUserKeyboardIntent())}
           disabled={disabled || (text.trim().length === 0 && liveAttachments.length === 0)}
           data-testid="composer-send-button"
           className="shrink-0 rounded-none self-stretch !h-auto w-[72px] px-0 text-xs font-bold"

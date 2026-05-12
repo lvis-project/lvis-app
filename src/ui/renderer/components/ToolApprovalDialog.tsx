@@ -79,7 +79,8 @@ export function ToolApprovalDialog({
   return (
     <Dialog open={open} onOpenChange={() => {}}>
       <DialogContent
-        className="flex max-h-[calc(100dvh-48px)] w-[calc(100vw-32px)] max-w-[760px] min-w-0 flex-col gap-0 overflow-hidden rounded-lg border-0 bg-card p-0 shadow-2xl outline-none ring-0"
+        size="lg"
+        className="flex min-w-0 flex-col gap-0 overflow-hidden p-0"
         data-testid="tool-approval-dialog"
         onInteractOutside={(e) => {
           if (request.requireExplicit) {
@@ -176,7 +177,7 @@ export function ToolApprovalDialog({
             <Button
               size="sm"
               variant="outline"
-              className="border-red-500 text-red-700 hover:bg-red-500/10 dark:text-red-400"
+              className="border-destructive text-destructive hover:bg-destructive/15"
               onClick={() => onDecide("deny-always", request.toolName)}
             >
               항상 거부

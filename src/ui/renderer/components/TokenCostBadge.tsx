@@ -130,7 +130,7 @@ export function TokenCostBadge({
           }
         >
           {showCostMode ? (
-            <span className="text-emerald-600 dark:text-emerald-400">≈ {formatCost(cost!)}</span>
+            <span className="text-success">≈ {formatCost(cost!)}</span>
           ) : (
             <span>🪙 {formatTokens(headlineTokens)}</span>
           )}
@@ -145,13 +145,13 @@ export function TokenCostBadge({
             <span>{freshInputTokens.toLocaleString()}</span>
           </div>
           {cacheReadTokens > 0 && (
-            <div className="flex justify-between gap-3 text-emerald-500">
+            <div className="flex justify-between gap-3 text-success">
               <span>cache read (0.1×):</span>
               <span>{cacheReadTokens.toLocaleString()}</span>
             </div>
           )}
           {cacheWriteTokens > 0 && (
-            <div className="flex justify-between gap-3 text-amber-500">
+            <div className="flex justify-between gap-3 text-warning">
               <span>cache write (1.25×):</span>
               <span>{cacheWriteTokens.toLocaleString()}</span>
             </div>
@@ -171,7 +171,7 @@ export function TokenCostBadge({
             <span>{tokensIn.toLocaleString()}</span>
           </div>
           {cost !== null && (
-            <div className="flex justify-between gap-3 font-semibold text-emerald-500 pt-0.5 border-t border-border/40">
+            <div className="flex justify-between gap-3 font-semibold text-success pt-0.5 border-t border-border/40">
               <span>≈ cost:</span>
               <span>{formatCost(cost)}</span>
             </div>

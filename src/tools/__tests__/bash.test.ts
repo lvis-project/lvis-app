@@ -22,12 +22,13 @@ const ctx = (cwd: string = process.cwd()): ToolExecutionContext => ({
   extraAllowedDirectories: [],
   metadata: {},
 });
+const SHELL_TIMEOUT_SECONDS = process.platform === "win32" ? 20 : 5;
 
 describe("BashTool — happy path", () => {
   it("runs `echo hello` and returns output with returncode 0", async () => {
     const tool = new BashTool();
     const result = await tool.execute(
-      { command: "echo hello", timeoutSeconds: 5 },
+      { command: "echo hello", timeoutSeconds: SHELL_TIMEOUT_SECONDS },
       ctx(),
     );
     expect(result.isError).toBe(false);
@@ -40,7 +41,7 @@ describe("BashTool — non-zero exit", () => {
   it("returns isError=true and returncode=1 for `false`", async () => {
     const tool = new BashTool();
     const result = await tool.execute(
-      { command: "false", timeoutSeconds: 5 },
+      { command: "false", timeoutSeconds: SHELL_TIMEOUT_SECONDS },
       ctx(),
     );
     expect(result.isError).toBe(true);
@@ -52,7 +53,7 @@ describe("BashTool — output cap", () => {
   it("truncates very large output to ~12_000 chars + marker", async () => {
     const tool = new BashTool();
     const result = await tool.execute(
-      { command: "yes | head -n 10000", timeoutSeconds: 5 },
+      { command: "yes | head -n 10000", timeoutSeconds: SHELL_TIMEOUT_SECONDS },
       ctx(),
     );
     expect(result.isError).toBe(false);
@@ -84,7 +85,7 @@ describe("BashTool — preflight interactive command block", () => {
   it("blocks `npm create some-app` without non-interactive flag", async () => {
     const tool = new BashTool();
     const result = await tool.execute(
-      { command: "npm create some-app", timeoutSeconds: 5 },
+      { command: "npm create some-app", timeoutSeconds: SHELL_TIMEOUT_SECONDS },
       ctx(),
     );
     expect(result.isError).toBe(true);
@@ -99,7 +100,7 @@ describe("BashTool — preflight interactive command block", () => {
     // the allow branch without spawning a real scaffolder.
     const tool = new BashTool();
     const result = await tool.execute(
-      { command: "echo some-app -y", timeoutSeconds: 5 },
+      { command: "echo some-app -y", timeoutSeconds: SHELL_TIMEOUT_SECONDS },
       ctx(),
     );
     // Preflight did NOT block — metadata.interactiveRequired is undefined.
@@ -112,7 +113,7 @@ describe("BashTool — preflight interactive command block", () => {
 describe("BashTool — ZodTool surface", () => {
   it("isReadOnly returns false", () => {
     const tool = new BashTool();
-    expect(tool.isReadOnly({ command: "echo", timeoutSeconds: 5 })).toBe(false);
+    expect(tool.isReadOnly({ command: "echo", timeoutSeconds: SHELL_TIMEOUT_SECONDS })).toBe(false);
   });
 
   it("toJsonSchema returns an object schema with a command property", () => {
@@ -163,7 +164,7 @@ describe("BashTool — sandbox violation", () => {
   it("rejects cwd outside the sandbox boundary", async () => {
     const tool = new BashTool();
     const result = await tool.execute(
-      { command: "echo hi", cwd: "/etc", timeoutSeconds: 5 },
+      { command: "echo hi", cwd: "/etc", timeoutSeconds: SHELL_TIMEOUT_SECONDS },
       ctx(),
     );
     expect(result.isError).toBe(true);
@@ -176,7 +177,7 @@ describe("BashTool — sandbox violation", () => {
     mkdirSync(sensitive, { recursive: true });
     try {
       const result = await new BashTool().execute(
-        { command: "echo hi", cwd: sensitive, timeoutSeconds: 5 },
+        { command: "echo hi", cwd: sensitive, timeoutSeconds: SHELL_TIMEOUT_SECONDS },
         ctx(root),
       );
       expect(result.isError).toBe(true);
@@ -193,7 +194,7 @@ describe("BashTool — sandbox violation", () => {
     writeFileSync(target, "secret", "utf8");
     try {
       const result = await new BashTool().execute(
-        { command: `cat ${target}`, timeoutSeconds: 5 },
+        { command: `cat ${target}`, timeoutSeconds: SHELL_TIMEOUT_SECONDS },
         ctx(root),
       );
       expect(result.isError).toBe(true);
@@ -208,7 +209,7 @@ describe("BashTool — sandbox violation", () => {
     writeFileSync(join(root, ".env"), "SECRET=1\n", "utf8");
     try {
       const result = await new BashTool().execute(
-        { command: "cat .env", timeoutSeconds: 5 },
+        { command: "cat .env", timeoutSeconds: SHELL_TIMEOUT_SECONDS },
         ctx(root),
       );
       expect(result.isError).toBe(true);
@@ -220,7 +221,7 @@ describe("BashTool — sandbox violation", () => {
 
   it("rejects redirection-attached sensitive operands before spawning the shell", async () => {
     const result = await new BashTool().execute(
-      { command: "cat<$HOME/.ssh/id_rsa", timeoutSeconds: 5 },
+      { command: "cat<$HOME/.ssh/id_rsa", timeoutSeconds: SHELL_TIMEOUT_SECONDS },
       ctx(),
     );
     expect(result.isError).toBe(true);
@@ -229,7 +230,7 @@ describe("BashTool — sandbox violation", () => {
 
   it("rejects unsupported ~user operands instead of validating a fake cwd-relative path", async () => {
     const result = await new BashTool().execute(
-      { command: "cat ~ken/Documents/not-in-sandbox.txt", timeoutSeconds: 5 },
+      { command: "cat ~ken/Documents/not-in-sandbox.txt", timeoutSeconds: SHELL_TIMEOUT_SECONDS },
       ctx(),
     );
     expect(result.isError).toBe(true);
@@ -238,7 +239,7 @@ describe("BashTool — sandbox violation", () => {
 
   it("rejects bare ~user operands before shell expansion", async () => {
     const result = await new BashTool().execute(
-      { command: "ls ~ken", timeoutSeconds: 5 },
+      { command: "ls ~ken", timeoutSeconds: SHELL_TIMEOUT_SECONDS },
       ctx(),
     );
     expect(result.isError).toBe(true);
@@ -249,7 +250,7 @@ describe("BashTool — sandbox violation", () => {
     const root = mkdtempSync(join(tmpdir(), "lvis-bash-redirection-"));
     try {
       const result = await new BashTool().execute(
-        { command: "printf x>/private/tmp/lvis-outside-redirection", timeoutSeconds: 5 },
+        { command: "printf x>/private/tmp/lvis-outside-redirection", timeoutSeconds: SHELL_TIMEOUT_SECONDS },
         ctx(root),
       );
       expect(result.isError).toBe(true);
@@ -263,7 +264,7 @@ describe("BashTool — sandbox violation", () => {
     const root = mkdtempSync(join(tmpdir(), "lvis-bash-recursive-traversal-"));
     try {
       const result = await new BashTool().execute(
-        { command: "grep -R SECRET .", timeoutSeconds: 5 },
+        { command: "grep -R SECRET .", timeoutSeconds: SHELL_TIMEOUT_SECONDS },
         ctx(root),
       );
       expect(result.isError).toBe(true);
@@ -295,7 +296,7 @@ describe("BashTool — H2 env whitelist", () => {
       // `env` prints all env vars; if the filter works, LVIS_TEST_SECRET
       // is absent and grep exits 1 (isError=true with "(no output)").
       const result = await tool.execute(
-        { command: "env | grep LVIS_TEST_SECRET || true", timeoutSeconds: 5 },
+        { command: "env | grep LVIS_TEST_SECRET || true", timeoutSeconds: SHELL_TIMEOUT_SECONDS },
         ctx(),
       );
       // The child exited cleanly (|| true) but no match should be found
@@ -313,7 +314,7 @@ describe("BashTool — H2 env whitelist", () => {
     try {
       const tool = new BashTool();
       const result = await tool.execute(
-        { command: "env | grep ANTHROPIC_API_KEY || true", timeoutSeconds: 5 },
+        { command: "env | grep ANTHROPIC_API_KEY || true", timeoutSeconds: SHELL_TIMEOUT_SECONDS },
         ctx(),
       );
       expect(result.output).not.toContain("sk-ant-test-should-not-leak");
@@ -327,7 +328,7 @@ describe("BashTool — H2 env whitelist", () => {
     const tool = new BashTool();
     // `echo` is a shell builtin but `which echo` exercises PATH lookup.
     const result = await tool.execute(
-      { command: "which echo || true", timeoutSeconds: 5 },
+      { command: "which echo || true", timeoutSeconds: SHELL_TIMEOUT_SECONDS },
       ctx(),
     );
     // We expect either "/bin/echo", "/usr/bin/echo", or similar — just

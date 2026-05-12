@@ -62,7 +62,7 @@ test.describe("deferred queue modal", () => {
       timeout: 30_000,
     });
     page = await app.firstWindow();
-    await page.locator('[data-testid="sidebar"]').first().waitFor({
+    await page.locator('[data-testid="main-toolbar"]').first().waitFor({
       state: "visible",
       timeout: 60_000,
     });

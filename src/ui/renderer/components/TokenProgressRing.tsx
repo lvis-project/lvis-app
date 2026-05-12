@@ -23,10 +23,10 @@ export function TokenProgressRing({ used, budget }: TokenProgressRingProps) {
 
   const strokeColor =
     pct < 50
-      ? "var(--color-emerald-500, #10b981)"
+      ? "hsl(var(--success))"
       : pct < 80
-        ? "var(--color-amber-500, #f59e0b)"
-        : "var(--color-rose-500, #f43f5e)";
+        ? "hsl(var(--warning))"
+        : "hsl(var(--destructive))";
 
   return (
     <Tooltip>
