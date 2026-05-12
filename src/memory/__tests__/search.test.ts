@@ -58,6 +58,10 @@ describe("MemoryManager AGENTS.md and MEMORY.md layout", () => {
     expect(existsSync(join(dir, "AGENTS.md"))).toBe(true);
     expect(existsSync(join(dir, "memories", "MEMORY.md"))).toBe(true);
     expect(existsSync(join(dir, "memory"))).toBe(false);
+    const index = readFileSync(join(dir, "memories", "MEMORY.md"), "utf-8");
+    expect(index).toContain("## Urgent Memory");
+    expect(index).toContain("## References");
+    expect(index).toContain("## Saved Memories");
   });
 
   it("migrates legacy LVIS.md and memory/ into the new layout", () => {
@@ -80,6 +84,28 @@ describe("MemoryManager AGENTS.md and MEMORY.md layout", () => {
     const index = readFileSync(join(dir, "memories", "MEMORY.md"), "utf-8");
     expect(index).toContain("[Meeting Notes](./meeting-notes.md)");
     expect(mm.getMemoryIndex()).toContain("weekly sync discussion");
+  });
+
+  it("updates MEMORY.md directly for sectioned urgent memory", async () => {
+    await mm.updateMemoryIndex("# LVIS Memory Index\n\n## Urgent Memory\n\n500자 내외 긴급 기억\n");
+
+    const index = readFileSync(join(dir, "memories", "MEMORY.md"), "utf-8");
+    expect(index).toContain("500자 내외 긴급 기억");
+    expect(mm.getMemoryIndex()).toContain("500자 내외 긴급 기억");
+  });
+
+  it("compare-and-set updates user-preferences.md only when unchanged", async () => {
+    mm.load();
+    const before = mm.getUserPreferences();
+
+    await expect(mm.updateUserPreferencesIfUnchanged(before, "# User Preferences\nupdated")).resolves.toBe(true);
+    expect(mm.getUserPreferences()).toBe("# User Preferences\nupdated");
+
+    writeFileSync(join(dir, "user-preferences.md"), "# User Preferences\nmanual edit", "utf-8");
+    await expect(mm.updateUserPreferencesIfUnchanged("# User Preferences\nupdated", "# User Preferences\nstale refresh")).resolves.toBe(false);
+
+    expect(readFileSync(join(dir, "user-preferences.md"), "utf-8")).toBe("# User Preferences\nmanual edit");
+    expect(mm.getUserPreferences()).toBe("# User Preferences\nmanual edit");
   });
 
   it("does not allow saved memory titles to overwrite MEMORY.md", async () => {

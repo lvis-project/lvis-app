@@ -75,6 +75,7 @@ import { RoutineSessionStore } from "./main/routine-session-store.js";
 import { SessionTodoStore } from "./main/session-todo-store.js";
 import { AskUserQuestionGate, IPC_ASK_USER_QUESTION_REQUEST } from "./main/ask-user-question-gate.js";
 import { NotificationService } from "./main/notification-service.js";
+import { PreferenceRefreshService } from "./memory/preference-refresh-service.js";
 import { SkillStore } from "./main/skill-store.js";
 import { SkillOverlay } from "./main/skill-overlay.js";
 import { SkillApprovalsStore } from "./main/skill-approvals-store.js";
@@ -544,6 +545,13 @@ export async function bootstrap(
   lateBinding.pluginCallLlmRef.fn = createCallLlmForPlugin(conversationLoop, bootAuditLogger);
   log.info("boot: plugin callLlm ready (rate-limited)");
 
+  const preferenceRefreshService = new PreferenceRefreshService({
+    memoryManager,
+    generateText: lateBinding.llmCallerRef.fn,
+    idleScheduler,
+  });
+  preferenceRefreshService.start();
+
   // Workflow system tools — late bindings now that ConversationLoop exists.
   // SubAgentRunner reuses the parent loop's deps (LLM, registry, gates) but
   // a fresh ConversationLoop is constructed per spawn inside the runner.
@@ -776,7 +784,7 @@ export async function bootstrap(
     pluginRuntime, pluginMarketplace, settingsService,
     memoryManager, keywordEngine, routeEngine, toolRegistry,
     systemPromptBuilder, conversationLoop, routineEngine, mcpManager, mcpArtifactStore,
-    idleScheduler, bashAstValidator, auditService, auditLogger: bootAuditLogger, postTurnHookChain,
+    idleScheduler, preferenceRefreshService, bashAstValidator, auditService, auditLogger: bootAuditLogger, postTurnHookChain,
     approvalGate, rewireReviewerAgent, knowledgeAvailable, starredStore, feedbackStore,
     routinesStore, routinesScheduler, routineSessionStore, sessionTodoStore, askUserQuestionGate, skillStore,
     notificationService,
@@ -798,6 +806,7 @@ export async function bootstrap(
         autoUpdaterStop?.();
         telemetry?.stop();
         pluginTelemetry?.stop();
+        preferenceRefreshService.stop();
         idleScheduler?.stop();
         routinesScheduler.stop();
         askUserQuestionGate.disposeAll();
