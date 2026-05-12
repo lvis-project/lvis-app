@@ -4,11 +4,13 @@
  */
 import { ipcMain } from "electron";
 import { validateExternalUrl } from "../../shared/external-url.js";
+import { SETTINGS } from "../../shared/ipc-channels.js";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
+import { sendToWindow } from "../safe-send.js";
 import type { IpcDeps } from "../types.js";
 
 export function registerSettingsHandlers(deps: IpcDeps): void {
-  const { settingsService, conversationLoop, systemPromptBuilder, auditLogger } = deps;
+  const { settingsService, conversationLoop, systemPromptBuilder, auditLogger, getAppWindows } = deps;
 
   // read-only — no sender guard needed
   ipcMain.handle("lvis:settings:get", () => settingsService.getAll());
@@ -21,6 +23,9 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     systemPromptBuilder.setContinuousBackendEnabled(
       result.features?.experimentalContinuousBackend ?? false,
     );
+    for (const win of getAppWindows?.() ?? []) {
+      sendToWindow(win, SETTINGS.updated, result);
+    }
     return result;
   });
 

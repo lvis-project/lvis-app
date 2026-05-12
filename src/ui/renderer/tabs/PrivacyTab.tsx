@@ -98,7 +98,7 @@ export function PrivacyTab({ piiRedactEnabled, onToggle }: PrivacyTabProps) {
   const maxKind = stats ? Math.max(...Object.values(stats.byKind), 1) : 1;
 
   return (
-    <div className="space-y-4 pt-4">
+    <div className="space-y-4">
       {/* ── Toggle ── */}
       <div className="space-y-2">
         <div>

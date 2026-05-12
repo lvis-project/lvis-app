@@ -9,6 +9,7 @@ import type { ApprovalDecision } from "../../permissions/approval-gate.js";
 import { PERMISSIONS } from "../../shared/ipc-channels.js";
 import { hasUserKeyboardIntent } from "../../shared/chat-origin.js";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
+import { sendToWindow } from "../safe-send.js";
 import type { IpcDeps } from "../types.js";
 import type {
   PermissionDirCommand,
@@ -53,6 +54,14 @@ function isParseError<T>(value: T | { ok: false; error: string }): value is { ok
   return "ok" in (value as Record<string, unknown>) && (value as { ok?: unknown }).ok === false;
 }
 
+function broadcastPermissionModeChanged(deps: IpcDeps, mode: string): void {
+  const mainWindow = deps.getMainWindow?.();
+  const windows = deps.getAppWindows?.() ?? [mainWindow];
+  for (const win of windows) {
+    sendToWindow(win, PERMISSIONS.modeChanged, { mode });
+  }
+}
+
 export function registerPermissionsHandlers(deps: IpcDeps): void {
   const { conversationLoop, approvalGate, auditLogger } = deps;
 
@@ -88,6 +97,7 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
       auditLogger,
     });
     if (!result.ok) return result;
+    broadcastPermissionModeChanged(deps, result.mode);
     return { ok: true, mode: result.mode };
   });
 

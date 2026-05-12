@@ -1,33 +1,16 @@
 import { test, expect } from './fixtures';
+import { openSettingsWindow } from './settings-window';
 
-/**
- * Settings dialog smoke — attempts to open settings via a common
- * selector set. Skips if no settings trigger can be located, so the
- * test remains safe against UI evolution.
- */
-test('settings dialog opens and closes, or skips if unavailable', async ({ mainWindow }) => {
-  const trigger = mainWindow.locator(
-    [
-      '[data-testid="settings-trigger"]',
-      'button[aria-label*="Settings" i]',
-      'button[aria-label*="설정"]',
-      'button[title*="Settings" i]',
-      'button[title*="설정"]',
-    ].join(', '),
-  ).first();
+test('native settings window opens and closes', async ({ app, mainWindow }) => {
+  const settingsWindow = await openSettingsWindow(app, mainWindow, 'chat');
 
-  const found = await trigger
-    .waitFor({ state: 'visible', timeout: 10_000 })
-    .then(() => true)
-    .catch(() => false);
+  await expect(settingsWindow).toHaveTitle(/LVIS 설정/);
+  await expect(settingsWindow.getByRole('tab', { name: '채팅' })).toHaveAttribute(
+    'data-state',
+    'active',
+  );
 
-  test.skip(!found, 'No settings trigger located — skipping.');
-
-  await trigger.click();
-
-  const dialog = mainWindow.locator('[role="dialog"]').first();
-  await expect(dialog).toBeVisible({ timeout: 10_000 });
-
-  await mainWindow.keyboard.press('Escape');
-  await expect(dialog).toBeHidden({ timeout: 10_000 });
+  const closePromise = settingsWindow.waitForEvent('close');
+  await settingsWindow.getByRole('button', { name: '닫기' }).click();
+  await closePromise;
 });

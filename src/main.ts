@@ -4,19 +4,22 @@
  * 슬림 엔트리. 모든 로직은 boot.ts와 ipc-bridge.ts로 위임.
  * §4.1 Client Architecture 준수.
  */
-import { Menu, app, BrowserWindow, shell, dialog, protocol, screen, type MenuItemConstructorOptions } from "electron";
+import { Menu, app, BrowserWindow, ipcMain, shell, dialog, protocol, screen, type IpcMainInvokeEvent, type MenuItemConstructorOptions } from "electron";
 import { dirname, resolve } from "node:path";
 import { existsSync } from "node:fs";
 import * as https from "node:https";
 import * as tls from "node:tls";
 import { Agent, setGlobalDispatcher } from "undici";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { bootstrap, type AppServices } from "./boot.js";
 import {
+  auditUnauthorized,
+  getLastThemePayload,
   registerIpcHandlers,
   registerWindowEventListeners,
   unregisterPluginWebview,
-  getLastThemePayload,
+  UNAUTHORIZED_FRAME,
+  validateSender,
 } from "./ipc-bridge.js";
 import {
   INITIAL_THEME_ARG_PREFIX,
@@ -36,6 +39,7 @@ import { emitEvent as emitHostEvent } from "./boot/types.js";
 import { WindowManager } from "./main/window-manager.js";
 import { createLogger } from "./lib/logger.js";
 import { LVIS_LOGO_PATH, LVIS_LOGO_VIEW_BOX } from "./shared/lvis-logo.js";
+import { normalizeSettingsTab } from "./shared/settings-tabs.js";
 const log = createLogger("lvis");
 
 function errorMessage(err: unknown): string {
@@ -124,6 +128,7 @@ async function injectCorporateCa() {
 await injectCorporateCa();
 
 let mainWindow: BrowserWindow | null = null;
+let settingsWindow: BrowserWindow | null = null;
 let services: AppServices | null = null;
 let pendingLvisUri: string | null = null;
 let lastRendererReloadAt = 0;
@@ -139,6 +144,11 @@ const MAIN_WINDOW_MIN_WIDTH = 460;
 const MAIN_WINDOW_MIN_HEIGHT = 640;
 const MAIN_WINDOW_TOP_GAP = 24;
 const MAIN_WINDOW_RIGHT_GAP = 10;
+const SETTINGS_WINDOW_WIDTH = 1040;
+const SETTINGS_WINDOW_HEIGHT = 760;
+const SETTINGS_WINDOW_MIN_WIDTH = 820;
+const SETTINGS_WINDOW_MIN_HEIGHT = 560;
+const rendererIndexUrl = () => pathToFileURL(resolve(__dirname, "index.html")).toString();
 
 function initialMainWindowBounds(): { x: number; y: number; width: number; height: number } {
   const { workArea } = screen.getPrimaryDisplay();
@@ -339,16 +349,39 @@ function createViewMenu() {
   };
 }
 
+function createSettingsMenuItem(): MenuItemConstructorOptions {
+  return {
+    label: "설정...",
+    accelerator: "CommandOrControl+,",
+    click: () => {
+      openSettingsWindow("llm");
+    },
+  };
+}
+
 function refreshApplicationMenu() {
+  const settingsMenuItem = createSettingsMenuItem();
   const template: MenuItemConstructorOptions[] =
     process.platform === "darwin"
       ? [
-          { label: app.name, submenu: [{ role: "about" }, { type: "separator" }, { role: "quit" }] },
+          {
+            label: app.name,
+            submenu: [
+              { role: "about" },
+              { type: "separator" },
+              settingsMenuItem,
+              { type: "separator" },
+              { role: "quit" },
+            ],
+          },
           createViewMenu(),
           { label: "편집", submenu: [{ role: "undo" }, { role: "redo" }, { type: "separator" }, { role: "cut" }, { role: "copy" }, { role: "paste" }, { role: "selectAll" }] },
           { label: "보기", submenu: [{ role: "reload" }] },
         ]
-      : [createViewMenu()];
+      : [
+          { label: "앱", submenu: [settingsMenuItem, { type: "separator" }, { role: "quit" }] },
+          createViewMenu(),
+        ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
@@ -357,10 +390,169 @@ async function loadMainInterface(win: BrowserWindow, reason: string) {
   try {
     await win.loadFile(resolve(__dirname, "index.html"));
     pendingRendererReload = false;
+    showMainWindow(win);
     log.info({ reason }, "main interface loaded");
   } catch (err) {
     log.error({ reason, err }, "failed to load index.html");
   }
+}
+
+function showMainWindow(win: BrowserWindow): void {
+  if (win.isDestroyed()) return;
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+  win.moveTop();
+}
+
+function getAppWindows(): BrowserWindow[] {
+  const seen = new Set<number>();
+  const windows = [
+    mainWindow,
+    settingsWindow,
+    ...(windowManager?.getDetachedWindows() ?? []),
+  ];
+  return windows.filter((win): win is BrowserWindow => {
+    if (!win || win.isDestroyed() || seen.has(win.id)) return false;
+    seen.add(win.id);
+    return true;
+  });
+}
+
+function settingsWindowUrl(initialTab: string): string {
+  return `${rendererIndexUrl()}#settings/${encodeURIComponent(initialTab)}`;
+}
+
+function isSettingsWindowUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    const expected = new URL(rendererIndexUrl());
+    return (
+      parsed.protocol === "file:" &&
+      parsed.origin === expected.origin &&
+      parsed.pathname === expected.pathname &&
+      parsed.hash.startsWith("#settings/")
+    );
+  } catch {
+    return false;
+  }
+}
+
+function openSettingsWindow(initialTabInput: unknown = "llm"): BrowserWindow {
+  const initialTab = normalizeSettingsTab(initialTabInput);
+  const preloadPath = resolve(__dirname, "preload.cjs");
+  if (!existsSync(preloadPath)) {
+    throw new Error(`[lvis] preload.cjs not found at ${preloadPath} — run 'npm run build:preload' first`);
+  }
+
+  if (settingsWindow && !settingsWindow.isDestroyed()) {
+    settingsWindow.webContents.send("lvis:settings-window:tab", { initialTab });
+    if (settingsWindow.isMinimized()) settingsWindow.restore();
+    settingsWindow.show();
+    settingsWindow.focus();
+    return settingsWindow;
+  }
+
+  settingsWindow = new BrowserWindow({
+    width: SETTINGS_WINDOW_WIDTH,
+    height: SETTINGS_WINDOW_HEIGHT,
+    minWidth: SETTINGS_WINDOW_MIN_WIDTH,
+    minHeight: SETTINGS_WINDOW_MIN_HEIGHT,
+    show: false,
+    title: "LVIS 설정",
+    autoHideMenuBar: true,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+      webviewTag: false,
+      preload: preloadPath,
+      // Settings window must paint its first frame against the active bundle
+      // tokens — without this the dialog flashes the default-bundle palette
+      // until ThemeProvider's async hydrate lands. Same mechanism as main
+      // and detached windows (architecture.md §6.7.1 "race window = 0").
+      additionalArguments: initialThemeArgs(),
+    },
+  });
+  if (typeof settingsWindow.setMenu === "function") settingsWindow.setMenu(null);
+
+  const win = settingsWindow;
+  registerWindowEventListeners(win);
+
+  win.once("ready-to-show", () => {
+    win.show();
+    win.focus();
+  });
+  win.on("closed", () => {
+    if (settingsWindow === win) settingsWindow = null;
+  });
+  win.webContents.on("did-fail-load", (_e, code, desc, url) => {
+    log.error({ code, desc, url }, "settings window failed to load");
+  });
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    try {
+      const parsedUrl = new URL(url);
+      if (parsedUrl.protocol === "http:" || parsedUrl.protocol === "https:") {
+        void shell.openExternal(parsedUrl.toString()).catch((err) => {
+          log.error({ url: parsedUrl.toString(), err }, "failed to open external URL from settings window");
+        });
+      }
+    } catch (err) {
+      log.warn({ url, err }, "blocked invalid settings window URL");
+    }
+    return { action: "deny" };
+  });
+  win.webContents.on("will-navigate", (details) => {
+    const url = details.url;
+    if (isSettingsWindowUrl(url)) return;
+    details.preventDefault();
+    try {
+      const parsedUrl = new URL(url);
+      if (parsedUrl.protocol === "http:" || parsedUrl.protocol === "https:") {
+        void shell.openExternal(parsedUrl.toString()).catch((err) => {
+          log.error({ url: parsedUrl.toString(), err }, "failed to open external URL from settings window navigation");
+        });
+        return;
+      }
+      log.warn({ url }, "blocked settings window navigation");
+    } catch (err) {
+      log.warn({ url, err }, "blocked invalid settings window navigation");
+    }
+  });
+
+  void win.loadURL(settingsWindowUrl(initialTab));
+  return win;
+}
+
+function registerSettingsWindowHandlers(auditLogger: AppServices["auditLogger"]): void {
+  ipcMain.handle("lvis:settings-window:open", (event: IpcMainInvokeEvent, initialTab: unknown) => {
+    if (!validateSender(event)) {
+      auditUnauthorized(auditLogger, "lvis:settings-window:open", event);
+      return UNAUTHORIZED_FRAME;
+    }
+    try {
+      const win = openSettingsWindow(initialTab);
+      return { ok: true, windowId: win.id };
+    } catch (err) {
+      return { ok: false, error: errorMessage(err) };
+    }
+  });
+
+  ipcMain.handle("lvis:settings-window:saved", (event: IpcMainInvokeEvent) => {
+    if (!validateSender(event)) {
+      auditUnauthorized(auditLogger, "lvis:settings-window:saved", event);
+      return UNAUTHORIZED_FRAME;
+    }
+    // Broadcast to every app-owned window (main + detached) so any consumer
+    // — not just the main window — can react to a settings save. Same scope
+    // as the SETTINGS.updated state broadcast; this `saved` signal is the
+    // discrete "save committed, you may close" event vs. the state diff.
+    for (const win of getAppWindows()) {
+      if (win === settingsWindow) continue; // sender skip — settings window initiated and closes itself
+      win.webContents.send("lvis:settings-window:saved");
+    }
+    return { ok: true };
+  });
 }
 
 const BOOTSTRAP_STATUS_MESSAGES = [
@@ -606,8 +798,7 @@ function createWindow() {
 
   win.once("ready-to-show", () => {
     log.info("window ready-to-show");
-    win.show();
-    win.focus();
+    showMainWindow(win);
   });
   win.on("closed", () => {
     if (mainWindow === win) mainWindow = null;
@@ -673,6 +864,7 @@ function createWindow() {
   bootstrapSplashShownAt = Date.now();
   void win
     .loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(BOOTSTRAP_SPLASH)}`)
+    .then(() => showMainWindow(win))
     .catch((err) => log.error({ err }, "splash load failed"));
 }
 
@@ -726,7 +918,12 @@ async function main() {
   windowManager.registerIpc(services.auditLogger);
 
   // §4.1 IPC Bridge — 반드시 index.html 로드 전에 등록 (renderer useEffect race 방지)
-  registerIpcHandlers(services, () => mainWindow);
+  registerIpcHandlers(
+    services,
+    () => mainWindow,
+    getAppWindows,
+  );
+  registerSettingsWindowHandlers(services.auditLogger);
 
   // L1: start the routines scheduler AFTER IPC handlers are wired so a
   // routine past-due at boot fires into a renderer that already has a
@@ -819,8 +1016,7 @@ if (!gotSingleInstanceLock) {
     lvisDevLog("[lvis] second-instance URL extracted", { url });
     if (url) void handleLvisUri(url);
     if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.focus();
+      showMainWindow(mainWindow);
     }
   });
 }
