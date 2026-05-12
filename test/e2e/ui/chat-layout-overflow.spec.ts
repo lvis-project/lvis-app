@@ -189,7 +189,7 @@ test.describe("chat layout overflow", () => {
 
   test("historical WorkGroup tools do not clip chat horizontally", async () => {
     await page.setViewportSize({ width: 560, height: 900 });
-    const workGroup = page.locator("[data-wg-id]").filter({ hasText: /단계/ }).first();
+    const workGroup = page.locator("[data-testid=\"work-group\"]").filter({ hasText: /단계/ }).first();
     await workGroup.waitFor({
       state: "visible",
       timeout: 15_000,
@@ -222,7 +222,7 @@ test.describe("chat layout overflow", () => {
       const viewportBox = toBox(chatViewport);
       const contentWrapperBox = toBox(chatContentWrapper);
       const elementBoxes = [
-        ...document.querySelectorAll('[data-testid="assistant-message-body"], [data-wg-id], pre, code, [data-testid="composer-input-bar"], .bg-message-user'),
+        ...document.querySelectorAll('[data-testid="assistant-message-body"], [data-testid="work-group"], pre, code, [data-testid="composer-input-bar"], .bg-message-user'),
       ]
         .filter((el) => {
           const r = el.getBoundingClientRect();
@@ -241,7 +241,7 @@ test.describe("chat layout overflow", () => {
         chatViewport: viewportBox,
         chatContentWrapper: contentWrapperBox,
         toolbar: toBox(document.querySelector('[data-testid="main-toolbar"]')),
-        workGroup: toBox(document.querySelector("[data-wg-id]")),
+        workGroup: toBox(document.querySelector("[data-testid=\"work-group\"]")),
         composer: toBox(document.querySelector('[data-testid="composer-input-bar"]')),
         overflowing: elementBoxes.filter((box) => {
           if (!viewportBox) return true;
