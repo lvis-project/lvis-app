@@ -34,6 +34,67 @@ function safeResolveFileUrl(relative: string): string {
 const pluginPreloadUrl = safeResolveFileUrl("plugin-preload.cjs");
 const pluginShellUrl = safeResolveFileUrl("plugin-ui-shell.html");
 
+// ─── Theme race-window-zero prime ───────────────────────────────────────────
+// Main process passes the host's currently cached `lastThemePayload` to every
+// new BrowserWindow via `webPreferences.additionalArguments` so that:
+//   (1) tokens are applied to documentElement BEFORE React mounts (frame-0
+//       paint correct — no flash of fallback CSS on the first render),
+//   (2) ThemeProvider can read the same payload via `window.__lvisInitialTheme`
+//       and skip its async settings.json hydrate, eliminating the cold-boot
+//       race where detached windows registered a plugin webview before
+//       the renderer's first `notifyPluginTheme` broadcast.
+// See architecture.md §6.7.1 ("race window = 0") and main.ts:initialThemeArgs.
+type LvisInitialThemePayload = Readonly<{
+  bundleId: string;
+  shell: "light" | "dark";
+  tokens?: Readonly<Record<string, string>>;
+}>;
+
+function readInitialThemeArg(): LvisInitialThemePayload | null {
+  try {
+    const PREFIX = "--lvis-initial-theme=";
+    const arg = process.argv.find((a) => typeof a === "string" && a.startsWith(PREFIX));
+    if (!arg) return null;
+    const json = arg.slice(PREFIX.length);
+    const parsed: unknown = JSON.parse(json);
+    if (!parsed || typeof parsed !== "object") return null;
+    const p = parsed as { bundleId?: unknown; shell?: unknown; tokens?: unknown };
+    if (typeof p.bundleId !== "string") return null;
+    if (p.shell !== "light" && p.shell !== "dark") return null;
+    const tokens: Record<string, string> = {};
+    if (p.tokens && typeof p.tokens === "object" && !Array.isArray(p.tokens)) {
+      for (const [k, v] of Object.entries(p.tokens as Record<string, unknown>)) {
+        if (typeof k === "string" && k.startsWith("--lvis-") && typeof v === "string") {
+          tokens[k] = v;
+        }
+      }
+    }
+    return Object.freeze({ bundleId: p.bundleId, shell: p.shell, tokens: Object.freeze(tokens) });
+  } catch {
+    return null;
+  }
+}
+
+const lvisInitialTheme = readInitialThemeArg();
+
+if (lvisInitialTheme && typeof document !== "undefined") {
+  // Apply attributes + tokens immediately. Preload's mutations to
+  // documentElement are visible to the renderer's first paint because both
+  // share the same DOM (contextIsolation isolates JS objects, not DOM).
+  try {
+    const root = document.documentElement;
+    root.setAttribute("data-theme-bundle", lvisInitialTheme.bundleId);
+    root.setAttribute("data-shell", lvisInitialTheme.shell);
+    if (lvisInitialTheme.tokens) {
+      for (const [k, v] of Object.entries(lvisInitialTheme.tokens)) {
+        root.style.setProperty(k, v);
+      }
+    }
+  } catch {
+    // Non-fatal: ThemeProvider's async hydrate still runs as a fallback.
+  }
+}
+
 type PluginActionResult =
   | { ok: true; pluginId: string; installed?: true; uninstalled?: true; version?: string }
   | { ok: false; error: string; message?: string };
@@ -894,6 +955,12 @@ const api = {
     },
   },
 };
+
+// Expose the theme prime payload so ThemeProvider (renderer) can read it
+// synchronously on mount and skip its async settings.json hydrate. `null`
+// when main has nothing cached yet (cold-boot first window). Frozen so the
+// renderer cannot mutate it.
+contextBridge.exposeInMainWorld("__lvisInitialTheme", lvisInitialTheme);
 
 contextBridge.exposeInMainWorld("lvisApi", api);
 
