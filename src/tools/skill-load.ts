@@ -54,7 +54,7 @@ export function createSkillLoadTool(deps: SkillLoadToolDeps): Tool {
     name: "skill_load",
     description:
       "이름으로 skill 을 로드해 다음 턴부터 시스템 프롬프트에 주입합니다. " +
-      "Skill 은 ~/.lvis/skills/<name>.md (YAML frontmatter + markdown). " +
+      "Skill 은 ~/.lvis/skills/<name>/SKILL.md (또는 legacy <name>.md, YAML frontmatter + markdown). " +
       "처음 로드되는 user skill 은 사용자 승인을 요구하며, 승인은 영구 저장됩니다. " +
       "성공 시 { loaded: true, skillName, summary } 반환.",
     source: "builtin",

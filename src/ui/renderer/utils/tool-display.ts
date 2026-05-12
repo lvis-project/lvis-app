@@ -1,7 +1,5 @@
 /** Human-readable display names for LLM tool identifiers. */
 const TOOL_DISPLAY_NAMES: Record<string, string> = {
-  search_memory: "기억 검색",
-
   // Tasks
   task_add: "할 일 추가",
   task_list: "할 일 목록",
@@ -31,11 +29,6 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   move_file: "파일 이동",
   delete_file: "파일 삭제",
   request_plugin: "플러그인 실행",
-
-  // Memory (boot/tools)
-  memory_save: "기억 저장",
-  memory_search: "기억 검색",
-  memory_list: "기억 목록",
 
   // Misc
   skill_load: "스킬 로드",

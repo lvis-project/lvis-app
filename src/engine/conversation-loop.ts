@@ -1771,13 +1771,13 @@ export class ConversationLoop {
         if (!args.trim()) { result = "사용법: /remember 기억할 내용"; break; }
         const title = args.slice(0, 40).replace(/\n/g, " ");
         await this.deps.memoryManager.saveMemory(title, args);
-        result = `메모리 저장됨: ${title}`;
+        result = `기억 저장됨: ${title}`;
         break;
       }
       case "memory": {
         const memories = this.deps.memoryManager.listMemoryEntries();
         result = memories.length === 0
-          ? "저장된 메모리 없음."
+          ? "저장된 기억 없음."
           : memories.map((n) => `- ${n.title} (${n.filename})`).join("\n");
         break;
       }
@@ -1833,8 +1833,8 @@ export class ConversationLoop {
 /sessions — 저장된 세션 목록
 /load <ID> — 세션 복원
 /compact — 대화 이력 압축
-/remember <내용> — 메모리 저장
-/memory — 사용자 메모리 목록
+/remember <내용> — 기억 저장
+/memory — 사용자 기억 목록
 /vendor — 현재 벤더/토큰 정보
 /tools — 등록된 도구 목록
 /permission — 현재 권한 모드
