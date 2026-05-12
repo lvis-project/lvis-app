@@ -136,6 +136,7 @@ export function createNoopHostApi(
     logEvent: () => {},
     onShutdown: () => {},
     openAuthWindow: async () => { throw new Error("openAuthWindow not available in noop context"); },
+    openAuthPartitionViewer: async () => { throw new Error("openAuthPartitionViewer not available in noop context"); },
     triggerConversation: async (spec) => ({
       accepted: false,
       reason: "loop_unavailable",
