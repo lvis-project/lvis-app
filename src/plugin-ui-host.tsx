@@ -41,11 +41,16 @@ export type PluginUiExtensionView = {
     exportName?: string;
     page?: string;
     /**
-     * Window placement preference. When `defaultMode` is `"detached"` the
-     * host opens the extension in a magnetic-snap BrowserWindow rather than
-     * rendering it inline.
+     * Detached window defaults. `defaultMode: "detached"` opens the extension
+     * in a magnetic-snap BrowserWindow rather than rendering it inline.
      */
     window?: {
+      width?: number;
+      height?: number;
+      minWidth?: number;
+      minHeight?: number;
+      resizable?: boolean;
+      alwaysOnTop?: boolean;
       defaultMode?: "embedded" | "detached";
     };
   };
