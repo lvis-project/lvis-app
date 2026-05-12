@@ -165,7 +165,36 @@ describe("lvis-prose CSS coverage — markdown tables stay readable", () => {
     expect(css).toContain(".lvis-prose :is(th, td) :is(p, span, strong, em)");
   });
 
-  it("body font-family inside @layer base leads with system-ui and mirrors HOST_FONT_STACK", () => {
+  /**
+   * Extract and concatenate the contents of every `@layer NAME { ... }` block
+   * in `source`. CSS cascade-layers allows the same layer name to appear in
+   * multiple `@layer NAME { ... }` declarations (they merge at parse time),
+   * so styles.css declares `@layer base` more than once. This walker tracks
+   * brace depth to skip multi-level nesting (`:root`, theme bundle blocks)
+   * — JS RegExp has no recursive group support, so a regex anchor either
+   * fails on the nesting or falsely matches selectors OUTSIDE the layer.
+   */
+  function extractLayerBody(source: string, layerName: string): string | null {
+    const markerRe = new RegExp(`@layer\\s+${layerName}\\s*\\{`, "g");
+    const slices: string[] = [];
+    let match: RegExpExecArray | null;
+    while ((match = markerRe.exec(source)) !== null) {
+      let i = match.index + match[0].length;
+      let depth = 1;
+      while (i < source.length && depth > 0) {
+        const ch = source[i];
+        if (ch === "{") depth++;
+        else if (ch === "}") depth--;
+        i++;
+      }
+      if (depth !== 0) return null;
+      slices.push(source.slice(match.index + match[0].length, i - 1));
+      markerRe.lastIndex = i;
+    }
+    return slices.length > 0 ? slices.join("\n") : null;
+  }
+
+  it("body font-family inside @layer base leads with system-ui and keeps Hangul fallback", () => {
     /*
      * Regression guard for issue #556 / #670. Plugin webviews paint with the
      * same `system-ui`-first stack via plugin-ui-shell.html; host body must
@@ -175,42 +204,85 @@ describe("lvis-prose CSS coverage — markdown tables stay readable", () => {
      * no glyph in `system-ui` itself so a Hangul-capable fallback is
      * required by spec.
      *
-     * Anchored to `@layer base` so a future `body.foo { ... }` override
-     * elsewhere in the file cannot accidentally satisfy the regex. Uses
-     * `[^{}]*?` so a nested rule (`&::before { ... }`) inside the body
-     * block still preserves the assertion.
+     * Scoped to `@layer base` via `extractLayerBody` so a future `body { ... }`
+     * outside the layer cannot accidentally satisfy the regex.
      */
-    expect(css).toMatch(
-      /@layer\s+base\s*\{[\s\S]*?\bbody\s*\{[^{}]*?font-family:\s*system-ui\s*,/,
-    );
-    // Korean fallback must still be in the stack so Hangul renders cross-OS.
-    expect(css).toMatch(
+    const layerBase = extractLayerBody(css, "base");
+    expect(layerBase, "@layer base block not found in styles.css").not.toBeNull();
+    expect(layerBase!).toMatch(/\bbody\s*\{[^{}]*?font-family:\s*system-ui\s*,/);
+    expect(layerBase!).toMatch(
       /body\s*\{[^{}]*?font-family:[^{}]*?("Noto Sans KR"|"Malgun Gothic"|"Apple SD Gothic Neo")/,
     );
   });
 
-  it("all host-owned chrome surfaces mirror HOST_FONT_STACK (SoT cross-mirror invariant)", () => {
-    /*
-     * Issue #556 / #670 — host-owned chrome surfaces ship raw font-family
-     * literals across 5 files (CSS / HTML cannot import a JS constant at
-     * runtime). The SoT is `src/shared/host-font-stack.ts` (HOST_FONT_STACK).
-     * This test asserts every mirror leads with `system-ui` AND includes
-     * the Korean fallback chain, so a typography update in one surface that
-     * forgets a sibling fails loudly here.
-     */
-    const mirrors: Array<[string, string]> = [
-      ["styles.css body", css],
-      ["plugin-ui-shell.html body", readFileSync("src/plugin-ui-shell.html", "utf-8").replace(/\r\n/g, "\n")],
-      ["main.ts splash inline", readFileSync("src/main.ts", "utf-8").replace(/\r\n/g, "\n")],
-      ["window-titlebar-shell.ts body", readFileSync("src/main/window-titlebar-shell.ts", "utf-8").replace(/\r\n/g, "\n")],
-    ];
-    for (const [label, text] of mirrors) {
-      expect(text, `${label} must lead font-family with system-ui`).toMatch(
-        /font-family\s*:\s*system-ui\s*,/,
-      );
-      expect(text, `${label} must keep a Hangul fallback in the stack`).toMatch(
-        /font-family\s*:[^;}]*?("Noto Sans KR"|"Malgun Gothic"|"Apple SD Gothic Neo")/,
-      );
+  /*
+   * Issue #556 / #670 — host-owned chrome surfaces ship raw font-family
+   * literals across files (CSS / HTML cannot import a JS constant at
+   * runtime). The SoT is `src/shared/host-font-stack.ts` (HOST_FONT_STACK).
+   * Each mirror file declares the stack with potentially different inline
+   * whitespace (splash CSS minifies `, ` to `,` for byte budget). The
+   * `mirrors` list below enumerates every host-owned surface; each line is
+   * a regex that captures the font-family value verbatim from that file.
+   *
+   * `extractFontStack` pulls the captured value, normalizes whitespace, and
+   * the assertion compares against `HOST_FONT_STACK` normalized the same
+   * way — true SoT byte-equality (modulo whitespace) rather than substring.
+   * Add a new shell here AND in the grep-zero allowlist below.
+   */
+  const HOST_FONT_STACK_LITERAL =
+    "system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, " +
+    "\"Apple SD Gothic Neo\", \"Noto Sans KR\", \"Malgun Gothic\", sans-serif";
+  // Normalize a font-family value to a canonical form for byte-comparison:
+  // - collapse internal whitespace runs to a single space
+  // - strip the optional space after every comma (splash CSS minifies these)
+  // - trim leading/trailing whitespace
+  const normalize = (s: string) =>
+    s.replace(/\s+/g, " ").replace(/\s*,\s*/g, ",").trim();
+
+  const FONT_STACK_MIRRORS: Array<{
+    label: string;
+    path: string;
+    /** Returns the font-family value text from the source file, or null if absent. */
+    extract: (text: string) => string | null;
+  }> = [
+    {
+      label: "styles.css @layer base body",
+      path: "src/styles.css",
+      extract: (text) => {
+        const layer = extractLayerBody(text, "base");
+        if (!layer) return null;
+        const m = layer.match(/\bbody\s*\{[^{}]*?font-family:\s*([^;}]+)/);
+        return m ? m[1]! : null;
+      },
+    },
+    {
+      label: "plugin-ui-shell.html body",
+      path: "src/plugin-ui-shell.html",
+      extract: (text) => text.match(/body\s*\{[^{}]*?font-family:\s*([^;}]+)/)?.[1] ?? null,
+    },
+    {
+      label: "main.ts splash inline",
+      path: "src/main.ts",
+      extract: (text) => text.match(/html,body\s*\{[^{}]*?font-family:\s*([^;}]+)/)?.[1] ?? null,
+    },
+    {
+      label: "window-titlebar-shell.ts body",
+      path: "src/main/window-titlebar-shell.ts",
+      extract: (text) => text.match(/body\s*\{[^{}]*?font-family:\s*([^;}]+)/)?.[1] ?? null,
+    },
+    {
+      label: "tools/render-html.ts wrapWithCsp",
+      path: "src/tools/render-html.ts",
+      extract: (text) => text.match(/html,body\{[^{}]*?font-family:([^;}]+)/)?.[1] ?? null,
+    },
+  ];
+
+  it("every host-owned chrome surface mirrors HOST_FONT_STACK byte-for-byte (whitespace-normalized)", () => {
+    for (const { label, path, extract } of FONT_STACK_MIRRORS) {
+      const text = readFileSync(path, "utf-8").replace(/\r\n/g, "\n");
+      const value = extract(text);
+      expect(value, `${label}: could not locate font-family literal — extractor stale?`).not.toBeNull();
+      expect(normalize(value!), `${label}: stack diverges from HOST_FONT_STACK`).toBe(normalize(HOST_FONT_STACK_LITERAL));
     }
   });
 
@@ -218,21 +290,21 @@ describe("lvis-prose CSS coverage — markdown tables stay readable", () => {
     /*
      * Defensive — if anyone adds a NEW host-owned shell that bakes a raw
      * font stack containing `"Noto Sans KR"` they must register it in the
-     * mirror list above. The 4 known mirrors plus the SoT module are
-     * allow-listed; every other src/ file must be 0.
+     * mirror list above. Allowlist below = SoT module + every registered
+     * mirror + this test file.
      */
     const allowlist = new Set(
       [
         "src/shared/host-font-stack.ts",
-        "src/styles.css",
-        "src/plugin-ui-shell.html",
-        "src/main.ts",
-        "src/main/window-titlebar-shell.ts",
+        ...FONT_STACK_MIRRORS.map((m) => m.path),
         // Test files reference the stack literally for assertions.
         "test/renderer/assistant-card-contrast.test.tsx",
       ].map((p) => p.replace(/\\/g, "/")),
     );
-    function walk(dir: string, out: string[]): void {
+    function walk(dir: string, out: string[], depth = 0): void {
+      // depth cap = 12 — protects against symlink cycles a contributor might
+      // introduce under src/ without notice. The repo today has no symlinks.
+      if (depth > 12) return;
       const fs = require("node:fs") as typeof import("node:fs");
       const path = require("node:path") as typeof import("node:path");
       let entries: string[];
@@ -240,10 +312,11 @@ describe("lvis-prose CSS coverage — markdown tables stay readable", () => {
       for (const name of entries) {
         const full = path.join(dir, name).replace(/\\/g, "/");
         let s;
-        try { s = fs.statSync(full); } catch { continue; }
+        try { s = fs.lstatSync(full); } catch { continue; }
+        if (s.isSymbolicLink()) continue;
         if (s.isDirectory()) {
           if (name === "node_modules" || name === "dist") continue;
-          walk(full, out);
+          walk(full, out, depth + 1);
           continue;
         }
         if (/\.(ts|tsx|html|css)$/.test(name)) out.push(full);
@@ -261,7 +334,7 @@ describe("lvis-prose CSS coverage — markdown tables stay readable", () => {
     }
     expect(
       violations,
-      "Korean font fallback should only appear inside HOST_FONT_STACK mirrors — add new shell to the mirror list",
+      "Korean font fallback should only appear inside HOST_FONT_STACK mirrors — add new shell to FONT_STACK_MIRRORS + allowlist",
     ).toEqual([]);
   });
 
