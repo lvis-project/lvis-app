@@ -182,7 +182,6 @@ export type LvisApi = {
     bundleId: string;
     shell: "light" | "dark";
     tokens: Record<string, string>;
-    fonts?: { family: string };
   }) => Promise<{ ok: boolean; error?: string }>;
   fileScanPaths: (paths: string[]) => Promise<{ ok: boolean; indexed?: number; failed?: number; jobId?: string; error?: string }>;
   getSettings: () => Promise<AppSettings>;
