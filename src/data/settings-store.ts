@@ -180,13 +180,19 @@ export interface AppearanceSettings {
 }
 
 /**
- * Allow only alphanumerics, spaces, commas, hyphens, single/double quotes, and
- * underscores in a user-supplied font-family stack. Same character class as
- * the plugin theme payload validator (defense in depth across IPC boundaries).
- * 200-char cap mirrors `validateThemePayload` so a malicious settings.json
- * cannot ship a giant stack that bloats every CSS var lookup.
+ * Allow Unicode letters/digits (Hangul, CJK, Latin, …), single space, commas,
+ * hyphens, single/double quotes, and underscores in a user-supplied font-family
+ * stack. The Unicode class is required because JS `\w` is ASCII-only — without
+ * `\p{L}` Korean users typing `맑은 고딕, sans-serif` would be silently rejected
+ * (PR #672 critic CRITICAL #3). Explicitly excludes every CSS injection
+ * metachar (`;`, `{`, `}`, `(`, `)`, `:`, `<`, `>`, `\`, `` ` ``, `/`, `*`, `=`)
+ * and embedded newlines/tabs (whitespace is narrowed to ASCII space) so the
+ * value cannot break out of the `font-family` declaration.
+ *
+ * 200-char cap prevents a malicious or oversized settings.json from bloating
+ * every CSS var lookup.
  */
-const _FONT_FAMILY_RE = /^[\w\s,"'-]+$/;
+const _FONT_FAMILY_RE = /^[\p{L}\p{N} ,"'_-]+$/u;
 const _FONT_FAMILY_MAX = 200;
 
 export function isValidFontFamilyOverride(value: unknown): value is string {
@@ -456,7 +462,35 @@ export class SettingsService {
       this.settings.audit = { ...this.settings.audit, ...partial.audit };
     }
     if (partial.appearance) {
-      this.settings.appearance = { ...this.settings.appearance, ...partial.appearance };
+      // Deep-merge the nested `font` block + validate every incoming font
+      // subfield at write time. Without this, two consecutive
+      // `updateSettings({ appearance: { font: { family } } })` and
+      // `updateSettings({ appearance: { font: { sizeScale } } })` calls each
+      // clobber the other's field (PR #672 review CRITICAL #1). And accepting
+      // an unvalidated `family` at patch time + dropping it on next load is a
+      // recovery-style fallback the No-Fallback-Code rule explicitly forbids
+      // (PR #672 review MAJOR #4) — validate at every trust boundary.
+      const nextAppearance: AppearanceSettings = {
+        ...this.settings.appearance,
+        ...partial.appearance,
+      };
+      const fontPatch = (partial.appearance as { font?: AppearanceFontSettings }).font;
+      if (fontPatch !== undefined) {
+        const mergedFont: AppearanceFontSettings = { ...this.settings.appearance.font };
+        if (typeof fontPatch.family === "string") {
+          if (fontPatch.family === "system" || isValidFontFamilyOverride(fontPatch.family)) {
+            mergedFont.family = fontPatch.family;
+          }
+          // else: drop silently — the cross-window broadcast still carries
+          // the validated post-merge value so listeners stay consistent.
+        }
+        if (typeof fontPatch.sizeScale === "number"
+          && (FONT_SIZE_SCALE_VALUES as readonly number[]).includes(fontPatch.sizeScale)) {
+          mergedFont.sizeScale = fontPatch.sizeScale as FontSizeScale;
+        }
+        nextAppearance.font = Object.keys(mergedFont).length > 0 ? mergedFont : undefined;
+      }
+      this.settings.appearance = nextAppearance;
     }
     if (partial.webView) {
       this.settings.webView = { ...this.settings.webView, ...partial.webView };
