@@ -45,9 +45,34 @@ describe("normalizeAllowedHosts", () => {
     expect(() => normalizeAllowedHosts(["localhost"])).toThrow(/at least one dot/);
   });
 
-  it("refuses bare public-suffix-style top levels", () => {
-    expect(() => normalizeAllowedHosts(["com"])).toThrow(/public-suffix/);
-    expect(() => normalizeAllowedHosts(["co.kr"])).toThrow(/public-suffix/);
+  // The list mirrored by the SDK's plugin-manifest.schema.json `not.enum`
+  // gate. Drift would mean a manifest passes AJV at publish but throws at
+  // plugin load. If you change this list, also update the SDK schema in
+  // lockstep (cross-repo sync per CLAUDE.md "Cross-repo contract sync").
+  it.each([
+    "com", "net", "org", "kr", "co.kr", "or.kr", "go.kr",
+    "io", "ai", "dev", "app",
+  ])("refuses bare public-suffix-style top level %s", (suffix) => {
+    expect(() => normalizeAllowedHosts([suffix])).toThrow(/public-suffix/);
+  });
+
+  // Defense-in-depth against IDN homoglyph phishing: SDK schema rejects
+  // `xn--*` at publish time, host normalizer rejects at load time. Both
+  // layers required — a hand-edited manifest bypasses the SDK schema.
+  it("refuses IDN-punycode labels (xn--*) — homoglyph risk", () => {
+    expect(() => normalizeAllowedHosts(["xn--80ak6aa92e.com"])).toThrow(
+      /punycode/,
+    );
+    expect(() => normalizeAllowedHosts(["outlook.xn--p1ai"])).toThrow(
+      /punycode/,
+    );
+    expect(() => normalizeAllowedHosts(["mail.xn--abc.example.com"])).toThrow(
+      /punycode/,
+    );
+  });
+
+  it("accepts mid-label `xn--` (not actual IDN encoding, just a literal substring)", () => {
+    expect(() => normalizeAllowedHosts(["foo-xn--bar.example.com"])).not.toThrow();
   });
 
   it("refuses a URL pasted in place of a hostname", () => {

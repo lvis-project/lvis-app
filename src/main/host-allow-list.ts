@@ -17,9 +17,12 @@
  * Defensive choices:
  * - Single-label TLDs (`com`, `co.kr`) cannot appear in the allow-list — any
  *   site under such a registry suffix would silently match.
- * - The IDN-encoded form is what the matcher sees (`new URL().hostname`
- *   normalizes to punycode), so a user-supplied display label like
- *   "한국마이크로소프트.kr" must be punycode-encoded in the manifest.
+ * - IDN-punycode labels (`xn--*`) are rejected at load time. They encode
+ *   Unicode and can be visually-similar homoglyphs of legitimate hosts
+ *   (e.g. `xn--80ak6aa92e.com` reads as `аррӏе.com`); the operator-readable
+ *   audit log would show the punycode form but the user sees the Unicode
+ *   form in the window title. There is no per-plugin bypass — relaxing
+ *   this requires a host-source change.
  * - The allow-list has a hard length cap so a runaway manifest entry can't
  *   turn into a wildcard.
  */
@@ -71,6 +74,11 @@ export function normalizeAllowedHosts(raw: readonly string[]): string[] {
     if (!host.includes(".")) {
       throw new Error(
         `host-allow-list: '${entry}' must contain at least one dot — single-label hosts blanket-match every site under that label`,
+      );
+    }
+    if (host.startsWith("xn--") || host.includes(".xn--")) {
+      throw new Error(
+        `host-allow-list: '${entry}' contains an IDN-punycode label (xn--*) — homoglyph risk; declare the ASCII brand domain instead`,
       );
     }
     if (!seen.has(host)) {
