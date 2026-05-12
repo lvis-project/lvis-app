@@ -677,10 +677,10 @@ export function migrateAppearanceV1ToV2(
 
   // Default chat (no overlay) — pick by explicit shell; "system" → DEFAULT.
   if (theme === "light") return { schemaVersion: 2, bundleId: "forest" };
-  if (theme === "dark")  return { schemaVersion: 2, bundleId: "tokyo-night" };
+  if (theme === "dark")  return { schemaVersion: 2, bundleId: DEFAULT_BUNDLE_ID };
 
   // system or unknown → DEFAULT_BUNDLE_ID
-  return { schemaVersion: 2, bundleId: "tokyo-night" };
+  return { schemaVersion: 2, bundleId: DEFAULT_BUNDLE_ID };
 }
 
 function normalizeAppearance(input: unknown): AppearanceSettings {
