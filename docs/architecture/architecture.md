@@ -2013,6 +2013,41 @@ broadcast 흐름 (`lvis:host:plugin-theme-notify` → wc.send → preload listen
 useTheme) 그대로. plugin-ui-shell 에서 한 번 pull 한 후 useTheme 가 후속
 broadcast 만 처리.
 
+**Race window = 0 — main 캐시를 BrowserWindow 생성 시점 inject (PR-1)**:
+detached BrowserWindow 가 cold mount 될 때 host renderer 의 ThemeProvider 가
+`api.getSettings()` 를 async hydrate 하는 동안, 그 안의 plugin webview 가
+먼저 attach 되면 renderer 의 첫 `notifyPluginTheme` broadcast 를 놓쳐
+잘못된 토큰으로 paint 됐다. 정공법은 main process 가 이미 들고 있는
+`lastThemePayload` 를 BrowserWindow 생성 시점에 동기 inject:
+
+```
+main.ts:initialThemeArgs()
+  └─ getLastThemePayload()
+  └─ ["--lvis-initial-theme=" + JSON.stringify(payload)]
+                                          ↓
+   BrowserWindow.create({ webPreferences.additionalArguments })
+                                          ↓
+   src/preload.ts (document-start)
+     ├─ readInitialThemeArg() — parse process.argv
+     ├─ documentElement.setAttribute("data-theme-bundle"|"data-shell")
+     ├─ documentElement.style.setProperty("--lvis-*", value)  ← frame 0 paint
+     └─ contextBridge.exposeInMainWorld("__lvisInitialTheme", payload)
+                                          ↓
+   ThemeProvider (renderer)
+     └─ useState(initialBundleId ?? readGlobalInitialBundleId() ?? DEFAULT)
+                                          ↓
+     첫 render 가 main 캐시와 일치 — async hydrate window = 0
+```
+
+- 호스트 main window 와 모든 detached window 가 같은 경로. plugin webview
+  의 register-webview replay 도 항상 정확한 payload 를 받게 됨.
+- 적용 범위: `lastThemePayload` 가 비어 있으면 (true 첫 cold boot)
+  `additionalArguments` 가 빈 배열 → 기존 async hydrate 경로로 1 프레임만
+  fallback. 이후 main → detached 흐름은 항상 race-free.
+- `WindowManager` 는 `getInitialThemeArgs: () => string[]` 콜백을 받아
+  `openDetachedTab` 내부에서 호출 — main 의 캐시는 BrowserWindow 생성
+  시점에 stale 하지 않음.
+
 **Defense-in-depth (보조 layer, 머지된 상태 유지)**:
 - `register-webview` 시점 replay (`replayThemeToWebview`) — pull 이 어떤
   이유로 실패해도 wc.send 로 한번 더 시도. preload listener 가 늦게

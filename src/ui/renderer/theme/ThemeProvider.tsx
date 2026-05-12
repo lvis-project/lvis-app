@@ -11,6 +11,36 @@ import { LGE_PAIR_IDS } from "./types.js";
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
+/**
+ * `window.__lvisInitialTheme` is set by `src/preload.ts` when the main
+ * process passes `--lvis-initial-theme=...` via `webPreferences.additional
+ * Arguments` (see `architecture.md` §6.7.1 "race window = 0"). The preload
+ * also paints documentElement tokens for the same payload before React
+ * mounts, so reading bundleId here lets ThemeProvider's first render agree
+ * with what's already on screen — eliminating the async hydrate race that
+ * left detached BrowserWindows with the wrong tokens.
+ */
+type InitialThemeGlobal = Readonly<{
+  bundleId: string;
+  shell: "light" | "dark";
+  tokens?: Readonly<Record<string, string>>;
+}>;
+
+declare global {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  interface Window {
+    __lvisInitialTheme?: InitialThemeGlobal | null;
+  }
+}
+
+function readGlobalInitialBundleId(): BundleId | undefined {
+  if (typeof window === "undefined") return undefined;
+  const initial = window.__lvisInitialTheme;
+  if (!initial || typeof initial !== "object") return undefined;
+  const id = initial.bundleId;
+  if (typeof id !== "string") return undefined;
+  return findBundle(id) ? (id as BundleId) : undefined;
+}
 
 export interface ThemeProviderProps {
   api?: LvisApi;
@@ -33,7 +63,7 @@ export interface ThemeProviderProps {
  */
 export function ThemeProvider({
   api,
-  initialBundleId = DEFAULT_BUNDLE_ID,
+  initialBundleId,
   initialFollowSystem = false,
   children,
 }: ThemeProviderProps) {
@@ -41,7 +71,15 @@ export function ThemeProvider({
     return findBundle(id) ?? findBundle(DEFAULT_BUNDLE_ID)!;
   }, []);
 
-  const [bundleId, setBundleIdState] = useState<BundleId>(initialBundleId);
+  // Resolution order:
+  //   (1) explicit `initialBundleId` prop — tests + composition root overrides
+  //   (2) `window.__lvisInitialTheme` from preload — set by main process
+  //       via `webPreferences.additionalArguments` so frame-0 paint already
+  //       matches this bundle id (architecture.md §6.7.1)
+  //   (3) DEFAULT_BUNDLE_ID — true cold boot, no global, no prop
+  const [bundleId, setBundleIdState] = useState<BundleId>(
+    () => initialBundleId ?? readGlobalInitialBundleId() ?? DEFAULT_BUNDLE_ID,
+  );
   const [followSystem, setFollowSystemState] = useState<boolean>(initialFollowSystem);
 
   // Track mount + user-touched state so late getSettings() doesn't clobber

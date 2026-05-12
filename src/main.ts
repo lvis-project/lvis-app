@@ -13,6 +13,7 @@ import { Agent, setGlobalDispatcher } from "undici";
 import { fileURLToPath } from "node:url";
 import { bootstrap, type AppServices } from "./boot.js";
 import { registerIpcHandlers, registerWindowEventListeners, unregisterPluginWebview } from "./ipc-bridge.js";
+import { getLastThemePayload } from "./ipc/domains/plugins.js";
 import { ensureCorporateCa } from "./main/corp-ca-loader.js";
 import { isAuthOwned } from "./main/auth-window-registry.js";
 import { isLinkOwned } from "./main/link-window-registry.js";
@@ -500,6 +501,30 @@ function updateSplashStatus(message: string): void {
     .catch(() => { /* splash window already replaced or page is mid-navigation */ });
 }
 
+/**
+ * Build the `webPreferences.additionalArguments` strings that carry the
+ * host's currently cached `lastThemePayload` into every new BrowserWindow.
+ *
+ * The preload script parses these on document-start, applies tokens to
+ * `documentElement` (frame-0 paint correct), and exposes the payload as
+ * `window.__lvisInitialTheme` so ThemeProvider can init synchronously
+ * without racing the renderer's first `notifyPluginTheme` broadcast. See
+ * `architecture.md` §6.7.1.
+ *
+ * Returns `[]` when no payload is cached yet (cold-boot first window),
+ * which is harmless — the existing async hydrate path stays in effect for
+ * that single frame.
+ */
+function initialThemeArgs(): string[] {
+  const payload = getLastThemePayload();
+  if (!payload) return [];
+  try {
+    return [`--lvis-initial-theme=${JSON.stringify(payload)}`];
+  } catch {
+    return [];
+  }
+}
+
 function createWindow() {
   const preloadPath = resolve(__dirname, "preload.cjs");
   if (!existsSync(preloadPath)) {
@@ -532,6 +557,9 @@ function createWindow() {
       // the main UI. The <webview> tag is gated by webPreferences.webviewTag.
       webviewTag: true,
       preload: preloadPath,
+      // Pass the host's cached lastThemePayload to the renderer so
+      // ThemeProvider can init from frame 0. See initialThemeArgs() above.
+      additionalArguments: initialThemeArgs(),
     },
   });
 
@@ -630,7 +658,11 @@ async function main() {
   // Initialise WindowManager before createWindow so registerMainWindow() can
   // be called synchronously inside createWindow().
   const preloadPath = resolve(__dirname, "preload.cjs");
-  windowManager = new WindowManager({ preloadPath, distRoot });
+  windowManager = new WindowManager({
+    preloadPath,
+    distRoot,
+    getInitialThemeArgs: initialThemeArgs,
+  });
 
   // §4.2 Step 8: window 생성 (splash 표시) — bootstrap이 mainWindow를 필요로 함
   createWindow();
