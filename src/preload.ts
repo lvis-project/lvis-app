@@ -44,18 +44,30 @@ const pluginShellUrl = safeResolveFileUrl("plugin-ui-shell.html");
 //       race where detached windows registered a plugin webview before
 //       the renderer's first `notifyPluginTheme` broadcast.
 // See architecture.md §6.7.1 ("race window = 0") and main.ts:initialThemeArgs.
-type LvisInitialThemePayload = Readonly<{
-  bundleId: string;
-  shell: "light" | "dark";
-  tokens?: Readonly<Record<string, string>>;
-}>;
+//
+// PREFIX, payload shape, and size cap are shared with main.ts via
+// `src/shared/initial-theme.ts` so the wire format has a single SoT.
+import {
+  INITIAL_THEME_ARG_PREFIX,
+  INITIAL_THEME_ARG_MAX_BYTES,
+  type InitialThemePrime,
+} from "./shared/initial-theme.js";
+
+type LvisInitialThemePayload = Readonly<InitialThemePrime>;
 
 function readInitialThemeArg(): LvisInitialThemePayload | null {
   try {
-    const PREFIX = "--lvis-initial-theme=";
-    const arg = process.argv.find((a) => typeof a === "string" && a.startsWith(PREFIX));
+    // `findLast` (vs `find`) defends against accidental duplicate arg
+    // injection: if anyone ever passes the prefix twice, the later one wins
+    // — matching the convention that "last write wins" in argv-style flags.
+    const arg = process.argv.findLast(
+      (a): a is string => typeof a === "string" && a.startsWith(INITIAL_THEME_ARG_PREFIX),
+    );
     if (!arg) return null;
-    const json = arg.slice(PREFIX.length);
+    const json = arg.slice(INITIAL_THEME_ARG_PREFIX.length);
+    // Size guard mirrors `main.ts:initialThemeArgs` — keeps a malformed or
+    // attacker-influenced argv from blocking the renderer on a giant parse.
+    if (json.length > INITIAL_THEME_ARG_MAX_BYTES) return null;
     const parsed: unknown = JSON.parse(json);
     if (!parsed || typeof parsed !== "object") return null;
     const p = parsed as { bundleId?: unknown; shell?: unknown; tokens?: unknown };
