@@ -422,6 +422,13 @@ export class WindowManager {
         const prefs = webPreferences as Record<string, unknown>;
         delete prefs.preload;
         delete prefs.preloadURL;
+        // Defense-in-depth: scrub our own theme-prime argv hook so that even
+        // if a future Electron change started forwarding parent
+        // `additionalArguments` into <webview> guests, the plugin sandbox
+        // would NOT receive `--lvis-initial-theme=` (which carries host
+        // theme cache). Plugin webviews already get theme via the
+        // `host.theme.changed` event, never via argv.
+        delete prefs.additionalArguments;
         prefs.nodeIntegration = false;
         prefs.nodeIntegrationInWorker = false;
         prefs.nodeIntegrationInSubFrames = false;
