@@ -30,6 +30,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  renameSync,
   writeFileSync,
   chmodSync,
 } from "node:fs";
@@ -129,17 +130,66 @@ export class SafeStorageSecretStore implements SecretStore {
     }
   }
 
+  private quarantinePath(path: string, createdAt: string): string {
+    const stamp = createdAt.replace(/[:.]/g, "-");
+    for (let i = 0; i < 100; i++) {
+      const suffix = i === 0 ? "" : `-${i}`;
+      const candidate = `${path}.quarantined-${stamp}${suffix}`;
+      if (!existsSync(candidate)) return candidate;
+    }
+    throw new Error(`could not allocate quarantine path for ${path}`);
+  }
+
+  private quarantineUnreadableSecret(
+    name: string,
+    path: string,
+    reason: "invalid-prefix" | "decrypt-failed",
+    cause?: unknown,
+  ): void {
+    const createdAt = new Date().toISOString();
+    const quarantinedPath = this.quarantinePath(path, createdAt);
+    renameSync(path, quarantinedPath);
+    try { chmodSync(quarantinedPath, 0o600); } catch { /* non-fatal */ }
+
+    const marker = {
+      schemaVersion: 1,
+      type: "safe-storage-secret-quarantined",
+      secretName: name,
+      reason,
+      createdAt,
+      originalPath: path,
+      quarantinedPath,
+      cause: cause instanceof Error ? cause.message : undefined,
+    };
+    try {
+      const markerPath = `${path}.recovery-${createdAt.replace(/[:.]/g, "-")}.json`;
+      writeFileSync(markerPath, `${JSON.stringify(marker)}\n`, {
+        encoding: "utf-8",
+        mode: 0o600,
+      });
+      try { chmodSync(markerPath, 0o600); } catch { /* non-fatal */ }
+    } catch {
+      /* The quarantined ciphertext is the critical forensic artifact. */
+    }
+  }
+
   read(name: string): string | null {
     this.assertAvailable();
     const p = this.path(name);
     if (!existsSync(p)) return null;
     const encrypted = readFileSync(p, "utf-8").replace(/\n$/, "");
     if (!encrypted.startsWith(SAFE_STORAGE_SECRET_PREFIX)) {
-      throw new Error(`safeStorage secret '${name}' has invalid ciphertext format`);
+      this.quarantineUnreadableSecret(name, p, "invalid-prefix");
+      return null;
     }
-    return this.safeStorage.decryptString(
-      Buffer.from(encrypted.slice(SAFE_STORAGE_SECRET_PREFIX.length), "base64"),
-    );
+    try {
+      return this.safeStorage.decryptString(
+        Buffer.from(encrypted.slice(SAFE_STORAGE_SECRET_PREFIX.length), "base64"),
+      );
+    } catch (err) {
+      this.quarantineUnreadableSecret(name, p, "decrypt-failed", err);
+      return null;
+    }
   }
 
   write(name: string, value: string): void {

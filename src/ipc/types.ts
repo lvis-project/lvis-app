@@ -6,4 +6,5 @@ import type { AppServices } from "../boot/types.js";
 
 export type IpcDeps = AppServices & {
   getMainWindow: () => BrowserWindow | null;
+  getAppWindows?: () => Array<BrowserWindow | null | undefined>;
 };

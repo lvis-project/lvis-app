@@ -186,6 +186,7 @@ export type LvisApi = {
   fileScanPaths: (paths: string[]) => Promise<{ ok: boolean; indexed?: number; failed?: number; jobId?: string; error?: string }>;
   getSettings: () => Promise<AppSettings>;
   updateSettings: (patch: DeepPartial<AppSettings>) => Promise<AppSettings>;
+  onSettingsUpdated: (handler: (settings: AppSettings) => void) => () => void;
   setApiKey: (vendor: string, k: string) => Promise<{ ok: true }>;
   hasApiKey: (vendor?: string) => Promise<boolean>;
   deleteApiKey: (vendor: string) => Promise<{ ok: true }>;
@@ -195,6 +196,10 @@ export type LvisApi = {
   setMarketplaceApiKey: (k: string) => Promise<{ ok: true }>;
   hasMarketplaceApiKey: () => Promise<boolean>;
   deleteMarketplaceApiKey: () => Promise<{ ok: true }>;
+  openSettingsWindow: (initialTab?: string) => Promise<{ ok: true; windowId: number } | { ok: false; error: string }>;
+  notifySettingsWindowSaved: () => Promise<{ ok: true } | { ok: false; error: string }>;
+  onSettingsWindowSaved: (handler: () => void) => () => void;
+  onSettingsWindowTab: (handler: (initialTab: string) => void) => () => void;
   /** Open an http(s) URL in the system browser. Main-side rejects any other scheme. */
   openExternalUrl: (url: string) => Promise<{
     ok: boolean;
@@ -606,6 +611,7 @@ export type LvisPermissionApi = {
     | { ok: true; mode: string }
     | { ok: false; error: string; message?: string }
   >;
+  onModeChanged: (cb: (mode: string) => void) => () => void;
   listRules: () => Promise<PermissionRule[]>;
   addRule: (pattern: string, action: "allow" | "deny") => Promise<AddRuleResult>;
   removeRule: (pattern: string, action: "allow" | "deny") => Promise<RemoveRuleResult>;
