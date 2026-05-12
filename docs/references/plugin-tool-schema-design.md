@@ -138,6 +138,7 @@ interface PluginManifest {
 | `id` | PluginRegistry, HostApi cleanup | boot + 런타임 전반 |
 | `version` | 마켓플레이스 카탈로그 카드 + update-detector 비교 + install receipt + `assertInstalledManifestMatchesCatalog` (defense-in-depth host check) + Settings UI 카드 | install + 런타임 전반 |
 | `icon` | plugin grid v3 popover (Lucide named-export 동적 lookup, 누락/매치 실패 시 `Plug` fallback). 옵션 필드 — 없으면 default 아이콘 | UI 렌더 |
+| `iconText` | plugin grid v3 popover — 짧은 텍스트 라벨 (1-4자, 예: `"EP"`, `"MTG"`) 을 Lucide 아이콘 대신 아바타 안에 렌더. 둘 다 선언 시 `iconText` 우선. 적당한 Lucide 글리프가 없는 도메인-내부 식별자에 사용. 옵션 필드 | UI 렌더 |
 | `entry` | runtime.ts `require()` | boot |
 | `tools[]` | Tool Registry 등록 | boot |
 | `toolSchemas` | SDK manifest authority metadata + LLM system prompt tool schema | boot ToolRegistry 등록 + system prompt 빌드 |
