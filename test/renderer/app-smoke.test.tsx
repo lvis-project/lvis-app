@@ -57,6 +57,23 @@ describe("App smoke (Phase 1 infra)", () => {
     expect(api.starredList).toHaveBeenCalledTimes(1);
   });
 
+  it("opens the native settings window from the API key prompt", async () => {
+    const { container, api } = await renderApp({ hasApiKey: false });
+    await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
+    await waitFor(() => expect(container.textContent).toContain("API 키 설정 필요"));
+    const settingsButton = Array.from(container.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("설정 열기"),
+    );
+    expect(settingsButton).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(settingsButton!);
+    });
+
+    await waitFor(() => expect(api.openSettingsWindow).toHaveBeenCalledWith("llm"));
+    expect(api.chatSend).not.toHaveBeenCalled();
+  });
+
   it("addStarred / listStarred mock surface is spy-able", async () => {
     const { api } = await renderApp();
     const entry = { messageIndex: 3, role: "assistant", text: "hi", sessionId: "s1" };

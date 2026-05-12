@@ -546,6 +546,12 @@ export class WindowManager {
     }));
   }
 
+  getDetachedWindows(): BrowserWindow[] {
+    return Array.from(this._children.values())
+      .map((entry) => entry.window)
+      .filter((win) => !win.isDestroyed());
+  }
+
   private _setChildPositionIfChanged(
     entry: ChildEntry,
     x: number,

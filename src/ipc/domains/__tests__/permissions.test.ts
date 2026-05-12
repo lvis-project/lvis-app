@@ -41,6 +41,22 @@ function makeDeps(options: {
   auditAppendError?: Error;
   queue?: Record<string, unknown> | null;
 } = {}) {
+  const appWindows = [
+    {
+      isDestroyed: vi.fn(() => false),
+      webContents: {
+        isDestroyed: vi.fn(() => false),
+        send: vi.fn(),
+      },
+    },
+    {
+      isDestroyed: vi.fn(() => false),
+      webContents: {
+        isDestroyed: vi.fn(() => false),
+        send: vi.fn(),
+      },
+    },
+  ];
   const permissionManager = {
     getMode: vi.fn(() => "default"),
     setMode: vi.fn(),
@@ -81,17 +97,18 @@ function makeDeps(options: {
       setDenyRules: vi.fn(),
     },
     rewireReviewerAgent: vi.fn(),
+    getAppWindows: vi.fn(() => appWindows),
   };
-  return { deps, permissionManager };
+  return { deps, permissionManager, appWindows };
 }
 
 async function setup(options: Parameters<typeof makeDeps>[0] = {}) {
   handlers.clear();
   vi.clearAllMocks();
-  const { deps, permissionManager } = makeDeps(options);
+  const { deps, permissionManager, appWindows } = makeDeps(options);
   const { registerPermissionsHandlers } = await import("../permissions.js");
   registerPermissionsHandlers(deps as never);
-  return { deps, permissionManager };
+  return { deps, permissionManager, appWindows };
 }
 
 beforeEach(() => {
@@ -116,6 +133,16 @@ describe("permissions IPC handlers", () => {
     expect(deps.auditLogger.appendPermissionAuditEntry).toHaveBeenCalledWith(
       expect.objectContaining({ decision: "mode_change", fromMode: "default", toMode: "auto", durable: true }),
     );
+  });
+
+  it("broadcasts successful durable mode changes to all app windows", async () => {
+    const { appWindows } = await setup({ approvalChoice: "allow-once" });
+
+    await invoke(PERMISSIONS.setMode, { mode: "auto", intent: USER_INTENT });
+
+    for (const win of appWindows) {
+      expect(win.webContents.send).toHaveBeenCalledWith(PERMISSIONS.modeChanged, { mode: "auto" });
+    }
   });
 
   it("setMode does not persist when durable confirmation is denied", async () => {

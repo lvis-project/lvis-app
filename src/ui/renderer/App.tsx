@@ -19,7 +19,6 @@ import { DeferredQueueDialog } from "./dialogs/DeferredQueueDialog.js";
 import { buildQuickActions } from "./components/CommandPopover.js";
 import { MainToolbar } from "./MainToolbar.js";
 import { MainContent } from "./MainContent.js";
-import { SettingsDialog } from "./SettingsDialog.js";
 import {
   Dialog,
   DialogContent,
@@ -100,8 +99,6 @@ export function App() {
 
   // App state
   const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsInitialTab, setSettingsInitialTab] = useState("llm");
   const [deferredQueueOpen, setDeferredQueueOpen] = useState(false);
   const [activeView, setActiveView] = useState("home");
   const [commandPopoverOpen, setCommandPopoverOpen] = useState(false);
@@ -489,6 +486,17 @@ export function App() {
   }, [activeView, activePluginView]);
   const checkApiKey = useCallback(async () => { const h = await api.hasApiKey(); setHasApiKey(h); return h; }, [api]);
   const vendorSupportsThinking = useMemo(() => vendorSupportsThinkingShared(llmVendor, llmModel), [llmVendor, llmModel]);
+  const onOpenSettings = useCallback((tab = "llm") => {
+    void api.openSettingsWindow(tab);
+  }, [api]);
+
+  useEffect(() => {
+    return api.onSettingsWindowSaved(() => {
+      void checkApiKey();
+      void refreshLlmSettings();
+    });
+  }, [api, checkApiKey, refreshLlmSettings]);
+
   const composeOutgoing = useCallback(
     (raw: string) => composeOutgoingUtil({ raw, activePreset, attachments }),
     [activePreset, attachments],
@@ -544,8 +552,7 @@ export function App() {
         }
       }
       if (!(await checkApiKey())) {
-        setSettingsInitialTab("llm");
-        setSettingsOpen(true);
+        onOpenSettings("llm");
         return;
       }
       const requestId = ++turnRequestRef.current;
@@ -646,6 +653,7 @@ export function App() {
       attachments,
       llmVendor,
       llmModel,
+      onOpenSettings,
     ],
   );
   // Keep ref in sync so handlePluginPrimaryAction can call handleAsk
@@ -720,11 +728,6 @@ export function App() {
   useEffect(() => {
     if (activeView !== "home") setCommandPopoverOpen(false);
   }, [activeView]);
-
-  const onOpenSettings = useCallback((tab = "llm") => {
-    setSettingsInitialTab(tab);
-    setSettingsOpen(true);
-  }, []);
 
   const commandActions = useMemo(
     () =>
@@ -908,7 +911,6 @@ export function App() {
           (immediately after the active turn's entries),
           so the previous App-level FloatingQuestionPanel mount is gone.
           See <AskUserQuestionCard> + ChatView ask-question slot. */}
-      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} api={api} onSaved={() => { void checkApiKey(); void refreshLlmSettings(); }} initialTab={settingsInitialTab} />
       <DeferredQueueDialog open={deferredQueueOpen} onOpenChange={setDeferredQueueOpen} />
       <ApprovalDialog queue={approvalQueue} onDecide={handleApprovalDecide} />
       <ApprovalQueueStatus queue={approvalQueue} />

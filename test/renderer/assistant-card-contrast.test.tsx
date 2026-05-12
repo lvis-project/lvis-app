@@ -27,6 +27,7 @@ import { describe, it, expect } from "vitest";
 import { render } from "@testing-library/react";
 import { AssistantCard } from "../../src/ui/renderer/components/AssistantCard.js";
 import type { ChatEntry } from "../../src/lib/chat-stream-state.js";
+import { BUNDLES } from "../../src/ui/renderer/theme/bundles/index.js";
 
 /* ────────────────────────────────────────────────────────────────────────
  * 1. Component-level guard
@@ -123,6 +124,20 @@ describe("Theme tokens — body text contrast must clear WCAG AA on every shell"
   for (const [shell, { fg, bg }] of Object.entries(SHELL_TOKENS)) {
     it(`data-theme=\"${shell}\" has --foreground / --background contrast >= 4.5:1`, () => {
       const ratio = contrastRatio(fg, bg);
+      expect(ratio).toBeGreaterThanOrEqual(4.5);
+    });
+  }
+});
+
+describe("Theme bundles — chat and code text contrast must clear WCAG AA", () => {
+  for (const bundle of BUNDLES) {
+    it(`${bundle.id} foreground/background contrast >= 4.5:1`, () => {
+      const ratio = contrastRatio(bundle.tokens.foreground, bundle.tokens.background);
+      expect(ratio).toBeGreaterThanOrEqual(4.5);
+    });
+
+    it(`${bundle.id} code foreground/background contrast >= 4.5:1`, () => {
+      const ratio = contrastRatio(bundle.tokens["code-fg"], bundle.tokens["code-bg"]);
       expect(ratio).toBeGreaterThanOrEqual(4.5);
     });
   }

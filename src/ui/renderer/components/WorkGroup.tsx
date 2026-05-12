@@ -100,7 +100,7 @@ export function WorkGroup({ stepCount, streaming, children, turnDurationMs }: Wo
         )}
       </button>
       {open && (
-        <div className="min-w-0 space-y-1.5 pl-1 pt-1">
+        <div className="min-w-0 space-y-1.5 pl-1 pt-1 text-foreground">
           {children}
         </div>
       )}

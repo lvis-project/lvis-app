@@ -61,7 +61,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   emitViewActivate: (v: string) => void;
   emitAskUserQuestion: (r: unknown) => void;
 } {
-  const settings = overrides.settings ?? DEFAULT_SETTINGS;
+  let settings = overrides.settings ?? DEFAULT_SETTINGS;
   const sessions = (overrides.sessions ?? []).map((session) => ({
     ...session,
     title: session.title ?? `세션 ${session.id.slice(0, 8)}`,
@@ -84,12 +84,23 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   const chatStreamHandlers = new Set<(ev: unknown) => void>();
   const routineFiredV2Handlers = new Set<(r: unknown) => void>();
   const viewHandlers = new Set<(v: string) => void>();
+  const settingsUpdatedHandlers = new Set<(settings: unknown) => void>();
+  const settingsWindowSavedHandlers = new Set<() => void>();
+  const settingsWindowTabHandlers = new Set<(tab: string) => void>();
   const askUserQuestionHandlers = new Set<(r: unknown) => void>();
 
   const api: MockLvisApi = {
     notifyPluginTheme: vi.fn(async () => ({ ok: true })),
     getSettings: vi.fn(async () => settings),
-    updateSettings: vi.fn(async (p: unknown) => ({ ...(settings as object), ...(p as object) })),
+    updateSettings: vi.fn(async (p: unknown) => {
+      settings = { ...(settings as object), ...(p as object) };
+      settingsUpdatedHandlers.forEach((handler) => handler(settings));
+      return settings;
+    }),
+    onSettingsUpdated: vi.fn((handler: (settings: unknown) => void) => {
+      settingsUpdatedHandlers.add(handler);
+      return () => settingsUpdatedHandlers.delete(handler);
+    }),
     setApiKey: vi.fn(async () => ({ ok: true })),
     hasApiKey: vi.fn(async () => hasApiKey),
     deleteApiKey: vi.fn(async () => ({ ok: true })),
@@ -99,6 +110,22 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     setMarketplaceApiKey: vi.fn(async () => ({ ok: true })),
     hasMarketplaceApiKey: vi.fn(async () => false),
     deleteMarketplaceApiKey: vi.fn(async () => ({ ok: true })),
+    openSettingsWindow: vi.fn(async (initialTab?: string) => {
+      if (initialTab) settingsWindowTabHandlers.forEach((handler) => handler(initialTab));
+      return { ok: true, windowId: 2 };
+    }),
+    notifySettingsWindowSaved: vi.fn(async () => {
+      settingsWindowSavedHandlers.forEach((handler) => handler());
+      return { ok: true };
+    }),
+    onSettingsWindowSaved: vi.fn((handler: () => void) => {
+      settingsWindowSavedHandlers.add(handler);
+      return () => settingsWindowSavedHandlers.delete(handler);
+    }),
+    onSettingsWindowTab: vi.fn((handler: (tab: string) => void) => {
+      settingsWindowTabHandlers.add(handler);
+      return () => settingsWindowTabHandlers.delete(handler);
+    }),
     listMcpCatalog: vi.fn(async () => []),
     installMcpFromMarketplace: vi.fn(async (slug: string) => ({
       ok: true,
@@ -113,6 +140,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     permission: {
       getMode: vi.fn(async () => ({ mode: "default" })),
       setMode: vi.fn(async (mode: string) => ({ ok: true, mode })),
+      onModeChanged: vi.fn(() => () => undefined),
       listRules: vi.fn(async () => []),
       addRule: vi.fn(async () => ({ ok: true })),
       removeRule: vi.fn(async () => ({ ok: true })),
@@ -321,6 +349,7 @@ export function makeMockLvisNamespace() {
       permission: {
         getMode: vi.fn(async () => ({ mode: "default" })),
         setMode: vi.fn(async (mode: string) => ({ ok: true, mode })),
+        onModeChanged: vi.fn(() => () => undefined),
         listRules: vi.fn(async () => []),
         addRule: vi.fn(async () => ({ ok: true })),
         removeRule: vi.fn(async () => ({ ok: true })),
