@@ -8,8 +8,8 @@
  *     name is not found in the lucide-react namespace.
  *   - The same component reference on repeated calls (cache stability).
  */
-import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
 import { Suspense } from "react";
 import { pluginIconFor, FALLBACK_ICON } from "../plugin-icon.js";
 import { Plug, Mic } from "lucide-react";
@@ -42,6 +42,10 @@ async function resolveIconName(name: string): Promise<unknown> {
 }
 
 describe("pluginIconFor", () => {
+  // The render-based iconText assertions below would otherwise leak DOM
+  // between cases — vitest doesn't auto-cleanup `render()` output.
+  afterEach(cleanup);
+
   it("returns the Plug fallback synchronously when icon is undefined", () => {
     const result = pluginIconFor({});
     expect(result).toBe(Plug);
@@ -100,5 +104,59 @@ describe("pluginIconFor", () => {
     );
     await screen.findByTestId("icon");
     expect(screen.queryByTestId("fallback")).toBeNull();
+  });
+
+  // ─── iconText path ─────────────────────────────────────────────────────
+  // iconText renders short text inline (no Lucide chunk load) and takes
+  // precedence over a sibling `icon` field so manifests can opt out of
+  // Lucide lookup without leaving the icon field undefined.
+
+  it("iconText renders the text inline (no React.lazy)", () => {
+    const Icon = pluginIconFor({ iconText: "EP" });
+    expect(isLazy(Icon)).toBe(false);
+    render(<Icon className="h-7 w-7" />);
+    // `getByText` throws if not present — existence is the assertion.
+    expect(screen.getByText("EP").tagName.toLowerCase()).toBe("span");
+  });
+
+  it("iconText takes precedence over icon when both are set", () => {
+    const Icon = pluginIconFor({ icon: "Mic", iconText: "EP" });
+    expect(isLazy(Icon)).toBe(false);
+    render(<Icon className="h-7 w-7" />);
+    expect(screen.getByText("EP").tagName.toLowerCase()).toBe("span");
+  });
+
+  it("iconText preserves the caller's className (sizing hook)", () => {
+    const Icon = pluginIconFor({ iconText: "EP" });
+    const { container } = render(<Icon className="h-7 w-7" />);
+    const span = container.querySelector("span");
+    expect(span?.className).toContain("h-7");
+    expect(span?.className).toContain("w-7");
+    expect(span?.className).toContain("inline-flex");
+  });
+
+  it("iconText caches by text — same reference on repeated calls", () => {
+    const first = pluginIconFor({ iconText: "EP" });
+    const second = pluginIconFor({ iconText: "EP" });
+    expect(first).toBe(second);
+  });
+
+  it("iconText cache is keyed separately from Lucide name cache", () => {
+    // Distinct text vs Lucide-name inputs should never collide, even when
+    // the strings happen to match (defensive — there is no Lucide icon
+    // named "EP" today but the contract should not depend on that).
+    const text = pluginIconFor({ iconText: "EP" });
+    const lucide = pluginIconFor({ icon: "EP" });
+    expect(text).not.toBe(lucide);
+  });
+
+  it("falls back to Plug when both icon and iconText are absent", () => {
+    expect(pluginIconFor({})).toBe(FALLBACK_ICON);
+    expect(pluginIconFor({ icon: undefined, iconText: undefined })).toBe(FALLBACK_ICON);
+  });
+
+  it("iconText with empty string is treated as absent (falls through to icon)", () => {
+    const Icon = pluginIconFor({ icon: "Mic", iconText: "" });
+    expect(isLazy(Icon)).toBe(true);
   });
 });
