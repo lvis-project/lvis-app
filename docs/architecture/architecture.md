@@ -2693,12 +2693,18 @@ PR 3 에서 Microsoft Graph 인증이 호스트에서 플러그인으로 이전�
     "label": "Microsoft 계정",      // optional; 기본은 manifest.name
     "statusTool": "msgraph_status",  // 필수, uiCallable[] 안
     "loginTool": "msgraph_auth",     // 필수, uiCallable[] 안
-    "logoutTool": "msgraph_signout"  // optional, uiCallable[] 안 (있으면)
+    "logoutTool": "msgraph_signout", // optional, uiCallable[] 안 (있으면)
+    "partitionDomains": [             // optional — `openAuthPartitionViewer` 호출 시만 필수
+      "outlook.office.com",
+      "login.microsoftonline.com"
+    ]
   }
 }
 ```
 
 세 tool 이름은 **모두 `uiCallable[]` 의 부분집합**이어야 하며, `manifest-validation.ts` 의 hand-rolled cross-field validator 가 load-time 에 강제한다 (AJV 단독으로는 cross-array membership 표현 불가).
+
+`partitionDomains[]` 는 `hostApi.openAuthPartitionViewer()` 의 dot-boundary suffix-match allow-list — 자세한 거부 패턴 / 3-layer defense / ms-graph 예시는 [`plugin-tool-schema-design.md` §2.4.1](../references/plugin-tool-schema-design.md) 참조.
 
 **StatusTool 반환 형 (recommended)**
 
