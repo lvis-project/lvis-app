@@ -1,8 +1,10 @@
 # Permission Policy — Design Document (v2.2)
 
-> **Status:** Draft v2.2 — multi-agent + Copilot review loop applied
-> **Issue:** #627
-> **Last updated:** 2026-05-10
+> **Status:** Accepted v2.2 — implementation landed via PR #643; this document is the operating reference for the live permission stack
+> **Issue:** #627 (implementation, closed) · #644 (this ratification)
+> **Owner:** Permissions stack maintainers (`src/permissions/`, `src/boot/steps/reviewer-wiring.ts`)
+> **Last updated:** 2026-05-13
+> **Change condition:** Material changes to the 4-axis matrix (`src/permissions/category-registry.ts`), reviewer agent contract (`src/permissions/reviewer/`), or hook v1 deny model require a new revision bump (v2.3+) with an accompanying design PR; minor wording / link / typo edits do not.
 > **v2.2 delta:** current implementation snapshot + future direction aligned to the permission-policy implementation
 
 ## 0. Purpose & scope
