@@ -6,7 +6,7 @@
  * loaded (LVIS_E2E=1, LVIS_DEV=1 bypass security checks).
  *
  * Coverage:
- *   1. Plugin sidebar panel mount — data-testid="agent-hub-panel-v3" visible
+ *   1. Plugin panel mount — data-testid="agent-hub-panel-v3" visible
  *   2. 마이워크 ↔ 팀보드 toggle via ah-pill-toggle (arrow keys + click)
  *   3. Approval row click → ConfirmModal → confirm → DOM store update
  *   4. bridge.config/storage round-trip via gear → SettingsPanel → save → reload
@@ -45,17 +45,17 @@ const test = base.extend<AgentHubFixtures>({
 });
 
 // ---------------------------------------------------------------------------
-// Test 1: Plugin sidebar panel mount
+// Test 1: Plugin panel mount
 // ---------------------------------------------------------------------------
 
-test('agent-hub-panel-v3 mounts in sidebar after boot', async ({ mainWindow }) => {
+test('agent-hub-panel-v3 mounts from host navigation after boot', async ({ mainWindow }) => {
   const tabFound = await openAgentHubTab(mainWindow);
-  test.skip(!tabFound, 'agent-hub plugin tab not present — build may predate v0.2.0');
+  test.skip(!tabFound, 'agent-hub plugin entry not present — build may predate v0.2.0');
 
   const panel = await waitForV3Panel(mainWindow);
   expect(
     panel,
-    'data-testid="agent-hub-panel-v3" must be visible after clicking the plugin tab',
+    'data-testid="agent-hub-panel-v3" must be visible after opening the plugin entry',
   ).not.toBeNull();
 
   await expect(panel!).toBeVisible();
@@ -67,7 +67,7 @@ test('agent-hub-panel-v3 mounts in sidebar after boot', async ({ mainWindow }) =
 
 test('ah-pill-toggle switches between 마이워크 and 팀보드', async ({ mainWindow }) => {
   const tabFound = await openAgentHubTab(mainWindow);
-  test.skip(!tabFound, 'agent-hub plugin tab not present — skipping pill-toggle test');
+  test.skip(!tabFound, 'agent-hub plugin entry not present — skipping pill-toggle test');
 
   const panel = await waitForV3Panel(mainWindow);
   test.skip(!panel, 'agent-hub-panel-v3 not mounted — skipping pill-toggle test');
@@ -119,7 +119,7 @@ test('approval row click opens ConfirmModal and confirm updates DOM', async ({ m
   await injectMockBaseUrl(mainWindow, mockServer);
 
   const tabFound = await openAgentHubTab(mainWindow);
-  test.skip(!tabFound, 'agent-hub plugin tab not present — skipping approval test');
+  test.skip(!tabFound, 'agent-hub plugin entry not present — skipping approval test');
 
   const panel = await waitForV3Panel(mainWindow);
   test.skip(!panel, 'agent-hub-panel-v3 not mounted — skipping approval test');
@@ -202,7 +202,7 @@ test('approval row click opens ConfirmModal and confirm updates DOM', async ({ m
 
 test('bridge.config round-trip: gear → SettingsPanel → save → value persists', async ({ mainWindow }) => {
   const tabFound = await openAgentHubTab(mainWindow);
-  test.skip(!tabFound, 'agent-hub plugin tab not present — skipping config round-trip test');
+  test.skip(!tabFound, 'agent-hub plugin entry not present — skipping config round-trip test');
 
   const panel = await waitForV3Panel(mainWindow);
   test.skip(!panel, 'agent-hub-panel-v3 not mounted — skipping config round-trip test');
@@ -344,7 +344,7 @@ test('S5PartialSync banner appears when one region fails', async ({ mainWindow, 
   await injectMockBaseUrl(mainWindow, mockServerFailing);
 
   const tabFound = await openAgentHubTab(mainWindow);
-  test.skip(!tabFound, 'agent-hub plugin tab not present — skipping partial-sync test');
+  test.skip(!tabFound, 'agent-hub plugin entry not present — skipping partial-sync test');
 
   const panel = await waitForV3Panel(mainWindow);
   test.skip(!panel, 'agent-hub-panel-v3 not mounted — skipping partial-sync test');
@@ -407,7 +407,7 @@ test('ah-myboard-row entries are visible in 마이워크 board', async ({ mainWi
   await injectMockBaseUrl(mainWindow, mockServer);
 
   const tabFound = await openAgentHubTab(mainWindow);
-  test.skip(!tabFound, 'agent-hub plugin tab not present — skipping myboard test');
+  test.skip(!tabFound, 'agent-hub plugin entry not present — skipping myboard test');
 
   const panel = await waitForV3Panel(mainWindow);
   test.skip(!panel, 'agent-hub-panel-v3 not mounted — skipping myboard test');

@@ -14,11 +14,37 @@ import type { AgentHubMockServer } from './fixtures/agent-hub-mock-server';
 // ---------------------------------------------------------------------------
 
 /**
- * Navigate to the agent-hub plugin tab in the main toolbar.
+ * Navigate to the agent-hub plugin view from the current host navigation.
  * Returns true if found and clicked, false if the plugin is not present
  * (treat false as a skip signal in the calling test).
  */
 export async function openAgentHubTab(page: Page): Promise<boolean> {
+  const gridButton = page.locator('[data-testid="plugin-grid-button"]').first();
+  const gridVisible = await gridButton
+    .waitFor({ state: 'visible', timeout: 5_000 })
+    .then(() => true)
+    .catch(() => false);
+  if (gridVisible) {
+    await gridButton.click();
+    const gridSelectors = [
+      '[data-testid="plugin-cell-plugin-agent-hub-agent-hub-panel"]',
+      'button[data-viewkey="plugin:agent-hub:agent-hub-panel"]',
+      '[data-testid^="plugin-cell-plugin-agent-hub-"]:has-text("Agent Hub")',
+      '[data-testid^="plugin-cell-plugin-agent-hub-"]:has-text("업무 보드")',
+    ];
+    for (const sel of gridSelectors) {
+      const cell = page.locator(sel).first();
+      const visible = await cell
+        .waitFor({ state: 'visible', timeout: 2_000 })
+        .then(() => true)
+        .catch(() => false);
+      if (visible) {
+        await cell.click();
+        return true;
+      }
+    }
+  }
+
   const tabSelectors = [
     '[data-testid="agent-hub-tab"]',
     'button[role="tab"]:has-text("에이전트 허브")',

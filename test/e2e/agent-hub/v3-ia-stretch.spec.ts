@@ -100,7 +100,7 @@ async function setupPanel(
 
   const tabFound = await openAgentHubTab(page);
   if (!tabFound) {
-    return { panel: page.locator('body'), skip: true, skipReason: 'agent-hub tab not present — build may predate v0.2.1' };
+    return { panel: page.locator('body'), skip: true, skipReason: 'agent-hub plugin entry not present — build may predate v0.2.1' };
   }
 
   const panel = await waitForV3Panel(page);

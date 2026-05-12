@@ -92,4 +92,18 @@ describe("UnifiedSearchPanel", () => {
     fireEvent.keyDown(input, { key: "Enter", shiftKey: true });
     expect(onPrevConversationMatch).toHaveBeenCalledTimes(1);
   });
+
+  it("loads a selected session result and closes the panel", async () => {
+    const onLoadSession = vi.fn();
+    const onClose = vi.fn();
+    render(<UnifiedSearchPanel {...defaultProps({ onLoadSession, onClose })} />);
+
+    await waitFor(() => expect(screen.getByText("세션 제목")).toBeTruthy());
+    const sessionButton = screen.getByText("세션 제목").closest("button");
+    expect(sessionButton).toBeTruthy();
+    fireEvent.click(sessionButton!);
+
+    expect(onLoadSession).toHaveBeenCalledWith("sess-1");
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
 });

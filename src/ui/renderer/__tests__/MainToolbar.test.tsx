@@ -19,6 +19,7 @@ function defaultProps(overrides: Partial<Parameters<typeof MainToolbar>[0]> = {}
     onOpenSettings: vi.fn(),
     onOpenUnifiedSearch: vi.fn(),
     onOpenStarredView: vi.fn(),
+    onOpenDetachedView: vi.fn(),
     ...overrides,
   };
 }
@@ -99,6 +100,22 @@ describe("MainToolbar", () => {
     await openHamburger();
     fireEvent.click(screen.getByText("즐겨찾기"));
     expect(onOpenStarredView).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens built-in views in detached windows from the hamburger menu", async () => {
+    const onOpenDetachedView = vi.fn();
+    renderWithProvider(defaultProps({ onOpenDetachedView }));
+
+    await openHamburger();
+    fireEvent.click(screen.getByTestId("toolbar-detach-routines"));
+    await openHamburger();
+    fireEvent.click(screen.getByTestId("toolbar-detach-memory"));
+    await openHamburger();
+    fireEvent.click(screen.getByTestId("toolbar-detach-starred"));
+
+    expect(onOpenDetachedView).toHaveBeenNthCalledWith(1, "routines");
+    expect(onOpenDetachedView).toHaveBeenNthCalledWith(2, "memory");
+    expect(onOpenDetachedView).toHaveBeenNthCalledWith(3, "starred");
   });
 
   it("calls onOpenSettings when 설정 menu item clicked", async () => {

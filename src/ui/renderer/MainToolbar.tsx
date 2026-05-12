@@ -1,4 +1,4 @@
-import { Database, Download, Home, KeyRound, Menu, Plus, Repeat2, Search, Star } from "lucide-react";
+import { Database, Download, ExternalLink, Home, KeyRound, Menu, Plus, Repeat2, Search, Star } from "lucide-react";
 import { Button } from "../../components/ui/button.js";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "../../components/ui/dropdown-menu.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip.js";
@@ -17,6 +17,7 @@ export interface MainToolbarProps {
   onOpenSettings: () => void;
   onOpenUnifiedSearch: () => void;
   onOpenStarredView: () => void;
+  onOpenDetachedView: (viewKey: "routines" | "memory" | "starred") => void | Promise<void>;
 }
 
 export function MainToolbar({
@@ -33,6 +34,7 @@ export function MainToolbar({
   onOpenSettings,
   onOpenUnifiedSearch,
   onOpenStarredView,
+  onOpenDetachedView,
 }: MainToolbarProps) {
   return (
     <div data-testid="main-toolbar" className="border-b bg-card px-3 py-2">
@@ -124,6 +126,22 @@ export function MainToolbar({
             <DropdownMenuItem onClick={onOpenStarredView}>
               <Star className="mr-2 h-3.5 w-3.5" />
               <span>즐겨찾기</span>
+            </DropdownMenuItem>
+
+            <DropdownMenuSeparator />
+
+            {/* ── Detached built-in views ── */}
+            <DropdownMenuItem data-testid="toolbar-detach-routines" onClick={() => void onOpenDetachedView("routines")}>
+              <ExternalLink className="mr-2 h-3.5 w-3.5" />
+              <span>루틴 새 창으로 열기</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem data-testid="toolbar-detach-memory" onClick={() => void onOpenDetachedView("memory")}>
+              <ExternalLink className="mr-2 h-3.5 w-3.5" />
+              <span>메모리 새 창으로 열기</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem data-testid="toolbar-detach-starred" onClick={() => void onOpenDetachedView("starred")}>
+              <ExternalLink className="mr-2 h-3.5 w-3.5" />
+              <span>즐겨찾기 새 창으로 열기</span>
             </DropdownMenuItem>
 
             <DropdownMenuSeparator />

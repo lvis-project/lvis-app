@@ -384,6 +384,24 @@ export function App() {
     [api, setErrorWithThought],
   );
 
+  const openDetachedBuiltInView = useCallback(
+    async (viewKey: "routines" | "memory" | "starred"): Promise<boolean> => {
+      const openDetached = api.window?.openDetached;
+      if (!openDetached) {
+        setErrorWithThought("오류: 새 창을 열 수 없습니다.");
+        return false;
+      }
+      const result = await openDetached(viewKey);
+      if (!result.ok) {
+        console.warn(`[window] detached built-in view ${viewKey} did not open`, result.error);
+        setErrorWithThought(`오류: 새 창을 열 수 없습니다. ${result.error}`);
+        return false;
+      }
+      return true;
+    },
+    [api, setErrorWithThought],
+  );
+
   // When a plugin view declares `window.defaultMode: "detached"`, selecting
   // it opens a separate magnetic-snap BrowserWindow instead of
   // switching the main window's active view.
@@ -788,6 +806,9 @@ export function App() {
               searchOpenOverlay();
             }}
             onOpenStarredView={() => setActiveView("starred")}
+            onOpenDetachedView={(viewKey) => {
+              void openDetachedBuiltInView(viewKey);
+            }}
           />
           {searchOpen && (
             <UnifiedSearchPanel
@@ -810,7 +831,10 @@ export function App() {
               }}
               onOpen={searchOpenOverlay}
               onClose={searchCloseOverlay}
-              onLoadSession={handleLoadSession}
+              onLoadSession={(sessionId) => {
+                setActiveView("home");
+                return handleLoadSession(sessionId);
+              }}
               onOpenMemoryView={() => {
                 setActiveView("memory");
                 searchCloseOverlay();

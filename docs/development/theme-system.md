@@ -38,9 +38,10 @@ This means:
   `--muted-foreground`, `--border`, `--ring`, `--destructive`, `--warning`,
   `--success`, …) live inside `[data-theme="<id>"]` blocks. Each variant
   re-points its semantic tokens to a different set of primitives.
-- **Components** consume semantic tokens **only**, via Tailwind utilities
-  defined in `tailwind.config.cjs` (`bg-background`, `text-primary`,
-  `border-border`, etc.). They never read `--p-*` directly.
+- **Components** consume semantic tokens **only**, via Tailwind v4 utilities
+  exposed from the `@theme inline` block in `src/styles.css`
+  (`bg-background`, `text-primary`, `border-border`, etc.). They never read
+  `--p-*` directly.
 
 The Tailwind utilities resolve at build time to `hsl(var(--background))`,
 which means runtime CSS-variable swaps re-paint immediately without a
@@ -113,15 +114,16 @@ Use case: "I need a `info-banner` color separate from `primary`."
    :root[data-theme="high-contrast"] { --info: 200 100% 60%; --info-foreground: 0 0% 0%; }
    ```
 
-3. Expose it in `tailwind.config.cjs`:
+3. Expose it in the `@theme inline` block in `src/styles.css`:
 
-   ```js
-   info: { DEFAULT: "hsl(var(--info))", foreground: "hsl(var(--info-foreground))" },
+   ```css
+   --color-info: hsl(var(--info));
+   --color-info-foreground: hsl(var(--info-foreground));
    ```
 
 4. Components can now use `bg-info text-info-foreground`.
 
-The PR diff is CSS + 1 line of config. No component changes.
+The PR diff is CSS-only. No component changes.
 
 ---
 
