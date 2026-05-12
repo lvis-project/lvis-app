@@ -372,6 +372,68 @@ interface PluginAuthStatusResult {
 }
 ```
 
+#### 2.4.1 `auth.partitionDomains` — 파티션 뷰어 allow-list (#649)
+
+OAuth-flow 를 소유한 플러그인이 자기 `persist:plugin-auth:<pluginId>` 파티션 안에서 외부 페이지(예: Outlook 캘린더 web UI)를 열기 위한 *hostname allow-list*. `hostApi.openAuthPartitionViewer({ url })` 호출이 이 리스트를 게이트로 사용한다 — URL 의 host 가 리스트에 매치되지 않으면 즉시 throw + audit.
+
+**매칭 룰** — dot-boundary suffix-match. `outlook.office.com` 가 리스트에 있으면:
+- `outlook.office.com` ✅
+- `mail.outlook.office.com` ✅
+- `outlook.office.com.attacker.com` ❌ (전형적인 typosquat)
+- `notoutlook.office.com` ❌
+
+**거부 패턴** — SDK schema 와 호스트 `host-allow-list.ts` 가 보안적으로 중요한 패턴을 **둘 다** 거부한다 (hand-edited manifest 가 schema 를 우회해도 호스트가 한 번 더 잡음). 형식 오류성 패턴은 SDK schema 만 publish-time 에 거부한다 (호스트는 단순히 매칭 실패로 처리되어 dead entry 가 됨).
+
+| 패턴 | SDK schema | 호스트 | 거부 이유 |
+|---|---|---|---|
+| `*`, `*.office.com` | ✅ | ✅ | wildcard 는 모든 sub-domain 매치 → blanket consent surface |
+| `localhost`, `intranet` | ✅ | ✅ | single-label 은 동일 등록자 suffix 의 모든 site 와 blanket-match |
+| `com`, `co.kr`, `or.kr`, `go.kr`, `kr`, `net`, `org`, `io`, `ai`, `dev`, `app` | ✅ | ✅ | 공개 등록 suffix — 모든 등록자 site 와 blanket-match |
+| `https://outlook.office.com/path` | ✅ | ✅ (slash detection) | URL/path → host 만 받음 |
+| `xn--80ak6aa92e.com` | ✅ | ✅ | IDN-punycode 는 homoglyph 위험 (e.g. `аррӏе.com`); ASCII brand domain 만 |
+| (entry 17개 이상) | ✅ (maxItems) | ✅ (`MAX_HOSTS=16`) | over-broad consent surface |
+| `Outlook.Office.com` | ✅ | (lowercase 정규화) | schema 는 소문자만 허용; 호스트는 정규화 후 매칭 |
+| `outlook.office.com:443` | ✅ | (매칭 실패, dead entry) | URL.hostname 에 포트가 없어 매칭 안 됨 |
+| `outlook..office.com`, `-foo.com`, `foo-.com`, `.outlook.com`, `outlook.com.` | ✅ | (매칭 실패, dead entry) | 정상 URL hostname 과 매칭 안 됨 |
+| (label > 63자 또는 hostname > 253자) | ✅ (RFC 1035) | (매칭 실패, dead entry) | 정상 URL 에 그런 host 없음 |
+
+**3 layer defense** — 매니페스트 publish 시 SDK schema 가 한 번, 호스트 load 시 `normalizeAllowedHosts` 가 한 번, viewer-open 호출 시 `urlHostMatchesAllowList` 가 한 번.
+
+**선택 필드** — 플러그인이 `openAuthPartitionViewer` 를 호출하지 않으면 `partitionDomains` 생략 가능. 호출하면서 빈 리스트 / 미선언이면 `external-auth-consumer` capability 가 있어도 거부.
+
+**`external-auth-consumer` capability 와의 관계** — partition viewer 는 `openAuthWindow` 와 동일한 cookie jar 에 접근하므로 capability 게이트도 동일 (`external-auth-consumer`). 즉 viewer 호출 플러그인은:
+
+1. `capabilities[]` 에 `external-auth-consumer` 선언
+2. `auth.partitionDomains[]` 에 non-empty hostname 리스트 선언
+3. (선택) `auth.{statusTool, loginTool, logoutTool}` 로 host UI 뱃지/버튼 surface 활성화
+
+**예시 (ms-graph 플러그인 — Outlook 캘린더 뷰어 surface 추가)**
+
+```jsonc
+{
+  "id": "ms-graph",
+  "capabilities": ["external-auth-consumer"],
+  "tools": [
+    "msgraph_status", "msgraph_auth", "msgraph_signout",
+    "msgraph_open_outlook_calendar"
+    /* ... */
+  ],
+  "uiCallable": ["msgraph_status", "msgraph_auth", "msgraph_signout"],
+  "emittedEvents": ["ms-graph.auth.changed"],
+  "auth": {
+    "label": "Microsoft 계정",
+    "statusTool": "msgraph_status",
+    "loginTool": "msgraph_auth",
+    "logoutTool": "msgraph_signout",
+    "partitionDomains": [
+      "outlook.office.com",
+      "login.microsoftonline.com",
+      "office365.com"
+    ]
+  }
+}
+```
+
 ### 2.5 AJV 매니페스트 검증 플로우
 
 ```
