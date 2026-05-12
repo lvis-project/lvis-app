@@ -16,6 +16,9 @@ describe("shell-resolver", () => {
   it("returns sh on Windows when sh is found", () => {
     vi.spyOn(process, "platform", "get").mockReturnValue("win32" as NodeJS.Platform);
     vi.mocked(execFileSync).mockImplementation((cmd, args) => {
+      if (String(cmd).includes("C:\\Program Files\\Git\\")) {
+        throw new Error("not installed");
+      }
       if (cmd === "where" && args[0] === "sh") {
         return "C:\\Windows\\System32\\sh.exe";
       }
@@ -34,9 +37,31 @@ describe("shell-resolver", () => {
     expect(shell.windowsFlavor).toBe("msys");
   });
 
+  it("prefers Git for Windows sh over the WSL bash launcher", () => {
+    vi.spyOn(process, "platform", "get").mockReturnValue("win32" as NodeJS.Platform);
+    vi.mocked(execFileSync).mockImplementation((cmd, args) => {
+      if (cmd === "C:\\Program Files\\Git\\usr\\bin\\sh.exe" && args[1] === "printf __lvis_shell_ok__") {
+        return "__lvis_shell_ok__";
+      }
+      if (cmd === "C:\\Program Files\\Git\\usr\\bin\\sh.exe" && args[1] === "uname -s") {
+        return "MINGW64_NT";
+      }
+      throw new Error("unexpected command");
+    });
+
+    const shell = resolveShell();
+
+    expect(shell.cmd).toBe("C:\\Program Files\\Git\\usr\\bin\\sh.exe");
+    expect(shell.shellArgs("echo hi")).toEqual(["-c", "echo hi"]);
+    expect(shell.windowsFlavor).toBe("msys");
+  });
+
   it("falls back to bash on Windows when sh is missing", () => {
     vi.spyOn(process, "platform", "get").mockReturnValue("win32" as NodeJS.Platform);
     vi.mocked(execFileSync).mockImplementation((cmd, args) => {
+      if (String(cmd).includes("C:\\Program Files\\Git\\")) {
+        throw new Error("not installed");
+      }
       if (cmd === "where" && args[0] === "sh") {
         throw new Error("not found");
       }

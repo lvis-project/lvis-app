@@ -24,6 +24,7 @@ import { spawn } from "node:child_process";
 import { buildSafeChildEnv } from "../tools/safe-env.js";
 import {
   resolveShell,
+  shellEnvForChild,
   shellCommandForHookPath,
   shellQuote,
   ShellMismatchError,
@@ -95,7 +96,7 @@ export async function runOneHookScript(
       cwd,
       // H2: whitelist env — do not leak ANTHROPIC_API_KEY, AWS_*, GITHUB_TOKEN
       // etc. to hook scripts. The hook receives only the LVIS_HOOK_* vars.
-      env: buildSafeChildEnv(hookEnv),
+      env: shellEnvForChild(shell, buildSafeChildEnv(hookEnv)),
       stdio: ["pipe", "pipe", "pipe"],
       // Run in a new process group so SIGKILL on timeout reaps the
       // entire descendant tree (sh → script → sleep). Without this the

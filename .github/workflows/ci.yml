@@ -44,6 +44,6 @@ jobs:
         working-directory: lvis-app
       - run: bun run build
         working-directory: lvis-app
-      - run: bunx vitest run
+      - run: bun run test
         working-directory: lvis-app
 
