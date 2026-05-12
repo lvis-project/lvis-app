@@ -157,7 +157,7 @@ export type ChatEntry =
       tokensIn: number;
       source: "session-estimate";
     }
-  // Overlay trigger that the user accepted ("지금 답하기"). The
+  // Overlay trigger that the user accepted ("확인하기"). The
   // trigger session ran in an isolated ConversationLoop; once imported,
   // its messages live in the chat loop's history (so the LLM has
   // context for the user's next turn) but the renderer collapses the
