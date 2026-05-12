@@ -310,6 +310,7 @@ export type LvisApi = {
   memoryDeleteEntry: (f: string) => Promise<void>;
   memorySearchEntries: (q: string) => Promise<Array<{ filename?: string; title: string; content?: string; excerpt: string; updatedAt: string }>>;
   memoryGetIndex: () => Promise<string>;
+  memoryUpdateIndex: (content: string) => Promise<unknown>;
   memoryListSessions: () => Promise<Array<{ sessionId: string; matchedMessage: string; timestamp: string }>>;
   memorySearchSessions: (q: string) => Promise<Array<{ sessionId: string; matchedMessage: string; timestamp: string }>>;
   memoryGetAgentsMd: () => Promise<string>;
@@ -322,7 +323,6 @@ export type LvisApi = {
     | {
         ok: true;
         content: string;
-        memoryEntry?: { filename: string; title: string; content: string; updatedAt?: string } | null;
         refreshedAt?: string;
         sources?: string[];
       }

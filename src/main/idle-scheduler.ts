@@ -166,6 +166,7 @@ export class IdleSchedulerService {
   private powerSubscribed = false;
   private readonly listeners: Array<{ event: string; handler: (...args: unknown[]) => void }> = [];
   private stateChangeListener: IdleStateChangeListener | null = null;
+  private readonly stateChangeListeners = new Set<IdleStateChangeListener>();
 
   // 파라미터 (기본값 확정)
   private readonly idleThresholdSec: number;
@@ -288,6 +289,13 @@ export class IdleSchedulerService {
    */
   setStateChangeListener(listener: IdleStateChangeListener | null): void {
     this.stateChangeListener = listener;
+  }
+
+  addStateChangeListener(listener: IdleStateChangeListener): () => void {
+    this.stateChangeListeners.add(listener);
+    return () => {
+      this.stateChangeListeners.delete(listener);
+    };
   }
 
   getQueueLength(): number {
@@ -427,9 +435,13 @@ export class IdleSchedulerService {
 
     // Notify listener (boot.ts wires the RoutineEngine handoff here).
     // Swallow listener errors — scheduler must never throw.
-    if (this.stateChangeListener) {
+    const listeners = [
+      ...(this.stateChangeListener ? [this.stateChangeListener] : []),
+      ...this.stateChangeListeners,
+    ];
+    for (const listener of listeners) {
       try {
-        this.stateChangeListener(newState, old, reason);
+        listener(newState, old, reason);
       } catch (err) {
         this.logger(`[idle-scheduler] stateChangeListener threw: ${(err as Error).message}`);
       }
