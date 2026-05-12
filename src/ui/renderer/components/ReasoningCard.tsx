@@ -49,7 +49,7 @@ export function ReasoningCard({
   // 한 곳에서만 표시.
 
   return (
-    <div className="min-w-0 w-full max-w-full rounded-md text-sm text-muted-foreground">
+    <div className="min-w-0 w-full max-w-full rounded-md text-sm text-muted-foreground lvis-anim-message-in">
       <button
         type="button"
         className="flex w-full min-w-0 items-center gap-2 px-3 py-1.5 text-[11px] text-muted-foreground hover:bg-muted/30 disabled:cursor-default disabled:hover:bg-transparent"
@@ -73,7 +73,7 @@ export function ReasoningCard({
         )}
       </button>
       {bodyVisible && (
-        <div className="ml-3 min-w-0 whitespace-pre-wrap break-words border-l-2 border-muted py-1 pl-3 text-[11px] italic leading-5 text-muted-foreground/80 [overflow-wrap:anywhere]">
+        <div className="ml-3 min-w-0 whitespace-pre-wrap break-words border-l-2 border-muted py-1 pl-3 text-[11px] italic leading-5 text-muted-foreground/80 [overflow-wrap:anywhere] lvis-anim-fade-in">
           {entry.text || (streaming ? "생각하는 중..." : "")}
         </div>
       )}

@@ -20,6 +20,7 @@ import { randomUUID } from "node:crypto";
 import { installPluginPartitionPolicy } from "../../main/html-preview-partition.js";
 import { pluginPartitionName } from "../../shared/plugin-partition.js";
 import { onEvent as onHostEvent } from "../types.js";
+import { normalizeAllowedHosts } from "../../main/host-allow-list.js";
 import { AuditLogger, type AuditEntry } from "../../audit/audit-logger.js";
 import { PluginRuntime } from "../../plugins/runtime.js";
 import { startPluginDevWatcher } from "../../plugins/dev-watcher.js";
@@ -732,6 +733,17 @@ export interface InitPluginRuntimeInput {
     opts: { url: string; windowTitle?: string; persistPartition?: string },
   ) => Promise<void>;
   /**
+   * Issue #649 — viewer that loads a URL inside the *caller plugin's*
+   * `persist:plugin-auth:<pluginId>` partition so AAD/OIDC cookies deposited
+   * by an earlier `openAuthWindow` produce silent SSO. Production wiring is
+   * `openAuthPartitionViewer` from `src/main/auth-partition-viewer-service.ts`;
+   * tests inject a stub.
+   */
+  openAuthPartitionViewerService: (
+    parent: BrowserWindow,
+    opts: import("../../main/auth-partition-viewer-service.js").OpenAuthPartitionViewerOptions,
+  ) => Promise<void>;
+  /**
    * §B3 — System browser opener used when
    * `settings.webView.preferredFlow === "system-browser"`. Production wiring
    * is `shell.openExternal` from electron; tests inject a spy.
@@ -776,6 +788,7 @@ export async function initPluginRuntime(
     mainWindow,
     openAuthWindowService,
     openLinkWindowService,
+    openAuthPartitionViewerService,
     shellOpenExternal,
     approvalGate,
   } = input;
@@ -825,11 +838,11 @@ export async function initPluginRuntime(
   }
 
   // §7.2 Plugin Deployment Guard.
-  // Plugin layout anchors at `~/.lvis/plugins/<id>/` — single root for both
+  // Plugin layout anchors at `lvisHome()/plugins/<id>/` — single root for both
   // user-installed and admin-injected plugins (distinguished by metadata,
   // not by physical directory). The resolver always uses
-  // `homedir()/.lvis/plugins`; tests pass an explicit `pluginsRoot` for
-  // sandbox isolation (Round-3 removed the env-tier override).
+  // `lvisHome()/plugins`; E2E overrides LVIS_HOME once and every caller
+  // follows the same app-home SOT.
   const pluginPaths = resolvePluginPaths();
   // mkdir the root once so the trust-root realpath check in PluginRuntime
   // (and any first-install write under pluginsRoot/<id>/) doesn't trip on a
@@ -1170,6 +1183,90 @@ export async function initPluginRuntime(
           : { ...opts, persistPartition: defaultPartition };
         return openAuthWindowService(ElectronBrowserWindow.getFocusedWindow() ?? mainWindow, effectiveOpts);
       }) as PluginHostApi["openAuthWindow"],
+
+      // ─── Issue #649 — Auth-partition viewer ───────────────────────────
+      // Opens a hardened BrowserWindow inside the *caller plugin's*
+      // `persist:plugin-auth:<pluginId>` partition so a re-load of an
+      // SSO-protected URL (e.g. Outlook calendar after ms-graph login)
+      // does not force the user through AAD again. Same `external-auth-
+      // consumer` capability gate as openAuthWindow — both surfaces grant
+      // access to the plugin's auth partition cookie jar.
+      //
+      // The partition is computed from `pluginId` of *this* HostApi
+      // instance (one HostApi per plugin per `PluginRuntime.start` call)
+      // — cross-plugin cookie reuse must route through a `callTool` to a
+      // tool owned by the partition-owning plugin so its handler gets
+      // its own HostApi (and hence its own partition).
+      openAuthPartitionViewer: async (opts: { url: string; windowTitle?: string }) => {
+        const safeUrlForLog = (() => {
+          try {
+            const parsed = new URL(opts.url);
+            return `${parsed.origin}${parsed.pathname}`;
+          } catch {
+            return "[invalid-url]";
+          }
+        })();
+        if (!manifest.capabilities?.includes("external-auth-consumer")) {
+          try {
+            bootAuditLogger.log({
+              timestamp: new Date().toISOString(),
+              sessionId: "plugin",
+              type: "error",
+              input: `[plugin:${pluginId}] open_auth_partition_viewer_capability_denied url=${safeUrlForLog} missingCapability=external-auth-consumer`,
+            });
+          } catch { /* audit must not break host */ }
+          throw new Error(
+            `[plugin:${pluginId}] capability not declared: external-auth-consumer`,
+          );
+        }
+        const declared = manifest.auth?.partitionDomains ?? [];
+        let allowedHosts: string[];
+        try {
+          allowedHosts = normalizeAllowedHosts(declared);
+        } catch (err) {
+          const reason = err instanceof Error ? err.message : String(err);
+          try {
+            bootAuditLogger.log({
+              timestamp: new Date().toISOString(),
+              sessionId: "plugin",
+              type: "error",
+              input: `[plugin:${pluginId}] open_auth_partition_viewer_manifest_invalid reason=${reason}`,
+            });
+          } catch { /* audit must not break host */ }
+          throw new Error(
+            `[plugin:${pluginId}] openAuthPartitionViewer: manifest.auth.partitionDomains invalid (${reason})`,
+          );
+        }
+        if (allowedHosts.length === 0) {
+          throw new Error(
+            `[plugin:${pluginId}] openAuthPartitionViewer: manifest.auth.partitionDomains must be a non-empty list`,
+          );
+        }
+        return openAuthPartitionViewerService(
+          ElectronBrowserWindow.getFocusedWindow() ?? mainWindow,
+          {
+            pluginId,
+            url: opts.url,
+            allowedHosts,
+            windowTitle: opts.windowTitle,
+            parent: ElectronBrowserWindow.getFocusedWindow() ?? mainWindow,
+            audit: (event) => {
+              try {
+                bootAuditLogger.log({
+                  timestamp: event.timestamp,
+                  sessionId: "plugin",
+                  type: event.type === "open_auth_partition_viewer" ? "tool_call" : "error",
+                  input:
+                    `[plugin:${event.pluginId}] ${event.type} ` +
+                    `url=${event.url}` +
+                    (event.deniedHost ? ` deniedHost=${event.deniedHost}` : "") +
+                    ` allowedHosts=${event.allowedHosts.join(",")}`,
+                });
+              } catch { /* audit must not break host */ }
+            },
+          },
+        );
+      },
 
       // ─── §8 Agent Approval — hostApi.agentApproval ────────────────────
       // Exposes the main-process ApprovalGate to plugins so they can request

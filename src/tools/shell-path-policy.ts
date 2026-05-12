@@ -114,6 +114,9 @@ export function findShellPathPolicyViolation(
   }
   const candidates = extractPathCandidates(command);
   for (const candidate of candidates) {
+    if (isIgnoredShellDeviceCandidate(candidate)) {
+      continue;
+    }
     let absolute: string;
     try {
       absolute = resolveCandidatePath(candidate, cwd);
@@ -151,6 +154,11 @@ export function findShellPathPolicyViolation(
 
 function isIgnoredShellDevicePath(canonicalPath: string): boolean {
   return canonicalPath === SHELL_NULL_DEVICE_PATH;
+}
+
+function isIgnoredShellDeviceCandidate(candidate: string): boolean {
+  const normalized = candidate.replace(/\\/g, "/").toLowerCase();
+  return normalized === SHELL_NULL_DEVICE_PATH || normalized === "nul";
 }
 
 export function validateShellCommandPathPolicy(

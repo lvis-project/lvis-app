@@ -15,7 +15,6 @@ function renderBar(overrides: Partial<Parameters<typeof InputActionBar>[0]> = {}
     plugins: [],
     onSelectPlugin: vi.fn(),
     onInsertSlashCommand: vi.fn(),
-    onToggleChatSearch: vi.fn(),
     commandActions: [],
     commandPopoverOpen: false,
     onCommandPopoverOpenChange: vi.fn(),

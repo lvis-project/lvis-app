@@ -14,9 +14,9 @@ export function SummaryToast({ summary }: { summary: string }) {
   return (
     <div
       data-testid="summary-toast"
-      className="w-full min-w-0 max-w-full border-l-2 border-blue-500/40 bg-blue-500/5 px-4 py-2.5 mb-3 rounded-r"
+      className="w-full min-w-0 max-w-full border-l-2 border-action-compact/40 bg-action-compact/5 px-4 py-2.5 mb-3 rounded-r"
     >
-      <div className="text-[10px] uppercase tracking-wider text-blue-600/80 dark:text-blue-300/80 mb-1.5 font-medium">
+      <div className="text-[10px] uppercase tracking-wider text-action-compact/80 mb-1.5 font-medium">
         📝 이전 요약
       </div>
       <div

@@ -54,7 +54,7 @@ function FileThumb() {
 
 function PasteThumb() {
   return (
-    <div className="flex h-12 w-12 items-center justify-center rounded border border-amber-300 bg-amber-100 text-amber-700">
+    <div className="flex h-12 w-12 items-center justify-center rounded border border-warning/40 bg-warning/15 text-warning">
       <ClipboardPaste className="h-5 w-5" />
     </div>
   );
@@ -68,7 +68,7 @@ function chipLabel(att: Attachment): string {
 
 function badgeClass(count: number): string {
   if (count >= ATTACH_MAX_COUNT) return "text-destructive font-bold";
-  if (count >= ATTACH_MAX_COUNT - 1) return "text-amber-600 font-semibold";
+  if (count >= ATTACH_MAX_COUNT - 1) return "text-warning font-semibold";
   return "text-muted-foreground";
 }
 
@@ -91,7 +91,7 @@ function StackVisual({ layers }: { layers: number }) {
             <div
               key={i}
               style={{ left, top, width: 40, height: 40 }}
-              className="absolute flex items-center justify-center rounded-md border border-white bg-muted text-muted-foreground shadow"
+              className="absolute flex items-center justify-center rounded-md border border-background bg-muted text-muted-foreground shadow"
             >
               <FileIcon className="h-4 w-4" />
             </div>
@@ -101,7 +101,7 @@ function StackVisual({ layers }: { layers: number }) {
           <div
             key={i}
             style={{ left, top, width: 40, height: 40 }}
-            className={`absolute rounded-md border border-white bg-gradient-to-br ${STACK_COLORS[i % STACK_COLORS.length]} shadow`}
+            className={`absolute rounded-md border border-background bg-gradient-to-br ${STACK_COLORS[i % STACK_COLORS.length]} shadow`}
           />
         );
       })}

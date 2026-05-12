@@ -7,7 +7,7 @@
  * existing `uiCallable ⊂ tools` cross-check pattern in §B-3 of
  * `manifest-validation.ts` so the same gate runs at load time.
  */
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -197,6 +197,94 @@ describe("manifest validation — auth cross-field", () => {
     await expect(parsePluginJson(manifestPath, validator)).rejects.toThrow(
       /schema validation/i,
     );
+  });
+
+  it("warns when manifest declares 'auth' but emittedEvents missing ${id}.auth.changed (lvis-plugin-agent-hub#131)", async () => {
+    // architecture.md §9.4a: host's `usePluginAuthStatuses` subscribes to
+    // `${manifest.id}.auth.changed` literally — without the matching
+    // emittedEvents[] entry the host event-bridge skips the renderer
+    // forward and the badge stays stuck on the boot snapshot.
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      await writeManifest({
+        auth: {
+          statusTool: "test_status",
+          loginTool: "test_login",
+          logoutTool: "test_signout",
+        },
+        // emittedEvents intentionally omitted — replicates the agent-hub
+        // 0.4.0 state where the plugin emitted under `agent_hub.*` but the
+        // manifest never declared the dash form.
+      });
+      const validator = TEST_VALIDATOR;
+      await parsePluginJson(manifestPath, validator);
+      const warnMessages = warnSpy.mock.calls.map((c) => c.join(" "));
+      expect(warnMessages.some((m) => m.includes("test-plugin.auth.changed"))).toBe(true);
+      expect(warnMessages.some((m) => m.includes("emittedEvents[] is missing"))).toBe(true);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("does not warn when emittedEvents includes the expected ${id}.auth.changed entry", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      await writeManifest({
+        auth: {
+          statusTool: "test_status",
+          loginTool: "test_login",
+        },
+        emittedEvents: ["test-plugin.auth.changed"],
+      });
+      const validator = TEST_VALIDATOR;
+      await parsePluginJson(manifestPath, validator);
+      const warnMessages = warnSpy.mock.calls.map((c) => c.join(" "));
+      expect(warnMessages.some((m) => m.includes("auth.changed"))).toBe(false);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("warns when emittedEvents declares the WRONG transformed name (the literal #131 regression)", async () => {
+    // Pin the exact bug class: manifest id contains a dash but author
+    // mirrors their tool prefix (underscore) in the event declaration.
+    // Validator must still warn that the dash form is missing.
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      await writeManifest({
+        auth: {
+          statusTool: "test_status",
+          loginTool: "test_login",
+        },
+        // Note the underscore — this would PASS a naive "any auth.changed
+        // entry exists" check but still leave the host hook silent because
+        // the host subscribes to the literal manifest id (`test-plugin`).
+        emittedEvents: ["test_plugin.auth.changed"],
+      });
+      const validator = TEST_VALIDATOR;
+      await parsePluginJson(manifestPath, validator);
+      const warnMessages = warnSpy.mock.calls.map((c) => c.join(" "));
+      expect(warnMessages.some((m) => m.includes("test-plugin.auth.changed"))).toBe(true);
+      expect(warnMessages.some((m) => m.includes("emittedEvents[] is missing"))).toBe(true);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("does NOT warn when manifest does not declare auth (don't pollute non-auth plugins)", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      await writeManifest({
+        // no `auth` key at all + no emittedEvents — most plugins look
+        // like this. The new check must be silent for them.
+      });
+      const validator = TEST_VALIDATOR;
+      await parsePluginJson(manifestPath, validator);
+      const warnMessages = warnSpy.mock.calls.map((c) => c.join(" "));
+      expect(warnMessages.some((m) => m.includes("auth.changed"))).toBe(false);
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   // Defense-in-depth — security review MED #1.

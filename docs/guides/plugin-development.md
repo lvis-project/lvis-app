@@ -370,10 +370,10 @@ hostApi.addTask({
 
 ### 5. saveNote()
 
-`~/.lvis/plugins/<plugin-id>/notes/` 하위에 마크다운 메모를 저장합니다. 동일 제목은 덮어씁니다.
+`~/.lvis/plugins/<plugin-id>/notes/` 하위에 플러그인 소유 메모리 항목을 저장합니다. 동일 제목은 덮어씁니다.
 
 ```typescript
-hostApi.saveNote(`미팅-${sessionId.slice(0,8)}`, `# ${title}\n\n${summary}`);
+hostApi.saveNote(`기록-${id.slice(0,8)}`, `# ${title}\n\n${body}`);
 ```
 
 ### 6. getSecret()
@@ -637,7 +637,7 @@ ipcRenderer.invoke("lvis:some:channel", ...);    // 절대 금지
 ```typescript
 interface PluginUiExtension {
   id: string;
-  slot: "sidebar";                           // 현재는 sidebar 만
+  slot: "sidebar";                           // historical slot key; host는 plugin view로 표시
   kind: "embedded-module" | "embedded-page" | "info-card";
   displayName?: string;
   title: string;

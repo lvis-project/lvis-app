@@ -294,6 +294,35 @@ export async function parsePluginJson(
         );
       }
     }
+
+    // architecture.md §9.4a: when `auth` is declared, the host's
+    // `usePluginAuthStatuses` hook subscribes to `${manifest.id}.auth.changed`
+    // (literal id, no `_`↔`-` normalization). The plugin must therefore
+    // declare and emit that exact event name — otherwise the badge stays
+    // stuck on the boot-time `unauthed` snapshot even after a successful
+    // login. The bug class: a plugin whose manifest id is `foo-bar` (dash)
+    // accidentally declares + emits `foo_bar.auth.changed` (underscore,
+    // mirroring its tool prefix), and the host hook never matches.
+    //
+    // Soft warn (not hard fail) to match the `notificationEvents` drift
+    // pattern below — catches the bug class without breaking already-loaded
+    // plugins that haven't migrated. Scope is intentionally limited to
+    // `auth.changed`: other emittedEvents names live in plugin-owned
+    // namespaces that the host treats as `neutral` (architecture.md §9.4a),
+    // so universal name validation would overreach.
+    // Defensive: AJV + the early `pid` guard at the top of this function
+    // already pin `parsed.id` to a non-empty string in the normal flow,
+    // but skipping the warn when the guard somehow doesn't hold avoids
+    // embedding `undefined.auth.changed` in the log line.
+    if (typeof parsed.id === "string" && parsed.id.length > 0) {
+      const expectedAuthEvent = `${parsed.id}.auth.changed`;
+      const declaredEmits = getDeclaredEmittedEvents(parsed);
+      if (!declaredEmits.includes(expectedAuthEvent)) {
+        log.warn(
+          `manifest declares 'auth' but emittedEvents[] is missing '${expectedAuthEvent}' — host badge will not refresh after login. Add "${expectedAuthEvent}" to emittedEvents[] and emit it from the loginTool/logoutTool/auth-state-change paths. See architecture.md §9.4a for the auth-event contract.`,
+        );
+      }
+    }
   }
 
   // keywords[].skillId must be in tools[].

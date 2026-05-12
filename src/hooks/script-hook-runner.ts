@@ -22,7 +22,13 @@
  */
 import { spawn } from "node:child_process";
 import { buildSafeChildEnv } from "../tools/safe-env.js";
-import { resolveShell, ShellMismatchError } from "../lib/shell-resolver.js";
+import {
+  resolveShell,
+  shellEnvForChild,
+  shellCommandForHookPath,
+  shellQuote,
+  ShellMismatchError,
+} from "../lib/shell-resolver.js";
 import { createLogger } from "../lib/logger.js";
 import {
   DEFAULT_HOOK_TIMEOUT_MS,
@@ -80,15 +86,17 @@ export async function runOneHookScript(
     // Run via the resolved shell — so a hook can be `bash hook.sh` even
     // on Windows under Git Bash. The hook file path is passed as $0 via
     // `shell.shellArgs(...)` so the script's own `$0` reflects its path.
-    const child = spawn(shell.cmd, shell.shellArgs(hook.path), {
+    const hookEnv = {
+      LVIS_HOOK_TYPE: payload.hookType,
+      LVIS_HOOK_TOOL_NAME: payload.toolName,
+      LVIS_HOOK_TRUST_ORIGIN: payload.trustOrigin,
+    };
+    const hookCommand = `${shellEnvAssignments(hookEnv)} ${shellCommandForHookPath(shell, hook.path)}`;
+    const child = spawn(shell.cmd, shell.shellArgs(hookCommand), {
       cwd,
       // H2: whitelist env — do not leak ANTHROPIC_API_KEY, AWS_*, GITHUB_TOKEN
       // etc. to hook scripts. The hook receives only the LVIS_HOOK_* vars.
-      env: buildSafeChildEnv({
-        LVIS_HOOK_TYPE: payload.hookType,
-        LVIS_HOOK_TOOL_NAME: payload.toolName,
-        LVIS_HOOK_TRUST_ORIGIN: payload.trustOrigin,
-      }),
+      env: shellEnvForChild(shell, buildSafeChildEnv(hookEnv)),
       stdio: ["pipe", "pipe", "pipe"],
       // Run in a new process group so SIGKILL on timeout reaps the
       // entire descendant tree (sh → script → sleep). Without this the
@@ -123,25 +131,16 @@ export async function runOneHookScript(
       log.warn("hook stdin error: %s (%s)", hook.fileName, err.message);
     });
 
+    let settled = false;
     let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      try {
-        if (process.platform !== "win32" && child.pid !== undefined) {
-          // Kill the whole process group (negative pid). detached:true
-          // above made the child a group leader so this reaps any
-          // descendants spawned inside the script (e.g. `sleep 30`).
-          process.kill(-child.pid, "SIGKILL");
-        } else {
-          child.kill("SIGKILL");
-        }
-      } catch {
-        // Already exited or pid invalid.
-      }
-    }, timeoutMs);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let timeoutFallback: ReturnType<typeof setTimeout> | undefined;
 
-    child.on("close", (code: number | null) => {
-      clearTimeout(timer);
+    const finish = (code: number | null): void => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      if (timeoutFallback) clearTimeout(timeoutFallback);
       const stdout = Buffer.concat(stdoutChunks).toString("utf-8");
       const stderr = Buffer.concat(stderrChunks).toString("utf-8");
       const durationMs = Date.now() - start;
@@ -201,10 +200,32 @@ export async function runOneHookScript(
         timedOut: false,
         durationMs,
       });
-    });
+    };
+
+    timer = setTimeout(() => {
+      timedOut = true;
+      try {
+        if (process.platform !== "win32" && child.pid !== undefined) {
+          // Kill the whole process group (negative pid). detached:true
+          // above made the child a group leader so this reaps any
+          // descendants spawned inside the script (e.g. `sleep 30`).
+          process.kill(-child.pid, "SIGKILL");
+        } else {
+          child.kill("SIGKILL");
+        }
+      } catch {
+        // Already exited or pid invalid.
+      }
+      timeoutFallback = setTimeout(() => finish(child.exitCode), 1000);
+    }, timeoutMs);
+
+    child.on("close", (code: number | null) => finish(code));
 
     child.on("error", (err: Error) => {
-      clearTimeout(timer);
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      if (timeoutFallback) clearTimeout(timeoutFallback);
       resolve({
         hookPath: hook.path,
         hookType: hook.hookType,
@@ -234,6 +255,12 @@ export async function runOneHookScript(
       });
     }
   });
+}
+
+function shellEnvAssignments(env: Record<string, string>): string {
+  return Object.entries(env)
+    .map(([key, value]) => `${key}=${shellQuote(value)}`)
+    .join(" ");
 }
 
 /**

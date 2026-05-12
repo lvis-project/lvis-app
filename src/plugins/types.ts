@@ -92,6 +92,21 @@ export interface PluginAuthSpec {
   loginTool: string;
   /** Optional uiCallable tool the host invokes when the user clicks 로그아웃. */
   logoutTool?: string;
+  /**
+   * Hostname allow-list (suffix-match) for `hostApi.openAuthPartitionViewer`.
+   * Required when the plugin calls that method — host rejects calls if this
+   * field is missing or the target URL host falls outside the list.
+   *
+   * Each entry must contain at least one dot; wildcards, single-label hosts,
+   * bare public-suffix entries (`com`, `co.kr`, …), and IDN-punycode labels
+   * (`xn--*`) are refused at manifest load time. Up to 16 entries. Suffix
+   * match is dot-boundary (`outlook.office.com` allows
+   * `mail.outlook.office.com` but not `outlook.office.com.attacker.com`).
+   *
+   * See `docs/references/plugin-tool-schema-design.md` §2.4.1 for the full
+   * contract (rejection table, three-layer defense, ms-graph example).
+   */
+  partitionDomains?: string[];
 }
 
 /**
@@ -335,8 +350,8 @@ export interface PluginUiExtension {
   page?: string;
   /**
    * Window placement preference. When `defaultMode` is `"detached"` the host
-   * opens the extension in a magnetic-snap BrowserWindow on sidebar click
-   * instead of rendering it inline. Omitting this field or setting
+   * opens the extension in a magnetic-snap BrowserWindow instead of rendering
+   * it inline. Omitting this field or setting
    * `"embedded"` preserves the existing behaviour.
    */
   window?: {
@@ -718,6 +733,49 @@ export interface PluginHostApi {
    */
   openAuthWindow(options: OpenAuthWindowWithFinalUrlOptions): Promise<OpenAuthWindowFinalUrlResult>;
   openAuthWindow(options: OpenAuthWindowCookieOptions): Promise<AuthWindowCookie[]>;
+
+  /**
+   * Open a hardened viewer BrowserWindow that loads `url` inside the
+   * caller plugin's `persist:plugin-auth:<pluginId>` partition. The
+   * existing cookies in that partition (typically deposited by an
+   * earlier `openAuthWindow` IdP flow) make the load silent-SSO — no
+   * re-login.
+   *
+   * **Caller binding:** the partition is decided by the host from the
+   * plugin id of the HostApi instance — plugins cannot name a different
+   * plugin's partition. Cross-plugin chaining must go through `callTool`
+   * to a tool owned by the partition-owning plugin (the target tool's
+   * handler receives that plugin's HostApi instance and so opens the
+   * viewer in the right partition).
+   *
+   * **Allow-list:** `url` host must match `manifest.auth.partitionDomains`
+   * (dot-boundary suffix). Navigation outside the allow-list is canceled
+   * (`will-navigate` + `will-redirect` + `setWindowOpenHandler: deny`).
+   * Downloads from the partition session are canceled. Cookies are never
+   * read back into plugin code.
+   *
+   * **Capability gate:** `manifest.capabilities[]` must include
+   * `external-auth-consumer`. Shared with `openAuthWindow` because both
+   * surfaces grant access to the same plugin auth partition cookie jar.
+   *
+   * Resolves once the window has loaded or been closed; rejects only on a
+   * hard load failure (not on user close).
+   *
+   * **Required (not `?`-optional)** unlike `openExternalUrl?` /
+   * `showOverlay?` / `getAppPreference?`. Convention: HostApi methods are
+   * declared required when the SDK + host wiring land in the same release
+   * window (lockstep shipping); methods are declared optional only when
+   * the SDK legitimately ships ahead of host adoption. Declaring this
+   * method required forces plugins to call it directly — a missing host
+   * wiring throws loudly at runtime instead of being silently optional-
+   * chained, matching CLAUDE.md "No Fallback Code" + the security
+   * "fail-closed" principle (silent fallback could route the user to a
+   * less-protected window).
+   */
+  openAuthPartitionViewer(opts: {
+    url: string;
+    windowTitle?: string;
+  }): Promise<void>;
 
   /**
    * §B3 — Open an arbitrary external URL routed through the host's webView

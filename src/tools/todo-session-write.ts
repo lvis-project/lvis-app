@@ -25,7 +25,11 @@ export function createTodoSessionWriteTool(store: SessionTodoStore): Tool {
       "현재 턴 동안 어시스턴트가 따라갈 체크리스트를 작성/갱신합니다. " +
       "사용자 task_* 와 다름 (세션 단위 휘발성). id 를 같이 보내면 merge, " +
       "생략하면 새 항목 생성. beforeId/afterId 로 중간 삽입 또는 이동 가능. " +
-      "status: pending | in_progress | completed | deleted.",
+      "status: pending | in_progress | completed | deleted. " +
+      "사용자가 본인의 업무·할 일·태스크를 등록·기록·추가해달라는 요청에는 " +
+      "이 도구를 사용하지 마세요 — 영구 업무 항목 등록을 지원하는 플러그인 " +
+      "도구가 노출되어 있으면 그쪽을 우선 호출하세요. 본 도구는 어시스턴트가 " +
+      "다단계 응답을 풀어가는 *내부 단계 추적* 용도로만 사용합니다.",
     source: "builtin",
     // H1: category="read" — the assistant's own per-session checklist lives
     // entirely in an in-memory store this conversation owns; there is no

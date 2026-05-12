@@ -1,6 +1,60 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+/* Tailwind v4 — CSS-first config.
+ * - @import replaces v3's @tailwind base/components/utilities trio.
+ * - @plugin loads the JS-side typography plugin (its `.prose` defaults are
+ *   then re-bound to semantic tokens by the `.lvis-prose` wrapper below).
+ * - @source explicitly scopes content detection to the renderer tree;
+ *   v4 auto-detects most files but an explicit glob makes the contract
+ *   robust against future repo restructures.
+ * - @theme inline rebinds Tailwind's color/radius slots to the existing
+ *   semantic tokens (`hsl(var(--background))`, etc.) so utilities like
+ *   `bg-background`, `text-muted-foreground`, `bg-success/15`, and
+ *   `rounded-md` keep their existing class names but resolve to the
+ *   per-bundle CSS-variable values defined below. */
+@import "tailwindcss";
+
+@plugin "@tailwindcss/typography";
+
+@source "./**/*.{ts,tsx,html}";
+
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-warning: hsl(var(--warning));
+  --color-warning-foreground: hsl(var(--warning-foreground));
+  --color-success: hsl(var(--success));
+  --color-success-foreground: hsl(var(--success-foreground));
+  --color-info: hsl(var(--info));
+  --color-info-foreground: hsl(var(--info-foreground));
+  --color-emphasis: hsl(var(--emphasis));
+  --color-emphasis-foreground: hsl(var(--emphasis-foreground));
+  --color-action-view: hsl(var(--action-view));
+  --color-action-branch: hsl(var(--action-branch));
+  --color-action-compact: hsl(var(--action-compact));
+  --color-message-user: hsl(var(--message-user-bg));
+  --color-message-user-foreground: hsl(var(--message-user-fg));
+  --color-input-bar: hsl(var(--input-bar-bg));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+}
 
 /* ─── §PR-5: View-Mode + Branch action tokens ───────────────────────────────
    Semantic action color tokens used by CheckpointDivider buttons and
@@ -106,6 +160,130 @@
   .fqp-slot-exit-top,
   .fqp-slot-exit-bottom {
     animation: fqp-fade-out 200ms ease both;
+  }
+}
+
+/* ─── lvis-anim-* — shared micro-interaction primitives ────────────────────
+   Reusable keyframes + utility classes for chat message entry, toggle pops,
+   star throbs, banner slides, modal stagger, and expand/collapse height
+   transitions. All animations are ≤200ms and use the same easing curve
+   (cubic-bezier(0.22, 1, 0.36, 1) — "ease-out-quart") so motion feels
+   coherent across surfaces.
+
+   Re-trigger pattern: components apply these classes via React `key` props
+   so the same DOM element gets unmounted/remounted on state change,
+   restarting the CSS animation. See AssistantCard / TurnActionBar / Star
+   button usage for the canonical pattern.
+
+   prefers-reduced-motion: collapses every variant into a 150ms opacity
+   fade-in so the surface still acknowledges the change without translate
+   or scale jumps. */
+@keyframes lvis-message-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes lvis-pop {
+  0%   { transform: scale(1); }
+  45%  { transform: scale(1.18); }
+  100% { transform: scale(1); }
+}
+@keyframes lvis-star-throb {
+  0%   { transform: scale(1); opacity: 1; }
+  45%  { transform: scale(1.22); opacity: 0.88; }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes lvis-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes lvis-slide-down {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes lvis-slide-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes lvis-zoom-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@layer components {
+  .lvis-anim-message-in  { animation: lvis-message-in 180ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+  .lvis-anim-pop         { animation: lvis-pop 180ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+  .lvis-anim-star        { animation: lvis-star-throb 200ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+  .lvis-anim-fade-in     { animation: lvis-fade-in 150ms ease-out both; }
+  .lvis-anim-slide-down  { animation: lvis-slide-down 180ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+  .lvis-anim-slide-up    { animation: lvis-slide-up 180ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+  .lvis-anim-zoom-in     { animation: lvis-zoom-in 180ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+  /* Height expand/collapse: works by toggling `data-expanded`. Consumer sets
+     `max-height: var(--expand-max-h, 1200px)` upper bound; animation
+     interpolates between 0 and that bound. opacity tracks so collapsed
+     content fades out instead of clipping. */
+  .lvis-anim-expand {
+    overflow: hidden;
+    max-height: 0;
+    opacity: 0;
+    transition:
+      max-height 200ms cubic-bezier(0.22, 1, 0.36, 1),
+      opacity 180ms ease-out;
+  }
+  .lvis-anim-expand[data-expanded="true"] {
+    max-height: var(--expand-max-h, 1200px);
+    opacity: 1;
+  }
+
+  /* Hover overlay smoothing — Radix data-state and bare hover targets get
+     a 150ms color transition by default so theme-bound surface swaps don't
+     pop. Components that already declare `transition-colors` get the same
+     duration. */
+  .lvis-anim-hover {
+    transition-property: background-color, color, border-color, opacity;
+    transition-duration: 150ms;
+    transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  }
+}
+
+/* Radix Dialog state-driven entry/exit — DialogContent fades + zoom-in on
+   open, fades + zoom-out on close. The DialogOverlay (theme backdrop) fades
+   independently so the backdrop blur appears before the card content lands. */
+[data-radix-dialog-overlay][data-state="open"] {
+  animation: lvis-fade-in 150ms ease-out both;
+}
+[data-radix-dialog-overlay][data-state="closed"] {
+  animation: lvis-fade-in 150ms ease-out reverse both;
+}
+[data-radix-dialog-content][data-state="open"] {
+  animation: lvis-zoom-in 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+[data-radix-dialog-content][data-state="closed"] {
+  animation: lvis-zoom-in 150ms cubic-bezier(0.22, 1, 0.36, 1) reverse both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lvis-anim-message-in,
+  .lvis-anim-pop,
+  .lvis-anim-star,
+  .lvis-anim-slide-down,
+  .lvis-anim-slide-up,
+  .lvis-anim-zoom-in {
+    animation: lvis-fade-in 150ms ease-out both;
+  }
+  .lvis-anim-expand {
+    transition: opacity 150ms ease-out;
+  }
+  .lvis-anim-hover {
+    transition-duration: 0ms;
+  }
+  [data-radix-dialog-overlay][data-state="open"],
+  [data-radix-dialog-content][data-state="open"] {
+    animation: lvis-fade-in 150ms ease-out both;
+  }
+  [data-radix-dialog-overlay][data-state="closed"],
+  [data-radix-dialog-content][data-state="closed"] {
+    animation: lvis-fade-in 150ms ease-out reverse both;
   }
 }
 
@@ -224,20 +402,40 @@
     --muted-foreground:         215 20% 65%;
     --accent:                   217 33% 17%;
     --accent-foreground:        210 40% 98%;
-    --destructive:              0 62.8% 30.6%;
+    --destructive:              0 78% 58%;
     --destructive-foreground:   210 40% 98%;
-    --warning:                  48 97% 77%;
-    --warning-foreground:       30 80% 25%;
+    --warning:                  38 92% 62%;
+    --warning-foreground:       0 0% 10%;
     --success:                  142 71% 45%;
+    --success-foreground:       0 0% 5%;
+    --info:                     199 89% 55%;
+    --info-foreground:          0 0% 5%;
+    --emphasis:                 48 96% 60%;
+    --emphasis-foreground:      0 0% 5%;
     --border:                   217 33% 17%;
     --input:                    217 33% 17%;
     --ring:                     224.3 76.3% 48%;
     --message-user-bg:          217.2 91.2% 59.8%;
-    --message-user-fg:          210 40% 98%;
+    --message-user-fg:          0 0% 5%;
     --input-bar-bg:             222.2 84% 7%;
+    --overlay:                  222 47% 4%;
+    --hover-overlay:            210 40% 98%;
+    --focus-ring:               217.2 91.2% 70%;
+    --link-fg:                  199 89% 65%;
+    --selection-bg:             217.2 91.2% 59.8%;
+    --selection-fg:             210 40% 98%;
+    --scrollbar-thumb:          217 33% 28%;
+    --scrollbar-track:          222.2 84% 7%;
+    --kbd-bg:                   217 33% 17%;
+    --kbd-border:               217 33% 28%;
     --code-bg:                  222 47% 9%;
     --code-fg:                  210 40% 96%;
     --code-border:              217 33% 22%;
+    --chart-1:                  217.2 91.2% 59.8%;
+    --chart-2:                  142 71% 45%;
+    --chart-3:                  25 95% 53%;
+    --chart-4:                  262 83% 58%;
+    --chart-5:                  330 81% 60%;
     --action-view:              262 83% 58%;
     --action-branch:            25 95% 53%;
     --action-compact:           262 83% 58%;
@@ -260,20 +458,40 @@
     --muted-foreground:         215 20% 65%;
     --accent:                   217 33% 17%;
     --accent-foreground:        210 40% 98%;
-    --destructive:              0 62.8% 30.6%;
+    --destructive:              0 78% 58%;
     --destructive-foreground:   210 40% 98%;
-    --warning:                  48 97% 77%;
-    --warning-foreground:       30 80% 25%;
+    --warning:                  38 92% 62%;
+    --warning-foreground:       0 0% 10%;
     --success:                  142 71% 45%;
+    --success-foreground:       0 0% 5%;
+    --info:                     199 89% 55%;
+    --info-foreground:          0 0% 5%;
+    --emphasis:                 48 96% 60%;
+    --emphasis-foreground:      0 0% 5%;
     --border:                   217 33% 17%;
     --input:                    217 33% 17%;
     --ring:                     290 70% 50%;
     --message-user-bg:          290 80% 60%;
-    --message-user-fg:          210 40% 98%;
+    --message-user-fg:          0 0% 5%;
     --input-bar-bg:             222.2 84% 7%;
+    --overlay:                  222 47% 4%;
+    --hover-overlay:            210 40% 98%;
+    --focus-ring:               290 80% 72%;
+    --link-fg:                  199 89% 65%;
+    --selection-bg:             290 80% 60%;
+    --selection-fg:             210 40% 98%;
+    --scrollbar-thumb:          217 33% 28%;
+    --scrollbar-track:          222.2 84% 7%;
+    --kbd-bg:                   217 33% 17%;
+    --kbd-border:               217 33% 28%;
     --code-bg:                  222 47% 9%;
     --code-fg:                  210 40% 96%;
     --code-border:              217 33% 22%;
+    --chart-1:                  290 80% 60%;
+    --chart-2:                  142 71% 45%;
+    --chart-3:                  25 95% 53%;
+    --chart-4:                  199 89% 48%;
+    --chart-5:                  48 96% 60%;
     --action-view:              290 80% 60%;
     --action-branch:            25 95% 53%;
     --action-compact:           290 80% 60%;
@@ -289,27 +507,47 @@
     --popover:                  0 0% 100%;
     --popover-foreground:       222 47% 11%;
     --primary:                  170 70% 45%;
-    --primary-foreground:       210 40% 98%;
+    --primary-foreground:       0 0% 5%;
     --secondary:                210 40% 96%;
     --secondary-foreground:     222 47% 11%;
     --muted:                    210 40% 96%;
-    --muted-foreground:         215 16% 47%;
+    --muted-foreground:         215 25% 28%;
     --accent:                   210 40% 96%;
     --accent-foreground:        222 47% 11%;
     --destructive:              0 84% 60%;
-    --destructive-foreground:   210 40% 98%;
-    --warning:                  48 96% 89%;
-    --warning-foreground:       30 80% 25%;
+    --destructive-foreground:   0 0% 5%;
+    --warning:                  35 91% 45%;
+    --warning-foreground:       0 0% 5%;
     --success:                  142 71% 45%;
+    --success-foreground:       0 0% 5%;
+    --info:                     199 89% 48%;
+    --info-foreground:          0 0% 5%;
+    --emphasis:                 40 96% 50%;
+    --emphasis-foreground:      0 0% 10%;
     --border:                   214 32% 91%;
     --input:                    214 32% 91%;
     --ring:                     170 70% 35%;
     --message-user-bg:          170 70% 45%;
-    --message-user-fg:          210 40% 98%;
+    --message-user-fg:          0 0% 5%;
     --input-bar-bg:             0 0% 100%;
+    --overlay:                  222 47% 11%;
+    --hover-overlay:            222 47% 11%;
+    --focus-ring:               170 70% 35%;
+    --link-fg:                  170 70% 38%;
+    --selection-bg:             170 70% 45%;
+    --selection-fg:             210 40% 98%;
+    --scrollbar-thumb:          214 32% 78%;
+    --scrollbar-track:          210 40% 96%;
+    --kbd-bg:                   210 40% 96%;
+    --kbd-border:               214 32% 78%;
     --code-bg:                  210 40% 98%;
     --code-fg:                  222 47% 11%;
     --code-border:              214 32% 88%;
+    --chart-1:                  170 70% 45%;
+    --chart-2:                  25 95% 53%;
+    --chart-3:                  262 83% 58%;
+    --chart-4:                  330 81% 60%;
+    --chart-5:                  48 96% 50%;
     --action-view:              170 70% 35%;
     --action-branch:            25 95% 53%;
     --action-compact:           170 70% 35%;
@@ -318,34 +556,54 @@
 
   /* ── 4. lge-light ─ light + LG warm-grey + vivid purple + LG red ─── */
   :root[data-theme-bundle="lge-light"] {
-    --background:               40 25% 92%;    /* Grey 6  #F0ECE4 */
+    --background:               40 25% 92%;    /* Grey 6  #F0ECE4 — canvas */
     --foreground:               0 0% 15%;      /* Grey 1  #262626 */
-    --card:                     40 25% 92%;
+    --card:                     40 35% 96%;    /* lifted warm ivory */
     --card-foreground:          0 0% 15%;
     --popover:                  0 0% 100%;
     --popover-foreground:       0 0% 15%;
     --primary:                  253 100% 65%;  /* #734dff — SEND */
     --primary-foreground:       0 0% 100%;
-    --secondary:                44 37% 94%;    /* Grey 7  #F6F3EB */
+    --secondary:                30 22% 86%;
     --secondary-foreground:     0 0% 15%;
-    --muted:                    44 37% 94%;
-    --muted-foreground:         43 3% 43%;     /* Grey 3  #716F6A */
-    --accent:                   44 37% 94%;
+    --muted:                    40 22% 89%;
+    --muted-foreground:         43 8% 28%;     /* darkened for body contrast on 89% L muted */
+    --accent:                   25 35% 82%;
     --accent-foreground:        0 0% 15%;
     --destructive:              1 98% 59%;     /* #FD312E — LG red STOP */
     --destructive-foreground:   0 0% 100%;
-    --warning:                  48 96% 89%;
-    --warning-foreground:       30 80% 25%;
+    --warning:                  35 91% 45%;
+    --warning-foreground:       0 0% 5%;
     --success:                  142 71% 45%;
-    --border:                   40 10% 78%;    /* Grey 4  #CBC8C2 */
-    --input:                    40 10% 78%;
+    --success-foreground:       0 0% 5%;
+    --info:                     210 90% 50%;
+    --info-foreground:          0 0% 100%;
+    --emphasis:                 40 96% 50%;
+    --emphasis-foreground:      0 0% 10%;
+    --border:                   30 14% 75%;
+    --input:                    30 14% 75%;
     --ring:                     263 70% 50%;
     --message-user-bg:          271 76% 76%;   /* #c497ef — lilac user bubble */
-    --message-user-fg:          0 0% 100%;
-    --input-bar-bg:             0 0% 100%;     /* white composer */
+    --message-user-fg:          0 0% 15%;      /* dark on light lilac */
+    --input-bar-bg:             0 0% 100%;
+    --overlay:                  0 0% 0%;
+    --hover-overlay:            0 0% 0%;
+    --focus-ring:               263 70% 50%;
+    --link-fg:                  253 100% 55%;
+    --selection-bg:             271 76% 76%;
+    --selection-fg:             0 0% 15%;
+    --scrollbar-thumb:          30 14% 65%;
+    --scrollbar-track:          40 22% 89%;
+    --kbd-bg:                   40 22% 89%;
+    --kbd-border:               30 14% 75%;
     --code-bg:                  210 40% 98%;
     --code-fg:                  222 47% 11%;
     --code-border:              214 32% 88%;
+    --chart-1:                  253 100% 65%;
+    --chart-2:                  1 98% 59%;
+    --chart-3:                  271 76% 76%;
+    --chart-4:                  142 71% 45%;
+    --chart-5:                  25 95% 53%;
     --action-view:              263 70% 50%;
     --action-branch:            25 95% 53%;
     --action-compact:           263 70% 50%;
@@ -354,34 +612,54 @@
 
   /* ── 5. lge-dark ── dark + LG warm-grey-1 + vivid purple + LG red ── */
   :root[data-theme-bundle="lge-dark"] {
-    --background:               0 0% 15%;      /* Grey 1  #262626 */
+    --background:               0 0% 15%;      /* Grey 1  #262626 — canvas */
     --foreground:               44 37% 94%;    /* Grey 7  #F6F3EB */
-    --card:                     0 0% 18%;
+    --card:                     30 8% 20%;     /* warm-grey lifted card */
     --card-foreground:          44 37% 94%;
-    --popover:                  0 0% 22%;
+    --popover:                  35 12% 26%;    /* warmest, most elevated */
     --popover-foreground:       44 37% 94%;
     --primary:                  253 100% 65%;  /* #734dff — SEND */
     --primary-foreground:       0 0% 100%;
-    --secondary:                0 0% 20%;
+    --secondary:                20 6% 23%;
     --secondary-foreground:     44 37% 94%;
-    --muted:                    0 0% 20%;
-    --muted-foreground:         40 5% 60%;
-    --accent:                   0 0% 20%;
+    --muted:                    15 5% 19%;
+    --muted-foreground:         40 8% 64%;
+    --accent:                   30 15% 28%;
     --accent-foreground:        44 37% 94%;
     --destructive:              1 98% 59%;     /* #FD312E — LG red STOP */
     --destructive-foreground:   0 0% 100%;
-    --warning:                  48 97% 77%;
-    --warning-foreground:       30 80% 25%;
+    --warning:                  38 92% 62%;
+    --warning-foreground:       0 0% 10%;
     --success:                  142 71% 45%;
-    --border:                   0 0% 28%;
-    --input:                    0 0% 28%;
+    --success-foreground:       0 0% 5%;
+    --info:                     210 90% 60%;
+    --info-foreground:          0 0% 5%;
+    --emphasis:                 48 96% 60%;
+    --emphasis-foreground:      0 0% 5%;
+    --border:                   25 10% 30%;
+    --input:                    25 10% 30%;
     --ring:                     263 70% 50%;
     --message-user-bg:          271 76% 76%;   /* #c497ef — lilac user bubble */
-    --message-user-fg:          0 0% 100%;
-    --input-bar-bg:             0 0% 22%;      /* elevated composer */
+    --message-user-fg:          0 0% 15%;      /* dark on light lilac */
+    --input-bar-bg:             35 12% 26%;
+    --overlay:                  0 0% 0%;
+    --hover-overlay:            44 37% 94%;
+    --focus-ring:               263 70% 65%;
+    --link-fg:                  253 100% 75%;
+    --selection-bg:             271 76% 76%;
+    --selection-fg:             0 0% 15%;
+    --scrollbar-thumb:          25 8% 34%;
+    --scrollbar-track:          30 8% 20%;
+    --kbd-bg:                   15 5% 19%;
+    --kbd-border:               25 10% 30%;
     --code-bg:                  222 47% 9%;
     --code-fg:                  210 40% 96%;
     --code-border:              217 33% 22%;
+    --chart-1:                  253 100% 65%;
+    --chart-2:                  271 76% 76%;
+    --chart-3:                  1 98% 59%;
+    --chart-4:                  142 71% 45%;
+    --chart-5:                  44 90% 60%;
     --action-view:              263 70% 50%;
     --action-branch:            25 95% 53%;
     --action-compact:           263 70% 50%;
@@ -409,19 +687,431 @@
     --warning:                  48 100% 50%;
     --warning-foreground:       0 0% 0%;
     --success:                  120 100% 40%;
+    --success-foreground:       0 0% 0%;
+    --info:                     210 100% 60%;
+    --info-foreground:          0 0% 0%;
+    --emphasis:                 60 100% 50%;
+    --emphasis-foreground:      0 0% 0%;
     --border:                   0 0% 100%;
     --input:                    0 0% 100%;
     --ring:                     60 100% 50%;
     --message-user-bg:          60 100% 50%;
     --message-user-fg:          0 0% 0%;
     --input-bar-bg:             0 0% 0%;
+    --overlay:                  0 0% 0%;
+    --hover-overlay:            0 0% 100%;
+    --focus-ring:               60 100% 50%;
+    --link-fg:                  60 100% 50%;
+    --selection-bg:             60 100% 50%;
+    --selection-fg:             0 0% 0%;
+    --scrollbar-thumb:          0 0% 100%;
+    --scrollbar-track:          0 0% 0%;
+    --kbd-bg:                   0 0% 15%;
+    --kbd-border:               0 0% 100%;
     --code-bg:                  222 47% 9%;
     --code-fg:                  210 40% 96%;
     --code-border:              0 0% 100%;
+    --chart-1:                  60 100% 50%;
+    --chart-2:                  120 100% 50%;
+    --chart-3:                  0 100% 50%;
+    --chart-4:                  180 100% 50%;
+    --chart-5:                  300 100% 60%;
     --action-view:              60 100% 50%;
     --action-branch:            60 100% 50%;
     --action-compact:           60 100% 50%;
     color-scheme: dark;
+  }
+
+  /* ── 7. catppuccin-mocha ─── dark pastel + mauve accent ─────────────── */
+  :root[data-theme-bundle="catppuccin-mocha"] {
+    --background:               240 21% 15%;
+    --foreground:               226 64% 88%;
+    --card:                     240 23% 12%;
+    --card-foreground:          226 64% 88%;
+    --popover:                  234 13% 24%;
+    --popover-foreground:       226 64% 88%;
+    --primary:                  267 84% 81%;
+    --primary-foreground:       240 21% 12%;
+    --secondary:                234 13% 24%;
+    --secondary-foreground:     226 64% 88%;
+    --muted:                    234 13% 24%;
+    --muted-foreground:         227 35% 80%;
+    --accent:                   234 13% 31%;
+    --accent-foreground:        226 64% 88%;
+    --destructive:              343 81% 75%;
+    --destructive-foreground:   240 21% 12%;
+    --warning:                  41 86% 83%;
+    --warning-foreground:       240 21% 12%;
+    --success:                  115 54% 76%;
+    --success-foreground:       240 21% 12%;
+    --info:                     217 92% 76%;
+    --info-foreground:          240 21% 12%;
+    --emphasis:                 41 86% 83%;
+    --emphasis-foreground:      240 21% 12%;
+    --border:                   234 13% 31%;
+    --input:                    234 13% 31%;
+    --ring:                     267 84% 81%;
+    --message-user-bg:          267 84% 81%;
+    --message-user-fg:          240 21% 12%;
+    --input-bar-bg:             234 13% 24%;
+    --overlay:                  240 23% 8%;
+    --hover-overlay:            226 64% 88%;
+    --focus-ring:               267 84% 85%;
+    --link-fg:                  217 92% 80%;
+    --selection-bg:             267 84% 81%;
+    --selection-fg:             240 21% 12%;
+    --scrollbar-thumb:          234 13% 31%;
+    --scrollbar-track:          240 23% 12%;
+    --kbd-bg:                   234 13% 24%;
+    --kbd-border:               234 13% 36%;
+    --code-bg:                  240 23% 12%;
+    --code-fg:                  226 64% 88%;
+    --code-border:              234 13% 31%;
+    --chart-1:                  267 84% 81%;
+    --chart-2:                  115 54% 76%;
+    --chart-3:                  23 92% 75%;
+    --chart-4:                  217 92% 76%;
+    --chart-5:                  316 73% 86%;
+    --action-view:              267 84% 81%;
+    --action-branch:            23 92% 75%;
+    --action-compact:           217 92% 76%;
+    color-scheme: dark;
+  }
+
+  /* ── 8. catppuccin-latte ─── light pastel + mauve accent ────────────── */
+  :root[data-theme-bundle="catppuccin-latte"] {
+    --background:               220 23% 95%;
+    --foreground:               234 16% 35%;
+    --card:                     220 22% 92%;
+    --card-foreground:          234 16% 35%;
+    --popover:                  0 0% 100%;
+    --popover-foreground:       234 16% 35%;
+    --primary:                  266 85% 58%;
+    --primary-foreground:       0 0% 100%;
+    --secondary:                223 16% 83%;
+    --secondary-foreground:     234 16% 35%;
+    --muted:                    223 16% 88%;
+    --muted-foreground:         233 15% 28%;
+    --accent:                   225 14% 77%;
+    --accent-foreground:        234 16% 35%;
+    --destructive:              347 87% 56%;
+    --destructive-foreground:   0 0% 100%;
+    --warning:                  35 77% 49%;
+    --warning-foreground:       234 16% 5%;
+    --success:                  109 62% 48%;
+    --success-foreground:       234 16% 5%;
+    --info:                     220 91% 54%;
+    --info-foreground:          0 0% 100%;
+    --emphasis:                 35 77% 49%;
+    --emphasis-foreground:      234 16% 5%;
+    --border:                   225 14% 77%;
+    --input:                    225 14% 77%;
+    --ring:                     266 85% 58%;
+    --message-user-bg:          266 85% 58%;
+    --message-user-fg:          0 0% 100%;
+    --input-bar-bg:             0 0% 100%;
+    --overlay:                  234 16% 25%;
+    --hover-overlay:            234 16% 35%;
+    --focus-ring:               266 85% 58%;
+    --link-fg:                  220 91% 54%;
+    --selection-bg:             266 85% 58%;
+    --selection-fg:             0 0% 100%;
+    --scrollbar-thumb:          223 16% 75%;
+    --scrollbar-track:          220 23% 92%;
+    --kbd-bg:                   223 16% 88%;
+    --kbd-border:               225 14% 77%;
+    --code-bg:                  220 22% 92%;
+    --code-fg:                  234 16% 35%;
+    --code-border:              225 14% 77%;
+    --chart-1:                  266 85% 58%;
+    --chart-2:                  109 58% 40%;
+    --chart-3:                  22 99% 52%;
+    --chart-4:                  220 91% 54%;
+    --chart-5:                  183 74% 35%;
+    --action-view:              266 85% 58%;
+    --action-branch:            22 99% 52%;
+    --action-compact:           220 91% 54%;
+    color-scheme: light;
+  }
+
+  /* ── 9. nord ─────────────────── dark + arctic frost + aurora ────────── */
+  :root[data-theme-bundle="nord"] {
+    --background:               220 16% 22%;
+    --foreground:               219 28% 88%;
+    --card:                     222 16% 28%;
+    --card-foreground:          219 28% 88%;
+    --popover:                  220 17% 32%;
+    --popover-foreground:       219 28% 88%;
+    --primary:                  193 43% 67%;
+    --primary-foreground:       220 16% 22%;
+    --secondary:                220 16% 36%;
+    --secondary-foreground:     219 28% 88%;
+    --muted:                    222 16% 28%;
+    --muted-foreground:         219 28% 75%;
+    --accent:                   210 34% 63%;
+    --accent-foreground:        220 16% 22%;
+    --destructive:              354 68% 62%;
+    --destructive-foreground:   220 16% 8%;
+    --warning:                  40 71% 73%;
+    --warning-foreground:       220 16% 22%;
+    --success:                  92 28% 65%;
+    --success-foreground:       220 16% 22%;
+    --info:                     210 34% 63%;
+    --info-foreground:          220 16% 22%;
+    --emphasis:                 40 71% 73%;
+    --emphasis-foreground:      220 16% 22%;
+    --border:                   220 16% 36%;
+    --input:                    220 16% 36%;
+    --ring:                     193 43% 67%;
+    --message-user-bg:          193 43% 67%;
+    --message-user-fg:          220 16% 22%;
+    --input-bar-bg:             222 16% 28%;
+    --overlay:                  220 16% 12%;
+    --hover-overlay:            219 28% 88%;
+    --focus-ring:               193 43% 72%;
+    --link-fg:                  213 32% 65%;
+    --selection-bg:             193 43% 67%;
+    --selection-fg:             220 16% 22%;
+    --scrollbar-thumb:          220 16% 36%;
+    --scrollbar-track:          222 16% 28%;
+    --kbd-bg:                   220 17% 32%;
+    --kbd-border:               220 16% 40%;
+    --code-bg:                  220 16% 18%;
+    --code-fg:                  219 28% 88%;
+    --code-border:              220 16% 36%;
+    --chart-1:                  193 43% 67%;
+    --chart-2:                  92 28% 65%;
+    --chart-3:                  14 51% 63%;
+    --chart-4:                  311 20% 63%;
+    --chart-5:                  40 71% 73%;
+    --action-view:              210 34% 63%;
+    --action-branch:            14 51% 63%;
+    --action-compact:           193 43% 67%;
+    color-scheme: dark;
+  }
+
+  /* ── 10. gruvbox-dark-hard ─── dark + warm orange + retro vim ────────── */
+  :root[data-theme-bundle="gruvbox-dark-hard"] {
+    --background:               195 7% 12%;
+    --foreground:               43 59% 81%;
+    --card:                     0 0% 16%;
+    --card-foreground:          43 59% 81%;
+    --popover:                  18 6% 22%;
+    --popover-foreground:       43 59% 81%;
+    --primary:                  24 99% 55%;
+    --primary-foreground:       195 7% 12%;
+    --secondary:                20 8% 30%;
+    --secondary-foreground:     43 59% 81%;
+    --muted:                    18 6% 22%;
+    --muted-foreground:         41 38% 73%;
+    --accent:                   41 95% 58%;
+    --accent-foreground:        195 7% 12%;
+    --destructive:              6 96% 59%;
+    --destructive-foreground:   195 7% 12%;
+    --warning:                  41 95% 58%;
+    --warning-foreground:       195 7% 12%;
+    --success:                  61 66% 44%;
+    --success-foreground:       195 7% 12%;
+    --info:                     195 55% 62%;
+    --info-foreground:          195 7% 12%;
+    --emphasis:                 41 95% 58%;
+    --emphasis-foreground:      195 7% 12%;
+    --border:                   20 8% 30%;
+    --input:                    20 8% 30%;
+    --ring:                     24 99% 55%;
+    --message-user-bg:          24 99% 55%;
+    --message-user-fg:          195 7% 12%;
+    --input-bar-bg:             0 0% 16%;
+    --overlay:                  195 7% 6%;
+    --hover-overlay:            43 59% 81%;
+    --focus-ring:               24 99% 65%;
+    --link-fg:                  41 95% 62%;
+    --selection-bg:             24 99% 55%;
+    --selection-fg:             195 7% 12%;
+    --scrollbar-thumb:          20 8% 30%;
+    --scrollbar-track:          0 0% 16%;
+    --kbd-bg:                   18 6% 22%;
+    --kbd-border:               20 8% 30%;
+    --code-bg:                  195 7% 9%;
+    --code-fg:                  43 59% 81%;
+    --code-border:              20 8% 30%;
+    --chart-1:                  24 99% 55%;
+    --chart-2:                  61 66% 44%;
+    --chart-3:                  41 95% 58%;
+    --chart-4:                  175 15% 58%;
+    --chart-5:                  339 41% 68%;
+    --action-view:              339 41% 68%;
+    --action-branch:            24 99% 55%;
+    --action-compact:           175 15% 58%;
+    color-scheme: dark;
+  }
+
+  /* ── 11. solarized-light ── light + Schoonover beige + balanced blue ── */
+  :root[data-theme-bundle="solarized-light"] {
+    --background:               44 87% 94%;
+    --foreground:               196 22% 22%;
+    --card:                     44 87% 94%;
+    --card-foreground:          196 22% 22%;
+    --popover:                  46 42% 88%;
+    --popover-foreground:       194 22% 18%;
+    --primary:                  205 69% 49%;
+    --primary-foreground:       44 87% 94%;
+    --secondary:                46 42% 88%;
+    --secondary-foreground:     194 22% 18%;
+    --muted:                    46 42% 88%;
+    --muted-foreground:         196 22% 28%;
+    --accent:                   175 59% 40%;
+    --accent-foreground:        0 0% 5%;
+    --destructive:              1 71% 52%;
+    --destructive-foreground:   44 87% 94%;
+    --warning:                  42 95% 45%;
+    --warning-foreground:       0 0% 5%;
+    --success:                  78 78% 42%;
+    --success-foreground:       0 0% 5%;
+    --info:                     205 69% 49%;
+    --info-foreground:          44 87% 94%;
+    --emphasis:                 45 100% 35%;
+    --emphasis-foreground:      44 87% 94%;
+    --border:                   46 42% 78%;
+    --input:                    46 42% 78%;
+    --ring:                     205 69% 49%;
+    --message-user-bg:          205 69% 49%;
+    --message-user-fg:          0 0% 5%;
+    --input-bar-bg:             44 87% 94%;
+    --overlay:                  194 14% 25%;
+    --hover-overlay:            194 14% 30%;
+    --focus-ring:               205 69% 49%;
+    --link-fg:                  237 43% 60%;
+    --selection-bg:             175 59% 40%;
+    --selection-fg:             44 87% 94%;
+    --scrollbar-thumb:          46 25% 72%;
+    --scrollbar-track:          46 42% 88%;
+    --kbd-bg:                   46 42% 88%;
+    --kbd-border:               46 42% 78%;
+    --code-bg:                  46 42% 88%;
+    --code-fg:                  194 22% 18%;
+    --code-border:              46 42% 78%;
+    --chart-1:                  205 69% 49%;
+    --chart-2:                  68 100% 30%;
+    --chart-3:                  18 80% 44%;
+    --chart-4:                  331 64% 52%;
+    --chart-5:                  175 59% 40%;
+    --action-view:              237 43% 60%;
+    --action-branch:            18 80% 44%;
+    --action-compact:           205 69% 49%;
+    color-scheme: light;
+  }
+
+  /* ── 12. rose-pine ─────────── dark + iris/foam/gold + soho rose ────── */
+  :root[data-theme-bundle="rose-pine"] {
+    --background:               249 22% 12%;
+    --foreground:               245 50% 91%;
+    --card:                     247 23% 15%;
+    --card-foreground:          245 50% 91%;
+    --popover:                  248 25% 18%;
+    --popover-foreground:       245 50% 91%;
+    --primary:                  267 57% 78%;
+    --primary-foreground:       249 22% 12%;
+    --secondary:                249 15% 28%;
+    --secondary-foreground:     245 50% 91%;
+    --muted:                    248 25% 18%;
+    --muted-foreground:         248 15% 61%;
+    --accent:                   189 43% 73%;
+    --accent-foreground:        249 22% 12%;
+    --destructive:              343 76% 68%;
+    --destructive-foreground:   249 22% 12%;
+    --warning:                  35 88% 72%;
+    --warning-foreground:       249 22% 12%;
+    --success:                  197 49% 50%;
+    --success-foreground:       249 22% 12%;
+    --info:                     189 43% 73%;
+    --info-foreground:          249 22% 12%;
+    --emphasis:                 35 88% 72%;
+    --emphasis-foreground:      249 22% 12%;
+    --border:                   248 13% 36%;
+    --input:                    248 13% 36%;
+    --ring:                     267 57% 78%;
+    --message-user-bg:          267 57% 78%;
+    --message-user-fg:          249 22% 12%;
+    --input-bar-bg:             247 23% 15%;
+    --overlay:                  249 22% 6%;
+    --hover-overlay:            245 50% 91%;
+    --focus-ring:               267 57% 82%;
+    --link-fg:                  2 55% 83%;
+    --selection-bg:             267 57% 78%;
+    --selection-fg:             249 22% 12%;
+    --scrollbar-thumb:          248 13% 36%;
+    --scrollbar-track:          247 23% 15%;
+    --kbd-bg:                   248 25% 18%;
+    --kbd-border:               248 13% 36%;
+    --code-bg:                  244 18% 10%;
+    --code-fg:                  245 50% 91%;
+    --code-border:              249 15% 28%;
+    --chart-1:                  267 57% 78%;
+    --chart-2:                  189 43% 73%;
+    --chart-3:                  35 88% 72%;
+    --chart-4:                  343 76% 68%;
+    --chart-5:                  2 55% 83%;
+    --action-view:              267 57% 78%;
+    --action-branch:            35 88% 72%;
+    --action-compact:           189 43% 73%;
+    color-scheme: dark;
+  }
+
+  /* ── 13. cherry-blossom ── light + splash key red + brand magenta ───── */
+  :root[data-theme-bundle="cherry-blossom"] {
+    --background:               0 0% 100%;
+    --foreground:               0 0% 10%;
+    --card:                     340 60% 99%;
+    --card-foreground:          0 0% 10%;
+    --popover:                  0 0% 100%;
+    --popover-foreground:       0 0% 10%;
+    --primary:                  343 92% 49%;
+    --primary-foreground:       0 0% 100%;
+    --secondary:                340 50% 95%;
+    --secondary-foreground:     0 0% 10%;
+    --muted:                    340 30% 96%;
+    --muted-foreground:         340 10% 45%;
+    --accent:                   340 40% 92%;
+    --accent-foreground:        0 0% 10%;
+    --destructive:              0 100% 50%;
+    --destructive-foreground:   0 0% 100%;
+    --warning:                  35 91% 45%;
+    --warning-foreground:       0 0% 5%;
+    --success:                  142 65% 50%;
+    --success-foreground:       0 0% 5%;
+    --info:                     220 90% 55%;
+    --info-foreground:          0 0% 100%;
+    --emphasis:                 35 91% 50%;
+    --emphasis-foreground:      0 0% 5%;
+    --border:                   340 20% 88%;
+    --input:                    340 20% 88%;
+    --ring:                     343 92% 49%;
+    --message-user-bg:          321 65% 78%;
+    --message-user-fg:          0 0% 10%;
+    --input-bar-bg:             0 0% 100%;
+    --overlay:                  340 30% 12%;
+    --hover-overlay:            0 0% 0%;
+    --focus-ring:               343 92% 49%;
+    --link-fg:                  291 100% 45%;
+    --selection-bg:             321 65% 78%;
+    --selection-fg:             0 0% 10%;
+    --scrollbar-thumb:          340 25% 75%;
+    --scrollbar-track:          340 30% 96%;
+    --kbd-bg:                   340 30% 96%;
+    --kbd-border:               340 20% 88%;
+    --code-bg:                  340 50% 98%;
+    --code-fg:                  0 0% 10%;
+    --code-border:              340 20% 88%;
+    --chart-1:                  343 92% 49%;
+    --chart-2:                  291 100% 50%;
+    --chart-3:                  142 55% 42%;
+    --chart-4:                  220 90% 55%;
+    --chart-5:                  35 91% 50%;
+    --action-view:              291 100% 50%;
+    --action-branch:            35 91% 45%;
+    --action-compact:           343 92% 49%;
+    color-scheme: light;
   }
 
   /* ── Default (no bundle set) → tokyo-night tokens for pre-hydration ── */
@@ -440,20 +1130,40 @@
     --muted-foreground:         215 20% 65%;
     --accent:                   217 33% 17%;
     --accent-foreground:        210 40% 98%;
-    --destructive:              0 62.8% 30.6%;
+    --destructive:              0 78% 58%;
     --destructive-foreground:   210 40% 98%;
-    --warning:                  48 97% 77%;
-    --warning-foreground:       30 80% 25%;
+    --warning:                  38 92% 62%;
+    --warning-foreground:       0 0% 10%;
     --success:                  142 71% 45%;
+    --success-foreground:       0 0% 5%;
+    --info:                     199 89% 55%;
+    --info-foreground:          0 0% 5%;
+    --emphasis:                 48 96% 60%;
+    --emphasis-foreground:      0 0% 5%;
     --border:                   217 33% 17%;
     --input:                    217 33% 17%;
     --ring:                     224.3 76.3% 48%;
     --message-user-bg:          217.2 91.2% 59.8%;
-    --message-user-fg:          210 40% 98%;
+    --message-user-fg:          0 0% 5%;
     --input-bar-bg:             222.2 84% 7%;
+    --overlay:                  222 47% 4%;
+    --hover-overlay:            210 40% 98%;
+    --focus-ring:               217.2 91.2% 70%;
+    --link-fg:                  199 89% 65%;
+    --selection-bg:             217.2 91.2% 59.8%;
+    --selection-fg:             210 40% 98%;
+    --scrollbar-thumb:          217 33% 28%;
+    --scrollbar-track:          222.2 84% 7%;
+    --kbd-bg:                   217 33% 17%;
+    --kbd-border:               217 33% 28%;
     --code-bg:                  222 47% 9%;
     --code-fg:                  210 40% 96%;
     --code-border:              217 33% 22%;
+    --chart-1:                  217.2 91.2% 59.8%;
+    --chart-2:                  142 71% 45%;
+    --chart-3:                  25 95% 53%;
+    --chart-4:                  262 83% 58%;
+    --chart-5:                  330 81% 60%;
     color-scheme: dark;
   }
 
@@ -477,6 +1187,61 @@
     @apply bg-background text-foreground;
     font-family: "Noto Sans KR", "Noto Sans CJK KR", "NanumGothic", "Malgun Gothic", Inter,
       -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  /* ── Text selection — themed via --selection-bg / --selection-fg ─────── */
+  ::selection {
+    background-color: hsl(var(--selection-bg) / 0.4);
+    color: hsl(var(--selection-fg));
+  }
+
+  /* ── Native scrollbars — webkit (Chrome/Safari/Electron) ─────────────── */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background-color: hsl(var(--scrollbar-track));
+  }
+  ::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--scrollbar-thumb));
+    border-radius: 5px;
+    border: 2px solid hsl(var(--scrollbar-track));
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(var(--scrollbar-thumb) / 0.85);
+  }
+  ::-webkit-scrollbar-corner {
+    background-color: hsl(var(--scrollbar-track));
+  }
+
+  /* Firefox standard property */
+  * {
+    scrollbar-color: hsl(var(--scrollbar-thumb)) hsl(var(--scrollbar-track));
+  }
+
+  /* ── <kbd> element — themed pill ─────────────────────────────────────── */
+  kbd {
+    display: inline-block;
+    padding: 0.05rem 0.35rem;
+    background-color: hsl(var(--kbd-bg));
+    border: 1px solid hsl(var(--kbd-border));
+    border-radius: 0.25rem;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.85em;
+    line-height: 1.2;
+    color: hsl(var(--foreground));
+    box-shadow: 0 1px 0 0 hsl(var(--kbd-border));
+  }
+
+  /* ── Keyboard focus — themed default ring ─────────────────────────────
+     Components using shadcn ring utilities (`focus-visible:ring-2`) keep
+     their explicit ring color via `--ring`. This rule provides a fallback
+     outline for raw native elements (buttons without Tailwind ring utils,
+     inputs, anchor tags) so they remain visible across all bundles. */
+  :where(:focus-visible) {
+    outline: 2px solid hsl(var(--focus-ring));
+    outline-offset: 2px;
   }
 }
 

@@ -169,6 +169,7 @@ async function runStreamedTurn(
           ...(cacheWriteTokens !== undefined ? { cacheWriteTokens } : {}),
           ...(breakdown ? { breakdown } : {}),
         }),
+      onLlmStatus: (status) => send({ type: "llm_status", ...status }),
       onFallback: (from, to) => sendToWebContents(webContents, "lvis:chat:fallback", { from, to }, log),
     },
     undefined,

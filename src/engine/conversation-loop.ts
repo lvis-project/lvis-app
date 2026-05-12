@@ -14,7 +14,7 @@ import { markStaleToolResults, estimateMessagesTokens, getModelPreflightThreshol
 import { compactWithBoundary, renderBoundaryAsPreamble } from "./structured-compact.js";
 import { stubMarkedToolResults } from "./wire-serialize.js";
 import { createProvider, secretKeyFor } from "./llm/provider-factory.js";
-import { FallbackProvider } from "./llm/vercel/fallback-chain.js";
+import { FallbackProvider, type FallbackStatus } from "./llm/vercel/fallback-chain.js";
 import type { LLMProvider, ToolSchema, TokenUsage } from "./llm/types.js";
 import { collectRoundStream } from "./turn/stream-collector.js";
 import {
@@ -119,6 +119,7 @@ export interface TurnCallbacks {
     compactNum?: number;
   }) => void;
   onFallback?: (from: string, to: string) => void;
+  onLlmStatus?: (status: FallbackStatus) => void;
   /**
    * Turn aggregate footer (§ chat transcript per-turn footer) — fires once
    * after the turn fully resolves with cumulative wall-clock / step-count /
@@ -381,17 +382,22 @@ export class ConversationLoop {
         ...(block.vertexProject ? { vertexProject: block.vertexProject } : {}),
         ...(block.vertexLocation ? { vertexLocation: block.vertexLocation } : {}),
       });
-      const chain = llmSettings.fallbackChain.filter(
-        (e) => e.provider && e.model,
+      const chain = llmSettings.fallbackChain
+        .filter((e) => e.provider && e.model)
+        .map((entry) => {
+          const fallbackBlock = llmSettings.vendors[entry.provider];
+          return {
+            ...entry,
+            ...(fallbackBlock?.baseUrl ? { baseUrl: fallbackBlock.baseUrl } : {}),
+            ...(fallbackBlock?.vertexProject ? { vertexProject: fallbackBlock.vertexProject } : {}),
+            ...(fallbackBlock?.vertexLocation ? { vertexLocation: fallbackBlock.vertexLocation } : {}),
+          };
+        });
+      this.provider = new FallbackProvider(
+        primary,
+        chain,
+        (v) => this.deps.settingsService.getSecret(secretKeyFor(v)) ?? "",
       );
-      this.provider =
-        chain.length > 0
-          ? new FallbackProvider(
-              primary,
-              chain,
-              (v) => this.deps.settingsService.getSecret(secretKeyFor(v)) ?? "",
-            )
-          : primary;
     } catch {
       this.provider = null;
     }
@@ -1163,10 +1169,12 @@ export class ConversationLoop {
     const llmSettings = this.deps.settingsService.get("llm");
     const activeBlock = llmSettings.vendors[llmSettings.provider];
     const model = activeBlock.model;
-    // Wire per-turn onFallback callback into FallbackProvider when available.
-    if (this.provider instanceof FallbackProvider) {
-      this.provider.setCallbacks({ onFallback: callbacks?.onFallback });
-    }
+    const turnProvider = this.provider instanceof FallbackProvider
+      ? this.provider.withCallbacks({
+        onFallback: callbacks?.onFallback,
+        onStatus: callbacks?.onLlmStatus,
+      })
+      : this.provider!;
     // Phase 1.5 Option C: scope is mutable within the turn. Mutating the
     // caller's Set directly means the next turn's fallback sees every plugin
     // that was activated here.
@@ -1224,7 +1232,7 @@ export class ConversationLoop {
 
       // ─── Stream attempt — Layer 0 preflight 가 사전 압축 처리하므로 mid-loop retry 없음 ───
       const stream = await collectRoundStream({
-        provider: this.provider!,
+        provider: turnProvider,
         model,
         systemPrompt,
         messages: this.history.getMessages(),

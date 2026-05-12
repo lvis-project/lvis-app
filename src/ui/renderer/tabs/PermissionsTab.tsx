@@ -348,7 +348,7 @@ export function PermissionsTab() {
 
         {/* ── 인라인 배너 (§F9 — alert 대체) ── */}
         {banner && (
-          <div className={`flex items-start gap-2 rounded-md border px-3 py-2 text-[12px] ${banner.type === "error" ? "border-destructive/40 bg-destructive/10 text-destructive" : "border-yellow-500/30 bg-yellow-500/10 text-yellow-600 dark:text-yellow-400"}`}>
+          <div className={`flex items-start gap-2 rounded-md border px-3 py-2 text-[12px] ${banner.type === "error" ? "border-destructive/40 bg-destructive/10 text-destructive" : "border-warning/40 bg-warning/15 text-warning"}`}>
             <span className="mt-0.5 flex-shrink-0">{banner.type === "error" ? "⚠" : "🔒"}</span>
             <span>{banner.msg}</span>
             <button className="ml-auto flex-shrink-0 opacity-60 hover:opacity-100" onClick={() => setBanner(null)}>✕</button>
@@ -358,10 +358,10 @@ export function PermissionsTab() {
         {quarantinedHooks.length > 0 && (
           <div
             data-testid="hook-quarantine-notice"
-            className="rounded-md border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-[12px] text-yellow-700 dark:text-yellow-300"
+            className="rounded-md border border-warning/40 bg-warning/15 px-3 py-2 text-[12px] text-warning"
           >
             <div className="flex items-start gap-2">
-              <Badge variant="secondary" className="mt-0.5 text-[10px] text-yellow-700 dark:text-yellow-300">
+              <Badge variant="secondary" className="mt-0.5 text-[10px] text-warning">
                 검토 대기 {quarantinedHooks.length}
               </Badge>
               <div className="min-w-0 flex-1">
@@ -372,12 +372,12 @@ export function PermissionsTab() {
                 </p>
                 <div className="mt-2 flex flex-wrap gap-1">
                   {quarantinedHooks.slice(0, 3).map((hook) => (
-                    <code key={hook.fileName} className="rounded border border-yellow-500/30 bg-background/70 px-1.5 py-0.5 font-mono text-[10px]">
+                    <code key={hook.fileName} className="rounded border border-warning/40 bg-background/70 px-1.5 py-0.5 font-mono text-[10px]">
                       {hook.fileName}
                     </code>
                   ))}
                   {quarantinedHooks.length > 3 && (
-                    <span className="text-[10px] text-yellow-700/80 dark:text-yellow-300/80">
+                    <span className="text-[10px] text-warning/80">
                       +{quarantinedHooks.length - 3}
                     </span>
                   )}
@@ -570,7 +570,7 @@ export function PermissionsTab() {
             {policyManaged && <span className="text-base" title="IT 관리자 설정">🔒</span>}
           </div>
           {policyManaged && (
-            <p className="rounded-md border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-[11px] text-yellow-600 dark:text-yellow-400">
+            <p className="rounded-md border border-warning/40 bg-warning/15 px-3 py-2 text-[11px] text-warning">
               {(policySource === "admin" || policySource === "merged") && policyAdminPath
                 ? `이 정책은 회사 IT 관리자가 배포했습니다 (경로: ${policyAdminPath}). 사용자가 변경할 수 없습니다.`
                 : "이 정책은 IT 관리자가 설정했습니다. 사용자가 변경할 수 없습니다."}
@@ -606,7 +606,7 @@ export function PermissionsTab() {
                     <tr key={`${r.pattern}:${r.action}:${i}`} className="border-b last:border-0 hover:bg-muted/20">
                       <td className="px-3 py-1.5 font-mono">{r.pattern}</td>
                       <td className="px-3 py-1.5">
-                        <Badge variant={r.action === "allow" ? "default" : "secondary"} className={`text-[10px] ${r.action === "deny" ? "text-red-400" : ""}`}>
+                        <Badge variant={r.action === "allow" ? "default" : "secondary"} className={`text-[10px] ${r.action === "deny" ? "text-destructive" : ""}`}>
                           {r.action === "allow" ? "허용" : "거부"}
                         </Badge>
                       </td>
@@ -722,7 +722,7 @@ export function PermissionsTab() {
           {pendingDirectoryWarning && pendingDirectoryWarning.path === newDirectory.trim() && (
             <div
               data-testid="directory-warning-confirmation"
-              className="rounded-md border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-[12px] text-yellow-700 dark:text-yellow-300"
+              className="rounded-md border border-warning/40 bg-warning/15 px-3 py-2 text-[12px] text-warning"
             >
               <p className="font-medium">경고 확인 필요</p>
               <ul className="mt-1 list-disc space-y-1 pl-4">
