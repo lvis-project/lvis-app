@@ -19,8 +19,8 @@ import type { IpcMainInvokeEvent } from "electron";
 
 /**
  * TIER 1: destructive or settings/permissions/plugins/files/network mutators.
- * TIER 2: triggers LLM calls or writes memory/tasks.
- * TIER 3: pure read-only queries — guard not required.
+ * TIER 2: triggers LLM calls, writes memory/tasks, or reads sensitive local context.
+ * TIER 3: pure non-sensitive read-only queries — guard not required.
  */
 const CHANNEL_MANIFEST: Record<string, "tier1" | "tier2" | "tier3"> = {
   // Settings
@@ -44,9 +44,18 @@ const CHANNEL_MANIFEST: Record<string, "tier1" | "tier2" | "tier3"> = {
   "lvis:chat:retry-effort": "tier2",
   "lvis:chat:export": "tier2",
   // Memory
-  "lvis:memory:lvis-md:get": "tier3",
+  "lvis:memory:entries:list": "tier2",
+  "lvis:memory:entries:save": "tier2",
+  "lvis:memory:entries:delete": "tier1",
+  "lvis:memory:entries:search": "tier2",
+  "lvis:memory:index:get": "tier2",
+  "lvis:memory:sessions:list": "tier2",
+  "lvis:memory:sessions:search": "tier2",
+  "lvis:memory:agents-md:get": "tier2",
+  "lvis:memory:agents-md:update": "tier1",
+  "lvis:memory:lvis-md:get": "tier2",
   "lvis:memory:lvis-md:update": "tier1",
-  "lvis:memory:user-prefs:get": "tier3",
+  "lvis:memory:user-prefs:get": "tier2",
   "lvis:memory:user-prefs:update": "tier1",
   // Plugins
   "lvis:plugins:marketplace:list": "tier3",

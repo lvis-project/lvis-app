@@ -5,12 +5,28 @@ export interface NoteResult {
   title: string;
   excerpt: string;
   updatedAt?: string;
+  filename?: string;
 }
 
 export interface SessionResult {
   sessionId: string;
   matchedMessage: string;
   timestamp: string;
+}
+
+function stripTopHeading(content: string): string {
+  return content.replace(/^#\s+.+(?:\r?\n)+/m, "").trim();
+}
+
+function memoryIndexResult(content: string | undefined, query = ""): NoteResult[] {
+  const trimmed = content?.trim() ?? "";
+  if (!trimmed) return [];
+  if (query.trim() && !trimmed.toLowerCase().includes(query.trim().toLowerCase())) return [];
+  return [{
+    filename: "MEMORY.md",
+    title: "메모리 인덱스",
+    excerpt: stripTopHeading(trimmed),
+  }];
 }
 
 /**
@@ -39,19 +55,22 @@ export function useMemorySearch(api: LvisApi) {
     void (async () => {
       setLoading(true);
       try {
-        const [notes, sessions] = await Promise.all([
+        const [memoryIndex, notes, sessions] = await Promise.all([
+          api.memoryGetIndex(),
           api.memoryListEntries(),
           api.memoryListSessions(),
         ]);
         if (!aliveRef.current) return;
         const mappedNotes = (notes ?? []).map((note) => ({
+          filename: note.filename,
           title: note.title,
-          excerpt: note.content.replace(/^#\s+.+\n+/m, "").trim(),
+          excerpt: stripTopHeading(note.content),
           updatedAt: note.updatedAt,
         }));
-        setNoteCatalog(mappedNotes);
+        const mappedMemory = [...memoryIndexResult(memoryIndex), ...mappedNotes];
+        setNoteCatalog(mappedMemory);
         setSessionCatalog(sessions ?? []);
-        setNoteResults(mappedNotes);
+        setNoteResults(mappedMemory);
         setSessionResults(sessions ?? []);
       } catch {
         if (!aliveRef.current) return;
@@ -76,12 +95,16 @@ export function useMemorySearch(api: LvisApi) {
       if (!aliveRef.current) return;
       setLoading(true);
       try {
-        const [notes, sessions] = await Promise.all([
+        const [memoryIndex, notes, sessions] = await Promise.all([
+          api.memoryGetIndex(),
           api.memorySearchEntries(query),
           api.memorySearchSessions(query),
         ]);
         if (!aliveRef.current) return;
-        setNoteResults(notes ?? []);
+        setNoteResults([
+          ...memoryIndexResult(memoryIndex, query),
+          ...(notes ?? []),
+        ]);
         setSessionResults(sessions ?? []);
       } catch {
         if (!aliveRef.current) return;

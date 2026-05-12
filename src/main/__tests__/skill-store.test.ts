@@ -8,7 +8,7 @@
  *   4. Bodies larger than SKILL_MAX_BODY_BYTES are rejected.
  */
 import { describe, it, expect } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync, symlinkSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir, platform } from "node:os";
 import { SkillStore, SKILL_MAX_BODY_BYTES } from "../skill-store.js";
@@ -97,6 +97,25 @@ describe("SkillStore — C2 traversal & allowlist", () => {
       const store = new SkillStore({ userDir: dir });
       const all = await store.list();
       expect(all.find((s) => s.name === "huge")).toBeUndefined();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("loads agent-platform directory skills from <name>/SKILL.md", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "lvis-skills-"));
+    try {
+      mkdirSync(join(dir, "git-release"), { recursive: true });
+      writeFileSync(
+        join(dir, "git-release", "SKILL.md"),
+        "---\nname: git-release\ndescription: Create releases\ntriggers: [release, tag]\n---\n## Release\nShip it.",
+        "utf-8",
+      );
+      const store = new SkillStore({ userDir: dir });
+      const skill = await store.load("git-release");
+      expect(skill?.description).toBe("Create releases");
+      expect(skill?.triggers).toEqual(["release", "tag"]);
+      expect(skill?.body).toContain("Ship it.");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
