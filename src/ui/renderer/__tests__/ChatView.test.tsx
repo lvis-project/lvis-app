@@ -152,8 +152,11 @@ describe("ChatView", () => {
       emitChatStream({ type: "done" });
     });
     await waitFor(() => {
-      expect(container.textContent).toContain("작업");
-      expect(container.textContent).toContain("2단계");
+      // Tighter than two separate `toContain("작업")` + `toContain("2단계")` —
+      // those would pass even if WorkGroup spans degenerated to `작업단계`
+      // (lost the count). `/작업\s*\d+단계/` requires the count digit between
+      // the label and the suffix, which is what WorkGroup actually renders.
+      expect(container.textContent).toMatch(/작업\s*2단계/);
       expect(container.textContent).not.toContain("calendar list");
       expect(container.textContent).not.toContain("__calendar_result__");
       expect(container.textContent).toContain("두번째 답변입니다");
@@ -207,8 +210,7 @@ describe("ChatView", () => {
       emitChatStream({ type: "done" });
     });
     await waitFor(() => {
-      expect(container.textContent).toContain("작업");
-      expect(container.textContent).toContain("2단계");
+      expect(container.textContent).toMatch(/작업\s*2단계/);
       expect(container.textContent).toContain("최종 답변입니다");
       expect(container.textContent).not.toContain("첫번째 답변입니다");
     });
@@ -652,7 +654,7 @@ describe("ChatView", () => {
       // Final assistant text must be visible
       expect(container.textContent).toContain("오늘 일정 정리해드릴게요");
       // Reasoning and tool results are one completed WorkGroup and collapse together.
-      expect(container.textContent).toContain("2단계");
+      expect(container.textContent).toMatch(/작업\s*2단계/);
       expect(container.textContent).not.toContain("calendar list");
       expect(container.textContent).not.toContain("__calendar_result__");
     });
