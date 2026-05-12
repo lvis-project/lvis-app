@@ -275,6 +275,12 @@ export interface PluginManifest {
    * Full list: https://lucide.dev/icons/
    */
   icon?: string;
+  /**
+   * Optional short text (1-4 chars) rendered in place of a Lucide icon — e.g.
+   * `"EP"`, `"MTG"`. Takes precedence over `icon` when both are declared.
+   * Use when no Lucide glyph matches the plugin's domain identity.
+   */
+  iconText?: string;
 }
 
 /**

@@ -358,6 +358,7 @@ export function App() {
         pluginId: view.pluginId,
         label: getPluginViewLabel(view),
         icon: view.icon,
+        iconText: view.iconText,
         unauthed: pluginAuthStatuses.get(view.pluginId)?.kind === "unauthed",
       })),
     [pluginViews, pluginAuthStatuses],

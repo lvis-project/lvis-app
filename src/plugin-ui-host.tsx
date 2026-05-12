@@ -24,6 +24,11 @@ export type PluginUiExtensionView = {
   pluginId: string;
   /** Optional Lucide icon name declared in the plugin manifest. */
   icon?: string;
+  /**
+   * Optional short text (1-4 chars) used in place of a Lucide icon — e.g.
+   * `"EP"`, `"MTG"`. Takes precedence over `icon` when both are declared.
+   */
+  iconText?: string;
   extension: {
     id: string;
     slot: "sidebar";

@@ -23,6 +23,11 @@ export interface PluginEntry {
   /** Lucide icon name from the plugin manifest (PascalCase, e.g. "Mic"). */
   icon?: string;
   /**
+   * Short text (1-4 chars) rendered in place of the Lucide icon — e.g.
+   * `"EP"`. Takes precedence over `icon` when both are set.
+   */
+  iconText?: string;
+  /**
    * `true` when the owning plugin declares `manifest.auth` and its current
    * statusTool result is `kind: "unauthed"`. The grid renders a small 🔒
    * indicator on those entries so users see the missing-auth state without
@@ -212,7 +217,7 @@ export function PluginGridButton({
               const cellTestId = p.viewKey.replace(/:/g, "-");
               const phase = installingPlugins?.get(pluginId);
               const isInstalling = phase !== undefined;
-              const Icon = pluginIconFor({ icon: p.icon });
+              const Icon = pluginIconFor({ icon: p.icon, iconText: p.iconText });
 
               return (
                 <button
