@@ -89,6 +89,14 @@ export function WorkGroup({ stepCount, streaming, children, turnDurationMs }: Wo
         <span className="min-w-0 font-medium text-foreground/90">
           {streaming ? "작업 중..." : "작업"}
         </span>
+        {/*
+          Single-step intermediate entries still render the WorkGroup header
+          (this `{stepCount}단계` line + the chevron) for parity with multi-
+          step turns — a uniform "작업 N단계" affordance is more discoverable
+          than collapsing single-step turns into inline rendering, which would
+          remove the expand/collapse UI for half the chat history. Reviewed
+          in #565; intentional, not a candidate for inline rendering.
+        */}
         {!streaming && <span className="shrink-0 opacity-50">{stepCount}단계</span>}
         {!streaming && turnDurationMs !== undefined && turnDurationMs > 0 && (
           <span className="shrink-0 opacity-50 tabular-nums">⏱ {formatDuration(turnDurationMs)}</span>
