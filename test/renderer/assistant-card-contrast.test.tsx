@@ -209,7 +209,13 @@ describe("lvis-prose CSS coverage — markdown tables stay readable", () => {
      */
     const layerBase = extractLayerBody(css, "base");
     expect(layerBase, "@layer base block not found in styles.css").not.toBeNull();
-    expect(layerBase!).toMatch(/\bbody\s*\{[^{}]*?font-family:\s*system-ui\s*,/);
+    // styles.css body wraps the default stack in `var(--lvis-font-family, …)`
+    // so a Track A user-override path can swap it at runtime. The default
+    // stack inside the fallback expression must still begin with `system-ui`
+    // and retain a Hangul fallback for cross-OS rendering.
+    expect(layerBase!).toMatch(
+      /\bbody\s*\{[^{}]*?font-family:\s*var\(\s*--lvis-font-family\s*,\s*system-ui\s*,/,
+    );
     expect(layerBase!).toMatch(
       /body\s*\{[^{}]*?font-family:[^{}]*?("Noto Sans KR"|"Malgun Gothic"|"Apple SD Gothic Neo")/,
     );
@@ -251,8 +257,13 @@ describe("lvis-prose CSS coverage — markdown tables stay readable", () => {
       extract: (text) => {
         const layer = extractLayerBody(text, "base");
         if (!layer) return null;
-        const m = layer.match(/\bbody\s*\{[^{}]*?font-family:\s*([^;}]+)/);
-        return m ? m[1]! : null;
+        // styles.css wraps the default stack in `var(--lvis-font-family, <stack>)`
+        // so the user-override path can swap it at runtime (Track A font customization).
+        // Peel the wrapper if present and return only the inner fallback stack.
+        const wrapped = layer.match(/\bbody\s*\{[^{}]*?font-family:\s*var\(\s*--lvis-font-family\s*,\s*([\s\S]*?)\s*\)\s*;/);
+        if (wrapped) return wrapped[1]!;
+        const raw = layer.match(/\bbody\s*\{[^{}]*?font-family:\s*([^;}]+)/);
+        return raw ? raw[1]! : null;
       },
     },
     {
@@ -299,6 +310,15 @@ describe("lvis-prose CSS coverage — markdown tables stay readable", () => {
         ...FONT_STACK_MIRRORS.map((m) => m.path),
         // Test files reference the stack literally for assertions.
         "test/renderer/assistant-card-contrast.test.tsx",
+        // Track A: AppearanceTab ships FONT_FAMILY_PRESETS with named Hangul
+        // fonts (Pretendard / Noto Sans KR / IBM Plex) that the user can pick
+        // from. These are not HOST_FONT_STACK mirrors — they are user-facing
+        // preset options that ship the named-font-family stacks the validator
+        // then accepts as `appearance.font.family`. Allowlisted.
+        "src/ui/renderer/tabs/AppearanceTab.tsx",
+        // Settings-store unit tests exercise the font-family validator with
+        // sample stacks containing the same Korean font names.
+        "src/data/__tests__/settings-store.test.ts",
       ].map((p) => p.replace(/\\/g, "/")),
     );
     function walk(dir: string, out: string[], depth = 0): void {
