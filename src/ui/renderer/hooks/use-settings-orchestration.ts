@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { AppSettings, LvisApi } from "../types.js";
 import { VENDORS } from "../constants.js";
 import type { FallbackEntry } from "../tabs/LlmTab.js";
@@ -91,6 +91,9 @@ export function useSettingsOrchestration(
   const [hasMarketplaceApiKey, setHasMarketplaceApiKey] = useState(false);
   const [marketplaceApiKeyInput, setMarketplaceApiKeyInput] = useState("");
   const [saving, setSaving] = useState(false);
+  const [settingsSnapshot, setSettingsSnapshot] = useState<AppSettings | null>(null);
+  const hydratedVendorRef = useRef<string | null>(null);
+  const hydratedWebProviderRef = useRef<string | null>(null);
 
   const vendorInfo = VENDORS.find((v) => v.id === vendor) ?? VENDORS[0];
 
@@ -101,25 +104,27 @@ export function useSettingsOrchestration(
     setSettingsLoaded(false);
     void (async () => {
       const s = await api.getSettings();
+      const [apiKeySet, webApiKeySet, marketplaceKeySet] = await Promise.all([
+        api.hasApiKey(s.llm.provider),
+        api.hasWebApiKey(s.webSearch.provider),
+        api.hasMarketplaceApiKey(),
+      ]);
       if (cancelled) return;
       const block = s.llm.vendors[s.llm.provider];
+      hydratedVendorRef.current = s.llm.provider;
+      hydratedWebProviderRef.current = s.webSearch.provider;
+      setSettingsSnapshot(s);
       setVendor(s.llm.provider);
       hydrateVendorBlock(block);
       setStreamSmoothing(s.llm.streamSmoothing);
       setAutoCompact(s.chat.autoCompact ?? true);
-      const apiKeySet = await api.hasApiKey(s.llm.provider);
-      if (cancelled) return;
       setHasKey(apiKeySet);
       setWebProvider(s.webSearch.provider);
-      const webApiKeySet = await api.hasWebApiKey(s.webSearch.provider);
-      if (cancelled) return;
       setHasWebKey(webApiKeySet);
       setPiiRedactEnabled(s.privacy?.piiRedactEnabled ?? false);
       setExperimentalContinuousBackend(s.features?.experimentalContinuousBackend ?? false);
       setMarketplaceBaseUrl(s.marketplace?.realCloudBaseUrl ?? "");
       setMarketplaceAllowPrivateNetwork(s.marketplace?.realCloudAllowPrivateNetwork ?? false);
-      const marketplaceKeySet = await api.hasMarketplaceApiKey();
-      if (cancelled) return;
       setHasMarketplaceApiKey(marketplaceKeySet);
       setFallbackChain(s.llm.fallbackChain.map((e) => ({ provider: e.provider, model: e.model })));
       setSettingsLoaded(true);
@@ -130,15 +135,18 @@ export function useSettingsOrchestration(
   // Re-hydrate every vendor-specific field when the active vendor changes.
   useEffect(() => {
     if (!open) return;
+    if (!settingsLoaded) return;
     if (!VENDORS.some((x) => x.id === vendor)) return;
+    if (hydratedVendorRef.current === vendor) {
+      hydratedVendorRef.current = null;
+      return;
+    }
     let cancelled = false;
     void api.hasApiKey(vendor).then((k) => { if (!cancelled) setHasKey(k); });
-    void api.getSettings().then((s) => {
-      if (cancelled) return;
-      hydrateVendorBlock(s.llm.vendors[vendor]);
-    });
+    const block = settingsSnapshot?.llm.vendors[vendor];
+    if (block) hydrateVendorBlock(block);
     return () => { cancelled = true; };
-  }, [vendor, open, api]);
+  }, [vendor, open, api, settingsLoaded, settingsSnapshot]);
 
   function hydrateVendorBlock(block: AppSettings["llm"]["vendors"][string]): void {
     setModel(block.model);
@@ -152,31 +160,47 @@ export function useSettingsOrchestration(
   // Re-check web key when webProvider changes
   useEffect(() => {
     if (!open) return;
+    if (!settingsLoaded) return;
+    if (hydratedWebProviderRef.current === webProvider) {
+      hydratedWebProviderRef.current = null;
+      return;
+    }
     let cancelled = false;
     void api.hasWebApiKey(webProvider).then((k) => { if (!cancelled) setHasWebKey(k); });
     return () => { cancelled = true; };
-  }, [webProvider, open, api]);
+  }, [webProvider, open, api, settingsLoaded]);
 
   const save = async (tab: string) => {
     if (!settingsLoaded) return;
     setSaving(true);
     try {
       if (tab !== "permissions") {
+        const secretUpdates: Array<Promise<unknown>> = [];
         if (keyInput.trim()) {
-          await api.setApiKey(vendor, keyInput.trim());
-          setKeyInput("");
-          setHasKey(true);
+          secretUpdates.push(
+            api.setApiKey(vendor, keyInput.trim()).then(() => {
+              setKeyInput("");
+              setHasKey(true);
+            }),
+          );
         }
         if (webKeyInput.trim()) {
-          await api.setWebApiKey(webProvider, webKeyInput.trim());
-          setWebKeyInput("");
-          setHasWebKey(true);
+          secretUpdates.push(
+            api.setWebApiKey(webProvider, webKeyInput.trim()).then(() => {
+              setWebKeyInput("");
+              setHasWebKey(true);
+            }),
+          );
         }
         if (marketplaceApiKeyInput.trim()) {
-          await api.setMarketplaceApiKey(marketplaceApiKeyInput.trim());
-          setMarketplaceApiKeyInput("");
-          setHasMarketplaceApiKey(true);
+          secretUpdates.push(
+            api.setMarketplaceApiKey(marketplaceApiKeyInput.trim()).then(() => {
+              setMarketplaceApiKeyInput("");
+              setHasMarketplaceApiKey(true);
+            }),
+          );
         }
+        await Promise.all(secretUpdates);
         const trimmedBaseUrl = baseUrl.trim();
         const trimmedVertexProject = vertexProject.trim();
         const trimmedVertexLocation = vertexLocation.trim();

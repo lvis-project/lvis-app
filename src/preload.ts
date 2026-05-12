@@ -9,7 +9,7 @@ import { resolve as pathResolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { McpServerConfig } from "./mcp/types.js";
 import type { SerializedHistoryMessage } from "./shared/chat-history.js";
-import { OVERLAY_V1, PERMISSIONS, ROUTINES_V2 } from "./shared/ipc-channels.js";
+import { OVERLAY_V1, PERMISSIONS, ROUTINES_V2, SETTINGS } from "./shared/ipc-channels.js";
 import { PLUGIN_PRIVATE_NAMESPACES } from "./plugins/capabilities.js";
 import type {
   ChatSendInputOrigin,
@@ -201,6 +201,11 @@ const api = {
   // ─── Settings ────────────────────────────────────
   getSettings: async () => ipcRenderer.invoke("lvis:settings:get"),
   updateSettings: async (partial: unknown) => ipcRenderer.invoke("lvis:settings:update", partial),
+  onSettingsUpdated: (handler: (settings: unknown) => void) => {
+    const listener = (_event: unknown, settings: unknown) => handler(settings);
+    ipcRenderer.on(SETTINGS.updated, listener);
+    return () => ipcRenderer.removeListener(SETTINGS.updated, listener);
+  },
   setApiKey: async (vendor: string, apiKey: string) => ipcRenderer.invoke("lvis:settings:set-api-key", vendor, apiKey),
   hasApiKey: async (vendor?: string) => ipcRenderer.invoke("lvis:settings:has-api-key", vendor) as Promise<boolean>,
   deleteApiKey: async (vendor: string) => ipcRenderer.invoke("lvis:settings:delete-api-key", vendor),
@@ -210,6 +215,24 @@ const api = {
   setMarketplaceApiKey: async (apiKey: string) => ipcRenderer.invoke("lvis:settings:marketplace:set-api-key", apiKey),
   hasMarketplaceApiKey: async () => ipcRenderer.invoke("lvis:settings:marketplace:has-api-key") as Promise<boolean>,
   deleteMarketplaceApiKey: async () => ipcRenderer.invoke("lvis:settings:marketplace:delete-api-key"),
+  openSettingsWindow: async (initialTab?: string) =>
+    ipcRenderer.invoke("lvis:settings-window:open", initialTab) as Promise<
+      { ok: true; windowId: number } | { ok: false; error: string }
+    >,
+  notifySettingsWindowSaved: async () =>
+    ipcRenderer.invoke("lvis:settings-window:saved") as Promise<{ ok: true } | { ok: false; error: string }>,
+  onSettingsWindowSaved: (handler: () => void) => {
+    const listener = () => handler();
+    ipcRenderer.on("lvis:settings-window:saved", listener);
+    return () => ipcRenderer.removeListener("lvis:settings-window:saved", listener);
+  },
+  onSettingsWindowTab: (handler: (initialTab: string) => void) => {
+    const listener = (_event: unknown, payload: { initialTab?: unknown }) => {
+      if (typeof payload?.initialTab === "string") handler(payload.initialTab);
+    };
+    ipcRenderer.on("lvis:settings-window:tab", listener);
+    return () => ipcRenderer.removeListener("lvis:settings-window:tab", listener);
+  },
   // Open an http(s) URL in the system browser. Main-side validates the
   // scheme and rejects file://, javascript:, and any other handler.
   openExternalUrl: async (url: string) =>
@@ -605,6 +628,14 @@ const api = {
       mode,
       intent: ipcUserKeyboardIntent(),
     }),
+    onModeChanged: (cb: (mode: string) => void) => {
+      const listener = (_event: unknown, payload: { mode?: unknown }) => {
+        if (typeof payload?.mode === "string") cb(payload.mode);
+      };
+      ipcRenderer.on(PERMISSIONS.modeChanged, listener);
+      return () =>
+        ipcRenderer.removeListener(PERMISSIONS.modeChanged, listener);
+    },
     listRules: async () => ipcRenderer.invoke(PERMISSIONS.listRules),
     addRule: async (pattern: string, action: string) =>
       ipcRenderer.invoke(PERMISSIONS.addRule, { pattern, action, intent: ipcUserKeyboardIntent() }),

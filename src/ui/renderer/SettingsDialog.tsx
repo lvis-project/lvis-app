@@ -8,7 +8,6 @@ import { PermissionsTab } from "./tabs/PermissionsTab.js";
 import { AuditTab } from "./tabs/AuditTab.js";
 import { UsageDashboard } from "./components/UsageDashboard.js";
 import { PluginPerfTab } from "./tabs/PluginPerfTab.js";
-import { PrivacyTab } from "./tabs/PrivacyTab.js";
 import { LlmTab } from "./tabs/LlmTab.js";
 import { AppearanceTab } from "./tabs/AppearanceTab.js";
 import { ChatTab } from "./tabs/ChatTab.js";
@@ -17,6 +16,7 @@ import { McpTab } from "./tabs/McpTab.js";
 import { PluginConfigTab } from "./tabs/PluginConfigTab.js";
 import { MarketplaceTab } from "./tabs/MarketplaceTab.js";
 import { useSettingsOrchestration } from "./hooks/use-settings-orchestration.js";
+import { normalizeSettingsTab } from "../../shared/settings-tabs.js";
 
 export function SettingsDialog({
   open,
@@ -31,12 +31,44 @@ export function SettingsDialog({
   onSaved: () => void;
   initialTab?: string;
 }) {
-  const [tab, setTab] = useState(initialTab);
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent size="xl">
+        <DialogHeader>
+          <DialogTitle>설정</DialogTitle>
+          <DialogDescription>앱 환경, 채팅 동작, 검색 엔진, 권한 정책을 설정합니다.</DialogDescription>
+        </DialogHeader>
+        <SettingsContent
+          open={open}
+          onOpenChange={onOpenChange}
+          api={api}
+          onSaved={onSaved}
+          initialTab={initialTab}
+        />
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+export function SettingsContent({
+  open,
+  onOpenChange,
+  api,
+  onSaved,
+  initialTab = "llm",
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  api: LvisApi;
+  onSaved: () => void;
+  initialTab?: string;
+}) {
+  const [tab, setTab] = useState(() => normalizeSettingsTab(initialTab));
   const [pendingPermissions, setPendingPermissions] = useState(0);
   const s = useSettingsOrchestration(open, api, onSaved, onOpenChange);
 
   useEffect(() => {
-    if (open) setTab(initialTab);
+    if (open) setTab(normalizeSettingsTab(initialTab));
   }, [initialTab, open]);
 
   useEffect(() => {
@@ -61,16 +93,13 @@ export function SettingsDialog({
   }, [api, open]);
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent size="xl">
-        <DialogHeader><DialogTitle>설정</DialogTitle><DialogDescription>앱 환경, 채팅 동작, 검색 엔진, 권한 정책을 설정합니다.</DialogDescription></DialogHeader>
-        <Tabs value={tab} onValueChange={setTab}>
+    <>
+        <Tabs value={tab} onValueChange={(nextTab) => setTab(normalizeSettingsTab(nextTab))}>
           <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1 [&>*]:!grow-0 [&>*]:!shrink-0 [&>*]:!basis-auto overflow-x-auto">
             <TabsTrigger value="llm">지능 (LLM)</TabsTrigger>
             <TabsTrigger value="appearance">테마</TabsTrigger>
             <TabsTrigger value="chat">채팅</TabsTrigger>
             <TabsTrigger value="web">검색 (Web)</TabsTrigger>
-            <TabsTrigger value="privacy">프라이버시</TabsTrigger>
             <TabsTrigger value="permissions" className="gap-1.5">
               권한
               {pendingPermissions > 0 && (
@@ -129,6 +158,8 @@ export function SettingsDialog({
               setStreamSmoothing={s.setStreamSmoothing}
               experimentalContinuousBackend={s.experimentalContinuousBackend}
               setExperimentalContinuousBackend={s.setExperimentalContinuousBackend}
+              piiRedactEnabled={s.piiRedactEnabled}
+              onPiiRedactToggle={() => s.setPiiRedactEnabled(!s.piiRedactEnabled)}
             />
           </TabsContent>
 
@@ -142,13 +173,6 @@ export function SettingsDialog({
               webKeyInput={s.webKeyInput}
               setWebKeyInput={s.setWebKeyInput}
               onSaved={onSaved}
-            />
-          </TabsContent>
-
-          <TabsContent value="privacy">
-            <PrivacyTab
-              piiRedactEnabled={s.piiRedactEnabled}
-              onToggle={() => s.setPiiRedactEnabled(!s.piiRedactEnabled)}
             />
           </TabsContent>
 
@@ -180,7 +204,6 @@ export function SettingsDialog({
             <Button onClick={() => void s.save(tab)} disabled={s.saving || !s.settingsLoaded}>{s.saving ? "저장 중..." : "저장"}</Button>
           )}
         </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    </>
   );
 }

@@ -123,6 +123,21 @@ describe("preload — plugin webview asset URLs", () => {
     expect(typeof api["captureUserKeyboardIntent"]).toBe("function");
   });
 
+  it("exposes settings updated subscription through preload", async () => {
+    const api = await loadLvisApi();
+    const handler = vi.fn();
+    const unsubscribe = (api["onSettingsUpdated"] as (cb: (settings: unknown) => void) => () => void)(handler);
+
+    expect(mockOn).toHaveBeenCalledWith("lvis:settings:updated", expect.any(Function));
+    const listener = mockOn.mock.calls.at(-1)?.[1] as (event: unknown, settings: unknown) => void;
+    const settings = { appearance: { schemaVersion: 2, bundleId: "forest" } };
+    listener({}, settings);
+    expect(handler).toHaveBeenCalledWith(settings);
+
+    unsubscribe();
+    expect(mockRemoveListener).toHaveBeenCalledWith("lvis:settings:updated", listener);
+  });
+
   it("does not trust renderer-minted chat userActivation flags", async () => {
     const api = await loadLvisApi();
     const chatSend = api["chatSend"] as (

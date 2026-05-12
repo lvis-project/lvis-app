@@ -179,6 +179,39 @@ describe("PermissionModeBadge", () => {
     });
   });
 
+  it("subscribes to cross-window mode changes through preload", async () => {
+    let capturedHandler: ((mode: string) => void) | null = null;
+    const unsubscribe = vi.fn();
+    const onModeChanged = vi.fn((handler: (mode: string) => void) => {
+      capturedHandler = handler;
+      return unsubscribe;
+    });
+    (window as unknown as { lvis: unknown }).lvis = {
+      permission: {
+        getMode: vi.fn(async () => ({ mode: "default" })),
+        onModeChanged,
+        deferredList: vi.fn(async () => ({ ok: true, pending: [], total: 0 })),
+        onDeferredPending: vi.fn(() => () => undefined),
+      },
+    };
+
+    const { unmount } = render(<PermissionModeBadge />);
+    await waitFor(() => {
+      expect(screen.getByTestId("permission-mode-badge").getAttribute("data-mode")).toBe("default");
+    });
+    expect(onModeChanged).toHaveBeenCalledOnce();
+
+    await act(async () => {
+      capturedHandler!("auto");
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("permission-mode-badge").getAttribute("data-mode")).toBe("auto");
+    });
+    unmount();
+    expect(unsubscribe).toHaveBeenCalledOnce();
+  });
+
   it("invokes onClick handler", async () => {
     const onClick = vi.fn();
     await act(async () => {

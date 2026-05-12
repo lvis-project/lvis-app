@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import type { LvisApi } from "../types.js";
+import type { AppSettings, LvisApi } from "../types.js";
 import { BUNDLES, DEFAULT_BUNDLE_ID, findBundle } from "./bundles/index.js";
 import type { ThemeBundle } from "./bundles/index.js";
 import { applyBundleToDocument, resolveSystemPair } from "./resolve-theme.js";
@@ -38,6 +38,23 @@ function readGlobalInitialBundleId(): BundleId | undefined {
   if (typeof id !== "string") return undefined;
   return findBundle(id) ? (id as BundleId) : undefined;
 }
+
+/**
+ * Extract `{ bundleId, followSystem }` from an `AppSettings` payload. Used
+ * both by the initial settings hydrate and by the `SETTINGS.updated`
+ * cross-window broadcast handler so the two paths share one normalizer.
+ */
+function resolveAppearanceSettings(settings: AppSettings): { bundleId: BundleId; followSystem: boolean } {
+  const appearance = settings.appearance as { schemaVersion?: number; bundleId?: string; followSystem?: boolean } | undefined;
+  const rawId = (appearance?.schemaVersion === 2 && typeof appearance.bundleId === "string")
+    ? appearance.bundleId
+    : DEFAULT_BUNDLE_ID;
+  return {
+    bundleId: findBundle(rawId) ? rawId : DEFAULT_BUNDLE_ID,
+    followSystem: appearance?.followSystem === true,
+  };
+}
+
 
 export interface ThemeProviderProps {
   api?: LvisApi;
@@ -85,6 +102,16 @@ export function ThemeProvider({
   const mountedRef = useRef(true);
   useEffect(() => () => { mountedRef.current = false; }, []);
 
+  const applySettingsAppearance = useCallback(
+    (settings: AppSettings, options: { skipIfUserTouched?: boolean } = {}) => {
+      if (options.skipIfUserTouched && userTouchedRef.current) return;
+      const next = resolveAppearanceSettings(settings);
+      setBundleIdState(next.bundleId);
+      setFollowSystemState(next.followSystem);
+    },
+    [],
+  );
+
   // Hydrate from settings on mount.
   useEffect(() => {
     if (!api) return;
@@ -93,20 +120,24 @@ export function ThemeProvider({
       try {
         const settings = await api.getSettings();
         if (cancelled || userTouchedRef.current || !mountedRef.current) return;
-        const appearance = settings.appearance as { schemaVersion?: number; bundleId?: string; followSystem?: boolean } | undefined;
-        const rawId = (appearance?.schemaVersion === 2 && typeof appearance.bundleId === "string")
-          ? appearance.bundleId
-          : DEFAULT_BUNDLE_ID;
-        const nextId = findBundle(rawId) ? rawId : DEFAULT_BUNDLE_ID;
-        const nextFollow = appearance?.followSystem === true;
-        setBundleIdState(nextId);
-        setFollowSystemState(nextFollow);
+        applySettingsAppearance(settings, { skipIfUserTouched: true });
       } catch {
         /* ignore — boot continues with defaults */
       }
     })();
     return () => { cancelled = true; };
-  }, [api]);
+  }, [api, applySettingsAppearance]);
+
+  // Settings can be changed from the separate native settings window. Keep each
+  // renderer's provider in sync with the persisted settings broadcast so theme
+  // changes are visible without restarting the app.
+  useEffect(() => {
+    if (!api) return;
+    return api.onSettingsUpdated((settings) => {
+      if (!mountedRef.current) return;
+      applySettingsAppearance(settings);
+    });
+  }, [api, applySettingsAppearance]);
 
   // Tick counter — incremented by the OS media query listener below.
   // Must be declared before effectiveBundleId so it is in scope for the dep array.

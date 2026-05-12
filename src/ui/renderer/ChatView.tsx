@@ -21,6 +21,7 @@ import { SessionResumeDivider } from "./components/SessionResumeDivider.js";
 import { SessionTodoPanel } from "./components/SessionTodoPanel.js";
 import { SubAgentCard } from "./components/SubAgentCard.js";
 import { TokenCostBadge } from "./components/TokenCostBadge.js";
+import { TokenProgressRing } from "./components/TokenProgressRing.js";
 import { PermissionModeBadge } from "./components/permissions/PermissionModeBadge.js";
 import { SkillBadge } from "./components/SkillBadge.js";
 import { WorkGroup } from "./components/WorkGroup.js";
@@ -1210,22 +1211,14 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           scrolled the chat. The panel collapses by default once it has
           content; in the collapsed state the active item title streams next
           to the count so the user always sees what step is running. */}
-      <div className="relative z-30 w-full max-w-full min-w-0 overflow-visible bg-background">
+      <div className="relative z-30 w-full max-w-full min-w-0 overflow-visible border-t border-border/70 bg-card/95">
         <div className="w-full max-w-full min-w-0 px-3">
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0 flex-1">
-              <SessionTodoPanel api={workflowApi} sessionId={currentSessionId} />
-            </div>
-            <PermissionModeBadge
-              onClick={() => onOpenSettings("permissions")}
-              onQueueClick={onOpenPermissionQueue}
-            />
+          <div className="min-w-0">
+            <SessionTodoPanel api={workflowApi} sessionId={currentSessionId} />
           </div>
         </div>
         <div className="w-full max-w-full min-w-0 overflow-x-hidden pb-1 space-y-2">
           <InputActionBar
-            usedTokens={usedTokens}
-            contextBudget={contextBudget}
             plugins={plugins}
             onSelectPlugin={onSelectPlugin}
             installingPlugins={installingPlugins}
@@ -1368,19 +1361,28 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
                   : "질문 입력 (Enter 전송 · Cmd/Ctrl+V 첨부) · /command 사용 가능"
             }
           />
-          <div className="px-3">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className={`text-[11px] font-mono ${costBadgeClass}`} title="예상 비용">
-                  {formatCostBadge(costEstimate.total)}
-                </span>
-              </TooltipTrigger>
-              <TooltipContent className="text-xs">
-                <div>입력: {costEstimate.inputTokens.toLocaleString()} tok · ${costEstimate.inputCost.toFixed(5)}</div>
-                <div>출력(추정): {costEstimate.outputTokens.toLocaleString()} tok · ${costEstimate.outputCost.toFixed(5)}</div>
-                <div className="font-semibold">합계: ${costEstimate.total.toFixed(5)}</div>
-              </TooltipContent>
-            </Tooltip>
+          <div className="flex min-w-0 items-center justify-between gap-3 px-3">
+            <div className="flex min-w-0 items-center gap-2">
+              <TokenProgressRing used={usedTokens} budget={contextBudget} />
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className={`text-[11px] font-mono ${costBadgeClass}`} title="예상 비용">
+                    {formatCostBadge(costEstimate.total)}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent className="text-xs">
+                  <div>입력: {costEstimate.inputTokens.toLocaleString()} tok · ${costEstimate.inputCost.toFixed(5)}</div>
+                  <div>출력(추정): {costEstimate.outputTokens.toLocaleString()} tok · ${costEstimate.outputCost.toFixed(5)}</div>
+                  <div className="font-semibold">합계: ${costEstimate.total.toFixed(5)}</div>
+                </TooltipContent>
+              </Tooltip>
+            </div>
+            <div className="ml-auto flex shrink-0 items-center justify-end">
+              <PermissionModeBadge
+                onClick={() => onOpenSettings("permissions")}
+                onQueueClick={onOpenPermissionQueue}
+              />
+            </div>
           </div>
         </div>
         <QuestionOverlay

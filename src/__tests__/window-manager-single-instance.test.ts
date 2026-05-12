@@ -9,6 +9,7 @@
  *   3. After the shell is closed, the next openDetachedTab call spawns a fresh
  *      window normally.
  *   4. listChildren() always reflects the current (live) viewKey.
+ *   5. getDetachedWindows() exposes live app-owned detached BrowserWindows.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
@@ -145,6 +146,15 @@ describe("WindowManager — single-instance detached shell", () => {
     const listed = wm.listChildren();
     expect(listed).toHaveLength(1);
     expect(listed[0].viewKey).toBe("plugin:local-indexer:search");
+  });
+
+  it("getDetachedWindows returns live detached app windows only", () => {
+    const detached = wm.openDetachedTab("plugin:meeting:meeting-control");
+
+    expect(wm.getDetachedWindows()).toEqual([detached]);
+
+    mockWindowInstances[0].close();
+    expect(wm.getDetachedWindows()).toEqual([]);
   });
 
   it("applies generic plugin default size when reusing the detached plugin shell", () => {
