@@ -10,7 +10,7 @@
   },
   "main": "dist/src/main.js",
   "scripts": {
-    "postinstall": "electron-rebuild && node scripts/fetch-uv.mjs && node scripts/register-lvis-protocol.mjs",
+    "postinstall": "electron-rebuild --only better-sqlite3 && node scripts/fetch-uv.mjs && node scripts/register-lvis-protocol.mjs",
     "build:main": "tsc -p tsconfig.json",
     "build:webpack": "webpack --config webpack.config.cjs",
     "build:renderer": "webpack --config webpack.config.cjs --config-name renderer",
