@@ -1465,8 +1465,18 @@
 
    Code spans/blocks deliberately reuse `--code-*` so a "dark code on light
    shell" combination still has a readable embedded code panel.
+
+   Cascade note: these rules are intentionally UNLAYERED. Tailwind v4 emits the
+   typography plugin under `@layer utilities`, including the hardcoded
+   `--tw-prose-bold: oklch(21%…)` (dark) on bare `.prose`. Per CSS cascade
+   layers (W3C css-cascade-5 §6.4.4), unlayered declarations take precedence
+   over any layered declaration regardless of specificity, so this is the only
+   reliable way for `.prose.lvis-prose` to win — keeping the rules inside
+   `@layer components` would silently lose to `@layer utilities` even with
+   higher specificity. Re-wrapping these in any @layer will reintroduce the
+   "bold/strong renders dark on dark theme" regression that the chat-contrast
+   guard test pins.
 ──────────────────────────────────────────────────────────────────────────── */
-@layer components {
   .prose.lvis-prose,
   .lvis-prose {
     /* Body + inline content */
@@ -1588,4 +1598,3 @@
     width: 100% !important;
     max-width: 100% !important;
   }
-}

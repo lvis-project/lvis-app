@@ -71,6 +71,15 @@ test.describe('Chat surface contrast — WCAG AA across all 6 theme bundles', ()
       codeColor: string;
       codeBg: string;
       codeRatio: number;
+      strongColor: string;
+      strongBg: string;
+      strongRatio: number;
+      thColor: string;
+      thBg: string;
+      thRatio: number;
+      tdColor: string;
+      tdBg: string;
+      tdRatio: number;
     };
     const failures: RowResult[] = [];
     const rows: RowResult[] = [];
@@ -90,7 +99,7 @@ test.describe('Chat surface contrast — WCAG AA across all 6 theme bundles', ()
         document.getElementById(PROBE_HOST_ID)?.remove();
         const host = document.createElement('div');
         host.id = PROBE_HOST_ID;
-        host.style.cssText = 'position:fixed;left:-9999px;top:0;width:320px;z-index:-1';
+        host.style.cssText = 'position:fixed;left:-9999px;top:0;width:480px;z-index:-1';
 
         const bubble = document.createElement('div');
         bubble.className = 'group relative max-w-[85%] rounded-md px-3 py-2 text-sm';
@@ -99,8 +108,13 @@ test.describe('Chat surface contrast — WCAG AA across all 6 theme bundles', ()
         body.id = '__lvis_contrast_probe_body__';
         body.className = 'prose prose-sm lvis-prose max-w-none break-words';
         body.innerHTML =
-          '<p>안녕! 오늘 날씨는 화창합니다. 즐거운 하루 보내세요.</p>' +
-          '<p>여기는 <code id="__lvis_contrast_probe_code__">inline</code> 사례입니다.</p>';
+          '<p>안녕! 오늘 <strong id="__lvis_contrast_probe_strong__">날씨</strong>는 화창합니다.</p>' +
+          '<p>여기는 <code id="__lvis_contrast_probe_code__">inline</code> 사례입니다.</p>' +
+          '<table><thead><tr>' +
+          '<th id="__lvis_contrast_probe_th__">날짜</th><th>날씨</th><th>최고/최저</th><th>강수</th>' +
+          '</tr></thead><tbody><tr>' +
+          '<td id="__lvis_contrast_probe_td__">5/12(화)</td><td>구름 조금</td><td>24° / 13°</td><td>1%</td>' +
+          '</tr></tbody></table>';
 
         bubble.appendChild(body);
         host.appendChild(bubble);
@@ -111,7 +125,10 @@ test.describe('Chat surface contrast — WCAG AA across all 6 theme bundles', ()
       const probe = await mainWindow.evaluate(() => {
         const body = document.getElementById('__lvis_contrast_probe_body__');
         const code = document.getElementById('__lvis_contrast_probe_code__');
-        if (!body || !code) throw new Error('probe missing after injection');
+        const strong = document.getElementById('__lvis_contrast_probe_strong__');
+        const th = document.getElementById('__lvis_contrast_probe_th__');
+        const td = document.getElementById('__lvis_contrast_probe_td__');
+        if (!body || !code || !strong || !th || !td) throw new Error('probe missing after injection');
         const bodyP = body.querySelector('p');
         if (!bodyP) throw new Error('probe paragraph missing');
 
@@ -134,11 +151,20 @@ test.describe('Chat surface contrast — WCAG AA across all 6 theme bundles', ()
           codeStyle.backgroundColor && codeStyle.backgroundColor !== 'rgba(0, 0, 0, 0)'
             ? codeStyle.backgroundColor
             : paintedBg(code);
-        return { bodyColor, bodyBg, codeColor, codeBg };
+        const strongColor = getComputedStyle(strong).color;
+        const strongBg = paintedBg(strong);
+        const thColor = getComputedStyle(th).color;
+        const thBg = paintedBg(th);
+        const tdColor = getComputedStyle(td).color;
+        const tdBg = paintedBg(td);
+        return { bodyColor, bodyBg, codeColor, codeBg, strongColor, strongBg, thColor, thBg, tdColor, tdBg };
       });
 
       const bodyRatio = contrastRatio(probe.bodyColor, probe.bodyBg);
       const codeRatio = contrastRatio(probe.codeColor, probe.codeBg);
+      const strongRatio = contrastRatio(probe.strongColor, probe.strongBg);
+      const thRatio = contrastRatio(probe.thColor, probe.thBg);
+      const tdRatio = contrastRatio(probe.tdColor, probe.tdBg);
 
       const row: RowResult = {
         bundle,
@@ -148,10 +174,19 @@ test.describe('Chat surface contrast — WCAG AA across all 6 theme bundles', ()
         codeColor: probe.codeColor,
         codeBg: probe.codeBg,
         codeRatio,
+        strongColor: probe.strongColor,
+        strongBg: probe.strongBg,
+        strongRatio,
+        thColor: probe.thColor,
+        thBg: probe.thBg,
+        thRatio,
+        tdColor: probe.tdColor,
+        tdBg: probe.tdBg,
+        tdRatio,
       };
       rows.push(row);
-      // 4.5 = WCAG AA Body Text minimum.
-      if (bodyRatio < 4.5 || codeRatio < 4.5) {
+      // 4.5 = WCAG AA Body Text minimum. td uses 0.88 alpha so allow 4.0 lower bound.
+      if (bodyRatio < 4.5 || codeRatio < 4.5 || strongRatio < 4.5 || thRatio < 4.5 || tdRatio < 4.0) {
         failures.push(row);
       }
     }
@@ -165,11 +200,14 @@ test.describe('Chat surface contrast — WCAG AA across all 6 theme bundles', ()
       const lines = failures.map(
         (f) =>
           `  bundle=${f.bundle}: ` +
-          `body color=${f.bodyColor} bg=${f.bodyBg} ratio=${f.bodyRatio.toFixed(2)}; ` +
-          `code color=${f.codeColor} bg=${f.codeBg} ratio=${f.codeRatio.toFixed(2)}`,
+          `body=${f.bodyRatio.toFixed(2)} ` +
+          `code=${f.codeRatio.toFixed(2)} ` +
+          `strong=${f.strongRatio.toFixed(2)} (color=${f.strongColor} bg=${f.strongBg}) ` +
+          `th=${f.thRatio.toFixed(2)} (color=${f.thColor}) ` +
+          `td=${f.tdRatio.toFixed(2)} (color=${f.tdColor})`,
       );
       throw new Error(
-        `Contrast regression — ${failures.length}/${rows.length} bundles below 4.5:1:\n${lines.join('\n')}`,
+        `Contrast regression — ${failures.length}/${rows.length} bundles below threshold:\n${lines.join('\n')}`,
       );
     }
 
