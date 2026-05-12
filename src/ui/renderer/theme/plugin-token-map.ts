@@ -32,6 +32,11 @@ function tripleToHsl(triple: string): string {
 // JSON-subpath import was attempted but Vite/Rollup's resolver rejects
 // non-JS subpath exports without a heavy SDK shim — the test-based gate is
 // strictly equivalent operationally and avoids the bundler dance.
+//
+// Note: the SDK's `fallback-dark.json` is legacy from before commit 1696f92
+// closed the cold-boot race via webPreferences.additionalArguments. Cleanup
+// to drop the SDK fallback is tracked in lvis-app#667; until that SDK PR
+// ships and we bump past it, this lockstep is the contract we maintain.
 const _INVARIANT: Partial<Record<LvisTokenName, string>> = {
   "--lvis-radius-xs":       "0.15rem",
   "--lvis-radius-lg":       "0.75rem",
