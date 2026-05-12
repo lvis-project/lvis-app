@@ -98,10 +98,13 @@ export interface PluginAuthSpec {
    * field is missing or the target URL host falls outside the list.
    *
    * Each entry must contain at least one dot; wildcards, single-label hosts,
-   * and bare public-suffix entries (`com`, `co.kr`, …) are refused at
-   * manifest load time. Up to 16 entries. Suffix match is dot-boundary
-   * (`outlook.office.com` allows `mail.outlook.office.com` but not
-   * `outlook.office.com.attacker.com`).
+   * bare public-suffix entries (`com`, `co.kr`, …), and IDN-punycode labels
+   * (`xn--*`) are refused at manifest load time. Up to 16 entries. Suffix
+   * match is dot-boundary (`outlook.office.com` allows
+   * `mail.outlook.office.com` but not `outlook.office.com.attacker.com`).
+   *
+   * See `docs/references/plugin-tool-schema-design.md` §2.4.1 for the full
+   * contract (rejection table, three-layer defense, ms-graph example).
    */
   partitionDomains?: string[];
 }
@@ -757,6 +760,17 @@ export interface PluginHostApi {
    *
    * Resolves once the window has loaded or been closed; rejects only on a
    * hard load failure (not on user close).
+   *
+   * **Required (not `?`-optional)** unlike `openExternalUrl?` /
+   * `showOverlay?` / `getAppPreference?`. Convention: HostApi methods are
+   * declared required when the SDK + host wiring land in the same release
+   * window (lockstep shipping); methods are declared optional only when
+   * the SDK legitimately ships ahead of host adoption. Declaring this
+   * method required forces plugins to call it directly — a missing host
+   * wiring throws loudly at runtime instead of being silently optional-
+   * chained, matching CLAUDE.md "No Fallback Code" + the security
+   * "fail-closed" principle (silent fallback could route the user to a
+   * less-protected window).
    */
   openAuthPartitionViewer(opts: {
     url: string;
