@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, waitFor, cleanup } from "@testing-library/react";
 import { ThemeProvider, useTheme } from "../ThemeProvider.js";
+import { DEFAULT_BUNDLE_ID } from "../bundles/index.js";
 
 // `useTheme()` consumer that surfaces the effective bundleId as text so
 // the test can assert what the provider initialised with.
@@ -56,12 +57,11 @@ describe("ThemeProvider — initial theme (race-window-zero)", () => {
     const { getByTestId } = render(
       <ThemeProvider><Probe /></ThemeProvider>
     );
-    // DEFAULT_BUNDLE_ID is the registry's first entry; just assert the
-    // provider produced *some* known bundle id (not empty).
-    expect(getByTestId("bundle").textContent).toBeTruthy();
+    // Pin the exact default — guards the chain `prop → global → DEFAULT`.
+    expect(getByTestId("bundle").textContent).toBe(DEFAULT_BUNDLE_ID);
   });
 
-  it("ignores invalid bundleId in the global and falls back", () => {
+  it("ignores invalid bundleId in the global and falls back to DEFAULT_BUNDLE_ID", () => {
     (window as { __lvisInitialTheme: unknown }).__lvisInitialTheme = {
       bundleId: "totally-not-a-bundle",
       shell: "dark",
@@ -70,8 +70,8 @@ describe("ThemeProvider — initial theme (race-window-zero)", () => {
     const { getByTestId } = render(
       <ThemeProvider><Probe /></ThemeProvider>
     );
-    // Should fall back to DEFAULT_BUNDLE_ID (any valid registered bundle).
-    expect(getByTestId("bundle").textContent).not.toBe("totally-not-a-bundle");
+    // `findBundle` rejects the unknown id → chain falls through to DEFAULT.
+    expect(getByTestId("bundle").textContent).toBe(DEFAULT_BUNDLE_ID);
   });
 
   it("async settings hydrate later does not clobber the global-sourced initial (when values agree)", async () => {

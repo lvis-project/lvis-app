@@ -12,8 +12,17 @@ import * as tls from "node:tls";
 import { Agent, setGlobalDispatcher } from "undici";
 import { fileURLToPath } from "node:url";
 import { bootstrap, type AppServices } from "./boot.js";
-import { registerIpcHandlers, registerWindowEventListeners, unregisterPluginWebview } from "./ipc-bridge.js";
-import { getLastThemePayload } from "./ipc/domains/plugins.js";
+import {
+  registerIpcHandlers,
+  registerWindowEventListeners,
+  unregisterPluginWebview,
+  getLastThemePayload,
+} from "./ipc-bridge.js";
+import {
+  INITIAL_THEME_ARG_PREFIX,
+  INITIAL_THEME_ARG_MAX_BYTES,
+  type InitialThemePrime,
+} from "./shared/initial-theme.js";
 import { ensureCorporateCa } from "./main/corp-ca-loader.js";
 import { isAuthOwned } from "./main/auth-window-registry.js";
 import { isLinkOwned } from "./main/link-window-registry.js";
@@ -511,18 +520,31 @@ function updateSplashStatus(message: string): void {
  * without racing the renderer's first `notifyPluginTheme` broadcast. See
  * `architecture.md` §6.7.1.
  *
- * Returns `[]` when no payload is cached yet (cold-boot first window),
- * which is harmless — the existing async hydrate path stays in effect for
- * that single frame.
+ * Returns `[]` when no payload is cached yet (cold-boot first window) OR
+ * when the serialized payload exceeds `INITIAL_THEME_ARG_MAX_BYTES` —
+ * either case is harmless because the renderer's async hydrate path
+ * remains in effect.
  */
 function initialThemeArgs(): string[] {
   const payload = getLastThemePayload();
   if (!payload) return [];
+  // Narrow projection to `InitialThemePrime` — the three fields that drive
+  // frame-0 paint. `colorScheme` / `reducedMotion` / `fonts` are renderer-
+  // only and hydrate from settings.json a few ms later, so embedding them in
+  // argv is pure overhead.
+  const prime: InitialThemePrime = {
+    bundleId: payload.bundleId,
+    shell: payload.shell,
+    ...(payload.tokens ? { tokens: payload.tokens } : {}),
+  };
+  let serialized: string;
   try {
-    return [`--lvis-initial-theme=${JSON.stringify(payload)}`];
+    serialized = JSON.stringify(prime);
   } catch {
     return [];
   }
+  if (serialized.length > INITIAL_THEME_ARG_MAX_BYTES) return [];
+  return [`${INITIAL_THEME_ARG_PREFIX}${serialized}`];
 }
 
 function createWindow() {
