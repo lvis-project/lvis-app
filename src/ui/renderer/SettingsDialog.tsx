@@ -198,7 +198,7 @@ export function SettingsContent({
             />
           </TabsContent>
         </Tabs>
-        <DialogFooter>
+        <DialogFooter className="mt-6 border-t pt-4">
           <Button variant="secondary" onClick={() => onOpenChange(false)}>닫기</Button>
           {tab !== "permissions" && tab !== "usage" && tab !== "roles" && tab !== "audit" && tab !== "plugin-perf" && tab !== "mcp" && tab !== "plugin-config" && tab !== "appearance" && (
             <Button onClick={() => void s.save(tab)} disabled={s.saving || !s.settingsLoaded}>{s.saving ? "저장 중..." : "저장"}</Button>
