@@ -113,7 +113,6 @@ export type SafeThemePayload = {
   shell: "light" | "dark";
   colorScheme?: "light" | "dark";
   reducedMotion?: boolean;
-  fonts?: { family: string };
   tokens?: Record<string, string>;
 };
 
@@ -280,13 +279,11 @@ export function validateThemePayload(payload: unknown):
     }
   }
   safe.tokens = safeTokens;
-  // fonts.family: allowlist of safe system/web font family names (no injection)
-  if (p.fonts && typeof p.fonts === "object" && !Array.isArray(p.fonts)) {
-    const f = p.fonts as Record<string, unknown>;
-    if (typeof f.family === "string" && /^[\w\s,"'-]+$/.test(f.family) && f.family.length <= 200) {
-      safe.fonts = { family: f.family };
-    }
-  }
+  // `fonts` is intentionally dropped. SDK v5+ removed the channel
+  // (`LvisThemePayload.fonts` is `@deprecated No longer emitted by the host`)
+  // and the renderer's `notifyPluginTheme` bridge no longer surfaces a
+  // `fonts` field. Any inbound `fonts` is silently ignored — letterforms
+  // come from each host-owned shell's `font-family` mirror of HOST_FONT_STACK.
   if (typeof p.colorScheme === "string" && (p.colorScheme === "light" || p.colorScheme === "dark")) {
     safe.colorScheme = p.colorScheme;
   }
