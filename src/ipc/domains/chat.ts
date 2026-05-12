@@ -194,6 +194,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
     feedbackStore,
     auditLogger,
     askUserQuestionGate,
+    preferenceRefreshService,
     getMainWindow,
   } = deps;
 
@@ -693,6 +694,10 @@ export function registerChatHandlers(deps: IpcDeps): void {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:index:get", e); return UNAUTHORIZED_FRAME; }
     return memoryManager.getMemoryIndex();
   });
+  ipcMain.handle("lvis:memory:index:update", async (e, content: string) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:index:update", e); return UNAUTHORIZED_FRAME; }
+    return memoryManager.updateMemoryIndex(content);
+  });
   ipcMain.handle("lvis:memory:sessions:list", (e) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:sessions:list", e); return UNAUTHORIZED_FRAME; }
     return memoryManager.listSessionEntries();
@@ -724,6 +729,23 @@ export function registerChatHandlers(deps: IpcDeps): void {
   ipcMain.handle("lvis:memory:user-prefs:update", async (e, content: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:user-prefs:update", e); return UNAUTHORIZED_FRAME; }
     return memoryManager.updateUserPreferences(content);
+  });
+  ipcMain.handle("lvis:memory:user-prefs:refresh", async (e) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:user-prefs:refresh", e); return UNAUTHORIZED_FRAME; }
+    if (!preferenceRefreshService) {
+      return { ok: false, error: "preference-refresh-service-unavailable" };
+    }
+    try {
+      const result = await preferenceRefreshService.refresh({ reason: "manual" });
+      return {
+        ok: true,
+        content: result.content,
+        refreshedAt: result.refreshedAt,
+        sources: result.sources,
+      };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
   });
 
   // ─── Starred messages ────────────────────────────────────

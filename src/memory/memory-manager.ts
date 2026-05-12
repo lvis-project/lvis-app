@@ -152,8 +152,17 @@ const DEFAULT_AGENTS_MD = `# LVIS 에이전트 컨텍스트
 
 const DEFAULT_MEMORY_INDEX = `# LVIS Memory Index
 
-> 이 파일은 LVIS가 세션 시작 시 적극적으로 읽는 장기 메모리 인덱스입니다.
-> 상세 기억은 같은 폴더의 개별 Markdown 파일로 분리하고, 이 파일에는 다음에 다시 찾기 쉬운 짧은 링크와 요약만 유지하세요.
+> LVIS가 세션 시작 시 적극적으로 읽는 장기 메모리 인덱스입니다.
+> 긴급 기억은 이 파일의 Urgent Memory 섹션에 500자 내외로 유지하고,
+> 상세 기억은 같은 폴더의 개별 Markdown 파일로 분리한 뒤 Saved Memories에 링크하세요.
+
+## Urgent Memory
+
+(지금 즉시 참고해야 할 내용을 500자 내외로 유지)
+
+## References
+
+(긴급 기억의 근거 링크 또는 출처)
 
 ## Saved Memories
 
@@ -433,6 +442,15 @@ export class MemoryManager {
     return { filename, title, content: visibleContent, updatedAt: new Date().toISOString() };
   }
 
+  /** memories/MEMORY.md 업데이트 */
+  async updateMemoryIndex(content: string): Promise<void> {
+    const targetPath = join(this.memoryDir, "MEMORY.md");
+    await withFileLock(targetPath, async () => {
+      writeFileSync(targetPath, content, "utf-8");
+    });
+    this.memoryIndex = this.readMemoryIndex();
+  }
+
   /** 기억 삭제 */
   async deleteMemory(filename: string): Promise<void> {
     const safeFilename = this.validateDeletableMemoryFilename(filename);
@@ -466,6 +484,27 @@ export class MemoryManager {
       writeFileSync(targetPath, content, "utf-8");
     });
     this.userPreferences = content;
+  }
+
+  /**
+   * user-preferences.md compare-and-set update.
+   * Used by background refresh so an idle LLM write cannot overwrite a newer
+   * manual edit that landed while the refresh was waiting on the model.
+   */
+  async updateUserPreferencesIfUnchanged(expectedContent: string, nextContent: string): Promise<boolean> {
+    const targetPath = join(this.lvisDir, "user-preferences.md");
+    let didWrite = false;
+    await withFileLock(targetPath, async () => {
+      const current = existsSync(targetPath) ? readFileSync(targetPath, "utf-8") : "";
+      if (current !== expectedContent) return;
+      writeFileSync(targetPath, nextContent, "utf-8");
+      this.userPreferences = nextContent;
+      didWrite = true;
+    });
+    if (!didWrite) {
+      this.userPreferences = this.readFile("user-preferences.md");
+    }
+    return didWrite;
   }
 
   /** ~/.lvis/ 경로 반환 */

@@ -28,6 +28,7 @@ import type { TelemetryService } from "../main/telemetry.js";
 import type { PluginTelemetryClient } from "../telemetry/client.js";
 import type { NotificationService } from "../main/notification-service.js";
 import type { PythonRuntimeBootstrapper } from "../main/python-runtime.js";
+import type { PreferenceRefreshService } from "../memory/preference-refresh-service.js";
 import { createLogger } from "../lib/logger.js";
 const log = createLogger("lvis");
 
@@ -83,6 +84,7 @@ export interface AppServices {
    */
   mcpArtifactStore?: import("../plugins/plugin-artifact-store.js").PluginArtifactStore;
   idleScheduler?: IdleSchedulerService;
+  preferenceRefreshService?: PreferenceRefreshService;
   bashAstValidator: BashAstValidator;
   auditService: AuditService;
   /** A3 — structured audit logger (JSONL, ~/.lvis/audit/) */

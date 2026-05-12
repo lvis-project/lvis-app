@@ -4,8 +4,7 @@
  * Each preset bundles a systemPromptAdd (appended as a pre-prefix to the user
  * message for that turn). The app applies the prompt addition per-turn.
  *
- * User-editable — the full list can be overridden from the Settings "역할"
- * tab, which writes through `role-presets-store` (localStorage).
+ * User-editable — the full list is stored in SettingsService.roles.presets.
  */
 
 export interface RolePreset {
@@ -56,54 +55,55 @@ export const DEFAULT_ROLE_PRESETS: RolePreset[] = [
   },
 ];
 
-const STORAGE_KEY = "lvis:role-presets:v1";
-
-/**
- * Window event name dispatched whenever the role-preset list changes via
- * `saveRolePresets` / `resetRolePresets`. Listen for this at the App level
- * to keep the preset dropdown in sync without requiring a restart.
- */
-export const ROLE_PRESETS_CHANGED_EVENT = "lvis:role-presets-changed";
-
-function emitChanged(): void {
-  try {
-    if (typeof window === "undefined") return;
-    window.dispatchEvent(new CustomEvent(ROLE_PRESETS_CHANGED_EVENT));
-  } catch {
-    /* ignore */
-  }
+export function cloneRolePresets(presets: RolePreset[]): RolePreset[] {
+  return presets.map((preset) => ({ ...preset }));
 }
 
-export function loadRolePresets(): RolePreset[] {
-  try {
-    const raw = typeof window !== "undefined" ? window.localStorage.getItem(STORAGE_KEY) : null;
-    if (!raw) return DEFAULT_ROLE_PRESETS;
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed) || parsed.length === 0) return DEFAULT_ROLE_PRESETS;
-    return parsed as RolePreset[];
-  } catch {
-    return DEFAULT_ROLE_PRESETS;
-  }
+export function cloneDefaultRolePresets(): RolePreset[] {
+  return cloneRolePresets(DEFAULT_ROLE_PRESETS);
 }
 
-export function saveRolePresets(list: RolePreset[]): void {
-  try {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
-  } catch {
-    /* ignore quota / serialization errors */
-  }
-  emitChanged();
+function normalizeText(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
-export function resetRolePresets(): RolePreset[] {
-  try {
-    if (typeof window !== "undefined") window.localStorage.removeItem(STORAGE_KEY);
-  } catch {
-    /* ignore */
+export function normalizeRolePresets(input: unknown): RolePreset[] {
+  if (!Array.isArray(input)) {
+    return cloneDefaultRolePresets();
   }
-  emitChanged();
-  return DEFAULT_ROLE_PRESETS;
+
+  const seenIds = new Set<string>();
+  const normalized: RolePreset[] = [];
+
+  for (const item of input) {
+    if (!item || typeof item !== "object") continue;
+
+    const record = item as Partial<RolePreset>;
+    const id = normalizeText(record.id);
+    const name = normalizeText(record.name);
+    if (!id || !name || seenIds.has(id)) continue;
+
+    seenIds.add(id);
+    normalized.push({
+      id,
+      name,
+      systemPromptAdd: typeof record.systemPromptAdd === "string" ? record.systemPromptAdd : "",
+      ...(record.isDefault ? { isDefault: true } : {}),
+    });
+  }
+
+  if (normalized.length === 0) {
+    return cloneDefaultRolePresets();
+  }
+
+  const defaultPreset = DEFAULT_ROLE_PRESETS.find((preset) => preset.id === "default");
+  if (defaultPreset && !normalized.some((preset) => preset.id === "default")) {
+    normalized.unshift({ ...defaultPreset });
+  }
+
+  return normalized;
 }
 
 /**
@@ -111,6 +111,6 @@ export function resetRolePresets(): RolePreset[] {
  * default preset so the message flows through unchanged.
  */
 export function buildPresetPrefix(preset: RolePreset | null | undefined): string {
-  if (!preset || preset.isDefault || !preset.systemPromptAdd) return "";
+  if (!preset || preset.isDefault || !preset.systemPromptAdd.trim()) return "";
   return `[Role: ${preset.name}]\n${preset.systemPromptAdd}\n\n`;
 }
