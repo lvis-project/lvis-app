@@ -44,6 +44,9 @@ jobs:
         working-directory: lvis-app
       - run: bun run build
         working-directory: lvis-app
+      - name: Remove root-level Bun binary shims before Vitest
+        working-directory: lvis-app
+        run: rm -f ajv pino
       - run: bun run test
         working-directory: lvis-app
 

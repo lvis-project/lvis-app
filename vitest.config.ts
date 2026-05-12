@@ -51,6 +51,7 @@ export default defineConfig({
       react: rootPath("node_modules/react/index.js"),
       "ajv-formats": rootPath("node_modules/ajv-formats/dist/index.js"),
       ajv: rootPath("node_modules/ajv/dist/ajv.js"),
+      pino: rootPath("node_modules/pino/pino.js"),
       "@lvis/plugin-sdk/ui/tokens": rootPath("node_modules/@lvis/plugin-sdk/src/ui/tokens/index.ts"),
       "@lvis/plugin-sdk/ui": rootPath("node_modules/@lvis/plugin-sdk/src/ui/index.ts"),
       "@lvis/plugin-sdk": rootPath("node_modules/@lvis/plugin-sdk/src/index.ts"),
