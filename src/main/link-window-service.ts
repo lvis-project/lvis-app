@@ -97,7 +97,7 @@ export function buildPersistentBrowserUserAgent(input?: {
  * grants (notifications, geolocation, media) across reopens. We deny by
  * default so the viewer cannot silently grow privileges over time.
  */
-function applyPersistentBrowserUserAgent(persistPartition: string): void {
+export function applyPersistentBrowserUserAgent(persistPartition: string): void {
   const ses = electronSession.fromPartition(persistPartition);
   ses.setUserAgent(buildPersistentBrowserUserAgent());
   ses.setPermissionRequestHandler((_webContents, _permission, callback) => {
