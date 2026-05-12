@@ -48,6 +48,17 @@ const _INVARIANT: Partial<Record<LvisTokenName, string>> = {
 };
 
 /**
+ * Internal export — single SoT for the invariant key list.
+ *
+ * The drift gate (`__tests__/host-sdk-token-lockstep.test.ts`) imports
+ * this instead of hand-mirroring a parallel `INVARIANT_KEYS` array, so
+ * adding a key to `_INVARIANT` automatically subjects it to the
+ * lockstep check against `@lvis/plugin-sdk/.../fallback-dark.json` —
+ * no second list to keep in sync, no false-negative drift.
+ */
+export const _INVARIANT_KEYS = Object.keys(_INVARIANT) as LvisTokenName[];
+
+/**
  * Derive the full --lvis-* plugin token map from an active ThemeBundle.
  *
  * Bundles are self-contained — no legacy axis resolution needed.
