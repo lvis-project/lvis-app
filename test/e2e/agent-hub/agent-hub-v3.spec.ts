@@ -12,9 +12,8 @@
  *   4. bridge.config/storage round-trip via gear → SettingsPanel → save → reload
  *   5. 6-region partial-sync — mock 1 region fail → S5PartialSync banner
  *
- * All tests skip gracefully when the plugin UI is not loaded (e.g., agent-hub
- * plugin not bundled in the current build). This keeps CI green when running
- * against a build that predates v0.2.0.
+ * The mount test is intentionally non-skipping: this workflow is the host
+ * navigation guard for Agent Hub, so a missing plugin entry must fail loudly.
  */
 
 import { AgentHubMockServer } from './fixtures/agent-hub-mock-server';
@@ -50,7 +49,7 @@ const test = base.extend<AgentHubFixtures>({
 
 test('agent-hub-panel-v3 mounts from host navigation after boot', async ({ mainWindow }) => {
   const tabFound = await openAgentHubTab(mainWindow);
-  test.skip(!tabFound, 'agent-hub plugin entry not present — build may predate v0.2.0');
+  expect(tabFound, 'agent-hub plugin entry must be reachable from the host plugin grid').toBe(true);
 
   const panel = await waitForV3Panel(mainWindow);
   expect(

@@ -31,12 +31,13 @@
  *     Edge so AAD treats this as a real browser; on `closed` we
  *     `cookies.flushStore()` to force the auth cookie to disk before teardown.
  */
-import { BrowserWindow, session as electronSession } from "electron";
+import { BrowserWindow, session as electronSession, type WebContents } from "electron";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
 import { registerWindowEventListeners } from "../ipc/domains/window.js";
 import { markAsWindowControlOwned } from "../ipc/window-control-registry.js";
+import { markAsLinkOwned } from "./link-window-registry.js";
 import {
   buildTitlebarCss,
   buildTitlebarHtml,
@@ -197,6 +198,25 @@ async function flushPartitionCookies(persistPartition: string): Promise<void> {
   }
 }
 
+function isHttpNavigationUrl(targetUrl: string): boolean {
+  try {
+    const protocol = new URL(targetUrl).protocol;
+    return protocol === "http:" || protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+export function attachLinkNavigationGuards(contents: WebContents): void {
+  contents.setWindowOpenHandler(() => ({ action: "deny" }));
+  contents.on("will-navigate", (details) => {
+    if (!isHttpNavigationUrl(details.url)) details.preventDefault();
+  });
+  contents.on("will-redirect", (details) => {
+    if (!isHttpNavigationUrl(details.url)) details.preventDefault();
+  });
+}
+
 /**
  * Open a lightweight BrowserWindow that loads `url` and lets the user
  * close it when done. Returns once the window has finished loading (or
@@ -267,6 +287,10 @@ export async function openLinkWindow(
     if (opts.persistPartition) {
       prefs.partition = opts.persistPartition;
     }
+  });
+  win.webContents.on("did-attach-webview", (_event, contents) => {
+    markAsLinkOwned(contents);
+    attachLinkNavigationGuards(contents);
   });
 
   // Resolve when the page finishes loading or the user closes the window.

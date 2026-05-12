@@ -15,6 +15,8 @@ import { bootstrap, type AppServices } from "./boot.js";
 import { registerIpcHandlers, registerWindowEventListeners, unregisterPluginWebview } from "./ipc-bridge.js";
 import { ensureCorporateCa } from "./main/corp-ca-loader.js";
 import { isAuthOwned } from "./main/auth-window-registry.js";
+import { isLinkOwned } from "./main/link-window-registry.js";
+import { shouldBlockGlobalWebviewNavigation } from "./main/webview-navigation-policy.js";
 import { installHtmlPreviewPartitionBlock, installPluginPartitionPolicy } from "./main/html-preview-partition.js";
 import { registerPluginAssetProtocolScheme } from "./main/plugin-asset-protocol.js";
 import { findLvisProtocolUri, parsePluginAuthUri } from "./main/lvis-protocol.js";
@@ -815,26 +817,16 @@ app.on("web-contents-created", (_event, contents) => {
     // here and bypass the security check entirely.
     const url = navEvent.url;
     const currentUrl = contents.getURL();
-    // Auth-window webviews (plugin OAuth/SSO portals) load remote http/https
-    // login pages. Their navigation policy lives in
-    // `src/main/auth-window-service.ts` and is scoped per auth flow (allows
-    // only http/https, with completion-pattern matching). The generic
-    // plugin-shell policy below would block legitimate post-login redirects
-    // like `/login/callback#access_token=…` because the URL is neither
-    // `data:` nor `about:`. Skip the global guard *only* when this
-    // webContents was explicitly registered as auth-owned — a URL-prefix
-    // check would also exempt any unrelated future webview that happens
-    // to be on http(s).
-    if (isAuthOwned(contents)) return;
-    const isPluginShellFrame = currentUrl.includes("plugin-ui-shell.html");
-    if (isPluginShellFrame && url.startsWith("file://")) {
-      try {
-        const distSrc = resolve(distRoot, "src").replace(/\\/g, "/");
-        const allowedPrefix = `file:///${distSrc.replace(/^\//, "")}/`;
-        if (url.toLowerCase().startsWith(allowedPrefix.toLowerCase())) return; // allow
-      } catch { /* fall through */ }
-    }
-    if (!url.startsWith("data:") && !url.startsWith("about:")) {
+    // Auth and external-link viewer webviews load remote http(s) pages under
+    // scoped per-window policies. Keep the global guard deny-by-default for
+    // every unregistered webview.
+    if (shouldBlockGlobalWebviewNavigation({
+      url,
+      currentUrl,
+      distRoot,
+      authOwned: isAuthOwned(contents),
+      linkOwned: isLinkOwned(contents),
+    })) {
       navEvent.preventDefault();
     }
   });

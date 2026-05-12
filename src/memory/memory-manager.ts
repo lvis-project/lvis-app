@@ -13,13 +13,13 @@
  */
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, unlinkSync, statSync } from "node:fs";
 import { join, resolve, basename } from "node:path";
-import { homedir } from "node:os";
 import { withFileLock } from "../lib/with-file-lock.js";
 import { createLogger } from "../lib/logger.js";
+import { lvisHome } from "../shared/lvis-home.js";
 const log = createLogger("memory");
 
 export interface MemoryManagerOptions {
-  /** ~/.lvis 기본, 테스트 시 override */
+  /** lvisHome() 기본, 테스트 시 override */
   lvisDir?: string;
 }
 
@@ -267,7 +267,7 @@ export class MemoryManager {
   private userPreferences: string = "";
 
   constructor(options?: MemoryManagerOptions) {
-    this.lvisDir = resolve(options?.lvisDir ?? join(homedir(), ".lvis"));
+    this.lvisDir = resolve(options?.lvisDir ?? lvisHome());
     this.memoryDir = join(this.lvisDir, "memory");
     this.sessionsDir = join(this.lvisDir, "sessions");
     this.ensureStructure();

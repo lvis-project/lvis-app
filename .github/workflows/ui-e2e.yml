@@ -23,6 +23,15 @@ jobs:
         with:
           path: lvis-app
 
+      - name: Clone sibling plugin repos
+        run: |
+          set -euo pipefail
+          GH_TOKEN=$(gh auth token)
+          for slug in lvis-plugin-local-indexer lvis-plugin-meeting lvis-plugin-work-proactive lvis-plugin-agent-hub; do
+            if [ -d "$slug" ]; then rm -rf "$slug"; fi
+            git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/lvis-project/${slug}.git" "$slug"
+          done
+
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
