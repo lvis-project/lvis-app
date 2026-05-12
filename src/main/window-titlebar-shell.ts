@@ -90,7 +90,8 @@ export function buildTitlebarCss(): string {
       flex-direction: column;
       background: var(--ts-bg);
       color: var(--ts-fg);
-      font-family: "Malgun Gothic", "Noto Sans KR", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      /* Mirrors HOST_FONT_STACK (src/shared/host-font-stack.ts) — issue #556 */
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
     }
     .titlebar {
       height: 36px;
