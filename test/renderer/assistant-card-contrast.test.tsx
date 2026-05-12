@@ -165,23 +165,104 @@ describe("lvis-prose CSS coverage — markdown tables stay readable", () => {
     expect(css).toContain(".lvis-prose :is(th, td) :is(p, span, strong, em)");
   });
 
-  it("body font-family leads with system-ui so host letterforms match plugin webview UA default", () => {
+  it("body font-family inside @layer base leads with system-ui and mirrors HOST_FONT_STACK", () => {
     /*
-     * Regression guard for issue #556. Plugin webviews paint with the
-     * Chromium/WebContents UA default font stack (`system-ui` first), and
-     * the host previously led with `"Noto Sans KR", "Noto Sans CJK KR", ...`
-     * so Latin codepoints rendered in the Noto KR Latin glyphs while the
-     * plugin side showed SF / Segoe UI. The two surfaces lived a few px
-     * apart and the mismatch was visible.
+     * Regression guard for issue #556 / #670. Plugin webviews paint with the
+     * same `system-ui`-first stack via plugin-ui-shell.html; host body must
+     * lead with `system-ui` so letterforms match across the boundary. The
+     * Korean entries that follow are unicode-range fallback (CSS font
+     * matching), NOT regression-recovery fallback — Hangul codepoints have
+     * no glyph in `system-ui` itself so a Hangul-capable fallback is
+     * required by spec.
      *
-     * Pin the body stack to `system-ui` first; the Korean entries that
-     * follow are unicode-range fallback (CSS font matching), NOT regression
-     * recovery — Hangul codepoints have no glyph in `system-ui` itself so
-     * a Hangul-capable fallback is required by spec.
+     * Anchored to `@layer base` so a future `body.foo { ... }` override
+     * elsewhere in the file cannot accidentally satisfy the regex. Uses
+     * `[^{}]*?` so a nested rule (`&::before { ... }`) inside the body
+     * block still preserves the assertion.
      */
-    expect(css).toMatch(/body\s*\{[^}]*font-family:\s*system-ui\s*,/);
-    // Sanity: still has a Korean fallback so Hangul renders on Windows / macOS.
-    expect(css).toMatch(/body\s*\{[^}]*font-family:[^}]*("Noto Sans KR"|"Malgun Gothic"|"Apple SD Gothic Neo")/);
+    expect(css).toMatch(
+      /@layer\s+base\s*\{[\s\S]*?\bbody\s*\{[^{}]*?font-family:\s*system-ui\s*,/,
+    );
+    // Korean fallback must still be in the stack so Hangul renders cross-OS.
+    expect(css).toMatch(
+      /body\s*\{[^{}]*?font-family:[^{}]*?("Noto Sans KR"|"Malgun Gothic"|"Apple SD Gothic Neo")/,
+    );
+  });
+
+  it("all host-owned chrome surfaces mirror HOST_FONT_STACK (SoT cross-mirror invariant)", () => {
+    /*
+     * Issue #556 / #670 — host-owned chrome surfaces ship raw font-family
+     * literals across 5 files (CSS / HTML cannot import a JS constant at
+     * runtime). The SoT is `src/shared/host-font-stack.ts` (HOST_FONT_STACK).
+     * This test asserts every mirror leads with `system-ui` AND includes
+     * the Korean fallback chain, so a typography update in one surface that
+     * forgets a sibling fails loudly here.
+     */
+    const mirrors: Array<[string, string]> = [
+      ["styles.css body", css],
+      ["plugin-ui-shell.html body", readFileSync("src/plugin-ui-shell.html", "utf-8").replace(/\r\n/g, "\n")],
+      ["main.ts splash inline", readFileSync("src/main.ts", "utf-8").replace(/\r\n/g, "\n")],
+      ["window-titlebar-shell.ts body", readFileSync("src/main/window-titlebar-shell.ts", "utf-8").replace(/\r\n/g, "\n")],
+    ];
+    for (const [label, text] of mirrors) {
+      expect(text, `${label} must lead font-family with system-ui`).toMatch(
+        /font-family\s*:\s*system-ui\s*,/,
+      );
+      expect(text, `${label} must keep a Hangul fallback in the stack`).toMatch(
+        /font-family\s*:[^;}]*?("Noto Sans KR"|"Malgun Gothic"|"Apple SD Gothic Neo")/,
+      );
+    }
+  });
+
+  it("HOST_FONT_STACK is the ONLY surface that mentions Noto Sans KR as a fallback (grep-zero invariant)", () => {
+    /*
+     * Defensive — if anyone adds a NEW host-owned shell that bakes a raw
+     * font stack containing `"Noto Sans KR"` they must register it in the
+     * mirror list above. The 4 known mirrors plus the SoT module are
+     * allow-listed; every other src/ file must be 0.
+     */
+    const allowlist = new Set(
+      [
+        "src/shared/host-font-stack.ts",
+        "src/styles.css",
+        "src/plugin-ui-shell.html",
+        "src/main.ts",
+        "src/main/window-titlebar-shell.ts",
+        // Test files reference the stack literally for assertions.
+        "test/renderer/assistant-card-contrast.test.tsx",
+      ].map((p) => p.replace(/\\/g, "/")),
+    );
+    function walk(dir: string, out: string[]): void {
+      const fs = require("node:fs") as typeof import("node:fs");
+      const path = require("node:path") as typeof import("node:path");
+      let entries: string[];
+      try { entries = fs.readdirSync(dir); } catch { return; }
+      for (const name of entries) {
+        const full = path.join(dir, name).replace(/\\/g, "/");
+        let s;
+        try { s = fs.statSync(full); } catch { continue; }
+        if (s.isDirectory()) {
+          if (name === "node_modules" || name === "dist") continue;
+          walk(full, out);
+          continue;
+        }
+        if (/\.(ts|tsx|html|css)$/.test(name)) out.push(full);
+      }
+    }
+    const files: string[] = [];
+    walk("src", files);
+    const violations: string[] = [];
+    for (const f of files) {
+      if (allowlist.has(f)) continue;
+      const text = readFileSync(f, "utf-8");
+      if (/"Noto Sans KR"|"Malgun Gothic"|"Apple SD Gothic Neo"/.test(text)) {
+        violations.push(f);
+      }
+    }
+    expect(
+      violations,
+      "Korean font fallback should only appear inside HOST_FONT_STACK mirrors — add new shell to the mirror list",
+    ).toEqual([]);
   });
 
   it("keeps lvis-prose rules UNLAYERED so they beat Tailwind Typography's @layer utilities", () => {
