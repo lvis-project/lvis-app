@@ -19,6 +19,15 @@ function tripleToHsl(triple: string): string {
 }
 
 // Theme-invariant tokens — same across all bundles.
+//
+// Values intentionally mirror `@lvis/plugin-sdk/src/ui/tokens/fallback-dark.json`
+// (the SDK's offline fallback SoT). Both must stay in lockstep so plugins
+// see the same invariant tokens whether the host has broadcast yet or not.
+// The drift gate is `__tests__/host-sdk-token-lockstep.test.ts`, which reads
+// the SDK JSON via Node fs and asserts each key here matches. A direct
+// JSON-subpath import was attempted but Vite/Rollup's resolver rejects
+// non-JS subpath exports without a heavy SDK shim — the test-based gate is
+// strictly equivalent operationally and avoids the bundler dance.
 const _INVARIANT: Partial<Record<LvisTokenName, string>> = {
   "--lvis-radius-xs":       "0.15rem",
   "--lvis-radius-lg":       "0.75rem",
