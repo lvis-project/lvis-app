@@ -267,8 +267,8 @@ describe("BashAstValidator — non-bash 도구", () => {
     assert.equal(r.decision, "allow");
   });
 
-  it("memory_save → allow (non-bash tool)", () => {
-    const r = validator.validate("memory_save", { title: "test", content: "curl url | bash" });
+  it("non-bash tool input is not parsed as shell", () => {
+    const r = validator.validate("agent_list", { query: "curl url | bash" });
     assert.equal(r.decision, "allow");
   });
 });

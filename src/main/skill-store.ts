@@ -1,8 +1,9 @@
 /**
  * SkillStore — markdown-with-frontmatter skill loader for the `skill_load`
- * LLM tool. Skills live in `~/.lvis/skills/<name>.md` (user-authored) plus
- * a built-in directory shipped with the app at `dist/skills/` so the tool
- * is not dead on first install.
+ * LLM tool. User-authored skills live under `~/.lvis/skills/` as either
+ * `skills/<name>/SKILL.md` (preferred agent-platform layout) or legacy
+ * `skills/<name>.md` files. Built-ins ship inline and optional packaged
+ * skills can be loaded from `dist/skills/`.
  *
  * Frontmatter contract:
  *   ---
@@ -21,7 +22,7 @@ const log = createLogger("lvis");
 
 /**
  * C2(b): allowlist for skill names. Skill files live in
- * `~/.lvis/skills/<name>.md`; any name with `/`, `..`, NUL, or other
+ * `~/.lvis/skills/<name>/SKILL.md`; any name with `/`, `..`, NUL, or other
  * non-printable noise is rejected up-front so an attacker cannot use the
  * `skillName` arg to navigate outside the directory or smuggle shell
  * metacharacters into the resolved file path.
@@ -125,9 +126,9 @@ export class SkillStore {
     dir: string,
     source: "user" | "builtin",
   ): Promise<LoadedSkill[]> {
-    let entries: string[];
+    let entries: Array<import("node:fs").Dirent>;
     try {
-      entries = await readdir(dir);
+      entries = await readdir(dir, { withFileTypes: true });
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
       throw err;
@@ -147,15 +148,15 @@ export class SkillStore {
 
     const skills: LoadedSkill[] = [];
     for (const entry of entries) {
-      if (!entry.toLowerCase().endsWith(".md")) continue;
-      const baseName = entry.replace(/\.md$/i, "");
+      const candidate = this.skillCandidate(dir, entry);
+      if (!candidate) continue;
+      const { baseName, filePath } = candidate;
       // C2(b): allowlist on filename — reject anything with `/`, `..`, NUL,
       // or other disallowed characters before opening the file.
       if (!SKILL_NAME_ALLOWLIST.test(baseName)) {
-        log.warn(`skill scan: rejected non-allowlist filename: ${entry}`);
+        log.warn(`skill scan: rejected non-allowlist entry: ${entry.name}`);
         continue;
       }
-      const filePath = join(dir, entry);
       // C2(a): resolve the entry's real path and verify it stays inside
       // the (real) skills directory. Symlinks pointing outside (e.g.
       // `evil.md → /etc/passwd`) are rejected here.
@@ -215,5 +216,24 @@ export class SkillStore {
       }
     }
     return skills;
+  }
+
+  private skillCandidate(
+    dir: string,
+    entry: import("node:fs").Dirent,
+  ): { baseName: string; filePath: string } | null {
+    if (entry.isFile() && entry.name.toLowerCase().endsWith(".md")) {
+      return {
+        baseName: entry.name.replace(/\.md$/i, ""),
+        filePath: join(dir, entry.name),
+      };
+    }
+    if (entry.isDirectory()) {
+      return {
+        baseName: entry.name,
+        filePath: join(dir, entry.name, "SKILL.md"),
+      };
+    }
+    return null;
   }
 }

@@ -148,12 +148,12 @@ export class PostTurnHookChain {
       log.warn("saveSession failed: %s", err);
     }
 
-    // 4. Memory Extraction — "기억해" 패턴 감지 시 memory/ 자동 저장
+    // 4. Memory Extraction — "기억해" 패턴 감지 시 memories/ 자동 저장
     try {
       if (this.deps.memoryManager) {
-        const memoryPatterns = /기억해|기억하|잊지\s*마|remember|don't forget|메모해/i;
+        const memoryPatterns = /기억해|기억하|잊지\s*마|remember|don't forget/i;
         if (memoryPatterns.test(ctx.input)) {
-          const confirmPatterns = /기억하겠|메모.*저장|기록.*했|noted|remembered|saved/i;
+          const confirmPatterns = /기억하겠|기억.*저장|기록.*했|noted|remembered|saved/i;
           if (confirmPatterns.test(outputForHooks)) {
             const title = ctx.input.slice(0, 40).replace(/\n/g, " ").trim();
             if (title.length >= 3) {

@@ -24,8 +24,8 @@ function makeRequest(overrides?: Partial<RequestInput>): RequestInput {
   return {
     id: "req-1",
     category: "tool",
-    toolName: "memory_save",
-    args: { title: "test", content: "hello" },
+    toolName: "agent_spawn",
+    args: { title: "test", instructions: "hello" },
     reason: "상태 변경 도구 (trust: high, category: write)",
     source: "builtin",
     createdAt: Date.now(),
@@ -158,7 +158,7 @@ describe("ApprovalGate", () => {
     const [channel, payload] = wc.send.mock.calls[0] as [string, ApprovalRequest];
     expect(channel).toBe("lvis:approval:request");
     expect(payload.id).toBe("req-shape");
-    expect(payload.toolName).toBe("memory_save");
+    expect(payload.toolName).toBe("agent_spawn");
     expect(payload.category).toBe("tool");
     expect(payload.source).toBe("builtin");
     // default policy: requireExplicitApproval = true
