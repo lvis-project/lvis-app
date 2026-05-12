@@ -53,7 +53,7 @@ describe("RoutineSessionView", () => {
     expect(container.textContent).not.toContain("very-long-unbroken-path-segment");
     expect(container.textContent).not.toContain("<summary>");
 
-    fireEvent.click(container.querySelector("[data-wg-id] button")!);
+    fireEvent.click(container.querySelector("[data-testid=\"work-group\"] button")!);
     await waitFor(() => {
       expect(screen.getByTestId("routine-session-line-tool_result")).toBeTruthy();
       expect(container.textContent).toContain("요약을 준비합니다.");
@@ -79,6 +79,6 @@ describe("RoutineSessionView", () => {
     await waitFor(() => {
       expect(screen.getByTestId("routine-session-result").textContent).toContain("object payload");
     });
-    expect(container.querySelector("[data-wg-id] button")).toBeNull();
+    expect(container.querySelector("[data-testid=\"work-group\"] button")).toBeNull();
   });
 });
