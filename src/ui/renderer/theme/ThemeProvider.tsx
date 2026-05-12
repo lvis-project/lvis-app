@@ -108,6 +108,24 @@ export function ThemeProvider({
       const next = resolveAppearanceSettings(settings);
       setBundleIdState(next.bundleId);
       setFollowSystemState(next.followSystem);
+      // User-configurable font family + size — written as CSS variables on
+      // `documentElement` so the body's `font-family: var(--lvis-font-family, …)`
+      // / `font-size: calc(1rem * var(--lvis-font-size-scale, 1))` rules pick
+      // up the override. `family: "system"` (or unset) removes the override so
+      // the default HOST_FONT_STACK / 1rem base apply. See styles.css body.
+      if (typeof document === "undefined") return;
+      const root = document.documentElement;
+      const font = settings.appearance?.font;
+      if (font?.family && font.family !== "system") {
+        root.style.setProperty("--lvis-font-family", font.family);
+      } else {
+        root.style.removeProperty("--lvis-font-family");
+      }
+      if (typeof font?.sizeScale === "number") {
+        root.style.setProperty("--lvis-font-size-scale", String(font.sizeScale));
+      } else {
+        root.style.removeProperty("--lvis-font-size-scale");
+      }
     },
     [],
   );
