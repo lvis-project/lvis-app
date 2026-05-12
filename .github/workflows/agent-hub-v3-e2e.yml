@@ -81,6 +81,10 @@ jobs:
       - name: Build Agent Hub plugin fixture
         working-directory: lvis-plugin-agent-hub
         run: |
+          rm -f ../postcss.config.cjs ../postcss.config.js
+          if [ ! -f postcss.config.cjs ] && [ ! -f postcss.config.js ]; then
+            printf 'module.exports = {};\n' > postcss.config.cjs
+          fi
           bun install --frozen-lockfile
           bun run build
 
