@@ -444,3 +444,71 @@ describe("SettingsService appearance v1 → v2 migration", () => {
     expect(service.get("appearance")).toMatchObject({ schemaVersion: 2 });
   });
 });
+
+describe("SettingsService appearance.font — Track A user-configurable font", () => {
+  let userDataPath: string;
+
+  beforeEach(() => {
+    userDataPath = mkdtempSync(join(tmpdir(), "settings-store-font-"));
+  });
+  afterEach(() => {
+    rmSync(userDataPath, { recursive: true, force: true });
+  });
+
+  function writeAppearance(font: unknown): void {
+    writeFileSync(
+      join(userDataPath, "lvis-settings.json"),
+      JSON.stringify({ appearance: { schemaVersion: 2, bundleId: "tokyo-night", font } }),
+    );
+  }
+
+  it("accepts `family: 'system'` verbatim", () => {
+    writeAppearance({ family: "system" });
+    const s = new SettingsService({ userDataPath });
+    expect(s.get("appearance")).toMatchObject({ font: { family: "system" } });
+  });
+
+  it("accepts a valid user stack and roundtrips it", () => {
+    const stack = 'Pretendard, system-ui, "Apple SD Gothic Neo", sans-serif';
+    writeAppearance({ family: stack });
+    const s = new SettingsService({ userDataPath });
+    expect(s.get("appearance")).toMatchObject({ font: { family: stack } });
+  });
+
+  it("rejects a stack that contains injection metachars and drops the field", () => {
+    writeAppearance({ family: 'Arial; color: red; url(http://evil)' });
+    const s = new SettingsService({ userDataPath });
+    expect(s.get("appearance").font?.family).toBeUndefined();
+  });
+
+  it("rejects a stack longer than 200 chars and drops the field", () => {
+    writeAppearance({ family: "A".repeat(201) });
+    const s = new SettingsService({ userDataPath });
+    expect(s.get("appearance").font?.family).toBeUndefined();
+  });
+
+  it("accepts each preset sizeScale value", () => {
+    for (const value of [0.875, 1, 1.125, 1.25]) {
+      const dir = mkdtempSync(join(tmpdir(), `settings-store-size-${value}-`));
+      writeFileSync(
+        join(dir, "lvis-settings.json"),
+        JSON.stringify({ appearance: { schemaVersion: 2, bundleId: "tokyo-night", font: { sizeScale: value } } }),
+      );
+      const s = new SettingsService({ userDataPath: dir });
+      expect(s.get("appearance")).toMatchObject({ font: { sizeScale: value } });
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects an off-preset sizeScale (e.g. 0.4) and drops the field", () => {
+    writeAppearance({ sizeScale: 0.4 });
+    const s = new SettingsService({ userDataPath });
+    expect(s.get("appearance").font?.sizeScale).toBeUndefined();
+  });
+
+  it("drops the entire `font` field when both fields are invalid", () => {
+    writeAppearance({ family: 123, sizeScale: "huge" });
+    const s = new SettingsService({ userDataPath });
+    expect(s.get("appearance").font).toBeUndefined();
+  });
+});
