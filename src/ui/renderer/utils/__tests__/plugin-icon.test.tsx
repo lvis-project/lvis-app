@@ -159,4 +159,22 @@ describe("pluginIconFor", () => {
     const Icon = pluginIconFor({ icon: "Mic", iconText: "" });
     expect(isLazy(Icon)).toBe(true);
   });
+
+  // Defense-in-depth: if the SDK schema's maxLength: 4 is somehow bypassed
+  // (legacy install, dev-mode validator skip), the renderer must still cap
+  // the visible text to 4 chars rather than overflowing the avatar.
+  it("iconText is hard-truncated to 4 chars at the renderer", () => {
+    const Icon = pluginIconFor({ iconText: "TOOLONG" });
+    const { container } = render(<Icon className="h-7 w-7" />);
+    const span = container.querySelector("span");
+    expect(span?.textContent).toBe("TOOL");
+  });
+
+  it("iconText sets aria-label so screen readers announce the badge", () => {
+    const Icon = pluginIconFor({ iconText: "EP" });
+    const { container } = render(<Icon className="h-7 w-7" />);
+    const span = container.querySelector("span");
+    expect(span?.getAttribute("aria-label")).toBe("EP");
+    expect(span?.getAttribute("role")).toBe("img");
+  });
 });
