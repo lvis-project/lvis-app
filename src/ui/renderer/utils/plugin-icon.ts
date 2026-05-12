@@ -45,20 +45,26 @@ const TEXT_FONT_SIZE_REM: Readonly<Record<1 | 2 | 3 | 4, number>> = {
   4: 0.6,
 };
 
-function buildTextIcon(text: string): ComponentType<LucideProps> {
+function buildTextIcon(rawText: string): ComponentType<LucideProps> {
+  // Defense-in-depth: hard-truncate at entry so a manifest that somehow
+  // bypasses the SDK schema's `maxLength: 4` (e.g. legacy install path,
+  // dev-mode validator skip) still can't blow up the avatar layout or
+  // seed an unbounded cache key.
+  const text = rawText.slice(0, 4);
   const cached = textIconCache.get(text);
   if (cached) return cached;
-  // Clamp the lookup key into the valid 1-4 range so a manifest with an
-  // out-of-spec longer string still renders something (worst-case: tiny
-  // but visible) rather than blowing up.
-  const len = Math.min(Math.max(text.length, 1), 4) as 1 | 2 | 3 | 4;
+  const len = (text.length || 1) as 1 | 2 | 3 | 4;
   const fontSize = `${TEXT_FONT_SIZE_REM[len]}rem`;
   function TextIcon({ className }: LucideProps) {
     return createElement(
       "span",
       {
         className: `${className ?? ""} inline-flex items-center justify-center font-bold leading-none tracking-tight`.trim(),
-        "aria-hidden": "true",
+        // Screen readers should announce the badge text — e.g. "EP" — since
+        // it carries the plugin's identity. The visual label below the
+        // avatar may be the same or richer; double-announce is acceptable.
+        "aria-label": text,
+        role: "img",
         style: { fontSize },
       },
       text,
