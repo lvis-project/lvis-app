@@ -470,12 +470,23 @@ export class SettingsService {
       // an unvalidated `family` at patch time + dropping it on next load is a
       // recovery-style fallback the No-Fallback-Code rule explicitly forbids
       // (PR #672 review MAJOR #4) — validate at every trust boundary.
+      // Strip `font` from the outer spread before merging — we always want
+      // the nested deep-merge below to be authoritative. Without this,
+      // a caller passing `font: null` would land `null` directly via the
+      // shallow spread and overwrite the previously-merged font block.
+      const { font: fontPatch, ...appearanceRest } = partial.appearance as unknown as {
+        font?: AppearanceFontSettings | null;
+        [k: string]: unknown;
+      };
       const nextAppearance: AppearanceSettings = {
         ...this.settings.appearance,
-        ...partial.appearance,
+        ...(appearanceRest as Partial<AppearanceSettings>),
       };
-      const fontPatch = (partial.appearance as { font?: AppearanceFontSettings }).font;
-      if (fontPatch !== undefined) {
+      // Accept `font: undefined`, missing field, or `font: null` — all three
+      // mean "no font subfield patch in this call". Guard against `null` so
+      // a defensive caller (or a malformed test fixture) cannot crash
+      // `fontPatch.family` access (PR #672 2차 critic minor N3).
+      if (fontPatch !== undefined && fontPatch !== null && typeof fontPatch === "object") {
         const mergedFont: AppearanceFontSettings = { ...this.settings.appearance.font };
         if (typeof fontPatch.family === "string") {
           if (fontPatch.family === "system" || isValidFontFamilyOverride(fontPatch.family)) {
