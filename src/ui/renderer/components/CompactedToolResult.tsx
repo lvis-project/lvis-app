@@ -6,7 +6,8 @@
  *
  * Four display states:
  *   collapsed — ▶ 📦 ToolName(input) · origLen chars  [펼치기]
- *               (origLen parsed from stub when compactedAt+originalLen present)
+ *               (origLen parsed from stub via `/origLen=(\d+)/` — server-side
+ *               `compactedAt` field is metadata only and not rendered)
  *   loading   — ⋯ 📦 ToolName(input) · [불러오는 중…]  (IPC in-flight)
  *   expanded  — ▼ 📦 ToolName(input) · N줄  [접기] + line-numbered body
  *   missing   — ▸ 📦 ToolName(input) · 원본 소실 ⓘ  (disabled, restart 후)
