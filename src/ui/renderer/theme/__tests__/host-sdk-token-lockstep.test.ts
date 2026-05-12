@@ -21,37 +21,26 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { bundleToPluginTokens } from "../plugin-token-map.js";
+import { bundleToPluginTokens, _INVARIANT_KEYS as INVARIANT_KEYS } from "../plugin-token-map.js";
 import { BUNDLES } from "../bundles/index.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// node_modules path is stable: this test file lives under src/, repo root
-// is 4 levels up, then node_modules/@lvis/plugin-sdk/...
+// Path walk: this file at `src/ui/renderer/theme/__tests__/host-sdk-token-lockstep.test.ts`
+// → 5 levels up reaches the repo root (`__tests__` → `theme` → `renderer`
+// → `ui` → `src` → root), then descend into `node_modules/@lvis/plugin-sdk/`.
+// node_modules layout is stable per bun.lock — bun does NOT hoist into a
+// shared workspace root in this single-package repo, so this resolves
+// without a `require.resolve` indirection.
 const SDK_FALLBACK_JSON = join(
   __dirname,
   "../../../../..",
   "node_modules/@lvis/plugin-sdk/src/ui/tokens/fallback-dark.json",
 );
 
-const INVARIANT_KEYS = [
-  "--lvis-radius-xs",
-  "--lvis-radius-lg",
-  "--lvis-radius-full",
-  "--lvis-text-xs",
-  "--lvis-text-sm",
-  "--lvis-text-base",
-  "--lvis-text-lg",
-  "--lvis-weight-normal",
-  "--lvis-weight-medium",
-  "--lvis-weight-semibold",
-  "--lvis-space-1",
-  "--lvis-space-2",
-  "--lvis-space-3",
-  "--lvis-space-4",
-  "--lvis-motion-fast",
-  "--lvis-motion-normal",
-] as const;
+// `INVARIANT_KEYS` is re-exported from `plugin-token-map.ts` as the single
+// SoT for the key list — no parallel array to maintain here. Adding a key
+// to `_INVARIANT` there automatically lands it in this gate too.
 
 describe("host ↔ SDK invariant token lockstep", () => {
   const raw = readFileSync(SDK_FALLBACK_JSON, "utf8");
