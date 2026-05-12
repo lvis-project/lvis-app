@@ -43,6 +43,7 @@ export const ROUTINES_V2 = {
 export const PERMISSIONS = {
   getMode: "lvis:permission:get-mode",
   setMode: "lvis:permission:set-mode",
+  modeChanged: "lvis:permissions:mode-changed",
   listRules: "lvis:permission:list-rules",
   addRule: "lvis:permission:add-rule",
   removeRule: "lvis:permission:remove-rule",
@@ -58,4 +59,8 @@ export const PERMISSIONS = {
   auditVerify: "lvis:permissions:audit-verify",
   hookTrustList: "lvis:permissions:hook-trust-list",
   manifestViolation: "lvis:permissions:manifest-violation",
+} as const;
+
+export const SETTINGS = {
+  updated: "lvis:settings:updated",
 } as const;

@@ -45,8 +45,9 @@ export { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized, validatePluginFr
 export function registerIpcHandlers(
   services: AppServices,
   getMainWindow: () => BrowserWindow | null,
+  getAppWindows: () => Array<BrowserWindow | null | undefined> = () => [getMainWindow()],
 ): void {
-  const deps: IpcDeps = { ...services, getMainWindow };
+  const deps: IpcDeps = { ...services, getMainWindow, getAppWindows };
 
   // Wire DLP audit logging so redactForLLM records hits to audit JSONL.
   initDlpAudit(deps.auditLogger, deps.conversationLoop.getSessionId());

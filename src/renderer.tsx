@@ -16,6 +16,13 @@ function getDetachedViewKey(): string | null {
   return match ? decodeURIComponent(match[1]) : null;
 }
 
+function getSettingsInitialTab(): string | null {
+  if (typeof window === "undefined") return null;
+  const hash = window.location.hash; // e.g. "#settings/llm"
+  const match = hash.match(/^#settings\/(.+)$/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
 // Guard with `typeof document` so importing <App /> from a jsdom test
 // harness (no #root) doesn't double-mount or throw.
 if (typeof document !== "undefined") {
@@ -23,7 +30,13 @@ if (typeof document !== "undefined") {
   const root = document.getElementById("root");
   if (root) {
     const detachedViewKey = getDetachedViewKey();
-    if (detachedViewKey) {
+    const settingsInitialTab = getSettingsInitialTab();
+    if (settingsInitialTab) {
+      const appRoot = createRoot(root);
+      void import("./ui/renderer/SettingsWindow.js").then(({ SettingsWindow }) => {
+        appRoot.render(<SettingsWindow initialTab={settingsInitialTab} />);
+      });
+    } else if (detachedViewKey) {
       createRoot(root).render(<DetachedView viewKey={detachedViewKey} />);
     } else {
       createRoot(root).render(<App />);

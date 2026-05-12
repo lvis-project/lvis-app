@@ -10,8 +10,6 @@ const mockPreset: RolePreset = { id: "default", name: "기본", systemPromptAdd:
 
 function renderBar(overrides: Partial<Parameters<typeof InputActionBar>[0]> = {}) {
   const props: Parameters<typeof InputActionBar>[0] = {
-    usedTokens: 500,
-    contextBudget: 1000,
     plugins: [],
     onSelectPlugin: vi.fn(),
     onInsertSlashCommand: vi.fn(),
@@ -59,10 +57,10 @@ describe("InputActionBar (post indexer-removal)", () => {
     expect(container.querySelector('[title="문서 첨부"]')).toBeNull();
   });
 
-  it("renders TokenProgressRing inside leading cluster", () => {
+  it("does not render TokenProgressRing inside the plugin action bar", () => {
     const { getByTestId } = renderBar();
     const leading = getByTestId("iab-leading");
-    expect(leading.querySelector("[data-testid='token-progress-ring']")).toBeTruthy();
+    expect(leading.querySelector("[data-testid='token-progress-ring']")).toBeNull();
   });
 
   it("renders PluginGridButton inside leading cluster", () => {

@@ -31,6 +31,7 @@ function installApi(disabledBatches: HookTrustRow[][]) {
     permission: {
       getMode: vi.fn(async () => ({ mode: "default" })),
       setMode: vi.fn(async (mode: string) => ({ ok: true, mode })),
+      onModeChanged: vi.fn(() => () => undefined),
       listRules: vi.fn(async () => []),
       addRule: vi.fn(async () => ({ ok: true, rule: { pattern: "x", action: "allow" } })),
       removeRule: vi.fn(async () => ({ ok: true })),
