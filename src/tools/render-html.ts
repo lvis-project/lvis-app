@@ -209,7 +209,8 @@ export function wrapWithCsp(body: string, title?: string): string {
     CSP_META +
     '<meta charset="utf-8">' +
     `<title>${safeTitle}</title>` +
-    '<style>html,body{margin:0;padding:8px;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#e5e7eb;background:transparent;}</style>' +
+    // font-family mirrors HOST_FONT_STACK (src/shared/host-font-stack.ts) — issue #556
+    '<style>html,body{margin:0;padding:8px;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Apple SD Gothic Neo","Noto Sans KR","Malgun Gothic",sans-serif;color:#e5e7eb;background:transparent;}</style>' +
     "</head><body>" +
     body +
     "</body></html>"

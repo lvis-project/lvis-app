@@ -9,7 +9,6 @@ export { bundleToPluginTokens };
 import type { ThemeContextValue, BundleId, ResolvedShell } from "./types.js";
 import { LGE_PAIR_IDS } from "./types.js";
 import type { InitialThemePrime } from "../../../shared/initial-theme.js";
-import { HOST_FONT_STACK } from "../../../shared/host-font-stack.js";
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
@@ -166,9 +165,11 @@ export function ThemeProvider({
   }, [activeBundle]);
 
   // Propagate bundle tokens to plugin webviews whenever active bundle changes.
-  // `fonts.family` carries the host font stack so SDK consumers (useTheme hook)
-  // apply the same letterforms — closing the last drift surface between host
-  // and plugin webview without a separate CSS broadcast. SoT: HOST_FONT_STACK.
+  // Font stack is NOT broadcast — SDK v5+ removed the `fonts` channel from
+  // `LvisHostThemeEvent` (marked `@deprecated No longer emitted by the host`),
+  // and the plugin webview body letterform is unified via the static
+  // `plugin-ui-shell.html` mirror of `HOST_FONT_STACK` instead. Re-introducing
+  // a `fonts.family` payload here would be dead code that the SDK ignores.
   useEffect(() => {
     if (!api) return;
     const tokens = bundleToPluginTokens(activeBundle);
@@ -176,7 +177,6 @@ export function ThemeProvider({
       bundleId: effectiveBundleId,
       shell: activeBundle.shell,
       tokens,
-      fonts: { family: HOST_FONT_STACK },
     }).catch((err: unknown) => {
       if (typeof process !== "undefined" && process.env?.LVIS_DEV === "1") {
         console.warn("[theme-propagation] notifyPluginTheme failed:", err);
