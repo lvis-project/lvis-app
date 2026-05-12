@@ -2096,7 +2096,7 @@ Token SoT 는 `lvis-plugin-sdk/src/ui/tokens/fallback-dark.json` 한 곳이고, 
 | **SoT** `fallback-dark.json` | `lvis-plugin-sdk/src/ui/tokens/fallback-dark.json` | 17 개 `--lvis-*` 토큰의 다크 1차 정의. 디자인 팔레트가 바뀔 때 **여기 하나만** 수정 | 손-편집 |
 | SDK `_FALLBACK_CSS` | `lvis-plugin-sdk/src/ui/tokens/inject.ts` | host broadcast 도착 전 `:root` 다크 fallback `<style>` 주입 | SDK 빌드 스크립트가 JSON → TS const 로 generate |
 | SDK `lvis-tokens.css :root` | `lvis-plugin-sdk/src/ui/tokens/lvis-tokens.css` | 플러그인 CSS 의 `var(--lvis-*)` 기본값 | SDK 빌드 스크립트가 JSON → CSS rule 로 generate |
-| Host `_DARK_BASE` | `lvis-app/src/ui/renderer/theme/plugin-token-map.ts` | host ThemeProvider 가 broadcast 보내기 전 토큰 기준값 | SDK 패키지에서 JSON 직접 `import` (re-export) |
+| Host `_INVARIANT` | `lvis-app/src/ui/renderer/theme/plugin-token-map.ts` | host ThemeProvider 가 broadcast 보내기 전 invariant 토큰 기준값 | SDK JSON 과 lockstep — CI 단위 테스트 (`__tests__/host-sdk-token-lockstep.test.ts`) 가 drift 차단. literal subpath import 는 Vite/Rollup 의 non-JS subpath export 제약으로 보류 (SDK v5.3.1 typed `.ts` helper 후 재검토 — PR-3 follow-up) |
 
 CI 단위 테스트 1개 (3-artifact snapshot vs JSON SoT) 로 drift 차단. 토큰
 화이트리스트 `LVIS_TOKEN_NAMES` / host `PLUGIN_TOKEN_NAMES` 동기화는 별개
