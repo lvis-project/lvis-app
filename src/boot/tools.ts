@@ -2,24 +2,24 @@
  * Boot §4.2 Step 4 — Builtin tool registration + §4.4 knowledge DI.
  *
  * - registerRequestPluginMetaTool: request_plugin meta tool
- * - registerBuiltinTools: memory_*, web_search, web_fetch
+ * - registerBuiltinTools: web_search, web_fetch, workflow tools
  * - wireKnowledgeAndIdleScheduler: worker-client capability 탐지 → HybridRetriever,
  *   knowledge tools 등록, IdleScheduler 배선
  */
 import type { ToolRegistry } from "../tools/registry.js";
-import type { MemoryManager } from "../memory/memory-manager.js";
 import type { SettingsService } from "../data/settings-store.js";
 import type { PluginRuntime } from "../plugins/runtime.js";
 import type { AuditService } from "../main/audit-service.js";
 import { createDynamicTool, type Tool } from "../tools/base.js";
 import { createKnowledgeSearchTools } from "../tools/knowledge-search.js";
-import { createSearchMemoryTool, memoryManagerNotesAdapter } from "../tools/search-memory.js";
 import { createRenderHtmlTool } from "../tools/render-html.js";
 import { createAskUserQuestionTool } from "../tools/ask-user-question.js";
 import { createScheduleRoutineTool } from "../tools/schedule-routine.js";
 import { createTodoSessionWriteTool } from "../tools/todo-session-write.js";
 import { createAgentSpawnTool, type AgentSpawnEvent } from "../tools/agent-spawn.js";
 import { createSkillLoadTool, type SkillLoadEvent } from "../tools/skill-load.js";
+import { createSkillListTool } from "../tools/skill-list.js";
+import { createAgentListTool } from "../tools/agent-list.js";
 import type { AskUserQuestionGate } from "../main/ask-user-question-gate.js";
 import type { RoutinesStore } from "../main/routines-store.js";
 import type { SessionTodoStore } from "../main/session-todo-store.js";
@@ -27,6 +27,7 @@ import type { SubAgentRunner } from "../engine/subagent-runner.js";
 import type { SkillStore } from "../main/skill-store.js";
 import type { SkillOverlay } from "../main/skill-overlay.js";
 import type { SkillApprovalsStore } from "../main/skill-approvals-store.js";
+import type { AgentProfileStore } from "../main/agent-profile-store.js";
 import type { ApprovalGate } from "../permissions/approval-gate.js";
 import { HybridRetriever } from "../main/hybrid-retriever.js";
 import { MockCloudIndexAdapter } from "../main/cloud-index-adapter.js";
@@ -190,6 +191,7 @@ export interface WorkflowToolDeps {
   /** Lazy-resolved sub-agent runner — populated after ConversationLoop wiring. */
   getSubAgentRunner?: () => SubAgentRunner | undefined;
   skillStore?: SkillStore;
+  agentProfileStore?: AgentProfileStore;
   /** C2(c): per-session skill overlay registry. */
   skillOverlay?: SkillOverlay;
   /** C2(d): persistent skill-approval allowlist. */
@@ -201,73 +203,11 @@ export interface WorkflowToolDeps {
 }
 
 export function registerBuiltinTools(
-  memoryManager: MemoryManager,
   toolRegistry: ToolRegistry,
   settingsService: SettingsService,
   workflowDeps?: WorkflowToolDeps,
 ): void {
   const builtins: Tool[] = [
-    createDynamicTool({
-      name: "memory_save",
-      description: "사용자가 기억해달라고 한 내용을 memory/에 저장합니다.",
-      source: "builtin",
-      category: "write",
-      jsonSchema: {
-        type: "object",
-        properties: {
-          title: { type: "string", description: "메모리 제목 (40자 이내)" },
-          content: { type: "string", description: "메모리 내용" },
-        },
-        required: ["title", "content"],
-      },
-      execute: async (rawInput) => {
-        const args = (rawInput ?? {}) as Record<string, unknown>;
-        const note = await memoryManager.saveMemory(
-          args.title as string,
-          args.content as string,
-        );
-        return {
-          output: JSON.stringify({ saved: true, filename: note.filename }),
-          isError: false,
-        };
-      },
-    }),
-    createDynamicTool({
-      name: "memory_search",
-      description: "사용자의 memory/ 메모리를 키워드로 검색합니다.",
-      source: "builtin",
-      category: "read",
-      isReadOnly: () => true,
-      jsonSchema: {
-        type: "object",
-        properties: { query: { type: "string", description: "검색 키워드" } },
-        required: ["query"],
-      },
-      execute: async (rawInput) => {
-        const args = (rawInput ?? {}) as Record<string, unknown>;
-        const results = memoryManager
-          .searchMemoryEntries(args.query as string)
-          .map((n) => ({ title: n.title, filename: n.filename }));
-        return { output: JSON.stringify(results), isError: false };
-      },
-    }),
-    createSearchMemoryTool({
-      getNotes: memoryManagerNotesAdapter(memoryManager),
-    }),
-    createDynamicTool({
-      name: "memory_list",
-      description: "저장된 모든 메모리 목록을 반환합니다.",
-      source: "builtin",
-      category: "read",
-      isReadOnly: () => true,
-      jsonSchema: { type: "object", properties: {} },
-      execute: async () => {
-        const notes = memoryManager
-          .listMemoryEntries()
-          .map((n) => ({ title: n.title, filename: n.filename }));
-        return { output: JSON.stringify(notes), isError: false };
-      },
-    }),
     createDynamicTool({
       name: "web_search",
       description: "인터넷 검색을 통해 최신 정보나 지식을 찾습니다.",
@@ -431,12 +371,19 @@ export function registerBuiltinTools(
     builtins.push(createTodoSessionWriteTool(workflowDeps.sessionTodoStore));
   }
   if (workflowDeps?.getSubAgentRunner && workflowDeps.emitAgentSpawn) {
+    const agentProfileStore = workflowDeps.agentProfileStore;
     builtins.push(
       createAgentSpawnTool({
         getRunner: workflowDeps.getSubAgentRunner,
+        getAgentProfile: agentProfileStore
+          ? async (name) => await agentProfileStore.load(name)
+          : undefined,
         emit: workflowDeps.emitAgentSpawn,
       }),
     );
+  }
+  if (workflowDeps?.agentProfileStore) {
+    builtins.push(createAgentListTool(workflowDeps.agentProfileStore));
   }
   if (
     workflowDeps?.skillStore &&
@@ -454,6 +401,7 @@ export function registerBuiltinTools(
         emit: workflowDeps.emitSkillLoad,
       }),
     );
+    builtins.push(createSkillListTool(workflowDeps.skillStore));
   }
 
   toolRegistry.registerBatch(builtins);

@@ -197,4 +197,33 @@ describe("preload — plugin webview asset URLs", () => {
 
     expect(env["debugStream"]).toBe(true);
   });
+
+  it("exposes memoryGetIndex and invokes the memory index IPC channel", async () => {
+    const api = await loadLvisApi();
+
+    expect(typeof api["memoryGetIndex"]).toBe("function");
+    await (api["memoryGetIndex"] as () => Promise<unknown>)();
+
+    expect(mockInvoke).toHaveBeenCalledWith("lvis:memory:index:get");
+  });
+
+  it.each([
+    ["memoryGetAgentsMd", "lvis:memory:agents-md:get"],
+    ["memoryUpdateAgentsMd", "lvis:memory:agents-md:update", "# Agents"],
+    ["memoryGetLvisMd", "lvis:memory:lvis-md:get"],
+    ["memoryUpdateLvisMd", "lvis:memory:lvis-md:update", "# Agents"],
+    ["memoryGetUserPrefs", "lvis:memory:user-prefs:get"],
+    ["memoryUpdateUserPrefs", "lvis:memory:user-prefs:update", "# Preferences"],
+  ])("exposes %s and invokes %s", async (apiKey, channel, payload) => {
+    const api = await loadLvisApi();
+
+    expect(typeof api[apiKey]).toBe("function");
+    await (api[apiKey] as (value?: string) => Promise<unknown>)(payload);
+
+    if (payload === undefined) {
+      expect(mockInvoke).toHaveBeenCalledWith(channel);
+    } else {
+      expect(mockInvoke).toHaveBeenCalledWith(channel, payload);
+    }
+  });
 });

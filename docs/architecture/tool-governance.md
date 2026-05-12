@@ -12,7 +12,7 @@ LVIS는 3개 소스에서 도구를 등록한다:
 
 | 소스 | 예시 | 신뢰 수준 | 위험 |
 |------|------|-----------|------|
-| **Builtin** | memory_save, web_search | 높음 (코드 리뷰됨) | 호스트 내부 동작 |
+| **Builtin** | web_search, agent_spawn | 높음 (코드 리뷰됨) | 호스트 내부 동작 |
 | **Plugin** | meeting_start, document_search | 중간 (매니페스트 검증) | HostApi 범위 내 동작 |
 | **MCP** | mcp_hr_query, mcp_erp_read | 낮음 (외부 프로세스/서비스) | 네트워크 연결 가능 |
 
@@ -131,8 +131,8 @@ check(toolName, source, trust) → ALLOW | DENY | ASK
 
 | 분류 | 기준 | 예시 |
 |------|------|------|
-| **Read** | 상태를 변경하지 않는 조회 | memory_search, document_search, web_search |
-| **Write** | 상태를 변경하거나 외부에 영향 | memory_save, meeting_start, email_analyze |
+| **Read** | 상태를 변경하지 않는 조회 | document_search, web_search, agent_list |
+| **Write** | 상태를 변경하거나 외부에 영향 | agent_spawn, meeting_start, email_analyze |
 | **Dangerous** | 되돌리기 어려운 파괴적 동작 | (현재 없음, Bash 도구 추가 시 해당) |
 
 ---
@@ -224,9 +224,16 @@ Plugin 제거:
 
 | 도구 | 분류 | 기본 권한 |
 |------|------|-----------|
-| memory_save | write | ask (default) |
-| memory_search | read | allow |
-| memory_list | read | allow |
+| agent_list | read | allow |
+| agent_spawn | write | ask (default) |
+| ask_user_question | write | ask (default) |
+| knowledge_search / document_* | read | ask (default; plugin dependency gated) |
+| render_html | write | ask (default) |
+| request_plugin | read | ask (default) |
+| schedule_routine | write | ask (default) |
+| skill_list | read | allow |
+| skill_load | read | ask (default; first-use approval gated) |
+| todo_session_write | write | ask (default) |
 | web_search | read | allow |
 | web_fetch | read | allow |
 
@@ -503,9 +510,9 @@ Claude Code는 6개 확장 메커니즘을 제공:
 | 메커니즘 | Claude Code | LVIS 대응 | 상태 |
 |---------|------------|-----------|------|
 | MCP Servers | 24파일 구현 | mcp/ 모듈 | 거버넌스 완료, Client 구현 중 |
-| Custom Agents | ~/.claude/agents/*.md | 없음 | Phase 3 |
-| Skills | ~/.claude/skills/ | KeywordEngine skill routing | ✓ |
-| CLAUDE.md | @import 합성 | LVIS.md + notes/ | ✓ |
+| Custom Agents | ~/.claude/agents/*.md | ~/.lvis/agents/*.md 또는 ~/.lvis/agents/<name>/AGENTS.md | ✓ |
+| Skills | ~/.claude/skills/<name>/SKILL.md | ~/.lvis/skills/<name>/SKILL.md + skill_load/skill_list | ✓ |
+| CLAUDE.md | @import 합성 | AGENTS.md + memories/MEMORY.md | ✓ |
 | Plugins | Marketplace | PluginRuntime | ✓ |
 | Hooks | Pre/Post ToolUse | HookRunner | ✓ |
 
