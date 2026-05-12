@@ -283,7 +283,7 @@ export function App() {
   const { statuses: pluginAuthStatuses } = usePluginAuthStatuses(api, pluginCards);
 
   // Sprint B — role preset, cost preview, multimodal attachments
-  const { rolePresets, activePreset, activePresetId, setActivePresetId } = useRolePresets();
+  const { rolePresets, activePreset, activePresetId, setActivePresetId } = useRolePresets(api);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   // Strictly increasing N — never reassigned even after attachment removal so
   // textarea markers ([Image #N]) keep referring to the same payload.

@@ -1,17 +1,12 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import {
   DEFAULT_ROLE_PRESETS,
   buildPresetPrefix,
-  loadRolePresets,
-  saveRolePresets,
-  resetRolePresets,
+  cloneDefaultRolePresets,
+  normalizeRolePresets,
 } from "../role-presets.js";
 
 describe("role-presets", () => {
-  beforeEach(() => {
-    try { (globalThis as any).window?.localStorage?.clear?.(); } catch { /* ignore */ }
-  });
-
   it("ships the 6 advertised presets", () => {
     const names = DEFAULT_ROLE_PRESETS.map((p) => p.name);
     expect(names).toEqual(["기본", "요약가", "코드 리뷰어", "번역가", "개발 비서", "에디터"]);
@@ -31,19 +26,19 @@ describe("role-presets", () => {
     expect(prefix.endsWith("\n\n")).toBe(true);
   });
 
-  it("load falls back to defaults when storage is empty", () => {
-    const list = loadRolePresets();
-    expect(list.length).toBeGreaterThan(0);
+  it("cloneDefaultRolePresets returns independent objects", () => {
+    const first = cloneDefaultRolePresets();
+    first[0].name = "changed";
+    expect(cloneDefaultRolePresets()[0].name).toBe("기본");
   });
 
-  it("save + load round-trips custom presets when localStorage exists", () => {
-    if (typeof window === "undefined" || !window.localStorage) return;
-    const custom = [
-      { id: "x", name: "X", systemPromptAdd: "hi" },
-    ];
-    saveRolePresets(custom);
-    expect(loadRolePresets()).toEqual(custom);
-    resetRolePresets();
-    expect(loadRolePresets()).toEqual(DEFAULT_ROLE_PRESETS);
+  it("normalizes stored role settings and preserves the default preset", () => {
+    const normalized = normalizeRolePresets([
+      { id: "review", name: "Review", systemPromptAdd: "review carefully" },
+      { id: "review", name: "Duplicate", systemPromptAdd: "ignored" },
+      { id: "", name: "Invalid", systemPromptAdd: "ignored" },
+    ]);
+    expect(normalized.map((preset) => preset.id)).toEqual(["default", "review"]);
+    expect(normalized[1].systemPromptAdd).toBe("review carefully");
   });
 });

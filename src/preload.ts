@@ -358,6 +358,7 @@ const api = {
   memoryDeleteEntry: async (filename: string) => ipcRenderer.invoke("lvis:memory:entries:delete", filename),
   memorySearchEntries: async (query: string) => ipcRenderer.invoke("lvis:memory:entries:search", query),
   memoryGetIndex: async () => ipcRenderer.invoke("lvis:memory:index:get") as Promise<string>,
+  memoryUpdateIndex: async (content: string) => ipcRenderer.invoke("lvis:memory:index:update", content),
   memoryListSessions: async () => ipcRenderer.invoke("lvis:memory:sessions:list"),
   memorySearchSessions: async (query: string) => ipcRenderer.invoke("lvis:memory:sessions:search", query),
   memoryGetAgentsMd: async () => ipcRenderer.invoke("lvis:memory:agents-md:get") as Promise<string>,
@@ -366,6 +367,7 @@ const api = {
   memoryUpdateLvisMd: async (content: string) => ipcRenderer.invoke("lvis:memory:lvis-md:update", content),
   memoryGetUserPrefs: async () => ipcRenderer.invoke("lvis:memory:user-prefs:get") as Promise<string>,
   memoryUpdateUserPrefs: async (content: string) => ipcRenderer.invoke("lvis:memory:user-prefs:update", content),
+  memoryRefreshUserPrefs: async () => ipcRenderer.invoke("lvis:memory:user-prefs:refresh"),
 
   // ─── Plugins ─────────────────────────────────────
   listMarketplacePlugins: async () => ipcRenderer.invoke("lvis:plugins:marketplace:list"),
