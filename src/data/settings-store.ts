@@ -149,11 +149,51 @@ export interface AppearanceSettingsV1 {
   codeTheme: CodeThemePreference;
 }
 
-/** v2 appearance settings — single bundle, optional followSystem. */
+/**
+ * User-configurable font preferences (Track A scope expansion).
+ *
+ * `family` — `"system"` keeps the built-in HOST_FONT_STACK (default). Any other
+ * value MUST match the validator below (`isValidFontFamilyOverride`); rejected
+ * values fall back to `"system"` at normalize time so a corrupt settings.json
+ * cannot break first paint.
+ *
+ * `sizeScale` — multiplicative on `1rem`. Discrete preset values keep the UI
+ * legible at every step (a free slider would let users pick `0.4` and lock
+ * themselves out of the settings dialog).
+ */
+export const FONT_SIZE_SCALE_VALUES = [0.875, 1, 1.125, 1.25] as const;
+export type FontSizeScale = (typeof FONT_SIZE_SCALE_VALUES)[number];
+
+export interface AppearanceFontSettings {
+  /** `"system"` = HOST_FONT_STACK default; otherwise a validated raw CSS font-family stack. */
+  family?: "system" | string;
+  /** Multiplier on `1rem` base. Allowed: 0.875 / 1 / 1.125 / 1.25. */
+  sizeScale?: FontSizeScale;
+}
+
+/** v2 appearance settings — single bundle, optional followSystem + font overrides. */
 export interface AppearanceSettings {
   schemaVersion: 2;
   bundleId: string;
   followSystem?: boolean;
+  font?: AppearanceFontSettings;
+}
+
+/**
+ * Allow only alphanumerics, spaces, commas, hyphens, single/double quotes, and
+ * underscores in a user-supplied font-family stack. Same character class as
+ * the plugin theme payload validator (defense in depth across IPC boundaries).
+ * 200-char cap mirrors `validateThemePayload` so a malicious settings.json
+ * cannot ship a giant stack that bloats every CSS var lookup.
+ */
+const _FONT_FAMILY_RE = /^[\w\s,"'-]+$/;
+const _FONT_FAMILY_MAX = 200;
+
+export function isValidFontFamilyOverride(value: unknown): value is string {
+  return typeof value === "string"
+    && value.length > 0
+    && value.length <= _FONT_FAMILY_MAX
+    && _FONT_FAMILY_RE.test(value);
 }
 
 /**
@@ -698,6 +738,8 @@ function normalizeAppearance(input: unknown): AppearanceSettings {
     const followSystem = typeof obj.followSystem === "boolean" ? obj.followSystem : undefined;
     const result: AppearanceSettings = { schemaVersion: 2, bundleId };
     if (followSystem !== undefined) result.followSystem = followSystem;
+    const font = normalizeAppearanceFont(obj.font);
+    if (font) result.font = font;
     return result;
   }
 
@@ -714,6 +756,25 @@ function normalizeAppearance(input: unknown): AppearanceSettings {
   }
 
   return { ...DEFAULT_SETTINGS.appearance };
+}
+
+function normalizeAppearanceFont(input: unknown): AppearanceFontSettings | undefined {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return undefined;
+  const o = input as Record<string, unknown>;
+  const out: AppearanceFontSettings = {};
+  if (typeof o.family === "string") {
+    if (o.family === "system") {
+      out.family = "system";
+    } else if (isValidFontFamilyOverride(o.family)) {
+      out.family = o.family;
+    }
+  }
+  if (typeof o.sizeScale === "number"
+    && (FONT_SIZE_SCALE_VALUES as readonly number[]).includes(o.sizeScale)) {
+    out.sizeScale = o.sizeScale as FontSizeScale;
+  }
+  // Empty object → treat as undefined so defaults serialize cleanly.
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 /**

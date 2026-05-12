@@ -1186,13 +1186,25 @@
   body {
     @apply bg-background text-foreground;
     /* SoT: src/shared/host-font-stack.ts (HOST_FONT_STACK) — mirrored verbatim
-     * here, in plugin-ui-shell.html, main.ts splash, and window-titlebar-shell.ts.
-     * The `assistant-card-contrast` test enforces equality across all 5 mirrors
-     * and asserts `grep -rn "Noto Sans KR" src/` returns only the SoT module
-     * (issue #556 / #670). Korean entries are unicode-range fallback for CSS
-     * font matching, not regression-recovery fallback (No-Fallback-Code rule). */
-    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-      "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
+     * here, in plugin-ui-shell.html, main.ts splash, window-titlebar-shell.ts,
+     * and tools/render-html.ts. The `assistant-card-contrast` test enforces
+     * equality across all 5 mirrors and asserts `grep -rn "Noto Sans KR" src/`
+     * returns only the SoT module + mirrors. Korean entries are unicode-range
+     * fallback for CSS font matching, not regression-recovery fallback
+     * (No-Fallback-Code rule).
+     *
+     * `--lvis-font-family` / `--lvis-font-size-scale` are user-override hooks
+     * set by ThemeProvider when `settings.appearance.font` is configured. The
+     * fallback `var(--lvis-font-family, …)` expression keeps the default stack
+     * intact when no override is set — this is CSS-spec variable defaulting,
+     * NOT recovery fallback. The same SoT cross-mirror test verifies the
+     * default expression's Hangul tail. */
+    font-family: var(
+      --lvis-font-family,
+      system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+        "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif
+    );
+    font-size: calc(1rem * var(--lvis-font-size-scale, 1));
   }
 
   /* ── Text selection — themed via --selection-bg / --selection-fg ─────── */
