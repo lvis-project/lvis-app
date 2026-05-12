@@ -35,6 +35,8 @@ import { BrowserWindow, session as electronSession } from "electron";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
+import { registerWindowEventListeners } from "../ipc/domains/window.js";
+import { markAsWindowControlOwned } from "../ipc/window-control-registry.js";
 import {
   buildTitlebarCss,
   buildTitlebarHtml,
@@ -232,14 +234,39 @@ export async function openLinkWindow(
          the external content. The webviewTag flag enables the embedded
          viewer; the actual cross-origin loading and cookie persistence
          happen inside the webview's own partition (passed through via
-         the shell-side JS that wires the webview's `partition=` attr). */
+         the shell-side JS that wires the webview's `partition=` attr).
+         The shell itself needs the normal preload bridge for titlebar IPC;
+         remote content remains isolated in the webview below. */
       webviewTag: true,
       nodeIntegration: false,
       contextIsolation: true,
-      sandbox: true,
+      sandbox: false,
       webSecurity: true,
       preload: preloadExists ? preloadPath : undefined,
     },
+  });
+  if (typeof win.setMenu === "function") win.setMenu(null);
+  markAsWindowControlOwned(win.webContents);
+  registerWindowEventListeners(win);
+  win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  win.webContents.on("will-attach-webview", (event, webPreferences, params) => {
+    if (typeof params.src !== "string" || params.src !== opts.url) {
+      event.preventDefault();
+      return;
+    }
+    const prefs = webPreferences as Record<string, unknown>;
+    delete prefs.preload;
+    delete prefs.preloadURL;
+    prefs.nodeIntegration = false;
+    prefs.nodeIntegrationInWorker = false;
+    prefs.nodeIntegrationInSubFrames = false;
+    prefs.contextIsolation = true;
+    prefs.webSecurity = true;
+    prefs.sandbox = true;
+    prefs.webviewTag = false;
+    if (opts.persistPartition) {
+      prefs.partition = opts.persistPartition;
+    }
   });
 
   // Resolve when the page finishes loading or the user closes the window.

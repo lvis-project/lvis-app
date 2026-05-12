@@ -18,6 +18,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BrowserWindow, type Cookie, type Session, type WebContents } from "electron";
 import { registerWindowEventListeners } from "../ipc/domains/window.js";
+import { markAsWindowControlOwned } from "../ipc/window-control-registry.js";
 import { markAsAuthOwned } from "./auth-window-registry.js";
 import {
   buildTitlebarCss,
@@ -368,6 +369,7 @@ export async function openAuthWindow(
   });
   centerAuthWindowOverParent(authWindow, parent);
   if (typeof authWindow.setMenu === "function") authWindow.setMenu(null);
+  markAsWindowControlOwned(authWindow.webContents);
   registerWindowEventListeners(authWindow);
 
   let authContents: WebContents | null = null;

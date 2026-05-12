@@ -97,8 +97,13 @@ function DetachedContent({ viewKey }: ContentProps) {
         starred={starred}
         currentSessionId=""
         refreshStarred={refreshStarred}
-        onJumpToSession={() => {
-          // Cross-window session jump not yet implemented.
+        onJumpToSession={async (sessionId) => {
+          const result = await api.window?.loadSessionInMain(sessionId);
+          if (!result?.ok) {
+            console.warn("[detached] failed to load starred session in main window", result?.error);
+            return false;
+          }
+          return true;
         }}
         onActivateHome={() => {
           void api.window?.closeDetached();

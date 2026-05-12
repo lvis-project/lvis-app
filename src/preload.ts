@@ -816,6 +816,10 @@ const api = {
       ipcRenderer.invoke("lvis:window:list-detached") as Promise<
         Array<{ windowId: number; viewKey: string; snapped: boolean }>
       >,
+    loadSessionInMain: async (sessionId: string) =>
+      ipcRenderer.invoke("lvis:window:load-session-in-main", sessionId) as Promise<
+        { ok: true } | { ok: false; error: string }
+      >,
     /**
      * Subscribe to snap-edge highlight events sent from the main process
      * when a child window enters/exits the snap zone.
@@ -838,6 +842,13 @@ const api = {
       };
       ipcRenderer.on("lvis:detached:navigate", listener);
       return () => ipcRenderer.removeListener("lvis:detached:navigate", listener);
+    },
+    onLoadSessionInMain: (handler: (sessionId: string) => void) => {
+      const listener = (_event: unknown, payload: { sessionId?: unknown }) => {
+        if (typeof payload?.sessionId === "string") handler(payload.sessionId);
+      };
+      ipcRenderer.on("lvis:window:load-session-in-main", listener);
+      return () => ipcRenderer.removeListener("lvis:window:load-session-in-main", listener);
     },
   },
 };

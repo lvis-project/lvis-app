@@ -325,6 +325,14 @@ export function App() {
     starredIsEntry, starredToggle,
   });
 
+  useEffect(() => {
+    const unsubscribe = api.window?.onLoadSessionInMain?.((sessionId) => {
+      setActiveView("home");
+      void handleLoadSession(sessionId);
+    });
+    return unsubscribe;
+  }, [api, handleLoadSession]);
+
   // LLM settings + context budget (single source of truth: src/shared/pricing-data.ts)
   const { llmVendor, llmModel, enableThinkingChat, refresh: refreshLlmSettings, toggleThinking } = useSettings(api);
 

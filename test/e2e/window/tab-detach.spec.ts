@@ -69,6 +69,8 @@ test.describe('tab-detach + magnetic snap', () => {
     }
 
     userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lvis-e2e-detach-'));
+    const lvisHomeForTest = path.join(userDataDir, 'lvis-state');
+    fs.mkdirSync(lvisHomeForTest, { recursive: true, mode: 0o700 });
     killPageindexWorkers();
 
     app = await electron.launch({
@@ -77,6 +79,7 @@ test.describe('tab-detach + magnetic snap', () => {
         ...process.env,
         LVIS_DEV: '1',
         LVIS_E2E: '1',
+        LVIS_HOME: lvisHomeForTest,
         NODE_ENV: 'test',
         ELECTRON_DISABLE_SECURITY_WARNINGS: '1',
       },
