@@ -1185,8 +1185,14 @@
   }
   body {
     @apply bg-background text-foreground;
-    font-family: "Noto Sans KR", "Noto Sans CJK KR", "NanumGothic", "Malgun Gothic", Inter,
-      -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    /* Font stack matches the plugin webview UA default so host and plugin
+     * surfaces render with the same letterforms — `system-ui` first picks
+     * Apple SF / Segoe UI / Roboto / Cantarell per OS, then a Korean fallback
+     * chain covers Hangul codepoints that `system-ui` itself does not ship.
+     * Issue #556. The Korean entries are unicode-range fallback (CSS-spec
+     * font matching), not regression-recovery fallback. */
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+      "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
   }
 
   /* ── Text selection — themed via --selection-bg / --selection-fg ─────── */
