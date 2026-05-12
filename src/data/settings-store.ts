@@ -17,6 +17,7 @@ import {
 } from "../shared/llm-vendor-defaults.js";
 import { BUNDLE_IDS, DEFAULT_BUNDLE_ID } from "../shared/theme-bundles.js";
 import { createLogger } from "../lib/logger.js";
+import { cloneDefaultRolePresets, normalizeRolePresets, type RolePreset } from "./role-presets.js";
 const log = createLogger("settings");
 
 export type { LLMVendor, LLMVendorSettings };
@@ -62,6 +63,10 @@ export interface ChatSettings {
   autoCompact: boolean;
 }
 
+export interface RoleSettings {
+  presets: RolePreset[];
+}
+
 /**
  * §14.2 Audit log rotation + retention settings.
  * - auditRotationMaxBytes: rotate when file exceeds this size (default 10 MB)
@@ -94,6 +99,7 @@ export interface FeatureFlags {
 export interface AppSettings {
   llm: LLMSettings;
   chat: ChatSettings;
+  roles: RoleSettings;
   webSearch: WebSearchSettings;
   marketplace: MarketplaceSettings;
   routine: RoutineSettings;
@@ -325,6 +331,9 @@ const DEFAULT_SETTINGS: AppSettings = {
       "당신은 LVIS 로컬 지식 어시스턴트입니다. 사용자의 문서와 컨텍스트를 기반으로 정확하고 유용한 답변을 제공합니다. 한국어로 답변합니다.",
     autoCompact: true,
   },
+  roles: {
+    presets: cloneDefaultRolePresets(),
+  },
   webSearch: {
     provider: "duckduckgo",
   },
@@ -439,6 +448,7 @@ export class SettingsService {
   ): Promise<AppSettings> {
     if (partial.llm) this.settings.llm = mergeLlmPatch(this.settings.llm, partial.llm);
     if (partial.chat) this.settings.chat = { ...this.settings.chat, ...partial.chat };
+    if (partial.roles) this.settings.roles = normalizeRoleSettings(partial.roles, this.settings.roles);
     if (partial.webSearch) this.settings.webSearch = { ...this.settings.webSearch, ...partial.webSearch };
     if (partial.marketplace) {
       this.settings.marketplace = { ...this.settings.marketplace, ...partial.marketplace };
@@ -615,6 +625,7 @@ export class SettingsService {
       const result: AppSettings & { __needsV2WriteBack?: boolean } = {
         llm,
         chat: { ...DEFAULT_SETTINGS.chat, ...parsed.chat },
+        roles: normalizeRoleSettings(parsed.roles),
         webSearch: { ...DEFAULT_SETTINGS.webSearch, ...parsed.webSearch },
         marketplace: { ...DEFAULT_SETTINGS.marketplace, ...marketplaceParsed },
         routine: normalizedRoutine,
@@ -695,6 +706,16 @@ function mergeLlmPatch(base: LLMSettings, partial: LLMSettingsPatch): LLMSetting
     vendors,
     streamSmoothing: partial.streamSmoothing ?? base.streamSmoothing,
     fallbackChain: partial.fallbackChain ?? base.fallbackChain,
+  };
+}
+
+function normalizeRoleSettings(input: unknown, base: RoleSettings = DEFAULT_SETTINGS.roles): RoleSettings {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return { presets: normalizeRolePresets(base.presets) };
+  }
+  const obj = input as { presets?: unknown };
+  return {
+    presets: normalizeRolePresets(obj.presets ?? base.presets),
   };
 }
 

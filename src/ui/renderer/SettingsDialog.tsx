@@ -177,7 +177,7 @@ export function SettingsContent({
           </TabsContent>
 
           <TabsContent value="permissions"><PermissionsTab /></TabsContent>
-          <TabsContent value="roles"><RolesTab /></TabsContent>
+          <TabsContent value="roles"><RolesTab api={api} /></TabsContent>
           <TabsContent value="usage"><UsageDashboard api={api} /></TabsContent>
           <TabsContent value="audit"><AuditTab /></TabsContent>
           <TabsContent value="plugin-perf"><PluginPerfTab api={api} /></TabsContent>

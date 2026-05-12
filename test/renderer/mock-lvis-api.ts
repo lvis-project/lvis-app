@@ -6,6 +6,7 @@
  * crashing.
  */
 import { vi, type Mock } from "vitest";
+import { cloneDefaultRolePresets } from "../../src/data/role-presets.js";
 import { fakeLlmSettings } from "../../src/shared/__tests__/fake-llm-settings.js";
 
 export type MockLvisApi = Record<string, Mock>;
@@ -38,6 +39,7 @@ type ApiOverrides = {
 const DEFAULT_SETTINGS = {
   llm: fakeLlmSettings({ provider: "openai", model: "gpt-4o-mini" }),
   chat: { systemPrompt: "", autoCompact: true },
+  roles: { presets: cloneDefaultRolePresets() },
   webSearch: { provider: "none" },
   routine: {},
   privacy: { piiRedactEnabled: false },
@@ -249,6 +251,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     memoryDeleteEntry: vi.fn(async () => undefined),
     memorySearchEntries: vi.fn(async () => []),
     memoryGetIndex: vi.fn(async () => memoryIndex),
+    memoryUpdateIndex: vi.fn(async () => undefined),
     memoryListSessions: vi.fn(async () => []),
     memorySearchSessions: vi.fn(async () => []),
     memoryGetAgentsMd: vi.fn(async () => "# Agents"),
@@ -257,6 +260,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     memoryUpdateLvisMd: vi.fn(async () => undefined),
     memoryGetUserPrefs: vi.fn(async () => "# Preferences"),
     memoryUpdateUserPrefs: vi.fn(async () => undefined),
+    memoryRefreshUserPrefs: vi.fn(async () => ({ ok: true, content: "# Refreshed Preferences" })),
 
     listMarketplacePlugins: vi.fn(async () => marketplace),
     installMarketplacePlugin: vi.fn(async () => ({ ok: true })),
