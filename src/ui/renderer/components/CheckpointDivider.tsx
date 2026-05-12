@@ -62,7 +62,7 @@ export function CheckpointDivider({
       <div className="flex items-center gap-2">
         <span className={`h-px flex-1 ${variant.lineCls}`} />
         <span className={`text-[10px] ${variant.textCls} font-medium`}>
-          {"───"} {variant.icon} 체크포인트{compactNum !== undefined ? ` #${compactNum}` : ""} · {variant.label} ({messageCount} messages) {"───"}
+          {"───"} {variant.icon} 체크포인트{compactNum !== undefined ? ` #${compactNum}` : ""} · {variant.label} (메시지 {messageCount}개) {"───"}
         </span>
         <span className={`h-px flex-1 ${variant.lineCls}`} />
       </div>
