@@ -567,4 +567,14 @@ describe("SettingsService appearance.font — Track A user-configurable font", (
     });
     expect(s.get("appearance").font?.family).toBeUndefined();
   });
+
+  it("patch with `font: null` is a no-op — does not crash on null deref (PR #672 2차 critic N3)", async () => {
+    const s = new SettingsService({ userDataPath });
+    await s.patch({ appearance: { schemaVersion: 2, bundleId: "tokyo-night", font: { sizeScale: 1.125 } } });
+    // Caller deliberately sends `font: null` (some defensive call sites do this
+    // to "clear" without specifying subfields). Must not throw, must preserve
+    // the previously-patched font block.
+    await s.patch({ appearance: { schemaVersion: 2, bundleId: "tokyo-night", font: null as unknown as { sizeScale: 1 | 1.125 } } });
+    expect(s.get("appearance").font?.sizeScale).toBe(1.125);
+  });
 });
