@@ -2,7 +2,7 @@
  * D5 — MemoryManager search tests.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MemoryManager } from "../memory-manager.js";
@@ -16,6 +16,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  mm.stopPersistentContextWatcher();
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -36,21 +37,109 @@ describe("MemoryManager.searchMemoryEntries", () => {
   });
 
   it("matches body substring", async () => {
-    await mm.saveMemory("기타 메모리", "quarterly review 내용 정리");
-    await mm.saveMemory("다른 메모리", "무관한 내용");
+    await mm.saveMemory("기타 기억", "quarterly review 내용 정리");
+    await mm.saveMemory("다른 기억", "무관한 내용");
     const results = mm.searchMemoryEntries("quarterly");
     expect(results.length).toBe(1);
-    expect(results[0].title).toBe("기타 메모리");
+    expect(results[0].title).toBe("기타 기억");
   });
 
   it("caps results at 50", async () => {
     for (let i = 0; i < 60; i++) {
-      await mm.saveMemory(`메모리 ${i}`, "공통 키워드 hello");
+      await mm.saveMemory(`기억 ${i}`, "공통 키워드 hello");
     }
     const results = mm.searchMemoryEntries("hello");
     expect(results.length).toBe(50);
   });
 });
+
+describe("MemoryManager AGENTS.md and MEMORY.md layout", () => {
+  it("creates AGENTS.md and memories/MEMORY.md on first boot", () => {
+    expect(existsSync(join(dir, "AGENTS.md"))).toBe(true);
+    expect(existsSync(join(dir, "memories", "MEMORY.md"))).toBe(true);
+    expect(existsSync(join(dir, "memory"))).toBe(false);
+  });
+
+  it("migrates legacy LVIS.md and memory/ into the new layout", () => {
+    rmSync(dir, { recursive: true, force: true });
+    mkdirSync(join(dir, "memory"), { recursive: true });
+    writeFileSync(join(dir, "LVIS.md"), "# Legacy LVIS", "utf-8");
+    writeFileSync(join(dir, "memory", "old-note.md"), "# Old Note\n\nbody", "utf-8");
+
+    const migrated = new MemoryManager({ lvisDir: dir });
+    migrated.load();
+
+    expect(existsSync(join(dir, "AGENTS.md"))).toBe(true);
+    expect(existsSync(join(dir, "LVIS.md"))).toBe(false);
+    expect(existsSync(join(dir, "memories", "old-note.md"))).toBe(true);
+    expect(migrated.getAgentsMd()).toContain("Legacy LVIS");
+  });
+
+  it("updates MEMORY.md when saving a memory and injects it via getMemoryIndex", async () => {
+    await mm.saveMemory("Meeting Notes", "weekly sync discussion");
+    const index = readFileSync(join(dir, "memories", "MEMORY.md"), "utf-8");
+    expect(index).toContain("[Meeting Notes](./meeting-notes.md)");
+    expect(mm.getMemoryIndex()).toContain("weekly sync discussion");
+  });
+
+  it("does not allow saved memory titles to overwrite MEMORY.md", async () => {
+    const entry = await mm.saveMemory("MEMORY", "reserved index collision");
+
+    expect(entry.filename.toLowerCase()).not.toBe("memory.md");
+    expect(existsSync(join(dir, "memories", entry.filename))).toBe(true);
+    const index = readFileSync(join(dir, "memories", "MEMORY.md"), "utf-8");
+    expect(index).toContain(`# LVIS Memory Index`);
+    expect(index).toContain(`](./${entry.filename})`);
+  });
+
+  it("removes deleted memories from MEMORY.md and the cached index", async () => {
+    await mm.saveMemory("Meeting Notes", "weekly sync discussion");
+
+    await mm.deleteMemory("meeting-notes.md");
+
+    expect(existsSync(join(dir, "memories", "meeting-notes.md"))).toBe(false);
+    const index = readFileSync(join(dir, "memories", "MEMORY.md"), "utf-8");
+    expect(index).not.toContain("[Meeting Notes](./meeting-notes.md)");
+    expect(mm.getMemoryIndex()).not.toContain("weekly sync discussion");
+  });
+
+  it("does not allow MEMORY.md to be deleted as a normal memory entry", async () => {
+    await expect(mm.deleteMemory("MEMORY.md")).rejects.toThrow(/MEMORY\.md is an index file/);
+    expect(existsSync(join(dir, "memories", "MEMORY.md"))).toBe(true);
+  });
+
+  it("reloads AGENTS.md and MEMORY.md after direct file edits", async () => {
+    mm.load();
+    mm.startPersistentContextWatcher();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    writeFileSync(join(dir, "AGENTS.md"), "# Live Agents\n\nwatcher updated", "utf-8");
+    await waitUntil(() => mm.getAgentsMd().includes("watcher updated"), 3000);
+
+    writeFileSync(join(dir, "memories", "MEMORY.md"), "# Live Memory\n\nindex updated", "utf-8");
+    await waitUntil(() => mm.getMemoryIndex().includes("index updated"), 3000);
+  });
+
+  it("injects directly edited detailed memory files without a tool call", () => {
+    mm.load();
+    writeFileSync(
+      join(dir, "memories", "direct-memory.md"),
+      "# Direct Memory\n\nfile-backed context",
+      "utf-8",
+    );
+
+    expect(mm.getMemoryContext()).toContain("file-backed context");
+  });
+});
+
+async function waitUntil(predicate: () => boolean, timeoutMs = 1500): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  expect(predicate()).toBe(true);
+}
 
 describe("MemoryManager.searchSessions", () => {
   it("returns empty array when no sessions exist", () => {

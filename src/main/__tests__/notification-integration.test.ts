@@ -59,7 +59,7 @@ describe("Trigger 4: ApprovalGate fires `approval` on requestAndWait entry", () 
     void gate.requestAndWait({
       id: "req-1",
       category: "tool",
-      toolName: "memory_save",
+      toolName: "agent_spawn",
       args: {},
       reason: "상태 변경 도구",
       source: "builtin",
