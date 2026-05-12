@@ -36,7 +36,7 @@ import { findLvisProtocolUri, parsePluginAuthUri } from "./main/lvis-protocol.js
 import { buildDevProtocolArgs } from "./main/electron-protocol-args.js";
 import { devNoSandboxAllowed, setIsPackaged } from "./boot/dev-flags.js";
 import { emitEvent as emitHostEvent } from "./boot/types.js";
-import { WindowManager } from "./main/window-manager.js";
+import { WindowManager, type DetachedWindowOptions } from "./main/window-manager.js";
 import { createLogger } from "./lib/logger.js";
 import { LVIS_LOGO_PATH, LVIS_LOGO_VIEW_BOX } from "./shared/lvis-logo.js";
 import { normalizeSettingsTab } from "./shared/settings-tabs.js";
@@ -347,6 +347,16 @@ function createViewMenu() {
       })),
     ],
   };
+}
+
+function detachedWindowOptionsForViewKey(viewKey: string): DetachedWindowOptions | undefined {
+  if (!services || !viewKey.startsWith("plugin:")) return undefined;
+  const [, pluginId, extensionId, extra] = viewKey.split(":");
+  if (!pluginId || !extensionId || extra !== undefined) return undefined;
+  const view = services.pluginRuntime
+    .listUiExtensions()
+    .find((item) => item.pluginId === pluginId && item.extension.id === extensionId);
+  return view?.extension.window;
 }
 
 function createSettingsMenuItem(): MenuItemConstructorOptions {
@@ -876,6 +886,7 @@ async function main() {
     preloadPath,
     distRoot,
     getInitialThemeArgs: initialThemeArgs,
+    resolveDetachedWindowOptions: detachedWindowOptionsForViewKey,
   });
 
   // §4.2 Step 8: window 생성 (splash 표시) — bootstrap이 mainWindow를 필요로 함

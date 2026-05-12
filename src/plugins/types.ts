@@ -355,12 +355,17 @@ export interface PluginUiExtension {
   exportName?: string;
   page?: string;
   /**
-   * Window placement preference. When `defaultMode` is `"detached"` the host
-   * opens the extension in a magnetic-snap BrowserWindow instead of rendering
-   * it inline. Omitting this field or setting
-   * `"embedded"` preserves the existing behaviour.
+   * Detached window defaults. `defaultMode: "detached"` opens the extension
+   * in a magnetic-snap BrowserWindow instead of rendering it inline.
+   * Width/height values are initial defaults; saved user bounds still win.
    */
   window?: {
+    width?: number;
+    height?: number;
+    minWidth?: number;
+    minHeight?: number;
+    resizable?: boolean;
+    alwaysOnTop?: boolean;
     defaultMode?: "embedded" | "detached";
   };
 }
