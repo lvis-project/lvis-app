@@ -14,8 +14,9 @@
 //   - esbuild --watch for preload (CJS)
 //   - esbuild --watch for renderer (ESM, browser)
 //   - tailwindcss --watch for styles
-//   - copies src/index.html, src/plugin-ui-shell.html, and the host-owned
-//     external bootstrap src/plugin-ui-shell.js once (and on change).
+//   - copies src/index.html, src/plugin-ui-shell.html, the host-owned
+//     external bootstrap src/plugin-ui-shell.js, and runtime script assets
+//     once (and on change).
 //     The plugin shell bootstrap MUST be a sibling file (not inlined) so it
 //     loads under the shell's strict CSP `script-src 'self'`.
 //   - launches electron dist/src/main.js after initial build
@@ -276,6 +277,16 @@ const pluginShellAssets = [
     label: "plugin-ui-shell.js",
   },
 ];
+// Runtime script assets imported by compiled main-process modules. Production
+// `bun run build` copies these through package.json; the dev watcher must keep
+// the same contract or Electron can boot before the imported files exist.
+const runtimeScriptAssets = [
+  {
+    src: resolve(repoRoot, "scripts/electron-flags.mjs"),
+    out: resolve(repoRoot, "dist/scripts/electron-flags.mjs"),
+    label: "electron-flags.mjs",
+  },
+];
 
 const RESTART_DELAY_MS = parseMsEnv("LVIS_DEV_RESTART_DELAY_MS", 2500);
 const RESTART_FORCE_KILL_MS = parseMsEnv("LVIS_DEV_RESTART_FORCE_KILL_MS", 3000);
@@ -413,6 +424,20 @@ function copyPluginShellAsset(asset) {
 
 function copyAllPluginShellAssets() {
   for (const asset of pluginShellAssets) copyPluginShellAsset(asset);
+}
+
+function copyRuntimeScriptAsset(asset) {
+  try {
+    mkdirSync(dirname(asset.out), { recursive: true });
+    copyFileSync(asset.src, asset.out);
+    log("runtime-script", `copied ${asset.label}`);
+  } catch (err) {
+    log("runtime-script", `copy failed (${asset.label}): ${err.message}`);
+  }
+}
+
+function copyAllRuntimeScriptAssets() {
+  for (const asset of runtimeScriptAssets) copyRuntimeScriptAsset(asset);
 }
 
 async function stopChildProcess(proc, { forceTree = false } = {}) {
@@ -586,6 +611,16 @@ async function main() {
       watch(asset.src, { persistent: true }, () => copyPluginShellAsset(asset));
     } catch (err) {
       log("plugin-shell", `watch failed (${asset.label}): ${err.message}`);
+    }
+  }
+
+  // Runtime script assets imported from compiled dist/src modules.
+  copyAllRuntimeScriptAssets();
+  for (const asset of runtimeScriptAssets) {
+    try {
+      watch(asset.src, { persistent: true }, () => copyRuntimeScriptAsset(asset));
+    } catch (err) {
+      log("runtime-script", `watch failed (${asset.label}): ${err.message}`);
     }
   }
 

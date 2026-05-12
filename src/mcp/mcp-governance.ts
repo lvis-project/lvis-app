@@ -225,7 +225,23 @@ export class McpGovernance {
       }
 
       // builtin/plugin 도구 shadowing 차단
-      const baseNames = ["memory_save", "memory_search", "memory_list", "web_search", "web_fetch"];
+      const baseNames = [
+        "agent_list",
+        "agent_spawn",
+        "ask_user_question",
+        "document_list",
+        "document_page_content",
+        "document_structure",
+        "knowledge_search",
+        "render_html",
+        "request_plugin",
+        "schedule_routine",
+        "skill_list",
+        "skill_load",
+        "todo_session_write",
+        "web_fetch",
+        "web_search",
+      ];
       if (baseNames.includes(tool.name)) {
         return { valid: false, reason: `빌트인 도구 덮어쓰기 시도 차단: '${tool.name}'`, layer: 3 };
       }

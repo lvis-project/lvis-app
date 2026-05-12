@@ -76,7 +76,7 @@ Lvis는 **internal search(사내 LLM 시스템)** 와 SSE(Server-Sent Events) �
 |--------|------|--------|
 | `corporateNIE_API_URL` | internal search API 엔드포인트 | (추후 추가) |
 | `corporateNIE_API_KEY` | internal search 인증 키 | (추후 추가) |
-| `AGENT_MEMORY_PATH` | 로컬 기억 저장 경로 | `~/.lvis/memory` |
+| `AGENT_MEMORY_PATH` | 로컬 기억 저장 경로 | `~/.lvis/memories` |
 
 ---
 

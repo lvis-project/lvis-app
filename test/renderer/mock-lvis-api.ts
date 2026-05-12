@@ -32,6 +32,7 @@ type ApiOverrides = {
   latestRoutineResult?: unknown;
   pendingRoutineResults?: unknown[];
   routineSessionsByRoutine?: Record<string, unknown[]>;
+  memoryIndex?: string;
 };
 
 const DEFAULT_SETTINGS = {
@@ -78,6 +79,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   const latestRoutineResult = overrides.latestRoutineResult ?? null;
   const pendingRoutineResults = overrides.pendingRoutineResults ?? [];
   const routineSessionsByRoutine = overrides.routineSessionsByRoutine ?? {};
+  const memoryIndex = overrides.memoryIndex ?? "";
 
   const chatStreamHandlers = new Set<(ev: unknown) => void>();
   const routineFiredV2Handlers = new Set<(r: unknown) => void>();
@@ -218,8 +220,15 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     memorySaveEntry: vi.fn(async () => ({ ok: true })),
     memoryDeleteEntry: vi.fn(async () => undefined),
     memorySearchEntries: vi.fn(async () => []),
+    memoryGetIndex: vi.fn(async () => memoryIndex),
     memoryListSessions: vi.fn(async () => []),
     memorySearchSessions: vi.fn(async () => []),
+    memoryGetAgentsMd: vi.fn(async () => "# Agents"),
+    memoryUpdateAgentsMd: vi.fn(async () => undefined),
+    memoryGetLvisMd: vi.fn(async () => "# Agents"),
+    memoryUpdateLvisMd: vi.fn(async () => undefined),
+    memoryGetUserPrefs: vi.fn(async () => "# Preferences"),
+    memoryUpdateUserPrefs: vi.fn(async () => undefined),
 
     listMarketplacePlugins: vi.fn(async () => marketplace),
     installMarketplacePlugin: vi.fn(async () => ({ ok: true })),

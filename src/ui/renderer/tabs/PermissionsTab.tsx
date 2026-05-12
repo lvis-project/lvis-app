@@ -631,7 +631,7 @@ export function PermissionsTab() {
           <div className="flex items-center gap-2">
             <Input
               className="h-8 flex-1 text-xs"
-              placeholder="패턴 (예: mcp_*, memory_save)"
+              placeholder="패턴 (예: mcp_*, agent_spawn)"
               value={newPattern}
               onChange={(e) => setNewPattern(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter" && newPattern.trim()) void handleAddRule(); }}
