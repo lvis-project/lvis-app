@@ -54,6 +54,7 @@ import { McpGovernance } from "./mcp/mcp-governance.js";
 import { McpManager } from "./mcp/mcp-manager.js";
 import { openAuthWindow as openAuthWindowService } from "./main/auth-window-service.js";
 import { openLinkWindow as openLinkWindowService } from "./main/link-window-service.js";
+import { openAuthPartitionViewer as openAuthPartitionViewerService } from "./main/auth-partition-viewer-service.js";
 import { shell } from "electron";
 
 import { type AppServices, emitEvent, onEvent } from "./boot/types.js";
@@ -216,6 +217,7 @@ export async function bootstrap(
     mainWindow,
     openAuthWindowService,
     openLinkWindowService,
+    openAuthPartitionViewerService: (_parent, opts) => openAuthPartitionViewerService(opts),
     shellOpenExternal: (url: string) => shell.openExternal(url),
     approvalGate,
   });
