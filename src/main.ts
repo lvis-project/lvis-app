@@ -1034,6 +1034,14 @@ app.on("open-url", (event, url) => {
 // Windows/Linux: URI delivered as argv of second instance
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 if (!gotSingleInstanceLock) {
+  // We are NOT the primary instance — quit immediately and let the existing
+  // primary handle the protocol URL via its `second-instance` listener.
+  // Do NOT run bootstrap on this doomed process: pino-pretty's thread-stream
+  // worker exits with the process, and the first `log.info(...)` afterwards
+  // would throw "the worker has exited" — Electron surfaces that as an
+  // uncaught-exception dialog the user sees during marketplace plugin
+  // install. Quitting before `whenReady` keeps the second-instance exit
+  // silent. Regression guard: `src/__tests__/main-single-instance-gate.test.ts`.
   app.quit();
 } else {
   const coldStartUri = findLvisProtocolUri(process.argv);
@@ -1055,6 +1063,16 @@ if (!gotSingleInstanceLock) {
     if (mainWindow) {
       showMainWindow(mainWindow);
     }
+  });
+
+  // whenReady is scoped to the primary-instance branch — second-instance
+  // processes must NOT run main(). See the comment on `app.quit()` above.
+  app.whenReady().then(() => {
+    installHtmlPreviewPartitionBlock();
+    void main().catch((error) => {
+      log.error({ err: error }, "bootstrap failed");
+      app.quit();
+    });
   });
 }
 
@@ -1225,12 +1243,4 @@ app.on("before-quit", (event) => {
       app.quit();
     }
   })();
-});
-
-app.whenReady().then(() => {
-  installHtmlPreviewPartitionBlock();
-  void main().catch((error) => {
-    log.error({ err: error }, "bootstrap failed");
-    app.quit();
-  });
 });
