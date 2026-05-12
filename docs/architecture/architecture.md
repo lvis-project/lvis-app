@@ -2055,15 +2055,21 @@ main.ts:initialThemeArgs()
 - preload sticky buffer (`STICKY_EVENT_TYPES.has("host.theme.changed")`) —
   late-binding `bridge.onEvent` 에 대한 보호. pull 이 정상이면 buffer 는
   단순히 redundant
-- SDK `lvis-tokens-fallback` `<style>` (lvis-plugin-sdk PR #101) — pull 이 null 반환 (cold
-  boot 직후 ThemeProvider 첫 effect 전) 했을 때 :root 다크 기본값 적용
+
+**Removed (lvis-app#667, SDK v5.4.0)** — `lvis-plugin-sdk` 의
+`lvis-tokens-fallback` `<style>` / `_FALLBACK_CSS` / `fallback-dark.json` /
+`lvis-tokens.css` artifact 4 종은 모두 제거되었다. `initialThemeArgs`
+(commit `1696f92`) 가 모든 BrowserWindow 에 primed token payload 를
+실어보내므로 SDK fallback 이 보호하던 cold-boot race window 가 닫혀
+fallback 자체가 dead code 였다. 플러그인은 `primeTheme(bridge, opts?)`
+로 live broadcast 에 가입하면 충분하다.
 
 캐시 (`lastThemePayload`) 는 다음과 같이 동작한다:
 - `recordValidatedTheme(payload)` 가 validation 통과 시에만 갱신, 실패 시 기존 값
   유지 (잘못된 broadcast 가 캐시를 오염시키지 않음)
 - 호스트 부팅 직후 ThemeProvider 가 처음 broadcast 하기 전에 pull 하면 `null`
-  반환. SDK :root fallback 으로 잠깐 그려지다가 ThemeProvider mount-time push
-  가 수 ms 내 도달
+  반환. 이 경우 BrowserWindow 가 이미 `additionalArguments` 의 primed payload
+  로 페인트 중이므로 추가 처리 없이 ThemeProvider mount-time push 를 기다린다
 - 같은 키/값 화이트리스트 검증을 거치므로 pull / replay / broadcast 모두
   동일한 보안 게이트 통과
 - 캐시는 host process lifetime 동안 유지되고 종료 시 자동 소멸 — payload 자체가
@@ -2080,25 +2086,27 @@ custom 토큰 매핑 같은 use-case 를 흡수해, 같은 `host.theme.changed` 
 `primeTheme(bridge, opts?)`** 호출이다 (`docs/references/plugin-tool-schema-design.md`
 §2.6 참조).
 
-Token SoT 는 `lvis-plugin-sdk/src/ui/tokens/fallback-dark.json` 한 곳이고, SDK
-의 `_FALLBACK_CSS` / `lvis-tokens.css :root` / host `_DARK_BASE` 3 artifact 가
-빌드타임 generate 또는 re-import 로 동기화된다. 손-lockstep 부담은 단위 테스트 1
-개 (3-artifact snapshot) 로 가드한다. 후보 비교 + plugin-별 변경 범위 +
-마이그레이션 시퀀스는 [`proposals/2026-05-12-plugin-theme-unification.md`](proposals/2026-05-12-plugin-theme-unification.md)
-참조.
+Token SoT 는 host 의 ThemeBundle (`src/ui/renderer/theme/bundles/`) 단일
+출처다. `bundleToPluginTokens(bundle)` 가 active bundle 에서 17 개
+`--lvis-*` 토큰을 derive 하고, validated payload 가 `additionalArguments`
++ `host.theme.changed` broadcast 두 경로로 plugin webview 에 도달한다.
+SDK 가 보조 fallback artifact 를 들고 있지 않으므로 lockstep 부담도
+사라진다.
 
 ### 6.7.2 Token SoT 표
 
-플러그인 webview 에 전파되는 디자인 토큰의 lockstep 관계.
+플러그인 webview 에 전파되는 디자인 토큰의 단일 출처.
 
 | Artifact | 위치 | 역할 | 갱신 방식 |
 |---|---|---|---|
-| **SoT** `fallback-dark.json` | `lvis-plugin-sdk/src/ui/tokens/fallback-dark.json` | 17 개 `--lvis-*` 토큰의 다크 1차 정의. 디자인 팔레트가 바뀔 때 **여기 하나만** 수정 | 손-편집 |
-| SDK `_FALLBACK_CSS` | `lvis-plugin-sdk/src/ui/tokens/inject.ts` | host broadcast 도착 전 `:root` 다크 fallback `<style>` 주입 | SDK 빌드 스크립트가 JSON → TS const 로 generate |
-| SDK `lvis-tokens.css :root` | `lvis-plugin-sdk/src/ui/tokens/lvis-tokens.css` | 플러그인 CSS 의 `var(--lvis-*)` 기본값 | SDK 빌드 스크립트가 JSON → CSS rule 로 generate |
-| Host `_INVARIANT` | `lvis-app/src/ui/renderer/theme/plugin-token-map.ts` | host ThemeProvider 가 broadcast 보내기 전 invariant 토큰 기준값 | SDK JSON 과 lockstep — CI 단위 테스트 (`__tests__/host-sdk-token-lockstep.test.ts`) 가 drift 차단. literal subpath import 는 Vite/Rollup 의 non-JS subpath export 제약으로 보류 (SDK v5.3.1 typed `.ts` helper 후 재검토 — PR-3 follow-up) |
+| **SoT** ThemeBundle | `lvis-app/src/ui/renderer/theme/bundles/*.ts` | `--lvis-*` 토큰 값의 단일 출처. 디자인 팔레트가 바뀌면 **여기만** 수정 | 손-편집 |
+| Host `_INVARIANT` | `lvis-app/src/ui/renderer/theme/plugin-token-map.ts` | 번들 무관 invariant 토큰 16 개 (radius/text/weight/space/motion) | 손-편집 |
+| `bundleToPluginTokens` | `lvis-app/src/ui/renderer/theme/plugin-token-map.ts` | active bundle + `_INVARIANT` → 17 개 `--lvis-*` token map derive | 함수 호출 (`ThemeProvider`, `getInitialThemeArgs`) |
+| `additionalArguments` priming | `lvis-app/src/main.ts:initialThemeArgs` (`1696f92`) | 모든 BrowserWindow webPreferences 에 primed token payload 주입 | `WindowManager.openDetachedTab` 콜백 |
+| `host.theme.changed` broadcast | `EventBus` (`channels.ts`) | 런타임 테마 변경시 plugin webview 에 live payload 전파 | `ThemeProvider` 가 bundle 변경시 호출 |
 
-CI 단위 테스트 1개 (3-artifact snapshot vs JSON SoT) 로 drift 차단. 토큰
+SDK 에는 fallback artifact (JSON / CSS / TS const) 가 없으며, plugin 은
+`primeTheme(bridge, opts?)` 로 위 두 경로의 payload 를 받는다. 토큰
 화이트리스트 `LVIS_TOKEN_NAMES` / host `PLUGIN_TOKEN_NAMES` 동기화는 별개
 트랙 — `docs/references/plugin-tool-schema-design.md` §2.6 "SoT 동기화 정책"
 참조.
