@@ -61,6 +61,7 @@ import {
   syncPluginToolRegistry,
 } from "../plugins.js";
 import { createLogger } from "../../lib/logger.js";
+import { stripUntrustedTags } from "../../lib/strip-untrusted-tags.js";
 import { plog, PluginPhase } from "../../plugins/lifecycle-log.js";
 import {
   ApprovalIssuerRegistry,
@@ -1356,13 +1357,21 @@ export async function initPluginRuntime(
         // spawning a fresh ConversationLoop.
         const eventId = randomUUID();
         const overlayId = `plugin:${pluginId}:${eventId}`;
+        // Strip plugin-authored `<untrusted-*>` wrap tags from the user-visible
+        // summary preview (the prompt itself, forwarded to chat LLM via
+        // `pendingPrompt` below, keeps the tags for prompt-injection defense).
+        // Cap at 2KB so the renderer can offer a "더 보기" expand without
+        // shoveling megabytes through IPC.
+        const SUMMARY_DISPLAY_CAP = 2_000;
         const overlayItem = {
           id: overlayId,
           source: { kind: "plugin" as const, pluginId, eventId },
           title: spec.title ?? spec.source.replace(/^overlay:/, ""),
-          summary: spec.summary ?? spec.prompt.slice(0, 200),
+          summary:
+            spec.summary ??
+            stripUntrustedTags(spec.prompt).slice(0, SUMMARY_DISPLAY_CAP),
           running: false,
-          primaryActionLabel: spec.primaryActionLabel ?? "지금 답하기",
+          primaryActionLabel: spec.primaryActionLabel ?? "확인하기",
           pendingPrompt: formatPluginPendingPrompt(spec.prompt, decision.source),
           createdAt: new Date().toISOString(),
         };
