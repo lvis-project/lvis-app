@@ -1,42 +1,91 @@
 /**
- * Dynamic Lucide icon resolver for the plugin grid.
+ * Dynamic plugin avatar resolver for the plugin grid.
  *
- * Plugins declare their icon by name in `manifest.icon` (e.g. `"Mic"`).
- * The host lazy-loads the lucide-react module and resolves the icon by name.
- * This avoids a static `import * as LucideIcons` (which adds all 1 000+ icons
- * to the main bundle) by instead loading lucide-react as a single shared chunk
- * via `React.lazy` + dynamic `import()` — esbuild --splitting moves it out of
- * the critical path. Unknown or absent names fall back to `Plug` synchronously.
+ * Plugins choose one of two rendering paths via the manifest:
+ *   • `iconText`  — short text (1-4 chars) rendered inside the avatar circle
+ *                   (e.g. `"EP"`, `"MTG"`). Takes precedence over `icon`.
+ *                   Useful when no Lucide glyph matches the plugin's domain
+ *                   identity. Rendered synchronously — no Suspense needed.
+ *   • `icon`      — Lucide PascalCase name (e.g. `"Mic"`). Host lazy-loads
+ *                   the lucide-react module and resolves the icon by name.
+ *                   Avoids a static `import * as LucideIcons` (which would
+ *                   add all 1 000+ icons to the main bundle) by loading
+ *                   lucide-react as a single shared chunk via `React.lazy`
+ *                   + dynamic `import()` — esbuild --splitting moves it out
+ *                   of the critical path. Unknown / absent names fall back
+ *                   to `Plug` synchronously.
  *
- * Wrap call-sites in `<Suspense fallback={…}>` for the async path.
+ * Wrap call-sites in `<Suspense fallback={…}>` for the async Lucide path.
  */
-import { lazy, type ComponentType } from "react";
+import { createElement, lazy, type ComponentType } from "react";
 import { Plug } from "lucide-react";
 import type { LucideProps } from "lucide-react";
 
 export const FALLBACK_ICON: ComponentType<LucideProps> = Plug;
 
 /**
- * Module-level cache so repeated calls with the same icon name return the
- * identical component reference. This prevents React from treating each render
- * as a new component type (which would unmount/remount and re-trigger Suspense).
+ * Module-level caches so repeated calls with the same input return the
+ * identical component reference. This prevents React from treating each
+ * render as a new component type (which would unmount/remount and re-trigger
+ * Suspense for the Lucide path). Separate maps avoid key collisions between
+ * a Lucide name (e.g. `"Box"`) and an iconText value that happens to match.
  */
-const iconCache = new Map<string, ComponentType<LucideProps>>();
+const lucideIconCache = new Map<string, ComponentType<LucideProps>>();
+const textIconCache = new Map<string, ComponentType<LucideProps>>();
 
 /**
- * Resolve the Lucide icon for a plugin manifest.
- *
- * Returns a `LucideIcon` component (lazy-loaded for non-fallback paths).
- * Unknown / missing icon names resolve to the synchronous `Plug` fallback.
- * Results are cached by icon name so the same component reference is returned
- * on every call — safe to use inside render without a `useMemo`.
- *
- * @param manifest - Object with an optional `icon` field (Lucide PascalCase name, e.g. `"Mic"`).
+ * Per-length font-size, in rem. Tuned so 1-2 chars render at roughly the
+ * same visual weight as the Lucide stroke icon (h-7 w-7 ~ 28 px), and 3-4
+ * chars shrink to fit inside the same avatar circle without clipping.
  */
-export function pluginIconFor(manifest: { icon?: string }): ComponentType<LucideProps> {
+const TEXT_FONT_SIZE_REM: Readonly<Record<1 | 2 | 3 | 4, number>> = {
+  1: 1.1,
+  2: 0.95,
+  3: 0.7,
+  4: 0.6,
+};
+
+function buildTextIcon(text: string): ComponentType<LucideProps> {
+  const cached = textIconCache.get(text);
+  if (cached) return cached;
+  // Clamp the lookup key into the valid 1-4 range so a manifest with an
+  // out-of-spec longer string still renders something (worst-case: tiny
+  // but visible) rather than blowing up.
+  const len = Math.min(Math.max(text.length, 1), 4) as 1 | 2 | 3 | 4;
+  const fontSize = `${TEXT_FONT_SIZE_REM[len]}rem`;
+  function TextIcon({ className }: LucideProps) {
+    return createElement(
+      "span",
+      {
+        className: `${className ?? ""} inline-flex items-center justify-center font-bold leading-none tracking-tight`.trim(),
+        "aria-hidden": "true",
+        style: { fontSize },
+      },
+      text,
+    );
+  }
+  TextIcon.displayName = `PluginTextIcon(${text})`;
+  textIconCache.set(text, TextIcon);
+  return TextIcon;
+}
+
+/**
+ * Resolve the avatar component for a plugin manifest.
+ *
+ * Precedence: `iconText` > `icon` > `FALLBACK_ICON` (Plug). Results are
+ * cached so the same component reference is returned on every call — safe
+ * to use inside render without a `useMemo`.
+ *
+ * @param manifest - Object with optional `iconText` (1-4 char short text) or
+ *                   `icon` (Lucide PascalCase name) fields.
+ */
+export function pluginIconFor(
+  manifest: { icon?: string; iconText?: string },
+): ComponentType<LucideProps> {
+  if (manifest.iconText) return buildTextIcon(manifest.iconText);
   if (!manifest.icon) return FALLBACK_ICON;
   const name = manifest.icon;
-  const cached = iconCache.get(name);
+  const cached = lucideIconCache.get(name);
   if (cached) return cached;
   // Eviction policy:
   //   • `.then` "invalid name" → DO NOT evict. The cache exists to keep the
@@ -62,10 +111,10 @@ export function pluginIconFor(manifest: { icon?: string }): ComponentType<Lucide
         return { default: candidate as ComponentType<LucideProps> };
       })
       .catch(() => {
-        iconCache.delete(name);
+        lucideIconCache.delete(name);
         return { default: FALLBACK_ICON };
       }),
   );
-  iconCache.set(name, Icon);
+  lucideIconCache.set(name, Icon);
   return Icon;
 }
