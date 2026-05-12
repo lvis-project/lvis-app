@@ -2,7 +2,7 @@
 //
 // Two source variants share the same card shell:
 //   - routine: running=true shows spinner, false shows "결과 보기" (only when jsonl exists)
-//   - plugin insertion: running=false shows primaryActionLabel ("지금 답하기")
+//   - plugin insertion: running=false shows primaryActionLabel ("확인하기")
 //
 // Policy:
 //   - Single active card with prev/next queue navigation
@@ -16,8 +16,8 @@
 // C1: running phase — when running=true shows spinner + "진행 중…" instead of
 // summary + actions. Transitions to done phase when running flips to false.
 
-import { useMemo } from "react";
-import { ChevronLeft, ChevronRight, Loader2, X } from "lucide-react";
+import { useMemo, useState } from "react";
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Loader2, X } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
 import {
   Card,
@@ -52,7 +52,7 @@ export interface OverlayCardProps {
    * (e.g. notification-only routine with no JSONL session).
    */
   onPrimaryAction?: () => void;
-  /** Label for the primary action button — e.g. "결과 보기" or "지금 답하기" */
+  /** Label for the primary action button — e.g. "결과 보기" or "확인하기" */
   primaryActionLabel?: string;
   /** Source kind — drives status label when not running ("루틴 완료" vs "플러그인 알림") */
   kind?: "routine" | "plugin";
@@ -90,7 +90,17 @@ export function OverlayCard({
   primaryActionLabel,
   kind = "routine",
 }: OverlayCardProps) {
+  const [expanded, setExpanded] = useState(false);
   const relTime = useMemo(() => relativeTime(firedAt), [firedAt]);
+
+  // Summary 가 2줄 (line-clamp-2) 안에 들어가는지 어림짐작 — 줄바꿈 1+ 또는
+  // 일정 길이 이상이면 truncate 가능성 있어 "더 보기" 버튼 노출. 정확한
+  // line-count 측정은 layout pass 필요해서 휴리스틱으로 충분.
+  const isLikelyTruncated = useMemo(() => {
+    if (!summary) return false;
+    const newlineCount = (summary.match(/\n/g) ?? []).length;
+    return newlineCount >= 2 || summary.length > 120;
+  }, [summary]);
 
   const isoLabel = useMemo(() => {
     try {
@@ -192,7 +202,41 @@ export function OverlayCard({
         {running ? (
           <p className="text-xs text-muted-foreground/70">루틴 실행 중입니다. 잠시 기다려 주세요.</p>
         ) : summary ? (
-          <p className="line-clamp-2 break-words text-xs text-muted-foreground">{summary}</p>
+          <>
+            <p
+              className={
+                expanded
+                  ? "max-h-64 overflow-y-auto whitespace-pre-wrap break-words text-xs text-muted-foreground"
+                  : "line-clamp-2 break-words text-xs text-muted-foreground"
+              }
+              data-testid="overlay-card-summary"
+              data-expanded={expanded}
+            >
+              {summary}
+            </p>
+            {isLikelyTruncated && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="mt-1 h-6 gap-1 px-1 text-[11px] text-muted-foreground hover:text-foreground"
+                data-testid="overlay-card-expand-toggle"
+                aria-expanded={expanded}
+                onClick={() => setExpanded((v) => !v)}
+              >
+                {expanded ? (
+                  <>
+                    <ChevronUp className="h-3 w-3" />
+                    접기
+                  </>
+                ) : (
+                  <>
+                    <ChevronDown className="h-3 w-3" />
+                    더 보기
+                  </>
+                )}
+              </Button>
+            )}
+          </>
         ) : (
           <p className="text-xs text-muted-foreground/50">요약 없음</p>
         )}
