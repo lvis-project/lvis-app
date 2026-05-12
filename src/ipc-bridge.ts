@@ -20,3 +20,8 @@ export {
   registerWindowEventListeners,
   unregisterPluginWebview,
 } from "./ipc/index.js";
+
+// Re-export host theme cache reader so non-IPC callers (e.g. main.ts'
+// `initialThemeArgs()`) don't reach into `./ipc/domains/plugins.js` directly
+// — keeps `main/` ↔ `ipc/domains/` decoupled through this façade.
+export { getLastThemePayload } from "./ipc/domains/plugins.js";
