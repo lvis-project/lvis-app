@@ -16,7 +16,7 @@
  *
  * The external URL section (§B1 webView policy) is preserved verbatim.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTheme } from "../theme/index.js";
 import { BUNDLES, LGE_PAIR_IDS } from "../theme/index.js";
 import type { ThemeBundle } from "../theme/index.js";
@@ -288,30 +288,47 @@ function FontFamilyCustomInput({
   onCommit: (value: string) => void;
 }) {
   const [raw, setRaw] = useState(initial);
+  const inputRef = useRef<HTMLInputElement | null>(null);
   // Re-sync when upstream changes (preset click, cross-window broadcast, …).
-  useEffect(() => { setRaw(initial); }, [initial]);
+  // Guard against overwriting in-progress typing — if the input is currently
+  // focused, the user is editing and we must not stomp their text with a
+  // sibling-window broadcast (PR #672 2차 critic minor N2).
+  useEffect(() => {
+    if (document.activeElement === inputRef.current) return;
+    setRaw(initial);
+  }, [initial]);
 
-  const commit = () => {
-    const trimmed = raw.trim();
-    onCommit(trimmed);
+  // `commit` accepts an explicit `override` so Escape can pass the canonical
+  // `initial` value directly (React 18 batches `setRaw(initial)` so an Escape
+  // → setRaw → blur path would otherwise fire `onBlur` with the stale `raw`
+  // closure and confirm the typed text — exactly inverse of Escape's intent
+  // (PR #672 2차 critic MAJOR N1). Dedupe against `initial.trim()` so the
+  // explicit-revert path stays a no-op end-to-end.
+  const commit = (override?: string) => {
+    const value = (override ?? raw).trim();
+    if (value === initial.trim()) return;
+    onCommit(value);
   };
 
   return (
     <details className="text-[11px] text-muted-foreground">
       <summary className="cursor-pointer select-none">직접 입력 (CSS font-family stack)</summary>
       <input
+        ref={inputRef}
         type="text"
         value={raw}
         placeholder='예: "Spoqa Han Sans Neo", system-ui, sans-serif'
         maxLength={200}
         onChange={(e) => setRaw(e.target.value)}
-        onBlur={commit}
+        onBlur={() => commit()}
         onKeyDown={(e) => {
           if (e.key === "Enter") {
             e.preventDefault();
             commit();
           } else if (e.key === "Escape") {
+            e.preventDefault();
             setRaw(initial);
+            commit(initial); // dedupes via the `value === initial.trim()` guard above.
             (e.target as HTMLInputElement).blur();
           }
         }}
@@ -320,7 +337,7 @@ function FontFamilyCustomInput({
       />
       <p className="mt-1 text-[10px]">
         한글/영문/숫자 폰트 이름, 콤마, 따옴표, 하이픈만 허용 (최대 200자). 입력 후 Enter 또는 포커스를 벗어나면 저장됩니다.
-        잘못된 입력은 자동으로 시스템 기본으로 되돌아갑니다. 플러그인 자체 창은 호스트 설정과 별도로 자체 폰트를 사용합니다.
+        Escape 로 취소합니다. 잘못된 입력은 자동으로 시스템 기본으로 되돌아갑니다.
       </p>
     </details>
   );
@@ -405,6 +422,7 @@ export function AppearanceTab() {
         </div>
         <p className="text-[11px] text-muted-foreground">
           호스트 본체 / 채팅 / 설정 창 전체에 적용됩니다. 시스템 기본은 OS 의 sans-serif 와 한글 폰트 fallback 체인을 사용합니다.
+          플러그인 자체 창은 호스트 설정과 별도로 자체 폰트를 사용합니다.
         </p>
 
         {/* 폰트 패밀리 */}
