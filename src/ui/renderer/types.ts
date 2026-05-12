@@ -7,6 +7,7 @@ import type { McpServerConfig, McpServerConfigDto, McpServerState } from "../../
 import type { SerializedHistoryMessage } from "../../shared/chat-history.js";
 import type { PluginConfigRecord } from "../../shared/plugin-config.js";
 import type { ChatSendInputOrigin } from "../../shared/chat-origin.js";
+import type { RolePreset } from "../../data/role-presets.js";
 
 // Re-export MCP types for renderer-side consumers (type-only, no main-process runtime)
 export type { McpServerConfig, McpServerConfigDto, McpServerState };
@@ -103,6 +104,7 @@ export type AppSettings = {
     fallbackChain: Array<{ provider: string; model: string }>;
   };
   chat: { systemPrompt: string; autoCompact: boolean };
+  roles: { presets: RolePreset[] };
   webSearch: { provider: string };
   routine?: Record<string, unknown>;
   privacy?: { piiRedactEnabled: boolean };
@@ -316,6 +318,16 @@ export type LvisApi = {
   memoryUpdateLvisMd: (content: string) => Promise<unknown>;
   memoryGetUserPrefs: () => Promise<string>;
   memoryUpdateUserPrefs: (content: string) => Promise<unknown>;
+  memoryRefreshUserPrefs: () => Promise<
+    | {
+        ok: true;
+        content: string;
+        memoryEntry?: { filename: string; title: string; content: string; updatedAt?: string } | null;
+        refreshedAt?: string;
+        sources?: string[];
+      }
+    | { ok: false; error: string }
+  >;
   listMarketplacePlugins: () => Promise<MarketplaceItem[]>;
   listPluginUiExtensions: () => Promise<PluginUiExtension[]>;
   readPluginUiModule: (pluginId: string, viewId: string) => Promise<string>;
