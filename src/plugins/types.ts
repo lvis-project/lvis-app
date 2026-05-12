@@ -969,7 +969,9 @@ export interface ConversationTriggerSpec {
   summary?: string;
   /**
    * Overlay Runner — label for the OverlayCard primary action button.
-   * Defaults to "지금 답하기".
+   * Defaults to "확인하기" (host-level generic). Plugins targeting a
+   * specific user intent (e.g. mail reply) may override per-detector
+   * (예: `"답장하기"`).
    */
   primaryActionLabel?: string;
 }
