@@ -172,6 +172,35 @@ describe("<ThemeProvider>", () => {
     );
   });
 
+  it("applies settings:update broadcasts from another window without restart", async () => {
+    const { api } = makeMockLvisApi({
+      settings: {
+        llm: { provider: "openai", vendors: {}, streamSmoothing: "none", fallbackChain: [] },
+        chat: { systemPrompt: "", autoCompact: true },
+        webSearch: { provider: "none" },
+        appearance: { schemaVersion: 2, bundleId: "tokyo-night" },
+      },
+    });
+    let observed: string | null = null;
+    render(
+      <ThemeProvider api={api as never}>
+        <Probe onValue={(v) => { observed = v.bundleId; }} />
+      </ThemeProvider>,
+    );
+    await waitFor(() => {
+      expect(observed).toBe("tokyo-night");
+    });
+
+    await act(async () => {
+      await api.updateSettings({ appearance: { schemaVersion: 2, bundleId: "forest" } });
+    });
+
+    await waitFor(() => {
+      expect(observed).toBe("forest");
+      expect(document.documentElement.getAttribute("data-theme-bundle")).toBe("forest");
+    });
+  });
+
   it("persistence roundtrip: set midnight → simulated reload → still midnight", async () => {
     let stored: { schemaVersion: 2; bundleId: string } = { schemaVersion: 2, bundleId: "tokyo-night" };
     const settingsBacking = {
