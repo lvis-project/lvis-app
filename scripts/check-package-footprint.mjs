@@ -7,31 +7,15 @@
  * docs add package size and cold-start I/O without helping runtime behavior.
  */
 
+import * as asar from "@electron/asar";
 import { existsSync, readdirSync, statSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { spawnSync } from "node:child_process";
+import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
 const fallbackAppAsar = resolve(root, "release", "linux-arm64-unpacked", "resources", "app.asar");
 const maxAppAsarMb = Number(process.env.LVIS_MAX_APP_ASAR_MB ?? "100");
-
-function defaultAppAsarPath() {
-  const releaseDir = resolve(root, "release");
-  if (existsSync(releaseDir)) {
-    const candidates = readdirSync(releaseDir, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() && /^linux-.+-unpacked$/.test(entry.name))
-      .map((entry) => resolve(releaseDir, entry.name, "resources", "app.asar"))
-      .filter((candidate) => existsSync(candidate));
-    if (candidates.length === 1) return candidates[0];
-  }
-  return fallbackAppAsar;
-}
-
-const appAsar = resolve(root, process.argv[2] ?? defaultAppAsarPath());
-const resourcesDir = dirname(appAsar);
-const appOutDir = dirname(resourcesDir);
 
 function fail(message, samples = []) {
   process.stderr.write(`[package-footprint] ERROR: ${message}\n`);
@@ -41,19 +25,118 @@ function fail(message, samples = []) {
   process.exit(1);
 }
 
-function asarList(archivePath) {
-  const asarBin = resolve(root, "node_modules", ".bin", process.platform === "win32" ? "asar.cmd" : "asar");
-  if (!existsSync(asarBin)) fail(`asar CLI not found: ${asarBin}`);
-  const result = spawnSync(asarBin, ["list", archivePath], {
-    cwd: root,
-    encoding: "utf8",
-  });
-  if (result.error) fail(`failed to run asar list: ${result.error.message}`);
-  if (result.status !== 0) {
-    fail(`asar list exited with code ${result.status}`, [result.stderr.trim()]);
+function collectAppAsarCandidates() {
+  const releaseDir = resolve(root, "release");
+  if (!existsSync(releaseDir)) return [];
+
+  const candidates = [];
+  for (const entry of readdirSync(releaseDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+
+    const releaseChildDir = resolve(releaseDir, entry.name);
+    const unpackedAppAsar = resolve(releaseChildDir, "resources", "app.asar");
+    if (existsSync(unpackedAppAsar)) candidates.push(unpackedAppAsar);
+
+    for (const child of readdirSync(releaseChildDir, { withFileTypes: true })) {
+      if (!child.isDirectory() || !child.name.endsWith(".app")) continue;
+      const macAppAsar = resolve(releaseChildDir, child.name, "Contents", "Resources", "app.asar");
+      if (existsSync(macAppAsar)) candidates.push(macAppAsar);
+    }
   }
-  return result.stdout.split(/\r?\n/).filter(Boolean);
+
+  return [...new Set(candidates)];
 }
+
+function isCurrentPlatformCandidate(candidate) {
+  const normalized = candidate.replaceAll("\\", "/");
+  if (process.platform === "darwin") {
+    return /\/[^/]+\.app\/Contents\/Resources\/app\.asar$/.test(normalized);
+  }
+  if (process.platform === "win32") {
+    return /\/win-unpacked\/resources\/app\.asar$/.test(normalized);
+  }
+  if (process.platform === "linux") {
+    return /\/linux-.+-unpacked\/resources\/app\.asar$/.test(normalized);
+  }
+  return false;
+}
+
+function defaultAppAsarPath() {
+  const candidates = collectAppAsarCandidates();
+  const platformCandidates = candidates.filter(isCurrentPlatformCandidate);
+  if (platformCandidates.length === 1) return platformCandidates[0];
+  if (platformCandidates.length > 1) {
+    fail("multiple current-platform app.asar candidates found; pass the target path explicitly", platformCandidates);
+  }
+  if (candidates.length === 1) return candidates[0];
+  if (candidates.length > 1) {
+    fail("multiple app.asar candidates found; pass the target path explicitly", candidates);
+  }
+  return fallbackAppAsar;
+}
+
+function normalizeAsarEntry(entry) {
+  const normalized = entry.replaceAll("\\", "/");
+  return normalized.startsWith("/") ? normalized : `/${normalized}`;
+}
+
+function asarList(archivePath) {
+  try {
+    return asar.listPackage(archivePath).map(normalizeAsarEntry).filter(Boolean);
+  } catch (err) {
+    fail(`failed to list app.asar: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+function isMacAppPackage() {
+  return basename(appOutDir) === "Contents" && basename(dirname(appOutDir)).endsWith(".app");
+}
+
+function isLinuxUnpackedPackage() {
+  return /^linux-.+-unpacked$/.test(basename(appOutDir));
+}
+
+function validateMacElectronLocales() {
+  const localeResourcesDir = resolve(
+    appOutDir,
+    "Frameworks",
+    "Electron Framework.framework",
+    "Versions",
+    "A",
+    "Resources",
+  );
+  if (!existsSync(localeResourcesDir)) {
+    fail(`Electron framework locale resources directory missing: ${localeResourcesDir}`);
+  }
+
+  const expectedLocales = new Set(["en.lproj", "ko.lproj"]);
+  const localeDirs = readdirSync(localeResourcesDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && entry.name.endsWith(".lproj"))
+    .map((entry) => entry.name);
+  const missingLocales = [...expectedLocales].filter(
+    (entry) => !existsSync(resolve(localeResourcesDir, entry, "locale.pak")),
+  );
+  if (missingLocales.length > 0) fail("required Electron locale bundles missing", missingLocales);
+  const unexpectedLocales = localeDirs.filter((entry) => !expectedLocales.has(entry));
+  if (unexpectedLocales.length > 0) fail("unexpected Electron locale bundles leaked into package", unexpectedLocales);
+  return localeDirs.length;
+}
+
+function validatePakElectronLocales() {
+  const localesDir = resolve(appOutDir, "locales");
+  if (!existsSync(localesDir)) fail(`Electron locales directory missing: ${localesDir}`);
+  const expectedLocales = new Set(["en-US.pak", "ko.pak"]);
+  const localeFiles = readdirSync(localesDir).filter((entry) => entry.endsWith(".pak"));
+  const missingLocales = [...expectedLocales].filter((entry) => !localeFiles.includes(entry));
+  if (missingLocales.length > 0) fail("required Electron locale files missing", missingLocales);
+  const unexpectedLocales = localeFiles.filter((entry) => !expectedLocales.has(entry));
+  if (unexpectedLocales.length > 0) fail("unexpected Electron locale files leaked into package", unexpectedLocales);
+  return localeFiles.length;
+}
+
+const appAsar = process.argv[2] ? resolve(root, process.argv[2]) : defaultAppAsarPath();
+const resourcesDir = dirname(appAsar);
+const appOutDir = dirname(resourcesDir);
 
 if (!existsSync(appAsar)) fail(`app.asar not found: ${appAsar}`);
 
@@ -154,24 +237,19 @@ if (uvFiles.has(uvBin)) fail("raw packaged uv binary leaked; expected compressed
 if (!uvFiles.has(`${uvBin}.gz`)) fail("compressed packaged uv binary missing", [...uvFiles]);
 if (!uvFiles.has("uv.meta.json")) fail("packaged uv metadata missing", [...uvFiles]);
 
-const localesDir = resolve(appOutDir, "locales");
-if (!existsSync(localesDir)) fail(`Electron locales directory missing: ${localesDir}`);
-const expectedLocales = new Set(["en-US.pak", "ko.pak"]);
-const localeFiles = readdirSync(localesDir).filter((entry) => entry.endsWith(".pak"));
-const missingLocales = [...expectedLocales].filter((entry) => !localeFiles.includes(entry));
-if (missingLocales.length > 0) fail("required Electron locale files missing", missingLocales);
-const unexpectedLocales = localeFiles.filter((entry) => !expectedLocales.has(entry));
-if (unexpectedLocales.length > 0) fail("unexpected Electron locale files leaked into package", unexpectedLocales);
+const localeCount = isMacAppPackage() ? validateMacElectronLocales() : validatePakElectronLocales();
 
-const linuxGpuRuntimeFiles = [
-  "libEGL.so",
-  "libGLESv2.so",
-  "libvk_swiftshader.so",
-  "libvulkan.so.1",
-  "vk_swiftshader_icd.json",
-];
-const leakedGpuFiles = linuxGpuRuntimeFiles.filter((entry) => existsSync(resolve(appOutDir, entry)));
-if (leakedGpuFiles.length > 0) fail("Linux GPU runtime files leaked into package", leakedGpuFiles);
+if (isLinuxUnpackedPackage()) {
+  const linuxGpuRuntimeFiles = [
+    "libEGL.so",
+    "libGLESv2.so",
+    "libvk_swiftshader.so",
+    "libvulkan.so.1",
+    "vk_swiftshader_icd.json",
+  ];
+  const leakedGpuFiles = linuxGpuRuntimeFiles.filter((entry) => existsSync(resolve(appOutDir, entry)));
+  if (leakedGpuFiles.length > 0) fail("Linux GPU runtime files leaked into package", leakedGpuFiles);
+}
 
 process.stdout.write(
   [
@@ -179,6 +257,6 @@ process.stdout.write(
     `app.asar=${appAsarMb.toFixed(1)} MB`,
     `entries=${entries.length}`,
     `uvTarget=${uvTargets[0]}`,
-    `locales=${localeFiles.length}`,
+    `locales=${localeCount}`,
   ].join(" ") + "\n",
 );
