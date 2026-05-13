@@ -181,25 +181,43 @@ export function isPathAllowed(
 }
 
 /**
- * Pick the **leaf-parent** of `canonicalPath` for the
- * "auto-suggest add directory" UX (§3 Layer 1 M3 strengthening).
+ * Pick the grant scope to auto-suggest in the "out-of-allowed-dir" approval
+ * dialog (§3 Layer 1 M3 strengthening).
  *
- * Spec rule: NEVER suggest the broadest common-prefix (`~/Documents/`).
- * ALWAYS suggest the immediate parent of the requested file
- * (`~/Documents/old-project/notes/today/`).
+ * Spec rule: NEVER suggest a broader common-prefix. Two cases:
  *
- * Returns `null` if the leaf parent is already covered by `currentAllowed`,
- * or if the parent is a Layer 0 sensitive directory, or if `canonicalPath`
- * has no parent (filesystem root).
+ *   - **`isDirectory: false`** (the request path is a *file*, e.g.
+ *     `read_file ~/Documents/notes.md`): suggest the *immediate parent*
+ *     directory (`~/Documents/`). Granting the file itself is too narrow
+ *     because the next file in the same dir would re-prompt.
+ *   - **`isDirectory: true`** (the request path IS a directory, e.g.
+ *     `list_files /Users/ken`): suggest the *requested path itself*.
+ *     The previous "always parent" heuristic over-granted to one level
+ *     above (e.g. suggesting `/Users` for a `/Users/ken` request gave
+ *     access to every user's home — visible bug in prod approval cards).
  *
- * @param canonicalPath leaf path (already canonicalized + case-folded).
+ * Returns `null` if the chosen scope is already covered by `currentAllowed`,
+ * is a Layer 0 sensitive directory, or has no parent (filesystem root).
+ *
+ * @param canonicalPath request path (already canonicalized + case-folded).
  * @param currentAllowed scope from settings (already canonicalized).
+ * @param isDirectory whether the request path IS the target directory.
+ *                    Caller (executor.ts) determines this via `statSync`;
+ *                    falls back to `false` (file-style) when stat fails or
+ *                    the parameter is omitted, preserving legacy behavior.
  */
 export function pickClosestParent(
   canonicalPath: string,
   currentAllowed: readonly string[],
+  isDirectory: boolean = false,
 ): string | null {
   if (!canonicalPath) return null;
+  if (isDirectory) {
+    if (isFilesystemRootPath(canonicalPath)) return null;
+    if (isSensitivePath(canonicalPath)) return null;
+    if (isPathAllowed(canonicalPath, { directories: currentAllowed })) return null;
+    return canonicalPath;
+  }
   const parent = caseFoldForMatch(canonicalizePathForMatch(pathResolve(canonicalPath, "..")));
   if (parent === canonicalPath) return null; // already at root
   if (isSensitivePath(parent)) return null;
