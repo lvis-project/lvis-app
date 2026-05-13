@@ -23,6 +23,7 @@ import { join } from "node:path";
 import { validateSender, auditUnauthorized, UNAUTHORIZED_FRAME } from "../ipc-bridge.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
+import { resolveAppIconPath } from "./app-icon.js";
 
 /**
  * Allowlist for viewKey values accepted by the detach IPC handlers.
@@ -441,6 +442,7 @@ export class WindowManager {
       alwaysOnTop: windowOptions.alwaysOnTop ?? false,
       show: false,
       title: `LVIS — ${viewKeyLabel(viewKey)}`,
+      icon: resolveAppIconPath(),
       autoHideMenuBar: true,
       frame: process.platform !== "darwin" ? false : undefined,
       titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "hidden",

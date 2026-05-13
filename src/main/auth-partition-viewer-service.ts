@@ -51,6 +51,7 @@ import {
   urlHostMatchesAllowList,
   urlMatchesAllowList,
 } from "./host-allow-list.js";
+import { resolveAppIconPath } from "./app-icon.js";
 
 export interface AuthPartitionViewerAuditEvent {
   type:
@@ -164,6 +165,7 @@ export async function openAuthPartitionViewer(
     width: 1024,
     height: 768,
     title: opts.windowTitle ?? parsedHost,
+    icon: resolveAppIconPath(),
     autoHideMenuBar: true,
     webPreferences: {
       partition,
