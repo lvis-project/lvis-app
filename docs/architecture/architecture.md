@@ -818,35 +818,33 @@ LVIS 는 OpenHarness 레퍼런스를 따라 multi-layer compact 를 채택한다
 - **Layer 1 — Mark Stale Tool Results (preventive, marker-only)**: 매 post-turn 마다 실행. `markStaleToolResults()` 가 오래된 `tool_result` 메시지에 `meta.compactedAt` 단일 마커만 set — 메모리상의 content 는 *verbatim 보존* 된다 (UI / Layer 3 preview 가 원본 표시 가능). 마커가 있는 메시지는 `wire-serialize.ts:stubMarkedToolResults` 가 provider 호출 직전 + `saveSession` 직전에 stub (`[tool_result stripped: tool=X, origLen=N]`) 으로 변환 — wire/disk 측에서만 토큰/디스크가 절감된다. 최근 N개 (기본 8) 는 raw 유지, 200자 미만은 mark 대상 제외 (OpenCode 패턴), `toolUseId` 참조 무결성은 그대로 보존. PR-3 에서 구 `meta.stripped` · `meta.strippedAt` · `meta.originalLength` 필드는 호환성 layer 없이 완전 제거 (`src/engine/auto-compact.ts:114-124`).
 - **Layer 2 — LLM Compact with Boundary (threshold-gated)**: §4.5.11 Layer 0 preflight 가 `estimateMessagesTokens(history) ≥ getModelPreflightThreshold(vendor, model)` 을 hit 하면 LLM 호출 차단 + `compactWithBoundary()` (`src/engine/structured-compact.ts:321`) 동기 실행. 보존 구간을 제외한 이전 메시지를 LLM 요약으로 교체하고 같은 sessionId 안에 `kind: "checkpoint"` ChatEntry 가 append 되어 Layer 3 anchor 가 된다. 생성된 요약은 다음 턴 system prompt 의 preamble 로 prepend, `compactNum` (PR-5 sequence number) 가 새 checkpoint 에 할당되어 view/branch action anchor 로 사용된다. (구 `shouldCompact()` 사용률 임계치 + `compactMessages()` LLM-free 요약 패턴은 PR-2-F-2 에서 폐기 — 토큰만 측정하는 Layer 0 preflight 가 단일 트리거.)
 
-Layer 1 은 *항상 실행* 되므로 Layer 0 threshold 와 독립적으로 wire/disk 토큰 압력을 완화한다. Layer 2 는 hit 시 같은 sessionId 안에서 boundary-marked summary 를 만들고 fork 없이 진행 (§4.5.11 의 same-session checkpoint chain 모델). 아래 도식은 *목표 설계* (사용률 기준 20% 단위 트리거) 와 현재 구현 (token-based preflight) 의 양쪽을 비교해 보여준다 — 트리거 신호는 PR-2-F-2 이후 토큰으로 통일됐다.
+Layer 1 은 *항상 실행* 되므로 Layer 0 threshold 와 독립적으로 wire/disk 토큰 압력을 완화한다. Layer 2 는 Layer 0 preflight hit 시에만 발동하여 같은 sessionId 안에서 boundary-marked summary 를 만들고 fork 없이 진행 (§4.5.11 same-session checkpoint chain). 아래 도식은 두 레이어의 trigger 와 영향 범위를 함께 보여준다.
 
 ```mermaid
 flowchart LR
-    USAGE["Context usage monitor<br/>(system + memory + history + tool result)"]
-    SETTING["사용자 설정<br/>(20 / 40 / 60 / 80%)"]
-    THRESHOLD{"사용률 ≥ 설정 임계치?"}
-    MODE{"autoCompact enabled?"}
-    BOUNDARY["findSafeBoundary()<br/>tool_call / tool_result 쌍 보호"]
-    SUMMARY["Compact Summary<br/>(extractive now / richer summary later)"]
-    REWRITE["[이전 대화 요약] + 최근 4개 메시지 유지"]
+    PostTurn["Post-turn"]
+    UserInput["User input"]
+    MarkStale["Layer 1<br/>markStaleToolResults()<br/>meta.compactedAt 마커만 set"]
+    Preflight{"Layer 0 preflight<br/>estimateMessagesTokens ≥<br/>getModelPreflightThreshold?"}
+    LLMCompact["Layer 2<br/>compactWithBoundary()<br/>LLM rolling summary<br/>+ kind:checkpoint append"]
+    Continue["Same sessionId 계속"]
 
-    USAGE --> THRESHOLD
-    SETTING --> THRESHOLD
-    THRESHOLD -->|"No"| USAGE
-    THRESHOLD -->|"Yes"| MODE
-    MODE -->|"Off"| USAGE
-    MODE -->|"On"| BOUNDARY --> SUMMARY --> REWRITE
+    PostTurn --> MarkStale --> Continue
+    UserInput --> Preflight
+    Preflight -->|"No"| Continue
+    Preflight -->|"Yes"| LLMCompact --> Continue
+    MarkStale -.->|"wire/disk 직렬화 시<br/>stubMarkedToolResults"| Continue
 ```
 
-| 항목 | 목표 설계 | 현재 구현 단계 |
+| 항목 | Layer 1 — Mark Stale | Layer 2 — LLM Compact |
 | --- | --- | --- |
-| 임계치 | 컨텍스트 사용률 **40% 기본값** | `inputTokens >= 80_000` |
-| 사용자 설정 | **20% 단위**로 20/40/60/80% 선택 가능 | `chat.autoCompact` on/off 토글 |
-| 압축 방식 | compact boundary 보존 + 더 풍부한 요약 전략 | 로컬 추출 기반 요약 (`generateSummary`) |
-| 공간 회수 | 약 40~60% 확보 목표 | 요약 내용과 메시지 길이에 따라 가변 |
-| 보존 규칙 | 최근 대화와 tool round 경계를 함께 보존 | 최근 4개 메시지 유지 + tool_call/tool_result 안전 경계 보존 |
-| 수동 트리거 | `/compact` 명령어로 수동 실행 가능 | 동일 |
-| 적용 위치 | post-turn + 세션 재개 전후 컨텍스트 관리까지 확장 | `PostTurnHookChain`와 `ConversationLoop` fallback 경로 사용 |
+| 트리거 | 매 post-turn (항상) | Layer 0 preflight hit (`estimateMessagesTokens(history) ≥ getModelPreflightThreshold(vendor, model)`) |
+| 함수 | `markStaleToolResults()` (`src/engine/auto-compact.ts:114-124`) | `compactWithBoundary()` (`src/engine/structured-compact.ts:321`) |
+| 메커니즘 | `meta.compactedAt` 단일 마커 set — content verbatim 보존 | LLM 으로 rolling summary 생성, `kind:"checkpoint"` ChatEntry 를 같은 sessionId 에 append |
+| 영향 범위 | wire/disk only (memory unchanged; `stubMarkedToolResults` 가 직렬화 시점에 stub 변환) | memory + wire/disk + 다음 턴 system prompt preamble |
+| 보존 규칙 | 최근 N (기본 8) raw 유지, 200자 미만 제외 (OpenCode 패턴) | `preserveRecentTokens = max(1_000, floor(preflight × 0.4))` |
+| 수동 트리거 | (자동만 — 사용자 노출 없음) | `/compact` 슬래시 명령어 |
+| 결과 | wire/disk 토큰 + 디스크 사용량 절감 | system prompt 압축 + Layer 3 anchor 생성 (`compactNum` 할당) |
 
 #### 4.5.5 Post-Turn Hooks
 
