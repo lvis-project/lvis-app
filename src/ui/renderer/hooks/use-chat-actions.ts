@@ -52,6 +52,20 @@ export function useChatActions(opts: {
     try { await api.chatAbort(); } catch { /* no-op */ }
   }, [api]);
 
+  /**
+   * "guide" — non-interrupting mid-stream direction adjustment. The current
+   * turn keeps running; the engine consumes the queued text at the next
+   * round boundary (between tool execution and the next LLM stream) and
+   * appends it to history as a user message. Caller is responsible for
+   * disabling the affordance when not streaming — the main-process handler
+   * returns `{ ok: false, error: "no-active-turn" }` as a defense-in-depth
+   * boundary check.
+   */
+  const handleGuide = useCallback(async (text: string) => {
+    if (text.trim().length === 0) return;
+    try { await api.chatGuide(text); } catch { /* no-op */ }
+  }, [api]);
+
   const handleFeedback = useCallback(async (messageIdx: number, rating: "up" | "down", reason?: string) => {
     if (!api.submitFeedback) return;
     try { await api.submitFeedback({ sessionId: currentSessionId, messageIndex: messageIdx, rating, reason }); } catch { /* no-op */ }
@@ -61,5 +75,5 @@ export function useChatActions(opts: {
     try { await api.chatExport(format); } catch (err) { console.warn("[lvis] export failed:", (err as Error).message); }
   }, [api]);
 
-  return { handleLoadSession, isEntryStarred, handleFork, handleToggleStar, handleAbort, handleFeedback, handleExport };
+  return { handleLoadSession, isEntryStarred, handleFork, handleToggleStar, handleAbort, handleGuide, handleFeedback, handleExport };
 }

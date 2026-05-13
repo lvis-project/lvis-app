@@ -121,8 +121,6 @@ async function runStreamedTurn(
   channel: string,
   streamId: number,
   options: {
-    shouldSuppressInterruptedTail?: () => boolean;
-    clearInterruptedTailSuppression?: () => void;
     attachments?: import("../../engine/llm/types.js").UserContentPart[];
     inputOrigin: ChatInputOrigin;
   },
@@ -136,7 +134,6 @@ async function runStreamedTurn(
     {
       onReasoningDelta: (text) => send({ type: "reasoning_delta", text }),
       onTextDelta: (text) => {
-        if (options.shouldSuppressInterruptedTail?.() && text === "\n\n[중단됨]") return;
         send({ type: "text_delta", text });
       },
       onAssistantRound: ({ roundIndex, text, thought, stopReason, hasToolCalls }) =>
@@ -171,6 +168,7 @@ async function runStreamedTurn(
         }),
       onLlmStatus: (status) => send({ type: "llm_status", ...status }),
       onFallback: (from, to) => sendToWebContents(webContents, "lvis:chat:fallback", { from, to }, log),
+      onGuidanceInjected: (text) => send({ type: "guidance_injected", text }),
     },
     undefined,
     {
@@ -181,10 +179,6 @@ async function runStreamedTurn(
       inputOrigin: options.inputOrigin,
     },
   );
-  if (options.shouldSuppressInterruptedTail?.() && result.stopReason === "interrupted") {
-    options.clearInterruptedTailSuppression?.();
-    return result;
-  }
   send({ type: "done", ...(result.route === "command" ? { route: "command" } : {}) });
   return result;
 }
@@ -205,7 +199,6 @@ export function registerChatHandlers(deps: IpcDeps): void {
   ipcMain.handle("lvis:chat:has-provider", () => conversationLoop.hasProvider());
 
   let activeStreamTurn: Promise<TurnResult> | null = null;
-  let suppressInterruptedTail = false;
   let nextStreamId = 0;
   const trackStreamTurn = (factory: () => Promise<TurnResult>) => {
     const turnPromise = factory().finally(() => {
@@ -215,10 +208,6 @@ export function registerChatHandlers(deps: IpcDeps): void {
     return turnPromise;
   };
   const streamTurnOptions = {
-    shouldSuppressInterruptedTail: () => suppressInterruptedTail,
-    clearInterruptedTailSuppression: () => {
-      suppressInterruptedTail = false;
-    },
     inputOrigin: "user-keyboard" as const,
   };
   const allocateStreamId = () => ++nextStreamId;
@@ -239,12 +228,6 @@ export function registerChatHandlers(deps: IpcDeps): void {
     }
     return effective;
   };
-  const buildGuidancePrompt = (input: string) => `현재 진행 중이던 응답에 대한 추가 방향 지시입니다.
-새 주제로 전환하지 말고, 바로 직전 답변의 흐름을 유지한 채 아래 지시를 우선 반영해서 이어서 답변하세요.
-
-[추가 방향 지시]
-${input}`;
-
   const streamTurn = async (
     input: string,
     attachments?: import("../../engine/llm/types.js").UserContentPart[],
@@ -325,24 +308,37 @@ ${input}`;
     ));
   });
 
+  // "guide" — non-interrupting mid-stream direction adjustment. Queues
+  // the user's text so the engine consumes it at the next assistant-round
+  // boundary (between tool execution and the next LLM stream). The
+  // in-flight LLM call and its tool round are NOT aborted.
+  //
+  // Contract diverges from the pre-#623 handler (which aborted + restarted
+  // with a guidance prompt template) — see `src/shared/chat-utterance.ts`
+  // for the full 4-mode taxonomy.
   ipcMain.handle("lvis:chat:guide", async (e, input: string) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:guide", e); return UNAUTHORIZED_FRAME; }
-    if (typeof input !== "string" || input.trim().length === 0) return { ok: false, error: "empty-text" };
-    const win = getMainWindow();
-    const streamId = allocateStreamId();
-    sendToWebContents(win?.webContents, "lvis:chat:stream", { type: "guidance_reset", streamId }, log);
-    suppressInterruptedTail = true;
-    conversationLoop.abortCurrentTurn();
-    if (activeStreamTurn) {
-      try {
-        await activeStreamTurn;
-      } catch {
-        // Keep guidance flow alive even if the interrupted turn rejects in future.
-      }
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, "lvis:chat:guide", e);
+      return UNAUTHORIZED_FRAME;
     }
-    suppressInterruptedTail = false;
-    const effective = sanitizeOutgoingInput(buildGuidancePrompt(input), win?.webContents);
-    return trackStreamTurn(() => runStreamedTurn(conversationLoop, effective, win?.webContents, "lvis:chat:stream", streamId, streamTurnOptions));
+    if (typeof input !== "string" || input.trim().length === 0) {
+      return { ok: false, error: "empty-text" };
+    }
+    // PII redaction applies to guide input too — same trust origin
+    // (user-keyboard) and same downstream LLM consumption as chatSend,
+    // so the policy is identical. webContents is undefined here because
+    // we do not stream a redact notice for guide (no new turn to attach
+    // it to); the notice will fire on the next chatSend instead.
+    const win = getMainWindow();
+    const effective = sanitizeOutgoingInput(input, win?.webContents);
+    if (!conversationLoop.hasActiveTurn()) {
+      // No round boundary will arrive — refuse rather than silently drop.
+      // Renderer should disable the "방향 지시" affordance when not
+      // streaming; this is a defense-in-depth boundary check.
+      return { ok: false, error: "no-active-turn" };
+    }
+    conversationLoop.queueGuidance(effective);
+    return { ok: true };
   });
 
   ipcMain.handle("lvis:chat:abort", async (e) => {
