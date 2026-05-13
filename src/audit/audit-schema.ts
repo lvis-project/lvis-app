@@ -156,6 +156,14 @@ export interface AuditDeferredResolve extends AuditCommon {
   reviewerVerdict: RiskVerdict;
   queueId: string;
   resolution: "approved" | "rejected";
+  /**
+   * Issue #690 P4 — provenance of the user gesture that resolved the
+   * deferred entry. "button" is the existing panel-click path;
+   * "natural-language" is the in-chat intent-matched chip path. Optional
+   * for backward compatibility with audit rows written before P4 landed
+   * — readers must treat `undefined` as `"button"`.
+   */
+  approvalSource?: "button" | "natural-language";
   reason?: string;
 }
 
