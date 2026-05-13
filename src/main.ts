@@ -52,7 +52,7 @@ function errorMessage(err: unknown): string {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const distRoot = resolve(__dirname, "..");
+const distRoot = resolve(__dirname, "..", "..");
 const projectRoot = resolve(distRoot, "..");
 
 registerPluginAssetProtocolScheme(protocol);
@@ -173,7 +173,7 @@ const SETTINGS_WINDOW_WIDTH = 1040;
 const SETTINGS_WINDOW_HEIGHT = 760;
 const SETTINGS_WINDOW_MIN_WIDTH = 820;
 const SETTINGS_WINDOW_MIN_HEIGHT = 560;
-const rendererIndexUrl = () => pathToFileURL(resolve(__dirname, "index.html")).toString();
+const rendererIndexUrl = () => pathToFileURL(resolve(__dirname, "..", "index.html")).toString();
 
 function initialMainWindowBounds(): { x: number; y: number; width: number; height: number } {
   const { workArea } = screen.getPrimaryDisplay();
@@ -539,7 +539,7 @@ function refreshApplicationMenu() {
 async function loadMainInterface(win: BrowserWindow, reason: string) {
   if (win.isDestroyed()) return;
   try {
-    await win.loadFile(resolve(__dirname, "index.html"));
+    await win.loadFile(resolve(__dirname, "..", "index.html"));
     pendingRendererReload = false;
     showMainWindow(win);
     log.info({ reason }, "main interface loaded");
@@ -591,7 +591,7 @@ function isSettingsWindowUrl(url: string): boolean {
 
 function openSettingsWindow(initialTabInput: unknown = "llm"): BrowserWindow {
   const initialTab = normalizeSettingsTab(initialTabInput);
-  const preloadPath = resolve(__dirname, "preload.cjs");
+  const preloadPath = resolve(__dirname, "..", "preload.cjs");
   if (!existsSync(preloadPath)) {
     throw new Error(`[lvis] preload.cjs not found at ${preloadPath} — run 'npm run build:preload' first`);
   }
@@ -913,7 +913,7 @@ function initialThemeArgs(): string[] {
 
 function createWindow(options: { showBootstrapSplash?: boolean } = {}) {
   const showBootstrapSplash = options.showBootstrapSplash ?? true;
-  const preloadPath = resolve(__dirname, "preload.cjs");
+  const preloadPath = resolve(__dirname, "..", "preload.cjs");
   if (!existsSync(preloadPath)) {
     throw new Error(`[lvis] preload.cjs not found at ${preloadPath} — run 'npm run build:preload' first`);
   }
@@ -1056,7 +1056,7 @@ function createWindow(options: { showBootstrapSplash?: boolean } = {}) {
 async function main() {
   // Initialise WindowManager before createWindow so registerMainWindow() can
   // be called synchronously inside createWindow().
-  const preloadPath = resolve(__dirname, "preload.cjs");
+  const preloadPath = resolve(__dirname, "..", "preload.cjs");
   windowManager = new WindowManager({
     preloadPath,
     distRoot,
