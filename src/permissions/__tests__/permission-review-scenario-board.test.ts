@@ -42,6 +42,12 @@ function makeManager(
   const pm = new PermissionManager(join(dir, "permissions.json"));
   const queue = new DeferredQueue(join(dir, "deferred-queue.jsonl"));
   pm.setMode(mode);
+  // Round-1 critic MAJOR-2 — `interactive.autoApprove` is now the SOT
+  // for foreground-auto reviewer dispatch. When the scenario asserts
+  // `mode="auto"` behaviour the test must opt in explicitly.
+  if (mode === "auto") {
+    pm.setInteractiveAutoApprove("low");
+  }
   pm.setReviewer({
     classifier,
     cache: new VerdictCache(join(dir, "reviewer-cache.jsonl")),
@@ -279,6 +285,10 @@ describe("permission-review-scenario-board-v2.html contract", () => {
   it("S8 auto-review with missing reviewer asks foreground and does not silently allow", async () => {
     const pm = new PermissionManager(tmpFile("permissions.json"));
     pm.setMode("auto");
+    // Round-1 critic MAJOR-2 — interactive opt-in is required for the
+    // foreground-auto reviewer lane to fire. With it set + reviewer
+    // missing, the scenario tests fail-closed behaviour.
+    pm.setInteractiveAutoApprove("low");
     const { tool, execute } = makeTool({ name: "write_file", category: "write", pathFields: ["path"] });
     const gate = makeGate("deny-once");
     const result = await runProbe({
