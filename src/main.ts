@@ -70,13 +70,15 @@ if (process.platform === "linux" && process.env.WSL_DISTRO_NAME) {
     app.commandLine.appendSwitch("ozone-platform-hint", "x11");
   }
 }
-// §GPU: Prevent the Chromium GPU utility process from spawning on Windows corp/VDI
+// §GPU: Prevent the Chromium GPU utility process from spawning on corp/VDI
 // machines where restricted drivers produce repeated ContextResult::kFatalFailure
 // errors that eventually kill the renderer process (GPU-lost IPC → render-process-gone).
 // Must be called before app.whenReady(). The launch-script --disable-gpu flags only
 // stop renderer compositing; only disableHardwareAcceleration() stops the GPU process.
+// Linux packaged builds also prune Electron's GPU fallback libraries afterPack,
+// so dev and packaged Linux both use the same software-rendered path.
 // Mirror the same guard as scripts/run-electron.mjs: opt-out with LVIS_KEEP_GPU=1.
-if (process.platform === "win32" && process.env.LVIS_KEEP_GPU !== "1") {
+if ((process.platform === "win32" || process.platform === "linux") && process.env.LVIS_KEEP_GPU !== "1") {
   app.disableHardwareAcceleration();
 }
 
@@ -137,7 +139,12 @@ async function injectCorporateCa() {
     log.error("corporate CA 주입 실패 (non-fatal): %s", errorMessage(e));
   }
 }
-await injectCorporateCa();
+
+let corporateCaReady: Promise<void> | null = null;
+function ensureCorporateCaInjected(): Promise<void> {
+  corporateCaReady ??= injectCorporateCa();
+  return corporateCaReady;
+}
 
 let mainWindow: BrowserWindow | null = null;
 let settingsWindow: BrowserWindow | null = null;
@@ -726,8 +733,7 @@ const BOOTSTRAP_STATUS_MESSAGES = [
   "작업 화면을 여는 중...",
 ] as const;
 const BOOTSTRAP_MESSAGE_MIN_VISIBLE_MS = 500;
-const BOOTSTRAP_SPLASH_MIN_VISIBLE_MS =
-  BOOTSTRAP_STATUS_MESSAGES.length * BOOTSTRAP_MESSAGE_MIN_VISIBLE_MS;
+const BOOTSTRAP_SPLASH_MIN_VISIBLE_MS = BOOTSTRAP_MESSAGE_MIN_VISIBLE_MS;
 let bootstrapSplashShownAt = 0;
 
 async function waitForMinimumBootstrapSplash() {
@@ -1060,6 +1066,9 @@ async function main() {
 
   // §4.2 Step 8: window 생성 (splash 표시) — bootstrap이 mainWindow를 필요로 함
   createWindow();
+
+  updateSplashStatus("네트워크 인증서를 확인하는 중...");
+  await ensureCorporateCaInjected();
 
   // Drive splash status from the real bootstrap pipeline so the text below
   // the wordmark matches what's actually happening rather than cycling
