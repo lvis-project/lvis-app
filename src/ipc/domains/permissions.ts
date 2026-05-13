@@ -5,6 +5,7 @@
 import { ipcMain } from "electron";
 import { randomUUID } from "node:crypto";
 import { loadPolicy, savePolicy } from "../../permissions/policy-store.js";
+import { readPermissionMigrationStatus } from "../../permissions/permission-migration-store.js";
 import type { ApprovalDecision } from "../../permissions/approval-gate.js";
 import { PERMISSIONS } from "../../shared/ipc-channels.js";
 import { hasUserKeyboardIntent } from "../../shared/chat-origin.js";
@@ -240,21 +241,21 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
   // Issue #690 follow-up — read-only migration status surface. The
   // renderer (ChatView migration banner) calls this once on mount to
   // decide whether to surface a one-shot "권한 정책이 업데이트되었습니다"
-  // toast. Returns `{ appliedAt?: string, schemaVersion?: number }`.
-  // No write/auth gate — payload is non-secret schema metadata.
-  ipcMain.handle(PERMISSIONS.migrationStatus, async (e) => {
+  // toast. Returns `{ appliedAt?: string, schemaVersion?: number,
+  // behaviourChanged: boolean }`. `validateSender` is the auth gate
+  // even though the payload is non-secret — it keeps foreign frames
+  // out of the renderer's IPC surface.
+  ipcMain.handle(PERMISSIONS.getMigrationStatus, async (e) => {
     if (!validateSender(e)) {
-      auditUnauthorized(auditLogger, PERMISSIONS.migrationStatus, e);
+      auditUnauthorized(auditLogger, PERMISSIONS.getMigrationStatus, e);
       return UNAUTHORIZED_FRAME;
     }
-    const { readPermissionMigrationStatus } = await import(
-      "../../permissions/permission-settings-store.js"
-    );
     const status = readPermissionMigrationStatus();
     return {
       ok: true,
       schemaVersion: status.schemaVersion,
       appliedAt: status.appliedAt,
+      behaviourChanged: Boolean(status.appliedAt),
     };
   });
 

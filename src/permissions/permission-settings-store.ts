@@ -67,38 +67,26 @@ export interface ReviewerSettingsBlock {
 }
 
 /**
- * Permission settings schema version.
+ * Permission settings shape.
  *
- * Bumps occur when default semantics change between releases. A bumped
- * schemaVersion plus a one-shot migrator keeps existing users aligned with
- * the new defaults without re-prompting them. The migrator persists
- * `migration.appliedAt` so the renderer can surface a one-time
- * "권한 정책이 업데이트되었습니다" banner.
+ * The settings file persists ONLY user-facing knobs (`additionalDirectories`,
+ * `reviewer.*`). Migration provenance (schemaVersion, appliedAt, etc.)
+ * is intentionally kept OUT of this file and lives in its own
+ * permission-domain file `~/.lvis/permissions/migration.json` — see
+ * {@link ./permission-migration-store.ts}. Reasons:
  *
- * v1 → v2 (issue #690 follow-up): users with legacy `executionMode: "auto"`
- *  inherit `reviewer.interactive.autoApprove: "low"` automatically. The
- *  `auto` execution mode preserved the "LOW silent allow" UX before the
- *  interactive setting existed; without the migration those users would
- *  lose that UX after upgrade because the foreground-auto gate now reads
- *  the interactive setting too.
+ *   1. Storage Namespace per Feature (CLAUDE.md REQUIRED) — `settings.json`
+ *      is the cross-cutting file; permission-domain state belongs under
+ *      `~/.lvis/permissions/`.
+ *   2. A corrupt provenance file must not block the user from editing
+ *      their reviewer settings.
+ *   3. Banner suppression for "schema bump with no behaviour change" is
+ *      cleaner when the provenance file is the SOT for "was anything
+ *      actually applied?".
  */
-export const PERMISSION_SETTINGS_SCHEMA_VERSION = 2 as const;
-export type PermissionSettingsSchemaVersion = typeof PERMISSION_SETTINGS_SCHEMA_VERSION;
-
-export interface PermissionMigrationBlock {
-  /** Absent on legacy/unmigrated files. Present once migration runs. */
-  appliedAt?: string;
-  /** The schemaVersion the migrator wrote. Future ChatView banners can
-   *  use this to scope dismissal flags per-version. */
-  appliedSchemaVersion?: PermissionSettingsSchemaVersion;
-}
-
 export interface PermissionSettingsBlock {
-  /** Schema version of this `permissions` block. Absent ↔ legacy v1. */
-  schemaVersion?: PermissionSettingsSchemaVersion;
   additionalDirectories: string[];
   reviewer: ReviewerSettingsBlock;
-  migration?: PermissionMigrationBlock;
 }
 
 export interface PermissionSettingsFile {
@@ -136,25 +124,72 @@ function defaultPath(): string {
 }
 
 /**
+ * Result of {@link readPermissionSettingsResult}. Callers that need to
+ * distinguish "fresh install" from "user typed a syntax error into their
+ * settings.json" should use this entrypoint rather than the convenience
+ * {@link readPermissionSettings}.
+ */
+export interface ReadPermissionSettingsResult {
+  /** Normalised file content. Always returned. */
+  file: PermissionSettingsFile;
+  /** True when the on-disk file existed but failed to parse. Migrations
+   *  MUST refuse to write when this is true — silent default-substitution
+   *  on read combined with read-modify-write would silently truncate
+   *  unrelated top-level keys the user has typed. */
+  malformed: boolean;
+  /** The raw parsed JSON object (only set when the file existed AND
+   *  parsed successfully). Absence-based migration triggers consult
+   *  the raw shape directly (vs normalised defaults) to distinguish
+   *  "user never set this key" from "user wrote the default value". */
+  raw: Record<string, unknown> | null;
+}
+
+/**
+ * Strict reader. Distinguishes `absent file`, `parsed file`, and
+ * `malformed file` so downstream migration logic can refuse to act on
+ * a corrupt file.
+ */
+export function readPermissionSettingsResult(
+  pathOverride?: string,
+): ReadPermissionSettingsResult {
+  const filePath = pathOverride ?? defaultPath();
+  if (!existsSync(filePath)) {
+    return { file: structuredClone(DEFAULT_FILE), malformed: false, raw: null };
+  }
+  const text = readFileSync(filePath, "utf-8");
+  // An empty file is a legitimate placeholder — `withFileLock`
+  // touches the file with `flag: "a"` to make it stat()-able before
+  // it can be locked. We treat empty as "fresh default", NOT as
+  // corrupt JSON.
+  if (text.trim().length === 0) {
+    return { file: structuredClone(DEFAULT_FILE), malformed: false, raw: null };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (err) {
+    log.warn(
+      `failed to read ${filePath}: %s — falling back to defaults (malformed=true)`,
+      (err as Error).message,
+    );
+    return { file: structuredClone(DEFAULT_FILE), malformed: true, raw: null };
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { file: structuredClone(DEFAULT_FILE), malformed: true, raw: null };
+  }
+  const obj = parsed as Record<string, unknown>;
+  return { file: normalizePermissionSettings(obj), malformed: false, raw: obj };
+}
+
+/**
  * Read `~/.lvis/settings.json`. Missing file → DEFAULT_FILE; malformed
  * file → DEFAULT_FILE + warn (atomic cutover: do NOT silently allow).
  *
- * `pathOverride` is for tests.
+ * Convenience wrapper around {@link readPermissionSettingsResult} for
+ * read-only callers that don't care about the malformed signal.
  */
 export function readPermissionSettings(pathOverride?: string): PermissionSettingsFile {
-  const filePath = pathOverride ?? defaultPath();
-  if (!existsSync(filePath)) return structuredClone(DEFAULT_FILE);
-  try {
-    const raw = readFileSync(filePath, "utf-8");
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    return normalizePermissionSettings(parsed);
-  } catch (err) {
-    log.warn(
-      `failed to read ${filePath}: %s — falling back to defaults`,
-      (err as Error).message,
-    );
-    return structuredClone(DEFAULT_FILE);
-  }
+  return readPermissionSettingsResult(pathOverride).file;
 }
 
 /**
@@ -173,27 +208,10 @@ export function normalizePermissionSettings(
   }
   return {
     permissions: {
-      schemaVersion: normalizeSchemaVersion(perm.schemaVersion),
       additionalDirectories: dirs,
       reviewer: normalizeReviewerBlock(perm.reviewer),
-      migration: normalizeMigrationBlock(perm.migration),
     },
   };
-}
-
-function normalizeSchemaVersion(value: unknown): PermissionSettingsSchemaVersion | undefined {
-  return value === PERMISSION_SETTINGS_SCHEMA_VERSION ? value : undefined;
-}
-
-function normalizeMigrationBlock(parsed: unknown): PermissionMigrationBlock | undefined {
-  if (!parsed || typeof parsed !== "object") return undefined;
-  const obj = parsed as Record<string, unknown>;
-  const appliedAt = typeof obj.appliedAt === "string" && obj.appliedAt.length > 0
-    ? obj.appliedAt
-    : undefined;
-  const appliedSchemaVersion = normalizeSchemaVersion(obj.appliedSchemaVersion);
-  if (!appliedAt && !appliedSchemaVersion) return undefined;
-  return { appliedAt, appliedSchemaVersion };
 }
 
 /**
@@ -252,25 +270,45 @@ export async function writePermissionSettings(
   patch: {
     additionalDirectories?: string[];
     reviewer?: Partial<ReviewerSettingsBlock>;
-    schemaVersion?: PermissionSettingsSchemaVersion;
-    migration?: PermissionMigrationBlock;
   },
   pathOverride?: string,
 ): Promise<void> {
   const filePath = pathOverride ?? defaultPath();
   await withFileLock(filePath, async () => {
     let existing: Record<string, unknown> = {};
+    let existingMalformed = false;
     if (existsSync(filePath)) {
-      try {
-        existing = JSON.parse(readFileSync(filePath, "utf-8")) as Record<string, unknown>;
-      } catch {
-        existing = {};
+      const text = readFileSync(filePath, "utf-8");
+      // Empty file (`withFileLock` placeholder or freshly-truncated)
+      // is NOT corrupt — treat it as "no prior content" and continue.
+      if (text.trim().length > 0) {
+        try {
+          existing = JSON.parse(text) as Record<string, unknown>;
+        } catch {
+          existingMalformed = true;
+        }
       }
+    }
+    if (existingMalformed) {
+      // Refuse to write — a malformed file in the read step would cause
+      // an unrelated top-level key wipe on the next persist. Surface
+      // the corruption so callers (settings UI / slash dispatch) can
+      // route the user to a recovery flow instead of silently
+      // re-stamping the file.
+      throw new Error(
+        `refusing to write ${filePath}: existing file is malformed JSON. ` +
+        `Move it aside (e.g. settings.json.broken) before re-persisting.`,
+      );
     }
     const existingPerm = (existing.permissions ?? {}) as Record<string, unknown>;
     // Drop the deprecated alias key on write — settings file converges
     // on the canonical name with each persist.
     delete existingPerm.allowedDirectories;
+    // Strip deprecated provenance keys — schemaVersion + migration moved
+    // to ~/.lvis/permissions/migration.json. Any file written by the
+    // pre-PR-#704 build that still has these keys gets cleaned up here.
+    delete existingPerm.schemaVersion;
+    delete existingPerm.migration;
     const existingReviewer = normalizeReviewerBlock(existingPerm.reviewer);
     const nextReviewer: ReviewerSettingsBlock = patch.reviewer
       ? validateReviewerPatch({ ...existingReviewer, ...patch.reviewer })
@@ -281,21 +319,11 @@ export async function writePermissionSettings(
         : Array.isArray(existingPerm.additionalDirectories)
           ? (existingPerm.additionalDirectories as string[])
           : [];
-    const nextSchemaVersion =
-      patch.schemaVersion ?? normalizeSchemaVersion(existingPerm.schemaVersion);
-    const nextMigration =
-      patch.migration ?? normalizeMigrationBlock(existingPerm.migration);
     const nextPerm: Record<string, unknown> = {
       ...existingPerm,
       additionalDirectories: nextDirs,
       reviewer: nextReviewer,
     };
-    if (nextSchemaVersion !== undefined) {
-      nextPerm.schemaVersion = nextSchemaVersion;
-    }
-    if (nextMigration) {
-      nextPerm.migration = nextMigration;
-    }
     const merged = { ...existing, permissions: nextPerm };
     mkdirSync(dirname(filePath), { recursive: true, mode: 0o700 });
     writeFileSync(filePath, JSON.stringify(merged, null, 2), {
@@ -386,100 +414,4 @@ export async function removeAllowedDirectoryPersist(
   if (next.length === list.length) return list;
   await writePermissionSettings({ additionalDirectories: next }, pathOverride);
   return next;
-}
-
-// ── Permission settings migration (issue #690 follow-up) ──────────────
-
-export interface PermissionMigrationStatus {
-  /** Current schemaVersion present in the file (`undefined` if legacy). */
-  schemaVersion?: PermissionSettingsSchemaVersion;
-  /** ISO timestamp when the v1→v2 migrator wrote a change. */
-  appliedAt?: string;
-  /** True when this run wrote a migration — used by callers to log audit. */
-  justApplied: boolean;
-  /** What the migrator did, for audit/log emission. */
-  changes: string[];
-}
-
-/**
- * Idempotent one-shot migration to {@link PERMISSION_SETTINGS_SCHEMA_VERSION}.
- *
- * Inputs:
- *   - The settings file at `pathOverride` (or default).
- *   - The legacy ExecutionMode persisted in `permissions.json` (passed
- *     in by the caller — we do NOT import permissions-store here to keep
- *     this module's deps clean).
- *
- * Behavior:
- *   - If `schemaVersion === PERMISSION_SETTINGS_SCHEMA_VERSION`, return
- *     existing state with `justApplied: false` (idempotent re-run).
- *   - Otherwise, write `schemaVersion = 2` plus migration provenance, and
- *     if `legacyExecutionMode === "auto"`, also set
- *     `reviewer.interactive.autoApprove = "low"` (preserving legacy UX).
- */
-export async function migratePermissionSettings(
-  legacyExecutionMode: string | null,
-  pathOverride?: string,
-): Promise<PermissionMigrationStatus> {
-  const current = readPermissionSettings(pathOverride);
-  const perm = current.permissions;
-  if (perm.schemaVersion === PERMISSION_SETTINGS_SCHEMA_VERSION) {
-    return {
-      schemaVersion: perm.schemaVersion,
-      appliedAt: perm.migration?.appliedAt,
-      justApplied: false,
-      changes: [],
-    };
-  }
-
-  const changes: string[] = [];
-  const reviewerPatch: Partial<ReviewerSettingsBlock> = {};
-
-  if (
-    legacyExecutionMode === "auto" &&
-    perm.reviewer.interactive.autoApprove === "off"
-  ) {
-    reviewerPatch.interactive = { autoApprove: "low" };
-    changes.push("reviewer.interactive.autoApprove: off → low (legacy executionMode=auto)");
-  }
-
-  changes.push(`schemaVersion: ${perm.schemaVersion ?? "v1"} → ${PERMISSION_SETTINGS_SCHEMA_VERSION}`);
-
-  const appliedAt = new Date().toISOString();
-  await writePermissionSettings(
-    {
-      reviewer: Object.keys(reviewerPatch).length > 0 ? reviewerPatch : undefined,
-      schemaVersion: PERMISSION_SETTINGS_SCHEMA_VERSION,
-      migration: {
-        appliedAt,
-        appliedSchemaVersion: PERMISSION_SETTINGS_SCHEMA_VERSION,
-      },
-    },
-    pathOverride,
-  );
-
-  log.info(`permission settings migrated to v${PERMISSION_SETTINGS_SCHEMA_VERSION}: ${changes.join("; ")}`);
-  return {
-    schemaVersion: PERMISSION_SETTINGS_SCHEMA_VERSION,
-    appliedAt,
-    justApplied: true,
-    changes,
-  };
-}
-
-/**
- * Read-only accessor used by the renderer (via IPC) to decide whether to
- * surface the one-time "권한 정책이 업데이트되었습니다" banner.
- */
-export function readPermissionMigrationStatus(
-  pathOverride?: string,
-): PermissionMigrationStatus {
-  const current = readPermissionSettings(pathOverride);
-  const perm = current.permissions;
-  return {
-    schemaVersion: perm.schemaVersion,
-    appliedAt: perm.migration?.appliedAt,
-    justApplied: false,
-    changes: [],
-  };
 }
