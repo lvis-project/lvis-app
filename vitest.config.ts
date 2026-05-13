@@ -27,6 +27,9 @@ export default defineConfig({
     // webstorage is not on by default (e.g. v22 on Windows CI).
     poolOptions: {
       forks: { execArgv: ["--no-experimental-webstorage"] },
+      // `threads` is forward-defense for a future `pool: "threads"` flip —
+      // vitest 2.x defaults to `forks`, so this key is currently dead but
+      // mirroring `forks` keeps the fix portable if the pool is ever switched.
       threads: { execArgv: ["--no-experimental-webstorage"] },
     },
     environment: "node",
