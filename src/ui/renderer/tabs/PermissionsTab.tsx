@@ -599,15 +599,24 @@ export function PermissionsTab() {
                 채팅 중 mutating 도구 호출에 대해 리뷰어가 LOW로 판정하면 모달 없이 자동 통과시킵니다.
                 MED/HIGH는 어떤 경우에도 모달이 떠야 합니다.
               </p>
-              <div className="grid gap-2 sm:grid-cols-2">
+              <div className="grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label="인터랙티브 자동 승인">
                 {REVIEWER_INTERACTIVE_OPTIONS.map((opt) => (
+                  // Round-3 UX NIT — the previously-selected option was
+                  // `disabled`, which removed it from the keyboard tab
+                  // sequence and broke the standard radio-group focus
+                  // model. Keep it focusable; the onClick no-ops when
+                  // the value is already current.
                   <button
                     type="button"
                     key={opt.value}
                     data-testid={`reviewer-interactive-${opt.value}`}
-                    aria-pressed={reviewer.interactive.autoApprove === opt.value}
-                    disabled={reviewerBusy || reviewer.interactive.autoApprove === opt.value}
-                    onClick={() => void applyReviewerCommand(`interactive ${opt.value}`)}
+                    role="radio"
+                    aria-checked={reviewer.interactive.autoApprove === opt.value}
+                    disabled={reviewerBusy}
+                    onClick={() => {
+                      if (reviewer.interactive.autoApprove === opt.value) return;
+                      void applyReviewerCommand(`interactive ${opt.value}`);
+                    }}
                     className={`flex w-full items-start gap-2.5 rounded-md border px-3 py-2 text-left text-xs transition-colors ${reviewer.interactive.autoApprove === opt.value ? "border-primary bg-primary/10" : "border-muted hover:border-muted-foreground/40"}`}
                   >
                     <span className={`mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full border-2 ${reviewer.interactive.autoApprove === opt.value ? "border-primary" : "border-muted-foreground"}`}>
