@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import type { RolePreset } from "../../../data/role-presets.js";
+import {
+  DEFAULT_ROLE_PRESETS,
+  normalizeRolePresets,
+  type RolePreset,
+} from "../../../data/role-presets.js";
 import type { LvisApi } from "../types.js";
+
+export const LEGACY_ROLE_PRESETS_STORAGE_KEY = "lvis:role-presets:v1";
 
 /**
  * Role preset list + active selection. SettingsService is the single source of
@@ -13,8 +19,14 @@ export function useRolePresets(api: LvisApi) {
   useEffect(() => {
     let disposed = false;
     api.getSettings()
-      .then((settings) => {
-        if (!disposed) setRolePresets(settings.roles.presets);
+      .then(async (settings) => {
+        let presets = settings.roles.presets;
+        try {
+          presets = await migrateLegacyRolePresets(api, settings.roles.presets);
+        } catch {
+          presets = settings.roles.presets;
+        }
+        if (!disposed) setRolePresets(presets);
       })
       .catch(() => {
         if (!disposed) setRolePresets([]);
@@ -34,4 +46,64 @@ export function useRolePresets(api: LvisApi) {
   );
 
   return { rolePresets, activePreset, activePresetId, setActivePresetId };
+}
+
+async function migrateLegacyRolePresets(api: LvisApi, currentPresets: RolePreset[]): Promise<RolePreset[]> {
+  const storage = getLocalStorage();
+  const legacyPresets = readLegacyRolePresets(storage);
+  if (!shouldMigrateLegacyRolePresets(currentPresets, legacyPresets)) {
+    return currentPresets;
+  }
+
+  const updated = await api.updateSettings({ roles: { presets: legacyPresets } });
+  try {
+    storage?.removeItem(LEGACY_ROLE_PRESETS_STORAGE_KEY);
+  } catch {
+    // Migration already reached the SettingsService SSOT; stale cleanup is best-effort.
+  }
+  return updated.roles.presets;
+}
+
+function getLocalStorage(): Storage | null {
+  try {
+    return globalThis.localStorage ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export function readLegacyRolePresets(storage: Pick<Storage, "getItem"> | null): RolePreset[] | null {
+  const raw = storage?.getItem(LEGACY_ROLE_PRESETS_STORAGE_KEY);
+  if (!raw) return null;
+
+  try {
+    return normalizeRolePresets(JSON.parse(raw) as unknown);
+  } catch {
+    return null;
+  }
+}
+
+export function shouldMigrateLegacyRolePresets(
+  currentPresets: RolePreset[],
+  legacyPresets: RolePreset[] | null,
+): legacyPresets is RolePreset[] {
+  return Boolean(
+    legacyPresets &&
+    sameRolePresets(currentPresets, DEFAULT_ROLE_PRESETS) &&
+    !sameRolePresets(legacyPresets, DEFAULT_ROLE_PRESETS),
+  );
+}
+
+function sameRolePresets(left: RolePreset[], right: RolePreset[]): boolean {
+  if (left.length !== right.length) return false;
+  return left.every((preset, index) => {
+    const other = right[index];
+    return Boolean(
+      other &&
+      preset.id === other.id &&
+      preset.name === other.name &&
+      preset.systemPromptAdd === other.systemPromptAdd &&
+      Boolean(preset.isDefault) === Boolean(other.isDefault),
+    );
+  });
 }

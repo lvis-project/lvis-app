@@ -1,8 +1,8 @@
 /**
  * Role Presets — Sprint B
  *
- * Each preset bundles a systemPromptAdd (appended as a pre-prefix to the user
- * message for that turn). The app applies the prompt addition per-turn.
+ * Each preset bundles a systemPromptAdd. The selected preset is sent as a
+ * per-turn system prompt section; the default preset means "no override".
  *
  * User-editable — the full list is stored in SettingsService.roles.presets.
  */
@@ -10,7 +10,7 @@
 export interface RolePreset {
   id: string;
   name: string;
-  /** Injected ahead of the user's message when this preset is active. */
+  /** Injected into the per-turn system prompt when this preset is active. */
   systemPromptAdd: string;
   /** Marks the "no override" entry. */
   isDefault?: boolean;
@@ -63,6 +63,11 @@ export function cloneDefaultRolePresets(): RolePreset[] {
   return cloneRolePresets(DEFAULT_ROLE_PRESETS);
 }
 
+export interface ActiveRolePrompt {
+  name: string;
+  systemPromptAdd: string;
+}
+
 function normalizeText(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
@@ -76,6 +81,7 @@ export function normalizeRolePresets(input: unknown): RolePreset[] {
 
   const seenIds = new Set<string>();
   const normalized: RolePreset[] = [];
+  let sawDefaultPreset = false;
 
   for (const item of input) {
     if (!item || typeof item !== "object") continue;
@@ -83,6 +89,10 @@ export function normalizeRolePresets(input: unknown): RolePreset[] {
     const record = item as Partial<RolePreset>;
     const id = normalizeText(record.id);
     const name = normalizeText(record.name);
+    if (id === "default") {
+      sawDefaultPreset = true;
+      continue;
+    }
     if (!id || !name || seenIds.has(id)) continue;
 
     seenIds.add(id);
@@ -90,16 +100,14 @@ export function normalizeRolePresets(input: unknown): RolePreset[] {
       id,
       name,
       systemPromptAdd: typeof record.systemPromptAdd === "string" ? record.systemPromptAdd : "",
-      ...(record.isDefault ? { isDefault: true } : {}),
     });
   }
 
-  if (normalized.length === 0) {
+  const defaultPreset = DEFAULT_ROLE_PRESETS.find((preset) => preset.id === "default");
+  if (normalized.length === 0 && !sawDefaultPreset) {
     return cloneDefaultRolePresets();
   }
-
-  const defaultPreset = DEFAULT_ROLE_PRESETS.find((preset) => preset.id === "default");
-  if (defaultPreset && !normalized.some((preset) => preset.id === "default")) {
+  if (defaultPreset) {
     normalized.unshift({ ...defaultPreset });
   }
 
@@ -107,10 +115,14 @@ export function normalizeRolePresets(input: unknown): RolePreset[] {
 }
 
 /**
- * Build the injected prefix for a user turn. Returns empty string for the
- * default preset so the message flows through unchanged.
+ * Build the per-turn role prompt payload. Returns null for the default preset
+ * so the user message flows through unchanged.
  */
-export function buildPresetPrefix(preset: RolePreset | null | undefined): string {
-  if (!preset || preset.isDefault || !preset.systemPromptAdd.trim()) return "";
-  return `[Role: ${preset.name}]\n${preset.systemPromptAdd}\n\n`;
+export function buildActiveRolePrompt(preset: RolePreset | null | undefined): ActiveRolePrompt | null {
+  const prompt = preset?.systemPromptAdd.trim();
+  if (!preset || preset.isDefault || !prompt) return null;
+  return {
+    name: preset.name,
+    systemPromptAdd: prompt,
+  };
 }

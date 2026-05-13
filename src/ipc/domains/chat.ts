@@ -22,6 +22,7 @@ import type { IpcDeps } from "../types.js";
 import { sendToWebContents } from "../safe-send.js";
 import { createLogger } from "../../lib/logger.js";
 const log = createLogger("chat");
+const MAX_ROLE_PROMPT_CHARS = 12_000;
 
 export type { SerializedHistoryMessage } from "../../shared/chat-history.js";
 
@@ -48,6 +49,30 @@ function removeOrphanToolUse(messages: GenericMessage[]): GenericMessage[] {
     result.splice(i, 1);
   }
   return result;
+}
+
+function normalizeRolePrompt(
+  inputOrigin: ChatInputOrigin,
+  value: unknown,
+): { ok: true; rolePrompt?: NonNullable<ChatSendPayload["rolePrompt"]> } | { ok: false; error: string } {
+  if (value === undefined || value === null) return { ok: true };
+  if (inputOrigin !== "user-keyboard") return { ok: false, error: "role-prompt-user-keyboard-only" };
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { ok: false, error: "invalid-role-prompt" };
+  }
+  const candidate = value as { name?: unknown; systemPromptAdd?: unknown };
+  if (typeof candidate.name !== "string" || typeof candidate.systemPromptAdd !== "string") {
+    return { ok: false, error: "invalid-role-prompt" };
+  }
+  const systemPromptAdd = candidate.systemPromptAdd.trim().slice(0, MAX_ROLE_PROMPT_CHARS);
+  if (!systemPromptAdd) return { ok: true };
+  return {
+    ok: true,
+    rolePrompt: {
+      name: candidate.name.trim().slice(0, 80) || "role",
+      systemPromptAdd,
+    },
+  };
 }
 
 function entryOrdinalToHistoryIndex(history: GenericMessage[], ordinal: number): number {
@@ -124,6 +149,7 @@ async function runStreamedTurn(
   options: {
     attachments?: import("../../engine/llm/types.js").UserContentPart[];
     inputOrigin: ChatInputOrigin;
+    rolePrompt?: ChatSendPayload["rolePrompt"];
   },
 ): Promise<TurnResult> {
   const send = (payload: unknown) => sendToWebContents(webContents, channel, { streamId, ...((payload as Record<string, unknown>) ?? {}) }, log);
@@ -179,6 +205,7 @@ async function runStreamedTurn(
         ? { attachments: options.attachments }
         : {}),
       inputOrigin: options.inputOrigin,
+      ...(options.rolePrompt ? { rolePrompt: options.rolePrompt } : {}),
     },
   );
   send({ type: "done", ...(result.route === "command" ? { route: "command" } : {}) });
@@ -260,6 +287,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
       attachments?: unknown;
       inputOrigin?: unknown;
       userActivation?: unknown;
+      rolePrompt?: unknown;
     };
     if (typeof candidate.input !== "string") {
       return { ok: false, error: "invalid-input" };
@@ -274,6 +302,8 @@ export function registerChatHandlers(deps: IpcDeps): void {
     if (candidate.inputOrigin === "plugin-emitted" && !originSource) {
       return { ok: false, error: "missing-plugin-envelope" };
     }
+    const rolePrompt = normalizeRolePrompt(candidate.inputOrigin, candidate.rolePrompt);
+    if (!rolePrompt.ok) return { ok: false, error: rolePrompt.error };
     return {
       ok: true,
       payload: {
@@ -281,6 +311,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
         attachments: candidate.attachments,
         inputOrigin: candidate.inputOrigin,
         ...(candidate.userActivation === true ? { userActivation: true } : {}),
+        ...(rolePrompt.rolePrompt ? { rolePrompt: rolePrompt.rolePrompt } : {}),
       },
     };
   };
@@ -292,7 +323,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:send", e); return UNAUTHORIZED_FRAME; }
     const parsed = parseChatSendPayload(payload);
     if (!parsed.ok) return { ok: false, error: parsed.error };
-    const { input, attachments, inputOrigin } = parsed.payload;
+    const { input, attachments, inputOrigin, rolePrompt } = parsed.payload;
     // IPC payload validation — the renderer is trusted but a corrupt
     // preload bridge or a stray `unknown[]` cast could deliver malformed
     // parts. We validate the shape here so the conversation loop never
@@ -307,7 +338,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
       win?.webContents,
       "lvis:chat:stream",
       streamId,
-      { ...streamTurnOptions, attachments: validated, inputOrigin },
+      { ...streamTurnOptions, attachments: validated, inputOrigin, rolePrompt },
     ));
   });
 
@@ -697,6 +728,28 @@ export function registerChatHandlers(deps: IpcDeps): void {
   ipcMain.handle("lvis:memory:index:update", async (e, content: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:index:update", e); return UNAUTHORIZED_FRAME; }
     return memoryManager.updateMemoryIndex(content);
+  });
+  ipcMain.handle("lvis:memory:index:update-if-unchanged", async (e, expectedContent: string, nextContent: string) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:index:update-if-unchanged", e); return UNAUTHORIZED_FRAME; }
+    return memoryManager.updateMemoryIndexIfUnchanged(expectedContent, nextContent);
+  });
+  ipcMain.handle("lvis:memory:index:sections:update", async (e, sections: unknown) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:index:sections:update", e); return UNAUTHORIZED_FRAME; }
+    if (!sections || typeof sections !== "object" || Array.isArray(sections)) {
+      return { ok: false, error: "invalid-memory-sections" };
+    }
+    const candidate = sections as { urgentMemory?: unknown; references?: unknown };
+    if (
+      (candidate.urgentMemory !== undefined && typeof candidate.urgentMemory !== "string") ||
+      (candidate.references !== undefined && typeof candidate.references !== "string")
+    ) {
+      return { ok: false, error: "invalid-memory-sections" };
+    }
+    await memoryManager.updateMemoryIndexSections({
+      ...(candidate.urgentMemory !== undefined ? { urgentMemory: candidate.urgentMemory } : {}),
+      ...(candidate.references !== undefined ? { references: candidate.references } : {}),
+    });
+    return { ok: true };
   });
   ipcMain.handle("lvis:memory:sessions:list", (e) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:sessions:list", e); return UNAUTHORIZED_FRAME; }

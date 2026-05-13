@@ -609,6 +609,7 @@ export function App() {
           outgoingAttachments,
           mode === "trigger-import" ? "plugin-emitted" : "user-keyboard",
           mode === "default" ? userIntent : undefined,
+          mode === "default" ? composed.rolePrompt : undefined,
         );
         if (debugStreamEnabled) debugLog("handleAsk", "chatSend:resolved", { requestId });
         // After successful send, clear attachments — the textarea was

@@ -151,6 +151,17 @@ describe("SettingsService role presets", () => {
     expect(service.get("chat").systemPrompt).toBe("preserved-prompt");
     expect(service.get("chat").autoCompact).toBe(false);
   });
+
+  it("normalizes feature flags so idle preference refresh is opt-in boolean only", async () => {
+    const service = new SettingsService({ userDataPath });
+    expect(service.get("features")?.idlePreferenceRefresh).toBe(false);
+
+    await service.patch({ features: { idlePreferenceRefresh: true } });
+    expect(service.get("features")?.idlePreferenceRefresh).toBe(true);
+
+    await service.patch({ features: { idlePreferenceRefresh: "yes" } as never });
+    expect(service.get("features")?.idlePreferenceRefresh).toBe(true);
+  });
 });
 
 describe("SettingsService LLM per-vendor patching", () => {

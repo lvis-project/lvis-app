@@ -140,13 +140,17 @@ describe("composeOutgoing", () => {
     expect(r.text).not.toContain("[Pasted text #7 +99 lines]");
   });
 
-  it("applies role-preset prefix when active", () => {
+  it("returns active role preset as system prompt metadata", () => {
     const r = composeOutgoing({
       raw: "hi",
-      activePreset: { id: "x", name: "x", systemPromptAdd: "" },
+      activePreset: { id: "x", name: "reviewer", systemPromptAdd: "Review carefully." },
       attachments: [],
     });
     expect(r.text).toBe("hi");
+    expect(r.rolePrompt).toEqual({
+      name: "reviewer",
+      systemPromptAdd: "Review carefully.",
+    });
   });
 
   it("keeps imported trigger envelopes as exact plugin-authored text", () => {

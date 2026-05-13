@@ -7,6 +7,8 @@ export interface ChatTabProps {
   setStreamSmoothing: (v: "none" | "word" | "char") => void;
   experimentalContinuousBackend?: boolean;
   setExperimentalContinuousBackend?: (v: boolean) => void;
+  idlePreferenceRefresh?: boolean;
+  setIdlePreferenceRefresh?: (v: boolean) => void;
   piiRedactEnabled: boolean;
   onPiiRedactToggle: () => void;
 }
@@ -18,6 +20,8 @@ export function ChatTab({
   setStreamSmoothing,
   experimentalContinuousBackend,
   setExperimentalContinuousBackend,
+  idlePreferenceRefresh,
+  setIdlePreferenceRefresh,
   piiRedactEnabled,
   onPiiRedactToggle,
 }: ChatTabProps) {
@@ -91,7 +95,29 @@ export function ChatTab({
                   세션 제목 자동 갱신, 연속성 가드, 요약 프리앰블을 활성화합니다. 체크포인트 압축은 자동 컴팩트 설정을 따릅니다.
                 </p>
               </div>
+          </div>
+          {setIdlePreferenceRefresh !== undefined && (
+            <div className="flex items-center gap-3 rounded-md border px-3 py-3">
+              <button
+                type="button"
+                role="checkbox"
+                aria-checked={idlePreferenceRefresh ?? false}
+                data-testid="idle-preference-refresh-toggle"
+                className={`relative h-5 w-5 flex-shrink-0 rounded border-2 transition-colors ${idlePreferenceRefresh ? "border-primary bg-primary" : "border-muted-foreground"} cursor-pointer hover:border-primary/60`}
+                onClick={() => setIdlePreferenceRefresh(!(idlePreferenceRefresh ?? false))}
+              >
+                {idlePreferenceRefresh && (
+                  <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-primary-foreground">✓</span>
+                )}
+              </button>
+              <div className="space-y-0.5">
+                <p className="text-sm font-medium">Experimental: idle 선호도 자동 갱신</p>
+                <p className="text-[11px] text-muted-foreground">
+                  IDLE_SCAN 동안 AGENTS.md, MEMORY.md, memories/*.md를 LLM에 보내 user-preferences.md를 갱신합니다. 기본값은 OFF입니다.
+                </p>
+              </div>
             </div>
+          )}
         </div>
       )}
       <section className="space-y-3 border-t border-border pt-4">

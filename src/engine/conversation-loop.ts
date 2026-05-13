@@ -31,6 +31,7 @@ import type { ToolRegistry } from "../tools/registry.js";
 import type { ToolTrustOrigin } from "../tools/types.js";
 import type { MemoryManager } from "../memory/memory-manager.js";
 import type { SettingsService } from "../data/settings-store.js";
+import type { ActiveRolePrompt } from "../data/role-presets.js";
 import type { HookTrustCommandOptions } from "../hooks/hook-trust-commands.js";
 import { AuditLogger } from "../audit/audit-logger.js";
 import type { RoutineEngine } from "../core/routine-engine.js";
@@ -889,6 +890,7 @@ export class ConversationLoop {
        */
       spawnDepth?: number;
       inputOrigin: ChatInputOrigin;
+      rolePrompt?: ActiveRolePrompt;
     },
   ): Promise<TurnResult> {
     const effectiveSessionId = options?.sessionIdOverride ?? this.sessionId;
@@ -1029,13 +1031,19 @@ export class ConversationLoop {
     // is optional on the prompt builder so legacy unit-test stubs without
     // skill overlay support keep working unchanged.
     this.deps.systemPromptBuilder.setActiveSessionId?.(this.sessionId);
+    this.deps.systemPromptBuilder.setActiveRolePrompt?.(options?.rolePrompt ?? null);
 
-    const systemPrompt = this.deps.systemPromptBuilder.build();
-    // Clear immediately so any nested or follow-up build() inside the same
-    // tick (or a concurrent runTurn that starts during the upcoming await)
-    // sees a clean slate.
-    this.deps.systemPromptBuilder.setOriginSource?.(null);
-    this.deps.systemPromptBuilder.setActiveSessionId?.(null);
+    let systemPrompt: string;
+    try {
+      systemPrompt = this.deps.systemPromptBuilder.build();
+    } finally {
+      // Clear immediately so any nested or follow-up build() inside the same
+      // tick (or a concurrent runTurn that starts during the upcoming await)
+      // sees a clean slate, even when prompt assembly throws.
+      this.deps.systemPromptBuilder.setOriginSource?.(null);
+      this.deps.systemPromptBuilder.setActiveSessionId?.(null);
+      this.deps.systemPromptBuilder.setActiveRolePrompt?.(null);
+    }
     // §4.5.2 step 6 — PROMPT_ASSEMBLE
     this.tracer.step("PROMPT_ASSEMBLE", { promptLen: systemPrompt.length, activePlugins: scope.activePluginIds.size });
     let result: Awaited<ReturnType<ConversationLoop["queryLoop"]>>;
