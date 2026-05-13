@@ -320,7 +320,7 @@ export function App() {
   // Small adapter callbacks that bridge hook outputs to ChatView / MainToolbar.
   const {
     handleLoadSession, isEntryStarred, handleFork, handleToggleStar,
-    handleAbort, handleFeedback, handleExport,
+    handleAbort, handleGuide, handleFeedback, handleExport,
   } = useChatActions({
     api, streaming, currentSessionId, entries, entryIndexToHistoryIndex,
     applyLoadedSession, truncateToEntry, sessionLoad, sessionFork,
@@ -892,6 +892,7 @@ export function App() {
             onRetryEffort={handleRetryEffort}
             isEntryStarred={isEntryStarred}
             onAbort={handleAbort}
+            onGuide={handleGuide}
             onFeedback={handleFeedback}
             subAgentSpawns={subAgentSpawns}
             loadedSkills={loadedSkills}
