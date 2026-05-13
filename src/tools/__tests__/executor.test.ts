@@ -703,6 +703,152 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
     expect(allowEntry).not.toHaveProperty("directoryAllowed");
   });
 
+  it("interactive auto-approve LOW in default mode silently allows mutating tool calls (issue #690)", async () => {
+    // P3 SOT change: previously, foreground reviewer auto-approve was
+    // gated to `exec mode === "auto"`. Issue #690 moves that gate to the
+    // `permissions.reviewer.interactive.autoApprove` setting so users
+    // can opt into "LOW silently allows" without flipping the entire
+    // exec mode. The test asserts:
+    //   1. With setInteractiveAutoApprove("low") + reviewer LOW verdict,
+    //      the tool executes without an approval modal (no `is_error`).
+    //   2. The audit entry records `decision: "allow"` with the reviewer
+    //      verdict (so the trail still shows what bypassed the modal).
+    const executeSpy = vi.fn(async () => "reviewed write");
+    const registry = new ToolRegistry();
+    registry.register(createDynamicTool({
+      name: "reviewed_write_probe_p3",
+      description: "P3 interactive auto-approve probe",
+      source: "plugin",
+      category: "write",
+      jsonSchema: {
+        type: "object",
+        properties: { payload: { type: "string" } },
+      },
+      execute: async (rawInput) => ({
+        output: await executeSpy(rawInput),
+        isError: false,
+      }),
+    }));
+    const dir = mkdtempSync(join(tmpdir(), "lvis-executor-interactive-p3-"));
+    try {
+      const permMgr = new PermissionManager(join(dir, "permissions.json"));
+      // Critically: exec mode is the safe DEFAULT, not "auto" — only the
+      // new interactive setting is the SOT for the foreground reviewer.
+      permMgr.setMode("default");
+      permMgr.setInteractiveAutoApprove("low");
+      permMgr.setReviewer({
+        classifier: {
+          classify: vi.fn(() => ({ level: "low", reason: "reviewer says safe" })),
+        },
+        cache: new VerdictCache(join(dir, "reviewer-cache.jsonl")),
+        deferredQueue: new DeferredQueue(join(dir, "deferred-queue.jsonl")),
+      });
+      const appendPermissionAuditEntry = vi.fn(async (entry: Record<string, unknown>) => ({
+        ...entry,
+        prevHash: "h",
+      }));
+      const auditLogger = {
+        log: vi.fn(),
+        isPermissionAuditChainReady: vi.fn(() => true),
+        assertPermissionAuditWritable: vi.fn(),
+        appendPermissionAuditEntry,
+      };
+      const executor = new ToolExecutor(
+        registry,
+        undefined,
+        permMgr,
+        undefined,
+        undefined,
+        undefined,
+        auditLogger as never,
+      );
+
+      const result = await executor.executeAll(
+        [{ id: "tu-p3-interactive", name: "reviewed_write_probe_p3", input: { payload: "ok" } }],
+        { sessionId: "sess-p3-interactive", permissionContext: userPermissionContext() },
+      );
+
+      // Tool ran silently — no modal, no is_error.
+      expect(result[0].is_error).toBeUndefined();
+      expect(executeSpy).toHaveBeenCalledOnce();
+      // Audit captures the reviewer verdict so the bypass is auditable.
+      expect(appendPermissionAuditEntry).toHaveBeenCalledWith(expect.objectContaining({
+        decision: "allow",
+        tool: "reviewed_write_probe_p3",
+        reviewer: expect.objectContaining({
+          level: "low",
+          reason: "reviewer says safe",
+        }),
+      }));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("interactive=off in default mode falls back to the user-approval modal even when reviewer would say LOW", async () => {
+    // Negative companion to the test above: with interactive=off, the
+    // foreground-auto reviewer lane MUST NOT trigger. The tool must
+    // surface to the approval gate (we simulate gate=null so the call
+    // hits the no-approval-gate fail-closed branch — proving the route
+    // never short-circuited via the reviewer).
+    const executeSpy = vi.fn(async () => "should-not-run");
+    const registry = new ToolRegistry();
+    registry.register(createDynamicTool({
+      name: "reviewed_write_probe_p3_off",
+      description: "P3 off-state probe",
+      source: "plugin",
+      category: "write",
+      jsonSchema: {
+        type: "object",
+        properties: { payload: { type: "string" } },
+      },
+      execute: async (rawInput) => ({
+        output: await executeSpy(rawInput),
+        isError: false,
+      }),
+    }));
+    const dir = mkdtempSync(join(tmpdir(), "lvis-executor-interactive-p3-off-"));
+    try {
+      const permMgr = new PermissionManager(join(dir, "permissions.json"));
+      permMgr.setMode("default");
+      permMgr.setInteractiveAutoApprove("off");
+      const classifySpy = vi.fn(() => ({ level: "low" as const, reason: "reviewer says safe" }));
+      permMgr.setReviewer({
+        classifier: { classify: classifySpy },
+        cache: new VerdictCache(join(dir, "reviewer-cache.jsonl")),
+        deferredQueue: new DeferredQueue(join(dir, "deferred-queue.jsonl")),
+      });
+      const auditLogger = {
+        log: vi.fn(),
+        isPermissionAuditChainReady: vi.fn(() => true),
+        assertPermissionAuditWritable: vi.fn(),
+        appendPermissionAuditEntry: vi.fn(async (entry: Record<string, unknown>) => ({ ...entry, prevHash: "h" })),
+      };
+      const executor = new ToolExecutor(
+        registry,
+        undefined,
+        permMgr,
+        undefined,
+        undefined,
+        undefined,
+        auditLogger as never,
+      );
+      const result = await executor.executeAll(
+        [{ id: "tu-p3-off", name: "reviewed_write_probe_p3_off", input: { payload: "ok" } }],
+        { sessionId: "sess-p3-off", permissionContext: userPermissionContext() },
+      );
+      // Tool MUST NOT have run: no approval gate is wired in this executor,
+      // and the reviewer is gated off, so the call should error/deny.
+      expect(executeSpy).not.toHaveBeenCalled();
+      expect(result[0].is_error).toBe(true);
+      // Reviewer MUST NOT have been consulted via the foreground-auto lane,
+      // since the gate now requires interactive!="off" or exec="auto".
+      expect(classifySpy).not.toHaveBeenCalled();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("records reviewer verdict on auto-reviewed LOW allow audit entries", async () => {
     const executeSpy = vi.fn(async () => "reviewed write");
     const registry = new ToolRegistry();
