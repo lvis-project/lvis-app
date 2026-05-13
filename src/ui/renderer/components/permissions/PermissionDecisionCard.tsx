@@ -49,6 +49,20 @@ export function ReviewRow({
   );
 }
 
+/**
+ * Round-7 architect MAJOR — canonical Korean label for a {@link RiskLevel}.
+ * Centralized here so every risk-display site (ToolApprovalDialog
+ * badge / reviewer-verdict row, DeferredQueuePanel header + review
+ * row, future surfaces) reads the same translation. Round-6 partial
+ * fix translated only the primary badge; the two remaining
+ * `level.toUpperCase()` callers leaked raw English to users.
+ */
+export function riskLevelKoLabel(level: RiskLevel): string {
+  if (level === "high") return "높은 위험";
+  if (level === "medium") return "중간 위험";
+  return "낮은 위험";
+}
+
 export function levelBadgeClass(level: RiskLevel) {
   if (level === "high") return "border-destructive text-destructive";
   if (level === "medium") return "border-warning text-warning";
