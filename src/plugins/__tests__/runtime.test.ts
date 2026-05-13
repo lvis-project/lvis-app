@@ -1134,6 +1134,59 @@ export default async function createPlugin(ctx) {
     return manifestPath;
   }
 
+  async function writeStartFailingPlugin(id: string): Promise<{ manifestPath: string; stoppedPath: string }> {
+    const pluginDir = join(installedDir, id);
+    await mkdir(pluginDir, { recursive: true });
+    const stoppedPath = join(pluginDir, "stopped.txt");
+    const methodName = `${id.replace(/[^a-zA-Z0-9_]/g, "_")}_ping`;
+    await writeFile(
+      join(pluginDir, "entry.mjs"),
+      `import { writeFile } from "node:fs/promises";
+export default async function createPlugin() {
+  return {
+    handlers: { "${methodName}": async () => "never" },
+    start: async () => { throw new Error("simulated start failure"); },
+    stop: async () => { await writeFile(${JSON.stringify(stoppedPath)}, "stopped", "utf-8"); },
+  };
+}
+`,
+      "utf-8",
+    );
+    const manifest = { id, name: id, version: "1.0.0", entry: "entry.mjs", tools: [methodName], description: "Start failure fixture.", publisher: "Test fixture" };
+    const manifestPath = join(pluginDir, "plugin.json");
+    await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
+    return { manifestPath, stoppedPath };
+  }
+
+  async function writeHostDisposerStartFailingPlugin(
+    id: string,
+  ): Promise<{ manifestPath: string; stoppedPath: string }> {
+    const pluginDir = join(installedDir, id);
+    await mkdir(pluginDir, { recursive: true });
+    const stoppedPath = join(pluginDir, "stopped.txt");
+    const methodName = `${id.replace(/[^a-zA-Z0-9_]/g, "_")}_ping`;
+    await writeFile(
+      join(pluginDir, "entry.mjs"),
+      `import { writeFile } from "node:fs/promises";
+export default async function createPlugin({ hostApi }) {
+  return {
+    handlers: { "${methodName}": async () => "never" },
+    start: async () => {
+      hostApi.onEvent("test.event", () => {});
+      throw new Error("simulated start failure");
+    },
+    stop: async () => { await writeFile(${JSON.stringify(stoppedPath)}, "stopped", "utf-8"); },
+  };
+}
+`,
+      "utf-8",
+    );
+    const manifest = { id, name: id, version: "1.0.0", entry: "entry.mjs", tools: [methodName], description: "Start failure fixture.", publisher: "Test fixture" };
+    const manifestPath = join(pluginDir, "plugin.json");
+    await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
+    return { manifestPath, stoppedPath };
+  }
+
   function makeRuntime(): PluginRuntime {
     return new PluginRuntime({
       hostRoot: testDir,
@@ -1141,6 +1194,136 @@ export default async function createPlugin(ctx) {
       pluginsRoot: installedDir,
     });
   }
+
+  function makeRuntimeWithTrackedHostDisposer(
+    disposed: string[],
+    disabled: string[],
+  ): PluginRuntime {
+    let runtime: PluginRuntime;
+    runtime = new PluginRuntime({
+      hostRoot: testDir,
+      registryPath,
+      pluginsRoot: installedDir,
+      onDisable: (pluginId) => disabled.push(pluginId),
+      createHostApi: (pluginId) => ({
+        registerKeywords: () => {},
+        emitEvent: () => {},
+        onEvent: () => {
+          const dispose = () => disposed.push(pluginId);
+          runtime.registerDisposer(pluginId, dispose);
+          return dispose;
+        },
+        getInstalledPluginIds: () => [],
+        onPluginsChanged: () => () => {},
+        getSecret: () => null,
+        callTool: async () => {
+          throw new Error("not available");
+        },
+        callLlm: async () => {
+          throw new Error("not available");
+        },
+        logEvent: () => {},
+        onShutdown: () => {},
+      }),
+    });
+    return runtime;
+  }
+
+  it("startAll stops a plugin instance whose start fails", async () => {
+    const { manifestPath, stoppedPath } = await writeStartFailingPlugin("p-start-fails");
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: "p-start-fails", manifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+    const runtime = makeRuntime();
+
+    await runtime.startAll();
+
+    expect(runtime.listPluginIds()).not.toContain("p-start-fails");
+    await expect(readFile(stoppedPath, "utf-8")).resolves.toBe("stopped");
+  });
+
+  it("startAll start failure cleans runtime-managed disposers before unload", async () => {
+    const { manifestPath, stoppedPath } = await writeHostDisposerStartFailingPlugin("p-start-disposer-fails");
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: "p-start-disposer-fails", manifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+    const disposed: string[] = [];
+    const disabled: string[] = [];
+    const runtime = makeRuntimeWithTrackedHostDisposer(disposed, disabled);
+
+    await runtime.startAll();
+
+    expect(runtime.listPluginIds()).not.toContain("p-start-disposer-fails");
+    expect(disposed).toEqual(["p-start-disposer-fails"]);
+    expect(disabled).toEqual(["p-start-disposer-fails"]);
+    await expect(readFile(stoppedPath, "utf-8")).resolves.toBe("stopped");
+  });
+
+  it("addPlugin stops a newly-instantiated plugin when start fails", async () => {
+    const existingPath = await writePlugin("p-existing");
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: "p-existing", manifestPath: existingPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+    const runtime = makeRuntime();
+    await runtime.startAll();
+
+    const { manifestPath, stoppedPath } = await writeStartFailingPlugin("p-new-broken");
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [
+          { id: "p-existing", manifestPath: existingPath, enabled: true },
+          { id: "p-new-broken", manifestPath, enabled: true },
+        ],
+      }),
+      "utf-8",
+    );
+
+    await expect(runtime.addPlugin("p-new-broken")).rejects.toThrow(/addPlugin failed/);
+    await expect(readFile(stoppedPath, "utf-8")).resolves.toBe("stopped");
+    expect(runtime.listPluginIds()).toEqual(["p-existing"]);
+  });
+
+  it("addPlugin restart path stops and disposes the new instance when start fails", async () => {
+    const existingPath = await writePlugin("p-restart-broken");
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: "p-restart-broken", manifestPath: existingPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+    const disposed: string[] = [];
+    const disabled: string[] = [];
+    const runtime = makeRuntimeWithTrackedHostDisposer(disposed, disabled);
+    await runtime.startAll();
+
+    const { stoppedPath } = await writeHostDisposerStartFailingPlugin("p-restart-broken");
+
+    await expect(runtime.addPlugin("p-restart-broken")).rejects.toThrow(/addPlugin failed/);
+
+    expect(runtime.listPluginIds()).not.toContain("p-restart-broken");
+    expect(disposed).toEqual(["p-restart-broken"]);
+    expect(disabled).toEqual(["p-restart-broken", "p-restart-broken"]);
+    await expect(readFile(stoppedPath, "utf-8")).resolves.toBe("stopped");
+  });
 
   it("setting plugin A config does not restart plugin B (single-plugin lifecycle)", async () => {
     // Two plugins both loaded; restartPlugin('p-a') must not affect p-b.
