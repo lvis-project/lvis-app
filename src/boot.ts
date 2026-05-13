@@ -105,10 +105,7 @@ import { registerPluginEventBridge } from "./boot/steps/ipc-bridge.js";
 import { wireReleasePrep, wireUpdateCheck } from "./boot/steps/post-boot.js";
 import { wireReviewerAgent } from "./boot/steps/reviewer-wiring.js";
 import { wireHookSystem } from "./boot/steps/hook-system-wiring.js";
-import {
-  readPermissionSettings,
-  migratePermissionSettings,
-} from "./permissions/permission-settings-store.js";
+import { readPermissionSettings } from "./permissions/permission-settings-store.js";
 import { createProvider, secretKeyFor } from "./engine/llm/provider-factory.js";
 import type { LLMProvider, LLMVendor } from "./engine/llm/types.js";
 import {
@@ -361,27 +358,6 @@ export async function bootstrap(
   // §6.3: PermissionManager (Layer 2-3).
   const permissionManager = await createPermissionManager();
   toolRegistry.setDenyRules(permissionManager.getVisibilityDenyRules());
-
-  // Issue #690 follow-up — idempotent one-shot permission settings
-  // migration. Runs BEFORE wireReviewerAgent() so the wiring step reads
-  // the post-migration `reviewer.interactive.autoApprove` value (legacy
-  // `executionMode === "auto"` users gain `interactive.autoApprove = "low"`
-  // here, preserving the LOW-silent-allow UX they had before #690).
-  // `getMode()` is sync because PermissionManager has already loaded
-  // `~/.lvis/permissions.json` inside `createPermissionManager()` above.
-  try {
-    const status = await migratePermissionSettings(permissionManager.getMode());
-    if (status.justApplied) {
-      log.info(
-        `permissions: schemaVersion migrated → v${status.schemaVersion} ` +
-        `(${status.changes.join("; ")})`,
-      );
-    }
-  } catch (err) {
-    log.warn(
-      `permissions: schemaVersion migration failed: ${(err as Error).message}`,
-    );
-  }
 
   // Permission policy P4 — Layer 5 reviewer agent wiring (Phase 3 deferral resolution).
   // Reads `permissions.reviewer` from `~/.lvis/settings.json` and binds the

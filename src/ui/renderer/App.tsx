@@ -40,7 +40,6 @@ import { useSessions } from "./hooks/use-sessions.js";
 import { useMarketplaceUpdates } from "./hooks/use-marketplace-updates.js";
 import { useBootstrapStatus } from "./hooks/use-bootstrap-status.js";
 import { MarketplaceUpdateBanner } from "./components/MarketplaceUpdateBanner.js";
-import { PermissionMigrationBanner } from "./components/PermissionMigrationBanner.js";
 import { BootstrapStatusBanner } from "./components/BootstrapStatusBanner.js";
 import { DevConsoleToggle } from "./components/DevConsoleToggle.js";
 import { DropZoneOverlay } from "./components/DropZoneOverlay.js";
@@ -813,7 +812,6 @@ export function App() {
             onDismiss={dismissMarketplaceUpdates}
             onUpdate={installPlugin}
           />
-          <PermissionMigrationBanner onOpenSettings={onOpenSettings} />
           {fallbackToast && (
             <div className="bg-warning text-warning-foreground text-xs px-4 py-2 border-b border-warning">
               {fallbackToast}

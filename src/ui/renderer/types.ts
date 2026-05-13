@@ -676,18 +676,6 @@ export type LvisPermissionApi = {
     | { ok: true; active: HookTrustRow[]; disabled: HookTrustRow[]; totalDisabled: number }
     | { ok: false; error: string }
   >;
-  /**
-   * Issue #690 follow-up — permission settings migration status.
-   *
-   * `appliedAt` is present iff the one-shot v1→v2 migrator ran on this
-   * install. The renderer uses it to surface a one-time
-   * "권한 정책이 업데이트되었습니다" banner. `schemaVersion` reflects the
-   * post-migration version; absent ↔ never migrated (fresh install).
-   */
-  getMigrationStatus: () => Promise<
-    | { ok: true; schemaVersion?: number; appliedAt?: string }
-    | { ok: false; error: string }
-  >;
   /** Permission policy — `/permission dir ...` slash dispatch. */
   dirDispatch: (
     rawArgs: string,
