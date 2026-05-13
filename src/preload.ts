@@ -360,7 +360,6 @@ const api = {
   memoryDeleteEntry: async (filename: string) => ipcRenderer.invoke("lvis:memory:entries:delete", filename),
   memorySearchEntries: async (query: string) => ipcRenderer.invoke("lvis:memory:entries:search", query),
   memoryGetIndex: async () => ipcRenderer.invoke("lvis:memory:index:get") as Promise<string>,
-  memoryUpdateIndex: async (content: string) => ipcRenderer.invoke("lvis:memory:index:update", content),
   memoryUpdateIndexIfUnchanged: async (expectedContent: string, nextContent: string) =>
     ipcRenderer.invoke("lvis:memory:index:update-if-unchanged", expectedContent, nextContent) as Promise<boolean>,
   memoryUpdateIndexSections: async (sections: { urgentMemory?: string; references?: string }) =>

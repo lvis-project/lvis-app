@@ -75,6 +75,14 @@ function normalizeRolePrompt(
   };
 }
 
+function rolePromptFromUserMessage(
+  message: GenericMessage | undefined,
+): NonNullable<ChatSendPayload["rolePrompt"]> | undefined {
+  if (!message || message.role !== "user") return undefined;
+  const normalized = normalizeRolePrompt("user-keyboard", message.meta?.activeRolePrompt);
+  return normalized.ok ? normalized.rolePrompt : undefined;
+}
+
 function entryOrdinalToHistoryIndex(history: GenericMessage[], ordinal: number): number {
   if (ordinal < 0) return -1;
   let count = 0;
@@ -261,6 +269,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
   const streamTurn = async (
     input: string,
     attachments?: import("../../engine/llm/types.js").UserContentPart[],
+    rolePrompt?: ChatSendPayload["rolePrompt"],
   ) => {
     const win = getMainWindow();
     const streamId = allocateStreamId();
@@ -270,9 +279,11 @@ export function registerChatHandlers(deps: IpcDeps): void {
       win?.webContents,
       "lvis:chat:stream",
       streamId,
-      attachments && attachments.length > 0
-        ? { ...streamTurnOptions, attachments }
-        : streamTurnOptions,
+      {
+        ...streamTurnOptions,
+        ...(attachments && attachments.length > 0 ? { attachments } : {}),
+        ...(rolePrompt ? { rolePrompt } : {}),
+      },
     ));
   };
 
@@ -530,8 +541,9 @@ export function registerChatHandlers(deps: IpcDeps): void {
     const history = conversationLoop.getHistory().getMessages() as GenericMessage[];
     const realIdx = entryOrdinalToHistoryIndex(history, messageIndex);
     if (realIdx < 0) return { ok: false, error: "index-out-of-range" };
+    const rolePrompt = rolePromptFromUserMessage(history[realIdx]);
     conversationLoop.getHistory().truncate(realIdx);
-    const result = await streamTurn(newText);
+    const result = await streamTurn(newText, undefined, rolePrompt);
     return { ok: true, result };
   });
 
@@ -580,6 +592,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
     const lastUserAttachments = Array.isArray(lastUser.content)
       ? lastUser.content.filter((p) => p.type !== "text")
       : undefined;
+    const rolePrompt = rolePromptFromUserMessage(lastUser);
     conversationLoop.getHistory().truncate(lastUserIdx);
 
     const prevLlm = settingsService.get("llm");
@@ -598,7 +611,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
     });
     conversationLoop.refreshProvider();
     try {
-      const result = await streamTurn(lastUserText, lastUserAttachments);
+      const result = await streamTurn(lastUserText, lastUserAttachments, rolePrompt);
       return { ok: true, result };
     } finally {
       await settingsService.patch({
@@ -724,10 +737,6 @@ export function registerChatHandlers(deps: IpcDeps): void {
   ipcMain.handle("lvis:memory:index:get", (e) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:index:get", e); return UNAUTHORIZED_FRAME; }
     return memoryManager.getMemoryIndex();
-  });
-  ipcMain.handle("lvis:memory:index:update", async (e, content: string) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:index:update", e); return UNAUTHORIZED_FRAME; }
-    return memoryManager.updateMemoryIndex(content);
   });
   ipcMain.handle("lvis:memory:index:update-if-unchanged", async (e, expectedContent: string, nextContent: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:index:update-if-unchanged", e); return UNAUTHORIZED_FRAME; }

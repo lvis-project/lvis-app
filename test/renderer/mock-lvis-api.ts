@@ -252,7 +252,6 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     memoryDeleteEntry: vi.fn(async () => undefined),
     memorySearchEntries: vi.fn(async () => []),
     memoryGetIndex: vi.fn(async () => memoryIndex),
-    memoryUpdateIndex: vi.fn(async () => undefined),
     memoryUpdateIndexIfUnchanged: vi.fn(async () => true),
     memoryUpdateIndexSections: vi.fn(async () => ({ ok: true })),
     memoryListSessions: vi.fn(async () => []),
