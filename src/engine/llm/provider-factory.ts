@@ -24,7 +24,10 @@ const COPILOT_BASE_URL = "https://models.github.ai/inference";
 let adapterModuleP: Promise<typeof import("./vercel/adapter.js")> | null = null;
 function loadAdapterModule(): Promise<typeof import("./vercel/adapter.js")> {
   if (!adapterModuleP) {
-    adapterModuleP = import("./vercel/adapter.js");
+    adapterModuleP = import("./vercel/adapter.js").catch((err) => {
+      adapterModuleP = null;
+      throw err;
+    });
   }
   return adapterModuleP;
 }
@@ -42,19 +45,24 @@ class LazyVercelProvider implements LLMProvider {
         cfg.vendor === "copilot"
           ? (cfg.baseUrl ?? COPILOT_BASE_URL)
           : cfg.baseUrl;
-      this.innerP = loadAdapterModule().then(
-        ({ VercelUnifiedProvider }) =>
-          new VercelUnifiedProvider(
-            cfg.vendor,
-            cfg.apiKey,
-            baseUrl,
-            undefined,
-            {
-              vertexProject: cfg.vertexProject,
-              vertexLocation: cfg.vertexLocation,
-            },
-          ),
-      );
+      this.innerP = loadAdapterModule()
+        .then(
+          ({ VercelUnifiedProvider }) =>
+            new VercelUnifiedProvider(
+              cfg.vendor,
+              cfg.apiKey,
+              baseUrl,
+              undefined,
+              {
+                vertexProject: cfg.vertexProject,
+                vertexLocation: cfg.vertexLocation,
+              },
+            ),
+        )
+        .catch((err) => {
+          this.innerP = null;
+          throw err;
+        });
     }
     return this.innerP;
   }
