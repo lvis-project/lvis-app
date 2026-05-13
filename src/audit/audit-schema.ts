@@ -192,40 +192,6 @@ export interface AuditManifestViolation extends AuditCommon {
   attemptedOperation: string;
 }
 
-/**
- * Permission settings v1→v2 migration record (issue #690 follow-up).
- *
- * Emitted exactly once per process when {@link migratePermissionSettings}
- * (or the boot step that wraps it) decides a behaviour-changing migration
- * applies — i.e. when `previous` is non-empty. Schema-only bumps do NOT
- * emit this row; they leave a `kind: "settings.migration.schema-bump"`
- * log line instead.
- *
- * `changes` is a free-form human-readable list of `"a.b.c: X → Y"`
- * lines for forensic correlation. `previous` is the structured
- * pre-migration snapshot (used by future rollback procedures).
- */
-export interface AuditSettingsMigration extends AuditCommon {
-  decision: "settings_migration";
-  schemaVersion: number;
-  appliedSchemaVersion: number;
-  appliedAt: string;
-  legacyExecutionMode: PermissionMode | null;
-  changes: string[];
-  previous: Record<string, unknown> | null;
-}
-
-/**
- * Permission settings migration error — emitted when the migrator
- * throws (corrupt file, IO error, etc.). Kept separate from the
- * success row so forensics can filter cleanly.
- */
-export interface AuditSettingsMigrationError extends AuditCommon {
-  decision: "settings_migration_error";
-  error: string;
-  legacyExecutionMode: PermissionMode | null;
-}
-
 export type PermissionAuditEntry =
   | AuditAllow
   | AuditAsk
@@ -233,9 +199,7 @@ export type PermissionAuditEntry =
   | AuditDeferred
   | AuditDeferredResolve
   | AuditModeChange
-  | AuditManifestViolation
-  | AuditSettingsMigration
-  | AuditSettingsMigrationError;
+  | AuditManifestViolation;
 
 export type PermissionAuditEntryInput = PermissionAuditEntry extends infer Entry
   ? Entry extends PermissionAuditEntry

@@ -59,7 +59,7 @@ export const PERMISSIONS = {
   auditVerify: "lvis:permissions:audit-verify",
   hookTrustList: "lvis:permissions:hook-trust-list",
   manifestViolation: "lvis:permissions:manifest-violation",
-  getMigrationStatus: "lvis:permissions:get-migration-status",
+  migrationStatus: "lvis:permissions:migration-status",
 } as const;
 
 export const SETTINGS = {

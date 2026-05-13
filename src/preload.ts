@@ -656,7 +656,7 @@ const api = {
      *  Returns `{ ok, schemaVersion?, appliedAt? }`. Used by ChatView
      *  migration banner to show a one-shot "권한 정책이 업데이트되었습니다" UI. */
     getMigrationStatus: async () =>
-      ipcRenderer.invoke(PERMISSIONS.getMigrationStatus),
+      ipcRenderer.invoke(PERMISSIONS.migrationStatus),
     /** Permission policy — `/permission dir ...` slash dispatch via IPC. */
     dirDispatch: async (rawArgs: string) =>
       ipcRenderer.invoke(PERMISSIONS.dirDispatch, { rawArgs, intent: ipcUserKeyboardIntent() }),

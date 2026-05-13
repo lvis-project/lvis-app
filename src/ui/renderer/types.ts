@@ -679,22 +679,13 @@ export type LvisPermissionApi = {
   /**
    * Issue #690 follow-up — permission settings migration status.
    *
-   * `appliedAt` is present iff the migrator wrote a BEHAVIOUR-CHANGING
-   * migration on this install. Schema-only version bumps leave it
-   * absent — the renderer banner uses `appliedAt` (and the derived
-   * `behaviourChanged` boolean) as its visibility predicate so users
-   * are not cry-wolf'd by file-touch noise.
-   *
-   * `schemaVersion` reflects the post-migration version of the
-   * provenance file; absent ↔ never migrated (fresh install).
+   * `appliedAt` is present iff the one-shot v1→v2 migrator ran on this
+   * install. The renderer uses it to surface a one-time
+   * "권한 정책이 업데이트되었습니다" banner. `schemaVersion` reflects the
+   * post-migration version; absent ↔ never migrated (fresh install).
    */
   getMigrationStatus: () => Promise<
-    | {
-        ok: true;
-        schemaVersion?: number;
-        appliedAt?: string;
-        behaviourChanged: boolean;
-      }
+    | { ok: true; schemaVersion?: number; appliedAt?: string }
     | { ok: false; error: string }
   >;
   /** Permission policy — `/permission dir ...` slash dispatch. */
