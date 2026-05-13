@@ -259,6 +259,10 @@ function approvalReviewRows(
       value: weak
         ? `⚠ ${cap.kind} (${cap.confidence}, ${cap.platform}) — ${cap.reason}`
         : `${cap.kind} (${cap.confidence}, ${cap.platform})`,
+      // `monospace: true` so the row renders inside the `<pre>` branch
+      // (which is where the `data-testid` lands per dialog convention).
+      // The value is already a single grep-stable line.
+      monospace: true,
       testId: "tool-approval-sandbox",
     });
   }

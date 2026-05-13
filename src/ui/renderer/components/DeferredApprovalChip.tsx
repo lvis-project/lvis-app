@@ -17,14 +17,14 @@
  *     be a footgun (#690 spec: 1회성 승인 — single target). The user
  *     must use the DeferredQueuePanel for multi-entry triage.
  *   - Trigger on text shorter than 1 char, longer than the matcher's
- *     cap (40 chars), or with sentence breaks — that's enforced inside
- *     {@link detectApprovalIntent}.
+ *     cap (24 chars), or with sentence breaks / question marks — that's
+ *     enforced inside {@link detectApprovalIntent}.
  *
  * Bind: this component subscribes to `permission.deferredList` /
  * `permission.onDeferredPending` itself; ChatView only passes the
  * draft text down.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "../../../components/ui/button.js";
 import {
   detectApprovalIntent,
@@ -45,6 +45,12 @@ export function DeferredApprovalChip({
 }: DeferredApprovalChipProps) {
   const [pending, setPending] = useState<DeferredQueueEntry[]>([]);
   const [busy, setBusy] = useState(false);
+  // Round-2 code-reviewer MAJOR — synchronous re-entry guard. `useState`
+  // updates batch + flush asynchronously in React 18, so a fast double
+  // click could fire two `handle()` invocations before the first
+  // `setBusy(true)` committed. A ref check that flips synchronously
+  // closes the window.
+  const inFlight = useRef(false);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
@@ -85,10 +91,12 @@ export function DeferredApprovalChip({
   const decision = intent.kind === "approve" ? "approved" : "rejected";
 
   const handle = async () => {
-    if (busy) return;
+    if (inFlight.current || busy) return;
+    inFlight.current = true;
     const api = window.lvis?.permission?.deferredResolve;
     const listApi = window.lvis?.permission?.deferredList;
     if (!api) {
+      inFlight.current = false;
       setError("deferred-resolve API 사용 불가");
       return;
     }
@@ -135,24 +143,33 @@ export function DeferredApprovalChip({
     } catch (err) {
       setError(err instanceof Error ? err.message : "deferred-resolve failed");
     } finally {
+      inFlight.current = false;
       setBusy(false);
     }
   };
 
-  // Round-1 architect MAJOR-2 — surface the entry source so the user
-  // sees whether they're approving a builtin host tool, a plugin tool,
-  // or an MCP-bridged tool. Without this, "허용해줘" could quietly
-  // approve a plugin's background routine the user has forgotten.
-  const sourceLabel =
+  // Round-1 architect MAJOR-2 / round-2 code-reviewer MINOR — surface
+  // the entry source so the user sees whether they're approving a
+  // builtin host tool, a plugin tool, or an MCP-bridged tool. The
+  // label is rendered with an aria-friendly source badge (see JSX
+  // below) so screen readers announce "플러그인 도구" / "MCP 도구"
+  // rather than the bracketed token.
+  const sourceBadgeText =
     target.source === "plugin"
-      ? "[plugin] "
+      ? "plugin"
       : target.source === "mcp"
-        ? "[mcp] "
-        : "";
-  const label =
+        ? "mcp"
+        : null;
+  const sourceBadgeAriaLabel =
+    target.source === "plugin"
+      ? "플러그인 도구"
+      : target.source === "mcp"
+        ? "MCP 도구"
+        : null;
+  const labelTail =
     intent.kind === "approve"
-      ? `${sourceLabel}'${target.toolName}' 호출 허용?`
-      : `${sourceLabel}'${target.toolName}' 호출 거절?`;
+      ? `'${target.toolName}' 호출 허용?`
+      : `'${target.toolName}' 호출 거절?`;
   const action = intent.kind === "approve" ? "허용" : "거절";
 
   return (
@@ -168,7 +185,15 @@ export function DeferredApprovalChip({
       />
       <span className="flex-1 min-w-0">
         <span className="font-medium">승인 의도 감지: </span>
-        <span className="text-muted-foreground">{label}</span>
+        {sourceBadgeText && sourceBadgeAriaLabel ? (
+          <span
+            aria-label={sourceBadgeAriaLabel}
+            className="mr-1 rounded bg-muted px-1 py-0.5 text-[10px] uppercase text-muted-foreground"
+          >
+            <span aria-hidden="true">{sourceBadgeText}</span>
+          </span>
+        ) : null}
+        <span className="text-muted-foreground">{labelTail}</span>
       </span>
       <Button
         size="sm"

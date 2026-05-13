@@ -167,6 +167,63 @@ describe("approval-intent — NFC normalization (#690 round-1 code-reviewer MINO
   });
 });
 
+describe("approval-intent — modal contraction negation (#690 round-2 critic CRITICAL)", () => {
+  // Round-2 critic CRITICAL: the round-1 fix added don't/can't/never/cannot
+  // but missed the modal-contraction family that English speakers use far
+  // more often. Pin all major forms now so a future refactor cannot
+  // regress.
+  it.each([
+    // approve-side negation
+    ["shouldn't approve", "none"],
+    ["wouldn't approve", "none"],
+    ["couldn't approve", "none"],
+    ["didn't approve", "none"],
+    ["won't approve", "none"],
+    ["I shouldn't allow", "none"],
+    ["I wouldn't allow", "none"],
+    // reject-side prefix negation
+    ["shouldn't cancel", "none"],
+    ["wouldn't cancel", "none"],
+    ["couldn't cancel", "none"],
+    ["didn't reject", "none"],
+    ["won't cancel", "none"],
+    ["I shouldn't cancel", "none"],
+    // do/does/did + not full forms
+    ["did not approve", "none"],
+    ["does not allow", "none"],
+    ["would not cancel", "none"],
+  ])("'%s' → %s", (text, expected) => {
+    expect(detectApprovalIntent(text).kind).toBe(expected);
+  });
+});
+
+describe("approval-intent — hesitation tokens (#690 round-2 critic MAJOR)", () => {
+  // Round-2 critic MAJOR — "잠시만 기다려 허용해 주세요" should be
+  // ambiguous (user is verbalizing process, not directing approval).
+  it.each([
+    "잠시만 허용해",
+    "기다려 허용해",
+    "아직 허용",
+    "wait approve",
+    "hold on approve",
+    "not yet approve",
+  ])("hesitation + approve → none: %s", (text) => {
+    expect(detectApprovalIntent(text).kind).toBe("none");
+  });
+});
+
+describe("approval-intent — uppercase + locale stability (#690 round-2)", () => {
+  // Round-2 critic MINOR — pin uppercase reject behaviour. The matcher
+  // lowercases the text before stem matching; this test ensures the
+  // pipeline stays case-insensitive at the boundary.
+  it.each(["ABORT", "REJECT", "CANCEL", "Stop"])(
+    "uppercase reject verb '%s' → reject",
+    (text) => {
+      expect(detectApprovalIntent(text).kind).toBe("reject");
+    },
+  );
+});
+
 describe("approval-intent — false-positive defence (#690 round-1 security/critic)", () => {
   // Round-1 reviewers raised concern about bare-verb 허용 matching
   // request phrases. Test the canonical cases — at minimum the

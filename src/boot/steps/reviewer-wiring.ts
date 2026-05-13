@@ -205,6 +205,25 @@ export function wireReviewerAgent(deps: WireReviewerDeps): WireReviewerResult {
   // PermissionManager so its gate can opt-in to the foreground reviewer
   // lane without re-reading settings on every tool call.
   deps.permissionManager.setInteractiveAutoApprove(settings.interactive.autoApprove);
+
+  // Round-2 architect + critic + security MAJOR — migration breadcrumb
+  // for users upgrading from a pre-PR install where `mode="auto"` was
+  // the standalone trigger for foreground auto-approve. Post-PR the
+  // SOT moved to `permissions.reviewer.interactive.autoApprove`; if a
+  // user's existing `mode="auto"` lands without the new field, every
+  // mutating tool now hits a modal. Log a one-line warning so the user
+  // can flip the setting (`/permission reviewer interactive low`) and
+  // see the breadcrumb in the log instead of silently wondering.
+  if (
+    deps.permissionManager.getMode() === "auto" &&
+    settings.interactive.autoApprove === "off"
+  ) {
+    log.warn(
+      "legacy exec mode=auto + reviewer.interactive.autoApprove=off — " +
+      "foreground auto-approve disabled. Use `/permission reviewer interactive low` " +
+      "to re-enable LOW-verdict silent allow.",
+    );
+  }
   return { classifier, cache, deferredQueue, appliedSettings: settings };
 }
 
