@@ -524,11 +524,20 @@ export class PermissionManager {
       approvalCacheKey: input.approvalCacheKey,
       finalInput: input.finalInput,
     };
+    // Round-1 code-reviewer MINOR — include sandbox capability in the
+    // cache scope so a future change to OS isolation (bubblewrap on
+    // Linux, sandbox-exec on macOS) invalidates stale verdicts that
+    // were produced under different sandbox assumptions. Until OS
+    // detection lands this is a stable constant, so the scope is
+    // unchanged in practice — but the wiring is correct ahead of time.
+    const sandboxScope = detectSandboxCapability();
     const cacheCtx = {
       allowedDirectories: input.allowedDirectories,
       scope: {
         ...(routineScope ?? {}),
         reviewer: this.reviewerCacheScope,
+        sandboxKind: sandboxScope.kind,
+        sandboxConfidence: sandboxScope.confidence,
       },
     };
 
@@ -696,17 +705,24 @@ export class PermissionManager {
         };
       case "ask":
       default: {
-        // Issue #690 — foreground reviewer auto-approve is gated by EITHER:
-        //   (a) legacy `auto` exec mode (preserves previous behaviour), or
-        //   (b) the new `interactive.autoApprove` setting being non-"off".
-        // Both apply only to mutating categories (write/shell/network)
-        // in non-headless flows. headless flow has its own reviewer lane
-        // and never enters this branch.
+        // Issue #690 — foreground reviewer auto-approve gating.
+        //
+        // Round-1 critic MAJOR-2: `interactive.autoApprove` is the SOT
+        // for foreground-auto opt-in. The legacy `auto` exec mode is no
+        // longer a standalone opt-in — it must be paired with an
+        // explicit `interactive` setting. The PermissionsTab UI couples
+        // both flips so selecting `auto` in the UI still produces the
+        // legacy UX.
+        //
+        // Reviewer wiring is NOT a gate here — when interactive opts in
+        // but the reviewer is not wired,
+        // {@link ToolExecutor.dispatchReviewerForInteractiveAuto}
+        // returns a clear "reviewer unavailable" ask, preserving the
+        // pre-PR fail-safe behaviour.
         const mutating = category === "write" || category === "shell" || category === "network";
-        const autoApproveOptIn =
-          this.mode === "auto" || this.interactiveAutoApprove !== "off";
+        const interactiveOptIn = this.interactiveAutoApprove !== "off";
         const enableForegroundAutoReviewer =
-          context.headless !== true && mutating && autoApproveOptIn;
+          context.headless !== true && mutating && interactiveOptIn;
         return {
           decision: "ask",
           reason: `사용자 컨펌 필요 (category: ${category}, trust: ${trust})`,
