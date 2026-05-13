@@ -1003,8 +1003,18 @@ export class ConversationLoop {
       attachmentParts.length > 0
         ? [{ type: "text" as const, text: baseText }, ...attachmentParts]
         : baseText;
+    const rolePromptMeta = options?.rolePrompt?.systemPromptAdd.trim()
+      ? {
+          name: options.rolePrompt.name,
+          systemPromptAdd: options.rolePrompt.systemPromptAdd,
+        }
+      : undefined;
 
-    this.history.append({ role: "user", content: userContent });
+    this.history.append({
+      role: "user",
+      content: userContent,
+      ...(rolePromptMeta ? { meta: { activeRolePrompt: rolePromptMeta } } : {}),
+    });
     // §4.5.2 step 5 — HISTORY_APPEND
     this.tracer.step("HISTORY_APPEND", { role: "user", historySize: this.history.length });
 

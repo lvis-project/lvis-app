@@ -217,6 +217,7 @@ describe("preload — plugin webview asset URLs", () => {
     const api = await loadLvisApi();
 
     expect(typeof api["memoryGetIndex"]).toBe("function");
+    expect(api["memoryUpdateIndex"]).toBeUndefined();
     await (api["memoryGetIndex"] as () => Promise<unknown>)();
 
     expect(mockInvoke).toHaveBeenCalledWith("lvis:memory:index:get");
@@ -225,7 +226,6 @@ describe("preload — plugin webview asset URLs", () => {
   it.each([
     ["memoryGetAgentsMd", "lvis:memory:agents-md:get"],
     ["memoryUpdateAgentsMd", "lvis:memory:agents-md:update", "# Agents"],
-    ["memoryUpdateIndex", "lvis:memory:index:update", "# Memory"],
     ["memoryUpdateIndexSections", "lvis:memory:index:sections:update", { urgentMemory: "Keep this." }],
     ["memoryGetLvisMd", "lvis:memory:lvis-md:get"],
     ["memoryUpdateLvisMd", "lvis:memory:lvis-md:update", "# Agents"],
