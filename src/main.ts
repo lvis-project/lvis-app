@@ -36,6 +36,7 @@ import { findLvisProtocolUri, parsePluginAuthUri } from "./main/lvis-protocol.js
 import { buildDevProtocolArgs } from "./main/electron-protocol-args.js";
 import { devNoSandboxAllowed, setIsPackaged } from "./boot/dev-flags.js";
 import { emitEvent as emitHostEvent } from "./boot/types.js";
+import { resolveAppIconPath } from "./main/app-icon.js";
 import { WindowManager, type DetachedWindowOptions } from "./main/window-manager.js";
 import { createLogger } from "./lib/logger.js";
 import { LVIS_LOGO_PATH, LVIS_LOGO_VIEW_BOX } from "./shared/lvis-logo.js";
@@ -106,6 +107,13 @@ if (process.env.LVIS_DISABLE_AAD_SSO !== "1") {
 // generic "Electron" identity. Issue #260 NotificationService relies on this.
 // Safe to call on all platforms; non-Windows treats it as a no-op.
 app.setAppUserModelId("com.lge.lvis");
+
+function applyRuntimeAppIcon() {
+  const iconPath = resolveAppIconPath();
+  if (iconPath && process.platform === "darwin" && app.dock) {
+    app.dock.setIcon(iconPath);
+  }
+}
 
 // Phase 1 trust-hardening — strip LVIS_DEV* from process.env in packaged
 // builds before any preload, renderer, or worker inherits it. Without this
@@ -507,6 +515,7 @@ function openSettingsWindow(initialTabInput: unknown = "llm"): BrowserWindow {
     minHeight: SETTINGS_WINDOW_MIN_HEIGHT,
     show: false,
     title: "LVIS 설정",
+    icon: resolveAppIconPath(),
     autoHideMenuBar: true,
     webPreferences: {
       contextIsolation: true,
@@ -811,6 +820,7 @@ function createWindow() {
     minWidth: MAIN_WINDOW_MIN_WIDTH,
     minHeight: MAIN_WINDOW_MIN_HEIGHT,
     show: true,
+    icon: resolveAppIconPath(),
     autoHideMenuBar: false,
     // ─── Cross-platform titlebar ─────────────────────────────────────────
     // macOS: keep native frame so traffic-light buttons render via the OS;
@@ -1093,6 +1103,7 @@ if (!gotSingleInstanceLock) {
   // whenReady is scoped to the primary-instance branch — second-instance
   // processes must NOT run main(). See the comment on `app.quit()` above.
   app.whenReady().then(() => {
+    applyRuntimeAppIcon();
     installHtmlPreviewPartitionBlock();
     void main().catch((error) => {
       log.error({ err: error }, "bootstrap failed");
