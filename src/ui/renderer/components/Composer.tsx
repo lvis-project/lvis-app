@@ -64,6 +64,13 @@ export interface ComposerProps {
   openExternal?: (path: string) => Promise<unknown>;
   onSend: (intent: UserKeyboardIntentSnapshot) => void;
   onAbort?: () => void;
+  /**
+   * Mid-stream "방향 지시" — non-interrupting guide utterance. Wired only
+   * when the parent supports it (App-level chatGuide). The composer shows
+   * a dedicated button + accepts Ctrl/Cmd+Enter while streaming. Empty
+   * text suppresses the action (composer renders the button as disabled).
+   */
+  onGuide?: () => void;
   streaming?: boolean;
   disabled?: boolean;
   placeholder?: string;
@@ -90,6 +97,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     openExternal,
     onSend,
     onAbort,
+    onGuide,
     streaming = false,
     disabled = false,
     placeholder,
@@ -248,12 +256,22 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       }
 
       if (e.key === "Enter" && !e.shiftKey) {
+        // Ctrl/Cmd+Enter while streaming = "guide" (non-interrupting,
+        // queued direction adjustment). Falls through to the normal
+        // Enter (= start / abort-then-start) when not streaming or when
+        // no guide handler is wired.
+        if (streaming && onGuide && (e.ctrlKey || e.metaKey)) {
+          e.preventDefault();
+          if (text.trim().length === 0) return;
+          onGuide();
+          return;
+        }
         e.preventDefault();
         if (disabled) return;
         onSend(captureUserKeyboardIntent());
       }
     },
-    [captureUserKeyboardIntent, disabled, streaming, onSend, text, onTextChange],
+    [captureUserKeyboardIntent, disabled, streaming, onSend, onGuide, text, onTextChange],
   );
 
   const isFull = liveAttachments.length >= ATTACH_MAX_COUNT;
@@ -301,6 +319,19 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           className="min-w-0 flex-1 resize-none min-h-[88px] border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none rounded-none text-xs placeholder:text-xs px-4 py-3"
         />
 
+        {streaming && onGuide && (
+          <Button
+            variant="secondary"
+            onClick={onGuide}
+            disabled={text.trim().length === 0}
+            data-testid="composer-guide-button"
+            className="shrink-0 rounded-none self-stretch !h-auto w-[68px] px-0 text-xs font-bold"
+            aria-label="방향 지시 (현재 응답 유지)"
+            title="방향 지시 — 응답 유지, 다음 단계에 반영 (Ctrl/Cmd+Enter)"
+          >
+            GUIDE
+          </Button>
+        )}
         {streaming && (
           <Button
             variant="destructive"

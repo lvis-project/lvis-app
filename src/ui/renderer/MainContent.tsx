@@ -38,6 +38,7 @@ export interface MainContentProps {
   onRetryEffort: Parameters<typeof ChatView>[0]["onRetryEffort"];
   isEntryStarred: (entryIdx: number) => string | null;
   onAbort: () => Promise<void>;
+  onGuide: Parameters<typeof ChatView>[0]["onGuide"];
   onFeedback: Parameters<typeof ChatView>[0]["onFeedback"];
   // workflow tool state (lifted from ChatView to survive navigation)
   subAgentSpawns: Parameters<typeof ChatView>[0]["subAgentSpawns"];
@@ -90,6 +91,7 @@ function HomeChatPane(props: MainContentProps) {
         onRetryEffort={props.onRetryEffort}
         isEntryStarred={props.isEntryStarred}
         onAbort={props.onAbort}
+        onGuide={props.onGuide}
         onFeedback={props.onFeedback}
         subAgentSpawns={props.subAgentSpawns}
         loadedSkills={props.loadedSkills}
