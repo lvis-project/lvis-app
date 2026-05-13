@@ -33,17 +33,37 @@ const result = await build({
     "fsevents",
   ],
   logLevel: "info",
-  // Some inlined modules call `require(...)` directly (CommonJS interop);
-  // expose a createRequire-backed `require` on the bundle scope so those
-  // calls keep resolving from node_modules.
+  // Inlined CommonJS modules (pino's `thread-stream`, etc.) reference the
+  // CJS-only globals `require` / `__dirname` / `__filename` directly. ESM
+  // bundles don't define those, so esbuild leaves the references intact
+  // and the bundle ReferenceErrors at startup. Recreate the three globals
+  // from `import.meta.url` so the inlined CJS code keeps working.
   banner: {
-    js: `import { createRequire as __lvisCreateRequire } from "node:module";\nconst require = __lvisCreateRequire(import.meta.url);\n`,
+    js:
+      `import { createRequire as __lvisCreateRequire } from "node:module";\n` +
+      `import { fileURLToPath as __lvisFileURLToPath } from "node:url";\n` +
+      `import { dirname as __lvisDirname } from "node:path";\n` +
+      `const require = __lvisCreateRequire(import.meta.url);\n` +
+      `const __filename = __lvisFileURLToPath(import.meta.url);\n` +
+      `const __dirname = __lvisDirname(__filename);\n`,
   },
 });
 
 if (result.errors.length > 0) {
   process.stderr.write(`[esbuild-main] failed with ${result.errors.length} errors\n`);
   process.exit(1);
+}
+
+if (result.warnings.length > 0) {
+  for (const warning of result.warnings) {
+    process.stderr.write(`[esbuild-main] warning: ${warning.text}\n`);
+  }
+  if (process.env.LVIS_ALLOW_ESBUILD_WARN !== "1") {
+    process.stderr.write(
+      `[esbuild-main] ${result.warnings.length} warning(s); set LVIS_ALLOW_ESBUILD_WARN=1 to bypass\n`,
+    );
+    process.exit(1);
+  }
 }
 
 process.stdout.write(`[esbuild-main] OK -> ${outfile}\n`);

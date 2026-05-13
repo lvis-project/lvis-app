@@ -33,7 +33,7 @@ test('chat history persists across app restart, or skips cleanly', async ({
   const { fileURLToPath } = await import('node:url');
   const HERE = path.dirname(fileURLToPath(import.meta.url));
   const repoRoot = path.resolve(HERE, '../../..');
-  const mainEntry = path.join(repoRoot, 'dist/src/main.js');
+  const mainEntry = path.join(repoRoot, 'dist/src/main/main.js');
 
   const app2 = await electron.launch({
     args: [mainEntry, `--user-data-dir=${userDataDir}`],

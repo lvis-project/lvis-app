@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "../../..");
-const MAIN_ENTRY = resolve(REPO_ROOT, "dist/src/main.js");
+const MAIN_ENTRY = resolve(REPO_ROOT, "dist/src/main/main.js");
 
 const LONG_ASSISTANT =
   '먼저 ken님의 “오늘(2026-05-06 KST)” 기준 할 일/마감 항목을 찾기 위해 ' +
@@ -25,7 +25,7 @@ const LONG_RESULT =
   "이 포함됩니다. ".repeat(6);
 
 test.describe("chat layout overflow", () => {
-  test.skip(!existsSync(MAIN_ENTRY), "dist/src/main.js not built; run bun run build first");
+  test.skip(!existsSync(MAIN_ENTRY), "dist/src/main/main.js not built; run bun run build first");
 
   let app: ElectronApplication;
   let page: Page;
