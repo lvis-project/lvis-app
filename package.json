@@ -20,7 +20,8 @@
     "build:styles": "tailwindcss --input src/styles.css --output dist/src/styles.css --minify",
     "build:preload": "webpack --config webpack.config.cjs --config-name preload",
     "build:plugin-preload": "webpack --config webpack.config.cjs --config-name pluginPreload",
-    "build": "bun run build:main && bun run build:webpack && bun run build:styles && node scripts/copy-build-assets.mjs src/index.html dist/src/index.html src/plugin-ui-shell.html dist/src/plugin-ui-shell.html src/plugin-ui-shell.js dist/src/plugin-ui-shell.js scripts/electron-flags.mjs dist/scripts/electron-flags.mjs && node scripts/check-no-tls-bypass.mjs",
+    "build:icons": "node scripts/generate-lvis-icons.cjs",
+    "build": "bun run build:icons && bun run build:main && bun run build:webpack && bun run build:styles && node scripts/copy-build-assets.mjs src/index.html dist/src/index.html src/plugin-ui-shell.html dist/src/plugin-ui-shell.html src/plugin-ui-shell.js dist/src/plugin-ui-shell.js scripts/electron-flags.mjs dist/scripts/electron-flags.mjs && node scripts/check-no-tls-bypass.mjs",
     "typecheck": "tsc --noEmit",
     "start": "bun run build && node scripts/run-electron.mjs dist/src/main.js",
     "dev": "node scripts/run-electron-dev.mjs",
@@ -135,6 +136,7 @@
   "build": {
     "appId": "com.lge.lvis",
     "productName": "LVIS",
+    "icon": "build/icon.png",
     "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
     "directories": {
       "output": "release"
@@ -155,6 +157,10 @@
       }
     ],
     "extraResources": [
+      {
+        "from": "build/icon.png",
+        "to": "icon.png"
+      },
       {
         "from": "resources/uv",
         "to": "uv"
