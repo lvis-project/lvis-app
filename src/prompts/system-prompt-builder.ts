@@ -4,12 +4,14 @@
  * Lgenie(또는 Claude)에 전송되는 시스템 프롬프트를 매 턴마다 조립.
  * 여러 컨텍스트 소스에서 정보를 수집하여 하나의 프롬프트로 결합.
  */
-import { hostname, platform, homedir, userInfo } from "node:os";
+import { hostname, platform, userInfo } from "node:os";
+import type { ActiveRolePrompt } from "../data/role-presets.js";
 import type { MemoryManager } from "../memory/memory-manager.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import { redactFsPath } from "../audit/dlp-filter.js";
 import { createLogger } from "../lib/logger.js";
 import { isOverlayTriggerOrigin } from "../shared/overlay-trigger-source.js";
+import { lvisHome } from "../shared/lvis-home.js";
 
 const log = createLogger("system-prompt");
 
@@ -75,6 +77,7 @@ export class SystemPromptBuilder {
    * scope to the right session without leaking skills across sessions.
    */
   private overlaySessionId: string | null = null;
+  private activeRolePrompt: ActiveRolePrompt | null = null;
   /**
    * PR-2: current session title injected as inert continuity context.
    * Title mutation is host-managed after the turn; the final answer must not
@@ -186,6 +189,22 @@ export class SystemPromptBuilder {
   }
 
   /**
+   * Per-turn role prompt selected by the user in the composer. ConversationLoop
+   * sets this immediately before build() and clears it immediately after.
+   */
+  setActiveRolePrompt(rolePrompt: ActiveRolePrompt | null): void {
+    const prompt = rolePrompt?.systemPromptAdd.trim();
+    if (!rolePrompt || !prompt) {
+      this.activeRolePrompt = null;
+      return;
+    }
+    this.activeRolePrompt = {
+      name: this.sanitizeRoleName(rolePrompt.name),
+      systemPromptAdd: prompt,
+    };
+  }
+
+  /**
    * PR-2: per-turn session title. ConversationLoop sets this before
    * `build()` so the LLM can use the title as inert continuity context.
    * Pass `null` to clear (no title yet — first turn of a new session).
@@ -207,6 +226,10 @@ export class SystemPromptBuilder {
    */
   private sanitizeTitle(t: string): string {
     return t.replace(/[\r\n"\\<>]/g, " ").slice(0, 50).trim();
+  }
+
+  private sanitizeRoleName(name: string): string {
+    return name.replace(/[\r\n"\\<>]/g, " ").slice(0, 80).trim() || "role";
   }
 
   /**
@@ -259,6 +282,23 @@ export class SystemPromptBuilder {
       name: "Role Definition",
       refresh: "static",
       build: () => ROLE_DEFINITION,
+    });
+
+    // ①-b Active role preset (per-turn, user-selected)
+    this.sources.push({
+      id: 1.5,
+      name: "Active Role Prompt",
+      refresh: "per-turn",
+      build: () => {
+        const rolePrompt = this.activeRolePrompt;
+        if (!rolePrompt) return "";
+        return [
+          `<lvis-active-role-prompt name="${escapeAttribute(rolePrompt.name)}">`,
+          "The user selected this role preset for the current turn. Apply it for this turn unless it conflicts with higher-priority instructions.",
+          rolePrompt.systemPromptAdd,
+          "</lvis-active-role-prompt>",
+        ].join("\n");
+      },
     });
 
     // ② AGENTS.md (파일 변경 시)
@@ -496,7 +536,7 @@ export class SystemPromptBuilder {
           `OS: ${platform()}`,
           `Host: ${hostname()}`,
           `User: ${userInfo().username}`,
-          `Home: ${redactFsPath(homedir())}`,
+          `LVIS Home: ${redactFsPath(lvisHome())}`,
           `Time: ${kstIso} (KST, UTC+9)`,
           `Locale: ${Intl.DateTimeFormat().resolvedOptions().locale}`,
           "NOTE: 날짜/시간 관련 도구 호출 시 반드시 KST(한국 표준시) 기준으로 위와 같은 ISO 8601 형식(+09:00 offset 포함)으로 전달하세요.",
@@ -549,6 +589,10 @@ export class SystemPromptBuilder {
 
     this.sources.sort((a, b) => a.id - b.id);
   }
+}
+
+function escapeAttribute(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 }
 
 // ─── Constants ──────────────────────────────────────

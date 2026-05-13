@@ -45,6 +45,8 @@ export interface SettingsOrchestrationState {
   // Experimental feature flags
   experimentalContinuousBackend: boolean;
   setExperimentalContinuousBackend: (v: boolean) => void;
+  idlePreferenceRefresh: boolean;
+  setIdlePreferenceRefresh: (v: boolean) => void;
   // Marketplace
   marketplaceBaseUrl: string;
   setMarketplaceBaseUrl: (v: string) => void;
@@ -86,6 +88,7 @@ export function useSettingsOrchestration(
   const [hasWebKey, setHasWebKey] = useState(false);
   const [piiRedactEnabled, setPiiRedactEnabled] = useState(false);
   const [experimentalContinuousBackend, setExperimentalContinuousBackend] = useState(false);
+  const [idlePreferenceRefresh, setIdlePreferenceRefresh] = useState(false);
   const [marketplaceBaseUrl, setMarketplaceBaseUrl] = useState("");
   const [marketplaceAllowPrivateNetwork, setMarketplaceAllowPrivateNetwork] = useState(true);
   const [hasMarketplaceApiKey, setHasMarketplaceApiKey] = useState(false);
@@ -123,6 +126,7 @@ export function useSettingsOrchestration(
       setHasWebKey(webApiKeySet);
       setPiiRedactEnabled(s.privacy?.piiRedactEnabled ?? false);
       setExperimentalContinuousBackend(s.features?.experimentalContinuousBackend ?? false);
+      setIdlePreferenceRefresh(s.features?.idlePreferenceRefresh ?? false);
       setMarketplaceBaseUrl(s.marketplace?.realCloudBaseUrl ?? "");
       setMarketplaceAllowPrivateNetwork(s.marketplace?.realCloudAllowPrivateNetwork ?? false);
       setHasMarketplaceApiKey(marketplaceKeySet);
@@ -240,7 +244,7 @@ export function useSettingsOrchestration(
             realCloudBaseUrl: marketplaceBaseUrl.trim() || undefined,
             realCloudAllowPrivateNetwork: marketplaceAllowPrivateNetwork,
           },
-          features: { experimentalContinuousBackend },
+          features: { experimentalContinuousBackend, idlePreferenceRefresh },
         } as any);
       }
       if (tab !== "permissions") { onSaved(); onOpenChange(false); }
@@ -263,6 +267,21 @@ export function useSettingsOrchestration(
       });
   }, [api, experimentalContinuousBackend, onSaved, settingsLoaded]);
 
+  const setIdlePreferenceRefreshLive = useCallback((next: boolean) => {
+    const previous = idlePreferenceRefresh;
+    setIdlePreferenceRefresh(next);
+    if (!settingsLoaded) return;
+    void api
+      .updateSettings({ features: { idlePreferenceRefresh: next } })
+      .then((updated) => {
+        setSettingsSnapshot(updated);
+        onSaved();
+      })
+      .catch(() => {
+        setIdlePreferenceRefresh(previous);
+      });
+  }, [api, idlePreferenceRefresh, onSaved, settingsLoaded]);
+
   return {
     vendor, setVendor,
     keyInput, setKeyInput,
@@ -282,6 +301,7 @@ export function useSettingsOrchestration(
     hasWebKey, setHasWebKey,
     piiRedactEnabled, setPiiRedactEnabled,
     experimentalContinuousBackend, setExperimentalContinuousBackend: setExperimentalContinuousBackendLive,
+    idlePreferenceRefresh, setIdlePreferenceRefresh: setIdlePreferenceRefreshLive,
     marketplaceBaseUrl, setMarketplaceBaseUrl,
     marketplaceAllowPrivateNetwork, setMarketplaceAllowPrivateNetwork,
     hasMarketplaceApiKey, setHasMarketplaceApiKey,

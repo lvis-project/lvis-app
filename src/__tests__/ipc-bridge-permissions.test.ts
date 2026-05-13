@@ -108,6 +108,8 @@ function makeServices(pm: ReturnType<typeof makeMockPM>, gate = makeMockGate()) 
       searchMemoryEntries: vi.fn(() => []),
       getMemoryIndex: vi.fn(() => "# Memory"),
       updateMemoryIndex: vi.fn(),
+      updateMemoryIndexIfUnchanged: vi.fn(async () => true),
+      updateMemoryIndexSections: vi.fn(),
       listSessionEntries: vi.fn(() => []),
       searchSessions: vi.fn(() => []),
       getMemoryContext: vi.fn(() => ""),
@@ -360,9 +362,25 @@ describe("lvis:memory:entries:*", () => {
     expect(services.memoryManager.updateMemoryIndex).toHaveBeenCalledWith("# Memory\n\n## Urgent Memory\n\nKeep this.");
   });
 
+  it("memory section update targets updateMemoryIndexSections", async () => {
+    const pm = makeMockPM();
+    const services = makeServices(pm);
+    const { registerIpcHandlers } = await import("../ipc-bridge.js");
+    registerIpcHandlers(services, () => null);
+
+    await invoke("lvis:memory:index:sections:update", { urgentMemory: "Keep this.", references: "ref" });
+
+    expect(services.memoryManager.updateMemoryIndexSections).toHaveBeenCalledWith({
+      urgentMemory: "Keep this.",
+      references: "ref",
+    });
+  });
+
   it.each([
     "lvis:memory:index:get",
     "lvis:memory:index:update",
+    "lvis:memory:index:update-if-unchanged",
+    "lvis:memory:index:sections:update",
     "lvis:memory:sessions:list",
     "lvis:memory:agents-md:get",
     "lvis:memory:lvis-md:get",

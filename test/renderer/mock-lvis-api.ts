@@ -43,6 +43,7 @@ const DEFAULT_SETTINGS = {
   webSearch: { provider: "none" },
   routine: {},
   privacy: { piiRedactEnabled: false },
+  features: { experimentalContinuousBackend: false, idlePreferenceRefresh: false },
 };
 
 const DEFAULT_USAGE = {
@@ -252,6 +253,8 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     memorySearchEntries: vi.fn(async () => []),
     memoryGetIndex: vi.fn(async () => memoryIndex),
     memoryUpdateIndex: vi.fn(async () => undefined),
+    memoryUpdateIndexIfUnchanged: vi.fn(async () => true),
+    memoryUpdateIndexSections: vi.fn(async () => ({ ok: true })),
     memoryListSessions: vi.fn(async () => []),
     memorySearchSessions: vi.fn(async () => []),
     memoryGetAgentsMd: vi.fn(async () => "# Agents"),
