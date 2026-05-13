@@ -569,11 +569,15 @@ export type ApprovalRequest = {
    * request build time. Renderer surfaces this in the approval card so
    * the user can see whether the tool will run under bubblewrap /
    * sandbox-exec / AppContainer or with no isolation.
+   *
+   * Round-3 code-reviewer MAJOR — `platform` is typed `NodeJS.Platform`
+   * (strict enum) instead of `string` so the renderer type cannot
+   * silently widen the canonical SOT shape.
    */
   sandboxCapability?: {
     kind: "none" | "bubblewrap" | "sandbox-exec" | "appcontainer";
     confidence: "verified" | "assumed";
-    platform: string;
+    platform: NodeJS.Platform;
     reason: string;
   };
 };

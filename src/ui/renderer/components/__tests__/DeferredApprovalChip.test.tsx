@@ -97,7 +97,12 @@ describe("DeferredApprovalChip", () => {
     const [id, decision, reason, source] = api.deferredResolve.mock.calls[0]!;
     expect(id).toBe("queue-42");
     expect(decision).toBe("approved");
-    expect(reason).toMatch(/natural-language match/);
+    // Round-3 critic MAJOR — `reason` is a static provenance string,
+    // NOT the matched phrase. The matched phrase is user-typed and
+    // must not land in HMAC-chained audit storage. The
+    // `approvalSource: "natural-language"` field is the SOT for
+    // provenance.
+    expect(reason).toBe("natural-language chip click");
     expect(source).toBe("natural-language");
   });
 
@@ -120,6 +125,37 @@ describe("DeferredApprovalChip", () => {
       render(<DeferredApprovalChip draftText="허용 안 함" />);
     });
     expect(api.deferredResolve).not.toHaveBeenCalled();
+  });
+
+  it("stays hidden when deferredList throws during mount refresh (round-3 test-engineer MAJOR-2)", async () => {
+    const deferredList = vi.fn(async () => {
+      throw new Error("ipc disconnected");
+    });
+    const deferredResolve = vi.fn(async () => ({ ok: true as const }));
+    const onDeferredPending = vi.fn(() => () => undefined);
+    (globalThis as unknown as { window: { lvis: unknown } }).window.lvis = {
+      permission: { deferredList, deferredResolve, onDeferredPending },
+    };
+    let container: HTMLElement;
+    await act(async () => {
+      const r = render(<DeferredApprovalChip draftText="허용해 주세요" />);
+      container = r.container;
+    });
+    // Production contract: a failing deferredList() must NOT crash and
+    // must NOT render the chip. The catch{} branch keeps `pending`
+    // empty, which falls through the `pending.length !== 1` guard.
+    expect(container!.querySelector('[data-testid="deferred-approval-chip"]')).toBeNull();
+    expect(deferredResolve).not.toHaveBeenCalled();
+  });
+
+  it("renders nothing when window.lvis is absent (round-3 test-engineer MINOR)", async () => {
+    delete (window as unknown as { lvis?: unknown }).lvis;
+    let container: HTMLElement;
+    await act(async () => {
+      const r = render(<DeferredApprovalChip draftText="허용" />);
+      container = r.container;
+    });
+    expect(container!.querySelector('[data-testid="deferred-approval-chip"]')).toBeNull();
   });
 
   it("re-fetches pending queue at click time and aborts when the entry was swapped (round-1 security MAJOR-1)", async () => {

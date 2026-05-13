@@ -395,16 +395,16 @@ describe("PermissionsTab hook quarantine notice", () => {
       render(<PermissionsTab />);
     });
     // Initial state: "off" is selected.
-    expect(screen.getByTestId("reviewer-interactive-off").getAttribute("aria-pressed")).toBe("true");
-    expect(screen.getByTestId("reviewer-interactive-low").getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByTestId("reviewer-interactive-off").getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByTestId("reviewer-interactive-low").getAttribute("aria-checked")).toBe("false");
 
     await act(async () => {
       fireEvent.click(screen.getByTestId("reviewer-interactive-low"));
     });
 
     expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("interactive low");
-    expect(screen.getByTestId("reviewer-interactive-low").getAttribute("aria-pressed")).toBe("true");
-    expect(screen.getByTestId("reviewer-interactive-off").getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByTestId("reviewer-interactive-low").getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByTestId("reviewer-interactive-off").getAttribute("aria-checked")).toBe("false");
   });
 
   it("keeps the prior reviewer mode when runtime rewire fails", async () => {
