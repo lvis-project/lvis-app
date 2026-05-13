@@ -376,14 +376,18 @@ describe("PythonRuntimeBootstrapper", () => {
   describe("플랫폼별 uv binary path 결정", () => {
     const cases: Array<[string, string, string]> = [
       ["darwin", "arm64", "darwin-arm64"],
-      ["darwin", "x64", "darwin-x64"],
       ["win32", "x64", "win32-x64"],
       ["linux", "x64", "linux-x64"],
       ["linux", "arm64", "linux-arm64"],
     ];
 
     for (const [platform, arch, expectedDir] of cases) {
-      it(`${platform}/${arch} → resources/uv/${expectedDir}/uv[.exe]`, () => {
+      it(`${platform}/${arch} → resources/uv/${expectedDir}/uv[.exe]`, async () => {
+        mockedAccess
+          .mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+          .mockResolvedValueOnce(undefined);
+        mockedSpawn.mockReturnValueOnce(makeSpawnFailMock(1, "stop after uv path assertion"));
+
         const originalPlatform = process.platform;
         const originalArch = process.arch;
 
@@ -392,15 +396,13 @@ describe("PythonRuntimeBootstrapper", () => {
 
         try {
           const bootstrapper = new PythonRuntimeBootstrapper();
-          // getPythonPath는 public이므로 직접 호출 가능
-          const pythonPath = bootstrapper.getPythonPath();
+          const win = makeBrowserWindow();
 
-          if (platform === "win32") {
-            expect(pythonPath).toContain("Scripts");
-            expect(pythonPath).toContain("python.exe");
-          } else {
-            expect(pythonPath.replace(/\\/g, "/")).toContain("bin/python");
-          }
+          await expect(bootstrapper.ensureReady(win)).rejects.toThrow();
+          const uvPath = String(mockedSpawn.mock.calls[0]?.[0] ?? "");
+          expect(normalizePathForAssert(uvPath)).toContain(
+            normalizePathForAssert(`/resources/uv/${expectedDir}/${platform === "win32" ? "uv.exe" : "uv"}`),
+          );
         } finally {
           Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });
           Object.defineProperty(process, "arch", { value: originalArch, configurable: true });
@@ -423,6 +425,51 @@ describe("PythonRuntimeBootstrapper", () => {
         const bootstrapper = new PythonRuntimeBootstrapper();
         const win = makeBrowserWindow();
         await expect(bootstrapper.ensureReady(win)).rejects.toThrow();
+      } finally {
+        Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });
+        Object.defineProperty(process, "arch", { value: originalArch, configurable: true });
+      }
+    });
+
+    it("macOS Intel은 .ready sentinel이 있어도 지원하지 않는다", async () => {
+      mockedAccess.mockResolvedValue(undefined);
+
+      const originalPlatform = process.platform;
+      const originalArch = process.arch;
+
+      Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
+      Object.defineProperty(process, "arch", { value: "x64", configurable: true });
+
+      try {
+        const bootstrapper = new PythonRuntimeBootstrapper();
+        const win = makeBrowserWindow();
+        await expect(bootstrapper.ensureReady(win)).rejects.toThrow(
+          "지원하지 않는 플랫폼/아키텍처: darwin/x64",
+        );
+        expect(mockedSpawn).not.toHaveBeenCalled();
+      } finally {
+        Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });
+        Object.defineProperty(process, "arch", { value: originalArch, configurable: true });
+      }
+    });
+
+    it("macOS Intel은 지원하지 않는다", async () => {
+      mockedAccess
+        .mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+        .mockResolvedValueOnce(undefined);
+
+      const originalPlatform = process.platform;
+      const originalArch = process.arch;
+
+      Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
+      Object.defineProperty(process, "arch", { value: "x64", configurable: true });
+
+      try {
+        const bootstrapper = new PythonRuntimeBootstrapper();
+        const win = makeBrowserWindow();
+        await expect(bootstrapper.ensureReady(win)).rejects.toThrow(
+          "지원하지 않는 플랫폼/아키텍처: darwin/x64",
+        );
       } finally {
         Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });
         Object.defineProperty(process, "arch", { value: originalArch, configurable: true });

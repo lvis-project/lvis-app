@@ -44,7 +44,7 @@
 `settings-store.ts` `migrateSecretsMode` 는 `stat→chmod` race를 `fstat+fchmod` 로 대체. 공격자가 stat와 chmod 사이에 symlink로 파일을 바꿔치기 하더라도 fd는 원 inode에 고정되어 race 차단.
 
 ### 2.5 Hardcoded SHA256 (F-round)
-`scripts/fetch-uv.mjs` 는 uv 0.7.3의 5 플랫폼 archive 해시를 compile-time 상수로 박음. GitHub compromise 시나리오에서도 verified. 새 버전으로 bump 시 side-car 폴백 → fail-closed.
+`scripts/fetch-uv.mjs` 는 `scripts/uv-targets.mjs` 의 지원 플랫폼 archive 해시를 단일 기준으로 사용한다. GitHub compromise 시나리오에서도 verified. 새 버전으로 bump 시 `DEFAULT_VERSION` 과 `UV_TARGETS` archive 해시를 함께 갱신한다.
 
 ### 2.6 UI lock
 `renderer.tsx` 플러그인 카드에 `🔒 + bg-muted/40 + disabled 버튼 + tooltip`. isManaged flag는 main process `list()` 에서 내려오며, UI는 backend 우회 불가 (Electron contextIsolation + 백엔드 재검증).
@@ -85,7 +85,7 @@
 | F6 | Code MED | `marketplace.install()` guard 통합 테스트 4건 (`marketplace-guard.test.ts`) | Code |
 | F7 | Code NIT | `fetch-uv.mjs` 미사용 import 정리 | Code |
 | F8 | Sec L3 + Code LOW | `readManifestSafe` `console.warn` forensics | Security + Code |
-| F10 | Sec L1 | `KNOWN_GOOD_SHA256` 포맷 assertion (regex 전수 검증) | Security |
+| F10 | Sec L1 | `UV_TARGETS` archiveSha256 포맷 assertion (regex 전수 검증) | Security |
 
 ### Phase 2 이월 (F-round 범위 밖)
 - Windows `plain:` prefix refuse (Sec M3) — platform-specific secrets 설계
