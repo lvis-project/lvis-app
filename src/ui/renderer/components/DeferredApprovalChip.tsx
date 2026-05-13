@@ -128,10 +128,17 @@ export function DeferredApprovalChip({
         setError("의도가 변경되었습니다 — 입력 확인 후 다시 시도");
         return;
       }
+      // Round-3 critic MAJOR — the audit `reason` field is HMAC-chained
+      // tamper-evident storage. Passing the matched phrase verbatim
+      // could land user-typed text (potentially PII / secrets adjacent
+      // to the approve verb) in immutable forensic logs. The
+      // `approvalSource: "natural-language"` field already carries
+      // the provenance signal; the phrase itself adds no integrity
+      // value, only PII risk. Use a static reason string.
       const r = await api(
         target.id,
         decision,
-        `natural-language match: ${intent.matchedPhrase}`,
+        "natural-language chip click",
         "natural-language",
       );
       if (!r.ok) {
@@ -173,41 +180,51 @@ export function DeferredApprovalChip({
   const action = intent.kind === "approve" ? "허용" : "거절";
 
   return (
+    // Round-3 UX MAJOR — switched to `flex-col` so the error row drops
+    // below the main row at narrow viewports instead of overflowing
+    // beside the [허용]/[거절] button. The action row stays as a
+    // horizontal flex inside.
     <div
       data-testid="deferred-approval-chip"
       data-target-id={target.id}
       data-target-source={target.source}
-      className="mx-3 mb-2 flex items-center gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-xs"
+      className="mx-3 mb-2 flex flex-col gap-1 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-xs"
     >
-      <span
-        aria-hidden="true"
-        className="inline-block h-2 w-2 rounded-full bg-primary"
-      />
-      <span className="flex-1 min-w-0">
-        <span className="font-medium">승인 의도 감지: </span>
-        {sourceBadgeText && sourceBadgeAriaLabel ? (
-          <span
-            aria-label={sourceBadgeAriaLabel}
-            className="mr-1 rounded bg-muted px-1 py-0.5 text-[10px] uppercase text-muted-foreground"
-          >
-            <span aria-hidden="true">{sourceBadgeText}</span>
-          </span>
-        ) : null}
-        <span className="text-muted-foreground">{labelTail}</span>
-      </span>
-      <Button
-        size="sm"
-        variant={intent.kind === "approve" ? "default" : "secondary"}
-        disabled={busy}
-        onClick={() => void handle()}
-        data-testid="deferred-approval-chip-action"
-      >
-        {action}
-      </Button>
-      {error ? (
-        <span className="text-destructive" data-testid="deferred-approval-chip-error">
-          {error}
+      <div className="flex items-center gap-2">
+        <span
+          aria-hidden="true"
+          className="inline-block h-2 w-2 rounded-full bg-primary"
+        />
+        <span className="flex-1 min-w-0">
+          <span className="font-medium">승인 의도 감지: </span>
+          {sourceBadgeText && sourceBadgeAriaLabel ? (
+            <span
+              aria-label={sourceBadgeAriaLabel}
+              className="mr-1 rounded bg-muted px-1 py-0.5 text-[10px] uppercase text-muted-foreground"
+            >
+              <span aria-hidden="true">{sourceBadgeText}</span>
+            </span>
+          ) : null}
+          <span className="text-muted-foreground">{labelTail}</span>
         </span>
+        <Button
+          size="sm"
+          variant={intent.kind === "approve" ? "default" : "secondary"}
+          disabled={busy}
+          onClick={() => void handle()}
+          data-testid="deferred-approval-chip-action"
+        >
+          {action}
+        </Button>
+      </div>
+      {error ? (
+        <div
+          className="w-full text-[11px] text-destructive"
+          data-testid="deferred-approval-chip-error"
+          role="alert"
+        >
+          {error}
+        </div>
       ) : null}
     </div>
   );

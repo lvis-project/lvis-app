@@ -18,6 +18,7 @@ import type { AuditLogger } from "../audit/audit-logger.js";
 import type { NotificationService } from "../main/notification-service.js";
 import type { ToolCategory } from "../tools/types.js";
 import type { RiskVerdict } from "./reviewer/risk-classifier.js";
+import { detectSandboxCapability, type SandboxCapability } from "./sandbox-capability.js";
 import type { PermissionEvaluationContext } from "./evaluation-context.js";
 import { isSensitivePath, canonicalizePathForMatch } from "./sensitive-paths.js";
 import { maskSensitiveData } from "../audit/dlp-filter.js";
@@ -108,14 +109,15 @@ export interface ApprovalRequest {
    * surfaced to the approval dialog so the user can see whether the
    * tool will run under bubblewrap / sandbox-exec / AppContainer or
    * with no isolation. Captured at request build time by the executor
-   * from {@link detectSandboxCapability}; immutable thereafter.
+   * (and by {@link ApprovalGate} for non-tool approvals) from
+   * {@link detectSandboxCapability}; immutable thereafter.
+   *
+   * Round-3 code-reviewer MAJOR — typed as the canonical
+   * {@link SandboxCapability} (not a structural mirror) to keep the
+   * `platform: NodeJS.Platform` enum tight. Mirror declarations in the
+   * renderer type SHOULD use the same shape.
    */
-  sandboxCapability?: {
-    kind: "none" | "bubblewrap" | "sandbox-exec" | "appcontainer";
-    confidence: "verified" | "assumed";
-    platform: string;
-    reason: string;
-  };
+  sandboxCapability?: SandboxCapability;
   /**
    * §S1: absolute filesystem path the tool intends to touch. When set and
    * matched against SENSITIVE_PATH_PATTERNS, the request is hard-blocked
@@ -322,8 +324,16 @@ export class ApprovalGate {
   async requestAndWait(
     req: Omit<ApprovalRequest, "requireExplicit">,
   ): Promise<ApprovalDecision> {
+    // Round-3 code-reviewer MAJOR — sandbox capability injection SOT.
+    // Every approval request the renderer sees now carries the sandbox
+    // SOT, including mode-change and out-of-allowed-dir approvals that
+    // do not flow through the executor's tool-approval path. Without
+    // this, the "격리" row in `ToolApprovalDialog` would be visible on
+    // tool asks but invisible on mode-change asks — UX divergence
+    // across two surfaces that should agree.
     const fullReq: ApprovalRequest = {
       ...req,
+      sandboxCapability: req.sandboxCapability ?? detectSandboxCapability(),
       requireExplicit: this.currentPolicy.requireExplicitApproval,
     };
 

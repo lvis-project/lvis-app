@@ -144,7 +144,14 @@ export function ToolApprovalDialog({
                 {reviewTitleForCategory(category)}
               </h4>
               {rows.map((row) => (
-                <ReviewRow key={row.label} label={row.label}>
+                <ReviewRow
+                  key={row.label}
+                  label={row.label}
+                  // Round-3 UX MAJOR — prose rows now carry the testId
+                  // on the row wrapper so we don't have to force human-
+                  // readable text through `<pre>`.
+                  testId={row.monospace ? undefined : row.testId}
+                >
                   {row.monospace ? (
                     <pre
                       className="max-h-24 max-w-full overflow-hidden whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed"
@@ -256,13 +263,13 @@ function approvalReviewRows(
     const weak = cap.kind === "none" || cap.confidence === "assumed";
     rows.push({
       label: "격리",
+      // Round-3 UX MAJOR — human-readable prose, not terminal output.
+      // Now that `ReviewRow` accepts `testId` directly, the row renders
+      // in the normal prose branch with proper line-wrap and screen-
+      // reader semantics.
       value: weak
         ? `⚠ ${cap.kind} (${cap.confidence}, ${cap.platform}) — ${cap.reason}`
         : `${cap.kind} (${cap.confidence}, ${cap.platform})`,
-      // `monospace: true` so the row renders inside the `<pre>` branch
-      // (which is where the `data-testid` lands per dialog convention).
-      // The value is already a single grep-stable line.
-      monospace: true,
       testId: "tool-approval-sandbox",
     });
   }
