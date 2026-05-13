@@ -1,6 +1,7 @@
 import "../../../../test/renderer/setup.ts";
 import { describe, expect, it } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { renderApp } from "../../../../test/renderer/render-app.js";
 
 describe("App plugin auth routing", () => {
@@ -53,13 +54,17 @@ describe("App plugin auth routing", () => {
   });
 
   it("routes command-palette plugin actions through detached-window handling", async () => {
+    const user = userEvent.setup();
     const { api } = await renderApp(detachedPluginFixture);
     api.callPluginMethod.mockImplementation(async (tool: string) =>
       tool === "token_status" ? { authenticated: false } : { ok: true },
     );
 
-    fireEvent.click(screen.getByTestId("command-popover-trigger"));
-    fireEvent.click(await screen.findByText("Token Plugin 열기"));
+    await waitFor(() => {
+      expect(api.listPluginUiExtensions).toHaveBeenCalled();
+    });
+    await user.click(screen.getByTestId("command-popover-trigger"));
+    await user.click(await screen.findByText("Token Plugin 열기"));
 
     await waitFor(() => {
       expect(api.window.openDetached).toHaveBeenCalledWith("plugin:token-plugin:main");

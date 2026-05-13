@@ -16,13 +16,15 @@
  *   - Windows: `certutil -exportPFX -p "" Root "LGERootCA" tmp.pfx` or win-ca npm pkg
  *   - Linux:   /etc/ssl/certs/LGERootCA*.pem or `update-ca-certificates` hook
  */
-import { execSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { mkdirSync, readFileSync, statSync } from "node:fs";
 import { open } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { createLogger } from "../lib/logger.js";
 const log = createLogger("corp-ca");
+const execFileAsync = promisify(execFile);
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
@@ -70,12 +72,18 @@ function readCacheIfFresh(): string | null {
 
 // ─── Platform-specific extraction ────────────────────────────────────────────
 
-function extractMacos(): string | null {
+async function extractMacos(): Promise<string | null> {
   try {
-    const pem = execSync(
-      `security find-certificate -a -c '${LGE_ROOT_CA_CN}' -p /Library/Keychains/System.keychain`,
-      { encoding: "utf8", timeout: 10_000 },
-    );
+    const output = await execFileAsync(
+      "security",
+      ["find-certificate", "-a", "-c", LGE_ROOT_CA_CN, "-p", "/Library/Keychains/System.keychain"],
+      { encoding: "utf8", timeout: 10_000, maxBuffer: 2 * 1024 * 1024 },
+    ) as unknown;
+    const stdout =
+      typeof output === "object" && output !== null && "stdout" in output
+        ? (output as { stdout?: string | Buffer }).stdout
+        : output;
+    const pem = Buffer.isBuffer(stdout) ? stdout.toString("utf8") : String(stdout ?? "");
     if (!pem.includes("-----BEGIN CERTIFICATE-----")) {
       log.warn("macOS: LGERootCA not found in System.keychain");
       return null;
@@ -87,7 +95,7 @@ function extractMacos(): string | null {
   }
 }
 
-function extractWindows(): string | null {
+async function extractWindows(): Promise<string | null> {
   // Windows runtime extraction is Phase 3 (win-ca pkg or certutil pfx export).
   // Until then, the OS still presents installed CAs to Chromium via the system
   // trust store, so TLS usually works without injection; skip silently unless
@@ -98,7 +106,7 @@ function extractWindows(): string | null {
   return null;
 }
 
-function extractLinux(): string | null {
+async function extractLinux(): Promise<string | null> {
   // Linux runtime extraction is Phase 3 (scan /etc/ssl/certs or
   // update-ca-trust). Silent by default — OS trust store still applies.
   if (process.env.LVIS_CORP_CA_DEBUG === "1") {
@@ -107,17 +115,17 @@ function extractLinux(): string | null {
   return null;
 }
 
-function extractByPlatform(): string | null {
+async function extractByPlatform(): Promise<string | null> {
   if (process.env.LVIS_SKIP_CORP_CA === "1") {
     return null;
   }
   switch (process.platform) {
     case "darwin":
-      return extractMacos();
+      return await extractMacos();
     case "win32":
-      return extractWindows();
+      return await extractWindows();
     case "linux":
-      return extractLinux();
+      return await extractLinux();
     default:
       log.warn(`Unsupported platform: ${process.platform} — skipping CA extraction`);
       return null;
@@ -165,7 +173,7 @@ export async function ensureCorporateCa(): Promise<CorporateCaResult> {
   }
 
   // 2. extraction
-  const pem = extractByPlatform();
+  const pem = await extractByPlatform();
   if (!pem) {
     return { pem: null, path: cachePath, source: "none", certCount: 0 };
   }

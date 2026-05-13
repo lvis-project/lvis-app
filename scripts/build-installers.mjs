@@ -7,9 +7,10 @@
  * target tooling, so the three-platform release path is the CI OS matrix.
  */
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { gzipSync } from "node:zlib";
 import { installerUvTargetFor } from "./uv-targets.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -166,8 +167,11 @@ function prepareUvRuntime(target) {
   }
 
   cleanUvRuntime();
-  cpSync(sourceDir, resolve(uvRuntimeDir, uvTarget.dir), { recursive: true });
-  process.stdout.write(`[installer] staged uv runtime: ${uvTarget.dir}\n`);
+  const targetDir = resolve(uvRuntimeDir, uvTarget.dir);
+  mkdirSync(targetDir, { recursive: true });
+  cpSync(resolve(sourceDir, "uv.meta.json"), resolve(targetDir, "uv.meta.json"));
+  writeFileSync(resolve(targetDir, `${uvTarget.bin}.gz`), gzipSync(readFileSync(sourceBin), { level: 9 }));
+  process.stdout.write(`[installer] staged compressed uv runtime: ${uvTarget.dir}\n`);
 }
 
 function builderArgsFor(target, publish, dirOnly) {

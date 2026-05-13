@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "src",
+    "scripts/electron-flags.d.mts",
+    "scripts/uv-targets.d.mts"
+  ],
+  "exclude": [
+    "src/**/__tests__/**",
+    "src/**/__probes__/**",
+    "src/**/*.stories.ts",
+    "src/**/*.stories.tsx",
+    "src/preload.ts",
+    "src/preload.cjs.ts",
+    "src/renderer.tsx"
+  ]
+}

@@ -3,7 +3,6 @@ import type { LvisApi } from "../types.js";
 
 export interface AppBootstrapDeps {
   api: LvisApi;
-  refreshMarketplace: () => Promise<void> | void;
   refreshViews: () => Promise<unknown> | unknown;
   refreshCards: () => Promise<void> | void;
   checkApiKey: () => Promise<unknown> | unknown;
@@ -13,7 +12,7 @@ export interface AppBootstrapDeps {
 
 /**
  * Mount-time bootstrap:
- *  - kick off marketplace / views / api-key refreshes
+ *  - kick off plugin views/cards and api-key refreshes
  *  - subscribe to plugin view-activate IPC
  *  - register Cmd/Ctrl+K keybinding for the command popover
  *
@@ -30,7 +29,7 @@ export interface AppBootstrapDeps {
  *     closure without ever re-attaching the listener.
  */
 export function useAppBootstrap({
-  api, refreshMarketplace, refreshViews, refreshCards, checkApiKey,
+  api, refreshViews, refreshCards, checkApiKey,
   setActiveView, toggleCommandPopover,
 }: AppBootstrapDeps) {
   const isMountedRef = useRef(true);
@@ -46,7 +45,6 @@ export function useAppBootstrap({
   // intentional omission of non-reactive stable deps.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
-    void refreshMarketplace();
     void refreshViews();
     void refreshCards();
     void checkApiKey();
