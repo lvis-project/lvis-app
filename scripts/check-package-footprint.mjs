@@ -263,6 +263,43 @@ if (isLinuxUnpackedPackage()) {
   if (leakedGpuFiles.length > 0) fail("Linux GPU runtime files leaked into package", leakedGpuFiles);
 }
 
+const keepWebgl = process.env.LVIS_KEEP_WEBGL === "1";
+
+if (!keepWebgl && isMacAppPackage()) {
+  const macFallbackDir = resolve(
+    appOutDir,
+    "Frameworks",
+    "Electron Framework.framework",
+    "Versions",
+    "A",
+    "Libraries",
+  );
+  const macWebglFallbackFiles = [
+    "libvk_swiftshader.dylib",
+    "libGLESv2.dylib",
+    "libEGL.dylib",
+    "vk_swiftshader_icd.json",
+  ];
+  const leakedMacWebgl = macWebglFallbackFiles.filter((entry) => existsSync(resolve(macFallbackDir, entry)));
+  if (leakedMacWebgl.length > 0) fail("macOS WebGL fallback libraries leaked into package", leakedMacWebgl);
+}
+
+function isWinUnpackedPackage() {
+  return basename(appOutDir) === "win-unpacked";
+}
+
+if (!keepWebgl && isWinUnpackedPackage()) {
+  const winWebglFallbackFiles = [
+    "vk_swiftshader.dll",
+    "libGLESv2.dll",
+    "libEGL.dll",
+    "vulkan-1.dll",
+    "vk_swiftshader_icd.json",
+  ];
+  const leakedWinWebgl = winWebglFallbackFiles.filter((entry) => existsSync(resolve(appOutDir, entry)));
+  if (leakedWinWebgl.length > 0) fail("Windows WebGL fallback libraries leaked into package", leakedWinWebgl);
+}
+
 process.stdout.write(
   [
     `[package-footprint] OK`,
