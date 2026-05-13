@@ -659,7 +659,12 @@ const api = {
       id: string,
       decision: "approved" | "rejected",
       reason?: string,
-      approvalSource?: "button" | "natural-language",
+      // Round-4 architect MAJOR — `approvalSource` is now required on
+      // the preload boundary so renderer callers MUST opt into the
+      // provenance contract. Defaults to "button" here for ergonomics
+      // (the only callers that need "natural-language" are the chip's
+      // `handle()`); explicit-undefined is no longer a wire shape.
+      approvalSource: "button" | "natural-language" = "button",
     ) =>
       ipcRenderer.invoke(PERMISSIONS.deferredResolve, {
         id,
