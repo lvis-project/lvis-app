@@ -1,6 +1,6 @@
 import "../../../../test/renderer/setup.js";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { act, render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { PluginConfigTab } from "../tabs/PluginConfigTab.js";
 import { PluginConfigSchemaForm } from "../tabs/PluginConfigSchemaForm.js";
 
@@ -66,6 +66,11 @@ afterEach(() => {
     writable: true,
     configurable: true,
   });
+  Object.defineProperty(window, "lvisApi", {
+    value: undefined,
+    writable: true,
+    configurable: true,
+  });
 });
 
 describe("PluginConfigTab", () => {
@@ -105,6 +110,70 @@ describe("PluginConfigTab", () => {
     });
 
     expect(screen.queryByText("설정이 저장되었습니다.")).toBeNull();
+  });
+
+  it("refreshes the settings plugin list when an install result event arrives", async () => {
+    const meeting = {
+      id: "meeting",
+      name: "Meeting",
+      description: "Meeting plugin",
+      publisher: "Test fixture",
+      sampleTools: [],
+      capabilities: [],
+      tools: [],
+      loadStatus: "loaded" as const,
+    };
+    const agentHub = {
+      id: "agent-hub",
+      name: "Agent Hub",
+      description: "Agent orchestration",
+      publisher: "Test fixture",
+      sampleTools: [],
+      capabilities: [],
+      tools: [],
+      loadStatus: "loaded" as const,
+    };
+    const cards = vi.fn()
+      .mockResolvedValueOnce([meeting])
+      .mockResolvedValueOnce([meeting, agentHub]);
+    let installResultHandler: ((payload: { slug: string; success: boolean; error?: string }) => void) | null = null;
+    Object.defineProperty(window, "lvis", {
+      value: {
+        plugins: { cards },
+        pluginConfig: { get: mockGet, set: mockSet },
+      },
+      writable: true,
+      configurable: true,
+    });
+    Object.defineProperty(window, "lvisApi", {
+      value: {
+        onPluginInstallProgress: vi.fn(() => () => undefined),
+        onPluginInstallResult: vi.fn((handler: (payload: { slug: string; success: boolean; error?: string }) => void) => {
+          installResultHandler = handler;
+          return () => undefined;
+        }),
+        onPluginUninstallResult: vi.fn(() => () => undefined),
+      },
+      writable: true,
+      configurable: true,
+    });
+
+    render(<PluginConfigTab />);
+
+    await waitFor(() => {
+      expect(cards).toHaveBeenCalledTimes(1);
+      expect(screen.getAllByText("Meeting").length).toBeGreaterThan(0);
+    });
+    expect(screen.queryByText("Agent Hub")).toBeNull();
+
+    await act(async () => {
+      installResultHandler?.({ slug: "agent-hub", success: true });
+    });
+
+    await waitFor(() => {
+      expect(cards).toHaveBeenCalledTimes(2);
+      expect(screen.getAllByText("Agent Hub").length).toBeGreaterThan(0);
+    });
   });
 });
 
