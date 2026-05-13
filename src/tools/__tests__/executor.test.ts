@@ -1511,6 +1511,94 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
     expect(results[0].is_error).toBeUndefined();
   });
 
+  it("captures post-directory-grant evaluation context for the Step 3 approval", async () => {
+    const outside = mkdtempSync(join(tmpdir(), "lvis-executor-context-scope-"));
+    try {
+      const target = join(outside, "notes.md");
+      const executeSpy = vi.fn(async () => "ok");
+      const registry = new ToolRegistry();
+      registry.register(createDynamicTool({
+        name: "write_file_probe",
+        description: "Writes a file.",
+        source: "builtin",
+        category: "write",
+        pathFields: ["path"],
+        jsonSchema: {
+          type: "object",
+          properties: { path: { type: "string" } },
+          required: ["path"],
+        },
+        execute: async (rawInput) => {
+          const value = await executeSpy(rawInput);
+          return { output: String(value), isError: false };
+        },
+      }));
+
+      const permMgr = new PermissionManager(join(outside, "permissions.json"));
+      permMgr.checkDetailed = () => ({
+        decision: "ask",
+        reason: "post-directory-grant approval",
+        layer: 3,
+      });
+
+      const wc = makeMockWebContents();
+      const gate = new ApprovalGate(wc as never);
+      const executor = new ToolExecutor(registry, undefined, permMgr, undefined, gate);
+
+      const callPromise = executor.executeAll(
+        [{ id: "tu-l1-context-scope", name: "write_file_probe", input: { path: target } }],
+        { sessionId: "sess-l1-context-scope", permissionContext: userPermissionContext() },
+      );
+
+      const directoryRequest = await waitForApprovalPayload<{
+        id: string;
+        nonce: string;
+        hmac: string;
+        kind?: string;
+        evaluationContext?: { allowedDirectories: readonly string[] };
+      }>(wc, 0);
+      expect(directoryRequest.kind).toBe("out-of-allowed-dir");
+      expect(directoryRequest.evaluationContext).toBeTruthy();
+      expect(directoryRequest.evaluationContext!.allowedDirectories.map(comparablePath))
+        .not.toContain(comparablePath(target));
+      gate.resolve(directoryRequest.id, {
+        requestId: directoryRequest.id,
+        choice: "allow-once",
+        nonce: directoryRequest.nonce,
+        hmac: directoryRequest.hmac,
+      });
+
+      const step3Request = await waitForApprovalPayload<{
+        id: string;
+        nonce: string;
+        hmac: string;
+        kind?: string;
+        evaluationContext?: {
+          allowedDirectories: readonly string[];
+          targetFilePaths: readonly string[];
+        };
+      }>(wc, 1);
+      expect(step3Request.kind).toBeUndefined();
+      expect(step3Request.evaluationContext).toBeTruthy();
+      expect(step3Request.evaluationContext!.allowedDirectories.map(comparablePath))
+        .toContain(comparablePath(target));
+      expect(step3Request.evaluationContext!.targetFilePaths.map(comparablePath))
+        .toContain(comparablePath(target));
+      gate.resolve(step3Request.id, {
+        requestId: step3Request.id,
+        choice: "allow-once",
+        nonce: step3Request.nonce,
+        hmac: step3Request.hmac,
+      });
+
+      const results = await callPromise;
+      expect(executeSpy).toHaveBeenCalled();
+      expect(results[0].is_error).toBeUndefined();
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
   it("user grants out-of-allowed-dir → native file tool receives the same invocation scope", async () => {
     const outside = mkdtempSync(join(tmpdir(), "lvis-executor-native-scope-"));
     try {
