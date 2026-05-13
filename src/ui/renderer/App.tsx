@@ -16,7 +16,7 @@ import type { PluginEntry } from "./components/PluginGridButton.js";
 import { ApprovalDialog } from "./dialogs/ApprovalDialog.js";
 import { ApprovalQueueStatus } from "./components/ApprovalQueueStatus.js";
 import { DeferredQueueDialog } from "./dialogs/DeferredQueueDialog.js";
-import { buildQuickActions } from "./components/CommandPopover.js";
+import { buildQuickActions } from "./components/command-actions.js";
 import { MainToolbar } from "./MainToolbar.js";
 import { MainContent } from "./MainContent.js";
 import {
@@ -696,7 +696,7 @@ export function App() {
   }, [activeView]);
 
   useAppBootstrap({
-    api, refreshMarketplace, refreshViews, refreshCards, checkApiKey,
+    api, refreshViews, refreshCards, checkApiKey,
     setActiveView,
     toggleCommandPopover,
   });
