@@ -165,10 +165,27 @@ export function PermissionsTab() {
   // ── Section A handler ─────────────────────────────
   const reviewerModeForExecMode = (m: ExecMode): PermissionReviewerMode =>
     m === "auto" ? "llm" : "disabled";
+  // Round-1 critic MAJOR-2 — interactive auto-approve is the SOT for
+  // foreground reviewer auto-allow. Selecting `auto` exec mode in the
+  // UI now also flips `interactive.autoApprove="low"` so the legacy UX
+  // (auto mode → LOW silent allow) is preserved without `auto` mode
+  // being a hidden second opt-in. Selecting any non-auto mode flips
+  // back to `"off"`.
+  const interactiveAutoApproveForExecMode = (
+    m: ExecMode,
+  ): "off" | "low" => (m === "auto" ? "low" : "off");
 
   const handleModeChange = async (m: ExecMode) => {
     const targetReviewerMode = reviewerModeForExecMode(m);
-    if ((m === mode && reviewer.mode === targetReviewerMode) || modeBusy) return;
+    const targetInteractive = interactiveAutoApproveForExecMode(m);
+    if (
+      (m === mode &&
+        reviewer.mode === targetReviewerMode &&
+        reviewer.interactive.autoApprove === targetInteractive) ||
+      modeBusy
+    ) {
+      return;
+    }
     setModeBusy(true);
     try {
       let modeChanged = m === mode;
@@ -190,6 +207,18 @@ export function PermissionsTab() {
           setReviewerModelDraft(reviewerRes.settings.model);
         } else {
           showBanner("error", formatReviewerDispatchError(reviewerRes.error));
+          return;
+        }
+      }
+      if (reviewer.interactive.autoApprove !== targetInteractive) {
+        if (!modeChanged) return;
+        const interactiveRes = await window.lvis.permission.reviewerDispatch(
+          `interactive ${targetInteractive}`,
+        );
+        if (interactiveRes.ok) {
+          setReviewer(interactiveRes.settings);
+        } else {
+          showBanner("error", formatReviewerDispatchError(interactiveRes.error));
           return;
         }
       }

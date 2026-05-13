@@ -104,6 +104,19 @@ export interface ApprovalRequest {
    */
   trustOrigin?: string;
   /**
+   * Issue #691 round-1 user request — OS-level execution sandbox SOT,
+   * surfaced to the approval dialog so the user can see whether the
+   * tool will run under bubblewrap / sandbox-exec / AppContainer or
+   * with no isolation. Captured at request build time by the executor
+   * from {@link detectSandboxCapability}; immutable thereafter.
+   */
+  sandboxCapability?: {
+    kind: "none" | "bubblewrap" | "sandbox-exec" | "appcontainer";
+    confidence: "verified" | "assumed";
+    platform: string;
+    reason: string;
+  };
+  /**
    * §S1: absolute filesystem path the tool intends to touch. When set and
    * matched against SENSITIVE_PATH_PATTERNS, the request is hard-blocked
    * BEFORE the user dialog is shown. Cannot be overridden.
