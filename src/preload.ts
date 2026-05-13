@@ -658,13 +658,14 @@ const api = {
     deferredResolve: async (
       id: string,
       decision: "approved" | "rejected",
-      reason?: string,
-      // Round-4 architect MAJOR — `approvalSource` is now required on
-      // the preload boundary so renderer callers MUST opt into the
-      // provenance contract. Defaults to "button" here for ergonomics
-      // (the only callers that need "natural-language" are the chip's
-      // `handle()`); explicit-undefined is no longer a wire shape.
-      approvalSource: "button" | "natural-language" = "button",
+      reason: string | undefined,
+      // Round-5 architect + critic MAJOR — `approvalSource` is REQUIRED
+      // (no default). Callers must explicitly opt into a provenance
+      // value; this eliminates the default-param softness that masked
+      // missing arguments as silent `"button"` writes to the HMAC-
+      // chained audit log. JS callers that pass `undefined` will fail
+      // the main-side enum validator and get `invalid-params`.
+      approvalSource: "button" | "natural-language",
     ) =>
       ipcRenderer.invoke(PERMISSIONS.deferredResolve, {
         id,
