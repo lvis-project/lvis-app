@@ -88,7 +88,7 @@ export function useChatState(api: LvisApi) {
       }
       const streamId = typeof ev.streamId === "number" ? ev.streamId : null;
       if (ev.type === "guidance_injected") {
-        // Non-interrupting "guide" mode (#566/utterance taxonomy) — engine
+        // Non-interrupting "guide" mode (chat utterance taxonomy) — engine
         // consumed a queued guide utterance at the round boundary and
         // appended it to history. Surface to the user as a system entry
         // so they can see their direction-adjustment landed; the assistant
@@ -98,6 +98,20 @@ export function useChatState(api: LvisApi) {
         setEntries((p) => [
           ...p,
           { kind: "system", text: `방향 지시 적용: ${text}` },
+        ]);
+        return;
+      }
+      if (ev.type === "guidance_dropped") {
+        // Round-cap reached before the queued guidance could be injected
+        // (edge case — normal end-turn extends one more round to deliver
+        // the guide). Surface so the user knows their direction-adjustment
+        // was NOT applied — otherwise the silent-drop is worse UX than the
+        // pre-redesign abort-and-restart flow.
+        const text = typeof ev.text === "string" ? ev.text : "";
+        if (text.length === 0) return;
+        setEntries((p) => [
+          ...p,
+          { kind: "system", text: `방향 지시 미적용 (응답 한도 도달): ${text}` },
         ]);
         return;
       }
