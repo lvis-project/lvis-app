@@ -19,24 +19,15 @@ test('session-todo-panel is NOT present when no todos exist', async ({ mainWindo
   expect(visible).toBe(false);
 });
 
-test('session-todo-panel appears inside ChatView after session-todo:changed event', async ({ mainWindow }) => {
+test('session-todo-panel appears inside ChatView after session-todo:changed event', async ({ app, mainWindow }) => {
   // Emit a session-todo:changed event with one in_progress item via the
   // preload bridge that the renderer's api.onSessionTodoChanged subscribes to.
-  await mainWindow.evaluate(() => {
+  await app.evaluate(({ BrowserWindow }) => {
+    const win = BrowserWindow.getAllWindows().find((candidate) => !candidate.isDestroyed());
+    if (!win) return false;
     const item = { id: 'e2e-1', content: 'E2E: Write the fix', status: 'in_progress' };
-    // The renderer subscribes to this IPC channel via api.onSessionTodoChanged.
-    // Simulate it via the global IPC bridge exposed by the preload.
-    const win = window as any;
-    if (typeof win.__lvis_ipc_emit__ === 'function') {
-      win.__lvis_ipc_emit__('lvis:session-todo:changed', { sessionId: undefined, items: [item] });
-    } else if (win.lvisApi?.simulateSessionTodoChanged) {
-      win.lvisApi.simulateSessionTodoChanged({ items: [item] });
-    } else {
-      // Fallback: fire the custom DOM event the renderer also monitors in test mode
-      window.dispatchEvent(new CustomEvent('lvis:session-todo:changed', {
-        detail: { sessionId: undefined, items: [item] },
-      }));
-    }
+    win.webContents.send('lvis:session-todo:changed', { sessionId: undefined, items: [item] });
+    return true;
   });
 
   // Panel should now be visible — it lives inside the chat root grid, not as
@@ -58,4 +49,28 @@ test('session-todo-panel appears inside ChatView after session-todo:changed even
   // The active row must also be present
   const activeRow = mainWindow.locator('[data-testid="session-todo-active-row"]');
   await expect(activeRow).toBeVisible();
+
+  const geometry = await mainWindow.evaluate(() => {
+    const main = document.querySelector<HTMLElement>('main');
+    const dock = document.querySelector<HTMLElement>('[data-testid="session-todo-dock"]');
+    const panel = document.querySelector<HTMLElement>('[data-testid="session-todo-panel"]');
+    if (!main || !dock || !panel) return null;
+    const m = main.getBoundingClientRect();
+    const d = dock.getBoundingClientRect();
+    const p = panel.getBoundingClientRect();
+    return {
+      mainLeft: m.left,
+      mainRight: m.right,
+      dockLeft: d.left,
+      dockRight: d.right,
+      panelLeft: p.left,
+      panelRight: p.right,
+    };
+  });
+
+  expect(geometry, 'session todo dock geometry must be measurable').not.toBeNull();
+  expect(Math.abs(geometry!.dockLeft - geometry!.mainLeft)).toBeLessThanOrEqual(1);
+  expect(Math.abs(geometry!.dockRight - geometry!.mainRight)).toBeLessThanOrEqual(1);
+  expect(Math.abs(geometry!.panelLeft - geometry!.mainLeft)).toBeLessThanOrEqual(1);
+  expect(Math.abs(geometry!.panelRight - geometry!.mainRight)).toBeLessThanOrEqual(1);
 });
