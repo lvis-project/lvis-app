@@ -8,9 +8,11 @@ import type { SerializedHistoryMessage } from "../../shared/chat-history.js";
 import type { PluginConfigRecord } from "../../shared/plugin-config.js";
 import type { ChatSendInputOrigin } from "../../shared/chat-origin.js";
 import type { ActiveRolePrompt, RolePreset } from "../../data/role-presets.js";
+import type { PermissionEvaluationContext as PermissionEvaluationContextShape } from "../../permissions/evaluation-context.js";
 
 // Re-export MCP types for renderer-side consumers (type-only, no main-process runtime)
 export type { McpServerConfig, McpServerConfigDto, McpServerState };
+export type { PermissionEvaluationContext } from "../../permissions/evaluation-context.js";
 
 // Re-export checkpoint chain types for renderer-side consumers (type-only, no main-process runtime)
 export type { CheckpointTrigger, Checkpoint, SessionMetadata } from "../../memory/memory-manager.js";
@@ -535,6 +537,8 @@ export type ApprovalRequest = {
   toolCategory?: "read" | "write" | "shell" | "network" | "meta";
   /** Layer 5 reviewer verdict when the ask came from auto-review. */
   reviewerVerdict?: { level: "low" | "medium" | "high"; reason: string };
+  /** Captured policy/sandbox context for user review. */
+  evaluationContext?: PermissionEvaluationContextShape;
   args: unknown;
   reason: string;
   source?: "builtin" | "plugin" | "mcp";
@@ -594,6 +598,8 @@ export interface DeferredQueueEntry {
   source: "builtin" | "plugin" | "mcp";
   category: "read" | "write" | "shell" | "network" | "meta";
   inputSummary: string;
+  /** Captured policy/sandbox context for user review. */
+  evaluationContext?: PermissionEvaluationContextShape;
   verdict: { level: "low" | "medium" | "high"; reason: string };
   status: "pending" | "approved" | "rejected";
   resolvedAt?: string;

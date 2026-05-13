@@ -4,6 +4,7 @@ import { Button } from "../../../components/ui/button.js";
 import { Input } from "../../../components/ui/input.js";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
 import { Separator } from "../../../components/ui/separator.js";
+import { PERMISSION_REVIEWER_FRAMEWORK } from "../../../shared/permission-reviewer-framework.js";
 import { EXEC_MODE_OPTIONS } from "../constants.js";
 import type {
   ExecMode,
@@ -542,6 +543,59 @@ export function PermissionsTab() {
               LLM API 키는 지능 설정의 공급자 키를 사용합니다. 키가 없거나 재연결에 실패하면 설정은 저장되지 않습니다.
             </p>
           </div>
+
+          <details
+            className="rounded-md border bg-muted/20"
+            data-testid="reviewer-framework-panel"
+          >
+            <summary className="cursor-pointer px-3 py-2 text-xs font-semibold">
+              권한 리뷰어 프레임워크 / 프롬프트
+            </summary>
+            <div className="space-y-3 border-t px-3 py-3 text-xs">
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div className="rounded border bg-background/60 px-2 py-2">
+                  <p className="text-[11px] text-muted-foreground">버전</p>
+                  <p className="mt-1 font-mono">{PERMISSION_REVIEWER_FRAMEWORK.version}</p>
+                </div>
+                <div className="rounded border bg-background/60 px-2 py-2">
+                  <p className="text-[11px] text-muted-foreground">출력 계약</p>
+                  <p className="mt-1 font-mono">{PERMISSION_REVIEWER_FRAMEWORK.outputContract}</p>
+                </div>
+              </div>
+              <div className="rounded border bg-background/60 px-2 py-2">
+                <p className="mb-1 text-[11px] font-medium text-muted-foreground">위험도 기준</p>
+                <ul className="space-y-1">
+                  {PERMISSION_REVIEWER_FRAMEWORK.levels.map((level) => (
+                    <li key={level.level}>
+                      <span className="font-mono uppercase">{level.level}</span> · {level.definition}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div className="rounded border bg-background/60 px-2 py-2">
+                <p className="mb-1 text-[11px] font-medium text-muted-foreground">판단 구성</p>
+                <ul className="space-y-1">
+                  {PERMISSION_REVIEWER_FRAMEWORK.compositionRules.map((rule) => (
+                    <li key={rule}>{rule}</li>
+                  ))}
+                </ul>
+              </div>
+              <div className="rounded border bg-background/60 px-2 py-2">
+                <p className="mb-1 text-[11px] font-medium text-muted-foreground">LLM 입력 필드</p>
+                <p className="font-mono leading-relaxed">
+                  {PERMISSION_REVIEWER_FRAMEWORK.inputFields.join(" · ")}
+                </p>
+              </div>
+              <details className="rounded border bg-background/60">
+                <summary className="cursor-pointer px-2 py-2 text-[11px] font-medium">
+                  시스템 프롬프트 원문
+                </summary>
+                <pre className="max-h-56 overflow-auto border-t px-2 py-2 whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed">
+                  {PERMISSION_REVIEWER_FRAMEWORK.systemPrompt}
+                </pre>
+              </details>
+            </div>
+          </details>
         </div>
 
         <Separator />

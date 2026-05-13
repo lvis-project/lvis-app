@@ -25,6 +25,7 @@ import { randomUUID } from "node:crypto";
 import { withFileLock } from "../../lib/with-file-lock.js";
 import { createLogger } from "../../lib/logger.js";
 import type { RiskVerdict } from "./risk-classifier.js";
+import type { PermissionEvaluationContext } from "../evaluation-context.js";
 import type { ToolCategory, ToolSource } from "../../tools/types.js";
 
 const log = createLogger("deferred-queue");
@@ -39,6 +40,8 @@ export interface DeferredEntry {
   category: ToolCategory;
   /** DLP-redacted finalInput summary (NOT the raw input). */
   inputSummary: string;
+  /** Captured policy/sandbox context for user review. */
+  evaluationContext?: PermissionEvaluationContext;
   verdict: RiskVerdict;
   status: DeferredEntryStatus;
   /** When status !== "pending", the resolution decision timestamp. */
@@ -99,6 +102,7 @@ export class DeferredQueue {
     source: ToolSource;
     category: ToolCategory;
     inputSummary: string;
+    evaluationContext?: PermissionEvaluationContext;
     verdict: RiskVerdict;
   }): Promise<string> {
     this.ensureLoaded();
