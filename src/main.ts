@@ -77,31 +77,6 @@ if (process.platform === "win32" && process.env.LVIS_KEEP_GPU !== "1") {
   app.disableHardwareAcceleration();
 }
 
-// §AAD-SeamlessSSO: Allow Chromium to respond to `WWW-Authenticate: Negotiate`
-// challenges from Microsoft's Azure AD seamless-SSO endpoints with the OS
-// Kerberos ticket. Mirrors Edge/Chrome's silent Outlook auto-login on a
-// corp-joined Windows PC.
-//
-// Apex hosts only — Chromium's `*` glob (per `AuthServerAllowlist` policy)
-// matches any character sequence including dots, so `*login.microsoftonline.com`
-// would also accept attacker-controlled `evil-login.microsoftonline.com`.
-// AAD's Negotiate challenge actually originates from the apex; subdomains
-// are not in the Seamless-SSO flow today.
-//
-// Off-corp / non-joined PC: no Kerberos ticket → existing MSAL popup fallback.
-// `--auth-negotiate-delegate-allowlist` 는 의도적으로 미설정 — ticket 은
-// challenge 응답 1-hop 만 전달되고 downstream 으로 forwarding (unconstrained
-// delegation) 되지 않도록.
-// `LVIS_DISABLE_AAD_SSO=1` 으로 환경 변수 opt-out 가능 (비-corp / red-team
-// 테스트 / Kerberos 없이 AAD 흐름 검증 시). 동일 tier 의 `LVIS_KEEP_GPU` 패턴.
-export const AAD_NEGOTIATE_HOSTS = [
-  "login.microsoftonline.com",
-  "autologon.microsoftazuread-sso.com",
-] as const;
-if (process.env.LVIS_DISABLE_AAD_SSO !== "1") {
-  app.commandLine.appendSwitch("auth-server-allowlist", AAD_NEGOTIATE_HOSTS.join(","));
-}
-
 // Windows 10/11 OS notifications require an AppUserModelId — without this,
 // `new Notification(...)` toasts are silently dropped or grouped under the
 // generic "Electron" identity. Issue #260 NotificationService relies on this.
