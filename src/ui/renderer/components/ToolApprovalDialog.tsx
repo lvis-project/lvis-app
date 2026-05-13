@@ -28,6 +28,10 @@ import {
   type ReviewBasisRow,
   type RiskLevel,
 } from "./permissions/PermissionDecisionCard.js";
+import {
+  formatEvaluationLimits,
+  PermissionEvaluationContextPanel,
+} from "./permissions/PermissionEvaluationContextPanel.js";
 
 export function ToolApprovalDialog({
   open,
@@ -155,6 +159,8 @@ export function ToolApprovalDialog({
               ))}
             </div>
 
+            <PermissionEvaluationContextPanel context={request.evaluationContext} />
+
             <details className="min-w-0 rounded-md border bg-muted/20">
               <summary className="cursor-pointer px-3 py-2 text-xs font-semibold">
                 전체 입력 보기
@@ -274,7 +280,7 @@ function approvalReviewRows(
       { label: "명령", value: pickSummary(parsed, ["command", "cmd", "args", "script", "argv"], inputSummary), monospace: true, testId: "tool-approval-input" },
       { label: "작업 디렉토리/환경", value: pickSummary(parsed, ["cwd", "workingDirectory", "env", "environment"], "작업 디렉토리/환경 정보는 입력 요약에 명시되지 않음"), monospace: true },
       { label: "부작용", value: "파일 변경, 네트워크 호출, dependency install, background process 가능성을 명령 기준으로 확인합니다." },
-      { label: "제한", value: pickSummary(parsed, ["timeout", "sandbox", "allowedDirectories", "allowedDir"], "제한 정보는 입력 요약에 명시되지 않음") },
+      { label: "제한", value: formatEvaluationLimits(request.evaluationContext) },
     );
   } else {
     rows.push({

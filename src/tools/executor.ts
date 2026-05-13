@@ -32,6 +32,10 @@ import type {
 import { trustFromSource } from "./types.js";
 import type { PermissionManager, PermissionCheckResult } from "../permissions/permission-manager.js";
 import type { ApprovalGate, ApprovalMode } from "../permissions/approval-gate.js";
+import {
+  buildPermissionEvaluationContext,
+  type PermissionEvaluationContext,
+} from "../permissions/evaluation-context.js";
 import { isSensitivePath, canonicalizePathForMatch, caseFoldForMatch } from "../permissions/sensitive-paths.js";
 import {
   buildAllowedScope,
@@ -565,6 +569,7 @@ export class ToolExecutor {
     allowedDirectories: string[],
     sensitivePathsAdjacent: string[],
     context: ToolPermissionContext,
+    evaluationContext: PermissionEvaluationContext,
   ): Promise<
     | { allowed: true; permissionResult: PermissionCheckResult }
     | { allowed: false; message: string; permissionResult: PermissionCheckResult }
@@ -577,6 +582,7 @@ export class ToolExecutor {
         source,
         category,
         inputSummary: summarizeInputForDeferred(finalInput),
+        evaluationContext,
         verdict,
       });
       return {
@@ -616,6 +622,7 @@ export class ToolExecutor {
         allowedDirectories,
         sensitivePathsAdjacent,
         trustOrigin: context.trustOrigin,
+        evaluationContext,
         ...(context.approvalCacheKey ? { approvalCacheKey: context.approvalCacheKey } : {}),
       },
       {
@@ -664,6 +671,7 @@ export class ToolExecutor {
     allowedDirectories: string[],
     sensitivePathsAdjacent: string[],
     context: ToolPermissionContext,
+    evaluationContext: PermissionEvaluationContext,
   ): Promise<PermissionCheckResult | null> {
     if (context.headless === true) return null;
     if (this.permissionManager?.getMode() !== "auto") return null;
@@ -688,6 +696,7 @@ export class ToolExecutor {
         allowedDirectories,
         sensitivePathsAdjacent,
         trustOrigin: context.trustOrigin,
+        evaluationContext,
         ...(context.approvalCacheKey ? { approvalCacheKey: context.approvalCacheKey } : {}),
       },
       {
@@ -836,6 +845,22 @@ export class ToolExecutor {
     };
     let invocationAllowedScope = buildAllowedScope(invocationPermissionContext.additionalDirectories);
     let invocationRuntimeAllowedDirectories = buildRuntimeAllowedDirectories(invocationPermissionContext.additionalDirectories);
+    const makeEvaluationContext = (input: {
+      pathFields: readonly string[];
+      targetFilePaths?: readonly string[];
+      sensitivePathsAdjacent?: readonly string[];
+    }): PermissionEvaluationContext => buildPermissionEvaluationContext({
+      policyMode: this.permissionManager?.getMode?.() ?? "unmanaged",
+      headless: invocationPermissionContext.headless === true,
+      source,
+      category: invocationCategory,
+      trustOrigin: invocationPermissionContext.trustOrigin,
+      executionCwd,
+      allowedDirectories: invocationAllowedScope.directories,
+      pathFields: input.pathFields,
+      targetFilePaths: input.targetFilePaths ?? [],
+      sensitivePathsAdjacent: input.sensitivePathsAdjacent ?? [],
+    });
 
     const requestOutOfAllowedDirectoryAccess = async (
       outOfAllowedTarget: { filePath: string; canonicalPath: string },
@@ -877,6 +902,11 @@ export class ToolExecutor {
           isReadOnly: invocationCategory === "read",
           mode: this.currentApprovalMode(),
           sensitivePathPattern: requestSensitivePathPattern,
+          evaluationContext: makeEvaluationContext({
+            pathFields: reviewerPathFields,
+            targetFilePaths: [outOfAllowedTarget.filePath],
+            sensitivePathsAdjacent: validation.adjacencyWarnings,
+          }),
           outOfAllowedDir: {
             candidatePath: outOfAllowedTarget.filePath,
             suggestedParent,
@@ -952,6 +982,11 @@ export class ToolExecutor {
             source,
             category: invocationCategory,
             inputSummary: summarizeInputForDeferred(finalInput),
+            evaluationContext: makeEvaluationContext({
+              pathFields: reviewerPathFields,
+              targetFilePaths: [outOfAllowedTarget.filePath],
+              sensitivePathsAdjacent: validation.adjacencyWarnings,
+            }),
             verdict,
           })
           : undefined;
@@ -1157,6 +1192,11 @@ export class ToolExecutor {
         // sufficient).
       }
     }
+    const evaluationContext = makeEvaluationContext({
+      pathFields: tool.pathFields ?? [],
+      targetFilePaths,
+      sensitivePathsAdjacent: sensitivePathPattern ? [sensitivePathPattern] : [],
+    });
 
     // ── Step 3: Permission (source-aware) ───────────
     //
@@ -1217,6 +1257,7 @@ export class ToolExecutor {
           invocationAllowedScope.directories,
           sensitivePathPattern ? [sensitivePathPattern] : [],
           invocationPermissionContext,
+          evaluationContext,
         );
         if (reviewerResult) {
           permissionResult = reviewerResult;
@@ -1259,6 +1300,7 @@ export class ToolExecutor {
             invocationAllowedScope.directories,
             sensitivePathPattern ? [sensitivePathPattern] : [],
             invocationPermissionContext,
+            evaluationContext,
           );
           if (reviewerResult.allowed) {
             permissionResult = reviewerResult.permissionResult;
@@ -1292,6 +1334,7 @@ export class ToolExecutor {
             mode: this.currentApprovalMode(),
             sensitivePathPattern,
             trustOrigin: invocationPermissionContext.trustOrigin,
+            evaluationContext,
           };
 
           const permHook = await this.runScriptHook(

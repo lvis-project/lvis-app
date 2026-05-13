@@ -305,6 +305,8 @@ describe("PermissionsTab hook quarantine notice", () => {
     expect(screen.getByTestId("reviewer-provider-select")).toBeTruthy();
     expect(screen.getByTestId("reviewer-fallback-select")).toBeTruthy();
     expect(screen.getByTestId("reviewer-model-input")).toBeTruthy();
+    expect(screen.getByTestId("reviewer-framework-panel")).toBeTruthy();
+    expect(screen.getByText("permission-reviewer-framework/v1")).toBeTruthy();
   });
 
   it("exposes the LLM reviewer fallback policy instead of hiding fail-open behavior", async () => {
