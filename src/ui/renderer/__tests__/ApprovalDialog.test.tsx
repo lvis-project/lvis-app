@@ -8,7 +8,25 @@ import "../../../../test/renderer/setup.js";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, fireEvent, waitFor } from "@testing-library/react";
 import { ApprovalDialog } from "../dialogs/ApprovalDialog.js";
-import type { ApprovalRequest } from "../types.js";
+import type { ApprovalRequest, PermissionEvaluationContext } from "../types.js";
+
+function makeEvaluationContext(overrides: Partial<PermissionEvaluationContext> = {}): PermissionEvaluationContext {
+  return {
+    version: "permission-evaluation-context/v1",
+    reviewerFrameworkVersion: "permission-reviewer-framework/v1",
+    policyMode: "auto",
+    headless: false,
+    source: "builtin",
+    category: "shell",
+    trustOrigin: "user-keyboard",
+    executionCwd: "C:\\workspace\\lvis-app",
+    allowedDirectories: ["C:\\workspace\\lvis-app", "C:\\tmp"],
+    pathFields: ["path"],
+    targetFilePaths: ["C:\\workspace\\lvis-app\\README.md"],
+    sensitivePathsAdjacent: [],
+    ...overrides,
+  };
+}
 
 function makeRequest(overrides: Partial<ApprovalRequest> = {}): ApprovalRequest {
   return {
@@ -92,6 +110,32 @@ describe("ApprovalDialog", () => {
     });
     expect(document.body.textContent).toContain("대기 중 1개");
     expect(document.body.textContent).not.toContain("모두 허용");
+  });
+
+  it("surfaces captured permission evaluation context instead of reconstructing sandbox details from args", async () => {
+    render(
+      <ApprovalDialog
+        queue={[makeRequest({
+          toolName: "powershell",
+          toolCategory: "shell",
+          args: { command: "Get-ChildItem", cwd: "stale-from-args" },
+          reviewerVerdict: { level: "medium", reason: "shell unclassified" },
+          evaluationContext: makeEvaluationContext({
+            executionCwd: "C:\\Users\\ikcha\\workspace\\lvis-project\\lvis-app",
+            allowedDirectories: ["C:\\Users\\ikcha\\workspace\\lvis-project\\lvis-app"],
+            targetFilePaths: [],
+          }),
+        })]}
+        onDecide={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(document.body.textContent).toContain("검증 환경 / 샌드박스 평가");
+      expect(document.body.textContent).toContain("permission-evaluation-context/v1");
+      expect(document.body.textContent).toContain("permission-reviewer-framework/v1");
+      expect(document.body.textContent).toContain("C:\\Users\\ikcha\\workspace\\lvis-project\\lvis-app");
+    });
   });
 
   it("routes out-of-allowed-dir requests to the directory access card", async () => {

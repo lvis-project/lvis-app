@@ -21,6 +21,7 @@ import {
   type ToolInvocationContext,
   type RiskVerdict,
 } from "../reviewer/risk-classifier.js";
+import { PERMISSION_REVIEWER_FRAMEWORK } from "../../shared/permission-reviewer-framework.js";
 
 const ALLOWED = ["/Users/ken/work", "/Users/ken/.lvis"];
 
@@ -306,6 +307,7 @@ describe("LlmRiskClassifier — DLP filter on input (security threat-gap #3)", (
     );
     expect(completeSpy).toHaveBeenCalledOnce();
     const arg = completeSpy.mock.calls[0][0];
+    expect(arg.systemPrompt).toBe(PERMISSION_REVIEWER_FRAMEWORK.systemPrompt);
     expect(arg.userPrompt).not.toContain("sk-abc123");
     expect(arg.userPrompt).toContain("sk-****");
   });
