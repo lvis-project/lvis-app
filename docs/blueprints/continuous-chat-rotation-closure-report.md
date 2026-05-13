@@ -1,6 +1,8 @@
 # LVIS Continuous Chat Rotation — Closure Report
 
-**Status**: ✅ COMPLETE
+> **⚠️ SUPERSEDED 2026-05-13 by PR-2-F-2** — Fork-based rotation (`runRotationCheck` / `decideRotation` / `RotationDecision` / `CheckpointTriggerType` / `rotateActive` / `justRotated` / child session 생성) 은 모두 *완전 제거* 되었고, Layer 0 preflight + Layer 2 LLM compact + Layer 3 same-session checkpoint chain (Copilot 패턴) 으로 대체됐다. compact_notice IPC payload 의 `revertSessionId` 필드 + 4-tier label model (긴급 정리 / 주제 전환 / 이전 세션 정리 / 자동 정리) + "↩ 여기로 되돌아가기" parent-resume 버튼도 함께 폐기. 본 문서의 §1~§5 (특히 lines 66, 80-82, 111, 113, 132, 146-152) 는 PR-2-F-2 이전 모델 기준의 *역사 기록* 으로만 참조할 것 — 현행 모델은 `docs/architecture/architecture.md` §4.5.4 + §4.5.11, 코드 SoT 는 `src/engine/auto-compact.ts:66-68,114-124` 및 `src/lib/chat-stream-state.ts:8`.
+
+**Status**: ✅ COMPLETE (as of Phase 3 — 2026-05-04). Superseded by PR-2-F-2 (2026-05-13+).
 **Window**: 2026-04-30 → 2026-05-04 (Phase 1+2+3 + 2026-05-04 incident hotfix)
 **Issue**: #457 — Implement Continuous Chat v3 with invisible checkpoints
 **PRs**: #520 (Phase 1+2 cleanup) · #521 (Phase 3 revert UI) · #522 (urgent hotfix) · #525 (incomplete-turn guards + tier-3 simplification)
