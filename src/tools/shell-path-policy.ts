@@ -170,6 +170,59 @@ export function validateShellCommandPathPolicy(
   return findShellPathPolicyViolation(command, cwd, sandboxRoot, extraAllowedDirectories)?.reason ?? null;
 }
 
+/**
+ * Map of recursive-traversal shell commands → equivalent LVIS builtin tool.
+ *
+ * The block message threads this hint through so the LLM agent (or human
+ * operator reading the error) can retry with a sandbox-aware alternative
+ * instead of re-narrowing into an unrelated subdirectory — the failure mode
+ * observed when a model fell back from `find /Users/ken/Documents` to
+ * `list_files /Users/ken/Documents/journals` (a guessed sub-path) rather
+ * than `list_files /Users/ken/Documents` (the original target).
+ *
+ * Entries that map to "(no direct LVIS equivalent)" still receive the
+ * "preserve the original target path" instruction so the LLM doesn't
+ * silently scope down on retry.
+ */
+/**
+ * Map keys MUST be a subset of `RECURSIVE_TRAVERSAL_COMMANDS` ∪
+ * `RECURSIVE_FLAG_COMMANDS` — any key outside that union is dead code (the
+ * lookup site is only reached when one of those two sets matches). Tests in
+ * `__tests__/shell-path-policy.test.ts` lock the mapped-vs-fallback contract.
+ */
+const LVIS_ALTERNATIVE_BY_COMMAND: Readonly<Record<string, string>> = {
+  // Traversal commands (RECURSIVE_TRAVERSAL_COMMANDS):
+  find: "glob_files (이름 패턴 매칭) 또는 list_files (디렉토리 목록)",
+  fd: "glob_files (이름 패턴 매칭)",
+  fdfind: "glob_files (이름 패턴 매칭)",
+  rg: "grep_files (콘텐츠 검색)",
+  tree: "list_files (재귀 옵션 포함)",
+  tar: "(LVIS 내장 대안 없음 — 비재귀 ls/cat 등으로 분해하세요)",
+  unzip: "(LVIS 내장 대안 없음)",
+  zip: "(LVIS 내장 대안 없음)",
+  // Flag-recursive commands (RECURSIVE_FLAG_COMMANDS):
+  grep: "grep_files (콘텐츠 검색)",
+  egrep: "grep_files (콘텐츠 검색 — 정규식)",
+  fgrep: "grep_files (콘텐츠 검색 — 고정 문자열)",
+  cp: "(LVIS 내장 대안 없음 — read_file + write_file 조합으로 개별 파일 처리)",
+  mv: "move_file (개별 파일 단위로)",
+};
+
+function buildRecursiveBlockMessage(
+  commandToken: string,
+  commandName: string,
+  flag?: string,
+): string {
+  const head = flag
+    ? `Sandbox: recursive shell filesystem traversal is not allowed: ${commandToken} ${flag}`
+    : `Sandbox: recursive shell filesystem traversal is not allowed: ${commandToken}`;
+  const alt = LVIS_ALTERNATIVE_BY_COMMAND[commandName];
+  const guidance = alt
+    ? ` LVIS 내장 도구 권장: ${alt}. 원래 target path 를 그대로 유지하세요 — 하위 디렉토리로 좁히지 마세요.`
+    : " 재귀 walk 는 path-policy 가 정적으로 검증할 수 없어 차단됩니다. 비재귀 명령으로 다시 시도하거나, 원래 target path 를 그대로 유지한 채 LVIS 내장 파일 도구를 사용하세요.";
+  return head + guidance;
+}
+
 function findUnsafeRecursiveTraversal(command: string): string | null {
   for (const segment of splitCommandSegments(command)) {
     const tokens = tokenizeCommand(segment);
@@ -178,14 +231,14 @@ function findUnsafeRecursiveTraversal(command: string): string | null {
     const commandName = normalizeCommandName(tokens[commandIndex]);
     if (!commandName) continue;
     if (RECURSIVE_TRAVERSAL_COMMANDS.has(commandName)) {
-      return `Sandbox: recursive shell filesystem traversal is not allowed: ${tokens[commandIndex]}`;
+      return buildRecursiveBlockMessage(tokens[commandIndex], commandName);
     }
     const recursiveFlags = RECURSIVE_FLAG_COMMANDS.get(commandName);
     if (recursiveFlags) {
       const args = tokens.slice(commandIndex + 1);
       const flag = args.find((arg) => recursiveFlags.some((candidate) => hasShellFlag(arg, candidate)));
       if (flag) {
-        return `Sandbox: recursive shell filesystem traversal is not allowed: ${tokens[commandIndex]} ${flag}`;
+        return buildRecursiveBlockMessage(tokens[commandIndex], commandName, flag);
       }
     }
   }

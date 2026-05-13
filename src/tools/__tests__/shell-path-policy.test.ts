@@ -71,6 +71,43 @@ describe("shell-path-policy", () => {
     });
   });
 
+  it("`find` block message points at glob_files / list_files and tells the caller to keep the original target path", () => {
+    withRoot((root) => {
+      const msg = validateShellCommandPathPolicy("find /tmp/foo -type f", root, root, ["/tmp/foo"]);
+      expect(msg).toContain("find");
+      expect(msg).toContain("glob_files");
+      expect(msg).toContain("list_files");
+      // The "preserve original target path" instruction is the load-bearing fix
+      // — stops the LLM from narrowing into a guessed sub-path on retry.
+      expect(msg).toContain("원래 target path 를 그대로 유지");
+    });
+  });
+
+  it("`rg` block message points at grep_files and preserves the path", () => {
+    withRoot((root) => {
+      const msg = validateShellCommandPathPolicy("rg pattern /tmp/foo", root, root, ["/tmp/foo"]);
+      expect(msg).toContain("grep_files");
+      expect(msg).toContain("원래 target path 를 그대로 유지");
+    });
+  });
+
+  it("flag-based `grep -r` block message includes the LVIS alternative + preserve-path hint", () => {
+    withRoot((root) => {
+      const msg = validateShellCommandPathPolicy("grep -r needle ./src", root, root, []);
+      expect(msg).toContain("grep_files");
+      expect(msg).toContain("원래 target path 를 그대로 유지");
+    });
+  });
+
+  it("recursive commands without a mapped LVIS alternative still get the preserve-path fallback hint", () => {
+    withRoot((root) => {
+      const msg = validateShellCommandPathPolicy("ls -R ./src", root, root, []);
+      // `ls` has no mapped LVIS alternative (only the explicit flag-set is blocked),
+      // so the fallback guidance must still nudge the caller to keep the target path.
+      expect(msg).toContain("원래 target path 를 그대로 유지");
+    });
+  });
+
   it("rejects PowerShell Join-Path dynamic path composition", () => {
     withRoot((root) => {
       expect(validateShellCommandPathPolicy("Join-Path $HOME .ssh", root, root, [])).toContain("dynamic path");
