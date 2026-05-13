@@ -76,6 +76,24 @@ if (process.platform === "win32" && process.env.LVIS_KEEP_GPU !== "1") {
   app.disableHardwareAcceleration();
 }
 
+// §AAD-SeamlessSSO: Allow Chromium to respond to `WWW-Authenticate: Negotiate`
+// challenges from Microsoft's Azure AD seamless-SSO endpoints with the OS
+// Kerberos ticket. On a corp-joined Windows machine inside the corp network,
+// this lets `login.microsoftonline.com` complete silent SSO without a password
+// prompt — the same mechanism that already drives Edge/Chrome auto-login to
+// Outlook. Scope is narrow on purpose (two Microsoft hosts only) so the
+// ticket is never delegated to `*.lge.com` or any other plugin auth window.
+// Must run before `app.whenReady()`; this is also the standard placement
+// pattern used by the WSL/Wayland and GPU switches above.
+//
+// Failure mode outside corp network / non-joined PC: Chromium simply receives
+// no Kerberos ticket from the OS and falls back to the existing interactive
+// MSAL popup. No regression for those users.
+app.commandLine.appendSwitch(
+  "auth-server-allowlist",
+  "*login.microsoftonline.com,autologon.microsoftazuread-sso.com",
+);
+
 // Windows 10/11 OS notifications require an AppUserModelId — without this,
 // `new Notification(...)` toasts are silently dropped or grouped under the
 // generic "Electron" identity. Issue #260 NotificationService relies on this.
