@@ -619,4 +619,89 @@ describe("ApprovalGate", () => {
     expect(result.rememberPattern).toContain("**/.ssh/**");
     expect(wc.send).not.toHaveBeenCalled();
   });
+
+  it("auto-injects sandboxCapability for tool-kind requests (round-4 test-engineer MAJOR)", () => {
+    const wc = makeMockWebContents();
+    const stub = vi.fn(() => ({
+      kind: "bubblewrap" as const,
+      confidence: "verified" as const,
+      platform: "linux" as NodeJS.Platform,
+      reason: "stubbed for test",
+    }));
+    const gate = new ApprovalGate(
+      wc as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      stub,
+    );
+    gate.requestAndWait(makeRequest({ id: "req-sandbox-inject" }));
+    expect(stub).toHaveBeenCalledOnce();
+    const sent = (wc.send.mock.calls[0] as [string, ApprovalRequest])[1];
+    expect(sent.sandboxCapability).toEqual(expect.objectContaining({
+      kind: "bubblewrap",
+      platform: "linux",
+    }));
+  });
+
+  it("preserves an explicitly-provided sandboxCapability without re-detecting (round-4 test-engineer MAJOR)", () => {
+    const wc = makeMockWebContents();
+    const stub = vi.fn(() => ({
+      kind: "bubblewrap" as const,
+      confidence: "verified" as const,
+      platform: "linux" as NodeJS.Platform,
+      reason: "should NOT be used",
+    }));
+    const gate = new ApprovalGate(
+      wc as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      stub,
+    );
+    const explicitCap = {
+      kind: "none" as const,
+      confidence: "verified" as const,
+      platform: "darwin" as NodeJS.Platform,
+      reason: "caller-supplied override",
+    };
+    gate.requestAndWait(makeRequest({ id: "req-sandbox-explicit", sandboxCapability: explicitCap }));
+    expect(stub).not.toHaveBeenCalled();
+    const sent = (wc.send.mock.calls[0] as [string, ApprovalRequest])[1];
+    expect(sent.sandboxCapability).toEqual(explicitCap);
+  });
+
+  it("does NOT inject sandboxCapability for out-of-allowed-dir kind (round-4 critic CRITICAL C2)", () => {
+    const wc = makeMockWebContents();
+    const stub = vi.fn(() => ({
+      kind: "bubblewrap" as const,
+      confidence: "verified" as const,
+      platform: "linux" as NodeJS.Platform,
+      reason: "should NOT be used",
+    }));
+    const gate = new ApprovalGate(
+      wc as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      stub,
+    );
+    gate.requestAndWait(makeRequest({
+      id: "req-oad",
+      kind: "out-of-allowed-dir",
+      toolName: "read_file",
+      outOfAllowedDir: {
+        candidatePath: "/some/path",
+        suggestedParent: "/some",
+        currentAllowed: [],
+        adjacencyWarnings: [],
+      },
+    }));
+    expect(stub).not.toHaveBeenCalled();
+    const sent = (wc.send.mock.calls[0] as [string, ApprovalRequest])[1];
+    expect(sent.sandboxCapability).toBeUndefined();
+  });
 });

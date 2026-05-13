@@ -290,17 +290,28 @@ export class ApprovalGate {
    */
   private readonly sessionKey: Buffer = randomBytes(32);
 
+  /**
+   * Round-4 architect MAJOR — injectable sandbox-capability provider.
+   * Defaults to {@link detectSandboxCapability} but can be overridden
+   * at construction time (tests, future async probe). Avoids the
+   * tight module-level coupling that complicated unit testing in
+   * round 3.
+   */
+  private readonly sandboxCapabilityProvider: () => SandboxCapability;
+
   constructor(
     webContents: WebContents,
     initialPolicy?: PolicyFile,
     timeoutMs = 5 * 60 * 1000,
     auditLogger?: AuditLogger,
     notificationService?: NotificationService,
+    sandboxCapabilityProvider: () => SandboxCapability = detectSandboxCapability,
   ) {
     this.webContents = webContents;
     this.timeoutMs = timeoutMs;
     this.auditLogger = auditLogger;
     this.notificationService = notificationService;
+    this.sandboxCapabilityProvider = sandboxCapabilityProvider;
     this.currentPolicy = initialPolicy ?? {
       version: 1,
       requireExplicitApproval: true,
@@ -324,16 +335,21 @@ export class ApprovalGate {
   async requestAndWait(
     req: Omit<ApprovalRequest, "requireExplicit">,
   ): Promise<ApprovalDecision> {
-    // Round-3 code-reviewer MAJOR — sandbox capability injection SOT.
-    // Every approval request the renderer sees now carries the sandbox
-    // SOT, including mode-change and out-of-allowed-dir approvals that
-    // do not flow through the executor's tool-approval path. Without
-    // this, the "격리" row in `ToolApprovalDialog` would be visible on
-    // tool asks but invisible on mode-change asks — UX divergence
-    // across two surfaces that should agree.
+    // Round-3 code-reviewer MAJOR + round-4 critic CRITICAL — sandbox
+    // capability injection is scoped to the tool-approval surface that
+    // actually renders the "격리" row (`kind === "tool"` or absent =
+    // tool-default). The `out-of-allowed-dir` card is a Layer 1
+    // directory-confirm surface that has no sandbox row in its DOM;
+    // injecting capability there is dead data (and the round-3 commit
+    // message's "every approval card surfaces the capability" claim
+    // was correctly scoped to the tool dialog).
+    //
+    // Caller-supplied capability is always preserved (`??` semantics).
+    const isToolKind = req.kind === undefined || req.kind === "tool";
     const fullReq: ApprovalRequest = {
       ...req,
-      sandboxCapability: req.sandboxCapability ?? detectSandboxCapability(),
+      sandboxCapability: req.sandboxCapability ??
+        (isToolKind ? this.sandboxCapabilityProvider() : undefined),
       requireExplicit: this.currentPolicy.requireExplicitApproval,
     };
 
@@ -406,7 +422,13 @@ export class ApprovalGate {
       timestamp: new Date().toISOString(),
       sessionId: "approval-gate",
       type: "approval",
-      input: `[approval:requested] ${fullReq.id} toolName=${fullReq.toolName} category=${fullReq.category} source=${fullReq.source ?? "unknown"} trustOrigin=${fullReq.trustOrigin ?? "unknown"}`,
+      // Round-4 critic CRITICAL — emit `toolCategory` alongside the
+      // top-level `category` discriminator so forensic readers can
+      // distinguish a tool ask (toolCategory="shell"/"write"/...) from a
+      // mode-change ask (toolCategory="meta"). Without this, both
+      // shapes serialize as `category=tool` and incident replay can't
+      // tell them apart.
+      input: `[approval:requested] ${fullReq.id} toolName=${fullReq.toolName} category=${fullReq.category} toolCategory=${fullReq.toolCategory ?? "unknown"} kind=${fullReq.kind ?? "tool"} source=${fullReq.source ?? "unknown"} trustOrigin=${fullReq.trustOrigin ?? "unknown"}`,
     });
 
     // Issue #260 — surface a system notification when an approval is about
