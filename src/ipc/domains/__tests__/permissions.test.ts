@@ -390,4 +390,84 @@ describe("permissions IPC handlers", () => {
     expect(queue.resolve).not.toHaveBeenCalled();
     expect(deps.auditLogger.appendPermissionAuditEntry).toHaveBeenCalledOnce();
   });
+
+  // ── Issue #690 P4 — approvalSource provenance in audit row ────────────
+  // Round-1 test-engineer CRITICAL-1: end-to-end IPC → audit
+  // integration assertion that the natural-language provenance reaches
+  // the audit chain.
+  it("deferredResolve records approvalSource='natural-language' in the audit entry", async () => {
+    const entry = makeDeferredEntry();
+    const queue = {
+      get: vi.fn(() => entry),
+      resolve: vi.fn(async (_id: string, status: string) => ({
+        ...entry,
+        status,
+        resolvedAt: "2026-05-10T00:00:01Z",
+      })),
+    };
+    const { deps } = await setup({ queue });
+
+    const result = await invoke(PERMISSIONS.deferredResolve, {
+      id: "deferred-1",
+      decision: "approved",
+      reason: "natural-language match: 허용해 주세요",
+      approvalSource: "natural-language",
+      intent: USER_INTENT,
+    });
+
+    expect(result).toMatchObject({ ok: true });
+    expect(deps.auditLogger.appendPermissionAuditEntry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        decision: "deferred_resolve",
+        resolution: "approved",
+        approvalSource: "natural-language",
+        queueId: "deferred-1",
+      }),
+    );
+  });
+
+  it("deferredResolve defaults approvalSource to 'button' when omitted (backward compat)", async () => {
+    const entry = makeDeferredEntry();
+    const queue = {
+      get: vi.fn(() => entry),
+      resolve: vi.fn(async (_id: string, status: string) => ({
+        ...entry,
+        status,
+        resolvedAt: "2026-05-10T00:00:01Z",
+      })),
+    };
+    const { deps } = await setup({ queue });
+
+    await invoke(PERMISSIONS.deferredResolve, {
+      id: "deferred-1",
+      decision: "approved",
+      intent: USER_INTENT,
+    });
+
+    expect(deps.auditLogger.appendPermissionAuditEntry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        approvalSource: "button",
+      }),
+    );
+  });
+
+  it("deferredResolve rejects an unknown approvalSource value as invalid-params", async () => {
+    const entry = makeDeferredEntry();
+    const queue = {
+      get: vi.fn(() => entry),
+      resolve: vi.fn(async () => ({ ...entry, status: "approved" })),
+    };
+    const { deps } = await setup({ queue });
+
+    const result = await invoke(PERMISSIONS.deferredResolve, {
+      id: "deferred-1",
+      decision: "approved",
+      approvalSource: "voice-assistant",
+      intent: USER_INTENT,
+    });
+
+    expect(result).toEqual({ ok: false, error: "invalid-params" });
+    expect(queue.resolve).not.toHaveBeenCalled();
+    expect(deps.auditLogger.appendPermissionAuditEntry).not.toHaveBeenCalled();
+  });
 });

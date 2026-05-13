@@ -870,6 +870,10 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
     try {
       const permMgr = new PermissionManager(join(dir, "permissions.json"));
       permMgr.setMode("auto");
+      // Round-1 critic MAJOR-2: `mode=auto` alone no longer enables
+      // foreground-auto reviewer; the interactive setting is the SOT.
+      // The UI couples both flips when the user picks `auto` exec mode.
+      permMgr.setInteractiveAutoApprove("low");
       permMgr.setReviewer({
         classifier: {
           classify: vi.fn(() => ({ level: "low", reason: "reviewer says safe" })),
