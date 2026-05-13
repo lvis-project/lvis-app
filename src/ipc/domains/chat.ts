@@ -169,6 +169,7 @@ async function runStreamedTurn(
       onLlmStatus: (status) => send({ type: "llm_status", ...status }),
       onFallback: (from, to) => sendToWebContents(webContents, "lvis:chat:fallback", { from, to }, log),
       onGuidanceInjected: (text) => send({ type: "guidance_injected", text }),
+      onGuidanceDropped: (text) => send({ type: "guidance_dropped", text }),
     },
     undefined,
     {
@@ -316,6 +317,12 @@ export function registerChatHandlers(deps: IpcDeps): void {
   // Contract diverges from the pre-#623 handler (which aborted + restarted
   // with a guidance prompt template) — see `src/shared/chat-utterance.ts`
   // for the full 4-mode taxonomy.
+  //
+  // Atomicity: the `currentAbortController` check is folded INTO
+  // `queueGuidance` so the renderer can never lose a guide to a turn that
+  // ended between the active-turn check and the enqueue (critic MAJOR #2 /
+  // code-reviewer MAJOR #3). The IPC return value drives the renderer's
+  // "keep typed text vs. clear" decision.
   ipcMain.handle("lvis:chat:guide", async (e, input: string) => {
     if (!validateSender(e)) {
       auditUnauthorized(auditLogger, "lvis:chat:guide", e);
@@ -325,20 +332,28 @@ export function registerChatHandlers(deps: IpcDeps): void {
       return { ok: false, error: "empty-text" };
     }
     // PII redaction applies to guide input too — same trust origin
-    // (user-keyboard) and same downstream LLM consumption as chatSend,
-    // so the policy is identical. webContents is undefined here because
-    // we do not stream a redact notice for guide (no new turn to attach
-    // it to); the notice will fire on the next chatSend instead.
+    // (user-keyboard) and same downstream LLM consumption as chatSend.
+    // The `redact_notice` stream event uses the active turn's streamId
+    // implicitly (sanitizeOutgoingInput sends to the host webContents
+    // directly — renderer surfaces under the current streaming context).
     const win = getMainWindow();
     const effective = sanitizeOutgoingInput(input, win?.webContents);
-    if (!conversationLoop.hasActiveTurn()) {
-      // No round boundary will arrive — refuse rather than silently drop.
-      // Renderer should disable the "방향 지시" affordance when not
-      // streaming; this is a defense-in-depth boundary check.
-      return { ok: false, error: "no-active-turn" };
+    const queueResult = conversationLoop.queueGuidance(effective);
+    if (queueResult === "queued") {
+      // Audit successful guide as a mutating state transition (parity with
+      // `lvis:feedback:submit` and other mutating IPC calls — security
+      // reviewer M2). Log metadata only; the text already passed
+      // `sanitizeOutgoingInput` but logging it widens the disclosure
+      // surface unnecessarily.
+      auditLogger.log({
+        timestamp: new Date().toISOString(),
+        sessionId: conversationLoop.getSessionId(),
+        type: "info",
+        input: `chat:guide:queued:len=${effective.length}`,
+      });
+      return { ok: true };
     }
-    conversationLoop.queueGuidance(effective);
-    return { ok: true };
+    return { ok: false, error: queueResult };
   });
 
   ipcMain.handle("lvis:chat:abort", async (e) => {

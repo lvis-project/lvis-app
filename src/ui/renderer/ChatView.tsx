@@ -73,8 +73,8 @@ export interface ChatViewProps {
   isEntryStarred: (idx: number) => string | null;
   /** B4: abort current streaming turn */
   onAbort: () => void | Promise<void>;
-  /** Mid-stream "guide" utterance — non-interrupting direction adjustment. Caller MUST gate on `streaming`. */
-  onGuide: (text: string) => void | Promise<void>;
+  /** Mid-stream "guide" utterance — non-interrupting direction adjustment. Returns IPC result so caller can preserve typed text on rejection. */
+  onGuide: (text: string) => Promise<{ ok: true } | { ok: false; error: string }>;
   /** D6: submit thumbs up/down feedback for an assistant message */
   onFeedback?: (messageIdx: number, rating: "up" | "down", reason?: string) => void | Promise<void>;
   /** Workflow tool state — lifted to App level so panel survives view navigation */
@@ -1361,8 +1361,15 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             onSend={(intent) => void onAsk(question, intent)}
             onAbort={() => void onAbort()}
             onGuide={() => {
-              void onGuide(question);
-              setQuestion("");
+              const text = question;
+              void (async () => {
+                const result = await onGuide(text);
+                // Preserve typed text on rejection so the user can retry —
+                // common case is the no-active-turn race between Composer's
+                // streaming-derived state and the actual turn lifecycle
+                // (code-reviewer MAJOR #3 / critic MAJOR #6).
+                if (result?.ok === true) setQuestion("");
+              })();
             }}
             streaming={streaming}
             disabled={hasApiKey === false || contextOverflowPct >= 0.95 || viewMode !== null}

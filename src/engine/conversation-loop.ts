@@ -130,6 +130,14 @@ export interface TurnCallbacks {
    */
   onGuidanceInjected?: (text: string) => void;
   /**
+   * Fired once at turn end if any queued guide utterances never reached a
+   * round boundary (single-round turn — typical of short text-only
+   * answers). Renderer surfaces this so the user knows their direction-
+   * adjustment was NOT applied, otherwise the silent-drop UX is worse
+   * than the pre-redesign abort-and-restart behavior (critic MAJOR #3).
+   */
+  onGuidanceDropped?: (text: string) => void;
+  /**
    * Turn aggregate footer (§ chat transcript per-turn footer) — fires once
    * after the turn fully resolves with cumulative wall-clock / step-count /
    * token totals. Renderer maps the payload to a `kind: "turn_summary"`
@@ -339,8 +347,17 @@ export class ConversationLoop {
    * Non-interrupting: the current LLM call and tool round are NOT aborted.
    * Multiple guidance entries within one round boundary are joined with
    * blank lines so the model receives them as a single coherent message.
+   *
+   * Bounded by `GUIDE_MAX_ENTRIES` (entry count) and `GUIDE_MAX_CHARS`
+   * (per-entry char count) — see `queueGuidance` rationale. Overflow is
+   * rejected at enqueue so memory + history bloat is hard-capped against
+   * runaway renderer / autorepeat keyboard pressure.
    */
   private guidanceQueue: string[] = [];
+  /** Max queued guide utterances at one boundary (security-reviewer M1). */
+  private static readonly GUIDE_MAX_ENTRIES = 16;
+  /** Max chars per queued guide utterance (security-reviewer M1). */
+  private static readonly GUIDE_MAX_CHARS = 8_000;
 
   constructor(deps: ConversationLoopDeps) {
     this.deps = deps;
@@ -385,24 +402,29 @@ export class ConversationLoop {
    * currently-streaming round is NOT aborted; in-flight tool calls run
    * to completion.
    *
-   * Caller responsibility (IPC handler at `ipc/domains/chat.ts`):
-   *   - Validate `text` is a non-empty string before queuing.
-   *   - Reject when no turn is active — guidance with no upcoming round
-   *     boundary would be dropped silently. Active-turn check =
-   *     `currentAbortController !== null` (set by `runTurn`).
+   * Atomically checks `hasActiveTurn()` inline so the IPC handler cannot
+   * race the turn's `finally` block and silently leak a queued guide
+   * into the next turn (critic MAJOR #2 / code-reviewer MAJOR #3).
    *
-   * The queue is bounded only by caller discipline; an attacker who can
-   * call this 1000 times before a round ends would inflate history with
-   * 1000 messages. The IPC handler should rate-limit and the sender guard
-   * (`validateSender`) already restricts to the host webContents.
+   * Returns:
+   *   - `"queued"` on success
+   *   - `"no-active-turn"` if no turn is in flight (caller must surface
+   *     this to the renderer so the user keeps their typed text)
+   *   - `"queue-full"` if `GUIDE_MAX_ENTRIES` is reached (DoS bound)
+   *   - `"too-long"` if `text` exceeds `GUIDE_MAX_CHARS` after trim
+   *   - `"empty"` if `text` is empty after trim (no-op, returned for parity)
    */
-  queueGuidance(text: string): void {
+  queueGuidance(text: string): "queued" | "no-active-turn" | "queue-full" | "too-long" | "empty" {
     const trimmed = text.trim();
-    if (trimmed.length === 0) return;
+    if (trimmed.length === 0) return "empty";
+    if (trimmed.length > ConversationLoop.GUIDE_MAX_CHARS) return "too-long";
+    if (this.currentAbortController === null) return "no-active-turn";
+    if (this.guidanceQueue.length >= ConversationLoop.GUIDE_MAX_ENTRIES) return "queue-full";
     this.guidanceQueue.push(trimmed);
+    return "queued";
   }
 
-  /** True when a turn is currently in flight. Used by IPC handler. */
+  /** True when a turn is currently in flight. Renderer-facing visibility. */
   hasActiveTurn(): boolean {
     return this.currentAbortController !== null;
   }
@@ -1034,12 +1056,18 @@ export class ConversationLoop {
       // round turn, or guidance queued after the last round closed). It
       // cannot be applied to a future turn safely — the next turn's user
       // intent should not be silently prefixed with stale mid-stream
-      // guidance — so drop with a warn.
+      // guidance — so drop and surface to the renderer via
+      // `onGuidanceDropped` (critic MAJOR #3) so the user knows their
+      // direction-adjustment was NOT applied. A `log.warn` alone made the
+      // drop invisible to end users and worse-UX than the old abort-and-
+      // restart flow.
       if (this.guidanceQueue.length > 0) {
+        const droppedJoined = this.guidanceQueue.join("\n\n");
         log.warn(
           `runTurn: ${this.guidanceQueue.length} guide utterance(s) queued but never reached a round boundary — dropping`,
         );
         this.guidanceQueue = [];
+        callbacks?.onGuidanceDropped?.(droppedJoined);
       }
     }
     // lastTurnScope must reflect any Option C request_plugin expansions so
@@ -1286,16 +1314,35 @@ export class ConversationLoop {
       // Round-boundary guidance inject — drain any "guide" utterances
       // queued via `ConversationLoop.queueGuidance` while the previous
       // round was running. Only fires when `round > 0` so the user's
-      // initial turn input is never preempted by a stale queue (in
-      // practice the queue is empty at round 0 because the IPC handler
-      // rejects guide calls without an active turn).
+      // initial turn input is never preempted by a stale queue (round 0
+      // is the user's original prompt; queue is empty there because
+      // `queueGuidance` requires `currentAbortController !== null`, which
+      // is set just before the queryLoop starts but a fresh runTurn
+      // always starts with the queue drained on the prior turn's finally).
+      //
+      // Race ordering (critic MAJOR #2): both `queueGuidance` (from IPC
+      // handler thread) and this drain run on Node's single-threaded
+      // event loop. `queryLoop` awaits between rounds inside
+      // `collectRoundStream`, giving the IPC handler an injection point.
+      // The atomic `currentAbortController` check inside `queueGuidance`
+      // closes the only true race.
       if (round > 0 && this.guidanceQueue.length > 0) {
         const joined = this.guidanceQueue.join("\n\n");
         this.guidanceQueue = [];
+        const injectedContent = `[방향 지시 — 진행 중 추가 입력]\n${joined}`;
         this.history.append({
           role: "user",
-          content: `[방향 지시 — 진행 중 추가 입력]\n${joined}`,
+          content: injectedContent,
         });
+        // Preflight re-run (critic BLOCKING #1) — guide content adds tokens
+        // that bypassed the turn-entry `runPreflightGuard` call. Without
+        // this re-check a 10K-char guide could push the next round into
+        // context-error. `runPreflightGuard` is idempotent (no-op if
+        // estimator says we're under threshold) so the cost when the
+        // injected content is small is negligible.
+        if (this.provider && !this.deps.disableSessionPersistence) {
+          await this.runPreflightGuard(abortSignal, callbacks);
+        }
         callbacks?.onGuidanceInjected?.(joined);
         this.tracer.step("GUIDANCE_INJECTED", { round, len: joined.length });
       }
@@ -1456,6 +1503,19 @@ export class ConversationLoop {
       assistantRoundsRun += 1;
 
       if (pendingToolCalls.length === 0 || stopReason === "end_turn") {
+        // BEFORE returning — "방향 지시는 end-turn 전에 영향을 미치는 거"
+        // (user spec). If guide is queued, do NOT end the turn; fall
+        // through to another iteration so the round-boundary inject site
+        // drains the queue and the LLM gets one more round to respond to
+        // the guidance. Round-cap still applies — if we're at the cap, we
+        // can't add another round; drop-on-end will surface to the user.
+        if (this.guidanceQueue.length > 0 && assistantRoundsRun < effectiveMaxRounds) {
+          this.tracer.step("ROUND_COMMIT", {
+            round: roundIndex,
+            note: "extending for queued guidance",
+          });
+          continue;
+        }
         // EARLY-EXIT #4: turn 종료. 정상 케이스는 stopReason === "end_turn"
         // 또는 LLM 이 tool 없이 final 답을 내놓은 케이스. *비정상 silent
         // truncation* (예: max_tokens / unknown stopReason 으로 0 tools 반환)
