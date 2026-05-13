@@ -182,6 +182,57 @@ describe("Permission policy P4 reviewer-wiring", () => {
     expect(result.appliedSettings.provider).toBe("google");
     expect(result.appliedSettings.fallbackOnError).toBe("deny");
   });
+
+  it("pushes interactive.autoApprove onto the live PermissionManager instance (round-3 test-engineer MAJOR-1)", () => {
+    const pm = new PermissionManager(join(tmpDir, "permissions.json"));
+    wireReviewerAgent({
+      permissionManager: pm,
+      readSettings: () => ({
+        mode: "rule",
+        provider: "openai",
+        model: "gpt-4o-mini",
+        fallbackOnError: "deny",
+        interactive: { autoApprove: "low" },
+      }),
+      verdictCachePath: join(tmpDir, "cache.jsonl"),
+      deferredQueuePath: join(tmpDir, "queue.jsonl"),
+    });
+    // Critical post-rewire invariant — the live PermissionManager state
+    // reflects the persisted settings without requiring a process
+    // restart. A refactor that drops setInteractiveAutoApprove() must
+    // be caught here.
+    expect(pm.getInteractiveAutoApprove()).toBe("low");
+  });
+
+  it("re-rewiring with a different interactive.autoApprove updates the live state (round-3 test-engineer MAJOR-1)", () => {
+    const pm = new PermissionManager(join(tmpDir, "permissions.json"));
+    wireReviewerAgent({
+      permissionManager: pm,
+      readSettings: () => ({
+        mode: "rule",
+        provider: "openai",
+        model: "gpt-4o-mini",
+        fallbackOnError: "deny",
+        interactive: { autoApprove: "low" },
+      }),
+      verdictCachePath: join(tmpDir, "cache-1.jsonl"),
+      deferredQueuePath: join(tmpDir, "queue-1.jsonl"),
+    });
+    expect(pm.getInteractiveAutoApprove()).toBe("low");
+    wireReviewerAgent({
+      permissionManager: pm,
+      readSettings: () => ({
+        mode: "rule",
+        provider: "openai",
+        model: "gpt-4o-mini",
+        fallbackOnError: "deny",
+        interactive: { autoApprove: "off" },
+      }),
+      verdictCachePath: join(tmpDir, "cache-2.jsonl"),
+      deferredQueuePath: join(tmpDir, "queue-2.jsonl"),
+    });
+    expect(pm.getInteractiveAutoApprove()).toBe("off");
+  });
 });
 
 describe("Permission policy P4 LlmReviewerProviderAdapter", () => {

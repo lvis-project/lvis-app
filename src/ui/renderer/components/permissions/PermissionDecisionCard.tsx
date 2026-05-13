@@ -23,9 +23,24 @@ export function SummaryTile({ label, children }: { label: string; children: Reac
   );
 }
 
-export function ReviewRow({ label, children }: { label: string; children: ReactNode }) {
+export function ReviewRow({
+  label,
+  children,
+  testId,
+}: {
+  label: string;
+  children: ReactNode;
+  // Round-3 UX MAJOR — allow the row wrapper itself to carry a
+  // data-testid so prose rows (non-monospace) can be selected without
+  // forcing them into the `<pre>` branch (which mis-renders human-
+  // readable sentences as terminal output).
+  testId?: string;
+}) {
   return (
-    <div className="grid min-w-0 grid-cols-[88px_minmax(0,1fr)] gap-3 border-b px-3 py-2 last:border-b-0">
+    <div
+      className="grid min-w-0 grid-cols-[88px_minmax(0,1fr)] gap-3 border-b px-3 py-2 last:border-b-0"
+      data-testid={testId}
+    >
       <b className="text-xs">{label}</b>
       <div className="min-w-0 break-words text-xs leading-relaxed">
         {children}
