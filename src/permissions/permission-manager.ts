@@ -28,6 +28,7 @@ import type {
   RiskVerdict,
   ToolInvocationContext,
 } from "./reviewer/risk-classifier.js";
+import type { PermissionEvaluationContext } from "./evaluation-context.js";
 import type { VerdictCache } from "./reviewer/verdict-cache.js";
 import type { DeferredQueue } from "./reviewer/deferred-queue.js";
 import { globMatch } from "../lib/glob-matcher.js";
@@ -111,6 +112,8 @@ export interface ReviewerDispatchInput {
   pathFields: readonly string[];
   /** DLP-redacted finalInput — caller is responsible for redaction. */
   finalInput: Record<string, unknown>;
+  /** Captured policy/sandbox context for user review. */
+  evaluationContext?: PermissionEvaluationContext;
   allowedDirectories: string[];
   sensitivePathsAdjacent: string[];
   /**
@@ -547,6 +550,7 @@ export class PermissionManager {
         source: input.source,
         category: input.category,
         inputSummary: summariseInput(input.finalInput),
+        ...(input.evaluationContext ? { evaluationContext: input.evaluationContext } : {}),
         verdict,
       });
       return { verdict, cacheReason: cacheResult.reason, deferredId };

@@ -33,6 +33,7 @@ import {
 import { Input } from "../../../../components/ui/input.js";
 import type { ApprovalChoice, ApprovalRequest } from "../../types.js";
 import { isNonUserTrustOrigin, trustOriginLabel } from "../../utils/trust-origin-label.js";
+import { PermissionEvaluationContextPanel } from "./PermissionEvaluationContextPanel.js";
 
 interface OutOfAllowedDirCardProps {
   open: boolean;
@@ -163,6 +164,8 @@ export function OutOfAllowedDirCard({
               </label>
             </section>
           )}
+
+          <PermissionEvaluationContextPanel context={request.evaluationContext} />
 
           <section className="rounded border bg-muted/30 p-2">
             <p className="mb-1 text-xs font-medium text-muted-foreground">
