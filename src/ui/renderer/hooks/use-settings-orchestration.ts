@@ -147,6 +147,8 @@ export function useSettingsOrchestration(
     if (!open) return;
     return api.onSettingsUpdated((next) => {
       setSettingsSnapshot(next);
+      setExperimentalContinuousBackend(next.features?.experimentalContinuousBackend ?? false);
+      setIdlePreferenceRefresh(next.features?.idlePreferenceRefresh ?? false);
     });
   }, [open, api]);
 
@@ -244,7 +246,6 @@ export function useSettingsOrchestration(
             realCloudBaseUrl: marketplaceBaseUrl.trim() || undefined,
             realCloudAllowPrivateNetwork: marketplaceAllowPrivateNetwork,
           },
-          features: { experimentalContinuousBackend, idlePreferenceRefresh },
         } as any);
       }
       if (tab !== "permissions") { onSaved(); onOpenChange(false); }
