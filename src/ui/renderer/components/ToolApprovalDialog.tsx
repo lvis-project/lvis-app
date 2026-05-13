@@ -110,8 +110,16 @@ export function ToolApprovalDialog({
           <div className="flex min-w-0 items-start pb-3">
             <div className="min-w-0 flex-1">
               <div className="flex min-w-0 flex-wrap items-center gap-2">
+                {/* Round-6 UX MAJOR — risk badge translated to Korean.
+                    Raw English `LOW`/`MEDIUM`/`HIGH` is opaque to non-
+                    technical Korean users and was the most prominent
+                    visual element in the dialog. */}
                 <Badge variant="outline" className={`${badgeClassName} shrink-0`}>
-                  {riskLevel.toUpperCase()}
+                  {riskLevel === "high"
+                    ? "높은 위험"
+                    : riskLevel === "medium"
+                      ? "중간 위험"
+                      : "낮은 위험"}
                 </Badge>
                 <h3 className="min-w-0 flex-1 text-base font-semibold">
                   {title}
@@ -133,9 +141,10 @@ export function ToolApprovalDialog({
                 출처: {sourceLabel(source)}
               </SummaryTile>
               <SummaryTile label="권한 분류">
+                {/* Round-6 UX MINOR — drop the raw English `category`
+                    token; `categoryLabel()` already conveys it in
+                    Korean and the duplicate looked like a code leak. */}
                 {categoryLabel(category)}
-                <br />
-                {category}
               </SummaryTile>
             </div>
 

@@ -673,6 +673,52 @@ describe("ApprovalGate", () => {
     expect(sent.sandboxCapability).toEqual(explicitCap);
   });
 
+  it("uses the REAL detectSandboxCapability when no provider is supplied (round-6 test-engineer MAJOR)", () => {
+    // Default-provider integration test — verifies that the production
+    // path (gate constructed without explicit sandboxCapabilityProvider)
+    // wires `detectSandboxCapability` correctly. A refactor that drops
+    // the default would silently break the dialog's "보안 격리" row in
+    // production but pass every stubbed unit test.
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never); // 1-arg form — uses real default
+    gate.requestAndWait(makeRequest({ id: "req-real-default" }));
+    const sent = (wc.send.mock.calls[0] as [string, ApprovalRequest])[1];
+    expect(sent.sandboxCapability).toBeDefined();
+    expect(sent.sandboxCapability?.kind).toMatch(/^(none|bubblewrap|sandbox-exec|appcontainer)$/);
+    expect(sent.sandboxCapability?.platform).toBe(process.platform);
+  });
+
+  it("does NOT inject sandboxCapability for toolCategory=meta requests (round-5 critic MAJOR-1)", () => {
+    const wc = makeMockWebContents();
+    const stub = vi.fn(() => ({
+      kind: "bubblewrap" as const,
+      confidence: "verified" as const,
+      platform: "linux" as NodeJS.Platform,
+      reason: "should NOT be used",
+    }));
+    const gate = new ApprovalGate(
+      wc as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      stub,
+    );
+    // Mode-change asks (permission-mode-apply.ts) and agent-action asks
+    // (agent-action-requester.ts) both pass toolCategory="meta". The
+    // sandbox row is meaningless on config-change cards — verify the
+    // injection is suppressed.
+    gate.requestAndWait(makeRequest({
+      id: "req-meta",
+      toolName: "permission_mode_change",
+      toolCategory: "meta",
+      args: { fromMode: "default", toMode: "auto", durable: true },
+    }));
+    expect(stub).not.toHaveBeenCalled();
+    const sent = (wc.send.mock.calls[0] as [string, ApprovalRequest])[1];
+    expect(sent.sandboxCapability).toBeUndefined();
+  });
+
   it("does NOT inject sandboxCapability for out-of-allowed-dir kind (round-4 critic CRITICAL C2)", () => {
     const wc = makeMockWebContents();
     const stub = vi.fn(() => ({

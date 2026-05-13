@@ -111,11 +111,16 @@ export function DeferredApprovalChip({
       if (listApi) {
         const current = await listApi();
         if (!current.ok) {
-          setError("pending 큐 확인 실패 — " + current.error);
+          // Round-6 UX MINOR — plain Korean; raw `current.error` value
+          // never reaches UI.
+          setError("대기 중인 요청을 확인하지 못했습니다. 잠시 후 다시 시도하세요.");
           return;
         }
         if (current.pending.length !== 1 || current.pending[0]?.id !== target.id) {
-          setError("pending 큐가 변경되었습니다 — 패널에서 직접 처리하세요");
+          // Round-6 UX MINOR — "pending 큐" English-Korean mix replaced
+          // with plain Korean. Tells the user what happened + the
+          // next step.
+          setError("다른 요청이 추가됐습니다. 승인 패널에서 직접 처리하세요.");
           await refresh();
           return;
         }
@@ -144,7 +149,9 @@ export function DeferredApprovalChip({
         "natural-language",
       );
       if (!r.ok) {
-        setError(r.error);
+        // Round-6 UX MINOR — sanitize raw IPC error string before
+        // surfacing. The error code may be a developer-facing token.
+        setError("요청 처리 중 오류가 발생했습니다.");
         return;
       }
       onResolved?.(decision, target.id);
