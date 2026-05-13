@@ -87,6 +87,7 @@ export function DeferredApprovalChip({
   const handle = async () => {
     if (busy) return;
     const api = window.lvis?.permission?.deferredResolve;
+    const listApi = window.lvis?.permission?.deferredList;
     if (!api) {
       setError("deferred-resolve API 사용 불가");
       return;
@@ -94,10 +95,35 @@ export function DeferredApprovalChip({
     setBusy(true);
     setError(null);
     try {
+      // Round-1 security MAJOR-1 (TOCTOU on pending[0]): re-fetch the
+      // queue *at click time* and confirm (a) exactly one entry still
+      // pending, (b) it is the same id we showed in the chip label.
+      // Without this, a race that adds a new pending entry between
+      // render and click would resolve the new entry instead.
+      if (listApi) {
+        const current = await listApi();
+        if (!current.ok) {
+          setError("pending 큐 확인 실패 — " + current.error);
+          return;
+        }
+        if (current.pending.length !== 1 || current.pending[0]?.id !== target.id) {
+          setError("pending 큐가 변경되었습니다 — 패널에서 직접 처리하세요");
+          await refresh();
+          return;
+        }
+      }
+      // Round-1 critic MAJOR-4 (stale closure on intent): re-run the
+      // matcher on the live draftText so the click can't act on an
+      // intent that no longer reflects the composer.
+      const liveIntent = detectApprovalIntent(draftText);
+      if (liveIntent.kind !== intent.kind) {
+        setError("의도가 변경되었습니다 — 입력 확인 후 다시 시도");
+        return;
+      }
       const r = await api(
         target.id,
         decision,
-        `natural-language match: ${"matchedPhrase" in intent ? intent.matchedPhrase : "?"}`,
+        `natural-language match: ${intent.matchedPhrase}`,
         "natural-language",
       );
       if (!r.ok) {
@@ -113,15 +139,27 @@ export function DeferredApprovalChip({
     }
   };
 
+  // Round-1 architect MAJOR-2 — surface the entry source so the user
+  // sees whether they're approving a builtin host tool, a plugin tool,
+  // or an MCP-bridged tool. Without this, "허용해줘" could quietly
+  // approve a plugin's background routine the user has forgotten.
+  const sourceLabel =
+    target.source === "plugin"
+      ? "[plugin] "
+      : target.source === "mcp"
+        ? "[mcp] "
+        : "";
   const label =
     intent.kind === "approve"
-      ? `'${target.toolName}' 호출 허용?`
-      : `'${target.toolName}' 호출 거절?`;
+      ? `${sourceLabel}'${target.toolName}' 호출 허용?`
+      : `${sourceLabel}'${target.toolName}' 호출 거절?`;
   const action = intent.kind === "approve" ? "허용" : "거절";
 
   return (
     <div
       data-testid="deferred-approval-chip"
+      data-target-id={target.id}
+      data-target-source={target.source}
       className="mx-3 mb-2 flex items-center gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-xs"
     >
       <span

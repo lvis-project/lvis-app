@@ -54,6 +54,7 @@ import { AuditLogger } from "../audit/audit-logger.js";
 import type { PermissionAuditEntryInput } from "../audit/audit-schema.js";
 import { maskSensitiveData } from "../audit/dlp-filter.js";
 import type { RiskVerdict } from "../permissions/reviewer/risk-classifier.js";
+import { detectSandboxCapability } from "../permissions/sandbox-capability.js";
 import { BashAstValidator } from "../main/bash-ast-validator.js";
 import {
   findShellPathPolicyViolation,
@@ -926,6 +927,10 @@ export class ToolExecutor {
           isReadOnly: invocationCategory === "read",
           mode: this.currentApprovalMode(),
           sensitivePathPattern: requestSensitivePathPattern,
+          // Issue #691 round-1 user request — sandbox capability surfaced
+          // to the dialog so the user can see whether the tool will run
+          // under OS isolation or with no protection.
+          sandboxCapability: detectSandboxCapability(),
           evaluationContext: makeEvaluationContext({
             pathFields: reviewerPathFields,
             targetFilePaths: [outOfAllowedTarget.filePath],
@@ -1358,6 +1363,8 @@ export class ToolExecutor {
             mode: this.currentApprovalMode(),
             sensitivePathPattern,
             trustOrigin: invocationPermissionContext.trustOrigin,
+            // Issue #691 round-1 — sandbox capability for the dialog.
+            sandboxCapability: detectSandboxCapability(),
             evaluationContext,
           };
 

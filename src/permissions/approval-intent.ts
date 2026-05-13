@@ -51,12 +51,13 @@ export type ApprovalIntent =
 
 /**
  * A user who types more than this is writing prose, not a yes/no.
- * The cap is generous on purpose — the typical confirmation is under
- * 12 chars ("허용해 주세요", "OK 진행"); we don't want to cut off the
- * occasional "응 이거 허용해도 돼" but anything that reads like a
- * paragraph is rejected.
+ * The cap is intentionally tight — the typical confirmation is under
+ * 12 chars ("허용해 주세요", "OK 진행"); anything that reads like a
+ * paragraph is rejected. Round-1 security review tightened from 40 to
+ * 24 to shrink the false-positive surface for LLM tool-output text that
+ * happens to start with an approve phrase.
  */
-export const MAX_INTENT_TEXT_LENGTH = 40;
+export const MAX_INTENT_TEXT_LENGTH = 24;
 
 /**
  * Approval phrases. Order matters: more specific (multi-word) entries
@@ -99,7 +100,9 @@ const APPROVE_PATTERNS: ReadonlyArray<RegExp> = [
   // Short affirmatives — accepted only when the text is *just* the
   // affirmative (no other content). The ^...$ shape is enforced by
   // the lonely-token check below; here we just list the tokens.
-  /^(yes|y|ok|okay|sure|네|예|응|좋아|좋아요|그래)$/iu,
+  // Round-1 security review: dropped single-letter "y" — typo risk too
+  // high (a user mid-typing "next question" would fire approve).
+  /^(yes|ok|okay|sure|네|예|응|좋아|좋아요|그래)$/iu,
 ];
 
 const REJECT_PATTERNS: ReadonlyArray<RegExp> = [
@@ -110,42 +113,89 @@ const REJECT_PATTERNS: ReadonlyArray<RegExp> = [
   new RegExp(`(^|\\s)중단${KO_BOUNDARY_AFTER}`, "u"),
   /(^|\s)안\s*돼(요|)(\s|[.!?]|$)/u,
   /(^|\s)하지\s*마(세요|)(\s|[.!?]|$)/u,
-  // English
+  // English — `don['’]?t` accepts straight + smart apostrophe (paste from macOS).
   /(^|\s)reject(\s|[.!?]|$)/iu,
   /(^|\s)deny(\s|[.!?]|$)/iu,
   /(^|\s)cancel(\s|[.!?]|$)/iu,
   /(^|\s)stop(\s|[.!?]|$)/iu,
   /(^|\s)abort(\s|[.!?]|$)/iu,
-  /(^|\s)don'?t(\s|$)/iu,
-  // Lonely-token negatives
-  /^(no|n|nope|아니|아니요)$/iu,
+  /(^|\s)don['’]?t(\s|$)/iu,
+  // Lonely-token negatives — single-letter "n" removed (round-1 review).
+  /^(no|nope|아니|아니요)$/iu,
 ];
 
 /**
  * Tokens whose presence near an approve phrase converts the verdict to
- * "none". A user typing "허용 안 함" or "don't allow" is NEGATING the
- * approve word, not approving. The matcher detects this by scanning
- * for these tokens within the same input.
+ * "none". A user typing "허용 안 함" / "허용 안해" / "허용안돼" or
+ * "don't allow" is NEGATING the approve word, not approving.
+ *
+ * Round-1 fixes:
+ *   - Drop space boundary on 안/않 — natural Korean often glues these
+ *     onto the preceding morpheme ("허용안함", "안허용"). Substring
+ *     match within the 24-char single-sentence input is the safety
+ *     envelope; the broader anchor would otherwise miss real negations.
+ *   - Add 못 (Korean impossibility marker — "허용 못 함").
+ *   - Add smart apostrophe variant for English contractions.
  */
 const NEGATION_TOKENS_NEAR_APPROVE: ReadonlyArray<RegExp> = [
-  /(^|\s)(안|않)(\s|$)/u,
-  // Korean "하지 마" is a strong negation that often glues onto the
-  // preceding morpheme without whitespace ("허용하지 마" / "허용하지마").
-  // No leading boundary — the trailing 마 already disambiguates against
-  // 하지만 ("but") since it requires 마 not 만.
+  /(안|않|못)/u,
   /하지\s*마/u,
-  /(^|\s)don'?t(\s|$)/iu,
+  /(^|\s)don['’]?t(\s|$)/iu,
   /(^|\s)do\s+not(\s|$)/iu,
   /(^|\s)never(\s|$)/iu,
+  /(^|\s)can['’]?t(\s|$)/iu,
+  /(^|\s)cannot(\s|$)/iu,
 ];
 
 /**
- * Sentence terminators. Two or more counted terminators ⇒ multi-sentence
- * input ⇒ verdict "none" (rule 4). Single terminator at the end is fine.
+ * Reject-verb stems that can carry a "don't <verb>" semantic when
+ * suffixed with negation. Used by {@link hasNegationAfterRejectVerb}
+ * to distinguish "취소하지 마" (negate "취소") from "하지 마" alone
+ * (which IS the reject phrase, not a negation of one).
+ *
+ * Round-1 critic CRITICAL — symmetric negation for reject path.
+ */
+const REJECT_VERB_STEMS: ReadonlyArray<string> = [
+  "거절",
+  "거부",
+  "취소",
+  "중단",
+  "reject",
+  "deny",
+  "cancel",
+  "stop",
+  "abort",
+];
+
+/**
+ * Korean / English suffixes that negate a preceding reject verb
+ * (i.e. convert "거절하지 마" → "don't reject").
+ */
+const NEGATION_SUFFIXES_AFTER_REJECT: ReadonlyArray<RegExp> = [
+  /하지\s*마/u,
+  /(\s|^)(안|않)/u,
+  /(\s|^)(don['’]?t|do\s+not|never|can['’]?t|cannot)/iu,
+];
+
+/**
+ * Sentence-terminator count. Round-1 fix: previous implementation
+ * required whitespace + token *after* the terminator, so "진짜? 허용해"
+ * (no trailing punctuation) counted as 1. We now count terminators
+ * directly — any text with ≥ 2 terminators OR ≥ 1 terminator followed
+ * by non-trivial content is treated as multi-sentence.
  */
 function countSentences(text: string): number {
-  const matches = text.match(/[.!?。]\s+\S|[.!?。]\s*$/gu);
-  return matches ? matches.length : 1;
+  const terminators = (text.match(/[.!?。]/gu) ?? []).length;
+  if (terminators >= 2) return terminators;
+  if (terminators === 1) {
+    // Single terminator: multi-sentence iff there's substantive content
+    // BOTH before AND after the terminator.
+    const idx = text.search(/[.!?。]/u);
+    const before = text.slice(0, idx).trim();
+    const after = text.slice(idx + 1).trim();
+    if (before.length > 0 && after.length > 0) return 2;
+  }
+  return 1;
 }
 
 /**
@@ -159,10 +209,18 @@ function countSentences(text: string): number {
  */
 export function detectApprovalIntent(rawText: string): ApprovalIntent {
   if (typeof rawText !== "string") return { kind: "none" };
-  const text = rawText.trim();
+  // Normalize composed/decomposed Hangul + Latin so paste-from-Finder
+  // (NFD) and typed text (NFC) produce identical match results.
+  // Round-1 code-reviewer finding (unicode normalization).
+  const text = rawText.normalize("NFC").trim();
   if (text.length === 0) return { kind: "none" };
   if (text.length > MAX_INTENT_TEXT_LENGTH) return { kind: "none" };
   if (countSentences(text) > 1) return { kind: "none" };
+  // Round-1 test-engineer CRITICAL — question forms ("허용했나요?",
+  // "허용 됩니까?") contain approve tokens but are not directives.
+  // The presence of any question mark (ASCII or full-width) forces
+  // "none" — a user issuing a directive does not append "?".
+  if (/[?？]/u.test(text)) return { kind: "none" };
 
   const approveMatch = firstMatch(text, APPROVE_PATTERNS);
   const rejectMatch = firstMatch(text, REJECT_PATTERNS);
@@ -171,25 +229,58 @@ export function detectApprovalIntent(rawText: string): ApprovalIntent {
   if (approveMatch && rejectMatch) return { kind: "none" };
 
   if (approveMatch) {
-    if (hasNearbyNegation(text)) return { kind: "none" };
+    if (hasNearbyNegation(text, NEGATION_TOKENS_NEAR_APPROVE)) {
+      return { kind: "none" };
+    }
     return { kind: "approve", matchedPhrase: approveMatch };
   }
   if (rejectMatch) {
+    // Round-1 critic CRITICAL: symmetric negation for reject path.
+    // Only treat as none when the negation appears *after* a reject
+    // VERB STEM ("취소", "cancel", ...). Standalone "하지 마" / "안
+    // 돼" IS a reject phrase and must remain reject.
+    if (hasNegationAfterRejectVerb(text)) {
+      return { kind: "none" };
+    }
     return { kind: "reject", matchedPhrase: rejectMatch };
   }
   return { kind: "none" };
 }
 
+function hasNegationAfterRejectVerb(text: string): boolean {
+  const lower = text.toLowerCase();
+  for (const stem of REJECT_VERB_STEMS) {
+    const idx = lower.indexOf(stem);
+    if (idx < 0) continue;
+    // Suffix negation (Korean "취소하지 마"): pattern follows the verb.
+    const tail = text.slice(idx + stem.length);
+    for (const suffix of NEGATION_SUFFIXES_AFTER_REJECT) {
+      if (suffix.test(tail)) return true;
+    }
+    // Prefix negation (English "don't cancel" / "never reject"): pattern
+    // precedes the verb. The window is the slice BEFORE the verb match;
+    // any English negation token there flips the verdict.
+    const head = text.slice(0, idx);
+    if (/(^|\s)(don['’]?t|do\s+not|never|can['’]?t|cannot)(\s|$)/iu.test(head)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function firstMatch(text: string, patterns: ReadonlyArray<RegExp>): string | null {
   for (const pattern of patterns) {
     const m = text.match(pattern);
-    if (m) return (m[0] ?? "").trim();
+    if (m) return (m[0] ?? "").replace(/^\s+/, "");
   }
   return null;
 }
 
-function hasNearbyNegation(text: string): boolean {
-  for (const pattern of NEGATION_TOKENS_NEAR_APPROVE) {
+function hasNearbyNegation(
+  text: string,
+  patterns: ReadonlyArray<RegExp>,
+): boolean {
+  for (const pattern of patterns) {
     if (pattern.test(text)) return true;
   }
   return false;

@@ -36,12 +36,17 @@ describe("approval-intent — accept (English)", () => {
     "proceed",
     "go ahead",
     "yes",
-    "y",
     "ok",
     "okay",
     "sure",
   ])("recognises English approve: %s", (text) => {
     expect(detectApprovalIntent(text).kind).toBe("approve");
+  });
+
+  // Round-1 security review: single-letter "y" / "n" / "Y" / "N" are
+  // NOT recognised as standalone approve/reject — typo risk too high.
+  it.each(["y", "Y", "n", "N"])("rejects single-letter affirmative/negative: %s", (text) => {
+    expect(detectApprovalIntent(text).kind).toBe("none");
   });
 });
 
@@ -77,8 +82,97 @@ describe("approval-intent — negation safety (#690 acceptance)", () => {
     "don't allow",
     "do not approve",
     "never proceed",
+    // Round-1 additions — code-reviewer MAJOR-1 / critic MAJOR-3
+    "허용하지 않아",
+    "허용 안해",
+    "허용안함",       // spaceless Korean — critic MAJOR-3
+    "허용안돼",
+    "허용 못 함",     // 못 impossibility marker
+    "I can't approve",
+    "I cannot allow",
+    "I don’t approve", // smart apostrophe — test-engineer NIT
   ])("treats negated-approve as none: %s", (text) => {
     expect(detectApprovalIntent(text).kind).toBe("none");
+  });
+});
+
+describe("approval-intent — symmetric reject-negation safety (#690 round-1 critic CRITICAL)", () => {
+  // A user typing "취소하지 마" ("don't cancel") is asking *not* to
+  // reject. The matcher MUST NOT report kind="reject".
+  it.each([
+    ["취소하지 마", "ko"],
+    ["취소하지 마세요", "ko"],
+    ["거절하지 마", "ko"],
+    ["거부하지 마세요", "ko"],
+    ["중단하지 마", "ko"],
+    ["don't cancel", "en"],
+    ["do not reject", "en"],
+    ["never cancel", "en"],
+    ["I can't cancel", "en"],
+    ["I cannot stop", "en"],
+  ])("'%s' (%s) → none (not reject)", (text) => {
+    expect(detectApprovalIntent(text).kind).toBe("none");
+  });
+
+  // But standalone "안 돼" / "하지 마" ARE reject phrases and must
+  // still be classified as reject.
+  it("preserves standalone '안 돼' as reject", () => {
+    expect(detectApprovalIntent("안 돼").kind).toBe("reject");
+  });
+  it("preserves standalone '하지 마세요' as reject", () => {
+    expect(detectApprovalIntent("하지 마세요").kind).toBe("reject");
+  });
+});
+
+describe("approval-intent — Korean question/passive forms (#690 round-1 test-engineer CRITICAL)", () => {
+  // A user typing "허용했나요?" (past-tense question — "Did you
+  // approve?") is asking, not directing. Same for the passive "허용된
+  // 건가요?" ("Is it approved?").
+  it.each([
+    "허용했나요?",
+    "허용하셨나요?",
+    "허용된 건가요?",
+    "허용 됩니까?",
+    "허용되었어?",
+  ])("treats question/passive form as none: %s", (text) => {
+    // These forms contain "허용" with verb-boundary continuations but
+    // are not approval directives. The current matcher's bare-verb
+    // pattern may match — pin the behaviour now so a future change
+    // that further relaxes the boundary doesn't regress safety.
+    const verdict = detectApprovalIntent(text);
+    // Acceptable: kind === "none" (preferred). If the matcher reports
+    // approve here, the chip still requires explicit click — but the
+    // assertion documents the contract we want.
+    expect(verdict.kind).toBe("none");
+  });
+});
+
+describe("approval-intent — countSentences fix (#690 round-1 code-reviewer MAJOR-3)", () => {
+  // Previously "진짜? 허용해" counted as 1 sentence and slipped
+  // through the multi-sentence guard.
+  it("'진짜? 허용해' → none (two sentences via question terminator)", () => {
+    expect(detectApprovalIntent("진짜? 허용해").kind).toBe("none");
+  });
+  it("'파일 있어? 허용' → none", () => {
+    expect(detectApprovalIntent("파일 있어? 허용").kind).toBe("none");
+  });
+});
+
+describe("approval-intent — NFC normalization (#690 round-1 code-reviewer MINOR)", () => {
+  // macOS Finder produces NFD-decomposed Hangul on paste. The matcher
+  // must normalize at entry so both encodings match identically.
+  it("matches '허용' in NFD form (paste from Finder)", () => {
+    const nfd = "허용".normalize("NFD");
+    expect(detectApprovalIntent(nfd).kind).toBe("approve");
+  });
+});
+
+describe("approval-intent — false-positive defence (#690 round-1 security/critic)", () => {
+  // Round-1 reviewers raised concern about bare-verb 허용 matching
+  // request phrases. Test the canonical cases — at minimum the
+  // ambiguity check should fire when other intent tokens appear too.
+  it("'I can\\'t approve' has approve + negation → none", () => {
+    expect(detectApprovalIntent("I can't approve").kind).toBe("none");
   });
 });
 
