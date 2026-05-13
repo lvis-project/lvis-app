@@ -652,6 +652,11 @@ const api = {
     deferredList: async () => ipcRenderer.invoke(PERMISSIONS.deferredList),
     /** Permission policy issue #633 — hook quarantine state for non-modal settings badge. */
     hookTrustList: async () => ipcRenderer.invoke(PERMISSIONS.hookTrustList),
+    /** Issue #690 follow-up — permission settings migration provenance.
+     *  Returns `{ ok, schemaVersion?, appliedAt? }`. Used by ChatView
+     *  migration banner to show a one-shot "권한 정책이 업데이트되었습니다" UI. */
+    getMigrationStatus: async () =>
+      ipcRenderer.invoke(PERMISSIONS.migrationStatus),
     /** Permission policy — `/permission dir ...` slash dispatch via IPC. */
     dirDispatch: async (rawArgs: string) =>
       ipcRenderer.invoke(PERMISSIONS.dirDispatch, { rawArgs, intent: ipcUserKeyboardIntent() }),

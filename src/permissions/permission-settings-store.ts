@@ -66,9 +66,39 @@ export interface ReviewerSettingsBlock {
   interactive: ReviewerInteractiveBlock;
 }
 
+/**
+ * Permission settings schema version.
+ *
+ * Bumps occur when default semantics change between releases. A bumped
+ * schemaVersion plus a one-shot migrator keeps existing users aligned with
+ * the new defaults without re-prompting them. The migrator persists
+ * `migration.appliedAt` so the renderer can surface a one-time
+ * "권한 정책이 업데이트되었습니다" banner.
+ *
+ * v1 → v2 (issue #690 follow-up): users with legacy `executionMode: "auto"`
+ *  inherit `reviewer.interactive.autoApprove: "low"` automatically. The
+ *  `auto` execution mode preserved the "LOW silent allow" UX before the
+ *  interactive setting existed; without the migration those users would
+ *  lose that UX after upgrade because the foreground-auto gate now reads
+ *  the interactive setting too.
+ */
+export const PERMISSION_SETTINGS_SCHEMA_VERSION = 2 as const;
+export type PermissionSettingsSchemaVersion = typeof PERMISSION_SETTINGS_SCHEMA_VERSION;
+
+export interface PermissionMigrationBlock {
+  /** Absent on legacy/unmigrated files. Present once migration runs. */
+  appliedAt?: string;
+  /** The schemaVersion the migrator wrote. Future ChatView banners can
+   *  use this to scope dismissal flags per-version. */
+  appliedSchemaVersion?: PermissionSettingsSchemaVersion;
+}
+
 export interface PermissionSettingsBlock {
+  /** Schema version of this `permissions` block. Absent ↔ legacy v1. */
+  schemaVersion?: PermissionSettingsSchemaVersion;
   additionalDirectories: string[];
   reviewer: ReviewerSettingsBlock;
+  migration?: PermissionMigrationBlock;
 }
 
 export interface PermissionSettingsFile {
@@ -143,10 +173,27 @@ export function normalizePermissionSettings(
   }
   return {
     permissions: {
+      schemaVersion: normalizeSchemaVersion(perm.schemaVersion),
       additionalDirectories: dirs,
       reviewer: normalizeReviewerBlock(perm.reviewer),
+      migration: normalizeMigrationBlock(perm.migration),
     },
   };
+}
+
+function normalizeSchemaVersion(value: unknown): PermissionSettingsSchemaVersion | undefined {
+  return value === PERMISSION_SETTINGS_SCHEMA_VERSION ? value : undefined;
+}
+
+function normalizeMigrationBlock(parsed: unknown): PermissionMigrationBlock | undefined {
+  if (!parsed || typeof parsed !== "object") return undefined;
+  const obj = parsed as Record<string, unknown>;
+  const appliedAt = typeof obj.appliedAt === "string" && obj.appliedAt.length > 0
+    ? obj.appliedAt
+    : undefined;
+  const appliedSchemaVersion = normalizeSchemaVersion(obj.appliedSchemaVersion);
+  if (!appliedAt && !appliedSchemaVersion) return undefined;
+  return { appliedAt, appliedSchemaVersion };
 }
 
 /**
@@ -205,6 +252,8 @@ export async function writePermissionSettings(
   patch: {
     additionalDirectories?: string[];
     reviewer?: Partial<ReviewerSettingsBlock>;
+    schemaVersion?: PermissionSettingsSchemaVersion;
+    migration?: PermissionMigrationBlock;
   },
   pathOverride?: string,
 ): Promise<void> {
@@ -232,14 +281,22 @@ export async function writePermissionSettings(
         : Array.isArray(existingPerm.additionalDirectories)
           ? (existingPerm.additionalDirectories as string[])
           : [];
-    const merged = {
-      ...existing,
-      permissions: {
-        ...existingPerm,
-        additionalDirectories: nextDirs,
-        reviewer: nextReviewer,
-      },
+    const nextSchemaVersion =
+      patch.schemaVersion ?? normalizeSchemaVersion(existingPerm.schemaVersion);
+    const nextMigration =
+      patch.migration ?? normalizeMigrationBlock(existingPerm.migration);
+    const nextPerm: Record<string, unknown> = {
+      ...existingPerm,
+      additionalDirectories: nextDirs,
+      reviewer: nextReviewer,
     };
+    if (nextSchemaVersion !== undefined) {
+      nextPerm.schemaVersion = nextSchemaVersion;
+    }
+    if (nextMigration) {
+      nextPerm.migration = nextMigration;
+    }
+    const merged = { ...existing, permissions: nextPerm };
     mkdirSync(dirname(filePath), { recursive: true, mode: 0o700 });
     writeFileSync(filePath, JSON.stringify(merged, null, 2), {
       encoding: "utf-8",
@@ -329,4 +386,100 @@ export async function removeAllowedDirectoryPersist(
   if (next.length === list.length) return list;
   await writePermissionSettings({ additionalDirectories: next }, pathOverride);
   return next;
+}
+
+// ── Permission settings migration (issue #690 follow-up) ──────────────
+
+export interface PermissionMigrationStatus {
+  /** Current schemaVersion present in the file (`undefined` if legacy). */
+  schemaVersion?: PermissionSettingsSchemaVersion;
+  /** ISO timestamp when the v1→v2 migrator wrote a change. */
+  appliedAt?: string;
+  /** True when this run wrote a migration — used by callers to log audit. */
+  justApplied: boolean;
+  /** What the migrator did, for audit/log emission. */
+  changes: string[];
+}
+
+/**
+ * Idempotent one-shot migration to {@link PERMISSION_SETTINGS_SCHEMA_VERSION}.
+ *
+ * Inputs:
+ *   - The settings file at `pathOverride` (or default).
+ *   - The legacy ExecutionMode persisted in `permissions.json` (passed
+ *     in by the caller — we do NOT import permissions-store here to keep
+ *     this module's deps clean).
+ *
+ * Behavior:
+ *   - If `schemaVersion === PERMISSION_SETTINGS_SCHEMA_VERSION`, return
+ *     existing state with `justApplied: false` (idempotent re-run).
+ *   - Otherwise, write `schemaVersion = 2` plus migration provenance, and
+ *     if `legacyExecutionMode === "auto"`, also set
+ *     `reviewer.interactive.autoApprove = "low"` (preserving legacy UX).
+ */
+export async function migratePermissionSettings(
+  legacyExecutionMode: string | null,
+  pathOverride?: string,
+): Promise<PermissionMigrationStatus> {
+  const current = readPermissionSettings(pathOverride);
+  const perm = current.permissions;
+  if (perm.schemaVersion === PERMISSION_SETTINGS_SCHEMA_VERSION) {
+    return {
+      schemaVersion: perm.schemaVersion,
+      appliedAt: perm.migration?.appliedAt,
+      justApplied: false,
+      changes: [],
+    };
+  }
+
+  const changes: string[] = [];
+  const reviewerPatch: Partial<ReviewerSettingsBlock> = {};
+
+  if (
+    legacyExecutionMode === "auto" &&
+    perm.reviewer.interactive.autoApprove === "off"
+  ) {
+    reviewerPatch.interactive = { autoApprove: "low" };
+    changes.push("reviewer.interactive.autoApprove: off → low (legacy executionMode=auto)");
+  }
+
+  changes.push(`schemaVersion: ${perm.schemaVersion ?? "v1"} → ${PERMISSION_SETTINGS_SCHEMA_VERSION}`);
+
+  const appliedAt = new Date().toISOString();
+  await writePermissionSettings(
+    {
+      reviewer: Object.keys(reviewerPatch).length > 0 ? reviewerPatch : undefined,
+      schemaVersion: PERMISSION_SETTINGS_SCHEMA_VERSION,
+      migration: {
+        appliedAt,
+        appliedSchemaVersion: PERMISSION_SETTINGS_SCHEMA_VERSION,
+      },
+    },
+    pathOverride,
+  );
+
+  log.info(`permission settings migrated to v${PERMISSION_SETTINGS_SCHEMA_VERSION}: ${changes.join("; ")}`);
+  return {
+    schemaVersion: PERMISSION_SETTINGS_SCHEMA_VERSION,
+    appliedAt,
+    justApplied: true,
+    changes,
+  };
+}
+
+/**
+ * Read-only accessor used by the renderer (via IPC) to decide whether to
+ * surface the one-time "권한 정책이 업데이트되었습니다" banner.
+ */
+export function readPermissionMigrationStatus(
+  pathOverride?: string,
+): PermissionMigrationStatus {
+  const current = readPermissionSettings(pathOverride);
+  const perm = current.permissions;
+  return {
+    schemaVersion: perm.schemaVersion,
+    appliedAt: perm.migration?.appliedAt,
+    justApplied: false,
+    changes: [],
+  };
 }
