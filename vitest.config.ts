@@ -16,6 +16,22 @@ export default defineConfig({
   test: {
     globalSetup: ["./vitest.globalSetup.ts"],
     testTimeout: 15000,
+    // Node v25 enabled experimental WebStorage by default. Its
+    // `localStorage` getter trips `Warning: --localstorage-file was
+    // provided without a valid path` and shadows the jsdom implementation,
+    // so tests that touch localStorage (e.g. use-role-presets) start to
+    // fail with `localStorage.setItem is not a function` despite running
+    // in a jsdom environment. Forcing `--no-experimental-webstorage` on
+    // every worker fork restores the pre-v25 behaviour where jsdom owns
+    // the `localStorage` global, and is a no-op on Node versions where
+    // webstorage is not on by default (e.g. v22 on Windows CI).
+    poolOptions: {
+      forks: { execArgv: ["--no-experimental-webstorage"] },
+      // `threads` is forward-defense for a future `pool: "threads"` flip —
+      // vitest 2.x defaults to `forks`, so this key is currently dead but
+      // mirroring `forks` keeps the fix portable if the pool is ever switched.
+      threads: { execArgv: ["--no-experimental-webstorage"] },
+    },
     environment: "node",
     environmentMatchGlobs: [
       ["test/renderer/**", "jsdom"],
