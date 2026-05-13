@@ -65,6 +65,7 @@ import { stripUntrustedTags } from "../../lib/strip-untrusted-tags.js";
 import { plog, PluginPhase } from "../../plugins/lifecycle-log.js";
 import {
   ApprovalIssuerRegistry,
+  verifyApprovalRequestScope,
   verifyApprovalResponder,
   ApprovalOriginError,
 } from "../../permissions/agent-action-requester.js";
@@ -1277,9 +1278,10 @@ export async function initPluginRuntime(
       // order is wrong, which is a programming error to surface loudly.
       //
       // §8 P0 security (issue #71):
-      //   request(): records (requestId → pluginId + scope) in registry.
+      //   request(): verifies scope against the approved install grant, then records
+      //              (requestId → pluginId + scope) in registry.
       //   respond(): verifies (a) requestId was issued by THIS plugin
-      //              (b) scope is in manifest.pluginAccess.agentApprovalScopes.
+      //              (b) scope is still in the approved install grant.
       //   Violations throw ApprovalOriginError (no silent fallback, §No-Fallback).
       agentApproval: {
         request: async (input: {
@@ -1288,6 +1290,16 @@ export async function initPluginRuntime(
           reason: string;
           scope: string;
         }): Promise<ApprovalChoice> => {
+          const approvedAccess = pluginRuntime.getApprovedPluginAccess(pluginId);
+          const allowedScopes: string[] =
+            Array.isArray(approvedAccess?.agentApprovalScopes)
+              ? approvedAccess.agentApprovalScopes
+              : [];
+          try {
+            verifyApprovalRequestScope(pluginId, input.scope, allowedScopes);
+          } catch (err) {
+            auditApprovalViolation(err, bootAuditLogger, pluginId, `request:${input.scope}`);
+          }
           const { requestAgentApproval } = await import(
             "../../permissions/agent-action-requester.js"
           );
@@ -1311,9 +1323,10 @@ export async function initPluginRuntime(
           nonce?: string,
           hmac?: string,
         ): Promise<void> => {
+          const approvedAccess = pluginRuntime.getApprovedPluginAccess(pluginId);
           const allowedScopes: string[] =
-            Array.isArray(manifest.pluginAccess?.agentApprovalScopes)
-              ? (manifest.pluginAccess!.agentApprovalScopes as string[])
+            Array.isArray(approvedAccess?.agentApprovalScopes)
+              ? approvedAccess.agentApprovalScopes
               : [];
           try {
             verifyApprovalResponder(

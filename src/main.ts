@@ -508,8 +508,27 @@ function createDisplayMenu(): MenuItemConstructorOptions {
   };
 }
 
+function createEditMenu(): MenuItemConstructorOptions {
+  return {
+    label: "편집",
+    submenu: [
+      { role: "undo", label: "실행 취소" },
+      { role: "redo", label: "다시 실행" },
+      { type: "separator" },
+      { role: "cut", label: "잘라내기" },
+      { role: "copy", label: "복사" },
+      { role: "paste", label: "붙여넣기" },
+      { role: "pasteAndMatchStyle", label: "서식 없이 붙여넣기" },
+      { role: "delete", label: "삭제" },
+      { type: "separator" },
+      { role: "selectAll", label: "전체 선택" },
+    ],
+  };
+}
+
 function refreshApplicationMenu() {
   const settingsMenuItem = createSettingsMenuItem();
+  const editMenu = createEditMenu();
   const displayMenu = createDisplayMenu();
   const template: MenuItemConstructorOptions[] =
     process.platform === "darwin"
@@ -525,11 +544,13 @@ function refreshApplicationMenu() {
               { role: "quit" },
             ],
           },
+          editMenu,
           createViewMenu(),
           displayMenu,
         ]
       : [
           { label: "앱", submenu: [createAlwaysOnTopMenuItem(), settingsMenuItem, { type: "separator" }, { role: "quit" }] },
+          editMenu,
           createViewMenu(),
           displayMenu,
         ];
@@ -633,7 +654,9 @@ function openSettingsWindow(initialTabInput: unknown = "llm"): BrowserWindow {
       additionalArguments: initialThemeArgs(),
     },
   });
-  if (typeof settingsWindow.setMenu === "function") settingsWindow.setMenu(null);
+  // Keep the hidden application menu attached so standard Edit-role
+  // accelerators (Cmd/Ctrl+C/V/X/A/Z) continue to work in settings inputs.
+  // `autoHideMenuBar` preserves the chrome-free settings-window appearance.
 
   const win = settingsWindow;
   registerWindowEventListeners(win);

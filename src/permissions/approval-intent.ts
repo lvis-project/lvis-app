@@ -151,15 +151,21 @@ const EN_CONTRACTION_NEGATION =
 
 const NEGATION_TOKENS_NEAR_APPROVE: ReadonlyArray<RegExp> = [
   /(안|않|못)/u,
+  /(말고|금지)/u,
   /하지\s*마/u,
+  /(^|\s)not(\s|$)/iu,
+  /(^|\s)no\s+(approve|allow|proceed|go\s+ahead|허용|진행|통과|승인)(\s|$)/iu,
   /(^|\s)never(\s|$)/iu,
   EN_CONTRACTION_NEGATION,
   /(^|\s)do\s+not(\s|$)/iu,
   /(^|\s)does\s+not(\s|$)/iu,
   /(^|\s)did\s+not(\s|$)/iu,
+  /(^|\s)will\s+not(\s|$)/iu,
   /(^|\s)would\s+not(\s|$)/iu,
   /(^|\s)should\s+not(\s|$)/iu,
   /(^|\s)could\s+not(\s|$)/iu,
+  /(^|\s)is\s+not(\s|$)/iu,
+  /(^|\s)are\s+not(\s|$)/iu,
   /(^|\s)cannot(\s|$)/iu,
 ];
 
@@ -255,6 +261,9 @@ export function detectApprovalIntent(rawText: string): ApprovalIntent {
   if (text.length === 0) return { kind: "none" };
   if (text.length > MAX_INTENT_TEXT_LENGTH) return { kind: "none" };
   if (countSentences(text) > 1) return { kind: "none" };
+  if (/^(assistant|system|developer|tool|user)\s*:/iu.test(text)) {
+    return { kind: "none" };
+  }
   // Round-1 test-engineer CRITICAL — question forms ("허용했나요?",
   // "허용 됩니까?") contain approve tokens but are not directives.
   // The presence of any question mark (ASCII or full-width) forces

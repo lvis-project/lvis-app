@@ -94,8 +94,6 @@ export function DeferredQueuePanel({ showEmpty = false, onClose }: DeferredQueue
       if (!api) return;
       setBusy(true);
       try {
-        // Round-5 architect MAJOR — `approvalSource` is required at
-        // the preload boundary. Panel clicks are always button-source.
         const r = await api(id, decision, undefined, "button");
         await refresh();
         if (!r.ok) setError(r.error);
@@ -175,8 +173,6 @@ export function DeferredQueuePanel({ showEmpty = false, onClose }: DeferredQueue
                   </SummaryTile>
                   <SummaryTile label="권한 분류">
                     {categoryLabel(activeEntry.category)}
-                    <br />
-                    {activeEntry.category}
                   </SummaryTile>
                 </div>
                 <div className={`min-w-0 overflow-hidden rounded-md border ${reviewBoxClass(activeEntry.verdict.level)}`}>
@@ -187,7 +183,7 @@ export function DeferredQueuePanel({ showEmpty = false, onClose }: DeferredQueue
                     <ReviewRow key={row.label} label={row.label}>
                       {row.monospace ? (
                         <pre
-                          className="max-h-24 max-w-full overflow-hidden whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed"
+                          className="max-h-40 max-w-full overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed"
                           data-testid={row.testId}
                         >
                           {row.value}

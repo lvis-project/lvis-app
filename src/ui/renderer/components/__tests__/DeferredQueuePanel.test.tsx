@@ -173,7 +173,7 @@ describe("DeferredQueuePanel", () => {
       render(<DeferredQueuePanel />);
     });
     for (const label of labels) {
-      expect(screen.getByText(label)).toBeTruthy();
+      expect(screen.getAllByText(label).length).toBeGreaterThan(0);
     }
   });
 

@@ -1291,8 +1291,12 @@ export class PluginRuntime {
     return this.plugins.get(pluginId)?.manifest ?? this.knownPluginManifests.get(pluginId);
   }
 
-  private getPluginAccessGrant(pluginId: string): PluginAccessSpec | undefined {
+  getApprovedPluginAccess(pluginId: string): PluginAccessSpec | undefined {
     return this.plugins.get(pluginId)?.approvedPluginAccess ?? this.knownPluginAccessGrants.get(pluginId);
+  }
+
+  private getPluginAccessGrant(pluginId: string): PluginAccessSpec | undefined {
+    return this.getApprovedPluginAccess(pluginId);
   }
 
   listPluginCards(toolRegistry?: { getVisibleTools(): Array<{ name: string }> }): PluginCard[] {
