@@ -189,6 +189,10 @@ describe("PermissionsTab hook quarantine notice", () => {
 
     expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("mode llm");
     expect(api.permission.setMode).toHaveBeenCalledWith("auto");
+    // Round-2 test-engineer MAJOR — exec-mode-auto must ALSO fire the
+    // `interactive low` dispatch so the new SOT (issue #690 P3) stays
+    // coupled to the legacy `auto` UX.
+    expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("interactive low");
     expect(api.permission.setMode.mock.invocationCallOrder[0]).toBeLessThan(
       api.permission.reviewerDispatch.mock.invocationCallOrder.at(-1)!,
     );
