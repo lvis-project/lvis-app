@@ -125,7 +125,9 @@ export function DeferredApprovalChip({
       // intent that no longer reflects the composer.
       const liveIntent = detectApprovalIntent(draftText);
       if (liveIntent.kind !== intent.kind) {
-        setError("의도가 변경되었습니다 — 입력 확인 후 다시 시도");
+        // Round-5 UX NIT — "의도가 변경되었습니다" is internal-state
+        // language. Plain Korean for what actually happened.
+        setError("입력이 바뀌었습니다. 다시 확인하고 버튼을 눌러 주세요.");
         return;
       }
       // Round-3 critic MAJOR — the audit `reason` field is HMAC-chained
@@ -155,28 +157,34 @@ export function DeferredApprovalChip({
     }
   };
 
-  // Round-1 architect MAJOR-2 / round-2 code-reviewer MINOR — surface
-  // the entry source so the user sees whether they're approving a
-  // builtin host tool, a plugin tool, or an MCP-bridged tool. The
-  // label is rendered with an aria-friendly source badge (see JSX
-  // below) so screen readers announce "플러그인 도구" / "MCP 도구"
-  // rather than the bracketed token.
+  // Round-1 architect MAJOR-2 / round-2 code-reviewer MINOR / round-5
+  // critic MAJOR-2 — surface the entry source so the user sees whether
+  // they're approving a builtin host tool, a plugin tool, or an MCP-
+  // bridged tool. Round-5 fix: every source gets a badge so screen
+  // readers always receive a provenance announcement (previous builtin
+  // case rendered no badge, leaving SR users unable to distinguish a
+  // builtin `fs_write` from a plugin tool of the same shape).
+  // Round-5 UX MAJOR — visible badge text in Korean (matches the
+  // aria-label) so non-technical users aren't confronted with raw
+  // English tokens like "mcp" or "builtin".
   const sourceBadgeText =
     target.source === "plugin"
-      ? "plugin"
+      ? "플러그인"
       : target.source === "mcp"
-        ? "mcp"
-        : null;
+        ? "MCP"
+        : "기본";
   const sourceBadgeAriaLabel =
     target.source === "plugin"
       ? "플러그인 도구"
       : target.source === "mcp"
         ? "MCP 도구"
-        : null;
+        : "기본 도구";
+  // Round-5 UX MAJOR — "호출" is dev jargon; "실행" reads as
+  // conversational confirmation rather than legal-permission form.
   const labelTail =
     intent.kind === "approve"
-      ? `'${target.toolName}' 호출 허용?`
-      : `'${target.toolName}' 호출 거절?`;
+      ? `'${target.toolName}' 실행을 허용할까요?`
+      : `'${target.toolName}' 실행을 취소할까요?`;
   const action = intent.kind === "approve" ? "허용" : "거절";
 
   return (
@@ -196,7 +204,10 @@ export function DeferredApprovalChip({
           className="inline-block h-2 w-2 rounded-full bg-primary"
         />
         <span className="flex-1 min-w-0">
-          <span className="font-medium">승인 의도 감지: </span>
+          {/* Round-5 UX MAJOR — drop the "의도 감지" framing (sounds
+              like surveillance to non-technical users). The chip's job
+              is to ask, not to announce that the system read the
+              user's input. */}
           {sourceBadgeText && sourceBadgeAriaLabel ? (
             <span
               aria-label={sourceBadgeAriaLabel}

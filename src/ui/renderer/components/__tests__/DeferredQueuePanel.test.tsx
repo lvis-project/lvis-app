@@ -188,7 +188,7 @@ describe("DeferredQueuePanel", () => {
     await act(async () => {
       fireEvent.click(button);
     });
-    expect(api.deferredResolve).toHaveBeenCalledWith("abc-123", "approved");
+    expect(api.deferredResolve).toHaveBeenCalledWith("abc-123", "approved", undefined, "button");
     // After click: deferredList re-fetched (initial + post-action)
     expect(api.deferredList.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
@@ -204,7 +204,7 @@ describe("DeferredQueuePanel", () => {
     await act(async () => {
       fireEvent.click(button);
     });
-    expect(api.deferredResolve).toHaveBeenCalledWith("xyz-789", "rejected");
+    expect(api.deferredResolve).toHaveBeenCalledWith("xyz-789", "rejected", undefined, "button");
   });
 
   it("subscribes to deferred-pending event", async () => {
@@ -242,7 +242,7 @@ describe("DeferredQueuePanel", () => {
     await act(async () => {
       fireEvent.click(screen.getByText("허용"));
     });
-    expect(api.deferredResolve).toHaveBeenCalledWith("err-1", "approved");
+    expect(api.deferredResolve).toHaveBeenCalledWith("err-1", "approved", undefined, "button");
     expect(api.deferredList.mock.calls.length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText("resolve failed")).toBeTruthy();
   });

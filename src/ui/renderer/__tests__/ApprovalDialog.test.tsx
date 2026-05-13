@@ -131,9 +131,11 @@ describe("ApprovalDialog", () => {
     await waitFor(() => {
       const row = document.body.querySelector('[data-testid="tool-approval-sandbox"]');
       expect(row).toBeTruthy();
+      // Round-5 UX MAJOR — plain Korean copy; raw English `reason`
+      // field no longer leaks into UI. "OS 격리 없음" is the canonical
+      // weak-sandbox message.
       expect(row!.textContent).toContain("⚠");
-      expect(row!.textContent).toContain("none");
-      expect(row!.textContent).toContain("darwin");
+      expect(row!.textContent).toContain("OS 격리 없음");
     });
   });
 
@@ -156,6 +158,8 @@ describe("ApprovalDialog", () => {
     await waitFor(() => {
       const row = document.body.querySelector('[data-testid="tool-approval-sandbox"]');
       expect(row).toBeTruthy();
+      // Round-5 UX MAJOR — strong sandbox renders "OS 격리 활성".
+      expect(row!.textContent).toContain("OS 격리 활성");
       expect(row!.textContent).toContain("bubblewrap");
       expect(row!.textContent).not.toContain("⚠");
     });
