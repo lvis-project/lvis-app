@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { KeywordEngine } from "../../core/keyword-engine.js";
 import { RouteEngine } from "../../core/route-engine.js";
@@ -21,6 +21,47 @@ class FakeProvider implements LLMProvider {
 }
 
 describe("ConversationLoop queryLoop", () => {
+  it("clears per-turn prompt builder state when prompt assembly throws", async () => {
+    const toolRegistry = new ToolRegistry();
+    const setOriginSource = vi.fn();
+    const setActiveSessionId = vi.fn();
+    const setActiveRolePrompt = vi.fn();
+    const loop = new ConversationLoop(({
+      settingsService: { get: () => fakeLlmSettings(), getSecret: () => "test-key" },
+      systemPromptBuilder: {
+        build: () => {
+          throw new Error("prompt assembly failed");
+        },
+        setOriginSource,
+        setActiveSessionId,
+        setActiveRolePrompt,
+        setToolScope: vi.fn(),
+      },
+      keywordEngine: new KeywordEngine(),
+      routeEngine: new RouteEngine({ toolRegistry }),
+      toolRegistry,
+      memoryManager: { saveSession: () => {}, listSessions: () => [] },
+      disableSessionPersistence: true,
+    } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+    (loop as { provider: LLMProvider | null }).provider = new FakeProvider([]);
+
+    await expect(loop.runTurn("질문", undefined, undefined, {
+      inputOrigin: "user-keyboard",
+      originSource: "overlay:test",
+      rolePrompt: { name: "Reviewer", systemPromptAdd: "Review carefully." },
+    })).rejects.toThrow("prompt assembly failed");
+
+    expect(setOriginSource).toHaveBeenNthCalledWith(1, "overlay:test");
+    expect(setOriginSource).toHaveBeenLastCalledWith(null);
+    expect(setActiveSessionId).toHaveBeenNthCalledWith(1, expect.any(String));
+    expect(setActiveSessionId).toHaveBeenLastCalledWith(null);
+    expect(setActiveRolePrompt).toHaveBeenNthCalledWith(1, {
+      name: "Reviewer",
+      systemPromptAdd: "Review carefully.",
+    });
+    expect(setActiveRolePrompt).toHaveBeenLastCalledWith(null);
+  });
+
   it("clears a fully completed session TO-DO plan at the next turn start", async () => {
     const toolRegistry = new ToolRegistry();
     const provider = new FakeProvider([

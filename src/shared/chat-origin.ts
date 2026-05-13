@@ -12,6 +12,10 @@ export interface ChatSendPayload {
   attachments?: unknown;
   inputOrigin: ChatSendInputOrigin;
   userActivation?: boolean;
+  rolePrompt?: {
+    name: string;
+    systemPromptAdd: string;
+  };
 }
 
 export interface UserKeyboardIntentSnapshot {

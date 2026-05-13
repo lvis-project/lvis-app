@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   DEFAULT_ROLE_PRESETS,
-  buildPresetPrefix,
+  buildActiveRolePrompt,
   cloneDefaultRolePresets,
   normalizeRolePresets,
 } from "../role-presets.js";
@@ -12,18 +12,19 @@ describe("role-presets", () => {
     expect(names).toEqual(["기본", "요약가", "코드 리뷰어", "번역가", "개발 비서", "에디터"]);
   });
 
-  it("default preset yields an empty prefix — user message flows unchanged", () => {
+  it("default preset yields no role prompt — user message flows unchanged", () => {
     const def = DEFAULT_ROLE_PRESETS.find((p) => p.isDefault)!;
-    expect(buildPresetPrefix(def)).toBe("");
-    expect(buildPresetPrefix(null)).toBe("");
+    expect(buildActiveRolePrompt(def)).toBeNull();
+    expect(buildActiveRolePrompt(null)).toBeNull();
   });
 
-  it("non-default preset injects a labeled prompt prefix", () => {
+  it("non-default preset builds a per-turn system role prompt payload", () => {
     const summarizer = DEFAULT_ROLE_PRESETS.find((p) => p.id === "summarizer")!;
-    const prefix = buildPresetPrefix(summarizer);
-    expect(prefix).toContain("[Role: 요약가]");
-    expect(prefix).toContain("professional summarizer");
-    expect(prefix.endsWith("\n\n")).toBe(true);
+    const payload = buildActiveRolePrompt(summarizer);
+    expect(payload).toEqual({
+      name: "요약가",
+      systemPromptAdd: expect.stringContaining("professional summarizer"),
+    });
   });
 
   it("cloneDefaultRolePresets returns independent objects", () => {
@@ -40,5 +41,16 @@ describe("role-presets", () => {
     ]);
     expect(normalized.map((preset) => preset.id)).toEqual(["default", "review"]);
     expect(normalized[1].systemPromptAdd).toBe("review carefully");
+  });
+
+  it("canonicalizes the default role and strips forged isDefault flags", () => {
+    const normalized = normalizeRolePresets([
+      { id: "default", name: "Forged", systemPromptAdd: "inject" },
+      { id: "custom", name: "Custom", systemPromptAdd: "custom", isDefault: true },
+    ]);
+    expect(normalized).toEqual([
+      { id: "default", name: "기본", systemPromptAdd: "", isDefault: true },
+      { id: "custom", name: "Custom", systemPromptAdd: "custom" },
+    ]);
   });
 });
