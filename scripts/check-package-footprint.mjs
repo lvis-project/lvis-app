@@ -206,6 +206,18 @@ if (rendererOnlyEntries.length > 0) {
   fail("renderer-only packages leaked into app.asar", rendererOnlyEntries);
 }
 
+const installTimeOnlyPattern = /^\/node_modules\/(?:prebuild-install|napi-build-utils|node-abi)(?:\/|$)/;
+const installTimeOnlyEntries = entries.filter((entry) => installTimeOnlyPattern.test(entry));
+if (installTimeOnlyEntries.length > 0) {
+  fail("install-time-only packages leaked into app.asar", installTimeOnlyEntries);
+}
+
+const betterSqliteSourceLeakPattern = /^\/node_modules\/better-sqlite3\/(?:src|binding\.gyp)(?:\/|$)/;
+const betterSqliteSourceLeakEntries = entries.filter((entry) => betterSqliteSourceLeakPattern.test(entry));
+if (betterSqliteSourceLeakEntries.length > 0) {
+  fail("better-sqlite3 build sources leaked into app.asar", betterSqliteSourceLeakEntries);
+}
+
 const unpackedDir = resolve(resourcesDir, "app.asar.unpacked");
 const betterSqliteNativeBinding = resolve(
   unpackedDir,
