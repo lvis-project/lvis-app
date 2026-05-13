@@ -219,7 +219,13 @@ export async function dispatchPermissionDirCommand(
 
 // ─── /permission reviewer slash ───────────────────────────────────────
 
-export type PermissionReviewerVerb = "mode" | "provider" | "model" | "fallback" | "show";
+export type PermissionReviewerVerb =
+  | "mode"
+  | "provider"
+  | "model"
+  | "fallback"
+  | "interactive"
+  | "show";
 
 export interface PermissionReviewerCommand {
   verb: PermissionReviewerVerb;
@@ -233,6 +239,7 @@ export type PermissionReviewerResult =
   | { ok: true; verb: "provider"; settings: ReviewerSettingsBlock }
   | { ok: true; verb: "model"; settings: ReviewerSettingsBlock }
   | { ok: true; verb: "fallback"; settings: ReviewerSettingsBlock }
+  | { ok: true; verb: "interactive"; settings: ReviewerSettingsBlock }
   | { ok: false; error: string };
 
 const VALID_REVIEWER_MODES: ReadonlySet<ReviewerMode> = new Set([
@@ -248,6 +255,10 @@ const VALID_REVIEWER_PROVIDERS: ReadonlySet<ReviewerProvider> = new Set([
 const VALID_REVIEWER_FALLBACKS: ReadonlySet<ReviewerFallbackOnError> = new Set([
   "deny",
   "rule",
+]);
+const VALID_REVIEWER_INTERACTIVE_AUTO_APPROVES: ReadonlySet<"off" | "low"> = new Set([
+  "off",
+  "low",
 ]);
 
 /**
@@ -279,9 +290,13 @@ export function parsePermissionReviewerCommand(
     verb !== "provider" &&
     verb !== "model" &&
     verb !== "fallback" &&
+    verb !== "interactive" &&
     verb !== "show"
   ) {
-    return { ok: false, error: `unknown subcommand '${verb}' — expected show|mode|provider|model|fallback` };
+    return {
+      ok: false,
+      error: `unknown subcommand '${verb}' — expected show|mode|provider|model|fallback|interactive`,
+    };
   }
   if (verb === "show") {
     if (args.length > 1) return { ok: false, error: "show takes no extra arguments" };
@@ -357,6 +372,23 @@ export async function dispatchPermissionReviewerCommand(
         pathOverride,
       );
       return { ok: true, verb: "fallback", settings };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+  }
+  if (cmd.verb === "interactive") {
+    if (!VALID_REVIEWER_INTERACTIVE_AUTO_APPROVES.has(cmd.value as "off" | "low")) {
+      return {
+        ok: false,
+        error: `invalid interactive auto-approve '${cmd.value}' — expected ${[...VALID_REVIEWER_INTERACTIVE_AUTO_APPROVES].join("|")}`,
+      };
+    }
+    try {
+      const settings = await setReviewerSettingsPersist(
+        { interactive: { autoApprove: cmd.value as "off" | "low" } },
+        pathOverride,
+      );
+      return { ok: true, verb: "interactive", settings };
     } catch (err) {
       return { ok: false, error: (err as Error).message };
     }
