@@ -239,6 +239,19 @@ export function wireReviewerAgent(deps: WireReviewerDeps): WireReviewerResult {
       "two to resolve the contradiction.",
     );
   }
+  // Round-5 architect MAJOR — `mode="allow"` bypasses the reviewer
+  // entirely, so the `interactive.autoApprove` setting is dead config.
+  // A user reading PermissionsTab might assume `interactive=off`
+  // protects them — but `allow` is strictly more permissive than the
+  // reviewer lane. Warn so the user notices the disabled-but-set
+  // signal is misleading.
+  if (deps.permissionManager.getMode() === "allow") {
+    log.warn(
+      "exec mode=allow — reviewer (and reviewer.interactive.autoApprove) is " +
+      "bypassed for all non-hard-blocked tools. `interactive.autoApprove` " +
+      "setting has no effect under allow mode.",
+    );
+  }
   return { classifier, cache, deferredQueue, appliedSettings: settings };
 }
 

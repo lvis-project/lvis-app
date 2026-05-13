@@ -544,4 +544,60 @@ describe("PermissionsTab hook quarantine notice", () => {
     expect(api.permission.dirDispatch).toHaveBeenCalledWith("allow --ack-warnings /tmp/project/.git");
     expect(screen.getByText("/tmp/project/.git")).toBeTruthy();
   });
+
+  it("renders the legacy auto-mode banner when mode=auto + interactive.autoApprove=off (round-5 test-engineer MAJOR)", async () => {
+    const api = installApi([[]]);
+    api.permission.getMode.mockResolvedValueOnce({ mode: "auto" });
+    // Note: reviewerDispatch("show") default returns interactive.autoApprove="off".
+    await act(async () => {
+      render(<PermissionsTab />);
+    });
+    expect(screen.getByTestId("permissions-legacy-auto-mode-banner")).toBeTruthy();
+  });
+
+  it("renders the strict-low contradiction banner when mode=strict + interactive.autoApprove=low (round-5 test-engineer MAJOR)", async () => {
+    const api = installApi([[]]);
+    api.permission.getMode.mockResolvedValueOnce({ mode: "strict" });
+    api.permission.reviewerDispatch.mockImplementation(async (rawArgs: string) => {
+      if (rawArgs === "show") {
+        return {
+          ok: true as const,
+          verb: "show" as const,
+          settings: {
+            mode: "llm" as const,
+            provider: "openai" as const,
+            model: "gpt-4o-mini",
+            fallbackOnError: "deny" as const,
+            interactive: { autoApprove: "low" as const },
+          },
+        };
+      }
+      throw new Error(`unexpected reviewerDispatch: ${rawArgs}`);
+    });
+    await act(async () => {
+      render(<PermissionsTab />);
+    });
+    expect(screen.getByTestId("permissions-strict-low-contradiction-banner")).toBeTruthy();
+  });
+
+  it("renders the allow-mode banner when mode=allow (round-5 architect MAJOR)", async () => {
+    const api = installApi([[]]);
+    api.permission.getMode.mockResolvedValueOnce({ mode: "allow" });
+    await act(async () => {
+      render(<PermissionsTab />);
+    });
+    expect(screen.getByTestId("permissions-allow-mode-banner")).toBeTruthy();
+  });
+
+  it("does NOT render legacy/contradiction banners under unrelated mode+interactive combos", async () => {
+    installApi([[]]);
+    // Default = mode "default" + reviewer interactive.autoApprove="off"
+    // → no banner should render.
+    await act(async () => {
+      render(<PermissionsTab />);
+    });
+    expect(screen.queryByTestId("permissions-legacy-auto-mode-banner")).toBeNull();
+    expect(screen.queryByTestId("permissions-strict-low-contradiction-banner")).toBeNull();
+    expect(screen.queryByTestId("permissions-allow-mode-banner")).toBeNull();
+  });
 });
