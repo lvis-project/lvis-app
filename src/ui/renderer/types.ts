@@ -617,18 +617,21 @@ export interface HookTrustRow {
 export type PermissionReviewerMode = "disabled" | "rule" | "llm";
 export type PermissionReviewerProvider = "openai" | "anthropic" | "google";
 export type PermissionReviewerFallbackOnError = "deny" | "rule";
+/** Issue #690 — interactive reviewer auto-approve scope. */
+export type PermissionReviewerInteractiveAutoApprove = "off" | "low";
 
 export interface PermissionReviewerSettings {
   mode: PermissionReviewerMode;
   provider: PermissionReviewerProvider;
   model: string;
   fallbackOnError: PermissionReviewerFallbackOnError;
+  interactive: { autoApprove: PermissionReviewerInteractiveAutoApprove };
 }
 
 export type PermissionReviewerDispatchResult =
   | {
       ok: true;
-      verb: "show" | "mode" | "provider" | "model" | "fallback";
+      verb: "show" | "mode" | "provider" | "model" | "fallback" | "interactive";
       settings: PermissionReviewerSettings;
     }
   | { ok: false; error: string };
