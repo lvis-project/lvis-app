@@ -106,12 +106,15 @@ export function useChatState(api: LvisApi) {
         // (edge case — normal end-turn extends one more round to deliver
         // the guide). Surface so the user knows their direction-adjustment
         // was NOT applied — otherwise the silent-drop is worse UX than the
-        // pre-redesign abort-and-restart flow.
+        // pre-redesign abort-and-restart flow. Use a "⚠️" prefix so the
+        // failure surface is visually distinguishable from the "방향 지시
+        // 적용" success entry (round 2 critic m1 — same `system` kind
+        // styling, only the leading glyph + text differs).
         const text = typeof ev.text === "string" ? ev.text : "";
         if (text.length === 0) return;
         setEntries((p) => [
           ...p,
-          { kind: "system", text: `방향 지시 미적용 (응답 한도 도달): ${text}` },
+          { kind: "system", text: `⚠️ 방향 지시 미적용 (응답 한도 도달): ${text}` },
         ]);
         return;
       }
