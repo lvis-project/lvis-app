@@ -81,6 +81,7 @@ export interface AskUserQuestionCardProps {
   api: LvisApi;
   request: AskUserQuestionRequest;
   onResolved: (id: string) => void;
+  className?: string;
 }
 
 function isAnswerComplete(item: AskUserQuestionItem, draft: DraftAnswer): boolean {
@@ -128,6 +129,7 @@ export function AskUserQuestionCard({
   api,
   request,
   onResolved,
+  className,
 }: AskUserQuestionCardProps) {
   const total = request.questions.length;
   const isMulti = total > 1;
@@ -236,7 +238,7 @@ export function AskUserQuestionCard({
   return (
     <Card
       aria-label="질문 응답 카드"
-      className="w-full max-w-none border border-l-4 border-l-message-user bg-card shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+      className={`w-full max-w-none border border-l-4 border-l-message-user bg-card shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${className ?? ""}`}
       data-testid="ask-user-question-card"
       role="group"
       tabIndex={0}
