@@ -57,6 +57,16 @@ describe("ChatView", () => {
     });
   });
 
+  it("keeps the session todo dock edge-to-edge above the composer", async () => {
+    const { container } = await renderApp({ hasApiKey: true });
+    await waitFor(() => {
+      const dock = container.querySelector('[data-testid="session-todo-dock"]');
+      expect(dock).not.toBeNull();
+      expect(dock).toHaveClass("w-full");
+      expect(dock?.className).not.toContain("px-");
+    });
+  });
+
   it("renders assistant text after stream text_delta event", async () => {
     const { container, emitChatStream } = await renderApp({ hasApiKey: true });
     await act(async () => {
@@ -488,7 +498,13 @@ describe("ChatView", () => {
 
     await waitFor(() => {
       expect(container.textContent).toContain("지역 기준을 알려주세요");
-      expect(container.querySelector('[data-testid="question-overlay"]')).not.toBeNull();
+      const overlay = container.querySelector('[data-testid="question-overlay"]');
+      const card = container.querySelector('[data-testid="ask-user-question-card"]');
+      expect(overlay).not.toBeNull();
+      expect(overlay?.className).not.toContain("pb-3");
+      expect(card).toHaveClass("rounded-none");
+      expect(card).toHaveClass("rounded-t-lg");
+      expect(card).toHaveClass("border-b-0");
     });
   });
 

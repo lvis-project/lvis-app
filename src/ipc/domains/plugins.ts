@@ -16,16 +16,16 @@ import { emitPluginConfigChange, SECRET_REDACTED_SENTINEL } from "../../plugins/
 import { runManagedBootstrap } from "../../boot/managed-marketplace.js";
 import { isDevModeUnlocked } from "../../boot/dev-flags.js";
 import { NOTIFICATION_KINDS } from "../../main/notification-service.js";
-import { resolvePluginPaths } from "../../plugins/plugin-paths.js";
-import { readPluginRegistry } from "../../plugins/registry.js";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized, validatePluginFrame } from "../gated.js";
 import type { IpcDeps } from "../types.js";
+import { sendToWindow } from "../safe-send.js";
 import { BUNDLE_IDS } from "../../shared/theme-bundles.js";
 import { createLogger } from "../../lib/logger.js";
 import { plog, PluginPhase } from "../../plugins/lifecycle-log.js";
 import { redactFsPath, redactAuditPayload } from "../../audit/dlp-filter.js";
 import { LVIS_TOKEN_NAMES } from "../../shared/plugin-ui-tokens.js";
 import { pluginAssetUrlFromRealPath } from "../../main/plugin-asset-protocol.js";
+import { preparePythonRuntimeForInstalledPlugin, withPluginInstallLock } from "../../plugins/install-lifecycle.js";
 const log = createLogger("lvis");
 
 function pluginConfigError(
@@ -56,46 +56,6 @@ function errMessage(e: unknown): string {
     return JSON.stringify(e);
   } catch {
     return String(e);
-  }
-}
-
-/**
- * Per-pluginId in-flight install mutex — serializes
- * `lvis:plugins:install` and `lvis:plugins:install-local` for the same
- * pluginId so a second user click during a slow `addPlugin` can't race
- * with the first call's rollback uninstall (which would otherwise wipe
- * the second click's just-installed registry entry).
- *
- * Lives at the IPC-handler layer (not inside `PluginMarketplace`)
- * because `marketplace.withPluginLock` is held only across
- * install/uninstall — not the addPlugin between them. Wrapping the
- * whole install→addPlugin→(rollback if needed) sequence here closes
- * that gap without restructuring the marketplace lock model.
- */
-const inflightInstallLocks = new Map<string, Promise<unknown>>();
-async function withInstallLock<T>(
-  pluginId: string,
-  fn: () => Promise<T>,
-): Promise<T> {
-  const prev = inflightInstallLocks.get(pluginId) ?? Promise.resolve();
-  let release: () => void = () => {};
-  const next = new Promise<void>((resolveNext) => {
-    release = resolveNext;
-  });
-  // `prev.then(() => next)` returns a NEW Promise object on each call; if we
-  // call it twice (set + cleanup identity-check) the references won't match
-  // and the Map entry leaks forever. Hoist into a local so the same
-  // reference is stored and compared.
-  const tail = prev.then(() => next);
-  inflightInstallLocks.set(pluginId, tail);
-  try {
-    await prev;
-    return await fn();
-  } finally {
-    release();
-    if (inflightInstallLocks.get(pluginId) === tail) {
-      inflightInstallLocks.delete(pluginId);
-    }
   }
 }
 
@@ -234,30 +194,6 @@ const PLUGIN_TOKEN_NAMES: Set<string> = new Set(LVIS_TOKEN_NAMES);
 // [1-9]00: font-weight values (100-900). \d+ms: motion timing (150ms, 200ms).
 const _SAFE_TOKEN_VALUE = /^(hsl\(\s*-?\d+(?:\.\d+)?\s*,\s*\d+(?:\.\d+)?%\s*,\s*\d+(?:\.\d+)?%\s*\)|#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{4}|[0-9a-fA-F]{3})|\d+(?:\.\d+)?(?:rem|em|px|%)|[1-9]00|\d+(?:\.\d+)?ms)$/;
 
-async function resolveInstalledManifestPath(pluginId: string): Promise<string | undefined> {
-  const pluginPaths = resolvePluginPaths();
-  const registry = await readPluginRegistry(pluginPaths.registryPath);
-  const entry = registry.plugins.find((candidate) => candidate.id === pluginId && candidate.enabled !== false);
-  if (!entry) return undefined;
-  return path.isAbsolute(entry.manifestPath)
-    ? entry.manifestPath
-    : path.resolve(path.dirname(pluginPaths.registryPath), entry.manifestPath);
-}
-
-async function preparePythonRuntimeForInstalledPlugin(
-  pluginId: string,
-  deps: Pick<IpcDeps, "pythonRuntime" | "pluginRuntime" | "getMainWindow">,
-): Promise<void> {
-  if (!deps.pythonRuntime) return;
-  const manifestPath = await resolveInstalledManifestPath(pluginId);
-  if (!manifestPath) return;
-  const win = deps.getMainWindow();
-  if (!win) return;
-  const runtime = await deps.pythonRuntime.ensureReadyForPluginManifest(manifestPath, win);
-  if (!runtime) return;
-  deps.pluginRuntime.mergeConfigOverride("*", { pythonExecutable: runtime.pythonPath });
-}
-
 export function validateThemePayload(payload: unknown):
   | { ok: true; safe: SafeThemePayload }
   | { ok: false; error: string } {
@@ -308,7 +244,13 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     notificationService,
     mcpArtifactStore,
     getMainWindow,
+    getAppWindows,
   } = deps;
+  const broadcastPluginLifecycleEvent = (channel: string, payload: unknown) => {
+    for (const win of getAppWindows?.() ?? [getMainWindow()]) {
+      sendToWindow(win, channel, payload, log);
+    }
+  };
 
   // Phase 2d FU — bootstrap retry
   ipcMain.handle("lvis:bootstrap:retry", async (e) => {
@@ -329,28 +271,27 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
 
   ipcMain.handle("lvis:plugins:install", async (e, pluginId: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:plugins:install", e); return UNAUTHORIZED_FRAME; }
-    return withInstallLock(pluginId, async () => {
-      const win = getMainWindow();
-      win?.webContents.send("lvis:plugins:install-progress", { slug: pluginId, phase: "installing" });
+    return withPluginInstallLock(pluginId, async () => {
+      broadcastPluginLifecycleEvent("lvis:plugins:install-progress", { slug: pluginId, phase: "installing" });
       const result = await pluginMarketplace.install(pluginId, "user", (evt) => {
         if (evt.phase === "downloading") {
-          win?.webContents.send("lvis:plugins:install-progress", {
+          broadcastPluginLifecycleEvent("lvis:plugins:install-progress", {
             slug: pluginId,
             phase: "downloading",
             bytesDownloaded: evt.bytesDownloaded,
             bytesTotal: evt.bytesTotal,
           });
         } else {
-          win?.webContents.send("lvis:plugins:install-progress", { slug: pluginId, phase: evt.phase });
+          broadcastPluginLifecycleEvent("lvis:plugins:install-progress", { slug: pluginId, phase: evt.phase });
         }
       });
-      win?.webContents.send("lvis:plugins:install-progress", { slug: pluginId, phase: "restarting" });
+      broadcastPluginLifecycleEvent("lvis:plugins:install-progress", { slug: pluginId, phase: "restarting" });
       // Atomic install — marketplace.install() has already extracted the
       // artifact + written the registry entry. If addPlugin throws (import
       // smoke fail, capability mismatch, start exception, …), roll back
       // via marketplace.uninstall() so the user sees the real error
       // instead of a ghost plugin in their list. The whole install → addPlugin
-      // → (rollback if needed) sequence is wrapped in `withInstallLock` so
+      // → (rollback if needed) sequence is wrapped in `withPluginInstallLock` so
       // a second click on the same pluginId can't race the rollback.
       try {
         await preparePythonRuntimeForInstalledPlugin(result.pluginId, deps);
@@ -366,7 +307,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
             `install rollback uninstall failed for ${result.pluginId}: ${errMessage(rollbackErr)}`,
           );
         }
-        win?.webContents.send("lvis:plugins:install-result", {
+        broadcastPluginLifecycleEvent("lvis:plugins:install-result", {
           slug: result.pluginId,
           success: false,
           error: message,
@@ -375,7 +316,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       }
       emitHostEvent("plugin.installed", { pluginId: result.pluginId, source: "marketplace" });
       refreshPluginNotifications?.();
-      win?.webContents.send("lvis:plugins:install-result", { slug: result.pluginId, success: true });
+      broadcastPluginLifecycleEvent("lvis:plugins:install-result", { slug: result.pluginId, success: true });
       return result;
     });
   });
@@ -383,8 +324,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   ipcMain.handle("lvis:plugins:uninstall", async (e, pluginId: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:plugins:uninstall", e); return UNAUTHORIZED_FRAME; }
     const broadcastUninstallResult = (payload: { slug: string; success: boolean; error?: string }) => {
-      const win = getMainWindow();
-      win?.webContents.send("lvis:plugins:uninstall-result", payload);
+      broadcastPluginLifecycleEvent("lvis:plugins:uninstall-result", payload);
     };
     let result: Awaited<ReturnType<typeof pluginMarketplace.uninstall>>;
     try {
@@ -438,7 +378,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     // after `installLocal` reads the on-disk plugin.json; the IPC entry
     // itself doesn't carry an id. Race window is narrow (single dev
     // double-clicking the dialog button) but the lock costs nothing.
-    return await withInstallLock(result.pluginId, async () => {
+    return await withPluginInstallLock(result.pluginId, async () => {
       try {
         await preparePythonRuntimeForInstalledPlugin(result.pluginId, deps);
         await pluginRuntime.addPlugin(result.pluginId);
@@ -451,7 +391,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
             `install-local rollback uninstall failed for ${result.pluginId}: ${errMessage(rollbackErr)}`,
           );
         }
-        getMainWindow()?.webContents.send("lvis:plugins:install-result", {
+        broadcastPluginLifecycleEvent("lvis:plugins:install-result", {
           slug: result.pluginId,
           success: false,
           error: message,
@@ -462,7 +402,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       refreshPluginNotifications?.();
       // Mirror the marketplace install path's renderer broadcast so
       // `App.tsx` `onPluginInstallResult` listener fires `refreshViews()`.
-      getMainWindow()?.webContents.send("lvis:plugins:install-result", {
+      broadcastPluginLifecycleEvent("lvis:plugins:install-result", {
         slug: result.pluginId,
         success: true,
       });

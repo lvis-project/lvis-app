@@ -502,6 +502,12 @@ export async function bootstrap(
   // §4.2 Step 7: manifest-driven IPC bridges.
   let disposePluginNotifications = registerPluginNotifications(pluginRuntime, mainWindow);
   let disposePluginEventBridge = registerPluginEventBridge(pluginRuntime, mainWindow);
+  let pluginEventBridgeWindow = mainWindow;
+  const replacePluginEventBridge = (win: BrowserWindow) => {
+    pluginEventBridgeWindow = win;
+    disposePluginEventBridge();
+    disposePluginEventBridge = registerPluginEventBridge(pluginRuntime, win);
+  };
 
   // §4.5 + Agent 6: PostTurnHookChain.
   const { postTurnHookChain } = createPostTurnHookChain({
@@ -794,11 +800,10 @@ export async function bootstrap(
     startRoutinesScheduler: () => routinesScheduler.start(),
     refreshPluginNotifications: () => {
       disposePluginNotifications();
-      disposePluginNotifications = registerPluginNotifications(pluginRuntime, mainWindow);
-      disposePluginEventBridge();
-      disposePluginEventBridge = registerPluginEventBridge(pluginRuntime, mainWindow);
+      disposePluginNotifications = registerPluginNotifications(pluginRuntime, pluginEventBridgeWindow);
+      replacePluginEventBridge(pluginEventBridgeWindow);
     },
-    registerPluginEventBridge: (win) => registerPluginEventBridge(pluginRuntime, win),
+    registerPluginEventBridge: replacePluginEventBridge,
     shutdown: () => {
       if (shutdownPromise) return shutdownPromise;
       shutdownPromise = (async () => {

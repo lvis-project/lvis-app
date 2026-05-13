@@ -1225,10 +1225,8 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           content; in the collapsed state the active item title streams next
           to the count so the user always sees what step is running. */}
       <div className="relative z-30 w-full max-w-full min-w-0 overflow-visible border-t border-border/70 bg-card/95">
-        <div className="w-full max-w-full min-w-0 px-3">
-          <div className="min-w-0">
-            <SessionTodoPanel api={workflowApi} sessionId={currentSessionId} />
-          </div>
+        <div className="w-full max-w-full min-w-0" data-testid="session-todo-dock">
+          <SessionTodoPanel api={workflowApi} sessionId={currentSessionId} />
         </div>
         <div className="w-full max-w-full min-w-0 overflow-x-hidden pb-1 space-y-2">
           <InputActionBar
