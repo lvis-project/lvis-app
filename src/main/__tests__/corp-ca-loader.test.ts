@@ -1,14 +1,14 @@
 /**
  * corp-ca-loader unit tests — §17 C1
  *
- * child_process.execSync と node:fs を mock して実際の keychain / 파일시스템
+ * child_process.execFile 와 node:fs 를 mock 해서 실제 keychain / 파일시스템
  * 없이 모든 경로를 검증한다.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // ─── Mock node:child_process ──────────────────────────────────────────────────
 vi.mock("node:child_process", () => ({
-  execSync: vi.fn(),
+  execFile: vi.fn(),
 }));
 
 // ─── Mock node:fs (sync) — for statSync / readFileSync / mkdirSync ────────────
@@ -31,7 +31,7 @@ import * as cpMock from "node:child_process";
 import * as fsMock from "node:fs";
 import * as fspMock from "node:fs/promises";
 
-const mockedExecSync = vi.mocked(cpMock.execSync);
+const mockedExecFile = vi.mocked(cpMock.execFile);
 const mockedStatSync = vi.mocked(fsMock.statSync);
 const mockedReadFileSync = vi.mocked(fsMock.readFileSync);
 const mockedMkdirSync = vi.mocked(fsMock.mkdirSync);
@@ -54,6 +54,22 @@ function makeStalestat(): ReturnType<typeof fsMock.statSync> {
   return { mtimeMs: Date.now() - 8 * 24 * 60 * 60 * 1000 } as ReturnType<typeof fsMock.statSync>;
 }
 
+function mockExecFileStdout(stdout: string): void {
+  mockedExecFile.mockImplementation(((...args: unknown[]) => {
+    const callback = args.at(-1) as (err: Error | null, stdout: string, stderr: string) => void;
+    callback(null, stdout, "");
+    return {} as ReturnType<typeof cpMock.execFile>;
+  }) as never);
+}
+
+function mockExecFileError(err: Error): void {
+  mockedExecFile.mockImplementation(((...args: unknown[]) => {
+    const callback = args.at(-1) as (err: Error | null, stdout: string, stderr: string) => void;
+    callback(err, "", "");
+    return {} as ReturnType<typeof cpMock.execFile>;
+  }) as never);
+}
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 // Save the real platform value once at module-evaluation time (before any mock).
@@ -70,8 +86,8 @@ describe("ensureCorporateCa", () => {
       const err = Object.assign(new Error("ENOENT"), { code: "ENOENT" });
       throw err;
     });
-    // default: execSync returns empty string
-    mockedExecSync.mockReturnValue("" as never);
+    // default: execFile returns empty string
+    mockExecFileStdout("");
     // mkdirSync no-op
     mockedMkdirSync.mockReturnValue(undefined);
   });
@@ -81,8 +97,8 @@ describe("ensureCorporateCa", () => {
     vi.resetModules();
   });
 
-  it("execSync returns empty string → { pem: null, source: 'none' }", async () => {
-    mockedExecSync.mockReturnValue("" as never);
+  it("execFile returns empty string → { pem: null, source: 'none' }", async () => {
+    mockExecFileStdout("");
 
     const { ensureCorporateCa } = await import("../corp-ca-loader.js");
     const result = await ensureCorporateCa();
@@ -92,8 +108,8 @@ describe("ensureCorporateCa", () => {
     expect(result.certCount).toBe(0);
   });
 
-  it("execSync returns valid PEM → { source: 'extracted' } + cache written", async () => {
-    mockedExecSync.mockReturnValue(SAMPLE_PEM as never);
+  it("execFile returns valid PEM → { source: 'extracted' } + cache written", async () => {
+    mockExecFileStdout(SAMPLE_PEM);
 
     const writtenChunks: string[] = [];
     const mockFd = {
@@ -118,7 +134,7 @@ describe("ensureCorporateCa", () => {
     expect(mockFd.close).toHaveBeenCalled();
   });
 
-  it("cache file fresh (mtime < 7d) → execSync NOT called, source: 'cache'", async () => {
+  it("cache file fresh (mtime < 7d) → execFile NOT called, source: 'cache'", async () => {
     mockedStatSync.mockReturnValue(makeFreshStat());
     mockedReadFileSync.mockReturnValue(SAMPLE_PEM as never);
 
@@ -127,15 +143,15 @@ describe("ensureCorporateCa", () => {
 
     expect(result.source).toBe("cache");
     expect(result.pem).toBe(SAMPLE_PEM);
-    expect(mockedExecSync).not.toHaveBeenCalled();
+    expect(mockedExecFile).not.toHaveBeenCalled();
   });
 
   it("cache file stale (mtime > 7d) → re-extracts, source: 'extracted'", async () => {
     mockedStatSync.mockReturnValue(makeStalestat());
     // stale cache content (still valid PEM — but older than 7d)
     mockedReadFileSync.mockReturnValue(SAMPLE_PEM as never);
-    // execSync returns fresh PEM
-    mockedExecSync.mockReturnValue(SAMPLE_PEM as never);
+    // execFile returns fresh PEM
+    mockExecFileStdout(SAMPLE_PEM);
 
     const mockFd = {
       writeFile: vi.fn(async () => undefined),
@@ -146,13 +162,13 @@ describe("ensureCorporateCa", () => {
     const { ensureCorporateCa } = await import("../corp-ca-loader.js");
     const result = await ensureCorporateCa();
 
-    expect(mockedExecSync).toHaveBeenCalledTimes(1);
+    expect(mockedExecFile).toHaveBeenCalledTimes(1);
     expect(result.source).toBe("extracted");
   });
 
   it("certCount reflects number of BEGIN CERTIFICATE blocks", async () => {
     const twoCerts = SAMPLE_PEM + SAMPLE_PEM;
-    mockedExecSync.mockReturnValue(twoCerts as never);
+    mockExecFileStdout(twoCerts);
     const mockFd = {
       writeFile: vi.fn(async () => undefined),
       close: vi.fn(async () => undefined),
@@ -165,10 +181,8 @@ describe("ensureCorporateCa", () => {
     expect(result.certCount).toBe(2);
   });
 
-  it("execSync throws (keychain access error) → { pem: null, source: 'none' } without throwing", async () => {
-    mockedExecSync.mockImplementation(() => {
-      throw new Error("security: No matching certificate found");
-    });
+  it("execFile returns an error (keychain access error) → { pem: null, source: 'none' } without throwing", async () => {
+    mockExecFileError(new Error("security: No matching certificate found"));
 
     const { ensureCorporateCa } = await import("../corp-ca-loader.js");
     // must NOT throw

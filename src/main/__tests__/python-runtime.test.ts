@@ -8,7 +8,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { SpawnOptionsWithoutStdio } from "node:child_process";
 import type { EventEmitter } from "node:events";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
+import { gzipSync } from "node:zlib";
 
 // ─── electron mock ────────────────────────────────────────────────────────────
 vi.mock("electron", () => ({
@@ -334,6 +337,71 @@ describe("PythonRuntimeBootstrapper", () => {
     );
     expect(pipSyncCall).toBeDefined();
     expectArgsToContainPath(pipSyncCall![1] as string[], declaredLockFilePath);
+  });
+
+  it("packaged Electron에서는 gzip uv archive를 사용자 런타임 캐시에 materialize한다", async () => {
+    const resourcesPath = mkdtempSync(path.join(tmpdir(), "lvis-packaged-resources-"));
+    const uvRuntimeDir = mkdtempSync(path.join(tmpdir(), "lvis-uv-runtime-"));
+    const manifestRoot = mkdtempSync(path.join(tmpdir(), "lvis-python-plugin-"));
+    const manifestPath = path.join(manifestRoot, "plugin.json");
+    const lockFilePath = path.join(manifestRoot, "python-requirements.lock");
+    const packagedUvDir = path.join(resourcesPath, "uv", "linux-arm64");
+    const expectedUvBin = path.join(uvRuntimeDir, "linux-arm64", "test-sha256", "uv");
+
+    mkdirSync(packagedUvDir, { recursive: true });
+    writeFileSync(path.join(packagedUvDir, "uv.gz"), gzipSync(Buffer.from("uv-bin")));
+    writeFileSync(path.join(packagedUvDir, "uv.meta.json"), JSON.stringify({ binarySha256: "test-sha256" }));
+    writeFileSync(manifestPath, JSON.stringify({ python: { managedBy: "lvis-app" } }));
+    writeFileSync(lockFilePath, "");
+
+    const originalPlatform = process.platform;
+    const originalArch = process.arch;
+    const originalDefaultApp = (process as { defaultApp?: boolean }).defaultApp;
+    const originalResourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
+
+    Object.defineProperty(process, "platform", { value: "linux", configurable: true });
+    Object.defineProperty(process, "arch", { value: "arm64", configurable: true });
+    (process as { defaultApp?: boolean }).defaultApp = false;
+    (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = resourcesPath;
+
+    mockedReadFile.mockResolvedValue(JSON.stringify({ python: { managedBy: "lvis-app" } }));
+    mockedAccess.mockImplementation(async (filePath) => {
+      const normalizedPath = normalizePathForAssert(String(filePath));
+      if (normalizedPath.includes(".ready")) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+      if (normalizePathForAssert(String(filePath)) === normalizePathForAssert(expectedUvBin)) return undefined;
+      if (normalizePathForAssert(String(filePath)) === normalizePathForAssert(lockFilePath)) return undefined;
+      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    });
+    mockedSpawn
+      .mockReturnValueOnce(makeSpawnMock("uv 0.7.3\n"))
+      .mockReturnValueOnce(makeSpawnMock(""))
+      .mockReturnValueOnce(makeSpawnMock(""))
+      .mockReturnValueOnce(makeSpawnMock("3.12.3\n"));
+
+    try {
+      const bootstrapper = new PythonRuntimeBootstrapper({
+        pluginManifestPaths: [manifestPath],
+        uvRuntimeDir,
+      });
+      await bootstrapper.ensureReady(makeBrowserWindow());
+
+      expect(existsSync(expectedUvBin)).toBe(true);
+      expect(readFileSync(expectedUvBin, "utf8")).toBe("uv-bin");
+      expect(mockedSpawn.mock.calls[0]?.[0]).toBe(expectedUvBin);
+      const pipSyncCall = mockedSpawn.mock.calls.find(
+        ([, args]) => (args as string[]).includes("pip") && (args as string[]).includes("sync"),
+      );
+      expect(pipSyncCall).toBeDefined();
+      expectArgsToContainPath(pipSyncCall![1] as string[], lockFilePath);
+    } finally {
+      Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });
+      Object.defineProperty(process, "arch", { value: originalArch, configurable: true });
+      (process as { defaultApp?: boolean }).defaultApp = originalDefaultApp;
+      (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = originalResourcesPath;
+      rmSync(resourcesPath, { recursive: true, force: true });
+      rmSync(uvRuntimeDir, { recursive: true, force: true });
+      rmSync(manifestRoot, { recursive: true, force: true });
+    }
   });
 
   // ─── 3. spawn non-zero exit → throws ─────────────────────────────────────

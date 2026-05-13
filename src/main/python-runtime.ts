@@ -11,10 +11,12 @@
  */
 
 import { spawn } from "node:child_process";
+import * as fsSync from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as os from "node:os";
 import { fileURLToPath } from "node:url";
+import { gunzipSync } from "node:zlib";
 import type { BrowserWindow } from "electron";
 import { createLogger } from "../lib/logger.js";
 import { resolvePluginPaths } from "../plugins/plugin-paths.js";
@@ -76,6 +78,8 @@ export interface PythonRuntimeBootstrapperOptions {
   registryPath?: string;
   /** Mostly for tests; defaults to python-requirements.lock. */
   lockFileName?: string;
+  /** Mostly for tests; defaults to ~/.lvis/runtime/uv. */
+  uvRuntimeDir?: string;
 }
 
 function isWithinDirectory(candidatePath: string, directoryPath: string): boolean {
@@ -265,13 +269,44 @@ export class PythonRuntimeBootstrapper {
       );
     }
 
-    // production: build-installers.mjs가 target binary만 resources/uv-runtime에
-    // staging하고 extraResources로 packaged한 Electron Resources
-    return path.join(process.resourcesPath, "uv", uvTarget.dir, uvTarget.bin);
+    // production: build-installers.mjs packages a compressed target uv binary.
+    // Materialize it into the user runtime cache so Electron installers do not
+    // carry the 30MB+ raw executable while uv can still be spawned normally.
+    return this.materializePackagedUvBinary(uvTarget);
   }
 
   private getCurrentUvTarget(): UvTarget {
     return resolveUvTarget(process.platform, process.arch);
+  }
+
+  private materializePackagedUvBinary(uvTarget: UvTarget): string {
+    const packagedDir = path.join(process.resourcesPath, "uv", uvTarget.dir);
+    const compressedBin = path.join(packagedDir, `${uvTarget.bin}.gz`);
+    const metaPath = path.join(packagedDir, "uv.meta.json");
+    let binarySha256 = "unverified";
+    try {
+      const meta = JSON.parse(fsSync.readFileSync(metaPath, "utf8")) as { binarySha256?: unknown };
+      if (typeof meta.binarySha256 === "string" && meta.binarySha256.length > 0) {
+        binarySha256 = meta.binarySha256;
+      }
+    } catch {
+      // Missing metadata is handled by the compressed binary access below.
+    }
+
+    const runtimeUvDir = this.options.uvRuntimeDir ?? path.join(LVIS_RUNTIME_DIR, "uv");
+    const targetDir = path.join(runtimeUvDir, uvTarget.dir, binarySha256);
+    const targetBin = path.join(targetDir, uvTarget.bin);
+    if (!fsSync.existsSync(targetBin)) {
+      if (!fsSync.existsSync(compressedBin)) {
+        throw new Error(`packaged uv archive를 찾을 수 없습니다: ${compressedBin}`);
+      }
+      fsSync.mkdirSync(targetDir, { recursive: true });
+      fsSync.writeFileSync(targetBin, gunzipSync(fsSync.readFileSync(compressedBin)));
+      if (process.platform !== "win32") {
+        fsSync.chmodSync(targetBin, 0o755);
+      }
+    }
+    return targetBin;
   }
 
   // ─── private: lock file 위치 ──────────────────────
@@ -346,12 +381,6 @@ export class PythonRuntimeBootstrapper {
       }
     } catch (err) {
       await this.log(`[python-runtime] registry lockfile discovery skipped (${registryPath}): ${(err as Error).message}`);
-    }
-
-    // Last resort for older packaged builds that still included this resource.
-    const resourcesPath = process.resourcesPath;
-    if (resourcesPath) {
-      candidates.push(path.join(resourcesPath, lockFileName));
     }
 
     return [...new Set(candidates)];

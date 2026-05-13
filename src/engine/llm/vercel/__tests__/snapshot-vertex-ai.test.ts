@@ -167,6 +167,10 @@ describe("VercelUnifiedProvider vertex-ai", () => {
     vi.resetModules();
     const { createProvider } = await import("../../provider-factory.js");
     const p = createProvider({ vendor: "vertex-ai", apiKey: "", vertexProject: "p" });
-    expect(p.constructor.name).toBe("VercelUnifiedProvider");
+    // PR #705: factory returns a lazy proxy that defers the Vercel adapter
+    // module load until first `streamTurn`. The vendor surface is preserved
+    // synchronously so reviewer-wiring + IPC handlers stay unchanged.
+    expect(p.constructor.name).toBe("LazyVercelProvider");
+    expect(p.vendor).toBe("vertex-ai");
   });
 });
