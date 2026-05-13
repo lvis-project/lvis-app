@@ -335,21 +335,30 @@ export class ApprovalGate {
   async requestAndWait(
     req: Omit<ApprovalRequest, "requireExplicit">,
   ): Promise<ApprovalDecision> {
-    // Round-3 code-reviewer MAJOR + round-4 critic CRITICAL — sandbox
-    // capability injection is scoped to the tool-approval surface that
-    // actually renders the "격리" row (`kind === "tool"` or absent =
-    // tool-default). The `out-of-allowed-dir` card is a Layer 1
-    // directory-confirm surface that has no sandbox row in its DOM;
-    // injecting capability there is dead data (and the round-3 commit
-    // message's "every approval card surfaces the capability" claim
-    // was correctly scoped to the tool dialog).
+    // Round-3 code-reviewer MAJOR + round-4 critic CRITICAL + round-5
+    // critic MAJOR-1 — sandbox capability injection is scoped to the
+    // tool-execution approval surface. Non-execution surfaces
+    // (out-of-allowed-dir directory confirm, mode-change config asks)
+    // have no sandbox row in their DOM and showing "격리: none" on a
+    // config change is misleading because no tool will run.
+    //
+    // The injection guard checks BOTH `kind` AND `toolCategory`:
+    //   - `kind === "out-of-allowed-dir"`        → no injection
+    //   - `kind === "mode-change"`               → no injection (round-5)
+    //   - `toolCategory === "meta"`              → no injection
+    //                                              (catches mode-change
+    //                                              asks that default
+    //                                              `kind` to "tool")
+    //   - else (tool execution)                  → inject
     //
     // Caller-supplied capability is always preserved (`??` semantics).
-    const isToolKind = req.kind === undefined || req.kind === "tool";
+    const isExecutionKind =
+      (req.kind === undefined || req.kind === "tool") &&
+      req.toolCategory !== "meta";
     const fullReq: ApprovalRequest = {
       ...req,
       sandboxCapability: req.sandboxCapability ??
-        (isToolKind ? this.sandboxCapabilityProvider() : undefined),
+        (isExecutionKind ? this.sandboxCapabilityProvider() : undefined),
       requireExplicit: this.currentPolicy.requireExplicitApproval,
     };
 
