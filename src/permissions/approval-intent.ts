@@ -136,15 +136,45 @@ const REJECT_PATTERNS: ReadonlyArray<RegExp> = [
  *     envelope; the broader anchor would otherwise miss real negations.
  *   - Add 못 (Korean impossibility marker — "허용 못 함").
  *   - Add smart apostrophe variant for English contractions.
+ *
+ * Round-2 critic CRITICAL — extend English contraction family to cover
+ * `shouldn't`, `didn't`, `wouldn't`, `couldn't`, `won't`, `isn't`, etc.
+ * The previous list missed the most common modal-contraction negations
+ * an English speaker uses ("I shouldn't approve" should NOT match
+ * kind="approve").
  */
+const EN_CONTRACTION_NEGATION =
+  /(^|\s)(don|doesn|didn|can|won|wouldn|shouldn|couldn|isn|aren|wasn|weren|hasn|haven|hadn|mustn|mightn|shan)['’]?t(\s|$)/iu;
+// Reserved for future "do not / would not" full-form coverage; the
+// space-separated forms below already match these so EN_NOT_VERB_NEGATION
+// stays out of the active matcher set.
+
 const NEGATION_TOKENS_NEAR_APPROVE: ReadonlyArray<RegExp> = [
   /(안|않|못)/u,
   /하지\s*마/u,
-  /(^|\s)don['’]?t(\s|$)/iu,
-  /(^|\s)do\s+not(\s|$)/iu,
   /(^|\s)never(\s|$)/iu,
-  /(^|\s)can['’]?t(\s|$)/iu,
+  EN_CONTRACTION_NEGATION,
+  /(^|\s)do\s+not(\s|$)/iu,
+  /(^|\s)does\s+not(\s|$)/iu,
+  /(^|\s)did\s+not(\s|$)/iu,
+  /(^|\s)would\s+not(\s|$)/iu,
+  /(^|\s)should\s+not(\s|$)/iu,
+  /(^|\s)could\s+not(\s|$)/iu,
   /(^|\s)cannot(\s|$)/iu,
+];
+
+/**
+ * Round-2 critic MAJOR — hesitation tokens that signal "wait, not yet,
+ * stop a moment" near an approve verb should collapse to "none" so a
+ * user typing "잠시만 기다려 허용해 주세요" isn't classified as approve.
+ */
+const HESITATION_TOKENS_NEAR_APPROVE: ReadonlyArray<RegExp> = [
+  /(^|\s)잠시만(\s|$)/u,
+  /(^|\s)기다려/u,
+  /(^|\s)아직(\s|$)/u,
+  /(^|\s)wait(\s|$)/iu,
+  /(^|\s)hold\s+on(\s|$)/iu,
+  /(^|\s)not\s+yet(\s|$)/iu,
 ];
 
 /**
@@ -170,12 +200,21 @@ const REJECT_VERB_STEMS: ReadonlyArray<string> = [
 /**
  * Korean / English suffixes that negate a preceding reject verb
  * (i.e. convert "거절하지 마" → "don't reject").
+ *
+ * Round-2 critic CRITICAL — extended to cover the full English modal
+ * contraction family ("shouldn't", "didn't", "wouldn't", "couldn't",
+ * "won't", "isn't", "aren't", ...). Without these, a user typing
+ * "shouldn't cancel" was wrongly classified as kind="reject" — same
+ * class as the Round-1 CRITICAL it was meant to close.
  */
 const NEGATION_SUFFIXES_AFTER_REJECT: ReadonlyArray<RegExp> = [
   /하지\s*마/u,
   /(\s|^)(안|않)/u,
-  /(\s|^)(don['’]?t|do\s+not|never|can['’]?t|cannot)/iu,
+  /(\s|^)never(\s|$)/iu,
 ];
+
+const ENGLISH_NEGATION_BEFORE_REJECT_VERB =
+  /(^|\s)(don|doesn|didn|can|won|wouldn|shouldn|couldn|isn|aren|wasn|weren|hasn|haven|hadn|mustn|mightn|shan)['’]?t(\s|$)|(^|\s)(do|does|did|will|would|should|could|is|are|was|were|has|have|had|must|might|shall)(\s+not)(\s|$)|(^|\s)never(\s|$)|(^|\s)cannot(\s|$)/iu;
 
 /**
  * Sentence-terminator count. Round-1 fix: previous implementation
@@ -232,6 +271,11 @@ export function detectApprovalIntent(rawText: string): ApprovalIntent {
     if (hasNearbyNegation(text, NEGATION_TOKENS_NEAR_APPROVE)) {
       return { kind: "none" };
     }
+    // Round-2 critic MAJOR — hesitation tokens ("잠시만 기다려",
+    // "wait", "not yet") near an approve verb collapse to "none".
+    if (hasNearbyNegation(text, HESITATION_TOKENS_NEAR_APPROVE)) {
+      return { kind: "none" };
+    }
     return { kind: "approve", matchedPhrase: approveMatch };
   }
   if (rejectMatch) {
@@ -248,20 +292,22 @@ export function detectApprovalIntent(rawText: string): ApprovalIntent {
 }
 
 function hasNegationAfterRejectVerb(text: string): boolean {
+  // Round-2 code-reviewer + critic — slice the lowercased text itself
+  // so head/tail indices stay self-consistent. Locale-aware lowering
+  // (Turkish İ → two units) would otherwise drift the slice indices.
   const lower = text.toLowerCase();
   for (const stem of REJECT_VERB_STEMS) {
     const idx = lower.indexOf(stem);
     if (idx < 0) continue;
     // Suffix negation (Korean "취소하지 마"): pattern follows the verb.
-    const tail = text.slice(idx + stem.length);
+    const tail = lower.slice(idx + stem.length);
     for (const suffix of NEGATION_SUFFIXES_AFTER_REJECT) {
       if (suffix.test(tail)) return true;
     }
-    // Prefix negation (English "don't cancel" / "never reject"): pattern
-    // precedes the verb. The window is the slice BEFORE the verb match;
-    // any English negation token there flips the verdict.
-    const head = text.slice(0, idx);
-    if (/(^|\s)(don['’]?t|do\s+not|never|can['’]?t|cannot)(\s|$)/iu.test(head)) {
+    // Prefix negation (English "don't cancel" / "shouldn't cancel" /
+    // "wouldn't reject" / "never stop"): pattern precedes the verb.
+    const head = lower.slice(0, idx);
+    if (ENGLISH_NEGATION_BEFORE_REJECT_VERB.test(head)) {
       return true;
     }
   }
