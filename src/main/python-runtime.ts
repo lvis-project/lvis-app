@@ -19,6 +19,7 @@ import type { BrowserWindow } from "electron";
 import { createLogger } from "../lib/logger.js";
 import { resolvePluginPaths } from "../plugins/plugin-paths.js";
 import { readPluginRegistry, resolveManifestPathsFromRegistry } from "../plugins/registry.js";
+import { resolveUvTarget, type UvTarget } from "../../scripts/uv-targets.mjs";
 const log = createLogger("python-runtime");
 
 const __filename = fileURLToPath(import.meta.url);
@@ -95,6 +96,7 @@ export class PythonRuntimeBootstrapper {
    */
   async ensureReady(mainWindow: BrowserWindow): Promise<RuntimeResult> {
     this.mainWindow = mainWindow;
+    this.getCurrentUvTarget();
 
     const pythonPath = this.getPythonPath();
     const result: RuntimeResult = { pythonPath, venvPath: VENV_DIR };
@@ -243,11 +245,7 @@ export class PythonRuntimeBootstrapper {
   // ─── private: uv binary path ──────────────────────
 
   private getUvBinaryPath(): string {
-    const platform = process.platform;
-    const arch = process.arch;
-
-    const platformDir = this.resolvePlatformDir(platform, arch);
-    const binName = platform === "win32" ? "uv.exe" : "uv";
+    const uvTarget = this.getCurrentUvTarget();
 
     // dev/prod 분기:
     //   - dev electron: process.defaultApp === true (Electron이 source 모드에서 set)
@@ -263,22 +261,17 @@ export class PythonRuntimeBootstrapper {
       // (fetch-uv.mjs가 dev/postinstall에서 현재 플랫폼만 다운로드한 경로와 일치)
       return path.join(
         __dirname, "..", "..", "..", "resources", "uv",
-        platformDir, binName,
+        uvTarget.dir, uvTarget.bin,
       );
     }
 
     // production: build-installers.mjs가 target binary만 resources/uv-runtime에
     // staging하고 extraResources로 packaged한 Electron Resources
-    return path.join(process.resourcesPath, "uv", platformDir, binName);
+    return path.join(process.resourcesPath, "uv", uvTarget.dir, uvTarget.bin);
   }
 
-  private resolvePlatformDir(platform: string, arch: string): string {
-    if (platform === "darwin" && arch === "arm64") return "darwin-arm64";
-    if (platform === "darwin" && arch === "x64") return "darwin-x64";
-    if (platform === "win32" && arch === "x64") return "win32-x64";
-    if (platform === "linux" && arch === "x64") return "linux-x64";
-    if (platform === "linux" && arch === "arm64") return "linux-arm64";
-    throw new Error(`지원하지 않는 플랫폼/아키텍처: ${platform}/${arch}`);
+  private getCurrentUvTarget(): UvTarget {
+    return resolveUvTarget(process.platform, process.arch);
   }
 
   // ─── private: lock file 위치 ──────────────────────

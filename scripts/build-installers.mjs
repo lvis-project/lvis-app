@@ -10,13 +10,14 @@ import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, rmSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { installerUvTargetFor } from "./uv-targets.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
 const uvCacheDir = resolve(root, "resources", "uv");
 const uvRuntimeDir = resolve(root, "resources", "uv-runtime");
 
-const TARGETS = {
+const INSTALLER_TARGETS = {
   mac: {
     platform: "darwin",
     flag: "--mac",
@@ -46,7 +47,7 @@ function usage() {
     "",
     "Targets:",
     "  --current        Build installers for the current OS (default)",
-    "  --mac            Build macOS DMG + ZIP",
+    "  --mac            Build macOS Apple Silicon DMG + ZIP",
     "  --linux          Build Linux AppImage + DEB + RPM",
     "  --win            Build Windows NSIS + ZIP",
     "",
@@ -140,7 +141,7 @@ function run(cmd, args, opts = {}) {
 }
 
 function assertNativeTarget(target) {
-  const config = TARGETS[target];
+  const config = INSTALLER_TARGETS[target];
   if (!config) throw new Error(`Unknown target: ${target}`);
   if (process.platform !== config.platform) {
     throw new Error(
@@ -150,27 +151,12 @@ function assertNativeTarget(target) {
   }
 }
 
-function currentUvTargetFor(target) {
-  if (target === "mac") {
-    // LVIS macOS distribution supports Apple Silicon only.
-    return { dir: "darwin-arm64", bin: "uv", archFlag: "--arm64" };
-  }
-  if (target === "linux") {
-    if (process.arch === "x64") return { dir: "linux-x64", bin: "uv", archFlag: "--x64" };
-    if (process.arch === "arm64") return { dir: "linux-arm64", bin: "uv", archFlag: "--arm64" };
-  }
-  if (target === "win") {
-    if (process.arch === "x64") return { dir: "win32-x64", bin: "uv.exe", archFlag: "--x64" };
-  }
-  throw new Error(`Unsupported ${target} installer architecture: ${process.platform}/${process.arch}`);
-}
-
 function cleanUvRuntime() {
   rmSync(uvRuntimeDir, { recursive: true, force: true });
 }
 
 function prepareUvRuntime(target) {
-  const uvTarget = currentUvTargetFor(target);
+  const uvTarget = installerUvTargetFor(target);
   run("node", ["scripts/fetch-uv.mjs", "--target", uvTarget.dir]);
 
   const sourceDir = resolve(uvCacheDir, uvTarget.dir);
@@ -185,8 +171,8 @@ function prepareUvRuntime(target) {
 }
 
 function builderArgsFor(target, publish, dirOnly) {
-  const config = TARGETS[target];
-  const uvTarget = currentUvTargetFor(target);
+  const config = INSTALLER_TARGETS[target];
+  const uvTarget = installerUvTargetFor(target);
   const args = ["electron-builder", config.flag];
   if (dirOnly) {
     args.push("--dir");

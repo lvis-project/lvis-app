@@ -11,7 +11,7 @@ LVIS 데스크톱 호스트 앱입니다. Electron main/renderer/preload, 플러
 - 앱 시작 시 Local Indexer 워커 + 자동 인덱서 구동
 - 실제 채팅 UI(렌더러) + preload IPC 브리지
 - webpack 기반 renderer/preload/plugin-preload 번들링
-- macOS / Linux / Windows installer 빌드 스크립트와 GitHub Actions matrix
+- macOS Apple Silicon / Linux / Windows installer 빌드 스크립트와 GitHub Actions matrix
 - IPC 핸들러
   - `lvis:index:scan`
   - `lvis:index:documents`
@@ -29,7 +29,7 @@ LVIS 데스크톱 호스트 앱입니다. Electron main/renderer/preload, 플러
 - 앱 빌드: `bun run build`
 - 현재 OS installer: `bun run dist`
 - OS별 installer:
-  - macOS: `bun run dist:mac` → DMG + ZIP
+  - macOS Apple Silicon: `bun run dist:mac` → DMG + ZIP
   - Linux: `bun run dist:linux` → AppImage + DEB + RPM
   - Windows: `bun run dist:win` → NSIS setup + ZIP
 - 3개 OS 전체 산출물은 GitHub Actions **Build Installers** workflow에서 생성합니다.
@@ -171,7 +171,7 @@ bun run dist:win
 
 | OS | 산출물 |
 |----|--------|
-| macOS | `LVIS-<version>-mac-<arch>.dmg`, `LVIS-<version>-mac-<arch>.zip` |
+| macOS Apple Silicon | `LVIS-<version>-mac-arm64.dmg`, `LVIS-<version>-mac-arm64.zip` |
 | Linux | `LVIS-<version>-linux-<arch>.AppImage`, `.deb`, `.rpm` |
 | Windows | `LVIS-<version>-windows-<arch>-setup.exe`, `LVIS-<version>-windows-<arch>.zip` |
 
@@ -183,7 +183,9 @@ node scripts/build-installers.mjs --current --skip-code-sign
 
 전체 macOS/Linux/Windows artifact는 GitHub Actions의 **Build Installers** workflow에서 생성합니다. `skip_code_sign=true`는 내부 검증용 unsigned artifact를 만들고, production 배포 시에는 signing/notarization secrets를 설정한 뒤 `skip_code_sign=false`로 실행합니다.
 
-`lvis://` deep link protocol과 Python bootstrap용 `uv` binary가 packaged app resource로 포함됩니다. 개발 환경의 `postinstall`은 현재 플랫폼의 `resources/uv/<platform>-<arch>/uv`만 준비하고, installer 빌드는 패키징 직전에 해당 target binary만 `resources/uv-runtime/`에 staging한 뒤 포함합니다.
+macOS installer와 macOS 개발 환경은 Apple Silicon만 지원합니다. Intel Mac(`darwin/x64`)은 지원 대상에서 제외되어 `uv` bootstrap과 installer build가 fail-fast 합니다.
+
+`lvis://` deep link protocol과 Python bootstrap용 `uv` binary가 packaged app resource로 포함됩니다. 개발 환경의 `postinstall`은 현재 지원 플랫폼의 `resources/uv/<platform>-<arch>/uv`만 준비하고, installer 빌드는 패키징 직전에 해당 target binary만 `resources/uv-runtime/`에 staging한 뒤 포함합니다.
 
 ## Windows (사내망) 실행 가이드
 
