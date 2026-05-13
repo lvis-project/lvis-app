@@ -64,6 +64,12 @@ export interface MessageMeta {
    */
   serializedStub?: boolean;
   /**
+   * Per-turn role prompt metadata selected by the user for this user message.
+   * Stored so retry/edit-resend can replay the same system-prompt role without
+   * embedding role instructions into visible user text.
+   */
+  activeRolePrompt?: { name: string; systemPromptAdd: string };
+  /**
    * Layer 2 boundary 의 opaque-state slot. type-only import 로 cycle 회피.
    * 단일 source of truth: src/engine/structured-compact.ts:CompactBoundary.
    * ⑧ slot / Layer 3 storage / history[0] 3 view 가 같은 frozen reference.

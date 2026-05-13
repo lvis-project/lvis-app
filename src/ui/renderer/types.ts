@@ -312,7 +312,6 @@ export type LvisApi = {
   memoryDeleteEntry: (f: string) => Promise<void>;
   memorySearchEntries: (q: string) => Promise<Array<{ filename?: string; title: string; content?: string; excerpt: string; updatedAt: string }>>;
   memoryGetIndex: () => Promise<string>;
-  memoryUpdateIndex: (content: string) => Promise<unknown>;
   memoryUpdateIndexIfUnchanged: (expectedContent: string, nextContent: string) => Promise<boolean>;
   memoryUpdateIndexSections: (sections: { urgentMemory?: string; references?: string }) => Promise<unknown>;
   memoryListSessions: () => Promise<Array<{ sessionId: string; matchedMessage: string; timestamp: string }>>;
