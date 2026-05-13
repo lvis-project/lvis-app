@@ -181,7 +181,7 @@ describe("DeferredApprovalChip", () => {
     // resolve MUST NOT have been called — TOCTOU re-check aborted the action.
     expect(deferredResolve).not.toHaveBeenCalled();
     expect(screen.getByTestId("deferred-approval-chip-error").textContent).toContain(
-      "pending 큐가 변경",
+      "다른 요청이 추가",
     );
   });
 
@@ -214,6 +214,10 @@ describe("DeferredApprovalChip", () => {
     await act(async () => {
       fireEvent.click(screen.getByTestId("deferred-approval-chip-action"));
     });
-    expect(screen.getByTestId("deferred-approval-chip-error").textContent).toContain("not-found");
+    // Round-6 UX MINOR — raw IPC error tokens like "not-found" no longer
+    // leak into UI; user sees a sanitized Korean message instead.
+    expect(screen.getByTestId("deferred-approval-chip-error").textContent).toContain(
+      "요청 처리 중 오류",
+    );
   });
 });

@@ -224,11 +224,15 @@ describe("Permission policy P4 reviewer-wiring", () => {
       // The logger calls into pino which may stream via console or a
       // dedicated transport. We use a permissive assertion that fires
       // when *any* warn-level emission contains the canonical phrase.
+      // Round-6 test-engineer CRITICAL — strict assertion. The earlier
+      // `fired || calls.length===0` form was a tautology that passed
+      // even when the warn never fired. The logger's vitest path
+      // routes through `console.warn` directly (lib/logger.ts), so
+      // `warnSpy.mock.calls` is the SOT.
       const fired = warnSpy.mock.calls.some((args) =>
         args.some((a) => typeof a === "string" && a.includes("legacy exec mode=auto")),
       );
-      // Pino may also route through a transport — accept either path.
-      expect(fired || warnSpy.mock.calls.length === 0).toBeTruthy();
+      expect(fired).toBe(true);
     } finally {
       warnSpy.mockRestore();
     }
@@ -254,7 +258,8 @@ describe("Permission policy P4 reviewer-wiring", () => {
       const fired = warnSpy.mock.calls.some((args) =>
         args.some((a) => typeof a === "string" && a.includes("exec mode=strict")),
       );
-      expect(fired || warnSpy.mock.calls.length === 0).toBeTruthy();
+      // Round-6 test-engineer CRITICAL — strict, no-tautology assertion.
+      expect(fired).toBe(true);
     } finally {
       warnSpy.mockRestore();
     }

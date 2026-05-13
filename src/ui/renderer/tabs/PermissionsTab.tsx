@@ -52,7 +52,7 @@ const REVIEWER_MODE_OPTIONS: Array<{
   label: string;
   description: string;
 }> = [
-  { value: "disabled", label: "명시 승인만", description: "백그라운드 자동 승인을 끄고 검토 대기열로 보냅니다." },
+  { value: "disabled", label: "명시 승인만", description: "백그라운드 자동 검사를 끕니다. 도구 실행 전 항상 확인 창이 표시됩니다." },
   { value: "rule", label: "규칙 기반 검증", description: "로컬 규칙으로 저위험 작업만 통과시키고 고위험은 대기시킵니다." },
   { value: "llm", label: "LLM 검증", description: "규칙 검증 뒤 LLM이 위험도를 올릴 수 있습니다. 낮출 수는 없습니다." },
 ];
@@ -603,7 +603,7 @@ export function PermissionsTab() {
                 위험도가 낮다고 판단된 도구 실행은 확인 없이 자동으로 허용합니다.
                 중간·높은 위험도의 실행은 어떤 경우에도 확인 창이 표시됩니다.
               </p>
-              <div className="grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label="인터랙티브 자동 승인">
+              <div className="grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label="저위험 자동 허용 설정">
                 {REVIEWER_INTERACTIVE_OPTIONS.map((opt) => (
                   // Round-3 UX NIT — the previously-selected option was
                   // `disabled`, which removed it from the keyboard tab
@@ -654,8 +654,11 @@ export function PermissionsTab() {
                   className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-[11px] text-destructive"
                   data-testid="permissions-strict-low-contradiction-banner"
                 >
-                  ⛔ "엄격(모두 묻기)" 모드와 "저위험 자동 허용"이 동시에 켜져 있어 설정이 충돌합니다.
-                  엄격 모드를 유지하려면 자동 허용을 "끔"으로 변경하세요.
+                  {/* Round-6 architect MAJOR — banner label must match
+                      the actual radio label rendered above ("전체 물어보기"),
+                      not the internal mode name "엄격". */}
+                  ⛔ "전체 물어보기" 모드와 "저위험 자동 허용"이 동시에 켜져 있어 설정이 충돌합니다.
+                  모두 묻기 정책을 유지하려면 자동 허용을 "끔"으로 변경하세요.
                 </p>
               ) : null}
               {mode === "allow" ? (
