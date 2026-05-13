@@ -4,7 +4,8 @@
  * 슬림 엔트리. 모든 로직은 boot.ts와 ipc-bridge.ts로 위임.
  * §4.1 Client Architecture 준수.
  */
-import { Menu, app, BrowserWindow, ipcMain, shell, dialog, protocol, screen, type IpcMainInvokeEvent, type MenuItemConstructorOptions } from "electron";
+import { Menu, Tray, app, BrowserWindow, ipcMain, shell, dialog, nativeImage, protocol, screen, type IpcMainInvokeEvent, type MenuItemConstructorOptions } from "electron";
+import { Buffer } from "node:buffer";
 import { dirname, resolve } from "node:path";
 import { existsSync } from "node:fs";
 import * as https from "node:https";
@@ -21,6 +22,7 @@ import {
   UNAUTHORIZED_FRAME,
   validateSender,
 } from "./ipc-bridge.js";
+import { sendToWindow } from "./ipc/safe-send.js";
 import {
   INITIAL_THEME_ARG_PREFIX,
   INITIAL_THEME_ARG_MAX_BYTES,
@@ -41,6 +43,7 @@ import { WindowManager, type DetachedWindowOptions } from "./main/window-manager
 import { createLogger } from "./lib/logger.js";
 import { LVIS_LOGO_PATH, LVIS_LOGO_VIEW_BOX } from "./shared/lvis-logo.js";
 import { normalizeSettingsTab } from "./shared/settings-tabs.js";
+import { preparePythonRuntimeForInstalledPlugin, withPluginInstallLock } from "./plugins/install-lifecycle.js";
 const log = createLogger("lvis");
 
 function errorMessage(err: unknown): string {
@@ -77,6 +80,7 @@ if (process.platform === "win32" && process.env.LVIS_KEEP_GPU !== "1") {
   app.disableHardwareAcceleration();
 }
 
+app.setName("LVIS");
 // Windows 10/11 OS notifications require an AppUserModelId — without this,
 // `new Notification(...)` toasts are silently dropped or grouped under the
 // generic "Electron" identity. Issue #260 NotificationService relies on this.
@@ -137,6 +141,7 @@ await injectCorporateCa();
 
 let mainWindow: BrowserWindow | null = null;
 let settingsWindow: BrowserWindow | null = null;
+let tray: Tray | null = null;
 // Holds the most-recently requested tab while the settings window's renderer
 // is still loading. Flushed once on `did-finish-load`; any later tab requests
 // after the renderer is ready are sent immediately via IPC. See the rapid
@@ -268,14 +273,16 @@ async function handleLvisUri(url: string) {
     pendingLvisUri = url;
     return;
   }
+  const activeServices = services;
   // macOS: app stays running after all windows closed. If the deep link arrives
   // with no window, re-open one so the confirmation dialog has a parent and the
   // user actually sees the install prompt (rather than it silently no-op'ing).
   if (!mainWindow || mainWindow.isDestroyed()) {
     lvisDevLog("[lvis] handleLvisUri: recreating window");
-    createWindow();
+    createWindow({ showBootstrapSplash: false });
+    if (mainWindow) registerMainWindowPluginEventBridge(mainWindow);
     try {
-      if (mainWindow) await (mainWindow as BrowserWindow).loadFile(resolve(__dirname, "index.html"));
+      if (mainWindow) await loadMainInterface(mainWindow, "lvis-uri-recreate");
     } catch (err) {
       log.error({ err }, "failed to load index.html for lvis:// URI");
     }
@@ -301,44 +308,70 @@ async function handleLvisUri(url: string) {
   lvisDevLog("[lvis] handleLvisUri: starting install", { slug: params.slug });
   // Renderer renders a skeleton card while these phase events fire — see
   // PluginConfigTab + plugin grid progress UI.
-  mainWindow?.webContents.send("lvis:plugins:install-progress", { slug: params.slug, phase: "installing" });
-  void services.pluginMarketplace
-    .install(params.slug, "user", (evt) => {
-      if (evt.phase === "downloading") {
-        mainWindow?.webContents.send("lvis:plugins:install-progress", {
-          slug: params.slug,
-          phase: "downloading",
-          bytesDownloaded: evt.bytesDownloaded,
-          bytesTotal: evt.bytesTotal,
-        });
-      } else {
-        mainWindow?.webContents.send("lvis:plugins:install-progress", { slug: params.slug, phase: evt.phase });
-      }
-    })
-    .then(async () => {
-      lvisDevLog("[lvis] handleLvisUri: install succeeded", { slug: params.slug });
+  broadcastPluginLifecycleEvent("lvis:plugins:install-progress", { slug: params.slug, phase: "installing" });
+  void (async () => {
+    const catalogItems = await activeServices.pluginMarketplace.list();
+    const installLockId =
+      catalogItems.find((item) => item.id === params.slug || item.slug === params.slug)?.id ?? params.slug;
+    return await withPluginInstallLock(installLockId, async () => {
+      const result = await activeServices.pluginMarketplace.install(params.slug, "user", (evt) => {
+        if (evt.phase === "downloading") {
+          broadcastPluginLifecycleEvent("lvis:plugins:install-progress", {
+            slug: params.slug,
+            phase: "downloading",
+            bytesDownloaded: evt.bytesDownloaded,
+            bytesTotal: evt.bytesTotal,
+          });
+        } else {
+          broadcastPluginLifecycleEvent("lvis:plugins:install-progress", { slug: params.slug, phase: evt.phase });
+        }
+      });
+      const pluginId = result.pluginId;
+      lvisDevLog("[lvis] handleLvisUri: install succeeded", { slug: pluginId });
       // Mirror the post-install steps from the lvis:plugins:install IPC handler
       // so deep-link installs behave identically to in-app installs.
       try {
-        mainWindow?.webContents.send("lvis:plugins:install-progress", { slug: params.slug, phase: "restarting" });
+        broadcastPluginLifecycleEvent("lvis:plugins:install-progress", { slug: pluginId, phase: "restarting" });
+        await preparePythonRuntimeForInstalledPlugin(pluginId, {
+          pythonRuntime: activeServices.pythonRuntime,
+          pluginRuntime: activeServices.pluginRuntime,
+          getMainWindow: () => mainWindow,
+        });
         // US-A3 — single-plugin lifecycle: only the deep-link-installed
         // plugin starts up. Other plugins keep their in-memory state.
-        await services!.pluginRuntime.addPlugin(params.slug);
-        emitHostEvent("plugin.installed", { pluginId: params.slug, source: "marketplace" });
-        services!.refreshPluginNotifications?.();
+        await activeServices.pluginRuntime.addPlugin(pluginId);
+        emitHostEvent("plugin.installed", { pluginId, source: "marketplace" });
+        activeServices.refreshPluginNotifications?.();
       } catch (err) {
-        log.error({ err }, "post-install steps failed for lvis:// install");
+        const message = errorMessage(err) || "addPlugin failed";
+        log.error({ pluginId, err }, "post-install steps failed for lvis:// install");
+        try {
+          await activeServices.pluginMarketplace.uninstall(pluginId);
+        } catch (rollbackErr) {
+          log.warn(
+            { pluginId, rollbackErr },
+            "lvis:// install rollback uninstall failed",
+          );
+        }
+        broadcastPluginLifecycleEvent("lvis:plugins:install-result", { slug: pluginId, success: false, error: message });
+        return;
       }
-      mainWindow?.webContents.send("lvis:plugins:install-result", { slug: params.slug, success: true });
-    })
-    .catch((err: Error) => {
-      log.error({ slug: params.slug, error: err.message, stack: err.stack }, "lvis:// install failed");
-      mainWindow?.webContents.send("lvis:plugins:install-result", { slug: params.slug, success: false, error: err.message });
+      broadcastPluginLifecycleEvent("lvis:plugins:install-result", { slug: pluginId, success: true });
     });
+  })().catch((err: Error) => {
+    log.error({ slug: params.slug, error: err.message, stack: err.stack }, "lvis:// install failed");
+    broadcastPluginLifecycleEvent("lvis:plugins:install-result", { slug: params.slug, success: false, error: err.message });
+  });
 }
 
 function activateView(viewKey: string) {
   mainWindow?.webContents.send("lvis:view:activate", { viewKey });
+}
+
+function broadcastPluginLifecycleEvent(channel: string, payload: unknown): void {
+  for (const win of getAppWindows()) {
+    sendToWindow(win, channel, payload, log);
+  }
 }
 
 function createViewMenu() {
@@ -382,8 +415,95 @@ function createSettingsMenuItem(): MenuItemConstructorOptions {
   };
 }
 
+function isMainWindowAlwaysOnTop(): boolean {
+  return mainWindow !== null && !mainWindow.isDestroyed() && mainWindow.isAlwaysOnTop();
+}
+
+function registerMainWindowPluginEventBridge(win: BrowserWindow): void {
+  services?.registerPluginEventBridge?.(win);
+}
+
+function showOrCreateMainWindow(reason: string): void {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    showMainWindow(mainWindow);
+    refreshApplicationMenu();
+    refreshTrayMenu();
+    return;
+  }
+  createWindow({ showBootstrapSplash: false });
+  if (mainWindow) registerMainWindowPluginEventBridge(mainWindow);
+  if (mainWindow && rendererReloadReady) {
+    void loadMainInterface(mainWindow, reason).finally(() => {
+      refreshApplicationMenu();
+      refreshTrayMenu();
+    });
+  }
+  refreshApplicationMenu();
+  refreshTrayMenu();
+}
+
+function refreshTrayMenu(): void {
+  if (!tray) return;
+  tray.setContextMenu(Menu.buildFromTemplate([
+    {
+      label: "LVIS 열기",
+      click: () => showOrCreateMainWindow("tray-open"),
+    },
+    { type: "separator" },
+    createAlwaysOnTopMenuItem(),
+    createSettingsMenuItem(),
+    { type: "separator" },
+    { label: "종료", role: "quit" },
+  ]));
+}
+
+function createTrayIcon() {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${LVIS_LOGO_VIEW_BOX}"><path fill="#f8fafc" d="${LVIS_LOGO_PATH}"/></svg>`;
+  const icon = nativeImage.createFromDataURL(`data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`);
+  const resized = icon.isEmpty() ? icon : icon.resize({ width: 18, height: 18 });
+  if (process.platform === "darwin") {
+    resized.setTemplateImage(true);
+  }
+  return resized;
+}
+
+function ensureTray(): void {
+  if (tray) return;
+  tray = new Tray(createTrayIcon());
+  tray.setToolTip("LVIS");
+  tray.on("click", () => showOrCreateMainWindow("tray-click"));
+  tray.on("double-click", () => showOrCreateMainWindow("tray-double-click"));
+  refreshTrayMenu();
+}
+
+function createAlwaysOnTopMenuItem(): MenuItemConstructorOptions {
+  return {
+    label: "항상 위에",
+    type: "checkbox",
+    checked: isMainWindowAlwaysOnTop(),
+    click: () => {
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      mainWindow.setAlwaysOnTop(!isMainWindowAlwaysOnTop());
+      refreshApplicationMenu();
+      refreshTrayMenu();
+    },
+  };
+}
+
+function createDisplayMenu(): MenuItemConstructorOptions {
+  return {
+    label: "보기",
+    submenu: [
+      { role: "reload" },
+      { type: "separator" },
+      createAlwaysOnTopMenuItem(),
+    ],
+  };
+}
+
 function refreshApplicationMenu() {
   const settingsMenuItem = createSettingsMenuItem();
+  const displayMenu = createDisplayMenu();
   const template: MenuItemConstructorOptions[] =
     process.platform === "darwin"
       ? [
@@ -392,18 +512,19 @@ function refreshApplicationMenu() {
             submenu: [
               { role: "about" },
               { type: "separator" },
+              createAlwaysOnTopMenuItem(),
               settingsMenuItem,
               { type: "separator" },
               { role: "quit" },
             ],
           },
           createViewMenu(),
-          { label: "편집", submenu: [{ role: "undo" }, { role: "redo" }, { type: "separator" }, { role: "cut" }, { role: "copy" }, { role: "paste" }, { role: "selectAll" }] },
-          { label: "보기", submenu: [{ role: "reload" }] },
+          displayMenu,
         ]
       : [
-          { label: "앱", submenu: [settingsMenuItem, { type: "separator" }, { role: "quit" }] },
+          { label: "앱", submenu: [createAlwaysOnTopMenuItem(), settingsMenuItem, { type: "separator" }, { role: "quit" }] },
           createViewMenu(),
+          displayMenu,
         ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
@@ -784,7 +905,8 @@ function initialThemeArgs(): string[] {
   return [`${INITIAL_THEME_ARG_PREFIX}${serialized}`];
 }
 
-function createWindow() {
+function createWindow(options: { showBootstrapSplash?: boolean } = {}) {
+  const showBootstrapSplash = options.showBootstrapSplash ?? true;
   const preloadPath = resolve(__dirname, "preload.cjs");
   if (!existsSync(preloadPath)) {
     throw new Error(`[lvis] preload.cjs not found at ${preloadPath} — run 'npm run build:preload' first`);
@@ -846,8 +968,17 @@ function createWindow() {
     log.info("window ready-to-show");
     showMainWindow(win);
   });
+  win.on("close", (event) => {
+    if (appShutdownStarted || appShutdownCompleted || !tray || win.isDestroyed()) return;
+    event.preventDefault();
+    win.hide();
+    refreshApplicationMenu();
+    refreshTrayMenu();
+  });
   win.on("closed", () => {
     if (mainWindow === win) mainWindow = null;
+    refreshApplicationMenu();
+    refreshTrayMenu();
   });
   win.webContents.on("did-fail-load", (_e, code, desc, url) => {
     log.error({ code, desc, url }, "window failed to load");
@@ -905,13 +1036,15 @@ function createWindow() {
     }
   });
 
-  // §M-race: bootstrap 동안 splash만 표시. 실 index.html 로드는 main()이
-  // IPC 핸들러 등록 후 수행.
-  bootstrapSplashShownAt = Date.now();
-  void win
-    .loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(BOOTSTRAP_SPLASH)}`)
-    .then(() => showMainWindow(win))
-    .catch((err) => log.error({ err }, "splash load failed"));
+  if (showBootstrapSplash) {
+    // §M-race: bootstrap 동안 splash만 표시. 실 index.html 로드는 main()이
+    // IPC 핸들러 등록 후 수행.
+    bootstrapSplashShownAt = Date.now();
+    void win
+      .loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(BOOTSTRAP_SPLASH)}`)
+      .then(() => showMainWindow(win))
+      .catch((err) => log.error({ err }, "splash load failed"));
+  }
 }
 
 async function main() {
@@ -979,6 +1112,7 @@ async function main() {
   services.startRoutinesScheduler?.();
 
   refreshApplicationMenu();
+  ensureTray();
   rendererReloadReady = true;
 
   // 실 UI 로드 — 이 시점부터 렌더러의 IPC 호출이 항상 handler와 매칭됨
@@ -1166,12 +1300,7 @@ app.on("window-all-closed", () => {
 // macOS: re-create window on Dock icon click when all windows are closed.
 // Re-register the plugin event bridge for the new window (Issue 5).
 app.on("activate", () => {
-  if (mainWindow === null || mainWindow.isDestroyed()) {
-    createWindow();
-    if (mainWindow && services?.registerPluginEventBridge) {
-      services.registerPluginEventBridge(mainWindow);
-    }
-  }
+  showOrCreateMainWindow("activate");
 });
 
 app.on("before-quit", (event) => {

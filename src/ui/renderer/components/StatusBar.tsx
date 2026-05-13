@@ -53,6 +53,7 @@ export function StatusBar(props: StatusBarProps) {
   return (
     <footer
       className="flex h-6 shrink-0 items-center justify-between gap-3 border-t bg-background px-3 text-[11px] text-muted-foreground"
+      data-testid="status-bar"
       role="status"
       aria-live="polite"
     >
