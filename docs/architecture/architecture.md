@@ -1908,11 +1908,13 @@ Components ─► Semantic tokens (--background, --primary, --destructive)
               ─► Primitive tokens (--p-blue-500, --p-slate-50)
 ```
 
-- **토큰 정의**: `src/styles.css` (`:root` primitive + `[data-theme="<id>"]` semantic)
+- **토큰 정의**: `src/styles.css` (`:root` primitive + `[data-theme-bundle="<id>"]` semantic)
 - **Provider**: `src/ui/renderer/theme/` (`ThemeProvider`, OS `prefers-color-scheme`
-  추적, `~/.lvis/settings.json#appearance.theme` 영속화)
-- **변형**: `dark` (기본), `light`, `high-contrast`. `system`은 런타임에서
-  `light`/`dark`로 해석된다.
+  추적, `~/.lvis/settings.json#appearance.schemaVersion=2` + `appearance.bundleId`
+  영속화)
+- **번들**: `src/shared/theme-bundles.ts` 의 `BUNDLE_IDS` 가 SOT이며 기본값은
+  `tokyo-night`. `followSystem`은 별도 boolean이고 violet light/dark pair에만
+  OS `prefers-color-scheme`을 반영한다.
 - **사용 가이드**: 새 컴포넌트는 Tailwind utility (`bg-background`,
   `text-destructive`, `border-border`) 만 사용. 임의의 `bg-red-500`,
   `text-neutral-700` 같은 팔레트 직접 참조는 dark/high-contrast에서
@@ -1925,15 +1927,16 @@ Components ─► Semantic tokens (--background, --primary, --destructive)
 
 ### 6.7.1 플러그인 webview 테마 전파 (PR #489)
 
-호스트 렌더러의 테마 변경(theme · chatTheme · codeTheme 어느 축이든)을 모든 plugin
-webview 로 fan-out 한다. 플러그인은 호스트와 동일한 시각 컨텍스트 안에서 자체 UI
-를 그릴 수 있고, 폴링/관찰 코드를 별도로 짜지 않아도 된다.
+호스트 렌더러의 active theme bundle 변경을 모든 plugin webview 로 fan-out 한다.
+플러그인은 호스트와 동일한 시각 컨텍스트 안에서 자체 UI 를 그릴 수 있고,
+폴링/관찰 코드를 별도로 짜지 않아도 된다. v2 payload 는
+`{ bundleId, shell, tokens }` 이며 legacy v1 payload 는 더 이상 SOT 가 아니다.
 
 ```
 ThemeProvider.tsx (renderer)
-  ├─ resolved · chatTheme · resolvedCodeTheme 변경 useEffect
-  └─ resolvePluginTokens(resolved, chatTheme)         ← computed --lvis-* 값
-      └─ api.notifyPluginTheme({theme, chatTheme, codeTheme, tokens})
+  ├─ activeBundle 변경 useEffect
+  └─ bundleToPluginTokens(activeBundle)              ← computed --lvis-* 값
+      └─ api.notifyPluginTheme({bundleId, shell, tokens})
           └─ IPC: lvis:host:plugin-theme-notify       (renderer → main)
               ├─ validateSender(e)                     ← 호스트 main frame 만 통과
               ├─ validateThemePayload(payload)         ← key/value 이중 검증
@@ -1943,7 +1946,8 @@ ThemeProvider.tsx (renderer)
                       └─ plugin SDK useTheme()
                           └─ applyThemeTokens(payload.tokens)
                               └─ document.documentElement
-                                  · setAttribute("data-theme", …)
+                                  · setAttribute("data-theme-bundle", …)
+                                  · setAttribute("data-shell", …)
                                   · style.setProperty("--lvis-*", …)
 ```
 
@@ -1955,7 +1959,7 @@ ThemeProvider.tsx (renderer)
 - plugin webview registry: `pluginWebviewRegistry` (`lvis:plugin:register-webview`
   로 채워지는 webContentsId ↔ pluginId 맵)
 - plugin SDK 소비: `useTheme()` → `applyThemeTokens()` (host.theme.changed
-  이벤트 listen → CSS variable + data-theme 동기 적용)
+  이벤트 listen → CSS variable + `data-theme-bundle` / `data-shell` 동기 적용)
 
 **보안 게이트**:
 - `validateSender` — 호스트 메인 webContents 만 broadcast 트리거 가능. plugin
@@ -2840,7 +2844,7 @@ LVIS는 IPC/RPC를 **시스템 레벨 전용**으로 확정한다. 플러그인�
 | Plugin Webview Bridge | `lvis:plugin:get-entry-url` | plugin shell → main: 검증된 entryUrl 동기 조회 (validatePluginFrame) |
 | Plugin Webview Bridge | `lvis:plugin:call-tool` | plugin shell → main: 플러그인 자신의 tool 호출 (validatePluginFrame, 교차 플러그인 차단) |
 | Plugin Webview Bridge | `lvis:plugin:emit-event` | plugin shell → main: 이벤트 버스 발행 (validatePluginFrame, capability-gate) |
-| Plugin Webview Bridge | `lvis:host:plugin-theme-notify` | 호스트 렌더러 → main → 등록된 모든 plugin webview: theme/chatTheme/codeTheme + computed `--lvis-*` token 값 (validateSender, key/value 이중 검증). 플러그인 SDK `useTheme()` → `applyThemeTokens()` 경로로 소비. |
+| Plugin Webview Bridge | `lvis:host:plugin-theme-notify` | 호스트 렌더러 → main → 등록된 모든 plugin webview: `{ bundleId, shell, tokens }` + computed `--lvis-*` token 값 (validateSender, key/value 이중 검증). 플러그인 SDK `useTheme()` → `applyThemeTokens()` 경로로 소비. |
 
 **플러그인 통신 경계 (tool 레벨만):**
 
@@ -3971,7 +3975,7 @@ v5 는 v4 Final 의 설계를 그대로 유지한 상태에서, **실구현 머�
 | §5 Memory — File-based | 파일 기반 경량 구조 | **§5.X (신규 v5)** `proper-lockfile` 크로스프로세스 파일 락 + audit log rotation/retention |
 | §6.4 Tool Registry & Taxonomy | 6 카테고리 + 동적 등록 | **§6.4.X (신규 v5)** Tool meta `version` / `deprecatedSince` / `replacedBy` 필드 |
 | §7 Marketplace Hub | 플러그인 배포·업데이트 | **§7.X (신규 v5) — S13 승인 워크플로우**, **§7.Y (신규 v5) — S15 카나리 롤아웃** |
-| §8 Agent Approval | 승인이 기본 | **§8.X (신규 v5)** HMAC nonce + 큐 cap + bulk approve UI + DLP arg mask + 병렬 tool 실행 |
+| §8 Agent Approval | 승인이 기본 | **§8.X (신규 v5)** HMAC nonce + FIFO queue cap + DLP arg mask + 병렬 tool 실행 |
 | §9 Plugin System | manifest + UI slots + MCP | **§9.X (신규 v5)** manifest JSON Schema (AJV CI) + HostApi contract CI + tool/event namespace CI |
 | §12 Use Case Mapping | 7개 매핑 | **§12.X (신규 v5) — S12+FU1 Client Telemetry** (opt-in, device_uuid, PII scrubber, URL allowlist, install_token header-only) |
 | §14 Deployment & Governance | 배포·거버넌스·Feature Flag | **§14.X (신규 v5)** SDK public 분리 + plugin template repo + drift-check nightly + 태그 정책 manual |
@@ -4042,11 +4046,11 @@ v4 §7 의 Marketplace Hub 배포 플로우는 유지된다. v5 는 **publisher 
 
 v4 §8 "승인이 기본" 모델을 강화한다.
 
-- **HMAC + nonce**: Approval 요청 payload 에 `nonce`(UUIDv4) + `hmac = HMAC-SHA256(server_secret, payload || nonce)` 를 부가. 재생공격·UI 스푸핑 차단. `nonce` 는 10분 TTL 의 per-user 세트에서 1회성 소비.
-- **큐 cap**: Approval Queue 최대 길이 **200**. 초과 시 신규 요청은 즉시 `rejected(reason=queue_full)` 로 drop 되고, 오래된 요청 중 `auto_expire_at` 경과 건부터 gc.
-- **Bulk approve UI**: 동일 tool + 동일 scope 요청을 그룹화하여 한 번에 승인/거절. 사원 클릭 수 감소가 목적. 그룹 단위 승인은 개별 audit record 로 전개되어 기록된다.
+- **HMAC + nonce**: `ApprovalGate` 가 요청마다 `nonce = randomBytes(16).toString("hex")` 를 만들고, per-gate `sessionKey` 로 `HMAC-SHA256(sessionKey, ${id}|${nonce}|${toolName}|${canonicalArgs})` 를 서명한다. renderer 는 `nonce`/`hmac` 를 그대로 되돌려야 하며, main process 는 pending entry 의 expected HMAC 과 비교한 뒤 불일치 시 `deny-once` 로 강제한다. pending entry 는 결정 또는 5분 timeout 때 제거된다.
+- **큐 cap**: Renderer approval FIFO queue 는 `DEFAULT_APPROVAL_QUEUE_MAX = 50` 이며 cap 도달 시 새 push 를 drop-newest 한다. 이미 사용자가 보고 있는 head-of-queue 를 보존하기 위한 DoS 방어다.
+- **승인 UI**: 사용자-facing 승인은 한 요청씩 결정한다. `clear` 는 행정적 queue reset 용도이며 unseen request 를 일괄 승인하지 않는다.
 - **DLP arg mask**: 승인 화면에 노출되는 인자 중 이메일·전화번호·사번·카드번호 패턴은 `****` 로 마스킹(로그는 원문 암호화 보관). §12.X PII scrubber 규칙 공유.
-- **병렬 tool 실행**: 승인이 끝난 독립 tool 호출은 v4 `StreamingToolExecutor` 경로에서 병렬 실행(기본 최대 4 동시). 종속 관계가 있는 호출은 sequential fallback.
+- **병렬 tool 실행**: 승인이 끝난 tool 호출 배열은 현행 `ToolExecutor.executeAll()` 경로에서 5개 단위 batch 로 나뉘고, 각 batch 는 `Promise.all` 로 병렬 실행된다. batch 사이에는 순차 진행한다. 의존성 인식 scheduling 은 executor 내부 기능이 아니므로, 종속 호출은 caller 가 별도 turn/batch 로 분리해야 한다.
 
 #### §9.X Plugin System — 계약 CI (신규 v5)
 

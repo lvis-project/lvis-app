@@ -397,7 +397,7 @@ deferred-queue entry is pending. Clicking the chip calls
 
 Audit chain: `AuditDeferredResolve.approvalSource: "button" |
 "natural-language"` captures provenance. The matcher is intentionally
-conservative (max 40 char input, single-sentence only, ambiguity →
+conservative (max 24 char input, single-sentence only, ambiguity →
 "none", negation modifiers convert approve → "none") so a stray LLM
 tool-output reflection cannot inject approval.
 
@@ -416,8 +416,12 @@ the OS-level execution sandbox available to spawned shell commands.
   > If executionSandbox.kind='none' or executionSandbox.confidence='assumed',
   > the LLM MUST NOT downgrade a rule-based MEDIUM/HIGH verdict to LOW.
 
-The sandbox SOT is also surfaced in the audit chain through the
-`reviewer` field on the audit entry (downstream of `permissionResult`).
+The reviewer prompt sees the sandbox SOT before returning a verdict. The
+current audit chain stores the resulting reviewer verdict (`level` + `reason`);
+it does not store the full `{ kind, confidence, platform, reason }` sandbox
+snapshot as a separate audit field. Add an explicit sandbox snapshot field in a
+future audit-schema migration if forensic replay needs to prove the exact
+sandbox probe state, rather than infer it from reviewer input and runtime logs.
 
 **Interface (sync-friendly):**
 
