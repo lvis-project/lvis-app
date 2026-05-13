@@ -696,8 +696,10 @@ export type LvisPermissionApi = {
   deferredResolve: (
     id: string,
     decision: "approved" | "rejected",
-    reason?: string,
-    approvalSource?: "button" | "natural-language",
+    reason: string | undefined,
+    // Round-5 architect + critic MAJOR — required (no default). All
+    // callers MUST explicitly state provenance.
+    approvalSource: "button" | "natural-language",
   ) => Promise<
     | { ok: true; entry: DeferredQueueEntry }
     | { ok: false; error: string }

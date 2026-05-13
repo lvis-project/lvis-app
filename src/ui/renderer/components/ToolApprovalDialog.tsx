@@ -261,15 +261,16 @@ function approvalReviewRows(
   if (request.sandboxCapability) {
     const cap = request.sandboxCapability;
     const weak = cap.kind === "none" || cap.confidence === "assumed";
+    // Round-5 UX MAJOR — plain Korean copy. "격리" alone meant nothing
+    // to non-technical users, and the raw English `reason` field
+    // bleed into UI was developer-diagnostic language. The row now
+    // surfaces an actionable summary; "보안 격리" makes the security
+    // framing explicit.
     rows.push({
-      label: "격리",
-      // Round-3 UX MAJOR — human-readable prose, not terminal output.
-      // Now that `ReviewRow` accepts `testId` directly, the row renders
-      // in the normal prose branch with proper line-wrap and screen-
-      // reader semantics.
+      label: "보안 격리",
       value: weak
-        ? `⚠ ${cap.kind} (${cap.confidence}, ${cap.platform}) — ${cap.reason}`
-        : `${cap.kind} (${cap.confidence}, ${cap.platform})`,
+        ? "⚠ OS 격리 없음 — 도구가 추가 제한 없이 실행됩니다"
+        : `OS 격리 활성 (${cap.kind})`,
       testId: "tool-approval-sandbox",
     });
   }
