@@ -6,6 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { fakeLlmSettings } from "../../../shared/__tests__/fake-llm-settings.js";
 
 // ─── Mock electron ────────────────────────────────────────────────────────────
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
@@ -58,7 +59,7 @@ function makeToolResultMsg(opts: {
 
 function makeConversationLoop(
   sessionId: string,
-  messages: ReturnType<typeof makeToolResultMsg>[],
+  messages: Array<ReturnType<typeof makeToolResultMsg> | Record<string, unknown>>,
 ) {
   return {
     getSessionId: vi.fn(() => sessionId),
@@ -87,8 +88,12 @@ function makeMinimalDeps(
   return {
     conversationLoop: loop as any,
     settingsService: {
-      get: vi.fn(() => ({})),
-      patch: vi.fn(),
+      get: vi.fn((key?: string) => {
+        if (key === "llm") return fakeLlmSettings();
+        if (key === "privacy") return { piiRedactEnabled: false };
+        return {};
+      }),
+      patch: vi.fn(async () => undefined),
     } as any,
     memoryManager: {
       listSessionsPage: vi.fn(() => []),
@@ -401,5 +406,77 @@ describe("lvis:chat:send provenance", () => {
         payload: expect.objectContaining({ type: "done", streamId: 1 }),
       },
     ]);
+  });
+
+  it("preserves stored role prompt metadata when edit-resending a user message", async () => {
+    const loop = makeConversationLoop("session-provenance", [
+      {
+        role: "user",
+        content: "old text",
+        meta: {
+          activeRolePrompt: {
+            name: "Reviewer",
+            systemPromptAdd: "Review carefully.",
+          },
+        },
+      },
+      { role: "assistant", content: "old answer" },
+    ]);
+    loop.runTurn.mockResolvedValue({ text: "ok", toolCalls: [], stopReason: "end_turn" });
+    await setupHandlers(loop);
+
+    await invoke("lvis:chat:edit-resend", 0, "new text");
+
+    expect(loop.runTurn).toHaveBeenCalledWith(
+      "new text",
+      expect.any(Object),
+      undefined,
+      expect.objectContaining({
+        inputOrigin: "user-keyboard",
+        rolePrompt: {
+          name: "Reviewer",
+          systemPromptAdd: "Review carefully.",
+        },
+      }),
+    );
+  });
+
+  it("preserves stored role prompt metadata when retrying with effort settings", async () => {
+    const loop = makeConversationLoop("session-provenance", [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "retry text" },
+          { type: "image", image: "data:image/png;base64,abc", mimeType: "image/png" },
+        ],
+        meta: {
+          activeRolePrompt: {
+            name: "Reviewer",
+            systemPromptAdd: "Review carefully.",
+          },
+        },
+      },
+      { role: "assistant", content: "old answer" },
+    ]);
+    loop.runTurn.mockResolvedValue({ text: "ok", toolCalls: [], stopReason: "end_turn" });
+    await setupHandlers(loop);
+
+    await invoke("lvis:chat:retry-effort", { enableThinking: true, thinkingBudgetTokens: 12345 });
+
+    expect(loop.runTurn).toHaveBeenCalledWith(
+      "retry text",
+      expect.any(Object),
+      undefined,
+      expect.objectContaining({
+        inputOrigin: "user-keyboard",
+        rolePrompt: {
+          name: "Reviewer",
+          systemPromptAdd: "Review carefully.",
+        },
+        attachments: [
+          { type: "image", image: "data:image/png;base64,abc", mimeType: "image/png" },
+        ],
+      }),
+    );
   });
 });

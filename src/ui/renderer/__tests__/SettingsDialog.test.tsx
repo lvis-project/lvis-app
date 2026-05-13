@@ -168,6 +168,49 @@ describe("SettingsDialog (smoke)", () => {
     expect(onSaved).toHaveBeenCalledTimes(1);
   });
 
+  it("does not rewrite live feature flags from the bulk save payload", async () => {
+    const api = makeApi();
+    const baseSettings = await api.getSettings();
+    api.getSettings.mockClear();
+    api.getSettings.mockResolvedValue({
+      ...(baseSettings as object),
+      features: { experimentalContinuousBackend: true, idlePreferenceRefresh: true },
+    });
+    const onOpenChange = vi.fn();
+    vi.stubGlobal("lvisApi", api);
+
+    render(
+      <SettingsDialog
+        open={true}
+        onOpenChange={onOpenChange}
+        api={api as never}
+        onSaved={vi.fn()}
+        initialTab="chat"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(api.onSettingsUpdated).toHaveBeenCalled();
+    });
+    const onSettingsUpdated = api.onSettingsUpdated.mock.calls[0][0] as (settings: unknown) => void;
+    onSettingsUpdated({
+      ...(baseSettings as object),
+      features: { experimentalContinuousBackend: false, idlePreferenceRefresh: false },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("idle-preference-refresh-toggle")).toHaveAttribute("aria-checked", "false");
+    });
+    api.updateSettings.mockClear();
+
+    fireEvent.click(screen.getByRole("button", { name: "저장" }));
+
+    await waitFor(() => {
+      expect(api.updateSettings).toHaveBeenCalled();
+    });
+    expect(api.updateSettings.mock.calls[0][0]).not.toHaveProperty("features");
+  });
+
   it("uses pending entry count for the permissions badge", async () => {
     const api = makeApi() as ReturnType<typeof makeApi> & {
       permission: {

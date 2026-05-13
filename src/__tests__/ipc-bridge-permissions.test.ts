@@ -351,17 +351,6 @@ describe("lvis:memory:entries:*", () => {
     expect(result).toEqual({ ok: false, error: "unauthorized-frame" });
   });
 
-  it("memory index update targets updateMemoryIndex", async () => {
-    const pm = makeMockPM();
-    const services = makeServices(pm);
-    const { registerIpcHandlers } = await import("../ipc-bridge.js");
-    registerIpcHandlers(services, () => null);
-
-    await invoke("lvis:memory:index:update", "# Memory\n\n## Urgent Memory\n\nKeep this.");
-
-    expect(services.memoryManager.updateMemoryIndex).toHaveBeenCalledWith("# Memory\n\n## Urgent Memory\n\nKeep this.");
-  });
-
   it("memory section update targets updateMemoryIndexSections", async () => {
     const pm = makeMockPM();
     const services = makeServices(pm);
@@ -378,7 +367,6 @@ describe("lvis:memory:entries:*", () => {
 
   it.each([
     "lvis:memory:index:get",
-    "lvis:memory:index:update",
     "lvis:memory:index:update-if-unchanged",
     "lvis:memory:index:sections:update",
     "lvis:memory:sessions:list",
