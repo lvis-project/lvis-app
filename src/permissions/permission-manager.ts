@@ -28,6 +28,7 @@ import type {
   RiskVerdict,
   ToolInvocationContext,
 } from "./reviewer/risk-classifier.js";
+import { detectSandboxCapability } from "./sandbox-capability.js";
 import type { PermissionEvaluationContext } from "./evaluation-context.js";
 import type { VerdictCache } from "./reviewer/verdict-cache.js";
 import type { DeferredQueue } from "./reviewer/deferred-queue.js";
@@ -168,6 +169,13 @@ export class PermissionManager {
   private verdictCache: VerdictCache | null = null;
   private deferredQueue: DeferredQueue | null = null;
   private reviewerCacheScope: Record<string, unknown> = {};
+  /**
+   * Issue #690 — interactive auto-approve setting. "off" by default;
+   * "low" means the reviewer's LOW verdict in the foreground flow
+   * skips the approval modal. Read by {@link categoryBasedDecision} to
+   * decide whether to set `reviewer.route='foreground-auto'`.
+   */
+  private interactiveAutoApprove: "off" | "low" = "off";
 
   constructor(permissionsFilePath?: string) {
     this.permissionsFilePath =
@@ -197,6 +205,20 @@ export class PermissionManager {
       this.verdictCache !== null &&
       this.deferredQueue !== null
     );
+  }
+
+  /**
+   * Issue #690 — set interactive auto-approve policy. Boot reads
+   * `permissions.reviewer.interactive.autoApprove` from settings and
+   * pushes it here so the gate inside {@link categoryBasedDecision}
+   * does not have to re-read the file on every tool call.
+   */
+  setInteractiveAutoApprove(autoApprove: "off" | "low"): void {
+    this.interactiveAutoApprove = autoApprove;
+  }
+
+  getInteractiveAutoApprove(): "off" | "low" {
+    return this.interactiveAutoApprove;
   }
 
   /**
@@ -524,6 +546,7 @@ export class PermissionManager {
         finalInput: input.finalInput,
         allowedDirectories: input.allowedDirectories,
         sensitivePathsAdjacent: input.sensitivePathsAdjacent,
+        sandboxCapability: detectSandboxCapability(),
       };
       try {
         const classified = classifier.classify(ctx);
@@ -672,16 +695,27 @@ export class PermissionManager {
           layer: 6,
         };
       case "ask":
-      default:
+      default: {
+        // Issue #690 — foreground reviewer auto-approve is gated by EITHER:
+        //   (a) legacy `auto` exec mode (preserves previous behaviour), or
+        //   (b) the new `interactive.autoApprove` setting being non-"off".
+        // Both apply only to mutating categories (write/shell/network)
+        // in non-headless flows. headless flow has its own reviewer lane
+        // and never enters this branch.
+        const mutating = category === "write" || category === "shell" || category === "network";
+        const autoApproveOptIn =
+          this.mode === "auto" || this.interactiveAutoApprove !== "off";
+        const enableForegroundAutoReviewer =
+          context.headless !== true && mutating && autoApproveOptIn;
         return {
           decision: "ask",
           reason: `사용자 컨펌 필요 (category: ${category}, trust: ${trust})`,
           layer: 6,
-          ...(this.mode === "auto" && context.headless !== true &&
-            (category === "write" || category === "shell" || category === "network")
+          ...(enableForegroundAutoReviewer
             ? { reviewer: { route: "foreground-auto" as const } }
             : {}),
         };
+      }
     }
   }
 }
