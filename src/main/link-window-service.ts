@@ -43,6 +43,7 @@ import {
   buildTitlebarHtml,
   buildTitlebarButtonScript,
 } from "./window-titlebar-shell.js";
+import { resolveAppIconPath } from "./app-icon.js";
 
 function escapeHtmlAttr(value: string): string {
   return value
@@ -245,6 +246,7 @@ export async function openLinkWindow(
     width: opts.width ?? 1024,
     height: opts.height ?? 768,
     title: shellTitle,
+    icon: resolveAppIconPath(),
     autoHideMenuBar: true,
     frame: process.platform !== "darwin" ? false : undefined,
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "hidden",
