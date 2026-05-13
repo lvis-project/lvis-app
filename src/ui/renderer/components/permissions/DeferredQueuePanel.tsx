@@ -27,6 +27,7 @@ import {
   categoryLabel,
   inputVolumeLabel,
   levelBadgeClass,
+  riskLevelKoLabel,
   parseInputSummary,
   payloadLabel,
   pickSummary,
@@ -113,9 +114,9 @@ export function DeferredQueuePanel({ showEmpty = false, onClose }: DeferredQueue
   const hasPending = pending.length > 0;
   const activeEntry = pending[activeIndex] ?? pending[0];
   const activeLevel = activeEntry?.verdict.level ?? "low";
-  const queueBadge = hasPending
-    ? activeLevel.toUpperCase()
-    : "대기 없음";
+  // Round-7 architect MAJOR — Korean risk label (was raw English
+  // `activeLevel.toUpperCase()` → `LOW`/`MEDIUM`/`HIGH` leaking into UI).
+  const queueBadge = hasPending ? riskLevelKoLabel(activeLevel) : "대기 없음";
   const badgeClassName = levelBadgeClass(activeLevel);
 
   return (
@@ -246,7 +247,8 @@ export function DeferredQueuePanel({ showEmpty = false, onClose }: DeferredQueue
 
 function reviewRows(entry: DeferredQueueEntry): ReviewBasisRow[] {
   const parsed = parseInputSummary(entry.inputSummary);
-  const verdict = `${entry.verdict.level.toUpperCase()} · ${entry.verdict.reason}`;
+  // Round-7 architect MAJOR — Korean risk label in the review row.
+  const verdict = `${riskLevelKoLabel(entry.verdict.level)} · ${entry.verdict.reason}`;
   const common = { label: "판단", value: verdict };
   if (entry.category === "read") {
     return [
