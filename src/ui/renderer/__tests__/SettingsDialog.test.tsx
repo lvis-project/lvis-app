@@ -134,6 +134,40 @@ describe("SettingsDialog (smoke)", () => {
     expect(onSaved).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps idle preference refresh opt-in and persists it immediately", async () => {
+    const api = makeApi();
+    const onSaved = vi.fn();
+    vi.stubGlobal("lvisApi", api);
+
+    render(
+      <SettingsDialog
+        open={true}
+        onOpenChange={vi.fn()}
+        api={api as never}
+        onSaved={onSaved}
+        initialTab="chat"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(api.getSettings).toHaveBeenCalledTimes(1);
+    });
+    const toggle = screen.getByTestId("idle-preference-refresh-toggle");
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+
+    fireEvent.click(toggle);
+
+    await waitFor(() => {
+      expect(api.updateSettings).toHaveBeenCalledWith({
+        features: { idlePreferenceRefresh: true },
+      });
+    });
+    await waitFor(() => {
+      expect(toggle).toHaveAttribute("aria-checked", "true");
+    });
+    expect(onSaved).toHaveBeenCalledTimes(1);
+  });
+
   it("uses pending entry count for the permissions badge", async () => {
     const api = makeApi() as ReturnType<typeof makeApi> & {
       permission: {

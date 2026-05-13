@@ -57,7 +57,31 @@ describe("PreferenceRefreshService", () => {
     expect(memoryManager.saveMemory).not.toHaveBeenCalled();
   });
 
-  it("runs refresh when the idle scheduler enters IDLE_SCAN", async () => {
+  it("does not run idle refresh unless the user opted in", async () => {
+    let listener: IdleStateChangeListener | null = null;
+    const idleScheduler = {
+      addStateChangeListener: vi.fn((handler: IdleStateChangeListener) => {
+        listener = handler;
+        return () => undefined;
+      }),
+    };
+    const memoryManager = makeMemoryManager();
+    const generateText = vi.fn(async () => "# User Preferences");
+
+    const service = new PreferenceRefreshService({
+      memoryManager,
+      generateText,
+      idleScheduler: idleScheduler as never,
+      minIdleRefreshIntervalMs: 0,
+    });
+    service.start();
+    listener?.("IDLE_SCAN", "RUNNING", "test");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(generateText).not.toHaveBeenCalled();
+  });
+
+  it("runs refresh when the opted-in idle scheduler enters IDLE_SCAN", async () => {
     let listener: IdleStateChangeListener | null = null;
     const idleScheduler = {
       addStateChangeListener: vi.fn((handler: IdleStateChangeListener) => {
@@ -76,6 +100,7 @@ describe("PreferenceRefreshService", () => {
       memoryManager,
       generateText,
       idleScheduler: idleScheduler as never,
+      isIdleRefreshEnabled: () => true,
       minIdleRefreshIntervalMs: 0,
     });
     service.start();
@@ -83,6 +108,40 @@ describe("PreferenceRefreshService", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(generateText).toHaveBeenCalledOnce();
+  });
+
+  it("does not spend the success idle budget when an idle refresh fails", async () => {
+    let listener: IdleStateChangeListener | null = null;
+    const idleScheduler = {
+      addStateChangeListener: vi.fn((handler: IdleStateChangeListener) => {
+        listener = handler;
+        return () => undefined;
+      }),
+    };
+    const memoryManager = makeMemoryManager();
+    const generateText = vi.fn()
+      .mockRejectedValueOnce(new Error("provider down"))
+      .mockResolvedValueOnce(`# User Preferences
+## Summary
+## Communication Style
+## Workflow Preferences
+## Standing Constraints`);
+
+    const service = new PreferenceRefreshService({
+      memoryManager,
+      generateText,
+      idleScheduler: idleScheduler as never,
+      isIdleRefreshEnabled: () => true,
+      minIdleRefreshIntervalMs: 60 * 60 * 1000,
+      minIdleFailureBackoffMs: 0,
+    });
+    service.start();
+    listener?.("IDLE_SCAN", "RUNNING", "first");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    listener?.("IDLE_SCAN", "RUNNING", "second");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(generateText).toHaveBeenCalledTimes(2);
   });
 
   it("does not overwrite preferences when they changed during refresh", async () => {
