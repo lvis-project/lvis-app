@@ -384,6 +384,23 @@ interface RoutineScope {
 }
 ```
 
+**Natural-language approval intent (issue #690 P4):**
+
+`src/permissions/approval-intent.ts` exports a pure matcher
+`detectApprovalIntent(text)` that recognises in-chat approval/rejection
+phrases (Korean + English, with negation guards). Renderer
+`DeferredApprovalChip` uses it to surface a non-blocking confirmation
+chip when (a) the user has typed an intent phrase AND (b) exactly one
+deferred-queue entry is pending. Clicking the chip calls
+`permission.deferredResolve(id, decision, reason, "natural-language")`
+— never auto-resolves without an explicit click.
+
+Audit chain: `AuditDeferredResolve.approvalSource: "button" |
+"natural-language"` captures provenance. The matcher is intentionally
+conservative (max 40 char input, single-sentence only, ambiguity →
+"none", negation modifiers convert approve → "none") so a stray LLM
+tool-output reflection cannot inject approval.
+
 **Sandbox capability SOT (issue #691):**
 
 `src/permissions/sandbox-capability.ts` is the single source of truth for
