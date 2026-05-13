@@ -36,6 +36,7 @@ import { highlightText } from "./utils/html-preview.js";
 import { useChatContext, type ChatContextValue } from "./context/ChatContext.js";
 import { InputActionBar } from "./components/InputActionBar.js";
 import { Composer, type ComposerHandle } from "./components/Composer.js";
+import { DeferredApprovalChip } from "./components/DeferredApprovalChip.js";
 import {
   ATTACH_MAX_COUNT,
   DENY_EXTENSIONS,
@@ -1351,6 +1352,12 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             enableThinkingChat={enableThinkingChat}
             onToggleThinking={toggleThinking}
           />
+          {/* Issue #690 P4 — natural-language approval chip. Renders
+              only when (a) the user's draft text contains an approve /
+              reject phrase, AND (b) exactly one deferred-queue entry is
+              pending. Self-contained: subscribes to deferredList /
+              onDeferredPending itself. */}
+          <DeferredApprovalChip draftText={question} />
           <Composer
             ref={composerRef}
             text={question}

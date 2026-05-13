@@ -259,7 +259,22 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
     PERMISSIONS.deferredResolve,
     async (
       e,
-      params: { id: string; decision: "approved" | "rejected"; reason?: string; intent?: unknown },
+      params: {
+        id: string;
+        decision: "approved" | "rejected";
+        reason?: string;
+        intent?: unknown;
+        /**
+         * Issue #690 P4 — provenance of the approval gesture. "button"
+         * means the user clicked a panel button (existing path);
+         * "natural-language" means the renderer's intent matcher
+         * recognised an in-chat phrase AND the user explicitly
+         * confirmed via the suggestion chip. Caller MUST default to
+         * "button" if undefined for backward compat with renderers
+         * that have not yet adopted the new field.
+         */
+        approvalSource?: "button" | "natural-language";
+      },
     ) => {
       if (!validateSender(e)) {
         auditUnauthorized(auditLogger, PERMISSIONS.deferredResolve, e);
@@ -274,10 +289,16 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
         (
           params.reason !== undefined &&
           (typeof params.reason !== "string" || params.reason.length > 1_000)
+        ) ||
+        (
+          params.approvalSource !== undefined &&
+          params.approvalSource !== "button" &&
+          params.approvalSource !== "natural-language"
         )
       ) {
         return { ok: false, error: "invalid-params" };
       }
+      const approvalSource = params.approvalSource ?? "button";
       const pm = conversationLoop.permissionManager;
       const queue = pm?.getDeferredQueue();
       if (!queue) return { ok: false, error: "no-deferred-queue" };
@@ -299,6 +320,7 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
           reviewerVerdict: current.verdict,
           queueId: current.id,
           resolution: params.decision,
+          approvalSource,
           ...(params.reason ? { reason: params.reason } : {}),
         });
       } catch (err) {

@@ -1,0 +1,141 @@
+// @vitest-environment jsdom
+import "../../../../../test/renderer/setup.ts";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import { DeferredApprovalChip } from "../DeferredApprovalChip.js";
+import type { DeferredQueueEntry } from "../../types.js";
+
+function makeEntry(overrides: Partial<DeferredQueueEntry> = {}): DeferredQueueEntry {
+  return {
+    id: "id-1",
+    ts: "2026-05-13T13:00:00.000Z",
+    toolName: "fs_write",
+    source: "builtin",
+    category: "write",
+    inputSummary: '{"path":"<redacted>"}',
+    verdict: { level: "high", reason: "write outside allowed dirs" },
+    status: "pending",
+    ...overrides,
+  };
+}
+
+function installApi(pending: DeferredQueueEntry[]) {
+  const deferredList = vi.fn(async () => ({
+    ok: true as const,
+    pending,
+    total: pending.length,
+  }));
+  const deferredResolve = vi.fn(async () => ({
+    ok: true as const,
+    entry: pending[0]!,
+  }));
+  const onDeferredPending = vi.fn(() => () => undefined);
+  (globalThis as unknown as { window: { lvis: unknown } }).window.lvis = {
+    permission: {
+      deferredList,
+      deferredResolve,
+      onDeferredPending,
+    },
+  };
+  return { deferredList, deferredResolve, onDeferredPending };
+}
+
+beforeEach(() => {
+  delete (window as unknown as { lvis?: unknown }).lvis;
+});
+
+describe("DeferredApprovalChip", () => {
+  it("renders nothing when draft text has no intent", async () => {
+    installApi([makeEntry()]);
+    let container: HTMLElement;
+    await act(async () => {
+      const r = render(<DeferredApprovalChip draftText="random question about something" />);
+      container = r.container;
+    });
+    expect(container!.querySelector('[data-testid="deferred-approval-chip"]')).toBeNull();
+  });
+
+  it("renders nothing when intent matches but the queue is empty", async () => {
+    installApi([]);
+    let container: HTMLElement;
+    await act(async () => {
+      const r = render(<DeferredApprovalChip draftText="허용해 주세요" />);
+      container = r.container;
+    });
+    expect(container!.querySelector('[data-testid="deferred-approval-chip"]')).toBeNull();
+  });
+
+  it("renders nothing when multiple entries pend (ambiguous target)", async () => {
+    installApi([makeEntry({ id: "a" }), makeEntry({ id: "b", toolName: "bash" })]);
+    let container: HTMLElement;
+    await act(async () => {
+      const r = render(<DeferredApprovalChip draftText="허용" />);
+      container = r.container;
+    });
+    expect(container!.querySelector('[data-testid="deferred-approval-chip"]')).toBeNull();
+  });
+
+  it("renders chip + approve button for an approve intent against a single pending entry", async () => {
+    installApi([makeEntry({ toolName: "bash" })]);
+    await act(async () => {
+      render(<DeferredApprovalChip draftText="OK 허용해줘" />);
+    });
+    expect(screen.getByTestId("deferred-approval-chip")).toBeTruthy();
+    expect(screen.getByText(/'bash' 호출 허용\?/)).toBeTruthy();
+    expect(screen.getByTestId("deferred-approval-chip-action").textContent).toContain("허용");
+  });
+
+  it("dispatches deferredResolve with approvalSource='natural-language' on click", async () => {
+    const api = installApi([makeEntry({ id: "queue-42", toolName: "bash" })]);
+    await act(async () => {
+      render(<DeferredApprovalChip draftText="허용해 주세요" />);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("deferred-approval-chip-action"));
+    });
+    expect(api.deferredResolve).toHaveBeenCalledTimes(1);
+    const [id, decision, reason, source] = api.deferredResolve.mock.calls[0]!;
+    expect(id).toBe("queue-42");
+    expect(decision).toBe("approved");
+    expect(reason).toMatch(/natural-language match/);
+    expect(source).toBe("natural-language");
+  });
+
+  it("dispatches rejected when the intent is reject", async () => {
+    const api = installApi([makeEntry({ id: "queue-99" })]);
+    await act(async () => {
+      render(<DeferredApprovalChip draftText="취소해줘" />);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("deferred-approval-chip-action"));
+    });
+    const [, decision, , source] = api.deferredResolve.mock.calls[0]!;
+    expect(decision).toBe("rejected");
+    expect(source).toBe("natural-language");
+  });
+
+  it("does NOT auto-resolve when the negation modifies the approve verb (#690 safety)", async () => {
+    const api = installApi([makeEntry()]);
+    await act(async () => {
+      render(<DeferredApprovalChip draftText="허용 안 함" />);
+    });
+    expect(api.deferredResolve).not.toHaveBeenCalled();
+  });
+
+  it("surfaces the resolve error inline when the IPC call fails", async () => {
+    const pending = [makeEntry()];
+    const deferredList = vi.fn(async () => ({ ok: true as const, pending, total: 1 }));
+    const deferredResolve = vi.fn(async () => ({ ok: false as const, error: "not-found" }));
+    const onDeferredPending = vi.fn(() => () => undefined);
+    (globalThis as unknown as { window: { lvis: unknown } }).window.lvis = {
+      permission: { deferredList, deferredResolve, onDeferredPending },
+    };
+    await act(async () => {
+      render(<DeferredApprovalChip draftText="허용" />);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("deferred-approval-chip-action"));
+    });
+    expect(screen.getByTestId("deferred-approval-chip-error").textContent).toContain("not-found");
+  });
+});

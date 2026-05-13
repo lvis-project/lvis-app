@@ -665,11 +665,23 @@ export type LvisPermissionApi = {
     | { ok: true; verb: "list"; defaults: string[]; userAdditions: string[]; effective: string[] }
     | { ok: false; error: string }
   >;
-  /** Permission policy — resolve a pending entry with user gesture. */
+  /**
+   * Permission policy — resolve a pending entry with user gesture.
+   *
+   * `approvalSource` (issue #690 P4) records how the user gestured:
+   *   - "button"           — clicked the DeferredQueuePanel button
+   *   - "natural-language" — clicked the chat-surface chip after the
+   *                          renderer's intent matcher detected an
+   *                          approval phrase. NOT auto-applied; the
+   *                          chip still requires an explicit click.
+   * Optional for backward compatibility; main treats `undefined` as
+   * "button".
+   */
   deferredResolve: (
     id: string,
     decision: "approved" | "rejected",
     reason?: string,
+    approvalSource?: "button" | "natural-language",
   ) => Promise<
     | { ok: true; entry: DeferredQueueEntry }
     | { ok: false; error: string }
