@@ -19,6 +19,10 @@ import { createLogger } from "../lib/logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
 const log = createLogger("memory");
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 export interface MemoryManagerOptions {
   /** lvisHome() 기본, 테스트 시 override */
   lvisDir?: string;
@@ -30,6 +34,11 @@ export interface NoteEntry {
   content: string;
   updatedAt?: string;
   excerpt?: string;
+}
+
+export interface MemoryIndexSectionsPatch {
+  urgentMemory?: string;
+  references?: string;
 }
 
 export interface SessionSearchEntry {
@@ -447,6 +456,30 @@ export class MemoryManager {
     const targetPath = join(this.memoryDir, "MEMORY.md");
     await withFileLock(targetPath, async () => {
       writeFileSync(targetPath, content, "utf-8");
+    });
+    this.memoryIndex = this.readMemoryIndex();
+  }
+
+  async updateMemoryIndexIfUnchanged(expectedContent: string, nextContent: string): Promise<boolean> {
+    const targetPath = join(this.memoryDir, "MEMORY.md");
+    let didUpdate = false;
+    await withFileLock(targetPath, async () => {
+      const current = existsSync(targetPath) ? readFileSync(targetPath, "utf-8") : "";
+      if (current !== expectedContent) return;
+      writeFileSync(targetPath, nextContent, "utf-8");
+      didUpdate = true;
+    });
+    this.memoryIndex = this.readMemoryIndex();
+    return didUpdate;
+  }
+
+  async updateMemoryIndexSections(sections: MemoryIndexSectionsPatch): Promise<void> {
+    const targetPath = join(this.memoryDir, "MEMORY.md");
+    await withFileLock(targetPath, async () => {
+      const current = existsSync(targetPath)
+        ? readFileSync(targetPath, "utf-8")
+        : DEFAULT_MEMORY_INDEX;
+      writeFileSync(targetPath, this.patchMemoryIndexSections(current, sections), "utf-8");
     });
     this.memoryIndex = this.readMemoryIndex();
   }
@@ -989,6 +1022,59 @@ export class MemoryManager {
       lines.push(line);
     }
     writeFileSync(targetPath, lines.join("\n").replace(/\n{4,}/g, "\n\n\n"), "utf-8");
+  }
+
+  private patchMemoryIndexSections(markdown: string, sections: MemoryIndexSectionsPatch): string {
+    let next = this.ensureMemoryIndexSections(markdown);
+    if (sections.urgentMemory !== undefined) {
+      next = this.replaceMemoryIndexSection(next, "Urgent Memory", sections.urgentMemory);
+    }
+    if (sections.references !== undefined) {
+      next = this.replaceMemoryIndexSection(next, "References", sections.references);
+    }
+    return `${next.trim()}\n`;
+  }
+
+  private ensureMemoryIndexSections(markdown: string): string {
+    const base = markdown.trim() ? markdown.trim() : "# LVIS Memory Index";
+    let next = base.startsWith("# ") ? base : `# LVIS Memory Index\n\n${base}`;
+    next = this.ensureMemoryIndexSection(next, "Urgent Memory", "(지금 즉시 참고해야 할 내용을 500자 내외로 유지)");
+    next = this.ensureMemoryIndexSection(next, "References", "(긴급 기억의 근거 링크 또는 출처)");
+    next = this.ensureMemoryIndexSection(next, "Saved Memories", "");
+    return next;
+  }
+
+  private ensureMemoryIndexSection(markdown: string, heading: string, placeholder: string): string {
+    if (this.hasMemoryIndexSection(markdown, heading)) return markdown;
+    const block = `## ${heading}\n\n${placeholder}`.trimEnd();
+    if (heading !== "Saved Memories") {
+      const savedIndex = markdown.search(/^##\s+Saved Memories\s*$/im);
+      if (savedIndex >= 0) {
+        return `${markdown.slice(0, savedIndex).trimEnd()}\n\n${block}\n\n${markdown.slice(savedIndex).trimStart()}`;
+      }
+    }
+    return `${markdown.trimEnd()}\n\n${block}`;
+  }
+
+  private replaceMemoryIndexSection(markdown: string, heading: string, body: string): string {
+    const lines = markdown.replace(/\r\n/g, "\n").split("\n");
+    const headingRegex = new RegExp(`^##\\s+${escapeRegExp(heading)}\\s*$`, "i");
+    const nextHeadingRegex = /^##\s+/;
+    const start = lines.findIndex((line) => headingRegex.test(line));
+    const sectionLines = [`## ${heading}`, "", ...body.trim().split(/\r?\n/).filter((line) => line.length > 0)];
+    if (start < 0) {
+      return `${markdown.trimEnd()}\n\n${sectionLines.join("\n")}`;
+    }
+
+    let end = start + 1;
+    while (end < lines.length && !nextHeadingRegex.test(lines[end])) {
+      end += 1;
+    }
+    return [...lines.slice(0, start), ...sectionLines, "", ...lines.slice(end)].join("\n").replace(/\n{4,}/g, "\n\n\n");
+  }
+
+  private hasMemoryIndexSection(markdown: string, heading: string): boolean {
+    return new RegExp(`^##\\s+${escapeRegExp(heading)}\\s*$`, "im").test(markdown);
   }
 
   private memoryFilenameForTitle(title: string): string {

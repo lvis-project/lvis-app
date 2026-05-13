@@ -270,11 +270,13 @@ const api = {
     attachments: unknown[] | undefined,
     inputOrigin: ChatSendInputOrigin,
     userIntent?: UserKeyboardIntentSnapshot,
+    rolePrompt?: { name: string; systemPromptAdd: string },
   ) =>
     ipcRenderer.invoke("lvis:chat:send", {
       input,
       attachments,
       inputOrigin,
+      ...(rolePrompt ? { rolePrompt } : {}),
       ...(inputOrigin === "user-keyboard"
         ? { userActivation: consumeUserKeyboardIntent(userIntent) }
         : {}),
@@ -359,6 +361,10 @@ const api = {
   memorySearchEntries: async (query: string) => ipcRenderer.invoke("lvis:memory:entries:search", query),
   memoryGetIndex: async () => ipcRenderer.invoke("lvis:memory:index:get") as Promise<string>,
   memoryUpdateIndex: async (content: string) => ipcRenderer.invoke("lvis:memory:index:update", content),
+  memoryUpdateIndexIfUnchanged: async (expectedContent: string, nextContent: string) =>
+    ipcRenderer.invoke("lvis:memory:index:update-if-unchanged", expectedContent, nextContent) as Promise<boolean>,
+  memoryUpdateIndexSections: async (sections: { urgentMemory?: string; references?: string }) =>
+    ipcRenderer.invoke("lvis:memory:index:sections:update", sections),
   memoryListSessions: async () => ipcRenderer.invoke("lvis:memory:sessions:list"),
   memorySearchSessions: async (query: string) => ipcRenderer.invoke("lvis:memory:sessions:search", query),
   memoryGetAgentsMd: async () => ipcRenderer.invoke("lvis:memory:agents-md:get") as Promise<string>,

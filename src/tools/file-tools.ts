@@ -803,7 +803,7 @@ async function atomicTextWrite(target: string, content: string): Promise<void> {
   const temp = temporaryWritePath(target);
   try {
     await writeFile(temp, content, "utf8");
-    await rename(temp, target);
+    await renameWithTransientRetry(temp, target);
   } catch (err) {
     try {
       await unlink(temp);
@@ -812,6 +812,31 @@ async function atomicTextWrite(target: string, content: string): Promise<void> {
     }
     throw err;
   }
+}
+
+async function renameWithTransientRetry(source: string, target: string): Promise<void> {
+  const delaysMs = [10, 25, 50, 100, 200];
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await rename(source, target);
+      return;
+    } catch (err) {
+      if (attempt >= delaysMs.length || !isTransientRenameError(err)) {
+        throw err;
+      }
+      await sleep(delaysMs[attempt]);
+    }
+  }
+}
+
+function isTransientRenameError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const code = (err as { code?: unknown }).code;
+  return code === "EPERM" || code === "EACCES" || code === "EBUSY";
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function toolError(output: string): ToolErrorResult {

@@ -1,5 +1,5 @@
 import type { RolePreset } from "../../../data/role-presets.js";
-import { buildPresetPrefix } from "../../../data/role-presets.js";
+import { buildActiveRolePrompt, type ActiveRolePrompt } from "../../../data/role-presets.js";
 import type { UserContentPart } from "../../../engine/llm/types.js";
 import type { Attachment } from "../types/attachments.js";
 import { buildMarkerText } from "./attachment-markers.js";
@@ -14,6 +14,8 @@ export interface ComposedOutgoing {
    * — the IPC layer forwards it to `runTurn(input, { attachments })`.
    */
   attachments: UserContentPart[];
+  /** Per-turn role prompt metadata; main injects this into the system prompt. */
+  rolePrompt?: ActiveRolePrompt;
 }
 
 /**
@@ -71,13 +73,7 @@ export function composeOutgoing(params: {
     body = body.replace(re, () => replacement);
   }
 
-  // 3. Compose final text with optional role preset prefix.
-  const parts: string[] = [];
-  const presetPrefix = buildPresetPrefix(activePreset);
-  if (presetPrefix) parts.push(presetPrefix.trimEnd());
-  parts.push(body);
-
-  // 4. Image attachments become vision parts.
+  // 3. Image attachments become vision parts.
   const imageParts: UserContentPart[] = attachments
     .filter((a): a is Extract<Attachment, { kind: "image" }> => a.kind === "image")
     .map((img) => ({
@@ -87,8 +83,9 @@ export function composeOutgoing(params: {
     }));
 
   return {
-    text: parts.join("\n\n"),
+    text: body,
     attachments: imageParts,
+    rolePrompt: buildActiveRolePrompt(activePreset) ?? undefined,
   };
 }
 

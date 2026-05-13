@@ -226,6 +226,7 @@ describe("preload — plugin webview asset URLs", () => {
     ["memoryGetAgentsMd", "lvis:memory:agents-md:get"],
     ["memoryUpdateAgentsMd", "lvis:memory:agents-md:update", "# Agents"],
     ["memoryUpdateIndex", "lvis:memory:index:update", "# Memory"],
+    ["memoryUpdateIndexSections", "lvis:memory:index:sections:update", { urgentMemory: "Keep this." }],
     ["memoryGetLvisMd", "lvis:memory:lvis-md:get"],
     ["memoryUpdateLvisMd", "lvis:memory:lvis-md:update", "# Agents"],
     ["memoryGetUserPrefs", "lvis:memory:user-prefs:get"],
@@ -242,5 +243,14 @@ describe("preload — plugin webview asset URLs", () => {
     } else {
       expect(mockInvoke).toHaveBeenCalledWith(channel, payload);
     }
+  });
+
+  it("exposes memoryUpdateIndexIfUnchanged with expected and next content", async () => {
+    const api = await loadLvisApi();
+
+    expect(typeof api["memoryUpdateIndexIfUnchanged"]).toBe("function");
+    await (api["memoryUpdateIndexIfUnchanged"] as (expected: string, next: string) => Promise<unknown>)("# Old", "# New");
+
+    expect(mockInvoke).toHaveBeenCalledWith("lvis:memory:index:update-if-unchanged", "# Old", "# New");
   });
 });

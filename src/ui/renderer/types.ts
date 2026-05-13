@@ -7,7 +7,7 @@ import type { McpServerConfig, McpServerConfigDto, McpServerState } from "../../
 import type { SerializedHistoryMessage } from "../../shared/chat-history.js";
 import type { PluginConfigRecord } from "../../shared/plugin-config.js";
 import type { ChatSendInputOrigin } from "../../shared/chat-origin.js";
-import type { RolePreset } from "../../data/role-presets.js";
+import type { ActiveRolePrompt, RolePreset } from "../../data/role-presets.js";
 
 // Re-export MCP types for renderer-side consumers (type-only, no main-process runtime)
 export type { McpServerConfig, McpServerConfigDto, McpServerState };
@@ -134,6 +134,7 @@ export type AppSettings = {
   /** Experimental feature flags — all default false. */
   features?: {
     experimentalContinuousBackend?: boolean;
+    idlePreferenceRefresh?: boolean;
   };
 };
 
@@ -263,6 +264,7 @@ export type LvisApi = {
     attachments: import("../../engine/llm/types.js").UserContentPart[] | undefined,
     inputOrigin: ChatSendInputOrigin,
     userIntent?: import("../../shared/chat-origin.js").UserKeyboardIntentSnapshot,
+    rolePrompt?: ActiveRolePrompt,
   ) => Promise<unknown>;
   chatGuide: (input: string) => Promise<unknown>;
   chatNew: () => Promise<{ ok: true }>;
@@ -311,6 +313,8 @@ export type LvisApi = {
   memorySearchEntries: (q: string) => Promise<Array<{ filename?: string; title: string; content?: string; excerpt: string; updatedAt: string }>>;
   memoryGetIndex: () => Promise<string>;
   memoryUpdateIndex: (content: string) => Promise<unknown>;
+  memoryUpdateIndexIfUnchanged: (expectedContent: string, nextContent: string) => Promise<boolean>;
+  memoryUpdateIndexSections: (sections: { urgentMemory?: string; references?: string }) => Promise<unknown>;
   memoryListSessions: () => Promise<Array<{ sessionId: string; matchedMessage: string; timestamp: string }>>;
   memorySearchSessions: (q: string) => Promise<Array<{ sessionId: string; matchedMessage: string; timestamp: string }>>;
   memoryGetAgentsMd: () => Promise<string>;
