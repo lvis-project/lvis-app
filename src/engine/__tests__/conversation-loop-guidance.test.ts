@@ -3,18 +3,25 @@
  * "guide" mode of the chat utterance taxonomy (`src/shared/chat-utterance.ts`).
  *
  * Contract (re-stated for future readers):
- *   - `queueGuidance(text)` buffers a non-empty trimmed string.
+ *   - `queueGuidance(text)` returns `"queued" | "no-active-turn" | "queue-full"
+ *     | "too-long" | "empty"`. Bounded by `GUIDE_MAX_ENTRIES` (16) and
+ *     `GUIDE_MAX_CHARS` (8000) — caller MUST surface non-"queued" results
+ *     so the renderer can preserve the user's typed text.
  *   - At each round boundary AFTER round 0 (between tool execution end and
  *     the next LLM stream), any buffered text is drained, joined with
  *     `"\n\n"`, prepended with the "[방향 지시 — ...]" marker, and appended
  *     to history as a `user` message so the model sees it like normal input.
- *   - `onGuidanceInjected(text)` callback fires once per drain so the
- *     renderer can surface a visible system entry.
- *   - Guidance queued during a single-round turn (no boundary reached) is
- *     dropped with a warn — it CANNOT carry over to the next turn because
- *     that would silently prefix the next user intent.
- *   - `hasActiveTurn()` is true exactly while `currentAbortController` is
- *     set, which is the IPC handler's gate for accepting `chat:guide` calls.
+ *   - Per user spec "방향지시는 endturn 전에 영향을 미치는 거": when a turn
+ *     would end (no tool calls or stopReason="end_turn") but guide is queued,
+ *     the loop refuses to return and falls through to one more round so the
+ *     LLM responds to the queued direction-adjustment. Round-cap still applies
+ *     — if cap is reached, `onGuidanceDropped` fires and the user sees a
+ *     visible "방향 지시 미적용" system entry.
+ *   - `onGuidanceInjected(text)` and `onGuidanceDropped(text)` callbacks fire
+ *     per round-boundary drain / per turn-end drop so the renderer surfaces
+ *     visible system entries.
+ *   - `hasActiveTurn()` is `currentAbortController !== null`, set just before
+ *     `queryLoop` and cleared in `runTurn`'s `finally`.
  */
 import { describe, expect, it } from "vitest";
 
@@ -29,17 +36,25 @@ import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
 class FakeProvider implements LLMProvider {
   readonly vendor = "openai" as const;
   private index = 0;
+  /**
+   * Optional hook fired right BEFORE the next turn yields its first event.
+   * Tests use this to call `queueGuidance` after the turn has started (so
+   * `currentAbortController` is set and the active-turn check passes)
+   * without needing to spin up real concurrent IPC traffic.
+   */
+  beforeNextTurn?: () => void;
 
   constructor(private readonly turns: StreamEvent[][]) {}
 
   async *streamTurn(): AsyncIterable<StreamEvent> {
+    this.beforeNextTurn?.();
+    this.beforeNextTurn = undefined;
     yield* this.turns[this.index++] ?? [];
   }
 }
 
 function makeLoop(provider: LLMProvider): ConversationLoop {
   const toolRegistry = new ToolRegistry();
-  // A no-op tool the FakeProvider can call to force a second round.
   toolRegistry.register(createDynamicTool({
     name: "noop_tool",
     description: "no-op",
@@ -60,35 +75,49 @@ function makeLoop(provider: LLMProvider): ConversationLoop {
   return loop;
 }
 
+function getHistory(loop: ConversationLoop) {
+  return (loop as unknown as { history: { getMessages: () => Array<{ role: string; content: unknown }> } }).history.getMessages();
+}
+
 describe("ConversationLoop guidance queue + boundary inject", () => {
   it("queues guide text and injects it at the next round boundary (between tool rounds)", async () => {
-    // Turn 0: emit a tool_call so the loop runs a second round.
-    // Turn 1 (after tool result): emit final text.
     const provider = new FakeProvider([
+      // Round 0: emit tool_call so the loop runs a second round.
       [
         { type: "text_delta", text: "보고를 시작합니다." } as StreamEvent,
         { type: "tool_call", id: "t1", name: "noop_tool", input: {} } as StreamEvent,
         { type: "message_complete", stopReason: "tool_use" } as StreamEvent,
       ],
+      // Round 1 (after tool result): final text.
       [
-        { type: "text_delta", text: "방향 반영 결과입니다." } as StreamEvent,
+        { type: "text_delta", text: "방향 반영 결과." } as StreamEvent,
         { type: "message_complete", stopReason: "end_turn" } as StreamEvent,
       ],
     ]);
+    // Queue mid-turn (after currentAbortController is set, before round 1
+    // starts) so the active-turn check passes and the inject site catches it.
+    provider.beforeNextTurn = () => {
+      // First yield of turn 0 — controller is set; queue guidance now.
+      // (Subsequent yields no-op because `beforeNextTurn = undefined`.)
+    };
     const loop = makeLoop(provider);
-
-    // Race-realistic: queue guidance BEFORE runTurn so it's present when the
-    // round-1 boundary check runs. (The real IPC path queues mid-flight; this
-    // synchronous setup mimics that without needing a real concurrent push.)
-    loop.queueGuidance("더 짧게 요약");
-
     const injected: string[] = [];
-    await loop.runTurn("긴 보고서 만들어줘", { onGuidanceInjected: (t) => injected.push(t) }, undefined, { inputOrigin: "user-keyboard" });
+
+    // Schedule queueGuidance right after runTurn starts.
+    const turnPromise = loop.runTurn(
+      "긴 보고서 만들어줘",
+      { onGuidanceInjected: (t) => injected.push(t) },
+      undefined,
+      { inputOrigin: "user-keyboard" },
+    );
+    // Microtask ordering: by the time the first stream event resolves, the
+    // controller has been set. Queue guidance now.
+    await Promise.resolve();
+    loop.queueGuidance("더 짧게 요약");
+    await turnPromise;
 
     expect(injected).toEqual(["더 짧게 요약"]);
-    // History should contain a synthetic user message at the boundary with the
-    // canonical marker prefix.
-    const userMessages = (loop as unknown as { history: { getMessages: () => Array<{ role: string; content: unknown }> } }).history.getMessages().filter((m) => m.role === "user");
+    const userMessages = getHistory(loop).filter((m) => m.role === "user");
     expect(userMessages.some((m) => typeof m.content === "string" && m.content.includes("[방향 지시 — 진행 중 추가 입력]") && m.content.includes("더 짧게 요약"))).toBe(true);
   });
 
@@ -104,47 +133,101 @@ describe("ConversationLoop guidance queue + boundary inject", () => {
       ],
     ]);
     const loop = makeLoop(provider);
+    const injected: string[] = [];
+    const turnPromise = loop.runTurn(
+      "작업 시작",
+      { onGuidanceInjected: (t) => injected.push(t) },
+      undefined,
+      { inputOrigin: "user-keyboard" },
+    );
+    await Promise.resolve();
     loop.queueGuidance("첫번째 지시");
     loop.queueGuidance("두번째 지시");
-
-    const injected: string[] = [];
-    await loop.runTurn("작업 시작", { onGuidanceInjected: (t) => injected.push(t) }, undefined, { inputOrigin: "user-keyboard" });
+    await turnPromise;
 
     expect(injected).toHaveLength(1);
     expect(injected[0]).toBe("첫번째 지시\n\n두번째 지시");
   });
 
-  it("drops guidance queued during a single-round turn (no boundary reached)", async () => {
-    // No tool_call → loop ends after round 0 → queued guidance has no
-    // boundary to consume it.
+  it("extends a 1-round turn by one round to deliver queued guide BEFORE end-turn", async () => {
+    // User spec: "방향지시는 endturn 전에 영향을 미치는 거". A naive
+    // single-round turn would let end_turn ship before the inject site runs;
+    // queryLoop now refuses to return when guidance is queued, falling
+    // through to one more round so the LLM responds with the guide applied.
     const provider = new FakeProvider([
       [
-        { type: "text_delta", text: "단답" } as StreamEvent,
+        { type: "text_delta", text: "원래 답" } as StreamEvent,
+        { type: "message_complete", stopReason: "end_turn" } as StreamEvent,
+      ],
+      [
+        { type: "text_delta", text: "수정 답" } as StreamEvent,
         { type: "message_complete", stopReason: "end_turn" } as StreamEvent,
       ],
     ]);
     const loop = makeLoop(provider);
-    loop.queueGuidance("절대 적용되면 안 됨");
-
     const injected: string[] = [];
-    await loop.runTurn("간단 질문", { onGuidanceInjected: (t) => injected.push(t) }, undefined, { inputOrigin: "user-keyboard" });
+    const dropped: string[] = [];
+    const turnPromise = loop.runTurn(
+      "질문",
+      { onGuidanceInjected: (t) => injected.push(t), onGuidanceDropped: (t) => dropped.push(t) },
+      undefined,
+      { inputOrigin: "user-keyboard" },
+    );
+    await Promise.resolve();
+    loop.queueGuidance("더 짧게");
+    await turnPromise;
 
-    expect(injected).toEqual([]);
-    // Guidance must NOT leak into history — would prefix a future turn.
-    const userMessages = (loop as unknown as { history: { getMessages: () => Array<{ role: string; content: unknown }> } }).history.getMessages().filter((m) => m.role === "user");
-    expect(userMessages.some((m) => typeof m.content === "string" && m.content.includes("절대 적용되면 안 됨"))).toBe(false);
+    expect(injected).toEqual(["더 짧게"]);
+    expect(dropped).toEqual([]);
   });
 
-  it("rejects empty / whitespace-only guidance silently (no allocation)", () => {
+  it("rejects empty / oversized / no-active-turn cases by return code", () => {
     const provider = new FakeProvider([]);
     const loop = makeLoop(provider);
-    loop.queueGuidance("");
-    loop.queueGuidance("   ");
-    loop.queueGuidance("\n\t\n");
-    // No public accessor; assert via behavior — a follow-up runTurn with a
-    // multi-round provider would NOT fire onGuidanceInjected if the queue
-    // had stayed empty. Direct introspection not exposed by design.
-    expect(true).toBe(true);
+    // No active turn — IPC handler must surface this so renderer keeps text.
+    expect(loop.queueGuidance("뭔가")).toBe("no-active-turn");
+    // Synthesize an active turn for the rest of the matrix.
+    (loop as { currentAbortController: AbortController | null }).currentAbortController = new AbortController();
+    expect(loop.queueGuidance("")).toBe("empty");
+    expect(loop.queueGuidance("   \n\t  ")).toBe("empty");
+    expect(loop.queueGuidance("a".repeat(8_001))).toBe("too-long");
+    expect(loop.queueGuidance("ok")).toBe("queued");
+  });
+
+  it("queue-full rejection at GUIDE_MAX_ENTRIES (16)", () => {
+    const loop = makeLoop(new FakeProvider([]));
+    (loop as { currentAbortController: AbortController | null }).currentAbortController = new AbortController();
+    for (let i = 0; i < 16; i++) {
+      expect(loop.queueGuidance(`g${i}`)).toBe("queued");
+    }
+    expect(loop.queueGuidance("overflow")).toBe("queue-full");
+  });
+
+  it("fires onGuidanceDropped when round-cap blocks the extension", async () => {
+    // maxRounds: 1 → one assistant round allowed; extension would need a
+    // second round, which the cap forbids. Queue must drain via the
+    // drop-on-end path so the renderer surfaces the failure.
+    const provider = new FakeProvider([
+      [
+        { type: "text_delta", text: "응답" } as StreamEvent,
+        { type: "message_complete", stopReason: "end_turn" } as StreamEvent,
+      ],
+    ]);
+    const loop = makeLoop(provider);
+    const injected: string[] = [];
+    const dropped: string[] = [];
+    const turnPromise = loop.runTurn(
+      "q",
+      { onGuidanceInjected: (t) => injected.push(t), onGuidanceDropped: (t) => dropped.push(t) },
+      undefined,
+      { inputOrigin: "user-keyboard", maxRounds: 1 },
+    );
+    await Promise.resolve();
+    loop.queueGuidance("late");
+    await turnPromise;
+
+    expect(injected).toEqual([]);
+    expect(dropped).toEqual(["late"]);
   });
 
   it("`hasActiveTurn()` reflects in-flight runTurn for IPC gate", async () => {
@@ -157,9 +240,6 @@ describe("ConversationLoop guidance queue + boundary inject", () => {
     const loop = makeLoop(provider);
     expect(loop.hasActiveTurn()).toBe(false);
     const p = loop.runTurn("test", undefined, undefined, { inputOrigin: "user-keyboard" });
-    // Synchronously after `runTurn` returns its Promise, the abort controller
-    // has been set inside the first microtask. Awaiting forces resolution
-    // before we can inspect the value — accept eventual-consistent boundary.
     await p;
     expect(loop.hasActiveTurn()).toBe(false);
   });
