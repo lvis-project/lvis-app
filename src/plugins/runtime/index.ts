@@ -50,6 +50,7 @@ import type { LoadedPlugin, ManifestLoadPlan, ManifestSnapshot } from "./types.j
 import { createLogger } from "../../lib/logger.js";
 import { plog, PluginPhase } from "../lifecycle-log.js";
 const log = createLogger("plugin-runtime");
+const START_FAILURE_STOP_TIMEOUT_MS = 2_000;
 
 export type { InstallPolicy };
 export { normalizeInstallPolicy, getDeclaredEmittedEvents };
@@ -452,16 +453,18 @@ export class PluginRuntime {
       const plugin = this.plugins.get(id);
       if (!plugin) continue;
       this.markFailed(id);
-      for (const method of plugin.methods.keys()) {
-        this.methodMap.delete(method);
-      }
-      this.plugins.delete(id);
+      this.cleanupFailedStartRuntimeState(id, plugin.methods);
+      await this.stopAfterStartFailure(plugin.manifest.id, plugin.instance);
     }
   }
 
   async stopAll(): Promise<void> {
     for (const plugin of this.plugins.values()) {
-      await plugin.instance.stop?.();
+      try {
+        await plugin.instance.stop?.();
+      } catch (err) {
+        log.error(`stopAll failed for ${plugin.manifest.id}: %s`, (err as Error).message);
+      }
     }
   }
 
@@ -605,10 +608,9 @@ export class PluginRuntime {
     } catch (err) {
       plog("error", { pluginId, phase: PluginPhase.RESTART_START_FAIL, err }, "start after restart failed");
       this.markFailed(pluginId);
-      for (const method of methods.keys()) {
-        this.methodMap.delete(method);
-      }
-      this.plugins.delete(pluginId);
+      this.cleanupFailedStartRuntimeState(pluginId, methods);
+      await this.stopAfterStartFailure(pluginId, instance);
+      throw new Error(`restartPlugin failed for ${pluginId}: ${(err as Error).message}`);
     }
   }
 
@@ -633,7 +635,12 @@ export class PluginRuntime {
    */
   async addPlugin(pluginId: string): Promise<void> {
     if (this.plugins.has(pluginId)) {
-      await this.restartPlugin(pluginId);
+      try {
+        await this.restartPlugin(pluginId);
+      } catch (err) {
+        throw new Error(`addPlugin failed for ${pluginId}: ${(err as Error).message}`);
+      }
+      this.throwIfPluginFailedAfterAdd(pluginId);
       return;
     }
 
@@ -668,11 +675,7 @@ export class PluginRuntime {
     // Throw if the plugin landed in failed state — caller (IPC install
     // handler) catches to roll back marketplace state. boot-time `load()`
     // doesn't take this path; it inlines its own iteration.
-    if (this.failedPluginIds.has(pluginId) || !this.plugins.has(pluginId)) {
-      const stub = this.failedPluginStubs.get(pluginId);
-      const reason = stub?.description ?? "plugin failed to load (see prior log)";
-      throw new Error(`addPlugin failed for ${pluginId}: ${reason}`);
-    }
+    this.throwIfPluginFailedAfterAdd(pluginId);
   }
 
   /**
@@ -959,10 +962,8 @@ export class PluginRuntime {
       } catch (err) {
         log.error(`start during addPlugin failed: %s`, (err as Error).message);
         this.markFailed(manifest.id);
-        for (const method of methods.keys()) {
-          this.methodMap.delete(method);
-        }
-        this.plugins.delete(manifest.id);
+        this.cleanupFailedStartRuntimeState(manifest.id, methods);
+        await this.stopAfterStartFailure(manifest.id, instance);
       }
     }
   }
@@ -1443,6 +1444,62 @@ export class PluginRuntime {
     this.failedPluginStubs.clear();
     this.disabledPluginIds.clear();
     this.loaded = false;
+  }
+
+  private async stopAfterStartFailure(
+    pluginId: string,
+    instance: RuntimePlugin,
+  ): Promise<void> {
+    if (!instance.stop) return;
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      await Promise.race([
+        Promise.resolve(instance.stop()),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error(`stop timeout (>${START_FAILURE_STOP_TIMEOUT_MS}ms)`)),
+            START_FAILURE_STOP_TIMEOUT_MS,
+          );
+        }),
+      ]);
+      plog("debug", { pluginId, phase: PluginPhase.STOP_OK }, "stopped after start failure");
+    } catch (err) {
+      plog("error", { pluginId, phase: PluginPhase.STOP_FAIL, err }, "stop after start failure failed");
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  private cleanupFailedStartRuntimeState(
+    pluginId: string,
+    methods: Map<string, PluginToolHandler>,
+  ): void {
+    for (const method of methods.keys()) {
+      this.methodMap.delete(method);
+    }
+    this.plugins.delete(pluginId);
+    this.runPluginDisposers(pluginId, "start failure cleanup");
+    this.onDisable?.(pluginId);
+  }
+
+  private runPluginDisposers(pluginId: string, context: string): void {
+    const pluginDisposers = this.disposers.get(pluginId);
+    if (!pluginDisposers) return;
+    for (const dispose of pluginDisposers) {
+      try {
+        dispose();
+      } catch (err) {
+        log.error(`disposer failed during ${context}: %s`, (err as Error).message);
+      }
+    }
+    this.disposers.delete(pluginId);
+  }
+
+  private throwIfPluginFailedAfterAdd(pluginId: string): void {
+    if (!this.failedPluginIds.has(pluginId) && this.plugins.has(pluginId)) return;
+    const stub = this.failedPluginStubs.get(pluginId);
+    const reason = stub?.description ?? "plugin failed to load (see prior log)";
+    throw new Error(`addPlugin failed for ${pluginId}: ${reason}`);
   }
 
   private markFailed(
