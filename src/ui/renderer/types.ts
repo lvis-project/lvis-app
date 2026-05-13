@@ -564,6 +564,18 @@ export type ApprovalRequest = {
   };
   /** Permission policy §9 — trust-origin classification, e.g. "user" / "agent". */
   trustOrigin?: string;
+  /**
+   * Issue #691 — OS-level execution sandbox capability captured at
+   * request build time. Renderer surfaces this in the approval card so
+   * the user can see whether the tool will run under bubblewrap /
+   * sandbox-exec / AppContainer or with no isolation.
+   */
+  sandboxCapability?: {
+    kind: "none" | "bubblewrap" | "sandbox-exec" | "appcontainer";
+    confidence: "verified" | "assumed";
+    platform: string;
+    reason: string;
+  };
 };
 export type ApprovalDecision = {
   requestId: string;

@@ -247,6 +247,21 @@ function approvalReviewRows(
       value: `${sourceBadge} · ${originLabel}`,
     },
   ];
+  // Issue #691 round-1 user request — surface the OS-level execution
+  // sandbox so the user sees how this tool will be isolated (or not).
+  // `kind: "none"` is the current real-world state; the row stays
+  // present so users learn to look for it once isolation lands.
+  if (request.sandboxCapability) {
+    const cap = request.sandboxCapability;
+    const weak = cap.kind === "none" || cap.confidence === "assumed";
+    rows.push({
+      label: "격리",
+      value: weak
+        ? `⚠ ${cap.kind} (${cap.confidence}, ${cap.platform}) — ${cap.reason}`
+        : `${cap.kind} (${cap.confidence}, ${cap.platform})`,
+      testId: "tool-approval-sandbox",
+    });
+  }
   if (isNonUserTrustOrigin(request.trustOrigin)) {
     rows.push({
       label: "주의",

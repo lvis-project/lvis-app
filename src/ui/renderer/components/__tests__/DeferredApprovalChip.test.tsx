@@ -122,6 +122,44 @@ describe("DeferredApprovalChip", () => {
     expect(api.deferredResolve).not.toHaveBeenCalled();
   });
 
+  it("re-fetches pending queue at click time and aborts when the entry was swapped (round-1 security MAJOR-1)", async () => {
+    const initial = [makeEntry({ id: "queue-1", toolName: "bash" })];
+    const afterSwap = [makeEntry({ id: "queue-2", toolName: "shell" })];
+    let callCount = 0;
+    const deferredList = vi.fn(async () => {
+      callCount += 1;
+      // First call (mount refresh) returns initial; later calls return swap.
+      return { ok: true as const, pending: callCount === 1 ? initial : afterSwap, total: 1 };
+    });
+    const deferredResolve = vi.fn(async () => ({ ok: true as const, entry: initial[0]! }));
+    const onDeferredPending = vi.fn(() => () => undefined);
+    (globalThis as unknown as { window: { lvis: unknown } }).window.lvis = {
+      permission: { deferredList, deferredResolve, onDeferredPending },
+    };
+    await act(async () => {
+      render(<DeferredApprovalChip draftText="허용해 주세요" />);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("deferred-approval-chip-action"));
+    });
+    // resolve MUST NOT have been called — TOCTOU re-check aborted the action.
+    expect(deferredResolve).not.toHaveBeenCalled();
+    expect(screen.getByTestId("deferred-approval-chip-error").textContent).toContain(
+      "pending 큐가 변경",
+    );
+  });
+
+  it("surfaces the entry source label so plugin-deferred entries are distinguishable (round-1 architect MAJOR-2)", async () => {
+    installApi([makeEntry({ source: "plugin", toolName: "work_proactive_email_scan" })]);
+    await act(async () => {
+      render(<DeferredApprovalChip draftText="허용해 주세요" />);
+    });
+    const chip = screen.getByTestId("deferred-approval-chip");
+    expect(chip.textContent).toContain("[plugin]");
+    expect(chip.textContent).toContain("work_proactive_email_scan");
+    expect(chip.getAttribute("data-target-source")).toBe("plugin");
+  });
+
   it("surfaces the resolve error inline when the IPC call fails", async () => {
     const pending = [makeEntry()];
     const deferredList = vi.fn(async () => ({ ok: true as const, pending, total: 1 }));
