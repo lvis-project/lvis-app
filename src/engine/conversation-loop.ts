@@ -358,6 +358,15 @@ export class ConversationLoop {
   private static readonly GUIDE_MAX_ENTRIES = 16;
   /** Max chars per queued guide utterance (security-reviewer M1). */
   private static readonly GUIDE_MAX_CHARS = 8_000;
+  /**
+   * Max chars of the JOINED guide message at one boundary (critic round 2
+   * M3). Caps the wall the LLM sees in a single user message even when
+   * the queue is full of max-size entries. Older entries are dropped with
+   * a leading "[일부 방향 지시 생략 — 길이 초과]" marker so the user
+   * understands the truncation, rather than the model silently seeing
+   * the most recent few.
+   */
+  private static readonly GUIDE_JOINED_MAX_CHARS = 16_000;
 
   constructor(deps: ConversationLoopDeps) {
     this.deps = deps;
@@ -1327,22 +1336,39 @@ export class ConversationLoop {
       // The atomic `currentAbortController` check inside `queueGuidance`
       // closes the only true race.
       if (round > 0 && this.guidanceQueue.length > 0) {
-        const joined = this.guidanceQueue.join("\n\n");
+        // Truncate from the head — preserve the user's MOST RECENT guides
+        // since older queued items may have been superseded. Worst case
+        // (16 × 8000 chars = 128KB joined) is capped at
+        // `GUIDE_JOINED_MAX_CHARS` and the truncation is surfaced via a
+        // leading marker so the LLM doesn't get confused by missing
+        // context.
+        let joined = this.guidanceQueue.join("\n\n");
+        let truncatedCount = 0;
+        const kept = [...this.guidanceQueue];
+        while (joined.length > ConversationLoop.GUIDE_JOINED_MAX_CHARS && kept.length > 1) {
+          kept.shift();
+          truncatedCount += 1;
+          joined = kept.join("\n\n");
+        }
+        if (truncatedCount > 0) {
+          joined = `[일부 방향 지시 생략 — ${truncatedCount}개 항목 길이 초과로 폐기됨]\n\n${joined}`;
+        }
         this.guidanceQueue = [];
         const injectedContent = `[방향 지시 — 진행 중 추가 입력]\n${joined}`;
+        // Critic round 2 M1: run preflight BEFORE appending the guide so
+        // compaction targets the older history and never accidentally
+        // summarizes-away the just-injected guide marker. `joined` is
+        // capped at GUIDE_MAX_ENTRIES × GUIDE_MAX_CHARS = 128KB chars
+        // (≈ 30K tokens worst case) but typical use is < 1K tokens —
+        // well below the post-compact preserveRecent budget, so the
+        // next round's prompt-assembly will fit.
+        if (this.provider && !this.deps.disableSessionPersistence) {
+          await this.runPreflightGuard(abortSignal, callbacks);
+        }
         this.history.append({
           role: "user",
           content: injectedContent,
         });
-        // Preflight re-run (critic BLOCKING #1) — guide content adds tokens
-        // that bypassed the turn-entry `runPreflightGuard` call. Without
-        // this re-check a 10K-char guide could push the next round into
-        // context-error. `runPreflightGuard` is idempotent (no-op if
-        // estimator says we're under threshold) so the cost when the
-        // injected content is small is negligible.
-        if (this.provider && !this.deps.disableSessionPersistence) {
-          await this.runPreflightGuard(abortSignal, callbacks);
-        }
         callbacks?.onGuidanceInjected?.(joined);
         this.tracer.step("GUIDANCE_INJECTED", { round, len: joined.length });
       }
@@ -1510,9 +1536,9 @@ export class ConversationLoop {
         // the guidance. Round-cap still applies — if we're at the cap, we
         // can't add another round; drop-on-end will surface to the user.
         if (this.guidanceQueue.length > 0 && assistantRoundsRun < effectiveMaxRounds) {
-          this.tracer.step("ROUND_COMMIT", {
+          this.tracer.step("GUIDANCE_INJECTED", {
             round: roundIndex,
-            note: "extending for queued guidance",
+            note: "extending turn — guide queued at end-turn boundary",
           });
           continue;
         }
