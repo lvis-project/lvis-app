@@ -811,14 +811,14 @@ sequenceDiagram
 | **지속성** | assistant `thought`는 히스토리에 저장되어 tool round-trip 후에도 reasoning 모델의 문맥이 유지된다. |
 | **거버넌스 동기화** | 대화 루프는 로컬 GovernancePolicy를 조회하고, 상위 정책 동기화 서버의 broadcast로 갱신되는 설계를 전제로 한다. |
 
-#### 4.5.4 컨텍스트 관리 — Auto-Compact (2-stage)
+#### 4.5.4 컨텍스트 관리 — Auto-Compact (PR-3 정리 후, Layer 1 + Layer 2)
 
-LVIS는 OpenHarness 레퍼런스를 따라 **2-stage compact** 를 채택한다:
+LVIS 는 OpenHarness 레퍼런스를 따라 multi-layer compact 를 채택한다. §4.5.11 의 Layer 0 preflight (token-based, blocking) 가 트리거이고, 본 절은 *현재 세션 안에서* 실제 토큰을 줄이는 Layer 1 + Layer 2 를 다룬다:
 
-- **Stage 1a — Microcompact (preventive, LLM-free)**: 매 post-turn마다 실행. `microcompactMessages()` 가 오래된 `tool_result` 메시지 body를 stub(`[tool_result stripped: tool=X, origLen=N]`)으로 교체해 토큰을 낮춘다. `MessageMeta.stripped=true` 로 표시되어 **idempotent** 이며, 최근 N개(기본 4)는 원본 유지, `toolUseId` 참조 무결성은 그대로 보존된다.
-- **Stage 1b — Full compact (threshold-gated, LLM-free 요약)**: `shouldCompact()` 가 사용률 임계치(기본 80%) 초과를 감지하면 `compactMessages()` 가 보존 구간을 제외한 이전 메시지를 요약으로 교체. 생성된 summary user 메시지는 `MessageMeta.compactBoundary=true` 로 마킹되어 **double-compact 를 방지** 한다 (marker 이후만 재요약 대상).
+- **Layer 1 — Mark Stale Tool Results (preventive, marker-only)**: 매 post-turn 마다 실행. `markStaleToolResults()` 가 오래된 `tool_result` 메시지에 `meta.compactedAt` 단일 마커만 set — 메모리상의 content 는 *verbatim 보존* 된다 (UI / Layer 3 preview 가 원본 표시 가능). 마커가 있는 메시지는 `wire-serialize.ts:stubMarkedToolResults` 가 provider 호출 직전 + `saveSession` 직전에 stub (`[tool_result stripped: tool=X, origLen=N]`) 으로 변환 — wire/disk 측에서만 토큰/디스크가 절감된다. 최근 N개 (기본 8) 는 raw 유지, 200자 미만은 mark 대상 제외 (OpenCode 패턴), `toolUseId` 참조 무결성은 그대로 보존. PR-3 에서 구 `meta.stripped` · `meta.strippedAt` · `meta.originalLength` 필드는 호환성 layer 없이 완전 제거 (`src/engine/auto-compact.ts:114-124`).
+- **Layer 2 — LLM Compact with Boundary (threshold-gated)**: §4.5.11 Layer 0 preflight 가 `estimateMessagesTokens(history) ≥ getModelPreflightThreshold(vendor, model)` 을 hit 하면 LLM 호출 차단 + `compactWithBoundary()` (`src/engine/structured-compact.ts:321`) 동기 실행. 보존 구간을 제외한 이전 메시지를 LLM 요약으로 교체하고 같은 sessionId 안에 `kind: "checkpoint"` ChatEntry 가 append 되어 Layer 3 anchor 가 된다. 생성된 요약은 다음 턴 system prompt 의 preamble 로 prepend, `compactNum` (PR-5 sequence number) 가 새 checkpoint 에 할당되어 view/branch action anchor 로 사용된다. (구 `shouldCompact()` 사용률 임계치 + `compactMessages()` LLM-free 요약 패턴은 PR-2-F-2 에서 폐기 — 토큰만 측정하는 Layer 0 preflight 가 단일 트리거.)
 
-목표 설계와 현재 구현 모두 사용률 기준 자동 트리거(20% 단위 조정 20/40/60/80%)를 따른다. 즉, Stage 1b는 고정 `inputTokens` 비교가 아니라 `shouldCompact(cumulativeUsage, contextWindow)` 로 계산되며, 누적 사용량이 `contextWindow × thresholdPct`(기본 80%) 를 넘으면 발동한다. Stage 1a는 **항상 실행** 되므로 threshold와 독립적으로 토큰 압력을 완화한다.
+Layer 1 은 *항상 실행* 되므로 Layer 0 threshold 와 독립적으로 wire/disk 토큰 압력을 완화한다. Layer 2 는 hit 시 같은 sessionId 안에서 boundary-marked summary 를 만들고 fork 없이 진행 (§4.5.11 의 same-session checkpoint chain 모델). 아래 도식은 *목표 설계* (사용률 기준 20% 단위 트리거) 와 현재 구현 (token-based preflight) 의 양쪽을 비교해 보여준다 — 트리거 신호는 PR-2-F-2 이후 토큰으로 통일됐다.
 
 ```mermaid
 flowchart LR
