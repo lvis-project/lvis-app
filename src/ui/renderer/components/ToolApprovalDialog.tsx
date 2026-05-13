@@ -21,6 +21,7 @@ import {
   pickSummary,
   reviewBoxClass,
   reviewTitleForCategory,
+  riskLevelKoLabel,
   scopeLabel,
   sensitivityLabel,
   type ParsedSummary,
@@ -115,11 +116,7 @@ export function ToolApprovalDialog({
                     technical Korean users and was the most prominent
                     visual element in the dialog. */}
                 <Badge variant="outline" className={`${badgeClassName} shrink-0`}>
-                  {riskLevel === "high"
-                    ? "높은 위험"
-                    : riskLevel === "medium"
-                      ? "중간 위험"
-                      : "낮은 위험"}
+                  {riskLevelKoLabel(riskLevel)}
                 </Badge>
                 <h3 className="min-w-0 flex-1 text-base font-semibold">
                   {title}
@@ -255,7 +252,7 @@ function approvalReviewRows(
 ): ReviewBasisRow[] {
   const parsed = parseArgs(request.args);
   const reviewer = request.reviewerVerdict
-    ? `${request.reviewerVerdict.level.toUpperCase()} · ${request.reviewerVerdict.reason}`
+    ? `${riskLevelKoLabel(request.reviewerVerdict.level)} · ${request.reviewerVerdict.reason}`
     : request.reason;
   const rows: ReviewBasisRow[] = [
     {
