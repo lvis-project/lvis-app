@@ -75,10 +75,11 @@ export interface ToolInvocationContext {
   /**
    * OS-level execution sandbox capability — the reviewer SOT for issue
    * #691. Constructed by {@link detectSandboxCapability} at the dispatch
-   * site (single producer) and threaded here so the LLM prompt + audit
-   * record both see the same value. Required: callers MUST supply it so
-   * a missing field cannot silently downgrade the reviewer's safety
-   * posture.
+   * site (single producer) and threaded here so the LLM prompt sees the
+   * same value used by the reviewer. The current audit schema records the
+   * resulting reviewer verdict, not the full SandboxCapability snapshot.
+   * Required: callers MUST supply it so a missing field cannot silently
+   * downgrade the reviewer's safety posture.
    */
   sandboxCapability: SandboxCapability;
 }

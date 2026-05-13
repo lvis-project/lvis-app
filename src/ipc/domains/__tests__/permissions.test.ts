@@ -316,6 +316,7 @@ describe("permissions IPC handlers", () => {
         id: "deferred-1",
         decision,
         reason: "reviewed by user",
+        approvalSource: "button",
         intent: USER_INTENT,
       });
 
@@ -332,6 +333,7 @@ describe("permissions IPC handlers", () => {
           reason: "reviewed by user",
           queueId: "deferred-1",
           reviewerVerdict: entry.verdict,
+          approvalSource: "button",
         }),
       );
     },
@@ -348,6 +350,7 @@ describe("permissions IPC handlers", () => {
     const result = await invoke(PERMISSIONS.deferredResolve, {
       id: "deferred-1",
       decision: "approved",
+      approvalSource: "button",
       intent: USER_INTENT,
     });
 
@@ -356,12 +359,111 @@ describe("permissions IPC handlers", () => {
     expect(deps.auditLogger.appendPermissionAuditEntry).not.toHaveBeenCalled();
   });
 
+  it("deferredResolve rejects a contradictory stale resolution without audit side effects", async () => {
+    const entry = makeDeferredEntry({
+      status: "approved",
+      resolvedAt: "2026-05-10T00:00:01Z",
+    });
+    const queue = {
+      get: vi.fn(() => entry),
+      resolve: vi.fn(),
+    };
+    const { deps } = await setup({ queue });
+
+    const result = await invoke(PERMISSIONS.deferredResolve, {
+      id: "deferred-1",
+      decision: "rejected",
+      approvalSource: "button",
+      intent: USER_INTENT,
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: "already-resolved",
+      entry,
+    });
+    expect(queue.resolve).not.toHaveBeenCalled();
+    expect(deps.auditLogger.appendPermissionAuditEntry).not.toHaveBeenCalled();
+  });
+
+  it("deferredResolve rejects a concurrent second resolution before writing a conflicting audit row", async () => {
+    const entry = makeDeferredEntry();
+    let releaseAudit!: () => void;
+    const auditStarted = new Promise<void>((resolve) => {
+      releaseAudit = resolve;
+    });
+    const queue = {
+      get: vi.fn(() => entry),
+      resolve: vi.fn(async (_id: string, status: string) => ({
+        ...entry,
+        status,
+        resolvedAt: "2026-05-10T00:00:01Z",
+      })),
+    };
+    const { deps } = await setup({ queue });
+    deps.auditLogger.appendPermissionAuditEntry.mockImplementation(async (auditEntry: Record<string, unknown>) => {
+      await auditStarted;
+      return { ...auditEntry, prevHash: "h" };
+    });
+
+    const first = invoke(PERMISSIONS.deferredResolve, {
+      id: "deferred-1",
+      decision: "approved",
+      approvalSource: "button",
+      intent: USER_INTENT,
+    }) as Promise<unknown>;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const second = await invoke(PERMISSIONS.deferredResolve, {
+      id: "deferred-1",
+      decision: "rejected",
+      approvalSource: "button",
+      intent: USER_INTENT,
+    });
+
+    expect(second).toEqual({ ok: false, error: "already-resolving" });
+    expect(deps.auditLogger.appendPermissionAuditEntry).toHaveBeenCalledOnce();
+    releaseAudit();
+    await expect(first).resolves.toMatchObject({ ok: true });
+    expect(queue.resolve).toHaveBeenCalledOnce();
+  });
+
+  it("deferredResolve reports a post-audit stale queue mutation result", async () => {
+    const entry = makeDeferredEntry();
+    const resolvedElsewhere = {
+      ...entry,
+      status: "rejected",
+      resolvedAt: "2026-05-10T00:00:01Z",
+    };
+    const queue = {
+      get: vi.fn(() => entry),
+      resolve: vi.fn(async () => resolvedElsewhere),
+    };
+    const { deps } = await setup({ queue });
+
+    const result = await invoke(PERMISSIONS.deferredResolve, {
+      id: "deferred-1",
+      decision: "approved",
+      approvalSource: "button",
+      intent: USER_INTENT,
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: "already-resolved",
+      entry: resolvedElsewhere,
+    });
+    expect(deps.auditLogger.appendPermissionAuditEntry).toHaveBeenCalledOnce();
+    expect(queue.resolve).toHaveBeenCalledWith("deferred-1", "approved", undefined);
+  });
+
   it("deferredResolve reports no queue without audit side effects", async () => {
     const { deps } = await setup({ queue: null });
 
     const result = await invoke(PERMISSIONS.deferredResolve, {
       id: "deferred-1",
       decision: "rejected",
+      approvalSource: "button",
       intent: USER_INTENT,
     });
 
@@ -383,6 +485,7 @@ describe("permissions IPC handlers", () => {
     const result = await invoke(PERMISSIONS.deferredResolve, {
       id: "deferred-1",
       decision: "approved",
+      approvalSource: "button",
       intent: USER_INTENT,
     });
 
@@ -395,7 +498,7 @@ describe("permissions IPC handlers", () => {
   // Round-1 test-engineer CRITICAL-1: end-to-end IPC → audit
   // integration assertion that the natural-language provenance reaches
   // the audit chain.
-  it("deferredResolve records approvalSource='natural-language' in the audit entry", async () => {
+  it("deferredResolve records PII-free approvalSource='natural-language' in the audit entry", async () => {
     const entry = makeDeferredEntry();
     const queue = {
       get: vi.fn(() => entry),
@@ -422,11 +525,21 @@ describe("permissions IPC handlers", () => {
         resolution: "approved",
         approvalSource: "natural-language",
         queueId: "deferred-1",
+        reason: "natural-language chip click",
       }),
+    );
+    const auditEntry = deps.auditLogger.appendPermissionAuditEntry.mock.calls[0]?.[0] as
+      | { reason?: string }
+      | undefined;
+    expect(auditEntry?.reason).not.toContain("허용해 주세요");
+    expect(queue.resolve).toHaveBeenCalledWith(
+      "deferred-1",
+      "approved",
+      "natural-language chip click",
     );
   });
 
-  it("deferredResolve defaults approvalSource to 'button' when omitted (backward compat)", async () => {
+  it("deferredResolve rejects omitted approvalSource as invalid-params", async () => {
     const entry = makeDeferredEntry();
     const queue = {
       get: vi.fn(() => entry),
@@ -438,17 +551,16 @@ describe("permissions IPC handlers", () => {
     };
     const { deps } = await setup({ queue });
 
-    await invoke(PERMISSIONS.deferredResolve, {
+    const result = await invoke(PERMISSIONS.deferredResolve, {
       id: "deferred-1",
       decision: "approved",
       intent: USER_INTENT,
     });
 
-    expect(deps.auditLogger.appendPermissionAuditEntry).toHaveBeenCalledWith(
-      expect.objectContaining({
-        approvalSource: "button",
-      }),
-    );
+    expect(result).toEqual({ ok: false, error: "invalid-params" });
+    expect(queue.get).not.toHaveBeenCalled();
+    expect(queue.resolve).not.toHaveBeenCalled();
+    expect(deps.auditLogger.appendPermissionAuditEntry).not.toHaveBeenCalled();
   });
 
   it("deferredResolve rejects an unknown approvalSource value as invalid-params", async () => {

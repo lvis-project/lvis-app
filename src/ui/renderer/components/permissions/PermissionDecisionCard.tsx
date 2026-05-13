@@ -38,7 +38,7 @@ export function ReviewRow({
 }) {
   return (
     <div
-      className="grid min-w-0 grid-cols-[88px_minmax(0,1fr)] gap-3 border-b px-3 py-2 last:border-b-0"
+      className="grid min-w-0 grid-cols-1 gap-1 border-b px-3 py-2 last:border-b-0 sm:grid-cols-[112px_minmax(0,1fr)] sm:gap-3"
       data-testid={testId}
     >
       <b className="text-xs">{label}</b>

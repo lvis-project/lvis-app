@@ -72,8 +72,7 @@ export interface AuditCommon {
   trustOrigin: TrustOrigin;
   /**
    * Hex-encoded HMAC over the previous line's serialized form.
-   * For the first entry of the file the placeholder is
-   * `"genesis"` (computed against the empty string).
+   * For the first entry of the file this is HMAC(secret, "genesis").
    */
   prevHash: string;
 }
@@ -159,9 +158,9 @@ export interface AuditDeferredResolve extends AuditCommon {
   /**
    * Issue #690 P4 — provenance of the user gesture that resolved the
    * deferred entry. "button" is the existing panel-click path;
-   * "natural-language" is the in-chat intent-matched chip path. Optional
-   * for backward compatibility with audit rows written before P4 landed
-   * — readers must treat `undefined` as `"button"`.
+   * "natural-language" is the in-chat intent-matched chip path. Main
+   * requires this field for new writes; historical rows written before
+   * P4 may omit it, so audit readers must tolerate `undefined`.
    */
   approvalSource?: "button" | "natural-language";
   reason?: string;

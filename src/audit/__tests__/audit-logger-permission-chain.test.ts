@@ -153,6 +153,7 @@ describe("AuditLogger permission audit chain", () => {
       reviewerVerdict: { level: "high", reason: "outside allowed dirs" },
       queueId: "queue-1",
       resolution: "approved",
+      approvalSource: "button",
       reason: "manual review",
     });
 
@@ -162,6 +163,7 @@ describe("AuditLogger permission audit chain", () => {
       decision: "deferred_resolve",
       queueId: "queue-1",
       resolution: "approved",
+      approvalSource: "button",
     });
     expect(verifyChain(SECRET, lines)).toEqual({ ok: true });
   });
