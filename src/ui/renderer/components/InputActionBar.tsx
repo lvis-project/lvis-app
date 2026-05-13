@@ -1,5 +1,6 @@
 import { ChevronDown, Paperclip, User } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
+import { Checkbox } from "../../../components/ui/checkbox.js";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -142,11 +143,11 @@ export function InputActionBar({
             wires through to existing onToggleThinking; on vendors that
             don't support thinking the engine simply ignores the flag. */}
         <label className="flex items-center gap-1.5 text-muted-foreground cursor-pointer select-none">
-          <input
-            type="checkbox"
-            className="h-3.5 w-3.5 appearance-none rounded-sm border-0 bg-muted checked:appearance-auto checked:accent-primary"
+          <Checkbox
+            aria-label="Thinking"
+            className="h-3.5 w-3.5 rounded-[2px] bg-white data-[state=unchecked]:bg-white data-[state=checked]:bg-primary"
             checked={enableThinkingChat}
-            onChange={(e) => void onToggleThinking(e.target.checked)}
+            onCheckedChange={(checked) => void onToggleThinking(checked === true)}
           />
           <span className="text-[11px]">Thinking</span>
         </label>
