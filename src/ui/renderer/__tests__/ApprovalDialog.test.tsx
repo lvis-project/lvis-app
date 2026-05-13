@@ -62,6 +62,31 @@ describe("ApprovalDialog", () => {
     });
   });
 
+  it("labels agent-action approval requests separately from tool execution", async () => {
+    render(
+      <ApprovalDialog
+        queue={[
+          makeRequest({
+            category: "agent-action",
+            kind: "agent-action",
+            toolName: "sample_plugin_decide_approval_with_host",
+            toolCategory: "meta",
+            source: "plugin",
+            sourcePluginId: "sample-plugin",
+            approvalScope: "agent_external_api_call",
+          }),
+        ]}
+        onDecide={vi.fn()}
+      />,
+    );
+    await waitFor(() => {
+      expect(document.body.textContent).toContain("에이전트 작업 승인");
+      expect(document.body.textContent).toContain("sample_plugin_decide_approval_with_host");
+      expect(document.body.textContent).toContain("sample-plugin");
+      expect(document.body.textContent).toContain("agent_external_api_call");
+    });
+  });
+
   it("warns when approval trust origin is missing", async () => {
     render(
       <ApprovalDialog queue={[makeRequest()]} onDecide={vi.fn()} />,
@@ -88,6 +113,56 @@ describe("ApprovalDialog", () => {
       expect(onDecide).toHaveBeenCalled();
       expect(onDecide.mock.calls[0]?.[0]).toMatch(/allow/);
     }
+  });
+
+  it("does not convert Enter on a focused deny button into allow-once", async () => {
+    const onDecide = vi.fn();
+    render(
+      <ApprovalDialog queue={[makeRequest({
+        toolName: "bash",
+        toolCategory: "shell",
+      })]} onDecide={onDecide} />,
+    );
+    await waitFor(() => {
+      expect(document.body.textContent).toContain("bash");
+    });
+
+    const denyBtn = Array.from(document.body.querySelectorAll("button")).find(
+      (button) => button.textContent === "거부",
+    );
+    expect(denyBtn).toBeTruthy();
+    denyBtn!.focus();
+    fireEvent.keyDown(denyBtn!, { key: "Enter", code: "Enter" });
+    expect(onDecide).not.toHaveBeenCalledWith("allow-once", undefined);
+
+    fireEvent.click(denyBtn!);
+    expect(onDecide.mock.calls[0]?.[0]).toBe("deny-once");
+  });
+
+  it("keeps advertised A/D shortcuts active when an action button has focus", async () => {
+    const onDecide = vi.fn();
+    render(
+      <ApprovalDialog queue={[makeRequest({
+        toolName: "bash",
+        toolCategory: "shell",
+      })]} onDecide={onDecide} />,
+    );
+    await waitFor(() => {
+      expect(document.body.textContent).toContain("bash");
+    });
+
+    const denyBtn = Array.from(document.body.querySelectorAll("button")).find(
+      (button) => button.textContent === "거부",
+    );
+    expect(denyBtn).toBeTruthy();
+    denyBtn!.focus();
+
+    fireEvent.keyDown(denyBtn!, { key: "a", code: "KeyA" });
+    expect(onDecide).toHaveBeenCalledWith("allow-once", undefined);
+
+    onDecide.mockClear();
+    fireEvent.keyDown(denyBtn!, { key: "d", code: "KeyD" });
+    expect(onDecide).toHaveBeenCalledWith("deny-once", undefined);
   });
 
   it("does not show tool name when queue is empty", () => {

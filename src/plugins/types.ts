@@ -883,7 +883,8 @@ export interface PluginHostApi {
      * The gate generates nonce + HMAC internally (§D2 confused-deputy defense).
      * Plugin MUST NOT compute nonce/HMAC.
      *
-     * `scope` must be declared in `manifest.pluginAccess.agentApprovalScopes`.
+     * `scope` must be present in the host-approved install grant
+     * (`approvedPluginAccess.agentApprovalScopes`), not merely in the manifest.
      */
     request(input: {
       toolName: string;
@@ -900,7 +901,7 @@ export interface PluginHostApi {
      * the decision. A mismatch forces deny-once (confused-deputy defense).
      *
      * §8 P0 security: host verifies (a) requestId was issued by this plugin,
-     * (b) scope is in manifest.pluginAccess.agentApprovalScopes. Violations throw.
+     * (b) scope is still in the host-approved install grant. Violations throw.
      *
      * NOTE: a `list()` method was deliberately NOT exposed. Listing pending
      * approvals from a plugin would surface gate-issued nonces/HMACs (§D2

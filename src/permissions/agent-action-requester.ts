@@ -6,9 +6,10 @@
  *
  * Responsibility split:
  *   - Caller (plugin): supplies toolName, args, reason, source, sourcePluginId, scope.
- *   - This module: builds a minimal ApprovalRequest (id, createdAt, category),
- *     records issuer plugin id + scope in the ApprovalIssuerRegistry, and
- *     delegates to ApprovalGate which mints nonce + HMAC.
+ *   - This module: builds a minimal ApprovalRequest (id, createdAt, category/kind),
+ *     records issuer plugin id + scope in the ApprovalIssuerRegistry, carries
+ *     that issuer metadata into ApprovalGate audit provenance, and delegates to
+ *     ApprovalGate which mints nonce + HMAC.
  *   - Plugin MUST NOT compute nonce/HMAC — those are gate-internal §D2 fields.
  *
  * Returns only the ApprovalChoice so callers don't need to unwrap
@@ -16,7 +17,7 @@
  *
  * Security: ApprovalIssuerRegistry records
  * (requestId -> { issuerPluginId, scope }) at request time. The respond path
- * verifies sender plugin id and manifest-declared scope. Violations throw
+ * verifies sender plugin id and the host-approved scope grant. Violations throw
  * without downgrade.
  */
 
@@ -30,7 +31,7 @@ export interface AgentApprovalInput {
   reason: string;
   source: "plugin";
   sourcePluginId: string;
-  /** Approval action scope — must be listed in issuer's agentApprovalScopes. */
+  /** Approval action scope — must be listed in the issuer's approved grant. */
   scope: string;
 }
 
@@ -122,6 +123,25 @@ export class ApprovalIssuerRegistry {
 }
 
 /**
+ * Verify that a plugin is allowed to issue an approval request for `scope`.
+ *
+ * This check must run on the request path, not only on respond(), because
+ * requestAgentApproval returns the user's choice directly to plugin code.
+ */
+export function verifyApprovalRequestScope(
+  issuerPluginId: string,
+  scope: string,
+  allowedScopes: readonly string[],
+): void {
+  if (allowedScopes.includes(scope)) return;
+  throw new ApprovalOriginError(
+    `[approval-gating] request denied: scope='${scope}' is not in ` +
+    `issuer='${issuerPluginId}' agentApprovalScopes=[${allowedScopes.join(",")}]`,
+    "scope-not-allowed",
+  );
+}
+
+/**
  * **Internal helper.** Plugin code MUST call `hostApi.agentApproval.request()`
  * — `requestAgentApproval` is the host-side wiring that the HostApi factory
  * binds to. Direct callers must hold the live `ApprovalGate` and shared
@@ -163,12 +183,15 @@ export async function requestAgentApproval(
   try {
     const decision = await gate.requestAndWait({
       id: requestId,
-      category: "tool",
+      category: "agent-action",
+      kind: "agent-action",
       toolName: input.toolName,
       toolCategory: "meta",
       args: input.args,
       reason: input.reason,
       source: input.source,
+      sourcePluginId: input.sourcePluginId,
+      approvalScope: input.scope,
       createdAt: Date.now(),
     });
     settled = true;
@@ -188,7 +211,7 @@ export async function requestAgentApproval(
  * Checks:
  *   (a) entry exists in registry (request was issued by this process)
  *   (b) responderPluginId == entry.issuerPluginId
- *   (c) entry.scope is listed in allowedScopes (issuer's agentApprovalScopes)
+ *   (c) entry.scope is listed in allowedScopes (issuer's approved grant)
  *
  * Throws `ApprovalOriginError` on any violation.
  * Consumes the entry from the registry on success.
@@ -196,7 +219,7 @@ export async function requestAgentApproval(
  * @param registry          - Shared ApprovalIssuerRegistry.
  * @param requestId         - The approval request ID being responded to.
  * @param responderPluginId - Plugin id of the IPC caller.
- * @param allowedScopes     - agentApprovalScopes from responder's manifest.
+ * @param allowedScopes     - agentApprovalScopes from the host-approved grant.
  * @returns                 - The consumed IssuerEntry (for audit logging).
  */
 export function verifyApprovalResponder(
