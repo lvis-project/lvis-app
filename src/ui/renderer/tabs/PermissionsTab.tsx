@@ -593,7 +593,6 @@ export function PermissionsTab() {
             <div className="space-y-2 border-t pt-3">
               <div className="flex items-baseline justify-between">
                 <span className="text-xs font-medium">인터랙티브 자동 승인</span>
-                <span className="text-[11px] text-muted-foreground">issue #690</span>
               </div>
               <p className="text-[11px] text-muted-foreground">
                 채팅 중 mutating 도구 호출에 대해 리뷰어가 LOW로 판정하면 모달 없이 자동 통과시킵니다.
@@ -632,6 +631,27 @@ export function PermissionsTab() {
               {reviewer.interactive.autoApprove === "low" && reviewer.mode === "disabled" ? (
                 <p className="rounded-md border border-warning/40 bg-warning/15 px-3 py-2 text-[11px] text-warning">
                   ⚠ 리뷰어 모드가 "명시 승인만" 인 상태에서는 자동 승인이 동작하지 않습니다. "규칙 기반" 또는 "LLM" 모드를 활성화하세요.
+                </p>
+              ) : null}
+              {/* Round-4 UX MAJOR + critic MAJOR-4 — surface the
+                  legacy/contradiction states in-product so users don't
+                  rely on the log file for diagnosis. */}
+              {mode === "auto" && reviewer.interactive.autoApprove === "off" ? (
+                <p
+                  className="rounded-md border border-warning/40 bg-warning/15 px-3 py-2 text-[11px] text-warning"
+                  data-testid="permissions-legacy-auto-mode-banner"
+                >
+                  ⚠ 실행 모드가 "자동 검증" 이지만 인터랙티브 자동 승인이 꺼져 있습니다.
+                  업그레이드 이전의 "auto" 동작(LOW 자동 통과)을 원하면 위에서 "LOW 자동 승인"을 선택하세요.
+                </p>
+              ) : null}
+              {mode === "strict" && reviewer.interactive.autoApprove === "low" ? (
+                <p
+                  className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-[11px] text-destructive"
+                  data-testid="permissions-strict-low-contradiction-banner"
+                >
+                  ⚠ 실행 모드가 "엄격(모두 묻기)" 이지만 인터랙티브 자동 승인이 LOW로 켜져 있습니다.
+                  두 설정이 서로 모순됩니다 — 한쪽을 변경하세요.
                 </p>
               ) : null}
             </div>
