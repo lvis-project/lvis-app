@@ -1367,8 +1367,24 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
                 // Preserve typed text on rejection so the user can retry —
                 // common case is the no-active-turn race between Composer's
                 // streaming-derived state and the actual turn lifecycle
-                // (code-reviewer MAJOR #3 / critic MAJOR #6).
-                if (result?.ok === true) setQuestion("");
+                // (code-reviewer round-1 MAJOR #3 / critic round-1 MAJOR #6).
+                if (result?.ok === true) {
+                  setQuestion("");
+                } else if (result?.ok === false) {
+                  // Visible feedback for queue-full / too-long / no-active-turn
+                  // so repeated Ctrl+Enter into a closed queue doesn't look
+                  // like the button is broken (round-2 code-reviewer MEDIUM).
+                  const message =
+                    result.error === "queue-full" ? "방향 지시가 너무 많아 대기열이 가득 찼습니다." :
+                    result.error === "too-long" ? "방향 지시 한 건이 너무 깁니다 (최대 8000자)." :
+                    result.error === "no-active-turn" ? "진행 중인 응답이 없어 방향 지시를 보낼 수 없습니다." :
+                    `방향 지시 전송 실패: ${result.error}`;
+                  // Renderer doesn't have a toast system in this view; emit a
+                  // transient warning via window event so callers / dev tools
+                  // can wire to it. Composer-side a11y attributes already
+                  // signal the streaming gate.
+                  window.dispatchEvent(new CustomEvent("lvis:guide:error", { detail: { message, error: result.error } }));
+                }
               })();
             }}
             streaming={streaming}

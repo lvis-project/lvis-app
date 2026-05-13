@@ -16,6 +16,7 @@ import { stubMarkedToolResults } from "../../engine/wire-serialize.js";
 import { serializeHistoryMessage } from "../../shared/chat-history.js";
 import type { ConversationLoop, TurnResult } from "../../engine/conversation-loop.js";
 import { parseImportedTriggerEnvelope } from "../../shared/overlay-trigger-source.js";
+import type { ChatUtteranceMode } from "../../shared/chat-utterance.js";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import type { IpcDeps } from "../types.js";
 import { sendToWebContents } from "../safe-send.js";
@@ -344,12 +345,15 @@ export function registerChatHandlers(deps: IpcDeps): void {
       // `lvis:feedback:submit` and other mutating IPC calls — security
       // reviewer M2). Log metadata only; the text already passed
       // `sanitizeOutgoingInput` but logging it widens the disclosure
-      // surface unnecessarily.
+      // surface unnecessarily. `mode` tag uses the shared utterance
+      // taxonomy so audit consumers can correlate guide/start/stop/abort
+      // calls across handlers.
+      const mode: ChatUtteranceMode = "guide";
       auditLogger.log({
         timestamp: new Date().toISOString(),
         sessionId: conversationLoop.getSessionId(),
         type: "info",
-        input: `chat:guide:queued:len=${effective.length}`,
+        input: `chat:utterance:${mode}:queued:len=${effective.length}`,
       });
       return { ok: true };
     }
