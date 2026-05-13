@@ -75,6 +75,8 @@ export interface ChatViewProps {
   onAbort: () => void | Promise<void>;
   /** Mid-stream "guide" utterance — non-interrupting direction adjustment. Returns IPC result so caller can preserve typed text on rejection. */
   onGuide: (text: string) => Promise<{ ok: true } | { ok: false; error: string }>;
+  /** Surface visible error in chat transcript when guide is rejected (queue-full / too-long / no-active-turn). */
+  onGuideError: (message: string) => void;
   /** D6: submit thumbs up/down feedback for an assistant message */
   onFeedback?: (messageIdx: number, rating: "up" | "down", reason?: string) => void | Promise<void>;
   /** Workflow tool state — lifted to App level so panel survives view navigation */
@@ -399,7 +401,7 @@ function HistoricalEntriesList({
   return <div className="min-w-0 w-full max-w-full space-y-3 overflow-x-hidden">{rendered}</div>;
 }
 
-export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort, onGuide, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, installingPlugins, onOpenMarketplace, marketplaceUrlReady, onPluginPrimaryAction, onRoutineAcknowledge, onOpenPermissionQueue }: ChatViewProps) {
+export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, installingPlugins, onOpenMarketplace, marketplaceUrlReady, onPluginPrimaryAction, onRoutineAcknowledge, onOpenPermissionQueue }: ChatViewProps) {
   // We still need the api for SessionTodoPanel; obtain it via singleton.
   const workflowApi = getApi();
   const debugStreamEnabled = isDebugStreamEnabled();
@@ -1379,11 +1381,11 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
                     result.error === "too-long" ? "방향 지시 한 건이 너무 깁니다 (최대 8000자)." :
                     result.error === "no-active-turn" ? "진행 중인 응답이 없어 방향 지시를 보낼 수 없습니다." :
                     `방향 지시 전송 실패: ${result.error}`;
-                  // Renderer doesn't have a toast system in this view; emit a
-                  // transient warning via window event so callers / dev tools
-                  // can wire to it. Composer-side a11y attributes already
-                  // signal the streaming gate.
-                  window.dispatchEvent(new CustomEvent("lvis:guide:error", { detail: { message, error: result.error } }));
+                  // Surface in chat transcript via the system-entry pipeline
+                  // (parity with `guidance_dropped` UX) so the user sees the
+                  // failure rather than a silent "button does nothing"
+                  // (round-3 reviewer + critic agreed MINOR).
+                  onGuideError(message);
                 }
               })();
             }}

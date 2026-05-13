@@ -80,7 +80,7 @@ export function App() {
     entries, streaming, beginStreamingRequest, finishStreamingRequest, editingEntryIdx, setEditingEntryIdx, editBusy,
     entryIndexToHistoryIndex, handleEditSave, handleRetryEffort,
     resetStreamAccumulators, setErrorWithThought, handleCompactCommand,
-    clearForNewChat, appendUserEntry, appendAssistantStatus, applyInitialSession, applyLoadedSession, truncateToEntry,
+    clearForNewChat, appendUserEntry, appendAssistantStatus, appendSystemEntry, applyInitialSession, applyLoadedSession, truncateToEntry,
     fallbackToast,
     insertImportedTriggerEntry,
   } = useChatState(api);
@@ -893,6 +893,7 @@ export function App() {
             isEntryStarred={isEntryStarred}
             onAbort={handleAbort}
             onGuide={handleGuide}
+            onGuideError={(msg) => appendSystemEntry(`⚠️ 방향 지시 전송 실패: ${msg}`)}
             onFeedback={handleFeedback}
             subAgentSpawns={subAgentSpawns}
             loadedSkills={loadedSkills}

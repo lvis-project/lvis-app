@@ -606,6 +606,11 @@ export function useChatState(api: LvisApi) {
     setEntries((p) => upsertStreamingAssistant(p, content));
   }, []);
 
+  const appendSystemEntry = useCallback((text: string): void => {
+    if (text.length === 0) return;
+    setEntries((p) => [...p, { kind: "system", text }]);
+  }, []);
+
   const applyLoadedSession = useCallback((loaded: ChatEntry[]) => {
     setEntries(loaded);
   }, []);
@@ -661,6 +666,7 @@ export function useChatState(api: LvisApi) {
     clearForNewChat,
     appendUserEntry: appendUserMessage,
     appendAssistantStatus,
+    appendSystemEntry,
     applyInitialSession,
     applyLoadedSession,
     truncateToEntry,
