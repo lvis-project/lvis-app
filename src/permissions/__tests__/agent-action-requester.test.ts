@@ -104,18 +104,15 @@ describe("requestAgentApproval", () => {
     expect(calledReq).not.toHaveProperty("hmac");
 
     // Must include the core fields the gate needs.
-    expect(calledReq.category).toBe("tool");
-    // Round-7 test-engineer MINOR — pin `toolCategory: "meta"` so the
-    // sandbox-row exclusion guard at `ApprovalGate.requestAndWait`
-    // (round-5 fix) fires correctly. If the source omits this field,
-    // agent-action approvals would silently start showing the sandbox
-    // row, contradicting the architectural intent that meta asks
-    // never reach the execution-row UI.
+    expect(calledReq.category).toBe("agent-action");
+    expect(calledReq.kind).toBe("agent-action");
     expect(calledReq.toolCategory).toBe("meta");
     expect(calledReq.toolName).toBe(BASE_INPUT.toolName);
     expect(calledReq.args).toEqual(BASE_INPUT.args);
     expect(calledReq.reason).toBe(BASE_INPUT.reason);
     expect(calledReq.source).toBe("plugin");
+    expect(calledReq.sourcePluginId).toBe(BASE_INPUT.sourcePluginId);
+    expect(calledReq.approvalScope).toBe(BASE_INPUT.scope);
     expect(typeof calledReq.id).toBe("string");
     expect(typeof calledReq.createdAt).toBe("number");
   });

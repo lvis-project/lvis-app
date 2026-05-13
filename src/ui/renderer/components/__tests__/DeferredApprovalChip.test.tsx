@@ -83,6 +83,7 @@ describe("DeferredApprovalChip", () => {
     expect(screen.getByTestId("deferred-approval-chip")).toBeTruthy();
     expect(screen.getByText(/'bash' 실행을 허용할까요\?/)).toBeTruthy();
     expect(screen.getByTestId("deferred-approval-chip-action").textContent).toContain("허용");
+    expect(screen.getByRole("button", { name: /기본 도구 'bash' 실행을 허용/ })).toBeTruthy();
   });
 
   it("dispatches deferredResolve with approvalSource='natural-language' on click", async () => {
@@ -104,6 +105,24 @@ describe("DeferredApprovalChip", () => {
     // provenance.
     expect(reason).toBe("natural-language chip click");
     expect(source).toBe("natural-language");
+  });
+
+  it("lets the user dismiss the current natural-language suggestion without resolving it", async () => {
+    const api = installApi([makeEntry({ id: "queue-dismiss", toolName: "bash" })]);
+    const { rerender } = render(<DeferredApprovalChip draftText="허용해 주세요" />);
+
+    expect(await screen.findByTestId("deferred-approval-chip")).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("deferred-approval-chip-dismiss"));
+    });
+
+    expect(screen.queryByTestId("deferred-approval-chip")).toBeNull();
+    expect(api.deferredResolve).not.toHaveBeenCalled();
+
+    await act(async () => {
+      rerender(<DeferredApprovalChip draftText="취소해줘" />);
+    });
+    expect(screen.getByTestId("deferred-approval-chip")).toBeTruthy();
   });
 
   it("dispatches rejected when the intent is reject", async () => {
@@ -198,6 +217,11 @@ describe("DeferredApprovalChip", () => {
     expect(chip.querySelector('[aria-label="플러그인 도구"]')).toBeTruthy();
     expect(chip.textContent).toContain("work_proactive_email_scan");
     expect(chip.getAttribute("data-target-source")).toBe("plugin");
+    expect(
+      screen.getByRole("button", {
+        name: /플러그인 도구 'work_proactive_email_scan' 실행을 허용/,
+      }),
+    ).toBeTruthy();
   });
 
   it("surfaces the resolve error inline when the IPC call fails", async () => {

@@ -22,6 +22,7 @@ const runtimeTestState = vi.hoisted(() => ({
     listPluginManifests: vi.fn(() => [] as Array<{ pluginId: string; manifest: unknown }>),
     getPluginRoot: vi.fn((pluginId: string) => `/tmp/lvis-test/plugins/${pluginId}`),
     getPluginManifest: vi.fn(() => null),
+    getApprovedPluginAccess: vi.fn(() => undefined),
     registerDisposer: vi.fn(),
     assertPluginToolAccess: vi.fn(),
     resolveToolOwner: vi.fn((toolName: string) => `${toolName}-owner`),
@@ -150,6 +151,185 @@ describe("sanitizePluginPendingPrompt", () => {
 });
 
 describe("initPluginRuntime HostApi factory", () => {
+  it("rejects agentApproval.request before prompting when the manifest has not declared the scope", async () => {
+    runtimeTestState.capturedRuntimeOptions = null;
+    runtimeTestState.runtime.getApprovedPluginAccess.mockReturnValue({
+      agentApprovalScopes: ["agent_task_delegate"],
+    });
+    const bootAuditLogger = { log: vi.fn() };
+    const approvalGate = { requestAndWait: vi.fn() };
+
+    await initPluginRuntime({
+      projectRoot: "/tmp/lvis-test/project",
+      settingsService: {
+        get: vi.fn((key: string) => {
+          if (key === "llm") return { provider: "openai" };
+          if (key === "pluginConfigs") return {};
+          return undefined;
+        }),
+        getSecret: vi.fn(() => undefined),
+        getPluginConfig: vi.fn(() => ({})),
+        setPluginConfig: vi.fn(),
+      } as never,
+      memoryManager: {} as never,
+      keywordEngine: {
+        registerKeywords: vi.fn(),
+        unregisterByPlugin: vi.fn(),
+      } as never,
+      toolRegistry: {
+        unregisterByPlugin: vi.fn(),
+        register: vi.fn(),
+        listAll: vi.fn(() => []),
+      } as never,
+      pythonPath: undefined,
+      bootAuditLogger: bootAuditLogger as never,
+      mainWindow: {} as never,
+      openAuthWindowService: vi.fn(),
+      openLinkWindowService: vi.fn(),
+      openAuthPartitionViewerService: vi.fn(),
+      shellOpenExternal: vi.fn(),
+      approvalGate: approvalGate as never,
+    });
+
+    const createHostApi = runtimeTestState.capturedRuntimeOptions?.createHostApi as
+      | ((pluginId: string, manifest: {
+          id: string;
+          config?: Record<string, unknown>;
+          pluginAccess?: { agentApprovalScopes?: string[] };
+        }, pluginDataDir: string) => {
+          agentApproval: {
+            request: (input: {
+              toolName: string;
+              args: unknown;
+              reason: string;
+              scope: string;
+            }) => Promise<unknown>;
+          };
+        })
+      | undefined;
+    expect(createHostApi).toBeDefined();
+
+    const pluginDataDir = mkdtempSync("/tmp/lvis-hostapi-data-");
+    const api = createHostApi!(
+      "plugin-a",
+      {
+        id: "plugin-a",
+        config: {},
+        pluginAccess: { agentApprovalScopes: ["agent_external_api_call"] },
+      },
+      pluginDataDir,
+    );
+
+    await expect(api.agentApproval.request({
+      toolName: "agent_external_call",
+      args: { target: "example" },
+      reason: "plugin wants host approval",
+      scope: "agent_external_api_call",
+    })).rejects.toMatchObject({ code: "scope-not-allowed" });
+
+    expect(approvalGate.requestAndWait).not.toHaveBeenCalled();
+    expect(runtimeTestState.runtime.getApprovedPluginAccess).toHaveBeenCalledWith("plugin-a");
+    expect(bootAuditLogger.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "error",
+        input: expect.stringContaining("[scope-not-allowed]"),
+      }),
+    );
+  });
+
+  it("allows agentApproval.request only from the approved grant and forwards issuer provenance", async () => {
+    runtimeTestState.capturedRuntimeOptions = null;
+    runtimeTestState.runtime.getApprovedPluginAccess.mockReturnValue({
+      agentApprovalScopes: ["agent_external_api_call"],
+    });
+    const bootAuditLogger = { log: vi.fn() };
+    const approvalGate = {
+      requestAndWait: vi.fn(async (req: { id: string }) => ({
+        requestId: req.id,
+        choice: "allow-once" as const,
+      })),
+    };
+
+    await initPluginRuntime({
+      projectRoot: "/tmp/lvis-test/project",
+      settingsService: {
+        get: vi.fn((key: string) => {
+          if (key === "llm") return { provider: "openai" };
+          if (key === "pluginConfigs") return {};
+          return undefined;
+        }),
+        getSecret: vi.fn(() => undefined),
+        getPluginConfig: vi.fn(() => ({})),
+        setPluginConfig: vi.fn(),
+      } as never,
+      memoryManager: {} as never,
+      keywordEngine: {
+        registerKeywords: vi.fn(),
+        unregisterByPlugin: vi.fn(),
+      } as never,
+      toolRegistry: {
+        unregisterByPlugin: vi.fn(),
+        register: vi.fn(),
+        listAll: vi.fn(() => []),
+      } as never,
+      pythonPath: undefined,
+      bootAuditLogger: bootAuditLogger as never,
+      mainWindow: {} as never,
+      openAuthWindowService: vi.fn(),
+      openLinkWindowService: vi.fn(),
+      openAuthPartitionViewerService: vi.fn(),
+      shellOpenExternal: vi.fn(),
+      approvalGate: approvalGate as never,
+    });
+
+    const createHostApi = runtimeTestState.capturedRuntimeOptions?.createHostApi as
+      | ((pluginId: string, manifest: {
+          id: string;
+          config?: Record<string, unknown>;
+          pluginAccess?: { agentApprovalScopes?: string[] };
+        }, pluginDataDir: string) => {
+          agentApproval: {
+            request: (input: {
+              toolName: string;
+              args: unknown;
+              reason: string;
+              scope: string;
+            }) => Promise<unknown>;
+          };
+        })
+      | undefined;
+    expect(createHostApi).toBeDefined();
+
+    const pluginDataDir = mkdtempSync("/tmp/lvis-hostapi-data-");
+    const api = createHostApi!(
+      "plugin-a",
+      {
+        id: "plugin-a",
+        config: {},
+        pluginAccess: { agentApprovalScopes: [] },
+      },
+      pluginDataDir,
+    );
+
+    await expect(api.agentApproval.request({
+      toolName: "agent_external_call",
+      args: { target: "example" },
+      reason: "plugin wants host approval",
+      scope: "agent_external_api_call",
+    })).resolves.toBe("allow-once");
+
+    expect(runtimeTestState.runtime.getApprovedPluginAccess).toHaveBeenCalledWith("plugin-a");
+    expect(approvalGate.requestAndWait).toHaveBeenCalledWith(
+      expect.objectContaining({
+        category: "agent-action",
+        kind: "agent-action",
+        source: "plugin",
+        sourcePluginId: "plugin-a",
+        approvalScope: "agent_external_api_call",
+      }),
+    );
+  });
+
   it("delegates plugin callTool through the production invoker after access assertion", async () => {
     runtimeTestState.capturedRuntimeOptions = null;
     runtimeTestState.runtime.assertPluginToolAccess.mockClear();

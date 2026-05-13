@@ -64,6 +64,7 @@ function broadcastPermissionModeChanged(deps: IpcDeps, mode: string): void {
 
 export function registerPermissionsHandlers(deps: IpcDeps): void {
   const { conversationLoop, approvalGate, auditLogger } = deps;
+  const deferredResolveInFlight = new Set<string>();
 
   // read-only, sender guard optional
   ipcMain.handle(PERMISSIONS.getMode, () => {
@@ -269,11 +270,10 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
          * means the user clicked a panel button (existing path);
          * "natural-language" means the renderer's intent matcher
          * recognised an in-chat phrase AND the user explicitly
-         * confirmed via the suggestion chip. Caller MUST default to
-         * "button" if undefined for backward compat with renderers
-         * that have not yet adopted the new field.
+         * confirmed via the suggestion chip. Required: callers must
+         * explicitly declare provenance for audit-chain entries.
          */
-        approvalSource?: "button" | "natural-language";
+        approvalSource: "button" | "natural-language";
       },
     ) => {
       if (!validateSender(e)) {
@@ -290,49 +290,63 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
           params.reason !== undefined &&
           (typeof params.reason !== "string" || params.reason.length > 1_000)
         ) ||
-        (
-          params.approvalSource !== undefined &&
-          params.approvalSource !== "button" &&
-          params.approvalSource !== "natural-language"
-        )
+        (params.approvalSource !== "button" && params.approvalSource !== "natural-language")
       ) {
         return { ok: false, error: "invalid-params" };
       }
-      const approvalSource = params.approvalSource ?? "button";
+      const approvalSource = params.approvalSource;
       const pm = conversationLoop.permissionManager;
       const queue = pm?.getDeferredQueue();
       if (!queue) return { ok: false, error: "no-deferred-queue" };
-      const current = queue.get(params.id);
-      if (!current) return { ok: false, error: "not-found" };
-      if (current.status !== "pending") return { ok: true, entry: current };
-      if (!auditLogger.isPermissionAuditChainReady()) {
-        return { ok: false, error: "permission-audit-not-ready" };
+      if (deferredResolveInFlight.has(params.id)) {
+        return { ok: false, error: "already-resolving" };
       }
+      deferredResolveInFlight.add(params.id);
       try {
-        await auditLogger.appendPermissionAuditEntry({
-          decision: "deferred_resolve",
-          auditId: randomUUID(),
-          ts: new Date().toISOString(),
-          trustOrigin: "user-keyboard",
-          tool: current.toolName,
-          source: current.source,
-          category: current.category,
-          reviewerVerdict: current.verdict,
-          queueId: current.id,
-          resolution: params.decision,
-          approvalSource,
-          ...(params.reason ? { reason: params.reason } : {}),
-        });
-      } catch (err) {
-        return {
-          ok: false,
-          error: "permission-audit-write-failed",
-          message: (err as Error).message,
-        };
+        const current = queue.get(params.id);
+        if (!current) return { ok: false, error: "not-found" };
+        if (current.status !== "pending") {
+          if (current.status === params.decision) return { ok: true, entry: current };
+          return { ok: false, error: "already-resolved", entry: current };
+        }
+        if (!auditLogger.isPermissionAuditChainReady()) {
+          return { ok: false, error: "permission-audit-not-ready" };
+        }
+        const auditReason =
+          approvalSource === "natural-language"
+            ? "natural-language chip click"
+            : params.reason;
+        try {
+          await auditLogger.appendPermissionAuditEntry({
+            decision: "deferred_resolve",
+            auditId: randomUUID(),
+            ts: new Date().toISOString(),
+            trustOrigin: "user-keyboard",
+            tool: current.toolName,
+            source: current.source,
+            category: current.category,
+            reviewerVerdict: current.verdict,
+            queueId: current.id,
+            resolution: params.decision,
+            approvalSource,
+            ...(auditReason ? { reason: auditReason } : {}),
+          });
+        } catch (err) {
+          return {
+            ok: false,
+            error: "permission-audit-write-failed",
+            message: (err as Error).message,
+          };
+        }
+        const resolved = await queue.resolve(params.id, params.decision, auditReason);
+        if (!resolved) return { ok: false, error: "not-found" };
+        if (resolved.status !== params.decision) {
+          return { ok: false, error: "already-resolved", entry: resolved };
+        }
+        return { ok: true, entry: resolved };
+      } finally {
+        deferredResolveInFlight.delete(params.id);
       }
-      const resolved = await queue.resolve(params.id, params.decision, params.reason);
-      if (!resolved) return { ok: false, error: "not-found" };
-      return { ok: true, entry: resolved };
     },
   );
 

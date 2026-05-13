@@ -51,15 +51,13 @@ export function ToolApprovalDialog({
   useEffect(() => {
     if (!open || !request) return;
     const handler = (e: KeyboardEvent) => {
+      if (isTextEntryShortcutTarget(e.target)) return;
       if (e.key.toLowerCase() === "a" && !e.metaKey && !e.ctrlKey) {
         e.preventDefault();
         onDecide("allow-once");
       } else if (e.key.toLowerCase() === "d" && !e.metaKey && !e.ctrlKey) {
         e.preventDefault();
         onDecide("deny-once");
-      } else if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        onDecide("allow-once");
       }
     };
     window.addEventListener("keydown", handler);
@@ -68,7 +66,7 @@ export function ToolApprovalDialog({
 
   if (!request) return null;
 
-  const title = "도구 실행 승인";
+  const title = request.kind === "agent-action" ? "에이전트 작업 승인" : "도구 실행 승인";
   const argsStr = JSON.stringify(request.args, null, 2) ?? "";
   const argsTruncated = argsStr.length > 500 && !expanded;
   const argsDisplay = argsTruncated ? argsStr.slice(0, 500) + "\n…" : argsStr;
@@ -136,6 +134,14 @@ export function ToolApprovalDialog({
                 <code>{request.toolName}</code>
                 <br />
                 출처: {sourceLabel(source)}
+                {request.kind === "agent-action" && (
+                  <>
+                    <br />
+                    플러그인: <code>{request.sourcePluginId ?? "알 수 없음"}</code>
+                    <br />
+                    승인 범위: <code>{request.approvalScope ?? "알 수 없음"}</code>
+                  </>
+                )}
               </SummaryTile>
               <SummaryTile label="권한 분류">
                 {/* Round-6 UX MINOR — drop the raw English `category`
@@ -160,7 +166,7 @@ export function ToolApprovalDialog({
                 >
                   {row.monospace ? (
                     <pre
-                      className="max-h-24 max-w-full overflow-hidden whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed"
+                      className="max-h-40 max-w-full overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed"
                       data-testid={row.testId}
                     >
                       {row.value}
@@ -220,7 +226,7 @@ export function ToolApprovalDialog({
               size="sm"
               variant="default"
               onClick={() => onDecide("allow-once")}
-              title="단축키: A 또는 Enter"
+              title="단축키: A"
             >
               한 번만 허용
             </Button>
@@ -229,6 +235,13 @@ export function ToolApprovalDialog({
       </DialogContent>
     </Dialog>
   );
+}
+
+function isTextEntryShortcutTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
+  return target.closest(
+    'input, textarea, select, [role="textbox"], [contenteditable="true"]',
+  ) !== null;
 }
 
 function riskLevelForCategory(category: PermissionDecisionCategory): RiskLevel {

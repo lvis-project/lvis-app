@@ -7,7 +7,7 @@
  *   chip surfaces above the composer with the matched intent and two
  *   buttons: [허용] / [거절]. Clicking either calls
  *   `permission.deferredResolve` with `approvalSource: "natural-language"`,
- *   and the audit row records the matched phrase as `reason`.
+ *   and the audit row records static natural-language provenance.
  *
  * What this DOES NOT do:
  *   - Auto-resolve. The user must click. The matcher only suggests;
@@ -25,6 +25,7 @@
  * draft text down.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
+import { X as XIcon } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
 import {
   detectApprovalIntent,
@@ -52,6 +53,7 @@ export function DeferredApprovalChip({
   // closes the window.
   const inFlight = useRef(false);
   const [error, setError] = useState<string | null>(null);
+  const [dismissedKey, setDismissedKey] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     const api = window.lvis?.permission?.deferredList;
@@ -89,6 +91,8 @@ export function DeferredApprovalChip({
 
   const target = pending[0]!;
   const decision = intent.kind === "approve" ? "approved" : "rejected";
+  const suggestionKey = `${target.id}:${intent.kind}:${intent.matchedPhrase}`;
+  if (dismissedKey === suggestionKey) return null;
 
   const handle = async () => {
     if (inFlight.current || busy) return;
@@ -220,7 +224,7 @@ export function DeferredApprovalChip({
               aria-label={sourceBadgeAriaLabel}
               className="mr-1 rounded bg-muted px-1 py-0.5 text-[10px] uppercase text-muted-foreground"
             >
-              <span aria-hidden="true">{sourceBadgeText}</span>
+              {sourceBadgeText}
             </span>
           ) : null}
           <span className="text-muted-foreground">{labelTail}</span>
@@ -231,8 +235,24 @@ export function DeferredApprovalChip({
           disabled={busy}
           onClick={() => void handle()}
           data-testid="deferred-approval-chip-action"
+          aria-label={`${sourceBadgeAriaLabel} '${target.toolName}' 실행을 ${action}`}
         >
           {action}
+        </Button>
+        <Button
+          type="button"
+          size="icon"
+          variant="ghost"
+          className="h-7 w-7 shrink-0 text-muted-foreground"
+          aria-label="이 승인 제안 닫기"
+          title="닫기"
+          data-testid="deferred-approval-chip-dismiss"
+          onClick={() => {
+            setError(null);
+            setDismissedKey(suggestionKey);
+          }}
+        >
+          <XIcon className="h-3.5 w-3.5" aria-hidden="true" />
         </Button>
       </div>
       {error ? (

@@ -18,6 +18,7 @@
 import { describe, it, expect, vi } from "vitest";
 import {
   ApprovalIssuerRegistry,
+  verifyApprovalRequestScope,
   verifyApprovalResponder,
   requestAgentApproval,
   ApprovalOriginError,
@@ -44,6 +45,28 @@ function makeGate(choice: import("../approval-gate.js").ApprovalChoice = "allow-
 const SCOPE = "agent_external_api_call";
 const PLUGIN_A = "sample-plugin";
 const PLUGIN_B = "malicious-plugin";
+
+describe("verifyApprovalRequestScope — request path", () => {
+  it("allows an approval scope from the approved grant before the request is issued", () => {
+    expect(() =>
+      verifyApprovalRequestScope(PLUGIN_A, SCOPE, [SCOPE, "agent_task_delegate"]),
+    ).not.toThrow();
+  });
+
+  it("rejects an undeclared approval scope before the request is issued", () => {
+    let err: ApprovalOriginError | undefined;
+    try {
+      verifyApprovalRequestScope(PLUGIN_A, SCOPE, ["agent_task_delegate"]);
+    } catch (e) {
+      err = e as ApprovalOriginError;
+    }
+
+    expect(err).toBeInstanceOf(ApprovalOriginError);
+    expect(err?.code).toBe("scope-not-allowed");
+    expect(err?.message).toContain("request denied");
+    expect(err?.message).toContain("agentApprovalScopes");
+  });
+});
 
 // ─── (a) Legitimate plugin CAN respond to its own pending approval ────────────
 

@@ -28,7 +28,7 @@
 **Phase 2 proper deferrals** (not in this scope):
 - IT Admin API (policy push, signed delivery, `mac-ca`/`win-ca` keystore integration)
 - Cross-process file locks (`proper-lockfile`)
-- Approval queue UI for parallel tool execution (§4.5.3 activation)
+- ApprovalGate internal pending hard cap beyond renderer FIFO queue (§4.5.3 activation)
 - Governance deny overrides (always-deny list that outranks user allows)
 - DLP filter on approval args preview
 - Full §8 agent-action callers (Agent Hub `agent_file_share`, `agent_task_delegate`, …)
@@ -39,14 +39,14 @@
 
 ### 2.1 Unified Approval Gate — §6.3 L3 and §8 share one service
 
-`ApprovalGate` (`src/core/approval-gate.ts`) is a main-process service that:
+`ApprovalGate` (`src/permissions/approval-gate.ts`) is a main-process service that:
 - Holds `Map<requestId, { resolve, timer }>` for pending user decisions
 - `requestAndWait(req)`: awaits user decision via `webContents.send("lvis:approval:request", …)` round-trip
 - `resolve(requestId, decision)`: called by the IPC handler when the renderer responds
 - 5-minute hard timeout → `deny-once` (fail-safe)
 - `disposeAll()`: pending entries get `deny-once` on window teardown
 
-The `ApprovalRequest` type carries `category: "tool" | "agent-action"` — the same modal serves both §6.3 L3 (tool execution ask) and future §8 destructive-action calls. Today only the `tool` entry point is wired; `agent-action` types are present so Phase 2 Agent Hub can call `approvalGate.requestAndWait({ category: "agent-action", … })` without touching this layer.
+The `ApprovalRequest` type carries `category: "tool" | "agent-action"` — the same modal serves both §6.3 L3 (tool execution ask) and §8 destructive-action calls. `agent-action-requester.ts` now calls `approvalGate.requestAndWait({ category: "agent-action", kind: "agent-action", … })` and includes issuer plugin id + approval scope in audit provenance, so incident replay can distinguish plugin approval requests from host tool execution asks.
 
 ### 2.2 Managed policy — pattern reuse from Phase 1.5
 
@@ -58,7 +58,7 @@ The `ApprovalRequest` type carries `category: "tool" | "agent-action"` — the s
 
 - **ApprovalGate timeout** → `deny-once` (not allow)
 - **webContents.send throws** (window destroyed) → `deny-once` + cleanup + audit (F2)
-- **`approvalGate` undefined at construction** → `ToolExecutor` throws (F4 required DI)
+- **`approvalGate` undefined on ask path** → `ToolExecutor` returns audited `is_error: true` / deny result; constructor injection remains optional for non-interactive tests and bootstrap paths
 - **Gate error path in tool-executor** → try/catch → audit + `is_error: true` ToolResult, never skip Step 8 (F3)
 - **permissions.json / policy.json write** → `fd = open(0o600)` + `fd.writeFile()` + `fd.close()` (F6)
 
@@ -111,7 +111,7 @@ Test-engineer agent returned a degenerate response (timestamp only); coverage ga
 - **S1 HIGH (system-breaking)**: `preload.cjs` is loaded at runtime, stale from Phase 1, does not expose B1/B2 namespaces. B1/B2 **dead on arrival in production**. Unit tests all green — the exact class of bug Phase 1.5 §18 warned about.
 - **A1 HIGH**: `ApprovalGate` captures `webContents` at boot, never refreshes on window reload/crash. Pending approvals freeze until 5-min timeout after window replacement.
 - **A3 HIGH**: `managed` flag is a single-file soft gate in user-writable `~/.lvis/`. Weaker than Phase 1.5 `PluginDeploymentGuard` path+manifest hybrid.
-- **A4 MED**: Parallel tool execution vs single-slot renderer state — batch `ask` decisions silently drop all but first.
+- **A4 MED**: Parallel tool execution vs renderer approval queue semantics — fixed by FIFO queue cap/drop-newest; revisit only if §4.5.3 enables true bulk parallel decisions.
 - **S2 HIGH**: `writeFile` uses default umask → 0o644. Not matching Phase 1.5 fd-based `fchmod` discipline.
 - **S3 HIGH**: Approval decisions not audited. §8 explicit requirement unmet.
 - **S7 MED**: IPC inputs not validated on handlers (set-mode, policy:set, add-rule).
@@ -139,14 +139,14 @@ Test-engineer agent returned a degenerate response (timestamp only); coverage ga
 
 ### Phase 2 proper 이월 (주석 또는 후속 PR)
 
-- **A2**: `category: "agent-action"` 실사용자 (§8 Agent Hub callers) 계약 문서화 — `approval-gate.ts` 헤더 JSDoc
+- **A2**: 완료. `category: "agent-action"` / `kind: "agent-action"` 는 `agent-action-requester.ts` 와 `approval-gate.ts` 타입/JSDoc 및 tests 에 반영됨.
 - **A3**: admin-dir policy merge path (macOS `/Library/Application Support/LVIS/policy.json`) — `policy-store.ts` 헤더 주석
 - **A4**: Parallel tool execution 시 approval queue 승격 — `ToolApprovalDialog` 주석
 - **A6**: `setRules` → `setDefaultRules` rename + dynamic `reloadRules()` — 별도 PR
 - **S4**: cross-process file lock (`proper-lockfile`) — `permissions-store` / `policy-store` 헤더 주석
 - **S5**: governance deny override (`mcp_exec_*`, `shell_*` default deny) — `permission-manager.ts` 주석
-- **S6**: approval response HMAC nonce — 주석
-- **S8**: `ApprovalGate.pending.size` cap + renderer queue UI — 주석
+- **S6**: 완료. approval response nonce/HMAC 계약은 `ApprovalGate` 타입/JSDoc, implementation, replay/mismatch tests 에 반영됨.
+- **S8**: renderer FIFO approval queue UI/cap 완료 (`DEFAULT_APPROVAL_QUEUE_MAX = 50`, drop-newest). ApprovalGate 내부 `pending.size` hard cap 이 별도로 필요하면 후속 PR.
 - **S9**: approval args preview DLP filter — 주석
 - **C5~C11**: path normalization, renderer visibility refetch, React effect race — 후속 PR
 
@@ -200,17 +200,17 @@ To be filled after user authorization:
 
 ### 7.1 Why unify §6.3 Layer 3 with §8 Agent Approval?
 
-Both are "pause, ask the user via modal, block until decision" semantics. Splitting them would duplicate the modal, the IPC round-trip, the queue, and the audit. The cost of one `category` discriminator field is 1 line of TypeScript — vs. dozens of lines of parallel plumbing that would drift apart. Unification is free and compounds forward: when §8 agent-action callers land, they call the same `ApprovalGate.requestAndWait` with `category: "agent-action"` and reuse every safety property (fail-closed, audit, timeout, rule persistence).
+Both are "pause, ask the user via modal, block until decision" semantics. Splitting them would duplicate the modal, the IPC round-trip, the queue, and the audit. The cost of one `category` discriminator field is 1 line of TypeScript — vs. dozens of lines of parallel plumbing that would drift apart. Unification is free and compounds forward: §8 agent-action callers now call the same `ApprovalGate.requestAndWait` with `category: "agent-action"` / `kind: "agent-action"` and reuse every safety property (fail-closed, audit, timeout, rule persistence).
 
-### 7.2 Why blocking per-call modal (D1=a) over queue UX?
+### 7.2 Why one-at-a-time decisions over bulk approval?
 
-Queue UX is tempting (batch approval for long agentic loops) but introduces a real architectural question: does the LLM turn halt while the user works through the queue, or continue opportunistically? Answering that correctly requires rethinking `ConversationLoop` control flow. Phase 2 Track B deliberately chose the simpler semantic (blocking per-call) because:
+Queue UX can reduce modal contention for long agentic loops, but bulk decisions introduce a real architectural question: does the LLM turn halt while the user works through the queue, or continue opportunistically? Answering that correctly requires rethinking `ConversationLoop` control flow. Phase 2 Track B deliberately chose one explicit decision per request because:
 - It matches §6.3 L3 spec literally
 - It gives each tool call an explicit user audit trail (not "approved in batch")
-- Parallel tool execution is not yet activated in LVIS (§4.5.3 is future work)
+- Parallel tool execution is active in `ToolExecutor.executeAll()` as 5-wide batches after per-request approval; bulk approval and dependency-aware approval scheduling are intentionally not part of Track B
 - The "approval fatigue" downside is mitigated by `allow-always` persistence
 
-When parallel execution lands, Phase 2 proper will add an approval queue UI. The ApprovalGate itself already supports concurrent pending requests — only the renderer's single-slot `useState<ApprovalRequest | null>` is limiting (flagged by A4).
+The renderer now has a FIFO approval queue with `DEFAULT_APPROVAL_QUEUE_MAX = 50` and drop-newest behavior at the cap. It preserves one-at-a-time user decisions; unseen requests are not bulk-approved.
 
 ### 7.3 Why persist rules to `~/.lvis/permissions.json` vs session-only?
 
@@ -220,9 +220,9 @@ Session-only forces users to re-approve the same tool every startup → approval
 
 Pragmatic Phase 1 shape. The Phase 1.5 deployment guard uses hybrid (path + manifest field) because packaged plugins live inside `plugins/installed/` with the same parent as user plugins — the ambiguity required hybrid check. Policy does not have this ambiguity: there's one policy file, owned by the host. Adding hybrid now would be premature; adding admin-dir merge later (Phase 2 proper A3) is a clean linear extension. The architect agent flagged this as HIGH because naming alignment with Phase 1.5 `managed` can mislead readers into expecting the same enforcement strength — closure report §2.2 documents the gap explicitly to prevent that misread.
 
-### 7.5 Why `approvalGate: required` in `ToolExecutor` (no optional fallback)?
+### 7.5 Why keep `approvalGate` optional in `ToolExecutor` but fail closed on ask?
 
-The optional parameter was a phase-in gradient from Phase 1 that outlived its purpose. Every F-round fix had to decide "what does this branch do when gate is missing?" and every safe answer was "deny". If every safe answer is deny, the branch shouldn't exist. Making the parameter required collapses 10 lines of fallback code and eliminates a class of latent fail-open bugs. The tradeoff: any test that constructs `ToolExecutor` standalone must now wire an `ApprovalGate` or a mock. Acceptable cost for eliminating the fail-open gradient.
+`ToolExecutor` still accepts `approvalGate?: ApprovalGate` because several tests and non-interactive bootstrap paths construct it without a UI approval surface. The safety invariant is enforced at the decision point instead of the constructor: if a tool reaches an `ask` decision and no gate is present, execution returns an audited `is_error: true` / deny result. This keeps constructor compatibility while avoiding the only unsafe outcome, which would be silently continuing without user approval.
 
 ### 7.6 Why `preload.ts` as single source of truth (delete `preload.cjs`)?
 
@@ -272,4 +272,4 @@ The `test-engineer` reviewer returned only a timestamp in B4. Coverage gaps were
 
 **작성자**: Claude Opus 4.6 (LVIS 오토파일럿 세션)
 **작성일**: 2026-04-15 KST
-**다음 단계**: Phase 2 proper — IT Admin API (policy push + signed delivery), §17 `mac-ca`/`win-ca` OS keystore, §8 Agent Hub callers using this gate, parallel tool execution + approval queue UI. §16.2 5 결정 항목 IT 부서 협의 선행 필요.
+**다음 단계**: Phase 2 proper — IT Admin API (policy push + signed delivery), §17 `mac-ca`/`win-ca` OS keystore, §8 Agent Hub callers using this gate, ApprovalGate internal pending hard cap / dependency-aware approval scheduling. §16.2 5 결정 항목 IT 부서 협의 선행 필요.

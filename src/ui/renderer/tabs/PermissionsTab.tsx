@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
 import { Input } from "../../../components/ui/input.js";
@@ -282,6 +282,39 @@ export function PermissionsTab() {
       return;
     }
     await applyReviewerCommand(`model ${model}`);
+  };
+
+  const handleInteractiveRadioKeyDown = (
+    e: KeyboardEvent<HTMLButtonElement>,
+    value: "off" | "low",
+  ) => {
+    if (reviewerBusy) return;
+    const currentIndex = REVIEWER_INTERACTIVE_OPTIONS.findIndex((opt) => opt.value === value);
+    let nextIndex = currentIndex;
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+      nextIndex = (currentIndex + 1) % REVIEWER_INTERACTIVE_OPTIONS.length;
+    } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+      nextIndex =
+        (currentIndex - 1 + REVIEWER_INTERACTIVE_OPTIONS.length) %
+        REVIEWER_INTERACTIVE_OPTIONS.length;
+    } else if (e.key === "Home") {
+      nextIndex = 0;
+    } else if (e.key === "End") {
+      nextIndex = REVIEWER_INTERACTIVE_OPTIONS.length - 1;
+    } else {
+      return;
+    }
+    e.preventDefault();
+    const next = REVIEWER_INTERACTIVE_OPTIONS[nextIndex];
+    if (!next || next.value === reviewer.interactive.autoApprove) return;
+    void (async () => {
+      await applyReviewerCommand(`interactive ${next.value}`);
+      requestAnimationFrame(() => {
+        document
+          .querySelector<HTMLButtonElement>(`[data-testid="reviewer-interactive-${next.value}"]`)
+          ?.focus();
+      });
+    })();
   };
 
   // ── Section C handlers ────────────────────────────
@@ -616,11 +649,13 @@ export function PermissionsTab() {
                     data-testid={`reviewer-interactive-${opt.value}`}
                     role="radio"
                     aria-checked={reviewer.interactive.autoApprove === opt.value}
+                    tabIndex={reviewer.interactive.autoApprove === opt.value ? 0 : -1}
                     disabled={reviewerBusy}
                     onClick={() => {
                       if (reviewer.interactive.autoApprove === opt.value) return;
                       void applyReviewerCommand(`interactive ${opt.value}`);
                     }}
+                    onKeyDown={(e) => handleInteractiveRadioKeyDown(e, opt.value)}
                     className={`flex w-full items-start gap-2.5 rounded-md border px-3 py-2 text-left text-xs transition-colors ${reviewer.interactive.autoApprove === opt.value ? "border-primary bg-primary/10" : "border-muted hover:border-muted-foreground/40"}`}
                   >
                     <span className={`mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full border-2 ${reviewer.interactive.autoApprove === opt.value ? "border-primary" : "border-muted-foreground"}`}>

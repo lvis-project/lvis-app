@@ -144,30 +144,31 @@ export const IPC_APPROVAL_RESPOND = "lvis:approval:respond";
 
 export interface ApprovalRequest {
   id: string;
-  category: "tool";
+  category: "tool" | "agent-action";
+  kind?: "tool" | "out-of-allowed-dir" | "agent-action";
   toolName: string;
   args: unknown;
   reason: string;
   source?: "builtin" | "plugin" | "mcp";
   // ...
   nonce?: string;   // §D2 confused-deputy nonce
-  hmac?: string;    // HMAC-SHA256(sessionKey, `${id}|${nonce}|${canonicalArgs}`)
+  hmac?: string;    // HMAC-SHA256(sessionKey, `${id}|${nonce}|${toolName}|${canonicalArgs}`)
 }
 
 export type ApprovalChoice = "allow-once" | "allow-always" | "deny-once" | "deny-always";
 ```
 
-**중요 관찰:** ApprovalGate 는 toolName 과 args 를 받는 _tool_ 카테고리만 지원. v3 "승인 요청 카드" 는 사용자가 _이미 plugin 안에 표시된 항목_ 을 클릭해서 컨펌 모달을 띄우는 흐름. 즉 plugin 이 backend `agent_hub_list_approvals(role='approver', status='pending')` 로 가져온 ApprovalRequest 항목을 카드에 그리고, 사용자가 "승인" 버튼을 눌렀을 때 plugin → host 로 _승인 의도_ 를 전달.
+**중요 관찰:** ApprovalGate 는 toolName 과 args 를 받는 공통 승인 표면을 제공하며, host tool 실행은 `category:"tool"`, plugin 이 host 승인 verdict 를 요청하는 §8 흐름은 `category:"agent-action"` / `kind:"agent-action"` 으로 구분한다. v3 "승인 요청 카드" 는 사용자가 _이미 plugin 안에 표시된 항목_ 을 클릭해서 컨펌 모달을 띄우는 흐름. 즉 plugin 이 backend `agent_hub_list_approvals(role='approver', status='pending')` 로 가져온 ApprovalRequest 항목을 카드에 그리고, 사용자가 "승인" 버튼을 눌렀을 때 plugin → host 로 _승인 의도_ 를 전달.
 
-**§8 와의 정확한 bridge 모델:** plugin 은 자체 approval queue 가 아니다. plugin 이 backend 에서 가져오는 `ApprovalRequestResponse` 의 _ack/decision_ 을 host §8 ApprovalGate 의 `requestAndWait()` 호출로 한 번 더 감싼다 — 즉 사용자가 plugin UI 의 "승인" 버튼을 누르면, plugin 이 `agent_hub_decide_approval` 을 _바로_ 호출하지 않고, _host §8 ApprovalGate 를 통해서_ "이 backend approval row 를 결정하시겠습니까" 라는 OS-level 승인 모달을 한 번 더 띄운 뒤 사용자가 OK 했을 때만 backend decision API 를 친다. 이렇게 하면:
+**§8 와의 정확한 bridge 모델:** plugin 은 자체 approval queue 가 아니다. plugin 이 backend 에서 가져오는 `ApprovalRequestResponse` 의 _ack/decision_ 을 host §8 ApprovalGate 의 `requestAndWait()` 호출로 한 번 더 감싼다 — 즉 사용자가 plugin UI 의 "승인" 버튼을 누르면, plugin 이 `agent_hub_decide_approval` 을 _바로_ 호출하지 않고, _host §8 ApprovalGate 를 통해서_ "이 backend approval row 를 결정하시겠습니까" 라는 renderer 승인 모달을 한 번 더 띄운 뒤 사용자가 OK 했을 때만 backend decision API 를 친다. 이렇게 하면:
 
-- 사용자가 OS-native 모달에서 두 번째 confirm 을 한다 (D3 의 "host §8 와 bridge" 충족).
+- 사용자가 host renderer 승인 모달에서 두 번째 confirm 을 한다 (D3 의 "host §8 와 bridge" 충족).
 - audit log 가 host 측 audit-logger 에 한 번, backend 에 한 번 — 두 군데 다 남는다.
 - DLP filter / sensitive-path block 이 자동 적용된다.
 
-**Renderer 측 호출 진입점 — Lane 5 가 사용할 IPC bridge:**
+**Renderer 측 호출 진입점 — Lane 5 host bridge 상태:**
 
-`src/permissions/agent-action-requester.ts` 는 현재 비어 있음 (skeleton 미구현 상태로 존재). Lane 5 가 이 파일에 `requestAgentApproval(toolName, args, reason)` 함수를 추가하고, plugin webview 의 preload bridge (`window.lvisPlugin`) 가 `requestAgentApproval` 을 호출할 수 있게 expose. 즉 plugin → preload → main → ApprovalGate → renderer modal → 사용자 → main → preload → plugin 의 한 turn.
+`src/permissions/agent-action-requester.ts` 는 host 측 `requestAgentApproval(...)` 래퍼와 issuer registry 를 구현한다. 이 경로는 `ApprovalGate.requestAndWait()` 에 `category:"agent-action"` / `kind:"agent-action"` 을 전달해 host tool 실행 승인과 plugin-origin backend 결정 승인을 audit/replay 에서 구분한다. 현재 SOT 는 plugin handler 가 main-process HostApi 의 `agentApproval` 메서드를 직접 호출하는 경로다. `src/plugin-preload.ts` 의 `window.lvisPlugin` bridge 는 의도적으로 permission / approval API 를 노출하지 않는다. 남은 Lane 5 plugin 작업은 agent-hub plugin 측 confirm action wiring 이며, webview preload permission bridge 는 별도 backlog 로 유지한다.
 
 → Lane 5 는 host 측 PR (lvis-app) + plugin 측 PR (lvis-plugin-agent-hub) 두 개로 나뉜다.
 
@@ -543,6 +544,12 @@ export type ApprovalChoice = "allow-once" | "allow-always" | "deny-once" | "deny
 
 ### 5.5 `agent_hub_decide_approval_with_host`
 
+**Status.** 이 항목은 `lvis-plugin-agent-hub` 측 tool contract 이다. 본
+`lvis-app` tree 에서 구현 완료를 주장하지 않는다. 현재 host repo 가 보장하는
+완료 범위는 main-process HostApi `agentApproval.request/respond`, 승인 scope
+검증, audit provenance 이며, 아래 plugin handler / backend bridge 는 plugin repo
+에서 별도 구현·검증해야 한다.
+
 - **호출 source.** UI direct call only. 사용자가 "승인 요청" 카드의 항목을 클릭해 컨펌 모달이 뜨고 OK 한 시점.
 - **Input.**
   ```ts
@@ -562,9 +569,9 @@ export type ApprovalChoice = "allow-once" | "allow-always" | "deny-once" | "deny
   }
   ```
 - **Body.**
-  1. plugin 이 `agent_hub_list_approvals` 로 가져온 row 의 metadata (`title`, `body`, `action_type`, `target_scope`) 를 `args` 에 채워 host §8 IPC `lvis:approval:request` 발송.
-  2. host §8 ApprovalGate.requestAndWait → 사용자 OS-native 모달 → 응답 반환 (`allow-once` / `deny-once`).
-  3. host 가 allow 면 plugin 이 `client.decideApproval(approvalId, decision, reason)` 호출. host 가 deny 면 backend 결정은 _건너뛰지 않고_, plugin UI 가 명시 거절 상태로 남는다 (사용자가 host 측에서 "이 결정 자체에 대한 승인" 을 거부한 것이므로).
+  1. plugin handler 가 `agent_hub_list_approvals` 로 가져온 row 의 metadata (`title`, `body`, `action_type`, `target_scope`) 를 HostApi `agentApproval.request/respond` 입력으로 변환한다. Plugin webview JS 는 `lvis:approval:request` IPC 를 직접 발송하지 않는다.
+  2. host main process 가 registry 의 host-approved `approvedPluginAccess.agentApprovalScopes` 를 prompt 전에 검증한 뒤 §8 ApprovalGate.requestAndWait → renderer 승인 모달 → 응답 반환 (`allow-once` / `deny-once`).
+  3. host 가 allow 면 plugin handler 가 `client.decideApproval(approvalId, decision, reason)` 를 호출한다. host 가 deny/timeout/send-failed 면 backend `decideApproval` 은 호출하지 않고 `bridgeError` 를 반환한다.
 - **No-Fallback.** host §8 가 timeout 나면 (`deny-once` 자동 반환), backend `decideApproval` 절대 호출 금지. fallback 카운터/우회 분기 금지.
 
 ### 5.6 (기존 22 tool 의 재정의 없음)
@@ -664,10 +671,9 @@ export type ApprovalChoice = "allow-once" | "allow-always" | "deny-once" | "deny
 **산출물 파일.**
 
 _lvis-app (host repo) 측:_
-- `src/permissions/agent-action-requester.ts` — `requestAgentApproval(toolName, args, reason): Promise<ApprovalChoice>` 구현. 현재 skeleton 만 존재.
-- `src/preload.ts` — `window.lvisPlugin.requestAgentApproval` bridge expose (contextBridge).
-- `src/plugin-preload.ts` — plugin webview 측 narrow bridge 에 `requestAgentApproval` 추가.
-- `src/ipc-bridge.ts` — main process 측 `lvis:plugin-bridge:request-agent-approval` IPC handler. ApprovalGate 인스턴스 호출.
+- `src/permissions/agent-action-requester.ts` — host-internal `requestAgentApproval(...)` 구현 + `category:"agent-action"` / `kind:"agent-action"` discriminator 유지.
+- `src/boot/steps/plugin-runtime.ts` — main-process HostApi `agentApproval.request/respond` wiring. `request()` 는 registry 의 host-approved `approvedPluginAccess` grant 를 prompt 전에 검증한다.
+- `src/plugin-preload.ts` — permission / approval API 를 노출하지 않는 상태를 유지한다. Plugin webview JS 는 직접 approval bridge 를 호출하지 않는다.
 - `src/__tests__/agent-action-requester.test.ts` — vitest, ApprovalGate mock 으로 round-trip 검증.
 
 _lvis-plugin-agent-hub 측:_
@@ -808,7 +814,7 @@ _lvis-app 측:_
   - Worker B: Lane 3 (마이워크 4 tool)
   - Worker C: Lane 4 (팀보드 5 tool + manifest pluginAccess)
   - Worker D: Lane 7 (Zustand store skeleton + types)
-- **Lane 5 contract.** _Worker D 가 Lane 5 의 type-only contract_ (`requestAgentApproval` signature) 를 store action 안에 _interface 로만_ 정의. 실제 IPC handler 는 W3 의 Lane 5 worker 가 채움.
+- **Lane 5 contract.** _Worker D 가 Lane 5 의 type-only contract_ 를 store action 안에 _interface 로만_ 정의한다. 실제 host path 는 W3 의 Lane 5 worker 가 main-process HostApi `agentApproval.request/respond` 로 채운다; plugin webview preload permission bridge 는 backlog 로 유지한다.
 - **목표 산출.** Domain layer (Layer 3) + State layer (Layer 2) 의 type / handler / unit test 까지 머지. UI 미구현이라 e2e 검증은 W3 까지 보류.
 - **검증.** 각 lane 별 vitest unit. cross-lane type compatibility 는 Lane 7 worker 가 Lane 3 / Lane 4 의 PR draft 를 type import 로 끌어와 매일 1회 sync (lvis-app/CLAUDE.md 의 "cross-repo contract sync" 룰).
 - **W2 종료 조건.** main 의 plugin repo 에서 `bun test` 가 새 unit suite 통과, 새 5 tool handler 가 plugin runtime 에 등록되어 host 가 호출 시 `mock:false` 응답 반환 (UI 가 없어도 manual 호출 가능).
@@ -906,10 +912,10 @@ gh repo clone lvis-project/lvis-marketplace /tmp/agent-hub/L<N>/lvis-marketplace
 - **Mitigation.** Lane 4 worker 가 작업 시작 _전_ 1시간 안에 `lvis-plugin-ms-graph/src/calendar/calendarClient.ts` read-only explore. attendees 미지원이면 ms-graph plugin 측에 PR 먼저 (cross-repo blocker). 늦어지면 Lane 4 의 W2 시작 1주일 지연.
 - **Owner.** Lane 4 worker (Worker C in W2). escalation: `architect` agent.
 
-### R2. host §8 ApprovalGate 의 IPC channel 이 plugin webview 측 preload 를 거치지 않으면 lvisPlugin bridge 미존재
+### R2. host §8 ApprovalGate 호출 경로가 plugin webview bridge 와 혼동될 위험
 
-- **Risk.** `plugin-ui-host.tsx` L240-251 의 `<webview preload>` 는 _첫 attach_ 에만 실행. plugin → preload bridge 에 `requestAgentApproval` 을 추가했더라도 plugin webview 가 navigation 을 일으키면 bridge 가 사라진다 (코드 주석에 명시되어 있음).
-- **Mitigation.** Lane 5 가 IPC handler 를 _main process_ 의 `lvis:plugin-bridge:request-agent-approval` 로 노출 (channel name 은 `lvis:` prefix 로 contract 안정). plugin-preload.ts 는 channel call 만 wrap. plugin webview navigation 정책은 변경하지 않는다 (`plugin-shell.html` 외 navigation 금지).
+- **Risk.** Plugin webview preload 는 permission / approval API 를 의도적으로 노출하지 않는다. Lane 5 구현자가 새 webview-exposed approval bridge 를 SOT 로 추가하려 하면 live host path 와 충돌한다.
+- **Mitigation.** Lane 5 host SOT 는 main-process HostApi `agentApproval.request/respond` 이다. Plugin UI 는 backend decision tool/handler 를 호출하고, plugin handler 가 HostApi approval 을 요청한다. plugin-preload.ts 는 permission / approval API 미노출 상태를 유지한다.
 - **Owner.** Lane 5 worker. `security-reviewer` consult.
 
 ### R3. plugin 진입 1회 LLM briefing 의 mount-loop polling 위험
@@ -1060,8 +1066,8 @@ Done = PR merged + build artifact verified + RELEASING.md notes present.
 
 | Repo | Lane 1 | Lane 2 | Lane 3 | Lane 4 | Lane 5 | Lane 6 | Lane 7 | Lane 8 | Lane 9 |
 |------|---|---|---|---|---|---|---|---|---|
-| lvis-plugin-agent-hub | ✅ manifest, tsup, hostPlugin.ts, ui placeholder, v2.1 panel delete | ✅ src/auth/*, tests | ✅ src/tools/work-board-v3, llm-briefing, today-team-schedule, weekly-gantt, tests, plugin.json (briefing.generated) | ✅ src/tools/team-board-v3, team-kpi, team-summary, manifest pluginAccess | ✅ src/tools/decide-approval-bridge, hostPlugin.ts handler reg, plugin.json (approval.bridged) | ✅ src/ui/* (React tree) | ✅ src/ui/store/* | ✅ RELEASING.md, scripts/release-0.2.0.md | ✅ test/integration/* |
-| lvis-app | — | — | — | — | ✅ permissions/agent-action-requester.ts, preload.ts, plugin-preload.ts, ipc-bridge.ts, tests | — | — | ✅ docs/architecture/architecture.md §10, tests/plugin-loading.test.ts | ✅ tests/e2e/agent-hub-v3.spec.ts, fixtures, workflow yml |
+| lvis-plugin-agent-hub | ✅ manifest, tsup, hostPlugin.ts, ui placeholder, v2.1 panel delete | ✅ src/auth/*, tests | ✅ src/tools/work-board-v3, llm-briefing, today-team-schedule, weekly-gantt, tests, plugin.json (briefing.generated) | ✅ src/tools/team-board-v3, team-kpi, team-summary, manifest pluginAccess | plugin repo follow-up: `src/tools/decide-approval-bridge`, handler reg, `plugin.json` `approval.bridged` | ✅ src/ui/* (React tree) | ✅ src/ui/store/* | ✅ RELEASING.md, scripts/release-0.2.0.md | ✅ test/integration/* |
+| lvis-app | — | — | — | — | ✅ permissions/agent-action-requester.ts, plugin-runtime HostApi agentApproval, ipc-bridge.ts, tests; plugin-preload permission bridge remains backlog | — | — | ✅ docs/architecture/architecture.md §10, tests/plugin-loading.test.ts | ✅ tests/e2e/agent-hub-v3.spec.ts, fixtures, workflow yml |
 | lvis-marketplace | — | — | — | — | — | — | — | ✅ catalog 0.2.0 entry | — |
 
 ---

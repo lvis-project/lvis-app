@@ -525,11 +525,11 @@ export type ApprovalChoice = "allow-once" | "allow-always" | "deny-once" | "deny
  * Permission policy — discriminated approval kinds. Renderer routes on this to
  * pick the right card. Default `"tool"` is the standard §6.3 dialog.
  */
-export type ApprovalKind = "tool" | "out-of-allowed-dir";
+export type ApprovalKind = "tool" | "out-of-allowed-dir" | "agent-action";
 
 export type ApprovalRequest = {
   id: string;
-  category: "tool";
+  category: "tool" | "agent-action";
   /** Permission policy — discriminator (defaults to "tool" when absent). */
   kind?: ApprovalKind;
   toolName: string;
@@ -542,6 +542,10 @@ export type ApprovalRequest = {
   args: unknown;
   reason: string;
   source?: "builtin" | "plugin" | "mcp";
+  /** Plugin id that issued this approval request, when source === "plugin". */
+  sourcePluginId?: string;
+  /** Manifest-declared plugin approval scope for agent-action requests. */
+  approvalScope?: string;
   createdAt: number;
   requireExplicit: boolean;
   target?: { filePath?: string };
@@ -690,15 +694,13 @@ export type LvisPermissionApi = {
    *                          renderer's intent matcher detected an
    *                          approval phrase. NOT auto-applied; the
    *                          chip still requires an explicit click.
-   * Optional for backward compatibility; main treats `undefined` as
-   * "button".
+   * Required: every deferred resolution must explicitly declare
+   * provenance before main writes the tamper-evident audit row.
    */
   deferredResolve: (
     id: string,
     decision: "approved" | "rejected",
     reason: string | undefined,
-    // Round-5 architect + critic MAJOR — required (no default). All
-    // callers MUST explicitly state provenance.
     approvalSource: "button" | "natural-language",
   ) => Promise<
     | { ok: true; entry: DeferredQueueEntry }
