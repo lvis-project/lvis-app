@@ -27,7 +27,7 @@ jobs:
       matrix:
         include:
           - name: macOS installer
-            os: macos-latest
+            os: macos-15
             target: mac
           - name: Linux installer
             os: ubuntu-latest
