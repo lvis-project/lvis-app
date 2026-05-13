@@ -25,6 +25,7 @@ import {
   buildTitlebarHtml,
   buildTitlebarButtonScript,
 } from "./window-titlebar-shell.js";
+import { resolveAppIconPath } from "./app-icon.js";
 
 const requireFromHere = createRequire(import.meta.url);
 
@@ -356,6 +357,7 @@ export async function openAuthWindow(
     width: 1024,
     height: 768,
     title: windowTitle,
+    icon: resolveAppIconPath(),
     autoHideMenuBar: true,
     frame: process.platform !== "darwin" ? false : undefined,
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "hidden",
