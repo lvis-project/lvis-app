@@ -372,12 +372,35 @@ interface RoutineScope {
       "mode": "llm",      // "disabled" | "rule" | "llm"
       "provider": "openai",       // default vendor — Anthropic 의존성 분리
       "model": "gpt-4o-mini",     // default — ~$0.0002/call, 5x cheaper than Haiku
-      "fallbackOnError": "deny"  // "deny" | "rule" 만 허용
+      "fallbackOnError": "deny", // "deny" | "rule" 만 허용
       // "thresholds" 제거: verdict 는 discrete enum 이라 threshold 불필요
+
+      // issue #690 — interactive auto-approve. 종전 `auto` exec mode 전용
+      // 가시화 lane 이 mode-independent 한 SOT 로 분리됨. "off" = 항상
+      // 모달, "low" = 리뷰어 LOW 시 모달 없이 통과. MED/HIGH 는 항상 모달.
+      "interactive": { "autoApprove": "off" }  // "off" | "low"
     }
   }
 }
 ```
+
+**Sandbox capability SOT (issue #691):**
+
+`src/permissions/sandbox-capability.ts` is the single source of truth for
+the OS-level execution sandbox available to spawned shell commands.
+`detectSandboxCapability()` returns `{ kind, confidence, platform, reason }`.
+
+- `kind`: `"none" | "bubblewrap" | "sandbox-exec" | "appcontainer"` —
+  current implementation always `"none"` (no OS-level isolation wired).
+- `confidence`: `"verified"` (active probe) | `"assumed"` (platform hint).
+- The reviewer's user prompt includes `executionSandbox=<kind> (<confidence>, <platform>)`
+  so the LLM can apply the binding composition rule.
+- Composition rule (now embedded in the system prompt):
+  > If executionSandbox.kind='none' or executionSandbox.confidence='assumed',
+  > the LLM MUST NOT downgrade a rule-based MEDIUM/HIGH verdict to LOW.
+
+The sandbox SOT is also surfaced in the audit chain through the
+`reviewer` field on the audit entry (downstream of `permissionResult`).
 
 **Interface (sync-friendly):**
 
@@ -425,6 +448,7 @@ category: $CATEGORY
 input (DLP-redacted): $INPUT_REDACTED
 allowedDirectories: $DIRS_BRIEF
 sensitivePathsAdjacent: $ADJACENT_BRIEF
+executionSandbox=$SANDBOX_KIND ($SANDBOX_CONFIDENCE, $PLATFORM) — $REASON
 </UNTRUSTED_INPUT>
 ```
 
