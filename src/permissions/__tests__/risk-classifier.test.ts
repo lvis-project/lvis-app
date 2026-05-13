@@ -22,6 +22,7 @@ import {
   type RiskVerdict,
 } from "../reviewer/risk-classifier.js";
 import { PERMISSION_REVIEWER_FRAMEWORK } from "../../shared/permission-reviewer-framework.js";
+import { detectSandboxCapability } from "../sandbox-capability.js";
 
 const ALLOWED = ["/Users/ken/work", "/Users/ken/.lvis"];
 
@@ -35,6 +36,7 @@ function ctx(overrides: Partial<ToolInvocationContext>): ToolInvocationContext {
     finalInput: {},
     allowedDirectories: ALLOWED,
     sensitivePathsAdjacent: [],
+    sandboxCapability: detectSandboxCapability(),
     ...overrides,
   };
 }
@@ -286,6 +288,46 @@ describe("LlmRiskClassifier — composition rule (security M1)", () => {
     const c = new LlmRiskClassifier(provider, "gpt-4o-mini");
     const v = await c.classify(ctx({ category: "shell", finalInput: { command: "make build" } }));
     expect(v.level).toBe("medium");
+  });
+});
+
+describe("LlmRiskClassifier — sandbox capability surface (issue #691)", () => {
+  it("threads executionSandbox into the LLM user prompt so the LLM can honour the no-downgrade composition rule", async () => {
+    const completeSpy = vi.fn(async () => ({
+      text: `{"level":"low","reason":"ok"}`,
+      tokensIn: 1,
+      tokensOut: 1,
+      costUsd: 0,
+    }));
+    const provider: LlmReviewerProvider = { complete: completeSpy };
+    const c = new LlmRiskClassifier(provider, "gpt-4o-mini");
+    await c.classify(
+      ctx({
+        category: "write",
+        finalInput: { path: "/Users/ken/work/x" },
+        sandboxCapability: {
+          kind: "none",
+          confidence: "verified",
+          platform: "darwin",
+          reason: "no OS sandbox configured for the host process",
+        },
+      }),
+    );
+    const arg = completeSpy.mock.calls[0][0];
+    // The user prompt must surface the sandbox SOT verbatim so the
+    // reviewer can apply the "weak-sandbox no-downgrade" composition rule.
+    expect(arg.userPrompt).toContain("executionSandbox=none (verified, darwin)");
+  });
+
+  it("system prompt now embeds the composition rules so the LLM is bound to the no-downgrade-in-weak-sandbox rule", () => {
+    // Sanity check: the system prompt is the binding contract surface
+    // for the LLM. Composition rules must appear in the prompt itself —
+    // not only in the framework constants — or the LLM has no way to
+    // honour them at inference time.
+    expect(PERMISSION_REVIEWER_FRAMEWORK.systemPrompt).toContain("Composition rules");
+    expect(PERMISSION_REVIEWER_FRAMEWORK.systemPrompt).toContain(
+      "MUST NOT downgrade a rule-based MEDIUM/HIGH verdict to LOW",
+    );
   });
 });
 

@@ -675,11 +675,20 @@ export class ToolExecutor {
     evaluationContext: PermissionEvaluationContext,
   ): Promise<PermissionCheckResult | null> {
     if (context.headless === true) return null;
-    if (this.permissionManager?.getMode() !== "auto") return null;
+    // Issue #690 — the gate is EITHER legacy `auto` exec mode OR the
+    // interactive auto-approve setting. PermissionManager.categoryBasedDecision
+    // only sets `reviewer.route='foreground-auto'` when one of those is
+    // true, so reaching here implies opt-in, but check explicitly to
+    // stay robust against future producers that set the route directly.
+    const mgr = this.permissionManager;
+    if (!mgr) return null;
+    if (mgr.getMode() !== "auto" && mgr.getInteractiveAutoApprove() === "off") {
+      return null;
+    }
     if (category !== "write" && category !== "shell" && category !== "network") {
       return null;
     }
-    if (!this.permissionManager.hasReviewer()) {
+    if (!mgr.hasReviewer()) {
       return {
         decision: "ask",
         reason: "auto-review reviewer unavailable — explicit user approval required",

@@ -27,6 +27,10 @@
 import type { ToolCategory, ToolSource, ToolTrustOrigin } from "../../tools/types.js";
 import { maskSensitiveData } from "../../audit/dlp-filter.js";
 import { PERMISSION_REVIEWER_SYSTEM_PROMPT } from "../../shared/permission-reviewer-framework.js";
+import {
+  formatSandboxCapabilityForPrompt,
+  type SandboxCapability,
+} from "../sandbox-capability.js";
 
 /** Verdict level — discrete enum. The reviewer lane never uses scalars. */
 export type RiskLevel = "low" | "medium" | "high";
@@ -68,6 +72,15 @@ export interface ToolInvocationContext {
   allowedDirectories: string[];
   /** Adjacent sensitive entries (e.g. `.env`, `.git`) detected near the path. */
   sensitivePathsAdjacent: string[];
+  /**
+   * OS-level execution sandbox capability — the reviewer SOT for issue
+   * #691. Constructed by {@link detectSandboxCapability} at the dispatch
+   * site (single producer) and threaded here so the LLM prompt + audit
+   * record both see the same value. Required: callers MUST supply it so
+   * a missing field cannot silently downgrade the reviewer's safety
+   * posture.
+   */
+  sandboxCapability: SandboxCapability;
 }
 
 export interface RiskClassifier {
@@ -440,6 +453,7 @@ function buildUserPrompt(input: ToolInvocationContext): string {
     `input (DLP-redacted): ${JSON.stringify(redacted)}\n` +
     `allowedDirectories: ${JSON.stringify(input.allowedDirectories.slice(0, 8))}\n` +
     `sensitivePathsAdjacent: ${JSON.stringify(input.sensitivePathsAdjacent.slice(0, 8))}\n` +
+    `${formatSandboxCapabilityForPrompt(input.sandboxCapability)}\n` +
     `</UNTRUSTED_INPUT>`
   );
 }
