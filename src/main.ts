@@ -88,6 +88,9 @@ if (process.platform === "win32" && process.env.LVIS_KEEP_GPU !== "1") {
 // are not in the Seamless-SSO flow today.
 //
 // Off-corp / non-joined PC: no Kerberos ticket → existing MSAL popup fallback.
+// `--auth-negotiate-delegate-allowlist` 는 의도적으로 미설정 — ticket 은
+// challenge 응답 1-hop 만 전달되고 downstream 으로 forwarding (unconstrained
+// delegation) 되지 않도록.
 const AAD_NEGOTIATE_HOSTS = [
   "login.microsoftonline.com",
   "autologon.microsoftazuread-sso.com",
