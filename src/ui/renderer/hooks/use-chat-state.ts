@@ -9,7 +9,6 @@ import {
   finalizeStreamingAssistant,
   finalizeStreamingReasoning,
   isImportedTriggerStreaming,
-  reopenLastAssistant,
   setAssistantError,
   upsertStreamingAssistant,
   upsertStreamingReasoning,
@@ -37,7 +36,6 @@ export function useChatState(api: LvisApi) {
   const thoughtRef = useRef("");
   const activeStreamIdRef = useRef<number | null>(null);
   const streamingRequestRef = useRef(0);
-  const guidanceResetPendingRef = useRef(false);
 
   const [editingEntryIdx, setEditingEntryIdx] = useState<number | null>(null);
   const [editBusy, setEditBusy] = useState(false);
@@ -89,20 +87,18 @@ export function useChatState(api: LvisApi) {
         });
       }
       const streamId = typeof ev.streamId === "number" ? ev.streamId : null;
-      if (ev.type === "guidance_reset") {
-        if (streamId !== null) activeStreamIdRef.current = streamId;
-        guidanceResetPendingRef.current = true;
-        setEntries((p) => {
-          const reopened = reopenLastAssistant(p);
-          streamRef.current = reopened.text;
-          thoughtRef.current = "";
-          if (debugStreamEnabled) {
-            debugLog("stream", "guidance_reset:applied", {
-              reopenedTextLen: reopened.text.length,
-            });
-          }
-          return reopened.entries;
-        });
+      if (ev.type === "guidance_injected") {
+        // Non-interrupting "guide" mode (#566/utterance taxonomy) — engine
+        // consumed a queued guide utterance at the round boundary and
+        // appended it to history. Surface to the user as a system entry
+        // so they can see their direction-adjustment landed; the assistant
+        // round that follows reads it like any other user message.
+        const text = typeof ev.text === "string" ? ev.text : "";
+        if (text.length === 0) return;
+        setEntries((p) => [
+          ...p,
+          { kind: "system", text: `방향 지시 적용: ${text}` },
+        ]);
         return;
       }
       if (ev.type === "permission_mode_changed" && ev.mode) {
@@ -129,8 +125,7 @@ export function useChatState(api: LvisApi) {
         if (!message) return;
         setEntries((p) => {
           if (isImportedTriggerStreaming(p)) return p;
-          const base = guidanceResetPendingRef.current ? reopenLastAssistant(p).entries : p;
-          guidanceResetPendingRef.current = false;
+          const base = p;
           return upsertStreamingAssistant(base, message);
         });
       } else if (ev.type === "text_delta" && ev.text) {
@@ -150,15 +145,13 @@ export function useChatState(api: LvisApi) {
             return appendDeltaToImportedTriggerResponse(p, ev.text!);
           }
           streamRef.current += ev.text!;
-          const base = guidanceResetPendingRef.current ? reopenLastAssistant(p).entries : p;
-          guidanceResetPendingRef.current = false;
+          const base = p;
           return upsertStreamingAssistant(base, streamRef.current);
         });
       } else if (ev.type === "reasoning_delta" && ev.text) {
         thoughtRef.current += ev.text;
         setEntries((p) => {
-          const base = guidanceResetPendingRef.current ? reopenLastAssistant(p).entries : p;
-          guidanceResetPendingRef.current = false;
+          const base = p;
           return upsertStreamingReasoning(dropPendingLlmStatusAssistant(base), thoughtRef.current);
         });
       } else if (ev.type === "assistant_round") {
@@ -192,8 +185,7 @@ export function useChatState(api: LvisApi) {
           if (isImportedTriggerStreaming(p)) {
             return finalizeStreamingReasoning(p, ev.thought ?? thoughtRef.current);
           }
-          const base = guidanceResetPendingRef.current ? reopenLastAssistant(p).entries : p;
-          guidanceResetPendingRef.current = false;
+          const base = p;
           const beforeCount = base.length;
           let next = finalizeStreamingReasoning(base, ev.thought ?? thoughtRef.current);
           const afterReasoningCount = next.length;
@@ -251,7 +243,6 @@ export function useChatState(api: LvisApi) {
         streamRef.current = "";
         thoughtRef.current = "";
         activeStreamIdRef.current = null;
-        guidanceResetPendingRef.current = false;
       } else if (ev.type === "redact_notice") {
         // Sprint E §3 — user draft 에서 PII 가 리댁트되었음을 알리는 시스템 배지.
         const count = (ev as unknown as { count?: number }).count ?? 0;
@@ -346,8 +337,7 @@ export function useChatState(api: LvisApi) {
             });
           }
           setEntries((p) => {
-            const base = guidanceResetPendingRef.current ? reopenLastAssistant(p).entries : p;
-            guidanceResetPendingRef.current = false;
+            const base = p;
             let next = finalizeStreamingReasoning(base, thoughtRef.current);
             next = finalizeStreamingAssistant(
               next,
@@ -373,7 +363,6 @@ export function useChatState(api: LvisApi) {
           }
         }
         activeStreamIdRef.current = null;
-        guidanceResetPendingRef.current = false;
       }
     });
     return () => { unsub(); };
@@ -570,7 +559,6 @@ export function useChatState(api: LvisApi) {
     streamRef.current = "";
     thoughtRef.current = "";
     activeStreamIdRef.current = null;
-    guidanceResetPendingRef.current = false;
   }, []);
 
   // Used by handleAsk error path to show an error bubble with the current thought.
@@ -579,7 +567,6 @@ export function useChatState(api: LvisApi) {
     streamRef.current = "";
     thoughtRef.current = "";
     activeStreamIdRef.current = null;
-    guidanceResetPendingRef.current = false;
   }, []);
 
   // ── Intent methods (replace raw setEntries) ──
@@ -592,7 +579,6 @@ export function useChatState(api: LvisApi) {
     streamRef.current = "";
     thoughtRef.current = "";
     activeStreamIdRef.current = null;
-    guidanceResetPendingRef.current = false;
   }, []);
 
   const appendUserMessage = useCallback((content: string): void => {

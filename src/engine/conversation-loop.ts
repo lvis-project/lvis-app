@@ -121,6 +121,15 @@ export interface TurnCallbacks {
   onFallback?: (from: string, to: string) => void;
   onLlmStatus?: (status: FallbackStatus) => void;
   /**
+   * Fired once per round boundary when a "guide" utterance was queued via
+   * `ConversationLoop.queueGuidance` and is now being injected into history
+   * as a user message ahead of the next LLM stream. Renderer uses this to
+   * render an inline "방향 지시 적용됨" note in the transcript so the user
+   * has visible feedback that the queued guidance landed (vs silently
+   * affecting the next assistant turn).
+   */
+  onGuidanceInjected?: (text: string) => void;
+  /**
    * Turn aggregate footer (§ chat transcript per-turn footer) — fires once
    * after the turn fully resolves with cumulative wall-clock / step-count /
    * token totals. Renderer maps the payload to a `kind: "turn_summary"`
@@ -320,6 +329,18 @@ export class ConversationLoop {
   private isCompacting: boolean = false;
   /** PR-2-C — Layer 2 compact 가 #N 번째인지 (numbered checkpoint chain, Copilot 패턴). */
   private compactNum: number = 0;
+  /**
+   * "Guide" utterance buffer — mid-stream direction adjustments that the
+   * user typed while a turn is in flight. Drained at each round boundary in
+   * `queryLoop` (BETWEEN tool execution and the next LLM stream) and
+   * appended to history as a user message so the model sees it like any
+   * other turn input.
+   *
+   * Non-interrupting: the current LLM call and tool round are NOT aborted.
+   * Multiple guidance entries within one round boundary are joined with
+   * blank lines so the model receives them as a single coherent message.
+   */
+  private guidanceQueue: string[] = [];
 
   constructor(deps: ConversationLoopDeps) {
     this.deps = deps;
@@ -353,6 +374,37 @@ export class ConversationLoop {
   /** B4: Abort the current streaming turn. No-op if no turn in flight. */
   abortCurrentTurn(): void {
     this.currentAbortController?.abort();
+  }
+
+  /**
+   * Queue a mid-stream "guide" utterance for non-interrupting injection.
+   *
+   * The text is held in `guidanceQueue` and consumed at the next round
+   * boundary in `queryLoop` (between tool execution and the next LLM
+   * stream), where it is appended to history as a user message. The
+   * currently-streaming round is NOT aborted; in-flight tool calls run
+   * to completion.
+   *
+   * Caller responsibility (IPC handler at `ipc/domains/chat.ts`):
+   *   - Validate `text` is a non-empty string before queuing.
+   *   - Reject when no turn is active — guidance with no upcoming round
+   *     boundary would be dropped silently. Active-turn check =
+   *     `currentAbortController !== null` (set by `runTurn`).
+   *
+   * The queue is bounded only by caller discipline; an attacker who can
+   * call this 1000 times before a round ends would inflate history with
+   * 1000 messages. The IPC handler should rate-limit and the sender guard
+   * (`validateSender`) already restricts to the host webContents.
+   */
+  queueGuidance(text: string): void {
+    const trimmed = text.trim();
+    if (trimmed.length === 0) return;
+    this.guidanceQueue.push(trimmed);
+  }
+
+  /** True when a turn is currently in flight. Used by IPC handler. */
+  hasActiveTurn(): boolean {
+    return this.currentAbortController !== null;
   }
 
   /** 설정 변경 시 Provider 재생성 — 벤더별 API 키 조회 */
@@ -978,6 +1030,17 @@ export class ConversationLoop {
       // TriggerExecutor's chat-busy guard), and a single failed chat turn
       // would permanently block trigger imports.
       this.currentAbortController = null;
+      // Drain any guidance that never reached a round boundary (single-
+      // round turn, or guidance queued after the last round closed). It
+      // cannot be applied to a future turn safely — the next turn's user
+      // intent should not be silently prefixed with stale mid-stream
+      // guidance — so drop with a warn.
+      if (this.guidanceQueue.length > 0) {
+        log.warn(
+          `runTurn: ${this.guidanceQueue.length} guide utterance(s) queued but never reached a round boundary — dropping`,
+        );
+        this.guidanceQueue = [];
+      }
     }
     // lastTurnScope must reflect any Option C request_plugin expansions so
     // the next turn's keyword-miss fallback keeps those plugins visible.
@@ -1220,6 +1283,23 @@ export class ConversationLoop {
           usage: turnUsage,
         };
       }
+      // Round-boundary guidance inject — drain any "guide" utterances
+      // queued via `ConversationLoop.queueGuidance` while the previous
+      // round was running. Only fires when `round > 0` so the user's
+      // initial turn input is never preempted by a stale queue (in
+      // practice the queue is empty at round 0 because the IPC handler
+      // rejects guide calls without an active turn).
+      if (round > 0 && this.guidanceQueue.length > 0) {
+        const joined = this.guidanceQueue.join("\n\n");
+        this.guidanceQueue = [];
+        this.history.append({
+          role: "user",
+          content: `[방향 지시 — 진행 중 추가 입력]\n${joined}`,
+        });
+        callbacks?.onGuidanceInjected?.(joined);
+        this.tracer.step("GUIDANCE_INJECTED", { round, len: joined.length });
+      }
+
       // §4.5.2 step 7 — LLM_STREAM
       this.tracer.step("LLM_STREAM", { round, model, toolCount: toolSchemas.length });
 
