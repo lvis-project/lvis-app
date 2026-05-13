@@ -22,7 +22,25 @@ const DEFAULT_REVIEWER_SETTINGS: PermissionReviewerSettings = {
   provider: "openai",
   model: "gpt-4o-mini",
   fallbackOnError: "deny",
+  interactive: { autoApprove: "off" },
 };
+
+const REVIEWER_INTERACTIVE_OPTIONS: Array<{
+  value: "off" | "low";
+  label: string;
+  description: string;
+}> = [
+  {
+    value: "off",
+    label: "끔",
+    description: "모든 mutating 호출에 대해 사용자 승인 모달을 띄웁니다. (안전 기본값)",
+  },
+  {
+    value: "low",
+    label: "LOW 자동 승인",
+    description: "리뷰어가 LOW로 판정한 경우 모달 없이 통과합니다. MED/HIGH는 여전히 모달.",
+  },
+];
 
 const REVIEWER_MODE_OPTIONS: Array<{
   value: PermissionReviewerMode;
@@ -542,6 +560,43 @@ export function PermissionsTab() {
             <p className="text-[11px] text-muted-foreground">
               LLM API 키는 지능 설정의 공급자 키를 사용합니다. 키가 없거나 재연결에 실패하면 설정은 저장되지 않습니다.
             </p>
+
+            <div className="space-y-2 border-t pt-3">
+              <div className="flex items-baseline justify-between">
+                <span className="text-xs font-medium">인터랙티브 자동 승인</span>
+                <span className="text-[11px] text-muted-foreground">issue #690</span>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                채팅 중 mutating 도구 호출에 대해 리뷰어가 LOW로 판정하면 모달 없이 자동 통과시킵니다.
+                MED/HIGH는 어떤 경우에도 모달이 떠야 합니다.
+              </p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {REVIEWER_INTERACTIVE_OPTIONS.map((opt) => (
+                  <button
+                    type="button"
+                    key={opt.value}
+                    data-testid={`reviewer-interactive-${opt.value}`}
+                    aria-pressed={reviewer.interactive.autoApprove === opt.value}
+                    disabled={reviewerBusy || reviewer.interactive.autoApprove === opt.value}
+                    onClick={() => void applyReviewerCommand(`interactive ${opt.value}`)}
+                    className={`flex w-full items-start gap-2.5 rounded-md border px-3 py-2 text-left text-xs transition-colors ${reviewer.interactive.autoApprove === opt.value ? "border-primary bg-primary/10" : "border-muted hover:border-muted-foreground/40"}`}
+                  >
+                    <span className={`mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full border-2 ${reviewer.interactive.autoApprove === opt.value ? "border-primary" : "border-muted-foreground"}`}>
+                      {reviewer.interactive.autoApprove === opt.value && <span className="h-2 w-2 rounded-full bg-primary" />}
+                    </span>
+                    <span className="flex-1 space-y-0.5">
+                      <span className="block font-medium">{opt.label}</span>
+                      <span className="block text-[11px] text-muted-foreground">{opt.description}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+              {reviewer.interactive.autoApprove === "low" && reviewer.mode === "disabled" ? (
+                <p className="rounded-md border border-warning/40 bg-warning/15 px-3 py-2 text-[11px] text-warning">
+                  ⚠ 리뷰어 모드가 "명시 승인만" 인 상태에서는 자동 승인이 동작하지 않습니다. "규칙 기반" 또는 "LLM" 모드를 활성화하세요.
+                </p>
+              ) : null}
+            </div>
           </div>
 
           <details

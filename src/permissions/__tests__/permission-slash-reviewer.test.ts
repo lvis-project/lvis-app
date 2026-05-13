@@ -69,6 +69,20 @@ describe("parsePermissionReviewerCommand", () => {
     });
   });
 
+  it("parses 'interactive off' (issue #690)", () => {
+    expect(parsePermissionReviewerCommand("interactive off")).toEqual({
+      verb: "interactive",
+      value: "off",
+    });
+  });
+
+  it("parses 'interactive low' (issue #690)", () => {
+    expect(parsePermissionReviewerCommand("interactive low")).toEqual({
+      verb: "interactive",
+      value: "low",
+    });
+  });
+
   it("rejects empty input", () => {
     const r = parsePermissionReviewerCommand("");
     expect(r).toEqual({ ok: false, error: expect.stringMatching(/missing subcommand/) });
@@ -132,6 +146,36 @@ describe("dispatchPermissionReviewerCommand — persistence", () => {
     await dispatchPermissionReviewerCommand({ verb: "fallback", value: "rule" }, path);
     const settings = readPermissionSettings(path);
     expect(settings.permissions.reviewer.fallbackOnError).toBe("rule");
+  });
+
+  it("interactive low persists (issue #690 — opt-in for auto-approve LOW)", async () => {
+    const path = tmpSettingsPath();
+    const r = await dispatchPermissionReviewerCommand(
+      { verb: "interactive", value: "low" },
+      path,
+    );
+    expect(r.ok).toBe(true);
+    const settings = readPermissionSettings(path);
+    expect(settings.permissions.reviewer.interactive.autoApprove).toBe("low");
+  });
+
+  it("interactive off persists and is the safe default", async () => {
+    const path = tmpSettingsPath();
+    // First flip to low, then back to off — confirms the toggle is bidirectional.
+    await dispatchPermissionReviewerCommand({ verb: "interactive", value: "low" }, path);
+    await dispatchPermissionReviewerCommand({ verb: "interactive", value: "off" }, path);
+    const settings = readPermissionSettings(path);
+    expect(settings.permissions.reviewer.interactive.autoApprove).toBe("off");
+  });
+
+  it("invalid interactive value returns ok:false (MED auto-approve is not in scope)", async () => {
+    const path = tmpSettingsPath();
+    const r = await dispatchPermissionReviewerCommand(
+      { verb: "interactive", value: "medium" },
+      path,
+    );
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/invalid interactive/);
   });
 
   it("invalid mode returns ok:false", async () => {
@@ -211,6 +255,7 @@ describe("normalizePermissionSettings — reviewer block", () => {
       provider: "openai",
       model: "gpt-4o-mini",
       fallbackOnError: "deny",
+      interactive: { autoApprove: "off" },
     });
   });
 
@@ -247,6 +292,7 @@ describe("normalizePermissionSettings — reviewer block", () => {
       provider: "anthropic",
       model: "claude-haiku-4-5",
       fallbackOnError: "deny",
+      interactive: { autoApprove: "off" },
     });
   });
 });

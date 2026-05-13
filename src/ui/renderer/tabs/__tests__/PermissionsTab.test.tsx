@@ -56,6 +56,7 @@ function installApi(disabledBatches: HookTrustRow[][]) {
               provider: "openai" as const,
               model: "gpt-4o-mini",
               fallbackOnError: "deny" as const,
+              interactive: { autoApprove: "off" as const },
             },
           };
         }
@@ -68,6 +69,7 @@ function installApi(disabledBatches: HookTrustRow[][]) {
               provider: "openai" as const,
               model: "gpt-4o-mini",
               fallbackOnError: "deny" as const,
+              interactive: { autoApprove: "off" as const },
             },
           };
         }
@@ -80,6 +82,7 @@ function installApi(disabledBatches: HookTrustRow[][]) {
               provider: "openai" as const,
               model: "gpt-4o-mini",
               fallbackOnError: "deny" as const,
+              interactive: { autoApprove: "off" as const },
             },
           };
         }
@@ -92,6 +95,7 @@ function installApi(disabledBatches: HookTrustRow[][]) {
               provider: "openai" as const,
               model: "gpt-4o-mini",
               fallbackOnError: "rule" as const,
+              interactive: { autoApprove: "off" as const },
             },
           };
         }
@@ -104,6 +108,7 @@ function installApi(disabledBatches: HookTrustRow[][]) {
               provider: "openai" as const,
               model: "gpt-5.5-mini",
               fallbackOnError: "deny" as const,
+              interactive: { autoApprove: "off" as const },
             },
           };
         }
@@ -204,6 +209,7 @@ describe("PermissionsTab hook quarantine notice", () => {
             provider: "openai" as const,
             model: "gpt-4o-mini",
             fallbackOnError: "deny" as const,
+            interactive: { autoApprove: "off" as const },
           },
         };
       }
@@ -216,6 +222,7 @@ describe("PermissionsTab hook quarantine notice", () => {
             provider: "openai" as const,
             model: "gpt-4o-mini",
             fallbackOnError: "deny" as const,
+            interactive: { autoApprove: "off" as const },
           },
         };
       }
@@ -348,6 +355,54 @@ describe("PermissionsTab hook quarantine notice", () => {
     expect((screen.getByTestId("reviewer-model-input") as HTMLInputElement).value).toBe("gpt-5.5-mini");
   });
 
+  it("toggles interactive auto-approve through reviewerDispatch (issue #690)", async () => {
+    const api = installApi([[]]);
+    api.permission.reviewerDispatch.mockImplementation(async (rawArgs: string) => {
+      if (rawArgs === "show") {
+        return {
+          ok: true as const,
+          verb: "show" as const,
+          settings: {
+            mode: "rule" as const,
+            provider: "openai" as const,
+            model: "gpt-4o-mini",
+            fallbackOnError: "deny" as const,
+            interactive: { autoApprove: "off" as const },
+          },
+        };
+      }
+      if (rawArgs === "interactive low") {
+        return {
+          ok: true as const,
+          verb: "interactive" as const,
+          settings: {
+            mode: "rule" as const,
+            provider: "openai" as const,
+            model: "gpt-4o-mini",
+            fallbackOnError: "deny" as const,
+            interactive: { autoApprove: "low" as const },
+          },
+        };
+      }
+      throw new Error(`unexpected reviewerDispatch: ${rawArgs}`);
+    });
+
+    await act(async () => {
+      render(<PermissionsTab />);
+    });
+    // Initial state: "off" is selected.
+    expect(screen.getByTestId("reviewer-interactive-off").getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByTestId("reviewer-interactive-low").getAttribute("aria-pressed")).toBe("false");
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("reviewer-interactive-low"));
+    });
+
+    expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("interactive low");
+    expect(screen.getByTestId("reviewer-interactive-low").getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByTestId("reviewer-interactive-off").getAttribute("aria-pressed")).toBe("false");
+  });
+
   it("keeps the prior reviewer mode when runtime rewire fails", async () => {
     const api = installApi([[]]);
     api.permission.reviewerDispatch.mockImplementation(async (rawArgs: string) => {
@@ -360,6 +415,7 @@ describe("PermissionsTab hook quarantine notice", () => {
             provider: "openai" as const,
             model: "gpt-4o-mini",
             fallbackOnError: "deny" as const,
+            interactive: { autoApprove: "off" as const },
           },
         };
       }

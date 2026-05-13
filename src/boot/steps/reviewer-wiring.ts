@@ -194,8 +194,17 @@ export function wireReviewerAgent(deps: WireReviewerDeps): WireReviewerResult {
       provider: settings.provider,
       model: settings.model,
       fallbackOnError: settings.fallbackOnError,
+      // Include interactive auto-approve in the cache scope so a setting
+      // change naturally invalidates cached verdicts. Without this,
+      // toggling autoApprove off → on could reuse a stale verdict that
+      // was produced under different policy assumptions.
+      interactiveAutoApprove: settings.interactive.autoApprove,
     },
   });
+  // Issue #690 — push the interactive auto-approve policy onto the
+  // PermissionManager so its gate can opt-in to the foreground reviewer
+  // lane without re-reading settings on every tool call.
+  deps.permissionManager.setInteractiveAutoApprove(settings.interactive.autoApprove);
   return { classifier, cache, deferredQueue, appliedSettings: settings };
 }
 

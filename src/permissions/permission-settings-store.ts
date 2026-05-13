@@ -34,15 +34,36 @@ export type ReviewerProvider = "openai" | "anthropic" | "google";
 export type ReviewerFallbackOnError = "deny" | "rule";
 
 /**
+ * Interactive auto-approve policy — issue #690.
+ *
+ *   - "off"  : reviewer never auto-approves in interactive (foreground)
+ *              flow. Every ask hits the modal. Default — safest.
+ *   - "low"  : reviewer's LOW verdict in interactive flow silently
+ *              allows the call without showing the modal. MEDIUM/HIGH
+ *              still surface to the modal.
+ *
+ * MED/HIGH is intentionally NOT auto-approvable — MEDIUM means
+ * "writes to user data dir / idempotent network", which still warrants
+ * human confirmation. Adding "low-medium" later would be a follow-up,
+ * not a hidden enum value here.
+ */
+export type ReviewerInteractiveAutoApprove = "off" | "low";
+
+export interface ReviewerInteractiveBlock {
+  autoApprove: ReviewerInteractiveAutoApprove;
+}
+
+/**
  * Permission policy P3 — `permissions.reviewer` block. Defaults per spec v2.1 §11
  * binding decision: provider="openai", model="gpt-4o-mini",
- * fallbackOnError="deny".
+ * fallbackOnError="deny", interactive.autoApprove="off".
  */
 export interface ReviewerSettingsBlock {
   mode: ReviewerMode;
   provider: ReviewerProvider;
   model: string;
   fallbackOnError: ReviewerFallbackOnError;
+  interactive: ReviewerInteractiveBlock;
 }
 
 export interface PermissionSettingsBlock {
@@ -59,7 +80,11 @@ const DEFAULT_REVIEWER: ReviewerSettingsBlock = {
   provider: "openai",
   model: "gpt-4o-mini",
   fallbackOnError: "deny",
+  interactive: { autoApprove: "off" },
 };
+
+const REVIEWER_INTERACTIVE_AUTO_APPROVES: ReadonlySet<ReviewerInteractiveAutoApprove> =
+  new Set(["off", "low"]);
 
 const DEFAULT_FILE: PermissionSettingsFile = {
   permissions: {
@@ -131,7 +156,7 @@ export function normalizePermissionSettings(
  * settings file may be hand-edited with bad values).
  */
 function normalizeReviewerBlock(parsed: unknown): ReviewerSettingsBlock {
-  if (!parsed || typeof parsed !== "object") return { ...DEFAULT_REVIEWER };
+  if (!parsed || typeof parsed !== "object") return structuredClone(DEFAULT_REVIEWER);
   const obj = parsed as Record<string, unknown>;
   const mode =
     typeof obj.mode === "string" && REVIEWER_MODES.has(obj.mode as ReviewerMode)
@@ -151,7 +176,21 @@ function normalizeReviewerBlock(parsed: unknown): ReviewerSettingsBlock {
     REVIEWER_FALLBACKS.has(obj.fallbackOnError as ReviewerFallbackOnError)
       ? (obj.fallbackOnError as ReviewerFallbackOnError)
       : DEFAULT_REVIEWER.fallbackOnError;
-  return { mode, provider, model, fallbackOnError };
+  const interactive = normalizeInteractiveBlock(obj.interactive);
+  return { mode, provider, model, fallbackOnError, interactive };
+}
+
+function normalizeInteractiveBlock(parsed: unknown): ReviewerInteractiveBlock {
+  if (!parsed || typeof parsed !== "object") {
+    return { ...DEFAULT_REVIEWER.interactive };
+  }
+  const obj = parsed as Record<string, unknown>;
+  const autoApprove =
+    typeof obj.autoApprove === "string" &&
+    REVIEWER_INTERACTIVE_AUTO_APPROVES.has(obj.autoApprove as ReviewerInteractiveAutoApprove)
+      ? (obj.autoApprove as ReviewerInteractiveAutoApprove)
+      : DEFAULT_REVIEWER.interactive.autoApprove;
+  return { autoApprove };
 }
 
 /**
@@ -233,6 +272,15 @@ function validateReviewerPatch(patch: ReviewerSettingsBlock): ReviewerSettingsBl
   }
   if (typeof patch.model !== "string" || patch.model.length === 0) {
     throw new Error("permissions.reviewer.model must be a non-empty string");
+  }
+  if (
+    !patch.interactive ||
+    !REVIEWER_INTERACTIVE_AUTO_APPROVES.has(patch.interactive.autoApprove)
+  ) {
+    throw new Error(
+      `permissions.reviewer.interactive.autoApprove invalid: '${patch.interactive?.autoApprove}'. ` +
+      `Allowed: ${[...REVIEWER_INTERACTIVE_AUTO_APPROVES].join("|")}`,
+    );
   }
   return patch;
 }
