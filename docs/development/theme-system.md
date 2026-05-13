@@ -36,7 +36,7 @@ This means:
   alpha syntax keeps working.
 - **Semantic tokens** (`--background`, `--foreground`, `--primary`,
   `--muted-foreground`, `--border`, `--ring`, `--destructive`, `--warning`,
-  `--success`, …) live inside `[data-theme="<id>"]` blocks. Each variant
+  `--success`, …) live inside `[data-theme-bundle="<id>"]` blocks. Each bundle
   re-points its semantic tokens to a different set of primitives.
 - **Components** consume semantic tokens **only**, via Tailwind v4 utilities
   exposed from the `@theme inline` block in `src/styles.css`
@@ -49,17 +49,14 @@ rebuild.
 
 ---
 
-## 2. Theme variants shipped
+## 2. Theme bundles shipped
 
-| `data-theme=` | When it applies                                              |
-|---------------|--------------------------------------------------------------|
-| `dark`        | Default. App default + the historical look.                  |
-| `light`       | User opt-in. Bright surfaces, dark text.                     |
-| `high-contrast` | Accessibility — pure black/white + saturated yellow accent. |
-
-The user picks via Settings → 테마. The `system` choice is **not** a theme
-in itself; it resolves at runtime to either `light` or `dark` based on
-`prefers-color-scheme`, and the renderer follows OS changes live.
+The user picks a bundle via Settings → 테마. Built-in bundle ids are defined
+in `src/shared/theme-bundles.ts`; the fresh-install default is
+`tokyo-night`. `followSystem` is a separate boolean, not a bundle id. When it
+is enabled and the selected bundle is one of the LGE light/dark pair, the
+renderer resolves the active bundle from `prefers-color-scheme` and follows OS
+changes live.
 
 ---
 
@@ -67,26 +64,29 @@ in itself; it resolves at runtime to either `light` or `dark` based on
 
 ```
 ~/.lvis/settings.json
-  └─ appearance.theme   ←── persisted preference (string)
+  └─ appearance.schemaVersion: 2
+     appearance.bundleId       ←── persisted theme bundle id
+     appearance.followSystem   ←── optional OS preference tracking
                                   │
                                   ▼
               ThemeProvider  (src/ui/renderer/theme/)
-                                  │  resolves "system" → "light"|"dark"
+                                  │  resolves followSystem for LGE pair
                                   ▼
-              <html data-theme="…" class="lvis-theme-…">
+              <html data-theme-bundle="…" data-shell="…" class="lvis-bundle-…">
                                   │
                                   ▼
-                  [data-theme] block in styles.css
+                  [data-theme-bundle] block in styles.css
 ```
 
 - `<ThemeProvider api={api}>` is mounted at the App composition root
   (`src/ui/renderer/App.tsx`).
-- It calls `api.getSettings()` once on mount and applies the persisted
-  preference. Failure to read settings is **not** fatal — the app boots
-  with `system` as the implicit default.
-- `setPreference()` writes `data-theme` immediately and calls
-  `api.updateSettings({ appearance: { theme } })` in the background.
-- When the active preference is `system`, the provider listens to
+- It calls `api.getSettings()` once on mount and applies the v2
+  `appearance.bundleId` bundle. Failure to read settings is **not** fatal —
+  the app boots with the default bundle.
+- `setBundle()` writes `data-theme-bundle` / `data-shell` immediately and calls
+  `api.updateSettings({ appearance: { schemaVersion: 2, bundleId } })` in the
+  background.
+- When `appearance.followSystem` is true, the provider listens to
   `matchMedia("(prefers-color-scheme: light)")` so OS-level toggles flow
   through with no reload.
 - Test escape hatch: `useOptionalTheme()` returns `null` instead of
@@ -100,18 +100,18 @@ Use case: "I need a `info-banner` color separate from `primary`."
 
 1. Pick the semantic name. Use *meaning*, not appearance — `info`, not
    `cyan`. Two foreground/background pairs is the typical shape.
-2. Add the variable to **every** `[data-theme="…"]` block in
+2. Add the variable to **every** `[data-theme-bundle="…"]` block in
    `src/styles.css`, pointing at an existing primitive (or add a new
    primitive if no existing one fits):
 
    ```css
-   :root, :root[data-theme="dark"] {
+   :root[data-theme-bundle="tokyo-night"] {
      /* existing tokens … */
      --info: var(--p-blue-400);
      --info-foreground: var(--p-slate-950);
    }
-   :root[data-theme="light"] { --info: var(--p-blue-600); --info-foreground: var(--p-slate-50); }
-   :root[data-theme="high-contrast"] { --info: 200 100% 60%; --info-foreground: 0 0% 0%; }
+   :root[data-theme-bundle="lge-light"] { --info: var(--p-blue-600); --info-foreground: var(--p-slate-50); }
+   :root[data-theme-bundle="high-contrast"] { --info: 200 100% 60%; --info-foreground: 0 0% 0%; }
    ```
 
 3. Expose it in the `@theme inline` block in `src/styles.css`:
@@ -127,18 +127,17 @@ The PR diff is CSS-only. No component changes.
 
 ---
 
-## 5. Adding a new theme variant
+## 5. Adding a new theme bundle
 
-Use case: "I want a 'sepia' variant for night reading."
+Use case: "I want a 'sepia' bundle for night reading."
 
-1. Add the literal to the `ThemePreference` union in
-   `src/data/settings-store.ts` and the `VALID_THEMES` constant.
-2. Mirror the union in `src/ui/renderer/theme/types.ts` and append the
-   id to `THEME_PREFERENCES`.
-3. Add a `[data-theme="sepia"]` block in `src/styles.css` that remaps every
-   semantic token. Copy from `[data-theme="light"]` and tune.
-4. Add an entry to the `OPTIONS` array in
-   `src/ui/renderer/tabs/AppearanceTab.tsx`.
+1. Add the bundle id to `BUNDLE_IDS` in `src/shared/theme-bundles.ts`.
+2. Add a `ThemeBundle` module under `src/ui/renderer/theme/bundles/` and
+   register it in `src/ui/renderer/theme/bundles/index.ts`.
+3. Add a `[data-theme-bundle="sepia"]` block in `src/styles.css` that remaps
+   every semantic token. Copy from a similar bundle and tune.
+4. AppearanceTab renders from the bundle registry; no separate options list
+   should be hard-coded.
 5. Run `bun run typecheck && bun run test`.
 
 Done. No component edits.

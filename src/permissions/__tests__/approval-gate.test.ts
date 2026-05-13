@@ -93,6 +93,118 @@ describe("ApprovalGate", () => {
     expect(result.requestId).toBe("req-1");
   });
 
+  it("audits agent-action issuer plugin id and scope on request and decision", async () => {
+    const wc = makeMockWebContents();
+    const auditLogger = { log: vi.fn() };
+    const gate = new ApprovalGate(wc as never, undefined, 1_000, auditLogger as never);
+    const req = makeRequest({
+      id: "req-agent-action-1",
+      category: "agent-action",
+      kind: "agent-action",
+      toolCategory: "meta",
+      source: "plugin",
+      sourcePluginId: "sample-plugin",
+      approvalScope: "agent_external_api_call",
+      trustOrigin: "plugin-emitted",
+    });
+
+    const promise = gate.requestAndWait(req);
+    const { nonce, hmac } = lastSentNonceHmac(wc);
+    gate.resolve(req.id, {
+      requestId: req.id,
+      choice: "allow-once",
+      nonce,
+      hmac,
+    });
+    await expect(promise).resolves.toMatchObject({ choice: "allow-once" });
+
+    const rows = auditLogger.log.mock.calls.map(([entry]) => {
+      const auditEntry = entry as { input?: string; output?: string };
+      return auditEntry.input ?? auditEntry.output ?? "";
+    });
+    const requested = rows.find((row) => row.includes("[approval:requested] req-agent-action-1"));
+    const decided = rows.find((row) => row.includes("[approval:decided] req-agent-action-1"));
+    expect(requested).toContain("category=agent-action");
+    expect(requested).toContain("kind=agent-action");
+    expect(requested).toContain("source=plugin");
+    expect(requested).toContain("sourcePluginId=sample-plugin");
+    expect(requested).toContain("approvalScope=agent_external_api_call");
+    expect(decided).toContain("category=agent-action");
+    expect(decided).toContain("kind=agent-action");
+    expect(decided).toContain("source=plugin");
+    expect(decided).toContain("sourcePluginId=sample-plugin");
+    expect(decided).toContain("approvalScope=agent_external_api_call");
+  });
+
+  it("audits agent-action issuer plugin id and scope on timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      const wc = makeMockWebContents();
+      const auditLogger = { log: vi.fn() };
+      const gate = new ApprovalGate(wc as never, undefined, 1_000, auditLogger as never);
+      const req = makeRequest({
+        id: "req-agent-timeout",
+        category: "agent-action",
+        kind: "agent-action",
+        toolCategory: "meta",
+        source: "plugin",
+        sourcePluginId: "sample-plugin",
+        approvalScope: "agent_external_api_call",
+      });
+
+      const promise = gate.requestAndWait(req);
+      vi.advanceTimersByTime(1_001);
+      await expect(promise).resolves.toMatchObject({ choice: "deny-once" });
+
+      const rows = auditLogger.log.mock.calls.map(([entry]) => {
+        const auditEntry = entry as { input?: string; output?: string };
+        return auditEntry.input ?? auditEntry.output ?? "";
+      });
+      const timeout = rows.find((row) => row.includes("[approval:timeout] req-agent-timeout"));
+      expect(timeout).toContain("category=agent-action");
+      expect(timeout).toContain("kind=agent-action");
+      expect(timeout).toContain("sourcePluginId=sample-plugin");
+      expect(timeout).toContain("approvalScope=agent_external_api_call");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("audits agent-action issuer plugin id and scope on nonce mismatch", async () => {
+    const wc = makeMockWebContents();
+    const auditLogger = { log: vi.fn() };
+    const gate = new ApprovalGate(wc as never, undefined, 1_000, auditLogger as never);
+    const req = makeRequest({
+      id: "req-agent-nonce-mismatch",
+      category: "agent-action",
+      kind: "agent-action",
+      toolCategory: "meta",
+      source: "plugin",
+      sourcePluginId: "sample-plugin",
+      approvalScope: "agent_external_api_call",
+    });
+
+    const promise = gate.requestAndWait(req);
+    const { hmac } = lastSentNonceHmac(wc);
+    gate.resolve(req.id, {
+      requestId: req.id,
+      choice: "allow-once",
+      nonce: "00000000000000000000000000000000",
+      hmac,
+    });
+    await expect(promise).resolves.toMatchObject({ choice: "deny-once" });
+
+    const rows = auditLogger.log.mock.calls.map(([entry]) => {
+      const auditEntry = entry as { input?: string; output?: string };
+      return auditEntry.input ?? auditEntry.output ?? "";
+    });
+    const mismatch = rows.find((row) => row.includes("[approval:nonce-mismatch] req-agent-nonce-mismatch"));
+    expect(mismatch).toContain("category=agent-action");
+    expect(mismatch).toContain("kind=agent-action");
+    expect(mismatch).toContain("sourcePluginId=sample-plugin");
+    expect(mismatch).toContain("approvalScope=agent_external_api_call");
+  });
+
   it("timeout returns deny-once after timeoutMs", async () => {
     vi.useFakeTimers();
     const wc = makeMockWebContents();
@@ -240,8 +352,17 @@ describe("ApprovalGate", () => {
 
   it("isDestroyed() true → deny-once immediately, no pending entry", async () => {
     const wc = makeMockWebContents({ isDestroyed: true });
-    const gate = new ApprovalGate(wc as never);
-    const req = makeRequest({ id: "req-destroyed" });
+    const auditLogger = { log: vi.fn() };
+    const gate = new ApprovalGate(wc as never, undefined, 1_000, auditLogger as never);
+    const req = makeRequest({
+      id: "req-destroyed",
+      category: "agent-action",
+      kind: "agent-action",
+      toolCategory: "meta",
+      source: "plugin",
+      sourcePluginId: "sample-plugin",
+      approvalScope: "agent_external_api_call",
+    });
 
     const result = await gate.requestAndWait(req);
 
@@ -250,6 +371,9 @@ describe("ApprovalGate", () => {
     // send should never be called when already destroyed
     expect(wc.send).not.toHaveBeenCalled();
     expect(gate.pendingCount).toBe(0);
+    const auditEntry = auditLogger.log.mock.calls[0]?.[0] as { output?: string } | undefined;
+    expect(auditEntry?.output).toContain("sourcePluginId=sample-plugin");
+    expect(auditEntry?.output).toContain("approvalScope=agent_external_api_call");
   });
 
   it("webContents.send throws → deny-once + pendingCount === 0", async () => {
@@ -290,6 +414,34 @@ describe("ApprovalGate", () => {
     // The pattern that triggered the block is surfaced to the caller
     expect(result.rememberPattern).toContain("Sensitive credential path blocked");
     expect(result.rememberPattern).toContain("**/.ssh/**");
+  });
+
+  it("sensitive path hard-block audit preserves agent-action plugin and scope provenance", async () => {
+    const wc = makeMockWebContents();
+    const auditLogger = { log: vi.fn() };
+    const gate = new ApprovalGate(wc as never, undefined, 1_000, auditLogger as never);
+    const req = makeRequest({
+      id: "req-sensitive-agent-action",
+      category: "agent-action",
+      kind: "agent-action",
+      toolName: "plugin_file_review",
+      toolCategory: "meta",
+      source: "plugin",
+      sourcePluginId: "sample-plugin",
+      approvalScope: "agent_external_api_call",
+      target: { filePath: "/Users/ken/.ssh/id_rsa" },
+    });
+
+    const result = await gate.requestAndWait(req);
+
+    expect(result.choice).toBe("deny-once");
+    expect(wc.send).not.toHaveBeenCalled();
+    const auditEntry = auditLogger.log.mock.calls[0]?.[0] as { output?: string } | undefined;
+    expect(auditEntry?.output).toContain("[approval:sensitive-path-blocked]");
+    expect(auditEntry?.output).toContain("category=agent-action");
+    expect(auditEntry?.output).toContain("kind=agent-action");
+    expect(auditEntry?.output).toContain("sourcePluginId=sample-plugin");
+    expect(auditEntry?.output).toContain("approvalScope=agent_external_api_call");
   });
 
   // ── S4: isReadOnly short-circuit ──────────────────
@@ -716,6 +868,38 @@ describe("ApprovalGate", () => {
     }));
     expect(stub).not.toHaveBeenCalled();
     const sent = (wc.send.mock.calls[0] as [string, ApprovalRequest])[1];
+    expect(sent.sandboxCapability).toBeUndefined();
+  });
+
+  it("does NOT inject sandboxCapability for agent-action requests", () => {
+    const wc = makeMockWebContents();
+    const stub = vi.fn(() => ({
+      kind: "bubblewrap" as const,
+      confidence: "verified" as const,
+      platform: "linux" as NodeJS.Platform,
+      reason: "should NOT be used",
+    }));
+    const gate = new ApprovalGate(
+      wc as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      stub,
+    );
+    gate.requestAndWait(makeRequest({
+      id: "req-agent-action",
+      category: "agent-action",
+      kind: "agent-action",
+      toolName: "sample_plugin_decide_approval_with_host",
+      toolCategory: "meta",
+      args: { approvalId: 42 },
+      source: "plugin",
+    }));
+    expect(stub).not.toHaveBeenCalled();
+    const sent = (wc.send.mock.calls[0] as [string, ApprovalRequest])[1];
+    expect(sent.category).toBe("agent-action");
+    expect(sent.kind).toBe("agent-action");
     expect(sent.sandboxCapability).toBeUndefined();
   });
 

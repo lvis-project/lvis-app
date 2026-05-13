@@ -59,15 +59,17 @@ function maskArgsForDisplay(value: unknown, detections: Set<string>): unknown {
 export type ApprovalMode = "default" | "ask_all" | "plan" | "full_auto";
 
 /**
- * Permission policy P2.5 — discriminated kinds for the approval modal. Default `"tool"`
- * is the normal §6.3 Layer 3 ask; `"out-of-allowed-dir"` is the Layer 1
- * directory-confirm variant which carries auto-suggest payload.
+ * Permission policy P2.5 — discriminated kinds for the approval modal.
+ * Default `"tool"` is the normal §6.3 Layer 3 ask;
+ * `"out-of-allowed-dir"` is the Layer 1 directory-confirm variant; and
+ * `"agent-action"` is a plugin-origin host approval request that does
+ * not correspond to a host tool execution.
  */
-export type ApprovalKind = "tool" | "out-of-allowed-dir";
+export type ApprovalKind = "tool" | "out-of-allowed-dir" | "agent-action";
 
 export interface ApprovalRequest {
   id: string;
-  category: "tool";
+  category: "tool" | "agent-action";
   /**
    * Permission policy P2.5 — discriminator for the renderer to pick the right card.
    * Defaults to `"tool"` when omitted (backwards-compatible).
@@ -83,6 +85,10 @@ export interface ApprovalRequest {
   args: unknown;
   reason: string;
   source?: "builtin" | "plugin" | "mcp";
+  /** Plugin id that issued this approval request, when source === "plugin". */
+  sourcePluginId?: string;
+  /** Manifest-declared plugin approval scope for agent-action requests. */
+  approvalScope?: string;
   createdAt: number;
   /** PolicyFile.requireExplicitApproval — renderer가 dismiss 동작을 분기하는 데 사용 */
   requireExplicit: boolean;
@@ -159,8 +165,8 @@ export interface ApprovalRequest {
    */
   nonce?: string;
   /**
-   * §D2: HMAC-SHA256(sessionKey, `${id}|${nonce}|${canonicalArgs}`) —
-   * hex encoded. The main process re-derives this from the stored pending
+   * §D2: HMAC-SHA256(sessionKey, `${id}|${nonce}|${toolName}|${canonicalArgs}`)
+   * — hex encoded. The main process re-derives this from the stored pending
    * entry on receipt of the decision and rejects on mismatch.
    */
   hmac?: string;
@@ -204,10 +210,39 @@ interface PendingEntry {
   timer: ReturnType<typeof setTimeout>;
   /** Permission origin captured with the approval prompt. */
   trustOrigin: string;
+  toolName: string;
+  category: "tool" | "agent-action";
+  kind?: ApprovalKind;
+  toolCategory?: ToolCategory;
+  source?: "builtin" | "plugin" | "mcp";
+  sourcePluginId?: string;
+  approvalScope?: string;
   /** §D2: nonce issued for this request (echoed back verbatim) */
   nonce: string;
   /** §D2: expected HMAC for this request */
   expectedHmac: string;
+}
+
+function formatApprovalAuditFields(fields: {
+  toolName: string;
+  category: "tool" | "agent-action";
+  kind?: ApprovalKind;
+  toolCategory?: ToolCategory;
+  source?: "builtin" | "plugin" | "mcp";
+  sourcePluginId?: string;
+  approvalScope?: string;
+  trustOrigin?: string;
+}): string {
+  return [
+    `toolName=${fields.toolName}`,
+    `category=${fields.category}`,
+    `toolCategory=${fields.toolCategory ?? "unknown"}`,
+    `kind=${fields.kind ?? "tool"}`,
+    `source=${fields.source ?? "unknown"}`,
+    `sourcePluginId=${fields.sourcePluginId ?? "none"}`,
+    `approvalScope=${fields.approvalScope ?? "none"}`,
+    `trustOrigin=${fields.trustOrigin ?? "unknown"}`,
+  ].join(" ");
 }
 
 /**
@@ -338,13 +373,14 @@ export class ApprovalGate {
     // Round-3 code-reviewer MAJOR + round-4 critic CRITICAL + round-5
     // critic MAJOR-1 — sandbox capability injection is scoped to the
     // tool-execution approval surface. Non-execution surfaces
-    // (out-of-allowed-dir directory confirm, mode-change config asks)
+    // (out-of-allowed-dir directory confirm, agent-action/mode-change
+    // config asks)
     // have no sandbox row in their DOM and showing "격리: none" on a
     // config change is misleading because no tool will run.
     //
     // The injection guard checks BOTH `kind` AND `toolCategory`:
     //   - `kind === "out-of-allowed-dir"`        → no injection
-    //   - `kind === "mode-change"`               → no injection (round-5)
+    //   - `kind === "agent-action"`              → no injection
     //   - `toolCategory === "meta"`              → no injection
     //                                              (catches mode-change
     //                                              asks that default
@@ -379,7 +415,7 @@ export class ApprovalGate {
           timestamp: new Date().toISOString(),
           sessionId: "approval-gate",
           type: "approval",
-          output: `[approval:sensitive-path-blocked] ${fullReq.id} toolName=${fullReq.toolName} trustOrigin=${fullReq.trustOrigin ?? "unknown"} raw=${rawCandidate} canonical=${caseFolded} pattern=${matchedPattern} → deny-once (hard-block)`,
+          output: `[approval:sensitive-path-blocked] ${fullReq.id} ${formatApprovalAuditFields(fullReq)} raw=${rawCandidate} canonical=${caseFolded} pattern=${matchedPattern} → deny-once (hard-block)`,
         });
         return {
           requestId: fullReq.id,
@@ -400,7 +436,8 @@ export class ApprovalGate {
       fullReq.isReadOnly === true &&
       fullReq.mode !== "ask_all" &&
       fullReq.mode !== "plan" &&
-      fullReq.kind !== "out-of-allowed-dir"
+      fullReq.kind !== "out-of-allowed-dir" &&
+      fullReq.kind !== "agent-action"
     ) {
       this.auditLogger?.log({
         timestamp: new Date().toISOString(),
@@ -421,7 +458,7 @@ export class ApprovalGate {
         timestamp: new Date().toISOString(),
         sessionId: "approval-gate",
         type: "approval",
-        output: `[approval:send-failed] ${fullReq.id} toolName=${fullReq.toolName} trustOrigin=${fullReq.trustOrigin ?? "unknown"} — webContents already destroyed → deny-once`,
+        output: `[approval:send-failed] ${fullReq.id} ${formatApprovalAuditFields(fullReq)} — webContents already destroyed → deny-once`,
       });
       return { requestId: fullReq.id, choice: "deny-once" };
     }
@@ -431,13 +468,9 @@ export class ApprovalGate {
       timestamp: new Date().toISOString(),
       sessionId: "approval-gate",
       type: "approval",
-      // Round-4 critic CRITICAL — emit `toolCategory` alongside the
-      // top-level `category` discriminator so forensic readers can
-      // distinguish a tool ask (toolCategory="shell"/"write"/...) from a
-      // mode-change ask (toolCategory="meta"). Without this, both
-      // shapes serialize as `category=tool` and incident replay can't
-      // tell them apart.
-      input: `[approval:requested] ${fullReq.id} toolName=${fullReq.toolName} category=${fullReq.category} toolCategory=${fullReq.toolCategory ?? "unknown"} kind=${fullReq.kind ?? "tool"} source=${fullReq.source ?? "unknown"} trustOrigin=${fullReq.trustOrigin ?? "unknown"}`,
+      // Emit provenance fields needed to distinguish a host tool ask from a
+      // plugin-origin agent-action request during incident replay.
+      input: `[approval:requested] ${fullReq.id} ${formatApprovalAuditFields(fullReq)}`,
     });
 
     // Issue #260 — surface a system notification when an approval is about
@@ -477,7 +510,7 @@ export class ApprovalGate {
           timestamp: new Date().toISOString(),
           sessionId: "approval-gate",
           type: "approval",
-          output: `[approval:timeout] ${fullReq.id} toolName=${fullReq.toolName} trustOrigin=${fullReq.trustOrigin ?? "unknown"} → deny-once`,
+          output: `[approval:timeout] ${fullReq.id} ${formatApprovalAuditFields(fullReq)} → deny-once`,
         });
         resolve({
           requestId: fullReq.id,
@@ -490,6 +523,13 @@ export class ApprovalGate {
         reject,
         timer,
         trustOrigin: fullReq.trustOrigin ?? "unknown",
+        toolName: fullReq.toolName,
+        category: fullReq.category,
+        kind: fullReq.kind,
+        toolCategory: fullReq.toolCategory,
+        source: fullReq.source,
+        sourcePluginId: fullReq.sourcePluginId,
+        approvalScope: fullReq.approvalScope,
         nonce,
         expectedHmac,
       });
@@ -522,7 +562,7 @@ export class ApprovalGate {
           timestamp: new Date().toISOString(),
           sessionId: "approval-gate",
           type: "approval",
-          output: `[approval:send-failed] ${fullReq.id} toolName=${fullReq.toolName} trustOrigin=${fullReq.trustOrigin ?? "unknown"} error=${sendErr instanceof Error ? sendErr.message : String(sendErr)} → deny-once`,
+          output: `[approval:send-failed] ${fullReq.id} ${formatApprovalAuditFields(fullReq)} error=${sendErr instanceof Error ? sendErr.message : String(sendErr)} → deny-once`,
         });
         resolve({ requestId: fullReq.id, choice: "deny-once" });
       }
@@ -548,7 +588,7 @@ export class ApprovalGate {
         timestamp: new Date().toISOString(),
         sessionId: "approval-gate",
         type: "approval",
-        output: `[approval:nonce-mismatch] ${requestId} trustOrigin=${entry.trustOrigin} choice=${decision.choice} nonceProvided=${decision.nonce ? "yes" : "no"} hmacProvided=${decision.hmac ? "yes" : "no"} → deny-once (forced)`,
+        output: `[approval:nonce-mismatch] ${requestId} ${formatApprovalAuditFields(entry)} choice=${decision.choice} nonceProvided=${decision.nonce ? "yes" : "no"} hmacProvided=${decision.hmac ? "yes" : "no"} → deny-once (forced)`,
       });
       entry.resolve({
         requestId,
@@ -565,7 +605,7 @@ export class ApprovalGate {
       timestamp: new Date().toISOString(),
       sessionId: "approval-gate",
       type: "approval",
-      output: `[approval:decided] ${requestId} trustOrigin=${entry.trustOrigin} choice=${decision.choice} rememberPattern=${decision.rememberPattern ?? "none"}`,
+      output: `[approval:decided] ${requestId} ${formatApprovalAuditFields(entry)} choice=${decision.choice} rememberPattern=${decision.rememberPattern ?? "none"}`,
     });
     entry.resolve(decision);
   }

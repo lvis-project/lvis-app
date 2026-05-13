@@ -139,7 +139,7 @@ export function LlmTab(props: LlmTabProps) {
           <Input type="password" placeholder={hasKey ? "새 키로 교체" : vendorInfo.placeholder} value={keyInput} onChange={(e) => setKeyInput(e.target.value)} />
         </div>
       )}
-      <div className="space-y-2"><label className="text-sm font-medium">모델</label><Input value={model} onChange={(e) => setModel(e.target.value)} placeholder={vendorInfo.defaultModel} /></div>
+      <div className="space-y-2"><label className="text-sm font-medium">모델</label><Input data-testid="llm-model-input" value={model} onChange={(e) => setModel(e.target.value)} placeholder={vendorInfo.defaultModel} /></div>
       <div className="space-y-2 rounded-md border p-3">
         <label className="flex items-center justify-between text-sm font-medium">
           <span>Extended Thinking / Reasoning</span>

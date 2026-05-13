@@ -659,12 +659,8 @@ const api = {
       id: string,
       decision: "approved" | "rejected",
       reason: string | undefined,
-      // Round-5 architect + critic MAJOR — `approvalSource` is REQUIRED
-      // (no default). Callers must explicitly opt into a provenance
-      // value; this eliminates the default-param softness that masked
-      // missing arguments as silent `"button"` writes to the HMAC-
-      // chained audit log. JS callers that pass `undefined` will fail
-      // the main-side enum validator and get `invalid-params`.
+      // Required: callers must explicitly opt into a provenance value
+      // before main writes the HMAC-chained audit row.
       approvalSource: "button" | "natural-language",
     ) =>
       ipcRenderer.invoke(PERMISSIONS.deferredResolve, {

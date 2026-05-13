@@ -4,10 +4,10 @@
  * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 7.
  *
  * Each audit line carries `prevHash = HMAC(secret, prevLine)` where
- * `prevLine` is the previous line's *exact JSON serialization* with
- * the trailing newline. The first line of a file uses the genesis
- * marker `"genesis"` so consumers can detect and skip it without a
- * stored "previous". Tampering with any line N forces the recomputed
+ * `prevLine` is the previous line's exact raw JSON string as stored in the
+ * JSONL body, without the trailing newline. The first line of a file uses
+ * `HMAC(secret, GENESIS_MARKER)` where `GENESIS_MARKER = "genesis"`.
+ * Tampering with any line N forces the recomputed
  * prevHash at line N+1 to mismatch — exposing the tampered region.
  *
  * The HMAC secret lives behind Electron's OS-backed `safeStorage`

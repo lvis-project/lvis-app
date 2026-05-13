@@ -23,7 +23,9 @@
  *   AppContainer (Windows). The detection function returns `kind: "none"`
  *   with `confidence: "verified"` — the SOT correctly reports the absence
  *   of OS isolation. When isolation lands, this function is the single
- *   place to update; reviewer + UI + audit all read from this SOT.
+ *   place to update; reviewer + UI read from this SOT. The audit chain
+ *   currently stores the reviewer verdict derived from this value, not the
+ *   full SandboxCapability snapshot.
  */
 
 export type SandboxKind = "none" | "bubblewrap" | "sandbox-exec" | "appcontainer";
@@ -43,7 +45,7 @@ export interface SandboxCapability {
   confidence: SandboxConfidence;
   /** NodeJS.Platform value at detection time. Useful for audit replay. */
   platform: NodeJS.Platform;
-  /** Short human-readable explanation, surfaced to UI + audit. */
+  /** Short human-readable explanation, surfaced to UI + reviewer prompt. */
   reason: string;
 }
 
