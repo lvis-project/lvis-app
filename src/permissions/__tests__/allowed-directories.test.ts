@@ -158,6 +158,36 @@ describe("pickClosestParent — leaf-parent UX rule", () => {
     // Definitely NOT the user's Documents root.
     expect(result).not.toBe(fold("/Users/example/Documents"));
   });
+
+  it("isDirectory=true: returns the request path itself, not its parent (e.g. list_files /Users/example)", () => {
+    const target = fold("/Users/example");
+    // Previous "always parent" behavior would over-grant to /users (root-adjacent).
+    expect(pickClosestParent(target, [], true)).toBe(target);
+    expect(pickClosestParent(target, [], true)).not.toBe(fold("/Users"));
+  });
+
+  it("isDirectory=true: nested directory request stays at the directory itself", () => {
+    const target = fold("/Users/example/Documents");
+    // Previous bug suggested /Users/example (whole home) — must now be the requested dir.
+    expect(pickClosestParent(target, [], true)).toBe(target);
+    expect(pickClosestParent(target, [], true)).not.toBe(fold("/Users/example"));
+  });
+
+  it("isDirectory=true: returns null when the directory is already in the allowed scope", () => {
+    const dir = fold("/Users/example/work");
+    expect(pickClosestParent(dir, [dir], true)).toBeNull();
+  });
+
+  it("isDirectory=true: returns null for Layer 0 sensitive directories (e.g. .ssh)", () => {
+    // .ssh matches **/.ssh/** via directory-form, so a list_files /Users/example/.ssh
+    // request must NOT auto-suggest .ssh itself.
+    const target = fold("/Users/example/.ssh");
+    expect(pickClosestParent(target, [], true)).toBeNull();
+  });
+
+  it("isDirectory=true: returns null for filesystem root", () => {
+    expect(pickClosestParent(fold("/"), [], true)).toBeNull();
+  });
 });
 
 describe("validateDirectoryAddition", () => {
