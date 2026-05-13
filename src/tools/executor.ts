@@ -19,6 +19,7 @@
  * - 실패 격리: Step 6 실패가 Step 8을 건너뛰지 않음
  */
 import { randomUUID } from "node:crypto";
+import { statSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve as pathResolve } from "node:path";
 import type { ToolRegistry } from "./registry.js";
@@ -882,9 +883,23 @@ export class ToolExecutor {
         await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...dirLayerResult, decision: "deny" }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
         return { allowed: false, result: { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs } };
       }
+      // Detect whether the request path itself is a directory (e.g.
+      // `list_files /Users/ken`) so the auto-suggest goes to the path
+      // itself rather than its parent. `statSync` is used here only to
+      // hint the UI suggestion — the actual permission check downstream
+      // is prefix-based and unaffected by TOCTOU, and the user must
+      // re-type the suggested path before persisting (phishing defense).
+      let isDirectoryTarget = false;
+      try {
+        isDirectoryTarget = statSync(outOfAllowedTarget.canonicalPath).isDirectory();
+      } catch {
+        // Path does not exist yet (e.g. write target before first write);
+        // fall back to file-style behavior (suggest the parent dir).
+      }
       const suggestedParent = pickClosestParent(
         outOfAllowedTarget.canonicalPath,
         invocationAllowedScope.directories,
+        isDirectoryTarget,
       );
 
       if (this.approvalGate && !headless) {
