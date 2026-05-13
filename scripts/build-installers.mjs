@@ -7,13 +7,17 @@
  * target tooling, so the three-platform release path is the CI OS matrix.
  */
 import { spawnSync } from "node:child_process";
+import { cpSync, existsSync, rmSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { installerUvTargetFor } from "./uv-targets.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
+const uvCacheDir = resolve(root, "resources", "uv");
+const uvRuntimeDir = resolve(root, "resources", "uv-runtime");
 
-const TARGETS = {
+const INSTALLER_TARGETS = {
   mac: {
     platform: "darwin",
     flag: "--mac",
@@ -43,7 +47,7 @@ function usage() {
     "",
     "Targets:",
     "  --current        Build installers for the current OS (default)",
-    "  --mac            Build macOS DMG + ZIP",
+    "  --mac            Build macOS Apple Silicon DMG + ZIP",
     "  --linux          Build Linux AppImage + DEB + RPM",
     "  --win            Build Windows NSIS + ZIP",
     "",
@@ -137,7 +141,7 @@ function run(cmd, args, opts = {}) {
 }
 
 function assertNativeTarget(target) {
-  const config = TARGETS[target];
+  const config = INSTALLER_TARGETS[target];
   if (!config) throw new Error(`Unknown target: ${target}`);
   if (process.platform !== config.platform) {
     throw new Error(
@@ -147,14 +151,35 @@ function assertNativeTarget(target) {
   }
 }
 
+function cleanUvRuntime() {
+  rmSync(uvRuntimeDir, { recursive: true, force: true });
+}
+
+function prepareUvRuntime(target) {
+  const uvTarget = installerUvTargetFor(target);
+  run("node", ["scripts/fetch-uv.mjs", "--target", uvTarget.dir]);
+
+  const sourceDir = resolve(uvCacheDir, uvTarget.dir);
+  const sourceBin = resolve(sourceDir, uvTarget.bin);
+  if (!existsSync(sourceBin)) {
+    throw new Error(`uv binary missing after fetch: ${sourceBin}`);
+  }
+
+  cleanUvRuntime();
+  cpSync(sourceDir, resolve(uvRuntimeDir, uvTarget.dir), { recursive: true });
+  process.stdout.write(`[installer] staged uv runtime: ${uvTarget.dir}\n`);
+}
+
 function builderArgsFor(target, publish, dirOnly) {
-  const config = TARGETS[target];
+  const config = INSTALLER_TARGETS[target];
+  const uvTarget = installerUvTargetFor(target);
   const args = ["electron-builder", config.flag];
   if (dirOnly) {
     args.push("--dir");
   } else {
     args.push(...config.installerTargets);
   }
+  args.push(uvTarget.archFlag);
   args.push(`--publish=${publish}`);
   return args;
 }
@@ -189,8 +214,13 @@ async function main() {
     process.stdout.write("[installer] --skip-code-sign: CSC_IDENTITY_AUTO_DISCOVERY=false\n");
   }
 
-  for (const target of selected) {
-    run("bunx", builderArgsFor(target, publish, dirOnly), { env });
+  try {
+    for (const target of selected) {
+      prepareUvRuntime(target);
+      run("bunx", builderArgsFor(target, publish, dirOnly), { env });
+    }
+  } finally {
+    cleanUvRuntime();
   }
 
   process.stdout.write("[installer] done. Artifacts in release/\n");

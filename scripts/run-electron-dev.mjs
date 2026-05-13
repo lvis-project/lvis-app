@@ -286,6 +286,11 @@ const runtimeScriptAssets = [
     out: resolve(repoRoot, "dist/scripts/electron-flags.mjs"),
     label: "electron-flags.mjs",
   },
+  {
+    src: resolve(repoRoot, "scripts/uv-targets.mjs"),
+    out: resolve(repoRoot, "dist/scripts/uv-targets.mjs"),
+    label: "uv-targets.mjs",
+  },
 ];
 
 const RESTART_DELAY_MS = parseMsEnv("LVIS_DEV_RESTART_DELAY_MS", 2500);
