@@ -22,7 +22,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve as pathResolve } from "node:path";
+import { basename, dirname, join, resolve as pathResolve } from "node:path";
 
 import { ToolExecutor } from "../executor.js";
 import { ToolRegistry } from "../registry.js";
@@ -71,7 +71,25 @@ function userPermissionContext(
 }
 
 function comparablePath(path: string | undefined): string {
-  return (path ?? "").replace(/\\/g, "/").toLowerCase();
+  // macOS `/var` is a symlink to `/private/var`; production code paths go
+  // through `realpathSync` so the canonical form is `/private/var/...`.
+  // Tests call this helper on raw `mkdtempSync` output (still `/var/...` on
+  // macOS) and on file paths that don't exist yet (e.g. target file before
+  // the tool writes it), so canonicalise via the closest existing ancestor
+  // and re-join the missing tail.
+  const raw = path ?? "";
+  if (!raw) return "";
+  let canonical = raw;
+  try {
+    canonical = realpathSync(raw);
+  } catch {
+    try {
+      canonical = join(realpathSync(dirname(raw)), basename(raw));
+    } catch {
+      canonical = raw;
+    }
+  }
+  return canonical.replace(/\\/g, "/").toLowerCase();
 }
 
 function makeReadFileTool(
