@@ -224,6 +224,21 @@ export function wireReviewerAgent(deps: WireReviewerDeps): WireReviewerResult {
       "to re-enable LOW-verdict silent allow.",
     );
   }
+  // Round-4 critic MAJOR-4 — symmetric inverted case. `mode=strict`
+  // promises "ask about everything" but `interactive.autoApprove=low`
+  // silently bypasses LOW mutating tools. These directly contradict.
+  // Warn at boot so the user notices the inconsistency.
+  if (
+    deps.permissionManager.getMode() === "strict" &&
+    settings.interactive.autoApprove === "low"
+  ) {
+    log.warn(
+      "exec mode=strict + reviewer.interactive.autoApprove=low — " +
+      "strict mode promises a modal for every tool call but interactive " +
+      "auto-approve silently allows LOW mutating calls. Flip one of the " +
+      "two to resolve the contradiction.",
+    );
+  }
   return { classifier, cache, deferredQueue, appliedSettings: settings };
 }
 
