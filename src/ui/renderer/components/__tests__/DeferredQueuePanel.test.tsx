@@ -1,19 +1,11 @@
 // @vitest-environment jsdom
 import "../../../../../test/renderer/setup.ts";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, act } from "@testing-library/react";
+import { render, screen, fireEvent, act, within } from "@testing-library/react";
 import { DeferredQueuePanel } from "../permissions/DeferredQueuePanel.js";
+import type { DeferredQueueEntry } from "../../types.js";
 
-interface DeferredEntry {
-  id: string;
-  ts: string;
-  toolName: string;
-  source: "builtin" | "plugin" | "mcp";
-  category: "read" | "write" | "shell" | "network" | "meta";
-  inputSummary: string;
-  verdict: { level: "low" | "medium" | "high"; reason: string };
-  status: "pending" | "approved" | "rejected";
-}
+type DeferredEntry = DeferredQueueEntry;
 
 function makeEntry(overrides: Partial<DeferredEntry> = {}): DeferredEntry {
   return {
@@ -110,6 +102,36 @@ describe("DeferredQueuePanel", () => {
     expect(screen.getByText(/write outside allowed dirs/)).toBeTruthy();
     expect(screen.getByText("백그라운드 변경 승인")).toBeTruthy();
     expect(screen.queryByText(/Reviewer 가/)).toBeNull();
+  });
+
+  it("renders captured evaluation context for deferred headless actions", async () => {
+    installApi({
+      entries: [makeEntry({
+        category: "shell",
+        inputSummary: '{"command":"./update-all.sh"}',
+        evaluationContext: {
+          version: "permission-evaluation-context/v1",
+          reviewerFrameworkVersion: "permission-reviewer-framework/v1",
+          policyMode: "auto",
+          headless: true,
+          source: "builtin",
+          category: "shell",
+          trustOrigin: "llm-tool-arg",
+          executionCwd: "C:\\workspace\\lvis-app",
+          allowedDirectories: ["C:\\workspace\\lvis-app"],
+          pathFields: [],
+          targetFilePaths: [],
+          sensitivePathsAdjacent: [],
+        },
+      })],
+    });
+    await act(async () => {
+      render(<DeferredQueuePanel />);
+    });
+    const contextPanel = screen.getByTestId("permission-evaluation-context");
+    expect(contextPanel).toBeTruthy();
+    expect(within(contextPanel).getByText(/auto · headless/)).toBeTruthy();
+    expect(within(contextPanel).getByText(/permission-reviewer-framework\/v1/)).toBeTruthy();
   });
 
   it.each([
