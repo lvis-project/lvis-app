@@ -28,13 +28,16 @@ interface PreferenceSource {
 export class PreferenceRefreshService {
   private running: Promise<PreferenceRefreshResult> | null = null;
   private lastIdleRefreshAt = 0;
+  private lastIdleFailureAt = 0;
   private disposeIdleListener: (() => void) | null = null;
 
   constructor(private readonly deps: {
     memoryManager: MemoryManager;
     generateText: GenerateText;
     idleScheduler?: IdleSchedulerService;
+    isIdleRefreshEnabled?: () => boolean;
     minIdleRefreshIntervalMs?: number;
+    minIdleFailureBackoffMs?: number;
   }) {}
 
   start(): void {
@@ -59,13 +62,17 @@ export class PreferenceRefreshService {
   }
 
   private async refreshOnIdle(): Promise<void> {
+    if (!this.deps.isIdleRefreshEnabled?.()) return;
     const minInterval = this.deps.minIdleRefreshIntervalMs ?? 60 * 60 * 1000;
+    const failureBackoff = this.deps.minIdleFailureBackoffMs ?? 60 * 1000;
     const now = Date.now();
     if (now - this.lastIdleRefreshAt < minInterval) return;
-    this.lastIdleRefreshAt = now;
+    if (now - this.lastIdleFailureAt < failureBackoff) return;
     try {
       await this.refresh({ reason: "idle" });
+      this.lastIdleRefreshAt = Date.now();
     } catch (err) {
+      this.lastIdleFailureAt = Date.now();
       log.warn("idle preference refresh failed: %s", (err as Error).message);
     }
   }

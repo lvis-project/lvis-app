@@ -94,6 +94,11 @@ export interface FeatureFlags {
    * (PR-2-F-2: 3-tier rotation 폐지 후 — Layer 0 preflight 는 이 flag 와 독립적으로 동작.)
    */
   experimentalContinuousBackend?: boolean;
+  /**
+   * When true, idle IDLE_SCAN may send local preference/memory sources to the
+   * configured LLM to refresh user-preferences.md. Default false: manual only.
+   */
+  idlePreferenceRefresh?: boolean;
 }
 
 export interface AppSettings {
@@ -375,6 +380,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   pluginConfigs: {},
   features: {
     experimentalContinuousBackend: false,
+    idlePreferenceRefresh: false,
   },
 };
 
@@ -525,7 +531,10 @@ export class SettingsService {
       this.settings.pluginConfigs = { ...this.settings.pluginConfigs, ...sanitized };
     }
     if (partial.features) {
-      this.settings.features = { ...this.settings.features, ...partial.features };
+      this.settings.features = {
+        ...this.settings.features,
+        ...normalizeFeatureFlags(partial.features),
+      };
     }
     await this.saveSettings();
     return this.getAll();
@@ -886,6 +895,9 @@ function normalizeFeatureFlags(input: unknown): FeatureFlags {
   const result: FeatureFlags = {};
   if (typeof obj.experimentalContinuousBackend === "boolean") {
     result.experimentalContinuousBackend = obj.experimentalContinuousBackend;
+  }
+  if (typeof obj.idlePreferenceRefresh === "boolean") {
+    result.idlePreferenceRefresh = obj.idlePreferenceRefresh;
   }
   return result;
 }
