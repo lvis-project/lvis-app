@@ -81,7 +81,7 @@ describe("DeferredApprovalChip", () => {
       render(<DeferredApprovalChip draftText="OK 허용해줘" />);
     });
     expect(screen.getByTestId("deferred-approval-chip")).toBeTruthy();
-    expect(screen.getByText(/'bash' 호출 허용\?/)).toBeTruthy();
+    expect(screen.getByText(/'bash' 실행을 허용할까요\?/)).toBeTruthy();
     expect(screen.getByTestId("deferred-approval-chip-action").textContent).toContain("허용");
   });
 
@@ -191,10 +191,10 @@ describe("DeferredApprovalChip", () => {
       render(<DeferredApprovalChip draftText="허용해 주세요" />);
     });
     const chip = screen.getByTestId("deferred-approval-chip");
-    // Round-2 code-reviewer MINOR — source badge is now an
-    // aria-labelled span ("플러그인 도구") with the visual "plugin" text
-    // hidden from screen readers.
-    expect(chip.textContent).toContain("plugin");
+    // Round-5 UX MAJOR — visible badge text is now Korean ("플러그인")
+    // to match the aria-label. Aria-label still asserted for SR
+    // semantics.
+    expect(chip.textContent).toContain("플러그인");
     expect(chip.querySelector('[aria-label="플러그인 도구"]')).toBeTruthy();
     expect(chip.textContent).toContain("work_proactive_email_scan");
     expect(chip.getAttribute("data-target-source")).toBe("plugin");

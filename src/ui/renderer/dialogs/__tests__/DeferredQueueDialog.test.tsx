@@ -64,7 +64,7 @@ describe("DeferredQueueDialog", () => {
     fireEvent.click(screen.getByText("허용"));
 
     await waitFor(() => {
-      expect(permission.deferredResolve).toHaveBeenCalledWith("dq-1", "approved");
+      expect(permission.deferredResolve).toHaveBeenCalledWith("dq-1", "approved", undefined, "button");
     });
   });
 

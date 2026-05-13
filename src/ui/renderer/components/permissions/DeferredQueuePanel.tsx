@@ -93,7 +93,9 @@ export function DeferredQueuePanel({ showEmpty = false, onClose }: DeferredQueue
       if (!api) return;
       setBusy(true);
       try {
-        const r = await api(id, decision);
+        // Round-5 architect MAJOR — `approvalSource` is required at
+        // the preload boundary. Panel clicks are always button-source.
+        const r = await api(id, decision, undefined, "button");
         await refresh();
         if (!r.ok) setError(r.error);
       } catch (err) {
