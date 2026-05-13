@@ -155,7 +155,11 @@ describe("DeferredApprovalChip", () => {
       render(<DeferredApprovalChip draftText="허용해 주세요" />);
     });
     const chip = screen.getByTestId("deferred-approval-chip");
-    expect(chip.textContent).toContain("[plugin]");
+    // Round-2 code-reviewer MINOR — source badge is now an
+    // aria-labelled span ("플러그인 도구") with the visual "plugin" text
+    // hidden from screen readers.
+    expect(chip.textContent).toContain("plugin");
+    expect(chip.querySelector('[aria-label="플러그인 도구"]')).toBeTruthy();
     expect(chip.textContent).toContain("work_proactive_email_scan");
     expect(chip.getAttribute("data-target-source")).toBe("plugin");
   });
