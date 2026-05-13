@@ -25,6 +25,7 @@ export function RolesTab({ api }: { api: LvisApi }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [agentsDraft, setAgentsDraft] = useState("");
   const [memoryIndex, setMemoryIndex] = useState("");
+  const [memoryIndexBase, setMemoryIndexBase] = useState("");
   const [userPrefsDraft, setUserPrefsDraft] = useState("");
   const [quickMemory, setQuickMemory] = useState("");
   const [quickLinks, setQuickLinks] = useState("");
@@ -58,7 +59,10 @@ export function RolesTab({ api }: { api: LvisApi }) {
     ]);
     if (agents.status === "fulfilled") setAgentsDraft(agents.value);
     else failures.push(`AGENTS.md: ${(agents.reason as Error).message}`);
-    if (memory.status === "fulfilled") setMemoryIndex(memory.value);
+    if (memory.status === "fulfilled") {
+      setMemoryIndex(memory.value);
+      setMemoryIndexBase(memory.value);
+    }
     else failures.push(`MEMORY.md: ${(memory.reason as Error).message}`);
     if (prefs.status === "fulfilled") setUserPrefsDraft(prefs.value);
     else failures.push(`user-preferences.md: ${(prefs.reason as Error).message}`);
@@ -177,7 +181,9 @@ export function RolesTab({ api }: { api: LvisApi }) {
     setSaving("memory-index");
     setError(null);
     try {
-      setMemoryIndex(await api.memoryGetIndex());
+      const latest = await api.memoryGetIndex();
+      setMemoryIndex(latest);
+      setMemoryIndexBase(latest);
       setStatus("MEMORY.md를 다시 읽었습니다.");
     } catch (err) {
       setError((err as Error).message);
@@ -190,8 +196,13 @@ export function RolesTab({ api }: { api: LvisApi }) {
     setSaving("memory-index-save");
     setError(null);
     try {
-      await api.memoryUpdateIndex(memoryIndex);
-      setMemoryIndex(await api.memoryGetIndex());
+      const didUpdate = await api.memoryUpdateIndexIfUnchanged(memoryIndexBase, memoryIndex);
+      const latest = await api.memoryGetIndex();
+      setMemoryIndex(latest);
+      setMemoryIndexBase(latest);
+      if (!didUpdate) {
+        throw new Error("MEMORY.md가 다른 작업으로 변경되어 다시 읽었습니다. 확인 후 다시 저장하세요.");
+      }
       setStatus("MEMORY.md를 저장했습니다.");
     } catch (err) {
       setError((err as Error).message);
@@ -207,14 +218,16 @@ export function RolesTab({ api }: { api: LvisApi }) {
     setError(null);
     try {
       const links = quickLinks.trim();
-      const nextIndex = withMemorySections(memoryIndex, {
-        "Urgent Memory": content,
-        References: links,
-      });
-      await api.memoryUpdateIndex(nextIndex);
+      const result = await api.memoryUpdateIndexSections({
+        urgentMemory: content,
+        references: links,
+      }) as { ok?: boolean; error?: string } | undefined;
+      if (result && result.ok === false) throw new Error(result.error ?? "MEMORY.md 섹션 저장 실패");
       setQuickMemory("");
       setQuickLinks("");
-      setMemoryIndex(await api.memoryGetIndex());
+      const latest = await api.memoryGetIndex();
+      setMemoryIndex(latest);
+      setMemoryIndexBase(latest);
       setStatus("긴급 기억을 MEMORY.md 섹션에 저장했습니다.");
     } catch (err) {
       setError((err as Error).message);
@@ -235,7 +248,9 @@ export function RolesTab({ api }: { api: LvisApi }) {
       setDetailMemoryTitle("");
       setDetailMemory("");
       setDetailLinks("");
-      setMemoryIndex(await api.memoryGetIndex());
+      const latest = await api.memoryGetIndex();
+      setMemoryIndex(latest);
+      setMemoryIndexBase(latest);
       setStatus("상세 기억을 memories/에 저장했습니다.");
     } catch (err) {
       setError((err as Error).message);
@@ -336,7 +351,7 @@ export function RolesTab({ api }: { api: LvisApi }) {
               <div className="mb-2 text-sm font-medium">{editingId ? "프롬프트 편집" : "새 역할 프롬프트"}</div>
               <div className="space-y-2">
                 <Input placeholder="이름" value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} />
-                <Textarea placeholder="사용자 메시지 앞에 붙일 역할 지시" value={draft.systemPromptAdd} onChange={(event) => setDraft({ ...draft, systemPromptAdd: event.target.value })} className="min-h-[90px]" />
+                <Textarea placeholder="해당 턴의 시스템 프롬프트에 주입할 역할 지시" value={draft.systemPromptAdd} onChange={(event) => setDraft({ ...draft, systemPromptAdd: event.target.value })} className="min-h-[90px]" />
                 <div className="flex justify-end gap-2">
                   {editingId ? <Button size="sm" variant="ghost" onClick={cancelEdit}>취소</Button> : null}
                   <Button size="sm" onClick={() => void saveDraft()} disabled={!rolesLoaded || !draft.name.trim() || saving === "roles"}>{editingId ? "업데이트" : "추가"}</Button>
@@ -355,11 +370,11 @@ user-preferences.md         -> compact durable user preferences only
 roles.presets               -> per-turn role prompt list in SettingsService
 
 Idle:
-  IDLE_SCAN -> refresh user-preferences.md from sources, preferences only
+  IDLE_SCAN -> optionally refresh user-preferences.md from sources, preferences only
 
 Turn:
   system prompt reads AGENTS.md + user-preferences.md + MEMORY.md + memories/*.md
-  selected role prompt is prefixed to the next user message`}
+  selected role prompt is injected as a per-turn system prompt section`}
           </pre>
         ) : null}
       </div>
@@ -378,50 +393,4 @@ function makeRoleId(name: string): string {
     .replace(/-+/g, "-")
     .slice(0, 40) || "role";
   return `${slug}-${Math.random().toString(36).slice(2, 6)}`;
-}
-
-function withMemorySections(markdown: string, sections: Record<string, string>): string {
-  let next = ensureMemoryIndexSections(markdown);
-  for (const [heading, body] of Object.entries(sections)) {
-    next = replaceMemorySection(next, heading, body.trim());
-  }
-  return next;
-}
-
-function ensureMemoryIndexSections(markdown: string): string {
-  const base = markdown.trim()
-    ? markdown.trim()
-    : "# LVIS Memory Index";
-  let next = base.startsWith("# ") ? base : `# LVIS Memory Index\n\n${base}`;
-  next = ensureMemorySection(next, "Urgent Memory", "(지금 즉시 참고해야 할 내용을 500자 내외로 유지)");
-  next = ensureMemorySection(next, "References", "(긴급 기억의 근거 링크 또는 출처)");
-  next = ensureMemorySection(next, "Saved Memories", "");
-  return `${next.trim()}\n`;
-}
-
-function ensureMemorySection(markdown: string, heading: string, placeholder: string): string {
-  if (hasMemorySection(markdown, heading)) return markdown;
-  const block = `## ${heading}\n\n${placeholder}`.trimEnd();
-  if (heading !== "Saved Memories") {
-    const savedIndex = markdown.search(/^##\s+Saved Memories\s*$/m);
-    if (savedIndex >= 0) {
-      return `${markdown.slice(0, savedIndex).trimEnd()}\n\n${block}\n\n${markdown.slice(savedIndex).trimStart()}`;
-    }
-  }
-  return `${markdown.trimEnd()}\n\n${block}`;
-}
-
-function replaceMemorySection(markdown: string, heading: string, body: string): string {
-  const pattern = new RegExp(`(^##\\s+${escapeRegExp(heading)}\\s*$)([\\s\\S]*?)(?=^##\\s+|\\s*$)`, "im");
-  return pattern.test(markdown)
-    ? markdown.replace(pattern, (_match, sectionHeading: string) => `${sectionHeading}\n\n${body ? `${body}\n\n` : ""}`)
-    : `${markdown.trimEnd()}\n\n## ${heading}\n\n${body}\n`;
-}
-
-function hasMemorySection(markdown: string, heading: string): boolean {
-  return new RegExp(`^##\\s+${escapeRegExp(heading)}\\s*$`, "im").test(markdown);
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
