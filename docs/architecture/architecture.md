@@ -811,42 +811,40 @@ sequenceDiagram
 | **지속성** | assistant `thought`는 히스토리에 저장되어 tool round-trip 후에도 reasoning 모델의 문맥이 유지된다. |
 | **거버넌스 동기화** | 대화 루프는 로컬 GovernancePolicy를 조회하고, 상위 정책 동기화 서버의 broadcast로 갱신되는 설계를 전제로 한다. |
 
-#### 4.5.4 컨텍스트 관리 — Auto-Compact (2-stage)
+#### 4.5.4 컨텍스트 관리 — Auto-Compact (PR-3 정리 후, Layer 1 + Layer 2)
 
-LVIS는 OpenHarness 레퍼런스를 따라 **2-stage compact** 를 채택한다:
+LVIS 는 OpenHarness 레퍼런스를 따라 multi-layer compact 를 채택한다. §4.5.11 의 Layer 0 preflight (token-based, blocking) 가 트리거이고, 본 절은 *현재 세션 안에서* 실제 토큰을 줄이는 Layer 1 + Layer 2 를 다룬다:
 
-- **Stage 1a — Microcompact (preventive, LLM-free)**: 매 post-turn마다 실행. `microcompactMessages()` 가 오래된 `tool_result` 메시지 body를 stub(`[tool_result stripped: tool=X, origLen=N]`)으로 교체해 토큰을 낮춘다. `MessageMeta.stripped=true` 로 표시되어 **idempotent** 이며, 최근 N개(기본 4)는 원본 유지, `toolUseId` 참조 무결성은 그대로 보존된다.
-- **Stage 1b — Full compact (threshold-gated, LLM-free 요약)**: `shouldCompact()` 가 사용률 임계치(기본 80%) 초과를 감지하면 `compactMessages()` 가 보존 구간을 제외한 이전 메시지를 요약으로 교체. 생성된 summary user 메시지는 `MessageMeta.compactBoundary=true` 로 마킹되어 **double-compact 를 방지** 한다 (marker 이후만 재요약 대상).
+- **Layer 1 — Mark Stale Tool Results (preventive, marker-only)**: 매 post-turn 마다 실행. `markStaleToolResults()` 가 오래된 `tool_result` 메시지에 `meta.compactedAt` 단일 마커만 set — 메모리상의 content 는 *verbatim 보존* 된다 (UI / Layer 3 preview 가 원본 표시 가능). 마커가 있는 메시지는 `wire-serialize.ts:stubMarkedToolResults` 가 provider 호출 직전 + `saveSession` 직전에 stub (`[tool_result stripped: tool=X, origLen=N]`) 으로 변환 — wire/disk 측에서만 토큰/디스크가 절감된다. 최근 N개 (기본 8) 는 raw 유지, 200자 미만은 mark 대상 제외 (OpenCode 패턴), `toolUseId` 참조 무결성은 그대로 보존. PR-3 에서 구 `meta.stripped` · `meta.strippedAt` · `meta.originalLength` 필드는 호환성 layer 없이 완전 제거 (`src/engine/auto-compact.ts:114-124`).
+- **Layer 2 — LLM Compact with Boundary (threshold-gated)**: §4.5.11 Layer 0 preflight 가 `estimateMessagesTokens(history) ≥ getModelPreflightThreshold(vendor, model)` 을 hit 하면 LLM 호출 차단 + `compactWithBoundary()` (`src/engine/structured-compact.ts:321`) 동기 실행. 보존 구간을 제외한 이전 메시지를 LLM 요약으로 교체하고 같은 sessionId 안에 `kind: "checkpoint"` ChatEntry 가 append 되어 Layer 3 anchor 가 된다. 생성된 요약은 다음 턴 system prompt 의 preamble 로 prepend, `compactNum` (PR-5 sequence number) 가 새 checkpoint 에 할당되어 view/branch action anchor 로 사용된다. (구 `shouldCompact()` 사용률 임계치 + `compactMessages()` LLM-free 요약 패턴은 PR-2-F-2 에서 폐기 — 토큰만 측정하는 Layer 0 preflight 가 단일 트리거.)
 
-목표 설계와 현재 구현 모두 사용률 기준 자동 트리거(20% 단위 조정 20/40/60/80%)를 따른다. 즉, Stage 1b는 고정 `inputTokens` 비교가 아니라 `shouldCompact(cumulativeUsage, contextWindow)` 로 계산되며, 누적 사용량이 `contextWindow × thresholdPct`(기본 80%) 를 넘으면 발동한다. Stage 1a는 **항상 실행** 되므로 threshold와 독립적으로 토큰 압력을 완화한다.
+Layer 1 은 *항상 실행* 되므로 Layer 0 threshold 와 독립적으로 wire/disk 토큰 압력을 완화한다. Layer 2 는 Layer 0 preflight hit 시에만 발동하여 같은 sessionId 안에서 boundary-marked summary 를 만들고 fork 없이 진행 (§4.5.11 same-session checkpoint chain). 아래 도식은 두 레이어의 trigger 와 영향 범위를 함께 보여준다.
 
 ```mermaid
 flowchart LR
-    USAGE["Context usage monitor<br/>(system + memory + history + tool result)"]
-    SETTING["사용자 설정<br/>(20 / 40 / 60 / 80%)"]
-    THRESHOLD{"사용률 ≥ 설정 임계치?"}
-    MODE{"autoCompact enabled?"}
-    BOUNDARY["findSafeBoundary()<br/>tool_call / tool_result 쌍 보호"]
-    SUMMARY["Compact Summary<br/>(extractive now / richer summary later)"]
-    REWRITE["[이전 대화 요약] + 최근 4개 메시지 유지"]
+    PostTurn["Post-turn"]
+    UserInput["User input"]
+    MarkStale["Layer 1<br/>markStaleToolResults()<br/>meta.compactedAt 마커만 set"]
+    Preflight{"Layer 0 preflight<br/>estimateMessagesTokens ≥<br/>getModelPreflightThreshold?"}
+    LLMCompact["Layer 2<br/>compactWithBoundary()<br/>LLM rolling summary<br/>+ kind:checkpoint append"]
+    Continue["Same sessionId 계속"]
 
-    USAGE --> THRESHOLD
-    SETTING --> THRESHOLD
-    THRESHOLD -->|"No"| USAGE
-    THRESHOLD -->|"Yes"| MODE
-    MODE -->|"Off"| USAGE
-    MODE -->|"On"| BOUNDARY --> SUMMARY --> REWRITE
+    PostTurn --> MarkStale --> Continue
+    UserInput --> Preflight
+    Preflight -->|"No"| Continue
+    Preflight -->|"Yes"| LLMCompact --> Continue
+    MarkStale -.->|"wire/disk 직렬화 시<br/>stubMarkedToolResults"| Continue
 ```
 
-| 항목 | 목표 설계 | 현재 구현 단계 |
+| 항목 | Layer 1 — Mark Stale | Layer 2 — LLM Compact |
 | --- | --- | --- |
-| 임계치 | 컨텍스트 사용률 **40% 기본값** | `inputTokens >= 80_000` |
-| 사용자 설정 | **20% 단위**로 20/40/60/80% 선택 가능 | `chat.autoCompact` on/off 토글 |
-| 압축 방식 | compact boundary 보존 + 더 풍부한 요약 전략 | 로컬 추출 기반 요약 (`generateSummary`) |
-| 공간 회수 | 약 40~60% 확보 목표 | 요약 내용과 메시지 길이에 따라 가변 |
-| 보존 규칙 | 최근 대화와 tool round 경계를 함께 보존 | 최근 4개 메시지 유지 + tool_call/tool_result 안전 경계 보존 |
-| 수동 트리거 | `/compact` 명령어로 수동 실행 가능 | 동일 |
-| 적용 위치 | post-turn + 세션 재개 전후 컨텍스트 관리까지 확장 | `PostTurnHookChain`와 `ConversationLoop` fallback 경로 사용 |
+| 트리거 | 매 post-turn (항상) | Layer 0 preflight hit (`estimateMessagesTokens(history) ≥ getModelPreflightThreshold(vendor, model)`) |
+| 함수 | `markStaleToolResults()` (`src/engine/auto-compact.ts:114-124`) | `compactWithBoundary()` (`src/engine/structured-compact.ts:321`) |
+| 메커니즘 | `meta.compactedAt` 단일 마커 set — content verbatim 보존 | LLM 으로 rolling summary 생성, `kind:"checkpoint"` ChatEntry 를 같은 sessionId 에 append |
+| 영향 범위 | wire/disk only (memory unchanged; `stubMarkedToolResults` 가 직렬화 시점에 stub 변환) | memory + wire/disk + 다음 턴 system prompt preamble |
+| 보존 규칙 | 최근 N (기본 8) raw 유지, 200자 미만 제외 (OpenCode 패턴) | `preserveRecentTokens = max(1_000, floor(preflight × 0.4))` |
+| 수동 트리거 | (자동만 — 사용자 노출 없음) | `/compact` 슬래시 명령어 |
+| 결과 | wire/disk 토큰 + 디스크 사용량 절감 | system prompt 압축 + Layer 3 anchor 생성 (`compactNum` 할당) |
 
 #### 4.5.5 Post-Turn Hooks
 
@@ -1071,39 +1069,21 @@ flowchart TB
 
 Chat은 단일 `ChatView` 컴포넌트를 통해 렌더링된다 (issue #547). PR #473에서 도입된 `StackedChatView` 컴포넌트는 제거되었으며 — Kakao-style 연속 스트림, day separator, token chip, WorkGroup 등 설계 의도는 `ChatView`에 직접 흡수되었다. 태그 `v1-chat` (`24191323`)이 회귀 경계로 유지된다 — chat 동작은 해당 지점 이전으로 회귀해서는 안 된다.
 
-#### 4.5.11 Continuous Chat Rotation — 3-Tier Decision + Incomplete-Turn Guards
+#### 4.5.11 Continuous Chat — Layer 0 Preflight + Same-Session Checkpoint Chain
 
-Issue #457 (Continuous Chat v3) 의 Phase 1+2+3 구현. §4.5.4 의 Auto-Compact 가 *현재 세션 안에서* 토큰을 줄이는 것이라면, Rotation 은 *세션 자체를 분기* 하여 child session 에 rolling summary preamble 만 남기고 fresh 컨텍스트로 시작한다. `runRotationCheck` 가 매 턴-종료 직후 (`runTurn` line 687) 호출되며, 결정 트리는 `decideRotation` (`auto-compact.ts`).
+Issue #457 (Continuous Chat v3) Phase 1+2+3 → PR-2-F-2 정리 후 현행. §4.5.4 의 Auto-Compact 가 *현재 세션 안에서* 토큰을 줄이는 것이라면, Continuous Chat 의 골자는 fork 없이 *같은 sessionId 안에서* Layer 0 preflight → Layer 2 LLM compact → Layer 3 checkpoint chain 으로 컨텍스트 사이클을 닫는 것이다. PR-2-F-2 에서 `runRotationCheck` · `decideRotation` · `RotationDecision` · `CheckpointTriggerType` · `rotateActive` · `justRotated` · child session 생성 흐름이 모두 제거 — sessionId 불변 (`fork-based rotation 폐지`, `src/engine/auto-compact.ts:66-68`).
 
-**3-tier 결정 트리** (직교 신호; 어느 하나라도 hit 하면 rotate):
+**Layer 0 Preflight (token-based, blocking)**: `runPreflightGuard` 가 매 user 입력 직후 호출 (`conversation-loop.ts:1027`, `:1384`). `estimateMessagesTokens(history) ≥ getModelPreflightThreshold(vendor, model)` 이 hit 하면 LLM 호출 차단 + Layer 2 (`compactWithBoundary`) 를 동기 실행한 뒤 같은 sessionId 그대로 진행. Threshold 는 model context window 의 보수적 비율 (v3 §6 default; `auto-compact.ts:54`). 3-tier semantic/time 결정은 모두 폐기되고 *토큰* 만 측정한다.
 
-| Tier | 신호 | 임계 | UX 의미 |
-|---|---|---|---|
-| **hard-token** | `ctxUsage` (cumulative tokens / context window) | `≥ 0.85` | 비상 — overflow 직전 |
-| **semantic-llm** | LLM assistant text | `[checkpoint-suggested]` 마커 | 토픽 전환 감지 |
-| **soft-time** | `sessionAgeMs` | `≥ 24h` (devMode 1h) | day-boundary 안전망 |
+**Layer 2 LLM Compact (boundary-marked)**: `compactWithBoundary` 는 rolling summary 를 생성해 다음 턴의 system prompt 에 preamble 로 prepend. 같은 sessionId 안에서 `kind: "checkpoint"` ChatEntry 가 history 에 append 되어 Layer 3 anchor 역할을 한다. PR-5 의 `compactNum` (sessionId 안에서 monotonically increasing — `chat-stream-state.ts:35-36`) 이 새 checkpoint 에 할당되어 후속 view/branch action 의 anchor 가 된다.
 
-**Tier 3 의 message-count 분기 부재 (의도적)**: 초기 구현은 `history.length >= 30` 분기를 포함했으나, 도구 호출 8회 ≈ 32 history entries → 첫 사용자 요청 도중에 false-positive trigger (2026-05-04 incident). 토큰/시간/의미 어느 진짜 신호도 측정 안 함. PR #525 에서 분기 자체 제거 → OpenCode 의 순수 토큰 + 시간 패턴으로 정합화.
+**Layer 3 Same-Session Checkpoint Chain (Copilot 패턴)**: 한 sessionId 안에 여러 compact checkpoint 가 연속 append 됨. 사용자는 두 가지 액션으로 시점 탐색이 가능하다 — "📖 이 시점 보기" 는 같은 sessionId 의 message slice 만 표시하는 readonly view-mode 진입 (fork 없음), "↩ 여기부터 다시 시작" 은 해당 compactNum 위치에서 *명시적으로* 새 세션 fork. 자동 fork 는 더 이상 일어나지 않고, fork 는 사용자의 명시적 결정에만 발생.
 
-**Incomplete-turn 가드 (4 layer defense-in-depth)**: rotation 호출 진입부에서 다음 4 케이스 skip:
+**Renderer 표면**: Layer 2 가 트리거되면 `compact_notice` IPC event 가 `tier` + `summary` + `compactNum` 을 carry (구 `revertSessionId` 필드는 PR-2-F-2 에서 폐지). `kind: "checkpoint"` 구조화 ChatEntry 가 chat stream 에 삽입되고, `CheckpointDivider` 컴포넌트가 tier 별 라벨/아이콘/색상 (`auto-compact` → 📌 자동 정리 / `--action-compact` blue, `manual` → ✋ 수동 정리 / `--muted-foreground` slate) 으로 horizontal divider 를 렌더링. `compactNum` 이 있을 때 두 액션 버튼 — "📖 이 시점 보기" (view-mode 진입, `--action-view` violet) + "↩ 여기부터 다시 시작" (해당 시점에서 새 세션 fork, `--action-branch` orange) — 을 함께 노출. `kind: "session_resume"` 은 fork 된 child session 의 첫 진입 시 prepend 되어 "이전 대화 이어서 시작 (요약 N자 적용)" 마커로 표시.
 
-```typescript
-// runRotationCheck 진입부 (conversation-loop.ts)
-if (this.justRotated) { this.justRotated = false; return; }   // (B)  재귀 방지
-if (stopReason === "interrupted") return;                       // (A1) 사용자 abort
-if (lastAssistantText.trim().length === 0) return;              // (A2) empty answer
-if (messages.at(-1)?.role === "tool_result") return;            // (A3) tool 후 follow-up 없음
-```
+**Prompt-injection fence**: rolling summary preamble 을 system prompt 에 주입할 때 `<prior-context-summary>` 블록을 *명령 해석 금지* fence 로 wrap (system-prompt-builder Section 8). 이전 컨텍스트의 사용자 입력이 요약을 거쳐 다음 턴 / fork 된 자식 세션의 system prompt 로 흘러들어가는 vector 차단.
 
-각 가드는 동일 incident (답변 미완료 도중 CheckpointDivider 표시) 의 *다른 측면* 을 잡음. (A2) empty-text 와 (A3) tool_result-last 는 LLM 이 도구 후 `end_turn` 으로 끝났는데 final answer 가 없는 케이스의 두 관점 (text 관점 + history shape 관점). 둘 다 두면 robust.
-
-**`justRotated` one-shot flag**: `rotateActive` 가 child session 진입 시 set. 다음 `runRotationCheck` 가 read+clear → 회전 직후 1턴은 자동 skip. OpenCode 의 compaction-summary 재귀 방지 패턴 차용.
-
-**Renderer 표면**: 회전이 트리거되면 `compact_notice` IPC event 가 `tier` + `revertSessionId` 을 carry. `kind: "checkpoint"` 구조화 ChatEntry 가 chat stream 에 삽입되고, `ChatView` 의 checkpoint 렌더러가 tier 별 라벨/색상/아이콘 (긴급 정리/주제 전환/이전 세션 정리/자동 정리) + 옵션 "↩ 여기로 되돌아가기" 버튼 (parent 세션 resume) 으로 표시. `kind: "session_resume"` 은 child session 으로 진입 시 prepend 되어 "이전 대화 이어서 시작 (요약 N자 적용)" 마커.
-
-**Prompt-injection fence**: rolling summary preamble 을 system prompt 에 주입할 때 `<prior-context-summary>` 블록을 *명령 해석 금지* fence 로 wrap (system-prompt-builder Section 8). 이전 세션의 사용자 입력이 요약을 거쳐 자식 세션 system prompt 로 흘러들어가는 vector 차단.
-
-**상세**: `docs/blueprints/continuous-chat-rotation-closure-report.md` — 4 PR (#520/#521/#522/#525) 변경 내역 + 2026-05-04 incident hotfix + 연구 출처 (Copilot Checkpoints / Warp / OpenCode).
+**상세**: `docs/blueprints/continuous-chat-rotation-closure-report.md` — Phase 1~3 의 4 PR (#520/#521/#522/#525) + 2026-05-04 incident hotfix + 연구 출처 (Copilot Checkpoints / Warp / OpenCode). ⚠️ closure report 의 일부 섹션 (4-tier 라벨 / `revertSessionId` IPC payload / fork-based rotation) 은 PR-2-F-2 이전 모델 기준이며 후속 sweep PR 에서 정합화 예정.
 
 ---
 
