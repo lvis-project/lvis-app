@@ -27,7 +27,8 @@ export type TraceStepName =
   | "REASONING_ACCUMULATE"  // 8. reasoning_delta 누적 완료 (round 단위)
   | "TOOL_EXECUTE"          // 9. ToolExecutor.executeAll
   | "ROUND_COMMIT"          // 10. assistant_round 확정
-  | "POST_TURN";            // 11. PostTurnHookChain.run
+  | "POST_TURN"             // 11. PostTurnHookChain.run
+  | "GUIDANCE_INJECTED";    // out-of-band — mid-stream "guide" utterance consumed at round boundary
 
 export interface TraceEntry {
   ts: string;

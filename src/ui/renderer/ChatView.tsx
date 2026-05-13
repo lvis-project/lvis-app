@@ -73,6 +73,8 @@ export interface ChatViewProps {
   isEntryStarred: (idx: number) => string | null;
   /** B4: abort current streaming turn */
   onAbort: () => void | Promise<void>;
+  /** Mid-stream "guide" utterance — non-interrupting direction adjustment. Caller MUST gate on `streaming`. */
+  onGuide: (text: string) => void | Promise<void>;
   /** D6: submit thumbs up/down feedback for an assistant message */
   onFeedback?: (messageIdx: number, rating: "up" | "down", reason?: string) => void | Promise<void>;
   /** Workflow tool state — lifted to App level so panel survives view navigation */
@@ -397,7 +399,7 @@ function HistoricalEntriesList({
   return <div className="min-w-0 w-full max-w-full space-y-3 overflow-x-hidden">{rendered}</div>;
 }
 
-export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, installingPlugins, onOpenMarketplace, marketplaceUrlReady, onPluginPrimaryAction, onRoutineAcknowledge, onOpenPermissionQueue }: ChatViewProps) {
+export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort, onGuide, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, installingPlugins, onOpenMarketplace, marketplaceUrlReady, onPluginPrimaryAction, onRoutineAcknowledge, onOpenPermissionQueue }: ChatViewProps) {
   // We still need the api for SessionTodoPanel; obtain it via singleton.
   const workflowApi = getApi();
   const debugStreamEnabled = isDebugStreamEnabled();
@@ -1358,6 +1360,10 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             openExternal={(p) => window.lvis.attach.openExternal(p)}
             onSend={(intent) => void onAsk(question, intent)}
             onAbort={() => void onAbort()}
+            onGuide={() => {
+              void onGuide(question);
+              setQuestion("");
+            }}
             streaming={streaming}
             disabled={hasApiKey === false || contextOverflowPct >= 0.95 || viewMode !== null}
             onWarning={(msg) => console.warn(msg)}
