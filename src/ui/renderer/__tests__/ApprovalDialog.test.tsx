@@ -112,6 +112,67 @@ describe("ApprovalDialog", () => {
     expect(document.body.textContent).not.toContain("모두 허용");
   });
 
+  it("renders the sandbox capability row with ⚠ when kind=none (#691 round-1 user request)", async () => {
+    render(
+      <ApprovalDialog
+        queue={[makeRequest({
+          toolName: "bash",
+          toolCategory: "shell",
+          sandboxCapability: {
+            kind: "none",
+            confidence: "verified",
+            platform: "darwin",
+            reason: "no OS sandbox configured for the host process",
+          },
+        })]}
+        onDecide={vi.fn()}
+      />,
+    );
+    await waitFor(() => {
+      const row = document.body.querySelector('[data-testid="tool-approval-sandbox"]');
+      expect(row).toBeTruthy();
+      expect(row!.textContent).toContain("⚠");
+      expect(row!.textContent).toContain("none");
+      expect(row!.textContent).toContain("darwin");
+    });
+  });
+
+  it("renders the sandbox capability row WITHOUT ⚠ when kind=bubblewrap + confidence=verified", async () => {
+    render(
+      <ApprovalDialog
+        queue={[makeRequest({
+          toolName: "bash",
+          toolCategory: "shell",
+          sandboxCapability: {
+            kind: "bubblewrap",
+            confidence: "verified",
+            platform: "linux",
+            reason: "bwrap binary present + invocable",
+          },
+        })]}
+        onDecide={vi.fn()}
+      />,
+    );
+    await waitFor(() => {
+      const row = document.body.querySelector('[data-testid="tool-approval-sandbox"]');
+      expect(row).toBeTruthy();
+      expect(row!.textContent).toContain("bubblewrap");
+      expect(row!.textContent).not.toContain("⚠");
+    });
+  });
+
+  it("omits the sandbox row entirely when sandboxCapability is undefined", async () => {
+    render(
+      <ApprovalDialog
+        queue={[makeRequest({ toolName: "read_file", toolCategory: "read" })]}
+        onDecide={vi.fn()}
+      />,
+    );
+    await waitFor(() => {
+      expect(document.body.querySelector('[data-testid="tool-approval-sandbox"]')).toBeNull();
+    });
+  });
+
   it("surfaces captured permission evaluation context instead of reconstructing sandbox details from args", async () => {
     render(
       <ApprovalDialog
