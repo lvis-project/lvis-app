@@ -659,11 +659,13 @@ const api = {
       id: string,
       decision: "approved" | "rejected",
       reason?: string,
+      approvalSource?: "button" | "natural-language",
     ) =>
       ipcRenderer.invoke(PERMISSIONS.deferredResolve, {
         id,
         decision,
         reason,
+        approvalSource,
         intent: ipcUserKeyboardIntent(),
       }),
     /** Foreground-entry pending notification — main→renderer event. */
