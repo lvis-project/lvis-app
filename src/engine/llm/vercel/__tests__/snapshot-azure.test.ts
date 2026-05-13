@@ -104,6 +104,10 @@ describe("VercelUnifiedProvider azure-foundry", () => {
       apiKey: "k",
       baseUrl: "https://example.openai.azure.com/openai/deployments/x/",
     });
-    expect(p.constructor.name).toBe("VercelUnifiedProvider");
+    // PR #705: factory returns a lazy proxy that defers the Vercel adapter
+    // module load until first `streamTurn`. The vendor surface is preserved
+    // synchronously so reviewer-wiring + IPC handlers stay unchanged.
+    expect(p.constructor.name).toBe("LazyVercelProvider");
+    expect(p.vendor).toBe("azure-foundry");
   });
 });
