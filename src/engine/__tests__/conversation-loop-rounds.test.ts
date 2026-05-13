@@ -62,6 +62,45 @@ describe("ConversationLoop queryLoop", () => {
     expect(setActiveRolePrompt).toHaveBeenLastCalledWith(null);
   });
 
+  it("persists role prompt metadata on the user message for retry replay", async () => {
+    const toolRegistry = new ToolRegistry();
+    const provider = new FakeProvider([
+      [
+        { type: "text_delta", text: "ok" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const loop = new ConversationLoop(({
+      settingsService: { get: () => fakeLlmSettings(), getSecret: () => "test-key" },
+      systemPromptBuilder: {
+        build: () => "system",
+        setActiveRolePrompt: vi.fn(),
+      },
+      keywordEngine: new KeywordEngine(),
+      routeEngine: new RouteEngine({ toolRegistry }),
+      toolRegistry,
+      memoryManager: { saveSession: () => {}, listSessions: () => [] },
+      disableSessionPersistence: true,
+    } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+    (loop as { provider: LLMProvider | null }).provider = provider;
+
+    await loop.runTurn("review this", undefined, undefined, {
+      inputOrigin: "user-keyboard",
+      rolePrompt: { name: "Reviewer", systemPromptAdd: "Review carefully." },
+    });
+
+    expect(loop.getHistory().getMessages()[0]).toEqual({
+      role: "user",
+      content: "review this",
+      meta: {
+        activeRolePrompt: {
+          name: "Reviewer",
+          systemPromptAdd: "Review carefully.",
+        },
+      },
+    });
+  });
+
   it("clears a fully completed session TO-DO plan at the next turn start", async () => {
     const toolRegistry = new ToolRegistry();
     const provider = new FakeProvider([
