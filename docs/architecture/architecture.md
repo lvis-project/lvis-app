@@ -1071,39 +1071,21 @@ flowchart TB
 
 Chat은 단일 `ChatView` 컴포넌트를 통해 렌더링된다 (issue #547). PR #473에서 도입된 `StackedChatView` 컴포넌트는 제거되었으며 — Kakao-style 연속 스트림, day separator, token chip, WorkGroup 등 설계 의도는 `ChatView`에 직접 흡수되었다. 태그 `v1-chat` (`24191323`)이 회귀 경계로 유지된다 — chat 동작은 해당 지점 이전으로 회귀해서는 안 된다.
 
-#### 4.5.11 Continuous Chat Rotation — 3-Tier Decision + Incomplete-Turn Guards
+#### 4.5.11 Continuous Chat — Layer 0 Preflight + Same-Session Checkpoint Chain
 
-Issue #457 (Continuous Chat v3) 의 Phase 1+2+3 구현. §4.5.4 의 Auto-Compact 가 *현재 세션 안에서* 토큰을 줄이는 것이라면, Rotation 은 *세션 자체를 분기* 하여 child session 에 rolling summary preamble 만 남기고 fresh 컨텍스트로 시작한다. `runRotationCheck` 가 매 턴-종료 직후 (`runTurn` line 687) 호출되며, 결정 트리는 `decideRotation` (`auto-compact.ts`).
+Issue #457 (Continuous Chat v3) Phase 1+2+3 → PR-2-F-2 정리 후 현행. §4.5.4 의 Auto-Compact 가 *현재 세션 안에서* 토큰을 줄이는 것이라면, Continuous Chat 의 골자는 fork 없이 *같은 sessionId 안에서* Layer 0 preflight → Layer 2 LLM compact → Layer 3 checkpoint chain 으로 컨텍스트 사이클을 닫는 것이다. PR-2-F-2 에서 `runRotationCheck` · `decideRotation` · `RotationDecision` · `CheckpointTriggerType` · `rotateActive` · `justRotated` · child session 생성 흐름이 모두 제거 — sessionId 불변 (`fork-based rotation 폐지`, `src/engine/auto-compact.ts:66-68`).
 
-**3-tier 결정 트리** (직교 신호; 어느 하나라도 hit 하면 rotate):
+**Layer 0 Preflight (token-based, blocking)**: `runPreflightGuard` 가 매 user 입력 직후 호출 (`conversation-loop.ts:1027`, `:1384`). `estimateMessagesTokens(history) ≥ getModelPreflightThreshold(vendor, model)` 이 hit 하면 LLM 호출 차단 + Layer 2 (`compactWithBoundary`) 를 동기 실행한 뒤 같은 sessionId 그대로 진행. Threshold 는 model context window 의 보수적 비율 (v3 §6 default; `auto-compact.ts:54`). 3-tier semantic/time 결정은 모두 폐기되고 *토큰* 만 측정한다.
 
-| Tier | 신호 | 임계 | UX 의미 |
-|---|---|---|---|
-| **hard-token** | `ctxUsage` (cumulative tokens / context window) | `≥ 0.85` | 비상 — overflow 직전 |
-| **semantic-llm** | LLM assistant text | `[checkpoint-suggested]` 마커 | 토픽 전환 감지 |
-| **soft-time** | `sessionAgeMs` | `≥ 24h` (devMode 1h) | day-boundary 안전망 |
+**Layer 2 LLM Compact (boundary-marked)**: `compactWithBoundary` 는 rolling summary 를 생성해 다음 턴의 system prompt 에 preamble 로 prepend. 같은 sessionId 안에서 `kind: "checkpoint"` ChatEntry 가 history 에 append 되어 Layer 3 anchor 역할을 한다. PR-5 의 `compactNum` (sessionId 안에서 monotonically increasing — `chat-stream-state.ts:35-36`) 이 새 checkpoint 에 할당되어 후속 view/branch action 의 anchor 가 된다.
 
-**Tier 3 의 message-count 분기 부재 (의도적)**: 초기 구현은 `history.length >= 30` 분기를 포함했으나, 도구 호출 8회 ≈ 32 history entries → 첫 사용자 요청 도중에 false-positive trigger (2026-05-04 incident). 토큰/시간/의미 어느 진짜 신호도 측정 안 함. PR #525 에서 분기 자체 제거 → OpenCode 의 순수 토큰 + 시간 패턴으로 정합화.
+**Layer 3 Same-Session Checkpoint Chain (Copilot 패턴)**: 한 sessionId 안에 여러 compact checkpoint 가 연속 append 됨. 사용자는 두 가지 액션으로 시점 탐색이 가능하다 — "📖 이 시점 보기" 는 같은 sessionId 의 message slice 만 표시하는 readonly view-mode 진입 (fork 없음), "↩ 여기부터 다시 시작" 은 해당 compactNum 위치에서 *명시적으로* 새 세션 fork. 자동 fork 는 더 이상 일어나지 않고, fork 는 사용자의 명시적 결정에만 발생.
 
-**Incomplete-turn 가드 (4 layer defense-in-depth)**: rotation 호출 진입부에서 다음 4 케이스 skip:
+**Renderer 표면**: Layer 2 가 트리거되면 `compact_notice` IPC event 가 `tier` + `summary` + `compactNum` 을 carry (구 `revertSessionId` 필드는 PR-2-F-2 에서 폐지). `kind: "checkpoint"` 구조화 ChatEntry 가 chat stream 에 삽입되고, `CheckpointDivider` 컴포넌트가 tier 별 라벨/아이콘/색상 (`auto-compact` → 📌 자동 정리 / `--action-compact` blue, `manual` → ✋ 수동 정리 / `--muted-foreground` slate) 으로 horizontal divider 를 렌더링. `compactNum` 이 있을 때 두 액션 버튼 — "📖 이 시점 보기" (view-mode 진입, `--action-view` violet) + "↩ 여기부터 다시 시작" (해당 시점에서 새 세션 fork, `--action-branch` orange) — 을 함께 노출. `kind: "session_resume"` 은 fork 된 child session 의 첫 진입 시 prepend 되어 "이전 대화 이어서 시작 (요약 N자 적용)" 마커로 표시.
 
-```typescript
-// runRotationCheck 진입부 (conversation-loop.ts)
-if (this.justRotated) { this.justRotated = false; return; }   // (B)  재귀 방지
-if (stopReason === "interrupted") return;                       // (A1) 사용자 abort
-if (lastAssistantText.trim().length === 0) return;              // (A2) empty answer
-if (messages.at(-1)?.role === "tool_result") return;            // (A3) tool 후 follow-up 없음
-```
+**Prompt-injection fence**: rolling summary preamble 을 system prompt 에 주입할 때 `<prior-context-summary>` 블록을 *명령 해석 금지* fence 로 wrap (system-prompt-builder Section 8). 이전 컨텍스트의 사용자 입력이 요약을 거쳐 다음 턴 / fork 된 자식 세션의 system prompt 로 흘러들어가는 vector 차단.
 
-각 가드는 동일 incident (답변 미완료 도중 CheckpointDivider 표시) 의 *다른 측면* 을 잡음. (A2) empty-text 와 (A3) tool_result-last 는 LLM 이 도구 후 `end_turn` 으로 끝났는데 final answer 가 없는 케이스의 두 관점 (text 관점 + history shape 관점). 둘 다 두면 robust.
-
-**`justRotated` one-shot flag**: `rotateActive` 가 child session 진입 시 set. 다음 `runRotationCheck` 가 read+clear → 회전 직후 1턴은 자동 skip. OpenCode 의 compaction-summary 재귀 방지 패턴 차용.
-
-**Renderer 표면**: 회전이 트리거되면 `compact_notice` IPC event 가 `tier` + `summary` + `compactNum` 을 carry (fork-based `revertSessionId` 는 PR-2-F-2 에서 폐지 — sessionId 불변). `kind: "checkpoint"` 구조화 ChatEntry 가 chat stream 에 삽입되고, `CheckpointDivider` 컴포넌트가 tier 별 라벨/아이콘/색상 (`auto-compact` → 📌 자동 정리 / blue, `manual` → ✋ 수동 정리 / slate) 으로 horizontal divider 를 렌더링. `compactNum` 이 있을 때 두 액션 버튼 — "📖 이 시점 보기" (view-mode 진입, violet) + "↩ 여기부터 다시 시작" (해당 시점에서 새 세션 fork, orange) — 을 함께 노출. `kind: "session_resume"` 은 child session 으로 진입 시 prepend 되어 "이전 대화 이어서 시작 (요약 N자 적용)" 마커.
-
-**Prompt-injection fence**: rolling summary preamble 을 system prompt 에 주입할 때 `<prior-context-summary>` 블록을 *명령 해석 금지* fence 로 wrap (system-prompt-builder Section 8). 이전 세션의 사용자 입력이 요약을 거쳐 자식 세션 system prompt 로 흘러들어가는 vector 차단.
-
-**상세**: `docs/blueprints/continuous-chat-rotation-closure-report.md` — 4 PR (#520/#521/#522/#525) 변경 내역 + 2026-05-04 incident hotfix + 연구 출처 (Copilot Checkpoints / Warp / OpenCode).
+**상세**: `docs/blueprints/continuous-chat-rotation-closure-report.md` — Phase 1~3 의 4 PR (#520/#521/#522/#525) + 2026-05-04 incident hotfix + 연구 출처 (Copilot Checkpoints / Warp / OpenCode). ⚠️ closure report 의 일부 섹션 (4-tier 라벨 / `revertSessionId` IPC payload / fork-based rotation) 은 PR-2-F-2 이전 모델 기준이며 후속 sweep PR 에서 정합화 예정.
 
 ---
 
