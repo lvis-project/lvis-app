@@ -183,7 +183,7 @@ node scripts/build-installers.mjs --current --skip-code-sign
 
 전체 macOS/Linux/Windows artifact는 GitHub Actions의 **Build Installers** workflow에서 생성합니다. `skip_code_sign=true`는 내부 검증용 unsigned artifact를 만들고, production 배포 시에는 signing/notarization secrets를 설정한 뒤 `skip_code_sign=false`로 실행합니다.
 
-`lvis://` deep link protocol과 `resources/uv/<platform>-<arch>/uv` Python bootstrap binary는 electron-builder `build` 설정에서 packaged app resource로 포함됩니다.
+`lvis://` deep link protocol과 Python bootstrap용 `uv` binary가 packaged app resource로 포함됩니다. 개발 환경의 `postinstall`은 현재 플랫폼의 `resources/uv/<platform>-<arch>/uv`만 준비하고, installer 빌드는 패키징 직전에 해당 target binary만 `resources/uv-runtime/`에 staging한 뒤 포함합니다.
 
 ## Windows (사내망) 실행 가이드
 

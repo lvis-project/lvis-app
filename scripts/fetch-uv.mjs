@@ -1,18 +1,20 @@
 /**
  * fetch-uv.mjs — uv standalone binary 다운로드 스크립트
  *
- * GitHub releases (astral-sh/uv) 에서 5개 플랫폼 바이너리를 다운로드한다.
+ * GitHub releases (astral-sh/uv) 에서 필요한 플랫폼 바이너리만 다운로드한다.
  * 이미 존재하면 skip (idempotent).
  *
  * 사용:
- *   node scripts/fetch-uv.mjs
+ *   node scripts/fetch-uv.mjs                  # current platform only
+ *   node scripts/fetch-uv.mjs --target linux-x64
+ *   node scripts/fetch-uv.mjs --all
  *   node scripts/fetch-uv.mjs --version 0.11.6
  *
- * postinstall 훅으로 자동 실행됨 (package.json scripts.postinstall).
+ * postinstall 훅으로 자동 실행됨. 개발 환경에서는 현재 플랫폼 바이너리만 받는다.
  */
 
 import { existsSync } from "node:fs";
-import { mkdir, chmod, rename, unlink } from "node:fs/promises";
+import { mkdir, chmod, rename } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -21,18 +23,76 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PROJECT_ROOT = path.resolve(__dirname, "..");
 
-// ─── 버전 결정 ────────────────────────────────────────────
+// ─── 버전/대상 결정 ───────────────────────────────────────
 
 const DEFAULT_VERSION = "0.7.3"; // uv 안정 버전 (2026-04-13 기준)
 
-function parseArgs() {
-  const args = process.argv.slice(2);
-  const vIdx = args.indexOf("--version");
-  if (vIdx !== -1 && args[vIdx + 1]) return args[vIdx + 1];
-  return DEFAULT_VERSION;
+function usage() {
+  return [
+    "Usage: node scripts/fetch-uv.mjs [options]",
+    "",
+    "Options:",
+    "  --current          Download only the current OS/arch uv binary (default)",
+    "  --target <dir>     Download one target dir. Repeatable. Example: linux-x64",
+    "  --all              Download every known target",
+    "  --version <ver>    uv release version (default: 0.7.3)",
+    "  --list-targets     Print known target dirs",
+  ].join("\n");
 }
 
-const UV_VERSION = parseArgs();
+function parseArgs() {
+  const args = process.argv.slice(2);
+  let version = DEFAULT_VERSION;
+  let mode = "current";
+  const targets = [];
+
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (arg === "--help" || arg === "-h") {
+      process.stdout.write(`${usage()}\n`);
+      process.exit(0);
+    }
+    if (arg === "--list-targets") {
+      process.stdout.write(`${TARGETS.map((target) => target.dir).join("\n")}\n`);
+      process.exit(0);
+    }
+    if (arg === "--current") {
+      mode = "current";
+      continue;
+    }
+    if (arg === "--all") {
+      mode = "all";
+      continue;
+    }
+    if (arg === "--version") {
+      const value = args[i + 1];
+      if (!value || value.startsWith("--")) fail("--version requires a value");
+      version = value;
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith("--version=")) {
+      version = arg.slice("--version=".length);
+      continue;
+    }
+    if (arg === "--target") {
+      const value = args[i + 1];
+      if (!value || value.startsWith("--")) fail("--target requires a value");
+      mode = "target";
+      targets.push(...value.split(",").map((item) => item.trim()).filter(Boolean));
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith("--target=")) {
+      mode = "target";
+      targets.push(...arg.slice("--target=".length).split(",").map((item) => item.trim()).filter(Boolean));
+      continue;
+    }
+    fail(`Unknown argument: ${arg}\n\n${usage()}`);
+  }
+
+  return { version, mode, targets };
+}
 
 // ─── Phase 1.5 Security A2: Hardcoded known-good SHA256 ─────────
 //
@@ -103,6 +163,10 @@ const TARGETS = [
   },
 ];
 
+const TARGET_BY_DIR = new Map(TARGETS.map((target) => [target.dir, target]));
+const CLI_ARGS = parseArgs();
+const UV_VERSION = CLI_ARGS.version;
+
 // ─── 유틸 ─────────────────────────────────────────────────
 
 function log(msg) {
@@ -112,6 +176,42 @@ function log(msg) {
 function fail(msg) {
   process.stderr.write(`[fetch-uv] ERROR: ${msg}\n`);
   process.exit(1);
+}
+
+function platformDirFor(platform, arch) {
+  if (platform === "darwin" && arch === "arm64") return "darwin-arm64";
+  if (platform === "darwin" && arch === "x64") return "darwin-x64";
+  if (platform === "win32" && arch === "x64") return "win32-x64";
+  if (platform === "linux" && arch === "x64") return "linux-x64";
+  if (platform === "linux" && arch === "arm64") return "linux-arm64";
+  throw new Error(`지원하지 않는 플랫폼/아키텍처: ${platform}/${arch}`);
+}
+
+function currentTarget() {
+  const dir = platformDirFor(process.platform, process.arch);
+  const target = TARGET_BY_DIR.get(dir);
+  if (!target) throw new Error(`uv target not configured: ${dir}`);
+  return target;
+}
+
+function selectedTargets() {
+  if (CLI_ARGS.mode === "all") return TARGETS;
+  if (CLI_ARGS.mode === "current") return [currentTarget()];
+
+  const selected = [];
+  for (const dir of CLI_ARGS.targets) {
+    const target = TARGET_BY_DIR.get(dir);
+    if (!target) {
+      throw new Error(
+        `Unknown uv target '${dir}'. Known targets: ${TARGETS.map((item) => item.dir).join(", ")}`,
+      );
+    }
+    selected.push(target);
+  }
+  if (selected.length === 0) {
+    throw new Error("--target mode requires at least one target");
+  }
+  return [...new Map(selected.map((target) => [target.dir, target])).values()];
 }
 
 /**
@@ -351,14 +451,15 @@ async function downloadTarget(target) {
 // ─── 메인 ─────────────────────────────────────────────────
 
 async function main() {
+  const targets = selectedTargets();
   log(`uv version: ${UV_VERSION}`);
   log(`대상 디렉토리: ${path.join(PROJECT_ROOT, "resources", "uv")}`);
-  log(`플랫폼 수: ${TARGETS.length}`);
+  log(`선택 플랫폼: ${targets.map((target) => target.dir).join(", ")}`);
   log("");
 
   const errors = [];
 
-  for (const target of TARGETS) {
+  for (const target of targets) {
     try {
       await downloadTarget(target);
     } catch (err) {
@@ -370,17 +471,12 @@ async function main() {
 
   log("");
   if (errors.length > 0) {
-    process.stderr.write(`[fetch-uv] ${errors.length}개 플랫폼 다운로드 실패:\n`);
+    process.stderr.write(`[fetch-uv] ${errors.length}개 선택 플랫폼 다운로드 실패:\n`);
     for (const e of errors) process.stderr.write(`  - ${e}\n`);
     process.stderr.write(`[fetch-uv] 네트워크 연결을 확인하거나 수동으로 다운로드하세요.\n`);
-    // postinstall에서 한 플랫폼 실패가 전체를 막지 않도록 exit 0
-    // (현재 OS가 아닌 플랫폼 바이너리는 다운로드 실패해도 무방)
-    if (errors.length === TARGETS.length) {
-      // 전부 실패 시에는 오류 코드 반환
-      process.exit(1);
-    }
+    process.exit(1);
   } else {
-    log("모든 플랫폼 uv binary 다운로드 완료.");
+    log("선택 플랫폼 uv binary 다운로드 완료.");
   }
 }
 

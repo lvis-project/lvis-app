@@ -138,6 +138,11 @@
     "productName": "LVIS",
     "icon": "build/icon.png",
     "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "files": [
+      "**/*",
+      "!resources/uv{,/**/*}",
+      "!resources/uv-runtime{,/**/*}"
+    ],
     "directories": {
       "output": "release"
     },
@@ -162,7 +167,7 @@
         "to": "icon.png"
       },
       {
-        "from": "resources/uv",
+        "from": "resources/uv-runtime",
         "to": "uv"
       }
     ],

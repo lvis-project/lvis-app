@@ -260,14 +260,15 @@ export class PythonRuntimeBootstrapper {
 
     if (isDev) {
       // dist/src/main/python-runtime.js 기준 → lvis-app/resources/uv/...
-      // (fetch-uv.mjs가 PROJECT_ROOT="lvis-app" 기준으로 다운로드한 경로와 일치)
+      // (fetch-uv.mjs가 dev/postinstall에서 현재 플랫폼만 다운로드한 경로와 일치)
       return path.join(
         __dirname, "..", "..", "..", "resources", "uv",
         platformDir, binName,
       );
     }
 
-    // production: extraResources로 packaged된 Electron Resources
+    // production: build-installers.mjs가 target binary만 resources/uv-runtime에
+    // staging하고 extraResources로 packaged한 Electron Resources
     return path.join(process.resourcesPath, "uv", platformDir, binName);
   }
 
