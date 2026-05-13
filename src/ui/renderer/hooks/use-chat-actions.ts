@@ -53,17 +53,31 @@ export function useChatActions(opts: {
   }, [api]);
 
   /**
-   * "guide" — non-interrupting mid-stream direction adjustment. The current
-   * turn keeps running; the engine consumes the queued text at the next
-   * round boundary (between tool execution and the next LLM stream) and
-   * appends it to history as a user message. Caller is responsible for
-   * disabling the affordance when not streaming — the main-process handler
-   * returns `{ ok: false, error: "no-active-turn" }` as a defense-in-depth
-   * boundary check.
+   * "guide" — non-interrupting mid-stream direction adjustment. Returns
+   * the IPC result so the caller can preserve the user's typed text on
+   * rejection (no-active-turn race, queue-full, too-long). The engine
+   * consumes a queued text at the next round boundary and (when no boundary
+   * arrives within round-cap) extends the turn by one round so the guide
+   * always lands BEFORE end-turn — per the "방향지시는 end-turn 전에
+   * 영향을 미치는 거" user spec.
    */
-  const handleGuide = useCallback(async (text: string) => {
-    if (text.trim().length === 0) return;
-    try { await api.chatGuide(text); } catch { /* no-op */ }
+  const handleGuide = useCallback(async (
+    text: string,
+  ): Promise<{ ok: true } | { ok: false; error: string }> => {
+    if (text.trim().length === 0) return { ok: false, error: "empty-text" };
+    try {
+      const result = await api.chatGuide(text);
+      // Main-process handler returns `{ ok: boolean, error?: string }`.
+      // Type-narrow defensively since the IPC boundary is `Promise<unknown>`.
+      if (result && typeof result === "object" && "ok" in result) {
+        const r = result as { ok: boolean; error?: string };
+        if (r.ok) return { ok: true };
+        return { ok: false, error: r.error ?? "unknown-error" };
+      }
+      return { ok: false, error: "invalid-response" };
+    } catch (err) {
+      return { ok: false, error: (err as Error)?.message ?? "ipc-error" };
+    }
   }, [api]);
 
   const handleFeedback = useCallback(async (messageIdx: number, rating: "up" | "down", reason?: string) => {
