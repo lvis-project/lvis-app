@@ -91,11 +91,15 @@ if (process.platform === "win32" && process.env.LVIS_KEEP_GPU !== "1") {
 // `--auth-negotiate-delegate-allowlist` 는 의도적으로 미설정 — ticket 은
 // challenge 응답 1-hop 만 전달되고 downstream 으로 forwarding (unconstrained
 // delegation) 되지 않도록.
-const AAD_NEGOTIATE_HOSTS = [
+// `LVIS_DISABLE_AAD_SSO=1` 으로 환경 변수 opt-out 가능 (비-corp / red-team
+// 테스트 / Kerberos 없이 AAD 흐름 검증 시). 동일 tier 의 `LVIS_KEEP_GPU` 패턴.
+export const AAD_NEGOTIATE_HOSTS = [
   "login.microsoftonline.com",
   "autologon.microsoftazuread-sso.com",
 ] as const;
-app.commandLine.appendSwitch("auth-server-allowlist", AAD_NEGOTIATE_HOSTS.join(","));
+if (process.env.LVIS_DISABLE_AAD_SSO !== "1") {
+  app.commandLine.appendSwitch("auth-server-allowlist", AAD_NEGOTIATE_HOSTS.join(","));
+}
 
 // Windows 10/11 OS notifications require an AppUserModelId — without this,
 // `new Notification(...)` toasts are silently dropped or grouped under the
