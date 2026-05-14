@@ -165,7 +165,7 @@ export const test = base.extend<ElectronFixtures>({
 
   app: async ({ userDataDir }, use) => {
     const repoRoot = path.resolve(HERE, '../../..');
-    const mainEntry = path.join(repoRoot, 'dist/src/main.js');
+    const mainEntry = path.join(repoRoot, 'dist/src/main/main.js');
     if (!fs.existsSync(mainEntry)) {
       throw new Error(
         `Electron main entry not found at ${mainEntry}. Run 'bun run build' before 'playwright test'.`,

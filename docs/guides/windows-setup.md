@@ -74,7 +74,7 @@ bun run start
 ### `bun run start` 가 순차적으로 하는 일
 
 1. **`bun run build`** — host TypeScript (tsc) + esbuild (renderer/preload) + Tailwind
-2. **`node scripts/run-electron.mjs dist/src/main.js`** — Electron 실행
+2. **`node scripts/run-electron.mjs dist/src/main/main.js`** — Electron 실행
 
 ### `scripts/run-electron.mjs` 가 자동으로 주입하는 것들
 
@@ -153,7 +153,7 @@ bun run start
 ```powershell
 $env:LVIS_DEBUG = "1"
 bun run start
-# [run-electron] args=["dist/src/main.js","--disable-gpu",...] 로그 확인
+# [run-electron] args=["dist/src/main/main.js","--disable-gpu",...] 로그 확인
 ```
 
 여전히 GPU 크래시 나면 추가 플래그를 `LVIS_EXTRA_ELECTRON_FLAGS` 로 주입:
