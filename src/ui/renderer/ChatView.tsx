@@ -661,10 +661,26 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
 
   useEffect(() => {
     const unsub = api.onChatStream((ev) => {
-      if (ev.type === "tool_end") flushQueueViaGuide();
+      if (ev.type === "tool_end") {
+        // mid-turn brake-point — 엔진 round boundary 에 합류 (onGuide).
+        flushQueueViaGuide();
+        return;
+      }
+      if (ev.type === "done") {
+        // turn 종료 — 큐 잔존 항목을 새 user message 로 자동 inject.
+        // streaming boolean 전이가 아닌 명시적 done event 만 신호 사용 →
+        // AskUserQuestion 카드 깜박임 같은 false-positive 차단.
+        // round boundary 없는 idle 상태이므로 onGuide 가 아닌 onAsk 사용
+        // (새 turn 시작).
+        if (messageQueueStore.size() === 0) return;
+        const taken = messageQueueStore.takeAll();
+        if (taken.length === 0) return;
+        const formatted = formatQueueInject(taken);
+        void onAsk(formatted, { inputOrigin: "user-keyboard", token: "" });
+      }
     });
     return unsub;
-  }, [api, flushQueueViaGuide]);
+  }, [api, flushQueueViaGuide, messageQueueStore, onAsk]);
 
   // streaming false 전이 fallback 폐기 (2026-05-15 사용자 피드백):
   // AskUserQuestion 카드 깜박임 등으로 streaming 이 일시 false → true 로
