@@ -5,7 +5,7 @@
 // module. Externals stay outside the bundle because they either ship
 // native bindings, are provided by Electron at runtime, or must share
 // a singleton across plugins.
-import { build } from "esbuild";
+import { build, context } from "esbuild";
 import { rmSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,10 +13,9 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..");
 const outfile = resolve(repoRoot, "dist", "src", "main", "main.js");
+const watchMode = process.argv.includes("--watch");
 
-rmSync(outfile, { force: true });
-
-const result = await build({
+const buildOptions = {
   entryPoints: [resolve(repoRoot, "src", "main.ts")],
   outfile,
   bundle: true,
@@ -47,23 +46,33 @@ const result = await build({
       `const __filename = __lvisFileURLToPath(import.meta.url);\n` +
       `const __dirname = __lvisDirname(__filename);\n`,
   },
-});
+};
 
-if (result.errors.length > 0) {
-  process.stderr.write(`[esbuild-main] failed with ${result.errors.length} errors\n`);
-  process.exit(1);
-}
+rmSync(outfile, { force: true });
 
-if (result.warnings.length > 0) {
-  for (const warning of result.warnings) {
-    process.stderr.write(`[esbuild-main] warning: ${warning.text}\n`);
-  }
-  if (process.env.LVIS_ALLOW_ESBUILD_WARN !== "1") {
-    process.stderr.write(
-      `[esbuild-main] ${result.warnings.length} warning(s); set LVIS_ALLOW_ESBUILD_WARN=1 to bypass\n`,
-    );
+if (watchMode) {
+  const ctx = await context(buildOptions);
+  await ctx.watch();
+  process.stdout.write(`[esbuild-main] watching -> ${outfile}\n`);
+} else {
+  const result = await build(buildOptions);
+
+  if (result.errors.length > 0) {
+    process.stderr.write(`[esbuild-main] failed with ${result.errors.length} errors\n`);
     process.exit(1);
   }
-}
 
-process.stdout.write(`[esbuild-main] OK -> ${outfile}\n`);
+  if (result.warnings.length > 0) {
+    for (const warning of result.warnings) {
+      process.stderr.write(`[esbuild-main] warning: ${warning.text}\n`);
+    }
+    if (process.env.LVIS_ALLOW_ESBUILD_WARN !== "1") {
+      process.stderr.write(
+        `[esbuild-main] ${result.warnings.length} warning(s); set LVIS_ALLOW_ESBUILD_WARN=1 to bypass\n`,
+      );
+      process.exit(1);
+    }
+  }
+
+  process.stdout.write(`[esbuild-main] OK -> ${outfile}\n`);
+}
