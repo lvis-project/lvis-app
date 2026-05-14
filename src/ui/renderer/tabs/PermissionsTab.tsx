@@ -572,7 +572,7 @@ export function PermissionsTab() {
               <p className="text-[11px] text-muted-foreground">LLM 검증을 선택하기 전에 공급자, 모델, 오류 처리 정책을 미리 정합니다.</p>
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
-              <label className="space-y-1 text-xs">
+              <Label className="space-y-1 text-xs">
                 <span className="font-medium">LLM 공급자</span>
                 <Select
                   value={reviewer.provider}
@@ -588,8 +588,8 @@ export function PermissionsTab() {
                     ))}
                   </SelectContent>
                 </Select>
-              </label>
-              <label className="space-y-1 text-xs">
+              </Label>
+              <Label className="space-y-1 text-xs">
                 <span className="font-medium">오류 처리</span>
                 <Select
                   value={reviewer.fallbackOnError}
@@ -605,9 +605,9 @@ export function PermissionsTab() {
                     ))}
                   </SelectContent>
                 </Select>
-              </label>
+              </Label>
             </div>
-            <label className="space-y-1 text-xs">
+            <Label className="space-y-1 text-xs">
               <span className="font-medium">리뷰어 모델</span>
               <div className="flex gap-2">
                 <Input
@@ -629,7 +629,7 @@ export function PermissionsTab() {
                   적용
                 </Button>
               </div>
-            </label>
+            </Label>
             <p className="text-[11px] text-muted-foreground">
               LLM API 키는 지능 설정의 공급자 키를 사용합니다. 키가 없거나 재연결에 실패하면 설정은 저장되지 않습니다.
             </p>

@@ -2,6 +2,7 @@ import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
 import { Checkbox } from "../../../components/ui/checkbox.js";
 import { Input } from "../../../components/ui/input.js";
+import { Label } from "../../../components/ui/label.js";
 import type { LvisApi } from "../types.js";
 
 export interface MarketplaceTabProps {
@@ -38,7 +39,7 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
       </div>
 
       <div className="space-y-2">
-        <label className="text-sm font-medium">마켓플레이스 서버 URL</label>
+        <Label className="text-sm font-medium">마켓플레이스 서버 URL</Label>
         <div className="flex items-center gap-2">
           <Input
             type="url"
@@ -68,7 +69,7 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
       </div>
 
       <div className="space-y-2">
-        <label className="text-sm font-medium">API 키 (선택)</label>
+        <Label className="text-sm font-medium">API 키 (선택)</Label>
         <div className="flex items-center gap-2">
           {hasApiKey
             ? <Badge variant="default" className="text-xs">설정됨</Badge>

@@ -23,6 +23,7 @@ import { useEffect, useState } from "react";
 import { Badge } from "../../../../components/ui/badge.js";
 import { Button } from "../../../../components/ui/button.js";
 import { Checkbox } from "../../../../components/ui/checkbox.js";
+import { Label } from "../../../../components/ui/label.js";
 import {
   Dialog,
   DialogContent,
@@ -155,14 +156,14 @@ export function OutOfAllowedDirCard({
               <ul className="ml-4 list-disc text-xs text-destructive">
                 {adjacencyWarnings.map((w, i) => <li key={i}>{w}</li>)}
               </ul>
-              <label className="mt-2 flex items-center gap-2 text-xs">
+              <Label className="mt-2 flex items-center gap-2 text-xs">
                 <Checkbox
                   checked={acknowledgedAdjacency}
                   onCheckedChange={(checked) => setAcknowledgedAdjacency(checked === true)}
                   data-testid="adjacency-warning-ack"
                 />
                 위 경고를 이해했고 진행을 원합니다.
-              </label>
+              </Label>
             </section>
           )}
 
