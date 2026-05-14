@@ -39,11 +39,13 @@ describe("capabilities module namespace policy", () => {
     expect(classifySubscription("email.new")).toBe("public");
     expect(classifySubscription("calendar.event")).toBe("public");
     expect(classifySubscription("index.scan_done")).toBe("public");
+    expect(classifySubscription("host.theme.changed")).toBe("public");
   });
 
   it("classifies everything else as 'neutral'", () => {
     expect(classifySubscription("random.event")).toBe("neutral");
     expect(classifySubscription("foobar")).toBe("neutral");
+    expect(classifySubscription("host.secret.changed")).toBe("neutral");
     // task.* was retired 2026-05-11 — host owner removed in Phase 4
     expect(classifySubscription("task.created")).toBe("neutral");
     // Plugin-owned namespaces stay neutral by design — host is
@@ -95,6 +97,7 @@ describe("capabilities module namespace policy", () => {
     // Sentinel host-only capability would not unlock either; no capability
     // declarable in a plugin manifest grants `plugin.*` emit.
     expect(canEmitEvent("plugin.installed", ["host-internal-cap-that-does-not-exist"])).toBe(false);
+    expect(canEmitEvent("host.theme.changed", ["meeting-recorder"])).toBe(false);
   });
 });
 
@@ -199,6 +202,23 @@ describe("registerManifestEventSubscriptions namespace gate", () => {
     }
     // No namespace warning for email.new (public namespace).
     expect(warns.some((w) => /email\.new/.test(w))).toBe(false);
+  });
+
+  it("accepts explicit host public events silently while keeping host namespace closed", async () => {
+    await writePlugin("p_host_theme", ["host.theme.changed"]);
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    await runtime.load();
+
+    const warns: string[] = [];
+    const orig = console.warn;
+    console.warn = (msg: string) => warns.push(String(msg));
+    try {
+      const { engine } = stubEventCollector();
+      registerManifestEventSubscriptions(runtime, engine);
+    } finally {
+      console.warn = orig;
+    }
+    expect(warns.some((w) => /host\.theme\.changed/.test(w))).toBe(false);
   });
 
   it("allows unknown neutral subscription with a drift warning", async () => {
