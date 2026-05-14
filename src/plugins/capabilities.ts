@@ -121,7 +121,7 @@ export const ENFORCED_CAPABILITIES: ReadonlyMap<string, CapabilityPolicy> = new 
     "background-watcher",
     {
       description:
-        "Advisory — signals the plugin boots long-running pollers/watchers via startupTools. Not gated at runtime today.",
+        "Advisory — signals the plugin boots long-running pollers/watchers in its own start() lifecycle. Not gated at runtime today.",
       enforcement: "advisory",
       gates: [],
     },
