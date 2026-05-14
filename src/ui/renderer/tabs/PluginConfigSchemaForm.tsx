@@ -20,6 +20,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "../../../components/ui/button.js";
 import { Checkbox } from "../../../components/ui/checkbox.js";
 import { Input } from "../../../components/ui/input.js";
+import { Label } from "../../../components/ui/label.js";
 import { NativeSelect, NativeSelectOption } from "../../../components/ui/native-select.js";
 import type { PluginConfigSchemaPropertySummary, PluginConfigSchemaSummary } from "../types.js";
 
@@ -158,11 +159,11 @@ export function PluginConfigSchemaForm({
         const error = !isSecret ? fieldError(prop, value) : null;
         return (
           <div key={key} className="flex flex-col gap-1">
-            <label htmlFor={fieldId} className="text-xs font-medium">
+            <Label htmlFor={fieldId} className="text-xs font-medium">
               {label}
               {required.has(key) && <span className="ml-1 text-destructive">*</span>}
               <span className="ml-2 font-mono text-[10px] text-muted-foreground">{key}</span>
-            </label>
+            </Label>
             {prop.description && (
               <p className="text-[11px] text-muted-foreground">{prop.description}</p>
             )}
@@ -215,14 +216,14 @@ export function PluginConfigSchemaForm({
                 ))}
               </NativeSelect>
             ) : prop.type === "boolean" ? (
-              <label className="flex items-center gap-2 text-xs">
+              <Label className="flex items-center gap-2 text-xs">
                 <Checkbox
                   id={fieldId}
                   checked={Boolean(value ?? prop.default ?? false)}
                   onCheckedChange={(checked) => setDraft((prev) => ({ ...prev, [key]: checked === true }))}
                 />
                 <span className="text-muted-foreground">{label} 활성화</span>
-              </label>
+              </Label>
             ) : prop.type === "array" && prop.items?.type === "string" ? (
               <Input
                 id={fieldId}

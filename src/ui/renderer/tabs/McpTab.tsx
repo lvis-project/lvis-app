@@ -3,6 +3,7 @@ import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
 import { Checkbox } from "../../../components/ui/checkbox.js";
 import { Input } from "../../../components/ui/input.js";
+import { Label } from "../../../components/ui/label.js";
 import { NativeSelect, NativeSelectOption } from "../../../components/ui/native-select.js";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
 import { Separator } from "../../../components/ui/separator.js";
@@ -476,9 +477,9 @@ export function McpTab() {
             <div className="grid grid-cols-2 gap-3">
               {/* ID */}
               <div className="space-y-1">
-                <label htmlFor={formIds.id} className="text-xs">
+                <Label htmlFor={formIds.id} className="text-xs">
                   서버 ID *
-                </label>
+                </Label>
                 <Input
                   id={formIds.id}
                   className="h-7 text-xs"
@@ -490,9 +491,9 @@ export function McpTab() {
 
               {/* Transport */}
               <div className="space-y-1">
-                <label htmlFor={formIds.transport} className="text-xs">
+                <Label htmlFor={formIds.transport} className="text-xs">
                   Transport *
-                </label>
+                </Label>
                 <NativeSelect
                   id={formIds.transport}
                   size="sm"
@@ -510,9 +511,9 @@ export function McpTab() {
 
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
-                <label htmlFor={formIds.auth} className="text-xs">
+                <Label htmlFor={formIds.auth} className="text-xs">
                   Auth
-                </label>
+                </Label>
                 <NativeSelect
                   id={formIds.auth}
                   size="sm"
@@ -528,9 +529,9 @@ export function McpTab() {
                 </NativeSelect>
               </div>
               <div className="space-y-1">
-                <label htmlFor={formIds.apiKey} className="text-xs">
+                <Label htmlFor={formIds.apiKey} className="text-xs">
                   API Key (write-only)
-                </label>
+                </Label>
                 <Input
                   id={formIds.apiKey}
                   type="password"
@@ -545,9 +546,9 @@ export function McpTab() {
             {form.transport === "stdio" ? (
               <>
                 <div className="space-y-1">
-                  <label htmlFor={formIds.command} className="text-xs">
+                  <Label htmlFor={formIds.command} className="text-xs">
                     Command *
-                  </label>
+                  </Label>
                   <Input
                     id={formIds.command}
                     className="h-7 text-xs font-mono"
@@ -560,9 +561,9 @@ export function McpTab() {
                   </p>
                 </div>
                 <div className="space-y-1">
-                  <label htmlFor={formIds.args} className="text-xs">
+                  <Label htmlFor={formIds.args} className="text-xs">
                     Args (추가 인자)
-                  </label>
+                  </Label>
                   <Input
                     id={formIds.args}
                     className="h-7 text-xs font-mono"
@@ -572,9 +573,9 @@ export function McpTab() {
                   />
                 </div>
                 <div className="space-y-1">
-                  <label htmlFor={formIds.env} className="text-xs">
+                  <Label htmlFor={formIds.env} className="text-xs">
                     Env (KEY=value, write-only)
-                  </label>
+                  </Label>
                   <Textarea
                     id={formIds.env}
                     className="min-h-[88px] text-xs font-mono"
@@ -587,9 +588,9 @@ export function McpTab() {
             ) : (
               <>
                 <div className="space-y-1">
-                  <label htmlFor={formIds.url} className="text-xs">
+                  <Label htmlFor={formIds.url} className="text-xs">
                     URL *
-                  </label>
+                  </Label>
                   <Input
                     id={formIds.url}
                     className="h-7 text-xs font-mono"
@@ -607,14 +608,14 @@ export function McpTab() {
                     }
                     className="size-3.5"
                   />
-                  <label htmlFor={formIds.allowPrivateNetworks} className="text-xs">
+                  <Label htmlFor={formIds.allowPrivateNetworks} className="text-xs">
                     사설 네트워크 허용 (localhost/사내망)
-                  </label>
+                  </Label>
                 </div>
                 <div className="space-y-1">
-                  <label htmlFor={formIds.headers} className="text-xs">
+                  <Label htmlFor={formIds.headers} className="text-xs">
                     Headers (HEADER: value, write-only)
-                  </label>
+                  </Label>
                   <Textarea
                     id={formIds.headers}
                     className="min-h-[88px] text-xs font-mono"
