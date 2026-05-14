@@ -5,6 +5,8 @@
  * daily trend sparkline, and top 5 patterns.
  */
 import React, { useCallback, useEffect, useState } from "react";
+import { Checkbox } from "../../../components/ui/checkbox.js";
+import { NativeSelect, NativeSelectOption } from "../../../components/ui/native-select.js";
 import { Separator } from "../../../components/ui/separator.js";
 
 interface DlpStats {
@@ -108,24 +110,12 @@ export function PrivacyTab({ piiRedactEnabled, onToggle }: PrivacyTabProps) {
           </p>
         </div>
         <div className="flex items-center gap-3 rounded-md border px-3 py-3">
-          <button
-            type="button"
-            role="checkbox"
-            aria-checked={piiRedactEnabled}
+          <Checkbox
+            checked={piiRedactEnabled}
             aria-labelledby="pii-redact-toggle-label"
-            className={`relative h-5 w-5 flex-shrink-0 rounded border-2 transition-colors ${
-              piiRedactEnabled
-                ? "border-primary bg-primary"
-                : "border-muted-foreground"
-            } cursor-pointer hover:border-primary/60`}
-            onClick={onToggle}
-          >
-            {piiRedactEnabled && (
-              <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-primary-foreground">
-                ✓
-              </span>
-            )}
-          </button>
+            className="size-5"
+            onCheckedChange={onToggle}
+          />
           <div className="space-y-0.5">
             <p id="pii-redact-toggle-label" className="text-sm font-medium">
               PII 리댁트 활성화 (기본 OFF)
@@ -144,15 +134,16 @@ export function PrivacyTab({ piiRedactEnabled, onToggle }: PrivacyTabProps) {
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <p className="text-sm font-medium">DLP 탐지 통계</p>
-              <select
-                className="h-7 rounded-md border bg-background px-2 text-xs"
+              <NativeSelect
+                size="sm"
+                className="w-28"
                 value={days}
                 onChange={(e) => setDays(Number(e.target.value))}
               >
-                <option value={7}>최근 7일</option>
-                <option value={14}>최근 14일</option>
-                <option value={30}>최근 30일</option>
-              </select>
+                <NativeSelectOption value={7}>최근 7일</NativeSelectOption>
+                <NativeSelectOption value={14}>최근 14일</NativeSelectOption>
+                <NativeSelectOption value={30}>최근 30일</NativeSelectOption>
+              </NativeSelect>
             </div>
 
             {statsError && (

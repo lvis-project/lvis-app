@@ -121,8 +121,7 @@ describe("OutOfAllowedDirCard", () => {
     expect(persist.disabled).toBe(true);
 
     // Acknowledge → now enabled.
-    const checkbox = document.body.querySelector('input[type="checkbox"]') as HTMLInputElement;
-    fireEvent.click(checkbox);
+    fireEvent.click(document.body.querySelector('[data-testid="adjacency-warning-ack"]') as HTMLElement);
     expect(persist.disabled).toBe(false);
   });
 

@@ -1,5 +1,6 @@
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
+import { Checkbox } from "../../../components/ui/checkbox.js";
 import { Input } from "../../../components/ui/input.js";
 import type { LvisApi } from "../types.js";
 
@@ -98,22 +99,12 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
       </div>
 
       <div className="flex items-start gap-3 rounded-md border px-3 py-2.5">
-        <button
-          type="button"
-          role="checkbox"
-          aria-checked={allowPrivateNetwork}
+        <Checkbox
+          checked={allowPrivateNetwork}
           aria-labelledby="marketplace-allow-private-network-label"
-          className={`relative mt-0.5 h-5 w-5 flex-shrink-0 rounded border-2 transition-colors cursor-pointer hover:border-primary/60 ${
-            allowPrivateNetwork ? "border-primary bg-primary" : "border-muted-foreground"
-          }`}
-          onClick={() => setAllowPrivateNetwork(!allowPrivateNetwork)}
-        >
-          {allowPrivateNetwork && (
-            <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-primary-foreground">
-              ✓
-            </span>
-          )}
-        </button>
+          className="mt-0.5 size-5"
+          onCheckedChange={(checked) => setAllowPrivateNetwork(checked === true)}
+        />
         <div className="space-y-0.5">
           <p id="marketplace-allow-private-network-label" className="text-sm font-medium">
             사설 네트워크 허용 (loopback / RFC1918)
