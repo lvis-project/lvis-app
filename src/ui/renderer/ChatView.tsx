@@ -20,7 +20,7 @@ import { ViewModeBanner, type ViewModeState } from "./components/ViewModeBanner.
 import { SessionResumeDivider } from "./components/SessionResumeDivider.js";
 import { SessionTodoPanel } from "./components/SessionTodoPanel.js";
 import { MessageQueuePanel } from "./components/MessageQueuePanel.js";
-import { MessageQueueStore } from "./state/message-queue-store.js";
+import { MessageQueueStore, formatQueueInject } from "./state/message-queue-store.js";
 import { SubAgentCard } from "./components/SubAgentCard.js";
 import { TokenCostBadge } from "./components/TokenCostBadge.js";
 import { TokenProgressRing } from "./components/TokenProgressRing.js";
@@ -622,11 +622,109 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
   }, [currentSessionId]);
 
   // Stage 3: per-ChatView message-queue store. session 변경 시 자동 비움.
-  // turn 종료 시 비움은 Stage 5 에서 streaming event 구독으로 추가.
   const messageQueueStore = useMemo(() => new MessageQueueStore(), []);
   useEffect(() => {
     messageQueueStore.clear();
   }, [currentSessionId, messageQueueStore]);
+
+  // Stage 5: streaming 종료 시 자연 인입 — 큐에 남은 항목이 있으면 다음 turn
+  // 으로 inject. brake-point 정의: streaming true → false 전이 (turn 종료).
+  // Per-tool-result mid-stream inject 는 더 정교한 conversation-loop hook
+  // 필요 — 후속 PR 에서 처리. 우선은 end-of-stream 으로 minimal viable.
+  const prevStreamingRef = useRef(false);
+  useEffect(() => {
+    const wasStreaming = prevStreamingRef.current;
+    prevStreamingRef.current = streaming;
+    if (wasStreaming && !streaming && messageQueueStore.size() > 0) {
+      const taken = messageQueueStore.takeAll();
+      if (taken.length > 0) {
+        // formatQueueInject 결과 = 0 항목엔 "" (위 size() > 0 가드로 도달 X),
+        // 1 항목은 항목 자체, 2+ 는 wrap
+        const formatted = formatQueueInject(taken);
+        void onAsk(formatted, { inputOrigin: "user-keyboard", token: "" });
+      }
+    }
+  }, [streaming, messageQueueStore, onAsk]);
+
+  // Stage 5: composer Enter morph — busy = queue.add, idle = onAsk 직행.
+  // ⌘⏎ = 즉시 주입 (LLM abort + 큐 selected + 현재 입력).
+  const handleComposerSend = useCallback(
+    (intent: UserKeyboardIntentSnapshot) => {
+      const text = question;
+      if (text.trim().length === 0 && attachments.length === 0) return;
+      if (streaming) {
+        // Busy: 큐에 추가 (자연 인입 대상)
+        if (text.trim().length > 0) messageQueueStore.add(text);
+        setQuestion("");
+      } else {
+        // Idle: 직행 전송
+        void onAsk(text, intent);
+      }
+    },
+    [question, attachments.length, streaming, messageQueueStore, onAsk, setQuestion],
+  );
+
+  const handleImmediateInject = useCallback(() => {
+    const text = question.trim();
+    const taken = messageQueueStore.takeSelected();
+    const parts: string[] = [];
+    if (taken.length > 0) parts.push(formatQueueInject(taken));
+    if (text.length > 0) parts.push(text);
+    if (parts.length === 0) return;
+    const combined = parts.join("\n");
+    setQuestion("");
+    // LLM abort 먼저 → 새 turn 시작 (onAsk 가 abort+restart 처리)
+    void onAbort();
+    void onAsk(combined, { inputOrigin: "user-keyboard", token: "" });
+  }, [question, messageQueueStore, onAsk, onAbort, setQuestion]);
+
+  // Stage 5: ESC = LLM 취소 (큐 보존). 모달 열려 있을 땐 모달이 ESC 우선
+  // 가로채므로 여기까지 안 옴. 큐 선택 해제 우선 처리: 선택 항목 있으면
+  // 그것만 해제하고 LLM 은 안 건드림.
+  useEffect(() => {
+    if (!streaming) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      const target = e.target as HTMLElement | null;
+      const isEditable = !!target && (
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.isContentEditable
+      );
+      // 선택된 큐 항목 있으면 → 선택 해제만 (LLM 안 건드림)
+      if (messageQueueStore.hasSelected()) {
+        e.preventDefault();
+        messageQueueStore.clearSelection();
+        return;
+      }
+      // textarea/input 안 ESC = LLM 취소 (커서 비우는 일반 ESC 가 아니라 의도 명확)
+      if (isEditable || !isEditable) {
+        e.preventDefault();
+        void onAbort();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [streaming, messageQueueStore, onAbort]);
+
+  // Stage 5: ⌘⏎ — 입력 영역에서만 동작. 즉시 주입 (인터럽트).
+  // textarea 자체의 onKeyDown 에서 처리하면 깔끔하지만, Composer 가 모르는
+  // messageQueueStore 의존이라 ChatView document-level 핸들러로.
+  useEffect(() => {
+    if (!streaming) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== "Enter") return;
+      if (!(e.metaKey || e.ctrlKey)) return;
+      const target = e.target as HTMLElement | null;
+      const isComposerTextarea =
+        target?.getAttribute?.("data-testid") === "composer-textarea";
+      if (!isComposerTextarea) return;
+      e.preventDefault();
+      handleImmediateInject();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [streaming, handleImmediateInject]);
 
   useEffect(() => {
     const viewport = scrollViewportRef.current;
@@ -1256,9 +1354,11 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           <MessageQueuePanel
             store={messageQueueStore}
             onSendNow={(item) => {
-              // Stage 5 wires this to LLM abort + immediate inject.
-              // Stage 3 keeps it as a no-op handler so the panel renders.
-              void item;
+              // 행별 [↑ 즉시] — 그 1 항목만 즉시 주입. 다른 큐 항목은 잔존.
+              messageQueueStore.remove(item.id);
+              const text = formatQueueInject([item]);
+              void onAbort();
+              void onAsk(text, { inputOrigin: "user-keyboard", token: "" });
             }}
           />
         </div>
@@ -1400,7 +1500,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             allocateN={() => ++attachmentNCounter.current}
             saveClipboardImage={(b64) => window.lvis.attach.saveClipboardImage(b64)}
             openExternal={(p) => window.lvis.attach.openExternal(p)}
-            onSend={(intent) => void onAsk(question, intent)}
+            onSend={handleComposerSend}
             onAbort={() => void onAbort()}
             onGuide={() => {
               const text = question;
@@ -1471,7 +1571,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
                 ? true
                 : question.trim().length === 0 && attachments.length === 0
             }
-            onSend={() => void onAsk(question, { inputOrigin: "user-keyboard", token: "" })}
+            onSend={() => handleComposerSend({ inputOrigin: "user-keyboard", token: "" })}
             onCancel={() => void onAbort()}
             onGuide={() => {
               // Stage 4: 가이드 버튼 = ChatView 의 onGuide 호출 위임. Stage 5 에서
