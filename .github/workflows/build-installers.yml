@@ -43,7 +43,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - name: Install Linux packaging tools
         if: matrix.target == 'linux'
-        run: sudo apt-get update && sudo apt-get install -y fakeroot rpm
+        run: sudo apt-get update && sudo apt-get install -y fakeroot rpm xvfb
       - name: Install dependencies
         run: bun install --frozen-lockfile
       - name: Build installer
@@ -63,6 +63,15 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+      - name: Smoke launch packaged app
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.target }}" = "linux" ]; then
+            xvfb-run -a node scripts/smoke-packaged-app.mjs --target "${{ matrix.target }}"
+          else
+            node scripts/smoke-packaged-app.mjs --target "${{ matrix.target }}"
+          fi
       - name: Upload installers
         uses: actions/upload-artifact@v7
         with:
