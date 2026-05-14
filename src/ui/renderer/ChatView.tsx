@@ -931,7 +931,15 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             }
 
             if (entry.kind === "system") {
-              rendered.push(<div key={idx} className="mx-auto text-center text-xs text-muted-foreground py-1 px-3 rounded-full bg-muted/50">{entry.text}</div>);
+              rendered.push(
+                <div
+                  key={idx}
+                  data-testid="system-entry"
+                  className="mx-auto text-center text-xs text-muted-foreground py-1 px-3 rounded-full bg-muted/50"
+                >
+                  {entry.text}
+                </div>,
+              );
               i++;
               continue;
             }
