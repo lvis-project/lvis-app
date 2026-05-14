@@ -1,0 +1,172 @@
+/**
+ * MessageQueueStore — mid-turn user input queue for LVIS chat.
+ *
+ * LLM busy 동안 사용자가 입력한 메시지들의 후보 풀. TODO 와 다름:
+ * - 완료/진행중/대기 단계 없음 (단순 후보)
+ * - 자연 인입 (전체) / 즉시 주입 (선택+입력) / 행별 즉시 / 취소 3 가지 시맨틱
+ * - turn 종료 시 자동 비움 (다음 turn 으로 이월 X)
+ *
+ * Renderer-only 단순 class. main process 와 IPC 없음 — 큐 inject 는
+ * 기존 chat.send IPC 로 user message 추가하는 형태. brake-point 감지는
+ * 스트리밍 이벤트 구독으로 renderer 에서 수행.
+ *
+ * Spec: docs/blueprints/composer-redesign-message-queue.md
+ */
+
+export interface MessageQueueItem {
+  id: string;
+  text: string;
+  selected: boolean;
+  createdAt: number;
+}
+
+let nextId = 0;
+function makeId(): string {
+  // crypto.randomUUID 가 fallback 없이 가능 (renderer 환경 보장).
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  // 테스트 환경 (jsdom 일부 버전) 에서 randomUUID 부재 시 단조 증가 id.
+  nextId += 1;
+  return `mq-${Date.now()}-${nextId}`;
+}
+
+/**
+ * 자동 인입 prompt 포맷.
+ * - 0 items: 빈 문자열 (caller 가 inject 하지 말지 결정)
+ * - 1 item: 항목 그 자체 (wrap 없음 — 어색함 회피)
+ * - 2+ items: "사용자가 다음 항목을 추가 요청했습니다:\n- a\n- b" 로 wrap
+ *
+ * 모든 vendor (Claude/OpenAI/Gemini) 호환 — 연속 user role 제약 회피용.
+ */
+export function formatQueueInject(items: readonly MessageQueueItem[]): string {
+  if (items.length === 0) return "";
+  if (items.length === 1) return items[0].text;
+  return (
+    "사용자가 다음 항목을 추가 요청했습니다:\n" +
+    items.map((it) => `- ${it.text}`).join("\n")
+  );
+}
+
+export class MessageQueueStore {
+  private items: MessageQueueItem[] = [];
+  private listeners = new Set<() => void>();
+
+  add(text: string): MessageQueueItem {
+    const trimmed = text.trim();
+    if (trimmed.length === 0) {
+      throw new Error("MessageQueueStore.add: empty text rejected");
+    }
+    const item: MessageQueueItem = {
+      id: makeId(),
+      text: trimmed,
+      selected: false,
+      createdAt: Date.now(),
+    };
+    this.items = [...this.items, item];
+    this.notify();
+    return item;
+  }
+
+  remove(id: string): void {
+    const before = this.items.length;
+    this.items = this.items.filter((it) => it.id !== id);
+    if (this.items.length !== before) this.notify();
+  }
+
+  toggleSelect(id: string): void {
+    let changed = false;
+    this.items = this.items.map((it) => {
+      if (it.id !== id) return it;
+      changed = true;
+      return { ...it, selected: !it.selected };
+    });
+    if (changed) this.notify();
+  }
+
+  clearSelection(): void {
+    let changed = false;
+    this.items = this.items.map((it) => {
+      if (!it.selected) return it;
+      changed = true;
+      return { ...it, selected: false };
+    });
+    if (changed) this.notify();
+  }
+
+  /** 큐 전체 비우기 — turn 종료 / session 변경 시 호출. */
+  clear(): void {
+    if (this.items.length === 0) return;
+    this.items = [];
+    this.notify();
+  }
+
+  /**
+   * 자연 인입 — 큐 전체를 꺼내고 비움. brake-point hook 에서 호출.
+   * Returns: items in insertion order (selection state 무시).
+   */
+  takeAll(): MessageQueueItem[] {
+    if (this.items.length === 0) return [];
+    const taken = this.items;
+    this.items = [];
+    this.notify();
+    return taken;
+  }
+
+  /**
+   * 즉시 주입 — 선택된 항목만 꺼내고 비움. 미선택 항목은 잔존.
+   * ⌘⏎ 인터럽트에서 호출. selection state 가 false 인 항목은 그대로.
+   */
+  takeSelected(): MessageQueueItem[] {
+    const selected = this.items.filter((it) => it.selected);
+    if (selected.length === 0) return [];
+    this.items = this.items.filter((it) => !it.selected);
+    this.notify();
+    return selected;
+  }
+
+  /**
+   * 행별 즉시 — 특정 1 항목을 꺼내고 비움. 다른 항목은 잔존.
+   * 큐 행의 [↑ 즉시] 버튼에서 호출.
+   */
+  takeOne(id: string): MessageQueueItem | null {
+    const idx = this.items.findIndex((it) => it.id === id);
+    if (idx === -1) return null;
+    const taken = this.items[idx];
+    this.items = [...this.items.slice(0, idx), ...this.items.slice(idx + 1)];
+    this.notify();
+    return taken;
+  }
+
+  // ─── selectors ───
+  getItems(): readonly MessageQueueItem[] {
+    return this.items;
+  }
+  size(): number {
+    return this.items.length;
+  }
+  hasSelected(): boolean {
+    return this.items.some((it) => it.selected);
+  }
+  selectedCount(): number {
+    return this.items.reduce((n, it) => (it.selected ? n + 1 : n), 0);
+  }
+
+  // ─── subscription ───
+  /**
+   * useSyncExternalStore 호환 subscribe.
+   * 반환된 unsubscribe 함수로 listener 제거.
+   */
+  subscribe = (listener: () => void): (() => void) => {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  };
+
+  private notify(): void {
+    for (const listener of this.listeners) {
+      listener();
+    }
+  }
+}
