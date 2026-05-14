@@ -91,7 +91,7 @@ export function OverlayCardRegion({ onPluginPrimaryAction, onRoutineAcknowledge 
               dismiss(active.id);
               onPluginPrimaryAction(active.id);
             }}
-            primaryActionLabel={active.primaryActionLabel ?? "확인하기"}
+            primaryActionLabel={active.primaryActionLabel ?? "지금 답하기"}
             kind="plugin"
           />
         </div>
