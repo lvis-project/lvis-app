@@ -152,7 +152,7 @@ plugin                   host gate/stage           renderer/main chat
   │                          │                         │ main chat
 ```
 
-`triggerConversation()` 자체는 사용자의 chat ConversationHistory 를 변경하지 않는다. 사용자가 "확인하기" 를 누른 뒤에만 host 가 pending prompt (`<imported-from-proactive source="...">...</imported-from-proactive>`) 를 main chat 에 삽입한다. 이후 실행되는 tool call 은 일반 `runTurn` permission path 를 통과하며, overlay trigger source 는 mutating tool 의 allow-cache 우회를 강제한다.
+`triggerConversation()` 자체는 사용자의 chat ConversationHistory 를 변경하지 않는다. 사용자가 "지금 답하기" 를 누른 뒤에만 host 가 pending prompt (`<imported-from-proactive source="...">...</imported-from-proactive>`) 를 main chat 에 삽입한다. 이후 실행되는 tool call 은 일반 `runTurn` permission path 를 통과하며, overlay trigger source 는 mutating tool 의 allow-cache 우회를 강제한다.
 
 ## Reason classes — caller 처리 가이드
 
@@ -207,7 +207,7 @@ P2 행동:
 | visibility | 처리 |
 |------------|------|
 | `silent` | renderer 가 `useTriggerResult` 단계에서 필터 — 카드 렌더 X. 호스트는 여전히 audit + cache (debug 용) |
-| `summary-only` | `TriggerCard` 가 우상단 toast variant (380px wide, line-clamp-2 summary) 로 마운트. 8s auto-dismiss, hover 시 타이머 일시정지 + mouseleave 시 fresh 8s 재시작. accept(`확인하기`) / dismiss 버튼 모두 살아 있음 |
+| `summary-only` | `TriggerCard` 가 우상단 toast variant (380px wide, line-clamp-2 summary) 로 마운트. 8s auto-dismiss, hover 시 타이머 일시정지 + mouseleave 시 fresh 8s 재시작. accept(`지금 답하기`) / dismiss 버튼 모두 살아 있음 |
 | `user-visible` | 기존 모달 형태 카드 — 화면 중앙(루틴 영역 아래) 에 마운트. auto-dismiss 없음 |
 
 `TriggerCard` 는 `result.visibility` 를 보고 내부 분기 (`data-variant="modal" | "summary"`). `ChatView` 는 visibility 별로 별도 슬롯 (top-right toast / centered modal) 에 라우팅. 단일 슬롯 정책이라 같은 시점에 두 종류가 동시에 뜨는 일은 없다.
