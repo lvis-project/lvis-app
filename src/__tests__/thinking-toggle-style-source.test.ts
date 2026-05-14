@@ -9,14 +9,15 @@ function readRepoFile(path: string): string {
 }
 
 describe("chat Thinking toggle styles", () => {
-  it("uses the shadcn/Radix checkbox component with a white unchecked square", () => {
+  it("uses the shadcn/Radix checkbox component with a semantic unchecked square", () => {
     const component = readRepoFile("src/ui/renderer/components/InputActionBar.tsx");
     const styles = readRepoFile("src/styles.css");
     const checkbox = readRepoFile("src/components/ui/checkbox.tsx");
 
     expect(component).toContain('import { Checkbox } from "../../../components/ui/checkbox.js"');
-    expect(component).toContain("data-[state=unchecked]:bg-white");
+    expect(component).toContain("data-[state=unchecked]:bg-background");
     expect(component).toContain("rounded-[2px]");
+    expect(component).not.toContain("bg-white");
     expect(component).not.toContain("thinking-toggle-input");
     expect(component).not.toContain("thinking-toggle-box");
     expect(component).not.toContain("checked:appearance-auto");

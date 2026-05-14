@@ -94,7 +94,9 @@ describe("InputActionBar (post indexer-removal)", () => {
     const checkbox = getByRole("checkbox", { name: "Thinking" });
     expect(checkbox).toHaveAttribute("data-state", "unchecked");
     expect(checkbox.className).toContain("rounded-[2px]");
-    expect(checkbox.className).toContain("bg-white");
+    expect(checkbox.className).toContain("bg-background");
+    expect(checkbox.className).toContain("data-[state=unchecked]:bg-background");
+    expect(checkbox.className).not.toContain("bg-white");
     expect(checkbox.className).not.toContain("appearance-auto");
   });
 
