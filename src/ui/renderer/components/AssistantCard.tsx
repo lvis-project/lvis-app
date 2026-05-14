@@ -1,6 +1,8 @@
 import { Loader2, Star, RefreshCw, GitBranch, ThumbsUp, ThumbsDown } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { useState } from "react";
+import { Button } from "../../../components/ui/button.js";
+import { Input } from "../../../components/ui/input.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
 import { clampDanglingMarkdownLink } from "../utils/streaming-markdown.js";
@@ -44,18 +46,41 @@ export function AssistantCard({
             <div className={`ml-auto gap-1 ${isFinal !== false ? "flex" : "hidden group-hover:flex"}`}>
               {actions.onRetry && (
                 <Tooltip><TooltipTrigger asChild>
-                  <button className="rounded p-0.5 hover:bg-muted" onClick={actions.onRetry} title="다시 시도 (깊이: high)">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-5 w-5 text-muted-foreground hover:text-foreground"
+                    onClick={actions.onRetry}
+                    title="다시 시도 (깊이: high)"
+                  >
                     <RefreshCw className="h-3 w-3" />
-                  </button>
+                  </Button>
                 </TooltipTrigger><TooltipContent>다시 시도 (깊이: high)</TooltipContent></Tooltip>
               )}
               {actions.onFork && (
-                <button className="rounded p-0.5 hover:bg-muted" onClick={actions.onFork} title="분기"><GitBranch className="h-3 w-3" /></button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-5 w-5 text-muted-foreground hover:text-foreground"
+                  onClick={actions.onFork}
+                  title="분기"
+                >
+                  <GitBranch className="h-3 w-3" />
+                </Button>
               )}
               {actions.onToggleStar && (
-                <button className="rounded p-0.5 hover:bg-muted" onClick={actions.onToggleStar} title="즐겨찾기">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-5 w-5 text-muted-foreground hover:text-foreground"
+                  onClick={actions.onToggleStar}
+                  title="즐겨찾기"
+                >
                   <Star key={isStarred ? "on" : "off"} className={`h-3 w-3 ${isStarred ? "fill-emphasis text-emphasis lvis-anim-star" : ""}`} />
-                </button>
+                </Button>
               )}
             </div>
           ) : null}
@@ -77,8 +102,11 @@ export function AssistantCard({
         <div className="mt-1.5 flex items-center gap-1">
           <Tooltip>
             <TooltipTrigger asChild>
-              <button
-                className={`rounded p-0.5 hover:bg-muted transition-colors ${feedbackRating === "up" ? "text-success" : "text-muted-foreground"}`}
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className={`h-5 w-5 ${feedbackRating === "up" ? "text-success" : "text-muted-foreground hover:text-foreground"}`}
                 onClick={() => {
                   if (feedbackRating === "up") return;
                   setFeedbackRating("up");
@@ -88,14 +116,17 @@ export function AssistantCard({
                 aria-label="도움이 됐어요"
               >
                 <ThumbsUp key={feedbackRating === "up" ? "on" : "off"} className={`h-3.5 w-3.5 ${feedbackRating === "up" ? "fill-success lvis-anim-pop" : ""}`} />
-              </button>
+              </Button>
             </TooltipTrigger>
             <TooltipContent>도움이 됐어요</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
-              <button
-                className={`rounded p-0.5 hover:bg-muted transition-colors ${feedbackRating === "down" ? "text-destructive" : "text-muted-foreground"}`}
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className={`h-5 w-5 ${feedbackRating === "down" ? "text-destructive" : "text-muted-foreground hover:text-foreground"}`}
                 onClick={() => {
                   if (feedbackRating === "down") return;
                   setShowReasonBox(true);
@@ -103,19 +134,19 @@ export function AssistantCard({
                 aria-label="개선이 필요해요"
               >
                 <ThumbsDown key={feedbackRating === "down" ? "on" : "off"} className={`h-3.5 w-3.5 ${feedbackRating === "down" ? "fill-destructive lvis-anim-pop" : ""}`} />
-              </button>
+              </Button>
             </TooltipTrigger>
             <TooltipContent>개선이 필요해요</TooltipContent>
           </Tooltip>
           {showReasonBox && feedbackRating !== "down" ? (
             <div className="ml-1 flex items-center gap-1">
-              <input
+              <Input
                 type="text"
                 maxLength={200}
                 placeholder="이유 (선택)"
                 value={reasonDraft}
                 onChange={(e) => setReasonDraft(e.target.value)}
-                className="h-6 rounded border border-input bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring w-40"
+                className="h-6 w-40 px-2 text-xs"
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
                     setFeedbackRating("down");
@@ -127,8 +158,11 @@ export function AssistantCard({
                   }
                 }}
               />
-              <button
-                className="rounded px-1.5 py-0.5 text-xs bg-muted hover:bg-muted/80"
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="h-6 px-2 text-xs"
                 onClick={() => {
                   setFeedbackRating("down");
                   setShowReasonBox(false);
@@ -136,7 +170,7 @@ export function AssistantCard({
                 }}
               >
                 전송
-              </button>
+              </Button>
             </div>
           ) : null}
         </div>

@@ -8,8 +8,10 @@ const logoSourcePath = join(root, "src", "shared", "lvis-logo.ts");
 
 const TARGET_SIZE = 1024;
 const SUPERSAMPLE = 2;
-const ICON_RADIUS = 192;
-const ICON_BACKGROUND = [8, 17, 31, 255];
+const ICON_CARD_INSET = 64;
+const ICON_CARD_RADIUS = 192;
+const LOGO_SAFE_PADDING = 192;
+const ICON_BACKGROUND = [255, 255, 255, 255];
 const GRADIENT_STOPS = [
   { at: 0, color: [255, 75, 46] },
   { at: 0.56, color: [255, 63, 110] },
@@ -28,8 +30,7 @@ function iconGeometry(viewBox) {
   const [, , logoWidthText, logoHeightText] = viewBox.split(/\s+/);
   const logoWidth = Number(logoWidthText);
   const logoHeight = Number(logoHeightText);
-  const padding = 160;
-  const scale = (TARGET_SIZE - padding * 2) / Math.max(logoWidth, logoHeight);
+  const scale = (TARGET_SIZE - LOGO_SAFE_PADDING * 2) / Math.max(logoWidth, logoHeight);
   const x = (TARGET_SIZE - logoWidth * scale) / 2;
   const y = (TARGET_SIZE - logoHeight * scale) / 2;
   return { logoWidth, logoHeight, x, y, scale };
@@ -37,6 +38,7 @@ function iconGeometry(viewBox) {
 
 function buildIconSvg(logoPath, geometry) {
   const { logoWidth, logoHeight, x, y, scale } = geometry;
+  const cardSize = TARGET_SIZE - ICON_CARD_INSET * 2;
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${TARGET_SIZE}" height="${TARGET_SIZE}" viewBox="0 0 ${TARGET_SIZE} ${TARGET_SIZE}" fill="none" xmlns="http://www.w3.org/2000/svg">
   <defs>
@@ -46,7 +48,7 @@ function buildIconSvg(logoPath, geometry) {
       <stop offset="1" stop-color="#d946ef"/>
     </linearGradient>
   </defs>
-  <rect width="${TARGET_SIZE}" height="${TARGET_SIZE}" rx="${ICON_RADIUS}" fill="#08111f"/>
+  <rect x="${ICON_CARD_INSET}" y="${ICON_CARD_INSET}" width="${cardSize}" height="${cardSize}" rx="${ICON_CARD_RADIUS}" fill="#ffffff"/>
   <path d="${logoPath}" fill="url(#lvis-icon-mark)" transform="translate(${x.toFixed(3)} ${y.toFixed(3)}) scale(${scale.toFixed(6)})"/>
 </svg>
 `;
@@ -217,13 +219,18 @@ function transformedEdges(subpaths, geometry, factor) {
   return edges;
 }
 
-function isInsideRoundedRect(x, y, size, radius) {
+function isInsideRoundedRect(x, y, left, top, width, height, radius) {
   const px = x + 0.5;
   const py = y + 0.5;
-  const min = radius;
-  const max = size - radius;
-  const dx = px < min ? px - min : px > max ? px - max : 0;
-  const dy = py < min ? py - min : py > max ? py - max : 0;
+  const right = left + width;
+  const bottom = top + height;
+  if (px < left || px > right || py < top || py > bottom) return false;
+  const minX = left + radius;
+  const maxX = right - radius;
+  const minY = top + radius;
+  const maxY = bottom - radius;
+  const dx = px < minX ? px - minX : px > maxX ? px - maxX : 0;
+  const dy = py < minY ? py - minY : py > maxY ? py - maxY : 0;
   return dx * dx + dy * dy <= radius * radius;
 }
 
@@ -253,12 +260,14 @@ function setPixel(buffer, size, x, y, color) {
 function rasterizeIcon(logoPath, geometry) {
   const factor = SUPERSAMPLE;
   const size = TARGET_SIZE * factor;
-  const radius = ICON_RADIUS * factor;
+  const cardInset = ICON_CARD_INSET * factor;
+  const cardSize = (TARGET_SIZE - ICON_CARD_INSET * 2) * factor;
+  const radius = ICON_CARD_RADIUS * factor;
   const buffer = Buffer.alloc(size * size * 4);
 
   for (let y = 0; y < size; y += 1) {
     for (let x = 0; x < size; x += 1) {
-      if (isInsideRoundedRect(x, y, size, radius)) {
+      if (isInsideRoundedRect(x, y, cardInset, cardInset, cardSize, cardSize, radius)) {
         setPixel(buffer, size, x, y, ICON_BACKGROUND);
       }
     }
