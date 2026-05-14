@@ -209,7 +209,41 @@ semantic token.
 
 ---
 
-## 8. Out of scope (handled separately)
+## 8. UI primitive source of truth
+
+Settings and renderer form controls use the shadcn registry primitives in
+`src/components/ui/` as the canonical implementation layer. Local feature code
+should compose those primitives instead of re-creating per-tab wrappers or
+styling native controls directly.
+
+Current canonical controls:
+
+| Control | File | Expected use |
+|---------|------|--------------|
+| Checkbox | `src/components/ui/checkbox.tsx` | Boolean settings, acknowledgement rows, compact option toggles |
+| Switch | `src/components/ui/switch.tsx` | Immediate on/off settings such as Appearance and LLM feature toggles |
+| Select | `src/components/ui/select.tsx` | Styled Radix-backed choice controls that need trigger/content/item composition |
+| NativeSelect | `src/components/ui/native-select.tsx` | Dense system-like select controls where native behavior is the intended UX |
+| RadioGroup | `src/components/ui/radio-group.tsx` | Mutually exclusive settings where all options should stay visible |
+| Slider | `src/components/ui/slider.tsx` | Numeric tuning controls such as token/reasoning budgets |
+| Field / Label | `src/components/ui/field.tsx`, `src/components/ui/label.tsx` | Accessible label, hint, and validation layout around controls |
+
+Rules:
+
+- New renderer UI must import primitives from `src/components/ui/*` rather
+  than defining local checkbox/select/switch/range/radio wrappers.
+- Feature-specific components may still decide layout, copy, loading state, and
+  domain behavior. They should not own primitive focus rings, checked states,
+  menu item structure, or theme colors.
+- shadcn registry setup is recorded in `components.json`; package imports
+  (`#components/*`, `#lib/*`, `#hooks/*`) are the supported import shape for
+  generated components in this Electron/Webpack repo.
+- Reviewer-visible visual evidence for this control set lives in
+  `docs/design/settings-controls-shadcn.html`.
+
+---
+
+## 9. Out of scope (handled separately)
 
 - Plugin webview tokens — deferred. Plugins eventually need their iframes
   to consume host tokens; planned as a separate PR adding a CSS-variable
@@ -224,11 +258,14 @@ semantic token.
 
 ---
 
-## 9. References
+## 10. References
 
 - `src/styles.css` — token definitions
 - `src/ui/renderer/theme/ThemeProvider.tsx` — provider + matchMedia hook
 - `src/ui/renderer/theme/resolve-theme.ts` — `system` → concrete resolver
 - `src/ui/renderer/tabs/AppearanceTab.tsx` — settings UI
+- `src/components/ui/` — shadcn registry primitives
+- `components.json` — shadcn registry configuration
+- `docs/design/settings-controls-shadcn.html` — visual confirmation board
 - `src/ui/renderer/__tests__/theme-provider.test.tsx` — provider tests
 - `src/ui/renderer/__tests__/appearance-tab.test.tsx` — settings UI tests
