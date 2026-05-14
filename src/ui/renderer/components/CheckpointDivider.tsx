@@ -1,18 +1,59 @@
 /**
  * CheckpointDivider — Layer 2 compact / manual checkpoint 표시 horizontal divider.
  *
- * post-infinity-session-v3 — 2 trigger:
- *   - auto-compact → 📌 자동 정리 (blue) — Layer 0 preflight 가 Layer 2 compact 실행
- *   - manual       → ✋ 수동 정리 (slate) — 사용자 `/compact` 트리거
+ * Phase 3 (compact pipeline rewrite) — status 별 visual variant:
+ *   - SUMMARIZED          → 📦 정상 요약 (blue/slate)
+ *   - CONTENT_TRUNCATED   → ✂️ 부분 절단됨 (yellow) — LLM 호출 skip
+ *   - NOOP                → ✓ 불필요 (gray) — small history
+ *   - REDUCED_INSUFFICIENT_FORCED → ⚠️ 강제 절단됨 (red) — last-resort raw drop
  *
- * §PR-5: Two action buttons exposed when compactNum + callbacks are provided:
- *   - 📖 이 시점 보기      (violet / --action-view)   — enter view-mode
- *   - ↩ 여기부터 다시 시작  (orange / --action-branch) — fork a new session
+ * §PR-5: action buttons (view / branch) only rendered for SUMMARIZED + FORCED
+ *   (둘 다 boundary 가 truthy 인 경로). NOOP / CONTENT_TRUNCATED 에선 숨김.
  */
 
 import type { CheckpointTier } from "../../../lib/chat-stream-state.js";
 
-const TIER_VARIANTS: Record<CheckpointTier | "default", { label: string; icon: string; lineCls: string; textCls: string }> = {
+type CompactStatus =
+  | "summarized"
+  | "content_truncated"
+  | "noop"
+  | "reduced_insufficient_forced";
+
+interface Variant {
+  label: string;
+  icon: string;
+  lineCls: string;
+  textCls: string;
+}
+
+const STATUS_VARIANTS: Record<CompactStatus, Variant> = {
+  summarized: {
+    label: "요약 완료",
+    icon: "📦",
+    lineCls: "bg-action-compact/30",
+    textCls: "text-action-compact/80",
+  },
+  content_truncated: {
+    label: "부분 절단",
+    icon: "✂️",
+    lineCls: "bg-warning/40",
+    textCls: "text-warning/90",
+  },
+  noop: {
+    label: "압축 불필요",
+    icon: "✓",
+    lineCls: "bg-muted-foreground/25",
+    textCls: "text-muted-foreground/70",
+  },
+  reduced_insufficient_forced: {
+    label: "강제 절단",
+    icon: "⚠️",
+    lineCls: "bg-destructive/40",
+    textCls: "text-destructive/90",
+  },
+};
+
+const TIER_VARIANTS: Record<CheckpointTier | "default", Variant> = {
   "auto-compact": {
     label: "자동 정리",
     icon: "📌",
@@ -37,6 +78,8 @@ export function CheckpointDivider({
   tier,
   messageCount,
   compactNum,
+  compactStatus,
+  truncatedDir,
   onEnterView,
   onBranchFrom,
 }: {
@@ -44,21 +87,35 @@ export function CheckpointDivider({
   messageCount: number;
   /** §PR-5: compact sequence number — enables view/branch action buttons. */
   compactNum?: number;
+  /** Phase 3: compact 결과 status. status variant 가 tier variant 보다 우선. */
+  compactStatus?: CompactStatus;
+  /** Phase 2: Layer A truncation 원본 디렉토리 — banner footnote 에 표시. */
+  truncatedDir?: string;
   /** §PR-5: enter view-mode for this checkpoint. */
   onEnterView?: (compactNum: number) => void | Promise<void>;
   /** §PR-5: fork a new session from this checkpoint. */
   onBranchFrom?: (compactNum: number) => void | Promise<void>;
 }) {
-  const variant = TIER_VARIANTS[tier ?? "default"];
-  const hasActions = compactNum !== undefined && (onEnterView !== undefined || onBranchFrom !== undefined);
+  // Status 가 명시되면 status variant 우선, 아니면 tier variant (legacy 호환).
+  const variant: Variant = compactStatus !== undefined
+    ? STATUS_VARIANTS[compactStatus]
+    : TIER_VARIANTS[tier ?? "default"];
+  // Action buttons: SUMMARIZED 또는 REDUCED_INSUFFICIENT_FORCED (boundary 가
+  // truthy 한 경로) + compactNum 있을 때만 노출. NOOP / CONTENT_TRUNCATED 는
+  // boundary 가 없어 view/branch 불가.
+  const hasBoundary = compactStatus === undefined
+    || compactStatus === "summarized"
+    || compactStatus === "reduced_insufficient_forced";
+  const hasActions =
+    hasBoundary && compactNum !== undefined && (onEnterView !== undefined || onBranchFrom !== undefined);
   return (
     <div
       data-testid="checkpoint-divider"
       data-tier={tier ?? "default"}
+      data-compact-status={compactStatus ?? "summarized"}
       data-compact-num={compactNum}
       className="my-2 flex flex-col gap-1.5 py-2"
     >
-      {/* ── Divider line + label row ── */}
       <div className="flex items-center gap-2">
         <span className={`h-px flex-1 ${variant.lineCls}`} />
         <span className={`text-[10px] ${variant.textCls} font-medium`}>
@@ -66,7 +123,11 @@ export function CheckpointDivider({
         </span>
         <span className={`h-px flex-1 ${variant.lineCls}`} />
       </div>
-      {/* ── §PR-5 action buttons ── */}
+      {truncatedDir !== undefined && (
+        <div className="px-4 text-center text-[9.5px] text-muted-foreground/70">
+          원본 보존: {truncatedDir}
+        </div>
+      )}
       {hasActions && (
         <div
           data-testid="checkpoint-actions"
