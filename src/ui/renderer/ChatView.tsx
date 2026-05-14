@@ -1383,13 +1383,14 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             vendorSupportsThinking={vendorSupportsThinking}
             enableThinkingChat={enableThinkingChat}
             onToggleThinking={toggleThinking}
+            permissionSlot={
+              <PermissionModeBadge
+                onClick={() => onOpenSettings("permissions")}
+                onQueueClick={onOpenPermissionQueue}
+              />
+            }
+            approvalSlot={<DeferredApprovalChip draftText={question} />}
           />
-          {/* Issue #690 P4 — natural-language approval chip. Renders
-              only when (a) the user's draft text contains an approve /
-              reject phrase, AND (b) exactly one deferred-queue entry is
-              pending. Self-contained: subscribes to deferredList /
-              onDeferredPending itself. */}
-          <DeferredApprovalChip draftText={question} />
           <Composer
             ref={composerRef}
             text={question}
@@ -1493,15 +1494,8 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             }}
             guideDisabled={!streaming || question.trim().length === 0}
           />
-          {/* PermissionModeBadge 의 위치 = TOP ROW (InputActionBar trailing) 으로
-              이전. Stage 4b commit 에서 InputActionBar 수정. 임시로 actions cluster
-              아래 둘 곳 없으니 우측 하단에 별도 row 로 유지 (placeholder). */}
-          <div className="flex shrink-0 items-center justify-end px-3 pb-1">
-            <PermissionModeBadge
-              onClick={() => onOpenSettings("permissions")}
-              onQueueClick={onOpenPermissionQueue}
-            />
-          </div>
+          {/* v6 Stage 4b: PermissionModeBadge + DeferredApprovalChip 모두
+              InputActionBar trailing 으로 이전 완료. 본 자리 비움. */}
         </div>
         <QuestionOverlay
           api={api}
