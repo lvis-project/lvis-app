@@ -93,9 +93,10 @@ describe("InputActionBar (post indexer-removal)", () => {
     const { getByRole } = renderBar({ enableThinkingChat: false });
     const checkbox = getByRole("checkbox", { name: "Thinking" });
     expect(checkbox).toHaveAttribute("data-state", "unchecked");
-    expect(checkbox.className).toContain("rounded-[2px]");
-    expect(checkbox.className).toContain("bg-background");
-    expect(checkbox.className).toContain("data-[state=unchecked]:bg-background");
+    // shadcn v4 Checkbox: rounded-[4px] + border-input + data-checked state.
+    expect(checkbox.className).toContain("rounded-[4px]");
+    expect(checkbox.className).toContain("border-input");
+    expect(checkbox.className).toContain("data-checked:bg-primary");
     expect(checkbox.className).not.toContain("bg-white");
     expect(checkbox.className).not.toContain("appearance-auto");
   });

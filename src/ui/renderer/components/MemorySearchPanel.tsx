@@ -3,6 +3,7 @@ import { Input } from "../../../components/ui/input.js";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../../../components/ui/tabs.js";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../../components/ui/card.js";
+import { Button } from "../../../components/ui/button.js";
 import { useMemorySearch, type NoteResult, type SessionResult } from "../hooks/use-memory-search.js";
 import type { LvisApi } from "../types.js";
 
@@ -20,9 +21,10 @@ function relativeTime(iso: string): string {
 function NoteRow({ note }: { note: NoteResult }) {
   const [expanded, setExpanded] = useState(false);
   return (
-    <button
+    <Button
       type="button"
-      className="w-full text-left px-3 py-2 rounded hover:bg-muted/50 transition-colors border-b border-border/50 last:border-0"
+      variant="ghost"
+      className="h-auto w-full flex-col items-stretch justify-start rounded-none border-b border-border/50 px-3 py-2 text-left last:border-0 hover:bg-muted/50"
       onClick={() => setExpanded((v) => !v)}
     >
       <div className="flex min-w-0 items-baseline justify-between gap-2">
@@ -34,16 +36,17 @@ function NoteRow({ note }: { note: NoteResult }) {
       <p className={`text-xs text-muted-foreground mt-0.5 ${expanded ? "whitespace-pre-wrap break-words" : "truncate"}`}>
         {note.excerpt}
       </p>
-    </button>
+    </Button>
   );
 }
 
 function SessionRow({ session }: { session: SessionResult }) {
   const [expanded, setExpanded] = useState(false);
   return (
-    <button
+    <Button
       type="button"
-      className="w-full text-left px-3 py-2 rounded hover:bg-muted/50 transition-colors border-b border-border/50 last:border-0"
+      variant="ghost"
+      className="h-auto w-full flex-col items-stretch justify-start rounded-none border-b border-border/50 px-3 py-2 text-left last:border-0 hover:bg-muted/50"
       onClick={() => setExpanded((v) => !v)}
     >
       <div className="flex min-w-0 items-baseline justify-between gap-2">
@@ -53,7 +56,7 @@ function SessionRow({ session }: { session: SessionResult }) {
       <p className={`text-xs text-muted-foreground mt-0.5 ${expanded ? "whitespace-pre-wrap break-words" : "truncate"}`}>
         {session.matchedMessage}
       </p>
-    </button>
+    </Button>
   );
 }
 

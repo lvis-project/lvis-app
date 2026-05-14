@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
 import { lookupPricing, effectiveContextWindow } from "../../../shared/pricing-data.js";
 import { getUsableContext } from "../../../shared/context-budget.js";
+import { estimateTokens } from "../../../engine/auto-compact.js";
 
 /**
  * Context budget hook — provider-truth based (Phase 3, 2026-05-07).
@@ -26,6 +27,11 @@ import { getUsableContext } from "../../../shared/context-budget.js";
  * Pre-first-turn: returns 0 (no usage yet). Streaming: still uses the
  * *previous* usage carrier until the new live turn_summary lands at turn end.
  *
+ * draftText: optional composer draft — when present, its token estimate
+ * (chars/4 + Korean 1.3x weighting via estimateTokens) is added on top of
+ * the last provider-reported usedTokens so the ring and color thresholds
+ * update as the user types, before the turn starts.
+ *
  * Context window source: `src/shared/pricing-data.ts` →
  * `effectiveContextWindow()` (picks 1M-beta tier for Sonnet/Opus 4.6) →
  * `getUsableContext()` (Cline-style fixed buffer for output reservation).
@@ -34,8 +40,9 @@ export function useContextBudget(params: {
   entries: ChatEntry[];
   llmVendor: string;
   llmModel: string;
+  draftText?: string;
 }) {
-  const { entries, llmVendor, llmModel } = params;
+  const { entries, llmVendor, llmModel, draftText } = params;
 
   const contextBudget = useMemo(() => {
     // Effective window picks the 1M beta tier when the model defines one
@@ -47,7 +54,7 @@ export function useContextBudget(params: {
     return getUsableContext(effectiveContextWindow(lookupPricing(llmVendor, llmModel)));
   }, [llmVendor, llmModel]);
 
-  const usedTokens = useMemo(() => {
+  const baseTokens = useMemo(() => {
     for (let i = entries.length - 1; i >= 0; i--) {
       const e = entries[i];
       if (e?.kind === "turn_summary" || e?.kind === "context_usage") {
@@ -59,6 +66,15 @@ export function useContextBudget(params: {
     // identity changes but the *last* entry is the only one that matters
     // for the latest turn_summary. Mirrors the pattern in `use-cost-estimate`.
   }, [entries.length, entries[entries.length - 1]]);
+
+  // Add draft token estimate so the ring updates as the user types.
+  // estimateTokens applies Korean 1.3x weighting (chars/4 heuristic).
+  const draftTokens = useMemo(
+    () => (draftText ? estimateTokens(draftText) : 0),
+    [draftText],
+  );
+
+  const usedTokens = baseTokens + draftTokens;
 
   const contextOverflowPct = useMemo(
     () => (contextBudget > 0 ? usedTokens / contextBudget : 0),

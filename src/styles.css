@@ -1183,6 +1183,17 @@
   * {
     @apply border-border;
   }
+  /* `--lvis-font-size-scale` is a user-override hook set by ThemeProvider when
+   * `settings.appearance.font.sizeScale` is configured. Applying it on `html`
+   * (not `body`) is required so that all Tailwind `text-*` utilities — which
+   * use `rem` units relative to the root element — scale proportionally with
+   * the user's preference. A `body { font-size: calc(1rem * …) }` rule has no
+   * effect on `rem`-based utilities because `rem` always resolves against the
+   * `html` root, not `body`. The default `var(…, 1)` keeps the base 16px
+   * unchanged when no scale override is set. */
+  html {
+    font-size: calc(1rem * var(--lvis-font-size-scale, 1));
+  }
   body {
     @apply bg-background text-foreground;
     /* SoT: src/shared/host-font-stack.ts (HOST_FONT_STACK) — mirrored verbatim
@@ -1193,18 +1204,17 @@
      * fallback for CSS font matching, not regression-recovery fallback
      * (No-Fallback-Code rule).
      *
-     * `--lvis-font-family` / `--lvis-font-size-scale` are user-override hooks
-     * set by ThemeProvider when `settings.appearance.font` is configured. The
-     * fallback `var(--lvis-font-family, …)` expression keeps the default stack
-     * intact when no override is set — this is CSS-spec variable defaulting,
-     * NOT recovery fallback. The same SoT cross-mirror test verifies the
-     * default expression's Hangul tail. */
+     * `--lvis-font-family` is a user-override hook set by ThemeProvider when
+     * `settings.appearance.font.family` is configured. The fallback
+     * `var(--lvis-font-family, …)` expression keeps the default stack intact
+     * when no override is set — this is CSS-spec variable defaulting, NOT
+     * recovery fallback. The same SoT cross-mirror test verifies the default
+     * expression's Hangul tail. */
     font-family: var(
       --lvis-font-family,
       system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
         "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif
     );
-    font-size: calc(1rem * var(--lvis-font-size-scale, 1));
   }
 
   /* ── Text selection — themed via --selection-bg / --selection-fg ─────── */
