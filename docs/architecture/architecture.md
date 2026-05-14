@@ -2468,7 +2468,6 @@ graph TB
 
   "tools": ["meeting_start", "meeting_push_chunk", "meeting_stop", "meeting_transcript", "meeting_sessions"],
   "uiCallable": ["meeting_transcript", "meeting_sessions"],
-  "startupTools": [],
   "capabilities": ["meeting-recorder"],
 
   "eventSubscriptions": ["calendar.event.started"],
@@ -2556,7 +2555,6 @@ graph TB
 | `capabilities` | **closed enum** (`src/plugins/capabilities.ts`) | `mail-source` / `calendar-source` / `meeting-recorder` / `knowledge-index` (emit namespace 게이트), `host:overlay` (HostApi `triggerConversation` 게이트) 는 enforced. `ms-graph-consumer`, `background-watcher`, `worker-client` 는 advisory/self-identification label. |
 | `deployment` | `"managed" \| "user"` | managed 는 ed25519 서명 필수 (fail-closed); user 는 warn-on-missing. |
 | `startupTimeoutMs` | integer (1~60000) | `Promise.race` 기반 start() 하드 타임아웃. 초과 시 fail-soft drop. |
-| `startupTools` | `string[]` (subset of `tools[]`) | boot 시 자동 호출되는 tool 이름 (백그라운드 watcher 등). |
 | `eventSubscriptions` | `string[]` | 호스트 이벤트 구독 대상. `memory.private.*` / `settings.apiKey.*` / `audit.*` / `dlp.*` (`PLUGIN_PRIVATE_NAMESPACES`) 는 **거부**. public namespace (`meeting` / `calendar` / `email` / `index`) 는 허용, 그 외는 warn. (2026-05-11: `task` 는 host owner 폐기로 retire. 플러그인-소유 namespace 는 host 가 의도적으로 알지 않으므로 신규 추가 안 함 — open-source-readiness 룰.) |
 | `notificationEvents` | `Array<{ event, titleField?, bodyField? }>` | `registerPluginNotifications()` 가 manifest 만 읽어 OS 알림 핸들러를 자동 배선. |
 | `keywords` | `Array<{ keyword, skillId }>` | boot 시 KeywordEngine 에 등록. |
@@ -2568,7 +2566,7 @@ graph TB
 
 **마켓플레이스 검증:** 플러그인 repo는 sidecar signature를 만들지 않는다. Marketplace upload API가 zip/manifest/schema/version/policy/dependency/access를 검증하고 최종 artifact envelope에 서명한다. Host는 설치 시 envelope를 검증하고 install receipt를 저장한다.
 
-**검증 플로우:** marketplace envelope verification → install receipt file-hash verification → JSON.parse → AJV (`@lvis/plugin-sdk/schemas/plugin-manifest.schema.json`) → cross-field (tool-name regex, `startupTools ⊂ tools`, `uiCallable ⊂ tools`, `startupTimeoutMs > 0`) → capability enforcement → entry import. 각 단계 실패 시 해당 플러그인 fail-soft drop. 에러 포맷 상세는 `docs/references/plugin-tool-schema-design.md` §2.5.
+**검증 플로우:** marketplace envelope verification → install receipt file-hash verification → JSON.parse → AJV (`@lvis/plugin-sdk/schemas/plugin-manifest.schema.json`) → cross-field (tool-name regex, `uiCallable ⊂ tools`, `startupTimeoutMs > 0`) → capability enforcement → entry import. 각 단계 실패 시 해당 플러그인 fail-soft drop. 에러 포맷 상세는 `docs/references/plugin-tool-schema-design.md` §2.5.
 
 규칙:
 - top-level `"type": "object"` 필수 (OpenAI / Claude / Gemini 공통 요구사항)

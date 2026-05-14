@@ -177,7 +177,7 @@ export interface PluginManifest {
    * - `meeting-recorder` — 실시간 음성 캡처 및 STT
    * - `mail-source` — 이메일 소스 연결
    * - `calendar-source` — 캘린더 소스 연결
-   * - `background-watcher` — `startupTools` 로 백그라운드 폴러/감시자 기동
+   * - `background-watcher` — 플러그인 자체 lifecycle (`start()` hook) 에서 백그라운드 폴러/감시자 기동
    * - `worker-client` — 외부 프로세스(Python 등) 워커 래퍼
    * - `knowledge-index` — 문서 인덱스/검색 기능 제공
    * - `ms-graph-consumer` — Microsoft Graph 를 사용하는 플러그인의 자기-식별
@@ -185,7 +185,6 @@ export interface PluginManifest {
    *   강제할 게이트가 없다. §9.4a "Plugin-Owned OAuth Authentication" 참고.
    */
   capabilities?: string[];
-  startupTools?: string[];
   /**
    * 플러그인이 구독하는 이벤트 타입 목록.
    * 두 가지 형태를 모두 지원한다:
@@ -495,7 +494,6 @@ export interface PluginMarketplaceItem {
   ui?: PluginUiExtension[];
   capabilities?: string[];
   keywords?: Array<{ keyword: string; skillId: string }>;
-  startupTools?: string[];
   uiCallable?: string[];
   auth?: PluginAuthSpec;
   emittedEvents?: string[];

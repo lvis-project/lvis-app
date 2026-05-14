@@ -2,7 +2,7 @@
  * Plugin orchestration helpers.
  *
  * - buildPluginConfigOverrides: 범용 API key 주입
- * - registerPluginTools / runManifestStartupTools: manifest-driven wiring
+ * - registerPluginTools: manifest-driven tool registry wiring
  * - registerManifestEventSubscriptions / buildManifestEventHints: event hint helpers
  * - registerPluginNotifications: OS 알림 (manifest.notificationEvents)
  */
@@ -97,58 +97,6 @@ export function syncPluginToolRegistry(
   }
   for (const id of pluginIdsInRegistry) toolRegistry.unregisterByPlugin(id);
   registerPluginTools(pluginRuntime, toolRegistry);
-}
-
-/**
- * Fail-soft startupTools.
- * One throwing startupTool does NOT unload the plugin and does NOT abort the
- * remaining startupTools. Each failure is logged as a warning so operators
- * can diagnose, while the plugin keeps serving the rest of its handlers.
- */
-export type PluginToolInvoker = (
-  toolName: string,
-  payload: unknown,
-  context: { origin: "startup" | "plugin" | "ui"; callerPluginId?: string; ownerPluginId?: string },
-) => Promise<unknown>;
-
-export function runManifestStartupTools(
-  pluginRuntime: PluginRuntime,
-  invokeTool: PluginToolInvoker,
-): void {
-  const loadedTools = new Set(pluginRuntime.listToolNames());
-  for (const { pluginId, manifest } of pluginRuntime.listPluginManifests()) {
-    for (const tool of manifest.startupTools ?? []) {
-      if (!loadedTools.has(tool)) {
-        log.warn(
-          `boot: startup tool not loaded (plugin=${pluginId}, tool=${tool})`,
-        );
-        continue;
-      }
-      try {
-        pluginRuntime.assertPluginToolAccess(pluginId, tool);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        log.warn(
-          `boot: startup-tool-access-denied (plugin=${pluginId}, tool=${tool}): %s`,
-          msg,
-        );
-        continue;
-      }
-      // fail-soft: catch + warn, never unload the plugin, never abort sibling
-      // startupTools. The loaded plugin list is unaffected.
-      invokeTool(tool, {}, {
-        origin: "startup",
-        callerPluginId: pluginId,
-        ownerPluginId: pluginRuntime.resolveToolOwner(tool),
-      }).catch((e: unknown) => {
-        const msg = e instanceof Error ? e.message : String(e);
-        log.warn(
-          `boot: startup-tool-failed (non-fatal, plugin=${pluginId}, tool=${tool}): %s`,
-          msg,
-        );
-      });
-    }
-  }
 }
 
 export function registerManifestEventSubscriptions(

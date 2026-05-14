@@ -990,7 +990,6 @@ export class PluginMarketplaceService {
     if (plugin.description) manifest.description = plugin.description;
     if (options.ui && options.ui.length > 0) manifest.ui = options.ui;
     if (plugin.capabilities && plugin.capabilities.length > 0) manifest.capabilities = plugin.capabilities;
-    if (plugin.startupTools && plugin.startupTools.length > 0) manifest.startupTools = plugin.startupTools;
     if (plugin.keywords && plugin.keywords.length > 0) manifest.keywords = plugin.keywords;
     if (plugin.uiCallable && plugin.uiCallable.length > 0) manifest.uiCallable = plugin.uiCallable;
     if (plugin.emittedEvents && plugin.emittedEvents.length > 0) manifest.emittedEvents = plugin.emittedEvents;
