@@ -797,6 +797,31 @@ export interface PluginHostApi {
   }): Promise<void>;
 
   /**
+   * Wipe all credential state (cookies, storage, cache, HTTP-auth, NTLM/
+   * Kerberos credentials) from a `persist:plugin-auth:<pluginId>[:<sub>]`
+   * partition. Use after a user-triggered sign-out so subsequent
+   * `openAuthWindow` calls against the same partition cannot silently
+   * SSO via residual IdP cookies — without this, plugin "sign out"
+   * only clears the plugin's in-memory + on-disk shadow state while the
+   * host Chromium keeps the federated session alive.
+   *
+   * **Allow-list:** the `partition` argument must equal
+   * `persist:plugin-auth:<pluginId>` or `persist:plugin-auth:<pluginId>:<sub>`
+   * for the calling plugin. The host rejects any other partition string.
+   * Direct cross-plugin partition wipes are not allowed.
+   *
+   * **Capability gate:** `manifest.capabilities[]` must include
+   * `external-auth-consumer` (same gate as `openAuthWindow`).
+   *
+   * **Required (not `?`-optional)** — declared in lockstep with SDK
+   * `@lvis/plugin-sdk@5.6.0`. Plugin authors get a typed signature; a
+   * missing host wiring throws loudly. Matches the "No Fallback Code"
+   * rule (CLAUDE.md) — silent optional-chain would let sign-out look
+   * successful while leaving the partition populated.
+   */
+  clearAuthPartition(partition: string): Promise<void>;
+
+  /**
    * §B3 — Open an arbitrary external URL routed through the host's webView
    * preference policy (`settings.webView.preferredFlow`):
    *   - `"in-app"` → host opens a lightweight BrowserWindow (no cookieHosts /
