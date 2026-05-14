@@ -22,11 +22,14 @@ import type { GenericMessage, LLMProvider, StreamEvent } from "./llm/types.js";
 import { serializeMessageForEstimation, userContentText } from "./llm/types.js";
 import { estimateTokens, estimateMessagesTokens } from "./auto-compact.js";
 import { lvisHome } from "../shared/lvis-home.js";
+import { createLogger } from "../lib/logger.js";
 import {
   CompressionStatus,
   TRUNCATION_THRESHOLD_TOKENS,
   TRUNCATION_PRESERVED_LINES,
 } from "../shared/compact-status.js";
+
+const log = createLogger("compact");
 
 /** 12-section SUMMARY_TEMPLATE 헤더 (v3 §5.1). 순서/이름 모두 contract — 변경 시 templateVersion bump 필수. */
 export const SUMMARY_TEMPLATE_HEADERS_V1 = [
@@ -522,23 +525,27 @@ export async function compactWithBoundary(
   if (toCompact.length === 0) {
     if (truncatedCount > 0) {
       // CONTENT_TRUNCATED — Layer A 만으로 충분히 reduce (LLM 호출 skip).
+      const estimatedAfter = estimateMessagesTokens(workingMessages);
+      log.info(`compact: status=content_truncated truncated=${truncatedCount} estimatedAfter=${estimatedAfter} compactNum=${compactNum}`);
       return {
         status: CompressionStatus.CONTENT_TRUNCATED,
         boundary: null,
         newHistory: workingMessages,
         removedCount: truncatedCount,
-        estimatedAfter: estimateMessagesTokens(workingMessages),
+        estimatedAfter,
         truncatedDir: layerATruncDir,
         truncatedCount,
       };
     }
     // NOOP — history 가 충분히 작음. 정상 small-history 경로.
+    const noopEstimatedAfter = estimateMessagesTokens(messages);
+    log.info(`compact: status=noop estimatedAfter=${noopEstimatedAfter} compactNum=${compactNum}`);
     return {
       status: CompressionStatus.NOOP,
       boundary: null,
       newHistory: messages,
       removedCount: 0,
-      estimatedAfter: estimateMessagesTokens(messages),
+      estimatedAfter: noopEstimatedAfter,
       truncatedCount: 0,
     };
   }
@@ -634,11 +641,13 @@ export async function compactWithBoundary(
     estimatedAfter = estimateMessagesTokens(newHistory);
     const finalTruncDir = forcedArchiveDir || layerAHalfDir || layerATruncDir || "";
     const finalTruncCount = totalTruncatedFromLayerA + dropCount;
+    const forcedRemoved = finalToCompact.length + layerAHalfResult.droppedCount + dropCount;
+    log.warn(`compact: status=reduced_insufficient_forced removed=${forcedRemoved} truncated=${finalTruncCount} estimatedAfter=${estimatedAfter} preflight=${preflightTokens} compactNum=${compactNum}`);
     return {
       status: CompressionStatus.REDUCED_INSUFFICIENT_FORCED,
       boundary,
       newHistory,
-      removedCount: finalToCompact.length + layerAHalfResult.droppedCount + dropCount,
+      removedCount: forcedRemoved,
       estimatedAfter,
       truncatedCount: finalTruncCount,
       ...(finalTruncDir !== "" ? { truncatedDir: finalTruncDir } : {}),
@@ -650,11 +659,13 @@ export async function compactWithBoundary(
   // surviving.length > 1 invariant 를 유지하므로 여기 도달 시 finalToCompact 가
   // 비어있을 가능성 없음.
   const summarizedTruncDir = layerAHalfDir || layerATruncDir || "";
+  const summarizedRemoved = finalToCompact.length + layerAHalfResult.droppedCount;
+  log.info(`compact: status=summarized removed=${summarizedRemoved} truncated=${totalTruncatedFromLayerA} estimatedAfter=${estimatedAfter} compactNum=${compactNum}`);
   return {
     status: CompressionStatus.SUMMARIZED,
     boundary,
     newHistory,
-    removedCount: finalToCompact.length + layerAHalfResult.droppedCount,
+    removedCount: summarizedRemoved,
     estimatedAfter,
     truncatedCount: totalTruncatedFromLayerA,
     ...(summarizedTruncDir !== "" ? { truncatedDir: summarizedTruncDir } : {}),
