@@ -1284,7 +1284,8 @@
     transition: box-shadow 180ms ease, transform 180ms ease;
   }
 
-  .lvis-theme-card:focus-visible {
+  .lvis-theme-card:focus-visible,
+  .lvis-theme-card:has([data-slot="radio-group-item"]:focus-visible) {
     outline: none;
     box-shadow:
       0 0 0 2px hsl(var(--background)),

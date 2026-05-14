@@ -22,8 +22,9 @@ import { BUNDLES, LGE_PAIR_IDS } from "../theme/index.js";
 import type { ThemeBundle } from "../theme/index.js";
 import type { CSSProperties } from "react";
 import { getApi } from "../api-client.js";
-import { Button } from "../../../components/ui/button.js";
 import { Input } from "../../../components/ui/input.js";
+import { Label } from "../../../components/ui/label.js";
+import { RadioGroup, RadioGroupItem } from "../../../components/ui/radio-group.js";
 import { Switch } from "../../../components/ui/switch.js";
 
 type WebViewPreferredFlow = "in-app" | "system-browser";
@@ -89,28 +90,23 @@ function BundleMock({ bundle }: { bundle: ThemeBundle }) {
 interface BundleCardProps {
   bundle: ThemeBundle;
   selected: boolean;
-  onSelect: () => void;
 }
 
-function BundleCard({ bundle, selected, onSelect }: BundleCardProps) {
+function BundleCard({ bundle, selected }: BundleCardProps) {
+  const id = `theme-bundle-${bundle.id}`;
   return (
-    <Button
-      type="button"
-      variant="ghost"
-      role="radio"
-      aria-checked={selected}
-      aria-label={`테마: ${bundle.name}`}
+    <Label
+      htmlFor={id}
       data-selected={selected ? "true" : "false"}
       data-bundle-id={bundle.id}
-      className="lvis-theme-card h-auto w-full bg-transparent p-0 text-left hover:bg-transparent"
-      onClick={onSelect}
-      onKeyDown={(e) => {
-        if (e.key === " " || e.key === "Enter") {
-          e.preventDefault();
-          onSelect();
-        }
-      }}
+      className="lvis-theme-card h-auto w-full !items-stretch bg-transparent p-0 text-left hover:bg-transparent"
     >
+      <RadioGroupItem
+        id={id}
+        value={bundle.id}
+        aria-label={`테마: ${bundle.name}`}
+        className="sr-only"
+      />
       <div className="lvis-theme-card-mock" aria-hidden="true">
         <BundleMock bundle={bundle} />
       </div>
@@ -118,7 +114,7 @@ function BundleCard({ bundle, selected, onSelect }: BundleCardProps) {
         <span>{bundle.name}</span>
         <span className="lvis-theme-card-checkmark" aria-hidden="true">✓</span>
       </div>
-    </Button>
+    </Label>
   );
 }
 
@@ -376,9 +372,10 @@ export function AppearanceTab() {
 
       {/* ── 6-bundle card grid ───────────────────────────────────────── */}
       <section className="space-y-3">
-        <div
-          role="radiogroup"
+        <RadioGroup
+          value={bundleId}
           aria-label="테마 선택"
+          onValueChange={(value) => setBundle(value)}
           className="grid grid-cols-2 gap-3 sm:grid-cols-3"
         >
           {BUNDLES.map((bundle) => (
@@ -386,10 +383,9 @@ export function AppearanceTab() {
               key={bundle.id}
               bundle={bundle}
               selected={bundleId === bundle.id}
-              onSelect={() => setBundle(bundle.id)}
             />
           ))}
-        </div>
+        </RadioGroup>
       </section>
 
       {/* ── followSystem toggle — LGE pair only ─────────────────────── */}
@@ -429,31 +425,32 @@ export function AppearanceTab() {
         {/* 폰트 패밀리 */}
         <div className="space-y-2">
           <label className="text-[11px] text-muted-foreground">패밀리</label>
-          <div
-            role="radiogroup"
+          <RadioGroup
+            value={activePreset}
             aria-label="폰트 패밀리 선택"
             data-testid="font-family-presets"
+            onValueChange={(value) => {
+              const next = FONT_FAMILY_PRESETS.find((opt) => opt.value === value);
+              if (next) setFamily(next.stack);
+            }}
             className="flex flex-wrap gap-2"
           >
             {FONT_FAMILY_PRESETS.map((opt) => {
               const checked = activePreset === opt.value;
+              const id = `font-family-${opt.value}`;
               return (
-                <Button
+                <Label
                   key={opt.value}
-                  type="button"
-                  variant={checked ? "default" : "outline"}
-                  size="sm"
-                  role="radio"
-                  aria-checked={checked}
+                  htmlFor={id}
                   data-value={opt.value}
-                  onClick={() => setFamily(opt.stack)}
-                  className={`rounded-full ${checked ? "" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"}`}
+                  className={`inline-flex h-8 cursor-pointer rounded-full border px-3 text-xs ${checked ? "border-primary bg-primary text-primary-foreground" : "border-input bg-background text-muted-foreground hover:bg-muted/50 hover:text-foreground"}`}
                 >
+                  <RadioGroupItem id={id} value={opt.value} className="sr-only" />
                   {opt.label}
-                </Button>
+                </Label>
               );
             })}
-          </div>
+          </RadioGroup>
 
           {/* 사용자 stack 직접 입력 — commit on blur / Enter only.
               `onChange` 마다 updateSettings 를 invoke 하면 disk write + 모든 윈도우에
@@ -469,32 +466,35 @@ export function AppearanceTab() {
         {/* 폰트 크기 */}
         <div className="space-y-2">
           <label className="text-[11px] text-muted-foreground">크기</label>
-          <div
-            role="radiogroup"
+          <RadioGroup
+            value={String(sizeScale)}
             aria-label="폰트 크기 선택"
             data-testid="font-size-scale"
+            onValueChange={(value) => {
+              const next = Number(value) as 0.875 | 1 | 1.125 | 1.25;
+              if ((FONT_SIZE_VALUES as readonly number[]).includes(next)) {
+                setSizeScale(next);
+              }
+            }}
             className="flex flex-wrap gap-2"
           >
             {FONT_SIZE_OPTIONS.map((opt) => {
               const checked = sizeScale === opt.value;
+              const id = `font-size-${String(opt.value).replace(".", "-")}`;
               return (
-                <Button
+                <Label
                   key={opt.value}
-                  type="button"
-                  variant={checked ? "default" : "outline"}
-                  size="sm"
-                  role="radio"
-                  aria-checked={checked}
+                  htmlFor={id}
                   data-value={String(opt.value)}
-                  onClick={() => setSizeScale(opt.value)}
-                  className={`rounded-full ${checked ? "" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"}`}
+                  className={`inline-flex h-8 cursor-pointer rounded-full border px-3 text-xs ${checked ? "border-primary bg-primary text-primary-foreground" : "border-input bg-background text-muted-foreground hover:bg-muted/50 hover:text-foreground"}`}
                   style={{ fontSize: `${opt.value * 0.75}rem` }}
                 >
+                  <RadioGroupItem id={id} value={String(opt.value)} className="sr-only" />
                   {opt.label}
-                </Button>
+                </Label>
               );
             })}
-          </div>
+          </RadioGroup>
         </div>
       </section>
 
@@ -509,32 +509,32 @@ export function AppearanceTab() {
         <p className="text-[11px] text-muted-foreground">
           이 설정은 플러그인이 호스트에 위임한 외부 URL 표시에 적용됩니다.
         </p>
-        <div
-          role="radiogroup"
+        <RadioGroup
+          value={webViewFlow}
           aria-label="외부 URL 표시 정책 선택"
           data-testid="webview-preferred-flow"
+          onValueChange={(value) => {
+            if (value === "in-app" || value === "system-browser") setWebViewFlow(value);
+          }}
           className="flex flex-wrap gap-2"
         >
           {WEBVIEW_OPTIONS.map((opt) => {
             const checked = webViewFlow === opt.value;
+            const id = `webview-flow-${opt.value}`;
             return (
-              <Button
+              <Label
                 key={opt.value}
-                type="button"
-                variant={checked ? "default" : "outline"}
-                size="sm"
-                role="radio"
-                aria-checked={checked}
+                htmlFor={id}
                 data-value={opt.value}
                 title={opt.hint}
-                onClick={() => setWebViewFlow(opt.value)}
-                className={`rounded-full ${checked ? "" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"}`}
+                className={`inline-flex h-8 cursor-pointer rounded-full border px-3 text-xs ${checked ? "border-primary bg-primary text-primary-foreground" : "border-input bg-background text-muted-foreground hover:bg-muted/50 hover:text-foreground"}`}
               >
+                <RadioGroupItem id={id} value={opt.value} className="sr-only" />
                 {opt.label}
-              </Button>
+              </Label>
             );
           })}
-        </div>
+        </RadioGroup>
       </section>
     </div>
   );
