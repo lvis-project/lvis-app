@@ -91,9 +91,22 @@ export type SafeThemePayload = {
  */
 let lastThemePayload: SafeThemePayload | null = null;
 
+function cloneThemePayload(payload: SafeThemePayload): SafeThemePayload {
+  const clone: SafeThemePayload = {
+    bundleId: payload.bundleId,
+    shell: payload.shell,
+  };
+  if (payload.colorScheme) clone.colorScheme = payload.colorScheme;
+  if (typeof payload.reducedMotion === "boolean") clone.reducedMotion = payload.reducedMotion;
+  if (payload.tokens) {
+    clone.tokens = Object.freeze({ ...payload.tokens }) as Record<string, string>;
+  }
+  return Object.freeze(clone);
+}
+
 /** @internal — read access to the cached theme payload (tests + replay). */
 export function getLastThemePayload(): SafeThemePayload | null {
-  return lastThemePayload;
+  return lastThemePayload ? cloneThemePayload(lastThemePayload) : null;
 }
 
 /**
@@ -105,8 +118,10 @@ export function recordValidatedTheme(payload: unknown):
   | { ok: true; safe: SafeThemePayload }
   | { ok: false; error: string } {
   const result = validateThemePayload(payload);
-  if (result.ok) lastThemePayload = result.safe;
-  return result;
+  if (!result.ok) return result;
+  const safe = cloneThemePayload(result.safe);
+  lastThemePayload = safe;
+  return { ok: true, safe };
 }
 
 /**
@@ -115,7 +130,7 @@ export function recordValidatedTheme(payload: unknown):
  * windows can subscribe through hostApi.onEvent("host.theme.changed").
  */
 export function publishHostThemeChanged(safe: SafeThemePayload): void {
-  emitHostEvent("host.theme.changed", safe);
+  emitHostEvent("host.theme.changed", cloneThemePayload(safe));
 }
 
 /**
@@ -130,12 +145,13 @@ export function publishHostThemeChanged(safe: SafeThemePayload): void {
  * registry-set and send.
  */
 export function replayThemeToWebview(webContentsId: number): SafeThemePayload | null {
-  if (!lastThemePayload) return null;
+  const theme = getLastThemePayload();
+  if (!theme) return null;
   try {
     const wc = webContents.fromId(webContentsId);
     if (wc && !wc.isDestroyed()) {
-      wc.send("lvis:plugin:event", "host.theme.changed", lastThemePayload);
-      return lastThemePayload;
+      wc.send("lvis:plugin:event", "host.theme.changed", theme);
+      return theme;
     }
   } catch {
     /* swallowed — caller logs at debug. */
@@ -1177,7 +1193,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       try {
         const wc = webContents.fromId(wcId);
         if (wc && !wc.isDestroyed()) {
-          wc.send("lvis:plugin:event", "host.theme.changed", safe);
+          wc.send("lvis:plugin:event", "host.theme.changed", cloneThemePayload(safe));
         }
       } catch { /* webview destroyed between registry read and send */ }
     }

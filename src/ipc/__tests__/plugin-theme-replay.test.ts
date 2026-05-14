@@ -42,6 +42,32 @@ describe("plugin theme replay cache", () => {
       shell: "dark",
       tokens: { "--lvis-bg": "#000" },
     });
+    expect(Object.isFrozen(result.safe)).toBe(true);
+    expect(Object.isFrozen(result.safe.tokens)).toBe(true);
+  });
+
+  it("returns cloned cache snapshots so callers cannot poison the replay cache", () => {
+    recordValidatedTheme({ bundleId: "lge-dark", shell: "dark", tokens: { "--lvis-bg": "#111" } });
+    const cached = getLastThemePayload();
+    expect(cached).toEqual({
+      bundleId: "lge-dark",
+      shell: "dark",
+      tokens: { "--lvis-bg": "#111" },
+    });
+    expect(Object.isFrozen(cached)).toBe(true);
+    expect(Object.isFrozen(cached?.tokens)).toBe(true);
+
+    try {
+      (cached!.tokens as Record<string, string>)["--lvis-bg"] = "#fff";
+    } catch {
+      /* frozen in strict runtimes */
+    }
+
+    expect(getLastThemePayload()).toEqual({
+      bundleId: "lge-dark",
+      shell: "dark",
+      tokens: { "--lvis-bg": "#111" },
+    });
   });
 
   it("invalid payload leaves the existing cache untouched", () => {
@@ -168,10 +194,18 @@ describe("replayThemeToWebview", () => {
 });
 
 describe("publishHostThemeChanged", () => {
-  it("emits the validated theme payload on the host event bus", () => {
+  it("emits an immutable clone on the host event bus", () => {
     const payload = { bundleId: "tokyo-night", shell: "dark" as const, tokens: { "--lvis-bg": "#0d0d12" } };
     const seen: unknown[] = [];
     const unsubscribe = onEvent("host.theme.changed", (data) => {
+      expect(data).not.toBe(payload);
+      expect(Object.isFrozen(data)).toBe(true);
+      expect(Object.isFrozen((data as { tokens?: unknown }).tokens)).toBe(true);
+      try {
+        ((data as { tokens: Record<string, string> }).tokens)["--lvis-bg"] = "#fff";
+      } catch {
+        /* frozen in strict runtimes */
+      }
       seen.push(data);
     });
 
@@ -182,6 +216,7 @@ describe("publishHostThemeChanged", () => {
     }
 
     expect(seen).toEqual([payload]);
+    expect(payload.tokens["--lvis-bg"]).toBe("#0d0d12");
   });
 });
 

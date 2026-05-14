@@ -227,6 +227,16 @@ export const PUBLIC_EVENT_NAMESPACES: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Exact host-owned event names that are intentionally available to plugins.
+ * Keep this exact-name allowlist separate from PUBLIC_EVENT_NAMESPACES so
+ * `host.*` remains blocked for plugin emits and future host internals do not
+ * become silently subscribable by namespace.
+ */
+export const PUBLIC_HOST_EVENT_TYPES: ReadonlySet<string> = new Set([
+  "host.theme.changed",
+]);
+
+/**
  * Event namespaces a plugin must NEVER subscribe to — they carry sensitive
  * host state (memory contents, secrets, audit trails, DLP decisions).
  * Subscriptions to these prefixes are rejected at wiring time.
@@ -245,6 +255,7 @@ export const PLUGIN_PRIVATE_NAMESPACES: ReadonlySet<string> = new Set([
  * and boot/plugins.
  */
 export function categorizeEvent(eventType: string): string {
+  if (PUBLIC_HOST_EVENT_TYPES.has(eventType)) return "host";
   const prefix = eventType.split(".")[0] ?? "";
   return PUBLIC_EVENT_NAMESPACES.has(prefix) ? prefix : "other";
 }
@@ -295,6 +306,7 @@ export function classifySubscription(
       return "private";
     }
   }
+  if (PUBLIC_HOST_EVENT_TYPES.has(eventType)) return "public";
   const prefix = eventType.split(".")[0] ?? "";
   if (PUBLIC_EVENT_NAMESPACES.has(prefix)) return "public";
   return "neutral";
