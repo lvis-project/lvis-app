@@ -11,6 +11,8 @@
  *   `rounded-md` keep their existing class names but resolve to the
  *   per-bundle CSS-variable values defined below. */
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
 
 @plugin "@tailwindcss/typography";
 

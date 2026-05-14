@@ -1,7 +1,16 @@
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
 import { Input } from "../../../components/ui/input.js";
-import { Select } from "../../../components/ui/select.js";
+import { Label } from "../../../components/ui/label.js";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../../../components/ui/select.js";
+import { Slider } from "../../../components/ui/slider.js";
+import { Switch } from "../../../components/ui/switch.js";
 import { REASONING_EFFORT_STEPS, VENDORS, budgetToEffortIndex } from "../constants.js";
 import type { LvisApi } from "../types.js";
 
@@ -69,16 +78,16 @@ export function LlmTab(props: LlmTabProps) {
   return (
     <div className="space-y-4 pt-4">
       <div className="space-y-2">
-        <label className="text-sm font-medium" htmlFor="vendor-select">벤더</label>
-        <Select
-          id="vendor-select"
-          className="h-9 py-1"
-          value={vendor}
-          onChange={(e) => setVendor(e.target.value)}
-        >
-          {VENDORS.map((v) => (
-            <option key={v.id} value={v.id}>{v.label}</option>
-          ))}
+        <Label htmlFor="vendor-select">벤더</Label>
+        <Select value={vendor} onValueChange={setVendor}>
+          <SelectTrigger id="vendor-select" className="w-full">
+            <SelectValue placeholder="벤더 선택" />
+          </SelectTrigger>
+          <SelectContent>
+            {VENDORS.map((v) => (
+              <SelectItem key={v.id} value={v.id}>{v.label}</SelectItem>
+            ))}
+          </SelectContent>
         </Select>
       </div>
       {vendor !== "vertex-ai" && (vendorInfo.needsBaseUrl || vendor === "openai" || vendor === "copilot") && (
@@ -144,22 +153,11 @@ export function LlmTab(props: LlmTabProps) {
       <div className="space-y-2 rounded-md border p-3">
         <label className="flex items-center justify-between text-sm font-medium">
           <span>Extended Thinking / Reasoning</span>
-          <Button
-            type="button"
-            variant="ghost"
-            role="switch"
-            aria-checked={enableThinking}
-            className={`relative h-5 w-9 justify-start rounded-full p-0 ${
-              enableThinking ? "bg-primary hover:bg-primary/90" : "bg-muted hover:bg-muted/80"
-            }`}
-            onClick={() => setEnableThinking(!enableThinking)}
-          >
-            <span
-              className={`inline-block h-4 w-4 rounded-full bg-primary-foreground transition-transform ${
-                enableThinking ? "translate-x-4" : "translate-x-1"
-              }`}
-            />
-          </Button>
+          <Switch
+            checked={enableThinking}
+            onCheckedChange={setEnableThinking}
+            aria-label="Extended Thinking / Reasoning"
+          />
         </label>
         <p className="text-[11px] text-muted-foreground">모델 내부 추론 과정을 스트리밍으로 표시합니다. Claude는 명시 활성화(Sonnet 4.5+/Opus 4+), OpenAI o-계열·gpt-5는 Responses API 자동, Gemini 2.0+는 모델 지원 시 자동.</p>
         {enableThinking && (
@@ -171,18 +169,16 @@ export function LlmTab(props: LlmTabProps) {
                 <span className="ml-2 text-muted-foreground">· {thinkingBudget.toLocaleString()} tokens</span>
               </span>
             </div>
-            <input
-              type="range"
+            <Slider
               min={0}
               max={REASONING_EFFORT_STEPS.length - 1}
               step={1}
-              value={budgetToEffortIndex(thinkingBudget)}
-              onChange={(e) =>
+              value={[budgetToEffortIndex(thinkingBudget)]}
+              onValueChange={([value]) =>
                 setThinkingBudget(
-                  REASONING_EFFORT_STEPS[Number(e.target.value)]!.budget,
+                  REASONING_EFFORT_STEPS[value ?? 0]!.budget,
                 )
               }
-              className="w-full accent-primary"
               aria-label="Reasoning effort"
             />
             <div className="flex justify-between text-[10px] text-muted-foreground">
@@ -212,15 +208,19 @@ export function LlmTab(props: LlmTabProps) {
             {fallbackChain.map((entry, idx) => (
               <div key={idx} className="flex gap-2">
                 <Select
-                  className="h-8 w-auto px-2 text-xs"
                   value={entry.provider}
-                  onChange={(e) => {
+                  onValueChange={(value) => {
                     const next = [...fallbackChain];
-                    next[idx] = { ...next[idx]!, provider: e.target.value };
+                    next[idx] = { ...next[idx]!, provider: value };
                     setFallbackChain(next);
                   }}
                 >
-                  {VENDORS.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
+                  <SelectTrigger className="w-36 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {VENDORS.map((v) => <SelectItem key={v.id} value={v.id}>{v.label}</SelectItem>)}
+                  </SelectContent>
                 </Select>
                 <Input
                   className="h-8 text-xs"

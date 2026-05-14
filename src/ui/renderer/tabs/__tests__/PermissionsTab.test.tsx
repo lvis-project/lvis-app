@@ -330,13 +330,22 @@ describe("PermissionsTab hook quarantine notice", () => {
       fireEvent.click(screen.getByTestId("reviewer-mode-llm"));
     });
     await act(async () => {
-      fireEvent.change(screen.getByTestId("reviewer-fallback-select"), {
-        target: { value: "rule" },
+      fireEvent.pointerDown(screen.getByTestId("reviewer-fallback-select"), {
+        button: 0,
+        ctrlKey: false,
+        pointerId: 1,
+        pointerType: "mouse",
       });
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/규칙 결과 사용/)).toBeTruthy();
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByText(/규칙 결과 사용/));
     });
 
     expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("fallback rule");
-    expect((screen.getByTestId("reviewer-fallback-select") as HTMLSelectElement).value).toBe("rule");
+    expect(screen.getByTestId("reviewer-fallback-select").textContent).toContain("규칙 결과 사용");
   });
 
   it("persists reviewer model changes through reviewerDispatch", async () => {
