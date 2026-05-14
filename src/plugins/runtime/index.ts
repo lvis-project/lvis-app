@@ -99,7 +99,7 @@ export interface PluginPerfStats {
 }
 
 export interface PluginToolInvocationContext {
-  origin: "startup" | "plugin" | "ui";
+  origin: "plugin" | "ui";
   callerPluginId?: string;
   ownerPluginId?: string;
 }

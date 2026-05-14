@@ -1,19 +1,17 @@
 /**
  * Runtime manifest validation hardening.
  *
- * Covers 5 cross-field / fail-soft rules:
+ * Covers 4 cross-field rules:
  *   1) keywords[].skillId ⊂ tools[]             (hard fail-load)
  *   2) toolSchemas keys    ⊂ tools[]             (hard fail-load)
  *   3) notificationEvents.event ⊂ eventSubscriptions (soft warn)
  *   4) ui[] kind-specific required fields (hard fail-load)
- *   5) startupTools fail-soft (one throws, others run, plugin stays loaded)
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PluginRuntime } from "../runtime.js";
-import { runManifestStartupTools } from "../../boot/plugins.js";
 import { mkdtempSync } from "node:fs";
 
 describe("runtime manifest validation hardening", () => {
@@ -228,37 +226,4 @@ describe("runtime manifest validation hardening", () => {
     expect(cap.errors.some((e) => /ui\[0\].*must be an object/.test(e))).toBe(true);
   });
 
-  it("5) startupTools fail-soft: one throws, others run, plugin stays loaded", async () => {
-    await writePlugin("p_su", {
-      startupTools: ["p_su_bad", "p_su_good"],
-    });
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
-    await runtime.load();
-    await runtime.startAll();
-    expect(runtime.listPluginIds()).toContain("p_su");
-
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-
-    runManifestStartupTools(runtime, (tool, payload) => runtime.call(tool, payload));
-
-    // Drain the microtask queue: runtime.call() is async so its .catch()
-    // handler fires after at least one await turn per promise in the chain.
-    // Four rounds covers: call → reject → boot .catch → warn side-effect.
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-
-    // Plugin still loaded after a startupTool threw.
-    expect(runtime.listPluginIds()).toContain("p_su");
-    // Warning observed — checked before restoring spy.
-    expect(
-      warnSpy.mock.calls.some(([msg]) =>
-        /startup-tool-failed.*plugin=p_su.*tool=p_su_bad/.test(String(msg)),
-      ),
-    ).toBe(true);
-    vi.restoreAllMocks();
-    // Good tool still callable post-failure.
-    await expect(runtime.call("p_su_good", {})).resolves.toBe("ok");
-  });
 });
