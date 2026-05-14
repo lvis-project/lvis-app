@@ -19,8 +19,8 @@
 //     once (and on change).
 //     The plugin shell bootstrap MUST be a sibling file (not inlined) so it
 //     loads under the shell's strict CSP `script-src 'self'`.
-//   - launches electron dist/src/main.js after initial build
-//   - restarts electron when dist/src/main.js changes (debounced)
+//   - launches electron dist/src/main/main.js after initial build
+//   - restarts electron when dist/src/main/main.js changes (debounced)
 
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -257,7 +257,7 @@ const repoRoot = resolve(__dirname, "..");
 const repoRootHash = createHash("sha256").update(repoRoot).digest("hex").slice(0, 8);
 const DEV_PROFILE_NAME = process.env.LVIS_DEV_PROFILE_NAME || `Electron-LVIS-Dev-${basename(repoRoot)}-${repoRootHash}`;
 const binDir = resolve(repoRoot, "node_modules/.bin");
-const mainOutput = resolve(repoRoot, "dist/src/main.js");
+const mainOutput = resolve(repoRoot, "dist/src/main/main.js");
 const htmlSrc = resolve(repoRoot, "src/index.html");
 const htmlOut = resolve(repoRoot, "dist/src/index.html");
 // Plugin UI shell — HTML + external bootstrap module. Both must reach
@@ -629,8 +629,11 @@ async function main() {
     }
   }
 
-  // Main (tsc --watch)
-  spawnWatcher("main", resolveLocalBin("tsc"), ["-p", "tsconfig.json", "--watch", "--preserveWatchOutput"]);
+  // Main (esbuild --watch via build-main-esbuild.mjs). tsc -p tsconfig.json
+  // would emit to `dist/src/main.js`, but the packaged bundle lives at
+  // `dist/src/main/main.js`; keeping dev on tsc would race two different
+  // entry paths. Reuse the bundle script so dev and prod share output.
+  spawnWatcher("main", process.execPath, [resolve(repoRoot, "scripts/build-main-esbuild.mjs"), "--watch"]);
 
   // Preload (esbuild --watch) — must write `.cjs` so Electron's main
   // process loads the freshly built file. `main.ts` resolves the preload
@@ -682,7 +685,7 @@ async function main() {
 
   const ok = await waitForMain();
   if (!ok) {
-    log("dev", "timed out waiting for dist/src/main.js");
+    log("dev", "timed out waiting for dist/src/main/main.js");
     await shutdown(1);
     return;
   }

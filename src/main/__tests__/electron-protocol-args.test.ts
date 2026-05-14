@@ -7,7 +7,7 @@ import {
 
 describe("resolveScriptPathArg", () => {
   it("returns the argv string when it is a normal script path", () => {
-    expect(resolveScriptPathArg("dist/src/main.js")).toBe("dist/src/main.js");
+    expect(resolveScriptPathArg("dist/src/main/main.js")).toBe("dist/src/main/main.js");
   });
 
   it("falls back to '.' when argv is missing", () => {
@@ -29,7 +29,7 @@ describe("resolveScriptPathArg", () => {
 describe("buildDevProtocolArgs", () => {
   function args(overrides: Partial<Parameters<typeof buildDevProtocolArgs>[0]> = {}) {
     return buildDevProtocolArgs({
-      argv1: "dist/src/main.js",
+      argv1: "dist/src/main/main.js",
       userDataDir: "/tmp/userdata",
       platform: "linux",
       disableGpu: true,
@@ -39,8 +39,8 @@ describe("buildDevProtocolArgs", () => {
   }
 
   it("returns a resolved script path as the first arg", () => {
-    const out = args({ argv1: "dist/src/main.js" });
-    expect(out[0]).toBe(resolve("dist/src/main.js"));
+    const out = args({ argv1: "dist/src/main/main.js" });
+    expect(out[0]).toBe(resolve("dist/src/main/main.js"));
   });
 
   it("appends --user-data-dir when provided", () => {
