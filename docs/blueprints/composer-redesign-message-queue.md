@@ -98,6 +98,12 @@ BOTTOM ROW (Turn 컨트롤, 2 cluster — NEW)
 - ⌘⏎ 인터럽트: 선택 항목만 비움 (미선택 잔존)
 - 행별 [↑ 즉시]: 그 1 개만 비움
 - LLM turn 자체 종료 시 (`done` event): 큐 잔존 항목을 **새 user message 로 자동 inject** (queue-auto inputOrigin path). chat-origin.ts 의 `ChatSendInputOrigin` allow-list 에 `queue-auto` 추가, validator 가 `userActivation` 검사 우회 (IPC stream context = user gesture 밖)
+- **queue-auto 의 trust + 보안 contract**:
+  - rolePrompt 허용 (chat.ts validator allow-list 가 user-keyboard 와 queue-auto 둘 다 포함) — role preset 효과 보존
+  - audit log 명시 (`chat:utterance:queue-auto:start:len=N`) — security forensics 에서 user-keyboard turn 과 구분 가능
+  - slash command literal 은 LLM 에 plain text 로 전달 (queue-auto path 는 App.tsx handleAsk 의 slash command 분기 우회) — 큐 자동 인입이 silent state mutation 트리거 차단
+  - attachments 미포함 (큐 schema = 텍스트 only) — 사용자가 별도로 추가한 image/file 가 자동 inject 시 따라가는 silent corruption 차단
+  - re-entrancy guard (`queueAutoInflightRef`) — rapid done event sequence 시 cascade race 방지
 
 ## 단축키 매핑
 

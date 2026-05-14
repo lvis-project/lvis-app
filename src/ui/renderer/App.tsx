@@ -597,7 +597,11 @@ export function App() {
       }
       // Renderer only performs UX-level shortcuts for typed composer input.
       // Main owns the authoritative trust-origin classification.
-      if (mode === "default") {
+      // queue-auto path 는 slash command 분기 우회 — 큐에 누적된 /compact,
+      // /load 가 silent execute 되는 회귀 차단 (Round 3 critic C1-NEW).
+      // 큐는 단순 user message inject 로만 동작 — slash command literal 은
+      // LLM 에 plain text 로 전달.
+      if (mode === "default" && opts?.inputOrigin !== "queue-auto") {
         if (await handleCompactCommand(t)) {
           if (debugStreamEnabled) debugLog("handleAsk", "skip:compact-command-handled");
           return;
@@ -633,7 +637,10 @@ export function App() {
         ? composeImportedTriggerOutgoing(t)
         : composeOutgoing(t);
       const outgoing = composed.text;
-      let outgoingAttachments = composed.attachments;
+      // queue-auto path 는 큐 schema (텍스트 only) 라 사용자가 별도로 추가한
+      // 첨부 파일이 따라가면 mental model 위배 + silent corruption (Round 3
+      // code-reviewer CRITICAL). queue-auto 시 attachments 강제 빈 배열.
+      let outgoingAttachments = opts?.inputOrigin === "queue-auto" ? [] : composed.attachments;
       // Vendor vision capability gate. The composer accepts images
       // regardless of the active model so the user can switch models
       // freely; check at send time and confirm before silently dropping
@@ -683,13 +690,9 @@ export function App() {
           opts?.inputOrigin === "queue-auto"
             ? undefined
             : mode === "default" ? userIntent : undefined,
-          // chat.ts:59 의 "role-prompt-user-keyboard-only" 검증은 inputOrigin
-          // === "user-keyboard" 만 rolePrompt 허용. queue-auto path 가
-          // rolePrompt 보내면 silent reject → silent message loss (critic
-          // Round 2 C1). queue-auto 는 rolePrompt 도 undefined 강제.
-          opts?.inputOrigin === "queue-auto"
-            ? undefined
-            : mode === "default" ? composed.rolePrompt : undefined,
+          // chat.ts:59 가 queue-auto 도 rolePrompt 허용 — Round 3 critic
+          // M-NEW-1 fix. role preset 효과가 queue-auto inject 에도 적용됨.
+          mode === "default" ? composed.rolePrompt : undefined,
         );
         if (debugStreamEnabled) debugLog("handleAsk", "chatSend:resolved", { requestId });
         // After successful send, clear attachments — the textarea was

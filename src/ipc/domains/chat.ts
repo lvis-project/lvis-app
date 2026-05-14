@@ -56,7 +56,11 @@ function normalizeRolePrompt(
   value: unknown,
 ): { ok: true; rolePrompt?: NonNullable<ChatSendPayload["rolePrompt"]> } | { ok: false; error: string } {
   if (value === undefined || value === null) return { ok: true };
-  if (inputOrigin !== "user-keyboard") return { ok: false, error: "role-prompt-user-keyboard-only" };
+  // queue-auto 도 user-keyboard 와 동등 trust (사용자 입력 누적) → rolePrompt
+  // 허용. 검증 명: role-prompt-origin-restricted (origin allow-list).
+  if (inputOrigin !== "user-keyboard" && inputOrigin !== "queue-auto") {
+    return { ok: false, error: "role-prompt-origin-restricted" };
+  }
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return { ok: false, error: "invalid-role-prompt" };
   }
