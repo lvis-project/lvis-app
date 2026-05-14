@@ -424,7 +424,6 @@ describe("PluginRuntime.disable", () => {
         entry: "entry.mjs",
         tools: ["meta_ping"],
         capabilities: ["worker-client"],
-        startupTools: ["meta_ping"],
       }),
       "utf-8",
     );
@@ -438,7 +437,7 @@ describe("PluginRuntime.disable", () => {
     expect(runtime.listPluginIdsByCapability("worker-client")).toEqual(["meta-plugin"]);
 
     const manifest = runtime.getPluginManifest("meta-plugin");
-    expect(manifest?.startupTools).toEqual(["meta_ping"]);
+    expect(manifest?.capabilities).toEqual(["worker-client"]);
   });
 
   describe("PluginHostApi.callTool", () => {

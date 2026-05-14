@@ -69,7 +69,6 @@ interface PluginManifest {
   keywords?: Array<{ keyword: string; skillId: string }>;
   /** 폐쇄형 enum — §2.3 Capabilities Taxonomy 참조. */
   capabilities?: string[];
-  startupTools?: string[];
   eventSubscriptions?: string[];
   /**
    * Renderer → plugin IPC (`lvis:plugins:call`) 허용 메서드 allowlist.
@@ -145,7 +144,6 @@ interface PluginManifest {
 | `description` | 비활성 플러그인 카탈로그 (`listPluginCards`) | system prompt · UI |
 | `keywords[]` | KeywordEngine 등록 | boot |
 | `ui[]` | plugin-ui-host.tsx 마운트 | boot + UI 렌더 |
-| `startupTools[]` | boot 시 자동 호출 (init 류) | boot |
 | `eventSubscriptions[]` | 호스트 이벤트 라우팅 | boot |
 | `notificationEvents[]` | `registerPluginNotifications()` — OS 알림 자동 등록 | boot |
 | `uiCallable[]` | `PluginRuntime.callFromUi()` allowlist | renderer IPC 호출 |
@@ -301,7 +299,7 @@ Renderer UI 는 `lvis:plugins:call` IPC 를 통해 allowlist 된 플러그인 to
 | `calendar-source` | **enforced** | `calendar.*` emit 게이트. |
 | `meeting-recorder` | **enforced** | `meeting.*` emit 게이트. |
 | `knowledge-index` | **enforced** | `index.*` emit 게이트. |
-| `background-watcher` | advisory | `startupTools` 기반 폴러/감시자 사용 선언. 런타임 게이트 없음 (향후 enforce 예정). |
+| `background-watcher` | advisory | 플러그인 자체 lifecycle (`start()` hook) 에서 폴러/감시자를 기동한다는 선언. 런타임 게이트 없음 (향후 enforce 예정). |
 | `worker-client` | advisory | 외부 프로세스(Python uv 등) 워커 래퍼 선언. |
 | `host:overlay` | **enforced** | `triggerConversation()` 호출 필수. 사용자가 입력하지 않은 plugin-authored prompt 를 host overlay 에 staged 하고, 사용자 확인 후 main chat 에 삽입하는 surface — 일반 plugin 에 부여하지 말 것. 자세한 설계는 [`overlay-trigger.md`](./overlay-trigger.md) 참조. |
 
@@ -457,7 +455,6 @@ plugin.json
 ┌──────────────────────────────────┐
 │ 3. Cross-field checks            │  runtime.ts readManifest()
 │    - tool name regex             │
-│    - startupTools ⊂ tools        │
 │    - uiCallable ⊂ tools          │
 │    - startupTimeoutMs > 0        │
 │    - notificationEvents shape    │  → 실패 시
@@ -487,7 +484,6 @@ plugin.json
 ```
 [manifest:<unknown>] JSON parse error (Unexpected token ...). Example: {"id":"com.lge.sample",...}
 [manifest:meeting] schema validation failed (/path/to/plugin.json): /uiCallable/0 must match pattern "^[a-zA-Z_][a-zA-Z0-9_]*$"
-Invalid plugin manifest 'meeting' at 'startupTools[0]' (/path/to/plugin.json): entry 'meeting_watch' is not declared in tools[]. Example: add "meeting_watch" to tools[] or remove it from startupTools[]
 Invalid tool name 'meeting.start' in plugin 'meeting' at 'tools[0]' (/path/to/plugin.json): tool names must match ^[a-zA-Z_][a-zA-Z0-9_]*$ (start with letter/underscore, then letters/digits/underscores). Example: "tools": ["meeting_start"] (not "meeting.start")
 [plugin-runtime] managed plugin 'lvis-plugin-ms-graph' rejected — signature invalid
 [plugin-runtime] managed plugin 'meeting' rejected — signature file missing
