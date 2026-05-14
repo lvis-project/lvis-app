@@ -7,9 +7,9 @@
  *   string + format:"secret"     → masked <Input type="password" /> stored
  *                                  via lvis.pluginConfig.setSecret (NEVER
  *                                  in cleartext pluginConfigs)
- *   string + enum:[...]          → <select>
+ *   string + enum:[...]          → <NativeSelect>
  *   number / integer             → <Input type="number" />
- *   boolean                      → checkbox toggle
+ *   boolean                      → <Checkbox> toggle
  *   array of string              → tag-style multi input (comma split)
  *
  * The form falls back gracefully when a property type is unknown — the
@@ -18,7 +18,9 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "../../../components/ui/button.js";
+import { Checkbox } from "../../../components/ui/checkbox.js";
 import { Input } from "../../../components/ui/input.js";
+import { NativeSelect, NativeSelectOption } from "../../../components/ui/native-select.js";
 import type { PluginConfigSchemaPropertySummary, PluginConfigSchemaSummary } from "../types.js";
 
 export type PluginConfigFormValues = Record<string, unknown>;
@@ -187,9 +189,10 @@ export function PluginConfigSchemaForm({
                 </Button>
               </div>
             ) : prop.enum ? (
-              <select
+              <NativeSelect
                 id={fieldId}
-                className="h-7 rounded-md border bg-background px-2 text-xs"
+                size="sm"
+                className="w-full"
                 value={(value ?? prop.default ?? "") as string | number}
                 onChange={(e) => {
                   const raw = e.target.value;
@@ -202,22 +205,21 @@ export function PluginConfigSchemaForm({
                   setDraft((prev) => ({ ...prev, [key]: next }));
                 }}
               >
-                <option value="" disabled>
+                <NativeSelectOption value="" disabled>
                   선택…
-                </option>
+                </NativeSelectOption>
                 {prop.enum.map((option) => (
-                  <option key={String(option)} value={String(option)}>
+                  <NativeSelectOption key={String(option)} value={String(option)}>
                     {String(option)}
-                  </option>
+                  </NativeSelectOption>
                 ))}
-              </select>
+              </NativeSelect>
             ) : prop.type === "boolean" ? (
               <label className="flex items-center gap-2 text-xs">
-                <input
+                <Checkbox
                   id={fieldId}
-                  type="checkbox"
                   checked={Boolean(value ?? prop.default ?? false)}
-                  onChange={(e) => setDraft((prev) => ({ ...prev, [key]: e.target.checked }))}
+                  onCheckedChange={(checked) => setDraft((prev) => ({ ...prev, [key]: checked === true }))}
                 />
                 <span className="text-muted-foreground">{label} 활성화</span>
               </label>
