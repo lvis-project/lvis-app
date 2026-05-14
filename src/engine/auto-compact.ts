@@ -68,12 +68,15 @@ export function getModelUsableContext(vendor: LLMVendor, model: string): number 
  * estimateMessagesTokens(history) >= getModelPreflightThreshold("claude", "claude-sonnet-4-6");
  */
 export function getModelPreflightThreshold(vendor: LLMVendor, model: string): number {
+  // Priority: runtime override (UI slider) > env var (LVIS_DEV_PREFLIGHT_OVERRIDE) > computed.
+  if (_runtimePreflightOverride !== null) return _runtimePreflightOverride;
   const devOverride = readDevPreflightOverride();
   if (devOverride !== null) return devOverride;
   return getPreflightThreshold(getModelContextWindow(vendor, model));
 }
 
 let _devOverrideWarnedValue: number | null | undefined = undefined;
+let _runtimePreflightOverride: number | null = null;
 
 function readDevPreflightOverride(): number | null {
   if (process.env.NODE_ENV === "production") return null;
@@ -88,6 +91,26 @@ function readDevPreflightOverride(): number | null {
     _devOverrideWarnedValue = n;
   }
   return n;
+}
+
+/**
+ * Runtime dev preflight override — IPC 가 UI slider 의 값을 push 할 때 사용.
+ * production NODE_ENV 에서는 set 자체를 거부 (no-op).
+ * `null` 전달 시 override clear → env var / computed 로 fallback.
+ */
+export function setRuntimePreflightOverride(n: number | null): void {
+  if (process.env.NODE_ENV === "production") return;
+  if (n === null) {
+    _runtimePreflightOverride = null;
+    return;
+  }
+  if (!Number.isFinite(n) || n <= 0) return;
+  _runtimePreflightOverride = Math.floor(n);
+}
+
+/** Renderer UI 가 현재 활성 runtime override 값 (또는 null) 을 조회. */
+export function getRuntimePreflightOverride(): number | null {
+  return _runtimePreflightOverride;
 }
 
 // PR-2-F-2: 3-tier rotation 폐지 — `decideRotation` 함수 + `RotationDecision` interface +

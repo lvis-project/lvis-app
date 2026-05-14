@@ -8,8 +8,6 @@ export interface ChatTabProps {
   setAutoCompact: (updater: boolean | ((prev: boolean) => boolean)) => void;
   streamSmoothing: "none" | "word" | "char";
   setStreamSmoothing: (v: "none" | "word" | "char") => void;
-  experimentalContinuousBackend?: boolean;
-  setExperimentalContinuousBackend?: (v: boolean) => void;
   idlePreferenceRefresh?: boolean;
   setIdlePreferenceRefresh?: (v: boolean) => void;
   piiRedactEnabled: boolean;
@@ -21,8 +19,6 @@ export function ChatTab({
   setAutoCompact,
   streamSmoothing,
   setStreamSmoothing,
-  experimentalContinuousBackend,
-  setExperimentalContinuousBackend,
   idlePreferenceRefresh,
   setIdlePreferenceRefresh,
   piiRedactEnabled,
@@ -64,46 +60,26 @@ export function ChatTab({
         </RadioGroup>
         <p className="text-[11px] text-muted-foreground">출력 스트림을 단어 또는 글자 단위로 부드럽게 표시합니다.</p>
       </div>
-      {setExperimentalContinuousBackend !== undefined && (
-        <div className="space-y-2">
-          <div>
-            <p className="text-sm font-medium">실험적 기능</p>
+      <div className="space-y-2">
+        <div>
+          <p className="text-sm font-medium">실험적 기능</p>
+          <p className="text-[11px] text-muted-foreground">기본값 OFF — 설정 즉시 반영됩니다.</p>
+        </div>
+        <div className="flex items-center gap-3 rounded-md border px-3 py-3">
+          <Checkbox
+            checked={idlePreferenceRefresh ?? false}
+            data-testid="idle-preference-refresh-toggle"
+            className="size-5"
+            onCheckedChange={(checked) => setIdlePreferenceRefresh?.(checked === true)}
+          />
+          <div className="space-y-0.5">
+            <p className="text-sm font-medium">Experimental: idle 선호도 자동 갱신</p>
             <p className="text-[11px] text-muted-foreground">
-              기본값 OFF — 설정 후 앱 재시작 없이 전환됩니다. 자동 압축은 위 설정에서 제어됩니다.
+              IDLE_SCAN 동안 AGENTS.md, MEMORY.md, memories/*.md를 LLM에 보내 user-preferences.md를 갱신합니다. 기본값은 OFF입니다.
             </p>
           </div>
-          <div className="flex items-center gap-3 rounded-md border px-3 py-3">
-            <Checkbox
-              checked={experimentalContinuousBackend ?? false}
-              data-testid="continuous-backend-toggle"
-              className="size-5"
-              onCheckedChange={(checked) => setExperimentalContinuousBackend(checked === true)}
-            />
-            <div className="space-y-0.5">
-              <p className="text-sm font-medium">Experimental: 연속 백엔드 (continuous backend)</p>
-              <p className="text-[11px] text-muted-foreground">
-                세션 제목 자동 갱신, 연속성 가드, 요약 프리앰블을 활성화합니다. 체크포인트 압축은 자동 컴팩트 설정을 따릅니다.
-              </p>
-            </div>
-          </div>
-          {setIdlePreferenceRefresh !== undefined && (
-            <div className="flex items-center gap-3 rounded-md border px-3 py-3">
-              <Checkbox
-                checked={idlePreferenceRefresh ?? false}
-                data-testid="idle-preference-refresh-toggle"
-                className="size-5"
-                onCheckedChange={(checked) => setIdlePreferenceRefresh(checked === true)}
-              />
-              <div className="space-y-0.5">
-                <p className="text-sm font-medium">Experimental: idle 선호도 자동 갱신</p>
-                <p className="text-[11px] text-muted-foreground">
-                  IDLE_SCAN 동안 AGENTS.md, MEMORY.md, memories/*.md를 LLM에 보내 user-preferences.md를 갱신합니다. 기본값은 OFF입니다.
-                </p>
-              </div>
-            </div>
-          )}
         </div>
-      )}
+      </div>
       <section className="space-y-3 border-t border-border pt-4">
         <div>
           <p className="text-sm font-medium">프라이버시</p>

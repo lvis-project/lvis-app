@@ -101,39 +101,6 @@ describe("SettingsDialog (smoke)", () => {
     });
   });
 
-  it("persists the continuous backend toggle immediately without pressing save", async () => {
-    const api = makeApi();
-    const onSaved = vi.fn();
-    vi.stubGlobal("lvisApi", api);
-    render(
-      <SettingsDialog
-        open={true}
-        onOpenChange={vi.fn()}
-        api={api as never}
-        onSaved={onSaved}
-        initialTab="chat"
-      />,
-    );
-
-    await waitFor(() => {
-      expect(api.getSettings).toHaveBeenCalledTimes(1);
-    });
-    const toggle = screen.getByTestId("continuous-backend-toggle");
-    expect(toggle).toHaveAttribute("aria-checked", "false");
-
-    fireEvent.click(toggle);
-
-    await waitFor(() => {
-      expect(api.updateSettings).toHaveBeenCalledWith({
-        features: { experimentalContinuousBackend: true },
-      });
-    });
-    await waitFor(() => {
-      expect(toggle).toHaveAttribute("aria-checked", "true");
-    });
-    expect(onSaved).toHaveBeenCalledTimes(1);
-  });
-
   it("keeps idle preference refresh opt-in and persists it immediately", async () => {
     const api = makeApi();
     const onSaved = vi.fn();
@@ -174,7 +141,7 @@ describe("SettingsDialog (smoke)", () => {
     api.getSettings.mockClear();
     api.getSettings.mockResolvedValue({
       ...(baseSettings as object),
-      features: { experimentalContinuousBackend: true, idlePreferenceRefresh: true },
+      features: { idlePreferenceRefresh: true },
     });
     const onOpenChange = vi.fn();
     vi.stubGlobal("lvisApi", api);
@@ -195,7 +162,7 @@ describe("SettingsDialog (smoke)", () => {
     const onSettingsUpdated = api.onSettingsUpdated.mock.calls[0][0] as (settings: unknown) => void;
     onSettingsUpdated({
       ...(baseSettings as object),
-      features: { experimentalContinuousBackend: false, idlePreferenceRefresh: false },
+      features: { idlePreferenceRefresh: false },
     });
 
     await waitFor(() => {

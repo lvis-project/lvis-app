@@ -10,6 +10,8 @@ import {
   estimateTokens,
   countHangul,
   getModelPreflightThreshold,
+  setRuntimePreflightOverride,
+  getRuntimePreflightOverride,
 } from "../auto-compact.js";
 import type { GenericMessage } from "../llm/types.js";
 
@@ -278,6 +280,63 @@ describe("getModelPreflightThreshold — LVIS_DEV_PREFLIGHT_OVERRIDE", () => {
     expect(getModelPreflightThreshold("claude", "claude-sonnet-4-5")).toBeGreaterThan(50_000);
     process.env.LVIS_DEV_PREFLIGHT_OVERRIDE = "-100";
     expect(getModelPreflightThreshold("claude", "claude-sonnet-4-5")).toBeGreaterThan(50_000);
+    restore();
+  });
+});
+
+describe("getModelPreflightThreshold — setRuntimePreflightOverride (Dev Tools panel)", () => {
+  const origOverride = process.env.LVIS_DEV_PREFLIGHT_OVERRIDE;
+  const origNodeEnv = process.env.NODE_ENV;
+
+  function restore(): void {
+    setRuntimePreflightOverride(null);
+    if (origOverride === undefined) delete process.env.LVIS_DEV_PREFLIGHT_OVERRIDE;
+    else process.env.LVIS_DEV_PREFLIGHT_OVERRIDE = origOverride;
+    if (origNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = origNodeEnv;
+  }
+
+  it("runtime override takes priority over env override", () => {
+    process.env.LVIS_DEV_PREFLIGHT_OVERRIDE = "1000";
+    delete process.env.NODE_ENV;
+    setRuntimePreflightOverride(7500);
+    expect(getModelPreflightThreshold("claude", "claude-sonnet-4-5")).toBe(7500);
+    expect(getRuntimePreflightOverride()).toBe(7500);
+    restore();
+  });
+
+  it("setRuntimePreflightOverride is a no-op in production NODE_ENV", () => {
+    process.env.NODE_ENV = "production";
+    setRuntimePreflightOverride(7500);
+    expect(getRuntimePreflightOverride()).toBeNull();
+    expect(getModelPreflightThreshold("claude", "claude-sonnet-4-5")).toBeGreaterThan(50_000);
+    restore();
+  });
+
+  it("setRuntimePreflightOverride(null) clears runtime override and falls back to env/computed", () => {
+    process.env.LVIS_DEV_PREFLIGHT_OVERRIDE = "3000";
+    delete process.env.NODE_ENV;
+    setRuntimePreflightOverride(7500);
+    expect(getModelPreflightThreshold("claude", "claude-sonnet-4-5")).toBe(7500);
+    setRuntimePreflightOverride(null);
+    expect(getRuntimePreflightOverride()).toBeNull();
+    // After clear, env override should take effect
+    expect(getModelPreflightThreshold("claude", "claude-sonnet-4-5")).toBe(3000);
+    // Clear env too — should fall back to computed
+    delete process.env.LVIS_DEV_PREFLIGHT_OVERRIDE;
+    expect(getModelPreflightThreshold("claude", "claude-sonnet-4-5")).toBeGreaterThan(50_000);
+    restore();
+  });
+
+  it("setRuntimePreflightOverride rejects malformed values (no state change)", () => {
+    delete process.env.NODE_ENV;
+    setRuntimePreflightOverride(7500);
+    setRuntimePreflightOverride(Number.NaN);
+    expect(getRuntimePreflightOverride()).toBe(7500); // unchanged
+    setRuntimePreflightOverride(0);
+    expect(getRuntimePreflightOverride()).toBe(7500); // unchanged
+    setRuntimePreflightOverride(-100);
+    expect(getRuntimePreflightOverride()).toBe(7500); // unchanged
     restore();
   });
 });

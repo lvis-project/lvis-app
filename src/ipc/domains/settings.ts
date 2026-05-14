@@ -10,7 +10,7 @@ import { sendToWindow } from "../safe-send.js";
 import type { IpcDeps } from "../types.js";
 
 export function registerSettingsHandlers(deps: IpcDeps): void {
-  const { settingsService, conversationLoop, systemPromptBuilder, auditLogger, getAppWindows } = deps;
+  const { settingsService, conversationLoop, auditLogger, getAppWindows } = deps;
 
   // read-only — no sender guard needed
   ipcMain.handle("lvis:settings:get", () => settingsService.getAll());
@@ -19,10 +19,6 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:settings:update", e); return UNAUTHORIZED_FRAME; }
     const result = await settingsService.patch(partial);
     conversationLoop.refreshProvider();
-    // Sync the safety flag so Section 8/9.9 state is consistent with saved settings.
-    systemPromptBuilder.setContinuousBackendEnabled(
-      result.features?.experimentalContinuousBackend ?? false,
-    );
     for (const win of getAppWindows?.() ?? []) {
       sendToWindow(win, SETTINGS.updated, result);
     }

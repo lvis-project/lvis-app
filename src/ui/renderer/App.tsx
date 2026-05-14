@@ -18,6 +18,7 @@ import { ApprovalQueueStatus } from "./components/ApprovalQueueStatus.js";
 import { DeferredQueueDialog } from "./dialogs/DeferredQueueDialog.js";
 import { buildQuickActions } from "./components/command-actions.js";
 import { MainToolbar } from "./MainToolbar.js";
+import { DevToolsPanel } from "./components/DevToolsPanel.js";
 import { MainContent } from "./MainContent.js";
 import {
   Dialog,
@@ -106,6 +107,26 @@ export function App() {
   const [deferredQueueOpen, setDeferredQueueOpen] = useState(false);
   const [activeView, setActiveView] = useState("home");
   const [commandPopoverOpen, setCommandPopoverOpen] = useState(false);
+  const [devToolsOpen, setDevToolsOpen] = useState(false);
+
+  // Dev tools — Cmd/Ctrl+Shift+D toggles the floating panel.
+  // Listener is only bound in dev mode (`window.__lvisDevMode === true`) so
+  // packaged builds neither swallow the chord nor pay setState cost on every
+  // press. Main process strips dev IPC handlers when packaged, so even if a
+  // production build accidentally read true, the panel would render inert.
+  useEffect(() => {
+    if ((window as unknown as { __lvisDevMode?: boolean }).__lvisDevMode !== true) {
+      return;
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.shiftKey && (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "d") {
+        e.preventDefault();
+        setDevToolsOpen((v) => !v);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   const { updates: marketplaceUpdates, dismiss: dismissMarketplaceUpdates } = useMarketplaceUpdates(api);
   const { status: bootstrapStatus, dismiss: dismissBootstrapStatus, retry: retryBootstrap } = useBootstrapStatus(api);
   const { queue: approvalQueue, decide: handleApprovalDecide } = useApproval();
@@ -895,6 +916,12 @@ export function App() {
             onOpenDetachedView={(viewKey) => {
               void openDetachedBuiltInView(viewKey);
             }}
+            onOpenDevTools={() => setDevToolsOpen((v) => !v)}
+          />
+          <DevToolsPanel
+            api={api}
+            open={devToolsOpen}
+            onClose={() => setDevToolsOpen(false)}
           />
           {searchOpen && (
             <UnifiedSearchPanel
