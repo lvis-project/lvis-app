@@ -10,6 +10,7 @@ import { Button } from "../../../components/ui/button.js";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../../components/ui/card.js";
 import { Checkbox } from "../../../components/ui/checkbox.js";
 import { Input } from "../../../components/ui/input.js";
+import { Label } from "../../../components/ui/label.js";
 import { NativeSelect, NativeSelectOption } from "../../../components/ui/native-select.js";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
 import { Textarea } from "../../../components/ui/textarea.js";
@@ -400,7 +401,7 @@ export function AddRoutineModal({ api, onClose, onAdded }: AddRoutineModalProps)
         {/* Shared: execution mode + title */}
         {tab !== "natural" && (
           <div className="mb-3 grid gap-3 sm:grid-cols-2">
-            <label className="space-y-1">
+            <Label className="space-y-1">
               <div className="text-xs font-medium text-muted-foreground">실행 모드</div>
               <NativeSelect
                 className="w-full"
@@ -410,11 +411,11 @@ export function AddRoutineModal({ api, onClose, onAdded }: AddRoutineModalProps)
                 <NativeSelectOption value="llm-session">LLM 세션</NativeSelectOption>
                 <NativeSelectOption value="notification-only">알림만</NativeSelectOption>
               </NativeSelect>
-            </label>
-            <label className="space-y-1">
+            </Label>
+            <Label className="space-y-1">
               <div className="text-xs font-medium text-muted-foreground">제목 (선택)</div>
               <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="데일리 리포트" />
-            </label>
+            </Label>
           </div>
         )}
 
@@ -422,16 +423,16 @@ export function AddRoutineModal({ api, onClose, onAdded }: AddRoutineModalProps)
         {tab === "form" && (
           <div className="space-y-3">
             <div className="grid gap-3 sm:grid-cols-2">
-              <label className="space-y-1">
+              <Label className="space-y-1">
                 <div className="text-xs font-medium text-muted-foreground">날짜</div>
                 <Input type="date" value={atDate} onChange={(e) => setAtDate(e.target.value)} />
-              </label>
-              <label className="space-y-1">
+              </Label>
+              <Label className="space-y-1">
                 <div className="text-xs font-medium text-muted-foreground">시각</div>
                 <Input type="time" value={atTime} onChange={(e) => setAtTime(e.target.value)} />
-              </label>
+              </Label>
             </div>
-            <label className="space-y-1">
+            <Label className="space-y-1">
               <div className="text-xs font-medium text-muted-foreground">반복</div>
               <NativeSelect
                 className="w-full"
@@ -442,9 +443,9 @@ export function AddRoutineModal({ api, onClose, onAdded }: AddRoutineModalProps)
                   <NativeSelectOption key={o.value} value={o.value}>{o.label}</NativeSelectOption>
                 ))}
               </NativeSelect>
-            </label>
+            </Label>
             {repeatKind === "interval" && (
-              <label className="space-y-1">
+              <Label className="space-y-1">
                 <div className="text-xs font-medium text-muted-foreground">간격 (분)</div>
                 <Input
                   type="number"
@@ -452,7 +453,7 @@ export function AddRoutineModal({ api, onClose, onAdded }: AddRoutineModalProps)
                   value={intervalMinutes}
                   onChange={(e) => setIntervalMinutes(e.target.value)}
                 />
-              </label>
+              </Label>
             )}
           </div>
         )}
@@ -460,7 +461,7 @@ export function AddRoutineModal({ api, onClose, onAdded }: AddRoutineModalProps)
         {/* Cron tab */}
         {tab === "cron" && (
           <div className="space-y-3">
-            <label className="space-y-1">
+            <Label className="space-y-1">
               <div className="text-xs font-medium text-muted-foreground">
                 크론 표현식 (분 시 일 월 요일)
               </div>
@@ -482,14 +483,14 @@ export function AddRoutineModal({ api, onClose, onAdded }: AddRoutineModalProps)
                 <code>*/30 * * * *</code> = 30분마다 &nbsp;·&nbsp;
                 <code>0 18 * * 5</code> = 매주 금요일 오후 6시
               </div>
-            </label>
+            </Label>
           </div>
         )}
 
         {/* Natural language tab */}
         {tab === "natural" && (
           <div className="space-y-3">
-            <label className="space-y-1">
+            <Label className="space-y-1">
               <div className="text-xs font-medium text-muted-foreground">
                 자연어로 루틴을 설명하세요
               </div>
@@ -500,7 +501,7 @@ export function AddRoutineModal({ api, onClose, onAdded }: AddRoutineModalProps)
                 rows={3}
                 data-testid="natural-input"
               />
-            </label>
+            </Label>
             <div className="text-[11px] text-muted-foreground">
               LLM이 자연어를 분석해서 schedule_routine 툴을 호출합니다.
             </div>
@@ -525,7 +526,7 @@ export function AddRoutineModal({ api, onClose, onAdded }: AddRoutineModalProps)
           <div className="mt-3 space-y-3">
             {execution === "llm-session" ? (
               <div className="space-y-3">
-                <label className="space-y-1">
+                <Label className="space-y-1">
                   <div className="text-xs font-medium text-muted-foreground">LLM 프롬프트</div>
                   <Textarea
                     value={prePrompt}
@@ -534,7 +535,7 @@ export function AddRoutineModal({ api, onClose, onAdded }: AddRoutineModalProps)
                     rows={3}
                     data-testid="pre-prompt-input"
                   />
-                </label>
+                </Label>
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <div className="text-xs font-medium text-muted-foreground">허용 플러그인</div>
@@ -558,7 +559,7 @@ export function AddRoutineModal({ api, onClose, onAdded }: AddRoutineModalProps)
                   ) : (
                     <div className="grid max-h-32 gap-1 overflow-y-auto rounded-md border p-2 sm:grid-cols-2">
                       {pluginCards.map((plugin) => (
-                        <label
+                        <Label
                           key={plugin.id}
                           className="flex min-w-0 items-center gap-2 rounded px-2 py-1 text-xs hover:bg-muted/60"
                         >
@@ -568,7 +569,7 @@ export function AddRoutineModal({ api, onClose, onAdded }: AddRoutineModalProps)
                             data-testid={`routine-allowed-plugin-${plugin.id}`}
                           />
                           <span className="truncate">{plugin.name}</span>
-                        </label>
+                        </Label>
                       ))}
                     </div>
                   )}
@@ -579,22 +580,22 @@ export function AddRoutineModal({ api, onClose, onAdded }: AddRoutineModalProps)
               </div>
             ) : (
               <div className="space-y-2">
-                <label className="space-y-1">
+                <Label className="space-y-1">
                   <div className="text-xs font-medium text-muted-foreground">알림 제목</div>
                   <Input
                     value={notificationTitle}
                     onChange={(e) => setNotificationTitle(e.target.value)}
                     placeholder="알림 제목"
                   />
-                </label>
-                <label className="space-y-1">
+                </Label>
+                <Label className="space-y-1">
                   <div className="text-xs font-medium text-muted-foreground">알림 본문 (선택)</div>
                   <Input
                     value={notificationBody}
                     onChange={(e) => setNotificationBody(e.target.value)}
                     placeholder="알림 내용"
                   />
-                </label>
+                </Label>
               </div>
             )}
 
