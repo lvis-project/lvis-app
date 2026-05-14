@@ -1,8 +1,18 @@
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
+import { Checkbox } from "../../../components/ui/checkbox.js";
 import { Input } from "../../../components/ui/input.js";
+import { Label } from "../../../components/ui/label.js";
+import { RadioGroup, RadioGroupItem } from "../../../components/ui/radio-group.js";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../../../components/ui/select.js";
 import { Separator } from "../../../components/ui/separator.js";
 import { PERMISSION_REVIEWER_FRAMEWORK } from "../../../shared/permission-reviewer-framework.js";
 import { EXEC_MODE_OPTIONS } from "../constants.js";
@@ -284,39 +294,6 @@ export function PermissionsTab() {
     await applyReviewerCommand(`model ${model}`);
   };
 
-  const handleInteractiveRadioKeyDown = (
-    e: KeyboardEvent<HTMLButtonElement>,
-    value: "off" | "low",
-  ) => {
-    if (reviewerBusy) return;
-    const currentIndex = REVIEWER_INTERACTIVE_OPTIONS.findIndex((opt) => opt.value === value);
-    let nextIndex = currentIndex;
-    if (e.key === "ArrowRight" || e.key === "ArrowDown") {
-      nextIndex = (currentIndex + 1) % REVIEWER_INTERACTIVE_OPTIONS.length;
-    } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
-      nextIndex =
-        (currentIndex - 1 + REVIEWER_INTERACTIVE_OPTIONS.length) %
-        REVIEWER_INTERACTIVE_OPTIONS.length;
-    } else if (e.key === "Home") {
-      nextIndex = 0;
-    } else if (e.key === "End") {
-      nextIndex = REVIEWER_INTERACTIVE_OPTIONS.length - 1;
-    } else {
-      return;
-    }
-    e.preventDefault();
-    const next = REVIEWER_INTERACTIVE_OPTIONS[nextIndex];
-    if (!next || next.value === reviewer.interactive.autoApprove) return;
-    void (async () => {
-      await applyReviewerCommand(`interactive ${next.value}`);
-      requestAnimationFrame(() => {
-        document
-          .querySelector<HTMLButtonElement>(`[data-testid="reviewer-interactive-${next.value}"]`)
-          ?.focus();
-      });
-    })();
-  };
-
   // ── Section C handlers ────────────────────────────
   const refreshRules = async () => {
     const r = await window.lvis.permission.listRules();
@@ -436,7 +413,16 @@ export function PermissionsTab() {
           <div className={`flex items-start gap-2 rounded-md border px-3 py-2 text-[12px] ${banner.type === "error" ? "border-destructive/40 bg-destructive/10 text-destructive" : "border-warning/40 bg-warning/15 text-warning"}`}>
             <span className="mt-0.5 flex-shrink-0">{banner.type === "error" ? "⚠" : "🔒"}</span>
             <span>{banner.msg}</span>
-            <button className="ml-auto flex-shrink-0 opacity-60 hover:opacity-100" onClick={() => setBanner(null)}>✕</button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="ml-auto h-6 w-6 flex-shrink-0 opacity-60 hover:opacity-100"
+              onClick={() => setBanner(null)}
+              aria-label="알림 닫기"
+            >
+              ✕
+            </Button>
           </div>
         )}
 
@@ -513,26 +499,33 @@ export function PermissionsTab() {
               기본은 읽기 도구를 허용하고, 전체 물어보기는 읽기까지 확인합니다. 자동 검증은 헤드리스 작업을 백그라운드 리뷰어 설정으로 검증하고, 전체 허용은 하드 차단 범위 밖의 도구를 자동 허용하되 허용 디렉터리 밖 접근은 별도 승인합니다.
             </p>
           </div>
-          <div className="space-y-1.5">
+          <RadioGroup
+            value={mode}
+            disabled={modeBusy}
+            aria-label="권한 정책 선택"
+            onValueChange={(value) => void handleModeChange(value as ExecMode)}
+            className="space-y-1.5"
+          >
             {EXEC_MODE_OPTIONS.map((opt) => (
-              <button
+              <Label
                 key={opt.value}
+                htmlFor={`exec-mode-${opt.value}-radio`}
                 data-testid={`exec-mode-${opt.value}`}
-                aria-pressed={mode === opt.value}
-                className={`flex w-full items-start gap-2.5 rounded-md border px-3 py-2 text-left text-sm transition-colors ${mode === opt.value ? "border-primary bg-primary/10" : "border-muted hover:border-muted-foreground/40"}`}
-                disabled={modeBusy}
-                onClick={() => void handleModeChange(opt.value)}
+                className={`flex h-auto w-full cursor-pointer items-start justify-start gap-2.5 rounded-md border px-3 py-2 text-left text-sm font-normal ${mode === opt.value ? "border-primary bg-primary/10 hover:bg-primary/10" : "border-muted hover:border-muted-foreground/40"}`}
               >
-                <span className={`mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full border-2 ${mode === opt.value ? "border-primary" : "border-muted-foreground"}`}>
-                  {mode === opt.value && <span className="h-2 w-2 rounded-full bg-primary" />}
-                </span>
+                <RadioGroupItem
+                  id={`exec-mode-${opt.value}-radio`}
+                  value={opt.value}
+                  aria-label={opt.label}
+                  className="mt-0.5"
+                />
                 <span>
                   <span className="font-medium">{opt.label}</span>
                   <span className="ml-1.5 text-[11px] text-muted-foreground">{opt.description}</span>
                 </span>
-              </button>
+              </Label>
             ))}
-          </div>
+          </RadioGroup>
         </div>
 
         <Separator />
@@ -545,26 +538,33 @@ export function PermissionsTab() {
             </p>
           </div>
 
-          <div className="space-y-1.5">
+          <RadioGroup
+            value={reviewer.mode}
+            disabled={reviewerBusy}
+            aria-label="백그라운드 권한 리뷰어 선택"
+            onValueChange={(value) => void applyReviewerCommand(`mode ${value}`)}
+            className="space-y-1.5"
+          >
             {REVIEWER_MODE_OPTIONS.map((opt) => (
-              <button
+              <Label
                 key={opt.value}
+                htmlFor={`reviewer-mode-${opt.value}-radio`}
                 data-testid={`reviewer-mode-${opt.value}`}
-                aria-pressed={reviewer.mode === opt.value}
-                className={`flex w-full items-start gap-2.5 rounded-md border px-3 py-2 text-left text-sm transition-colors ${reviewer.mode === opt.value ? "border-primary bg-primary/10" : "border-muted hover:border-muted-foreground/40"}`}
-                disabled={reviewerBusy}
-                onClick={() => void applyReviewerCommand(`mode ${opt.value}`)}
+                className={`flex h-auto w-full cursor-pointer items-start justify-start gap-2.5 rounded-md border px-3 py-2 text-left text-sm font-normal ${reviewer.mode === opt.value ? "border-primary bg-primary/10 hover:bg-primary/10" : "border-muted hover:border-muted-foreground/40"}`}
               >
-                <span className={`mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full border-2 ${reviewer.mode === opt.value ? "border-primary" : "border-muted-foreground"}`}>
-                  {reviewer.mode === opt.value && <span className="h-2 w-2 rounded-full bg-primary" />}
-                </span>
+                <RadioGroupItem
+                  id={`reviewer-mode-${opt.value}-radio`}
+                  value={opt.value}
+                  aria-label={opt.label}
+                  className="mt-0.5"
+                />
                 <span className="min-w-0">
                   <span className="font-medium">{opt.label}</span>
                   <span className="ml-1.5 text-[11px] text-muted-foreground">{opt.description}</span>
                 </span>
-              </button>
+              </Label>
             ))}
-          </div>
+          </RadioGroup>
 
           <div className="space-y-3 rounded-md border bg-muted/20 px-3 py-3">
             <div>
@@ -572,36 +572,42 @@ export function PermissionsTab() {
               <p className="text-[11px] text-muted-foreground">LLM 검증을 선택하기 전에 공급자, 모델, 오류 처리 정책을 미리 정합니다.</p>
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
-              <label className="space-y-1 text-xs">
+              <Label className="space-y-1 text-xs">
                 <span className="font-medium">LLM 공급자</span>
-                <select
-                  data-testid="reviewer-provider-select"
-                  className="h-8 w-full rounded-md border bg-background px-2 text-xs"
+                <Select
                   value={reviewer.provider}
                   disabled={reviewerBusy}
-                  onChange={(e) => void applyReviewerCommand(`provider ${e.target.value}`)}
+                  onValueChange={(value) => void applyReviewerCommand(`provider ${value}`)}
                 >
-                  {REVIEWER_PROVIDER_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="space-y-1 text-xs">
+                  <SelectTrigger data-testid="reviewer-provider-select" className="w-full text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {REVIEWER_PROVIDER_OPTIONS.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Label>
+              <Label className="space-y-1 text-xs">
                 <span className="font-medium">오류 처리</span>
-                <select
-                  data-testid="reviewer-fallback-select"
-                  className="h-8 w-full rounded-md border bg-background px-2 text-xs"
+                <Select
                   value={reviewer.fallbackOnError}
                   disabled={reviewerBusy}
-                  onChange={(e) => void applyReviewerCommand(`fallback ${e.target.value}`)}
+                  onValueChange={(value) => void applyReviewerCommand(`fallback ${value}`)}
                 >
-                  {REVIEWER_FALLBACK_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>{opt.label} - {opt.description}</option>
-                  ))}
-                </select>
-              </label>
+                  <SelectTrigger data-testid="reviewer-fallback-select" className="w-full text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {REVIEWER_FALLBACK_OPTIONS.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>{opt.label} - {opt.description}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Label>
             </div>
-            <label className="space-y-1 text-xs">
+            <Label className="space-y-1 text-xs">
               <span className="font-medium">리뷰어 모델</span>
               <div className="flex gap-2">
                 <Input
@@ -623,7 +629,7 @@ export function PermissionsTab() {
                   적용
                 </Button>
               </div>
-            </label>
+            </Label>
             <p className="text-[11px] text-muted-foreground">
               LLM API 키는 지능 설정의 공급자 키를 사용합니다. 키가 없거나 재연결에 실패하면 설정은 저장되지 않습니다.
             </p>
@@ -636,38 +642,33 @@ export function PermissionsTab() {
                 위험도가 낮다고 판단된 도구 실행은 확인 없이 자동으로 허용합니다.
                 중간·높은 위험도의 실행은 어떤 경우에도 확인 창이 표시됩니다.
               </p>
-              <div className="grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label="저위험 자동 허용 설정">
+              <RadioGroup
+                value={reviewer.interactive.autoApprove}
+                disabled={reviewerBusy}
+                aria-label="저위험 자동 허용 설정"
+                onValueChange={(value) => void applyReviewerCommand(`interactive ${value}`)}
+                className="grid gap-2 sm:grid-cols-2"
+              >
                 {REVIEWER_INTERACTIVE_OPTIONS.map((opt) => (
-                  // Round-3 UX NIT — the previously-selected option was
-                  // `disabled`, which removed it from the keyboard tab
-                  // sequence and broke the standard radio-group focus
-                  // model. Keep it focusable; the onClick no-ops when
-                  // the value is already current.
-                  <button
-                    type="button"
+                  <Label
                     key={opt.value}
+                    htmlFor={`reviewer-interactive-${opt.value}-radio`}
                     data-testid={`reviewer-interactive-${opt.value}`}
-                    role="radio"
-                    aria-checked={reviewer.interactive.autoApprove === opt.value}
-                    tabIndex={reviewer.interactive.autoApprove === opt.value ? 0 : -1}
-                    disabled={reviewerBusy}
-                    onClick={() => {
-                      if (reviewer.interactive.autoApprove === opt.value) return;
-                      void applyReviewerCommand(`interactive ${opt.value}`);
-                    }}
-                    onKeyDown={(e) => handleInteractiveRadioKeyDown(e, opt.value)}
-                    className={`flex w-full items-start gap-2.5 rounded-md border px-3 py-2 text-left text-xs transition-colors ${reviewer.interactive.autoApprove === opt.value ? "border-primary bg-primary/10" : "border-muted hover:border-muted-foreground/40"}`}
+                    className={`flex h-auto w-full cursor-pointer items-start justify-start gap-2.5 rounded-md border px-3 py-2 text-left text-xs font-normal ${reviewer.interactive.autoApprove === opt.value ? "border-primary bg-primary/10 hover:bg-primary/10" : "border-muted hover:border-muted-foreground/40"}`}
                   >
-                    <span className={`mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full border-2 ${reviewer.interactive.autoApprove === opt.value ? "border-primary" : "border-muted-foreground"}`}>
-                      {reviewer.interactive.autoApprove === opt.value && <span className="h-2 w-2 rounded-full bg-primary" />}
-                    </span>
+                    <RadioGroupItem
+                      id={`reviewer-interactive-${opt.value}-radio`}
+                      value={opt.value}
+                      aria-label={opt.label}
+                      className="mt-0.5"
+                    />
                     <span className="flex-1 space-y-0.5">
                       <span className="block font-medium">{opt.label}</span>
                       <span className="block text-[11px] text-muted-foreground">{opt.description}</span>
                     </span>
-                  </button>
+                  </Label>
                 ))}
-              </div>
+              </RadioGroup>
               {reviewer.interactive.autoApprove === "low" && reviewer.mode === "disabled" ? (
                 <p className="rounded-md border border-warning/40 bg-warning/15 px-3 py-2 text-[11px] text-warning">
                   ⚠ 백그라운드 권한 검사가 "명시 승인만" 으로 꺼져 있어 자동 허용이 동작하지 않습니다. "규칙 기반" 또는 "LLM" 으로 변경하세요.
@@ -770,18 +771,13 @@ export function PermissionsTab() {
             <p className="text-[11px] text-muted-foreground">체크 시 승인 대화상자에서 모달 외부 클릭과 Escape 키가 차단되어 버튼 또는 승인 단축키로 명시적으로 결정해야 합니다.</p>
           </div>
           <div className="flex items-center gap-3">
-            <button
-              role="checkbox"
-              aria-checked={requireExplicit}
+            <Checkbox
+              checked={requireExplicit}
               aria-label="승인 대화상자에서 버튼 또는 단축키로 명시적 승인 또는 거부를 요구"
               disabled={policyManaged || policyBusy}
-              className={`relative h-5 w-5 flex-shrink-0 rounded border-2 transition-colors ${requireExplicit ? "border-primary bg-primary" : "border-muted-foreground"} ${policyManaged ? "cursor-not-allowed opacity-50" : "cursor-pointer hover:border-primary/60"}`}
-              onClick={() => void handleExplicitToggle()}
-            >
-              {requireExplicit && (
-                <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-primary-foreground">✓</span>
-              )}
-            </button>
+              className="size-5"
+              onCheckedChange={() => void handleExplicitToggle()}
+            />
             <span className="text-sm">{requireExplicit ? "활성화됨" : "비활성화됨"}</span>
             {policyManaged && <span className="text-base" title="IT 관리자 설정">🔒</span>}
           </div>
@@ -828,13 +824,16 @@ export function PermissionsTab() {
                       </td>
                       <td className="px-3 py-1.5 text-muted-foreground">{r.source ?? "전체"}</td>
                       <td className="px-3 py-1.5 text-right">
-                        <button
-                          className="text-[10px] text-muted-foreground hover:text-destructive disabled:opacity-40"
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 px-2 text-[10px] text-muted-foreground hover:text-destructive"
                           disabled={rulesBusy}
                           onClick={() => void handleRemoveRule(r.pattern, r.action)}
                         >
                           ✕
-                        </button>
+                        </Button>
                       </td>
                     </tr>
                   ))}
@@ -852,14 +851,18 @@ export function PermissionsTab() {
               onChange={(e) => setNewPattern(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter" && newPattern.trim()) void handleAddRule(); }}
             />
-            <select
-              className="h-8 rounded-md border bg-background px-2 text-xs"
+            <Select
               value={newAction}
-              onChange={(e) => setNewAction(e.target.value as "allow" | "deny")}
+              onValueChange={(value) => setNewAction(value as "allow" | "deny")}
             >
-              <option value="allow">허용</option>
-              <option value="deny">거부</option>
-            </select>
+              <SelectTrigger className="h-8 w-24 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="allow">허용</SelectItem>
+                <SelectItem value="deny">거부</SelectItem>
+              </SelectContent>
+            </Select>
             <Button size="sm" className="h-8" onClick={() => void handleAddRule()} disabled={rulesBusy || !newPattern.trim()}>
               추가
             </Button>
@@ -904,13 +907,16 @@ export function PermissionsTab() {
                         <span className="block whitespace-normal break-all" title={dir}>{dir}</span>
                       </td>
                       <td className="px-3 py-1.5 text-right">
-                        <button
-                          className="text-[10px] text-muted-foreground hover:text-destructive disabled:opacity-40"
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 px-2 text-[10px] text-muted-foreground hover:text-destructive"
                           disabled={dirsBusy}
                           onClick={() => void handleRemoveDirectory(dir)}
                         >
                           ✕
-                        </button>
+                        </Button>
                       </td>
                     </tr>
                   ))}

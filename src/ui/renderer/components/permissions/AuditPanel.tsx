@@ -22,6 +22,8 @@
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
 import { Badge } from "../../../../components/ui/badge.js";
 import { Button } from "../../../../components/ui/button.js";
+import { Label } from "../../../../components/ui/label.js";
+import { NativeSelect, NativeSelectOption } from "../../../../components/ui/native-select.js";
 import type { PermissionAuditEntrySummary } from "../../types.js";
 
 type DecisionFilter = "all" | "allow" | "ask" | "deny" | "deferred" | "mode_change" | "manifest_violation";
@@ -201,27 +203,28 @@ export function AuditPanel({
       {/* Filters */}
       <section className="flex flex-col gap-2 border-b px-3 py-2 text-xs">
         <div className="flex items-center gap-2">
-          <label htmlFor="audit-filter-decision" className="text-muted-foreground">
+          <Label htmlFor="audit-filter-decision" className="text-muted-foreground">
             결정
-          </label>
-          <select
+          </Label>
+          <NativeSelect
             id="audit-filter-decision"
             value={decisionFilter}
             onChange={(e) => setDecisionFilter(e.target.value as DecisionFilter)}
-            className="rounded border bg-background px-1 py-0.5"
+            size="sm"
+            className="w-32"
             data-testid="audit-decision-filter"
           >
-            <option value="all">전체</option>
-            <option value="allow">allow</option>
-            <option value="ask">ask</option>
-            <option value="deny">deny</option>
-            <option value="deferred">deferred</option>
-            <option value="mode_change">mode_change</option>
-            <option value="manifest_violation">manifest_violation</option>
-          </select>
-          <label htmlFor="audit-filter-tool" className="ml-2 text-muted-foreground">
+            <NativeSelectOption value="all">전체</NativeSelectOption>
+            <NativeSelectOption value="allow">allow</NativeSelectOption>
+            <NativeSelectOption value="ask">ask</NativeSelectOption>
+            <NativeSelectOption value="deny">deny</NativeSelectOption>
+            <NativeSelectOption value="deferred">deferred</NativeSelectOption>
+            <NativeSelectOption value="mode_change">mode_change</NativeSelectOption>
+            <NativeSelectOption value="manifest_violation">manifest_violation</NativeSelectOption>
+          </NativeSelect>
+          <Label htmlFor="audit-filter-tool" className="ml-2 text-muted-foreground">
             도구
-          </label>
+          </Label>
           <input
             id="audit-filter-tool"
             type="text"

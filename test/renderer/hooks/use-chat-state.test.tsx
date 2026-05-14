@@ -118,8 +118,13 @@ describe("useChatState", () => {
       });
     });
 
+    // Since 5b19e05c, compact_notice with freedTokens > 0 also emits a
+    // synthetic `context_usage` carrier after the checkpoint so the ring
+    // refreshes. The intent of this test is the checkpoint payload — not
+    // its position — so locate it by kind.
     await waitFor(() => {
-      expect(result.current.entries.at(-1)).toMatchObject({
+      const checkpoint = result.current.entries.findLast((e) => e.kind === "checkpoint");
+      expect(checkpoint).toMatchObject({
         kind: "checkpoint",
         removedMessages: 7,
         freedTokens: 123,
