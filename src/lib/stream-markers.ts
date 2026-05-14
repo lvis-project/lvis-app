@@ -5,9 +5,5 @@
  * to preserve layering boundaries. This shim lives in src/lib/ — a shared
  * layer accessible to both main-process and renderer code — and re-exports
  * the pure text-processing helpers that are safe to call in the renderer.
- *
- * Only pure, side-effect-free functions are re-exported here. LLM-dependent
- * logic (chainTitle) stays in src/engine/ and is invoked exclusively from the
- * main process via IPC.
  */
 export { detectFromStream, type DetectorResult } from "../engine/checkpoint-detector.js";
