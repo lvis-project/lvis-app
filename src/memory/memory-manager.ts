@@ -12,7 +12,7 @@
  * - 사용자 제어: 직접 확인·편집·삭제 가능
  * - 세션 독립: 파일은 영속, 인메모리는 휘발
  */
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, unlinkSync, statSync, renameSync, watch, type FSWatcher } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, unlinkSync, rmSync, statSync, renameSync, watch, type FSWatcher } from "node:fs";
 import { join, resolve, basename } from "node:path";
 import { withFileLock } from "../lib/with-file-lock.js";
 import { createLogger } from "../lib/logger.js";
@@ -810,10 +810,24 @@ export class MemoryManager {
     return chain;
   }
 
-  /** 세션 삭제 */
+  /**
+   * 세션 삭제 — jsonl + 같은 session 의 compact archive 디렉토리 동시 제거.
+   *
+   * Compact pipeline (PR #718) 이 oversize 메시지를
+   * `sessions/<sessionId>/truncated/` 에 격리하므로, 세션 삭제 시 archive
+   * orphan 으로 남지 않게 함께 정리.
+   */
   deleteSession(sessionId: string): void {
-    const path = join(this.sessionsDir, `${sessionId}.jsonl`);
-    if (existsSync(path)) unlinkSync(path);
+    const jsonlPath = join(this.sessionsDir, `${sessionId}.jsonl`);
+    if (existsSync(jsonlPath)) unlinkSync(jsonlPath);
+    const sessionDir = join(this.sessionsDir, sessionId);
+    if (existsSync(sessionDir)) {
+      try {
+        rmSync(sessionDir, { recursive: true, force: true });
+      } catch (err) {
+        log.warn(`deleteSession: failed to remove session dir ${sessionDir}: ${(err as Error).message}`);
+      }
+    }
   }
 
   private ensureStructure(): void {
