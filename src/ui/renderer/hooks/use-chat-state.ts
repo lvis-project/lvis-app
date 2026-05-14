@@ -674,6 +674,11 @@ export function useChatState(api: LvisApi) {
   }, []);
 
   const truncateToEntry = useCallback((entryIndex: number) => {
+    // Edit/retry rewind drops history forward of `entryIndex`. If a pre-turn
+    // compact was mid-flight, its `compact_notice` will land in a different
+    // streaming context (or never arrive for this hook instance), so clear
+    // the indicator here too — same class as applyLoadedSession / clearForNewChat.
+    setIsCompacting(false);
     setEntries((p) => p.slice(0, entryIndex + 1));
   }, []);
 
