@@ -12,6 +12,7 @@ import { ToolExecutor, type ToolResult, type ToolUseBlock } from "../tools/execu
 import { HookRunner } from "../hooks/hook-runner.js";
 import { markStaleToolResults, estimateMessagesTokens, getModelPreflightThreshold, getModelUsableContext } from "./auto-compact.js";
 import { compactWithBoundary, renderBoundaryAsPreamble } from "./structured-compact.js";
+import { CompressionStatus } from "../shared/compact-status.js";
 import { stubMarkedToolResults } from "./wire-serialize.js";
 import { createProvider, secretKeyFor } from "./llm/provider-factory.js";
 import { FallbackProvider, type FallbackStatus } from "./llm/vercel/fallback-chain.js";
@@ -122,6 +123,18 @@ export interface TurnCallbacks {
      * view-mode and branch-from-checkpoint actions.
      */
     compactNum?: number;
+    /**
+     * Phase 3 — Gemini-style status. Renderer 가 status 별로 다른 banner
+     * variant (색상/아이콘/메시지) 를 표시한다. SUMMARIZED 가 정상 경로,
+     * CONTENT_TRUNCATED / REDUCED_INSUFFICIENT_FORCED 는 fail-loud UX.
+     */
+    compactStatus?: CompressionStatus;
+    /**
+     * Layer A / A.5 / FORCED 가 원본 메시지를 격리한 디렉토리.
+     * `~/.lvis/sessions/<sessionId>/truncated/` — 사용자가 banner footnote
+     * 에서 원본 archive 위치 확인 가능. plumb 누락 방지를 위해 명시 필드.
+     */
+    truncatedDir?: string;
   }) => void;
   /**
    * Fired at the start of a pre-turn auto-compact (Layer 0 preflight) so the
@@ -825,17 +838,11 @@ export class ConversationLoop {
         model,
         preserveRecentTokens,
         compactNum: this.compactNum + 1,
+        sessionId: this.sessionId,
+        preflightTokens: preflight,
       });
 
-      if (result === null || result.removedCount === 0) {
-        // No-op happens when splitForBoundary preserves the entire history —
-        // either the input is genuinely small or the tail is a single large
-        // message that exceeds preserveRecentTokens (a structural
-        // compact-deadlock at high usagePct). Recommending manual deletion
-        // was the wrong UX direction — the deeper fix is a Gemini-style
-        // 3-layer pipeline (per-message truncation → reverse-budget history
-        // truncation → LLM summary) tracked as a follow-up issue. Until that
-        // lands, return the generic message here.
+      if (result.status === CompressionStatus.NOOP) {
         return {
           compacted: false,
           compactedAt: null,
@@ -847,18 +854,23 @@ export class ConversationLoop {
       const estimated = estimateMessagesTokens(messagesBefore);
       await this.applyBoundaryToSession(result, "manual", estimated, callbacks, messagesBefore.length, messagesBefore);
 
-      // 영속화 — manualCompact 완료 시점에 즉시 disk 반영. saveSession 실패는
-      // 사용자 가시 결과에 영향 X (next turn 에서도 compact 결과 보존됨).
+      // 영속화 — manualCompact 완료 시점에 즉시 disk 반영.
       void Promise.resolve(
         this.deps.memoryManager?.saveSession(this.sessionId, stubMarkedToolResults(this.history.getMessages())),
       ).catch((err: unknown) => {
         log.warn("manualCompact saveSession failed: %s", (err as Error).message);
       });
 
+      const compactedAt = result.boundary?.createdAt ?? new Date().toISOString();
+      const summary = result.status === CompressionStatus.CONTENT_TRUNCATED
+        ? `${result.removedCount}개 메시지 부분 절단됨 (LLM 호출 생략)`
+        : result.status === CompressionStatus.REDUCED_INSUFFICIENT_FORCED
+        ? `${result.removedCount}개 메시지 강제 절단됨 (compact #${this.compactNum})`
+        : `${result.removedCount}개 메시지 요약됨 (compact #${this.compactNum})`;
       return {
         compacted: true,
-        compactedAt: result.boundary.createdAt,
-        summary: `${result.removedCount}개 메시지 요약됨 (compact #${this.compactNum})`,
+        compactedAt,
+        summary,
         removedMessageCount: result.removedCount,
       };
     } catch (err) {
@@ -1770,6 +1782,33 @@ export class ConversationLoop {
     /** §C1: verbatim pre-compact messages — persisted as checkpoint snapshot for branchFromCheckpoint. */
     messagesBefore: import("./llm/types.js").GenericMessage[],
   ): Promise<void> {
+    // CONTENT_TRUNCATED 경로 — boundary 없이 history 만 갱신. truncation 은
+    // 메시지를 stub 으로 대체하지 않고 in-place clip 이므로 boundary preamble
+    // 변경 불필요. 그러나 chain consistency 위해 compactNum 은 bump (M-Critic-2).
+    // cacheReadTokens/cacheWriteTokens 는 보존 — boundary 가 없으므로 provider
+    // cache prefix 가 여전히 유효 (M-Critic-4 fix). reset 하면 다음 turn 의
+    // 빌링이 부풀려진다.
+    if (result.boundary === null) {
+      this.compactNum += 1;
+      this.history.clear();
+      this.history.restore([...result.newHistory]);
+      this.cumulativeUsage = {
+        ...this.cumulativeUsage,
+        inputTokens: result.estimatedAfter,
+      };
+      callbacks?.onCompactOccurred?.({
+        removedMessages: result.removedCount,
+        freedTokens: Math.max(0, estimatedBefore - result.estimatedAfter),
+        tier: trigger,
+        compactNum: this.compactNum,
+        summary: `${result.removedCount}개 메시지 부분 절단됨`,
+        estimatedAfter: result.estimatedAfter,
+        compactStatus: result.status,
+        ...(result.truncatedDir !== undefined ? { truncatedDir: result.truncatedDir } : {}),
+      });
+      return;
+    }
+
     this.compactNum = result.boundary.compactNum;
 
     // §C1: persist pre-compact verbatim history so branchFromCheckpoint can replay.
@@ -1831,6 +1870,8 @@ export class ConversationLoop {
       tier: trigger,
       summary: preamble,
       compactNum: this.compactNum,
+      compactStatus: result.status,
+      ...(result.truncatedDir !== undefined ? { truncatedDir: result.truncatedDir } : {}),
     });
   }
 
@@ -1896,19 +1937,28 @@ export class ConversationLoop {
       log.info(
         `preflight: TRIGGER — estimated=${estimated} >= preflight=${preflight} (model=${provider}/${model}) → Layer 2 compact #${this.compactNum + 1}`,
       );
-      // preserve budget = preflight 의 40% — Cline preserve-recent-tokens 휴리스틱 (per-model 추가 조정 가능).
-      const preserveRecentTokens = Math.max(1_000, Math.floor(preflight * 0.4));
+      // Adaptive preserve budget — usagePct 가 높을수록 더 공격적으로 줄여서
+      // compact 가 항상 reduce 보장. red zone (usage >= 100%) 에서는 preserve=0
+      // 으로 전체 compact (boundary stub 만 남김).
+      const usagePct = preflight > 0 ? estimated / preflight : 0;
+      const preserveRecentTokens = usagePct >= 1.0
+        ? 0
+        : usagePct >= 0.8
+          ? Math.max(1_000, Math.floor(preflight * 0.2))
+          : Math.max(1_000, Math.floor(preflight * 0.4));
       const compactResult = await compactWithBoundary({
         messages: messagesBefore,
         llm: this.provider,
         model,
         preserveRecentTokens,
         compactNum: this.compactNum + 1,
+        sessionId: this.sessionId,
+        preflightTokens: preflight,
         ...(abortSignal !== undefined && { abortSignal }),
       });
 
-      if (compactResult === null || compactResult.removedCount === 0) {
-        log.info("preflight: Layer 2 returned removedCount=0 (preserveRecentTokens covered all) — no mutation");
+      if (compactResult.status === CompressionStatus.NOOP) {
+        log.info("preflight: Layer 2 returned NOOP (history within preserveRecentTokens) — no mutation");
         return;
       }
 

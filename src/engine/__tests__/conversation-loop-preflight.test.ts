@@ -29,6 +29,7 @@ vi.mock("../structured-compact.js", () => ({
 
 // Import the mock *after* vi.mock so we can configure return values per-test.
 import { compactWithBoundary } from "../structured-compact.js";
+import { CompressionStatus } from "../../shared/compact-status.js";
 
 // Clear mock call history before each test so assertions are test-local.
 beforeEach(() => {
@@ -125,6 +126,7 @@ function makeSyntheticCompactResult(originalMessages: GenericMessage[]): import(
   };
   const recent = originalMessages.slice(-2);
   return {
+    status: CompressionStatus.SUMMARIZED,
     boundary: {
       id: "test-boundary-1",
       compactNum: 1,
@@ -132,10 +134,22 @@ function makeSyntheticCompactResult(originalMessages: GenericMessage[]): import(
       toolBoundaryLedger: [],
       pinnedArtifacts: [],
       createdAt: new Date().toISOString(),
-    } as unknown as import("../structured-compact.js").CompactWithBoundaryResult["boundary"],
+    } as unknown as NonNullable<import("../structured-compact.js").CompactWithBoundaryResult["boundary"]>,
     newHistory: [boundaryStub, ...recent],
     removedCount: originalMessages.length - recent.length - 1,
     estimatedAfter: 100,
+    truncatedCount: 0,
+  };
+}
+
+function makeSyntheticNoopResult(messages: GenericMessage[]): import("../structured-compact.js").CompactWithBoundaryResult {
+  return {
+    status: CompressionStatus.NOOP,
+    boundary: null,
+    newHistory: messages,
+    removedCount: 0,
+    estimatedAfter: 0,
+    truncatedCount: 0,
   };
 }
 
@@ -247,7 +261,7 @@ describe("runPreflightGuard — skip conditions", () => {
     const fakeProvider = makeTurnProvider();
     (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
 
-    vi.mocked(compactWithBoundary).mockResolvedValueOnce(null);
+    vi.mocked(compactWithBoundary).mockResolvedValueOnce(makeSyntheticNoopResult([]));
 
     const compactOccurredCb = vi.fn();
     await loop.runTurn(
@@ -275,7 +289,7 @@ describe("runPreflightGuard — skip conditions", () => {
     const fakeProvider = makeTurnProvider();
     (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
 
-    vi.mocked(compactWithBoundary).mockResolvedValueOnce(null);
+    vi.mocked(compactWithBoundary).mockResolvedValueOnce(makeSyntheticNoopResult([]));
 
     const compactOccurredCb = vi.fn();
     await loop.runTurn(
