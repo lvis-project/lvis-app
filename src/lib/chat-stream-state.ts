@@ -28,6 +28,10 @@ export type StreamEvent = {
   hasToolCalls?: boolean;
   removedMessages?: number;
   freedTokens?: number;
+  /** Post-compact actual history token estimate (renderer uses this to
+   *  refresh contextOverflowPct immediately; falls back to (lastKnown -
+   *  freedTokens) when missing). */
+  estimatedAfter?: number;
   /** Compact trigger tier on `compact_notice` — Layer 0 auto vs manual. */
   tier?: CheckpointTier;
   /** Rolling summary attached to a compact checkpoint (rendered preamble). */
