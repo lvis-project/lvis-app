@@ -1,6 +1,7 @@
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
 import { Input } from "../../../components/ui/input.js";
+import { Label } from "../../../components/ui/label.js";
 import { WEB_PROVIDERS } from "../constants.js";
 import type { LvisApi } from "../types.js";
 
@@ -22,7 +23,7 @@ export function WebTab(props: WebTabProps) {
   return (
     <div className="space-y-4 pt-4">
       <div className="space-y-2">
-        <label className="text-sm font-medium">검색 엔진</label>
+        <Label className="text-sm font-medium">검색 엔진</Label>
         <div className="grid grid-cols-2 gap-2">
           {WEB_PROVIDERS.map((p) => (
             <Button key={p.id} size="sm" variant={webProvider === p.id ? "default" : "outline"} className="justify-start text-xs" onClick={() => setWebProvider(p.id)}>
@@ -33,7 +34,7 @@ export function WebTab(props: WebTabProps) {
       </div>
       {webInfo.needsKey && (
         <div className="space-y-2">
-          <label className="text-sm font-medium">{webInfo.label} API 키</label>
+          <Label className="text-sm font-medium">{webInfo.label} API 키</Label>
           <div className="flex items-center gap-2">
             {hasWebKey ? <Badge variant="default" className="text-xs">설정됨</Badge> : <Badge variant="secondary" className="text-xs">미설정</Badge>}
             {hasWebKey && <Button size="sm" variant="ghost" className="h-7 text-xs text-destructive" onClick={() => void api.deleteWebApiKey(webProvider).then(() => { setHasWebKey(false); onSaved(); })}>삭제</Button>}
