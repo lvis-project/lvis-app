@@ -96,7 +96,7 @@
     "cmdk": "^1.1.1",
     "date-fns": "^4.1.0",
     "electron": "^41.2.0",
-    "electron-builder": "26.9.0",
+    "electron-builder": "26.10.0",
     "eruda": "^3.4.3",
     "esbuild": "^0.28.0",
     "jsdom": "^29.0.2",
