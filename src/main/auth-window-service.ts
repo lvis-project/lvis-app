@@ -16,7 +16,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { BrowserWindow, type Cookie, type Session, type WebContents } from "electron";
+import { BrowserWindow, session, type Cookie, type Session, type WebContents } from "electron";
 import { registerWindowEventListeners } from "../ipc/domains/window.js";
 import { markAsWindowControlOwned } from "../ipc/window-control-registry.js";
 import { markAsAuthOwned } from "./auth-window-registry.js";
@@ -98,6 +98,21 @@ export interface OpenAuthWindowOptions {
    * 네임스페이스 밖의 값을 거부한다 — plugin-runtime 참고.)
    */
   persistPartition?: string;
+  /**
+   * Whether the BrowserWindow is shown. `true` (default) shows the auth
+   * window so the user can interact with the IdP page. `false` keeps the
+   * window invisible — the page still loads, navigates, and emits the
+   * `did-navigate` events that drive `completionUrlPatterns`/cookie
+   * harvest, but it is never raised. Used by plugin warmups that depend
+   * on residual IdP cookies in `persistPartition` to silent-SSO with no
+   * user input. Caller MUST pair `show: false` with a finite `timeoutMs`
+   * so a hidden challenge page cannot hang invisibly.
+   *
+   * Mirrors `OpenAuthWindowBaseOptions.show` in `@lvis/plugin-sdk`.
+   *
+   * @default true
+   */
+  show?: boolean;
 }
 
 export interface OpenAuthWindowResult {
@@ -296,7 +311,16 @@ export async function openAuthWindow(
     windowTitle = "Login",
     persistPartition,
     returnFinalUrl = false,
+    show: showRequested = true,
   } = options;
+  // Silent warmups (show:false) MUST pair with an explicit timeoutMs so an
+  // invisible challenge page can't hang forever. Reject the combination
+  // early so the caller surface is unambiguous.
+  if (showRequested === false && options.timeoutMs === undefined) {
+    throw new Error(
+      "openAuthWindow: when show is false, timeoutMs is required (silent warmup must bound itself)",
+    );
+  }
 
   // timeoutMs 검증 — NaN / Infinity / 음수 / 과도하게 긴 값 모두 거부.
   // 기본 5분, 최대 30분 (manifest schema 와 동일한 상한).
@@ -361,6 +385,12 @@ export async function openAuthWindow(
     autoHideMenuBar: true,
     frame: process.platform !== "darwin" ? false : undefined,
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "hidden",
+    // Hidden warmup BrowserWindow — page still loads + harvests cookies +
+    // emits navigation events; never rendered to the user. Electron's
+    // default `show: true` produces the popup-flash when callers want
+    // silent SSO; explicit `show: false` suppresses both the initial
+    // raise and any later focus/raise from web content.
+    show: showRequested,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -369,7 +399,9 @@ export async function openAuthWindow(
       preload: authShellPreloadPath(),
     },
   });
-  centerAuthWindowOverParent(authWindow, parent);
+  // Centering only matters for visible windows; skip the geometry math
+  // when the caller asked for a hidden warmup.
+  if (showRequested) centerAuthWindowOverParent(authWindow, parent);
   if (typeof authWindow.setMenu === "function") authWindow.setMenu(null);
   markAsWindowControlOwned(authWindow.webContents);
   registerWindowEventListeners(authWindow);
@@ -601,4 +633,46 @@ function centerAuthWindowOverParent(authWindow: BrowserWindow, parent: BrowserWi
     Math.round(parentBounds.x + (parentBounds.width - authBounds.width) / 2),
     Math.round(parentBounds.y + (parentBounds.height - authBounds.height) / 2),
   );
+}
+
+/**
+ * Wipe all credential state from a persist partition — cookies, storage,
+ * cache, indexedDB, HTTP cache, auth cache, and the WebStorage stack.
+ * Used after a plugin's user-triggered sign-out so that subsequent
+ * `openAuthWindow` calls against the same partition cannot silently SSO
+ * via residual IdP cookies (`.lge.com`, `.microsoft.com`, etc.) the host
+ * Chromium still holds. Without this, plugin "sign out" only clears the
+ * plugin's in-memory + on-disk shadow state; the partition keeps the
+ * federated session alive and re-login proceeds with no challenge.
+ *
+ * The plugin-runtime layer (`plugin-runtime.ts`) validates the partition
+ * argument against the calling plugin's `persist:plugin-auth:<pluginId>`
+ * allow-list before calling this service. Direct host callers are
+ * responsible for their own scoping.
+ *
+ * The wipe runs in two passes: `clearStorageData()` for the broad
+ * cookie/storage/cache surface, then `clearAuthCache()` for HTTP-auth
+ * + NTLM/Kerberos credentials that `clearStorageData` does not touch.
+ */
+export async function clearAuthPartition(partition: string): Promise<void> {
+  if (typeof partition !== "string" || partition.length === 0) {
+    throw new Error("clearAuthPartition: partition must be a non-empty string");
+  }
+  const ses = session.fromPartition(partition);
+  await ses.clearStorageData({
+    storages: [
+      "cookies",
+      "filesystem",
+      "indexdb",
+      "localstorage",
+      "shadercache",
+      "websql",
+      "serviceworkers",
+      "cachestorage",
+    ],
+  });
+  await ses.clearCache();
+  if (typeof ses.clearAuthCache === "function") {
+    await ses.clearAuthCache();
+  }
 }
