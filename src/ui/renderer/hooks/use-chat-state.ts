@@ -32,6 +32,8 @@ import type { LvisApi } from "../types.js";
 export function useChatState(api: LvisApi) {
   const [entries, setEntries] = useState<ChatEntry[]>([]);
   const [streaming, setStreaming] = useState(false);
+  /** True while a pre-turn auto-compact (Layer 0 preflight) is running. */
+  const [isCompacting, setIsCompacting] = useState(false);
   const streamRef = useRef("");
   const thoughtRef = useRef("");
   const activeStreamIdRef = useRef<number | null>(null);
@@ -241,6 +243,9 @@ export function useChatState(api: LvisApi) {
         const { groupId, toolUseId, result, isError, uiPayload, durationMs } = ev;
         setEntries((p) => applyToolEnd(p, { groupId, toolUseId, result, isError, uiPayload, durationMs }));
       } else if (ev.type === "error") {
+        // Layer 2 compact may have started but thrown — clear the indicator
+        // so the StatusBar item doesn't stick when compact_notice never arrives.
+        setIsCompacting(false);
         setEntries((p) => {
           // Error during an overlay-trigger import turn: also close the
           // card's streaming indicator so the spinner doesn't hang
@@ -302,7 +307,13 @@ export function useChatState(api: LvisApi) {
             ...(ev.breakdown ? { breakdown: ev.breakdown } : {}),
           },
         ]);
+      } else if (ev.type === "compact_started") {
+        // Pre-turn auto-compact started — show a transient "자동 압축 중..." hint.
+        // Cleared when `compact_notice` (completion) arrives.
+        setIsCompacting(true);
       } else if (ev.type === "compact_notice") {
+        // Compact completed — clear the in-progress indicator.
+        setIsCompacting(false);
         // §457 PR-A: emit a structured `kind: "checkpoint"` entry instead of
         // a free-text system bubble. ChatView reads `tier` to pick a
         // tier-aware label/color. Keeping the old prose route would
@@ -353,6 +364,10 @@ export function useChatState(api: LvisApi) {
           ];
         });
       } else if (ev.type === "done") {
+        // Defensive clear — if compact started but compact_notice never
+        // arrived (engine error path swallowed the throw), this prevents
+        // the indicator from sticking forever.
+        setIsCompacting(false);
         if (debugStreamEnabled) {
           debugLog("stream", "done:enter", {
             accStream: streamRef.current.length,
@@ -679,6 +694,7 @@ export function useChatState(api: LvisApi) {
     entries,
     streaming,
     setStreaming,
+    isCompacting,
     beginStreamingRequest,
     finishStreamingRequest,
     editingEntryIdx,
