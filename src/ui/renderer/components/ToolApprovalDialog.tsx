@@ -188,12 +188,15 @@ export function ToolApprovalDialog({
                 {argsDisplay}
               </pre>
               {argsStr.length > 500 && (
-                <button
-                  className="px-3 pb-2 text-[11px] text-primary underline"
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-auto px-3 pb-2 pt-0 text-[11px] text-primary underline hover:bg-transparent"
                   onClick={() => setExpanded((v) => !v)}
                 >
                   {expanded ? "접기" : "모두 보기"}
-                </button>
+                </Button>
               )}
             </details>
           </div>
