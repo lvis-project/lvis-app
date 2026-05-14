@@ -116,6 +116,12 @@ if (app.isPackaged) {
       delete process.env[key];
     }
   }
+  // Force NODE_ENV=production in packaged builds so downstream gates
+  // (preload `__lvisDevMode`, dev IPC, auto-compact runtime override) read
+  // a reliable signal. Electron itself does not set NODE_ENV, so without
+  // this an internal QA build with `NODE_ENV=development` leaking into the
+  // env would expose dev affordances in shipped product.
+  process.env.NODE_ENV = "production";
 }
 
 // §17 C1: 사내망 Corporate CA 런타임 주입 — corp-ca-loader 사용 (정식 대응 완료).

@@ -135,7 +135,6 @@ export type AppSettings = {
   };
   /** Experimental feature flags — all default false. */
   features?: {
-    experimentalContinuousBackend?: boolean;
     idlePreferenceRefresh?: boolean;
   };
 };

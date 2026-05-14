@@ -109,11 +109,15 @@ export function App() {
   const [commandPopoverOpen, setCommandPopoverOpen] = useState(false);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
 
-  // Dev tools — Cmd/Ctrl+Shift+D toggles the floating panel. Bound regardless
-  // of NODE_ENV (production main process rejects the IPC anyway), but the
-  // toolbar indicator + dead-code elimination keep the panel hidden in
-  // production builds via `IS_DEV_MODE` guard in MainToolbar.
+  // Dev tools — Cmd/Ctrl+Shift+D toggles the floating panel.
+  // Listener is only bound in dev mode (`window.__lvisDevMode === true`) so
+  // packaged builds neither swallow the chord nor pay setState cost on every
+  // press. Main process strips dev IPC handlers when packaged, so even if a
+  // production build accidentally read true, the panel would render inert.
   useEffect(() => {
+    if ((window as unknown as { __lvisDevMode?: boolean }).__lvisDevMode !== true) {
+      return;
+    }
     const onKey = (e: KeyboardEvent) => {
       if (e.shiftKey && (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "d") {
         e.preventDefault();

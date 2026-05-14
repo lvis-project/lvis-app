@@ -72,11 +72,23 @@ export function DevToolsPanel({ api, open, onClose }: DevToolsPanelProps) {
     [api, refreshStatus],
   );
 
+  // Drag updates only the local display value — IPC fires on commit
+  // (pointer-up / keyboard release) so dragging the slider does not flood
+  // main with hundreds of round-trips. Radix Slider's `onValueCommit`
+  // delivers exactly one event per gesture.
   const handleSliderChange = useCallback(
     (next: number[]) => {
       const v = next[0];
       if (typeof v !== "number") return;
       setSliderValue(v);
+    },
+    [],
+  );
+
+  const handleSliderCommit = useCallback(
+    (next: number[]) => {
+      const v = next[0];
+      if (typeof v !== "number") return;
       void applyOverride(v);
     },
     [applyOverride],
@@ -122,6 +134,7 @@ export function DevToolsPanel({ api, open, onClose }: DevToolsPanelProps) {
           step={500}
           value={[sliderValue]}
           onValueChange={handleSliderChange}
+          onValueCommit={handleSliderCommit}
           aria-label="Preflight threshold"
         />
         <div className="flex items-center justify-between text-[10px] text-muted-foreground">

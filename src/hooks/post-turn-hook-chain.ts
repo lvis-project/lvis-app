@@ -109,22 +109,18 @@ export class PostTurnHookChain {
     //    Run before persistence so durable session history stores the same
     //    cleaned assistant output that the caller and renderer receive.
     let detector: DetectorResult = { cleanedText: ctx.output, newTitle: null, checkpointSuggested: false };
-    const continuousBackendEnabled =
-      this.deps.settingsService?.get("features")?.experimentalContinuousBackend ?? false;
-    if (continuousBackendEnabled) {
-      try {
-        detector = detectFromStream(ctx.output);
-        if (detector.checkpointSuggested) {
-          log.info(`detect-checkpoint: legacy [checkpoint] marker stripped for session ${ctx.sessionId}`);
-          try {
-            this.deps.onCheckpointSuggested?.(ctx.sessionId, detector.cleanedText);
-          } catch (cbErr) {
-            log.warn("onCheckpointSuggested callback failed: %s", cbErr);
-          }
+    try {
+      detector = detectFromStream(ctx.output);
+      if (detector.checkpointSuggested) {
+        log.info(`detect-checkpoint: legacy [checkpoint] marker stripped for session ${ctx.sessionId}`);
+        try {
+          this.deps.onCheckpointSuggested?.(ctx.sessionId, detector.cleanedText);
+        } catch (cbErr) {
+          log.warn("onCheckpointSuggested callback failed: %s", cbErr);
         }
-      } catch (err) {
-        log.warn("detect-checkpoint failed: %s", err);
       }
+    } catch (err) {
+      log.warn("detect-checkpoint failed: %s", err);
     }
     const outputForHooks = detector.cleanedText;
     const outputForPersistence =
@@ -172,32 +168,29 @@ export class PostTurnHookChain {
 
     // 5. §PR-3: Update Title — newTitle 있으면 session metadata 업데이트
     //    없으면 chainTitle LLM fallback (llmProvider 주입된 경우에만)
-    //    Skipped when experimentalContinuousBackend feature flag is OFF.
-    if (continuousBackendEnabled) {
-      try {
-        if (this.deps.memoryManager) {
-          let titleToStore: string | null = detector.newTitle;
+    try {
+      if (this.deps.memoryManager) {
+        let titleToStore: string | null = detector.newTitle;
 
-          // Load metadata once and reuse for both chainTitle input and saveSessionMetadata.
-          const sessionMeta = this.deps.memoryManager.loadSessionMetadata(ctx.sessionId) ?? {};
+        // Load metadata once and reuse for both chainTitle input and saveSessionMetadata.
+        const sessionMeta = this.deps.memoryManager.loadSessionMetadata(ctx.sessionId) ?? {};
 
-          if (!titleToStore && this.deps.llmProvider) {
-            // chainTitle fallback: 현재 세션 메타데이터에서 직접 제목 조회 (listSessions I/O 비용 회피)
-            const existingTitle = sessionMeta.title ?? `세션 ${ctx.sessionId.slice(0, 8)}`;
-            titleToStore = await chainTitle(this.deps.llmProvider, existingTitle, detector.cleanedText);
-          }
-
-          if (titleToStore) {
-            await this.deps.memoryManager.saveSessionMetadata(ctx.sessionId, {
-              ...sessionMeta,
-              title: titleToStore,
-            });
-            log.info(`update-title: session ${ctx.sessionId} title set to "${titleToStore}"`);
-          }
+        if (!titleToStore && this.deps.llmProvider) {
+          // chainTitle fallback: 현재 세션 메타데이터에서 직접 제목 조회 (listSessions I/O 비용 회피)
+          const existingTitle = sessionMeta.title ?? `세션 ${ctx.sessionId.slice(0, 8)}`;
+          titleToStore = await chainTitle(this.deps.llmProvider, existingTitle, detector.cleanedText);
         }
-      } catch (err) {
-        log.warn("update-title failed: %s", err);
+
+        if (titleToStore) {
+          await this.deps.memoryManager.saveSessionMetadata(ctx.sessionId, {
+            ...sessionMeta,
+            title: titleToStore,
+          });
+          log.info(`update-title: session ${ctx.sessionId} title set to "${titleToStore}"`);
+        }
       }
+    } catch (err) {
+      log.warn("update-title failed: %s", err);
     }
 
     // 6. Audit Log (§14.2)
