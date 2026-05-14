@@ -52,7 +52,10 @@ import { StarredStore } from "./data/starred-store.js";
 import { FeedbackStore } from "./data/feedback-store.js";
 import { McpGovernance } from "./mcp/mcp-governance.js";
 import { McpManager } from "./mcp/mcp-manager.js";
-import { openAuthWindow as openAuthWindowService } from "./main/auth-window-service.js";
+import {
+  openAuthWindow as openAuthWindowService,
+  clearAuthPartition as clearAuthPartitionService,
+} from "./main/auth-window-service.js";
 import { openLinkWindow as openLinkWindowService } from "./main/link-window-service.js";
 import { openAuthPartitionViewer as openAuthPartitionViewerService } from "./main/auth-partition-viewer-service.js";
 import { shell } from "electron";
@@ -220,6 +223,7 @@ export async function bootstrap(
     openAuthWindowService,
     openLinkWindowService,
     openAuthPartitionViewerService: (_parent, opts) => openAuthPartitionViewerService(opts),
+    clearAuthPartitionService,
     shellOpenExternal: (url: string) => shell.openExternal(url),
     approvalGate,
   });
