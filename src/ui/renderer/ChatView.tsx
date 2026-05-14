@@ -909,11 +909,15 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
                     {/* §PR-5: hide mutating actions in view-mode (read-only slice) */}
                     {!viewMode && (
                       <div className="absolute right-2 top-2 hidden gap-1 group-hover:flex bg-message-user/95 rounded">
-                        <button className="rounded p-0.5 hover:bg-[hsl(var(--hover-overlay)/0.2)]" title="편집" onClick={() => setEditingEntryIdx(idx)}><Pencil className="h-3 w-3" /></button>
-                        <button className="rounded p-0.5 hover:bg-[hsl(var(--hover-overlay)/0.2)]" title="분기" onClick={() => void onFork(idx)}><GitBranch className="h-3 w-3" /></button>
-                        <button className="rounded p-0.5 hover:bg-[hsl(var(--hover-overlay)/0.2)]" title="즐겨찾기" onClick={() => void onToggleStar(idx)}>
+                        <Button type="button" variant="ghost" size="icon-xs" title="편집" onClick={() => setEditingEntryIdx(idx)}>
+                          <Pencil className="h-3 w-3" />
+                        </Button>
+                        <Button type="button" variant="ghost" size="icon-xs" title="분기" onClick={() => void onFork(idx)}>
+                          <GitBranch className="h-3 w-3" />
+                        </Button>
+                        <Button type="button" variant="ghost" size="icon-xs" title="즐겨찾기" onClick={() => void onToggleStar(idx)}>
                           <Star key={starActive ? "on" : "off"} className={`h-3 w-3 ${starActive ? "fill-emphasis text-emphasis lvis-anim-star" : ""}`} />
-                        </button>
+                        </Button>
                       </div>
                     )}
                     <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{searchHighlight ? highlightText(entry.text, searchHighlight) : entry.text}</div>
@@ -931,7 +935,15 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             }
 
             if (entry.kind === "system") {
-              rendered.push(<div key={idx} className="mx-auto text-center text-xs text-muted-foreground py-1 px-3 rounded-full bg-muted/50">{entry.text}</div>);
+              rendered.push(
+                <div
+                  key={idx}
+                  data-testid="system-entry"
+                  className="mx-auto text-center text-xs text-muted-foreground py-1 px-3 rounded-full bg-muted/50"
+                >
+                  {entry.text}
+                </div>,
+              );
               i++;
               continue;
             }
@@ -1395,7 +1407,13 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
               })();
             }}
             streaming={streaming}
-            disabled={hasApiKey === false || contextOverflowPct >= 0.95 || viewMode !== null}
+            disabled={
+              // Slash commands (e.g. /compact) bypass the context-overflow gate
+              // so the user can escape a fully-blocked input even while the
+              // "자동 압축이 필요합니다" banner is showing.
+              (hasApiKey === false || contextOverflowPct >= 0.95 || viewMode !== null) &&
+              !question.trimStart().startsWith("/")
+            }
             onWarning={(msg) => console.warn(msg)}
             placeholder={
               hasApiKey === false

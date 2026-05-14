@@ -1,6 +1,16 @@
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
 import { Input } from "../../../components/ui/input.js";
+import { Label } from "../../../components/ui/label.js";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../../../components/ui/select.js";
+import { Slider } from "../../../components/ui/slider.js";
+import { Switch } from "../../../components/ui/switch.js";
 import { REASONING_EFFORT_STEPS, VENDORS, budgetToEffortIndex } from "../constants.js";
 import type { LvisApi } from "../types.js";
 
@@ -68,23 +78,23 @@ export function LlmTab(props: LlmTabProps) {
   return (
     <div className="space-y-4 pt-4">
       <div className="space-y-2">
-        <label className="text-sm font-medium" htmlFor="vendor-select">벤더</label>
-        <select
-          id="vendor-select"
-          className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-          value={vendor}
-          onChange={(e) => setVendor(e.target.value)}
-        >
-          {VENDORS.map((v) => (
-            <option key={v.id} value={v.id}>{v.label}</option>
-          ))}
-        </select>
+        <Label htmlFor="vendor-select">벤더</Label>
+        <Select value={vendor} onValueChange={setVendor}>
+          <SelectTrigger id="vendor-select" className="w-full">
+            <SelectValue placeholder="벤더 선택" />
+          </SelectTrigger>
+          <SelectContent>
+            {VENDORS.map((v) => (
+              <SelectItem key={v.id} value={v.id}>{v.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
       {vendor !== "vertex-ai" && (vendorInfo.needsBaseUrl || vendor === "openai" || vendor === "copilot") && (
         <div className="space-y-2">
-          <label className="text-sm font-medium">
+          <Label className="text-sm font-medium">
             Endpoint (baseUrl){vendorInfo.needsBaseUrl ? " *" : " (선택)"}
-          </label>
+          </Label>
           <Input
             value={baseUrl}
             onChange={(e) => setBaseUrl(e.target.value)}
@@ -112,7 +122,7 @@ export function LlmTab(props: LlmTabProps) {
             API 키는 사용하지 않으며, <code>GOOGLE_APPLICATION_CREDENTIALS</code> 환경 변수로 서비스 계정 JSON 경로를 지정할 수 있습니다.
           </p>
           <div className="space-y-1">
-            <label className="text-xs text-muted-foreground">GCP Project ID *</label>
+            <Label className="text-xs text-muted-foreground">GCP Project ID *</Label>
             <Input
               value={vertexProject}
               onChange={(e) => setVertexProject(e.target.value)}
@@ -120,7 +130,7 @@ export function LlmTab(props: LlmTabProps) {
             />
           </div>
           <div className="space-y-1">
-            <label className="text-xs text-muted-foreground">Location (region) — 선택</label>
+            <Label className="text-xs text-muted-foreground">Location (region) — 선택</Label>
             <Input
               value={vertexLocation}
               onChange={(e) => setVertexLocation(e.target.value)}
@@ -131,7 +141,7 @@ export function LlmTab(props: LlmTabProps) {
       )}
       {vendor !== "vertex-ai" && (
         <div className="space-y-2">
-          <label className="text-sm font-medium">{vendorInfo.label} API 키</label>
+          <Label className="text-sm font-medium">{vendorInfo.label} API 키</Label>
           <div className="flex items-center gap-2">
             {hasKey ? <Badge variant="default" className="text-xs">설정됨</Badge> : <Badge variant="secondary" className="text-xs">미설정</Badge>}
             {hasKey && <Button size="sm" variant="ghost" className="h-7 text-xs text-destructive" onClick={() => void api.deleteApiKey(vendor).then(() => { setHasKey(false); onSaved(); })}>삭제</Button>}
@@ -139,34 +149,36 @@ export function LlmTab(props: LlmTabProps) {
           <Input type="password" placeholder={hasKey ? "새 키로 교체" : vendorInfo.placeholder} value={keyInput} onChange={(e) => setKeyInput(e.target.value)} />
         </div>
       )}
-      <div className="space-y-2"><label className="text-sm font-medium">모델</label><Input data-testid="llm-model-input" value={model} onChange={(e) => setModel(e.target.value)} placeholder={vendorInfo.defaultModel} /></div>
+      <div className="space-y-2"><Label className="text-sm font-medium">모델</Label><Input data-testid="llm-model-input" value={model} onChange={(e) => setModel(e.target.value)} placeholder={vendorInfo.defaultModel} /></div>
       <div className="space-y-2 rounded-md border p-3">
-        <label className="flex items-center justify-between text-sm font-medium">
+        <Label className="flex items-center justify-between text-sm font-medium">
           <span>Extended Thinking / Reasoning</span>
-          <input type="checkbox" className="h-4 w-4" checked={enableThinking} onChange={(e) => setEnableThinking(e.target.checked)} />
-        </label>
+          <Switch
+            checked={enableThinking}
+            onCheckedChange={setEnableThinking}
+            aria-label="Extended Thinking / Reasoning"
+          />
+        </Label>
         <p className="text-[11px] text-muted-foreground">모델 내부 추론 과정을 스트리밍으로 표시합니다. Claude는 명시 활성화(Sonnet 4.5+/Opus 4+), OpenAI o-계열·gpt-5는 Responses API 자동, Gemini 2.0+는 모델 지원 시 자동.</p>
         {enableThinking && (
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <label className="text-xs text-muted-foreground">Reasoning Effort</label>
+              <Label className="text-xs text-muted-foreground">Reasoning Effort</Label>
               <span className="text-xs font-medium tabular-nums">
                 {REASONING_EFFORT_STEPS[budgetToEffortIndex(thinkingBudget)]!.label}
                 <span className="ml-2 text-muted-foreground">· {thinkingBudget.toLocaleString()} tokens</span>
               </span>
             </div>
-            <input
-              type="range"
+            <Slider
               min={0}
               max={REASONING_EFFORT_STEPS.length - 1}
               step={1}
-              value={budgetToEffortIndex(thinkingBudget)}
-              onChange={(e) =>
+              value={[budgetToEffortIndex(thinkingBudget)]}
+              onValueChange={([value]) =>
                 setThinkingBudget(
-                  REASONING_EFFORT_STEPS[Number(e.target.value)]!.budget,
+                  REASONING_EFFORT_STEPS[value ?? 0]!.budget,
                 )
               }
-              className="w-full accent-primary"
               aria-label="Reasoning effort"
             />
             <div className="flex justify-between text-[10px] text-muted-foreground">
@@ -181,30 +193,35 @@ export function LlmTab(props: LlmTabProps) {
         )}
       </div>
       <div className="space-y-2 rounded-md border" data-testid="fallback-chain-section">
-        <button
+        <Button
           type="button"
-          className="flex w-full items-center justify-between px-3 py-2 text-sm font-medium"
+          variant="ghost"
+          className="h-auto w-full justify-between rounded-none px-3 py-2 text-sm font-medium"
           onClick={() => setFallbackOpen((o) => !o)}
         >
           <span>장애 복구 (Fallback Chain)</span>
           <span className="text-muted-foreground">{fallbackOpen ? "▲" : "▼"}</span>
-        </button>
+        </Button>
         {fallbackOpen && (
           <div className="space-y-2 px-3 pb-3">
             <p className="text-[11px] text-muted-foreground">첫 응답이 1초 안에 오지 않거나 5xx/429/네트워크 오류가 나면 같은 모델을 5회 시도한 뒤 순서대로 전환할 벤더·모델 목록입니다.</p>
             {fallbackChain.map((entry, idx) => (
               <div key={idx} className="flex gap-2">
-                <select
-                  className="flex h-8 rounded-md border border-input bg-background px-2 text-xs"
+                <Select
                   value={entry.provider}
-                  onChange={(e) => {
+                  onValueChange={(value) => {
                     const next = [...fallbackChain];
-                    next[idx] = { ...next[idx]!, provider: e.target.value };
+                    next[idx] = { ...next[idx]!, provider: value };
                     setFallbackChain(next);
                   }}
                 >
-                  {VENDORS.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
-                </select>
+                  <SelectTrigger className="w-36 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {VENDORS.map((v) => <SelectItem key={v.id} value={v.id}>{v.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
                 <Input
                   className="h-8 text-xs"
                   value={entry.model}

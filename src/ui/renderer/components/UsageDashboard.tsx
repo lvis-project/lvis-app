@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { Button } from "../../../components/ui/button.js";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui/card.js";
+import { Input } from "../../../components/ui/input.js";
 import { formatCost, formatTokens } from "../utils/cost-format.js";
 import type { LvisApi, UsageSummaryShape, UsageTrendPt } from "../types.js";
 import { Sparkline } from "./Sparkline.js";
@@ -98,9 +99,9 @@ export function UsageDashboard({ api }: { api: LvisApi }) {
         </CardHeader>
         {preset === "custom" && (
           <CardContent className="px-3 pb-3 flex gap-2 items-center">
-            <input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} className="border rounded px-2 py-1 text-xs" aria-label="시작일" />
+            <Input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} className="h-7 w-auto px-2 py-1 text-xs" aria-label="시작일" />
             <span className="text-xs text-muted-foreground">~</span>
-            <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} className="border rounded px-2 py-1 text-xs" aria-label="종료일" />
+            <Input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} className="h-7 w-auto px-2 py-1 text-xs" aria-label="종료일" />
             <Button size="sm" onClick={load} className="h-6 px-2 text-[11px]">조회</Button>
           </CardContent>
         )}
