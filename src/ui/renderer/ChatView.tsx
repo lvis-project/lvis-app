@@ -627,24 +627,57 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     messageQueueStore.clear();
   }, [currentSessionId, messageQueueStore]);
 
-  // Stage 5: streaming 종료 시 자연 인입 — 큐에 남은 항목이 있으면 다음 turn
-  // 으로 inject. brake-point 정의: streaming true → false 전이 (turn 종료).
-  // Per-tool-result mid-stream inject 는 더 정교한 conversation-loop hook
-  // 필요 — 후속 PR 에서 처리. 우선은 end-of-stream 으로 minimal viable.
+  // Stage 5c: 자연 인입 (true mid-turn brake-point) — 엔진의 onGuide
+  // (round-boundary inject) 메커니즘 위임. tool_end event 발생 시 큐 dump:
+  // 엔진이 다음 assistant round 시작 직전에 user message 로 합류시킴.
+  // 이전 implementation (streaming false 전이 시 onAsk = abort+restart) 의
+  // 한계 — 매 turn 종료까지 기다림 — 해소. spec §"메세지 큐 시맨틱" 의
+  // brake-point 정의 ("tool result 도착 직후 = 다음 assistant 호출 직전")
+  // 와 동일.
+  //
+  // streaming false 전이는 fallback (tool-less turn — LLM 이 도구 안 쓰고
+  // 직접 텍스트만 응답한 경우) 으로 유지. tool_end 가 없으니 turn 끝에
+  // onGuide 호출.
+  //
+  // onGuide 가 fail (queue-full / too-long / no-active-turn) 하면 큐에
+  // 다시 추가 — 다음 brake-point 에 retry. 중복 inject 방지.
+  const flushQueueViaGuide = useCallback(() => {
+    if (messageQueueStore.size() === 0) return;
+    const taken = messageQueueStore.takeAll();
+    if (taken.length === 0) return;
+    const formatted = formatQueueInject(taken);
+    void (async () => {
+      const result = await onGuide(formatted);
+      if (result?.ok !== true) {
+        // 실패 — 항목 보존 (retry 가능). add() throw 시 (cap 재초과) 무시.
+        for (const item of taken) {
+          try {
+            messageQueueStore.add(item.text);
+          } catch (err) {
+            console.warn("[message-queue] re-add after guide failure failed:", (err as Error).message);
+          }
+        }
+      }
+    })();
+  }, [messageQueueStore, onGuide]);
+
+  useEffect(() => {
+    const unsub = api.onChatStream((ev) => {
+      if (ev.type === "tool_end") flushQueueViaGuide();
+    });
+    return unsub;
+  }, [api, flushQueueViaGuide]);
+
   const prevStreamingRef = useRef(false);
   useEffect(() => {
     const wasStreaming = prevStreamingRef.current;
     prevStreamingRef.current = streaming;
-    if (wasStreaming && !streaming && messageQueueStore.size() > 0) {
-      const taken = messageQueueStore.takeAll();
-      if (taken.length > 0) {
-        // formatQueueInject 결과 = 0 항목엔 "" (위 size() > 0 가드로 도달 X),
-        // 1 항목은 항목 자체, 2+ 는 wrap
-        const formatted = formatQueueInject(taken);
-        void onAsk(formatted, { inputOrigin: "user-keyboard", token: "" });
-      }
+    if (wasStreaming && !streaming) {
+      // tool-less turn fallback — tool_end 가 없었으면 여기서 inject.
+      // tool 있는 turn 은 이미 위 핸들러가 비웠으니 store.size() === 0.
+      flushQueueViaGuide();
     }
-  }, [streaming, messageQueueStore, onAsk]);
+  }, [streaming, flushQueueViaGuide]);
 
   // Stage 5: composer Enter morph — busy = queue.add, idle = onAsk 직행.
   // ⌘⏎ = 즉시 주입 (LLM abort + 큐 selected + 현재 입력).
@@ -1573,7 +1606,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
               hasApiKey === false
                 ? "API 키를 먼저 설정해 주세요..."
                 : streaming
-                  ? "메세지 큐에 추가됩니다 (즉시 인터럽트는 ⌘⏎)"
+                  ? "메시지 큐에 추가됩니다 (즉시 인터럽트는 ⌘⏎)"
                   : "질문 입력 (Enter 전송 · Cmd/Ctrl+V 첨부) · /command 사용 가능"
             }
           />

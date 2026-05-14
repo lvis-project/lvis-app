@@ -1,7 +1,7 @@
 /**
  * MessageQueueStore 단위 테스트.
  *
- * Spec: docs/blueprints/composer-redesign-message-queue.md (메세지 큐 시맨틱)
+ * Spec: docs/blueprints/composer-redesign-message-queue.md (메시지 큐 시맨틱)
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

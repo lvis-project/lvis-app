@@ -133,7 +133,7 @@
 <body>
   <h1>LVIS Composer mockup v6 — 환경 컨트롤(top) vs Turn 컨트롤(bottom)</h1>
   <p class="subtitle-top">
-    피드백: status chip 제거 (ScrollArea 의 ReasoningCard 가 표시), 권한·메세지 큐 권한 → top row 의 첨부와 페르소나 사이, TokenRing → bottom row 맨 앞, 그 다음 가이드 + 단축키. 큐 명칭 = "메세지 큐".
+    피드백: status chip 제거 (ScrollArea 의 ReasoningCard 가 표시), 권한·메시지 큐 권한 → top row 의 첨부와 페르소나 사이, TokenRing → bottom row 맨 앞, 그 다음 가이드 + 단축키. 큐 명칭 = "메시지 큐".
   </p>
 
   <!-- ─────────────────────────── Scenario 1: idle ─────────────────────────── -->
@@ -192,7 +192,7 @@
   </div>
 
   <!-- ─────────────────────────── Scenario 2: LLM 응답 중 ─────────────────────────── -->
-  <div class="scenario-title"><span class="num">2</span><h3>LLM 응답 중 (메세지 큐 비어 있음)</h3><span class="tag">취소 가능</span></div>
+  <div class="scenario-title"><span class="num">2</span><h3>LLM 응답 중 (메시지 큐 비어 있음)</h3><span class="tag">취소 가능</span></div>
   <div class="scenario">
     <div class="app-shell">
       <div class="scroll-area">
@@ -214,7 +214,7 @@
         </div>
         <div class="composer">
           <div class="input-bar">
-            <textarea placeholder="끼어들 메시지 입력... (⏎ 메세지 큐에 추가)"></textarea>
+            <textarea placeholder="끼어들 메시지 입력... (⏎ 메시지 큐에 추가)"></textarea>
           </div>
         </div>
         <div class="bottom-row">
@@ -226,7 +226,7 @@
           </div>
           <div class="cluster actions">
             <button class="cancel-btn"><span class="anno">G</span>esc 취소</button>
-            <button class="send-btn"><span class="icon-up"></span> 메세지 큐에 추가 <kbd>⏎</kbd></button>
+            <button class="send-btn"><span class="icon-up"></span> 메시지 큐에 추가 <kbd>⏎</kbd></button>
           </div>
         </div>
       </div>
@@ -235,15 +235,15 @@
       <h4>변화 (idle 대비)</h4>
       <ol>
         <li><span class="anno-marker">F</span><b>⌘⏎ 즉시 주입 hint</b> 추가 (busy 시만)</li>
-        <li><span class="anno-marker">G</span><b>[esc 취소]</b> 등장 — actions cluster, Send 왼쪽. ESC 단축키 동일 액션 (LLM abort, 메세지 큐 보존)</li>
-        <li>Send 버튼 라벨: <code>전송</code> → <code>메세지 큐에 추가</code></li>
+        <li><span class="anno-marker">G</span><b>[esc 취소]</b> 등장 — actions cluster, Send 왼쪽. ESC 단축키 동일 액션 (LLM abort, 메시지 큐 보존)</li>
+        <li>Send 버튼 라벨: <code>전송</code> → <code>메시지 큐에 추가</code></li>
         <li>status (응답 작성 중 등) 는 ScrollArea 의 ReasoningCard 가 담당 — bottom row 에 중복 표시 없음</li>
       </ol>
     </div>
   </div>
 
   <!-- ─────────────────────────── Scenario 3: 모든 영역 동시 ─────────────────────────── -->
-  <div class="scenario-title"><span class="num">3</span><h3>최대 노출 — TODO + 메세지 큐 + 권한 승인 + busy</h3></div>
+  <div class="scenario-title"><span class="num">3</span><h3>최대 노출 — TODO + 메시지 큐 + 권한 승인 + busy</h3></div>
   <div class="scenario">
     <div class="app-shell">
       <div class="scroll-area" style="min-height: 50px;">
@@ -260,7 +260,7 @@
           </div>
         </div>
         <div class="panel-msgqueue">
-          <div class="head"><span style="color: var(--text-muted);">▾</span><span class="title">메세지 큐</span><span class="badge">3</span><span class="meta">· <span style="color: var(--accent);">2 선택</span> (⌘⏎ 대상)</span></div>
+          <div class="head"><span style="color: var(--text-muted);">▾</span><span class="title">메시지 큐</span><span class="badge">3</span><span class="meta">· <span style="color: var(--accent);">2 선택</span> (⌘⏎ 대상)</span></div>
           <div class="items">
             <div class="q-row sel">
               <span class="checkbox"></span>
@@ -310,7 +310,7 @@
           </div>
           <div class="cluster actions">
             <button class="cancel-btn">esc 취소</button>
-            <button class="send-btn"><span class="icon-up"></span> 메세지 큐에 추가 <kbd>⏎</kbd></button>
+            <button class="send-btn"><span class="icon-up"></span> 메시지 큐에 추가 <kbd>⏎</kbd></button>
           </div>
         </div>
       </div>
@@ -319,7 +319,7 @@
       <h4>최대 노출</h4>
       <ol>
         <li><span class="anno-marker">H</span><b>큐 권한 승인 chip</b> — top row trailing, perm-badge 와 페르소나 사이. 권한 승인 대기 N 개 노출, 클릭 = DeferredQueueDialog</li>
-        <li>위→아래: SessionTodoPanel → 메세지 큐 패널 → top-row → textarea → bottom-row</li>
+        <li>위→아래: SessionTodoPanel → 메시지 큐 패널 → top-row → textarea → bottom-row</li>
         <li>좁은 화면: bottom-row 가 wrap (info cluster 가 줄바꿈, actions 는 항상 한 줄)</li>
       </ol>
     </div>
@@ -338,8 +338,8 @@
     <tbody>
       <tr style="background: var(--panel-2);"><td colspan="3" style="padding: 8px; color: var(--text-dim); font-weight: 600;">SessionTodoPanel (warning)</td></tr>
       <tr style="border-bottom: 1px solid var(--border);"><td style="padding: 6px 8px;">최상단</td><td style="padding: 6px 8px;">할 일 list</td><td style="padding: 6px 8px;">TODO 있을 때</td></tr>
-      <tr style="background: var(--panel-2);"><td colspan="3" style="padding: 8px; color: var(--text-dim); font-weight: 600;">메세지 큐 패널 (info, 신규)</td></tr>
-      <tr style="border-bottom: 1px solid var(--border);"><td style="padding: 6px 8px;">TODO 다음</td><td style="padding: 6px 8px;">메세지 큐 list (체크박스 + text + [↑ 즉시] + [✕])</td><td style="padding: 6px 8px;">큐 항목 있을 때</td></tr>
+      <tr style="background: var(--panel-2);"><td colspan="3" style="padding: 8px; color: var(--text-dim); font-weight: 600;">메시지 큐 패널 (info, 신규)</td></tr>
+      <tr style="border-bottom: 1px solid var(--border);"><td style="padding: 6px 8px;">TODO 다음</td><td style="padding: 6px 8px;">메시지 큐 list (체크박스 + text + [↑ 즉시] + [✕])</td><td style="padding: 6px 8px;">큐 항목 있을 때</td></tr>
       <tr style="background: var(--panel-2);"><td colspan="3" style="padding: 8px; color: var(--text-dim); font-weight: 600;">TOP ROW — 환경 컨트롤</td></tr>
       <tr style="border-bottom: 1px solid var(--border);"><td style="padding: 6px 8px;">좌</td><td style="padding: 6px 8px;">[🔴 알림] [/ 명령어] [⊞ 플러그인]</td><td style="padding: 6px 8px;">항상</td></tr>
       <tr style="border-bottom: 1px solid var(--border);"><td style="padding: 6px 8px;">우</td><td style="padding: 6px 8px;"><b>[📎 첨부] [● 권한] [승인 대기 N] [👤 페르소나] [☐ Thinking]</b></td><td style="padding: 6px 8px;">권한/페르소나/Thinking 항상, 승인 chip 은 대기 시만</td></tr>
@@ -347,7 +347,7 @@
       <tr style="border-bottom: 1px solid var(--border);"><td style="padding: 6px 8px;">전체 폭</td><td style="padding: 6px 8px;">textarea만 (min 2줄, max 6줄 후 scroll)</td><td style="padding: 6px 8px;">항상</td></tr>
       <tr style="background: var(--panel-2);"><td colspan="3" style="padding: 8px; color: var(--text-dim); font-weight: 600;">BOTTOM ROW — Turn 컨트롤 (2 cluster)</td></tr>
       <tr style="border-bottom: 1px solid var(--border);"><td style="padding: 6px 8px;">좌 (info, grow)</td><td style="padding: 6px 8px;"><b>[○ TokenRing $] [? 가이드 ⌘K] [⇧⏎ 줄바꿈] [⌘⏎ 즉시]</b></td><td style="padding: 6px 8px;">⌘⏎ 만 busy 시 노출</td></tr>
-      <tr><td style="padding: 6px 8px;">우 (actions)</td><td style="padding: 6px 8px;">[esc 취소] [↑ 전송 / 메세지 큐에 추가 ⏎]</td><td style="padding: 6px 8px;">취소는 LLM busy 시만</td></tr>
+      <tr><td style="padding: 6px 8px;">우 (actions)</td><td style="padding: 6px 8px;">[esc 취소] [↑ 전송 / 메시지 큐에 추가 ⏎]</td><td style="padding: 6px 8px;">취소는 LLM busy 시만</td></tr>
     </tbody>
   </table>
 
@@ -356,7 +356,7 @@
     <li><b>inline-status chip 제거</b> — ScrollArea 의 ReasoningCard 가 status 담당 (중복 제거)</li>
     <li><b>권한 + 권한 큐 승인 → TOP ROW 이전</b> — 첨부와 페르소나 사이. TOP = "환경 컨트롤" / BOTTOM = "Turn 컨트롤" 의미 분리</li>
     <li><b>BOTTOM ROW 좌측 순서</b>: TokenRing → 가이드 → 단축키 → (즉시) → grow → 취소 → 전송</li>
-    <li><b>메세지 큐 명칭</b> — "큐" → "메세지 큐" (권한 큐와 구분)</li>
+    <li><b>메시지 큐 명칭</b> — "큐" → "메시지 큐" (권한 큐와 구분)</li>
     <li><b>BOTTOM ROW 가 2 cluster</b> (info+actions) 로 단순화 — 3 cluster 였던 v5 의 state cluster 가 권한/승인 → top row 로 이전 + status 제거 → 사라짐</li>
   </ul>
 

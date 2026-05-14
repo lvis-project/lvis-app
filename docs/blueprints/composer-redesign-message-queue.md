@@ -6,7 +6,7 @@
 
 ## Goal
 
-채팅영역 입력 부 (composer) 를 사용자가 정의한 v6 layout 으로 재정비하고, 동시에 LLM busy 도중 사용자 입력을 큐잉/주입할 수 있는 **메세지 큐 시스템** 을 도입한다.
+채팅영역 입력 부 (composer) 를 사용자가 정의한 v6 layout 으로 재정비하고, 동시에 LLM busy 도중 사용자 입력을 큐잉/주입할 수 있는 **메시지 큐 시스템** 을 도입한다.
 
 기존 문제:
 - composer textarea 가 과도하게 큼 (multi-line 큰 박스)
@@ -48,7 +48,7 @@ MIDDLE — Composer (textarea ONLY)
   ↓
 BOTTOM ROW (Turn 컨트롤, 2 cluster — NEW)
   좌 (info, grow): [○ TokenRing $] [? 가이드 ⌘K] [⇧⏎ 줄바꿈] [⌘⏎ 즉시]
-  우 (actions):    [esc 취소] [↑ 전송 / 메세지 큐에 추가 ⏎]
+  우 (actions):    [esc 취소] [↑ 전송 / 메시지 큐에 추가 ⏎]
 ```
 
 ### 의미 분리
@@ -61,12 +61,12 @@ BOTTOM ROW (Turn 컨트롤, 2 cluster — NEW)
 
 - **warning** (`#f0b042`) — SessionTodoPanel + PermissionModeBadge
 - **info** (`#4aa9e8`) — MessageQueuePanel + DeferredApprovalChip (큐 권한 승인)
-- **accent** (`#6c5ce7`) — Send 버튼 + 메세지 큐 선택 항목 + ⌘⏎ 즉시
+- **accent** (`#6c5ce7`) — Send 버튼 + 메시지 큐 선택 항목 + ⌘⏎ 즉시
 - **soft-danger** (`#e57373`) — esc 취소 버튼
 
-## 메세지 큐 시맨틱
+## 메시지 큐 시맨틱
 
-**핵심 개념**: 메세지 큐는 **TODO 가 아니다**. 완료/진행중/대기 단계 X. 단순 주입 후보 풀.
+**핵심 개념**: 메시지 큐는 **TODO 가 아니다**. 완료/진행중/대기 단계 X. 단순 주입 후보 풀.
 
 ### 3 가지 LLM-busy 상태별 동작
 
@@ -103,7 +103,7 @@ BOTTOM ROW (Turn 컨트롤, 2 cluster — NEW)
 
 | 키 | idle | LLM busy |
 |---|---|---|
-| `⏎` Enter | 전송 → LLM 직행 | 메세지 큐에 추가 |
+| `⏎` Enter | 전송 → LLM 직행 | 메시지 큐에 추가 |
 | `⌘⏎` Cmd+Enter | (동작 동일 — 전송) | 즉시 주입 (LLM abort + 선택+입력 inject) |
 | `⇧⏎` Shift+Enter | 줄바꿈 | 줄바꿈 |
 | `ESC` | (모달 닫기 또는 무동작) | LLM 취소 (큐 보존) |
@@ -113,7 +113,7 @@ BOTTOM ROW (Turn 컨트롤, 2 cluster — NEW)
 
 | 키 | 표시 위치 | 표시 형식 | 조건 |
 |---|---|---|---|
-| `⏎` | Send 버튼 안 | `↑ 전송 ⏎` / `↑ 메세지 큐에 추가 ⏎` | 항상 |
+| `⏎` | Send 버튼 안 | `↑ 전송 ⏎` / `↑ 메시지 큐에 추가 ⏎` | 항상 |
 | `⇧⏎` | BOTTOM ROW info cluster | `⇧⏎ 줄바꿈` | 항상 |
 | `⌘⏎` | BOTTOM ROW info cluster (⇧⏎ 옆) | `⌘⏎ 즉시` | LLM busy 시만 |
 | `⌘K` | 가이드 ghost button 안 | `? 가이드 ⌘K` | 항상 |
@@ -122,7 +122,7 @@ BOTTOM ROW (Turn 컨트롤, 2 cluster — NEW)
 ### ESC 우선순위
 
 1. 모달 (Dialog) 열려 있으면 → 모달 닫기
-2. 메세지 큐에 선택된 항목 있으면 → 선택 해제 만 (LLM 안 건드림)
+2. 메시지 큐에 선택된 항목 있으면 → 선택 해제 만 (LLM 안 건드림)
 3. LLM busy 면 → LLM abort (큐 보존)
 4. idle 이면 → 무동작
 
@@ -163,7 +163,7 @@ BOTTOM ROW (Turn 컨트롤, 2 cluster — NEW)
 
 | 파일 / 영역 | 이유 |
 |---|---|
-| `src/ui/renderer/components/ApprovalQueueStatus.tsx` (floating) | 메세지 큐 in-flow 패널이 대체 |
+| `src/ui/renderer/components/ApprovalQueueStatus.tsx` (floating) | 메시지 큐 in-flow 패널이 대체 |
 
 ## 구현 단계 (PR 분할)
 
@@ -186,7 +186,7 @@ BOTTOM ROW (Turn 컨트롤, 2 cluster — NEW)
 | 큐 잔존으로 다음 turn 에 의도치 않은 inject | turn 종료 시 자동 비우기 (위 "큐 비우기 시점" 참조) |
 | 모바일 / 좁은 화면 wrap 깨짐 | BOTTOM ROW info cluster 가 먼저 wrap (actions 는 한 줄 유지) — flex-wrap CSS 로 |
 | ESC 가 기존 모달 닫기와 경합 | ESC 우선순위 1=모달, 2=큐 선택 해제, 3=LLM 취소 |
-| Plugin 이 메세지 큐 직접 read/write 시도 | host API 미노출. 큐 = host-only state. plugin 은 hostApi.cancel() 정도만 (있다면) |
+| Plugin 이 메시지 큐 직접 read/write 시도 | host API 미노출. 큐 = host-only state. plugin 은 hostApi.cancel() 정도만 (있다면) |
 
 ## Out of scope (별도 PR)
 

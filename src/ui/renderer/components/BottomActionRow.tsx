@@ -8,9 +8,9 @@
  *     [○ TokenRing $] [? 가이드 ⌘K] [⇧⏎ 줄바꿈] [⌘⏎ 즉시(busy)]
  *
  *   actions cluster (우):
- *     [esc 취소(busy)] [↑ 전송/메세지 큐에 추가 ⏎]
+ *     [esc 취소(busy)] [↑ 전송/메시지 큐에 추가 ⏎]
  *
- * Send 버튼 라벨은 isBusy 따라 morph: idle="전송" / busy="메세지 큐에 추가".
+ * Send 버튼 라벨은 isBusy 따라 morph: idle="전송" / busy="메시지 큐에 추가".
  *
  * Spec: docs/blueprints/composer-redesign-message-queue.md
  */
@@ -100,7 +100,7 @@ export function BottomActionRow({
           className="inline-flex h-7 items-center gap-1.5 px-3 text-xs font-semibold"
         >
           <ArrowUp className="h-3 w-3" />
-          <span>{isBusy ? "메세지 큐에 추가" : "전송"}</span>
+          <span>{isBusy ? "메시지 큐에 추가" : "전송"}</span>
           <KbdInverse>⏎</KbdInverse>
         </Button>
       </div>

@@ -61,7 +61,7 @@ export function MessageQueuePanel({ store, onSendNow }: MessageQueuePanelProps) 
           <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
         )}
         <MessageSquarePlus className="h-3.5 w-3.5 text-info" />
-        <span className="text-sm font-medium">메세지 큐</span>
+        <span className="text-sm font-medium">메시지 큐</span>
         <Badge className="bg-info text-[10px] font-semibold text-background">{items.length}</Badge>
         {selectedCount > 0 && (
           <span className="text-xs text-muted-foreground">
