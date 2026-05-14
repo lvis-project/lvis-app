@@ -35,6 +35,7 @@
     "test:watch": "vitest",
     "test:ui-e2e": "playwright test",
     "test:electron-smoke": "node scripts/run-electron.mjs --version",
+    "test:packaged-smoke": "node scripts/smoke-packaged-app.mjs --target current",
     "test:main-flow": "tsx scripts/test-main-flow.ts",
     "dist": "node scripts/build-installers.mjs --current",
     "dist:current": "node scripts/build-installers.mjs --current",
