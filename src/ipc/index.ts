@@ -17,8 +17,10 @@
  *   permissions  lvis:permission:*, lvis:approval:*, lvis:policy:*
  *   window       window:*
  *   misc         lvis:routines:v2:*, lvis:session-todo:*
+ *   dev          lvis:dev:*  (only registered when !app.isPackaged)
  */
 import { initDlpAudit } from "../audit/dlp-filter.js";
+import { getIsPackaged } from "../boot/dev-flags.js";
 import { registerSettingsHandlers } from "./domains/settings.js";
 import { registerChatHandlers } from "./domains/chat.js";
 import { registerPluginsHandlers } from "./domains/plugins.js";
@@ -28,6 +30,7 @@ import { registerPermissionsHandlers } from "./domains/permissions.js";
 import { registerWindowHandlers } from "./domains/window.js";
 import { registerMiscHandlers } from "./domains/misc.js";
 import { registerAttachHandlers } from "./domains/attach.js";
+import { registerDevHandlers } from "./domains/dev.js";
 import type { IpcDeps } from "./types.js";
 import type { AppServices } from "../boot/types.js";
 import type { BrowserWindow } from "electron";
@@ -61,4 +64,9 @@ export function registerIpcHandlers(
   registerWindowHandlers(deps);
   registerMiscHandlers(deps);
   registerAttachHandlers(deps);
+  // Dev IPC is *not* registered in packaged builds — the channels never
+  // exist on `ipcMain`, so a compromised renderer/preload cannot probe them.
+  if (!getIsPackaged()) {
+    registerDevHandlers(deps);
+  }
 }

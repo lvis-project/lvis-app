@@ -43,8 +43,6 @@ export interface SettingsOrchestrationState {
   piiRedactEnabled: boolean;
   setPiiRedactEnabled: (v: boolean) => void;
   // Experimental feature flags
-  experimentalContinuousBackend: boolean;
-  setExperimentalContinuousBackend: (v: boolean) => void;
   idlePreferenceRefresh: boolean;
   setIdlePreferenceRefresh: (v: boolean) => void;
   // Marketplace
@@ -87,7 +85,6 @@ export function useSettingsOrchestration(
   const [webKeyInput, setWebKeyInput] = useState("");
   const [hasWebKey, setHasWebKey] = useState(false);
   const [piiRedactEnabled, setPiiRedactEnabled] = useState(false);
-  const [experimentalContinuousBackend, setExperimentalContinuousBackend] = useState(false);
   const [idlePreferenceRefresh, setIdlePreferenceRefresh] = useState(false);
   const [marketplaceBaseUrl, setMarketplaceBaseUrl] = useState("");
   const [marketplaceAllowPrivateNetwork, setMarketplaceAllowPrivateNetwork] = useState(true);
@@ -125,7 +122,6 @@ export function useSettingsOrchestration(
       setWebProvider(s.webSearch.provider);
       setHasWebKey(webApiKeySet);
       setPiiRedactEnabled(s.privacy?.piiRedactEnabled ?? false);
-      setExperimentalContinuousBackend(s.features?.experimentalContinuousBackend ?? false);
       setIdlePreferenceRefresh(s.features?.idlePreferenceRefresh ?? false);
       setMarketplaceBaseUrl(s.marketplace?.realCloudBaseUrl ?? "");
       setMarketplaceAllowPrivateNetwork(s.marketplace?.realCloudAllowPrivateNetwork ?? false);
@@ -147,7 +143,6 @@ export function useSettingsOrchestration(
     if (!open) return;
     return api.onSettingsUpdated((next) => {
       setSettingsSnapshot(next);
-      setExperimentalContinuousBackend(next.features?.experimentalContinuousBackend ?? false);
       setIdlePreferenceRefresh(next.features?.idlePreferenceRefresh ?? false);
     });
   }, [open, api]);
@@ -253,21 +248,6 @@ export function useSettingsOrchestration(
     } finally { setSaving(false); }
   };
 
-  const setExperimentalContinuousBackendLive = useCallback((next: boolean) => {
-    const previous = experimentalContinuousBackend;
-    setExperimentalContinuousBackend(next);
-    if (!settingsLoaded) return;
-    void api
-      .updateSettings({ features: { experimentalContinuousBackend: next } })
-      .then((updated) => {
-        setSettingsSnapshot(updated);
-        onSaved();
-      })
-      .catch(() => {
-        setExperimentalContinuousBackend(previous);
-      });
-  }, [api, experimentalContinuousBackend, onSaved, settingsLoaded]);
-
   const setIdlePreferenceRefreshLive = useCallback((next: boolean) => {
     const previous = idlePreferenceRefresh;
     setIdlePreferenceRefresh(next);
@@ -301,7 +281,6 @@ export function useSettingsOrchestration(
     webKeyInput, setWebKeyInput,
     hasWebKey, setHasWebKey,
     piiRedactEnabled, setPiiRedactEnabled,
-    experimentalContinuousBackend, setExperimentalContinuousBackend: setExperimentalContinuousBackendLive,
     idlePreferenceRefresh, setIdlePreferenceRefresh: setIdlePreferenceRefreshLive,
     marketplaceBaseUrl, setMarketplaceBaseUrl,
     marketplaceAllowPrivateNetwork, setMarketplaceAllowPrivateNetwork,

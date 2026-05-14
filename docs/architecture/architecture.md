@@ -1005,7 +1005,7 @@ flowchart LR
         S5["⑤ Tool Schemas<br/>L1 Filter 통과한 도구 스키마"]
         S6["⑥ Active Plugin Schemas<br/>활성 플러그인 도구·스킬"]
         S7["⑦ Memory / MEMORY.md<br/>사용자 축적 기억 인덱스"]
-        S8["⑧ Conversation Summary<br/>Auto-Compact 요약 (있을 경우)"]
+        S8["⑧ Rolling Summary Preamble<br/>id=2.5 (회전된 prior 세션 요약, 있을 경우)"]
     end
 
     subgraph "Contextual Sources (상황별)"
@@ -1040,7 +1040,7 @@ flowchart LR
 | ⑤ | Tool Schemas | 매 턴 | 3~8K | L1 Filter 통과 후 Lgenie에 노출할 도구 JSON 스키마 |
 | ⑥ | Plugin Schemas | 플러그인 변경 시 | 1~5K | 활성 플러그인의 도구·스킬 스키마 |
 | ⑦ | MEMORY.md | 파일 변경 시 | 1~3K | 사용자 축적 기억 인덱스 — 선호, 루틴, 프로젝트 정보 |
-| ⑧ | Compact Summary | Compact 후 | 2~5K | 이전 대화 요약 (Auto-Compact 실행 시에만) |
+| ⑧ | Rolling Summary Preamble (id=2.5) | on-change | 2~5K | 회전된 prior 세션의 12-section structured summary. `summaryPreamble` 가 set 된 모든 턴에서 주입 — 게이트 제거됨 (PR #729). |
 | ⑨ | OS / Environment | 부팅 시 | 0.3~0.5K | OS 종류, 홈 디렉터리, 시간대, 현재 시각 |
 | ⑩ | Session Context | 매 턴 | 0.5~1K | 현재 열린 파일, 작업 디렉터리 등 |
 | ⑪ | Overlay Trigger Context | 매 턴 (조건부) | 0.5~2K | 대기 중인 승인 건수, 임박 일정, 브리핑 요약 |
