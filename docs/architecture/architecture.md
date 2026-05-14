@@ -811,40 +811,71 @@ sequenceDiagram
 | **지속성** | assistant `thought`는 히스토리에 저장되어 tool round-trip 후에도 reasoning 모델의 문맥이 유지된다. |
 | **거버넌스 동기화** | 대화 루프는 로컬 GovernancePolicy를 조회하고, 상위 정책 동기화 서버의 broadcast로 갱신되는 설계를 전제로 한다. |
 
-#### 4.5.4 컨텍스트 관리 — Auto-Compact (PR-3 정리 후, Layer 1 + Layer 2)
+#### 4.5.4 컨텍스트 관리 — Auto-Compact (PR #718 정리 후, Layer 1 + Layer 2)
 
-LVIS 는 OpenHarness 레퍼런스를 따라 multi-layer compact 를 채택한다. §4.5.11 의 Layer 0 preflight (token-based, blocking) 가 트리거이고, 본 절은 *현재 세션 안에서* 실제 토큰을 줄이는 Layer 1 + Layer 2 를 다룬다:
+LVIS 는 OpenHarness / Codex / Gemini CLI 레퍼런스를 합성한 multi-layer compact 를 채택한다. §4.5.11 의 Layer 0 preflight (token-based, blocking) 가 트리거이고, 본 절은 *현재 세션 안에서* 실제 토큰을 줄이는 Layer 1 + Layer 2 를 다룬다.
 
-- **Layer 1 — Mark Stale Tool Results (preventive, marker-only)**: 매 post-turn 마다 실행. `markStaleToolResults()` 가 오래된 `tool_result` 메시지에 `meta.compactedAt` 단일 마커만 set — 메모리상의 content 는 *verbatim 보존* 된다 (UI / Layer 3 preview 가 원본 표시 가능). 마커가 있는 메시지는 `wire-serialize.ts:stubMarkedToolResults` 가 provider 호출 직전 + `saveSession` 직전에 stub (`[tool_result stripped: tool=X, origLen=N]`) 으로 변환 — wire/disk 측에서만 토큰/디스크가 절감된다. 최근 N개 (기본 8) 는 raw 유지, 200자 미만은 mark 대상 제외 (OpenCode 패턴), `toolUseId` 참조 무결성은 그대로 보존. PR-3 에서 구 `meta.stripped` · `meta.strippedAt` · `meta.originalLength` 필드는 호환성 layer 없이 완전 제거 (`src/engine/auto-compact.ts:114-124`).
-- **Layer 2 — LLM Compact with Boundary (threshold-gated)**: §4.5.11 Layer 0 preflight 가 `estimateMessagesTokens(history) ≥ getModelPreflightThreshold(vendor, model)` 을 hit 하면 LLM 호출 차단 + `compactWithBoundary()` (`src/engine/structured-compact.ts:321`) 동기 실행. 보존 구간을 제외한 이전 메시지를 LLM 요약으로 교체하고 같은 sessionId 안에 `kind: "checkpoint"` ChatEntry 가 append 되어 Layer 3 anchor 가 된다. 생성된 요약은 다음 턴 system prompt 의 preamble 로 prepend, `compactNum` (PR-5 sequence number) 가 새 checkpoint 에 할당되어 view/branch action anchor 로 사용된다. (구 `shouldCompact()` 사용률 임계치 + `compactMessages()` LLM-free 요약 패턴은 PR-2-F-2 에서 폐기 — 토큰만 측정하는 Layer 0 preflight 가 단일 트리거.)
+**사용자 contract**: compact 는 어떤 input shape (단일 200K 메시지 / 다수 중간 메시지 누적 / 깊은 tool chain) 에서도 reduce 보장. 수동 메시지 삭제 없이 항상 성공해야 함.
 
-Layer 1 은 *항상 실행* 되므로 Layer 0 threshold 와 독립적으로 wire/disk 토큰 압력을 완화한다. Layer 2 는 Layer 0 preflight hit 시에만 발동하여 같은 sessionId 안에서 boundary-marked summary 를 만들고 fork 없이 진행 (§4.5.11 same-session checkpoint chain). 아래 도식은 두 레이어의 trigger 와 영향 범위를 함께 보여준다.
+**Layer 1 — Mark Stale Tool Results (preventive, marker-only)**: 매 post-turn 마다 실행. `markStaleToolResults()` 가 오래된 `tool_result` 메시지에 `meta.compactedAt` 단일 마커만 set — 메모리상의 content 는 *verbatim 보존* 된다. 마커가 있는 메시지는 `wire-serialize.ts:stubMarkedToolResults` 가 provider 호출 직전 + `saveSession` 직전에 stub 으로 변환. 최근 N개 (기본 8) raw 유지, 200자 미만 제외 (OpenCode 패턴), `toolUseId` 참조 무결성 보존 (`src/engine/auto-compact.ts:114-124`).
+
+**Layer 2 — LLM Compact with Boundary (threshold-gated, 4-status pipeline)**: §4.5.11 Layer 0 preflight 가 `estimateMessagesTokens(history) ≥ getModelPreflightThreshold(vendor, model)` 을 hit 하면 LLM 호출 차단 + `compactWithBoundary()` (`src/engine/structured-compact.ts`) 동기 실행. 결과는 4 상태 중 하나 (`src/shared/compact-status.ts:CompressionStatus`):
+
+- `NOOP` — history 가 이미 작음. boundary 없이 반환.
+- `CONTENT_TRUNCATED` — Layer A (per-message truncation) 만으로 충분히 reduce. LLM 호출 skip. 원본은 `~/.lvis/sessions/<id>/truncated/` 에 격리.
+- `SUMMARIZED` — 정상 LLM 요약 경로. boundary stub + recentVerbatim 으로 history 교체.
+- `REDUCED_INSUFFICIENT_FORCED` — 위 모두 후에도 over-budget. last-resort 로 toPreserve oldest 50% 강제 drop + archive.
+
+내부 sub-stage (`compactWithBoundary` 안):
+
+- **Layer A** — 단일 메시지가 30K tokens 초과 시 per-message truncation. 원본은 archive 파일로 격리 (Codex CLI `TruncationPolicy` 패턴).
+- **Layer A.5** — history-wide reverse-budget truncation. Layer A 이후 toCompact 총 토큰이 LLM input budget (preflight × 0.9) 초과 시 oldest 부터 drop & archive (Gemini CLI 패턴). O(N) 구현 — running token total 유지.
+- **Layer B** — `splitForBoundary` 로 toCompact / toPreserve 분리. preserveRecent 는 ceiling 의미 (cumulative ≤ budget). 단일 메시지가 budget 단독 초과 시 toPreserve 비어짐. tool_use/tool_result pair 안전: `adjustToToolBoundary` (bounded 3-step backward) + `adjustForwardToToolBoundary` (unbounded forward, leading tool_result 만 skip) — 모든 surviving[0] 이 orphan tool_result 가 되지 않음 보장.
+- **Layer C** — 12-section structured LLM summary (`SUMMARY_TEMPLATE_PROMPT_V1`) + freezeBoundary (P7 invariant).
+- **Layer D** — FORCED archive: post-compact estimatedAfter > preflight × 0.8 시 toPreserve oldest 50% drop. `adjustForwardToToolBoundary` 로 surviving 시작이 orphan tool_result 안 되게 보호.
+
+Adaptive `preserveRecentTokens` (runPreflightGuard 가 결정):
+
+- usagePct < 80%: `preflight × 0.4` (정상)
+- usagePct in [80, 100): `preflight × 0.2` (orange zone)
+- usagePct ≥ 100%: `0` (red zone — 전체 compact, boundary stub 만 남김)
+
+CONTENT_TRUNCATED / REDUCED_INSUFFICIENT_FORCED 경로의 `truncatedDir` 은 `onCompactOccurred` 콜백 → IPC `compact_notice` → renderer `CheckpointDivider` 의 footnote 까지 plumb. 사용자가 archive 위치를 가시 확인 가능.
+
+`compactNum` (PR-5 sequence number) 은 NOOP 외 모든 경로에서 증가하여 view/branch action 의 anchor 역할.
 
 ```mermaid
 flowchart LR
     PostTurn["Post-turn"]
     UserInput["User input"]
-    MarkStale["Layer 1<br/>markStaleToolResults()<br/>meta.compactedAt 마커만 set"]
-    Preflight{"Layer 0 preflight<br/>estimateMessagesTokens ≥<br/>getModelPreflightThreshold?"}
-    LLMCompact["Layer 2<br/>compactWithBoundary()<br/>LLM rolling summary<br/>+ kind:checkpoint append"]
-    Continue["Same sessionId 계속"]
+    MarkStale["Layer 1<br/>markStaleToolResults()"]
+    Preflight{"Layer 0 preflight"}
+    LayerA["Layer A<br/>per-message truncation<br/>(>30K)"]
+    LayerAHalf["Layer A.5<br/>history-wide reverse-budget"]
+    LayerB["Layer B<br/>splitForBoundary<br/>+ tool-pair safe"]
+    LayerC["Layer C<br/>LLM summary<br/>+ boundary stub"]
+    LayerD{"Layer D<br/>still > 0.8 preflight?"}
+    Forced["FORCED: oldest 50% drop<br/>+ archive"]
+    Continue["Same sessionId 계속<br/>(status 별 banner)"]
 
     PostTurn --> MarkStale --> Continue
     UserInput --> Preflight
     Preflight -->|"No"| Continue
-    Preflight -->|"Yes"| LLMCompact --> Continue
-    MarkStale -.->|"wire/disk 직렬화 시<br/>stubMarkedToolResults"| Continue
+    Preflight -->|"Yes"| LayerA --> LayerAHalf --> LayerB --> LayerC --> LayerD
+    LayerD -->|"No → SUMMARIZED"| Continue
+    LayerD -->|"Yes → FORCED"| Forced --> Continue
+    LayerA -.->|"truncatedCount > 0 ∧ toCompact = []"| Continue
+    LayerB -.->|"toCompact = [] ∧ truncatedCount = 0 → NOOP"| Continue
 ```
 
-| 항목 | Layer 1 — Mark Stale | Layer 2 — LLM Compact |
+| 항목 | Layer 1 — Mark Stale | Layer 2 — LLM Compact (4-status) |
 | --- | --- | --- |
-| 트리거 | 매 post-turn (항상) | Layer 0 preflight hit (`estimateMessagesTokens(history) ≥ getModelPreflightThreshold(vendor, model)`) |
-| 함수 | `markStaleToolResults()` (`src/engine/auto-compact.ts:114-124`) | `compactWithBoundary()` (`src/engine/structured-compact.ts:321`) |
-| 메커니즘 | `meta.compactedAt` 단일 마커 set — content verbatim 보존 | LLM 으로 rolling summary 생성, `kind:"checkpoint"` ChatEntry 를 같은 sessionId 에 append |
-| 영향 범위 | wire/disk only (memory unchanged; `stubMarkedToolResults` 가 직렬화 시점에 stub 변환) | memory + wire/disk + 다음 턴 system prompt preamble |
-| 보존 규칙 | 최근 N (기본 8) raw 유지, 200자 미만 제외 (OpenCode 패턴) | `preserveRecentTokens = max(1_000, floor(preflight × 0.4))` |
-| 수동 트리거 | (자동만 — 사용자 노출 없음) | `/compact` 슬래시 명령어 |
-| 결과 | wire/disk 토큰 + 디스크 사용량 절감 | system prompt 압축 + Layer 3 anchor 생성 (`compactNum` 할당) |
+| 트리거 | 매 post-turn (항상) | Layer 0 preflight hit |
+| 함수 | `markStaleToolResults()` | `compactWithBoundary()` |
+| 결과 | wire/disk 토큰 절감 | 4 status (NOOP / CONTENT_TRUNCATED / SUMMARIZED / REDUCED_INSUFFICIENT_FORCED) |
+| 보존 규칙 | 최근 8 raw + 200자 미만 제외 | adaptive `preserveRecentTokens`: 0.4/0.2/0 × preflight (usagePct 별) |
+| 수동 트리거 | (자동만) | `/compact` 슬래시 명령어 |
+| 원본 보존 | content verbatim (in-memory) | `~/.lvis/sessions/<id>/truncated/` archive (CONTENT_TRUNCATED, FORCED 경로) |
 
 #### 4.5.5 Post-Turn Hooks
 
