@@ -345,6 +345,18 @@ export function registerChatHandlers(deps: IpcDeps): void {
     const parsed = parseChatSendPayload(payload);
     if (!parsed.ok) return { ok: false, error: parsed.error };
     const { input, attachments, inputOrigin, rolePrompt } = parsed.payload;
+    // queue-auto inputOrigin path 는 사용자 명시 입력 누적 의 자동 인입.
+    // user gesture context 밖 (IPC stream done event 트리거) 라 audit 추가
+    // 필요 — security forensics 에서 user-keyboard turn 과 구분 가능해야 함
+    // (critic Round 2 M2). guide 와 동일 패턴.
+    if (inputOrigin === "queue-auto") {
+      auditLogger.log({
+        timestamp: new Date().toISOString(),
+        sessionId: conversationLoop.getSessionId(),
+        type: "info",
+        input: `chat:utterance:queue-auto:start:len=${input.length}`,
+      });
+    }
     // IPC payload validation — the renderer is trusted but a corrupt
     // preload bridge or a stray `unknown[]` cast could deliver malformed
     // parts. We validate the shape here so the conversation loop never

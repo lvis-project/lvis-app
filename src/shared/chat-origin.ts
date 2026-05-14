@@ -33,13 +33,6 @@ export interface UserKeyboardIntent {
   userActivation: true;
 }
 
-/**
- * queue-auto inject — 사용자 명시 input 이 아닌 큐 자동 인입 신호.
- * userActivation 검사 우회 (IPC stream done event 등 user gesture 컨텍스트 밖).
- */
-export interface QueueAutoIntent {
-  inputOrigin: "queue-auto";
-}
 
 /**
  * Turn-entry provenance. Do not pass this through as the tool invocation

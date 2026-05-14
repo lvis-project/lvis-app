@@ -683,7 +683,13 @@ export function App() {
           opts?.inputOrigin === "queue-auto"
             ? undefined
             : mode === "default" ? userIntent : undefined,
-          mode === "default" ? composed.rolePrompt : undefined,
+          // chat.ts:59 의 "role-prompt-user-keyboard-only" 검증은 inputOrigin
+          // === "user-keyboard" 만 rolePrompt 허용. queue-auto path 가
+          // rolePrompt 보내면 silent reject → silent message loss (critic
+          // Round 2 C1). queue-auto 는 rolePrompt 도 undefined 강제.
+          opts?.inputOrigin === "queue-auto"
+            ? undefined
+            : mode === "default" ? composed.rolePrompt : undefined,
         );
         if (debugStreamEnabled) debugLog("handleAsk", "chatSend:resolved", { requestId });
         // After successful send, clear attachments — the textarea was

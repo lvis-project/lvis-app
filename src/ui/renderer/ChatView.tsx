@@ -627,6 +627,8 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
 
   // Stage 3: per-ChatView message-queue store. session 변경 시 자동 비움.
   const messageQueueStore = useMemo(() => new MessageQueueStore(), []);
+  // queue-auto inject in-flight 플래그 — done event re-entrancy 방지.
+  const queueAutoInflightRef = useRef(false);
   useEffect(() => {
     messageQueueStore.clear();
   }, [currentSessionId, messageQueueStore]);
@@ -673,13 +675,22 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
       if (ev.type === "done") {
         // turn 종료 시 큐 잔존 항목 → 새 user message 로 자동 inject.
         // inputOrigin "queue-auto" 사용 — chat.ts validator 가 userActivation
-        // 검사 우회 (IPC stream context = user gesture 밖). chat-origin.ts
-        // 의 ChatSendInputOrigin allow-list 에 추가됨 (critic C1 fix).
+        // 검사 우회 (IPC stream context = user gesture 밖).
+        // re-entrancy guard (critic Round 2 M4): inflight inject 중 재 done
+        // event 무시 — rapid done sequence 시 cascade race 방지.
+        if (queueAutoInflightRef.current) return;
         if (messageQueueStore.size() === 0) return;
         const taken = messageQueueStore.takeAll();
         if (taken.length === 0) return;
+        queueAutoInflightRef.current = true;
         const formatted = formatQueueInject(taken);
-        void onAsk(formatted, undefined, { injectHint: "queue", inputOrigin: "queue-auto" });
+        void (async () => {
+          try {
+            await onAsk(formatted, undefined, { injectHint: "queue", inputOrigin: "queue-auto" });
+          } finally {
+            queueAutoInflightRef.current = false;
+          }
+        })();
       }
     });
     return unsub;
