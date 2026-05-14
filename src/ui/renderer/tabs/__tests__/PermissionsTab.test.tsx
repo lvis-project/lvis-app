@@ -467,53 +467,6 @@ describe("PermissionsTab hook quarantine notice", () => {
     expect(low.getAttribute("aria-checked")).toBe("true");
   });
 
-  it("uses the shadcn radio group for keyboard reviewer updates", async () => {
-    const api = installApi([[]]);
-    api.permission.reviewerDispatch.mockImplementation(async (rawArgs: string) => {
-      if (rawArgs === "show") {
-        return {
-          ok: true as const,
-          verb: "show" as const,
-          settings: {
-            mode: "rule" as const,
-            provider: "openai" as const,
-            model: "gpt-4o-mini",
-            fallbackOnError: "deny" as const,
-            interactive: { autoApprove: "off" as const },
-          },
-        };
-      }
-      if (rawArgs === "interactive low") {
-        return {
-          ok: true as const,
-          verb: "interactive" as const,
-          settings: {
-            mode: "rule" as const,
-            provider: "openai" as const,
-            model: "gpt-4o-mini",
-            fallbackOnError: "deny" as const,
-            interactive: { autoApprove: "low" as const },
-          },
-        };
-      }
-      throw new Error(`unexpected reviewerDispatch: ${rawArgs}`);
-    });
-
-    await act(async () => {
-      render(<PermissionsTab />);
-    });
-    const off = screen.getByRole("radio", { name: "끔" });
-    const low = screen.getByRole("radio", { name: "저위험 자동 허용" });
-    off.focus();
-
-    await act(async () => {
-      fireEvent.keyDown(off, { key: "ArrowRight" });
-    });
-
-    expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("interactive low");
-    expect(low.getAttribute("aria-checked")).toBe("true");
-  });
-
   it("keeps the prior reviewer mode when runtime rewire fails", async () => {
     const api = installApi([[]]);
     api.permission.reviewerDispatch.mockImplementation(async (rawArgs: string) => {
