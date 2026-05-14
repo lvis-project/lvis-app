@@ -1841,12 +1841,21 @@ export class ConversationLoop {
 
     const messagesBefore = this.history.getMessages();
     const estimated = estimateMessagesTokens(messagesBefore);
-    if (estimated < preflight) return;
+    // Secondary trigger: use actual provider-reported input tokens from the
+    // previous turn as a corroborating signal. estimateMessagesTokens() can
+    // undercount by 15-25% for code-heavy English content (chars/4 heuristic
+    // vs real 3-3.5 chars/token). If the last round's actual tokensIn already
+    // exceeds the preflight threshold we compact immediately rather than
+    // waiting for the estimate to catch up.
+    const actualTokensIn = this.cumulativeUsage.inputTokens;
+    if (estimated < preflight && actualTokensIn < preflight) return;
+
+    const triggerSource = estimated >= preflight ? "estimate" : "actual-tokensIn";
 
     this.isCompacting = true;
     try {
       log.info(
-        `preflight: TRIGGER — estimated=${estimated} >= preflight=${preflight} (model=${provider}/${model}) → Layer 2 compact #${this.compactNum + 1}`,
+        `preflight: TRIGGER(${triggerSource}) — estimated=${estimated} actualTokensIn=${actualTokensIn} preflight=${preflight} (model=${provider}/${model}) → Layer 2 compact #${this.compactNum + 1}`,
       );
       // preserve budget = preflight 의 40% — Cline preserve-recent-tokens 휴리스틱 (per-model 추가 조정 가능).
       const preserveRecentTokens = Math.max(1_000, Math.floor(preflight * 0.4));
