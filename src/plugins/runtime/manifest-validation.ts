@@ -197,32 +197,6 @@ export async function parsePluginJson(
     }
   }
 
-  if (parsed.startupTools !== undefined && !Array.isArray(parsed.startupTools)) {
-    fail(
-      "startupTools",
-      "must be an array of strings (each value must appear in tools[])",
-      `"startupTools": ["startup_watch"]`,
-    );
-  }
-  const startupTools = parsed.startupTools ?? [];
-  for (let i = 0; i < startupTools.length; i += 1) {
-    const startupMethod = startupTools[i];
-    if (typeof startupMethod !== "string") {
-      fail(
-        `startupTools[${i}]`,
-        "must be a string",
-        `"startupTools": ["startup_watch"]`,
-      );
-    }
-    if (!parsed.tools.includes(startupMethod)) {
-      fail(
-        `startupTools[${i}]`,
-        `entry '${startupMethod}' is not declared in tools[]`,
-        `add "${startupMethod}" to tools[] or remove it from startupTools[]`,
-      );
-    }
-  }
-
   // Sprint 4-A — surface any remaining testMode flag in a protected plugin manifest.
   if (
     normalizeInstallPolicy(parsed) === "admin" &&
@@ -236,6 +210,10 @@ export async function parsePluginJson(
     );
   }
 
+  // `startupTimeoutMs` 는 *plugin instance.start() lifecycle hook 의 timeout* 만
+  // 통제한다 — manifest 의 tool name list 자동 invoke 메커니즘 (runManifestStartupTools,
+  // 2026-05-14 폐기) 의 잔재가 아님. plugin self-start 가 SoT 인 모델에서 host runtime
+  // 의 `Promise.race` 에 묶이는 유일한 시간 가드.
   if (parsed.startupTimeoutMs !== undefined) {
     if (
       typeof parsed.startupTimeoutMs !== "number" ||
