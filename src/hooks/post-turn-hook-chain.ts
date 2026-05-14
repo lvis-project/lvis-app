@@ -158,11 +158,11 @@ export class PostTurnHookChain {
       log.warn("extractMemory failed: %s", err);
     }
 
-    // 5. §PR-3: Update Title — newTitle (legacy [title] marker) 만 metadata 에 저장.
-    //    chainTitle LLM fallback 은 boot/conversation.ts 에서 llmProvider 를
-    //    주입하지 않아 dead code 였음 — PR #729 에서 제거 (No Fallback Code 룰).
-    //    LLM 기반 제목 자동 생성을 원하면 boot 에서 llmProvider 주입 + 빈도
-    //    게이트 (e.g. "N turn 마다") 를 별도 PR 에서 함께 도입.
+    // 5. Legacy [title] marker handling — newTitle 가 detector 에서 추출되면
+    //    session metadata 에 저장. LLM-based title chaining 은 PR #729 에서
+    //    완전 제거됨 (호출처가 없는 dead code 였음 — No Fallback Code 룰).
+    //    LLM title chaining 을 재도입하려면 별도 PR 에서 llmProvider 주입 +
+    //    빈도 게이트 (e.g. "N turn 마다") 를 함께 설계.
     try {
       if (this.deps.memoryManager && detector.newTitle) {
         const sessionMeta = this.deps.memoryManager.loadSessionMetadata(ctx.sessionId) ?? {};
