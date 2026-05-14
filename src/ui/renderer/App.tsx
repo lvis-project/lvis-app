@@ -970,7 +970,7 @@ export function App() {
             onJumpToSession={handleLoadSession}
             onRefreshSessions={refreshSessions}
             chatContextValue={chatContextValue}
-            onAsk={(q, intent) => handleAsk(q, "default", intent)}
+            onAsk={(q, intent, opts) => handleAsk(q, "default", intent, opts)}
             onEditSave={handleEditSave}
             onFork={handleFork}
             onToggleStar={handleToggleStar}

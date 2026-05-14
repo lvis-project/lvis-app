@@ -794,7 +794,9 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     const handler = (e: KeyboardEvent) => {
       if (e.key !== "Enter") return;
       if (!(e.metaKey || e.ctrlKey)) return;
-      if (e.isComposing) return;
+      // 한국어 IME composing 가드 제거 — composing 시 첫 ⌘⏎ 가 IME commit 으로
+      // 소비되고 두 번째 ⌘⏎ 가 동작하는 회귀 (사용자 보고 2026-05-15).
+      // 미확정 음절 손실은 마이너 — 사용자 의도 (인터럽트) 가 명확.
       if (
         document.querySelector(
           '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]',
