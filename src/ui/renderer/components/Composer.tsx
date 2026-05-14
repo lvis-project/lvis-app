@@ -9,8 +9,6 @@ import {
   type SetStateAction,
 } from "react";
 import { flushSync } from "react-dom";
-import { Loader2, Square } from "lucide-react";
-import { Button } from "../../../components/ui/button.js";
 import { Textarea } from "../../../components/ui/textarea.js";
 import {
   AttachmentChip,
@@ -63,15 +61,9 @@ export interface ComposerProps {
   /** Open via OS default app — for the overlay's open button. */
   openExternal?: (path: string) => Promise<unknown>;
   onSend: (intent: UserKeyboardIntentSnapshot) => void;
-  onAbort?: () => void;
-  /**
-   * Mid-stream "방향 지시" — non-interrupting guide utterance. Wired only
-   * when the parent supports it (App-level chatGuide). The composer shows
-   * a dedicated button + accepts Ctrl/Cmd+Enter while streaming. Empty
-   * text suppresses the action (composer renders the button as disabled).
-   */
-  onGuide?: () => void;
-  streaming?: boolean;
+  // v6: onAbort / onGuide / streaming props 제거. 모든 액션 버튼이
+  // BottomActionRow 로 이전됐고 키보드 매핑 (ESC/⌘⏎/⌘K) 은 ChatView 레벨
+  // 핸들러로 통합. Composer 는 순수 textarea + Enter 만 책임.
   disabled?: boolean;
   placeholder?: string;
   onWarning?: (message: string) => void;
@@ -96,9 +88,6 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     saveClipboardImage,
     openExternal,
     onSend,
-    onAbort,
-    onGuide,
-    streaming = false,
     disabled = false,
     placeholder,
     onWarning,
@@ -256,31 +245,29 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       }
 
       if (e.key === "Enter" && !e.shiftKey) {
-        // Ctrl/Cmd+Enter while streaming = "guide" (non-interrupting,
-        // queued direction adjustment). Falls through to the normal
-        // Enter (= start / abort-then-start) when not streaming or when
-        // no guide handler is wired.
-        if (streaming && onGuide && (e.ctrlKey || e.metaKey)) {
+        // v6: Cmd/Ctrl+Enter = 즉시 주입 (인터럽트) — ChatView document-level
+        // 핸들러가 처리. 여기서 onSend 호출하면 큐 추가가 먼저 일어나서 인터럽트
+        // 의미가 깨짐. modifier 있으면 노스킵 (preventDefault 만 — 줄바꿈 차단).
+        if (e.metaKey || e.ctrlKey) {
           e.preventDefault();
-          if (text.trim().length === 0) return;
-          onGuide();
           return;
         }
+        // 일반 Enter = onSend (idle = 전송, busy = 큐 추가).
         e.preventDefault();
         if (disabled) return;
         onSend(captureUserKeyboardIntent());
       }
     },
-    [captureUserKeyboardIntent, disabled, streaming, onSend, onGuide, text, onTextChange],
+    [captureUserKeyboardIntent, disabled, onSend, text, onTextChange],
   );
 
   const isFull = liveAttachments.length >= ATTACH_MAX_COUNT;
 
   return (
-    <div data-testid="composer" className="min-w-0 px-3">
+    <div data-testid="composer" className="min-w-0">
       <div
         data-testid="composer-input-bar"
-        className="flex min-w-0 w-full items-stretch gap-0 overflow-hidden rounded-xl bg-input-bar shadow-md"
+        className="flex min-w-0 w-full items-stretch gap-0 overflow-hidden"
       >
         {/* Strip is rendered ONLY when there is at least one attachment so
             the empty state does not reserve horizontal space. Single chip
@@ -316,42 +303,15 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           onPaste={handlePaste}
           onKeyDown={handleKeyDown}
           placeholder={placeholder ?? "질문을 입력하세요... (Cmd/Ctrl+V 로 클립보드 붙여넣기)"}
-          className="min-w-0 flex-1 resize-none min-h-[88px] border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none rounded-none text-xs placeholder:text-xs px-4 py-3"
+          /* v6 layout: ~2 줄 시작 (min-h-[40px] = 2 lines @ leading-5),
+             자동 확장 후 ~6 줄에서 scroll. 기존 88px 는 4 줄+ 차지해 textarea 가
+             채팅 영역을 잡아먹는 문제 (issue: composer redesign) 해결. */
+          className="min-w-0 flex-1 resize-none min-h-[40px] max-h-[144px] overflow-y-auto border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none rounded-none text-xs placeholder:text-xs px-4 py-2"
         />
 
-        {streaming && onGuide && (
-          <Button
-            variant="secondary"
-            onClick={onGuide}
-            disabled={text.trim().length === 0}
-            data-testid="composer-guide-button"
-            className="shrink-0 rounded-none self-stretch !h-auto w-[68px] px-0 text-xs font-bold"
-            aria-label="방향 지시 (현재 응답 유지)"
-            title="방향 지시 — 응답 유지, 다음 단계에 반영 (Ctrl/Cmd+Enter)"
-          >
-            GUIDE
-          </Button>
-        )}
-        {streaming && (
-          <Button
-            variant="destructive"
-            onClick={() => onAbort?.()}
-            data-testid="composer-abort-button"
-            className="shrink-0 rounded-none self-stretch !h-auto w-[44px] px-0 text-xs font-bold"
-            aria-label="응답 중지"
-            title="스트리밍 중단 (Ctrl/Cmd+C)"
-          >
-            <Square className="h-4 w-4" />
-          </Button>
-        )}
-        <Button
-          onClick={() => onSend(captureUserKeyboardIntent())}
-          disabled={disabled || (text.trim().length === 0 && liveAttachments.length === 0)}
-          data-testid="composer-send-button"
-          className="shrink-0 rounded-none self-stretch !h-auto w-[72px] px-0 text-xs font-bold"
-        >
-          <Loader2 className="h-4 w-4 mr-1 hidden" />SEND
-        </Button>
+        {/* v6: Send/Stop/Guide 버튼은 BottomActionRow 로 이전. input-bar 안에는
+            attachment chip + textarea 만. 키보드 (Enter/Shift+Enter/Ctrl+Enter)
+            는 textarea onKeyDown 에서 그대로 처리. */}
       </div>
       {isFull ? (
         <div

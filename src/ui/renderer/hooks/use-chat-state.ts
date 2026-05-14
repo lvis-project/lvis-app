@@ -90,17 +90,10 @@ export function useChatState(api: LvisApi) {
       }
       const streamId = typeof ev.streamId === "number" ? ev.streamId : null;
       if (ev.type === "guidance_injected") {
-        // Non-interrupting "guide" mode (chat utterance taxonomy) — engine
-        // consumed a queued guide utterance at the round boundary and
-        // appended it to history. Surface to the user as a system entry
-        // so they can see their direction-adjustment landed; the assistant
-        // round that follows reads it like any other user message.
+        // 사용자 피드백 (2026-05-15): system entry → user bubble + 작은 hint 배지.
         const text = typeof ev.text === "string" ? ev.text : "";
         if (text.length === 0) return;
-        setEntries((p) => [
-          ...p,
-          { kind: "system", text: `방향 지시 적용: ${text}` },
-        ]);
+        setEntries((p) => [...p, { kind: "user", text, injectHint: "queue" }]);
         return;
       }
       if (ev.type === "guidance_dropped") {
@@ -650,8 +643,8 @@ export function useChatState(api: LvisApi) {
     setIsCompacting(false);
   }, []);
 
-  const appendUserMessage = useCallback((content: string): void => {
-    setEntries((p) => appendUserEntry(p, content));
+  const appendUserMessage = useCallback((content: string, injectHint?: "queue" | "interrupt"): void => {
+    setEntries((p) => appendUserEntry(p, content, injectHint));
   }, []);
 
   const appendAssistantStatus = useCallback((content: string): void => {

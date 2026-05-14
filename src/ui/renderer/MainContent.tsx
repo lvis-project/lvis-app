@@ -31,7 +31,11 @@ export interface MainContentProps {
   onRefreshSessions: () => void | Promise<void>;
   // chat
   chatContextValue: ChatContextValue;
-  onAsk: (q: string, intent?: UserKeyboardIntentSnapshot) => Promise<void>;
+  onAsk: (
+    q: string,
+    intent?: UserKeyboardIntentSnapshot,
+    opts?: { injectHint?: "queue" | "interrupt"; inputOrigin?: "queue-auto" },
+  ) => Promise<void>;
   onEditSave: Parameters<typeof ChatView>[0]["onEditSave"];
   onFork: (entryIdx: number) => Promise<void>;
   onToggleStar: (entryIdx: number) => void;
