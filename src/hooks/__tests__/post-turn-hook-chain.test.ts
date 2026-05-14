@@ -135,7 +135,6 @@ describe("PostTurnHookChain", () => {
     const settingsService = {
       get: vi.fn((key: string) => {
         if (key === "llm") return fakeLlmSettings();
-        if (key === "features") return { experimentalContinuousBackend: true };
         return { systemPrompt: "", autoCompact: false };
       }),
     } as unknown as SettingsService;
@@ -176,7 +175,6 @@ describe("PostTurnHookChain", () => {
     const settingsService = {
       get: vi.fn((key: string) => {
         if (key === "llm") return fakeLlmSettings();
-        if (key === "features") return { experimentalContinuousBackend: true };
         return { systemPrompt: "", autoCompact: false };
       }),
     } as unknown as SettingsService;
@@ -214,7 +212,6 @@ describe("PostTurnHookChain", () => {
     const settingsService = {
       get: vi.fn((key: string) => {
         if (key === "llm") return fakeLlmSettings();
-        if (key === "features") return { experimentalContinuousBackend: true };
         return { systemPrompt: "", autoCompact: false };
       }),
     } as unknown as SettingsService;
@@ -312,7 +309,6 @@ describe("PostTurnHookChain", () => {
     const settingsService = {
       get: vi.fn((key: string) => {
         if (key === "llm") return fakeLlmSettings();
-        if (key === "features") return { experimentalContinuousBackend: true };
         return { systemPrompt: "", autoCompact: false };
       }),
     } as unknown as SettingsService;
@@ -418,7 +414,6 @@ describe("PostTurnHookChain", () => {
       const settingsService = {
         get: vi.fn((key: string) => {
           if (key === "llm") return fakeLlmSettings();
-          if (key === "features") return { experimentalContinuousBackend: true };
           return { systemPrompt: "", autoCompact: false };
         }),
       } as unknown as SettingsService;
@@ -438,71 +433,4 @@ describe("PostTurnHookChain", () => {
     });
   });
 
-  describe("safety flag: experimentalContinuousBackend OFF", () => {
-    it("detect-checkpoint step is skipped when flag is OFF — checkpointSuggested stays false", async () => {
-      const onCheckpointSuggested = vi.fn();
-      const settingsService = {
-        get: vi.fn((key: string) => {
-          if (key === "llm") return fakeLlmSettings();
-          if (key === "features") return { experimentalContinuousBackend: false };
-          return { systemPrompt: "", autoCompact: false };
-        }),
-      } as unknown as SettingsService;
-      const chain = new PostTurnHookChain({
-        memoryManager: {
-          saveSession: vi.fn(),
-          loadSessionMetadata: vi.fn().mockReturnValue(null),
-        } as unknown as MemoryManager,
-        settingsService,
-        onCheckpointSuggested,
-      });
-
-      const result = await chain.run({
-        sessionId: "session-flag-off",
-        messages: createMessages(),
-        input: "테스트",
-        output: "응답 완료입니다.<title>테스트 제목</title>[checkpoint]",
-        toolCalls: [],
-        route: "chat",
-      });
-
-      // Flag OFF: detector not invoked, returns default values, callback not called.
-      expect(result.detector.checkpointSuggested).toBe(false);
-      expect(result.detector.newTitle).toBeNull();
-      // cleanedText stays as raw output (not stripped) since detect was skipped
-      expect(result.detector.cleanedText).toContain("[checkpoint]");
-      expect(onCheckpointSuggested).not.toHaveBeenCalled();
-    });
-
-    it("update-title step is skipped when flag is OFF — saveSessionMetadata not called", async () => {
-      const saveSessionMetadata = vi.fn();
-      const settingsService = {
-        get: vi.fn((key: string) => {
-          if (key === "llm") return fakeLlmSettings();
-          if (key === "features") return { experimentalContinuousBackend: false };
-          return { systemPrompt: "", autoCompact: false };
-        }),
-      } as unknown as SettingsService;
-      const chain = new PostTurnHookChain({
-        memoryManager: {
-          saveSession: vi.fn(),
-          saveSessionMetadata,
-          loadSessionMetadata: vi.fn().mockReturnValue(null),
-        } as unknown as MemoryManager,
-        settingsService,
-      });
-
-      await chain.run({
-        sessionId: "session-no-title",
-        messages: createMessages(),
-        input: "테스트",
-        output: "응답 완료입니다.<title>어떤 제목</title>",
-        toolCalls: [],
-        route: "chat",
-      });
-
-      // Flag OFF: saveSessionMetadata must not be called for title update.
-      expect(saveSessionMetadata).not.toHaveBeenCalled();
-    });
-  });
 });

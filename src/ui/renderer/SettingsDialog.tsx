@@ -156,8 +156,6 @@ export function SettingsContent({
               setAutoCompact={s.setAutoCompact}
               streamSmoothing={s.streamSmoothing}
               setStreamSmoothing={s.setStreamSmoothing}
-              experimentalContinuousBackend={s.experimentalContinuousBackend}
-              setExperimentalContinuousBackend={s.setExperimentalContinuousBackend}
               idlePreferenceRefresh={s.idlePreferenceRefresh}
               setIdlePreferenceRefresh={s.setIdlePreferenceRefresh}
               piiRedactEnabled={s.piiRedactEnabled}
