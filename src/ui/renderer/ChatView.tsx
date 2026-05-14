@@ -19,6 +19,8 @@ import { SummaryToast } from "./components/SummaryToast.js";
 import { ViewModeBanner, type ViewModeState } from "./components/ViewModeBanner.js";
 import { SessionResumeDivider } from "./components/SessionResumeDivider.js";
 import { SessionTodoPanel } from "./components/SessionTodoPanel.js";
+import { MessageQueuePanel } from "./components/MessageQueuePanel.js";
+import { MessageQueueStore } from "./state/message-queue-store.js";
 import { SubAgentCard } from "./components/SubAgentCard.js";
 import { TokenCostBadge } from "./components/TokenCostBadge.js";
 import { TokenProgressRing } from "./components/TokenProgressRing.js";
@@ -617,6 +619,13 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     sawHistoryLoadingRef.current = false;
     setShowJumpToBottom(false);
   }, [currentSessionId]);
+
+  // Stage 3: per-ChatView message-queue store. session 변경 시 자동 비움.
+  // turn 종료 시 비움은 Stage 5 에서 streaming event 구독으로 추가.
+  const messageQueueStore = useMemo(() => new MessageQueueStore(), []);
+  useEffect(() => {
+    messageQueueStore.clear();
+  }, [currentSessionId, messageQueueStore]);
 
   useEffect(() => {
     const viewport = scrollViewportRef.current;
@@ -1243,6 +1252,14 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
       <div className="relative z-30 w-full max-w-full min-w-0 overflow-visible border-t border-border/70 bg-card/95">
         <div className="w-full max-w-full min-w-0" data-testid="session-todo-dock">
           <SessionTodoPanel api={workflowApi} sessionId={currentSessionId} />
+          <MessageQueuePanel
+            store={messageQueueStore}
+            onSendNow={(item) => {
+              // Stage 5 wires this to LLM abort + immediate inject.
+              // Stage 3 keeps it as a no-op handler so the panel renders.
+              void item;
+            }}
+          />
         </div>
         <div className="w-full max-w-full min-w-0 overflow-x-hidden pb-1 space-y-2">
           <InputActionBar
