@@ -52,9 +52,9 @@ export function StarredView({
                     <Badge variant="outline" className="text-[10px]">{s.role}</Badge>
                     <span>{new Date(s.starredAt).toLocaleString("ko-KR")}</span>
                     <span className="font-mono opacity-60">#{s.sessionId.slice(0, 8)}</span>
-                    <button className="ml-auto rounded p-0.5 hover:bg-muted" title="해제" onClick={() => { void api.starredRemove({ id: s.id }).then(() => refreshStarred()); }}>
+                    <Button variant="ghost" size="icon-xs" className="ml-auto hover:bg-muted" title="해제" onClick={() => { void api.starredRemove({ id: s.id }).then(() => refreshStarred()); }}>
                       <XIcon className="h-3 w-3" />
-                    </button>
+                    </Button>
                   </div>
                   <button
                     className="w-full whitespace-pre-wrap break-words text-left text-sm hover:opacity-80"

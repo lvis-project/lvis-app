@@ -15,17 +15,18 @@ describe("chat Thinking toggle styles", () => {
     const checkbox = readRepoFile("src/components/ui/checkbox.tsx");
 
     expect(component).toContain('import { Checkbox } from "../../../components/ui/checkbox.js"');
-    expect(component).toContain("data-[state=unchecked]:bg-background");
-    expect(component).toContain("rounded-[2px]");
     expect(component).not.toContain("bg-white");
     expect(component).not.toContain("thinking-toggle-input");
     expect(component).not.toContain("thinking-toggle-box");
     expect(component).not.toContain("checked:appearance-auto");
     expect(component).not.toContain("bg-muted checked:");
+    // shadcn v4 Checkbox uses rounded-[4px] + data-checked:* state attrs.
+    expect(checkbox).toContain("rounded-[4px]");
+    expect(checkbox).toContain("data-checked:bg-primary");
 
     expect(styles).not.toContain(".thinking-toggle-input");
     expect(styles).not.toContain(".thinking-toggle-box");
-    expect(checkbox).toContain('@radix-ui/react-checkbox');
+    expect(checkbox).toContain('from "radix-ui"');
     expect(checkbox).toContain("CheckboxPrimitive.Root");
   });
 });
