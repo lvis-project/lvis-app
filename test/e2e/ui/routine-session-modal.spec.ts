@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "../../..");
-const MAIN_ENTRY = resolve(REPO_ROOT, "dist/src/main.js");
+const MAIN_ENTRY = resolve(REPO_ROOT, "dist/src/main/main.js");
 const ROUTINE_ID = "layout-probe";
 const FIRED_AT = "2026-05-11T04:00:00.000Z";
 const SESSION_FILE = "2026-05-11T04-00-00-003Z.jsonl";
@@ -29,7 +29,7 @@ const LONG_FINAL_RESULT = [
 ].join("\n");
 
 test.describe("routine session modal", () => {
-  test.skip(!existsSync(MAIN_ENTRY), "dist/src/main.js not built; run bun run build first");
+  test.skip(!existsSync(MAIN_ENTRY), "dist/src/main/main.js not built; run bun run build first");
 
   let app: ElectronApplication;
   let page: Page;

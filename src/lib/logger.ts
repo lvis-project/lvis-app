@@ -19,7 +19,7 @@ import pino from "pino";
 const isTest = process.env.VITEST !== undefined || process.env.NODE_ENV === "test";
 const isProduction = process.env.NODE_ENV === "production";
 // process.defaultApp is set to `true` by the Electron runtime when the app is
-// launched unpackaged (i.e. `electron dist/src/main.js`). In a packaged build
+// launched unpackaged (i.e. `electron dist/src/main/main.js`). In a packaged build
 // the property is absent (undefined). In vitest/plain Node.js it is also
 // absent, but those paths are guarded by isTest.
 // Precedence (highest to lowest):

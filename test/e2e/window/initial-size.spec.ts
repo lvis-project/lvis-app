@@ -19,7 +19,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const DIST_MAIN = resolve(HERE, "../../../dist/src/main.js");
+const DIST_MAIN = resolve(HERE, "../../../dist/src/main/main.js");
 const EXPECTED_WIDTH = 460;
 const EXPECTED_HEIGHT = 840;
 const EXPECTED_MIN_HEIGHT = 640;
@@ -27,7 +27,7 @@ const EXPECTED_RIGHT_GAP = 10;
 const EXPECTED_TOP_GAP = 24;
 
 test.describe("initial window size", () => {
-  test.skip(!existsSync(DIST_MAIN), "dist/src/main.js not built — skipping");
+  test.skip(!existsSync(DIST_MAIN), "dist/src/main/main.js not built — skipping");
 
   let app: ElectronApplication;
   let tempHome: string;

@@ -12,10 +12,10 @@
   "engines": {
     "node": ">=22.4"
   },
-  "main": "dist/src/main.js",
+  "main": "dist/src/main/main.js",
   "scripts": {
     "postinstall": "electron-rebuild --only better-sqlite3 && node scripts/fetch-uv.mjs && node scripts/register-lvis-protocol.mjs",
-    "build:main": "tsc -p tsconfig.build.json",
+    "build:main": "node scripts/build-main-esbuild.mjs",
     "build:webpack": "webpack --config webpack.config.cjs",
     "build:renderer": "webpack --config webpack.config.cjs --config-name renderer",
     "build:styles": "tailwindcss --input src/styles.css --output dist/src/styles.css --minify",
@@ -24,7 +24,7 @@
     "build:icons": "node scripts/generate-lvis-icons.cjs",
     "build": "node scripts/clean-dist.mjs && bun run build:icons && bun run build:main && bun run build:webpack && bun run build:styles && node scripts/copy-build-assets.mjs src/index.html dist/src/index.html src/plugin-ui-shell.html dist/src/plugin-ui-shell.html src/plugin-ui-shell.js dist/src/plugin-ui-shell.js scripts/electron-flags.mjs dist/scripts/electron-flags.mjs scripts/uv-targets.mjs dist/scripts/uv-targets.mjs && node scripts/check-no-tls-bypass.mjs",
     "typecheck": "tsc --noEmit",
-    "start": "bun run build && node scripts/run-electron.mjs dist/src/main.js",
+    "start": "bun run build && node scripts/run-electron.mjs dist/src/main/main.js",
     "dev": "node scripts/run-electron-dev.mjs",
     "plugins:list": "tsx scripts/plugins-cli.ts list",
     "plugins:add": "tsx scripts/plugins-cli.ts add",
@@ -159,6 +159,8 @@
       "!node_modules/better-sqlite3/src{,/**/*}",
       "!node_modules/better-sqlite3/binding.gyp",
       "!node_modules/{prebuild-install,napi-build-utils,node-abi}{,/**/*}",
+      "!node_modules/{ai,zod,ajv,ajv-formats,undici,adm-zip,proper-lockfile,pino,pino-abstract-transport,pino-std-serializers,thread-stream,quick-format-unescaped,sonic-boom,split2,safe-stable-stringify,real-require,atomic-sleep,on-exit-leak-free,fast-redact}{,/**/*}",
+      "!node_modules/@ai-sdk{,/**/*}",
       "!node_modules/@azure/msal-*{,/**/*}",
       "!node_modules/@radix-ui{,/**/*}",
       "!node_modules/{class-variance-authority,clsx,cmdk,date-fns,eruda,lucide-react,react,react-day-picker,react-dom,react-markdown,remark-gfm,tailwind-merge}{,/**/*}",

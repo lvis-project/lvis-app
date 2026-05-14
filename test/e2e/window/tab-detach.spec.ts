@@ -33,7 +33,7 @@ import { execSync } from 'node:child_process';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '../../..');
-const MAIN_ENTRY = path.join(REPO_ROOT, 'dist/src/main.js');
+const MAIN_ENTRY = path.join(REPO_ROOT, 'dist/src/main/main.js');
 const PRELOAD_PATH = path.join(REPO_ROOT, 'dist/src/preload.cjs');
 
 /** Magnetic snap threshold — must match SNAP_THRESHOLD_DIP in window-manager.ts. */
