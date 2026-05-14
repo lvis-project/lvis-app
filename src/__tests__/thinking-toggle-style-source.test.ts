@@ -25,7 +25,7 @@ describe("chat Thinking toggle styles", () => {
 
     expect(styles).not.toContain(".thinking-toggle-input");
     expect(styles).not.toContain(".thinking-toggle-box");
-    expect(checkbox).toContain('@radix-ui/react-checkbox');
+    expect(checkbox).toContain('from "radix-ui"');
     expect(checkbox).toContain("CheckboxPrimitive.Root");
   });
 });
