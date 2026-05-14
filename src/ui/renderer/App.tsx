@@ -77,7 +77,7 @@ export function App() {
 
   // Chat state + stream lifecycle (useChatState is the sole owner of entries).
   const {
-    entries, streaming, beginStreamingRequest, finishStreamingRequest, editingEntryIdx, setEditingEntryIdx, editBusy,
+    entries, streaming, isCompacting, beginStreamingRequest, finishStreamingRequest, editingEntryIdx, setEditingEntryIdx, editBusy,
     entryIndexToHistoryIndex, handleEditSave, handleRetryEffort,
     resetStreamAccumulators, setErrorWithThought, handleCompactCommand,
     clearForNewChat, appendUserEntry, appendAssistantStatus, appendSystemEntry, applyInitialSession, applyLoadedSession, truncateToEntry,
@@ -343,7 +343,7 @@ export function App() {
   const { llmVendor, llmModel, enableThinkingChat, refresh: refreshLlmSettings, toggleThinking } = useSettings(api);
 
   const { usedTokens, contextBudget, contextOverflowPct } =
-    useContextBudget({ entries, llmVendor, llmModel });
+    useContextBudget({ entries, llmVendor, llmModel, draftText: question });
 
   const activePluginView = useMemo(() => pluginViews.find((i) => toViewKey(i) === activeView), [pluginViews, activeView]);
 
@@ -818,8 +818,21 @@ export function App() {
   // notifyClick IPC (which restores+focuses the window) and dismiss the
   // toast. Other toast producers leave `notification` undefined so this
   // handler is a no-op for them.
-  const { persistent: statusPersistent, visibleToast: statusVisibleToast, pendingCount: statusPendingCount, removeToast: statusRemoveToast } =
+  const { persistent: statusPersistent, visibleToast: statusVisibleToast, pendingCount: statusPendingCount, removeToast: statusRemoveToast, upsertPersistent: statusUpsertPersistent, removePersistent: statusRemovePersistent } =
     useStatusBar({ api });
+
+  // Show a persistent StatusBar indicator while a pre-turn auto-compact runs.
+  // `compact_started` sets isCompacting → this effect upserts the item.
+  // `compact_notice` clears isCompacting → this effect removes the item.
+  useEffect(() => {
+    const COMPACT_ITEM_ID = "auto-compact-in-progress";
+    if (isCompacting) {
+      statusUpsertPersistent({ id: COMPACT_ITEM_ID, severity: "info", label: "컨텍스트", value: "자동 압축 중..." });
+    } else {
+      statusRemovePersistent(COMPACT_ITEM_ID);
+    }
+  }, [isCompacting, statusUpsertPersistent, statusRemovePersistent]);
+
   const handleStatusToastClick = useCallback(
     (toast: { id: string; notification?: NotificationToastMeta }) => {
       if (!toast.notification) return;
