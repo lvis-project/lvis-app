@@ -92,9 +92,9 @@ export function LlmTab(props: LlmTabProps) {
       </div>
       {vendor !== "vertex-ai" && (vendorInfo.needsBaseUrl || vendor === "openai" || vendor === "copilot") && (
         <div className="space-y-2">
-          <label className="text-sm font-medium">
+          <Label className="text-sm font-medium">
             Endpoint (baseUrl){vendorInfo.needsBaseUrl ? " *" : " (선택)"}
-          </label>
+          </Label>
           <Input
             value={baseUrl}
             onChange={(e) => setBaseUrl(e.target.value)}
@@ -122,7 +122,7 @@ export function LlmTab(props: LlmTabProps) {
             API 키는 사용하지 않으며, <code>GOOGLE_APPLICATION_CREDENTIALS</code> 환경 변수로 서비스 계정 JSON 경로를 지정할 수 있습니다.
           </p>
           <div className="space-y-1">
-            <label className="text-xs text-muted-foreground">GCP Project ID *</label>
+            <Label className="text-xs text-muted-foreground">GCP Project ID *</Label>
             <Input
               value={vertexProject}
               onChange={(e) => setVertexProject(e.target.value)}
@@ -130,7 +130,7 @@ export function LlmTab(props: LlmTabProps) {
             />
           </div>
           <div className="space-y-1">
-            <label className="text-xs text-muted-foreground">Location (region) — 선택</label>
+            <Label className="text-xs text-muted-foreground">Location (region) — 선택</Label>
             <Input
               value={vertexLocation}
               onChange={(e) => setVertexLocation(e.target.value)}
@@ -141,7 +141,7 @@ export function LlmTab(props: LlmTabProps) {
       )}
       {vendor !== "vertex-ai" && (
         <div className="space-y-2">
-          <label className="text-sm font-medium">{vendorInfo.label} API 키</label>
+          <Label className="text-sm font-medium">{vendorInfo.label} API 키</Label>
           <div className="flex items-center gap-2">
             {hasKey ? <Badge variant="default" className="text-xs">설정됨</Badge> : <Badge variant="secondary" className="text-xs">미설정</Badge>}
             {hasKey && <Button size="sm" variant="ghost" className="h-7 text-xs text-destructive" onClick={() => void api.deleteApiKey(vendor).then(() => { setHasKey(false); onSaved(); })}>삭제</Button>}
@@ -149,21 +149,21 @@ export function LlmTab(props: LlmTabProps) {
           <Input type="password" placeholder={hasKey ? "새 키로 교체" : vendorInfo.placeholder} value={keyInput} onChange={(e) => setKeyInput(e.target.value)} />
         </div>
       )}
-      <div className="space-y-2"><label className="text-sm font-medium">모델</label><Input data-testid="llm-model-input" value={model} onChange={(e) => setModel(e.target.value)} placeholder={vendorInfo.defaultModel} /></div>
+      <div className="space-y-2"><Label className="text-sm font-medium">모델</Label><Input data-testid="llm-model-input" value={model} onChange={(e) => setModel(e.target.value)} placeholder={vendorInfo.defaultModel} /></div>
       <div className="space-y-2 rounded-md border p-3">
-        <label className="flex items-center justify-between text-sm font-medium">
+        <Label className="flex items-center justify-between text-sm font-medium">
           <span>Extended Thinking / Reasoning</span>
           <Switch
             checked={enableThinking}
             onCheckedChange={setEnableThinking}
             aria-label="Extended Thinking / Reasoning"
           />
-        </label>
+        </Label>
         <p className="text-[11px] text-muted-foreground">모델 내부 추론 과정을 스트리밍으로 표시합니다. Claude는 명시 활성화(Sonnet 4.5+/Opus 4+), OpenAI o-계열·gpt-5는 Responses API 자동, Gemini 2.0+는 모델 지원 시 자동.</p>
         {enableThinking && (
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <label className="text-xs text-muted-foreground">Reasoning Effort</label>
+              <Label className="text-xs text-muted-foreground">Reasoning Effort</Label>
               <span className="text-xs font-medium tabular-nums">
                 {REASONING_EFFORT_STEPS[budgetToEffortIndex(thinkingBudget)]!.label}
                 <span className="ml-2 text-muted-foreground">· {thinkingBudget.toLocaleString()} tokens</span>

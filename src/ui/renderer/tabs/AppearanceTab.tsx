@@ -424,7 +424,7 @@ export function AppearanceTab() {
 
         {/* 폰트 패밀리 */}
         <div className="space-y-2">
-          <label className="text-[11px] text-muted-foreground">패밀리</label>
+          <Label className="text-[11px] text-muted-foreground">패밀리</Label>
           <RadioGroup
             value={activePreset}
             aria-label="폰트 패밀리 선택"
@@ -465,7 +465,7 @@ export function AppearanceTab() {
 
         {/* 폰트 크기 */}
         <div className="space-y-2">
-          <label className="text-[11px] text-muted-foreground">크기</label>
+          <Label className="text-[11px] text-muted-foreground">크기</Label>
           <RadioGroup
             value={String(sizeScale)}
             aria-label="폰트 크기 선택"
