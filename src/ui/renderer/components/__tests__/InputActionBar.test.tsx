@@ -89,6 +89,17 @@ describe("InputActionBar (post indexer-removal)", () => {
     expect(getByText("Thinking")).toBeTruthy();
   });
 
+  it("uses the shadcn checkbox affordance for Thinking", () => {
+    const { getByRole } = renderBar({ enableThinkingChat: false });
+    const checkbox = getByRole("checkbox", { name: "Thinking" });
+    expect(checkbox).toHaveAttribute("data-state", "unchecked");
+    expect(checkbox.className).toContain("rounded-[2px]");
+    expect(checkbox.className).toContain("bg-background");
+    expect(checkbox.className).toContain("data-[state=unchecked]:bg-background");
+    expect(checkbox.className).not.toContain("bg-white");
+    expect(checkbox.className).not.toContain("appearance-auto");
+  });
+
   it("paperclip attach button calls onAttach when clicked and not disabled", () => {
     const onAttach = vi.fn();
     const { getByTestId } = renderBar({ onAttach, attachDisabled: false });
