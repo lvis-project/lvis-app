@@ -9,7 +9,7 @@
  *   5) AJV unknown-property rejection (additionalProperties:false at root,
  *      SDK 5.7.0+) — guards against silent acceptance of removed/typo'd fields
  */
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -247,6 +247,37 @@ describe("runtime manifest validation hardening", () => {
     expect(
       cap.errors.some((e) => /additional|unknown|startupTools/i.test(e)),
     ).toBe(true);
+  });
+
+  // Supply-chain visibility — manifest schema reject 또는 cross-field 위반으로
+  // plugin 이 fail-soft drop 될 때 audit log 에 `plugin_manifest_rejected` 가
+  // 남아야 security ops / operator 가 어느 plugin 이 왜 드랍됐는지 추적 가능.
+  it("6) auditLog emits plugin_manifest_rejected on manifest reject", async () => {
+    await writePlugin("p_audit_target", {
+      startupTools: ["p_audit_target_hello"], // AJV reject trigger
+    });
+    const auditLog = vi.fn();
+    const runtime = new PluginRuntime({
+      hostRoot: testDir,
+      registryPath,
+      pluginsRoot: installedDir,
+      auditLog,
+    });
+    const cap = captureErrors();
+    try {
+      await runtime.load();
+    } finally {
+      cap.restore();
+    }
+    expect(runtime.listPluginIds()).not.toContain("p_audit_target");
+    const rejected = auditLog.mock.calls.find(
+      (call) => call[1] === "plugin_manifest_rejected",
+    );
+    expect(rejected).toBeTruthy();
+    expect(rejected?.[0]).toBe("error");
+    const data = rejected?.[2] as { manifestPath: string; error: string };
+    expect(data.manifestPath).toContain("p_audit_target");
+    expect(data.error).toMatch(/additional|startupTools|schema/i);
   });
 
 });
