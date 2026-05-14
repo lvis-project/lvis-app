@@ -30,21 +30,40 @@ const buildOptions = {
     "@lvis/plugin-sdk",
     "@sentry/electron",
     "fsevents",
+    // Pino transports spawn worker_threads via thread-stream and resolve the
+    // worker entry + transport target (e.g. pino-pretty) as filesystem paths
+    // under node_modules. Bundling pino inlines the source but leaves the
+    // worker unable to resolve those paths — first log call exits with
+    // "the worker has exited" (reproduced on Windows after PR #706). Keep
+    // pino + its transitive worker deps external so they ship as real
+    // node_modules entries the worker can resolve.
+    "pino",
+    "pino-pretty",
+    "thread-stream",
+    "pino-abstract-transport",
+    "pino-std-serializers",
+    "sonic-boom",
+    "quick-format-unescaped",
+    "split2",
+    "safe-stable-stringify",
+    "real-require",
+    "atomic-sleep",
+    "on-exit-leak-free",
+    "fast-redact",
   ],
   logLevel: "info",
-  // Inlined CommonJS modules (pino's `thread-stream`, etc.) reference the
-  // CJS-only globals `require` / `__dirname` / `__filename` directly. ESM
-  // bundles don't define those, so esbuild leaves the references intact
-  // and the bundle ReferenceErrors at startup. Recreate the three globals
-  // from `import.meta.url` so the inlined CJS code keeps working.
+  // Inlined CommonJS modules reference CJS-only `require` directly; the ESM
+  // bundle doesn't define it, so we shim it from `import.meta.url`. We
+  // intentionally do NOT declare `__dirname` / `__filename` here — esbuild
+  // hoists `var __dirname = ...` from inlined CJS modules to the bundle's
+  // top-level scope, which collides with `const __dirname = ...` from this
+  // banner and produces `SyntaxError: Identifier '__dirname' has already
+  // been declared` at load time. The inlined CJS modules compute their own
+  // `__dirname` / `__filename` locally, so a banner shim is not needed.
   banner: {
     js:
       `import { createRequire as __lvisCreateRequire } from "node:module";\n` +
-      `import { fileURLToPath as __lvisFileURLToPath } from "node:url";\n` +
-      `import { dirname as __lvisDirname } from "node:path";\n` +
-      `const require = __lvisCreateRequire(import.meta.url);\n` +
-      `const __filename = __lvisFileURLToPath(import.meta.url);\n` +
-      `const __dirname = __lvisDirname(__filename);\n`,
+      `const require = __lvisCreateRequire(import.meta.url);\n`,
   },
 };
 

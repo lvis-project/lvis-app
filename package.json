@@ -1,6 +1,6 @@
 {
   "name": "lvis-app",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "type": "module",
   "description": "Test Electron host app for LVIS plugins.",
@@ -161,7 +161,7 @@
       "!node_modules/better-sqlite3/src{,/**/*}",
       "!node_modules/better-sqlite3/binding.gyp",
       "!node_modules/{prebuild-install,napi-build-utils,node-abi}{,/**/*}",
-      "!node_modules/{ai,zod,ajv,ajv-formats,undici,adm-zip,proper-lockfile,pino,pino-abstract-transport,pino-std-serializers,thread-stream,quick-format-unescaped,sonic-boom,split2,safe-stable-stringify,real-require,atomic-sleep,on-exit-leak-free,fast-redact}{,/**/*}",
+      "!node_modules/{ai,zod,ajv,ajv-formats,undici,adm-zip,proper-lockfile}{,/**/*}",
       "!node_modules/@ai-sdk{,/**/*}",
       "!node_modules/@azure/msal-*{,/**/*}",
       "!node_modules/@radix-ui{,/**/*}",
