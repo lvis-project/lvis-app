@@ -69,7 +69,11 @@ const CHAT_BOTTOM_THRESHOLD_PX = 96;
  */
 export interface ChatViewProps {
   api: LvisApi;
-  onAsk: (q: string, intent?: UserKeyboardIntentSnapshot) => void | Promise<void>;
+  onAsk: (
+    q: string,
+    intent?: UserKeyboardIntentSnapshot,
+    opts?: { injectHint?: "queue" | "interrupt" },
+  ) => void | Promise<void>;
   onEditSave: (idx: number, text: string) => void | Promise<void>;
   onFork: (idx: number) => void | Promise<void>;
   onToggleStar: (idx: number) => void | Promise<void>;
@@ -671,12 +675,13 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
         // streaming boolean 전이가 아닌 명시적 done event 만 신호 사용 →
         // AskUserQuestion 카드 깜박임 같은 false-positive 차단.
         // round boundary 없는 idle 상태이므로 onGuide 가 아닌 onAsk 사용
-        // (새 turn 시작).
+        // (새 turn 시작). injectHint: "queue" 로 마킹 → user bubble 에
+        // "↪ 큐에서" 배지 표시.
         if (messageQueueStore.size() === 0) return;
         const taken = messageQueueStore.takeAll();
         if (taken.length === 0) return;
         const formatted = formatQueueInject(taken);
-        void onAsk(formatted, { inputOrigin: "user-keyboard", token: "" });
+        void onAsk(formatted, { inputOrigin: "user-keyboard", token: "" }, { injectHint: "queue" });
       }
     });
     return unsub;
@@ -697,7 +702,8 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     }
     const taken = messageQueueStore.takeAll();
     const formatted = formatQueueInject(taken);
-    void onAsk(formatted, { inputOrigin: "user-keyboard", token: "" });
+    // ESC / esc 취소 = 사용자 명시 인터럽트 → "⚡ 중단후 새메세지" hint.
+    void onAsk(formatted, { inputOrigin: "user-keyboard", token: "" }, { injectHint: "interrupt" });
   }, [messageQueueStore, onAbort, onAsk]);
 
   // Stage 5: composer Enter morph — busy = queue.add, idle = onAsk 직행.
@@ -741,10 +747,9 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     if (parts.length === 0) return;
     const combined = parts.join("\n");
     setQuestion("");
-    // App.tsx 의 handleAsk 가 streaming + default mode 일 때 자체 abort 처리
-    // (Issue #622). 별도 onAbort() 호출은 중복 IPC 라운드트립 + race 유발 →
-    // 제거. handleAsk 위임으로 단일 abort+restart 시퀀스 보장.
-    void onAsk(combined, { inputOrigin: "user-keyboard", token: "" });
+    // ⌘⏎ = 사용자 명시 인터럽트 → "⚡ 중단후 새메세지" hint.
+    // handleAsk 가 streaming 시 자체 abort 처리.
+    void onAsk(combined, { inputOrigin: "user-keyboard", token: "" }, { injectHint: "interrupt" });
   }, [question, messageQueueStore, onAsk, setQuestion]);
 
   // Stage 5: ESC 우선순위
@@ -1130,9 +1135,13 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
                     {/* "나" label removed — sender is implicit. Star + hover
                         actions float top-right via absolute positioning so
                         the bubble has no header chrome. */}
-                    {entry.injectedFromQueue ? (
+                    {entry.injectHint === "queue" ? (
                       <div className="mb-1 inline-flex items-center gap-1 rounded bg-message-user-foreground/10 px-1.5 py-0.5 text-[10px] text-message-user-foreground/70" title="메시지 큐에서 자동 인입">
                         ↪ 큐에서
+                      </div>
+                    ) : entry.injectHint === "interrupt" ? (
+                      <div className="mb-1 inline-flex items-center gap-1 rounded bg-message-user-foreground/10 px-1.5 py-0.5 text-[10px] text-message-user-foreground/70" title="현재 LLM 응답 중단 후 즉시 새 메시지로 주입">
+                        ⚡ 중단후 새메세지
                       </div>
                     ) : null}
                     {starActive ? (
@@ -1476,11 +1485,11 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           <MessageQueuePanel
             store={messageQueueStore}
             onSendNow={(item) => {
-              // 행별 [↑ 즉시] — 그 1 항목만 즉시 주입. 다른 큐 항목은 잔존.
-              // handleAsk 가 streaming 시 자체 abort → 별도 onAbort 호출 불필요.
+              // 행별 [↑ 즉시] — 그 1 항목만 즉시 주입 = 사용자 명시 인터럽트.
+              // "⚡ 중단후 새메세지" hint. handleAsk 자체 abort.
               messageQueueStore.remove(item.id);
               const text = formatQueueInject([item]);
-              void onAsk(text, { inputOrigin: "user-keyboard", token: "" });
+              void onAsk(text, { inputOrigin: "user-keyboard", token: "" }, { injectHint: "interrupt" });
             }}
           />
         </div>

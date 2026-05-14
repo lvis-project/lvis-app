@@ -90,16 +90,10 @@ export function useChatState(api: LvisApi) {
       }
       const streamId = typeof ev.streamId === "number" ? ev.streamId : null;
       if (ev.type === "guidance_injected") {
-        // 사용자 피드백 (2026-05-15): "방향 지시도 일반 입력 버블로 뜨지
-        // 저렇게 방향 지시라고 특이하게 대화창에 들어가는것을 바란 건
-        // 아니였어." → system entry ("방향 지시 적용: ...") 대신 일반 user
-        // bubble. injectedFromQueue 플래그로 작은 hint 배지만 표시.
+        // 사용자 피드백 (2026-05-15): system entry → user bubble + 작은 hint 배지.
         const text = typeof ev.text === "string" ? ev.text : "";
         if (text.length === 0) return;
-        setEntries((p) => [
-          ...p,
-          { kind: "user", text, injectedFromQueue: true },
-        ]);
+        setEntries((p) => [...p, { kind: "user", text, injectHint: "queue" }]);
         return;
       }
       if (ev.type === "guidance_dropped") {
@@ -649,8 +643,8 @@ export function useChatState(api: LvisApi) {
     setIsCompacting(false);
   }, []);
 
-  const appendUserMessage = useCallback((content: string): void => {
-    setEntries((p) => appendUserEntry(p, content));
+  const appendUserMessage = useCallback((content: string, injectHint?: "queue" | "interrupt"): void => {
+    setEntries((p) => appendUserEntry(p, content, injectHint));
   }, []);
 
   const appendAssistantStatus = useCallback((content: string): void => {

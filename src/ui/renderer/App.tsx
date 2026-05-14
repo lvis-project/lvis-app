@@ -571,6 +571,7 @@ export function App() {
       q: string,
       mode: "default" | "trigger-import" = "default",
       userIntent?: UserKeyboardIntentSnapshot,
+      opts?: { injectHint?: "queue" | "interrupt" },
     ) => {
       // Cache once per invocation — `window.lvis.env.debugStream` is fixed at
       // preload bootstrap, so reading it again per debugLog call is wasted
@@ -661,7 +662,7 @@ export function App() {
       // visibly, and rendering the wrapped envelope as a user bubble
       // would misattribute authorship.
       if (mode !== "trigger-import") {
-        appendUserEntry(t);
+        appendUserEntry(t, opts?.injectHint);
       }
       resetStreamAccumulators();
       if (mode !== "trigger-import") {
