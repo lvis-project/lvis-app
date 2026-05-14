@@ -61,15 +61,9 @@ export interface ComposerProps {
   /** Open via OS default app — for the overlay's open button. */
   openExternal?: (path: string) => Promise<unknown>;
   onSend: (intent: UserKeyboardIntentSnapshot) => void;
-  onAbort?: () => void;
-  /**
-   * Mid-stream "방향 지시" — non-interrupting guide utterance. Wired only
-   * when the parent supports it (App-level chatGuide). The composer shows
-   * a dedicated button + accepts Ctrl/Cmd+Enter while streaming. Empty
-   * text suppresses the action (composer renders the button as disabled).
-   */
-  onGuide?: () => void;
-  streaming?: boolean;
+  // v6: onAbort / onGuide / streaming props 제거. 모든 액션 버튼이
+  // BottomActionRow 로 이전됐고 키보드 매핑 (ESC/⌘⏎/⌘K) 은 ChatView 레벨
+  // 핸들러로 통합. Composer 는 순수 textarea + Enter 만 책임.
   disabled?: boolean;
   placeholder?: string;
   onWarning?: (message: string) => void;
@@ -94,9 +88,6 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     saveClipboardImage,
     openExternal,
     onSend,
-    // onAbort, onGuide, streaming — v6: 버튼 BottomActionRow 로 이전, 상태도
-    // ChatView 레벨로 통합. 키보드 매핑 (ESC/⌘⏎/⏎ morph) 은 Stage 5 처리.
-    // 인터페이스 유지로 caller 호환 (signature breaking 방지).
     disabled = false,
     placeholder,
     onWarning,

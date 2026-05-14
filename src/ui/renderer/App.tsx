@@ -14,7 +14,6 @@ import { ThemeProvider } from "./theme/index.js";
 import { getApi, getPluginViewLabel, toViewKey } from "./api-client.js";
 import type { PluginEntry } from "./components/PluginGridButton.js";
 import { ApprovalDialog } from "./dialogs/ApprovalDialog.js";
-import { ApprovalQueueStatus } from "./components/ApprovalQueueStatus.js";
 import { DeferredQueueDialog } from "./dialogs/DeferredQueueDialog.js";
 import { buildQuickActions } from "./components/command-actions.js";
 import { MainToolbar } from "./MainToolbar.js";
@@ -1009,7 +1008,9 @@ export function App() {
           See <AskUserQuestionCard> + ChatView ask-question slot. */}
       <DeferredQueueDialog open={deferredQueueOpen} onOpenChange={setDeferredQueueOpen} />
       <ApprovalDialog queue={approvalQueue} onDecide={handleApprovalDecide} />
-      <ApprovalQueueStatus queue={approvalQueue} />
+      {/* v6: ApprovalQueueStatus floating chip 제거. 큐 정보는 InputActionBar
+          trailing 의 DeferredApprovalChip 으로 통합. Spec docs/blueprints/
+          composer-redesign-message-queue.md "제거" 섹션. */}
       <DropZoneOverlay />
       <DevConsoleToggle />
       {/* Snap edge highlight — shown when a detached child window enters the snap zone */}

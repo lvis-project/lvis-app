@@ -36,6 +36,25 @@ describe("MessageQueueStore", () => {
     expect(store.size()).toBe(0);
   });
 
+  it("add 는 MAX_ITEM_CHARS 초과 시 throw (economic DoS 방어)", () => {
+    const huge = "x".repeat(MessageQueueStore.MAX_ITEM_CHARS + 1);
+    expect(() => store.add(huge)).toThrow(/exceeds/);
+    expect(store.size()).toBe(0);
+    // 정확히 limit 까지는 OK
+    const atLimit = "x".repeat(MessageQueueStore.MAX_ITEM_CHARS);
+    expect(() => store.add(atLimit)).not.toThrow();
+    expect(store.size()).toBe(1);
+  });
+
+  it("add 는 MAX_ITEMS 초과 시 throw", () => {
+    for (let i = 0; i < MessageQueueStore.MAX_ITEMS; i++) {
+      store.add(`item-${i}`);
+    }
+    expect(store.size()).toBe(MessageQueueStore.MAX_ITEMS);
+    expect(() => store.add("overflow")).toThrow(/queue full/);
+    expect(store.size()).toBe(MessageQueueStore.MAX_ITEMS);
+  });
+
   it("add 는 text 를 trim 해서 저장", () => {
     const item = store.add("  hello  ");
     expect(item.text).toBe("hello");
@@ -215,6 +234,19 @@ describe("MessageQueueStore", () => {
     store.add("a");
     expect(l1).toHaveBeenCalledTimes(1);
     expect(l2).toHaveBeenCalledTimes(1);
+  });
+
+  it("listener throw 가 다른 listener 호출 막지 않음 (isolation)", () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const l1 = vi.fn(() => { throw new Error("listener boom"); });
+    const l2 = vi.fn();
+    store.subscribe(l1);
+    store.subscribe(l2);
+    store.add("a");
+    expect(l1).toHaveBeenCalledTimes(1);
+    expect(l2).toHaveBeenCalledTimes(1);
+    expect(errSpy).toHaveBeenCalled();
+    errSpy.mockRestore();
   });
 });
 

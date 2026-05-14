@@ -49,6 +49,10 @@ export function formatQueueInject(items: readonly MessageQueueItem[]): string {
 }
 
 export class MessageQueueStore {
+  /** 큐 capacity caps — economic DoS 방어. add() 가 throw 함. */
+  static readonly MAX_ITEMS = 50;
+  static readonly MAX_ITEM_CHARS = 8000;
+
   private items: MessageQueueItem[] = [];
   private listeners = new Set<() => void>();
 
@@ -56,6 +60,19 @@ export class MessageQueueStore {
     const trimmed = text.trim();
     if (trimmed.length === 0) {
       throw new Error("MessageQueueStore.add: empty text rejected");
+    }
+    // Cap: economic DoS / API cost blast 방어 (security review MAJOR-1).
+    // 사용자 button-mash 사고로 1000+ 항목 누적 시 formatQueueInject 의 거대
+    // string 이 다음 brake-point 에 통째로 paid LLM API 로 전송되는 것 차단.
+    if (trimmed.length > MessageQueueStore.MAX_ITEM_CHARS) {
+      throw new Error(
+        `MessageQueueStore.add: item exceeds ${MessageQueueStore.MAX_ITEM_CHARS} chars`,
+      );
+    }
+    if (this.items.length >= MessageQueueStore.MAX_ITEMS) {
+      throw new Error(
+        `MessageQueueStore.add: queue full (${MessageQueueStore.MAX_ITEMS})`,
+      );
     }
     const item: MessageQueueItem = {
       id: makeId(),
@@ -165,8 +182,16 @@ export class MessageQueueStore {
   };
 
   private notify(): void {
+    // Listener isolation — 한 listener throw 가 다른 listener 호출 막지 않음.
+    // useSyncExternalStore 가 React 내부에서 listener 호출하므로 throw 가
+    // 다른 구독자 (외부 sync) 까지 영향 안 미치도록.
     for (const listener of this.listeners) {
-      listener();
+      try {
+        listener();
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error("[message-queue-store] listener threw:", err);
+      }
     }
   }
 }

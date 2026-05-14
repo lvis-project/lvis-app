@@ -653,15 +653,29 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
       const text = question;
       if (text.trim().length === 0 && attachments.length === 0) return;
       if (streaming) {
-        // Busy: 큐에 추가 (자연 인입 대상)
-        if (text.trim().length > 0) messageQueueStore.add(text);
+        // Busy: 큐에 추가. cap 초과 throw catch 해서 textarea 보존.
+        if (text.trim().length > 0) {
+          try {
+            messageQueueStore.add(text);
+          } catch (err) {
+            console.warn("[message-queue] add rejected:", (err as Error).message);
+            return;
+          }
+        }
+        // 첨부도 같이 비움 — busy 분기에서 첨부 잔존하면 다음 idle 입력 시
+        // 의도치 않게 따라감 (mental model 위배). 큐 schema 가 첨부 비포함이라
+        // busy 시 첨부는 명시적으로 사용자가 재선택하는 것이 명확.
         setQuestion("");
+        if (attachments.length > 0) setAttachments([]);
       } else {
         // Idle: 직행 전송
         void onAsk(text, intent);
       }
     },
-    [question, attachments.length, streaming, messageQueueStore, onAsk, setQuestion],
+    [
+      question, attachments.length, streaming, messageQueueStore, onAsk,
+      setQuestion, setAttachments,
+    ],
   );
 
   const handleImmediateInject = useCallback(() => {
@@ -673,48 +687,59 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     if (parts.length === 0) return;
     const combined = parts.join("\n");
     setQuestion("");
-    // LLM abort 먼저 → 새 turn 시작 (onAsk 가 abort+restart 처리)
-    void onAbort();
+    // App.tsx 의 handleAsk 가 streaming + default mode 일 때 자체 abort 처리
+    // (Issue #622). 별도 onAbort() 호출은 중복 IPC 라운드트립 + race 유발 →
+    // 제거. handleAsk 위임으로 단일 abort+restart 시퀀스 보장.
     void onAsk(combined, { inputOrigin: "user-keyboard", token: "" });
-  }, [question, messageQueueStore, onAsk, onAbort, setQuestion]);
+  }, [question, messageQueueStore, onAsk, setQuestion]);
 
-  // Stage 5: ESC = LLM 취소 (큐 보존). 모달 열려 있을 땐 모달이 ESC 우선
-  // 가로채므로 여기까지 안 옴. 큐 선택 해제 우선 처리: 선택 항목 있으면
-  // 그것만 해제하고 LLM 은 안 건드림.
+  // Stage 5: ESC 우선순위
+  //   1. 모달 (Radix Dialog [data-state="open"]) → 모달이 가로챔 (defensive)
+  //   2. 큐 선택 항목 있음 → 선택 해제만 (LLM 안 건드림)
+  //   3. composer textarea 안에서 ESC → LLM 취소
   useEffect(() => {
     if (!streaming) return;
     const handler = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
-      const target = e.target as HTMLElement | null;
-      const isEditable = !!target && (
-        target.tagName === "INPUT" ||
-        target.tagName === "TEXTAREA" ||
-        target.isContentEditable
-      );
-      // 선택된 큐 항목 있으면 → 선택 해제만 (LLM 안 건드림)
+      if (
+        document.querySelector(
+          '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]',
+        )
+      ) {
+        return;
+      }
       if (messageQueueStore.hasSelected()) {
         e.preventDefault();
         messageQueueStore.clearSelection();
         return;
       }
-      // textarea/input 안 ESC = LLM 취소 (커서 비우는 일반 ESC 가 아니라 의도 명확)
-      if (isEditable || !isEditable) {
-        e.preventDefault();
-        void onAbort();
-      }
+      const target = e.target as HTMLElement | null;
+      const inComposer =
+        target?.getAttribute?.("data-testid") === "composer-textarea";
+      if (!inComposer) return;
+      e.preventDefault();
+      void onAbort();
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [streaming, messageQueueStore, onAbort]);
 
-  // Stage 5: ⌘⏎ — 입력 영역에서만 동작. 즉시 주입 (인터럽트).
-  // textarea 자체의 onKeyDown 에서 처리하면 깔끔하지만, Composer 가 모르는
-  // messageQueueStore 의존이라 ChatView document-level 핸들러로.
+  // Stage 5: ⌘⏎ — composer textarea 에서만 즉시 주입 (인터럽트).
+  // IME 조합 중 / 모달 열림 시 무시. document-level keydown 으로 처리 (Composer 가
+  // messageQueueStore 의존을 안 가지도록).
   useEffect(() => {
     if (!streaming) return;
     const handler = (e: KeyboardEvent) => {
       if (e.key !== "Enter") return;
       if (!(e.metaKey || e.ctrlKey)) return;
+      if (e.isComposing) return;
+      if (
+        document.querySelector(
+          '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]',
+        )
+      ) {
+        return;
+      }
       const target = e.target as HTMLElement | null;
       const isComposerTextarea =
         target?.getAttribute?.("data-testid") === "composer-textarea";
@@ -725,6 +750,41 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [streaming, handleImmediateInject]);
+
+  // Stage 5 follow-up: ⌘K = 가이드 호출. BottomActionRow 의 ghost 버튼과 동일
+  // onGuide 위임. text 비어 있으면 noop. busy 와 무관 (idle 에서도 가이드 가능).
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== "k" && e.key !== "K") return;
+      if (!(e.metaKey || e.ctrlKey)) return;
+      if (e.isComposing) return;
+      if (
+        document.querySelector(
+          '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]',
+        )
+      ) {
+        return;
+      }
+      const text = question.trim();
+      if (text.length === 0) return;
+      e.preventDefault();
+      void (async () => {
+        const result = await onGuide(text);
+        if (result?.ok === true) {
+          setQuestion("");
+        } else if (result?.ok === false) {
+          const message =
+            result.error === "queue-full" ? "방향 지시가 너무 많아 대기열이 가득 찼습니다." :
+            result.error === "too-long" ? "방향 지시 한 건이 너무 깁니다 (최대 8000자)." :
+            result.error === "no-active-turn" ? "진행 중인 응답이 없어 방향 지시를 보낼 수 없습니다." :
+            `방향 지시 전송 실패: ${result.error}`;
+          onGuideError(message);
+        }
+      })();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [question, onGuide, onGuideError, setQuestion]);
 
   useEffect(() => {
     const viewport = scrollViewportRef.current;
@@ -1355,9 +1415,9 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             store={messageQueueStore}
             onSendNow={(item) => {
               // 행별 [↑ 즉시] — 그 1 항목만 즉시 주입. 다른 큐 항목은 잔존.
+              // handleAsk 가 streaming 시 자체 abort → 별도 onAbort 호출 불필요.
               messageQueueStore.remove(item.id);
               const text = formatQueueInject([item]);
-              void onAbort();
               void onAsk(text, { inputOrigin: "user-keyboard", token: "" });
             }}
           />
@@ -1501,35 +1561,6 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             saveClipboardImage={(b64) => window.lvis.attach.saveClipboardImage(b64)}
             openExternal={(p) => window.lvis.attach.openExternal(p)}
             onSend={handleComposerSend}
-            onAbort={() => void onAbort()}
-            onGuide={() => {
-              const text = question;
-              void (async () => {
-                const result = await onGuide(text);
-                // Preserve typed text on rejection so the user can retry —
-                // common case is the no-active-turn race between Composer's
-                // streaming-derived state and the actual turn lifecycle
-                // (code-reviewer round-1 MAJOR #3 / critic round-1 MAJOR #6).
-                if (result?.ok === true) {
-                  setQuestion("");
-                } else if (result?.ok === false) {
-                  // Visible feedback for queue-full / too-long / no-active-turn
-                  // so repeated Ctrl+Enter into a closed queue doesn't look
-                  // like the button is broken (round-2 code-reviewer MEDIUM).
-                  const message =
-                    result.error === "queue-full" ? "방향 지시가 너무 많아 대기열이 가득 찼습니다." :
-                    result.error === "too-long" ? "방향 지시 한 건이 너무 깁니다 (최대 8000자)." :
-                    result.error === "no-active-turn" ? "진행 중인 응답이 없어 방향 지시를 보낼 수 없습니다." :
-                    `방향 지시 전송 실패: ${result.error}`;
-                  // Surface in chat transcript via the system-entry pipeline
-                  // (parity with `guidance_dropped` UX) so the user sees the
-                  // failure rather than a silent "button does nothing"
-                  // (round-3 reviewer + critic agreed MINOR).
-                  onGuideError(message);
-                }
-              })();
-            }}
-            streaming={streaming}
             disabled={
               // Slash commands (e.g. /compact) bypass the context-overflow gate
               // so the user can escape a fully-blocked input even while the
@@ -1542,7 +1573,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
               hasApiKey === false
                 ? "API 키를 먼저 설정해 주세요..."
                 : streaming
-                  ? "새 메시지 전송 시 현재 응답을 중단하고 새 턴을 시작합니다"
+                  ? "메세지 큐에 추가됩니다 (즉시 인터럽트는 ⌘⏎)"
                   : "질문 입력 (Enter 전송 · Cmd/Ctrl+V 첨부) · /command 사용 가능"
             }
           />
