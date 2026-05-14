@@ -47,6 +47,14 @@ export type StreamEvent = {
   summary?: string;
   /** §PR-5: compact sequence number on `compact_notice` — enables view/branch actions. */
   compactNum?: number;
+  /**
+   * Phase 3 — compact 결과 분류. Renderer 가 status 별로 다른 banner
+   * variant 를 표시 ("summarized" / "content_truncated" / "noop" /
+   * "reduced_insufficient_forced"). `compact-status.ts` SOT.
+   */
+  compactStatus?: "summarized" | "content_truncated" | "noop" | "reduced_insufficient_forced";
+  /** Layer A truncation 으로 격리된 원본 디렉토리 (CONTENT_TRUNCATED 경로). */
+  truncatedDir?: string;
   /** Set to "command" on `done` events when the turn was a slash command. */
   route?: "command";
   /** Permission mode changed by slash command; renderer fans this into the badge event bus. */
@@ -150,6 +158,13 @@ export type ChatEntry =
       summary?: string;
       /** §PR-5: compact sequence number — enables view/branch actions on CheckpointDivider. */
       compactNum?: number;
+      /**
+       * Phase 3 — compact 결과 분류. CheckpointDivider 가 status 별로
+       * 다른 visual variant (색상/아이콘/메시지) 를 표시한다.
+       */
+      compactStatus?: "summarized" | "content_truncated" | "noop" | "reduced_insufficient_forced";
+      /** Layer A truncation 으로 격리된 원본 파일 디렉토리 (CONTENT_TRUNCATED 경로). */
+      truncatedDir?: string;
     }
   // §457 PR-A: marker placed at the head of a resumed child session's
   // historical entry list when the parent session left a rolling
