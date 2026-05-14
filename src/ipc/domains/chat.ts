@@ -179,11 +179,12 @@ async function runStreamedTurn(
         send({ type: "tool_end", name, result: toolResult, isError, ...meta, ...(uiPayload && { uiPayload }), durationMs }),
       onError: (error) => send({ type: "error", error }),
       onPermissionModeChanged: (mode) => send({ type: "permission_mode_changed", mode }),
-      onCompactOccurred: ({ removedMessages, freedTokens, tier, summary, compactNum }) =>
+      onCompactOccurred: ({ removedMessages, freedTokens, estimatedAfter, tier, summary, compactNum }) =>
         send({
           type: "compact_notice",
           removedMessages,
           freedTokens,
+          estimatedAfter,
           ...(tier !== undefined ? { tier } : {}),
           ...(summary !== undefined ? { summary } : {}),
           ...(compactNum !== undefined ? { compactNum } : {}),
