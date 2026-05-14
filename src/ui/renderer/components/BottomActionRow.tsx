@@ -136,8 +136,10 @@ function Kbd({ children }: { children: ReactNode }) {
 }
 
 function KbdInverse({ children }: { children: ReactNode }) {
+  // theme tokens 만 사용 (theme-snapshot.test.tsx 가 black/white 직접 참조 금지).
+  // primary 배경 위 kbd 라 primary-foreground 의 sub-opacity 토큰으로 표현.
   return (
-    <kbd className="inline-flex h-4 min-w-[16px] items-center justify-center rounded border border-white/30 border-b-2 bg-white/15 px-1 font-mono text-[10px] text-primary-foreground">
+    <kbd className="inline-flex h-4 min-w-[16px] items-center justify-center rounded border border-primary-foreground/30 border-b-2 bg-primary-foreground/15 px-1 font-mono text-[10px] text-primary-foreground">
       {children}
     </kbd>
   );

@@ -215,9 +215,13 @@ describe("Composer", () => {
     });
   });
 
-  it("send button is disabled when text empty and no attachments", () => {
+  it("composer renders textarea (send button moved to BottomActionRow per v6 layout)", () => {
+    // v6: input-bar = textarea only. Send 버튼은 BottomActionRow 로 이전.
+    // 본 테스트는 Composer 의 textarea-only contract 만 검증. Send disable 동작
+    // 검증은 BottomActionRow 의 isSendDisabled prop 단위로 별도 (ChatView 통합).
     render(<Harness />);
-    const send = screen.getByTestId("composer-send-button") as HTMLButtonElement;
-    expect(send.disabled).toBe(true);
+    const textarea = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    expect(textarea).toBeTruthy();
+    expect(screen.queryByTestId("composer-send-button")).toBeNull();
   });
 });
