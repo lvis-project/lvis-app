@@ -55,12 +55,39 @@ export function getModelUsableContext(vendor: LLMVendor, model: string): number 
  * 64K → 50% / 128K → 55% / 200K → 60% / 1M → 65% / other → 60%.
  * 호출자: queryLoop 의 step 5/6 사이 (`infinity-session-redesign-v3.md` §4.1).
  *
+ * **Dev override**: `LVIS_DEV_PREFLIGHT_OVERRIDE` 환경변수가 양의 정수면 그
+ * 값을 그대로 사용. 실제 200K context 를 채우지 않고도 compact 시나리오 (130%
+ * deadlock, FORCED path 등) 를 손쉽게 재현 가능. production NODE_ENV 에서는
+ * 무시 — bypass 위험 차단.
+ *
+ * Example: `LVIS_DEV_PREFLIGHT_OVERRIDE=5000 bun run start` 로 실행하면
+ * preflight 가 5K tokens 로 떨어져 짧은 대화만으로도 Layer 0 트리거 가능.
+ *
  * @example
  * // 200K Sonnet → usable 160K → 60% × 160K = 96K trigger
  * estimateMessagesTokens(history) >= getModelPreflightThreshold("claude", "claude-sonnet-4-6");
  */
 export function getModelPreflightThreshold(vendor: LLMVendor, model: string): number {
+  const devOverride = readDevPreflightOverride();
+  if (devOverride !== null) return devOverride;
   return getPreflightThreshold(getModelContextWindow(vendor, model));
+}
+
+let _devOverrideWarnedValue: number | null | undefined = undefined;
+
+function readDevPreflightOverride(): number | null {
+  if (process.env.NODE_ENV === "production") return null;
+  const raw = process.env.LVIS_DEV_PREFLIGHT_OVERRIDE;
+  if (!raw) return null;
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  // 첫 read 시 한 번만 log — 매 호출 spam 방지.
+  if (_devOverrideWarnedValue !== n) {
+    // eslint-disable-next-line no-console
+    console.warn(`[lvis] dev preflight override active: LVIS_DEV_PREFLIGHT_OVERRIDE=${n} tokens (production NODE_ENV 에서는 무시됨)`);
+    _devOverrideWarnedValue = n;
+  }
+  return n;
 }
 
 // PR-2-F-2: 3-tier rotation 폐지 — `decideRotation` 함수 + `RotationDecision` interface +
