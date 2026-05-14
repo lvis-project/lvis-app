@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { ChevronDown, Paperclip, User } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
 import { Checkbox } from "../../../components/ui/checkbox.js";
@@ -45,6 +46,11 @@ export interface InputActionBarProps {
   vendorSupportsThinking: boolean;
   enableThinkingChat: boolean;
   onToggleThinking: (enabled: boolean) => void | Promise<void>;
+  // v6: 환경 컨트롤 — 첨부와 페르소나 사이. caller (ChatView) 가 실제 컴포넌트
+  // 인스턴스를 주입. InputActionBar 는 PermissionModeBadge /
+  // DeferredApprovalChip 의 구체 타입에 의존 X (slot pattern).
+  permissionSlot?: ReactNode;
+  approvalSlot?: ReactNode;
 }
 
 function attachButtonLabel(
@@ -78,6 +84,8 @@ export function InputActionBar({
   vendorSupportsThinking,
   enableThinkingChat,
   onToggleThinking,
+  permissionSlot,
+  approvalSlot,
 }: InputActionBarProps) {
   return (
     <div data-testid="input-action-bar" className="flex min-w-0 items-center justify-between gap-2 px-3 pt-2">
@@ -115,6 +123,11 @@ export function InputActionBar({
         >
           <Paperclip className="h-3.5 w-3.5" />
         </Button>
+
+        {/* v6: 권한 + 권한 큐 승인 chip — 첨부와 페르소나 사이. 환경 컨트롤
+            slot, ChatView 가 실제 인스턴스 주입. */}
+        {permissionSlot}
+        {approvalSlot}
 
         {/* Role preset dropdown */}
         <DropdownMenu>
