@@ -19,6 +19,11 @@ describe("categorizeEvent", () => {
     expect(categorizeEvent("index.document.added")).toBe("index");
   });
 
+  it("categorizes explicit public host events without opening the host namespace", () => {
+    expect(categorizeEvent("host.theme.changed")).toBe("host");
+    expect(categorizeEvent("host.secret.changed")).toBe("other");
+  });
+
   it("returns 'other' for unknown / plugin-owned namespaces (host stays agnostic to plugin ids)", () => {
     expect(categorizeEvent("unknown.event")).toBe("other");
     expect(categorizeEvent("system.boot")).toBe("other");

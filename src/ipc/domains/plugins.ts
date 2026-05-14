@@ -91,9 +91,22 @@ export type SafeThemePayload = {
  */
 let lastThemePayload: SafeThemePayload | null = null;
 
+function cloneThemePayload(payload: SafeThemePayload): SafeThemePayload {
+  const clone: SafeThemePayload = {
+    bundleId: payload.bundleId,
+    shell: payload.shell,
+  };
+  if (payload.colorScheme) clone.colorScheme = payload.colorScheme;
+  if (typeof payload.reducedMotion === "boolean") clone.reducedMotion = payload.reducedMotion;
+  if (payload.tokens) {
+    clone.tokens = Object.freeze({ ...payload.tokens }) as Record<string, string>;
+  }
+  return Object.freeze(clone);
+}
+
 /** @internal — read access to the cached theme payload (tests + replay). */
 export function getLastThemePayload(): SafeThemePayload | null {
-  return lastThemePayload;
+  return lastThemePayload ? cloneThemePayload(lastThemePayload) : null;
 }
 
 /**
@@ -105,8 +118,19 @@ export function recordValidatedTheme(payload: unknown):
   | { ok: true; safe: SafeThemePayload }
   | { ok: false; error: string } {
   const result = validateThemePayload(payload);
-  if (result.ok) lastThemePayload = result.safe;
-  return result;
+  if (!result.ok) return result;
+  const safe = cloneThemePayload(result.safe);
+  lastThemePayload = safe;
+  return { ok: true, safe };
+}
+
+/**
+ * Publish a host-owned theme change on the plugin event bus. Plugin webviews
+ * still receive the direct IPC fanout below; host plugins that own detached
+ * windows can subscribe through hostApi.onEvent("host.theme.changed").
+ */
+export function publishHostThemeChanged(safe: SafeThemePayload): void {
+  emitHostEvent("host.theme.changed", cloneThemePayload(safe));
 }
 
 /**
@@ -121,12 +145,13 @@ export function recordValidatedTheme(payload: unknown):
  * registry-set and send.
  */
 export function replayThemeToWebview(webContentsId: number): SafeThemePayload | null {
-  if (!lastThemePayload) return null;
+  const theme = getLastThemePayload();
+  if (!theme) return null;
   try {
     const wc = webContents.fromId(webContentsId);
     if (wc && !wc.isDestroyed()) {
-      wc.send("lvis:plugin:event", "host.theme.changed", lastThemePayload);
-      return lastThemePayload;
+      wc.send("lvis:plugin:event", "host.theme.changed", theme);
+      return theme;
     }
   } catch {
     /* swallowed — caller logs at debug. */
@@ -881,7 +906,9 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     pluginWebviewRegistry.set(webContentsId, binding);
     flushPendingEntryUrl(webContentsId, binding);
     plog("debug", { pluginId, phase: PluginPhase.WEBVIEW_ATTACH, webContentsId }, "webview attached");
-    if (replayThemeToWebview(webContentsId)) {
+    const replayedTheme = replayThemeToWebview(webContentsId);
+    if (replayedTheme) {
+      publishHostThemeChanged(replayedTheme);
       plog("debug", { pluginId, phase: PluginPhase.WEBVIEW_ATTACH, webContentsId }, "theme replay sent");
     }
     return { ok: true };
@@ -1151,7 +1178,8 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
 
   // ─── Theme propagation ─────────────────────────────────────────────────
   // Host renderer calls this when any theme axis changes; main fans out to
-  // every registered plugin webview via the existing lvis:plugin:event channel.
+  // every registered plugin webview via the existing lvis:plugin:event channel
+  // and publishes the same host event for plugin host services.
   ipcMain.handle("lvis:host:plugin-theme-notify", (e, payload: unknown) => {
     if (!validateSender(e)) {
       auditUnauthorized(auditLogger, "lvis:host:plugin-theme-notify", e);
@@ -1160,11 +1188,12 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     const validated = recordValidatedTheme(payload);
     if (!validated.ok) return validated;
     const { safe } = validated;
+    publishHostThemeChanged(safe);
     for (const [wcId] of pluginWebviewRegistry) {
       try {
         const wc = webContents.fromId(wcId);
         if (wc && !wc.isDestroyed()) {
-          wc.send("lvis:plugin:event", "host.theme.changed", safe);
+          wc.send("lvis:plugin:event", "host.theme.changed", cloneThemePayload(safe));
         }
       } catch { /* webview destroyed between registry read and send */ }
     }
