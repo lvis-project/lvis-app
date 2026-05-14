@@ -324,13 +324,26 @@ export function useChatState(api: LvisApi) {
         const freed = ev.freedTokens ?? 0;
         const estimatedAfter = ev.estimatedAfter;
         setEntries((p) => {
-          // Prefer engine-supplied post-compact estimate (estimatedAfter) —
-          // it reflects the real history token count after boundary applied
-          // and is accurate even when only a tiny message was summarized
-          // (freedTokens ≈ 0). Falls back to (lastKnown − freedTokens) when
-          // the field is absent (older IPC payloads).
+          const hasReliableAfter = typeof estimatedAfter === "number" && estimatedAfter >= 0;
+          // Synthetic usage carrier only when we have a reliable signal:
+          //   1. Engine-supplied `estimatedAfter` (preferred — exact post-compact tokens), or
+          //   2. `freedTokens > 0` (legacy fallback: subtract from lastKnown)
+          // When BOTH are absent (older IPC + zero-removed no-op), emitting a
+          // synthetic context_usage with stale lastKnown is misleading —
+          // it overwrites genuine turn_summary state. Skip in that case.
+          const checkpointEntry = {
+            kind: "checkpoint" as const,
+            removedMessages: removed,
+            freedTokens: freed,
+            ...(ev.tier ? { tier: ev.tier } : {}),
+            ...(ev.summary ? { summary: ev.summary } : {}),
+            ...(ev.compactNum !== undefined ? { compactNum: ev.compactNum } : {}),
+          };
+          if (!hasReliableAfter && freed <= 0) {
+            return [...p, checkpointEntry];
+          }
           let postCompactTokens: number;
-          if (typeof estimatedAfter === "number" && estimatedAfter >= 0) {
+          if (hasReliableAfter) {
             postCompactTokens = estimatedAfter;
           } else {
             let lastKnownTokens = 0;
@@ -345,17 +358,7 @@ export function useChatState(api: LvisApi) {
           }
           return [
             ...p,
-            {
-              kind: "checkpoint",
-              removedMessages: removed,
-              freedTokens: freed,
-              ...(ev.tier ? { tier: ev.tier } : {}),
-              ...(ev.summary ? { summary: ev.summary } : {}),
-              ...(ev.compactNum !== undefined ? { compactNum: ev.compactNum } : {}),
-            },
-            // Synthetic usage carrier so contextOverflowPct drops immediately
-            // after compact. Source tag distinguishes this from a live
-            // provider-reported turn_summary.
+            checkpointEntry,
             {
               kind: "context_usage" as const,
               tokensIn: postCompactTokens,
@@ -641,6 +644,8 @@ export function useChatState(api: LvisApi) {
     streamRef.current = "";
     thoughtRef.current = "";
     activeStreamIdRef.current = null;
+    // New chat: any prior session's in-flight compact indicator is stale.
+    setIsCompacting(false);
   }, []);
 
   const appendUserMessage = useCallback((content: string): void => {
@@ -657,6 +662,10 @@ export function useChatState(api: LvisApi) {
   }, []);
 
   const applyLoadedSession = useCallback((loaded: ChatEntry[]) => {
+    // Session switch: clear any in-flight compact indicator. If a compact
+    // was running in the previous session, its compact_notice may never
+    // arrive for this hook instance — the StatusBar hint would stick.
+    setIsCompacting(false);
     setEntries(loaded);
   }, []);
 
