@@ -65,7 +65,7 @@ import { PERMISSIONS, ROUTINES_V2 } from "./shared/ipc-channels.js";
 import { sendToWindow } from "./ipc/safe-send.js";
 import { startWatcherTelemetryCollector } from "./boot/steps/watcher-telemetry-collector.js";
 import { bootstrapCoreServices } from "./boot/services.js";
-import { registerPluginNotifications, runManifestStartupTools } from "./boot/plugins.js";
+import { registerPluginNotifications } from "./boot/plugins.js";
 import {
   registerBuiltinTools,
   registerRequestPluginMetaTool,
@@ -471,7 +471,6 @@ export async function bootstrap(
   };
   lateBinding.pluginToolInvokerRef.fn = invokePluginTool;
   pluginRuntime.setToolInvocationDelegate(invokePluginTool);
-  runManifestStartupTools(pluginRuntime, invokePluginTool);
 
   // §7: Routine Engine — 루틴마다 독립된 ConversationLoop를 생성하는 factory를 주입.
   // interactive 채팅의 ConversationLoop 인스턴스를 공유하면 세션 히스토리 오염 및

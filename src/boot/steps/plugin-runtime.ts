@@ -782,8 +782,8 @@ export interface InitPluginRuntimeOutput {
 
 /**
  * §4.2 Step 3-5 — construct PluginRuntime, register the per-plugin HostApi
- * factory, start all plugins, run manifest startupTools, register plugin
- * tools into ToolRegistry, and wire the dev hot-reload watcher.
+ * factory, start all plugins, register plugin tools into ToolRegistry, and
+ * wire the dev hot-reload watcher.
  */
 export async function initPluginRuntime(
   input: InitPluginRuntimeInput,

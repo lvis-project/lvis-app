@@ -17,7 +17,7 @@ vi.mock("electron", () => ({
   },
 }));
 
-import { runManifestStartupTools, syncPluginToolRegistry } from "../plugins.js";
+import { syncPluginToolRegistry } from "../plugins.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import { createDynamicTool } from "../../tools/base.js";
 import type { PluginRuntime } from "../../plugins/runtime.js";
@@ -205,32 +205,3 @@ describe("syncPluginToolRegistry — plugin lifecycle sync", () => {
   });
 });
 
-describe("runManifestStartupTools", () => {
-  it("delegates startup tools through the shared plugin tool invoker", async () => {
-    const runtime = {
-      listToolNames: vi.fn(() => ["owner_boot"]),
-      listPluginManifests: vi.fn(() => [
-        {
-          pluginId: "caller",
-          manifest: {
-            ...manifest("caller", ["owner_boot"]),
-            startupTools: ["owner_boot"],
-          },
-        },
-      ]),
-      assertPluginToolAccess: vi.fn(),
-      resolveToolOwner: vi.fn(() => "owner"),
-    } as unknown as PluginRuntime;
-    const invoker = vi.fn(async () => ({ ok: true }));
-
-    runManifestStartupTools(runtime, invoker);
-    await Promise.resolve();
-
-    expect(runtime.assertPluginToolAccess).toHaveBeenCalledWith("caller", "owner_boot");
-    expect(invoker).toHaveBeenCalledWith("owner_boot", {}, {
-      origin: "startup",
-      callerPluginId: "caller",
-      ownerPluginId: "owner",
-    });
-  });
-});

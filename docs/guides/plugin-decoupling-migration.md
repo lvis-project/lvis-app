@@ -2,6 +2,13 @@
 
 > 상태: 적용 시작 (2026-04-17)
 > 범위: lvis-app host, installed plugin manifests
+>
+> **Update 2026-05-14:** manifest `startupTools` 메커니즘은 권한 시스템과 layer
+> 충돌을 일으켜 폐기되었다 (표준 lifecycle 모델 — VS Code `deactivate` / MCP
+> `shutdown` — 정합). 백그라운드 watcher / poller 는 플러그인 자체 `start()`
+> lifecycle 안에서 기동한다. 본 문서의 Phase 1 기록은 *역참조 제거* 라는 의도
+> 자체는 여전히 유효하지만, 그 수단으로서의 `startupTools` 는 더 이상 사용하지
+> 않는다.
 
 ## 목표
 
@@ -57,7 +64,7 @@
 ## 플러그인 개발자 가이드라인
 
 1. 새 플러그인은 반드시 capability를 선언한다.
-2. 앱 부팅 시 동작이 필요하면 startupTools에만 선언하고, 호스트 코드 수정 요청을 하지 않는다.
+2. 앱 부팅 시 동작이 필요하면 플러그인의 `start()` lifecycle 안에서 처리하고, 호스트 코드 수정 요청을 하지 않는다.
 3. 이벤트 연동은 eventSubscriptions를 통해 명시한다.
 4. 레거시 IPC가 필요한 경우 ipcBindings로만 선언한다.
 5. tool name은 underscore 규칙을 지키고, manifest와 runtime handler를 일치시킨다.

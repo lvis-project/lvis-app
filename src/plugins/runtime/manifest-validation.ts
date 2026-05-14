@@ -197,32 +197,6 @@ export async function parsePluginJson(
     }
   }
 
-  if (parsed.startupTools !== undefined && !Array.isArray(parsed.startupTools)) {
-    fail(
-      "startupTools",
-      "must be an array of strings (each value must appear in tools[])",
-      `"startupTools": ["startup_watch"]`,
-    );
-  }
-  const startupTools = parsed.startupTools ?? [];
-  for (let i = 0; i < startupTools.length; i += 1) {
-    const startupMethod = startupTools[i];
-    if (typeof startupMethod !== "string") {
-      fail(
-        `startupTools[${i}]`,
-        "must be a string",
-        `"startupTools": ["startup_watch"]`,
-      );
-    }
-    if (!parsed.tools.includes(startupMethod)) {
-      fail(
-        `startupTools[${i}]`,
-        `entry '${startupMethod}' is not declared in tools[]`,
-        `add "${startupMethod}" to tools[] or remove it from startupTools[]`,
-      );
-    }
-  }
-
   // Sprint 4-A — surface any remaining testMode flag in a protected plugin manifest.
   if (
     normalizeInstallPolicy(parsed) === "admin" &&
