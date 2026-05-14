@@ -150,7 +150,7 @@ const entries = asarList(appAsar);
 const entrySet = new Set(entries);
 
 const requiredEntries = [
-  "/dist/src/main.js",
+  "/dist/src/main/main.js",
   "/dist/src/renderer.js",
   "/dist/src/preload.cjs",
   "/dist/scripts/electron-flags.mjs",

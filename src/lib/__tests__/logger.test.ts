@@ -174,7 +174,7 @@ describe("logger format selection", () => {
   // ── isPackagedElectron branch coverage ────────────────────────────────────
 
   it("Electron + unpackaged (defaultApp=true) → pino-pretty, not JSON", async () => {
-    // Simulates `electron dist/src/main.js` (unpackaged dev run).
+    // Simulates `electron dist/src/main/main.js` (unpackaged dev run).
     // process.versions.electron present, process.defaultApp=true.
     const { transport } = await importLogger(
       {

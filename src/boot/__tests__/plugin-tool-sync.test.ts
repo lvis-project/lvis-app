@@ -40,7 +40,7 @@ function manifest(id: string, tools: string[], version = "1.0.0"): PluginManifes
     name: id,
     version,
     description: "",
-    entry: "dist/main.js",
+    entry: "dist/main/main.js",
     tools,
     toolSchemas: Object.fromEntries(
       tools.map((tool) => [
