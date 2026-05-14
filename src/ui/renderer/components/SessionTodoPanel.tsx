@@ -25,6 +25,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, ListChecks, RotateCcw, Sparkles } from "lucide-react";
 import { Badge } from "../../../components/ui/badge.js";
+import { Button } from "../../../components/ui/button.js";
 import type { LvisApi } from "../types.js";
 
 interface SessionTodoItem {
@@ -166,8 +167,10 @@ export function SessionTodoPanel({
       data-testid="session-todo-panel"
       data-session-id={sessionId ?? ""}
     >
-      <button
-        className="flex w-full items-center gap-2 px-3 py-1.5 hover:bg-warning/10"
+      <Button
+        type="button"
+        variant="ghost"
+        className="h-auto w-full justify-start gap-2 rounded-none px-3 py-1.5 text-xs font-normal hover:bg-warning/10"
         onClick={() => setOpen((o) => !o)}
       >
         {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
@@ -212,7 +215,7 @@ export function SessionTodoPanel({
             {inProgress.content}
           </span>
         )}
-      </button>
+      </Button>
       {open && (
         // Cap the expanded list so a long plan doesn't push the input
         // cluster off-screen — internal scroll preserves the chat layout.

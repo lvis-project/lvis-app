@@ -142,9 +142,29 @@ const FONT_FAMILY_PRESETS: ReadonlyArray<FontFamilyPreset> = [
     stack: "\"Noto Sans KR\", \"Apple SD Gothic Neo\", \"Malgun Gothic\", system-ui, sans-serif",
   },
   {
+    value: "spoqa-han-sans",
+    label: "Spoqa Han Sans Neo",
+    stack: "\"Spoqa Han Sans Neo\", \"Apple SD Gothic Neo\", \"Noto Sans KR\", \"Malgun Gothic\", system-ui, sans-serif",
+  },
+  {
+    value: "apple-sd-gothic",
+    label: "Apple SD Gothic Neo",
+    stack: "\"Apple SD Gothic Neo\", \"Noto Sans KR\", \"Malgun Gothic\", system-ui, sans-serif",
+  },
+  {
     value: "ibm-plex",
     label: "IBM Plex Sans",
     stack: "\"IBM Plex Sans KR\", \"IBM Plex Sans\", system-ui, -apple-system, sans-serif",
+  },
+  {
+    value: "jetbrains-mono",
+    label: "JetBrains Mono",
+    stack: "\"JetBrains Mono\", \"Fira Code\", \"Cascadia Code\", ui-monospace, SFMono-Regular, \"SF Mono\", Menlo, Consolas, monospace",
+  },
+  {
+    value: "fira-code",
+    label: "Fira Code",
+    stack: "\"Fira Code\", \"JetBrains Mono\", \"Cascadia Code\", ui-monospace, SFMono-Regular, \"SF Mono\", Menlo, Consolas, monospace",
   },
 ];
 

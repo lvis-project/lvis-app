@@ -18,6 +18,7 @@
 import { Inbox } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
 import { Badge } from "../../../../components/ui/badge.js";
+import { Button } from "../../../../components/ui/button.js";
 
 export type ModeBadgeVariant = "default" | "strict" | "auto" | "allow" | "unknown";
 
@@ -158,10 +159,12 @@ export function PermissionModeBadge({
 
   return (
     <div className="inline-flex items-center gap-1" data-testid="permission-policy-controls">
-      <button
+      <Button
         type="button"
+        variant="ghost"
+        size="sm"
         onClick={handleClick}
-        className="inline-flex items-center rounded-full focus:outline-none focus:ring-2 focus:ring-ring"
+        className="h-auto rounded-full p-0 hover:bg-transparent"
         title={MODE_DESCRIPTIONS[mode]}
         aria-label={`현재 권한 정책: ${MODE_DESCRIPTIONS[mode]}`}
         data-testid="permission-mode-badge"
@@ -170,13 +173,15 @@ export function PermissionModeBadge({
         <Badge variant="outline" className={`text-[10px] ${MODE_COLOR_CLASSES[mode]}`}>
           {MODE_LABELS[mode]}
         </Badge>
-      </button>
+      </Button>
       {queueVisible && (
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="sm"
           onClick={onQueueClick}
           disabled={!onQueueClick}
-          className="inline-flex items-center rounded-full focus:outline-none focus:ring-2 focus:ring-ring"
+          className="h-auto rounded-full p-0 hover:bg-transparent"
           title={`보류된 승인 큐 열기${pendingText}`}
           aria-label={`보류된 승인 큐 열기${pendingText}`}
           data-testid="permission-queue-button"
@@ -189,7 +194,7 @@ export function PermissionModeBadge({
             <Inbox className="h-3 w-3" aria-hidden="true" />
             {queueLabel}
           </Badge>
-        </button>
+        </Button>
       )}
     </div>
   );

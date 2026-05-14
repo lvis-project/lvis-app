@@ -32,6 +32,8 @@ import type { LvisApi } from "../types.js";
 export function useChatState(api: LvisApi) {
   const [entries, setEntries] = useState<ChatEntry[]>([]);
   const [streaming, setStreaming] = useState(false);
+  /** True while a pre-turn auto-compact (Layer 0 preflight) is running. */
+  const [isCompacting, setIsCompacting] = useState(false);
   const streamRef = useRef("");
   const thoughtRef = useRef("");
   const activeStreamIdRef = useRef<number | null>(null);
@@ -241,6 +243,9 @@ export function useChatState(api: LvisApi) {
         const { groupId, toolUseId, result, isError, uiPayload, durationMs } = ev;
         setEntries((p) => applyToolEnd(p, { groupId, toolUseId, result, isError, uiPayload, durationMs }));
       } else if (ev.type === "error") {
+        // Layer 2 compact may have started but thrown — clear the indicator
+        // so the StatusBar item doesn't stick when compact_notice never arrives.
+        setIsCompacting(false);
         setEntries((p) => {
           // Error during an overlay-trigger import turn: also close the
           // card's streaming indicator so the spinner doesn't hang
@@ -302,7 +307,13 @@ export function useChatState(api: LvisApi) {
             ...(ev.breakdown ? { breakdown: ev.breakdown } : {}),
           },
         ]);
+      } else if (ev.type === "compact_started") {
+        // Pre-turn auto-compact started — show a transient "자동 압축 중..." hint.
+        // Cleared when `compact_notice` (completion) arrives.
+        setIsCompacting(true);
       } else if (ev.type === "compact_notice") {
+        // Compact completed — clear the in-progress indicator.
+        setIsCompacting(false);
         // §457 PR-A: emit a structured `kind: "checkpoint"` entry instead of
         // a free-text system bubble. ChatView reads `tier` to pick a
         // tier-aware label/color. Keeping the old prose route would
@@ -311,18 +322,55 @@ export function useChatState(api: LvisApi) {
         // contain that token. See Issue #457 Phase 1+2 cleanup.
         const removed = ev.removedMessages ?? 0;
         const freed = ev.freedTokens ?? 0;
-        setEntries((p) => [
-          ...p,
-          {
-            kind: "checkpoint",
+        const estimatedAfter = ev.estimatedAfter;
+        setEntries((p) => {
+          const hasReliableAfter = typeof estimatedAfter === "number" && estimatedAfter >= 0;
+          // Synthetic usage carrier only when we have a reliable signal:
+          //   1. Engine-supplied `estimatedAfter` (preferred — exact post-compact tokens), or
+          //   2. `freedTokens > 0` (legacy fallback: subtract from lastKnown)
+          // When BOTH are absent (older IPC + zero-removed no-op), emitting a
+          // synthetic context_usage with stale lastKnown is misleading —
+          // it overwrites genuine turn_summary state. Skip in that case.
+          const checkpointEntry = {
+            kind: "checkpoint" as const,
             removedMessages: removed,
             freedTokens: freed,
             ...(ev.tier ? { tier: ev.tier } : {}),
             ...(ev.summary ? { summary: ev.summary } : {}),
             ...(ev.compactNum !== undefined ? { compactNum: ev.compactNum } : {}),
-          },
-        ]);
+          };
+          if (!hasReliableAfter && freed <= 0) {
+            return [...p, checkpointEntry];
+          }
+          let postCompactTokens: number;
+          if (hasReliableAfter) {
+            postCompactTokens = estimatedAfter;
+          } else {
+            let lastKnownTokens = 0;
+            for (let i = p.length - 1; i >= 0; i--) {
+              const e = p[i];
+              if (e?.kind === "turn_summary" || e?.kind === "context_usage") {
+                lastKnownTokens = e.tokensIn;
+                break;
+              }
+            }
+            postCompactTokens = Math.max(0, lastKnownTokens - freed);
+          }
+          return [
+            ...p,
+            checkpointEntry,
+            {
+              kind: "context_usage" as const,
+              tokensIn: postCompactTokens,
+              source: "session-estimate" as const,
+            },
+          ];
+        });
       } else if (ev.type === "done") {
+        // Defensive clear — if compact started but compact_notice never
+        // arrived (engine error path swallowed the throw), this prevents
+        // the indicator from sticking forever.
+        setIsCompacting(false);
         if (debugStreamEnabled) {
           debugLog("stream", "done:enter", {
             accStream: streamRef.current.length,
@@ -596,6 +644,8 @@ export function useChatState(api: LvisApi) {
     streamRef.current = "";
     thoughtRef.current = "";
     activeStreamIdRef.current = null;
+    // New chat: any prior session's in-flight compact indicator is stale.
+    setIsCompacting(false);
   }, []);
 
   const appendUserMessage = useCallback((content: string): void => {
@@ -612,6 +662,10 @@ export function useChatState(api: LvisApi) {
   }, []);
 
   const applyLoadedSession = useCallback((loaded: ChatEntry[]) => {
+    // Session switch: clear any in-flight compact indicator. If a compact
+    // was running in the previous session, its compact_notice may never
+    // arrive for this hook instance — the StatusBar hint would stick.
+    setIsCompacting(false);
     setEntries(loaded);
   }, []);
 
@@ -620,6 +674,11 @@ export function useChatState(api: LvisApi) {
   }, []);
 
   const truncateToEntry = useCallback((entryIndex: number) => {
+    // Edit/retry rewind drops history forward of `entryIndex`. If a pre-turn
+    // compact was mid-flight, its `compact_notice` will land in a different
+    // streaming context (or never arrive for this hook instance), so clear
+    // the indicator here too — same class as applyLoadedSession / clearForNewChat.
+    setIsCompacting(false);
     setEntries((p) => p.slice(0, entryIndex + 1));
   }, []);
 
@@ -649,6 +708,7 @@ export function useChatState(api: LvisApi) {
     entries,
     streaming,
     setStreaming,
+    isCompacting,
     beginStreamingRequest,
     finishStreamingRequest,
     editingEntryIdx,
