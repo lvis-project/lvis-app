@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "../../..");
-const MAIN_ENTRY = resolve(REPO_ROOT, "dist/src/main.js");
+const MAIN_ENTRY = resolve(REPO_ROOT, "dist/src/main/main.js");
 
 const LONG_INPUT_SUMMARY = JSON.stringify({
   allowedPlugins: [],
@@ -21,7 +21,7 @@ const LONG_INPUT_SUMMARY = JSON.stringify({
 });
 
 test.describe("deferred queue modal", () => {
-  test.skip(!existsSync(MAIN_ENTRY), "dist/src/main.js not built; run bun run build first");
+  test.skip(!existsSync(MAIN_ENTRY), "dist/src/main/main.js not built; run bun run build first");
 
   let app: ElectronApplication;
   let page: Page;

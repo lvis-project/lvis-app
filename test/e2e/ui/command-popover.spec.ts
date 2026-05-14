@@ -3,7 +3,7 @@ import { test, expect } from './fixtures';
 /**
  * E2E tests for the unified CommandPopover (PR-A: B안).
  *
- * These tests require `bun run build` to have produced dist/src/main.js.
+ * These tests require `bun run build` to have produced dist/src/main/main.js.
  * All tests hard-fail when the UI trigger is not visible — a missing trigger
  * is a real regression, not a skip. The fixture waits up to 60 s for React
  * to boot before handing control to tests.
