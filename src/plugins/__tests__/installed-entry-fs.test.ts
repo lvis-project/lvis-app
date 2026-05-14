@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, open, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { tombstoneAndDeferredRemove } from "../installed-entry-fs.js";
+import { tombstoneAndDeferredRemove, TOMBSTONE_SUBDIR } from "../installed-entry-fs.js";
 
 describe("tombstoneAndDeferredRemove", () => {
   let pluginsRoot: string;
@@ -21,60 +21,98 @@ describe("tombstoneAndDeferredRemove", () => {
     await rm(pluginsRoot, { recursive: true, force: true });
   });
 
-  it("renames the install dir to a .uninstalling-<ts> tombstone", async () => {
-    const tombstone = await tombstoneAndDeferredRemove(installedDir, {
+  it("renames the install dir into +tombstones+/<id>-<ts>-<rand>", async () => {
+    const tombstone = await tombstoneAndDeferredRemove(installedDir, pluginsRoot, {
       now: () => 1715000000000,
+      randomSuffix: () => "deadbeef",
     });
 
-    expect(tombstone).toBe(`${installedDir}.uninstalling-1715000000000`);
+    expect(tombstone).toBe(join(pluginsRoot, TOMBSTONE_SUBDIR, "local-indexer-1715000000000-deadbeef"));
     // Original dir is gone
     await expect(stat(installedDir)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("creates the tombstone subdir if missing (idempotent on repeat)", async () => {
+    await tombstoneAndDeferredRemove(installedDir, pluginsRoot, {
+      now: () => 1,
+      randomSuffix: () => "a",
+    });
+    // Repeat with another fresh dir to hit the existing subdir path
+    const second = join(pluginsRoot, "second-plugin");
+    await mkdir(second);
+    await writeFile(join(second, "plugin.json"), "{}");
+    const tombstone2 = await tombstoneAndDeferredRemove(second, pluginsRoot, {
+      now: () => 2,
+      randomSuffix: () => "b",
+    });
+    expect(tombstone2).toBe(join(pluginsRoot, TOMBSTONE_SUBDIR, "second-plugin-2-b"));
   });
 
   it("returns null when the install dir is already gone (ENOENT)", async () => {
     await rm(installedDir, { recursive: true, force: true });
 
-    const result = await tombstoneAndDeferredRemove(installedDir);
+    const result = await tombstoneAndDeferredRemove(installedDir, pluginsRoot);
 
     expect(result).toBeNull();
   });
 
   it("eventually rms the tombstone (deferred rm completes)", async () => {
-    const tombstone = await tombstoneAndDeferredRemove(installedDir, {
+    const tombstone = await tombstoneAndDeferredRemove(installedDir, pluginsRoot, {
       now: () => 9999,
+      randomSuffix: () => "x",
     });
     expect(tombstone).not.toBeNull();
 
-    // Wait briefly for the fire-and-forget rm to complete. macOS/Linux
-    // unlink succeeds immediately on closed files; this should not flake.
+    // Wait briefly for the fire-and-forget rm to complete
     await new Promise((resolve) => setTimeout(resolve, 100));
 
-    const remaining = await readdir(pluginsRoot);
-    expect(remaining).toEqual([]);
-  });
-
-  it("preserves contents in the tombstone (rename is non-destructive)", async () => {
-    const tombstone = await tombstoneAndDeferredRemove(installedDir, {
-      now: () => 1,
-      // Suppress the deferred rm by intercepting its failure path —
-      // we want to read the tombstone before rm completes. Easier: use
-      // a near-future timestamp that makes the tombstone uniquely
-      // identifiable, then race the rm by checking immediately.
-      onDeferredRmError: () => undefined,
-    });
-    expect(tombstone).not.toBeNull();
-    // Note: rm may have already completed by the time we read; this test
-    // primarily verifies the rename happened (assert via tombstone path).
-    expect(tombstone).toMatch(/\.uninstalling-1$/);
+    const remainingInTombstones = await readdir(join(pluginsRoot, TOMBSTONE_SUBDIR));
+    expect(remainingInTombstones).toEqual([]);
   });
 
   it("does not throw when the deferred rm callback is omitted", async () => {
-    // Contract: callers may omit onDeferredRmError. The function must
-    // resolve cleanly even if the deferred rm later fails (no unhandled
-    // rejection). Hard to reliably trigger rm failure cross-platform —
-    // smoke test that the call completes without throwing.
     await expect(
-      tombstoneAndDeferredRemove(installedDir, { now: () => 42 }),
-    ).resolves.toMatch(/\.uninstalling-42$/);
+      tombstoneAndDeferredRemove(installedDir, pluginsRoot, {
+        now: () => 42,
+        randomSuffix: () => "z",
+      }),
+    ).resolves.toMatch(/local-indexer-42-z$/);
+  });
+
+  it("simulates EBUSY tolerance: rename succeeds even with an open file handle inside", async () => {
+    // macOS/Linux allow rename of dir with open files (no exception). On
+    // NTFS this is the documented MoveFileExW behaviour. Simulate by
+    // holding an open handle to a file inside; rename must still succeed.
+    const fh = await open(join(installedDir, "data", "fts5.sqlite"), "r");
+    try {
+      const tombstone = await tombstoneAndDeferredRemove(installedDir, pluginsRoot, {
+        now: () => 7,
+        randomSuffix: () => "w",
+      });
+      expect(tombstone).toMatch(/local-indexer-7-w$/);
+      // Original install dir is renamed away
+      await expect(stat(installedDir)).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await fh.close();
+    }
+  });
+
+  it("uses random suffix to avoid same-millisecond collision", async () => {
+    // Two uninstalls of different dirs in the same ms — random suffix differs
+    const second = join(pluginsRoot, "second-plugin");
+    await mkdir(second);
+    await writeFile(join(second, "plugin.json"), "{}");
+
+    const t1 = await tombstoneAndDeferredRemove(installedDir, pluginsRoot, {
+      now: () => 100,
+      randomSuffix: () => "aaaa",
+    });
+    const t2 = await tombstoneAndDeferredRemove(second, pluginsRoot, {
+      now: () => 100,
+      randomSuffix: () => "bbbb",
+    });
+    expect(t1).not.toBe(t2);
+    expect(t1).toMatch(/-100-aaaa$/);
+    expect(t2).toMatch(/-100-bbbb$/);
   });
 });

@@ -849,12 +849,20 @@ export class PluginMarketplaceService {
     const installedManifestDir = dirname(manifestPath);
     if (!this.isWithin(this.pluginsRoot, installedManifestDir)) return;
 
-    // Windows-atomic uninstall: rename to tombstone (succeeds even with
-    // open SQLite WAL/SHM handles inside on NTFS) → defer rm so registry
-    // write proceeds. Orphan sweeper (sweepOrphanUninstallDirs at boot)
+    // Windows-atomic uninstall: rename to a tombstone under +tombstones+/
+    // (collision-free namespace; `+` not in plugin id allowed chars), then
+    // fire-and-forget rm. Lifecycle ordering enforced upstream
+    // (pluginRuntime.removePlugin runs before this) reduces the window where
+    // handles are still held; the tombstone-defer pattern is dual-defense
+    // for the residual ~ms gap between stop() resolving and the OS releasing
+    // the SQLite WAL/SHM file descriptors. The orphan sweeper at next boot
     // picks up any tombstone whose deferred rm hit EBUSY. See
-    // installed-entry-fs.ts for the rationale and OS-specific notes.
-    await tombstoneAndDeferredRemove(installedManifestDir, {
+    // installed-entry-fs.ts for OS-specific rationale.
+    //
+    // NOTE: this returns BEFORE the rm completes. Callers that need
+    // synchronous removal (none today) should not assume the install dir
+    // is gone after this resolves.
+    await tombstoneAndDeferredRemove(installedManifestDir, this.pluginsRoot, {
       onDeferredRmError: (tombstone, err) => {
         log.warn(
           `removeInstalledEntry: tombstone rm deferred to orphan sweeper: ${tombstone} (${err.message})`,

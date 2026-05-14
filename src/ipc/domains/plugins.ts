@@ -324,6 +324,16 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       } catch (err) {
         const message = errMessage(err) || "addPlugin failed";
         try {
+          // Lifecycle ordering parity with the user-driven uninstall path:
+          // addPlugin may have partially started (opened DB, spawned worker)
+          // before throwing. Run runtime cleanup first so handles are
+          // released before marketplace.uninstall hits rm. removePlugin is
+          // best-effort here — failure shouldn't block the rm rollback.
+          await pluginRuntime.removePlugin(result.pluginId).catch((rmPluginErr) => {
+            log.warn(
+              `install rollback removePlugin failed for ${result.pluginId}: ${errMessage(rmPluginErr)}`,
+            );
+          });
           await pluginMarketplace.uninstall(result.pluginId);
         } catch (rollbackErr) {
           // Rollback failure is logged; original error still surfaces
@@ -354,11 +364,19 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     // Lifecycle ordering (architecture §9): stop → unregister → unload → remove.
     // pluginRuntime.removePlugin() runs the plugin's stop() + disposers, which
     // is the ONLY chance for plugin code to release OS resources (DB handles,
-    // file watchers, child processes). Calling pluginMarketplace.uninstall()
-    // first means rm hits files that are still open — on Windows the SQLite
-    // WAL/SHM unlinks fail with EBUSY (errno -4082) and leave a half-deleted
-    // plugin dir + a still-mutated registry entry, so the next webview click
-    // gets `entry-url-outside-install-root`. Pre-fix issue: github.com/lvis-project/lvis-app#TBD.
+    // file watchers, child processes). The order MUST be removePlugin first,
+    // marketplace.uninstall second so rm runs after handles are released —
+    // see PR #734 for the Windows EBUSY history.
+    //
+    // Note: this lifecycle reordering REDUCES the EBUSY window but does not
+    // fully eliminate it. removePlugin currently swallows stop()/disposer
+    // errors (runtime/index.ts:715-731) and the OS may take a few ms to
+    // actually flush the SQLite WAL/SHM file descriptors after stop()
+    // resolves. The dual-defense is the tombstone-and-deferred-rm pattern
+    // in marketplace.removeInstalledEntry — directory rename succeeds even
+    // with open handles inside (NTFS) so the registry write can proceed; any
+    // EBUSY on the deferred rm is swept on next boot. Both layers together
+    // give EBUSY-tolerance.
     try {
       await pluginRuntime.removePlugin(pluginId);
     } catch (err) {
@@ -422,6 +440,16 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       } catch (err) {
         const message = errMessage(err) || "addPlugin failed";
         try {
+          // Lifecycle ordering parity with the user-driven uninstall path:
+          // addPlugin may have partially started (opened DB, spawned worker)
+          // before throwing. Run runtime cleanup first so handles are
+          // released before marketplace.uninstall hits rm. removePlugin is
+          // best-effort here — failure shouldn't block the rm rollback.
+          await pluginRuntime.removePlugin(result.pluginId).catch((rmPluginErr) => {
+            log.warn(
+              `install rollback removePlugin failed for ${result.pluginId}: ${errMessage(rmPluginErr)}`,
+            );
+          });
           await pluginMarketplace.uninstall(result.pluginId);
         } catch (rollbackErr) {
           log.warn(
@@ -912,8 +940,17 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       // confusing error. Return `plugin-not-loaded` and trigger a runtime
       // purge so the plugin card disappears on next refresh.
       if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-        void pluginRuntime.removePlugin(pluginId).catch(() => {
-          // best-effort — runtime may already be in cleanup mid-flight
+        // Auto-purge the runtime tracking entry so the plugin card disappears
+        // on next refresh. Fire-and-forget — we want to return promptly to
+        // the webview-register IPC. Concurrent uninstall in flight is OK
+        // (removePlugin is map-level idempotent + JS event-loop serialized);
+        // log on failure for forensics rather than swallowing silently.
+        void pluginRuntime.removePlugin(pluginId).catch((purgeErr) => {
+          plog(
+            "warn",
+            { pluginId, phase: PluginPhase.WEBVIEW_REJECT, reason: "auto-purge-failed", error: (purgeErr as Error).message },
+            "register-webview auto-purge after ENOENT failed",
+          );
         });
         logRegisterReject("plugin-not-loaded", { webContentsId, pluginId, reason: "install-dir-missing" });
         plog("warn", { pluginId, phase: PluginPhase.WEBVIEW_REJECT, webContentsId, reason: "plugin-not-loaded" }, "webview register rejected (install dir missing)");

@@ -49,6 +49,7 @@ import { RealCloudMarketplaceFetcher } from "./plugins/real-cloud-marketplace-fe
 import { PluginArtifactStore } from "./plugins/plugin-artifact-store.js";
 import { getBundledPublicKeys } from "./plugins/publisher-keys.js";
 import { sweepOrphanUninstallDirs } from "./plugins/orphan-uninstall-sweeper.js";
+import { resolvePluginPaths } from "./plugins/plugin-paths.js";
 import { StarredStore } from "./data/starred-store.js";
 import { FeedbackStore } from "./data/feedback-store.js";
 import { McpGovernance } from "./mcp/mcp-governance.js";
@@ -209,12 +210,30 @@ export async function bootstrap(
   // §4.2 Step 3 + 5: PluginRuntime + per-plugin HostApi factory.
   // Sweep orphan uninstall tombstones from prior session FIRST (before
   // initPluginRuntime touches pluginsRoot for discovery). The Windows
-  // uninstall path leaves `<plugin>.uninstalling-<ts>` dirs behind when
-  // SQLite WAL/SHM handles weren't released in time; this is the only
+  // uninstall path leaves tombstones under `<pluginsRoot>/+tombstones+/`
+  // when SQLite WAL/SHM handles weren't released in time; this is the only
   // moment where the previous worker process is guaranteed gone.
+  //
+  // pluginsRoot resolution MUST go through `resolvePluginPaths()` (which
+  // honors the `LVIS_HOME` env override via `lvisHome()`) — `homedir()`
+  // alone would silently sweep `~/.lvis/plugins` even in e2e fixtures
+  // pointing at a per-test temp dir, masking real bugs.
   // Fire-and-forget — sweep failure must not block boot.
-  const pluginsRootForSweep = `${homedir()}/.lvis/plugins`;
-  void sweepOrphanUninstallDirs(pluginsRootForSweep)
+  const sweeperPluginPaths = resolvePluginPaths();
+  void sweepOrphanUninstallDirs(sweeperPluginPaths.pluginsRoot, {
+    auditFailures: (failures) => {
+      // Surface persistent rm failures (typically antivirus / corp endpoint
+      // protection holding handles past process death) into the audit log
+      // so operators see them beyond the info-level summary line.
+      bootAuditLogger.log({
+        timestamp: new Date().toISOString(),
+        sessionId: "boot",
+        type: "warn",
+        input: `plugin-tombstone-sweep-failed root=${sweeperPluginPaths.pluginsRoot}`,
+        output: JSON.stringify(failures),
+      });
+    },
+  })
     .then(({ swept, failed }) => {
       if (swept.length > 0 || failed.length > 0) {
         log.info(
