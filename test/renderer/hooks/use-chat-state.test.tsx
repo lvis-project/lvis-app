@@ -52,6 +52,42 @@ describe("useChatState", () => {
     });
   });
 
+  it("keeps overlay-import responses in the normal assistant stream", async () => {
+    const { api, emitChatStream } = makeMockLvisApi();
+    const { result } = renderHook(() => useChatState(api as unknown as LvisApi));
+
+    act(() => {
+      result.current.insertImportedTriggerEntry({
+        sessionId: "trigger-1",
+        pluginId: "meeting",
+        prompt: "<imported-from-overlay source=\"overlay:meeting-summary\">요약</imported-from-overlay>",
+        summary: "회의 요약",
+        title: "회의",
+      });
+      emitChatStream({ type: "text_delta", text: "assistant reply" });
+    });
+
+    await waitFor(() => {
+      const imported = result.current.entries.find((e) => e.kind === "imported_trigger");
+      const assistant = result.current.entries.find((e) => e.kind === "assistant");
+      expect(imported).toMatchObject({ kind: "imported_trigger", sessionId: "trigger-1" });
+      expect(Object.keys(imported ?? {}).sort()).toEqual([
+        "importedAt",
+        "kind",
+        "prompt",
+        "sessionId",
+        "source",
+        "summary",
+        "toolCallCount",
+      ]);
+      expect(assistant).toMatchObject({
+        kind: "assistant",
+        text: "assistant reply",
+        streaming: true,
+      });
+    });
+  });
+
   it("dispatches a permission badge refresh event when slash mode changes", async () => {
     const { api, emitChatStream } = makeMockLvisApi();
     const listener = vi.fn();

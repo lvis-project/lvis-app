@@ -2,7 +2,7 @@
 //
 // Two source variants share the same card shell:
 //   - routine: running=true shows spinner, false shows "결과 보기" (only when jsonl exists)
-//   - plugin insertion: running=false shows primaryActionLabel ("지금 답하기")
+//   - plugin insertion: running=false shows primaryActionLabel ("확인하기")
 //
 // Policy:
 //   - Single active card with prev/next queue navigation
@@ -16,8 +16,8 @@
 // C1: running phase — when running=true shows spinner + "진행 중…" instead of
 // summary + actions. Transitions to done phase when running flips to false.
 
-import { useMemo } from "react";
-import { ChevronLeft, ChevronRight, Loader2, X } from "lucide-react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Loader2, X } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
 import {
   Card,
@@ -52,7 +52,7 @@ export interface OverlayCardProps {
    * (e.g. notification-only routine with no JSONL session).
    */
   onPrimaryAction?: () => void;
-  /** Label for the primary action button — e.g. "결과 보기" or "지금 답하기" */
+  /** Label for the primary action button — e.g. "결과 보기" or "확인하기" */
   primaryActionLabel?: string;
   /** Source kind — drives status label when not running ("루틴 완료" vs "플러그인 알림") */
   kind?: "routine" | "plugin";
@@ -90,7 +90,21 @@ export function OverlayCard({
   primaryActionLabel,
   kind = "routine",
 }: OverlayCardProps) {
+  const [expanded, setExpanded] = useState(false);
+  const [isOverflowing, setIsOverflowing] = useState(false);
+  const summaryRef = useRef<HTMLParagraphElement | null>(null);
   const relTime = useMemo(() => relativeTime(firedAt), [firedAt]);
+
+  // Layout 측정으로 정확한 truncation 감지 — `scrollHeight > clientHeight`
+  // 비교. CSS `line-clamp-2` 의 실제 overflow 여부를 폰트/너비 기반으로
+  // 측정. 휴리스틱 (newline≥2 || length>120) 의 false-positive (짧지만
+  // 줄바꿈 많은 컨텐츠 — "더 보기" 무효 클릭) 와 false-negative (긴
+  // 단일라인 < 120자 — 잘리지만 버튼 안 보임) 양쪽 다 회피.
+  useLayoutEffect(() => {
+    const el = summaryRef.current;
+    if (!el || expanded) return;
+    setIsOverflowing(el.scrollHeight > el.clientHeight + 1);
+  }, [summary, expanded]);
 
   const isoLabel = useMemo(() => {
     try {
@@ -192,7 +206,42 @@ export function OverlayCard({
         {running ? (
           <p className="text-xs text-muted-foreground/70">루틴 실행 중입니다. 잠시 기다려 주세요.</p>
         ) : summary ? (
-          <p className="line-clamp-2 break-words text-xs text-muted-foreground">{summary}</p>
+          <>
+            <p
+              ref={summaryRef}
+              className={
+                expanded
+                  ? "max-h-64 overflow-y-auto whitespace-pre-wrap break-words text-xs text-muted-foreground"
+                  : "line-clamp-2 break-words text-xs text-muted-foreground"
+              }
+              data-testid="overlay-card-summary"
+              data-expanded={expanded}
+            >
+              {summary}
+            </p>
+            {(isOverflowing || expanded) && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="mt-1 h-6 gap-1 px-1 text-[11px] text-muted-foreground hover:text-foreground"
+                data-testid="overlay-card-expand-toggle"
+                aria-expanded={expanded}
+                onClick={() => setExpanded((v) => !v)}
+              >
+                {expanded ? (
+                  <>
+                    <ChevronUp className="h-3 w-3" />
+                    접기
+                  </>
+                ) : (
+                  <>
+                    <ChevronDown className="h-3 w-3" />
+                    더 보기
+                  </>
+                )}
+              </Button>
+            )}
+          </>
         ) : (
           <p className="text-xs text-muted-foreground/50">요약 없음</p>
         )}

@@ -185,12 +185,12 @@ export type ChatEntry =
       tokensIn: number;
       source: "session-estimate";
     }
-  // Overlay trigger that the user accepted ("지금 답하기"). The
+  // Overlay trigger that the user accepted ("확인하기"). The
   // trigger session ran in an isolated ConversationLoop; once imported,
-  // its messages live in the chat loop's history (so the LLM has
-  // context for the user's next turn) but the renderer collapses the
-  // whole interaction into ONE card. Rendering as a user-message
-  // bubble would be wrong on two axes:
+  // its prompt enters the main chat loop, but the visible entry is only
+  // an input provenance marker. Assistant output, tool groups, and
+  // turn_summary entries continue through the normal chat renderer.
+  // Rendering the prompt as a user-message bubble would be wrong on two axes:
   //   1. The plugin authored that prompt, not the user — showing "나" /
   //      keyword-routing prefix misattributes authorship.
   //   2. The trigger session is intentionally distinct from chat —
@@ -210,15 +210,6 @@ export type ChatEntry =
       toolCallCount: number;
       /** Wall-clock timestamp the import landed. */
       importedAt: string;
-      /**
-       * Chat LLM's response to the overlay prompt, streamed in after the
-       * user clicks 확인하기. Lives inside the imported card so the
-       * overlay trigger flow stays visually grouped — separate user/assistant
-       * bubbles would scatter the interaction across the chat.
-       */
-      response?: string;
-      /** True while the response is mid-stream. */
-      responseStreaming?: boolean;
     }
   // Turn aggregate footer — appended after the final assistant entry of a
   // turn. Carries the totals shown by `TurnSummaryFooter` (step count,
@@ -298,66 +289,8 @@ export function appendImportedTriggerEntry(
     {
       kind: "imported_trigger",
       ...payload,
-      response: "",
-      responseStreaming: true,
     },
   ];
-}
-
-/**
- * Find the most recent imported_trigger entry with `responseStreaming`
- * still true. Returns -1 when none. Tool calls and reasoning events
- * may insert child entries AFTER an imported_trigger, so we don't
- * assume "last entry"; instead scan from the tail for the open
- * streaming card.
- */
-function findStreamingImportedTriggerIndex(entries: ChatEntry[]): number {
-  for (let i = entries.length - 1; i >= 0; i -= 1) {
-    const e = entries[i];
-    if (e.kind === "imported_trigger" && e.responseStreaming) return i;
-  }
-  return -1;
-}
-
-/**
- * Stream a delta into the open imported_trigger entry's response —
- * keeps the chat LLM's reply inside the imported-trigger card instead of
- * spawning a sibling assistant bubble. No-op when no streaming
- * imported_trigger exists (regular chat turn).
- */
-export function appendDeltaToImportedTriggerResponse(
-  entries: ChatEntry[],
-  delta: string,
-): ChatEntry[] {
-  const idx = findStreamingImportedTriggerIndex(entries);
-  if (idx < 0) return entries;
-  const target = entries[idx] as Extract<ChatEntry, { kind: "imported_trigger" }>;
-  const next: ChatEntry[] = [...entries];
-  next[idx] = { ...target, response: (target.response ?? "") + delta };
-  return next;
-}
-
-/** Mark the imported_trigger response as no longer streaming (server "done"). */
-export function finalizeImportedTriggerResponse(
-  entries: ChatEntry[],
-  transformResponse?: (response: string) => string,
-): ChatEntry[] {
-  const idx = findStreamingImportedTriggerIndex(entries);
-  if (idx < 0) return entries;
-  const target = entries[idx] as Extract<ChatEntry, { kind: "imported_trigger" }>;
-  const next: ChatEntry[] = [...entries];
-  const response = target.response ?? "";
-  next[idx] = {
-    ...target,
-    response: transformResponse && response ? transformResponse(response) : target.response,
-    responseStreaming: false,
-  };
-  return next;
-}
-
-/** True while a streaming imported_trigger card is open (text deltas redirect into it). */
-export function isImportedTriggerStreaming(entries: ChatEntry[]): boolean {
-  return findStreamingImportedTriggerIndex(entries) >= 0;
 }
 
 export function upsertStreamingReasoning(

@@ -382,22 +382,12 @@ function HistoricalEntriesList({
             // markdown 으로 render — plugin prompt 의 `\n` + list (`- 항목`) +
             // **bold** 등을 살림. plain `<p>` 시 CSS `white-space: normal` 이
             // newline 을 collapse 해 모든 내용이 한 줄로 붙어 가독성 손상.
-            // response 측 (아래) 과 같은 markdown 파이프라인 재사용.
+            // 일반 assistant 렌더와 같은 markdown 파이프라인 재사용.
             <div className="mt-1 text-muted-foreground prose prose-sm lvis-prose max-w-none">
               <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>
                 {entry.summary}
               </ReactMarkdown>
             </div>
-          )}
-          {entry.response && (
-            <div className="mt-2 text-foreground/80 prose prose-sm lvis-prose max-w-none">
-              <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>
-                {entry.response}
-              </ReactMarkdown>
-            </div>
-          )}
-          {entry.responseStreaming && !entry.response && (
-            <p className="mt-1 text-muted-foreground animate-pulse">응답 중...</p>
           )}
         </div>,
       );
@@ -1268,16 +1258,6 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
                   </div>
                   {entry.summary && (
                     <p className="mt-1 text-muted-foreground">{entry.summary}</p>
-                  )}
-                  {entry.response && (
-                    <div className="mt-2 text-foreground/80 prose prose-sm lvis-prose max-w-none">
-                      <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>
-                        {entry.response}
-                      </ReactMarkdown>
-                    </div>
-                  )}
-                  {entry.responseStreaming && !entry.response && (
-                    <p className="mt-1 text-muted-foreground animate-pulse">응답 중...</p>
                   )}
                 </div>,
               );
