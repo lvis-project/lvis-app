@@ -264,10 +264,10 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const isFull = liveAttachments.length >= ATTACH_MAX_COUNT;
 
   return (
-    <div data-testid="composer" className="min-w-0 px-3">
+    <div data-testid="composer" className="min-w-0">
       <div
         data-testid="composer-input-bar"
-        className="flex min-w-0 w-full items-stretch gap-0 overflow-hidden rounded-xl bg-input-bar shadow-md"
+        className="flex min-w-0 w-full items-stretch gap-0 overflow-hidden"
       >
         {/* Strip is rendered ONLY when there is at least one attachment so
             the empty state does not reserve horizontal space. Single chip

@@ -1613,6 +1613,10 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             }
             approvalSlot={<DeferredApprovalChip draftText={question} />}
           />
+          {/* v6 layout: Composer (textarea) + BottomActionRow (TokenRing/가이드/
+              단축키/취소/Send) 가 하나의 흰색 컨테이너 안. 사용자 인지 = "타이핑
+              영역 + 즉시 액션" 한 묶음. shadow-md + rounded-xl 로 경계 강조. */}
+          <div className="mx-3 rounded-xl bg-input-bar shadow-md overflow-hidden">
           <Composer
             ref={composerRef}
             text={question}
@@ -1690,6 +1694,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             }}
             guideDisabled={!streaming || question.trim().length === 0}
           />
+          </div>
           {/* v6 Stage 4b: PermissionModeBadge + DeferredApprovalChip 모두
               InputActionBar trailing 으로 이전 완료. 본 자리 비움. */}
         </div>
