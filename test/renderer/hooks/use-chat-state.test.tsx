@@ -177,12 +177,10 @@ describe("useChatState", () => {
     errSpy.mockRestore();
   });
 
-  it("guidance_injected appends a system entry without disturbing streaming assistant", async () => {
-    // New non-interrupting "guide" mode (chat utterance taxonomy redesign):
-    // engine consumes a queued guide utterance at the round boundary and
-    // emits a `guidance_injected` event. Renderer must surface it as a
-    // visible system entry so the user sees their direction-adjustment
-    // landed — without touching the in-flight assistant entry.
+  it("guidance_injected appends a user bubble with injectHint='queue' without disturbing streaming assistant", async () => {
+    // 사용자 피드백 (2026-05-15): system entry ("방향 지시 적용:") 대신 일반
+    // user bubble + injectHint="queue" 배지. mid-turn brake-point 의 큐 인입은
+    // 사용자 입력 누적의 자동 발화이므로 user kind 가 mental model 정합.
     const { api, emitChatStream } = makeMockLvisApi();
     const { result } = renderHook(() => useChatState(api as unknown as LvisApi));
 
@@ -194,8 +192,8 @@ describe("useChatState", () => {
     });
 
     await waitFor(() => {
-      const systemEntries = result.current.entries.filter((e) => e.kind === "system") as Array<{ text: string }>;
-      expect(systemEntries.some((e) => e.text === "방향 지시 적용: 더 짧게")).toBe(true);
+      const userEntries = result.current.entries.filter((e) => e.kind === "user") as Array<{ text: string; injectHint?: "queue" | "interrupt" }>;
+      expect(userEntries.some((e) => e.text === "더 짧게" && e.injectHint === "queue")).toBe(true);
     });
     // Streaming assistant entry is preserved — guide is non-interrupting.
     const assistants = result.current.entries.filter((e) => e.kind === "assistant") as Array<{ text: string; streaming?: boolean }>;
