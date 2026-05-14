@@ -85,9 +85,9 @@ describe("RoutinePanel scope payload mapping", () => {
     fireEvent.change(dateInputs[0]!, { target: { value: validFutureDate() } });
 
     // Toggle plugin on then off — exercising the click path. Final state empty.
-    const checkbox = getByTestId("routine-allowed-plugin-plugin-a") as HTMLInputElement;
+    const checkbox = getByTestId("routine-allowed-plugin-plugin-a");
     fireEvent.click(checkbox); // selected
-    expect(checkbox.checked).toBe(true);
+    expect(checkbox.getAttribute("aria-checked")).toBe("true");
 
     // Click the "선택 해제 (플러그인 사용 안 함)" button — clears selection.
     const clearBtn = getByTestId("routine-clear-allowed-plugins");

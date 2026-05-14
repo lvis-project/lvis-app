@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
 import { Input } from "../../../components/ui/input.js";
+import { NativeSelect, NativeSelectOption } from "../../../components/ui/native-select.js";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
 import { Separator } from "../../../components/ui/separator.js";
 import type { AuditEntry } from "../../../audit/audit-logger.js";
@@ -174,20 +175,21 @@ export function AuditTab() {
             </div>
           </div>
           <div className="flex gap-2">
-            <select
-              className="h-8 flex-shrink-0 rounded-md border bg-background px-2 text-xs"
+            <NativeSelect
+              size="sm"
+              className="w-32 flex-shrink-0"
               value={typeFilter}
               onChange={(e) => setTypeFilter(e.target.value)}
             >
-              <option value="">모든 유형</option>
-              <option value="turn">turn</option>
-              <option value="tool_call">tool_call</option>
-              <option value="approval">approval</option>
-              <option value="warn">warn</option>
-              <option value="error">error</option>
-              <option value="mcp_connect">mcp_connect</option>
-              <option value="kill_switch">kill_switch</option>
-            </select>
+              <NativeSelectOption value="">모든 유형</NativeSelectOption>
+              <NativeSelectOption value="turn">turn</NativeSelectOption>
+              <NativeSelectOption value="tool_call">tool_call</NativeSelectOption>
+              <NativeSelectOption value="approval">approval</NativeSelectOption>
+              <NativeSelectOption value="warn">warn</NativeSelectOption>
+              <NativeSelectOption value="error">error</NativeSelectOption>
+              <NativeSelectOption value="mcp_connect">mcp_connect</NativeSelectOption>
+              <NativeSelectOption value="kill_switch">kill_switch</NativeSelectOption>
+            </NativeSelect>
             <Input
               className="h-8 flex-1 text-xs"
               placeholder="텍스트 검색..."

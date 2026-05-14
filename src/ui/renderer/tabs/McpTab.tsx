@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
+import { Checkbox } from "../../../components/ui/checkbox.js";
 import { Input } from "../../../components/ui/input.js";
+import { NativeSelect, NativeSelectOption } from "../../../components/ui/native-select.js";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
 import { Separator } from "../../../components/ui/separator.js";
 import { Textarea } from "../../../components/ui/textarea.js";
@@ -491,17 +493,18 @@ export function McpTab() {
                 <label htmlFor={formIds.transport} className="text-xs">
                   Transport *
                 </label>
-                <select
+                <NativeSelect
                   id={formIds.transport}
-                  className="h-7 w-full rounded-md border bg-background px-2 text-xs"
+                  size="sm"
+                  className="w-full"
                   value={form.transport}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, transport: e.target.value as Transport }))
                   }
                 >
-                  <option value="stdio">stdio (로컬 프로세스)</option>
-                  <option value="http">http (원격 서버)</option>
-                </select>
+                  <NativeSelectOption value="stdio">stdio (로컬 프로세스)</NativeSelectOption>
+                  <NativeSelectOption value="http">http (원격 서버)</NativeSelectOption>
+                </NativeSelect>
               </div>
             </div>
 
@@ -510,18 +513,19 @@ export function McpTab() {
                 <label htmlFor={formIds.auth} className="text-xs">
                   Auth
                 </label>
-                <select
+                <NativeSelect
                   id={formIds.auth}
-                  className="h-7 w-full rounded-md border bg-background px-2 text-xs"
+                  size="sm"
+                  className="w-full"
                   value={form.auth}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, auth: e.target.value as typeof EMPTY_FORM.auth }))
                   }
                 >
-                  <option value="none">없음</option>
-                  <option value="sso">SSO</option>
-                  <option value="api-key">API Key</option>
-                </select>
+                  <NativeSelectOption value="none">없음</NativeSelectOption>
+                  <NativeSelectOption value="sso">SSO</NativeSelectOption>
+                  <NativeSelectOption value="api-key">API Key</NativeSelectOption>
+                </NativeSelect>
               </div>
               <div className="space-y-1">
                 <label htmlFor={formIds.apiKey} className="text-xs">
@@ -595,14 +599,13 @@ export function McpTab() {
                   />
                 </div>
                 <div className="flex items-center gap-2">
-                  <input
+                  <Checkbox
                     id={formIds.allowPrivateNetworks}
-                    type="checkbox"
                     checked={form.allowPrivateNetworks}
-                    onChange={(e) =>
-                      setForm((f) => ({ ...f, allowPrivateNetworks: e.target.checked }))
+                    onCheckedChange={(checked) =>
+                      setForm((f) => ({ ...f, allowPrivateNetworks: checked === true }))
                     }
-                    className="h-3.5 w-3.5"
+                    className="size-3.5"
                   />
                   <label htmlFor={formIds.allowPrivateNetworks} className="text-xs">
                     사설 네트워크 허용 (localhost/사내망)
