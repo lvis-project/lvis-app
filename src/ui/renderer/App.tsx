@@ -87,6 +87,10 @@ export function App() {
   const [question, setQuestion] = useState("");
   const chatEndRef = useRef<HTMLDivElement>(null);
   const turnRequestRef = useRef(0);
+  // In-flight guard for kind="action" sidebar dispatches — keyed by
+  // `${pluginId}:${tool}`. Prevents duplicate fires from rapid double-clicks
+  // when no panel transition is visible to throttle the user naturally.
+  const pluginActionInflightRef = useRef<Set<string>>(new Set());
   // Ref so handlePluginPrimaryAction (defined before handleAsk) can call
   // handleAsk without a forward-declaration TS error. Updated each render.
   const handleAskRef = useRef<(
@@ -427,6 +431,46 @@ export function App() {
       if (key.startsWith("plugin:")) {
         const view = pluginViews.find((v) => toViewKey(v) === key);
         if (!view) return;
+        // kind="action" entries never open a panel/window — host directly
+        // dispatches the declared tool. uiCallable allowlist is enforced
+        // downstream in runtime/index.ts:callFromUi. Active view state is
+        // intentionally NOT changed so the user stays on whatever they
+        // were looking at (chat / settings / etc.). slot==="sidebar" 는
+        // 현재 schema 가 강제하지만 future enum 확장 시 defense-in-depth.
+        if (view.extension.kind === "action" && view.extension.slot === "sidebar") {
+          const actionTool = view.extension.tool;
+          if (typeof actionTool !== "string" || actionTool.length === 0) {
+            console.warn(
+              `[plugin-action] ${view.pluginId} extension ${view.extension.id} has kind="action" but no tool field — manifest validation should have caught this`,
+            );
+            return;
+          }
+          // In-flight guard: 사용자가 동일 action 아이콘을 빠르게 N번 클릭하면
+          // N번 동시 디스패치 surface 가 열림 (mutating tool 일 때 실해). per
+          // (pluginId, tool) 단위로 in-flight 추적해 진행 중이면 swallow.
+          const inflightKey = `${view.pluginId}:${actionTool}`;
+          if (pluginActionInflightRef.current.has(inflightKey)) {
+            return;
+          }
+          pluginActionInflightRef.current.add(inflightKey);
+          void (async () => {
+            try {
+              await api.callPluginMethod(actionTool);
+            } catch (err) {
+              // Raw err.message 는 OAuth refresh-token / Bearer header fragment
+              // 가 포함될 수 있어 사용자 chat 영역에 그대로 노출하지 않는다.
+              // 진단용 raw 는 console.warn 으로만 보존.
+              console.warn(
+                `[plugin-action] ${view.pluginId} tool '${actionTool}' failed`,
+                err,
+              );
+              setErrorWithThought("오류: 플러그인 액션을 실행할 수 없습니다.");
+            } finally {
+              pluginActionInflightRef.current.delete(inflightKey);
+            }
+          })();
+          return;
+        }
         const isDetachedView = view.extension.window?.defaultMode === "detached";
         if (isDetachedView) {
           void openDetachedPluginView(key);

@@ -174,6 +174,40 @@ describe("runtime manifest validation hardening", () => {
     ).toBe(true);
   });
 
+  it("4c) ui[] kind=\"action\" without tool fails load", async () => {
+    await writePlugin("p_action_bad", {
+      ui: [
+        { id: "a", slot: "sidebar", kind: "action", title: "A" },
+      ],
+    });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const cap = captureErrors();
+    try {
+      await runtime.load();
+    } finally {
+      cap.restore();
+    }
+    expect(runtime.listPluginIds()).not.toContain("p_action_bad");
+    expect(
+      cap.errors.some((e) =>
+        /ui\[0\].*kind="action" missing required field\(s\): tool/.test(e),
+      ),
+    ).toBe(true);
+  });
+
+  it("4d) ui[] kind=\"action\" with valid tool loads", async () => {
+    await writePlugin("p_action_ok", {
+      tools: ["my_tool"],
+      ui: [
+        { id: "a", slot: "sidebar", kind: "action", title: "A", tool: "my_tool" },
+      ],
+      uiCallable: ["my_tool"],
+    });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    await runtime.load();
+    expect(runtime.listPluginIds()).toContain("p_action_ok");
+  });
+
   it("4b) ui[] non-plain-object entries fail load instead of being dropped", async () => {
     await writePlugin("p_ui_bad", {
       ui: [
