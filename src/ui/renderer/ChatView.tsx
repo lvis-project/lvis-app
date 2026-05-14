@@ -340,6 +340,8 @@ function HistoricalEntriesList({
             tier={entry.tier}
             messageCount={entry.removedMessages}
             compactNum={entry.compactNum}
+            compactStatus={entry.compactStatus}
+            truncatedDir={entry.truncatedDir}
             onEnterView={onEnterView}
             onBranchFrom={onBranchFrom}
           />
@@ -967,6 +969,8 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
                   tier={entry.tier}
                   messageCount={entry.removedMessages}
                   compactNum={entry.compactNum}
+                  compactStatus={entry.compactStatus}
+                  truncatedDir={entry.truncatedDir}
                   onEnterView={handleEnterView}
                   onBranchFrom={handleBranchFrom}
                 />,
