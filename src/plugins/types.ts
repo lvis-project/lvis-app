@@ -34,6 +34,22 @@ export type OpenAuthWindowBaseOptions = {
   timeoutMs?: number;
   windowTitle?: string;
   persistPartition?: string;
+  /**
+   * Whether the auth window is rendered visibly. Default `true` for
+   * interactive logins (the user must see + interact with the IdP page).
+   * Set to `false` for silent-SSO warmups where the page is expected to
+   * complete via residual IdP cookies in `persistPartition` and never
+   * requires user input — the BrowserWindow still loads + harvests
+   * cookies + emits navigation events but is never shown.
+   *
+   * `show: false` MUST pair with an explicit `timeoutMs` so a hidden
+   * SSO challenge (captcha, MFA prompt) cannot hang the warmup forever
+   * invisible to the user.
+   *
+   * @default true
+   * @since SDK 5.6.0
+   */
+  show?: boolean;
 };
 
 export type OpenAuthWindowWithFinalUrlOptions = OpenAuthWindowBaseOptions & {
