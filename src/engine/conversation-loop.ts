@@ -123,6 +123,17 @@ export interface TurnCallbacks {
      */
     compactNum?: number;
   }) => void;
+  /**
+   * Fired at the start of a pre-turn auto-compact (Layer 0 preflight) so the
+   * renderer can show a "자동 압축 중..." indicator before the potentially
+   * long-running LLM compaction finishes. Complementary to `onCompactOccurred`
+   * which fires on completion.
+   */
+  onCompactStarted?: (info: {
+    triggerSource: "estimate" | "actual-tokensIn" | "manual";
+    estimatedBefore: number;
+    preflight: number;
+  }) => void;
   onFallback?: (from: string, to: string) => void;
   onLlmStatus?: (status: FallbackStatus) => void;
   /**
@@ -768,7 +779,7 @@ export class ConversationLoop {
    *
    * R14 lock — 동시 compact race 방지.
    */
-  async manualCompact(callbacks?: Pick<TurnCallbacks, "onCompactOccurred">): Promise<{
+  async manualCompact(callbacks?: Pick<TurnCallbacks, "onCompactOccurred" | "onCompactStarted">): Promise<{
     compacted: boolean;
     compactedAt: string | null;
     summary: string;
@@ -800,6 +811,14 @@ export class ConversationLoop {
     this.isCompacting = true;
     try {
       const messagesBefore = this.history.getMessages();
+      // Mirror runPreflightGuard's pre-compact UX hint so slash-`/compact`
+      // also lights up the "자동 압축 중..." StatusBar indicator during the
+      // potentially long-running LLM summarization.
+      callbacks?.onCompactStarted?.({
+        triggerSource: "manual",
+        estimatedBefore: estimateMessagesTokens(messagesBefore),
+        preflight,
+      });
       const result = await compactWithBoundary({
         messages: messagesBefore,
         llm: this.provider,
@@ -809,21 +828,10 @@ export class ConversationLoop {
       });
 
       if (result === null || result.removedCount === 0) {
-        // Distinguish two no-op cases so the user can act:
-        //   (a) genuinely small history → "not needed" is accurate
-        //   (b) huge single message (loaded session preamble, long
-        //       turn_summary, etc.) that compact cannot shrink — the
-        //       generic "not needed" message hides the actual deadlock
-        //       (ring at 130%+ but /compact refuses). Report the live
-        //       token count + actionable guidance instead.
-        const tokens = estimateMessagesTokens(messagesBefore);
-        const usagePct = Math.round((tokens / preflight) * 100);
         return {
           compacted: false,
           compactedAt: null,
-          summary: usagePct >= 100
-            ? `컴팩트가 줄일 수 있는 메시지가 없습니다 — 현재 ${tokens.toLocaleString()} 토큰 (preflight 의 ${usagePct}%). 단일 메시지가 너무 크거나 모두 보존 영역(preserveRecent=${preserveRecentTokens.toLocaleString()} 토큰) 안에 있습니다. 새 세션을 시작하거나 가장 큰 메시지를 직접 삭제하세요.`
-            : "컴팩트 불필요: 메시지 수가 충분히 적습니다.",
+          summary: "컴팩트 불필요: 메시지 수가 충분히 적습니다.",
           removedMessageCount: 0,
         };
       }
@@ -1857,21 +1865,20 @@ export class ConversationLoop {
 
     const messagesBefore = this.history.getMessages();
     const estimated = estimateMessagesTokens(messagesBefore);
-    // Secondary trigger: use actual provider-reported input tokens from the
-    // previous turn as a corroborating signal. estimateMessagesTokens() can
-    // undercount by 15-25% for code-heavy English content (chars/4 heuristic
-    // vs real 3-3.5 chars/token). If the last round's actual tokensIn already
-    // exceeds the preflight threshold we compact immediately rather than
-    // waiting for the estimate to catch up.
-    const actualTokensIn = this.cumulativeUsage.inputTokens;
-    if (estimated < preflight && actualTokensIn < preflight) return;
-
-    const triggerSource = estimated >= preflight ? "estimate" : "actual-tokensIn";
+    if (estimated < preflight) return;
 
     this.isCompacting = true;
+    // Notify renderer immediately so it can show a "자동 압축 중..." indicator
+    // before the blocking LLM compaction call. `onCompactOccurred` fires on
+    // completion; this fires at start so there is no silent wait.
+    callbacks?.onCompactStarted?.({
+      triggerSource: "estimate",
+      estimatedBefore: estimated,
+      preflight,
+    });
     try {
       log.info(
-        `preflight: TRIGGER(${triggerSource}) — estimated=${estimated} actualTokensIn=${actualTokensIn} preflight=${preflight} (model=${provider}/${model}) → Layer 2 compact #${this.compactNum + 1}`,
+        `preflight: TRIGGER — estimated=${estimated} >= preflight=${preflight} (model=${provider}/${model}) → Layer 2 compact #${this.compactNum + 1}`,
       );
       // preserve budget = preflight 의 40% — Cline preserve-recent-tokens 휴리스틱 (per-model 추가 조정 가능).
       const preserveRecentTokens = Math.max(1_000, Math.floor(preflight * 0.4));
