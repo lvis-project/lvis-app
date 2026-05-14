@@ -16,7 +16,6 @@
  */
 
 import type { ReactNode } from "react";
-import { ArrowUp } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
 import type { UserKeyboardIntentSnapshot } from "../../../shared/chat-origin.js";
 
@@ -99,7 +98,6 @@ export function BottomActionRow({
           data-testid="composer-send-button"
           className="inline-flex h-7 items-center gap-1.5 px-3 text-xs font-semibold"
         >
-          <ArrowUp className="h-3 w-3" />
           <span>{isBusy ? "메시지 큐에 추가" : "전송"}</span>
           <KbdInverse>⏎</KbdInverse>
         </Button>
