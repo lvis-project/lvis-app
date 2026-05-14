@@ -840,7 +840,7 @@ export class ConversationLoop {
         return {
           compacted: false,
           compactedAt: null,
-          summary: usagePct >= 100
+          summary: usagePct >= 80
             ? `컴팩트가 줄일 수 있는 메시지가 없습니다 — 현재 ${tokens.toLocaleString()} 토큰 (preflight 의 ${usagePct}%). 단일 메시지가 너무 크거나 모두 보존 영역(preserveRecent=${preserveRecentTokens.toLocaleString()} 토큰) 안에 있습니다. 새 세션을 시작하거나 가장 큰 메시지를 직접 삭제하세요.`
             : "컴팩트 불필요: 메시지 수가 충분히 적습니다.",
           removedMessageCount: 0,
