@@ -24,6 +24,7 @@ import { MessageQueueStore } from "./state/message-queue-store.js";
 import { SubAgentCard } from "./components/SubAgentCard.js";
 import { TokenCostBadge } from "./components/TokenCostBadge.js";
 import { TokenProgressRing } from "./components/TokenProgressRing.js";
+import { BottomActionRow } from "./components/BottomActionRow.js";
 import { PermissionModeBadge } from "./components/permissions/PermissionModeBadge.js";
 import { SkillBadge } from "./components/SkillBadge.js";
 import { WorkGroup } from "./components/WorkGroup.js";
@@ -1444,28 +1445,62 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
                   : "질문 입력 (Enter 전송 · Cmd/Ctrl+V 첨부) · /command 사용 가능"
             }
           />
-          <div className="flex min-w-0 items-center justify-between gap-3 px-3">
-            <div className="flex min-w-0 items-center gap-2">
-              <TokenProgressRing used={usedTokens} budget={contextBudget} />
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className={`text-[11px] font-mono ${costBadgeClass}`} title="예상 비용">
-                    {formatCostBadge(costEstimate.total)}
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent className="text-xs">
-                  <div>입력: {costEstimate.inputTokens.toLocaleString()} tok · ${costEstimate.inputCost.toFixed(5)}</div>
-                  <div>출력(추정): {costEstimate.outputTokens.toLocaleString()} tok · ${costEstimate.outputCost.toFixed(5)}</div>
-                  <div className="font-semibold">합계: ${costEstimate.total.toFixed(5)}</div>
-                </TooltipContent>
-              </Tooltip>
-            </div>
-            <div className="ml-auto flex shrink-0 items-center justify-end">
-              <PermissionModeBadge
-                onClick={() => onOpenSettings("permissions")}
-                onQueueClick={onOpenPermissionQueue}
-              />
-            </div>
+          <BottomActionRow
+            tokenSlot={
+              <div className="flex min-w-0 items-center gap-2">
+                <TokenProgressRing used={usedTokens} budget={contextBudget} />
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className={`text-[11px] font-mono ${costBadgeClass}`} title="예상 비용">
+                      {formatCostBadge(costEstimate.total)}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent className="text-xs">
+                    <div>입력: {costEstimate.inputTokens.toLocaleString()} tok · ${costEstimate.inputCost.toFixed(5)}</div>
+                    <div>출력(추정): {costEstimate.outputTokens.toLocaleString()} tok · ${costEstimate.outputCost.toFixed(5)}</div>
+                    <div className="font-semibold">합계: ${costEstimate.total.toFixed(5)}</div>
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+            }
+            isBusy={streaming}
+            isSendDisabled={
+              (hasApiKey === false || contextOverflowPct >= 0.95 || viewMode !== null) &&
+              !question.trimStart().startsWith("/")
+                ? true
+                : question.trim().length === 0 && attachments.length === 0
+            }
+            onSend={() => void onAsk(question, { inputOrigin: "user-keyboard", token: "" })}
+            onCancel={() => void onAbort()}
+            onGuide={() => {
+              // Stage 4: 가이드 버튼 = ChatView 의 onGuide 호출 위임. Stage 5 에서
+              // ⌘K 단축키 + open guide modal 추가 예정. 현재는 streaming 중
+              // 방향지시 와 동일 동작 (text 비어있어도 시도).
+              const text = question;
+              void (async () => {
+                const result = await onGuide(text);
+                if (result?.ok === true) {
+                  setQuestion("");
+                } else if (result?.ok === false) {
+                  const message =
+                    result.error === "queue-full" ? "방향 지시가 너무 많아 대기열이 가득 찼습니다." :
+                    result.error === "too-long" ? "방향 지시 한 건이 너무 깁니다 (최대 8000자)." :
+                    result.error === "no-active-turn" ? "진행 중인 응답이 없어 방향 지시를 보낼 수 없습니다." :
+                    `방향 지시 전송 실패: ${result.error}`;
+                  onGuideError(message);
+                }
+              })();
+            }}
+            guideDisabled={!streaming || question.trim().length === 0}
+          />
+          {/* PermissionModeBadge 의 위치 = TOP ROW (InputActionBar trailing) 으로
+              이전. Stage 4b commit 에서 InputActionBar 수정. 임시로 actions cluster
+              아래 둘 곳 없으니 우측 하단에 별도 row 로 유지 (placeholder). */}
+          <div className="flex shrink-0 items-center justify-end px-3 pb-1">
+            <PermissionModeBadge
+              onClick={() => onOpenSettings("permissions")}
+              onQueueClick={onOpenPermissionQueue}
+            />
           </div>
         </div>
         <QuestionOverlay
