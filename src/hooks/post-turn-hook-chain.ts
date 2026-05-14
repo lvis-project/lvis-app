@@ -12,8 +12,7 @@
 import { markStaleToolResults } from "../engine/auto-compact.js";
 import { stubMarkedToolResults } from "../engine/wire-serialize.js";
 import { detectFromStream, type DetectorResult } from "../engine/checkpoint-detector.js";
-import { chainTitle } from "../engine/title-chainer.js";
-import type { GenericMessage, TokenUsage, LLMProvider } from "../engine/llm/types.js";
+import type { GenericMessage, TokenUsage } from "../engine/llm/types.js";
 import type { MemoryManager } from "../memory/memory-manager.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
 import type { IdleSchedulerService } from "../main/idle-scheduler.js";
@@ -49,13 +48,6 @@ export interface PostTurnHookChainDeps {
   auditLogger?: AuditLogger;
   idleScheduler?: IdleSchedulerService;
   settingsService?: SettingsService;
-  /**
-   * §PR-3: optional LLM provider for chainTitle fallback.
-   * When supplied and detectFromStream returns no newTitle, chainTitle is
-   * called as a mini-call to generate a session title from existing title +
-   * final answer. Omit in tests / lightweight setups to skip the fallback.
-   */
-  llmProvider?: LLMProvider;
   /**
    * §PR-3: optional callback invoked when a legacy [checkpoint] marker is detected.
    * Caller (typically conversation-loop or IPC bridge) can trigger PR-4 summary.
@@ -109,22 +101,18 @@ export class PostTurnHookChain {
     //    Run before persistence so durable session history stores the same
     //    cleaned assistant output that the caller and renderer receive.
     let detector: DetectorResult = { cleanedText: ctx.output, newTitle: null, checkpointSuggested: false };
-    const continuousBackendEnabled =
-      this.deps.settingsService?.get("features")?.experimentalContinuousBackend ?? false;
-    if (continuousBackendEnabled) {
-      try {
-        detector = detectFromStream(ctx.output);
-        if (detector.checkpointSuggested) {
-          log.info(`detect-checkpoint: legacy [checkpoint] marker stripped for session ${ctx.sessionId}`);
-          try {
-            this.deps.onCheckpointSuggested?.(ctx.sessionId, detector.cleanedText);
-          } catch (cbErr) {
-            log.warn("onCheckpointSuggested callback failed: %s", cbErr);
-          }
+    try {
+      detector = detectFromStream(ctx.output);
+      if (detector.checkpointSuggested) {
+        log.info(`detect-checkpoint: legacy [checkpoint] marker stripped for session ${ctx.sessionId}`);
+        try {
+          this.deps.onCheckpointSuggested?.(ctx.sessionId, detector.cleanedText);
+        } catch (cbErr) {
+          log.warn("onCheckpointSuggested callback failed: %s", cbErr);
         }
-      } catch (err) {
-        log.warn("detect-checkpoint failed: %s", err);
       }
+    } catch (err) {
+      log.warn("detect-checkpoint failed: %s", err);
     }
     const outputForHooks = detector.cleanedText;
     const outputForPersistence =
@@ -170,34 +158,22 @@ export class PostTurnHookChain {
       log.warn("extractMemory failed: %s", err);
     }
 
-    // 5. §PR-3: Update Title — newTitle 있으면 session metadata 업데이트
-    //    없으면 chainTitle LLM fallback (llmProvider 주입된 경우에만)
-    //    Skipped when experimentalContinuousBackend feature flag is OFF.
-    if (continuousBackendEnabled) {
-      try {
-        if (this.deps.memoryManager) {
-          let titleToStore: string | null = detector.newTitle;
-
-          // Load metadata once and reuse for both chainTitle input and saveSessionMetadata.
-          const sessionMeta = this.deps.memoryManager.loadSessionMetadata(ctx.sessionId) ?? {};
-
-          if (!titleToStore && this.deps.llmProvider) {
-            // chainTitle fallback: 현재 세션 메타데이터에서 직접 제목 조회 (listSessions I/O 비용 회피)
-            const existingTitle = sessionMeta.title ?? `세션 ${ctx.sessionId.slice(0, 8)}`;
-            titleToStore = await chainTitle(this.deps.llmProvider, existingTitle, detector.cleanedText);
-          }
-
-          if (titleToStore) {
-            await this.deps.memoryManager.saveSessionMetadata(ctx.sessionId, {
-              ...sessionMeta,
-              title: titleToStore,
-            });
-            log.info(`update-title: session ${ctx.sessionId} title set to "${titleToStore}"`);
-          }
-        }
-      } catch (err) {
-        log.warn("update-title failed: %s", err);
+    // 5. Legacy [title] marker handling — newTitle 가 detector 에서 추출되면
+    //    session metadata 에 저장. LLM-based title chaining 은 PR #729 에서
+    //    완전 제거됨 (호출처가 없는 dead code 였음 — No Fallback Code 룰).
+    //    LLM title chaining 을 재도입하려면 별도 PR 에서 llmProvider 주입 +
+    //    빈도 게이트 (e.g. "N turn 마다") 를 함께 설계.
+    try {
+      if (this.deps.memoryManager && detector.newTitle) {
+        const sessionMeta = this.deps.memoryManager.loadSessionMetadata(ctx.sessionId) ?? {};
+        await this.deps.memoryManager.saveSessionMetadata(ctx.sessionId, {
+          ...sessionMeta,
+          title: detector.newTitle,
+        });
+        log.info(`update-title: session ${ctx.sessionId} title set to "${detector.newTitle}"`);
       }
+    } catch (err) {
+      log.warn("update-title failed: %s", err);
     }
 
     // 6. Audit Log (§14.2)

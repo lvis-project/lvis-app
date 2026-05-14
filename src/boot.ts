@@ -353,12 +353,6 @@ export async function bootstrap(
     pluginRuntime,
     getActiveSkillsSection: (sessionId) => skillOverlay.buildSection(sessionId),
   });
-  // Initialize the safety flag from persisted settings so the first turn
-  // respects whatever the user last saved (default false on fresh installs).
-  systemPromptBuilder.setContinuousBackendEnabled(
-    settingsService.get("features")?.experimentalContinuousBackend ?? false,
-  );
-
   // §6.3: PermissionManager (Layer 2-3).
   const permissionManager = await createPermissionManager();
   toolRegistry.setDenyRules(permissionManager.getVisibilityDenyRules());

@@ -86,15 +86,6 @@ export interface AuditSettings {
  */
 export interface FeatureFlags {
   /**
-   * Phase 1 continuous-backend behaviors (checkpoint detection, title chaining,
-   * rolling summary preamble in system prompt).
-   * Default false — OFF until explicitly verified by user.
-   * When OFF: Section 8 + 9.9 system prompt sources are skipped, post-turn
-   * detect-checkpoint / update-title steps are skipped.
-   * (PR-2-F-2: 3-tier rotation 폐지 후 — Layer 0 preflight 는 이 flag 와 독립적으로 동작.)
-   */
-  experimentalContinuousBackend?: boolean;
-  /**
    * When true, idle IDLE_SCAN may send local preference/memory sources to the
    * configured LLM to refresh user-preferences.md. Default false: manual only.
    */
@@ -379,7 +370,6 @@ const DEFAULT_SETTINGS: AppSettings = {
   plugins: {},
   pluginConfigs: {},
   features: {
-    experimentalContinuousBackend: false,
     idlePreferenceRefresh: false,
   },
 };
@@ -893,9 +883,6 @@ function normalizeFeatureFlags(input: unknown): FeatureFlags {
   }
   const obj = input as Record<string, unknown>;
   const result: FeatureFlags = {};
-  if (typeof obj.experimentalContinuousBackend === "boolean") {
-    result.experimentalContinuousBackend = obj.experimentalContinuousBackend;
-  }
   if (typeof obj.idlePreferenceRefresh === "boolean") {
     result.idlePreferenceRefresh = obj.idlePreferenceRefresh;
   }
