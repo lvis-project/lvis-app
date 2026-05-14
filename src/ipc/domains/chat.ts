@@ -179,6 +179,13 @@ async function runStreamedTurn(
         send({ type: "tool_end", name, result: toolResult, isError, ...meta, ...(uiPayload && { uiPayload }), durationMs }),
       onError: (error) => send({ type: "error", error }),
       onPermissionModeChanged: (mode) => send({ type: "permission_mode_changed", mode }),
+      onCompactStarted: ({ triggerSource, estimatedBefore, preflight }) =>
+        send({
+          type: "compact_started",
+          triggerSource,
+          estimatedBefore,
+          preflight,
+        }),
       onCompactOccurred: ({ removedMessages, freedTokens, estimatedAfter, tier, summary, compactNum }) =>
         send({
           type: "compact_notice",
@@ -464,7 +471,24 @@ export function registerChatHandlers(deps: IpcDeps): void {
 
   ipcMain.handle("lvis:chat:compact", (e) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:compact", e); return UNAUTHORIZED_FRAME; }
-    return conversationLoop.manualCompact();
+    // Wire onCompactStarted/onCompactOccurred so slash-/compact also shows
+    // the "자동 압축 중..." StatusBar indicator (parity with Layer 0 preflight
+    // path which gets it via runStreamedTurn callbacks). streamId is omitted
+    // because manualCompact runs outside the per-turn stream.
+    return conversationLoop.manualCompact({
+      onCompactStarted: ({ triggerSource, estimatedBefore, preflight }) =>
+        sendToWebContents(e.sender, "lvis:chat:stream", { type: "compact_started", triggerSource, estimatedBefore, preflight }, log),
+      onCompactOccurred: ({ removedMessages, freedTokens, estimatedAfter, tier, summary, compactNum }) =>
+        sendToWebContents(e.sender, "lvis:chat:stream", {
+          type: "compact_notice",
+          removedMessages,
+          freedTokens,
+          estimatedAfter,
+          ...(tier !== undefined ? { tier } : {}),
+          ...(summary !== undefined ? { summary } : {}),
+          ...(compactNum !== undefined ? { compactNum } : {}),
+        }, log),
+    });
   });
 
   ipcMain.handle("lvis:chat:session-resume", (e, sessionId: string) => {
