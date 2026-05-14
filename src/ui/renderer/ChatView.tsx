@@ -786,11 +786,11 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     return () => window.removeEventListener("keydown", handler);
   }, [streaming, messageQueueStore, onAbort]);
 
-  // Stage 5: ⌘⏎ — composer textarea 에서만 즉시 주입 (인터럽트).
-  // IME 조합 중 / 모달 열림 시 무시. document-level keydown 으로 처리 (Composer 가
-  // messageQueueStore 의존을 안 가지도록).
+  // ⌘⏎ — composer textarea 에서 즉시 주입. busy 시 = 인터럽트 (LLM abort + 새
+  // turn). idle 시도 동작 (큐가 있으면 큐+입력 inject, 없으면 입력만 send).
+  // 사용자 mental model: "⌘⏎ = 지금 즉시 보내" — busy/idle 무관 일관 동작.
+  // 가드 (streaming) 제거 — 사용자 보고 2026-05-15 (idle ⌘⏎ 가 무동작이던 회귀).
   useEffect(() => {
-    if (!streaming) return;
     const handler = (e: KeyboardEvent) => {
       if (e.key !== "Enter") return;
       if (!(e.metaKey || e.ctrlKey)) return;
@@ -813,7 +813,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [streaming, handleImmediateInject]);
+  }, [handleImmediateInject]);
 
   // Stage 5 follow-up: ⌘K = 가이드 호출. BottomActionRow 의 ghost 버튼과 동일
   // onGuide 위임. text 비어 있으면 noop. busy 와 무관 (idle 에서도 가이드 가능).
