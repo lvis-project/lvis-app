@@ -516,6 +516,20 @@ export type LvisApi = {
     onDetachedNavigate: (handler: (viewKey: string) => void) => () => void;
     onLoadSessionInMain: (handler: (sessionId: string) => void) => () => void;
   };
+  /**
+   * Dev tools bridge — only useful in non-production NODE_ENV. Renderer
+   * floating panel uses these to adjust Layer 0 preflight threshold at
+   * runtime. production builds reject set/get with `production-disabled`.
+   */
+  dev: {
+    setPreflightOverride: (tokens: number | null) => Promise<
+      { ok: true; value: number | null } | { ok: false; error: string }
+    >;
+    getPreflightStatus: () => Promise<
+      | { ok: true; runtimeOverride: number | null; envOverride: number | null; effective: number; provider: string; model: string }
+      | { ok: false; error: string }
+    >;
+  };
 };
 
 // ─── Approval types (mirrored from approval-gate.ts — no node import in renderer) ─

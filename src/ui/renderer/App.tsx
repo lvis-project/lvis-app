@@ -18,6 +18,7 @@ import { ApprovalQueueStatus } from "./components/ApprovalQueueStatus.js";
 import { DeferredQueueDialog } from "./dialogs/DeferredQueueDialog.js";
 import { buildQuickActions } from "./components/command-actions.js";
 import { MainToolbar } from "./MainToolbar.js";
+import { DevToolsPanel } from "./components/DevToolsPanel.js";
 import { MainContent } from "./MainContent.js";
 import {
   Dialog,
@@ -106,6 +107,22 @@ export function App() {
   const [deferredQueueOpen, setDeferredQueueOpen] = useState(false);
   const [activeView, setActiveView] = useState("home");
   const [commandPopoverOpen, setCommandPopoverOpen] = useState(false);
+  const [devToolsOpen, setDevToolsOpen] = useState(false);
+
+  // Dev tools — Cmd/Ctrl+Shift+D toggles the floating panel. Bound regardless
+  // of NODE_ENV (production main process rejects the IPC anyway), but the
+  // toolbar indicator + dead-code elimination keep the panel hidden in
+  // production builds via `IS_DEV_MODE` guard in MainToolbar.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.shiftKey && (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "d") {
+        e.preventDefault();
+        setDevToolsOpen((v) => !v);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   const { updates: marketplaceUpdates, dismiss: dismissMarketplaceUpdates } = useMarketplaceUpdates(api);
   const { status: bootstrapStatus, dismiss: dismissBootstrapStatus, retry: retryBootstrap } = useBootstrapStatus(api);
   const { queue: approvalQueue, decide: handleApprovalDecide } = useApproval();
@@ -895,6 +912,12 @@ export function App() {
             onOpenDetachedView={(viewKey) => {
               void openDetachedBuiltInView(viewKey);
             }}
+            onOpenDevTools={() => setDevToolsOpen((v) => !v)}
+          />
+          <DevToolsPanel
+            api={api}
+            open={devToolsOpen}
+            onClose={() => setDevToolsOpen(false)}
           />
           {searchOpen && (
             <UnifiedSearchPanel

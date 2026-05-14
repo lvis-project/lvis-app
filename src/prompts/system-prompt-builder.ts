@@ -91,13 +91,6 @@ export class SystemPromptBuilder {
    */
   private summaryPreamble: string | null = null;
 
-  /**
-   * Safety flag: experimentalContinuousBackend (default false).
-   * When false, Section 8 (Rolling Summary Preamble) and Section 9.9
-   * (Conversation Continuity Guard) are omitted from the built prompt to prevent
-   * system prompt contamination and silent LLM instruction issues.
-   */
-  private continuousBackendEnabled: boolean = false;
 
   /**
    * Routine session mode flag (default false).
@@ -239,7 +232,7 @@ export class SystemPromptBuilder {
   setSummaryPreamble(preamble: string | null): void {
     const newLen = preamble && preamble.length > 0 ? preamble.length : 0;
     log.info(
-      `setSummaryPreamble: ${newLen > 0 ? `INJECTED len=${newLen}` : "CLEARED"} continuousBackend=${this.continuousBackendEnabled}`,
+      `setSummaryPreamble: ${newLen > 0 ? `INJECTED len=${newLen}` : "CLEARED"}`,
     );
     this.summaryPreamble = preamble && preamble.length > 0 ? preamble : null;
   }
@@ -250,15 +243,6 @@ export class SystemPromptBuilder {
    */
   clearSummaryPreamble(): void {
     this.setSummaryPreamble(null);
-  }
-
-  /**
-   * Safety gate: sets whether the continuous-backend prompt sections
-   * (Section 8 Rolling Summary Preamble and Section 9.9 Conversation Continuity Guard)
-   * are included. Default false — caller must explicitly enable.
-   */
-  setContinuousBackendEnabled(enabled: boolean): void {
-    this.continuousBackendEnabled = enabled;
   }
 
   /**
@@ -499,7 +483,6 @@ export class SystemPromptBuilder {
       name: "Rolling Summary Preamble",
       refresh: "on-change",
       build: () => {
-        if (!this.continuousBackendEnabled) return "";
         const preamble = this.summaryPreamble;
         if (!preamble) return "";
         return [
@@ -558,7 +541,6 @@ export class SystemPromptBuilder {
       name: "Conversation Continuity Guard",
       refresh: "per-turn",
       build: () => {
-        if (!this.continuousBackendEnabled) return "";
         const titleLine = this.sessionTitle
           ? `현재 세션 제목: "${this.sessionTitle}"\n\n`
           : "";
