@@ -2,10 +2,12 @@
  * manualCompact — user-flow scenario suite for /compact slash command.
  *
  * Verifies behaviour from the user's perspective (not function-level):
- *   M3-A: at usagePct ≥ 80 with a no-op compact result → actionable
- *         deadlock guidance message (covers orange zone too, not just red).
- *   M3-B: at usagePct < 80 with a no-op compact result → generic
- *         "not needed" message.
+ *   M3-B: no-op compact (removedCount=0) returns generic "not needed" message.
+ *         Both genuine-small-history and structural-deadlock branches collapse
+ *         to the same message — the "actionable deadlock guidance" approach
+ *         was dropped because the right fix is the Gemini-style 3-layer
+ *         compact pipeline (tracked as a follow-up rewrite issue) rather
+ *         than telling the user to delete messages manually.
  *   M3-C: successful compact returns compacted=true + removedMessageCount.
  *   Trigger: manualCompact emits onCompactStarted with triggerSource="manual".
  */
@@ -14,7 +16,6 @@ import { ConversationLoop } from "../conversation-loop.js";
 import type { ConversationLoopDeps } from "../conversation-loop.js";
 import type { GenericMessage } from "../llm/types.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
-import { getModelPreflightThreshold } from "../auto-compact.js";
 
 vi.mock("../structured-compact.js", () => ({
   compactWithBoundary: vi.fn(),
@@ -105,39 +106,7 @@ function makeProviderStub() {
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe("manualCompact — /compact deadlock guidance (M3 scenarios)", () => {
-  it("M3-A: at usagePct ≥ 80 with removedCount=0 returns actionable deadlock guidance", async () => {
-    const threshold = getModelPreflightThreshold("claude", "claude-sonnet-4-5");
-    // Build a history that estimates roughly 80%+ of preflight.
-    const charsForOver80 = Math.ceil(threshold * 0.85 * 4);
-    const big: GenericMessage[] = [
-      { role: "user", content: "x".repeat(charsForOver80) },
-    ];
-
-    const loop = new ConversationLoop(makeDeps({ memoryManager: makeMemoryManager(big) }));
-    loop.resetAndResume("sess-1");
-    (loop as unknown as { provider: ReturnType<typeof makeProviderStub> }).provider = makeProviderStub();
-
-    // No-op compact result — message is too large to shrink under preserveRecent.
-    vi.mocked(compactWithBoundary).mockResolvedValueOnce({
-      boundary: {} as never,
-      newHistory: big,
-      removedCount: 0,
-      estimatedAfter: 0,
-    });
-
-    const startedCb = vi.fn();
-    const result = await loop.manualCompact({ onCompactStarted: startedCb });
-
-    expect(result.compacted).toBe(false);
-    expect(result.removedMessageCount).toBe(0);
-    // The actionable branch must mention preflight % and tell user to start
-    // a new session — the generic "불필요" branch must NOT be selected.
-    expect(result.summary).toContain("줄일 수 있는 메시지가 없습니다");
-    expect(result.summary).toContain("새 세션을 시작");
-    expect(result.summary).not.toBe("컴팩트 불필요: 메시지 수가 충분히 적습니다.");
-  });
-
-  it("M3-B: at usagePct < 80 with removedCount=0 returns generic 'not needed' message", async () => {
+  it("M3-B: removedCount=0 returns generic 'not needed' message (both small-history and deadlock branches)", async () => {
     // Tiny history — well below 80% of preflight.
     const small: GenericMessage[] = [
       { role: "user", content: "hi" },
