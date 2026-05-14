@@ -670,19 +670,15 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
         flushQueueViaGuide();
         return;
       }
-      if (ev.type === "done") {
-        // turn 종료 — 큐 잔존 항목을 새 user message 로 자동 inject.
-        // streaming boolean 전이가 아닌 명시적 done event 만 신호 사용 →
-        // AskUserQuestion 카드 깜박임 같은 false-positive 차단.
-        // round boundary 없는 idle 상태이므로 onGuide 가 아닌 onAsk 사용
-        // (새 turn 시작). injectHint: "queue" 로 마킹 → user bubble 에
-        // "↪ 큐에서" 배지 표시.
-        if (messageQueueStore.size() === 0) return;
-        const taken = messageQueueStore.takeAll();
-        if (taken.length === 0) return;
-        const formatted = formatQueueInject(taken);
-        void onAsk(formatted, { inputOrigin: "user-keyboard", token: "" }, { injectHint: "queue" });
-      }
+      // done event 자동 인입 폐기 (2026-05-15 critic C1):
+      // IPC stream 의 done event 는 user gesture 컨텍스트 밖 → preload 의
+      // consumeUserKeyboardIntent 가 navigator.userActivation.isActive=false
+      // 반환 → chat.ts:319 가 user-keyboard-required 로 reject → user bubble
+      // 만 추가되고 LLM 호출 안 되는 silent message loss.
+      // 후속 PR 에서 새 inputOrigin enum ("queue-auto") + validator allow-list
+      // 추가로 정상 구현 예정. 본 commit 에선 사용자 명시 액션 (⌘⏎ / ESC /
+      // 행별 [↑ 즉시] / tool_end via onGuide) 만 inject path 로 유지.
+      // turn 종료 시 큐 잔존 — 사용자가 명시적으로 inject.
     });
     return unsub;
   }, [api, flushQueueViaGuide, messageQueueStore, onAsk]);
