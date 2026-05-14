@@ -22,6 +22,7 @@
 import { useEffect, useState } from "react";
 import { Badge } from "../../../../components/ui/badge.js";
 import { Button } from "../../../../components/ui/button.js";
+import { Checkbox } from "../../../../components/ui/checkbox.js";
 import {
   Dialog,
   DialogContent,
@@ -155,10 +156,10 @@ export function OutOfAllowedDirCard({
                 {adjacencyWarnings.map((w, i) => <li key={i}>{w}</li>)}
               </ul>
               <label className="mt-2 flex items-center gap-2 text-xs">
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={acknowledgedAdjacency}
-                  onChange={(e) => setAcknowledgedAdjacency(e.target.checked)}
+                  onCheckedChange={(checked) => setAcknowledgedAdjacency(checked === true)}
+                  data-testid="adjacency-warning-ack"
                 />
                 위 경고를 이해했고 진행을 원합니다.
               </label>

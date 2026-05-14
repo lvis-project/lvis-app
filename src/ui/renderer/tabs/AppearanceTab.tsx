@@ -24,6 +24,7 @@ import type { CSSProperties } from "react";
 import { getApi } from "../api-client.js";
 import { Button } from "../../../components/ui/button.js";
 import { Input } from "../../../components/ui/input.js";
+import { Switch } from "../../../components/ui/switch.js";
 
 type WebViewPreferredFlow = "in-app" | "system-browser";
 
@@ -401,24 +402,12 @@ export function AppearanceTab() {
                 OS 라이트/다크 모드에 맞춰 LGE Light / LGE Dark 를 자동 전환합니다.
               </p>
             </div>
-            <Button
-              type="button"
-              variant="ghost"
-              role="switch"
-              aria-checked={followSystem}
+            <Switch
+              checked={followSystem}
               aria-label="OS 시스템 색상 따라가기"
               data-testid="follow-system-toggle"
-              onClick={() => setFollowSystem(!followSystem)}
-              className={`relative h-5 w-9 justify-start rounded-full p-0 transition-colors ${
-                followSystem ? "bg-primary hover:bg-primary/90" : "bg-muted hover:bg-muted/80"
-              }`}
-            >
-              <span
-                className={`inline-block h-4 w-4 transform rounded-full bg-primary-foreground transition-transform ${
-                  followSystem ? "translate-x-4" : "translate-x-1"
-                }`}
-              />
-            </Button>
+              onCheckedChange={(checked) => setFollowSystem(checked === true)}
+            />
           </div>
         </section>
       )}

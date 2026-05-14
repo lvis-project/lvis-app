@@ -8,7 +8,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../../components/ui/card.js";
+import { Checkbox } from "../../../components/ui/checkbox.js";
 import { Input } from "../../../components/ui/input.js";
+import { NativeSelect, NativeSelectOption } from "../../../components/ui/native-select.js";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
 import { Textarea } from "../../../components/ui/textarea.js";
 import {
@@ -400,14 +402,14 @@ export function AddRoutineModal({ api, onClose, onAdded }: AddRoutineModalProps)
           <div className="mb-3 grid gap-3 sm:grid-cols-2">
             <label className="space-y-1">
               <div className="text-xs font-medium text-muted-foreground">실행 모드</div>
-              <select
-                className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+              <NativeSelect
+                className="w-full"
                 value={execution}
                 onChange={(e) => setExecution(e.target.value as RoutineExecution)}
               >
-                <option value="llm-session">LLM 세션</option>
-                <option value="notification-only">알림만</option>
-              </select>
+                <NativeSelectOption value="llm-session">LLM 세션</NativeSelectOption>
+                <NativeSelectOption value="notification-only">알림만</NativeSelectOption>
+              </NativeSelect>
             </label>
             <label className="space-y-1">
               <div className="text-xs font-medium text-muted-foreground">제목 (선택)</div>
@@ -431,15 +433,15 @@ export function AddRoutineModal({ api, onClose, onAdded }: AddRoutineModalProps)
             </div>
             <label className="space-y-1">
               <div className="text-xs font-medium text-muted-foreground">반복</div>
-              <select
-                className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+              <NativeSelect
+                className="w-full"
                 value={repeatKind}
                 onChange={(e) => setRepeatKind(e.target.value as RepeatKind)}
               >
                 {REPEAT_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
+                  <NativeSelectOption key={o.value} value={o.value}>{o.label}</NativeSelectOption>
                 ))}
-              </select>
+              </NativeSelect>
             </label>
             {repeatKind === "interval" && (
               <label className="space-y-1">
@@ -560,11 +562,9 @@ export function AddRoutineModal({ api, onClose, onAdded }: AddRoutineModalProps)
                           key={plugin.id}
                           className="flex min-w-0 items-center gap-2 rounded px-2 py-1 text-xs hover:bg-muted/60"
                         >
-                          <input
-                            type="checkbox"
-                            className="h-4 w-4"
+                          <Checkbox
                             checked={allowedPluginIds.includes(plugin.id)}
-                            onChange={() => toggleAllowedPlugin(plugin.id)}
+                            onCheckedChange={() => toggleAllowedPlugin(plugin.id)}
                             data-testid={`routine-allowed-plugin-${plugin.id}`}
                           />
                           <span className="truncate">{plugin.name}</span>

@@ -4,7 +4,7 @@
  * Imported from each test file (import "./setup"). Sets up:
  *   - @testing-library/jest-dom matchers
  *   - global afterEach cleanup
- *   - matchMedia / scrollIntoView polyfills
+ *   - matchMedia / scrollIntoView / pointer-capture polyfills
  */
 import "@testing-library/jest-dom/vitest";
 import { afterEach, vi } from "vitest";
@@ -57,6 +57,17 @@ if (typeof window !== "undefined") {
   }
   if (!Element.prototype.scrollIntoView) {
     Element.prototype.scrollIntoView = function () {};
+  }
+  if (!Element.prototype.hasPointerCapture) {
+    Element.prototype.hasPointerCapture = function () {
+      return false;
+    };
+  }
+  if (!Element.prototype.setPointerCapture) {
+    Element.prototype.setPointerCapture = function () {};
+  }
+  if (!Element.prototype.releasePointerCapture) {
+    Element.prototype.releasePointerCapture = function () {};
   }
   if (!window.ResizeObserver) {
     window.ResizeObserver = class ResizeObserver {
