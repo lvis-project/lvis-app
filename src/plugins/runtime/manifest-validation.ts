@@ -210,6 +210,10 @@ export async function parsePluginJson(
     );
   }
 
+  // `startupTimeoutMs` 는 *plugin instance.start() lifecycle hook 의 timeout* 만
+  // 통제한다 — manifest 의 tool name list 자동 invoke 메커니즘 (runManifestStartupTools,
+  // 2026-05-14 폐기) 의 잔재가 아님. plugin self-start 가 SoT 인 모델에서 host runtime
+  // 의 `Promise.race` 에 묶이는 유일한 시간 가드.
   if (parsed.startupTimeoutMs !== undefined) {
     if (
       typeof parsed.startupTimeoutMs !== "number" ||

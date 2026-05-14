@@ -696,7 +696,7 @@ export interface LateBindingRefs {
       | ((
           toolName: string,
           payload: unknown,
-          context: { origin: "startup" | "plugin" | "ui"; callerPluginId?: string; ownerPluginId?: string },
+          context: { origin: "plugin" | "ui"; callerPluginId?: string; ownerPluginId?: string },
         ) => Promise<unknown>)
       | null;
   };
