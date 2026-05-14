@@ -346,7 +346,7 @@ export interface PluginConfigSchemaProperty {
 export interface PluginUiExtension {
   id: string;
   slot: "sidebar";
-  kind: "embedded-module" | "embedded-page" | "info-card";
+  kind: "embedded-module" | "embedded-page" | "info-card" | "action";
   displayName?: string;
   title: string;
   description?: string;
@@ -354,6 +354,14 @@ export interface PluginUiExtension {
   entry?: string;
   exportName?: string;
   page?: string;
+  /**
+   * kind="action" 전용. 사이드바 아이콘 클릭 시 host 가 직접 디스패치할
+   * plugin tool 이름. action entry 는 panel webview 를 *생성하지 않고*
+   * 곧바로 `api.callPluginMethod(tool)` 만 호출한다. tool 은 manifest의
+   * `uiCallable[]` 에 등록되어야 하며, runtime/index.ts 의 callFromUi
+   * 게이트가 그대로 enforce 한다.
+   */
+  tool?: string;
   /**
    * Detached window defaults. `defaultMode: "detached"` opens the extension
    * in a magnetic-snap BrowserWindow instead of rendering it inline.

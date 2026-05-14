@@ -32,7 +32,7 @@ export type PluginUiExtensionView = {
   extension: {
     id: string;
     slot: "sidebar";
-    kind: "embedded-module" | "embedded-page" | "info-card";
+    kind: "embedded-module" | "embedded-page" | "info-card" | "action";
     displayName?: string;
     title: string;
     description?: string;
@@ -40,6 +40,8 @@ export type PluginUiExtensionView = {
     entry?: string;
     exportName?: string;
     page?: string;
+    /** kind="action" 전용 dispatch target — host 가 api.callPluginMethod 로 호출. */
+    tool?: string;
     /**
      * Detached window defaults. `defaultMode: "detached"` opens the extension
      * in a magnetic-snap BrowserWindow rather than rendering it inline.
@@ -240,6 +242,16 @@ export function PluginUiHostView({
     }
     if (view.extension.kind === "embedded-page") {
       setErrorText("구형 iframe UI 형식은 지원되지 않습니다. entry 기반 모듈 UI를 사용하세요.");
+      setLoading(false);
+      return;
+    }
+    // action entries never produce a panel — App.tsx 의 handleViewSelect 가
+    // 사이드바 click 시 곧장 callPluginMethod 디스패치하고 active view 도
+    // 안 바꾸므로 정상 경로에서는 여기 도달하지 않는다. 다만 다른 caller
+    // (keyboard shortcut, command palette 등) 가 action view 를 잘못 전달했을
+    // 때 panel chrome (Card 헤더 + border) 이 회귀로 뜨지 않도록 fail-safe.
+    if (view.extension.kind === "action") {
+      setErrorText("action kind 는 패널 없이 호스트가 직접 tool 을 디스패치합니다.");
       setLoading(false);
       return;
     }
