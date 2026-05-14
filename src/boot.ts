@@ -48,6 +48,7 @@ import type { MarketplaceFetcher } from "./plugins/marketplace.js";
 import { RealCloudMarketplaceFetcher } from "./plugins/real-cloud-marketplace-fetcher.js";
 import { PluginArtifactStore } from "./plugins/plugin-artifact-store.js";
 import { getBundledPublicKeys } from "./plugins/publisher-keys.js";
+import { sweepOrphanUninstallDirs } from "./plugins/orphan-uninstall-sweeper.js";
 import { StarredStore } from "./data/starred-store.js";
 import { FeedbackStore } from "./data/feedback-store.js";
 import { McpGovernance } from "./mcp/mcp-governance.js";
@@ -206,6 +207,27 @@ export async function bootstrap(
   const approvalGate = await createApprovalGate(mainWindow, bootAuditLogger, notificationService);
 
   // §4.2 Step 3 + 5: PluginRuntime + per-plugin HostApi factory.
+  // Sweep orphan uninstall tombstones from prior session FIRST (before
+  // initPluginRuntime touches pluginsRoot for discovery). The Windows
+  // uninstall path leaves `<plugin>.uninstalling-<ts>` dirs behind when
+  // SQLite WAL/SHM handles weren't released in time; this is the only
+  // moment where the previous worker process is guaranteed gone.
+  // Fire-and-forget — sweep failure must not block boot.
+  const pluginsRootForSweep = `${homedir()}/.lvis/plugins`;
+  void sweepOrphanUninstallDirs(pluginsRootForSweep)
+    .then(({ swept, failed }) => {
+      if (swept.length > 0 || failed.length > 0) {
+        log.info(
+          "boot: orphan-uninstall-sweeper swept=%d failed=%d",
+          swept.length,
+          failed.length,
+        );
+      }
+    })
+    .catch((err) => {
+      log.warn("boot: orphan-uninstall-sweeper crashed (non-fatal): %s", (err as Error).message);
+    });
+
   const {
     pluginRuntime,
     deploymentGuard,

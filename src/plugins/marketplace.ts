@@ -1,4 +1,5 @@
 import { cp, readFile, rename, rm, stat as statAsync, writeFile } from "node:fs/promises";
+import { tombstoneAndDeferredRemove } from "./installed-entry-fs.js";
 import { realpathSync } from "node:fs";
 import { dirname, isAbsolute, posix, relative, resolve } from "node:path";
 import { buildSideloadCopyFilter, rejectEscapingSymlinks } from "./sideload-filter.js";
@@ -846,9 +847,20 @@ export class PluginMarketplaceService {
       ? entry.manifestPath
       : resolve(dirname(this.registryPath), entry.manifestPath);
     const installedManifestDir = dirname(manifestPath);
-    if (this.isWithin(this.pluginsRoot, installedManifestDir)) {
-      await rm(installedManifestDir, { recursive: true, force: true });
-    }
+    if (!this.isWithin(this.pluginsRoot, installedManifestDir)) return;
+
+    // Windows-atomic uninstall: rename to tombstone (succeeds even with
+    // open SQLite WAL/SHM handles inside on NTFS) → defer rm so registry
+    // write proceeds. Orphan sweeper (sweepOrphanUninstallDirs at boot)
+    // picks up any tombstone whose deferred rm hit EBUSY. See
+    // installed-entry-fs.ts for the rationale and OS-specific notes.
+    await tombstoneAndDeferredRemove(installedManifestDir, {
+      onDeferredRmError: (tombstone, err) => {
+        log.warn(
+          `removeInstalledEntry: tombstone rm deferred to orphan sweeper: ${tombstone} (${err.message})`,
+        );
+      },
+    });
   }
 
   private isWithin(basePath: string, targetPath: string): boolean {

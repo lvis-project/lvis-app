@@ -137,6 +137,39 @@ describe("plugins IPC lifecycle broadcast", () => {
     }
   });
 
+  it("removes plugin runtime BEFORE marketplace.uninstall (lifecycle §9 ordering)", async () => {
+    // Regression guard for Windows EBUSY on fts5.sqlite-shm/-wal: marketplace
+    // uninstall (rm files) must NOT run before runtime stop (close DB
+    // handles). If the order regresses, the plugin's worker still holds
+    // open SQLite WAL files when rm fires → EBUSY → half-deleted dir.
+    const { deps } = await setup();
+
+    await invoke("lvis:plugins:uninstall", "agent-hub");
+
+    const removePluginOrder = deps.pluginRuntime.removePlugin.mock.invocationCallOrder[0];
+    const uninstallOrder = deps.pluginMarketplace.uninstall.mock.invocationCallOrder[0];
+    expect(removePluginOrder).toBeLessThan(uninstallOrder);
+  });
+
+  it("surfaces removePlugin failure as uninstall failure (does not silently mutate registry)", async () => {
+    // If removePlugin throws (e.g. dispose chain failure), marketplace
+    // uninstall MUST NOT proceed — otherwise registry mutation happens
+    // while runtime tracking still references the plugin, leaving
+    // listPluginCards showing a ghost card.
+    const { deps, appWindows } = await setup();
+    deps.pluginRuntime.removePlugin.mockRejectedValueOnce(new Error("dispose chain failed"));
+
+    await expect(invoke("lvis:plugins:uninstall", "agent-hub")).rejects.toThrow("dispose chain failed");
+
+    expect(deps.pluginMarketplace.uninstall).not.toHaveBeenCalled();
+    for (const win of appWindows) {
+      expect(win.webContents.send).toHaveBeenCalledWith(
+        "lvis:plugins:uninstall-result",
+        { slug: "agent-hub", success: false, error: "dispose chain failed" },
+      );
+    }
+  });
+
   it("broadcasts idempotent uninstall success when marketplace entry is already gone", async () => {
     const { deps, appWindows } = await setup();
     deps.pluginMarketplace.uninstall.mockRejectedValueOnce(new Error("Plugin not installed: agent-hub"));
