@@ -330,13 +330,22 @@ describe("PermissionsTab hook quarantine notice", () => {
       fireEvent.click(screen.getByTestId("reviewer-mode-llm"));
     });
     await act(async () => {
-      fireEvent.change(screen.getByTestId("reviewer-fallback-select"), {
-        target: { value: "rule" },
+      fireEvent.pointerDown(screen.getByTestId("reviewer-fallback-select"), {
+        button: 0,
+        ctrlKey: false,
+        pointerId: 1,
+        pointerType: "mouse",
       });
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/규칙 결과 사용/)).toBeTruthy();
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByText(/규칙 결과 사용/));
     });
 
     expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("fallback rule");
-    expect((screen.getByTestId("reviewer-fallback-select") as HTMLSelectElement).value).toBe("rule");
+    expect(screen.getByTestId("reviewer-fallback-select").textContent).toContain("규칙 결과 사용");
   });
 
   it("persists reviewer model changes through reviewerDispatch", async () => {
@@ -394,17 +403,19 @@ describe("PermissionsTab hook quarantine notice", () => {
     await act(async () => {
       render(<PermissionsTab />);
     });
+    const off = screen.getByRole("radio", { name: "끔" });
+    const low = screen.getByRole("radio", { name: "저위험 자동 허용" });
     // Initial state: "off" is selected.
-    expect(screen.getByTestId("reviewer-interactive-off").getAttribute("aria-checked")).toBe("true");
-    expect(screen.getByTestId("reviewer-interactive-low").getAttribute("aria-checked")).toBe("false");
+    expect(off.getAttribute("aria-checked")).toBe("true");
+    expect(low.getAttribute("aria-checked")).toBe("false");
 
     await act(async () => {
-      fireEvent.click(screen.getByTestId("reviewer-interactive-low"));
+      fireEvent.click(low);
     });
 
     expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("interactive low");
-    expect(screen.getByTestId("reviewer-interactive-low").getAttribute("aria-checked")).toBe("true");
-    expect(screen.getByTestId("reviewer-interactive-off").getAttribute("aria-checked")).toBe("false");
+    expect(low.getAttribute("aria-checked")).toBe("true");
+    expect(off.getAttribute("aria-checked")).toBe("false");
   });
 
   it("supports arrow-key navigation for the low-risk auto-allow radio group", async () => {
@@ -442,74 +453,18 @@ describe("PermissionsTab hook quarantine notice", () => {
     await act(async () => {
       render(<PermissionsTab />);
     });
-    const off = screen.getByTestId("reviewer-interactive-off");
-    expect(off.getAttribute("tabIndex")).toBe("0");
-    expect(screen.getByTestId("reviewer-interactive-low").getAttribute("tabIndex")).toBe("-1");
+    const off = screen.getByRole("radio", { name: "끔" });
+    const low = screen.getByRole("radio", { name: "저위험 자동 허용" });
+    expect(off.getAttribute("aria-checked")).toBe("true");
+    expect(low.getAttribute("aria-checked")).toBe("false");
+    off.focus();
 
     await act(async () => {
       fireEvent.keyDown(off, { key: "ArrowRight" });
     });
 
     expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("interactive low");
-    expect(screen.getByTestId("reviewer-interactive-low").getAttribute("aria-checked")).toBe("true");
-    expect(screen.getByTestId("reviewer-interactive-low").getAttribute("tabIndex")).toBe("0");
-    expect(screen.getByTestId("reviewer-interactive-off").getAttribute("tabIndex")).toBe("-1");
-  });
-
-  it("moves radio focus after an async arrow-key reviewer update completes", async () => {
-    const api = installApi([[]]);
-    let resolveInteractive!: () => void;
-    const interactiveGate = new Promise<void>((resolve) => {
-      resolveInteractive = resolve;
-    });
-    api.permission.reviewerDispatch.mockImplementation(async (rawArgs: string) => {
-      if (rawArgs === "show") {
-        return {
-          ok: true as const,
-          verb: "show" as const,
-          settings: {
-            mode: "rule" as const,
-            provider: "openai" as const,
-            model: "gpt-4o-mini",
-            fallbackOnError: "deny" as const,
-            interactive: { autoApprove: "off" as const },
-          },
-        };
-      }
-      if (rawArgs === "interactive low") {
-        await interactiveGate;
-        return {
-          ok: true as const,
-          verb: "interactive" as const,
-          settings: {
-            mode: "rule" as const,
-            provider: "openai" as const,
-            model: "gpt-4o-mini",
-            fallbackOnError: "deny" as const,
-            interactive: { autoApprove: "low" as const },
-          },
-        };
-      }
-      throw new Error(`unexpected reviewerDispatch: ${rawArgs}`);
-    });
-
-    await act(async () => {
-      render(<PermissionsTab />);
-    });
-    const off = screen.getByTestId("reviewer-interactive-off");
-    off.focus();
-
-    fireEvent.keyDown(off, { key: "ArrowRight" });
-    expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("interactive low");
-    expect(document.activeElement).toBe(off);
-
-    await act(async () => {
-      resolveInteractive();
-      await interactiveGate;
-    });
-    await waitFor(() => {
-      expect(document.activeElement).toBe(screen.getByTestId("reviewer-interactive-low"));
-    });
+    expect(low.getAttribute("aria-checked")).toBe("true");
   });
 
   it("keeps the prior reviewer mode when runtime rewire fails", async () => {

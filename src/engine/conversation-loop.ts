@@ -104,6 +104,10 @@ export interface TurnCallbacks {
   onCompactOccurred?: (result: {
     removedMessages: number;
     freedTokens: number;
+    /** Post-compact history token estimate (estimateMessagesTokens after the
+     *  boundary applied). Renderer uses this as the SOT for the ring;
+     *  freedTokens alone undercounts when only one small message was summarized. */
+    estimatedAfter: number;
     /**
      * Compact tier — `"auto-compact"` (Layer 0 preflight) | `"manual"` (`/compact`).
      * UI CheckpointDivider 가 색상/라벨 결정에 사용 (`lib/chat-stream-state.ts:CheckpointTier`).
@@ -118,6 +122,17 @@ export interface TurnCallbacks {
      * view-mode and branch-from-checkpoint actions.
      */
     compactNum?: number;
+  }) => void;
+  /**
+   * Fired at the start of a pre-turn auto-compact (Layer 0 preflight) so the
+   * renderer can show a "자동 압축 중..." indicator before the potentially
+   * long-running LLM compaction finishes. Complementary to `onCompactOccurred`
+   * which fires on completion.
+   */
+  onCompactStarted?: (info: {
+    triggerSource: "estimate" | "actual-tokensIn" | "manual";
+    estimatedBefore: number;
+    preflight: number;
   }) => void;
   onFallback?: (from: string, to: string) => void;
   onLlmStatus?: (status: FallbackStatus) => void;
@@ -764,7 +779,7 @@ export class ConversationLoop {
    *
    * R14 lock — 동시 compact race 방지.
    */
-  async manualCompact(callbacks?: Pick<TurnCallbacks, "onCompactOccurred">): Promise<{
+  async manualCompact(callbacks?: Pick<TurnCallbacks, "onCompactOccurred" | "onCompactStarted">): Promise<{
     compacted: boolean;
     compactedAt: string | null;
     summary: string;
@@ -796,6 +811,14 @@ export class ConversationLoop {
     this.isCompacting = true;
     try {
       const messagesBefore = this.history.getMessages();
+      // Mirror runPreflightGuard's pre-compact UX hint so slash-`/compact`
+      // also lights up the "자동 압축 중..." StatusBar indicator during the
+      // potentially long-running LLM summarization.
+      callbacks?.onCompactStarted?.({
+        triggerSource: "manual",
+        estimatedBefore: estimateMessagesTokens(messagesBefore),
+        preflight,
+      });
       const result = await compactWithBoundary({
         messages: messagesBefore,
         llm: this.provider,
@@ -805,6 +828,14 @@ export class ConversationLoop {
       });
 
       if (result === null || result.removedCount === 0) {
+        // No-op happens when splitForBoundary preserves the entire history —
+        // either the input is genuinely small or the tail is a single large
+        // message that exceeds preserveRecentTokens (a structural
+        // compact-deadlock at high usagePct). Recommending manual deletion
+        // was the wrong UX direction — the deeper fix is a Gemini-style
+        // 3-layer pipeline (per-message truncation → reverse-budget history
+        // truncation → LLM summary) tracked as a follow-up issue. Until that
+        // lands, return the generic message here.
         return {
           compacted: false,
           compactedAt: null,
@@ -1796,6 +1827,7 @@ export class ConversationLoop {
     callbacks?.onCompactOccurred?.({
       removedMessages: result.removedCount,
       freedTokens: Math.max(0, estimatedBefore - result.estimatedAfter),
+      estimatedAfter: result.estimatedAfter,
       tier: trigger,
       summary: preamble,
       compactNum: this.compactNum,
@@ -1841,9 +1873,25 @@ export class ConversationLoop {
 
     const messagesBefore = this.history.getMessages();
     const estimated = estimateMessagesTokens(messagesBefore);
-    if (estimated < preflight) return;
+    // Two-signal preflight: estimateMessagesTokens (chars/4 heuristic) undercounts
+    // real provider tokens by 15-25% on code-heavy English content. Pair it with
+    // the actual provider-reported tokensIn from the prior turn so compact fires
+    // even when the local estimate is below threshold but the live billing said
+    // the next round will overflow.
+    const actualTokensIn = this.cumulativeUsage.inputTokens;
+    if (estimated < preflight && actualTokensIn < preflight) return;
+    const triggerSource: "estimate" | "actual-tokensIn" =
+      estimated >= preflight ? "estimate" : "actual-tokensIn";
 
     this.isCompacting = true;
+    // Notify renderer immediately so it can show a "자동 압축 중..." indicator
+    // before the blocking LLM compaction call. `onCompactOccurred` fires on
+    // completion; this fires at start so there is no silent wait.
+    callbacks?.onCompactStarted?.({
+      triggerSource,
+      estimatedBefore: estimated,
+      preflight,
+    });
     try {
       log.info(
         `preflight: TRIGGER — estimated=${estimated} >= preflight=${preflight} (model=${provider}/${model}) → Layer 2 compact #${this.compactNum + 1}`,

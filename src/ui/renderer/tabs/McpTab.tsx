@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
+import { Checkbox } from "../../../components/ui/checkbox.js";
 import { Input } from "../../../components/ui/input.js";
+import { Label } from "../../../components/ui/label.js";
+import { NativeSelect, NativeSelectOption } from "../../../components/ui/native-select.js";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
 import { Separator } from "../../../components/ui/separator.js";
 import { Textarea } from "../../../components/ui/textarea.js";
@@ -474,9 +477,9 @@ export function McpTab() {
             <div className="grid grid-cols-2 gap-3">
               {/* ID */}
               <div className="space-y-1">
-                <label htmlFor={formIds.id} className="text-xs">
+                <Label htmlFor={formIds.id} className="text-xs">
                   서버 ID *
-                </label>
+                </Label>
                 <Input
                   id={formIds.id}
                   className="h-7 text-xs"
@@ -488,45 +491,47 @@ export function McpTab() {
 
               {/* Transport */}
               <div className="space-y-1">
-                <label htmlFor={formIds.transport} className="text-xs">
+                <Label htmlFor={formIds.transport} className="text-xs">
                   Transport *
-                </label>
-                <select
+                </Label>
+                <NativeSelect
                   id={formIds.transport}
-                  className="h-7 w-full rounded-md border bg-background px-2 text-xs"
+                  size="sm"
+                  className="w-full"
                   value={form.transport}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, transport: e.target.value as Transport }))
                   }
                 >
-                  <option value="stdio">stdio (로컬 프로세스)</option>
-                  <option value="http">http (원격 서버)</option>
-                </select>
+                  <NativeSelectOption value="stdio">stdio (로컬 프로세스)</NativeSelectOption>
+                  <NativeSelectOption value="http">http (원격 서버)</NativeSelectOption>
+                </NativeSelect>
               </div>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
-                <label htmlFor={formIds.auth} className="text-xs">
+                <Label htmlFor={formIds.auth} className="text-xs">
                   Auth
-                </label>
-                <select
+                </Label>
+                <NativeSelect
                   id={formIds.auth}
-                  className="h-7 w-full rounded-md border bg-background px-2 text-xs"
+                  size="sm"
+                  className="w-full"
                   value={form.auth}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, auth: e.target.value as typeof EMPTY_FORM.auth }))
                   }
                 >
-                  <option value="none">없음</option>
-                  <option value="sso">SSO</option>
-                  <option value="api-key">API Key</option>
-                </select>
+                  <NativeSelectOption value="none">없음</NativeSelectOption>
+                  <NativeSelectOption value="sso">SSO</NativeSelectOption>
+                  <NativeSelectOption value="api-key">API Key</NativeSelectOption>
+                </NativeSelect>
               </div>
               <div className="space-y-1">
-                <label htmlFor={formIds.apiKey} className="text-xs">
+                <Label htmlFor={formIds.apiKey} className="text-xs">
                   API Key (write-only)
-                </label>
+                </Label>
                 <Input
                   id={formIds.apiKey}
                   type="password"
@@ -541,9 +546,9 @@ export function McpTab() {
             {form.transport === "stdio" ? (
               <>
                 <div className="space-y-1">
-                  <label htmlFor={formIds.command} className="text-xs">
+                  <Label htmlFor={formIds.command} className="text-xs">
                     Command *
-                  </label>
+                  </Label>
                   <Input
                     id={formIds.command}
                     className="h-7 text-xs font-mono"
@@ -556,9 +561,9 @@ export function McpTab() {
                   </p>
                 </div>
                 <div className="space-y-1">
-                  <label htmlFor={formIds.args} className="text-xs">
+                  <Label htmlFor={formIds.args} className="text-xs">
                     Args (추가 인자)
-                  </label>
+                  </Label>
                   <Input
                     id={formIds.args}
                     className="h-7 text-xs font-mono"
@@ -568,9 +573,9 @@ export function McpTab() {
                   />
                 </div>
                 <div className="space-y-1">
-                  <label htmlFor={formIds.env} className="text-xs">
+                  <Label htmlFor={formIds.env} className="text-xs">
                     Env (KEY=value, write-only)
-                  </label>
+                  </Label>
                   <Textarea
                     id={formIds.env}
                     className="min-h-[88px] text-xs font-mono"
@@ -583,9 +588,9 @@ export function McpTab() {
             ) : (
               <>
                 <div className="space-y-1">
-                  <label htmlFor={formIds.url} className="text-xs">
+                  <Label htmlFor={formIds.url} className="text-xs">
                     URL *
-                  </label>
+                  </Label>
                   <Input
                     id={formIds.url}
                     className="h-7 text-xs font-mono"
@@ -595,23 +600,22 @@ export function McpTab() {
                   />
                 </div>
                 <div className="flex items-center gap-2">
-                  <input
+                  <Checkbox
                     id={formIds.allowPrivateNetworks}
-                    type="checkbox"
                     checked={form.allowPrivateNetworks}
-                    onChange={(e) =>
-                      setForm((f) => ({ ...f, allowPrivateNetworks: e.target.checked }))
+                    onCheckedChange={(checked) =>
+                      setForm((f) => ({ ...f, allowPrivateNetworks: checked === true }))
                     }
-                    className="h-3.5 w-3.5"
+                    className="size-3.5"
                   />
-                  <label htmlFor={formIds.allowPrivateNetworks} className="text-xs">
+                  <Label htmlFor={formIds.allowPrivateNetworks} className="text-xs">
                     사설 네트워크 허용 (localhost/사내망)
-                  </label>
+                  </Label>
                 </div>
                 <div className="space-y-1">
-                  <label htmlFor={formIds.headers} className="text-xs">
+                  <Label htmlFor={formIds.headers} className="text-xs">
                     Headers (HEADER: value, write-only)
-                  </label>
+                  </Label>
                   <Textarea
                     id={formIds.headers}
                     className="min-h-[88px] text-xs font-mono"

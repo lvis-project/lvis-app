@@ -1,5 +1,7 @@
 import { RefreshCw, GitBranch, Star, ThumbsUp, ThumbsDown } from "lucide-react";
 import { useState } from "react";
+import { Button } from "../../../components/ui/button.js";
+import { Input } from "../../../components/ui/input.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
 import { TokenCostBadge, type TokenCostBadgePricing, type TokenCostBadgeProps } from "./TokenCostBadge.js";
 import type { LLMVendor } from "../../../shared/llm-vendor-defaults.js";
@@ -46,9 +48,16 @@ export function TurnActionBar({
       {actions?.onRetry && (
         <Tooltip>
           <TooltipTrigger asChild>
-            <button className="rounded p-0.5 hover:bg-muted hover:text-foreground transition-colors" title="다시 시도 (깊이: high)" onClick={actions.onRetry}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-5 w-5 text-muted-foreground hover:text-foreground"
+              title="다시 시도 (깊이: high)"
+              onClick={actions.onRetry}
+            >
               <RefreshCw className="h-3 w-3" />
-            </button>
+            </Button>
           </TooltipTrigger>
           <TooltipContent>다시 시도 (깊이: high)</TooltipContent>
         </Tooltip>
@@ -56,9 +65,15 @@ export function TurnActionBar({
       {actions?.onFork && (
         <Tooltip>
           <TooltipTrigger asChild>
-            <button className="rounded p-0.5 hover:bg-muted hover:text-foreground transition-colors" onClick={actions.onFork}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-5 w-5 text-muted-foreground hover:text-foreground"
+              onClick={actions.onFork}
+            >
               <GitBranch className="h-3 w-3" />
-            </button>
+            </Button>
           </TooltipTrigger>
           <TooltipContent>분기</TooltipContent>
         </Tooltip>
@@ -66,9 +81,15 @@ export function TurnActionBar({
       {actions?.onToggleStar && (
         <Tooltip>
           <TooltipTrigger asChild>
-            <button className="rounded p-0.5 hover:bg-muted hover:text-foreground transition-colors" onClick={actions.onToggleStar}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-5 w-5 text-muted-foreground hover:text-foreground"
+              onClick={actions.onToggleStar}
+            >
               <Star key={isStarred ? "on" : "off"} className={`h-3 w-3 ${isStarred ? "fill-emphasis text-emphasis lvis-anim-star" : ""}`} />
-            </button>
+            </Button>
           </TooltipTrigger>
           <TooltipContent>즐겨찾기</TooltipContent>
         </Tooltip>
@@ -78,8 +99,11 @@ export function TurnActionBar({
           <span className="text-muted-foreground/30">|</span>
           <Tooltip>
             <TooltipTrigger asChild>
-              <button
-                className={`rounded p-0.5 hover:bg-muted transition-colors ${feedbackRating === "up" ? "text-success" : "hover:text-foreground"}`}
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className={`h-5 w-5 ${feedbackRating === "up" ? "text-success" : "text-muted-foreground hover:text-foreground"}`}
                 onClick={() => {
                   if (feedbackRating === "up") return;
                   setFeedbackRating("up");
@@ -89,14 +113,17 @@ export function TurnActionBar({
                 aria-label="도움이 됐어요"
               >
                 <ThumbsUp key={feedbackRating === "up" ? "on" : "off"} className={`h-3 w-3 ${feedbackRating === "up" ? "fill-success lvis-anim-pop" : ""}`} />
-              </button>
+              </Button>
             </TooltipTrigger>
             <TooltipContent>도움이 됐어요</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
-              <button
-                className={`rounded p-0.5 hover:bg-muted transition-colors ${feedbackRating === "down" ? "text-destructive" : "hover:text-foreground"}`}
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className={`h-5 w-5 ${feedbackRating === "down" ? "text-destructive" : "text-muted-foreground hover:text-foreground"}`}
                 onClick={() => {
                   if (feedbackRating === "down") return;
                   setShowReasonBox(true);
@@ -104,19 +131,19 @@ export function TurnActionBar({
                 aria-label="개선이 필요해요"
               >
                 <ThumbsDown key={feedbackRating === "down" ? "on" : "off"} className={`h-3 w-3 ${feedbackRating === "down" ? "fill-destructive lvis-anim-pop" : ""}`} />
-              </button>
+              </Button>
             </TooltipTrigger>
             <TooltipContent>개선이 필요해요</TooltipContent>
           </Tooltip>
           {showReasonBox && feedbackRating !== "down" ? (
             <div className="flex items-center gap-1">
-              <input
+              <Input
                 type="text"
                 maxLength={200}
                 placeholder="이유 (선택)"
                 value={reasonDraft}
                 onChange={(e) => setReasonDraft(e.target.value)}
-                className="h-6 rounded border border-input bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring w-36"
+                className="h-6 w-36 px-2 text-xs"
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
                     setFeedbackRating("down");
@@ -128,8 +155,11 @@ export function TurnActionBar({
                   }
                 }}
               />
-              <button
-                className="rounded px-1.5 py-0.5 text-xs bg-muted hover:bg-muted/80"
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="h-6 px-2 text-xs"
                 onClick={() => {
                   setFeedbackRating("down");
                   setShowReasonBox(false);
@@ -137,7 +167,7 @@ export function TurnActionBar({
                 }}
               >
                 전송
-              </button>
+              </Button>
             </div>
           ) : null}
         </>
