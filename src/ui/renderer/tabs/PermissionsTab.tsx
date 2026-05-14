@@ -3,6 +3,7 @@ import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
 import { Input } from "../../../components/ui/input.js";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
+import { Select } from "../../../components/ui/select.js";
 import { Separator } from "../../../components/ui/separator.js";
 import { PERMISSION_REVIEWER_FRAMEWORK } from "../../../shared/permission-reviewer-framework.js";
 import { EXEC_MODE_OPTIONS } from "../constants.js";
@@ -436,7 +437,16 @@ export function PermissionsTab() {
           <div className={`flex items-start gap-2 rounded-md border px-3 py-2 text-[12px] ${banner.type === "error" ? "border-destructive/40 bg-destructive/10 text-destructive" : "border-warning/40 bg-warning/15 text-warning"}`}>
             <span className="mt-0.5 flex-shrink-0">{banner.type === "error" ? "⚠" : "🔒"}</span>
             <span>{banner.msg}</span>
-            <button className="ml-auto flex-shrink-0 opacity-60 hover:opacity-100" onClick={() => setBanner(null)}>✕</button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="ml-auto h-6 w-6 flex-shrink-0 opacity-60 hover:opacity-100"
+              onClick={() => setBanner(null)}
+              aria-label="알림 닫기"
+            >
+              ✕
+            </Button>
           </div>
         )}
 
@@ -515,11 +525,13 @@ export function PermissionsTab() {
           </div>
           <div className="space-y-1.5">
             {EXEC_MODE_OPTIONS.map((opt) => (
-              <button
+              <Button
                 key={opt.value}
+                type="button"
+                variant="ghost"
                 data-testid={`exec-mode-${opt.value}`}
                 aria-pressed={mode === opt.value}
-                className={`flex w-full items-start gap-2.5 rounded-md border px-3 py-2 text-left text-sm transition-colors ${mode === opt.value ? "border-primary bg-primary/10" : "border-muted hover:border-muted-foreground/40"}`}
+                className={`h-auto w-full items-start justify-start gap-2.5 rounded-md border px-3 py-2 text-left text-sm font-normal ${mode === opt.value ? "border-primary bg-primary/10 hover:bg-primary/10" : "border-muted hover:border-muted-foreground/40"}`}
                 disabled={modeBusy}
                 onClick={() => void handleModeChange(opt.value)}
               >
@@ -530,7 +542,7 @@ export function PermissionsTab() {
                   <span className="font-medium">{opt.label}</span>
                   <span className="ml-1.5 text-[11px] text-muted-foreground">{opt.description}</span>
                 </span>
-              </button>
+              </Button>
             ))}
           </div>
         </div>
@@ -547,11 +559,13 @@ export function PermissionsTab() {
 
           <div className="space-y-1.5">
             {REVIEWER_MODE_OPTIONS.map((opt) => (
-              <button
+              <Button
                 key={opt.value}
+                type="button"
+                variant="ghost"
                 data-testid={`reviewer-mode-${opt.value}`}
                 aria-pressed={reviewer.mode === opt.value}
-                className={`flex w-full items-start gap-2.5 rounded-md border px-3 py-2 text-left text-sm transition-colors ${reviewer.mode === opt.value ? "border-primary bg-primary/10" : "border-muted hover:border-muted-foreground/40"}`}
+                className={`h-auto w-full items-start justify-start gap-2.5 rounded-md border px-3 py-2 text-left text-sm font-normal ${reviewer.mode === opt.value ? "border-primary bg-primary/10 hover:bg-primary/10" : "border-muted hover:border-muted-foreground/40"}`}
                 disabled={reviewerBusy}
                 onClick={() => void applyReviewerCommand(`mode ${opt.value}`)}
               >
@@ -562,7 +576,7 @@ export function PermissionsTab() {
                   <span className="font-medium">{opt.label}</span>
                   <span className="ml-1.5 text-[11px] text-muted-foreground">{opt.description}</span>
                 </span>
-              </button>
+              </Button>
             ))}
           </div>
 
@@ -574,9 +588,9 @@ export function PermissionsTab() {
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="space-y-1 text-xs">
                 <span className="font-medium">LLM 공급자</span>
-                <select
+                <Select
                   data-testid="reviewer-provider-select"
-                  className="h-8 w-full rounded-md border bg-background px-2 text-xs"
+                  className="h-8 px-2 text-xs"
                   value={reviewer.provider}
                   disabled={reviewerBusy}
                   onChange={(e) => void applyReviewerCommand(`provider ${e.target.value}`)}
@@ -584,13 +598,13 @@ export function PermissionsTab() {
                   {REVIEWER_PROVIDER_OPTIONS.map((opt) => (
                     <option key={opt.value} value={opt.value}>{opt.label}</option>
                   ))}
-                </select>
+                </Select>
               </label>
               <label className="space-y-1 text-xs">
                 <span className="font-medium">오류 처리</span>
-                <select
+                <Select
                   data-testid="reviewer-fallback-select"
-                  className="h-8 w-full rounded-md border bg-background px-2 text-xs"
+                  className="h-8 px-2 text-xs"
                   value={reviewer.fallbackOnError}
                   disabled={reviewerBusy}
                   onChange={(e) => void applyReviewerCommand(`fallback ${e.target.value}`)}
@@ -598,7 +612,7 @@ export function PermissionsTab() {
                   {REVIEWER_FALLBACK_OPTIONS.map((opt) => (
                     <option key={opt.value} value={opt.value}>{opt.label} - {opt.description}</option>
                   ))}
-                </select>
+                </Select>
               </label>
             </div>
             <label className="space-y-1 text-xs">
@@ -643,9 +657,10 @@ export function PermissionsTab() {
                   // sequence and broke the standard radio-group focus
                   // model. Keep it focusable; the onClick no-ops when
                   // the value is already current.
-                  <button
+                  <Button
                     type="button"
                     key={opt.value}
+                    variant="ghost"
                     data-testid={`reviewer-interactive-${opt.value}`}
                     role="radio"
                     aria-checked={reviewer.interactive.autoApprove === opt.value}
@@ -656,7 +671,7 @@ export function PermissionsTab() {
                       void applyReviewerCommand(`interactive ${opt.value}`);
                     }}
                     onKeyDown={(e) => handleInteractiveRadioKeyDown(e, opt.value)}
-                    className={`flex w-full items-start gap-2.5 rounded-md border px-3 py-2 text-left text-xs transition-colors ${reviewer.interactive.autoApprove === opt.value ? "border-primary bg-primary/10" : "border-muted hover:border-muted-foreground/40"}`}
+                    className={`h-auto w-full items-start justify-start gap-2.5 rounded-md border px-3 py-2 text-left text-xs font-normal ${reviewer.interactive.autoApprove === opt.value ? "border-primary bg-primary/10 hover:bg-primary/10" : "border-muted hover:border-muted-foreground/40"}`}
                   >
                     <span className={`mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full border-2 ${reviewer.interactive.autoApprove === opt.value ? "border-primary" : "border-muted-foreground"}`}>
                       {reviewer.interactive.autoApprove === opt.value && <span className="h-2 w-2 rounded-full bg-primary" />}
@@ -665,7 +680,7 @@ export function PermissionsTab() {
                       <span className="block font-medium">{opt.label}</span>
                       <span className="block text-[11px] text-muted-foreground">{opt.description}</span>
                     </span>
-                  </button>
+                  </Button>
                 ))}
               </div>
               {reviewer.interactive.autoApprove === "low" && reviewer.mode === "disabled" ? (
@@ -770,18 +785,20 @@ export function PermissionsTab() {
             <p className="text-[11px] text-muted-foreground">체크 시 승인 대화상자에서 모달 외부 클릭과 Escape 키가 차단되어 버튼 또는 승인 단축키로 명시적으로 결정해야 합니다.</p>
           </div>
           <div className="flex items-center gap-3">
-            <button
+            <Button
+              type="button"
+              variant="ghost"
               role="checkbox"
               aria-checked={requireExplicit}
               aria-label="승인 대화상자에서 버튼 또는 단축키로 명시적 승인 또는 거부를 요구"
               disabled={policyManaged || policyBusy}
-              className={`relative h-5 w-5 flex-shrink-0 rounded border-2 transition-colors ${requireExplicit ? "border-primary bg-primary" : "border-muted-foreground"} ${policyManaged ? "cursor-not-allowed opacity-50" : "cursor-pointer hover:border-primary/60"}`}
+              className={`relative h-5 w-5 flex-shrink-0 rounded border-2 p-0 ${requireExplicit ? "border-primary bg-primary hover:bg-primary/90" : "border-muted-foreground hover:border-primary/60"}`}
               onClick={() => void handleExplicitToggle()}
             >
               {requireExplicit && (
                 <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-primary-foreground">✓</span>
               )}
-            </button>
+            </Button>
             <span className="text-sm">{requireExplicit ? "활성화됨" : "비활성화됨"}</span>
             {policyManaged && <span className="text-base" title="IT 관리자 설정">🔒</span>}
           </div>
@@ -828,13 +845,16 @@ export function PermissionsTab() {
                       </td>
                       <td className="px-3 py-1.5 text-muted-foreground">{r.source ?? "전체"}</td>
                       <td className="px-3 py-1.5 text-right">
-                        <button
-                          className="text-[10px] text-muted-foreground hover:text-destructive disabled:opacity-40"
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 px-2 text-[10px] text-muted-foreground hover:text-destructive"
                           disabled={rulesBusy}
                           onClick={() => void handleRemoveRule(r.pattern, r.action)}
                         >
                           ✕
-                        </button>
+                        </Button>
                       </td>
                     </tr>
                   ))}
@@ -852,14 +872,14 @@ export function PermissionsTab() {
               onChange={(e) => setNewPattern(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter" && newPattern.trim()) void handleAddRule(); }}
             />
-            <select
-              className="h-8 rounded-md border bg-background px-2 text-xs"
+            <Select
+              className="h-8 w-auto px-2 text-xs"
               value={newAction}
               onChange={(e) => setNewAction(e.target.value as "allow" | "deny")}
             >
               <option value="allow">허용</option>
               <option value="deny">거부</option>
-            </select>
+            </Select>
             <Button size="sm" className="h-8" onClick={() => void handleAddRule()} disabled={rulesBusy || !newPattern.trim()}>
               추가
             </Button>
@@ -904,13 +924,16 @@ export function PermissionsTab() {
                         <span className="block whitespace-normal break-all" title={dir}>{dir}</span>
                       </td>
                       <td className="px-3 py-1.5 text-right">
-                        <button
-                          className="text-[10px] text-muted-foreground hover:text-destructive disabled:opacity-40"
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 px-2 text-[10px] text-muted-foreground hover:text-destructive"
                           disabled={dirsBusy}
                           onClick={() => void handleRemoveDirectory(dir)}
                         >
                           ✕
-                        </button>
+                        </Button>
                       </td>
                     </tr>
                   ))}

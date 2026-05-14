@@ -1,6 +1,7 @@
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
 import { Input } from "../../../components/ui/input.js";
+import { Select } from "../../../components/ui/select.js";
 import { REASONING_EFFORT_STEPS, VENDORS, budgetToEffortIndex } from "../constants.js";
 import type { LvisApi } from "../types.js";
 
@@ -69,16 +70,16 @@ export function LlmTab(props: LlmTabProps) {
     <div className="space-y-4 pt-4">
       <div className="space-y-2">
         <label className="text-sm font-medium" htmlFor="vendor-select">벤더</label>
-        <select
+        <Select
           id="vendor-select"
-          className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          className="h-9 py-1"
           value={vendor}
           onChange={(e) => setVendor(e.target.value)}
         >
           {VENDORS.map((v) => (
             <option key={v.id} value={v.id}>{v.label}</option>
           ))}
-        </select>
+        </Select>
       </div>
       {vendor !== "vertex-ai" && (vendorInfo.needsBaseUrl || vendor === "openai" || vendor === "copilot") && (
         <div className="space-y-2">
@@ -143,7 +144,22 @@ export function LlmTab(props: LlmTabProps) {
       <div className="space-y-2 rounded-md border p-3">
         <label className="flex items-center justify-between text-sm font-medium">
           <span>Extended Thinking / Reasoning</span>
-          <input type="checkbox" className="h-4 w-4" checked={enableThinking} onChange={(e) => setEnableThinking(e.target.checked)} />
+          <Button
+            type="button"
+            variant="ghost"
+            role="switch"
+            aria-checked={enableThinking}
+            className={`relative h-5 w-9 justify-start rounded-full p-0 ${
+              enableThinking ? "bg-primary hover:bg-primary/90" : "bg-muted hover:bg-muted/80"
+            }`}
+            onClick={() => setEnableThinking(!enableThinking)}
+          >
+            <span
+              className={`inline-block h-4 w-4 rounded-full bg-primary-foreground transition-transform ${
+                enableThinking ? "translate-x-4" : "translate-x-1"
+              }`}
+            />
+          </Button>
         </label>
         <p className="text-[11px] text-muted-foreground">모델 내부 추론 과정을 스트리밍으로 표시합니다. Claude는 명시 활성화(Sonnet 4.5+/Opus 4+), OpenAI o-계열·gpt-5는 Responses API 자동, Gemini 2.0+는 모델 지원 시 자동.</p>
         {enableThinking && (
@@ -181,21 +197,22 @@ export function LlmTab(props: LlmTabProps) {
         )}
       </div>
       <div className="space-y-2 rounded-md border" data-testid="fallback-chain-section">
-        <button
+        <Button
           type="button"
-          className="flex w-full items-center justify-between px-3 py-2 text-sm font-medium"
+          variant="ghost"
+          className="h-auto w-full justify-between rounded-none px-3 py-2 text-sm font-medium"
           onClick={() => setFallbackOpen((o) => !o)}
         >
           <span>장애 복구 (Fallback Chain)</span>
           <span className="text-muted-foreground">{fallbackOpen ? "▲" : "▼"}</span>
-        </button>
+        </Button>
         {fallbackOpen && (
           <div className="space-y-2 px-3 pb-3">
             <p className="text-[11px] text-muted-foreground">첫 응답이 1초 안에 오지 않거나 5xx/429/네트워크 오류가 나면 같은 모델을 5회 시도한 뒤 순서대로 전환할 벤더·모델 목록입니다.</p>
             {fallbackChain.map((entry, idx) => (
               <div key={idx} className="flex gap-2">
-                <select
-                  className="flex h-8 rounded-md border border-input bg-background px-2 text-xs"
+                <Select
+                  className="h-8 w-auto px-2 text-xs"
                   value={entry.provider}
                   onChange={(e) => {
                     const next = [...fallbackChain];
@@ -204,7 +221,7 @@ export function LlmTab(props: LlmTabProps) {
                   }}
                 >
                   {VENDORS.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
-                </select>
+                </Select>
                 <Input
                   className="h-8 text-xs"
                   value={entry.model}

@@ -22,6 +22,8 @@ import { BUNDLES, LGE_PAIR_IDS } from "../theme/index.js";
 import type { ThemeBundle } from "../theme/index.js";
 import type { CSSProperties } from "react";
 import { getApi } from "../api-client.js";
+import { Button } from "../../../components/ui/button.js";
+import { Input } from "../../../components/ui/input.js";
 
 type WebViewPreferredFlow = "in-app" | "system-browser";
 
@@ -91,14 +93,15 @@ interface BundleCardProps {
 
 function BundleCard({ bundle, selected, onSelect }: BundleCardProps) {
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
       role="radio"
       aria-checked={selected}
       aria-label={`테마: ${bundle.name}`}
       data-selected={selected ? "true" : "false"}
       data-bundle-id={bundle.id}
-      className="lvis-theme-card"
+      className="lvis-theme-card h-auto w-full bg-transparent p-0 text-left hover:bg-transparent"
       onClick={onSelect}
       onKeyDown={(e) => {
         if (e.key === " " || e.key === "Enter") {
@@ -114,7 +117,7 @@ function BundleCard({ bundle, selected, onSelect }: BundleCardProps) {
         <span>{bundle.name}</span>
         <span className="lvis-theme-card-checkmark" aria-hidden="true">✓</span>
       </div>
-    </button>
+    </Button>
   );
 }
 
@@ -316,7 +319,7 @@ function FontFamilyCustomInput({
   return (
     <details className="text-[11px] text-muted-foreground">
       <summary className="cursor-pointer select-none">직접 입력 (CSS font-family stack)</summary>
-      <input
+      <Input
         ref={inputRef}
         type="text"
         value={raw}
@@ -340,7 +343,7 @@ function FontFamilyCustomInput({
             (e.target as HTMLInputElement).blur();
           }
         }}
-        className="mt-2 w-full rounded border border-input bg-background px-2 py-1 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+        className="mt-2 h-8 font-mono text-xs"
         aria-label="사용자 정의 폰트 stack"
       />
       <p className="mt-1 text-[10px]">
@@ -398,15 +401,16 @@ export function AppearanceTab() {
                 OS 라이트/다크 모드에 맞춰 LGE Light / LGE Dark 를 자동 전환합니다.
               </p>
             </div>
-            <button
+            <Button
               type="button"
+              variant="ghost"
               role="switch"
               aria-checked={followSystem}
               aria-label="OS 시스템 색상 따라가기"
               data-testid="follow-system-toggle"
               onClick={() => setFollowSystem(!followSystem)}
-              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                followSystem ? "bg-primary" : "bg-muted"
+              className={`relative h-5 w-9 justify-start rounded-full p-0 transition-colors ${
+                followSystem ? "bg-primary hover:bg-primary/90" : "bg-muted hover:bg-muted/80"
               }`}
             >
               <span
@@ -414,7 +418,7 @@ export function AppearanceTab() {
                   followSystem ? "translate-x-4" : "translate-x-1"
                 }`}
               />
-            </button>
+            </Button>
           </div>
         </section>
       )}
@@ -445,21 +449,19 @@ export function AppearanceTab() {
             {FONT_FAMILY_PRESETS.map((opt) => {
               const checked = activePreset === opt.value;
               return (
-                <button
+                <Button
                   key={opt.value}
                   type="button"
+                  variant={checked ? "default" : "outline"}
+                  size="sm"
                   role="radio"
                   aria-checked={checked}
                   data-value={opt.value}
                   onClick={() => setFamily(opt.stack)}
-                  className={`rounded-full border px-3 py-1 text-xs transition-colors ${
-                    checked
-                      ? "border-primary bg-primary text-primary-foreground"
-                      : "border-border text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-                  }`}
+                  className={`rounded-full ${checked ? "" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"}`}
                 >
                   {opt.label}
-                </button>
+                </Button>
               );
             })}
           </div>
@@ -487,22 +489,20 @@ export function AppearanceTab() {
             {FONT_SIZE_OPTIONS.map((opt) => {
               const checked = sizeScale === opt.value;
               return (
-                <button
+                <Button
                   key={opt.value}
                   type="button"
+                  variant={checked ? "default" : "outline"}
+                  size="sm"
                   role="radio"
                   aria-checked={checked}
                   data-value={String(opt.value)}
                   onClick={() => setSizeScale(opt.value)}
-                  className={`rounded-full border px-3 py-1 transition-colors ${
-                    checked
-                      ? "border-primary bg-primary text-primary-foreground"
-                      : "border-border text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-                  }`}
+                  className={`rounded-full ${checked ? "" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"}`}
                   style={{ fontSize: `${opt.value * 0.75}rem` }}
                 >
                   {opt.label}
-                </button>
+                </Button>
               );
             })}
           </div>
@@ -529,22 +529,20 @@ export function AppearanceTab() {
           {WEBVIEW_OPTIONS.map((opt) => {
             const checked = webViewFlow === opt.value;
             return (
-              <button
+              <Button
                 key={opt.value}
                 type="button"
+                variant={checked ? "default" : "outline"}
+                size="sm"
                 role="radio"
                 aria-checked={checked}
                 data-value={opt.value}
                 title={opt.hint}
                 onClick={() => setWebViewFlow(opt.value)}
-                className={`rounded-full border px-3 py-1 text-xs transition-colors ${
-                  checked
-                    ? "border-primary bg-primary text-primary-foreground"
-                    : "border-border text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-                }`}
+                className={`rounded-full ${checked ? "" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"}`}
               >
                 {opt.label}
-              </button>
+              </Button>
             );
           })}
         </div>
