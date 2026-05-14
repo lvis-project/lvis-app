@@ -7,7 +7,7 @@
  *   3) notificationEvents.event ⊂ eventSubscriptions (soft warn)
  *   4) ui[] kind-specific required fields (hard fail-load)
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
