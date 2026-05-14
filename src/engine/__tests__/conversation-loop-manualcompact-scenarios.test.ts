@@ -23,6 +23,7 @@ vi.mock("../structured-compact.js", () => ({
 }));
 
 import { compactWithBoundary } from "../structured-compact.js";
+import { CompressionStatus } from "../../shared/compact-status.js";
 
 beforeEach(() => {
   vi.mocked(compactWithBoundary).mockClear();
@@ -118,10 +119,12 @@ describe("manualCompact — /compact deadlock guidance (M3 scenarios)", () => {
     (loop as unknown as { provider: ReturnType<typeof makeProviderStub> }).provider = makeProviderStub();
 
     vi.mocked(compactWithBoundary).mockResolvedValueOnce({
-      boundary: {} as never,
+      status: CompressionStatus.NOOP,
+      boundary: null,
       newHistory: small,
       removedCount: 0,
       estimatedAfter: 0,
+      truncatedCount: 0,
     });
 
     const result = await loop.manualCompact();
@@ -142,6 +145,7 @@ describe("manualCompact — /compact deadlock guidance (M3 scenarios)", () => {
     (loop as unknown as { provider: ReturnType<typeof makeProviderStub> }).provider = makeProviderStub();
 
     vi.mocked(compactWithBoundary).mockResolvedValueOnce({
+      status: CompressionStatus.SUMMARIZED,
       boundary: {
         id: "b1",
         compactNum: 1,
@@ -153,6 +157,7 @@ describe("manualCompact — /compact deadlock guidance (M3 scenarios)", () => {
       newHistory: history.slice(-2),
       removedCount: 2,
       estimatedAfter: 100,
+      truncatedCount: 0,
     });
 
     const result = await loop.manualCompact();
@@ -170,10 +175,12 @@ describe("manualCompact — /compact deadlock guidance (M3 scenarios)", () => {
     (loop as unknown as { provider: ReturnType<typeof makeProviderStub> }).provider = makeProviderStub();
 
     vi.mocked(compactWithBoundary).mockResolvedValueOnce({
-      boundary: {} as never,
+      status: CompressionStatus.NOOP,
+      boundary: null,
       newHistory: history,
       removedCount: 0,
       estimatedAfter: 0,
+      truncatedCount: 0,
     });
 
     const startedCb = vi.fn();
