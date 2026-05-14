@@ -59,6 +59,11 @@ interface ReadySentinel {
 const LVIS_RUNTIME_DIR = path.join(os.homedir(), ".lvis", "runtime");
 const VENV_DIR = path.join(LVIS_RUNTIME_DIR, "venv");
 const PYTHON_INSTALL_DIR = path.join(LVIS_RUNTIME_DIR, "python");
+// Co-locate uv cache with the venv so hardlinks from cache → site-packages stay
+// on the same physical volume. NTFS hardlinks fail cross-volume with EXDEV
+// (issue #713) when ~/.lvis and %LOCALAPPDATA% live on different drives via
+// junction / OneDrive redirect / profile migration.
+const UV_CACHE_DIR_PATH = path.join(LVIS_RUNTIME_DIR, "uv-cache");
 const LOGS_DIR = path.join(LVIS_RUNTIME_DIR, "logs");
 const SETUP_LOG = path.join(LOGS_DIR, "setup.log");
 const READY_SENTINEL = path.join(VENV_DIR, ".ready");
@@ -424,6 +429,11 @@ export class PythonRuntimeBootstrapper {
         "TMP",
         "SYSTEMROOT",
         "NODE_ENV",
+        // Issue #713 escape hatches: let users override cache location and
+        // hardlink mode via OS env when their drive layout still trips uv
+        // (e.g. ~/.lvis itself bridging volumes via subpath junctions).
+        "UV_CACHE_DIR",
+        "UV_LINK_MODE",
       ]);
       const env: NodeJS.ProcessEnv = {};
       for (const key of allowedEnvKeys) {
@@ -433,6 +443,11 @@ export class PythonRuntimeBootstrapper {
       Object.assign(env, extraEnv);
       // uv가 interactive prompt를 띄우지 않도록
       env.UV_NO_PROGRESS = "1";
+      // Default uv cache co-located with the LVIS runtime; user-provided
+      // UV_CACHE_DIR (via the whitelist above or extraEnv) takes precedence.
+      if (env.UV_CACHE_DIR === undefined) {
+        env.UV_CACHE_DIR = UV_CACHE_DIR_PATH;
+      }
 
       const proc = spawn(uvBin, args, { env, stdio: ["ignore", "pipe", "pipe"] });
 
@@ -560,14 +575,16 @@ export class PythonRuntimeBootstrapper {
   // ─── private: 로그 ───────────────────────────────
 
   private async ensureDirs(): Promise<void> {
-    await fs.mkdir(LOGS_DIR, { recursive: true });
-    await fs.mkdir(PYTHON_INSTALL_DIR, { recursive: true });
+    // ~/.lvis/<feature>/ namespace rule: directories owner-only (0o700).
+    await fs.mkdir(LOGS_DIR, { recursive: true, mode: 0o700 });
+    await fs.mkdir(PYTHON_INSTALL_DIR, { recursive: true, mode: 0o700 });
+    await fs.mkdir(UV_CACHE_DIR_PATH, { recursive: true, mode: 0o700 });
   }
 
   private async log(msg: string): Promise<void> {
     const line = `[${new Date().toISOString()}] ${msg}\n`;
     try {
-      await fs.mkdir(LOGS_DIR, { recursive: true });
+      await fs.mkdir(LOGS_DIR, { recursive: true, mode: 0o700 });
       await fs.appendFile(SETUP_LOG, line, "utf8");
     } catch {
       // 로그 실패는 무시 (non-fatal)

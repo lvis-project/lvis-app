@@ -404,6 +404,103 @@ describe("PythonRuntimeBootstrapper", () => {
     }
   });
 
+  // ─── issue #713: uv cache co-located with venv (cross-volume hardlink fix) ─
+
+  describe("issue #713 — uv cache cross-volume hardlink fix", () => {
+    function setupSetupSpawns(): void {
+      mockedAccess
+        .mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" })) // sentinel 없음
+        .mockResolvedValueOnce(undefined) // uv binary 존재
+        .mockResolvedValueOnce(undefined); // lock file 존재
+      mockedSpawn
+        .mockReturnValueOnce(makeSpawnMock("uv 0.7.3\n"))
+        .mockReturnValueOnce(makeSpawnMock(""))
+        .mockReturnValueOnce(makeSpawnMock(""))
+        .mockReturnValueOnce(makeSpawnMock("3.12.3\n"));
+    }
+
+    function uvSpawnEnvs(): NodeJS.ProcessEnv[] {
+      return mockedSpawn.mock.calls
+        .filter(([bin]) => {
+          const s = String(bin);
+          return s.endsWith("uv") || s.endsWith("uv.exe");
+        })
+        .map(([, , opts]) => (opts as SpawnOptionsWithoutStdio).env ?? {});
+    }
+
+    it("기본적으로 UV_CACHE_DIR을 ~/.lvis/runtime/uv-cache 로 설정한다", async () => {
+      delete process.env.UV_CACHE_DIR;
+      delete process.env.UV_LINK_MODE;
+      setupSetupSpawns();
+
+      const bootstrapper = new PythonRuntimeBootstrapper({
+        pluginManifestPaths: ["/installed/local-indexer/plugin.json"],
+      });
+      await bootstrapper.ensureReady(makeBrowserWindow());
+
+      const envs = uvSpawnEnvs();
+      expect(envs.length).toBeGreaterThan(0);
+      for (const env of envs) {
+        expect(env.UV_CACHE_DIR).toBeDefined();
+        expect(normalizePathForAssert(String(env.UV_CACHE_DIR))).toContain("/.lvis/runtime/uv-cache");
+      }
+    });
+
+    it("사용자가 설정한 UV_CACHE_DIR / UV_LINK_MODE 가 spawn env 로 전파된다", async () => {
+      const userCache = path.join(tmpdir(), "lvis-test-uv-user-cache");
+      process.env.UV_CACHE_DIR = userCache;
+      process.env.UV_LINK_MODE = "copy";
+      try {
+        setupSetupSpawns();
+
+        const bootstrapper = new PythonRuntimeBootstrapper({
+          pluginManifestPaths: ["/installed/local-indexer/plugin.json"],
+        });
+        await bootstrapper.ensureReady(makeBrowserWindow());
+
+        const envs = uvSpawnEnvs();
+        expect(envs.length).toBeGreaterThan(0);
+        for (const env of envs) {
+          expect(env.UV_CACHE_DIR).toBe(userCache);
+          expect(env.UV_LINK_MODE).toBe("copy");
+        }
+      } finally {
+        delete process.env.UV_CACHE_DIR;
+        delete process.env.UV_LINK_MODE;
+      }
+    });
+
+    it("ensureDirs() 가 UV_CACHE_DIR 경로를 0o700 권한으로 mkdir 한다", async () => {
+      delete process.env.UV_CACHE_DIR;
+      setupSetupSpawns();
+
+      const mkdirCalls: Array<{ path: string; mode: number | undefined }> = [];
+      vi.mocked(fsMock.mkdir).mockImplementation(async (target, opts) => {
+        const optsObj = (opts as { mode?: number } | undefined) ?? {};
+        mkdirCalls.push({ path: String(target), mode: optsObj.mode });
+        return undefined;
+      });
+
+      try {
+        const bootstrapper = new PythonRuntimeBootstrapper({
+          pluginManifestPaths: ["/installed/local-indexer/plugin.json"],
+        });
+        await bootstrapper.ensureReady(makeBrowserWindow());
+
+        const cacheCall = mkdirCalls.find((c) => normalizePathForAssert(c.path).endsWith("/.lvis/runtime/uv-cache"));
+        expect(cacheCall).toBeDefined();
+        expect(cacheCall!.mode).toBe(0o700);
+        // ~/.lvis/<feature>/ 룰: 모든 runtime 하위 디렉토리는 0o700.
+        const lvisRuntimeMkdirs = mkdirCalls.filter((c) => normalizePathForAssert(c.path).includes("/.lvis/runtime/"));
+        for (const call of lvisRuntimeMkdirs) {
+          expect(call.mode).toBe(0o700);
+        }
+      } finally {
+        vi.mocked(fsMock.mkdir).mockResolvedValue(undefined);
+      }
+    });
+  });
+
   // ─── 3. spawn non-zero exit → throws ─────────────────────────────────────
 
   it("uv spawn이 non-zero exit code를 반환하면 throws한다", async () => {
