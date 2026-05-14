@@ -746,6 +746,15 @@ export interface InitPluginRuntimeInput {
     opts: import("../../main/auth-partition-viewer-service.js").OpenAuthPartitionViewerOptions,
   ) => Promise<void>;
   /**
+   * SDK 5.6.0 — wipe-partition surface used by plugin `clearAuthPartition`
+   * to delete cookies / storage / cache / HTTP-auth from one of the
+   * plugin's own `persist:plugin-auth:<pluginId>[:<sub>]` partitions
+   * after a user-triggered sign-out. Production wiring is
+   * `clearAuthPartition` from `src/main/auth-window-service.ts`; tests
+   * inject a stub.
+   */
+  clearAuthPartitionService: (partition: string) => Promise<void>;
+  /**
    * §B3 — System browser opener used when
    * `settings.webView.preferredFlow === "system-browser"`. Production wiring
    * is `shell.openExternal` from electron; tests inject a spy.
@@ -791,6 +800,7 @@ export async function initPluginRuntime(
     openAuthWindowService,
     openLinkWindowService,
     openAuthPartitionViewerService,
+    clearAuthPartitionService,
     shellOpenExternal,
     approvalGate,
   } = input;
@@ -1268,6 +1278,62 @@ export async function initPluginRuntime(
             },
           },
         );
+      },
+
+      // ─── SDK 5.6.0 — clearAuthPartition ──────────────────────────────
+      // Wipe cookies / storage / cache / HTTP-auth from one of the calling
+      // plugin's own `persist:plugin-auth:<pluginId>[:<sub>]` partitions.
+      // Used after `lge_signout` / equivalent user-triggered sign-out so a
+      // subsequent `openAuthWindow` cannot silently SSO via residual IdP
+      // cookies. Capability + partition allow-list mirror `openAuthWindow`.
+      clearAuthPartition: async (partition: string): Promise<void> => {
+        if (!manifest.capabilities?.includes("external-auth-consumer")) {
+          try {
+            bootAuditLogger.log({
+              timestamp: new Date().toISOString(),
+              sessionId: "plugin",
+              type: "error",
+              input: `[plugin:${pluginId}] clear_auth_partition_capability_denied missingCapability=external-auth-consumer`,
+            });
+          } catch { /* audit must not break host */ }
+          throw new Error(
+            `[plugin:${pluginId}] capability not declared: external-auth-consumer`,
+          );
+        }
+        if (typeof partition !== "string" || partition.length === 0) {
+          throw new Error(
+            `[plugin:${pluginId}] clearAuthPartition: partition must be a non-empty string`,
+          );
+        }
+        const encodedId = encodeURIComponent(pluginId);
+        const allowedPersistBase = `persist:plugin-auth:${encodedId}`;
+        if (
+          partition !== allowedPersistBase &&
+          !partition.startsWith(`${allowedPersistBase}:`)
+        ) {
+          try {
+            bootAuditLogger.log({
+              timestamp: new Date().toISOString(),
+              sessionId: "plugin",
+              type: "error",
+              input:
+                `[plugin:${pluginId}] clear_auth_partition_invalid_partition ` +
+                `partition=${partition} allowed=${allowedPersistBase}[:<sub>]`,
+            });
+          } catch { /* audit must not break host */ }
+          throw new Error(
+            `[plugin:${pluginId}] clearAuthPartition: partition must be '${allowedPersistBase}' or '${allowedPersistBase}:<sub>'`,
+          );
+        }
+        try {
+          bootAuditLogger.log({
+            timestamp: new Date().toISOString(),
+            sessionId: "plugin",
+            type: "tool_call",
+            input: `[plugin:${pluginId}] clearAuthPartition partition=${partition}`,
+          });
+        } catch { /* audit must not break host */ }
+        await clearAuthPartitionService(partition);
       },
 
       // ─── §8 Agent Approval — hostApi.agentApproval ────────────────────
