@@ -15,8 +15,10 @@ import {
   recordValidatedTheme,
   getLastThemePayload,
   replayThemeToWebview,
+  publishHostThemeChanged,
   __resetLastThemePayloadForTests,
 } from "../domains/plugins.js";
+import { onEvent } from "../../boot/types.js";
 import { HOST_ONLY_EMIT_NAMESPACES } from "../../plugins/capabilities.js";
 
 describe("plugin theme replay cache", () => {
@@ -162,6 +164,24 @@ describe("replayThemeToWebview", () => {
 
     expect(() => replayThemeToWebview(7)).not.toThrow();
     expect(replayThemeToWebview(7)).toBeNull();
+  });
+});
+
+describe("publishHostThemeChanged", () => {
+  it("emits the validated theme payload on the host event bus", () => {
+    const payload = { bundleId: "tokyo-night", shell: "dark" as const, tokens: { "--lvis-bg": "#0d0d12" } };
+    const seen: unknown[] = [];
+    const unsubscribe = onEvent("host.theme.changed", (data) => {
+      seen.push(data);
+    });
+
+    try {
+      publishHostThemeChanged(payload);
+    } finally {
+      unsubscribe();
+    }
+
+    expect(seen).toEqual([payload]);
   });
 });
 

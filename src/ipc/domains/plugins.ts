@@ -110,6 +110,15 @@ export function recordValidatedTheme(payload: unknown):
 }
 
 /**
+ * Publish a host-owned theme change on the plugin event bus. Plugin webviews
+ * still receive the direct IPC fanout below; host plugins that own detached
+ * windows can subscribe through hostApi.onEvent("host.theme.changed").
+ */
+export function publishHostThemeChanged(safe: SafeThemePayload): void {
+  emitHostEvent("host.theme.changed", safe);
+}
+
+/**
  * Push the cached theme payload to a freshly registered webview so the
  * plugin paints with the active tokens from first frame instead of the
  * SDK `:root` fallback. Returns the payload that was sent (or null when
@@ -881,7 +890,9 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     pluginWebviewRegistry.set(webContentsId, binding);
     flushPendingEntryUrl(webContentsId, binding);
     plog("debug", { pluginId, phase: PluginPhase.WEBVIEW_ATTACH, webContentsId }, "webview attached");
-    if (replayThemeToWebview(webContentsId)) {
+    const replayedTheme = replayThemeToWebview(webContentsId);
+    if (replayedTheme) {
+      publishHostThemeChanged(replayedTheme);
       plog("debug", { pluginId, phase: PluginPhase.WEBVIEW_ATTACH, webContentsId }, "theme replay sent");
     }
     return { ok: true };
@@ -1151,7 +1162,8 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
 
   // ─── Theme propagation ─────────────────────────────────────────────────
   // Host renderer calls this when any theme axis changes; main fans out to
-  // every registered plugin webview via the existing lvis:plugin:event channel.
+  // every registered plugin webview via the existing lvis:plugin:event channel
+  // and publishes the same host event for plugin host services.
   ipcMain.handle("lvis:host:plugin-theme-notify", (e, payload: unknown) => {
     if (!validateSender(e)) {
       auditUnauthorized(auditLogger, "lvis:host:plugin-theme-notify", e);
@@ -1160,6 +1172,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     const validated = recordValidatedTheme(payload);
     if (!validated.ok) return validated;
     const { safe } = validated;
+    publishHostThemeChanged(safe);
     for (const [wcId] of pluginWebviewRegistry) {
       try {
         const wc = webContents.fromId(wcId);
