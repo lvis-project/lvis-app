@@ -254,7 +254,7 @@ export function OverlayCard({
               data-testid="overlay-card-primary-action"
               onClick={onPrimaryAction}
             >
-              {primaryActionLabel}
+              {primaryActionLabel ?? (kind === "plugin" ? "확인하기" : "결과 보기")}
             </Button>
           </div>
         )}

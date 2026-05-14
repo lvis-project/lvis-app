@@ -62,6 +62,31 @@ import { parseImportedTriggerEnvelope } from "../../shared/overlay-trigger-sourc
 
 const CHAT_BOTTOM_THRESHOLD_PX = 96;
 
+type ImportedTriggerEntry = Extract<ChatEntry, { kind: "imported_trigger" }>;
+
+function ImportedTriggerCard({ entry }: { entry: ImportedTriggerEntry }) {
+  // Parse envelope source tag to confirm overlay trigger provenance.
+  // title + summary fields are already clean (set at insert time).
+  const envelopeSource = parseImportedTriggerEnvelope(entry.prompt);
+  return (
+    <div
+      className="mx-3 my-1 rounded border border-action-view/20 bg-action-view/5 px-3 py-2 text-xs"
+    >
+      <div className="flex items-center gap-1 text-action-view font-medium">
+        <span>●</span>
+        <span>{envelopeSource ?? entry.summary.slice(0, 60)}</span>
+      </div>
+      {entry.summary && (
+        <div className="mt-1 text-muted-foreground prose prose-sm lvis-prose max-w-none">
+          <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>
+            {entry.summary}
+          </ReactMarkdown>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /**
  * ChatView — consumes cross-cutting state via `useChatContext()`. Action
  * callbacks stay as direct props so data flow for user-driven side effects
@@ -366,30 +391,11 @@ function HistoricalEntriesList({
     }
 
     if (entry.kind === "imported_trigger") {
-      // Parse envelope source tag to confirm overlay trigger provenance.
-      // title + summary fields are already clean (set at insert time).
-      const envelopeSource = parseImportedTriggerEnvelope(entry.prompt);
       rendered.push(
-        <div
+        <ImportedTriggerCard
           key={`trigger:${entry.sessionId}`}
-          className="mx-3 my-1 rounded border border-action-view/20 bg-action-view/5 px-3 py-2 text-xs"
-        >
-          <div className="flex items-center gap-1 text-action-view font-medium">
-            <span>●</span>
-            <span>{envelopeSource ?? entry.summary.slice(0, 60)}</span>
-          </div>
-          {entry.summary && (
-            // markdown 으로 render — plugin prompt 의 `\n` + list (`- 항목`) +
-            // **bold** 등을 살림. plain `<p>` 시 CSS `white-space: normal` 이
-            // newline 을 collapse 해 모든 내용이 한 줄로 붙어 가독성 손상.
-            // 일반 assistant 렌더와 같은 markdown 파이프라인 재사용.
-            <div className="mt-1 text-muted-foreground prose prose-sm lvis-prose max-w-none">
-              <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>
-                {entry.summary}
-              </ReactMarkdown>
-            </div>
-          )}
-        </div>,
+          entry={entry}
+        />,
       );
       i++;
       continue;
@@ -1244,22 +1250,11 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             }
 
             if (entry.kind === "imported_trigger") {
-              // Parse envelope source tag to confirm overlay trigger provenance.
-              // title + summary fields are already clean (set at insert time).
-              const envelopeSource = parseImportedTriggerEnvelope(entry.prompt);
               rendered.push(
-                <div
+                <ImportedTriggerCard
                   key={`trigger:${entry.sessionId}`}
-                  className="mx-3 my-1 rounded border border-action-view/20 bg-action-view/5 px-3 py-2 text-xs"
-                >
-                  <div className="flex items-center gap-1 text-action-view font-medium">
-                    <span>●</span>
-                    <span>{envelopeSource ?? entry.summary.slice(0, 60)}</span>
-                  </div>
-                  {entry.summary && (
-                    <p className="mt-1 text-muted-foreground">{entry.summary}</p>
-                  )}
-                </div>,
+                  entry={entry}
+                />,
               );
               i++;
               continue;

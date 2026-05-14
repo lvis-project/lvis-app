@@ -107,7 +107,6 @@ describe("OverlayCard — expand toggle", () => {
       summary: "x",
       kind: "plugin",
       onPrimaryAction: () => {},
-      primaryActionLabel: "확인하기",
     });
     const action = getByTestId("overlay-card-primary-action");
     expect(action.textContent).toContain("확인하기");
