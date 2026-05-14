@@ -330,8 +330,19 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
           // released before marketplace.uninstall hits rm. removePlugin is
           // best-effort here — failure shouldn't block the rm rollback.
           await pluginRuntime.removePlugin(result.pluginId).catch((rmPluginErr) => {
-            log.warn(
-              `install rollback removePlugin failed for ${result.pluginId}: ${errMessage(rmPluginErr)}`,
+            // Structured log for forensic correlation — parity with the
+            // register-webview auto-purge path. log.warn alone would be a
+            // free-text breadcrumb that's hard to grep against the audit
+            // trail of the larger install attempt.
+            plog(
+              "warn",
+              {
+                pluginId: result.pluginId,
+                phase: PluginPhase.STOP_FAIL,
+                reason: "install-rollback-removePlugin-failed",
+                error: errMessage(rmPluginErr),
+              },
+              "install rollback removePlugin failed (best-effort, marketplace.uninstall continues)",
             );
           });
           await pluginMarketplace.uninstall(result.pluginId);
@@ -446,8 +457,19 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
           // released before marketplace.uninstall hits rm. removePlugin is
           // best-effort here — failure shouldn't block the rm rollback.
           await pluginRuntime.removePlugin(result.pluginId).catch((rmPluginErr) => {
-            log.warn(
-              `install rollback removePlugin failed for ${result.pluginId}: ${errMessage(rmPluginErr)}`,
+            // Structured log for forensic correlation — parity with the
+            // register-webview auto-purge path. log.warn alone would be a
+            // free-text breadcrumb that's hard to grep against the audit
+            // trail of the larger install attempt.
+            plog(
+              "warn",
+              {
+                pluginId: result.pluginId,
+                phase: PluginPhase.STOP_FAIL,
+                reason: "install-rollback-removePlugin-failed",
+                error: errMessage(rmPluginErr),
+              },
+              "install rollback removePlugin failed (best-effort, marketplace.uninstall continues)",
             );
           });
           await pluginMarketplace.uninstall(result.pluginId);
