@@ -909,11 +909,11 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
                     {/* §PR-5: hide mutating actions in view-mode (read-only slice) */}
                     {!viewMode && (
                       <div className="absolute right-2 top-2 hidden gap-1 group-hover:flex bg-message-user/95 rounded">
-                        <Button variant="ghost" size="icon-xs" className="hover:bg-[hsl(var(--hover-overlay)/0.2)]" title="편집" onClick={() => setEditingEntryIdx(idx)}><Pencil className="h-3 w-3" /></Button>
-                        <Button variant="ghost" size="icon-xs" className="hover:bg-[hsl(var(--hover-overlay)/0.2)]" title="분기" onClick={() => void onFork(idx)}><GitBranch className="h-3 w-3" /></Button>
-                        <Button variant="ghost" size="icon-xs" className="hover:bg-[hsl(var(--hover-overlay)/0.2)]" title="즐겨찾기" onClick={() => void onToggleStar(idx)}>
+                        <button className="rounded p-0.5 hover:bg-[hsl(var(--hover-overlay)/0.2)]" title="편집" onClick={() => setEditingEntryIdx(idx)}><Pencil className="h-3 w-3" /></button>
+                        <button className="rounded p-0.5 hover:bg-[hsl(var(--hover-overlay)/0.2)]" title="분기" onClick={() => void onFork(idx)}><GitBranch className="h-3 w-3" /></button>
+                        <button className="rounded p-0.5 hover:bg-[hsl(var(--hover-overlay)/0.2)]" title="즐겨찾기" onClick={() => void onToggleStar(idx)}>
                           <Star key={starActive ? "on" : "off"} className={`h-3 w-3 ${starActive ? "fill-emphasis text-emphasis lvis-anim-star" : ""}`} />
-                        </Button>
+                        </button>
                       </div>
                     )}
                     <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{searchHighlight ? highlightText(entry.text, searchHighlight) : entry.text}</div>
@@ -1395,7 +1395,13 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
               })();
             }}
             streaming={streaming}
-            disabled={hasApiKey === false || contextOverflowPct >= 0.95 || viewMode !== null}
+            disabled={
+              // Slash commands (e.g. /compact) bypass the context-overflow gate
+              // so the user can escape a fully-blocked input even while the
+              // "자동 압축이 필요합니다" banner is showing.
+              (hasApiKey === false || contextOverflowPct >= 0.95 || viewMode !== null) &&
+              !question.trimStart().startsWith("/")
+            }
             onWarning={(msg) => console.warn(msg)}
             placeholder={
               hasApiKey === false
