@@ -1,7 +1,18 @@
-import { Database, Download, ExternalLink, Home, KeyRound, Menu, Plus, Repeat2, Search, Star } from "lucide-react";
+import { Database, Download, ExternalLink, Home, KeyRound, Menu, Plus, Repeat2, Search, Star, Wrench } from "lucide-react";
 import { Button } from "../../components/ui/button.js";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "../../components/ui/dropdown-menu.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip.js";
+
+/**
+ * Dev mode 감지 — preload (`src/preload.ts`) 가 `window.__lvisDevMode` 를
+ * runtime 에 set. main process 가 `scripts/run-electron.mjs` 에서
+ * NODE_ENV=development 설정한 결과를 reads. webpack build-time 치환에 의존
+ * 안 함 (renderer build 가 default production 모드라서 build-time literal
+ * 은 항상 false 가 됨).
+ */
+function isDevMode(): boolean {
+  return (window as unknown as { __lvisDevMode?: boolean }).__lvisDevMode === true;
+}
 
 export interface MainToolbarProps {
   activeView: string;
@@ -18,6 +29,8 @@ export interface MainToolbarProps {
   onOpenUnifiedSearch: () => void;
   onOpenStarredView: () => void;
   onOpenDetachedView: (viewKey: "routines" | "memory" | "starred") => void | Promise<void>;
+  /** Dev mode 만 사용 — clicking the wrench opens the floating DevToolsPanel. */
+  onOpenDevTools?: () => void;
 }
 
 export function MainToolbar({
@@ -35,6 +48,7 @@ export function MainToolbar({
   onOpenUnifiedSearch,
   onOpenStarredView,
   onOpenDetachedView,
+  onOpenDevTools,
 }: MainToolbarProps) {
   return (
     <div data-testid="main-toolbar" className="border-b bg-card px-3 py-2">
@@ -55,6 +69,28 @@ export function MainToolbar({
           </TooltipTrigger>
           <TooltipContent>홈</TooltipContent>
         </Tooltip>
+
+        {/* ── Dev tools indicator — only visible in non-production. */}
+        {isDevMode() && onOpenDevTools !== undefined && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 gap-1 px-2 text-[10.5px] font-mono text-warning"
+                onClick={onOpenDevTools}
+                title="Dev Tools (Cmd/Ctrl+Shift+D)"
+                aria-label="Dev Tools (Cmd/Ctrl+Shift+D)"
+                data-testid="dev-tools-toggle"
+              >
+                <Wrench className="h-3 w-3" />
+                <span>Dev</span>
+                <kbd className="rounded border border-warning/40 bg-warning/10 px-1 text-[9.5px]">⇧⌘D</kbd>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Dev Tools — Preflight 임계 조절 (Cmd/Ctrl+Shift+D)</TooltipContent>
+          </Tooltip>
+        )}
 
         {/* ── Spacer pushes remaining items to the right ─────────────── */}
         <div className="flex-1" />

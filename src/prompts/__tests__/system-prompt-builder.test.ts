@@ -1,22 +1,22 @@
 /**
- * PR-2 — Conversation Continuity Guard section (id 9.9).
+ * PR-2 — Conversation Continuity Guard section (id 9.9) — always-on after gate removal.
  *
  * Verifies:
- *   - Hidden title/checkpoint markers are forbidden when experimentalContinuousBackend is ON
+ *   - Hidden title/checkpoint markers are forbidden in the continuity guard
  *   - Session title is injected when set
  *   - No session title line emitted when title is null
  *   - setSessionTitle("") normalises to null (no injection)
  *   - sanitizeTitle() strips dangerous characters (newline, quote, backslash, angle brackets)
  *   - sanitizeTitle() + setSessionTitle() whitespace-only → normalised to null
- *   - Section 9.9 is absent when experimentalContinuousBackend is OFF (safety flag)
+ *   - Section 8 (Rolling Summary Preamble) injected when preamble set, omitted otherwise
  */
 import { describe, it, expect } from "vitest";
 
 import { SystemPromptBuilder } from "../system-prompt-builder.js";
 import { ToolRegistry } from "../../tools/registry.js";
 
-function makeBuilder({ continuousBackend = true }: { continuousBackend?: boolean } = {}): SystemPromptBuilder {
-  const builder = new SystemPromptBuilder({
+function makeBuilder(): SystemPromptBuilder {
+  return new SystemPromptBuilder({
     memoryManager: {
       getAgentsMd: () => "",
       getLvisMd: () => "",
@@ -26,8 +26,6 @@ function makeBuilder({ continuousBackend = true }: { continuousBackend?: boolean
     } as never,
     toolRegistry: new ToolRegistry(),
   });
-  builder.setContinuousBackendEnabled(continuousBackend);
-  return builder;
 }
 
 function makeMemoryBuilder(memoryIndex: string): SystemPromptBuilder {
@@ -195,36 +193,26 @@ describe("SystemPromptBuilder — sanitizeTitle via setSessionTitle", () => {
   });
 });
 
-describe("SystemPromptBuilder — safety flag (experimentalContinuousBackend)", () => {
-  it("Section 9.9 is absent when flag is OFF (default)", () => {
-    const builder = makeBuilder({ continuousBackend: false });
-    const prompt = builder.build();
-    expect(prompt).not.toContain("## 대화 연속성 출력 규칙");
-    expect(prompt).not.toContain("<title>10-20자 한국어 제목</title>");
-    expect(prompt).not.toContain("[checkpoint-suggested]");
-  });
-
-  it("Section 8 (Rolling Summary Preamble) is absent when flag is OFF even with preamble set", () => {
-    const builder = makeBuilder({ continuousBackend: false });
-    builder.setSummaryPreamble("이전 세션 요약 내용입니다.");
-    const prompt = builder.build();
-    expect(prompt).not.toContain("<prior-context-summary>");
-    expect(prompt).not.toContain("이전 세션 요약 내용입니다.");
-  });
-
-  it("Section 9.9 appears when flag is turned ON", () => {
-    const builder = makeBuilder({ continuousBackend: true });
+describe("SystemPromptBuilder — Section 8 Rolling Summary Preamble (always-on)", () => {
+  it("Section 9.9 is always present (no gate)", () => {
+    const builder = makeBuilder();
     const prompt = builder.build();
     expect(prompt).toContain("## 대화 연속성 출력 규칙");
     expect(prompt).toContain("체크포인트 마커를 출력하지 마세요");
     expect(prompt).not.toContain("<title>10-20자 한국어 제목</title>");
   });
 
-  it("Section 8 appears when flag is ON and preamble is set", () => {
-    const builder = makeBuilder({ continuousBackend: true });
+  it("Section 8 (Rolling Summary Preamble) appears when preamble set", () => {
+    const builder = makeBuilder();
     builder.setSummaryPreamble("이전 세션 요약 내용입니다.");
     const prompt = builder.build();
     expect(prompt).toContain("<prior-context-summary>");
     expect(prompt).toContain("이전 세션 요약 내용입니다.");
+  });
+
+  it("Section 8 is absent when preamble is null (first-turn / fresh session)", () => {
+    const builder = makeBuilder();
+    const prompt = builder.build();
+    expect(prompt).not.toContain("<prior-context-summary>");
   });
 });

@@ -43,7 +43,7 @@ const DEFAULT_SETTINGS = {
   webSearch: { provider: "none" },
   routine: {},
   privacy: { piiRedactEnabled: false },
-  features: { experimentalContinuousBackend: false, idlePreferenceRefresh: false },
+  features: { idlePreferenceRefresh: false },
 };
 
 const DEFAULT_USAGE = {

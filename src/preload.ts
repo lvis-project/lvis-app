@@ -1008,6 +1008,24 @@ const api = {
       return () => ipcRenderer.removeListener("lvis:window:load-session-in-main", listener);
     },
   },
+
+  /**
+   * Dev tools bridge — only useful in non-production builds. Renderer
+   * floating panel uses this to adjust the Layer 0 preflight threshold
+   * at runtime (so compact scenarios can be reproduced without filling
+   * the actual model context window).
+   */
+  dev: {
+    setPreflightOverride: async (tokens: number | null) =>
+      ipcRenderer.invoke("lvis:dev:setPreflightOverride", tokens) as Promise<
+        { ok: true; value: number | null } | { ok: false; error: string }
+      >,
+    getPreflightStatus: async () =>
+      ipcRenderer.invoke("lvis:dev:getPreflightStatus") as Promise<
+        | { ok: true; runtimeOverride: number | null; envOverride: number | null; effective: number; provider: string; model: string }
+        | { ok: false; error: string }
+      >,
+  },
 };
 
 // Expose the theme prime payload so ThemeProvider (renderer) can read it
@@ -1017,6 +1035,11 @@ const api = {
 contextBridge.exposeInMainWorld("__lvisInitialTheme", lvisInitialTheme);
 
 contextBridge.exposeInMainWorld("lvisApi", api);
+// Dev mode runtime flag — main process sets NODE_ENV=development in
+// `scripts/run-electron.mjs`, so preload reads it at runtime to bypass the
+// webpack build-time substitution issue (renderer bundle would otherwise see
+// NODE_ENV="production" because webpack defaults to production mode).
+contextBridge.exposeInMainWorld("__lvisDevMode", process.env.NODE_ENV !== "production");
 
 let hostMarketplaceApiClaimed = false;
 contextBridge.exposeInMainWorld("lvisHost", {
