@@ -1,11 +1,13 @@
 /**
  * Runtime manifest validation hardening.
  *
- * Covers 4 cross-field rules:
+ * Covers 5 cross-field rules:
  *   1) keywords[].skillId ⊂ tools[]             (hard fail-load)
  *   2) toolSchemas keys    ⊂ tools[]             (hard fail-load)
  *   3) notificationEvents.event ⊂ eventSubscriptions (soft warn)
  *   4) ui[] kind-specific required fields (hard fail-load)
+ *   5) AJV unknown-property rejection (additionalProperties:false at root,
+ *      SDK 5.7.0+) — guards against silent acceptance of removed/typo'd fields
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";
@@ -224,6 +226,27 @@ describe("runtime manifest validation hardening", () => {
     }
     expect(runtime.listPluginIds()).not.toContain("p_ui_bad");
     expect(cap.errors.some((e) => /ui\[0\].*must be an object/.test(e))).toBe(true);
+  });
+
+  // SDK 5.7.0 의 schema 가 root 에 `additionalProperties: false` 를 강제하므로
+  // 폐기된 `startupTools` 또는 plugin author 의 typo 가 silent ignore 되지 않고
+  // AJV 단계에서 hard reject 되어야 한다. plugin 자체가 fail-soft drop 되며 host
+  // 는 계속 동작.
+  it("5) AJV rejects manifest with unknown root property (startupTools post 5.7.0)", async () => {
+    await writePlugin("p_unknown_field", {
+      startupTools: ["p_unknown_field_hello"],
+    });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const cap = captureErrors();
+    try {
+      await runtime.load();
+    } finally {
+      cap.restore();
+    }
+    expect(runtime.listPluginIds()).not.toContain("p_unknown_field");
+    expect(
+      cap.errors.some((e) => /additional|unknown|startupTools/i.test(e)),
+    ).toBe(true);
   });
 
 });
