@@ -15,12 +15,12 @@
 |---|---|---|
 | Continuous chat without visible session cards | ✅ | `StackedChatView` Kakao stream + structured `kind: "checkpoint"`/`"session_resume"` entries |
 | Compaction auditable / debuggable | ✅ | `RotationDecision.trigger` ↛ `onCompactOccurred.tier` 일관 wiring; tier 별 색상/라벨/아이콘 (CheckpointDivider) |
-| Feature flags can revert to current behavior | ✅ | `experimentalContinuousBackend` default OFF; `decideRotation` safety gate |
+| Feature flags can revert to current behavior | ✅ (2026-05-15 후속) | `experimentalContinuousBackend` 게이트는 PR #729 에서 제거 — ⑧/⑨.9 항상 주입. Rollback path 는 `git revert` 만. |
 | Day separator + LLM rolling summary + day boundary safety net | ✅ | `DaySeparator` (PR-5) + `summary-generator` (PR-4) + tier 3 24h time-only (PR #525 정합화) |
 | Rollback / revert-to-checkpoint UI | ✅ | `CheckpointDivider.onRevert` → `lvis:chat:session-resume(parentSessionId)` (#521) |
 
 **Intentionally not implemented (out of scope, deferred)**:
-- 4 separate sub-flags (`enabled / visibleNotice / llmSummary / daySeparators`) → 단일 `experimentalContinuousBackend` 로 단순화
+- 4 separate sub-flags (`enabled / visibleNotice / llmSummary / daySeparators`) → 단일 `experimentalContinuousBackend` 로 단순화 (해당 flag 자체는 PR #729 에서 제거됨 — 항상-on)
 - Day separator `YYYY-MM-DD (요일)` 의 *요일* 표기 → 현재 `(오늘)/(어제)/dateKey-only`
 - Warp 식 propose-only banner (사용자 결정으로 보류, 향후 검토 가능)
 

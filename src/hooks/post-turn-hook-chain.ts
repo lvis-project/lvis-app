@@ -12,8 +12,7 @@
 import { markStaleToolResults } from "../engine/auto-compact.js";
 import { stubMarkedToolResults } from "../engine/wire-serialize.js";
 import { detectFromStream, type DetectorResult } from "../engine/checkpoint-detector.js";
-import { chainTitle } from "../engine/title-chainer.js";
-import type { GenericMessage, TokenUsage, LLMProvider } from "../engine/llm/types.js";
+import type { GenericMessage, TokenUsage } from "../engine/llm/types.js";
 import type { MemoryManager } from "../memory/memory-manager.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
 import type { IdleSchedulerService } from "../main/idle-scheduler.js";
@@ -49,13 +48,6 @@ export interface PostTurnHookChainDeps {
   auditLogger?: AuditLogger;
   idleScheduler?: IdleSchedulerService;
   settingsService?: SettingsService;
-  /**
-   * §PR-3: optional LLM provider for chainTitle fallback.
-   * When supplied and detectFromStream returns no newTitle, chainTitle is
-   * called as a mini-call to generate a session title from existing title +
-   * final answer. Omit in tests / lightweight setups to skip the fallback.
-   */
-  llmProvider?: LLMProvider;
   /**
    * §PR-3: optional callback invoked when a legacy [checkpoint] marker is detected.
    * Caller (typically conversation-loop or IPC bridge) can trigger PR-4 summary.
@@ -166,28 +158,19 @@ export class PostTurnHookChain {
       log.warn("extractMemory failed: %s", err);
     }
 
-    // 5. §PR-3: Update Title — newTitle 있으면 session metadata 업데이트
-    //    없으면 chainTitle LLM fallback (llmProvider 주입된 경우에만)
+    // 5. §PR-3: Update Title — newTitle (legacy [title] marker) 만 metadata 에 저장.
+    //    chainTitle LLM fallback 은 boot/conversation.ts 에서 llmProvider 를
+    //    주입하지 않아 dead code 였음 — PR #729 에서 제거 (No Fallback Code 룰).
+    //    LLM 기반 제목 자동 생성을 원하면 boot 에서 llmProvider 주입 + 빈도
+    //    게이트 (e.g. "N turn 마다") 를 별도 PR 에서 함께 도입.
     try {
-      if (this.deps.memoryManager) {
-        let titleToStore: string | null = detector.newTitle;
-
-        // Load metadata once and reuse for both chainTitle input and saveSessionMetadata.
+      if (this.deps.memoryManager && detector.newTitle) {
         const sessionMeta = this.deps.memoryManager.loadSessionMetadata(ctx.sessionId) ?? {};
-
-        if (!titleToStore && this.deps.llmProvider) {
-          // chainTitle fallback: 현재 세션 메타데이터에서 직접 제목 조회 (listSessions I/O 비용 회피)
-          const existingTitle = sessionMeta.title ?? `세션 ${ctx.sessionId.slice(0, 8)}`;
-          titleToStore = await chainTitle(this.deps.llmProvider, existingTitle, detector.cleanedText);
-        }
-
-        if (titleToStore) {
-          await this.deps.memoryManager.saveSessionMetadata(ctx.sessionId, {
-            ...sessionMeta,
-            title: titleToStore,
-          });
-          log.info(`update-title: session ${ctx.sessionId} title set to "${titleToStore}"`);
-        }
+        await this.deps.memoryManager.saveSessionMetadata(ctx.sessionId, {
+          ...sessionMeta,
+          title: detector.newTitle,
+        });
+        log.info(`update-title: session ${ctx.sessionId} title set to "${detector.newTitle}"`);
       }
     } catch (err) {
       log.warn("update-title failed: %s", err);
