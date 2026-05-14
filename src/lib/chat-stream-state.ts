@@ -32,6 +32,15 @@ export type StreamEvent = {
    *  refresh contextOverflowPct immediately; falls back to (lastKnown -
    *  freedTokens) when missing). */
   estimatedAfter?: number;
+  /**
+   * `compact_started` event fields — pre-turn auto-compact in progress.
+   * Renderer sets `isCompacting: true` on this event and clears it on
+   * `compact_notice` (completion). Allows showing a "자동 압축 중..." indicator
+   * during the blocking LLM compaction call.
+   */
+  triggerSource?: "estimate" | "actual-tokensIn" | "manual";
+  estimatedBefore?: number;
+  preflight?: number;
   /** Compact trigger tier on `compact_notice` — Layer 0 auto vs manual. */
   tier?: CheckpointTier;
   /** Rolling summary attached to a compact checkpoint (rendered preamble). */
