@@ -424,8 +424,8 @@ describe("compactWithBoundary — Layer 2 LLM call integration", () => {
       compactNum: 1,
     });
     expect(r.boundary!.pinnedArtifacts.length).toBeGreaterThan(0);
-    const hasSkill = r.boundary.pinnedArtifacts.some((p) => p.startsWith("skill:"));
-    const hasLock = r.boundary.pinnedArtifacts.some((p) => p.startsWith("lock-user:"));
+    const hasSkill = r.boundary!.pinnedArtifacts.some((p) => p.startsWith("skill:"));
+    const hasLock = r.boundary!.pinnedArtifacts.some((p) => p.startsWith("lock-user:"));
     expect(hasSkill).toBe(true);
     expect(hasLock).toBe(true);
   });
@@ -500,6 +500,78 @@ describe("compactWithBoundary — Layer 2 LLM call integration", () => {
         prev?.role === "assistant" && prev.toolCalls && prev.toolCalls.length > 0,
       ).toBe(true);
     }
+  });
+
+  it("deep tool chain (>3 step) at preserve boundary — surviving never starts with orphan tool_result", async () => {
+    // Loop 2 NEW MAJOR fix: splitForBoundary 의 backward walk 는 3-step bound
+    // 이므로 더 깊은 tool chain 에선 preserveStart 가 여전히 tool_result 일 수
+    // 있음. adjustForwardToToolBoundary 후처리로 surviving[0] 이 절대 orphan
+    // tool_result 가 되지 않게 보장. 이 시나리오 회귀 차단.
+    const llm = makeMockLlm([makeFullSummaryText()]);
+    const messages: GenericMessage[] = [];
+    for (let i = 0; i < 15; i++) {
+      messages.push({ role: "user", content: `q${i} `.repeat(20) });
+      messages.push({ role: "assistant", content: `a${i} `.repeat(20) });
+    }
+    // Append 6-step deep tool chain (>3 backward bound) at the tail.
+    for (let i = 0; i < 3; i++) {
+      messages.push({
+        role: "assistant",
+        content: `tool call ${i}`,
+        toolCalls: [{ id: `t${i}`, name: "search", input: {} }],
+      });
+      messages.push({
+        role: "tool_result",
+        toolUseId: `t${i}`,
+        toolName: "search",
+        content: `result ${i}`,
+      });
+    }
+
+    const r = await compactWithBoundary({
+      messages,
+      llm,
+      model: "claude-sonnet-4-6",
+      preserveRecentTokens: 100,
+      sessionId: "test-sess-deep-chain",
+      preflightTokens: 100_000,
+      compactNum: 1,
+    });
+
+    // newHistory[0] = boundary stub (user role). newHistory[1] 가 첫 surviving
+    // 메시지. orphan tool_result 가 안 되어야 함 — toPreserve 가 비어있어 stub
+    // 만 있거나, 또는 첫 surviving 메시지가 non-tool_result.
+    if (r.newHistory.length > 1) {
+      expect(r.newHistory[1].role).not.toBe("tool_result");
+    }
+  });
+
+  it("REDUCED_INSUFFICIENT_FORCED — post-compact > preflight*0.8 triggers oldest 50% drop + archive", async () => {
+    // Layer D: LLM summary 후에도 budget 초과 시 toPreserve oldest 50% 강제
+    // drop. fresh preserveRecent 가 충분히 커서 post-compact 가 여전히
+    // preflight × 0.8 초과하도록 fixture 구성.
+    const llm = makeMockLlm([makeFullSummaryText()]);
+    const messages: GenericMessage[] = [];
+    for (let i = 0; i < 30; i++) {
+      messages.push({ role: "user", content: "x".repeat(2_000) });
+      messages.push({ role: "assistant", content: "y".repeat(2_000) });
+    }
+
+    const r = await compactWithBoundary({
+      messages,
+      llm,
+      model: "claude-sonnet-4-6",
+      // history ≈ 30K tokens, preserve 10K → toCompact ≈ 20K → A.5 drops to ~4.5K
+      // → LLM summary → newHistory ≈ stub + 10K preserve = ~10K. 10K > 5K*0.8=4K → FORCED.
+      preserveRecentTokens: 10_000,
+      sessionId: "test-sess-forced",
+      preflightTokens: 5_000,
+      compactNum: 1,
+    });
+
+    expect(r.status).toBe("reduced_insufficient_forced");
+    expect(r.boundary).not.toBeNull();
+    expect(r.removedCount).toBeGreaterThan(0);
   });
 });
 
