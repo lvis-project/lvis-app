@@ -338,6 +338,8 @@ export function useChatState(api: LvisApi) {
             ...(ev.tier ? { tier: ev.tier } : {}),
             ...(ev.summary ? { summary: ev.summary } : {}),
             ...(ev.compactNum !== undefined ? { compactNum: ev.compactNum } : {}),
+            ...(ev.compactStatus !== undefined ? { compactStatus: ev.compactStatus } : {}),
+            ...(ev.truncatedDir !== undefined ? { truncatedDir: ev.truncatedDir } : {}),
           };
           if (!hasReliableAfter && freed <= 0) {
             return [...p, checkpointEntry];

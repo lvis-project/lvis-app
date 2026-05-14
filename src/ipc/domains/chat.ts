@@ -186,7 +186,7 @@ async function runStreamedTurn(
           estimatedBefore,
           preflight,
         }),
-      onCompactOccurred: ({ removedMessages, freedTokens, estimatedAfter, tier, summary, compactNum }) =>
+      onCompactOccurred: ({ removedMessages, freedTokens, estimatedAfter, tier, summary, compactNum, compactStatus, truncatedDir }) =>
         send({
           type: "compact_notice",
           removedMessages,
@@ -195,6 +195,8 @@ async function runStreamedTurn(
           ...(tier !== undefined ? { tier } : {}),
           ...(summary !== undefined ? { summary } : {}),
           ...(compactNum !== undefined ? { compactNum } : {}),
+          ...(compactStatus !== undefined ? { compactStatus } : {}),
+          ...(truncatedDir !== undefined ? { truncatedDir } : {}),
         }),
       onTurnSummary: ({ turnDurationMs, toolCount, cumulativeToolMs, tokensIn, freshInputTokens, tokensOut, cacheReadTokens, cacheWriteTokens, breakdown }) =>
         send({
@@ -478,7 +480,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
     return conversationLoop.manualCompact({
       onCompactStarted: ({ triggerSource, estimatedBefore, preflight }) =>
         sendToWebContents(e.sender, "lvis:chat:stream", { type: "compact_started", triggerSource, estimatedBefore, preflight }, log),
-      onCompactOccurred: ({ removedMessages, freedTokens, estimatedAfter, tier, summary, compactNum }) =>
+      onCompactOccurred: ({ removedMessages, freedTokens, estimatedAfter, tier, summary, compactNum, compactStatus, truncatedDir }) =>
         sendToWebContents(e.sender, "lvis:chat:stream", {
           type: "compact_notice",
           removedMessages,
@@ -487,6 +489,8 @@ export function registerChatHandlers(deps: IpcDeps): void {
           ...(tier !== undefined ? { tier } : {}),
           ...(summary !== undefined ? { summary } : {}),
           ...(compactNum !== undefined ? { compactNum } : {}),
+          ...(compactStatus !== undefined ? { compactStatus } : {}),
+          ...(truncatedDir !== undefined ? { truncatedDir } : {}),
         }, log),
     });
   });

@@ -15,9 +15,18 @@
  * 청사진 §4.3, §5, §7.1 참조.
  */
 
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
+import { randomUUID } from "node:crypto";
 import type { GenericMessage, LLMProvider, StreamEvent } from "./llm/types.js";
 import { serializeMessageForEstimation, userContentText } from "./llm/types.js";
 import { estimateTokens, estimateMessagesTokens } from "./auto-compact.js";
+import { lvisHome } from "../shared/lvis-home.js";
+import {
+  CompressionStatus,
+  TRUNCATION_THRESHOLD_TOKENS,
+  TRUNCATION_PRESERVED_LINES,
+} from "../shared/compact-status.js";
 
 /** 12-section SUMMARY_TEMPLATE 헤더 (v3 §5.1). 순서/이름 모두 contract — 변경 시 templateVersion bump 필수. */
 export const SUMMARY_TEMPLATE_HEADERS_V1 = [
@@ -286,22 +295,201 @@ export interface CompactWithBoundaryArgs {
   /** Cline preserve-recent-tokens — `getModelPreflightThreshold()` 의 일부 또는 별도 설정. */
   preserveRecentTokens: number;
   compactNum: number;
+  /**
+   * Session id — 단일 거대 메시지 truncation pre-pass 가 원본 content 를
+   * `~/.lvis/sessions/<sessionId>/truncated/` 디렉토리에 격리할 때 사용.
+   */
+  sessionId: string;
+  /**
+   * Preflight 토큰. compact 후 estimatedAfter 가 이 값의 일정 비율을 초과하면
+   * last-resort raw truncation (`REDUCED_INSUFFICIENT_FORCED`) 발동.
+   */
+  preflightTokens: number;
   abortSignal?: AbortSignal;
 }
 
 export interface CompactWithBoundaryResult {
-  boundary: Readonly<CompactBoundary>;
+  /**
+   * 사용자 가시 compact 결과 분류 — 단순 success/failure 가 아닌 4 상태로
+   * 구분된다. Renderer 가 status 별로 다른 banner variant 를 표시한다.
+   */
+  status: CompressionStatus;
+  /** SUMMARIZED 경로에서만 truthy. NOOP/CONTENT_TRUNCATED 경로에선 null. */
+  boundary: Readonly<CompactBoundary> | null;
   newHistory: GenericMessage[];
+  /** History 에서 stub 으로 대체된 메시지 수. NOOP=0, CONTENT_TRUNCATED=절단된 메시지 수, SUMMARIZED=요약된 메시지 수. */
   removedCount: number;
   /** post-compact estimated input tokens — caller 가 cumulativeUsage 리셋용. */
   estimatedAfter: number;
+  /** CONTENT_TRUNCATED 경로의 원본 보존 디렉토리. 사용자 banner 에 표시. */
+  truncatedDir?: string;
+  /** Phase 2 truncation 으로 격리된 메시지 수. */
+  truncatedCount: number;
 }
 
 /**
- * `compactWithBoundary` 가 no-op 시 반환 — `toCompact.length === 0` 경로.
- * caller 는 null 을 받으면 compact 건너뜀 (boundary/freeze 부작용 0).
+ * Per-message truncation pre-pass — Codex CLI `TruncationPolicy` 패턴.
+ *
+ * 단일 메시지가 `TRUNCATION_THRESHOLD_TOKENS` 를 초과하면:
+ *   - 원본 content 를 `~/.lvis/sessions/<sessionId>/truncated/compact-<N>-msg-<idx>.txt` 로 격리
+ *   - in-memory content 를 `<last N lines>\n[…full content saved to <path>]` 로 대체
+ *
+ * 효과:
+ *   - 단일 200K+ 메시지가 compact LLM call 의 input context 를 초과하는 deadlock 해소
+ *   - 원본은 보존되어 사용자가 archive 접근 가능
+ *   - tool_use/tool_result content 모두 적용 (가장 흔한 oversize 케이스)
  */
-export type CompactWithBoundaryNoOp = null;
+async function truncateOversizeMessages(
+  messages: GenericMessage[],
+  sessionId: string,
+  compactNum: number,
+): Promise<{ messages: GenericMessage[]; truncatedCount: number; truncatedDir: string }> {
+  const truncatedDir = path.join(lvisHome(), "sessions", sessionId, "truncated");
+  let truncatedCount = 0;
+  const result: GenericMessage[] = [];
+  let dirCreated = false;
+
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i];
+    const msgTokens = estimateTokens(serializeMessageForEstimation(msg));
+    if (msgTokens <= TRUNCATION_THRESHOLD_TOKENS) {
+      result.push(msg);
+      continue;
+    }
+
+    if (!dirCreated) {
+      await fs.mkdir(truncatedDir, { recursive: true, mode: 0o700 });
+      dirCreated = true;
+    }
+
+    const uuid = randomUUID();
+    const fileName = `compact-${compactNum}-msg-${i}-${Date.now()}-${uuid}.txt`;
+    const filePath = path.join(truncatedDir, fileName);
+    const fullText = extractMessageText(msg);
+    await fs.writeFile(filePath, fullText, { mode: 0o600 });
+
+    const lines = fullText.split("\n");
+    const preservedLines = lines.slice(-TRUNCATION_PRESERVED_LINES);
+    const clippedText = [
+      `[…earlier ${lines.length - preservedLines.length} lines truncated, full content saved to ${filePath}]`,
+      ...preservedLines,
+    ].join("\n");
+
+    result.push(rebuildMessageWithText(msg, clippedText));
+    truncatedCount++;
+  }
+
+  return { messages: result, truncatedCount, truncatedDir };
+}
+
+/** Extract a single text representation of a message for truncation. */
+function extractMessageText(msg: GenericMessage): string {
+  if (msg.role === "user") return userContentText(msg.content);
+  if (msg.role === "assistant") {
+    const tool = msg.toolCalls && msg.toolCalls.length > 0
+      ? `\n[tool calls: ${msg.toolCalls.map((t) => t.name).join(", ")}]`
+      : "";
+    return `${msg.content}${tool}`;
+  }
+  // tool_result — include toolName + isError marker for provenance so the
+  // archive file is self-describing without cross-referencing the assistant's
+  // toolCalls metadata (critic MINOR-1).
+  const provenance = `[tool_result: tool=${msg.toolName ?? "?"}${msg.isError ? " error" : ""}]\n`;
+  return `${provenance}${msg.content}`;
+}
+
+/** Rebuild a message with new text content, preserving role + tool metadata. */
+function rebuildMessageWithText(msg: GenericMessage, newText: string): GenericMessage {
+  if (msg.role === "user") {
+    return { ...msg, content: newText };
+  }
+  if (msg.role === "assistant") {
+    return { ...msg, content: newText };
+  }
+  return { ...msg, content: newText };
+}
+
+/**
+ * Archive a slice of messages to `~/.lvis/sessions/<id>/truncated/` as a JSON
+ * file. Used by:
+ *   - Layer A.5 (history-wide reverse-budget truncation): oldest messages
+ *     beyond the LLM's input budget are archived rather than fed to the LLM.
+ *   - REDUCED_INSUFFICIENT_FORCED path: oldest preserve slice that gets
+ *     dropped is archived rather than silently destroyed.
+ *
+ * Returns the truncatedDir (always set if `messages.length > 0`), so callers
+ * can surface the location to the user via the compact_notice banner.
+ */
+async function archiveDroppedMessages(
+  messages: GenericMessage[],
+  sessionId: string,
+  compactNum: number,
+  label: "precompact-drop" | "forced-drop",
+): Promise<string> {
+  if (messages.length === 0) return "";
+  const truncatedDir = path.join(lvisHome(), "sessions", sessionId, "truncated");
+  await fs.mkdir(truncatedDir, { recursive: true, mode: 0o700 });
+  const uuid = randomUUID();
+  const fileName = `compact-${compactNum}-${label}-${Date.now()}-${uuid}.json`;
+  const filePath = path.join(truncatedDir, fileName);
+  await fs.writeFile(filePath, JSON.stringify(messages, null, 2), { mode: 0o600 });
+  return truncatedDir;
+}
+
+/**
+ * Layer A.5 — history-wide reverse-budget truncation.
+ *
+ * After `splitForBoundary` produces `toCompact`, this pass guarantees
+ * `toCompact` fits into the LLM's input budget before the summary call.
+ * Walks from oldest forward, dropping messages until the cumulative token
+ * count is under `budget`. Dropped messages are archived to disk so users
+ * can recover originals if needed (Gemini CLI pattern).
+ *
+ * Resolves the "many medium messages accumulating to >budget" case that
+ * per-message truncation (`truncateOversizeMessages`) cannot solve alone —
+ * each message is under the per-message threshold (30K) but their sum
+ * exceeds the LLM input window.
+ */
+async function dropOldestUntilUnderBudget(
+  toCompact: GenericMessage[],
+  budget: number,
+  sessionId: string,
+  compactNum: number,
+): Promise<{ messages: GenericMessage[]; droppedCount: number; truncatedDir: string }> {
+  if (budget <= 0 || toCompact.length === 0) {
+    return { messages: toCompact, droppedCount: 0, truncatedDir: "" };
+  }
+  // Precompute per-message token counts once. The naive implementation
+  // re-ran `estimateMessagesTokens(surviving)` after every shift (O(N²)
+  // serialization cost on 200+ message histories while holding `isCompacting`
+  // lock). Maintain a running total instead — O(N).
+  const perMessageTokens = toCompact.map((m) => estimateTokens(serializeMessageForEstimation(m)));
+  let currentTotal = perMessageTokens.reduce((a, b) => a + b, 0);
+  if (currentTotal <= budget) {
+    return { messages: toCompact, droppedCount: 0, truncatedDir: "" };
+  }
+  const dropped: GenericMessage[] = [];
+  const surviving = [...toCompact];
+  // `cursor` indexes into the *precomputed* `perMessageTokens` array, which
+  // is in the original `toCompact` order. We rely on the invariant that
+  // `surviving.shift()` drops the oldest, which maps 1:1 with `perMessageTokens[cursor]`
+  // — this is fragile to future edits that change the drop order (e.g.,
+  // drop-from-middle), so keep the array indexing consistent if reworked.
+  let cursor = 0;
+  // Keep at least 1 message — `surviving.length > 1` invariant stops the loop
+  // before emptying toCompact (which would then trigger NOOP / no LLM call).
+  // If a single message is genuinely huge, Layer A (per-message truncation)
+  // already clipped it.
+  while (currentTotal > budget && surviving.length > 1) {
+    const oldest = surviving.shift();
+    if (oldest === undefined) break;
+    dropped.push(oldest);
+    currentTotal -= perMessageTokens[cursor];
+    cursor += 1;
+  }
+  const truncatedDir = await archiveDroppedMessages(dropped, sessionId, compactNum, "precompact-drop");
+  return { messages: surviving, droppedCount: dropped.length, truncatedDir };
+}
 
 /**
  * Layer 2 — Structured compact with LLM call + opaque-state slot.
@@ -320,20 +508,59 @@ export type CompactWithBoundaryNoOp = null;
  */
 export async function compactWithBoundary(
   args: CompactWithBoundaryArgs,
-): Promise<CompactWithBoundaryResult | CompactWithBoundaryNoOp> {
-  const { messages, llm, model, preserveRecentTokens, compactNum, abortSignal } = args;
+): Promise<CompactWithBoundaryResult> {
+  const { messages, llm, model, preserveRecentTokens, compactNum, sessionId, preflightTokens, abortSignal } = args;
+
+  // 0. Per-message truncation pre-pass (Phase 2, Codex pattern).
+  //    단일 거대 메시지 (>30K tokens) 가 LLM input context 초과하는 케이스 방지.
+  const { messages: workingMessages, truncatedCount, truncatedDir: layerATruncDir } =
+    await truncateOversizeMessages(messages, sessionId, compactNum);
 
   // 1. Split — 끝에서부터 preserveRecentTokens 만큼 보존, tool 페어 안전.
-  const { toCompact, toPreserve } = splitForBoundary(messages, preserveRecentTokens);
+  const { toCompact, toPreserve } = splitForBoundary(workingMessages, preserveRecentTokens);
 
   if (toCompact.length === 0) {
-    // 압축할 내용 없음 — boundary 자체를 만들지 않음. caller 가 null 을 받으면 compact skip.
-    // (freezeBoundary 에 외부 messages 배열을 직접 넘기면 caller array 까지 frozen 되는 부작용 차단.)
-    return null;
+    if (truncatedCount > 0) {
+      // CONTENT_TRUNCATED — Layer A 만으로 충분히 reduce (LLM 호출 skip).
+      return {
+        status: CompressionStatus.CONTENT_TRUNCATED,
+        boundary: null,
+        newHistory: workingMessages,
+        removedCount: truncatedCount,
+        estimatedAfter: estimateMessagesTokens(workingMessages),
+        truncatedDir: layerATruncDir,
+        truncatedCount,
+      };
+    }
+    // NOOP — history 가 충분히 작음. 정상 small-history 경로.
+    return {
+      status: CompressionStatus.NOOP,
+      boundary: null,
+      newHistory: messages,
+      removedCount: 0,
+      estimatedAfter: estimateMessagesTokens(messages),
+      truncatedCount: 0,
+    };
   }
 
+  // 1a. Layer A.5 — history-wide reverse-budget truncation (Gemini pattern,
+  //     CRITICAL contract fix). Per-message truncation handles ONE huge
+  //     message, but many medium messages (예: 200 × 1K tokens) summing
+  //     to > preflight will still overflow the LLM input context. Drop
+  //     oldest from `toCompact` (archive to disk) until total <= 90% preflight.
+  const llmInputBudget = preflightTokens > 0 ? Math.floor(preflightTokens * 0.9) : Infinity;
+  const layerAHalfResult = await dropOldestUntilUnderBudget(
+    toCompact,
+    llmInputBudget,
+    sessionId,
+    compactNum,
+  );
+  const finalToCompact = layerAHalfResult.messages;
+  const layerAHalfDir = layerAHalfResult.truncatedDir;
+  const totalTruncatedFromLayerA = truncatedCount + layerAHalfResult.droppedCount;
+
   // 2-3. LLM call + parse with retry-once (R2 mitigation).
-  const conversationText = renderConversation(toCompact);
+  const conversationText = renderConversation(finalToCompact);
   let summary: ParsedSummary | null = null;
   let lastRawText = "";
   for (let attempt = 0; attempt <= MAX_PARSE_RETRY; attempt++) {
@@ -352,13 +579,13 @@ export async function compactWithBoundary(
     }
   }
   if (!summary) {
-    // 2회 모두 형식 위반. raw 본문이라도 LLM 이 다음 턴에 의미 추론 가능 → graceful (R2).
     summary = { templateVersion: 1, sections: {}, raw: lastRawText };
   }
 
-  // 4-5. Pinned artifacts + tool boundary ledger.
-  const pinnedArtifacts = collectPinned(toCompact);
-  const toolBoundaryLedger = makeToolLedger(toCompact, TOOL_BOUNDARY_LEDGER_K);
+  // 4-5. Pinned artifacts + tool boundary ledger — finalToCompact 기준
+  //     (Layer A.5 archive 이후 LLM 에 실제로 들어간 메시지들).
+  const pinnedArtifacts = collectPinned(finalToCompact);
+  const toolBoundaryLedger = makeToolLedger(finalToCompact, TOOL_BOUNDARY_LEDGER_K);
 
   // 6. Build + freeze boundary (P7 invariant — 3 view 동일 reference).
   const boundary = freezeBoundary({
@@ -378,18 +605,59 @@ export async function compactWithBoundary(
     meta: {
       compactBoundary: true,
       compactNum,
-      removedCount: toCompact.length,
+      removedCount: finalToCompact.length + layerAHalfResult.droppedCount,
       compactedAt: boundary.createdAt,
       boundary,
     },
   };
-  const newHistory: GenericMessage[] = [stubMessage, ...toPreserve];
+  let newHistory: GenericMessage[] = [stubMessage, ...toPreserve];
+  let estimatedAfter = estimateMessagesTokens(newHistory);
 
+  // 7a. REDUCED_INSUFFICIENT_FORCED — post-compact 이 preflight × 0.8 초과.
+  //     last-resort 로 toPreserve 의 oldest 50% 강제 drop. **사용자 contract
+  //     "원본 보존" 충족 위해 dropped slice 도 archive 파일로 격리.**
+  if (preflightTokens > 0 && estimatedAfter > preflightTokens * 0.8 && toPreserve.length > 0) {
+    const rawDropCount = Math.ceil(toPreserve.length / 2);
+    // Tool-pair safety: surviving 의 첫 메시지가 orphan tool_result 가 되지
+    // 않도록 dropCount 를 앞으로 민다. 그렇지 않으면 provider 가 400
+    // (tool_use_id 미스매치) 으로 거부 — 원래 C1 deadlock fix 의도 회귀.
+    const dropCount = adjustForwardToToolBoundary(toPreserve, rawDropCount);
+    const droppedSlice = toPreserve.slice(0, dropCount);
+    const survivingPreserve = toPreserve.slice(dropCount);
+    const forcedArchiveDir = await archiveDroppedMessages(
+      droppedSlice,
+      sessionId,
+      compactNum,
+      "forced-drop",
+    );
+    newHistory = [stubMessage, ...survivingPreserve];
+    estimatedAfter = estimateMessagesTokens(newHistory);
+    const finalTruncDir = forcedArchiveDir || layerAHalfDir || layerATruncDir || "";
+    const finalTruncCount = totalTruncatedFromLayerA + dropCount;
+    return {
+      status: CompressionStatus.REDUCED_INSUFFICIENT_FORCED,
+      boundary,
+      newHistory,
+      removedCount: finalToCompact.length + layerAHalfResult.droppedCount + dropCount,
+      estimatedAfter,
+      truncatedCount: finalTruncCount,
+      ...(finalTruncDir !== "" ? { truncatedDir: finalTruncDir } : {}),
+    };
+  }
+
+  // SUMMARIZED — 정상 경로. CONTENT_TRUNCATED 는 위쪽 early-return 에서 이미
+  // 처리됐고 (toCompact.length === 0 분기), dropOldestUntilUnderBudget 는
+  // surviving.length > 1 invariant 를 유지하므로 여기 도달 시 finalToCompact 가
+  // 비어있을 가능성 없음.
+  const summarizedTruncDir = layerAHalfDir || layerATruncDir || "";
   return {
+    status: CompressionStatus.SUMMARIZED,
     boundary,
     newHistory,
-    removedCount: toCompact.length,
-    estimatedAfter: estimateMessagesTokens(newHistory),
+    removedCount: finalToCompact.length + layerAHalfResult.droppedCount,
+    estimatedAfter,
+    truncatedCount: totalTruncatedFromLayerA,
+    ...(summarizedTruncDir !== "" ? { truncatedDir: summarizedTruncDir } : {}),
   };
 }
 
@@ -437,34 +705,68 @@ export function renderBoundaryAsPreamble(boundary: CompactBoundary): string {
 
 /**
  * Token-aware split — 끝에서부터 preserveRecentTokens 까지 보존, 나머지는 compact.
- * tool_use/tool_result 페어 무결성 보존 (claw-code findSafeBoundary 패턴).
+ *
+ * Contract (compact 가 어떤 input 에도 reduce 보장하기 위한 의미):
+ *   - preserveRecentTokens 는 **ceiling** — preserve 영역의 누적 토큰이 이 값을
+ *     초과하면 더 이상 메시지를 포함시키지 않는다.
+ *   - 단일 메시지가 preserveRecentTokens 를 단독으로 초과하면 preserve 는 빈
+ *     배열이 되고 그 메시지를 포함한 전체가 compact 대상이 된다.
+ *   - tool_use/tool_result 페어가 boundary 에 의해 갈리는 경우
+ *     `adjustToToolBoundary` 가 최대 3 step backward walk 하여 페어를 같은
+ *     쪽으로 정렬한다. 더 깊은 tool chain 이면 partial-pair 허용 (LLM summary
+ *     의 R2 raw fallback 이 처리).
  */
 function splitForBoundary(
   messages: GenericMessage[],
   preserveRecentTokens: number,
 ): { toCompact: GenericMessage[]; toPreserve: GenericMessage[] } {
-  if (messages.length === 0 || preserveRecentTokens <= 0) {
+  if (messages.length === 0) {
+    return { toCompact: [], toPreserve: [] };
+  }
+  if (preserveRecentTokens <= 0) {
     return { toCompact: messages, toPreserve: [] };
   }
   let preserveStart = messages.length;
   let preservedTokens = 0;
   for (let i = messages.length - 1; i >= 0; i--) {
     const msgTokens = estimateTokens(serializeMessageForEstimation(messages[i]));
+    if (preservedTokens + msgTokens > preserveRecentTokens) break;
     preservedTokens += msgTokens;
     preserveStart = i;
-    if (preservedTokens >= preserveRecentTokens) break;
   }
   preserveStart = adjustToToolBoundary(messages, preserveStart);
+  // 추가 안전망 — backward walk 가 bounded (3 step) 이라 더 깊은 tool chain
+  // 에서 preserveStart 가 여전히 orphan tool_result 를 가리킬 수 있음. forward
+  // walk 로 tool_result prefix 를 toCompact 쪽으로 넘겨 toPreserve[0] 이
+  // 절대 orphan tool_result 가 되지 않게 한다 — 그렇지 않으면 다음 turn 의
+  // provider 호출이 tool_use_id 미스매치로 400.
+  preserveStart = adjustForwardToToolBoundary(messages, preserveStart);
   return {
     toCompact: messages.slice(0, preserveStart),
     toPreserve: messages.slice(preserveStart),
   };
 }
 
-/** Move `idx` backwards if it splits a tool_use → tool_result pair. */
+/**
+ * tool_use/tool_result 페어 무결성 보존 — **bounded backward walk only**.
+ *
+ * 기본 전략: idx 에서 backward 로 최대 3 step 까지만 walk. tool_result /
+ * assistant+toolCalls 가 연속되면 그 만큼 뒤로 밀고, 그 외엔 즉시 break.
+ *
+ * **No forward fallback** — 이전 구현은 backward 가 0 으로 collapse 시
+ * forward walk 로 fallback 했지만, 이는 `backward === 0` 만 트리거 조건으로
+ * 사용해 entire-prefix-is-tool 와 deep-history-coincidentally-zero 두 케이스를
+ * 구분 못 함 → non-deadlock 케이스에 forward walk 가 misfire 하여 toCompact
+ * 가 의도 외로 비어지는 회귀 발생.
+ *
+ * 대신 backward 를 3-step 으로 bound — 더 깊은 tool chain 이면 partial-pair
+ * 허용. LLM summary 는 orphan tool_use/tool_result 가 있어도 12-section
+ * 생성 가능 (R2 raw fallback 과 동일 원리).
+ */
 function adjustToToolBoundary(messages: GenericMessage[], idx: number): number {
+  const minIdx = Math.max(0, idx - 3);
   let cur = idx;
-  while (cur > 0 && cur < messages.length) {
+  while (cur > minIdx) {
     const m = messages[cur];
     if (m.role === "tool_result") {
       cur--;
@@ -474,7 +776,35 @@ function adjustToToolBoundary(messages: GenericMessage[], idx: number): number {
       break;
     }
   }
-  return Math.max(0, cur);
+  return cur;
+}
+
+/**
+ * FORCED 분기 + splitForBoundary 의 안전망 — surviving / toPreserve 의 첫
+ * 메시지가 orphan `tool_result` 가 되지 않도록 idx 를 forward 로 민다.
+ *
+ * 시나리오: `messages[idx-1]` = `assistant+toolCalls` (drop / compact 쪽),
+ *   `messages[idx]` = `tool_result` (preserve / surviving 쪽) — assistant tool_use
+ *   가 reduce 됐는데 tool_result 만 history 에 남음 → Anthropic/OpenAI 400
+ *   invalid_request (tool_use_id mismatch). 해결: tool_result 가 보이면 계속
+ *   forward walk.
+ *
+ * **Unbounded forward walk**: backward sibling 은 3-step bound 가 있지만 forward
+ * 는 안전한 방향이라 bound 없음. 극단적으로 모든 메시지가 `tool_result` 면
+ * `messages.length` 반환 — toPreserve 가 빈 배열이 되지만 `[stubMessage]` 만으로
+ * 유효한 history. orphan 보다 빈 preserve 가 항상 안전.
+ */
+function adjustForwardToToolBoundary(messages: GenericMessage[], idx: number): number {
+  let cur = idx;
+  while (cur < messages.length) {
+    const m = messages[cur];
+    if (m.role === "tool_result") {
+      cur++;
+    } else {
+      break;
+    }
+  }
+  return cur;
 }
 
 /** Conversation 직렬화 — LLM 프롬프트 본문용. trimmed per-message + role marker. */
