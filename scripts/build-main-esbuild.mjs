@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // esbuild main-process bundler. Replaces the per-file tsc emit so the
 // runtime dependency tree (`ai`, `@ai-sdk/*`, `zod`, `ajv`, `undici`,
-// `adm-zip`, `proper-lockfile`, `pino`) inlines into a single ESM
-// module. Externals stay outside the bundle because they either ship
-// native bindings, are provided by Electron at runtime, or must share
-// a singleton across plugins.
+// `adm-zip`, `proper-lockfile`) inlines into a single ESM module. Externals
+// stay outside the bundle because they either ship native bindings, are
+// provided by Electron at runtime, must share a singleton across plugins, or
+// need real node_modules paths at runtime.
 import { build, context } from "esbuild";
 import { rmSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -40,16 +40,17 @@ const buildOptions = {
     "pino",
     "pino-pretty",
     "thread-stream",
+    "@pinojs/redact",
     "pino-abstract-transport",
     "pino-std-serializers",
     "sonic-boom",
     "quick-format-unescaped",
     "split2",
     "safe-stable-stringify",
+    "process-warning",
     "real-require",
     "atomic-sleep",
     "on-exit-leak-free",
-    "fast-redact",
   ],
   logLevel: "info",
   // Inlined CommonJS modules reference CJS-only `require` directly; the ESM
