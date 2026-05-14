@@ -136,7 +136,7 @@ export type ToolEntryItem = {
 };
 
 export type ChatEntry =
-  | { kind: "user"; text: string }
+  | { kind: "user"; text: string; injectedFromQueue?: boolean }
   | { kind: "reasoning"; text: string; streaming?: boolean }
   | { kind: "assistant"; text: string; streaming?: boolean; route?: "command"; phase?: "work" | "final" }
   | { kind: "tool_group"; groupId: string; groupIds: string[]; status: "running" | "done" | "error"; tools: ToolEntryItem[] }

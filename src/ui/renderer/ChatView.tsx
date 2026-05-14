@@ -1130,6 +1130,11 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
                     {/* "나" label removed — sender is implicit. Star + hover
                         actions float top-right via absolute positioning so
                         the bubble has no header chrome. */}
+                    {entry.injectedFromQueue ? (
+                      <div className="mb-1 inline-flex items-center gap-1 rounded bg-message-user-foreground/10 px-1.5 py-0.5 text-[10px] text-message-user-foreground/70" title="메시지 큐에서 자동 인입">
+                        ↪ 큐에서
+                      </div>
+                    ) : null}
                     {starActive ? (
                       <Star key="active" className="absolute right-2 top-2 h-3 w-3 fill-emphasis text-emphasis lvis-anim-star" />
                     ) : null}

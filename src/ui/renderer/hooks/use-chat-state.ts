@@ -90,16 +90,15 @@ export function useChatState(api: LvisApi) {
       }
       const streamId = typeof ev.streamId === "number" ? ev.streamId : null;
       if (ev.type === "guidance_injected") {
-        // Non-interrupting "guide" mode (chat utterance taxonomy) — engine
-        // consumed a queued guide utterance at the round boundary and
-        // appended it to history. Surface to the user as a system entry
-        // so they can see their direction-adjustment landed; the assistant
-        // round that follows reads it like any other user message.
+        // 사용자 피드백 (2026-05-15): "방향 지시도 일반 입력 버블로 뜨지
+        // 저렇게 방향 지시라고 특이하게 대화창에 들어가는것을 바란 건
+        // 아니였어." → system entry ("방향 지시 적용: ...") 대신 일반 user
+        // bubble. injectedFromQueue 플래그로 작은 hint 배지만 표시.
         const text = typeof ev.text === "string" ? ev.text : "";
         if (text.length === 0) return;
         setEntries((p) => [
           ...p,
-          { kind: "system", text: `방향 지시 적용: ${text}` },
+          { kind: "user", text, injectedFromQueue: true },
         ]);
         return;
       }
