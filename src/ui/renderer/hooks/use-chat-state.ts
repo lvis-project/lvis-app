@@ -311,17 +311,40 @@ export function useChatState(api: LvisApi) {
         // contain that token. See Issue #457 Phase 1+2 cleanup.
         const removed = ev.removedMessages ?? 0;
         const freed = ev.freedTokens ?? 0;
-        setEntries((p) => [
-          ...p,
-          {
-            kind: "checkpoint",
-            removedMessages: removed,
-            freedTokens: freed,
-            ...(ev.tier ? { tier: ev.tier } : {}),
-            ...(ev.summary ? { summary: ev.summary } : {}),
-            ...(ev.compactNum !== undefined ? { compactNum: ev.compactNum } : {}),
-          },
-        ]);
+        setEntries((p) => {
+          // Find the last known tokensIn so we can synthesize a post-compact
+          // context_usage entry. useContextBudget scans entries in reverse for
+          // turn_summary or context_usage; without this entry the ring stays
+          // at the pre-compact value even though history was trimmed.
+          let lastKnownTokens = 0;
+          for (let i = p.length - 1; i >= 0; i--) {
+            const e = p[i];
+            if (e?.kind === "turn_summary" || e?.kind === "context_usage") {
+              lastKnownTokens = e.tokensIn;
+              break;
+            }
+          }
+          const postCompactTokens = Math.max(0, lastKnownTokens - freed);
+          return [
+            ...p,
+            {
+              kind: "checkpoint",
+              removedMessages: removed,
+              freedTokens: freed,
+              ...(ev.tier ? { tier: ev.tier } : {}),
+              ...(ev.summary ? { summary: ev.summary } : {}),
+              ...(ev.compactNum !== undefined ? { compactNum: ev.compactNum } : {}),
+            },
+            // Synthetic usage carrier so contextOverflowPct drops immediately
+            // after compact. Source tag distinguishes this from a live
+            // provider-reported turn_summary.
+            {
+              kind: "context_usage" as const,
+              tokensIn: postCompactTokens,
+              source: "session-estimate" as const,
+            },
+          ];
+        });
       } else if (ev.type === "done") {
         if (debugStreamEnabled) {
           debugLog("stream", "done:enter", {
