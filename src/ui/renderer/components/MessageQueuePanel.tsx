@@ -17,8 +17,8 @@
  * Spec: docs/blueprints/composer-redesign-message-queue.md
  */
 
-import { useSyncExternalStore, useState, useMemo } from "react";
-import { ChevronDown, ChevronRight, MessageSquarePlus, ArrowUp, X } from "lucide-react";
+import { useSyncExternalStore, useState, useMemo, useCallback, useRef } from "react";
+import { ChevronDown, ChevronRight, MessageSquarePlus, ArrowUp, X, Pencil } from "lucide-react";
 import { Badge } from "../../../components/ui/badge.js";
 import type { MessageQueueStore, MessageQueueItem } from "../state/message-queue-store.js";
 
@@ -88,6 +88,7 @@ export function MessageQueuePanel({ store, onSendNow }: MessageQueuePanelProps) 
               onToggle={() => store.toggleSelect(item.id)}
               onSendNow={() => onSendNow(item)}
               onRemove={() => store.remove(item.id)}
+              onEdit={(next) => store.update(item.id, next)}
             />
           ))}
         </ul>
@@ -101,9 +102,46 @@ interface MessageQueueRowProps {
   onToggle: () => void;
   onSendNow: () => void;
   onRemove: () => void;
+  /** 텍스트 수정 — Enter / blur 로 저장. 빈 텍스트 또는 cap 초과 시 throw. */
+  onEdit: (newText: string) => void;
 }
 
-function MessageQueueRow({ item, onToggle, onSendNow, onRemove }: MessageQueueRowProps) {
+function MessageQueueRow({ item, onToggle, onSendNow, onRemove, onEdit }: MessageQueueRowProps) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(item.text);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  const enterEdit = useCallback(() => {
+    setDraft(item.text);
+    setEditing(true);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, [item.text]);
+
+  const commit = useCallback(() => {
+    const next = draft.trim();
+    if (next.length === 0) {
+      // 빈 텍스트 → 제거 의도
+      setEditing(false);
+      onRemove();
+      return;
+    }
+    if (next === item.text) {
+      setEditing(false);
+      return;
+    }
+    try {
+      onEdit(next);
+      setEditing(false);
+    } catch (err) {
+      console.warn("[message-queue] edit rejected:", (err as Error).message);
+    }
+  }, [draft, item.text, onEdit, onRemove]);
+
+  const cancel = useCallback(() => {
+    setDraft(item.text);
+    setEditing(false);
+  }, [item.text]);
+
   return (
     <li
       className={
@@ -118,6 +156,7 @@ function MessageQueueRow({ item, onToggle, onSendNow, onRemove }: MessageQueueRo
       <button
         type="button"
         onClick={onToggle}
+        disabled={editing}
         className={
           "flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border " +
           (item.selected
@@ -129,25 +168,69 @@ function MessageQueueRow({ item, onToggle, onSendNow, onRemove }: MessageQueueRo
       >
         {item.selected ? "✓" : null}
       </button>
-      <span className="flex-1 truncate text-xs text-foreground">{item.text}</span>
-      <button
-        type="button"
-        onClick={onSendNow}
-        className="inline-flex h-5 items-center gap-1 rounded border border-transparent px-1.5 text-[10px] text-accent hover:border-accent hover:bg-accent/10"
-        aria-label="이 항목만 즉시 주입"
-        title="이 항목만 즉시 주입 (인터럽트)"
-      >
-        <ArrowUp className="h-2.5 w-2.5" /> 즉시
-      </button>
-      <button
-        type="button"
-        onClick={onRemove}
-        className="inline-flex h-5 w-5 items-center justify-center rounded border border-transparent text-muted-foreground hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive"
-        aria-label="제거"
-        title="제거"
-      >
-        <X className="h-3 w-3" />
-      </button>
+      {editing ? (
+        <input
+          ref={inputRef}
+          type="text"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              commit();
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              cancel();
+            }
+          }}
+          data-testid="message-queue-row-edit"
+          className="flex-1 rounded border border-accent/50 bg-background px-1.5 py-0.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-accent"
+          maxLength={8000}
+          aria-label="큐 항목 텍스트 수정"
+        />
+      ) : (
+        <span
+          className="flex-1 cursor-text truncate text-xs text-foreground"
+          onDoubleClick={enterEdit}
+          title="더블클릭으로 수정"
+          data-testid="message-queue-row-text"
+        >
+          {item.text}
+        </span>
+      )}
+      {!editing && (
+        <>
+          <button
+            type="button"
+            onClick={enterEdit}
+            className="inline-flex h-5 w-5 items-center justify-center rounded border border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground"
+            aria-label="수정"
+            title="수정 (또는 텍스트 더블클릭)"
+            data-testid="message-queue-row-edit-button"
+          >
+            <Pencil className="h-2.5 w-2.5" />
+          </button>
+          <button
+            type="button"
+            onClick={onSendNow}
+            className="inline-flex h-5 items-center gap-1 rounded border border-transparent px-1.5 text-[10px] text-accent hover:border-accent hover:bg-accent/10"
+            aria-label="이 항목만 즉시 주입"
+            title="이 항목만 즉시 주입 (인터럽트)"
+          >
+            <ArrowUp className="h-2.5 w-2.5" /> 즉시
+          </button>
+          <button
+            type="button"
+            onClick={onRemove}
+            className="inline-flex h-5 w-5 items-center justify-center rounded border border-transparent text-muted-foreground hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive"
+            aria-label="제거"
+            title="제거"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </>
+      )}
     </li>
   );
 }

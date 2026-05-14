@@ -629,6 +629,14 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
   const messageQueueStore = useMemo(() => new MessageQueueStore(), []);
   // queue-auto inject in-flight 플래그 — done event re-entrancy 방지.
   const queueAutoInflightRef = useRef(false);
+
+  // dev-mode test hook — Playwright e2e 가 store 직접 manipulation 으로
+  // 큐 시나리오 검증 가능. production 빌드에선 노출 X.
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "production") {
+      (window as unknown as { __lvis_message_queue_store__?: MessageQueueStore }).__lvis_message_queue_store__ = messageQueueStore;
+    }
+  }, [messageQueueStore]);
   useEffect(() => {
     messageQueueStore.clear();
   }, [currentSessionId, messageQueueStore]);

@@ -236,6 +236,80 @@ describe("MessageQueueStore", () => {
     expect(l2).toHaveBeenCalledTimes(1);
   });
 
+  // ─── update (큐 항목 수정) ────────────────────────────────────────────
+
+  it("update 는 텍스트 수정 + expiresAt 갱신 + listener 호출", () => {
+    const a = store.add("original");
+    const oldExpiresAt = store.getItems()[0].expiresAt;
+    const listener = vi.fn();
+    store.subscribe(listener);
+    // 시간 한 ms 진행 후 update
+    const result = store.update(a.id, "edited");
+    expect(result).toBe(true);
+    expect(store.getItems()[0].text).toBe("edited");
+    expect(store.getItems()[0].expiresAt).toBeGreaterThanOrEqual(oldExpiresAt);
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it("update 는 같은 텍스트면 no-op + listener 호출 안 함", () => {
+    const a = store.add("foo");
+    const listener = vi.fn();
+    store.subscribe(listener);
+    const result = store.update(a.id, "foo");
+    expect(result).toBe(false);
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it("update 는 빈 텍스트 throw", () => {
+    const a = store.add("foo");
+    expect(() => store.update(a.id, "")).toThrow(/empty/);
+    expect(() => store.update(a.id, "   ")).toThrow(/empty/);
+  });
+
+  it("update 는 cap 초과 throw", () => {
+    const a = store.add("foo");
+    const huge = "x".repeat(MessageQueueStore.MAX_ITEM_CHARS + 1);
+    expect(() => store.update(a.id, huge)).toThrow(/exceeds/);
+    expect(store.getItems()[0].text).toBe("foo");
+  });
+
+  it("update 가 없는 id 면 no-op", () => {
+    store.add("foo");
+    const listener = vi.fn();
+    store.subscribe(listener);
+    const result = store.update("nonexistent", "bar");
+    expect(result).toBe(false);
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  // ─── 자동 만료 (lazy prune) ───────────────────────────────────────────
+
+  it("getItems 는 만료된 항목 자동 prune", () => {
+    const item = store.add("will expire");
+    // 항목의 expiresAt 을 과거로 직접 변형 — store 내부 시점 manipulation
+    // 어려우니 vi.setSystemTime 으로 시간 진행.
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.now() + MessageQueueStore.DEFAULT_TTL_MS + 1);
+    const items = store.getItems();
+    expect(items.find((it) => it.id === item.id)).toBeUndefined();
+    expect(store.size()).toBe(0);
+    vi.useRealTimers();
+  });
+
+  it("update 시 expiresAt 갱신 — TTL reset", () => {
+    vi.useFakeTimers();
+    const start = Date.now();
+    vi.setSystemTime(start);
+    const item = store.add("foo");
+    const initialExpiresAt = store.getItems()[0].expiresAt;
+    // TTL 의 절반 시간 경과
+    vi.setSystemTime(start + MessageQueueStore.DEFAULT_TTL_MS / 2);
+    store.update(item.id, "bar");
+    const newExpiresAt = store.getItems()[0].expiresAt;
+    expect(newExpiresAt).toBeGreaterThan(initialExpiresAt);
+    vi.useRealTimers();
+  });
+
   it("listener throw 가 다른 listener 호출 막지 않음 (isolation)", () => {
     const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const l1 = vi.fn(() => { throw new Error("listener boom"); });
@@ -252,9 +326,9 @@ describe("MessageQueueStore", () => {
 
 describe("formatQueueInject", () => {
   function makeItem(text: string): {
-    id: string; text: string; selected: boolean; createdAt: number;
+    id: string; text: string; selected: boolean; createdAt: number; expiresAt: number;
   } {
-    return { id: "x", text, selected: false, createdAt: 0 };
+    return { id: "x", text, selected: false, createdAt: 0, expiresAt: Date.now() + 60_000 };
   }
 
   it("0 항목 → 빈 문자열", () => {

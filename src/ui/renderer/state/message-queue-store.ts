@@ -18,6 +18,8 @@ export interface MessageQueueItem {
   text: string;
   selected: boolean;
   createdAt: number;
+  /** 자동 만료 시점 (Date.now() 기준 ms). 초과 시 lazy prune 으로 제거됨. */
+  expiresAt: number;
 }
 
 let nextId = 0;
@@ -52,9 +54,26 @@ export class MessageQueueStore {
   /** 큐 capacity caps — economic DoS 방어. add() 가 throw 함. */
   static readonly MAX_ITEMS = 50;
   static readonly MAX_ITEM_CHARS = 8000;
+  /**
+   * 큐 항목 자동 만료 TTL (30 분). 사용자가 큐에 적재 후 장시간 방치 시
+   * stale 항목이 의도치 않게 inject 되는 회귀 방지. take/getItems 에서
+   * lazy prune.
+   */
+  static readonly DEFAULT_TTL_MS = 30 * 60 * 1000;
 
   private items: MessageQueueItem[] = [];
   private listeners = new Set<() => void>();
+
+  /**
+   * Lazy prune — 만료된 항목 제거. 모든 read/take 메서드가 호출.
+   * 항목 변동 있으면 listener notify.
+   */
+  private prune(): void {
+    const now = Date.now();
+    const before = this.items.length;
+    this.items = this.items.filter((it) => it.expiresAt > now);
+    if (this.items.length !== before) this.notify();
+  }
 
   add(text: string): MessageQueueItem {
     const trimmed = text.trim();
@@ -74,11 +93,13 @@ export class MessageQueueStore {
         `MessageQueueStore.add: queue full (${MessageQueueStore.MAX_ITEMS})`,
       );
     }
+    const now = Date.now();
     const item: MessageQueueItem = {
       id: makeId(),
       text: trimmed,
       selected: false,
-      createdAt: Date.now(),
+      createdAt: now,
+      expiresAt: now + MessageQueueStore.DEFAULT_TTL_MS,
     };
     this.items = [...this.items, item];
     this.notify();
@@ -89,6 +110,33 @@ export class MessageQueueStore {
     const before = this.items.length;
     this.items = this.items.filter((it) => it.id !== id);
     if (this.items.length !== before) this.notify();
+  }
+
+  /**
+   * 큐 항목 텍스트 수정. 빈/cap 초과 throw — add 와 동일 contract.
+   * Returns: true 면 변경됨 (listener notify). 같은 텍스트면 false (no-op).
+   * 수정 시 expiresAt 갱신 (사용자 액션 = TTL reset).
+   */
+  update(id: string, text: string): boolean {
+    const trimmed = text.trim();
+    if (trimmed.length === 0) {
+      throw new Error("MessageQueueStore.update: empty text rejected");
+    }
+    if (trimmed.length > MessageQueueStore.MAX_ITEM_CHARS) {
+      throw new Error(
+        `MessageQueueStore.update: item exceeds ${MessageQueueStore.MAX_ITEM_CHARS} chars`,
+      );
+    }
+    let changed = false;
+    const now = Date.now();
+    this.items = this.items.map((it) => {
+      if (it.id !== id) return it;
+      if (it.text === trimmed) return it;
+      changed = true;
+      return { ...it, text: trimmed, expiresAt: now + MessageQueueStore.DEFAULT_TTL_MS };
+    });
+    if (changed) this.notify();
+    return changed;
   }
 
   toggleSelect(id: string): void {
@@ -156,16 +204,21 @@ export class MessageQueueStore {
   }
 
   // ─── selectors ───
+  // 모든 selector + take* 는 prune 먼저 호출 — 만료된 항목 lazy 제거.
   getItems(): readonly MessageQueueItem[] {
+    this.prune();
     return this.items;
   }
   size(): number {
+    this.prune();
     return this.items.length;
   }
   hasSelected(): boolean {
+    this.prune();
     return this.items.some((it) => it.selected);
   }
   selectedCount(): number {
+    this.prune();
     return this.items.reduce((n, it) => (it.selected ? n + 1 : n), 0);
   }
 
