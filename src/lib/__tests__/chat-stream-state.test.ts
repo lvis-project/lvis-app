@@ -392,4 +392,47 @@ describe("imported_trigger helpers (overlay import marker lifecycle)", () => {
       streaming: true,
     });
   });
+
+  it("does not preserve an empty imported-trigger assistant because of prior turn siblings", () => {
+    let entries: ChatEntry[] = appendUserEntry([], "이전 질문");
+    entries = applyToolStart(entries, {
+      groupId: "prior-round",
+      toolUseId: "prior-tool",
+      name: "calendar_list",
+      displayOrder: 0,
+    });
+    entries = applyToolEnd(entries, {
+      groupId: "prior-round",
+      toolUseId: "prior-tool",
+      result: "ok",
+      isError: false,
+    });
+    entries = upsertStreamingAssistant(entries, "이전 답변");
+    entries = finalizeStreamingAssistant(entries, "이전 답변", { phase: "final" });
+    entries = [
+      ...entries,
+      {
+        kind: "turn_summary",
+        turnDurationMs: 1000,
+        toolCount: 1,
+        cumulativeToolMs: 100,
+        tokensIn: 100,
+        freshInputTokens: 10,
+        tokensOut: 1,
+      },
+    ];
+
+    entries = appendImportedTriggerEntry(entries, trigger);
+    entries = upsertStreamingAssistant(entries, "생각 중...");
+    entries = finalizeStreamingAssistant(entries, "", { phase: "final", overrideText: "" });
+
+    expect(entries.map((entry) => entry.kind)).toEqual([
+      "user",
+      "tool_group",
+      "assistant",
+      "turn_summary",
+      "imported_trigger",
+    ]);
+    expect(entries.at(-1)).toMatchObject({ kind: "imported_trigger", sessionId: "s1" });
+  });
 });

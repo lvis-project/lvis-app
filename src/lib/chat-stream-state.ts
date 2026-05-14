@@ -256,6 +256,10 @@ type ReasoningEntry = Extract<ChatEntry, { kind: "reasoning" }>;
 type AssistantEntry = Extract<ChatEntry, { kind: "assistant" }>;
 type ToolGroupEntry = Extract<ChatEntry, { kind: "tool_group" }>;
 
+function isTurnStartEntry(entry: ChatEntry | undefined): boolean {
+  return entry?.kind === "user" || entry?.kind === "imported_trigger";
+}
+
 export function appendUserEntry(
   entries: ChatEntry[],
   text: string,
@@ -420,9 +424,9 @@ export function finalizeStreamingAssistant(
       // turn's content and the entry must stay so the history timeline is
       // intact.  Only splice when the entry is truly orphaned (no siblings
       // in the current turn).
-      const lastUserIdx = findLastIdx(next, (e) => e.kind === "user");
+      const lastTurnStartIdx = findLastIdx(next, isTurnStartEntry);
       const hasTurnSiblings = next
-        .slice(lastUserIdx + 1)
+        .slice(lastTurnStartIdx + 1)
         .some((e) => e.kind === "tool_group" || e.kind === "checkpoint");
       if (hasTurnSiblings) {
         next[assistantIdx] = {
