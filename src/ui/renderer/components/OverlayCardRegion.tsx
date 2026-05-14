@@ -43,7 +43,6 @@ export function OverlayCardRegion({ onPluginPrimaryAction, onRoutineAcknowledge 
       >
         <div className="pointer-events-auto">
           <OverlayCard
-            key={active.id}
             title={active.title}
             summary={active.summary}
             firedAt={firedAt}
@@ -78,7 +77,6 @@ export function OverlayCardRegion({ onPluginPrimaryAction, onRoutineAcknowledge 
       >
         <div className="pointer-events-auto">
           <OverlayCard
-            key={active.id}
             title={active.title}
             summary={active.summary}
             firedAt={pluginFiredAt}

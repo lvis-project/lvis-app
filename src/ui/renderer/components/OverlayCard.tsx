@@ -16,7 +16,7 @@
 // C1: running phase — when running=true shows spinner + "진행 중…" instead of
 // summary + actions. Transitions to done phase when running flips to false.
 
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Loader2, X } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
 import {
@@ -91,20 +91,16 @@ export function OverlayCard({
   kind = "routine",
 }: OverlayCardProps) {
   const [expanded, setExpanded] = useState(false);
-  const [isOverflowing, setIsOverflowing] = useState(false);
-  const summaryRef = useRef<HTMLParagraphElement | null>(null);
   const relTime = useMemo(() => relativeTime(firedAt), [firedAt]);
 
-  // Layout 측정으로 정확한 truncation 감지 — `scrollHeight > clientHeight`
-  // 비교. CSS `line-clamp-2` 의 실제 overflow 여부를 폰트/너비 기반으로
-  // 측정. 휴리스틱 (newline≥2 || length>120) 의 false-positive (짧지만
-  // 줄바꿈 많은 컨텐츠 — "더 보기" 무효 클릭) 와 false-negative (긴
-  // 단일라인 < 120자 — 잘리지만 버튼 안 보임) 양쪽 다 회피.
-  useLayoutEffect(() => {
-    const el = summaryRef.current;
-    if (!el || expanded) return;
-    setIsOverflowing(el.scrollHeight > el.clientHeight + 1);
-  }, [summary, expanded]);
+  // Summary 가 2줄 (line-clamp-2) 안에 들어가는지 어림짐작 — 줄바꿈 1+ 또는
+  // 일정 길이 이상이면 truncate 가능성 있어 "더 보기" 버튼 노출. 정확한
+  // line-count 측정은 layout pass 필요해서 휴리스틱으로 충분.
+  const isLikelyTruncated = useMemo(() => {
+    if (!summary) return false;
+    const newlineCount = (summary.match(/\n/g) ?? []).length;
+    return newlineCount >= 2 || summary.length > 120;
+  }, [summary]);
 
   const isoLabel = useMemo(() => {
     try {
@@ -208,7 +204,6 @@ export function OverlayCard({
         ) : summary ? (
           <>
             <p
-              ref={summaryRef}
               className={
                 expanded
                   ? "max-h-64 overflow-y-auto whitespace-pre-wrap break-words text-xs text-muted-foreground"
@@ -219,7 +214,7 @@ export function OverlayCard({
             >
               {summary}
             </p>
-            {(isOverflowing || expanded) && (
+            {isLikelyTruncated && (
               <Button
                 size="sm"
                 variant="ghost"
