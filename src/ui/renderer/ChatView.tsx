@@ -72,7 +72,7 @@ export interface ChatViewProps {
   onAsk: (
     q: string,
     intent?: UserKeyboardIntentSnapshot,
-    opts?: { injectHint?: "queue" | "interrupt" },
+    opts?: { injectHint?: "queue" | "interrupt"; inputOrigin?: "queue-auto" },
   ) => void | Promise<void>;
   onEditSave: (idx: number, text: string) => void | Promise<void>;
   onFork: (idx: number) => void | Promise<void>;
@@ -670,15 +670,17 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
         flushQueueViaGuide();
         return;
       }
-      // done event 자동 인입 폐기 (2026-05-15 critic C1):
-      // IPC stream 의 done event 는 user gesture 컨텍스트 밖 → preload 의
-      // consumeUserKeyboardIntent 가 navigator.userActivation.isActive=false
-      // 반환 → chat.ts:319 가 user-keyboard-required 로 reject → user bubble
-      // 만 추가되고 LLM 호출 안 되는 silent message loss.
-      // 후속 PR 에서 새 inputOrigin enum ("queue-auto") + validator allow-list
-      // 추가로 정상 구현 예정. 본 commit 에선 사용자 명시 액션 (⌘⏎ / ESC /
-      // 행별 [↑ 즉시] / tool_end via onGuide) 만 inject path 로 유지.
-      // turn 종료 시 큐 잔존 — 사용자가 명시적으로 inject.
+      if (ev.type === "done") {
+        // turn 종료 시 큐 잔존 항목 → 새 user message 로 자동 inject.
+        // inputOrigin "queue-auto" 사용 — chat.ts validator 가 userActivation
+        // 검사 우회 (IPC stream context = user gesture 밖). chat-origin.ts
+        // 의 ChatSendInputOrigin allow-list 에 추가됨 (critic C1 fix).
+        if (messageQueueStore.size() === 0) return;
+        const taken = messageQueueStore.takeAll();
+        if (taken.length === 0) return;
+        const formatted = formatQueueInject(taken);
+        void onAsk(formatted, undefined, { injectHint: "queue", inputOrigin: "queue-auto" });
+      }
     });
     return unsub;
   }, [api, flushQueueViaGuide, messageQueueStore, onAsk]);

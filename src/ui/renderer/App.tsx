@@ -571,7 +571,7 @@ export function App() {
       q: string,
       mode: "default" | "trigger-import" = "default",
       userIntent?: UserKeyboardIntentSnapshot,
-      opts?: { injectHint?: "queue" | "interrupt" },
+      opts?: { injectHint?: "queue" | "interrupt"; inputOrigin?: "queue-auto" },
     ) => {
       // Cache once per invocation — `window.lvis.env.debugStream` is fixed at
       // preload bootstrap, so reading it again per debugLog call is wasted
@@ -672,8 +672,17 @@ export function App() {
         await api.chatSend(
           outgoing,
           outgoingAttachments,
-          mode === "trigger-import" ? "plugin-emitted" : "user-keyboard",
-          mode === "default" ? userIntent : undefined,
+          opts?.inputOrigin === "queue-auto"
+            ? "queue-auto"
+            : mode === "trigger-import"
+              ? "plugin-emitted"
+              : "user-keyboard",
+          // queue-auto path 는 user gesture 없이 IPC stream context 에서
+          // 발생하므로 userIntent 전달 안 함 (validator 가 userActivation
+          // 검사 우회).
+          opts?.inputOrigin === "queue-auto"
+            ? undefined
+            : mode === "default" ? userIntent : undefined,
           mode === "default" ? composed.rolePrompt : undefined,
         );
         if (debugStreamEnabled) debugLog("handleAsk", "chatSend:resolved", { requestId });
@@ -971,6 +980,8 @@ export function App() {
             onRefreshSessions={refreshSessions}
             chatContextValue={chatContextValue}
             onAsk={(q, intent, opts) => handleAsk(q, "default", intent, opts)}
+            /* opts 의 inputOrigin / injectHint 가 그대로 handleAsk 4번째
+               인자로 전달 — queue-auto inject path 활성. */
             onEditSave={handleEditSave}
             onFork={handleFork}
             onToggleStar={handleToggleStar}

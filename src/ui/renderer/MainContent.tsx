@@ -34,7 +34,7 @@ export interface MainContentProps {
   onAsk: (
     q: string,
     intent?: UserKeyboardIntentSnapshot,
-    opts?: { injectHint?: "queue" | "interrupt" },
+    opts?: { injectHint?: "queue" | "interrupt"; inputOrigin?: "queue-auto" },
   ) => Promise<void>;
   onEditSave: Parameters<typeof ChatView>[0]["onEditSave"];
   onFork: (entryIdx: number) => Promise<void>;

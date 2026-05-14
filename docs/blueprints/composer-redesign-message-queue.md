@@ -97,16 +97,16 @@ BOTTOM ROW (Turn 컨트롤, 2 cluster — NEW)
 - 자연 인입 시: 전체 비움
 - ⌘⏎ 인터럽트: 선택 항목만 비움 (미선택 잔존)
 - 행별 [↑ 즉시]: 그 1 개만 비움
-- LLM turn 자체 종료 시 (응답 완료 + idle 복귀): **큐 자동 비움** (다음 turn 으로 이월 X)
+- LLM turn 자체 종료 시 (`done` event): 큐 잔존 항목을 **새 user message 로 자동 inject** (queue-auto inputOrigin path). chat-origin.ts 의 `ChatSendInputOrigin` allow-list 에 `queue-auto` 추가, validator 가 `userActivation` 검사 우회 (IPC stream context = user gesture 밖)
 
 ## 단축키 매핑
 
 | 키 | idle | LLM busy |
 |---|---|---|
 | `⏎` Enter | 전송 → LLM 직행 | 메시지 큐에 추가 |
-| `⌘⏎` Cmd+Enter | (동작 동일 — 전송) | 즉시 주입 (LLM abort + 선택+입력 inject) |
+| `⌘⏎` Cmd+Enter | 즉시 주입 (큐+입력, abort 무관) | 즉시 주입 (LLM abort + 선택+입력 inject) |
 | `⇧⏎` Shift+Enter | 줄바꿈 | 줄바꿈 |
-| `ESC` | (모달 닫기 또는 무동작) | LLM 취소 (큐 보존) |
+| `ESC` | (모달 닫기 또는 무동작) | LLM abort + 큐 → 새 user message 로 inject (멈춤만 X) |
 | `⌘K` | 가이드 열기 | 가이드 열기 |
 
 ### 단축키 hint 표시 위치 (locality)
