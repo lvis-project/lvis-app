@@ -136,7 +136,7 @@ export type ToolEntryItem = {
 };
 
 export type ChatEntry =
-  | { kind: "user"; text: string }
+  | { kind: "user"; text: string; injectHint?: "queue" | "interrupt" }
   | { kind: "reasoning"; text: string; streaming?: boolean }
   | { kind: "assistant"; text: string; streaming?: boolean; route?: "command"; phase?: "work" | "final" }
   | { kind: "tool_group"; groupId: string; groupIds: string[]; status: "running" | "done" | "error"; tools: ToolEntryItem[] }
@@ -265,8 +265,12 @@ type ReasoningEntry = Extract<ChatEntry, { kind: "reasoning" }>;
 type AssistantEntry = Extract<ChatEntry, { kind: "assistant" }>;
 type ToolGroupEntry = Extract<ChatEntry, { kind: "tool_group" }>;
 
-export function appendUserEntry(entries: ChatEntry[], text: string): ChatEntry[] {
-  return [...entries, { kind: "user", text }];
+export function appendUserEntry(
+  entries: ChatEntry[],
+  text: string,
+  injectHint?: "queue" | "interrupt",
+): ChatEntry[] {
+  return [...entries, { kind: "user", text, ...(injectHint ? { injectHint } : {}) }];
 }
 
 /**
