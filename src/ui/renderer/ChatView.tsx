@@ -649,14 +649,12 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     void (async () => {
       const result = await onGuide(formatted);
       if (result?.ok !== true) {
-        // 실패 — 항목 보존 (retry 가능). add() throw 시 (cap 재초과) 무시.
-        for (const item of taken) {
-          try {
-            messageQueueStore.add(item.text);
-          } catch (err) {
-            console.warn("[message-queue] re-add after guide failure failed:", (err as Error).message);
-          }
-        }
+        // no-active-turn = turn 이 cancel/완료된 후 → re-add 하면 무한 loop.
+        // queue-full / too-long = 일시적이지만 사용자 cancel 동시 시 무한 retry
+        // 위험. 현재는 모든 실패를 best-effort drop 으로 처리 (사용자 알림 X).
+        // future: too-long 만 batch split + queue-full 만 backoff retry.
+        const reason = result?.error ?? "unknown";
+        console.warn(`[message-queue] guide flush dropped (${reason}):`, formatted.slice(0, 80));
       }
     })();
   }, [messageQueueStore, onGuide]);
@@ -668,16 +666,23 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     return unsub;
   }, [api, flushQueueViaGuide]);
 
-  const prevStreamingRef = useRef(false);
-  useEffect(() => {
-    const wasStreaming = prevStreamingRef.current;
-    prevStreamingRef.current = streaming;
-    if (wasStreaming && !streaming) {
-      // tool-less turn fallback — tool_end 가 없었으면 여기서 inject.
-      // tool 있는 turn 은 이미 위 핸들러가 비웠으니 store.size() === 0.
-      flushQueueViaGuide();
+  // streaming false 전이 fallback 폐기 (2026-05-15 사용자 피드백):
+  // AskUserQuestion 카드 깜박임 등으로 streaming 이 일시 false → true 로
+  // 되돌아갈 때 의도치 않게 큐가 자동 인입되어 사라지는 문제. 자동 인입은
+  // tool_end (진정한 brake-point) 에서만. turn 종료 시 큐 잔존 = OK,
+  // 사용자가 ESC 또는 esc 취소 로 명시적 inject 트리거.
+
+  // ESC / esc 취소 시 호출 — 큐를 새 user message 로 inject + handleAsk 가
+  // 자체 abort 처리 (Issue #622). 큐 비어 있으면 단순 abort 만.
+  const flushQueueAsUserMessage = useCallback(() => {
+    if (messageQueueStore.size() === 0) {
+      void onAbort();
+      return;
     }
-  }, [streaming, flushQueueViaGuide]);
+    const taken = messageQueueStore.takeAll();
+    const formatted = formatQueueInject(taken);
+    void onAsk(formatted, { inputOrigin: "user-keyboard", token: "" });
+  }, [messageQueueStore, onAbort, onAsk]);
 
   // Stage 5: composer Enter morph — busy = queue.add, idle = onAsk 직행.
   // ⌘⏎ = 즉시 주입 (LLM abort + 큐 selected + 현재 입력).
@@ -751,7 +756,10 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
         target?.getAttribute?.("data-testid") === "composer-textarea";
       if (!inComposer) return;
       e.preventDefault();
-      void onAbort();
+      // 사용자 의도 (2026-05-15): ESC = LLM abort + 큐를 새 user message 로
+      // inject. 멈춤만 하는 게 아니고 큐 항목이 입력으로 보내짐. 빈 큐면
+      // 단순 abort. handleAsk 가 자체 abort 처리.
+      flushQueueAsUserMessage();
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
@@ -1636,7 +1644,10 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
                 : question.trim().length === 0 && attachments.length === 0
             }
             onSend={() => handleComposerSend({ inputOrigin: "user-keyboard", token: "" })}
-            onCancel={() => void onAbort()}
+            onCancel={() => {
+              // ESC handler 와 동일: 큐를 inject + abort (멈춤 X, 입력으로 inject).
+              flushQueueAsUserMessage();
+            }}
             onGuide={() => {
               // Stage 4: 가이드 버튼 = ChatView 의 onGuide 호출 위임. Stage 5 에서
               // ⌘K 단축키 + open guide modal 추가 예정. 현재는 streaming 중

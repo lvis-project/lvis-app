@@ -245,9 +245,14 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       }
 
       if (e.key === "Enter" && !e.shiftKey) {
-        // v6: Cmd/Ctrl+Enter (즉시 주입) 와 Enter (전송/큐 추가) morph 는
-        // Stage 5 에서 ChatView 레벨 keyboard 핸들러로 통합. 여기는 단순
-        // Enter = onSend 만 (BottomActionRow 의 [↑ 전송 ⏎] 와 동등).
+        // v6: Cmd/Ctrl+Enter = 즉시 주입 (인터럽트) — ChatView document-level
+        // 핸들러가 처리. 여기서 onSend 호출하면 큐 추가가 먼저 일어나서 인터럽트
+        // 의미가 깨짐. modifier 있으면 노스킵 (preventDefault 만 — 줄바꿈 차단).
+        if (e.metaKey || e.ctrlKey) {
+          e.preventDefault();
+          return;
+        }
+        // 일반 Enter = onSend (idle = 전송, busy = 큐 추가).
         e.preventDefault();
         if (disabled) return;
         onSend(captureUserKeyboardIntent());
