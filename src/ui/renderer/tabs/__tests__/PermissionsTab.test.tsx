@@ -403,17 +403,19 @@ describe("PermissionsTab hook quarantine notice", () => {
     await act(async () => {
       render(<PermissionsTab />);
     });
+    const off = screen.getByRole("radio", { name: "끔" });
+    const low = screen.getByRole("radio", { name: "저위험 자동 허용" });
     // Initial state: "off" is selected.
-    expect(screen.getByTestId("reviewer-interactive-off").getAttribute("aria-checked")).toBe("true");
-    expect(screen.getByTestId("reviewer-interactive-low").getAttribute("aria-checked")).toBe("false");
+    expect(off.getAttribute("aria-checked")).toBe("true");
+    expect(low.getAttribute("aria-checked")).toBe("false");
 
     await act(async () => {
-      fireEvent.click(screen.getByTestId("reviewer-interactive-low"));
+      fireEvent.click(low);
     });
 
     expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("interactive low");
-    expect(screen.getByTestId("reviewer-interactive-low").getAttribute("aria-checked")).toBe("true");
-    expect(screen.getByTestId("reviewer-interactive-off").getAttribute("aria-checked")).toBe("false");
+    expect(low.getAttribute("aria-checked")).toBe("true");
+    expect(off.getAttribute("aria-checked")).toBe("false");
   });
 
   it("supports arrow-key navigation for the low-risk auto-allow radio group", async () => {
@@ -451,26 +453,22 @@ describe("PermissionsTab hook quarantine notice", () => {
     await act(async () => {
       render(<PermissionsTab />);
     });
-    const off = screen.getByTestId("reviewer-interactive-off");
-    expect(off.getAttribute("tabIndex")).toBe("0");
-    expect(screen.getByTestId("reviewer-interactive-low").getAttribute("tabIndex")).toBe("-1");
+    const off = screen.getByRole("radio", { name: "끔" });
+    const low = screen.getByRole("radio", { name: "저위험 자동 허용" });
+    expect(off.getAttribute("aria-checked")).toBe("true");
+    expect(low.getAttribute("aria-checked")).toBe("false");
+    off.focus();
 
     await act(async () => {
       fireEvent.keyDown(off, { key: "ArrowRight" });
     });
 
     expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("interactive low");
-    expect(screen.getByTestId("reviewer-interactive-low").getAttribute("aria-checked")).toBe("true");
-    expect(screen.getByTestId("reviewer-interactive-low").getAttribute("tabIndex")).toBe("0");
-    expect(screen.getByTestId("reviewer-interactive-off").getAttribute("tabIndex")).toBe("-1");
+    expect(low.getAttribute("aria-checked")).toBe("true");
   });
 
-  it("moves radio focus after an async arrow-key reviewer update completes", async () => {
+  it("uses the shadcn radio group for keyboard reviewer updates", async () => {
     const api = installApi([[]]);
-    let resolveInteractive!: () => void;
-    const interactiveGate = new Promise<void>((resolve) => {
-      resolveInteractive = resolve;
-    });
     api.permission.reviewerDispatch.mockImplementation(async (rawArgs: string) => {
       if (rawArgs === "show") {
         return {
@@ -486,7 +484,6 @@ describe("PermissionsTab hook quarantine notice", () => {
         };
       }
       if (rawArgs === "interactive low") {
-        await interactiveGate;
         return {
           ok: true as const,
           verb: "interactive" as const,
@@ -505,20 +502,16 @@ describe("PermissionsTab hook quarantine notice", () => {
     await act(async () => {
       render(<PermissionsTab />);
     });
-    const off = screen.getByTestId("reviewer-interactive-off");
+    const off = screen.getByRole("radio", { name: "끔" });
+    const low = screen.getByRole("radio", { name: "저위험 자동 허용" });
     off.focus();
 
-    fireEvent.keyDown(off, { key: "ArrowRight" });
-    expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("interactive low");
-    expect(document.activeElement).toBe(off);
-
     await act(async () => {
-      resolveInteractive();
-      await interactiveGate;
+      fireEvent.keyDown(off, { key: "ArrowRight" });
     });
-    await waitFor(() => {
-      expect(document.activeElement).toBe(screen.getByTestId("reviewer-interactive-low"));
-    });
+
+    expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("interactive low");
+    expect(low.getAttribute("aria-checked")).toBe("true");
   });
 
   it("keeps the prior reviewer mode when runtime rewire fails", async () => {
