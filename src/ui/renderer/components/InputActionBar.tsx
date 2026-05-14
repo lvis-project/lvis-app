@@ -144,8 +144,7 @@ export function InputActionBar({
             don't support thinking the engine simply ignores the flag. */}
         <label className="flex items-center gap-1.5 text-muted-foreground cursor-pointer select-none">
           <Checkbox
-            aria-label="Thinking"
-            className="h-3.5 w-3.5 rounded-[2px] bg-background data-[state=unchecked]:bg-background data-[state=checked]:bg-primary"
+            className="size-3.5"
             checked={enableThinkingChat}
             onCheckedChange={(checked) => void onToggleThinking(checked === true)}
           />

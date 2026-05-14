@@ -1,9 +1,16 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
+import { Checkbox } from "../../../components/ui/checkbox.js";
 import { Input } from "../../../components/ui/input.js";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
-import { Select } from "../../../components/ui/select.js";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../../../components/ui/select.js";
 import { Separator } from "../../../components/ui/separator.js";
 import { PERMISSION_REVIEWER_FRAMEWORK } from "../../../shared/permission-reviewer-framework.js";
 import { EXEC_MODE_OPTIONS } from "../constants.js";
@@ -589,29 +596,35 @@ export function PermissionsTab() {
               <label className="space-y-1 text-xs">
                 <span className="font-medium">LLM 공급자</span>
                 <Select
-                  data-testid="reviewer-provider-select"
-                  className="h-8 px-2 text-xs"
                   value={reviewer.provider}
                   disabled={reviewerBusy}
-                  onChange={(e) => void applyReviewerCommand(`provider ${e.target.value}`)}
+                  onValueChange={(value) => void applyReviewerCommand(`provider ${value}`)}
                 >
-                  {REVIEWER_PROVIDER_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
+                  <SelectTrigger data-testid="reviewer-provider-select" className="w-full text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {REVIEWER_PROVIDER_OPTIONS.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                    ))}
+                  </SelectContent>
                 </Select>
               </label>
               <label className="space-y-1 text-xs">
                 <span className="font-medium">오류 처리</span>
                 <Select
-                  data-testid="reviewer-fallback-select"
-                  className="h-8 px-2 text-xs"
                   value={reviewer.fallbackOnError}
                   disabled={reviewerBusy}
-                  onChange={(e) => void applyReviewerCommand(`fallback ${e.target.value}`)}
+                  onValueChange={(value) => void applyReviewerCommand(`fallback ${value}`)}
                 >
-                  {REVIEWER_FALLBACK_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>{opt.label} - {opt.description}</option>
-                  ))}
+                  <SelectTrigger data-testid="reviewer-fallback-select" className="w-full text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {REVIEWER_FALLBACK_OPTIONS.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>{opt.label} - {opt.description}</SelectItem>
+                    ))}
+                  </SelectContent>
                 </Select>
               </label>
             </div>
@@ -785,20 +798,13 @@ export function PermissionsTab() {
             <p className="text-[11px] text-muted-foreground">체크 시 승인 대화상자에서 모달 외부 클릭과 Escape 키가 차단되어 버튼 또는 승인 단축키로 명시적으로 결정해야 합니다.</p>
           </div>
           <div className="flex items-center gap-3">
-            <Button
-              type="button"
-              variant="ghost"
-              role="checkbox"
-              aria-checked={requireExplicit}
+            <Checkbox
+              checked={requireExplicit}
               aria-label="승인 대화상자에서 버튼 또는 단축키로 명시적 승인 또는 거부를 요구"
               disabled={policyManaged || policyBusy}
-              className={`relative h-5 w-5 flex-shrink-0 rounded border-2 p-0 ${requireExplicit ? "border-primary bg-primary hover:bg-primary/90" : "border-muted-foreground hover:border-primary/60"}`}
-              onClick={() => void handleExplicitToggle()}
-            >
-              {requireExplicit && (
-                <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-primary-foreground">✓</span>
-              )}
-            </Button>
+              className="size-5"
+              onCheckedChange={() => void handleExplicitToggle()}
+            />
             <span className="text-sm">{requireExplicit ? "활성화됨" : "비활성화됨"}</span>
             {policyManaged && <span className="text-base" title="IT 관리자 설정">🔒</span>}
           </div>
@@ -873,12 +879,16 @@ export function PermissionsTab() {
               onKeyDown={(e) => { if (e.key === "Enter" && newPattern.trim()) void handleAddRule(); }}
             />
             <Select
-              className="h-8 w-auto px-2 text-xs"
               value={newAction}
-              onChange={(e) => setNewAction(e.target.value as "allow" | "deny")}
+              onValueChange={(value) => setNewAction(value as "allow" | "deny")}
             >
-              <option value="allow">허용</option>
-              <option value="deny">거부</option>
+              <SelectTrigger className="h-8 w-24 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="allow">허용</SelectItem>
+                <SelectItem value="deny">거부</SelectItem>
+              </SelectContent>
             </Select>
             <Button size="sm" className="h-8" onClick={() => void handleAddRule()} disabled={rulesBusy || !newPattern.trim()}>
               추가
