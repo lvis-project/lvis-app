@@ -319,6 +319,8 @@ describe("compactWithBoundary — Layer 2 LLM call integration", () => {
       llm,
       model: "claude-sonnet-4-6",
       preserveRecentTokens: 200, // 작게 잡아서 split 발생 보장
+      sessionId: "test-sess",
+      preflightTokens: 100_000,
       compactNum: 1,
     });
 
@@ -328,12 +330,12 @@ describe("compactWithBoundary — Layer 2 LLM call integration", () => {
     expect(r.newHistory[0].meta?.compactBoundary).toBe(true);
     expect(r.newHistory[0].meta?.compactNum).toBe(1);
     expect(r.newHistory[0].meta?.boundary).toBe(r.boundary);
-    expect(Object.isFrozen(r.boundary)).toBe(true);
-    expect(r.boundary.structuredSummary.sections.Goal).toBe("auth refactor");
-    expect(r.boundary.compactNum).toBe(1);
+    expect(Object.isFrozen(r.boundary!)).toBe(true);
+    expect(r.boundary!.structuredSummary.sections.Goal).toBe("auth refactor");
+    expect(r.boundary!.compactNum).toBe(1);
   });
 
-  it("returns null when nothing to compact (preserveRecentTokens covers all)", async () => {
+  it("returns NOOP status when nothing to compact (preserveRecentTokens covers all)", async () => {
     const llm = makeMockLlm(["(should not be called)"]);
     const messages: GenericMessage[] = [
       { role: "user", content: "hi" },
@@ -343,11 +345,15 @@ describe("compactWithBoundary — Layer 2 LLM call integration", () => {
       messages,
       llm,
       model: "claude-sonnet-4-6",
-      preserveRecentTokens: 1_000_000, // 모든 메시지 보존
+      preserveRecentTokens: 1_000_000,
+      sessionId: "test-sess",
+      preflightTokens: 100_000,
       compactNum: 1,
     });
-    // no-op path: null 반환 (boundary/freeze 부작용 없음 — Major Fix #1)
-    expect(r).toBeNull();
+    // Phase 3 — NOOP status, boundary null, removedCount 0.
+    expect(r.status).toBe("noop");
+    expect(r.boundary).toBeNull();
+    expect(r.removedCount).toBe(0);
   });
 
   it("retries parse failure once, then graceful raw fallback", async () => {
@@ -360,10 +366,12 @@ describe("compactWithBoundary — Layer 2 LLM call integration", () => {
       llm,
       model: "claude-sonnet-4-6",
       preserveRecentTokens: 200,
+      sessionId: "test-sess",
+      preflightTokens: 100_000,
       compactNum: 2,
     });
-    expect(r.boundary.structuredSummary.raw).toBeDefined();
-    expect(r.boundary.structuredSummary.raw).toContain("bad response 2");
+    expect(r.boundary!.structuredSummary.raw).toBeDefined();
+    expect(r.boundary!.structuredSummary.raw).toContain("bad response 2");
   });
 
   it("recovers when 1st attempt malformed but 2nd succeeds", async () => {
@@ -375,10 +383,12 @@ describe("compactWithBoundary — Layer 2 LLM call integration", () => {
       llm,
       model: "claude-sonnet-4-6",
       preserveRecentTokens: 200,
+      sessionId: "test-sess",
+      preflightTokens: 100_000,
       compactNum: 3,
     });
-    expect(r.boundary.structuredSummary.raw).toBeUndefined();
-    expect(r.boundary.structuredSummary.sections.Goal).toBe("auth refactor");
+    expect(r.boundary!.structuredSummary.raw).toBeUndefined();
+    expect(r.boundary!.structuredSummary.sections.Goal).toBe("auth refactor");
   });
 
   it("collects pinnedArtifacts from skill outputs and meta.lock=true", async () => {
@@ -409,9 +419,11 @@ describe("compactWithBoundary — Layer 2 LLM call integration", () => {
       llm,
       model: "claude-sonnet-4-6",
       preserveRecentTokens: 200,
+      sessionId: "test-sess",
+      preflightTokens: 100_000,
       compactNum: 1,
     });
-    expect(r.boundary.pinnedArtifacts.length).toBeGreaterThan(0);
+    expect(r.boundary!.pinnedArtifacts.length).toBeGreaterThan(0);
     const hasSkill = r.boundary.pinnedArtifacts.some((p) => p.startsWith("skill:"));
     const hasLock = r.boundary.pinnedArtifacts.some((p) => p.startsWith("lock-user:"));
     expect(hasSkill).toBe(true);
@@ -438,6 +450,8 @@ describe("compactWithBoundary — Layer 2 LLM call integration", () => {
         llm,
         model: "claude-sonnet-4-6",
         preserveRecentTokens: 200,
+      sessionId: "test-sess",
+      preflightTokens: 100_000,
         compactNum: 1,
         abortSignal: ctrl.signal,
       }),
@@ -470,6 +484,8 @@ describe("compactWithBoundary — Layer 2 LLM call integration", () => {
       llm,
       model: "claude-sonnet-4-6",
       preserveRecentTokens: 50, // 작게 — tool_result 만 preserve 영역에 들어가도 페어 보존
+      sessionId: "test-sess",
+      preflightTokens: 100_000,
       compactNum: 1,
     });
     // newHistory 의 첫번째 non-stub 이 tool_use 가 있는 assistant 라면 페어 보존.
