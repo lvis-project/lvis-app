@@ -176,7 +176,20 @@ export class PluginRuntime {
 
   private async readManifest(path: string): Promise<PluginManifest> {
     const validator = await this.getManifestValidator();
-    return parsePluginJson(path, validator);
+    try {
+      return await parsePluginJson(path, validator);
+    } catch (err) {
+      // Supply-chain visibility — manifest schema reject / cross-field violation /
+      // JSON parse failure 가 발생하면 operator/security 채널이 *어느 plugin* 이
+      // *왜* 드랍됐는지 추적할 수 있어야 한다. fail-soft drop 자체는 보존
+      // (re-throw 으로 기존 load loop 의 catch path 가 그 plugin 을 skip 하고
+      // 호스트는 계속 동작).
+      this.auditLog?.("error", "plugin_manifest_rejected", {
+        manifestPath: path,
+        error: err instanceof Error ? err.message.slice(0, 500) : String(err),
+      });
+      throw err;
+    }
   }
 
   // ─── Sandbox helpers (instance-context wrappers) ───────────────────────────
