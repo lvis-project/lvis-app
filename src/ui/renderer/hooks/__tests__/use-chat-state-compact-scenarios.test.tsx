@@ -190,6 +190,31 @@ describe("useChatState — compact lifecycle scenarios", () => {
     expect(result.current.isCompacting).toBe(false);
   });
 
+  it("S5b (M4-ext): truncateToEntry during mid-compact clears stale isCompacting", () => {
+    // Edit/retry rewind drops history forward of the cut point. If a
+    // pre-turn compact is mid-flight, its compact_notice will land in
+    // a different streaming context — same stale-indicator race as
+    // session switch.
+    const { api, streamHandler } = makeCapturedApi();
+    const { result } = renderHook(() => useChatState(api));
+
+    act(() => {
+      result.current.applyLoadedSession([
+        { kind: "user", text: "first" },
+        { kind: "assistant", text: "reply" },
+      ]);
+    });
+
+    dispatchEvent(streamHandler, { type: "compact_started" } as StreamEvent);
+    expect(result.current.isCompacting).toBe(true);
+
+    act(() => {
+      result.current.truncateToEntry(0);
+    });
+
+    expect(result.current.isCompacting).toBe(false);
+  });
+
   it("S6 (M4): clearForNewChat during mid-compact clears stale isCompacting", () => {
     const { api, streamHandler } = makeCapturedApi();
     const { result } = renderHook(() => useChatState(api));
