@@ -104,6 +104,10 @@ export interface TurnCallbacks {
   onCompactOccurred?: (result: {
     removedMessages: number;
     freedTokens: number;
+    /** Post-compact history token estimate (estimateMessagesTokens after the
+     *  boundary applied). Renderer uses this as the SOT for the ring;
+     *  freedTokens alone undercounts when only one small message was summarized. */
+    estimatedAfter: number;
     /**
      * Compact tier — `"auto-compact"` (Layer 0 preflight) | `"manual"` (`/compact`).
      * UI CheckpointDivider 가 색상/라벨 결정에 사용 (`lib/chat-stream-state.ts:CheckpointTier`).
@@ -1796,6 +1800,7 @@ export class ConversationLoop {
     callbacks?.onCompactOccurred?.({
       removedMessages: result.removedCount,
       freedTokens: Math.max(0, estimatedBefore - result.estimatedAfter),
+      estimatedAfter: result.estimatedAfter,
       tier: trigger,
       summary: preamble,
       compactNum: this.compactNum,
