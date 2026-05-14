@@ -9,6 +9,7 @@ import {
   markStaleToolResults,
   estimateTokens,
   countHangul,
+  getModelPreflightThreshold,
 } from "../auto-compact.js";
 import type { GenericMessage } from "../llm/types.js";
 
@@ -224,5 +225,59 @@ describe("estimateTokens — chars/4 + 1 with Korean weighting (P11)", () => {
     const weighted = estimateTokens(longHangul);
     expect(weighted).toBeGreaterThan(naive);
     expect(weighted).toBe(Math.ceil(200 * 1.3 / 4) + 1); // 66
+  });
+});
+
+describe("getModelPreflightThreshold — LVIS_DEV_PREFLIGHT_OVERRIDE", () => {
+  const origOverride = process.env.LVIS_DEV_PREFLIGHT_OVERRIDE;
+  const origNodeEnv = process.env.NODE_ENV;
+
+  function restore(): void {
+    if (origOverride === undefined) delete process.env.LVIS_DEV_PREFLIGHT_OVERRIDE;
+    else process.env.LVIS_DEV_PREFLIGHT_OVERRIDE = origOverride;
+    if (origNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = origNodeEnv;
+  }
+
+  it("returns computed threshold when override is unset", () => {
+    delete process.env.LVIS_DEV_PREFLIGHT_OVERRIDE;
+    delete process.env.NODE_ENV;
+    const t = getModelPreflightThreshold("claude", "claude-sonnet-4-5");
+    expect(t).toBeGreaterThan(0);
+    expect(t).not.toBe(5000);
+    restore();
+  });
+
+  it("returns override value when LVIS_DEV_PREFLIGHT_OVERRIDE is set in non-prod", () => {
+    process.env.LVIS_DEV_PREFLIGHT_OVERRIDE = "5000";
+    delete process.env.NODE_ENV;
+    expect(getModelPreflightThreshold("claude", "claude-sonnet-4-5")).toBe(5000);
+    restore();
+  });
+
+  it("ignores override in production NODE_ENV", () => {
+    process.env.LVIS_DEV_PREFLIGHT_OVERRIDE = "5000";
+    process.env.NODE_ENV = "production";
+    const t = getModelPreflightThreshold("claude", "claude-sonnet-4-5");
+    expect(t).not.toBe(5000);
+    expect(t).toBeGreaterThan(50_000);
+    restore();
+  });
+
+  it("ignores malformed override values", () => {
+    process.env.LVIS_DEV_PREFLIGHT_OVERRIDE = "not-a-number";
+    delete process.env.NODE_ENV;
+    const t = getModelPreflightThreshold("claude", "claude-sonnet-4-5");
+    expect(t).toBeGreaterThan(50_000);
+    restore();
+  });
+
+  it("ignores zero and negative override values", () => {
+    process.env.LVIS_DEV_PREFLIGHT_OVERRIDE = "0";
+    delete process.env.NODE_ENV;
+    expect(getModelPreflightThreshold("claude", "claude-sonnet-4-5")).toBeGreaterThan(50_000);
+    process.env.LVIS_DEV_PREFLIGHT_OVERRIDE = "-100";
+    expect(getModelPreflightThreshold("claude", "claude-sonnet-4-5")).toBeGreaterThan(50_000);
+    restore();
   });
 });
