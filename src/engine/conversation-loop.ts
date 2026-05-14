@@ -828,10 +828,21 @@ export class ConversationLoop {
       });
 
       if (result === null || result.removedCount === 0) {
+        // Distinguish two no-op cases so the user can act:
+        //   (a) genuinely small history → "not needed" is accurate
+        //   (b) huge single message (loaded session preamble, long
+        //       turn_summary, etc.) that compact cannot shrink — the
+        //       generic "not needed" message hides the actual deadlock
+        //       (ring at 130%+ but /compact refuses). Report the live
+        //       token count + actionable guidance instead.
+        const tokens = estimateMessagesTokens(messagesBefore);
+        const usagePct = Math.round((tokens / preflight) * 100);
         return {
           compacted: false,
           compactedAt: null,
-          summary: "컴팩트 불필요: 메시지 수가 충분히 적습니다.",
+          summary: usagePct >= 100
+            ? `컴팩트가 줄일 수 있는 메시지가 없습니다 — 현재 ${tokens.toLocaleString()} 토큰 (preflight 의 ${usagePct}%). 단일 메시지가 너무 크거나 모두 보존 영역(preserveRecent=${preserveRecentTokens.toLocaleString()} 토큰) 안에 있습니다. 새 세션을 시작하거나 가장 큰 메시지를 직접 삭제하세요.`
+            : "컴팩트 불필요: 메시지 수가 충분히 적습니다.",
           removedMessageCount: 0,
         };
       }
@@ -1865,14 +1876,22 @@ export class ConversationLoop {
 
     const messagesBefore = this.history.getMessages();
     const estimated = estimateMessagesTokens(messagesBefore);
-    if (estimated < preflight) return;
+    // Two-signal preflight: estimateMessagesTokens (chars/4 heuristic) undercounts
+    // real provider tokens by 15-25% on code-heavy English content. Pair it with
+    // the actual provider-reported tokensIn from the prior turn so compact fires
+    // even when the local estimate is below threshold but the live billing said
+    // the next round will overflow.
+    const actualTokensIn = this.cumulativeUsage.inputTokens;
+    if (estimated < preflight && actualTokensIn < preflight) return;
+    const triggerSource: "estimate" | "actual-tokensIn" =
+      estimated >= preflight ? "estimate" : "actual-tokensIn";
 
     this.isCompacting = true;
     // Notify renderer immediately so it can show a "자동 압축 중..." indicator
     // before the blocking LLM compaction call. `onCompactOccurred` fires on
     // completion; this fires at start so there is no silent wait.
     callbacks?.onCompactStarted?.({
-      triggerSource: "estimate",
+      triggerSource,
       estimatedBefore: estimated,
       preflight,
     });
