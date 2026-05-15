@@ -14,7 +14,7 @@
 import "../../../../test/renderer/setup.js";
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { render, fireEvent, waitFor, act } from "@testing-library/react";
-import { FileEditDiff } from "../components/FileEditDiff.js";
+import { WriteFileSidecarDiff as FileEditDiff } from "../components/FileEditDiff.js";
 
 const SESSION_ID = "session-test-1";
 const TOOL_USE_ID = "tu-test-1";

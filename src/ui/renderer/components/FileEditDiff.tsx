@@ -1,36 +1,198 @@
 /**
- * Issue #749 — FileEditDiff
+ * FileEditDiff — inline diff renderer for edit_file / apply_patch / write_file.
+ * Used by ToolGroupCard for tools whose result carries before/after hunk data
+ * via the `lvis.write_file` kind or via edit_file/apply_patch input fields.
  *
- * Renders a write_file tool result. When the diff is truncated (either side
- * exceeds WRITE_DIFF_PREVIEW_LIMIT) and a sidecar exists, shows a
- * "전체 diff 보기" button that fetches and renders the full before/after via IPC.
+ * WriteFileSidecarDiff — sidecar IPC renderer for write_file when either side
+ * exceeds WRITE_DIFF_PREVIEW_LIMIT. Fetches full before/after via IPC on demand.
+ * Issue #749 — IPC channel: lvis:chat:get-write-diff → { before, after } | null
+ * Mirrors CompactedToolResult's lazy-fetch pattern.
  *
- * States:
- *   truncated  — truncated badge + "전체 diff 보기" button (sidecar available)
+ * States (WriteFileSidecarDiff):
+ *   idle       — truncated badge + "전체 diff 보기" button (sidecar available)
  *   loading    — spinner, button disabled
  *   expanded   — full before/after diff hunks
  *   error      — inline error message with retry button
  *   normal     — no truncation, renders result block directly (pass-through)
- *
- * IPC channel: lvis:chat:get-write-diff → { before, after } | null
- * Mirrors CompactedToolResult's lazy-fetch pattern.
  */
 
 import { useState, useEffect, useRef } from "react";
+import { ChevronDown, ChevronRight, FilePlus2, FilePenLine } from "lucide-react";
+import type { FileEditDiffData, FileEditHunk } from "../utils/file-diff.js";
+import { countDiffLines } from "../utils/file-diff.js";
 import { getApi } from "../api-client.js";
 
-// ─── Diff helpers ─────────────────────────────────────────────────────────────
+// ─── Main inline diff component (edit_file / apply_patch / write_file inline) ─
+
+const VERB_BY_TOOL: Record<FileEditDiffData["tool"], string> = {
+  edit_file: "Edit",
+  apply_patch: "Patch",
+  write_file: "Write",
+};
+
+export function FileEditDiff({ data }: { data: FileEditDiffData }) {
+  const [open, setOpen] = useState(true);
+  const totals = computeLineTotals(data.hunks);
+  const verb = data.isNewFile ? "Create" : VERB_BY_TOOL[data.tool];
+  const Icon = data.isNewFile ? FilePlus2 : FilePenLine;
+
+  return (
+    <div
+      className="overflow-hidden rounded border border-border bg-background"
+      data-testid="file-edit-diff"
+      data-tool={data.tool}
+      data-new-file={data.isNewFile ? "true" : "false"}
+      data-truncated={data.truncated ? "true" : "false"}
+    >
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full min-w-0 items-center gap-2 border-b border-border bg-muted/30 px-3 py-1.5 text-[11px] text-foreground/90 hover:bg-muted/50"
+        aria-expanded={open}
+      >
+        {open ? (
+          <ChevronDown className="h-3 w-3 shrink-0 opacity-70" />
+        ) : (
+          <ChevronRight className="h-3 w-3 shrink-0 opacity-70" />
+        )}
+        <Icon className="h-3 w-3 shrink-0 opacity-70" />
+        <span className="min-w-0 truncate text-left">
+          <span className="font-medium">{verb}</span>
+          <span className="opacity-60">(</span>
+          <span className="font-mono">{data.path}</span>
+          <span className="opacity-60">)</span>
+        </span>
+        <span className="ml-auto flex shrink-0 items-center gap-2 text-[10px] text-muted-foreground">
+          {totals.added > 0 && (
+            <span className="text-success" aria-label={`Added ${totals.added} lines`}>
+              +{totals.added}
+            </span>
+          )}
+          {totals.removed > 0 && (
+            <span className="text-destructive" aria-label={`Removed ${totals.removed} lines`}>
+              −{totals.removed}
+            </span>
+          )}
+          {data.truncated && (
+            <span className="text-warning" title="긴 파일은 미리보기가 잘렸습니다">
+              truncated
+            </span>
+          )}
+        </span>
+      </button>
+      {open && (
+        <div className="font-mono text-[11px] leading-[1.55]">
+          {data.hunks.map((hunk, i) => (
+            <DiffHunk
+              key={i}
+              hunk={hunk}
+              startLine={hunkStartLine(data.hunks, i)}
+              separator={data.hunks.length > 1 && i > 0}
+            />
+          ))}
+          {totals.added === 0 && totals.removed === 0 && (
+            <div className="px-3 py-2 text-[10px] text-muted-foreground">
+              변경된 내용 없음.
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DiffHunk({
+  hunk,
+  startLine,
+  separator,
+}: {
+  hunk: FileEditHunk;
+  startLine: number;
+  separator: boolean;
+}) {
+  const removed = hunk.oldText.length > 0 ? hunk.oldText.split("\n") : [];
+  const added = hunk.newText.length > 0 ? hunk.newText.split("\n") : [];
+  let line = startLine;
+  return (
+    <>
+      {separator && (
+        <div className="border-t border-dashed border-border/60 bg-muted/20 px-3 py-0.5 text-[10px] text-muted-foreground">
+          @@ next hunk
+        </div>
+      )}
+      {removed.map((text, i) => {
+        const n = line++;
+        return <DiffLine key={`r-${i}`} kind="removed" lineNo={n} text={text} />;
+      })}
+      {added.map((text, i) => {
+        const n = line++;
+        return <DiffLine key={`a-${i}`} kind="added" lineNo={n} text={text} />;
+      })}
+    </>
+  );
+}
+
+function DiffLine({
+  kind,
+  lineNo,
+  text,
+}: {
+  kind: "added" | "removed";
+  lineNo: number;
+  text: string;
+}) {
+  // Theme-adaptive backgrounds — `success` / `destructive` tokens both have
+  // dark + light variants defined in styles.css and adjust automatically.
+  const palette =
+    kind === "added"
+      ? "bg-success/10 text-success-foreground/90"
+      : "bg-destructive/10 text-destructive-foreground/90";
+  const accent = kind === "added" ? "text-success" : "text-destructive";
+  const sigil = kind === "added" ? "+" : "−";
+  return (
+    <div className={`${palette} flex min-w-0 gap-2 px-3`}>
+      <span className="w-8 shrink-0 select-none text-right text-[10px] opacity-50">
+        {lineNo}
+      </span>
+      <span className={`${accent} shrink-0 select-none`}>{sigil}</span>
+      <span className="min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+        {text.length > 0 ? text : " "}
+      </span>
+    </div>
+  );
+}
+
+function computeLineTotals(hunks: FileEditHunk[]): { added: number; removed: number } {
+  return hunks.reduce(
+    (acc, h) => ({
+      added: acc.added + countDiffLines(h.newText),
+      removed: acc.removed + countDiffLines(h.oldText),
+    }),
+    { added: 0, removed: 0 },
+  );
+}
+
+function hunkStartLine(hunks: FileEditHunk[], idx: number): number {
+  let n = 1;
+  for (let i = 0; i < idx; i++) {
+    const h = hunks[i];
+    if (!h) continue;
+    n += countDiffLines(h.oldText) + countDiffLines(h.newText);
+  }
+  return n;
+}
+
+// ─── Sidecar IPC diff component (write_file truncated+hasSidecar) ─────────────
 
 /** Split content into lines (no trailing newline artifact). */
-function lines(text: string): string[] {
+function sidecarLines(text: string): string[] {
   if (text === "") return [];
   const ls = text.split("\n");
-  // If last char is \n, split gives empty trailing element — drop it.
   if (ls[ls.length - 1] === "") ls.pop();
   return ls;
 }
 
-type DiffHunk =
+type SidecarDiffHunk =
   | { type: "context"; line: string }
   | { type: "removed"; line: string }
   | { type: "added"; line: string };
@@ -40,14 +202,12 @@ type DiffHunk =
  * Produces `removed` / `added` / `context` hunks.
  * Context window: 3 lines around each changed line.
  */
-function buildDiffHunks(before: string, after: string): DiffHunk[] {
-  const bLines = lines(before);
-  const aLines = lines(after);
+function buildDiffHunks(before: string, after: string): SidecarDiffHunk[] {
+  const bLines = sidecarLines(before);
+  const aLines = sidecarLines(after);
 
-  // LCS-based diff via DP (O(m*n) — acceptable for display sized inputs).
   const m = bLines.length;
   const n = aLines.length;
-  // dp[i][j] = LCS length for bLines[0..i), aLines[0..j)
   const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
   for (let i = m - 1; i >= 0; i--) {
     for (let j = n - 1; j >= 0; j--) {
@@ -59,8 +219,7 @@ function buildDiffHunks(before: string, after: string): DiffHunk[] {
     }
   }
 
-  // Walk the LCS to build flat removed/added/context sequence.
-  const raw: DiffHunk[] = [];
+  const raw: SidecarDiffHunk[] = [];
   let i = 0;
   let j = 0;
   while (i < m || j < n) {
@@ -77,7 +236,6 @@ function buildDiffHunks(before: string, after: string): DiffHunk[] {
     }
   }
 
-  // Collapse context: keep only 3 lines around changes.
   const CONTEXT_LINES = 3;
   const changed = new Set<number>();
   for (let k = 0; k < raw.length; k++) {
@@ -91,7 +249,7 @@ function buildDiffHunks(before: string, after: string): DiffHunk[] {
     }
   }
 
-  const result: DiffHunk[] = [];
+  const result: SidecarDiffHunk[] = [];
   let lastKept = -1;
   for (let k = 0; k < raw.length; k++) {
     if (!keep.has(k)) continue;
@@ -104,9 +262,7 @@ function buildDiffHunks(before: string, after: string): DiffHunk[] {
   return result;
 }
 
-// ─── Props ────────────────────────────────────────────────────────────────────
-
-export interface FileEditDiffProps {
+export interface WriteFileSidecarDiffProps {
   /** Raw JSON string output from WriteFileTool — parsed here for truncated/hasSidecar. */
   resultJson: string;
   /** Active session id for IPC guard. */
@@ -117,7 +273,6 @@ export interface FileEditDiffProps {
   filePath?: string;
 }
 
-// ─── Parsed result shape from WriteFileTool output ───────────────────────────
 interface WriteDiffResult {
   path?: string;
   bytes?: number;
@@ -137,19 +292,24 @@ function parseWriteResult(json: string): WriteDiffResult {
   return {};
 }
 
-// ─── Component ────────────────────────────────────────────────────────────────
+type SidecarDiffState = "idle" | "loading" | "expanded" | "error";
 
-type DiffState = "idle" | "loading" | "expanded" | "error";
-
-export function FileEditDiff({ resultJson, sessionId, toolUseId, filePath }: FileEditDiffProps) {
+export function WriteFileSidecarDiff({
+  resultJson,
+  sessionId,
+  toolUseId,
+  filePath,
+}: WriteFileSidecarDiffProps) {
   const parsed = parseWriteResult(resultJson);
-  const [diffState, setDiffState] = useState<DiffState>("idle");
+  const [diffState, setDiffState] = useState<SidecarDiffState>("idle");
   const [diffData, setDiffData] = useState<{ before: string; after: string } | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const isMountedRef = useRef(true);
   useEffect(() => {
     isMountedRef.current = true;
-    return () => { isMountedRef.current = false; };
+    return () => {
+      isMountedRef.current = false;
+    };
   }, []);
 
   // If not truncated or no sidecar, render a plain summary.
@@ -165,7 +325,6 @@ export function FileEditDiff({ resultJson, sessionId, toolUseId, filePath }: Fil
   }
 
   async function handleExpand() {
-    // cache hit
     if (diffData) {
       setDiffState("expanded");
       return;
@@ -197,14 +356,15 @@ export function FileEditDiff({ resultJson, sessionId, toolUseId, filePath }: Fil
   const path = filePath ?? parsed.path ?? "";
   const bytes = parsed.bytes !== undefined ? `${parsed.bytes.toLocaleString()} bytes` : "";
 
-  // ── Expanded — full diff ────────────────────────────────────────────────────
+  // ── Expanded — full diff ─────────────────────────────────────────────────────
   if (diffState === "expanded" && diffData) {
     const hunks = buildDiffHunks(diffData.before, diffData.after);
     return (
       <div className="min-w-0 w-full max-w-full rounded-md text-[11px]">
-        {/* header */}
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-t-md border-b"
-          style={{ backgroundColor: "hsl(var(--muted) / 0.5)" }}>
+        <div
+          className="flex items-center gap-2 px-3 py-1.5 rounded-t-md border-b"
+          style={{ backgroundColor: "hsl(var(--muted) / 0.5)" }}
+        >
           <span className="font-medium text-primary/80 truncate min-w-0">{path}</span>
           {bytes && <span className="shrink-0 text-muted-foreground/60 text-[10px]">{bytes}</span>}
           <button
@@ -215,7 +375,6 @@ export function FileEditDiff({ resultJson, sessionId, toolUseId, filePath }: Fil
             접기
           </button>
         </div>
-        {/* diff body */}
         <div
           className="max-h-[24rem] overflow-y-auto font-mono text-[10px] leading-[1.5] rounded-b-md px-0 py-1"
           style={{ backgroundColor: "hsl(var(--code-bg))", color: "hsl(var(--code-fg))" }}
@@ -260,7 +419,7 @@ export function FileEditDiff({ resultJson, sessionId, toolUseId, filePath }: Fil
     );
   }
 
-  // ── Error state ─────────────────────────────────────────────────────────────
+  // ── Error state ──────────────────────────────────────────────────────────────
   if (diffState === "error") {
     return (
       <div className="rounded-md px-3 py-1.5 text-[11px] text-destructive/80 bg-destructive/10 flex items-center gap-2">
@@ -276,11 +435,13 @@ export function FileEditDiff({ resultJson, sessionId, toolUseId, filePath }: Fil
     );
   }
 
-  // ── Idle / Loading — truncated preview with expand button ──────────────────
+  // ── Idle / Loading — truncated preview with expand button ────────────────────
   const isLoading = diffState === "loading";
   return (
-    <div className="min-w-0 w-full max-w-full rounded-md text-[11px]"
-      style={{ backgroundColor: "hsl(var(--muted) / 0.4)" }}>
+    <div
+      className="min-w-0 w-full max-w-full rounded-md text-[11px]"
+      style={{ backgroundColor: "hsl(var(--muted) / 0.4)" }}
+    >
       <div className="flex items-center gap-2 px-3 py-1.5">
         <span className="font-medium text-primary/80 truncate min-w-0">{path}</span>
         {bytes && <span className="shrink-0 text-muted-foreground/60 text-[10px]">{bytes}</span>}
@@ -289,7 +450,9 @@ export function FileEditDiff({ resultJson, sessionId, toolUseId, filePath }: Fil
           type="button"
           disabled={isLoading}
           className="ml-auto shrink-0 text-[10px] text-primary hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
-          onClick={() => { void handleExpand(); }}
+          onClick={() => {
+            void handleExpand();
+          }}
         >
           {isLoading ? "불러오는 중…" : "전체 diff 보기"}
         </button>

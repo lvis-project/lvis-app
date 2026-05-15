@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
 import type { Cookie } from "electron";
 
 // auth-window-service imports `electron` at module load time. Vitest's default
@@ -13,9 +13,18 @@ vi.mock("electron", () => ({
   ipcMain: {},
 }));
 
-const { filterCookiesByHost, isCompletionUrl, sanitizeUrlForLog, buildAuthResult, buildAuthWindowShellHtml } = await import(
-  "../auth-window-service.js"
-);
+const {
+  filterCookiesByHost,
+  isCompletionUrl,
+  sanitizeUrlForLog,
+  buildAuthResult,
+  buildAuthWindowShellHtml,
+  wirePluginAuthPartitionPersistence,
+  seedPluginAuthPartitions,
+  rememberPluginAuthPartition,
+  getTrackedPluginAuthPartitions,
+  forgetTrackedPluginAuthPartitions,
+} = await import("../auth-window-service.js");
 
 function cookie(overrides: Partial<Cookie>): Cookie {
   return {
@@ -218,5 +227,96 @@ describe("buildAuthWindowShellHtml", () => {
       platform: "win32",
     });
     expect(html).not.toContain("__lvis_eruda_booted");
+  });
+});
+
+describe("seedPluginAuthPartitions", () => {
+  it("seeds in-memory tracker from persisted map", () => {
+    seedPluginAuthPartitions({
+      "seed.plugin": [
+        "persist:plugin-auth:seed.plugin",
+        "persist:plugin-auth:seed.plugin:sub",
+      ],
+    });
+    const partitions = getTrackedPluginAuthPartitions("seed.plugin");
+    expect(partitions).toContain("persist:plugin-auth:seed.plugin");
+    expect(partitions).toContain("persist:plugin-auth:seed.plugin:sub");
+    // Cleanup
+    forgetTrackedPluginAuthPartitions("seed.plugin");
+  });
+
+  it("merges with existing in-memory entries (additive)", () => {
+    rememberPluginAuthPartition("persist:plugin-auth:merge.plugin:a");
+    seedPluginAuthPartitions({
+      "merge.plugin": ["persist:plugin-auth:merge.plugin:b"],
+    });
+    const partitions = getTrackedPluginAuthPartitions("merge.plugin");
+    expect(partitions).toContain("persist:plugin-auth:merge.plugin:a");
+    expect(partitions).toContain("persist:plugin-auth:merge.plugin:b");
+    // Cleanup
+    forgetTrackedPluginAuthPartitions("merge.plugin");
+  });
+});
+
+describe("wirePluginAuthPartitionPersistence + rememberPluginAuthPartition", () => {
+  beforeEach(() => {
+    // Reset to unwired state between tests by wiring no-op stubs.
+    wirePluginAuthPartitionPersistence({
+      write: vi.fn().mockResolvedValue(undefined),
+      delete: vi.fn().mockResolvedValue(undefined),
+      onError: vi.fn(),
+    });
+  });
+
+  it("calls write callback when a new partition is observed", async () => {
+    const write = vi.fn().mockResolvedValue(undefined);
+    const onError = vi.fn();
+    wirePluginAuthPartitionPersistence({
+      write,
+      delete: vi.fn().mockResolvedValue(undefined),
+      onError,
+    });
+
+    rememberPluginAuthPartition("persist:plugin-auth:wired.plugin:session");
+    // Fire-and-forget — flush microtask queue.
+    await Promise.resolve();
+
+    expect(write).toHaveBeenCalledOnce();
+    const [map] = write.mock.calls[0] as [Map<string, Set<string>>];
+    expect(map.get("wired.plugin")?.has("persist:plugin-auth:wired.plugin:session")).toBe(true);
+    // Cleanup
+    forgetTrackedPluginAuthPartitions("wired.plugin");
+  });
+
+  it("calls delete callback when forgetTrackedPluginAuthPartitions is called", async () => {
+    const deleteFn = vi.fn().mockResolvedValue(undefined);
+    wirePluginAuthPartitionPersistence({
+      write: vi.fn().mockResolvedValue(undefined),
+      delete: deleteFn,
+      onError: vi.fn(),
+    });
+
+    rememberPluginAuthPartition("persist:plugin-auth:forget.plugin");
+    forgetTrackedPluginAuthPartitions("forget.plugin");
+    await Promise.resolve();
+
+    expect(deleteFn).toHaveBeenCalledWith("forget.plugin");
+  });
+
+  it("routes write errors to onError callback, does not throw", async () => {
+    const onError = vi.fn();
+    wirePluginAuthPartitionPersistence({
+      write: vi.fn().mockRejectedValue(new Error("disk full")),
+      delete: vi.fn().mockResolvedValue(undefined),
+      onError,
+    });
+
+    rememberPluginAuthPartition("persist:plugin-auth:err.plugin");
+    // Flush microtask queue so the rejection handler runs.
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(onError).toHaveBeenCalledWith(expect.stringContaining("disk full"));
+    // Cleanup
+    forgetTrackedPluginAuthPartitions("err.plugin");
   });
 });

@@ -218,6 +218,51 @@ describe("file native tools", () => {
     expect(["one\n", "two\n"]).toContain(readFileSync(join(workDir, "generated", "race.txt"), "utf8"));
   });
 
+  it("write_file overwrite emits path and bytes without kind sentinel", async () => {
+    writeFileSync(join(workDir, "snap.txt"), "first line\nsecond line\n", "utf8");
+    const result = await new WriteFileTool().execute(
+      { path: "snap.txt", content: "first line\nupdated line\n" },
+      ctx(),
+    );
+
+    expect(result.isError).toBe(false);
+    const parsed = parse(result.output);
+    // Sidecar model: output carries path + bytes only; no inline before/after.
+    expect(parsed.path).toMatch(/snap\.txt$/);
+    expect(typeof parsed.bytes).toBe("number");
+    // Small file: both sides under WRITE_DIFF_PREVIEW_LIMIT — not truncated.
+    expect(parsed.truncated).toBeUndefined();
+    expect(parsed.hasSidecar).toBeUndefined();
+  });
+
+  it("write_file new file emits path and bytes without truncated flag", async () => {
+    const result = await new WriteFileTool().execute(
+      { path: "generated/fresh.txt", content: "hello\n" },
+      ctx(),
+    );
+
+    expect(result.isError).toBe(false);
+    const parsed = parse(result.output);
+    expect(parsed.path).toMatch(/fresh\.txt$/);
+    expect(parsed.bytes).toBe(Buffer.byteLength("hello\n", "utf8"));
+    expect(parsed.truncated).toBeUndefined();
+  });
+
+  it("write_file large content sets truncated=true in output", async () => {
+    const big = "x".repeat(10_000);
+    const result = await new WriteFileTool().execute(
+      { path: "generated/big.txt", content: big },
+      ctx(),
+    );
+
+    expect(result.isError).toBe(false);
+    const parsed = parse(result.output);
+    expect(parsed.truncated).toBe(true);
+    expect(parsed.bytes).toBe(Buffer.byteLength(big, "utf8"));
+    // Sidecar model: no inline after field — full content lives in sidecar file.
+    expect(parsed.after).toBeUndefined();
+  });
+
   it("edit_file replaces a single exact match", async () => {
     const result = await new EditFileTool().execute(
       { path: "README.md", oldText: "needle docs", newText: "updated docs" },

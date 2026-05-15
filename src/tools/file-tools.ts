@@ -45,6 +45,7 @@ type Result<T> = { ok: true; value: T } | { ok: false; error: ToolErrorResult };
 const DEFAULT_LINE_LIMIT = 2_000;
 const MAX_LINE_LIMIT = 5_000;
 const MAX_TEXT_FILE_BYTES = 2_000_000;
+
 const MAX_SEARCH_FILE_BYTES = 1_000_000;
 const BINARY_SAMPLE_BYTES = 8_192;
 const DEFAULT_RESULT_LIMIT = 200;

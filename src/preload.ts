@@ -1041,10 +1041,22 @@ contextBridge.exposeInMainWorld("__lvisInitialTheme", lvisInitialTheme);
 
 contextBridge.exposeInMainWorld("lvisApi", api);
 // Dev mode runtime flag — main process sets NODE_ENV=development in
-// `scripts/run-electron.mjs`, so preload reads it at runtime to bypass the
-// webpack build-time substitution issue (renderer bundle would otherwise see
-// NODE_ENV="production" because webpack defaults to production mode).
-contextBridge.exposeInMainWorld("__lvisDevMode", process.env.NODE_ENV !== "production");
+// `scripts/run-electron.mjs`, so preload reads it at runtime.
+//
+// IMPORTANT: webpack's production mode auto-injects DefinePlugin that
+// statically replaces ANY recognizable `process.env.NODE_ENV` shape with
+// the build-time value ("production") — including bracket notation
+// `process.env["NODE_ENV"]`. To force a true runtime lookup we route the
+// access through (a) a runtime-resolved key name and (b) `globalThis.process`
+// indirection so neither AST root nor index matches DefinePlugin's pattern.
+function readEnvAtRuntime(name: string): string | undefined {
+  const p = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process;
+  return p?.env?.[name];
+}
+contextBridge.exposeInMainWorld(
+  "__lvisDevMode",
+  readEnvAtRuntime("NODE_ENV") !== "production",
+);
 
 let hostMarketplaceApiClaimed = false;
 contextBridge.exposeInMainWorld("lvisHost", {
