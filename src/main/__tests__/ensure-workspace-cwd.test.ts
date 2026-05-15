@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, realpathSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,22 +6,22 @@ import { ensureWorkspaceCwd } from "../ensure-workspace-cwd.js";
 
 describe("ensureWorkspaceCwd", () => {
   let prevCwd: string;
-  let prevLvisHome: string | undefined;
   let tmpHome: string;
 
   beforeEach(() => {
     prevCwd = process.cwd();
-    prevLvisHome = process.env.LVIS_HOME;
     // realpathSync normalizes macOS /var/folders → /private/var/folders so the
     // path matches process.cwd() after chdir (kernel resolves the symlink).
     tmpHome = realpathSync(mkdtempSync(join(tmpdir(), "lvis-workspace-cwd-")));
-    process.env.LVIS_HOME = tmpHome;
+    // vi.stubEnv tracks the mutation so vi.unstubAllEnvs() in afterEach
+    // restores the prior value automatically — safer than manual save/restore
+    // and forward-compatible with `it.concurrent`.
+    vi.stubEnv("LVIS_HOME", tmpHome);
   });
 
   afterEach(() => {
     process.chdir(prevCwd);
-    if (prevLvisHome === undefined) delete process.env.LVIS_HOME;
-    else process.env.LVIS_HOME = prevLvisHome;
+    vi.unstubAllEnvs();
     rmSync(tmpHome, { recursive: true, force: true });
   });
 
@@ -48,8 +48,8 @@ describe("ensureWorkspaceCwd", () => {
   });
 
   it("honors LVIS_HOME env override", () => {
-    const customHome = mkdtempSync(join(tmpdir(), "lvis-custom-home-"));
-    process.env.LVIS_HOME = customHome;
+    const customHome = realpathSync(mkdtempSync(join(tmpdir(), "lvis-custom-home-")));
+    vi.stubEnv("LVIS_HOME", customHome);
     try {
       const workspaceDir = ensureWorkspaceCwd();
       expect(workspaceDir).toBe(join(customHome, "workspace"));
