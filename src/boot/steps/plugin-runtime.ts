@@ -936,14 +936,10 @@ export async function initPluginRuntime(
       toolRegistry.unregisterByPlugin(pluginId);
       lateBinding.conversationLoopRef.fn?.onPluginDisabled(pluginId);
     },
-    // Symmetric to `onDisable` — fires after a successful restartPlugin /
-    // addPlugin / reloadPlugin so the ToolRegistry re-registers the tools
-    // that `onDisable` wiped during the tear-down phase. Without this
-    // wiring every chat-surface tool call would hit `도구를 찾을 수 없습니다`
-    // after a hostApi.config.set or IPC config-set restart cycle (see
-    // PR #760). The sync is idempotent + non-fatal — a sync exception is
-    // logged but does not surface as `runtime reload failed`, so the
-    // caller plugin doesn't retry an already-persisted config save.
+    // Symmetric to `onDisable` — re-registers tools after a successful
+    // restart/add/reload. Without this every chat-surface tool call hits
+    // `도구를 찾을 수 없습니다` post-restart (see PR #760). Non-fatal:
+    // a sync exception is logged but does not become `runtime reload failed`.
     onEnable: (pluginId) => {
       try {
         syncPluginToolRegistry(pluginRuntime, toolRegistry);
@@ -1006,15 +1002,10 @@ export async function initPluginRuntime(
           // for the reload.
           pluginRuntime.setConfigOverride(pluginId, nextRecord);
           emitPluginConfigChange(pluginId, key, value);
-          // US-A3 — only the calling plugin needs its handlers to see the new
-          // config. Mirrors the IPC `lvis:plugins:config:set` behaviour
-          // (restartPlugin, not restartAll) so changing one plugin's config
-          // does NOT wipe every other loaded plugin's in-memory state.
-          // `restartPlugin` resolves after both the `onDisable` tear-down
-          // (unregisters plugin tools) and the `onEnable` re-registration
-          // wired on this runtime — so no explicit ToolRegistry sync is
-          // needed here. Restart already audits per-plugin failures; surface
-          // the outer error so the calling plugin can branch on it.
+          // US-A3 — targeted restartPlugin (not restartAll) so changing one
+          // plugin's config does not wipe other plugins' in-memory state.
+          // ToolRegistry resync happens automatically via the runtime's
+          // wired `onEnable` callback.
           try {
             await pluginRuntime.restartPlugin(pluginId);
           } catch (err) {
