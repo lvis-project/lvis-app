@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import {
   copyFile,
   mkdir,
+  open,
   readdir,
   readFile,
   rename,
@@ -353,19 +354,26 @@ export class WriteFileTool extends FileTool<typeof WriteFileInputSchema> {
     // Mirrors the EditFileTool / ApplyPatchTool pattern exactly.
     let before = "";
     let skipSidecar = false;
-    const existingStat = await stat(target).catch(() => null);
-    if (existingStat !== null) {
-      if (existingStat.size > MAX_TEXT_FILE_BYTES) {
-        skipSidecar = true;
-      } else if (await isBinaryFile(target)) {
-        skipSidecar = true;
-      }
-    }
-    if (!skipSidecar && existingStat !== null) {
+    // Open the file once and bind stat + read to the same inode handle to
+    // eliminate the TOCTOU window between stat() and readFile().
+    const fh = await open(target, "r").catch(() => null);
+    if (fh !== null) {
       try {
-        before = await readFile(target, "utf8");
-      } catch {
-        // Read failed unexpectedly — treat as empty before, still allow sidecar.
+        const fhStat = await fh.stat();
+        if (fhStat.size > MAX_TEXT_FILE_BYTES) {
+          skipSidecar = true;
+        } else {
+          // Safe to read — size is bound by the same handle.
+          before = await fh.readFile("utf8");
+        }
+      } finally {
+        await fh.close();
+      }
+      // isBinaryFile reopens the file internally but is bounded by its own
+      // limit; acceptable as a secondary guard after the size check passes.
+      if (!skipSidecar && (await isBinaryFile(target))) {
+        skipSidecar = true;
+        before = "";
       }
     }
     const after = input.content;

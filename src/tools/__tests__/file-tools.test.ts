@@ -439,17 +439,23 @@ describe("WriteFileTool pre-image guard (MAJOR 1)", () => {
     const binPath = join(workDir, "image.bin");
     writeFileSync(binPath, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x00, 0x00, 0x00]));
 
+    // Use after content > WRITE_DIFF_PREVIEW_LIMIT (4096) so truncated=true fires.
+    // Without the binary guard, hasSidecar would be true. The guard must suppress it.
+    const largeAfter = "x".repeat(4097);
     const result = await new WriteFileTool().execute(
-      { path: binPath, content: "overwrite content" },
+      { path: binPath, content: largeAfter },
       { cwd: workDir, extraAllowedDirectories: [], metadata: { sessionId: "s2", toolUseId: "tu2" } },
     );
 
     expect(result.isError).toBe(false);
     const body = parse(result.output);
-    // hasSidecar must be false — binary pre-image triggers skipSidecar.
-    expect(body.hasSidecar).toBeUndefined();
+    // truncated=true because afterBytes > WRITE_DIFF_PREVIEW_LIMIT.
+    expect(body.truncated).toBe(true);
+    // hasSidecar must be false — binary pre-image triggers skipSidecar, so
+    // writeDiffSidecar is never called even though afterBytes > preview limit.
+    expect(body.hasSidecar).toBe(false);
     // File was still written with new text content.
-    expect(readFileSync(binPath, "utf8")).toBe("overwrite content");
+    expect(readFileSync(binPath, "utf8")).toBe(largeAfter);
   });
 
   it("writes sidecar normally for a small text pre-existing file", async () => {

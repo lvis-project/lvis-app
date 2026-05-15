@@ -4,7 +4,6 @@
 #   bunx vitest run
 # or:
 #   bun run test
-preload = []
 testPathIgnorePatterns = [
   "src/ui/renderer/__tests__",
   "src/ui/__tests__",

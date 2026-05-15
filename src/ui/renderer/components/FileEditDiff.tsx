@@ -147,7 +147,10 @@ export function FileEditDiff({ resultJson, sessionId, toolUseId, filePath }: Fil
   const [diffData, setDiffData] = useState<{ before: string; after: string } | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const isMountedRef = useRef(true);
-  useEffect(() => () => { isMountedRef.current = false; }, []);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => { isMountedRef.current = false; };
+  }, []);
 
   // If not truncated or no sidecar, render a plain summary.
   if (!parsed.truncated || !parsed.hasSidecar) {
