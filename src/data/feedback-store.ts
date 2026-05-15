@@ -9,7 +9,7 @@
  */
 import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
-import { homedir } from "node:os";
+import { lvisHome } from "../shared/lvis-home.js";
 
 export interface FeedbackEntry {
   /** uuid */
@@ -35,8 +35,8 @@ export class FeedbackStore {
   private readonly retentionDays: number;
 
   constructor(options?: FeedbackStoreOptions) {
-    const resolvedPath = resolve(options?.filePath ?? join(homedir(), ".lvis", "feedback.jsonl"));
-    const lvisDir = resolve(join(homedir(), ".lvis"));
+    const resolvedPath = resolve(options?.filePath ?? join(lvisHome(), "feedback.jsonl"));
+    const lvisDir = resolve(lvisHome());
     if (!resolvedPath.startsWith(lvisDir + sep) && resolvedPath !== lvisDir) {
       throw new Error(`feedback-store: path confinement violation — ${resolvedPath} is outside ${lvisDir}`);
     }

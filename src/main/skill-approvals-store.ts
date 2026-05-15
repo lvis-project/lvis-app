@@ -32,8 +32,8 @@
  */
 import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import { homedir } from "node:os";
 import { createHash } from "node:crypto";
+import { lvisHome } from "../shared/lvis-home.js";
 
 export interface SkillApprovalRecord {
   name: string;
@@ -46,7 +46,7 @@ export interface SkillApprovalsFile {
   approvedSkills: SkillApprovalRecord[];
 }
 
-const DEFAULT_PATH = resolve(homedir(), ".lvis", "skill-approvals.json");
+const DEFAULT_PATH = resolve(lvisHome(), "skill-approvals.json");
 
 const fileLocks = new Map<string, Promise<void>>();
 

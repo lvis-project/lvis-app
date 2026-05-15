@@ -15,9 +15,9 @@
  */
 import { readFile, readdir, realpath } from "node:fs/promises";
 import { resolve, join, relative, isAbsolute } from "node:path";
-import { homedir } from "node:os";
 import { BUILTIN_SKILLS } from "./builtin-skills.js";
 import { createLogger } from "../lib/logger.js";
+import { lvisHome } from "../shared/lvis-home.js";
 const log = createLogger("lvis");
 
 /**
@@ -47,7 +47,7 @@ export interface LoadedSkill {
   filePath: string;
 }
 
-const USER_SKILLS_DIR = resolve(homedir(), ".lvis", "skills");
+const USER_SKILLS_DIR = resolve(lvisHome(), "skills");
 
 /**
  * Parse a YAML-ish frontmatter block. Supports `key: value` lines and

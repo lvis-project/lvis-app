@@ -28,13 +28,13 @@
  * `fallbackOnError` (rule | deny), NOT through cache.
  */
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, resolve as pathResolve } from "node:path";
 import { createHash } from "node:crypto";
 import type { RiskVerdict } from "./risk-classifier.js";
 import type { ToolCategory, ToolSource, ToolTrustOrigin } from "../../tools/types.js";
 import { withFileLock } from "../../lib/with-file-lock.js";
 import { createLogger } from "../../lib/logger.js";
+import { lvisHome } from "../../shared/lvis-home.js";
 
 const log = createLogger("reviewer-cache");
 
@@ -73,7 +73,7 @@ export interface VerdictCacheContext {
 }
 
 function defaultPath(): string {
-  return pathResolve(homedir(), ".lvis", "permissions", "reviewer-cache.jsonl");
+  return pathResolve(lvisHome(), "permissions", "reviewer-cache.jsonl");
 }
 
 // ─── Canonical-shape derivation ──────────────────────────────────────

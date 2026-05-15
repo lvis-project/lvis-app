@@ -19,10 +19,10 @@
 import { execFile } from "node:child_process";
 import { mkdirSync, readFileSync, statSync } from "node:fs";
 import { open } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { createLogger } from "../lib/logger.js";
+import { lvisHome } from "../shared/lvis-home.js";
 const log = createLogger("corp-ca");
 const execFileAsync = promisify(execFile);
 
@@ -41,7 +41,7 @@ export interface CorporateCaResult {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const CACHE_DIR = join(homedir(), ".lvis", "certs");
+const CACHE_DIR = join(lvisHome(), "certs");
 const CACHE_PATH = join(CACHE_DIR, "corp-ca.pem");
 /** 7일 (ms). 이 시간이 지나면 재추출. */
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
