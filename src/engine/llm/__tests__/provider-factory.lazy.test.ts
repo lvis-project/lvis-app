@@ -47,10 +47,12 @@ describe("createProvider lazy adapter (PR #705)", () => {
     const innerStreamTurn = vi.fn(async function* () {
       yield { type: "text_delta", text: "hi" };
     });
-    const ctor = vi.fn(() => ({
-      vendor: "openai",
-      streamTurn: innerStreamTurn,
-    }));
+    const ctor = vi.fn(function () {
+      return {
+        vendor: "openai",
+        streamTurn: innerStreamTurn,
+      };
+    });
     vi.doMock("../vercel/adapter.js", () => ({ VercelUnifiedProvider: ctor }));
 
     const { createProvider } = await import("../provider-factory.js");
@@ -69,7 +71,7 @@ describe("createProvider lazy adapter (PR #705)", () => {
 
   it("retries after a transient adapter construction failure", async () => {
     let attempt = 0;
-    const ctor = vi.fn(() => {
+    const ctor = vi.fn(function () {
       if (++attempt === 1) throw new Error("first attempt fails");
       return {
         vendor: "openai",

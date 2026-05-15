@@ -5,6 +5,23 @@ import { fileURLToPath } from "node:url";
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const rootPath = (p: string) => path.resolve(ROOT, p);
 
+const testFileGlob = "**/*.{test,spec}.{ts,tsx}";
+const baseExclude = [
+  "node_modules/**",
+  "dist/**",
+  "plugins/**",
+  ".claude/**",
+  // Playwright E2E specs run under the `playwright test` runner,
+  // not vitest. Excluded here to avoid double-execution + import errors.
+  "test/e2e/**",
+];
+const rendererTestGlobs = [
+  `test/renderer/${testFileGlob}`,
+  `src/ui/__tests__/${testFileGlob}`,
+  `src/ui/renderer/__tests__/${testFileGlob}`,
+  `src/ui/renderer/**/__tests__/${testFileGlob}`,
+];
+
 /**
  * Phase 1 renderer split — test infrastructure.
  *
@@ -26,32 +43,32 @@ export default defineConfig({
     // every worker fork restores the pre-v25 behaviour where jsdom owns
     // the `localStorage` global, and is a no-op on Node versions where
     // webstorage is not on by default (e.g. v22 on Windows CI).
-    poolOptions: {
-      forks: { execArgv: ["--no-experimental-webstorage"] },
-      // `threads` is forward-defense for a future `pool: "threads"` flip —
-      // vitest 2.x defaults to `forks`, so this key is currently dead but
-      // mirroring `forks` keeps the fix portable if the pool is ever switched.
-      threads: { execArgv: ["--no-experimental-webstorage"] },
-    },
-    environment: "node",
-    environmentMatchGlobs: [
-      ["test/renderer/**", "jsdom"],
-      ["src/ui/__tests__/**", "jsdom"],
-      ["src/ui/renderer/__tests__/**", "jsdom"],
-      ["src/ui/renderer/**/__tests__/**", "jsdom"],
-    ],
-    include: [
-      "src/**/__tests__/**/*.{test,spec}.{ts,tsx}",
-      "test/**/*.{test,spec}.{ts,tsx}",
-    ],
-    exclude: [
-      "node_modules/**",
-      "dist/**",
-      "plugins/**",
-      ".claude/**",
-      // Playwright E2E specs run under the `playwright test` runner,
-      // not vitest. Excluded here to avoid double-execution + import errors.
-      "test/e2e/**",
+    execArgv: ["--no-experimental-webstorage"],
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: "node",
+          environment: "node",
+          include: [
+            `src/**/__tests__/${testFileGlob}`,
+            `test/${testFileGlob}`,
+          ],
+          exclude: [
+            ...baseExclude,
+            ...rendererTestGlobs,
+          ],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "jsdom",
+          environment: "jsdom",
+          include: rendererTestGlobs,
+          exclude: baseExclude,
+        },
+      },
     ],
   },
   resolve: {

@@ -9,6 +9,7 @@ import { resolveShell, ShellMismatchError, __resetShellResolverCache } from "../
 
 afterEach(() => {
   __resetShellResolverCache();
+  vi.mocked(execFileSync).mockReset();
   vi.restoreAllMocks();
 });
 
