@@ -46,6 +46,36 @@ bun run dist:linux               # AppImage + DEB + RPM, run on Linux
 bun run dist:win                 # NSIS + ZIP, run on Windows
 ```
 
+For fast internal preview builds:
+
+```bash
+bun run dist:fast                # current OS, writes release-fast/
+bun run dist:mac:fast            # macOS preview DMG + ZIP, larger files
+bun run dist:linux:fast          # Linux preview AppImage + DEB + RPM, larger files
+bun run dist:win:fast            # Windows preview NSIS + ZIP, larger files
+```
+
+Fast preview mode is only for quick QA links while a PR is still moving. It
+passes `compression=store` and `npmRebuild=false` to `electron-builder`, writes
+to `release-fast/`, and refuses `--publish`. Keep normal `dist:*` / `release`
+commands for public release assets because they retain size-optimized normal
+compression.
+
+Measured on 2026-05-15 for `lvis-app` 0.1.3 on macOS arm64:
+
+| Command | Time | Artifact size |
+| --- | ---: | ---: |
+| `bun run build` | 2.61s | n/a |
+| `build-installers --mac --skip-build --skip-code-sign --dir` | 8.67s | unpacked only |
+| same with `-c.npmRebuild=false` | 6.12s | unpacked only |
+| normal `--mac --skip-build --skip-code-sign` | 45.73s | DMG 106M / ZIP 103M |
+| fast preview equivalent | 16.99s | DMG 227M / ZIP 226M |
+
+Use `--skip-native-rebuild` only immediately after `bun install` or another
+known-good native dependency rebuild. It avoids the duplicate
+`better-sqlite3` rebuild that `electron-builder` performs by default, without
+changing artifact compression or size.
+
 For all three platforms, use the **Build Installers** GitHub Actions workflow.
 It runs the same `scripts/build-installers.mjs` entrypoint on macOS, Linux,
 and Windows runners so native dependencies and installer tooling are resolved
