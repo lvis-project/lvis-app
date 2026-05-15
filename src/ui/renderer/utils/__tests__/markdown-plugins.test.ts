@@ -4,10 +4,9 @@ import { join } from "node:path";
 import remarkGfm from "remark-gfm";
 import { MARKDOWN_REMARK_PLUGINS, remarkKoreanAdjacentStrong } from "../markdown-plugins.js";
 
-// Single source of truth check. Every chat-side ReactMarkdown
-// (AssistantCard, TriggerCard, RoutineCard, ImportedTriggerCard summary +
-// response) imports MARKDOWN_REMARK_PLUGINS, so verifying the constant
-// here verifies every consumer transitively. The `walkSrcForRemarkGfm`
+// Single source of truth check. Every chat-side ReactMarkdown surface imports
+// MARKDOWN_REMARK_PLUGINS, so verifying the constant here verifies every
+// consumer transitively. The `walkSrcForRemarkGfm`
 // suite below adds the grep-style guard requested in issue #507 — it
 // scans every renderer source file and fails if `remark-gfm` (or
 // `MARKDOWN_REMARK_PLUGINS`-bypassing options like `remarkPlugins={[...]}`)

@@ -66,6 +66,7 @@ vi.mock("../../../plugins/plugin-paths.js", () => ({
 
 import {
   auditApprovalViolation,
+  deriveOverlaySummaryForDisplay,
   formatPluginPendingPrompt,
   initPluginRuntime,
   sanitizePluginPendingPrompt,
@@ -147,6 +148,35 @@ describe("sanitizePluginPendingPrompt", () => {
 
   it("rejects invalid overlay trigger source tags", () => {
     expect(() => formatPluginPendingPrompt("hi", "plugin:bad")).toThrow(/invalid overlay trigger source/);
+  });
+});
+
+describe("deriveOverlaySummaryForDisplay", () => {
+  it("strips untrusted wrapper tags from explicit plugin summaries", () => {
+    expect(
+      deriveOverlaySummaryForDisplay({
+        prompt: "fallback",
+        summary: "<untrusted-highlight>회의 요약</untrusted-highlight>",
+      }),
+    ).toBe("회의 요약");
+  });
+
+  it("strips untrusted wrapper tags from prompt-derived summaries", () => {
+    expect(
+      deriveOverlaySummaryForDisplay({
+        prompt: "<untrusted-meeting-title>대화 내용 확인</untrusted-meeting-title>",
+      }),
+    ).toBe("대화 내용 확인");
+  });
+
+  it("caps long explicit summaries and appends a truncation marker", () => {
+    const summary = deriveOverlaySummaryForDisplay({
+      prompt: "fallback",
+      summary: "긴 요약 ".repeat(600),
+    });
+    expect(summary.length).toBeLessThanOrEqual(2_000);
+    expect(summary).toContain("[잘림");
+    expect(summary).toContain("확인하기");
   });
 });
 

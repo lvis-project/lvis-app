@@ -2,6 +2,8 @@ node_modules/
 package-lock.json
 dist/
 release/
+release-fast/
+.cache/
 *.log
 .omx/
 .pageindex-workspace/
