@@ -78,6 +78,62 @@ describe("PluginRuntime config overrides", () => {
     await expect(runtime.call("config_echo")).resolves.toBe("after");
   });
 
+  it("clears plugin-specific config overrides on removePlugin", async () => {
+    const pluginDir = join(installedDir, "remove-config-plugin");
+    await mkdir(pluginDir, { recursive: true });
+    await writeFile(
+      join(pluginDir, "entry.mjs"),
+      `export default async function createPlugin(ctx) {
+  return {
+    handlers: {
+      "remove_config_echo": async () => ctx.config.apiKey ?? "missing",
+    },
+  };
+}
+`,
+      "utf-8",
+    );
+    const manifestPath = join(pluginDir, "plugin.json");
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        id: "remove-config-plugin",
+        name: "Remove Config Plugin",
+        version: "1.0.0",
+        description: "Test fixture.",
+        publisher: "Test fixture",
+        entry: "entry.mjs",
+        tools: ["remove_config_echo"],
+      }),
+      "utf-8",
+    );
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: "remove-config-plugin", manifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+
+    const runtime = new PluginRuntime({
+      hostRoot: testDir,
+      registryPath,
+      pluginsRoot: installedDir,
+      configOverrides: {
+        "remove-config-plugin": { apiKey: "stale" },
+      },
+    });
+
+    await runtime.load();
+    await expect(runtime.call("remove_config_echo")).resolves.toBe("stale");
+
+    await runtime.removePlugin("remove-config-plugin");
+    await runtime.addPlugin("remove-config-plugin");
+
+    await expect(runtime.call("remove_config_echo")).resolves.toBe("missing");
+  });
+
   it("fires onDisable for loaded plugins before restartAll re-registers them", async () => {
     const pluginDir = join(installedDir, "cleanup-plugin");
     await mkdir(pluginDir, { recursive: true });

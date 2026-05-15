@@ -26,6 +26,7 @@ import { redactFsPath, redactAuditPayload } from "../../audit/dlp-filter.js";
 import { LVIS_TOKEN_NAMES } from "../../shared/plugin-ui-tokens.js";
 import { pluginAssetUrlFromRealPath } from "../../main/plugin-asset-protocol.js";
 import { preparePythonRuntimeForInstalledPlugin, withPluginInstallLock } from "../../plugins/install-lifecycle.js";
+import { uninstallPluginWithLifecycle } from "../../plugins/uninstall-lifecycle.js";
 const log = createLogger("lvis");
 
 function pluginConfigError(
@@ -266,6 +267,10 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     settingsService,
     auditLogger,
     refreshPluginNotifications,
+    pluginPaths,
+    clearAuthPartitionService,
+    listPluginAuthPartitionsService,
+    forgetPluginAuthPartitionsService,
     notificationService,
     mcpArtifactStore,
     getMainWindow,
@@ -372,55 +377,30 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     const broadcastUninstallResult = (payload: { slug: string; success: boolean; error?: string }) => {
       broadcastPluginLifecycleEvent("lvis:plugins:uninstall-result", payload);
     };
-    // Lifecycle ordering (architecture §9): stop → unregister → unload → remove.
-    // pluginRuntime.removePlugin() runs the plugin's stop() + disposers, which
-    // is the ONLY chance for plugin code to release OS resources (DB handles,
-    // file watchers, child processes). The order MUST be removePlugin first,
-    // marketplace.uninstall second so rm runs after handles are released —
-    // see PR #734 for the Windows EBUSY history.
-    //
-    // Note: this lifecycle reordering REDUCES the EBUSY window but does not
-    // fully eliminate it. removePlugin currently swallows stop()/disposer
-    // errors (runtime/index.ts:715-731) and the OS may take a few ms to
-    // actually flush the SQLite WAL/SHM file descriptors after stop()
-    // resolves. The dual-defense is the tombstone-and-deferred-rm pattern
-    // in marketplace.removeInstalledEntry — directory rename succeeds even
-    // with open handles inside (NTFS) so the registry write can proceed; any
-    // EBUSY on the deferred rm is swept on next boot. Both layers together
-    // give EBUSY-tolerance.
     try {
-      await pluginRuntime.removePlugin(pluginId);
-    } catch (err) {
-      const message = (err as Error).message ?? "removePlugin failed";
-      broadcastUninstallResult({ slug: pluginId, success: false, error: message });
-      throw err;
-    }
-    let result: Awaited<ReturnType<typeof pluginMarketplace.uninstall>>;
-    try {
-      result = await pluginMarketplace.uninstall(pluginId);
+      // Lifecycle ordering lives in uninstallPluginWithLifecycle:
+      // runtime remove (stop/dispose) first, marketplace file removal second,
+      // then best-effort host state cleanup. This keeps the Windows EBUSY
+      // defense from PR #734 while centralizing config/secret/auth cleanup.
+      const result = await uninstallPluginWithLifecycle(pluginId, {
+        pluginMarketplace,
+        pluginRuntime,
+        settingsService,
+        pluginPaths,
+        clearAuthPartitionService,
+        listPluginAuthPartitionsService,
+        forgetPluginAuthPartitionsService,
+        refreshPluginNotifications,
+        emitHostEvent,
+        log,
+      });
+      broadcastUninstallResult({ slug: pluginId, success: true });
+      return result;
     } catch (err) {
       const message = (err as Error).message ?? "uninstall failed";
-      // Idempotent path: removePlugin succeeded above, but the marketplace
-      // registry no longer has the entry (e.g. double-click race, or registry
-      // already purged by a prior aborted uninstall). User intent (plugin gone)
-      // is satisfied — return success. Both error strings come from
-      // marketplace.uninstall / deployment-guard precondition checks.
-      if (
-        message.startsWith("Plugin not found:") ||
-        message.startsWith("Plugin not installed:")
-      ) {
-        emitHostEvent("plugin.uninstalled", { pluginId });
-        refreshPluginNotifications?.();
-        broadcastUninstallResult({ slug: pluginId, success: true });
-        return { pluginId, uninstalled: true as const };
-      }
       broadcastUninstallResult({ slug: pluginId, success: false, error: message });
       throw err;
     }
-    emitHostEvent("plugin.uninstalled", { pluginId });
-    refreshPluginNotifications?.();
-    broadcastUninstallResult({ slug: pluginId, success: true });
-    return result;
   });
 
   ipcMain.handle("lvis:plugins:install-local", async (e) => {

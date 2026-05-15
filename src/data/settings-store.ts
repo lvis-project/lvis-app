@@ -4,6 +4,7 @@ import { dirname, resolve } from "node:path";
 import { withFileLock } from "../lib/with-file-lock.js";
 import {
   sanitizePluginConfig,
+  sanitizePluginConfigKey,
   sanitizePluginConfigPluginId,
   type PluginConfigRecord,
 } from "../shared/plugin-config.js";
@@ -546,6 +547,15 @@ export class SettingsService {
     return structuredClone(sanitizedConfig);
   }
 
+  async deletePluginConfig(pluginId: string): Promise<void> {
+    const safePluginId = sanitizePluginConfigPluginId(pluginId);
+    if (!(safePluginId in this.settings.pluginConfigs)) return;
+    const next = { ...this.settings.pluginConfigs };
+    delete next[safePluginId];
+    this.settings.pluginConfigs = next;
+    await this.saveSettings();
+  }
+
   /** 비밀 값(API 키 등)을 암호화하여 저장 */
   async setSecret(key: string, value: string): Promise<void> {
     const secrets = this.loadSecrets();
@@ -588,6 +598,23 @@ export class SettingsService {
     const secrets = this.loadSecrets();
     delete secrets[key];
     await this.saveSecrets(secrets);
+  }
+
+  async deletePluginSecrets(pluginId: string, keys: Iterable<string>): Promise<number> {
+    const safePluginId = sanitizePluginConfigPluginId(pluginId);
+    const secrets = this.loadSecrets();
+    let deleted = 0;
+    for (const key of keys) {
+      const safeKey = sanitizePluginConfigKey(key);
+      const storageKey = `plugin.${safePluginId}.${safeKey}`;
+      if (!(storageKey in secrets)) continue;
+      delete secrets[storageKey];
+      deleted += 1;
+    }
+    if (deleted > 0) {
+      await this.saveSecrets(secrets);
+    }
+    return deleted;
   }
 
   // Copilot review fix: 기존 hasApiKey() 는 `llm.apiKey` 단일 키만 검사했으나
