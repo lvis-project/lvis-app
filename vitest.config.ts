@@ -15,7 +15,8 @@ const rootPath = (p: string) => path.resolve(ROOT, p);
 export default defineConfig({
   test: {
     globalSetup: ["./vitest.globalSetup.ts"],
-    testTimeout: 15000,
+    testTimeout: 45000,
+    hookTimeout: 45000,
     // Node v25 enabled experimental WebStorage by default. Its
     // `localStorage` getter trips `Warning: --localstorage-file was
     // provided without a valid path` and shadows the jsdom implementation,

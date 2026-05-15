@@ -10,6 +10,7 @@ import type { InstallInFlight } from "../hooks/use-plugin-marketplace.js";
 import type { PluginCardSummary } from "../types.js";
 import { PluginAuthSection } from "../components/PluginAuthSection.js";
 import { usePluginAuthStatuses } from "../hooks/use-plugin-auth-status.js";
+import { PluginUninstallDialog } from "../dialogs/PluginUninstallDialog.js";
 import { PluginConfigSchemaForm } from "./PluginConfigSchemaForm.js";
 
 type KV = { key: string; value: string };
@@ -40,6 +41,7 @@ export function PluginConfigTab() {
   const [plugins, setPlugins] = useState<PluginCardSummary[]>([]);
   const [installInFlight, setInstallInFlight] = useState<InstallInFlight>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [uninstallTarget, setUninstallTarget] = useState<PluginCardSummary | null>(null);
   // Test environments do not always inject `window.lvisApi`; fall back to
   // `null` so unrelated PluginConfigTab tests don't crash before they
   // exercise their own code paths. The hook short-circuits when api is null.
@@ -294,28 +296,35 @@ export function PluginConfigTab() {
     }
   }, [showBanner, refreshPlugins]);
 
-  const handleUninstall = useCallback(async () => {
-    if (!selectedId || !selectedPlugin) return;
-    if (!window.confirm(`"${selectedPlugin.name}" 플러그인을 제거하시겠습니까?`)) return;
+  const handleUninstall = useCallback(async (pluginId: string, displayName: string) => {
     setSaving(true);
     try {
-      const result = await getHostMarketplaceApi().uninstallMarketplacePlugin(selectedId);
+      const result = await getHostMarketplaceApi().uninstallMarketplacePlugin(pluginId);
       if (!result.ok) {
         showBanner("error", result.message ?? "제거 실패");
         return;
       }
-      setPlugins((prev) => prev.filter((p) => p.id !== selectedId));
-      setSelectedId(null);
-      showBanner("success", `${selectedPlugin.name} 제거 완료`);
+      setPlugins((prev) => prev.filter((p) => p.id !== pluginId));
+      setSelectedId((current) => (current === pluginId ? null : current));
+      showBanner("success", `${displayName} 제거 완료`);
     } catch (e) {
       showBanner("error", (e as Error).message ?? "제거 실패");
     } finally {
       setSaving(false);
+      setUninstallTarget(null);
     }
-  }, [selectedId, selectedPlugin, showBanner]);
+  }, [showBanner]);
 
   return (
     <div className="flex flex-col h-full gap-3">
+      <PluginUninstallDialog
+        target={uninstallTarget}
+        working={saving}
+        onClose={() => {
+          if (!saving) setUninstallTarget(null);
+        }}
+        onConfirm={(id) => handleUninstall(id, uninstallTarget?.name ?? id)}
+      />
       {banner && (
         <div
           className={`rounded-md px-3 py-2 text-sm ${
@@ -482,7 +491,7 @@ export function PluginConfigTab() {
                     size="sm"
                     variant="destructive"
                     className="h-7 text-xs px-2 shrink-0"
-                    onClick={() => void handleUninstall()}
+                    onClick={() => setUninstallTarget(selectedPlugin)}
                     disabled={saving || selectedPlugin.isManaged}
                     title={selectedPlugin.isManaged ? "관리자가 설치한 플러그인은 제거할 수 없습니다" : undefined}
                   >
