@@ -12,6 +12,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PluginRuntime } from "../../runtime.js";
 import { buildImportUrl } from "../sandbox.js";
+import { ToolRegistry } from "../../../tools/registry.js";
+import { syncPluginToolRegistry } from "../../../boot/plugins.js";
 
 describe("PluginRuntime lifecycle — restartPlugin", () => {
   let testDir: string;
@@ -320,31 +322,31 @@ export default async function createPlugin() {
     await expect(runtime.disable("does-not-exist")).rejects.toThrow("Plugin not loaded");
   });
 
-  // The host wires `onDisable` to `toolRegistry.unregisterByPlugin(pluginId)`
-  // (see boot/steps/plugin-runtime.ts). restartPlugin fires onDisable during
-  // its stop phase but its start phase only re-populates `methodMap` — the
-  // ToolRegistry is NOT touched. Callers MUST call `syncPluginToolRegistry`
-  // after `restartPlugin` resolves; otherwise every plugin tool reports
-  // `도구를 찾을 수 없습니다` until the next install/uninstall event fires.
-  it("restartPlugin fires onDisable so callers know to re-sync ToolRegistry", async () => {
-    const pluginDir = join(installedDir, "lc-restart-on-disable");
+  // Lifecycle callback contract: every post-boot transition into the
+  // `loaded + started` state must fire `onEnable` so the host can re-sync
+  // ToolRegistry, mirroring the existing `onDisable` tear-down hook.
+  // Without `onEnable` the bug from PR #760 returns — `onDisable` wipes
+  // plugin tools from ToolRegistry during the stop phase but nothing
+  // re-registers them after start.
+  async function setupLifecyclePluginFixture(pluginId: string) {
+    const pluginDir = join(installedDir, pluginId);
     await mkdir(pluginDir, { recursive: true });
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(
       join(pluginDir, "entry.mjs"),
       `export default async function createPlugin() {
-  return { handlers: { lc_rod_ping: async () => "ok" }, start: async () => {}, stop: async () => {} };
+  return { handlers: { ${pluginId.replace(/-/g, "_")}_ping: async () => "ok" }, start: async () => {}, stop: async () => {} };
 }`,
       "utf-8",
     );
     await writeFile(
       manifestPath,
       JSON.stringify({
-        id: "lc-restart-on-disable",
-        name: "LC",
+        id: pluginId,
+        name: pluginId,
         version: "1.0.0",
         entry: "entry.mjs",
-        tools: ["lc_rod_ping"],
+        tools: [`${pluginId.replace(/-/g, "_")}_ping`],
         description: "x",
         publisher: "x",
       }),
@@ -354,28 +356,212 @@ export default async function createPlugin() {
       registryPath,
       JSON.stringify({
         version: 1,
-        plugins: [{ id: "lc-restart-on-disable", manifestPath, enabled: true }],
+        plugins: [{ id: pluginId, manifestPath, enabled: true }],
       }),
       "utf-8",
     );
+    return manifestPath;
+  }
 
-    const onDisableCalls: string[] = [];
+  it("restartPlugin fires onDisable then onEnable around the restart cycle", async () => {
+    await setupLifecyclePluginFixture("lc-restart-pair");
+
+    const events: Array<{ type: "disable" | "enable"; pluginId: string }> = [];
     const runtime = new PluginRuntime({
       hostRoot: testDir,
       registryPath,
       pluginsRoot: installedDir,
-      onDisable: (pluginId) => { onDisableCalls.push(pluginId); },
+      onDisable: (pluginId) => { events.push({ type: "disable", pluginId }); },
+      onEnable: (pluginId) => { events.push({ type: "enable", pluginId }); },
     });
     await runtime.startAll();
-    onDisableCalls.length = 0;
+    events.length = 0;
 
-    await runtime.restartPlugin("lc-restart-on-disable");
+    await runtime.restartPlugin("lc-restart-pair");
 
-    expect(onDisableCalls).toEqual(["lc-restart-on-disable"]);
-    // methodMap is back so the runtime call itself works — proving the bug
-    // surface: methodMap recovered, but the toolRegistry-side cleanup ran
-    // without a matching re-registration.
-    await expect(runtime.call("lc_rod_ping")).resolves.toBe("ok");
+    expect(events).toEqual([
+      { type: "disable", pluginId: "lc-restart-pair" },
+      { type: "enable", pluginId: "lc-restart-pair" },
+    ]);
+    await expect(runtime.call("lc_restart_pair_ping")).resolves.toBe("ok");
+  });
+
+  it("addPlugin (fresh-load branch) fires onEnable once after start succeeds", async () => {
+    // Register the plugin in the registry but DO NOT call startAll — addPlugin
+    // takes the fresh-load branch via instantiateAndStartSinglePlugin only
+    // when the plugin is not already in the runtime's plugins map.
+    await setupLifecyclePluginFixture("lc-add-fresh");
+
+    const enableCalls: string[] = [];
+    const runtime = new PluginRuntime({
+      hostRoot: testDir,
+      registryPath,
+      pluginsRoot: installedDir,
+      onEnable: (pluginId) => { enableCalls.push(pluginId); },
+    });
+    // Skip startAll so the plugins map stays empty — addPlugin's "already
+    // loaded" branch (which delegates to restartPlugin) does not engage and
+    // we exercise the fresh-load codepath in `instantiateAndStartSinglePlugin`.
+    await runtime.addPlugin("lc-add-fresh");
+
+    expect(enableCalls).toEqual(["lc-add-fresh"]);
+    await expect(runtime.call("lc_add_fresh_ping")).resolves.toBe("ok");
+  });
+
+  it("reloadPlugin fires onEnable after a successful module re-import + start", async () => {
+    await setupLifecyclePluginFixture("lc-reload-pair");
+
+    const events: Array<{ type: "disable" | "enable"; pluginId: string }> = [];
+    const runtime = new PluginRuntime({
+      hostRoot: testDir,
+      registryPath,
+      pluginsRoot: installedDir,
+      onDisable: (pluginId) => { events.push({ type: "disable", pluginId }); },
+      onEnable: (pluginId) => { events.push({ type: "enable", pluginId }); },
+    });
+    await runtime.startAll();
+    events.length = 0;
+
+    await runtime.reloadPlugin("lc-reload-pair");
+
+    expect(events).toEqual([
+      { type: "disable", pluginId: "lc-reload-pair" },
+      { type: "enable", pluginId: "lc-reload-pair" },
+    ]);
+  });
+
+  // Boot-wiring integration test: real PluginRuntime + real ToolRegistry +
+  // a real `onEnable -> syncPluginToolRegistry` callback. Asserts that
+  // restartPlugin's `onEnable` actually re-populates ToolRegistry end-to-end,
+  // not just that the callback was called (the other lifecycle tests assert
+  // the callback contract; this one pins the boot WIRING that turns the
+  // callback into a registry resync). If anyone removes the `onEnable`
+  // wiring from `src/boot/steps/plugin-runtime.ts`, this test fails.
+  it("boot wiring: onEnable → syncPluginToolRegistry actually re-registers tools after restartPlugin", async () => {
+    const pluginId = "lc-bootwiring";
+    const toolName = "lc_bootwiring_ping";
+    const pluginDir = join(installedDir, pluginId);
+    await mkdir(pluginDir, { recursive: true });
+    const manifestPath = join(pluginDir, "plugin.json");
+    await writeFile(
+      join(pluginDir, "entry.mjs"),
+      `export default async function createPlugin() {
+  return { handlers: { ${toolName}: async () => "ok" }, start: async () => {}, stop: async () => {} };
+}`,
+      "utf-8",
+    );
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        id: pluginId,
+        name: pluginId,
+        version: "1.0.0",
+        entry: "entry.mjs",
+        tools: [toolName],
+        toolSchemas: {
+          [toolName]: {
+            description: "lifecycle integration test",
+            category: "read",
+            inputSchema: { type: "object", properties: {}, additionalProperties: false },
+          },
+        },
+        description: "x",
+        publisher: "x",
+      }),
+      "utf-8",
+    );
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: pluginId, manifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+
+    const toolRegistry = new ToolRegistry();
+    // Two-step binding so `onEnable` does not capture the `runtime` reference
+    // via TDZ-adjacent closure (the arrow body only runs after construction
+    // completes, but the explicit factory makes the safety obvious to readers).
+    let runtime!: PluginRuntime;
+    runtime = new PluginRuntime({
+      hostRoot: testDir,
+      registryPath,
+      pluginsRoot: installedDir,
+      onDisable: (id) => { toolRegistry.unregisterByPlugin(id); },
+      onEnable: () => { syncPluginToolRegistry(runtime, toolRegistry); },
+    });
+    await runtime.startAll();
+
+    // Boot's `registerPluginTools(...)` is what initially populates the
+    // registry in production. Mirror that here so the post-restart state has
+    // a meaningful baseline to compare against.
+    syncPluginToolRegistry(runtime, toolRegistry);
+    expect(toolRegistry.findByName(toolName)?.pluginId).toBe(pluginId);
+
+    // Restart removes the tool via onDisable, then re-registers via onEnable.
+    // Without the onEnable wiring this test fails — findByName returns
+    // undefined after the restart.
+    await runtime.restartPlugin(pluginId);
+
+    expect(toolRegistry.findByName(toolName)?.pluginId).toBe(pluginId);
+  });
+
+  it("addPlugin failure path (start throws) does NOT fire onEnable", async () => {
+    // Plugin whose `start` always throws — `instantiateAndStartSinglePlugin`
+    // markFailed-and-returns on the catch branch, never reaches the
+    // `this.onEnable?.(manifest.id)` call after the try/catch.
+    const pluginId = "lc-add-fail";
+    const pluginDir = join(installedDir, pluginId);
+    await mkdir(pluginDir, { recursive: true });
+    const manifestPath = join(pluginDir, "plugin.json");
+    await writeFile(
+      join(pluginDir, "entry.mjs"),
+      `export default async function createPlugin() {
+  return {
+    handlers: { lc_add_fail_ping: async () => "ok" },
+    start: async () => { throw new Error("simulated start failure"); },
+    stop: async () => {},
+  };
+}`,
+      "utf-8",
+    );
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        id: pluginId,
+        name: pluginId,
+        version: "1.0.0",
+        entry: "entry.mjs",
+        tools: ["lc_add_fail_ping"],
+        description: "x",
+        publisher: "x",
+      }),
+      "utf-8",
+    );
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: pluginId, manifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+
+    const enableCalls: string[] = [];
+    const runtime = new PluginRuntime({
+      hostRoot: testDir,
+      registryPath,
+      pluginsRoot: installedDir,
+      onEnable: (pluginId) => { enableCalls.push(pluginId); },
+    });
+
+    // addPlugin re-throws via `throwIfPluginFailedAfterAdd`; either way the
+    // plugin should be in the failed set and onEnable must not have fired.
+    await runtime.addPlugin(pluginId).catch(() => undefined);
+
+    expect(enableCalls).toEqual([]);
+    expect(runtime.listPluginIds()).not.toContain(pluginId);
   });
 });
 
