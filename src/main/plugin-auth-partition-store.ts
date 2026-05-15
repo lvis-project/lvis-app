@@ -176,6 +176,20 @@ export function writePersistedPluginAuthPartitions(
 
   // A write is already in-flight; _pendingSnapshot updated above will be
   // picked up by the trailing while-loop continuation.
+  //
+  // KNOWN COALESCED-CALLER EDGE: if the in-flight write throws BEFORE the
+  // loop reaches the just-set _pendingSnapshot, this caller's promise
+  // resolves "successfully" (it returns the .catch-detached chain), but
+  // the snapshot itself is dropped. In actual usage this is benign:
+  //  (a) the only call site is auth-window-service.ts and it routes the
+  //      write rejection (received by the in-flight caller) through the
+  //      onError audit hook,
+  //  (b) writes are idempotent — the next rememberPluginAuthPartition
+  //      observation re-triggers a write with the latest snapshot,
+  //  (c) callers do not poll the returned promise to verify "is my
+  //      snapshot persisted" — they fire-and-forget.
+  // If a future caller needs durable per-call confirmation, return a
+  // per-caller deferred that resolves only when its snapshot is written.
   return _writeChain;
 }
 
