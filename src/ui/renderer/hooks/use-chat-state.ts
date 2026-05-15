@@ -64,7 +64,7 @@ export function useChatState(api: LvisApi) {
 
   // Stream subscription absorbed from App.tsx.
   useEffect(() => {
-    const unsub = api.onChatStream((ev) => {
+    const handleStreamEvent = (ev: Parameters<Parameters<typeof api.onChatStream>[0]>[0]) => {
       if (!aliveRef.current) return;
       const debugStreamEnabled = isDebugStreamEnabled();
       // `process` is not defined in the renderer (browser context — esbuild
@@ -367,8 +367,30 @@ export function useChatState(api: LvisApi) {
         }
         activeStreamIdRef.current = null;
       }
-    });
-    return () => { unsub(); };
+    };
+    const unsub = api.onChatStream(handleStreamEvent);
+
+    // E2E test seam — only exposed when LVIS_DEV=1 (preload reads the env at
+    // runtime, so the gate stays inert in packaged production builds where the
+    // launcher never sets that flag). Playwright specs use this to inject
+    // synthetic tool_start / tool_end events without a live LLM provider.
+    // NOTE: `__lvisDevMode` cannot be used as the gate here — esbuild inlines
+    // NODE_ENV at preload bundle time, so that flag is always `false` in the
+    // built app regardless of how the process is launched.
+    const w = window as unknown as {
+      lvis?: { env?: { isDev?: boolean } };
+      __lvisChatStream?: { _emit: typeof handleStreamEvent };
+    };
+    if (w.lvis?.env?.isDev === true) {
+      w.__lvisChatStream = { _emit: handleStreamEvent };
+    }
+
+    return () => {
+      unsub();
+      if (w.__lvisChatStream && w.__lvisChatStream._emit === handleStreamEvent) {
+        delete w.__lvisChatStream;
+      }
+    };
   }, [api]);
 
   // Imperative method exposed to App.tsx — App owns the trigger-import
