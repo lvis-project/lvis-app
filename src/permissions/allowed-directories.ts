@@ -29,6 +29,7 @@ import {
   caseFoldForMatch,
   isSensitivePath,
 } from "./sensitive-paths.js";
+import { lvisHome } from "../shared/lvis-home.js";
 
 /**
  * Directory addition pre-flight result.
@@ -81,7 +82,7 @@ export function computeDefaultRuntimeAllowedDirectories(cwd: string = process.cw
 }
 
 function computeDefaultAllowedDirectoryEntries(cwd: string, foldCase: boolean): string[] {
-  const candidates = [cwd, pathResolve(homedir(), ".lvis")];
+  const candidates = [cwd, lvisHome()];
   const out: string[] = [];
   const seen = new Set<string>();
   for (const raw of candidates) {

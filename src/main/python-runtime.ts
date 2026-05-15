@@ -22,6 +22,7 @@ import { createLogger } from "../lib/logger.js";
 import { resolvePluginPaths } from "../plugins/plugin-paths.js";
 import { readPluginRegistry, resolveManifestPathsFromRegistry } from "../plugins/registry.js";
 import { resolveUvTarget, type UvTarget } from "../../scripts/uv-targets.mjs";
+import { lvisHome } from "../shared/lvis-home.js";
 const log = createLogger("python-runtime");
 
 const __filename = fileURLToPath(import.meta.url);
@@ -56,7 +57,7 @@ interface ReadySentinel {
 
 // ─── 상수 ────────────────────────────────────────────
 
-const LVIS_RUNTIME_DIR = path.join(os.homedir(), ".lvis", "runtime");
+const LVIS_RUNTIME_DIR = path.join(lvisHome(), "runtime");
 const VENV_DIR = path.join(LVIS_RUNTIME_DIR, "venv");
 const PYTHON_INSTALL_DIR = path.join(LVIS_RUNTIME_DIR, "python");
 // Co-locate uv cache with the venv so hardlinks from cache → site-packages stay
