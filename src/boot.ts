@@ -827,11 +827,17 @@ export async function bootstrap(
   });
   app.on("before-quit", () => watcherTelemetryCollector.stop());
 
-  // Issue #749 — clean up current session's diff-cache dir on quit.
+  // Issue #749 — clean up CURRENT session's diff-cache dir on quit.
+  // NOTE: only clears the CURRENT session's diff-cache dir. Diff caches from
+  // sessions touched earlier in this process lifetime persist on disk until
+  // the 7-day boot-time purge. Acceptable trade-off because:
+  //   (a) cache content is owner-only (0o600),
+  //   (b) boot purge backstop exists,
+  //   (c) tracking all touched-session-ids would add lifecycle complexity.
   // Fire-and-forget: quit must not block on I/O.
   app.prependOnceListener("before-quit", () => {
     const sid = conversationLoop.getSessionId();
-    void clearSessionDiffCache(sid).catch((err: unknown) => {
+    if (sid) void clearSessionDiffCache(sid).catch((err: unknown) => {
       log.warn("before-quit: diff-cache clear failed: %s", (err as Error).message);
     });
   });

@@ -349,11 +349,24 @@ export class WriteFileTool extends FileTool<typeof WriteFileInputSchema> {
     if (blocked) return blocked;
 
     // Read existing content for diff sidecar (best-effort — missing file = empty before).
+    // Guard: skip pre-image read for large or binary files to avoid OOM / mojibake.
+    // Mirrors the EditFileTool / ApplyPatchTool pattern exactly.
     let before = "";
-    try {
-      before = await readFile(target, "utf8");
-    } catch {
-      // File does not exist yet — before remains "".
+    let skipSidecar = false;
+    const existingStat = await stat(target).catch(() => null);
+    if (existingStat !== null) {
+      if (existingStat.size > MAX_TEXT_FILE_BYTES) {
+        skipSidecar = true;
+      } else if (await isBinaryFile(target)) {
+        skipSidecar = true;
+      }
+    }
+    if (!skipSidecar && existingStat !== null) {
+      try {
+        before = await readFile(target, "utf8");
+      } catch {
+        // Read failed unexpectedly — treat as empty before, still allow sidecar.
+      }
     }
     const after = input.content;
 
@@ -366,7 +379,7 @@ export class WriteFileTool extends FileTool<typeof WriteFileInputSchema> {
     const toolUseId =
       typeof ctx.metadata?.toolUseId === "string" ? ctx.metadata.toolUseId : "";
     let hasSidecar = false;
-    if (sessionId && toolUseId) {
+    if (!skipSidecar && sessionId && toolUseId) {
       // writeDiffSidecar logs failures internally via its own createLogger.
       // auditWarn callback is a no-op here; failures keep truncated state
       // visible in the UI without a silent fallback.

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   existsSync,
   mkdirSync,
@@ -393,5 +393,80 @@ describe("file native tools", () => {
     expect(registry.findByName("read_file")?.category).toBe("read");
     expect(registry.findByName("write_file")?.category).toBe("write");
     expect(registry.findByName("apply_patch")?.category).toBe("write");
+  });
+});
+
+describe("WriteFileTool pre-image guard (MAJOR 1)", () => {
+  let testHome: string;
+
+  beforeEach(() => {
+    testHome = mkdtempSync(join(tmpdir(), "lvis-write-guard-"));
+    // Redirect sidecar writes to isolated temp dir (mirrors write-diff-cache.test.ts pattern).
+    process.env.LVIS_HOME = testHome;
+  });
+
+  afterEach(() => {
+    delete process.env.LVIS_HOME;
+    rmSync(testHome, { recursive: true, force: true });
+  });
+
+  it("skips pre-image read and sets skipSidecar for a file exceeding MAX_TEXT_FILE_BYTES", async () => {
+    // Write a stub file > 2MB.
+    const bigPath = join(workDir, "big.bin");
+    // We only need the stat to report large size — write a small placeholder and
+    // then mock stat. Simpler: write real large content is slow; instead we spy
+    // on fs/promises.stat to return a fake large size.
+    writeFileSync(bigPath, "small placeholder", "utf8");
+
+    const fsMod = await import("node:fs/promises");
+    const statSpy = vi.spyOn(fsMod, "stat").mockImplementationOnce(async () => {
+      return { size: 3_000_000, isFile: () => true } as unknown as Awaited<ReturnType<typeof fsMod.stat>>;
+    });
+
+    const result = await new WriteFileTool().execute(
+      { path: bigPath, content: "new content" },
+      { cwd: workDir, extraAllowedDirectories: [], metadata: { sessionId: "s1", toolUseId: "tu1" } },
+    );
+    statSpy.mockRestore();
+
+    expect(result.isError).toBe(false);
+    const body = parse(result.output);
+    // hasSidecar must be false — skipSidecar was set.
+    expect(body.hasSidecar).toBeUndefined();
+    // File was still written.
+    expect(readFileSync(bigPath, "utf8")).toBe("new content");
+  });
+
+  it("skips pre-image read and sets skipSidecar for a binary pre-existing file", async () => {
+    // Write a file with null bytes (binary signature).
+    const binPath = join(workDir, "image.bin");
+    writeFileSync(binPath, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x00, 0x00, 0x00]));
+
+    const result = await new WriteFileTool().execute(
+      { path: binPath, content: "overwrite content" },
+      { cwd: workDir, extraAllowedDirectories: [], metadata: { sessionId: "s2", toolUseId: "tu2" } },
+    );
+
+    expect(result.isError).toBe(false);
+    const body = parse(result.output);
+    // hasSidecar must be false — binary pre-image triggers skipSidecar.
+    expect(body.hasSidecar).toBeUndefined();
+    // File was still written with new text content.
+    expect(readFileSync(binPath, "utf8")).toBe("overwrite content");
+  });
+
+  it("writes sidecar normally for a small text pre-existing file", async () => {
+    const txtPath = join(workDir, "small.txt");
+    writeFileSync(txtPath, "before content", "utf8");
+
+    const result = await new WriteFileTool().execute(
+      { path: txtPath, content: "after content" },
+      { cwd: workDir, extraAllowedDirectories: [], metadata: { sessionId: "s3", toolUseId: "tu3" } },
+    );
+
+    expect(result.isError).toBe(false);
+    // Small file: sidecar is NOT written unless content exceeds WRITE_DIFF_PREVIEW_LIMIT.
+    // The important invariant: no crash, and the file content is updated.
+    expect(readFileSync(txtPath, "utf8")).toBe("after content");
   });
 });

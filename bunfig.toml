@@ -1,0 +1,12 @@
+[test]
+# Renderer tests require jsdom (via vitest). bun's native test runner has no
+# jsdom support, so these paths are excluded here. Run renderer tests via:
+#   bunx vitest run
+# or:
+#   bun run test
+preload = []
+testPathIgnorePatterns = [
+  "src/ui/renderer/__tests__",
+  "src/ui/__tests__",
+  "test/renderer",
+]

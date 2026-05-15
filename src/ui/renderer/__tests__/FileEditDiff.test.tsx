@@ -12,8 +12,8 @@
  *   8. 접기 button collapses expanded state back to idle
  */
 import "../../../../test/renderer/setup.js";
-import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, fireEvent, waitFor } from "@testing-library/react";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
+import { render, fireEvent, waitFor, act } from "@testing-library/react";
 import { FileEditDiff } from "../components/FileEditDiff.js";
 
 const SESSION_ID = "session-test-1";
@@ -208,5 +208,35 @@ describe("FileEditDiff", () => {
     expect(container.textContent).toContain("-");
     expect(container.textContent).toContain("removed line");
     expect(container.textContent).toContain("added line");
+  });
+
+  it("unmount mid-IPC does not trigger setState or React warning", async () => {
+    // isMountedRef guard: after unmount the promise resolution must be a no-op.
+    let resolve!: (v: { before: string; after: string }) => void;
+    const pending = new Promise<{ before: string; after: string }>((res) => {
+      resolve = res;
+    });
+    vi.stubGlobal("lvisApi", makeApi(() => pending));
+
+    const warnSpy = vi.spyOn(console, "error");
+    const { container, unmount } = render(
+      <FileEditDiff resultJson={TRUNCATED_RESULT} sessionId={SESSION_ID} toolUseId={TOOL_USE_ID} />,
+    );
+
+    fireEvent.click(container.querySelector("button") as HTMLButtonElement);
+    // Unmount before the IPC resolves.
+    unmount();
+    // Now resolve — isMountedRef guard must swallow this.
+    await act(async () => {
+      resolve({ before: "a", after: "b" });
+      // Flush micro-task queue.
+      await Promise.resolve();
+    });
+
+    // React must not have emitted an "unmounted component setState" warning.
+    const errCalls = warnSpy.mock.calls.map((c) => String(c[0]));
+    const stateWarning = errCalls.some((m) => m.includes("unmounted") || m.includes("memory leak"));
+    expect(stateWarning).toBe(false);
+    warnSpy.mockRestore();
   });
 });

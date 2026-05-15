@@ -16,7 +16,7 @@
  * Mirrors CompactedToolResult's lazy-fetch pattern.
  */
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { getApi } from "../api-client.js";
 
 // ─── Diff helpers ─────────────────────────────────────────────────────────────
@@ -146,6 +146,8 @@ export function FileEditDiff({ resultJson, sessionId, toolUseId, filePath }: Fil
   const [diffState, setDiffState] = useState<DiffState>("idle");
   const [diffData, setDiffData] = useState<{ before: string; after: string } | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const isMountedRef = useRef(true);
+  useEffect(() => () => { isMountedRef.current = false; }, []);
 
   // If not truncated or no sidecar, render a plain summary.
   if (!parsed.truncated || !parsed.hasSidecar) {
@@ -169,6 +171,7 @@ export function FileEditDiff({ resultJson, sessionId, toolUseId, filePath }: Fil
     setErrorMsg(null);
     try {
       const result = await getApi().chatGetWriteDiff(sessionId, toolUseId);
+      if (!isMountedRef.current) return;
       if (result === null) {
         setErrorMsg("diff 파일이 소실되었습니다 (세션 재시작 후 불가).");
         setDiffState("error");
@@ -177,6 +180,7 @@ export function FileEditDiff({ resultJson, sessionId, toolUseId, filePath }: Fil
         setDiffState("expanded");
       }
     } catch (err) {
+      if (!isMountedRef.current) return;
       setErrorMsg((err as Error).message ?? "IPC 오류");
       setDiffState("error");
     }
@@ -277,7 +281,7 @@ export function FileEditDiff({ resultJson, sessionId, toolUseId, filePath }: Fil
       <div className="flex items-center gap-2 px-3 py-1.5">
         <span className="font-medium text-primary/80 truncate min-w-0">{path}</span>
         {bytes && <span className="shrink-0 text-muted-foreground/60 text-[10px]">{bytes}</span>}
-        <span className="shrink-0 text-[10px] text-amber-500/80 ml-1">· 미리보기 제한</span>
+        <span className="shrink-0 text-[10px] text-warning/80 ml-1">· 미리보기 제한</span>
         <button
           type="button"
           disabled={isLoading}
