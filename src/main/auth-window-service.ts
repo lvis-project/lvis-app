@@ -124,6 +124,38 @@ export interface OpenAuthWindowResult {
   finalUrl: string;
 }
 
+const PLUGIN_AUTH_PERSIST_PREFIX = "persist:plugin-auth:";
+const trackedPluginAuthPartitions = new Map<string, Set<string>>();
+
+function pluginIdFromPluginAuthPartition(partition: string): string | null {
+  if (!partition.startsWith(PLUGIN_AUTH_PERSIST_PREFIX)) return null;
+  const rest = partition.slice(PLUGIN_AUTH_PERSIST_PREFIX.length);
+  const encodedPluginId = rest.split(":", 1)[0];
+  if (!encodedPluginId) return null;
+  try {
+    return decodeURIComponent(encodedPluginId);
+  } catch {
+    return null;
+  }
+}
+
+export function rememberPluginAuthPartition(partition: string): void {
+  const pluginId = pluginIdFromPluginAuthPartition(partition);
+  if (!pluginId) return;
+  const current = trackedPluginAuthPartitions.get(pluginId) ?? new Set<string>();
+  current.add(partition);
+  trackedPluginAuthPartitions.set(pluginId, current);
+}
+
+export function getTrackedPluginAuthPartitions(pluginId: string): string[] {
+  const base = `${PLUGIN_AUTH_PERSIST_PREFIX}${encodeURIComponent(pluginId)}`;
+  return [...new Set([base, ...(trackedPluginAuthPartitions.get(pluginId) ?? [])])];
+}
+
+export function forgetTrackedPluginAuthPartitions(pluginId: string): void {
+  trackedPluginAuthPartitions.delete(pluginId);
+}
+
 function authShellPreloadPath(): string {
   return join(dirname(fileURLToPath(import.meta.url)), "../preload.cjs");
 }
@@ -371,6 +403,7 @@ export async function openAuthWindow(
     persistPartition && persistPartition.length > 0
       ? persistPartition
       : `ephemeral-auth-${randomBytes(8).toString("hex")}`;
+  rememberPluginAuthPartition(effectivePartition);
 
   // Hardened webPreferences — 외부 포털을 Chromium 에 띄우는 창이므로
   // renderer ↔ Node 경계를 완전히 차단해 RCE 표면을 좁힌다. 원격지 페이지에

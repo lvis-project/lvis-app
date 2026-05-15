@@ -103,6 +103,59 @@ describe("SettingsService removes plugin-specific legacy host settings", () => {
   });
 });
 
+describe("SettingsService plugin uninstall cleanup", () => {
+  let userDataPath: string;
+
+  beforeEach(() => {
+    userDataPath = mkdtempSync(join(tmpdir(), "settings-store-plugin-cleanup-"));
+    mockedElectron.safeStorage.isEncryptionAvailable.mockReturnValue(false);
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    rmSync(userDataPath, { recursive: true, force: true });
+  });
+
+  it("deletes only the selected plugin config", async () => {
+    const service = new SettingsService({ userDataPath });
+
+    await service.setPluginConfig("meeting", { apiKey: "abc" });
+    await service.setPluginConfig("calendar", { tenant: "lge" });
+    await service.deletePluginConfig("meeting");
+
+    expect(service.getPluginConfig("meeting")).toEqual({});
+    expect(service.getPluginConfig("calendar")).toEqual({ tenant: "lge" });
+  });
+
+  it("deletes only requested secret keys for the selected plugin", async () => {
+    const service = new SettingsService({ userDataPath });
+
+    await service.setSecret("plugin.meeting.token", "abc");
+    await service.setSecret("plugin.meeting.unlisted", "preserved");
+    await service.setSecret("plugin.meeting_extra.token", "preserved");
+    await service.setSecret("llm.apiKey.openai", "preserved");
+
+    await expect(service.deletePluginSecrets("meeting", ["token"])).resolves.toBe(1);
+
+    expect(service.getSecret("plugin.meeting.token")).toBeNull();
+    expect(service.getSecret("plugin.meeting.unlisted")).toBe("preserved");
+    expect(service.getSecret("plugin.meeting_extra.token")).toBe("preserved");
+    expect(service.getSecret("llm.apiKey.openai")).toBe("preserved");
+  });
+
+  it("does not delete another dotted plugin id's secret by prefix", async () => {
+    const service = new SettingsService({ userDataPath });
+
+    await service.setSecret("plugin.com.lge.token", "abc");
+    await service.setSecret("plugin.com.lge.mail.token", "preserved");
+
+    await expect(service.deletePluginSecrets("com.lge", ["token"])).resolves.toBe(1);
+
+    expect(service.getSecret("plugin.com.lge.token")).toBeNull();
+    expect(service.getSecret("plugin.com.lge.mail.token")).toBe("preserved");
+  });
+});
+
 describe("SettingsService role presets", () => {
   let userDataPath: string;
 
