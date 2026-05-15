@@ -223,6 +223,16 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
     },
   );
 
+  // ── C3 — reviewer provider key-presence check (read-only, no sender guard) ──
+  // Used by the renderer settings UI to determine which reviewer providers
+  // are activatable (key-driven dynamic activation). Read-only — no mutation.
+  ipcMain.handle(PERMISSIONS.reviewerProviderHasKey, async (_e, provider: string) => {
+    const { reviewerProviderKeyPresent } = await import(
+      "../../permissions/reviewer/provider-adapters.js"
+    );
+    return reviewerProviderKeyPresent(provider, (key) => deps.settingsService.getSecret(key));
+  });
+
   // ── Permission policy — deferred queue surface ────────────────────────────
   // Returns DLP-redacted tool inputs + verdicts; gated to prevent a
   // compromised foreign frame from harvesting them (Copilot round 3).

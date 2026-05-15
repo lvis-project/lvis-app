@@ -693,7 +693,7 @@ export interface HookTrustRow {
 }
 
 export type PermissionReviewerMode = "disabled" | "rule" | "llm";
-export type PermissionReviewerProvider = "openai" | "anthropic" | "google";
+export type PermissionReviewerProvider = "openai" | "anthropic" | "google" | "foundry" | "gcp-playground";
 export type PermissionReviewerFallbackOnError = "deny" | "rule";
 /** Issue #690 — interactive reviewer auto-approve scope. */
 export type PermissionReviewerInteractiveAutoApprove = "off" | "low";
@@ -778,6 +778,12 @@ export type LvisPermissionApi = {
   reviewerDispatch: (
     rawArgs: string,
   ) => Promise<PermissionReviewerDispatchResult>;
+  /**
+   * Permission policy C3 — check whether an API key (or GCP service account)
+   * is stored for a given reviewer provider. Used by the settings UI to
+   * determine which providers are selectable (key-driven dynamic activation).
+   */
+  reviewerProviderHasKey: (provider: PermissionReviewerProvider) => Promise<boolean>;
   /** Permission policy — `/permission audit show` — recent permission audit entries. */
   auditShow: (last: number) => Promise<
     | {

@@ -139,6 +139,9 @@ const TRUSTED_NETWORK_HOSTS: ReadonlySet<string> = new Set([
   "api.anthropic.com",
   "generativelanguage.googleapis.com",
   "models.github.ai",
+  // C3 — Foundry (Azure AI Foundry) and GCP playground reviewer providers
+  "services.ai.azure.com",
+  "openai.azure.com",
 ]);
 
 /** Localhost / loopback variants. */

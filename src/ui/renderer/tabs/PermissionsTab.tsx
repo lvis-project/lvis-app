@@ -67,10 +67,13 @@ const REVIEWER_MODE_OPTIONS: Array<{
   { value: "llm", label: "LLM 검증", description: "규칙 검증 뒤 LLM이 위험도를 올릴 수 있습니다. 낮출 수는 없습니다." },
 ];
 
+/** All five providers — always visible so users know what's available. */
 const REVIEWER_PROVIDER_OPTIONS: Array<{ value: PermissionReviewerProvider; label: string }> = [
   { value: "openai", label: "OpenAI" },
   { value: "anthropic", label: "Anthropic Claude" },
   { value: "google", label: "Google Gemini" },
+  { value: "foundry", label: "Azure AI Foundry" },
+  { value: "gcp-playground", label: "Google AI Studio (GCP)" },
 ];
 
 const REVIEWER_FALLBACK_OPTIONS: Array<{
@@ -141,20 +144,34 @@ export function PermissionsTab() {
   const [reviewer, setReviewer] = useState<PermissionReviewerSettings>(DEFAULT_REVIEWER_SETTINGS);
   const [reviewerModelDraft, setReviewerModelDraft] = useState(DEFAULT_REVIEWER_SETTINGS.model);
   const [reviewerBusy, setReviewerBusy] = useState(false);
+  /**
+   * C3 — key-driven dynamic activation: maps each provider to whether
+   * its required API key (or GCP service account) is stored. Providers
+   * with no key are visible but non-selectable (greyed out + tooltip).
+   * Refreshed on tab entry and whenever reviewerDispatch mutates settings.
+   */
+  const [providerKeyMap, setProviderKeyMap] = useState<
+    Partial<Record<PermissionReviewerProvider, boolean>>
+  >({});
 
   // ── 초기 fetch (탭 진입 시) ───────────────────────
   const fetchAll = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [modeRes, policyRes, rulesRes, hookTrustRes, dirRes, reviewerRes] = await Promise.all([
-        window.lvis.permission.getMode(),
-        window.lvis.policy.get(),
-        window.lvis.permission.listRules(),
-        window.lvis.permission.hookTrustList(),
-        window.lvis.permission.dirDispatch("list"),
-        window.lvis.permission.reviewerDispatch("show"),
-      ]);
+      const [modeRes, policyRes, rulesRes, hookTrustRes, dirRes, reviewerRes, ...keyChecks] =
+        await Promise.all([
+          window.lvis.permission.getMode(),
+          window.lvis.policy.get(),
+          window.lvis.permission.listRules(),
+          window.lvis.permission.hookTrustList(),
+          window.lvis.permission.dirDispatch("list"),
+          window.lvis.permission.reviewerDispatch("show"),
+          // C3 — check key presence for all five providers in parallel
+          ...REVIEWER_PROVIDER_OPTIONS.map((opt) =>
+            window.lvis.permission.reviewerProviderHasKey(opt.value),
+          ),
+        ]);
       if (!reviewerRes.ok) {
         throw new Error(reviewerRes.error);
       }
@@ -168,6 +185,12 @@ export function PermissionsTab() {
       setDirectories(dirRes.ok && dirRes.verb === "list" ? dirRes.userAdditions : []);
       setReviewer(reviewerRes.settings);
       setReviewerModelDraft(reviewerRes.settings.model);
+      // Build provider key map from parallel key-check results
+      const keyMap: Partial<Record<PermissionReviewerProvider, boolean>> = {};
+      REVIEWER_PROVIDER_OPTIONS.forEach((opt, i) => {
+        keyMap[opt.value] = Boolean(keyChecks[i]);
+      });
+      setProviderKeyMap(keyMap);
     } catch (e) {
       setError((e as Error).message ?? "데이터를 불러오지 못했습니다.");
     } finally {
@@ -263,14 +286,30 @@ export function PermissionsTab() {
     }
   };
 
+  /** C3 — refresh provider key map (re-query all providers in parallel). */
+  const refreshProviderKeyMap = useCallback(async () => {
+    const results = await Promise.all(
+      REVIEWER_PROVIDER_OPTIONS.map((opt) =>
+        window.lvis.permission.reviewerProviderHasKey(opt.value),
+      ),
+    );
+    const keyMap: Partial<Record<PermissionReviewerProvider, boolean>> = {};
+    REVIEWER_PROVIDER_OPTIONS.forEach((opt, i) => {
+      keyMap[opt.value] = Boolean(results[i]);
+    });
+    setProviderKeyMap(keyMap);
+  }, []);
+
   const applyReviewerCommand = async (rawArgs: string) => {
     if (reviewerBusy) return;
     setReviewerBusy(true);
+    let dispatchOk = false;
     try {
       const res = await window.lvis.permission.reviewerDispatch(rawArgs);
       if (res.ok) {
         setReviewer(res.settings);
         setReviewerModelDraft(res.settings.model);
+        dispatchOk = true;
       } else {
         showBanner("error", formatReviewerDispatchError(res.error));
       }
@@ -278,6 +317,12 @@ export function PermissionsTab() {
       showBanner("error", `리뷰어 설정 변경 중 오류: ${(e as Error).message}`);
     } finally {
       setReviewerBusy(false);
+    }
+    // C3: refresh key map AFTER busy is cleared, so a provider change
+    // paired with a key change in the same session updates the list.
+    // Only refresh on success — no point querying keys after a failed dispatch.
+    if (dispatchOk) {
+      await refreshProviderKeyMap();
     }
   };
 
@@ -583,9 +628,29 @@ export function PermissionsTab() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {REVIEWER_PROVIDER_OPTIONS.map((opt) => (
-                      <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                    ))}
+                    {REVIEWER_PROVIDER_OPTIONS.map((opt) => {
+                      const hasKey = providerKeyMap[opt.value] ?? false;
+                      const isDisabled = !hasKey;
+                      return (
+                        <SelectItem
+                          key={opt.value}
+                          value={opt.value}
+                          disabled={isDisabled}
+                          title={
+                            isDisabled
+                              ? "API 키 설정 필요 — 지능 설정에서 키를 추가하세요."
+                              : undefined
+                          }
+                          className={isDisabled ? "opacity-40 cursor-not-allowed" : undefined}
+                          data-testid={`reviewer-provider-option-${opt.value}`}
+                        >
+                          {opt.label}
+                          {isDisabled && (
+                            <span className="ml-1 text-[10px] text-muted-foreground">(키 없음)</span>
+                          )}
+                        </SelectItem>
+                      );
+                    })}
                   </SelectContent>
                 </Select>
               </Label>
@@ -631,7 +696,10 @@ export function PermissionsTab() {
               </div>
             </Label>
             <p className="text-[11px] text-muted-foreground">
-              LLM API 키는 지능 설정의 공급자 키를 사용합니다. 키가 없거나 재연결에 실패하면 설정은 저장되지 않습니다.
+              OpenAI · Anthropic · Google: 지능 설정의 공급자 키를 사용합니다.
+              Azure AI Foundry · Google AI Studio: 지능 설정 &gt; 비밀 키에서
+              <code className="mx-0.5 rounded bg-muted px-0.5">reviewer.apiKey.*</code>를 저장하면 활성화됩니다.
+              키가 없는 공급자는 선택할 수 없습니다.
             </p>
 
             <div className="space-y-2 border-t pt-3">

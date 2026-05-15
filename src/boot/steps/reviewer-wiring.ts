@@ -32,6 +32,10 @@ import {
   type RiskClassifier,
   type ReviewerSettings,
 } from "../../permissions/reviewer/risk-classifier.js";
+import {
+  createFoundryProvider,
+  createGcpPlaygroundProvider,
+} from "../../permissions/reviewer/provider-adapters.js";
 import { VerdictCache } from "../../permissions/reviewer/verdict-cache.js";
 import { DeferredQueue } from "../../permissions/reviewer/deferred-queue.js";
 import { PermissionManager } from "../../permissions/permission-manager.js";
@@ -108,6 +112,11 @@ export class LlmReviewerProviderAdapter implements LlmReviewerProvider {
  * vendor name. Boot calls this only when `settings.reviewer.mode === "llm"`.
  * Returning `null` indicates the vendor is not configured; the caller
  * then fails the boot step (atomic cutover, no silent fallback).
+ *
+ * C3: `getSecret` is required when `foundry` or `gcp-playground` is the
+ * configured provider. The adapters resolve their API keys from the encrypted
+ * secret store at wire-time (boot) so the keys are never persisted in memory
+ * beyond the wiring step.
  */
 export interface WireReviewerDeps {
   permissionManager: PermissionManager;
@@ -117,11 +126,18 @@ export interface WireReviewerDeps {
    */
   readSettings?: () => ReviewerSettingsBlock;
   /**
-   * Provider factory for `mode: "llm"`. Test override returns a stub
-   * implementing {@link LLMProvider}. Returning `null` means "vendor not
-   * configured" — wiring fails closed.
+   * Provider factory for `mode: "llm"` with `openai | anthropic | google`
+   * providers. Boot calls this only for the stream-based host providers.
+   * Returning `null` means "vendor not configured" — wiring fails closed.
+   * Not called for `foundry` or `gcp-playground` (direct HTTP adapters).
    */
   streamProviderFor?: (vendor: string) => LLMProvider | null;
+  /**
+   * C3 — Secret accessor for Foundry and GCP playground providers.
+   * Required when `settings.reviewer.provider` is `"foundry"` or
+   * `"gcp-playground"`. Override in tests to supply fake secrets.
+   */
+  getSecret?: (key: string) => string | null;
   /** Test override for the cache file path. */
   verdictCachePath?: string;
   /** Test override for the deferred queue file path. */
@@ -156,20 +172,7 @@ export function wireReviewerAgent(deps: WireReviewerDeps): WireReviewerResult {
     log.info("boot: reviewer wired (mode=%s)", settings.mode);
   } else {
     // mode === "llm"
-    if (!deps.streamProviderFor) {
-      throw new Error(
-        `Permission reviewer wiring: settings.reviewer.mode='llm' but no streamProviderFor supplied. ` +
-        `Boot caller must provide a provider factory (atomic cutover — no silent fallback).`,
-      );
-    }
-    const upstream = deps.streamProviderFor(settings.provider);
-    if (!upstream) {
-      throw new Error(
-        `Permission reviewer wiring: settings.reviewer.provider='${settings.provider}' is not configured. ` +
-        `Add an API key for ${settings.provider} or change reviewer mode.`,
-      );
-    }
-    const adapter = new LlmReviewerProviderAdapter(upstream);
+    const adapter = resolveReviewerAdapter(settings.provider, deps);
     const reviewerSettings: ReviewerSettings = {
       mode: "llm",
       provider: adapter,
@@ -257,4 +260,69 @@ export function wireReviewerAgent(deps: WireReviewerDeps): WireReviewerResult {
 
 function defaultReadSettings(): ReviewerSettingsBlock {
   return readPermissionSettings().permissions.reviewer;
+}
+
+/**
+ * Resolve a concrete {@link LlmReviewerProvider} adapter for the configured
+ * provider name. Throws with a clear message if the provider cannot be
+ * instantiated (missing key, missing factory) — atomic cutover, no silent
+ * fallback per CLAUDE.md No-Fallback.
+ *
+ * C3: `foundry` and `gcp-playground` use direct HTTP adapters keyed from
+ * the encrypted secret store via `deps.getSecret`. `openai`, `anthropic`,
+ * and `google` use the host's streaming LLMProvider via `deps.streamProviderFor`.
+ */
+function resolveReviewerAdapter(
+  provider: string,
+  deps: WireReviewerDeps,
+): LlmReviewerProvider {
+  if (provider === "foundry") {
+    if (!deps.getSecret) {
+      throw new Error(
+        `Permission reviewer wiring: provider='foundry' requires getSecret to be supplied. ` +
+        `Boot caller must provide a secret accessor (atomic cutover — no silent fallback).`,
+      );
+    }
+    const adapter = createFoundryProvider(deps.getSecret);
+    if (!adapter) {
+      throw new Error(
+        `Permission reviewer wiring: provider='foundry' — API key or endpoint not configured. ` +
+        `Set 'reviewer.apiKey.foundry' and 'reviewer.endpoint.foundry' secrets, or change reviewer provider.`,
+      );
+    }
+    return adapter;
+  }
+
+  if (provider === "gcp-playground") {
+    if (!deps.getSecret) {
+      throw new Error(
+        `Permission reviewer wiring: provider='gcp-playground' requires getSecret to be supplied. ` +
+        `Boot caller must provide a secret accessor (atomic cutover — no silent fallback).`,
+      );
+    }
+    const adapter = createGcpPlaygroundProvider(deps.getSecret);
+    if (!adapter) {
+      throw new Error(
+        `Permission reviewer wiring: provider='gcp-playground' — API key not configured. ` +
+        `Set 'reviewer.apiKey.gcp-playground' secret, or change reviewer provider.`,
+      );
+    }
+    return adapter;
+  }
+
+  // openai | anthropic | google — use host streaming LLMProvider
+  if (!deps.streamProviderFor) {
+    throw new Error(
+      `Permission reviewer wiring: settings.reviewer.mode='llm' but no streamProviderFor supplied. ` +
+      `Boot caller must provide a provider factory (atomic cutover — no silent fallback).`,
+    );
+  }
+  const upstream = deps.streamProviderFor(provider);
+  if (!upstream) {
+    throw new Error(
+      `Permission reviewer wiring: settings.reviewer.provider='${provider}' is not configured. ` +
+      `Add an API key for ${provider} or change reviewer mode.`,
+    );
+  }
+  return new LlmReviewerProviderAdapter(upstream);
 }
