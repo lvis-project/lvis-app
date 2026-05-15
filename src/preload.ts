@@ -338,6 +338,11 @@ const api = {
     ipcRenderer.invoke("lvis:chat:get-verbatim-tool-result", { sessionId, toolUseId }) as Promise<
       { content: string; lineCount: number } | null
     >,
+  // Issue #749: lazy-load full write_file diff when content exceeds preview limit
+  chatGetWriteDiff: async (sessionId: string, toolUseId: string) =>
+    ipcRenderer.invoke("lvis:chat:get-write-diff", { sessionId, toolUseId }) as Promise<
+      { before: string; after: string } | null
+    >,
   starredList: async () => ipcRenderer.invoke("lvis:starred:list"),
   starredAdd: async (entry: { sessionId?: string; messageIndex: number; role: string; text: string }) =>
     ipcRenderer.invoke("lvis:starred:add", entry),
