@@ -1,15 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  appendDeltaToImportedTriggerResponse,
   appendImportedTriggerEntry,
   appendUserEntry,
   applyToolEnd,
   applyToolStart,
-  finalizeImportedTriggerResponse,
   finalizeStreamingReasoning,
   finalizeStreamingAssistant,
-  isImportedTriggerStreaming,
   upsertStreamingReasoning,
   upsertStreamingAssistant,
   type ChatEntry,
@@ -347,7 +344,7 @@ describe("chat-stream-state", () => {
   });
 });
 
-describe("imported_trigger helpers (overlay import card lifecycle)", () => {
+describe("imported_trigger helpers (overlay import marker lifecycle)", () => {
   const trigger = {
     sessionId: "s1",
     source: "overlay:meeting-detection",
@@ -357,15 +354,24 @@ describe("imported_trigger helpers (overlay import card lifecycle)", () => {
     importedAt: "2026-04-26T00:00:00.000Z",
   };
 
-  it("appendImportedTriggerEntry inserts a streaming card", () => {
+  it("appendImportedTriggerEntry inserts an input provenance marker only", () => {
     const next = appendImportedTriggerEntry([], trigger);
     expect(next).toHaveLength(1);
     expect(next[0]).toMatchObject({
       kind: "imported_trigger",
       sessionId: "s1",
-      response: "",
-      responseStreaming: true,
+      prompt: "p",
+      summary: "s",
     });
+    expect(Object.keys(next[0]).sort()).toEqual([
+      "importedAt",
+      "kind",
+      "prompt",
+      "sessionId",
+      "source",
+      "summary",
+      "toolCallCount",
+    ]);
   });
 
   it("appendImportedTriggerEntry is idempotent on duplicate sessionId", () => {
@@ -375,57 +381,58 @@ describe("imported_trigger helpers (overlay import card lifecycle)", () => {
     expect(second).toBe(first); // identity preserved
   });
 
-  it("appendDeltaToImportedTriggerResponse appends to the open card's response", () => {
+  it("keeps assistant output in the normal chat flow after an imported trigger", () => {
     let entries = appendImportedTriggerEntry([], trigger);
-    entries = appendDeltaToImportedTriggerResponse(entries, "hello ");
-    entries = appendDeltaToImportedTriggerResponse(entries, "world");
-    const card = entries[0] as Extract<ChatEntry, { kind: "imported_trigger" }>;
-    expect(card.response).toBe("hello world");
-    expect(card.responseStreaming).toBe(true);
-  });
-
-  it("appendDeltaToImportedTriggerResponse is a no-op when no card is open", () => {
-    const before: ChatEntry[] = [{ kind: "user", text: "hi" }];
-    const after = appendDeltaToImportedTriggerResponse(before, "x");
-    expect(after).toBe(before);
-  });
-
-  it("finds the streaming card even when later entries (tool_group) follow", () => {
-    let entries = appendImportedTriggerEntry([], trigger);
-    entries = applyToolStart(entries, {
-      groupId: "g1",
-      toolUseId: "t1",
-      displayOrder: 0,
-      name: "email_read",
-      input: {},
+    entries = upsertStreamingAssistant(entries, "assistant reply");
+    expect(entries).toHaveLength(2);
+    expect(entries[0]).toMatchObject({ kind: "imported_trigger", sessionId: "s1" });
+    expect(entries[1]).toMatchObject({
+      kind: "assistant",
+      text: "assistant reply",
+      streaming: true,
     });
-    entries = appendDeltaToImportedTriggerResponse(entries, "after-tool");
-    const card = entries.find(
-      (e): e is Extract<ChatEntry, { kind: "imported_trigger" }> =>
-        e.kind === "imported_trigger",
-    );
-    expect(card?.response).toBe("after-tool");
   });
 
-  it("finalizeImportedTriggerResponse flips responseStreaming to false", () => {
-    let entries = appendImportedTriggerEntry([], trigger);
-    entries = appendDeltaToImportedTriggerResponse(entries, "done");
-    expect(isImportedTriggerStreaming(entries)).toBe(true);
-    entries = finalizeImportedTriggerResponse(entries);
-    expect(isImportedTriggerStreaming(entries)).toBe(false);
-    const card = entries[0] as Extract<ChatEntry, { kind: "imported_trigger" }>;
-    expect(card.responseStreaming).toBe(false);
-    expect(card.response).toBe("done");
-  });
+  it("does not preserve an empty imported-trigger assistant because of prior turn siblings", () => {
+    let entries: ChatEntry[] = appendUserEntry([], "이전 질문");
+    entries = applyToolStart(entries, {
+      groupId: "prior-round",
+      toolUseId: "prior-tool",
+      name: "calendar_list",
+      displayOrder: 0,
+    });
+    entries = applyToolEnd(entries, {
+      groupId: "prior-round",
+      toolUseId: "prior-tool",
+      result: "ok",
+      isError: false,
+    });
+    entries = upsertStreamingAssistant(entries, "이전 답변");
+    entries = finalizeStreamingAssistant(entries, "이전 답변", { phase: "final" });
+    entries = [
+      ...entries,
+      {
+        kind: "turn_summary",
+        turnDurationMs: 1000,
+        toolCount: 1,
+        cumulativeToolMs: 100,
+        tokensIn: 100,
+        freshInputTokens: 10,
+        tokensOut: 1,
+      },
+    ];
 
-  it("appendDeltaToImportedTriggerResponse is a no-op after finalize", () => {
-    let entries = appendImportedTriggerEntry([], trigger);
-    entries = appendDeltaToImportedTriggerResponse(entries, "first");
-    entries = finalizeImportedTriggerResponse(entries);
-    const before = entries;
-    const after = appendDeltaToImportedTriggerResponse(entries, "leaked");
-    expect(after).toBe(before);
-    const card = after[0] as Extract<ChatEntry, { kind: "imported_trigger" }>;
-    expect(card.response).toBe("first");
+    entries = appendImportedTriggerEntry(entries, trigger);
+    entries = upsertStreamingAssistant(entries, "생각 중...");
+    entries = finalizeStreamingAssistant(entries, "", { phase: "final", overrideText: "" });
+
+    expect(entries.map((entry) => entry.kind)).toEqual([
+      "user",
+      "tool_group",
+      "assistant",
+      "turn_summary",
+      "imported_trigger",
+    ]);
+    expect(entries.at(-1)).toMatchObject({ kind: "imported_trigger", sessionId: "s1" });
   });
 });
