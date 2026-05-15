@@ -26,6 +26,7 @@ vi.mock("node:fs/promises", () => ({
   appendFile: vi.fn().mockResolvedValue(undefined),
   writeFile: vi.fn().mockResolvedValue(undefined),
   rename: vi.fn().mockResolvedValue(undefined),
+  chmod: vi.fn().mockResolvedValue(undefined),
 }));
 
 // ─── node:child_process mock ──────────────────────────────────────────────────
@@ -639,6 +640,175 @@ describe("PythonRuntimeBootstrapper", () => {
         Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });
         Object.defineProperty(process, "arch", { value: originalArch, configurable: true });
       }
+    });
+  });
+
+  // ─── issue #717: ~/.lvis/runtime/* file permissions hardening ────────────
+
+  describe("issue #717 — runtime file permission hardening (0o600)", () => {
+    function setupSetupSpawns(): void {
+      mockedAccess
+        .mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" })) // sentinel 없음
+        .mockResolvedValueOnce(undefined) // uv binary 존재
+        .mockResolvedValueOnce(undefined); // lock file 존재
+      mockedSpawn
+        .mockReturnValueOnce(makeSpawnMock("uv 0.7.3\n"))
+        .mockReturnValueOnce(makeSpawnMock(""))
+        .mockReturnValueOnce(makeSpawnMock(""))
+        .mockReturnValueOnce(makeSpawnMock("3.12.3\n"));
+    }
+
+    it("writeSentinel은 mode: 0o600으로 writeFile을 호출한다", async () => {
+      setupSetupSpawns();
+
+      const writeFileCalls: Array<{ path: string; opts: unknown }> = [];
+      vi.mocked(fsMock.writeFile).mockImplementation(async (target, _data, opts) => {
+        writeFileCalls.push({ path: String(target), opts });
+        return undefined;
+      });
+
+      try {
+        const bootstrapper = new PythonRuntimeBootstrapper({
+          pluginManifestPaths: ["/installed/local-indexer/plugin.json"],
+        });
+        await bootstrapper.ensureReady(makeBrowserWindow());
+
+        const sentinelCall = writeFileCalls.find((c) => normalizePathForAssert(c.path).endsWith("/venv/.ready"));
+        expect(sentinelCall).toBeDefined();
+        expect((sentinelCall!.opts as { mode?: number }).mode).toBe(0o600);
+      } finally {
+        vi.mocked(fsMock.writeFile).mockResolvedValue(undefined);
+      }
+    });
+
+    it("log()는 mode: 0o600으로 appendFile을 호출한다", async () => {
+      setupSetupSpawns();
+
+      const appendFileCalls: Array<{ path: string; opts: unknown }> = [];
+      vi.mocked(fsMock.appendFile).mockImplementation(async (target, _data, opts) => {
+        appendFileCalls.push({ path: String(target), opts });
+        return undefined;
+      });
+
+      try {
+        const bootstrapper = new PythonRuntimeBootstrapper({
+          pluginManifestPaths: ["/installed/local-indexer/plugin.json"],
+        });
+        await bootstrapper.ensureReady(makeBrowserWindow());
+
+        const logCalls = appendFileCalls.filter((c) =>
+          normalizePathForAssert(c.path).endsWith("/runtime/logs/setup.log"),
+        );
+        expect(logCalls.length).toBeGreaterThan(0);
+        for (const call of logCalls) {
+          expect((call.opts as { mode?: number }).mode).toBe(0o600);
+        }
+      } finally {
+        vi.mocked(fsMock.appendFile).mockResolvedValue(undefined);
+      }
+    });
+
+    it("materializePackagedUvBinary 실제 파일시스템: 바이너리 mode가 non-Windows에서 0o700(owner-exec)이다", async () => {
+      // Skip on Windows — NTFS does not honour Unix mode bits.
+      if (process.platform === "win32") return;
+
+      const resourcesPath = mkdtempSync(path.join(tmpdir(), "lvis-perm717-resources-"));
+      const uvRuntimeDir = mkdtempSync(path.join(tmpdir(), "lvis-perm717-uv-"));
+      const manifestRoot = mkdtempSync(path.join(tmpdir(), "lvis-perm717-plugin-"));
+      const manifestPath = path.join(manifestRoot, "plugin.json");
+      const lockFilePath = path.join(manifestRoot, "python-requirements.lock");
+      const packagedUvDir = path.join(resourcesPath, "uv", `${process.platform}-${process.arch}`);
+      const binName = "uv";
+      const expectedUvBin = path.join(uvRuntimeDir, `${process.platform}-${process.arch}`, "sha717", binName);
+
+      mkdirSync(packagedUvDir, { recursive: true });
+      writeFileSync(path.join(packagedUvDir, "uv.gz"), gzipSync(Buffer.from("uv-bin-content")));
+      writeFileSync(path.join(packagedUvDir, "uv.meta.json"), JSON.stringify({ binarySha256: "sha717" }));
+      writeFileSync(manifestPath, JSON.stringify({ python: { managedBy: "lvis-app" } }));
+      writeFileSync(lockFilePath, "");
+
+      const originalDefaultApp = (process as { defaultApp?: boolean }).defaultApp;
+      const originalResourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
+      (process as { defaultApp?: boolean }).defaultApp = false;
+      (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = resourcesPath;
+
+      mockedReadFile.mockResolvedValue(JSON.stringify({ python: { managedBy: "lvis-app" } }));
+      mockedAccess.mockImplementation(async (filePath) => {
+        const p = normalizePathForAssert(String(filePath));
+        if (p.includes(".ready")) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+        if (normalizePathForAssert(String(filePath)) === normalizePathForAssert(expectedUvBin)) return undefined;
+        if (normalizePathForAssert(String(filePath)) === normalizePathForAssert(lockFilePath)) return undefined;
+        throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+      });
+      mockedSpawn
+        .mockReturnValueOnce(makeSpawnMock("uv 0.7.3\n"))
+        .mockReturnValueOnce(makeSpawnMock(""))
+        .mockReturnValueOnce(makeSpawnMock(""))
+        .mockReturnValueOnce(makeSpawnMock("3.12.3\n"));
+
+      try {
+        const bootstrapper = new PythonRuntimeBootstrapper({
+          pluginManifestPaths: [manifestPath],
+          uvRuntimeDir,
+        });
+        await bootstrapper.ensureReady(makeBrowserWindow());
+
+        // Binary was materialized by writeFileSync + chmodSync (real FS, not mocked).
+        expect(existsSync(expectedUvBin)).toBe(true);
+        const stat = require("node:fs").statSync(expectedUvBin);
+        // Mode bits: 0o700 = owner rwx only (no group/world read or execute).
+        // statSync.mode includes file type bits (0o100000 for regular file).
+        const permBits = stat.mode & 0o777;
+        expect(permBits).toBe(0o700);
+      } finally {
+        (process as { defaultApp?: boolean }).defaultApp = originalDefaultApp;
+        (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = originalResourcesPath;
+        rmSync(resourcesPath, { recursive: true, force: true });
+        rmSync(uvRuntimeDir, { recursive: true, force: true });
+        rmSync(manifestRoot, { recursive: true, force: true });
+      }
+    });
+
+    it("repairLegacyFileModes chmods existing .ready and setup.log to 0o600 on every boot", async () => {
+      // Pre-fix #717 follow-up: existing files created with default umask
+      // 0o644 stayed world-readable forever because mode-on-write only
+      // applies to NEW files. The boot-time chmod sweep migrates them.
+      const chmodCalls: Array<{ target: string; mode: number }> = [];
+      vi.mocked(fsMock.chmod).mockImplementation(async (target, mode) => {
+        chmodCalls.push({ target: String(target), mode: Number(mode) });
+      });
+      mockedAccess.mockResolvedValue(undefined); // sentinel exists — skip setup
+      mockedSpawn.mockReturnValue(makeSpawnMock(""));
+
+      const bootstrapper = new PythonRuntimeBootstrapper();
+      await bootstrapper.ensureReady(makeBrowserWindow());
+
+      // On non-Windows, sweep should have called chmod for both targets
+      // with mode 0o600. Skip assertion entirely on Windows where the
+      // production code early-returns from repairLegacyFileModes.
+      if (process.platform !== "win32") {
+        const sentinelChmod = chmodCalls.find((c) => c.target.includes(".ready"));
+        const logChmod = chmodCalls.find((c) => c.target.includes("setup.log"));
+        expect(sentinelChmod).toBeDefined();
+        expect(sentinelChmod?.mode).toBe(0o600);
+        expect(logChmod).toBeDefined();
+        expect(logChmod?.mode).toBe(0o600);
+      } else {
+        expect(chmodCalls.length).toBe(0);
+      }
+    });
+
+    it("repairLegacyFileModes silently skips ENOENT (first install — file not yet created)", async () => {
+      if (process.platform === "win32") return;
+      vi.mocked(fsMock.chmod).mockRejectedValue(
+        Object.assign(new Error("ENOENT"), { code: "ENOENT" }),
+      );
+      mockedAccess.mockResolvedValue(undefined);
+      mockedSpawn.mockReturnValue(makeSpawnMock(""));
+
+      const bootstrapper = new PythonRuntimeBootstrapper();
+      // Should NOT throw — ENOENT is expected on first install.
+      await expect(bootstrapper.ensureReady(makeBrowserWindow())).resolves.toBeDefined();
     });
   });
 });
