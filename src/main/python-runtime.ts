@@ -110,6 +110,14 @@ export class PythonRuntimeBootstrapper {
     const pythonPath = this.getPythonPath();
     const result: RuntimeResult = { pythonPath, venvPath: VENV_DIR };
 
+    // Repair file modes on existing files (#717 follow-up). Pre-fix, files
+    // created with default umask 0o644 are world-readable on shared corp
+    // hosts. The mode-on-write hardening only affects NEW writes; existing
+    // installs need a one-shot chmod sweep on each boot to migrate. Idempotent
+    // (chmod to already-correct mode is a no-op). Best-effort — failure must
+    // not block boot. Windows: fs.chmod is a no-op for mode bits, harmless.
+    await this.repairLegacyFileModes();
+
     // sentinel 확인
     const sentinelExists = await this.checkSentinel();
     if (sentinelExists) {
@@ -176,7 +184,7 @@ export class PythonRuntimeBootstrapper {
       uvVersion,
       pythonVersion,
     };
-    await fs.writeFile(READY_SENTINEL, JSON.stringify(data, null, 2), "utf8");
+    await fs.writeFile(READY_SENTINEL, JSON.stringify(data, null, 2), { encoding: "utf8", mode: 0o600 });
   }
 
   // ─── private: setup pipeline ─────────────────────
@@ -306,9 +314,10 @@ export class PythonRuntimeBootstrapper {
         throw new Error(`packaged uv archive를 찾을 수 없습니다: ${compressedBin}`);
       }
       fsSync.mkdirSync(targetDir, { recursive: true });
-      fsSync.writeFileSync(targetBin, gunzipSync(fsSync.readFileSync(compressedBin)));
+      fsSync.writeFileSync(targetBin, gunzipSync(fsSync.readFileSync(compressedBin)), { mode: 0o600 });
       if (process.platform !== "win32") {
-        fsSync.chmodSync(targetBin, 0o755);
+        // Executable bit required for uv binary; 0o700 = owner-only rwx (no world-read).
+        fsSync.chmodSync(targetBin, 0o700);
       }
     }
     return targetBin;
@@ -581,11 +590,41 @@ export class PythonRuntimeBootstrapper {
     await fs.mkdir(UV_CACHE_DIR_PATH, { recursive: true, mode: 0o700 });
   }
 
+  /**
+   * One-shot chmod sweep for files created by older installs (umask default
+   * 0o644). Idempotent — chmod to already-correct mode is a no-op. Skipped
+   * on Windows where mode bits are meaningless. Each chmod is best-effort;
+   * failure for one file does not skip the others.
+   */
+  private async repairLegacyFileModes(): Promise<void> {
+    if (process.platform === "win32") return;
+    const targets: Array<{ path: string; mode: number }> = [
+      { path: READY_SENTINEL, mode: 0o600 },
+      { path: SETUP_LOG, mode: 0o600 },
+    ];
+    for (const { path: target, mode } of targets) {
+      try {
+        await fs.chmod(target, mode);
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === "ENOENT") continue; // first install — file not yet created
+        log.warn(`repairLegacyFileModes failed for ${target}: ${(err as Error).message}`);
+      }
+    }
+    // Note: the materialized uv binary lives under <UV_RUNTIME_DIR>/<arch>/
+    // <binarySha256>/uv — sha-keyed path is hard to enumerate up front. New
+    // materializations will get 0o700 directly via writeFileSync mode +
+    // chmod. Existing legacy 0o755 binaries are still owner-rwx + world-rx
+    // — unauthorised execute is benign (the binary is not setuid) but
+    // world-read is a small info leak. Future enhancement: walk
+    // <UV_RUNTIME_DIR> to chmod all `uv` entries to 0o700 on boot.
+  }
+
   private async log(msg: string): Promise<void> {
     const line = `[${new Date().toISOString()}] ${msg}\n`;
     try {
       await fs.mkdir(LOGS_DIR, { recursive: true, mode: 0o700 });
-      await fs.appendFile(SETUP_LOG, line, "utf8");
+      await fs.appendFile(SETUP_LOG, line, { encoding: "utf8", mode: 0o600 });
     } catch {
       // 로그 실패는 무시 (non-fatal)
     }
