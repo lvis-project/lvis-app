@@ -17,6 +17,7 @@ import {
   readPersistedPluginAuthPartitions,
   writePersistedPluginAuthPartitions,
   deletePersistedPluginAuthPartitions,
+  cleanupStaleTmpFiles,
   __resetWriteQueueForTest,
 } from "../plugin-auth-partition-store.js";
 
@@ -183,5 +184,61 @@ describe("write queue — concurrency safety", () => {
     const result = await readPersistedPluginAuthPartitions();
     expect(result!["original"]).toEqual(["persist:plugin-auth:original"]);
     expect(result!["injected"]).toBeUndefined();
+  });
+
+  it("write queue recovers after transient I/O error — subsequent write succeeds", async () => {
+    const { chmod } = await import("node:fs/promises");
+
+    // Create the plugins dir and make it non-writable to force a real EACCES.
+    const dir = join(tmpHome, "plugins");
+    await mkdir(dir, { recursive: true });
+    await chmod(dir, 0o500); // r-x: mkdir+writeFile inside will fail
+
+    const mapA = new Map([["pluginA", new Set(["persist:plugin-auth:pluginA"])]]);
+    const mapB = new Map([["pluginB", new Set(["persist:plugin-auth:pluginB"])]]);
+
+    // Write A should reject because the dir is read-only.
+    await expect(writePersistedPluginAuthPartitions(mapA)).rejects.toThrow();
+
+    // Restore dir permissions so subsequent writes can succeed.
+    await chmod(dir, 0o700);
+
+    // The write queue must NOT be permanently bricked after the error.
+    // __resetWriteQueueForTest() is NOT called here — we rely on the
+    // try/finally + catch-detach fix to allow recovery without a reset.
+    await expect(writePersistedPluginAuthPartitions(mapB)).resolves.toBeUndefined();
+
+    const result = await readPersistedPluginAuthPartitions();
+    expect(result!["pluginB"]).toEqual(["persist:plugin-auth:pluginB"]);
+  });
+});
+
+describe("cleanupStaleTmpFiles", () => {
+  it("removes stale .tmp sibling files left by a prior crash", async () => {
+    const dir = join(tmpHome, "plugins");
+    await mkdir(dir, { recursive: true });
+    const authFile = join(dir, "auth-partitions.json");
+    const staleTmp = `${authFile}.abc123.tmp`;
+
+    // Create a valid auth file and a stale tmp file simulating a prior crash.
+    await writeFile(
+      authFile,
+      JSON.stringify({ partitions: { "com.lge.test": ["persist:plugin-auth:com.lge.test"] } }, null, 2) + "\n",
+      { encoding: "utf8", mode: 0o600 },
+    );
+    await writeFile(staleTmp, "incomplete write", { encoding: "utf8", mode: 0o600 });
+
+    // Verify the tmp file exists before sweep.
+    const { access } = await import("node:fs/promises");
+    await expect(access(staleTmp)).resolves.toBeUndefined();
+
+    await cleanupStaleTmpFiles();
+
+    // The stale tmp file must be gone.
+    await expect(access(staleTmp)).rejects.toThrow();
+
+    // The real auth file must be untouched.
+    const result = await readPersistedPluginAuthPartitions();
+    expect(result!["com.lge.test"]).toEqual(["persist:plugin-auth:com.lge.test"]);
   });
 });

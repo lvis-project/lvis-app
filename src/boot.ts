@@ -65,6 +65,7 @@ import {
   readPersistedPluginAuthPartitions,
   writePersistedPluginAuthPartitions,
   deletePersistedPluginAuthPartitions,
+  cleanupStaleTmpFiles,
 } from "./main/plugin-auth-partition-store.js";
 import { openLinkWindow as openLinkWindowService } from "./main/link-window-service.js";
 import { openAuthPartitionViewer as openAuthPartitionViewerService } from "./main/auth-partition-viewer-service.js";
@@ -214,6 +215,15 @@ export async function bootstrap(
   // uninstall can wipe partitions created in prior app sessions (not just the
   // current runtime). Wire persistence callbacks so every new observation is
   // immediately flushed to `~/.lvis/plugins/auth-partitions.json`.
+  //
+  // Sweep crashed-write tombstones from prior session before reading current state.
+  // Non-fatal — continue boot if sweep fails.
+  await cleanupStaleTmpFiles().catch((err: unknown) => {
+    log.warn(
+      "boot: cleanupStaleTmpFiles failed (non-fatal): %s",
+      (err as Error).message,
+    );
+  });
   //
   // Corrupt file → throws loudly with an audit entry instead of silently
   // using an empty set (CLAUDE.md "No Fallback Code" rule).

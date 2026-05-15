@@ -156,16 +156,26 @@ export function writePersistedPluginAuthPartitions(
 
   if (!_writing) {
     _writing = true;
-    _writeChain = _writeChain.then(async () => {
-      while (_pendingSnapshot !== null) {
-        const next = _pendingSnapshot;
-        _pendingSnapshot = null;
-        await doActualWrite(next);
+    const result = _writeChain.then(async () => {
+      try {
+        while (_pendingSnapshot !== null) {
+          const next = _pendingSnapshot;
+          _pendingSnapshot = null;
+          await doActualWrite(next);
+        }
+      } finally {
+        _writing = false;
       }
-      _writing = false;
     });
+    // Detach the rejection from the persistent chain so future writes can
+    // recover after a transient I/O error (EIO, ENOSPC, EACCES) without
+    // permanently bricking _writeChain.
+    _writeChain = result.catch(() => undefined);
+    return result;
   }
 
+  // A write is already in-flight; _pendingSnapshot updated above will be
+  // picked up by the trailing while-loop continuation.
   return _writeChain;
 }
 
