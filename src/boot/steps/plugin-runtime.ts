@@ -1001,6 +1001,31 @@ export async function initPluginRuntime(
               `[plugin:${pluginId}] config.set('${key}'): runtime reload failed: ${(err as Error).message}`,
             );
           }
+          // restartPlugin's stop phase fires `onDisable` which calls
+          // `toolRegistry.unregisterByPlugin(pluginId)`, but the start phase
+          // only re-populates `methodMap` — it does NOT re-register tools in
+          // the ToolRegistry. Without this sync, every plugin tool turns
+          // into `도구를 찾을 수 없습니다` for the rest of the session.
+          //
+          // The sync is non-fatal — it's idempotent and the next install /
+          // uninstall / dev-reload event heals any transient miss, mirroring
+          // the error semantics of the sibling sync subscribers below.
+          // Throwing here would misattribute a registry-sync failure as a
+          // `runtime reload failed` to the caller plugin.
+          //
+          // Wire-up is covered by the integration test in
+          // `src/__tests__/ipc-bridge-permissions.test.ts` ("re-registers
+          // plugin tools in ToolRegistry after the restart-triggered onDisable
+          // wipe") via the IPC sibling at `ipc/domains/plugins.ts` which uses
+          // the same `syncPluginToolRegistry` function.
+          try {
+            syncPluginToolRegistry(pluginRuntime, toolRegistry);
+          } catch (err) {
+            log.error(
+              `tool registry sync failed after hostApi.config.set restart (${pluginId}): %s`,
+              (err as Error).message,
+            );
+          }
         },
         onChange: <T = unknown>(
           key: string,
@@ -1573,7 +1598,17 @@ export async function initPluginRuntime(
     onReloaded: (pluginId) => {
       const manifest = pluginRuntime.getPluginManifest(pluginId);
       if (!manifest) return;
-      syncPluginToolRegistry(pluginRuntime, toolRegistry);
+      // Mirror the install/uninstall/restart sibling sync sites — non-fatal,
+      // logged on failure. Without the try/catch a sync exception would
+      // propagate into the watcher's event loop and could take it offline.
+      try {
+        syncPluginToolRegistry(pluginRuntime, toolRegistry);
+      } catch (err) {
+        log.error(
+          `tool registry sync failed after plugin dev hot-reload (${pluginId}): %s`,
+          (err as Error).message,
+        );
+      }
       log.info(`plugin:${pluginId} hot-reloaded (${manifest.tools.length} tools)`);
     },
   });

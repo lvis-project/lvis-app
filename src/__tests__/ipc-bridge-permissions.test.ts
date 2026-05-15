@@ -89,6 +89,9 @@ function makeServices(pm: ReturnType<typeof makeMockPM>, gate = makeMockGate()) 
       // `format: "secret"` keys. Default to undefined so the strip pass is
       // a no-op for legacy tests.
       getPluginManifest: vi.fn(() => undefined),
+      // config:set re-syncs ToolRegistry after restartPlugin to avoid the
+      // post-toggle "도구를 찾을 수 없습니다" regression — default to empty.
+      listPluginManifests: vi.fn(() => []),
     } as any,
     pluginMarketplace: { list: vi.fn(), install: vi.fn(), uninstall: vi.fn() } as any,
     settingsService: {
@@ -123,7 +126,13 @@ function makeServices(pm: ReturnType<typeof makeMockPM>, gate = makeMockGate()) 
     conversationLoop: makeMockLoop(pm) as any,
     approvalGate: gate as any,
     mcpManager: { listServers: vi.fn(() => []), killSwitch: vi.fn() } as any,
-    toolRegistry: { setDenyRules: vi.fn() } as any,
+    toolRegistry: {
+      setDenyRules: vi.fn(),
+      // syncPluginToolRegistry contract — wipe then re-register from runtime.
+      listAll: vi.fn(() => []),
+      unregisterByPlugin: vi.fn(),
+      register: vi.fn(),
+    } as any,
     auditLogger: {
       log: vi.fn(),
       isPermissionAuditChainReady: vi.fn(() => true),
@@ -439,6 +448,60 @@ describe("lvis:plugins:config:*", () => {
     // US-3c.2: targeted restart — only the affected plugin is restarted.
     expect(services.pluginRuntime.restartPlugin).toHaveBeenCalledWith("meeting");
     expect(services.pluginRuntime.restartAll).not.toHaveBeenCalled();
+  });
+
+  // Regression: restartPlugin's onDisable callback removes plugin tools from
+  // ToolRegistry; without a post-restart `syncPluginToolRegistry` call the
+  // tools stay unregistered until the next install/uninstall event, surfacing
+  // as `도구를 찾을 수 없습니다` for every chat-surface call on this plugin.
+  // This test locks in the wire-up at the IPC layer.
+  it("re-registers plugin tools in ToolRegistry after the restart-triggered onDisable wipe", async () => {
+    const pm = makeMockPM();
+    handlers.clear();
+    vi.clearAllMocks();
+    const { registerIpcHandlers } = await import("../ipc-bridge.js");
+    const services = makeServices(pm);
+    // Pre-existing plugin tool so the sweep half of `syncPluginToolRegistry`
+    // (unregisterByPlugin) is exercised — `listAll` empty would skip it.
+    (services.toolRegistry as { listAll: ReturnType<typeof vi.fn> }).listAll = vi.fn(() => [
+      { name: "meeting_ping", source: "plugin", pluginId: "meeting" },
+    ]);
+    // Stand up a manifest so `syncPluginToolRegistry` actually has something
+    // to re-register — empty `listPluginManifests` would let a broken fix
+    // (no sync) pass without `toolRegistry.register` being inspected.
+    services.pluginRuntime.listPluginManifests = vi.fn(() => [{
+      pluginId: "meeting",
+      manifest: {
+        id: "meeting",
+        name: "Meeting",
+        version: "1.0.0",
+        entry: "index.js",
+        description: "fixture",
+        publisher: "Test",
+        tools: ["meeting_ping"],
+        toolSchemas: {
+          meeting_ping: {
+            description: "ping",
+            category: "read",
+            inputSchema: { type: "object", properties: {} },
+          },
+        },
+      } as never,
+    }]);
+    registerIpcHandlers(services, () => null);
+
+    const result = await invoke("lvis:plugins:config:set", "meeting", { volume: 5 }) as {
+      ok: boolean;
+    };
+
+    expect(result.ok).toBe(true);
+    expect(services.pluginRuntime.restartPlugin).toHaveBeenCalledWith("meeting");
+    // syncPluginToolRegistry contract — unregister-by-plugin sweep then
+    // re-register from manifest. If either is missing, the bug regresses.
+    expect(services.toolRegistry.unregisterByPlugin).toHaveBeenCalled();
+    expect(services.toolRegistry.register).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "meeting_ping", pluginId: "meeting" }),
+    );
   });
 
   // §9.2 Track B — US-B5
