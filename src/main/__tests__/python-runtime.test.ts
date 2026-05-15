@@ -27,6 +27,7 @@ vi.mock("node:fs/promises", () => ({
   writeFile: vi.fn().mockResolvedValue(undefined),
   rename: vi.fn().mockResolvedValue(undefined),
   chmod: vi.fn().mockResolvedValue(undefined),
+  readdir: vi.fn().mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" })),
 }));
 
 // ─── node:child_process mock ──────────────────────────────────────────────────
@@ -119,6 +120,12 @@ describe("PythonRuntimeBootstrapper", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockedReadFile.mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
+    // readdir default — repairLegacyUvBinaries calls readdir on uvRuntimeDir;
+    // most tests don't care, so default to ENOENT (no uv binaries) and let
+    // sweep tests override per-case.
+    vi.mocked(fsMock.readdir).mockRejectedValue(
+      Object.assign(new Error("ENOENT"), { code: "ENOENT" }),
+    );
     // process.resourcesPath를 undefined로 설정 (개발 환경 시뮬레이션)
     (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = undefined;
   });
@@ -808,6 +815,78 @@ describe("PythonRuntimeBootstrapper", () => {
 
       const bootstrapper = new PythonRuntimeBootstrapper();
       // Should NOT throw — ENOENT is expected on first install.
+      await expect(bootstrapper.ensureReady(makeBrowserWindow())).resolves.toBeDefined();
+    });
+
+    it("repairLegacyFileModes also chmods runtime parent dirs to 0o700 (Round 3 — directory mode migration)", async () => {
+      // Pre-Round-3: directories created by older installs at default 0o755
+      // were world-traversable (directory listing only, no content). The
+      // sweep now tightens LVIS_RUNTIME_DIR / VENV_DIR / LOGS_DIR /
+      // UV_CACHE_DIR_PATH to 0o700 alongside the file targets.
+      if (process.platform === "win32") return;
+      const chmodCalls: Array<{ target: string; mode: number }> = [];
+      vi.mocked(fsMock.chmod).mockImplementation(async (target, mode) => {
+        chmodCalls.push({ target: String(target), mode: Number(mode) });
+      });
+      mockedAccess.mockResolvedValue(undefined);
+      mockedSpawn.mockReturnValue(makeSpawnMock(""));
+
+      const bootstrapper = new PythonRuntimeBootstrapper();
+      await bootstrapper.ensureReady(makeBrowserWindow());
+
+      const dirChmod = (suffix: string) =>
+        chmodCalls.find((c) => c.target.endsWith(suffix) && c.mode === 0o700);
+      expect(dirChmod("/runtime")).toBeDefined();
+      expect(dirChmod("/runtime/venv")).toBeDefined();
+      expect(dirChmod("/runtime/logs")).toBeDefined();
+      expect(dirChmod("/runtime/uv-cache")).toBeDefined();
+    });
+
+    it("repairLegacyUvBinaries chmods all uv binaries under uvRuntimeDir to 0o700", async () => {
+      // Pre-Round-3: legacy materialized uv binaries lived at 0o755
+      // (world-read+exec). The sha-keyed path layout
+      // `<uvRuntimeDir>/<arch>/<sha>/uv` is enumerated and each chmod'd to
+      // 0o700.
+      if (process.platform === "win32") return;
+      const chmodCalls: Array<{ target: string; mode: number }> = [];
+      vi.mocked(fsMock.chmod).mockImplementation(async (target, mode) => {
+        chmodCalls.push({ target: String(target), mode: Number(mode) });
+      });
+      // Simulate two arch dirs each with one sha-keyed binary.
+      // Cast through `unknown` rather than `as never` — readdir's overload
+      // union (string[] | Buffer[] | Dirent[]) makes vitest's mock typing
+      // awkward; the unknown cast preserves the "I'm narrowing the
+      // overload" intent without nuking the type system.
+      vi.mocked(fsMock.readdir).mockImplementation((async (dirPath: string) => {
+        const p = String(dirPath);
+        if (p.endsWith("/runtime/uv")) return ["linux-arm64", "linux-x64"];
+        if (p.endsWith("linux-arm64")) return ["sha-aaa"];
+        if (p.endsWith("linux-x64")) return ["sha-bbb"];
+        return [];
+      }) as unknown as typeof fsMock.readdir);
+      mockedAccess.mockResolvedValue(undefined);
+      mockedSpawn.mockReturnValue(makeSpawnMock(""));
+
+      const bootstrapper = new PythonRuntimeBootstrapper();
+      await bootstrapper.ensureReady(makeBrowserWindow());
+
+      const uvChmod = (suffix: string) =>
+        chmodCalls.find((c) => c.target.endsWith(suffix) && c.mode === 0o700);
+      expect(uvChmod("/runtime/uv/linux-arm64/sha-aaa/uv")).toBeDefined();
+      expect(uvChmod("/runtime/uv/linux-x64/sha-bbb/uv")).toBeDefined();
+    });
+
+    it("repairLegacyUvBinaries returns silently when uvRuntimeDir does not exist", async () => {
+      // Pre-first-install: no uv binaries yet. ENOENT on top-level readdir
+      // returns without logging.
+      if (process.platform === "win32") return;
+      vi.mocked(fsMock.readdir).mockRejectedValue(
+        Object.assign(new Error("ENOENT"), { code: "ENOENT" }),
+      );
+      mockedAccess.mockResolvedValue(undefined);
+      mockedSpawn.mockReturnValue(makeSpawnMock(""));
+
+      const bootstrapper = new PythonRuntimeBootstrapper();
       await expect(bootstrapper.ensureReady(makeBrowserWindow())).resolves.toBeDefined();
     });
   });
