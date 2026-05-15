@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import {
   copyFile,
   mkdir,
+  open,
   readdir,
   readFile,
   rename,
@@ -24,6 +25,7 @@ import { z } from "zod";
 
 import { validateSandboxPath } from "../sandbox/path-validator.js";
 import { globToRegExp } from "../lib/glob-matcher.js";
+import { writeDiffSidecar, WRITE_DIFF_PREVIEW_LIMIT } from "./write-diff-cache.js";
 import {
   canonicalizePathForMatch,
   caseFoldForMatch,
@@ -44,11 +46,6 @@ const DEFAULT_LINE_LIMIT = 2_000;
 const MAX_LINE_LIMIT = 5_000;
 const MAX_TEXT_FILE_BYTES = 2_000_000;
 
-// Cap per-side preview for write_file diff payload. The diff UI is a
-// best-effort preview, not the source of truth — capping keeps the LLM-facing
-// tool result bounded (~1k tokens per side worst case). When either side
-// exceeds this, `truncated: true` is emitted and the renderer shows a marker.
-const WRITE_DIFF_PREVIEW_LIMIT = 4096;
 const MAX_SEARCH_FILE_BYTES = 1_000_000;
 const BINARY_SAMPLE_BYTES = 8_192;
 const DEFAULT_RESULT_LIMIT = 200;
@@ -353,51 +350,68 @@ export class WriteFileTool extends FileTool<typeof WriteFileInputSchema> {
     const blocked = this.ensureAllowed(target, ctx);
     if (blocked) return blocked;
 
-    await mkdir(dirname(target), { recursive: true });
-
-    // Capture before-snapshot for the FileEditDiff renderer (see
-    // src/ui/renderer/components/FileEditDiff.tsx). Skip when the prior
-    // file is binary or exceeds the preview cap — those cases set
-    // `truncated: true` and the UI falls back to a summary header.
-    const existing = await statExistingPath(target);
-    let before: string | undefined;
-    let isNewFile = false;
-    let truncated = false;
-    if (existing.ok) {
-      if (existing.value === null) {
-        isNewFile = true;
-      } else if (
-        existing.value.isFile() &&
-        existing.value.size <= WRITE_DIFF_PREVIEW_LIMIT &&
-        !(await isBinaryFile(target))
-      ) {
-        before = await readFile(target, "utf8");
-      } else if (existing.value.isFile()) {
-        truncated = true;
+    // Read existing content for diff sidecar (best-effort — missing file = empty before).
+    // Guard: skip pre-image read for large or binary files to avoid OOM / mojibake.
+    // Mirrors the EditFileTool / ApplyPatchTool pattern exactly.
+    let before = "";
+    let skipSidecar = false;
+    // Open the file once and bind stat + read to the same inode handle to
+    // eliminate the TOCTOU window between stat() and readFile().
+    const fh = await open(target, "r").catch(() => null);
+    if (fh !== null) {
+      try {
+        const fhStat = await fh.stat();
+        if (fhStat.size > MAX_TEXT_FILE_BYTES) {
+          skipSidecar = true;
+        } else {
+          // Size verified ≤ MAX_TEXT_FILE_BYTES on this exact handle.
+          // A concurrent truncate between fh.stat() and fh.readFile() can
+          // shrink the read result but cannot grow it past the cap, so the
+          // OOM bound holds — the file descriptor binds the inode, not the
+          // data length.
+          before = await fh.readFile("utf8");
+        }
+      } finally {
+        await fh.close();
+      }
+      // isBinaryFile reopens the file internally but is bounded by its own
+      // limit; acceptable as a secondary guard after the size check passes.
+      if (!skipSidecar && (await isBinaryFile(target))) {
+        skipSidecar = true;
+        before = "";
       }
     }
+    const after = input.content;
 
-    await atomicTextWrite(target, input.content);
+    await mkdir(dirname(target), { recursive: true });
+    await atomicTextWrite(target, after);
 
-    const afterFull = input.content;
-    const after =
-      afterFull.length > WRITE_DIFF_PREVIEW_LIMIT
-        ? afterFull.slice(0, WRITE_DIFF_PREVIEW_LIMIT)
-        : afterFull;
-    if (after.length < afterFull.length) truncated = true;
+    // Write diff sidecar when either side exceeds the preview limit.
+    const sessionId =
+      typeof ctx.metadata?.sessionId === "string" ? ctx.metadata.sessionId : "";
+    const toolUseId =
+      typeof ctx.metadata?.toolUseId === "string" ? ctx.metadata.toolUseId : "";
+    let hasSidecar = false;
+    if (!skipSidecar && sessionId && toolUseId) {
+      // writeDiffSidecar logs failures internally via its own createLogger.
+      // auditWarn callback is a no-op here; failures keep truncated state
+      // visible in the UI without a silent fallback.
+      hasSidecar = await writeDiffSidecar(sessionId, toolUseId, before, after, () => {});
+    }
+
+    const beforeBytes = Buffer.byteLength(before, "utf8");
+    const afterBytes = Buffer.byteLength(after, "utf8");
+    const truncated =
+      beforeBytes > WRITE_DIFF_PREVIEW_LIMIT || afterBytes > WRITE_DIFF_PREVIEW_LIMIT;
 
     return {
       output: JSON.stringify({
-        kind: "lvis.write_file",
         path: target,
-        bytes: Buffer.byteLength(afterFull, "utf8"),
-        isNewFile,
-        truncated,
-        ...(before !== undefined ? { before } : {}),
-        after,
+        bytes: afterBytes,
+        ...(truncated ? { truncated: true, hasSidecar } : {}),
       }),
       isError: false,
-      metadata: { path: target },
+      metadata: { path: target, ...(truncated ? { truncated: true, hasSidecar } : {}) },
     };
   }
 }
