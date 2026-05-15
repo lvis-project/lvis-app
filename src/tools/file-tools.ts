@@ -363,7 +363,11 @@ export class WriteFileTool extends FileTool<typeof WriteFileInputSchema> {
         if (fhStat.size > MAX_TEXT_FILE_BYTES) {
           skipSidecar = true;
         } else {
-          // Safe to read — size is bound by the same handle.
+          // Size verified ≤ MAX_TEXT_FILE_BYTES on this exact handle.
+          // A concurrent truncate between fh.stat() and fh.readFile() can
+          // shrink the read result but cannot grow it past the cap, so the
+          // OOM bound holds — the file descriptor binds the inode, not the
+          // data length.
           before = await fh.readFile("utf8");
         }
       } finally {
