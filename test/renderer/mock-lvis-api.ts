@@ -60,6 +60,8 @@ const DEFAULT_USAGE = {
 export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   api: MockLvisApi;
   emitChatStream: (ev: unknown) => void;
+  emitOverlayShow: (item: unknown) => void;
+  emitOverlayDismiss: (id: string) => void;
   emitRoutineFiredV2: (r: unknown) => void;
   emitViewActivate: (v: string) => void;
   emitAskUserQuestion: (r: unknown) => void;
@@ -85,6 +87,8 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   const memoryIndex = overrides.memoryIndex ?? "";
 
   const chatStreamHandlers = new Set<(ev: unknown) => void>();
+  const overlayShowHandlers = new Set<(item: unknown) => void>();
+  const overlayDismissHandlers = new Set<(id: string) => void>();
   const routineFiredV2Handlers = new Set<(r: unknown) => void>();
   const viewHandlers = new Set<(v: string) => void>();
   const settingsUpdatedHandlers = new Set<(settings: unknown) => void>();
@@ -313,6 +317,16 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     onTriggerImported: vi.fn((_h: (p: unknown) => void) => () => {}),
     dismissTrigger: vi.fn(async () => ({ ok: true, removed: true })),
     importTrigger: vi.fn(async () => ({ ok: true, imported: 0 })),
+    onOverlayShow: vi.fn((handler: (item: unknown) => void) => {
+      overlayShowHandlers.add(handler);
+      return () => overlayShowHandlers.delete(handler);
+    }),
+    onOverlayUpdate: vi.fn((_handler: (id: string, patch: unknown) => void) => () => {}),
+    onOverlayDismiss: vi.fn((handler: (id: string) => void) => {
+      overlayDismissHandlers.add(handler);
+      return () => overlayDismissHandlers.delete(handler);
+    }),
+    notifyOverlayPrimary: vi.fn(async () => undefined),
 
     onAskUserQuestion: vi.fn((h: (r: unknown) => void) => {
       askUserQuestionHandlers.add(h);
@@ -342,6 +356,8 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   return {
     api,
     emitChatStream: (ev) => chatStreamHandlers.forEach((h) => h(ev)),
+    emitOverlayShow: (item) => overlayShowHandlers.forEach((h) => h(item)),
+    emitOverlayDismiss: (id) => overlayDismissHandlers.forEach((h) => h(id)),
     emitRoutineFiredV2: (r) => routineFiredV2Handlers.forEach((h) => h(r)),
     emitViewActivate: (v) => viewHandlers.forEach((h) => h(v)),
     emitAskUserQuestion: (r) => askUserQuestionHandlers.forEach((h) => h(r)),

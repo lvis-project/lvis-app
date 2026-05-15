@@ -296,6 +296,13 @@ describe("MessageQueueStore", () => {
     vi.useRealTimers();
   });
 
+  it("getItems 는 만료 항목이 없으면 동일 snapshot 참조를 유지", () => {
+    store.add("stable");
+    const first = store.getItems();
+    const second = store.getItems();
+    expect(second).toBe(first);
+  });
+
   it("update 시 expiresAt 갱신 — TTL reset", () => {
     vi.useFakeTimers();
     const start = Date.now();
