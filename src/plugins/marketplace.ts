@@ -1,4 +1,5 @@
 import { cp, readFile, rename, rm, stat as statAsync, writeFile } from "node:fs/promises";
+import { tombstoneAndDeferredRemove } from "./installed-entry-fs.js";
 import { realpathSync } from "node:fs";
 import { dirname, isAbsolute, posix, relative, resolve } from "node:path";
 import { buildSideloadCopyFilter, rejectEscapingSymlinks } from "./sideload-filter.js";
@@ -846,9 +847,28 @@ export class PluginMarketplaceService {
       ? entry.manifestPath
       : resolve(dirname(this.registryPath), entry.manifestPath);
     const installedManifestDir = dirname(manifestPath);
-    if (this.isWithin(this.pluginsRoot, installedManifestDir)) {
-      await rm(installedManifestDir, { recursive: true, force: true });
-    }
+    if (!this.isWithin(this.pluginsRoot, installedManifestDir)) return;
+
+    // Windows-atomic uninstall: rename to a tombstone under +tombstones+/
+    // (collision-free namespace; `+` not in plugin id allowed chars), then
+    // fire-and-forget rm. Lifecycle ordering enforced upstream
+    // (pluginRuntime.removePlugin runs before this) reduces the window where
+    // handles are still held; the tombstone-defer pattern is dual-defense
+    // for the residual ~ms gap between stop() resolving and the OS releasing
+    // the SQLite WAL/SHM file descriptors. The orphan sweeper at next boot
+    // picks up any tombstone whose deferred rm hit EBUSY. See
+    // installed-entry-fs.ts for OS-specific rationale.
+    //
+    // NOTE: this returns BEFORE the rm completes. Callers that need
+    // synchronous removal (none today) should not assume the install dir
+    // is gone after this resolves.
+    await tombstoneAndDeferredRemove(installedManifestDir, this.pluginsRoot, {
+      onDeferredRmError: (tombstone, err) => {
+        log.warn(
+          `removeInstalledEntry: tombstone rm deferred to orphan sweeper: ${tombstone} (${err.message})`,
+        );
+      },
+    });
   }
 
   private isWithin(basePath: string, targetPath: string): boolean {
