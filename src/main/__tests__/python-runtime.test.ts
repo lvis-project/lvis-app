@@ -26,6 +26,7 @@ vi.mock("node:fs/promises", () => ({
   appendFile: vi.fn().mockResolvedValue(undefined),
   writeFile: vi.fn().mockResolvedValue(undefined),
   rename: vi.fn().mockResolvedValue(undefined),
+  chmod: vi.fn().mockResolvedValue(undefined),
 }));
 
 // ─── node:child_process mock ──────────────────────────────────────────────────
@@ -707,93 +708,6 @@ describe("PythonRuntimeBootstrapper", () => {
       }
     });
 
-    it("materializePackagedUvBinary는 uv 바이너리를 0o600으로 쓴 뒤 non-Windows에서 0o700으로 chmod한다", () => {
-      const resourcesPath = mkdtempSync(path.join(tmpdir(), "lvis-perm-test-resources-"));
-      const uvRuntimeDir = mkdtempSync(path.join(tmpdir(), "lvis-perm-test-uv-"));
-      const packagedUvDir = path.join(resourcesPath, "uv", "linux-arm64");
-      const expectedUvBin = path.join(uvRuntimeDir, "linux-arm64", "perm-sha256", "uv");
-
-      mkdirSync(packagedUvDir, { recursive: true });
-      writeFileSync(path.join(packagedUvDir, "uv.gz"), gzipSync(Buffer.from("uv-binary")));
-      writeFileSync(path.join(packagedUvDir, "uv.meta.json"), JSON.stringify({ binarySha256: "perm-sha256" }));
-
-      const originalPlatform = process.platform;
-      const originalArch = process.arch;
-      const originalDefaultApp = (process as { defaultApp?: boolean }).defaultApp;
-      const originalResourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
-
-      Object.defineProperty(process, "platform", { value: "linux", configurable: true });
-      Object.defineProperty(process, "arch", { value: "arm64", configurable: true });
-      (process as { defaultApp?: boolean }).defaultApp = false;
-      (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = resourcesPath;
-
-      try {
-        // Directly exercise materializePackagedUvBinary by calling getUvBinaryPath via the bootstrapper.
-        // We call it synchronously by constructing the bootstrapper and triggering the sync path.
-        const bootstrapper = new PythonRuntimeBootstrapper({ uvRuntimeDir });
-        // getUvBinaryPath is private; access via the public setup flow aborted at spawn.
-        // Instead we verify file permissions on the real filesystem after the packaged test.
-
-        // Re-invoke the real FS write by constructing a fresh bootstrapper and triggering materialize:
-        // The easiest route is the same pattern used by "packaged Electron에서는 gzip uv archive" test above.
-        // We verify that after materialize the binary has owner-execute bits (0o700) on Linux.
-
-        // Trigger materialize by accessing a non-existent binary (skip spawn since we just want the write):
-        // getUvBinaryPath is called during setup(); bypass access guard by pre-populating the target dir.
-        // Simplest: let it fall through — the binary is absent, so materialize runs.
-
-        // The binary does not yet exist → materialize will run.
-        expect(existsSync(expectedUvBin)).toBe(false);
-
-        // Invoke the packaged binary materialization via the internal path by calling ensureReady
-        // and swallowing the subsequent spawn failure (the binary content is "uv-binary", not a real uv).
-        // We don't want to wait for spawn, so short-circuit by checking the FS state after writeFileSync.
-
-        // Use the direct filesystem verification approach: run the bootstrapper so that
-        // materializePackagedUvBinary executes its writeFileSync + chmodSync, then check stat.
-        // Note: ensureReady uses fsMock (vi.mock) for fs/promises but materializePackagedUvBinary
-        // uses fsSync (node:fs sync) which is NOT mocked — so real FS operations occur.
-        mockedAccess.mockImplementation(async (filePath) => {
-          const p = normalizePathForAssert(String(filePath));
-          if (p.includes(".ready")) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
-          // uv binary (the materialize target) — return as if it exists after materialization
-          if (normalizePathForAssert(String(filePath)) === normalizePathForAssert(expectedUvBin)) return undefined;
-          throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
-        });
-        mockedSpawn.mockReturnValue(makeSpawnFailMock(1, "stop"));
-
-        // Run synchronously to completion (the spawn will fail, but materialize already ran).
-        // We use a try/catch because ensureReady will throw after the spawn failure.
-        // eslint-disable-next-line @typescript-eslint/no-floating-promises
-        void (async () => {
-          try {
-            await new PythonRuntimeBootstrapper({
-              pluginManifestPaths: [],
-              uvRuntimeDir,
-            }).ensureReady(makeBrowserWindow());
-          } catch {
-            // expected — spawn mock returns exit 1
-          }
-        })();
-
-        // After materialize, verify the binary was written and has the expected mode bits.
-        // The file is written synchronously in getUvBinaryPath() before any spawn occurs.
-        // Since the promise above is still resolving microtasks, we check synchronously:
-        // materializePackagedUvBinary is fully synchronous (writeFileSync + chmodSync).
-
-        // Force synchronous execution up to the first spawn by running the inner sync block:
-        // Instead of the async trick above, use the same real-FS pattern as the packaged test:
-        // The test below is a deterministic synchronous check after ensureReady resolves/rejects.
-      } finally {
-        Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });
-        Object.defineProperty(process, "arch", { value: originalArch, configurable: true });
-        (process as { defaultApp?: boolean }).defaultApp = originalDefaultApp;
-        (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = originalResourcesPath;
-        rmSync(resourcesPath, { recursive: true, force: true });
-        rmSync(uvRuntimeDir, { recursive: true, force: true });
-      }
-    });
-
     it("materializePackagedUvBinary 실제 파일시스템: 바이너리 mode가 non-Windows에서 0o700(owner-exec)이다", async () => {
       // Skip on Windows — NTFS does not honour Unix mode bits.
       if (process.platform === "win32") return;
@@ -853,6 +767,48 @@ describe("PythonRuntimeBootstrapper", () => {
         rmSync(uvRuntimeDir, { recursive: true, force: true });
         rmSync(manifestRoot, { recursive: true, force: true });
       }
+    });
+
+    it("repairLegacyFileModes chmods existing .ready and setup.log to 0o600 on every boot", async () => {
+      // Pre-fix #717 follow-up: existing files created with default umask
+      // 0o644 stayed world-readable forever because mode-on-write only
+      // applies to NEW files. The boot-time chmod sweep migrates them.
+      const chmodCalls: Array<{ target: string; mode: number }> = [];
+      vi.mocked(fsMock.chmod).mockImplementation(async (target, mode) => {
+        chmodCalls.push({ target: String(target), mode: Number(mode) });
+      });
+      mockedAccess.mockResolvedValue(undefined); // sentinel exists — skip setup
+      mockedSpawn.mockReturnValue(makeSpawnMock(""));
+
+      const bootstrapper = new PythonRuntimeBootstrapper();
+      await bootstrapper.ensureReady(makeBrowserWindow());
+
+      // On non-Windows, sweep should have called chmod for both targets
+      // with mode 0o600. Skip assertion entirely on Windows where the
+      // production code early-returns from repairLegacyFileModes.
+      if (process.platform !== "win32") {
+        const sentinelChmod = chmodCalls.find((c) => c.target.includes(".ready"));
+        const logChmod = chmodCalls.find((c) => c.target.includes("setup.log"));
+        expect(sentinelChmod).toBeDefined();
+        expect(sentinelChmod?.mode).toBe(0o600);
+        expect(logChmod).toBeDefined();
+        expect(logChmod?.mode).toBe(0o600);
+      } else {
+        expect(chmodCalls.length).toBe(0);
+      }
+    });
+
+    it("repairLegacyFileModes silently skips ENOENT (first install — file not yet created)", async () => {
+      if (process.platform === "win32") return;
+      vi.mocked(fsMock.chmod).mockRejectedValue(
+        Object.assign(new Error("ENOENT"), { code: "ENOENT" }),
+      );
+      mockedAccess.mockResolvedValue(undefined);
+      mockedSpawn.mockReturnValue(makeSpawnMock(""));
+
+      const bootstrapper = new PythonRuntimeBootstrapper();
+      // Should NOT throw — ENOENT is expected on first install.
+      await expect(bootstrapper.ensureReady(makeBrowserWindow())).resolves.toBeDefined();
     });
   });
 });
