@@ -9,6 +9,12 @@ import type { PluginConfigRecord } from "../../shared/plugin-config.js";
 import type { ChatSendInputOrigin } from "../../shared/chat-origin.js";
 import type { ActiveRolePrompt, RolePreset } from "../../data/role-presets.js";
 import type { PermissionEvaluationContext as PermissionEvaluationContextShape } from "../../permissions/evaluation-context.js";
+import type {
+  AssistantAgentSummary,
+  AssistantSkillSummary,
+  MarketplacePackageType,
+  SelectedAssistantContext,
+} from "../../shared/assistant-context.js";
 
 // Re-export MCP types for renderer-side consumers (type-only, no main-process runtime)
 export type { McpServerConfig, McpServerConfigDto, McpServerState };
@@ -25,6 +31,7 @@ export type MarketplaceItem = {
   installed: boolean;
   enabled: boolean;
   isManaged?: boolean;
+  pluginType?: MarketplacePackageType;
 };
 
 export type PluginUiExtension = PluginUiExtensionView;
@@ -225,7 +232,7 @@ export type LvisApi = {
     description: string;
     version?: string;
     publisher?: string;
-    pluginType?: "plugin" | "mcp";
+    pluginType?: MarketplacePackageType;
     installed: boolean;
     enabled: boolean;
     isManaged?: boolean;
@@ -266,6 +273,7 @@ export type LvisApi = {
     inputOrigin: ChatSendInputOrigin,
     userIntent?: import("../../shared/chat-origin.js").UserKeyboardIntentSnapshot,
     rolePrompt?: ActiveRolePrompt,
+    assistantContext?: SelectedAssistantContext,
   ) => Promise<unknown>;
   chatGuide: (input: string) => Promise<unknown>;
   chatNew: () => Promise<{ ok: true }>;
@@ -333,6 +341,24 @@ export type LvisApi = {
     | { ok: false; error: string }
   >;
   listMarketplacePlugins: () => Promise<MarketplaceItem[]>;
+  listAgentProfiles: () => Promise<{ agents: AssistantAgentSummary[] }>;
+  listSkills: () => Promise<{ skills: AssistantSkillSummary[] }>;
+  installAgentFromMarketplace: (slug: string) => Promise<
+    | { ok: true; slug: string; agentId: string; version: string }
+    | { ok: false; error: string; message: string }
+  >;
+  uninstallAgentPackage: (slug: string) => Promise<
+    | { ok: true; slug: string; agentId: string }
+    | { ok: false; error: string; message: string }
+  >;
+  installSkillFromMarketplace: (slug: string) => Promise<
+    | { ok: true; slug: string; skillId: string; version: string }
+    | { ok: false; error: string; message: string }
+  >;
+  uninstallSkillPackage: (slug: string) => Promise<
+    | { ok: true; slug: string; skillId: string }
+    | { ok: false; error: string; message: string }
+  >;
   listPluginUiExtensions: () => Promise<PluginUiExtension[]>;
   readPluginUiModule: (pluginId: string, viewId: string) => Promise<string>;
   callPluginMethod: (m: string, p?: unknown) => Promise<unknown>;
@@ -393,6 +419,10 @@ export type LvisApi = {
   retryBootstrap: () => Promise<{ ok: true } | { ok: false; error: string }>;
   onPluginInstallResult: (h: (payload: { slug: string; success: boolean; error?: string }) => void) => () => void;
   onPluginUninstallResult: (h: (payload: { slug: string; success: boolean; error?: string }) => void) => () => void;
+  onAgentInstallResult: (h: (payload: { slug: string; success: boolean; agentId?: string; error?: string }) => void) => () => void;
+  onAgentUninstallResult: (h: (payload: { slug: string; success: boolean; agentId?: string; error?: string }) => void) => () => void;
+  onSkillInstallResult: (h: (payload: { slug: string; success: boolean; skillId?: string; error?: string }) => void) => () => void;
+  onSkillUninstallResult: (h: (payload: { slug: string; success: boolean; skillId?: string; error?: string }) => void) => () => void;
   /**
    * Dev-only: open a folder picker and install a local plugin directory.
    *
@@ -404,6 +434,14 @@ export type LvisApi = {
    */
   installLocalPlugin: () => Promise<{ pluginId: string; installed: true } | null>;
   onPluginInstallProgress: (h: (payload:
+    | { slug: string; phase: "installing" | "restarting" | "verifying" | "registering" }
+    | { slug: string; phase: "downloading"; bytesDownloaded: number; bytesTotal: number | null }
+  ) => void) => () => void;
+  onAgentInstallProgress: (h: (payload:
+    | { slug: string; phase: "installing" | "restarting" | "verifying" | "registering" }
+    | { slug: string; phase: "downloading"; bytesDownloaded: number; bytesTotal: number | null }
+  ) => void) => () => void;
+  onSkillInstallProgress: (h: (payload:
     | { slug: string; phase: "installing" | "restarting" | "verifying" | "registering" }
     | { slug: string; phase: "downloading"; bytesDownloaded: number; bytesTotal: number | null }
   ) => void) => () => void;
@@ -836,6 +874,10 @@ export type LvisPluginsApi = {
 export type LvisHostMarketplaceApi = {
   installMarketplacePlugin: (id: string) => Promise<PluginMarketplaceActionResult>;
   uninstallMarketplacePlugin: (id: string) => Promise<PluginMarketplaceActionResult>;
+  installMarketplaceAgent?: (slug: string) => Promise<PluginMarketplaceActionResult>;
+  uninstallMarketplaceAgent?: (slug: string) => Promise<PluginMarketplaceActionResult>;
+  installMarketplaceSkill?: (slug: string) => Promise<PluginMarketplaceActionResult>;
+  uninstallMarketplaceSkill?: (slug: string) => Promise<PluginMarketplaceActionResult>;
 };
 
 export type LvisHostApi = {

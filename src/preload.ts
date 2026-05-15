@@ -16,6 +16,7 @@ import type {
   UserKeyboardIntent,
   UserKeyboardIntentSnapshot,
 } from "./shared/chat-origin.js";
+import type { SelectedAssistantContext } from "./shared/assistant-context.js";
 
 // ─── Deterministic plugin webview asset URLs ────────────────────────────────
 // `__dirname` here resolves to the host preload's bundled location
@@ -149,6 +150,25 @@ function normalizePluginActionResult(result: unknown): PluginActionResult {
   return normalized;
 }
 
+function normalizeMarketplacePackageActionResult(
+  result: unknown,
+  idField: "agentId" | "skillId",
+): PluginActionResult {
+  if (result && typeof result === "object" && "ok" in result && result.ok === false) {
+    return result as PluginActionResult;
+  }
+  const payload = result && typeof result === "object"
+    ? result as Record<string, unknown>
+    : {};
+  const packageId = typeof payload[idField] === "string" ? payload[idField].trim() : "";
+  if (!packageId) return invalidPluginActionResult();
+  const normalized: PluginActionResult = { ok: true, pluginId: packageId };
+  if (payload.uninstalled === true) normalized.uninstalled = true;
+  else normalized.installed = true;
+  if (typeof payload.version === "string") normalized.version = payload.version;
+  return normalized;
+}
+
 function hasActiveUserGesture(): boolean {
   return globalThis.navigator?.userActivation?.isActive === true;
 }
@@ -271,12 +291,14 @@ const api = {
     inputOrigin: ChatSendInputOrigin,
     userIntent?: UserKeyboardIntentSnapshot,
     rolePrompt?: { name: string; systemPromptAdd: string },
+    assistantContext?: SelectedAssistantContext,
   ) =>
     ipcRenderer.invoke("lvis:chat:send", {
       input,
       attachments,
       inputOrigin,
       ...(rolePrompt ? { rolePrompt } : {}),
+      ...(assistantContext ? { assistantContext } : {}),
       ...(inputOrigin === "user-keyboard"
         ? { userActivation: consumeUserKeyboardIntent(userIntent) }
         : {}),
@@ -376,6 +398,16 @@ const api = {
 
   // ─── Plugins ─────────────────────────────────────
   listMarketplacePlugins: async () => ipcRenderer.invoke("lvis:plugins:marketplace:list"),
+  listAgentProfiles: async () => ipcRenderer.invoke("lvis:agents:list"),
+  listSkills: async () => ipcRenderer.invoke("lvis:skills:list"),
+  installAgentFromMarketplace: async (slug: string) =>
+    ipcRenderer.invoke("lvis:agents:install", slug),
+  uninstallAgentPackage: async (slug: string) =>
+    ipcRenderer.invoke("lvis:agents:uninstall", slug),
+  installSkillFromMarketplace: async (slug: string) =>
+    ipcRenderer.invoke("lvis:skills:install", slug),
+  uninstallSkillPackage: async (slug: string) =>
+    ipcRenderer.invoke("lvis:skills:uninstall", slug),
   listPluginUiExtensions: async () => ipcRenderer.invoke("lvis:plugins:ui:list"),
   // #237 — host renderer pre-binds (webContents.id → pluginId, entryUrl)
   // before each plugin webview navigates. Main rejects unknown pluginId
@@ -552,6 +584,27 @@ const api = {
     return () => ipcRenderer.removeListener("lvis:plugins:uninstall-result", listener);
   },
 
+  onAgentInstallResult: (handler: (payload: { slug: string; success: boolean; agentId?: string; error?: string }) => void) => {
+    const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
+    ipcRenderer.on("lvis:agents:install-result", listener);
+    return () => ipcRenderer.removeListener("lvis:agents:install-result", listener);
+  },
+  onAgentUninstallResult: (handler: (payload: { slug: string; success: boolean; agentId?: string; error?: string }) => void) => {
+    const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
+    ipcRenderer.on("lvis:agents:uninstall-result", listener);
+    return () => ipcRenderer.removeListener("lvis:agents:uninstall-result", listener);
+  },
+  onSkillInstallResult: (handler: (payload: { slug: string; success: boolean; skillId?: string; error?: string }) => void) => {
+    const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
+    ipcRenderer.on("lvis:skills:install-result", listener);
+    return () => ipcRenderer.removeListener("lvis:skills:install-result", listener);
+  },
+  onSkillUninstallResult: (handler: (payload: { slug: string; success: boolean; skillId?: string; error?: string }) => void) => {
+    const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
+    ipcRenderer.on("lvis:skills:uninstall-result", listener);
+    return () => ipcRenderer.removeListener("lvis:skills:uninstall-result", listener);
+  },
+
   // Phase progress for in-flight installs. Granular phases fire from inside
   // installFromMarketplace: downloading (byte-level) → verifying → registering.
   // The callers (handleLvisUri, lvis:plugins:install) emit `installing` at the
@@ -564,6 +617,22 @@ const api = {
     const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
     ipcRenderer.on("lvis:plugins:install-progress", listener);
     return () => ipcRenderer.removeListener("lvis:plugins:install-progress", listener);
+  },
+  onAgentInstallProgress: (handler: (payload:
+    | { slug: string; phase: "installing" | "restarting" | "verifying" | "registering" }
+    | { slug: string; phase: "downloading"; bytesDownloaded: number; bytesTotal: number | null }
+  ) => void) => {
+    const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
+    ipcRenderer.on("lvis:agents:install-progress", listener);
+    return () => ipcRenderer.removeListener("lvis:agents:install-progress", listener);
+  },
+  onSkillInstallProgress: (handler: (payload:
+    | { slug: string; phase: "installing" | "restarting" | "verifying" | "registering" }
+    | { slug: string; phase: "downloading"; bytesDownloaded: number; bytesTotal: number | null }
+  ) => void) => {
+    const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
+    ipcRenderer.on("lvis:skills:install-progress", listener);
+    return () => ipcRenderer.removeListener("lvis:skills:install-progress", listener);
   },
 
   // Status bar — aggregated runtime counters (tools / plugins / mcps).
@@ -1051,6 +1120,14 @@ contextBridge.exposeInMainWorld("lvisHost", {
         normalizePluginActionResult(await ipcRenderer.invoke("lvis:plugins:install", pluginId)),
       uninstallMarketplacePlugin: async (pluginId: string) =>
         normalizePluginActionResult(await ipcRenderer.invoke("lvis:plugins:uninstall", pluginId)),
+      installMarketplaceAgent: async (slug: string) =>
+        normalizeMarketplacePackageActionResult(await ipcRenderer.invoke("lvis:agents:install", slug), "agentId"),
+      uninstallMarketplaceAgent: async (slug: string) =>
+        normalizeMarketplacePackageActionResult(await ipcRenderer.invoke("lvis:agents:uninstall", slug), "agentId"),
+      installMarketplaceSkill: async (slug: string) =>
+        normalizeMarketplacePackageActionResult(await ipcRenderer.invoke("lvis:skills:install", slug), "skillId"),
+      uninstallMarketplaceSkill: async (slug: string) =>
+        normalizeMarketplacePackageActionResult(await ipcRenderer.invoke("lvis:skills:uninstall", slug), "skillId"),
     };
   },
 });

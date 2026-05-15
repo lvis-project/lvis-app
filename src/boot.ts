@@ -789,6 +789,26 @@ export async function bootstrap(
       publicKeys: getBundledPublicKeys(),
     });
   })();
+  const agentArtifactStore = (() => {
+    if (marketplaceFetcher instanceof DisabledMarketplaceFetcher) return undefined;
+    const agentInstallRoot = resolve(lvisHome(), "agents");
+    return new PluginArtifactStore({
+      installRoot: agentInstallRoot,
+      cacheRoot: resolve(agentInstallRoot, ".cache"),
+      fetcher: marketplaceFetcher,
+      publicKeys: getBundledPublicKeys(),
+    });
+  })();
+  const skillArtifactStore = (() => {
+    if (marketplaceFetcher instanceof DisabledMarketplaceFetcher) return undefined;
+    const skillInstallRoot = resolve(lvisHome(), "skills");
+    return new PluginArtifactStore({
+      installRoot: skillInstallRoot,
+      cacheRoot: resolve(skillInstallRoot, ".cache"),
+      fetcher: marketplaceFetcher,
+      publicKeys: getBundledPublicKeys(),
+    });
+  })();
 
   log.info("boot: ready (%d tools, %d plugins, %d mcp)", toolRegistry.size, pluginRuntime.listPluginIds().length, mcpManager.listServers().filter(s => s.status === "connected").length);
 
@@ -830,10 +850,10 @@ export async function bootstrap(
     pythonRuntime, pythonPath,
     pluginRuntime, pluginMarketplace, settingsService,
     memoryManager, keywordEngine, routeEngine, toolRegistry,
-    systemPromptBuilder, conversationLoop, routineEngine, mcpManager, mcpArtifactStore,
+    systemPromptBuilder, conversationLoop, routineEngine, mcpManager, mcpArtifactStore, agentArtifactStore, skillArtifactStore,
     idleScheduler, preferenceRefreshService, bashAstValidator, auditService, auditLogger: bootAuditLogger, postTurnHookChain,
     approvalGate, rewireReviewerAgent, knowledgeAvailable, starredStore, feedbackStore,
-    routinesStore, routinesScheduler, routineSessionStore, sessionTodoStore, askUserQuestionGate, skillStore,
+    routinesStore, routinesScheduler, routineSessionStore, sessionTodoStore, askUserQuestionGate, skillStore, agentProfileStore,
     notificationService,
     scriptHookManager,
     telemetry, pluginTelemetry, autoUpdaterStop,
