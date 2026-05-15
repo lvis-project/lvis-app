@@ -38,10 +38,13 @@ import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
 import { parseRenderHtmlResult } from "../utils/html-preview.js";
+import { extractFileEditDiff } from "../utils/file-diff.js";
+import type { FileEditDiffData } from "../utils/file-diff.js";
 import { getToolDisplayName } from "../utils/tool-display.js";
 import { formatToolDuration } from "../utils/format-duration.js";
 import type { RenderHtmlPayload } from "../types.js";
 import { HtmlPreview } from "./HtmlPreview.js";
+import { FileEditDiff } from "./FileEditDiff.js";
 import { McpAppView } from "./McpAppView.js";
 import { CompactedToolResult } from "./CompactedToolResult.js";
 
@@ -110,6 +113,7 @@ function SingleToolInline({
   const isRunning = tool.status === "running";
   const isError = tool.status === "error";
   const [open, setOpen] = useState(false);
+  const [scriptAllowed, setScriptAllowed] = useState(false);
 
   // PR-4: stub result — render collapsible CompactedToolResult instead of raw block.
   // Compaction marks tool_results by role+length, independent of error status,
@@ -130,6 +134,14 @@ function SingleToolInline({
       />
     );
   }
+
+  const htmlPayload: RenderHtmlPayload | null =
+    tool.name === "render_html" && tool.status === "done"
+      ? parseRenderHtmlResult(tool.result)
+      : null;
+  const htmlNeedsJavaScript =
+    htmlPayload != null && /<script\b|on[a-z]+\s*=|javascript:/i.test(htmlPayload.html);
+  const fileDiff: FileEditDiffData | null = extractFileEditDiff(tool);
 
   return (
     <div className="min-w-0 w-full max-w-full rounded-md text-[11px] text-muted-foreground">
@@ -164,6 +176,29 @@ function SingleToolInline({
               <ToolPayloadBlock value={tool.result} isError={isError} />
             </div>
           )}
+        </div>
+      )}
+      {htmlPayload && (
+        <div className="space-y-2 border-t px-3 py-2">
+          {htmlNeedsJavaScript && (
+            <div className="flex items-center justify-between gap-3 rounded border border-dashed px-3 py-2 text-[11px] text-muted-foreground">
+              <span>이 HTML은 JavaScript가 필요할 수 있습니다. 실행을 허용할까요?</span>
+              <Button
+                type="button"
+                size="sm"
+                variant={scriptAllowed ? "secondary" : "outline"}
+                onClick={() => setScriptAllowed((v) => !v)}
+              >
+                {scriptAllowed ? "JavaScript 차단" : "JavaScript 허용"}
+              </Button>
+            </div>
+          )}
+          <HtmlPreview payload={htmlPayload} allowScripts={scriptAllowed} />
+        </div>
+      )}
+      {fileDiff && (
+        <div className="border-t px-3 py-2">
+          <FileEditDiff data={fileDiff} />
         </div>
       )}
     </div>
@@ -209,6 +244,13 @@ export function ToolGroupCard({
     .filter((t) => t.name === "render_html" && t.status === "done")
     .map((t) => ({ toolUseId: t.toolUseId, payload: parseRenderHtmlResult(t.result) }))
     .filter((p): p is { toolUseId: string; payload: RenderHtmlPayload } => p.payload !== null);
+
+  const fileDiffs = tools
+    .map((t) => {
+      const data = extractFileEditDiff(t);
+      return data != null ? { toolUseId: t.toolUseId, data } : null;
+    })
+    .filter((entry): entry is { toolUseId: string; data: FileEditDiffData } => entry !== null);
 
   // MCP Apps §3.2 — collect tools that carry a uiPayload
   const mcpAppPreviews = tools.filter(
@@ -330,6 +372,13 @@ export function ToolGroupCard({
                 allowScripts={scriptAllowed.has(p.toolUseId)}
               />
             </div>
+          ))}
+        </div>
+      )}
+      {fileDiffs.length > 0 && (
+        <div className="space-y-2 border-t px-3 py-2">
+          {fileDiffs.map((entry) => (
+            <FileEditDiff key={entry.toolUseId} data={entry.data} />
           ))}
         </div>
       )}
