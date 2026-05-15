@@ -137,6 +137,79 @@ describe("plugins IPC lifecycle broadcast", () => {
     }
   });
 
+  it("removes plugin runtime BEFORE marketplace.uninstall (lifecycle §9 ordering)", async () => {
+    // Regression guard for Windows EBUSY on fts5.sqlite-shm/-wal: marketplace
+    // uninstall (rm files) must NOT run before runtime stop (close DB
+    // handles). If the order regresses, the plugin's worker still holds
+    // open SQLite WAL files when rm fires → EBUSY → half-deleted dir.
+    const { deps } = await setup();
+
+    await invoke("lvis:plugins:uninstall", "agent-hub");
+
+    const removePluginOrder = deps.pluginRuntime.removePlugin.mock.invocationCallOrder[0];
+    const uninstallOrder = deps.pluginMarketplace.uninstall.mock.invocationCallOrder[0];
+    expect(removePluginOrder).toBeLessThan(uninstallOrder);
+  });
+
+  it("surfaces removePlugin failure as uninstall failure (does not silently mutate registry)", async () => {
+    // Production removePlugin (runtime/index.ts) currently swallows stop()
+    // and disposer errors via try/catch + log.error and never re-throws.
+    // This test guards a future tightening where removePlugin DOES throw
+    // (e.g. invariant violation, runtime map corruption): the IPC handler
+    // MUST surface that failure and NOT proceed to marketplace.uninstall —
+    // otherwise registry mutation happens while runtime tracking still
+    // references the plugin, leaving listPluginCards showing a ghost card.
+    const { deps, appWindows } = await setup();
+    deps.pluginRuntime.removePlugin.mockRejectedValueOnce(new Error("dispose chain failed"));
+
+    await expect(invoke("lvis:plugins:uninstall", "agent-hub")).rejects.toThrow("dispose chain failed");
+
+    expect(deps.pluginMarketplace.uninstall).not.toHaveBeenCalled();
+    for (const win of appWindows) {
+      expect(win.webContents.send).toHaveBeenCalledWith(
+        "lvis:plugins:uninstall-result",
+        { slug: "agent-hub", success: false, error: "dispose chain failed" },
+      );
+    }
+  });
+
+  it("surfaces marketplace.uninstall non-idempotent failure (EACCES) after removePlugin succeeds", async () => {
+    // After removePlugin already torn down runtime tracking, if marketplace
+    // rm fails with a non-idempotent error (permission denied, IO error),
+    // the user sees an explicit failure broadcast rather than silent ghost
+    // state. removePlugin still ran — this is the expected partial-success
+    // outcome, surfaced honestly.
+    const { deps, appWindows } = await setup();
+    deps.pluginMarketplace.uninstall.mockRejectedValueOnce(new Error("EACCES: permission denied"));
+
+    await expect(invoke("lvis:plugins:uninstall", "agent-hub")).rejects.toThrow("EACCES");
+
+    expect(deps.pluginRuntime.removePlugin).toHaveBeenCalledWith("agent-hub");
+    for (const win of appWindows) {
+      expect(win.webContents.send).toHaveBeenCalledWith(
+        "lvis:plugins:uninstall-result",
+        { slug: "agent-hub", success: false, error: "EACCES: permission denied" },
+      );
+    }
+  });
+
+  it("install rollback runs removePlugin BEFORE marketplace.uninstall", async () => {
+    // Architect M1 regression guard: failed addPlugin may have partially
+    // started the plugin (DB open, worker spawned). Rollback must follow
+    // the same lifecycle order as user-driven uninstall — runtime cleanup
+    // first, then marketplace rm — to avoid the same Windows EBUSY class.
+    const { deps } = await setup();
+    deps.pluginRuntime.addPlugin.mockRejectedValueOnce(new Error("start exception"));
+
+    await expect(invoke("lvis:plugins:install", "agent-hub")).rejects.toThrow("start exception");
+
+    const removePluginOrder = deps.pluginRuntime.removePlugin.mock.invocationCallOrder[0];
+    const uninstallOrder = deps.pluginMarketplace.uninstall.mock.invocationCallOrder[0];
+    expect(removePluginOrder).toBeDefined();
+    expect(uninstallOrder).toBeDefined();
+    expect(removePluginOrder).toBeLessThan(uninstallOrder);
+  });
+
   it("broadcasts idempotent uninstall success when marketplace entry is already gone", async () => {
     const { deps, appWindows } = await setup();
     deps.pluginMarketplace.uninstall.mockRejectedValueOnce(new Error("Plugin not installed: agent-hub"));

@@ -68,7 +68,13 @@ const buildOptions = {
   },
 };
 
-rmSync(outfile, { force: true });
+// In one-shot mode, force a clean build by removing the stale output first.
+// In watch mode, esbuild atomically overwrites the output — pre-deleting
+// would only force the dev launcher to wait an extra round trip for the
+// initial build (and momentarily breaks fs.watch on the output).
+if (!watchMode) {
+  rmSync(outfile, { force: true });
+}
 
 if (watchMode) {
   const ctx = await context(buildOptions);
