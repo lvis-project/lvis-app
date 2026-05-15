@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * useStatusBar — unit tests for toast TTL eviction, queue cap,
  * persistent item management, and producer lifecycle effects.

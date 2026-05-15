@@ -27,6 +27,7 @@ import { LVIS_TOKEN_NAMES } from "../../shared/plugin-ui-tokens.js";
 import { pluginAssetUrlFromRealPath } from "../../main/plugin-asset-protocol.js";
 import { preparePythonRuntimeForInstalledPlugin, withPluginInstallLock } from "../../plugins/install-lifecycle.js";
 import { uninstallPluginWithLifecycle } from "../../plugins/uninstall-lifecycle.js";
+import { lvisHome } from "../../shared/lvis-home.js";
 const log = createLogger("lvis");
 
 function pluginConfigError(
@@ -273,6 +274,8 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     forgetPluginAuthPartitionsService,
     notificationService,
     mcpArtifactStore,
+    agentArtifactStore,
+    skillArtifactStore,
     getMainWindow,
     getAppWindows,
   } = deps;
@@ -575,6 +578,187 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
 
   // read-only, sender guard optional
   ipcMain.handle("lvis:plugins:marketplace:list", () => pluginMarketplace.list());
+
+  ipcMain.handle("lvis:agents:list", async (e) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, "lvis:agents:list", e);
+      return UNAUTHORIZED_FRAME;
+    }
+    const agents = (await deps.agentProfileStore?.list() ?? []).map((agent) => ({
+      name: agent.name,
+      description: agent.description,
+      sourceTools: agent.sourceTools,
+      triggers: agent.triggers,
+      ...(agent.model ? { model: agent.model } : {}),
+      ...(agent.mode ? { mode: agent.mode } : {}),
+      source: agent.source,
+    }));
+    return { agents };
+  });
+
+  ipcMain.handle("lvis:skills:list", async (e) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, "lvis:skills:list", e);
+      return UNAUTHORIZED_FRAME;
+    }
+    const skills = (await deps.skillStore?.list() ?? []).map((skill) => ({
+      name: skill.name,
+      description: skill.description,
+      triggers: skill.triggers,
+      source: skill.source,
+    }));
+    return { skills };
+  });
+
+  ipcMain.handle("lvis:agents:install", async (e, slug: string) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, "lvis:agents:install", e);
+      return UNAUTHORIZED_FRAME;
+    }
+    const trimmed = typeof slug === "string" ? slug.trim() : "";
+    if (!trimmed) return { ok: false, error: "invalid-slug", message: "slug is required" } as const;
+    if (!agentArtifactStore) {
+      return {
+        ok: false,
+        error: "marketplace-disabled",
+        message: "Agent marketplace install is unavailable: marketplace backend is disabled in this build.",
+      } as const;
+    }
+    try {
+      const { installAgentPackageFromMarketplace } = await import("../../agents/agent-installer.js");
+      broadcastPluginLifecycleEvent("lvis:agents:install-progress", { slug: trimmed, phase: "installing" });
+      const result = await installAgentPackageFromMarketplace(trimmed, {
+        fetcher: pluginMarketplace.getFetcher(),
+        store: agentArtifactStore,
+        registryPath: path.resolve(lvisHome(), "agents", "registry.json"),
+        onProgress: (evt) => {
+          if (evt.phase === "downloading") {
+            broadcastPluginLifecycleEvent("lvis:agents:install-progress", {
+              slug: trimmed,
+              phase: "downloading",
+              bytesDownloaded: evt.bytesDownloaded,
+              bytesTotal: evt.bytesTotal,
+            });
+          } else {
+            broadcastPluginLifecycleEvent("lvis:agents:install-progress", { slug: trimmed, phase: evt.phase });
+          }
+        },
+      });
+      emitHostEvent("agent.installed", { agentId: result.agentId, slug: result.slug, source: "marketplace" });
+      broadcastPluginLifecycleEvent("lvis:agents:install-result", {
+        slug: result.slug,
+        agentId: result.agentId,
+        success: true,
+      });
+      return { ok: true as const, slug: result.slug, agentId: result.agentId, version: result.version, installed: true as const };
+    } catch (err) {
+      const message = (err as Error).message ?? "Agent install failed";
+      broadcastPluginLifecycleEvent("lvis:agents:install-result", { slug: trimmed, success: false, error: message });
+      return { ok: false as const, error: "install-failed", message };
+    }
+  });
+
+  ipcMain.handle("lvis:agents:uninstall", async (e, slug: string) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, "lvis:agents:uninstall", e);
+      return UNAUTHORIZED_FRAME;
+    }
+    const trimmed = typeof slug === "string" ? slug.trim() : "";
+    if (!trimmed) return { ok: false, error: "invalid-slug", message: "slug is required" } as const;
+    try {
+      const { uninstallAgentPackage } = await import("../../agents/agent-installer.js");
+      const result = await uninstallAgentPackage(trimmed, {
+        installRoot: path.resolve(lvisHome(), "agents"),
+        registryPath: path.resolve(lvisHome(), "agents", "registry.json"),
+      });
+      emitHostEvent("agent.uninstalled", { agentId: result.agentId, slug: result.slug, source: "marketplace" });
+      broadcastPluginLifecycleEvent("lvis:agents:uninstall-result", {
+        slug: result.slug,
+        agentId: result.agentId,
+        success: true,
+      });
+      return { ok: true as const, slug: result.slug, agentId: result.agentId, uninstalled: true as const };
+    } catch (err) {
+      const message = (err as Error).message ?? "Agent uninstall failed";
+      broadcastPluginLifecycleEvent("lvis:agents:uninstall-result", { slug: trimmed, success: false, error: message });
+      return { ok: false as const, error: "uninstall-failed", message };
+    }
+  });
+
+  ipcMain.handle("lvis:skills:install", async (e, slug: string) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, "lvis:skills:install", e);
+      return UNAUTHORIZED_FRAME;
+    }
+    const trimmed = typeof slug === "string" ? slug.trim() : "";
+    if (!trimmed) return { ok: false, error: "invalid-slug", message: "slug is required" } as const;
+    if (!skillArtifactStore) {
+      return {
+        ok: false,
+        error: "marketplace-disabled",
+        message: "Skill marketplace install is unavailable: marketplace backend is disabled in this build.",
+      } as const;
+    }
+    try {
+      const { installSkillPackageFromMarketplace } = await import("../../skills/skill-installer.js");
+      broadcastPluginLifecycleEvent("lvis:skills:install-progress", { slug: trimmed, phase: "installing" });
+      const result = await installSkillPackageFromMarketplace(trimmed, {
+        fetcher: pluginMarketplace.getFetcher(),
+        store: skillArtifactStore,
+        registryPath: path.resolve(lvisHome(), "skills", "registry.json"),
+        onProgress: (evt) => {
+          if (evt.phase === "downloading") {
+            broadcastPluginLifecycleEvent("lvis:skills:install-progress", {
+              slug: trimmed,
+              phase: "downloading",
+              bytesDownloaded: evt.bytesDownloaded,
+              bytesTotal: evt.bytesTotal,
+            });
+          } else {
+            broadcastPluginLifecycleEvent("lvis:skills:install-progress", { slug: trimmed, phase: evt.phase });
+          }
+        },
+      });
+      emitHostEvent("skill.installed", { skillId: result.skillId, slug: result.slug, source: "marketplace" });
+      broadcastPluginLifecycleEvent("lvis:skills:install-result", {
+        slug: result.slug,
+        skillId: result.skillId,
+        success: true,
+      });
+      return { ok: true as const, slug: result.slug, skillId: result.skillId, version: result.version, installed: true as const };
+    } catch (err) {
+      const message = (err as Error).message ?? "Skill install failed";
+      broadcastPluginLifecycleEvent("lvis:skills:install-result", { slug: trimmed, success: false, error: message });
+      return { ok: false as const, error: "install-failed", message };
+    }
+  });
+
+  ipcMain.handle("lvis:skills:uninstall", async (e, slug: string) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, "lvis:skills:uninstall", e);
+      return UNAUTHORIZED_FRAME;
+    }
+    const trimmed = typeof slug === "string" ? slug.trim() : "";
+    if (!trimmed) return { ok: false, error: "invalid-slug", message: "slug is required" } as const;
+    try {
+      const { uninstallSkillPackage } = await import("../../skills/skill-installer.js");
+      const result = await uninstallSkillPackage(trimmed, {
+        installRoot: path.resolve(lvisHome(), "skills"),
+        registryPath: path.resolve(lvisHome(), "skills", "registry.json"),
+      });
+      emitHostEvent("skill.uninstalled", { skillId: result.skillId, slug: result.slug, source: "marketplace" });
+      broadcastPluginLifecycleEvent("lvis:skills:uninstall-result", {
+        slug: result.slug,
+        skillId: result.skillId,
+        success: true,
+      });
+      return { ok: true as const, slug: result.slug, skillId: result.skillId, uninstalled: true as const };
+    } catch (err) {
+      const message = (err as Error).message ?? "Skill uninstall failed";
+      broadcastPluginLifecycleEvent("lvis:skills:uninstall-result", { slug: trimmed, success: false, error: message });
+      return { ok: false as const, error: "uninstall-failed", message };
+    }
+  });
 
   ipcMain.handle("lvis:plugins:config:get", (e, pluginId: string) => {
     if (!validateSender(e)) {

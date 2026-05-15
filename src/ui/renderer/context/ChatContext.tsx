@@ -6,6 +6,7 @@ import type { EstimateBreakdown } from "../../../lib/cost-estimator.js";
 import type { ModelPricing } from "../../../shared/pricing-data.js";
 import type { LLMVendor } from "../../../shared/llm-vendor-defaults.js";
 import type { Attachment } from "../types/attachments.js";
+import type { AssistantAgentSummary, AssistantSkillSummary } from "../../../shared/assistant-context.js";
 
 /**
  * Cross-cutting chat-view state bundle. Groups props by concern so ChatView
@@ -61,6 +62,12 @@ export interface ChatContextValue {
   activePreset: RolePreset | null;
   activePresetId: string;
   setActivePresetId: (id: string) => void;
+  agentOptions: AssistantAgentSummary[];
+  skillOptions: AssistantSkillSummary[];
+  activeAgentName: string;
+  setActiveAgentName: (name: string) => void;
+  activeSkillNames: string[];
+  setActiveSkillNames: React.Dispatch<React.SetStateAction<string[]>>;
 
   // Composer attachments — single source of truth lives in textarea body
   // (markers like [Image #N], [File #N], [Pasted text #N +X lines]). The
