@@ -976,6 +976,27 @@ export function App() {
             />
           )}
 
+          {/* Inner ErrorBoundary scoped to MainContent so a single failing
+              plugin (e.g. stale manifest schema mismatch — issue #736) does
+              NOT bring down MainToolbar / Settings dialog / Marketplace tab.
+              The user must remain able to update / uninstall the broken
+              plugin via Settings, otherwise they are locked out and the only
+              recovery is manually rm-ing ~/.lvis/plugins/<id>/.
+              onReset: refresh plugin state then re-render — for transient
+              throws this avoids the deterministic reload-into-same-crash
+              loop where the bad data is reloaded with the page. */}
+          <ErrorBoundary
+            boundaryName="main-content"
+            fallback="메인 영역에 오류가 발생했습니다 — 상단 메뉴에서 설정 → 마켓플레이스로 이동하여 해당 플러그인을 업데이트하거나 제거해 주세요."
+            onReset={() => {
+              // Refresh plugin views/cards in case the failure was caused by
+              // a transient state mismatch. activeView reset to "home" gives
+              // the user a clean baseline to navigate from.
+              void refreshViews();
+              void refreshCards();
+              setActiveView("home");
+            }}
+          >
           <MainContent
             activeView={activeView}
             api={api}
@@ -1017,6 +1038,7 @@ export function App() {
             onRoutineAcknowledge={handleRoutineAcknowledge}
             onOpenPermissionQueue={() => setDeferredQueueOpen(true)}
           />
+          </ErrorBoundary>
         </main>
         </div>
         <StatusBar persistent={statusPersistent} visibleToast={statusVisibleToast} pendingCount={statusPendingCount} onToastClick={handleStatusToastClick} />
