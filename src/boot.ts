@@ -58,7 +58,15 @@ import {
   clearAuthPartition as clearAuthPartitionService,
   forgetTrackedPluginAuthPartitions as forgetPluginAuthPartitionsService,
   getTrackedPluginAuthPartitions as listPluginAuthPartitionsService,
+  wirePluginAuthPartitionPersistence,
+  seedPluginAuthPartitions,
 } from "./main/auth-window-service.js";
+import {
+  readPersistedPluginAuthPartitions,
+  writePersistedPluginAuthPartitions,
+  deletePersistedPluginAuthPartitions,
+  cleanupStaleTmpFiles,
+} from "./main/plugin-auth-partition-store.js";
 import { openLinkWindow as openLinkWindowService } from "./main/link-window-service.js";
 import { openAuthPartitionViewer as openAuthPartitionViewerService } from "./main/auth-partition-viewer-service.js";
 import { shell } from "electron";
@@ -202,6 +210,51 @@ export async function bootstrap(
   }
   // Routine delivery sites pass `notificationService` explicitly per-call so
   // there's no module-level singleton to reset between tests/processes.
+
+  // Issue #748 — seed the in-memory plugin-auth-partition tracker from disk so
+  // uninstall can wipe partitions created in prior app sessions (not just the
+  // current runtime). Wire persistence callbacks so every new observation is
+  // immediately flushed to `~/.lvis/plugins/auth-partitions.json`.
+  //
+  // Sweep crashed-write tombstones from prior session before reading current state.
+  // Non-fatal — continue boot if sweep fails.
+  await cleanupStaleTmpFiles().catch((err: unknown) => {
+    log.warn(
+      "boot: cleanupStaleTmpFiles failed (non-fatal): %s",
+      (err as Error).message,
+    );
+  });
+  //
+  // Corrupt file → throws loudly with an audit entry instead of silently
+  // using an empty set (CLAUDE.md "No Fallback Code" rule).
+  await readPersistedPluginAuthPartitions()
+    .then((persisted) => {
+      if (persisted !== null) seedPluginAuthPartitions(persisted);
+    })
+    .catch((err) => {
+      const msg = (err as Error).message;
+      bootAuditLogger.log({
+        timestamp: new Date().toISOString(),
+        sessionId: "boot",
+        type: "error",
+        input: "plugin-auth-partition-store: load failed at boot",
+        output: msg,
+      });
+      throw err;
+    });
+  wirePluginAuthPartitionPersistence({
+    write: writePersistedPluginAuthPartitions,
+    delete: deletePersistedPluginAuthPartitions,
+    onError: (msg) => {
+      bootAuditLogger.log({
+        timestamp: new Date().toISOString(),
+        sessionId: "boot",
+        type: "error",
+        input: "plugin-auth-partition-store: async write/delete failed",
+        output: msg,
+      });
+    },
+  });
 
   // B1 + §F7: ApprovalGate with audit. Constructed BEFORE initPluginRuntime so
   // the per-plugin HostApi factory can wire `agentApproval` namespace to the
