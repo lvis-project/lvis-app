@@ -227,6 +227,10 @@ describe("ChatView", () => {
         "plugin-emitted",
         undefined,
         undefined,
+        // PR #753 — assistant context (agentName / skillNames) is the
+        // sixth positional arg. Plugin-emitted (overlay-import) mode
+        // does not propagate agent/skill selection, so this is undefined.
+        undefined,
       );
       expect(container.textContent).toContain("overlay:meeting-summary");
       expect(container.querySelector("strong")?.textContent).toBe("회의 요약");
@@ -314,6 +318,9 @@ describe("ChatView", () => {
         expect.any(Array),
         "plugin-emitted",
         undefined,
+        undefined,
+        // PR #753 — assistant context (agentName / skillNames) sixth arg.
+        // Same rationale as the prior overlay-import test above.
         undefined,
       );
       expect(container.textContent).toContain("overlay:meeting-summary");

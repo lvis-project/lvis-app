@@ -271,6 +271,38 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     listMarketplacePlugins: vi.fn(async () => marketplace),
     installMarketplacePlugin: vi.fn(async () => ({ ok: true })),
     uninstallMarketplacePlugin: vi.fn(async () => ({ ok: true })),
+    // Marketplace agent/skill surface — added with PR #753. Default mocks
+    // return empty lists and no-op subscribers so renderer tests that mount
+    // <ChatView> via `useAssistantContextOptions` resolve cleanly rather than
+    // throwing `api.listAgentProfiles is not a function`.
+    listAgentProfiles: vi.fn(async () => ({ agents: [] })),
+    listSkills: vi.fn(async () => ({ skills: [] })),
+    installAgentFromMarketplace: vi.fn(async (slug: string) => ({
+      ok: true as const,
+      slug,
+      agentId: `mock-agent-${slug}`,
+      version: "0.0.0",
+    })),
+    uninstallAgentPackage: vi.fn(async (slug: string) => ({
+      ok: true as const,
+      slug,
+      agentId: `mock-agent-${slug}`,
+    })),
+    installSkillFromMarketplace: vi.fn(async (slug: string) => ({
+      ok: true as const,
+      slug,
+      skillId: `mock-skill-${slug}`,
+      version: "0.0.0",
+    })),
+    uninstallSkillPackage: vi.fn(async (slug: string) => ({
+      ok: true as const,
+      slug,
+      skillId: `mock-skill-${slug}`,
+    })),
+    onAgentInstallResult: vi.fn(() => () => {}),
+    onAgentUninstallResult: vi.fn(() => () => {}),
+    onSkillInstallResult: vi.fn(() => () => {}),
+    onSkillUninstallResult: vi.fn(() => () => {}),
     listPluginUiExtensions: vi.fn(async () => pluginUiExtensions),
     listPluginCards: vi.fn(async () => pluginCards),
     callPluginMethod: vi.fn(async () => ({ ok: true })),
