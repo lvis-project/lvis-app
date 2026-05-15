@@ -46,7 +46,7 @@ const mockWindowInstances: Array<{
 let nextWindowId = 1;
 
 vi.mock("electron", () => {
-  const BrowserWindow = vi.fn().mockImplementation((opts: Record<string, unknown>) => {
+  const BrowserWindow = vi.fn().mockImplementation(function (this: unknown, opts: Record<string, unknown>) {
     const id = nextWindowId++;
     const events = new Map<string, Array<() => void>>();
     const instance = {

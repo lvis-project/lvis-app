@@ -67,6 +67,7 @@ describe("BashTool — output cap", () => {
 describe("BashTool — timeout", () => {
   it(
     "kills a long sleep and reports timedOut metadata",
+    { timeout: 8000 },
     async () => {
       const tool = new BashTool();
       const result = await tool.execute(
@@ -77,7 +78,6 @@ describe("BashTool — timeout", () => {
       expect(result.metadata?.timedOut).toBe(true);
       expect(result.output).toMatch(/timed out/i);
     },
-    { timeout: 8000 },
   );
 });
 
