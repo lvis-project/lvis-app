@@ -132,6 +132,10 @@ const REVERSIBLE_SHELL_RE =
 /**
  * Hosts the host considers trusted by virtue of being LVIS-owned or
  * canonical model providers. `network → trusted-host` collapses to LOW.
+ *
+ * Exact-match set for well-known fixed hostnames. For hosts that appear
+ * as subdomains (e.g. Azure AI Foundry project endpoints), use the
+ * suffix list below.
  */
 const TRUSTED_NETWORK_HOSTS: ReadonlySet<string> = new Set([
   "lvisai.xyz",
@@ -139,10 +143,37 @@ const TRUSTED_NETWORK_HOSTS: ReadonlySet<string> = new Set([
   "api.anthropic.com",
   "generativelanguage.googleapis.com",
   "models.github.ai",
-  // C3 — Foundry (Azure AI Foundry) and GCP playground reviewer providers
-  "services.ai.azure.com",
-  "openai.azure.com",
 ]);
+
+/**
+ * Trusted hostname suffixes — any hostname that ends with one of these
+ * patterns (and the suffix is preceded by a `.` or IS the full hostname)
+ * is considered trusted. Used for Azure endpoints whose project subdomain
+ * varies per user (`<project>.services.ai.azure.com`,
+ * `<resource>.openai.azure.com`, etc.).
+ *
+ * Subdomain takeover analysis: both suffixes are rooted at `.azure.com`,
+ * which Microsoft controls. A dangling-CNAME attack would require an
+ * attacker to claim the exact Azure resource in the user's subscription —
+ * not feasible without the user's subscription credentials. See also
+ * {@link validateFoundryEndpoint} in provider-adapters.ts.
+ */
+const TRUSTED_NETWORK_HOST_SUFFIXES: readonly string[] = [
+  ".services.ai.azure.com",
+  ".openai.azure.com",
+];
+
+/**
+ * Returns true when `host` is in {@link TRUSTED_NETWORK_HOSTS} (exact) or
+ * ends with one of {@link TRUSTED_NETWORK_HOST_SUFFIXES} (suffix).
+ */
+function isTrustedNetworkHost(host: string): boolean {
+  if (TRUSTED_NETWORK_HOSTS.has(host)) return true;
+  for (const suffix of TRUSTED_NETWORK_HOST_SUFFIXES) {
+    if (host.endsWith(suffix)) return true;
+  }
+  return false;
+}
 
 /** Localhost / loopback variants. */
 const LOCALHOST_HOSTS: ReadonlySet<string> = new Set([
@@ -334,7 +365,7 @@ const RULES: Array<(ctx: ToolInvocationContext) => RiskVerdict | null> = [
       return { level: "medium", reason: "network graph data operation" };
     }
     const host = target?.host ?? null;
-    if (host && TRUSTED_NETWORK_HOSTS.has(host)) {
+    if (host && isTrustedNetworkHost(host)) {
       return { level: "low", reason: `network trusted host (${host})` };
     }
     return null;

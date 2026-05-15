@@ -296,6 +296,135 @@ describe("Permission policy P4 reviewer-wiring", () => {
   });
 });
 
+describe("Permission policy C3 foundry/gcp wiring paths", () => {
+  it("mode=llm provider=foundry without getSecret → throws clear message", () => {
+    const pm = new PermissionManager(join(tmpDir, "permissions.json"));
+    expect(() =>
+      wireReviewerAgent({
+        permissionManager: pm,
+        readSettings: () => ({
+          mode: "llm",
+          provider: "foundry",
+          model: "gpt-4o",
+          fallbackOnError: "deny",
+          interactive: { autoApprove: "off" },
+        }),
+        // getSecret intentionally omitted
+        getFoundryEndpoint: () => "https://proj.services.ai.azure.com",
+        verdictCachePath: join(tmpDir, "cache-foundry-nosecret.jsonl"),
+        deferredQueuePath: join(tmpDir, "queue-foundry-nosecret.jsonl"),
+      }),
+    ).toThrow(/getSecret/);
+    expect(pm.hasReviewer()).toBe(false);
+  });
+
+  it("mode=llm provider=foundry with getSecret returning null → throws 'API key or endpoint not configured'", () => {
+    const pm = new PermissionManager(join(tmpDir, "permissions.json"));
+    expect(() =>
+      wireReviewerAgent({
+        permissionManager: pm,
+        readSettings: () => ({
+          mode: "llm",
+          provider: "foundry",
+          model: "gpt-4o",
+          fallbackOnError: "deny",
+          interactive: { autoApprove: "off" },
+        }),
+        getSecret: () => null,
+        getFoundryEndpoint: () => "https://proj.services.ai.azure.com",
+        verdictCachePath: join(tmpDir, "cache-foundry-nokey.jsonl"),
+        deferredQueuePath: join(tmpDir, "queue-foundry-nokey.jsonl"),
+      }),
+    ).toThrow(/API key or endpoint not configured/);
+    expect(pm.hasReviewer()).toBe(false);
+  });
+
+  it("mode=llm provider=foundry with valid secrets → wires LlmRiskClassifier", () => {
+    const pm = new PermissionManager(join(tmpDir, "permissions.json"));
+    const result = wireReviewerAgent({
+      permissionManager: pm,
+      readSettings: () => ({
+        mode: "llm",
+        provider: "foundry",
+        model: "gpt-4o",
+        fallbackOnError: "deny",
+        interactive: { autoApprove: "off" },
+      }),
+      getSecret: (key) => {
+        if (key === "llm.apiKey.azure-foundry") return "az-api-key";
+        return null;
+      },
+      getFoundryEndpoint: () => "https://proj.services.ai.azure.com",
+      verdictCachePath: join(tmpDir, "cache-foundry-ok.jsonl"),
+      deferredQueuePath: join(tmpDir, "queue-foundry-ok.jsonl"),
+    });
+    expect(result.classifier).toBeInstanceOf(LlmRiskClassifier);
+    expect(pm.hasReviewer()).toBe(true);
+  });
+
+  it("mode=llm provider=gcp-playground without getSecret → throws clear message", () => {
+    const pm = new PermissionManager(join(tmpDir, "permissions.json"));
+    expect(() =>
+      wireReviewerAgent({
+        permissionManager: pm,
+        readSettings: () => ({
+          mode: "llm",
+          provider: "gcp-playground",
+          model: "gemini-1.5-flash",
+          fallbackOnError: "deny",
+          interactive: { autoApprove: "off" },
+        }),
+        // getSecret intentionally omitted
+        verdictCachePath: join(tmpDir, "cache-gcp-nosecret.jsonl"),
+        deferredQueuePath: join(tmpDir, "queue-gcp-nosecret.jsonl"),
+      }),
+    ).toThrow(/getSecret/);
+    expect(pm.hasReviewer()).toBe(false);
+  });
+
+  it("mode=llm provider=gcp-playground with getSecret returning null → throws 'API key not configured'", () => {
+    const pm = new PermissionManager(join(tmpDir, "permissions.json"));
+    expect(() =>
+      wireReviewerAgent({
+        permissionManager: pm,
+        readSettings: () => ({
+          mode: "llm",
+          provider: "gcp-playground",
+          model: "gemini-1.5-flash",
+          fallbackOnError: "deny",
+          interactive: { autoApprove: "off" },
+        }),
+        getSecret: () => null,
+        verdictCachePath: join(tmpDir, "cache-gcp-nokey.jsonl"),
+        deferredQueuePath: join(tmpDir, "queue-gcp-nokey.jsonl"),
+      }),
+    ).toThrow(/API key not configured/);
+    expect(pm.hasReviewer()).toBe(false);
+  });
+
+  it("mode=llm provider=gcp-playground with llm.apiKey.gemini → wires LlmRiskClassifier", () => {
+    const pm = new PermissionManager(join(tmpDir, "permissions.json"));
+    const result = wireReviewerAgent({
+      permissionManager: pm,
+      readSettings: () => ({
+        mode: "llm",
+        provider: "gcp-playground",
+        model: "gemini-1.5-flash",
+        fallbackOnError: "deny",
+        interactive: { autoApprove: "off" },
+      }),
+      getSecret: (key) => {
+        if (key === "llm.apiKey.gemini") return "AIza-gemini-key";
+        return null;
+      },
+      verdictCachePath: join(tmpDir, "cache-gcp-ok.jsonl"),
+      deferredQueuePath: join(tmpDir, "queue-gcp-ok.jsonl"),
+    });
+    expect(result.classifier).toBeInstanceOf(LlmRiskClassifier);
+    expect(pm.hasReviewer()).toBe(true);
+  });
+});
+
 describe("Permission policy P4 LlmReviewerProviderAdapter", () => {
   it("collects streamTurn `text_delta` events into a single string", async () => {
     const provider = stubProvider([

@@ -113,10 +113,12 @@ export class LlmReviewerProviderAdapter implements LlmReviewerProvider {
  * Returning `null` indicates the vendor is not configured; the caller
  * then fails the boot step (atomic cutover, no silent fallback).
  *
- * C3: `getSecret` is required when `foundry` or `gcp-playground` is the
- * configured provider. The adapters resolve their API keys from the encrypted
- * secret store at wire-time (boot) so the keys are never persisted in memory
- * beyond the wiring step.
+ * C3 key inheritance: `foundry` reads `llm.apiKey.azure-foundry` via
+ * `getSecret` and the endpoint via `getFoundryEndpoint` (plain setting,
+ * not a secret). `gcp-playground` reads `llm.apiKey.gemini` via `getSecret`.
+ * This eliminates separate reviewer secret storage — users who have chat
+ * working with Azure AI Foundry or Google Gemini get the reviewer provider
+ * automatically.
  */
 export interface WireReviewerDeps {
   permissionManager: PermissionManager;
@@ -135,9 +137,16 @@ export interface WireReviewerDeps {
   /**
    * C3 — Secret accessor for Foundry and GCP playground providers.
    * Required when `settings.reviewer.provider` is `"foundry"` or
-   * `"gcp-playground"`. Override in tests to supply fake secrets.
+   * `"gcp-playground"`. Reads `llm.apiKey.azure-foundry` (Foundry) or
+   * `llm.apiKey.gemini` (GCP). Override in tests to supply fake secrets.
    */
   getSecret?: (key: string) => string | null;
+  /**
+   * C3 — Endpoint accessor for the Foundry provider. Reads the plain
+   * (non-secret) `llm.vendors.azure-foundry.baseUrl` setting. Required
+   * when `settings.reviewer.provider` is `"foundry"`. Override in tests.
+   */
+  getFoundryEndpoint?: () => string | null;
   /** Test override for the cache file path. */
   verdictCachePath?: string;
   /** Test override for the deferred queue file path. */
@@ -283,11 +292,16 @@ function resolveReviewerAdapter(
         `Boot caller must provide a secret accessor (atomic cutover — no silent fallback).`,
       );
     }
-    const adapter = createFoundryProvider(deps.getSecret);
+    const adapter = createFoundryProvider(
+      deps.getSecret,
+      deps.getFoundryEndpoint ?? (() => null),
+    );
     if (!adapter) {
       throw new Error(
         `Permission reviewer wiring: provider='foundry' — API key or endpoint not configured. ` +
-        `Set 'reviewer.apiKey.foundry' and 'reviewer.endpoint.foundry' secrets, or change reviewer provider.`,
+        `Set the Azure AI Foundry API key ('llm.apiKey.azure-foundry') and endpoint ` +
+        `('llm.vendors.azure-foundry.baseUrl') via the chat LLM provider settings, ` +
+        `or change the reviewer provider.`,
       );
     }
     return adapter;
@@ -304,7 +318,8 @@ function resolveReviewerAdapter(
     if (!adapter) {
       throw new Error(
         `Permission reviewer wiring: provider='gcp-playground' — API key not configured. ` +
-        `Set 'reviewer.apiKey.gcp-playground' secret, or change reviewer provider.`,
+        `Set the Google Gemini API key ('llm.apiKey.gemini') via the chat LLM provider ` +
+        `settings, or change the reviewer provider.`,
       );
     }
     return adapter;

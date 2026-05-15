@@ -19,6 +19,7 @@ import { EXEC_MODE_OPTIONS } from "../constants.js";
 import type {
   ExecMode,
   HookTrustRow,
+  LvisApi,
   PermissionReviewerFallbackOnError,
   PermissionReviewerMode,
   PermissionReviewerProvider,
@@ -299,6 +300,17 @@ export function PermissionsTab() {
     });
     setProviderKeyMap(keyMap);
   }, []);
+
+  // C3 — refresh providerKeyMap whenever chat LLM settings change so that
+  // adding an Azure AI Foundry or Gemini key in the Settings tab immediately
+  // enables the corresponding reviewer provider without a tab switch.
+  useEffect(() => {
+    const api = (window as unknown as { lvisApi: LvisApi }).lvisApi;
+    if (!api?.onSettingsUpdated) return;
+    return api.onSettingsUpdated(() => {
+      void refreshProviderKeyMap();
+    });
+  }, [refreshProviderKeyMap]);
 
   const applyReviewerCommand = async (rawArgs: string) => {
     if (reviewerBusy) return;

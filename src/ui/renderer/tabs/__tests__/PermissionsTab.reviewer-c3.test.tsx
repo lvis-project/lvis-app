@@ -132,6 +132,12 @@ function installApi(providerKeys: Partial<Record<string, boolean>> = {}) {
   };
 
   (globalThis as unknown as { window: typeof window }).window.lvis = lvis as never;
+  // C3 Round 2 — stub lvisApi.onSettingsUpdated so the PermissionsTab
+  // useEffect that subscribes to settings changes doesn't throw.
+  const lvisApi = {
+    onSettingsUpdated: vi.fn(() => () => undefined),
+  };
+  (globalThis as unknown as { window: { lvisApi?: unknown } }).window.lvisApi = lvisApi;
   return lvis;
 }
 

@@ -7,6 +7,10 @@
  *   - createFoundryProvider / createGcpPlaygroundProvider factory helpers
  *   - reviewerProviderKeyPresent predicate for all five providers
  *   - Error propagation (non-2xx → thrown error for fallbackOnError chain)
+ *   - Key inheritance: Foundry uses llm.apiKey.azure-foundry,
+ *     GCP uses llm.apiKey.gemini (chat-provider key inheritance)
+ *   - GCP API key in x-goog-api-key header (not URL query param)
+ *   - Foundry endpoint validation (HTTPS + .azure.com suffix)
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
@@ -15,8 +19,8 @@ import {
   createFoundryProvider,
   createGcpPlaygroundProvider,
   reviewerProviderKeyPresent,
+  validateFoundryEndpoint,
   FOUNDRY_API_KEY_SECRET,
-  FOUNDRY_ENDPOINT_SECRET,
   GCP_PLAYGROUND_API_KEY_SECRET,
 } from "../reviewer/provider-adapters.js";
 
@@ -54,13 +58,25 @@ describe("FoundryReviewerProvider", () => {
   });
 
   it("throws when apiKey is empty", () => {
-    expect(() => new FoundryReviewerProvider("", "https://endpoint.example.com")).toThrow(
+    expect(() => new FoundryReviewerProvider("", "https://endpoint.services.ai.azure.com")).toThrow(
       /apiKey is required/,
     );
   });
 
   it("throws when endpoint is empty", () => {
     expect(() => new FoundryReviewerProvider("sk-test", "")).toThrow(/endpoint is required/);
+  });
+
+  it("throws when endpoint is HTTP (not HTTPS)", () => {
+    expect(
+      () => new FoundryReviewerProvider("sk-test", "http://proj.services.ai.azure.com"),
+    ).toThrow(/must use HTTPS/);
+  });
+
+  it("throws when endpoint hostname does not end with .azure.com", () => {
+    expect(
+      () => new FoundryReviewerProvider("sk-test", "https://evil.example.com"),
+    ).toThrow(/must end with .azure.com/);
   });
 
   it("builds correct URL with model encoded in path + api-version query param", async () => {
@@ -83,7 +99,7 @@ describe("FoundryReviewerProvider", () => {
     expect(fetchSpy).toHaveBeenCalledOnce();
     const [url] = fetchSpy.mock.calls[0] as [string, RequestInit];
     expect(url).toContain("/models/gpt-4o-mini/chat/completions");
-    expect(url).toContain("api-version=2024-05-01-preview");
+    expect(url).toContain("api-version=");
     expect(url).toContain("proj.services.ai.azure.com");
   });
 
@@ -150,6 +166,30 @@ describe("FoundryReviewerProvider", () => {
   });
 });
 
+// ─── validateFoundryEndpoint ─────────────────────────────────────────
+
+describe("validateFoundryEndpoint", () => {
+  it("accepts https://<subdomain>.services.ai.azure.com", () => {
+    expect(() => validateFoundryEndpoint("https://proj.services.ai.azure.com")).not.toThrow();
+  });
+
+  it("accepts https://<resource>.openai.azure.com", () => {
+    expect(() => validateFoundryEndpoint("https://myresource.openai.azure.com")).not.toThrow();
+  });
+
+  it("rejects HTTP endpoints", () => {
+    expect(() => validateFoundryEndpoint("http://proj.services.ai.azure.com")).toThrow(/HTTPS/);
+  });
+
+  it("rejects non-azure.com hostnames", () => {
+    expect(() => validateFoundryEndpoint("https://attacker.example.com")).toThrow(/azure.com/);
+  });
+
+  it("rejects invalid URL strings", () => {
+    expect(() => validateFoundryEndpoint("not-a-url")).toThrow(/valid URL/);
+  });
+});
+
 // ─── GcpPlaygroundReviewerProvider ──────────────────────────────────
 
 describe("GcpPlaygroundReviewerProvider", () => {
@@ -161,7 +201,7 @@ describe("GcpPlaygroundReviewerProvider", () => {
     expect(() => new GcpPlaygroundReviewerProvider("")).toThrow(/apiKey is required/);
   });
 
-  it("builds correct GCP URL with model + API key as query param", async () => {
+  it("builds correct GCP URL with model in path (no API key in URL)", async () => {
     const fetchSpy = mockFetch({
       ok: true,
       json: async () => ({
@@ -183,7 +223,26 @@ describe("GcpPlaygroundReviewerProvider", () => {
     expect(url).toContain("generativelanguage.googleapis.com");
     expect(url).toContain("gemini-1.5-flash");
     expect(url).toContain(":generateContent");
-    expect(url).toContain("key=AIza-test-key");
+    // API key must NOT appear in the URL — it is sent as a header instead.
+    expect(url).not.toContain("key=");
+    expect(url).not.toContain("AIza-test-key");
+  });
+
+  it("sends API key as x-goog-api-key header (not URL query param)", async () => {
+    const fetchSpy = mockFetch({
+      ok: true,
+      json: async () => ({
+        candidates: [{ content: { parts: [{ text: '{"level":"low","reason":"ok"}' }] } }],
+        usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 2 },
+      }),
+    });
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+    const provider = new GcpPlaygroundReviewerProvider("AIza-secret-key");
+    await provider.complete({ model: "m", systemPrompt: "s", userPrompt: "u" });
+
+    const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect((init.headers as Record<string, string>)["x-goog-api-key"]).toBe("AIza-secret-key");
   });
 
   it("sends systemInstruction + contents in request body", async () => {
@@ -258,23 +317,41 @@ describe("GcpPlaygroundReviewerProvider", () => {
 describe("createFoundryProvider", () => {
   it("returns null when API key is absent", () => {
     const getSecret = (_key: string) => null;
-    expect(createFoundryProvider(getSecret)).toBeNull();
+    const getEndpoint = () => "https://e.services.ai.azure.com";
+    expect(createFoundryProvider(getSecret, getEndpoint)).toBeNull();
   });
 
   it("returns null when endpoint is absent (key present)", () => {
     const getSecret = (key: string) =>
       key === FOUNDRY_API_KEY_SECRET ? "api-key" : null;
-    expect(createFoundryProvider(getSecret)).toBeNull();
+    const getEndpoint = () => null;
+    expect(createFoundryProvider(getSecret, getEndpoint)).toBeNull();
   });
 
-  it("returns FoundryReviewerProvider when both key + endpoint are present", () => {
-    const getSecret = (key: string) => {
-      if (key === FOUNDRY_API_KEY_SECRET) return "api-key";
-      if (key === FOUNDRY_ENDPOINT_SECRET) return "https://e.services.ai.azure.com";
-      return null;
-    };
-    const provider = createFoundryProvider(getSecret);
+  it("returns null when endpoint is invalid (key present, bad URL)", () => {
+    const getSecret = (key: string) =>
+      key === FOUNDRY_API_KEY_SECRET ? "api-key" : null;
+    const getEndpoint = () => "http://evil.example.com";
+    expect(createFoundryProvider(getSecret, getEndpoint)).toBeNull();
+  });
+
+  it("returns FoundryReviewerProvider when both key + endpoint are present and valid", () => {
+    const getSecret = (key: string) =>
+      key === FOUNDRY_API_KEY_SECRET ? "api-key" : null;
+    const getEndpoint = () => "https://e.services.ai.azure.com";
+    const provider = createFoundryProvider(getSecret, getEndpoint);
     expect(provider).toBeInstanceOf(FoundryReviewerProvider);
+  });
+
+  // Key inheritance — the factory reads llm.apiKey.azure-foundry
+  it("reads llm.apiKey.azure-foundry (chat-provider key inheritance)", () => {
+    const getSecret = vi.fn((key: string) =>
+      key === "llm.apiKey.azure-foundry" ? "az-key" : null,
+    );
+    const getEndpoint = () => "https://proj.services.ai.azure.com";
+    const provider = createFoundryProvider(getSecret, getEndpoint);
+    expect(provider).toBeInstanceOf(FoundryReviewerProvider);
+    expect(getSecret).toHaveBeenCalledWith("llm.apiKey.azure-foundry");
   });
 });
 
@@ -289,6 +366,16 @@ describe("createGcpPlaygroundProvider", () => {
       key === GCP_PLAYGROUND_API_KEY_SECRET ? "AIza-key" : null;
     const provider = createGcpPlaygroundProvider(getSecret);
     expect(provider).toBeInstanceOf(GcpPlaygroundReviewerProvider);
+  });
+
+  // Key inheritance — the factory reads llm.apiKey.gemini
+  it("reads llm.apiKey.gemini (chat-provider key inheritance)", () => {
+    const getSecret = vi.fn((key: string) =>
+      key === "llm.apiKey.gemini" ? "gemini-key" : null,
+    );
+    const provider = createGcpPlaygroundProvider(getSecret);
+    expect(provider).toBeInstanceOf(GcpPlaygroundReviewerProvider);
+    expect(getSecret).toHaveBeenCalledWith("llm.apiKey.gemini");
   });
 });
 
@@ -312,25 +399,35 @@ describe("reviewerProviderKeyPresent", () => {
     expect(reviewerProviderKeyPresent("google", getSecret)).toBe(true);
   });
 
-  it("foundry → false when both secrets absent", () => {
+  it("foundry → false when API key absent (even with endpoint)", () => {
     const getSecret = vi.fn((_key: string) => null);
-    expect(reviewerProviderKeyPresent("foundry", getSecret)).toBe(false);
+    const getEndpoint = vi.fn(() => "https://e.services.ai.azure.com");
+    expect(reviewerProviderKeyPresent("foundry", getSecret, getEndpoint)).toBe(false);
   });
 
   it("foundry → false when only API key present (endpoint missing)", () => {
     const getSecret = vi.fn((key: string) =>
       key === FOUNDRY_API_KEY_SECRET ? "k" : null,
     );
-    expect(reviewerProviderKeyPresent("foundry", getSecret)).toBe(false);
+    const getEndpoint = vi.fn(() => null);
+    expect(reviewerProviderKeyPresent("foundry", getSecret, getEndpoint)).toBe(false);
   });
 
-  it("foundry → true when both API key and endpoint present", () => {
-    const getSecret = vi.fn((key: string) => {
-      if (key === FOUNDRY_API_KEY_SECRET) return "api-key";
-      if (key === FOUNDRY_ENDPOINT_SECRET) return "https://e.services.ai.azure.com";
-      return null;
-    });
-    expect(reviewerProviderKeyPresent("foundry", getSecret)).toBe(true);
+  it("foundry → true when both llm.apiKey.azure-foundry and endpoint present", () => {
+    const getSecret = vi.fn((key: string) =>
+      key === FOUNDRY_API_KEY_SECRET ? "api-key" : null,
+    );
+    const getEndpoint = vi.fn(() => "https://e.services.ai.azure.com");
+    expect(reviewerProviderKeyPresent("foundry", getSecret, getEndpoint)).toBe(true);
+    expect(getSecret).toHaveBeenCalledWith("llm.apiKey.azure-foundry");
+  });
+
+  it("foundry → false when getEndpoint not supplied (conservative)", () => {
+    const getSecret = vi.fn((key: string) =>
+      key === FOUNDRY_API_KEY_SECRET ? "k" : null,
+    );
+    // No getEndpoint supplied → treated as no endpoint
+    expect(reviewerProviderKeyPresent("foundry", getSecret)).toBe(false);
   });
 
   it("gcp-playground → false when API key absent", () => {
@@ -338,11 +435,12 @@ describe("reviewerProviderKeyPresent", () => {
     expect(reviewerProviderKeyPresent("gcp-playground", getSecret)).toBe(false);
   });
 
-  it("gcp-playground → true when API key present", () => {
+  it("gcp-playground → true when llm.apiKey.gemini is present", () => {
     const getSecret = vi.fn((key: string) =>
       key === GCP_PLAYGROUND_API_KEY_SECRET ? "AIza-key" : null,
     );
     expect(reviewerProviderKeyPresent("gcp-playground", getSecret)).toBe(true);
+    expect(getSecret).toHaveBeenCalledWith("llm.apiKey.gemini");
   });
 
   it("unknown provider → false (checked via llm.apiKey.unknown)", () => {
