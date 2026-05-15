@@ -113,4 +113,75 @@ describe("ErrorBoundary", () => {
     expect(fallbackEl.closest("div")?.className).toContain("items-center");
     consoleSpy.mockRestore();
   });
+
+  it("onReset receives the captured Error so callers can branch on error class", () => {
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const onReset = vi.fn();
+    const { getByText } = render(
+      <ErrorBoundary onReset={onReset}>
+        <ThrowingChild />
+      </ErrorBoundary>,
+    );
+    fireEvent.click(getByText("다시 시도"));
+    // Caller's onReset received the Error object captured by getDerivedStateFromError
+    expect(onReset).toHaveBeenCalledTimes(1);
+    const passedArg = onReset.mock.calls[0][0];
+    expect(passedArg).toBeInstanceOf(Error);
+    expect(passedArg.message).toBe("test render error");
+    consoleSpy.mockRestore();
+  });
+
+  it("onReset throwing does NOT trap the boundary in error state — state still clears", () => {
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    function Harness() {
+      const [shouldThrow, setShouldThrow] = useState(true);
+      return (
+        <ErrorBoundary
+          onReset={() => {
+            // Trigger BOTH a throw AND a state change. The boundary must
+            // catch the throw, log it, and still proceed to clear its
+            // own error state so the children get a chance to re-render.
+            setShouldThrow(false);
+            throw new Error("onReset hook intentionally throws");
+          }}
+        >
+          <ConditionallyThrowing shouldThrow={shouldThrow} />
+        </ErrorBoundary>
+      );
+    }
+    const { getByText, queryByTestId } = render(<Harness />);
+    expect(queryByTestId("recovered-child")).toBeNull();
+    fireEvent.click(getByText("다시 시도"));
+    // Boundary cleared its state despite onReset throwing → children re-rendered
+    expect(queryByTestId("recovered-child")).not.toBeNull();
+    // Verify the onReset throw was logged (forensic trail for the caller bug)
+    const calls = consoleSpy.mock.calls.map((args) => String(args[0]));
+    expect(calls.some((s) => s.includes("onReset hook threw"))).toBe(true);
+    consoleSpy.mockRestore();
+  });
+
+  it("(integration) inner boundary failure does NOT bubble to outer sibling — sibling stays mounted (#736)", () => {
+    // Mimics the App.tsx layout: outer boundary wraps the whole tree;
+    // inner boundary scopes a sub-region. Sibling region (Toolbar stub)
+    // sits OUTSIDE the inner boundary. When the inner sub-region throws,
+    // the inner boundary catches it; the sibling stays in the DOM.
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { getByTestId, getByText } = render(
+      <ErrorBoundary boundaryName="outer-root">
+        <div data-testid="sibling-toolbar">toolbar stays mounted</div>
+        <ErrorBoundary boundaryName="inner-main-content" fallback="메인 영역 오류">
+          <ThrowingChild />
+        </ErrorBoundary>
+      </ErrorBoundary>,
+    );
+    // Inner boundary caught the throw and shows its scoped fallback
+    expect(getByText("메인 영역 오류")).toBeDefined();
+    // Sibling (mocking MainToolbar / Settings access) is still rendered
+    expect(getByTestId("sibling-toolbar")).toBeDefined();
+    // Outer boundary's fallback is NOT shown (the throw didn't propagate)
+    const calls = consoleSpy.mock.calls.map((args) => String(args[0]));
+    expect(calls.some((s) => s.includes("boundary='inner-main-content'"))).toBe(true);
+    expect(calls.some((s) => s.includes("boundary='outer-root'"))).toBe(false);
+    consoleSpy.mockRestore();
+  });
 });
