@@ -89,9 +89,6 @@ function makeServices(pm: ReturnType<typeof makeMockPM>, gate = makeMockGate()) 
       // `format: "secret"` keys. Default to undefined so the strip pass is
       // a no-op for legacy tests.
       getPluginManifest: vi.fn(() => undefined),
-      // config:set re-syncs ToolRegistry after restartPlugin to avoid the
-      // post-toggle "도구를 찾을 수 없습니다" regression — default to empty.
-      listPluginManifests: vi.fn(() => []),
     } as any,
     pluginMarketplace: { list: vi.fn(), install: vi.fn(), uninstall: vi.fn() } as any,
     settingsService: {
@@ -128,8 +125,8 @@ function makeServices(pm: ReturnType<typeof makeMockPM>, gate = makeMockGate()) 
     mcpManager: { listServers: vi.fn(() => []), killSwitch: vi.fn() } as any,
     toolRegistry: {
       setDenyRules: vi.fn(),
-      // syncPluginToolRegistry contract — wipe then re-register from runtime.
-      listAll: vi.fn(() => []),
+      // Spied on by the "delegates post-restart ToolRegistry resync" test
+      // — the IPC handler must NOT mutate ToolRegistry directly.
       unregisterByPlugin: vi.fn(),
       register: vi.fn(),
     } as any,
