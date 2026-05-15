@@ -8,7 +8,7 @@ set -u
 # Honor Ctrl-C even when interactive `read` is active. Without this the
 # `|| true` fallbacks on `read` would swallow SIGINT and the script would
 # fall through to `open` instead of aborting.
-trap 'echo; echo "Aborted."; exit 130' INT
+trap 'echo; echo "중단됨. / Aborted."; exit 130' INT
 
 APP="/Applications/LVIS.app"
 
@@ -34,7 +34,10 @@ fi
 echo "📦 Found: $APP"
 echo ""
 echo "🔓 Checking Gatekeeper quarantine..."
-if xattr -p com.apple.quarantine "$APP" >/dev/null 2>&1; then
+# Recursive scan so nested resources (Frameworks/Helpers) are caught —
+# `xattr -p` is non-recursive but `xattr -dr` strips recursively. Asymmetric
+# pre-check would miss nested quarantine and falsely report "already clean".
+if xattr -lr "$APP" 2>/dev/null | grep -q com.apple.quarantine; then
   if xattr -dr com.apple.quarantine "$APP" 2>/dev/null; then
     echo "✅ Quarantine removed."
   else
