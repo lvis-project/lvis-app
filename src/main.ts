@@ -6,8 +6,8 @@
  */
 import { Menu, Tray, app, BrowserWindow, ipcMain, shell, dialog, nativeImage, protocol, screen, type IpcMainInvokeEvent, type MenuItemConstructorOptions } from "electron";
 import { Buffer } from "node:buffer";
-import { dirname, resolve } from "node:path";
-import { existsSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { existsSync, mkdirSync } from "node:fs";
 import * as https from "node:https";
 import * as tls from "node:tls";
 import { Agent, setGlobalDispatcher } from "undici";
@@ -44,6 +44,7 @@ import { createLogger } from "./lib/logger.js";
 import { LVIS_LOGO_PATH, LVIS_LOGO_VIEW_BOX } from "./shared/lvis-logo.js";
 import { normalizeSettingsTab } from "./shared/settings-tabs.js";
 import { preparePythonRuntimeForInstalledPlugin, withPluginInstallLock } from "./plugins/install-lifecycle.js";
+import { lvisHome } from "./shared/lvis-home.js";
 const log = createLogger("lvis");
 
 function errorMessage(err: unknown): string {
@@ -54,6 +55,19 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const distRoot = resolve(__dirname, "..", "..");
 const projectRoot = resolve(distRoot, "..");
+
+// When LVIS launches via Finder/`open` (packaged dmg), the inherited cwd is `/`.
+// The tool executor fails-closed on root cwd (src/tools/executor.ts), which
+// would block every builtin tool. Anchor cwd to `~/.lvis/workspace/` — its own
+// feature namespace per the storage convention (CLAUDE.md § Storage Namespace).
+function ensureWorkspaceCwd(): string {
+  const workspaceDir = join(lvisHome(), "workspace");
+  mkdirSync(workspaceDir, { recursive: true, mode: 0o700 });
+  process.chdir(workspaceDir);
+  return workspaceDir;
+}
+const workspaceCwd = ensureWorkspaceCwd();
+log.info({ workspaceCwd }, "main: cwd anchored to ~/.lvis/workspace");
 
 registerPluginAssetProtocolScheme(protocol);
 
