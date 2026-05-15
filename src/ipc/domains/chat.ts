@@ -21,6 +21,7 @@ import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.
 import type { IpcDeps } from "../types.js";
 import { sendToWebContents } from "../safe-send.js";
 import { createLogger } from "../../lib/logger.js";
+import { readDiffSidecar, isSafeId } from "../../tools/write-diff-cache.js";
 const log = createLogger("chat");
 const MAX_ROLE_PROMPT_CHARS = 12_000;
 
@@ -949,6 +950,30 @@ export function registerChatHandlers(deps: IpcDeps): void {
         if (content.charCodeAt(i) === 10) lineCount++;
       }
       return { content, lineCount };
+    },
+  );
+
+  // ─── Issue #749: write-file diff sidecar lazy-load ──────────────────────
+  // Returns { before, after } for a write_file tool call when content exceeded
+  // WRITE_DIFF_PREVIEW_LIMIT on either side. The sidecar is written by
+  // WriteFileTool.executeTyped into ~/.lvis/diff-cache/<sessionId>/<toolUseId>.json.
+  // Returns null when:
+  //   - sessionId / toolUseId fail safe-id validation (no path separators)
+  //   - sidecar file not found or unreadable
+  ipcMain.handle(
+    "lvis:chat:get-write-diff",
+    async (e, payload: unknown): Promise<{ before: string; after: string } | null> => {
+      if (!validateSender(e)) {
+        auditUnauthorized(auditLogger, "lvis:chat:get-write-diff", e);
+        return null;
+      }
+      const p = (payload ?? {}) as Record<string, unknown>;
+      const sessionId = typeof p.sessionId === "string" ? p.sessionId : "";
+      const toolUseId = typeof p.toolUseId === "string" ? p.toolUseId : "";
+      if (!sessionId || !toolUseId || !isSafeId(sessionId) || !isSafeId(toolUseId)) {
+        return null;
+      }
+      return readDiffSidecar(sessionId, toolUseId);
     },
   );
 

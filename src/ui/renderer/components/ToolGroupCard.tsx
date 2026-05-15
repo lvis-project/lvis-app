@@ -44,7 +44,7 @@ import { getToolDisplayName } from "../utils/tool-display.js";
 import { formatToolDuration } from "../utils/format-duration.js";
 import type { RenderHtmlPayload } from "../types.js";
 import { HtmlPreview } from "./HtmlPreview.js";
-import { FileEditDiff } from "./FileEditDiff.js";
+import { FileEditDiff, WriteFileSidecarDiff } from "./FileEditDiff.js";
 import { McpAppView } from "./McpAppView.js";
 import { CompactedToolResult } from "./CompactedToolResult.js";
 
@@ -135,6 +135,33 @@ function SingleToolInline({
     );
   }
 
+  // Issue #749: write_file results with truncated+hasSidecar render via sidecar IPC.
+  const isWriteFileSidecar =
+    !isRunning &&
+    !isError &&
+    tool.name === "write_file" &&
+    typeof tool.result === "string" &&
+    sessionId &&
+    (() => {
+      try {
+        const p = JSON.parse(tool.result) as Record<string, unknown>;
+        return p.truncated === true && p.hasSidecar === true;
+      } catch {
+        return false;
+      }
+    })();
+
+  if (isWriteFileSidecar && sessionId) {
+    return (
+      <WriteFileSidecarDiff
+        resultJson={tool.result as string}
+        sessionId={sessionId}
+        toolUseId={tool.toolUseId}
+        filePath={typeof tool.input?.path === "string" ? tool.input.path : undefined}
+      />
+    );
+  }
+
   const htmlPayload: RenderHtmlPayload | null =
     tool.name === "render_html" && tool.status === "done"
       ? parseRenderHtmlResult(tool.result)
@@ -142,7 +169,6 @@ function SingleToolInline({
   const htmlNeedsJavaScript =
     htmlPayload != null && /<script\b|on[a-z]+\s*=|javascript:/i.test(htmlPayload.html);
   const fileDiff: FileEditDiffData | null = extractFileEditDiff(tool);
-
   return (
     <div className="min-w-0 w-full max-w-full rounded-md text-[11px] text-muted-foreground">
       <button
@@ -330,6 +356,24 @@ export function ToolGroupCard({
                             input={tool.input}
                             stubContent={tool.result}
                             sessionId={sessionId}
+                          />
+                        ) : /* Issue #749: write_file truncated+hasSidecar → WriteFileSidecarDiff */
+                        tool.status !== "error" &&
+                          tool.name === "write_file" &&
+                          sessionId &&
+                          (() => {
+                            try {
+                              const p = JSON.parse(tool.result) as Record<string, unknown>;
+                              return p.truncated === true && p.hasSidecar === true;
+                            } catch {
+                              return false;
+                            }
+                          })() ? (
+                          <WriteFileSidecarDiff
+                            resultJson={tool.result}
+                            sessionId={sessionId}
+                            toolUseId={tool.toolUseId}
+                            filePath={typeof tool.input?.path === "string" ? tool.input.path : undefined}
                           />
                         ) : (
                           <ToolPayloadBlock value={tool.result} isError={tool.status === "error"} />
