@@ -20,6 +20,9 @@ import type { PluginInstallReceipt } from "./plugin-install-receipt.js";
 import { STABLE_SEMVER_RE } from "./runtime/manifest-validation.js";
 import type { InstallPolicy, PluginRegistryEntry } from "./types.js";
 import { createLogger } from "../lib/logger.js";
+import { readAgentRegistry } from "../agents/agent-registry.js";
+import { readSkillRegistry } from "../skills/skill-registry.js";
+import { lvisHome } from "../shared/lvis-home.js";
 const log = createLogger("marketplace");
 
 export type { MarketplaceFetcher } from "./marketplace-fetcher.js";
@@ -268,18 +271,38 @@ export class PluginMarketplaceService {
       await setCachedCatalog(catalogPlugins, cacheBase);
     }
 
-    const [plugins, registry] = await Promise.all([
+    const [plugins, registry, agentRegistry, skillRegistry] = await Promise.all([
       Promise.resolve(catalogPlugins),
       readPluginRegistry(this.registryPath),
+      readAgentRegistry(resolve(lvisHome(), "agents", "registry.json")),
+      readSkillRegistry(resolve(lvisHome(), "skills", "registry.json")),
     ]);
     const items: MarketplaceListItem[] = [];
     for (const plugin of plugins) {
       const entry = registry.plugins.find((x) => x.id === plugin.id);
-      const isManaged = await this.resolveIsManaged(plugin, entry?.manifestPath);
+      const agentEntry = plugin.pluginType === "agent"
+        ? agentRegistry.agents.find((x) => x.id === plugin.id || x.id === plugin.slug)
+        : undefined;
+      const skillEntry = plugin.pluginType === "skill"
+        ? skillRegistry.skills.find((x) => x.id === plugin.id || x.id === plugin.slug)
+        : undefined;
+      const installed = plugin.pluginType === "agent"
+        ? !!agentEntry
+        : plugin.pluginType === "skill"
+          ? !!skillEntry
+          : !!entry;
+      const enabled = plugin.pluginType === "agent"
+        ? agentEntry?.enabled !== false
+        : plugin.pluginType === "skill"
+          ? skillEntry?.enabled !== false
+          : entry?.enabled !== false;
+      const isManaged = plugin.pluginType === "agent" || plugin.pluginType === "skill"
+        ? false
+        : await this.resolveIsManaged(plugin, entry?.manifestPath);
       items.push({
         ...plugin,
-        installed: !!entry,
-        enabled: entry?.enabled !== false,
+        installed,
+        enabled,
         isManaged,
       });
     }

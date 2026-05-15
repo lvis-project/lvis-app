@@ -510,11 +510,11 @@ export interface PluginMarketplaceItem {
   /** S14: dependency capabilities this plugin requires. */
   requires?: RequiresSpec;
   /**
-   * lvis-marketplace#52 — catalog entries are either a regular plugin or
-   * an MCP server. Defaults to `"plugin"` when the server omits the field
-   * (back-compat with pre-#52 catalogs).
+   * lvis-marketplace#52/#456 — catalog entries are regular plugins, MCP
+   * servers, agent profiles, or skills. Defaults to `"plugin"` when the
+   * server omits the field (back-compat with pre-#52 catalogs).
    */
-  pluginType?: "plugin" | "mcp";
+  pluginType?: "plugin" | "mcp" | "agent" | "skill";
   /**
    * MCP runtime block — present when `pluginType === "mcp"` and the
    * server has the schema extension. The host materializes this into

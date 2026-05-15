@@ -4,11 +4,12 @@ export function findLvisProtocolUri(argv: readonly string[]): string | null {
 }
 
 const MARKETPLACE_ACTIONS = new Set(["install", "uninstall"]);
+const MARKETPLACE_PACKAGE_TYPES = new Set(["plugin", "mcp", "agent", "skill"]);
 const MARKETPLACE_SLUG_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/i;
 
 export function parseMarketplacePluginActionUri(
   url: string,
-): { action: "install" | "uninstall"; slug: string } | null {
+): { action: "install" | "uninstall"; slug: string; packageType: "plugin" | "mcp" | "agent" | "skill" } | null {
   let parsed: URL;
   try {
     parsed = new URL(url);
@@ -19,14 +20,26 @@ export function parseMarketplacePluginActionUri(
   const action = parsed.hostname.toLowerCase();
   if (!MARKETPLACE_ACTIONS.has(action)) return null;
   if (parsed.search || parsed.hash) return null;
-  let slug: string;
+  let segments: string[];
   try {
-    slug = decodeURIComponent(parsed.pathname.replace(/^\//, ""));
+    segments = parsed.pathname
+      .replace(/^\//, "")
+      .split("/")
+      .filter((part) => part.length > 0)
+      .map((part) => decodeURIComponent(part));
   } catch {
     return null;
   }
+  if (segments.length !== 1 && segments.length !== 2) return null;
+  let packageType: "plugin" | "mcp" | "agent" | "skill" = "plugin";
+  let slug = segments[0];
+  if (segments.length === 2) {
+    if (!MARKETPLACE_PACKAGE_TYPES.has(segments[0])) return null;
+    packageType = segments[0] as typeof packageType;
+    slug = segments[1];
+  }
   if (!slug || !MARKETPLACE_SLUG_RE.test(slug)) return null;
-  return { action: action as "install" | "uninstall", slug };
+  return { action: action as "install" | "uninstall", slug, packageType };
 }
 
 /**

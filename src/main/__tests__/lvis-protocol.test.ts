@@ -145,10 +145,12 @@ describe("parseMarketplacePluginActionUri", () => {
     expect(parseMarketplacePluginActionUri("lvis://install/agent-hub")).toEqual({
       action: "install",
       slug: "agent-hub",
+      packageType: "plugin",
     });
     expect(parseMarketplacePluginActionUri("lvis://uninstall/agent-hub")).toEqual({
       action: "uninstall",
       slug: "agent-hub",
+      packageType: "plugin",
     });
   });
 
@@ -156,6 +158,20 @@ describe("parseMarketplacePluginActionUri", () => {
     expect(parseMarketplacePluginActionUri("lvis://uninstall/agent.hub_2")).toEqual({
       action: "uninstall",
       slug: "agent.hub_2",
+      packageType: "plugin",
+    });
+  });
+
+  it("parses package-typed marketplace action URLs", () => {
+    expect(parseMarketplacePluginActionUri("lvis://install/agent/research-helper")).toEqual({
+      action: "install",
+      slug: "research-helper",
+      packageType: "agent",
+    });
+    expect(parseMarketplacePluginActionUri("lvis://uninstall/skill/summarizer")).toEqual({
+      action: "uninstall",
+      slug: "summarizer",
+      packageType: "skill",
     });
   });
 
@@ -165,5 +181,7 @@ describe("parseMarketplacePluginActionUri", () => {
     expect(parseMarketplacePluginActionUri("lvis://remove/agent-hub")).toBeNull();
     expect(parseMarketplacePluginActionUri("lvis://uninstall/%2E%2E%2Fagent-hub")).toBeNull();
     expect(parseMarketplacePluginActionUri("lvis://uninstall/%E0%A4%A")).toBeNull();
+    expect(parseMarketplacePluginActionUri("lvis://install/theme/agent-hub")).toBeNull();
+    expect(parseMarketplacePluginActionUri("lvis://install/agent/agent-hub/extra")).toBeNull();
   });
 });

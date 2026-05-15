@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ChevronDown, Paperclip, User } from "lucide-react";
+import { Bot, Check, Paperclip, Sparkles, User } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
 import { Checkbox } from "../../../components/ui/checkbox.js";
 import { Label } from "../../../components/ui/label.js";
@@ -7,12 +7,17 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "../../../components/ui/dropdown-menu.js";
 import { PluginGridButton, type PluginEntry } from "./PluginGridButton.js";
 import type { InstallPhase } from "../hooks/use-plugin-marketplace.js";
 import { CommandPopover, type QuickAction } from "./CommandPopover.js";
 import type { RolePreset } from "../../../data/role-presets.js";
+import type { AssistantAgentSummary, AssistantSkillSummary } from "../../../shared/assistant-context.js";
 
 export interface InputActionBarProps {
   // Leading
@@ -42,6 +47,12 @@ export interface InputActionBarProps {
   activePreset: RolePreset | null | undefined;
   activePresetId: string;
   onSelectPreset: (id: string) => void;
+  agentOptions: AssistantAgentSummary[];
+  skillOptions: AssistantSkillSummary[];
+  activeAgentName: string;
+  onSelectAgent: (name: string) => void;
+  activeSkillNames: string[];
+  onChangeSkillNames: (updater: (current: string[]) => string[]) => void;
   // Trailing — thinking
   vendorSupportsThinking: boolean;
   enableThinkingChat: boolean;
@@ -81,12 +92,36 @@ export function InputActionBar({
   activePreset,
   activePresetId,
   onSelectPreset,
+  agentOptions,
+  skillOptions,
+  activeAgentName,
+  onSelectAgent,
+  activeSkillNames,
+  onChangeSkillNames,
   vendorSupportsThinking,
   enableThinkingChat,
   onToggleThinking,
   permissionSlot,
   approvalSlot,
 }: InputActionBarProps) {
+  const activeSkillSet = new Set(activeSkillNames);
+  const hasAssistantContext =
+    !!activeAgentName ||
+    activeSkillNames.length > 0 ||
+    (!!activePreset && !activePreset.isDefault);
+  const assistantTitle = [
+    activeAgentName ? `Agent: ${activeAgentName}` : "",
+    activeSkillNames.length > 0 ? `Skills: ${activeSkillNames.join(", ")}` : "",
+    activePreset && !activePreset.isDefault ? `Persona: ${activePreset.name}` : "",
+  ].filter(Boolean).join(" / ") || "Agent, skill, persona 선택";
+  const toggleSkill = (name: string) => {
+    onChangeSkillNames((current) => (
+      current.includes(name)
+        ? current.filter((item) => item !== name)
+        : [...current, name]
+    ));
+  };
+
   return (
     <div data-testid="input-action-bar" className="flex min-w-0 items-center justify-between gap-2 px-3 pt-2">
       {/* Leading cluster */}
@@ -129,26 +164,97 @@ export function InputActionBar({
         {permissionSlot}
         {approvalSlot}
 
-        {/* Role preset dropdown */}
+        {/* Assistant context dropdown */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
               variant="outline"
               size="sm"
-              className="h-7 max-w-28 gap-1 bg-input-bar text-[11px]"
-              title="역할 프리셋 선택"
+              className="relative h-7 w-7 bg-input-bar p-0"
+              title={assistantTitle}
+              aria-label={assistantTitle}
             >
-              <User className="h-3 w-3" />
-              <span className="min-w-0 truncate">{activePreset?.name ?? "기본"}</span>
-              <ChevronDown className="h-3 w-3 opacity-60" />
+              <User className="h-3.5 w-3.5" />
+              {hasAssistantContext && (
+                <span className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-action-view" />
+              )}
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            {rolePresets.map((p) => (
-              <DropdownMenuItem key={p.id} onClick={() => onSelectPreset(p.id)}>
-                <span className={activePresetId === p.id ? "font-semibold" : ""}>{p.name}</span>
-              </DropdownMenuItem>
-            ))}
+          <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>
+                <Bot className="mr-2 h-3.5 w-3.5" />
+                <span>Agent</span>
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="max-h-72 w-60 overflow-y-auto">
+                <DropdownMenuItem onClick={() => onSelectAgent("")}>
+                  <Check className={`mr-2 h-3.5 w-3.5 ${activeAgentName ? "opacity-0" : "opacity-100"}`} />
+                  <span>기본 에이전트</span>
+                </DropdownMenuItem>
+                {agentOptions.length > 0 ? (
+                  agentOptions.map((agent) => (
+                    <DropdownMenuItem key={agent.name} onClick={() => onSelectAgent(agent.name)}>
+                      <Check className={`mr-2 h-3.5 w-3.5 ${activeAgentName === agent.name ? "opacity-100" : "opacity-0"}`} />
+                      <span className="min-w-0 truncate">{agent.name}</span>
+                    </DropdownMenuItem>
+                  ))
+                ) : (
+                  <DropdownMenuItem disabled>
+                    <span className="text-muted-foreground">설치된 agent 없음</span>
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>
+                <Sparkles className="mr-2 h-3.5 w-3.5" />
+                <span>Skills</span>
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="max-h-72 w-60 overflow-y-auto">
+                <DropdownMenuItem
+                  onSelect={(event) => {
+                    event.preventDefault();
+                    onChangeSkillNames(() => []);
+                  }}
+                >
+                  <Check className={`mr-2 h-3.5 w-3.5 ${activeSkillNames.length === 0 ? "opacity-100" : "opacity-0"}`} />
+                  <span>스킬 해제</span>
+                </DropdownMenuItem>
+                {skillOptions.length > 0 ? (
+                  skillOptions.map((skill) => (
+                    <DropdownMenuItem
+                      key={skill.name}
+                      onSelect={(event) => {
+                        event.preventDefault();
+                        toggleSkill(skill.name);
+                      }}
+                    >
+                      <Check className={`mr-2 h-3.5 w-3.5 ${activeSkillSet.has(skill.name) ? "opacity-100" : "opacity-0"}`} />
+                      <span className="min-w-0 truncate">{skill.name}</span>
+                    </DropdownMenuItem>
+                  ))
+                ) : (
+                  <DropdownMenuItem disabled>
+                    <span className="text-muted-foreground">사용 가능한 skill 없음</span>
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+            <DropdownMenuSeparator />
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>
+                <User className="mr-2 h-3.5 w-3.5" />
+                <span>Persona</span>
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="max-h-72 w-56 overflow-y-auto">
+                {rolePresets.map((p) => (
+                  <DropdownMenuItem key={p.id} onClick={() => onSelectPreset(p.id)}>
+                    <Check className={`mr-2 h-3.5 w-3.5 ${activePresetId === p.id ? "opacity-100" : "opacity-0"}`} />
+                    <span className={activePresetId === p.id ? "min-w-0 truncate font-semibold" : "min-w-0 truncate"}>{p.name}</span>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
           </DropdownMenuContent>
         </DropdownMenu>
 
