@@ -63,4 +63,28 @@ describe("stripMarkdown", () => {
   it("leaves bare punctuation alone", () => {
     expect(stripMarkdown("err: status=500, retry?")).toBe("err: status=500, retry?");
   });
+
+  it("preserves snake_case identifiers (no intra-word italic)", () => {
+    expect(stripMarkdown("session_abc_xyz fired")).toBe("session_abc_xyz fired");
+    expect(stripMarkdown("Open my_file_name.ts")).toBe("Open my_file_name.ts");
+    expect(stripMarkdown("tool web_search ok")).toBe("tool web_search ok");
+  });
+
+  it("preserves __ inside identifiers", () => {
+    expect(stripMarkdown("key__name__value")).toBe("key__name__value");
+  });
+
+  it("still strips word-boundary _italic_ and __bold__", () => {
+    expect(stripMarkdown("status _urgent_")).toBe("status urgent");
+    expect(stripMarkdown("status __urgent__")).toBe("status urgent");
+  });
+
+  it("balances one level of parens in link URLs", () => {
+    expect(stripMarkdown("see [Foo](https://x.com/path_(v1))")).toBe("see Foo");
+    expect(stripMarkdown("[wiki](https://en.wikipedia.org/wiki/Foo_(bar)) note")).toBe("wiki note");
+  });
+
+  it("preserves emoji surrogate pairs inside emphasis", () => {
+    expect(stripMarkdown("**👍 done**")).toBe("👍 done");
+  });
 });
