@@ -936,6 +936,24 @@ export async function initPluginRuntime(
       toolRegistry.unregisterByPlugin(pluginId);
       lateBinding.conversationLoopRef.fn?.onPluginDisabled(pluginId);
     },
+    // Symmetric to `onDisable` — fires after a successful restartPlugin /
+    // addPlugin / reloadPlugin so the ToolRegistry re-registers the tools
+    // that `onDisable` wiped during the tear-down phase. Without this
+    // wiring every chat-surface tool call would hit `도구를 찾을 수 없습니다`
+    // after a hostApi.config.set or IPC config-set restart cycle (see
+    // PR #760). The sync is idempotent + non-fatal — a sync exception is
+    // logged but does not surface as `runtime reload failed`, so the
+    // caller plugin doesn't retry an already-persisted config save.
+    onEnable: (pluginId) => {
+      try {
+        syncPluginToolRegistry(pluginRuntime, toolRegistry);
+      } catch (err) {
+        log.error(
+          `tool registry sync failed after plugin onEnable (${pluginId}): %s`,
+          (err as Error).message,
+        );
+      }
+    },
     createHostApi: (pluginId: string, manifest: PluginManifest, pluginDataDir: string): PluginHostApi => ({
       storage: createPluginStorage(pluginId, pluginDataDir, (msg, meta) => {
         try {
@@ -992,38 +1010,16 @@ export async function initPluginRuntime(
           // config. Mirrors the IPC `lvis:plugins:config:set` behaviour
           // (restartPlugin, not restartAll) so changing one plugin's config
           // does NOT wipe every other loaded plugin's in-memory state.
+          // `restartPlugin` resolves after both the `onDisable` tear-down
+          // (unregisters plugin tools) and the `onEnable` re-registration
+          // wired on this runtime — so no explicit ToolRegistry sync is
+          // needed here. Restart already audits per-plugin failures; surface
+          // the outer error so the calling plugin can branch on it.
           try {
             await pluginRuntime.restartPlugin(pluginId);
           } catch (err) {
-            // Restart already audits per-plugin failures; surface the
-            // outer error so the calling plugin can branch on it.
             throw new Error(
               `[plugin:${pluginId}] config.set('${key}'): runtime reload failed: ${(err as Error).message}`,
-            );
-          }
-          // restartPlugin's stop phase fires `onDisable` which calls
-          // `toolRegistry.unregisterByPlugin(pluginId)`, but the start phase
-          // only re-populates `methodMap` — it does NOT re-register tools in
-          // the ToolRegistry. Without this sync, every plugin tool turns
-          // into `도구를 찾을 수 없습니다` for the rest of the session.
-          //
-          // The sync is non-fatal — it's idempotent and the next install /
-          // uninstall / dev-reload event heals any transient miss, mirroring
-          // the error semantics of the sibling sync subscribers below.
-          // Throwing here would misattribute a registry-sync failure as a
-          // `runtime reload failed` to the caller plugin.
-          //
-          // Wire-up is covered by the integration test in
-          // `src/__tests__/ipc-bridge-permissions.test.ts` ("re-registers
-          // plugin tools in ToolRegistry after the restart-triggered onDisable
-          // wipe") via the IPC sibling at `ipc/domains/plugins.ts` which uses
-          // the same `syncPluginToolRegistry` function.
-          try {
-            syncPluginToolRegistry(pluginRuntime, toolRegistry);
-          } catch (err) {
-            log.error(
-              `tool registry sync failed after hostApi.config.set restart (${pluginId}): %s`,
-              (err as Error).message,
             );
           }
         },
@@ -1555,27 +1551,22 @@ export async function initPluginRuntime(
   // for these (it reads `contents.session.partition` which is undocumented
   // and returns `undefined`), so the partition policy must be installed at
   // plugin-install time.
-  // Full ToolRegistry resync on every plugin lifecycle event. Idempotent —
-  // wipes plugin-sourced tools then re-registers from the current
-  // PluginRuntime state, so install/update/uninstall/reinstall all converge
-  // to a consistent registry without per-event special casing. A transient
-  // failure (logged below) is healed automatically by the next event.
+  // Install events: partition policy is per-install (Electron `session`s are
+  // created lazily and pinned per pluginId), so it stays here. ToolRegistry
+  // resync runs through the runtime's `onEnable` hook wired above —
+  // `addPlugin` / `restartPlugin` already fire it before this event lands.
   onHostEvent("plugin.installed", (data) => {
     const pluginId = (data as { pluginId?: string } | undefined)?.pluginId;
     if (typeof pluginId !== "string") return;
     installPluginPartitionPolicy(pluginPartitionName(pluginId), {
       pluginRoot: pluginRuntime.getPluginRoot(pluginId),
     });
-    try {
-      syncPluginToolRegistry(pluginRuntime, toolRegistry);
-    } catch (err) {
-      log.error(
-        `tool registry sync failed after plugin.installed (${pluginId}): %s`,
-        (err as Error).message,
-      );
-    }
   });
 
+  // Uninstall: `onDisable` only unregisters the removed plugin's tools, but a
+  // full resync also sweeps any ghost entries (e.g. a stale registry row from
+  // a previous load generation). `onEnable` covers add/restart/reload; it
+  // does NOT fire on uninstall, so the listener-driven sync is still load-bearing.
   onHostEvent("plugin.uninstalled", (data) => {
     const pluginId = (data as { pluginId?: string } | undefined)?.pluginId;
     if (typeof pluginId !== "string") return;
@@ -1593,22 +1584,14 @@ export async function initPluginRuntime(
   registerPluginTools(pluginRuntime, toolRegistry);
 
   // I2 — Dev-mode live-reload watcher. No-op unless LVIS_DEV_RELOAD=1.
+  // ToolRegistry resync runs through the runtime's `onEnable` callback wired
+  // above — `reloadPlugin` fires it on success — so the watcher only
+  // surfaces the hot-reload log line here.
   const pluginDevWatcher = startPluginDevWatcher({
     pluginRuntime,
     onReloaded: (pluginId) => {
       const manifest = pluginRuntime.getPluginManifest(pluginId);
       if (!manifest) return;
-      // Mirror the install/uninstall/restart sibling sync sites — non-fatal,
-      // logged on failure. Without the try/catch a sync exception would
-      // propagate into the watcher's event loop and could take it offline.
-      try {
-        syncPluginToolRegistry(pluginRuntime, toolRegistry);
-      } catch (err) {
-        log.error(
-          `tool registry sync failed after plugin dev hot-reload (${pluginId}): %s`,
-          (err as Error).message,
-        );
-      }
       log.info(`plugin:${pluginId} hot-reloaded (${manifest.tools.length} tools)`);
     },
   });
