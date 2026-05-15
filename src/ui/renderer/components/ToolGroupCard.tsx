@@ -44,6 +44,7 @@ import type { RenderHtmlPayload } from "../types.js";
 import { HtmlPreview } from "./HtmlPreview.js";
 import { McpAppView } from "./McpAppView.js";
 import { CompactedToolResult } from "./CompactedToolResult.js";
+import { FileEditDiff } from "./FileEditDiff.js";
 
 /**
  * Per-tool execution duration badge — `⏱ 1.4s`. Rendered next to the
@@ -127,6 +128,33 @@ function SingleToolInline({
         input={tool.input}
         stubContent={tool.result as string}
         sessionId={sessionId}
+      />
+    );
+  }
+
+  // Issue #749: write_file results with truncated+hasSidecar render as FileEditDiff.
+  const isWriteFileDiff =
+    !isRunning &&
+    !isError &&
+    tool.name === "write_file" &&
+    typeof tool.result === "string" &&
+    sessionId &&
+    (() => {
+      try {
+        const p = JSON.parse(tool.result) as Record<string, unknown>;
+        return p.truncated === true && p.hasSidecar === true;
+      } catch {
+        return false;
+      }
+    })();
+
+  if (isWriteFileDiff && sessionId) {
+    return (
+      <FileEditDiff
+        resultJson={tool.result as string}
+        sessionId={sessionId}
+        toolUseId={tool.toolUseId}
+        filePath={typeof tool.input?.path === "string" ? tool.input.path : undefined}
       />
     );
   }
@@ -288,6 +316,24 @@ export function ToolGroupCard({
                             input={tool.input}
                             stubContent={tool.result}
                             sessionId={sessionId}
+                          />
+                        ) : /* Issue #749: write_file truncated+hasSidecar → FileEditDiff */
+                        tool.status !== "error" &&
+                          tool.name === "write_file" &&
+                          sessionId &&
+                          (() => {
+                            try {
+                              const p = JSON.parse(tool.result) as Record<string, unknown>;
+                              return p.truncated === true && p.hasSidecar === true;
+                            } catch {
+                              return false;
+                            }
+                          })() ? (
+                          <FileEditDiff
+                            resultJson={tool.result}
+                            sessionId={sessionId}
+                            toolUseId={tool.toolUseId}
+                            filePath={typeof tool.input?.path === "string" ? tool.input.path : undefined}
                           />
                         ) : (
                           <ToolPayloadBlock value={tool.result} isError={tool.status === "error"} />

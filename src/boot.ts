@@ -48,6 +48,7 @@ import { RealCloudMarketplaceFetcher } from "./plugins/real-cloud-marketplace-fe
 import { PluginArtifactStore } from "./plugins/plugin-artifact-store.js";
 import { getBundledPublicKeys } from "./plugins/publisher-keys.js";
 import { sweepOrphanUninstallDirs } from "./plugins/orphan-uninstall-sweeper.js";
+import { purgeStaleSessionDiffDirs, clearSessionDiffCache } from "./tools/write-diff-cache.js";
 import { resolvePluginPaths } from "./plugins/plugin-paths.js";
 import { StarredStore } from "./data/starred-store.js";
 import { FeedbackStore } from "./data/feedback-store.js";
@@ -247,6 +248,29 @@ export async function bootstrap(
     })
     .catch((err) => {
       log.warn("boot: orphan-uninstall-sweeper crashed (non-fatal): %s", (err as Error).message);
+    });
+
+  // Issue #749 — boot-time purge of stale write-file diff sidecar dirs.
+  // Dirs older than 7 days are deleted fire-and-forget. Mirrors the
+  // orphan-uninstall-sweeper pattern: failures surface to audit log only.
+  const DIFF_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+  void purgeStaleSessionDiffDirs(DIFF_CACHE_MAX_AGE_MS)
+    .then(({ swept, failed }) => {
+      if (swept.length > 0 || failed.length > 0) {
+        log.info("boot: diff-cache-sweeper swept=%d failed=%d", swept.length, failed.length);
+      }
+      if (failed.length > 0) {
+        bootAuditLogger.log({
+          timestamp: new Date().toISOString(),
+          sessionId: "boot",
+          type: "warn",
+          input: "diff-cache-sweep-failed",
+          output: JSON.stringify(failed),
+        });
+      }
+    })
+    .catch((err) => {
+      log.warn("boot: diff-cache-sweeper crashed (non-fatal): %s", (err as Error).message);
     });
 
   const {
@@ -802,6 +826,15 @@ export async function bootstrap(
     log: (msg, meta) => log.warn({ meta }, msg),
   });
   app.on("before-quit", () => watcherTelemetryCollector.stop());
+
+  // Issue #749 — clean up current session's diff-cache dir on quit.
+  // Fire-and-forget: quit must not block on I/O.
+  app.prependOnceListener("before-quit", () => {
+    const sid = conversationLoop.getSessionId();
+    void clearSessionDiffCache(sid).catch((err: unknown) => {
+      log.warn("before-quit: diff-cache clear failed: %s", (err as Error).message);
+    });
+  });
 
   // Sprint 4.C — starred store + D6 feedback store.
   const starredStore = new StarredStore();

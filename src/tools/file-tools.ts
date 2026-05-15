@@ -24,6 +24,7 @@ import { z } from "zod";
 
 import { validateSandboxPath } from "../sandbox/path-validator.js";
 import { globToRegExp } from "../lib/glob-matcher.js";
+import { writeDiffSidecar, WRITE_DIFF_PREVIEW_LIMIT } from "./write-diff-cache.js";
 import {
   canonicalizePathForMatch,
   caseFoldForMatch,
@@ -347,12 +348,44 @@ export class WriteFileTool extends FileTool<typeof WriteFileInputSchema> {
     const blocked = this.ensureAllowed(target, ctx);
     if (blocked) return blocked;
 
+    // Read existing content for diff sidecar (best-effort — missing file = empty before).
+    let before = "";
+    try {
+      before = await readFile(target, "utf8");
+    } catch {
+      // File does not exist yet — before remains "".
+    }
+    const after = input.content;
+
     await mkdir(dirname(target), { recursive: true });
-    await atomicTextWrite(target, input.content);
+    await atomicTextWrite(target, after);
+
+    // Write diff sidecar when either side exceeds the preview limit.
+    const sessionId =
+      typeof ctx.metadata?.sessionId === "string" ? ctx.metadata.sessionId : "";
+    const toolUseId =
+      typeof ctx.metadata?.toolUseId === "string" ? ctx.metadata.toolUseId : "";
+    let hasSidecar = false;
+    if (sessionId && toolUseId) {
+      // writeDiffSidecar logs failures internally via its own createLogger.
+      // auditWarn callback is a no-op here; failures keep truncated state
+      // visible in the UI without a silent fallback.
+      hasSidecar = await writeDiffSidecar(sessionId, toolUseId, before, after, () => {});
+    }
+
+    const beforeBytes = Buffer.byteLength(before, "utf8");
+    const afterBytes = Buffer.byteLength(after, "utf8");
+    const truncated =
+      beforeBytes > WRITE_DIFF_PREVIEW_LIMIT || afterBytes > WRITE_DIFF_PREVIEW_LIMIT;
+
     return {
-      output: JSON.stringify({ path: target, bytes: Buffer.byteLength(input.content, "utf8") }),
+      output: JSON.stringify({
+        path: target,
+        bytes: afterBytes,
+        ...(truncated ? { truncated: true, hasSidecar } : {}),
+      }),
       isError: false,
-      metadata: { path: target },
+      metadata: { path: target, ...(truncated ? { truncated: true, hasSidecar } : {}) },
     };
   }
 }

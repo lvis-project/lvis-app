@@ -304,6 +304,13 @@ export type LvisApi = {
     sessionId: string,
     toolUseId: string,
   ) => Promise<{ content: string; lineCount: number } | null>;
+  /** Issue #749: lazy-load full write_file diff when content exceeded preview limit.
+   * Returns { before, after } from ~/.lvis/diff-cache/<sessionId>/<toolUseId>.json,
+   * or null when sidecar not found / session id invalid. */
+  chatGetWriteDiff: (
+    sessionId: string,
+    toolUseId: string,
+  ) => Promise<{ before: string; after: string } | null>;
   submitFeedback: (payload: { sessionId: string; messageIndex: number; rating: "up" | "down"; reason?: string }) => Promise<{ ok: boolean; error?: string }>;
   starredList: () => Promise<Array<{ id: string; sessionId: string; messageIndex: number; role: string; text: string; starredAt: string }>>;
   starredAdd: (entry: { sessionId?: string; messageIndex: number; role: string; text: string }) => Promise<{ ok: boolean; entry?: { id: string; sessionId: string; messageIndex: number; role: string; text: string; starredAt: string } }>;
