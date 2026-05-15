@@ -16,7 +16,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { BrowserWindow, session, type Cookie, type Session, type WebContents } from "electron";
+import { BrowserWindow, screen, session, type Cookie, type Session, type WebContents } from "electron";
 import { registerWindowEventListeners } from "../ipc/domains/window.js";
 import { markAsWindowControlOwned } from "../ipc/window-control-registry.js";
 import { markAsAuthOwned } from "./auth-window-registry.js";
@@ -493,7 +493,7 @@ export async function openAuthWindow(
   });
   // Centering only matters for visible windows; skip the geometry math
   // when the caller asked for a hidden warmup.
-  if (showRequested) centerAuthWindowOverParent(authWindow, parent);
+  if (showRequested) centerAuthWindowOnScreen(authWindow);
   if (typeof authWindow.setMenu === "function") authWindow.setMenu(null);
   markAsWindowControlOwned(authWindow.webContents);
   registerWindowEventListeners(authWindow);
@@ -717,13 +717,16 @@ export async function openAuthWindow(
   });
 }
 
-function centerAuthWindowOverParent(authWindow: BrowserWindow, parent: BrowserWindow): void {
-  if (authWindow.isDestroyed() || parent.isDestroyed()) return;
-  const parentBounds = parent.getBounds();
-  const authBounds = authWindow.getBounds();
+// Auth window 위치: primary display 의 workArea 중앙. host parent 위치를
+// 따라가던 이전 동작은 host 가 화면 가장자리에 있으면 auth window 도
+// 가장자리에 잘려서 사용자 매번 수동 이동 — 데스크톱 중앙 고정으로 통일.
+function centerAuthWindowOnScreen(authWindow: BrowserWindow): void {
+  if (authWindow.isDestroyed()) return;
+  const { workArea } = screen.getPrimaryDisplay();
+  const { width, height } = authWindow.getBounds();
   authWindow.setPosition(
-    Math.round(parentBounds.x + (parentBounds.width - authBounds.width) / 2),
-    Math.round(parentBounds.y + (parentBounds.height - authBounds.height) / 2),
+    Math.round(workArea.x + (workArea.width - width) / 2),
+    Math.round(workArea.y + (workArea.height - height) / 2),
   );
 }
 
