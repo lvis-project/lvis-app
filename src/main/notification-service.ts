@@ -25,6 +25,7 @@
 import type { BrowserWindow } from "electron";
 import type { AuditLogger } from "../audit/audit-logger.js";
 import { createLogger } from "../lib/logger.js";
+import { stripMarkdown } from "./strip-markdown.js";
 const log = createLogger("lvis");
 
 export type NotificationKind = "turn-end" | "routine" | "ask-user" | "approval";
@@ -263,8 +264,14 @@ export class NotificationService {
     // Sanitize title and body — strip control chars defense-in-depth (body
     // sources include LLM responses and user-typed questions; routine titles
     // interpolate user-authored routine IDs).
+    //
+    // Two body variants: the toast goes through the React renderer (markdown
+    // OK), but OS-native notifications on macOS/Windows/Linux treat `body`
+    // as plain text, so markdown leaks to the user as literal `**bold**` etc.
+    // Strip before truncating so the 80-char cap reflects what the user sees.
     const cleanTitle = capTitle(opts.title);
     const truncatedBody = truncateBody(opts.body);
+    const truncatedPlainBody = truncateBody(stripMarkdown(opts.body));
     const urgent = opts.urgent ?? (opts.kind === "approval");
 
     const win = this.getMainWindow();
@@ -288,12 +295,12 @@ export class NotificationService {
           "notification toast send failed, falling back to OS: %s",
           (err as Error).message,
         );
-        this.fireOsNotification(opts, cleanTitle, truncatedBody, urgent);
+        this.fireOsNotification(opts, cleanTitle, truncatedPlainBody, urgent);
         this.audit("os", opts.kind, cleanTitle);
         return;
       }
     } else {
-      this.fireOsNotification(opts, cleanTitle, truncatedBody, urgent);
+      this.fireOsNotification(opts, cleanTitle, truncatedPlainBody, urgent);
     }
 
     this.audit(gate, opts.kind, cleanTitle);
