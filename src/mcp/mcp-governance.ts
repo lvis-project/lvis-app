@@ -11,7 +11,6 @@
  */
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
 import type {
   McpGovernancePolicy,
   McpServerApproval,
@@ -20,6 +19,7 @@ import type {
   ValidationResult,
 } from "./types.js";
 import { createLogger } from "../lib/logger.js";
+import { lvisHome } from "../shared/lvis-home.js";
 const log = createLogger("mcp-governance");
 
 const DEFAULT_POLICY: McpGovernancePolicy = {
@@ -42,7 +42,7 @@ export class McpGovernance {
   private refreshTimer: NodeJS.Timeout | null = null;
 
   constructor(policyPath?: string) {
-    this.policyPath = policyPath ?? join(homedir(), ".lvis", "governance", "mcp-policy.json");
+    this.policyPath = policyPath ?? join(lvisHome(), "governance", "mcp-policy.json");
     this.policy = this.loadPolicy();
   }
 

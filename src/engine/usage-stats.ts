@@ -6,10 +6,10 @@
  */
 import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
 import { isLLMVendor, type LLMVendor } from "./llm/types.js";
 import { DEFAULT_LLM_VENDOR } from "../shared/llm-vendor-defaults.js";
 import { getModelPricing, computeCost } from "./llm/pricing.js";
+import { lvisHome } from "../shared/lvis-home.js";
 
 export interface AuditTurnEntry {
   timestamp: string;
@@ -281,7 +281,7 @@ export interface UsageRangeOptions {
  * Reads only JSONL files whose filename date falls within the range.
  */
 export function getUsageRange(opts: UsageRangeOptions): UsageSummary {
-  const auditDir = join(homedir(), ".lvis", "audit");
+  const auditDir = join(lvisHome(), "audit");
   if (!existsSync(auditDir)) return computeUsageSummary([]);
 
   const files = readdirSync(auditDir)
@@ -332,7 +332,7 @@ export function computeMonthlyProjection(trend: UsageTrendPoint[]): number {
 
 /** Default convenience — reads from `~/.lvis/audit` and computes a 60-day summary. */
 export function getUsageSummary(days: number = 60): UsageSummary {
-  const auditDir = join(homedir(), ".lvis", "audit");
+  const auditDir = join(lvisHome(), "audit");
   const entries = readAuditEntries(auditDir, days);
   return computeUsageSummary(entries);
 }

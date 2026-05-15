@@ -9,11 +9,11 @@
  */
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { lvisHome } from "../shared/lvis-home.js";
 
 // Q9: consolidated under ~/.lvis/routine/sessions/ (same namespace as routines.json)
-const DEFAULT_SESSIONS_ROOT = resolve(homedir(), ".lvis", "routine", "sessions");
+const DEFAULT_SESSIONS_ROOT = resolve(lvisHome(), "routine", "sessions");
 
 export interface RoutineSessionRecord {
   routineId: string;

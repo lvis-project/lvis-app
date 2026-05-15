@@ -22,10 +22,10 @@
  *
  */
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, resolve as pathResolve } from "node:path";
 import { withFileLock } from "../lib/with-file-lock.js";
 import { createLogger } from "../lib/logger.js";
+import { lvisHome } from "../shared/lvis-home.js";
 
 const log = createLogger("permission-settings");
 
@@ -102,7 +102,7 @@ const REVIEWER_PROVIDERS: ReadonlySet<ReviewerProvider> = new Set([
 const REVIEWER_FALLBACKS: ReadonlySet<ReviewerFallbackOnError> = new Set(["deny", "rule"]);
 
 function defaultPath(): string {
-  return pathResolve(homedir(), ".lvis", "settings.json");
+  return pathResolve(lvisHome(), "settings.json");
 }
 
 /**
