@@ -176,7 +176,7 @@ export class PythonRuntimeBootstrapper {
       uvVersion,
       pythonVersion,
     };
-    await fs.writeFile(READY_SENTINEL, JSON.stringify(data, null, 2), "utf8");
+    await fs.writeFile(READY_SENTINEL, JSON.stringify(data, null, 2), { encoding: "utf8", mode: 0o600 });
   }
 
   // ─── private: setup pipeline ─────────────────────
@@ -306,9 +306,10 @@ export class PythonRuntimeBootstrapper {
         throw new Error(`packaged uv archive를 찾을 수 없습니다: ${compressedBin}`);
       }
       fsSync.mkdirSync(targetDir, { recursive: true });
-      fsSync.writeFileSync(targetBin, gunzipSync(fsSync.readFileSync(compressedBin)));
+      fsSync.writeFileSync(targetBin, gunzipSync(fsSync.readFileSync(compressedBin)), { mode: 0o600 });
       if (process.platform !== "win32") {
-        fsSync.chmodSync(targetBin, 0o755);
+        // Executable bit required for uv binary; 0o700 = owner-only rwx (no world-read).
+        fsSync.chmodSync(targetBin, 0o700);
       }
     }
     return targetBin;
@@ -585,7 +586,7 @@ export class PythonRuntimeBootstrapper {
     const line = `[${new Date().toISOString()}] ${msg}\n`;
     try {
       await fs.mkdir(LOGS_DIR, { recursive: true, mode: 0o700 });
-      await fs.appendFile(SETUP_LOG, line, "utf8");
+      await fs.appendFile(SETUP_LOG, line, { encoding: "utf8", mode: 0o600 });
     } catch {
       // 로그 실패는 무시 (non-fatal)
     }
