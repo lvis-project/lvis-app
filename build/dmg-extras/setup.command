@@ -30,12 +30,25 @@ fi
 echo "📦 Found: $APP"
 echo ""
 echo "🔓 Removing Gatekeeper quarantine..."
-xattr -dr com.apple.quarantine "$APP" 2>/dev/null || true
-echo "✅ Done."
+if xattr -dr com.apple.quarantine "$APP" 2>/dev/null; then
+  echo "✅ Done."
+else
+  echo "⚠️  xattr 실패 — 다음 명령을 Terminal 에서 직접 실행해보세요:"
+  echo "   xattr failed. Run this in Terminal manually:"
+  echo ""
+  echo "   sudo xattr -dr com.apple.quarantine \"$APP\""
+  echo ""
+  read -r -p "Press Enter to continue (or Ctrl+C to abort)..." _ || true
+fi
 echo ""
 echo "🚀 Launching LVIS..."
-open "$APP"
-echo ""
-echo "이 창은 닫으셔도 됩니다. / You can close this window."
+if open "$APP"; then
+  echo ""
+  echo "이 창은 닫으셔도 됩니다. / You can close this window."
+else
+  echo ""
+  echo "❌ 실행 실패. Applications 폴더에서 LVIS 를 직접 더블클릭하세요."
+  echo "   Launch failed. Open LVIS manually from Applications."
+fi
 sleep 2
 exit 0
