@@ -1,3 +1,5 @@
+import type { SelectedAssistantContext } from "./assistant-context.js";
+
 export type ChatInputOrigin =
   | "user-keyboard"
   | "plugin-emitted"
@@ -21,6 +23,7 @@ export interface ChatSendPayload {
     name: string;
     systemPromptAdd: string;
   };
+  assistantContext?: SelectedAssistantContext;
 }
 
 export interface UserKeyboardIntentSnapshot {

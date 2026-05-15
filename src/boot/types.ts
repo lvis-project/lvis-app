@@ -83,6 +83,10 @@ export interface AppServices {
    * marketplace configured) so the MCP install IPC degrades gracefully.
    */
   mcpArtifactStore?: import("../plugins/plugin-artifact-store.js").PluginArtifactStore;
+  /** Issue #456 — signed marketplace agent packages extracted under ~/.lvis/agents/. */
+  agentArtifactStore?: import("../plugins/plugin-artifact-store.js").PluginArtifactStore;
+  /** Issue #456 — signed marketplace skill packages extracted under ~/.lvis/skills/. */
+  skillArtifactStore?: import("../plugins/plugin-artifact-store.js").PluginArtifactStore;
   idleScheduler?: IdleSchedulerService;
   preferenceRefreshService?: PreferenceRefreshService;
   bashAstValidator: BashAstValidator;
@@ -108,6 +112,7 @@ export interface AppServices {
   sessionTodoStore?: import("../main/session-todo-store.js").SessionTodoStore;
   askUserQuestionGate?: import("../main/ask-user-question-gate.js").AskUserQuestionGate;
   skillStore?: import("../main/skill-store.js").SkillStore;
+  agentProfileStore?: import("../main/agent-profile-store.js").AgentProfileStore;
   /** 플러그인 설치/제거 후 OS 알림 핸들러를 재구성한다. */
   refreshPluginNotifications?: () => void;
   /** Phase 0 SoT — canonical plugin install/cache paths. */

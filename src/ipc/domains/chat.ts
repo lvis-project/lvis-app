@@ -17,6 +17,9 @@ import { serializeHistoryMessage } from "../../shared/chat-history.js";
 import type { ConversationLoop, TurnResult } from "../../engine/conversation-loop.js";
 import { parseImportedTriggerEnvelope } from "../../shared/overlay-trigger-source.js";
 import type { ChatUtteranceMode } from "../../shared/chat-utterance.js";
+import type { SelectedAssistantContext } from "../../shared/assistant-context.js";
+import { AGENT_NAME_ALLOWLIST } from "../../main/agent-profile-store.js";
+import { SKILL_NAME_ALLOWLIST } from "../../main/skill-store.js";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import type { IpcDeps } from "../types.js";
 import { sendToWebContents } from "../safe-send.js";
@@ -24,6 +27,7 @@ import { createLogger } from "../../lib/logger.js";
 import { readDiffSidecar, isSafeId } from "../../tools/write-diff-cache.js";
 const log = createLogger("chat");
 const MAX_ROLE_PROMPT_CHARS = 12_000;
+const MAX_SELECTED_SKILLS = 5;
 
 export type { SerializedHistoryMessage } from "../../shared/chat-history.js";
 
@@ -77,6 +81,141 @@ function normalizeRolePrompt(
       name: candidate.name.trim().slice(0, 80) || "role",
       systemPromptAdd,
     },
+  };
+}
+
+function normalizeAssistantContext(
+  inputOrigin: ChatInputOrigin,
+  value: unknown,
+): { ok: true; assistantContext?: SelectedAssistantContext } | { ok: false; error: string } {
+  if (value === undefined || value === null) return { ok: true };
+  if (inputOrigin !== "user-keyboard" && inputOrigin !== "queue-auto") {
+    return { ok: false, error: "assistant-context-origin-restricted" };
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { ok: false, error: "invalid-assistant-context" };
+  }
+  const candidate = value as { agentName?: unknown; skillNames?: unknown };
+  let agentName: string | undefined;
+  if (candidate.agentName !== undefined && candidate.agentName !== null) {
+    if (typeof candidate.agentName !== "string") {
+      return { ok: false, error: "invalid-assistant-agent" };
+    }
+    const trimmed = candidate.agentName.trim();
+    if (trimmed) {
+      if (!AGENT_NAME_ALLOWLIST.test(trimmed)) {
+        return { ok: false, error: "invalid-assistant-agent" };
+      }
+      agentName = trimmed;
+    }
+  }
+
+  const skillNames: string[] = [];
+  if (candidate.skillNames !== undefined && candidate.skillNames !== null) {
+    if (!Array.isArray(candidate.skillNames)) {
+      return { ok: false, error: "invalid-assistant-skills" };
+    }
+    const seen = new Set<string>();
+    for (const raw of candidate.skillNames) {
+      if (typeof raw !== "string") return { ok: false, error: "invalid-assistant-skills" };
+      const name = raw.trim();
+      if (!name) continue;
+      if (!SKILL_NAME_ALLOWLIST.test(name)) {
+        return { ok: false, error: "invalid-assistant-skill" };
+      }
+      if (!seen.has(name)) {
+        seen.add(name);
+        skillNames.push(name);
+      }
+      if (skillNames.length >= MAX_SELECTED_SKILLS) break;
+    }
+  }
+
+  if (!agentName && skillNames.length === 0) return { ok: true };
+  return {
+    ok: true,
+    assistantContext: {
+      ...(agentName ? { agentName } : {}),
+      ...(skillNames.length > 0 ? { skillNames } : {}),
+    },
+  };
+}
+
+function escapeXmlAttribute(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function neutralizeAssistantContextTags(value: string): string {
+  return value.replace(
+    /<\/?\s*lvis-(?:selected-assistant-context|agent-profile|selected-skill)[^>]*>/gi,
+    (match) => match.replace("<", "< "),
+  );
+}
+
+async function mergeAssistantContextPrompt(
+  baseRolePrompt: ChatSendPayload["rolePrompt"],
+  assistantContext: SelectedAssistantContext | undefined,
+  deps: Pick<IpcDeps, "agentProfileStore" | "skillStore">,
+): Promise<ChatSendPayload["rolePrompt"]> {
+  if (!assistantContext) return baseRolePrompt;
+  const sections: string[] = [];
+  const labels: string[] = [];
+
+  if (assistantContext.agentName && deps.agentProfileStore) {
+    const agent = await deps.agentProfileStore.load(assistantContext.agentName);
+    if (agent) {
+      labels.push(`Agent: ${agent.name}`);
+      sections.push([
+        `<lvis-agent-profile name="${escapeXmlAttribute(agent.name)}">`,
+        neutralizeAssistantContextTags(agent.body),
+        "</lvis-agent-profile>",
+      ].join("\n"));
+    }
+  }
+
+  if (assistantContext.skillNames?.length && deps.skillStore) {
+    const skillRows: string[] = [];
+    for (const skillName of assistantContext.skillNames) {
+      const skill = await deps.skillStore.load(skillName);
+      if (!skill) continue;
+      labels.push(`Skill: ${skill.name}`);
+      const triggers = skill.triggers.length > 0
+        ? ` triggers="${escapeXmlAttribute(skill.triggers.join(", "))}"`
+        : "";
+      skillRows.push(
+        `<lvis-selected-skill name="${escapeXmlAttribute(skill.name)}" source="${skill.source}"${triggers}>${neutralizeAssistantContextTags(skill.description)}</lvis-selected-skill>`,
+      );
+    }
+    if (skillRows.length > 0) {
+      sections.push([
+        "<lvis-selected-skills>",
+        "The user selected these skills for this turn. Do not apply a selected skill body from metadata alone; call the skill_load tool before relying on the full skill instructions so existing approval and body-hash checks run.",
+        ...skillRows,
+        "</lvis-selected-skills>",
+      ].join("\n"));
+    }
+  }
+
+  if (sections.length === 0) return baseRolePrompt;
+  const assistantSection = [
+    "<lvis-selected-assistant-context>",
+    ...sections,
+    "</lvis-selected-assistant-context>",
+  ].join("\n");
+  const systemPromptAdd = [
+    baseRolePrompt?.systemPromptAdd?.trim(),
+    assistantSection,
+  ].filter((part): part is string => !!part).join("\n\n").slice(0, MAX_ROLE_PROMPT_CHARS);
+  if (!systemPromptAdd.trim()) return undefined;
+  const baseName = baseRolePrompt?.name?.trim();
+  const promptLabels = [baseName, ...labels].filter((label): label is string => !!label);
+  return {
+    name: promptLabels.length > 0 ? promptLabels.slice(0, 4).join(" + ") : "assistant context",
+    systemPromptAdd,
   };
 }
 
@@ -159,7 +298,7 @@ async function runStreamedTurn(
   webContents: WebContents | undefined,
   channel: string,
   streamId: number,
-  options: {
+    options: {
     attachments?: import("../../engine/llm/types.js").UserContentPart[];
     inputOrigin: ChatInputOrigin;
     rolePrompt?: ChatSendPayload["rolePrompt"];
@@ -314,6 +453,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
       inputOrigin?: unknown;
       userActivation?: unknown;
       rolePrompt?: unknown;
+      assistantContext?: unknown;
     };
     if (typeof candidate.input !== "string") {
       return { ok: false, error: "invalid-input" };
@@ -330,6 +470,8 @@ export function registerChatHandlers(deps: IpcDeps): void {
     }
     const rolePrompt = normalizeRolePrompt(candidate.inputOrigin, candidate.rolePrompt);
     if (!rolePrompt.ok) return { ok: false, error: rolePrompt.error };
+    const assistantContext = normalizeAssistantContext(candidate.inputOrigin, candidate.assistantContext);
+    if (!assistantContext.ok) return { ok: false, error: assistantContext.error };
     return {
       ok: true,
       payload: {
@@ -338,6 +480,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
         inputOrigin: candidate.inputOrigin,
         ...(candidate.userActivation === true ? { userActivation: true } : {}),
         ...(rolePrompt.rolePrompt ? { rolePrompt: rolePrompt.rolePrompt } : {}),
+        ...(assistantContext.assistantContext ? { assistantContext: assistantContext.assistantContext } : {}),
       },
     };
   };
@@ -349,7 +492,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:send", e); return UNAUTHORIZED_FRAME; }
     const parsed = parseChatSendPayload(payload);
     if (!parsed.ok) return { ok: false, error: parsed.error };
-    const { input, attachments, inputOrigin, rolePrompt } = parsed.payload;
+    const { input, attachments, inputOrigin, rolePrompt, assistantContext } = parsed.payload;
     // queue-auto inputOrigin path 는 사용자 명시 입력 누적 의 자동 인입.
     // user gesture context 밖 (IPC stream done event 트리거) 라 audit 추가
     // 필요 — security forensics 에서 user-keyboard turn 과 구분 가능해야 함
@@ -369,6 +512,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
     const validated = validateUserContentParts(attachments);
     const win = getMainWindow();
     const effective = sanitizeOutgoingInput(input, win?.webContents);
+    const effectiveRolePrompt = await mergeAssistantContextPrompt(rolePrompt, assistantContext, deps);
     const streamId = allocateStreamId();
     return trackStreamTurn(() => runStreamedTurn(
       conversationLoop,
@@ -376,7 +520,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
       win?.webContents,
       "lvis:chat:stream",
       streamId,
-      { ...streamTurnOptions, attachments: validated, inputOrigin, rolePrompt },
+      { ...streamTurnOptions, attachments: validated, inputOrigin, rolePrompt: effectiveRolePrompt },
     ));
   });
 
