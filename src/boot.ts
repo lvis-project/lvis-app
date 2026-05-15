@@ -41,7 +41,6 @@ import { app, powerMonitor } from "electron";
 import type { BrowserWindow } from "electron";
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
-import { homedir } from "node:os";
 import { adaptPowerMonitor } from "./main/idle-scheduler.js";
 import { DisabledMarketplaceFetcher, PluginMarketplaceService } from "./plugins/marketplace.js";
 import type { MarketplaceFetcher } from "./plugins/marketplace.js";
@@ -119,6 +118,7 @@ import {
 } from "./permissions/manifest-integrity.js";
 import { runManagedBootstrap } from "./boot/managed-marketplace.js";
 import { createLogger } from "./lib/logger.js";
+import { lvisHome } from "./shared/lvis-home.js";
 const log = createLogger("lvis");
 
 export type { AppServices } from "./boot/types.js";
@@ -779,7 +779,7 @@ export async function bootstrap(
   // anyway).
   const mcpArtifactStore = (() => {
     if (marketplaceFetcher instanceof DisabledMarketplaceFetcher) return undefined;
-    const mcpInstallRoot = resolve(homedir(), ".lvis", "mcp");
+    const mcpInstallRoot = resolve(lvisHome(), "mcp");
     return new PluginArtifactStore({
       installRoot: mcpInstallRoot,
       cacheRoot: resolve(mcpInstallRoot, ".cache"),
@@ -793,7 +793,7 @@ export async function bootstrap(
   // Watcher telemetry consumer — plugin-emitted watcher poll events are
   // appended to ~/.lvis/logs/watcher-poll.jsonl. This is the pre-metrics
   // pipeline raw source for cold-seed latency / payload distribution tuning.
-  const watcherTelemetryLogPath = resolve(homedir(), ".lvis", "logs", "watcher-poll.jsonl");
+  const watcherTelemetryLogPath = resolve(lvisHome(), "logs", "watcher-poll.jsonl");
   const watcherTelemetryCollector = startWatcherTelemetryCollector({
     filePath: watcherTelemetryLogPath,
     subscribe: (type, handler) => onEvent(type, handler),

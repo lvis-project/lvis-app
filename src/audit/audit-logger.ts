@@ -25,7 +25,6 @@ import {
 import { createWriteStream } from "node:fs";
 import { unlink, rename, stat as fsStat } from "node:fs/promises";
 import { join } from "node:path";
-import { homedir } from "node:os";
 import { createInterface } from "node:readline";
 import { createGzip } from "node:zlib";
 import { pipeline } from "node:stream/promises";
@@ -36,6 +35,7 @@ import {
   type SecretStore,
 } from "./hmac-chain.js";
 import type { PermissionAuditEntry, PermissionAuditEntryInput } from "./audit-schema.js";
+import { lvisHome } from "../shared/lvis-home.js";
 
 function readLastNonEmptyLineSync(filePath: string): string {
   if (!existsSync(filePath)) return GENESIS_MARKER;
@@ -139,7 +139,7 @@ export class AuditLogger {
   private permissionAuditSealStore: SecretStore | null = null;
 
   constructor(auditDirOverride?: string) {
-    this.auditDir = auditDirOverride ?? join(homedir(), ".lvis", "audit");
+    this.auditDir = auditDirOverride ?? join(lvisHome(), "audit");
     if (!existsSync(this.auditDir)) {
       mkdirSync(this.auditDir, { recursive: true, mode: 0o700 });
     }
