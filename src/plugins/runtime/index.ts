@@ -121,7 +121,34 @@ export interface PluginRuntimeOptions {
   deploymentGuard?: PluginDeploymentGuard;
   installReceiptCacheRoot?: string;
   auditLog?: (level: "info" | "warn" | "error", message: string, data?: unknown) => void;
+  /**
+   * Fires when a plugin's tear-down path runs (`restartPlugin` stop phase,
+   * `restartAll` stop phase per plugin, `disable`, `removePlugin`,
+   * `reloadPlugin` stop phase, and `cleanupFailedStartRuntimeState` when a
+   * fresh start fails mid-`restartAll`). The host wires this to
+   * `toolRegistry.unregisterByPlugin` + `keywordEngine.unregisterByPlugin`
+   * + `conversationLoop.onPluginDisabled` so transient runtime state stays
+   * in sync with the runtime's plugin map.
+   *
+   * May fire more than once per logical cycle for the same pluginId — e.g.,
+   * `restartAll` fires it from its pre-stop fan-out and then again from
+   * `cleanupFailedStartRuntimeState` if that plugin's start fails. Callbacks
+   * MUST be idempotent.
+   */
   onDisable?: (pluginId: string) => void;
+  /**
+   * Fires after a plugin's instance is in the `loaded + started` state and
+   * the runtime considers it callable — symmetric to {@link onDisable}.
+   * Currently invoked after a successful `restartPlugin`, `addPlugin`, or
+   * `reloadPlugin`. The host wires this to `syncPluginToolRegistry(...)` so a
+   * post-restart sync re-registers the tools that the tear-down phase
+   * removed; without it the ToolRegistry stays empty and every chat-surface
+   * tool call reports `도구를 찾을 수 없습니다: <tool>` until the next
+   * install / uninstall event. The boot path's initial `startAll` is NOT
+   * covered here — `registerPluginTools(...)` at the end of boot owns that
+   * one-shot registration. See `architecture.md §9.3a`.
+   */
+  onEnable?: (pluginId: string) => void;
 }
 
 export class PluginRuntime {
@@ -135,6 +162,7 @@ export class PluginRuntime {
   private readonly installReceiptCacheRoot?: string;
   private readonly auditLog?: (level: "info" | "warn" | "error", message: string, data?: unknown) => void;
   private readonly onDisable?: (pluginId: string) => void;
+  private readonly onEnable?: (pluginId: string) => void;
   private readonly plugins = new Map<string, LoadedPlugin>();
   private readonly methodMap = new Map<string, { pluginId: string; handler: PluginToolHandler }>();
   private readonly perfStats = new Map<string, PluginPerfStats>();
@@ -164,6 +192,7 @@ export class PluginRuntime {
       : undefined;
     this.auditLog = options.auditLog;
     this.onDisable = options.onDisable;
+    this.onEnable = options.onEnable;
   }
 
   // ─── Manifest Validator (lazy) ─────────────────────────────────────────────
@@ -489,6 +518,17 @@ export class PluginRuntime {
     }
     this.resetLoadedState();
     await this.startAll();
+    // Symmetric to the per-plugin onDisable fan-out above: fire onEnable for
+    // each plugin that survived the restart so the host's ToolRegistry sync
+    // (wired in boot/steps/plugin-runtime.ts) runs without callers having to
+    // remember a follow-up `syncPluginToolRegistry`. Initial boot's `startAll`
+    // is the only path that intentionally bypasses onEnable — `registerPluginTools`
+    // owns that one-shot. See architecture.md §9.3a.
+    if (this.onEnable) {
+      for (const pluginId of this.plugins.keys()) {
+        this.onEnable(pluginId);
+      }
+    }
   }
 
   /**
@@ -625,6 +665,7 @@ export class PluginRuntime {
       await this.stopAfterStartFailure(pluginId, instance);
       throw new Error(`restartPlugin failed for ${pluginId}: ${(err as Error).message}`);
     }
+    this.onEnable?.(pluginId);
   }
 
   setConfigOverride(pluginId: string, config: Record<string, unknown>): void {
@@ -821,9 +862,12 @@ export class PluginRuntime {
   }
 
   /**
-   * Per-plugin instantiation + start. Extracted from `load()` + `startAll()`
-   * so single-plugin install (`addPlugin`) can run the same path without a
-   * full restart.
+   * Per-plugin instantiation + start. Used by `addPlugin` for post-boot
+   * fresh-load installs. Boot's `startAll` intentionally bypasses this path
+   * — it runs its own inline start loop and lets `registerPluginTools` own
+   * the one-shot ToolRegistry population (see §9.3a). This method fires
+   * `onEnable` on the start-success branch so post-boot installs converge
+   * the host's transient state automatically.
    */
   private async instantiateAndStartSinglePlugin(
     plan: ManifestLoadPlan,
@@ -978,8 +1022,10 @@ export class PluginRuntime {
         this.markFailed(manifest.id);
         this.cleanupFailedStartRuntimeState(manifest.id, methods);
         await this.stopAfterStartFailure(manifest.id, instance);
+        return;
       }
     }
+    this.onEnable?.(manifest.id);
   }
 
   /**
@@ -1069,6 +1115,7 @@ export class PluginRuntime {
       log.error(`start after reload failed: %s`, (err as Error).message);
       throw err;
     }
+    this.onEnable?.(pluginId);
   }
 
   /**
