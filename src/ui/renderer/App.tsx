@@ -48,6 +48,7 @@ import { usePluginMarketplace } from "./hooks/use-plugin-marketplace.js";
 import { usePluginAuthStatuses } from "./hooks/use-plugin-auth-status.js";
 import type { Attachment } from "./types/attachments.js";
 import { useRolePresets } from "./hooks/use-role-presets.js";
+import { useAssistantContextOptions } from "./hooks/use-assistant-context-options.js";
 import { useAppBootstrap } from "./hooks/use-app-bootstrap.js";
 import { useChatActions } from "./hooks/use-chat-actions.js";
 import { useChatContextValue } from "./hooks/use-chat-context-value.js";
@@ -308,6 +309,9 @@ export function App() {
 
   // Sprint B — role preset, cost preview, multimodal attachments
   const { rolePresets, activePreset, activePresetId, setActivePresetId } = useRolePresets(api);
+  const { agents: agentOptions, skills: skillOptions } = useAssistantContextOptions(api);
+  const [activeAgentName, setActiveAgentName] = useState("");
+  const [activeSkillNames, setActiveSkillNames] = useState<string[]>([]);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   // Strictly increasing N — never reassigned even after attachment removal so
   // textarea markers ([Image #N]) keep referring to the same payload.
@@ -567,6 +571,16 @@ export function App() {
     [activePreset, attachments],
   );
 
+  useEffect(() => {
+    if (activeAgentName && !agentOptions.some((agent) => agent.name === activeAgentName)) {
+      setActiveAgentName("");
+    }
+    if (activeSkillNames.length > 0) {
+      const available = new Set(skillOptions.map((skill) => skill.name));
+      setActiveSkillNames((current) => current.filter((name) => available.has(name)));
+    }
+  }, [activeAgentName, activeSkillNames.length, agentOptions, skillOptions]);
+
   const handleAsk = useCallback(
     async (
       q: string,
@@ -692,6 +706,12 @@ export function App() {
           // chat.ts:59 가 queue-auto 도 rolePrompt 허용 — Round 3 critic
           // M-NEW-1 fix. role preset 효과가 queue-auto inject 에도 적용됨.
           mode === "default" ? composed.rolePrompt : undefined,
+          mode === "default"
+            ? {
+                ...(activeAgentName ? { agentName: activeAgentName } : {}),
+                ...(activeSkillNames.length > 0 ? { skillNames: activeSkillNames } : {}),
+              }
+            : undefined,
         );
         if (debugStreamEnabled) debugLog("handleAsk", "chatSend:resolved", { requestId });
         // After successful send, clear attachments — the textarea was
@@ -743,6 +763,8 @@ export function App() {
       // composeOutgoing's deps drift. llmVendor/llmModel are read by
       // the supportsVision gate.
       attachments,
+      activeAgentName,
+      activeSkillNames,
       llmVendor,
       llmModel,
       onOpenSettings,
@@ -815,6 +837,18 @@ export function App() {
     return unsubscribe;
   }, [api, refreshViews, refreshMarketplace, refreshCards]);
 
+  useEffect(() => {
+    const unsubs = [
+      api.onAgentInstallResult?.(({ success }) => { if (success) void refreshMarketplace(); }),
+      api.onAgentUninstallResult?.(({ success }) => { if (success) void refreshMarketplace(); }),
+      api.onSkillInstallResult?.(({ success }) => { if (success) void refreshMarketplace(); }),
+      api.onSkillUninstallResult?.(({ success }) => { if (success) void refreshMarketplace(); }),
+    ].filter((unsubscribe): unsubscribe is () => void => typeof unsubscribe === "function");
+    return () => {
+      for (const unsubscribe of unsubs) unsubscribe();
+    };
+  }, [api, refreshMarketplace]);
+
   // Auto-close CommandPopover when navigating away from home — the popover
   // is only mounted on the home view so leaving it open causes stuck state.
   useEffect(() => {
@@ -842,6 +876,8 @@ export function App() {
     searchChangeQuery, searchToggleCase, searchNext, searchPrev, searchCloseOverlay, searchToggleOverlay,
     contextOverflowPct, usedTokens, contextBudget,
     rolePresets, activePreset, activePresetId, setActivePresetId,
+    agentOptions, skillOptions, activeAgentName, setActiveAgentName,
+    activeSkillNames, setActiveSkillNames,
     attachments, setAttachments, attachmentNCounter,
     vendorSupportsThinking, enableThinkingChat, toggleThinking, costEstimate, costBadgeClass,
     activePricing,

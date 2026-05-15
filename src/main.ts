@@ -46,6 +46,7 @@ import { normalizeSettingsTab } from "./shared/settings-tabs.js";
 import { preparePythonRuntimeForInstalledPlugin, withPluginInstallLock } from "./plugins/install-lifecycle.js";
 import { ensureWorkspaceCwd } from "./main/ensure-workspace-cwd.js";
 import { uninstallPluginWithLifecycle } from "./plugins/uninstall-lifecycle.js";
+import { lvisHome } from "./shared/lvis-home.js";
 const log = createLogger("lvis");
 
 function errorMessage(err: unknown): string {
@@ -267,6 +268,224 @@ async function resolveMarketplaceActionTarget(
   }
 }
 
+type MarketplacePackageType = "plugin" | "mcp" | "agent" | "skill";
+
+function marketplacePackageLabel(packageType: MarketplacePackageType): string {
+  if (packageType === "agent") return "에이전트";
+  if (packageType === "skill") return "스킬";
+  if (packageType === "mcp") return "MCP 서버";
+  return "플러그인";
+}
+
+function assistantPackageChannels(packageType: "agent" | "skill"): {
+  installProgress: string;
+  installResult: string;
+  uninstallResult: string;
+} {
+  const ns = packageType === "agent" ? "agents" : "skills";
+  return {
+    installProgress: `lvis:${ns}:install-progress`,
+    installResult: `lvis:${ns}:install-result`,
+    uninstallResult: `lvis:${ns}:uninstall-result`,
+  };
+}
+
+async function handleAssistantMarketplaceAction(
+  activeServices: AppServices,
+  win: BrowserWindow,
+  params: { action: "install" | "uninstall"; slug: string; packageType: "agent" | "skill" },
+): Promise<void> {
+  const channels = assistantPackageChannels(params.packageType);
+  const label = marketplacePackageLabel(params.packageType);
+  const target = await resolveMarketplaceActionTarget(activeServices, params.slug);
+  if (params.action === "uninstall") {
+    if (target.installed === false) {
+      await dialog.showMessageBox(win, {
+        type: "info",
+        buttons: ["확인"],
+        defaultId: 0,
+        cancelId: 0,
+        message: `${label} '${target.name}'은(는) 설치되어 있지 않습니다.`,
+        detail: "외부 링크의 제거 요청을 처리하지 않았습니다.",
+      });
+      broadcastPluginLifecycleEvent(channels.uninstallResult, {
+        slug: params.slug,
+        success: false,
+        error: `${label} not installed`,
+      });
+      return;
+    }
+    const { response } = await dialog.showMessageBox(win, {
+      type: "warning",
+      buttons: ["제거", "취소"],
+      defaultId: 1,
+      cancelId: 1,
+      message: `${label} '${target.name}'을(를) 제거하시겠습니까?`,
+      detail: "외부 링크로부터 요청된 제거입니다.",
+    });
+    if (response !== 0) return;
+    void (async () => {
+      if (params.packageType === "agent") {
+        const { uninstallAgentPackage } = await import("./agents/agent-installer.js");
+        const result = await uninstallAgentPackage(params.slug, {
+          installRoot: resolve(lvisHome(), "agents"),
+          registryPath: resolve(lvisHome(), "agents", "registry.json"),
+        });
+        emitHostEvent("agent.uninstalled", { agentId: result.agentId, slug: result.slug, source: "marketplace" });
+        broadcastPluginLifecycleEvent(channels.uninstallResult, {
+          slug: result.slug,
+          agentId: result.agentId,
+          success: true,
+        });
+        return;
+      }
+      const { uninstallSkillPackage } = await import("./skills/skill-installer.js");
+      const result = await uninstallSkillPackage(params.slug, {
+        installRoot: resolve(lvisHome(), "skills"),
+        registryPath: resolve(lvisHome(), "skills", "registry.json"),
+      });
+      emitHostEvent("skill.uninstalled", { skillId: result.skillId, slug: result.slug, source: "marketplace" });
+      broadcastPluginLifecycleEvent(channels.uninstallResult, {
+        slug: result.slug,
+        skillId: result.skillId,
+        success: true,
+      });
+    })().catch((err: Error) => {
+      log.error({ slug: params.slug, packageType: params.packageType, error: err.message, stack: err.stack }, "lvis:// assistant package uninstall failed");
+      broadcastPluginLifecycleEvent(channels.uninstallResult, {
+        slug: params.slug,
+        success: false,
+        error: err.message,
+      });
+    });
+    return;
+  }
+
+  const { response } = await dialog.showMessageBox(win, {
+    type: "question",
+    buttons: ["설치", "취소"],
+    defaultId: 1,
+    cancelId: 1,
+    message: `${label} '${target.name}'을(를) 설치하시겠습니까?`,
+    detail: "외부 링크로부터 요청된 설치입니다.",
+  });
+  if (response !== 0) return;
+  broadcastPluginLifecycleEvent(channels.installProgress, { slug: params.slug, phase: "installing" });
+  void (async () => {
+    if (params.packageType === "agent") {
+      if (!activeServices.agentArtifactStore) {
+        throw new Error("Agent marketplace install is unavailable: marketplace backend is disabled in this build.");
+      }
+      const { installAgentPackageFromMarketplace } = await import("./agents/agent-installer.js");
+      const result = await installAgentPackageFromMarketplace(params.slug, {
+        fetcher: activeServices.pluginMarketplace.getFetcher(),
+        store: activeServices.agentArtifactStore,
+        registryPath: resolve(lvisHome(), "agents", "registry.json"),
+        onProgress: (evt) => {
+          if (evt.phase === "downloading") {
+            broadcastPluginLifecycleEvent(channels.installProgress, {
+              slug: params.slug,
+              phase: "downloading",
+              bytesDownloaded: evt.bytesDownloaded,
+              bytesTotal: evt.bytesTotal,
+            });
+          } else {
+            broadcastPluginLifecycleEvent(channels.installProgress, { slug: params.slug, phase: evt.phase });
+          }
+        },
+      });
+      emitHostEvent("agent.installed", { agentId: result.agentId, slug: result.slug, source: "marketplace" });
+      broadcastPluginLifecycleEvent(channels.installResult, {
+        slug: result.slug,
+        agentId: result.agentId,
+        success: true,
+      });
+      return;
+    }
+    if (!activeServices.skillArtifactStore) {
+      throw new Error("Skill marketplace install is unavailable: marketplace backend is disabled in this build.");
+    }
+    const { installSkillPackageFromMarketplace } = await import("./skills/skill-installer.js");
+    const result = await installSkillPackageFromMarketplace(params.slug, {
+      fetcher: activeServices.pluginMarketplace.getFetcher(),
+      store: activeServices.skillArtifactStore,
+      registryPath: resolve(lvisHome(), "skills", "registry.json"),
+      onProgress: (evt) => {
+        if (evt.phase === "downloading") {
+          broadcastPluginLifecycleEvent(channels.installProgress, {
+            slug: params.slug,
+            phase: "downloading",
+            bytesDownloaded: evt.bytesDownloaded,
+            bytesTotal: evt.bytesTotal,
+          });
+        } else {
+          broadcastPluginLifecycleEvent(channels.installProgress, { slug: params.slug, phase: evt.phase });
+        }
+      },
+    });
+    emitHostEvent("skill.installed", { skillId: result.skillId, slug: result.slug, source: "marketplace" });
+    broadcastPluginLifecycleEvent(channels.installResult, {
+      slug: result.slug,
+      skillId: result.skillId,
+      success: true,
+    });
+  })().catch((err: Error) => {
+    log.error({ slug: params.slug, packageType: params.packageType, error: err.message, stack: err.stack }, "lvis:// assistant package install failed");
+    broadcastPluginLifecycleEvent(channels.installResult, {
+      slug: params.slug,
+      success: false,
+      error: err.message,
+    });
+  });
+}
+
+async function handleMcpMarketplaceAction(
+  activeServices: AppServices,
+  win: BrowserWindow,
+  params: { action: "install" | "uninstall"; slug: string },
+): Promise<void> {
+  const label = marketplacePackageLabel("mcp");
+  const target = await resolveMarketplaceActionTarget(activeServices, params.slug);
+  if (params.action === "uninstall") {
+    const { response } = await dialog.showMessageBox(win, {
+      type: "warning",
+      buttons: ["제거", "취소"],
+      defaultId: 1,
+      cancelId: 1,
+      message: `${label} '${target.name}'을(를) 제거하시겠습니까?`,
+      detail: "외부 링크로부터 요청된 제거입니다.",
+    });
+    if (response !== 0) return;
+    void activeServices.mcpManager.removeConfig(params.slug).catch((err: Error) => {
+      log.error({ slug: params.slug, error: err.message, stack: err.stack }, "lvis:// MCP uninstall failed");
+    });
+    return;
+  }
+  const { response } = await dialog.showMessageBox(win, {
+    type: "question",
+    buttons: ["설치", "취소"],
+    defaultId: 1,
+    cancelId: 1,
+    message: `${label} '${target.name}'을(를) 설치하시겠습니까?`,
+    detail: "외부 링크로부터 요청된 설치입니다.",
+  });
+  if (response !== 0) return;
+  void (async () => {
+    if (!activeServices.mcpArtifactStore) {
+      throw new Error("MCP marketplace install is unavailable: marketplace backend is disabled in this build.");
+    }
+    const { installMcpFromMarketplace } = await import("./mcp/mcp-marketplace-install.js");
+    const result = await installMcpFromMarketplace(params.slug, {
+      fetcher: activeServices.pluginMarketplace.getFetcher(),
+      store: activeServices.mcpArtifactStore,
+      pythonPath: activeServices.pythonPath,
+    });
+    await activeServices.mcpManager.addConfig(result.config);
+  })().catch((err: Error) => {
+    log.error({ slug: params.slug, error: err.message, stack: err.stack }, "lvis:// MCP install failed");
+  });
+}
+
 async function handleLvisUri(url: string) {
   lvisDevLog("[lvis] handleLvisUri called", { url });
 
@@ -295,12 +514,14 @@ async function handleLvisUri(url: string) {
   lvisDevLog("[lvis] handleLvisUri parsed", {
     action: params.action,
     slug: params.slug,
+    packageType: params.packageType,
     servicesReady: !!services,
   });
   if (!services) {
     lvisDevLog("[lvis] handleLvisUri: services not ready, queueing", {
       action: params.action,
       slug: params.slug,
+      packageType: params.packageType,
     });
     pendingLvisUri = url;
     return;
@@ -324,6 +545,21 @@ async function handleLvisUri(url: string) {
   if (!win) {
     // createWindow() failed or was destroyed — abort rather than install silently.
     log.warn(`handleLvisUri: no window available, aborting ${params.action}`);
+    return;
+  }
+  if (params.packageType === "agent" || params.packageType === "skill") {
+    await handleAssistantMarketplaceAction(activeServices, win, {
+      action: params.action,
+      slug: params.slug,
+      packageType: params.packageType,
+    });
+    return;
+  }
+  if (params.packageType === "mcp") {
+    await handleMcpMarketplaceAction(activeServices, win, {
+      action: params.action,
+      slug: params.slug,
+    });
     return;
   }
   if (params.action === "uninstall") {
