@@ -1,9 +1,13 @@
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
 import { Checkbox } from "../../../components/ui/checkbox.js";
 import { Input } from "../../../components/ui/input.js";
 import { Label } from "../../../components/ui/label.js";
-import type { LvisApi } from "../types.js";
+import { ScrollArea } from "../../../components/ui/scroll-area.js";
+import { getHostMarketplaceApi } from "../host-marketplace-api.js";
+import type { LvisApi, MarketplaceItem } from "../types.js";
+import type { MarketplacePackageType } from "../../../shared/assistant-context.js";
 
 export interface MarketplaceTabProps {
   api: LvisApi;
@@ -31,6 +35,85 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
     setApiKeyInput,
     onSaved,
   } = props;
+  const [packages, setPackages] = useState<MarketplaceItem[]>([]);
+  const [packageStatus, setPackageStatus] = useState("로딩 중...");
+  const [filter, setFilter] = useState<"all" | MarketplacePackageType>("all");
+  const [workingSlug, setWorkingSlug] = useState<string | null>(null);
+
+  const refreshPackages = useCallback(async () => {
+    try {
+      const items = await api.listMarketplacePlugins();
+      setPackages(items);
+      setPackageStatus(`패키지 ${items.length}개`);
+    } catch (err) {
+      setPackageStatus(`로드 실패: ${(err as Error).message}`);
+    }
+  }, [api]);
+
+  useEffect(() => {
+    void refreshPackages();
+  }, [refreshPackages]);
+
+  const visiblePackages = useMemo(() => (
+    filter === "all"
+      ? packages
+      : packages.filter((item) => (item.pluginType ?? "plugin") === filter)
+  ), [filter, packages]);
+
+  const installPackage = useCallback(async (item: MarketplaceItem) => {
+    const packageType = item.pluginType ?? "plugin";
+    setWorkingSlug(item.id);
+    try {
+      if (packageType === "mcp") {
+        const result = await api.installMcpFromMarketplace(item.id);
+        if (!result.ok) throw new Error(result.message);
+      } else if (packageType === "agent") {
+        const result = await getHostMarketplaceApi().installMarketplaceAgent?.(item.id);
+        if (!result?.ok) throw new Error(result?.message ?? result?.error ?? "Agent install API unavailable");
+      } else if (packageType === "skill") {
+        const result = await getHostMarketplaceApi().installMarketplaceSkill?.(item.id);
+        if (!result?.ok) throw new Error(result?.message ?? result?.error ?? "Skill install API unavailable");
+      } else {
+        const result = await getHostMarketplaceApi().installMarketplacePlugin(item.id);
+        if (!result.ok) throw new Error(result.message ?? result.error);
+      }
+      await refreshPackages();
+    } catch (err) {
+      setPackageStatus(`작업 실패: ${(err as Error).message}`);
+    } finally {
+      setWorkingSlug(null);
+    }
+  }, [api, refreshPackages]);
+
+  const uninstallPackage = useCallback(async (item: MarketplaceItem) => {
+    const packageType = item.pluginType ?? "plugin";
+    setWorkingSlug(item.id);
+    try {
+      if (packageType === "agent") {
+        const result = await getHostMarketplaceApi().uninstallMarketplaceAgent?.(item.id);
+        if (!result?.ok) throw new Error(result?.message ?? result?.error ?? "Agent uninstall API unavailable");
+      } else if (packageType === "skill") {
+        const result = await getHostMarketplaceApi().uninstallMarketplaceSkill?.(item.id);
+        if (!result?.ok) throw new Error(result?.message ?? result?.error ?? "Skill uninstall API unavailable");
+      } else if (packageType === "plugin") {
+        const result = await getHostMarketplaceApi().uninstallMarketplacePlugin(item.id);
+        if (!result.ok) throw new Error(result.message ?? result.error);
+      }
+      await refreshPackages();
+    } catch (err) {
+      setPackageStatus(`작업 실패: ${(err as Error).message}`);
+    } finally {
+      setWorkingSlug(null);
+    }
+  }, [refreshPackages]);
+
+  const filterOptions: Array<{ value: "all" | MarketplacePackageType; label: string }> = [
+    { value: "all", label: "All" },
+    { value: "plugin", label: "Plugins" },
+    { value: "mcp", label: "MCP" },
+    { value: "agent", label: "Agents" },
+    { value: "skill", label: "Skills" },
+  ];
 
   return (
     <div className="space-y-4 pt-4">
@@ -114,6 +197,64 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
             로컬 또는 사내 마켓플레이스 서버에 접속할 때 활성화합니다. SSRF 가드를 우회하므로 외부 호스트(prod) 환경에서는 끄세요.
           </p>
         </div>
+      </div>
+
+      <div className="space-y-3 rounded-md border bg-card p-3">
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-semibold">패키지 인벤토리</h3>
+            <p className="text-[11px] text-muted-foreground">{packageStatus}</p>
+          </div>
+          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => void refreshPackages()}>
+            새로고침
+          </Button>
+        </div>
+        <div className="flex flex-wrap gap-1">
+          {filterOptions.map((option) => (
+            <Button
+              key={option.value}
+              size="sm"
+              variant={filter === option.value ? "default" : "outline"}
+              className="h-7 px-2 text-xs"
+              onClick={() => setFilter(option.value)}
+            >
+              {option.label}
+            </Button>
+          ))}
+        </div>
+        <ScrollArea className="h-64 rounded-md border">
+          <div className="divide-y">
+            {visiblePackages.length === 0 ? (
+              <div className="p-4 text-center text-xs text-muted-foreground">표시할 패키지가 없습니다.</div>
+            ) : visiblePackages.map((item) => {
+              const packageType = item.pluginType ?? "plugin";
+              const isWorking = workingSlug === item.id;
+              const canUninstall = item.installed && (packageType === "plugin" || packageType === "agent" || packageType === "skill");
+              return (
+                <div key={`${packageType}:${item.id}`} className="flex items-start justify-between gap-3 p-2">
+                  <div className="min-w-0">
+                    <div className="flex min-w-0 items-center gap-1.5">
+                      <span className="truncate text-sm font-medium">{item.name}</span>
+                      <Badge variant="secondary" className="h-5 px-1.5 text-[10px] uppercase">{packageType}</Badge>
+                      {item.installed && <Badge variant="default" className="h-5 px-1.5 text-[10px]">설치됨</Badge>}
+                    </div>
+                    <p className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground">{item.description || item.packageSpec}</p>
+                    <p className="mt-0.5 font-mono text-[10px] text-muted-foreground">{item.id}</p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant={item.installed ? "outline" : "default"}
+                    className="h-7 shrink-0 px-2 text-xs"
+                    disabled={isWorking || (item.installed && !canUninstall)}
+                    onClick={() => void (item.installed ? uninstallPackage(item) : installPackage(item))}
+                  >
+                    {isWorking ? "처리 중..." : item.installed ? "제거" : "설치"}
+                  </Button>
+                </div>
+              );
+            })}
+          </div>
+        </ScrollArea>
       </div>
     </div>
   );
