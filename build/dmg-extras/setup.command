@@ -5,6 +5,10 @@
 # "Apple cannot verify..." dialog. See README.txt next to this file.
 
 set -u
+# Honor Ctrl-C even when interactive `read` is active. Without this the
+# `|| true` fallbacks on `read` would swallow SIGINT and the script would
+# fall through to `open` instead of aborting.
+trap 'echo; echo "Aborted."; exit 130' INT
 
 APP="/Applications/LVIS.app"
 
@@ -29,16 +33,20 @@ fi
 
 echo "📦 Found: $APP"
 echo ""
-echo "🔓 Removing Gatekeeper quarantine..."
-if xattr -dr com.apple.quarantine "$APP" 2>/dev/null; then
-  echo "✅ Done."
+echo "🔓 Checking Gatekeeper quarantine..."
+if xattr -p com.apple.quarantine "$APP" >/dev/null 2>&1; then
+  if xattr -dr com.apple.quarantine "$APP" 2>/dev/null; then
+    echo "✅ Quarantine removed."
+  else
+    echo "⚠️  xattr 제거 실패 — 다음 명령을 Terminal 에서 직접 실행해보세요:"
+    echo "   xattr removal failed. Run this in Terminal manually:"
+    echo ""
+    echo "   sudo xattr -dr com.apple.quarantine \"$APP\""
+    echo ""
+    read -r -p "Press Enter to continue..." _ || true
+  fi
 else
-  echo "⚠️  xattr 실패 — 다음 명령을 Terminal 에서 직접 실행해보세요:"
-  echo "   xattr failed. Run this in Terminal manually:"
-  echo ""
-  echo "   sudo xattr -dr com.apple.quarantine \"$APP\""
-  echo ""
-  read -r -p "Press Enter to continue (or Ctrl+C to abort)..." _ || true
+  echo "✅ 이미 깨끗합니다 / Already clean (no quarantine attribute)."
 fi
 echo ""
 echo "🚀 Launching LVIS..."
