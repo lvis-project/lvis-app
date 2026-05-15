@@ -42,7 +42,7 @@ vi.mock("electron", () => ({
 }));
 
 vi.mock("../../../plugins/runtime.js", () => ({
-  PluginRuntime: vi.fn().mockImplementation((options: Record<string, unknown>) => {
+  PluginRuntime: vi.fn().mockImplementation(function (this: unknown, options: Record<string, unknown>) {
     runtimeTestState.capturedRuntimeOptions = options;
     return runtimeTestState.runtime;
   }),
