@@ -1,6 +1,6 @@
 import "../../../../test/renderer/setup.js";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { act, render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { act, render, screen, waitFor, fireEvent, within } from "@testing-library/react";
 import { PluginConfigTab } from "../tabs/PluginConfigTab.js";
 import { PluginConfigSchemaForm } from "../tabs/PluginConfigSchemaForm.js";
 
@@ -75,7 +75,6 @@ afterEach(() => {
 
 describe("PluginConfigTab", () => {
   it("shows uninstall failure instead of success when IPC returns ok=false", async () => {
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
     render(<PluginConfigTab />);
 
     await waitFor(() => {
@@ -84,6 +83,9 @@ describe("PluginConfigTab", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: "제거" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/로컬 데이터/)).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "제거" }));
 
     await waitFor(() => {
       expect(mockUninstall).toHaveBeenCalledWith("meeting");
@@ -91,7 +93,6 @@ describe("PluginConfigTab", () => {
     });
 
     expect(screen.queryByText("Meeting 제거 완료")).toBeNull();
-    confirmSpy.mockRestore();
   });
 
   it("shows save failure instead of success when IPC returns ok=false", async () => {
