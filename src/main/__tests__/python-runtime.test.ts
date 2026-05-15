@@ -118,7 +118,12 @@ function makeBrowserWindow() {
 
 describe("PythonRuntimeBootstrapper", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
+    vi.mocked(fsMock.mkdir).mockResolvedValue(undefined);
+    vi.mocked(fsMock.appendFile).mockResolvedValue(undefined);
+    vi.mocked(fsMock.writeFile).mockResolvedValue(undefined);
+    vi.mocked(fsMock.rename).mockResolvedValue(undefined);
+    vi.mocked(fsMock.chmod).mockResolvedValue(undefined);
     mockedReadFile.mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
     // readdir default — repairLegacyUvBinaries calls readdir on uvRuntimeDir;
     // most tests don't care, so default to ENOENT (no uv binaries) and let
