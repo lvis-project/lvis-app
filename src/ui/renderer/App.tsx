@@ -87,7 +87,7 @@ export function App() {
   const [question, setQuestion] = useState("");
   const chatEndRef = useRef<HTMLDivElement>(null);
   const turnRequestRef = useRef(0);
-  // In-flight guard for kind="action" sidebar dispatches — keyed by
+  // In-flight guard for kind="action" plugin-panel dispatches — keyed by
   // `${pluginId}:${tool}`. Prevents duplicate fires from rapid double-clicks
   // when no panel transition is visible to throttle the user naturally.
   const pluginActionInflightRef = useRef<Set<string>>(new Set());
@@ -456,7 +456,8 @@ export function App() {
         // downstream in runtime/index.ts:callFromUi. Active view state is
         // intentionally NOT changed so the user stays on whatever they
         // were looking at (chat / settings / etc.). slot==="sidebar" 는
-        // 현재 schema 가 강제하지만 future enum 확장 시 defense-in-depth.
+        // (현재 schema 키 — 사용자에게는 "플러그인 패널") 강제하지만
+        // future enum 확장 시 defense-in-depth.
         if (view.extension.kind === "action" && view.extension.slot === "sidebar") {
           const actionTool = view.extension.tool;
           if (typeof actionTool !== "string" || actionTool.length === 0) {

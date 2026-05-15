@@ -246,7 +246,7 @@ export function PluginUiHostView({
       return;
     }
     // action entries never produce a panel — App.tsx 의 handleViewSelect 가
-    // 사이드바 click 시 곧장 callPluginMethod 디스패치하고 active view 도
+    // 플러그인 패널 click 시 곧장 callPluginMethod 디스패치하고 active view 도
     // 안 바꾸므로 정상 경로에서는 여기 도달하지 않는다. 다만 다른 caller
     // (keyboard shortcut, command palette 등) 가 action view 를 잘못 전달했을
     // 때 panel chrome (Card 헤더 + border) 이 회귀로 뜨지 않도록 fail-safe.
@@ -285,7 +285,7 @@ export function PluginUiHostView({
       // `key={view.pluginId}` 가 결정적. Electron `<webview>` 는 처음
       // attach 시점에만 partition / src 를 바인딩하고 이후 prop 변경을
       // 완전히 적용하지 못한다 (mojo: "Message N rejected by interface
-      // blink.mojom.WidgetHost" 형태로 떨어짐). 사이드바에서 다른
+      // blink.mojom.WidgetHost" 형태로 떨어짐). 플러그인 패널에서 다른
       // 플러그인 탭으로 전환하면 같은 React 컴포넌트 인스턴스가
       // partition/src 만 바꿔서 재사용되는데 이때부터 webview 가
       // half-loaded 상태로 남아 새 플러그인 UI 가 안 뜨고, 이전 탭으로
