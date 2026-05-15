@@ -450,44 +450,19 @@ describe("lvis:plugins:config:*", () => {
     expect(services.pluginRuntime.restartAll).not.toHaveBeenCalled();
   });
 
-  // Regression: restartPlugin's onDisable callback removes plugin tools from
-  // ToolRegistry; without a post-restart `syncPluginToolRegistry` call the
-  // tools stay unregistered until the next install/uninstall event, surfacing
-  // as `도구를 찾을 수 없습니다` for every chat-surface call on this plugin.
-  // This test locks in the wire-up at the IPC layer.
-  it("re-registers plugin tools in ToolRegistry after the restart-triggered onDisable wipe", async () => {
+  // Contract: the IPC `lvis:plugins:config:set` handler delegates the
+  // post-restart ToolRegistry resync to the runtime's `onEnable` callback
+  // (wired in `boot/steps/plugin-runtime.ts`) — it no longer calls
+  // `syncPluginToolRegistry` directly. This test pins that contract: the
+  // handler must NOT touch `deps.toolRegistry` on its own and must rely
+  // entirely on `restartPlugin` (which fires onEnable on success per
+  // `src/plugins/runtime/__tests__/lifecycle.test.ts`).
+  it("delegates post-restart ToolRegistry resync to the runtime onEnable hook (no direct registry mutation in the IPC handler)", async () => {
     const pm = makeMockPM();
     handlers.clear();
     vi.clearAllMocks();
     const { registerIpcHandlers } = await import("../ipc-bridge.js");
     const services = makeServices(pm);
-    // Pre-existing plugin tool so the sweep half of `syncPluginToolRegistry`
-    // (unregisterByPlugin) is exercised — `listAll` empty would skip it.
-    (services.toolRegistry as { listAll: ReturnType<typeof vi.fn> }).listAll = vi.fn(() => [
-      { name: "meeting_ping", source: "plugin", pluginId: "meeting" },
-    ]);
-    // Stand up a manifest so `syncPluginToolRegistry` actually has something
-    // to re-register — empty `listPluginManifests` would let a broken fix
-    // (no sync) pass without `toolRegistry.register` being inspected.
-    services.pluginRuntime.listPluginManifests = vi.fn(() => [{
-      pluginId: "meeting",
-      manifest: {
-        id: "meeting",
-        name: "Meeting",
-        version: "1.0.0",
-        entry: "index.js",
-        description: "fixture",
-        publisher: "Test",
-        tools: ["meeting_ping"],
-        toolSchemas: {
-          meeting_ping: {
-            description: "ping",
-            category: "read",
-            inputSchema: { type: "object", properties: {} },
-          },
-        },
-      } as never,
-    }]);
     registerIpcHandlers(services, () => null);
 
     const result = await invoke("lvis:plugins:config:set", "meeting", { volume: 5 }) as {
@@ -496,12 +471,11 @@ describe("lvis:plugins:config:*", () => {
 
     expect(result.ok).toBe(true);
     expect(services.pluginRuntime.restartPlugin).toHaveBeenCalledWith("meeting");
-    // syncPluginToolRegistry contract — unregister-by-plugin sweep then
-    // re-register from manifest. If either is missing, the bug regresses.
-    expect(services.toolRegistry.unregisterByPlugin).toHaveBeenCalled();
-    expect(services.toolRegistry.register).toHaveBeenCalledWith(
-      expect.objectContaining({ name: "meeting_ping", pluginId: "meeting" }),
-    );
+    // The IPC handler must not bypass the runtime's lifecycle contract by
+    // mutating the ToolRegistry on its own — that's onEnable's job, and the
+    // runtime layer's lifecycle tests verify it fires.
+    expect(services.toolRegistry.unregisterByPlugin).not.toHaveBeenCalled();
+    expect(services.toolRegistry.register).not.toHaveBeenCalled();
   });
 
   // §9.2 Track B — US-B5
