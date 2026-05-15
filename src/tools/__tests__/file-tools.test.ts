@@ -218,6 +218,52 @@ describe("file native tools", () => {
     expect(["one\n", "two\n"]).toContain(readFileSync(join(workDir, "generated", "race.txt"), "utf8"));
   });
 
+  it("write_file overwrite emits lvis.write_file with before snapshot", async () => {
+    writeFileSync(join(workDir, "snap.txt"), "first line\nsecond line\n", "utf8");
+    const result = await new WriteFileTool().execute(
+      { path: "snap.txt", content: "first line\nupdated line\n" },
+      ctx(),
+    );
+
+    expect(result.isError).toBe(false);
+    const parsed = parse(result.output);
+    expect(parsed.kind).toBe("lvis.write_file");
+    expect(parsed.isNewFile).toBe(false);
+    expect(parsed.truncated).toBe(false);
+    expect(parsed.before).toBe("first line\nsecond line\n");
+    expect(parsed.after).toBe("first line\nupdated line\n");
+  });
+
+  it("write_file new file emits isNewFile=true without before field", async () => {
+    const result = await new WriteFileTool().execute(
+      { path: "generated/fresh.txt", content: "hello\n" },
+      ctx(),
+    );
+
+    expect(result.isError).toBe(false);
+    const parsed = parse(result.output);
+    expect(parsed.kind).toBe("lvis.write_file");
+    expect(parsed.isNewFile).toBe(true);
+    expect(parsed.before).toBeUndefined();
+    expect(parsed.after).toBe("hello\n");
+  });
+
+  it("write_file large content sets truncated=true and caps after preview", async () => {
+    const big = "x".repeat(10_000);
+    const result = await new WriteFileTool().execute(
+      { path: "generated/big.txt", content: big },
+      ctx(),
+    );
+
+    expect(result.isError).toBe(false);
+    const parsed = parse(result.output);
+    expect(parsed.kind).toBe("lvis.write_file");
+    expect(parsed.truncated).toBe(true);
+    expect(typeof parsed.after).toBe("string");
+    expect((parsed.after as string).length).toBeLessThan(big.length);
+    expect(parsed.bytes).toBe(Buffer.byteLength(big, "utf8"));
+  });
+
   it("edit_file replaces a single exact match", async () => {
     const result = await new EditFileTool().execute(
       { path: "README.md", oldText: "needle docs", newText: "updated docs" },

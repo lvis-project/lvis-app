@@ -43,6 +43,12 @@ type Result<T> = { ok: true; value: T } | { ok: false; error: ToolErrorResult };
 const DEFAULT_LINE_LIMIT = 2_000;
 const MAX_LINE_LIMIT = 5_000;
 const MAX_TEXT_FILE_BYTES = 2_000_000;
+
+// Cap per-side preview for write_file diff payload. The diff UI is a
+// best-effort preview, not the source of truth — capping keeps the LLM-facing
+// tool result bounded (~1k tokens per side worst case). When either side
+// exceeds this, `truncated: true` is emitted and the renderer shows a marker.
+const WRITE_DIFF_PREVIEW_LIMIT = 4096;
 const MAX_SEARCH_FILE_BYTES = 1_000_000;
 const BINARY_SAMPLE_BYTES = 8_192;
 const DEFAULT_RESULT_LIMIT = 200;
@@ -348,9 +354,48 @@ export class WriteFileTool extends FileTool<typeof WriteFileInputSchema> {
     if (blocked) return blocked;
 
     await mkdir(dirname(target), { recursive: true });
+
+    // Capture before-snapshot for the FileEditDiff renderer (see
+    // src/ui/renderer/components/FileEditDiff.tsx). Skip when the prior
+    // file is binary or exceeds the preview cap — those cases set
+    // `truncated: true` and the UI falls back to a summary header.
+    const existing = await statExistingPath(target);
+    let before: string | undefined;
+    let isNewFile = false;
+    let truncated = false;
+    if (existing.ok) {
+      if (existing.value === null) {
+        isNewFile = true;
+      } else if (
+        existing.value.isFile() &&
+        existing.value.size <= WRITE_DIFF_PREVIEW_LIMIT &&
+        !(await isBinaryFile(target))
+      ) {
+        before = await readFile(target, "utf8");
+      } else if (existing.value.isFile()) {
+        truncated = true;
+      }
+    }
+
     await atomicTextWrite(target, input.content);
+
+    const afterFull = input.content;
+    const after =
+      afterFull.length > WRITE_DIFF_PREVIEW_LIMIT
+        ? afterFull.slice(0, WRITE_DIFF_PREVIEW_LIMIT)
+        : afterFull;
+    if (after.length < afterFull.length) truncated = true;
+
     return {
-      output: JSON.stringify({ path: target, bytes: Buffer.byteLength(input.content, "utf8") }),
+      output: JSON.stringify({
+        kind: "lvis.write_file",
+        path: target,
+        bytes: Buffer.byteLength(afterFull, "utf8"),
+        isNewFile,
+        truncated,
+        ...(before !== undefined ? { before } : {}),
+        after,
+      }),
       isError: false,
       metadata: { path: target },
     };
