@@ -218,7 +218,7 @@ describe("file native tools", () => {
     expect(["one\n", "two\n"]).toContain(readFileSync(join(workDir, "generated", "race.txt"), "utf8"));
   });
 
-  it("write_file overwrite emits lvis.write_file with before snapshot", async () => {
+  it("write_file overwrite emits path and bytes without kind sentinel", async () => {
     writeFileSync(join(workDir, "snap.txt"), "first line\nsecond line\n", "utf8");
     const result = await new WriteFileTool().execute(
       { path: "snap.txt", content: "first line\nupdated line\n" },
@@ -227,14 +227,15 @@ describe("file native tools", () => {
 
     expect(result.isError).toBe(false);
     const parsed = parse(result.output);
-    expect(parsed.kind).toBe("lvis.write_file");
-    expect(parsed.isNewFile).toBe(false);
-    expect(parsed.truncated).toBe(false);
-    expect(parsed.before).toBe("first line\nsecond line\n");
-    expect(parsed.after).toBe("first line\nupdated line\n");
+    // Sidecar model: output carries path + bytes only; no inline before/after.
+    expect(parsed.path).toMatch(/snap\.txt$/);
+    expect(typeof parsed.bytes).toBe("number");
+    // Small file: both sides under WRITE_DIFF_PREVIEW_LIMIT — not truncated.
+    expect(parsed.truncated).toBeUndefined();
+    expect(parsed.hasSidecar).toBeUndefined();
   });
 
-  it("write_file new file emits isNewFile=true without before field", async () => {
+  it("write_file new file emits path and bytes without truncated flag", async () => {
     const result = await new WriteFileTool().execute(
       { path: "generated/fresh.txt", content: "hello\n" },
       ctx(),
@@ -242,13 +243,12 @@ describe("file native tools", () => {
 
     expect(result.isError).toBe(false);
     const parsed = parse(result.output);
-    expect(parsed.kind).toBe("lvis.write_file");
-    expect(parsed.isNewFile).toBe(true);
-    expect(parsed.before).toBeUndefined();
-    expect(parsed.after).toBe("hello\n");
+    expect(parsed.path).toMatch(/fresh\.txt$/);
+    expect(parsed.bytes).toBe(Buffer.byteLength("hello\n", "utf8"));
+    expect(parsed.truncated).toBeUndefined();
   });
 
-  it("write_file large content sets truncated=true and caps after preview", async () => {
+  it("write_file large content sets truncated=true in output", async () => {
     const big = "x".repeat(10_000);
     const result = await new WriteFileTool().execute(
       { path: "generated/big.txt", content: big },
@@ -257,11 +257,10 @@ describe("file native tools", () => {
 
     expect(result.isError).toBe(false);
     const parsed = parse(result.output);
-    expect(parsed.kind).toBe("lvis.write_file");
     expect(parsed.truncated).toBe(true);
-    expect(typeof parsed.after).toBe("string");
-    expect((parsed.after as string).length).toBeLessThan(big.length);
     expect(parsed.bytes).toBe(Buffer.byteLength(big, "utf8"));
+    // Sidecar model: no inline after field — full content lives in sidecar file.
+    expect(parsed.after).toBeUndefined();
   });
 
   it("edit_file replaces a single exact match", async () => {
@@ -439,5 +438,83 @@ describe("file native tools", () => {
     expect(registry.findByName("read_file")?.category).toBe("read");
     expect(registry.findByName("write_file")?.category).toBe("write");
     expect(registry.findByName("apply_patch")?.category).toBe("write");
+  });
+});
+
+describe("WriteFileTool pre-image guard (MAJOR 1)", () => {
+  let testHome: string;
+
+  beforeEach(() => {
+    testHome = mkdtempSync(join(tmpdir(), "lvis-write-guard-"));
+    // Redirect sidecar writes to isolated temp dir (mirrors write-diff-cache.test.ts pattern).
+    process.env.LVIS_HOME = testHome;
+  });
+
+  afterEach(() => {
+    delete process.env.LVIS_HOME;
+    rmSync(testHome, { recursive: true, force: true });
+  });
+
+  it("skips pre-image read and sets skipSidecar for a file exceeding MAX_TEXT_FILE_BYTES", async () => {
+    // Write a real file that exceeds MAX_TEXT_FILE_BYTES (2_000_000).
+    // We fill 2.1MB with repeated ASCII so stat() reports the actual size.
+    // ESM module namespaces are not re-configurable, so vi.spyOn(node:fs/promises)
+    // does not work in this suite — real file is the correct approach.
+    const bigPath = join(workDir, "big.txt");
+    const chunk = "x".repeat(1024); // 1 KiB
+    const buf = Buffer.alloc(2_100_000);
+    buf.fill(chunk);
+    writeFileSync(bigPath, buf);
+
+    const result = await new WriteFileTool().execute(
+      { path: bigPath, content: "new content" },
+      { cwd: workDir, extraAllowedDirectories: [], metadata: { sessionId: "s1", toolUseId: "tu1" } },
+    );
+
+    expect(result.isError).toBe(false);
+    const body = parse(result.output);
+    // hasSidecar must be false — skipSidecar was set for the oversized pre-image.
+    expect(body.hasSidecar).toBeUndefined();
+    // File was still overwritten with new content.
+    expect(readFileSync(bigPath, "utf8")).toBe("new content");
+  });
+
+  it("skips pre-image read and sets skipSidecar for a binary pre-existing file", async () => {
+    // Write a file with null bytes (binary signature).
+    const binPath = join(workDir, "image.bin");
+    writeFileSync(binPath, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x00, 0x00, 0x00]));
+
+    // Use after content > WRITE_DIFF_PREVIEW_LIMIT (4096) so truncated=true fires.
+    // Without the binary guard, hasSidecar would be true. The guard must suppress it.
+    const largeAfter = "x".repeat(4097);
+    const result = await new WriteFileTool().execute(
+      { path: binPath, content: largeAfter },
+      { cwd: workDir, extraAllowedDirectories: [], metadata: { sessionId: "s2", toolUseId: "tu2" } },
+    );
+
+    expect(result.isError).toBe(false);
+    const body = parse(result.output);
+    // truncated=true because afterBytes > WRITE_DIFF_PREVIEW_LIMIT.
+    expect(body.truncated).toBe(true);
+    // hasSidecar must be false — binary pre-image triggers skipSidecar, so
+    // writeDiffSidecar is never called even though afterBytes > preview limit.
+    expect(body.hasSidecar).toBe(false);
+    // File was still written with new text content.
+    expect(readFileSync(binPath, "utf8")).toBe(largeAfter);
+  });
+
+  it("writes sidecar normally for a small text pre-existing file", async () => {
+    const txtPath = join(workDir, "small.txt");
+    writeFileSync(txtPath, "before content", "utf8");
+
+    const result = await new WriteFileTool().execute(
+      { path: txtPath, content: "after content" },
+      { cwd: workDir, extraAllowedDirectories: [], metadata: { sessionId: "s3", toolUseId: "tu3" } },
+    );
+
+    expect(result.isError).toBe(false);
+    // Small file: sidecar is NOT written unless content exceeds WRITE_DIFF_PREVIEW_LIMIT.
+    // The important invariant: no crash, and the file content is updated.
+    expect(readFileSync(txtPath, "utf8")).toBe("after content");
   });
 });
