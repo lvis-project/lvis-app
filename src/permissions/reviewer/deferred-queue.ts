@@ -19,7 +19,6 @@
  * "rejected") so the audit chain is preserved even after queue drain.
  */
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, resolve as pathResolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { withFileLock } from "../../lib/with-file-lock.js";
@@ -27,6 +26,7 @@ import { createLogger } from "../../lib/logger.js";
 import type { RiskVerdict } from "./risk-classifier.js";
 import type { PermissionEvaluationContext } from "../evaluation-context.js";
 import type { ToolCategory, ToolSource } from "../../tools/types.js";
+import { lvisHome } from "../../shared/lvis-home.js";
 
 const log = createLogger("deferred-queue");
 
@@ -51,7 +51,7 @@ export interface DeferredEntry {
 }
 
 function defaultPath(): string {
-  return pathResolve(homedir(), ".lvis", "permissions", "deferred-queue.jsonl");
+  return pathResolve(lvisHome(), "permissions", "deferred-queue.jsonl");
 }
 
 export class DeferredQueue {

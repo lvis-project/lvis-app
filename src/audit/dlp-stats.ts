@@ -6,9 +6,9 @@
  */
 import { existsSync, readdirSync, createReadStream } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
 import { createInterface } from "node:readline";
 import type { AuditEntry } from "./audit-logger.js";
+import { lvisHome } from "../shared/lvis-home.js";
 
 export interface DlpStats {
   totalHits: number;
@@ -48,7 +48,7 @@ function readLines(filePath: string): Promise<string[]> {
 }
 
 export async function getDlpStats(days = 7): Promise<DlpStats> {
-  const auditDir = join(homedir(), ".lvis", "audit");
+  const auditDir = join(lvisHome(), "audit");
   const files = filesInRange(auditDir, days);
 
   const byKind: Record<string, number> = {};

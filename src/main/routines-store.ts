@@ -11,7 +11,6 @@
  */
 import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { isValidCronExpression } from "../routines/cron-evaluator.js";
 import { createLogger } from "../lib/logger.js";
@@ -41,6 +40,7 @@ import type {
   AddRoutineInput,
 } from "../shared/routines-types.js";
 import { MAX_PERSISTED_ROUTINES, MAX_LLM_SESSION_ROUTINES } from "../shared/routines-types.js";
+import { lvisHome } from "../shared/lvis-home.js";
 
 /** Maximum allowed distance into the future for schedule.at (parity with RemindersStore). */
 const MAX_FUTURE_OFFSET_MS = 5 * 365.25 * 24 * 60 * 60 * 1000;
@@ -121,7 +121,7 @@ export interface RoutinesFile {
 }
 
 // Consolidated under ~/.lvis/routine/ namespace (single directory for all routine data).
-const DEFAULT_PATH = resolve(homedir(), ".lvis", "routine", "routines.json");
+const DEFAULT_PATH = resolve(lvisHome(), "routine", "routines.json");
 
 const fileLocks = new Map<string, Promise<void>>();
 

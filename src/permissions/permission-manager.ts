@@ -16,7 +16,6 @@
  * 7. 사용자 "항상 허용" 규칙
  * 8. Trust/category 기본 정책 (MCP auto 는 별도 우회 없이 여기로 합류)
  */
-import { homedir } from "node:os";
 import { resolve } from "node:path";
 import type { DenyRule, ToolCategory, ToolSource, ToolTrustOrigin, TrustLevel } from "../tools/types.js";
 import { trustFromSource } from "../tools/types.js";
@@ -33,6 +32,7 @@ import type { PermissionEvaluationContext } from "./evaluation-context.js";
 import type { VerdictCache } from "./reviewer/verdict-cache.js";
 import type { DeferredQueue } from "./reviewer/deferred-queue.js";
 import { globMatch } from "../lib/glob-matcher.js";
+import { lvisHome } from "../shared/lvis-home.js";
 
 export type PermissionDecision = "allow" | "deny" | "ask";
 export type ExecutionMode = "default" | "strict" | "auto" | "allow";
@@ -179,7 +179,7 @@ export class PermissionManager {
 
   constructor(permissionsFilePath?: string) {
     this.permissionsFilePath =
-      permissionsFilePath ?? resolve(homedir(), ".lvis", "permissions.json");
+      permissionsFilePath ?? resolve(lvisHome(), "permissions.json");
   }
 
   /**
