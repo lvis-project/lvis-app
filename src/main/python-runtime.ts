@@ -598,26 +598,82 @@ export class PythonRuntimeBootstrapper {
    */
   private async repairLegacyFileModes(): Promise<void> {
     if (process.platform === "win32") return;
-    const targets: Array<{ path: string; mode: number }> = [
+
+    // Files: 0o600 (owner-only rw)
+    const fileTargets: Array<{ path: string; mode: number }> = [
       { path: READY_SENTINEL, mode: 0o600 },
       { path: SETUP_LOG, mode: 0o600 },
     ];
-    for (const { path: target, mode } of targets) {
+    // Directories: 0o700 (owner-only rwx). Pre-fix dirs created at default
+    // 0o755 are world-traversable — minor info leak (directory listing only,
+    // not contents), but tightening matches the namespace rule.
+    const dirTargets: Array<{ path: string; mode: number }> = [
+      { path: LVIS_RUNTIME_DIR, mode: 0o700 },
+      { path: VENV_DIR, mode: 0o700 },
+      { path: LOGS_DIR, mode: 0o700 },
+      { path: UV_CACHE_DIR_PATH, mode: 0o700 },
+    ];
+
+    for (const { path: target, mode } of [...fileTargets, ...dirTargets]) {
       try {
         await fs.chmod(target, mode);
       } catch (err) {
         const code = (err as NodeJS.ErrnoException).code;
-        if (code === "ENOENT") continue; // first install — file not yet created
+        if (code === "ENOENT") continue; // first install — entry not yet created
         log.warn(`repairLegacyFileModes failed for ${target}: ${(err as Error).message}`);
       }
     }
-    // Note: the materialized uv binary lives under <UV_RUNTIME_DIR>/<arch>/
-    // <binarySha256>/uv — sha-keyed path is hard to enumerate up front. New
-    // materializations will get 0o700 directly via writeFileSync mode +
-    // chmod. Existing legacy 0o755 binaries are still owner-rwx + world-rx
-    // — unauthorised execute is benign (the binary is not setuid) but
-    // world-read is a small info leak. Future enhancement: walk
-    // <UV_RUNTIME_DIR> to chmod all `uv` entries to 0o700 on boot.
+
+    // Materialized uv binaries: walk `<uvRuntimeDir>/<arch>/<sha>/<bin>`
+    // and chmod each to 0o700. Pre-fix legacy installs left these at 0o755
+    // (world-read+exec). Owner-only is the contract going forward.
+    const uvRuntimeDir = this.options.uvRuntimeDir ?? path.join(LVIS_RUNTIME_DIR, "uv");
+    await this.repairLegacyUvBinaryModes(uvRuntimeDir);
+  }
+
+  /**
+   * Walk the materialized uv binary tree and chmod each binary to 0o700.
+   * The binary basename is derived from `resolveUvTarget(process.platform,
+   * process.arch).bin` — currently `"uv"` on POSIX, `"uv.exe"` on Windows.
+   * Note: this method only runs on POSIX (caller early-returns on win32),
+   * but resolving the basename programmatically guards against future
+   * cross-platform symmetry refactors silently missing `uv.exe`.
+   */
+  private async repairLegacyUvBinaryModes(uvRuntimeDir: string): Promise<void> {
+    const binBasename = resolveUvTarget(process.platform, process.arch).bin;
+    let archDirs: string[];
+    try {
+      archDirs = await fs.readdir(uvRuntimeDir);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
+      log.warn(`repairLegacyUvBinaryModes readdir(${uvRuntimeDir}) failed: ${(err as Error).message}`);
+      return;
+    }
+    for (const arch of archDirs) {
+      const archPath = path.join(uvRuntimeDir, arch);
+      let shaDirs: string[];
+      try {
+        shaDirs = await fs.readdir(archPath);
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code !== "ENOENT") {
+          // Parity with outer warn — pre-fix this catch was silent and a
+          // permission-denied arch dir disappeared without trace.
+          log.warn(`repairLegacyUvBinaryModes readdir(${archPath}) failed: ${(err as Error).message}`);
+        }
+        continue;
+      }
+      for (const sha of shaDirs) {
+        const binPath = path.join(archPath, sha, binBasename);
+        try {
+          await fs.chmod(binPath, 0o700);
+        } catch (err) {
+          const code = (err as NodeJS.ErrnoException).code;
+          if (code === "ENOENT") continue;
+          log.warn(`repairLegacyUvBinaryModes chmod(${binPath}) failed: ${(err as Error).message}`);
+        }
+      }
+    }
   }
 
   private async log(msg: string): Promise<void> {
