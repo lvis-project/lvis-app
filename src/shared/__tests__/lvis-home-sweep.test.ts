@@ -19,9 +19,19 @@ const SRC_ROOT = pathResolve(__dirname, "../..");
 // The single allowed location for direct homedir() + ".lvis" composition.
 const ALLOWED_FILE = pathResolve(SRC_ROOT, "shared/lvis-home.ts");
 
-// Pattern that flags violations. Excludes comments by requiring it to look
-// like an actual call expression (paren after .lvis somewhere).
-const VIOLATION_PATTERN = /(?:join|resolve|pathResolve|path\.join|path\.resolve)\(\s*(?:os\.)?homedir\(\)\s*,\s*"\.lvis"/;
+// Patterns that flag violations:
+// 1. Direct `(join|resolve|...)(homedir(), ".lvis", ...)` form
+// 2. Template-literal `\`${homedir()}/.lvis...\`` form
+// Plugin-side helpers that take a `home` parameter (e.g.
+// `getDefaultAuditDir(home)` in permission-audit-runner) are intentionally
+// NOT scanned here — they delegate the responsibility to the caller.
+// Their callers must already use lvisHome().
+const VIOLATION_PATTERNS: RegExp[] = [
+  // join(homedir(), ".lvis", ...) / resolve / pathResolve / path.join / path.resolve
+  /(?:join|resolve|pathResolve|path\.join|path\.resolve)\(\s*(?:os\.)?homedir\(\)\s*,\s*"\.lvis"/,
+  // Template literal: `${homedir()}/.lvis...`
+  /\$\{\s*(?:os\.)?homedir\(\)\s*\}\/\.lvis/,
+];
 
 function walk(dir: string, acc: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
@@ -49,7 +59,7 @@ describe("issue #735 — homedir() + '.lvis' composition is centralized in lvisH
       const content = readFileSync(file, "utf8");
       const lines = content.split("\n");
       lines.forEach((line, idx) => {
-        if (VIOLATION_PATTERN.test(line)) {
+        if (VIOLATION_PATTERNS.some((rx) => rx.test(line))) {
           violations.push({ file, line: idx + 1, text: line.trim() });
         }
       });
