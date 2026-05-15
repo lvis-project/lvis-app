@@ -28,30 +28,41 @@ interface Props {
    * use this hook to ALSO clear the bad state (e.g. force a refresh of
    * plugin cards, switch active view) before the retry happens.
    *
+   * Receives the captured `Error` so callers can branch on error class
+   * (e.g. "manifest validation failed" → trigger plugin refresh; otherwise
+   * → just clear state). The error argument may be undefined if the
+   * boundary state was reset programmatically; callers can treat it as
+   * optional. onReset throwing is caught — see handleRetry.
+   *
    * If `onReset` is omitted, the fallback only offers the full-window
    * reload button (legacy behavior).
    */
-  onReset?: () => void;
+  onReset?: (error: Error | undefined) => void;
 }
-interface State { hasError: boolean; message: string }
+interface State { hasError: boolean; message: string; error: Error | undefined }
 
 export class ErrorBoundary extends Component<Props, State> {
-  state: State = { hasError: false, message: "" };
+  state: State = { hasError: false, message: "", error: undefined };
   static getDerivedStateFromError(error: Error): State {
-    return { hasError: true, message: error.message };
+    return { hasError: true, message: error.message, error };
   }
   componentDidCatch(error: Error, info: ErrorInfo) {
     const scope = this.props.boundaryName ?? "<root>";
     console.error(`[lvis] render error in boundary='${scope}':`, error, info);
   }
   private handleRetry = () => {
+    const capturedError = this.state.error;
     try {
-      this.props.onReset?.();
+      this.props.onReset?.(capturedError);
     } catch (err) {
-      // Caller's onReset throwing must not loop the boundary
+      // Caller's onReset throwing must not stick the boundary in error
+      // state. Log + continue to setState so children get re-rendered. If
+      // the children still throw, the boundary catches again — no infinite
+      // loop because React's getDerivedStateFromError fires once per
+      // render cycle, not in a tight retry loop.
       console.error(`[lvis] onReset hook threw in boundary='${this.props.boundaryName ?? "<root>"}':`, err);
     }
-    this.setState({ hasError: false, message: "" });
+    this.setState({ hasError: false, message: "", error: undefined });
   };
   render() {
     if (this.state.hasError) {
