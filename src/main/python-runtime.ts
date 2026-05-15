@@ -624,20 +624,29 @@ export class PythonRuntimeBootstrapper {
       }
     }
 
-    // Materialized uv binaries: walk `<uvRuntimeDir>/<arch>/<sha>/uv` and
-    // chmod each to 0o700. Pre-fix legacy installs left these at 0o755
+    // Materialized uv binaries: walk `<uvRuntimeDir>/<arch>/<sha>/<bin>`
+    // and chmod each to 0o700. Pre-fix legacy installs left these at 0o755
     // (world-read+exec). Owner-only is the contract going forward.
     const uvRuntimeDir = this.options.uvRuntimeDir ?? path.join(LVIS_RUNTIME_DIR, "uv");
-    await this.repairLegacyUvBinaries(uvRuntimeDir);
+    await this.repairLegacyUvBinaryModes(uvRuntimeDir);
   }
 
-  private async repairLegacyUvBinaries(uvRuntimeDir: string): Promise<void> {
+  /**
+   * Walk the materialized uv binary tree and chmod each binary to 0o700.
+   * The binary basename is derived from `resolveUvTarget(process.platform,
+   * process.arch).bin` — currently `"uv"` on POSIX, `"uv.exe"` on Windows.
+   * Note: this method only runs on POSIX (caller early-returns on win32),
+   * but resolving the basename programmatically guards against future
+   * cross-platform symmetry refactors silently missing `uv.exe`.
+   */
+  private async repairLegacyUvBinaryModes(uvRuntimeDir: string): Promise<void> {
+    const binBasename = resolveUvTarget(process.platform, process.arch).bin;
     let archDirs: string[];
     try {
       archDirs = await fs.readdir(uvRuntimeDir);
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
-      log.warn(`repairLegacyUvBinaries readdir(${uvRuntimeDir}) failed: ${(err as Error).message}`);
+      log.warn(`repairLegacyUvBinaryModes readdir(${uvRuntimeDir}) failed: ${(err as Error).message}`);
       return;
     }
     for (const arch of archDirs) {
@@ -645,19 +654,23 @@ export class PythonRuntimeBootstrapper {
       let shaDirs: string[];
       try {
         shaDirs = await fs.readdir(archPath);
-      } catch {
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code !== "ENOENT") {
+          // Parity with outer warn — pre-fix this catch was silent and a
+          // permission-denied arch dir disappeared without trace.
+          log.warn(`repairLegacyUvBinaryModes readdir(${archPath}) failed: ${(err as Error).message}`);
+        }
         continue;
       }
       for (const sha of shaDirs) {
-        // uv binary basename is `uv` on POSIX; `.exe` only on Windows where
-        // we already early-return — so the literal "uv" suffices here.
-        const binPath = path.join(archPath, sha, "uv");
+        const binPath = path.join(archPath, sha, binBasename);
         try {
           await fs.chmod(binPath, 0o700);
         } catch (err) {
           const code = (err as NodeJS.ErrnoException).code;
           if (code === "ENOENT") continue;
-          log.warn(`repairLegacyUvBinaries chmod(${binPath}) failed: ${(err as Error).message}`);
+          log.warn(`repairLegacyUvBinaryModes chmod(${binPath}) failed: ${(err as Error).message}`);
         }
       }
     }

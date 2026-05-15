@@ -852,14 +852,18 @@ describe("PythonRuntimeBootstrapper", () => {
       vi.mocked(fsMock.chmod).mockImplementation(async (target, mode) => {
         chmodCalls.push({ target: String(target), mode: Number(mode) });
       });
-      // Simulate two arch dirs each with one sha-keyed binary
-      vi.mocked(fsMock.readdir).mockImplementation(async (dirPath) => {
+      // Simulate two arch dirs each with one sha-keyed binary.
+      // Cast through `unknown` rather than `as never` — readdir's overload
+      // union (string[] | Buffer[] | Dirent[]) makes vitest's mock typing
+      // awkward; the unknown cast preserves the "I'm narrowing the
+      // overload" intent without nuking the type system.
+      vi.mocked(fsMock.readdir).mockImplementation((async (dirPath: string) => {
         const p = String(dirPath);
-        if (p.endsWith("/runtime/uv")) return ["linux-arm64", "linux-x64"] as never;
-        if (p.endsWith("linux-arm64")) return ["sha-aaa"] as never;
-        if (p.endsWith("linux-x64")) return ["sha-bbb"] as never;
-        return [] as never;
-      });
+        if (p.endsWith("/runtime/uv")) return ["linux-arm64", "linux-x64"];
+        if (p.endsWith("linux-arm64")) return ["sha-aaa"];
+        if (p.endsWith("linux-x64")) return ["sha-bbb"];
+        return [];
+      }) as unknown as typeof fsMock.readdir);
       mockedAccess.mockResolvedValue(undefined);
       mockedSpawn.mockReturnValue(makeSpawnMock(""));
 

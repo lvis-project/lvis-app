@@ -39,12 +39,12 @@ interface Props {
    */
   onReset?: (error: Error | undefined) => void;
 }
-interface State { hasError: boolean; message: string; error: Error | undefined }
+interface State { hasError: boolean; error: Error | undefined }
 
 export class ErrorBoundary extends Component<Props, State> {
-  state: State = { hasError: false, message: "", error: undefined };
+  state: State = { hasError: false, error: undefined };
   static getDerivedStateFromError(error: Error): State {
-    return { hasError: true, message: error.message, error };
+    return { hasError: true, error };
   }
   componentDidCatch(error: Error, info: ErrorInfo) {
     const scope = this.props.boundaryName ?? "<root>";
@@ -62,7 +62,7 @@ export class ErrorBoundary extends Component<Props, State> {
       // render cycle, not in a tight retry loop.
       console.error(`[lvis] onReset hook threw in boundary='${this.props.boundaryName ?? "<root>"}':`, err);
     }
-    this.setState({ hasError: false, message: "", error: undefined });
+    this.setState({ hasError: false, error: undefined });
   };
   render() {
     if (this.state.hasError) {
