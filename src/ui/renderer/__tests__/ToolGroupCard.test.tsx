@@ -367,6 +367,188 @@ describe("ToolGroupCard", () => {
     expect(container.textContent).toContain("normal file content");
     expect(container.textContent).not.toContain("[펼치기]");
   });
+
+  // Regression: PR #299 introduced single-tool inline early-return that bypassed
+  // the HtmlPreview area for render_html, so single render_html calls rendered
+  // only the collapsible indicator with raw JSON. SingleToolInline must now also
+  // render the iframe preview when the tool is a successful render_html call.
+  it("single render_html: renders HtmlPreview area inline", () => {
+    const group = makeGroup({
+      tools: [
+        {
+          toolUseId: "tu-html-1",
+          name: "render_html",
+          input: { html: "<p>hi</p>" },
+          result: JSON.stringify({
+            kind: "lvis.render_html",
+            title: "차트 미리보기",
+            height: 320,
+            html: "<p>hi</p>",
+            warnings: [],
+          }),
+          status: "done",
+          displayOrder: 0,
+        },
+      ],
+    });
+    const { container } = render(<ToolGroupCard group={group} />);
+    expect(container.textContent).toContain("차트 미리보기");
+    expect(container.querySelector("webview")).toBeTruthy();
+  });
+
+  it("single render_html with <script>: shows JavaScript permission button", () => {
+    const group = makeGroup({
+      tools: [
+        {
+          toolUseId: "tu-html-2",
+          name: "render_html",
+          input: {},
+          result: JSON.stringify({
+            kind: "lvis.render_html",
+            height: 200,
+            html: "<script>console.log('hi')</script>",
+            warnings: [],
+          }),
+          status: "done",
+          displayOrder: 0,
+        },
+      ],
+    });
+    const { container } = render(<ToolGroupCard group={group} />);
+    expect(container.textContent).toContain("JavaScript 허용");
+  });
+
+  // File edit diff UI — edit_file / apply_patch / write_file render an inline
+  // unified-diff card with theme-adaptive colors. Data comes from `tool.input`
+  // for edit/patch (no backend change), and from `lvis.write_file` JSON for
+  // writes (WriteFileTool captures before-snapshot).
+  it("single edit_file: renders FileEditDiff with old and new text", () => {
+    const group = makeGroup({
+      tools: [
+        {
+          toolUseId: "tu-edit",
+          name: "edit_file",
+          input: {
+            path: "src/foo.ts",
+            oldText: "const x = 1;\nconst y = 2;",
+            newText: "const x = 1;\nconst y = 3;",
+          },
+          result: JSON.stringify({ path: "src/foo.ts", replacements: 1 }),
+          status: "done",
+          displayOrder: 0,
+        },
+      ],
+    });
+    const { container } = render(<ToolGroupCard group={group} />);
+    expect(container.textContent).toContain("src/foo.ts");
+    expect(container.textContent).toContain("Edit");
+    expect(container.textContent).toContain("const y = 2;");
+    expect(container.textContent).toContain("const y = 3;");
+  });
+
+  it("single apply_patch with 2 replacements: renders 2 hunks", () => {
+    const group = makeGroup({
+      tools: [
+        {
+          toolUseId: "tu-patch",
+          name: "apply_patch",
+          input: {
+            path: "src/bar.ts",
+            replacements: [
+              { oldText: "alpha", newText: "ALPHA" },
+              { oldText: "beta", newText: "BETA" },
+            ],
+          },
+          result: JSON.stringify({ path: "src/bar.ts", replacements: 2 }),
+          status: "done",
+          displayOrder: 0,
+        },
+      ],
+    });
+    const { container } = render(<ToolGroupCard group={group} />);
+    expect(container.textContent).toContain("src/bar.ts");
+    expect(container.textContent).toContain("alpha");
+    expect(container.textContent).toContain("ALPHA");
+    expect(container.textContent).toContain("beta");
+    expect(container.textContent).toContain("BETA");
+    expect(container.textContent).toContain("next hunk");
+  });
+
+  it("single write_file (existing): renders before and after", () => {
+    const group = makeGroup({
+      tools: [
+        {
+          toolUseId: "tu-write-existing",
+          name: "write_file",
+          input: { path: "src/baz.ts", content: "after\n" },
+          result: JSON.stringify({
+            kind: "lvis.write_file",
+            path: "src/baz.ts",
+            bytes: 6,
+            isNewFile: false,
+            truncated: false,
+            before: "before\n",
+            after: "after\n",
+          }),
+          status: "done",
+          displayOrder: 0,
+        },
+      ],
+    });
+    const { container } = render(<ToolGroupCard group={group} />);
+    expect(container.textContent).toContain("Write");
+    expect(container.textContent).toContain("before");
+    expect(container.textContent).toContain("after");
+  });
+
+  it("single write_file (new file): shows Create verb without before", () => {
+    const group = makeGroup({
+      tools: [
+        {
+          toolUseId: "tu-write-new",
+          name: "write_file",
+          input: { path: "src/new.ts", content: "hello\n" },
+          result: JSON.stringify({
+            kind: "lvis.write_file",
+            path: "src/new.ts",
+            bytes: 6,
+            isNewFile: true,
+            truncated: false,
+            after: "hello\n",
+          }),
+          status: "done",
+          displayOrder: 0,
+        },
+      ],
+    });
+    const { container } = render(<ToolGroupCard group={group} />);
+    expect(container.textContent).toContain("Create");
+    expect(container.textContent).toContain("hello");
+  });
+
+  it("single write_file (truncated): shows truncated marker", () => {
+    const group = makeGroup({
+      tools: [
+        {
+          toolUseId: "tu-write-trunc",
+          name: "write_file",
+          input: { path: "src/big.ts", content: "x".repeat(10000) },
+          result: JSON.stringify({
+            kind: "lvis.write_file",
+            path: "src/big.ts",
+            bytes: 10000,
+            isNewFile: false,
+            truncated: true,
+            after: "x".repeat(100),
+          }),
+          status: "done",
+          displayOrder: 0,
+        },
+      ],
+    });
+    const { container } = render(<ToolGroupCard group={group} />);
+    expect(container.textContent).toContain("truncated");
+  });
 });
 
 afterEach(() => {
