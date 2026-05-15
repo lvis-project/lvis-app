@@ -62,6 +62,35 @@ import { parseImportedTriggerEnvelope } from "../../shared/overlay-trigger-sourc
 
 const CHAT_BOTTOM_THRESHOLD_PX = 96;
 
+type ImportedTriggerEntry = Extract<ChatEntry, { kind: "imported_trigger" }>;
+
+function isTurnStartEntry(entry: ChatEntry | undefined): boolean {
+  return entry?.kind === "user" || entry?.kind === "imported_trigger";
+}
+
+function ImportedTriggerCard({ entry }: { entry: ImportedTriggerEntry }) {
+  // Parse envelope source tag to confirm overlay trigger provenance.
+  // title + summary fields are already clean (set at insert time).
+  const envelopeSource = parseImportedTriggerEnvelope(entry.prompt);
+  return (
+    <div
+      className="mx-3 my-1 rounded border border-action-view/20 bg-action-view/5 px-3 py-2 text-xs"
+    >
+      <div className="flex items-center gap-1 text-action-view font-medium">
+        <span>●</span>
+        <span>{envelopeSource ?? entry.summary.slice(0, 60)}</span>
+      </div>
+      {entry.summary && (
+        <div className="mt-1 text-muted-foreground prose prose-sm lvis-prose max-w-none">
+          <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>
+            {entry.summary}
+          </ReactMarkdown>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /**
  * ChatView — consumes cross-cutting state via `useChatContext()`. Action
  * callbacks stay as direct props so data flow for user-driven side effects
@@ -252,18 +281,18 @@ function HistoricalEntriesList({
         ? segment.slice(0, finalAssistantOffset)
         : segment;
       // Historical segment 의 turnStart + 같은 turn 의 turn_summary entry
-      // 한 번에 lookup. turn_summary 는 segment 외부 (다음 user 직전) 에 있어
-      // entries 전체에서 찾되 다음 user 만나기 전까지만.
+      // 한 번에 lookup. turn_summary 는 segment 외부 (다음 user/imported_trigger
+      // 직전) 에 있어 entries 전체에서 찾되 다음 turn start 만나기 전까지만.
       let histTurnStart = -1;
       for (let k = segmentStart; k >= 0; k--) {
-        if (entries[k]?.kind === "user") { histTurnStart = k; break; }
+        if (isTurnStartEntry(entries[k])) { histTurnStart = k; break; }
       }
       let histTurnSummary: Extract<ChatEntry, { kind: "turn_summary" }> | undefined;
       if (histTurnStart >= 0) {
         for (let k = segmentStart; k < entries.length; k++) {
           const ne = entries[k];
           if (!ne) continue;
-          if (ne.kind === "user" && k !== histTurnStart) break;
+          if (isTurnStartEntry(ne) && k !== histTurnStart) break;
           if (ne.kind === "turn_summary") {
             histTurnSummary = ne;
             break;
@@ -366,40 +395,11 @@ function HistoricalEntriesList({
     }
 
     if (entry.kind === "imported_trigger") {
-      // Parse envelope source tag to confirm overlay trigger provenance.
-      // title + summary fields are already clean (set at insert time).
-      const envelopeSource = parseImportedTriggerEnvelope(entry.prompt);
       rendered.push(
-        <div
+        <ImportedTriggerCard
           key={`trigger:${entry.sessionId}`}
-          className="mx-3 my-1 rounded border border-action-view/20 bg-action-view/5 px-3 py-2 text-xs"
-        >
-          <div className="flex items-center gap-1 text-action-view font-medium">
-            <span>●</span>
-            <span>{envelopeSource ?? entry.summary.slice(0, 60)}</span>
-          </div>
-          {entry.summary && (
-            // markdown 으로 render — plugin prompt 의 `\n` + list (`- 항목`) +
-            // **bold** 등을 살림. plain `<p>` 시 CSS `white-space: normal` 이
-            // newline 을 collapse 해 모든 내용이 한 줄로 붙어 가독성 손상.
-            // response 측 (아래) 과 같은 markdown 파이프라인 재사용.
-            <div className="mt-1 text-muted-foreground prose prose-sm lvis-prose max-w-none">
-              <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>
-                {entry.summary}
-              </ReactMarkdown>
-            </div>
-          )}
-          {entry.response && (
-            <div className="mt-2 text-foreground/80 prose prose-sm lvis-prose max-w-none">
-              <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>
-                {entry.response}
-              </ReactMarkdown>
-            </div>
-          )}
-          {entry.responseStreaming && !entry.response && (
-            <p className="mt-1 text-muted-foreground animate-pulse">응답 중...</p>
-          )}
-        </div>,
+          entry={entry}
+        />,
       );
       i++;
       continue;
@@ -491,7 +491,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     for (let i = 0; i < visibleEntries.length; i++) {
       const e = visibleEntries[i];
       if (!e) continue;
-      if (e.kind === "user") curTurnStart = i;
+      if (isTurnStartEntry(e)) curTurnStart = i;
       else if (e.kind === "turn_summary" && curTurnStart >= 0) {
         map.set(curTurnStart, {
           turnDurationMs: e.turnDurationMs,
@@ -1050,10 +1050,11 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           // §PR-5: use visibleEntries (sliced in view-mode, full list otherwise)
           const activeEntries = visibleEntries;
 
-          // Last user-message index: determines which WorkGroup belongs to the active turn.
-          let lastUserIdx = -1;
+          // Last turn-start index: user messages and imported overlay prompts both
+          // own the assistant/tool/summary output that follows them.
+          let lastTurnStartIdx = -1;
           for (let k = activeEntries.length - 1; k >= 0; k--) {
-            if (activeEntries[k]?.kind === "user") { lastUserIdx = k; break; }
+            if (isTurnStartEntry(activeEntries[k])) { lastTurnStartIdx = k; break; }
           }
 
           type EntryClass = "intermediate" | "live" | "final";
@@ -1065,15 +1066,15 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           for (let i = 0; i < activeEntries.length; i++) {
             const e = activeEntries[i];
             if (!e) continue;
-            if (e.kind === "user") { turnStart = i; continue; }
+            if (isTurnStartEntry(e)) { turnStart = i; continue; }
             if (e.kind !== "assistant" && e.kind !== "reasoning" && e.kind !== "tool_group") continue;
 
-            let nextUserIdx = activeEntries.length;
+            let nextTurnStartIdx = activeEntries.length;
             for (let j = i + 1; j < activeEntries.length; j++) {
-              if (activeEntries[j]?.kind === "user") { nextUserIdx = j; break; }
+              if (isTurnStartEntry(activeEntries[j])) { nextTurnStartIdx = j; break; }
             }
 
-            const subsequentTurnEntries = activeEntries.slice(i + 1, nextUserIdx);
+            const subsequentTurnEntries = activeEntries.slice(i + 1, nextTurnStartIdx);
             const hasSubsequent = subsequentTurnEntries.some(
               (ne) => ne.kind === "assistant" || ne.kind === "tool_group" || ne.kind === "reasoning",
             );
@@ -1083,7 +1084,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
 
             const myTurnStart = turnStart >= 0 ? turnStart : 0;
             entryTurnStartMap.set(i, myTurnStart);
-            const isActiveTurnEntry = myTurnStart === lastUserIdx && streaming;
+            const isActiveTurnEntry = myTurnStart === lastTurnStartIdx && streaming;
             const hasPriorWork = activeEntries.slice(myTurnStart + 1, i).some(
               (pe) => pe.kind === "tool_group" || pe.kind === "reasoning",
             );
@@ -1254,32 +1255,11 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             }
 
             if (entry.kind === "imported_trigger") {
-              // Parse envelope source tag to confirm overlay trigger provenance.
-              // title + summary fields are already clean (set at insert time).
-              const envelopeSource = parseImportedTriggerEnvelope(entry.prompt);
               rendered.push(
-                <div
+                <ImportedTriggerCard
                   key={`trigger:${entry.sessionId}`}
-                  className="mx-3 my-1 rounded border border-action-view/20 bg-action-view/5 px-3 py-2 text-xs"
-                >
-                  <div className="flex items-center gap-1 text-action-view font-medium">
-                    <span>●</span>
-                    <span>{envelopeSource ?? entry.summary.slice(0, 60)}</span>
-                  </div>
-                  {entry.summary && (
-                    <p className="mt-1 text-muted-foreground">{entry.summary}</p>
-                  )}
-                  {entry.response && (
-                    <div className="mt-2 text-foreground/80 prose prose-sm lvis-prose max-w-none">
-                      <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>
-                        {entry.response}
-                      </ReactMarkdown>
-                    </div>
-                  )}
-                  {entry.responseStreaming && !entry.response && (
-                    <p className="mt-1 text-muted-foreground animate-pulse">응답 중...</p>
-                  )}
-                </div>,
+                  entry={entry}
+                />,
               );
               i++;
               continue;
@@ -1290,12 +1270,12 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
               const groupStart = i;
               const groupTurnStart = entryTurnStartMap.get(i) ?? 0;
               // Spinner is shown only while this WorkGroup belongs to the currently active turn
-              const groupIsActiveTurn = groupTurnStart === lastUserIdx && streaming;
+              const groupIsActiveTurn = groupTurnStart === lastTurnStartIdx && streaming;
               if (debugStreamEnabled) {
                 debugLog("ChatView", "WorkGroup:render-decision", {
                   groupStart,
                   groupTurnStart,
-                  lastUserIdx,
+                  lastTurnStartIdx,
                   globalStreaming: streaming,
                   groupIsActiveTurn,
                 });
@@ -1360,7 +1340,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
                   // 으로 turnStart 일치 검증.
                   let aaTurnStart = -1;
                   for (let k = i; k >= 0; k--) {
-                    if (activeEntries[k]?.kind === "user") { aaTurnStart = k; break; }
+                    if (isTurnStartEntry(activeEntries[k])) { aaTurnStart = k; break; }
                   }
                   if (aaTurnStart === groupTurnStart) {
                     groupEntries.push({

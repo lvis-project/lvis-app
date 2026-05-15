@@ -195,6 +195,173 @@ describe("ChatView", () => {
     });
   });
 
+  it("keeps overlay-import tool and final assistant output in the normal chat flow", async () => {
+    const { container, api, emitOverlayShow, emitChatStream } = await renderApp({ hasApiKey: true });
+    await act(async () => {
+      emitOverlayShow({
+        id: "plugin:meeting:trigger-1",
+        source: { kind: "plugin", pluginId: "meeting", eventId: "trigger-1" },
+        title: "meeting-summary",
+        summary: "**회의 요약**\n- 액션 확인",
+        running: false,
+        primaryActionLabel: "확인하기",
+        pendingPrompt:
+          '<imported-from-proactive source="overlay:meeting-summary">\n회의 요약을 확인해줘\n</imported-from-proactive>',
+        createdAt: new Date().toISOString(),
+      });
+    });
+
+    await waitFor(() => {
+      expect(container.textContent).toContain("회의 요약");
+      expect(container.querySelector("[data-testid=\"overlay-card-primary-action\"]")).not.toBeNull();
+    });
+
+    await act(async () => {
+      fireEvent.click(container.querySelector("[data-testid=\"overlay-card-primary-action\"]")!);
+    });
+
+    await waitFor(() => {
+      expect(api.chatSend).toHaveBeenCalledWith(
+        expect.stringContaining("회의 요약을 확인해줘"),
+        expect.any(Array),
+        "plugin-emitted",
+        undefined,
+        undefined,
+      );
+      expect(container.textContent).toContain("overlay:meeting-summary");
+      expect(container.querySelector("strong")?.textContent).toBe("회의 요약");
+    });
+
+    await act(async () => {
+      emitChatStream({ type: "tool_start", name: "meeting_transcript", groupId: "g1", toolUseId: "t1" });
+      emitChatStream({
+        type: "tool_end",
+        name: "meeting_transcript",
+        groupId: "g1",
+        toolUseId: "t1",
+        result: "__meeting_transcript__",
+        isError: false,
+      });
+      emitChatStream({ type: "text_delta", text: "후속 안내입니다" });
+      emitChatStream({
+        type: "assistant_round",
+        text: "후속 안내입니다",
+        thought: "",
+        stopReason: "end_turn",
+        hasToolCalls: false,
+      });
+      emitChatStream({ type: "done" });
+    });
+
+    await waitFor(() => {
+      expect(container.textContent).toMatch(/작업\s*1단계/);
+      expect(container.textContent).toContain("후속 안내입니다");
+      expect(container.textContent).not.toContain("__meeting_transcript__");
+    });
+  });
+
+  it("treats overlay imports after an existing chat as a separate turn boundary", async () => {
+    const { container, api, emitOverlayShow, emitChatStream } = await renderApp({ hasApiKey: true });
+    await submitUser(container, "첫 질문");
+    await act(async () => {
+      emitChatStream({ type: "text_delta", text: "첫 최종 답변" });
+      emitChatStream({
+        type: "assistant_round",
+        text: "첫 최종 답변",
+        thought: "",
+        stopReason: "end_turn",
+        hasToolCalls: false,
+      });
+      emitChatStream({
+        type: "turn_summary",
+        turnDurationMs: 1000,
+        toolCount: 0,
+        cumulativeToolMs: 0,
+        tokensIn: 100,
+        freshInputTokens: 10,
+        tokensOut: 1,
+      });
+      emitChatStream({ type: "done" });
+    });
+
+    await waitFor(() => {
+      expect(container.textContent).toContain("첫 최종 답변");
+      expect(Array.from(container.querySelectorAll("button")).some((button) =>
+        button.textContent?.includes("11"),
+      )).toBe(true);
+    });
+
+    await act(async () => {
+      emitOverlayShow({
+        id: "plugin:meeting:trigger-after-chat",
+        source: { kind: "plugin", pluginId: "meeting", eventId: "trigger-after-chat" },
+        title: "meeting-summary",
+        summary: "이전 대화 이후 회의 요약",
+        running: false,
+        primaryActionLabel: "확인하기",
+        pendingPrompt:
+          '<imported-from-proactive source="overlay:meeting-summary">\n회의 요약을 확인해줘\n</imported-from-proactive>',
+        createdAt: new Date().toISOString(),
+      });
+    });
+    await act(async () => {
+      fireEvent.click(container.querySelector("[data-testid=\"overlay-card-primary-action\"]")!);
+    });
+
+    await waitFor(() => {
+      expect(api.chatSend).toHaveBeenCalledWith(
+        expect.stringContaining("회의 요약을 확인해줘"),
+        expect.any(Array),
+        "plugin-emitted",
+        undefined,
+        undefined,
+      );
+      expect(container.textContent).toContain("overlay:meeting-summary");
+    });
+
+    await act(async () => {
+      emitChatStream({ type: "tool_start", name: "meeting_transcript", groupId: "g1", toolUseId: "t1" });
+      emitChatStream({
+        type: "tool_end",
+        name: "meeting_transcript",
+        groupId: "g1",
+        toolUseId: "t1",
+        result: "__meeting_transcript__",
+        isError: false,
+      });
+      emitChatStream({ type: "text_delta", text: "overlay 최종 답변" });
+      emitChatStream({
+        type: "assistant_round",
+        text: "overlay 최종 답변",
+        thought: "",
+        stopReason: "end_turn",
+        hasToolCalls: false,
+      });
+      emitChatStream({
+        type: "turn_summary",
+        turnDurationMs: 2000,
+        toolCount: 1,
+        cumulativeToolMs: 300,
+        tokensIn: 200,
+        freshInputTokens: 20,
+        tokensOut: 2,
+      });
+      emitChatStream({ type: "done" });
+    });
+
+    await waitFor(() => {
+      const assistantBodies = Array.from(container.querySelectorAll('[data-testid="assistant-message-body"]'));
+      expect(assistantBodies.some((body) => body.textContent?.includes("첫 최종 답변"))).toBe(true);
+      expect(assistantBodies.some((body) => body.textContent?.includes("overlay 최종 답변"))).toBe(true);
+      expect(container.querySelectorAll("[data-testid=\"work-group\"]")).toHaveLength(1);
+      const tokenLabels = Array.from(container.querySelectorAll("button"))
+        .map((button) => button.textContent ?? "")
+        .filter((text) => text.includes("🪙"));
+      expect(tokenLabels.some((text) => text.includes("11"))).toBe(true);
+      expect(tokenLabels.some((text) => text.includes("22"))).toBe(true);
+    });
+  });
+
   it("keeps a one-step pre-final assistant round inside WorkGroup", async () => {
     const { container, emitChatStream } = await renderApp({ hasApiKey: true });
     await submitUser(container, "추론 확인");
