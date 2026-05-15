@@ -434,15 +434,16 @@ export class RealCloudMarketplaceFetcher implements MarketplaceFetcher, Marketpl
       item.requires = requires;
     }
 
-    // lvis-marketplace#52: surface plugin_type + advisory runtime block.
-    // The renderer uses pluginType to filter MCP entries; the install
-    // path always re-reads runtime from the verified manifest in the
-    // signed zip, never trusting the catalog row alone.
+    // lvis-marketplace#52/#456: surface plugin_type + advisory runtime block.
+    // The renderer uses pluginType to filter entries; install paths always
+    // re-read authoritative package files from the verified signed zip.
     const pluginTypeRaw = row.plugin_type ?? row.pluginType;
     if (pluginTypeRaw === "mcp") {
       item.pluginType = "mcp";
       const runtime = parseMcpRuntimeSpec(row.runtime ?? row.mcpRuntime);
       if (runtime) item.mcpRuntime = runtime;
+    } else if (pluginTypeRaw === "agent" || pluginTypeRaw === "skill") {
+      item.pluginType = pluginTypeRaw;
     } else {
       item.pluginType = "plugin";
     }
