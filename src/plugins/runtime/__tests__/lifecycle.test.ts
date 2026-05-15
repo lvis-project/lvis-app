@@ -319,6 +319,64 @@ export default async function createPlugin() {
     await runtime.startAll();
     await expect(runtime.disable("does-not-exist")).rejects.toThrow("Plugin not loaded");
   });
+
+  // The host wires `onDisable` to `toolRegistry.unregisterByPlugin(pluginId)`
+  // (see boot/steps/plugin-runtime.ts). restartPlugin fires onDisable during
+  // its stop phase but its start phase only re-populates `methodMap` — the
+  // ToolRegistry is NOT touched. Callers MUST call `syncPluginToolRegistry`
+  // after `restartPlugin` resolves; otherwise every plugin tool reports
+  // `도구를 찾을 수 없습니다` until the next install/uninstall event fires.
+  it("restartPlugin fires onDisable so callers know to re-sync ToolRegistry", async () => {
+    const pluginDir = join(installedDir, "lc-restart-on-disable");
+    await mkdir(pluginDir, { recursive: true });
+    const manifestPath = join(pluginDir, "plugin.json");
+    await writeFile(
+      join(pluginDir, "entry.mjs"),
+      `export default async function createPlugin() {
+  return { handlers: { lc_rod_ping: async () => "ok" }, start: async () => {}, stop: async () => {} };
+}`,
+      "utf-8",
+    );
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        id: "lc-restart-on-disable",
+        name: "LC",
+        version: "1.0.0",
+        entry: "entry.mjs",
+        tools: ["lc_rod_ping"],
+        description: "x",
+        publisher: "x",
+      }),
+      "utf-8",
+    );
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: "lc-restart-on-disable", manifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+
+    const onDisableCalls: string[] = [];
+    const runtime = new PluginRuntime({
+      hostRoot: testDir,
+      registryPath,
+      pluginsRoot: installedDir,
+      onDisable: (pluginId) => { onDisableCalls.push(pluginId); },
+    });
+    await runtime.startAll();
+    onDisableCalls.length = 0;
+
+    await runtime.restartPlugin("lc-restart-on-disable");
+
+    expect(onDisableCalls).toEqual(["lc-restart-on-disable"]);
+    // methodMap is back so the runtime call itself works — proving the bug
+    // surface: methodMap recovered, but the toolRegistry-side cleanup ran
+    // without a matching re-registration.
+    await expect(runtime.call("lc_rod_ping")).resolves.toBe("ok");
+  });
 });
 
 describe("buildImportUrl — cache-bust contract", () => {
