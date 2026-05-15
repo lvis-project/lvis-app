@@ -26,6 +26,7 @@ import { redactFsPath, redactAuditPayload } from "../../audit/dlp-filter.js";
 import { LVIS_TOKEN_NAMES } from "../../shared/plugin-ui-tokens.js";
 import { pluginAssetUrlFromRealPath } from "../../main/plugin-asset-protocol.js";
 import { preparePythonRuntimeForInstalledPlugin, withPluginInstallLock } from "../../plugins/install-lifecycle.js";
+import { syncPluginToolRegistry } from "../../boot/plugins.js";
 import { uninstallPluginWithLifecycle } from "../../plugins/uninstall-lifecycle.js";
 import { lvisHome } from "../../shared/lvis-home.js";
 const log = createLogger("lvis");
@@ -792,6 +793,21 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
         emitPluginConfigChange(pluginId, k, savedConfig?.[k]);
       }
       await pluginRuntime.restartPlugin(pluginId);
+      // restartPlugin's `onDisable` callback unregisters this plugin's tools
+      // from ToolRegistry, but the start phase only re-populates methodMap.
+      // Re-sync so subsequent chat-surface tool calls don't hit
+      // `도구를 찾을 수 없습니다`. Idempotent + non-fatal — the next install /
+      // uninstall / dev-reload event heals any transient miss, so a sync
+      // failure here must not surface as `plugin-config-save-failed` after
+      // the config has already been persisted on disk.
+      try {
+        syncPluginToolRegistry(pluginRuntime, deps.toolRegistry);
+      } catch (err) {
+        log.error(
+          `tool registry sync failed after lvis:plugins:config:set restart (${pluginId}): %s`,
+          (err as Error).message,
+        );
+      }
       return { ok: true as const, config: savedConfig };
     } catch (err) {
       return pluginConfigError("plugin-config-save-failed", (err as Error).message);
