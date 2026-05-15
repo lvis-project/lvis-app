@@ -61,6 +61,7 @@ import {
   syncPluginToolRegistry,
 } from "../plugins.js";
 import { createLogger } from "../../lib/logger.js";
+import { stripUntrustedTags } from "../../lib/strip-untrusted-tags.js";
 import { plog, PluginPhase } from "../../plugins/lifecycle-log.js";
 import {
   ApprovalIssuerRegistry,
@@ -358,6 +359,26 @@ export function formatPluginPendingPrompt(prompt: string, source: string): strin
     throw new Error(`invalid overlay trigger source for pending prompt: ${source}`);
   }
   return `<imported-from-proactive source="${source}">\n${sanitizePluginPendingPrompt(prompt)}\n</imported-from-proactive>`;
+}
+
+export const OVERLAY_SUMMARY_DISPLAY_CAP = 2_000;
+export const OVERLAY_SUMMARY_TRUNCATION_MARKER = "\n…[잘림 — 확인하기 후 채팅에서 전체 보기]";
+
+/**
+ * Build the user-visible overlay preview. The full prompt still flows through
+ * `pendingPrompt`; this display string is bounded and stripped of
+ * plugin-authored `<untrusted-*>` wrappers before reaching renderer chrome.
+ */
+export function deriveOverlaySummaryForDisplay(
+  spec: Pick<ConversationTriggerSpec, "prompt" | "summary">,
+): string {
+  const rawSummary = spec.summary != null ? spec.summary : spec.prompt;
+  const stripped = stripUntrustedTags(rawSummary);
+  if (stripped.length > OVERLAY_SUMMARY_DISPLAY_CAP) {
+    const cap = OVERLAY_SUMMARY_DISPLAY_CAP - OVERLAY_SUMMARY_TRUNCATION_MARKER.length;
+    return stripped.slice(0, cap) + OVERLAY_SUMMARY_TRUNCATION_MARKER;
+  }
+  return stripped;
 }
 
 export class TriggerConversationRateLimiter {
@@ -1435,13 +1456,14 @@ export async function initPluginRuntime(
         // spawning a fresh ConversationLoop.
         const eventId = randomUUID();
         const overlayId = `plugin:${pluginId}:${eventId}`;
+        const derivedSummary = deriveOverlaySummaryForDisplay(spec);
         const overlayItem = {
           id: overlayId,
           source: { kind: "plugin" as const, pluginId, eventId },
           title: spec.title ?? spec.source.replace(/^overlay:/, ""),
-          summary: spec.summary ?? spec.prompt.slice(0, 200),
+          summary: derivedSummary,
           running: false,
-          primaryActionLabel: spec.primaryActionLabel ?? "지금 답하기",
+          primaryActionLabel: spec.primaryActionLabel ?? "확인하기",
           pendingPrompt: formatPluginPendingPrompt(spec.prompt, decision.source),
           createdAt: new Date().toISOString(),
         };

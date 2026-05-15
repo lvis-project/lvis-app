@@ -70,9 +70,10 @@ export class MessageQueueStore {
    */
   private prune(): void {
     const now = Date.now();
-    const before = this.items.length;
-    this.items = this.items.filter((it) => it.expiresAt > now);
-    if (this.items.length !== before) this.notify();
+    const next = this.items.filter((it) => it.expiresAt > now);
+    if (next.length === this.items.length) return;
+    this.items = next;
+    this.notify();
   }
 
   add(text: string): MessageQueueItem {

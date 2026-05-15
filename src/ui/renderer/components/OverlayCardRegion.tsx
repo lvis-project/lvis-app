@@ -43,6 +43,7 @@ export function OverlayCardRegion({ onPluginPrimaryAction, onRoutineAcknowledge 
       >
         <div className="pointer-events-auto">
           <OverlayCard
+            key={active.id}
             title={active.title}
             summary={active.summary}
             firedAt={firedAt}
@@ -77,6 +78,7 @@ export function OverlayCardRegion({ onPluginPrimaryAction, onRoutineAcknowledge 
       >
         <div className="pointer-events-auto">
           <OverlayCard
+            key={active.id}
             title={active.title}
             summary={active.summary}
             firedAt={pluginFiredAt}
@@ -91,7 +93,7 @@ export function OverlayCardRegion({ onPluginPrimaryAction, onRoutineAcknowledge 
               dismiss(active.id);
               onPluginPrimaryAction(active.id);
             }}
-            primaryActionLabel={active.primaryActionLabel ?? "지금 답하기"}
+            primaryActionLabel={active.primaryActionLabel ?? "확인하기"}
             kind="plugin"
           />
         </div>

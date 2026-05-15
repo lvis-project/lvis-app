@@ -17,6 +17,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
 const uvCacheDir = resolve(root, "resources", "uv");
 const uvRuntimeDir = resolve(root, "resources", "uv-runtime");
+const fastOutputDir = "release-fast";
 
 const INSTALLER_TARGETS = {
   mac: {
@@ -56,7 +57,11 @@ function usage() {
     "  --publish <mode> Publish mode for electron-builder (default: never)",
     "  --skip-build     Package the existing dist/ output",
     "  --skip-code-sign Produce an unsigned internal build",
+    "  --skip-native-rebuild",
+    "                   Trust already-rebuilt native deps and pass npmRebuild=false",
     "  --dir            Build unpacked app directories instead of installers",
+    "  --fast           Internal preview build: release-fast/, store compression,",
+    "                   and --skip-native-rebuild. Do not use for public release.",
   ].join("\n");
 }
 
@@ -65,6 +70,8 @@ function parseArgs(argv) {
   let publish = "never";
   let skipBuild = false;
   let skipCodeSign = false;
+  let skipNativeRebuild = false;
+  let fast = false;
   let dirOnly = false;
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -104,6 +111,15 @@ function parseArgs(argv) {
       skipCodeSign = true;
       continue;
     }
+    if (arg === "--skip-native-rebuild") {
+      skipNativeRebuild = true;
+      continue;
+    }
+    if (arg === "--fast") {
+      fast = true;
+      skipNativeRebuild = true;
+      continue;
+    }
     if (arg === "--dir") {
       dirOnly = true;
       continue;
@@ -122,6 +138,8 @@ function parseArgs(argv) {
     publish,
     skipBuild,
     skipCodeSign,
+    skipNativeRebuild,
+    fast,
     dirOnly,
   };
 }
@@ -174,7 +192,7 @@ function prepareUvRuntime(target) {
   process.stdout.write(`[installer] staged compressed uv runtime: ${uvTarget.dir}\n`);
 }
 
-function builderArgsFor(target, publish, dirOnly) {
+function builderArgsFor(target, { publish, dirOnly, skipNativeRebuild, fast }) {
   const config = INSTALLER_TARGETS[target];
   const uvTarget = installerUvTargetFor(target);
   const args = ["electron-builder", config.flag];
@@ -185,13 +203,24 @@ function builderArgsFor(target, publish, dirOnly) {
   }
   args.push(uvTarget.archFlag);
   args.push(`--publish=${publish}`);
+  if (skipNativeRebuild) {
+    args.push("-c.npmRebuild=false");
+  }
+  if (fast) {
+    args.push("-c.compression=store", `-c.directories.output=${fastOutputDir}`);
+  }
   return args;
 }
 
 async function main() {
-  const { selected, publish, skipBuild, skipCodeSign, dirOnly } = parseArgs(process.argv.slice(2));
+  const { selected, publish, skipBuild, skipCodeSign, skipNativeRebuild, fast, dirOnly } = parseArgs(
+    process.argv.slice(2),
+  );
   for (const target of selected) {
     assertNativeTarget(target);
+  }
+  if (fast && publish !== "never") {
+    throw new Error("--fast writes non-release-size artifacts and cannot be combined with --publish");
   }
 
   if (!skipBuild) {
@@ -217,17 +246,23 @@ async function main() {
     env.CSC_IDENTITY_AUTO_DISCOVERY = "false";
     process.stdout.write("[installer] --skip-code-sign: CSC_IDENTITY_AUTO_DISCOVERY=false\n");
   }
+  if (skipNativeRebuild) {
+    process.stdout.write("[installer] --skip-native-rebuild: electron-builder npmRebuild=false\n");
+  }
+  if (fast) {
+    process.stdout.write(`[installer] --fast: output=${fastOutputDir}, compression=store (larger artifacts)\n`);
+  }
 
   try {
     for (const target of selected) {
       prepareUvRuntime(target);
-      run("bunx", builderArgsFor(target, publish, dirOnly), { env });
+      run("bunx", builderArgsFor(target, { publish, dirOnly, skipNativeRebuild, fast }), { env });
     }
   } finally {
     cleanUvRuntime();
   }
 
-  process.stdout.write("[installer] done. Artifacts in release/\n");
+  process.stdout.write(`[installer] done. Artifacts in ${fast ? fastOutputDir : "release"}/\n`);
 }
 
 main().catch((err) => {

@@ -259,7 +259,7 @@ export function App() {
 
       // Start the main ConversationLoop turn immediately (user-in-the-loop
       // confirm → auto-process). trigger-import mode skips the user-bubble
-      // append since the imported_trigger card already represents the prompt.
+      // append since the imported_trigger marker already represents the prompt.
       void handleAskRef.current(pendingPrompt, "trigger-import");
     },
     [api, insertImportedTriggerEntry],
@@ -664,17 +664,15 @@ export function App() {
         }
         outgoingAttachments = outgoingAttachments.filter((p) => p.type !== "image");
       }
-      // trigger-import: skip the user-bubble append. The
-      // ImportedTriggerCard already represents the overlay-trigger prompt
+      // trigger-import: skip only the user-bubble append. The imported_trigger
+      // marker already represents the plugin-authored overlay prompt
       // visibly, and rendering the wrapped envelope as a user bubble
       // would misattribute authorship.
       if (mode !== "trigger-import") {
         appendUserEntry(t, opts?.injectHint);
       }
       resetStreamAccumulators();
-      if (mode !== "trigger-import") {
-        appendAssistantStatus("생각 중...");
-      }
+      appendAssistantStatus("생각 중...");
       try {
         await api.chatSend(
           outgoing,
