@@ -141,11 +141,35 @@ export async function parsePluginJson(
   }
 
   if (!validator(parsed)) {
-    const errs = (validator.errors ?? [])
-      .map((e) => `${e.instancePath || "/"} ${e.message ?? ""}`.trim())
+    // Enrich the error so users can act on it. Pre-fix AJV's default text
+    // for additional-properties was "/ must NOT have additional properties"
+    // — never named WHICH property was rejected, leaving users stuck (#737).
+    // Now we name the offending field(s) and append a reinstall hint when
+    // it's the additional-property case (typical when SDK schema tightens
+    // and a stale plugin install carries a deprecated field).
+    const ajvErrors = validator.errors ?? [];
+    const additionalProps: string[] = [];
+    for (const e of ajvErrors) {
+      if (e.keyword === "additionalProperties") {
+        const extra = (e.params as { additionalProperty?: string } | undefined)?.additionalProperty;
+        if (typeof extra === "string") additionalProps.push(extra);
+      }
+    }
+    const errs = ajvErrors
+      .map((e) => {
+        if (e.keyword === "additionalProperties") {
+          const extra = (e.params as { additionalProperty?: string } | undefined)?.additionalProperty;
+          return `${e.instancePath || "/"} unknown property: '${extra ?? "?"}'`;
+        }
+        return `${e.instancePath || "/"} ${e.message ?? ""}`.trim();
+      })
       .join("; ");
+    const hint =
+      additionalProps.length > 0
+        ? ` — the manifest contains ${additionalProps.length === 1 ? "a field" : "fields"} that the current SDK schema no longer allows. The plugin may need an update — try reinstalling from the marketplace.`
+        : "";
     throw new Error(
-      `[manifest:${pid}] schema validation failed (${path}): ${errs}`,
+      `[manifest:${pid}] schema validation failed (${path}): ${errs}${hint}`,
     );
   }
   parsed.installPolicy = normalizeInstallPolicy(parsed);
