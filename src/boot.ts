@@ -56,6 +56,8 @@ import { McpManager } from "./mcp/mcp-manager.js";
 import {
   openAuthWindow as openAuthWindowService,
   clearAuthPartition as clearAuthPartitionService,
+  forgetTrackedPluginAuthPartitions as forgetPluginAuthPartitionsService,
+  getTrackedPluginAuthPartitions as listPluginAuthPartitionsService,
 } from "./main/auth-window-service.js";
 import { openLinkWindow as openLinkWindowService } from "./main/link-window-service.js";
 import { openAuthPartitionViewer as openAuthPartitionViewerService } from "./main/auth-partition-viewer-service.js";
@@ -835,6 +837,10 @@ export async function bootstrap(
     notificationService,
     scriptHookManager,
     telemetry, pluginTelemetry, autoUpdaterStop,
+    pluginPaths,
+    clearAuthPartitionService,
+    forgetPluginAuthPartitionsService,
+    listPluginAuthPartitionsService,
     startRoutinesScheduler: () => routinesScheduler.start(),
     refreshPluginNotifications: () => {
       disposePluginNotifications();

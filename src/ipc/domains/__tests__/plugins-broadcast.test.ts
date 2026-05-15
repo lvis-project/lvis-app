@@ -59,14 +59,29 @@ async function setup() {
       addPlugin: vi.fn(async () => undefined),
       removePlugin: vi.fn(async () => undefined),
       mergeConfigOverride: vi.fn(),
+      getPluginManifest: vi.fn(() => ({
+        configSchema: {
+          properties: {
+            apiKey: { type: "string", format: "secret" },
+          },
+        },
+      })),
     },
     settingsService: {
       get: vi.fn(() => ({ backend: "real-cloud", realCloudBaseUrl: "https://marketplace.example" })),
+      deletePluginConfig: vi.fn(async () => undefined),
+      deletePluginSecrets: vi.fn(async () => 0),
     },
     auditLogger: {
       log: vi.fn(),
     },
     refreshPluginNotifications: vi.fn(),
+    clearAuthPartitionService: vi.fn(async () => undefined),
+    listPluginAuthPartitionsService: vi.fn(() => [
+      "persist:plugin-auth:agent-hub",
+      "persist:plugin-auth:agent-hub:tenant",
+    ]),
+    forgetPluginAuthPartitionsService: vi.fn(),
     getMainWindow: vi.fn(() => appWindows[0]),
     getAppWindows: vi.fn(() => appWindows),
   };
@@ -129,6 +144,11 @@ describe("plugins IPC lifecycle broadcast", () => {
 
     expect(deps.pluginMarketplace.uninstall).toHaveBeenCalledWith("agent-hub");
     expect(deps.pluginRuntime.removePlugin).toHaveBeenCalledWith("agent-hub");
+    expect(deps.settingsService.deletePluginConfig).toHaveBeenCalledWith("agent-hub");
+    expect(deps.settingsService.deletePluginSecrets).toHaveBeenCalledWith("agent-hub", new Set(["apiKey"]));
+    expect(deps.clearAuthPartitionService).toHaveBeenCalledWith("persist:plugin-auth:agent-hub");
+    expect(deps.clearAuthPartitionService).toHaveBeenCalledWith("persist:plugin-auth:agent-hub:tenant");
+    expect(deps.forgetPluginAuthPartitionsService).toHaveBeenCalledWith("agent-hub");
     for (const win of appWindows) {
       expect(win.webContents.send).toHaveBeenCalledWith(
         "lvis:plugins:uninstall-result",

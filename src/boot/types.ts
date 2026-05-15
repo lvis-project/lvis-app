@@ -110,6 +110,14 @@ export interface AppServices {
   skillStore?: import("../main/skill-store.js").SkillStore;
   /** 플러그인 설치/제거 후 OS 알림 핸들러를 재구성한다. */
   refreshPluginNotifications?: () => void;
+  /** Phase 0 SoT — canonical plugin install/cache paths. */
+  pluginPaths?: ReturnType<typeof import("../plugins/plugin-paths.js").resolvePluginPaths>;
+  /** Host-owned wipe for persistent plugin auth sessions. */
+  clearAuthPartitionService?: (partition: string) => Promise<void>;
+  /** Returns the tracked persistent auth partitions for a plugin, including the base partition. */
+  listPluginAuthPartitionsService?: (pluginId: string) => string[];
+  /** Drops tracked persistent auth partitions after uninstall cleanup completes. */
+  forgetPluginAuthPartitionsService?: (pluginId: string) => void;
   /**
    * Issue 5: Re-register the generic plugin event bridge for a new window.
    * Call on macOS `activate` when a new BrowserWindow is created.
