@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   existsSync,
   mkdirSync,
@@ -411,29 +411,26 @@ describe("WriteFileTool pre-image guard (MAJOR 1)", () => {
   });
 
   it("skips pre-image read and sets skipSidecar for a file exceeding MAX_TEXT_FILE_BYTES", async () => {
-    // Write a stub file > 2MB.
-    const bigPath = join(workDir, "big.bin");
-    // We only need the stat to report large size — write a small placeholder and
-    // then mock stat. Simpler: write real large content is slow; instead we spy
-    // on fs/promises.stat to return a fake large size.
-    writeFileSync(bigPath, "small placeholder", "utf8");
-
-    const fsMod = await import("node:fs/promises");
-    const statSpy = vi.spyOn(fsMod, "stat").mockImplementationOnce(async () => {
-      return { size: 3_000_000, isFile: () => true } as unknown as Awaited<ReturnType<typeof fsMod.stat>>;
-    });
+    // Write a real file that exceeds MAX_TEXT_FILE_BYTES (2_000_000).
+    // We fill 2.1MB with repeated ASCII so stat() reports the actual size.
+    // ESM module namespaces are not re-configurable, so vi.spyOn(node:fs/promises)
+    // does not work in this suite — real file is the correct approach.
+    const bigPath = join(workDir, "big.txt");
+    const chunk = "x".repeat(1024); // 1 KiB
+    const buf = Buffer.alloc(2_100_000);
+    buf.fill(chunk);
+    writeFileSync(bigPath, buf);
 
     const result = await new WriteFileTool().execute(
       { path: bigPath, content: "new content" },
       { cwd: workDir, extraAllowedDirectories: [], metadata: { sessionId: "s1", toolUseId: "tu1" } },
     );
-    statSpy.mockRestore();
 
     expect(result.isError).toBe(false);
     const body = parse(result.output);
-    // hasSidecar must be false — skipSidecar was set.
+    // hasSidecar must be false — skipSidecar was set for the oversized pre-image.
     expect(body.hasSidecar).toBeUndefined();
-    // File was still written.
+    // File was still overwritten with new content.
     expect(readFileSync(bigPath, "utf8")).toBe("new content");
   });
 
