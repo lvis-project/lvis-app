@@ -11,9 +11,9 @@
  */
 import { readFile, readdir, realpath } from "node:fs/promises";
 import { resolve, join, relative, isAbsolute } from "node:path";
-import { homedir } from "node:os";
 import type { Dirent } from "node:fs";
 import { createLogger } from "../lib/logger.js";
+import { lvisHome } from "../shared/lvis-home.js";
 
 const log = createLogger("lvis");
 
@@ -45,7 +45,7 @@ export interface AgentProfileStoreOptions {
   userDir?: string;
 }
 
-const USER_AGENTS_DIR = resolve(homedir(), ".lvis", "agents");
+const USER_AGENTS_DIR = resolve(lvisHome(), "agents");
 
 export function parseAgentFrontmatter(raw: string): {
   fm: AgentProfileFrontmatter;
