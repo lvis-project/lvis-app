@@ -144,4 +144,31 @@ describe("manifest-validation enriched error messages (#737)", () => {
     expect(err!.message).toContain("/version");
     expect(err!.message).not.toContain("try reinstalling from the marketplace");
   });
+
+  it("preserves AJV `params` for non-additionalProperties errors (Round 2 — was lossy pre-fix)", async () => {
+    const path = join(workDir, "plugin.json");
+    // Pattern mismatch — AJV emits params.pattern with the regex source so
+    // users can see what was expected. Pre-Round-2 fix dropped params and
+    // only logged the AJV default text, which lost the regex itself.
+    await writeFile(
+      path,
+      JSON.stringify({
+        id: "x.x",
+        name: "X",
+        description: "y",
+        version: "abc",
+        entry: "e",
+        tools: [],
+      }),
+    );
+
+    const validator = makeValidator();
+    const err = await parsePluginJson(path, validator).then(
+      () => null,
+      (e: Error) => e,
+    );
+    expect(err).toBeInstanceOf(Error);
+    // The pattern source must appear in the error message
+    expect(err!.message).toContain("\\\\d+\\\\.\\\\d+\\\\.\\\\d+");
+  });
 });

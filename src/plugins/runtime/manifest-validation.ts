@@ -161,7 +161,16 @@ export async function parsePluginJson(
           const extra = (e.params as { additionalProperty?: string } | undefined)?.additionalProperty;
           return `${e.instancePath || "/"} unknown property: '${extra ?? "?"}'`;
         }
-        return `${e.instancePath || "/"} ${e.message ?? ""}`.trim();
+        // Preserve AJV's `params` for non-additionalProperties errors so
+        // users see the actionable detail (allowed enum values, expected
+        // type, regex pattern, etc.). Pre-fix dropped params silently —
+        // a `pattern` mismatch on `version` would say "must match pattern"
+        // without showing the pattern itself.
+        const base = `${e.instancePath || "/"} ${e.message ?? ""}`.trim();
+        const params = e.params && typeof e.params === "object" && Object.keys(e.params).length > 0
+          ? ` (${JSON.stringify(e.params)})`
+          : "";
+        return `${base}${params}`;
       })
       .join("; ");
     const hint =

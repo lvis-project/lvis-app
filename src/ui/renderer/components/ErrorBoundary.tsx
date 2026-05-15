@@ -19,6 +19,19 @@ interface Props {
    * Default is the full centered card.
    */
   compact?: boolean;
+  /**
+   * Optional reset hook — when provided, the fallback shows a "다시 시도"
+   * button that clears the boundary's error state and re-renders children.
+   * For inner boundaries this avoids the deterministic reload-into-same-crash
+   * loop where the fault is in the data the boundary's children depend on
+   * (e.g. stale plugin manifest still on disk after a reload). Caller can
+   * use this hook to ALSO clear the bad state (e.g. force a refresh of
+   * plugin cards, switch active view) before the retry happens.
+   *
+   * If `onReset` is omitted, the fallback only offers the full-window
+   * reload button (legacy behavior).
+   */
+  onReset?: () => void;
 }
 interface State { hasError: boolean; message: string }
 
@@ -31,12 +44,25 @@ export class ErrorBoundary extends Component<Props, State> {
     const scope = this.props.boundaryName ?? "<root>";
     console.error(`[lvis] render error in boundary='${scope}':`, error, info);
   }
+  private handleRetry = () => {
+    try {
+      this.props.onReset?.();
+    } catch (err) {
+      // Caller's onReset throwing must not loop the boundary
+      console.error(`[lvis] onReset hook threw in boundary='${this.props.boundaryName ?? "<root>"}':`, err);
+    }
+    this.setState({ hasError: false, message: "" });
+  };
   render() {
     if (this.state.hasError) {
+      const showRetry = typeof this.props.onReset === "function";
       if (this.props.compact) {
         return (
           <div className="flex items-center gap-2 px-3 py-1 text-xs text-muted-foreground border-b border-warning bg-warning/10">
             <span>{this.props.fallback ?? "이 영역에 오류가 발생했습니다"}</span>
+            {showRetry && (
+              <Button variant="link" size="sm" className="text-xs h-auto p-0" onClick={this.handleRetry}>다시 시도</Button>
+            )}
             <Button variant="link" size="sm" className="text-xs h-auto p-0" onClick={() => window.location.reload()}>새로고침</Button>
           </div>
         );
@@ -44,7 +70,12 @@ export class ErrorBoundary extends Component<Props, State> {
       return (
         <div className="flex flex-col items-center justify-center h-full gap-4 p-8 text-center">
           <p className="text-sm text-muted-foreground">{this.props.fallback ?? "렌더링 오류"}</p>
-          <Button variant="link" size="sm" className="text-xs h-auto p-0" onClick={() => window.location.reload()}>새로고침</Button>
+          <div className="flex items-center gap-3">
+            {showRetry && (
+              <Button variant="link" size="sm" className="text-xs h-auto p-0" onClick={this.handleRetry}>다시 시도</Button>
+            )}
+            <Button variant="link" size="sm" className="text-xs h-auto p-0" onClick={() => window.location.reload()}>새로고침</Button>
+          </div>
         </div>
       );
     }
