@@ -2,7 +2,8 @@
  * Unit tests for plugin-auth-partition-store.ts (issue #748).
  *
  * Exercises: write → read round-trip, ENOENT returns null, corrupt JSON throws,
- * unexpected schema throws, delete removes single entry, delete no-ops on ENOENT.
+ * unexpected schema throws, delete removes single entry, delete no-ops on ENOENT,
+ * concurrent write coalescing (write queue serialization).
  *
  * LVIS_HOME is overridden via vi.stubEnv so each test suite block points at
  * a fresh temp dir and the module reads the env at call-time (not import-time).
@@ -16,6 +17,7 @@ import {
   readPersistedPluginAuthPartitions,
   writePersistedPluginAuthPartitions,
   deletePersistedPluginAuthPartitions,
+  __resetWriteQueueForTest,
 } from "../plugin-auth-partition-store.js";
 
 // Each test gets its own temp LVIS_HOME so there is no cross-test state.
@@ -24,6 +26,8 @@ let tmpHome: string;
 beforeEach(() => {
   tmpHome = mkdtempSync(join(tmpdir(), "lvis-auth-store-test-"));
   vi.stubEnv("LVIS_HOME", tmpHome);
+  // Reset module-level write queue so concurrent tests don't bleed state.
+  __resetWriteQueueForTest();
 });
 
 afterEach(async () => {
@@ -130,5 +134,54 @@ describe("deletePersistedPluginAuthPartitions", () => {
 
     const result = await readPersistedPluginAuthPartitions();
     expect(result!["a"]).toEqual(["persist:plugin-auth:a"]);
+  });
+});
+
+describe("write queue — concurrency safety", () => {
+  it("10 parallel writes all resolve and final file contains all entries", async () => {
+    // Build 10 maps, each with one unique plugin, accumulating entries like the
+    // real caller does (each call passes the full in-memory map so far).
+    const accumulated = new Map<string, Set<string>>();
+    const promises: Promise<void>[] = [];
+
+    for (let i = 0; i < 10; i++) {
+      const pluginId = `plugin-${i}`;
+      accumulated.set(pluginId, new Set([`persist:plugin-auth:${pluginId}`]));
+      // Snapshot the accumulated map at call-time by spreading into a new Map —
+      // this mirrors how rememberPluginAuthPartition passes trackedPluginAuthPartitions.
+      promises.push(
+        writePersistedPluginAuthPartitions(new Map(accumulated)),
+      );
+    }
+
+    // All promises must resolve without error.
+    await expect(Promise.all(promises)).resolves.toBeDefined();
+
+    // The final file must contain all 10 entries (last write wins = largest snapshot).
+    const result = await readPersistedPluginAuthPartitions();
+    expect(result).not.toBeNull();
+    for (let i = 0; i < 10; i++) {
+      expect(result![`plugin-${i}`]).toEqual([`persist:plugin-auth:plugin-${i}`]);
+    }
+  });
+
+  it("snapshot taken before scheduling — later map mutation does not corrupt in-flight write", async () => {
+    // Pass a live map, then immediately mutate it before the write completes.
+    const liveMap = new Map<string, Set<string>>([
+      ["original", new Set(["persist:plugin-auth:original"])],
+    ]);
+
+    const writePromise = writePersistedPluginAuthPartitions(liveMap);
+
+    // Mutate the map synchronously right after scheduling.
+    liveMap.set("injected", new Set(["persist:plugin-auth:injected"]));
+    liveMap.get("original")!.add("persist:plugin-auth:original:extra");
+
+    await writePromise;
+
+    // The write must reflect the snapshot at call-time, not the mutated state.
+    const result = await readPersistedPluginAuthPartitions();
+    expect(result!["original"]).toEqual(["persist:plugin-auth:original"]);
+    expect(result!["injected"]).toBeUndefined();
   });
 });

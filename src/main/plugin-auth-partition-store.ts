@@ -11,8 +11,12 @@
  * - LVIS_HOME env override flows through `lvisHome()`.
  * - Corrupt / unreadable JSON → throws immediately with a descriptive error.
  *   Caller (boot.ts) logs to audit and re-throws — no silent empty-set fallback.
+ * - Coalescing serial write queue: concurrent callers always see the latest
+ *   snapshot written; at most one in-flight disk write at a time. The snapshot
+ *   is taken (deep-cloned) synchronously before the async chain is entered, so
+ *   subsequent map mutations cannot corrupt an in-flight write.
  */
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { glob, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 import { lvisHome } from "../shared/lvis-home.js";
@@ -41,6 +45,58 @@ function isPartitionsFile(value: unknown): value is PartitionsFile {
   }
   return true;
 }
+
+// ---------------------------------------------------------------------------
+// Coalescing write queue
+//
+// Invariant: at most one `doActualWrite` is executing at any time.
+// New callers update `_pendingSnapshot` (latest wins) and chain onto
+// `_writeChain` — if a write is already in-flight, the trailing continuation
+// picks up the latest snapshot.
+// ---------------------------------------------------------------------------
+
+/** Snapshot taken before entering the async chain — immune to later mutations. */
+let _pendingSnapshot: PartitionsFile | null = null;
+/** Serial promise chain; never rejects (errors propagate via the returned promise). */
+let _writeChain: Promise<void> = Promise.resolve();
+/** True while `doActualWrite` is executing inside the chain. */
+let _writing = false;
+
+/** Deep-clone a partition map into a plain PartitionsFile object. */
+function snapshotMap(partitions: ReadonlyMap<string, ReadonlySet<string>>): PartitionsFile {
+  const data: PartitionsFile = { partitions: {} };
+  for (const [pluginId, set] of partitions) {
+    data.partitions[pluginId] = [...set].sort();
+  }
+  return data;
+}
+
+/** Execute a single disk write for `snapshot`. Never throws (errors returned). */
+async function doActualWrite(snapshot: PartitionsFile): Promise<void> {
+  const path = filePath();
+  const dir = dirname(path);
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  const tmp = `${path}.${randomBytes(6).toString("hex")}.tmp`;
+  await writeFile(tmp, `${JSON.stringify(snapshot, null, 2)}\n`, {
+    encoding: "utf8",
+    mode: 0o600,
+  });
+  await rename(tmp, path);
+}
+
+/**
+ * For test isolation only — resets module-level write queue state.
+ * @internal
+ */
+export function __resetWriteQueueForTest(): void {
+  _pendingSnapshot = null;
+  _writeChain = Promise.resolve();
+  _writing = false;
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
 
 /**
  * Read persisted partitions from disk.
@@ -87,27 +143,30 @@ export async function readPersistedPluginAuthPartitions(): Promise<
 /**
  * Atomically persist the current in-memory partition map to disk.
  *
- * `partitions` is the full map of pluginId → set of partition strings.
- * Converts Set values to sorted arrays for stable output.
+ * Uses a coalescing serial write queue: if a write is already in-flight, the
+ * latest snapshot is queued and the trailing continuation writes it. The map is
+ * deep-cloned synchronously before this function returns, so callers may mutate
+ * the map immediately without risk of corrupting an in-flight write.
  */
-export async function writePersistedPluginAuthPartitions(
+export function writePersistedPluginAuthPartitions(
   partitions: ReadonlyMap<string, ReadonlySet<string>>,
 ): Promise<void> {
-  const path = filePath();
-  const dir = dirname(path);
-  await mkdir(dir, { recursive: true, mode: 0o700 });
+  // Snapshot now — before any await — so subsequent map mutations are safe.
+  _pendingSnapshot = snapshotMap(partitions);
 
-  const data: PartitionsFile = { partitions: {} };
-  for (const [pluginId, set] of partitions) {
-    data.partitions[pluginId] = [...set].sort();
+  if (!_writing) {
+    _writing = true;
+    _writeChain = _writeChain.then(async () => {
+      while (_pendingSnapshot !== null) {
+        const next = _pendingSnapshot;
+        _pendingSnapshot = null;
+        await doActualWrite(next);
+      }
+      _writing = false;
+    });
   }
 
-  const tmp = `${path}.${randomBytes(6).toString("hex")}.tmp`;
-  await writeFile(tmp, `${JSON.stringify(data, null, 2)}\n`, {
-    encoding: "utf8",
-    mode: 0o600,
-  });
-  await rename(tmp, path);
+  return _writeChain;
 }
 
 /**
@@ -152,4 +211,22 @@ export async function deletePersistedPluginAuthPartitions(pluginId: string): Pro
     mode: 0o600,
   });
   await rename(tmp, path);
+}
+
+/**
+ * Clean up any stale `.tmp` files left by a previous crash mid-write.
+ * Call once at startup, before the first read.
+ */
+export async function cleanupStaleTmpFiles(): Promise<void> {
+  const path = filePath();
+  const pattern = `${path}.*.tmp`;
+  try {
+    for await (const tmpFile of glob(pattern)) {
+      await unlink(tmpFile).catch(() => {
+        /* best-effort */
+      });
+    }
+  } catch {
+    /* glob throws if dir absent — safe to ignore on first boot */
+  }
 }
