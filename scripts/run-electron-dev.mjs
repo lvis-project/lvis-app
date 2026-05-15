@@ -25,6 +25,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, watch, copyFileSync, mkdirSync, readFileSync } from "node:fs";
+import { waitForAllFirstBuilds } from "./lib/dev-watcher-gate.mjs";
 import { homedir } from "node:os";
 import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -553,13 +554,23 @@ function scheduleRestart() {
   }, 400);
 }
 
-async function waitForMain(timeoutMs = 60_000) {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    if (existsSync(mainOutput)) return true;
-    await new Promise((r) => setTimeout(r, 250));
-  }
-  return false;
+// Each watcher's expected output relative to repoRoot. We gate Electron
+// launch on ALL of them having a fresh first build so the renderer never
+// loads HTML referencing missing styles.css/renderer.js (which previously
+// produced an unstyled UI on first dev run after a clean dist).
+//
+// First-build detection uses output mtime ≥ launcherStartedAt rather than
+// existsSync alone, because incremental builds from a previous dev session
+// may already have files in place; we want the new session's first emit.
+// See scripts/lib/dev-watcher-gate.mjs for the polling implementation.
+function makeWatcherList() {
+  return [
+    { tag: "main",           label: "Main process (esbuild)",  output: resolve(repoRoot, "dist/src/main/main.js") },
+    { tag: "preload",        label: "Preload (esbuild)",       output: resolve(repoRoot, "dist/src/preload.cjs") },
+    { tag: "plugin-preload", label: "Plugin preload (esbuild)",output: resolve(repoRoot, "dist/src/plugin-preload.cjs") },
+    { tag: "renderer",       label: "Renderer (esbuild)",      output: resolve(repoRoot, "dist/src/renderer.js") },
+    { tag: "styles",         label: "Styles (Tailwind)",       output: resolve(repoRoot, "dist/src/styles.css") },
+  ];
 }
 
 function shutdown(code = 0) {
@@ -599,6 +610,12 @@ process.on("exit", () => {
 
 async function main() {
   log("dev", "LVIS_DEV=1");
+  // Captured BEFORE any watcher spawns. waitForFirstBuild compares each
+  // output's mtime against this baseline so we accept ONLY emits produced
+  // by the current dev session (not stale incremental output left behind
+  // by a prior run).
+  const launcherStartedAt = Date.now();
+  const watchers = makeWatcherList();
 
   // Initial html copy
   copyHtml();
@@ -683,12 +700,19 @@ async function main() {
     "--watch=always",
   ]);
 
-  const ok = await waitForMain();
+  // Wait for ALL watchers' first build before launching Electron. Pre-fix
+  // the launcher only awaited dist/src/main/main.js, so renderer.js and
+  // styles.css could be missing when Electron loaded index.html — Tailwind
+  // utility classes were undefined and v6 composer rendered as raw text
+  // (Bug #TBD). The mtime gate ensures every watcher has produced a fresh
+  // build for the current dev session.
+  const ok = await waitForAllFirstBuilds(watchers, launcherStartedAt, log);
   if (!ok) {
-    log("dev", "timed out waiting for dist/src/main/main.js");
+    log("dev", "timed out waiting for watchers — see [dev:progress] FAIL lines above");
     await shutdown(1);
     return;
   }
+  log("progress", "all watchers ready — launching Electron");
 
   lastMainOutputHash = hashFile(mainOutput);
   launchElectron();

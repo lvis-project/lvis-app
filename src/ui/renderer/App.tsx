@@ -14,10 +14,10 @@ import { ThemeProvider } from "./theme/index.js";
 import { getApi, getPluginViewLabel, toViewKey } from "./api-client.js";
 import type { PluginEntry } from "./components/PluginGridButton.js";
 import { ApprovalDialog } from "./dialogs/ApprovalDialog.js";
-import { ApprovalQueueStatus } from "./components/ApprovalQueueStatus.js";
 import { DeferredQueueDialog } from "./dialogs/DeferredQueueDialog.js";
 import { buildQuickActions } from "./components/command-actions.js";
 import { MainToolbar } from "./MainToolbar.js";
+import { DevToolsPanel } from "./components/DevToolsPanel.js";
 import { MainContent } from "./MainContent.js";
 import {
   Dialog,
@@ -106,6 +106,26 @@ export function App() {
   const [deferredQueueOpen, setDeferredQueueOpen] = useState(false);
   const [activeView, setActiveView] = useState("home");
   const [commandPopoverOpen, setCommandPopoverOpen] = useState(false);
+  const [devToolsOpen, setDevToolsOpen] = useState(false);
+
+  // Dev tools — Cmd/Ctrl+Shift+D toggles the floating panel.
+  // Listener is only bound in dev mode (`window.__lvisDevMode === true`) so
+  // packaged builds neither swallow the chord nor pay setState cost on every
+  // press. Main process strips dev IPC handlers when packaged, so even if a
+  // production build accidentally read true, the panel would render inert.
+  useEffect(() => {
+    if ((window as unknown as { __lvisDevMode?: boolean }).__lvisDevMode !== true) {
+      return;
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.shiftKey && (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "d") {
+        e.preventDefault();
+        setDevToolsOpen((v) => !v);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   const { updates: marketplaceUpdates, dismiss: dismissMarketplaceUpdates } = useMarketplaceUpdates(api);
   const { status: bootstrapStatus, dismiss: dismissBootstrapStatus, retry: retryBootstrap } = useBootstrapStatus(api);
   const { queue: approvalQueue, decide: handleApprovalDecide } = useApproval();
@@ -239,7 +259,7 @@ export function App() {
 
       // Start the main ConversationLoop turn immediately (user-in-the-loop
       // confirm → auto-process). trigger-import mode skips the user-bubble
-      // append since the imported_trigger card already represents the prompt.
+      // append since the imported_trigger marker already represents the prompt.
       void handleAskRef.current(pendingPrompt, "trigger-import");
     },
     [api, insertImportedTriggerEntry],
@@ -551,6 +571,7 @@ export function App() {
       q: string,
       mode: "default" | "trigger-import" = "default",
       userIntent?: UserKeyboardIntentSnapshot,
+      opts?: { injectHint?: "queue" | "interrupt"; inputOrigin?: "queue-auto" },
     ) => {
       // Cache once per invocation — `window.lvis.env.debugStream` is fixed at
       // preload bootstrap, so reading it again per debugLog call is wasted
@@ -576,7 +597,11 @@ export function App() {
       }
       // Renderer only performs UX-level shortcuts for typed composer input.
       // Main owns the authoritative trust-origin classification.
-      if (mode === "default") {
+      // queue-auto path 는 slash command 분기 우회 — 큐에 누적된 /compact,
+      // /load 가 silent execute 되는 회귀 차단 (Round 3 critic C1-NEW).
+      // 큐는 단순 user message inject 로만 동작 — slash command literal 은
+      // LLM 에 plain text 로 전달.
+      if (mode === "default" && opts?.inputOrigin !== "queue-auto") {
         if (await handleCompactCommand(t)) {
           if (debugStreamEnabled) debugLog("handleAsk", "skip:compact-command-handled");
           return;
@@ -612,7 +637,10 @@ export function App() {
         ? composeImportedTriggerOutgoing(t)
         : composeOutgoing(t);
       const outgoing = composed.text;
-      let outgoingAttachments = composed.attachments;
+      // queue-auto path 는 큐 schema (텍스트 only) 라 사용자가 별도로 추가한
+      // 첨부 파일이 따라가면 mental model 위배 + silent corruption (Round 3
+      // code-reviewer CRITICAL). queue-auto 시 attachments 강제 빈 배열.
+      let outgoingAttachments = opts?.inputOrigin === "queue-auto" ? [] : composed.attachments;
       // Vendor vision capability gate. The composer accepts images
       // regardless of the active model so the user can switch models
       // freely; check at send time and confirm before silently dropping
@@ -636,23 +664,32 @@ export function App() {
         }
         outgoingAttachments = outgoingAttachments.filter((p) => p.type !== "image");
       }
-      // trigger-import: skip the user-bubble append. The
-      // ImportedTriggerCard already represents the overlay-trigger prompt
+      // trigger-import: skip only the user-bubble append. The imported_trigger
+      // marker already represents the plugin-authored overlay prompt
       // visibly, and rendering the wrapped envelope as a user bubble
       // would misattribute authorship.
       if (mode !== "trigger-import") {
-        appendUserEntry(t);
+        appendUserEntry(t, opts?.injectHint);
       }
       resetStreamAccumulators();
-      if (mode !== "trigger-import") {
-        appendAssistantStatus("생각 중...");
-      }
+      appendAssistantStatus("생각 중...");
       try {
         await api.chatSend(
           outgoing,
           outgoingAttachments,
-          mode === "trigger-import" ? "plugin-emitted" : "user-keyboard",
-          mode === "default" ? userIntent : undefined,
+          opts?.inputOrigin === "queue-auto"
+            ? "queue-auto"
+            : mode === "trigger-import"
+              ? "plugin-emitted"
+              : "user-keyboard",
+          // queue-auto path 는 user gesture 없이 IPC stream context 에서
+          // 발생하므로 userIntent 전달 안 함 (validator 가 userActivation
+          // 검사 우회).
+          opts?.inputOrigin === "queue-auto"
+            ? undefined
+            : mode === "default" ? userIntent : undefined,
+          // chat.ts:59 가 queue-auto 도 rolePrompt 허용 — Round 3 critic
+          // M-NEW-1 fix. role preset 효과가 queue-auto inject 에도 적용됨.
           mode === "default" ? composed.rolePrompt : undefined,
         );
         if (debugStreamEnabled) debugLog("handleAsk", "chatSend:resolved", { requestId });
@@ -895,6 +932,12 @@ export function App() {
             onOpenDetachedView={(viewKey) => {
               void openDetachedBuiltInView(viewKey);
             }}
+            onOpenDevTools={() => setDevToolsOpen((v) => !v)}
+          />
+          <DevToolsPanel
+            api={api}
+            open={devToolsOpen}
+            onClose={() => setDevToolsOpen(false)}
           />
           {searchOpen && (
             <UnifiedSearchPanel
@@ -943,7 +986,9 @@ export function App() {
             onJumpToSession={handleLoadSession}
             onRefreshSessions={refreshSessions}
             chatContextValue={chatContextValue}
-            onAsk={(q, intent) => handleAsk(q, "default", intent)}
+            onAsk={(q, intent, opts) => handleAsk(q, "default", intent, opts)}
+            /* opts 의 inputOrigin / injectHint 가 그대로 handleAsk 4번째
+               인자로 전달 — queue-auto inject path 활성. */
             onEditSave={handleEditSave}
             onFork={handleFork}
             onToggleStar={handleToggleStar}
@@ -982,7 +1027,9 @@ export function App() {
           See <AskUserQuestionCard> + ChatView ask-question slot. */}
       <DeferredQueueDialog open={deferredQueueOpen} onOpenChange={setDeferredQueueOpen} />
       <ApprovalDialog queue={approvalQueue} onDecide={handleApprovalDecide} />
-      <ApprovalQueueStatus queue={approvalQueue} />
+      {/* v6: ApprovalQueueStatus floating chip 제거. 큐 정보는 InputActionBar
+          trailing 의 DeferredApprovalChip 으로 통합. Spec docs/blueprints/
+          composer-redesign-message-queue.md "제거" 섹션. */}
       <DropZoneOverlay />
       <DevConsoleToggle />
       {/* Snap edge highlight — shown when a detached child window enters the snap zone */}

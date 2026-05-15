@@ -47,6 +47,10 @@
     "dist:mac": "node scripts/build-installers.mjs --mac",
     "dist:linux": "node scripts/build-installers.mjs --linux",
     "dist:win": "node scripts/build-installers.mjs --win",
+    "dist:fast": "node scripts/build-installers.mjs --current --fast",
+    "dist:mac:fast": "node scripts/build-installers.mjs --mac --fast",
+    "dist:linux:fast": "node scripts/build-installers.mjs --linux --fast",
+    "dist:win:fast": "node scripts/build-installers.mjs --win --fast",
     "release": "node scripts/release.mjs",
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build"
@@ -71,7 +75,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@ai-sdk/devtools": "^0.0.15",
+    "@ai-sdk/devtools": "^0.0.17",
     "@electron/rebuild": "^4.0.3",
     "@playwright/test": "^1.48.0",
     "@storybook/react": "^10.3.6",
@@ -96,7 +100,7 @@
     "cmdk": "^1.1.1",
     "date-fns": "^4.1.0",
     "electron": "^41.2.0",
-    "electron-builder": "26.9.0",
+    "electron-builder": "26.10.0",
     "eruda": "^3.4.3",
     "esbuild": "^0.28.0",
     "jsdom": "^29.0.2",

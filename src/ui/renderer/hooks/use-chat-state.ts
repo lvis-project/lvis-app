@@ -1,14 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  appendDeltaToImportedTriggerResponse,
   appendImportedTriggerEntry,
   appendUserEntry,
   applyToolEnd,
   applyToolStart,
-  finalizeImportedTriggerResponse,
   finalizeStreamingAssistant,
   finalizeStreamingReasoning,
-  isImportedTriggerStreaming,
   setAssistantError,
   upsertStreamingAssistant,
   upsertStreamingReasoning,
@@ -90,17 +87,10 @@ export function useChatState(api: LvisApi) {
       }
       const streamId = typeof ev.streamId === "number" ? ev.streamId : null;
       if (ev.type === "guidance_injected") {
-        // Non-interrupting "guide" mode (chat utterance taxonomy) — engine
-        // consumed a queued guide utterance at the round boundary and
-        // appended it to history. Surface to the user as a system entry
-        // so they can see their direction-adjustment landed; the assistant
-        // round that follows reads it like any other user message.
+        // 사용자 피드백 (2026-05-15): system entry → user bubble + 작은 hint 배지.
         const text = typeof ev.text === "string" ? ev.text : "";
         if (text.length === 0) return;
-        setEntries((p) => [
-          ...p,
-          { kind: "system", text: `방향 지시 적용: ${text}` },
-        ]);
+        setEntries((p) => [...p, { kind: "user", text, injectHint: "queue" }]);
         return;
       }
       if (ev.type === "guidance_dropped") {
@@ -143,26 +133,11 @@ export function useChatState(api: LvisApi) {
         const message = formatLlmStatusMessage(ev);
         if (!message) return;
         setEntries((p) => {
-          if (isImportedTriggerStreaming(p)) return p;
           const base = p;
           return upsertStreamingAssistant(base, message);
         });
       } else if (ev.type === "text_delta" && ev.text) {
         setEntries((p) => {
-          // Overlay trigger import flow — when the LLM is responding to an
-          // accepted overlay trigger, redirect deltas INTO the
-          // imported_trigger card's response field so the whole
-          // interaction stays visually grouped. Falls back to the
-          // normal streaming-assistant path for ordinary user turns.
-          //
-          // Critical: do NOT accumulate streamRef when routing to the
-          // card. Otherwise the `done` handler's fallback in
-          // finalizeStreamingAssistant sees streamRef populated and
-          // appends a phantom assistant entry below the card, which
-          // looks like a duplicate response.
-          if (isImportedTriggerStreaming(p)) {
-            return appendDeltaToImportedTriggerResponse(p, ev.text!);
-          }
           streamRef.current += ev.text!;
           const base = p;
           return upsertStreamingAssistant(base, streamRef.current);
@@ -186,24 +161,6 @@ export function useChatState(api: LvisApi) {
           });
         }
         setEntries((p) => {
-          // Overlay trigger import flow — DO NOT finalize the imported_trigger
-          // card here. assistant_round fires once per LLM round
-          // (tool_use → next round → end_turn). Finalizing on the
-          // first round (stopReason="tool_use") would close the card
-          // before the LLM's actual reply text arrives in the next
-          // round, and those subsequent text_deltas would land in a
-          // sibling streaming-assistant entry — exactly the
-          // duplicate-response bug we're fixing.
-          //
-          // BUT: a streaming `reasoning` entry for THIS round still
-          // needs sealing. Without this, a per-round reasoning entry
-          // stays `streaming: true` forever (thoughtRef gets reset
-          // on the next round, and the `done` branch only finalizes
-          // when thoughtRef is non-empty). Finalize reasoning even
-          // on the trigger path.
-          if (isImportedTriggerStreaming(p)) {
-            return finalizeStreamingReasoning(p, ev.thought ?? thoughtRef.current);
-          }
           const base = p;
           const beforeCount = base.length;
           let next = finalizeStreamingReasoning(base, ev.thought ?? thoughtRef.current);
@@ -246,22 +203,9 @@ export function useChatState(api: LvisApi) {
         // Layer 2 compact may have started but thrown — clear the indicator
         // so the StatusBar item doesn't stick when compact_notice never arrives.
         setIsCompacting(false);
-        setEntries((p) => {
-          // Error during an overlay-trigger import turn: also close the
-          // card's streaming indicator so the spinner doesn't hang
-          // forever. The error message itself still surfaces via the
-          // normal setAssistantError sibling path — surfacing it inside
-          // the card would conflate the overlay-trigger interaction with a
-          // host-level error and is likely more confusing than helpful.
-          const closed = isImportedTriggerStreaming(p)
-            ? finalizeImportedTriggerResponse(p)
-            : p;
-          return setAssistantError(
-            closed,
-            `오류: ${ev.error || "알 수 없는 오류"}`,
-            thoughtRef.current,
-          );
-        });
+        setEntries((p) =>
+          setAssistantError(p, `오류: ${ev.error || "알 수 없는 오류"}`, thoughtRef.current),
+        );
         streamRef.current = "";
         thoughtRef.current = "";
         activeStreamIdRef.current = null;
@@ -380,14 +324,6 @@ export function useChatState(api: LvisApi) {
             route: ev.route,
           });
         }
-        // Overlay trigger import flow — close the card's streaming indicator.
-        // Independent of the regular streaming-assistant finalize; the
-        // card may have absorbed every text_delta of this turn so
-        // streamRef.current can be empty even though the card has
-        // content to seal.
-        setEntries((p) =>
-          finalizeImportedTriggerResponse(p, (response) => detectFromStream(response).cleanedText),
-        );
         if (streamRef.current || thoughtRef.current) {
           const doneRoute = ev.route;
           // §PR-3: strip <title>...</title> and [checkpoint] markers
@@ -486,18 +422,6 @@ export function useChatState(api: LvisApi) {
     },
     [],
   );
-
-  /**
-   * Close any open imported_trigger card without surfacing an error.
-   * Used by App's handleAsk catch path: a `chatSend` rejection (network
-   * fail, abort) would otherwise leave the card's streaming spinner
-   * spinning forever — the `done` event never lands so the normal
-   * finalize doesn't fire. The error message itself surfaces via the
-   * regular setAssistantError sibling path.
-   */
-  const closeOpenImportedTrigger = useCallback(() => {
-    setEntries((p) => finalizeImportedTriggerResponse(p));
-  }, []);
 
   // Fallback toast — shown briefly when the LLM provider auto-switches.
   const [fallbackToast, setFallbackToast] = useState<string | null>(null);
@@ -650,8 +574,8 @@ export function useChatState(api: LvisApi) {
     setIsCompacting(false);
   }, []);
 
-  const appendUserMessage = useCallback((content: string): void => {
-    setEntries((p) => appendUserEntry(p, content));
+  const appendUserMessage = useCallback((content: string, injectHint?: "queue" | "interrupt"): void => {
+    setEntries((p) => appendUserEntry(p, content, injectHint));
   }, []);
 
   const appendAssistantStatus = useCallback((content: string): void => {
@@ -734,7 +658,6 @@ export function useChatState(api: LvisApi) {
     truncateToEntry,
     // Trigger import methods.
     addImportedTriggerEntry,
-    closeOpenImportedTrigger,
     insertImportedTriggerEntry,
   };
 }

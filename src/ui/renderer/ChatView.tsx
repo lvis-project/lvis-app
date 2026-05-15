@@ -19,9 +19,12 @@ import { SummaryToast } from "./components/SummaryToast.js";
 import { ViewModeBanner, type ViewModeState } from "./components/ViewModeBanner.js";
 import { SessionResumeDivider } from "./components/SessionResumeDivider.js";
 import { SessionTodoPanel } from "./components/SessionTodoPanel.js";
+import { MessageQueuePanel } from "./components/MessageQueuePanel.js";
+import { MessageQueueStore, formatQueueInject } from "./state/message-queue-store.js";
 import { SubAgentCard } from "./components/SubAgentCard.js";
 import { TokenCostBadge } from "./components/TokenCostBadge.js";
 import { TokenProgressRing } from "./components/TokenProgressRing.js";
+import { BottomActionRow } from "./components/BottomActionRow.js";
 import { PermissionModeBadge } from "./components/permissions/PermissionModeBadge.js";
 import { SkillBadge } from "./components/SkillBadge.js";
 import { WorkGroup } from "./components/WorkGroup.js";
@@ -59,6 +62,35 @@ import { parseImportedTriggerEnvelope } from "../../shared/overlay-trigger-sourc
 
 const CHAT_BOTTOM_THRESHOLD_PX = 96;
 
+type ImportedTriggerEntry = Extract<ChatEntry, { kind: "imported_trigger" }>;
+
+function isTurnStartEntry(entry: ChatEntry | undefined): boolean {
+  return entry?.kind === "user" || entry?.kind === "imported_trigger";
+}
+
+function ImportedTriggerCard({ entry }: { entry: ImportedTriggerEntry }) {
+  // Parse envelope source tag to confirm overlay trigger provenance.
+  // title + summary fields are already clean (set at insert time).
+  const envelopeSource = parseImportedTriggerEnvelope(entry.prompt);
+  return (
+    <div
+      className="mx-3 my-1 rounded border border-action-view/20 bg-action-view/5 px-3 py-2 text-xs"
+    >
+      <div className="flex items-center gap-1 text-action-view font-medium">
+        <span>●</span>
+        <span>{envelopeSource ?? entry.summary.slice(0, 60)}</span>
+      </div>
+      {entry.summary && (
+        <div className="mt-1 text-muted-foreground prose prose-sm lvis-prose max-w-none">
+          <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>
+            {entry.summary}
+          </ReactMarkdown>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /**
  * ChatView — consumes cross-cutting state via `useChatContext()`. Action
  * callbacks stay as direct props so data flow for user-driven side effects
@@ -66,7 +98,11 @@ const CHAT_BOTTOM_THRESHOLD_PX = 96;
  */
 export interface ChatViewProps {
   api: LvisApi;
-  onAsk: (q: string, intent?: UserKeyboardIntentSnapshot) => void | Promise<void>;
+  onAsk: (
+    q: string,
+    intent?: UserKeyboardIntentSnapshot,
+    opts?: { injectHint?: "queue" | "interrupt"; inputOrigin?: "queue-auto" },
+  ) => void | Promise<void>;
   onEditSave: (idx: number, text: string) => void | Promise<void>;
   onFork: (idx: number) => void | Promise<void>;
   onToggleStar: (idx: number) => void | Promise<void>;
@@ -245,18 +281,18 @@ function HistoricalEntriesList({
         ? segment.slice(0, finalAssistantOffset)
         : segment;
       // Historical segment 의 turnStart + 같은 turn 의 turn_summary entry
-      // 한 번에 lookup. turn_summary 는 segment 외부 (다음 user 직전) 에 있어
-      // entries 전체에서 찾되 다음 user 만나기 전까지만.
+      // 한 번에 lookup. turn_summary 는 segment 외부 (다음 user/imported_trigger
+      // 직전) 에 있어 entries 전체에서 찾되 다음 turn start 만나기 전까지만.
       let histTurnStart = -1;
       for (let k = segmentStart; k >= 0; k--) {
-        if (entries[k]?.kind === "user") { histTurnStart = k; break; }
+        if (isTurnStartEntry(entries[k])) { histTurnStart = k; break; }
       }
       let histTurnSummary: Extract<ChatEntry, { kind: "turn_summary" }> | undefined;
       if (histTurnStart >= 0) {
         for (let k = segmentStart; k < entries.length; k++) {
           const ne = entries[k];
           if (!ne) continue;
-          if (ne.kind === "user" && k !== histTurnStart) break;
+          if (isTurnStartEntry(ne) && k !== histTurnStart) break;
           if (ne.kind === "turn_summary") {
             histTurnSummary = ne;
             break;
@@ -359,40 +395,11 @@ function HistoricalEntriesList({
     }
 
     if (entry.kind === "imported_trigger") {
-      // Parse envelope source tag to confirm overlay trigger provenance.
-      // title + summary fields are already clean (set at insert time).
-      const envelopeSource = parseImportedTriggerEnvelope(entry.prompt);
       rendered.push(
-        <div
+        <ImportedTriggerCard
           key={`trigger:${entry.sessionId}`}
-          className="mx-3 my-1 rounded border border-action-view/20 bg-action-view/5 px-3 py-2 text-xs"
-        >
-          <div className="flex items-center gap-1 text-action-view font-medium">
-            <span>●</span>
-            <span>{envelopeSource ?? entry.summary.slice(0, 60)}</span>
-          </div>
-          {entry.summary && (
-            // markdown 으로 render — plugin prompt 의 `\n` + list (`- 항목`) +
-            // **bold** 등을 살림. plain `<p>` 시 CSS `white-space: normal` 이
-            // newline 을 collapse 해 모든 내용이 한 줄로 붙어 가독성 손상.
-            // response 측 (아래) 과 같은 markdown 파이프라인 재사용.
-            <div className="mt-1 text-muted-foreground prose prose-sm lvis-prose max-w-none">
-              <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>
-                {entry.summary}
-              </ReactMarkdown>
-            </div>
-          )}
-          {entry.response && (
-            <div className="mt-2 text-foreground/80 prose prose-sm lvis-prose max-w-none">
-              <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>
-                {entry.response}
-              </ReactMarkdown>
-            </div>
-          )}
-          {entry.responseStreaming && !entry.response && (
-            <p className="mt-1 text-muted-foreground animate-pulse">응답 중...</p>
-          )}
-        </div>,
+          entry={entry}
+        />,
       );
       i++;
       continue;
@@ -484,7 +491,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     for (let i = 0; i < visibleEntries.length; i++) {
       const e = visibleEntries[i];
       if (!e) continue;
-      if (e.kind === "user") curTurnStart = i;
+      if (isTurnStartEntry(e)) curTurnStart = i;
       else if (e.kind === "turn_summary" && curTurnStart >= 0) {
         map.set(curTurnStart, {
           turnDurationMs: e.turnDurationMs,
@@ -617,6 +624,248 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     sawHistoryLoadingRef.current = false;
     setShowJumpToBottom(false);
   }, [currentSessionId]);
+
+  // Stage 3: per-ChatView message-queue store. session 변경 시 자동 비움.
+  const messageQueueStore = useMemo(() => new MessageQueueStore(), []);
+  // queue-auto inject in-flight 플래그 — done event re-entrancy 방지.
+  const queueAutoInflightRef = useRef(false);
+
+  // dev-mode test hook — Playwright e2e 가 store 직접 manipulation 으로
+  // 큐 시나리오 검증 가능. production 빌드에선 노출 X.
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "production") {
+      (window as unknown as { __lvis_message_queue_store__?: MessageQueueStore }).__lvis_message_queue_store__ = messageQueueStore;
+    }
+  }, [messageQueueStore]);
+  useEffect(() => {
+    messageQueueStore.clear();
+  }, [currentSessionId, messageQueueStore]);
+
+  // Stage 5c: 자연 인입 (true mid-turn brake-point) — 엔진의 onGuide
+  // (round-boundary inject) 메커니즘 위임. tool_end event 발생 시 큐 dump:
+  // 엔진이 다음 assistant round 시작 직전에 user message 로 합류시킴.
+  // 이전 implementation (streaming false 전이 시 onAsk = abort+restart) 의
+  // 한계 — 매 turn 종료까지 기다림 — 해소. spec §"메세지 큐 시맨틱" 의
+  // brake-point 정의 ("tool result 도착 직후 = 다음 assistant 호출 직전")
+  // 와 동일.
+  //
+  // streaming false 전이는 fallback (tool-less turn — LLM 이 도구 안 쓰고
+  // 직접 텍스트만 응답한 경우) 으로 유지. tool_end 가 없으니 turn 끝에
+  // onGuide 호출.
+  //
+  // onGuide 가 fail (queue-full / too-long / no-active-turn) 하면 큐에
+  // 다시 추가 — 다음 brake-point 에 retry. 중복 inject 방지.
+  const flushQueueViaGuide = useCallback(() => {
+    if (messageQueueStore.size() === 0) return;
+    const taken = messageQueueStore.takeAll();
+    if (taken.length === 0) return;
+    const formatted = formatQueueInject(taken);
+    void (async () => {
+      const result = await onGuide(formatted);
+      if (result?.ok !== true) {
+        // no-active-turn = turn 이 cancel/완료된 후 → re-add 하면 무한 loop.
+        // queue-full / too-long = 일시적이지만 사용자 cancel 동시 시 무한 retry
+        // 위험. 현재는 모든 실패를 best-effort drop 으로 처리 (사용자 알림 X).
+        // future: too-long 만 batch split + queue-full 만 backoff retry.
+        const reason = result?.error ?? "unknown";
+        console.warn(`[message-queue] guide flush dropped (${reason}):`, formatted.slice(0, 80));
+      }
+    })();
+  }, [messageQueueStore, onGuide]);
+
+  useEffect(() => {
+    const unsub = api.onChatStream((ev) => {
+      if (ev.type === "tool_end") {
+        // mid-turn brake-point — 엔진 round boundary 에 합류 (onGuide).
+        flushQueueViaGuide();
+        return;
+      }
+      if (ev.type === "done") {
+        // turn 종료 시 큐 잔존 항목 → 새 user message 로 자동 inject.
+        // inputOrigin "queue-auto" 사용 — chat.ts validator 가 userActivation
+        // 검사 우회 (IPC stream context = user gesture 밖).
+        // re-entrancy guard (critic Round 2 M4): inflight inject 중 재 done
+        // event 무시 — rapid done sequence 시 cascade race 방지.
+        if (queueAutoInflightRef.current) return;
+        if (messageQueueStore.size() === 0) return;
+        const taken = messageQueueStore.takeAll();
+        if (taken.length === 0) return;
+        queueAutoInflightRef.current = true;
+        const formatted = formatQueueInject(taken);
+        void (async () => {
+          try {
+            await onAsk(formatted, undefined, { injectHint: "queue", inputOrigin: "queue-auto" });
+          } finally {
+            queueAutoInflightRef.current = false;
+          }
+        })();
+      }
+    });
+    return unsub;
+  }, [api, flushQueueViaGuide, messageQueueStore, onAsk]);
+
+  // streaming false 전이 fallback 폐기 (2026-05-15 사용자 피드백):
+  // AskUserQuestion 카드 깜박임 등으로 streaming 이 일시 false → true 로
+  // 되돌아갈 때 의도치 않게 큐가 자동 인입되어 사라지는 문제. 자동 인입은
+  // tool_end (진정한 brake-point) 에서만. turn 종료 시 큐 잔존 = OK,
+  // 사용자가 ESC 또는 esc 취소 로 명시적 inject 트리거.
+
+  // ESC / esc 취소 시 호출 — 큐를 새 user message 로 inject + handleAsk 가
+  // 자체 abort 처리 (Issue #622). 큐 비어 있으면 단순 abort 만.
+  const flushQueueAsUserMessage = useCallback(() => {
+    if (messageQueueStore.size() === 0) {
+      void onAbort();
+      return;
+    }
+    const taken = messageQueueStore.takeAll();
+    const formatted = formatQueueInject(taken);
+    // ESC / esc 취소 = 사용자 명시 인터럽트 → "⚡ 중단후 새메세지" hint.
+    void onAsk(formatted, { inputOrigin: "user-keyboard", token: "" }, { injectHint: "interrupt" });
+  }, [messageQueueStore, onAbort, onAsk]);
+
+  // Stage 5: composer Enter morph — busy = queue.add, idle = onAsk 직행.
+  // ⌘⏎ = 즉시 주입 (LLM abort + 큐 selected + 현재 입력).
+  const handleComposerSend = useCallback(
+    (intent: UserKeyboardIntentSnapshot) => {
+      const text = question;
+      if (text.trim().length === 0 && attachments.length === 0) return;
+      if (streaming) {
+        // Busy: 큐에 추가. cap 초과 throw catch 해서 textarea 보존.
+        if (text.trim().length > 0) {
+          try {
+            messageQueueStore.add(text);
+          } catch (err) {
+            console.warn("[message-queue] add rejected:", (err as Error).message);
+            return;
+          }
+        }
+        // 첨부도 같이 비움 — busy 분기에서 첨부 잔존하면 다음 idle 입력 시
+        // 의도치 않게 따라감 (mental model 위배). 큐 schema 가 첨부 비포함이라
+        // busy 시 첨부는 명시적으로 사용자가 재선택하는 것이 명확.
+        setQuestion("");
+        if (attachments.length > 0) setAttachments([]);
+      } else {
+        // Idle: 직행 전송
+        void onAsk(text, intent);
+      }
+    },
+    [
+      question, attachments.length, streaming, messageQueueStore, onAsk,
+      setQuestion, setAttachments,
+    ],
+  );
+
+  const handleImmediateInject = useCallback(() => {
+    const text = question.trim();
+    const taken = messageQueueStore.takeSelected();
+    const parts: string[] = [];
+    if (taken.length > 0) parts.push(formatQueueInject(taken));
+    if (text.length > 0) parts.push(text);
+    if (parts.length === 0) return;
+    const combined = parts.join("\n");
+    setQuestion("");
+    // ⌘⏎ = 사용자 명시 인터럽트 → "⚡ 중단후 새메세지" hint.
+    // handleAsk 가 streaming 시 자체 abort 처리.
+    void onAsk(combined, { inputOrigin: "user-keyboard", token: "" }, { injectHint: "interrupt" });
+  }, [question, messageQueueStore, onAsk, setQuestion]);
+
+  // Stage 5: ESC 우선순위
+  //   1. 모달 (Radix Dialog [data-state="open"]) → 모달이 가로챔 (defensive)
+  //   2. 큐 선택 항목 있음 → 선택 해제만 (LLM 안 건드림)
+  //   3. composer textarea 안에서 ESC → LLM 취소
+  useEffect(() => {
+    if (!streaming) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (
+        document.querySelector(
+          '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]',
+        )
+      ) {
+        return;
+      }
+      if (messageQueueStore.hasSelected()) {
+        e.preventDefault();
+        messageQueueStore.clearSelection();
+        return;
+      }
+      const target = e.target as HTMLElement | null;
+      const inComposer =
+        target?.getAttribute?.("data-testid") === "composer-textarea";
+      if (!inComposer) return;
+      e.preventDefault();
+      // 사용자 의도 (2026-05-15): ESC = LLM abort + 큐를 새 user message 로
+      // inject. 멈춤만 하는 게 아니고 큐 항목이 입력으로 보내짐. 빈 큐면
+      // 단순 abort. handleAsk 가 자체 abort 처리.
+      flushQueueAsUserMessage();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [streaming, messageQueueStore, onAbort]);
+
+  // ⌘⏎ — composer textarea 에서 즉시 주입. busy 시 = 인터럽트 (LLM abort + 새
+  // turn). idle 시도 동작 (큐가 있으면 큐+입력 inject, 없으면 입력만 send).
+  // 사용자 mental model: "⌘⏎ = 지금 즉시 보내" — busy/idle 무관 일관 동작.
+  // 가드 (streaming) 제거 — 사용자 보고 2026-05-15 (idle ⌘⏎ 가 무동작이던 회귀).
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== "Enter") return;
+      if (!(e.metaKey || e.ctrlKey)) return;
+      // 한국어 IME composing 가드 제거 — composing 시 첫 ⌘⏎ 가 IME commit 으로
+      // 소비되고 두 번째 ⌘⏎ 가 동작하는 회귀 (사용자 보고 2026-05-15).
+      // 미확정 음절 손실은 마이너 — 사용자 의도 (인터럽트) 가 명확.
+      if (
+        document.querySelector(
+          '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]',
+        )
+      ) {
+        return;
+      }
+      const target = e.target as HTMLElement | null;
+      const isComposerTextarea =
+        target?.getAttribute?.("data-testid") === "composer-textarea";
+      if (!isComposerTextarea) return;
+      e.preventDefault();
+      handleImmediateInject();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [handleImmediateInject]);
+
+  // Stage 5 follow-up: ⌘K = 가이드 호출. BottomActionRow 의 ghost 버튼과 동일
+  // onGuide 위임. text 비어 있으면 noop. busy 와 무관 (idle 에서도 가이드 가능).
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== "k" && e.key !== "K") return;
+      if (!(e.metaKey || e.ctrlKey)) return;
+      if (e.isComposing) return;
+      if (
+        document.querySelector(
+          '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]',
+        )
+      ) {
+        return;
+      }
+      const text = question.trim();
+      if (text.length === 0) return;
+      e.preventDefault();
+      void (async () => {
+        const result = await onGuide(text);
+        if (result?.ok === true) {
+          setQuestion("");
+        } else if (result?.ok === false) {
+          const message =
+            result.error === "queue-full" ? "방향 지시가 너무 많아 대기열이 가득 찼습니다." :
+            result.error === "too-long" ? "방향 지시 한 건이 너무 깁니다 (최대 8000자)." :
+            result.error === "no-active-turn" ? "진행 중인 응답이 없어 방향 지시를 보낼 수 없습니다." :
+            `방향 지시 전송 실패: ${result.error}`;
+          onGuideError(message);
+        }
+      })();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [question, onGuide, onGuideError, setQuestion]);
 
   useEffect(() => {
     const viewport = scrollViewportRef.current;
@@ -801,10 +1050,11 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           // §PR-5: use visibleEntries (sliced in view-mode, full list otherwise)
           const activeEntries = visibleEntries;
 
-          // Last user-message index: determines which WorkGroup belongs to the active turn.
-          let lastUserIdx = -1;
+          // Last turn-start index: user messages and imported overlay prompts both
+          // own the assistant/tool/summary output that follows them.
+          let lastTurnStartIdx = -1;
           for (let k = activeEntries.length - 1; k >= 0; k--) {
-            if (activeEntries[k]?.kind === "user") { lastUserIdx = k; break; }
+            if (isTurnStartEntry(activeEntries[k])) { lastTurnStartIdx = k; break; }
           }
 
           type EntryClass = "intermediate" | "live" | "final";
@@ -816,15 +1066,15 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           for (let i = 0; i < activeEntries.length; i++) {
             const e = activeEntries[i];
             if (!e) continue;
-            if (e.kind === "user") { turnStart = i; continue; }
+            if (isTurnStartEntry(e)) { turnStart = i; continue; }
             if (e.kind !== "assistant" && e.kind !== "reasoning" && e.kind !== "tool_group") continue;
 
-            let nextUserIdx = activeEntries.length;
+            let nextTurnStartIdx = activeEntries.length;
             for (let j = i + 1; j < activeEntries.length; j++) {
-              if (activeEntries[j]?.kind === "user") { nextUserIdx = j; break; }
+              if (isTurnStartEntry(activeEntries[j])) { nextTurnStartIdx = j; break; }
             }
 
-            const subsequentTurnEntries = activeEntries.slice(i + 1, nextUserIdx);
+            const subsequentTurnEntries = activeEntries.slice(i + 1, nextTurnStartIdx);
             const hasSubsequent = subsequentTurnEntries.some(
               (ne) => ne.kind === "assistant" || ne.kind === "tool_group" || ne.kind === "reasoning",
             );
@@ -834,7 +1084,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
 
             const myTurnStart = turnStart >= 0 ? turnStart : 0;
             entryTurnStartMap.set(i, myTurnStart);
-            const isActiveTurnEntry = myTurnStart === lastUserIdx && streaming;
+            const isActiveTurnEntry = myTurnStart === lastTurnStartIdx && streaming;
             const hasPriorWork = activeEntries.slice(myTurnStart + 1, i).some(
               (pe) => pe.kind === "tool_group" || pe.kind === "reasoning",
             );
@@ -905,6 +1155,15 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
                     {/* "나" label removed — sender is implicit. Star + hover
                         actions float top-right via absolute positioning so
                         the bubble has no header chrome. */}
+                    {entry.injectHint === "queue" ? (
+                      <div className="mb-1 inline-flex items-center gap-1 rounded bg-message-user-foreground/10 px-1.5 py-0.5 text-[10px] text-message-user-foreground/70" title="메시지 큐에서 자동 인입">
+                        ↪ 큐에서
+                      </div>
+                    ) : entry.injectHint === "interrupt" ? (
+                      <div className="mb-1 inline-flex items-center gap-1 rounded bg-message-user-foreground/10 px-1.5 py-0.5 text-[10px] text-message-user-foreground/70" title="현재 LLM 응답 중단 후 즉시 새 메시지로 주입">
+                        ⚡ 중단후 새메세지
+                      </div>
+                    ) : null}
                     {starActive ? (
                       <Star key="active" className="absolute right-2 top-2 h-3 w-3 fill-emphasis text-emphasis lvis-anim-star" />
                     ) : null}
@@ -996,32 +1255,11 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             }
 
             if (entry.kind === "imported_trigger") {
-              // Parse envelope source tag to confirm overlay trigger provenance.
-              // title + summary fields are already clean (set at insert time).
-              const envelopeSource = parseImportedTriggerEnvelope(entry.prompt);
               rendered.push(
-                <div
+                <ImportedTriggerCard
                   key={`trigger:${entry.sessionId}`}
-                  className="mx-3 my-1 rounded border border-action-view/20 bg-action-view/5 px-3 py-2 text-xs"
-                >
-                  <div className="flex items-center gap-1 text-action-view font-medium">
-                    <span>●</span>
-                    <span>{envelopeSource ?? entry.summary.slice(0, 60)}</span>
-                  </div>
-                  {entry.summary && (
-                    <p className="mt-1 text-muted-foreground">{entry.summary}</p>
-                  )}
-                  {entry.response && (
-                    <div className="mt-2 text-foreground/80 prose prose-sm lvis-prose max-w-none">
-                      <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>
-                        {entry.response}
-                      </ReactMarkdown>
-                    </div>
-                  )}
-                  {entry.responseStreaming && !entry.response && (
-                    <p className="mt-1 text-muted-foreground animate-pulse">응답 중...</p>
-                  )}
-                </div>,
+                  entry={entry}
+                />,
               );
               i++;
               continue;
@@ -1032,12 +1270,12 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
               const groupStart = i;
               const groupTurnStart = entryTurnStartMap.get(i) ?? 0;
               // Spinner is shown only while this WorkGroup belongs to the currently active turn
-              const groupIsActiveTurn = groupTurnStart === lastUserIdx && streaming;
+              const groupIsActiveTurn = groupTurnStart === lastTurnStartIdx && streaming;
               if (debugStreamEnabled) {
                 debugLog("ChatView", "WorkGroup:render-decision", {
                   groupStart,
                   groupTurnStart,
-                  lastUserIdx,
+                  lastTurnStartIdx,
                   globalStreaming: streaming,
                   groupIsActiveTurn,
                 });
@@ -1102,7 +1340,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
                   // 으로 turnStart 일치 검증.
                   let aaTurnStart = -1;
                   for (let k = i; k >= 0; k--) {
-                    if (activeEntries[k]?.kind === "user") { aaTurnStart = k; break; }
+                    if (isTurnStartEntry(activeEntries[k])) { aaTurnStart = k; break; }
                   }
                   if (aaTurnStart === groupTurnStart) {
                     groupEntries.push({
@@ -1243,6 +1481,16 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
       <div className="relative z-30 w-full max-w-full min-w-0 overflow-visible border-t border-border/70 bg-card/95">
         <div className="w-full max-w-full min-w-0" data-testid="session-todo-dock">
           <SessionTodoPanel api={workflowApi} sessionId={currentSessionId} />
+          <MessageQueuePanel
+            store={messageQueueStore}
+            onSendNow={(item) => {
+              // 행별 [↑ 즉시] — 그 1 항목만 즉시 주입 = 사용자 명시 인터럽트.
+              // "⚡ 중단후 새메세지" hint. handleAsk 자체 abort.
+              messageQueueStore.remove(item.id);
+              const text = formatQueueInject([item]);
+              void onAsk(text, { inputOrigin: "user-keyboard", token: "" }, { injectHint: "interrupt" });
+            }}
+          />
         </div>
         <div className="w-full max-w-full min-w-0 overflow-x-hidden pb-1 space-y-2">
           <InputActionBar
@@ -1365,13 +1613,18 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             vendorSupportsThinking={vendorSupportsThinking}
             enableThinkingChat={enableThinkingChat}
             onToggleThinking={toggleThinking}
+            permissionSlot={
+              <PermissionModeBadge
+                onClick={() => onOpenSettings("permissions")}
+                onQueueClick={onOpenPermissionQueue}
+              />
+            }
+            approvalSlot={<DeferredApprovalChip draftText={question} />}
           />
-          {/* Issue #690 P4 — natural-language approval chip. Renders
-              only when (a) the user's draft text contains an approve /
-              reject phrase, AND (b) exactly one deferred-queue entry is
-              pending. Self-contained: subscribes to deferredList /
-              onDeferredPending itself. */}
-          <DeferredApprovalChip draftText={question} />
+          {/* v6 layout: Composer (textarea) + BottomActionRow (TokenRing/가이드/
+              단축키/취소/Send) 가 하나의 흰색 컨테이너 안. 사용자 인지 = "타이핑
+              영역 + 즉시 액션" 한 묶음. shadow-md + rounded-xl 로 경계 강조. */}
+          <div className="mx-3 rounded-xl bg-input-bar shadow-md overflow-hidden">
           <Composer
             ref={composerRef}
             text={question}
@@ -1381,36 +1634,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             allocateN={() => ++attachmentNCounter.current}
             saveClipboardImage={(b64) => window.lvis.attach.saveClipboardImage(b64)}
             openExternal={(p) => window.lvis.attach.openExternal(p)}
-            onSend={(intent) => void onAsk(question, intent)}
-            onAbort={() => void onAbort()}
-            onGuide={() => {
-              const text = question;
-              void (async () => {
-                const result = await onGuide(text);
-                // Preserve typed text on rejection so the user can retry —
-                // common case is the no-active-turn race between Composer's
-                // streaming-derived state and the actual turn lifecycle
-                // (code-reviewer round-1 MAJOR #3 / critic round-1 MAJOR #6).
-                if (result?.ok === true) {
-                  setQuestion("");
-                } else if (result?.ok === false) {
-                  // Visible feedback for queue-full / too-long / no-active-turn
-                  // so repeated Ctrl+Enter into a closed queue doesn't look
-                  // like the button is broken (round-2 code-reviewer MEDIUM).
-                  const message =
-                    result.error === "queue-full" ? "방향 지시가 너무 많아 대기열이 가득 찼습니다." :
-                    result.error === "too-long" ? "방향 지시 한 건이 너무 깁니다 (최대 8000자)." :
-                    result.error === "no-active-turn" ? "진행 중인 응답이 없어 방향 지시를 보낼 수 없습니다." :
-                    `방향 지시 전송 실패: ${result.error}`;
-                  // Surface in chat transcript via the system-entry pipeline
-                  // (parity with `guidance_dropped` UX) so the user sees the
-                  // failure rather than a silent "button does nothing"
-                  // (round-3 reviewer + critic agreed MINOR).
-                  onGuideError(message);
-                }
-              })();
-            }}
-            streaming={streaming}
+            onSend={handleComposerSend}
             disabled={
               // Slash commands (e.g. /compact) bypass the context-overflow gate
               // so the user can escape a fully-blocked input even while the
@@ -1423,33 +1647,64 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
               hasApiKey === false
                 ? "API 키를 먼저 설정해 주세요..."
                 : streaming
-                  ? "새 메시지 전송 시 현재 응답을 중단하고 새 턴을 시작합니다"
+                  ? "메시지 큐에 추가됩니다 (즉시 인터럽트는 ⌘⏎)"
                   : "질문 입력 (Enter 전송 · Cmd/Ctrl+V 첨부) · /command 사용 가능"
             }
           />
-          <div className="flex min-w-0 items-center justify-between gap-3 px-3">
-            <div className="flex min-w-0 items-center gap-2">
-              <TokenProgressRing used={usedTokens} budget={contextBudget} />
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className={`text-[11px] font-mono ${costBadgeClass}`} title="예상 비용">
-                    {formatCostBadge(costEstimate.total)}
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent className="text-xs">
-                  <div>입력: {costEstimate.inputTokens.toLocaleString()} tok · ${costEstimate.inputCost.toFixed(5)}</div>
-                  <div>출력(추정): {costEstimate.outputTokens.toLocaleString()} tok · ${costEstimate.outputCost.toFixed(5)}</div>
-                  <div className="font-semibold">합계: ${costEstimate.total.toFixed(5)}</div>
-                </TooltipContent>
-              </Tooltip>
-            </div>
-            <div className="ml-auto flex shrink-0 items-center justify-end">
-              <PermissionModeBadge
-                onClick={() => onOpenSettings("permissions")}
-                onQueueClick={onOpenPermissionQueue}
-              />
-            </div>
+          <BottomActionRow
+            tokenSlot={
+              <div className="flex min-w-0 items-center gap-2">
+                <TokenProgressRing used={usedTokens} budget={contextBudget} />
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className={`text-[11px] font-mono ${costBadgeClass}`} title="예상 비용">
+                      {formatCostBadge(costEstimate.total)}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent className="text-xs">
+                    <div>입력: {costEstimate.inputTokens.toLocaleString()} tok · ${costEstimate.inputCost.toFixed(5)}</div>
+                    <div>출력(추정): {costEstimate.outputTokens.toLocaleString()} tok · ${costEstimate.outputCost.toFixed(5)}</div>
+                    <div className="font-semibold">합계: ${costEstimate.total.toFixed(5)}</div>
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+            }
+            isBusy={streaming}
+            isSendDisabled={
+              (hasApiKey === false || contextOverflowPct >= 0.95 || viewMode !== null) &&
+              !question.trimStart().startsWith("/")
+                ? true
+                : question.trim().length === 0 && attachments.length === 0
+            }
+            onSend={() => handleComposerSend({ inputOrigin: "user-keyboard", token: "" })}
+            onCancel={() => {
+              // ESC handler 와 동일: 큐를 inject + abort (멈춤 X, 입력으로 inject).
+              flushQueueAsUserMessage();
+            }}
+            onGuide={() => {
+              // Stage 4: 가이드 버튼 = ChatView 의 onGuide 호출 위임. Stage 5 에서
+              // ⌘K 단축키 + open guide modal 추가 예정. 현재는 streaming 중
+              // 방향지시 와 동일 동작 (text 비어있어도 시도).
+              const text = question;
+              void (async () => {
+                const result = await onGuide(text);
+                if (result?.ok === true) {
+                  setQuestion("");
+                } else if (result?.ok === false) {
+                  const message =
+                    result.error === "queue-full" ? "방향 지시가 너무 많아 대기열이 가득 찼습니다." :
+                    result.error === "too-long" ? "방향 지시 한 건이 너무 깁니다 (최대 8000자)." :
+                    result.error === "no-active-turn" ? "진행 중인 응답이 없어 방향 지시를 보낼 수 없습니다." :
+                    `방향 지시 전송 실패: ${result.error}`;
+                  onGuideError(message);
+                }
+              })();
+            }}
+            guideDisabled={!streaming || question.trim().length === 0}
+          />
           </div>
+          {/* v6 Stage 4b: PermissionModeBadge + DeferredApprovalChip 모두
+              InputActionBar trailing 으로 이전 완료. 본 자리 비움. */}
         </div>
         <QuestionOverlay
           api={api}

@@ -52,6 +52,42 @@ describe("useChatState", () => {
     });
   });
 
+  it("keeps overlay-import responses in the normal assistant stream", async () => {
+    const { api, emitChatStream } = makeMockLvisApi();
+    const { result } = renderHook(() => useChatState(api as unknown as LvisApi));
+
+    act(() => {
+      result.current.insertImportedTriggerEntry({
+        sessionId: "trigger-1",
+        pluginId: "meeting",
+        prompt: "<imported-from-overlay source=\"overlay:meeting-summary\">요약</imported-from-overlay>",
+        summary: "회의 요약",
+        title: "회의",
+      });
+      emitChatStream({ type: "text_delta", text: "assistant reply" });
+    });
+
+    await waitFor(() => {
+      const imported = result.current.entries.find((e) => e.kind === "imported_trigger");
+      const assistant = result.current.entries.find((e) => e.kind === "assistant");
+      expect(imported).toMatchObject({ kind: "imported_trigger", sessionId: "trigger-1" });
+      expect(Object.keys(imported ?? {}).sort()).toEqual([
+        "importedAt",
+        "kind",
+        "prompt",
+        "sessionId",
+        "source",
+        "summary",
+        "toolCallCount",
+      ]);
+      expect(assistant).toMatchObject({
+        kind: "assistant",
+        text: "assistant reply",
+        streaming: true,
+      });
+    });
+  });
+
   it("dispatches a permission badge refresh event when slash mode changes", async () => {
     const { api, emitChatStream } = makeMockLvisApi();
     const listener = vi.fn();
@@ -177,12 +213,10 @@ describe("useChatState", () => {
     errSpy.mockRestore();
   });
 
-  it("guidance_injected appends a system entry without disturbing streaming assistant", async () => {
-    // New non-interrupting "guide" mode (chat utterance taxonomy redesign):
-    // engine consumes a queued guide utterance at the round boundary and
-    // emits a `guidance_injected` event. Renderer must surface it as a
-    // visible system entry so the user sees their direction-adjustment
-    // landed — without touching the in-flight assistant entry.
+  it("guidance_injected appends a user bubble with injectHint='queue' without disturbing streaming assistant", async () => {
+    // 사용자 피드백 (2026-05-15): system entry ("방향 지시 적용:") 대신 일반
+    // user bubble + injectHint="queue" 배지. mid-turn brake-point 의 큐 인입은
+    // 사용자 입력 누적의 자동 발화이므로 user kind 가 mental model 정합.
     const { api, emitChatStream } = makeMockLvisApi();
     const { result } = renderHook(() => useChatState(api as unknown as LvisApi));
 
@@ -194,8 +228,8 @@ describe("useChatState", () => {
     });
 
     await waitFor(() => {
-      const systemEntries = result.current.entries.filter((e) => e.kind === "system") as Array<{ text: string }>;
-      expect(systemEntries.some((e) => e.text === "방향 지시 적용: 더 짧게")).toBe(true);
+      const userEntries = result.current.entries.filter((e) => e.kind === "user") as Array<{ text: string; injectHint?: "queue" | "interrupt" }>;
+      expect(userEntries.some((e) => e.text === "더 짧게" && e.injectHint === "queue")).toBe(true);
     });
     // Streaming assistant entry is preserved — guide is non-interrupting.
     const assistants = result.current.entries.filter((e) => e.kind === "assistant") as Array<{ text: string; streaming?: boolean }>;
