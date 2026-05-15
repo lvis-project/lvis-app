@@ -214,7 +214,17 @@
       "entitlementsInherit": "build/entitlements.mac.plist"
     },
     "dmg": {
-      "artifactName": "${productName}-${version}-mac-${arch}.${ext}"
+      "artifactName": "${productName}-${version}-mac-${arch}.${ext}",
+      "window": {
+        "width": 540,
+        "height": 420
+      },
+      "contents": [
+        { "x": 140, "y": 130, "type": "file" },
+        { "x": 400, "y": 130, "type": "link", "path": "/Applications" },
+        { "x": 140, "y": 290, "type": "file", "path": "build/dmg-extras/setup.command" },
+        { "x": 400, "y": 290, "type": "file", "path": "build/dmg-extras/README.txt" }
+      ]
     },
     "linux": {
       "category": "Office",
