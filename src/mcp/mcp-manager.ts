@@ -17,7 +17,6 @@ import { randomBytes } from "node:crypto";
 import { readFile, writeFile, mkdir, rename, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, dirname } from "node:path";
-import { homedir } from "node:os";
 import type { McpServerConfig, McpServerConfigDto, McpServerState, McpUiPayload } from "./types.js";
 import { McpGovernance } from "./mcp-governance.js";
 import { McpClient } from "./mcp-client.js";
@@ -26,9 +25,10 @@ import type { PermissionManager } from "../permissions/permission-manager.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
 import { withFileLock } from "../lib/with-file-lock.js";
 import { createLogger } from "../lib/logger.js";
+import { lvisHome } from "../shared/lvis-home.js";
 const log = createLogger("mcp-manager");
 
-const DEFAULT_CONFIG_PATH = join(homedir(), ".lvis", "mcp", "servers.json");
+const DEFAULT_CONFIG_PATH = join(lvisHome(), "mcp", "servers.json");
 
 export class McpManager {
   private readonly clients = new Map<string, McpClient>();
