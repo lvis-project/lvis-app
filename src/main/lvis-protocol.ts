@@ -3,6 +3,32 @@ export function findLvisProtocolUri(argv: readonly string[]): string | null {
   return argv.find((arg) => arg.toLowerCase().startsWith("lvis://")) ?? null;
 }
 
+const MARKETPLACE_ACTIONS = new Set(["install", "uninstall"]);
+const MARKETPLACE_SLUG_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/i;
+
+export function parseMarketplacePluginActionUri(
+  url: string,
+): { action: "install" | "uninstall"; slug: string } | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "lvis:") return null;
+  const action = parsed.hostname.toLowerCase();
+  if (!MARKETPLACE_ACTIONS.has(action)) return null;
+  if (parsed.search || parsed.hash) return null;
+  let slug: string;
+  try {
+    slug = decodeURIComponent(parsed.pathname.replace(/^\//, ""));
+  } catch {
+    return null;
+  }
+  if (!slug || !MARKETPLACE_SLUG_RE.test(slug)) return null;
+  return { action: action as "install" | "uninstall", slug };
+}
+
 /**
  * `lvis://plugin-auth/<pluginId>?code=<code>` parser.
  *

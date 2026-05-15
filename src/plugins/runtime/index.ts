@@ -695,6 +695,7 @@ export class PluginRuntime {
    * US-A3 — Targeted single-plugin remove for uninstall paths.
    */
   async removePlugin(pluginId: string): Promise<void> {
+    delete this.configOverrides[pluginId];
     // Plugin may be in one of three states when uninstall is requested:
     //   - loaded (`this.plugins` has it) → run stop + dispose, then clean
     //     all tracking maps below
