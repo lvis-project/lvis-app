@@ -180,7 +180,12 @@ export function InputActionBar({
               )}
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-56">
+          {/* Open upward from the input bar (trigger sits at the bottom of
+              the chat surface). Without `side="top"` Radix defaults to
+              "bottom" and the menu clips below the viewport; that also
+              forces the Agent/Skills/Persona submenus to RTL-flip
+              independently of the parent, making them visually detach. */}
+          <DropdownMenuContent side="top" sideOffset={8} align="end" className="w-56">
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>
                 <Bot className="mr-2 h-3.5 w-3.5" />
