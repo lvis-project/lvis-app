@@ -5,6 +5,7 @@ import { Input } from "../../../components/ui/input.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
 import { TokenCostBadge, type TokenCostBadgePricing, type TokenCostBadgeProps } from "./TokenCostBadge.js";
 import type { LLMVendor } from "../../../shared/llm-vendor-defaults.js";
+import { formatHhMmKst } from "../utils/format-time.js";
 
 /**
  * Turn-aggregate provider-reported token usage forwarded to the inline
@@ -45,13 +46,9 @@ export function TurnActionBar({
   const [showReasonBox, setShowReasonBox] = useState(false);
   const [reasonDraft, setReasonDraft] = useState("");
 
-  const timestampLabel = useMemo(() => {
-    if (timestamp === undefined) return null;
-    return new Date(timestamp).toLocaleTimeString("ko-KR", {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  }, [timestamp]);
+  // Centralized KST formatter — keeps wall-clock display consistent between
+  // TurnActionBar and SessionCalendarPopover regardless of OS timezone.
+  const timestampLabel = useMemo(() => formatHhMmKst(timestamp), [timestamp]);
 
   return (
     <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5 px-3">

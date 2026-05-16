@@ -219,12 +219,24 @@ export interface TurnCallbacks {
   }) => void;
 }
 
+/**
+ * Why the turn ended. Centralized so the queryLoop return type, TurnResult,
+ * and the willEmit/notification gates all reference one source — adding a new
+ * reason later means changing one union (and then auditing the gates).
+ */
+export type TurnStopReason =
+  | "end_turn"
+  | "tool_use"
+  | "interrupted"
+  | "context-error"
+  | "stream-error";
+
 export interface TurnResult {
   text: string;
   toolCalls: Array<{ name: string; input: Record<string, unknown>; result: string }>;
   route: string;
   usage?: TokenUsage;
-  stopReason?: "end_turn" | "tool_use" | "interrupted" | "context-error" | "stream-error";
+  stopReason?: TurnStopReason;
 }
 
 export interface ConversationLoopDeps {
@@ -1378,7 +1390,7 @@ export class ConversationLoop {
       inputOrigin: ChatInputOrigin;
       toolTrustOrigin: ToolTrustOrigin;
     },
-  ): Promise<{ text: string; toolCalls: Array<{ name: string; input: Record<string, unknown>; result: string }>; usage?: TokenUsage; stopReason?: "end_turn" | "tool_use" | "interrupted" | "context-error" | "stream-error" }> {
+  ): Promise<{ text: string; toolCalls: Array<{ name: string; input: Record<string, unknown>; result: string }>; usage?: TokenUsage; stopReason?: TurnStopReason }> {
     const llmSettings = this.deps.settingsService.get("llm");
     const activeBlock = llmSettings.vendors[llmSettings.provider];
     const model = activeBlock.model;

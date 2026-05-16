@@ -50,6 +50,14 @@ export class ConversationHistory {
     }
   }
 
+  /**
+   * Returns a SHALLOW copy of the messages array. Each element is the same
+   * object reference held internally — mutations applied via
+   * `attachTurnSummaryToLastAssistant` (or any future meta mutator) are
+   * visible through previously-returned snapshots. This is intentional:
+   * `saveSession` reads a snapshot then the loop attaches turnSummary, and
+   * both must see the same final meta.
+   */
   getMessages(): GenericMessage[] {
     return [...this.messages];
   }

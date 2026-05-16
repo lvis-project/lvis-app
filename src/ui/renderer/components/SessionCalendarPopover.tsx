@@ -2,6 +2,7 @@ import { Suspense, useEffect, useState } from "react";
 import type { Matcher } from "react-day-picker";
 import { PopoverContent } from "../../../components/ui/popover.js";
 import type { SessionSummary } from "../hooks/use-sessions.js";
+import { formatHhMmKst } from "../utils/format-time.js";
 import { CalendarFallback, LazyCalendar, preloadCalendar } from "./LazyCalendar.js";
 
 /**
@@ -262,11 +263,7 @@ export function SessionCalendarPopover({
                 >
                   <span className="block truncate">{session.title || "제목 없는 세션"}</span>
                   <span className="block text-[10px] text-muted-foreground">
-                    {new Date(session.modifiedAt).toLocaleTimeString("ko-KR", {
-                      timeZone: "Asia/Seoul",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
+                    {formatHhMmKst(new Date(session.modifiedAt).getTime())}
                     {isCurrent ? " · 현재" : ""}
                   </span>
                 </button>
