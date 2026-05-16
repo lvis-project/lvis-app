@@ -113,12 +113,15 @@ export function UnifiedSearchPanel({
   streaming = false,
 }: UnifiedSearchPanelProps) {
   const [calendarOpen, setCalendarOpen] = useState(false);
+  // Only user + assistant entries carry `createdAt` (reasoning entries are
+  // never stamped). Excluding reasoning from the mapper avoids passing dead
+  // `{idx, createdAt: undefined}` rows that the popover would skip anyway.
   const currentSessionEntries = useMemo(
     () =>
       entries.map((entry, idx) => ({
         idx,
         createdAt:
-          entry.kind === "assistant" || entry.kind === "user" || entry.kind === "reasoning"
+          entry.kind === "assistant" || entry.kind === "user"
             ? entry.createdAt
             : undefined,
       })),

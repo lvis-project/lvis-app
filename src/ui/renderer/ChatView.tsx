@@ -306,6 +306,23 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     [entries, viewMode],
   );
 
+  // Calendar's in-session day jump indexer — derived from visibleEntries with
+  // only user + assistant entries (the only kinds that carry createdAt).
+  // Memoized so that stream-delta re-renders of ChatView don't rebuild the
+  // map on every keystroke (which would re-mount the calendar tree behind the
+  // closed popover at ~100Hz on long sessions).
+  const navigatorCurrentSessionEntries = useMemo(
+    () =>
+      visibleEntries.map((entry, idx) => ({
+        idx,
+        createdAt:
+          entry.kind === "assistant" || entry.kind === "user"
+            ? entry.createdAt
+            : undefined,
+      })),
+    [visibleEntries],
+  );
+
   // turn_summary entry 의 turnStart 별 lookup. 각 turn 의 final assistant
   // 와 WorkGroup 이 같은 turn 의 token / duration 정보를 inline 으로 가져와
   // 표시한다. turn_summary entry 자체는 standalone 렌더링 되지 않는다.
@@ -795,20 +812,17 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
       <ScrollArea className="lvis-chat-scroll h-full min-h-0 min-w-0 max-w-full" viewportRef={scrollViewportRef}><div className="min-w-0 w-full max-w-full overflow-x-hidden space-y-3 px-3 py-4">
         {/* Today's date badge stays a selector for explicit session loads only.
             currentSessionEntries enables in-session day jumping via
-            SessionCalendarPopover Step 4 — pass entries with createdAt + index. */}
+            SessionCalendarPopover Step 4 — pass entries with createdAt + index.
+            Reasoning entries never carry createdAt (only user + assistant get
+            stamped in historyToEntries / appendUserEntry / finalizeStreamingAssistant),
+            so they're excluded from the mapper rather than passed with undefined. */}
         <SessionDateNavigator
           dateKey={activeDayKey}
           sessionMarkerId={currentSessionId}
           sessions={sessions}
           currentSessionId={currentSessionId}
           streaming={streaming}
-          currentSessionEntries={visibleEntries.map((entry, idx) => ({
-            idx,
-            createdAt:
-              entry.kind === "assistant" || entry.kind === "user" || entry.kind === "reasoning"
-                ? entry.createdAt
-                : undefined,
-          }))}
+          currentSessionEntries={navigatorCurrentSessionEntries}
           onJumpToEntry={(entryIndex) => {
             const el = scrollViewportRef.current?.querySelector<HTMLElement>(
               `[data-chat-entry-index="${entryIndex}"]`,

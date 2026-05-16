@@ -1010,13 +1010,24 @@ export function App() {
                 // Calendar popover in the search bar jumps to entries
                 // tagged with data-chat-entry-index in ChatView. Switch the
                 // view to home before scrolling so the entry is mounted.
+                // ChatView (and its children) may be Suspense-wrapped, so a
+                // single requestAnimationFrame is not enough — the entry node
+                // may not exist yet at the next paint. Retry a few frames
+                // before giving up so the scroll lands once mount completes.
+                if (!Number.isInteger(entryIndex) || entryIndex < 0) return;
                 setActiveView("home");
-                requestAnimationFrame(() => {
-                  const el = document.querySelector<HTMLElement>(
-                    `[data-chat-entry-index="${entryIndex}"]`,
-                  );
-                  el?.scrollIntoView({ behavior: "smooth", block: "start" });
-                });
+                const selector = `[data-chat-entry-index="${entryIndex}"]`;
+                let attempts = 0;
+                const tryScroll = () => {
+                  const el = document.querySelector<HTMLElement>(selector);
+                  if (el) {
+                    el.scrollIntoView({ behavior: "smooth", block: "start" });
+                    return;
+                  }
+                  if (++attempts >= 10) return; // ~10 frames ≈ 160ms ceiling
+                  requestAnimationFrame(tryScroll);
+                };
+                requestAnimationFrame(tryScroll);
               }}
             />
           )}

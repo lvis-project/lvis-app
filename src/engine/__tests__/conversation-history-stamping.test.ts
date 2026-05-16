@@ -41,49 +41,61 @@ describe("ConversationHistory createdAt stamping", () => {
   });
 });
 
-describe("ConversationHistory.attachToLastAssistant", () => {
+describe("ConversationHistory.attachTurnSummaryToLastAssistant", () => {
+  const sampleSummary = {
+    turnDurationMs: 1234,
+    toolCount: 2,
+    cumulativeToolMs: 567,
+    tokensIn: 1000,
+    freshInputTokens: 800,
+    tokensOut: 50,
+  };
+
   it("mutates the most recent assistant message's meta", () => {
     const h = new ConversationHistory();
     h.append({ role: "user", content: "q" });
     h.append({ role: "assistant", content: "a" });
-    h.attachToLastAssistant({
-      turnSummary: {
-        turnDurationMs: 1234,
-        toolCount: 2,
-        cumulativeToolMs: 567,
-        tokensIn: 1000,
-        freshInputTokens: 800,
-        tokensOut: 50,
-      },
-    });
+    h.attachTurnSummaryToLastAssistant(sampleSummary);
     const last = h.getMessages()[1];
     expect(last.meta?.turnSummary?.turnDurationMs).toBe(1234);
     expect(last.meta?.turnSummary?.tokensOut).toBe(50);
+    expect(last.meta?.turnSummary?.freshInputTokens).toBe(800);
   });
 
   it("no-ops when there is no assistant message yet", () => {
     const h = new ConversationHistory();
     h.append({ role: "user", content: "q" });
-    expect(() => h.attachToLastAssistant({ turnSummary: {
+    expect(() => h.attachTurnSummaryToLastAssistant({
       turnDurationMs: 0, toolCount: 0, cumulativeToolMs: 0,
       tokensIn: 0, freshInputTokens: 0, tokensOut: 0,
-    } })).not.toThrow();
+    })).not.toThrow();
     // user message should still NOT have turnSummary
     expect(h.getMessages()[0].meta?.turnSummary).toBeUndefined();
   });
 
-  it("attaches to the last assistant when interleaved with later non-assistant", () => {
+  it("attaches to the LAST assistant when multiple exist, not earlier ones", () => {
     const h = new ConversationHistory();
     h.append({ role: "user", content: "q1" });
     h.append({ role: "assistant", content: "a1" });
     h.append({ role: "tool_result", toolUseId: "t1", content: "ok" });
     h.append({ role: "assistant", content: "a2" });
-    h.attachToLastAssistant({ createdAt: 42 });
+    h.attachTurnSummaryToLastAssistant({ ...sampleSummary, tokensOut: 999 });
     const messages = h.getMessages();
-    // First assistant retains its original createdAt (auto-stamped on append).
-    expect(messages[1].meta?.createdAt).not.toBe(42);
+    // First assistant has no turnSummary.
+    expect(messages[1].meta?.turnSummary).toBeUndefined();
     // Last assistant got the mutation.
-    expect(messages[3].meta?.createdAt).toBe(42);
+    expect(messages[3].meta?.turnSummary?.tokensOut).toBe(999);
+  });
+
+  it("preserves prior meta fields when attaching turnSummary", () => {
+    const h = new ConversationHistory();
+    h.append({ role: "user", content: "q" });
+    h.append({ role: "assistant", content: "a", meta: { lock: true, compactedAt: "2026-05-17T00:00:00.000Z" } });
+    h.attachTurnSummaryToLastAssistant(sampleSummary);
+    const last = h.getMessages()[1];
+    expect(last.meta?.lock).toBe(true);
+    expect(last.meta?.compactedAt).toBe("2026-05-17T00:00:00.000Z");
+    expect(last.meta?.turnSummary?.turnDurationMs).toBe(1234);
   });
 });
 

@@ -606,15 +606,38 @@ export async function compactWithBoundary(
   });
 
   // 7. Stub boundary message + preserved → newHistory.
+  // `createdAt` parsed from the boundary ISO string so the renderer can place
+  // the boundary on the calendar's day index after reload. `checkpointMeta`
+  // is the renderer-facing summary the historyToEntries reconstruction
+  // consumes to rebuild a `kind: "checkpoint"` divider on session reload —
+  // without this the boundary would render as a raw user bubble showing the
+  // stub template text. `freedTokens` here is the pre→post compact delta of
+  // the messages that the LLM summarized; the conversation-loop's
+  // onCompactOccurred emits the same number for the live UI path.
+  const stubEstimatedAfter = estimateMessagesTokens([
+    { role: "user" as const, content: BOUNDARY_STUB_TEMPLATE(compactNum) },
+  ]);
+  const stubFreedTokens = Math.max(
+    0,
+    estimateMessagesTokens(finalToCompact) - stubEstimatedAfter,
+  );
+  const stubRemovedMessages = finalToCompact.length + reverseBudgetResult.droppedCount;
   const stubMessage: GenericMessage = {
     role: "user",
     content: BOUNDARY_STUB_TEMPLATE(compactNum),
     meta: {
       compactBoundary: true,
       compactNum,
-      removedCount: finalToCompact.length + reverseBudgetResult.droppedCount,
+      removedCount: stubRemovedMessages,
       compactedAt: boundary.createdAt,
       boundary,
+      createdAt: new Date(boundary.createdAt).getTime(),
+      checkpointMeta: {
+        removedMessages: stubRemovedMessages,
+        freedTokens: stubFreedTokens,
+        trigger: "auto-compact",
+        ...(summary.raw ? { summary: summary.raw.slice(0, 200) } : {}),
+      },
     },
   };
   let newHistory: GenericMessage[] = [stubMessage, ...toPreserve];

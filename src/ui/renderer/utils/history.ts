@@ -77,11 +77,11 @@ export function historyToEntries(
         });
         continue;
       }
-      const userEntry: ChatEntry = { kind: "user", text: textContent(m.content) };
-      if (m.createdAt !== undefined) {
-        (userEntry as { createdAt?: number }).createdAt = m.createdAt;
-      }
-      out.push(userEntry);
+      out.push({
+        kind: "user",
+        text: textContent(m.content),
+        ...(m.createdAt !== undefined ? { createdAt: m.createdAt } : {}),
+      });
     } else if (m.role === "assistant") {
       const text = textContent(m.content);
       const cleanedText = detectFromStream(text).cleanedText;
@@ -91,20 +91,17 @@ export function historyToEntries(
           ? EMPTY_ASSISTANT_RESPONSE_TEXT
           : "";
       out = finalizeStreamingReasoning(out, m.thought ?? "");
-      out = finalizeStreamingAssistant(out, visibleText);
-
-      // Stamp createdAt onto the assistant entry just emitted so TurnActionBar
-      // reads the original turn time. Walk backward since finalize may have
-      // interleaved reasoning + assistant near the tail.
-      if (m.createdAt !== undefined) {
-        for (let i = out.length - 1; i >= 0; i--) {
-          const entry = out[i];
-          if (entry.kind === "assistant" && entry.createdAt === undefined) {
-            (entry as { createdAt?: number }).createdAt = m.createdAt;
-            break;
-          }
-        }
-      }
+      // Pass the persisted createdAt through finalize so the assistant entry
+      // it constructs/updates carries the original turn time (rather than
+      // the load-time Date.now() stamp finalize would default to). When the
+      // persisted message has no createdAt (legacy session), finalize falls
+      // back to Date.now() — UI then renders the load time, but that's
+      // acceptable for legacy data since the timestamp wasn't recorded.
+      out = finalizeStreamingAssistant(
+        out,
+        visibleText,
+        m.createdAt !== undefined ? { createdAt: m.createdAt } : undefined,
+      );
 
       if (m.toolCalls?.length) {
         const groupId = `hist-tools-${m.index}`;

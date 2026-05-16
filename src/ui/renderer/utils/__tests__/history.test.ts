@@ -228,4 +228,39 @@ describe("historyToEntries", () => {
       expect(entries.find((e) => e.kind === "turn_summary")).toBeUndefined();
     });
   });
+
+  describe("checkpointMeta reconstruction", () => {
+    it("emits a checkpoint ChatEntry when the user message carries meta.checkpointMeta", () => {
+      const entries = historyToEntries([
+        { index: 0, role: "user", content: "[compact stub]" },
+        {
+          index: 1,
+          role: "user",
+          content: "[Boundary marker]",
+          checkpointMeta: {
+            removedMessages: 5,
+            freedTokens: 1200,
+            trigger: "auto-compact",
+            summary: "summarized 5 messages",
+          },
+        },
+      ]);
+      const checkpoint = entries.find((e) => e.kind === "checkpoint");
+      expect(checkpoint).toBeDefined();
+      if (checkpoint?.kind === "checkpoint") {
+        expect(checkpoint.removedMessages).toBe(5);
+        expect(checkpoint.freedTokens).toBe(1200);
+        expect(checkpoint.trigger).toBe("auto-compact");
+        expect(checkpoint.summary).toBe("summarized 5 messages");
+      }
+    });
+
+    it("renders a normal user bubble when checkpointMeta is absent (legacy boundary)", () => {
+      const entries = historyToEntries([
+        { index: 0, role: "user", content: "old boundary stub" },
+      ]);
+      expect(entries[0]?.kind).toBe("user");
+      expect(entries.find((e) => e.kind === "checkpoint")).toBeUndefined();
+    });
+  });
 });

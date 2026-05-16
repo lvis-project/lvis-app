@@ -24,16 +24,27 @@ export class ConversationHistory {
   }
 
   /**
-   * Mutate the last assistant message's meta — used by the conversation
-   * loop to attach `turnSummary` to the turn-final assistant message right
-   * before persistence so the renderer can rebuild the turn footer on
-   * session reload. No-op when there is no assistant message yet.
+   * Attach `turnSummary` to the last assistant message. Dedicated entry-point
+   * (rather than a generic meta merge) so the type system enforces every
+   * required turnSummary field — including `freshInputTokens` — at every
+   * future call site, not just the one in conversation-loop today.
+   *
+   * No-op when there is no assistant message yet (rare tool-only termination).
+   *
+   * Mutation contract: `getMessages()` returns a shallow copy of the array
+   * but each element is the same object reference held internally, so an
+   * `attachTurnSummaryToLastAssistant` call AFTER a getMessages() snapshot
+   * IS visible through that snapshot. This is intentional — the persistence
+   * path (`saveSession`) calls `getMessages()` followed by attach so both
+   * see the same final meta.
    */
-  attachToLastAssistant(meta: Partial<NonNullable<GenericMessage["meta"]>>): void {
+  attachTurnSummaryToLastAssistant(
+    turnSummary: NonNullable<NonNullable<GenericMessage["meta"]>["turnSummary"]>,
+  ): void {
     for (let i = this.messages.length - 1; i >= 0; i--) {
       const m = this.messages[i];
       if (m.role === "assistant") {
-        m.meta = { ...(m.meta ?? {}), ...meta };
+        m.meta = { ...(m.meta ?? {}), turnSummary };
         return;
       }
     }

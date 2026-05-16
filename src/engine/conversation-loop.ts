@@ -224,7 +224,7 @@ export interface TurnResult {
   toolCalls: Array<{ name: string; input: Record<string, unknown>; result: string }>;
   route: string;
   usage?: TokenUsage;
-  stopReason?: "end_turn" | "tool_use" | "interrupted" | "context-error";
+  stopReason?: "end_turn" | "tool_use" | "interrupted" | "context-error" | "stream-error";
 }
 
 export interface ConversationLoopDeps {
@@ -1273,6 +1273,11 @@ export class ConversationLoop {
     const willEmitSummary =
       result.stopReason !== "interrupted" &&
       result.stopReason !== "context-error" &&
+      // Stream errors push an *error* message as the assistant content;
+      // attaching turn-aggregate stats to it would render a TokenCostBadge
+      // under a user-facing failure notice with stats that belong to the
+      // PARTIAL (failed) round, not a completed turn. Exclude explicitly.
+      result.stopReason !== "stream-error" &&
       typeof result.text === "string" &&
       result.text.trim().length > 0;
     log.info(
@@ -1323,7 +1328,7 @@ export class ConversationLoop {
       // assistant entry of the turn. Silent on history with no assistant
       // (rare tool-only termination) — nothing to attach to.
       try {
-        this.history.attachToLastAssistant({ turnSummary: turnSummaryPayload });
+        this.history.attachTurnSummaryToLastAssistant(turnSummaryPayload);
       } catch {
         // Meta attach must never break turn completion either.
       }
@@ -1332,12 +1337,14 @@ export class ConversationLoop {
     callbacks?.onTurnComplete?.(result.text);
 
     // Issue #260 — fire system notification on turn-end. Skip if the turn
-    // was interrupted (user aborted), hit context_error, or produced no
-    // assistant text (rare tool-only termination). Body is the leading slice
-    // of the assistant response — NotificationService caps + ellipses it.
+    // was interrupted (user aborted), hit context_error / stream_error, or
+    // produced no assistant text (rare tool-only termination). Body is the
+    // leading slice of the assistant response — NotificationService caps +
+    // ellipses it.
     if (
       result.stopReason !== "interrupted" &&
       result.stopReason !== "context-error" &&
+      result.stopReason !== "stream-error" &&
       typeof result.text === "string" &&
       result.text.trim().length > 0
     ) {
@@ -1371,7 +1378,7 @@ export class ConversationLoop {
       inputOrigin: ChatInputOrigin;
       toolTrustOrigin: ToolTrustOrigin;
     },
-  ): Promise<{ text: string; toolCalls: Array<{ name: string; input: Record<string, unknown>; result: string }>; usage?: TokenUsage; stopReason?: "end_turn" | "tool_use" | "interrupted" | "context-error" }> {
+  ): Promise<{ text: string; toolCalls: Array<{ name: string; input: Record<string, unknown>; result: string }>; usage?: TokenUsage; stopReason?: "end_turn" | "tool_use" | "interrupted" | "context-error" | "stream-error" }> {
     const llmSettings = this.deps.settingsService.get("llm");
     const activeBlock = llmSettings.vendors[llmSettings.provider];
     const model = activeBlock.model;
@@ -1524,7 +1531,7 @@ export class ConversationLoop {
         );
         callbacks?.onError?.(stream.userMessage);
         this.history.append({ role: "assistant", content: stream.userMessage });
-        return { text: stream.userMessage, toolCalls: allToolCalls, usage: turnUsage };
+        return { text: stream.userMessage, toolCalls: allToolCalls, usage: turnUsage, stopReason: "stream-error" };
       }
 
       if (stream.kind === "interrupted") {
