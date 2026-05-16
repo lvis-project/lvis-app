@@ -196,8 +196,14 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
           }}
         />
         <div className="space-y-0.5">
-          <p id="marketplace-allow-private-network-label" className="text-sm font-medium">
+          <p
+            id="marketplace-allow-private-network-label"
+            className="flex items-center gap-2 text-sm font-medium"
+          >
             사설 네트워크 허용 (loopback / RFC1918)
+            <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
+              즉시 적용
+            </span>
           </p>
           <p className="text-[11px] text-muted-foreground">
             로컬 또는 사내 마켓플레이스 서버에 접속할 때 활성화합니다. SSRF 가드를 우회하므로 외부 호스트(prod) 환경에서는 끄세요.
