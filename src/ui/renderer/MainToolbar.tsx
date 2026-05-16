@@ -1,7 +1,22 @@
-import { Database, Download, ExternalLink, Home, KeyRound, Menu, Plus, Repeat2, Search, Star, Wrench } from "lucide-react";
+import { ArrowDownToLine, Database, Download, ExternalLink, Home, KeyRound, Menu, Plus, RefreshCw, Repeat2, Search, Star, Wrench } from "lucide-react";
 import { Button } from "../../components/ui/button.js";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "../../components/ui/dropdown-menu.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip.js";
+
+/**
+ * App auto-update state mirrored from the main process via
+ * `api.onAppUpdateState`. The badge next to Home renders one of four
+ * affordances:
+ *   idle         → not rendered (zero footprint)
+ *   available    → "↓ v0.1.5" pill, click starts the user-gated download
+ *   downloading  → spinner + percent, click is disabled
+ *   downloaded   → "v0.1.5 적용" pill (success tint), click → quit & install
+ */
+export type AppUpdateBadgeState =
+  | { kind: "idle" }
+  | { kind: "available"; version: string }
+  | { kind: "downloading"; version: string; percent: number }
+  | { kind: "downloaded"; version: string };
 
 /**
  * Dev mode 감지 — preload (`src/preload.ts`) 가 `window.__lvisDevMode` 를
@@ -31,6 +46,12 @@ export interface MainToolbarProps {
   onOpenDetachedView: (viewKey: "routines" | "memory" | "starred") => void | Promise<void>;
   /** Dev mode 만 사용 — clicking the wrench opens the floating DevToolsPanel. */
   onOpenDevTools?: () => void;
+  /** Latest app-update state from the main process. */
+  appUpdateState?: AppUpdateBadgeState;
+  /** Triggered when the badge is in "available" state and clicked. */
+  onDownloadAppUpdate?: () => void | Promise<void>;
+  /** Triggered when the badge is in "downloaded" state and clicked. */
+  onInstallAppUpdate?: () => void | Promise<void>;
 }
 
 export function MainToolbar({
@@ -49,6 +70,9 @@ export function MainToolbar({
   onOpenStarredView,
   onOpenDetachedView,
   onOpenDevTools,
+  appUpdateState = { kind: "idle" },
+  onDownloadAppUpdate,
+  onInstallAppUpdate,
 }: MainToolbarProps) {
   return (
     <div data-testid="main-toolbar" className="border-b bg-card px-3 py-2">
@@ -69,6 +93,18 @@ export function MainToolbar({
           </TooltipTrigger>
           <TooltipContent>홈</TooltipContent>
         </Tooltip>
+
+        {/* ── App update badge — sits immediately right of Home so users
+            always see "an update is ready" without opening any menu. The
+            badge is permanent (NOT a toast) until acted on; clicking maps
+            to download (available) → install (downloaded). The download
+            step is the user's first explicit consent — no implicit
+            background fetch (사용자 명시 클릭 전엔 절대 다운로드 금지). */}
+        <AppUpdateBadge
+          state={appUpdateState}
+          onDownload={onDownloadAppUpdate}
+          onInstall={onInstallAppUpdate}
+        />
 
         {/* ── Dev tools indicator — only visible in non-production. */}
         {isDevMode() && onOpenDevTools !== undefined && (
@@ -208,5 +244,93 @@ export function MainToolbar({
         </DropdownMenu>
       </div>
     </div>
+  );
+}
+
+/**
+ * Update badge next to the Home button — three render branches:
+ *
+ *   available   → solid info pill ("↓ v0.1.5"); click fires the download.
+ *   downloading → muted pill with a spinner + percent; click is a no-op.
+ *   downloaded  → solid success pill ("v0.1.5 적용"); click quits & installs.
+ *
+ * Nothing renders for `idle`, so the toolbar gains zero visual weight when
+ * there's no update — important because most app launches are no-op
+ * (already on latest).
+ */
+function AppUpdateBadge({
+  state,
+  onDownload,
+  onInstall,
+}: {
+  state: AppUpdateBadgeState;
+  onDownload?: () => void | Promise<void>;
+  onInstall?: () => void | Promise<void>;
+}) {
+  if (state.kind === "idle") return null;
+
+  if (state.kind === "available") {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 gap-1 px-2 text-[11px] font-medium text-info border border-info/40 bg-info/10 hover:bg-info/20"
+            onClick={() => void onDownload?.()}
+            title={`새 버전 v${state.version} 사용 가능 — 클릭해서 다운로드`}
+            aria-label={`업데이트 다운로드 (v${state.version})`}
+            data-testid="app-update-badge-available"
+          >
+            <ArrowDownToLine className="h-3 w-3" />
+            <span>v{state.version}</span>
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>새 버전 v{state.version} 사용 가능 — 클릭해서 다운로드</TooltipContent>
+      </Tooltip>
+    );
+  }
+
+  if (state.kind === "downloading") {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 gap-1 px-2 text-[11px] font-medium text-muted-foreground border border-border bg-muted/40 cursor-progress"
+            disabled
+            title={`v${state.version} 다운로드 중 (${state.percent}%)`}
+            aria-label={`업데이트 다운로드 중 (${state.percent}%)`}
+            data-testid="app-update-badge-downloading"
+          >
+            <RefreshCw className="h-3 w-3 animate-spin" />
+            <span>{state.percent}%</span>
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>v{state.version} 다운로드 중 — {state.percent}%</TooltipContent>
+      </Tooltip>
+    );
+  }
+
+  // downloaded
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 gap-1 px-2 text-[11px] font-medium text-success border border-success/40 bg-success/10 hover:bg-success/20"
+          onClick={() => void onInstall?.()}
+          title={`v${state.version} 다운로드 완료 — 클릭해서 재시작 적용`}
+          aria-label={`업데이트 적용 (v${state.version})`}
+          data-testid="app-update-badge-downloaded"
+        >
+          <Download className="h-3 w-3" />
+          <span>v{state.version} 적용</span>
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>v{state.version} 다운로드 완료 — 클릭해서 재시작 적용</TooltipContent>
+    </Tooltip>
   );
 }
