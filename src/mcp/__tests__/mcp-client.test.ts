@@ -910,6 +910,43 @@ describe("StdioTransport — regression", () => {
     await client.disconnect();
   });
 
+  it("stdio — apiKey does NOT leak into environment when apiKeyEnv is absent (HIGH-3/HIGH-4)", async () => {
+    const fake = new FakeChildProcess();
+    fake.responses = {
+      initialize: (id) => ({
+        id,
+        protocolVersion: "2024-11-05",
+        capabilities: { tools: {} },
+        serverInfo: { name: "no-env-key", version: "1.0" },
+      }),
+      "tools/list": () => ({ tools: [] }),
+    };
+    spawnMock.mockReturnValueOnce(fake);
+
+    const gov = governanceWithPolicy(
+      buildPolicy([stdioApproval("no-env-key", "uvx")]),
+    );
+    const client = new McpClient(
+      {
+        id: "no-env-key",
+        transport: "stdio",
+        command: "uvx",
+        auth: "api-key",
+        apiKey: "secret-should-not-appear",
+        // intentionally no apiKeyEnv — apiKey must NOT appear in the spawn env
+      } as McpStdioServerConfig,
+      gov,
+      new ToolRegistry(),
+    );
+
+    await client.connect();
+    const spawnEnv = (spawnMock.mock.calls[0]?.[2] as { env?: Record<string, unknown> })?.env ?? {};
+    // apiKey value must not appear in any env-var value
+    const envValues = Object.values(spawnEnv).map(String);
+    expect(envValues).not.toContain("secret-should-not-appear");
+    await client.disconnect();
+  });
+
   it("SIGKILL fallback fires when the subprocess ignores SIGTERM", async () => {
     // Build a FakeChildProcess that REFUSES to exit on SIGTERM so we can
     // verify the SIGKILL fallback timer (mcp-client.ts close()) actually

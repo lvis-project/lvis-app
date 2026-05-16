@@ -71,6 +71,8 @@ async function makeManager() {
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  // Restore default implementations cleared by vi.clearAllMocks()
+  mockValidateServer.mockImplementation(() => ({ valid: true as const }));
   const actualFsPromises =
     await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
   vi.mocked(rename).mockImplementation(actualFsPromises.rename);
@@ -335,6 +337,87 @@ describe("McpManager — addConfig()", () => {
 
     expect(existsSync(testConfigPath)).toBe(false);
     expect(mockConnect).not.toHaveBeenCalled();
+  });
+
+  // ─── Round 2 security tests (PR #765) ───────────────────────
+
+  it("setApiKey — rejects CR/LF in apiKey value (HIGH-4)", async () => {
+    const servers: McpServerConfig[] = [
+      { id: "browser-use", transport: "stdio", command: "uvx", auth: "api-key", apiKeyEnv: "MY_KEY" },
+    ];
+    await writeFile(testConfigPath, JSON.stringify({ servers }), "utf-8");
+    const mgr = await makeManager();
+
+    await expect(mgr.setApiKey("browser-use", "\nbad-key")).rejects.toThrow("제어 문자");
+    await expect(mgr.setApiKey("browser-use", "bad\rkey")).rejects.toThrow("제어 문자");
+  });
+
+  it("setApiKey — rejects apiKey that is too long (HIGH-3)", async () => {
+    const servers: McpServerConfig[] = [
+      { id: "browser-use", transport: "stdio", command: "uvx", auth: "api-key", apiKeyEnv: "MY_KEY" },
+    ];
+    await writeFile(testConfigPath, JSON.stringify({ servers }), "utf-8");
+    const mgr = await makeManager();
+
+    await expect(mgr.setApiKey("browser-use", "a".repeat(5000))).rejects.toThrow("너무 깁니다");
+  });
+
+  it("setApiKey — governance.validateServer is called BEFORE saveConfigs (HIGH-3)", async () => {
+    const servers: McpServerConfig[] = [
+      { id: "gov-check", transport: "stdio", command: "uvx", auth: "api-key", apiKeyEnv: "MY_KEY" },
+    ];
+    await writeFile(testConfigPath, JSON.stringify({ servers }), "utf-8");
+    const mgr = await makeManager();
+
+    const callOrder: string[] = [];
+    mockValidateServer.mockImplementation(() => {
+      callOrder.push("validate");
+      return { valid: false as const, layer: 1, reason: "blocked" };
+    });
+    vi.mocked(rename).mockImplementation(async (...args) => {
+      callOrder.push("rename");
+      const actual = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+      return actual.rename(...args);
+    });
+
+    await expect(mgr.setApiKey("gov-check", "sk-test-key")).rejects.toThrow("거버넌스 검증 실패");
+    // validate must come before any file write (rename)
+    expect(callOrder.indexOf("validate")).toBeLessThan(
+      callOrder.indexOf("rename") === -1 ? Infinity : callOrder.indexOf("rename"),
+    );
+    expect(callOrder).not.toContain("rename");
+  });
+
+  it("setApiKey — disconnects existing client then reconnects with new key (MEDIUM-1)", async () => {
+    const servers: McpServerConfig[] = [
+      { id: "rotate-srv", transport: "stdio", command: "uvx", auth: "api-key", apiKeyEnv: "MY_KEY" },
+    ];
+    await writeFile(testConfigPath, JSON.stringify({ servers }), "utf-8");
+    const mgr = await makeManager();
+
+    // Simulate an existing connected client
+    await mgr.connectServer(servers[0]);
+    const connectCallsBefore = mockConnect.mock.calls.length;
+
+    await expect(mgr.setApiKey("rotate-srv", "sk-new-key")).resolves.toEqual({ connected: true });
+
+    // Should have disconnected and then reconnected
+    expect(mockDisconnect).toHaveBeenCalled();
+    expect(mockConnect.mock.calls.length).toBeGreaterThan(connectCallsBefore);
+  });
+
+  it("setApiKey — emits mcp_apikey_set audit log on success (MEDIUM-5)", async () => {
+    const servers: McpServerConfig[] = [
+      { id: "audit-key-srv", transport: "stdio", command: "uvx", auth: "api-key", apiKeyEnv: "MY_KEY" },
+    ];
+    await writeFile(testConfigPath, JSON.stringify({ servers }), "utf-8");
+    const mgr = await makeManager();
+
+    await mgr.setApiKey("audit-key-srv", "sk-good-key");
+
+    expect(mockAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "mcp_apikey_set", output: "connected" }),
+    );
   });
 });
 

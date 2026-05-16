@@ -698,7 +698,8 @@ class StdioTransport implements McpTransport {
     this.process.stderr?.on("data", (chunk: Buffer) => {
       const text = chunk.toString("utf-8").trim();
       if (text) {
-        log.warn(`${this.config.id} stderr: %s`, text);
+        // MEDIUM-4: scrub secrets before logging stderr output from MCP child processes
+        log.warn(`${this.config.id} stderr: %s`, scrubSecrets(text));
       }
     });
 
@@ -852,15 +853,22 @@ class HttpTransport implements McpTransport {
     // Build and validate request headers. `config.headers` comes from admin
     // governance but we still strip CRLF-injection attempts — no trusted
     // source should be immune from hardening.
+    // HIGH-1: normalize all header names to lowercase to prevent case-collision
+    // between admin-supplied headers and apiKey injection (e.g. both
+    // `Authorization` and `authorization` co-existing in the same object).
     const headers: Record<string, string> = {
       "content-type": "application/json",
       // Streamable HTTP servers may return either JSON or SSE.
       accept: "application/json, text/event-stream",
-      ...this.config.headers,
     };
+    for (const [k, v] of Object.entries(this.config.headers ?? {})) {
+      headers[k.toLowerCase()] = v;
+    }
     if (this.config.apiKey) {
       if (this.config.apiKeyHeader) {
-        headers[this.config.apiKeyHeader] = this.config.apiKey;
+        // Single write using normalized key — no double-set risk
+        const normalizedKey = this.config.apiKeyHeader.toLowerCase();
+        headers[normalizedKey] = this.config.apiKey;
       } else if (!hasAuthorization(headers)) {
         headers.authorization = `Bearer ${this.config.apiKey}`;
       }
@@ -1069,7 +1077,7 @@ function hasAuthorization(headers: Record<string, string>): boolean {
  * might reflect from MCP HTTP responses: bearer tokens, API keys in headers,
  * query params, and JSON payloads.
  */
-function scrubSecrets(text: string): string {
+export function scrubSecrets(text: string): string {
   return text
     .replace(/[Bb]earer\s+[A-Za-z0-9._\-~+/=]+/g, "Bearer [redacted]")
     .replace(

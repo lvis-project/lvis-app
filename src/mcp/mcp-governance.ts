@@ -20,10 +20,14 @@ import type {
 } from "./types.js";
 import { createLogger } from "../lib/logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
+import {
+  ENV_NAME_RE,
+  HTTP_HEADER_NAME_RE,
+  MAX_NAME_LEN,
+  RESERVED_ENV_NAMES,
+  RESERVED_HEADERS,
+} from "./safe-names.js";
 const log = createLogger("mcp-governance");
-
-const ENV_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
-const HTTP_HEADER_NAME_RE = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 
 const DEFAULT_POLICY: McpGovernancePolicy = {
   version: "1.0",
@@ -426,22 +430,54 @@ export class McpGovernance {
 
   private validateApiKeyEnv(name: string | undefined): ValidationResult {
     if (!name) return { valid: true };
-    if (ENV_NAME_RE.test(name)) return { valid: true };
-    return {
-      valid: false,
-      reason: `apiKeyEnv는 안전한 환경변수 이름이어야 합니다: '${name}'`,
-      layer: 1,
-    };
+    if (!ENV_NAME_RE.test(name)) {
+      return {
+        valid: false,
+        reason: `apiKeyEnv는 안전한 환경변수 이름이어야 합니다: '${name}'`,
+        layer: 1,
+      };
+    }
+    if (name.length > MAX_NAME_LEN) {
+      return {
+        valid: false,
+        reason: `apiKeyEnv 이름이 너무 깁니다 (최대 ${MAX_NAME_LEN}자): '${name}'`,
+        layer: 1,
+      };
+    }
+    if (RESERVED_ENV_NAMES.has(name.toUpperCase())) {
+      return {
+        valid: false,
+        reason: `apiKeyEnv '${name}'은 호스트 보안 기준에 예약된 환경변수입니다`,
+        layer: 1,
+      };
+    }
+    return { valid: true };
   }
 
   private validateApiKeyHeader(name: string | undefined): ValidationResult {
     if (!name) return { valid: true };
-    if (HTTP_HEADER_NAME_RE.test(name)) return { valid: true };
-    return {
-      valid: false,
-      reason: `apiKeyHeader는 안전한 HTTP 헤더 이름이어야 합니다: '${name}'`,
-      layer: 1,
-    };
+    if (!HTTP_HEADER_NAME_RE.test(name)) {
+      return {
+        valid: false,
+        reason: `apiKeyHeader는 안전한 HTTP 헤더 이름이어야 합니다: '${name}'`,
+        layer: 1,
+      };
+    }
+    if (name.length > MAX_NAME_LEN) {
+      return {
+        valid: false,
+        reason: `apiKeyHeader 이름이 너무 깁니다 (최대 ${MAX_NAME_LEN}자): '${name}'`,
+        layer: 1,
+      };
+    }
+    if (RESERVED_HEADERS.has(name.toLowerCase())) {
+      return {
+        valid: false,
+        reason: `apiKeyHeader '${name}'은 예약된 HTTP 헤더입니다`,
+        layer: 1,
+      };
+    }
+    return { valid: true };
   }
 
   /**
