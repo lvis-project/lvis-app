@@ -33,6 +33,7 @@ import {
   formatEvaluationLimits,
   PermissionEvaluationContextPanel,
 } from "./permissions/PermissionEvaluationContextPanel.js";
+import { isWeakSandbox } from "../../../permissions/sandbox-capability.js";
 
 export function ToolApprovalDialog({
   open,
@@ -282,7 +283,7 @@ function approvalReviewRows(
   // present so users learn to look for it once isolation lands.
   if (request.sandboxCapability) {
     const cap = request.sandboxCapability;
-    const weak = cap.kind === "none" || cap.confidence === "assumed";
+    const weak = isWeakSandbox(cap);
     // Round-5 UX MAJOR — plain Korean copy. "격리" alone meant nothing
     // to non-technical users, and the raw English `reason` field
     // bleed into UI was developer-diagnostic language. The row now
