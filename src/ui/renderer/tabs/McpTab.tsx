@@ -204,6 +204,9 @@ export function McpTab() {
   const [showForm, setShowForm] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
   const removingIdRef = useRef<string | null>(null);
+  const [credentialTargetId, setCredentialTargetId] = useState<string | null>(null);
+  const [credentialApiKey, setCredentialApiKey] = useState("");
+  const [credentialBusy, setCredentialBusy] = useState(false);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -261,6 +264,31 @@ export function McpTab() {
     },
     [fetchAll, showBanner],
   );
+
+  const handleSetApiKey = useCallback(async () => {
+    if (!credentialTargetId) return;
+    if (!credentialApiKey.trim()) {
+      showBanner("error", "API Key를 입력하세요.");
+      return;
+    }
+    setCredentialBusy(true);
+    try {
+      const result = await window.lvis.mcp.setApiKey(credentialTargetId, credentialApiKey);
+      setCredentialTargetId(null);
+      setCredentialApiKey("");
+      await fetchAll();
+      showBanner(
+        result.connected ? "success" : "error",
+        result.connected
+          ? `${credentialTargetId} API Key가 저장되고 연결되었습니다.`
+          : `${credentialTargetId} API Key는 저장되었지만 연결 실패: ${result.warning ?? "원인 불명"}`,
+      );
+    } catch (e) {
+      showBanner("error", e instanceof Error ? e.message : String(e));
+    } finally {
+      setCredentialBusy(false);
+    }
+  }, [credentialApiKey, credentialTargetId, fetchAll, showBanner]);
 
   // 서버 추가
   const handleAdd = useCallback(async () => {
@@ -439,6 +467,19 @@ export function McpTab() {
                       )}
                     </div>
                     <div className="flex gap-1.5 shrink-0">
+                      {cfg?.auth === "api-key" && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-6 text-xs px-2"
+                          onClick={() => {
+                            setCredentialTargetId((current) => (current === id ? null : id));
+                            setCredentialApiKey("");
+                          }}
+                        >
+                          키 설정
+                        </Button>
+                      )}
                       {status === "connected" && (
                         <Button
                           variant="outline"
@@ -460,6 +501,37 @@ export function McpTab() {
                       </Button>
                     </div>
                   </div>
+                  {credentialTargetId === id && (
+                    <div className="mt-3 flex items-end gap-2 border-t pt-3">
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <Label htmlFor={`${id}-api-key-update`} className="text-xs">
+                          API Key (write-only)
+                        </Label>
+                        <Input
+                          id={`${id}-api-key-update`}
+                          type="password"
+                          className="h-7 text-xs font-mono"
+                          placeholder={
+                            cfg?.transport === "stdio" && cfg.apiKeyEnv
+                              ? `${cfg.apiKeyEnv}=...`
+                              : cfg?.transport === "http" && cfg.apiKeyHeader
+                                ? `${cfg.apiKeyHeader}: ...`
+                                : "API key"
+                          }
+                          value={credentialApiKey}
+                          onChange={(event) => setCredentialApiKey(event.target.value)}
+                        />
+                      </div>
+                      <Button
+                        size="sm"
+                        className="h-7 px-2 text-xs"
+                        disabled={credentialBusy}
+                        onClick={() => void handleSetApiKey()}
+                      >
+                        저장
+                      </Button>
+                    </div>
+                  )}
                 </div>
               );
             })}

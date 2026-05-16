@@ -19,7 +19,7 @@ import { existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import type { McpServerConfig, McpServerConfigDto, McpServerState, McpUiPayload } from "./types.js";
 import { McpGovernance } from "./mcp-governance.js";
-import { McpClient } from "./mcp-client.js";
+import { McpClient, scrubSecrets } from "./mcp-client.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { PermissionManager } from "../permissions/permission-manager.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
@@ -143,10 +143,10 @@ export class McpManager {
   }
 
   /** 단일 서버 연결 */
-  async connectServer(config: McpServerConfig): Promise<void> {
+  async connectServer(config: McpServerConfig, opts: { force?: boolean } = {}): Promise<void> {
     // 이미 연결된 서버는 건너뛰기
     const existing = this.clients.get(config.id);
-    if (existing && existing.getState().status === "connected") {
+    if (existing && existing.getState().status === "connected" && !opts.force) {
       log.info(`${config.id}: 이미 연결됨 — 건너뛰기`);
       return;
     }
@@ -321,6 +321,94 @@ export class McpManager {
         return { connected: false, warning };
       }
     });
+  }
+
+  async setApiKey(serverId: string, apiKey: string): Promise<{ connected: boolean; warning?: string }> {
+    const id = serverId.trim();
+    if (!id) {
+      throw new Error("[mcp-manager] 서버 id가 비어있거나 공백만 포함할 수 없습니다.");
+    }
+
+    // HIGH-4: apiKey 값 자체 CR/LF + control char 검증 (raw 값 기준 — trim 전에 검사)
+    if (/[\r\n\x00-\x08\x0B-\x1F\x7F]/.test(apiKey)) {
+      throw new Error("[mcp-manager] API 키에 제어 문자(CR/LF 등)가 포함되어 있습니다.");
+    }
+    const trimmedKey = apiKey.trim();
+    if (trimmedKey.length === 0) {
+      throw new Error("[mcp-manager] API 키가 비어있습니다.");
+    }
+    if (trimmedKey.length > 4096) {
+      throw new Error("[mcp-manager] API 키가 너무 깁니다 (최대 4096자).");
+    }
+
+    let updatedConfig: McpServerConfig | undefined;
+
+    // HIGH-3: validate BEFORE saveConfigs (inside the file-lock, mirrors addConfig pattern)
+    await this.withConfigLock(async () => {
+      await this.withConfigFileLock(async () => {
+        const existing = await this.loadFromConfigUnlocked();
+        const idx = existing.findIndex((server) => server.id === id);
+        if (idx === -1) {
+          throw new Error(`[mcp-manager] 서버 id '${id}'를 찾을 수 없습니다.`);
+        }
+        const current = existing[idx];
+        if (current.auth !== "api-key") {
+          throw new Error(`[mcp-manager] 서버 '${id}'는 API key 인증 서버가 아닙니다.`);
+        }
+        const candidate = { ...current, apiKey: trimmedKey } as McpServerConfig;
+        // Governance validation BEFORE persisting to disk
+        const validation = this.governance.validateServer(candidate);
+        if (!validation.valid) {
+          throw new Error(
+            `[mcp-manager] 거버넌스 검증 실패 (Layer ${validation.layer}): ${validation.reason}`,
+          );
+        }
+        updatedConfig = candidate;
+        const updated = [...existing];
+        updated[idx] = updatedConfig;
+        await this.saveConfigs(updated);
+      });
+    });
+
+    if (!updatedConfig) {
+      throw new Error(`[mcp-manager] 서버 id '${id}'를 찾을 수 없습니다.`);
+    }
+
+    // MEDIUM-1: disconnect existing client before reconnect so the new apiKey takes effect
+    const existingClient = this.clients.get(id);
+    if (existingClient) {
+      await existingClient.disconnect().catch((err) => {
+        log.warn(`setApiKey: 기존 클라이언트 연결 해제 실패 (${id}): %s`, err);
+      });
+      this.clients.delete(id);
+    }
+
+    try {
+      await this.connectServer(updatedConfig, { force: true });
+      // MEDIUM-5: audit log on success
+      this.auditLogger?.log({
+        timestamp: new Date().toISOString(),
+        sessionId: "mcp-manager",
+        type: "mcp_apikey_set",
+        input: JSON.stringify({ serverId: id }),
+        output: "connected",
+      });
+      return { connected: true };
+    } catch (err) {
+      // MEDIUM-3: scrub secrets from warning before surfacing to caller
+      const rawMsg = err instanceof Error ? err.message : String(err);
+      const warning = scrubSecrets(rawMsg);
+      log.warn(`API 키 설정 후 연결 실패 (${id}): %s`, warning);
+      // MEDIUM-5: audit log on failure
+      this.auditLogger?.log({
+        timestamp: new Date().toISOString(),
+        sessionId: "mcp-manager",
+        type: "mcp_apikey_set",
+        input: JSON.stringify({ serverId: id }),
+        output: "warning",
+      });
+      return { connected: false, warning };
+    }
   }
 
   /**

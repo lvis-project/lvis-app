@@ -467,11 +467,15 @@ export type McpRuntimeSpec =
       args?: string[];
       env?: Record<string, string>;
       auth?: "none" | "api-key" | "sso";
+      /** Safe env var name that receives the user-supplied apiKey at launch. */
+      apiKeyEnv?: string;
     }
   | {
       transport: "http";
       url: string;
       auth?: "none" | "api-key" | "sso" | "oauth";
+      /** Safe header name that receives the user-supplied apiKey on requests. */
+      apiKeyHeader?: string;
       allowPrivateNetworks?: boolean;
       oauth?: McpOAuthMetadata;
     };
