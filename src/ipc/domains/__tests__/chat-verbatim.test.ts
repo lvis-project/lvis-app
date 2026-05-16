@@ -403,6 +403,10 @@ describe("lvis:chat:send provenance", () => {
       },
       {
         channel: "lvis:chat:stream",
+        payload: expect.objectContaining({ type: "suggested_replies", replies: [], streamId: 1 }),
+      },
+      {
+        channel: "lvis:chat:stream",
         payload: expect.objectContaining({ type: "done", streamId: 1 }),
       },
     ]);
