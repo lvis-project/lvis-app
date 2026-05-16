@@ -24,7 +24,7 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, watch, copyFileSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, watch, copyFileSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { waitForAllFirstBuilds } from "./lib/dev-watcher-gate.mjs";
 import { homedir } from "node:os";
 import { basename, dirname, resolve } from "node:path";
@@ -692,6 +692,15 @@ async function main() {
   ]);
 
   // Styles (tailwind --watch)
+  // Force-delete any pre-existing dist/src/styles.css before spawning the
+  // watcher. The first-build gate at waitForAllFirstBuilds() relies on
+  // output-file mtime ≥ launcherStartedAt, but tailwindcss v4 skips the
+  // write when the resolved CSS is identical to the prior build (idempotent
+  // optimization). Without this delete, every subsequent dev run hangs at
+  // "OK preload/plugin-preload/main/renderer — 1 remaining: styles" because
+  // the stale file's mtime never advances. Force-delete guarantees the next
+  // build is a fresh write.
+  rmSync(resolve(repoRoot, "dist/src/styles.css"), { force: true });
   spawnWatcher("styles", resolveLocalBin("tailwindcss"), [
     "-i",
     "src/styles.css",
