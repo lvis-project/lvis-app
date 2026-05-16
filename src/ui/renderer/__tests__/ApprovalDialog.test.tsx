@@ -388,9 +388,14 @@ describe("ApprovalDialog", () => {
     // Verifies that window.lvis.userApproval.record is called with a payload
     // containing all 5 required fields: toolName, args (canonical JSON string),
     // source, trustOrigin, approvalCacheKey. Catches future regression of any field.
+    // Fixture sets trustOrigin + approvalCacheKey explicitly so a regression
+    // that drops the spread won't pass via TypeScript-only optional shape.
     const onDecide = vi.fn();
     render(
-      <ApprovalDialog queue={[makeRequest()]} onDecide={onDecide} />,
+      <ApprovalDialog
+        queue={[makeRequest({ trustOrigin: "user-keyboard", approvalCacheKey: "test-key-r5" })]}
+        onDecide={onDecide}
+      />,
     );
     await waitFor(() => {
       expect(document.body.textContent).toContain("read_file");
@@ -401,14 +406,14 @@ describe("ApprovalDialog", () => {
     expect(allowBtn).toBeTruthy();
     fireEvent.click(allowBtn!);
     await waitFor(() => expect(onDecide).toHaveBeenCalled());
-    // Assert required fields in record payload (toolName, args, source).
-    // trustOrigin and approvalCacheKey are optional string fields — TypeScript
-    // enforces their shape; undefined is valid when not provided by the request.
+    // Assert all 5 required fields in record payload — runtime regression guard.
     expect(window.lvis.userApproval.record).toHaveBeenCalledWith(
       expect.objectContaining({
         toolName: expect.any(String),
         args: expect.any(String),
         source: expect.any(String),
+        trustOrigin: "user-keyboard",
+        approvalCacheKey: "test-key-r5",
       }),
     );
     // args must be a canonical JSON object string (parseable, non-null object).
