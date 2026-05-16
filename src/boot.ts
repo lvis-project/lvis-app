@@ -164,12 +164,6 @@ export async function bootstrap(
 ): Promise<AppServices> {
   log.info("boot: starting...");
 
-  // Issue #837 — one-shot idempotent migration: re-canonicalize R-2
-  // user-approval keys after PR #828 upgraded canonicalStringify to RFC 8785
-  // JCS deep recursion. Runs before any approval lookup so lookups immediately
-  // benefit from migrated keys. Noop if marker file already present.
-  await migrateCanonicalization();
-
   // §4.2 Step 0-1 + 4-5: Core services.
   const core = await bootstrapCoreServices(mainWindow);
   const {
@@ -183,6 +177,12 @@ export async function bootstrap(
     toolRegistry,
     routeEngine,
   } = core;
+
+  // Issue #837 — one-shot idempotent migration: re-canonicalize R-2
+  // user-approval keys after PR #828 upgraded canonicalStringify to RFC 8785
+  // JCS deep recursion. Runs after bootstrapCoreServices so any failure is
+  // caught internally and logged without aborting boot. Noop if marker present.
+  await migrateCanonicalization();
 
   // Sprint 1-A A3 — shared AuditLogger instance (plugin runtime + hooks + gate).
   const { AuditLogger } = await import("./audit/audit-logger.js");
