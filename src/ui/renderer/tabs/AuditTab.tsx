@@ -4,7 +4,6 @@ import { Button } from "../../../components/ui/button.js";
 import { Input } from "../../../components/ui/input.js";
 import { Label } from "../../../components/ui/label.js";
 import { NativeSelect, NativeSelectOption } from "../../../components/ui/native-select.js";
-import { ScrollArea } from "../../../components/ui/scroll-area.js";
 import { Separator } from "../../../components/ui/separator.js";
 import type { AuditEntry } from "../../../audit/audit-logger.js";
 
@@ -109,7 +108,10 @@ export function AuditTab() {
   const maxCount = top3[0]?.[1] ?? 1;
 
   return (
-    <ScrollArea className="h-[460px] pr-2">
+    // No inner scroll wrapper — SettingsContent's right pane owns the
+    // single dialog scroll (always-visible gutter for G2). Wrapping the
+    // tab in its own ScrollArea here would create a double scrollbar.
+    <div className="pr-1">
       <div className="space-y-4 pt-4">
 
         {/* ── Stats Bar ── */}
@@ -295,6 +297,6 @@ export function AuditTab() {
         </div>
 
       </div>
-    </ScrollArea>
+    </div>
   );
 }
