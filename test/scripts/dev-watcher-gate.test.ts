@@ -110,4 +110,56 @@ describe("waitForAllFirstBuilds", () => {
     // Insertion order: a b c
     expect(startLine).toMatch(/a b c/);
   });
+
+  // ─── readyPromise (stdout signal) path — for tailwindcss-style skip-write ─
+
+  it("readyPromise resolves before timeout → reports OK", async () => {
+    const watchers = [
+      { tag: "styles", label: "Styles", readyPromise: Promise.resolve() },
+    ];
+    const { log, lines } = makeLog();
+    const ok = await waitForAllFirstBuilds(watchers, Date.now(), log, {
+      timeoutMs: 500,
+      sleepMs: 25,
+    });
+    expect(ok).toBe(true);
+    expect(lines.find((l) => /OK styles/.test(l))).toBeDefined();
+  });
+
+  it("readyPromise never resolves → reports FAIL on timeout", async () => {
+    const watchers = [
+      { tag: "styles", label: "Styles", readyPromise: new Promise<void>(() => {}) },
+    ];
+    const { log, lines } = makeLog();
+    const ok = await waitForAllFirstBuilds(watchers, Date.now(), log, {
+      timeoutMs: 150,
+      sleepMs: 25,
+    });
+    expect(ok).toBe(false);
+    expect(lines.find((l) => /FAIL styles/.test(l))).toBeDefined();
+  });
+
+  it("readyPromise takes priority over stale output (gate signal switch)", async () => {
+    // Watcher carries BOTH a stale output AND a resolvable readyPromise —
+    // promise path must win. Without this, the original tailwindcss
+    // skip-write bug would return: mtime stays old, gate falls back to
+    // mtime, gate hangs. since = far future → mtime would never satisfy.
+    const stale = join(workDir, "stale.css");
+    await writeFile(stale, "x");
+    const sinceFarFuture = Date.now() + 365 * 24 * 60 * 60 * 1000;
+    const watchers = [
+      {
+        tag: "styles",
+        label: "Styles",
+        output: stale,
+        readyPromise: Promise.resolve(),
+      },
+    ];
+    const { log } = makeLog();
+    const ok = await waitForAllFirstBuilds(watchers, sinceFarFuture, log, {
+      timeoutMs: 500,
+      sleepMs: 25,
+    });
+    expect(ok).toBe(true);
+  });
 });
