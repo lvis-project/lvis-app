@@ -25,7 +25,12 @@ export function WebTab(props: WebTabProps) {
   return (
     <div className="space-y-4 pt-4">
       <div className="space-y-2">
-        <Label className="text-sm font-medium">검색 엔진</Label>
+        <Label className="flex items-center gap-2 text-sm font-medium">
+          검색 엔진
+          <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
+            즉시 적용
+          </span>
+        </Label>
         <div className="grid grid-cols-2 gap-2">
           {WEB_PROVIDERS.map((p) => (
             <Button key={p.id} size="sm" variant={webProvider === p.id ? "default" : "outline"} className="justify-start text-xs" onClick={() => { setWebProvider(p.id); onImmediateChange?.(); }}>
