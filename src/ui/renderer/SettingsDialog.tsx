@@ -123,8 +123,12 @@ export function SettingsContent({
   }, [open, llmSave, chatSave, webSave, marketplaceSave]);
 
   useEffect(() => {
-    if (open) setTab(normalizeSettingsTab(initialTab));
-  }, [initialTab, open]);
+    if (open) {
+      setTab(normalizeSettingsTab(initialTab));
+      // Clear stale error banner from a previous session.
+      s.clearLastSaveError();
+    }
+  }, [initialTab, open, s]);
 
   useEffect(() => {
     if (!open) return;
@@ -149,6 +153,25 @@ export function SettingsContent({
 
   return (
     <>
+        {s.lastSaveError && (
+          <div
+            role="alert"
+            className="mb-3 flex items-start justify-between gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+            data-testid="settings-save-error"
+          >
+            <div className="min-w-0">
+              <p className="font-medium">설정 저장 실패 — {s.lastSaveError.tab} 탭</p>
+              <p className="text-[11px] opacity-80">{s.lastSaveError.message}</p>
+            </div>
+            <button
+              type="button"
+              className="text-[11px] underline opacity-80 hover:opacity-100"
+              onClick={s.clearLastSaveError}
+            >
+              닫기
+            </button>
+          </div>
+        )}
         <Tabs value={tab} onValueChange={(nextTab) => setTab(normalizeSettingsTab(nextTab))}>
           <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1 [&>*]:!grow-0 [&>*]:!shrink-0 [&>*]:!basis-auto overflow-x-auto">
             <TabsTrigger value="llm">지능 (LLM)</TabsTrigger>

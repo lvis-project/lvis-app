@@ -58,9 +58,19 @@ export interface SettingsOrchestrationState {
   settingsLoaded: boolean;
   saving: boolean;
   /**
-   * Persist current draft for the named tab. Returns when the IPC round
-   * trip completes (or surfaces the error via the orchestration's own
-   * banner — callers do NOT receive a rejection).
+   * Last save failure surface. Cleared on the next successful save.
+   * SettingsDialog renders this as a banner so silent IPC failures
+   * (network drop, locked settings file, schema reject) become
+   * visible — without this, an auto-save that silently rejected
+   * would leave the user thinking a toggle persisted when it did not.
+   */
+  lastSaveError: { tab: string; message: string } | null;
+  /** Programmatic clear — used when the user opens the dialog fresh. */
+  clearLastSaveError: () => void;
+  /**
+   * Persist current draft for the named tab. Errors surface via
+   * `lastSaveError`, not via promise rejection (the debounced caller
+   * does `void s.save(tab)`).
    *
    * The save NEVER closes the dialog. Multi-tab Settings modals (VS Code,
    * Linear, Raycast) keep the dialog open after Save so the user can
@@ -101,6 +111,8 @@ export function useSettingsOrchestration(
   const [hasMarketplaceApiKey, setHasMarketplaceApiKey] = useState(false);
   const [marketplaceApiKeyInput, setMarketplaceApiKeyInput] = useState("");
   const [saving, setSaving] = useState(false);
+  const [lastSaveError, setLastSaveError] = useState<{ tab: string; message: string } | null>(null);
+  const clearLastSaveError = useCallback(() => setLastSaveError(null), []);
   const [settingsSnapshot, setSettingsSnapshot] = useState<AppSettings | null>(null);
   const hydratedVendorRef = useRef<string | null>(null);
   const hydratedWebProviderRef = useRef<string | null>(null);
@@ -275,6 +287,15 @@ export function useSettingsOrchestration(
         } as any);
       }
       if (tab !== "permissions") onSaved();
+      setLastSaveError(null);
+    } catch (err) {
+      // Surface via state so SettingsDialog can render an inline banner —
+      // debounced callers do `void s.save(tab)` and would otherwise lose
+      // the rejection in an unhandled-promise warning, leaving the user
+      // thinking a toggle persisted when it did not.
+      const message =
+        err instanceof Error && err.message ? err.message : "설정 저장 실패";
+      setLastSaveError({ tab, message });
     } finally {
       savingRef.current = false;
       setSaving(false);
@@ -310,6 +331,8 @@ export function useSettingsOrchestration(
   }, [api, idlePreferenceRefresh, onSaved, settingsLoaded]);
 
   return {
+    lastSaveError,
+    clearLastSaveError,
     vendor, setVendor,
     keyInput, setKeyInput,
     model, setModel,

@@ -86,7 +86,12 @@ export function LlmTab(props: LlmTabProps) {
   return (
     <div className="space-y-4 pt-4">
       <div className="space-y-2">
-        <Label htmlFor="vendor-select">벤더</Label>
+        <Label htmlFor="vendor-select" className="flex items-center gap-2">
+          벤더
+          <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
+            즉시 적용
+          </span>
+        </Label>
         <Select
           value={vendor}
           onValueChange={(v) => {
@@ -166,7 +171,12 @@ export function LlmTab(props: LlmTabProps) {
       <div className="space-y-2"><Label className="text-sm font-medium">모델</Label><Input data-testid="llm-model-input" value={model} onChange={(e) => setModel(e.target.value)} placeholder={vendorInfo.defaultModel} /></div>
       <div className="space-y-2 rounded-md border p-3">
         <Label className="flex items-center justify-between text-sm font-medium">
-          <span>Extended Thinking / Reasoning</span>
+          <span className="flex items-center gap-2">
+            Extended Thinking / Reasoning
+            <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
+              즉시 적용
+            </span>
+          </span>
           <Switch
             checked={enableThinking}
             onCheckedChange={(c) => {
