@@ -250,6 +250,17 @@ export interface PluginManifest {
       /** Filesystem argument names that must be checked against allowed directories. */
       pathFields?: string[];
       /**
+       * Issue #664 P1 — sandbox-write self-attestation. When true AND the
+       * runtime verifies that every resolved `pathFields` value stays
+       * inside the owning plugin's sandbox root
+       * (`~/.lvis/plugins/<pluginId>/`), the reviewer auto-LOWs the
+       * verdict so plugins can write to their own data dir without
+       * round-tripping the user. The runtime still verifies path
+       * containment — a tool that declares the flag but emits an
+       * out-of-sandbox path falls back to the normal write rules.
+       */
+      writesToOwnSandbox?: boolean;
+      /**
        * §6.4 Tool versioning — optional semver string for this tool. When
        * omitted, the plugin manifest's top-level `version` is used as the
        * tool version so plugins that ship tools in lock-step with their

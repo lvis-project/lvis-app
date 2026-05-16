@@ -409,6 +409,7 @@ describe("ApprovalDialog", () => {
     // Assert all 5 required fields in record payload — runtime regression guard.
     expect(window.lvis.userApproval.record).toHaveBeenCalledWith(
       expect.objectContaining({
+        requestId: expect.any(String),
         toolName: expect.any(String),
         args: expect.any(String),
         source: expect.any(String),
