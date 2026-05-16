@@ -15,8 +15,9 @@
  *   deny default — deny-by-default baseline.
  *   Selective allows for process-fork, process-exec, signal (self), essential
  *   system read paths, optional network, caller-specified fs paths, and tmp.
- *   A temporary .sb profile file is written per spawn to /tmp/lvis-sandbox-exec/
- *   and cleaned up after the child exits.
+ *   A temporary per-spawn directory is created via mkdtemp() under /tmp/
+ *   (prefix: lvis-sandbox-exec-). The .sb profile is written there (0o600)
+ *   and the entire directory is rm -rf'd after the child exits.
  *
  * Known limitations (D2 PARTIAL):
  *   - sandbox-exec does not block loopback (localhost/127.0.0.1/::1) network.
@@ -27,10 +28,9 @@
 
 import { spawn } from "node:child_process";
 import { Readable } from "node:stream";
-import { access, constants, writeFile, mkdir, unlink } from "node:fs/promises";
+import { access, constants, writeFile, rm, chmod, stat, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { randomBytes } from "node:crypto";
 import type {
   SandboxRunner,
   SandboxCapabilityDescriptor,
@@ -41,9 +41,6 @@ import type {
 
 /** Absolute path to the macOS system sandbox-exec binary (D8: no bundled fallback). */
 export const SANDBOX_EXEC_BIN = "/usr/bin/sandbox-exec";
-
-/** Temporary directory for per-spawn SBPL profile files. */
-const PROFILE_DIR = join(tmpdir(), "lvis-sandbox-exec");
 
 export class SandboxExecRunner implements SandboxRunner {
   /**
@@ -89,15 +86,19 @@ export class SandboxExecRunner implements SandboxRunner {
    * Spawn `cmd` with `args` inside a sandbox-exec profile applying the
    * requested `capabilities`.
    *
-   * The SBPL profile is written to a randomly-named temporary file under
-   * /tmp/lvis-sandbox-exec/ (mode 0o600) and cleaned up after child exit.
-   * randomBytes(6) in the filename prevents path-traversal and collision.
+   * CRITICAL-1 (TOCTOU fix): Profile dir is created via mkdtemp() per spawn —
+   * each call gets a unique, owner-only directory guaranteed by the OS at
+   * creation time. No shared /tmp/lvis-sandbox-exec/ parent that an attacker
+   * could pre-create with 0o777 to swap in a permissive profile.
    *
    * Missing capability fields use conservative defaults:
    *   - `networkBlocked` defaults to `true` (deny network — D2 PARTIAL)
    *   - `processIsolated` is informational; sandbox-exec does not provide
    *     PID namespace isolation (no --unshare-pid equivalent on macOS)
    *   - `fsReadPaths`/`fsWritePaths` default to `[]`
+   *
+   * MEDIUM-2 (env required): options.env MUST be provided (bwrap --clearenv
+   * parity). Refusing to spawn with default process.env prevents secret leak.
    */
   async spawn(
     cmd: string,
@@ -105,63 +106,99 @@ export class SandboxExecRunner implements SandboxRunner {
     capabilities: Partial<SandboxCapabilityDescriptor>,
     options?: SandboxSpawnOptions,
   ): Promise<SandboxedProcess> {
-    const profile = buildSbplProfile(capabilities);
-
-    // Write the SBPL profile to a temp file. randomBytes prevents collision
-    // and path traversal (no user-controlled content in the filename).
-    await mkdir(PROFILE_DIR, { recursive: true, mode: 0o700 });
-    const profilePath = join(PROFILE_DIR, `profile-${randomBytes(6).toString("hex")}.sb`);
-    await writeFile(profilePath, profile, { mode: 0o600 });
-
-    // sandbox-exec -f <profile> <cmd> [args...]
-    const sandboxArgs: string[] = ["-f", profilePath, cmd, ...args];
-
-    const child = spawn(SANDBOX_EXEC_BIN, sandboxArgs, {
-      // Pass caller env directly — sandbox-exec does not have --clearenv like
-      // bwrap. The caller (bash.ts buildSafeChildEnv) is responsible for
-      // stripping secrets before passing options.env.
-      env: options?.env ?? {},
-      ...(options?.cwd ? { cwd: options.cwd } : {}),
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-
-    if (!child.stdout || !child.stderr) {
-      await unlink(profilePath).catch(() => {});
-      throw new Error("SandboxExecRunner: child process missing stdout/stderr pipes");
+    // MEDIUM-2: env is required — fail-closed to prevent secret leak.
+    if (!options?.env) {
+      throw new Error(
+        "SandboxExecRunner: options.env is REQUIRED. Pass buildSafeChildEnv() result. " +
+        "Refusing to spawn with default env to prevent secret leak (bwrap --clearenv parity).",
+      );
     }
 
-    const exitCode = new Promise<number>((resolve, reject) => {
-      child.on("exit", (code, signal) => {
-        if (code !== null) {
-          resolve(code);
-        } else if (signal) {
-          reject(new Error(`sandbox-exec process killed by signal ${signal}`));
-        } else {
-          reject(new Error("sandbox-exec process exited with no code and no signal"));
+    if (capabilities.processIsolated === true) {
+      // D2 known limitation: macOS sandbox-exec does not provide PID namespace
+      // isolation. Log a warning so callers are not misled.
+      // eslint-disable-next-line no-console
+      console.warn(
+        "SandboxExecRunner: processIsolated=true requested but macOS sandbox-exec " +
+        "does not provide PID-namespace isolation. Capability is informational only.",
+      );
+    }
+
+    const profile = buildSbplProfile(capabilities);
+
+    // CRITICAL-1 (TOCTOU): mkdtemp() creates a unique dir with 0o700 mode,
+    // owner set to current process uid, atomically — no pre-create race.
+    // Belt-and-suspenders: verify uid and explicitly chmod 0o700 after.
+    const profileDir = await mkdtemp(join(tmpdir(), "lvis-sandbox-exec-"));
+
+    try {
+      // Verify ownership — catches symlink races or unexpected uid mismatches.
+      if (process.getuid) {
+        const st = await stat(profileDir);
+        if (st.uid !== process.getuid()) {
+          throw new Error("SandboxExecRunner: profile dir ownership mismatch");
         }
+      }
+      // Explicit chmod 0o700 — belt-and-suspenders against umask or OS edge cases.
+      await chmod(profileDir, 0o700);
+
+      const profilePath = join(profileDir, "profile.sb");
+      await writeFile(profilePath, profile, { mode: 0o600 });
+
+      // sandbox-exec -f <profile> <cmd> [args...]
+      const sandboxArgs: string[] = ["-f", profilePath, cmd, ...args];
+
+      const child = spawn(SANDBOX_EXEC_BIN, sandboxArgs, {
+        // Pass caller env directly — sandbox-exec does not have --clearenv like
+        // bwrap. The caller is responsible for stripping secrets via buildSafeChildEnv.
+        env: options.env,
+        ...(options.cwd ? { cwd: options.cwd } : {}),
+        stdio: ["ignore", "pipe", "pipe"],
       });
-      child.on("error", reject);
-    });
 
-    // Clean up the temporary profile file after the child exits (success or error).
-    exitCode.finally(() => { void Promise.resolve(unlink(profilePath)).catch(() => {}); });
+      if (!child.stdout || !child.stderr) {
+        throw new Error("SandboxExecRunner: child process missing stdout/stderr pipes");
+      }
 
-    return {
-      pid: child.pid ?? -1,
-      stdout: Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
-      stderr: Readable.toWeb(child.stderr) as ReadableStream<Uint8Array>,
-      exitCode,
-      abort: async () => {
-        // MEDIUM-1: SIGTERM → 2 s grace → SIGKILL escalation.
-        // Parity with bwrap-runner and bash.ts terminateProcess().
-        child.kill("SIGTERM");
-        setTimeout(() => {
-          if (child.exitCode === null && !child.killed) {
-            child.kill("SIGKILL");
+      const exitCode = new Promise<number>((resolve, reject) => {
+        child.on("exit", (code, signal) => {
+          if (code !== null) {
+            resolve(code);
+          } else if (signal) {
+            reject(new Error(`sandbox-exec process killed by signal ${signal}`));
+          } else {
+            reject(new Error("sandbox-exec process exited with no code and no signal"));
           }
-        }, 2000).unref();
-      },
-    };
+        });
+        child.on("error", reject);
+      });
+
+      // Cleanup: rm the entire per-spawn profileDir (not just the .sb file).
+      exitCode.finally(() => {
+        void Promise.resolve(rm(profileDir, { recursive: true, force: true })).catch(() => {});
+      });
+
+      return {
+        pid: child.pid ?? -1,
+        stdout: Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
+        stderr: Readable.toWeb(child.stderr) as ReadableStream<Uint8Array>,
+        exitCode,
+        abort: async () => {
+          // SIGTERM → 2 s grace → SIGKILL escalation.
+          // Parity with bwrap-runner and bash.ts terminateProcess().
+          child.kill("SIGTERM");
+          setTimeout(() => {
+            if (child.exitCode === null && !child.killed) {
+              child.kill("SIGKILL");
+            }
+          }, 2000).unref();
+        },
+      };
+    } catch (err) {
+      // Cleanup profileDir on setup error (before child was spawned).
+      await Promise.resolve(rm(profileDir, { recursive: true, force: true })).catch(() => {});
+      throw err;
+    }
   }
 }
 
@@ -239,9 +276,19 @@ export function buildSbplProfile(capabilities: Partial<SandboxCapabilityDescript
 
 /**
  * Escape a filesystem path for safe embedding in an SBPL string literal.
- * Replaces `"` with `\"` to prevent SBPL injection via path values.
- * randomBytes-based profile filenames ensure the profilePath itself is safe.
+ *
+ * MEDIUM-1 (security): Fail-closed on control characters. SBPL string
+ * tokenizer is C-string backed — NUL, CR, LF, and other C0 control chars
+ * cause silent truncation or undefined behavior that could break the
+ * deny-default baseline (e.g. `)\n(allow file-write* ...` injection).
+ * Reject rather than silently strip so callers learn of bad paths early.
  */
 function escapeSbplPath(path: string): string {
+  // Reject control characters (C0: 0x00–0x1F, DEL: 0x7F).
+  if (/[\x00-\x1f\x7f]/.test(path)) {
+    throw new Error(
+      `SandboxExecRunner: control character in sandbox path (rejected to prevent SBPL injection): ${JSON.stringify(path)}`,
+    );
+  }
   return path.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }

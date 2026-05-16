@@ -18,9 +18,11 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   return {
     constants: real.constants,
     access:    vi.fn(),
-    mkdir:     vi.fn(),
+    mkdtemp:   vi.fn(),
     writeFile: vi.fn(),
-    unlink:    vi.fn(),
+    chmod:     vi.fn(),
+    stat:      vi.fn(),
+    rm:        vi.fn(),
   };
 });
 
@@ -69,9 +71,13 @@ function makeFakeChild() {
 beforeEach(async () => {
   const fsMod = await import("node:fs/promises");
   vi.mocked(fsMod.access).mockResolvedValue(undefined);    // binary present by default
-  vi.mocked(fsMod.mkdir).mockResolvedValue(undefined);
+  // mkdtemp returns a unique per-spawn dir path (CRITICAL-1 TOCTOU fix)
+  vi.mocked(fsMod.mkdtemp).mockResolvedValue("/tmp/lvis-sandbox-exec-abcdef");
   vi.mocked(fsMod.writeFile).mockResolvedValue(undefined);
-  vi.mocked(fsMod.unlink).mockResolvedValue(undefined);
+  vi.mocked(fsMod.chmod).mockResolvedValue(undefined);
+  // stat returns current uid — ownership verification passes by default
+  vi.mocked(fsMod.stat).mockResolvedValue({ uid: process.getuid?.() ?? 0 } as import("node:fs").Stats);
+  vi.mocked(fsMod.rm).mockResolvedValue(undefined);
 
   const cpMod = await import("node:child_process");
   vi.mocked(cpMod.spawn).mockReturnValue(makeFakeChild() as never);
@@ -207,7 +213,7 @@ describe("buildSbplProfile() — filesystem policy", () => {
 describe("SandboxExecRunner.spawn()", () => {
   it("calls child_process.spawn with SANDBOX_EXEC_BIN", async () => {
     const { spawn: mockSpawn } = await import("node:child_process");
-    await new SandboxExecRunner().spawn("/bin/echo", ["hello"], {});
+    await new SandboxExecRunner().spawn("/bin/echo", ["hello"], {}, { env: {} });
     expect(mockSpawn).toHaveBeenCalledWith(
       SANDBOX_EXEC_BIN,
       expect.arrayContaining(["-f", expect.stringContaining(".sb"), "/bin/echo", "hello"]),
@@ -217,16 +223,16 @@ describe("SandboxExecRunner.spawn()", () => {
 
   it("args order: -f <profile.sb> <cmd> [...args]", async () => {
     const { spawn: mockSpawn } = await import("node:child_process");
-    await new SandboxExecRunner().spawn("/usr/bin/env", ["FOO=bar"], {});
+    await new SandboxExecRunner().spawn("/usr/bin/env", ["FOO=bar"], {}, { env: {} });
     const callArgs = vi.mocked(mockSpawn).mock.calls.at(-1)![1] as string[];
     expect(callArgs[0]).toBe("-f");
-    expect(callArgs[1]).toMatch(/\.sb$/);
+    expect(callArgs[1]).toMatch(/profile\.sb$/);
     expect(callArgs[2]).toBe("/usr/bin/env");
     expect(callArgs[3]).toBe("FOO=bar");
   });
 
   it("returns SandboxedProcess with pid, stdout, stderr, exitCode, abort", async () => {
-    const proc = await new SandboxExecRunner().spawn("/bin/echo", [], {});
+    const proc = await new SandboxExecRunner().spawn("/bin/echo", [], {}, { env: {} });
     expect(typeof proc.pid).toBe("number");
     expect(proc.stdout).toBeDefined();
     expect(proc.stderr).toBeDefined();
@@ -236,7 +242,7 @@ describe("SandboxExecRunner.spawn()", () => {
 
   it("passes cwd to spawn options", async () => {
     const { spawn: mockSpawn } = await import("node:child_process");
-    await new SandboxExecRunner().spawn("/bin/sh", [], {}, { cwd: "/tmp/work" });
+    await new SandboxExecRunner().spawn("/bin/sh", [], {}, { env: {}, cwd: "/tmp/work" });
     const opts = vi.mocked(mockSpawn).mock.calls.at(-1)![2] as Record<string, unknown>;
     expect(opts["cwd"]).toBe("/tmp/work");
   });
@@ -249,23 +255,150 @@ describe("SandboxExecRunner.spawn()", () => {
   });
 
   it("abort() calls child.kill(SIGTERM)", async () => {
-    const proc = await new SandboxExecRunner().spawn("/bin/sleep", ["10"], {});
+    const proc = await new SandboxExecRunner().spawn("/bin/sleep", ["10"], {}, { env: {} });
     await proc.abort();
     expect(fakeKill).toHaveBeenCalledWith("SIGTERM");
   });
 
   it("exitCode resolves to 0 on clean exit", async () => {
-    const proc = await new SandboxExecRunner().spawn("/bin/true", [], {});
+    const proc = await new SandboxExecRunner().spawn("/bin/true", [], {}, { env: {} });
     await expect(proc.exitCode).resolves.toBe(0);
   });
 
-  it("calls writeFile with .sb path, (version 1) profile, mode 0o600", async () => {
+  it("calls writeFile with profile.sb path, (version 1) profile, mode 0o600", async () => {
     const { writeFile } = await import("node:fs/promises");
-    await new SandboxExecRunner().spawn("/bin/echo", [], {});
+    await new SandboxExecRunner().spawn("/bin/echo", [], {}, { env: {} });
     expect(writeFile).toHaveBeenCalledWith(
-      expect.stringContaining(".sb"),
+      expect.stringContaining("profile.sb"),
       expect.stringContaining("(version 1)"),
       expect.objectContaining({ mode: 0o600 }),
     );
+  });
+});
+
+// ─── spawn() — CRITICAL-1 TOCTOU: mkdtemp per-spawn ──────────────────────────
+
+describe("SandboxExecRunner.spawn() — CRITICAL-1 mkdtemp per-spawn", () => {
+  it("calls mkdtemp with lvis-sandbox-exec- prefix on each spawn", async () => {
+    const { mkdtemp } = await import("node:fs/promises");
+    await new SandboxExecRunner().spawn("/bin/echo", [], {}, { env: {} });
+    await new SandboxExecRunner().spawn("/bin/echo", [], {}, { env: {} });
+    expect(mkdtemp).toHaveBeenCalledTimes(2);
+    const calls = vi.mocked(mkdtemp).mock.calls;
+    expect(calls[0]![0]).toMatch(/lvis-sandbox-exec-$/);
+    expect(calls[1]![0]).toMatch(/lvis-sandbox-exec-$/);
+  });
+
+  it("writes profile.sb inside the mkdtemp dir", async () => {
+    const { writeFile, mkdtemp } = await import("node:fs/promises");
+    vi.mocked(mkdtemp).mockResolvedValue("/tmp/lvis-sandbox-exec-xyz123");
+    await new SandboxExecRunner().spawn("/bin/echo", [], {}, { env: {} });
+    const writtenPath = vi.mocked(writeFile).mock.calls[0]![0] as string;
+    expect(writtenPath).toBe("/tmp/lvis-sandbox-exec-xyz123/profile.sb");
+  });
+
+  it("calls chmod(profileDir, 0o700) after mkdtemp", async () => {
+    const { chmod, mkdtemp } = await import("node:fs/promises");
+    vi.mocked(mkdtemp).mockResolvedValue("/tmp/lvis-sandbox-exec-xyz123");
+    await new SandboxExecRunner().spawn("/bin/echo", [], {}, { env: {} });
+    expect(chmod).toHaveBeenCalledWith("/tmp/lvis-sandbox-exec-xyz123", 0o700);
+  });
+
+  it("calls rm(profileDir, recursive+force) on exit for cleanup", async () => {
+    const { rm, mkdtemp } = await import("node:fs/promises");
+    vi.mocked(mkdtemp).mockResolvedValue("/tmp/lvis-sandbox-exec-cleanup");
+    const proc = await new SandboxExecRunner().spawn("/bin/echo", [], {}, { env: {} });
+    // Wait for exit so finally() fires
+    await proc.exitCode;
+    // Allow micro-task queue to flush
+    await Promise.resolve();
+    expect(rm).toHaveBeenCalledWith(
+      "/tmp/lvis-sandbox-exec-cleanup",
+      expect.objectContaining({ recursive: true, force: true }),
+    );
+  });
+
+  it("cleans up profileDir and rethrows when ownership check fails", async () => {
+    const { stat, rm } = await import("node:fs/promises");
+    // Return a different uid than process.getuid()
+    const wrongUid = (process.getuid?.() ?? 0) + 1;
+    vi.mocked(stat).mockResolvedValue({ uid: wrongUid } as import("node:fs").Stats);
+    await expect(
+      new SandboxExecRunner().spawn("/bin/echo", [], {}, { env: {} }),
+    ).rejects.toThrow("profile dir ownership mismatch");
+    expect(rm).toHaveBeenCalledWith(
+      expect.stringContaining("lvis-sandbox-exec-"),
+      expect.objectContaining({ recursive: true, force: true }),
+    );
+  });
+});
+
+// ─── spawn() — MEDIUM-2: env required ────────────────────────────────────────
+
+describe("SandboxExecRunner.spawn() — MEDIUM-2 env required", () => {
+  it("throws when options is undefined", async () => {
+    await expect(
+      new SandboxExecRunner().spawn("/bin/echo", [], {}),
+    ).rejects.toThrow("options.env is REQUIRED");
+  });
+
+  it("throws when options.env is undefined", async () => {
+    await expect(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      new SandboxExecRunner().spawn("/bin/echo", [], {}, {} as any),
+    ).rejects.toThrow("options.env is REQUIRED");
+  });
+
+  it("accepts empty env object", async () => {
+    await expect(
+      new SandboxExecRunner().spawn("/bin/echo", [], {}, { env: {} }),
+    ).resolves.toBeDefined();
+  });
+});
+
+// ─── buildSbplProfile() — MEDIUM-1: control character rejection ──────────────
+
+describe("buildSbplProfile() — MEDIUM-1 SBPL control char escape", () => {
+  it("rejects NUL byte (\\x00) in fsReadPaths", () => {
+    expect(() => buildSbplProfile({ fsReadPaths: ["/path\x00evil"] })).toThrow(
+      "control character in sandbox path",
+    );
+  });
+
+  it("rejects newline (\\n) in fsReadPaths", () => {
+    expect(() => buildSbplProfile({ fsReadPaths: ["/path\nevil"] })).toThrow(
+      "control character in sandbox path",
+    );
+  });
+
+  it("rejects carriage return (\\r) in fsReadPaths", () => {
+    expect(() => buildSbplProfile({ fsReadPaths: ["/path\revil"] })).toThrow(
+      "control character in sandbox path",
+    );
+  });
+
+  it("rejects tab (\\t) in fsReadPaths", () => {
+    expect(() => buildSbplProfile({ fsReadPaths: ["/path\tevil"] })).toThrow(
+      "control character in sandbox path",
+    );
+  });
+
+  it("rejects SBPL injection string containing )\\n(allow file-write*", () => {
+    expect(() =>
+      buildSbplProfile({ fsReadPaths: [')\n(allow file-write* (subpath "/"))'] }),
+    ).toThrow("control character in sandbox path");
+  });
+
+  it("rejects DEL (\\x7f) in fsWritePaths", () => {
+    expect(() => buildSbplProfile({ fsWritePaths: ["/path\x7fevil"] })).toThrow(
+      "control character in sandbox path",
+    );
+  });
+
+  it("still allows normal paths with backslash and double-quote", () => {
+    // Windows-style path with backslash, and a path with embedded double-quote
+    const p = buildSbplProfile({ fsReadPaths: ['/path/with"quote', "C:\\Windows"] });
+    expect(p).toContain('\\"quote');
+    expect(p).toContain("C:\\\\Windows");
   });
 });

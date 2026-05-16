@@ -376,7 +376,12 @@ async function spawnPowerShellWithSandbox(
     ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command],
     {
       networkBlocked: true,
-      fsReadPaths: ["/etc", "/usr", process.env["HOME"] ?? "/home"],
+      fsReadPaths: process.platform === "win32"
+        ? [
+            process.env["SystemRoot"] ?? "C:\\Windows",
+            process.env["USERPROFILE"] ?? "C:\\Users",
+          ]
+        : ["/etc", "/usr", process.env["HOME"] ?? "/home"],
       fsWritePaths: [cwd],
       processIsolated: true,
     },
