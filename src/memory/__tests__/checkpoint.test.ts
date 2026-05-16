@@ -760,6 +760,16 @@ describe("saveSessionMetadata — invalid sessionId throws", () => {
   });
 });
 
+describe("saveSession / loadSession — invalid sessionId protection", () => {
+  it("rejects path-traversal sessionId on save", async () => {
+    await expect(mm.saveSession("../etc/passwd", [])).rejects.toThrow(/invalid sessionId/);
+  });
+
+  it("returns null for path-traversal sessionId on load", () => {
+    expect(mm.loadSession("../etc/passwd")).toBeNull();
+  });
+});
+
 describe("loadSessionMetadata — invalid sessionId throws", () => {
   it("throws for path-traversal sessionId (../etc/passwd)", () => {
     expect(() => mm.loadSessionMetadata("../etc/passwd")).toThrow(/invalid sessionId/);
