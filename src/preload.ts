@@ -837,6 +837,8 @@ const api = {
   userApproval: {
     /** Record a user approval decision (scope: session | persistent). */
     record: async (entry: {
+      /** Server-side ApprovalRequest binding — required for IPC handler validation. */
+      requestId: string;
       toolName: string;
       args: string;
       source: string;
