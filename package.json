@@ -11,7 +11,7 @@
   "description": "Test Electron host app for LVIS plugins.",
   "homepage": "https://github.com/lvis-project/lvis-app",
   "author": {
-    "name": "lvis-project",
+    "name": "Ken Jo",
     "email": "jo.dreame@gmail.com"
   },
   "engines": {
