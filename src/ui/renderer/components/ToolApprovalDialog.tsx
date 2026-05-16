@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { UserApprovalScope, UserApprovalVerdict } from "../../../shared/permissions-events.js";
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
 import { Input } from "../../../components/ui/input.js";
@@ -54,7 +55,7 @@ export function ToolApprovalDialog({
   // R-4: NL justification (required for HIGH verdict approvals)
   const [nlJustification, setNlJustification] = useState("");
   // R-4: Scope selector ("session" | "persistent"). HIGH forces "session".
-  const [scopeChoice, setScopeChoice] = useState<"session" | "persistent">("session");
+  const [scopeChoice, setScopeChoice] = useState<UserApprovalScope>("session");
   const nlInputRef = useRef<HTMLInputElement>(null);
 
   // Reset R-4 state when a new request arrives.
@@ -95,7 +96,7 @@ export function ToolApprovalDialog({
         args: canonicalArgs,
         source: request.source ?? "builtin",
         scope: finalVerdict === "high" ? "session" : scopeChoice,
-        verdictAtApproval: finalVerdict as "low" | "medium" | "high",
+        verdictAtApproval: finalVerdict as UserApprovalVerdict,
         nlJustification: finalVerdict === "high" ? nlJustification.trim() : null,
         trustOrigin: request.trustOrigin,
         approvalCacheKey: request.approvalCacheKey,
@@ -301,7 +302,7 @@ export function ToolApprovalDialog({
               <p className="mb-1.5 text-xs font-semibold">승인 범위</p>
               <RadioGroup
                 value={scopeChoice}
-                onValueChange={(v) => setScopeChoice(v as "session" | "persistent")}
+                onValueChange={(v) => setScopeChoice(v as UserApprovalScope)}
                 className="flex gap-4"
               >
                 <div className="flex items-center gap-1.5">

@@ -22,6 +22,7 @@
  */
 
 import type { SandboxKind, SandboxCapability } from "../permissions/sandbox-capability.js";
+import type { UserApprovalVerdict } from "../shared/permissions-events.js";
 
 // ─── Event shapes ─────────────────────────────────────────────────────────────
 
@@ -115,7 +116,7 @@ export interface SandboxAuditEntry {
       /** NL justification provided by the user, or null if not given. */
       nlJustification: string | null;
       /** Reviewer verdict at the moment the user was prompted. */
-      verdictAtApproval: "low" | "medium" | "high" | null;
+      verdictAtApproval: UserApprovalVerdict | null;
     } | null;
   };
 }

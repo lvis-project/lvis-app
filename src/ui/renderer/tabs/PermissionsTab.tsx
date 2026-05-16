@@ -21,6 +21,7 @@ import {
   TooltipTrigger,
 } from "../../../components/ui/tooltip.js";
 import { PERMISSION_REVIEWER_FRAMEWORK } from "../../../shared/permission-reviewer-framework.js";
+import type { UserApprovalScope, UserApprovalVerdict } from "../../../shared/permissions-events.js";
 import { EXEC_MODE_OPTIONS } from "../constants.js";
 import { getApi } from "../api-client.js";
 import type {
@@ -89,6 +90,27 @@ const REVIEWER_FALLBACK_OPTIONS: Array<{
   { value: "rule", label: "규칙 결과 사용", description: "LLM 실패 시 로컬 규칙 결과를 그대로 적용합니다." },
 ];
 
+/**
+ * Map IPC-layer revoke error codes to Korean user-facing strings.
+ *
+ * Mirrors `formatReviewerDispatchError` for the user-approval revoke
+ * path so the UI doesn't leak raw English error codes (e.g.
+ * "user-keyboard-required") to end users. Issue #826 introduced the
+ * intent gate; this helper closes the resulting localization gap
+ * surfaced in the cross-cutting review.
+ */
+function formatRevokeError(error: string | undefined, message: string | undefined): string {
+  if (error === "user-keyboard-required") {
+    return "이 권한 변경은 활성 사용자 입력에서만 실행할 수 있습니다.";
+  }
+  if (error === "invalid-key") {
+    return "유효하지 않은 승인 키입니다.";
+  }
+  // managed errors carry a backend message; surface verbatim if present.
+  if (message && message.trim().length > 0) return message;
+  return error ?? "알 수 없는 오류가 발생했습니다.";
+}
+
 function formatReviewerDispatchError(error: string): string {
   if (error.startsWith("reviewer-rewire-failed:")) {
     const detail = error.slice("reviewer-rewire-failed:".length).trim();
@@ -151,8 +173,8 @@ export function PermissionsTab() {
   const [userApprovals, setUserApprovals] = useState<Array<{
     key: string;
     approvedAt: string;
-    scope: "session" | "persistent";
-    verdictAtApproval: "low" | "medium" | "high";
+    scope: UserApprovalScope;
+    verdictAtApproval: UserApprovalVerdict;
     nlJustification: string | null;
     revokedAt: string | null;
     /** R-2 Round-3: display metadata from user-approval-store. */
@@ -232,7 +254,7 @@ export function PermissionsTab() {
 
   useEffect(() => { void fetchApprovals(); }, [fetchApprovals]);
 
-  const handleRevokeApproval = async (key: string, toolName: string, scope: "session" | "persistent") => {
+  const handleRevokeApproval = async (key: string, toolName: string, scope: UserApprovalScope) => {
     if (!window.lvis?.userApproval) return;
     // CRITICAL 2.1: persistent approvals require explicit confirmation — accidental revoke is unrecoverable
     if (scope === "persistent") {
@@ -247,8 +269,19 @@ export function PermissionsTab() {
       // refresh failure after a SUCCESSFUL revoke shows an accurate banner
       // instead of the misleading "취소 실패" message that conflates the
       // two failure modes.
+      //
+      // Cross-cutting #826 follow-up: `revokeByKey` is an `ipcRenderer.invoke`
+      // that RESOLVES with `{ok:false,error,message}` on policy reject —
+      // it does NOT throw. The try blocks below catch thrown errors AND
+      // inspect the resolved result. The intent gate ("user-keyboard-
+      // required") is one such resolved-reject path.
       try {
-        await window.lvis.userApproval.revokeByKey(key);
+        const result = await window.lvis.userApproval.revokeByKey(key);
+        if (!result.ok) {
+          const message = formatRevokeError(result.error, result.message);
+          showBanner("error", `취소 실패: ${message}`);
+          return;
+        }
       } catch (err) {
         showBanner("error", `취소 실패: ${(err as Error).message}`);
         return;
