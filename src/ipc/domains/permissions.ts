@@ -478,6 +478,12 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
   ipcMain.handle(PERMISSIONS.userApprovalRecord, async (e, payload: unknown) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, PERMISSIONS.userApprovalRecord, e); return UNAUTHORIZED_FRAME; }
     const body = payloadRecord(payload);
+    // Issue #798: parity with peer mutating handlers (addRule, removeRule,
+    // setMode, dirDispatch, reviewerDispatch, deferredResolve, policySet).
+    // Gates on user-keyboard freshness so a synthetic record submission
+    // from a compromised renderer cannot record without an active gesture.
+    const intent = requireUserKeyboardIntent(body.intent);
+    if (!intent.ok) return intent;
     const toolName = body.toolName;
     const args = body.args;
     const source = body.source;
@@ -534,8 +540,18 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
     }
   });
 
-  ipcMain.handle(PERMISSIONS.userApprovalRevoke, async (e, key: unknown) => {
+  ipcMain.handle(PERMISSIONS.userApprovalRevoke, async (e, payload: unknown) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, PERMISSIONS.userApprovalRevoke, e); return UNAUTHORIZED_FRAME; }
+    // Issue #798: revoke is destructive (forces re-approval). Gate on
+    // user-keyboard intent for parity with peer mutating handlers.
+    //
+    // Payload contract: object `{ key, intent }`. The preload bridge
+    // auto-injects `intent`; untrusted callers that submit a raw string
+    // key will fail the `payloadRecord` narrow and return `invalid-key`.
+    const body = payloadRecord(payload);
+    const intent = requireUserKeyboardIntent(body.intent);
+    if (!intent.ok) return intent;
+    const key = body.key;
     if (typeof key !== "string" || key.trim().length === 0) {
       return { ok: false, error: "invalid-key", message: "revoke: key must be a non-empty string" };
     }
