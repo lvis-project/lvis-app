@@ -179,18 +179,15 @@ test.describe("Sandbox approval flow", () => {
     );
 
     // Navigate to Settings → Permissions tab
-    // (Implementation-specific navigation — adjust selector to match actual UI)
     const settingsButton = page.locator('[data-testid="settings-button"], [aria-label*="설정"]').first();
-    if (await settingsButton.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await settingsButton.click();
-      const permissionsTab = page.locator('[data-testid="permissions-tab"], :text("권한")').first();
-      if (await permissionsTab.isVisible({ timeout: 3000 }).catch(() => false)) {
-        await permissionsTab.click();
-        // Check the approval records section exists
-        await expect(page.locator(':text("사용자 승인 기록")')).toBeVisible({ timeout: 3000 });
-      }
-    }
-    // If navigation fails (different UI structure), test passes without assertion
-    // This is acceptable for E2E smoke — the unit tests cover the logic
+    await expect(settingsButton).toBeVisible({ timeout: 5000 });
+    await settingsButton.click();
+
+    const permissionsTab = page.locator('[data-testid="permissions-tab"], :text("권한")').first();
+    await expect(permissionsTab).toBeVisible({ timeout: 5000 });
+    await permissionsTab.click();
+
+    // Check the approval records section exists
+    await expect(page.locator(':text("사용자 승인 기록")')).toBeVisible({ timeout: 5000 });
   });
 });

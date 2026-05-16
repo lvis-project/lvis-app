@@ -25,6 +25,7 @@ import { getToolCategoryDescriptor } from "./category-registry.js";
 import {
   LlmRiskClassifier,
   RuleBasedRiskClassifier,
+  maxVerdict,
   type RiskClassifier,
   type RiskVerdict,
   type ToolInvocationContext,
@@ -35,7 +36,7 @@ import type { VerdictCache } from "./reviewer/verdict-cache.js";
 import type { DeferredQueue } from "./reviewer/deferred-queue.js";
 import { globMatch } from "../lib/glob-matcher.js";
 import { lvisHome } from "../shared/lvis-home.js";
-import { lookupApproval } from "./user-approval-store.js";
+import { lookupApproval, canonicalStringify } from "./user-approval-store.js";
 import { buildSandboxAuditEntry } from "../audit/sandbox-audit.js";
 import { emitSandboxAudit } from "../audit/sandbox-audit-sink.js";
 
@@ -159,32 +160,10 @@ export interface ReviewerDispatchResult {
 
 export type ReviewerDeferPolicy = "none" | "high" | "medium-high";
 
-/**
- * R-3 RejectResponse — structured reject from the reviewer with a retry hint.
- *
- * When dispatchReviewer returns a HIGH verdict and the conversation loop
- * decides to surface a rejection (rather than silently block), it MAY return
- * this shape so the LLM can optionally self-correct by providing the missing
- * context identified in `hint` before re-requesting approval.
- *
- * `retryable: false` → the action is categorically disallowed (e.g. sensitive
- *   path hit, overlay-trigger guard). The loop MUST NOT retry.
- * `retryable: true`  → the action was rejected due to insufficient context;
- *   the LLM may retry at most MAX_REVIEWER_RETRIES (2) times after enriching
- *   the conversation context per the `hint` guidance.
- */
-export interface RejectResponse {
-  verdict: "reject";
-  /** Human-readable reason for the rejection. */
-  reason: string;
-  /** Optional: what additional context would allow a re-evaluation. */
-  hint?: string;
-  /** Whether the caller may retry after providing the suggested context. */
-  retryable: boolean;
-}
-
-/** Maximum LLM self-correction retries when retryable === true (anti-abuse cap). */
-export const MAX_REVIEWER_RETRIES = 2;
+// R-3 RejectResponse interface and MAX_REVIEWER_RETRIES deferred to follow-up.
+// The R-3 LLM caller retry wiring lives in conversation-loop.ts scope — outside
+// the 17-file boundary of PR-A4. Tracked in follow-up issue for "R-3 LLM caller
+// retry wiring" with max 2 retry / counter scope / args-change-reset contract.
 
 export class PermissionManager {
   private rules: PermissionRule[] = [];
@@ -582,8 +561,10 @@ export class PermissionManager {
     // justified a HIGH action this session, re-running the LLM is wasteful.
     const userApproval = await lookupApproval(
       toolName,
-      JSON.stringify(input.finalInput),
+      canonicalStringify(input.finalInput),
       input.source,
+      input.trustOrigin,
+      input.approvalCacheKey,
     ).catch(() => null); // storage failure must not block tool execution
 
     const cacheResult = cache.lookup(lookupKey, cacheCtx);
@@ -611,8 +592,12 @@ export class PermissionManager {
         sandboxCapability: detectSandboxCapability(),
       };
       // Use the rule-based classifier for fast sync classification (no LLM call).
+      // Take max(ruleVerdict, verdictAtApproval) so a stored HIGH approval cannot
+      // be silently downgraded if the rule classifier now returns LOW/MEDIUM.
       const ruleClassifier = new RuleBasedRiskClassifier();
-      verdict = ruleClassifier.classify(ctx);
+      const ruleVerdict = ruleClassifier.classify(ctx);
+      const storedLevel = userApproval.verdictAtApproval;
+      verdict = maxVerdict(ruleVerdict, { level: storedLevel, reason: `stored approval verdict at approval time` });
       userApprovalUsed = {
         memoryHit: true,
         nlJustification: userApproval.nlJustification,

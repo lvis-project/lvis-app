@@ -492,6 +492,17 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
     ) {
       return { ok: false, error: "invalid-payload", message: "user-approval record: invalid payload" };
     }
+    // R-4 HIGH verdict enforcement: HIGH approvals must use session scope and
+    // include a non-empty NL justification. Enforced here in the IPC handler
+    // (renderer-side XSS bypass protection) in addition to dialog-level guards.
+    if (verdictAtApproval === "high") {
+      if (scope !== "session") {
+        return { ok: false, error: "high-requires-session-scope", message: "HIGH verdict approvals must use session scope (per R-4 design)" };
+      }
+      if (typeof nlJustification !== "string" || nlJustification.trim().length === 0) {
+        return { ok: false, error: "high-requires-justification", message: "HIGH verdict approvals require non-empty NL justification" };
+      }
+    }
     try {
       await recordApproval(toolName, args, source, {
         scope,
