@@ -572,6 +572,7 @@ export class ToolExecutor {
     sensitivePathsAdjacent: string[],
     context: ToolPermissionContext,
     evaluationContext: PermissionEvaluationContext,
+    abortSignal?: AbortSignal,
   ): Promise<
     | { allowed: true; permissionResult: PermissionCheckResult }
     | { allowed: false; message: string; permissionResult: PermissionCheckResult }
@@ -633,7 +634,7 @@ export class ToolExecutor {
           : undefined,
         additionalDirectories: context.additionalDirectories ?? [],
       },
-      { defer: "medium-high" },
+      { defer: "medium-high", abortSignal },
     );
     if (reviewer.verdict.level !== "low") {
       return {
@@ -674,6 +675,7 @@ export class ToolExecutor {
     sensitivePathsAdjacent: string[],
     context: ToolPermissionContext,
     evaluationContext: PermissionEvaluationContext,
+    abortSignal?: AbortSignal,
   ): Promise<PermissionCheckResult | null> {
     if (context.headless === true) return null;
     // Issue #690 — the gate is EITHER legacy `auto` exec mode OR the
@@ -716,7 +718,7 @@ export class ToolExecutor {
           : undefined,
         additionalDirectories: context.additionalDirectories ?? [],
       },
-      { defer: "none" },
+      { defer: "none", abortSignal },
     );
 
     if (reviewer.verdict.level === "low") {
@@ -1287,6 +1289,7 @@ export class ToolExecutor {
           sensitivePathPattern ? [sensitivePathPattern] : [],
           invocationPermissionContext,
           evaluationContext,
+          abortSignal,
         );
         if (reviewerResult) {
           permissionResult = reviewerResult;
@@ -1330,6 +1333,7 @@ export class ToolExecutor {
             sensitivePathPattern ? [sensitivePathPattern] : [],
             invocationPermissionContext,
             evaluationContext,
+            abortSignal,
           );
           if (reviewerResult.allowed) {
             permissionResult = reviewerResult.permissionResult;
