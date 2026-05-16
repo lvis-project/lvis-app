@@ -171,6 +171,9 @@ export function LlmTab(props: LlmTabProps) {
               onChange={(e) => setBaseUrl(e.target.value)}
               placeholder={(vendorInfo as any).baseUrlPlaceholder ?? "https://..."}
             />
+            <p className="text-[11px] text-muted-foreground">
+              ⓘ 저장 전 벤더 변경 시 현재 입력이 폐기됩니다.
+            </p>
             {vendor === "azure-foundry" && (
               <p className="text-[11px] text-muted-foreground">
                 Azure AI Foundry 엔드포인트 형식:
