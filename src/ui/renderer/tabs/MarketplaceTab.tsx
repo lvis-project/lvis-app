@@ -39,7 +39,7 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
     onImmediateChange,
   } = props;
   const [packages, setPackages] = useState<MarketplaceItem[]>([]);
-  const [packageStatus, setPackageStatus] = useState("로딩 중...");
+  const [packageStatus, setPackageStatus] = useState("로딩 중…");
   const [filter, setFilter] = useState<"all" | MarketplacePackageType>("all");
   const [workingSlug, setWorkingSlug] = useState<string | null>(null);
 
@@ -257,7 +257,7 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
                     disabled={isWorking || (item.installed && !canUninstall)}
                     onClick={() => void (item.installed ? uninstallPackage(item) : installPackage(item))}
                   >
-                    {isWorking ? "처리 중..." : item.installed ? "제거" : "설치"}
+                    {isWorking ? "처리 중…" : item.installed ? "제거" : "설치"}
                   </Button>
                 </div>
               );
