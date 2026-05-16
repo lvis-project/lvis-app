@@ -885,7 +885,21 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   const SET_API_KEY_WINDOW_MS = 60_000;
 
   function checkSetApiKeyRateLimit(serverId: string): boolean {
+    // NOTE: Date.now() relies on wall clock; NTP adjustment or laptop sleep
+    // can cause windowStart to be > now (negative delta), locking the bucket
+    // until clock catches up. Acceptable for 5/min limits — switch to
+    // performance.now() if monotonic semantics become critical.
     const now = Date.now();
+    // Lazy GC: when Map exceeds 64 entries, evict expired windows to bound
+    // memory under serverId fuzzing (NEW-2 MEDIUM). 64 active servers is a
+    // generous real-world ceiling; anything beyond is adversarial.
+    if (setApiKeyRateBucket.size > 64) {
+      for (const [k, b] of setApiKeyRateBucket) {
+        if (now - b.windowStart >= SET_API_KEY_WINDOW_MS) {
+          setApiKeyRateBucket.delete(k);
+        }
+      }
+    }
     const bucket = setApiKeyRateBucket.get(serverId);
     if (!bucket || now - bucket.windowStart >= SET_API_KEY_WINDOW_MS) {
       setApiKeyRateBucket.set(serverId, { count: 1, windowStart: now });

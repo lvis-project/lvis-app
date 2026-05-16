@@ -16,6 +16,13 @@ export const HTTP_HEADER_NAME_RE = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 export const MAX_NAME_LEN = 64;
 
 /**
+ * Maximum byte size for an MCP manifest (plugin.json) before readFile is
+ * attempted. Matches claude-desktop config import policy: reject > 1 MB to
+ * prevent main-process OOM from a malicious marketplace artifact (NEW-1 HIGH).
+ */
+export const MAX_MCP_MANIFEST_BYTES = 1 * 1024 * 1024; // 1 MB
+
+/**
  * Env-var names that are dangerous to override via a manifest:
  * injecting an apiKey value into any of these could allow RCE via
  * shared-object injection (LD_PRELOAD, DYLD_INSERT_LIBRARIES),

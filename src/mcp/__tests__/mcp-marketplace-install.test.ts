@@ -18,6 +18,7 @@ import {
   readRuntimeFromInstalledManifest,
   substituteRuntimeTokens,
 } from "../mcp-marketplace-install.js";
+import { MAX_MCP_MANIFEST_BYTES } from "../safe-names.js";
 import type { McpRuntimeSpec, PluginMarketplaceItem } from "../../plugins/types.js";
 import type { PluginArtifactStore } from "../../plugins/plugin-artifact-store.js";
 import type { MarketplaceFetcher } from "../../plugins/marketplace-fetcher.js";
@@ -301,6 +302,40 @@ describe("readRuntimeFromInstalledManifest", () => {
     const tmp = makeTmpDir();
     try {
       await expect(readRuntimeFromInstalledManifest(tmp)).rejects.toThrow(/manifest not found/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("throws a byte-cap error when manifest exceeds MAX_MCP_MANIFEST_BYTES (NEW-1 HIGH)", async () => {
+    const tmp = makeTmpDir();
+    try {
+      await mkdir(tmp, { recursive: true });
+      // Write a file that is 1 byte over the cap using a Buffer of the right size.
+      const oversized = Buffer.alloc(MAX_MCP_MANIFEST_BYTES + 1, "x");
+      await writeFile(join(tmp, "plugin.json"), oversized);
+      await expect(readRuntimeFromInstalledManifest(tmp)).rejects.toThrow(
+        /exceeds.*byte cap/,
+      );
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("succeeds when manifest is exactly at MAX_MCP_MANIFEST_BYTES (NEW-1 boundary)", async () => {
+    const tmp = makeTmpDir();
+    try {
+      await mkdir(tmp, { recursive: true });
+      // Write a valid manifest padded with whitespace to reach the cap exactly.
+      const manifest = JSON.stringify({
+        id: "weather",
+        version: "1.0.0",
+        runtime: { transport: "stdio", command: "node", args: ["server.js"], auth: "none" },
+      });
+      const padding = " ".repeat(MAX_MCP_MANIFEST_BYTES - manifest.length);
+      await writeFile(join(tmp, "plugin.json"), manifest + padding, "utf-8");
+      const runtime = await readRuntimeFromInstalledManifest(tmp);
+      expect(runtime.transport).toBe("stdio");
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
