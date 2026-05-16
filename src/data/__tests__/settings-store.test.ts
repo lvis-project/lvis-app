@@ -274,7 +274,7 @@ describe("SettingsService LLM per-vendor patching", () => {
     // undefined and crash refreshProvider at first turn.
     writeFileSync(
       join(userDataPath, "lvis-settings.json"),
-      JSON.stringify({ llm: { provider: "lgenie" } }),
+      JSON.stringify({ llm: { provider: "unknown-vendor" } }),
       "utf-8",
     );
 

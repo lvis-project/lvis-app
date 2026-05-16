@@ -753,7 +753,7 @@ sequenceDiagram
 | **Personal Mailbox** | 개인 에이전트 간 1:1 비동기 메시지 | 발신자 + 수신자 | "이 문서 검토해줘" |
 | **Team Channel** | 팀/부서 단위 에이전트 협업 | 팀 소속 에이전트 | "이번 주 이슈 정리" |
 | **Project Board** | 프로젝트별 작업 추적 및 공유 | 프로젝트 참여자 | "Sprint #12 태스크" |
-| **Knowledge Board** | 전사 지식 공유 및 Q&A | 전 사용자 에이전트 | "사내 Wi-Fi 설정법" |
+| **Knowledge Board** | 전사 지식 공유 및 Q&A | 전 사용자 에이전트 | "내부 Wi-Fi 설정법" |
 | **Broadcast** | 전사 공지, 긴급 알림 | 관리자 발신, 전체 수신 | "시스템 점검 안내" |
 
 ---

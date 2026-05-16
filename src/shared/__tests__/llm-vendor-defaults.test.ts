@@ -10,7 +10,7 @@ describe("isLLMVendor", () => {
 
   it("rejects unknown strings", () => {
     expect(isLLMVendor("anthropic")).toBe(false);
-    expect(isLLMVendor("lgenie")).toBe(false);
+    expect(isLLMVendor("unknown-vendor")).toBe(false);
     expect(isLLMVendor("openai-compatible")).toBe(false);
     expect(isLLMVendor("")).toBe(false);
   });

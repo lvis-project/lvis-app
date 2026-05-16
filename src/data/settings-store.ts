@@ -720,7 +720,7 @@ function mergeLlmPatch(base: LLMSettings, partial: LLMSettingsPatch): LLMSetting
       if (incoming) vendors[v] = { ...vendors[v], ...incoming };
     }
   }
-  // Coerce stale on-disk `provider` (e.g. removed vendor "lgenie") to the
+  // Coerce stale on-disk `provider` (e.g. a since-removed vendor name) to the
   // base provider — `vendors[provider]` would otherwise be undefined and
   // crash refreshProvider/stream-collector at first turn. The type guard
   // narrows `partial.provider` so the assignment below is cast-free.

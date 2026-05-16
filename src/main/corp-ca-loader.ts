@@ -8,13 +8,9 @@
  *
  * 재사용 cache: ~/.lvis/certs/corp-ca.pem (다음 부팅 skip, 7일마다 refresh)
  *
- * PoC 검증 결과 (2026-04-15):
- *   [3] CN=LGERootCA issuer=LGERootCA (self-signed, 2005-2045)
- *   SHA1: CD:E9:73:D6:39:37:6E:C4:CD:42:AB:70:6C:14:15:8C:A0:CA:52:3B
- *
  * TODO Phase 3: Windows (win-ca / certutil) + Linux (/etc/ssl/certs) 구현.
- *   - Windows: `certutil -exportPFX -p "" Root "LGERootCA" tmp.pfx` or win-ca npm pkg
- *   - Linux:   /etc/ssl/certs/LGERootCA*.pem or `update-ca-certificates` hook
+ *   - Windows: `certutil -exportPFX -p "" Root "<CN>" tmp.pfx` or win-ca npm pkg
+ *   - Linux:   /etc/ssl/certs/*RootCA*.pem or `update-ca-certificates` hook
  */
 import { execFile } from "node:child_process";
 import { mkdirSync, readFileSync, statSync } from "node:fs";
@@ -48,9 +44,10 @@ const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
  * macOS System.keychain에서 검색할 CN 이름.
- * MDM이 LGERootCA를 배포하므로 root CA 하나만 추출하면 chain이 해결된다.
+ * 환경변수 LVIS_CORP_CA_CN 으로 오버라이드 가능 (기본값: "Corporate Root CA").
+ * 조직 MDM이 배포한 root CA 하나만 추출하면 chain이 해결된다.
  */
-const LGE_ROOT_CA_CN = "LGERootCA";
+const CORP_ROOT_CA_CN = process.env.LVIS_CORP_CA_CN ?? "Corporate Root CA";
 
 // ─── Cache read (sync — startup 경로에서 호출됨) ──────────────────────────────
 
@@ -76,7 +73,7 @@ async function extractMacos(): Promise<string | null> {
   try {
     const output = await execFileAsync(
       "security",
-      ["find-certificate", "-a", "-c", LGE_ROOT_CA_CN, "-p", "/Library/Keychains/System.keychain"],
+      ["find-certificate", "-a", "-c", CORP_ROOT_CA_CN, "-p", "/Library/Keychains/System.keychain"],
       { encoding: "utf8", timeout: 10_000, maxBuffer: 2 * 1024 * 1024 },
     ) as unknown;
     const stdout =
@@ -85,7 +82,7 @@ async function extractMacos(): Promise<string | null> {
         : output;
     const pem = Buffer.isBuffer(stdout) ? stdout.toString("utf8") : String(stdout ?? "");
     if (!pem.includes("-----BEGIN CERTIFICATE-----")) {
-      log.warn("macOS: LGERootCA not found in System.keychain");
+      log.warn("macOS: corporate root CA not found in System.keychain (set LVIS_CORP_CA_CN to match your CA's CN)");
       return null;
     }
     return pem;

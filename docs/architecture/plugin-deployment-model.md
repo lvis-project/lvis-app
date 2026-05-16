@@ -29,7 +29,7 @@ LVIS는 개인 데스크톱에서 실행되는 AI 비서이며, 플러그인 생
 3. **Signed Policy** — managed 정책 파일은 LG Internal Root CA로 서명된다. 위변조 감지 시 default policy(deny all user, managed only)로 fallback.
 4. **Offline Resilience** — 최근 유효한 policy cache를 보관하여 오프라인(VPN 끊김, 출장) 상황에서도 작동. TTL 초과 시 보수 모드.
 5. **No Silent Failures** — managed 플러그인 설치/서명 검증 실패는 audit + 사용자 UI + (Phase 3+) IT 알림의 3중 표면화.
-6. **Backward Compatible** — 기존 `deployment` 필드 없는 매니페스트는 `user`로 자동 분류. Phase 1.5 초기에는 모든 기존 플러그인이 자연스럽게 user로 잡힌다 (단, 사내 marketplace를 통해 단계적으로 managed로 마이그레이션).
+6. **Backward Compatible** — 기존 `deployment` 필드 없는 매니페스트는 `user`로 자동 분류. Phase 1.5 초기에는 모든 기존 플러그인이 자연스럽게 user로 잡힌다 (단, enterprise marketplace를 통해 단계적으로 managed로 마이그레이션).
 
 ---
 
@@ -45,7 +45,7 @@ LVIS는 개인 데스크톱에서 실행되는 AI 비서이며, 플러그인 생
 │   ┌─────────────────────────────────────────────┐           │
 │   │ ManagedPolicySync                           │           │
 │   │  ├─ fetchPolicy(ssoToken)                   │           │
-│   │  │    → HTTP GET /policy (사내 IT admin API)│           │
+│   │  │    → HTTP GET /policy (enterprise IT admin API)│           │
 │   │  │    → mTLS + SSO 토큰                     │           │
 │   │  ├─ verifyPolicySignature()                 │           │
 │   │  │    → LG Internal Root CA                 │           │
@@ -216,7 +216,7 @@ export interface PolicyEnforcements {
 export interface ManagedPluginEntry {
   id: string;
   version: string;
-  /** 다운로드 URL (사내 artifact store) */
+  /** 다운로드 URL (enterprise artifact store) */
   source: string;
   sha256: string;
   /** 자동 설치 여부 (사용자 승인 bypass) */
@@ -724,7 +724,7 @@ ipcMain.handle("lvis:plugins:disable", async (_e, pluginId: string) => {
 - `plugin.install.denied` (사용자가 policy 위반 설치 시도)
 - `plugin.signature.verification-failed` **[CRITICAL]**
 
-모든 이벤트는 `~/.lvis/audit/managed-sync.ndjson`에 append-only NDJSON으로 기록되며, **Phase 3부터는 사내 감사 endpoint로도 push** (개인정보 제거 후).
+모든 이벤트는 `~/.lvis/audit/managed-sync.ndjson`에 append-only NDJSON으로 기록되며, **Phase 3부터는 enterprise 감사 endpoint로도 push** (개인정보 제거 후).
 
 ---
 
@@ -812,18 +812,18 @@ ipcMain.handle("lvis:plugins:disable", async (_e, pluginId: string) => {
 - `ManagedPolicySync` 구현 (fetchPolicy, applyPolicy, loadCache)
 - `ManagedPluginInstaller` 구현 (sync, install, update, remove)
 - Boot sequence에 Step 0.5 + Step 0.6 삽입
-- 사내 marketplace API 계약 협의 + stub endpoint
+- enterprise marketplace API 계약 협의 + stub endpoint
 - UI 정책 동기화 상태 표시
 
-**제외**: ECDSA 서명 검증, 오프라인 TTL 강제, 사내 감사 endpoint
+**제외**: ECDSA 서명 검증, 오프라인 TTL 강제, enterprise 감사 endpoint
 
 ### Phase 3 — 서명 검증 + 감사
 
 **Scope**:
 - ECDSA-P256-SHA256 서명 검증 (Node.js `crypto`)
-- LG Internal Root CA 번들 + 체인 검증
+- corporate Root CA 번들 + 체인 검증
 - 오프라인 TTL 강제 (7일 / 30일 모드)
-- 사내 감사 endpoint 연동 (audit push)
+- enterprise 감사 endpoint 연동 (audit push)
 - 주기적 sync (30분)
 
 ### Phase 4 — 고급 기능
@@ -866,7 +866,7 @@ ipcMain.handle("lvis:plugins:disable", async (_e, pluginId: string) => {
 
 1. **Phase 1.5 초기**: 3개 기본 플러그인의 `plugin.json`에 `"deployment": "managed"` 필드 추가 + 기본 manifest로 bundle
 2. **Phase 1.5 중기**: 기존 사용자 PC에서 LVIS 업그레이드 시, `plugin.json`의 `deployment` 필드가 변경되면 자동 재분류 → uninstall 불가로 전환
-3. **Phase 2 시작**: 사내 marketplace API에 정책 파일 배포 → `ManagedPolicySync`가 작동 시작
+3. **Phase 2 시작**: enterprise marketplace API에 정책 파일 배포 → `ManagedPolicySync`가 작동 시작
 4. **Phase 2 안정**: 모든 기본 플러그인이 IT 서명된 managed 버전으로 교체
 5. **Phase 3**: 서명 검증 활성화 → 서명 없는 기존 매니페스트는 warning 후 re-install 요구
 
@@ -874,8 +874,8 @@ ipcMain.handle("lvis:plugins:disable", async (_e, pluginId: string) => {
 
 ## 15. 결정이 필요한 항목
 
-1. **사내 marketplace API 명세** — endpoint URL, SSO 토큰 경로, response 스키마는 IT 부서와 협의 필요
-2. **LG Internal Root CA 공개키 번들 방식** — 앱 리소스에 포함? MDM push? 첫 부팅 시 다운로드?
+1. **enterprise marketplace API 명세** — endpoint URL, SSO 토큰 경로, response 스키마는 IT 부서와 협의 필요
+2. **corporate Root CA 공개키 번들 방식** — 앱 리소스에 포함? MDM push? 첫 부팅 시 다운로드?
 3. **오프라인 TTL 기본값** — 7일이 적절한지 vs 14일 / 30일
 4. **User 설치 기본 정책** — `allow` (자유) vs `allowlist` (보수) vs `ask` (중간)
 5. **기존 Phase 1 번들 플러그인을 언제 managed로 전환** — 즉시 vs 점진적
