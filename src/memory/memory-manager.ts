@@ -601,6 +601,9 @@ export class MemoryManager {
 
   /** 세션 저장 — JSONL 형식 */
   async saveSession(sessionId: string, messages: unknown[]): Promise<void> {
+    if (!isValidSessionId(sessionId)) {
+      throw new Error(`saveSession: invalid sessionId "${sessionId}"`);
+    }
     const targetPath = join(this.sessionsDir, `${sessionId}.jsonl`);
     const lines = messages.map((m) => JSON.stringify(m)).join("\n") + "\n";
     await withFileLock(targetPath, async () => {
@@ -646,6 +649,7 @@ export class MemoryManager {
 
   /** 세션 복원 */
   loadSession(sessionId: string): unknown[] | null {
+    if (!isValidSessionId(sessionId)) return null;
     const path = join(this.sessionsDir, `${sessionId}.jsonl`);
     if (!existsSync(path)) return null;
     const lines = readFileSync(path, "utf-8").trim().split("\n");
