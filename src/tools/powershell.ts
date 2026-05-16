@@ -22,6 +22,7 @@ import {
   validateShellCommandPathPolicy,
   validateShellWorkingDirectory,
 } from "./shell-path-policy.js";
+import { getSandboxRunner } from "../permissions/sandbox-runner.js";
 
 type PipedChild = ChildProcessByStdio<null, Readable, Readable>;
 type PowerShellParser = (command: string) => Promise<PowerShellAstSummary>;
@@ -169,6 +170,25 @@ export class PowerShellTool extends ZodTool<typeof PowerShellToolInputSchema> {
     const preflightError = await validatePowerShellCommand(input.command);
     if (preflightError) {
       return { output: preflightError, isError: true, metadata: { preflightDenied: true } };
+    }
+
+    // §691 PR-A3: SandboxRunner adoption for PowerShell spawn path.
+    // On Windows, AppContainerRunner.detect() returns available=false in PR-A3
+    // (native binding deferred to PR-A3.5), so getSandboxRunner("win32") returns
+    // undefined and this block is skipped — Windows falls through to spawnPowerShell.
+    // On macOS, SandboxExecRunner is registered when LVIS_SANDBOX_ENABLED=1, so
+    // pwsh on macOS will run inside the sandbox-exec PARTIAL profile.
+    // MEDIUM-2: Gated on LVIS_SANDBOX_ENABLED=1 (default off) — parity with bash.ts.
+    // TODO(PR-A4 R-2): remove the env-gate and make sandbox always-on.
+    const sandboxRunner = getSandboxRunner(process.platform as NodeJS.Platform);
+    const sandboxEnabled = process.env["LVIS_SANDBOX_ENABLED"] === "1";
+    if (sandboxRunner && sandboxEnabled) {
+      return await spawnPowerShellWithSandbox(
+        sandboxRunner,
+        input.command,
+        resolvedCwd,
+        input.timeoutSeconds,
+      );
     }
 
     return spawnPowerShell(input.command, resolvedCwd, input.timeoutSeconds);
@@ -330,6 +350,101 @@ $commands = @(
   commands = $commands
 } | ConvertTo-Json -Depth 8 -Compress
 `;
+
+/**
+ * Execute a PowerShell command via the registered {@link SandboxRunner}.
+ * Mirrors spawnWithSandbox in bash.ts — WHATWG ReadableStream<Uint8Array>
+ * drained through per-stream TextDecoder for CJK boundary safety.
+ *
+ * @internal — called only when LVIS_SANDBOX_ENABLED=1 and a runner is registered.
+ */
+async function spawnPowerShellWithSandbox(
+  runner: import("../permissions/sandbox-runner.js").SandboxRunner,
+  command: string,
+  cwd: string,
+  timeoutSeconds: number,
+): Promise<ToolResult> {
+  const executable = resolvePowerShellExecutable();
+  const safeEnv = Object.fromEntries(
+    Object.entries(buildSafeChildEnv()).filter(
+      (entry): entry is [string, string] => typeof entry[1] === "string",
+    ),
+  );
+
+  const proc = await runner.spawn(
+    executable,
+    ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command],
+    {
+      networkBlocked: true,
+      fsReadPaths: process.platform === "win32"
+        ? [
+            process.env["SystemRoot"] ?? "C:\\Windows",
+            process.env["USERPROFILE"] ?? "C:\\Users",
+          ]
+        : ["/etc", "/usr", process.env["HOME"] ?? "/home"],
+      fsWritePaths: [cwd],
+      processIsolated: true,
+    },
+    { env: safeEnv, cwd },
+  );
+
+  const chunks: string[] = [];
+
+  async function drainStream(stream: ReadableStream<Uint8Array>): Promise<void> {
+    const decoder = new TextDecoder("utf-8");
+    const reader = stream.getReader();
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(decoder.decode(value, { stream: true }));
+      }
+      const flushed = decoder.decode(undefined, { stream: false });
+      if (flushed) chunks.push(flushed);
+    } finally {
+      reader.releaseLock();
+    }
+  }
+
+  let timedOut = false;
+  let code: number | undefined;
+
+  const timeoutHandle = setTimeout(async () => {
+    timedOut = true;
+    await proc.abort();
+  }, timeoutSeconds * 1000);
+
+  try {
+    await Promise.all([drainStream(proc.stdout), drainStream(proc.stderr)]);
+    code = await proc.exitCode;
+  } catch (err) {
+    code = undefined;
+    chunks.push(`\nspawn failed: ${(err as Error).message}`);
+  } finally {
+    clearTimeout(timeoutHandle);
+  }
+
+  const combined = chunks.join("").replace(/\r\n/g, "\n").trim();
+  const output = combined.length === 0
+    ? "(no output)"
+    : combined.length > OUTPUT_CAP
+      ? combined.slice(0, OUTPUT_CAP) + TRUNCATION_MARKER
+      : combined;
+
+  if (timedOut) {
+    return {
+      output: `PowerShell command timed out after ${timeoutSeconds} seconds.\n${output}`,
+      isError: true,
+      metadata: { returncode: code ?? null, timedOut: true, sandboxed: true },
+    };
+  }
+
+  return {
+    output,
+    isError: code !== 0,
+    metadata: { returncode: code ?? null, sandboxed: true },
+  };
+}
 
 async function spawnPowerShell(
   command: string,

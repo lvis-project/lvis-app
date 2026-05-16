@@ -891,28 +891,31 @@ export async function bootstrap(
     });
   })();
 
-  // §691 PR-A2: Linux bwrap runner detection + boot-phase registry seal.
+  // §691 PR-A2/A3: Per-OS sandbox runner detection + boot-phase registry seal.
   // Runs after MCP connects so the full service graph is ready before
-  // adding OS-level spawn isolation. Only attempted on Linux (D1+D8).
-  // If bwrap is absent (dnf install bubblewrap), runner stays unregistered
-  // and Linux tools run with isolation=none — R-1 composition rule + the
-  // reviewer judgment provide the safety net.
+  // adding OS-level spawn isolation.
   //
-  // MEDIUM-2: Gated on LVIS_SANDBOX_ENABLED=1 (default off) until PR-A4 R-2
-  // wires the always-on policy hook. Without the gate, bwrap registration
-  // would activate for all Linux users before the policy rollout is ready.
-  // TODO(PR-A4 R-2): remove the env-gate condition and make this always-on.
+  // Linux   (PR-A2): bubblewrap (bwrap) — verified-kernel CLONE_NEWNET (D1)
+  // macOS   (PR-A3): sandbox-exec SBPL profile — PARTIAL (D2, known bypasses)
+  // Windows (PR-A3): AppContainer — detect-only in PR-A3; spawn deferred to
+  //                  PR-A3.5 (native Win32 N-API binding). detect() returns
+  //                  available=false so registration is skipped (D3).
+  //
+  // All platforms: MEDIUM-2 gate — LVIS_SANDBOX_ENABLED=1 required (default off)
+  // until PR-A4 R-2 wires the always-on policy hook.
+  // TODO(PR-A4 R-2): remove the env-gate and make sandbox always-on.
   {
-    const { registerSandboxRunner: _registerBwrap, sealSandboxRunnerRegistry } = await import(
+    const { registerSandboxRunner: _registerRunner, sealSandboxRunnerRegistry } = await import(
       "./permissions/sandbox-runner.js"
     );
+
     if (process.platform === "linux" && process.env["LVIS_SANDBOX_ENABLED"] === "1") {
       const { BwrapRunner } = await import("./permissions/runners/bwrap-runner.js");
       const bwrapRunner = new BwrapRunner();
       const detection = await bwrapRunner.detect();
       if (detection.available) {
         // MAJOR-1: pass detection so sandbox-capability SOT reflects the active runner.
-        _registerBwrap("linux", bwrapRunner, detection);
+        _registerRunner("linux", bwrapRunner, detection);
         log.info("boot: bwrap runner registered — %s", detection.reason);
       } else {
         log.warn(
@@ -921,6 +924,65 @@ export async function bootstrap(
         );
       }
     }
+
+    // §691 PR-A3: macOS sandbox-exec runner (D2 PARTIAL).
+    if (process.platform === "darwin" && process.env["LVIS_SANDBOX_ENABLED"] === "1") {
+      const { SandboxExecRunner } = await import("./permissions/runners/sandbox-exec-runner.js");
+      const sandboxExecRunner = new SandboxExecRunner();
+      const detection = await sandboxExecRunner.detect();
+      if (detection.available) {
+        _registerRunner("darwin", sandboxExecRunner, detection);
+        log.info("boot: sandbox-exec runner registered (PARTIAL) — %s", detection.reason);
+      } else {
+        log.warn(
+          "boot: sandbox-exec runner unavailable — %s. macOS tools will run with isolation=none.",
+          detection.reason,
+        );
+      }
+    } else if (process.platform === "darwin") {
+      log.info(
+        "boot: macOS sandbox runner gated off (set LVIS_SANDBOX_ENABLED=1 to enable)",
+      );
+    }
+
+    // §691 PR-A3: Windows AppContainer runner (D3 detect-only; spawn deferred to PR-A3.5).
+    // detect() always returns available=false in PR-A3 so registration is skipped.
+    if (process.platform === "win32" && process.env["LVIS_SANDBOX_ENABLED"] === "1") {
+      const { AppContainerRunner } = await import("./permissions/runners/appcontainer-runner.js");
+      const appContainerRunner = new AppContainerRunner();
+      const detection = await appContainerRunner.detect();
+      if (detection.available) {
+        _registerRunner("win32", appContainerRunner, detection);
+        log.info("boot: AppContainer runner registered — %s", detection.reason);
+      } else {
+        log.warn(
+          "boot: AppContainer runner unavailable — %s. Windows tools will run with isolation=none.",
+          detection.reason,
+        );
+      }
+    }
+
+    // §691 PR-A3 D9: Wire the "mcp" slot with the active platform runner.
+    // MCP child processes (StdioTransport) need bidirectional stdin — the
+    // SandboxRunner interface does not yet support stdin pipes, so MCP spawn
+    // is not replaced in PR-A3. The "mcp" registry slot is pre-populated so
+    // that capability reporting (getSandboxRunner("mcp")) reflects the OS
+    // isolation level that *would* apply when PR-A4 wires full MCP sandboxing.
+    // PR-A4 will replace StdioTransport.open() with a SandboxedProcess variant
+    // that adds stdin support.
+    {
+      const { getSandboxRunner: _getRunner, getActiveDetection } = await import(
+        "./permissions/sandbox-runner.js"
+      );
+      const platformKey = process.platform as NodeJS.Platform;
+      const platformRunner = _getRunner(platformKey);
+      const platformDetection = getActiveDetection(platformKey);
+      if (platformRunner && platformDetection) {
+        _registerRunner("mcp", platformRunner, platformDetection);
+        log.info("boot: mcp sandbox slot wired to %s runner (D9)", platformKey);
+      }
+    }
+
     // Seal the registry after all boot-time runners are registered.
     // Post-seal registration throws in production (NODE_ENV !== "test")
     // to prevent runtime injection of untrusted runners (PR-A1 follow-up #1).
