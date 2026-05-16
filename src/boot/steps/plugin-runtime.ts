@@ -23,6 +23,7 @@ import { onEvent as onHostEvent } from "../types.js";
 import { normalizeAllowedHosts } from "../../main/host-allow-list.js";
 import { AuditLogger, type AuditEntry } from "../../audit/audit-logger.js";
 import { PluginRuntime } from "../../plugins/runtime.js";
+import { currentInvocationOrigin } from "../../plugins/runtime/origin-chain.js";
 import { startPluginDevWatcher } from "../../plugins/dev-watcher.js";
 import { PluginDeploymentGuard } from "../../plugins/deployment-guard.js";
 import { createPluginStorage } from "../../plugins/storage.js";
@@ -1096,10 +1097,19 @@ export async function initPluginRuntime(
         if (!invoker) {
           throw new Error("Plugin tool executor is not wired; plugin callTool denied");
         }
+        // Issue #664 P2 — propagate the effective origin chain into the
+        // inner invocation. When this HostApi.callTool is reached from a
+        // wrapper handler that itself runs inside a UI-rooted chain, the
+        // ambient AsyncLocalStorage frame already holds "ui" and the inner
+        // invoker reads it through `currentInvocationOrigin()`. We pass
+        // `parentOrigin` explicitly so a wrapper that calls into a fresh
+        // async frame (queueMicrotask, setTimeout boundary) still inherits.
+        const parentOrigin = currentInvocationOrigin();
         return invoker(toolName, payload, {
           origin: "plugin",
           callerPluginId: pluginId,
           ownerPluginId: pluginRuntime.resolveToolOwner(toolName),
+          ...(parentOrigin ? { parentOrigin } : {}),
         }) as Promise<T>;
       },
       callLlm: async (prompt, opts) => {

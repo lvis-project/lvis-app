@@ -7,14 +7,20 @@
  * verdict
  * composition `final = max(rule, llm)`; DLP filter on classifier input).
  *
- * Three implementations selected by mode:
- *   - `disabled` → DisabledRiskClassifier — always HIGH (defer-all
- *     fail-safe so the headless lane queues every action).
+ * Four implementations selected by mode:
+ *   - `disabled` → DisabledRiskClassifier — always LOW (reviewer lane bypassed,
+ *     per-tool category × source × trust matrix still applies).
+ *     Issue #664: pre-fix this was wired as "defer-all-HIGH" which contradicted
+ *     the name and broke wrapper UX (plugin auth/write silently queued forever).
+ *     Fail-closed semantics moved to {@link StrictRiskClassifier}.
  *   - `rule`     → RuleBasedRiskClassifier — deterministic 36-rule
  *     heuristic (4 categories × 3 dir-relations × 3 confidence levels).
  *   - `llm`      → LlmRiskClassifier — multi-vendor LLM call. Always
  *     runs RuleBased first; takes `max(ruleVerdict, llmVerdict)`
  *     (LLM cannot downgrade — security M1).
+ *   - `strict`   → StrictRiskClassifier — always HIGH + defer-all. Use this for
+ *     hardened deployments where every headless mutation must be manually
+ *     approved. Equivalent to the pre-#664 "disabled" semantic.
  *
  * Interface is sync-friendly union (`RiskVerdict | Promise<RiskVerdict>`)
  * so callers using only the rule classifier do not pay an event-loop
@@ -97,6 +103,30 @@ export interface ToolInvocationContext {
   conversationContext?: {
     recentUserMessage?: string;
   };
+  /**
+   * Issue #664 P1 — sandbox-write self-attestation.
+   *
+   * `ownerPluginSandboxRoot` is the absolute directory path the owning
+   * plugin (or builtin tool) is permitted to write inside without
+   * triggering reviewer escalation. For plugin tools this is
+   * `~/.lvis/plugins/<ownerPluginId>/`, computed by the plugin runtime at
+   * tool-invocation time. For builtin tools or where the contract does
+   * not declare a sandbox, leave undefined and the normal write rules
+   * apply.
+   *
+   * `writesToOwnSandbox` is the manifest/SDK-declared intent flag: the
+   * tool promises that every value resolved through `pathFields` will
+   * stay inside `ownerPluginSandboxRoot`. The classifier still verifies
+   * the claim at invocation time (sound by construction) — a tool that
+   * declares the flag but emits a path outside its own sandbox falls
+   * back to the normal write rules.
+   *
+   * Both fields must be present to engage the auto-LOW rule. The owner
+   * sandbox path participates in the verdict-cache scope so a future
+   * sandbox move invalidates stale verdicts.
+   */
+  writesToOwnSandbox?: boolean;
+  ownerPluginSandboxRoot?: string;
 }
 
 export interface RiskClassifier {
@@ -105,9 +135,35 @@ export interface RiskClassifier {
 
 // ─── DisabledRiskClassifier ───────────────────────────────────────────
 
+/**
+ * Reviewer disabled — every dispatch returns LOW so the reviewer lane is a
+ * no-op. The per-tool category × source × trust matrix in
+ * {@link PermissionManager} (deny rules, allowed-dir checks, overlay-trigger
+ * guards, explicit approval modal) is unaffected.
+ *
+ * Issue #664: pre-fix this classifier returned HIGH+"defer all" which silently
+ * queued every plugin write/auth tool in the headless lane (msgraph_auth was
+ * the reproducer). The name contradicted the behaviour and broke wrapper UX.
+ * Fail-closed semantics moved to {@link StrictRiskClassifier}.
+ */
 export class DisabledRiskClassifier implements RiskClassifier {
   classify(_: ToolInvocationContext): RiskVerdict {
-    return { level: "high", reason: "reviewer disabled — defer all" };
+    return { level: "low", reason: "reviewer disabled — pass-through" };
+  }
+}
+
+// ─── StrictRiskClassifier ─────────────────────────────────────────────
+
+/**
+ * Fail-closed reviewer — every dispatch returns HIGH so headless mutations
+ * land in the deferred queue. Use this for hardened deployments where the
+ * user wants to manually approve every plugin/MCP write before it executes.
+ *
+ * Equivalent to the pre-#664 "disabled" semantic but under an honest name.
+ */
+export class StrictRiskClassifier implements RiskClassifier {
+  classify(_: ToolInvocationContext): RiskVerdict {
+    return { level: "high", reason: "reviewer strict — defer all" };
   }
 }
 
@@ -447,7 +503,37 @@ const RULES: Array<(ctx: ToolInvocationContext) => RiskVerdict | null> = [
     return { level: "high", reason: "network untrusted host" };
   },
 
-  // ── write rules (3) ────────────────────────────────────
+  // ── write rules (4) ────────────────────────────────────
+  //
+  // Issue #664 P1 — Sandbox-write auto-LOW.
+  //
+  // When the tool's manifest declared `writesToOwnSandbox: true` AND every
+  // resolved path is inside the owner plugin's sandbox root, the write
+  // collapses to LOW. The runtime verifies the path containment claim — the
+  // declaration alone is not sufficient (sound-by-construction).
+  //
+  // Without this rule a plugin like ms-graph that writes its MSAL token cache
+  // to `~/.lvis/plugins/lvis-plugin-ms-graph/...` gets caught by the "write
+  // path not declared" or "write outside allowed dirs" HIGH rules — the host's
+  // `allowedDirectories` does not include plugin sandboxes by design (plugin
+  // data isolation, §5 file-based memory). The auto-LOW rule lets plugins
+  // touch their own sandbox without round-tripping the user.
+  //
+  // If `pathFields` are declared but resolve to nothing (manifest mistake),
+  // we do NOT auto-LOW — falls through to the standard "write path not
+  // declared" HIGH so manifest bugs do not silently downgrade verdicts.
+  (ctx) => {
+    if (ctx.category !== "write") return null;
+    if (!ctx.writesToOwnSandbox) return null;
+    if (!ctx.ownerPluginSandboxRoot) return null;
+    const paths = extractDeclaredPaths(ctx);
+    if (paths.length === 0) return null;
+    const allInside = paths.every((p) =>
+      isInsideAllowed(p, [ctx.ownerPluginSandboxRoot!]),
+    );
+    if (!allInside) return null;
+    return { level: "low", reason: "write inside owner plugin sandbox" };
+  },
   (ctx) => {
     if (ctx.category !== "write") return null;
     const paths = extractDeclaredPaths(ctx);
@@ -670,7 +756,7 @@ export class LlmRiskClassifier implements RiskClassifier {
 
 // ─── Factory ──────────────────────────────────────────────────────────
 
-export type ReviewerMode = "disabled" | "rule" | "llm";
+export type ReviewerMode = "disabled" | "rule" | "llm" | "strict";
 
 export interface ReviewerSettings {
   mode: ReviewerMode;
@@ -691,6 +777,8 @@ export function createRiskClassifier(settings: ReviewerSettings): RiskClassifier
   switch (settings.mode) {
     case "disabled":
       return new DisabledRiskClassifier();
+    case "strict":
+      return new StrictRiskClassifier();
     case "rule":
       return new RuleBasedRiskClassifier();
     case "llm": {

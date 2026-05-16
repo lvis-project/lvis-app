@@ -29,7 +29,27 @@ import { lvisHome } from "../shared/lvis-home.js";
 
 const log = createLogger("permission-settings");
 
-export type ReviewerMode = "disabled" | "rule" | "llm";
+/**
+ * Reviewer mode semantics (post issue #664 P0 normalization):
+ *
+ * - "disabled" — reviewer lane bypassed. All invocations classify as LOW. The
+ *   per-tool category × source × trust matrix in {@link PermissionManager} still
+ *   applies (deny rules, allowed-dir checks, overlay-trigger guards, explicit
+ *   user approval flows). This mode is for users who DO NOT want LLM/rule-based
+ *   risk classification gating their plugin tool calls. Pre-#664 this mode was
+ *   wired as "fail-closed defer all", which contradicted both the name and
+ *   user expectation — that semantic moved to "strict".
+ *
+ * - "rule" — deterministic 36-rule heuristic. No LLM call.
+ *
+ * - "llm" — LLM-backed classifier with rule composition (max(rule, llm)).
+ *
+ * - "strict" — fail-closed: every reviewer dispatch returns HIGH and is sent
+ *   to the deferred queue. Equivalent to the pre-#664 "disabled" semantic but
+ *   under an honest name. Use for security-hardened deployments where every
+ *   headless mutation must be manually approved.
+ */
+export type ReviewerMode = "disabled" | "rule" | "llm" | "strict";
 /** Canonical list of all supported reviewer providers — single SOT. */
 export const REVIEWER_PROVIDERS = [
   "openai",
@@ -84,7 +104,16 @@ export interface PermissionSettingsFile {
 }
 
 const DEFAULT_REVIEWER: ReviewerSettingsBlock = {
-  mode: "disabled",
+  // Default to "rule" (deterministic, no LLM cost). Pre-#664 this was
+  // "disabled" but "disabled" was wired as "defer-all-HIGH" — that meant a
+  // fresh install (no settings.json) silently queued every plugin write/auth
+  // tool in `~/.lvis/permissions/deferred-queue.jsonl` (#664 reproducer).
+  //
+  // The honest-by-name choice is "rule": deterministic 36-rule heuristic
+  // with no provider dependency. Sandbox-internal plugin writes are
+  // resolved by the writesToOwnSandbox auto-LOW rule (P1) inside the
+  // classifier itself.
+  mode: "rule",
   provider: "openai",
   model: "gpt-4o-mini",
   fallbackOnError: "deny",
@@ -101,7 +130,12 @@ const DEFAULT_FILE: PermissionSettingsFile = {
   },
 };
 
-const REVIEWER_MODES: ReadonlySet<ReviewerMode> = new Set(["disabled", "rule", "llm"]);
+const REVIEWER_MODES: ReadonlySet<ReviewerMode> = new Set([
+  "disabled",
+  "rule",
+  "llm",
+  "strict",
+]);
 /** Exported so IPC handlers can validate provider names against a single SOT. */
 export const REVIEWER_PROVIDERS_SET: ReadonlySet<ReviewerProvider> = new Set(REVIEWER_PROVIDERS);
 const REVIEWER_FALLBACKS: ReadonlySet<ReviewerFallbackOnError> = new Set(["deny", "rule"]);

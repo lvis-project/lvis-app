@@ -114,6 +114,10 @@ import {
 import type { ConversationLoop } from "./engine/conversation-loop.js";
 import { ToolExecutor } from "./tools/executor.js";
 import type { PluginToolInvocationContext } from "./plugins/runtime.js";
+import {
+  currentInvocationOrigin,
+  runWithInvocationOrigin,
+} from "./plugins/runtime/origin-chain.js";
 import { initPluginRuntime } from "./boot/steps/plugin-runtime.js";
 import { registerPluginEventBridge } from "./boot/steps/ipc-bridge.js";
 import { wireReleasePrep, wireUpdateCheck } from "./boot/steps/post-boot.js";
@@ -577,31 +581,45 @@ export async function bootstrap(
     payload: unknown,
     context: PluginToolInvocationContext,
   ): Promise<unknown> => {
-    const [result] = await pluginSurfaceExecutor.executeAll(
-      [{
-        id: randomUUID(),
-        name: toolName,
-        input: toPluginToolInput(payload),
-      }],
-      {
-        sessionId: pluginInvocationSessionId(context),
-        permissionContext: {
-          headless: context.origin !== "ui",
-          additionalDirectories: readPermissionSettings().permissions.additionalDirectories,
-          trustOrigin: "plugin-emitted",
+    // Issue #664 P2 — UI-origin chain propagation. Enter an
+    // AsyncLocalStorage frame so nested ctx.callTool(...) invocations from
+    // a wrapper handler inherit the outermost UI origin. `parentOrigin`
+    // is the explicit handoff (e.g. tests / future bridges that want to
+    // pin the chain start); the ambient chain (set by an outer
+    // invokePluginTool) takes precedence over a bare "plugin" current so
+    // a UI→wrapper→inner chain stays UI all the way down.
+    return runWithInvocationOrigin(context.origin, context.parentOrigin, async () => {
+      const effectiveOrigin = currentInvocationOrigin() ?? context.origin;
+      const [result] = await pluginSurfaceExecutor.executeAll(
+        [{
+          id: randomUUID(),
+          name: toolName,
+          input: toPluginToolInput(payload),
+        }],
+        {
+          sessionId: pluginInvocationSessionId(context),
+          permissionContext: {
+            // headless follows the *effective* chain origin (#664 P2):
+            // a UI-rooted chain keeps `headless: false` even after one or
+            // more `ctx.callTool` hops, so the user's outer approval is
+            // honoured and the reviewer lane is not re-engaged.
+            headless: effectiveOrigin !== "ui",
+            additionalDirectories: readPermissionSettings().permissions.additionalDirectories,
+            trustOrigin: "plugin-emitted",
+          },
         },
-      },
-    );
-    if (!result) {
-      throw new Error(`Plugin tool '${toolName}' produced no executor result`);
-    }
-    if (result.is_error) {
-      throw new Error(result.content);
-    }
-    if (Object.prototype.hasOwnProperty.call(result, "rawResult")) {
-      return result.rawResult;
-    }
-    return result.content;
+      );
+      if (!result) {
+        throw new Error(`Plugin tool '${toolName}' produced no executor result`);
+      }
+      if (result.is_error) {
+        throw new Error(result.content);
+      }
+      if (Object.prototype.hasOwnProperty.call(result, "rawResult")) {
+        return result.rawResult;
+      }
+      return result.content;
+    });
   };
   lateBinding.pluginToolInvokerRef.fn = invokePluginTool;
   pluginRuntime.setToolInvocationDelegate(invokePluginTool);

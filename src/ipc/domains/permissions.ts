@@ -484,19 +484,33 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
     // from a compromised renderer cannot record without an active gesture.
     const intent = requireUserKeyboardIntent(body.intent);
     if (!intent.ok) return intent;
-    const toolName = body.toolName;
-    const args = body.args;
-    const source = body.source;
     const scope = body.scope;
     const verdictAtApproval = body.verdictAtApproval;
     const nlJustification = body.nlJustification;
-    // R-2 Round-3: extract optional fields for record/lookup key symmetry.
-    const trustOrigin = typeof body.trustOrigin === "string" ? body.trustOrigin : undefined;
-    const approvalCacheKey = typeof body.approvalCacheKey === "string" ? body.approvalCacheKey : undefined;
+    const args = body.args;
+    // Issue #799 — server-side ApprovalRequest binding.
+    //
+    // Pre-fix this handler trusted the renderer to faithfully echo back
+    // `body.toolName`, `body.source`, `body.trustOrigin`, and
+    // `body.approvalCacheKey`. A renderer XSS could swap any of these and
+    // make the recorded entry a memory hit for a different
+    // (toolName, source, trustOrigin, approvalCacheKey) tuple than the
+    // one the main process emitted — defeating R-2 CRITICAL-4 cache
+    // identity isolation.
+    //
+    // Fix: the renderer now sends `requestId` (the original
+    // ApprovalRequest.id). The handler reads the canonical
+    // toolName/source/trustOrigin/approvalCacheKey from the in-flight
+    // ApprovalGate entry via `getRequestSnapshot()`. The renderer can no
+    // longer spoof identity fields — it can only contribute the parts
+    // that are semantically the user's decision (scope, verdict at
+    // approval, NL justification) and the args/intent freshness gates.
+    const requestId = body.requestId;
+    if (typeof requestId !== "string" || requestId.length === 0) {
+      return { ok: false, error: "invalid-request-id", message: "user-approval record: requestId required (server-side ApprovalRequest binding)" };
+    }
     if (
-      typeof toolName !== "string" ||
       typeof args !== "string" ||
-      typeof source !== "string" ||
       (scope !== "session" && scope !== "persistent") ||
       (verdictAtApproval !== "low" && verdictAtApproval !== "medium" && verdictAtApproval !== "high")
     ) {
@@ -513,6 +527,13 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
         return { ok: false, error: "high-requires-justification", message: "HIGH verdict approvals require non-empty NL justification" };
       }
     }
+    // Server-side SOT lookup. If the approval already resolved/timed out
+    // or never existed, reject — we never silently create an orphan entry
+    // that the renderer can later use to fish for memory hits.
+    const snapshot = approvalGate?.getRequestSnapshot(requestId) ?? null;
+    if (!snapshot) {
+      return { ok: false, error: "no-such-request", message: "user-approval record: no in-flight ApprovalRequest for requestId" };
+    }
     try {
       // MEDIUM security-M2: canonicalize at IPC handler to catch any non-renderer
       // callers that bypass the renderer-side canonicalization. Non-JSON or
@@ -527,12 +548,15 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
       } catch {
         return { ok: false, error: "args-not-json", message: "user-approval record: args must be valid JSON" };
       }
-      await recordApproval(toolName, canonicalArgs, source, {
+      // Authority fields come from the main-process snapshot, never the
+      // renderer body. The renderer contribution is reduced to
+      // (scope, verdictAtApproval, nlJustification, args).
+      await recordApproval(snapshot.toolName, canonicalArgs, snapshot.source, {
         scope,
         verdictAtApproval,
         nlJustification: typeof nlJustification === "string" ? nlJustification : null,
-        trustOrigin,
-        approvalCacheKey,
+        trustOrigin: snapshot.trustOrigin,
+        approvalCacheKey: snapshot.approvalCacheKey,
       });
       return { ok: true };
     } catch (err) {
