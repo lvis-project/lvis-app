@@ -14,7 +14,7 @@ import { AssistantCard } from "./components/AssistantCard.js";
 import { UserMessageEditor } from "./components/UserMessageEditor.js";
 import { ReasoningCard } from "./components/ReasoningCard.js";
 import { ToolGroupCard } from "./components/ToolGroupCard.js";
-import { DayDivider } from "./components/DayDivider.js";
+import { SessionDateNavigator } from "./components/SessionDateNavigator.js";
 import { CheckpointDivider } from "./components/CheckpointDivider.js";
 import { SummaryToast } from "./components/SummaryToast.js";
 import { ViewModeBanner, type ViewModeState } from "./components/ViewModeBanner.js";
@@ -304,6 +304,23 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
   const visibleEntries = useMemo(
     () => viewMode ? entries.slice(0, viewMode.slicedRangeEnd) : entries,
     [entries, viewMode],
+  );
+
+  // Calendar's in-session day jump indexer — derived from visibleEntries with
+  // only user + assistant entries (the only kinds that carry createdAt).
+  // Memoized so that stream-delta re-renders of ChatView don't rebuild the
+  // map on every keystroke (which would re-mount the calendar tree behind the
+  // closed popover at ~100Hz on long sessions).
+  const navigatorCurrentSessionEntries = useMemo(
+    () =>
+      visibleEntries.map((entry, idx) => ({
+        idx,
+        createdAt:
+          entry.kind === "assistant" || entry.kind === "user"
+            ? entry.createdAt
+            : undefined,
+      })),
+    [visibleEntries],
   );
 
   // turn_summary entry 의 turnStart 별 lookup. 각 turn 의 final assistant
@@ -793,13 +810,25 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
         </div>
       )}
       <ScrollArea className="lvis-chat-scroll h-full min-h-0 min-w-0 max-w-full" viewportRef={scrollViewportRef}><div className="min-w-0 w-full max-w-full overflow-x-hidden space-y-3 px-3 py-4">
-        {/* Today's date badge stays a selector for explicit session loads only. */}
-        <DayDivider
+        {/* Today's date badge stays a selector for explicit session loads only.
+            currentSessionEntries enables in-session day jumping via
+            SessionCalendarPopover Step 4 — pass entries with createdAt + index.
+            Reasoning entries never carry createdAt (only user + assistant get
+            stamped in historyToEntries / appendUserEntry / finalizeStreamingAssistant),
+            so they're excluded from the mapper rather than passed with undefined. */}
+        <SessionDateNavigator
           dateKey={activeDayKey}
           sessionMarkerId={currentSessionId}
           sessions={sessions}
           currentSessionId={currentSessionId}
           streaming={streaming}
+          currentSessionEntries={navigatorCurrentSessionEntries}
+          onJumpToEntry={(entryIndex) => {
+            const el = scrollViewportRef.current?.querySelector<HTMLElement>(
+              `[data-chat-entry-index="${entryIndex}"]`,
+            );
+            el?.scrollIntoView({ behavior: "smooth", block: "start" });
+          }}
           onLoadSession={handleCalendarSessionSelect}
           onRefreshSessions={onRefreshSessions}
         />
@@ -1204,6 +1233,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
                   />
                   {/* Suppress mutating TurnActionBar actions in view-mode. */}
                   <TurnActionBar
+                    timestamp={entry.kind === "assistant" ? entry.createdAt : undefined}
                     turnSummary={summary}
                     pricing={activePricing}
                     vendor={activeVendor}
