@@ -37,8 +37,7 @@ docs/
 │   ├── README.md                          # 아키텍처 개요·요약·목차
 │   ├── architecture.md                    # ★ 현재 아키텍처 (v0.4.1 Draft)
 │   ├── tool-governance.md                 # 통합 도구 거버넌스 보충
-│   ├── plugin-deployment-model.md         # managed/user 배포 모델 상세
-│   └── architecture.reference.md          # v1 초안 (참고용)
+│   └── plugin-deployment-model.md         # managed/user 배포 모델 상세
 ├── guides/
 │   ├── getting-started.md                 # 시작 및 실행 가이드
 │   └── plugin-development.md              # 플러그인 개발 가이드
