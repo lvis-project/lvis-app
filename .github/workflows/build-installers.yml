@@ -22,6 +22,11 @@ on:
 jobs:
   installers:
     name: ${{ matrix.name }}
+    # Explicit least-privilege: electron-builder's GitHub publisher
+    # needs `contents: write` to create the release and upload assets.
+    # Everything else stays at the default (read).
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
