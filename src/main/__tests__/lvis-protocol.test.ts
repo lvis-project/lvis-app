@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { findLvisProtocolUri, parseMarketplacePluginActionUri, parsePluginAuthUri } from "../lvis-protocol.js";
+import {
+  findLvisProtocolUri,
+  parseMarketplacePluginActionUri,
+  parseMcpLoginUri,
+  parsePluginAuthUri,
+} from "../lvis-protocol.js";
 
 describe("findLvisProtocolUri", () => {
   it("returns the custom protocol URI from argv", () => {
@@ -183,5 +188,22 @@ describe("parseMarketplacePluginActionUri", () => {
     expect(parseMarketplacePluginActionUri("lvis://uninstall/%E0%A4%A")).toBeNull();
     expect(parseMarketplacePluginActionUri("lvis://install/theme/agent-hub")).toBeNull();
     expect(parseMarketplacePluginActionUri("lvis://install/agent/agent-hub/extra")).toBeNull();
+  });
+});
+
+describe("parseMcpLoginUri", () => {
+  it("parses a marketplace MCP OAuth login URL", () => {
+    expect(parseMcpLoginUri("lvis://mcp-login/context7-mcp")).toEqual({
+      slug: "context7-mcp",
+    });
+  });
+
+  it("rejects malformed MCP login URLs", () => {
+    expect(parseMcpLoginUri("lvis://mcp-login/context7-mcp?next=1")).toBeNull();
+    expect(parseMcpLoginUri("lvis://mcp-login/context7-mcp#frag")).toBeNull();
+    expect(parseMcpLoginUri("lvis://mcp-login/context7-mcp/extra")).toBeNull();
+    expect(parseMcpLoginUri("lvis://mcp-login/%2E%2E%2Fcontext7-mcp")).toBeNull();
+    expect(parseMcpLoginUri("lvis://install/mcp/context7-mcp")).toBeNull();
+    expect(parseMcpLoginUri("https://mcp-login/context7-mcp")).toBeNull();
   });
 });

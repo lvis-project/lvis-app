@@ -32,6 +32,10 @@ export type MarketplaceItem = {
   enabled: boolean;
   isManaged?: boolean;
   pluginType?: MarketplacePackageType;
+  mcpAuth?: {
+    mode: "none" | "api-key" | "sso" | "oauth";
+    transport?: "stdio" | "http";
+  };
 };
 
 export type PluginUiExtension = PluginUiExtensionView;
@@ -238,7 +242,7 @@ export type LvisApi = {
     isManaged?: boolean;
   }>>;
   installMcpFromMarketplace: (slug: string) => Promise<
-    | { ok: true; slug: string; installDir: string; connected: boolean; warning?: string; needsCredential: boolean; authMode: "none" | "api-key" | "sso" }
+    | { ok: true; slug: string; installDir: string; connected: boolean; warning?: string; needsCredential: boolean; authMode: "none" | "api-key" | "sso" | "oauth" }
     | { ok: false; error: string; message: string }
   >;
   /** #FU262 — Claude Desktop config import. */
