@@ -13,6 +13,7 @@ import {
 } from "../../../components/ui/dialog.js";
 import { SOURCE_BADGE } from "../constants.js";
 import type { ApprovalChoice, ApprovalRequest } from "../types.js";
+import { canonicalStringify as canonicalStringifyForRenderer } from "../../../shared/canonical-json.js";
 import { isNonUserTrustOrigin, trustOriginLabel } from "../utils/trust-origin-label.js";
 import {
   SummaryTile,
@@ -77,22 +78,35 @@ export function ToolApprovalDialog({
   const approveDisabled = finalVerdict === "high" && nlJustification.trim().length === 0;
 
   // R-4: Wrap onDecide("allow-*") to record approval before deciding.
+  // R-2 Round-3 CRITICAL: use canonicalStringify for args + propagate trustOrigin
+  // + approvalCacheKey so that the record key matches the lookup key in
+  // dispatchReviewer. Without this, R-2 memory hit rate is 0%.
+  // Fire-and-await pattern: onDecide is called synchronously so the UI
+  // responds immediately; the record IPC is awaited in the background so
+  // test assertions on onDecide do not need to drain microtask queues.
   async function handleApprove(choice: ApprovalChoice, pattern?: string) {
+    let recordPromise: Promise<unknown> | undefined;
     if (request) {
-      try {
-        await window.lvis.userApproval.record({
-          toolName: request.toolName,
-          args: JSON.stringify(request.args),
-          source: request.source ?? "builtin",
-          scope: finalVerdict === "high" ? "session" : scopeChoice,
-          verdictAtApproval: finalVerdict as "low" | "medium" | "high",
-          nlJustification: finalVerdict === "high" ? nlJustification.trim() : null,
-        });
-      } catch {
-        // Non-fatal: record failure should not block the user's approval.
-      }
+      // canonicalStringify: sort object keys so {a,b} and {b,a} produce the
+      // same string — matching how dispatchReviewer builds the lookup key.
+      const canonicalArgs = canonicalStringifyForRenderer(request.args);
+      recordPromise = window.lvis?.userApproval?.record({
+        toolName: request.toolName,
+        args: canonicalArgs,
+        source: request.source ?? "builtin",
+        scope: finalVerdict === "high" ? "session" : scopeChoice,
+        verdictAtApproval: finalVerdict as "low" | "medium" | "high",
+        nlJustification: finalVerdict === "high" ? nlJustification.trim() : null,
+        trustOrigin: request.trustOrigin,
+        approvalCacheKey: request.approvalCacheKey,
+      }).catch((err: unknown) => {
+        console.warn("[R-2] user-approval record failed (non-fatal):", err);
+      });
     }
+    // Call onDecide synchronously so the UI responds immediately.
     onDecide(choice, pattern);
+    // Await the record promise in the background (non-blocking for the user).
+    await recordPromise;
   }
 
   // 키보드 단축키 (disabled for HIGH when NL field empty)
