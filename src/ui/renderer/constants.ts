@@ -1,5 +1,27 @@
 // Phase 2: React-free constants extracted from src/renderer.tsx.
 
+// ── Toast / Banner TTL ────────────────────────────────────────────────────────
+/**
+ * Short auto-dismiss duration for simple one-line toasts (ms).
+ * Use when the message is a brief status (e.g. drag-drop result, copy
+ * confirmation) that does not require extended reading time.
+ */
+export const SHORT_TOAST_TTL_MS = 3000;
+
+/**
+ * Default auto-dismiss duration for inline toasts and banners (ms).
+ * Most callsites use this value; those that need a longer read window
+ * (complex permission banners, MCP status) override explicitly with a comment.
+ */
+export const DEFAULT_TOAST_TTL_MS = 4000;
+
+/**
+ * Long auto-dismiss duration for toasts that require extended reading (ms).
+ * Use for multi-line banners, error details, or Korean prose longer than
+ * ~8 words that needs comfortable reading time.
+ */
+export const LONG_TOAST_TTL_MS = 5000;
+
 import type { ExecMode } from "./types.js";
 import {
   LLM_VENDOR_DEFAULTS,
