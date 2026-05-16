@@ -15,6 +15,7 @@
  * - Cleans up all listeners on unmount.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
+import { SHORT_TOAST_TTL_MS } from "../constants.js";
 
 interface DropZoneOverlayProps {
   /** Called with result for parent-level toast/notification; optional. */
@@ -32,7 +33,7 @@ export function DropZoneOverlay({ onResult }: DropZoneOverlayProps) {
   const showToast = useCallback((msg: string) => {
     setToast(msg);
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-    toastTimerRef.current = setTimeout(() => setToast(null), 3000);
+    toastTimerRef.current = setTimeout(() => setToast(null), SHORT_TOAST_TTL_MS);
   }, []);
 
   useEffect(() => {

@@ -22,7 +22,7 @@ import {
 } from "../../../components/ui/tooltip.js";
 import { PERMISSION_REVIEWER_FRAMEWORK } from "../../../shared/permission-reviewer-framework.js";
 import type { UserApprovalScope, UserApprovalVerdict } from "../../../shared/permissions-events.js";
-import { EXEC_MODE_OPTIONS } from "../constants.js";
+import { EXEC_MODE_OPTIONS, LONG_TOAST_TTL_MS } from "../constants.js";
 import { getApi } from "../api-client.js";
 import { formatIpcError } from "../format-ipc-error.js";
 import type {
@@ -136,7 +136,7 @@ export function PermissionsTab() {
   const showBanner = useCallback((type: "error" | "warn", msg: string) => {
     if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current);
     setBanner({ type, msg });
-    bannerTimerRef.current = setTimeout(() => setBanner(null), 5000);
+    bannerTimerRef.current = setTimeout(() => setBanner(null), LONG_TOAST_TTL_MS); // permission banners contain policy text that needs longer read time
   }, []);
 
   // ── Execution Mode ────────────────────────────────

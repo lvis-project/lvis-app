@@ -12,6 +12,7 @@ import { PluginAuthSection } from "../components/PluginAuthSection.js";
 import { usePluginAuthStatuses } from "../hooks/use-plugin-auth-status.js";
 import { PluginUninstallDialog } from "../dialogs/PluginUninstallDialog.js";
 import { PluginConfigSchemaForm } from "./PluginConfigSchemaForm.js";
+import { DEFAULT_TOAST_TTL_MS } from "../constants.js";
 
 type KV = { key: string; value: string };
 
@@ -66,7 +67,7 @@ export function PluginConfigTab() {
   const showBanner = useCallback((type: "error" | "success", msg: string) => {
     if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current);
     setBanner({ type, msg });
-    bannerTimerRef.current = setTimeout(() => setBanner(null), 4000);
+    bannerTimerRef.current = setTimeout(() => setBanner(null), DEFAULT_TOAST_TTL_MS);
   }, []);
 
   useEffect(() => {
