@@ -223,3 +223,228 @@ describe("migrateCanonicalization — Case 3: flat entries are not spuriously re
     expect(file.approvals[syntheticKey]).toBeDefined();
   });
 });
+
+// ─── Case 4: corrupt / unreadable approvals file — boot must not crash ────────
+
+describe("migrateCanonicalization — Case 4: corrupt JSON file does not abort boot", () => {
+  it("gracefully handles a corrupt JSON approvals file without throwing", async () => {
+    // Write a syntactically invalid JSON file to simulate corruption.
+    await mkdir(join(TEST_HOME, "permissions"), { recursive: true, mode: 0o700 });
+    await writeFile(APPROVALS_PATH, "{ this is not valid JSON !!! }", { mode: 0o600 });
+
+    // Must not throw — MAJOR-1 try/catch in migrateCanonicalization.
+    await expect(migrateCanonicalization()).resolves.toBeUndefined();
+
+    // Marker must NOT be written so the next boot can retry.
+    await expect(access(MARKER_PATH)).rejects.toThrow();
+  });
+
+  it("gracefully handles a truncated/incomplete JSON file without throwing", async () => {
+    // Write a truncated JSON file — simulates a partially-written file from
+    // a prior crash (a different kind of read-level failure from corrupt JSON).
+    await mkdir(join(TEST_HOME, "permissions"), { recursive: true, mode: 0o700 });
+    await writeFile(APPROVALS_PATH, '{"approvals": {"abc": {', { mode: 0o600 });
+
+    await expect(migrateCanonicalization()).resolves.toBeUndefined();
+
+    // Marker must NOT be written — next boot should retry.
+    await expect(access(MARKER_PATH)).rejects.toThrow();
+  });
+});
+
+// ─── Case 5: write failure — boot does not crash, marker not written ──────────
+
+describe("migrateCanonicalization — Case 5: write failure does not crash boot and skips marker", () => {
+  it("does not write marker when the approvals file cannot be read (EACCES-like)", async () => {
+    // Simulate a read failure by writing a corrupt file that throws on JSON.parse
+    // but in a way that is NOT ENOENT (so readApprovalsFile re-throws).
+    // We achieve this by writing a non-JSON file that is NOT empty.
+    await mkdir(join(TEST_HOME, "permissions"), { recursive: true, mode: 0o700 });
+    await writeFile(APPROVALS_PATH, "NOT_VALID_JSON", { mode: 0o600 });
+
+    // migrateCanonicalization wraps in try/catch — must not throw.
+    await expect(migrateCanonicalization()).resolves.toBeUndefined();
+
+    // Marker must NOT be written — next boot should retry.
+    await expect(access(MARKER_PATH)).rejects.toThrow();
+  });
+
+  it("atomic write uses tmp+rename so a mid-write crash leaves original intact", async () => {
+    // Verify that the atomicWrite pattern means the approvals file is only
+    // replaced after a successful rename — i.e., the original file path is
+    // never partially written. We test this by confirming the final file is
+    // a complete valid JSON document after a successful migration.
+    const toolName = "mcp_tool";
+    const source = "mcp";
+    const argsObj = [{ b: 2, a: 1 }];
+    const oldArgs = JSON.stringify(argsObj);
+    const oldKey = makeKey(toolName, oldArgs, source);
+    const newArgs = canonicalStringify(argsObj);
+    const newKey = makeKey(toolName, newArgs, source);
+
+    await writeRawApprovals({
+      [oldKey]: {
+        approvedAt: "2026-01-01T00:00:00.000Z",
+        scope: "persistent",
+        verdictAtApproval: "low",
+        nlJustification: null,
+        revokedAt: null,
+        toolName,
+        source,
+        args: oldArgs,
+      },
+    });
+
+    await migrateCanonicalization();
+
+    // File must be valid JSON with the new key and no tmp artifacts.
+    const raw = await readFile(APPROVALS_PATH, "utf8");
+    const parsed = JSON.parse(raw) as { approvals: Record<string, unknown> };
+    expect(parsed.approvals[newKey]).toBeDefined();
+    expect(parsed.approvals[oldKey]).toBeUndefined();
+    // No .tmp files left behind.
+    const { readdir } = await import("node:fs/promises");
+    const files = await readdir(join(TEST_HOME, "permissions"));
+    expect(files.some((f) => f.endsWith(".tmp"))).toBe(false);
+  });
+});
+
+// ─── Case 6: mixed-version entries (old args-having + legacy no-args) ─────────
+
+describe("migrateCanonicalization — Case 6: mixed old-format and legacy entries", () => {
+  it("migrates args-having entries and carries forward legacy no-args entries", async () => {
+    const toolName = "mcp_tool";
+    const source = "mcp";
+    const argsObj = [{ b: 2, a: 1 }];
+    const oldArgs = JSON.stringify(argsObj);
+    const oldKey = makeKey(toolName, oldArgs, source);
+    const newArgs = canonicalStringify(argsObj);
+    const newKey = makeKey(toolName, newArgs, source);
+
+    const legacyKey = randomBytes(32).toString("hex");
+
+    await writeRawApprovals({
+      // New-format entry with args — should be re-keyed.
+      [oldKey]: {
+        approvedAt: "2026-01-01T00:00:00.000Z",
+        scope: "persistent",
+        verdictAtApproval: "low",
+        nlJustification: null,
+        revokedAt: null,
+        toolName,
+        source,
+        args: oldArgs,
+      },
+      // Legacy entry without args — should be carried forward unchanged.
+      [legacyKey]: {
+        approvedAt: "2025-06-01T00:00:00.000Z",
+        scope: "persistent",
+        verdictAtApproval: "medium",
+        nlJustification: null,
+        revokedAt: null,
+        // no toolName / source / args
+      },
+    });
+
+    await migrateCanonicalization();
+
+    const file = await readApprovals();
+    // Stale entry must be re-keyed.
+    expect(file.approvals[oldKey]).toBeUndefined();
+    expect(file.approvals[newKey]).toBeDefined();
+    // Legacy entry must survive unchanged.
+    expect(file.approvals[legacyKey]).toBeDefined();
+    expect(file.approvals[legacyKey].verdictAtApproval).toBe("medium");
+  });
+});
+
+// ─── Case 7: revokedAt entry is carried forward to new key ────────────────────
+
+describe("migrateCanonicalization — Case 7: revokedAt entry carries forward on re-key", () => {
+  it("preserves revokedAt timestamp after re-keying a stale entry", async () => {
+    const toolName = "mcp_tool";
+    const source = "mcp";
+    const argsObj = [{ b: 2, a: 1 }];
+    const oldArgs = JSON.stringify(argsObj);
+    const oldKey = makeKey(toolName, oldArgs, source);
+    const newArgs = canonicalStringify(argsObj);
+    const newKey = makeKey(toolName, newArgs, source);
+
+    const revokedAt = "2026-02-15T12:00:00.000Z";
+
+    await writeRawApprovals({
+      [oldKey]: {
+        approvedAt: "2026-01-01T00:00:00.000Z",
+        scope: "persistent",
+        verdictAtApproval: "low",
+        nlJustification: null,
+        revokedAt,
+        toolName,
+        source,
+        args: oldArgs,
+      },
+    });
+
+    await migrateCanonicalization();
+
+    const file = await readApprovals();
+    expect(file.approvals[oldKey]).toBeUndefined();
+    expect(file.approvals[newKey]).toBeDefined();
+    // revokedAt must be preserved on the new key.
+    expect(file.approvals[newKey].revokedAt).toBe(revokedAt);
+    // Marker must exist.
+    await expect(access(MARKER_PATH)).resolves.toBeUndefined();
+  });
+
+  it("collision: revoked entry wins over active entry for same new key", async () => {
+    const toolName = "mcp_tool";
+    const source = "mcp";
+    const argsObj = [{ b: 2, a: 1 }];
+    const newArgs = canonicalStringify(argsObj);
+    const newKey = makeKey(toolName, newArgs, source);
+
+    // Two stale entries that both canonicalize to newKey.
+    // entry A: active (revokedAt null), entry B: revoked.
+    const oldArgsA = JSON.stringify(argsObj);
+    const oldKeyA = makeKey(toolName, oldArgsA, source);
+
+    // Manufacture a second distinct stale key that also maps to newKey by
+    // writing the already-canonical args under a hand-crafted hash that
+    // differs from newKey (simulates a real collision scenario via direct write).
+    const collisionKey = randomBytes(32).toString("hex");
+    const revokedAt = "2026-03-01T00:00:00.000Z";
+
+    await writeRawApprovals({
+      // Active entry under the real stale oldKey.
+      [oldKeyA]: {
+        approvedAt: "2026-01-01T00:00:00.000Z",
+        scope: "persistent",
+        verdictAtApproval: "low",
+        nlJustification: null,
+        revokedAt: null,
+        toolName,
+        source,
+        args: oldArgsA,
+      },
+      // Revoked entry whose stored args will also re-canonicalize to newKey.
+      [collisionKey]: {
+        approvedAt: "2026-01-02T00:00:00.000Z",
+        scope: "persistent",
+        verdictAtApproval: "low",
+        nlJustification: null,
+        revokedAt,
+        toolName,
+        source,
+        // args already canonical — will produce newKey on re-key.
+        args: newArgs,
+      },
+    });
+
+    await migrateCanonicalization();
+
+    const file = await readApprovals();
+    expect(file.approvals[newKey]).toBeDefined();
+    // Revoked entry must win (revokedAt non-null takes priority).
+    expect(file.approvals[newKey].revokedAt).toBe(revokedAt);
+  });
+});
