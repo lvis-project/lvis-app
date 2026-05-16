@@ -487,6 +487,33 @@ describe("reviewerProviderKeyPresent", () => {
     expect(reviewerProviderKeyPresent("foundry", getSecret)).toBe(false);
   });
 
+  // ── #766 regression: empty / whitespace endpoint must not be truthy ──
+
+  it("foundry → false when endpoint is empty string (key present) — #766", () => {
+    // Empty string is !== null so the old code returned true; must be false.
+    const getSecret = vi.fn((key: string) =>
+      key === FOUNDRY_API_KEY_SECRET ? "api-key" : null,
+    );
+    const getEndpoint = vi.fn(() => "");
+    expect(reviewerProviderKeyPresent("foundry", getSecret, getEndpoint)).toBe(false);
+  });
+
+  it("foundry → false when endpoint is whitespace-only (key present) — #766", () => {
+    const getSecret = vi.fn((key: string) =>
+      key === FOUNDRY_API_KEY_SECRET ? "api-key" : null,
+    );
+    const getEndpoint = vi.fn(() => "   ");
+    expect(reviewerProviderKeyPresent("foundry", getSecret, getEndpoint)).toBe(false);
+  });
+
+  it("foundry → true when endpoint is a valid non-empty URL (key present) — #766", () => {
+    const getSecret = vi.fn((key: string) =>
+      key === FOUNDRY_API_KEY_SECRET ? "api-key" : null,
+    );
+    const getEndpoint = vi.fn(() => "https://valid.services.ai.azure.com");
+    expect(reviewerProviderKeyPresent("foundry", getSecret, getEndpoint)).toBe(true);
+  });
+
   it("gcp-playground → false when API key absent", () => {
     const getSecret = vi.fn((_key: string) => null);
     expect(reviewerProviderKeyPresent("gcp-playground", getSecret)).toBe(false);
