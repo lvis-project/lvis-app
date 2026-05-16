@@ -122,6 +122,27 @@ export function SettingsContent({
     }
   }, [open, llmSave, chatSave, webSave, marketplaceSave]);
 
+  // Flush any pending debounced save when the user closes the window or
+  // quits the app. The 200ms debounce window is short, but a user who
+  // toggles a control and immediately hits Cmd+Q would otherwise lose
+  // that toggle to the dying renderer process. `flush()` is a no-op
+  // when nothing is pending, so registering all four is safe.
+  useEffect(() => {
+    if (!open) return;
+    const flushAll = () => {
+      llmSave.flush();
+      chatSave.flush();
+      webSave.flush();
+      marketplaceSave.flush();
+    };
+    window.addEventListener("beforeunload", flushAll);
+    window.addEventListener("pagehide", flushAll);
+    return () => {
+      window.removeEventListener("beforeunload", flushAll);
+      window.removeEventListener("pagehide", flushAll);
+    };
+  }, [open, llmSave, chatSave, webSave, marketplaceSave]);
+
   // Reset tab + clear stale error banner ONLY when the dialog transitions
   // open. Depending on the whole `s` orchestration object would re-fire
   // this effect every render (since `s` is recreated each render) and
@@ -251,10 +272,11 @@ export function SettingsContent({
               idlePreferenceRefresh={s.idlePreferenceRefresh}
               setIdlePreferenceRefresh={s.setIdlePreferenceRefresh}
               piiRedactEnabled={s.piiRedactEnabled}
-              onPiiRedactToggle={() => {
-                s.setPiiRedactEnabled(!s.piiRedactEnabled);
-                chatSave.schedule();
-              }}
+              // ChatTab wraps onPiiRedactToggle with onImmediateChange
+              // internally, matching the pattern used by autoCompact /
+              // streamSmoothing / idlePreferenceRefresh. Don't fire the
+              // debounce here too — that would double-schedule.
+              onPiiRedactToggle={() => s.setPiiRedactEnabled(!s.piiRedactEnabled)}
               onImmediateChange={chatSave.schedule}
             />
             {/* ChatTab is fully immediate-apply — no deferred-save bar needed. */}
