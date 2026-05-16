@@ -1,5 +1,5 @@
 /**
- * §PR-5 Layer 3 View-Mode — component unit tests.
+ * Checkpoint view-mode — component unit tests.
  *
  * Covers:
  *  1. ViewModeBanner: hidden when viewMode=null, shown when non-null, exit button fires onExit

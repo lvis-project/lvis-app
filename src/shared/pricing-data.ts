@@ -166,7 +166,7 @@ export const DEFAULT_PRICING: Record<PricingVendor, Record<string, ModelPricing>
   // Deployment-name routed — pricing is account-specific. Populate via env
   // override (`LVIS_PRICING_OVERRIDE`). Without an override every model on
   // these vendors falls through to FALLBACK_PRICING, which means UI ring +
-  // Layer 0 preflight is denominated at 128K regardless of the actual deployment
+  // token preflight is denominated at 128K regardless of the actual deployment
   // capability — explicit override is REQUIRED for context-window math, not
   // just cost accuracy.
   "azure-foundry": {},
@@ -248,9 +248,8 @@ export function anthropicCacheRates(
  *
  * The adapter auto-sends the `context-1m-2025-08-07` header for any Claude
  * model with `contextWindow1MBeta` set, so the larger window is what the
- * model actually delivers. UI denominators and rotation thresholds must
- * mirror this resolution to avoid the 5× denominator mismatch noted in
- * `reference_token_session_4source.md` §4.
+ * model actually delivers. UI denominators and compact thresholds must
+ * mirror this resolution to avoid denominator mismatch.
  */
 export function effectiveContextWindow(pricing: ModelPricing): number {
   return pricing.contextWindow1MBeta ?? pricing.contextWindow;

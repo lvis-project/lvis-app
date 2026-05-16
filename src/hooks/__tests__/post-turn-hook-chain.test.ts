@@ -48,8 +48,8 @@ describe("PostTurnHookChain", () => {
     expect(saveSession).toHaveBeenCalledWith("session-disabled", messages);
   });
 
-  // PR-2-F-3 정정: Stage 1b (post-turn full compact) 가 제거됐으므로 *PostTurnHookChain 안에서*
-  // boundary marker 생성 시나리오 자체 폐기. 동등 검증은 `runPreflightGuard` 의 Layer 2 경로
+  // Post-turn full compact 가 제거됐으므로 *PostTurnHookChain 안에서*
+  // boundary marker 생성 시나리오 자체 폐기. 동등 검증은 `runPreflightGuard` 의 LLM compact 경로
   // (engine 통합 테스트) 에서 다뤄짐 — `structured-compact.test.ts:compactWithBoundary` 참조.
 
   it("runs mark-stale alone (no full compact) when threshold is not met", async () => {
@@ -99,7 +99,7 @@ describe("PostTurnHookChain", () => {
     // full-compact 요약 marker 는 없음 (mark-stale 만 실행됨)
     const marker = result.compactedMessages?.find((m) => m.role === "user" && m.meta?.compactBoundary === true);
     expect(marker).toBeUndefined();
-    // PR-3 검증: 마킹된 (compactedAt set) tool_result 가 *memory 에서는 verbatim*
+    // 마킹된 (compactedAt set) tool_result 가 *memory 에서는 verbatim*
     const marked = result.compactedMessages?.filter((m) => m.role === "tool_result" && m.meta?.compactedAt !== undefined) ?? [];
     expect(marked.length).toBeGreaterThan(0);
     for (const m of marked) {
@@ -109,7 +109,7 @@ describe("PostTurnHookChain", () => {
         expect(m.content).not.toContain("[tool_result stripped");
       }
     }
-    // saveSession 은 *stub 변환된* 형태 받음 (R4 mitigation) — content 짧음
+    // saveSession 은 *stub 변환된* 형태 받음 — content 짧음
     expect(saveSession).toHaveBeenCalledTimes(1);
     const persisted = saveSession.mock.calls[0]?.[1] as GenericMessage[];
     expect(persisted).toBeDefined();

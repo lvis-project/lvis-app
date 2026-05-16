@@ -18,7 +18,6 @@ import {
   Dialog,
   DialogClose,
   DialogContent,
-  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "../../../components/ui/dialog.js";
@@ -26,10 +25,10 @@ import type { LvisApi, PluginCardSummary } from "../types.js";
 import type { AddRoutineInput, RoutineRecord, RoutineExecution, RepeatKind, RoutineSchedule } from "../../../shared/routines-types.js";
 import { MAX_PERSISTED_ROUTINES, MAX_LLM_SESSION_ROUTINES } from "../../../shared/routines-types.js";
 import { isValidCronExpression } from "../../../routines/cron-evaluator.js";
-import { RoutineSessionView } from "./RoutineSessionView.js";
 
 export interface RoutinePanelProps {
   api: LvisApi;
+  onOpenSession?: (sessionId: string) => void;
 }
 
 // ─── Execution badge ─────────────────────────────────────────────────────────
@@ -50,13 +49,6 @@ interface RoutineRowProps {
   onRemove: (id: string) => void;
   onTriggerNow: (id: string) => void;
   recentlyFired: boolean;
-}
-
-interface RoutineSessionListItem {
-  routineId: string;
-  routineTitle: string;
-  firedAt: string;
-  jsonlPath: string;
 }
 
 function describeSchedule(routine: RoutineRecord): string {
@@ -136,13 +128,13 @@ function RoutineRow({ routine, onDismiss, onRemove, onTriggerNow, recentlyFired 
   );
 }
 
-function RoutineSessionRow({ session, onOpen }: { session: RoutineSessionListItem; onOpen: (jsonlPath: string) => void }) {
+function RoutineSessionRow({ session, onOpen }: { session: RoutineSessionListItem; onOpen: (sessionId: string) => void }) {
   return (
     <button
       type="button"
       className="w-full rounded-md border px-3 py-2 text-left transition hover:bg-muted/60"
       data-testid="routine-session-row"
-      onClick={() => onOpen(session.jsonlPath)}
+      onClick={() => onOpen(session.sessionId)}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
@@ -150,6 +142,11 @@ function RoutineSessionRow({ session, onOpen }: { session: RoutineSessionListIte
           <div className="mt-0.5 text-[11px] text-muted-foreground">
             {formatSessionTime(session.firedAt)}
           </div>
+          {session.preview && (
+            <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+              {session.preview}
+            </div>
+          )}
         </div>
         <Badge variant="outline">열기</Badge>
       </div>
@@ -620,13 +617,12 @@ export function AddRoutineModal({ api, onClose, onAdded }: AddRoutineModalProps)
 
 // ─── Main Panel ───────────────────────────────────────────────────────────────
 
-export function RoutinePanel({ api }: RoutinePanelProps) {
+export function RoutinePanel({ api, onOpenSession }: RoutinePanelProps) {
   const [routines, setRoutines] = useState<RoutineRecord[]>([]);
   const [routineSessions, setRoutineSessions] = useState<RoutineSessionListItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [recentlyFired, setRecentlyFired] = useState<string[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
-  const [selectedSessionPath, setSelectedSessionPath] = useState<string | null>(null);
   const mountedRef = useRef(true);
   useEffect(() => () => { mountedRef.current = false; }, []);
 
@@ -647,7 +643,8 @@ export function RoutinePanel({ api }: RoutinePanelProps) {
                 routineId: record.routineId,
                 routineTitle,
                 firedAt: record.firedAt,
-                jsonlPath: record.jsonlPath,
+                sessionId: record.sessionId,
+                preview: record.preview,
               }));
             }),
         )
@@ -784,9 +781,9 @@ export function RoutinePanel({ api }: RoutinePanelProps) {
                   <div className="space-y-2 pr-2">
                     {routineSessions.map((session) => (
                       <RoutineSessionRow
-                        key={`${session.routineId}:${session.firedAt}:${session.jsonlPath}`}
+                        key={`${session.routineId}:${session.firedAt}:${session.sessionId}`}
                         session={session}
-                        onOpen={setSelectedSessionPath}
+                        onOpen={(sessionId) => onOpenSession?.(sessionId)}
                       />
                     ))}
                   </div>
@@ -796,32 +793,6 @@ export function RoutinePanel({ api }: RoutinePanelProps) {
           </div>
         </CardContent>
       </Card>
-
-      <Dialog
-        open={selectedSessionPath !== null}
-        onOpenChange={(next) => { if (!next) setSelectedSessionPath(null); }}
-      >
-        <DialogContent
-          size="lg"
-          className="flex max-h-[85dvh] min-w-0 flex-col gap-0 overflow-hidden p-0"
-          data-testid="routine-panel-session-dialog"
-        >
-          <DialogHeader className="flex flex-row items-center justify-between space-y-0 border-b px-4 py-3">
-            <DialogTitle className="text-sm">루틴 세션 기록</DialogTitle>
-            <DialogClose asChild>
-              <Button size="sm" variant="ghost" aria-label="닫기">닫기</Button>
-            </DialogClose>
-          </DialogHeader>
-          <DialogDescription className="sr-only">
-            선택한 루틴 실행 기록을 봅니다.
-          </DialogDescription>
-          <div className="min-h-0 flex-1 overflow-auto p-4">
-            {selectedSessionPath && (
-              <RoutineSessionView api={api} jsonlPath={selectedSessionPath} />
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
 
       {showAddModal && (
         <AddRoutineModal
@@ -835,4 +806,11 @@ export function RoutinePanel({ api }: RoutinePanelProps) {
       )}
     </>
   );
+}
+interface RoutineSessionListItem {
+  routineId: string;
+  routineTitle: string;
+  firedAt: string;
+  sessionId: string;
+  preview: string;
 }
