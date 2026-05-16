@@ -753,6 +753,14 @@ const api = {
       return () =>
         ipcRenderer.removeListener(PERMISSIONS.deferredPending, listener);
     },
+    /** CRITICAL 4.1: memory-hit auto-approve disclosure — main→renderer event. */
+    onUserApprovalHit: (cb: (payload: { toolName: string; scope: "session" | "persistent"; verdictAtApproval: "low" | "medium" | "high" }) => void) => {
+      const listener = (_event: unknown, payload: { toolName: string; scope: "session" | "persistent"; verdictAtApproval: "low" | "medium" | "high" }) =>
+        cb(payload);
+      ipcRenderer.on(PERMISSIONS.userApprovalHit, listener);
+      return () =>
+        ipcRenderer.removeListener(PERMISSIONS.userApprovalHit, listener);
+    },
     /** Permission policy — `/permission reviewer ...` slash dispatch via IPC. */
     reviewerDispatch: async (rawArgs: string) =>
       ipcRenderer.invoke(PERMISSIONS.reviewerDispatch, { rawArgs, intent: ipcUserKeyboardIntent() }),
