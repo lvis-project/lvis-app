@@ -136,9 +136,9 @@ export type ToolEntryItem = {
 };
 
 export type ChatEntry =
-  | { kind: "user"; text: string; injectHint?: "queue" | "interrupt" }
-  | { kind: "reasoning"; text: string; streaming?: boolean }
-  | { kind: "assistant"; text: string; streaming?: boolean; route?: "command"; phase?: "work" | "final" }
+  | { kind: "user"; text: string; injectHint?: "queue" | "interrupt"; createdAt?: number }
+  | { kind: "reasoning"; text: string; streaming?: boolean; createdAt?: number }
+  | { kind: "assistant"; text: string; streaming?: boolean; route?: "command"; phase?: "work" | "final"; createdAt?: number }
   | { kind: "tool_group"; groupId: string; groupIds: string[]; status: "running" | "done" | "error"; tools: ToolEntryItem[] }
   | {
       kind: "ask_user_answer";

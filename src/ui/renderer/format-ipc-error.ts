@@ -99,7 +99,6 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "uninstall-failed": "플러그인 제거에 실패했습니다.",
   "marketplace-disabled": "마켓플레이스 기능이 비활성화되었습니다.",
   // Frame-trust gate (used by chat.ts + plugins.ts pluginConfigError helper)
-  "unauthorized-frame": "권한이 없는 프레임에서의 요청입니다.",
   // ── Legacy snake_case codes (src/ipc/domains/attach.ts) ──
   // These predate the kebab-case convention. New code MUST use kebab-case
   // (#803 IPC convention). The snake_case shape is grandfathered until the

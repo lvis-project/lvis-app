@@ -1300,20 +1300,32 @@ export class ConversationLoop {
         turnToolBreakdown.size > 0
           ? Object.fromEntries(turnToolBreakdown.entries())
           : undefined;
+      const turnSummaryPayload = {
+        turnDurationMs: Math.max(0, Date.now() - turnStartedAt),
+        toolCount: turnToolCount,
+        cumulativeToolMs: turnCumulativeToolMs,
+        tokensIn: turnTokensIn,
+        freshInputTokens: turnFreshInput,
+        tokensOut: turnTokensOut,
+        ...(turnCacheRead > 0 ? { cacheReadTokens: turnCacheRead } : {}),
+        ...(turnCacheWrite > 0 ? { cacheWriteTokens: turnCacheWrite } : {}),
+        ...(breakdown ? { breakdown } : {}),
+      };
       try {
-        callbacks?.onTurnSummary?.({
-          turnDurationMs: Math.max(0, Date.now() - turnStartedAt),
-          toolCount: turnToolCount,
-          cumulativeToolMs: turnCumulativeToolMs,
-          tokensIn: turnTokensIn,
-          freshInputTokens: turnFreshInput,
-          tokensOut: turnTokensOut,
-          ...(turnCacheRead > 0 ? { cacheReadTokens: turnCacheRead } : {}),
-          ...(turnCacheWrite > 0 ? { cacheWriteTokens: turnCacheWrite } : {}),
-          ...(breakdown ? { breakdown } : {}),
-        });
+        callbacks?.onTurnSummary?.(turnSummaryPayload);
       } catch {
         // Summary emission must never break turn completion.
+      }
+      // Persist turn-aggregate stats onto the turn-final assistant message so
+      // a reload reconstructs the same TokenCostBadge / TurnSummaryFooter
+      // numbers without re-running the loop. historyToEntries reads this
+      // meta and emits a `kind: "turn_summary"` ChatEntry after the last
+      // assistant entry of the turn. Silent on history with no assistant
+      // (rare tool-only termination) — nothing to attach to.
+      try {
+        this.history.attachToLastAssistant({ turnSummary: turnSummaryPayload });
+      } catch {
+        // Meta attach must never break turn completion either.
       }
     }
 

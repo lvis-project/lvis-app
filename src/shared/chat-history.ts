@@ -1,4 +1,4 @@
-import type { GenericMessage } from "../engine/llm/types.js";
+import type { GenericMessage, MessageMeta } from "../engine/llm/types.js";
 import { userContentText } from "../engine/llm/types.js";
 import { maskSensitiveData } from "./dlp.js";
 
@@ -7,6 +7,17 @@ export type SerializedHistoryToolCall = {
   name: string;
   input?: Record<string, unknown>;
 };
+
+/**
+ * Turn-aggregate stats carried on the turn-final assistant message. Mirrors
+ * `MessageMeta.turnSummary` 1:1 so the renderer can reconstruct a
+ * `kind: "turn_summary"` ChatEntry from persisted state without re-running
+ * the conversation loop.
+ */
+export type SerializedTurnSummary = NonNullable<MessageMeta["turnSummary"]>;
+
+/** Checkpoint metrics carried on the compactBoundary user message. */
+export type SerializedCheckpointMeta = NonNullable<MessageMeta["checkpointMeta"]>;
 
 // Exact IPC payload emitted by serializeHistoryMessage() for renderer history
 // replay: multimodal content is flattened at the boundary, while persisted
@@ -20,6 +31,12 @@ export type SerializedHistoryMessage = {
   toolUseId?: string;
   toolName?: string;
   isError?: boolean;
+  /** Wall-clock epoch ms when the message was created (see MessageMeta.createdAt). */
+  createdAt?: number;
+  /** Turn-aggregate stats — only on turn-final assistant messages. */
+  turnSummary?: SerializedTurnSummary;
+  /** Checkpoint metrics — only on compactBoundary user messages. */
+  checkpointMeta?: SerializedCheckpointMeta;
 };
 
 export function serializeHistoryMessage(
@@ -32,6 +49,11 @@ export function serializeHistoryMessage(
       : m.role === "tool_result"
         ? maskSensitiveData(m.content).masked
         : m.content;
+  const metaFields = {
+    ...(m.meta?.createdAt !== undefined ? { createdAt: m.meta.createdAt } : {}),
+    ...(m.meta?.turnSummary !== undefined ? { turnSummary: m.meta.turnSummary } : {}),
+    ...(m.meta?.checkpointMeta !== undefined ? { checkpointMeta: m.meta.checkpointMeta } : {}),
+  };
   const base = {
     index,
     role: m.role,
@@ -39,6 +61,7 @@ export function serializeHistoryMessage(
     // content is flattened to the same placeholders used by export/search,
     // while assistant/tool structural fields below are passed through intact.
     content,
+    ...metaFields,
   };
 
   if (m.role === "assistant") {

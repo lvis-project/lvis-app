@@ -1003,6 +1003,21 @@ export function App() {
                 setActiveView("routines");
                 searchCloseOverlay();
               }}
+              currentSessionId={currentSessionId}
+              streaming={streaming}
+              onRefreshSessions={refreshSessions}
+              onJumpToEntry={(entryIndex) => {
+                // Calendar popover in the search bar jumps to entries
+                // tagged with data-chat-entry-index in ChatView. Switch the
+                // view to home before scrolling so the entry is mounted.
+                setActiveView("home");
+                requestAnimationFrame(() => {
+                  const el = document.querySelector<HTMLElement>(
+                    `[data-chat-entry-index="${entryIndex}"]`,
+                  );
+                  el?.scrollIntoView({ behavior: "smooth", block: "start" });
+                });
+              }}
             />
           )}
 

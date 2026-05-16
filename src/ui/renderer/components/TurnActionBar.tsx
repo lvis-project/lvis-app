@@ -1,5 +1,5 @@
 import { RefreshCw, GitBranch, Star, ThumbsUp, ThumbsDown } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Button } from "../../../components/ui/button.js";
 import { Input } from "../../../components/ui/input.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
@@ -16,6 +16,7 @@ export type TurnSummaryForBadge = Pick<
 >;
 
 export function TurnActionBar({
+  timestamp,
   turnSummary,
   pricing,
   vendor,
@@ -23,6 +24,15 @@ export function TurnActionBar({
   actions,
   onFeedback,
 }: {
+  /**
+   * Wall-clock epoch ms when this turn's assistant message was created.
+   * Sourced from `ChatEntry.createdAt` (persisted on the assistant message's
+   * meta and propagated through historyToEntries). Undefined for legacy
+   * sessions written before per-message timestamps were stored — those
+   * render WITHOUT a time stamp (CLAUDE.md "No Fallback Code": better to
+   * show nothing than fake the load time as the original turn time).
+   */
+  timestamp?: number;
   turnSummary?: TurnSummaryForBadge;
   pricing?: TokenCostBadgePricing;
   /** Active vendor — selects cache-cost branching in TokenCostBadge. */
@@ -35,14 +45,17 @@ export function TurnActionBar({
   const [showReasonBox, setShowReasonBox] = useState(false);
   const [reasonDraft, setReasonDraft] = useState("");
 
-  const [timestamp] = useState(() => new Date().toLocaleTimeString("ko-KR", {
-    hour: "2-digit",
-    minute: "2-digit",
-  }));
+  const timestampLabel = useMemo(() => {
+    if (timestamp === undefined) return null;
+    return new Date(timestamp).toLocaleTimeString("ko-KR", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  }, [timestamp]);
 
   return (
     <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5 px-3">
-      <span className="shrink-0">{timestamp}</span>
+      {timestampLabel ? <span className="shrink-0">{timestampLabel}</span> : null}
       {turnSummary ? <TokenCostBadge {...turnSummary} pricing={pricing} vendor={vendor} /> : null}
       <div className="flex-1" />
       {actions?.onRetry && (

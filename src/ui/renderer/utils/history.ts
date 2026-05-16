@@ -18,6 +18,10 @@ export type PersistedHistoryMessage = SerializedHistoryMessage;
 // thought is work, and toolCalls/tool_result pairs form work units. Empty
 // assistant content is therefore structural only when thought/toolCalls exist;
 // it must preserve work boundaries without creating a blank answer bubble.
+//
+// `createdAt`, `turnSummary`, and `checkpointMeta` on the persisted message
+// flow through so the renderer shows real per-turn timestamps + token totals +
+// checkpoint dividers on session reload instead of mount-time fakes / zeros.
 export function historyToEntries(
   messages: PersistedHistoryMessage[],
 ): ChatEntry[] {
@@ -52,7 +56,32 @@ export function historyToEntries(
     }
     fallbackGroupId = null;
     if (m.role === "user") {
-      out.push({ kind: "user", text: textContent(m.content) });
+      // Compact-boundary marker — rebuild a CheckpointDivider rather than a
+      // normal user bubble so the visual matches what a live structured-compact
+      // turn would have rendered.
+      if (m.checkpointMeta) {
+        out.push({
+          kind: "checkpoint",
+          removedMessages: m.checkpointMeta.removedMessages,
+          freedTokens: m.checkpointMeta.freedTokens,
+          ...(m.checkpointMeta.trigger ? { trigger: m.checkpointMeta.trigger } : {}),
+          ...(m.checkpointMeta.compactStatus
+            ? { compactStatus: m.checkpointMeta.compactStatus }
+            : {}),
+          ...(m.checkpointMeta.summary !== undefined
+            ? { summary: m.checkpointMeta.summary }
+            : {}),
+          ...(m.checkpointMeta.truncatedDir !== undefined
+            ? { truncatedDir: m.checkpointMeta.truncatedDir }
+            : {}),
+        });
+        continue;
+      }
+      const userEntry: ChatEntry = { kind: "user", text: textContent(m.content) };
+      if (m.createdAt !== undefined) {
+        (userEntry as { createdAt?: number }).createdAt = m.createdAt;
+      }
+      out.push(userEntry);
     } else if (m.role === "assistant") {
       const text = textContent(m.content);
       const cleanedText = detectFromStream(text).cleanedText;
@@ -63,6 +92,19 @@ export function historyToEntries(
           : "";
       out = finalizeStreamingReasoning(out, m.thought ?? "");
       out = finalizeStreamingAssistant(out, visibleText);
+
+      // Stamp createdAt onto the assistant entry just emitted so TurnActionBar
+      // reads the original turn time. Walk backward since finalize may have
+      // interleaved reasoning + assistant near the tail.
+      if (m.createdAt !== undefined) {
+        for (let i = out.length - 1; i >= 0; i--) {
+          const entry = out[i];
+          if (entry.kind === "assistant" && entry.createdAt === undefined) {
+            (entry as { createdAt?: number }).createdAt = m.createdAt;
+            break;
+          }
+        }
+      }
 
       if (m.toolCalls?.length) {
         const groupId = `hist-tools-${m.index}`;
@@ -77,6 +119,29 @@ export function historyToEntries(
             displayOrder,
             input: toolCall.input,
           });
+        });
+      }
+
+      // Turn-final assistant — emit a turn_summary ChatEntry so the renderer
+      // shows real token / duration totals on reload. Only the turn-final
+      // assistant carries `turnSummary` (attached by ConversationLoop right
+      // after onTurnSummary fires).
+      if (m.turnSummary) {
+        out.push({
+          kind: "turn_summary",
+          turnDurationMs: m.turnSummary.turnDurationMs,
+          toolCount: m.turnSummary.toolCount,
+          cumulativeToolMs: m.turnSummary.cumulativeToolMs,
+          tokensIn: m.turnSummary.tokensIn,
+          freshInputTokens: m.turnSummary.freshInputTokens,
+          tokensOut: m.turnSummary.tokensOut,
+          ...(m.turnSummary.cacheReadTokens !== undefined
+            ? { cacheReadTokens: m.turnSummary.cacheReadTokens }
+            : {}),
+          ...(m.turnSummary.cacheWriteTokens !== undefined
+            ? { cacheWriteTokens: m.turnSummary.cacheWriteTokens }
+            : {}),
+          ...(m.turnSummary.breakdown ? { breakdown: m.turnSummary.breakdown } : {}),
         });
       }
     }

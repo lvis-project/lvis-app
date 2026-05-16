@@ -19,8 +19,24 @@ export class ConversationHistory {
   }
 
   append(message: GenericMessage): void {
-    this.messages.push(message);
+    this.messages.push(stampCreatedAt(message));
     this.trim();
+  }
+
+  /**
+   * Mutate the last assistant message's meta — used by the conversation
+   * loop to attach `turnSummary` to the turn-final assistant message right
+   * before persistence so the renderer can rebuild the turn footer on
+   * session reload. No-op when there is no assistant message yet.
+   */
+  attachToLastAssistant(meta: Partial<NonNullable<GenericMessage["meta"]>>): void {
+    for (let i = this.messages.length - 1; i >= 0; i--) {
+      const m = this.messages[i];
+      if (m.role === "assistant") {
+        m.meta = { ...(m.meta ?? {}), ...meta };
+        return;
+      }
+    }
   }
 
   getMessages(): GenericMessage[] {
@@ -40,6 +56,10 @@ export class ConversationHistory {
   }
 
   restore(messages: GenericMessage[]): void {
+    // Restore from disk — preserve original createdAt (set on prior session
+    // turn) rather than restamping with the load time. Messages with no
+    // createdAt (legacy sessions written before the field existed) stay
+    // undefined — UI renders nothing rather than fake a fresh timestamp.
     this.messages = normalizeToolPairInvariant(messages).messages;
     this.trim();
   }
@@ -85,6 +105,19 @@ export class ConversationHistory {
 
 interface NormalizeToolPairOptions {
   preserveOpenToolTail?: boolean;
+}
+
+/**
+ * Stamp `meta.createdAt` (wall-clock epoch ms) on any incoming message that
+ * doesn't already carry one. Append boundary is the single chokepoint for
+ * every message route (user input, LLM round assistant, executor tool_result,
+ * structured-compact boundary) so this is the right place to ensure every
+ * persisted row has a creation time. Existing createdAt is preserved so
+ * restored or programmatically-constructed messages keep their original time.
+ */
+function stampCreatedAt(message: GenericMessage): GenericMessage {
+  if (message.meta?.createdAt !== undefined) return message;
+  return { ...message, meta: { ...(message.meta ?? {}), createdAt: Date.now() } };
 }
 
 export function normalizeToolPairInvariant(
