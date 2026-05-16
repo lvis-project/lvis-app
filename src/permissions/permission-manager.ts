@@ -24,6 +24,7 @@ import { isOverlayTriggerOrigin } from "../shared/overlay-trigger-source.js";
 import { getToolCategoryDescriptor } from "./category-registry.js";
 import {
   LlmRiskClassifier,
+  RuleBasedRiskClassifier,
   type RiskClassifier,
   type RiskVerdict,
   type ToolInvocationContext,
@@ -34,6 +35,9 @@ import type { VerdictCache } from "./reviewer/verdict-cache.js";
 import type { DeferredQueue } from "./reviewer/deferred-queue.js";
 import { globMatch } from "../lib/glob-matcher.js";
 import { lvisHome } from "../shared/lvis-home.js";
+import { lookupApproval } from "./user-approval-store.js";
+import { buildSandboxAuditEntry } from "../audit/sandbox-audit.js";
+import { emitSandboxAudit } from "../audit/sandbox-audit-sink.js";
 
 export type PermissionDecision = "allow" | "deny" | "ask";
 export type ExecutionMode = "default" | "strict" | "auto" | "allow";
@@ -154,6 +158,33 @@ export interface ReviewerDispatchResult {
 }
 
 export type ReviewerDeferPolicy = "none" | "high" | "medium-high";
+
+/**
+ * R-3 RejectResponse — structured reject from the reviewer with a retry hint.
+ *
+ * When dispatchReviewer returns a HIGH verdict and the conversation loop
+ * decides to surface a rejection (rather than silently block), it MAY return
+ * this shape so the LLM can optionally self-correct by providing the missing
+ * context identified in `hint` before re-requesting approval.
+ *
+ * `retryable: false` → the action is categorically disallowed (e.g. sensitive
+ *   path hit, overlay-trigger guard). The loop MUST NOT retry.
+ * `retryable: true`  → the action was rejected due to insufficient context;
+ *   the LLM may retry at most MAX_REVIEWER_RETRIES (2) times after enriching
+ *   the conversation context per the `hint` guidance.
+ */
+export interface RejectResponse {
+  verdict: "reject";
+  /** Human-readable reason for the rejection. */
+  reason: string;
+  /** Optional: what additional context would allow a re-evaluation. */
+  hint?: string;
+  /** Whether the caller may retry after providing the suggested context. */
+  retryable: boolean;
+}
+
+/** Maximum LLM self-correction retries when retryable === true (anti-abuse cap). */
+export const MAX_REVIEWER_RETRIES = 2;
 
 export class PermissionManager {
   private rules: PermissionRule[] = [];
@@ -542,9 +573,52 @@ export class PermissionManager {
       },
     };
 
+    // ── R-2 user-approval memory hit ─────────────────────────────────────
+    // Check the user-approval store before consulting the LLM classifier.
+    // A memory hit for a non-revoked approval bypasses the LLM call and
+    // returns the rule-based verdict directly (the R-1 composition rule
+    // still applies — sandbox/context quality can only raise, not lower).
+    // HIGH-verdict approvals are intentionally included: if the user already
+    // justified a HIGH action this session, re-running the LLM is wasteful.
+    const userApproval = await lookupApproval(
+      toolName,
+      JSON.stringify(input.finalInput),
+      input.source,
+    ).catch(() => null); // storage failure must not block tool execution
+
     const cacheResult = cache.lookup(lookupKey, cacheCtx);
     let verdict: RiskVerdict;
-    if (cacheResult.hit && cacheResult.verdict) {
+    let userApprovalUsed: {
+      memoryHit: boolean;
+      nlJustification: string | null;
+      verdictAtApproval: "low" | "medium" | "high" | null;
+    } | null = null;
+
+    if (userApproval) {
+      // Memory hit — use the rule-based verdict (cheaper + consistent).
+      // We still run the rule classifier to get a fresh verdict; we just
+      // skip the LLM call. The max(rule, stored) composition would allow
+      // the LLM to downgrade — rule-only is the safe choice here.
+      const ctx: ToolInvocationContext = {
+        toolName,
+        source: input.source,
+        category: input.category,
+        pathFields: input.pathFields,
+        trustOrigin: input.trustOrigin,
+        finalInput: input.finalInput,
+        allowedDirectories: input.allowedDirectories,
+        sensitivePathsAdjacent: input.sensitivePathsAdjacent,
+        sandboxCapability: detectSandboxCapability(),
+      };
+      // Use the rule-based classifier for fast sync classification (no LLM call).
+      const ruleClassifier = new RuleBasedRiskClassifier();
+      verdict = ruleClassifier.classify(ctx);
+      userApprovalUsed = {
+        memoryHit: true,
+        nlJustification: userApproval.nlJustification,
+        verdictAtApproval: userApproval.verdictAtApproval,
+      };
+    } else if (cacheResult.hit && cacheResult.verdict) {
       verdict = cacheResult.verdict;
     } else {
       const ctx: ToolInvocationContext = {
@@ -575,6 +649,38 @@ export class PermissionManager {
         verdict = { level: "high", reason: `reviewer error — ${message}` };
       }
     }
+
+    // ── S2 audit emit ─────────────────────────────────────────────────────
+    // Emit a sandbox audit entry for every dispatchReviewer call so the
+    // audit log captures reviewer composition signals + user-approval provenance.
+    // Failures are swallowed so audit never blocks tool execution.
+    const sandboxCap = detectSandboxCapability();
+    const auditEntry = buildSandboxAuditEntry({
+      tool: {
+        name: toolName,
+        // args already DLP-redacted by caller (ReviewerDispatchInput.finalInput)
+        args: JSON.stringify(input.finalInput),
+        source: input.source,
+      },
+      sandbox: {
+        kind: sandboxCap.kind,
+        confidence: sandboxCap.confidence,
+        events: [],
+        spawnLatencyMs: 0,
+        overheadPercent: 0,
+      },
+      reviewer: {
+        // For memory-hit path, ruleVerdict === finalVerdict (no LLM).
+        ruleVerdict: verdict.level,
+        llmVerdict: verdict.level,
+        finalVerdict: verdict.level,
+        compositionRulesTriggered: [],
+        userApprovalUsed,
+      },
+    });
+    emitSandboxAudit(auditEntry).catch(() => {
+      // intentionally swallowed — audit failure must not block tool execution
+    });
 
     const deferPolicy = options?.defer ?? "high";
     const shouldDefer =

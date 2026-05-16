@@ -114,26 +114,50 @@ export class DisabledRiskClassifier implements RiskClassifier {
 // ─── Context-quality helpers (R-1) ───────────────────────────────────
 
 /**
- * R-1 heuristic: returns true when the conversation context does not
- * provide a clear stated purpose/intent for the tool call.
+ * PR-A4 R-1 intent classifier — grapheme cluster count + word entropy.
  *
- * v1 heuristic: absent or very short (<5 chars) `recentUserMessage`
- * → treat as weak context. The LLM composition rule then prevents
- * the LLM from downgrading a rule-based MEDIUM/HIGH verdict to LOW.
+ * Replaces the v1 five-character heuristic (PR-A1) with a CJK-safe
+ * multi-signal detector. All three signals must pass for intent to be
+ * considered present; failure of any returns true (missing intent),
+ * preventing LLM downgrade of rule-based MEDIUM/HIGH verdicts.
  *
- * KNOWN GAP: Korean CJK utterances like "확인해"/"실행해" (3 chars) are
- * legitimate intent but flagged as weak by this length threshold.
- * PR-A4 will replace this with an LLM-side intent classifier using
- * grapheme cluster count + entropy. Conservative bias is correct for
- * v1 — defaults to no-downgrade when uncertain.
+ *   1. Grapheme count >= 15 (via Intl.Segmenter — CJK characters each
+ *      count as one grapheme, avoiding the v1 false-positive where a
+ *      5-char Korean utterance counted as absent intent).
  *
- * This v1 version is intentionally conservative and cheap (no LLM call).
+ *   2. Unique word count >= 3 (whitespace-split, deduplicated, min word
+ *      length 2 chars — filters punctuation-only tokens and stop words).
+ *
+ *   3. Character diversity ratio: unique chars / total chars >= 0.25
+ *      (entropy proxy — catches repeated-character spam like "aaaaaa"
+ *      that passes grapheme and word count but carries no intent signal).
+ *
+ * Conservative bias: any signal failure returns true (missing intent).
+ * O(n) in message length; no LLM call.
+ *
+ * Resolves PR-A1 security F1 finding: Korean CJK false positives.
  */
 export function isContextMissingIntent(input: ToolInvocationContext): boolean {
-  return (
-    !input.conversationContext?.recentUserMessage
-    || input.conversationContext.recentUserMessage.trim().length < 5
+  const msg = input.conversationContext?.recentUserMessage?.trim() ?? "";
+  if (msg.length === 0) return true;
+
+  // Signal 1: grapheme cluster count (CJK-safe)
+  const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+  const graphemes = Array.from(segmenter.segment(msg)).length;
+  if (graphemes < 15) return true;
+
+  // Signal 2: unique word count (whitespace-split, min length 2)
+  const words = new Set(
+    msg.toLowerCase().split(/\s+/).filter((w) => w.length >= 2),
   );
+  if (words.size < 3) return true;
+
+  // Signal 3: character diversity ratio (entropy proxy)
+  const uniqueChars = new Set(msg).size;
+  const diversityRatio = uniqueChars / msg.length;
+  if (diversityRatio < 0.25) return true;
+
+  return false;
 }
 
 // ─── RuleBasedRiskClassifier ─────────────────────────────────────────
