@@ -314,7 +314,7 @@ describe("PermissionsTab hook quarantine notice", () => {
     });
 
     expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("show");
-    expect(screen.getAllByText("명시 승인만").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("명시 액션 필수").length).toBeGreaterThan(0);
 
     await act(async () => {
       fireEvent.click(screen.getByTestId("reviewer-mode-llm"));
