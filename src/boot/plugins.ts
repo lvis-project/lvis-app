@@ -225,6 +225,7 @@ export function registerPluginEventBridge(
 export function registerPluginNotifications(
   pluginRuntime: PluginRuntime,
   mainWindow: BrowserWindow,
+  auditLogger?: Pick<AuditLogger, "log">,
 ): () => void {
   if (!Notification.isSupported()) return () => {};
 
@@ -234,6 +235,7 @@ export function registerPluginNotifications(
   const registeredEvents = new Set<string>();
 
   for (const { manifest } of pluginRuntime.listPluginManifests()) {
+    const pluginId = manifest.id;
     const notificationEvents = Array.isArray(manifest.notificationEvents)
       ? manifest.notificationEvents
       : [];
@@ -262,6 +264,46 @@ export function registerPluginNotifications(
       registeredEvents.add(event);
       const { titleField, bodyField } = spec;
       const handler: EventHandler = (data) => {
+        // Focus gate — plugin events fire on every turn-end / job-complete
+        // and the prior unconditional `new Notification(...)` produced a
+        // pop on every cycle even when the user was actively typing in the
+        // chat. Match the policy enforced by NotificationService: native OS
+        // notifications are reserved for "user is away" cues.
+        //
+        // Destroyed-window semantics: the `!isDestroyed()` short-circuit
+        // evaluates `focused === false`, so the gate falls through to fire an
+        // OS notification even after the window is gone. The click handler
+        // below then no-ops via its own `isDestroyed()` guard — a graceful
+        // degradation, not a uniform stance with the click handler (which
+        // returns early on destroyed).
+        const focused =
+          !mainWindow.isDestroyed() &&
+          mainWindow.isFocused() &&
+          !mainWindow.isMinimized();
+        if (focused) {
+          // Structured audit row mirrors NotificationService.auditSuppressed.
+          // pluginId is included so field telemetry can attribute runaway
+          // emit loops to a specific plugin (the dev-time `log.debug` is
+          // filtered out at the default production log level).
+          log.debug(`plugin notification "${event}" suppressed — window focused`);
+          try {
+            auditLogger?.log({
+              timestamp: new Date().toISOString(),
+              sessionId: "plugin-notification",
+              type: "info",
+              input: JSON.stringify({
+                event: "notification.suppressed",
+                kind: "plugin",
+                reason: "window-focused",
+                pluginId,
+                pluginEvent: event,
+              }),
+            });
+          } catch {
+            // audit failure must never block notification suppression
+          }
+          return;
+        }
         const resolvedTitle = titleField ? getFieldByPath(data, titleField) : "";
         const title = resolvedTitle || event;
         const body = bodyField ? getFieldByPath(data, bodyField) : "";
