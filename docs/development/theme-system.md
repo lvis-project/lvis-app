@@ -300,3 +300,9 @@ strong / 14% hover) to meet WCAG AA+ contrast requirements on black backgrounds.
 
 Follow-up migration PRs for meeting, local-indexer, and agent-hub will replace
 their private color-mix derivations with these host-provided tokens.
+
+**Box-shadow elevation tokens (follow-up):** `--lvis-elevation-shadow-soft` and
+`--lvis-elevation-shadow-strong` (full `box-shadow` offset+blur+color values) are
+intentionally deferred to a separate PR. Meeting plugin's `--pm-toggle-hover-shadow`
+and `--pm-toggle-selected-shadow` remain as-is until that elevation family lands.
+This keeps the current 7-token set's scope tight while documenting the gap.
