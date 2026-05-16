@@ -140,7 +140,7 @@ export interface PluginRuntimeOptions {
    * Fires after a plugin's instance is in the `loaded + started` state and
    * the runtime considers it callable — symmetric to {@link onDisable}.
    * Currently invoked after a successful `restartPlugin`, `addPlugin`, or
-   * `reloadPlugin`. The host wires this to `syncPluginToolRegistry(...)` so a
+   * `reloadPlugin`. The host wires this to targeted ToolRegistry sync so a
    * post-restart sync re-registers the tools that the tear-down phase
    * removed; without it the ToolRegistry stays empty and every chat-surface
    * tool call reports `도구를 찾을 수 없습니다: <tool>` until the next

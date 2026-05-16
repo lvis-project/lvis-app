@@ -110,11 +110,68 @@ export class ToolRegistry {
 
   /** Remove every tool contributed by the given plugin. */
   unregisterByPlugin(pluginId: string): void {
-    for (const [name, versionMap] of this.versioned) {
-      for (const [version, tool] of versionMap) {
-        if (tool.pluginId === pluginId) versionMap.delete(version);
+    this.replacePluginTools([pluginId], []);
+  }
+
+  /** Plugin ids that currently contribute at least one registered tool version. */
+  listPluginIds(): string[] {
+    const ids = new Set<string>();
+    for (const versionMap of this.versioned.values()) {
+      for (const tool of versionMap.values()) {
+        if (tool.source === "plugin" && tool.pluginId) ids.add(tool.pluginId);
       }
-      this.syncLatest(name, versionMap);
+    }
+    return [...ids];
+  }
+
+  /**
+   * Atomically replace every registered tool owned by the given plugins.
+   *
+   * The replacement is computed against cloned indexes first. If validation or
+   * duplicate detection fails, the live registry is untouched.
+   */
+  replacePluginTools(pluginIds: Iterable<string>, replacementTools: Tool[]): void {
+    const targetPluginIds = new Set([...pluginIds].filter((id) => id.length > 0));
+    if (targetPluginIds.size === 0) {
+      if (replacementTools.length > 0) {
+        throw new Error("replacePluginTools requires pluginIds for replacement tools");
+      }
+      return;
+    }
+
+    for (const tool of replacementTools) {
+      if (tool.source !== "plugin" || !tool.pluginId) {
+        throw new Error(`replacePluginTools expected plugin-sourced tool: ${tool.name}`);
+      }
+      if (!targetPluginIds.has(tool.pluginId)) {
+        throw new Error(
+          `replacePluginTools received tool '${tool.name}' for plugin '${tool.pluginId}' outside target set`,
+        );
+      }
+    }
+
+    const nextVersioned = this.cloneVersioned();
+    for (const [name, versionMap] of nextVersioned) {
+      for (const [version, tool] of versionMap) {
+        if (tool.pluginId && targetPluginIds.has(tool.pluginId)) {
+          versionMap.delete(version);
+        }
+      }
+      if (versionMap.size === 0) nextVersioned.delete(name);
+    }
+
+    for (const tool of replacementTools) {
+      this.addToVersioned(nextVersioned, tool);
+    }
+    const nextTools = this.buildLatestMap(nextVersioned);
+
+    this.versioned.clear();
+    for (const [name, versionMap] of nextVersioned) {
+      this.versioned.set(name, versionMap);
+    }
+    this.tools.clear();
+    for (const [name, tool] of nextTools) {
+      this.tools.set(name, tool);
     }
   }
 
@@ -312,6 +369,31 @@ export class ToolRegistry {
     return pool.reduce((best, cur) =>
       compareSemver(cur.version, best.version) > 0 ? cur : best,
     );
+  }
+
+  private cloneVersioned(): Map<string, Map<string, Tool>> {
+    const clone = new Map<string, Map<string, Tool>>();
+    for (const [name, versionMap] of this.versioned) {
+      clone.set(name, new Map(versionMap));
+    }
+    return clone;
+  }
+
+  private addToVersioned(index: Map<string, Map<string, Tool>>, tool: Tool): void {
+    const versionMap = index.get(tool.name) ?? new Map<string, Tool>();
+    if (versionMap.has(tool.version)) {
+      throw new Error(`Tool already registered: ${tool.name}@${tool.version}`);
+    }
+    versionMap.set(tool.version, tool);
+    index.set(tool.name, versionMap);
+  }
+
+  private buildLatestMap(index: Map<string, Map<string, Tool>>): Map<string, Tool> {
+    const latest = new Map<string, Tool>();
+    for (const [name, versionMap] of index) {
+      if (versionMap.size > 0) latest.set(name, this.pickLatest(versionMap));
+    }
+    return latest;
   }
 
   /** Recompute the `tools` map entry for `name` after a version change. */
