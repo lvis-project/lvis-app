@@ -753,6 +753,14 @@ const api = {
       return () =>
         ipcRenderer.removeListener(PERMISSIONS.deferredPending, listener);
     },
+    /** CRITICAL 4.1: memory-hit auto-approve disclosure — main→renderer event. */
+    onUserApprovalHit: (cb: (payload: { toolName: string; scope: "session" | "persistent"; verdictAtApproval: "low" | "medium" | "high" }) => void) => {
+      const listener = (_event: unknown, payload: { toolName: string; scope: "session" | "persistent"; verdictAtApproval: "low" | "medium" | "high" }) =>
+        cb(payload);
+      ipcRenderer.on(PERMISSIONS.userApprovalHit, listener);
+      return () =>
+        ipcRenderer.removeListener(PERMISSIONS.userApprovalHit, listener);
+    },
     /** Permission policy — `/permission reviewer ...` slash dispatch via IPC. */
     reviewerDispatch: async (rawArgs: string) =>
       ipcRenderer.invoke(PERMISSIONS.reviewerDispatch, { rawArgs, intent: ipcUserKeyboardIntent() }),
@@ -803,6 +811,28 @@ const api = {
     /** 사용자 결정을 main으로 전송 */
     respond: async (decision: unknown) =>
       ipcRenderer.invoke(PERMISSIONS.approvalRespond, decision),
+  },
+
+  // ─── R-2 User-Approval Store (PR-A4) ─────────────
+  userApproval: {
+    /** Record a user approval decision (scope: session | persistent). */
+    record: async (entry: {
+      toolName: string;
+      args: string;
+      source: string;
+      scope: "session" | "persistent";
+      verdictAtApproval: "low" | "medium" | "high";
+      nlJustification: string | null;
+      /** R-2 Round-3: propagated for record/lookup key symmetry. */
+      trustOrigin?: string;
+      /** R-2 Round-3: propagated for record/lookup key symmetry. */
+      approvalCacheKey?: string;
+    }) => ipcRenderer.invoke(PERMISSIONS.userApprovalRecord, entry),
+    /** Revoke an approval by raw composite key. */
+    revokeByKey: async (key: string) =>
+      ipcRenderer.invoke(PERMISSIONS.userApprovalRevoke, key),
+    /** List all approval entries (for PermissionsTab display). */
+    list: async () => ipcRenderer.invoke(PERMISSIONS.userApprovalList),
   },
 
   // ─── DLP Hit Statistics (Observability) ─────────
@@ -1183,6 +1213,7 @@ contextBridge.exposeInMainWorld("lvisWindow", {
 contextBridge.exposeInMainWorld("lvis", {
   permission: api.permission,
   approval: api.approval,
+  userApproval: api.userApproval,
   policy: api.policy,
   mcp: api.mcp,
   plugins: {

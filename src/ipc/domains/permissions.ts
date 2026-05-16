@@ -21,6 +21,12 @@ import {
   REVIEWER_PROVIDERS_SET,
   type ReviewerProvider,
 } from "../../permissions/permission-settings-store.js";
+import {
+  recordApproval,
+  revokeApprovalByKey,
+  listApprovals,
+  canonicalStringify,
+} from "../../permissions/user-approval-store.js";
 
 function validateRulePatternInput(pattern: unknown): { ok: true; pattern: string } | { ok: false; error: string; message: string } {
   if (typeof pattern !== "string") {
@@ -464,6 +470,89 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
       return { ok: true, policy: updated };
     } catch (err) {
       return { ok: false, error: "managed", message: (err as Error).message };
+    }
+  });
+
+  // ── R-2 User-Approval Store handlers (PR-A4) ──────────────────────────
+
+  ipcMain.handle(PERMISSIONS.userApprovalRecord, async (e, payload: unknown) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, PERMISSIONS.userApprovalRecord, e); return UNAUTHORIZED_FRAME; }
+    const body = payloadRecord(payload);
+    const toolName = body.toolName;
+    const args = body.args;
+    const source = body.source;
+    const scope = body.scope;
+    const verdictAtApproval = body.verdictAtApproval;
+    const nlJustification = body.nlJustification;
+    // R-2 Round-3: extract optional fields for record/lookup key symmetry.
+    const trustOrigin = typeof body.trustOrigin === "string" ? body.trustOrigin : undefined;
+    const approvalCacheKey = typeof body.approvalCacheKey === "string" ? body.approvalCacheKey : undefined;
+    if (
+      typeof toolName !== "string" ||
+      typeof args !== "string" ||
+      typeof source !== "string" ||
+      (scope !== "session" && scope !== "persistent") ||
+      (verdictAtApproval !== "low" && verdictAtApproval !== "medium" && verdictAtApproval !== "high")
+    ) {
+      return { ok: false, error: "invalid-payload", message: "user-approval record: invalid payload" };
+    }
+    // R-4 HIGH verdict enforcement: HIGH approvals must use session scope and
+    // include a non-empty NL justification. Enforced here in the IPC handler
+    // (renderer-side XSS bypass protection) in addition to dialog-level guards.
+    if (verdictAtApproval === "high") {
+      if (scope !== "session") {
+        return { ok: false, error: "high-requires-session-scope", message: "HIGH verdict approvals must use session scope (per R-4 design)" };
+      }
+      if (typeof nlJustification !== "string" || nlJustification.trim().length === 0) {
+        return { ok: false, error: "high-requires-justification", message: "HIGH verdict approvals require non-empty NL justification" };
+      }
+    }
+    try {
+      // MEDIUM security-M2: canonicalize at IPC handler to catch any non-renderer
+      // callers that bypass the renderer-side canonicalization. Non-JSON or
+      // non-object args are explicitly rejected (CLAUDE.md No Fallback Code).
+      let canonicalArgs: string;
+      try {
+        const parsed = JSON.parse(args);
+        if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+          return { ok: false, error: "args-not-object", message: "user-approval record: args must be a JSON object" };
+        }
+        canonicalArgs = canonicalStringify(parsed);
+      } catch {
+        return { ok: false, error: "args-not-json", message: "user-approval record: args must be valid JSON" };
+      }
+      await recordApproval(toolName, canonicalArgs, source, {
+        scope,
+        verdictAtApproval,
+        nlJustification: typeof nlJustification === "string" ? nlJustification : null,
+        trustOrigin,
+        approvalCacheKey,
+      });
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: "managed", message: (err as Error).message };
+    }
+  });
+
+  ipcMain.handle(PERMISSIONS.userApprovalRevoke, async (e, key: unknown) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, PERMISSIONS.userApprovalRevoke, e); return UNAUTHORIZED_FRAME; }
+    if (typeof key !== "string" || key.trim().length === 0) {
+      return { ok: false, error: "invalid-key", message: "revoke: key must be a non-empty string" };
+    }
+    try {
+      await revokeApprovalByKey(key.trim());
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: "managed", message: (err as Error).message };
+    }
+  });
+
+  ipcMain.handle(PERMISSIONS.userApprovalList, async (e) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, PERMISSIONS.userApprovalList, e); return UNAUTHORIZED_FRAME; }
+    try {
+      return await listApprovals();
+    } catch {
+      return [];
     }
   });
 }

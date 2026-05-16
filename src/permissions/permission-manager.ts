@@ -24,6 +24,8 @@ import { isOverlayTriggerOrigin } from "../shared/overlay-trigger-source.js";
 import { getToolCategoryDescriptor } from "./category-registry.js";
 import {
   LlmRiskClassifier,
+  RuleBasedRiskClassifier,
+  maxVerdict,
   type RiskClassifier,
   type RiskVerdict,
   type ToolInvocationContext,
@@ -34,6 +36,9 @@ import type { VerdictCache } from "./reviewer/verdict-cache.js";
 import type { DeferredQueue } from "./reviewer/deferred-queue.js";
 import { globMatch } from "../lib/glob-matcher.js";
 import { lvisHome } from "../shared/lvis-home.js";
+import { lookupApproval, canonicalStringify } from "./user-approval-store.js";
+import { buildSandboxAuditEntry } from "../audit/sandbox-audit.js";
+import { emitSandboxAudit } from "../audit/sandbox-audit-sink.js";
 
 export type PermissionDecision = "allow" | "deny" | "ask";
 export type ExecutionMode = "default" | "strict" | "auto" | "allow";
@@ -155,6 +160,11 @@ export interface ReviewerDispatchResult {
 
 export type ReviewerDeferPolicy = "none" | "high" | "medium-high";
 
+// R-3 RejectResponse interface and MAX_REVIEWER_RETRIES deferred to follow-up.
+// The R-3 LLM caller retry wiring lives in conversation-loop.ts scope — outside
+// the 17-file boundary of PR-A4. Tracked in follow-up issue for "R-3 LLM caller
+// retry wiring" with max 2 retry / counter scope / args-change-reset contract.
+
 export class PermissionManager {
   private rules: PermissionRule[] = [];
   private mode: ExecutionMode = "default";
@@ -177,6 +187,8 @@ export class PermissionManager {
    * decide whether to set `reviewer.route='foreground-auto'`.
    */
   private interactiveAutoApprove: "off" | "low" = "off";
+  /** CRITICAL 4.1: optional broadcast for memory-hit auto-approve disclosure */
+  private broadcastUserApprovalHit: ((payload: { toolName: string; scope: "session" | "persistent"; verdictAtApproval: "low" | "medium" | "high" }) => void) | null = null;
 
   constructor(permissionsFilePath?: string) {
     this.permissionsFilePath =
@@ -220,6 +232,15 @@ export class PermissionManager {
 
   getInteractiveAutoApprove(): "off" | "low" {
     return this.interactiveAutoApprove;
+  }
+
+  /**
+   * CRITICAL 4.1 — wire renderer broadcast for memory-hit auto-approve disclosure.
+   * Called once at boot. When set, every R-2 memory hit emits
+   * `lvis:permissions:user-approval-hit` to the renderer and a console.info log.
+   */
+  setBroadcastUserApprovalHit(fn: (payload: { toolName: string; scope: "session" | "persistent"; verdictAtApproval: "low" | "medium" | "high" }) => void): void {
+    this.broadcastUserApprovalHit = fn;
   }
 
   /**
@@ -542,9 +563,65 @@ export class PermissionManager {
       },
     };
 
+    // ── R-2 user-approval memory hit ─────────────────────────────────────
+    // Check the user-approval store before consulting the LLM classifier.
+    // A memory hit for a non-revoked approval bypasses the LLM call and
+    // returns the rule-based verdict directly (the R-1 composition rule
+    // still applies — sandbox/context quality can only raise, not lower).
+    // HIGH-verdict approvals are intentionally included: if the user already
+    // justified a HIGH action this session, re-running the LLM is wasteful.
+    const userApproval = await lookupApproval(
+      toolName,
+      canonicalStringify(input.finalInput),
+      input.source,
+      input.trustOrigin,
+      input.approvalCacheKey,
+    ).catch(() => null); // storage failure must not block tool execution
+
     const cacheResult = cache.lookup(lookupKey, cacheCtx);
     let verdict: RiskVerdict;
-    if (cacheResult.hit && cacheResult.verdict) {
+    let userApprovalUsed: {
+      memoryHit: boolean;
+      nlJustification: string | null;
+      verdictAtApproval: "low" | "medium" | "high" | null;
+    } | null = null;
+
+    if (userApproval) {
+      // Memory hit — use the rule-based verdict (cheaper + consistent).
+      // We still run the rule classifier to get a fresh verdict; we just
+      // skip the LLM call. The max(rule, stored) composition would allow
+      // the LLM to downgrade — rule-only is the safe choice here.
+      const ctx: ToolInvocationContext = {
+        toolName,
+        source: input.source,
+        category: input.category,
+        pathFields: input.pathFields,
+        trustOrigin: input.trustOrigin,
+        finalInput: input.finalInput,
+        allowedDirectories: input.allowedDirectories,
+        sensitivePathsAdjacent: input.sensitivePathsAdjacent,
+        sandboxCapability: detectSandboxCapability(),
+      };
+      // Use the rule-based classifier for fast sync classification (no LLM call).
+      // Take max(ruleVerdict, verdictAtApproval) so a stored HIGH approval cannot
+      // be silently downgraded if the rule classifier now returns LOW/MEDIUM.
+      const ruleClassifier = new RuleBasedRiskClassifier();
+      const ruleVerdict = ruleClassifier.classify(ctx);
+      const storedLevel = userApproval.verdictAtApproval;
+      verdict = maxVerdict(ruleVerdict, { level: storedLevel, reason: `stored approval verdict at approval time` });
+      userApprovalUsed = {
+        memoryHit: true,
+        nlJustification: userApproval.nlJustification,
+        verdictAtApproval: userApproval.verdictAtApproval,
+      };
+      // CRITICAL 4.1: disclose memory-hit auto-approve to renderer + log
+      console.info(`[permission] memory-hit auto-approve: ${toolName} (scope=${userApproval.scope}, verdict=${userApproval.verdictAtApproval})`);
+      try {
+        this.broadcastUserApprovalHit?.({ toolName, scope: userApproval.scope, verdictAtApproval: userApproval.verdictAtApproval });
+      } catch {
+        // broadcast failure must not block tool execution
+      }
+    } else if (cacheResult.hit && cacheResult.verdict) {
       verdict = cacheResult.verdict;
     } else {
       const ctx: ToolInvocationContext = {
@@ -575,6 +652,38 @@ export class PermissionManager {
         verdict = { level: "high", reason: `reviewer error — ${message}` };
       }
     }
+
+    // ── S2 audit emit ─────────────────────────────────────────────────────
+    // Emit a sandbox audit entry for every dispatchReviewer call so the
+    // audit log captures reviewer composition signals + user-approval provenance.
+    // Failures are swallowed so audit never blocks tool execution.
+    const sandboxCap = detectSandboxCapability();
+    const auditEntry = buildSandboxAuditEntry({
+      tool: {
+        name: toolName,
+        // args already DLP-redacted by caller (ReviewerDispatchInput.finalInput)
+        args: JSON.stringify(input.finalInput),
+        source: input.source,
+      },
+      sandbox: {
+        kind: sandboxCap.kind,
+        confidence: sandboxCap.confidence,
+        events: [],
+        spawnLatencyMs: 0,
+        overheadPercent: 0,
+      },
+      reviewer: {
+        // For memory-hit path, ruleVerdict === finalVerdict (no LLM).
+        ruleVerdict: verdict.level,
+        llmVerdict: verdict.level,
+        finalVerdict: verdict.level,
+        compositionRulesTriggered: [],
+        userApprovalUsed,
+      },
+    });
+    emitSandboxAudit(auditEntry).catch(() => {
+      // intentionally swallowed — audit failure must not block tool execution
+    });
 
     const deferPolicy = options?.defer ?? "high";
     const shouldDefer =

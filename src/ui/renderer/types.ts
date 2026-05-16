@@ -631,6 +631,13 @@ export type ApprovalRequest = {
   /** Permission policy §9 — trust-origin classification, e.g. "user" / "agent". */
   trustOrigin?: string;
   /**
+   * R-2 Round-3: semantic cache key for the approval (e.g. a stable hash of
+   * the tool invocation, distinct from the raw args string). Propagated from
+   * the main process so the renderer can include it in the record IPC call,
+   * ensuring record/lookup key symmetry in user-approval-store.
+   */
+  approvalCacheKey?: string;
+  /**
    * Issue #691 — OS-level execution sandbox capability captured at
    * request build time. Renderer surfaces this in the approval card so
    * the user can see whether the tool will run under bubblewrap /
@@ -660,6 +667,34 @@ export type ApprovalDecision = {
   export type LvisApprovalApi = {
   onRequest: (cb: (req: ApprovalRequest) => void) => () => void;
   respond: (decision: ApprovalDecision) => Promise<unknown>;
+};
+
+/** R-2 User-Approval Store API (PR-A4) */
+export type LvisUserApprovalApi = {
+  record: (entry: {
+    toolName: string;
+    args: string;
+    source: string;
+    scope: "session" | "persistent";
+    verdictAtApproval: "low" | "medium" | "high";
+    nlJustification: string | null;
+    /** R-2 Round-3: propagate trust origin for record/lookup key symmetry. */
+    trustOrigin?: string;
+    /** R-2 Round-3: propagate cache key for record/lookup key symmetry. */
+    approvalCacheKey?: string;
+  }) => Promise<{ ok: boolean; error?: string; message?: string }>;
+  revokeByKey: (key: string) => Promise<{ ok: boolean; error?: string; message?: string }>;
+  list: () => Promise<Array<{
+    key: string;
+    approvedAt: string;
+    scope: "session" | "persistent";
+    verdictAtApproval: "low" | "medium" | "high";
+    nlJustification: string | null;
+    revokedAt: string | null;
+    /** R-2 Round-3: display metadata stored alongside the entry. */
+    toolName?: string;
+    source?: string;
+  }>>;
 };
 
 export type PermissionRule = { pattern: string; action: "allow" | "deny"; source?: string };
@@ -970,6 +1005,7 @@ declare global {
     lvis: {
       permission: LvisPermissionApi;
       approval: LvisApprovalApi;
+      userApproval: LvisUserApprovalApi;
       policy: LvisPolicyApi;
       mcp: LvisMcpApi;
       plugins: LvisPluginsApi;
