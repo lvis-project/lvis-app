@@ -156,7 +156,42 @@ describe("Routine flow (Phase 3.3 regression net)", () => {
       expect(api.chatSessionResume).toHaveBeenCalledWith("routine-session-1");
       expect(api.chatSessionHistory).toHaveBeenCalledWith("routine-session-1");
     });
+    await waitFor(() => {
+      expect(api.acknowledgeRoutineResultV2).toHaveBeenCalledWith("schedule-daily", expect.any(String));
+      expect(container.querySelector('[data-testid="routine-card"]')).toBeFalsy();
+    });
     expect(api.listRoutineSessionsV2).not.toHaveBeenCalled();
+  });
+
+  it("does not acknowledge or dismiss a routine result when opening its session fails", async () => {
+    const { container, api, emitRoutineFiredV2 } = await renderApp();
+    api.chatSessionResume.mockResolvedValueOnce({
+      ok: false,
+      compacted: false,
+      compactedAt: null,
+      removedMessageCount: 0,
+    });
+    await act(async () => {
+      emitRoutineFiredV2({
+        ...makeRoutineResult(),
+        routineSessionId: "missing-routine-session",
+      });
+    });
+    const primary = await waitFor(() => {
+      const el = container.querySelector('[data-testid="overlay-card-primary-action"]');
+      if (!el) throw new Error("primary action not rendered");
+      return el;
+    });
+
+    await act(async () => {
+      fireEvent.click(primary);
+      await Promise.resolve();
+    });
+
+    expect(api.chatSessionResume).toHaveBeenCalledWith("missing-routine-session");
+    expect(api.chatSessionHistory).not.toHaveBeenCalledWith("missing-routine-session");
+    expect(api.acknowledgeRoutineResultV2).not.toHaveBeenCalled();
+    expect(container.querySelector('[data-testid="routine-card"]')).toBeTruthy();
   });
 
   it("does not open or acknowledge a routine session while the active chat is streaming", async () => {

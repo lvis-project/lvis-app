@@ -28,7 +28,7 @@ export function DayDivider({
   sessions?: SessionSummary[];
   currentSessionId?: string;
   streaming?: boolean;
-  onLoadSession?: (sessionId: string) => void | Promise<void>;
+  onLoadSession?: (sessionId: string) => void | boolean | Promise<void | boolean>;
   onRefreshSessions?: () => void | Promise<void>;
 }) {
   const key = dateKey ?? getKoreaDateKey(new Date());
