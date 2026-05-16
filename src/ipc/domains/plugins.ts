@@ -878,6 +878,40 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   });
 
   // ─── MCP ──────────────────────────────────────
+
+  // MEDIUM-2: in-process token-bucket rate limiter for set-api-key (5 calls/min/serverId)
+  const setApiKeyRateBucket = new Map<string, { count: number; windowStart: number }>();
+  const SET_API_KEY_MAX_CALLS = 5;
+  const SET_API_KEY_WINDOW_MS = 60_000;
+
+  function checkSetApiKeyRateLimit(serverId: string): boolean {
+    // NOTE: Date.now() relies on wall clock; NTP adjustment or laptop sleep
+    // can cause windowStart to be > now (negative delta), locking the bucket
+    // until clock catches up. Acceptable for 5/min limits — switch to
+    // performance.now() if monotonic semantics become critical.
+    const now = Date.now();
+    // Lazy GC: when Map exceeds 64 entries, evict expired windows to bound
+    // memory under serverId fuzzing (NEW-2 MEDIUM). 64 active servers is a
+    // generous real-world ceiling; anything beyond is adversarial.
+    if (setApiKeyRateBucket.size > 64) {
+      for (const [k, b] of setApiKeyRateBucket) {
+        if (now - b.windowStart >= SET_API_KEY_WINDOW_MS) {
+          setApiKeyRateBucket.delete(k);
+        }
+      }
+    }
+    const bucket = setApiKeyRateBucket.get(serverId);
+    if (!bucket || now - bucket.windowStart >= SET_API_KEY_WINDOW_MS) {
+      setApiKeyRateBucket.set(serverId, { count: 1, windowStart: now });
+      return true;
+    }
+    if (bucket.count >= SET_API_KEY_MAX_CALLS) {
+      return false;
+    }
+    bucket.count += 1;
+    return true;
+  }
+
   ipcMain.handle("lvis:mcp:servers", (e) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:mcp:servers", e); return UNAUTHORIZED_FRAME; }
     return deps.mcpManager.listServers();
@@ -897,6 +931,13 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   ipcMain.handle("lvis:mcp:config:add", async (e, config: unknown) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:mcp:config:add", e); return UNAUTHORIZED_FRAME; }
     return deps.mcpManager.addConfig(config as import("../../mcp/types.js").McpServerConfig);
+  });
+  ipcMain.handle("lvis:mcp:config:set-api-key", async (e, serverId: string, apiKey: string) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:mcp:config:set-api-key", e); return UNAUTHORIZED_FRAME; }
+    if (!checkSetApiKeyRateLimit(String(serverId))) {
+      throw new Error("Rate limit exceeded: lvis:mcp:config:set-api-key (5/min per server)");
+    }
+    return deps.mcpManager.setApiKey(serverId, apiKey);
   });
   ipcMain.handle("lvis:mcp:config:remove", async (e, serverId: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:mcp:config:remove", e); return UNAUTHORIZED_FRAME; }
