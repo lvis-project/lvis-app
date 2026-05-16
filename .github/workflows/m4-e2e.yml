@@ -20,10 +20,9 @@ jobs:
     timeout-minutes: 20
     env:
       # Both keys MUST be provided as repo/org secrets. The prior committed
-      # literals (PUBLISHER_KEY=lvismkt_e2epubKEY1234_abcd1234,
-      # MARKETPLACE_SIGNING_PRIVATE_KEY_POC_V1=Bp4Luwxz5EA...) are now
-      # considered burned — rotate the marketplace-side counterparts before
-      # the next M4 E2E run and configure the secrets below.
+      # literals are now considered burned — rotate the marketplace-side
+      # counterparts before the next M4 E2E run and configure the secrets
+      # below. (Literal values intentionally NOT re-inscribed here.)
       PUBLISHER_KEY: ${{ secrets.M4_PUBLISHER_KEY }}
       MARKETPLACE_SIGNING_PRIVATE_KEY_POC_V1: ${{ secrets.M4_MARKETPLACE_SIGNING_KEY_POC_V1 }}
     steps:
