@@ -1372,7 +1372,9 @@ function createWindow(options: { showBootstrapSplash?: boolean } = {}) {
     //            our own minimize/maximize/close buttons in the renderer.
     frame: process.platform !== "darwin" ? false : undefined,
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "hidden",
-    trafficLightPosition: process.platform === "darwin" ? { x: 14, y: 14 } : undefined,
+    // x=14 keeps existing left inset; y=12 vertically centers the 12px lights
+    // inside the 36px CustomTitleBar (see CustomTitleBar.tsx darwin branch).
+    trafficLightPosition: process.platform === "darwin" ? { x: 14, y: 12 } : undefined,
     // ─────────────────────────────────────────────────────────────────────
     webPreferences: {
       contextIsolation: true,
