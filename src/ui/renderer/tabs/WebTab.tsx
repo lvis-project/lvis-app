@@ -14,10 +14,12 @@ export interface WebTabProps {
   webKeyInput: string;
   setWebKeyInput: (v: string) => void;
   onSaved: () => void;
+  /** Debounced immediate-apply hook — fired when the user picks a provider. */
+  onImmediateChange?: () => void;
 }
 
 export function WebTab(props: WebTabProps) {
-  const { api, webProvider, setWebProvider, hasWebKey, setHasWebKey, webKeyInput, setWebKeyInput, onSaved } = props;
+  const { api, webProvider, setWebProvider, hasWebKey, setHasWebKey, webKeyInput, setWebKeyInput, onSaved, onImmediateChange } = props;
   const webInfo = WEB_PROVIDERS.find((p) => p.id === webProvider) ?? WEB_PROVIDERS[0];
 
   return (
@@ -26,7 +28,7 @@ export function WebTab(props: WebTabProps) {
         <Label className="text-sm font-medium">검색 엔진</Label>
         <div className="grid grid-cols-2 gap-2">
           {WEB_PROVIDERS.map((p) => (
-            <Button key={p.id} size="sm" variant={webProvider === p.id ? "default" : "outline"} className="justify-start text-xs" onClick={() => setWebProvider(p.id)}>
+            <Button key={p.id} size="sm" variant={webProvider === p.id ? "default" : "outline"} className="justify-start text-xs" onClick={() => { setWebProvider(p.id); onImmediateChange?.(); }}>
               {p.label}
             </Button>
           ))}
