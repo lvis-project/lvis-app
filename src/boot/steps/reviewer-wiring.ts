@@ -113,7 +113,7 @@ export class LlmReviewerProviderAdapter implements LlmReviewerProvider {
  * Returning `null` indicates the vendor is not configured; the caller
  * then fails the boot step (atomic cutover, no silent fallback).
  *
- * C3 key inheritance: `foundry` reads `llm.apiKey.azure-foundry` via
+ * Key inheritance: `foundry` reads `llm.apiKey.azure-foundry` via
  * `getSecret` and the endpoint via `getFoundryEndpoint` (plain setting,
  * not a secret). `gcp-playground` reads `llm.apiKey.gemini` via `getSecret`.
  * This eliminates separate reviewer secret storage — users who have chat
@@ -135,14 +135,14 @@ export interface WireReviewerDeps {
    */
   streamProviderFor?: (vendor: string) => LLMProvider | null;
   /**
-   * C3 — Secret accessor for Foundry and GCP playground providers.
+   * Secret accessor for Foundry and GCP playground providers.
    * Required when `settings.reviewer.provider` is `"foundry"` or
    * `"gcp-playground"`. Reads `llm.apiKey.azure-foundry` (Foundry) or
    * `llm.apiKey.gemini` (GCP). Override in tests to supply fake secrets.
    */
   getSecret?: (key: string) => string | null;
   /**
-   * C3 — Endpoint accessor for the Foundry provider. Reads the plain
+   * Endpoint accessor for the Foundry provider. Reads the plain
    * (non-secret) `llm.vendors.azure-foundry.baseUrl` setting. Required
    * when `settings.reviewer.provider` is `"foundry"`. Override in tests.
    */
@@ -236,11 +236,10 @@ export function wireReviewerAgent(deps: WireReviewerDeps): WireReviewerResult {
   // lane without re-reading settings on every tool call.
   deps.permissionManager.setInteractiveAutoApprove(settings.interactive.autoApprove);
 
-  // Round-2 architect + critic + security MAJOR — migration breadcrumb
-  // for users upgrading from a pre-PR install where `mode="auto"` was
-  // the standalone trigger for foreground auto-approve. Post-PR the
-  // SOT moved to `permissions.reviewer.interactive.autoApprove`; if a
-  // user's existing `mode="auto"` lands without the new field, every
+  // Migration breadcrumb for users upgrading from a pre-PR install where
+  // `mode="auto"` was the standalone trigger for foreground auto-approve.
+  // Post-PR the SOT moved to `permissions.reviewer.interactive.autoApprove`;
+  // if a user's existing `mode="auto"` lands without the new field, every
   // mutating tool now hits a modal. Log a one-line warning so the user
   // can flip the setting (`/permission reviewer interactive low`) and
   // see the breadcrumb in the log instead of silently wondering.
@@ -254,10 +253,9 @@ export function wireReviewerAgent(deps: WireReviewerDeps): WireReviewerResult {
       "to re-enable LOW-verdict silent allow.",
     );
   }
-  // Round-4 critic MAJOR-4 — symmetric inverted case. `mode=strict`
-  // promises "ask about everything" but `interactive.autoApprove=low`
-  // silently bypasses LOW mutating tools. These directly contradict.
-  // Warn at boot so the user notices the inconsistency.
+  // Symmetric inverted case: `mode=strict` promises "ask about everything"
+  // but `interactive.autoApprove=low` silently bypasses LOW mutating tools.
+  // These directly contradict. Warn at boot so the user notices.
   if (
     deps.permissionManager.getMode() === "strict" &&
     settings.interactive.autoApprove === "low"
@@ -269,12 +267,11 @@ export function wireReviewerAgent(deps: WireReviewerDeps): WireReviewerResult {
       "two to resolve the contradiction.",
     );
   }
-  // Round-5 architect MAJOR — `mode="allow"` bypasses the reviewer
-  // entirely, so the `interactive.autoApprove` setting is dead config.
-  // A user reading PermissionsTab might assume `interactive=off`
-  // protects them — but `allow` is strictly more permissive than the
-  // reviewer lane. Warn so the user notices the disabled-but-set
-  // signal is misleading.
+  // `mode="allow"` bypasses the reviewer entirely, so the
+  // `interactive.autoApprove` setting is dead config. A user reading
+  // PermissionsTab might assume `interactive=off` protects them — but
+  // `allow` is strictly more permissive than the reviewer lane.
+  // Warn so the user notices the disabled-but-set signal is misleading.
   if (deps.permissionManager.getMode() === "allow") {
     log.warn(
       "exec mode=allow — reviewer (and reviewer.interactive.autoApprove) is " +
@@ -295,7 +292,7 @@ function defaultReadSettings(): ReviewerSettingsBlock {
  * instantiated (missing key, missing factory) — atomic cutover, no silent
  * fallback per CLAUDE.md No-Fallback.
  *
- * C3: `foundry` and `gcp-playground` use direct HTTP adapters keyed from
+ * `foundry` and `gcp-playground` use direct HTTP adapters keyed from
  * the encrypted secret store via `deps.getSecret`. `openai`, `anthropic`,
  * and `google` use the host's streaming LLMProvider via `deps.streamProviderFor`.
  */

@@ -82,7 +82,7 @@ function readLastNonEmptyLineSync(filePath: string): string {
 export interface AuditEntry {
   timestamp: string;
   sessionId: string;
-  type: "turn" | "tool_call" | "approval" | "warn" | "error" | "mcp_connect" | "kill_switch" | "dlp" | "info";
+  type: "turn" | "tool_call" | "approval" | "warn" | "error" | "mcp_connect" | "mcp_apikey_set" | "kill_switch" | "dlp" | "info";
   /** DLP hit payload — populated when type === "dlp" */
   dlp?: {
     byKind: Record<string, number>;

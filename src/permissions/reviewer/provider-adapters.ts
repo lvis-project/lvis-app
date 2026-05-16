@@ -1,5 +1,5 @@
 /**
- * Permission policy C3 — Foundry + GCP playground reviewer LLM provider adapters.
+ * Foundry + GCP playground reviewer LLM provider adapters.
  *
  * Both adapters implement {@link LlmReviewerProvider} directly via native
  * `fetch` — no host LLMProvider dependency — inheriting API keys from the
@@ -45,30 +45,41 @@
  * provider errors.
  */
 import type { LlmCompletionResult, LlmReviewerProvider } from "./risk-classifier.js";
+import { TRUSTED_NETWORK_HOST_SUFFIXES } from "./risk-classifier.js";
+// REVIEWER_VENDOR_MAP lives in reviewer-vendor-map.ts (single SOT).
+// Imported here for internal use and re-exported for backward compat.
+import { REVIEWER_VENDOR_MAP } from "./reviewer-vendor-map.js";
+export { REVIEWER_VENDOR_MAP };
+import { secretKeyFor } from "../../engine/llm/provider-factory.js";
 import { createLogger } from "../../lib/logger.js";
 
 const log = createLogger("reviewer-adapters");
 
-// ─── Pinned API version ────────────────────────────────────────────────
-// Bump when Microsoft drops support for the preview version.
+// ─── Pinned API versions ───────────────────────────────────────────────
+// Bump when the provider drops support for the pinned version.
 // Pinned here rather than inlined so a single grep catches all usages.
 const FOUNDRY_API_VERSION = "2024-05-01-preview";
+const GCP_API_VERSION = "v1beta";
+
+// ─── HTTP timeout ──────────────────────────────────────────────────────
+// Shared by both adapters. Bump here to change timeout for both.
+const REVIEWER_HTTP_TIMEOUT_MS = 15_000;
 
 // ─── Secret key constants (chat-provider inheritance) ─────────────────
 
 /**
- * Secret key for the Azure AI Foundry API key — inherits from the chat
- * `azure-foundry` LLM provider (`secretKeyFor("azure-foundry")`).
+ * Secret key for the Azure AI Foundry API key — derived from the chat
+ * `azure-foundry` LLM provider via `secretKeyFor("azure-foundry")`.
  */
-export const FOUNDRY_API_KEY_SECRET = "llm.apiKey.azure-foundry";
+export const FOUNDRY_API_KEY_SECRET = secretKeyFor("azure-foundry");
 
 /**
- * Secret key for the Google Gemini API key — inherits from the chat
- * `gemini` LLM provider (`secretKeyFor("gemini")`). The same Google
+ * Secret key for the Google Gemini API key — derived from the chat
+ * `gemini` LLM provider via `secretKeyFor("gemini")`. The same Google
  * gen-AI key authorises both Gemini chat and the Generative Language API
  * used by the reviewer.
  */
-export const GCP_PLAYGROUND_API_KEY_SECRET = "llm.apiKey.gemini";
+export const GCP_PLAYGROUND_API_KEY_SECRET = secretKeyFor("gemini");
 
 // ─── FoundryReviewerProvider ──────────────────────────────────────────
 
@@ -125,7 +136,10 @@ export class FoundryReviewerProvider implements LlmReviewerProvider {
     });
 
     const ac = new AbortController();
-    const timeoutId = setTimeout(() => ac.abort(new Error("Foundry reviewer timeout 15s")), 15_000);
+    const timeoutId = setTimeout(
+      () => ac.abort(new Error(`Foundry reviewer timeout ${REVIEWER_HTTP_TIMEOUT_MS / 1000}s`)),
+      REVIEWER_HTTP_TIMEOUT_MS,
+    );
     const signal = params.abortSignal
       ? AbortSignal.any([params.abortSignal, ac.signal])
       : ac.signal;
@@ -160,13 +174,8 @@ export class FoundryReviewerProvider implements LlmReviewerProvider {
   }
 }
 
-/**
- * Allowed hostname suffixes for Foundry endpoints.
- * Matches TRUSTED_NETWORK_HOST_SUFFIXES in risk-classifier.ts.
- *   - `.services.ai.azure.com` — Foundry serverless / project endpoints
- *   - `.openai.azure.com`      — Azure OpenAI deployment endpoints
- */
-const FOUNDRY_VALID_SUFFIXES = [".services.ai.azure.com", ".openai.azure.com"] as const;
+// FOUNDRY_VALID_SUFFIXES is now TRUSTED_NETWORK_HOST_SUFFIXES imported from
+// risk-classifier.ts — single source of truth for the Azure hostname allowlist.
 
 /**
  * Validate that the Foundry endpoint is HTTPS, ends with one of the approved
@@ -194,7 +203,7 @@ export function validateFoundryEndpoint(endpoint: string): void {
       `FoundryReviewerProvider: endpoint must use HTTPS (got ${url.protocol}): ${endpoint}`,
     );
   }
-  const matchedSuffix = FOUNDRY_VALID_SUFFIXES.find((s) => url.hostname.endsWith(s));
+  const matchedSuffix = TRUSTED_NETWORK_HOST_SUFFIXES.find((s) => url.hostname.endsWith(s));
   if (!matchedSuffix) {
     throw new Error(
       `FoundryReviewerProvider: endpoint hostname must end with ` +
@@ -312,7 +321,10 @@ export class GcpPlaygroundReviewerProvider implements LlmReviewerProvider {
     });
 
     const ac = new AbortController();
-    const timeoutId = setTimeout(() => ac.abort(new Error("GCP reviewer timeout 15s")), 15_000);
+    const timeoutId = setTimeout(
+      () => ac.abort(new Error(`GCP reviewer timeout ${REVIEWER_HTTP_TIMEOUT_MS / 1000}s`)),
+      REVIEWER_HTTP_TIMEOUT_MS,
+    );
     const signal = params.abortSignal
       ? AbortSignal.any([params.abortSignal, ac.signal])
       : ac.signal;
@@ -352,7 +364,7 @@ export class GcpPlaygroundReviewerProvider implements LlmReviewerProvider {
 
 function buildGcpUrl(model: string): string {
   return (
-    `https://generativelanguage.googleapis.com/v1beta/models/` +
+    `https://generativelanguage.googleapis.com/${GCP_API_VERSION}/models/` +
     `${encodeURIComponent(model)}:generateContent`
   );
 }
@@ -425,33 +437,6 @@ export function createGcpPlaygroundProvider(
 }
 
 /**
- * Maps UI-facing provider names to canonical vendor secret key suffixes.
- *
- * The UI uses provider names that differ from the canonical secret-store
- * vendor names used by the chat LLM providers (boot.ts vendorMap).
- * This map aligns them so `reviewerProviderKeyPresent` looks up the
- * correct secret key for each provider.
- *
- * Canonical vendor names match the keys used in `llm.apiKey.<vendor>`
- * (e.g. `llm.apiKey.claude`, `llm.apiKey.gemini`).
- *
- * MEDIUM-3: Built with `Object.create(null)` so prototype-chain properties
- * (`__proto__`, `constructor`, `hasOwnProperty`, etc.) cannot be looked up
- * as if they were valid vendor mappings. Combined with `hasOwnProperty`-safe
- * access in `reviewerProviderKeyPresent` to close prototype-pollution risk.
- */
-export const REVIEWER_VENDOR_MAP: Readonly<Record<string, string>> = Object.assign(
-  Object.create(null) as Record<string, string>,
-  {
-    openai: "openai",
-    anthropic: "claude",
-    google: "gemini",
-    "azure-foundry": "azure-foundry",
-    gemini: "gemini",
-  },
-);
-
-/**
  * Secret-presence predicate used by both the boot wiring and the
  * settings-UI IPC handler to determine whether a provider is activatable.
  *
@@ -470,7 +455,10 @@ export function reviewerProviderKeyPresent(
 ): boolean {
   if (provider === "foundry") {
     const hasKey = getSecret(FOUNDRY_API_KEY_SECRET) !== null;
-    const hasEndpoint = getEndpoint ? (getEndpoint() ?? null) !== null : false;
+    // #766: empty string or whitespace-only endpoint must not be treated as
+    // "endpoint present" — createFoundryProvider would reject it at boot.
+    const endpoint = getEndpoint?.();
+    const hasEndpoint = !!endpoint && endpoint.trim() !== "";
     return hasKey && hasEndpoint;
   }
   if (provider === "gcp-playground") {

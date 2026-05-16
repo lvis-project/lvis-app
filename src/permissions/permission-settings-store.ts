@@ -30,7 +30,15 @@ import { lvisHome } from "../shared/lvis-home.js";
 const log = createLogger("permission-settings");
 
 export type ReviewerMode = "disabled" | "rule" | "llm";
-export type ReviewerProvider = "openai" | "anthropic" | "google" | "foundry" | "gcp-playground";
+/** Canonical list of all supported reviewer providers — single SOT. */
+export const REVIEWER_PROVIDERS = [
+  "openai",
+  "anthropic",
+  "google",
+  "foundry",
+  "gcp-playground",
+] as const;
+export type ReviewerProvider = (typeof REVIEWER_PROVIDERS)[number];
 export type ReviewerFallbackOnError = "deny" | "rule";
 
 /**
@@ -95,15 +103,7 @@ const DEFAULT_FILE: PermissionSettingsFile = {
 
 const REVIEWER_MODES: ReadonlySet<ReviewerMode> = new Set(["disabled", "rule", "llm"]);
 /** Exported so IPC handlers can validate provider names against a single SOT. */
-export const REVIEWER_PROVIDERS_SET: ReadonlySet<ReviewerProvider> = new Set([
-  "openai",
-  "anthropic",
-  "google",
-  "foundry",
-  "gcp-playground",
-]);
-/** @internal — module-private alias used by validation helpers below. */
-const REVIEWER_PROVIDERS = REVIEWER_PROVIDERS_SET;
+export const REVIEWER_PROVIDERS_SET: ReadonlySet<ReviewerProvider> = new Set(REVIEWER_PROVIDERS);
 const REVIEWER_FALLBACKS: ReadonlySet<ReviewerFallbackOnError> = new Set(["deny", "rule"]);
 
 function defaultPath(): string {
@@ -169,7 +169,7 @@ function normalizeReviewerBlock(parsed: unknown): ReviewerSettingsBlock {
       : DEFAULT_REVIEWER.mode;
   const provider =
     typeof obj.provider === "string" &&
-    REVIEWER_PROVIDERS.has(obj.provider as ReviewerProvider)
+    REVIEWER_PROVIDERS_SET.has(obj.provider as ReviewerProvider)
       ? (obj.provider as ReviewerProvider)
       : DEFAULT_REVIEWER.provider;
   const model =
@@ -265,9 +265,9 @@ function validateReviewerPatch(patch: ReviewerSettingsBlock): ReviewerSettingsBl
       `permissions.reviewer.mode invalid: '${patch.mode}'. Allowed: ${[...REVIEWER_MODES].join("|")}`,
     );
   }
-  if (!REVIEWER_PROVIDERS.has(patch.provider)) {
+  if (!REVIEWER_PROVIDERS_SET.has(patch.provider)) {
     throw new Error(
-      `permissions.reviewer.provider invalid: '${patch.provider}'. Allowed: ${[...REVIEWER_PROVIDERS].join("|")}`,
+      `permissions.reviewer.provider invalid: '${patch.provider}'. Allowed: ${REVIEWER_PROVIDERS.join("|")}`,
     );
   }
   if (!REVIEWER_FALLBACKS.has(patch.fallbackOnError)) {

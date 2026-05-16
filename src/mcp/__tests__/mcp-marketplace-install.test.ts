@@ -18,6 +18,7 @@ import {
   readRuntimeFromInstalledManifest,
   substituteRuntimeTokens,
 } from "../mcp-marketplace-install.js";
+import { MAX_MCP_MANIFEST_BYTES } from "../safe-names.js";
 import type { McpRuntimeSpec, PluginMarketplaceItem } from "../../plugins/types.js";
 import type { PluginArtifactStore } from "../../plugins/plugin-artifact-store.js";
 import type { MarketplaceFetcher } from "../../plugins/marketplace-fetcher.js";
@@ -48,6 +49,23 @@ describe("substituteRuntimeTokens", () => {
       env: { WORKDIR: "/data/mcp/weather" },
       auth: "api-key",
     });
+  });
+
+  it("preserves stdio apiKeyEnv metadata without substituting secret material", () => {
+    const runtime: McpRuntimeSpec = {
+      transport: "stdio",
+      command: "uvx",
+      args: ["--from", "browser-use[cli]", "browser-use", "--mcp"],
+      auth: "api-key",
+      apiKeyEnv: "OPENAI_API_KEY",
+    };
+    const out = substituteRuntimeTokens(runtime, {
+      pluginDir: "/data/mcp/browser-use",
+      nodePath: "/usr/bin/node",
+      pythonPath: "/usr/bin/python3",
+    });
+    expect(out).toEqual(runtime);
+    expect(JSON.stringify(out)).not.toMatch(/sk-|Bearer|secret/i);
   });
 
   it("does not substitute http url tokens (publisher controls endpoint)", () => {
@@ -81,6 +99,25 @@ describe("buildMcpServerConfig", () => {
     });
   });
 
+  it("emits stdio api-key config with apiKeyEnv metadata", () => {
+    const config = buildMcpServerConfig("browser-use-mcp", {
+      transport: "stdio",
+      command: "uvx",
+      args: ["--from", "browser-use[cli]", "browser-use", "--mcp"],
+      auth: "api-key",
+      apiKeyEnv: "OPENAI_API_KEY",
+    });
+    expect(config).toEqual({
+      id: "browser-use-mcp",
+      transport: "stdio",
+      command: "uvx",
+      args: ["--from", "browser-use[cli]", "browser-use", "--mcp"],
+      env: undefined,
+      auth: "api-key",
+      apiKeyEnv: "OPENAI_API_KEY",
+    });
+  });
+
   it("emits http config with allowPrivateNetworks pass-through", () => {
     const config = buildMcpServerConfig("internal", {
       transport: "http",
@@ -94,6 +131,22 @@ describe("buildMcpServerConfig", () => {
       url: "http://localhost:8765",
       auth: "sso",
       allowPrivateNetworks: true,
+    });
+  });
+
+  it("emits http api-key config with custom safe header metadata", () => {
+    const config = buildMcpServerConfig("browser-use-cloud-mcp", {
+      transport: "http",
+      url: "https://api.browser-use.com/v3/mcp",
+      auth: "api-key",
+      apiKeyHeader: "x-browser-use-api-key",
+    });
+    expect(config).toEqual({
+      id: "browser-use-cloud-mcp",
+      transport: "http",
+      url: "https://api.browser-use.com/v3/mcp",
+      auth: "api-key",
+      apiKeyHeader: "x-browser-use-api-key",
     });
   });
 
@@ -198,6 +251,37 @@ describe("readRuntimeFromInstalledManifest", () => {
     }
   });
 
+  it("returns browser-use stdio apiKeyEnv metadata from a verified manifest", async () => {
+    const tmp = makeTmpDir();
+    try {
+      await mkdir(tmp, { recursive: true });
+      await writeFile(
+        join(tmp, "plugin.json"),
+        JSON.stringify({
+          id: "browser-use-mcp",
+          version: "0.12.6",
+          runtime: {
+            transport: "stdio",
+            command: "uvx",
+            args: ["--from", "browser-use[cli]==0.12.6", "browser-use", "--mcp"],
+            auth: "api-key",
+            apiKeyEnv: "OPENAI_API_KEY",
+          },
+        }),
+      );
+      const runtime = await readRuntimeFromInstalledManifest(tmp);
+      expect(runtime).toEqual({
+        transport: "stdio",
+        command: "uvx",
+        args: ["--from", "browser-use[cli]==0.12.6", "browser-use", "--mcp"],
+        auth: "api-key",
+        apiKeyEnv: "OPENAI_API_KEY",
+      });
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it("throws a clear error when runtime block is missing", async () => {
     const tmp = makeTmpDir();
     try {
@@ -218,6 +302,40 @@ describe("readRuntimeFromInstalledManifest", () => {
     const tmp = makeTmpDir();
     try {
       await expect(readRuntimeFromInstalledManifest(tmp)).rejects.toThrow(/manifest not found/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("throws a byte-cap error when manifest exceeds MAX_MCP_MANIFEST_BYTES (NEW-1 HIGH)", async () => {
+    const tmp = makeTmpDir();
+    try {
+      await mkdir(tmp, { recursive: true });
+      // Write a file that is 1 byte over the cap using a Buffer of the right size.
+      const oversized = Buffer.alloc(MAX_MCP_MANIFEST_BYTES + 1, "x");
+      await writeFile(join(tmp, "plugin.json"), oversized);
+      await expect(readRuntimeFromInstalledManifest(tmp)).rejects.toThrow(
+        /exceeds.*byte cap/,
+      );
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("succeeds when manifest is exactly at MAX_MCP_MANIFEST_BYTES (NEW-1 boundary)", async () => {
+    const tmp = makeTmpDir();
+    try {
+      await mkdir(tmp, { recursive: true });
+      // Write a valid manifest padded with whitespace to reach the cap exactly.
+      const manifest = JSON.stringify({
+        id: "weather",
+        version: "1.0.0",
+        runtime: { transport: "stdio", command: "node", args: ["server.js"], auth: "none" },
+      });
+      const padding = " ".repeat(MAX_MCP_MANIFEST_BYTES - manifest.length);
+      await writeFile(join(tmp, "plugin.json"), manifest + padding, "utf-8");
+      const runtime = await readRuntimeFromInstalledManifest(tmp);
+      expect(runtime.transport).toBe("stdio");
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
