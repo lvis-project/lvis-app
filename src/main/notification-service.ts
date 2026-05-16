@@ -25,7 +25,7 @@
 import type { BrowserWindow } from "electron";
 import type { AuditLogger } from "../audit/audit-logger.js";
 import { createLogger } from "../lib/logger.js";
-import { stripMarkdown } from "./strip-markdown.js";
+import { stripMarkdown } from "../shared/strip-markdown.js";
 const log = createLogger("lvis");
 
 export type NotificationKind = "turn-end" | "routine" | "ask-user" | "approval";
