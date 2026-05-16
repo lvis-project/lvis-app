@@ -216,11 +216,15 @@ export interface PluginManifest {
   /**
    * OS 네이티브 알림으로 표시할 이벤트 선언.
    * titleField / bodyField 는 이벤트 데이터의 점(.) 경로.
+   * bypassFocusGate (#843): true 일 경우 활성 LVIS 윈도우가 있어도 OS 알림이
+   * 그대로 뜬다. 중요 surface (`meeting.starting-soon`,
+   * `approval.deadline-imminent`, `incident.page`) 에만 true. 기본 false.
    */
   notificationEvents?: Array<{
     event: string;
     titleField?: string;
     bodyField?: string;
+    bypassFocusGate?: boolean;
   }>;
   installPolicy?: InstallPolicy;
   dependencies?: Array<string | DependencySpec>;
@@ -534,6 +538,7 @@ export interface PluginMarketplaceItem {
     event: string;
     titleField?: string;
     bodyField?: string;
+    bypassFocusGate?: boolean;
   }>;
   installPolicy?: InstallPolicy;
   dependencies?: Array<string | DependencySpec>;
