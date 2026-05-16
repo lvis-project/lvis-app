@@ -6,8 +6,15 @@
  * existing chat LLM provider configuration:
  *
  * Provider choices:
- *   - `foundry`       — Microsoft Azure AI Foundry (OpenAI-compatible REST
- *                       at `https://<endpoint>/models/<model>/chat/completions`).
+ *   - `foundry`       — Microsoft Azure AI Foundry (OpenAI-compatible REST).
+ *                       Two URL shapes are supported:
+ *                         • Foundry-native (serverless):
+ *                             `https://<project>.services.ai.azure.com`
+ *                             → appends `/models/<model>/chat/completions?api-version=…`
+ *                         • Azure OpenAI deployment (chat-shape):
+ *                             `https://<resource>.openai.azure.com/openai/deployments/<deployment>/`
+ *                             → appends `chat/completions?api-version=…` only
+ *                               (model is determined by the deployment)
  *                       API key  → `llm.apiKey.azure-foundry` (same key used by
  *                                   the chat azure-foundry LLM provider).
  *                       Endpoint → `llm.vendors.azure-foundry.baseUrl` setting
@@ -38,6 +45,9 @@
  * provider errors.
  */
 import type { LlmCompletionResult, LlmReviewerProvider } from "./risk-classifier.js";
+import { createLogger } from "../../lib/logger.js";
+
+const log = createLogger("reviewer-adapters");
 
 // ─── Pinned API version ────────────────────────────────────────────────
 // Bump when Microsoft drops support for the preview version.
@@ -104,46 +114,58 @@ export class FoundryReviewerProvider implements LlmReviewerProvider {
       temperature: 0,
     });
 
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${this.apiKey}`,
-      },
-      body,
-      signal: params.abortSignal,
-    });
+    const ac = new AbortController();
+    const timeoutId = setTimeout(() => ac.abort(new Error("Foundry reviewer timeout 15s")), 15_000);
+    const signal = params.abortSignal
+      ? AbortSignal.any([params.abortSignal, ac.signal])
+      : ac.signal;
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${this.apiKey}`,
+        },
+        body,
+        signal,
+      });
 
-    if (!response.ok) {
-      const errText = await response.text().catch(() => String(response.status));
-      throw new Error(`Foundry reviewer HTTP ${response.status}: ${errText.slice(0, 120)}`);
+      if (!response.ok) {
+        const errText = await response.text().catch(() => String(response.status));
+        throw new Error(`Foundry reviewer HTTP ${response.status}: ${errText.slice(0, 120)}`);
+      }
+
+      const data = (await response.json()) as FoundryCompletionResponse;
+      const text = data.choices?.[0]?.message?.content ?? "";
+      const usage = data.usage;
+      return {
+        text,
+        tokensIn: usage?.prompt_tokens ?? 0,
+        tokensOut: usage?.completion_tokens ?? 0,
+        costUsd: 0, // Foundry pricing varies by deployment; not surfaced here.
+      };
+    } finally {
+      clearTimeout(timeoutId);
     }
-
-    const data = (await response.json()) as FoundryCompletionResponse;
-    const text = data.choices?.[0]?.message?.content ?? "";
-    const usage = data.usage;
-    return {
-      text,
-      tokensIn: usage?.prompt_tokens ?? 0,
-      tokensOut: usage?.completion_tokens ?? 0,
-      costUsd: 0, // Foundry pricing varies by deployment; not surfaced here.
-    };
   }
 }
 
 /**
- * Validate that the Foundry endpoint is HTTPS and ends with `.azure.com`
- * (suffix match — catches all `*.services.ai.azure.com`,
- * `*.openai.azure.com`, etc. without subdomain enumeration).
+ * Allowed hostname suffixes for Foundry endpoints.
+ * Matches TRUSTED_NETWORK_HOST_SUFFIXES in risk-classifier.ts.
+ *   - `.services.ai.azure.com` — Foundry serverless / project endpoints
+ *   - `.openai.azure.com`      — Azure OpenAI deployment endpoints
+ */
+const FOUNDRY_VALID_SUFFIXES = [".services.ai.azure.com", ".openai.azure.com"] as const;
+
+/**
+ * Validate that the Foundry endpoint is HTTPS and ends with one of the
+ * approved Azure suffixes (`.services.ai.azure.com` or `.openai.azure.com`).
  * Throws on invalid input so the caller fails closed (atomic cutover).
  *
- * Subdomain takeover analysis: because we suffix-match `.azure.com` we
- * accept any subdomain of azure.com. Subdomain takeover of azure.com itself
- * is not feasible — Microsoft controls the apex domain and all its
- * NS/MX records. Individual `<project>.services.ai.azure.com` slots are
- * managed by the Azure control plane; a dangling CNAME attack requires
- * an attacker to claim the exact Azure resource, which they cannot do
- * without the user's subscription credentials.
+ * Subdomain takeover analysis: both accepted suffixes are managed by the
+ * Azure control plane. A dangling CNAME attack requires an attacker to claim
+ * the exact Azure resource, which requires the user's subscription credentials.
  */
 export function validateFoundryEndpoint(endpoint: string): void {
   let url: URL;
@@ -159,18 +181,38 @@ export function validateFoundryEndpoint(endpoint: string): void {
       `FoundryReviewerProvider: endpoint must use HTTPS (got ${url.protocol}): ${endpoint}`,
     );
   }
-  if (!url.hostname.endsWith(".azure.com") && url.hostname !== "azure.com") {
+  if (!FOUNDRY_VALID_SUFFIXES.some((s) => url.hostname.endsWith(s))) {
     throw new Error(
-      `FoundryReviewerProvider: endpoint hostname must end with .azure.com ` +
+      `FoundryReviewerProvider: endpoint hostname must end with ` +
+      `.services.ai.azure.com or .openai.azure.com ` +
       `(got ${url.hostname}). Provide the full Foundry project endpoint, ` +
       `e.g. https://<project>.services.ai.azure.com`,
     );
   }
 }
 
-function buildFoundryUrl(endpoint: string, model: string): string {
+/**
+ * Build the chat-completions fetch URL for a Foundry endpoint.
+ *
+ * Two URL shapes are supported:
+ *   - **Azure OpenAI deployment** (contains `/openai/deployments/`):
+ *     The model is embedded in the deployment path; only the
+ *     `chat/completions?api-version=…` suffix is appended.
+ *     Example: `https://res.openai.azure.com/openai/deployments/gpt-4o/`
+ *              → `https://res.openai.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=…`
+ *   - **Foundry-native** (serverless / project endpoint):
+ *     The model is added as `/models/<model>/chat/completions?api-version=…`.
+ *     Example: `https://proj.services.ai.azure.com`
+ *              → `https://proj.services.ai.azure.com/models/gpt-4o/chat/completions?api-version=…`
+ */
+export function buildFoundryUrl(endpoint: string, model: string): string {
   // Normalize trailing slash
   const base = endpoint.replace(/\/+$/, "");
+  if (base.includes("/openai/deployments/")) {
+    // Chat-shape: deployment already encodes the model; do not add /models/<model>.
+    return `${base}/chat/completions?api-version=${FOUNDRY_API_VERSION}`;
+  }
+  // Foundry-native: model is specified explicitly in the path.
   return `${base}/models/${encodeURIComponent(model)}/chat/completions?api-version=${FOUNDRY_API_VERSION}`;
 }
 
@@ -216,33 +258,42 @@ export class GcpPlaygroundReviewerProvider implements LlmReviewerProvider {
       generationConfig: { maxOutputTokens: 256, temperature: 0 },
     });
 
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        // API key passed as a request header, not a query parameter,
-        // to avoid key exposure in server logs and HTTP Referer headers.
-        "x-goog-api-key": this.apiKey,
-      },
-      body,
-      signal: params.abortSignal,
-    });
+    const ac = new AbortController();
+    const timeoutId = setTimeout(() => ac.abort(new Error("GCP reviewer timeout 15s")), 15_000);
+    const signal = params.abortSignal
+      ? AbortSignal.any([params.abortSignal, ac.signal])
+      : ac.signal;
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          // API key passed as a request header, not a query parameter,
+          // to avoid key exposure in server logs and HTTP Referer headers.
+          "x-goog-api-key": this.apiKey,
+        },
+        body,
+        signal,
+      });
 
-    if (!response.ok) {
-      const errText = await response.text().catch(() => String(response.status));
-      throw new Error(`GCP reviewer HTTP ${response.status}: ${errText.slice(0, 120)}`);
+      if (!response.ok) {
+        const errText = await response.text().catch(() => String(response.status));
+        throw new Error(`GCP reviewer HTTP ${response.status}: ${errText.slice(0, 120)}`);
+      }
+
+      const data = (await response.json()) as GcpGenerateContentResponse;
+      const text =
+        data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+      const usage = data.usageMetadata;
+      return {
+        text,
+        tokensIn: usage?.promptTokenCount ?? 0,
+        tokensOut: usage?.candidatesTokenCount ?? 0,
+        costUsd: 0, // Google AI Studio pricing is not surfaced per-call here.
+      };
+    } finally {
+      clearTimeout(timeoutId);
     }
-
-    const data = (await response.json()) as GcpGenerateContentResponse;
-    const text =
-      data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-    const usage = data.usageMetadata;
-    return {
-      text,
-      tokensIn: usage?.promptTokenCount ?? 0,
-      tokensOut: usage?.candidatesTokenCount ?? 0,
-      costUsd: 0, // Google AI Studio pricing is not surfaced per-call here.
-    };
   }
 }
 
@@ -280,8 +331,8 @@ export function createFoundryProvider(
   if (!endpoint) return null;
   try {
     return new FoundryReviewerProvider(apiKey, endpoint);
-  } catch {
-    // Invalid endpoint URL — surface null so callers throw a clear message.
+  } catch (err) {
+    log.warn("createFoundryProvider: invalid endpoint — %s", (err as Error).message);
     return null;
   }
 }
@@ -299,13 +350,33 @@ export function createGcpPlaygroundProvider(
 }
 
 /**
+ * Maps UI-facing provider names to canonical vendor secret key suffixes.
+ *
+ * The UI uses provider names that differ from the canonical secret-store
+ * vendor names used by the chat LLM providers (boot.ts vendorMap).
+ * This map aligns them so `reviewerProviderKeyPresent` looks up the
+ * correct secret key for each provider.
+ *
+ * Canonical vendor names match the keys used in `llm.apiKey.<vendor>`
+ * (e.g. `llm.apiKey.claude`, `llm.apiKey.gemini`).
+ */
+export const REVIEWER_VENDOR_MAP: Readonly<Record<string, string>> = {
+  openai: "openai",
+  anthropic: "claude",
+  google: "gemini",
+  "azure-foundry": "azure-foundry",
+  gemini: "gemini",
+};
+
+/**
  * Secret-presence predicate used by both the boot wiring and the
  * settings-UI IPC handler to determine whether a provider is activatable.
  *
  * For `foundry`: checks that `llm.apiKey.azure-foundry` is present AND
  * that a non-empty endpoint is available (`getEndpoint` returns truthy).
  * For `gcp-playground`: checks that `llm.apiKey.gemini` is present.
- * For `openai` / `anthropic` / `google`: checks `llm.apiKey.<vendor>`.
+ * For `openai` / `anthropic` / `google`: resolves via REVIEWER_VENDOR_MAP
+ * then checks `llm.apiKey.<canonical-vendor>`.
  *
  * Returns `true` when all required config for the provider exists.
  */
@@ -322,6 +393,7 @@ export function reviewerProviderKeyPresent(
   if (provider === "gcp-playground") {
     return getSecret(GCP_PLAYGROUND_API_KEY_SECRET) !== null;
   }
-  // openai / anthropic / google — checked via existing llm.apiKey.<vendor> convention
-  return getSecret(`llm.apiKey.${provider}`) !== null;
+  // openai / anthropic / google — resolve UI name → canonical vendor, then check secret
+  const vendor = REVIEWER_VENDOR_MAP[provider] ?? provider;
+  return getSecret(`llm.apiKey.${vendor}`) !== null;
 }

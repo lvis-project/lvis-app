@@ -709,8 +709,7 @@ export function PermissionsTab() {
             </Label>
             <p className="text-[11px] text-muted-foreground">
               OpenAI · Anthropic · Google: 지능 설정의 공급자 키를 사용합니다.
-              Azure AI Foundry · Google AI Studio: 지능 설정 &gt; 비밀 키에서
-              <code className="mx-0.5 rounded bg-muted px-0.5">reviewer.apiKey.*</code>를 저장하면 활성화됩니다.
+              Azure AI Foundry · Google AI Studio: 지능 설정에서 Azure AI Foundry 또는 Gemini 공급자 API 키를 저장하면 자동으로 활성화됩니다. Foundry 는 엔드포인트 baseUrl 도 함께 설정해야 합니다.
               키가 없는 공급자는 선택할 수 없습니다.
             </p>
 

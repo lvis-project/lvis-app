@@ -20,6 +20,7 @@ import {
   createGcpPlaygroundProvider,
   reviewerProviderKeyPresent,
   validateFoundryEndpoint,
+  buildFoundryUrl,
   FOUNDRY_API_KEY_SECRET,
   GCP_PLAYGROUND_API_KEY_SECRET,
 } from "../reviewer/provider-adapters.js";
@@ -73,10 +74,10 @@ describe("FoundryReviewerProvider", () => {
     ).toThrow(/must use HTTPS/);
   });
 
-  it("throws when endpoint hostname does not end with .azure.com", () => {
+  it("throws when endpoint hostname does not end with a valid azure suffix", () => {
     expect(
       () => new FoundryReviewerProvider("sk-test", "https://evil.example.com"),
-    ).toThrow(/must end with .azure.com/);
+    ).toThrow(/\.services\.ai\.azure\.com or \.openai\.azure\.com/);
   });
 
   it("builds correct URL with model encoded in path + api-version query param", async () => {
@@ -166,6 +167,40 @@ describe("FoundryReviewerProvider", () => {
   });
 });
 
+// ─── buildFoundryUrl (M1: deployment URL shape detection) ────────────
+
+describe("buildFoundryUrl", () => {
+  it("Foundry-native: appends /models/<model>/chat/completions?api-version=...", () => {
+    const url = buildFoundryUrl("https://proj.services.ai.azure.com", "gpt-4o");
+    expect(url).toContain("/models/gpt-4o/chat/completions");
+    expect(url).toContain("api-version=");
+    expect(url).not.toContain("/openai/deployments/");
+  });
+
+  it("Foundry-native: strips trailing slash before appending path", () => {
+    const url = buildFoundryUrl("https://proj.services.ai.azure.com/", "gpt-4o");
+    expect(url).not.toMatch(/\/\/models/);
+    expect(url).toContain("/models/gpt-4o/chat/completions");
+  });
+
+  it("Azure deployment (chat-shape): appends chat/completions only — no /models/<model>", () => {
+    const base = "https://res.openai.azure.com/openai/deployments/gpt-4o-mini";
+    const url = buildFoundryUrl(base, "gpt-4o-mini");
+    expect(url).toContain("/openai/deployments/gpt-4o-mini/chat/completions");
+    expect(url).toContain("api-version=");
+    // Model must NOT appear twice (once in deployment path, once in /models/)
+    expect(url).not.toMatch(/\/models\/gpt-4o-mini/);
+  });
+
+  it("Azure deployment with trailing slash: produces correct URL", () => {
+    const base = "https://res.openai.azure.com/openai/deployments/gpt-4o/";
+    const url = buildFoundryUrl(base, "gpt-4o");
+    expect(url).toBe(
+      "https://res.openai.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=2024-05-01-preview",
+    );
+  });
+});
+
 // ─── validateFoundryEndpoint ─────────────────────────────────────────
 
 describe("validateFoundryEndpoint", () => {
@@ -182,11 +217,22 @@ describe("validateFoundryEndpoint", () => {
   });
 
   it("rejects non-azure.com hostnames", () => {
-    expect(() => validateFoundryEndpoint("https://attacker.example.com")).toThrow(/azure.com/);
+    expect(() => validateFoundryEndpoint("https://attacker.example.com")).toThrow(/\.services\.ai\.azure\.com or \.openai\.azure\.com/);
   });
 
   it("rejects invalid URL strings", () => {
     expect(() => validateFoundryEndpoint("not-a-url")).toThrow(/valid URL/);
+  });
+
+  it("rejects bare azure.com (m2: no longer accepted as endpoint)", () => {
+    // Previously accepted by the broad .azure.com suffix; now rejected since
+    // bare azure.com is not a valid Foundry project endpoint.
+    expect(() => validateFoundryEndpoint("https://azure.com")).toThrow(/\.services\.ai\.azure\.com or \.openai\.azure\.com/);
+  });
+
+  it("rejects subdomain of azure.com that is not .services.ai or .openai (m2: narrowed)", () => {
+    // e.g. management.azure.com — was accepted before, now rejected
+    expect(() => validateFoundryEndpoint("https://management.azure.com")).toThrow(/\.services\.ai\.azure\.com or \.openai\.azure\.com/);
   });
 });
 
@@ -388,15 +434,26 @@ describe("reviewerProviderKeyPresent", () => {
     expect(getSecret).toHaveBeenCalledWith("llm.apiKey.openai");
   });
 
-  it("anthropic → checks llm.apiKey.anthropic", () => {
-    const getSecret = vi.fn((_key: string) => null);
-    expect(reviewerProviderKeyPresent("anthropic", getSecret)).toBe(false);
-    expect(getSecret).toHaveBeenCalledWith("llm.apiKey.anthropic");
+  it("anthropic → checks llm.apiKey.claude (M2: vendor map, not llm.apiKey.anthropic)", () => {
+    // UI sends "anthropic"; canonical vendor is "claude" — must look up llm.apiKey.claude
+    const getSecret = vi.fn((key: string) => (key === "llm.apiKey.claude" ? "x" : null));
+    expect(reviewerProviderKeyPresent("anthropic", getSecret)).toBe(true);
+    expect(getSecret).toHaveBeenCalledWith("llm.apiKey.claude");
+    expect(getSecret).not.toHaveBeenCalledWith("llm.apiKey.anthropic");
   });
 
-  it("google → checks llm.apiKey.google", () => {
-    const getSecret = vi.fn((key: string) => (key === "llm.apiKey.google" ? "k" : null));
+  it("anthropic → false when only llm.apiKey.anthropic present (M2: regression guard)", () => {
+    // Ensure the old (broken) key path no longer satisfies the check
+    const getSecret = vi.fn((key: string) => (key === "llm.apiKey.anthropic" ? "x" : null));
+    expect(reviewerProviderKeyPresent("anthropic", getSecret)).toBe(false);
+  });
+
+  it("google → checks llm.apiKey.gemini (M2: vendor map, not llm.apiKey.google)", () => {
+    // UI sends "google"; canonical vendor is "gemini"
+    const getSecret = vi.fn((key: string) => (key === "llm.apiKey.gemini" ? "k" : null));
     expect(reviewerProviderKeyPresent("google", getSecret)).toBe(true);
+    expect(getSecret).toHaveBeenCalledWith("llm.apiKey.gemini");
+    expect(getSecret).not.toHaveBeenCalledWith("llm.apiKey.google");
   });
 
   it("foundry → false when API key absent (even with endpoint)", () => {
@@ -447,5 +504,57 @@ describe("reviewerProviderKeyPresent", () => {
     const getSecret = vi.fn((_key: string) => null);
     expect(reviewerProviderKeyPresent("unknown-provider", getSecret)).toBe(false);
     expect(getSecret).toHaveBeenCalledWith("llm.apiKey.unknown-provider");
+  });
+});
+
+// ─── M4: fetch timeout (Foundry) ──────────────────────────────────────
+
+describe("FoundryReviewerProvider timeout (M4)", () => {
+  it("aborts with AbortError when fetch hangs beyond 15s", async () => {
+    vi.useFakeTimers();
+    let rejectFetch!: (err: Error) => void;
+    globalThis.fetch = vi.fn(
+      () =>
+        new Promise<never>((_res, rej) => {
+          rejectFetch = rej;
+        }),
+    ) as unknown as typeof fetch;
+
+    const provider = new FoundryReviewerProvider("key", "https://e.services.ai.azure.com");
+    const completionPromise = provider.complete({ model: "m", systemPrompt: "s", userPrompt: "u" });
+
+    // Advance timers past the 15s timeout
+    await vi.advanceTimersByTimeAsync(16_000);
+    // Simulate the fetch being aborted (AbortController fires the rejection)
+    rejectFetch(Object.assign(new Error("The operation was aborted"), { name: "AbortError" }));
+
+    await expect(completionPromise).rejects.toThrow(/aborted|timeout/i);
+
+    vi.useRealTimers();
+  });
+});
+
+// ─── M4: fetch timeout (GCP) ─────────────────────────────────────────
+
+describe("GcpPlaygroundReviewerProvider timeout (M4)", () => {
+  it("aborts with AbortError when fetch hangs beyond 15s", async () => {
+    vi.useFakeTimers();
+    let rejectFetch!: (err: Error) => void;
+    globalThis.fetch = vi.fn(
+      () =>
+        new Promise<never>((_res, rej) => {
+          rejectFetch = rej;
+        }),
+    ) as unknown as typeof fetch;
+
+    const provider = new GcpPlaygroundReviewerProvider("AIza-key");
+    const completionPromise = provider.complete({ model: "gemini-1.5-flash", systemPrompt: "s", userPrompt: "u" });
+
+    await vi.advanceTimersByTimeAsync(16_000);
+    rejectFetch(Object.assign(new Error("The operation was aborted"), { name: "AbortError" }));
+
+    await expect(completionPromise).rejects.toThrow(/aborted|timeout/i);
+
+    vi.useRealTimers();
   });
 });
