@@ -702,7 +702,7 @@ describe("ChatView", () => {
     await submitUser(container, "새 질문");
 
     await waitFor(() => {
-      expect(container.querySelectorAll('[data-testid="day-divider"]')).toHaveLength(1);
+      expect(container.querySelectorAll('[data-testid="session-date-navigator"]')).toHaveLength(1);
       expect(container.querySelector('[data-session-marker-id="old-yesterday"]')).toBeNull();
       expect(container.textContent).not.toContain("이전 질문");
       expect(container.textContent).not.toContain("이전 답변");
@@ -732,7 +732,7 @@ describe("ChatView", () => {
       },
     });
 
-    const dayButton = container.querySelector('[data-testid="day-divider"] button') as HTMLButtonElement | null;
+    const dayButton = container.querySelector('[data-testid="session-date-navigator"] button') as HTMLButtonElement | null;
     expect(dayButton).toBeTruthy();
 
     await act(async () => {
