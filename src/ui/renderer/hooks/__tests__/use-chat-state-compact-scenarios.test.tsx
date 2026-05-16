@@ -10,8 +10,7 @@
  *   S1: compact_started flips isCompacting on (StatusBar hint appears)
  *   S2: compact_notice with estimatedAfter → checkpoint + accurate
  *       synthetic context_usage drives ring refresh
- *   S3: compact_notice without estimatedAfter but freed > 0 → legacy
- *       fallback (lastKnown − freed)
+ *   S3: compact_notice without estimatedAfter → checkpoint only
  *   S4 (M2 fix): compact_notice without estimatedAfter AND freed === 0
  *       → checkpoint only, no misleading synthetic context_usage
  *   S5 (M4 fix): applyLoadedSession during mid-compact clears the stale
@@ -94,7 +93,7 @@ describe("useChatState — compact lifecycle scenarios", () => {
       removedMessages: 12,
       freedTokens: 4_000,
       estimatedAfter: 50_000,
-      tier: "auto-compact",
+      trigger: "auto-compact",
       compactNum: 1,
     } as StreamEvent);
 
@@ -105,7 +104,7 @@ describe("useChatState — compact lifecycle scenarios", () => {
       kind: "checkpoint",
       removedMessages: 12,
       freedTokens: 4_000,
-      tier: "auto-compact",
+      trigger: "auto-compact",
       compactNum: 1,
     });
     expect(lastTwo[1]).toMatchObject({
@@ -115,17 +114,20 @@ describe("useChatState — compact lifecycle scenarios", () => {
     });
   });
 
-  it("S3: compact_notice without estimatedAfter but freed > 0 → legacy fallback (lastKnown − freed)", () => {
+  it("S3: compact_notice without estimatedAfter writes checkpoint only", () => {
     const { api, streamHandler } = makeCapturedApi();
     const { result } = renderHook(() => useChatState(api));
 
-    // Seed a prior turn_summary that the fallback path will read.
+    // Seed a prior turn_summary; without estimatedAfter, compact_notice must
+    // not synthesize a replacement usage estimate.
     act(() => {
       result.current.applyLoadedSession([
         { kind: "user", text: "hi" },
         { kind: "turn_summary", tokensIn: 10_000, tokensOut: 500, turnDurationMs: 100, toolCount: 0, cumulativeToolMs: 0 } as ChatEntry,
       ]);
     });
+
+    const before = result.current.entries.length;
 
     dispatchEvent(streamHandler, {
       type: "compact_notice",
@@ -134,11 +136,17 @@ describe("useChatState — compact lifecycle scenarios", () => {
       // estimatedAfter intentionally omitted
     } as StreamEvent);
 
-    const ctx = result.current.entries.find((e) => e.kind === "context_usage") as
-      | { kind: "context_usage"; tokensIn: number }
-      | undefined;
-    expect(ctx).toBeDefined();
-    expect(ctx?.tokensIn).toBe(7_000);
+    expect(result.current.entries.length).toBe(before + 1);
+    expect(result.current.entries.at(-1)).toMatchObject({
+      kind: "checkpoint",
+      removedMessages: 5,
+      freedTokens: 3_000,
+    });
+    const lastUsage = [...result.current.entries].reverse().find(
+      (e) => e.kind === "turn_summary" || e.kind === "context_usage",
+    );
+    expect(lastUsage?.kind).toBe("turn_summary");
+    expect(lastUsage && "tokensIn" in lastUsage ? lastUsage.tokensIn : -1).toBe(10_000);
   });
 
   it("S4 (M2): compact_notice without estimatedAfter AND freed === 0 → checkpoint only, NO synthetic context_usage", () => {

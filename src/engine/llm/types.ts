@@ -42,25 +42,25 @@ export const LLM_DEFAULT_MODELS: Record<LLMVendor, string> = {
  */
 export interface MessageMeta {
   /**
-   * Layer 1 mark-stale + Layer 2 compact 양쪽의 단일 marker — set 시 의미:
+   * Tool-result stubbing + LLM compact 양쪽의 단일 marker — set 시 의미:
    *   - tool_result message: `wire-serialize.ts:stubMarkedToolResults` 가 wire/disk 직렬화 시
-   *     content 를 stub 으로 변환해야 함 (memory verbatim, serialization stub — v3 §4.2)
-   *   - user-role boundary message: Layer 2 compact 가 생성한 경계 (compactBoundary 와 paired)
+   *     content 를 stub 으로 변환해야 함 (memory verbatim, serialization stub)
+   *   - user-role boundary message: LLM compact 가 생성한 경계 (compactBoundary 와 paired)
    */
   compactedAt?: string;
-  /** Layer 2 boundary marker (idempotency + revert anchor) */
+  /** Compact boundary marker (idempotency + revert anchor) */
   compactBoundary?: boolean;
   /** 경계 marker의 경우, 요약 대상이 된 메시지 수 */
   removedCount?: number;
-  /** Layer 2 boundary 의 #N (numbered checkpoint chain — Copilot 패턴 차용). */
+  /** Compact boundary #N in the numbered checkpoint chain. */
   compactNum?: number;
-  /** Layer 1 mark-stale 면제 — skill 도구 출력 또는 사용자 명시 lock. structured-compact 의 pinnedArtifacts 와 paired. */
+  /** Tool-result stubbing 면제 — skill 도구 출력 또는 사용자 명시 lock. structured-compact 의 pinnedArtifacts 와 paired. */
   lock?: boolean;
   /**
    * wire/disk serialization 직전 stub 화가 적용되어 content 가 이미 placeholder 인 경우 true.
    * 이중 변환 방지 idempotency guard. memoryManager.saveSession 시 보존되어야 함.
    * string-prefix 체크 대신 이 flag 를 사용함으로써 도구 출력이 우연히 stub prefix 로 시작하는
-   * false-positive (R4 회귀) 방지 — Copilot round 2 지적 (PR-3 round 3 fix).
+   * false-positive 방지.
    */
   serializedStub?: boolean;
   /**
@@ -70,9 +70,9 @@ export interface MessageMeta {
    */
   activeRolePrompt?: { name: string; systemPromptAdd: string };
   /**
-   * Layer 2 boundary 의 opaque-state slot. type-only import 로 cycle 회피.
+   * Compact boundary 의 opaque-state slot. type-only import 로 cycle 회피.
    * 단일 source of truth: src/engine/structured-compact.ts:CompactBoundary.
-   * ⑧ slot / Layer 3 storage / history[0] 3 view 가 같은 frozen reference.
+   * prompt slot / checkpoint storage / history[0] view 가 같은 frozen reference.
    */
   boundary?: import("../structured-compact.js").CompactBoundary;
 }

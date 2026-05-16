@@ -12,13 +12,11 @@ export interface SessionSummary {
   id: string;
   modifiedAt: string;
   title: string;
-  /**
-   * §PR-5: ID of the previous session in this chain.
-   * This field is set for all chained sessions (resume, rotation, and checkpoint forks).
-   * Check branchedFromCompactNum to determine if this is a true checkpoint fork.
-   */
-  parentSessionId?: string;
-  /** §PR-5: compact number of the checkpoint this session was forked from. Only set on true checkpoint forks. */
+  sessionKind: "main" | "routine";
+  routineId?: string;
+  routineTitle?: string;
+  routineFiredAt?: string;
+  /** Compact number of the checkpoint this session was forked from. Only set on true checkpoint forks. */
   branchedFromCompactNum?: number;
 }
 
@@ -37,6 +35,8 @@ export function useSessions(
   applyInitialSession?: (entries: ChatEntry[]) => void,
 ) {
   const [currentSessionId, setCurrentSessionId] = useState<string>("");
+  const [currentSessionKind, setCurrentSessionKind] = useState<"main" | "routine">("main");
+  const [currentSessionTitle, setCurrentSessionTitle] = useState<string | undefined>(undefined);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const sessionReadTokenRef = useRef(0);
 
@@ -46,57 +46,82 @@ export function useSessions(
       const h = await api.chatGetHistory();
       if (token !== sessionReadTokenRef.current) return;
       setCurrentSessionId(h.sessionId);
+      setCurrentSessionKind(h.sessionKind ?? "main");
+      setCurrentSessionTitle(h.sessionTitle);
     } catch { /* ignore */ }
   }, [api]);
 
   const hydrateInitialSession = useCallback(async () => {
     const token = ++sessionReadTokenRef.current;
+    const applyFreshMain = async (current: Awaited<ReturnType<LvisApi["chatGetHistory"]>>) => {
+      if ((current.sessionKind ?? "main") === "main" && current.messages.length === 0) {
+        setCurrentSessionId(current.sessionId);
+        setCurrentSessionKind("main");
+        setCurrentSessionTitle(undefined);
+        applyInitialSession?.([]);
+        return;
+      }
+      await api.chatNew();
+      if (token !== sessionReadTokenRef.current) return;
+      const fresh = await api.chatGetHistory();
+      if (token !== sessionReadTokenRef.current) return;
+      setCurrentSessionId(fresh.sessionId);
+      setCurrentSessionKind("main");
+      setCurrentSessionTitle(undefined);
+      applyInitialSession?.([]);
+    };
+
     try {
       const h = await api.chatGetHistory();
       if (token !== sessionReadTokenRef.current) return;
-      const listed = await api.chatSessions();
+      const listed = await api.chatSessions({ kind: "main" });
       if (token !== sessionReadTokenRef.current) return;
       setSessions(listed.sessions);
-      if (h.messages.length > 0) {
-        setCurrentSessionId(h.sessionId);
-        // The renderer state contract is: active in-memory stream entries and
-        // persisted session replay both enter ChatView as ChatEntry[].  Hydrate
-        // the current session at startup, but let the chat-state owner reject a
-        // late result if the user already started a live turn.
-        applyInitialSession?.(historyWithUsageToEntries(h));
+      const activeState = await api.chatMainActiveState();
+      if (token !== sessionReadTokenRef.current) return;
+      if (!activeState || activeState.mainActiveMode === "fresh" || !activeState.mainActiveSessionId) {
+        await applyFreshMain(h);
         return;
       }
 
-      const latestToday = latestSessionForKoreaDate(listed.sessions, new Date());
-      if (!latestToday) {
+      if ((h.sessionKind ?? "main") === "main" && h.sessionId === activeState.mainActiveSessionId && h.messages.length > 0) {
         setCurrentSessionId(h.sessionId);
-        applyInitialSession?.([]);
+        setCurrentSessionKind("main");
+        setCurrentSessionTitle(h.sessionTitle);
+        // The renderer state contract is: active in-memory stream entries and
+        // persisted session replay both enter ChatView as ChatEntry[]. Hydrate
+        // only the exact active main session so routine re-entry never replaces
+        // the persisted main active state.
+        applyInitialSession?.(historyWithUsageToEntries(h));
         return;
       }
-      const resumed = await api.chatSessionResume(latestToday.id);
+      const resumed = await api.chatSessionResume(activeState.mainActiveSessionId);
       if (token !== sessionReadTokenRef.current) return;
       if (!resumed?.ok) {
-        setCurrentSessionId(h.sessionId);
-        applyInitialSession?.([]);
+        await applyFreshMain(h);
         return;
       }
-      const persisted = await api.chatSessionHistory(latestToday.id);
+      const persisted = await api.chatSessionHistory(activeState.mainActiveSessionId);
       if (token !== sessionReadTokenRef.current) return;
       if (!persisted.ok) {
-        setCurrentSessionId(h.sessionId);
-        applyInitialSession?.([]);
+        await applyFreshMain(h);
         return;
       }
-      setCurrentSessionId(latestToday.id);
+      setCurrentSessionId(activeState.mainActiveSessionId);
+      setCurrentSessionKind("main");
+      setCurrentSessionTitle(persisted.sessionTitle);
       applyInitialSession?.(sessionHistoryToEntries(persisted));
     } catch { /* ignore */ }
   }, [api, applyInitialSession]);
 
   const refreshSessions = useCallback(async () => {
     try {
-      const r = await api.chatSessions();
+      const r = await api.chatSessions({ kind: "main" });
       setSessions(r.sessions);
-      setCurrentSessionId(r.current);
+      const h = await api.chatGetHistory();
+      setCurrentSessionId(h.sessionId);
+      setCurrentSessionKind(h.sessionKind ?? "main");
+      setCurrentSessionTitle(h.sessionTitle);
     } catch { /* ignore */ }
   }, [api]);
 
@@ -123,6 +148,8 @@ export function useSessions(
         if (!h.ok) return;
         applyLoadedSession(sessionHistoryToEntries(h));
         setCurrentSessionId(sessionId);
+        setCurrentSessionKind(h.sessionKind ?? "main");
+        setCurrentSessionTitle(h.sessionTitle);
       } catch { /* ignore */ }
     },
     [api],
@@ -152,6 +179,8 @@ export function useSessions(
 
   return {
     currentSessionId,
+    currentSessionKind,
+    currentSessionTitle,
     setCurrentSessionId,
     sessions,
     refreshSessionId,
@@ -168,7 +197,6 @@ export function sessionHistoryToEntries(history: Awaited<ReturnType<LvisApi["cha
     {
       kind: "session_resume",
       preambleChars: history.preambleChars ?? 0,
-      ...(history.parentSessionId ? { parentSessionId: history.parentSessionId } : {}),
     },
     ...entries,
   ];
@@ -187,35 +215,4 @@ function historyWithUsageToEntries(history: UsageEstimatedHistory): ChatEntry[] 
 function normalizeEstimatedInputTokens(value: unknown): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return 0;
   return Math.max(0, Math.floor(value));
-}
-
-export function latestSessionForKoreaDate(
-  sessions: SessionSummary[],
-  date: Date,
-): SessionSummary | undefined {
-  const targetDayKey = koreaDateKey(date);
-  let latest: SessionSummary | undefined;
-  let latestTime = Number.NEGATIVE_INFINITY;
-  for (const session of sessions) {
-    const sessionDate = new Date(session.modifiedAt);
-    if (Number.isNaN(sessionDate.getTime())) continue;
-    if (koreaDateKey(sessionDate) !== targetDayKey) continue;
-    const time = sessionDate.getTime();
-    if (time > latestTime) {
-      latest = session;
-      latestTime = time;
-    }
-  }
-  return latest;
-}
-
-function koreaDateKey(date: Date): string {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Seoul",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(date);
-  const get = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
-  return `${get("year")}-${get("month")}-${get("day")}`;
 }

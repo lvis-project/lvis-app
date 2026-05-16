@@ -1,8 +1,7 @@
 /**
  * SessionResumeDivider — emerald-toned horizontal-line divider placed at the
  * head of a resumed child session's entry list when the parent session left
- * a rolling summary preamble (§457 PR-A). Restored from the deleted
- * StackedChatView (issue #547 visual absorption).
+ * a rolling summary preamble.
  *
  * We deliberately do NOT show the preamble text — that material lives in the
  * system prompt and surfacing it inline would leak summarization content into
