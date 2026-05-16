@@ -12,9 +12,9 @@ LVIS 프로젝트의 **시스템 구조 및 기술 설계** 문서입니다.
 | 문서 | 설명 |
 |------|------|
 | **[architecture.md](./architecture.md)** | **현재 아키텍처 (v0.4.1 Draft / currentized)** — 5-Layer Architecture, 42+ Mermaid 다이어그램, 16개 섹션 |
+| **[session-model-v2.md](./session-model-v2.md)** | **세션 모델 v2 구현 기준** — 명시적 세션 로드, main/routine 단일 모델, active main restore, 이전 세션 자동 로드 제거 |
 | [tool-governance.md](./tool-governance.md) | §6.3 / §9.5 / §14.2 보충 — 통합 도구 거버넌스 |
 | [plugin-deployment-model.md](./plugin-deployment-model.md) | managed vs user-installed 플러그인 배포 모델 상세 |
-| [architecture.reference.md](./architecture.reference.md) | v1 초안 (참고용 보존) |
 
 ---
 
