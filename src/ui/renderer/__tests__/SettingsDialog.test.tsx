@@ -152,7 +152,7 @@ describe("SettingsDialog (smoke)", () => {
         onOpenChange={onOpenChange}
         api={api as never}
         onSaved={vi.fn()}
-        initialTab="chat"
+        initialTab="llm"
       />,
     );
 
@@ -164,12 +164,13 @@ describe("SettingsDialog (smoke)", () => {
       ...(baseSettings as object),
       features: { idlePreferenceRefresh: false },
     });
-
-    await waitFor(() => {
-      expect(screen.getByTestId("idle-preference-refresh-toggle")).toHaveAttribute("aria-checked", "false");
-    });
     api.updateSettings.mockClear();
 
+    // The bulk-save payload assertion is tab-agnostic: any explicit save
+    // must NOT echo `features` from local state (live updates own that
+    // slice). LlmTab still has a TabSaveBar Save button after the PR #780
+    // UX overhaul — ChatTab went fully immediate-apply, so the original
+    // initialTab="chat" no longer has a Save button to click.
     fireEvent.click(screen.getByRole("button", { name: "저장" }));
 
     await waitFor(() => {
