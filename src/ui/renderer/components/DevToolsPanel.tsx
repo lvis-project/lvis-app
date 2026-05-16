@@ -5,7 +5,7 @@
  * in MainToolbar (next to Home button) or by keyboard shortcut Cmd/Ctrl+Shift+D.
  *
  * Current controls:
- *   - Preflight threshold slider — adjusts the Layer 0 compact trigger
+ *   - Preflight threshold slider — adjusts the compact trigger
  *     so dev/test can reproduce compact scenarios without filling 200K context.
  *     Range 500 — 100,000 tokens. Live IPC push to engine.
  */
@@ -189,7 +189,7 @@ export function DevToolsPanel({ api, open, onClose }: DevToolsPanelProps) {
       )}
 
       <p className="mt-3 border-t pt-2 text-[10px] text-muted-foreground">
-        설명: 슬라이더 위치가 Layer 0 compact 트리거 임계 (절대 token count). 작게
+        설명: 슬라이더 위치가 compact 트리거 임계 (절대 token count). 작게
         설정하면 짧은 대화만으로도 SUMMARIZED / CONTENT_TRUNCATED / FORCED 시나리오
         재현 가능. 변경 즉시 IPC 로 engine 에 반영.
       </p>

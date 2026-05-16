@@ -1,7 +1,7 @@
 /**
- * Wire/Disk serialization transform — Layer 1 marked tool_results 를 stub 으로 변환.
+ * Wire/Disk serialization transform — marked tool_results 를 stub 으로 변환.
  *
- * v3 §4.2 (PR-3) 핵심 — `markStaleToolResults` 가 *memory verbatim* 보존하므로 provider 호출
+ * `markStaleToolResults` 가 *memory verbatim* 보존하므로 provider 호출
  * 직전 + JSONL 영속화 직전 두 boundary 에서 *반드시* 이 helper 를 통과시켜 stub 형태로 만든다.
  *
  * 단일 source of truth — 모든 vendor adapter (Anthropic / OpenAI / Gemini / Copilot / Vertex /
@@ -25,7 +25,7 @@ export function stubMarkedToolResults(messages: GenericMessage[]): GenericMessag
   // Copy-on-write — eligible 메시지가 하나도 없으면 새 array 생성하지 않고 입력 그대로 반환.
   // 사전 scan: marked (compactedAt set) + 아직 stub 아님 (serializedStub !== true) 인 첫 인덱스 탐색.
   // NOTE: string-prefix 체크는 도구 출력이 우연히 그 prefix 로 시작하는 false-positive 위험 →
-  //       meta.serializedStub flag 기반으로 전환 (Copilot round 2 지적, PR-3 round 3 fix).
+  //       meta.serializedStub flag 기반으로 전환.
   let firstEligibleIdx = -1;
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i];

@@ -26,17 +26,6 @@ async function submitUser(container: HTMLElement, text: string) {
   });
 }
 
-function kstDateKey(date: Date): string {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Seoul",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(date);
-  const get = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
-  return `${get("year")}-${get("month")}-${get("day")}`;
-}
-
 describe("ChatView", () => {
   it("mounts without crashing", async () => {
     const { container } = await renderApp();
@@ -542,6 +531,11 @@ describe("ChatView", () => {
           { index: 1, role: "assistant", content: "이전 답변" },
         ],
       },
+      mainActiveState: {
+        mainActiveSessionId: "sess-history",
+        mainActiveMode: "resume",
+        updatedAt: "2026-05-16T00:00:00.000Z",
+      },
     });
 
     await waitFor(() => {
@@ -682,7 +676,7 @@ describe("ChatView", () => {
     });
   });
 
-  it("keeps the calendar day divider visible for the active conversation after previous-day history loads", async () => {
+  it("does not prepend previous-day session history into the active conversation", async () => {
     const now = new Date().toISOString();
     const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const { container } = await renderApp({
@@ -708,55 +702,48 @@ describe("ChatView", () => {
     await submitUser(container, "새 질문");
 
     await waitFor(() => {
-      expect(container.querySelectorAll('[data-testid="day-divider"]').length).toBeGreaterThanOrEqual(2);
-      expect(container.textContent).not.toContain("현재 대화");
+      expect(container.querySelectorAll('[data-testid="day-divider"]')).toHaveLength(1);
+      expect(container.querySelector('[data-session-marker-id="old-yesterday"]')).toBeNull();
+      expect(container.textContent).not.toContain("이전 질문");
+      expect(container.textContent).not.toContain("이전 답변");
     });
   });
 
-  it("scrolls to an already loaded historical session from the calendar session list", async () => {
+  it("loads the exact selected session from the calendar session list", async () => {
     const scrollSpy = vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(() => {});
     const now = new Date().toISOString();
-    const yesterdayDate = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const yesterday = yesterdayDate.toISOString();
-    const yesterdayKey = kstDateKey(yesterdayDate);
-    const { container } = await renderApp({
+    const { container, api } = await renderApp({
       currentSession: "current",
       sessions: [
         { id: "current", modifiedAt: now, title: "현재 대화" },
-        { id: "old-yesterday", modifiedAt: yesterday, title: "이전 대화" },
+        { id: "other-session", modifiedAt: now, title: "다른 대화" },
       ],
       history: {
         sessionId: "current",
         messages: [],
       },
       historyBySession: {
-        "old-yesterday": {
+        "other-session": {
           messages: [
-            { index: 0, role: "user", content: "이전 질문" },
-            { index: 1, role: "assistant", content: "이전 답변" },
+            { index: 0, role: "user", content: "다른 질문" },
+            { index: 1, role: "assistant", content: "다른 답변" },
           ],
         },
       },
     });
 
-    await waitFor(() => {
-      expect(container.querySelector('[data-session-marker-id="old-yesterday"]')).toBeTruthy();
-    });
-
-    const dayButton = Array.from(container.querySelectorAll("button")).find((button) =>
-      button.textContent?.includes(yesterdayKey),
-    ) as HTMLButtonElement | undefined;
+    const dayButton = container.querySelector('[data-testid="day-divider"] button') as HTMLButtonElement | null;
     expect(dayButton).toBeTruthy();
 
     await act(async () => {
       fireEvent.click(dayButton!);
     });
     await waitFor(() => {
-      expect(document.body.textContent).toContain("이전 대화");
+      expect(document.body.textContent).toContain("다른 대화");
     });
 
     const sessionButton = Array.from(document.querySelectorAll("button")).find((button) =>
-      button.textContent?.includes("이전 대화"),
+      button.textContent?.includes("다른 대화"),
     ) as HTMLButtonElement | undefined;
     expect(sessionButton).toBeTruthy();
 
@@ -764,7 +751,17 @@ describe("ChatView", () => {
       fireEvent.click(sessionButton!);
     });
 
-    expect(scrollSpy).toHaveBeenCalled();
+    await waitFor(() => {
+      expect(api.chatSessionResume).toHaveBeenCalledWith("other-session");
+      expect(api.chatSessionHistory).toHaveBeenCalledWith("other-session");
+    });
+    const scrolledToMarker = scrollSpy.mock.calls.some(([arg]) =>
+      typeof arg === "object" &&
+      arg !== null &&
+      "block" in arg &&
+      (arg as ScrollIntoViewOptions).block === "start",
+    );
+    expect(scrolledToMarker).toBe(false);
   });
 
   it("moves a tool_use assistant round into the active WorkGroup before tool events arrive", async () => {
@@ -894,6 +891,11 @@ describe("ChatView", () => {
           { index: 6, role: "assistant", content: "최종 답변입니다." },
         ],
       },
+      mainActiveState: {
+        mainActiveSessionId: "sess-work-order",
+        mainActiveMode: "resume",
+        updatedAt: "2026-05-16T00:00:00.000Z",
+      },
     });
 
     await waitFor(() => {
@@ -969,6 +971,11 @@ describe("ChatView", () => {
           { index: 5, role: "tool_result", toolUseId: "t2", toolName: "web_fetch", content: "본문" },
           { index: 6, role: "assistant", content: "needle 최종 답변입니다." },
         ],
+      },
+      mainActiveState: {
+        mainActiveSessionId: "sess-search-rings",
+        mainActiveMode: "resume",
+        updatedAt: "2026-05-16T00:00:00.000Z",
       },
     });
 

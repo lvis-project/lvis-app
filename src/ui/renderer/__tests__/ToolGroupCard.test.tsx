@@ -303,8 +303,8 @@ describe("ToolGroupCard", () => {
     expect(badges[1]?.textContent).toContain("⏱ 1.4s");
   });
 
-  // ─── PR-4: CompactedToolResult rendering paths (Major #4) ───────────────
-  it("PR-4: single tool with stub result + sessionId → renders CompactedToolResult (펼치기 visible)", () => {
+  // ─── CompactedToolResult rendering paths ────────────────────────────────
+  it("single tool with stub result + sessionId → renders CompactedToolResult (펼치기 visible)", () => {
     const stubResult = "[tool_result stripped: tool=Read, origLen=5000]";
     vi.stubGlobal("lvisApi", {
       chatGetVerbatimToolResult: vi.fn(() => new Promise(() => {})), // never resolves — just test render
@@ -328,7 +328,7 @@ describe("ToolGroupCard", () => {
     expect(container.textContent).not.toContain("[tool_result stripped:");
   });
 
-  it("PR-4: single tool with stub result but NO sessionId → renders ToolPayloadBlock (raw stub shown)", () => {
+  it("single tool with stub result but NO sessionId → renders ToolPayloadBlock (raw stub shown)", () => {
     const stubResult = "[tool_result stripped: tool=Read, origLen=5000]";
     const group = makeGroup({
       tools: [
@@ -349,7 +349,7 @@ describe("ToolGroupCard", () => {
     expect(container.textContent).not.toContain("[펼치기]");
   });
 
-  it("PR-4: single tool with non-stub result + sessionId → renders ToolPayloadBlock (not CompactedToolResult)", () => {
+  it("single tool with non-stub result + sessionId → renders ToolPayloadBlock (not CompactedToolResult)", () => {
     const group = makeGroup({
       tools: [
         {

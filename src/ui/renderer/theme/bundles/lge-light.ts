@@ -69,7 +69,7 @@ export const lgeLightBundle: ThemeBundle = {
     "chart-3":                "271 76% 76%",    /* lilac */
     "chart-4":                "142 71% 45%",    /* green */
     "chart-5":                "25 95% 53%",     /* orange */
-    /* ── Action tokens (PR-4/5) ────────────────────────────────── */
+    /* ── Action tokens ─────────────────────────────────────────── */
     "action-view":            "263 70% 50%",
     "action-branch":          "25 95% 53%",
     "action-compact":         "263 70% 50%",

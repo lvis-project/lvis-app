@@ -55,7 +55,6 @@ import type { SubAgentSpawn } from "./components/SubAgentCard.js";
 import type { SkillBadgeProps } from "./components/SkillBadge.js";
 import type { SessionSummary } from "./hooks/use-sessions.js";
 import type { UserKeyboardIntentSnapshot } from "../../shared/chat-origin.js";
-import { useContinuousHistory, type ContinuousHistorySession } from "./hooks/use-continuous-history.js";
 import ReactMarkdown from "react-markdown";
 import { MARKDOWN_REMARK_PLUGINS } from "./utils/markdown-plugins.js";
 import { parseImportedTriggerEnvelope } from "../../shared/overlay-trigger-source.js";
@@ -129,6 +128,8 @@ export interface ChatViewProps {
   plugins: PluginEntry[];
   /** Navigate to a plugin view */
   onSelectPlugin: (viewKey: string) => void;
+  currentSessionKind?: "main" | "routine";
+  currentSessionTitle?: string;
   sessions?: SessionSummary[];
   onLoadSession?: (sessionId: string) => void | Promise<void>;
   onRefreshSessions?: () => void | Promise<void>;
@@ -142,9 +143,8 @@ export interface ChatViewProps {
   marketplaceUrlReady?: boolean;
   /** Set of routineIds currently executing (LLM session in-flight). */
   runningRoutines?: Set<string>;
-  // PR-2-F-2 정정: fork-based revert (revertSessionId/onRevertCheckpoint) 폐지 — Layer 3
-  // same-session checkpoint chain (Copilot 패턴) 으로 대체. sessionId 불변이므로 별도 revert action
-  // 불필요 — 사용자가 임의 시점으로 돌아가려면 후속 PR 의 view-mode 지원 필요.
+  // Fork-based revert is replaced by the same-session checkpoint chain.
+  // sessionId remains stable until the user explicitly branches from a checkpoint.
   /** Called when user confirms a plugin overlay item; id is the OverlayItem.id. */
   onPluginPrimaryAction?: (overlayItemId: string) => void;
   /** Called when a completed routine overlay result has been seen or dismissed. */
@@ -153,29 +153,10 @@ export interface ChatViewProps {
   onOpenPermissionQueue?: () => void;
 }
 
-function HistoricalSessionMarker({ title, sessionId }: { title: string; sessionId: string }) {
-  return (
-    <div
-      className="mx-auto max-w-full truncate text-center text-[11px] text-muted-foreground/50 py-0.5 px-3"
-      data-testid="session-marker"
-      data-session-marker-id={sessionId}
-    >
-      - {title || sessionId.slice(0, 8)} -
-    </div>
-  );
-}
-
-function sessionMarkerSelector(sessionId: string): string {
-  const escaped = typeof CSS !== "undefined" && typeof CSS.escape === "function"
-    ? CSS.escape(sessionId)
-    : sessionId.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-  return `[data-session-marker-id="${escaped}"]`;
-}
-
 function AskUserAnswerBubble({
   entry,
 }: {
-  entry: Extract<ContinuousHistorySession["entries"][number], { kind: "ask_user_answer" }>;
+  entry: Extract<ChatEntry, { kind: "ask_user_answer" }>;
 }) {
   if (entry.dismissed) {
     return (
@@ -209,209 +190,7 @@ function AskUserAnswerBubble({
   );
 }
 
-function HistoricalEntriesList({
-  entries,
-  activePricing,
-  activeVendor,
-  onEnterView,
-  onBranchFrom,
-}: {
-  entries: ContinuousHistorySession["entries"];
-  activePricing: ChatContextValue["activePricing"];
-  activeVendor: ChatContextValue["activeVendor"];
-  onEnterView?: (compactNum: number) => void;
-  onBranchFrom?: (compactNum: number) => void;
-}) {
-  const renderEntry = (entry: ContinuousHistorySession["entries"][number], idx: number, embedded = false) => {
-    if (entry.kind === "assistant") {
-      return (
-        <AssistantCard
-          key={idx}
-          entry={{ ...entry, streaming: false }}
-          highlightQuery=""
-          isStarred={false}
-          isFinal={true}
-          embedded={embedded}
-        />
-      );
-    }
-    if (entry.kind === "reasoning") {
-      return <ReasoningCard key={idx} entry={{ ...entry, streaming: false }} embedded={embedded} />;
-    }
-    if (entry.kind === "tool_group") {
-      // Historical sessions are loaded from disk stubs — no verbatim available (sessionId omitted)
-      return <ToolGroupCard key={entry.groupId || idx} group={entry} embedded={embedded} />;
-    }
-    if (entry.kind === "ask_user_answer") {
-      return <AskUserAnswerBubble key={entry.sourceToolUseId || idx} entry={entry} />;
-    }
-    if (entry.kind === "turn_summary" || entry.kind === "context_usage") {
-      // Historical: usage carriers are data only — standalone 표시 X.
-      // duration 정보는 WorkGroup 헤더가 표시. token 정보는 historical 의
-      // final assistant 위치엔 ActionBar 가 없어 이번 phase 에서 미노출;
-      // 필요 시 후속에서 historical-footer 컴포넌트 추가 가능.
-      return null;
-    }
-    return null;
-  };
-
-  const rendered: React.ReactNode[] = [];
-  let i = 0;
-  while (i < entries.length) {
-    const entry = entries[i];
-    if (!entry) {
-      i++;
-      continue;
-    }
-
-    if (entry.kind === "assistant" || entry.kind === "reasoning" || entry.kind === "tool_group") {
-      const segmentStart = i;
-      const segment: Array<{ entry: typeof entry; idx: number }> = [];
-      while (i < entries.length) {
-        const next = entries[i];
-        if (!next || (next.kind !== "assistant" && next.kind !== "reasoning" && next.kind !== "tool_group")) break;
-        segment.push({ entry: next as typeof entry, idx: i });
-        i++;
-      }
-      const lastSegmentEntry = segment[segment.length - 1]?.entry;
-      const finalAssistantOffset = lastSegmentEntry?.kind === "assistant"
-        ? segment.length - 1
-        : -1;
-      const workItems = finalAssistantOffset >= 0
-        ? segment.slice(0, finalAssistantOffset)
-        : segment;
-      // Historical segment 의 turnStart + 같은 turn 의 turn_summary entry
-      // 한 번에 lookup. turn_summary 는 segment 외부 (다음 user/imported_trigger
-      // 직전) 에 있어 entries 전체에서 찾되 다음 turn start 만나기 전까지만.
-      let histTurnStart = -1;
-      for (let k = segmentStart; k >= 0; k--) {
-        if (isTurnStartEntry(entries[k])) { histTurnStart = k; break; }
-      }
-      let histTurnSummary: Extract<ChatEntry, { kind: "turn_summary" }> | undefined;
-      if (histTurnStart >= 0) {
-        for (let k = segmentStart; k < entries.length; k++) {
-          const ne = entries[k];
-          if (!ne) continue;
-          if (isTurnStartEntry(ne) && k !== histTurnStart) break;
-          if (ne.kind === "turn_summary") {
-            histTurnSummary = ne;
-            break;
-          }
-        }
-      }
-
-      if (workItems.length > 0) {
-        rendered.push(
-          <WorkGroup
-            key={`hist-wg-${segmentStart}`}
-            stepCount={workItems.length}
-            streaming={false}
-            turnDurationMs={histTurnSummary?.turnDurationMs}
-          >
-            {workItems.map((item) => renderEntry(item.entry, item.idx, true))}
-          </WorkGroup>,
-        );
-      }
-      if (finalAssistantOffset >= 0) {
-        const finalItem = segment[finalAssistantOffset];
-        if (finalItem) rendered.push(renderEntry(finalItem.entry, finalItem.idx));
-        // Historical 의 final assistant 다음에 token 정보 inline 표시.
-        // Live 와 달리 ActionBar 가 없어 별도 footer slot — TokenCostBadge 만.
-        if (histTurnSummary) {
-          rendered.push(
-            <div key={`hist-tcb-${segmentStart}`} className="px-3 mt-0.5">
-              <TokenCostBadge
-                tokensIn={histTurnSummary.tokensIn}
-                freshInputTokens={histTurnSummary.freshInputTokens}
-                tokensOut={histTurnSummary.tokensOut}
-                cacheReadTokens={histTurnSummary.cacheReadTokens}
-                cacheWriteTokens={histTurnSummary.cacheWriteTokens}
-                vendor={activeVendor}
-                pricing={activePricing}
-              />
-            </div>,
-          );
-        }
-      }
-      continue;
-    }
-
-    if (entry.kind === "user") {
-      rendered.push(
-        <div
-          key={i}
-          data-testid="historical-user-message"
-          className="ml-auto w-fit min-w-0 max-w-[75%] overflow-hidden rounded-md bg-message-user px-3.5 py-2 text-sm text-message-user-foreground"
-        >
-          <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{entry.text}</div>
-        </div>,
-      );
-      i++;
-      continue;
-    }
-
-    if (entry.kind === "ask_user_answer") {
-      rendered.push(<AskUserAnswerBubble key={i} entry={entry} />);
-      i++;
-      continue;
-    }
-
-    if (entry.kind === "system") {
-      rendered.push(<div key={i} className="mx-auto text-center text-xs text-muted-foreground py-1 px-3 rounded-full bg-muted/50">{entry.text}</div>);
-      i++;
-      continue;
-    }
-
-    if (entry.kind === "turn_summary" || entry.kind === "context_usage") {
-      // Historical: usage carriers are data only — standalone 표시 X.
-      // (See note in renderEntry above.)
-      i++;
-      continue;
-    }
-
-    if (entry.kind === "checkpoint") {
-      rendered.push(
-        <Fragment key={i}>
-          <CheckpointDivider
-            tier={entry.tier}
-            messageCount={entry.removedMessages}
-            compactNum={entry.compactNum}
-            compactStatus={entry.compactStatus}
-            truncatedDir={entry.truncatedDir}
-            onEnterView={onEnterView}
-            onBranchFrom={onBranchFrom}
-          />
-          {entry.summary ? <SummaryToast summary={entry.summary} /> : null}
-        </Fragment>,
-      );
-      i++;
-      continue;
-    }
-
-    if (entry.kind === "session_resume") {
-      rendered.push(<SessionResumeDivider key={i} preambleChars={entry.preambleChars} />);
-      i++;
-      continue;
-    }
-
-    if (entry.kind === "imported_trigger") {
-      rendered.push(
-        <ImportedTriggerCard
-          key={`trigger:${entry.sessionId}`}
-          entry={entry}
-        />,
-      );
-      i++;
-      continue;
-    }
-
-    i++;
-  }
-
-  return <div className="min-w-0 w-full max-w-full space-y-3 overflow-x-hidden">{rendered}</div>;
-}
-
-export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, installingPlugins, onOpenMarketplace, marketplaceUrlReady, onPluginPrimaryAction, onRoutineAcknowledge, onOpenPermissionQueue }: ChatViewProps) {
+export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, currentSessionKind = "main", currentSessionTitle, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, installingPlugins, onOpenMarketplace, marketplaceUrlReady, onPluginPrimaryAction, onRoutineAcknowledge, onOpenPermissionQueue }: ChatViewProps) {
   // We still need the api for SessionTodoPanel; obtain it via singleton.
   const workflowApi = getApi();
   const debugStreamEnabled = isDebugStreamEnabled();
@@ -429,11 +208,6 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     vendorSupportsThinking, enableThinkingChat, toggleThinking,
     costEstimate, costBadgeClass, activePricing, activeVendor,
   } = useChatContext();
-
-  const currentSessionAnchor = useMemo(() => {
-    const current = sessions?.find((session) => session.id === currentSessionId);
-    return current ? { id: currentSessionId, modifiedAt: current.modifiedAt } : undefined;
-  }, [currentSessionId, sessions]);
 
   // Sub-agent spawns by their originating tool_use id. Used so SubAgentCard
   // renders inline next to the ToolGroupCard whose `agent_spawn` call started
@@ -455,20 +229,20 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     [subAgentSpawns],
   );
 
-  // §PR-5: Layer 3 View-Mode — null = live, non-null = viewing a past checkpoint slice
+  // Checkpoint view-mode — null = live, non-null = viewing a past checkpoint slice.
   const [viewMode, setViewMode] = useState<ViewModeState | null>(null);
-  // §PR-5: brief fork-success toast (auto-dismisses after 3 s)
+  // Brief fork-success toast (auto-dismisses after 3 s).
   const [forkToast, setForkToast] = useState<string | null>(null);
   const forkToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // §PR-5: cleanup fork toast timer on unmount to avoid setState-after-unmount
+  // Cleanup fork toast timer on unmount to avoid setState-after-unmount.
   useEffect(() => {
     return () => {
       if (forkToastTimerRef.current) clearTimeout(forkToastTimerRef.current);
     };
   }, []);
 
-  // §PR-5: in view-mode, show only the sliced entries up to the checkpoint.
+  // In view-mode, show only the sliced entries up to the checkpoint.
   const visibleEntries = useMemo(
     () => viewMode ? entries.slice(0, viewMode.slicedRangeEnd) : entries,
     [entries, viewMode],
@@ -528,17 +302,8 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     [spawnsByToolUseId],
   );
 
-  const {
-    historicalSessions,
-    loading: loadingHistory,
-    reachedEnd: reachedHistoryEnd,
-    sentinelRef,
-    scrollViewportRef,
-  } = useContinuousHistory(api, currentSessionId, hasApiKey !== false, currentSessionAnchor);
-
+  const scrollViewportRef = useRef<HTMLDivElement | null>(null);
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
-  const initialBottomScrollPendingRef = useRef(true);
-  const sawHistoryLoadingRef = useRef(false);
 
   const isNearBottom = useCallback(() => {
     const viewport = scrollViewportRef.current;
@@ -560,20 +325,9 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     setShowJumpToBottom(false);
   }, [chatEndRef, scrollViewportRef]);
 
-  const scrollToSessionMarker = useCallback((sessionId: string): boolean => {
-    const viewport = scrollViewportRef.current;
-    if (!viewport) return false;
-    const target = viewport.querySelector<HTMLElement>(sessionMarkerSelector(sessionId));
-    if (!target) return false;
-    target.scrollIntoView({ behavior: "smooth", block: "start" });
-    setShowJumpToBottom(!isNearBottom());
-    return true;
-  }, [isNearBottom, scrollViewportRef]);
-
   const handleCalendarSessionSelect = useCallback(async (sessionId: string) => {
-    if (scrollToSessionMarker(sessionId)) return;
     await onLoadSession?.(sessionId);
-  }, [onLoadSession, scrollToSessionMarker]);
+  }, [onLoadSession]);
 
   useEffect(() => {
     if (!searchOpen || searchMatches.length === 0) return;
@@ -588,15 +342,15 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     return () => window.cancelAnimationFrame(frame);
   }, [searchIdx, searchMatches, searchOpen, scrollViewportRef]);
 
-  // §PR-5: View-Mode handlers
+  // Checkpoint view-mode handlers.
   const handleEnterView = useCallback(async (compactNum: number) => {
     const result = await api.chatEnterCheckpointView?.(currentSessionId, compactNum);
     if (!result || "error" in result) return;
-    // §PR-5 note: messageIndexAtCreation is engine history message count — it does NOT
+    // messageIndexAtCreation is engine history message count — it does NOT
     // map 1:1 to renderer entries (which include reasoning/tool_group/checkpoint entries).
     // We cap to entries.length so the slice is always valid, accepting that in tool-heavy
     // sessions the visible range may show slightly more entries than the exact checkpoint.
-    // A precise renderer↔engine index mapping is deferred to a future PR.
+    // A precise renderer↔engine index mapping can be added later if needed.
     const slicedRangeEnd = Math.min(result.messageIndexAtCreation, entries.length);
     setViewMode({ compactNum, slicedRangeEnd });
     scrollChatToBottom("auto");
@@ -611,7 +365,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
   const handleBranchFrom = useCallback(async (compactNum: number) => {
     const result = await api.chatBranchFromCheckpoint?.(currentSessionId, compactNum);
     if (!result || "error" in result) return;
-    // §PR-5: exit view-mode before loading the new session so it opens in live mode
+    // Exit view-mode before loading the new session so it opens in live mode.
     setViewMode(null);
     // Load the branched session
     await onLoadSession?.(result.newSessionId);
@@ -622,12 +376,10 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
   }, [api, currentSessionId, onLoadSession]);
 
   useEffect(() => {
-    initialBottomScrollPendingRef.current = true;
-    sawHistoryLoadingRef.current = false;
     setShowJumpToBottom(false);
   }, [currentSessionId]);
 
-  // Stage 3: per-ChatView message-queue store. session 변경 시 자동 비움.
+  // per-ChatView message-queue store. session 변경 시 자동 비움.
   const messageQueueStore = useMemo(() => new MessageQueueStore(), []);
   // queue-auto inject in-flight 플래그 — done event re-entrancy 방지.
   const queueAutoInflightRef = useRef(false);
@@ -643,7 +395,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     messageQueueStore.clear();
   }, [currentSessionId, messageQueueStore]);
 
-  // Stage 5c: 자연 인입 (true mid-turn brake-point) — 엔진의 onGuide
+  // 자연 인입 (true mid-turn brake-point) — 엔진의 onGuide
   // (round-boundary inject) 메커니즘 위임. tool_end event 발생 시 큐 dump:
   // 엔진이 다음 assistant round 시작 직전에 user message 로 합류시킴.
   // 이전 implementation (streaming false 전이 시 onAsk = abort+restart) 의
@@ -725,7 +477,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     void onAsk(formatted, { inputOrigin: "user-keyboard", token: "" }, { injectHint: "interrupt" });
   }, [messageQueueStore, onAbort, onAsk]);
 
-  // Stage 5: composer Enter morph — busy = queue.add, idle = onAsk 직행.
+  // composer Enter morph — busy = queue.add, idle = onAsk 직행.
   // ⌘⏎ = 즉시 주입 (LLM abort + 큐 selected + 현재 입력).
   const handleComposerSend = useCallback(
     (intent: UserKeyboardIntentSnapshot) => {
@@ -771,7 +523,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     void onAsk(combined, { inputOrigin: "user-keyboard", token: "" }, { injectHint: "interrupt" });
   }, [question, messageQueueStore, onAsk, setQuestion]);
 
-  // Stage 5: ESC 우선순위
+  // ESC 우선순위
   //   1. 모달 (Radix Dialog [data-state="open"]) → 모달이 가로챔 (defensive)
   //   2. 큐 선택 항목 있음 → 선택 해제만 (LLM 안 건드림)
   //   3. composer textarea 안에서 ESC → LLM 취소
@@ -834,7 +586,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     return () => window.removeEventListener("keydown", handler);
   }, [handleImmediateInject]);
 
-  // Stage 5 follow-up: ⌘K = 가이드 호출. BottomActionRow 의 ghost 버튼과 동일
+  // ⌘K = 가이드 호출. BottomActionRow 의 ghost 버튼과 동일
   // onGuide 위임. text 비어 있으면 noop. busy 와 무관 (idle 에서도 가이드 가능).
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -879,20 +631,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
   }, [isNearBottom, scrollViewportRef]);
 
   useEffect(() => {
-    if (loadingHistory) {
-      sawHistoryLoadingRef.current = true;
-      return;
-    }
-    if (!initialBottomScrollPendingRef.current) return;
-    if (!sawHistoryLoadingRef.current) return;
-    initialBottomScrollPendingRef.current = false;
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => scrollChatToBottom("auto"));
-    });
-  }, [loadingHistory, scrollChatToBottom]);
-
-  useEffect(() => {
-    // §PR-5: suppress auto-scroll while in view-mode so new live entries don't
+    // Suppress auto-scroll while in view-mode so new live entries don't
     // yank the viewport away from the frozen checkpoint slice the user is reading.
     if (viewMode) return;
     if (isNearBottom()) {
@@ -900,21 +639,6 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     }
   }, [entries.length, isNearBottom, scrollChatToBottom, viewMode]);
 
-  const historicalByDay = useMemo(() => {
-    const map = new Map<string, ContinuousHistorySession[]>();
-    for (const session of historicalSessions) {
-      if (session.id === currentSessionId) continue;
-      const existing = map.get(session.dayKey);
-      if (existing) {
-        existing.push(session);
-      } else {
-        map.set(session.dayKey, [session]);
-      }
-    }
-    return [...map.entries()].sort(([a], [b]) => a.localeCompare(b));
-  }, [currentSessionId, historicalSessions]);
-
-  const hasHistoricalContent = historicalSessions.length > 0;
   const activeDayKey = getKoreaDateKey(new Date());
 
 
@@ -959,9 +683,9 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
         onRoutineAcknowledge={onRoutineAcknowledge}
       />
       <div className="relative min-h-0 min-w-0 max-w-full flex-1 overflow-hidden">
-      {/* §PR-5: View-Mode banner — sticky at the top of the chat scroll area */}
+      {/* Checkpoint view-mode banner — sticky at the top of the chat scroll area */}
       <ViewModeBanner viewMode={viewMode} onExit={() => { void handleExitView(); }} />
-      {/* §PR-5: Fork-success toast — auto-dismisses after 3 s */}
+      {/* Fork-success toast — auto-dismisses after 3 s */}
       {forkToast && (
         <div
           data-testid="fork-toast"
@@ -970,45 +694,17 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           {forkToast}
         </div>
       )}
+      {currentSessionKind === "routine" && (
+        <div
+          data-testid="current-session-kind-banner"
+          className="sticky top-0 z-20 mx-3 mt-2 rounded-md border border-action-view/30 bg-action-view/10 px-3 py-2 text-xs text-action-view"
+        >
+          <span className="font-medium">루틴 세션</span>
+          {currentSessionTitle ? <span className="ml-2 text-muted-foreground">{currentSessionTitle}</span> : null}
+        </div>
+      )}
       <ScrollArea className="lvis-chat-scroll h-full min-h-0 min-w-0 max-w-full" viewportRef={scrollViewportRef}><div className="min-w-0 w-full max-w-full overflow-x-hidden space-y-3 px-3 py-4">
-        <div ref={sentinelRef} data-testid="chat-history-sentinel" className="h-px" />
-        {loadingHistory && (
-          <div
-            data-testid="chat-history-loading"
-            className="py-2 text-center text-[11px] text-muted-foreground border-b border-dashed border-border/40"
-          >
-            이전 대화 기록 불러오는 중...
-          </div>
-        )}
-        {reachedHistoryEnd && hasHistoricalContent && (
-          <div className="py-2 text-center text-[10px] text-muted-foreground/50">
-            - 대화 시작 -
-          </div>
-        )}
-        {historicalByDay.map(([dayKey, daySessions]) => (
-          <Fragment key={dayKey}>
-            <DayDivider
-              dateKey={dayKey}
-              sessions={sessions}
-              currentSessionId={currentSessionId}
-              streaming={streaming}
-              onLoadSession={handleCalendarSessionSelect}
-              onRefreshSessions={onRefreshSessions}
-            />
-            {daySessions.map((session) => (
-              <Fragment key={session.id}>
-                <HistoricalSessionMarker title={session.title} sessionId={session.id} />
-                {/* §PR-5: historical sessions use currentSessionId in IPC — hide view/branch actions
-                    to prevent session-mismatch. Actions are only valid on the live current session. */}
-                <HistoricalEntriesList entries={session.entries} activePricing={activePricing} activeVendor={activeVendor} />
-              </Fragment>
-            ))}
-          </Fragment>
-        ))}
-        {/* Today's date badge — always shown above the active conversation.
-            Even when historical sessions already rendered today's date, the
-            active turn boundary must remain the same calendar-enabled divider
-            instead of degrading to a plain "현재 대화" separator. */}
+        {/* Today's date badge stays a selector for explicit session loads only. */}
         <DayDivider
           dateKey={activeDayKey}
           sessionMarkerId={currentSessionId}
@@ -1030,12 +726,12 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           </div>
         )}
         {/* Orphan-only fallback: spawns without a toolUseId association
-            (legacy events or pre-association race conditions). Spawns with
+            (older events or pre-association race conditions). Spawns with
             a toolUseId render inline next to their ToolGroupCard below. */}
         {orphanSpawns.map((spawn) => (
           <SubAgentCard key={spawn.spawnId} spawn={spawn} />
         ))}
-        {visibleEntries.length === 0 && !hasHistoricalContent && hasApiKey !== false && !hasAskQuestions && <div className="py-12 text-center text-sm text-muted-foreground">LVIS 에이전트가 준비되었습니다. 질문을 입력하거나 /command를 사용하세요.</div>}
+        {visibleEntries.length === 0 && hasApiKey !== false && !hasAskQuestions && <div className="py-12 text-center text-sm text-muted-foreground">LVIS 에이전트가 준비되었습니다. 질문을 입력하거나 /command를 사용하세요.</div>}
         {(() => {
           // Three-way entry classification eliminates retroactive-reclassification flicker.
           //
@@ -1049,7 +745,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           //
           // TurnActionBar therefore appears ONLY when the whole turn is done, never during it.
 
-          // §PR-5: use visibleEntries (sliced in view-mode, full list otherwise)
+          // Use visibleEntries (sliced in view-mode, full list otherwise).
           const activeEntries = visibleEntries;
 
           // Last turn-start index: user messages and imported overlay prompts both
@@ -1169,7 +865,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
                     {starActive ? (
                       <Star key="active" className="absolute right-2 top-2 h-3 w-3 fill-emphasis text-emphasis lvis-anim-star" />
                     ) : null}
-                    {/* §PR-5: hide mutating actions in view-mode (read-only slice) */}
+                    {/* Hide mutating actions in view-mode (read-only slice). */}
                     {!viewMode && (
                       <div className="absolute right-2 top-2 hidden gap-1 group-hover:flex bg-message-user/95 rounded">
                         <Button type="button" variant="ghost" size="icon-xs" title="편집" onClick={() => setEditingEntryIdx(idx)}>
@@ -1220,14 +916,14 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             }
 
             // Structured compact checkpoint marker — auto-compact 및 manual compact 모두 CheckpointDivider 로 렌더.
-            // CheckpointDivider 의 tier prop 이 auto/manual variant 를 구분.
-            // PR-2-F-2 이후 sessionId 불변이라 revert 액션 없음 (Copilot 패턴).
+            // CheckpointDivider 의 trigger prop 이 auto/manual variant 를 구분.
+            // sessionId 불변이라 revert 액션 없음.
             // SummaryToast 가 rendered preamble (12-section structured summary) 노출.
             if (entry.kind === "checkpoint") {
               rendered.push(
                 <CheckpointDivider
                   key={`cp-${idx}`}
-                  tier={entry.tier}
+                  trigger={entry.trigger}
                   messageCount={entry.removedMessages}
                   compactNum={entry.compactNum}
                   compactStatus={entry.compactStatus}
@@ -1417,7 +1113,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
                     isStarred={!!isEntryStarred(idx)}
                     isFinal={true}
                   />
-                  {/* §PR-5: suppress mutating TurnActionBar actions in view-mode */}
+                  {/* Suppress mutating TurnActionBar actions in view-mode. */}
                   <TurnActionBar
                     turnSummary={summary}
                     pricing={activePricing}
@@ -1690,8 +1386,8 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
               flushQueueAsUserMessage();
             }}
             onGuide={() => {
-              // Stage 4: 가이드 버튼 = ChatView 의 onGuide 호출 위임. Stage 5 에서
-              // ⌘K 단축키 + open guide modal 추가 예정. 현재는 streaming 중
+              // 가이드 버튼 = ChatView 의 onGuide 호출 위임. ⌘K 단축키와
+              // 동일한 진입점. 현재는 streaming 중
               // 방향지시 와 동일 동작 (text 비어있어도 시도).
               const text = question;
               void (async () => {
@@ -1711,7 +1407,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             guideDisabled={!streaming || question.trim().length === 0}
           />
           </div>
-          {/* v6 Stage 4b: PermissionModeBadge + DeferredApprovalChip 모두
+          {/* PermissionModeBadge + DeferredApprovalChip 모두
               InputActionBar trailing 으로 이전 완료. 본 자리 비움. */}
         </div>
         <QuestionOverlay

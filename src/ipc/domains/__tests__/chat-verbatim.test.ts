@@ -1,5 +1,5 @@
 /**
- * PR-4 — lvis:chat:get-verbatim-tool-result IPC handler unit tests.
+ * lvis:chat:get-verbatim-tool-result IPC handler unit tests.
  *
  * Strategy: register the chat IPC handlers with a minimal mock conversationLoop,
  * then invoke the verbatim handler directly to cover all branches.
@@ -63,7 +63,11 @@ function makeConversationLoop(
 ) {
   return {
     getSessionId: vi.fn(() => sessionId),
+    getSessionKind: vi.fn(() => "main"),
+    getSessionRoutineId: vi.fn(() => null),
+    getSessionRoutineTitle: vi.fn(() => null),
     getHistory: vi.fn(() => ({
+      length: messages.length,
       getMessages: vi.fn(() => messages),
       truncate: vi.fn(),
     })),
@@ -71,7 +75,6 @@ function makeConversationLoop(
     runTurn: vi.fn(),
     newConversation: vi.fn(),
     listSessions: vi.fn(() => []),
-    listRoutineSessions: vi.fn(() => []),
     loadSession: vi.fn(),
     refreshProvider: vi.fn(),
     abortCurrentTurn: vi.fn(),
@@ -97,8 +100,13 @@ function makeMinimalDeps(
     } as any,
     memoryManager: {
       listSessionsPage: vi.fn(() => []),
+      listSessions: vi.fn(() => []),
       loadSession: vi.fn(),
       loadSessionMetadata: vi.fn(() => null),
+      saveSessionMetadata: vi.fn(),
+      loadMainActiveSessionState: vi.fn(() => null),
+      markMainActiveFresh: vi.fn(async () => undefined),
+      markMainActiveResume: vi.fn(async () => undefined),
       saveSession: vi.fn(),
       listMemoryEntries: vi.fn(() => []),
       saveMemory: vi.fn(),
@@ -129,7 +137,9 @@ async function setupHandlers(
   handlers.clear();
   vi.clearAllMocks();
   const { registerChatHandlers } = await import("../chat.js");
-  registerChatHandlers(makeMinimalDeps(loop, opts) as any);
+  const deps = makeMinimalDeps(loop, opts);
+  registerChatHandlers(deps as any);
+  return deps;
 }
 
 function invoke(channel: string, ...args: unknown[]): unknown {
@@ -263,6 +273,126 @@ describe("lvis:chat:get-verbatim-tool-result", () => {
     const resultB = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-B" });
     expect((resultA as any).content).toBe("content-A");
     expect((resultB as any).content).toBe("content-B");
+  });
+});
+
+describe("lvis:chat active main state", () => {
+  it("marks fresh state when a new main chat starts", async () => {
+    const loop = makeConversationLoop("session-active", []);
+    const deps = await setupHandlers(loop);
+
+    await invoke("lvis:chat:new");
+
+    expect(loop.newConversation).toHaveBeenCalled();
+    expect(deps.memoryManager.markMainActiveFresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("marks explicit main session resume but ignores routine session resume", async () => {
+    const mainLoop = makeConversationLoop("session-main", []);
+    mainLoop.resetAndResume.mockReturnValue({ ok: true });
+    const mainDeps = await setupHandlers(mainLoop);
+
+    await invoke("lvis:chat:session-resume", "session-main");
+
+    expect(mainDeps.memoryManager.markMainActiveResume).toHaveBeenCalledWith("session-main");
+
+    const routineLoop = makeConversationLoop("session-routine", []);
+    routineLoop.getSessionKind.mockReturnValue("routine");
+    routineLoop.resetAndResume.mockReturnValue({ ok: true });
+    const routineDeps = await setupHandlers(routineLoop);
+
+    await invoke("lvis:chat:session-resume", "session-routine");
+
+    expect(routineDeps.memoryManager.markMainActiveResume).not.toHaveBeenCalled();
+  });
+
+  it("marks main active after main turns but not after routine turns", async () => {
+    const mainLoop = makeConversationLoop("session-main", [{ role: "user", content: "existing" }]);
+    mainLoop.runTurn.mockResolvedValue({ text: "ok", toolCalls: [], stopReason: "end_turn" });
+    const mainDeps = await setupHandlers(mainLoop);
+
+    await invoke("lvis:chat:send", {
+      input: "next",
+      inputOrigin: "user-keyboard",
+      userActivation: true,
+    });
+
+    expect(mainDeps.memoryManager.markMainActiveResume).toHaveBeenCalledWith("session-main");
+
+    const routineLoop = makeConversationLoop("session-routine", [{ role: "user", content: "existing" }]);
+    routineLoop.getSessionKind.mockReturnValue("routine");
+    routineLoop.runTurn.mockResolvedValue({ text: "ok", toolCalls: [], stopReason: "end_turn" });
+    const routineDeps = await setupHandlers(routineLoop);
+
+    await invoke("lvis:chat:send", {
+      input: "continue routine",
+      inputOrigin: "user-keyboard",
+      userActivation: true,
+    });
+
+    expect(routineDeps.memoryManager.markMainActiveResume).not.toHaveBeenCalled();
+    expect(routineDeps.memoryManager.markMainActiveFresh).not.toHaveBeenCalled();
+  });
+});
+
+describe("lvis:chat:session-history parent provenance", () => {
+  it("does not load or merge the parent transcript when a child has parentSessionId", async () => {
+    const loop = makeConversationLoop("active-session", []);
+    const deps = await setupHandlers(loop);
+    deps.memoryManager.loadSession.mockImplementation((sessionId: string) => {
+      if (sessionId === "child-session") {
+        return [{ role: "user", content: "child only" }];
+      }
+      if (sessionId === "parent-session") {
+        return [{ role: "user", content: "parent should not render" }];
+      }
+      return [];
+    });
+    deps.memoryManager.loadSessionMetadata.mockReturnValue({
+      parentSessionId: "parent-session",
+      summaryPreamble: "요약된 부모 맥락",
+      title: "Child",
+    });
+
+    const result = await invoke("lvis:chat:session-history", "child-session") as {
+      ok: boolean;
+      messages: Array<{ content: string }>;
+      preambleChars?: number;
+    };
+
+    expect(result.ok).toBe(true);
+    expect(result.messages.map((message) => message.content)).toEqual(["child only"]);
+    expect(result.preambleChars).toBe("요약된 부모 맥락".length);
+    expect(deps.memoryManager.loadSession).toHaveBeenCalledTimes(1);
+    expect(deps.memoryManager.loadSession).toHaveBeenCalledWith("child-session");
+    expect(deps.memoryManager.loadSession).not.toHaveBeenCalledWith("parent-session");
+  });
+});
+
+describe("lvis:chat:fork", () => {
+  it("carries the active rolling summary preamble into a normal fork", async () => {
+    const loop = makeConversationLoop("session-fork-source", [
+      { role: "user", content: "old context" },
+      { role: "assistant", content: "old answer" },
+    ]);
+    loop.loadSession.mockReturnValue(true);
+    const deps = await setupHandlers(loop);
+    deps.memoryManager.loadSessionMetadata.mockReturnValue({
+      sessionKind: "main",
+      summaryPreamble: "요약된 이전 맥락",
+    });
+
+    const result = await invoke("lvis:chat:fork", undefined) as { ok: boolean; sessionId: string | null };
+
+    expect(result.ok).toBe(true);
+    expect(result.sessionId).toEqual(expect.any(String));
+    expect(deps.memoryManager.saveSessionMetadata).toHaveBeenCalledWith(
+      result.sessionId,
+      expect.objectContaining({
+        sessionKind: "main",
+        summaryPreamble: "요약된 이전 맥락",
+      }),
+    );
   });
 });
 

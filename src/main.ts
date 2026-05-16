@@ -47,6 +47,7 @@ import { preparePythonRuntimeForInstalledPlugin, withPluginInstallLock } from ".
 import { ensureWorkspaceCwd } from "./main/ensure-workspace-cwd.js";
 import { uninstallPluginWithLifecycle } from "./plugins/uninstall-lifecycle.js";
 import { lvisHome } from "./shared/lvis-home.js";
+import { runShutdownRoutines } from "./main/shutdown-routines.js";
 const log = createLogger("lvis");
 
 function errorMessage(err: unknown): string {
@@ -1768,62 +1769,7 @@ app.on("before-quit", (event) => {
     try {
       // v2 shutdown routines — fire all active shutdown-trigger routines with a
       // 5s timeout so a hung LLM call cannot block app.quit() indefinitely.
-      if (svc.routinesStore && svc.routineEngine) {
-        try {
-          const shutdownRoutines = svc.routinesStore.listActive().filter(
-            (r) => r.trigger === "shutdown",
-          );
-          for (const r of shutdownRoutines) {
-            try {
-              if (r.execution === "llm-session") {
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort("shutdown timeout"), 5000);
-                try {
-                  await svc.routineEngine.runRoutine({
-                    id: r.id,
-                    trigger: r.trigger,
-                    prePrompt: r.prePrompt ?? "",
-                    title: r.title,
-                    scope: r.scope,
-                    signal: controller.signal,
-                  });
-                } catch (abortErr) {
-                  if (controller.signal.aborted) {
-                    log.warn("before-quit: shutdown routine aborted (5s timeout, id=%s)", r.id);
-                  } else {
-                    throw abortErr;
-                  }
-                } finally {
-                  clearTimeout(timeoutId);
-                }
-              } else {
-                svc.notificationService?.fire({
-                  kind: "routine",
-                  title: r.notificationTitle ?? r.title ?? "종료 루틴 알림",
-                  body: r.notificationBody ?? "",
-                  contextRef: { routineId: r.id },
-                });
-              }
-            } catch (err) {
-              log.warn("before-quit: shutdown routine failed (id=%s): %s", r.id, errorMessage(err));
-            }
-            // markFired runs in its own try/catch so a marker-write I/O error
-            // is logged distinctly from execution failure, and does NOT break
-            // the loop for the remaining shutdown routines.
-            try {
-              await svc.routinesStore.markFired(r.id);
-            } catch (markErr) {
-              log.warn(
-                "before-quit: markFired failed (id=%s): %s — routine may re-fire on next launch",
-                r.id,
-                errorMessage(markErr),
-              );
-            }
-          }
-        } catch (e) {
-          log.warn("before-quit: shutdown routines setup failed: %s", errorMessage(e));
-        }
-      }
+      await runShutdownRoutines(svc);
       await svc.shutdown?.();
       await svc.pluginRuntime.stopAll();
       windowManager?.persistAll();

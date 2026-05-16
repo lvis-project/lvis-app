@@ -49,7 +49,7 @@ describe("getUsableContext — Cline tier-fixed buffers", () => {
   });
 });
 
-describe("getPreflightThreshold — Layer 0 trigger (v3 §6 LVIS conservative default, 2026-05 lowered)", () => {
+describe("getPreflightThreshold — token preflight trigger", () => {
   it("64K → floor(37K × 45%) = 16,650", () => {
     // usable = 37,000, pct = 0.45 (lowered from 0.50 to compensate estimator undercount)
     expect(getPreflightThreshold(64_000)).toBe(16_650);

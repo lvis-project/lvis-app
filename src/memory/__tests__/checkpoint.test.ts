@@ -1,6 +1,5 @@
 /**
  * Tests for checkpoint chain fields (parentSessionId, summaryPreamble, checkpoints[]).
- * Spec: PR-1 — session DB checkpoint chain fields.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -45,7 +44,7 @@ afterEach(() => {
 
 describe("appendCheckpoint", () => {
   it("adds a checkpoint to metadata with no prior checkpoints", () => {
-    const meta: SessionMetadata = { routineId: "r1" };
+    const meta: SessionMetadata = { sessionKind: "routine", routineId: "r1" };
     const ckpt = makeCheckpoint();
     const updated = mm.appendCheckpoint(meta, ckpt);
     expect(updated.checkpoints).toHaveLength(1);
@@ -73,7 +72,7 @@ describe("appendCheckpoint", () => {
     const sessionId = SESSION_A;
     await mm.saveSession(sessionId, [{ role: "user", content: "hello" }]);
     const ckpt = makeCheckpoint();
-    const meta: SessionMetadata = { routineId: "r1" };
+    const meta: SessionMetadata = { sessionKind: "routine", routineId: "r1" };
     const updated = mm.appendCheckpoint(meta, ckpt);
     await mm.saveSessionMetadata(sessionId, updated);
 
@@ -140,7 +139,7 @@ describe("getCheckpointChain", () => {
 
   it("returns single-element chain for a root session (no parentSessionId)", async () => {
     await mm.saveSession(SESSION_A, [{ role: "user", content: "root" }]);
-    await mm.saveSessionMetadata(SESSION_A, { routineId: "r1" });
+    await mm.saveSessionMetadata(SESSION_A, { sessionKind: "routine", routineId: "r1" });
     const chain = await mm.getCheckpointChain(SESSION_A);
     expect(chain).toHaveLength(1);
     expect(chain[0].routineId).toBe("r1");
@@ -149,7 +148,7 @@ describe("getCheckpointChain", () => {
   it("traverses a 3-node chain (root → mid → leaf) in correct order", async () => {
     // Setup 3 sessions: A is root, B is child of A, C is child of B
     await mm.saveSession(SESSION_A, [{ role: "user", content: "root msg" }]);
-    await mm.saveSessionMetadata(SESSION_A, { routineId: "r1", summaryPreamble: "root summary" });
+    await mm.saveSessionMetadata(SESSION_A, { sessionKind: "routine", routineId: "r1", summaryPreamble: "root summary" });
 
     await mm.saveSession(SESSION_B, [{ role: "user", content: "mid msg" }]);
     await mm.saveSessionMetadata(SESSION_B, {
@@ -195,29 +194,9 @@ describe("getCheckpointChain", () => {
   });
 });
 
-// ── 4. Backward compatibility ─────────────────────────────────────────────────
+// ── 4. Metadata validation ───────────────────────────────────────────────────
 
-describe("backward compatibility — loading old-format metadata", () => {
-  it("loads legacy metadata (routineId/routineTitle only) without crashing", async () => {
-    const sessionId = SESSION_A;
-    await mm.saveSession(sessionId, [{ role: "user", content: "legacy" }]);
-    // Write metadata in old format (no new fields)
-    const sessionsDir = join(dir, "sessions");
-    writeFileSync(
-      join(sessionsDir, `${sessionId}.meta.json`),
-      JSON.stringify({ routineId: "legacy-r1", routineTitle: "Legacy Routine" }),
-      "utf-8",
-    );
-
-    const meta = mm.loadSessionMetadata(sessionId);
-    expect(meta).not.toBeNull();
-    expect(meta!.routineId).toBe("legacy-r1");
-    expect(meta!.routineTitle).toBe("Legacy Routine");
-    expect(meta!.parentSessionId).toBeUndefined();
-    expect(meta!.summaryPreamble).toBeUndefined();
-    expect(meta!.checkpoints).toBeUndefined();
-  });
-
+describe("metadata validation", () => {
   it("silently drops checkpoint entries with invalid trigger values", async () => {
     const sessionId = SESSION_B;
     await mm.saveSession(sessionId, [{ role: "user", content: "msg" }]);
@@ -250,6 +229,69 @@ describe("backward compatibility — loading old-format metadata", () => {
     const meta = mm.loadSessionMetadata(sessionId);
     expect(meta!.checkpoints).toHaveLength(1);
     expect(meta!.checkpoints![0].id).toBe("ckpt-valid");
+  });
+});
+
+// ── 4b. Main active session state ────────────────────────────────────────────
+
+describe("main active session state", () => {
+  it("persists resume state for an explicit main session", async () => {
+    await mm.saveSession(SESSION_A, [{ role: "user", content: "main" }]);
+    await mm.saveSessionMetadata(SESSION_A, { sessionKind: "main" });
+
+    await mm.markMainActiveResume(SESSION_A);
+
+    expect(mm.loadMainActiveSessionState()).toEqual({
+      mainActiveMode: "resume",
+      mainActiveSessionId: SESSION_A,
+      updatedAt: expect.any(String),
+    });
+  });
+
+  it("fresh mode ignores any stored session id", async () => {
+    await mm.saveMainActiveSessionState({
+      mainActiveMode: "fresh",
+      mainActiveSessionId: SESSION_A,
+      updatedAt: "2026-05-16T00:00:00.000Z",
+    });
+
+    expect(mm.loadMainActiveSessionState()).toEqual({
+      mainActiveMode: "fresh",
+      mainActiveSessionId: null,
+      updatedAt: "2026-05-16T00:00:00.000Z",
+    });
+  });
+
+  it("treats a routine session id in active state as fresh", async () => {
+    await mm.saveSession(SESSION_B, [{ role: "user", content: "routine" }]);
+    await mm.saveSessionMetadata(SESSION_B, {
+      sessionKind: "routine",
+      routineId: "r1",
+      routineTitle: "Routine",
+    });
+    const sessionsDir = join(dir, "sessions");
+    writeFileSync(
+      join(sessionsDir, ".active-session.json"),
+      JSON.stringify({
+        mainActiveMode: "resume",
+        mainActiveSessionId: SESSION_B,
+        updatedAt: "2026-05-16T00:00:00.000Z",
+      }),
+      "utf-8",
+    );
+
+    expect(mm.loadMainActiveSessionState()).toEqual({
+      mainActiveMode: "fresh",
+      mainActiveSessionId: null,
+      updatedAt: "2026-05-16T00:00:00.000Z",
+    });
+  });
+
+  it("returns null for corrupt active state files", async () => {
+    const sessionsDir = join(dir, "sessions");
+    writeFileSync(join(sessionsDir, ".active-session.json"), "{", "utf-8");
+
+    expect(mm.loadMainActiveSessionState()).toBeNull();
   });
 });
 
@@ -448,7 +490,7 @@ describe("normalizeSessionMetadata — parentSessionId regex validation", () => 
     const sessionsDir = join(dir, "sessions");
     writeFileSync(
       join(sessionsDir, `${sessionId}.meta.json`),
-      JSON.stringify({ routineId: "r1", parentSessionId: "../../../etc/passwd" }),
+      JSON.stringify({ sessionKind: "routine", routineId: "r1", parentSessionId: "../../../etc/passwd" }),
       "utf-8",
     );
     // normalizeSessionMetadata must drop the invalid parentSessionId
@@ -606,9 +648,9 @@ describe("normalizeSessionMetadata — read-side summaryPreamble truncation (def
   });
 });
 
-// ── §PR-5: saveCheckpointSnapshot / loadCheckpointSnapshot ───────────────────
+// ── saveCheckpointSnapshot / loadCheckpointSnapshot ──────────────────────────
 
-describe("saveCheckpointSnapshot / loadCheckpointSnapshot — §PR-5", () => {
+describe("saveCheckpointSnapshot / loadCheckpointSnapshot", () => {
   const SESSION_SNAP = "dddddddd-0000-1111-2222-333333333333";
 
   it("round-trips messages through save and load", async () => {
@@ -671,9 +713,9 @@ describe("saveCheckpointSnapshot / loadCheckpointSnapshot — §PR-5", () => {
   });
 });
 
-// ── §PR-5: branchFromCheckpoint post-compaction simulation ────────────────────
+// ── branchFromCheckpoint post-compaction simulation ──────────────────────────
 
-describe("saveCheckpointSnapshot post-compaction simulation — §PR-5", () => {
+describe("saveCheckpointSnapshot post-compaction simulation", () => {
   const SESSION_BRANCH = "eeeeeeee-0000-1111-2222-333333333333";
 
   it("snapshot survives a subsequent saveSession overwrite (simulates PostTurnHookChain)", async () => {
@@ -747,6 +789,7 @@ describe("round-trip — write then read preserves all new fields", () => {
       messageCountAtTrigger: 10,
     });
     const meta: SessionMetadata = {
+      sessionKind: "routine",
       routineId: "r2",
       parentSessionId: SESSION_A,
       summaryPreamble: "prior context summary",

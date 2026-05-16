@@ -1,11 +1,11 @@
 /**
  * Checkpoint trigger reason on `compact_notice` events.
- * - "auto-compact": Layer 0 preflight 가 Layer 2 compact 를 실행 (post-infinity-session-v3 default)
+ * - "auto-compact": token preflight 가 LLM compact 를 실행
  * - "manual":       사용자 명시 trigger (/compact)
  * Mirrors `CheckpointTrigger` in `memory/memory-manager.ts` but kept as a
  * string-literal union here so the renderer side has zero memory layer imports.
  */
-export type CheckpointTier = "auto-compact" | "manual";
+export type CheckpointTrigger = "auto-compact" | "manual";
 
 export const EMPTY_ASSISTANT_RESPONSE_TEXT =
   "응답이 비어있습니다. (도구 호출만 있었거나 LLM이 텍스트를 생성하지 않음)";
@@ -41,11 +41,11 @@ export type StreamEvent = {
   triggerSource?: "estimate" | "actual-tokensIn" | "manual";
   estimatedBefore?: number;
   preflight?: number;
-  /** Compact trigger tier on `compact_notice` — Layer 0 auto vs manual. */
-  tier?: CheckpointTier;
+  /** Compact trigger on `compact_notice` — token preflight vs manual command. */
+  trigger?: CheckpointTrigger;
   /** Rolling summary attached to a compact checkpoint (rendered preamble). */
   summary?: string;
-  /** §PR-5: compact sequence number on `compact_notice` — enables view/branch actions. */
+  /** Compact sequence number on `compact_notice` — enables view/branch actions. */
   compactNum?: number;
   /**
    * Phase 3 — compact 결과 분류. Renderer 가 status 별로 다른 banner
@@ -53,7 +53,7 @@ export type StreamEvent = {
    * "reduced_insufficient_forced"). `compact-status.ts` SOT.
    */
   compactStatus?: "summarized" | "content_truncated" | "noop" | "reduced_insufficient_forced";
-  /** Layer A truncation 으로 격리된 원본 디렉토리 (CONTENT_TRUNCATED 경로). */
+  /** Truncation archive directory for original messages (CONTENT_TRUNCATED path). */
   truncatedDir?: string;
   /** Set to "command" on `done` events when the turn was a slash command. */
   route?: "command";
@@ -67,7 +67,7 @@ export type StreamEvent = {
   from?: string;
   to?: string;
   reason?: string;
-  /** MCP Apps spec §3.2 — optional UI payload emitted with tool_end events. */
+  /** Optional MCP Apps UI payload emitted with tool_end events. */
   uiPayload?: {
     serverId: string;
     resourceUri: string;
@@ -86,7 +86,7 @@ export type StreamEvent = {
    * after `done`. Carries totals computed in the conversation loop so the
    * renderer never needs to re-aggregate per-tool / per-round numbers.
    * `cumulativeToolMs` is summed from per-tool `durationMs` once available;
-   * may be 0 in legacy/aborted turns. `breakdown` is the optional per-tool
+   * may be 0 in aborted turns. `breakdown` is the optional per-tool
    * dictionary used by the expand affordance.
    */
   turnDurationMs?: number;
@@ -118,7 +118,7 @@ export type ToolEntryItem = {
   status: "running" | "done" | "error";
   input?: Record<string, unknown>;
   result?: string;
-  /** MCP Apps spec §3.2 — optional UI payload from MCP tool response. */
+  /** Optional MCP Apps UI payload from MCP tool response. */
   uiPayload?: {
     serverId: string;
     resourceUri: string;
@@ -147,35 +147,33 @@ export type ChatEntry =
       rows: Array<{ label: string; value: string }>;
     }
   | { kind: "system"; text: string }
-  // Structured replacement for the legacy "💾 이전 N개 대화를 요약했습니다"
-  // system bubble. tier 는 Layer 0 auto-compact 또는 manual `/compact`. 기존
-  // fork-based revertSessionId 는 PR-2-F-2 에서 폐지 (sessionId 불변).
+  // Structured compact checkpoint marker. The trigger distinguishes
+  // token-preflight compaction from manual `/compact`; sessionId remains
+  // unchanged unless the user explicitly branches from the checkpoint.
   | {
       kind: "checkpoint";
-      tier?: CheckpointTier;
+      trigger?: CheckpointTrigger;
       removedMessages: number;
       freedTokens: number;
       summary?: string;
-      /** §PR-5: compact sequence number — enables view/branch actions on CheckpointDivider. */
+      /** Compact sequence number — enables view/branch actions on CheckpointDivider. */
       compactNum?: number;
       /**
        * Phase 3 — compact 결과 분류. CheckpointDivider 가 status 별로
        * 다른 visual variant (색상/아이콘/메시지) 를 표시한다.
        */
       compactStatus?: "summarized" | "content_truncated" | "noop" | "reduced_insufficient_forced";
-      /** Layer A truncation 으로 격리된 원본 파일 디렉토리 (CONTENT_TRUNCATED 경로). */
+      /** Truncation archive directory for original messages (CONTENT_TRUNCATED path). */
       truncatedDir?: string;
     }
-  // §457 PR-A: marker placed at the head of a resumed child session's
-  // historical entry list when the parent session left a rolling
-  // summaryPreamble. Lets the user see "이전 대화 이어서 시작 (요약 N자
-  // 적용)" rather than silently inheriting context from the prompt
+  // Marker placed at the head of a resumed session when a rolling
+  // summaryPreamble is applied. Lets the user see "이전 대화 이어서 시작
+  // (요약 N자 적용)" rather than silently inheriting context from the prompt
   // builder. `preambleChars` is the actual character count after the
   // 8 000-char cap; renderer formats the label.
   | {
       kind: "session_resume";
       preambleChars: number;
-      parentSessionId?: string;
     }
   // Hidden carrier for session replay context usage. Unlike turn_summary,
   // this is an estimate rebuilt from persisted messages, not provider-reported
@@ -222,8 +220,7 @@ export type ChatEntry =
       toolCount: number;
       /**
        * Cumulative per-tool wall-clock ms summed across the turn. May be 0
-       * when the executor has not yet been instrumented with durationMs
-       * (companion PR `feat/tool-execution-duration-display`); the
+       * when the executor has not yet been instrumented with durationMs; the
        * renderer treats 0 as "per-tool slice unavailable" and elides it
        * from the footer summary line.
        */

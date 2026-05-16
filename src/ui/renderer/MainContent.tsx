@@ -23,6 +23,8 @@ export interface MainContentProps {
   // starred
   starred: StarredItem[];
   currentSessionId: string;
+  currentSessionKind: "main" | "routine";
+  currentSessionTitle?: string;
   sessions: SessionSummary[];
   refreshStarred: () => void;
   // navigation
@@ -106,6 +108,8 @@ function HomeChatPane(props: MainContentProps) {
         onResolveAskQuestion={props.onResolveAskQuestion}
         plugins={props.plugins}
         onSelectPlugin={props.onSelectPlugin}
+        currentSessionKind={props.currentSessionKind}
+        currentSessionTitle={props.currentSessionTitle}
         sessions={props.sessions}
         onLoadSession={props.onJumpToSession}
         onRefreshSessions={props.onRefreshSessions}
@@ -156,7 +160,13 @@ export function MainContent(props: MainContentProps): ReactNode {
   if (activeView === "reminders" || activeView === "routines") {
     return (
       <MainPaneShell>
-        <RoutinePanel api={api} />
+        <RoutinePanel
+          api={api}
+          onOpenSession={(sessionId) => {
+            props.onActivateHome();
+            props.onJumpToSession(sessionId);
+          }}
+        />
       </MainPaneShell>
     );
   }
