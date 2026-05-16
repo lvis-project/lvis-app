@@ -61,7 +61,7 @@ export const midnightBundle: ThemeBundle = {
     "chart-3":                "25 95% 53%",
     "chart-4":                "199 89% 48%",
     "chart-5":                "48 96% 60%",
-    /* ── Action tokens (PR-4/5) ────────────────────────────────── */
+    /* ── Action tokens ─────────────────────────────────────────── */
     "action-view":            "290 80% 60%",
     "action-branch":          "25 95% 53%",
     "action-compact":         "290 80% 60%",

@@ -1,7 +1,7 @@
 // OverlayCard — overlay card for routine fire and plugin (insertion-type) triggers.
 //
 // Two source variants share the same card shell:
-//   - routine: running=true shows spinner, false shows "결과 보기" (only when jsonl exists)
+//   - routine: running=true shows spinner, false shows "결과 보기" (only when a session exists)
 //   - plugin insertion: running=false shows primaryActionLabel ("확인하기")
 //
 // Policy:
@@ -10,8 +10,8 @@
 //   - dismiss (X) — permanent removal
 //   - snooze removed (production smoke test: UX risk)
 //
-// Isolation: only ~200ch summary flows here. Full content
-// lives in RoutineSessionView which reads the JSONL directly.
+// Isolation: only summary and session id flow here. Full content stays in the
+// normal conversation session model.
 //
 // C1: running phase — when running=true shows spinner + "진행 중…" instead of
 // summary + actions. Transitions to done phase when running flips to false.
@@ -49,7 +49,7 @@ export interface OverlayCardProps {
   /**
    * Called when the user clicks the primary action button.
    * When undefined, the primary action button is not rendered
-   * (e.g. notification-only routine with no JSONL session).
+   * (e.g. notification-only routine with no conversation session).
    */
   onPrimaryAction?: () => void;
   /** Label for the primary action button — e.g. "결과 보기" or "확인하기" */

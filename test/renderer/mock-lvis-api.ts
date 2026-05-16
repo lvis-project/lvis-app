@@ -13,13 +13,23 @@ export type MockLvisApi = Record<string, Mock>;
 
 type HistoryMock = {
   sessionId?: string;
+  sessionTitle?: string;
+  sessionKind?: "main" | "routine";
   messages: unknown[];
   estimatedInputTokens?: number;
 };
 
 type ApiOverrides = {
   settings?: unknown;
-  sessions?: Array<{ id: string; modifiedAt: string; title?: string }>;
+  sessions?: Array<{
+    id: string;
+    modifiedAt: string;
+    title?: string;
+    sessionKind?: "main" | "routine";
+    routineId?: string;
+    routineTitle?: string;
+    routineFiredAt?: string;
+  }>;
   currentSession?: string;
   starred?: unknown[];
   history?: ({ sessionId: string } & HistoryMock) | Promise<{ sessionId: string } & HistoryMock>;
@@ -34,6 +44,11 @@ type ApiOverrides = {
   pendingRoutineResults?: unknown[];
   routineSessionsByRoutine?: Record<string, unknown[]>;
   memoryIndex?: string;
+  mainActiveState?: {
+    mainActiveSessionId: string | null;
+    mainActiveMode: "resume" | "fresh";
+    updatedAt: string;
+  } | null;
 };
 
 const DEFAULT_SETTINGS = {
@@ -70,6 +85,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   const sessions = (overrides.sessions ?? []).map((session) => ({
     ...session,
     title: session.title ?? `세션 ${session.id.slice(0, 8)}`,
+    sessionKind: session.sessionKind ?? "main",
   }));
   const currentSession = overrides.currentSession ?? "sess-default";
   const starred = overrides.starred ?? [];
@@ -85,6 +101,11 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   const pendingRoutineResults = overrides.pendingRoutineResults ?? [];
   const routineSessionsByRoutine = overrides.routineSessionsByRoutine ?? {};
   const memoryIndex = overrides.memoryIndex ?? "";
+  const mainActiveState = overrides.mainActiveState ?? {
+    mainActiveSessionId: null,
+    mainActiveMode: "fresh" as const,
+    updatedAt: new Date().toISOString(),
+  };
 
   const chatStreamHandlers = new Set<(ev: unknown) => void>();
   const overlayShowHandlers = new Set<(item: unknown) => void>();
@@ -186,10 +207,13 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     chatSend: vi.fn(async () => ({ ok: true })),
     chatGuide: vi.fn(async () => ({ ok: true })),
     chatNew: vi.fn(async () => ({ ok: true })),
-    chatSessions: vi.fn(async (opts?: { limit?: number; before?: string; beforeId?: string; after?: string }) => {
+    chatSessions: vi.fn(async (opts?: { kind?: "main" | "routine" | "all"; routineId?: string; limit?: number; before?: string; beforeId?: string; after?: string }) => {
       const beforeTime = opts?.before ? Date.parse(opts.before) : Number.NaN;
       const afterTime = opts?.after ? Date.parse(opts.after) : Number.NaN;
       const filtered = sessions.filter((session) => {
+        const kind = opts?.kind ?? "main";
+        if (kind !== "all" && session.sessionKind !== kind) return false;
+        if (opts?.routineId && session.routineId !== opts.routineId) return false;
         const t = Date.parse(session.modifiedAt);
         if (!Number.isNaN(afterTime) && t < afterTime) return false;
         if (Number.isNaN(beforeTime)) return true;
@@ -201,9 +225,9 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
         sessions: filtered.slice(0, opts?.limit ?? 20),
       };
     }),
-    chatLoadSession: vi.fn(async (id: string) => ({ ok: true, sessionId: id })),
     chatSessionResume: vi.fn(async (id: string) => ({ ok: true, compacted: false, compactedAt: null, removedMessageCount: 0 })),
     chatCompact: vi.fn(async () => ({ compacted: false, compactedAt: null, summary: "불필요", removedMessageCount: 0 })),
+    chatMainActiveState: vi.fn(async () => mainActiveState),
     chatGetHistory: vi.fn(async () => history),
     chatSessionHistory: vi.fn(async (sessionId: string) => {
       const sessionHistory = historyBySession[sessionId];
@@ -211,6 +235,8 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
         const resolvedSessionHistory = await sessionHistory;
         return {
           ok: true,
+          sessionKind: resolvedSessionHistory.sessionKind ?? "main",
+          sessionTitle: resolvedSessionHistory.sessionTitle,
           messages: resolvedSessionHistory.messages,
           ...(resolvedSessionHistory.estimatedInputTokens !== undefined
             ? { estimatedInputTokens: resolvedSessionHistory.estimatedInputTokens }
@@ -220,6 +246,8 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
       const resolvedHistory = await history;
       return {
         ok: true,
+        sessionKind: resolvedHistory.sessionKind ?? "main",
+        sessionTitle: resolvedHistory.sessionTitle,
         messages: resolvedHistory.messages,
         ...(resolvedHistory.estimatedInputTokens !== undefined
           ? { estimatedInputTokens: resolvedHistory.estimatedInputTokens }
@@ -228,7 +256,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     }),
     chatEditResend: vi.fn(async () => ({ ok: true })),
     chatFork: vi.fn(async () => ({ ok: true, sessionId: currentSession })),
-    // §PR-5: shapes match actual preload/IPC return types exactly — discriminated union:
+    // Shapes match actual preload/IPC return types exactly — discriminated union:
     // success paths have no `ok` field (enter → { messageIndexAtCreation }, branch → { newSessionId });
     // error paths return { error: string }. IPC may also return UNAUTHORIZED_FRAME { ok: false, error }.
     chatEnterCheckpointView: vi.fn(async (_sessionId: string, _compactNum: number) => ({ messageIndexAtCreation: 5 })),
@@ -339,7 +367,6 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     onRoutineRunningFinished: vi.fn((_h: (id: string) => void) => () => {}),
     onRoutineFailedV2: vi.fn((_handler: (event: { routineId: string; error: string }) => void) => () => {}),
     listRoutineSessionsV2: vi.fn(async (routineId: string) => routineSessionsByRoutine[routineId] ?? []),
-    readRoutineSessionV2: vi.fn(async () => ""),
     // Overlay trigger lifecycle. Tests that don't exercise the
     // trigger card just need these to be callable subscribe/no-op functions.
     onTriggerStarted: vi.fn((_h: (p: unknown) => void) => () => {}),
