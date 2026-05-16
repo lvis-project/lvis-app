@@ -495,12 +495,13 @@ describe("AskUserQuestionCard — 4-direction card-level arrow navigation", () =
     const card = getByTestId("ask-user-question-card");
     card.focus();
 
-    // First ArrowDown from card → focuses first choice (index 0 → roving idx 0+1=1 wraps… or just 1).
+    // First ArrowDown from card surface → focusedIdx sentinel -1, so focusAnswerAt(-1+1)=0 → "빨강".
     await act(async () => { fireEvent.keyDown(card, { key: "ArrowDown" }); });
 
-    // Focus must have moved to a choice button inside the card (not still on the card).
+    // Focus must have moved to the FIRST choice button "빨강" (index 0).
     expect(document.activeElement).not.toBe(card);
     expect(document.activeElement?.tagName.toLowerCase()).toBe("button");
+    expect(document.activeElement?.textContent).toContain("빨강");
   });
 
   /**
@@ -551,9 +552,10 @@ describe("AskUserQuestionCard — 4-direction card-level arrow navigation", () =
     const card = getByTestId("ask-user-question-card");
     card.focus();
 
-    // ArrowDown → moves to first choice "A" (focusedIdx 0+1 or wraps).
+    // ArrowDown from card surface → sentinel -1, focusAnswerAt(0) → "A" (first choice).
     await act(async () => { fireEvent.keyDown(card, { key: "ArrowDown" }); });
     expect(document.activeElement?.tagName.toLowerCase()).toBe("button");
+    expect(document.activeElement?.textContent).toContain("A");
     // Still on Q1, not Q2.
     expect(queryByText("Q2")).toBeNull();
 
@@ -564,5 +566,110 @@ describe("AskUserQuestionCard — 4-direction card-level arrow navigation", () =
     card.focus();
     await act(async () => { fireEvent.keyDown(card, { key: "ArrowRight" }); });
     expect(getByText("Q2")).toBeTruthy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Med-2: free-text textarea focused — ArrowUp/Down must NOT reach card handler
+// ---------------------------------------------------------------------------
+
+describe("AskUserQuestionCard — ArrowUp/Down suppressed when free-text input is focused", () => {
+  /**
+   * When allowFreeText:true and the user is typing in the input, ArrowDown/Up
+   * inside the input must stay on the input (for cursor movement) and must NOT
+   * trigger card-level arrowNav delegation.
+   * The input's own onKeyDown calls stopPropagation, so document.activeElement
+   * must remain the input after the keydown.
+   */
+  it("ArrowDown inside free-text input keeps focus on the input", async () => {
+    const api = makeApi();
+    const request = makeRequest({
+      questions: [
+        { question: "의제", allowFreeText: true },
+      ],
+    });
+
+    const { getByTestId } = render(
+      <AskUserQuestionCard api={api as never} request={request} onResolved={vi.fn()} />,
+    );
+
+    const input = getByTestId("ask-freetext-input") as HTMLInputElement;
+    input.focus();
+    expect(document.activeElement).toBe(input);
+
+    await act(async () => { fireEvent.keyDown(input, { key: "ArrowDown" }); });
+
+    // Focus must remain on the input — card-level arrowNav must not fire.
+    expect(document.activeElement).toBe(input);
+  });
+
+  it("ArrowUp inside free-text input keeps focus on the input", async () => {
+    const api = makeApi();
+    const request = makeRequest({
+      questions: [
+        { question: "의제", allowFreeText: true },
+      ],
+    });
+
+    const { getByTestId } = render(
+      <AskUserQuestionCard api={api as never} request={request} onResolved={vi.fn()} />,
+    );
+
+    const input = getByTestId("ask-freetext-input") as HTMLInputElement;
+    input.focus();
+    expect(document.activeElement).toBe(input);
+
+    await act(async () => { fireEvent.keyDown(input, { key: "ArrowUp" }); });
+
+    // Focus must remain on the input.
+    expect(document.activeElement).toBe(input);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Med-3: confirm step — ArrowDown must NOT jump into prior question choices
+// ---------------------------------------------------------------------------
+
+describe("AskUserQuestionCard — ArrowDown suppressed on confirm step", () => {
+  /**
+   * After all questions answered and confirm step is shown (step === total),
+   * there is no QuestionForm mounted, so card-level ArrowDown must not
+   * move focus into prior question choices.
+   */
+  it("ArrowDown on card at confirm step does not move focus to a choice button", async () => {
+    const api = makeApi();
+    const request = makeRequest({
+      questions: [
+        { question: "Q1", choices: ["A", "B"], allowFreeText: false },
+        { question: "Q2", choices: ["X", "Y"], allowFreeText: false },
+      ],
+    });
+
+    const { getByTestId, getByText } = render(
+      <AskUserQuestionCard api={api as never} request={request} onResolved={vi.fn()} />,
+    );
+
+    // Advance to confirm step via Enter on each question's first choice.
+    const btnA = getByText("A").closest("button")!;
+    btnA.focus();
+    await act(async () => { fireEvent.keyDown(btnA, { key: "Enter" }); });
+
+    const btnX = getByText("X").closest("button")!;
+    btnX.focus();
+    await act(async () => { fireEvent.keyDown(btnX, { key: "Enter" }); });
+
+    // Confirm step is now visible (보내기 button).
+    const card = getByTestId("ask-user-question-card");
+    card.focus();
+    const focusBefore = document.activeElement;
+
+    await act(async () => { fireEvent.keyDown(card, { key: "ArrowDown" }); });
+
+    // Focus must NOT have jumped into a Q1/Q2 choice button (role="option").
+    // On confirm step the QuestionForm is unmounted, so arrowNav ref is null
+    // and the card-level handler guards with !onConfirmStep. Either focus stays
+    // on the card or moves to the 보내기 submit button — never a choice option.
+    const focused = document.activeElement;
+    expect(focused?.getAttribute("role")).not.toBe("option");
   });
 });

@@ -513,29 +513,28 @@ export interface QuestionFormHandle {
   arrowNav(delta: 1 | -1): boolean;
 }
 
-const QuestionForm = forwardRef<
-  QuestionFormHandle,
-  {
-    item: AskUserQuestionItem;
-    draft: DraftAnswer;
-    disabled: boolean;
-    /** Returns a ChoiceResult signalling what the keyboard handler should do next. */
-    onChoose: (choice: string, choiceIndex: number) => ChoiceResult;
-    onFreeText: (text: string) => void;
-    /**
-     * Called on free-text Enter: validates current draft (which IS current
-     * because free-text onChange fires before onKeyDown) then advances.
-     */
-    onSubmit: () => void;
-    /**
-     * Called by the keyboard choice handler when onChoose returns { kind: "advance" }.
-     * Advances directly (goNext) without re-checking draft — the synchronous
-     * return value of onChoose is authoritative; re-reading currentDraft here
-     * would be stale due to React 18 state batching.
-     */
-    onAdvance: () => void;
-  }
->(function QuestionForm({
+interface QuestionFormProps {
+  item: AskUserQuestionItem;
+  draft: DraftAnswer;
+  disabled: boolean;
+  /** Returns a ChoiceResult signalling what the keyboard handler should do next. */
+  onChoose: (choice: string, choiceIndex: number) => ChoiceResult;
+  onFreeText: (text: string) => void;
+  /**
+   * Called on free-text Enter: validates current draft (which IS current
+   * because free-text onChange fires before onKeyDown) then advances.
+   */
+  onSubmit: () => void;
+  /**
+   * Called by the keyboard choice handler when onChoose returns { kind: "advance" }.
+   * Advances directly (goNext) without re-checking draft — the synchronous
+   * return value of onChoose is authoritative; re-reading currentDraft here
+   * would be stale due to React 18 state batching.
+   */
+  onAdvance: () => void;
+}
+
+const QuestionForm = forwardRef<QuestionFormHandle, QuestionFormProps>(function QuestionForm({
   item,
   draft,
   disabled,
@@ -550,8 +549,13 @@ const QuestionForm = forwardRef<
   const freeTextIndex = item.allowFreeText ? choices.length : -1;
   const answerCount = choices.length + (item.allowFreeText ? 1 : 0);
   // Roving tabIndex: track which choice button has the "tab stop".
+  // -1 is a sentinel meaning "focus is on the card container, no choice focused yet".
+  // The render uses (focusedIdx < 0 && i === 0) as the fallback tab-stop so index 0
+  // still receives tabIndex=0 when the sentinel is active.
+  // arrowNav(+1) from card surface: focusAnswerAt(-1 + 1) = 0 ("first choice").
+  // arrowNav(-1) from card surface: focusAnswerAt(-1 - 1) = -2 → wraps to last.
   const [focusedIdx, setFocusedIdx] = useState<number>(
-    () => draft.choiceIndex ?? (recommendIndex(item) ?? 0),
+    () => draft.choiceIndex ?? (recommendIndex(item) ?? -1),
   );
   const buttonRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -577,7 +581,14 @@ const QuestionForm = forwardRef<
   useImperativeHandle(ref, () => ({
     arrowNav(delta: 1 | -1): boolean {
       if (answerCount <= 0) return false;
-      focusAnswerAt(focusedIdx + delta);
+      // When no choice is focused yet (sentinel -1), treat ArrowDown as "go to
+      // first" (focusAnswerAt(0)) and ArrowUp as "go to last"
+      // (focusAnswerAt(answerCount-1)). For ArrowDown(+1) we need base=-1 so
+      // that base+delta=0. For ArrowUp(-1) we need base=answerCount so that
+      // base+delta=answerCount-1. This avoids the double-wrap that a raw
+      // (-2 + answerCount) % answerCount produces when answerCount > 2.
+      const base = focusedIdx < 0 ? (delta > 0 ? -1 : answerCount) : focusedIdx;
+      focusAnswerAt(base + delta);
       return true;
     },
   }), [answerCount, focusAnswerAt, focusedIdx]);
@@ -585,8 +596,10 @@ const QuestionForm = forwardRef<
   // Reset focused idx when the question item changes (step transition).
   // Prevents out-of-range focusedIdx when the new step has fewer choices,
   // which would leave all option buttons with tabIndex={-1} (keyboard nav broken).
+  // Uses -1 sentinel (no choice focused) when there is no recommended index so that
+  // the first ArrowDown from the card surface lands on index 0 (not index 1).
   useEffect(() => {
-    setFocusedIdx(recommendIndex(item) ?? (choices.length > 0 ? 0 : freeTextIndex));
+    setFocusedIdx(recommendIndex(item) ?? -1);
   }, [choices.length, freeTextIndex, item]);
 
   // Sync focused idx when the draft's selected choice changes externally.
