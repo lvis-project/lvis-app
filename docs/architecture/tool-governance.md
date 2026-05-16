@@ -399,15 +399,13 @@ interface ToolCallAuditEntry {
 
 ---
 
-## 12. 레퍼런스 기반 보강 (claw-code + ccleaks.com/architecture)
+## 12. 독립 설계 보강
 
-> 아래 항목은 검증된 프로덕션 시스템(Claude Code 아키텍처, claw-code Rust 포트)에서
-> 관찰된 패턴을 LVIS에 적용한 것이다.
+> 아래 항목은 LVIS threat model, 공개 프로토콜 문서, 그리고 라이선스가 확인된
+> OSS의 일반적인 agent-governance 패턴을 내부 요구사항으로 재정리한 것이다.
+> closed-source 또는 비공식 분석 자료의 구현 세부사항은 설계 근거로 사용하지 않는다.
 
-### 12.1 Layer 1 도구 비가시성 원칙 (ccleaks.com §Permission)
-
-> "Tool Registry Filter removes denied tools before Claude's context is built.
->  Claude never sees — and cannot call — tools blocked at this layer."
+### 12.1 Layer 1 도구 비가시성 원칙
 
 **핵심**: deny된 도구는 LLM의 system prompt에 포함되지 않아야 한다.
 LLM이 존재를 모르면 hallucination으로도 호출할 수 없다.
@@ -420,10 +418,10 @@ SystemPromptBuilder.build()
 
 **검증 포인트**: `getVisibleTools()`가 MCP revoked 서버의 도구도 제외하는지 확인.
 
-### 12.2 Workspace Boundary Validation (claw-code Lane 3: file_ops.rs)
+### 12.2 Workspace Boundary Validation
 
-> claw-code `file_ops.rs` (744 LOC): binary detection, size limits,
-> canonical workspace-boundary validation, symlink escape prevention.
+파일 접근 도구는 binary detection, size limits, canonical workspace-boundary
+validation, symlink escape prevention 을 공통 정책으로 가져야 한다.
 
 **LVIS 적용**: 모든 파일 접근 도구(향후 FileRead/FileWrite 추가 시)에 적용.
 
@@ -449,11 +447,10 @@ interface WorkspaceBoundary {
 **MCP 도구에 특히 중요**: MCP 서버가 요청하는 파일 경로가
 policy에 선언된 `allowedFilePathPatterns` 범위 내인지 검증.
 
-### 12.3 Bash 검증 매트릭스 (claw-code Lane 1: bash_validation.rs)
+### 12.3 Bash 검증 매트릭스
 
-> Claude Code upstream: 18개 bash 검증 서브모듈
-> claw-code 포트: readOnlyValidation, destructiveCommandWarning,
-> modeValidation, sedValidation, pathValidation, commandSemantics
+LVIS shell 도구는 로컬 PC에서 실행되므로, 다음 위험군을 내부 정책으로
+분리해 preflight 단계에서 검증한다.
 
 **LVIS Bash 도구 추가 시 필수 적용:**
 
@@ -469,9 +466,10 @@ policy에 선언된 `allowedFilePathPatterns` 범위 내인지 검증.
 **구현 권장**: AST 파서 대신 [DCG](https://github.com/Dicklesworthstone/destructive_command_guard)
 외부 바이너리를 Sub-millisecond 훅으로 통합.
 
-### 12.4 Permission Prompt UX 3-Choice (ccleaks.com §Permission Layer 3)
+### 12.4 Permission Prompt UX 3-Choice
 
-> "If no rule matches, execution halts. Choices: allow once · allow always · deny."
+규칙이 명시적으로 allow/deny 를 반환하지 않는 경우 실행을 멈추고 사용자에게
+`allow once`, `allow always`, `deny` 중 하나를 선택하게 한다.
 
 **LVIS IPC 설계:**
 
@@ -485,36 +483,36 @@ Renderer → Main: "lvis:permission:respond"
 allow-always → PermissionManager.addAlwaysAllowed(toolName)
 ```
 
-### 12.5 11-Step Boot Sequence (ccleaks.com §Boot)
+### 12.5 Boot Sequence Checklist
 
 우리 Boot Sequence(§4.2)와 비교:
 
-| Step | Claude Code (ccleaks) | LVIS 현재 | Delta |
+| Step | Generic agent bootstrap concern | LVIS 현재 | Delta |
 |------|----------------------|-----------|-------|
-| 1 | CLI loads | Electron shell init | ✓ |
-| 2 | **Feature flags evaluated** | 없음 | §14.4 |
-| 3 | main.tsx init | boot.ts init | ✓ |
-| 4 | Config loaded (settings, CLAUDE.md) | SettingsService | ✓ |
-| 5 | **Auth checked (OAuth)** | 없음 | SSO Phase 4 |
-| 6 | **GrowthBook initialized** | 없음 | §14.4 |
-| 7 | **Tools assembled (43 built-in + MCP)** | core builtins + native file tools + plugins | 확장 중 |
-| 8 | **MCP servers connected** | 없음 | 이번 구현 |
-| 9 | System prompt built (10+ sources) | 6/12 sources | 확장 중 |
-| 10 | REPL launched | Electron UI ready | ✓ |
+| 1 | Shell/app entry loads | Electron shell init | ✓ |
+| 2 | Feature flags evaluated | 없음 | §14.4 |
+| 3 | Runtime init | boot.ts init | ✓ |
+| 4 | Config loaded | SettingsService | ✓ |
+| 5 | Auth checked | 없음 | SSO Phase 4 |
+| 6 | Flag client initialized | 없음 | §14.4 |
+| 7 | Tools assembled | core builtins + native file tools + plugins | 확장 중 |
+| 8 | MCP servers connected | 없음 | 이번 구현 |
+| 9 | System prompt built | 6/12 sources | 확장 중 |
+| 10 | UI/interaction surface ready | Electron UI ready | ✓ |
 | 11 | Query loop begins | ConversationLoop | ✓ |
 
-### 12.6 Extension Point 아키텍처 (ccleaks.com §Extension)
+### 12.6 Extension Point 아키텍처
 
-Claude Code는 6개 확장 메커니즘을 제공:
+현대 agent runtime 에서 반복되는 확장 범주는 다음 6개로 정리한다:
 
-| 메커니즘 | Claude Code | LVIS 대응 | 상태 |
+| 메커니즘 | 일반 형식 | LVIS 대응 | 상태 |
 |---------|------------|-----------|------|
-| MCP Servers | 24파일 구현 | mcp/ 모듈 | 거버넌스 완료, Client 구현 중 |
-| Custom Agents | ~/.claude/agents/*.md | ~/.lvis/agents/*.md 또는 ~/.lvis/agents/<name>/AGENTS.md | ✓ |
-| Skills | ~/.claude/skills/<name>/SKILL.md | ~/.lvis/skills/<name>/SKILL.md + skill_load/skill_list | ✓ |
-| CLAUDE.md | @import 합성 | AGENTS.md + memories/MEMORY.md | ✓ |
+| MCP Servers | MCP server config | mcp/ 모듈 | 거버넌스 완료, Client 구현 중 |
+| Custom Agents | user-local agent profiles | ~/.lvis/agents/*.md 또는 ~/.lvis/agents/<name>/AGENTS.md | ✓ |
+| Skills | directory-scoped skill bundles | ~/.lvis/skills/<name>/SKILL.md + skill_load/skill_list | ✓ |
+| Context files | project/user instruction files | AGENTS.md + memories/MEMORY.md | ✓ |
 | Plugins | Marketplace | PluginRuntime | ✓ |
-| Hooks | Pre/Post ToolUse | HookRunner | ✓ |
+| Hooks | Pre/Post ToolUse | HookRunner / ScriptHookManager | ✓ |
 
 ---
 

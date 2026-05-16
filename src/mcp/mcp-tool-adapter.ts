@@ -3,11 +3,9 @@
  * (`tools/list` response shape) into the canonical {@link Tool}
  * contract used by the §6.4 ToolRegistry.
  *
- * Mirrors the OpenHarness `McpToolAdapter` pattern (MIT,
- * https://github.com/HKUDS/OpenHarness/blob/main/src/openharness/tools/__init__.py)
- * — every MCP server's discovered tools flow through this single
- * named adapter so the conversion contract stays in one auditable
- * place instead of being inlined at every call site.
+ * Every MCP server's discovered tools flow through this single named
+ * adapter so the conversion contract stays in one auditable place
+ * instead of being inlined at every call site.
  */
 import { createDynamicTool, type Tool } from "../tools/base.js";
 import type { McpToolSchema, McpUiPayload } from "./types.js";

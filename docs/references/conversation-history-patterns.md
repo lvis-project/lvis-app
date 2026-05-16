@@ -18,14 +18,15 @@ LVIS currently implements only Stage 2. This reference set motivated the Stage 1
 
 ---
 
-## 1. claw-code (`emmarktech/claw-code`) — Rust runtime
+## 1. Stateless LLM API baseline
 
-**File**: `rust/crates/runtime/src/conversation.rs`
+The baseline is provider-neutral: chat/completions style APIs do not retain
+the local session history for the client. LVIS must therefore keep its own
+message array, re-send the relevant context on each call, and compact that
+client-owned state before it exceeds the active model's usable window.
 
-- `run_turn()` (line ~155): `messages: self.session.messages.clone()` — **full history re-transmitted** every turn.
-- `compact()` (line ~257): **manually invoked** by caller. Config: `CompactionConfig { preserve_recent: usize, summary_budget: usize }`.
-- No automatic per-turn stripping; no boundary marker.
-- Takeaway: simplest model — re-transmit all, compact only when explicitly asked.
+Takeaway: the compaction contract is an LVIS responsibility, not something
+delegated to any closed-source agent implementation.
 
 ## 2. OpenHarness (`HKUDS/OpenHarness`) — Python engine
 

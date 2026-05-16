@@ -1,5 +1,5 @@
 /**
- * Bash AST Pre-Validator — ccleaks utils/bash/ 패턴 차용
+ * Bash AST Pre-Validator — LVIS local shell safety policy
  *
  * tool-executor.ts Step 2.5에서 호출되며, Bash 계열 도구 호출 시 인자를
  * 간이 패턴 분석하여 위험 패턴을 탐지. 13개 패턴을 차단:

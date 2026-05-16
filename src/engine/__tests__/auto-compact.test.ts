@@ -121,7 +121,7 @@ describe("markStaleToolResults", () => {
     expect(out).toBe(messages); // reference-equal
   });
 
-  it("skips tool_results below minStubThreshold (OpenCode pattern, default 200 chars)", () => {
+  it("skips tool_results below minStubThreshold (default 200 chars)", () => {
     const msgs: GenericMessage[] = [{ role: "user", content: "go" }];
     for (let i = 0; i < 10; i++) {
       const id = makeToolUseId(i);
