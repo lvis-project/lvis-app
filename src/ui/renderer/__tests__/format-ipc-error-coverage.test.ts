@@ -30,6 +30,7 @@ const IPC_DOMAIN_DIR = resolve(__dirname, "../../../ipc/domains");
 function listTsFiles(dir: string): string[] {
   const out: string[] = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name === "__tests__") continue; // test fixtures may quote codes
     const full = join(dir, entry.name);
     if (entry.isDirectory()) out.push(...listTsFiles(full));
     else if (entry.isFile() && entry.name.endsWith(".ts")) out.push(full);
@@ -38,10 +39,15 @@ function listTsFiles(dir: string): string[] {
 }
 
 function extractErrorCodes(source: string): Set<string> {
-  // Strict shape: `{ ok: false, error: "<code>"`. Captures only static
-  // string codes; ignores dynamic-template `error: \`${prefix}:${...}\``.
+  // Captures `{ ok: false[ as const][, ...intermediate fields], error: "<code>" }`.
+  //   - underscore allowed (legacy snake_case in attach.ts grandfathered)
+  //   - `as const` and intermediate object fields between `false` and `error`
+  //     are tolerated via `[^}]*?` (non-greedy, no closing brace)
+  //   - dynamic template literals (`error: \`${prefix}:...\``) are
+  //     intentionally NOT captured — those are caller-handled per the
+  //     formatIpcError SOT contract (see PermissionsTab reviewer-rewire-failed)
   const codes = new Set<string>();
-  const re = /\{\s*ok:\s*false\s*,\s*error:\s*"([a-z][a-z0-9-]+)"/g;
+  const re = /\{\s*ok:\s*false\b[^}]*?\berror:\s*"([a-zA-Z][a-zA-Z0-9_-]+)"/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(source)) !== null) {
     codes.add(m[1]);
@@ -69,6 +75,14 @@ describe("formatIpcError — full IPC error code coverage", () => {
         `Unmapped IPC error codes (add to COMMON_IPC_ERROR_MESSAGES in src/ui/renderer/format-ipc-error.ts):\n  ${missing.join("\n  ")}`,
       );
     }
+
+    // Sanity floor — guards against future regex regression that silently
+    // matches zero codes (and would otherwise pass with empty `allCodes`).
+    // Skeptic Multi-Perspective from round-2 critic.
+    expect(
+      allCodes.size,
+      "regex captured zero codes — likely a regex regression (cluster review C-R2-Skeptic)",
+    ).toBeGreaterThan(50);
   });
 
   it("COMMON_IPC_ERROR_MESSAGES values are non-empty Korean strings", () => {

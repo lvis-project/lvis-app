@@ -96,8 +96,19 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "invalid-bundle-id": "잘못된 번들 ID입니다.",
   "invalid-entry-url": "잘못된 entry URL입니다.",
   "entry-url-outside-install-root": "entry URL이 설치 경로를 벗어났습니다.",
-  "install-failed": "설치에 실패했습니다.",
+  "install-failed": "플러그인 설치에 실패했습니다.",
+  "uninstall-failed": "플러그인 제거에 실패했습니다.",
   "marketplace-disabled": "마켓플레이스 기능이 비활성화되었습니다.",
+  // Frame-trust gate (used by chat.ts + plugins.ts pluginConfigError helper)
+  "unauthorized-frame": "권한이 없는 프레임에서의 요청입니다.",
+  // ── Legacy snake_case codes (src/ipc/domains/attach.ts) ──
+  // These predate the kebab-case convention. New code MUST use kebab-case
+  // (#803 IPC convention). The snake_case shape is grandfathered until the
+  // attach.ts handlers are rewritten (tracked in follow-up).
+  "path_not_authorized": "허용되지 않은 경로입니다.",
+  "not_image": "이미지 파일이 아닙니다.",
+  "invalid_payload": "잘못된 요청 형식입니다.",
+  "denied_extension": "허용되지 않은 파일 확장자입니다.",
   "no-store": "저장소를 사용할 수 없습니다.",
   "no-starred-store": "즐겨찾기 저장소를 사용할 수 없습니다.",
 

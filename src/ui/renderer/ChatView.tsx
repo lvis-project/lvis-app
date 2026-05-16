@@ -271,6 +271,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
       if (
         !payload ||
         typeof payload.toolName !== "string" ||
+        payload.toolName.length === 0 ||
         (payload.scope !== "session" && payload.scope !== "persistent") ||
         (payload.verdictAtApproval !== "low" &&
           payload.verdictAtApproval !== "medium" &&
