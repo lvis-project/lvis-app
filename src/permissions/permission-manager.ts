@@ -601,8 +601,12 @@ export class PermissionManager {
     // Fail-closed: re-prompt is the correct UX when verdict
     // provenance is lost.
     if (userApproval && userApproval.verdictAtApproval == null) {
+      // Structured marker as 2nd arg keeps tests stable across i18n /
+      // wording changes (cluster review S-Med-1 + C-Med-4). The
+      // human-readable first arg stays for existing log readers.
       console.warn(
         `[permission] legacy R-2 entry without verdictAtApproval — rejecting memory hit, forcing fresh approval (tool=${toolName}, scope=${userApproval.scope})`,
+        { event: "legacy-r2-null-verdict", toolName, scope: userApproval.scope },
       );
     }
     if (userApproval && userApproval.verdictAtApproval != null) {

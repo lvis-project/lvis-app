@@ -22,6 +22,7 @@ import { detectSandboxCapability, type SandboxCapability } from "./sandbox-capab
 import type { PermissionEvaluationContext } from "./evaluation-context.js";
 import { isSensitivePath, canonicalizePathForMatch } from "./sensitive-paths.js";
 import { maskSensitiveData } from "../audit/dlp-filter.js";
+import { canonicalStringify } from "../shared/canonical-json.js";
 
 // ─── §D1 args DLP masking ────────────────────────────
 // Approval 모달에 전달되는 tool args 내 민감정보(API key, 이메일, 전화번호,
@@ -252,37 +253,6 @@ function formatApprovalAuditFields(fields: {
     `approvalScope=${fields.approvalScope ?? "none"}`,
     `trustOrigin=${fields.trustOrigin ?? "unknown"}`,
   ].join(" ");
-}
-
-/**
- * §D2: Deterministic canonicalization of arbitrary tool args for HMAC input.
- * Sorts object keys recursively; stringifies with JSON. Non-JSON values
- * (undefined, functions) are skipped just like JSON.stringify.
- */
-function canonicalStringify(value: unknown): string {
-  const seen = new WeakSet<object>();
-  const stringify = (v: unknown): string => {
-    if (v === null || typeof v !== "object") return JSON.stringify(v) ?? "null";
-    if (seen.has(v as object)) return '"[Circular]"';
-    seen.add(v as object);
-    if (Array.isArray(v)) {
-      return "[" + v.map((e) => stringify(e)).join(",") + "]";
-    }
-    const keys = Object.keys(v as Record<string, unknown>).sort();
-    return (
-      "{" +
-      keys
-        .map(
-          (k) =>
-            JSON.stringify(k) +
-            ":" +
-            stringify((v as Record<string, unknown>)[k]),
-        )
-        .join(",") +
-      "}"
-    );
-  };
-  return stringify(value);
 }
 
 /**
