@@ -863,18 +863,23 @@ describe("LlmRiskClassifier — retry policy (#865)", () => {
   it("respects abortSignal during back-off sleep (no extra retries after cancel)", async () => {
     const provider = makeFlapProvider(99, "503");
     const c = new LlmRiskClassifier(provider, "gpt-4o-mini", "deny", {}, {
-      maxAttempts: 10, baseDelayMs: 100, jitterPct: 0,
+      // maxAttempts=5 (was 10, but cap=10 anyway). Use plenty of headroom
+      // so the assertion below pins behavior, not the maxAttempts ceiling.
+      maxAttempts: 5, baseDelayMs: 100, jitterPct: 0,
     });
     const ctrl = new AbortController();
-    // Abort mid-flight (after first failure, before retry sleep elapses).
+    // Abort mid-flight (after first failure, during retry sleep).
     setTimeout(() => ctrl.abort(), 30);
     const v = await c.classify(
       ctx({ category: "read", finalInput: { path: "/Users/ken/work/x.md" } }),
       { abortSignal: ctrl.signal },
     );
     expect(v.level).toBe("high"); // aborted → fallback path
-    // At most 2 attempts: first call fails, second is interrupted by abort during sleep.
-    expect(provider.complete.call.length).toBeLessThanOrEqual(2);
+    // Correct mock-call accessor (critic R1 MAJOR-2 fix — the previous
+    // `.call.length` accessor was Function.prototype.call arity, not call
+    // count). At most 2 attempts: first call fails, then abort interrupts
+    // the back-off sleep before the second `provider.complete()` can fire.
+    expect((provider.complete as ReturnType<typeof vi.fn>).mock.calls.length).toBeLessThanOrEqual(1);
   });
 
   it("fallbackOnError=rule returns the rule verdict on exhausted retry", async () => {
