@@ -772,7 +772,7 @@ export function PermissionsTab() {
                         return (
                           <Tooltip key={opt.value}>
                             <TooltipTrigger asChild>{item}</TooltipTrigger>
-                            <TooltipContent>API 키 설정 필요 — 지능 설정에서 키를 추가하세요.</TooltipContent>
+                            <TooltipContent data-testid="reviewer-provider-tooltip">API 키 설정 필요 — 지능 설정에서 키를 추가하세요.</TooltipContent>
                           </Tooltip>
                         );
                       })}
