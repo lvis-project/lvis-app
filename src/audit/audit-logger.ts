@@ -143,7 +143,8 @@ export class AuditLogger {
     if (!existsSync(this.auditDir)) {
       mkdirSync(this.auditDir, { recursive: true, mode: 0o700 });
     }
-    // 일별 로그 파일
+    // 일별 로그 파일 — UTC 기준 (issue #801). `sandbox-audit-sink.ts` 와 같은
+    // `toISOString().slice(0, 10)` 컨벤션 → 두 채널이 동일 UTC midnight 에 rotate.
     const date = new Date().toISOString().slice(0, 10);
     this.logFile = join(this.auditDir, `${date}.jsonl`);
     this.permissionAuditLogFile = join(this.auditDir, `${date}.permission-audit.jsonl`);
