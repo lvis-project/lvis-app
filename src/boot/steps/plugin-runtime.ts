@@ -1315,9 +1315,9 @@ export async function initPluginRuntime(
       // ─── SDK 5.6.0 — clearAuthPartition ──────────────────────────────
       // Wipe cookies / storage / cache / HTTP-auth from one of the calling
       // plugin's own `persist:plugin-auth:<pluginId>[:<sub>]` partitions.
-      // Used after `lge_signout` / equivalent user-triggered sign-out so a
-      // subsequent `openAuthWindow` cannot silently SSO via residual IdP
-      // cookies. Capability + partition allow-list mirror `openAuthWindow`.
+      // Used after a user-triggered plugin sign-out so a subsequent
+      // `openAuthWindow` cannot silently SSO via residual IdP cookies.
+      // Capability + partition allow-list mirror `openAuthWindow`.
       clearAuthPartition: async (partition: string): Promise<void> => {
         if (!manifest.capabilities?.includes("external-auth-consumer")) {
           try {
