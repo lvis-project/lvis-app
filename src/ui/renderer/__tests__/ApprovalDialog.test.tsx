@@ -5,7 +5,7 @@
  * to document.body — assertions must query document.body, not the render container.
  */
 import "../../../../test/renderer/setup.js";
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, fireEvent, waitFor } from "@testing-library/react";
 import { ApprovalDialog } from "../dialogs/ApprovalDialog.js";
 import type { ApprovalRequest, PermissionEvaluationContext } from "../types.js";
@@ -43,6 +43,22 @@ function makeRequest(overrides: Partial<ApprovalRequest> = {}): ApprovalRequest 
 }
 
 describe("ApprovalDialog", () => {
+  // HIGH-1 CI fix: ToolApprovalDialog.handleApprove calls window.lvis.userApproval.record.
+  // Without this mock the IPC bridge throws synchronously before onDecide is reached.
+  // The fire-and-await pattern calls onDecide synchronously before awaiting record,
+  // so the test's fireEvent.click assertion is always synchronous — but the record
+  // mock must exist so the optional-chain doesn't return undefined and throw.
+  // vi.stubGlobal is used so the outer afterEach's vi.unstubAllGlobals() handles cleanup.
+  beforeEach(() => {
+    vi.stubGlobal("lvis", {
+      userApproval: {
+        record: vi.fn().mockResolvedValue({ ok: true }),
+        revokeByKey: vi.fn().mockResolvedValue({ ok: true }),
+        list: vi.fn().mockResolvedValue([]),
+      },
+    });
+  });
+
   it("renders without crashing with empty queue", () => {
     const { container } = render(
       <ApprovalDialog queue={[]} onDecide={vi.fn()} />,
@@ -121,6 +137,7 @@ describe("ApprovalDialog", () => {
       <ApprovalDialog queue={[makeRequest({
         toolName: "bash",
         toolCategory: "shell",
+        reviewerVerdict: { level: "low", reason: "test fixture — exercise A/D shortcut path, not R-4 HIGH NL gate" },
       })]} onDecide={onDecide} />,
     );
     await waitFor(() => {
@@ -145,6 +162,7 @@ describe("ApprovalDialog", () => {
       <ApprovalDialog queue={[makeRequest({
         toolName: "bash",
         toolCategory: "shell",
+        reviewerVerdict: { level: "low", reason: "test fixture — exercise A/D shortcut path, not R-4 HIGH NL gate" },
       })]} onDecide={onDecide} />,
     );
     await waitFor(() => {
@@ -364,6 +382,44 @@ describe("ApprovalDialog", () => {
     expect(allowOnce).toBeTruthy();
     fireEvent.click(allowOnce!);
     expect(onDecide).toHaveBeenCalledWith("allow-once", undefined);
+  });
+
+  it("record IPC call receives 5-component payload with canonical JSON args (critic MAJOR-5)", async () => {
+    // Verifies that window.lvis.userApproval.record is called with a payload
+    // containing all 5 required fields: toolName, args (canonical JSON string),
+    // source, trustOrigin, approvalCacheKey. Catches future regression of any field.
+    // Fixture sets trustOrigin + approvalCacheKey explicitly so a regression
+    // that drops the spread won't pass via TypeScript-only optional shape.
+    const onDecide = vi.fn();
+    render(
+      <ApprovalDialog
+        queue={[makeRequest({ trustOrigin: "user-keyboard", approvalCacheKey: "test-key-r5" })]}
+        onDecide={onDecide}
+      />,
+    );
+    await waitFor(() => {
+      expect(document.body.textContent).toContain("read_file");
+    });
+    const allowBtn = Array.from(document.body.querySelectorAll("button")).find(
+      (b) => b.textContent?.includes("허용"),
+    );
+    expect(allowBtn).toBeTruthy();
+    fireEvent.click(allowBtn!);
+    await waitFor(() => expect(onDecide).toHaveBeenCalled());
+    // Assert all 5 required fields in record payload — runtime regression guard.
+    expect(window.lvis.userApproval.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toolName: expect.any(String),
+        args: expect.any(String),
+        source: expect.any(String),
+        trustOrigin: "user-keyboard",
+        approvalCacheKey: "test-key-r5",
+      }),
+    );
+    // args must be a canonical JSON object string (parseable, non-null object).
+    const recordPayload = (window.lvis.userApproval.record as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as Record<string, unknown>;
+    const parsedArgs = JSON.parse(recordPayload.args as string) as unknown;
+    expect(parsedArgs !== null && typeof parsedArgs === "object" && !Array.isArray(parsedArgs)).toBe(true);
   });
 });
 
