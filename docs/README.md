@@ -1,6 +1,6 @@
 # LVIS Project Documentation
 
-**Lvis (LG Virtual Intelligence Secretary)**
+**Lvis (Local Versatile Intelligent System)**
 AI 프론티어 생산성 향상 엔터프라이즈 매니지먼트 시스템
 
 이 디렉터리는 LVIS 프로젝트 문서의 **단일 소스**입니다. 기존 standalone `lvis-project/docs` 저장소는 아카이브용 히스토리 레퍼런스만 유지합니다.

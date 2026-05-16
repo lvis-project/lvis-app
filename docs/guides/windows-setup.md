@@ -187,7 +187,7 @@ chcp 65001 | Out-Null
 
 또는 Windows Terminal (UTF-8 default) 사용으로 회피.
 
-### `[lvis] corporate CA not found` 경고 (비-LG 네트워크)
+### `[lvis] corporate CA not found` 경고 (non-corporate network)
 정상 — macOS 키체인에 corp CA 가 없으면 나오는 informational log.
 외부 네트워크 환경에서는 무시 가능. 확실히 끄고 싶으면:
 ```powershell

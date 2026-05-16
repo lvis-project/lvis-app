@@ -26,7 +26,7 @@ LVIS는 개인 데스크톱에서 실행되는 AI 비서이며, 플러그인 생
 
 1. **단일 Plugin System 위에서 모드 구분** — 이미 구현된 §9.1-9.5의 PluginRuntime, HostApi, Marketplace는 그대로 두고, deployment 모드에 따라 lifecycle만 제어한다. 플러그인 코드는 자신이 어떤 모드인지 알 필요가 없다.
 2. **Deny-by-Default for User 설치** — 정책이 명시적으로 allow하지 않으면 user 설치는 차단. 이는 §14.2 Policy Enforcement의 공통 원칙과 일치.
-3. **Signed Policy** — managed 정책 파일은 LG Internal Root CA로 서명된다. 위변조 감지 시 default policy(deny all user, managed only)로 fallback.
+3. **Signed Policy** — managed 정책 파일은 Corporate Internal Root CA로 서명된다. 위변조 감지 시 default policy(deny all user, managed only)로 fallback.
 4. **Offline Resilience** — 최근 유효한 policy cache를 보관하여 오프라인(VPN 끊김, 출장) 상황에서도 작동. TTL 초과 시 보수 모드.
 5. **No Silent Failures** — managed 플러그인 설치/서명 검증 실패는 audit + 사용자 UI + (Phase 3+) IT 알림의 3중 표면화.
 6. **Backward Compatible** — 기존 `deployment` 필드 없는 매니페스트는 `user`로 자동 분류. Phase 1.5 초기에는 모든 기존 플러그인이 자연스럽게 user로 잡힌다 (단, enterprise marketplace를 통해 단계적으로 managed로 마이그레이션).
@@ -48,7 +48,7 @@ LVIS는 개인 데스크톱에서 실행되는 AI 비서이며, 플러그인 생
 │   │  │    → HTTP GET /policy (enterprise IT admin API)│           │
 │   │  │    → mTLS + SSO 토큰                     │           │
 │   │  ├─ verifyPolicySignature()                 │           │
-│   │  │    → LG Internal Root CA                 │           │
+│   │  │    → Corporate Internal Root CA                 │           │
 │   │  ├─ applyPolicy() → cache 갱신              │           │
 │   │  └─ fallback: loadCache() (오프라인)        │           │
 │   └──────────────┬──────────────────────────────┘           │
@@ -117,7 +117,7 @@ LVIS는 개인 데스크톱에서 실행되는 AI 비서이며, 플러그인 생
 ├── governance/
 │   ├── managed-policy.json             # IT admin push (서명됨) — 단일 진실 소스
 │   ├── managed-policy.sig              # 분리된 signature (optional)
-│   ├── trusted-ca.pem                  # LG Internal Root CA (서명 검증용)
+│   ├── trusted-ca.pem                  # Corporate Internal Root CA (서명 검증용)
 │   └── policy-cache/
 │       ├── last-valid.json             # 가장 최근 검증 성공한 정책
 │       └── last-check.json             # 마지막 IT API 호출 시각 + 결과
@@ -314,7 +314,7 @@ export class ManagedPolicySync {
     // Timeout 10s, retry 3x with exponential backoff
   }
 
-  /** ECDSA 서명 검증 (LG CA 공개키로) */
+  /** ECDSA 서명 검증 (corporate CA public key로) */
   async verifyPolicySignature(policy: ManagedPolicy): Promise<boolean> {
     // 1. load trusted-ca.pem (fs cached)
     // 2. canonicalize(policy.enforcements + denyList + nextCheckAt)
@@ -771,7 +771,7 @@ ipcMain.handle("lvis:plugins:disable", async (_e, pluginId: string) => {
 | 6 | 사용자가 user 플러그인으로 managed ID 사용 시도 | `canInstall()`에서 registry 충돌 감지 → deny + 명확한 에러 |
 | 7 | Managed 플러그인 업데이트 네트워크 실패 | 기존 버전 유지 + 재시도 큐 + 사용자 알림 |
 | 8 | 특정 managed 플러그인이 CVE로 판명 | 정책 denyList에 추가 → 다음 sync 시 자동 제거 + `lockEnabled: false` 덮어쓰기 |
-| 9 | 멀티 CA (LG 본사 + 자회사) | Phase 4: `trusted-ca.pem`이 여러 CA를 포함, 체인 검증 |
+| 9 | 멀티 CA (parent + subsidiary corp) | Phase 4: `trusted-ca.pem`이 여러 CA를 포함, 체인 검증 |
 | 10 | 동일 PC 여러 사용자 | LVIS는 1인 1PC 가정 (architecture.md §14) — 지원 안 함 |
 | 11 | VPN 끊김 중 정책 업데이트 긴급 필요 | cache만 사용, 온라인 복구 시 즉시 sync |
 | 12 | 하이재킹된 managed 플러그인 | deny list + 서명 실패 → 즉시 비활성화 + 이전 버전 롤백 |
