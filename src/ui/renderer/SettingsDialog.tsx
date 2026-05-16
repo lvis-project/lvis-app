@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Button } from "../../components/ui/button.js";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../../components/ui/tabs.js";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../components/ui/dialog.js";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../../components/ui/dialog.js";
 import type { LvisApi } from "./types.js";
 import { RolesTab } from "./tabs/RolesTab.js";
 import { PermissionsTab } from "./tabs/PermissionsTab.js";
@@ -18,6 +18,31 @@ import { MarketplaceTab } from "./tabs/MarketplaceTab.js";
 import { useSettingsOrchestration } from "./hooks/use-settings-orchestration.js";
 import { normalizeSettingsTab } from "../../shared/settings-tabs.js";
 
+/**
+ * Inline save bar rendered at the bottom of each tab that holds a
+ * deferred-save form (llm / chat / web / marketplace). Replaces the
+ * single dialog-level footer Save button so the action lives next to
+ * the inputs it persists, matching the per-section save policy used
+ * by the rest of the dialog.
+ */
+function TabSaveBar({
+  onSave,
+  saving,
+  settingsLoaded,
+}: {
+  onSave: () => void;
+  saving: boolean;
+  settingsLoaded: boolean;
+}) {
+  return (
+    <div className="mt-4 flex justify-end border-t border-border/40 pt-3">
+      <Button onClick={onSave} disabled={saving || !settingsLoaded}>
+        {saving ? "저장 중..." : "저장"}
+      </Button>
+    </div>
+  );
+}
+
 export function SettingsDialog({
   open,
   onOpenChange,
@@ -33,7 +58,7 @@ export function SettingsDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent size="xl">
+      <DialogContent size="2xl">
         <DialogHeader>
           <DialogTitle>설정</DialogTitle>
           <DialogDescription>앱 환경, 채팅 동작, 검색 엔진, 권한 정책을 설정합니다.</DialogDescription>
@@ -144,6 +169,7 @@ export function SettingsContent({
               setFallbackOpen={s.setFallbackOpen}
               onSaved={onSaved}
             />
+            <TabSaveBar onSave={() => void s.save("llm")} saving={s.saving} settingsLoaded={s.settingsLoaded} />
           </TabsContent>
 
           <TabsContent value="appearance">
@@ -161,6 +187,7 @@ export function SettingsContent({
               piiRedactEnabled={s.piiRedactEnabled}
               onPiiRedactToggle={() => s.setPiiRedactEnabled(!s.piiRedactEnabled)}
             />
+            <TabSaveBar onSave={() => void s.save("chat")} saving={s.saving} settingsLoaded={s.settingsLoaded} />
           </TabsContent>
 
           <TabsContent value="web">
@@ -174,6 +201,7 @@ export function SettingsContent({
               setWebKeyInput={s.setWebKeyInput}
               onSaved={onSaved}
             />
+            <TabSaveBar onSave={() => void s.save("web")} saving={s.saving} settingsLoaded={s.settingsLoaded} />
           </TabsContent>
 
           <TabsContent value="permissions"><PermissionsTab /></TabsContent>
@@ -196,14 +224,9 @@ export function SettingsContent({
               setApiKeyInput={s.setMarketplaceApiKeyInput}
               onSaved={onSaved}
             />
+            <TabSaveBar onSave={() => void s.save("marketplace")} saving={s.saving} settingsLoaded={s.settingsLoaded} />
           </TabsContent>
         </Tabs>
-        <DialogFooter className="mt-6 border-t pt-4">
-          <Button variant="secondary" onClick={() => onOpenChange(false)}>닫기</Button>
-          {tab !== "permissions" && tab !== "usage" && tab !== "roles" && tab !== "audit" && tab !== "plugin-perf" && tab !== "mcp" && tab !== "plugin-config" && tab !== "appearance" && (
-            <Button onClick={() => void s.save(tab)} disabled={s.saving || !s.settingsLoaded}>{s.saving ? "저장 중..." : "저장"}</Button>
-          )}
-        </DialogFooter>
     </>
   );
 }
