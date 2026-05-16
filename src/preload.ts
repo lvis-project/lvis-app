@@ -541,6 +541,44 @@ const api = {
     return () => ipcRenderer.removeListener("marketplace:updates-available", listener);
   },
 
+  // ─── App auto-update (electron-updater) ──────────
+  // Main process emits `lvis:update:state` whenever the updater state
+  // transitions (available / downloading / downloaded). Renderer renders
+  // a permanent badge next to the Home button so the user always sees the
+  // current state, not a transient toast. The two action commands are
+  // user-gated — `downloadAppUpdate` is only called from a badge click,
+  // never automatically (사용자 명시 클릭 전엔 절대 다운로드 금지).
+  // UpdateState type imported from the SoT at src/shared/update-state.ts
+  // so adding a new variant only needs editing that one file.
+  onAppUpdateState: (
+    handler: (state: import("./shared/update-state.js").UpdateState) => void,
+  ) => {
+    const listener = (_event: unknown, state: Parameters<typeof handler>[0]) => handler(state);
+    ipcRenderer.on("lvis:update:state", listener);
+    return () => ipcRenderer.removeListener("lvis:update:state", listener);
+  },
+  /** Fetch the last-known state synchronously (for late-mounting components
+   *  that miss the initial broadcast). Returns { kind: "idle" } before the
+   *  first check completes. */
+  getAppUpdateState: () =>
+    ipcRenderer.invoke("lvis:update:get-state") as Promise<
+      import("./shared/update-state.js").UpdateState
+    >,
+  /** Start the actual download. Only valid when the current state is
+   *  "available"; rejected (ok:false) otherwise. */
+  downloadAppUpdate: () =>
+    ipcRenderer.invoke("lvis:update:download-now") as Promise<{ ok: boolean; reason?: string }>,
+  /** Quit and apply the downloaded update. Only valid when the current
+   *  state is "downloaded"; rejected (ok:false) otherwise. */
+  installAppUpdate: () =>
+    ipcRenderer.invoke("lvis:update:install-now") as Promise<{ ok: boolean; reason?: string }>,
+  /** Show the native confirmation dialog before installAppUpdate. Returns
+   *  { confirmed: true } only when the user clicked 재시작. Replaces the
+   *  renderer-side window.confirm() (which blocks the JS thread and
+   *  doesn't respect window focus on macOS). */
+  confirmInstallAppUpdate: () =>
+    ipcRenderer.invoke("lvis:update:confirm-install") as Promise<{ confirmed: boolean }>,
+
   // ─── Phase 2d — managed bootstrap status ─────────
   // The host emits these around `ensureManagedInstalled()` so the renderer
   // can show a banner / toast during startup install. Three lifecycle states:
