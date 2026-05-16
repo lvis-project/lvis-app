@@ -764,6 +764,12 @@ async function handleLvisUri(url: string) {
         const message = errorMessage(err) || "addPlugin failed";
         log.error({ pluginId, err }, "post-install steps failed for lvis:// install");
         try {
+          await activeServices.pluginRuntime.removePlugin(pluginId).catch((rmPluginErr) => {
+            log.warn(
+              { pluginId, rmPluginErr },
+              "lvis:// install rollback removePlugin failed",
+            );
+          });
           await activeServices.pluginMarketplace.uninstall(pluginId);
         } catch (rollbackErr) {
           log.warn(
