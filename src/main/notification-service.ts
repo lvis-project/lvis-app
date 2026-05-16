@@ -28,18 +28,21 @@ import { createLogger } from "../lib/logger.js";
 import { stripMarkdown } from "../shared/strip-markdown.js";
 const log = createLogger("lvis");
 
-export type NotificationKind = "turn-end" | "routine" | "ask-user" | "approval";
+export type NotificationKind = "turn-end" | "routine" | "ask-user" | "approval" | "plugin";
 
 /**
  * Closed enumeration of valid `NotificationKind` values. Exported so IPC
  * handlers can validate untrusted renderer payloads without re-listing the
- * 4 kinds inline.
+ * kinds inline. `plugin` was added in #841 when manifest-driven plugin
+ * notifications were routed through this service to inherit cooldown,
+ * truncation, sanitization, click-restore, and structured audit.
  */
 export const NOTIFICATION_KINDS: ReadonlySet<NotificationKind> = new Set([
   "turn-end",
   "routine",
   "ask-user",
   "approval",
+  "plugin",
 ]);
 
 export interface NotificationContextRef {
@@ -57,6 +60,16 @@ export interface FireOptions {
   contextRef?: NotificationContextRef;
   /** Approval defaults true; rest default false. */
   urgent?: boolean;
+  /**
+   * #843 — opt out of the focus-suppression gate. When true, the OS
+   * notification fires regardless of focus state (critical surfaces like
+   * `meeting.starting-soon` / `approval.deadline-imminent` / `incident.page`).
+   * Defaults false. Routed through from `plugin.json` manifest's
+   * `notificationEvents[i].bypassFocusGate`. Independent of `urgent` —
+   * a critical notification can be focus-bypassed without being marked urgent
+   * (silent: !urgent still applies).
+   */
+  bypassFocusGate?: boolean;
 }
 
 /**
@@ -86,6 +99,7 @@ const ELLIPSIS = "…";
  *   - approval : 2 s  (coalesce micro-bursts only)
  *   - routine  : 0    (rare — always fire)
  *   - ask-user : 0    (rare — user expects every one)
+ *   - plugin   : 5 s  (#841 — protects against runaway plugin emit loops)
  *
  * In-memory only — cooldown resets on app restart by design
  * (cross-restart persistence is overkill for an anti-spam gate).
@@ -95,6 +109,12 @@ const COOLDOWN_MS_BY_KIND: Record<NotificationKind, number> = {
   approval: 2_000,
   routine: 0,
   "ask-user": 0,
+  // #841 — plugin notifications inherit a 5s cooldown. Lower than turn-end
+  // because plugin events span many distinct surfaces (meeting/work-proactive
+  // /agent-hub etc.) and a per-kind cooldown that's too aggressive would
+  // coalesce legitimate independent alerts. Still tight enough to defang a
+  // buggy plugin emitting 30 events/sec from blasting toasts.
+  plugin: 5_000,
 };
 
 /**
@@ -146,6 +166,15 @@ export interface NotificationServiceOptions {
    * Test override of NODE_ENV check. Default: read process.env.NODE_ENV.
    */
   isTestEnv?: () => boolean;
+  /**
+   * #842 — focus detection across ALL LVIS-owned BrowserWindows (settings,
+   * auth-window, link-window, auth-partition-viewer, detached children).
+   * The pre-fix gate only consulted `mainWindow.isFocused()`, so an active
+   * settings window would still trigger an OS pop. Defaults to a live
+   * `BrowserWindow.getAllWindows().some(w => !w.isDestroyed() && w.isFocused())`
+   * scan; tests override to avoid loading Electron.
+   */
+  isAnyWindowFocused?: () => boolean;
 }
 
 /**
@@ -210,12 +239,39 @@ function defaultIsReady(): boolean {
   }
 }
 
+/**
+ * #842 — default multi-window focus probe. Scans every LVIS-owned
+ * `BrowserWindow` (main + settings + auth + link + detached children) so
+ * "user is actively working in some LVIS window" is detected even when
+ * the main window is blurred. `isDestroyed()` filtered out to avoid
+ * touching a window that's already being torn down. Wrapped in try/catch
+ * so callers without Electron loaded (tests) fall back to "no focus".
+ */
+function defaultIsAnyWindowFocused(): boolean {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { BrowserWindow } = require("electron") as typeof import("electron");
+    return BrowserWindow.getAllWindows().some(
+      (w) => !w.isDestroyed() && w.isFocused(),
+    );
+  } catch (err) {
+    // Electron not loaded (e.g. unit tests) — log at warn so a *runtime*
+    // import failure (broken Electron upgrade, missing native binding) does
+    // not silently degrade to "always treat user as away". Tests pass via
+    // the `isAnyWindowFocused` constructor option so the catch is rarely
+    // hit outside true config errors.
+    log.warn("defaultIsAnyWindowFocused fallback: %s", (err as Error).message);
+    return false;
+  }
+}
+
 export class NotificationService {
   private readonly getMainWindow: () => BrowserWindow | null;
   private readonly auditLogger?: AuditLogger;
   private readonly notificationFactory: NonNullable<NotificationServiceOptions["notificationFactory"]>;
   private readonly isReady: () => boolean;
   private readonly isTestEnv: () => boolean;
+  private readonly isAnyWindowFocused: () => boolean;
   /**
    * Per-kind last-fire monotonic timestamps (performance.now() ms). Using a
    * monotonic clock (immune to NTP steps and manual clock changes) means a
@@ -231,6 +287,7 @@ export class NotificationService {
     this.notificationFactory = opts.notificationFactory ?? defaultNotificationFactory;
     this.isReady = opts.isReady ?? defaultIsReady;
     this.isTestEnv = opts.isTestEnv ?? defaultIsTestEnv;
+    this.isAnyWindowFocused = opts.isAnyWindowFocused ?? defaultIsAnyWindowFocused;
   }
 
   fire(opts: FireOptions): void {
@@ -243,6 +300,16 @@ export class NotificationService {
     // can detect spam in field telemetry. routine and ask-user have a 0 ms
     // cooldown (always fire).
     //
+    // #843 — `bypassFocusGate` is an opt-in *manifest* signal that the event
+    // is a critical alert (e.g. meeting.starting-soon). It must escape BOTH
+    // the focus gate AND the per-kind cooldown — otherwise a plugin emitting
+    // routine notifications in the prior 5s window would silently suppress
+    // an unrelated critical alert that the manifest explicitly marked as
+    // "must be delivered". The cooldown still updates `lastFiredAt` so that
+    // the *next* non-bypass fire is correctly throttled relative to this
+    // bypass event (i.e. bypass consumes the slot, it does not pretend the
+    // fire never happened).
+    //
     // Timing: performance.now() is monotonic (immune to NTP steps / manual
     // wall-clock changes). A Date.now() backwards jump would produce a
     // negative elapsedMs that trivially passes `< cooldownMs`, suppressing
@@ -254,7 +321,7 @@ export class NotificationService {
       const last = this.lastFiredAt.get(opts.kind) ?? 0;
       const now = performance.now();
       const elapsedMs = now - last;
-      if (last !== 0 && elapsedMs < cooldownMs) {
+      if (last !== 0 && elapsedMs < cooldownMs && opts.bypassFocusGate !== true) {
         this.auditSuppressed(opts.kind, elapsedMs);
         return;
       }
@@ -272,14 +339,33 @@ export class NotificationService {
     const cleanTitle = capTitle(opts.title);
     const truncatedBody = truncateBody(opts.body);
     const truncatedPlainBody = truncateBody(stripMarkdown(opts.body));
-    const urgent = opts.urgent ?? (opts.kind === "approval");
+    // #843 — `bypassFocusGate` is a manifest signal that the event is
+    // critical enough to escape the focus + cooldown gates. A silent (non-
+    // urgent) OS notification on top of that is contradictory: the user
+    // would see a quiet popup for an alert the plugin author flagged as
+    // "must reach the user even with another window focused". Promote
+    // `urgent` to `true` automatically when `bypassFocusGate` is set,
+    // unless the caller has explicitly opted out by passing `urgent: false`.
+    const urgent =
+      opts.urgent ??
+      (opts.kind === "approval" || opts.bypassFocusGate === true);
 
+    // #842 — focus gate consults EVERY LVIS-owned window. The pre-fix path
+    // checked `win.isFocused()` only, missing detached/aux windows (settings,
+    // auth, link). #843 — `bypassFocusGate` forces the OS path regardless of
+    // any focused window (critical surfaces like meeting.starting-soon).
+    //
+    // `mainAlive` semantics: "the main window is in a state where it can
+    // *receive* an in-app toast". A minimized main is treated as not-alive
+    // because the user can't see the in-app toast — we want the OS path
+    // instead. A destroyed main (mid-teardown) is also not-alive.
     const win = this.getMainWindow();
-    const winFocused =
-      win !== null && !win.isDestroyed() && win.isFocused() && !win.isMinimized();
-    const gate: "os" | "in-app" = winFocused ? "in-app" : "os";
+    const mainAlive = win !== null && !win.isDestroyed() && !win.isMinimized();
+    const anyFocused = this.isAnyWindowFocused();
+    const focusGateActive = !opts.bypassFocusGate && mainAlive && anyFocused;
+    const gate: "os" | "in-app" = focusGateActive ? "in-app" : "os";
 
-    if (winFocused && win) {
+    if (focusGateActive && win) {
       const payload: ToastPayload = {
         kind: opts.kind,
         title: cleanTitle,
