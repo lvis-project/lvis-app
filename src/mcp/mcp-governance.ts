@@ -452,6 +452,9 @@ export class McpGovernance {
       if (approval.requiredAuth === "sso" && config.auth !== "sso") {
         return { valid: false, reason: `SSO 인증이 필요합니다 (서버: ${config.id})`, layer: 2 };
       }
+      if (approval.requiredAuth === "oauth" && config.auth !== "oauth") {
+        return { valid: false, reason: `OAuth 인증이 필요합니다 (서버: ${config.id})`, layer: 2 };
+      }
     }
 
     return { valid: true };

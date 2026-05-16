@@ -42,6 +42,32 @@ export function parseMarketplacePluginActionUri(
   return { action: action as "install" | "uninstall", slug, packageType };
 }
 
+export function parseMcpLoginUri(url: string): { slug: string } | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "lvis:") return null;
+  if (parsed.hostname.toLowerCase() !== "mcp-login") return null;
+  if (parsed.search || parsed.hash) return null;
+  let slug: string;
+  try {
+    const segments = parsed.pathname
+      .replace(/^\//, "")
+      .split("/")
+      .filter((part) => part.length > 0)
+      .map((part) => decodeURIComponent(part));
+    if (segments.length !== 1) return null;
+    slug = segments[0];
+  } catch {
+    return null;
+  }
+  if (!slug || !MARKETPLACE_SLUG_RE.test(slug)) return null;
+  return { slug };
+}
+
 /**
  * `lvis://plugin-auth/<pluginId>?code=<code>` parser.
  *
