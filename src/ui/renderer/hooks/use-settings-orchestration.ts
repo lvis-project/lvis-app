@@ -85,7 +85,6 @@ export function useSettingsOrchestration(
   open: boolean,
   api: LvisApi,
   onSaved: () => void,
-  onOpenChange: (o: boolean) => void,
 ): SettingsOrchestrationState {
   const [vendor, setVendor] = useState("claude");
   const [keyInput, setKeyInput] = useState("");
