@@ -2617,4 +2617,52 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
     expect(results[0].is_error).toBe(true);
     expect(results[0].content).toContain("민감 경로 차단");
   });
+
+  it.skipIf(process.platform === "win32")("R-2 R4: approvalRequest carries approvalCacheKey for record/lookup key symmetry", async () => {
+    // Regression: executor must spread approvalCacheKey into the ApprovalRequest
+    // so the renderer receives a non-undefined value and can record entries with
+    // the same key that dispatchReviewer uses for lookup. Without this fix the
+    // R-2 hit rate for bash/schedule_routine/fs_write is 0%.
+    const registry = new ToolRegistry();
+    const bash = new BashTool();
+    registry.register(bash);
+
+    const permMgr = new PermissionManager("/tmp/nonexistent-permissions-r2r4.json");
+    // Force "ask" so the approval gate is invoked and receives the request.
+    permMgr.checkDetailed = () => ({ decision: "ask", reason: "r2-r4 regression", layer: 5 });
+
+    const requestSpy = vi.fn(async (req: { id: string }) => ({
+      requestId: req.id,
+      choice: "deny-once" as const,
+    }));
+    const approvalGate = { requestAndWait: requestSpy };
+
+    const executor = new ToolExecutor(
+      registry,
+      undefined,
+      permMgr,
+      undefined,
+      approvalGate as never,
+    );
+
+    const input = { command: "echo r2r4", timeoutSeconds: 1 };
+    // approvalCacheKeyFor() in executor prefixes the raw key with "${tool.name}:".
+    // Use the same prefix here so the assertion matches what the executor sends.
+    const expectedCacheKey = `bash:${bash.approvalCacheKey(input)}`;
+    // Sanity: the tool must produce a non-empty cache key for this test to be meaningful.
+    expect(expectedCacheKey).toBeTruthy();
+
+    await executor.executeAll(
+      [{ id: "tu-r2r4", name: "bash", input }],
+      {
+        sessionId: "sess-r2r4",
+        permissionContext: userPermissionContext({ trustOrigin: "llm-tool-arg" }),
+      },
+    );
+
+    expect(requestSpy).toHaveBeenCalledTimes(1);
+    expect(requestSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ approvalCacheKey: expectedCacheKey }),
+    );
+  });
 });
