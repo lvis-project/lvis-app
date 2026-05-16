@@ -15,6 +15,7 @@ import { describe, it, expect, vi } from "vitest";
 import { ConversationLoop } from "../conversation-loop.js";
 import type { ConversationLoopDeps } from "../conversation-loop.js";
 import type { GenericMessage } from "../llm/types.js";
+import { estimateMessagesTokens } from "../auto-compact.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
 import { wireHookSystem } from "../../boot/steps/hook-system-wiring.js";
 
@@ -102,9 +103,8 @@ describe("ConversationLoop.resetAndResume", () => {
 
     expect(result.ok).toBe(true);
     expect(loop.getHistory().length).toBe(2);
-    // Issue 1 fix: cumulativeUsage is now estimated from loaded history (not zero).
-    // Short 2-message history → small but non-zero estimate.
-    expect(loop.getCumulativeUsage().inputTokens).toBeGreaterThan(0);
+    // Resume seeds token accounting from the exact persisted session history.
+    expect(loop.getCumulativeUsage().inputTokens).toBe(estimateMessagesTokens(history));
     expect(loop.getCumulativeUsage().outputTokens).toBe(0);
   });
 
@@ -195,9 +195,49 @@ describe("ConversationLoop.resetAndResume", () => {
     const result = loop.resetAndResume("test-session-id");
     expect(result.ok).toBe(true);
     // cumulativeUsage 가 estimate 로 set 됐는지 — token preflight 가 정확한 ratio 평가 가능
-    expect(loop.getCumulativeUsage().inputTokens).toBeGreaterThan(0);
+    expect(loop.getCumulativeUsage().inputTokens).toBe(estimateMessagesTokens(msgs));
     // resetAndResume 자체는 더 이상 auto-compact 하지 않음 — token preflight 가 next turn 처리
     expect(result.compacted).toBe(false);
+  });
+
+  it("passes resumed history plus the new user turn to the LLM provider", async () => {
+    const history: GenericMessage[] = [
+      { role: "user", content: "old question" },
+      { role: "assistant", content: "old answer" },
+    ];
+    const mem = makeMemoryManager(history);
+    const routeEngine = {
+      route: vi.fn().mockReturnValue({ route: "llm" }),
+    } as unknown as ConversationLoopDeps["routeEngine"];
+    const keywordEngine = {
+      classify: vi.fn().mockReturnValue({ type: "chat" }),
+      matchAllPluginIds: () => new Set(),
+    } as unknown as ConversationLoopDeps["keywordEngine"];
+    const loop = new ConversationLoop(makeDeps({
+      memoryManager: mem,
+      routeEngine,
+      keywordEngine,
+      settingsService: makeSettings(false),
+    }));
+    let providerMessages: GenericMessage[] = [];
+    const fakeProvider = {
+      vendor: "openai" as const,
+      streamTurn: async function* (params: { messages: GenericMessage[] }) {
+        providerMessages = params.messages.map((message) => ({ ...message }));
+        yield { type: "text_delta" as const, text: "new answer" };
+        yield { type: "message_complete" as const };
+      },
+    };
+    (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
+
+    expect(loop.resetAndResume("test-session-id").ok).toBe(true);
+    await loop.runTurn("new question", undefined, undefined, { inputOrigin: "user-keyboard" });
+
+    expect(providerMessages.map((message) => message.content)).toEqual([
+      "old question",
+      "old answer",
+      "new question",
+    ]);
   });
 
   it("does not dispatch slash commands from non-keyboard origin", async () => {

@@ -132,25 +132,28 @@ export function useSessions(
       sessionId: string,
       streaming: boolean,
       applyLoadedSession: (entries: ChatEntry[]) => void,
-    ) => {
+    ): Promise<boolean> => {
       // Don't swap sessions mid-stream — ConversationLoop.runTurn() has no
       // concurrency guard, so replacing history while a turn is writing to it
       // would race. The "기록" button is also disabled during streaming, but
       // keep this guard here too for programmatic callers (e.g. starred jump).
-      if (streaming) return;
+      if (streaming) return false;
       const token = ++sessionReadTokenRef.current;
       try {
         const res = await api.chatSessionResume(sessionId);
-        if (token !== sessionReadTokenRef.current) return;
-        if (!res?.ok) return;
+        if (token !== sessionReadTokenRef.current) return false;
+        if (!res?.ok) return false;
         const h = await api.chatSessionHistory(sessionId);
-        if (token !== sessionReadTokenRef.current) return;
-        if (!h.ok) return;
+        if (token !== sessionReadTokenRef.current) return false;
+        if (!h.ok) return false;
         applyLoadedSession(sessionHistoryToEntries(h));
         setCurrentSessionId(sessionId);
         setCurrentSessionKind(h.sessionKind ?? "main");
         setCurrentSessionTitle(h.sessionTitle);
-      } catch { /* ignore */ }
+        return true;
+      } catch {
+        return false;
+      }
     },
     [api],
   );

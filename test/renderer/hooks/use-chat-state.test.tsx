@@ -364,9 +364,11 @@ describe("useSessions (streaming guard)", () => {
     const { api } = makeMockLvisApi();
     const { result } = renderHook(() => useSessions(api as unknown as LvisApi));
     const setEntries = vi.fn();
+    let loaded = true;
     await act(async () => {
-      await result.current.handleLoadSession("other-sess", true, setEntries);
+      loaded = await result.current.handleLoadSession("other-sess", true, setEntries);
     });
+    expect(loaded).toBe(false);
     expect(api.chatSessionResume).not.toHaveBeenCalled();
     expect(setEntries).not.toHaveBeenCalled();
   });
@@ -375,11 +377,34 @@ describe("useSessions (streaming guard)", () => {
     const { api } = makeMockLvisApi();
     const { result } = renderHook(() => useSessions(api as unknown as LvisApi));
     const setEntries = vi.fn();
+    let loaded = false;
     await act(async () => {
-      await result.current.handleLoadSession("other-sess", false, setEntries);
+      loaded = await result.current.handleLoadSession("other-sess", false, setEntries);
     });
+    expect(loaded).toBe(true);
     expect(api.chatSessionResume).toHaveBeenCalledWith("other-sess");
     expect(setEntries).toHaveBeenCalled();
+  });
+
+  it("handleLoadSession returns false when resume fails", async () => {
+    const { api } = makeMockLvisApi();
+    api.chatSessionResume.mockResolvedValueOnce({
+      ok: false,
+      compacted: false,
+      compactedAt: null,
+      removedMessageCount: 0,
+    });
+    const { result } = renderHook(() => useSessions(api as unknown as LvisApi));
+    const setEntries = vi.fn();
+    let loaded = true;
+
+    await act(async () => {
+      loaded = await result.current.handleLoadSession("missing-sess", false, setEntries);
+    });
+
+    expect(loaded).toBe(false);
+    expect(api.chatSessionHistory).not.toHaveBeenCalledWith("missing-sess");
+    expect(setEntries).not.toHaveBeenCalled();
   });
 
   it("handleLoadSession replays structural history into chat entries", async () => {

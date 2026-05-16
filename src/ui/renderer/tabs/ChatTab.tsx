@@ -13,7 +13,8 @@ export interface ChatTabProps {
   setIdlePreferenceRefresh?: (v: boolean) => void;
   piiRedactEnabled: boolean;
   onPiiRedactToggle: () => void;
-  /** Debounced immediate-apply hook. All ChatTab controls are toggle/radio so they all call this. */
+  settingsLoaded: boolean;
+  /** Debounced immediate-apply hook for chat settings saved through the chat payload. */
   onImmediateChange?: () => void;
 }
 
@@ -26,6 +27,7 @@ export function ChatTab({
   setIdlePreferenceRefresh,
   piiRedactEnabled,
   onPiiRedactToggle,
+  settingsLoaded,
   onImmediateChange,
 }: ChatTabProps) {
   // Memoize the wrapped onToggle so PrivacyTab receives a stable identity
@@ -45,6 +47,7 @@ export function ChatTab({
         <div className="flex items-center gap-3 rounded-md border px-3 py-3">
           <Checkbox
             checked={autoCompact}
+            disabled={!settingsLoaded}
             className="size-5"
             onCheckedChange={(checked) => {
               setAutoCompact(checked === true);
@@ -62,6 +65,7 @@ export function ChatTab({
         <RadioGroup
           className="flex gap-4 text-sm"
           value={streamSmoothing}
+          disabled={!settingsLoaded}
           onValueChange={(value) => {
             setStreamSmoothing(value as "none" | "word" | "char");
             onImmediateChange?.();
@@ -85,11 +89,11 @@ export function ChatTab({
         <div className="flex items-center gap-3 rounded-md border px-3 py-3">
           <Checkbox
             checked={idlePreferenceRefresh ?? false}
+            disabled={!settingsLoaded}
             data-testid="idle-preference-refresh-toggle"
             className="size-5"
             onCheckedChange={(checked) => {
               setIdlePreferenceRefresh?.(checked === true);
-              onImmediateChange?.();
             }}
           />
           <div className="space-y-0.5">
