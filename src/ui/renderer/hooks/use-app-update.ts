@@ -74,17 +74,23 @@ export function useAppUpdate(api: LvisApi): {
 
   const install = useCallback(async () => {
     if (inFlightRef.current) return;
-    // Destructive: app will quit and replace itself. Confirm before firing
-    // so users with unsaved composer text / in-flight LLM streams have a
-    // chance to cancel. `confirm()` is synchronous and browser-blocking,
-    // matching the gravity of the action — quitAndInstall is irreversible.
-    const version = state.kind === "downloaded" ? state.version : "";
-    const ok = window.confirm(
-      version
-        ? `LVIS v${version} 으로 재시작합니다. 진행 중인 작업이 종료됩니다. 계속하시겠습니까?`
-        : "업데이트를 적용하고 재시작합니다. 진행 중인 작업이 종료됩니다. 계속하시겠습니까?",
-    );
-    if (!ok) return;
+    // Destructive: app will quit and replace itself. Confirmation runs via
+    // a main-process `dialog.showMessageBox` (lvis:update:confirm-install)
+    // instead of `window.confirm`. Rationale:
+    //   - window.confirm blocks the renderer JS thread (Chromium impl).
+    //   - On macOS it shows a Chromium alert that doesn't always respect
+    //     window focus when the BrowserWindow is minimized.
+    //   - Every other destructive confirm in this codebase uses native
+    //     dialog.showMessageBox via IPC — we keep the pattern consistent.
+    try {
+      const result = await api.confirmInstallAppUpdate();
+      if (!result.confirmed) return;
+    } catch {
+      // If the dialog IPC itself fails (test env without dialog stub,
+      // closed window between click and dispatch), abort the install
+      // rather than silently triggering quitAndInstall.
+      return;
+    }
     inFlightRef.current = true;
     setInFlight(true);
     try {
@@ -93,7 +99,7 @@ export function useAppUpdate(api: LvisApi): {
       inFlightRef.current = false;
       setInFlight(false);
     }
-  }, [api, state]);
+  }, [api]);
 
   return { state, inFlight, download, install };
 }

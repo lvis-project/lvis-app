@@ -23,6 +23,8 @@
 import { createRequire } from "node:module";
 import type { BrowserWindow, IpcMain } from "electron";
 import { createLogger } from "../lib/logger.js";
+import type { UpdateState } from "../shared/update-state.js";
+export type { UpdateState };
 const log = createLogger("auto-updater");
 
 const _require = createRequire(import.meta.url);
@@ -58,23 +60,11 @@ export interface UpdaterLike {
   autoDownload?: boolean;
 }
 
-/**
- * Update state machine surfaced to the renderer. The badge UI maps each
- * kind to a different glyph + click handler so the user always knows what
- * the next action will do.
- *
- *   idle        — no known update (default; never re-emits after first sync)
- *   available   — feed reports a newer version; click → start download
- *   downloading — download in flight; badge shows percent; click is a no-op
- *   downloaded  — local zip ready; click → quitAndInstall
- *   error       — transient feed/download failure; badge stays at last known
- *                 good state (we do not surface error toasts for noise)
- */
-export type UpdateState =
-  | { kind: "idle" }
-  | { kind: "available"; version: string }
-  | { kind: "downloading"; version: string; percent: number }
-  | { kind: "downloaded"; version: string };
+// UpdateState type now lives in src/shared/update-state.ts and is
+// re-exported above for callers that traditionally imported from this
+// module (test harness, settings UI). Transient feed/download errors are
+// logged but not surfaced to the renderer — we keep the last good state
+// rather than introducing a fifth variant whose badge UX is unclear.
 
 export const CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
 
@@ -82,6 +72,17 @@ export function createAutoUpdater(deps: AutoUpdaterDeps): {
   start: () => void;
   stop: () => void;
   triggerCheck: () => Promise<void>;
+  /** Test seam — exposes the same closure-private handlers that are
+   *  registered against ipcMain at start(). Used by release-prep tests
+   *  to assert negative paths (download-when-not-available, etc.)
+   *  without spinning up a real Electron ipcMain. NOT used by production
+   *  callers; the registered ipcMain handlers are the SoT for runtime. */
+  _testOnly: {
+    downloadNow: () => Promise<{ ok: boolean; reason?: string }>;
+    installNow: () => Promise<{ ok: boolean; reason?: string }>;
+    confirmInstall: () => Promise<{ confirmed: boolean }>;
+    getState: () => UpdateState;
+  };
 } {
   let timer: NodeJS.Timeout | undefined;
   let updater: UpdaterLike | null = null;
@@ -204,9 +205,10 @@ export function createAutoUpdater(deps: AutoUpdaterDeps): {
     }
     log.info("user-initiated install for v%s", lastState.version);
     try {
-      // Fires quit-and-install on the next tick. The renderer is responsible
-      // for confirming with the user before calling this — see
-      // useAppUpdate.install() which window.confirm()s first.
+      // Fires quit-and-install on the next tick. Confirmation runs via
+      // the separate `lvis:update:confirm-install` IPC (native dialog
+      // shown from the main process) BEFORE the renderer invokes us, so
+      // by the time we get here the user has already accepted.
       setImmediate(() => {
         try { u.quitAndInstall(); } catch (err) {
           log.warn("quitAndInstall failed: %s", (err as Error).message);
@@ -216,6 +218,43 @@ export function createAutoUpdater(deps: AutoUpdaterDeps): {
     } catch (err) {
       log.warn("install scheduling failed: %s", (err as Error).message);
       return { ok: false, reason: (err as Error).message };
+    }
+  };
+
+  /**
+   * Native confirmation dialog shown via the main process. Replaces
+   * `window.confirm()` which (a) blocks the renderer JS thread, (b)
+   * shows a Chromium-style alert that doesn't respect window focus on
+   * macOS, and (c) sets a bad precedent — every other destructive
+   * confirm in this codebase goes through `dialog.showMessageBox`.
+   *
+   * Returns `{ confirmed: true }` only when the user clicks 재시작.
+   * Cancel / Esc / window close → `{ confirmed: false }`.
+   */
+  const onConfirmInstall = async (): Promise<{ confirmed: boolean }> => {
+    if (lastState.kind !== "downloaded") {
+      return { confirmed: false };
+    }
+    try {
+      const electron = _require("electron") as {
+        dialog?: { showMessageBox?: (window: BrowserWindow | undefined, opts: unknown) => Promise<{ response: number }> };
+      };
+      if (typeof electron.dialog?.showMessageBox !== "function") {
+        return { confirmed: false };
+      }
+      const result = await electron.dialog.showMessageBox(deps.mainWindow, {
+        type: "question",
+        buttons: ["취소", "재시작"],
+        defaultId: 1,
+        cancelId: 0,
+        title: "업데이트 적용",
+        message: `LVIS v${lastState.version} 으로 재시작합니다.`,
+        detail: "진행 중인 작업이 종료됩니다. 계속하시겠습니까?",
+      });
+      return { confirmed: result.response === 1 };
+    } catch (err) {
+      log.warn("confirm-install dialog failed: %s", (err as Error).message);
+      return { confirmed: false };
     }
   };
 
@@ -241,6 +280,7 @@ export function createAutoUpdater(deps: AutoUpdaterDeps): {
     ipcRegistered = true;
     ipc.handle("lvis:update:download-now", onDownloadNow);
     ipc.handle("lvis:update:install-now", onInstallNow);
+    ipc.handle("lvis:update:confirm-install", onConfirmInstall);
     ipc.handle("lvis:update:get-state", onGetState);
   };
   const unregisterIpc = () => {
@@ -253,6 +293,7 @@ export function createAutoUpdater(deps: AutoUpdaterDeps): {
     if (!ipc) return;
     ipc.removeHandler("lvis:update:download-now");
     ipc.removeHandler("lvis:update:install-now");
+    ipc.removeHandler("lvis:update:confirm-install");
     ipc.removeHandler("lvis:update:get-state");
   };
 
@@ -270,5 +311,11 @@ export function createAutoUpdater(deps: AutoUpdaterDeps): {
       unregisterIpc();
     },
     triggerCheck,
+    _testOnly: {
+      downloadNow: onDownloadNow,
+      installNow: onInstallNow,
+      confirmInstall: onConfirmInstall,
+      getState: onGetState,
+    },
   };
 }
