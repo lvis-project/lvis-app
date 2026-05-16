@@ -151,6 +151,34 @@ describe("syncPluginToolRegistry — plugin lifecycle sync", () => {
     expect(registry.findByName("alpha_run")).toBeUndefined();
   });
 
+  it("never removes non-plugin tools even when they carry pluginId metadata", () => {
+    const registry = new ToolRegistry();
+    const hostTool = createDynamicTool({
+      name: "builtin_shadow",
+      description: "host-owned metadata edge case",
+      source: "builtin",
+      pluginId: "alpha",
+      version: "1.0.0",
+      jsonSchema: { type: "object", properties: {} },
+      category: "read",
+      execute: async () => ({ output: "", isError: false }),
+    });
+    registry.register(hostTool);
+
+    syncPluginToolRegistry(
+      stubRuntime([
+        { pluginId: "alpha", manifest: manifest("alpha", ["alpha_run"]) },
+      ]),
+      registry,
+    );
+    expect(registry.findByName("builtin_shadow")).toBe(hostTool);
+    expect(registry.findByName("alpha_run")?.pluginId).toBe("alpha");
+
+    syncPluginToolRegistryForPlugin(stubRuntime([]), registry, "alpha");
+    expect(registry.findByName("builtin_shadow")).toBe(hostTool);
+    expect(registry.findByName("alpha_run")).toBeUndefined();
+  });
+
   it("targeted sync updates only the requested plugin and preserves bystander tool identity", () => {
     const registry = new ToolRegistry();
     syncPluginToolRegistry(
@@ -173,6 +201,44 @@ describe("syncPluginToolRegistry — plugin lifecycle sync", () => {
     );
 
     expect(registry.findByName("alpha_run")?.version).toBe("2.0.0");
+    expect(registry.findByName("beta_run")).toBe(betaBefore);
+    expect(registry.findByName("beta_run")?.version).toBe("1.0.0");
+  });
+
+  it("targeted sync rolls back atomically when the target plugin manifest is invalid", () => {
+    const registry = new ToolRegistry();
+    syncPluginToolRegistry(
+      stubRuntime([
+        { pluginId: "alpha", manifest: manifest("alpha", ["alpha_run"], "1.0.0") },
+        { pluginId: "beta", manifest: manifest("beta", ["beta_run"], "1.0.0") },
+      ]),
+      registry,
+    );
+    const alphaBefore = registry.findByName("alpha_run");
+    const betaBefore = registry.findByName("beta_run");
+
+    expect(() => syncPluginToolRegistryForPlugin(
+      stubRuntime([
+        {
+          pluginId: "alpha",
+          manifest: {
+            ...manifest("alpha", ["alpha_run"], "2.0.0"),
+            toolSchemas: {
+              alpha_run: {
+                description: "Invalid alpha tool without category",
+                inputSchema: { type: "object", properties: {} },
+              },
+            },
+          },
+        },
+        { pluginId: "beta", manifest: manifest("beta", ["beta_run"], "2.0.0") },
+      ]),
+      registry,
+      "alpha",
+    )).toThrow(/category is required/);
+
+    expect(registry.findByName("alpha_run")).toBe(alphaBefore);
+    expect(registry.findByName("alpha_run")?.version).toBe("1.0.0");
     expect(registry.findByName("beta_run")).toBe(betaBefore);
     expect(registry.findByName("beta_run")?.version).toBe("1.0.0");
   });
