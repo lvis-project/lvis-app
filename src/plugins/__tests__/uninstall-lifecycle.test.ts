@@ -84,17 +84,17 @@ describe("uninstallPluginWithLifecycle", () => {
   it("passes exact manifest-declared secret keys and all tracked auth partitions", async () => {
     const root = mkdtempSync(join(tmpdir(), "lvis-uninstall-state-"));
     try {
-      const deps = makeDeps("com.lge", join(root, ".cache"));
+      const deps = makeDeps("com.example", join(root, ".cache"));
 
-      await uninstallPluginWithLifecycle("com.lge", deps);
+      await uninstallPluginWithLifecycle("com.example", deps);
 
       expect(deps.settingsService.deletePluginSecrets).toHaveBeenCalledWith(
-        "com.lge",
+        "com.example",
         new Set(["token"]),
       );
-      expect(deps.clearAuthPartitionService).toHaveBeenCalledWith("persist:plugin-auth:com.lge");
-      expect(deps.clearAuthPartitionService).toHaveBeenCalledWith("persist:plugin-auth:com.lge:tenant");
-      expect(deps.forgetPluginAuthPartitionsService).toHaveBeenCalledWith("com.lge");
+      expect(deps.clearAuthPartitionService).toHaveBeenCalledWith("persist:plugin-auth:com.example");
+      expect(deps.clearAuthPartitionService).toHaveBeenCalledWith("persist:plugin-auth:com.example:tenant");
+      expect(deps.forgetPluginAuthPartitionsService).toHaveBeenCalledWith("com.example");
     } finally {
       await rm(root, { recursive: true, force: true });
     }

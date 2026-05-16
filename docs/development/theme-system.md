@@ -54,7 +54,7 @@ rebuild.
 The user picks a bundle via Settings → 테마. Built-in bundle ids are defined
 in `src/shared/theme-bundles.ts`; the fresh-install default is
 `tokyo-night`. `followSystem` is a separate boolean, not a bundle id. When it
-is enabled and the selected bundle is one of the LGE light/dark pair, the
+is enabled and the selected bundle is one of the violet light/dark pair, the
 renderer resolves the active bundle from `prefers-color-scheme` and follows OS
 changes live.
 
@@ -70,7 +70,7 @@ changes live.
                                   │
                                   ▼
               ThemeProvider  (src/ui/renderer/theme/)
-                                  │  resolves followSystem for LGE pair
+                                  │  resolves followSystem for violet pair
                                   ▼
               <html data-theme-bundle="…" data-shell="…" class="lvis-bundle-…">
                                   │
@@ -110,7 +110,7 @@ Use case: "I need a `info-banner` color separate from `primary`."
      --info: var(--p-blue-400);
      --info-foreground: var(--p-slate-950);
    }
-   :root[data-theme-bundle="lge-light"] { --info: var(--p-blue-600); --info-foreground: var(--p-slate-50); }
+   :root[data-theme-bundle="violet-light"] { --info: var(--p-blue-600); --info-foreground: var(--p-slate-50); }
    :root[data-theme-bundle="high-contrast"] { --info: 200 100% 60%; --info-foreground: 0 0% 0%; }
    ```
 

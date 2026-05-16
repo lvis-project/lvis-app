@@ -91,7 +91,7 @@ export const SENSITIVE_PATH_PATTERNS: readonly string[] = Object.freeze([
   "**/id_ed25519.pub",
   "**/id_ecdsa",
   "**/id_ecdsa.pub",
-  // ── LGE / LVIS-specific additions ───────────────────
+  // ── LVIS-specific additions ─────────────────────────
   "**/.lvis/certs/**", // corporate CA bundle + extracted certs
   "**/.lvis/secrets/**", // API keys, tokens
   "**/.lvis/keys/**", // signing / encryption keys

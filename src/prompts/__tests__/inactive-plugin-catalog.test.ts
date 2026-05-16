@@ -34,7 +34,7 @@ describe("SystemPromptBuilder — inactive plugin catalog", () => {
   it("renders inactive plugins with bold id + sample tools", () => {
     const builder = makeBuilder([
       {
-        id: "com.lge.meeting",
+        id: "com.example.meeting",
         name: "Meeting",
         description: "회의 녹음/요약",
         sampleTools: ["meeting_start", "meeting_stop"],
@@ -53,7 +53,7 @@ describe("SystemPromptBuilder — inactive plugin catalog", () => {
     });
     const prompt = builder.build();
     expect(prompt).toContain("## 사용 가능한 플러그인 (현재 비활성 — request_plugin 으로 활성화)");
-    expect(prompt).toContain("**com.lge.meeting**");
+    expect(prompt).toContain("**com.example.meeting**");
     expect(prompt).toContain("meeting_start, meeting_stop");
     expect(prompt).toContain("**docs-plugin**");
   });
@@ -61,26 +61,26 @@ describe("SystemPromptBuilder — inactive plugin catalog", () => {
   it("omits active plugin from catalog", () => {
     const builder = makeBuilder([
       {
-        id: "com.lge.meeting",
+        id: "com.example.meeting",
         name: "Meeting",
         description: "회의 녹음/요약",
         sampleTools: ["meeting_start"],
       },
       {
-        id: "com.lge.email",
+        id: "com.example.email",
         name: "Email",
         description: "이메일",
         sampleTools: ["email_list"],
       },
     ]);
     builder.setToolScope({
-      activePluginIds: new Set(["com.lge.meeting"]),
+      activePluginIds: new Set(["com.example.meeting"]),
       includeBuiltins: true,
       includeMcp: true,
     });
     const prompt = builder.build();
-    expect(prompt).not.toContain("**com.lge.meeting**");
-    expect(prompt).toContain("**com.lge.email**");
+    expect(prompt).not.toContain("**com.example.meeting**");
+    expect(prompt).toContain("**com.example.email**");
   });
 
   it("section omitted when no cards", () => {
@@ -97,14 +97,14 @@ describe("SystemPromptBuilder — inactive plugin catalog", () => {
   it("section omitted when all cards are active", () => {
     const builder = makeBuilder([
       {
-        id: "com.lge.meeting",
+        id: "com.example.meeting",
         name: "Meeting",
         description: "회의",
         sampleTools: ["meeting_start"],
       },
     ]);
     builder.setToolScope({
-      activePluginIds: new Set(["com.lge.meeting"]),
+      activePluginIds: new Set(["com.example.meeting"]),
       includeBuiltins: true,
       includeMcp: true,
     });

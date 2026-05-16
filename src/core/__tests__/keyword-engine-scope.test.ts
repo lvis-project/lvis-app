@@ -8,12 +8,12 @@ describe("KeywordEngine — pluginId propagation (Phase 1 scoping)", () => {
   it("classify() returns pluginId when keyword is plugin-owned", () => {
     const eng = new KeywordEngine();
     eng.registerKeywords([
-      { keyword: "회의록", skillId: "meeting.start", pluginId: "com.lge.meeting" },
+      { keyword: "회의록", skillId: "meeting.start", pluginId: "com.example.meeting" },
     ]);
     const r = eng.classify("오늘 회의록 작성해줘");
     expect(r.type).toBe("skill");
     if (r.type === "skill") {
-      expect(r.pluginId).toBe("com.lge.meeting");
+      expect(r.pluginId).toBe("com.example.meeting");
     }
   });
 
@@ -30,18 +30,18 @@ describe("KeywordEngine — pluginId propagation (Phase 1 scoping)", () => {
   it("matchAllPluginIds() returns union of matched plugin IDs", () => {
     const eng = new KeywordEngine();
     eng.registerKeywords([
-      { keyword: "회의록", skillId: "m.s", pluginId: "com.lge.meeting" },
-      { keyword: "이메일", skillId: "e.l", pluginId: "com.lge.email" },
+      { keyword: "회의록", skillId: "m.s", pluginId: "com.example.meeting" },
+      { keyword: "이메일", skillId: "e.l", pluginId: "com.example.email" },
       { keyword: "번역", skillId: "b.t" }, // builtin — ignored
     ]);
     const ids = eng.matchAllPluginIds("회의록 정리해서 이메일로 보내고 번역도");
-    expect(ids).toEqual(new Set(["com.lge.meeting", "com.lge.email"]));
+    expect(ids).toEqual(new Set(["com.example.meeting", "com.example.email"]));
   });
 
   it("matchAllPluginIds() returns empty Set when nothing matches", () => {
     const eng = new KeywordEngine();
     eng.registerKeywords([
-      { keyword: "회의록", skillId: "m.s", pluginId: "com.lge.meeting" },
+      { keyword: "회의록", skillId: "m.s", pluginId: "com.example.meeting" },
     ]);
     expect(eng.matchAllPluginIds("날씨 어때")).toEqual(new Set());
   });
@@ -49,15 +49,15 @@ describe("KeywordEngine — pluginId propagation (Phase 1 scoping)", () => {
   it("unregisterByPlugin() removes only that plugin's keywords", () => {
     const eng = new KeywordEngine();
     eng.registerKeywords([
-      { keyword: "회의록", skillId: "m.s", pluginId: "com.lge.meeting" },
-      { keyword: "이메일", skillId: "e.l", pluginId: "com.lge.email" },
+      { keyword: "회의록", skillId: "m.s", pluginId: "com.example.meeting" },
+      { keyword: "이메일", skillId: "e.l", pluginId: "com.example.email" },
       { keyword: "번역", skillId: "b.t" }, // builtin — no pluginId
     ]);
-    eng.unregisterByPlugin("com.lge.meeting");
+    eng.unregisterByPlugin("com.example.meeting");
     // meeting keyword gone
     expect(eng.matchAllPluginIds("회의록")).toEqual(new Set());
     // email keyword still present
-    expect(eng.matchAllPluginIds("이메일")).toEqual(new Set(["com.lge.email"]));
+    expect(eng.matchAllPluginIds("이메일")).toEqual(new Set(["com.example.email"]));
     // builtin keyword still classifies
     const r = eng.classify("이 문장 번역해줘");
     expect(r.type).toBe("skill");
