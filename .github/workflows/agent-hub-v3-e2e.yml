@@ -17,6 +17,11 @@ on:
 jobs:
   agent-hub-v3-e2e:
     name: Agent Hub v3 E2E (Playwright + Electron)
+    # E2E requires building private sibling plugin fixtures
+    # (lvis-plugin-agent-hub etc.). Fork PRs cannot access
+    # LVIS_REPO_READ_TOKEN, so this job is meaningful only for same-repo
+    # PRs, push to main, scheduled runs, and workflow_dispatch.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, Linux, ARM64, oracle]
     timeout-minutes: 30
     env:

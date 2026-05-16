@@ -9,9 +9,14 @@ on:
 
 jobs:
   ui-e2e:
+    # workflow_dispatch (manual) OR same-repo PR labeled `ui-e2e`.
+    # Fork PRs cannot access LVIS_REPO_READ_TOKEN, so the sibling plugin
+    # clone + fixture build would fail — gate them out even if labeled.
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'pull_request' && github.event.label.name == 'ui-e2e')
+      (github.event_name == 'pull_request' &&
+       github.event.label.name == 'ui-e2e' &&
+       github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: [self-hosted, Linux, ARM64, oracle]
     timeout-minutes: 25
     env:
