@@ -28,7 +28,15 @@
  *   full SandboxCapability snapshot.
  */
 
-export type SandboxKind = "none" | "bubblewrap" | "sandbox-exec" | "appcontainer";
+export type SandboxKind =
+  | "none"
+  | "bubblewrap"
+  | "sandbox-exec"
+  | "appcontainer"
+  /** D5+D6: OS-level isolation present but evidence quality is PARTIAL (e.g. sandbox-exec partial profile). */
+  | "partial"
+  /** D6: filesystem-only isolation (landlock-only — future-proofing for Linux landlock runner). */
+  | "fs-only";
 
 /**
  * Confidence in the detection result.
@@ -85,10 +93,21 @@ export function detectSandboxCapability(): SandboxCapability {
  * audited against the input that produced it. Example output:
  *
  *   "executionSandbox=none (verified, darwin) — no OS sandbox configured for the host process"
+ *
+ * Labels for new kinds (D5+D6):
+ *   partial  → "⚠ OS 격리 부분적 (sandbox-exec)"
+ *   fs-only  → "ℹ 파일시스템만 격리 (landlock)"
  */
 export function formatSandboxCapabilityForPrompt(capability: SandboxCapability): string {
+  const kindLabel = (() => {
+    switch (capability.kind) {
+      case "partial":  return "partial [⚠ OS 격리 부분적 (sandbox-exec)]";
+      case "fs-only":  return "fs-only [ℹ 파일시스템만 격리 (landlock)]";
+      default:         return capability.kind;
+    }
+  })();
   return (
-    `executionSandbox=${capability.kind} (${capability.confidence}, ${capability.platform}) ` +
+    `executionSandbox=${kindLabel} (${capability.confidence}, ${capability.platform}) ` +
     `— ${capability.reason}`
   );
 }
@@ -99,12 +118,25 @@ export function formatSandboxCapabilityForPrompt(capability: SandboxCapability):
  * invocation. Centralised here so the reviewer + audit + UI agree.
  *
  *   - `kind === "none"`          → weak (no isolation)
+ *   - `kind === "partial"`       → weak (D5: partial isolation = evidence gap)
  *   - `confidence === "assumed"` → weak (unverified isolation = no isolation)
  *
+ * `fs-only` is NOT weak — it is strong-for-fs. The composition rule
+ * handles network egress separately for fs-only runners.
  * Anything else (verified bubblewrap / sandbox-exec) is "strong".
  */
-export function isSandboxWeak(capability: SandboxCapability): boolean {
-  if (capability.kind === "none") return true;
-  if (capability.confidence === "assumed") return true;
+export function isWeakSandbox(cap: SandboxCapability): boolean {
+  if (cap.kind === "none") return true;
+  if (cap.kind === "partial") return true;
+  if (cap.confidence === "assumed") return true;
   return false;
+}
+
+/**
+ * @deprecated Use {@link isWeakSandbox} instead. Kept for backwards compatibility
+ * until all callers are updated.
+ * @internal
+ */
+export function isSandboxWeak(capability: SandboxCapability): boolean {
+  return isWeakSandbox(capability);
 }
