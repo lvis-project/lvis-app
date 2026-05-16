@@ -20,6 +20,7 @@ import type { BrowserWindow } from "electron";
 import { createLogger } from "../lib/logger.js";
 import { resolvePluginPaths } from "../plugins/plugin-paths.js";
 import { readPluginRegistry, resolveManifestPathsFromRegistry } from "../plugins/registry.js";
+import { getSandboxRunner } from "../permissions/sandbox-runner.js";
 import { resolveUvTarget, type UvTarget } from "../../scripts/uv-targets.mjs";
 import { lvisHome } from "../shared/lvis-home.js";
 const log = createLogger("python-runtime");
@@ -465,7 +466,6 @@ export class PythonRuntimeBootstrapper {
       // ReadableStream; runUv uses .on("data") event emitter pattern).
       // Tracking: #691 spawn-path follow-up.
       if (process.env.LVIS_SANDBOX_ENABLED === "1") {
-        const { getSandboxRunner } = await import("../permissions/sandbox-runner.js");
         const runner = getSandboxRunner(process.platform);
         if (runner) {
           // Runner is available — future: wrap spawn via runner.spawn()
