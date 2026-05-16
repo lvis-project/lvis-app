@@ -24,12 +24,13 @@ import {
 import type { MarketplaceHttp } from "./marketplace-installer.js";
 import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import type {
+  McpAuthMetadata,
   PluginMarketplaceItem,
   PluginUiExtension,
   RequiresSpec,
   SignatureEnvelope,
 } from "./types.js";
-import { parseMcpRuntimeSpec } from "./mcp-runtime-spec.js";
+import { parseMcpOAuthMetadata, parseMcpRuntimeSpec } from "./mcp-runtime-spec.js";
 
 /**
  * Allowlist for npm package identifiers. Matches scoped (@scope/name) and
@@ -91,6 +92,9 @@ interface ServerCatalogRow {
   /** MCP runtime block when present (advisory copy; manifest is authoritative). */
   runtime?: unknown;
   mcpRuntime?: unknown;
+  /** Safe MCP auth/login metadata from lvis-marketplace. */
+  mcp_auth?: unknown;
+  mcpAuth?: unknown;
 }
 
 export class RealCloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceHttp {
@@ -442,6 +446,8 @@ export class RealCloudMarketplaceFetcher implements MarketplaceFetcher, Marketpl
       item.pluginType = "mcp";
       const runtime = parseMcpRuntimeSpec(row.runtime ?? row.mcpRuntime);
       if (runtime) item.mcpRuntime = runtime;
+      const auth = this.mapMcpAuth(row.mcp_auth ?? row.mcpAuth, runtime);
+      if (auth) item.mcpAuth = auth;
     } else if (pluginTypeRaw === "agent" || pluginTypeRaw === "skill") {
       item.pluginType = pluginTypeRaw;
     } else {
@@ -449,6 +455,32 @@ export class RealCloudMarketplaceFetcher implements MarketplaceFetcher, Marketpl
     }
 
     return item;
+  }
+
+  private mapMcpAuth(value: unknown, runtime: PluginMarketplaceItem["mcpRuntime"]): McpAuthMetadata | undefined {
+    const fallbackMode = runtime?.auth ?? "none";
+    const fallbackTransport = runtime?.transport;
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return {
+        mode: fallbackMode,
+        ...(fallbackTransport ? { transport: fallbackTransport } : {}),
+      };
+    }
+    const raw = value as Record<string, unknown>;
+    const mode =
+      raw.mode === "none" || raw.mode === "api-key" || raw.mode === "sso" || raw.mode === "oauth"
+        ? raw.mode
+        : fallbackMode;
+    const transport =
+      raw.transport === "stdio" || raw.transport === "http"
+        ? raw.transport
+        : fallbackTransport;
+    const oauth = parseMcpOAuthMetadata(raw);
+    return {
+      mode,
+      ...(transport ? { transport } : {}),
+      ...oauth,
+    };
   }
 }
 

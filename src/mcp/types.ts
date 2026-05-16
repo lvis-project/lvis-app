@@ -50,7 +50,7 @@ export interface McpServerApproval {
 
   // ─── Layer 2: 연결 보안 ────────────────────────
   /** 인증 요구 수준 */
-  requiredAuth: "sso" | "api-key" | "mtls" | "none";
+  requiredAuth: "sso" | "api-key" | "oauth" | "mtls" | "none";
   /** TLS 강제 여부 (SSE/WebSocket) */
   tlsRequired: boolean;
 
@@ -145,9 +145,19 @@ export type McpCapability = "tools" | "resources" | "prompts";
 interface McpServerConfigBase {
   id: string;
   /** 인증 방식 */
-  auth?: "sso" | "api-key" | "none";
+  auth?: "sso" | "api-key" | "oauth" | "none";
   /** API 키 (api-key auth 시) — stdio 서버에서도 env로 전달 가능 */
   apiKey?: string;
+}
+
+export interface McpOAuthConfig {
+  /** RFC 8707 resource identifier for the target MCP server. */
+  resource?: string;
+  /** RFC 9728 protected resource metadata URL, when known before first 401. */
+  resourceMetadataUrl?: string;
+  authorizationServers?: string[];
+  scopes?: string[];
+  clientRegistration?: "client-id-metadata-document" | "dynamic" | "preregistration" | "manual";
 }
 
 export interface McpStdioServerConfig extends McpServerConfigBase {
@@ -167,6 +177,8 @@ export interface McpHttpServerConfig extends McpServerConfigBase {
   transport: "http";
   /** Streamable HTTP endpoint URL (POST target). */
   url: string;
+  /** OAuth discovery/login metadata. Contains no tokens or secrets. */
+  oauth?: McpOAuthConfig;
   /** Optional additional request headers (e.g. `Authorization`). */
   headers?: Record<string, string>;
   /**

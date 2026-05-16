@@ -236,6 +236,9 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
                     <div className="flex min-w-0 items-center gap-1.5">
                       <span className="truncate text-sm font-medium">{item.name}</span>
                       <Badge variant="secondary" className="h-5 px-1.5 text-[10px] uppercase">{packageType}</Badge>
+                      {packageType === "mcp" && item.mcpAuth?.mode === "oauth" && (
+                        <Badge variant="secondary" className="h-5 px-1.5 text-[10px] uppercase">OAuth</Badge>
+                      )}
                       {item.installed && <Badge variant="default" className="h-5 px-1.5 text-[10px]">설치됨</Badge>}
                     </div>
                     <p className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground">{item.description || item.packageSpec}</p>

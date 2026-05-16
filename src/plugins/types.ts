@@ -471,9 +471,27 @@ export type McpRuntimeSpec =
   | {
       transport: "http";
       url: string;
-      auth?: "none" | "api-key" | "sso";
+      auth?: "none" | "api-key" | "sso" | "oauth";
       allowPrivateNetworks?: boolean;
+      oauth?: McpOAuthMetadata;
     };
+
+export interface McpOAuthMetadata {
+  /** RFC 8707 resource identifier for the target MCP server. */
+  resource?: string;
+  /** RFC 9728 protected resource metadata URL, when advertised by the server/catalog. */
+  resourceMetadataUrl?: string;
+  /** Authorization server issuers discovered from protected resource metadata. */
+  authorizationServers?: string[];
+  /** Initial least-privilege scopes requested for this MCP server. */
+  scopes?: string[];
+  clientRegistration?: "client-id-metadata-document" | "dynamic" | "preregistration" | "manual";
+}
+
+export interface McpAuthMetadata extends McpOAuthMetadata {
+  mode: "none" | "api-key" | "sso" | "oauth";
+  transport?: "stdio" | "http";
+}
 
 export interface PluginMarketplaceItem {
   id: string;
@@ -523,6 +541,8 @@ export interface PluginMarketplaceItem {
    * catalog row may carry a duplicate as advisory metadata.
    */
   mcpRuntime?: McpRuntimeSpec;
+  /** Safe login metadata surfaced by lvis-marketplace for MCP entries. */
+  mcpAuth?: McpAuthMetadata;
 }
 
 /**
