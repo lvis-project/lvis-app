@@ -29,6 +29,7 @@ import { maskSensitiveData } from "../../audit/dlp-filter.js";
 import { PERMISSION_REVIEWER_SYSTEM_PROMPT } from "../../shared/permission-reviewer-framework.js";
 import {
   formatSandboxCapabilityForPrompt,
+  isWeakSandbox,
   type SandboxCapability,
 } from "../sandbox-capability.js";
 
@@ -82,6 +83,20 @@ export interface ToolInvocationContext {
    * downgrade the reviewer's safety posture.
    */
   sandboxCapability: SandboxCapability;
+  /**
+   * R-1 (PR-A1): Conversation context for context-quality no-downgrade rule.
+   * PR-A4 will wire actual conversation state here. In v1 only
+   * `recentUserMessage` is consulted — the heuristic in
+   * {@link isContextMissingIntent} treats an absent or short (<5 chars)
+   * message as "weak context", preventing the LLM from downgrading a
+   * rule-based MEDIUM/HIGH verdict to LOW.
+   *
+   * Optional so that existing callers that pre-date PR-A1 do not require
+   * immediate updates. Absence is treated as weak context (conservative).
+   */
+  conversationContext?: {
+    recentUserMessage?: string;
+  };
 }
 
 export interface RiskClassifier {
@@ -94,6 +109,31 @@ export class DisabledRiskClassifier implements RiskClassifier {
   classify(_: ToolInvocationContext): RiskVerdict {
     return { level: "high", reason: "reviewer disabled — defer all" };
   }
+}
+
+// ─── Context-quality helpers (R-1) ───────────────────────────────────
+
+/**
+ * R-1 heuristic: returns true when the conversation context does not
+ * provide a clear stated purpose/intent for the tool call.
+ *
+ * v1 heuristic: absent or very short (<5 chars) `recentUserMessage`
+ * → treat as weak context. The LLM composition rule then prevents
+ * the LLM from downgrading a rule-based MEDIUM/HIGH verdict to LOW.
+ *
+ * KNOWN GAP: Korean CJK utterances like "확인해"/"실행해" (3 chars) are
+ * legitimate intent but flagged as weak by this length threshold.
+ * PR-A4 will replace this with an LLM-side intent classifier using
+ * grapheme cluster count + entropy. Conservative bias is correct for
+ * v1 — defaults to no-downgrade when uncertain.
+ *
+ * This v1 version is intentionally conservative and cheap (no LLM call).
+ */
+export function isContextMissingIntent(input: ToolInvocationContext): boolean {
+  return (
+    !input.conversationContext?.recentUserMessage
+    || input.conversationContext.recentUserMessage.trim().length < 5
+  );
 }
 
 // ─── RuleBasedRiskClassifier ─────────────────────────────────────────
@@ -587,6 +627,19 @@ export class LlmRiskClassifier implements RiskClassifier {
       return ruleVerdict;
     }
 
+    // R-1 + weak-sandbox composition enforcement:
+    // When sandbox is weak (kind=none/partial or confidence=assumed) OR
+    // conversation context lacks explicit intent, prevent the LLM from
+    // downgrading a rule-based MEDIUM/HIGH verdict to LOW.
+    const weakSandbox = isWeakSandbox(input.sandboxCapability);
+    const weakContext = isContextMissingIntent(input);
+    if (weakSandbox || weakContext) {
+      if (LEVEL_RANK[llmVerdict.level] < LEVEL_RANK[ruleVerdict.level]) {
+        // LLM attempted to downgrade — honour the rule verdict.
+        return ruleVerdict;
+      }
+    }
+
     return maxVerdict(ruleVerdict, llmVerdict);
   }
 }
@@ -647,4 +700,4 @@ export function createRiskClassifier(settings: ReviewerSettings): RiskClassifier
 }
 
 // Internal exports for unit tests.
-export const _internal = { buildUserPrompt, tryParseVerdict, RULES, PERMISSION_REVIEWER_SYSTEM_PROMPT };
+export const _internal = { buildUserPrompt, tryParseVerdict, RULES, PERMISSION_REVIEWER_SYSTEM_PROMPT, isContextMissingIntent };

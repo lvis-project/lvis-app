@@ -641,7 +641,7 @@ export type ApprovalRequest = {
    * silently widen the canonical SOT shape.
    */
   sandboxCapability?: {
-    kind: "none" | "bubblewrap" | "sandbox-exec" | "appcontainer";
+    kind: "none" | "bubblewrap" | "sandbox-exec" | "appcontainer" | "partial" | "fs-only";
     confidence: "verified" | "assumed";
     platform: NodeJS.Platform;
     reason: string;

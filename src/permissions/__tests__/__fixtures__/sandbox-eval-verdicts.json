@@ -1,0 +1,8 @@
+{
+  "kind=none + benign tool": { "rule": "low", "llm": "low", "final": "low" },
+  "kind=none + risky tool": { "rule": "medium", "llm": "low", "final": "medium" },
+  "kind=bubblewrap + risky tool": { "rule": "medium", "llm": "low", "final": "medium" },
+  "kind=partial + risky tool": { "rule": "medium", "llm": "low", "final": "medium" },
+  "kind=fs-only + high-risk write": { "rule": "high", "llm": "medium", "final": "high" },
+  "weak context + benign tool": { "rule": "medium", "llm": "low", "final": "medium" }
+}
