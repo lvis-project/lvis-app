@@ -1,5 +1,5 @@
 /**
- * Memory Manager — §5 경량 기억 구조
+ * Memory Manager — 파일 기반 기억 구조
  *
  * ~/.lvis/ 파일 기반 메모리 시스템.
  * - AGENTS.md: 프로젝트·조직 컨텍스트 (관리자 배포 가능)
@@ -7,7 +7,7 @@
  * - memories/MEMORY.md: 부팅 시 적극 주입되는 메모리 인덱스
  * - memories/: 사용자 축적 기억
  * - sessions/: 대화 세션 JSONL *
- * 설계 원칙 (§5.1):
+ * 설계 원칙:
  * - 단순함 우선: 별도 기억 엔진·승격·만료 로직 없음
  * - 사용자 제어: 직접 확인·편집·삭제 가능
  * - 세션 독립: 파일은 영속, 인메모리는 휘발
@@ -45,6 +45,24 @@ export interface SessionSearchEntry {
   sessionId: string;
   matchedMessage: string;
   timestamp: string;
+  sessionKind: SessionKind;
+}
+
+export type SessionKind = "main" | "routine";
+
+export interface ListSessionsOptions {
+  kind?: SessionKind | "all";
+  routineId?: string;
+  limit?: number;
+  before?: Date;
+  beforeId?: string;
+  after?: Date;
+}
+
+export interface MainActiveSessionState {
+  mainActiveSessionId: string | null;
+  mainActiveMode: "resume" | "fresh";
+  updatedAt: string;
 }
 
 export interface SessionListEntry {
@@ -52,23 +70,24 @@ export interface SessionListEntry {
   modifiedAt: Date;
   title: string;
   preview: string;
+  sessionKind: SessionKind;
   routineId?: string;
   routineTitle?: string;
+  routineFiredAt?: string;
   /**
-   * ID of the previous session in this chain. Set for all chained sessions
-   * (session-resume, rotation, and §PR-5 branchFromCheckpoint forks).
-   * Use branchedFromCompactNum to distinguish true checkpoint forks from other chain types.
+   * Checkpoint/fork provenance only. This is not a chronological previous
+   * session pointer and must not drive automatic previous-session loading.
    */
   parentSessionId?: string;
-  /** §PR-5: compact sequence number this session was forked from. Only set on true checkpoint forks. */
+  /** Compact sequence number this session was forked from. Only set on true checkpoint forks. */
   branchedFromCompactNum?: number;
-  /** §PR-5: ISO timestamp when this session was branched. Only set on true checkpoint forks. */
+  /** ISO timestamp when this session was branched. Only set on true checkpoint forks. */
   branchedAt?: string;
 }
 
 /**
- * Checkpoint trigger reasons (post-infinity-session-v3).
- * - "auto-compact": Layer 0 pre-flight 가 Layer 2 compact 를 실행
+ * Checkpoint trigger reasons.
+ * - "auto-compact": token preflight 가 LLM compact 를 실행
  * - "manual":      user explicitly triggered a checkpoint (e.g. /compact command)
  */
 export type CheckpointTrigger = "auto-compact" | "manual";
@@ -77,7 +96,7 @@ export type CheckpointTrigger = "auto-compact" | "manual";
  * A checkpoint record written into a session's metadata when context is compacted.
  * Stores enough information to reconstruct the chain and resume with prior context.
  *
- * PR-2-C 정정 — `summary` 는 이제 `renderBoundaryAsPreamble()` 결과 (12-section structured)
+ * `summary` 는 `renderBoundaryAsPreamble()` 결과 (12-section structured)
  * 또는 raw fallback. 전체 `CompactBoundary` 객체는 module boundary (memory ⊥ engine)
  * 준수상 *in-memory only* — `MessageMeta.boundary` 에 frozen reference 로 보존됨.
  */
@@ -96,27 +115,29 @@ export interface Checkpoint {
   /**
    * Rolling summary text generated at checkpoint time.
    * null when context was below the 10% minimum — no summary needed.
-   * PR-2-C 이후 Layer 0 preflight checkpoint 의 경우 `renderBoundaryAsPreamble()` 결과.
+   * For auto-compact checkpoints, this is `renderBoundaryAsPreamble()` output.
    */
   summary: string | null;
   /** Number of messages in the session at trigger time */
   messageCountAtTrigger: number;
   /**
-   * Layer 2 compact #N (numbered checkpoint chain — Copilot 패턴).
-   * PR-2-C 이후 auto-compact + manual compact 양쪽에서 set. legacy rotation 은 absent.
+   * Compact checkpoint #N in the numbered checkpoint chain.
+   * Set by auto-compact and manual compact when a checkpoint is created.
    */
   compactNum?: number;
 }
 
 /**
  * Metadata stored alongside a session's JSONL message file.
- * All fields are optional to preserve backward compatibility with
- * sessions written before the checkpoint chain feature was introduced.
+ * Fields are optional because metadata may be partial; missing kind is
+ * normalized by the repository and must not imply chronological continuity.
  */
 export interface SessionMetadata {
+  sessionKind?: SessionKind;
   routineId?: string;
   routineTitle?: string;
-  /** ID of the previous session in this checkpoint chain (if any) */
+  routineFiredAt?: string;
+  /** Checkpoint/fork provenance parent, not a chronological previous session. */
   parentSessionId?: string;
   /**
    * Rolling summary carried forward from the parent session.
@@ -126,18 +147,18 @@ export interface SessionMetadata {
   /** Checkpoints recorded inside this session (normally 0 or 1) */
   checkpoints?: Checkpoint[];
   /**
-   * §PR-3: LLM-generated session title. When set, takes precedence over the
+   * LLM-generated session title. When set, takes precedence over the
    * auto-derived title from session content. Max 20 chars enforced on write.
    */
   title?: string;
   /**
-   * §PR-5: compact number of the checkpoint this session was branched from.
+   * Compact number of the checkpoint this session was branched from.
    * Set when a session is created via branchFromCheckpoint().
    * Absent for normal (non-branched) sessions.
    */
   branchedFromCompactNum?: number;
   /**
-   * §PR-5: ISO timestamp when this session was branched from a checkpoint.
+   * ISO timestamp when this session was branched from a checkpoint.
    * Absent for normal (non-branched) sessions.
    */
   branchedAt?: string;
@@ -194,6 +215,7 @@ const DEFAULT_USER_PREFS = `# 사용자 선호
 const MAX_SESSION_FILE_BYTES = 5_000_000;
 /** Max length of summaryPreamble stored in session metadata (~2000 tokens). */
 const MAX_SUMMARY_PREAMBLE_CHARS = 8_000;
+const ACTIVE_SESSION_STATE_FILE = ".active-session.json";
 
 /**
  * Regex for session IDs used in file paths.
@@ -215,6 +237,22 @@ const VALID_CHECKPOINT_TRIGGERS = new Set<CheckpointTrigger>([
   "manual",
 ]);
 
+function normalizeSessionKind(value: unknown): SessionKind {
+  if (value === "main" || value === "routine") return value;
+  return "main";
+}
+
+function matchesSessionScope(
+  metadata: SessionMetadata | null,
+  options: Pick<ListSessionsOptions, "kind" | "routineId">,
+): boolean {
+  const kind = options.kind ?? "main";
+  const sessionKind = metadata?.sessionKind ?? normalizeSessionKind(undefined);
+  if (kind !== "all" && sessionKind !== kind) return false;
+  if (options.routineId !== undefined && metadata?.routineId !== options.routineId) return false;
+  return true;
+}
+
 /**
  * Normalizes a raw parsed Checkpoint record — rejects entries with invalid
  * trigger values or missing required fields so corrupted data is never surfaced.
@@ -230,9 +268,9 @@ function normalizeCheckpoint(raw: unknown): Checkpoint | null {
   if (r.summary !== null && typeof r.summary !== "string") return null;
   const msgCount = r.messageCountAtTrigger;
   if (typeof msgCount !== "number" || msgCount < 0 || !Number.isInteger(msgCount)) return null;
-  // PR-2-E (#608) — `compactNum` 은 numbered checkpoint chain 의 #N. load 시 누락되면
+  // `compactNum` 은 numbered checkpoint chain 의 #N. load 시 누락되면
   // chain 깨짐 → 신규 record 만 set 되도록 optional 유지하되 정상 read.
-  // §PR-5: >= 0 허용 — enterViewMode/branchFromCheckpoint 가 compactNum=0 checkpoint 검색.
+  // >= 0 허용 — enterViewMode/branchFromCheckpoint 가 compactNum=0 checkpoint 검색.
   const compactNum =
     typeof r.compactNum === "number" && r.compactNum >= 0 && Number.isInteger(r.compactNum)
       ? r.compactNum
@@ -250,7 +288,8 @@ function normalizeCheckpoint(raw: unknown): Checkpoint | null {
 
 /**
  * Normalizes a raw parsed SessionMetadata object.
- * All new fields are optional — absent fields are left undefined (backward compat).
+ * Absent or invalid session kind is treated as main. Routine metadata is not
+ * used to infer kind because fallback inference is intentionally unsupported.
  * Invalid checkpoint entries are silently dropped rather than failing the whole load.
  */
 function normalizeSessionMetadata(raw: Record<string, unknown>): SessionMetadata {
@@ -265,18 +304,21 @@ function normalizeSessionMetadata(raw: Record<string, unknown>): SessionMetadata
     ? raw.branchedFromCompactNum
     : undefined;
   const rawBranchedAt = typeof raw.branchedAt === "string" ? raw.branchedAt : undefined;
+  const routineId = typeof raw.routineId === "string" ? raw.routineId : undefined;
   return {
-    routineId: typeof raw.routineId === "string" ? raw.routineId : undefined,
+    sessionKind: normalizeSessionKind(raw.sessionKind),
+    routineId,
     routineTitle: typeof raw.routineTitle === "string" ? raw.routineTitle : undefined,
+    routineFiredAt: typeof raw.routineFiredAt === "string" ? raw.routineFiredAt : undefined,
     parentSessionId: isValidSessionId(raw.parentSessionId) ? raw.parentSessionId : undefined,
     // Defense-in-depth: cap on read in case file was written without truncation.
     summaryPreamble: rawPreamble !== undefined
       ? rawPreamble.slice(0, MAX_SUMMARY_PREAMBLE_CHARS)
       : undefined,
     checkpoints: checkpoints && checkpoints.length > 0 ? checkpoints : undefined,
-    // §PR-3: stored title (max 20 chars enforced on write; cap defensively on read too)
+    // Stored title (max 20 chars enforced on write; cap defensively on read too)
     title: rawTitle && rawTitle.length > 0 ? rawTitle.slice(0, 20) : undefined,
-    // §PR-5: branch provenance fields
+    // Checkpoint branch provenance fields.
     branchedFromCompactNum: rawBranchedFromCompactNum,
     branchedAt: rawBranchedAt,
   };
@@ -290,7 +332,7 @@ export class MemoryManager {
   private persistentContextReloadTimer: ReturnType<typeof setTimeout> | undefined;
   private persistentContextPollTimer: ReturnType<typeof setInterval> | undefined;
   private persistentContextFileState = new Map<string, number>();
-  /** §PR-5: Pre-compact snapshots stored here to avoid polluting listSessions scan. */
+  /** Pre-compact snapshots stored here to avoid polluting listSessions scan. */
   private get checkpointsDir(): string {
     return join(this.sessionsDir, ".checkpoints");
   }
@@ -366,13 +408,13 @@ export class MemoryManager {
     return this.readMarkdownEntries(this.memoryDir);
   }
 
-  /** memories/ 키워드 검색 — Agent Loop에서 on-demand 참조 (§5 참조 방식). Cap 50. */
+  /** memories/ 키워드 검색 — Agent Loop에서 on-demand 참조. Cap 50. */
   searchMemoryEntries(query: string): NoteEntry[] {
     return this.searchEntries(this.listMemoryEntries(), query);
   }
 
   /** sessions/ 키워드 검색 — D5 메모리 검색 패널용. Cap 50. */
-  searchSessions(query: string): SessionSearchEntry[] {
+  searchSessions(query: string, options: Pick<ListSessionsOptions, "kind" | "routineId"> = {}): SessionSearchEntry[] {
     // Require at least 2 chars to prevent accidental full-dump via empty/trivial query.
     if (query.trim().length < 2) return [];
     if (!existsSync(this.sessionsDir)) return [];
@@ -385,6 +427,8 @@ export class MemoryManager {
       const stem = file.replace(".jsonl", "");
       // Skip files whose stem is not UUID-shaped — prevents path-traversal info leak.
       if (!UUID_RE.test(stem)) continue;
+      const metadata = this.loadSessionMetadata(stem);
+      if (!matchesSessionScope(metadata, options)) continue;
       const filePath = join(this.sessionsDir, file);
       const stat = statSync(filePath);
       // Skip oversized files — unbounded readFileSync is a DoS vector.
@@ -405,7 +449,12 @@ export class MemoryManager {
               const start = Math.max(0, idx - 100);
               const end = Math.min(content.length, idx + lower.length + 100);
               const excerpt = content.slice(start, end);
-              results.push({ sessionId: stem, matchedMessage: excerpt, timestamp });
+              results.push({
+                sessionId: stem,
+                matchedMessage: excerpt,
+                timestamp,
+                sessionKind: metadata?.sessionKind ?? normalizeSessionKind(undefined),
+              });
               break; // one match per session
             }
           }
@@ -423,14 +472,15 @@ export class MemoryManager {
   }
 
   /** sessions/ 최근 목록 — 검색 전에도 항목을 확인할 수 있도록 최근 세션을 노출한다. */
-  listSessionEntries(limit = 50): SessionSearchEntry[] {
+  listSessionEntries(limit = 50, options: Pick<ListSessionsOptions, "kind" | "routineId"> = {}): SessionSearchEntry[] {
     const UUID_RE = /^[0-9a-f-]{8,}$/i;
-    return this.listSessions(limit)
+    return this.listSessions({ ...options, limit })
       .filter((session) => UUID_RE.test(session.id))
       .map((session) => ({
         sessionId: session.id,
         matchedMessage: session.preview,
         timestamp: session.modifiedAt.toISOString(),
+        sessionKind: session.sessionKind,
       }));
   }
 
@@ -547,9 +597,9 @@ export class MemoryManager {
 
   // ─── Private ──────────────────────────────────────
 
-  // ─── Session Persistence (§5.2 ~/.lvis/sessions/) ─
+  // ─── Session Persistence (~/.lvis/sessions/) ─
 
-  /** 세션 저장 — JSONL 형식 (§4.5.7) */
+  /** 세션 저장 — JSONL 형식 */
   async saveSession(sessionId: string, messages: unknown[]): Promise<void> {
     const targetPath = join(this.sessionsDir, `${sessionId}.jsonl`);
     const lines = messages.map((m) => JSON.stringify(m)).join("\n") + "\n";
@@ -559,7 +609,7 @@ export class MemoryManager {
   }
 
   /**
-   * §PR-5: Save a per-checkpoint pre-compact snapshot before compaction overwrites the main JSONL.
+   * Save a per-checkpoint pre-compact snapshot before compaction overwrites the main JSONL.
    * Stored at `{sessionsDir}/.checkpoints/{sessionId}/{compactNum}.jsonl` so that
    * listSessions/listSessionsPage (which only scan sessionsDir root) never pick them up.
    * branchFromCheckpoint() loads from here instead of the mutable main session file.
@@ -577,7 +627,7 @@ export class MemoryManager {
     });
   }
 
-  /** §PR-5: Load a per-checkpoint pre-compact snapshot saved by saveCheckpointSnapshot(). Returns null if not found. */
+  /** Load a per-checkpoint pre-compact snapshot saved by saveCheckpointSnapshot(). Returns null if not found. */
   loadCheckpointSnapshot(sessionId: string, compactNum: number): unknown[] | null {
     if (!isValidSessionId(sessionId)) return null;
     const snapshotPath = join(this.checkpointsDir, sessionId, `${compactNum}.jsonl`);
@@ -620,7 +670,11 @@ export class MemoryManager {
       metadata.summaryPreamble.length > MAX_SUMMARY_PREAMBLE_CHARS
       ? { ...metadata, summaryPreamble: metadata.summaryPreamble.slice(0, MAX_SUMMARY_PREAMBLE_CHARS) }
       : metadata;
-    // §PR-3: cap stored title to 20 chars.
+    safe = {
+      ...safe,
+      sessionKind: normalizeSessionKind(safe.sessionKind),
+    };
+    // Cap stored title to 20 chars.
     if (safe.title !== undefined && safe.title.length > 20) {
       safe = { ...safe, title: safe.title.slice(0, 20) };
     }
@@ -640,7 +694,7 @@ export class MemoryManager {
       if (!parsed || typeof parsed !== "object") return null;
       return normalizeSessionMetadata(parsed);
     } catch (err) {
-      // Round-3 §7: surface metadata parse/IO failures as a warning so a
+      // Surface metadata parse/IO failures as a warning so a
       // corrupted .meta.json doesn't silently surface as "no metadata".
       // Error semantics are preserved (still returns null) — only the
       // diagnostic surface is added.
@@ -649,9 +703,78 @@ export class MemoryManager {
     }
   }
 
+  loadMainActiveSessionState(): MainActiveSessionState | null {
+    const path = join(this.sessionsDir, ACTIVE_SESSION_STATE_FILE);
+    if (!existsSync(path)) return null;
+    try {
+      const parsed = JSON.parse(readFileSync(path, "utf-8")) as Record<string, unknown>;
+      const mode = parsed.mainActiveMode;
+      if (mode !== "resume" && mode !== "fresh") return null;
+      const id = parsed.mainActiveSessionId;
+      const updatedAt = typeof parsed.updatedAt === "string" ? parsed.updatedAt : new Date(0).toISOString();
+      const mainActiveSessionId = isValidSessionId(id) ? id : null;
+      if (mode === "resume" && mainActiveSessionId) {
+        const metadata = this.loadSessionMetadata(mainActiveSessionId);
+        if (metadata?.sessionKind === "routine") {
+          return {
+            mainActiveMode: "fresh",
+            mainActiveSessionId: null,
+            updatedAt,
+          };
+        }
+      }
+      return {
+        mainActiveMode: mode,
+        mainActiveSessionId,
+        updatedAt,
+      };
+    } catch (err) {
+      log.warn(`loadMainActiveSessionState failed: %s`, (err as Error).message);
+      return null;
+    }
+  }
+
+  async saveMainActiveSessionState(state: MainActiveSessionState): Promise<void> {
+    const targetPath = join(this.sessionsDir, ACTIVE_SESSION_STATE_FILE);
+    const safe: MainActiveSessionState = {
+      mainActiveMode: state.mainActiveMode,
+      mainActiveSessionId:
+        state.mainActiveMode === "fresh"
+          ? null
+          : isValidSessionId(state.mainActiveSessionId)
+            ? state.mainActiveSessionId
+            : null,
+      updatedAt: state.updatedAt,
+    };
+    await withFileLock(targetPath, async () => {
+      writeFileSync(targetPath, JSON.stringify(safe, null, 2), "utf-8");
+    });
+  }
+
+  async markMainActiveFresh(): Promise<void> {
+    await this.saveMainActiveSessionState({
+      mainActiveSessionId: null,
+      mainActiveMode: "fresh",
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  async markMainActiveResume(sessionId: string): Promise<void> {
+    if (!isValidSessionId(sessionId)) {
+      throw new Error(`markMainActiveResume: invalid sessionId "${sessionId}"`);
+    }
+    await this.saveMainActiveSessionState({
+      mainActiveSessionId: sessionId,
+      mainActiveMode: "resume",
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
   /** 세션 목록 */
-  listSessions(limit = Number.POSITIVE_INFINITY): SessionListEntry[] {
+  listSessions(input: number | ListSessionsOptions = Number.POSITIVE_INFINITY): SessionListEntry[] {
+    const options: ListSessionsOptions = typeof input === "number" ? { limit: input } : input;
     if (!existsSync(this.sessionsDir)) return [];
+    const limit = options.limit ?? Number.POSITIVE_INFINITY;
     return readdirSync(this.sessionsDir)
       .filter((f) => f.endsWith(".jsonl"))
       .map((f) => {
@@ -663,9 +786,12 @@ export class MemoryManager {
         };
       })
       .sort((a, b) => b.modifiedAt.getTime() - a.modifiedAt.getTime())
+      .map((session) => ({ ...session, metadata: this.loadSessionMetadata(session.id) }))
+      .filter((session) => matchesSessionScope(session.metadata, options))
       .slice(0, Number.isFinite(limit) ? Math.max(0, limit) : undefined)
       .map((session) => {
-        const metadata = this.loadSessionMetadata(session.id);
+        const metadata = session.metadata;
+        const sessionKind = metadata?.sessionKind ?? normalizeSessionKind(undefined);
         const summary = session.size > MAX_SESSION_FILE_BYTES
           ? {
               title: metadata?.routineTitle
@@ -677,11 +803,13 @@ export class MemoryManager {
         return {
           id: session.id,
           modifiedAt: session.modifiedAt,
+          sessionKind,
           title: metadata?.title || summary.title || metadata?.routineTitle || `세션 ${session.id.slice(0, 8)}`,
           preview: summary.preview,
           routineId: metadata?.routineId,
           routineTitle: metadata?.routineTitle,
-          // §PR-5: branch provenance — already loaded from metadata, no extra disk IO
+          routineFiredAt: metadata?.routineFiredAt,
+          // Branch provenance — already loaded from metadata, no extra disk IO
           ...(metadata?.parentSessionId ? { parentSessionId: metadata.parentSessionId } : {}),
           ...(metadata?.branchedFromCompactNum !== undefined ? { branchedFromCompactNum: metadata.branchedFromCompactNum } : {}),
           ...(metadata?.branchedAt ? { branchedAt: metadata.branchedAt } : {}),
@@ -689,7 +817,7 @@ export class MemoryManager {
       });
   }
 
-  listSessionsPage(options: { limit?: number; before?: Date; beforeId?: string; after?: Date } = {}): SessionListEntry[] {
+  listSessionsPage(options: ListSessionsOptions = {}): SessionListEntry[] {
     if (!existsSync(this.sessionsDir)) return [];
     const limit = Number.isFinite(options.limit)
       ? Math.max(0, Math.floor(options.limit ?? 0))
@@ -718,9 +846,12 @@ export class MemoryManager {
         const timeDelta = b.modifiedAt.getTime() - a.modifiedAt.getTime();
         return timeDelta !== 0 ? timeDelta : b.id.localeCompare(a.id);
       })
+      .map((session) => ({ ...session, metadata: this.loadSessionMetadata(session.id) }))
+      .filter((session) => matchesSessionScope(session.metadata, options))
       .slice(0, Number.isFinite(limit) ? limit : undefined)
       .map((session) => {
-        const metadata = this.loadSessionMetadata(session.id);
+        const metadata = session.metadata;
+        const sessionKind = metadata?.sessionKind ?? normalizeSessionKind(undefined);
         const summary = session.size > MAX_SESSION_FILE_BYTES
           ? {
               title: metadata?.routineTitle
@@ -732,11 +863,13 @@ export class MemoryManager {
         return {
           id: session.id,
           modifiedAt: session.modifiedAt,
+          sessionKind,
           title: metadata?.title || summary.title || metadata?.routineTitle || `세션 ${session.id.slice(0, 8)}`,
           preview: summary.preview,
           routineId: metadata?.routineId,
           routineTitle: metadata?.routineTitle,
-          // §PR-5: branch provenance — already loaded from metadata above, no extra disk IO
+          routineFiredAt: metadata?.routineFiredAt,
+          // Branch provenance — already loaded from metadata above, no extra disk IO
           ...(metadata?.parentSessionId ? { parentSessionId: metadata.parentSessionId } : {}),
           ...(metadata?.branchedFromCompactNum !== undefined ? { branchedFromCompactNum: metadata.branchedFromCompactNum } : {}),
           ...(metadata?.branchedAt ? { branchedAt: metadata.branchedAt } : {}),
@@ -745,9 +878,7 @@ export class MemoryManager {
   }
 
   listSessionsByRoutine(routineId: string, limit = Number.POSITIVE_INFINITY): SessionListEntry[] {
-    return this.listSessions()
-      .filter((session) => session.routineId === routineId)
-      .slice(0, Number.isFinite(limit) ? Math.max(0, limit) : undefined);
+    return this.listSessions({ kind: "routine", routineId, limit });
   }
 
   // ─── Checkpoint Chain Helpers ─────────────────────
@@ -811,21 +942,43 @@ export class MemoryManager {
   }
 
   /**
-   * 세션 삭제 — jsonl + 같은 session 의 compact archive 디렉토리 동시 제거.
+   * 세션 삭제 — jsonl + metadata + 같은 session 의 compact archive/snapshot/sidecar 동시 제거.
    *
-   * Compact pipeline (PR #718) 이 oversize 메시지를
-   * `sessions/<sessionId>/truncated/` 에 격리하므로, 세션 삭제 시 archive
-   * orphan 으로 남지 않게 함께 정리.
+   * Compact pipeline 이 oversize 메시지를
+   * `sessions/<sessionId>/truncated/` 와 `sessions/.checkpoints/<sessionId>/`
+   * 에 격리하므로, 세션 삭제 시 transcript 조각이 orphan 으로 남지 않게 함께 정리.
    */
   deleteSession(sessionId: string): void {
+    if (!isValidSessionId(sessionId)) {
+      log.warn({ sessionId }, "unsafe caller-provided sessionId rejected in deleteSession");
+      return;
+    }
     const jsonlPath = join(this.sessionsDir, `${sessionId}.jsonl`);
     if (existsSync(jsonlPath)) unlinkSync(jsonlPath);
+    const metaPath = join(this.sessionsDir, `${sessionId}.meta.json`);
+    if (existsSync(metaPath)) unlinkSync(metaPath);
     const sessionDir = join(this.sessionsDir, sessionId);
     if (existsSync(sessionDir)) {
       try {
         rmSync(sessionDir, { recursive: true, force: true });
       } catch (err) {
         log.warn(`deleteSession: failed to remove session dir ${sessionDir}: ${(err as Error).message}`);
+      }
+    }
+    const checkpointSnapshotDir = join(this.checkpointsDir, sessionId);
+    if (existsSync(checkpointSnapshotDir)) {
+      try {
+        rmSync(checkpointSnapshotDir, { recursive: true, force: true });
+      } catch (err) {
+        log.warn(`deleteSession: failed to remove checkpoint snapshot dir ${checkpointSnapshotDir}: ${(err as Error).message}`);
+      }
+    }
+    const diffCacheDir = join(this.lvisDir, "diff-cache", sessionId);
+    if (existsSync(diffCacheDir)) {
+      try {
+        rmSync(diffCacheDir, { recursive: true, force: true });
+      } catch (err) {
+        log.warn(`deleteSession: failed to remove diff cache dir ${diffCacheDir}: ${(err as Error).message}`);
       }
     }
   }

@@ -61,7 +61,7 @@ export const tokyoNightBundle: ThemeBundle = {
     "chart-3":                "25 95% 53%",          /* orange */
     "chart-4":                "262 83% 58%",         /* violet */
     "chart-5":                "330 81% 60%",         /* pink */
-    /* ── Action tokens (PR-4/5) ────────────────────────────────── */
+    /* ── Action tokens ─────────────────────────────────────────── */
     "action-view":            "262 83% 58%",
     "action-branch":          "25 95% 53%",
     "action-compact":         "262 83% 58%",

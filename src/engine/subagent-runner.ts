@@ -22,7 +22,7 @@
  * Rationale (vs. mutating the main loop): a sub-loop helper file keeps the
  * primary ConversationLoop unchanged, avoids reentrancy hazards on the
  * shared state (`sessionId`, `history`, `cumulativeUsage`), and lets each
- * spawn audit-log under a child sessionId tagged with the parent's id.
+ * spawn audit-log under a child sessionId tagged with the origin session id.
  */
 import { randomUUID } from "node:crypto";
 import { ConversationLoop, type ConversationLoopDeps } from "./conversation-loop.js";
@@ -34,8 +34,8 @@ export interface SubAgentSpawnInput {
   instructions: string;
   sourceTools?: string[];
   maxTurns?: number;
-  /** Parent session id — propagated for audit attribution. */
-  parentSessionId?: string;
+  /** Origin session id — propagated for audit attribution only. */
+  originSessionId?: string;
 }
 
 export interface SubAgentTurnUpdate {
@@ -111,7 +111,7 @@ export class SubAgentRunner {
     input: SubAgentSpawnInput,
     callbacks?: SubAgentSpawnCallbacks,
   ): Promise<SubAgentSpawnResult> {
-    const childSessionId = `${input.parentSessionId ?? "spawn"}::${randomUUID()}`;
+    const childSessionId = `${input.originSessionId ?? "spawn"}::${randomUUID()}`;
     const requestedTurns = input.maxTurns ?? MAX_TURNS_DEFAULT;
     const cappedTurns = Math.max(1, Math.min(MAX_TURNS_CAP, requestedTurns));
 

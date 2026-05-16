@@ -31,7 +31,7 @@ import type { KeywordEngine } from "../core/keyword-engine.js";
 import type { RouteEngine } from "../core/route-engine.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { ToolTrustOrigin } from "../tools/types.js";
-import type { MemoryManager } from "../memory/memory-manager.js";
+import type { MemoryManager, SessionKind } from "../memory/memory-manager.js";
 import type { SettingsService } from "../data/settings-store.js";
 import type { ActiveRolePrompt } from "../data/role-presets.js";
 import type { HookTrustCommandOptions } from "../hooks/hook-trust-commands.js";
@@ -111,16 +111,16 @@ export interface TurnCallbacks {
      *  freedTokens alone undercounts when only one small message was summarized. */
     estimatedAfter: number;
     /**
-     * Compact tier — `"auto-compact"` (Layer 0 preflight) | `"manual"` (`/compact`).
-     * UI CheckpointDivider 가 색상/라벨 결정에 사용 (`lib/chat-stream-state.ts:CheckpointTier`).
+     * Compact trigger — `"auto-compact"` (token preflight) | `"manual"` (`/compact`).
+     * UI CheckpointDivider uses this to choose the auto/manual label.
      */
-    tier?: "auto-compact" | "manual";
+    trigger?: "auto-compact" | "manual";
     /**
-     * Rolling summary — Layer 2 의 `renderBoundaryAsPreamble()` 결과. 사용자 가시성용.
+     * Rolling summary — `renderBoundaryAsPreamble()` 결과. 사용자 가시성용.
      */
     summary?: string;
     /**
-     * §PR-5: compact sequence number — passed to CheckpointDivider to enable
+     * Compact sequence number — passed to CheckpointDivider to enable
      * view-mode and branch-from-checkpoint actions.
      */
     compactNum?: number;
@@ -131,14 +131,14 @@ export interface TurnCallbacks {
      */
     compactStatus?: CompressionStatus;
     /**
-     * Layer A / A.5 / FORCED 가 원본 메시지를 격리한 디렉토리.
+     * Compact archive directory for per-message, reverse-budget, or forced drops.
      * `~/.lvis/sessions/<sessionId>/truncated/` — 사용자가 banner footnote
      * 에서 원본 archive 위치 확인 가능. plumb 누락 방지를 위해 명시 필드.
      */
     truncatedDir?: string;
   }) => void;
   /**
-   * Fired at the start of a pre-turn auto-compact (Layer 0 preflight) so the
+   * Fired at the start of a pre-turn auto-compact (token preflight) so the
    * renderer can show a "자동 압축 중..." indicator before the potentially
    * long-running LLM compaction finishes. Complementary to `onCompactOccurred`
    * which fires on completion.
@@ -276,18 +276,18 @@ export interface ConversationLoopDeps {
   /** Live reader for foreground settings-backed additional directories. */
   getAdditionalDirectories?: () => readonly string[];
   /**
-   * Layer 6 script hooks. Boot owns discovery/trust and injects the manager;
+   * Script hooks. Boot owns discovery/trust and injects the manager;
    * the executor only invokes the already-trusted generic hook contract.
    */
   scriptHookManager?: import("../hooks/script-hook-manager.js").ScriptHookManager;
   /** Hook trust command storage override. Production uses default hook paths. */
   hookTrustCommandOptions?: Omit<HookTrustCommandOptions, "manager">;
-  /** Disable normal ~/.lvis/sessions persistence for isolated routine loops. */
+  /** Disable normal ~/.lvis/sessions persistence for isolated child loops. */
   disableSessionPersistence?: boolean;
   /**
    * C2(c): per-session SkillOverlay handle. Cleared on `newConversation()`
    * so a brand-new session does not inherit a previous session's loaded
-   * skills. Optional — legacy unit-test setups skip the overlay.
+   * skills. Optional so focused unit-test setups can skip the overlay.
    */
   skillOverlay?: { clear(sessionId: string): void };
   /**
@@ -338,7 +338,9 @@ export class ConversationLoop {
   private readonly auditLogger: AuditLogger;
   private provider: LLMProvider | null = null;
   private sessionId: string = crypto.randomUUID();
+  private sessionKind: SessionKind = "main";
   private sessionRoutineId: string | null = null;
+  private sessionRoutineTitle: string | null = null;
   /** K4: §4.5 11-step trace — dev 모드 활성, 프로덕션 no-op */
   private tracer: ConversationTracer = createTracer(this.sessionId);
   private cumulativeUsage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
@@ -361,11 +363,11 @@ export class ConversationLoop {
   private sessionPluginExpansions = 0;
   private sessionAdditionalDirectories: string[] = [];
   /**
-   * PR-2-C R14 mitigation — single in-flight Layer 2 compact lock per ConversationLoop.
-   * 같은 instance 에서 두 turn 이 동시에 Layer 0 trigger 시 두 번째는 skip (race 방지).
+   * Single in-flight LLM compact lock per ConversationLoop.
+   * 같은 instance 에서 두 turn 이 동시에 compact trigger 시 두 번째는 skip (race 방지).
    */
   private isCompacting: boolean = false;
-  /** PR-2-C — Layer 2 compact 가 #N 번째인지 (numbered checkpoint chain, Copilot 패턴). */
+  /** LLM compact 가 #N 번째인지 추적하는 numbered checkpoint counter. */
   private compactNum: number = 0;
   /**
    * "Guide" utterance buffer — mid-stream direction adjustments that the
@@ -556,7 +558,7 @@ export class ConversationLoop {
   }
 
   /** 대화 이력 초기화 (새 대화) — §4.5.7 */
-  newConversation(): void {
+  newConversation(kind: SessionKind = "main"): void {
     if (this.history.length > 0) {
       this.deps.memoryManager.saveSession(this.sessionId, stubMarkedToolResults(this.history.getMessages())).catch((err: unknown) => {
         log.warn("newConversation saveSession failed: %s", (err as Error).message);
@@ -566,14 +568,16 @@ export class ConversationLoop {
     // starts with a clean overlay. Tests / stubs without overlay omit this.
     this.deps.skillOverlay?.clear(this.sessionId);
     this.sessionId = crypto.randomUUID();
+    this.sessionKind = kind;
     this.sessionRoutineId = null;
+    this.sessionRoutineTitle = null;
     this.sessionAdditionalDirectories = [];
     this.history.clear();
     this.cumulativeUsage = { inputTokens: 0, outputTokens: 0 };
     this.sessionPluginExpansions = 0;
     this.compactNum = 0;
     this.tracer = createTracer(this.sessionId);
-    // PR-4: clear rolling summary preamble for fresh session
+    // Clear rolling summary preamble for fresh session.
     this.deps.systemPromptBuilder.setSummaryPreamble?.(null);
   }
 
@@ -598,8 +602,16 @@ export class ConversationLoop {
     return this.sessionId;
   }
 
+  getSessionKind(): SessionKind {
+    return this.sessionKind;
+  }
+
+  getSessionRoutineTitle(): string | null {
+    return this.sessionRoutineTitle;
+  }
+
   /**
-   * §PR-5 Layer 3 View-Mode — 체크포인트 #compactNum 의 슬라이스 끝 인덱스를 반환.
+   * Checkpoint view-mode — 체크포인트 #compactNum 의 슬라이스 끝 인덱스를 반환.
    * 렌더러가 visibleMessages = messages.slice(0, slicedRangeEnd) 로 view-mode 를 구현.
    * 해당 compactNum 체크포인트가 없으면 null 반환.
    */
@@ -611,7 +623,7 @@ export class ConversationLoop {
   }
 
   /**
-   * §PR-5 Layer 3 View-Mode — view-mode 종료 audit hook.
+   * Checkpoint view-mode 종료 audit hook.
    * 실제 engine 상태 변경 없음 (렌더러 state 만 reset). 추후 감사 로그 추가 가능.
    */
   public exitViewMode(): void {
@@ -619,7 +631,7 @@ export class ConversationLoop {
   }
 
   /**
-   * §PR-5 Layer 3 Branch — 체크포인트 #compactNum 지점에서 새 세션을 fork.
+   * Checkpoint branch — 체크포인트 #compactNum 지점에서 새 세션을 fork.
    * history 를 slicing 하고 wire-serialize 후 disk 영속화. 새 sessionId 반환.
    */
   public async branchFromCheckpoint(compactNum: number): Promise<{ newSessionId: string }> {
@@ -627,7 +639,7 @@ export class ConversationLoop {
     const target = checkpoints.find((c) => c.compactNum === compactNum);
     if (!target) throw new Error(`Checkpoint #${compactNum} not found in session ${this.sessionId}`);
 
-    // §PR-5: Load the pre-compact snapshot saved at compaction time.
+    // Load the pre-compact snapshot saved at compaction time.
     // The main session JSONL is overwritten by PostTurnHookChain.saveSession with the
     // post-compact history after each turn, so it cannot be used to reconstruct the
     // pre-checkpoint transcript. saveCheckpointSnapshot() persists messagesBefore to
@@ -648,7 +660,7 @@ export class ConversationLoop {
     const newSessionId = crypto.randomUUID();
     const sliced = (snapshotMessages as import("./llm/types.js").GenericMessage[]).slice(0, target.messageCountAtTrigger);
 
-    // §PR-5 round-8: repair tool-pair invariant — loadCheckpointSnapshot skips malformed JSONL
+    // Repair tool-pair invariant — loadCheckpointSnapshot skips malformed JSONL.
     // lines, which can leave orphaned tool_call or tool_result entries in the slice.
     const { messages: repaired, removedMessages, removedToolCalls } = normalizeToolPairInvariant(sliced);
     if (removedMessages > 0 || removedToolCalls > 0) {
@@ -660,9 +672,13 @@ export class ConversationLoop {
     // wire-serialize: markStaleToolResults 된 verbatim history 를 stub 치환 후 영속화
     await this.deps.memoryManager.saveSession(newSessionId, stubMarkedToolResults(repaired));
 
-    // 브랜치 세션 metadata — parentSessionId + 브랜치 provenance
+    // 브랜치 세션 metadata — checkpoint/fork provenance + prior summary.
     await this.deps.memoryManager.saveSessionMetadata(newSessionId, {
+      sessionKind: this.sessionKind,
+      ...(this.sessionRoutineId ? { routineId: this.sessionRoutineId } : {}),
+      ...(this.sessionRoutineTitle ? { routineTitle: this.sessionRoutineTitle } : {}),
       parentSessionId: this.sessionId,
+      ...(target.summary ? { summaryPreamble: target.summary } : {}),
       branchedFromCompactNum: compactNum,
       branchedAt: new Date().toISOString(),
     });
@@ -694,12 +710,12 @@ export class ConversationLoop {
   }
 
   /** 세션 목록 조회 — §4.5.7 */
-  listSessions(limit?: number): Array<{ id: string; modifiedAt: Date; title: string; preview: string }> {
-    return this.deps.memoryManager.listSessions(limit);
-  }
-
-  listRoutineSessions(routineId: string, limit?: number): Array<{ id: string; modifiedAt: Date; title: string; preview: string }> {
-    return this.deps.memoryManager.listSessionsByRoutine(routineId, limit);
+  listSessions(limit?: number): Array<{ id: string; modifiedAt: Date; title: string }> {
+    return this.deps.memoryManager.listSessions(limit).map((session) => ({
+      id: session.id,
+      modifiedAt: session.modifiedAt,
+      title: session.title,
+    }));
   }
 
   /** 기존 세션 복원 — §4.5.7 */
@@ -726,7 +742,9 @@ export class ConversationLoop {
 
     this.sessionId = sessionId;
     const sessionMeta = this.deps.memoryManager.loadSessionMetadata(sessionId);
+    this.sessionKind = sessionMeta?.sessionKind ?? "main";
     this.sessionRoutineId = sessionMeta?.routineId ?? null;
+    this.sessionRoutineTitle = sessionMeta?.routineTitle ?? null;
     this.history.clear();
     this.history.restore(normalized.messages);
     this.cumulativeUsage = { inputTokens: 0, outputTokens: 0 };
@@ -740,17 +758,23 @@ export class ConversationLoop {
       0,
     ) ?? 0;
     this.tracer = createTracer(this.sessionId);
-    // PR-4: inject rolling summary preamble from loaded session metadata
+    // Inject rolling summary preamble from loaded session metadata.
     const preamble = sessionMeta?.summaryPreamble ?? null;
     this.deps.systemPromptBuilder.setSummaryPreamble?.(preamble);
     return true;
   }
 
-  async startRoutineConversation(routineId: string, routineTitle: string): Promise<string> {
-    this.newConversation();
+  async startRoutineConversation(routineId: string, routineTitle: string, routineFiredAt?: string): Promise<string> {
+    this.newConversation("routine");
     this.sessionRoutineId = routineId;
+    this.sessionRoutineTitle = routineTitle;
     await this.deps.memoryManager.saveSession(this.sessionId, []);
-    await this.deps.memoryManager.saveSessionMetadata(this.sessionId, { routineId, routineTitle });
+    await this.deps.memoryManager.saveSessionMetadata(this.sessionId, {
+      sessionKind: "routine",
+      routineId,
+      routineTitle,
+      ...(routineFiredAt ? { routineFiredAt } : {}),
+    });
     return this.sessionId;
   }
 
@@ -769,10 +793,9 @@ export class ConversationLoop {
       return { ok: false, compacted: false, compactedAt: null, removedMessageCount: 0 };
     }
 
-    // PR-2-F-4: loadSession 후 auto-compact 제거 — Layer 0 preflight 가 next user turn
-    // 진입 시 estimateMessagesTokens 평가 + 도달 시 Layer 2 LLM compact 처리. resume-time
-    // sync compact 는 redundant. cumulativeUsage 만 추정값으로 set 하여 Layer 0 가
-    // 정확한 ratio 평가 가능하도록 함.
+    // Session resume does not compact immediately. The next user turn runs
+    // token preflight and triggers LLM compact if needed. Keep only an
+    // estimated input-token baseline so that ratio evaluation is accurate.
     this.cumulativeUsage = {
       inputTokens: estimateMessagesTokens(this.history.getMessages()),
       outputTokens: 0,
@@ -789,11 +812,10 @@ export class ConversationLoop {
   /**
    * §4.5.4 — Manual compact trigger (`/compact` user command).
    *
-   * PR-2-F-4 정정: extractive `compactMessages` → LLM-based `compactWithBoundary` 마이그레이션.
-   * 사용자가 명시적으로 trigger 한 강제 압축이므로 임계값 무시하고 진입 — 단 history 가
+   * 사용자가 명시적으로 trigger 한 강제 LLM compact 이므로 임계값 무시하고 진입 — 단 history 가
    * preserveRecentTokens 보다 작으면 no-op (압축할 내용 없음).
    *
-   * R14 lock — 동시 compact race 방지.
+   * Per-loop lock — 동시 compact race 방지.
    */
   async manualCompact(callbacks?: Pick<TurnCallbacks, "onCompactOccurred" | "onCompactStarted">): Promise<{
     compacted: boolean;
@@ -1064,11 +1086,11 @@ export class ConversationLoop {
     // §4.5.2 step 5 — HISTORY_APPEND
     this.tracer.step("HISTORY_APPEND", { role: "user", historySize: this.history.length });
 
-    // ─── Layer 0 — Pre-flight Guard (`infinity-session-redesign-v3.md` §4.1) ───
+    // ─── Token Preflight (same-session checkpoint compaction) ───
     // step 5 (HISTORY_APPEND) 직후 / step 6 (PROMPT_ASSEMBLE) 직전. estimateMessagesTokens
-    // 가 model 의 preflight threshold 도달 시 차단형으로 Layer 2 (compactWithBoundary) 실행.
-    // 결과: ⑧ slot 갱신 + history 교체 + cumulativeUsage reset → 후속 step 6 build() 가
-    // 새 compact 결과를 반영. mid-loop reactive compact 영구 예방 (R13 sync chain + R14 lock).
+    // 가 model 의 preflight threshold 도달 시 차단형으로 LLM compact 실행.
+    // 결과: summary preamble 갱신 + history 교체 + cumulativeUsage reset → 후속 step 6 build() 가
+    // 새 compact 결과를 반영. mid-loop reactive compact 영구 예방.
     if (this.provider && !this.deps.disableSessionPersistence) {
       await this.runPreflightGuard(turnSignal, callbacks);
     }
@@ -1084,7 +1106,7 @@ export class ConversationLoop {
     // `originSource` slot; if we straddled an await we'd race.
     this.deps.systemPromptBuilder.setOriginSource?.(options?.originSource ?? null);
     // C2(c): scope the SkillOverlay section to this session id. The setter
-    // is optional on the prompt builder so legacy unit-test stubs without
+    // is optional on the prompt builder so focused unit-test stubs without
     // skill overlay support keep working unchanged.
     this.deps.systemPromptBuilder.setActiveSessionId?.(this.sessionId);
     this.deps.systemPromptBuilder.setActiveRolePrompt?.(options?.rolePrompt ?? null);
@@ -1175,7 +1197,7 @@ export class ConversationLoop {
         this.history.clear();
         this.history.restore(hookResult.compactedMessages);
       }
-      // §PR-3: cleaned text (markers stripped) replaces raw output for caller
+      // Cleaned text (markers stripped) replaces raw output for caller.
       if (hookResult.detector.cleanedText !== result.text) {
         result = { ...result, text: hookResult.detector.cleanedText };
       }
@@ -1183,15 +1205,15 @@ export class ConversationLoop {
       // fallback: PostTurnHookChain 미주입 시 기존 inline 로직 유지.
       // SubAgentRunner 의 child loop 가 이 경로를 사용 (`postTurnHookChain: undefined`)
       // — isolation contract 보존 (parent session 의 audit/extractMemory/idle-poke 미터치) +
-      // Layer 1 markStaleToolResults 만 child 에도 적용하여 child tool_result 가 parent
-      // 로 surface 되어 history 부풀리는 문제 방지 (v3 PR-1c).
+      // markStaleToolResults 만 child 에도 적용하여 child tool_result 가 parent
+      // 로 surface 되어 history 부풀리는 문제 방지.
       // cycle 1 MED: extractMemory 중복 제거 — memory-extract hook이
       // PostTurnHookChain에서 이미 처리하므로 fallback에서도 호출하지 않는다.
       // PostTurnHookChain을 주입한 경우와 fallback 모두 memory 추출은
       // hook chain의 memory-extract 단계에서만 일어난다.
       if (this.isAutoCompactEnabled()) {
-        // Layer 1 part marking — 항상 실행, 저비용. child loop 에서도 작동.
-        // PR-2-F-3: Stage 1b 제거 — Layer 0 preflight (next turn) 가 동등 압축 처리.
+        // Tool-result marking — 항상 실행, 저비용. child loop 에서도 작동.
+        // token preflight (next turn) 가 동등 압축 처리.
         // child loop 은 fire-and-forget 이라 turn budget 짧음 → markStaleToolResults 만으로 충분.
         const { messages: afterMark, result: mr } = markStaleToolResults(this.history.getMessages());
         if (mr.marked) {
@@ -1225,9 +1247,8 @@ export class ConversationLoop {
       this.deps.idleScheduler?.signalConversation();
     }
 
-    // PR-2-F-2: rotation orchestration 폐지. Layer 2 의 same-session checkpoint chain
-    // (`runPreflightGuard` 안의 appendCheckpoint) 으로 대체 — fork 없음, sessionId 불변.
-    // Turn 종료 후 별도 hook 불필요: Layer 0 가 다음 turn 진입 시 다시 평가.
+    // Same-session compact checkpoints run inside `runPreflightGuard`.
+    // No post-turn hook is needed; the next user turn re-evaluates token usage.
 
     // Turn aggregate footer — see TurnCallbacks.onTurnSummary doc above.
     // Tokens come from the LLM provider's usage report (Vercel AI SDK
@@ -1353,7 +1374,7 @@ export class ConversationLoop {
     let assistantRoundsRun = 0;
     // C3(a): effective round budget. Default = MAX_TOOL_ROUNDS (10); when a
     // caller supplies maxRounds (sub-agent runner) clamp to it. Negative or
-    // zero falls back to default so legacy callers keep working unchanged.
+    // zero falls back to default so callers keep working unchanged.
     const requestedMaxRounds = bounds?.maxRounds;
     const effectiveMaxRounds =
       typeof requestedMaxRounds === "number" && Number.isFinite(requestedMaxRounds) && requestedMaxRounds > 0
@@ -1447,7 +1468,7 @@ export class ConversationLoop {
         );
       }
 
-      // ─── Stream attempt — Layer 0 preflight 가 사전 압축 처리하므로 mid-loop retry 없음 ───
+      // ─── Stream attempt — token preflight 가 사전 압축 처리하므로 mid-loop retry 없음 ───
       const stream = await collectRoundStream({
         provider: turnProvider,
         model,
@@ -1460,12 +1481,12 @@ export class ConversationLoop {
         onTextDelta: callbacks?.onTextDelta,
       });
 
-      // EARLY-EXIT (R6 safety net): Layer 0 estimator drift 로 context_error 도달 시
+      // EARLY-EXIT (safety net): token estimator drift 로 context_error 도달 시
       // 사용자 안내 + turn 종료. retry 없음 — mid-loop history mutation 으로 LLM tool-chain
       // 손상되던 silent failure 패턴 영구 제거.
       if (stream.kind === "context_error") {
         log.warn(
-          `queryLoop: EARLY-EXIT(context_error after Layer 0) — round=${roundIndex} err="${(stream.errorMessage ?? "").slice(0, 100)}" (estimator drift suspected)`,
+          `queryLoop: EARLY-EXIT(context_error after token preflight) — round=${roundIndex} err="${(stream.errorMessage ?? "").slice(0, 100)}" (estimator drift suspected)`,
         );
         const userMsg =
           "대화 이력이 모델 한도를 초과했습니다. 새 메시지를 보내면 자동 압축이 다시 시도됩니다.";
@@ -1550,7 +1571,7 @@ export class ConversationLoop {
       // generateText() but defense in depth.
       const textContent = stripSuggestedReplies(streamText);
 
-      // R2-CR-1: cap BEFORE persisting to history. Anthropic + OpenAI strict
+      // Cap BEFORE persisting to history. Anthropic + OpenAI strict
       // APIs reject mismatches between assistant.tool_use blocks and the
       // tool_result blocks in the next user turn. If we keep the un-capped
       // pendingToolCalls in history, blocks 11..N never receive a matching
@@ -1572,7 +1593,7 @@ export class ConversationLoop {
         content: wasCapped ? `${textContent}\n\n[capped at ${MAX_TOOL_CALLS_PER_ROUND} of ${pendingToolCalls.length} tool_use blocks]` : textContent,
         ...(thoughtContent && { thought: thoughtContent }),
         ...(preserveThinkingBlocks && roundThinkingBlocks.length > 0 && { thinkingBlocks: roundThinkingBlocks }),
-        // R2-CR-1: persist only the capped slice — these are the only blocks
+        // Persist only the capped slice — these are the only blocks
         // that will receive a matching tool_result. Streaming UI still sees
         // the un-capped count below via the assistant-round callback so the
         // user can observe the original LLM intent (and the cap message).
@@ -1780,12 +1801,12 @@ export class ConversationLoop {
    * `runPreflightGuard` (auto) 와 `manualCompact` (manual) 가 동일 동작을 공유:
    *   1. `compactNum` 증가
    *   2. `history` 교체 (boundary stub + recentVerbatim)
-   *   3. `setSummaryPreamble` 로 ⑧ slot 갱신 (P1 sync chain)
+   *   3. `setSummaryPreamble` 로 prior-context summary 갱신
    *   4. `cumulativeUsage.inputTokens = estimatedAfter` reset
-   *   5. Layer 3 checkpoint append + saveSessionMetadata 영속화
+   *   5. checkpoint append + saveSessionMetadata 영속화
    *   6. `callbacks.onCompactOccurred` surface (사용자 가시 compact_notice)
    *
-   * Layer 3 storage 실패는 대화 차단 금지 — warn 후 계속.
+   * Checkpoint storage 실패는 대화 차단 금지 — warn 후 계속.
    */
   private async applyBoundaryToSession(
     result: import("./structured-compact.js").CompactWithBoundaryResult,
@@ -1814,7 +1835,7 @@ export class ConversationLoop {
       callbacks?.onCompactOccurred?.({
         removedMessages: result.removedCount,
         freedTokens: Math.max(0, estimatedBefore - result.estimatedAfter),
-        tier: trigger,
+        trigger,
         compactNum: this.compactNum,
         summary: `${result.removedCount}개 메시지 부분 절단됨`,
         estimatedAfter: result.estimatedAfter,
@@ -1826,8 +1847,8 @@ export class ConversationLoop {
 
     this.compactNum = result.boundary.compactNum;
 
-    // §C1: persist pre-compact verbatim history so branchFromCheckpoint can replay.
-    // wire-serialize stub applied (R4: avoids disk explosion from large tool results).
+    // Persist pre-compact verbatim history so branchFromCheckpoint can replay.
+    // wire-serialize stub applied to avoid disk explosion from large tool results.
     // Failure is non-fatal — warn and continue; branch-from-checkpoint will surface the
     // "no snapshot found" error at use-time rather than silently corrupting a compact.
     try {
@@ -1851,8 +1872,8 @@ export class ConversationLoop {
       ...(this.cumulativeUsage.cacheWriteTokens !== undefined && { cacheWriteTokens: 0 }),
     };
 
-    // Layer 3 — same-session checkpoint chain (§4.4).
-    // PR-2-E (#608) 정정: ctxUsageAtTrigger 분모는 *usable context window* (Cline buffer 적용).
+    // Same-session checkpoint chain.
+    // ctxUsageAtTrigger 분모는 *usable context window* (Cline buffer 적용).
     try {
       const llmSettings = this.deps.settingsService.get("llm");
       const provider = llmSettings.provider;
@@ -1875,14 +1896,14 @@ export class ConversationLoop {
         summaryPreamble: preamble,
       });
     } catch (storageErr) {
-      log.warn(`applyBoundaryToSession: Layer 3 checkpoint persist 실패 — ${(storageErr as Error).message}`);
+      log.warn(`applyBoundaryToSession: checkpoint persist failed — ${(storageErr as Error).message}`);
     }
 
     callbacks?.onCompactOccurred?.({
       removedMessages: result.removedCount,
       freedTokens: Math.max(0, estimatedBefore - result.estimatedAfter),
       estimatedAfter: result.estimatedAfter,
-      tier: trigger,
+      trigger,
       summary: preamble,
       compactNum: this.compactNum,
       compactStatus: result.status,
@@ -1891,20 +1912,20 @@ export class ConversationLoop {
   }
 
   /**
-   * Layer 0 — Pre-flight Guard (`infinity-session-redesign-v3.md` §4.1, P1 sync chain).
+   * Token preflight guard for same-session checkpoint compaction.
    *
    * step 5 (HISTORY_APPEND) 직후 호출 — `estimateMessagesTokens(history) >= getModelPreflightThreshold()`
-   * 시 차단형 await 로 Layer 2 (`compactWithBoundary`) 실행. 결과:
+   * 시 차단형 await 로 `compactWithBoundary` 실행. 결과:
    *   1. `compactNum` 증가
    *   2. `history` 교체 (boundary stub + recentVerbatim)
-   *   3. `setSummaryPreamble` 로 ⑧ slot 갱신 (P1 — step 6 진입 전 반드시 set)
+   *   3. `setSummaryPreamble` 로 prior-context summary 갱신
    *   4. `cumulativeUsage.inputTokens = estimatedAfter` (의미 정합 reset)
    *   5. `onCompactOccurred` 콜백 surface
    *
-   * R14 mitigation — `isCompacting` lock per ConversationLoop instance. 동시 turn 에서
-   * Layer 0 진입 race 시 두번째는 silent skip.
+   * `isCompacting` lock per ConversationLoop instance. 동시 turn 에서
+   * token preflight race 시 두번째는 silent skip.
    *
-   * mid-loop reactive compact 는 PR-2-F-1 에서 영구 제거됨 — context_error 도달 시
+   * Mid-loop reactive compact retry is intentionally absent — context_error 도달 시
    * early-exit signal 만 전달하고 stream-collector 가 사용자 안내 처리.
    */
   private async runPreflightGuard(
@@ -1950,7 +1971,7 @@ export class ConversationLoop {
     });
     try {
       log.info(
-        `preflight: TRIGGER — estimated=${estimated} >= preflight=${preflight} (model=${provider}/${model}) → Layer 2 compact #${this.compactNum + 1}`,
+        `preflight: TRIGGER — estimated=${estimated} >= preflight=${preflight} (model=${provider}/${model}) → LLM compact #${this.compactNum + 1}`,
       );
       // Adaptive preserve budget — usagePct 가 높을수록 더 공격적으로 줄여서
       // compact 가 항상 reduce 보장. red zone (usage >= 100%) 에서는 preserve=0
@@ -1973,11 +1994,11 @@ export class ConversationLoop {
       });
 
       if (compactResult.status === CompressionStatus.NOOP) {
-        log.info("preflight: Layer 2 returned NOOP (history within preserveRecentTokens) — no mutation");
+        log.info("preflight: LLM compact returned NOOP (history within preserveRecentTokens) — no mutation");
         return;
       }
 
-      // P1 sync chain — 다음 step 6 PROMPT_ASSEMBLE 가 새 boundary 를 read 해야 함.
+      // 다음 prompt assembly 가 새 boundary 를 read 해야 함.
       // onCompactOccurred (compactNum 포함) 은 applyBoundaryToSession 안에서 단일 emit.
       // 여기서 두 번째 emit 을 제거해 CheckpointDivider 중복 방지.
       await this.applyBoundaryToSession(compactResult, "auto-compact", estimated, callbacks, messagesBefore.length, messagesBefore);
@@ -1986,9 +2007,9 @@ export class ConversationLoop {
         `preflight: APPLIED — removed=${compactResult.removedCount} estimatedAfter=${compactResult.estimatedAfter} compactNum=${this.compactNum}`,
       );
     } catch (err) {
-      // Layer 2 실패 시 turn 자체는 계속 진행 — Layer 0 미적용 history 로 stream attempt.
+      // LLM compact 실패 시 turn 자체는 계속 진행 — compact 미적용 history 로 stream attempt.
       // context_error 도달 시 stream-collector 의 safety net 이 사용자 안내 처리.
-      log.warn(`preflight: Layer 2 failed — ${(err as Error).message}. context_error safety net 으로 위임.`);
+      log.warn(`preflight: LLM compact failed — ${(err as Error).message}. context_error safety net 으로 위임.`);
     } finally {
       this.isCompacting = false;
     }
@@ -2107,9 +2128,8 @@ export class ConversationLoop {
         result = `현재 벤더: ${this.getVendor()}\n세션: ${this.sessionId.slice(0, 8)}…\n누적 토큰: 입력 ${this.cumulativeUsage.inputTokens}, 출력 ${this.cumulativeUsage.outputTokens}`;
         break;
       case "compact": {
-        // PR-2-F-4: extractive compactMessages → LLM-based compactWithBoundary 마이그레이션.
-        // manualCompact 가 Layer 2 path 를 사용 (12-section structured summary + freezeBoundary +
-        // ⑧ slot 갱신 + summaryPreamble 영속화 + Layer 3 checkpoint append 포함).
+        // manualCompact uses the LLM compact path (12-section structured summary +
+        // freezeBoundary + summaryPreamble persistence + checkpoint append).
         // callbacks 전달 — onCompactOccurred 가 renderer 에 compact_notice 이벤트 전달 가능.
         const r = await this.manualCompact(callbacks);
         result = r.summary;
@@ -2290,7 +2310,6 @@ export class ConversationLoop {
     return `Hook 영구 거부됨: ${result.rejected.fileName}\ntrusted=${result.trusted.length}`;
   }
 
-  // PR-2-F-2: 3-tier rotation 폐지 — Layer 0/2/3 가 same-session checkpoint chain
-  // (Copilot 패턴) 으로 대체. `runRotationCheck`, `createChildSession`, `rotateActive`,
-  // `decideRotation` 모두 제거. fork 없음 — sessionId 불변.
+  // Compaction uses same-session checkpoints. Automatic session forks are not
+  // part of the compact path; forks only happen through explicit user action.
 }

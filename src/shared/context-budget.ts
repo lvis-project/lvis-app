@@ -11,8 +11,7 @@
  *   headroom — single tool-result rounds blow past it. Cline's empirical
  *   buffers (27K / 30K / 40K) prevent this asymmetric pinch.
  *
- * Source: github.com/cline/cline `src/core/context/context-management/
- *         context-window-utils.ts` (Lvis ref `reference_token_session_4source.md` §2)
+ * Source: github.com/cline/cline `src/core/context/context-management/context-window-utils.ts`
  */
 
 /**
@@ -37,11 +36,11 @@ export function getUsableContext(contextWindow: number): number {
 }
 
 /**
- * Layer 0 pre-flight 트리거 임계 — `infinity-session-redesign-v3.md` §6.
+ * Token preflight trigger threshold — same-session checkpoint compaction.
  *
  * `getUsableContext()` 와 *별도 함수* — 의미가 다름:
  *   - `getUsableContext`  = 분모 (전체 컨텍스트 윈도우의 사용 가능 portion)
- *   - `getPreflightThreshold` = 트리거 (usable 의 conservative %, Layer 2 압축 진입점)
+ *   - `getPreflightThreshold` = 트리거 (usable 의 conservative %, LLM compact 진입점)
  *
  * 두 함수가 같은 구조라도 분리해야 향후 임계 비율을 모델 출시/관측치 기반으로
  * 독립 조정 가능.
@@ -57,7 +56,7 @@ export function getUsableContext(contextWindow: number): number {
  *   - 1M   context  → 60 %  of usable  (≈ 576K)
  *   - other         → 55 %  of usable
  *
- * 근거: Gemini CLI 의 50% 추세 (PR #13517) + estimator undercount 실측 보정.
+ * 근거: Gemini CLI 의 50% 추세 + estimator undercount 실측 보정.
  *
  * @returns 절대 token count (Math.floor(usable × pct)). 0 if input invalid.
  */

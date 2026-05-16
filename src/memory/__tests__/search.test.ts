@@ -311,4 +311,49 @@ describe("MemoryManager.listSessionEntries", () => {
     expect(sessions[0].id).toBe(sessionId);
     expect(sessions[0].preview).toContain("미리보기를 생략");
   });
+
+  it("defaults list/search APIs to main sessions and requires explicit routine scope", async () => {
+    const mainId = "11111111-2222-3333-4444-555555555555";
+    const routineSessionId = "22222222-3333-4444-5555-666666666666";
+    const routineIdOnlySessionId = "33333333-4444-5555-6666-777777777777";
+    await mm.saveSession(mainId, [{ role: "user", content: "needle main" }]);
+    await mm.saveSessionMetadata(mainId, { sessionKind: "main", title: "Main" });
+    await mm.saveSession(routineSessionId, [{ role: "user", content: "needle routine" }]);
+    await mm.saveSessionMetadata(routineSessionId, {
+      sessionKind: "routine",
+      routineId: "routine-a",
+      routineTitle: "Routine A",
+    });
+    await mm.saveSession(routineIdOnlySessionId, [{ role: "user", content: "needle routine id only" }]);
+    await mm.saveSessionMetadata(routineIdOnlySessionId, { routineId: "routine-a", title: "Routine id only" });
+
+    expect(mm.listSessions().map((s) => s.id)).toEqual(expect.arrayContaining([mainId, routineIdOnlySessionId]));
+    expect(mm.listSessions().map((s) => s.id)).not.toContain(routineSessionId);
+    expect(mm.listSessions({ kind: "routine" }).map((s) => s.id)).toEqual([routineSessionId]);
+    expect(mm.listSessionsByRoutine("routine-a").map((s) => s.id)).toEqual([routineSessionId]);
+    expect(mm.searchSessions("needle").map((s) => s.sessionId)).toEqual(expect.arrayContaining([mainId, routineIdOnlySessionId]));
+    expect(mm.searchSessions("needle").map((s) => s.sessionId)).not.toContain(routineSessionId);
+    expect(mm.searchSessions("needle", { kind: "routine" }).map((s) => s.sessionId)).toEqual([routineSessionId]);
+  });
+
+  it("deleteSession removes the jsonl, metadata, per-session archive, checkpoint snapshots, and diff sidecars", async () => {
+    const sessionId = "44444444-5555-6666-7777-888888888888";
+    const sessionsDir = join(dir, "sessions");
+    const diffCacheDir = join(dir, "diff-cache", sessionId);
+    await mm.saveSession(sessionId, [{ role: "user", content: "delete me" }]);
+    await mm.saveSessionMetadata(sessionId, { sessionKind: "main", title: "Delete me" });
+    await mm.saveCheckpointSnapshot(sessionId, 1, [{ role: "user", content: "snapshot" }]);
+    mkdirSync(join(sessionsDir, sessionId, "truncated"), { recursive: true });
+    writeFileSync(join(sessionsDir, sessionId, "truncated", "0.jsonl"), "archive", "utf-8");
+    mkdirSync(diffCacheDir, { recursive: true });
+    writeFileSync(join(diffCacheDir, "tool-call.json"), "diff", "utf-8");
+
+    mm.deleteSession(sessionId);
+
+    expect(existsSync(join(sessionsDir, `${sessionId}.jsonl`))).toBe(false);
+    expect(existsSync(join(sessionsDir, `${sessionId}.meta.json`))).toBe(false);
+    expect(existsSync(join(sessionsDir, sessionId))).toBe(false);
+    expect(existsSync(join(sessionsDir, ".checkpoints", sessionId))).toBe(false);
+    expect(existsSync(diffCacheDir)).toBe(false);
+  });
 });

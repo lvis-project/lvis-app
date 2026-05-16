@@ -7,6 +7,7 @@ import { RoutineEngine } from "../routine-engine.js";
 function makeLoop(opts: { text?: string; throws?: boolean } = {}) {
   return {
     getSessionId: vi.fn(() => "test-session-id"),
+    startRoutineConversation: vi.fn(async () => "test-session-id"),
     runTurn: vi.fn(async () => {
       if (opts.throws) throw new Error("loop crashed");
       return { text: opts.text ?? "루틴 완료 메시지", toolCalls: [], route: "llm" };
@@ -29,6 +30,12 @@ describe("RoutineEngine.runRoutine", () => {
     expect(result.routineId).toBe("schedule-daily");
     expect(result.trigger).toBe("schedule");
     expect(typeof result.generatedAt).toBe("string");
+    expect(result.sessionId).toBe("test-session-id");
+    expect(loop.startRoutineConversation).toHaveBeenCalledWith(
+      "schedule-daily",
+      "schedule-daily",
+      expect.any(String),
+    );
     expect(loop.runTurn).toHaveBeenCalledWith(
       "오늘 하루 알려줘.",
       undefined,
@@ -53,6 +60,7 @@ describe("RoutineEngine.runRoutine", () => {
   it("returns missing-tag marker when runTurn returns no <summary> tag", async () => {
     const loop = {
       getSessionId: vi.fn(() => "test-session-id"),
+      startRoutineConversation: vi.fn(async () => "test-session-id"),
       runTurn: vi.fn(async () => ({ text: "", toolCalls: [], route: "llm" })),
       dispose: vi.fn(),
     };

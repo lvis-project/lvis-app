@@ -115,7 +115,7 @@ function SingleToolInline({
   const [open, setOpen] = useState(false);
   const [scriptAllowed, setScriptAllowed] = useState(false);
 
-  // PR-4: stub result — render collapsible CompactedToolResult instead of raw block.
+  // Stub result — render collapsible CompactedToolResult instead of raw block.
   // Compaction marks tool_results by role+length, independent of error status,
   // so error tool_results can also be stubs.
   const isStubResult =
@@ -237,7 +237,7 @@ export function ToolGroupCard({
 }: {
   group: Extract<ChatEntry, { kind: "tool_group" }>;
   embedded?: boolean;
-  /** PR-4: active session id for verbatim IPC fetch. When provided, stub results render as CompactedToolResult. */
+  /** Active session id for verbatim IPC fetch. When provided, stub results render as CompactedToolResult. */
   sessionId?: string;
 }) {
   // All hooks must be declared before any conditional return (Rules of Hooks)
@@ -348,7 +348,7 @@ export function ToolGroupCard({
                         <div className={`mb-0.5 text-[9px] uppercase opacity-60 ${tool.status === "error" ? "text-destructive" : ""}`}>
                           {tool.status === "error" ? "오류" : "결과"}
                         </div>
-                        {/* PR-4: stub results render as collapsible CompactedToolResult */}
+                        {/* Stub results render as collapsible CompactedToolResult. */}
                         {tool.result.startsWith("[tool_result stripped:") && sessionId ? (
                           <CompactedToolResult
                             toolUseId={tool.toolUseId}
