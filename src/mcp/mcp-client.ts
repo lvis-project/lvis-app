@@ -46,6 +46,7 @@ import {
   validateHttpUrl,
 } from "../core/network-guard.js";
 import { createLogger } from "../lib/logger.js";
+import { resolveStdioSpawnCommand } from "./uvx-command.js";
 const log = createLogger("mcp-client");
 
 // ─── JSON-RPC 2.0 Types ──────────────────────────────
@@ -618,8 +619,9 @@ class StdioTransport implements McpTransport {
     if (!this.config.command) {
       throw new Error(`[mcp-client] stdio transport에 command가 필요합니다.`);
     }
+    const spawnCommand = resolveStdioSpawnCommand(this.config.command, this.config.args ?? []);
 
-    this.process = spawn(this.config.command, this.config.args ?? [], {
+    this.process = spawn(spawnCommand.command, spawnCommand.args, {
       stdio: ["pipe", "pipe", "pipe"],
       // Windows: 콘솔 창 생성 방지 (창이 뜨면 stdout 파이프 동작이 달라짐)
       windowsHide: true,
@@ -632,6 +634,9 @@ class StdioTransport implements McpTransport {
         LANG: process.env.LANG,
         NODE_ENV: process.env.NODE_ENV,
         ...this.config.env, // 관리자 승인 환경변수만
+        ...(this.config.apiKey && this.config.apiKeyEnv
+          ? { [this.config.apiKeyEnv]: this.config.apiKey }
+          : {}),
       },
     });
 
@@ -695,7 +700,8 @@ class StdioTransport implements McpTransport {
     this.process.stderr?.on("data", (chunk: Buffer) => {
       const text = chunk.toString("utf-8").trim();
       if (text) {
-        log.warn(`${this.config.id} stderr: %s`, text);
+        // MEDIUM-4: scrub secrets before logging stderr output from MCP child processes
+        log.warn(`${this.config.id} stderr: %s`, scrubSecrets(text));
       }
     });
 
@@ -849,14 +855,25 @@ class HttpTransport implements McpTransport {
     // Build and validate request headers. `config.headers` comes from admin
     // governance but we still strip CRLF-injection attempts — no trusted
     // source should be immune from hardening.
+    // HIGH-1: normalize all header names to lowercase to prevent case-collision
+    // between admin-supplied headers and apiKey injection (e.g. both
+    // `Authorization` and `authorization` co-existing in the same object).
     const headers: Record<string, string> = {
       "content-type": "application/json",
       // Streamable HTTP servers may return either JSON or SSE.
       accept: "application/json, text/event-stream",
-      ...this.config.headers,
     };
-    if (this.config.apiKey && !hasAuthorization(headers)) {
-      headers.authorization = `Bearer ${this.config.apiKey}`;
+    for (const [k, v] of Object.entries(this.config.headers ?? {})) {
+      headers[k.toLowerCase()] = v;
+    }
+    if (this.config.apiKey) {
+      if (this.config.apiKeyHeader) {
+        // Single write using normalized key — no double-set risk
+        const normalizedKey = this.config.apiKeyHeader.toLowerCase();
+        headers[normalizedKey] = this.config.apiKey;
+      } else if (!hasAuthorization(headers)) {
+        headers.authorization = `Bearer ${this.config.apiKey}`;
+      }
     }
 
     const body = JSON.stringify(message);
@@ -1062,7 +1079,7 @@ function hasAuthorization(headers: Record<string, string>): boolean {
  * might reflect from MCP HTTP responses: bearer tokens, API keys in headers,
  * query params, and JSON payloads.
  */
-function scrubSecrets(text: string): string {
+export function scrubSecrets(text: string): string {
   return text
     .replace(/[Bb]earer\s+[A-Za-z0-9._\-~+/=]+/g, "Bearer [redacted]")
     .replace(

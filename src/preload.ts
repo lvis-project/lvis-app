@@ -698,6 +698,7 @@ const api = {
     getConfigs: async () => ipcRenderer.invoke("lvis:mcp:config:get"),
     getConfigPath: async () => ipcRenderer.invoke("lvis:mcp:config:path"),
     addConfig: async (config: McpServerConfig) => ipcRenderer.invoke("lvis:mcp:config:add", config),
+    setApiKey: async (id: string, apiKey: string) => ipcRenderer.invoke("lvis:mcp:config:set-api-key", id, apiKey),
     removeConfig: async (id: string) => ipcRenderer.invoke("lvis:mcp:config:remove", id),
     readUiResource: async (serverId: string, uri: string) => ipcRenderer.invoke("lvis:mcp:ui-resource", serverId, uri) as Promise<string>,
   },
