@@ -94,13 +94,18 @@ export function SettingsContent({
   const s = useSettingsOrchestration(open, api, onSaved, onOpenChange);
 
   // Per-tab debounced save handlers. Toggle / radio / slider controls
-  // call these `schedule` functions; rapid bursts (e.g. dragging a slider)
-  // collapse into a single `s.save(tab)` call 200ms after the most recent
-  // change. The deferred-save Save button calls `s.save(tab)` directly.
-  const llmAutoSave = useDebouncedSave(() => void s.save("llm")).schedule;
-  const chatAutoSave = useDebouncedSave(() => void s.save("chat")).schedule;
-  const webAutoSave = useDebouncedSave(() => void s.save("web")).schedule;
-  const marketplaceAutoSave = useDebouncedSave(() => void s.save("marketplace")).schedule;
+  // call `.schedule()`; rapid bursts (slider drag) collapse into a single
+  // `s.save(tab, { closeOnDone: false })` call 200ms after the most recent
+  // change. The explicit TabSaveBar Save button calls `.cancel()` first
+  // to avoid a double-write race (pending debounce + click on Save would
+  // otherwise fire `s.save` twice), then `s.save(tab)` with the default
+  // `closeOnDone: true`. `closeOnDone: false` for the debounce path is
+  // critical: without it, every immediate-apply toggle would close the
+  // dialog 200ms later.
+  const llmSave = useDebouncedSave(() => void s.save("llm", { closeOnDone: false }));
+  const chatSave = useDebouncedSave(() => void s.save("chat", { closeOnDone: false }));
+  const webSave = useDebouncedSave(() => void s.save("web", { closeOnDone: false }));
+  const marketplaceSave = useDebouncedSave(() => void s.save("marketplace", { closeOnDone: false }));
 
   useEffect(() => {
     if (open) setTab(normalizeSettingsTab(initialTab));
@@ -178,9 +183,16 @@ export function SettingsContent({
               fallbackOpen={s.fallbackOpen}
               setFallbackOpen={s.setFallbackOpen}
               onSaved={onSaved}
-              onImmediateChange={llmAutoSave}
+              onImmediateChange={llmSave.schedule}
             />
-            <TabSaveBar onSave={() => void s.save("llm")} saving={s.saving} settingsLoaded={s.settingsLoaded} />
+            <TabSaveBar
+              onSave={() => {
+                llmSave.cancel();
+                void s.save("llm");
+              }}
+              saving={s.saving}
+              settingsLoaded={s.settingsLoaded}
+            />
           </TabsContent>
 
           <TabsContent value="appearance">
@@ -198,9 +210,9 @@ export function SettingsContent({
               piiRedactEnabled={s.piiRedactEnabled}
               onPiiRedactToggle={() => {
                 s.setPiiRedactEnabled(!s.piiRedactEnabled);
-                chatAutoSave();
+                chatSave.schedule();
               }}
-              onImmediateChange={chatAutoSave}
+              onImmediateChange={chatSave.schedule}
             />
             {/* ChatTab is fully immediate-apply — no deferred-save bar needed. */}
           </TabsContent>
@@ -215,9 +227,16 @@ export function SettingsContent({
               webKeyInput={s.webKeyInput}
               setWebKeyInput={s.setWebKeyInput}
               onSaved={onSaved}
-              onImmediateChange={webAutoSave}
+              onImmediateChange={webSave.schedule}
             />
-            <TabSaveBar onSave={() => void s.save("web")} saving={s.saving} settingsLoaded={s.settingsLoaded} />
+            <TabSaveBar
+              onSave={() => {
+                webSave.cancel();
+                void s.save("web");
+              }}
+              saving={s.saving}
+              settingsLoaded={s.settingsLoaded}
+            />
           </TabsContent>
 
           <TabsContent value="permissions"><PermissionsTab /></TabsContent>
@@ -239,9 +258,16 @@ export function SettingsContent({
               apiKeyInput={s.marketplaceApiKeyInput}
               setApiKeyInput={s.setMarketplaceApiKeyInput}
               onSaved={onSaved}
-              onImmediateChange={marketplaceAutoSave}
+              onImmediateChange={marketplaceSave.schedule}
             />
-            <TabSaveBar onSave={() => void s.save("marketplace")} saving={s.saving} settingsLoaded={s.settingsLoaded} />
+            <TabSaveBar
+              onSave={() => {
+                marketplaceSave.cancel();
+                void s.save("marketplace");
+              }}
+              saving={s.saving}
+              settingsLoaded={s.settingsLoaded}
+            />
           </TabsContent>
         </Tabs>
     </>

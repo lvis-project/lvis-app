@@ -22,8 +22,16 @@ export interface DebouncedSave {
  * every render. Only the most recent `saveFn` runs when the timer fires.
  */
 export function useDebouncedSave(saveFn: () => void, ms = 200): DebouncedSave {
+  // Keep the latest `saveFn` in a ref so the debounced callback always
+  // sees the most recent closure (with the most recent component state)
+  // when the timer eventually fires. Update via `useEffect` rather than a
+  // render-body assignment — concurrent rendering can discard a render,
+  // and a discarded render would leave the ref pointing at a closure
+  // captured from an aborted commit.
   const savedFn = useRef(saveFn);
-  savedFn.current = saveFn;
+  useEffect(() => {
+    savedFn.current = saveFn;
+  });
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const cancel = useCallback(() => {
