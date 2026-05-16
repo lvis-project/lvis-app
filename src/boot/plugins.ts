@@ -13,6 +13,7 @@ import type { ToolRegistry } from "../tools/registry.js";
 import type { Tool } from "../tools/base.js";
 import type { SettingsService } from "../data/settings-store.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
+import type { NotificationService } from "../main/notification-service.js";
 import { classifySubscription } from "../plugins/capabilities.js";
 import { pluginToolsForRegistration } from "../plugins/plugin-tool-adapter.js";
 import { type EventHandler, onEvent, offEvent } from "./types.js";
@@ -221,10 +222,33 @@ export function registerPluginEventBridge(
   };
 }
 
-/** manifest.notificationEvents 선언 기반으로 OS 알림을 등록한다. 플러그인 특정 코드 없음. */
+/**
+ * manifest.notificationEvents 선언 기반으로 OS 알림을 등록한다.
+ *
+ * Routes every plugin emit through {@link NotificationService} (#841) so
+ * plugin notifications inherit:
+ *   - per-kind cooldown (5 s for `plugin`) — defangs a runaway plugin
+ *     emitting 30 events/sec from blasting OS toasts
+ *   - 80-char body cap + ANSI/markdown/control-char stripping
+ *   - in-app toast vs OS routing decision (NotificationService.fire picks
+ *     based on `isAnyWindowFocused()` — #842, multi-window safe)
+ *   - click-to-restore-minimized
+ *   - structured `notification.fired` / `notification.suppressed` audit rows
+ *
+ * Per-event `bypassFocusGate?: boolean` (#843) opts out of the focus
+ * suppression for critical surfaces (`meeting.starting-soon`,
+ * `approval.deadline-imminent`, etc.) — the OS notification fires
+ * regardless of any focused LVIS window.
+ *
+ * The `mainWindow` parameter is retained for the early `isSupported()` /
+ * destroyed-window guard; the actual fire pipeline goes through
+ * `notificationService` (which has its own live `getMainWindow` getter for
+ * the click-restore path).
+ */
 export function registerPluginNotifications(
   pluginRuntime: PluginRuntime,
   mainWindow: BrowserWindow,
+  notificationService: NotificationService,
   auditLogger?: Pick<AuditLogger, "log">,
 ): () => void {
   if (!Notification.isSupported()) return () => {};
@@ -257,35 +281,22 @@ export function registerPluginNotifications(
         log.warn(`boot: notificationEvents[${event}].bodyField must be string, skipped`);
         continue;
       }
+      if (spec.bypassFocusGate !== undefined && typeof spec.bypassFocusGate !== "boolean") {
+        log.warn(`boot: notificationEvents[${event}].bypassFocusGate must be boolean, skipped`);
+        continue;
+      }
       if (registeredEvents.has(event)) {
         log.warn(`boot: duplicate notificationEvents entry for "${event}" — keeping first, skipping rest`);
         continue;
       }
       registeredEvents.add(event);
-      const { titleField, bodyField } = spec;
+      const { titleField, bodyField, bypassFocusGate } = spec;
       const handler: EventHandler = (data) => {
-        // Focus gate — plugin events fire on every turn-end / job-complete
-        // and the prior unconditional `new Notification(...)` produced a
-        // pop on every cycle even when the user was actively typing in the
-        // chat. Match the policy enforced by NotificationService: native OS
-        // notifications are reserved for "user is away" cues.
-        //
-        // Destroyed-window semantics: the `!isDestroyed()` short-circuit
-        // evaluates `focused === false`, so the gate falls through to fire an
-        // OS notification even after the window is gone. The click handler
-        // below then no-ops via its own `isDestroyed()` guard — a graceful
-        // degradation, not a uniform stance with the click handler (which
-        // returns early on destroyed).
-        const focused =
-          !mainWindow.isDestroyed() &&
-          mainWindow.isFocused() &&
-          !mainWindow.isMinimized();
-        if (focused) {
-          // Structured audit row mirrors NotificationService.auditSuppressed.
-          // pluginId is included so field telemetry can attribute runaway
-          // emit loops to a specific plugin (the dev-time `log.debug` is
-          // filtered out at the default production log level).
-          log.debug(`plugin notification "${event}" suppressed — window focused`);
+        // Defensive: if the main window is destroyed between plugin emit and
+        // dispatch, the click-restore inside NotificationService no-ops, but
+        // we still audit the attempt so field telemetry can attribute
+        // emit-during-shutdown to the originating plugin.
+        if (mainWindow.isDestroyed()) {
           try {
             auditLogger?.log({
               timestamp: new Date().toISOString(),
@@ -294,7 +305,7 @@ export function registerPluginNotifications(
               input: JSON.stringify({
                 event: "notification.suppressed",
                 kind: "plugin",
-                reason: "window-focused",
+                reason: "window-destroyed",
                 pluginId,
                 pluginEvent: event,
               }),
@@ -307,14 +318,16 @@ export function registerPluginNotifications(
         const resolvedTitle = titleField ? getFieldByPath(data, titleField) : "";
         const title = resolvedTitle || event;
         const body = bodyField ? getFieldByPath(data, bodyField) : "";
-        const notif = new Notification({ title, body, silent: false });
-        notif.on("click", () => {
-          // macOS에서 창 닫힌 뒤에도 알림이 살아 있을 수 있음 — destroyed 창 접근 시 throw 방지
-          if (mainWindow.isDestroyed()) return;
-          mainWindow.show();
-          mainWindow.focus();
+        // Route through NotificationService — inherits focus gate (#842
+        // multi-window-aware), cooldown, truncation, sanitization, click
+        // restore, and audit. `bypassFocusGate` (#843) passes through to
+        // FireOptions so meeting.starting-soon etc. fire regardless of focus.
+        notificationService.fire({
+          kind: "plugin",
+          title,
+          body,
+          bypassFocusGate: bypassFocusGate === true,
         });
-        notif.show();
       };
       onEvent(event, handler);
       registered.push({ type: event, handler });
