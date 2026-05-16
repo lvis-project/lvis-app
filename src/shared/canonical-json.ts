@@ -45,10 +45,11 @@
  *                        `Array.from(set).sort()` before calling.
  *   - `function`       → `JSON.stringify` returns `undefined` (the
  *                        whole property is dropped at the parent level).
- *                        At the top level our `?? "null"` fallback maps
- *                        it to the literal string `"null"`. Functions
- *                        should never reach this layer; if they do, the
- *                        symmetry guarantee no longer applies.
+ *                        At the top level the early `value === undefined`
+ *                        return maps it to the literal string `"null"`.
+ *                        Functions should never reach this layer; if
+ *                        they do, the symmetry guarantee no longer
+ *                        applies.
  *   - `Symbol`         → same as function (`JSON.stringify` drops keys
  *                        whose value is Symbol, returns `undefined` at
  *                        top level → `"null"` here).
