@@ -362,9 +362,9 @@ export function PluginConfigTab() {
           설치된 플러그인이 없습니다.
         </div>
       ) : (
-        <div className="flex gap-3 h-[400px]">
+        <div className="flex gap-3 min-h-[520px] max-h-[70dvh]">
           {/* Left: plugin list */}
-          <div className="w-48 shrink-0 rounded-md border bg-card">
+          <div className="w-60 shrink-0 rounded-md border bg-card">
             <ScrollArea className="h-full">
               <div className="p-1 space-y-0.5">
                 {plugins.map((p) => (

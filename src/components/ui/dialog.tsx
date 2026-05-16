@@ -20,10 +20,11 @@ import { cn } from "../../lib/utils.js";
  *      notification cards which never compete with a backdrop).
  *
  *  Size variants:
- *    sm  max-w-md  (448px) — confirmations
- *    md  max-w-lg  (512px) — default
- *    lg  max-w-2xl (672px) — approval / queue / session detail
- *    xl  max-w-3xl (768px) — settings + multi-tab consoles
+ *    sm   max-w-md  (448px)  — confirmations
+ *    md   max-w-lg  (512px)  — default
+ *    lg   max-w-2xl (672px)  — approval / queue / session detail
+ *    xl   max-w-3xl (768px)  — multi-tab consoles
+ *    2xl  max-w-5xl (1024px) — settings (plugin detail / per-section saves)
  *
  *  Consumers normally just write `<DialogContent size="lg">`. Specialized
  *  dialogs (e.g. ToolApprovalDialog) that need edge-to-edge inner sections
@@ -65,6 +66,7 @@ const dialogContentVariants = cva(
         md: "max-w-lg",
         lg: "max-w-2xl",
         xl: "max-w-3xl",
+        "2xl": "max-w-5xl",
       },
     },
     defaultVariants: {

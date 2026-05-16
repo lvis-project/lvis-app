@@ -12,6 +12,16 @@
  *   boolean                      → <Checkbox> toggle
  *   array of string              → tag-style multi input (comma split)
  *
+ * Save semantics (post-2026-05-16 UX overhaul):
+ *   - Checkbox (boolean) + NativeSelect (enum) — apply on change with a
+ *     200ms trailing debounce. Rapid toggles collapse into a single
+ *     `pluginConfig.set` (which triggers a plugin restart), so user gets
+ *     immediate feel without restart spam.
+ *   - Text / number / array inputs — edit a local draft and only persist
+ *     when the section "변경사항 저장" button is clicked.
+ *   - Secret fields — per-field 저장 button on a separate IPC path
+ *     (`pluginConfig.setSecret`). Never enters the cleartext draft.
+ *
  * The form falls back gracefully when a property type is unknown — the
  * field is rendered as a read-only display so the user is not silently
  * locked out of declared settings.
@@ -23,6 +33,7 @@ import { Input } from "../../../components/ui/input.js";
 import { Label } from "../../../components/ui/label.js";
 import { NativeSelect, NativeSelectOption } from "../../../components/ui/native-select.js";
 import type { PluginConfigSchemaPropertySummary, PluginConfigSchemaSummary } from "../types.js";
+import { useDebouncedSave } from "../hooks/use-debounced-save.js";
 
 export type PluginConfigFormValues = Record<string, unknown>;
 
@@ -37,6 +48,9 @@ export interface PluginConfigSchemaFormProps {
   onSave: (values: PluginConfigFormValues) => Promise<void> | void;
   onSetSecret: (key: string, value: string) => Promise<void> | void;
 }
+
+/** Debounce window for immediate-apply controls (toggle / enum select). */
+const IMMEDIATE_SAVE_DEBOUNCE_MS = 200;
 
 function deriveLabel(key: string, prop: PluginConfigSchemaPropertySummary): string {
   return prop.title?.trim() || key;
@@ -110,26 +124,55 @@ export function PluginConfigSchemaForm({
   const [secretSaving, setSecretSaving] = useState<Record<string, boolean>>({});
   const required = new Set(schema.required ?? []);
 
-  const handleSave = useCallback(async () => {
-    // Strip secret fields — they have a dedicated path. Anything else is
-    // saved together so plugins always see a single coherent commit.
-    const out: PluginConfigFormValues = {};
-    for (const key of propertyKeys) {
-      const prop = properties[key];
-      if (prop.type === "string" && prop.format === "secret") continue;
-      const v = draft[key];
-      if (v === undefined || v === "") {
-        if (required.has(key)) {
-          // surface as a top-level alert by leaving the value out — the
-          // host's AJV validator will reject and return a structured
-          // message.
-        }
-        continue;
+  const buildOut = useCallback(
+    (source: PluginConfigFormValues): PluginConfigFormValues => {
+      const out: PluginConfigFormValues = {};
+      for (const key of propertyKeys) {
+        const prop = properties[key];
+        if (prop.type === "string" && prop.format === "secret") continue;
+        const v = source[key];
+        if (v === undefined || v === "") continue;
+        out[key] = v;
       }
-      out[key] = v;
-    }
-    await onSave(out);
-  }, [draft, properties, propertyKeys, required, onSave]);
+      return out;
+    },
+    [properties, propertyKeys],
+  );
+
+  const saveDraft = useCallback(
+    async (source: PluginConfigFormValues) => {
+      await onSave(buildOut(source));
+    },
+    [buildOut, onSave],
+  );
+
+  // Trailing-edge debounce: rapid toggle bursts collapse into a single
+  // pluginConfig.set so we don't fire one plugin restart per click.
+  const autoSave = useDebouncedSave(
+    () => {
+      void saveDraft(draft);
+    },
+    IMMEDIATE_SAVE_DEBOUNCE_MS,
+  );
+
+  const handleManualSave = useCallback(() => {
+    autoSave.cancel();
+    void saveDraft(draft);
+  }, [autoSave, draft, saveDraft]);
+
+  /** Update + schedule auto-save (200ms debounce). For toggle/enum. */
+  const updateImmediate = useCallback(
+    (key: string, value: unknown) => {
+      setDraft((prev) => ({ ...prev, [key]: value }));
+      autoSave.schedule();
+    },
+    [autoSave],
+  );
+
+  /** Update local draft only. For text/number/array — explicit save. */
+  const updateDraft = useCallback((key: string, value: unknown) => {
+    setDraft((prev) => ({ ...prev, [key]: value }));
+  }, []);
 
   const handleSetSecret = useCallback(
     async (key: string) => {
@@ -144,6 +187,17 @@ export function PluginConfigSchemaForm({
     },
     [secretDrafts, onSetSecret],
   );
+
+  // Only show the section-level "변경사항 저장" button when there is at
+  // least one explicit-save field (text/number/array). Pure toggle/enum
+  // forms auto-save and the button would just be visual noise.
+  const hasExplicitSaveFields = propertyKeys.some((key) => {
+    const prop = properties[key];
+    if (prop.type === "string" && prop.format === "secret") return false;
+    if (prop.type === "boolean") return false;
+    if (prop.enum) return false;
+    return true;
+  });
 
   return (
     <div data-testid={`plugin-config-form:${pluginId}`} className="flex flex-col gap-3">
@@ -203,7 +257,7 @@ export function PluginConfigSchemaForm({
                       : prop.type === "boolean"
                         ? raw === "true"
                         : raw;
-                  setDraft((prev) => ({ ...prev, [key]: next }));
+                  updateImmediate(key, next);
                 }}
               >
                 <NativeSelectOption value="" disabled>
@@ -220,7 +274,7 @@ export function PluginConfigSchemaForm({
                 <Checkbox
                   id={fieldId}
                   checked={Boolean(value ?? prop.default ?? false)}
-                  onCheckedChange={(checked) => setDraft((prev) => ({ ...prev, [key]: checked === true }))}
+                  onCheckedChange={(checked) => updateImmediate(key, checked === true)}
                 />
                 <span className="text-muted-foreground">{label} 활성화</span>
               </Label>
@@ -241,7 +295,7 @@ export function PluginConfigSchemaForm({
                     .split(",")
                     .map((s) => s.trim())
                     .filter((s) => s.length > 0);
-                  setDraft((prev) => ({ ...prev, [key]: tokens }));
+                  updateDraft(key, tokens);
                 }}
               />
             ) : prop.type === "number" || prop.type === "integer" ? (
@@ -258,7 +312,7 @@ export function PluginConfigSchemaForm({
                 }
                 onChange={(e) => {
                   const next = coerceNumber(e.target.value, prop);
-                  setDraft((prev) => ({ ...prev, [key]: next }));
+                  updateDraft(key, next);
                 }}
                 step={prop.type === "integer" ? 1 : "any"}
                 min={prop.minimum}
@@ -269,7 +323,7 @@ export function PluginConfigSchemaForm({
                 id={fieldId}
                 className="h-7 text-xs"
                 value={typeof value === "string" ? value : (prop.default as string | undefined) ?? ""}
-                onChange={(e) => setDraft((prev) => ({ ...prev, [key]: e.target.value }))}
+                onChange={(e) => updateDraft(key, e.target.value)}
                 maxLength={prop.maxLength}
               />
             )}
@@ -286,11 +340,21 @@ export function PluginConfigSchemaForm({
           향후 UI Slot System(§9.3) 을 통해 자동 마운트될 예정입니다.
         </div>
       )}
-      <div className="flex justify-end">
-        <Button size="sm" onClick={() => void handleSave()} disabled={Boolean(saving)}>
-          {saving ? "저장 중…" : "저장"}
-        </Button>
-      </div>
+      {hasExplicitSaveFields && (
+        <div className="flex items-center justify-between gap-3 border-t border-border/40 pt-2">
+          <p className="text-[10px] text-muted-foreground">
+            토글 · 드롭다운은 자동 저장됩니다. 입력 필드는 변경 후 우측 버튼으로 저장하세요.
+          </p>
+          <Button
+            size="sm"
+            onClick={handleManualSave}
+            disabled={Boolean(saving)}
+            data-testid={`plugin-config-form:${pluginId}:save`}
+          >
+            {saving ? "저장 중…" : "변경사항 저장"}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
