@@ -132,6 +132,10 @@ export function ToolApprovalDialog({
   if (!request) return null;
 
   const title = request.kind === "agent-action" ? "에이전트 작업 승인" : "도구 실행 승인";
+  // NOTE: argsStr uses JSON.stringify for human-readable display (pretty-printed,
+  // insertion-order keys). The IPC approval record uses canonicalStringify (#828)
+  // which sorts object keys — key ordering may differ between what is shown here
+  // and the canonical form used for cache-key lookups in dispatchReviewer.
   const argsStr = JSON.stringify(request.args, null, 2) ?? "";
   const argsTruncated = argsStr.length > 500 && !expanded;
   const argsDisplay = argsTruncated ? argsStr.slice(0, 500) + "\n…" : argsStr;

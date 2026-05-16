@@ -9,6 +9,8 @@ import { ScrollArea } from "../../../components/ui/scroll-area.js";
 import { Separator } from "../../../components/ui/separator.js";
 import { Textarea } from "../../../components/ui/textarea.js";
 import type { McpServerConfig, McpServerConfigDto, McpServerState } from "../types.js";
+import { LONG_TOAST_TTL_MS } from "../constants.js";
+import { useNotifySaved } from "../contexts/saved-toast.js";
 
 // ─── Helper types re-exported from renderer/types.ts ─
 // McpServerConfig / McpServerState 는 window.lvis.mcp 의 반환 타입
@@ -161,6 +163,7 @@ function parseKeyValueLines(input: string, delimiter: ":" | "="): Record<string,
 }
 
 export function McpTab() {
+  const notifySaved = useNotifySaved();
   const formIdPrefix = useId();
   const formIds = {
     id: `${formIdPrefix}-server-id`,
@@ -183,7 +186,7 @@ export function McpTab() {
   const showBanner = useCallback((type: "error" | "success", msg: string) => {
     if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current);
     setBanner({ type, msg });
-    bannerTimerRef.current = setTimeout(() => setBanner(null), 5000);
+    bannerTimerRef.current = setTimeout(() => setBanner(null), LONG_TOAST_TTL_MS); // MCP status messages need longer read time
   }, []);
 
   // 언마운트 시 타이머 정리 — 언마운트 후 setBanner 호출 방지
@@ -255,6 +258,7 @@ export function McpTab() {
         await window.lvis.mcp.removeConfig(id);
         await fetchAll();
         showBanner("success", `${id} 서버가 제거되었습니다.`);
+        notifySaved();
       } catch (e) {
         showBanner("error", e instanceof Error ? e.message : String(e));
       } finally {
@@ -262,7 +266,7 @@ export function McpTab() {
         setRemovingId(null);
       }
     },
-    [fetchAll, showBanner],
+    [fetchAll, showBanner, notifySaved],
   );
 
   const handleSetApiKey = useCallback(async () => {
@@ -283,12 +287,15 @@ export function McpTab() {
           ? `${credentialTargetId} API Key가 저장되고 연결되었습니다.`
           : `${credentialTargetId} API Key는 저장되었지만 연결 실패: ${result.warning ?? "원인 불명"}`,
       );
+      // Save itself succeeded — the connection-failure branch above is a
+      // post-save warning, not a save failure. Toast either way.
+      notifySaved();
     } catch (e) {
       showBanner("error", e instanceof Error ? e.message : String(e));
     } finally {
       setCredentialBusy(false);
     }
-  }, [credentialApiKey, credentialTargetId, fetchAll, showBanner]);
+  }, [credentialApiKey, credentialTargetId, fetchAll, showBanner, notifySaved]);
 
   // 서버 추가
   const handleAdd = useCallback(async () => {
@@ -357,13 +364,16 @@ export function McpTab() {
           ? `${config.id} 서버가 추가되고 연결되었습니다.`
           : `${config.id} 서버 설정은 저장되었지만 연결 실패: ${result.warning ?? "원인 불명"}`,
       );
+      // addConfig persisted the entry — connection failure is a separate
+      // post-save warning, not a save failure. Toast either way.
+      notifySaved();
       void fetchAll();
     } catch (e) {
       showBanner("error", e instanceof Error ? e.message : String(e));
     } finally {
       setFormBusy(false);
     }
-  }, [form, fetchAll, showBanner]);
+  }, [form, fetchAll, showBanner, notifySaved]);
 
   // 설정에는 있지만 현재 연결 상태가 없는 서버도 표시
   const allIds = new Set([

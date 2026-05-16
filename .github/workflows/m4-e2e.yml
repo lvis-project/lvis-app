@@ -9,14 +9,22 @@ on:
 
 jobs:
   m4-e2e:
+    # workflow_dispatch (manual) OR same-repo PR labeled `m4-e2e`.
+    # Sibling marketplace + signing-key secrets are not exposed to forks.
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'pull_request' && github.event.label.name == 'm4-e2e')
+      (github.event_name == 'pull_request' &&
+       github.event.label.name == 'm4-e2e' &&
+       github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: [self-hosted, Linux, ARM64, oracle]
     timeout-minutes: 20
     env:
-      PUBLISHER_KEY: lvismkt_e2epubKEY1234_abcd1234
-      MARKETPLACE_SIGNING_PRIVATE_KEY_POC_V1: "Bp4Luwxz5EAAat48KhCUhpDFIgDjZ4WY3T081QvQfJs="
+      # Both keys MUST be provided as repo/org secrets. The prior committed
+      # literals are now considered burned — rotate the marketplace-side
+      # counterparts before the next M4 E2E run and configure the secrets
+      # below. (Literal values intentionally NOT re-inscribed here.)
+      PUBLISHER_KEY: ${{ secrets.M4_PUBLISHER_KEY }}
+      MARKETPLACE_SIGNING_PRIVATE_KEY_POC_V1: ${{ secrets.M4_MARKETPLACE_SIGNING_KEY_POC_V1 }}
     steps:
       - name: Checkout lvis-app
         uses: actions/checkout@v6

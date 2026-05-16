@@ -136,9 +136,9 @@ export type ToolEntryItem = {
 };
 
 export type ChatEntry =
-  | { kind: "user"; text: string; injectHint?: "queue" | "interrupt" }
-  | { kind: "reasoning"; text: string; streaming?: boolean }
-  | { kind: "assistant"; text: string; streaming?: boolean; route?: "command"; phase?: "work" | "final" }
+  | { kind: "user"; text: string; injectHint?: "queue" | "interrupt"; createdAt?: number }
+  | { kind: "reasoning"; text: string; streaming?: boolean; createdAt?: number }
+  | { kind: "assistant"; text: string; streaming?: boolean; route?: "command"; phase?: "work" | "final"; createdAt?: number }
   | { kind: "tool_group"; groupId: string; groupIds: string[]; status: "running" | "done" | "error"; tools: ToolEntryItem[] }
   | {
       kind: "ask_user_answer";
@@ -262,7 +262,16 @@ export function appendUserEntry(
   text: string,
   injectHint?: "queue" | "interrupt",
 ): ChatEntry[] {
-  return [...entries, { kind: "user", text, ...(injectHint ? { injectHint } : {}) }];
+  // Stamp createdAt at construction so the live UI shows the original send
+  // time (and the calendar's per-day jump indexer sees the entry) before
+  // the next session reload pulls it through historyToEntries.
+  // Without this, the engine's ConversationHistory.append() stamp lives on
+  // a parallel array the renderer doesn't share — the UI would show no
+  // timestamp on fresh turns until the user reopens the session.
+  return [
+    ...entries,
+    { kind: "user", text, createdAt: Date.now(), ...(injectHint ? { injectHint } : {}) },
+  ];
 }
 
 /**
@@ -403,7 +412,17 @@ export function finalizeStreamingReasoning(
 export function finalizeStreamingAssistant(
   entries: ChatEntry[],
   fallbackText: string,
-  opts?: { route?: "command"; phase?: "work" | "final"; overrideText?: string },
+  opts?: {
+    route?: "command";
+    phase?: "work" | "final";
+    overrideText?: string;
+    /**
+     * Persisted creation timestamp from disk replay. When supplied, overrides
+     * the live `Date.now()` stamp so reloaded sessions show the original turn
+     * time. Live streaming callers omit this — the live path stamps Date.now().
+     */
+    createdAt?: number;
+  },
 ): ChatEntry[] {
   const next = [...entries];
   const assistantIdx = findLastIdx(
@@ -432,6 +451,7 @@ export function finalizeStreamingAssistant(
           streaming: false,
           route: opts?.route,
           phase: opts?.phase,
+          createdAt: opts?.createdAt ?? assistant.createdAt ?? Date.now(),
         };
         return next;
       }
@@ -449,6 +469,11 @@ export function finalizeStreamingAssistant(
       // finalized entry should inherit a streaming-era route.
       route: opts?.route,
       phase: opts?.phase,
+      // Stamp createdAt at first finalization so the live TurnActionBar shows
+      // the original turn time — without this the timestamp prop is undefined
+      // until the next session reload, defeating the PR's user-visible goal.
+      // Preserve existing createdAt on re-finalize (idempotency).
+      createdAt: opts?.createdAt ?? assistant.createdAt ?? Date.now(),
     };
     return next;
   }
@@ -457,12 +482,22 @@ export function finalizeStreamingAssistant(
     return next;
   }
 
+  // No streaming assistant in `entries` — this is either the disk-replay
+  // path (historyToEntries) or an edge case where the reasoning-only turn
+  // produced an assistant out of order. On the replay path, persisted
+  // `opts.createdAt` carries the original turn time when available. When
+  // the persisted message has NO createdAt (legacy session written before
+  // per-message stamping shipped), leave the field undefined — the UI
+  // renders nothing rather than fake the load time as the original time
+  // (CLAUDE.md "No Fallback Code"). Live callers (which DO want a stamp)
+  // reach the streaming-entry branch above, not this push branch.
   next.push({
     kind: "assistant",
     text: fallbackText,
     streaming: false,
     route: opts?.route,
     phase: opts?.phase,
+    ...(opts?.createdAt !== undefined ? { createdAt: opts.createdAt } : {}),
   });
   return next;
 }
