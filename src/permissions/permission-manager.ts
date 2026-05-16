@@ -21,7 +21,7 @@ import type { DenyRule, ToolCategory, ToolSource, ToolTrustOrigin, TrustLevel } 
 import { trustFromSource } from "../tools/types.js";
 import { readPermissionsFile, updatePermissionsFile } from "./permissions-store.js";
 import { isOverlayTriggerOrigin } from "../shared/overlay-trigger-source.js";
-import type { UserApprovalHitPayload } from "../shared/permissions-events.js";
+import type { UserApprovalHitPayload, UserApprovalVerdict } from "../shared/permissions-events.js";
 import { getToolCategoryDescriptor } from "./category-registry.js";
 import {
   LlmRiskClassifier,
@@ -584,10 +584,28 @@ export class PermissionManager {
     let userApprovalUsed: {
       memoryHit: boolean;
       nlJustification: string | null;
-      verdictAtApproval: "low" | "medium" | "high" | null;
+      verdictAtApproval: UserApprovalVerdict | null;
     } | null = null;
 
-    if (userApproval) {
+    // Cross-cutting root-cause fix: a legacy R-2 entry may carry
+    // `null verdictAtApproval` (PR-A4 R3 added the field; entries
+    // written before that PR pre-date it). A legacy null means
+    // "the original verdict is unrecoverable" — NOT "medium".
+    // Treat the memory hit as missing → fresh approval flow takes
+    // over. This protects two invariants:
+    //   (a) maxVerdict() below would otherwise receive null and
+    //       silently treat it as the rule verdict (downgrade risk).
+    //   (b) UserApprovalHitPayload broadcast is non-null per SOT —
+    //       a coerce to "medium" would mis-represent unknown origin
+    //       as a real medium-risk approval in the user's audit toast.
+    // Fail-closed: re-prompt is the correct UX when verdict
+    // provenance is lost.
+    if (userApproval && userApproval.verdictAtApproval == null) {
+      console.warn(
+        `[permission] legacy R-2 entry without verdictAtApproval — rejecting memory hit, forcing fresh approval (tool=${toolName}, scope=${userApproval.scope})`,
+      );
+    }
+    if (userApproval && userApproval.verdictAtApproval != null) {
       // Memory hit — use the rule-based verdict (cheaper + consistent).
       // We still run the rule classifier to get a fresh verdict; we just
       // skip the LLM call. The max(rule, stored) composition would allow
@@ -608,7 +626,9 @@ export class PermissionManager {
       // be silently downgraded if the rule classifier now returns LOW/MEDIUM.
       const ruleClassifier = new RuleBasedRiskClassifier();
       const ruleVerdict = ruleClassifier.classify(ctx);
-      const storedLevel = userApproval.verdictAtApproval;
+      // Narrowed above: the outer `userApproval.verdictAtApproval != null`
+      // gate guarantees a concrete verdict literal here.
+      const storedLevel: UserApprovalVerdict = userApproval.verdictAtApproval;
       verdict = maxVerdict(ruleVerdict, { level: storedLevel, reason: `stored approval verdict at approval time` });
       userApprovalUsed = {
         memoryHit: true,
@@ -618,7 +638,15 @@ export class PermissionManager {
       // CRITICAL 4.1: disclose memory-hit auto-approve to renderer + log
       console.info(`[permission] memory-hit auto-approve: ${toolName} (scope=${userApproval.scope}, verdict=${userApproval.verdictAtApproval})`);
       try {
-        this.broadcastUserApprovalHit?.({ toolName, scope: userApproval.scope, verdictAtApproval: userApproval.verdictAtApproval });
+        // verdictAtApproval is non-null inside this branch — the outer
+        // gate `userApproval.verdictAtApproval != null` rejects legacy
+        // entries above. Broadcast passes the concrete literal straight
+        // through to UserApprovalHitPayload (non-null per SOT).
+        this.broadcastUserApprovalHit?.({
+          toolName,
+          scope: userApproval.scope,
+          verdictAtApproval: storedLevel,
+        });
       } catch {
         // broadcast failure must not block tool execution
       }

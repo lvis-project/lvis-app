@@ -672,13 +672,24 @@ export type ApprovalDecision = {
 };
 
 /** R-2 User-Approval Store API (PR-A4) */
+/**
+ * Approval scope + verdict — re-uses the union literal types from the
+ * shared SOT (`UserApprovalScope` / `UserApprovalVerdict`) so renderer
+ * types stay in lockstep with the IPC contract. Issue #802 follow-up
+ * (cross-cutting review of PRs #822-#827).
+ */
+import type {
+  UserApprovalScope,
+  UserApprovalVerdict,
+} from "../../shared/permissions-events.js";
+
 export type LvisUserApprovalApi = {
   record: (entry: {
     toolName: string;
     args: string;
     source: string;
-    scope: "session" | "persistent";
-    verdictAtApproval: "low" | "medium" | "high";
+    scope: UserApprovalScope;
+    verdictAtApproval: UserApprovalVerdict;
     nlJustification: string | null;
     /** R-2 Round-3: propagate trust origin for record/lookup key symmetry. */
     trustOrigin?: string;
@@ -689,8 +700,8 @@ export type LvisUserApprovalApi = {
   list: () => Promise<Array<{
     key: string;
     approvedAt: string;
-    scope: "session" | "persistent";
-    verdictAtApproval: "low" | "medium" | "high";
+    scope: UserApprovalScope;
+    verdictAtApproval: UserApprovalVerdict;
     nlJustification: string | null;
     revokedAt: string | null;
     /** R-2 Round-3: display metadata stored alongside the entry. */

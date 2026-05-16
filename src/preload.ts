@@ -8,7 +8,11 @@ import { randomUUID } from "node:crypto";
 import { resolve as pathResolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { McpServerConfig } from "./mcp/types.js";
-import type { UserApprovalHitPayload } from "./shared/permissions-events.js";
+import type {
+  UserApprovalHitPayload,
+  UserApprovalScope,
+  UserApprovalVerdict,
+} from "./shared/permissions-events.js";
 import type { SerializedHistoryMessage } from "./shared/chat-history.js";
 import { OVERLAY_V1, PERMISSIONS, ROUTINES_V2, SETTINGS } from "./shared/ipc-channels.js";
 import { PLUGIN_PRIVATE_NAMESPACES } from "./plugins/capabilities.js";
@@ -836,8 +840,8 @@ const api = {
       toolName: string;
       args: string;
       source: string;
-      scope: "session" | "persistent";
-      verdictAtApproval: "low" | "medium" | "high";
+      scope: UserApprovalScope;
+      verdictAtApproval: UserApprovalVerdict;
       nlJustification: string | null;
       /** R-2 Round-3: propagated for record/lookup key symmetry. */
       trustOrigin?: string;
