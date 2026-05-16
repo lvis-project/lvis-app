@@ -41,12 +41,16 @@ export type SandboxKind =
 /**
  * Confidence in the detection result.
  *
- *   - "verified" — actively checked (binary present + invocable, OS API
+ *   - "verified"          — actively checked (binary present + invocable, OS API
  *     reports the process is sandboxed, etc.).
- *   - "assumed"  — inferred from platform without active probe (used
+ *   - "assumed"           — inferred from platform without active probe (used
  *     when a probe is expensive or not yet implemented).
+ *   - "policy-best-effort" — binary confirmed present + executable, but the
+ *     sandbox profile is a best-effort policy (e.g. macOS sandbox-exec SBPL).
+ *     Known bypass paths exist; enforcement is weaker than "verified".
+ *     D2: used for macOS sandbox-exec (PARTIAL) to distinguish from assumed.
  */
-export type SandboxConfidence = "verified" | "assumed";
+export type SandboxConfidence = "verified" | "assumed" | "policy-best-effort";
 
 export interface SandboxCapability {
   kind: SandboxKind;
@@ -122,9 +126,18 @@ export function detectSandboxCapability(): SandboxCapability {
 export function formatSandboxCapabilityForPrompt(capability: SandboxCapability): string {
   const kindLabel = (() => {
     switch (capability.kind) {
-      case "partial":  return "partial [⚠ OS 격리 부분적 (sandbox-exec)]";
-      case "fs-only":  return "fs-only [ℹ 파일시스템만 격리 (landlock)]";
-      default:         return capability.kind;
+      case "none":         return "none";
+      case "bubblewrap":   return "bubblewrap";
+      case "sandbox-exec": return "sandbox-exec";
+      case "appcontainer": return "appcontainer";
+      case "partial":      return "partial [⚠ OS 격리 부분적 (sandbox-exec)]";
+      case "fs-only":      return "fs-only [ℹ 파일시스템만 격리 (landlock)]";
+      default: {
+        // Exhaustive check — if a new SandboxKind is added without updating
+        // this switch, the TypeScript compiler will report an error here.
+        const _exhaustive: never = capability.kind;
+        return _exhaustive;
+      }
     }
   })();
   return (
