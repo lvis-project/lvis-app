@@ -70,12 +70,39 @@ function filePath(): string {
 }
 
 /**
- * Stable cache key for a (toolName, args, source) triple.
- * args is SHA-256 hashed so long argument strings do not bloat the file.
+ * Stable cache key for a (toolName, args, source, trustOrigin?, approvalCacheKey?) tuple.
+ *
+ * `trustOrigin` and `approvalCacheKey` are included when present so that two
+ * invocations of the same tool from different trust origins (e.g. "user-keyboard"
+ * vs "plugin-abc") or with different semantic keys cannot collapse onto the same
+ * cached approval. This prevents a low-trust caller from inheriting a high-trust
+ * approval made by a different origin (CRITICAL-4 cache identity collapse fix).
+ *
+ * args is canonicalized via `canonicalStringify` before hashing so that object
+ * key ordering differences ({a,b} vs {b,a}) do not produce distinct keys
+ * for semantically identical inputs (HIGH-2 JSON canonical fix).
  */
-function entryKey(toolName: string, args: string, source: string): string {
-  const argsHash = createHash("sha256").update(args).digest("hex");
-  return `${toolName}::${argsHash}::${source}`;
+export function canonicalStringify(value: unknown): string {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return JSON.stringify(value);
+  }
+  const obj = value as Record<string, unknown>;
+  const sortedKeys = Object.keys(obj).sort();
+  const parts = sortedKeys.map(k => `${JSON.stringify(k)}:${canonicalStringify(obj[k])}`);
+  return `{${parts.join(",")}}`;
+}
+
+function entryKey(
+  toolName: string,
+  args: string,
+  source: string,
+  trustOrigin?: string,
+  approvalCacheKey?: string,
+): string {
+  const components = [toolName, args, source];
+  if (trustOrigin) components.push(trustOrigin);
+  if (approvalCacheKey) components.push(approvalCacheKey);
+  return createHash("sha256").update(components.join("\0")).digest("hex");
 }
 
 async function readApprovalsFile(): Promise<ApprovalsFile> {
@@ -122,9 +149,11 @@ export async function recordApproval(
     verdictAtApproval: "low" | "medium" | "high";
     nlJustification: string | null;
     approvedAt?: string;
+    trustOrigin?: string;
+    approvalCacheKey?: string;
   },
 ): Promise<void> {
-  const key = entryKey(toolName, args, source);
+  const key = entryKey(toolName, args, source, entry.trustOrigin, entry.approvalCacheKey);
   const full: UserApprovalEntry = {
     approvedAt: entry.approvedAt ?? new Date().toISOString(),
     scope: entry.scope,
@@ -159,8 +188,10 @@ export async function lookupApproval(
   toolName: string,
   args: string,
   source: string,
+  trustOrigin?: string,
+  approvalCacheKey?: string,
 ): Promise<UserApprovalEntry | null> {
-  const key = entryKey(toolName, args, source);
+  const key = entryKey(toolName, args, source, trustOrigin, approvalCacheKey);
 
   // Fast: in-memory session cache.
   const cached = sessionStore.get(key);
@@ -190,8 +221,10 @@ export async function revokeApproval(
   toolName: string,
   args: string,
   source: string,
+  trustOrigin?: string,
+  approvalCacheKey?: string,
 ): Promise<void> {
-  const key = entryKey(toolName, args, source);
+  const key = entryKey(toolName, args, source, trustOrigin, approvalCacheKey);
 
   // Evict from session store.
   sessionStore.delete(key);
