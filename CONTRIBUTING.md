@@ -4,6 +4,16 @@ Thanks for your interest. LVIS is an Electron-based personal AI assistant
 desktop app. Contributions of all sizes are welcome — bug reports, small
 fixes, new plugins, architecture proposals.
 
+## Language
+
+Contributions are welcome in any language. Issues, pull request descriptions,
+review comments, design notes, and questions do not need to be written in
+English or Korean to be accepted.
+
+Use the language that lets you explain the problem clearly. Maintainers may add
+short translations or ask follow-up questions when shared context is needed, but
+language should not be a barrier to participation.
+
 ## Development setup
 
 ```bash

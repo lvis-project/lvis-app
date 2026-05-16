@@ -28,13 +28,13 @@ export enum CompressionStatus {
 /**
  * Per-message truncation 임계. 단일 메시지가 이 토큰 수를 초과하면
  * compactWithBoundary 진입 전에 truncation pre-pass 가 발동한다.
- * Codex CLI `TruncationPolicy` 의 LVIS 적용.
+ * LVIS oversize-message guard threshold.
  */
 export const TRUNCATION_THRESHOLD_TOKENS = 30_000;
 
 /**
  * Truncated 메시지의 보존 라인 수. 메시지 끝에서부터 이 만큼의 라인을
  * 유지하고 그 외는 temp 파일 (~/.lvis/sessions/<id>/truncated/) 로 격리.
- * Gemini CLI `truncation.ts` 의 "last N lines + ref" 패턴.
+ * LVIS keeps the last N lines inline and stores the full body in an archive.
  */
 export const TRUNCATION_PRESERVED_LINES = 30;

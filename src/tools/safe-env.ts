@@ -1,7 +1,4 @@
 /**
- * Portions adapted from OpenHarness hardening discussion (MIT License).
- * Copyright (c) 2026 HKU Data Intelligence Lab
- *
  * Safe child-process environment builder (Tier H2).
  *
  * Whitelist-based forwarding of environment variables to spawned children.

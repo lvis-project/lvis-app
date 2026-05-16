@@ -1,5 +1,5 @@
 /**
- * Usable context budget — Cline-style model-tier fixed buffers.
+ * Usable context budget — LVIS model-tier fixed reservations.
  *
  * Browser-safe (no Node imports) so both the renderer hook
  * (`use-context-budget`) and engine paths can derive the same usable
@@ -8,10 +8,8 @@
  * Why fixed buffers not a percentage:
  *   Small models (64K) need proportionally more reservation for output.
  *   With 32K typical max output, 0.85× of 64K (= 54K) leaves only 10K
- *   headroom — single tool-result rounds blow past it. Cline's empirical
- *   buffers (27K / 30K / 40K) prevent this asymmetric pinch.
- *
- * Source: github.com/cline/cline `src/core/context/context-management/context-window-utils.ts`
+ *   headroom — single tool-result rounds blow past it. LVIS reserves fixed
+ *   output/safety buffers (27K / 30K / 40K) to prevent this asymmetric pinch.
  */
 
 /**
@@ -56,7 +54,7 @@ export function getUsableContext(contextWindow: number): number {
  *   - 1M   context  → 60 %  of usable  (≈ 576K)
  *   - other         → 55 %  of usable
  *
- * 근거: Gemini CLI 의 50% 추세 + estimator undercount 실측 보정.
+ * 근거: conservative context-budgeting + estimator undercount 실측 보정.
  *
  * @returns 절대 token count (Math.floor(usable × pct)). 0 if input invalid.
  */
