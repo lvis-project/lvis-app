@@ -114,18 +114,18 @@ describe.each(BUNDLES.map((b) => [b.id, b] as [string, (typeof BUNDLES)[number]]
   },
 );
 
-describe("LGE pair consistency", () => {
-  it("lge-light and lge-dark share the same primary accent", () => {
-    const light = findBundle("lge-light")!;
-    const dark = findBundle("lge-dark")!;
+describe("violet pair consistency", () => {
+  it("violet-light and violet-dark share the same primary accent", () => {
+    const light = findBundle("violet-light")!;
+    const dark = findBundle("violet-dark")!;
     expect(light.tokens.primary).toBe(dark.tokens.primary);
     expect(light.tokens["message-user-bg"]).toBe(dark.tokens["message-user-bg"]);
     expect(light.tokens.destructive).toBe(dark.tokens.destructive);
   });
 
-  it("lge-light is shell=light, lge-dark is shell=dark", () => {
-    expect(findBundle("lge-light")!.shell).toBe("light");
-    expect(findBundle("lge-dark")!.shell).toBe("dark");
+  it("violet-light is shell=light, violet-dark is shell=dark", () => {
+    expect(findBundle("violet-light")!.shell).toBe("light");
+    expect(findBundle("violet-dark")!.shell).toBe("dark");
   });
 });
 

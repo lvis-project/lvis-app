@@ -2,14 +2,14 @@
  * AppearanceTab — theme bundle picker (v2 single-bundle redesign).
  *
  * Single section: a card grid where each card represents a ThemeBundle
- * (Tokyo Night / Midnight / Forest / LGE Light / LGE Dark / High Contrast
+ * (Tokyo Night / Midnight / Forest / Violet Light / Violet Dark / High Contrast
  * plus the community bundles — Catppuccin Mocha/Latte, Nord, Gruvbox Dark
  * Hard, Solarized Light, Rosé Pine, Cherry Blossom).
  *
  * Clicking a card calls `setBundle(bundle.id)` and applies the bundle to
  * `<html data-theme-bundle>` immediately via ThemeProvider.
  *
- * When the selected bundle is part of the LGE pair (lge-light / lge-dark),
+ * When the selected bundle is part of the violet pair (violet-light / violet-dark),
  * a `followSystem` toggle is shown. For all other bundles it is hidden.
  *
  * High-contrast is always shown (never auto-suggested).
@@ -18,7 +18,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { useTheme } from "../theme/index.js";
-import { BUNDLES, LGE_PAIR_IDS } from "../theme/index.js";
+import { BUNDLES, VIOLET_PAIR_IDS } from "../theme/index.js";
 import type { ThemeBundle } from "../theme/index.js";
 import type { CSSProperties } from "react";
 import { getApi } from "../api-client.js";
@@ -376,7 +376,7 @@ export function AppearanceTab() {
   const { flow: webViewFlow, setFlow: setWebViewFlow } = useWebViewPreferredFlow();
   const { family, sizeScale, setFamily, setSizeScale } = useFontPreferences();
 
-  const isLgePair = LGE_PAIR_IDS.includes(bundleId);
+  const isVioletPair = VIOLET_PAIR_IDS.includes(bundleId);
   const activePreset = presetForStack(family);
   const customStack = activePreset === "custom" ? family : "";
 
@@ -408,14 +408,14 @@ export function AppearanceTab() {
         </div>
       </section>
 
-      {/* ── followSystem toggle — LGE pair only ─────────────────────── */}
-      {isLgePair && (
+      {/* ── followSystem toggle — violet pair only ─────────────────────── */}
+      {isVioletPair && (
         <section className="space-y-2 border-t border-border pt-4">
           <div className="flex items-center justify-between">
             <div>
               <h3 className="text-sm font-semibold">시스템 테마 따르기</h3>
               <p className="text-[11px] text-muted-foreground">
-                OS 라이트/다크 모드에 맞춰 LGE Light / LGE Dark 를 자동 전환합니다.
+                OS 라이트/다크 모드에 맞춰 Violet Light / Violet Dark 를 자동 전환합니다.
               </p>
             </div>
             <button

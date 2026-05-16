@@ -93,7 +93,7 @@ app.setName("LVIS");
 // `new Notification(...)` toasts are silently dropped or grouped under the
 // generic "Electron" identity. Issue #260 NotificationService relies on this.
 // Safe to call on all platforms; non-Windows treats it as a no-op.
-app.setAppUserModelId("com.lge.lvis");
+app.setAppUserModelId("xyz.lvisai.app");
 
 function applyRuntimeAppIcon() {
   const iconPath = resolveAppIconPath();
@@ -130,7 +130,7 @@ if (app.isPackaged) {
   process.env.NODE_ENV = "production";
 }
 
-// §17 C1: 사내망 Corporate CA 런타임 주입 — corp-ca-loader 사용 (정식 대응 완료).
+// §17 C1: Corporate CA 런타임 주입 — corp-ca-loader 사용 (정식 대응 완료).
 // Phase 1.5의 dev-only TLS bypass 완전 제거. Chromium은 OS keystore 자동 신뢰.
 async function injectCorporateCa() {
   try {

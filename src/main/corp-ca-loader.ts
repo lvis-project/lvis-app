@@ -1,8 +1,8 @@
 /**
  * Corporate CA Loader — §17 정식 대응 (C1)
  *
- * LG 사내망 proxy가 TLS 인터셉트를 수행하므로, Electron 번들 Node가
- * LGERootCA를 신뢰하지 않으면 api.openai.com 등 모든 외부 HTTPS 호출이
+ * 조직 프록시가 TLS 인터셉트를 수행하는 환경에서, Electron 번들 Node가
+ * 커스텀 CA를 신뢰하지 않으면 api.openai.com 등 모든 외부 HTTPS 호출이
  * SELF_SIGNED_CERT_IN_CHAIN으로 실패한다. OS keychain에 이미 MDM으로
  * 설치된 CA를 런타임에 추출하여 Node의 undici / https / tls에 주입한다.
  *
@@ -154,7 +154,7 @@ function countCerts(pem: string): number {
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
- * 사내망 Root CA PEM을 반환한다.
+ * 조직 Root CA PEM을 반환한다.
  *
  * 1. cache (~/.lvis/certs/corp-ca.pem) 가 fresh하면 그대로 반환
  * 2. stale 또는 미존재 → 플랫폼별 추출 후 0o600으로 cache 저장

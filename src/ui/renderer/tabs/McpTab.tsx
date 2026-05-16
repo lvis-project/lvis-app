@@ -681,7 +681,7 @@ export function McpTab() {
                     className="size-3.5"
                   />
                   <Label htmlFor={formIds.allowPrivateNetworks} className="text-xs">
-                    사설 네트워크 허용 (localhost/사내망)
+                    사설 네트워크 허용 (localhost/로컬 네트워크)
                   </Label>
                 </div>
                 <div className="space-y-1">

@@ -28,7 +28,7 @@ LVIS의 설계 철학은 세 가지 원칙에 기반한다.
 
 **Local-First Intelligence** — 대부분의 업무를 로컬에서 처리한다. 사용자 PC에 설치된 클라이언트가 로컬 문서 인덱싱, 키워드 감지, 에이전트 라우팅을 자체적으로 수행한다. 서버는 로컬이 할 수 없는 일(LLM 추론, 전사적 동기화)만 담당한다.
 
-**Employee Replica Network** — 전 사원이 자신의 디지털 레플리카(에이전트)를 갖는다. 이 에이전트들은 메시지 보드를 통해 서로 소통하며, 사원이 부재 중에도 비동기적으로 협업할 수 있는 통로가 된다.
+**Employee Replica Network** — 전 사용자이 자신의 디지털 레플리카(에이전트)를 갖는다. 이 에이전트들은 메시지 보드를 통해 서로 소통하며, 사용자이 부재 중에도 비동기적으로 협업할 수 있는 통로가 된다.
 
 **Dynamic Extensibility** — 클라이언트는 최소한의 코어로 시작하여, 플러그인을 통해 기능과 UI를 동적으로 확장한다. 플러그인은 부팅 시 자동 업데이트되며, Electron 클라이언트의 렌더러를 직접 변경할 수 있다.
 
@@ -48,13 +48,13 @@ graph TB
 
     subgraph "🏢 Enterprise Infrastructure"
         subgraph "Core Services"
-            LGENIE["Lgenie<br/>(사내 LLM System)"]
+            LLM_BACKEND["LLM<br/>(LLM System)"]
             AUTH["Auth & Identity<br/>(SSO/LDAP)"]
         end
 
         subgraph "Agent Hub"
             MSG_BOARD["Message Board<br/>(Agent 간 통신)"]
-            AGENT_REG["Agent Registry<br/>(전 사원 레플리카)"]
+            AGENT_REG["Agent Registry<br/>(전 사용자 레플리카)"]
             AGENT_RT["Agent Runtime<br/>(비동기 실행)"]
         end
 
@@ -70,7 +70,7 @@ graph TB
         end
     end
 
-    CLIENT <-->|"WebSocket/gRPC"| LGENIE
+    CLIENT <-->|"WebSocket/gRPC"| LLM_BACKEND
     CLIENT <-->|"REST API"| MSG_BOARD
     CLIENT <-->|"REST API"| PLUGIN_STORE
     CLIENT -->|"Query"| SRV_IDX
@@ -78,7 +78,7 @@ graph TB
     LOCAL_IDX --- LOCAL_STORE
     MSG_BOARD --- AGENT_REG
     MSG_BOARD --- AGENT_RT
-    AGENT_RT <-->|"LLM 추론"| LGENIE
+    AGENT_RT <-->|"LLM 추론"| LLM_BACKEND
     API_GW <-->|"사업부 시스템"| PLUGIN_SPEC
     SRV_IDX --- SRV_STORE
     AUTH -.->|"인증"| CLIENT
@@ -98,10 +98,10 @@ block-beta
         B1["Keyword<br/>Detecting<br/>Engine"] B2["Agent<br/>Route<br/>Engine"] B3["Local Index<br/>Engine"] B4["Plugin<br/>Lifecycle<br/>Manager"]
     end
     block:LAYER3["Layer 3: Communication — Protocol Layer"]
-        C1["Lgenie<br/>Session"] C2["Agent Hub<br/>MessageBus"] C3["Marketplace<br/>API Client"] C4["Sync<br/>Engine"]
+        C1["LLM<br/>Session"] C2["Agent Hub<br/>MessageBus"] C3["Marketplace<br/>API Client"] C4["Sync<br/>Engine"]
     end
     block:LAYER4["Layer 4: Server — Enterprise Services"]
-        D1["Lgenie<br/>LLM"] D2["Agent Hub<br/>Board"] D3["Marketplace<br/>Hub"] D4["Server Index<br/>& Knowledge"]
+        D1["LLM<br/>LLM"] D2["Agent Hub<br/>Board"] D3["Marketplace<br/>Hub"] D4["Server Index<br/>& Knowledge"]
     end
 
     LAYER1 --> LAYER2
@@ -140,7 +140,7 @@ graph LR
         P3A --> P3B --> P3C --> P3D
     end
 
-    subgraph PILLAR4["🧠 Lgenie"]
+    subgraph PILLAR4["🧠 LLM"]
         direction TB
         P4A["LLM Inference"]
         P4B["Model Router"]
@@ -183,7 +183,7 @@ graph TB
 
     subgraph "Layer 3 — Communication"
         direction LR
-        L3_SESSION["Lgenie Session Manager"]
+        L3_SESSION["LLM Session Manager"]
         L3_MSGBUS["Agent Hub MessageBus"]
         L3_MARKET["Marketplace API Client"]
         L3_SYNC["Bi-directional Sync"]
@@ -191,7 +191,7 @@ graph TB
 
     subgraph "Layer 4 — Enterprise Server"
         direction LR
-        L4_LLM["Lgenie LLM System"]
+        L4_LLM["LLM System"]
         L4_AGENT["Agent Hub Server"]
         L4_MARKET["Marketplace Server"]
         L4_INDEX["Server Index Engine"]
@@ -285,7 +285,7 @@ sequenceDiagram
     participant PluginMgr as Plugin Manager
     participant Market as Marketplace Hub
     participant AgentHub as Agent Hub
-    participant Lgenie as Lgenie
+    participant LLM as LLM
 
     App->>Config: 1. Load local config
     Config->>Auth: 2. SSO/LDAP 인증
@@ -299,8 +299,8 @@ sequenceDiagram
         Config->>AgentHub: 3b. Fetch skill/agent registry
         AgentHub-->>App: Updated skills & agent configs
     and
-        Config->>Lgenie: 3c. Session handshake
-        Lgenie-->>App: Session ID + model config
+        Config->>LLM: 3c. Session handshake
+        LLM-->>App: Session ID + model config
     end
 
     PluginMgr->>App: 4. Register plugin UI slots
@@ -323,7 +323,7 @@ flowchart TB
     
     SKILL_INVOKE["Skill Invocation<br/>(회의록, 번역 등)"]
     AGENT_ROUTE["Agent Route Engine<br/>(에이전트 선택)"]
-    DIRECT_LLM["Lgenie 직접 대화"]
+    DIRECT_LLM["LLM 직접 대화"]
     
     TOOL_LOOP["Tool Execution Loop"]
     
@@ -333,7 +333,7 @@ flowchart TB
     POST_HOOK["PostToolUse Hook"]
     
     RESULT["Tool Result"]
-    LLM_CALL["Lgenie 추론 요청"]
+    LLM_CALL["LLM 추론 요청"]
     RESPONSE["응답 생성"]
     
     RENDER["UI 렌더링<br/>(Chat / Plugin UI)"]
@@ -446,8 +446,8 @@ flowchart LR
 | 1 | 명시적 명령어 | `/meeting start` | Command Executor 직접 실행 |
 | 2 | 스킬 키워드 | "회의록 작성해줘" | Skill Resolver → 해당 플러그인 활성화 |
 | 3 | 에이전트 멘션 | "@김철수 이거 확인해줘" | Agent Hub 메시지 라우팅 |
-| 4 | 의도 기반 | "이 문서 요약해줘" | Intent → Route Engine → Lgenie |
-| 5 | 일반 대화 | "안녕하세요" | Lgenie 직접 세션 |
+| 4 | 의도 기반 | "이 문서 요약해줘" | Intent → Route Engine → LLM |
+| 5 | 일반 대화 | "안녕하세요" | LLM 직접 세션 |
 
 ### 5.2 Agent Route Engine
 
@@ -461,13 +461,13 @@ flowchart TB
     
     RESOLVER -->|"로컬 스킬"| LOCAL_SKILL["Local Skill Executor<br/>(플러그인 내장 기능)"]
     RESOLVER -->|"원격 에이전트"| AGENT_HUB_ROUTE["Agent Hub Router<br/>(메시지 보드 전달)"]
-    RESOLVER -->|"LLM 대화"| LGENIE_SESSION["Lgenie Session<br/>(직접 추론)"]
+    RESOLVER -->|"LLM 대화"| LLM_BACKEND_SESSION["LLM Session<br/>(직접 추론)"]
     RESOLVER -->|"복합 작업"| ORCHESTRATOR["Task Orchestrator<br/>(다중 스킬 조합)"]
     RESOLVER -->|"마켓플레이스 API"| MARKET_CALL["Marketplace API Call<br/>(사업부 API)"]
     
     LOCAL_SKILL --> RESULT["Execution Result"]
     AGENT_HUB_ROUTE --> RESULT
-    LGENIE_SESSION --> RESULT
+    LLM_BACKEND_SESSION --> RESULT
     ORCHESTRATOR --> RESULT
     MARKET_CALL --> RESULT
     
@@ -481,7 +481,7 @@ flowchart TB
 2. Local Skill Match     → 설치된 플러그인에서 스킬 매칭 시도
 3. Agent Hub Routing     → @멘션 또는 에이전트 위임이 필요한 경우
 4. Marketplace API       → 사업부 API 호출이 필요한 경우
-5. Lgenie Fallback       → 위 모두 해당 없으면 LLM 직접 대화
+5. LLM Fallback       → 위 모두 해당 없으면 LLM 직접 대화
 ```
 
 ---
@@ -538,7 +538,7 @@ graph TB
 
 ```json
 {
-  "id": "com.lge.meeting-recorder",
+  "id": "com.example.meeting-recorder",
   "name": "회의록 녹음",
   "version": "1.2.0",
   "description": "STT 기반 회의록 자동 작성 플러그인",
@@ -546,7 +546,7 @@ graph TB
   "permissions": [
     "microphone",
     "local-storage",
-    "lgenie-session",
+    "llm-session",
     "ui-slot:sidebar",
     "ui-slot:toolbar"
   ],
@@ -577,7 +577,7 @@ graph TB
   "dependencies": {
     "translation-plugin": ">=1.0.0"
   },
-  "lgenie": {
+  "llm": {
     "requiredModels": ["stt-whisper", "summary-v2"],
     "optionalModels": ["translation-nmt"]
   }
@@ -634,8 +634,8 @@ graph TB
 stateDiagram-v2
     state "기본 클라이언트" as BASE {
         [*] --> Chat: 부팅
-        Chat --> Lgenie: 메시지 전송
-        Lgenie --> Chat: 응답
+        Chat --> LLM: 메시지 전송
+        LLM --> Chat: 응답
         Chat --> FileExplorer: 파일 탐색
         Chat --> MemoryVault: 기억 조회
     }
@@ -668,7 +668,7 @@ stateDiagram-v2
 
 ### 7.1 Agent Hub Architecture
 
-Agent Hub는 전 사원 레플리카 에이전트들의 소통 창구이자 메시지 보드다. 사원 카피 DB의 개념으로, 각 사원의 디지털 트윈이 비동기적으로 협업한다.
+Agent Hub는 전 사용자 레플리카 에이전트들의 소통 창구이자 메시지 보드다. 사용자 카피 DB의 개념으로, 각 사용자의 디지털 트윈이 비동기적으로 협업한다.
 
 ```mermaid
 graph TB
@@ -677,7 +677,7 @@ graph TB
         
         subgraph "Agent Registry"
             REG["Agent 등록/관리"]
-            PROFILE["Agent Profile DB<br/>(사원 정보, 역할, 전문분야)"]
+            PROFILE["Agent Profile DB<br/>(사용자 정보, 역할, 전문분야)"]
             STATUS["Agent Status<br/>(온라인/오프라인/작업중)"]
         end
 
@@ -725,7 +725,7 @@ sequenceDiagram
     participant Hub as Agent Hub (Message Board)
     participant AgentB as 이영희 Agent (Replica)
     participant UserB as 이영희 (Client)
-    participant Lgenie as Lgenie
+    participant LLM as LLM
 
     UserA->>AgentA: "@이영희 지난 Q1 마케팅 보고서 공유해줄 수 있어?"
     AgentA->>Hub: Direct Message → 이영희 Agent
@@ -736,8 +736,8 @@ sequenceDiagram
         UserB->>AgentB: "보내줘"
         AgentB->>Hub: 파일 첨부 응답
     else 이영희 오프라인
-        AgentB->>Lgenie: Context 조회 (권한 확인)
-        Lgenie-->>AgentB: 권한 OK + 파일 위치
+        AgentB->>LLM: Context 조회 (권한 확인)
+        LLM-->>AgentB: 권한 OK + 파일 위치
         AgentB->>AgentB: 자동 응답 판단
         AgentB->>Hub: 자동 응답 + 파일 공유
     end
@@ -753,7 +753,7 @@ sequenceDiagram
 | **Personal Mailbox** | 개인 에이전트 간 1:1 비동기 메시지 | 발신자 + 수신자 | "이 문서 검토해줘" |
 | **Team Channel** | 팀/부서 단위 에이전트 협업 | 팀 소속 에이전트 | "이번 주 이슈 정리" |
 | **Project Board** | 프로젝트별 작업 추적 및 공유 | 프로젝트 참여자 | "Sprint #12 태스크" |
-| **Knowledge Board** | 전사 지식 공유 및 Q&A | 전 사원 에이전트 | "사내 Wi-Fi 설정법" |
+| **Knowledge Board** | 전사 지식 공유 및 Q&A | 전 사용자 에이전트 | "사내 Wi-Fi 설정법" |
 | **Broadcast** | 전사 공지, 긴급 알림 | 관리자 발신, 전체 수신 | "시스템 점검 안내" |
 
 ---
@@ -868,19 +868,19 @@ flowchart TB
     end
 
     subgraph "Server"
-        LGENIE_CALL["⑧ Lgenie 추론<br/>요약/정리/포맷팅"]
+        LLM_BACKEND_CALL["⑧ LLM 추론<br/>요약/정리/포맷팅"]
         AGENT_SHARE["⑨ Agent Hub<br/>참석자 에이전트에 공유"]
         SRV_STORE_SAVE["⑩ Server Store<br/>회의록 영구 저장"]
     end
 
     USER --> KW --> ROUTE --> LOCAL_CTX --> PLUGIN_ACT
     PLUGIN_ACT --> STT --> MID_SUM --> FINAL
-    MID_SUM -->|"LLM 요약"| LGENIE_CALL
-    FINAL -->|"LLM 포맷팅"| LGENIE_CALL
+    MID_SUM -->|"LLM 요약"| LLM_BACKEND_CALL
+    FINAL -->|"LLM 포맷팅"| LLM_BACKEND_CALL
     FINAL --> AGENT_SHARE --> SRV_STORE_SAVE
 
-    LGENIE_CALL -->|"요약 결과"| MID_SUM
-    LGENIE_CALL -->|"최종 문서"| FINAL
+    LLM_BACKEND_CALL -->|"요약 결과"| MID_SUM
+    LLM_BACKEND_CALL -->|"최종 문서"| FINAL
 ```
 
 ### 9.2 Indexing Data Flow
@@ -952,11 +952,11 @@ graph TB
     end
 
     subgraph "On-Premise Datacenter"
-        subgraph "Lgenie Cluster"
+        subgraph "LLM Cluster"
             LLM_LB["Load Balancer"]
-            LLM_1["Lgenie Node 1"]
-            LLM_2["Lgenie Node 2"]
-            LLM_N["Lgenie Node N"]
+            LLM_1["LLM Node 1"]
+            LLM_2["LLM Node 2"]
+            LLM_N["LLM Node N"]
             LLM_LB --> LLM_1
             LLM_LB --> LLM_2
             LLM_LB --> LLM_N
@@ -1006,7 +1006,7 @@ graph TB
 | **Client** | Local Store | SQLite + FTS5 |
 | **Client** | Local Vector | HNSW (hnswlib) / LanceDB |
 | **Client** | Plugin Runtime | Sandboxed V8 / WebAssembly |
-| **Server** | Lgenie | 사내 LLM 시스템 (독자 인프라) |
+| **Server** | LLM | LLM 시스템 |
 | **Server** | Agent Hub | Go/Rust + PostgreSQL + Redis/NATS |
 | **Server** | Marketplace | Node.js/Go + Object Storage |
 | **Server** | Server Index | Elasticsearch + Milvus/Qdrant |
@@ -1030,7 +1030,7 @@ LVIS 클라이언트 코어의 에이전트 루프는 [claw-code](https://github
 | `PermissionPolicy` | 권한 관리 — 도구별, 플러그인별 접근 제어 |
 | `Session` persistence | 세션 관리 — 대화 이력 저장 및 재개 |
 | `HookRunner` | Hook Runner — 플러그인 훅의 실행 및 결과 머지 |
-| Multi-provider `ApiClient` | Lgenie Session — 사내 LLM 엔드포인트 추상화 |
+| Multi-provider `ApiClient` | LLM Session — LLM 엔드포인트 추상화 |
 
 ## Appendix B: Key Design Decisions
 
@@ -1040,7 +1040,7 @@ LVIS 클라이언트 코어의 에이전트 루프는 [claw-code](https://github
 | Rust Native Module (NAPI-RS) | 키워드 감지/인덱싱의 성능 보장 | 개발 복잡도 ↑ |
 | 로컬 Vector DB | 네트워크 없이도 의미 검색 가능 | 로컬 스토리지 사용 ↑ |
 | Plugin Sandbox (V8/WASM) | 플러그인 격리로 보안 확보 | 플러그인 기능 일부 제한 |
-| Message Board 기반 Agent Hub | 비동기 협업, 사원 부재 시에도 동작 | 실시간성 다소 부족 |
+| Message Board 기반 Agent Hub | 비동기 협업, 사용자 부재 시에도 동작 | 실시간성 다소 부족 |
 | API Gateway 기반 Marketplace | 사업부별 독립 배포 가능 | Gateway 단일 장애점 |
 
 ---

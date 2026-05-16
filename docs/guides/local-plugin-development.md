@@ -273,7 +273,7 @@ git stash pop  # 필요 시
 
 # 모든 sibling 플러그인 최신화
 cd ..
-for r in lvis-plugin-meeting lvis-plugin-local-indexer lvis-plugin-lge-api \
+for r in lvis-plugin-meeting lvis-plugin-local-indexer lvis-plugin-work-proactive \
          lvis-plugin-work-assistant lvis-plugin-ms-graph \
          lvis-plugin-agent-hub lvis-plugin-template lvis-plugin-sdk \
          lvis-marketplace lvis-agent-hub; do
@@ -341,5 +341,5 @@ bun run dev
 - [`local-marketplace-testing.md`](./local-marketplace-testing.md) — **권장 dev 루프** (로컬 마켓플레이스 서버 + git-based 부트스트랩)
 - [`marketplace-publishing.md`](./marketplace-publishing.md) — prod 마켓플레이스 publish 채널
 - [`plugin-development.md`](./plugin-development.md) — 매니페스트 전체 스키마, HostApi 계약, capabilities, 이벤트, 서명, 테스팅 깊은 레퍼런스
-- [`windows-setup.md`](./windows-setup.md) — Windows 사내망 first-run 가이드
+- [`windows-setup.md`](./windows-setup.md) — Windows first-run 가이드
 - [`../architecture/architecture.md` §9](../architecture/architecture.md#9-plugin-system--ui-extension) — 플러그인 시스템 아키텍처

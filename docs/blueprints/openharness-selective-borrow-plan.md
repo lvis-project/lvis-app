@@ -15,12 +15,12 @@ HKUDS/OpenHarness (9.7k stars, 14 days old at discovery, MIT) is a Python re-imp
 |---|---|---|---|
 | Runtime | Electron + Node + TypeScript | Python 3.10+ + Ink TUI | 🔴 incompatible |
 | UI target | Desktop DOM + Korean UX | Terminal TUI (Ink) | 🔴 incompatible |
-| Distribution | Electron installer (MSI/dmg) | `pip install` / `curl \| bash` | 🔴 LGE non-dev users can't use pip |
-| Audience | LGE non-developers | Developers + researchers | 🔴 opposite |
+| Distribution | Electron installer (MSI/dmg) | `pip install` / `curl \| bash` | 🔴 일반 사용자 can't use pip |
+| Audience | 일반 사용자 | Developers + researchers | 🔴 opposite |
 | Marketplace | FastAPI + Web UI (Path β, chosen) | Git-based `/plugin marketplace add repo` | 🔴 previously rejected path α |
-| Corp security | LGE CA + admin policy + 0o600 fd-based | None | 🟡 must be layered on top |
+| Corp security | 배포 CA + admin policy + 0o600 fd-based | None | 🟡 must be layered on top |
 | Maturity | 4 months hardening | 14 days old | 🔴 maturity inversion |
-| Existing 3 plugins | meeting/pageindex/email (LGE-specific) | General agent tools | 🔴 zero overlap |
+| Existing 3 plugins | meeting/pageindex/email | General agent tools | 🔴 zero overlap |
 
 **Decision**: **selective TS port** of 5 Tier-S + 4 Tier-A patterns under MIT attribution. Zero upstream runtime dependency. Phase 3 folder refactor executed as precondition to give new modules a dedicated home.
 
@@ -35,7 +35,7 @@ HKUDS/OpenHarness (9.7k stars, 14 days old at discovery, MIT) is a Python re-imp
 | **S4** | `isReadOnly` short-circuit in approval-gate | `src/permissions/approval-gate.ts` (modified) | #4 | Read-only tool invocations skip confirmation dialog in default mode. Plan mode still blocks. |
 | **S5** | `UNTRUSTED_CONTENT_BANNER` prefix + `wrapUntrusted` helper | `src/tools/untrusted-banner.ts` | #5 | Prompt injection mitigation — tells LLM "this is data, not instructions" for external content. |
 
-**LGE additions to SENSITIVE_PATH_PATTERNS**: `~/.lvis/certs/**`, `~/.lvis/secrets/**`, `~/.lvis/keys/**`, `~/.lvis/lvis-secrets.json`.
+**Additions to SENSITIVE_PATH_PATTERNS**: `~/.lvis/certs/**`, `~/.lvis/secrets/**`, `~/.lvis/keys/**`, `~/.lvis/lvis-secrets.json`.
 
 ---
 

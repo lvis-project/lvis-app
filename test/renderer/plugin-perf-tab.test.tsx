@@ -11,21 +11,21 @@ afterEach(() => {
 });
 
 const MOCK_STATS = {
-  "com.lge.meeting": {
+  "com.example.meeting": {
     startupMs: 120,
     toolCallCount: 10,
     errorCount: 0,
     totalExecMs: 500,
     lastCallAt: Date.now() - 5000,
   },
-  "com.lge.email": {
+  "com.example.email": {
     startupMs: 80,
     toolCallCount: 20,
     errorCount: 2,
     totalExecMs: 2000,
     lastCallAt: Date.now() - 1000,
   },
-  "com.lge.bad": {
+  "com.example.bad": {
     startupMs: 200,
     toolCallCount: 10,
     errorCount: 6,
@@ -65,9 +65,9 @@ describe("PluginPerfTab", () => {
   it("renders plugin rows with plugin IDs", async () => {
     await renderTab();
     await waitFor(() => {
-      expect(screen.getByText("com.lge.meeting")).toBeTruthy();
-      expect(screen.getByText("com.lge.email")).toBeTruthy();
-      expect(screen.getByText("com.lge.bad")).toBeTruthy();
+      expect(screen.getByText("com.example.meeting")).toBeTruthy();
+      expect(screen.getByText("com.example.email")).toBeTruthy();
+      expect(screen.getByText("com.example.bad")).toBeTruthy();
     });
   });
 
@@ -92,9 +92,9 @@ describe("PluginPerfTab", () => {
   it("color-codes error rate: green for <1%, amber for 1-5%, red for >5%", async () => {
     await renderTab();
     await waitFor(() => {
-      // com.lge.meeting: 0/10 = 0% → green
-      // com.lge.email: 2/20 = 10% → red (>5%)
-      // com.lge.bad: 6/10 = 60% → red
+      // com.example.meeting: 0/10 = 0% → green
+      // com.example.email: 2/20 = 10% → red (>5%)
+      // com.example.bad: 6/10 = 60% → red
       const allText = document.body.textContent ?? "";
       expect(allText).toContain("0.0%");   // meeting — green
       expect(allText).toContain("10.0%");  // email — red

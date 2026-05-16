@@ -9,13 +9,13 @@
 
 ## 1. 문제 정의
 
-LVIS는 LG 사원 데스크톱에서 실행되는 엔터프라이즈 AI 비서이며, 플러그인 생태계를 지원한다. 현재(Phase 1)까지는 모든 플러그인이 **동일한 lifecycle과 동일한 권한**으로 관리되어, 회사 정책으로 강제 배포해야 하는 플러그인(예: 사내 HR 통합, 보안 인덱서)과 사용자가 자율적으로 설치하는 플러그인(예: 개인 Notion, 습관 추적기)이 구분되지 않는다.
+LVIS는 개인 데스크톱에서 실행되는 AI 비서이며, 플러그인 생태계를 지원한다. 현재(Phase 1)까지는 모든 플러그인이 **동일한 lifecycle과 동일한 권한**으로 관리되어, 조직 정책으로 강제 배포해야 하는 플러그인(예: 내부 HR 통합, 보안 인덱서)과 사용자가 자율적으로 설치하는 플러그인(예: 개인 Notion, 습관 추적기)이 구분되지 않는다.
 
 이는 다음 네 가지 실질적 문제를 낳는다:
 
 1. **강제 배포 불가** — IT 부서가 새 버전을 push해도 사용자가 재부팅하기 전에 적용되지 않으며, 사용자가 수동으로 disable할 수 있다.
-2. **삭제 권한 오남용** — 사원이 보안 플러그인(예: DLP 스캐너)을 임의로 제거할 수 있다.
-3. **긴급 대응 불가** — 특정 플러그인이 CVE로 판명되어도 사원 전원에게 즉시 비활성화를 강제할 수 없다.
+2. **삭제 권한 오남용** — 사용자가 보안 플러그인(예: DLP 스캐너)을 임의로 제거할 수 있다.
+3. **긴급 대응 불가** — 특정 플러그인이 CVE로 판명되어도 사용자 전원에게 즉시 비활성화를 강제할 수 없다.
 4. **감사 불가** — 사용자가 자유롭게 설치한 외부 플러그인을 회사가 추적·제어할 공식 경로가 없다.
 
 본 설계는 플러그인을 **managed**(회사 배포)와 **user**(자율 설치) 두 모드로 구분하여 위 문제를 해결한다.
@@ -190,7 +190,7 @@ export interface ManagedPolicy {
   version: string;
 
   /** 서명 메타 */
-  signer: string;             // "lge-it-root-ca"
+  signer: string;             // "example-ca"
   signature: string;          // base64(ECDSA(canonicalize(body)))
   signatureAlgorithm: "ECDSA-P256-SHA256";
 
@@ -244,7 +244,7 @@ export interface DenyListEntry {
 ```json
 {
   "version": "2026-04-13T21:00:00Z",
-  "signer": "lge-it-root-ca",
+  "signer": "example-ca",
   "signature": "MEUCIQDk...base64...==",
   "signatureAlgorithm": "ECDSA-P256-SHA256",
   "enforcements": {

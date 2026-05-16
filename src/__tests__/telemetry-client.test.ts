@@ -58,7 +58,7 @@ describe("PluginTelemetryClient", () => {
   it("track() is a no-op when enabled=false", async () => {
     const fetch = okFetch();
     const client = new PluginTelemetryClient(makeDeps({ enabled: false, fetchImpl: fetch }));
-    client.track("plugin_install", { slug: "com.lge.foo", version: "1.0.0" });
+    client.track("plugin_install", { slug: "com.example.foo", version: "1.0.0" });
     expect(client.queueLength).toBe(0);
     await client.flush();
     expect(fetch).not.toHaveBeenCalled();
@@ -70,7 +70,7 @@ describe("PluginTelemetryClient", () => {
     const client = new PluginTelemetryClient(
       makeDeps({ promptAnswered: false, fetchImpl: fetch }),
     );
-    client.track("plugin_install", { slug: "com.lge.foo", version: "1.0.0" });
+    client.track("plugin_install", { slug: "com.example.foo", version: "1.0.0" });
     expect(client.queueLength).toBe(0);
     await client.flush();
     expect(fetch).not.toHaveBeenCalled();
@@ -80,10 +80,10 @@ describe("PluginTelemetryClient", () => {
   it("batches multiple events into a single POST", async () => {
     const fetch = okFetch();
     const client = new PluginTelemetryClient(makeDeps({ fetchImpl: fetch }));
-    client.track("plugin_install", { slug: "com.lge.foo", version: "1.0.0" });
-    client.track("plugin_uninstall", { slug: "com.lge.bar", version: "2.0.0" });
+    client.track("plugin_install", { slug: "com.example.foo", version: "1.0.0" });
+    client.track("plugin_uninstall", { slug: "com.example.bar", version: "2.0.0" });
     client.track("plugin_error", {
-      slug: "com.lge.baz",
+      slug: "com.example.baz",
       version: "3.0.0",
       errorClass: "MarketplaceInstallerError"
     });
@@ -104,7 +104,7 @@ describe("PluginTelemetryClient", () => {
     const client = new PluginTelemetryClient(
       makeDeps({ fetchImpl: fetch, flushIntervalMs: INTERVAL }),
     );
-    client.track("plugin_update", { slug: "com.lge.foo", version: "1.0.0" });
+    client.track("plugin_update", { slug: "com.example.foo", version: "1.0.0" });
     client.start();
     vi.advanceTimersByTime(INTERVAL + 1);
     // flush() is async — just confirm it was called by checking queue drains
@@ -121,7 +121,7 @@ describe("PluginTelemetryClient", () => {
     expect(scrubPii("/home/user/documents/secret.txt")).toContain("[path]");
     expect(scrubPii("C:\\Users\\ken\\AppData\\Local\\lvis")).toContain("[path]");
     expect(scrubPii("contact user@example.com for support")).toContain("[email]");
-    expect(scrubPii("com.lge.meeting-recorder")).toBe("com.lge.meeting-recorder");
+    expect(scrubPii("com.example.meeting-recorder")).toBe("com.example.meeting-recorder");
     expect(scrubPii("1.2.3")).toBe("1.2.3");
   });
 
@@ -132,7 +132,7 @@ describe("PluginTelemetryClient", () => {
     const client = new PluginTelemetryClient(
       makeDeps({ fetchImpl: fetch, installToken: "ghp_test_token_abc" }),
     );
-    client.track("plugin_install", { slug: "com.lge.foo", version: "1.0.0" });
+    client.track("plugin_install", { slug: "com.example.foo", version: "1.0.0" });
     await client.flush();
     const [url, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
     expect(url).toContain("/telemetry/events");
@@ -162,7 +162,7 @@ describe("PluginTelemetryClient", () => {
     const client = new PluginTelemetryClient(
       makeDeps({ fetchImpl: fetch as unknown as typeof globalThis.fetch }),
     );
-    client.track("plugin_install", { slug: "com.lge.foo", version: "1.0.0" });
+    client.track("plugin_install", { slug: "com.example.foo", version: "1.0.0" });
     const a = client.flush();
     const b = client.flush();
     const c = client.flush();
@@ -186,7 +186,7 @@ describe("PluginTelemetryClient", () => {
     const client = new PluginTelemetryClient(
       makeDeps({ fetchImpl: fetch as unknown as typeof globalThis.fetch }),
     );
-    client.track("plugin_install", { slug: "com.lge.foo", version: "1.0.0" });
+    client.track("plugin_install", { slug: "com.example.foo", version: "1.0.0" });
     await client.flush();
     // Event must still be in queue for retry
     expect(client.queueLength).toBe(1);
@@ -197,7 +197,7 @@ describe("PluginTelemetryClient", () => {
     const fetch = okFetch();
     const client = new PluginTelemetryClient(makeDeps({ fetchImpl: fetch }));
     client.track("plugin_error", {
-      slug: "com.lge.foo",
+      slug: "com.example.foo",
       version: "1.0.0",
       errorClass: "NetworkError"
     });

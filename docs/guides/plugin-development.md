@@ -62,7 +62,7 @@ interface PluginManifest {
 
   // ── 문서/메타 ──
   description?: string;    // LLM 카탈로그·UI에 표시되는 1줄 요약 (≤280자)
-  publisher?: string;      // 퍼블리셔 식별자 (예: "LG Electronics IT")
+  publisher?: string;      // 퍼블리셔 식별자 (예: "example-publisher")
   installPolicy?: "admin" | "user"; // 설치 정책. 배포 경로는 marketplace 단일 경로.
   dependencies?: Array<string | { pluginId: string; versionRange?: string; required?: boolean }>;
   pluginAccess?: {
@@ -110,7 +110,7 @@ interface PluginManifest {
   "name": "LVIS Meeting",
   "version": "1.0.0",
   "installPolicy": "admin",
-  "publisher": "LG Electronics IT",
+  "publisher": "example-publisher",
   "startupTimeoutMs": 5000,
   "entry": "../../../node_modules/@lvis/plugin-meeting/dist/hostPlugin.js",
   "description": "회의 녹음·전사·요약 및 액션 아이템 추출",
@@ -127,7 +127,7 @@ interface PluginManifest {
 
 - 플러그인 패키지 식별자. **시스템이 플러그인을 추적하는 유일한 키**.
 - 현재 출시된 플러그인은 모두 flat 형식 (`meeting`, `local-indexer`, `ms-graph`).
-- 도트 형식 (`com.lge.meeting-recorder`) 도 허용되지만 **필수 아님**.
+- 도트 형식 (`com.example.meeting-recorder`) 도 허용되지만 **필수 아님**.
 - UI 슬롯 ID, 이벤트 네임스페이스의 프리픽스로 사용 가능.
 - ⚠️ **LLM tool name 과 별개** — `id` 에 도트가 있어도 `tools[]` 는 언더스코어만 허용.
 
@@ -452,7 +452,7 @@ LVIS 플러그인에는 **세 개의 독립 네임스페이스**가 있습니다
 
 | 구분 | 대상 | 도트 허용? | 예시 |
 |------|------|-----------|------|
-| 플러그인 ID | `id` 필드 | ✅ | `meeting`, `com.lge.meeting-recorder` |
+| 플러그인 ID | `id` 필드 | ✅ | `meeting`, `com.example.meeting-recorder` |
 | LLM tool name | `tools[]`, `handlers` 키 | ❌ | `meeting_start` |
 | 이벤트 이름 | `emitEvent()` / `onEvent()` | ✅ | `meeting.summary.created` |
 | keywords.skillId | `keywords[].skillId` | ❌ (tool name 과 일치) | `meeting_start` |

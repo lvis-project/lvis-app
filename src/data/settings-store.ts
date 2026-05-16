@@ -126,8 +126,8 @@ export interface PluginSettings {}
  * specified set of shell + chat + code tokens, so combinatorial mismatches
  * are impossible.
  *
- * `followSystem` (optional, LGE pair only): when true and the active bundle
- * is "lge-light" or "lge-dark", the host automatically switches between the
+ * `followSystem` (optional, violet pair only): when true and the active bundle
+ * is "violet-light" or "violet-dark", the host automatically switches between the
  * two based on `prefers-color-scheme`.
  *
  * `schemaVersion: 2` distinguishes v2 from legacy v1 files that have
@@ -767,20 +767,20 @@ const VALID_BUNDLE_IDS: readonly string[] = BUNDLE_IDS;
  *
  * Migration matrix (12 cases, per spec §3):
  *  dark + default/auto  → tokyo-night
- *  dark + lg            → lge-dark
+ *  dark + lg            → violet-dark
  *  light + default/auto → forest
- *  light + lg           → lge-light
+ *  light + lg           → violet-light
  *  system + default     → tokyo-night (DEFAULT_BUNDLE_ID; renderer may apply followSystem)
- *  system + lg          → lge-dark + followSystem:true (renderer tracks OS scheme)
+ *  system + lg          → violet-dark + followSystem:true (renderer tracks OS scheme)
  *  * + purple|orange|blue → midnight (closest dark accent coercion)
  *  high-contrast + *    → high-contrast (HC always wins)
  *  code override (dark+default+light / light+default+dark) → bundle wins, code override ignored
- *  dark + lg + dark     → lge-dark
+ *  dark + lg + dark     → violet-dark
  *  invalid/unknown      → DEFAULT_BUNDLE_ID
  *
  * Note: "system" is intentionally NOT resolved via window.matchMedia here.
  * This function runs in the Electron main process where `window` is undefined.
- * System-theme users get DEFAULT_BUNDLE_ID (or lge-dark+followSystem for LGE),
+ * System-theme users get DEFAULT_BUNDLE_ID (or violet-dark+followSystem),
  * and the renderer's followSystem toggle can track the OS scheme from there.
  */
 export function migrateAppearanceV1ToV2(
@@ -799,12 +799,12 @@ export function migrateAppearanceV1ToV2(
     return { schemaVersion: 2, bundleId: "midnight" };
   }
 
-  // LG pair.
+  // Violet pair (migrated from legacy "lg" chat theme).
   if (chatTheme === "lg") {
-    if (theme === "light") return { schemaVersion: 2, bundleId: "lge-light" };
-    if (theme === "dark")  return { schemaVersion: 2, bundleId: "lge-dark" };
-    // system: default to lge-dark; renderer followSystem will track OS from here.
-    return { schemaVersion: 2, bundleId: "lge-dark", followSystem: true };
+    if (theme === "light") return { schemaVersion: 2, bundleId: "violet-light" };
+    if (theme === "dark")  return { schemaVersion: 2, bundleId: "violet-dark" };
+    // system: default to violet-dark; renderer followSystem will track OS from here.
+    return { schemaVersion: 2, bundleId: "violet-dark", followSystem: true };
   }
 
   // Default chat (no overlay) — pick by explicit shell; "system" → DEFAULT.
@@ -823,9 +823,20 @@ function normalizeAppearance(input: unknown): AppearanceSettings {
 
   // v2 path — schemaVersion:2 present.
   if (obj.schemaVersion === 2) {
+    // Remap retired bundle IDs to their renamed successors. The keys here
+    // are LITERAL historical strings persisted in users' settings.json from
+    // earlier builds — they MUST be preserved verbatim so the migration
+    // matches existing on-disk state. New IDs (values) follow the current
+    // naming scheme. This map only grows when an ID is retired; it never
+    // shrinks.
+    const BUNDLE_ID_REMAP: Record<string, string> = {
+      "lge-dark":  "violet-dark",
+      "lge-light": "violet-light",
+    };
+    const rawBundleId = typeof obj.bundleId === "string" ? (BUNDLE_ID_REMAP[obj.bundleId] ?? obj.bundleId) : "";
     const bundleId =
-      typeof obj.bundleId === "string" && VALID_BUNDLE_IDS.includes(obj.bundleId)
-        ? obj.bundleId
+      VALID_BUNDLE_IDS.includes(rawBundleId)
+        ? rawBundleId
         : DEFAULT_BUNDLE_ID;
     const followSystem = typeof obj.followSystem === "boolean" ? obj.followSystem : undefined;
     const result: AppearanceSettings = { schemaVersion: 2, bundleId };
@@ -841,7 +852,7 @@ function normalizeAppearance(input: unknown): AppearanceSettings {
       theme: (typeof obj.theme === "string" && (VALID_THEMES_V1 as readonly string[]).includes(obj.theme)
         ? obj.theme : "system") as ThemePreference,
       chatTheme: (typeof obj.chatTheme === "string" && (VALID_CHAT_THEMES_V1 as readonly string[]).includes(obj.chatTheme)
-        ? obj.chatTheme : "lg") as ChatThemePreference,
+        ? obj.chatTheme : "default") as ChatThemePreference,
       codeTheme: (typeof obj.codeTheme === "string" ? obj.codeTheme : "auto") as CodeThemePreference,
     };
     return migrateAppearanceV1ToV2(legacy);

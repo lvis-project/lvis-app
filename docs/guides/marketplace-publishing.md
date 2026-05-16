@@ -160,7 +160,7 @@ MARKETPLACE_SIGNING_PRIVATE_KEY_PROD_V2=<base64>
 | 필드 | 비고 |
 |------|------|
 | `$schema` | `"https://${LVIS_SCHEMA_HOST}/schemas/plugin.schema.json"` — 서버가 이 값을 보고 일반 플러그인으로 분류. dev 기본 `lvis.local`, prod 빌드 시 운영팀이 `LVIS_SCHEMA_HOST=<prod-host>` 로 build-time 치환 (lvis-marketplace#54). URL 자체는 fetch 되지 않는 식별자 |
-| `id` | 마켓플레이스 카탈로그 키 (manifest `id` = catalog `slug`). 게시 후 변경 불가. flat (`agent-hub`) 또는 도트 (`com.lge.agent-hub`) 모두 허용 |
+| `id` | 마켓플레이스 카탈로그 키 (manifest `id` = catalog `slug`). 게시 후 변경 불가. flat (`agent-hub`) 또는 도트 (`com.example.agent-hub`) 모두 허용 |
 | `version` | semver. 서버가 `(plugin_id, version)` 유니크 + sha256 immutability 강제 — 동일 버전 + 다른 sha256 은 거절 |
 | `tools` | LLM tool 이름 배열. 다른 플러그인과 namespace 충돌 시 publish 시점 거절 |
 | `installPolicy` | `"admin"` (관리형 — 사용자 임의 제거 불가) / `"user"` (사용자 직접 설치). bootstrap 채널에서 admin policy 는 §채널-선택 표 참고 |
@@ -359,7 +359,7 @@ lvis-publish reject <publish-id> --reason <text> [--json]  # admin: 거절
 
 ## 채널 3 — Per-plugin CI publish (git tag SoT)
 
-> **요약**: 채널 1/2 와 같은 `POST /api/v1/plugins/<slug>/versions` 엔드포인트를 쓰지만 **트리거 surface 와 SoT 가 다름** — 마켓플레이스 폴링도 없고 사람이 CLI 를 돌리지도 않고, plugin repo 의 tag-push 가 직접 publish 를 일으킨다. 모든 `lvis-plugin-*` 레포에 동일하게 적용되는 contract (work-assistant 가 첫 도입, calendar/meeting/ms-graph/lge-api/local-indexer 순차 fan-out).
+> **요약**: 채널 1/2 와 같은 `POST /api/v1/plugins/<slug>/versions` 엔드포인트를 쓰지만 **트리거 surface 와 SoT 가 다름** — 마켓플레이스 폴링도 없고 사람이 CLI 를 돌리지도 않고, plugin repo 의 tag-push 가 직접 publish 를 일으킨다. 모든 `lvis-plugin-*` 레포에 동일하게 적용되는 contract (work-assistant 가 첫 도입, meeting/ms-graph/local-indexer 순차 fan-out).
 >
 > **이 룰의 enforcement 위치**: 각 plugin repo 의 `.github/workflows/publish.yml` 워크플로우. 호스트와 마켓플레이스 backend 는 catalog 만 trust 할 뿐 tag↔manifest 일치를 직접 강제하지 않는다 — discipline 은 publisher CI 에 있다.
 

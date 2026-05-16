@@ -58,8 +58,8 @@ export function buildTitlebarHtml({ platform }: TitlebarShellOptions): string {
 }
 
 /** Emit the CSS for the titlebar + supporting layout primitives.
- *  Light tokens are warm-cream (matches LGE Light feel); dark tokens are
- *  warm-grey-1 (matches LGE Dark feel). Both use HSL so theme bundle
+ *  Light tokens are warm-cream (matches Violet Light feel); dark tokens are
+ *  warm-grey-1 (matches Violet Dark feel). Both use HSL so theme bundle
  *  changes in a future revision can reuse the same variable names. */
 export function buildTitlebarCss(): string {
   return `
