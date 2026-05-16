@@ -29,7 +29,7 @@ export interface MainContentProps {
   refreshStarred: () => void;
   // navigation
   onActivateHome: () => void;
-  onJumpToSession: (sessionId: string) => void;
+  onJumpToSession: (sessionId: string) => void | boolean | Promise<void | boolean>;
   onRefreshSessions: () => void | Promise<void>;
   // chat
   chatContextValue: ChatContextValue;
@@ -163,8 +163,10 @@ export function MainContent(props: MainContentProps): ReactNode {
         <RoutinePanel
           api={api}
           onOpenSession={(sessionId) => {
-            props.onActivateHome();
-            props.onJumpToSession(sessionId);
+            void (async () => {
+              const loaded = await props.onJumpToSession(sessionId);
+              if (loaded !== false) props.onActivateHome();
+            })();
           }}
         />
       </MainPaneShell>
