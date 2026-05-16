@@ -260,8 +260,7 @@ function defaultIsAnyWindowFocused(): boolean {
     // not silently degrade to "always treat user as away". Tests pass via
     // the `isAnyWindowFocused` constructor option so the catch is rarely
     // hit outside true config errors.
-    // eslint-disable-next-line no-console
-    console.warn("[NotificationService] defaultIsAnyWindowFocused fallback:", err);
+    log.warn("defaultIsAnyWindowFocused fallback: %s", (err as Error).message);
     return false;
   }
 }
