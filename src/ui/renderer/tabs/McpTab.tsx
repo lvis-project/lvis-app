@@ -9,7 +9,7 @@ import { ScrollArea } from "../../../components/ui/scroll-area.js";
 import { Separator } from "../../../components/ui/separator.js";
 import { Textarea } from "../../../components/ui/textarea.js";
 import type { McpServerConfig, McpServerConfigDto, McpServerState } from "../types.js";
-import { DEFAULT_TOAST_TTL_MS } from "../constants.js";
+import { LONG_TOAST_TTL_MS } from "../constants.js";
 
 // ─── Helper types re-exported from renderer/types.ts ─
 // McpServerConfig / McpServerState 는 window.lvis.mcp 의 반환 타입
@@ -184,7 +184,7 @@ export function McpTab() {
   const showBanner = useCallback((type: "error" | "success", msg: string) => {
     if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current);
     setBanner({ type, msg });
-    bannerTimerRef.current = setTimeout(() => setBanner(null), DEFAULT_TOAST_TTL_MS + 1000); // 5 s — MCP status messages need longer read time
+    bannerTimerRef.current = setTimeout(() => setBanner(null), LONG_TOAST_TTL_MS); // MCP status messages need longer read time
   }, []);
 
   // 언마운트 시 타이머 정리 — 언마운트 후 setBanner 호출 방지

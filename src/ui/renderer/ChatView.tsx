@@ -27,7 +27,7 @@ import { TokenCostBadge } from "./components/TokenCostBadge.js";
 import { TokenProgressRing } from "./components/TokenProgressRing.js";
 import { BottomActionRow } from "./components/BottomActionRow.js";
 import { PermissionModeBadge } from "./components/permissions/PermissionModeBadge.js";
-import { DEFAULT_TOAST_TTL_MS } from "./constants.js";
+import { DEFAULT_TOAST_TTL_MS, SHORT_TOAST_TTL_MS } from "./constants.js";
 import { SkillBadge } from "./components/SkillBadge.js";
 import { WorkGroup } from "./components/WorkGroup.js";
 import { TurnActionBar } from "./components/TurnActionBar.js";
@@ -430,7 +430,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     // Show fork-success toast (shorter than default — single-line confirmation needs less time)
     if (forkToastTimerRef.current) clearTimeout(forkToastTimerRef.current);
     setForkToast(`checkpoint #${compactNum} 에서 새 분기를 시작했습니다`);
-    forkToastTimerRef.current = setTimeout(() => setForkToast(null), DEFAULT_TOAST_TTL_MS - 1000); // 3 s
+    forkToastTimerRef.current = setTimeout(() => setForkToast(null), SHORT_TOAST_TTL_MS); // single-line fork confirmation needs less read time
   }, [api, currentSessionId, onLoadSession]);
 
   useEffect(() => {
