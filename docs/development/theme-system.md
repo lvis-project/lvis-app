@@ -269,3 +269,40 @@ Rules:
 - `docs/design/settings-controls-shadcn.html` — visual confirmation board
 - `src/ui/renderer/__tests__/theme-provider.test.tsx` — provider tests
 - `src/ui/renderer/__tests__/appearance-tab.test.tsx` — settings UI tests
+
+---
+
+## 11. Derived plugin-ui tokens (tinted surfaces + focus shadow)
+
+Seven derived tokens were added to the plugin-ui contract
+(`src/shared/plugin-ui-tokens.ts`) to eliminate the 79 cross-plugin
+`color-mix()` reinventions found across the `--pm-*`, `--accent-bg`, and
+`--ah-*` namespaces in meeting / local-indexer / agent-hub. Drift across
+13 theme bundles is the primary risk this addresses.
+
+All values are pre-computed by `bundleToPluginTokens()` in
+`src/ui/renderer/theme/plugin-token-map.ts` using `color-mix(in srgb, …)`
+expressions and shipped to plugin webviews as part of the `LvisHostThemeEvent`
+token payload. Plugins reference them via `var(--lvis-primary-bg-subtle)` etc.
+
+| Token | Semantic intent | Mix rule |
+|-------|----------------|----------|
+| `--lvis-primary-bg-subtle` | Tinted primary surface — card highlight, active row bg | `color-mix(primary 14%/18%, card)` (light/dark) |
+| `--lvis-primary-bg-strong` | Stronger tint — hover/active variant of subtle | `color-mix(primary 28%/32%, card)` (light/dark) |
+| `--lvis-danger-bg-subtle` | Tinted danger surface for inline alerts, error rows | `color-mix(destructive 14%, transparent)` |
+| `--lvis-warning-bg-subtle` | Tinted warning surface for caution banners, status chips | `color-mix(warning 14%, transparent)` |
+| `--lvis-success-bg-subtle` | Tinted success surface for status pills, done states | `color-mix(success 14%, transparent)` |
+| `--lvis-surface-hover` | fg-over-secondary blend for hover highlights | `color-mix(fg 6%/10%, secondary)` (light/dark) |
+| `--lvis-focus-shadow` | Box-shadow ring color for `focus-visible` outlines | `color-mix(ring 62%, transparent)` |
+
+**high-contrast** bundle receives elevated mix percentages (24% subtle / 40%
+strong / 14% hover) to meet WCAG AA+ contrast requirements on black backgrounds.
+
+Follow-up migration PRs for meeting, local-indexer, and agent-hub will replace
+their private color-mix derivations with these host-provided tokens.
+
+**Box-shadow elevation tokens (follow-up):** `--lvis-elevation-shadow-soft` and
+`--lvis-elevation-shadow-strong` (full `box-shadow` offset+blur+color values) are
+intentionally deferred to a separate PR. Meeting plugin's `--pm-toggle-hover-shadow`
+and `--pm-toggle-selected-shadow` remain as-is until that elevation family lands.
+This keeps the current 7-token set's scope tight while documenting the gap.
