@@ -120,6 +120,7 @@ import { wireReleasePrep, wireUpdateCheck } from "./boot/steps/post-boot.js";
 import { wireReviewerAgent } from "./boot/steps/reviewer-wiring.js";
 import { wireHookSystem } from "./boot/steps/hook-system-wiring.js";
 import { readPermissionSettings } from "./permissions/permission-settings-store.js";
+import { migrateCanonicalization } from "./permissions/user-approval-store.js";
 import { createProvider, secretKeyFor } from "./engine/llm/provider-factory.js";
 import { reviewerVendorFor } from "./permissions/reviewer/reviewer-vendor-map.js";
 import type { LLMProvider } from "./engine/llm/types.js";
@@ -162,6 +163,12 @@ export async function bootstrap(
   getMainWindow: () => BrowserWindow | null = () => mainWindow,
 ): Promise<AppServices> {
   log.info("boot: starting...");
+
+  // Issue #837 — one-shot idempotent migration: re-canonicalize R-2
+  // user-approval keys after PR #828 upgraded canonicalStringify to RFC 8785
+  // JCS deep recursion. Runs before any approval lookup so lookups immediately
+  // benefit from migrated keys. Noop if marker file already present.
+  await migrateCanonicalization();
 
   // §4.2 Step 0-1 + 4-5: Core services.
   const core = await bootstrapCoreServices(mainWindow);
