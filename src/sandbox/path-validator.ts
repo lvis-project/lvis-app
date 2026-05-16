@@ -1,7 +1,7 @@
 /**
  * Portions adapted from OpenHarness (MIT License)
  * https://github.com/HKUDS/OpenHarness/blob/main/src/openharness/sandbox/path_validator.py
- * Copyright (c) 2026 HKU Data Intelligence Lab
+ * Copyright (c) 2025 OpenHarness Contributors
  *
  * SandboxPathValidator (Tier A3) — symlink-safe path boundary check.
  *

@@ -1,7 +1,7 @@
 /**
  * IdleScheduler — 5-state 머신 + powerMonitor + P0~P4 우선순위 큐
  *
- * 청사진 §6.1 R5 차용 (claw-code + Spotlight + Windows Indexer Backoff).
+ * 청사진 §6.1 R5: LVIS idle/backoff scheduling model.
  * Document-indexer plugin idle-scheduler interface와 호환.
  *
  * ## 5-state 머신

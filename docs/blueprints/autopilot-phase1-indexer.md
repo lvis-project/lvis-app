@@ -1,7 +1,7 @@
 # LVIS Phase 1 인덱싱 스택 Production 격상 — 통합 구현 청사진
 
 **문서 종류**: 단일 진실 소스 (Single Source of Truth)
-**기반 리서치**: R1 (LightRAG), R2 (PageIndex), R3 (uv+Python), R4 (한국어 NLP), R5 (claw-code/ccleaks)
+**기반 리서치**: R1 (LightRAG), R2 (PageIndex), R3 (uv+Python), R4 (한국어 NLP), R5 (LVIS agent-runtime threat model)
 **머저 에이전트**: Opus, agentId `aeaf997ab35b6f4c7`
 **대상 브랜치**: `lvis-app@feat/real-chat-implementation`, `lvis-plugin-pageindex@main`
 **작성일**: 2026-04-13

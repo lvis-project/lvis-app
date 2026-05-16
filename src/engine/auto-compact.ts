@@ -1,5 +1,5 @@
 /**
- * Auto-Compact — claw-code 패턴: 토큰 기반 컨텍스트 관리
+ * Auto-Compact — LVIS token-based context management
  *
  * 대화가 길어지면 히스토리 토큰이 컨텍스트 윈도우를 초과.
  * 자동으로 오래된 메시지를 요약하여 공간 확보.
@@ -40,7 +40,7 @@ export function getModelContextWindow(vendor: LLMVendor, model: string): number 
 
 /**
  * Usable portion of the model's context window — what callers should treat
- * as the denominator for "fullness" math. Subtracts Cline-style fixed
+ * as the denominator for "fullness" math. Subtracts LVIS fixed
  * buffer (output + safety reservation). See {@link getUsableContext}.
  *
  * Use this for compact decisions and any UI ring that should hit 100% at the
@@ -136,7 +136,7 @@ export function countHangul(text: string): number {
 }
 
 /**
- * 텍스트의 토큰 수 추정 (claw-code 방식: length/4 + 1) + 한글 가중치 (P11).
+ * 텍스트의 토큰 수 추정 (simple length/4 + 1 heuristic) + 한글 가중치 (P11).
  *
  * 한글 비율 ≥ 50% 면 weight 1.3 적용 (mixed-language 코드+주석 등은 ratio < 50% → weight 1.0).
  * 보수적 fallback: 모르는 문자는 기본 4-char/token 가정.
@@ -176,7 +176,7 @@ export function estimateMessagesTokens(messages: GenericMessage[]): number {
 export interface MarkStaleConfig {
   /** 말단에서부터 이 개수만큼의 tool_result는 raw 유지 (기본 8) */
   preserveRecentToolResults: number;
-  /** 이 길이(자) 미만의 tool_result는 mark 대상에서 제외 (기본 200, OpenCode 패턴) */
+  /** 이 길이(자) 미만의 tool_result는 mark 대상에서 제외 (기본 200, LVIS noise floor) */
   minStubThreshold?: number;
 }
 
