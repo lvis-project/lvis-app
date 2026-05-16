@@ -52,6 +52,7 @@ export const PERMISSIONS = {
   policySet: "lvis:policy:set",
   dirDispatch: "lvis:permissions:dir-dispatch",
   reviewerDispatch: "lvis:permissions:reviewer-dispatch",
+  reviewerProviderHasKey: "lvis:permissions:reviewer-provider-has-key",
   deferredList: "lvis:permissions:deferred-list",
   deferredResolve: "lvis:permissions:deferred-resolve",
   deferredPending: "lvis:permissions:deferred-pending",

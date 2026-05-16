@@ -504,6 +504,14 @@ export async function bootstrap(
     wireReviewerAgent({
       permissionManager,
       streamProviderFor: reviewerStreamProviderFor,
+      // C3 key inheritance — Foundry reads llm.apiKey.azure-foundry,
+      // GCP playground reads llm.apiKey.gemini. Both use the same secret
+      // store as the chat LLM providers so no new UI is required.
+      getSecret: (key) => settingsService.getSecret(key),
+      // Foundry endpoint is a plain (non-secret) setting: the same
+      // llm.vendors.azure-foundry.baseUrl field used by the chat provider.
+      getFoundryEndpoint: () =>
+        settingsService.get("llm").vendors["azure-foundry"]?.baseUrl ?? null,
       onDeferredPendingChange: (summary) => {
         sendToWindow(getMainWindow(), PERMISSIONS.deferredPending, summary, log);
       },

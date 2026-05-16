@@ -251,6 +251,8 @@ const VALID_REVIEWER_PROVIDERS: ReadonlySet<ReviewerProvider> = new Set([
   "openai",
   "anthropic",
   "google",
+  "foundry",
+  "gcp-playground",
 ]);
 const VALID_REVIEWER_FALLBACKS: ReadonlySet<ReviewerFallbackOnError> = new Set([
   "deny",
