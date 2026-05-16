@@ -6,13 +6,16 @@ on:
     branches: [main]
 jobs:
   build-and-test:
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: [self-hosted, Linux, ARM64, oracle]
     steps:
       - uses: actions/checkout@v6
         with:
           path: lvis-app
       - name: Clone sibling plugin repos
+        # Sibling plugin repos are private; fork PRs cannot access the
+        # LVIS_REPO_READ_TOKEN secret. Skip cloning on fork PRs so host
+        # build+test still runs and reports status to the contributor.
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         env:
           LVIS_REPO_READ_TOKEN: ${{ secrets.LVIS_REPO_READ_TOKEN }}
         run: |
@@ -21,7 +24,9 @@ jobs:
           if [ -z "$repo_token" ] && gh auth status --hostname github.com >/dev/null 2>&1; then
             repo_token="$(gh auth token)"
           fi
-          if [ -z "$repo_token" ]; then
+          if [ -n "$repo_token" ]; then
+            echo "::add-mask::$repo_token"
+          else
             echo "::warning::No LVIS_REPO_READ_TOKEN or gh auth token available; attempting unauthenticated sibling clones."
           fi
           sibling_ref="${LVIS_SIBLING_REPO_REF:-${GITHUB_HEAD_REF:-${GITHUB_REF_NAME:-}}}"
