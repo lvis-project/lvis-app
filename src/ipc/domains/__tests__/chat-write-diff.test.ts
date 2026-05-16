@@ -73,7 +73,6 @@ function makeConversationLoop(sessionId: string) {
     runTurn: vi.fn(),
     newConversation: vi.fn(),
     listSessions: vi.fn(() => []),
-    listRoutineSessions: vi.fn(() => []),
     loadSession: vi.fn(),
     refreshProvider: vi.fn(),
     abortCurrentTurn: vi.fn(),
