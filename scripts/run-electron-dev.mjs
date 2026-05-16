@@ -364,17 +364,53 @@ function resolveLocalBin(name) {
 // can await stdout signals instead of polling output mtime.
 const watcherReady = new Map();
 
+function stripAnsi(value) {
+  return String(value).replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, "");
+}
+
+function suppressTailwindStatusLine(line) {
+  const normalized = stripAnsi(line).trim();
+  return (
+    normalized === "" ||
+    /^Done in \d+(?:\.\d+)?(?:ms|s|[\u00b5\u03bc]s)$/.test(normalized) ||
+    /^(?:\u2248\s*)?tailwindcss v\d+\.\d+\.\d+/.test(normalized)
+  );
+}
+
+function createLineWriter(sink, suppressLine) {
+  let pending = "";
+  return {
+    write(chunk) {
+      if (typeof suppressLine !== "function") {
+        sink.write(chunk);
+        return;
+      }
+      pending += chunk.toString();
+      const lines = pending.split(/\r?\n/);
+      pending = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!suppressLine(line)) sink.write(`${line}\n`);
+      }
+    },
+    flush() {
+      if (pending && !suppressLine(pending)) sink.write(pending);
+      pending = "";
+    },
+  };
+}
+
 function spawnWatcher(tag, cmd, args, opts = {}) {
-  const { readyPattern, ...spawnOpts } = opts;
-  // When readyPattern is supplied, pipe stdout so we can scan for the first
-  // build-complete signal (then tee to the parent terminal so the dev sees
-  // the same output). Without readyPattern the legacy mtime gate is used,
-  // so stdout/stderr inherit directly.
+  const { readyPattern, suppressStderrLine, ...spawnOpts } = opts;
+  // When readyPattern is supplied, pipe stdout/stderr so we can scan for the
+  // first build-complete signal. Optional stderr filtering suppresses known
+  // status noise while preserving diagnostics.
   if (readyPattern) {
     let resolveReady;
     const promise = new Promise((r) => { resolveReady = r; });
     watcherReady.set(tag, { resolve: resolveReady, promise });
   }
+  const shouldPipeStdout = Boolean(readyPattern);
+  const shouldPipeStderr = Boolean(readyPattern || suppressStderrLine);
   const child = spawn(cmd, args, {
     cwd: repoRoot,
     // When readyPattern is set, pipe BOTH stdout and stderr — different
@@ -383,23 +419,41 @@ function spawnWatcher(tag, cmd, args, opts = {}) {
     // "build finished" on stderr too). We tee both back to the parent
     // terminal so dev still sees full output, but also scan for the
     // pattern.
-    stdio: readyPattern ? ["ignore", "pipe", "pipe"] : ["ignore", "inherit", "inherit"],
+    stdio: [
+      "ignore",
+      shouldPipeStdout ? "pipe" : "inherit",
+      shouldPipeStderr ? "pipe" : "inherit",
+    ],
     env: { ...process.env, LVIS_DEV: "1" },
     shell: process.platform === "win32" && cmd.toLowerCase().endsWith(".cmd"),
     ...spawnOpts,
   });
-  if (readyPattern) {
+  if (readyPattern || suppressStderrLine) {
     let matched = false;
-    const scan = (chunk, sink) => {
-      sink.write(chunk);
-      if (!matched && readyPattern.test(chunk.toString())) {
-        matched = true;
-        const entry = watcherReady.get(tag);
-        if (entry) entry.resolve();
+    let readyScanBuffer = "";
+    const stdoutWriter = createLineWriter(process.stdout);
+    const stderrWriter = createLineWriter(process.stderr, suppressStderrLine);
+    const scan = (chunk, writer) => {
+      if (readyPattern && !matched) {
+        readyScanBuffer += chunk.toString();
+        if (readyScanBuffer.length > 4096) readyScanBuffer = readyScanBuffer.slice(-4096);
+        if (readyPattern.test(stripAnsi(readyScanBuffer))) {
+          matched = true;
+          readyScanBuffer = "";
+          const entry = watcherReady.get(tag);
+          if (entry) entry.resolve();
+        }
       }
+      writer.write(chunk);
     };
-    if (child.stdout) child.stdout.on("data", (c) => scan(c, process.stdout));
-    if (child.stderr) child.stderr.on("data", (c) => scan(c, process.stderr));
+    if (child.stdout) {
+      child.stdout.on("data", (c) => scan(c, stdoutWriter));
+      child.stdout.on("end", () => stdoutWriter.flush());
+    }
+    if (child.stderr) {
+      child.stderr.on("data", (c) => scan(c, stderrWriter));
+      child.stderr.on("end", () => stderrWriter.flush());
+    }
   }
   child.on("error", (err) => {
     log(tag, `spawn failed: ${err.message}`);
@@ -746,22 +800,23 @@ async function main() {
   // tailwindcss v4 skips file writes when the resolved CSS is identical to
   // the prior build (intentional incremental optimization). The mtime gate
   // would then never see mtime advance and time out. Instead we capture
-  // the watcher's stdout and treat the first "Done in NNNms" line as the
-  // build-complete signal — works regardless of whether tailwindcss
+  // the watcher's stderr/stdout and treat the first "Done in ..." line as
+  // the build-complete signal — works regardless of whether tailwindcss
   // actually rewrote the file. See scripts/lib/dev-watcher-gate.mjs for the
   // dual-signal (stdout + mtime fallback) detection logic.
-  // Pattern anchored at line start + `ms\b` suffix to avoid false positives
+  // Pattern anchored at line start + known duration suffixes to avoid false positives
   // from any "Done in N" substring appearing in error stack traces or CSS
-  // comments. tailwindcss v4's exact line is `Done in NNNms` (verified at
-  // node_modules/@tailwindcss/cli/dist/index.mjs). Failing tight is better
-  // than silently resolving on a non-build line.
+  // comments. Failing tight is better than silently resolving on a non-build line.
   spawnWatcher("styles", resolveLocalBin("tailwindcss"), [
     "-i",
     "src/styles.css",
     "-o",
     "dist/src/styles.css",
     "--watch=always",
-  ], { readyPattern: /(^|\n)Done in \d+ms\b/ });
+  ], {
+    readyPattern: /(^|\n)Done in \d+(?:\.\d+)?(?:ms|s|[\u00b5\u03bc]s)\b/,
+    suppressStderrLine: suppressTailwindStatusLine,
+  });
 
   // Wait for ALL watchers' first build before launching Electron. Pre-fix
   // the launcher only awaited dist/src/main/main.js, so renderer.js and
