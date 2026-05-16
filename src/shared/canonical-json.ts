@@ -27,7 +27,12 @@
  *                        order produce distinct strings. Tool args
  *                        relying on element-order-agnostic comparison
  *                        must normalize (e.g. `[...arr].sort()`) before
- *                        calling.
+ *                        calling. **Nested objects inside arrays ARE
+ *                        recursively canonicalized** (keys sorted) per
+ *                        RFC 8785 JCS — `[{a:1,b:2}]` and `[{b:2,a:1}]`
+ *                        produce identical output. Required for HMAC
+ *                        stability when caller uses this for nonce
+ *                        signing (issue #828).
  *   - `Date`           → quoted ISO string via `Date.prototype.toJSON`
  *                        (e.g. `"2026-05-16T14:30:00.000Z"`). Two Date
  *                        instances with the same epoch produce identical
@@ -88,11 +93,22 @@ function canonicalStringifyInner(
 ): string {
   if (depth > MAX_DEPTH) return '"[MaxDepth]"';
   if (value === undefined) return "null";
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+  if (value === null || typeof value !== "object") {
     return JSON.stringify(value) ?? "null";
   }
   if (seen.has(value as object)) return '"[Circular]"';
   seen.add(value as object);
+  if (Array.isArray(value)) {
+    // RFC 8785 JCS — element order preserved; nested objects within an
+    // array are RECURSIVELY canonicalized (keys sorted). Without this,
+    // `[{a:1,b:2}]` and `[{b:2,a:1}]` produce distinct strings, breaking
+    // R-2 cache symmetry and HMAC stability for approval-gate
+    // (issue #828 — private duplicate consolidation).
+    const parts = value.map(
+      (e) => canonicalStringifyInner(e, seen, depth + 1),
+    );
+    return `[${parts.join(",")}]`;
+  }
   const obj = value as Record<string, unknown>;
   const sortedKeys = Object.keys(obj)
     .filter(k => obj[k] !== undefined)
