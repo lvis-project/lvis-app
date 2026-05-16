@@ -110,8 +110,8 @@ const COOLDOWN_MS_BY_KIND: Record<NotificationKind, number> = {
   routine: 0,
   "ask-user": 0,
   // #841 — plugin notifications inherit a 5s cooldown. Lower than turn-end
-  // because plugin events span many distinct surfaces (meeting/work-proactive
-  // /agent-hub etc.) and a per-kind cooldown that's too aggressive would
+  // because plugin events span many distinct surfaces across loaded
+  // plugins and a per-kind cooldown that's too aggressive would
   // coalesce legitimate independent alerts. Still tight enough to defang a
   // buggy plugin emitting 30 events/sec from blasting toasts.
   plugin: 5_000,
