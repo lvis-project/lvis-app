@@ -1,5 +1,31 @@
 import { describe, it, expect } from "vitest";
-import { isLvisThemeBundleId, LVIS_THEME_BUNDLE_IDS } from "../plugin-ui-tokens.js";
+import { isLvisThemeBundleId, LVIS_THEME_BUNDLE_IDS, LVIS_TOKEN_NAMES } from "../plugin-ui-tokens.js";
+
+const DERIVED_TOKENS = [
+  "--lvis-primary-bg-subtle",
+  "--lvis-primary-bg-strong",
+  "--lvis-danger-bg-subtle",
+  "--lvis-warning-bg-subtle",
+  "--lvis-success-bg-subtle",
+  "--lvis-surface-hover",
+  "--lvis-focus-shadow",
+] as const;
+
+describe("LVIS_TOKEN_NAMES — derived tinted-surface tokens", () => {
+  it("includes all 7 new derived tokens", () => {
+    for (const token of DERIVED_TOKENS) {
+      expect(LVIS_TOKEN_NAMES).toContain(token);
+    }
+  });
+
+  it("has no duplicate token names", () => {
+    const seen = new Set<string>();
+    for (const name of LVIS_TOKEN_NAMES) {
+      expect(seen.has(name), `duplicate token: ${name}`).toBe(false);
+      seen.add(name);
+    }
+  });
+});
 
 describe("isLvisThemeBundleId", () => {
   it("accepts every member of LVIS_THEME_BUNDLE_IDS", () => {
