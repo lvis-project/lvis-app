@@ -158,6 +158,78 @@ describe("auto-updater", () => {
       payload: { kind: "downloading", version: "2.0.0", percent: 43 }
     });
   });
+
+  // ── Negative-path coverage for the three MAJOR review findings ────────
+  it("downloadNow rejects when current state is not 'available'", async () => {
+    const fw = fakeWindow();
+    const u = fakeUpdater();
+    const svc = createAutoUpdater({
+      mainWindow: fw.win,
+      isEnabled: () => true,
+      updaterFactory: () => u,
+    });
+    await svc.triggerCheck();
+    // No update-available emitted yet — state is still { kind: "idle" }.
+    const result = await svc._testOnly.downloadNow();
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain("not-available");
+    expect(u.downloads).toBe(0);
+  });
+
+  it("installNow rejects when current state is not 'downloaded'", async () => {
+    const fw = fakeWindow();
+    const u = fakeUpdater();
+    const svc = createAutoUpdater({
+      mainWindow: fw.win,
+      isEnabled: () => true,
+      updaterFactory: () => u,
+    });
+    await svc.triggerCheck();
+    u.emit("update-available", { version: "3.0.0" });
+    // Still in "available" — install must reject (download not finished).
+    const result = await svc._testOnly.installNow();
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain("not-downloaded");
+    expect(u.installs).toBe(0);
+  });
+
+  it("reverts to 'available' when downloadUpdate rejects (user can retry)", async () => {
+    const fw = fakeWindow();
+    const u = fakeUpdater();
+    u.downloadUpdate = async () => {
+      throw new Error("ENETUNREACH");
+    };
+    const svc = createAutoUpdater({
+      mainWindow: fw.win,
+      isEnabled: () => true,
+      updaterFactory: () => u,
+    });
+    await svc.triggerCheck();
+    u.emit("update-available", { version: "4.0.0" });
+    const result = await svc._testOnly.downloadNow();
+    expect(result.ok).toBe(false);
+    // Final state should be back to "available" so the badge invites a retry,
+    // not stuck spinning on a "downloading" pill with no progress events.
+    const last = fw.sent[fw.sent.length - 1]!;
+    expect(last.payload).toMatchObject({ kind: "available", version: "4.0.0" });
+  });
+
+  it("drops download-progress events when state is neither 'downloading' nor 'available'", async () => {
+    const fw = fakeWindow();
+    const u = fakeUpdater();
+    const svc = createAutoUpdater({
+      mainWindow: fw.win,
+      isEnabled: () => true,
+      updaterFactory: () => u,
+    });
+    await svc.triggerCheck();
+    // State is still idle — a stray progress event (delta probe, blockmap
+    // fetch) MUST NOT promote the badge to "downloading" with version=""
+    // because the tooltip would render "v 다운로드 중 — N%" (broken).
+    const before = fw.sent.length;
+    u.emit("download-progress", { percent: 10, transferred: 1, total: 10 });
+    expect(fw.sent.length).toBe(before);
+  });
 });
 
 describe("crash-reporter", () => {

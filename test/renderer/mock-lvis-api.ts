@@ -411,6 +411,9 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     getAppUpdateState: vi.fn(async () => ({ kind: "idle" })),
     downloadAppUpdate: vi.fn(async () => ({ ok: true })),
     installAppUpdate: vi.fn(async () => ({ ok: true })),
+    // Native confirm dialog stub — default to "confirmed" so install
+    // flow tests don't need to special-case opening the dialog.
+    confirmInstallAppUpdate: vi.fn(async () => ({ confirmed: true })),
 
     plugins: {
       getPerfStats: vi.fn(async () => ({})),

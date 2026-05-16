@@ -427,26 +427,23 @@ export type LvisApi = {
    * the updater state changes (available → downloading → downloaded).
    * Renderer renders a permanent badge next to the Home button based on
    * this state. Download is user-gated (badge click) — see `downloadAppUpdate`.
+   *
+   * Both this method and `getAppUpdateState` reference the SoT
+   * `UpdateState` union from `src/shared/update-state.ts` — never inline
+   * the discriminated literals here (Field-Addition Sweep rule).
    */
   onAppUpdateState: (
-    handler: (state:
-      | { kind: "idle" }
-      | { kind: "available"; version: string }
-      | { kind: "downloading"; version: string; percent: number }
-      | { kind: "downloaded"; version: string }
-    ) => void,
+    handler: (state: import("../../shared/update-state.js").UpdateState) => void,
   ) => () => void;
   /** Late-mount sync: fetch the last broadcasted state. */
-  getAppUpdateState: () => Promise<
-    | { kind: "idle" }
-    | { kind: "available"; version: string }
-    | { kind: "downloading"; version: string; percent: number }
-    | { kind: "downloaded"; version: string }
-  >;
+  getAppUpdateState: () => Promise<import("../../shared/update-state.js").UpdateState>;
   /** Trigger download. Valid only when state is "available". */
   downloadAppUpdate: () => Promise<{ ok: boolean; reason?: string }>;
   /** Quit & install. Valid only when state is "downloaded". */
   installAppUpdate: () => Promise<{ ok: boolean; reason?: string }>;
+  /** Confirm install via native dialog (main-process showMessageBox).
+   *  Returns { confirmed: true } only on the "재시작" button. */
+  confirmInstallAppUpdate: () => Promise<{ confirmed: boolean }>;
   onBootstrapStatus: (
     h: (status:
       | { phase: "start" }
