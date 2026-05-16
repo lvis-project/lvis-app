@@ -71,7 +71,7 @@ export const lgeDarkBundle: ThemeBundle = {
     "chart-3":                "1 98% 59%",
     "chart-4":                "142 71% 45%",
     "chart-5":                "44 90% 60%",
-    /* ── Action tokens (PR-4/5) ────────────────────────────────── */
+    /* ── Action tokens ─────────────────────────────────────────── */
     "action-view":            "263 70% 50%",
     "action-branch":          "25 95% 53%",
     "action-compact":         "263 70% 50%",

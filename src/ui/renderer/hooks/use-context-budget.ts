@@ -48,7 +48,7 @@ export function useContextBudget(params: {
     // Effective window picks the 1M beta tier when the model defines one
     // (adapter auto-sends `context-1m-2025-08-07`). Cline-style buffer
     // then subtracts output + safety reservation so the ring hits 100% at
-    // the actual rotation point, not at raw context = full.
+    // the compact threshold, not at raw context = full.
     // `lookupPricing` always returns a value (FALLBACK_PRICING on miss),
     // so no null branch is needed here.
     return getUsableContext(effectiveContextWindow(lookupPricing(llmVendor, llmModel)));
