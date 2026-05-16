@@ -17,6 +17,7 @@ import { ApprovalDialog } from "./dialogs/ApprovalDialog.js";
 import { DeferredQueueDialog } from "./dialogs/DeferredQueueDialog.js";
 import { buildQuickActions } from "./components/command-actions.js";
 import { MainToolbar } from "./MainToolbar.js";
+import { useAppUpdate } from "./hooks/use-app-update.js";
 import { DevToolsPanel } from "./components/DevToolsPanel.js";
 import { MainContent } from "./MainContent.js";
 import { StatusBar } from "./components/StatusBar.js";
@@ -57,6 +58,10 @@ import type { UserKeyboardIntentSnapshot } from "../../shared/chat-origin.js";
 
 export function App() {
   const api = useMemo(() => getApi(), []);
+  // App auto-update badge state — surfaces the main-process electron-updater
+  // events as a permanent badge next to the Home button. User-gated:
+  // download/install only run on explicit badge click.
+  const appUpdate = useAppUpdate(api);
 
   // Workflow tools (S1+S2) — lifted to App level so FloatingQuestionPanel
   // survives view navigation (question state persists across view changes).
@@ -963,6 +968,9 @@ export function App() {
               void openDetachedBuiltInView(viewKey);
             }}
             onOpenDevTools={() => setDevToolsOpen((v) => !v)}
+            appUpdateState={appUpdate.state}
+            onDownloadAppUpdate={appUpdate.download}
+            onInstallAppUpdate={appUpdate.install}
           />
           <DevToolsPanel
             api={api}
