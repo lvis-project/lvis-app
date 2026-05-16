@@ -1058,14 +1058,14 @@ describe("ChatView — userApprovalHit disclosure toast (#793 + cluster MAJOR-2/
     expect(toast.textContent).toContain("MEDIUM");
   });
 
-  it("verdict-tier tint: low=emerald, medium=amber, high=red (cluster MAJOR-3)", async () => {
+  it("verdict-tier tint uses semantic theme tokens (low=success, medium=warning, high=destructive)", async () => {
     const { container, fire } = await setupWithCallback();
     const cases: Array<["low" | "medium" | "high", string]> = [
-      ["low", "emerald"],
-      ["medium", "amber"],
-      ["high", "red"],
+      ["low", "success"],
+      ["medium", "warning"],
+      ["high", "destructive"],
     ];
-    for (const [verdict, expectedTone] of cases) {
+    for (const [verdict, expectedToken] of cases) {
       await act(async () => {
         fire({ toolName: `tool_${verdict}`, scope: "session", verdictAtApproval: verdict });
       });
@@ -1076,10 +1076,12 @@ describe("ChatView — userApprovalHit disclosure toast (#793 + cluster MAJOR-2/
         expect(el).not.toBeNull();
         return el as HTMLElement;
       });
+      // Class string uses `hsl(var(--<token>)/...)` form — assert the token
+      // name appears (theme system v2 — bundle-invariant, no palette literals).
       expect(
         toast.className,
-        `verdict=${verdict} expected tone "${expectedTone}"`,
-      ).toContain(expectedTone);
+        `verdict=${verdict} expected token "--${expectedToken}"`,
+      ).toContain(`--${expectedToken}`);
     }
   });
 

@@ -753,19 +753,20 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
       )}
       {/* R-2 user-approval memory-hit disclosure toast (#793) — auto-dismisses after 4 s.
           Verdict-tier tint surfaces the trust gradient (CRITICAL 4.1 disclosure):
-          - low    → emerald (lowest risk, informational)
-          - medium → amber (moderate risk)
-          - high   → red + role="alert" (urgent — user is re-using a high-risk approval)
-          Cluster review MAJOR-3 — disclosure surface must be visually distinguishable per tier. */}
+          - low    → --success (informational, safe re-approval)
+          - medium → --warning (moderate risk)
+          - high   → --destructive + role="alert" (urgent — user is re-using a high-risk approval)
+          Cluster review MAJOR-3 — disclosure surface must be visually distinguishable per tier.
+          Uses semantic theme tokens (--success / --warning / --destructive) so bundles
+          (tokyo-night / forest / etc.) supply the actual color — the toast adapts. */}
       {userApprovalHitToast && (() => {
         const verdict = userApprovalHitToast.verdictAtApproval;
         const isHigh = verdict === "high";
-        const tone =
-          verdict === "high"
-            ? "border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-300"
-            : verdict === "medium"
-            ? "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300"
-            : "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
+        const token =
+          verdict === "high" ? "destructive"
+          : verdict === "medium" ? "warning"
+          : "success";
+        const tone = `border-[hsl(var(--${token})/0.4)] bg-[hsl(var(--${token})/0.1)] text-[hsl(var(--${token}))]`;
         return (
           <div
             data-testid="user-approval-hit-toast"
