@@ -755,6 +755,9 @@ const api = {
     /** Permission policy — `/permission reviewer ...` slash dispatch via IPC. */
     reviewerDispatch: async (rawArgs: string) =>
       ipcRenderer.invoke(PERMISSIONS.reviewerDispatch, { rawArgs, intent: ipcUserKeyboardIntent() }),
+    /** C3 — check whether a reviewer provider has its required API key stored. */
+    reviewerProviderHasKey: async (provider: string) =>
+      ipcRenderer.invoke(PERMISSIONS.reviewerProviderHasKey, provider),
     /** Permission policy — `/permission audit show` — fetch recent permission audit entries. */
     auditShow: async (last: number) =>
       ipcRenderer.invoke(PERMISSIONS.auditShow, { last }),

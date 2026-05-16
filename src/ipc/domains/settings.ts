@@ -29,6 +29,11 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:settings:set-api-key", e); return UNAUTHORIZED_FRAME; }
     await settingsService.setSecret(`llm.apiKey.${vendor}`, apiKey);
     conversationLoop.refreshProvider();
+    // Broadcast settings snapshot so reviewer tab can auto-unlock without a full reload.
+    const snapshot = settingsService.getAll();
+    for (const win of getAppWindows?.() ?? []) {
+      sendToWindow(win, SETTINGS.updated, snapshot);
+    }
     return { ok: true };
   });
 
@@ -42,6 +47,11 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:settings:delete-api-key", e); return UNAUTHORIZED_FRAME; }
     await settingsService.deleteSecret(`llm.apiKey.${vendor}`);
     conversationLoop.refreshProvider();
+    // Broadcast settings snapshot so reviewer tab reflects key removal immediately.
+    const snapshot = settingsService.getAll();
+    for (const win of getAppWindows?.() ?? []) {
+      sendToWindow(win, SETTINGS.updated, snapshot);
+    }
     return { ok: true };
   });
 

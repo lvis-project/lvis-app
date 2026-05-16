@@ -223,6 +223,26 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
     },
   );
 
+  // ── C3 — reviewer provider key-presence check ────────────────────────────
+  // Used by the renderer settings UI to determine which reviewer providers
+  // are activatable (key-driven dynamic activation). Read-only, but gated
+  // to prevent a foreign frame from probing which LLM API keys are present.
+  ipcMain.handle(PERMISSIONS.reviewerProviderHasKey, async (e, provider: string) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, PERMISSIONS.reviewerProviderHasKey, e);
+      return false;
+    }
+    const { reviewerProviderKeyPresent } = await import(
+      "../../permissions/reviewer/provider-adapters.js"
+    );
+    return reviewerProviderKeyPresent(
+      provider,
+      (key) => deps.settingsService.getSecret(key),
+      // Foundry endpoint lives in the plain settings (not encrypted).
+      () => deps.settingsService.get("llm").vendors["azure-foundry"]?.baseUrl ?? null,
+    );
+  });
+
   // ── Permission policy — deferred queue surface ────────────────────────────
   // Returns DLP-redacted tool inputs + verdicts; gated to prevent a
   // compromised foreign frame from harvesting them (Copilot round 3).
