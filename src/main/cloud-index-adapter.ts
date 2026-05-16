@@ -1,7 +1,7 @@
 /**
  * Cloud Index Adapter — Phase 1 Mock
  *
- * 향후 사내 Server Index Engine (Elasticsearch + Milvus/Qdrant) 클라이언트로
+ * 향후 Server Index Engine (Elasticsearch + Milvus/Qdrant) 클라이언트로
  * 교체될 인터페이스. Phase 1에서는 빈 결과 + 구조화 로그만 반환한다.
  *
  * 청사진 §1 C4: Phase 1 cloud weight = 0.0 (bm25:0.5 + vec:0.5 로 재정규화)
@@ -30,7 +30,7 @@ export interface CloudIndexHit {
 
 /**
  * Cloud Index Adapter 인터페이스.
- * Phase 2에서 사내 Server Index Engine 실연결 클라이언트가 이 인터페이스를 구현한다.
+ * Phase 2에서 Server Index Engine 실연결 클라이언트가 이 인터페이스를 구현한다.
  */
 export interface CloudIndexAdapter {
   /**

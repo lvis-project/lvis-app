@@ -71,7 +71,7 @@ if (!realPlist.startsWith(realRoot + "/")) {
 }
 
 const SCHEME = "lvis";
-const ENTRY_NAME = "com.lge.lvis.dev"; // disambiguate from production build.appId in lsregister dumps
+const ENTRY_NAME = "xyz.lvisai.app.dev"; // disambiguate from production build.appId in lsregister dumps
 
 function reportSpawnFailure(label, r) {
   if (r.error) {

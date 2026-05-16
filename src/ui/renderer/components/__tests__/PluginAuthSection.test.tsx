@@ -64,16 +64,16 @@ describe("PluginAuthSection", () => {
     render(
       <PluginAuthSection
         api={makeApi()}
-        pluginId="lge-api"
-        pluginName="lge-api"
-        auth={{ statusTool: "lge_status", loginTool: "lge_login" }}
-        state={{ kind: "authed", account: "jo.dreame@gmail.com" }}
+        pluginId="example-corp-portal"
+        pluginName="example-corp-portal"
+        auth={{ statusTool: "portal_status", loginTool: "portal_login" }}
+        state={{ kind: "authed", account: "alice@example.com" }}
         onRefresh={() => undefined}
       />,
     );
     expect(screen.getByText("✓ 인증됨")).toBeInTheDocument();
-    expect(screen.queryByTestId("plugin-auth-logout-lge-api")).toBeNull();
-    expect(screen.getByTestId("plugin-auth-logout-hint-lge-api")).toBeInTheDocument();
+    expect(screen.queryByTestId("plugin-auth-logout-example-corp-portal")).toBeNull();
+    expect(screen.getByTestId("plugin-auth-logout-hint-example-corp-portal")).toBeInTheDocument();
   });
 
   it("invokes loginTool + onRefresh when 로그인 clicked", async () => {

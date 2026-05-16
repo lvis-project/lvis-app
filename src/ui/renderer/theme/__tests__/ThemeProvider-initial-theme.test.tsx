@@ -48,9 +48,9 @@ describe("ThemeProvider — initial theme (race-window-zero)", () => {
       tokens: {},
     };
     const { getByTestId } = render(
-      <ThemeProvider initialBundleId="lge-light"><Probe /></ThemeProvider>
+      <ThemeProvider initialBundleId="violet-light"><Probe /></ThemeProvider>
     );
-    expect(getByTestId("bundle").textContent).toBe("lge-light");
+    expect(getByTestId("bundle").textContent).toBe("violet-light");
   });
 
   it("falls back to DEFAULT_BUNDLE_ID when neither prop nor global is present", () => {

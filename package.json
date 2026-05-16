@@ -139,7 +139,7 @@
     "esbuild"
   ],
   "build": {
-    "appId": "com.lge.lvis",
+    "appId": "xyz.lvisai.app",
     "productName": "LVIS",
     "icon": "build/icon.png",
     "electronLanguages": [

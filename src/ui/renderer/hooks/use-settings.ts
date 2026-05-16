@@ -98,7 +98,7 @@ export function useSettings(api: LvisApi): UseSettingsResult {
       try {
         const s = await api.getSettings();
         // Narrow before constructing the patch key. If `s.llm.provider`
-        // is stale/corrupt (`"lgenie"`-style), `mergeLlmPatch` would skip
+        // is stale/corrupt (a since-removed vendor name), `mergeLlmPatch` would skip
         // the unknown vendor entry and the toggle would silently no-op.
         // The narrower's `DEFAULT_LLM_VENDOR` fallback guarantees the
         // update lands somewhere valid; if the user is actively on a
