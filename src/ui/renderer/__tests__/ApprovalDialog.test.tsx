@@ -259,13 +259,15 @@ describe("ApprovalDialog", () => {
     await waitFor(() => {
       const row = document.body.querySelector('[data-testid="tool-approval-sandbox"]');
       expect(row).toBeTruthy();
-      // partial kind is weak per isWeakSandbox() SOT — must show warning
+      // MAJOR-2.1 fix: partial now shows its own distinct Korean label
+      // (partial isolation IS present — "OS 격리 없음" was factually wrong)
       expect(row!.textContent).toContain("⚠");
-      expect(row!.textContent).toContain("OS 격리 없음");
+      expect(row!.textContent).toContain("OS 격리 부분적");
+      expect(row!.textContent).toContain("sandbox-exec");
     });
   });
 
-  it("renders strong (no ⚠) when kind=fs-only + confidence=verified", async () => {
+  it("renders ℹ fs-only label when kind=fs-only + confidence=verified", async () => {
     render(
       <ApprovalDialog
         queue={[makeRequest({
@@ -284,10 +286,10 @@ describe("ApprovalDialog", () => {
     await waitFor(() => {
       const row = document.body.querySelector('[data-testid="tool-approval-sandbox"]');
       expect(row).toBeTruthy();
-      // fs-only is strong (not weak) per isWeakSandbox() SOT
+      // MAJOR-2.1 fix: fs-only now shows Korean label instead of raw "OS 격리 활성 (fs-only)"
       expect(row!.textContent).not.toContain("⚠");
-      expect(row!.textContent).toContain("OS 격리 활성");
-      expect(row!.textContent).toContain("fs-only");
+      expect(row!.textContent).toContain("파일시스템만 격리");
+      expect(row!.textContent).toContain("landlock");
     });
   });
 

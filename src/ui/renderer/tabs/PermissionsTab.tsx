@@ -14,12 +14,18 @@ import {
   SelectValue,
 } from "../../../components/ui/select.js";
 import { Separator } from "../../../components/ui/separator.js";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "../../../components/ui/tooltip.js";
 import { PERMISSION_REVIEWER_FRAMEWORK } from "../../../shared/permission-reviewer-framework.js";
 import { EXEC_MODE_OPTIONS } from "../constants.js";
+import { getApi } from "../api-client.js";
 import type {
   ExecMode,
   HookTrustRow,
-  LvisApi,
   PermissionReviewerFallbackOnError,
   PermissionReviewerMode,
   PermissionReviewerProvider,
@@ -95,7 +101,9 @@ function formatReviewerDispatchError(error: string): string {
   if (error === "user-keyboard-required") {
     return "리뷰어 설정 변경은 활성 사용자 입력에서만 실행할 수 있습니다.";
   }
-  return error;
+  // Minor-3.2: catch-all wraps unknown backend errors with Korean prefix
+  // instead of letting raw English strings pass through to the UI.
+  return `리뷰어 오류: ${error}`;
 }
 
 export function PermissionsTab() {
@@ -300,8 +308,11 @@ export function PermissionsTab() {
   // Refresh providerKeyMap whenever chat LLM settings change so that
   // adding an Azure AI Foundry or Gemini key in the Settings tab immediately
   // enables the corresponding reviewer provider without a tab switch.
+  // Minor-1.3 fix: use getApi() consistent with AppearanceTab / RolesTab
+  // instead of direct (window as unknown as { lvisApi }).lvisApi access.
   useEffect(() => {
-    const api = (window as unknown as { lvisApi: LvisApi }).lvisApi;
+    let api: ReturnType<typeof getApi> | undefined;
+    try { api = getApi(); } catch { return; }
     if (!api?.onSettingsUpdated) return;
     return api.onSettingsUpdated(() => {
       void refreshProviderKeyMap();
@@ -636,29 +647,36 @@ export function PermissionsTab() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {REVIEWER_PROVIDER_OPTIONS.map((opt) => {
-                      const hasKey = providerKeyMap[opt.value] ?? false;
-                      const isDisabled = !hasKey;
-                      return (
-                        <SelectItem
-                          key={opt.value}
-                          value={opt.value}
-                          disabled={isDisabled}
-                          title={
-                            isDisabled
-                              ? "API 키 설정 필요 — 지능 설정에서 키를 추가하세요."
-                              : undefined
-                          }
-                          className={isDisabled ? "opacity-40 cursor-not-allowed" : undefined}
-                          data-testid={`reviewer-provider-option-${opt.value}`}
-                        >
-                          {opt.label}
-                          {isDisabled && (
-                            <span className="ml-1 text-[10px] text-muted-foreground">(키 없음)</span>
-                          )}
-                        </SelectItem>
-                      );
-                    })}
+                    <TooltipProvider>
+                      {REVIEWER_PROVIDER_OPTIONS.map((opt) => {
+                        const hasKey = providerKeyMap[opt.value] ?? false;
+                        const isDisabled = !hasKey;
+                        // Minor-4.1: use design-system Tooltip (hover + keyboard focus)
+                        // instead of title attribute (hover-only, not read by screen readers).
+                        // opacity-40 → opacity-60 for Minor-1.2 contrast improvement.
+                        const item = (
+                          <SelectItem
+                            key={opt.value}
+                            value={opt.value}
+                            disabled={isDisabled}
+                            className={isDisabled ? "opacity-60 cursor-not-allowed" : undefined}
+                            data-testid={`reviewer-provider-option-${opt.value}`}
+                          >
+                            {opt.label}
+                            {isDisabled && (
+                              <span className="ml-2 text-[10px] text-muted-foreground">(키 없음)</span>
+                            )}
+                          </SelectItem>
+                        );
+                        if (!isDisabled) return item;
+                        return (
+                          <Tooltip key={opt.value}>
+                            <TooltipTrigger asChild>{item}</TooltipTrigger>
+                            <TooltipContent>API 키 설정 필요 — 지능 설정에서 키를 추가하세요.</TooltipContent>
+                          </Tooltip>
+                        );
+                      })}
+                    </TooltipProvider>
                   </SelectContent>
                 </Select>
               </Label>
@@ -708,6 +726,13 @@ export function PermissionsTab() {
               Azure AI Foundry · Google AI Studio: 지능 설정에서 Azure AI Foundry 또는 Gemini 공급자 API 키를 저장하면 자동으로 활성화됩니다. Foundry 는 엔드포인트 baseUrl 도 함께 설정해야 합니다.
               키가 없는 공급자는 선택할 수 없습니다.
             </p>
+            {/* Minor-1.4: Foundry baseUrl format hint — prose-only was ambiguous */}
+            <details className="text-[10px] text-muted-foreground">
+              <summary className="cursor-pointer select-none">Foundry baseUrl 형식 보기</summary>
+              <code className="mt-1 block rounded bg-muted/30 px-2 py-1 font-mono">
+                {"https://<resource>.openai.azure.com/openai/deployments/<deployment>"}
+              </code>
+            </details>
 
             <div className="space-y-2 border-t pt-3">
               <div className="flex items-baseline justify-between">
