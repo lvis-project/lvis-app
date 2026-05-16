@@ -243,11 +243,27 @@ export function PermissionsTab() {
     }
     setApprovalsBusy(true);
     try {
-      await window.lvis.userApproval.revokeByKey(key);
-      await fetchApprovals();  // MEDIUM: await so table state is consistent before banner
-      showBanner("warn", `[${toolName}] 승인이 취소되었습니다.`);
-    } catch (err) {
-      showBanner("error", `취소 실패: ${(err as Error).message}`);
+      // Issue #805: split revoke + refresh into separate try blocks so a
+      // refresh failure after a SUCCESSFUL revoke shows an accurate banner
+      // instead of the misleading "취소 실패" message that conflates the
+      // two failure modes.
+      try {
+        await window.lvis.userApproval.revokeByKey(key);
+      } catch (err) {
+        showBanner("error", `취소 실패: ${(err as Error).message}`);
+        return;
+      }
+      // Revoke succeeded — refresh the table. If that fails, the row may
+      // stay visible until the next reload but the revoke itself landed.
+      try {
+        await fetchApprovals();
+        showBanner("warn", `[${toolName}] 승인이 취소되었습니다.`);
+      } catch (err) {
+        showBanner(
+          "warn",
+          `[${toolName}] 승인이 취소되었으나 목록 새로고침 실패: ${(err as Error).message}`,
+        );
+      }
     } finally {
       setApprovalsBusy(false);
     }
