@@ -453,6 +453,8 @@ describe("LlmRiskClassifier — telemetry", () => {
       tokensOut: 7,
       costUsd: 0.0002,
       parseFailed: false,
+      // attempts added by #865 retry wiring — 1 = success on first try.
+      attempts: 1,
     });
   });
 });
@@ -808,5 +810,81 @@ describe("sandbox-eval-verdicts fixture — composition rule verification", () =
     expect(entry.rule).toBe("medium");
     expect(entry.llm).toBe("low");
     expect(entry.final).toBe("medium");
+  });
+});
+
+// ─── Retry policy (#865) ──────────────────────────────────────────────
+describe("LlmRiskClassifier — retry policy (#865)", () => {
+  /** Provider that fails the first N calls then returns valid JSON. */
+  function makeFlapProvider(failures: number, errorMsg: string): LlmReviewerProvider {
+    let calls = 0;
+    return {
+      complete: vi.fn(async () => {
+        calls += 1;
+        if (calls <= failures) throw new Error(errorMsg);
+        return { text: `{"level":"low","reason":"ok after ${calls - 1} retries"}`, tokensIn: 1, tokensOut: 1, costUsd: 0 };
+      }),
+    };
+  }
+
+  it("retries transient errors (rate-limit / 5xx / network) and recovers", async () => {
+    const onCall = vi.fn();
+    const provider = makeFlapProvider(2, "503 Service Unavailable");
+    const c = new LlmRiskClassifier(provider, "gpt-4o-mini", "deny", { onCall }, {
+      maxAttempts: 3, baseDelayMs: 1, jitterPct: 0,
+    });
+    const v = await c.classify(ctx({ category: "read", finalInput: { path: "/Users/ken/work/x.md" } }));
+    expect(v.level).toBe("low");
+    expect(provider.complete).toHaveBeenCalledTimes(3);
+    expect(onCall).toHaveBeenCalledWith(expect.objectContaining({ attempts: 3 }));
+  });
+
+  it("does NOT retry terminal 4xx errors (other than rate limit)", async () => {
+    const provider = makeFlapProvider(99, "401 Unauthorized");
+    const c = new LlmRiskClassifier(provider, "gpt-4o-mini", "deny", {}, {
+      maxAttempts: 5, baseDelayMs: 1, jitterPct: 0,
+    });
+    const v = await c.classify(ctx({ category: "read", finalInput: { path: "/Users/ken/work/x.md" } }));
+    // Terminal error → fallbackOnError=deny → high
+    expect(v.level).toBe("high");
+    expect(provider.complete).toHaveBeenCalledTimes(1);
+  });
+
+  it("exhausts maxAttempts on persistent transient errors → falls back", async () => {
+    const provider = makeFlapProvider(99, "ETIMEDOUT network unreachable");
+    const c = new LlmRiskClassifier(provider, "gpt-4o-mini", "deny", {}, {
+      maxAttempts: 3, baseDelayMs: 1, jitterPct: 0,
+    });
+    const v = await c.classify(ctx({ category: "read", finalInput: { path: "/Users/ken/work/x.md" } }));
+    expect(v.level).toBe("high");
+    expect(provider.complete).toHaveBeenCalledTimes(3);
+  });
+
+  it("respects abortSignal during back-off sleep (no extra retries after cancel)", async () => {
+    const provider = makeFlapProvider(99, "503");
+    const c = new LlmRiskClassifier(provider, "gpt-4o-mini", "deny", {}, {
+      maxAttempts: 10, baseDelayMs: 100, jitterPct: 0,
+    });
+    const ctrl = new AbortController();
+    // Abort mid-flight (after first failure, before retry sleep elapses).
+    setTimeout(() => ctrl.abort(), 30);
+    const v = await c.classify(
+      ctx({ category: "read", finalInput: { path: "/Users/ken/work/x.md" } }),
+      { abortSignal: ctrl.signal },
+    );
+    expect(v.level).toBe("high"); // aborted → fallback path
+    // At most 2 attempts: first call fails, second is interrupted by abort during sleep.
+    expect(provider.complete.call.length).toBeLessThanOrEqual(2);
+  });
+
+  it("fallbackOnError=rule returns the rule verdict on exhausted retry", async () => {
+    const provider = makeFlapProvider(99, "500 Internal Server Error");
+    const c = new LlmRiskClassifier(provider, "gpt-4o-mini", "rule", {}, {
+      maxAttempts: 2, baseDelayMs: 1, jitterPct: 0,
+    });
+    const v = await c.classify(ctx({ category: "read", finalInput: { path: "/Users/ken/work/x.md" } }));
+    // Rule verdict for a read on allowed path → low (rule classifier default).
+    expect(v.level).toBe("low");
+    expect(provider.complete).toHaveBeenCalledTimes(2);
   });
 });
