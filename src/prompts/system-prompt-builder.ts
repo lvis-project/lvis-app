@@ -566,6 +566,17 @@ export class SystemPromptBuilder {
       },
     });
 
+    // Suggested Replies — ghost-text contract. Renderer parses + filters the
+    // <suggested_replies> block out of the user-visible stream; this section
+    // just instructs the model to emit it. See
+    // `docs/architecture/proposals/suggested-replies-ghost-text.md`.
+    this.sources.push({
+      id: 9.85,
+      name: "Suggested Replies",
+      refresh: "static",
+      build: () => SUGGESTED_REPLIES_INSTRUCTION,
+    });
+
     // Active Session Context — 서버 인프라 의존
     // Feature Flags — 서버 인프라 의존
 
@@ -607,6 +618,26 @@ const CONVERSATION_CONTINUITY_GUARD = `## 대화 연속성 출력 규칙
 - 특히 \`<title>...</title>\`, \`[checkpoint]\`, \`[checkpoint-suggested]\` 문자열은 출력 금지입니다.
 - 체크포인트와 세션 요약은 host 가 다음 턴 시작 전 context preflight 에서 자동 처리합니다.
 - 답변을 마칠 때는 Markdown 문법을 닫고, 본문이 완성된 뒤 종료하세요.`;
+
+const SUGGESTED_REPLIES_INSTRUCTION = `## Suggested Replies
+
+응답 본문 마지막에 별도 블록으로, 사용자가 가장 자연스럽게 이어
+입력할 짧은 답변 후보를 1~3개 제시한다. 형식은 정확히 다음과 같다:
+
+<suggested_replies>
+- {text}
+- {text}
+- {text}
+</suggested_replies>
+
+규칙:
+- 응답이 단순 확인성("완료했습니다") 외에 사용자 행동을 유도할 여지가
+  없으면 블록 자체를 생략한다 (강제로 채우지 말 것).
+- 각 후보는 25자 이하의 한국어 (사용자 prior turn 언어와 일치).
+- Tool 호출이 진행 중이거나 응답이 cut-off 된 경우 생략.
+- 후보 간 의미가 서로 직교적이어야 한다 ("예/아니오" OK, "예/네/그래"
+  같은 동의어 묶음 금지).
+- 블록 이외 부가 설명 없이 위 형식만 사용한다 (markdown / 백틱 금지).`;
 
 const ROUTINE_SUMMARY_TAG_INSTRUCTION = `## 루틴 세션 — 결과 요약 태그 강제
 

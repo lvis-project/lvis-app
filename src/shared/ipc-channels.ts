@@ -65,3 +65,7 @@ export const PERMISSIONS = {
 export const SETTINGS = {
   updated: "lvis:settings:updated",
 } as const;
+
+export const SUGGESTED_REPLIES = {
+  updated: "lvis:chat:suggested-replies-updated",
+} as const;
