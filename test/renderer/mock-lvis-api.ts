@@ -404,6 +404,13 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
 
     onMarketplaceUpdatesAvailable: vi.fn(() => () => {}),
     onBootstrapStatus: vi.fn(() => () => {}),
+    // App auto-update bridge — renderer's useAppUpdate hook subscribes
+    // immediately at App mount, so the smoke test mock must define these
+    // even when the suite doesn't exercise update flow.
+    onAppUpdateState: vi.fn(() => () => {}),
+    getAppUpdateState: vi.fn(async () => ({ kind: "idle" })),
+    downloadAppUpdate: vi.fn(async () => ({ ok: true })),
+    installAppUpdate: vi.fn(async () => ({ ok: true })),
 
     plugins: {
       getPerfStats: vi.fn(async () => ({})),
