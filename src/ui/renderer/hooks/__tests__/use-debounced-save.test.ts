@@ -137,4 +137,38 @@ describe("useDebouncedSave", () => {
 
     expect(saveFn).toHaveBeenCalledTimes(1);
   });
+
+  it("flush runs the pending saveFn immediately and clears the timer", () => {
+    const saveFn = vi.fn();
+    const { result } = renderHook(() => useDebouncedSave(saveFn, 200));
+
+    act(() => {
+      result.current.schedule();
+      vi.advanceTimersByTime(50);
+    });
+    expect(saveFn).not.toHaveBeenCalled();
+
+    act(() => {
+      result.current.flush();
+    });
+    expect(saveFn).toHaveBeenCalledTimes(1);
+
+    // Advancing past the original debounce window does NOT fire again —
+    // flush cleared the timer.
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+    expect(saveFn).toHaveBeenCalledTimes(1);
+  });
+
+  it("flush is a no-op when nothing is pending", () => {
+    const saveFn = vi.fn();
+    const { result } = renderHook(() => useDebouncedSave(saveFn, 200));
+
+    act(() => {
+      result.current.flush();
+    });
+
+    expect(saveFn).not.toHaveBeenCalled();
+  });
 });

@@ -99,7 +99,10 @@ export function ChatTab({
         </div>
         <PrivacyTab
           piiRedactEnabled={piiRedactEnabled}
-          onToggle={onPiiRedactToggle}
+          onToggle={() => {
+            onPiiRedactToggle();
+            onImmediateChange?.();
+          }}
         />
       </section>
     </div>
