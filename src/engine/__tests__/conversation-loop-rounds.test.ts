@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { KeywordEngine } from "../../core/keyword-engine.js";
 import { RouteEngine } from "../../core/route-engine.js";
 import { ConversationLoop } from "../conversation-loop.js";
-import type { LLMProvider, StreamEvent } from "../llm/types.js";
+import type { GenericMessage, LLMProvider, StreamEvent } from "../llm/types.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import { createDynamicTool } from "../../tools/base.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
@@ -18,6 +18,15 @@ class FakeProvider implements LLMProvider {
   async *streamTurn(): AsyncIterable<StreamEvent> {
     yield* this.turns[this.index++] ?? [];
   }
+}
+
+function withoutRuntimeMeta(messages: ReadonlyArray<GenericMessage>) {
+  return messages.map((message) => {
+    const { meta, ...rest } = message;
+    if (!meta) return rest;
+    const { createdAt: _createdAt, turnSummary: _turnSummary, ...stableMeta } = meta;
+    return Object.keys(stableMeta).length > 0 ? { ...rest, meta: stableMeta } : rest;
+  });
 }
 
 describe("ConversationLoop queryLoop", () => {
@@ -89,7 +98,8 @@ describe("ConversationLoop queryLoop", () => {
       rolePrompt: { name: "Reviewer", systemPromptAdd: "Review carefully." },
     });
 
-    expect(loop.getHistory().getMessages()[0]).toEqual({
+    const [firstMessage] = withoutRuntimeMeta(loop.getHistory().getMessages());
+    expect(firstMessage).toEqual({
       role: "user",
       content: "review this",
       meta: {
@@ -416,7 +426,7 @@ describe("ConversationLoop queryLoop", () => {
       { type: "start", name: "list_directory" },
       { type: "end", name: "list_directory" },
     ]);
-    expect(loop.getHistory().getMessages()).toEqual([
+    expect(withoutRuntimeMeta(loop.getHistory().getMessages())).toEqual([
       { role: "user", content: "질문" },
       {
         role: "assistant",
