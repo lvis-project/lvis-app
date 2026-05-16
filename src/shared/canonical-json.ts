@@ -14,8 +14,57 @@
  * dropped, matching JSON.stringify behaviour. A top-level `undefined` is
  * serialised as "null" per RFC 8259 (JSON has no undefined token).
  *
+ * ## Value-type handling contract (issue #800)
+ *
+ * Permission tool args originate either from JSON-parsed LLM tool input
+ * (always JSON-clean) or from user-typed strings (renderer + IPC). The
+ * function delegates non-object primitives + arrays to `JSON.stringify`,
+ * so its behaviour for non-JSON-native value types is inherited from
+ * there:
+ *
+ *   - `Array`          → element order is preserved (NOT sorted). Two
+ *                        arrays with the same elements in different
+ *                        order produce distinct strings. Tool args
+ *                        relying on element-order-agnostic comparison
+ *                        must normalize (e.g. `[...arr].sort()`) before
+ *                        calling.
+ *   - `Date`           → quoted ISO string via `Date.prototype.toJSON`
+ *                        (e.g. `"2026-05-16T14:30:00.000Z"`). Two Date
+ *                        instances with the same epoch produce identical
+ *                        output → key symmetry preserved.
+ *   - `BigInt`         → `JSON.stringify` throws `TypeError`. Callers
+ *                        upstream must coerce to string/number before
+ *                        reaching this function. The record path in
+ *                        `user-approval-store.ts` controls inputs, so a
+ *                        BigInt arriving here indicates a contract bug.
+ *   - `Map` / `Set`    → `JSON.stringify` returns `"{}"`. **Caveat**: two
+ *                        Maps/Sets with different contents serialise to
+ *                        the same string. If callers need symmetric
+ *                        comparison across Maps/Sets, convert to
+ *                        `Object.fromEntries(map)` or
+ *                        `Array.from(set).sort()` before calling.
+ *   - `function`       → `JSON.stringify` returns `undefined` (the
+ *                        whole property is dropped at the parent level).
+ *                        At the top level the early `value === undefined`
+ *                        return maps it to the literal string `"null"`.
+ *                        Functions should never reach this layer; if
+ *                        they do, the symmetry guarantee no longer
+ *                        applies.
+ *   - `Symbol`         → same as function (`JSON.stringify` drops keys
+ *                        whose value is Symbol, returns `undefined` at
+ *                        top level → `"null"` here).
+ *   - `NaN` / `±Infinity` → `JSON.stringify` returns `"null"` per spec.
+ *                        Two `NaN`s and `±Infinity` collapse to the same
+ *                        string — acceptable for our R-2 use case
+ *                        (permission cache key) but worth noting.
+ *
+ * In summary: callers should pass JSON-clean tool args (plain objects,
+ * arrays of primitives, strings, numbers, booleans, null). The exotic-
+ * type behaviour above is documented so a future reader can understand
+ * the symmetry properties of the resulting cache key.
+ *
  * Spec ref: docs/research/sandbox-isolation.md §R-2
- * Issue: #691 PR-A4 Round 5
+ * Issue: #691 PR-A4 Round 5, #800 value-type docs
  */
 export function canonicalStringify(value: unknown): string {
   if (value === undefined) return "null";
