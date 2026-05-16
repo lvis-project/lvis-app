@@ -435,3 +435,134 @@ describe("AskUserQuestionCard — mouse click path (single question)", () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// 4-direction card-level navigation (regression: ArrowUp/Down broken after
+// composer redesign + message queue PR #720 merge)
+// ---------------------------------------------------------------------------
+
+describe("AskUserQuestionCard — 4-direction card-level arrow navigation", () => {
+  /**
+   * ArrowLeft / ArrowRight on the card container must navigate between questions
+   * in a multi-step flow. These were working before PR #720; verify they remain
+   * intact while we fix Up/Down.
+   */
+  it("ArrowLeft and ArrowRight navigate between questions from card surface", async () => {
+    const api = makeApi();
+    const request = makeRequest({
+      questions: [
+        { question: "Q1", choices: ["A", "B"], allowFreeText: false },
+        { question: "Q2", choices: ["X", "Y"], allowFreeText: false },
+      ],
+    });
+
+    const { getByTestId, getByText, queryByText } = render(
+      <AskUserQuestionCard api={api as never} request={request} onResolved={vi.fn()} />,
+    );
+
+    // Click A to complete Q1 draft so ArrowRight can advance.
+    await act(async () => { fireEvent.click(getByText("A").closest("button")!); });
+
+    const card = getByTestId("ask-user-question-card");
+    card.focus();
+
+    // ArrowRight → should advance to Q2.
+    await act(async () => { fireEvent.keyDown(card, { key: "ArrowRight" }); });
+    expect(getByText("Q2")).toBeTruthy();
+
+    // ArrowLeft → should go back to Q1.
+    await act(async () => { fireEvent.keyDown(card, { key: "ArrowLeft" }); });
+    expect(getByText("Q1")).toBeTruthy();
+    expect(queryByText("Q2")).toBeNull();
+  });
+
+  /**
+   * ArrowDown on the card container must move focus to the next choice button.
+   * Regression: before this fix, ArrowUp/Down on the card surface had no effect.
+   */
+  it("ArrowDown from card surface moves focus to next choice answer", async () => {
+    const api = makeApi();
+    const request = makeRequest({
+      questions: [
+        { question: "색상 선택", choices: ["빨강", "파랑", "초록"], allowFreeText: false },
+      ],
+    });
+
+    const { getByTestId } = render(
+      <AskUserQuestionCard api={api as never} request={request} onResolved={vi.fn()} />,
+    );
+
+    const card = getByTestId("ask-user-question-card");
+    card.focus();
+
+    // First ArrowDown from card → focuses first choice (index 0 → roving idx 0+1=1 wraps… or just 1).
+    await act(async () => { fireEvent.keyDown(card, { key: "ArrowDown" }); });
+
+    // Focus must have moved to a choice button inside the card (not still on the card).
+    expect(document.activeElement).not.toBe(card);
+    expect(document.activeElement?.tagName.toLowerCase()).toBe("button");
+  });
+
+  /**
+   * ArrowUp on the card container must move focus to the previous choice button
+   * (wraps around to last when at index 0).
+   */
+  it("ArrowUp from card surface moves focus to a choice answer (wraps to last)", async () => {
+    const api = makeApi();
+    const request = makeRequest({
+      questions: [
+        { question: "색상 선택", choices: ["빨강", "파랑", "초록"], allowFreeText: false },
+      ],
+    });
+
+    const { getByTestId } = render(
+      <AskUserQuestionCard api={api as never} request={request} onResolved={vi.fn()} />,
+    );
+
+    const card = getByTestId("ask-user-question-card");
+    card.focus();
+
+    // ArrowUp from card → wraps focus to last choice ("초록", index 2).
+    await act(async () => { fireEvent.keyDown(card, { key: "ArrowUp" }); });
+
+    expect(document.activeElement).not.toBe(card);
+    expect(document.activeElement?.tagName.toLowerCase()).toBe("button");
+    // The focused button text should be "초록" (last choice, wrap-around from index 0).
+    expect(document.activeElement?.textContent).toContain("초록");
+  });
+
+  /**
+   * Full 4-direction sequence: ArrowDown navigates choices, ArrowRight advances
+   * questions — both work together without interfering.
+   */
+  it("ArrowDown navigates choices then ArrowRight advances question (4-dir together)", async () => {
+    const api = makeApi();
+    const request = makeRequest({
+      questions: [
+        { question: "Q1", choices: ["A", "B"], allowFreeText: false },
+        { question: "Q2", choices: ["X", "Y"], allowFreeText: false },
+      ],
+    });
+
+    const { getByTestId, getByText, queryByText } = render(
+      <AskUserQuestionCard api={api as never} request={request} onResolved={vi.fn()} />,
+    );
+
+    const card = getByTestId("ask-user-question-card");
+    card.focus();
+
+    // ArrowDown → moves to first choice "A" (focusedIdx 0+1 or wraps).
+    await act(async () => { fireEvent.keyDown(card, { key: "ArrowDown" }); });
+    expect(document.activeElement?.tagName.toLowerCase()).toBe("button");
+    // Still on Q1, not Q2.
+    expect(queryByText("Q2")).toBeNull();
+
+    // Select A via click so the draft is complete.
+    await act(async () => { fireEvent.click(getByText("A").closest("button")!); });
+
+    // ArrowRight from card → should advance to Q2.
+    card.focus();
+    await act(async () => { fireEvent.keyDown(card, { key: "ArrowRight" }); });
+    expect(getByText("Q2")).toBeTruthy();
+  });
+});

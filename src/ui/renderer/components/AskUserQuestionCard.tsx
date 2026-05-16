@@ -21,7 +21,7 @@
  *     advisory only here — the prompt enforces; the UI renders whatever
  *     the model produces and trusts upstream validation.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { Button } from "../../../components/ui/button.js";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui/card.js";
 import { Input } from "../../../components/ui/input.js";
@@ -139,6 +139,7 @@ export function AskUserQuestionCard({
   );
   const [submitting, setSubmitting] = useState(false);
   const submitButtonRef = useRef<HTMLButtonElement | null>(null);
+  const questionFormRef = useRef<QuestionFormHandle | null>(null);
 
   // New request → reset all internal state. The id is the discriminator
   // so re-rendering the same card with the same questions keeps state.
@@ -262,6 +263,15 @@ export function AskUserQuestionCard({
         }
         if (e.key === "ArrowRight" && !textEditingTarget) {
           if (goNextByKeyboard()) e.preventDefault();
+          return;
+        }
+        // ArrowUp/Down on the card surface (not inside a choice button or
+        // free-text input) delegates to the QuestionForm's roving-tabIndex
+        // answer navigation. This restores the regression where Up/Down had
+        // no effect when focus sat on the card container itself.
+        if ((e.key === "ArrowUp" || e.key === "ArrowDown") && !textEditingTarget && !onConfirmStep) {
+          const handled = questionFormRef.current?.arrowNav(e.key === "ArrowDown" ? 1 : -1);
+          if (handled) e.preventDefault();
         }
       }}
     >
@@ -290,6 +300,7 @@ export function AskUserQuestionCard({
       <CardContent className="space-y-2 px-3 pb-3">
         {currentItem ? (
           <QuestionForm
+            ref={questionFormRef}
             item={currentItem}
             draft={currentDraft}
             disabled={submitting}
@@ -491,7 +502,40 @@ export type ChoiceResult =
   | { kind: "advance" }
   | { kind: "closed" };
 
-function QuestionForm({
+/**
+ * Imperative handle exposed to the parent card so it can delegate card-level
+ * ArrowUp/Down keypresses into the QuestionForm's roving-tabIndex navigation.
+ *
+ * `arrowNav(delta)` — delta: +1 (ArrowDown) or -1 (ArrowUp). Returns true
+ * when there are answers to navigate (i.e. the event was handled).
+ */
+export interface QuestionFormHandle {
+  arrowNav(delta: 1 | -1): boolean;
+}
+
+const QuestionForm = forwardRef<
+  QuestionFormHandle,
+  {
+    item: AskUserQuestionItem;
+    draft: DraftAnswer;
+    disabled: boolean;
+    /** Returns a ChoiceResult signalling what the keyboard handler should do next. */
+    onChoose: (choice: string, choiceIndex: number) => ChoiceResult;
+    onFreeText: (text: string) => void;
+    /**
+     * Called on free-text Enter: validates current draft (which IS current
+     * because free-text onChange fires before onKeyDown) then advances.
+     */
+    onSubmit: () => void;
+    /**
+     * Called by the keyboard choice handler when onChoose returns { kind: "advance" }.
+     * Advances directly (goNext) without re-checking draft — the synchronous
+     * return value of onChoose is authoritative; re-reading currentDraft here
+     * would be stale due to React 18 state batching.
+     */
+    onAdvance: () => void;
+  }
+>(function QuestionForm({
   item,
   draft,
   disabled,
@@ -499,26 +543,7 @@ function QuestionForm({
   onFreeText,
   onSubmit,
   onAdvance,
-}: {
-  item: AskUserQuestionItem;
-  draft: DraftAnswer;
-  disabled: boolean;
-  /** Returns a ChoiceResult signalling what the keyboard handler should do next. */
-  onChoose: (choice: string, choiceIndex: number) => ChoiceResult;
-  onFreeText: (text: string) => void;
-  /**
-   * Called on free-text Enter: validates current draft (which IS current
-   * because free-text onChange fires before onKeyDown) then advances.
-   */
-  onSubmit: () => void;
-  /**
-   * Called by the keyboard choice handler when onChoose returns { kind: "advance" }.
-   * Advances directly (goNext) without re-checking draft — the synchronous
-   * return value of onChoose is authoritative; re-reading currentDraft here
-   * would be stale due to React 18 state batching.
-   */
-  onAdvance: () => void;
-}) {
+}, ref) {
   const choices = effectiveChoices(item);
   const recommend = recommendIndex(item);
   const alts = altIndices(item);
@@ -544,6 +569,18 @@ function QuestionForm({
     },
     [answerCount, freeTextIndex],
   );
+
+  // Expose arrowNav to the parent Card so card-level ArrowUp/Down events
+  // (when focus is on the card container itself) can delegate into the
+  // roving-tabIndex choice navigation. Fixes the regression where Up/Down
+  // had no effect when the card container held focus.
+  useImperativeHandle(ref, () => ({
+    arrowNav(delta: 1 | -1): boolean {
+      if (answerCount <= 0) return false;
+      focusAnswerAt(focusedIdx + delta);
+      return true;
+    },
+  }), [answerCount, focusAnswerAt, focusedIdx]);
 
   // Reset focused idx when the question item changes (step transition).
   // Prevents out-of-range focusedIdx when the new step has fewer choices,
@@ -666,7 +703,7 @@ function QuestionForm({
       )}
     </>
   );
-}
+});
 
 function ConfirmReview({
   request,
