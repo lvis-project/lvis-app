@@ -1,7 +1,8 @@
-import { createContext, useCallback, useContext, useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Button } from "../../components/ui/button.js";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../../components/ui/tabs.js";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../../components/ui/dialog.js";
+import { SavedToastFloating, SavedToastProvider } from "./contexts/saved-toast.js";
 import type { LvisApi } from "./types.js";
 import { RolesTab } from "./tabs/RolesTab.js";
 import { PermissionsTab } from "./tabs/PermissionsTab.js";
@@ -44,50 +45,10 @@ function TabSaveBar({
   );
 }
 
-/**
- * Settings-wide "저장되었습니다" notifier. Every successful save in the
- * settings dialog — explicit Save click, immediate-apply debounced save,
- * plugin config write, etc. — must call `notifySaved()` so the user sees
- * one consistent feedback signal regardless of which tab triggered it.
- *
- * Tabs with their own non-orchestration save paths (PluginConfigTab,
- * AppearanceTab, etc.) read the callback via `useNotifySaved()` and call
- * it after their IPC resolves successfully.
- */
-const SavedToastContext = createContext<(() => void) | null>(null);
-
-export function useNotifySaved(): () => void {
-  const cb = useContext(SavedToastContext);
-  return cb ?? (() => {});
-}
-
-/**
- * Floating "저장되었습니다" pill rendered in the top-right corner of the
- * settings content pane. Each call to `notifySaved()` bumps `at`; the
- * toast fades in for ~2.2s then auto-dismisses. The fixed position keeps
- * the feedback visible no matter which tab the user is on or how far
- * they have scrolled.
- */
-export function SavedToastFloating({ at }: { at: number | null }) {
-  const [visible, setVisible] = useState(false);
-  useEffect(() => {
-    if (!at) return;
-    setVisible(true);
-    const timer = setTimeout(() => setVisible(false), 2200);
-    return () => clearTimeout(timer);
-  }, [at]);
-  if (!visible) return null;
-  return (
-    <div
-      role="status"
-      aria-live="polite"
-      data-testid="settings-saved-toast"
-      className="pointer-events-none absolute right-4 top-3 z-10 rounded-full bg-success/15 px-3 py-1 text-xs font-medium text-success shadow-sm ring-1 ring-success/30 animate-in fade-in slide-in-from-top-2 duration-200"
-    >
-      ✓ 저장되었습니다
-    </div>
-  );
-}
+// Settings-wide "저장되었습니다" toast plumbing now lives in
+// `./contexts/saved-toast.tsx` so PluginConfigTab can import the consumer
+// hook without forming a circular import with SettingsDialog (which
+// itself imports PluginConfigTab in this file).
 
 export function SettingsDialog({
   open,
@@ -106,7 +67,7 @@ export function SettingsDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         size="2xl"
-        className="h-[90dvh] !overflow-hidden flex flex-col gap-3"
+        className="h-[90dvh] min-h-[600px] max-h-[920px] !overflow-hidden flex flex-col gap-3"
       >
         <DialogHeader>
           <DialogTitle>설정</DialogTitle>
@@ -144,10 +105,15 @@ export function SettingsContent({
   // Floating "저장되었습니다" pulse — bumped on EVERY successful save in
   // the dialog. Tabs whose save runs through the orchestration hook hit
   // it via the wrapped `handleSaved` below; tabs with their own IPC
-  // (PluginConfigTab / AppearanceTab) call `notifySaved()` from the
-  // SavedToastContext after their own success.
+  // (PluginConfigTab / AppearanceTab / RolesTab / McpTab) call
+  // `notifySaved()` from useNotifySaved() after their own success.
+  //
+  // Use a monotonic counter (not Date.now()) so two saves completing in
+  // the same millisecond still cause the SavedToastFloating useEffect to
+  // re-fire — React bails state updates via Object.is, and equal
+  // timestamps would silently drop the second toast.
   const [savedAt, setSavedAt] = useState<number | null>(null);
-  const notifySaved = useCallback(() => setSavedAt(Date.now()), []);
+  const notifySaved = useCallback(() => setSavedAt((n) => (n ?? 0) + 1), []);
   const handleSaved = useCallback(() => {
     notifySaved();
     onSaved();
@@ -244,21 +210,29 @@ export function SettingsContent({
   // accent background to read like a real selected list item rather than
   // the horizontal pill-tab style Radix ships by default. `data-[state=active]`
   // overrides the base TabsTrigger active style (background + shadow) which
-  // looks wrong in a vertical list.
+  // looks wrong in a vertical list. `whitespace-nowrap` + `overflow-hidden`
+  // keep long labels (or scaled-up system fonts) from wrapping to two lines
+  // and breaking the row rhythm of the sidebar.
   const sideTriggerCls =
-    "w-full justify-start rounded-md px-3 py-2 text-sm font-medium " +
+    "w-full justify-start overflow-hidden whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium " +
     "text-muted-foreground hover:bg-accent/60 hover:text-foreground " +
     "data-[state=active]:bg-accent data-[state=active]:text-accent-foreground " +
     "data-[state=active]:shadow-none";
 
   return (
-    <SavedToastContext.Provider value={notifySaved}>
+    <SavedToastProvider value={notifySaved}>
     <Tabs
       orientation="vertical"
       value={tab}
       onValueChange={(nextTab) => setTab(normalizeSettingsTab(nextTab))}
-      className="flex h-full min-h-0 gap-3"
+      className="relative flex h-full min-h-0 gap-3"
     >
+      {/* Dialog-wide save feedback — anchored to the Tabs root (not the
+          right pane) so the user sees it even after scrolling deep into
+          a tab. Top-center placement keeps it in the spot the eye lands
+          immediately after clicking Save. */}
+      <SavedToastFloating at={savedAt} />
+
       {/* Sidebar — fixed column, scrolls independently if the trigger list
           ever grows beyond the available height. The list stays put when
           the right pane scrolls (the headline ux complaint that motivated
@@ -294,8 +268,7 @@ export function SettingsContent({
           scrollbar set in styles.css renders the thumb only when content
           exceeds the pane. `relative` so the floating SavedToast anchors
           here rather than the dialog. */}
-      <div className="relative flex flex-1 min-w-0 flex-col overflow-y-scroll pr-1 lvis-settings-scroll">
-        <SavedToastFloating at={savedAt} />
+      <div className="flex flex-1 min-w-0 flex-col overflow-y-scroll pr-1 lvis-settings-scroll">
         {s.lastSaveError && (
           <div
             role="alert"
@@ -429,6 +402,6 @@ export function SettingsContent({
           </TabsContent>
       </div>
     </Tabs>
-    </SavedToastContext.Provider>
+    </SavedToastProvider>
   );
 }
