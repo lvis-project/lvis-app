@@ -495,6 +495,69 @@ describe("createRiskClassifier — atomic cutover", () => {
   });
 });
 
+// ─── MEDIUM-2: abortSignal threading through classify → provider.complete ─────
+
+describe("MEDIUM-2: LlmRiskClassifier.classify threads abortSignal to provider.complete", () => {
+  it("passes abortSignal option through to provider.complete when supplied", async () => {
+    const completeSpy = vi.fn(async () => ({
+      text: '{"level":"low","reason":"ok"}',
+      tokensIn: 5,
+      tokensOut: 3,
+      costUsd: 0,
+    }));
+    const provider: LlmReviewerProvider = { complete: completeSpy };
+    const classifier = new LlmRiskClassifier(provider, "gpt-4o-mini");
+
+    const ac = new AbortController();
+    const input = ctx({ toolName: "read_file", finalInput: { path: "/tmp/a.txt" } });
+    await (classifier as unknown as {
+      classify(input: ToolInvocationContext, opts: { abortSignal?: AbortSignal }): Promise<RiskVerdict>;
+    }).classify(input, { abortSignal: ac.signal });
+
+    expect(completeSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ abortSignal: ac.signal }),
+    );
+  });
+
+  it("works without opts (backward compatible — no abortSignal supplied)", async () => {
+    const completeSpy = vi.fn(async () => ({
+      text: '{"level":"low","reason":"ok"}',
+      tokensIn: 5,
+      tokensOut: 3,
+      costUsd: 0,
+    }));
+    const provider: LlmReviewerProvider = { complete: completeSpy };
+    const classifier = new LlmRiskClassifier(provider, "gpt-4o-mini");
+
+    const input = ctx({ toolName: "read_file", finalInput: { path: "/tmp/a.txt" } });
+    await classifier.classify(input);
+
+    expect(completeSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ abortSignal: undefined }),
+    );
+  });
+
+  it("provider sees already-aborted signal when abort fires before classify", async () => {
+    let capturedSignal: AbortSignal | undefined;
+    const provider: LlmReviewerProvider = {
+      complete: vi.fn(async (params) => {
+        capturedSignal = params.abortSignal;
+        return { text: '{"level":"low","reason":"ok"}', tokensIn: 0, tokensOut: 0, costUsd: 0 };
+      }),
+    };
+    const classifier = new LlmRiskClassifier(provider, "gpt-4o-mini");
+
+    const ac = new AbortController();
+    ac.abort();
+    const input = ctx({ toolName: "read_file", finalInput: { path: "/tmp/a.txt" } });
+    await (classifier as unknown as {
+      classify(input: ToolInvocationContext, opts: { abortSignal?: AbortSignal }): Promise<RiskVerdict>;
+    }).classify(input, { abortSignal: ac.signal });
+
+    expect(capturedSignal?.aborted).toBe(true);
+  });
+});
+
 describe("maxVerdict ordering", () => {
   it("low < medium < high", () => {
     const lo: RiskVerdict = { level: "low", reason: "a" };
