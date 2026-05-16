@@ -22,10 +22,11 @@ import { trustFromSource } from "../tools/types.js";
 import { readPermissionsFile, updatePermissionsFile } from "./permissions-store.js";
 import { isOverlayTriggerOrigin } from "../shared/overlay-trigger-source.js";
 import { getToolCategoryDescriptor } from "./category-registry.js";
-import type {
-  RiskClassifier,
-  RiskVerdict,
-  ToolInvocationContext,
+import {
+  LlmRiskClassifier,
+  type RiskClassifier,
+  type RiskVerdict,
+  type ToolInvocationContext,
 } from "./reviewer/risk-classifier.js";
 import { detectSandboxCapability } from "./sandbox-capability.js";
 import type { PermissionEvaluationContext } from "./evaluation-context.js";
@@ -503,7 +504,7 @@ export class PermissionManager {
     toolName: string,
     input: ReviewerDispatchInput,
     routineScope?: Record<string, unknown>,
-    options?: { defer?: ReviewerDeferPolicy },
+    options?: { defer?: ReviewerDeferPolicy; abortSignal?: AbortSignal },
   ): Promise<ReviewerDispatchResult> {
     if (!this.hasReviewer()) {
       return {
@@ -558,7 +559,14 @@ export class PermissionManager {
         sandboxCapability: detectSandboxCapability(),
       };
       try {
-        const classified = classifier.classify(ctx);
+        // MAJOR-1: pass abortSignal to LlmRiskClassifier.classify so user
+        // cancellation aborts an in-flight LLM call. The RiskClassifier
+        // interface is signal-agnostic; LlmRiskClassifier accepts the optional
+        // second argument — other classifiers safely ignore extra arguments.
+        const classified =
+          classifier instanceof LlmRiskClassifier
+            ? classifier.classify(ctx, { abortSignal: options?.abortSignal })
+            : classifier.classify(ctx);
         verdict = classified instanceof Promise ? await classified : classified;
         // Persist for next time (HIGH cached too — re-deny is fast).
         await cache.store(lookupKey, cacheCtx, verdict);

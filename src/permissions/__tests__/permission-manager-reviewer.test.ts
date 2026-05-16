@@ -313,6 +313,97 @@ describe("PermissionManager.dispatchReviewer", () => {
   });
 });
 
+// ─── MAJOR-1 R2: abortSignal end-to-end dispatchReviewer → LlmRiskClassifier ──
+
+describe("MAJOR-1 R2: dispatchReviewer threads abortSignal to LlmRiskClassifier.classify", () => {
+  it("calls LlmRiskClassifier.classify with the supplied abortSignal", async () => {
+    const { pm } = makeManager();
+    const ac = new AbortController();
+
+    // Stub an LlmRiskClassifier-shaped classifier with a spy on classify.
+    // We can't easily import LlmRiskClassifier here without a provider, so we
+    // subclass to a minimal stand-in that records the opts argument.
+    let capturedOpts: { abortSignal?: AbortSignal } | undefined;
+    const { LlmRiskClassifier } = await import("../reviewer/risk-classifier.js");
+    const { LlmReviewerProvider } = {} as never; // type only
+    const providerStub = {
+      complete: vi.fn(async () => ({
+        text: '{"level":"low","reason":"ok"}',
+        tokensIn: 0,
+        tokensOut: 0,
+        costUsd: 0,
+      })),
+    };
+    const llmClassifier = new LlmRiskClassifier(providerStub, "gpt-4o-mini");
+    const origClassify = llmClassifier.classify.bind(llmClassifier);
+    vi.spyOn(llmClassifier, "classify").mockImplementation(
+      async (ctx: import("../reviewer/risk-classifier.js").ToolInvocationContext, opts?: { abortSignal?: AbortSignal }) => {
+        capturedOpts = opts;
+        return origClassify(ctx, opts);
+      },
+    );
+
+    const cache = new VerdictCache(tmpFile("reviewer-cache.jsonl"));
+    const queue = new DeferredQueue(tmpFile("deferred-queue.jsonl"));
+    pm.setReviewer({ classifier: llmClassifier, cache, deferredQueue: queue });
+
+    await pm.dispatchReviewer(
+      "bash",
+      {
+        source: "builtin",
+        category: "shell",
+        pathFields: [],
+        finalInput: { command: "echo hello" },
+        allowedDirectories: ["/Users/ken/work"],
+        sensitivePathsAdjacent: [],
+        trustOrigin: "llm-tool-arg",
+      },
+      undefined,
+      { abortSignal: ac.signal },
+    );
+
+    expect(capturedOpts?.abortSignal).toBe(ac.signal);
+  });
+
+  it("mid-call abort → classify throws and dispatchReviewer returns HIGH (fallbackOnError=deny)", async () => {
+    const { pm } = makeManager();
+    const ac = new AbortController();
+
+    const { LlmRiskClassifier } = await import("../reviewer/risk-classifier.js");
+    const providerStub = {
+      complete: vi.fn(async (_params: { abortSignal?: AbortSignal }) => {
+        // Abort during the in-flight call
+        ac.abort();
+        const err = new Error("AbortError");
+        err.name = "AbortError";
+        throw err;
+      }),
+    };
+    const llmClassifier = new LlmRiskClassifier(providerStub, "gpt-4o-mini", "deny");
+    const cache = new VerdictCache(tmpFile("reviewer-cache.jsonl"));
+    const queue = new DeferredQueue(tmpFile("deferred-queue.jsonl"));
+    pm.setReviewer({ classifier: llmClassifier, cache, deferredQueue: queue });
+
+    const result = await pm.dispatchReviewer(
+      "bash",
+      {
+        source: "builtin",
+        category: "shell",
+        pathFields: [],
+        finalInput: { command: "echo hello" },
+        allowedDirectories: ["/Users/ken/work"],
+        sensitivePathsAdjacent: [],
+        trustOrigin: "llm-tool-arg",
+      },
+      undefined,
+      { abortSignal: ac.signal },
+    );
+
+    // fallbackOnError=deny → AbortError yields HIGH
+    expect(result.verdict.level).toBe("high");
+  });
+});
+
 describe("PermissionManager.checkDetailed — headless mutating reviewer lane", () => {
   it("headless+write routes through the category reviewer lane", () => {
     const { pm } = makeManager();

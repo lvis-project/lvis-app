@@ -166,6 +166,16 @@ export interface WireReviewerResult {
 /**
  * Wire the reviewer agent. Idempotent — calling twice replaces the
  * previously-installed classifier on `permissionManager`.
+ *
+ * MEDIUM-1: VerdictCache and DeferredQueue are lightweight file-backed stores
+ * with no persistent open file handles — each operation opens, appends, and
+ * closes atomically via withFileLock. Creating new instances on re-wire is
+ * therefore safe: the new instances share the same backing files as the old
+ * ones and no write-queue state is lost. The `onDeferredPendingChange`
+ * callback is re-supplied so the new queue instance keeps notifying the
+ * renderer. For settings changes that only affect the classifier (provider,
+ * model, fallbackOnError), the cache and queue file paths are identical
+ * across rewires — the data persists transparently.
  */
 export function wireReviewerAgent(deps: WireReviewerDeps): WireReviewerResult {
   const settings = (deps.readSettings ?? defaultReadSettings)();
@@ -211,6 +221,14 @@ export function wireReviewerAgent(deps: WireReviewerDeps): WireReviewerResult {
       // toggling autoApprove off → on could reuse a stale verdict that
       // was produced under different policy assumptions.
       interactiveAutoApprove: settings.interactive.autoApprove,
+      // MAJOR-2: include Foundry endpoint in cacheScope so that a baseUrl change
+      // causes a cache miss — otherwise cached verdicts from the old endpoint
+      // would be replayed against a different (potentially attacker-controlled)
+      // Foundry deployment. GCP does not have a configurable endpoint.
+      endpoint:
+        settings.provider === "foundry"
+          ? (deps.getFoundryEndpoint?.() ?? null)
+          : null,
     },
   });
   // Issue #690 — push the interactive auto-approve policy onto the
