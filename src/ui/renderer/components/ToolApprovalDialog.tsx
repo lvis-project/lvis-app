@@ -283,17 +283,25 @@ function approvalReviewRows(
   // present so users learn to look for it once isolation lands.
   if (request.sandboxCapability) {
     const cap = request.sandboxCapability;
-    const weak = isWeakSandbox(cap);
-    // Round-5 UX MAJOR — plain Korean copy. "격리" alone meant nothing
-    // to non-technical users, and the raw English `reason` field
-    // bleed into UI was developer-diagnostic language. The row now
-    // surfaces an actionable summary; "보안 격리" makes the security
-    // framing explicit.
+    // MAJOR-2.1 SOT consumer fix: per-kind Korean labels instead of
+    // binary weak/strong. "partial" was incorrectly shown as "OS 격리
+    // 없음" (factually wrong — partial isolation IS present), and
+    // "fs-only" showed the raw English token "OS 격리 활성 (fs-only)".
+    // Labels mirror formatSandboxCapabilityForPrompt() in sandbox-capability.ts
+    // (the SOT) so UI and reviewer prompt agree.
+    let sandboxValue: string;
+    if (cap.kind === "partial") {
+      sandboxValue = "⚠ OS 격리 부분적 (sandbox-exec) — 일부 제한만 적용됩니다";
+    } else if (cap.kind === "fs-only") {
+      sandboxValue = "ℹ 파일시스템만 격리 (landlock) — 네트워크 접근은 제한되지 않습니다";
+    } else if (isWeakSandbox(cap)) {
+      sandboxValue = "⚠ OS 격리 없음 — 도구가 추가 제한 없이 실행됩니다";
+    } else {
+      sandboxValue = `OS 격리 활성 (${cap.kind})`;
+    }
     rows.push({
       label: "보안 격리",
-      value: weak
-        ? "⚠ OS 격리 없음 — 도구가 추가 제한 없이 실행됩니다"
-        : `OS 격리 활성 (${cap.kind})`,
+      value: sandboxValue,
       testId: "tool-approval-sandbox",
     });
   }
