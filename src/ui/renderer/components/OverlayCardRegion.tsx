@@ -57,7 +57,10 @@ export function OverlayCardRegion({ onPluginPrimaryAction, onRoutineAcknowledge 
             onPrimaryAction={hasSession ? () => {
               void (async () => {
                 const opened = await openSession(active.routineSessionId!);
-                if (opened) onRoutineAcknowledge?.(routineId, firedAt);
+                if (opened) {
+                  onRoutineAcknowledge?.(routineId, firedAt);
+                  dismiss(active.id);
+                }
               })();
             } : undefined}
             primaryActionLabel="결과 보기"

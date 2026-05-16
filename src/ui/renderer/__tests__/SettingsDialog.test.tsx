@@ -120,6 +120,9 @@ describe("SettingsDialog (smoke)", () => {
       expect(api.getSettings).toHaveBeenCalledTimes(1);
     });
     const toggle = screen.getByTestId("idle-preference-refresh-toggle");
+    await waitFor(() => {
+      expect(toggle).not.toBeDisabled();
+    });
     expect(toggle).toHaveAttribute("aria-checked", "false");
 
     fireEvent.click(toggle);
@@ -129,6 +132,7 @@ describe("SettingsDialog (smoke)", () => {
         features: { idlePreferenceRefresh: true },
       });
     });
+    expect(api.updateSettings).toHaveBeenCalledTimes(1);
     await waitFor(() => {
       expect(toggle).toHaveAttribute("aria-checked", "true");
     });

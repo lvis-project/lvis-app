@@ -34,6 +34,11 @@ const log = createLogger("chat");
 const MAX_ROLE_PROMPT_CHARS = 12_000;
 const MAX_SELECTED_SKILLS = 5;
 const SESSION_KIND_VALUES = new Set<SessionKind | "all">(["main", "routine", "all"]);
+const SESSION_ID_REGEX = /^[a-zA-Z0-9_\-]+$/;
+
+function isSafeSessionId(sessionId: unknown): sessionId is string {
+  return typeof sessionId === "string" && SESSION_ID_REGEX.test(sessionId);
+}
 
 export type { SerializedHistoryMessage } from "../../shared/chat-history.js";
 
@@ -647,7 +652,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
     const before = Number.isNaN(beforeTime) ? undefined : new Date(beforeTime);
     const afterTime = typeof opts?.after === "string" ? Date.parse(opts.after) : Number.NaN;
     const after = Number.isNaN(afterTime) ? undefined : new Date(afterTime);
-    const beforeId = typeof opts?.beforeId === "string" && /^[a-zA-Z0-9_\-]+$/.test(opts.beforeId)
+    const beforeId = isSafeSessionId(opts?.beforeId)
       ? opts.beforeId
       : undefined;
     const kind = SESSION_KIND_VALUES.has(opts?.kind as SessionKind | "all")
@@ -699,6 +704,9 @@ export function registerChatHandlers(deps: IpcDeps): void {
 
   ipcMain.handle("lvis:chat:session-resume", async (e, sessionId: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:session-resume", e); return UNAUTHORIZED_FRAME; }
+    if (!isSafeSessionId(sessionId)) {
+      return { ok: false, compacted: false, compactedAt: null, removedMessageCount: 0 };
+    }
     const result = conversationLoop.resetAndResume(sessionId);
     if (result.ok && conversationLoop.getSessionKind() === "main") {
       await memoryManager.markMainActiveResume(sessionId).catch((err: unknown) => {
@@ -743,7 +751,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
       // to widen the type and check before reading.
       return { ok: false, messages: [], error: "unauthorized-frame" as const };
     }
-    if (typeof sessionId !== "string" || !/^[a-zA-Z0-9_\-]+$/.test(sessionId)) {
+    if (!isSafeSessionId(sessionId)) {
       return { ok: false, messages: [] };
     }
     // loadSession() reads the session JSONL via readFileSync; IO/parse errors
