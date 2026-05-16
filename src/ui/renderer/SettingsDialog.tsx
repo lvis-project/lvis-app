@@ -122,13 +122,20 @@ export function SettingsContent({
     }
   }, [open, llmSave, chatSave, webSave, marketplaceSave]);
 
+  // Reset tab + clear stale error banner ONLY when the dialog transitions
+  // open. Depending on the whole `s` orchestration object would re-fire
+  // this effect every render (since `s` is recreated each render) and
+  // clear the error banner the moment it is set — the user would see it
+  // flash and disappear. Depending on the stable `clearLastSaveError`
+  // identity (it is a `useCallback([])` inside the hook) keeps the
+  // dependency list explicit while still firing only on dialog open.
+  const clearLastSaveError = s.clearLastSaveError;
   useEffect(() => {
     if (open) {
       setTab(normalizeSettingsTab(initialTab));
-      // Clear stale error banner from a previous session.
-      s.clearLastSaveError();
+      clearLastSaveError();
     }
-  }, [initialTab, open, s]);
+  }, [initialTab, open, clearLastSaveError]);
 
   useEffect(() => {
     if (!open) return;
