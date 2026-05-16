@@ -24,6 +24,15 @@ export const LVIS_TOKEN_NAMES = [
   "--lvis-success-fg",
   "--lvis-border",
   "--lvis-ring",
+  // Derived tinted-surface tokens — pre-computed color-mix values shipped by the host.
+  // Plugins use these directly instead of reinventing color-mix derivations.
+  "--lvis-danger-bg-subtle",
+  "--lvis-focus-shadow",
+  "--lvis-primary-bg-strong",
+  "--lvis-primary-bg-subtle",
+  "--lvis-success-bg-subtle",
+  "--lvis-surface-hover",
+  "--lvis-warning-bg-subtle",
   "--lvis-radius-xs",
   "--lvis-radius-sm",
   "--lvis-radius",
