@@ -7,7 +7,7 @@ import { applyBundleToDocument, resolveSystemPair } from "./resolve-theme.js";
 import { bundleToPluginTokens } from "./plugin-token-map.js";
 export { bundleToPluginTokens };
 import type { ThemeContextValue, BundleId, ResolvedShell } from "./types.js";
-import { corporate_PAIR_IDS } from "./types.js";
+import { VIOLET_PAIR_IDS } from "./types.js";
 import type { InitialThemePrime } from "../../../shared/initial-theme.js";
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
@@ -165,7 +165,7 @@ export function ThemeProvider({
   // is part of the violet pair, override with the OS-resolved variant.
   // osTick is included so any OS scheme change triggers a re-evaluation.
   const effectiveBundleId: BundleId = useMemo(() => {
-    if (followSystem && corporate_PAIR_IDS.includes(bundleId)) {
+    if (followSystem && VIOLET_PAIR_IDS.includes(bundleId)) {
       return resolveSystemPair();
     }
     return bundleId;
@@ -205,7 +205,7 @@ export function ThemeProvider({
   // Live-follow OS preference when followSystem is active for violet pair.
   // A tick counter forces effectiveBundleId to re-evaluate on OS scheme change.
   useEffect(() => {
-    if (!followSystem || !corporate_PAIR_IDS.includes(bundleId)) return;
+    if (!followSystem || !VIOLET_PAIR_IDS.includes(bundleId)) return;
     if (typeof window === "undefined" || !window.matchMedia) return;
     const mql = window.matchMedia("(prefers-color-scheme: light)");
     const onChange = () => setOsTick((n) => n + 1);
@@ -242,8 +242,8 @@ export function ThemeProvider({
        * preference resolution (resolveSystemPair). Treat the explicit pick as
        * "I want this exact bundle" and turn followSystem off so the click is
        * honored. Re-enabling the toggle continues to work normally. */
-      const isLgePairPick = corporate_PAIR_IDS.includes(safeId);
-      if (isLgePairPick && followSystem) {
+      const isVioletPairPick = VIOLET_PAIR_IDS.includes(safeId);
+      if (isVioletPairPick && followSystem) {
         setFollowSystemState(false);
         persistAppearance({ bundleId: safeId, followSystem: false });
       } else {

@@ -24,7 +24,7 @@
 8. [Agent Approval System — 에이전트 요청 승인](#8-agent-approval-system--에이전트-요청-승인)
 9. [Plugin System & UI Extension](#9-plugin-system--ui-extension)
    - 9.1 Plugin Architecture · 9.2 Manifest · 9.3 UI Slot · 9.4 Scenario · **9.5 MCP Protocol Architecture** · **9.6 Deployment Model**
-10. [Agent Hub — 사원 레플리카 메시지 보드](#10-agent-hub--사원-레플리카-메시지-보드)
+10. [Agent Hub — 사용자 레플리카 메시지 보드](#10-agent-hub--사용자-레플리카-메시지-보드)
 11. [Marketplace Hub — 사업부 플러그인 생태계](#11-marketplace-hub--사업부-플러그인-생태계)
 12. [Use Case → Architecture Mapping](#12-use-case--architecture-mapping)
 13. [Data Flow](#13-data-flow)
@@ -37,7 +37,7 @@
 
 ## 1. Design Philosophy — 철학에서 구조로
 
-> _"직원은 판단과 소통에 집중하고, 절차·탐색·정리는 Lvis·internal search가 맡는 회사."_
+> _"사용자는 판단과 소통에 집중하고, 절차·탐색·정리는 LVIS가 맡는 환경."_
 > — philosophy.md 비전 문장
 
 LVIS의 모든 설계 결정은 아래 네 가지 철학 원칙에서 출발한다. 각 원칙이 아키텍처의 어떤 구조로 구현되는지를 함께 표기한다.
@@ -47,7 +47,7 @@ mindmap
   root((LVIS 설계 철학))
     설치형·로컬 기반 (온라인 전제)
       내 PC에 상주하는 퍼스널 AI
-      로컬 문서·파일 인덱싱 (Internal search 연동)
+      로컬 문서·파일 인덱싱 (the LLM backend 연동)
       Local Index Engine (local-indexer)
       Client Core Engines
     기억 중심 개인화
@@ -58,7 +58,7 @@ mindmap
       Memory Files
       Overlay Trigger Surface
     에이전트 네트워크
-      전 사원 디지털 레플리카
+      전 사용자 디지털 레플리카
       에이전트 간 비동기 협업 A2A
       메시지 보드 기반 소통
       업무 일지 범위 지정 게시 · 상호작용 승인
@@ -67,10 +67,10 @@ mindmap
       Agent Route Engine
       Agent Approval System
     기업 프로세스 통합
-      internal search 사내 LLM 시스템
+      the LLM backend LLM 시스템
       사업부 API 플러그인 연동
       거버넌스·감사·보안
-      Internal search Session
+      the LLM backend Session
       Marketplace Hub
       Governance Layer
 ```
@@ -80,7 +80,7 @@ mindmap
 | **설치형·로컬 기반**   | Client Core Engines + Local Index                  | J.A.R.V.I.S.처럼 내 PC에 상주. 선배 5명에게 물어보던 것을 로컬에서 즉시 검색 |
 | **기억 중심 개인화**   | Memory Files (AGENTS.md + MEMORY.md + memories/) + Overlay Trigger Surface | 사용자가 수락한 플러그인 제안을 main chat 의 정상 권한 경로로 가져온다. 기억이 쌓일수록 맞춤도 ↑      |
 | **에이전트 네트워크**  | Agent Hub (Message Board) + A2A                    | "이영희님 이거 확인해주세요" → 본인 부재 중에도 레플리카가 대응              |
-| **기업 프로세스 통합** | Internal search + Marketplace + Governance                  | 50~60장 문서 대신 "필수 조항·승인 단계"만 추출. 회사 허용 경로만 사용        |
+| **기업 프로세스 통합** | the LLM backend + Marketplace + Governance                  | 50~60장 문서 대신 "필수 조항·승인 단계"만 추출. 회사 허용 경로만 사용        |
 
 ---
 
@@ -90,7 +90,7 @@ mindmap
 
 ```mermaid
 graph TB
-    subgraph "👤 사원 데스크톱"
+    subgraph "👤 사용자 데스크톱"
         CLIENT["LVIS Client<br/>(Electron + Rust Core)"]
         LOCAL_IDX["Local Index Engine<br/>(문서·파일·메일 인덱싱)"]
         LOCAL_STORE["Local Knowledge Store<br/>(SQLite + PageIndex Tree)"]
@@ -99,16 +99,16 @@ graph TB
     end
 
     subgraph "🏢 Enterprise Infrastructure"
-        subgraph "🧠 Internal search — 심장"
-            corporateNIE["Internal search LLM System<br/>(통제된 추론·세션)"]
+        subgraph "🧠 the LLM backend — 심장"
+            LLM_BACKEND["the LLM backend LLM System<br/>(통제된 추론·세션)"]
             MODEL_ROUTER["Model Router<br/>(모델 선택·토큰 관리)"]
             CONTEXT_MGR["Context Manager<br/>(세션·맥락 유지)"]
             AUTH["Auth & Identity<br/>(SSO/LDAP)"]
         end
 
-        subgraph "🤖 Agent Hub — 사원 카피 DB"
+        subgraph "🤖 Agent Hub — 사용자 카피 DB"
             MSG_BOARD["Message Board<br/>(에이전트 간 비동기 통신)"]
-            AGENT_REG["Agent Registry<br/>(전 사원 레플리카 등록)"]
+            AGENT_REG["Agent Registry<br/>(전 사용자 레플리카 등록)"]
             AGENT_RT["Agent Runtime<br/>(비동기 실행·위임)"]
         end
 
@@ -130,7 +130,7 @@ graph TB
         end
     end
 
-    CLIENT <-->|"WebSocket<br/>streaming 세션"| corporateNIE
+    CLIENT <-->|"WebSocket<br/>streaming 세션"| LLM_BACKEND
     CLIENT <-->|"REST API<br/>메시지 보드"| MSG_BOARD
     CLIENT <-->|"REST API<br/>플러그인 관리"| PLUGIN_STORE
     CLIENT -->|"Hybrid Query"| SRV_IDX
@@ -140,18 +140,18 @@ graph TB
     LOCAL_IDX --- LOCAL_STORE
     MSG_BOARD --- AGENT_REG
     MSG_BOARD --- AGENT_RT
-    AGENT_RT <-->|"LLM 추론"| corporateNIE
+    AGENT_RT <-->|"LLM 추론"| LLM_BACKEND
     API_GW <-->|"사업부 API"| PLUGIN_SPEC
     SRV_IDX --- SRV_STORE
     AUTH -.->|"인증"| CLIENT
     AUTH -.->|"인증"| MSG_BOARD
     AUTH -.->|"인증"| API_GW
     POLICY -.->|"정책 적용"| CLIENT
-    POLICY -.->|"정책 적용"| corporateNIE
+    POLICY -.->|"정책 적용"| LLM_BACKEND
     AUDIT -.->|"감사 로그"| MSG_BOARD
     AUDIT -.->|"감사 로그"| API_GW
-    corporateNIE --- MODEL_ROUTER
-    corporateNIE --- CONTEXT_MGR
+    LLM_BACKEND --- MODEL_ROUTER
+    LLM_BACKEND --- CONTEXT_MGR
 ```
 
 ### 2.2 Five Pillars
@@ -168,9 +168,9 @@ graph LR
         P1A --> P1B --> P1C --> P1D --> P1E
     end
 
-    subgraph P2["🧠 Internal search"]
+    subgraph P2["🧠 the LLM backend"]
         direction TB
-        P2A["LLM Inference<br/>(사내 LLM)"]
+        P2A["LLM Inference<br/>(LLM)"]
         P2B["Model Router"]
         P2C["Context Manager"]
         P2D["Token Accounting"]
@@ -180,7 +180,7 @@ graph LR
     subgraph P3["🤖 Agent Hub"]
         direction TB
         P3A["Message Board"]
-        P3B["Agent Registry<br/>(전 사원 레플리카)"]
+        P3B["Agent Registry<br/>(전 사용자 레플리카)"]
         P3C["A2A Runtime"]
         P3D["Async Mailbox"]
         P3A --> P3B --> P3C --> P3D
@@ -244,7 +244,7 @@ graph TB
 
     subgraph "Layer 3 — 실행·추론 Execution and Inference"
         direction LR
-        L3_SESSION["Internal search Session<br/>(LLM 추론)"]
+        L3_SESSION["the LLM backend Session<br/>(LLM 추론)"]
         L3_TOOL["Tool Executor<br/>(도구 실행)"]
         L3_AGENT_LOOP["Agent Loop<br/>(claw harness)"]
     end
@@ -298,8 +298,8 @@ graph TB
 | ------ | --------------------- | ------------------ | ----------------------------------------------------------------------------- |
 | **L1** | 사용자·단말           | 사용자·단말 층     | Electron UI + Plugin Slots. 사용자가 보고 만지는 모든 것                      |
 | **L2** | 클라이언트 인텔리전스 | 사용자·단말 내부   | 로컬에서 돌아가는 지능. 키워드 감지, 에이전트 라우팅, 인덱싱, 기억, overlay trigger |
-| **L3** | 실행·추론             | 실행·추론 층       | **Internal search(사내 LLM)** 세션 + claw harness 기반 Agent Loop + Tool 실행          |
-| **L4** | 연동                  | 연동 층            | Agent Hub, Marketplace, 서버 인덱스, 사내 시스템 커넥터                       |
+| **L3** | 실행·추론             | 실행·추론 층       | **the LLM backend(LLM)** 세션 + claw harness 기반 Agent Loop + Tool 실행          |
+| **L4** | 연동                  | 연동 층            | Agent Hub, Marketplace, 서버 인덱스, enterprise 시스템 커넥터                       |
 | **L5** | 거버넌스              | 거버넌스 층        | 인증, 정책, 감사, 암호화. 회사가 허용한 경로만 사용                           |
 
 ---
@@ -388,7 +388,7 @@ sequenceDiagram
     participant PluginMgr as Plugin Manager
     participant Market as Marketplace Hub
     participant AgentHub as Agent Hub
-    participant Internal search as Internal search (LLM)
+    participant the LLM backend as the LLM backend (LLM)
 
     App->>PythonRT: 0. Python Runtime Bootstrap (python-runtime.ts)
     Note over PythonRT: ~/.lvis/runtime/venv/.ready 존재?
@@ -404,7 +404,7 @@ sequenceDiagram
 
     App->>Config: 1. Load local config and cached state
     Config->>Auth: 2. SSO/LDAP 인증
-    Auth-->>Config: Token + 사원 프로필
+    Auth-->>Config: Token + 사용자 프로필
     Config->>Policy: 3. Fetch 정책 + 로컬 캐시 갱신
     Policy-->>Config: 정책 매니페스트 + 브로드캐스트 채널 정보
 
@@ -416,8 +416,8 @@ sequenceDiagram
         Config->>AgentHub: 4b. Skill and Agent registry sync
         AgentHub-->>App: Updated skills and agent configs
     and
-        Config->>Internal search: 4c. Session handshake
-        Internal search-->>App: Session ID + model config + 세션 복원
+        Config->>the LLM backend: 4c. Session handshake
+        the LLM backend-->>App: Session ID + model config + 세션 복원
     end
 
     PluginMgr->>App: 5. Register plugin UI slots + Skills + Tools + Keywords
@@ -438,7 +438,7 @@ flowchart TB
     MEMORY["Memory / Context Load<br/>(AGENTS.md + MEMORY.md + 로컬 컨텍스트)"]
     DETECT["Keyword Detecting Engine<br/>(builtin + plugin keyword groups)"]
     DISAMBIG{"명확한 매칭인가?"}
-    RECOMMEND["Internal search Keyword Recommender<br/>(최적 후보 추천 / 애매하면 사용자 문의)"]
+    RECOMMEND["the LLM backend Keyword Recommender<br/>(최적 후보 추천 / 애매하면 사용자 문의)"]
     ROUTE{"Route Resolver"}
 
     COMMAND["/command 직접 실행"]
@@ -465,12 +465,12 @@ flowchart TB
 **설계 노트**
 
 - 플러그인은 설치/활성화 시 **키워드 그룹**을 동적으로 등록한다.
-- 동일 입력이 여러 그룹에 걸리면 Internal search가 가장 적합한 후보를 추천하고, 확신이 낮으면 사용자에게 확인을 요청한다.
+- 동일 입력이 여러 그룹에 걸리면 the LLM backend가 가장 적합한 후보를 추천하고, 확신이 낮으면 사용자에게 확인을 요청한다.
 - Agent Hub는 paperclip의 board와 유사한 **비동기 메시지 보드**이며, 에이전트가 백그라운드에서 자율 실행되는 서버를 의미하지 않는다.
 
 ### 4.4 Local Index Engine — 로컬 검색 엔진 LLD
 
-로컬 PC의 데이터를 최대한 활용하는 핵심 엔진. Internal search와 상시 연동하여 LLM 추론 기반 인덱싱·검색을 수행한다.
+로컬 PC의 데이터를 최대한 활용하는 핵심 엔진. the LLM backend와 상시 연동하여 LLM 추론 기반 인덱싱·검색을 수행한다.
 
 ```mermaid
 graph LR
@@ -511,7 +511,7 @@ graph LR
     WATCHER --> PARSER
     PARSER --> SQLITE
     PARSER -->|"텍스트 추출"| TREE_BUILD
-    TREE_BUILD -->|"Internal search 호출"| TREE_SUMMARY
+    TREE_BUILD -->|"the LLM backend 호출"| TREE_SUMMARY
     TREE_SUMMARY --> TREE_JSON
 
     TREE_SEARCH --> TREE_JSON
@@ -541,7 +541,7 @@ Layer B — 지능형 인덱싱 (local-indexer)
 | **SQLite + FTS5** | SQLite FTS5 `unicode61` + `kiwipiepy` 사전 토큰화 (`content_ko`) | 한국어 BM25 (패턴 B): 형태소 추출 → 공백 결합 → FTS5 MATCH |
 | **Vector Store** | OpenAI `text-embedding-3-small` (1536 dim) + `lancedb` 로컬 ANN | 100 chunks / batch, 400 RPM throttle, 지수 백오프 |
 | **Hybrid Ranker** | `HybridRetriever` (TypeScript) — RRF `k=60`, `{bm25:0.5, vec:0.5, cloud:0.0}` | BM25 + vector + cloud adapter 결과를 가중 융합 |
-| **Cloud Adapter** | `MockCloudIndexAdapter` | Phase 1은 빈 결과 반환, Phase 2에서 사내 Elasticsearch + Milvus/Qdrant 실연결 |
+| **Cloud Adapter** | `MockCloudIndexAdapter` | Phase 1은 빈 결과 반환, Phase 2에서 enterprise Elasticsearch + Milvus/Qdrant 실연결 |
 | **Query Cache** | LRU Cache (in-memory, structure/content) | 재인덱싱 시 자동 무효화 |
 
 **PageIndex 활용 시 고려사항 (Phase 1):**
@@ -549,8 +549,8 @@ Layer B — 지능형 인덱싱 (local-indexer)
 | 항목 | Phase 1 현황 | 대응 방안 |
 |------|------|-----------|
 | 지원 포맷 | PDF · DOCX · PPTX · XLSX · HTML · MD · TXT | `pymupdf4llm`(PDF) + `markitdown`(Office / HTML) + 직접 읽기(텍스트). PPTX / XLSX 이미지 OCR은 Phase 2 Vision |
-| LLM 의존성 | 임베딩은 OpenAI `text-embedding-3-small` 사용 | Phase 1은 OpenAI API key 필요. Phase 2는 BAAI / bge-m3 또는 internal search 후속 경로 검토 |
-| 온라인 전제 | 인덱싱 시 임베딩 API 호출 필요 | Phase 1은 외부 임베딩 경로, Phase 2는 로컬 / 사내 임베딩으로 오프라인화 목표 |
+| LLM 의존성 | 임베딩은 OpenAI `text-embedding-3-small` 사용 | Phase 1은 OpenAI API key 필요. Phase 2는 BAAI / bge-m3 또는 the LLM backend 후속 경로 검토 |
+| 온라인 전제 | 인덱싱 시 임베딩 API 호출 필요 | Phase 1은 외부 임베딩 경로, Phase 2는 로컬 / enterprise 임베딩으로 오프라인화 목표 |
 | Python 런타임 | `uv` + venv 자동 셋업 (Step 0) | 첫 부팅 ~40-50초, 이후 <1.5초. 사용자 PC에 Python 수동 설치 불필요 |
 
 #### 4.4.1 Phase 1 Production Upgrade — 완료 (2026-04-13)
@@ -569,7 +569,7 @@ Phase 1에서 §4.4 Layer A·B 명세를 production 수준으로 끌어올리는
 | **Cloud 어댑터** | `lvis-app/src/main/cloud-index-adapter.ts`는 Phase 1에서 mock 인터페이스만 제공 |
 | **검색 도구** | builtin tool 4종 — `knowledge_search`, `document_list`, `document_structure`, `document_page_content` |
 | **거버넌스 보강** | `lvis-app/src/tools/executor.ts` Step 2.5 Bash AST pre-validator, `lvis-app/src/main/audit-service.ts`, `lvis-app/src/hooks/post-turn-hook-chain.ts` 연계 |
-| **Out-of-Scope** | LightRAG knowledge graph, 로컬 임베딩, internal search 기반 인덱싱, 사내 cloud index 실연결, PPTX / XLSX OCR은 후속 단계 |
+| **Out-of-Scope** | LightRAG knowledge graph, 로컬 임베딩, the LLM backend 기반 인덱싱, enterprise cloud index 실연결, PPTX / XLSX OCR은 후속 단계 |
 
 **Phase 1 완료 메트릭 (lvis-app 기준):**
 
@@ -690,7 +690,7 @@ RESUME_DELAY ──── 90s elapsed ──→ RUNNING
 **Phase 2 마이그레이션 경로:**
 
 1. `CloudIndexAdapter` 인터페이스를 구현하는 실제 클라이언트 작성
-2. 사내 Elasticsearch (BM25) + Milvus / Qdrant (벡터) 연결
+2. enterprise Elasticsearch (BM25) + Milvus / Qdrant (벡터) 연결
 3. weights를 `{bm25:0.35, vec:0.35, cloud:0.3}`으로 재정규화
 4. `settings.indexing.cloudEnabled` feature flag로 제어
 
@@ -737,7 +737,7 @@ flowchart TB
 | 단계 | 함수 / 컴포넌트 | 설명 | 비고 |
 | --- | --- | --- | --- |
 | **1. 요청 진입** | `window.lvis.chat.send()` → `ipcMain.handle("lvis:chat:send")` | renderer 입력을 main process로 전달 | 채팅 UI의 단일 진입점 |
-| **2. 조기 키워드 감지** | `KeywordEngine.classify()` | 대화 루프 본문에 들어가기 전에 명령/스킬/@멘션/일반 대화를 판단 | 플러그인 keyword group 동적 등록 지원. 다중 후보일 때 internal search 추천/사용자 확인은 목표 설계 |
+| **2. 조기 키워드 감지** | `KeywordEngine.classify()` | 대화 루프 본문에 들어가기 전에 명령/스킬/@멘션/일반 대화를 판단 | 플러그인 keyword group 동적 등록 지원. 다중 후보일 때 the LLM backend 추천/사용자 확인은 목표 설계 |
 | **3. 실행 경로 결정** | `RouteEngine.route()` | `command` / `skill` / `agent-hub` / `llm` 중 하나로 경로 확정 | Agent Hub 경로는 메시지 보드/A2A 상호작용 경로 |
 | **4. 턴 오케스트레이션** | `ConversationLoop.runTurn()` | 한 턴 전체를 관리하고 provider/tool/post-turn 훅을 묶는다 | 턴 경계의 canonical 구현 |
 | **5. 히스토리 적재** | `ConversationHistory.append()` | user 메시지를 인메모리 히스토리에 추가 | assistant/tool_result도 동일 히스토리에 누적 |
@@ -990,14 +990,14 @@ sequenceDiagram
 #### 4.5.9 System Prompt 조립 상세 — 12개 소스
 
 > **Reference**: ccleaks.com §02 "System prompt built — Assembled from 10+ component sources"
-> Internal search에 전송되는 시스템 프롬프트는 매 턴마다 아래 12개 소스에서 조립된다.
+> the LLM backend에 전송되는 시스템 프롬프트는 매 턴마다 아래 12개 소스에서 조립된다.
 
 ```mermaid
 flowchart LR
     subgraph "Static Sources (부팅 시 로드)"
         S1["① Role Definition<br/>LVIS 에이전트 역할 정의"]
         S2["② AGENTS.md<br/>프로젝트·조직 컨텍스트"]
-        S3["③ Employee Profile<br/>사원 프로필·역할·부서"]
+        S3["③ Employee Profile<br/>사용자 프로필·역할·부서"]
         S4["④ Org Context<br/>조직 구조·정책 요약"]
     end
 
@@ -1028,16 +1028,16 @@ flowchart LR
     S11 --> BUILD
     S12 --> BUILD
 
-    BUILD --> PROMPT["최종 System Prompt<br/>(Internal search에 전송)"]
+    BUILD --> PROMPT["최종 System Prompt<br/>(the LLM backend에 전송)"]
 ```
 
 | # | 소스 | 갱신 주기 | 토큰 예상 | 설명 |
 | --- | --- | --- | --- | --- |
 | ① | Role Definition | 부팅 시 (정적) | 1~2K | LVIS 에이전트의 기본 역할·행동 원칙 정의 |
 | ② | AGENTS.md | 파일 변경 시 | 2~5K | 프로젝트·조직 레벨 컨텍스트 (사용자 편집 가능) |
-| ③ | Employee Profile | 부팅 시 | 0.5~1K | 사원 이름·직급·부서·역할 |
+| ③ | Employee Profile | 부팅 시 | 0.5~1K | 사용자 이름·직급·부서·역할 |
 | ④ | Org Context | 부팅 시 | 1~2K | 조직 구조 요약, 팀원 목록, 보고 라인 |
-| ⑤ | Tool Schemas | 매 턴 | 3~8K | L1 Filter 통과 후 Internal search에 노출할 도구 JSON 스키마 |
+| ⑤ | Tool Schemas | 매 턴 | 3~8K | L1 Filter 통과 후 the LLM backend에 노출할 도구 JSON 스키마 |
 | ⑥ | Plugin Schemas | 플러그인 변경 시 | 1~5K | 활성 플러그인의 도구·스킬 스키마 |
 | ⑦ | MEMORY.md | 파일 변경 시 | 1~3K | 사용자 축적 기억 인덱스 — 선호, 루틴, 프로젝트 정보 |
 | ⑧ | Rolling Summary Preamble (id=2.5) | on-change | 2~5K | 체크포인트에서 이어받은 prior context summary. `summaryPreamble` 가 set 된 모든 턴에서 주입. |
@@ -1046,7 +1046,7 @@ flowchart LR
 | ⑪ | Overlay Trigger Context | 매 턴 (조건부) | 0.5~2K | 대기 중인 승인 건수, 임박 일정, 브리핑 요약 |
 | ⑫ | Feature Flags | 부팅 시 | 0.2~0.5K | 활성 실험 기능 목록 (§14.4 Feature Flag 참조) |
 
-**총 토큰 예산**: 약 15~35K tokens (Internal search 컨텍스트 윈도우의 3~7%)
+**총 토큰 예산**: 약 15~35K tokens (the LLM backend 컨텍스트 윈도우의 3~7%)
 
 ---
 
@@ -1320,7 +1320,7 @@ artifact 와 save data 를 함께 보관한다 (호스트 root 에 끼어들지 
 │   └── <session-id>.jsonl
 ├── audit/               # AuditLogger (회전·retention)
 ├── traces/              # FileTracer 디버그 trace
-├── certs/               # 사내 CA 캐시
+├── certs/               # corporate CA 캐시
 ├── governance/          # MCP / 플러그인 admin 정책
 ├── mcp/                 # MCP servers config + install dir
 │   ├── servers.json
@@ -1360,7 +1360,7 @@ flowchart LR
     TOKENIZER --> INTENT_DETECT{"의도 분류<br/>(질문/요청/지시)"}
     TOKENIZER --> ENTITY_EXTRACT["엔티티 추출<br/>(파일명, 날짜, 금액)"]
     SKILL_DETECT --> AMBIG{"후보가 하나인가?"}
-    AMBIG -->|"No"| LLM_RECO["Internal search Recommender<br/>(최적 후보 추천 / 애매하면 사용자 문의)"]
+    AMBIG -->|"No"| LLM_RECO["the LLM backend Recommender<br/>(최적 후보 추천 / 애매하면 사용자 문의)"]
     AMBIG -->|"Yes"| SKILL_RESOLVE["Skill Resolver<br/>(어떤 플러그인?)"]
 
     CMD_DETECT -->|"매칭"| CMD_EXEC["Command Executor"]
@@ -1382,13 +1382,13 @@ flowchart LR
 | 1    | 명시적 명령어 | `/meeting start`        | Command Executor 직접 실행        |
 | 2    | 스킬 키워드   | "회의록 작성해줘"       | Skill Resolver → 플러그인 활성화  |
 | 3    | 에이전트 멘션 | "@이영희 이거 확인해줘" | Agent Hub 메시지 라우팅           |
-| 4    | 의도 + 엔티티 | "출장 품의 작성해줘"    | Route Engine → Internal search + 관련 도구 |
-| 5    | 일반 대화     | "안녕하세요"            | Internal search 직접 세션                  |
+| 4    | 의도 + 엔티티 | "출장 품의 작성해줘"    | Route Engine → the LLM backend + 관련 도구 |
+| 5    | 일반 대화     | "안녕하세요"            | the LLM backend 직접 세션                  |
 
 **확장 설계 노트**
 
 - 플러그인은 manifest/skill 등록 시 **keyword group** 을 동적으로 추가한다.
-- 동일 입력이 여러 스킬 그룹에 걸리면 Internal search가 가장 적합한 후보를 추천한다.
+- 동일 입력이 여러 스킬 그룹에 걸리면 the LLM backend가 가장 적합한 후보를 추천한다.
 - 추천 confidence가 낮으면 사용자가 명시적으로 선택하도록 묻는다.
 
 ### 6.2 Agent Route Engine
@@ -1403,13 +1403,13 @@ flowchart TB
 
     RESOLVER -->|"로컬 스킬"| LOCAL["Local Skill Executor<br/>(플러그인 내장 기능)"]
     RESOLVER -->|"에이전트 메시지/A2A"| A2A["Agent Hub Message Board<br/>(메시지 보드 전달)"]
-    RESOLVER -->|"LLM 대화"| corporateNIE["Internal search Session<br/>(추론·요약·생성)"]
+    RESOLVER -->|"LLM 대화"| LLM_BACKEND["the LLM backend Session<br/>(추론·요약·생성)"]
     RESOLVER -->|"복합 작업"| ORCHESTRATOR["Task Orchestrator<br/>(다중 스킬 조합)"]
     RESOLVER -->|"사업부 API"| MARKET["Marketplace API<br/>(사업부 시스템 호출)"]
 
     LOCAL --> RESULT["Result"]
     A2A --> RESULT
-    corporateNIE --> RESULT
+    LLM_BACKEND --> RESULT
     ORCHESTRATOR --> RESULT
     MARKET --> RESULT
 
@@ -1422,11 +1422,11 @@ flowchart TB
 
 ```
 1. Governance Policy Check   → 거버넌스 정책 위반 시 즉시 차단
-2. Permission Check          → 사원 권한 확인
+2. Permission Check          → 사용자 권한 확인
 3. Local Skill Match         → 설치된 플러그인 스킬 매칭
 4. Agent Hub Routing         → @멘션 또는 메시지 보드/A2A 상호작용
 5. Marketplace API           → 사업부 API 호출 필요 시
-6. Internal search Fallback           → 위 모두 해당 없으면 LLM 직접 대화
+6. the LLM backend Fallback           → 위 모두 해당 없으면 LLM 직접 대화
 ```
 
 ### 6.3 Tool Permission Model — 10-Layer Pipeline
@@ -1702,7 +1702,7 @@ broken file + line 표시). `/permission audit verify` 는 keychain 의
 
 ### 6.4 Tool Registry & Taxonomy — 빌트인 도구 카탈로그
 
-> Internal search가 호출할 수 있는 **빌트인 도구**와 **플러그인 도구**를 구분하고, 카테고리별로 분류한다.
+> the LLM backend가 호출할 수 있는 **빌트인 도구**와 **플러그인 도구**를 구분하고, 카테고리별로 분류한다.
 
 ```mermaid
 graph TB
@@ -1779,7 +1779,7 @@ graph TB
 | --- | --- |
 | **부팅 시** | `registerStandardCategories()` → 빌트인 도구 등록 → Plugin 도구 등록 → MCP 도구 등록 → Feature Flag 평가 |
 | **플러그인 설치/제거** | Registry 동적 업데이트 (Hot-reload) |
-| **매 턴** | L1 Registry Filter 적용 → Internal search에 전달할 도구 스키마 확정 |
+| **매 턴** | L1 Registry Filter 적용 → the LLM backend에 전달할 도구 스키마 확정 |
 
 ### 6.5 Command Safety — 명령어 안전 분석
 
@@ -2268,9 +2268,9 @@ flowchart TB
 
 ### 8.1 설계 원칙
 
-> **기본값: 승인 필요.** 에이전트가 외부와 상호작용하는 대부분의 행위는 사원의 명시적 승인을 거친다. 내 에이전트가 내 이름으로 무언가를 건네거나 응답하기 전에, 나의 허락을 받는 것이 원칙이다.
+> **기본값: 승인 필요.** 에이전트가 외부와 상호작용하는 대부분의 행위는 사용자의 명시적 승인을 거친다. 내 에이전트가 내 이름으로 무언가를 건네거나 응답하기 전에, 나의 허락을 받는 것이 원칙이다.
 
-**업무 일지 — 공개 범위 승인 후 게시.** 업무 일지는 에이전트가 자동 생성하되, 게시 전에 **공개 범위를 사원이 승인**한다. 전사 공개가 기본이 아니라, 팀 레벨부터 시작하여 사원이 범위를 결정한다.
+**업무 일지 — 공개 범위 승인 후 게시.** 업무 일지는 에이전트가 자동 생성하되, 게시 전에 **공개 범위를 사용자이 승인**한다. 전사 공개가 기본이 아니라, 팀 레벨부터 시작하여 사용자이 범위를 결정한다.
 
 ```
 기본 원칙:
@@ -2290,10 +2290,10 @@ flowchart TB
 
 | 구분 | 품의 결재 | 에이전트 요청 승인 |
 |------|----------|-------------------|
-| **주체** | 사원 본인 → 상위 결재자 | 에이전트 → 에이전트 소유자(사원) |
+| **주체** | 사용자 본인 → 상위 결재자 | 에이전트 → 에이전트 소유자(사용자) |
 | **대상** | 예산·인사·구매 등 공식 프로세스 | **파일 전송** · **상호작용 허용** · **문서 공유** · **일지 공개 범위** 등 |
-| **시스템** | 전자결재 시스템 (기존 사내) | LVIS Agent Approval (클라이언트 내장) |
-| **흐름** | 사원 → 팀장 → 실장 → ... | 타인 에이전트 → 내 에이전트 → **나에게 승인 요청** → 승인/거부 |
+| **시스템** | 전자결재 시스템 (기존 internal) | LVIS Agent Approval (클라이언트 내장) |
+| **흐름** | 사용자 → 팀장 → 실장 → ... | 타인 에이전트 → 내 에이전트 → **나에게 승인 요청** → 승인/거부 |
 
 ### 8.2 자율 행위 vs 승인 필요 행위
 
@@ -2330,7 +2330,7 @@ Agent Hub에 게시된 정보는 **설정된 공개 범위 내의 에이전트**
 ```mermaid
 sequenceDiagram
     participant Agent as 내 에이전트
-    participant User as 사원 (나)
+    participant User as 사용자 (나)
     participant Hub as Agent Hub
 
     Agent->>Agent: 오늘의 업무 이력 자동 수집·정리
@@ -2349,7 +2349,7 @@ sequenceDiagram
     participant Hub as Agent Hub
     participant AgentA as 김철수 Agent
     participant Approval as Approval Queue
-    participant UserA as 김철수 (사원)
+    participant UserA as 김철수 (사용자)
     participant ApprovalPanel as Approval Panel
 
     AgentB->>Hub: "김철수님 분기 보고서 공유 요청"
@@ -2419,7 +2419,7 @@ graph TB
 | "외부 API(Marketplace) 호출은 자동 승인 불가"       | 외부 연동 엄격 통제        |
 | "업무 일지 기본 공개 범위를 👥팀으로 자동 설정"      | 매번 범위 선택 생략 가능   |
 
-> ⚠️ 자동 승인 정책은 **기본값을 미리 설정**하는 것이지, 승인 절차 자체를 건너뛰는 것이 아니다. 예: "업무 일지는 항상 팀 레벨로 게시" 설정 시, 범위가 👥팀으로 **자동 선택**되어 게시되지만, 사원은 언제든 개별 일지의 범위를 변경하거나 게시를 보류할 수 있다.
+> ⚠️ 자동 승인 정책은 **기본값을 미리 설정**하는 것이지, 승인 절차 자체를 건너뛰는 것이 아니다. 예: "업무 일지는 항상 팀 레벨로 게시" 설정 시, 범위가 👥팀으로 **자동 선택**되어 게시되지만, 사용자은 언제든 개별 일지의 범위를 변경하거나 게시를 보류할 수 있다.
 
 ---
 
@@ -2477,7 +2477,7 @@ graph TB
   "version": "0.3.2",
   "description": "회의 녹음·음성 전사(STT)·요약 생성 플러그인.",
   "entry": "dist/hostPlugin.js",
-  "publisher": "the organization's IT",
+  "publisher": "example-publisher",
   "installPolicy": "user",
   "startupTimeoutMs": 8000,
 
@@ -2577,7 +2577,7 @@ graph TB
 | `publisher` | string | 감사 로그·마켓플레이스 표시. |
 | `configSchema` | `PluginConfigSchema` (선택) | **§9.2 Track B** — VSCode-style 선언형 설정 스키마. JSON Schema draft-07 subset (`toolSchemas` 와 동일 dialect) 으로 `properties` map 을 선언하면 호스트가 `PluginConfigTab` 에 typed form (string / number / boolean / enum / string[] ) 을 자동 렌더링한다. 미선언 시 기존 raw key/value 편집기로 fallback (legacy plugin back-compat 보장). UI 라우팅 hint 는 `format: "secret"` 한 종류 — `setSecret` (Electron `safeStorage` 암호화) 로 라우팅되어 cleartext `settings.json` 에 저장되지 **않는다**. `customPanel` (entry/exportName) 은 escape hatch — schema 필드로 표현하기 어려운 expressive UI 를 plugin 이 자체 React 컴포넌트로 마운트할 수 있다 (UI Slot System §9.3 호환). 상세: `docs/references/plugin-tool-schema-design.md` (track B). |
 
-> **Deprecated (Phase 1 스키마에서 제거됨):** `additionalProperties: false` 적용 (Phase 1 결정) 이후 아래 legacy 필드는 매니페스트에 포함하면 로드 거부된다: top-level `permissions[]` 문자열 배열 (host 미사용, Phase 1 제거), `eventPublishes[]` (`emittedEvents`로 교체), nested 객체 형태의 `tools[{ name, entry, description }]`, `skills[]`, 객체 형태의 `ui`, `hooks`, `events`, `dependencies`, `internal-search`. `description` 은 Phase 1 이후 MUST 필드로 승격되었다. 이전 설계 초안은 git history (pre-Sprint-3-B) 에서만 확인 가능하다.
+> **Deprecated (Phase 1 스키마에서 제거됨):** `additionalProperties: false` 적용 (Phase 1 결정) 이후 아래 legacy 필드는 매니페스트에 포함하면 로드 거부된다: top-level `permissions[]` 문자열 배열 (host 미사용, Phase 1 제거), `eventPublishes[]` (`emittedEvents`로 교체), nested 객체 형태의 `tools[{ name, entry, description }]`, `skills[]`, 객체 형태의 `ui`, `hooks`, `events`, `dependencies`. `description` 은 Phase 1 이후 MUST 필드로 승격되었다. 이전 설계 초안은 git history (pre-Sprint-3-B) 에서만 확인 가능하다.
 
 **마켓플레이스 검증:** 플러그인 repo는 sidecar signature를 만들지 않는다. Marketplace upload API가 zip/manifest/schema/version/policy/dependency/access를 검증하고 최종 artifact envelope에 서명한다. Host는 설치 시 envelope를 검증하고 install receipt를 저장한다.
 
@@ -2691,8 +2691,8 @@ Host Renderer                     Main Process                 Plugin Webview
 stateDiagram-v2
     state "설치 전: 기본 클라이언트" as BEFORE {
         [*] --> Chat
-        Chat --> Internal search_Chat: 메시지 전송
-        Internal search_Chat --> Chat: 응답
+        Chat --> the LLM backend_Chat: 메시지 전송
+        the LLM backend_Chat --> Chat: 응답
         Chat --> FileExplorer: 파일 탐색
         Chat --> MemoryVault: 기억 조회
     }
@@ -2712,7 +2712,7 @@ stateDiagram-v2
         state "회의록 모드" as MeetingMode {
             [*] --> STT_Recording: 녹음 시작
             STT_Recording --> RealTimeCaption: 실시간 STT
-            RealTimeCaption --> MidSummary: 중간 요약 via Internal search
+            RealTimeCaption --> MidSummary: 중간 요약 via the LLM backend
             MidSummary --> STT_Recording: 계속 녹음
             MidSummary --> FinalSummary: 회의 종료
         }
@@ -2778,7 +2778,7 @@ PR 3 에서 Microsoft Graph 인증이 호스트에서 플러그인으로 이전�
 - 호스트는 **OAuth-specific 코드를 포함하지 않는다**. MS Graph / Slack / Notion 등 외부 ID provider 는 모두 해당 플러그인이 소유.
 
 **근거**
-1. **OSS 친화성**: 호스트가 사내 (LG) tenant ID / client ID 를 소스에 두지 않고, 플러그인이 자기 config 에 둔다. 호스트 코드 자체는 어떤 외부 서비스도 모름.
+1. **OSS 친화성**: 호스트가 enterprise tenant ID / client ID 를 소스에 두지 않고, 플러그인이 자기 config 에 둔다. 호스트 코드 자체는 어떤 외부 서비스도 모름.
 2. **플러그인 자율성**: 새 OAuth 플러그인을 추가할 때마다 호스트 PR 이 필요했던 종속을 끊는다.
 3. **보안 표면 최소화**: 호스트의 신뢰 경계가 좁아지고, OAuth 누수/오염은 해당 플러그인 안에서 격리.
 
@@ -2871,12 +2871,12 @@ hostApi.emitEvent(`${pluginId}.auth.changed`);  // 예: "ms-graph.auth.changed"
 
 호스트 PR landing 후 다음을 같은 sync 사이클에 맞춤:
 - `lvis-plugin-ms-graph`: `auth: { statusTool: "msgraph_status", loginTool: "msgraph_auth", logoutTool: "msgraph_signout" }` + `emittedEvents` 에 `"ms-graph.auth.changed"` + MSAL 상태 전이에서 emit
-- `lvis-plugin-ep-api`: `auth: { statusTool: "lge_status", loginTool: "lge_login" }` + `emittedEvents` 에 `"ep-api.auth.changed"` + 쿠키 auth 흐름에서 emit
+- `lvis-plugin-ms-graph`: `auth: { statusTool: "ms_graph_status", loginTool: "ms_graph_login" }` + `emittedEvents` 에 `"ms-graph.auth.changed"` + 쿠키 auth 흐름에서 emit
 - auth 를 선언하지 않는 플러그인: manifest 변경 없음.
 
 **의도적으로 deferred 된 항목** — 별 PR 로 추적:
 - `auth.statusTool` 의 `outputSchema` 강제 검증 (toolSchemas 전체 outputSchema 인프라 큰 작업)
-- `agent-hub` 의 connection-status 까지 흡수하는 generic `statusBadge` 일반화 (3+ consumer 룰 — 현재는 ms-graph + ep-api 둘만 auth)
+- `agent-hub` 의 connection-status 까지 흡수하는 generic `statusBadge` 일반화 (3+ consumer 룰 — 현재는 ms-graph + ms-graph 둘만 auth)
 - LayoutGrid 아이콘 자체에 미인증 점 뱃지 (Settings 외 발견성 강화)
 - `registry.json` 캐시 (현재 event-driven refresh 로 충분 — 풀고 싶은 flicker 문제 없음)
 
@@ -2931,9 +2931,9 @@ graph TB
 
     subgraph "MCP Servers (외부)"
         FS_SERVER["Filesystem Server<br/>(파일 접근)"]
-        DB_SERVER["Database Server<br/>(사내 DB 조회)"]
+        DB_SERVER["Database Server<br/>(internal DB 조회)"]
         API_SERVER["API Server<br/>(사업부 REST API)"]
-        CUSTOM["Custom Server<br/>(사내 시스템)"]
+        CUSTOM["Custom Server<br/>(internal 시스템)"]
     end
 
     MCP_CLIENT --> TRANSPORT_MGR
@@ -2955,7 +2955,7 @@ graph TB
 
 | Capability | 설명 | LVIS 활용 |
 | --- | --- | --- |
-| **Tools** | 서버가 제공하는 도구 (함수) | Internal search가 호출 가능한 도구로 Tool Registry에 등록 |
+| **Tools** | 서버가 제공하는 도구 (함수) | the LLM backend가 호출 가능한 도구로 Tool Registry에 등록 |
 | **Resources** | 서버가 제공하는 데이터 소스 | 파일 목록, DB 스키마, API 응답 등을 컨텍스트로 활용 |
 | **Prompts** | 서버가 제공하는 프롬프트 템플릿 | 특정 작업에 최적화된 시스템 프롬프트 확장 |
 
@@ -2964,7 +2964,7 @@ graph TB
 | Transport | 프로토콜 | 적합 시나리오 | 비고 |
 | --- | --- | --- | --- |
 | **stdio** | subprocess stdin/stdout | 로컬 도구 (파일 시스템, git 등) | 가장 단순·안정적 |
-| **http (Streamable HTTP 2025-03-26)** | 단일 POST → `application/json` 또는 `text/event-stream` | 원격 MCP 서버 (사내 API, SaaS) | 현행 권장 원격 transport. NetworkGuard(Tier A2) + `fetchPublicHttpResponse` 경유 — DNS rebinding/SSRF 방어, 매 요청·매 redirect hop DNS 재검증. `redirect: "manual"`, `allowPrivateNetworks` 옵트인은 거버넌스 admin 플래그(`globalRules.allowPrivateNetworks` 또는 승인 레벨) 동의 필수. |
+| **http (Streamable HTTP 2025-03-26)** | 단일 POST → `application/json` 또는 `text/event-stream` | 원격 MCP 서버 (internal API, SaaS) | 현행 권장 원격 transport. NetworkGuard(Tier A2) + `fetchPublicHttpResponse` 경유 — DNS rebinding/SSRF 방어, 매 요청·매 redirect hop DNS 재검증. `redirect: "manual"`, `allowPrivateNetworks` 옵트인은 거버넌스 admin 플래그(`globalRules.allowPrivateNetworks` 또는 승인 레벨) 동의 필수. |
 | **sse** | HTTP Server-Sent Events (legacy dual-endpoint) | — | **governance-only, legacy** — 런타임 client 미구현. 신규 서버는 `http` 로 이전. |
 | **websocket** | 양방향 소켓 | — | **governance-only, legacy** — 런타임 client 미구현. 실시간 요구 사항은 `http` SSE response 로 우선 검토. |
 
@@ -3025,7 +3025,7 @@ sequenceDiagram
 ```mermaid
 graph TB
     subgraph "managed (회사 배포)"
-        M1["IT Admin API<br/>(사내 marketplace)"]
+        M1["IT Admin API<br/>(enterprise marketplace)"]
         M2["Managed Policy<br/>(서명된 JSON)"]
         M3["ensureManagedInstalled<br/>(boot 시 auto-sync)"]
         M4["~/.lvis/plugins/&lt;id&gt;/<br/>(installedBy=admin, 사용자 삭제 불가)"]
@@ -3053,16 +3053,16 @@ graph TB
 
 | 항목 | managed | user |
 | --- | --- | --- |
-| **소스** | 사내 marketplace API (mTLS + SSO) | 사용자 직접 (URL, local file, 사내 store의 자율 항목) |
+| **소스** | enterprise marketplace API (mTLS + SSO) | 사용자 직접 (URL, local file, enterprise store의 자율 항목) |
 | **설치 시점** | LVIS boot 시 Managed Policy Sync에서 자동 | 사용자 명시 액션 |
 | **삭제 권한** | 회사만 (`PluginDeploymentGuard.canUninstall()` = false) | 사용자 자유 |
 | **업데이트** | 정책 push 시 강제 | 사용자 opt-in |
-| **서명 검증** | **[Phase 3 계획]** Corporate Internal Root CA 필수 (실패 시 load 거부). 현 스키마는 서명 필드 미지원. | **[Phase 3 계획]** 정책에 따라 `warn` / `require` / `off` |
+| **서명 검증** | **[Phase 3 계획]** corporate Root CA 필수 (실패 시 load 거부). 현 스키마는 서명 필드 미지원. | **[Phase 3 계획]** 정책에 따라 `warn` / `require` / `off` |
 | **Directory** | `~/.lvis/plugins/<id>/` (단일 root, `installedBy=admin` 메타데이터로 분류) | `~/.lvis/plugins/<id>/` (단일 root, `installedBy=user` 메타데이터로 분류) |
 | **Manifest 필드** | `deployment: "managed"`, `publisher` | `deployment: "user"` |
 | **Settings UI** | lock icon + "회사 배포" 표시, 제거 / 비활성화 버튼 잠금 | 정상 토글 |
 | **차단 시나리오** | 정책 `deny_list` 발행 → 다음 boot 시 자동 제거 | 정책 매치 시 즉시 비활성화 |
-| **감사 로깅** | managed sync 이벤트는 사내 감사 endpoint push 대상 | 로컬 audit log 중심 |
+| **감사 로깅** | managed sync 이벤트는 enterprise 감사 endpoint push 대상 | 로컬 audit log 중심 |
 | **오프라인** | 최근 정책 cache (TTL 7일), 30일 초과 시 보수 모드 | 항상 사용 가능 |
 
 **Manifest 확장 (§9.2 보강)**
@@ -3076,7 +3076,7 @@ graph TB
   "tools": ["document_scan", "document_search", "..."],
   "description": "Document processing and semantic search plugin.",
   "installPolicy": "admin",
-  "publisher": "the organization's IT"
+  "publisher": "example-publisher"
 }
 ```
 
@@ -3117,7 +3117,7 @@ Step 1-8:  기존 boot sequence
 ```json
 {
   "version": "2026-04-13T21:00:00Z",
-  "signer": "corp-it-root-ca",
+  "signer": "example-ca",
   "signature": "base64(ECDSA(policy_body))",
   "enforcements": {
     "managedPlugins": [
@@ -3145,7 +3145,7 @@ Step 1-8:  기존 boot sequence
 
 - **Phase 1.5**: deployment mode 타입 + manifest 확장 + `PluginDeploymentGuard` 경량 구현 + UI 잠금 표시
 - **Phase 2**: Managed Policy Sync + Installer + IT Admin API 실연결 + SSO 토큰 경로
-- **Phase 3**: ECDSA 서명 검증 + corporate CA 체인 + 오프라인 cache TTL + 사내 감사 endpoint 연동
+- **Phase 3**: ECDSA 서명 검증 + corporate CA 체인 + 오프라인 cache TTL + enterprise 감사 endpoint 연동
 
 ### 9.7 Plugin UI bridge namespaces (added in v0.x)
 
@@ -3172,7 +3172,7 @@ guard in agent-hub-panel-v3.tsx throws if host omits the namespaces.
 
 ---
 
-## 10. Agent Hub — 사원 레플리카 메시지 보드 및 업무 보드
+## 10. Agent Hub — 사용자 레플리카 메시지 보드 및 업무 보드
 
 **2026-05-02 Review**: Agent Hub는 최종 목표로는 범위 지정 게시, 메시지 라우팅, 승인 체계, A2A 런타임을 갖춘 전체 엔터프라이즈 협업 플랫폼이다. 현재 구현은 **Work Board Pilot** 위에 최소 **Approval + Direct Message Board POC**가 추가된 상태다. 팀·조직·전체 공개 게시, 팀 채널, 정책 엔진, A2A 위임은 아직 안전하지 않다.
 
@@ -3257,10 +3257,10 @@ graph LR
 
 ### 10.1 Roadmap to Full Agent Hub
 
-Agent Hub는 모든 사원 레플리카 에이전트가 모인 비동기 메시지 보드이다. 두 가지 축으로 작동한다:
+Agent Hub는 모든 사용자 레플리카 에이전트가 모인 비동기 메시지 보드이다. 두 가지 축으로 작동한다:
 
-1. **범위 지정 게시** (Future) — 업무 일지·팁·인사이트는 사원이 **공개 범위를 승인**한 뒤 게시된다 (개인 보관 / 팀 / 상위 조직 / 전체). 기본값은 팀 레벨이다.
-2. **수시 열람** (Partial: read-only) — 에이전트는 자기 권한 범위 내의 게시물(팀 채널, Knowledge Board 등)을 **수시로 탐색**하며, 자기 사원에게 유용한 인사이트를 능동적으로 수집한다. 현재는 개인/팀 읽기만 가능하며, 사용자가 수락한 overlay 제안에 "오늘 우리 팀에서 이런 일이 있었습니다"가 포함되는 근거이다.
+1. **범위 지정 게시** (Future) — 업무 일지·팁·인사이트는 사용자이 **공개 범위를 승인**한 뒤 게시된다 (개인 보관 / 팀 / 상위 조직 / 전체). 기본값은 팀 레벨이다.
+2. **수시 열람** (Partial: read-only) — 에이전트는 자기 권한 범위 내의 게시물(팀 채널, Knowledge Board 등)을 **수시로 탐색**하며, 자기 사용자에게 유용한 인사이트를 능동적으로 수집한다. 현재는 개인/팀 읽기만 가능하며, 사용자가 수락한 overlay 제안에 "오늘 우리 팀에서 이런 일이 있었습니다"가 포함되는 근거이다.
 
 > 1:1 Direct Message는 현재 POC로 존재하지만, 파일 첨부·위임 수락·외부 API 실행 같은 **민감 행위**는 Section 8의 승인 원칙을 따른다. 현재 구현된 승인 POC는 verdict 기록까지이며, 승인 후 실제 행위 실행은 아직 연결하지 않는다.
 
@@ -3273,9 +3273,9 @@ graph TB
     subgraph "Agent Hub Server"
         MSG_BOARD["📋 Message Board<br/>(비동기 메시지 보드)"]
 
-        subgraph "Agent Registry 사원 카피 DB"
+        subgraph "Agent Registry 사용자 카피 DB"
             REG["에이전트 등록/관리"]
-            PROFILE_DB["Agent Profile<br/>(사원 정보·역할·전문분야·기억)"]
+            PROFILE_DB["Agent Profile<br/>(사용자 정보·역할·전문분야·기억)"]
             STATUS["Agent Status<br/>(온라인/오프라인/작업중)"]
             CAPABILITY["Capability Map<br/>(각 에이전트가 할 수 있는 일)"]
         end
@@ -3298,7 +3298,7 @@ graph TB
         A1["🧑 김철수 Agent<br/>(마케팅·출장 전문)"]
         A2["👩 이영희 Agent<br/>(재무·보고서 전문)"]
         A3["🧑 박민수 Agent<br/>(IT·개발 전문)"]
-        AN["... 전 사원 레플리카"]
+        AN["... 전 사용자 레플리카"]
     end
 
     A1 <-->|"비동기 메시지"| MSG_BOARD
@@ -3355,7 +3355,7 @@ sequenceDiagram
     AgentA->>UserA: 이영희님이 분기 보고서를 공유했습니다
 ```
 
-> 에이전트는 사원을 대리하되, 민감한 행위는 사원이 최종 결정한다.
+> 에이전트는 사용자을 대리하되, 민감한 행위는 사용자이 최종 결정한다.
 
 ### 10.3 Board Types (Target Architecture + Current POC Implementation Note)
 
@@ -3366,7 +3366,7 @@ sequenceDiagram
 | **Personal Mailbox** | 1:1 에이전트 비동기 메시지 | 발신·수신자 | **승인 필요**                | "이 문서 검토해줘"  |
 | **Team Channel**     | 팀/부서 단위 에이전트 협업 | 팀 소속     | 일지 👥팀 게시 · 열람 자율 · 응답 승인 | "이번 주 이슈 정리" |
 | **Project Board**    | 프로젝트별 작업·위임·추적  | 프로젝트원  | 열람 자율 · 위임수락 승인    | "Sprint #12 태스크" |
-| **Knowledge Board**  | 전사 지식 공유·Q&A         | 전 사원     | 🌐전체 범위 게시물 열람 자율 | "출장 절차 가이드"  |
+| **Knowledge Board**  | 전사 지식 공유·Q&A         | 전 사용자     | 🌐전체 범위 게시물 열람 자율 | "출장 절차 가이드"  |
 | **Work Log Board**   | 업무 일지 (범위 지정 게시) | 범위별 상이 | **공개 범위 승인 후 게시** (🔒/👥/🏢/🌐) | "오늘 한 일 요약"   |
 | **Broadcast**        | 전사 공지·긴급 알림        | 관리자→전체 | **자율 열람**                | "시스템 점검 안내"  |
 
@@ -3477,9 +3477,9 @@ flowchart TB
         U1["출장 품의 작성해줘"]
         U1 --> KW1["KW: 출장, 품의"]
         KW1 --> SK1["Skill: HR Plugin<br/>(출장 에이전트)"]
-        SK1 --> MEM1["Memory: 사원 프로필·부서"]
+        SK1 --> MEM1["Memory: 사용자 프로필·부서"]
         MEM1 --> IDX1["Local/Server Index:<br/>출장 규정·양식 검색"]
-        IDX1 --> LG1["Internal search: 품의서 초안 생성"]
+        IDX1 --> LG1["the LLM backend: 품의서 초안 생성"]
         LG1 --> RESULT1["✅ 품의서 초안 + 체크리스트 + 다음 스텝"]
     end
 
@@ -3488,7 +3488,7 @@ flowchart TB
         U2 --> KW2["KW: Figma, 구매, 절차"]
         KW2 --> SK2["Skill: IT Plugin<br/>(SW 도입)"]
         SK2 --> IDX2["Index: 50~60장 가이드 검색"]
-        IDX2 --> LG2["Internal search: 필수 조항·승인 단계 추출"]
+        IDX2 --> LG2["the LLM backend: 필수 조항·승인 단계 추출"]
         LG2 --> AG2["Agent Hub: 담당자 에이전트 연결"]
         AG2 --> RESULT2["✅ 요약 + 담당자 + 다음 액션"]
     end
@@ -3498,7 +3498,7 @@ flowchart TB
         U3 --> KW3["KW: 팀, 업무, 현황, 정리"]
         KW3 --> MEM3["Memory: 팀원 태스크·진행상황"]
         MEM3 --> HUB3["Agent Hub: 팀원 에이전트 데이터 수집"]
-        HUB3 --> LG3["Internal search: 보고서 포맷 생성"]
+        HUB3 --> LG3["the LLM backend: 보고서 포맷 생성"]
         LG3 --> RESULT3["✅ 업무 현황 보고서 + 시너지 후보 제안"]
     end
 
@@ -3506,14 +3506,14 @@ flowchart TB
         U4["플러그인이 업무 신호 감지"]
         U4 --> OVERLAY["hostApi.triggerConversation()"]
         OVERLAY --> CTA["사용자 overlay CTA 수락"]
-        CTA --> LG4["Internal search: main chat 정상 턴 실행"]
+        CTA --> LG4["the LLM backend: main chat 정상 턴 실행"]
         LG4 --> RESULT4["✅ 제안 검토 + 필요한 도구 권한 확인"]
     end
 ```
 
 ### 12.2 시나리오 → 컴포넌트 매핑 테이블
 
-| 시나리오       | KW Engine | Notes | Local Index | Server Index |   Internal search    | Agent Hub |    Plugin     | Overlay Trigger |   Agent Approval    |
+| 시나리오       | KW Engine | Notes | Local Index | Server Index |   the LLM backend    | Agent Hub |    Plugin     | Overlay Trigger |   Agent Approval    |
 | -------------- | :-------: | :---: | :---------: | :----------: | :---------: | :-------: | :-----------: | :---------: | :-----------------: |
 | 출장 품의      |    ✅     |  ✅   |   ✅ 양식   |   ✅ 규정    |   ✅ 초안   |     -     |   HR Plugin   |      -      |          -          |
 | SW 도입        |    ✅     |   -   |  ✅ 가이드  |  ✅ 가이드   |   ✅ 요약   | ✅ 담당자 |   IT Plugin   |      -      |          -          |
@@ -3536,13 +3536,13 @@ flowchart TB
     subgraph "Layer 2 — Client Intelligence"
         KW["① Keyword Engine<br/>출장 + 품의 감지"]
         ROUTE["② Route Engine<br/>HR Plugin 매칭"]
-        MEM["③ Memory Recall<br/>사원 프로필·과거 출장"]
+        MEM["③ Memory Recall<br/>사용자 프로필·과거 출장"]
         IDX["④ Local + Server Index<br/>출장 규정·양식 검색"]
     end
 
     subgraph "Layer 3 — Execution"
         TOOL["⑤ Tool: HR API Connector<br/>양식 데이터 준비"]
-        corporateNIE_CALL["⑥ Internal search 추론<br/>품의서 초안 생성"]
+        LLM_BACKEND_CALL["⑥ the LLM backend 추론<br/>품의서 초안 생성"]
     end
 
     subgraph "Layer 5 — Governance"
@@ -3556,8 +3556,8 @@ flowchart TB
     end
 
     USER --> KW --> ROUTE --> MEM --> IDX
-    IDX --> TOOL --> corporateNIE_CALL
-    corporateNIE_CALL --> POLICY_CHECK --> AUDIT_WRITE
+    IDX --> TOOL --> LLM_BACKEND_CALL
+    LLM_BACKEND_CALL --> POLICY_CHECK --> AUDIT_WRITE
     AUDIT_WRITE --> RENDER --> ACTION
 ```
 
@@ -3573,14 +3573,14 @@ flowchart LR
 
     subgraph "Server Sources"
         S1["전사 문서 서버"]
-        S2["지식 베이스<br/>(사내 위키)"]
+        S2["지식 베이스<br/>(internal 위키)"]
         S3["이메일 아카이브"]
     end
 
     subgraph "Local Index Engine (local-indexer 기반)"
         L_WATCH["File Watcher"]
         L_PARSE["Parser<br/>(PDF·DOCX·PPTX·XLSX·Image)"]
-        L_TREE["PageIndex Tree Builder<br/>(Internal search 연동)"]
+        L_TREE["PageIndex Tree Builder<br/>(the LLM backend 연동)"]
         L_STORE["SQLite FTS5 + Tree Cache (JSON)"]
     end
 
@@ -3639,7 +3639,7 @@ Phase 1 감사 로깅은 두 컴포넌트가 병렬로 운용된다.
 
 ```mermaid
 graph TB
-    subgraph "사원 PC"
+    subgraph "사용자 PC"
         ELECTRON["LVIS Client (Electron)"]
         RUST_CORE["Rust Native Module<br/>(Core Engines)"]
         LOCAL_DATA["Local Store<br/>(SQLite + PageIndex Tree + Memory Files)"]
@@ -3650,7 +3650,7 @@ graph TB
     end
 
     subgraph "On-Premise / Private Cloud"
-        subgraph "Internal search Cluster"
+        subgraph "the LLM backend Cluster"
             LLM_LB["LB"] --> LLM_1["Node 1"]
             LLM_LB --> LLM_2["Node 2"]
             LLM_LB --> LLM_N["Node N"]
@@ -3708,7 +3708,7 @@ graph TB
 
     subgraph "적용 대상"
         C_CLIENT["Client<br/>(인증·정책·암호화)"]
-        C_corporateNIE["Internal search<br/>(세션 감사·DLP)"]
+        C_LLM_BACKEND["the LLM backend<br/>(세션 감사·DLP)"]
         C_HUB["Agent Hub<br/>(RBAC·감사)"]
         C_MARKET["Marketplace<br/>(플러그인 보안 심사)"]
     end
@@ -3719,12 +3719,12 @@ graph TB
     AUTHZ --> C_CLIENT
     AUTHZ --> C_HUB
     POLICY_ENG --> C_CLIENT
-    POLICY_ENG --> C_corporateNIE
+    POLICY_ENG --> C_LLM_BACKEND
     POLICY_ENG --> C_MARKET
-    AUDIT_SVC --> C_corporateNIE
+    AUDIT_SVC --> C_LLM_BACKEND
     AUDIT_SVC --> C_HUB
     AUDIT_SVC --> C_MARKET
-    DLP --> C_corporateNIE
+    DLP --> C_LLM_BACKEND
     DLP --> C_CLIENT
     ENCRYPT --> C_CLIENT
 ```
@@ -3740,14 +3740,14 @@ graph TB
 | **Client**     | Query Cache      | In-memory LRU               | 반복 쿼리 응답 속도 최적화        |
 | **Client**     | Memory Files     | Markdown (.md)              | 투명·편집 가능한 사용자 기억 저장 |
 | **Client**     | Plugin Sandbox   | V8 Isolate / WASM           | 플러그인 격리 보안                |
-| **Client**     | Doc Parser       | PDF(PyMUPDF)·DOCX·PPTX·XLSX·Image(OCR) | MS Office + 이미지 계열 사내 문서 커버 |
-| **Server**     | Internal search           | 사내 LLM 인프라             | 통제된 추론 환경                  |
+| **Client**     | Doc Parser       | PDF(PyMUPDF)·DOCX·PPTX·XLSX·Image(OCR) | MS Office + 이미지 계열 enterprise 문서 커버 |
+| **Server**     | the LLM backend           | LLM 인프라             | 통제된 추론 환경                  |
 | **Server**     | Agent Hub        | Go/Rust + PostgreSQL + NATS | 고성능 메시지 라우팅              |
 | **Server**     | Marketplace      | Node.js/Go + S3             | 플러그인 스토어                   |
 | **Server**     | Server Index     | Elasticsearch + Milvus      | 전사 문서 하이브리드 검색         |
-| **Comm**       | Streaming        | WebSocket (WSS)             | Internal search 실시간 스트리밍            |
+| **Comm**       | Streaming        | WebSocket (WSS)             | the LLM backend 실시간 스트리밍            |
 | **Comm**       | Structured       | gRPC / REST                 | 구조화된 API 호출                 |
-| **Governance** | Auth             | SSO/LDAP                    | 기존 사내 인증 통합               |
+| **Governance** | Auth             | SSO/LDAP                    | 기존 enterprise 인증 통합               |
 | **Governance** | Policy Engine    | OPA / Custom Rules          | 선언적 정책 평가                  |
 | **Governance** | Audit            | Elasticsearch + Kibana      | 감사 로그 검색·시각화             |
 | **Governance** | Encryption       | AES-256 (rest) + TLS 1.3    | 저장·전송 데이터 암호화           |
@@ -3756,7 +3756,7 @@ graph TB
 ### 14.4 Feature Flag & Gradual Rollout — 점진적 기능 배포
 
 > **Reference**: ccleaks.com §02 "GrowthBook initialized — Remote feature flags fetched asynchronously"
-> 기업 환경에서 모든 사원에게 동시에 새 기능을 배포하는 것은 리스크가 크다. Feature Flag 시스템으로 부서별·사업부별·역할별 점진 롤아웃을 제어한다.
+> 기업 환경에서 모든 사용자에게 동시에 새 기능을 배포하는 것은 리스크가 크다. Feature Flag 시스템으로 부서별·사업부별·역할별 점진 롤아웃을 제어한다.
 
 ```mermaid
 flowchart TB
@@ -3805,7 +3805,7 @@ flowchart TB
 | 단계 | 시점 | 동작 |
 | --- | --- | --- |
 | **1. Fetch** | 부팅 시 (비동기) | Flag Service에서 최신 규칙 다운로드. 실패 시 로컬 캐시 사용 |
-| **2. Evaluate** | 부팅 시 + 매 턴 (변경 감지 시) | 사원 프로필(부서·역할·ID)을 기준으로 각 flag 평가 |
+| **2. Evaluate** | 부팅 시 + 매 턴 (변경 감지 시) | 사용자 프로필(부서·역할·ID)을 기준으로 각 flag 평가 |
 | **3. Apply** | Tool Registry 빌드 시 | Feature-gated 도구는 flag가 true일 때만 Registry에 등록 |
 | **4. Sync** | 주기적 (30분) | 백그라운드에서 flag 변경 확인 → Hot-reload |
 
@@ -3967,7 +3967,7 @@ Electron 윈도우 전체에 드래그 앤 드롭 오버레이를 제공한다. 
 | Bash AST safety analysis         | Command Safety (§6.5) | + 위험 등급 4단계 + Governance 불변 경계 |
 | System prompt (10+ sources)      | SystemPromptBuilder (§4.5.9) | 12개 소스 — + 조직 컨텍스트·Feature Flag·overlay trigger origin guidance |
 | GrowthBook feature flags         | Feature Flag Service (§14.4) | + 부서·사업부·역할 타겟팅 + 킬 스위치 |
-| MCP architecture (24 files)      | MCP Protocol Architecture (§9.5) | + 사내 SSO 인증 + Governance 연동 |
+| MCP architecture (24 files)      | MCP Protocol Architecture (§9.5) | + enterprise SSO 인증 + Governance 연동 |
 
 ### B. v3 → v4 (Final) 변경점
 
@@ -3993,7 +3993,7 @@ Electron 윈도우 전체에 드래그 앤 드롭 오버레이를 제공한다. 
 | 항목              | v1           | v2               | v3                   | v4 (Final)              |
 | ----------------- | ------------ | ---------------- | -------------------- | ----------------------- |
 | 레이어            | 4-Layer      | 5-Layer          | 5-Layer              | 5-Layer (확정)          |
-| Internal search            | 모호         | 심장 명확화      | 유지                 | 유지                    |
+| the LLM backend            | 모호         | 심장 명확화      | 유지                 | 유지                    |
 | Memory            | 없음         | 4계층 복잡 구조  | 파일 기반 경량화     | 파일 기반 (확정)        |
 | Local Index LLD   | **전용 섹션** | 없음 (Data Flow만) | 없음 (Data Flow만)   | **§4.4 전용 섹션 복원** |
 | Query Loop LLD    | 없음         | 없음               | 없음                 | **§4.5 Conversation Query Loop 신설** |
@@ -4011,8 +4011,8 @@ Electron 윈도우 전체에 드래그 앤 드롭 오버레이를 제공한다. 
 
 ### D. 비전 문장
 
-> _"모든 사원이 자신만의 AI 비서를 가진다."_
-> _"직원은 판단과 소통에 집중하고, 절차·탐색·정리는 Lvis·internal search가 맡는 회사."_
+> _"모든 사용자이 자신만의 AI 비서를 가진다."_
+> _"사용자는 판단과 소통에 집중하고, 절차·탐색·정리는 LVIS가 맡는 환경."_
 > — philosophy.md
 
 ---
@@ -4087,13 +4087,13 @@ v4 §7 의 Marketplace Hub 배포 플로우는 유지된다. v5 는 **publisher 
 
 #### §7.Y Marketplace 카나리 롤아웃 — S15 (신규 v5)
 
-승인된(§7.X) 버전이라도 전체 사원에게 동시 배포되지 않는다. v5 는 결정론적 슬롯 분배로 카나리 대상을 제한한다.
+승인된(§7.X) 버전이라도 전체 사용자에게 동시 배포되지 않는다. v5 는 결정론적 슬롯 분배로 카나리 대상을 제한한다.
 
 - **`rollout_stage`**: `disabled | canary | ga` 3-stage.
 - **`rollout_percent`**: 0~100 정수. `canary` 단계에서만 유효.
-- **디바이스 슬롯 계산**: 각 사원 디바이스는 `slot = sha256(device_uuid || ':' || plugin_slug) % 100` 로 결정론적 슬롯을 가진다. `slot < rollout_percent` 인 디바이스만 해당 버전 업데이트 후보.
+- **디바이스 슬롯 계산**: 각 사용자 디바이스는 `slot = sha256(device_uuid || ':' || plugin_slug) % 100` 로 결정론적 슬롯을 가진다. `slot < rollout_percent` 인 디바이스만 해당 버전 업데이트 후보.
 - **Stage 전이 운영**: `canary` 는 기본 10% → 50% → 100% 단계적 증대. `ga` 전환 시 `rollout_percent` 는 100 으로 고정된다.
-- **클라이언트 동작**: 매니페스트 업데이트 폴링(§9) 은 슬롯 검증 후 대상이 아니면 현재 설치 버전을 유지한다. 이 과정은 사원에게 불투명(no UI flicker).
+- **클라이언트 동작**: 매니페스트 업데이트 폴링(§9) 은 슬롯 검증 후 대상이 아니면 현재 설치 버전을 유지한다. 이 과정은 사용자에게 불투명(no UI flicker).
 
 #### §8.X Approval System — HMAC/큐/UI/DLP/병렬 (신규 v5)
 
@@ -4118,7 +4118,7 @@ v4 §9 의 manifest 스키마 / HostApi / 도구·이벤트 네임스페이스 �
 
 v4 §12 는 Use Case ↔ Architecture 매핑에 집중되어 있었다. v5 는 클라이언트 운영 가시성을 신규 추가한다.
 
-- **Opt-in**: 기본 OFF. 최초 실행 설정에서 사원이 **명시적으로 허용**해야 전송 시작. 설정은 `~/.lvis/prefs.json` 의 `telemetry.enabled` 로 저장.
+- **Opt-in**: 기본 OFF. 최초 실행 설정에서 사용자이 **명시적으로 허용**해야 전송 시작. 설정은 `~/.lvis/prefs.json` 의 `telemetry.enabled` 로 저장.
 - **`device_uuid`**: 첫 실행 시 UUIDv4 1회 생성 후 고정. 사번/이메일은 포함하지 않는다.
 - **PII scrubber**: 전송 전 공통 규칙(이메일, 전화, 사번, 카드번호, 경로 내 사용자명) 으로 마스킹. §8.X DLP arg mask 와 규칙 공유.
 - **URL allowlist**: 전송 엔드포인트는 빌드 타임에 주입된 화이트리스트(예: `https://telemetry.lvis.internal`) 외에는 거부. 런타임 재지정 불가.
@@ -4141,13 +4141,13 @@ v4 §14 배포·거버넌스 체계는 유지된다. v5 는 개발 조직 운영
 | ---------------------------- | -------------------------------------------- | ----------------------- |
 | Electron 기반 클라이언트     | 크로스 플랫폼 + 웹 기술 기반 UI 확장         | 메모리 사용량 ↑         |
 | Rust Native Module (NAPI-RS) | 키워드 감지/인덱싱의 성능 보장               | 개발 복잡도 ↑           |
-| PageIndex 트리 인덱싱        | LLM 추론 기반 검색 — 장문 문맥 파악 우수     | Internal search 상시 연동 (온라인 전제)            |
+| PageIndex 트리 인덱싱        | LLM 추론 기반 검색 — 장문 문맥 파악 우수     | the LLM backend 상시 연동 (온라인 전제)            |
 | Plugin Sandbox (V8/WASM)     | 플러그인 격리로 보안 확보                    | 플러그인 기능 일부 제한 |
-| Message Board 기반 Agent Hub | 비동기 협업, 사원 부재 시에도 동작           | 실시간성 다소 부족      |
+| Message Board 기반 Agent Hub | 비동기 협업, 사용자 부재 시에도 동작           | 실시간성 다소 부족      |
 | API Gateway 기반 Marketplace | 사업부별 독립 배포 가능                      | Gateway 단일 장애점     |
 | Overlay Trigger Surface을 코어로    | 사용자가 수락한 plugin-authored prompt 만 main chat 으로 import | 코어 gate 유지 필요     |
 | **파일 기반 경량 메모리**    | 단순·투명·사용자 제어 가능. 점진적 확장 여지 | 자동 기억 축적 부족     |
-| **에이전트 행위 승인 필수**  | 사원 대리 행위의 신뢰·보안 보장              | 응답 지연 가능성        |
+| **에이전트 행위 승인 필수**  | 사용자 대리 행위의 신뢰·보안 보장              | 응답 지연 가능성        |
 | **SSE 스트리밍 + Agentic Loop** | 체감 응답 속도 극대화 + 복잡 작업 자동 반복 | 네트워크 불안정 시 스트림 끊김 가능 |
 | **Auto-Compact 컨텍스트 관리** | 장시간 대화에서도 컨텍스트 유지              | 요약 시 세부 정보 손실 가능 |
 | **Post-Turn Hooks 파이프라인** | 메모리 축적·감사·능동 알림 자동화            | 후처리 지연 시 다음 턴 입력 대기 |
@@ -4155,9 +4155,9 @@ v4 §14 배포·거버넌스 체계는 유지된다. v5 는 개발 조직 운영
 | **AST 레벨 명령어 안전 분석** | Governance 동급 불변 안전 경계               | 파서 유지보수 필요 |
 | **MCP 3 Transport 지원**       | stdio·SSE·WebSocket으로 다양한 외부 시스템 연동 | Transport별 보안 설정 필요 |
 | **Feature Flag 점진 롤아웃**   | 부서별·사업부별 리스크 최소화 배포           | Flag 서비스 인프라 추가 |
-| **업무 일지 범위 지정 게시** | 팀 기본 → 사원이 범위 결정. 전사 무분별 노출 방지 | 게시 전 한 단계 승인 추가 |
-| **PageIndex 트리 인덱싱**    | LLM 추론 기반 검색 — 장문 문서 문맥 파악 우수 | Internal search 상시 연동 전제 (온라인 온리) |
-| **MS Office + Image 파서**   | DOCX·PPTX·XLSX·PDF·Image로 사내 문서 커버    | 포맷 추가 시 파서 확장 필요 |
+| **업무 일지 범위 지정 게시** | 팀 기본 → 사용자이 범위 결정. 전사 무분별 노출 방지 | 게시 전 한 단계 승인 추가 |
+| **PageIndex 트리 인덱싱**    | LLM 추론 기반 검색 — 장문 문서 문맥 파악 우수 | the LLM backend 상시 연동 전제 (온라인 온리) |
+| **MS Office + Image 파서**   | DOCX·PPTX·XLSX·PDF·Image로 enterprise 문서 커버    | 포맷 추가 시 파서 확장 필요 |
 
 ---
 
@@ -4165,19 +4165,19 @@ v4 §14 배포·거버넌스 체계는 유지된다. v5 는 개발 조직 운영
 >
 > - [ ] 각 엔진의 상세 인터페이스 정의 (IDL/Proto)
 > - [ ] Plugin SDK 상세 가이드 작성
-> - [ ] Internal search 세션 프로토콜 상세 정의
+> - [ ] the LLM backend 세션 프로토콜 상세 정의
 > - [ ] Overlay Trigger Surface 이벤트 스펙 정의
 > - [ ] 거버넌스 정책 스키마 정의 (OPA rule 포맷)
 > - [ ] Agent Approval 정책 스키마 정의
 > - [ ] 자동 승인 규칙 DSL 설계
-> - [ ] PageIndex Internal search 연동 프로토타입 (Internal search를 LLM 백엔드로 사용)
-> - [ ] Conversation Query Loop 프로토타입 (Internal searchSession SSE 스트리밍 구현)
+> - [ ] PageIndex the LLM backend 연동 프로토타입 (the LLM backend를 LLM 백엔드로 사용)
+> - [ ] Conversation Query Loop 프로토타입 (the LLM backendSession SSE 스트리밍 구현)
 > - [ ] StreamingToolExecutor 병렬 실행 + Approval Queue 연동 구현
 > - [ ] Auto-Compact 임계치 튜닝 및 요약 품질 검증
 > - [ ] Post-Turn Memory Extraction 규칙 정의
 > - [ ] Tool Permission 규칙 DSL 설계 (allow/deny 패턴 문법)
 > - [ ] Shell AST Parser 위험 패턴 카탈로그 확정
-> - [ ] MCP 서버 연동 프로토타입 (사내 HR API — SSE transport)
+> - [ ] MCP 서버 연동 프로토타입 (enterprise HR API — SSE transport)
 > - [ ] Feature Flag 서비스 인프라 선정 및 PoC
 > - [ ] 빌트인 도구 API 상세 인터페이스 정의 (§6.4 카탈로그 기반)
 > - [ ] PageIndex 핵심 로직 Rust 포팅 타당성 검토 (Phase 2)

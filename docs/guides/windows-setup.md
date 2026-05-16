@@ -1,6 +1,6 @@
-# LVIS — Windows (사내망) 설치 & 실행 가이드
+# LVIS — Windows 설치 & 실행 가이드
 
-사내망 Windows PC 에서 LVIS 를 처음부터 실행까지 끝내는 원스톱 가이드.
+Windows PC 에서 LVIS 를 처음부터 실행까지 끝내는 원스톱 가이드.
 `bun run start` 한 방으로 뜨도록 host 가 GPU flag / UTF-8 / 환경변수를
 자동 주입하므로, 이 문서의 절차만 따르면 추가 세팅이 필요 없다.
 
@@ -107,7 +107,7 @@ Electron 은 `cmd.exe /s /c "chcp 65001>nul & electron.exe …"` 형태로 래�
 | `LVIS_KEEP_GPU` | `1` | Windows safe-GPU flag 자동 주입 skip (GPU 정상 VM/CI 에서) |
 | `LVIS_KEEP_WEBGL` | `1` | **빌드 시점만** — `bun run dist`/`build-installers.mjs` 가 패키지에서 WebGL software fallback dylib/dll (`libvk_swiftshader`, `libGLESv2`, `libEGL`, `vulkan-1.dll`) 을 제거하지 않도록 유지. corp 기본 빌드는 `--disable-webgl` flag 가 inject 되어 WebGL context 가 생성되지 않으므로 fallback 미사용 → 기본 제거 안전. 다운스트림 빌드가 WebGL canvas 를 필요로 할 때만 `LVIS_KEEP_WEBGL=1 bun run dist` 로 빌드 |
 | `LVIS_EXTRA_ELECTRON_FLAGS` | `"--foo --bar"` | 기본 safe-flag 를 유지한 채 추가 플래그 append |
-| `LVIS_SKIP_CORP_CA` | `1` | 해외망/비-사내 네트워크 — 사내망 CA 추출 완전 skip |
+| `LVIS_SKIP_CORP_CA` | `1` | 외부 네트워크 환경 — corp CA 추출 완전 skip |
 | `LVIS_CORP_CA_DEBUG` | `1` | Windows/Linux CA 추출 Phase 3 pending 로그 표시 |
 | `LVIS_DEV` | `0` | 플러그인 경로 경계 검사 엄격 모드 (production-like) |
 | `LVIS_DEBUG` | `1` | `run-electron.mjs` 가 적용한 args/env 를 stderr 로 출력 |
@@ -187,9 +187,9 @@ chcp 65001 | Out-Null
 
 또는 Windows Terminal (UTF-8 default) 사용으로 회피.
 
-### `[lvis] corporate CA not found` 경고 (비-사내 네트워크)
-정상 — macOS 키체인에 CorporateRootCA 가 없으면 나오는 informational log.
-해외망/비사내망에서는 무시 가능. 확실히 끄고 싶으면:
+### `[lvis] corporate CA not found` 경고 (non-corporate network)
+정상 — macOS 키체인에 corp CA 가 없으면 나오는 informational log.
+외부 네트워크 환경에서는 무시 가능. 확실히 끄고 싶으면:
 ```powershell
 $env:LVIS_SKIP_CORP_CA = "1"
 ```
@@ -214,7 +214,6 @@ git pull --recurse-submodules
 cd ..\lvis-plugin-local-indexer      ; git pull
 cd ..\lvis-plugin-meeting        ; git pull
 cd ..\lvis-plugin-ms-graph       ; git pull
-cd ..\lvis-plugin-ep-api        ; git pull
 cd ..\lvis-plugin-work-assistant ; git pull
 cd ..\lvis-plugin-agent-hub      ; git pull
 

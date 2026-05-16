@@ -35,7 +35,7 @@ export interface ThemeContextValue {
   /**
    * The bundle id actually applied to the DOM after resolving `followSystem`.
    * When `followSystem` is false this equals `bundleId`.
-   * When `followSystem` is true and bundleId is an violet pair id, this reflects
+   * When `followSystem` is true and bundleId is a violet pair id, this reflects
    * the OS-resolved variant ("violet-light" or "violet-dark").
    */
   effectiveBundleId: BundleId;
@@ -55,5 +55,5 @@ export interface ThemeContextValue {
   setFollowSystem: (next: boolean) => void;
 }
 
-/** violet pair bundle ids that support followSystem. */
-export const corporate_PAIR_IDS: readonly string[] = ["violet-light", "violet-dark"];
+/** Violet pair bundle ids that support followSystem. */
+export const VIOLET_PAIR_IDS: readonly string[] = ["violet-light", "violet-dark"];

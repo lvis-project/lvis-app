@@ -158,7 +158,7 @@ bun run start
 | `LVIS_DEV_SKIP_SIG=1` | 매니페스트 ed25519 서명 검증 skip — 로컬 빌드는 `plugin.json.sig` 없음 |
 | `LVIS_ALLOW_LINKED_PLUGIN_ENTRY=1` | manifest 의 `entry` 필드가 `../node_modules/@lvis/...` 같은 링크 항목 가리키는 것 허용 |
 | `LVIS_ENABLE_DEV_CONSOLE=0` | DevTools 자동 열기 끄기 |
-| `LVIS_DEV_NO_SANDBOX=1` (Windows) | Chromium sandbox off — 사내 PC GPU 크래시 회피 |
+| `LVIS_DEV_NO_SANDBOX=1` (Windows) | Chromium sandbox off — enterprise PC GPU 크래시 회피 |
 | GPU safe-flags (Windows) | `--disable-gpu --disable-software-rasterizer --disable-gpu-compositing --no-sandbox` 자동 추가 |
 | 콘솔 UTF-8 (Windows) | `chcp 65001`, `PYTHONIOENCODING=utf-8` 등 |
 
@@ -190,7 +190,7 @@ packaged 빌드 (`app.isPackaged === true`) 는 보안 정책 상 사이드로�
 
 따라서 packaged 빌드에서 **마켓플레이스 없이 플러그인을 추가하려면**:
 
-1. **trusted publisher key 로 서명된 zip 을 직접 받아 설치**: 마켓플레이스 외 채널(예: 사내 파일 공유)로 받은 서명된 artifact 를 (앱이 직접 install API 를 노출하지 않으므로) registry 에 수동 추가하는 방법은 사실상 없음 — 정상 경로는 마켓플레이스 install.
+1. **trusted publisher key 로 서명된 zip 을 직접 받아 설치**: 마켓플레이스 외 채널(예: enterprise 파일 공유)로 받은 서명된 artifact 를 (앱이 직접 install API 를 노출하지 않으므로) registry 에 수동 추가하는 방법은 사실상 없음 — 정상 경로는 마켓플레이스 install.
 2. **사용자 플러그인 (서명 없음) + 토글 켜기**: 설정 → 플러그인 → "서명되지 않은 사용자 플러그인 허용" 켜고, `~/.lvis/plugins/<id>/` 에 복사하고 `~/.lvis/plugins/registry.json` 수동 편집. 이는 **사용자가 명시적으로 보안 약화를 동의** 한 경우에만 가능. 관리형 정책(`admin`) 플러그인은 이 우회 안 됨.
 
 **결론**: 비공식 prod 사이드로드 channel 은 설계상 없음. dev 에서 §3 또는 [local-marketplace-testing.md](./local-marketplace-testing.md) 로 검증 후, **prod 는 [`marketplace-publishing.md`](./marketplace-publishing.md) 의 정식 publish 가 유일 경로**.
@@ -273,7 +273,7 @@ git stash pop  # 필요 시
 
 # 모든 sibling 플러그인 최신화
 cd ..
-for r in lvis-plugin-meeting lvis-plugin-local-indexer lvis-plugin-ep-api \
+for r in lvis-plugin-meeting lvis-plugin-local-indexer lvis-plugin-work-proactive \
          lvis-plugin-work-assistant lvis-plugin-ms-graph \
          lvis-plugin-agent-hub lvis-plugin-template lvis-plugin-sdk \
          lvis-marketplace lvis-agent-hub; do
@@ -341,5 +341,5 @@ bun run dev
 - [`local-marketplace-testing.md`](./local-marketplace-testing.md) — **권장 dev 루프** (로컬 마켓플레이스 서버 + git-based 부트스트랩)
 - [`marketplace-publishing.md`](./marketplace-publishing.md) — prod 마켓플레이스 publish 채널
 - [`plugin-development.md`](./plugin-development.md) — 매니페스트 전체 스키마, HostApi 계약, capabilities, 이벤트, 서명, 테스팅 깊은 레퍼런스
-- [`windows-setup.md`](./windows-setup.md) — Windows 사내망 first-run 가이드
+- [`windows-setup.md`](./windows-setup.md) — Windows first-run 가이드
 - [`../architecture/architecture.md` §9](../architecture/architecture.md#9-plugin-system--ui-extension) — 플러그인 시스템 아키텍처

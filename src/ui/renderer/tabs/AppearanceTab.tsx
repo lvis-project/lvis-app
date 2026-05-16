@@ -18,7 +18,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { useTheme } from "../theme/index.js";
-import { BUNDLES, corporate_PAIR_IDS } from "../theme/index.js";
+import { BUNDLES, VIOLET_PAIR_IDS } from "../theme/index.js";
 import type { ThemeBundle } from "../theme/index.js";
 import type { CSSProperties } from "react";
 import { getApi } from "../api-client.js";
@@ -376,7 +376,7 @@ export function AppearanceTab() {
   const { flow: webViewFlow, setFlow: setWebViewFlow } = useWebViewPreferredFlow();
   const { family, sizeScale, setFamily, setSizeScale } = useFontPreferences();
 
-  const isLgePair = corporate_PAIR_IDS.includes(bundleId);
+  const isVioletPair = VIOLET_PAIR_IDS.includes(bundleId);
   const activePreset = presetForStack(family);
   const customStack = activePreset === "custom" ? family : "";
 
@@ -409,7 +409,7 @@ export function AppearanceTab() {
       </section>
 
       {/* ── followSystem toggle — violet pair only ─────────────────────── */}
-      {isLgePair && (
+      {isVioletPair && (
         <section className="space-y-2 border-t border-border pt-4">
           <div className="flex items-center justify-between">
             <div>
