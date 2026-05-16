@@ -20,6 +20,13 @@ import type {
 } from "./types.js";
 import { createLogger } from "../lib/logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
+import {
+  ENV_NAME_RE,
+  HTTP_HEADER_NAME_RE,
+  MAX_NAME_LEN,
+  RESERVED_ENV_NAMES,
+  RESERVED_HEADERS,
+} from "./safe-names.js";
 const log = createLogger("mcp-governance");
 
 const DEFAULT_POLICY: McpGovernancePolicy = {
@@ -142,6 +149,8 @@ export class McpGovernance {
     if (config.transport === "stdio") {
       const cmdResult = this.validateStdioCommand(config, approval);
       if (!cmdResult.valid) return cmdResult;
+      const apiKeyEnvResult = this.validateApiKeyEnv(config, approval);
+      if (!apiKeyEnvResult.valid) return apiKeyEnvResult;
     }
 
     // L1-e: HTTP / SSE / WebSocket — URL 검증
@@ -164,6 +173,8 @@ export class McpGovernance {
         //       values with \r or \n is cheap to block here.
         const headersResult = this.validateHeaders(config.headers);
         if (!headersResult.valid) return headersResult;
+        const apiKeyHeaderResult = this.validateApiKeyHeader(config, approval);
+        if (!apiKeyHeaderResult.valid) return apiKeyHeaderResult;
 
         // L1-h: `allowPrivateNetworks` is a per-server escape hatch — it
         //       must be authorised by admin policy, either globally or on
@@ -413,6 +424,95 @@ export class McpGovernance {
           layer: 1,
         };
       }
+    }
+    return { valid: true };
+  }
+
+  private validateApiKeyEnv(
+    config: McpServerConfig,
+    approval: McpServerApproval,
+  ): ValidationResult {
+    const name = config.apiKeyEnv;
+    const isApiKeyServer = config.auth === "api-key" || approval.requiredAuth === "api-key";
+    if (!name) {
+      if (!isApiKeyServer) return { valid: true };
+      return {
+        valid: false,
+        reason: `stdio API-key 서버는 승인된 apiKeyEnv가 필요합니다 (서버: ${config.id})`,
+        layer: 1,
+      };
+    }
+    if (!ENV_NAME_RE.test(name)) {
+      return {
+        valid: false,
+        reason: `apiKeyEnv는 안전한 환경변수 이름이어야 합니다: '${name}'`,
+        layer: 1,
+      };
+    }
+    if (name.length > MAX_NAME_LEN) {
+      return {
+        valid: false,
+        reason: `apiKeyEnv 이름이 너무 깁니다 (최대 ${MAX_NAME_LEN}자): '${name}'`,
+        layer: 1,
+      };
+    }
+    if (RESERVED_ENV_NAMES.has(name.toUpperCase())) {
+      return {
+        valid: false,
+        reason: `apiKeyEnv '${name}'은 호스트 보안 기준에 예약된 환경변수입니다`,
+        layer: 1,
+      };
+    }
+    if (approval.apiKeyEnv !== name) {
+      return {
+        valid: false,
+        reason: `승인되지 않은 apiKeyEnv: '${name}'. 승인값: ${approval.apiKeyEnv ?? "(none)"}`,
+        layer: 1,
+      };
+    }
+    return { valid: true };
+  }
+
+  private validateApiKeyHeader(
+    config: McpServerConfig,
+    approval: McpServerApproval,
+  ): ValidationResult {
+    const name = config.apiKeyHeader;
+    if (!name) {
+      if (!approval.apiKeyHeader) return { valid: true };
+      return {
+        valid: false,
+        reason: `HTTP API-key 서버는 승인된 apiKeyHeader '${approval.apiKeyHeader}'를 사용해야 합니다`,
+        layer: 1,
+      };
+    }
+    if (!HTTP_HEADER_NAME_RE.test(name)) {
+      return {
+        valid: false,
+        reason: `apiKeyHeader는 안전한 HTTP 헤더 이름이어야 합니다: '${name}'`,
+        layer: 1,
+      };
+    }
+    if (name.length > MAX_NAME_LEN) {
+      return {
+        valid: false,
+        reason: `apiKeyHeader 이름이 너무 깁니다 (최대 ${MAX_NAME_LEN}자): '${name}'`,
+        layer: 1,
+      };
+    }
+    if (RESERVED_HEADERS.has(name.toLowerCase())) {
+      return {
+        valid: false,
+        reason: `apiKeyHeader '${name}'은 예약된 HTTP 헤더입니다`,
+        layer: 1,
+      };
+    }
+    if (approval.apiKeyHeader !== name) {
+      return {
+        valid: false,
+        reason: `승인되지 않은 apiKeyHeader: '${name}'. 승인값: ${approval.apiKeyHeader ?? "(none)"}`,
+        layer: 1,
+      };
     }
     return { valid: true };
   }

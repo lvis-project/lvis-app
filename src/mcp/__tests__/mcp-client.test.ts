@@ -99,6 +99,7 @@ function httpApproval(
 function stdioApproval(
   id: string,
   command: string,
+  overrides: Partial<McpGovernancePolicy["servers"][number]> = {},
 ): McpGovernancePolicy["servers"][number] {
   return {
     id,
@@ -115,6 +116,7 @@ function stdioApproval(
     maxResponseSizeBytes: 1_000_000,
     connectionTimeoutMs: 5_000,
     maxConcurrentRequests: 4,
+    ...overrides,
   };
 }
 
@@ -433,6 +435,60 @@ describe("HttpTransport — happy path", () => {
     await expect(client.connect()).rejects.toThrow(/\[redacted]/i);
     await expect(client.connect()).rejects.not.toThrow(leakedToken);
     await expect(client.connect()).rejects.not.toThrow(leakedApiKey);
+  });
+
+  it("sends apiKey through a configured custom HTTP header", async () => {
+    lookupMock.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
+
+    const fetchMock = vi.fn(
+      async (_url: string, init?: RequestInit): Promise<Response> => {
+        const headers = new Headers(init?.headers);
+        expect(headers.get("x-browser-use-api-key")).toBe("browser-use-secret");
+        expect(headers.get("authorization")).toBeNull();
+        const method = readRpcMethod(init);
+        const id = readRpcId(init) ?? 0;
+        if (method === "initialize") {
+          return jsonRpcResponse(id, {
+            protocolVersion: "2024-11-05",
+            capabilities: { tools: {} },
+            serverInfo: { name: "browser-use", version: "1.0.0" },
+          });
+        }
+        if (method === "notifications/initialized") {
+          return new Response(null, { status: 202 });
+        }
+        if (method === "tools/list") {
+          return jsonRpcResponse(id, { tools: [] });
+        }
+        return new Response("unexpected", { status: 500 });
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const gov = governanceWithPolicy(
+      buildPolicy([
+        httpApproval("browser-use", "https://api.browser-use.com/v3/mcp", {
+          requiredAuth: "api-key",
+          apiKeyHeader: "x-browser-use-api-key",
+        }),
+      ]),
+    );
+    const client = new McpClient(
+      {
+        id: "browser-use",
+        transport: "http",
+        url: "https://api.browser-use.com/v3/mcp",
+        auth: "api-key",
+        apiKey: "browser-use-secret",
+        apiKeyHeader: "x-browser-use-api-key",
+      },
+      gov,
+      new ToolRegistry(),
+    );
+
+    await client.connect();
+    expect(client.getState().status).toBe("connected");
+    await client.disconnect();
   });
 });
 
@@ -816,6 +872,91 @@ describe("StdioTransport — regression", () => {
 
     await client.disconnect();
     expect(client.getState().status).toBe("disconnected");
+  });
+
+  it("injects apiKey into the configured stdio environment variable", async () => {
+    const fake = new FakeChildProcess();
+    fake.responses = {
+      initialize: (id) => ({
+        id,
+        protocolVersion: "2024-11-05",
+        capabilities: { tools: {} },
+        serverInfo: { name: "browser-use", version: "0.12.6" },
+      }),
+      "tools/list": () => ({ tools: [] }),
+    };
+    spawnMock.mockReturnValueOnce(fake);
+
+    const gov = governanceWithPolicy(
+      buildPolicy([
+        stdioApproval("browser-use", "uvx", {
+          requiredAuth: "api-key",
+          apiKeyEnv: "OPENAI_API_KEY",
+        }),
+      ]),
+    );
+    const client = new McpClient(
+      {
+        id: "browser-use",
+        transport: "stdio",
+        command: "uvx",
+        args: ["--from", "browser-use[cli]==0.12.6", "browser-use", "--mcp"],
+        auth: "api-key",
+        apiKey: "openai-secret",
+        apiKeyEnv: "OPENAI_API_KEY",
+      },
+      gov,
+      new ToolRegistry(),
+    );
+
+    await client.connect();
+    expect(spawnMock).toHaveBeenCalledWith(
+      expect.stringMatching(/resources\/uv\/[^/]+\/uv(?:\.exe)?$/),
+      ["tool", "run", "--from", "browser-use[cli]==0.12.6", "browser-use", "--mcp"],
+      expect.objectContaining({
+        env: expect.objectContaining({
+          OPENAI_API_KEY: "openai-secret",
+        }),
+      }),
+    );
+    await client.disconnect();
+  });
+
+  it("stdio — apiKey does NOT leak into environment when apiKeyEnv is absent (HIGH-3/HIGH-4)", async () => {
+    const fake = new FakeChildProcess();
+    fake.responses = {
+      initialize: (id) => ({
+        id,
+        protocolVersion: "2024-11-05",
+        capabilities: { tools: {} },
+        serverInfo: { name: "no-env-key", version: "1.0" },
+      }),
+      "tools/list": () => ({ tools: [] }),
+    };
+    spawnMock.mockReturnValueOnce(fake);
+
+    const gov = governanceWithPolicy(
+      buildPolicy([stdioApproval("no-env-key", "uvx")]),
+    );
+    const client = new McpClient(
+      {
+        id: "no-env-key",
+        transport: "stdio",
+        command: "uvx",
+        auth: "none",
+        apiKey: "secret-should-not-appear",
+        // intentionally no apiKeyEnv — apiKey must NOT appear in the spawn env
+      } as McpStdioServerConfig,
+      gov,
+      new ToolRegistry(),
+    );
+
+    await client.connect();
+    const spawnEnv = (spawnMock.mock.calls[0]?.[2] as { env?: Record<string, unknown> })?.env ?? {};
+    // apiKey value must not appear in any env-var value
+    const envValues = Object.values(spawnEnv).map(String);
+    expect(envValues).not.toContain("secret-should-not-appear");
+    await client.disconnect();
   });
 
   it("SIGKILL fallback fires when the subprocess ignores SIGTERM", async () => {

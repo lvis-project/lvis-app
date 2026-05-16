@@ -16,7 +16,7 @@
  *     existing api-key / SSO / OAuth flows after the server entry is registered.
  */
 
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import type { PluginArtifactStore } from "../plugins/plugin-artifact-store.js";
@@ -25,6 +25,7 @@ import { parseMcpRuntimeSpec } from "../plugins/mcp-runtime-spec.js";
 import type { McpRuntimeSpec, PluginMarketplaceItem } from "../plugins/types.js";
 import type { McpServerConfig } from "./types.js";
 import type { InstallerProgressEvent } from "../plugins/marketplace-installer.js";
+import { MAX_MCP_MANIFEST_BYTES } from "./safe-names.js";
 
 export interface InstallMcpResult {
   config: McpServerConfig;
@@ -99,8 +100,15 @@ export async function readRuntimeFromInstalledManifest(installDir: string): Prom
   const manifestPath = resolve(installDir, "plugin.json");
   let raw: string;
   try {
+    const manifestStat = await stat(manifestPath);
+    if (manifestStat.size > MAX_MCP_MANIFEST_BYTES) {
+      throw new Error(
+        `MCP manifest exceeds ${MAX_MCP_MANIFEST_BYTES} byte cap: ${manifestStat.size} bytes at ${manifestPath}`,
+      );
+    }
     raw = await readFile(manifestPath, "utf-8");
   } catch (err) {
+    if ((err as Error).message.includes("byte cap")) throw err;
     throw new Error(
       `MCP manifest not found at ${manifestPath}: ${(err as Error).message}`,
     );
@@ -157,6 +165,7 @@ export function substituteRuntimeTokens(
       );
     }
     if (runtime.auth) out.auth = runtime.auth;
+    if (runtime.apiKeyEnv) out.apiKeyEnv = runtime.apiKeyEnv;
     return out;
   }
   return { ...runtime };
@@ -164,7 +173,7 @@ export function substituteRuntimeTokens(
 
 export function buildMcpServerConfig(slug: string, runtime: McpRuntimeSpec): McpServerConfig {
   if (runtime.transport === "stdio") {
-    return {
+    const config: McpServerConfig = {
       id: slug,
       transport: "stdio",
       command: runtime.command,
@@ -172,6 +181,10 @@ export function buildMcpServerConfig(slug: string, runtime: McpRuntimeSpec): Mcp
       env: runtime.env,
       auth: runtime.auth ?? "none",
     };
+    if (runtime.apiKeyEnv) {
+      config.apiKeyEnv = runtime.apiKeyEnv;
+    }
+    return config;
   }
   const config: McpServerConfig = {
     id: slug,
@@ -179,6 +192,9 @@ export function buildMcpServerConfig(slug: string, runtime: McpRuntimeSpec): Mcp
     url: runtime.url,
     auth: runtime.auth ?? "none",
   };
+  if (runtime.apiKeyHeader) {
+    config.apiKeyHeader = runtime.apiKeyHeader;
+  }
   if (typeof runtime.allowPrivateNetworks === "boolean") {
     config.allowPrivateNetworks = runtime.allowPrivateNetworks;
   }

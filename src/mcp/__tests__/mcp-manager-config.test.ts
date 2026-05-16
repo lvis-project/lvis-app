@@ -71,6 +71,8 @@ async function makeManager() {
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  // Restore default implementations cleared by vi.clearAllMocks()
+  mockValidateServer.mockImplementation(() => ({ valid: true as const }));
   const actualFsPromises =
     await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
   vi.mocked(rename).mockImplementation(actualFsPromises.rename);
@@ -107,6 +109,7 @@ describe("McpManager — getConfigs()", () => {
         transport: "http" as const,
         url: "https://example.com/mcp",
         apiKey: "super-secret",
+        apiKeyHeader: "x-api-key",
         headers: { Authorization: "Bearer token" },
       },
       {
@@ -114,6 +117,7 @@ describe("McpManager — getConfigs()", () => {
         transport: "stdio" as const,
         command: "npx tool",
         apiKey: "stdio-api-secret",
+        apiKeyEnv: "OPENAI_API_KEY",
         args: ["--token=abc123", "--verbose"],
         env: { SECRET_TOKEN: "abc123", PATH: "/usr/bin" },
       },
@@ -125,10 +129,12 @@ describe("McpManager — getConfigs()", () => {
     // http server: apiKey and headers stripped
     expect(result[0]).not.toHaveProperty("apiKey");
     expect(result[0]).not.toHaveProperty("headers");
+    expect(result[0]).toHaveProperty("apiKeyHeader", "x-api-key");
     // stdio server: apiKey, args, and env stripped (all can embed secrets)
     expect(result[1]).not.toHaveProperty("apiKey");
     expect(result[1]).not.toHaveProperty("args");
     expect(result[1]).not.toHaveProperty("env");
+    expect(result[1]).toHaveProperty("apiKeyEnv", "OPENAI_API_KEY");
     expect(result[0].id).toBe("http-srv");
     expect(result[1].id).toBe("stdio-srv");
   });
@@ -190,6 +196,92 @@ describe("McpManager — addConfig()", () => {
 
     const raw = JSON.parse(await readFile(testConfigPath, "utf-8")) as { servers: McpServerConfig[] };
     expect(raw.servers.map((server) => server.id)).toContain("warn-srv");
+  });
+
+  it("updates write-only API key for an existing api-key server and reconnects", async () => {
+    const servers: McpServerConfig[] = [
+      {
+        id: "browser-use",
+        transport: "stdio",
+        command: "uvx",
+        args: ["--from", "browser-use[cli]==0.12.6", "browser-use", "--mcp"],
+        auth: "api-key",
+        apiKeyEnv: "OPENAI_API_KEY",
+      },
+    ];
+    await writeFile(testConfigPath, JSON.stringify({ servers }), "utf-8");
+    const mgr = await makeManager();
+
+    await expect(mgr.setApiKey("browser-use", "sk-test")).resolves.toEqual({ connected: true });
+
+    const raw = JSON.parse(await readFile(testConfigPath, "utf-8")) as { servers: McpServerConfig[] };
+    expect(raw.servers[0]).toMatchObject({
+      id: "browser-use",
+      auth: "api-key",
+      apiKey: "sk-test",
+      apiKeyEnv: "OPENAI_API_KEY",
+    });
+    expect(mockConnect).toHaveBeenCalledOnce();
+  });
+
+  it("forces reconnect when updating an already connected API key server", async () => {
+    const servers: McpServerConfig[] = [
+      {
+        id: "browser-use",
+        transport: "stdio",
+        command: "uvx",
+        args: ["--from", "browser-use[cli]==0.12.6", "browser-use", "--mcp"],
+        auth: "api-key",
+        apiKey: "old-key",
+        apiKeyEnv: "OPENAI_API_KEY",
+      },
+    ];
+    await writeFile(testConfigPath, JSON.stringify({ servers }), "utf-8");
+    const mgr = await makeManager();
+
+    await mgr.connectServer(servers[0]);
+    await expect(mgr.setApiKey("browser-use", "new-key")).resolves.toEqual({ connected: true });
+
+    const raw = JSON.parse(await readFile(testConfigPath, "utf-8")) as { servers: McpServerConfig[] };
+    expect(raw.servers[0]).toMatchObject({ apiKey: "new-key" });
+    expect(mockDisconnect).toHaveBeenCalledOnce();
+    expect(mockConnect).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not persist a new API key when governance rejects the updated config", async () => {
+    const servers: McpServerConfig[] = [
+      {
+        id: "browser-use",
+        transport: "stdio",
+        command: "uvx",
+        auth: "api-key",
+        apiKey: "old-key",
+        apiKeyEnv: "PATH",
+      },
+    ];
+    await writeFile(testConfigPath, JSON.stringify({ servers }), "utf-8");
+    mockValidateServer.mockReturnValueOnce({
+      valid: false,
+      reason: "apiKeyEnv는 런타임 제어 환경변수를 사용할 수 없습니다: 'PATH'",
+      layer: 1,
+    });
+    const mgr = await makeManager();
+
+    await expect(mgr.setApiKey("browser-use", "new-key")).rejects.toThrow("거버넌스 검증 실패");
+
+    const raw = JSON.parse(await readFile(testConfigPath, "utf-8")) as { servers: McpServerConfig[] };
+    expect(raw.servers[0]).toMatchObject({ apiKey: "old-key" });
+    expect(mockConnect).not.toHaveBeenCalled();
+  });
+
+  it("rejects API key updates for non-api-key servers", async () => {
+    const servers: McpServerConfig[] = [
+      { id: "plain", transport: "stdio", command: "npx", auth: "none" },
+    ];
+    await writeFile(testConfigPath, JSON.stringify({ servers }), "utf-8");
+    const mgr = await makeManager();
+
+    await expect(mgr.setApiKey("plain", "secret")).rejects.toThrow("API key 인증 서버가 아닙니다");
   });
 
   it("cleans up failed clients after connectServer throws", async () => {
@@ -295,6 +387,87 @@ describe("McpManager — addConfig()", () => {
 
     expect(existsSync(testConfigPath)).toBe(false);
     expect(mockConnect).not.toHaveBeenCalled();
+  });
+
+  // ─── Round 2 security tests (PR #765) ───────────────────────
+
+  it("setApiKey — rejects CR/LF in apiKey value (HIGH-4)", async () => {
+    const servers: McpServerConfig[] = [
+      { id: "browser-use", transport: "stdio", command: "uvx", auth: "api-key", apiKeyEnv: "MY_KEY" },
+    ];
+    await writeFile(testConfigPath, JSON.stringify({ servers }), "utf-8");
+    const mgr = await makeManager();
+
+    await expect(mgr.setApiKey("browser-use", "\nbad-key")).rejects.toThrow("제어 문자");
+    await expect(mgr.setApiKey("browser-use", "bad\rkey")).rejects.toThrow("제어 문자");
+  });
+
+  it("setApiKey — rejects apiKey that is too long (HIGH-3)", async () => {
+    const servers: McpServerConfig[] = [
+      { id: "browser-use", transport: "stdio", command: "uvx", auth: "api-key", apiKeyEnv: "MY_KEY" },
+    ];
+    await writeFile(testConfigPath, JSON.stringify({ servers }), "utf-8");
+    const mgr = await makeManager();
+
+    await expect(mgr.setApiKey("browser-use", "a".repeat(5000))).rejects.toThrow("너무 깁니다");
+  });
+
+  it("setApiKey — governance.validateServer is called BEFORE saveConfigs (HIGH-3)", async () => {
+    const servers: McpServerConfig[] = [
+      { id: "gov-check", transport: "stdio", command: "uvx", auth: "api-key", apiKeyEnv: "MY_KEY" },
+    ];
+    await writeFile(testConfigPath, JSON.stringify({ servers }), "utf-8");
+    const mgr = await makeManager();
+
+    const callOrder: string[] = [];
+    mockValidateServer.mockImplementation(() => {
+      callOrder.push("validate");
+      return { valid: false as const, layer: 1, reason: "blocked" };
+    });
+    vi.mocked(rename).mockImplementation(async (...args) => {
+      callOrder.push("rename");
+      const actual = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+      return actual.rename(...args);
+    });
+
+    await expect(mgr.setApiKey("gov-check", "sk-test-key")).rejects.toThrow("거버넌스 검증 실패");
+    // validate must come before any file write (rename)
+    expect(callOrder.indexOf("validate")).toBeLessThan(
+      callOrder.indexOf("rename") === -1 ? Infinity : callOrder.indexOf("rename"),
+    );
+    expect(callOrder).not.toContain("rename");
+  });
+
+  it("setApiKey — disconnects existing client then reconnects with new key (MEDIUM-1)", async () => {
+    const servers: McpServerConfig[] = [
+      { id: "rotate-srv", transport: "stdio", command: "uvx", auth: "api-key", apiKeyEnv: "MY_KEY" },
+    ];
+    await writeFile(testConfigPath, JSON.stringify({ servers }), "utf-8");
+    const mgr = await makeManager();
+
+    // Simulate an existing connected client
+    await mgr.connectServer(servers[0]);
+    const connectCallsBefore = mockConnect.mock.calls.length;
+
+    await expect(mgr.setApiKey("rotate-srv", "sk-new-key")).resolves.toEqual({ connected: true });
+
+    // Should have disconnected and then reconnected
+    expect(mockDisconnect).toHaveBeenCalled();
+    expect(mockConnect.mock.calls.length).toBeGreaterThan(connectCallsBefore);
+  });
+
+  it("setApiKey — emits mcp_apikey_set audit log on success (MEDIUM-5)", async () => {
+    const servers: McpServerConfig[] = [
+      { id: "audit-key-srv", transport: "stdio", command: "uvx", auth: "api-key", apiKeyEnv: "MY_KEY" },
+    ];
+    await writeFile(testConfigPath, JSON.stringify({ servers }), "utf-8");
+    const mgr = await makeManager();
+
+    await mgr.setApiKey("audit-key-srv", "sk-good-key");
+
+    expect(mockAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "mcp_apikey_set", output: "connected" }),
+    );
   });
 });
 
