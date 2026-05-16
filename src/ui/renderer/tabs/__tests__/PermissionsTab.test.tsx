@@ -314,7 +314,11 @@ describe("PermissionsTab hook quarantine notice", () => {
     });
 
     expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("show");
-    expect(screen.getAllByText("명시 승인만").length).toBeGreaterThan(0);
+    // #664 renamed reviewer-mode `disabled` label from "명시 승인만" to
+    // "검토 끔 (자동 통과)" (the semantic was inverted: pre-#664 `disabled`
+    // was fail-closed defer-all, post-#664 it is true pass-through and the
+    // new fail-closed mode is `strict`). REVIEWER_MODE_OPTIONS[0].label.
+    expect(screen.getAllByText("검토 끔 (자동 통과)").length).toBeGreaterThan(0);
 
     await act(async () => {
       fireEvent.click(screen.getByTestId("reviewer-mode-llm"));
