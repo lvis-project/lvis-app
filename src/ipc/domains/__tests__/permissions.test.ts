@@ -673,6 +673,94 @@ describe("Minor-3 R2: REVIEWER_PROVIDERS_SET is the single SOT for allowed provi
   });
 });
 
+// ─── CRITICAL-2: HIGH verdict IPC enforcement (scope + nlJustification) ──────
+
+describe("CRITICAL-2: user-approval-record HIGH verdict IPC enforcement", () => {
+  it("rejects HIGH verdict with persistent scope (must use session)", async () => {
+    await setup();
+
+    const result = await invoke(PERMISSIONS.userApprovalRecord, {
+      toolName: "bash_run",
+      args: '{"command":"rm -rf /tmp"}',
+      source: "user-keyboard",
+      scope: "persistent",
+      verdictAtApproval: "high",
+      nlJustification: "some justification",
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: "high-requires-session-scope",
+    });
+  });
+
+  it("rejects HIGH verdict with empty nlJustification", async () => {
+    await setup();
+
+    const result = await invoke(PERMISSIONS.userApprovalRecord, {
+      toolName: "bash_run",
+      args: '{"command":"rm -rf /tmp"}',
+      source: "user-keyboard",
+      scope: "session",
+      verdictAtApproval: "high",
+      nlJustification: "",
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: "high-requires-justification",
+    });
+  });
+
+  it("rejects HIGH verdict with null nlJustification", async () => {
+    await setup();
+
+    const result = await invoke(PERMISSIONS.userApprovalRecord, {
+      toolName: "bash_run",
+      args: '{"command":"rm -rf /tmp"}',
+      source: "user-keyboard",
+      scope: "session",
+      verdictAtApproval: "high",
+      nlJustification: null,
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: "high-requires-justification",
+    });
+  });
+
+  it("accepts HIGH verdict with session scope and non-empty nlJustification", async () => {
+    await setup();
+
+    const result = await invoke(PERMISSIONS.userApprovalRecord, {
+      toolName: "bash_run",
+      args: '{"command":"rm -rf /tmp"}',
+      source: "user-keyboard",
+      scope: "session",
+      verdictAtApproval: "high",
+      nlJustification: "사용자 요청에 따른 삭제",
+    });
+
+    expect(result).toMatchObject({ ok: true });
+  });
+
+  it("allows MEDIUM verdict with persistent scope (no HIGH restriction)", async () => {
+    await setup();
+
+    const result = await invoke(PERMISSIONS.userApprovalRecord, {
+      toolName: "bash_run",
+      args: '{"command":"ls"}',
+      source: "user-keyboard",
+      scope: "persistent",
+      verdictAtApproval: "medium",
+      nlJustification: null,
+    });
+
+    expect(result).toMatchObject({ ok: true });
+  });
+});
+
 // ─── Minor-2 R2: vendors optional chain prevents TypeError ────────────────────
 
 describe("Minor-2 R2: vendors?.['azure-foundry']?.baseUrl — no TypeError when vendors is undefined", () => {
