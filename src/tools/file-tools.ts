@@ -1,4 +1,4 @@
-import { constants, createReadStream } from "node:fs";
+import { constants, createReadStream, type Stats } from "node:fs";
 import { randomUUID } from "node:crypto";
 import {
   copyFile,
@@ -635,9 +635,7 @@ function sensitivePatternForPath(path: string): string | null {
   return isSensitivePath(caseFoldForMatch(canonicalizePathForMatch(path)));
 }
 
-async function statFile(path: string): Promise<
-  Result<Awaited<ReturnType<typeof stat>>>
-> {
+async function statFile(path: string): Promise<Result<Stats>> {
   try {
     return { ok: true, value: await stat(path) };
   } catch (err) {
@@ -645,9 +643,7 @@ async function statFile(path: string): Promise<
   }
 }
 
-async function statExistingPath(path: string): Promise<
-  Result<Awaited<ReturnType<typeof stat>> | null>
-> {
+async function statExistingPath(path: string): Promise<Result<Stats | null>> {
   try {
     return { ok: true, value: await stat(path) };
   } catch (err) {
