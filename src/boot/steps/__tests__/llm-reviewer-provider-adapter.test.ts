@@ -16,6 +16,10 @@
  *   4. error event → throws with the provider error message
  *   5. mid-stream abort → throws "reviewer LLM call aborted"
  *   6. reasoning_delta / tool_call events ignored (not concatenated)
+ *
+ * Each contract is verified across all 6 supported vendor strings so that
+ * adding a new vendor to LLM_VENDORS without updating the adapter surfaces
+ * here rather than in production (#767 vendor-breadth requirement).
  */
 import { describe, it, expect } from "vitest";
 import { LlmReviewerProviderAdapter } from "../reviewer-wiring.js";
@@ -25,9 +29,20 @@ import type {
   StreamTurnParams,
 } from "../../../engine/llm/types.js";
 
-function makeStreamProvider(events: StreamEvent[]): LLMProvider {
+const VENDORS = [
+  "openai",
+  "claude",
+  "gemini",
+  "copilot",
+  "azure-foundry",
+  "vertex-ai",
+] as const;
+
+type Vendor = (typeof VENDORS)[number];
+
+function makeStreamProvider(events: StreamEvent[], vendor: Vendor = "openai"): LLMProvider {
   return {
-    vendor: "openai",
+    vendor,
     streamTurn(_params: StreamTurnParams): AsyncIterable<StreamEvent> {
       return {
         async *[Symbol.asyncIterator]() {
@@ -38,18 +53,21 @@ function makeStreamProvider(events: StreamEvent[]): LLMProvider {
   };
 }
 
-describe("LlmReviewerProviderAdapter", () => {
+describe.each(VENDORS)("LlmReviewerProviderAdapter [vendor=%s]", (vendor) => {
   it("accumulates text_delta chunks into the final text", async () => {
-    const provider = makeStreamProvider([
-      { type: "text_delta", text: '{"level":"' },
-      { type: "text_delta", text: "low" },
-      { type: "text_delta", text: '","reason":"safe"}' },
-      {
-        type: "message_complete",
-        stopReason: "end_turn",
-        usage: { inputTokens: 120, outputTokens: 30 },
-      },
-    ]);
+    const provider = makeStreamProvider(
+      [
+        { type: "text_delta", text: '{"level":"' },
+        { type: "text_delta", text: "low" },
+        { type: "text_delta", text: '","reason":"safe"}' },
+        {
+          type: "message_complete",
+          stopReason: "end_turn",
+          usage: { inputTokens: 120, outputTokens: 30 },
+        },
+      ],
+      vendor,
+    );
     const adapter = new LlmReviewerProviderAdapter(provider);
 
     const result = await adapter.complete({
@@ -65,10 +83,13 @@ describe("LlmReviewerProviderAdapter", () => {
   });
 
   it("returns zero tokens when message_complete carries no usage", async () => {
-    const provider = makeStreamProvider([
-      { type: "text_delta", text: "ok" },
-      { type: "message_complete", stopReason: "end_turn" },
-    ]);
+    const provider = makeStreamProvider(
+      [
+        { type: "text_delta", text: "ok" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+      vendor,
+    );
     const adapter = new LlmReviewerProviderAdapter(provider);
 
     const result = await adapter.complete({
@@ -83,10 +104,13 @@ describe("LlmReviewerProviderAdapter", () => {
   });
 
   it("throws on error events with the provider error message", async () => {
-    const provider = makeStreamProvider([
-      { type: "text_delta", text: "partial" },
-      { type: "error", error: "upstream 429 rate-limit" },
-    ]);
+    const provider = makeStreamProvider(
+      [
+        { type: "text_delta", text: "partial" },
+        { type: "error", error: "upstream 429 rate-limit" },
+      ],
+      vendor,
+    );
     const adapter = new LlmReviewerProviderAdapter(provider);
 
     await expect(
@@ -97,7 +121,7 @@ describe("LlmReviewerProviderAdapter", () => {
   it("throws when aborted mid-stream", async () => {
     const controller = new AbortController();
     const provider: LLMProvider = {
-      vendor: "openai",
+      vendor,
       streamTurn(): AsyncIterable<StreamEvent> {
         return {
           async *[Symbol.asyncIterator]() {
@@ -122,22 +146,25 @@ describe("LlmReviewerProviderAdapter", () => {
   });
 
   it("ignores reasoning_delta and tool_call events", async () => {
-    const provider = makeStreamProvider([
-      { type: "reasoning_delta", text: "thinking aloud..." },
-      { type: "text_delta", text: "real" },
-      {
-        type: "tool_call",
-        id: "t1",
-        name: "stray_tool",
-        input: { x: 1 },
-      },
-      { type: "text_delta", text: " answer" },
-      {
-        type: "message_complete",
-        stopReason: "end_turn",
-        usage: { inputTokens: 10, outputTokens: 5 },
-      },
-    ]);
+    const provider = makeStreamProvider(
+      [
+        { type: "reasoning_delta", text: "thinking aloud..." },
+        { type: "text_delta", text: "real" },
+        {
+          type: "tool_call",
+          id: "t1",
+          name: "stray_tool",
+          input: { x: 1 },
+        },
+        { type: "text_delta", text: " answer" },
+        {
+          type: "message_complete",
+          stopReason: "end_turn",
+          usage: { inputTokens: 10, outputTokens: 5 },
+        },
+      ],
+      vendor,
+    );
     const adapter = new LlmReviewerProviderAdapter(provider);
 
     const result = await adapter.complete({
@@ -155,7 +182,7 @@ describe("LlmReviewerProviderAdapter", () => {
     const captured: StreamTurnParams[] = [];
     const controller = new AbortController();
     const provider: LLMProvider = {
-      vendor: "claude",
+      vendor,
       streamTurn(params: StreamTurnParams): AsyncIterable<StreamEvent> {
         captured.push(params);
         return {
