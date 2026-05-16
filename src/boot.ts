@@ -122,7 +122,8 @@ import { wireReviewerAgent } from "./boot/steps/reviewer-wiring.js";
 import { wireHookSystem } from "./boot/steps/hook-system-wiring.js";
 import { readPermissionSettings } from "./permissions/permission-settings-store.js";
 import { createProvider, secretKeyFor } from "./engine/llm/provider-factory.js";
-import type { LLMProvider, LLMVendor } from "./engine/llm/types.js";
+import { reviewerVendorFor } from "./permissions/reviewer/reviewer-vendor-map.js";
+import type { LLMProvider } from "./engine/llm/types.js";
 import {
   bindManifestIntegrityAudit,
   manifestIntegrityState,
@@ -485,16 +486,11 @@ export async function bootstrap(
   // VercelUnifiedProvider streaming surface — the reviewer needs only a
   // one-shot complete() call shape.
   const reviewerStreamProviderFor = (vendor: string): LLMProvider | null => {
-    // Reviewer settings vendor name → LLMVendor:
-    //   "openai"    → "openai"
-    //   "anthropic" → "claude"
-    //   "google"    → "gemini"
-    const vendorMap: Record<string, LLMVendor> = {
-      openai: "openai",
-      anthropic: "claude",
-      google: "gemini",
-    };
-    const llmVendor = vendorMap[vendor];
+    // Reviewer settings provider name → canonical LLMVendor via shared helper.
+    // "openai" → "openai", "anthropic" → "claude", "google" → "gemini".
+    // "foundry" and "gcp-playground" are handled by dedicated adapters
+    // and never reach this function.
+    const llmVendor = reviewerVendorFor(vendor);
     if (!llmVendor) return null;
     const apiKey = settingsService.getSecret(secretKeyFor(llmVendor));
     if (!apiKey) return null;
@@ -504,7 +500,7 @@ export async function bootstrap(
     wireReviewerAgent({
       permissionManager,
       streamProviderFor: reviewerStreamProviderFor,
-      // C3 key inheritance — Foundry reads llm.apiKey.azure-foundry,
+      // Key inheritance — Foundry reads llm.apiKey.azure-foundry,
       // GCP playground reads llm.apiKey.gemini. Both use the same secret
       // store as the chat LLM providers so no new UI is required.
       getSecret: (key) => settingsService.getSecret(key),
