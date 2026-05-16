@@ -1007,16 +1007,16 @@ export function App() {
               streaming={streaming}
               onRefreshSessions={refreshSessions}
               onJumpToEntry={(entryIndex) => {
-                // Calendar popover in the search bar jumps to entries
-                // tagged with data-chat-entry-index in ChatView. Switch the
-                // view to home before scrolling so the entry is mounted.
-                // ChatView (and its children) may be Suspense-wrapped, so a
-                // single requestAnimationFrame is not enough — the entry node
-                // may not exist yet at the next paint. Retry a few frames
-                // before giving up so the scroll lands once mount completes.
+                // Calendar popover in the search bar jumps to entries tagged
+                // with data-chat-entry-index in ChatView. Switch the view to
+                // home before scrolling so the entry is mounted.
+                // ChatView (and its Suspense-wrapped children) may not be in
+                // the DOM at the next paint — retry a bounded number of
+                // frames so the scroll lands once mount completes.
                 if (!Number.isInteger(entryIndex) || entryIndex < 0) return;
                 setActiveView("home");
                 const selector = `[data-chat-entry-index="${entryIndex}"]`;
+                const MAX_SCROLL_RETRY_FRAMES = 10; // ~160ms ceiling at 60fps
                 let attempts = 0;
                 const tryScroll = () => {
                   const el = document.querySelector<HTMLElement>(selector);
@@ -1024,7 +1024,7 @@ export function App() {
                     el.scrollIntoView({ behavior: "smooth", block: "start" });
                     return;
                   }
-                  if (++attempts >= 10) return; // ~10 frames ≈ 160ms ceiling
+                  if (++attempts >= MAX_SCROLL_RETRY_FRAMES) return;
                   requestAnimationFrame(tryScroll);
                 };
                 requestAnimationFrame(tryScroll);

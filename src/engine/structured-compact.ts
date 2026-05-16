@@ -622,6 +622,10 @@ export async function compactWithBoundary(
     estimateMessagesTokens(finalToCompact) - stubEstimatedAfter,
   );
   const stubRemovedMessages = finalToCompact.length + reverseBudgetResult.droppedCount;
+  // Hoist the ISO→epoch conversion so the persisted `meta.createdAt` and the
+  // in-memory `meta.compactedAt` are derived from the same parse — avoids
+  // double-parsing the ISO string at construction time.
+  const boundaryCreatedAtMs = new Date(boundary.createdAt).getTime();
   const stubMessage: GenericMessage = {
     role: "user",
     content: BOUNDARY_STUB_TEMPLATE(compactNum),
@@ -631,7 +635,7 @@ export async function compactWithBoundary(
       removedCount: stubRemovedMessages,
       compactedAt: boundary.createdAt,
       boundary,
-      createdAt: new Date(boundary.createdAt).getTime(),
+      createdAt: boundaryCreatedAtMs,
       checkpointMeta: {
         removedMessages: stubRemovedMessages,
         freedTokens: stubFreedTokens,
