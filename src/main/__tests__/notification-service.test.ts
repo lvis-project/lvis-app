@@ -201,10 +201,11 @@ describe("NotificationService — routing decision", () => {
     expect(call.urgency).toBe("critical");
     // body capped
     expect(call.body.length).toBe(81);
-    // Audit: gate=os
+    // Audit: gate=os (parsed JSON, not substring — see critic iter 1 finding).
     const log = (auditLogger.log as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0];
-    expect(log.input).toContain('"gate":"os"');
-    expect(log.input).toContain('"kind":"approval"');
+    const parsed = JSON.parse(log.input);
+    expect(parsed.gate).toBe("os");
+    expect(parsed.kind).toBe("approval");
   });
 
   it("blurred (non-focused) window → OS path", () => {
@@ -561,9 +562,10 @@ describe("NotificationService — bypassFocusGate (#843)", () => {
       IPC_NOTIFICATION_TOAST,
       expect.anything(),
     );
-    // Audit reflects gate=os
+    // Audit reflects gate=os (parsed JSON property, not substring).
     const log = (auditLogger.log as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0];
-    expect(log.input).toContain('"gate":"os"');
+    const parsed = JSON.parse(log.input);
+    expect(parsed.gate).toBe("os");
   });
 
   it("bypassFocusGate=false (default) + focused window → in-app toast (gate honored)", () => {
@@ -608,5 +610,112 @@ describe("NotificationService — plugin kind cooldown (#841)", () => {
     );
     expect(logs.filter((l) => l.includes('"event":"notification.suppressed"')).length).toBe(1);
     vi.restoreAllMocks();
+  });
+});
+
+// CRITICAL regression guard — critic iter 1 finding. The pre-fix `fire()`
+// applied the per-kind cooldown branch BEFORE the bypassFocusGate gate, so a
+// plugin's routine fire would silently coalesce a subsequent critical alert
+// (meeting.starting-soon, incident.page) within the 5s plugin cooldown window.
+// `bypassFocusGate=true` must escape BOTH gates.
+describe("NotificationService — bypassFocusGate × cooldown intersection (#843 regression)", () => {
+  it("bypass=true fires even when a prior plugin emit is within cooldown window", () => {
+    const win = makeMockWindow({ focused: false, minimized: false });
+    const auditLogger = makeMockAuditLogger();
+    const factoryStub = makeNotificationFactoryStub();
+    const svc = new NotificationService({
+      getMainWindow: () => win as unknown as Electron.BrowserWindow,
+      auditLogger,
+      notificationFactory: factoryStub.factory,
+      isReady: () => true,
+      isTestEnv: () => false,
+      isAnyWindowFocused: () => false,
+    });
+    const perfBase = performance.now();
+    vi.spyOn(performance, "now").mockImplementation(() => perfBase);
+    // Routine plugin emit consumes the cooldown slot.
+    svc.fire({ kind: "plugin", title: "routine", body: "1" });
+    // 2s later — well within the 5s plugin cooldown.
+    vi.spyOn(performance, "now").mockImplementation(() => perfBase + 2_000);
+    // Critical alert with bypass — pre-fix this would be cooldown-suppressed.
+    svc.fire({
+      kind: "plugin",
+      title: "meeting.starting-soon",
+      body: "회의 5분 전",
+      bypassFocusGate: true,
+    });
+    // Both fires reach the OS path.
+    expect(factoryStub.calls.length).toBe(2);
+    // No suppressed audit entries.
+    const logs = (auditLogger.log as unknown as ReturnType<typeof vi.fn>).mock.calls.map(
+      (c) => c[0].input as string,
+    );
+    expect(
+      logs.filter((l) => l.includes('"event":"notification.suppressed"')).length,
+    ).toBe(0);
+    vi.restoreAllMocks();
+  });
+
+  it("non-bypass fire after a bypass fire still respects cooldown (slot consumed)", () => {
+    // bypass=true fires CONSUME the cooldown slot — the next non-bypass fire
+    // within cooldownMs is suppressed as normal. This guards against the
+    // alternate bug: bypass treated as "didn't happen at all", which would
+    // let a turn-loop spam non-bypass fires without cooldown.
+    const win = makeMockWindow({ focused: false, minimized: false });
+    const auditLogger = makeMockAuditLogger();
+    const factoryStub = makeNotificationFactoryStub();
+    const svc = new NotificationService({
+      getMainWindow: () => win as unknown as Electron.BrowserWindow,
+      auditLogger,
+      notificationFactory: factoryStub.factory,
+      isReady: () => true,
+      isTestEnv: () => false,
+      isAnyWindowFocused: () => false,
+    });
+    const perfBase = performance.now();
+    vi.spyOn(performance, "now").mockImplementation(() => perfBase);
+    // Bypass fire consumes the slot.
+    svc.fire({
+      kind: "plugin",
+      title: "incident.page",
+      body: "critical",
+      bypassFocusGate: true,
+    });
+    // 1s later — still within the 5s plugin cooldown.
+    vi.spyOn(performance, "now").mockImplementation(() => perfBase + 1_000);
+    // Non-bypass plugin fire — must be suppressed.
+    svc.fire({ kind: "plugin", title: "routine", body: "1" });
+    expect(factoryStub.calls.length).toBe(1);
+    const logs = (auditLogger.log as unknown as ReturnType<typeof vi.fn>).mock.calls.map(
+      (c) => c[0].input as string,
+    );
+    expect(
+      logs.filter((l) => l.includes('"reason":"cooldown"')).length,
+    ).toBe(1);
+    vi.restoreAllMocks();
+  });
+
+  it("bypass=true also sets urgent (silent+bypassed paradox guard)", () => {
+    // code-reviewer iter 1 HIGH: bypassFocusGate without urgent produces a
+    // silent OS notification for an alert flagged as critical. urgent must
+    // auto-promote when bypass is set (unless caller explicitly opts out).
+    const win = makeMockWindow({ focused: true, minimized: false });
+    const factoryStub = makeNotificationFactoryStub();
+    const svc = new NotificationService({
+      getMainWindow: () => win as unknown as Electron.BrowserWindow,
+      notificationFactory: factoryStub.factory,
+      isReady: () => true,
+      isTestEnv: () => false,
+      isAnyWindowFocused: () => true,
+    });
+    svc.fire({
+      kind: "plugin",
+      title: "meeting.starting-soon",
+      body: "회의 5분 전",
+      bypassFocusGate: true,
+    });
+    expect(factoryStub.calls.length).toBe(1);
+    expect(factoryStub.calls[0].silent).toBe(false);
+    expect(factoryStub.calls[0].urgency).toBe("critical");
   });
 });

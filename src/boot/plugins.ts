@@ -296,7 +296,14 @@ export function registerPluginNotifications(
         // dispatch, the click-restore inside NotificationService no-ops, but
         // we still audit the attempt so field telemetry can attribute
         // emit-during-shutdown to the originating plugin.
-        if (mainWindow.isDestroyed()) {
+        //
+        // #843 — `bypassFocusGate` is a manifest signal that the event is a
+        // critical alert. A torn-down main window must NOT swallow such an
+        // alert (e.g. `incident.page` during shutdown). When bypass is set,
+        // fall through to NotificationService.fire; the OS notification still
+        // surfaces, and the internal `isDestroyed()` guards on click-restore
+        // handle the no-op safely.
+        if (mainWindow.isDestroyed() && bypassFocusGate !== true) {
           try {
             auditLogger?.log({
               timestamp: new Date().toISOString(),
