@@ -92,6 +92,17 @@ function makeDeps(options: {
         requestId: req.id,
         choice: options.approvalChoice ?? "allow-once",
       })),
+      // #799 + CRITICAL-2 ralph iter 4: server-side ApprovalRequest binding.
+      // userApprovalRecord handler reads trustOrigin/source/approvalCacheKey
+      // from this snapshot; tests use a static snapshot that mirrors the
+      // payload's claimed values (works because handler validates HIGH
+      // verdict rules BEFORE reading snapshot for record fields).
+      getRequestSnapshot: vi.fn((_requestId: string) => ({
+        toolName: "bash_run",
+        source: "user-keyboard" as const,
+        trustOrigin: "user-keyboard",
+        approvalCacheKey: undefined,
+      })),
     },
     auditLogger: {
       log: vi.fn(),
@@ -693,6 +704,7 @@ describe("CRITICAL-2: user-approval-record HIGH verdict IPC enforcement", () => 
     await setup();
 
     const result = await invoke(PERMISSIONS.userApprovalRecord, {
+      requestId: "req-test-1",
       toolName: "bash_run",
       args: '{"command":"rm -rf /tmp"}',
       source: "user-keyboard",
@@ -711,6 +723,7 @@ describe("CRITICAL-2: user-approval-record HIGH verdict IPC enforcement", () => 
     await setup();
 
     const result = await invoke(PERMISSIONS.userApprovalRecord, {
+      requestId: "req-test-2",
       toolName: "bash_run",
       args: '{"command":"rm -rf /tmp"}',
       source: "user-keyboard",
@@ -729,6 +742,7 @@ describe("CRITICAL-2: user-approval-record HIGH verdict IPC enforcement", () => 
     await setup();
 
     const result = await invoke(PERMISSIONS.userApprovalRecord, {
+      requestId: "req-test-3",
       toolName: "bash_run",
       args: '{"command":"rm -rf /tmp"}',
       source: "user-keyboard",
@@ -747,6 +761,7 @@ describe("CRITICAL-2: user-approval-record HIGH verdict IPC enforcement", () => 
     await setup();
 
     const result = await invoke(PERMISSIONS.userApprovalRecord, {
+      requestId: "req-test-4",
       toolName: "bash_run",
       args: '{"command":"rm -rf /tmp"}',
       source: "user-keyboard",
@@ -762,6 +777,7 @@ describe("CRITICAL-2: user-approval-record HIGH verdict IPC enforcement", () => 
     await setup();
 
     const result = await invoke(PERMISSIONS.userApprovalRecord, {
+      requestId: "req-test-5",
       toolName: "bash_run",
       args: '{"command":"ls"}',
       source: "user-keyboard",
@@ -777,6 +793,7 @@ describe("CRITICAL-2: user-approval-record HIGH verdict IPC enforcement", () => 
     await setup();
 
     const result = await invoke(PERMISSIONS.userApprovalRecord, {
+      requestId: "req-test-6",
       toolName: "bash_run",
       args: "not valid json",
       source: "user-keyboard",
@@ -794,6 +811,7 @@ describe("CRITICAL-2: user-approval-record HIGH verdict IPC enforcement", () => 
     await setup();
 
     const result = await invoke(PERMISSIONS.userApprovalRecord, {
+      requestId: "req-test-7",
       toolName: "bash_run",
       args: '"just a string"',
       source: "user-keyboard",

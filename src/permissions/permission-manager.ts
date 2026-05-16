@@ -136,6 +136,19 @@ export interface ReviewerDispatchInput {
   approvalCacheKey?: string;
   /** When true, out-of-allowed-dir access also routes to the reviewer. */
   outOfAllowedDir?: boolean;
+  /**
+   * Issue #664 P1 — manifest-declared sandbox-write self-attestation.
+   * Threaded from the Tool descriptor through to the classifier's
+   * {@link ToolInvocationContext} so the auto-LOW rule can engage.
+   */
+  writesToOwnSandbox?: boolean;
+  /**
+   * Issue #664 P1 — owning plugin's sandbox root
+   * (`~/.lvis/plugins/<pluginId>/`). Computed by the executor when the
+   * tool descriptor carries `pluginId` and threaded here for the
+   * sandbox-write auto-LOW rule.
+   */
+  ownerPluginSandboxRoot?: string;
 }
 
 /**
@@ -546,6 +559,11 @@ export class PermissionManager {
       trustOrigin: input.trustOrigin,
       approvalCacheKey: input.approvalCacheKey,
       finalInput: input.finalInput,
+      // Issue #664 P1 — sandbox-write attestation participates in cache
+      // identity. A future change to the owning plugin's sandbox root
+      // (e.g. plugin renamed/reinstalled) invalidates stale verdicts.
+      writesToOwnSandbox: input.writesToOwnSandbox,
+      ownerPluginSandboxRoot: input.ownerPluginSandboxRoot,
     };
     // Round-1 code-reviewer MINOR — include sandbox capability in the
     // cache scope so a future change to OS isolation (bubblewrap on
@@ -624,6 +642,12 @@ export class PermissionManager {
         allowedDirectories: input.allowedDirectories,
         sensitivePathsAdjacent: input.sensitivePathsAdjacent,
         sandboxCapability: detectSandboxCapability(),
+        ...(input.writesToOwnSandbox !== undefined
+          ? { writesToOwnSandbox: input.writesToOwnSandbox }
+          : {}),
+        ...(input.ownerPluginSandboxRoot !== undefined
+          ? { ownerPluginSandboxRoot: input.ownerPluginSandboxRoot }
+          : {}),
       };
       // Use the rule-based classifier for fast sync classification (no LLM call).
       // Take max(ruleVerdict, verdictAtApproval) so a stored HIGH approval cannot
@@ -667,6 +691,12 @@ export class PermissionManager {
         allowedDirectories: input.allowedDirectories,
         sensitivePathsAdjacent: input.sensitivePathsAdjacent,
         sandboxCapability: detectSandboxCapability(),
+        ...(input.writesToOwnSandbox !== undefined
+          ? { writesToOwnSandbox: input.writesToOwnSandbox }
+          : {}),
+        ...(input.ownerPluginSandboxRoot !== undefined
+          ? { ownerPluginSandboxRoot: input.ownerPluginSandboxRoot }
+          : {}),
       };
       try {
         // MAJOR-1: pass abortSignal to LlmRiskClassifier.classify so user

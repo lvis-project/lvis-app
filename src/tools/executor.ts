@@ -55,6 +55,7 @@ import type { PermissionAuditEntryInput } from "../audit/audit-schema.js";
 import { maskSensitiveData } from "../audit/dlp-filter.js";
 import type { RiskVerdict } from "../permissions/reviewer/risk-classifier.js";
 import { detectSandboxCapability } from "../permissions/sandbox-capability.js";
+import { lvisHome } from "../shared/lvis-home.js";
 import { BashAstValidator } from "../main/bash-ast-validator.js";
 import {
   findShellPathPolicyViolation,
@@ -572,6 +573,7 @@ export class ToolExecutor {
     sensitivePathsAdjacent: string[],
     context: ToolPermissionContext,
     evaluationContext: PermissionEvaluationContext,
+    sandboxAttestation: { writesToOwnSandbox?: boolean; ownerPluginSandboxRoot?: string },
     abortSignal?: AbortSignal,
   ): Promise<
     | { allowed: true; permissionResult: PermissionCheckResult }
@@ -627,6 +629,12 @@ export class ToolExecutor {
         trustOrigin: context.trustOrigin,
         evaluationContext,
         ...(context.approvalCacheKey ? { approvalCacheKey: context.approvalCacheKey } : {}),
+        ...(sandboxAttestation.writesToOwnSandbox !== undefined
+          ? { writesToOwnSandbox: sandboxAttestation.writesToOwnSandbox }
+          : {}),
+        ...(sandboxAttestation.ownerPluginSandboxRoot !== undefined
+          ? { ownerPluginSandboxRoot: sandboxAttestation.ownerPluginSandboxRoot }
+          : {}),
       },
       {
         allowedPluginIds: context.allowedPluginIds
@@ -675,6 +683,7 @@ export class ToolExecutor {
     sensitivePathsAdjacent: string[],
     context: ToolPermissionContext,
     evaluationContext: PermissionEvaluationContext,
+    sandboxAttestation: { writesToOwnSandbox?: boolean; ownerPluginSandboxRoot?: string },
     abortSignal?: AbortSignal,
   ): Promise<PermissionCheckResult | null> {
     if (context.headless === true) return null;
@@ -711,6 +720,12 @@ export class ToolExecutor {
         trustOrigin: context.trustOrigin,
         evaluationContext,
         ...(context.approvalCacheKey ? { approvalCacheKey: context.approvalCacheKey } : {}),
+        ...(sandboxAttestation.writesToOwnSandbox !== undefined
+          ? { writesToOwnSandbox: sandboxAttestation.writesToOwnSandbox }
+          : {}),
+        ...(sandboxAttestation.ownerPluginSandboxRoot !== undefined
+          ? { ownerPluginSandboxRoot: sandboxAttestation.ownerPluginSandboxRoot }
+          : {}),
       },
       {
         allowedPluginIds: context.allowedPluginIds
@@ -1292,6 +1307,16 @@ export class ToolExecutor {
           sensitivePathPattern ? [sensitivePathPattern] : [],
           invocationPermissionContext,
           evaluationContext,
+          // Issue #664 P1 — manifest-declared sandbox-write self-attestation
+          // populated from the Tool descriptor. `ownerPluginSandboxRoot` is
+          // computed only when the tool is plugin-owned; builtin / MCP tools
+          // have no sandbox root and the auto-LOW rule will not engage.
+          {
+            writesToOwnSandbox: tool.writesToOwnSandbox,
+            ownerPluginSandboxRoot: tool.pluginId
+              ? pathResolve(lvisHome(), "plugins", tool.pluginId)
+              : undefined,
+          },
           abortSignal,
         );
         if (reviewerResult) {
@@ -1336,6 +1361,14 @@ export class ToolExecutor {
             sensitivePathPattern ? [sensitivePathPattern] : [],
             invocationPermissionContext,
             evaluationContext,
+            // Issue #664 P1 — sandbox-write attestation (see interactive
+            // call site for rationale).
+            {
+              writesToOwnSandbox: tool.writesToOwnSandbox,
+              ownerPluginSandboxRoot: tool.pluginId
+                ? pathResolve(lvisHome(), "plugins", tool.pluginId)
+                : undefined,
+            },
             abortSignal,
           );
           if (reviewerResult.allowed) {

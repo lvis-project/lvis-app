@@ -67,9 +67,14 @@ const REVIEWER_MODE_OPTIONS: Array<{
   label: string;
   description: string;
 }> = [
-  { value: "disabled", label: "명시 승인만", description: "백그라운드 자동 검사를 끕니다. 도구 실행 전 항상 확인 창이 표시됩니다." },
+  // 4-mode enum (post issue #664 normalization). `disabled` is now a true
+  // pass-through (no reviewer lane); `strict` is the new fail-closed mode
+  // equivalent to the pre-#664 "disabled" semantic. See
+  // docs/architecture/permission-policy-design.md §3 Layer 5.
+  { value: "disabled", label: "검토 끔 (자동 통과)", description: "리뷰어 레인을 끄고 카테고리 기본 정책만 적용합니다. 도구별 차단/허용 규칙은 그대로 유지됩니다." },
   { value: "rule", label: "규칙 기반 검증", description: "로컬 규칙으로 저위험 작업만 통과시키고 고위험은 대기시킵니다." },
   { value: "llm", label: "LLM 검증", description: "규칙 검증 뒤 LLM이 위험도를 올릴 수 있습니다. 낮출 수는 없습니다." },
+  { value: "strict", label: "엄격 (모두 보류)", description: "헤드리스 변경을 모두 보류 대기열로 보냅니다. 사용자가 직접 승인해야 실행됩니다." },
 ];
 
 /** All five providers — always visible so users know what's available. */
