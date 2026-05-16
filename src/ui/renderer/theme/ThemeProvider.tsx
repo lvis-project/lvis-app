@@ -7,7 +7,7 @@ import { applyBundleToDocument, resolveSystemPair } from "./resolve-theme.js";
 import { bundleToPluginTokens } from "./plugin-token-map.js";
 export { bundleToPluginTokens };
 import type { ThemeContextValue, BundleId, ResolvedShell } from "./types.js";
-import { LGE_PAIR_IDS } from "./types.js";
+import { VIOLET_PAIR_IDS } from "./types.js";
 import type { InitialThemePrime } from "../../../shared/initial-theme.js";
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
@@ -72,7 +72,7 @@ export interface ThemeProviderProps {
  * from `api.getSettings().appearance.bundleId`. On change, writes
  * `data-theme-bundle` on `<html>` and persists via `api.updateSettings`.
  *
- * For the LGE pair (lge-light / lge-dark), `followSystem` auto-switches the
+ * For the violet pair (violet-light / violet-dark), `followSystem` auto-switches the
  * active bundle based on `prefers-color-scheme`.
  */
 export function ThemeProvider({
@@ -162,10 +162,10 @@ export function ThemeProvider({
   const [osTick, setOsTick] = useState(0);
 
   // Derive the effective bundle — when followSystem is active and the bundleId
-  // is part of the LGE pair, override with the OS-resolved variant.
+  // is part of the violet pair, override with the OS-resolved variant.
   // osTick is included so any OS scheme change triggers a re-evaluation.
   const effectiveBundleId: BundleId = useMemo(() => {
-    if (followSystem && LGE_PAIR_IDS.includes(bundleId)) {
+    if (followSystem && VIOLET_PAIR_IDS.includes(bundleId)) {
       return resolveSystemPair();
     }
     return bundleId;
@@ -202,10 +202,10 @@ export function ThemeProvider({
     });
   }, [api, activeBundle]);
 
-  // Live-follow OS preference when followSystem is active for LGE pair.
+  // Live-follow OS preference when followSystem is active for violet pair.
   // A tick counter forces effectiveBundleId to re-evaluate on OS scheme change.
   useEffect(() => {
-    if (!followSystem || !LGE_PAIR_IDS.includes(bundleId)) return;
+    if (!followSystem || !VIOLET_PAIR_IDS.includes(bundleId)) return;
     if (typeof window === "undefined" || !window.matchMedia) return;
     const mql = window.matchMedia("(prefers-color-scheme: light)");
     const onChange = () => setOsTick((n) => n + 1);
@@ -237,13 +237,13 @@ export function ThemeProvider({
       userTouchedRef.current = true;
       const safeId = findBundle(id) ? id : DEFAULT_BUNDLE_ID;
       setBundleIdState(safeId);
-      /* When the user explicitly picks one of the LGE pair while followSystem
+      /* When the user explicitly picks one of the violet pair while followSystem
        * is on, the pick would otherwise be silently overridden by the OS
        * preference resolution (resolveSystemPair). Treat the explicit pick as
        * "I want this exact bundle" and turn followSystem off so the click is
        * honored. Re-enabling the toggle continues to work normally. */
-      const isLgePairPick = LGE_PAIR_IDS.includes(safeId);
-      if (isLgePairPick && followSystem) {
+      const isVioletPairPick = VIOLET_PAIR_IDS.includes(safeId);
+      if (isVioletPairPick && followSystem) {
         setFollowSystemState(false);
         persistAppearance({ bundleId: safeId, followSystem: false });
       } else {

@@ -54,7 +54,7 @@ This research documents the integration points where sandbox capability will plu
 | **Egress Block (D1)** | Sandbox MUST 100% block external network egress from sandboxed tool process | `verified-kernel` = independent reproducible test of kernel guarantee; `policy-best-effort` = vendor docs claim + bypass paths documented; `unverified` = claims without proof; `EVIDENCE-MISSING` = no available evidence |
 | **Performance Overhead ≤ 30%** | Tool invocation latency overhead measured; tool runtime overhead ≤ 30% vs unsandboxed | `measured` = cited benchmark; `estimated-low` = vendor claims <5%; `estimated-high` = vendor claims 10–25%; `EVIDENCE-MISSING` = no measurement available |
 | **License-Free** | Sandbox tool must not require commercial license or proprietary agreement | `GPL/MIT/Apache/free` = clear open license; `proprietary` = requires paid license or closed-source EULA; `dual-license` = mixed (requires analysis) |
-| **Windows Deployable** | Sandbox mechanism must ship in LVIS (Electron bundle or pre-installed) without per-invocation admin elevation | `native` = OS primitive, no external install; `one-time-install` = admin elevation once at boot, automatable via signed installer (acceptable per LGE corp MSI precedent); `per-invocation-admin` = repeating elevation (rejected); `unavailable-windows` = no Windows version |
+| **Windows Deployable** | Sandbox mechanism must ship in LVIS (Electron bundle or pre-installed) without per-invocation admin elevation | `native` = OS primitive, no external install; `one-time-install` = admin elevation once at boot, automatable via signed installer (acceptable per enterprise MSI precedent); `per-invocation-admin` = repeating elevation (rejected); `unavailable-windows` = no Windows version |
 
 ---
 
@@ -348,7 +348,7 @@ With D8 DECIDED (OS-only), no bundled installers or MSI auto-installs. LVIS hand
 
 ### Previously Considered: Lima / WSL2 MSI Installer (Rejected)
 
-The original §8 described automatic Lima (macOS) and WSL2 (Windows) installation via LGE MSI installer. This approach was rejected in D2 (Lima 폐기) and D3 (WSL2 폐기). See §9 for full rationale.
+The original §8 described automatic Lima (macOS) and WSL2 (Windows) installation via a signed installer. This approach was rejected in D2 (Lima 폐기) and D3 (WSL2 폐기). See §9 for full rationale.
 
 ---
 
@@ -369,12 +369,12 @@ Use Lima/WSL2/bwrap everywhere: all OSes route through a Linux container runtime
 
 **Lima** (macOS fallback — rejected in D2):
 - Was: one-time ~500 MB VM image download; 10–15% per-tool overhead; MIT license
-- Was: shipped via signed LGE MSI installer, first-boot auto-run
+- Was: shipped via signed installer, first-boot auto-run
 - **Rejection rationale (D2)**: sandbox-exec PARTIAL accepted as sufficient for macOS. Lima adds ~500 MB bundle size, complex boot flow, and deployment pipeline complexity. PARTIAL isolation with user-visible warning is the correct trade-off. Lima bundling conflicts with D8 (OS-only deployment).
 
 **WSL2** (Windows fallback — rejected in D3):
 - Was: one-time ~3 GB distro download; 10–20% per-tool overhead; free Windows feature
-- Was: shipped via signed LGE MSI installer, first-boot WSL2 init
+- Was: shipped via signed installer, first-boot WSL2 init
 - **Rejection rationale (D3)**: AppContainer-only for Windows. If AppContainer compat test fails, result is isolation=none — not WSL2. Adding WSL2 as fallback doubles the Windows deployment surface and conflicts with D8 (OS-only). No MSI auto-installer.
 
 ### Option C — Network-Only Isolation (Rejected)
@@ -394,15 +394,15 @@ Use only `unshare --net` (Linux), Network Extension filter (macOS), WFP (Windows
 
 ### Failure Scenario 1 — Linux bwrap Unavailable on Target
 
-**Risk**: Deployment target (LGE corp Linux, RHEL 8/9 derivative) doesn't have `dnf list bubblewrap` or `bwrap` binary is too old (v0.4 lacks certain flags).
+**Risk**: Deployment target (Linux, RHEL 8/9 derivative) doesn't have `dnf list bubblewrap` or `bwrap` binary is too old (v0.4 lacks certain flags).
 
-**Evidence Quality**: unverified (no LGE corp Linux audit yet).
+**Evidence Quality**: unverified (no Linux corp audit yet).
 
 **Mitigation** (updated for D1/D8 OS-only decision):
 - Step 2 (external research phase) explicitly validates bwrap availability on RHEL 8/9
 - Pre-deployment gate: automated bwrap version check in CI
 - If unavailable: **no bundled fallback** — LVIS operates at isolation=none, reviewer no-downgrade active, user instructed to install bubblewrap via OS package manager
-- LGE corp IT team must confirm `bubblewrap` package availability on target distros before launch
+- Deployment team must confirm `bubblewrap` package availability on target distros before launch
 
 **Early Warning Signal**: If D1 research shows `dnf bwrap` absent on RHEL 8, escalate to infrastructure team. Mitigation is IT-side package install, not LVIS bundling.
 
@@ -466,7 +466,7 @@ Rejected options (for record):
 - bwrap bundled binary: conflicts with D8 OS-only decision
 - bwrap + bundled fallback: conflicts with D8 OS-only decision + "No Fallback Code" rule
 
-**Owner**: Infrastructure + Security team (validate bwrap package availability on LGE corp RHEL distros)
+**Owner**: Infrastructure + Security team (validate bwrap package availability on target RHEL distros)
 
 ---
 
@@ -554,7 +554,7 @@ Selected option: all sandbox mechanisms sourced from OS. No bundled binaries. No
 
 Rationale: bundling creates binary audit burden, platform-specific build pipeline, and update channel management. Hybrid conflicts with "No Fallback Code" rule without explicit removal date. OS-only is the clean path.
 
-**Owner**: Build team (remove any bundled sandbox binary references from build pipeline) + Deployment team (OS package validation per LGE corp Linux distro)
+**Owner**: Build team (remove any bundled sandbox binary references from build pipeline) + Deployment team (OS package validation per target Linux distro)
 
 ---
 

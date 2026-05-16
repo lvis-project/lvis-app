@@ -1,6 +1,6 @@
 # 로컬 마켓플레이스로 플러그인 테스트하기 (권장 dev 루프)
 
-> **대상**: 사내 prod 마켓플레이스에 올리기 전 전체 마켓플레이스 흐름(서버 부트스트랩 → 카탈로그 노출 → 앱 install)을 로컬에서 검증하고 싶은 플러그인 개발자.
+> **대상**: enterprise prod 마켓플레이스에 올리기 전 전체 마켓플레이스 흐름(서버 부트스트랩 → 카탈로그 노출 → 앱 install)을 로컬에서 검증하고 싶은 플러그인 개발자.
 >
 > **이 문서가 다루는 범위**: 로컬 `lvis-marketplace` 서버 띄우기 → 플러그인 git 레포에서 빌드/버전 bump → 서버가 자동으로 카탈로그에 등록 → `lvis-app` 에서 install. 마켓플레이스 우회 시나리오는 [`local-plugin-development.md`](./local-plugin-development.md). prod 카탈로그 publish 절차는 [`marketplace-publishing.md`](./marketplace-publishing.md).
 >
@@ -69,12 +69,12 @@ LVIS 마켓플레이스는 **git-based publish** (Go 모듈 프록시 스타일)
 | `meeting` | `lvis-plugin-meeting` | user (명시) | |
 | `local-indexer` | `lvis-plugin-local-indexer` | admin (fallback) | `install_policy`/`deployment` 키 생략 → fallback 룰로 admin |
 | `ms-graph` | `lvis-plugin-ms-graph` | user (명시) | 구 email + calendar 플러그인 합본 |
-| `lge-api` | `lvis-plugin-lge-api` | admin (fallback) | 위 local-indexer 와 동일 |
+
 | `work-assistant` | `lvis-plugin-work-assistant` | user (명시) | |
 | `agent-hub` | `lvis-plugin-agent-hub` | user (명시) | |
 | `hello-world` (합성) | (코드 안에 dummy zip) | free | 부팅 시 자동 publish — install-flow 테스트용 |
 
-> ⚠️ **fallback 룰 주의**: `MANAGED_SOURCES` 항목에서 `install_policy` / `deployment` 를 둘 다 생략하면 `admin`/`managed` 로 간주됩니다 (`bootstrap.py:651-655`). 새 user-policy 플러그인은 반드시 둘 다 명시(`install_policy="user", deployment="user"`)하세요. local-indexer/lge-api 가 admin 인 것은 두 필드를 모두 생략한 결과지 의도된 admin 정책이라는 보장은 코드 차원입니다.
+> ⚠️ **fallback 룰 주의**: `MANAGED_SOURCES` 항목에서 `install_policy` / `deployment` 를 둘 다 생략하면 `admin`/`managed` 로 간주됩니다 (`bootstrap.py:651-655`). 새 user-policy 플러그인은 반드시 둘 다 명시(`install_policy="user", deployment="user"`)하세요. local-indexer 가 admin 인 것은 두 필드를 모두 생략한 결과지 의도된 admin 정책이라는 보장은 코드 차원입니다.
 
 이 6개 중 하나를 수정하고 있다면 §3 의 dev 루프로 바로 진입. 새 플러그인은 §6 참고.
 
@@ -98,7 +98,7 @@ lvis-project/
 ├── lvis-plugin-local-indexer/
 ├── lvis-plugin-email/
 ├── lvis-plugin-calendar/
-├── lvis-plugin-lge-api/
+├── 
 ├── lvis-plugin-work-assistant/
 └── lvis-plugin-agent-hub/
 ```
@@ -139,7 +139,6 @@ docker compose up
 
 ```
 bootstrap: meeting@1.0.0 unchanged — preserving existing artifact
-bootstrap: lge-api@0.1.1 published (123456 bytes, abcdef012345…)
 bootstrap: repo missing, skipped: /path/to/lvis-plugin-local-indexer
 ```
 
@@ -369,7 +368,7 @@ MANAGED_SOURCES: list[dict[str, Any]] = [
 ]
 ```
 
-서버 재시작 → 부트스트랩 → 카탈로그 노출. 사내 prod 배포 시에는 `lvis-marketplace` 에 PR 로 등록.
+서버 재시작 → 부트스트랩 → 카탈로그 노출. enterprise prod 배포 시에는 `lvis-marketplace` 에 PR 로 등록.
 
 ### 6-B. `lvis-publish` CLI 로 ad-hoc upload (보조 경로)
 
@@ -427,7 +426,7 @@ uv run alembic upgrade head        # 빈 DB 재생성
 
 | 항목 | dev (이 가이드) | prod ([marketplace-publishing.md](./marketplace-publishing.md)) |
 |------|------|------|
-| 마켓플레이스 URL | `http://127.0.0.1:8000` | 사내 prod URL (env 로 주입) |
+| 마켓플레이스 URL | `http://127.0.0.1:8000` | enterprise prod URL (env 로 주입) |
 | 서버 서명 키 | `poc-v1` (현 단일 정규 키) | prod 키 회전 시 서버 env 와 앱 호스트의 `marketplace-keys.ts` 를 함께 갱신 |
 | `LVIS_MARKETPLACE_LOAD_DOTENV` | `1` 필수 | **금지** — 운영 환경은 secret manager 또는 정식 env 주입 |
 | publish 채널 | git-based 부트스트랩 (managed) + CLI ad-hoc | 동일 (managed 는 `lvis-marketplace` PR + 서버 재배포, ad-hoc 은 CLI publish + admin approve) |

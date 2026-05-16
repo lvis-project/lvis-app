@@ -177,7 +177,7 @@ describe("plugin-preload bridge", () => {
   it("getTheme invokes lvis:plugin:get-theme and unwraps the cached payload", async () => {
     const bridge = exposed.get("lvisPlugin") as { getTheme: () => Promise<unknown> };
     const payload = {
-      bundleId: "lge-dark",
+      bundleId: "violet-dark",
       shell: "dark",
       tokens: { "--lvis-bg": "hsl(0,0%,100%)", "--lvis-fg": "hsl(222,47%,11%)" },
     };

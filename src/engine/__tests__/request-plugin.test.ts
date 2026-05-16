@@ -51,12 +51,12 @@ function makeLoop(opts: {
     },
     execute: async () => ({ output: "unreachable", isError: false }),
   }));
-  // a plugin tool gated by com.lge.meeting scope
+  // a plugin tool gated by com.example.meeting scope
   toolRegistry.register(createDynamicTool({
     name: "meeting_start",
     description: "회의 시작",
     source: "plugin",
-    pluginId: "com.lge.meeting",
+    pluginId: "com.example.meeting",
     jsonSchema: { type: "object", properties: {} },
     execute: async () => ({ output: "started", isError: false }),
   }));
@@ -95,7 +95,7 @@ describe("ConversationLoop — request_plugin meta tool (Option C)", () => {
     const provider = new RecordingProvider([
       // Round 0: LLM asks to activate meeting plugin.
       [
-        { type: "tool_call", id: "tu-1", name: "request_plugin", input: { pluginId: "com.lge.meeting" } },
+        { type: "tool_call", id: "tu-1", name: "request_plugin", input: { pluginId: "com.example.meeting" } },
         { type: "message_complete", stopReason: "tool_use" },
       ],
       // Round 1: LLM now calls meeting_start (should be available).
@@ -109,7 +109,7 @@ describe("ConversationLoop — request_plugin meta tool (Option C)", () => {
         { type: "message_complete", stopReason: "end_turn" },
       ],
     ]);
-    const loop = makeLoop({ provider, availablePluginIds: ["com.lge.meeting"] });
+    const loop = makeLoop({ provider, availablePluginIds: ["com.example.meeting"] });
     const result = await loop.runTurn("일반 질문", undefined, undefined, { inputOrigin: "user-keyboard" });
     expect(result.text).toBe("회의를 시작했습니다.");
     // Round 0 should NOT have meeting_start available.
@@ -129,7 +129,7 @@ describe("ConversationLoop — request_plugin meta tool (Option C)", () => {
         { type: "message_complete", stopReason: "end_turn" },
       ],
     ]);
-    const loop = makeLoop({ provider, availablePluginIds: ["com.lge.meeting"] });
+    const loop = makeLoop({ provider, availablePluginIds: ["com.example.meeting"] });
     const result = await loop.runTurn("아무거나", undefined, undefined, { inputOrigin: "user-keyboard" });
     expect(result.text).toBe("미등록 플러그인입니다.");
     const messages = loop.getHistory().getMessages();
@@ -172,7 +172,7 @@ describe("ConversationLoop — request_plugin meta tool (Option C)", () => {
   it("rejects request_plugin outside the loop allowedPluginIds scope", async () => {
     const provider = new RecordingProvider([
       [
-        { type: "tool_call", id: "tu-1", name: "request_plugin", input: { pluginId: "com.lge.meeting" } },
+        { type: "tool_call", id: "tu-1", name: "request_plugin", input: { pluginId: "com.example.meeting" } },
         { type: "message_complete", stopReason: "tool_use" },
       ],
       [
@@ -182,7 +182,7 @@ describe("ConversationLoop — request_plugin meta tool (Option C)", () => {
     ]);
     const loop = makeLoop({
       provider,
-      availablePluginIds: ["com.lge.meeting"],
+      availablePluginIds: ["com.example.meeting"],
       allowedPluginIds: [],
     });
 
@@ -204,9 +204,9 @@ describe("ConversationLoop — request_plugin meta tool (Option C)", () => {
     ]);
     const loop = makeLoop({
       provider,
-      availablePluginIds: ["com.lge.meeting"],
+      availablePluginIds: ["com.example.meeting"],
       allowedPluginIds: [],
-      forcedActivePluginIds: ["com.lge.meeting"],
+      forcedActivePluginIds: ["com.example.meeting"],
     });
 
     await loop.runTurn("일반 질문", undefined, undefined, { inputOrigin: "user-keyboard" });

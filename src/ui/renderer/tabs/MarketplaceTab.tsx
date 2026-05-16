@@ -153,7 +153,7 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
           </Button>
         </div>
         <p className="text-[11px] text-muted-foreground">
-          lvis-marketplace REST API 엔드포인트. 사내 배포 시 사내 호스트로 변경하세요. 비워두면 마켓플레이스 기능이 비활성화됩니다.
+          lvis-marketplace REST API 엔드포인트. 자체 배포 시 내부 호스트로 변경하세요. 비워두면 마켓플레이스 기능이 비활성화됩니다.
         </p>
       </div>
 
@@ -209,7 +209,7 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
             </span>
           </p>
           <p className="text-[11px] text-muted-foreground">
-            로컬 또는 사내 마켓플레이스 서버에 접속할 때 활성화합니다. SSRF 가드를 우회하므로 외부 호스트(prod) 환경에서는 끄세요.
+            로컬 또는 내부 마켓플레이스 서버에 접속할 때 활성화합니다. SSRF 가드를 우회하므로 외부 호스트(prod) 환경에서는 끄세요.
           </p>
         </div>
       </div>

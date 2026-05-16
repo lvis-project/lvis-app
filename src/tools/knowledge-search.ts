@@ -108,7 +108,7 @@ export function createKnowledgeSearchTools(
   const knowledgeSearchTool = createDynamicTool({
     name: "knowledge_search",
     description:
-      "사용자 질문과 관련된 사내 문서 chunk를 검색합니다. BM25 + 벡터 hybrid retrieval (RRF k=60) 기반으로 최대 10개 결과를 반환합니다. 결과의 chunk_id, doc_id, page, snippet을 활용하여 추가 상세가 필요하면 document_structure와 document_page_content를 호출하세요. 가장 먼저 호출해야 하는 1차 검색 도구입니다.",
+      "사용자 질문과 관련된 문서 chunk를 검색합니다. BM25 + 벡터 hybrid retrieval (RRF k=60) 기반으로 최대 10개 결과를 반환합니다. 결과의 chunk_id, doc_id, page, snippet을 활용하여 추가 상세가 필요하면 document_structure와 document_page_content를 호출하세요. 가장 먼저 호출해야 하는 1차 검색 도구입니다.",
     source: "builtin",
     category: "read",
     isReadOnly: () => true,

@@ -23,23 +23,23 @@ export function applyBundleToDocument(bundle: ThemeBundle, doc: Document = docum
 }
 
 /**
- * For the LGE pair (lge-light / lge-dark): resolve which bundle to use based
- * on `prefers-color-scheme`. Returns "lge-light" for a light OS scheme, "lge-dark"
+ * For the violet pair (violet-light / violet-dark): resolve which bundle to use based
+ * on `prefers-color-scheme`. Returns "violet-light" for a light OS scheme, "violet-dark"
  * otherwise.
  *
  * Only called when `followSystem` is true and the current bundleId is one of
- * the LGE pair.
+ * the violet pair.
  */
 export function resolveSystemPair(
   win: Pick<Window, "matchMedia"> | undefined = typeof window !== "undefined" ? window : undefined,
-): "lge-light" | "lge-dark" {
+): "violet-light" | "violet-dark" {
   try {
     const mql = win?.matchMedia?.("(prefers-color-scheme: light)");
-    if (mql?.matches) return "lge-light";
+    if (mql?.matches) return "violet-light";
   } catch {
     /* matchMedia unavailable */
   }
-  return "lge-dark";
+  return "violet-dark";
 }
 
 /**

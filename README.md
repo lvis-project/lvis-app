@@ -6,7 +6,7 @@ LVIS 데스크톱 호스트 앱입니다. Electron main/renderer/preload, 플러
 - Plugin Runtime + Manifest 기반 동적 로딩
 - `~/.lvis/plugins/registry.json` 기반 manifestPath 동적 로딩
 - `@lvis/plugin-local-indexer`, `@lvis/plugin-meeting`, `@lvis/plugin-ms-graph`,
-  `@lvis/plugin-lge-api`, `@lvis/plugin-work-proactive`, `@lvis/plugin-agent-hub`
+  `@lvis/plugin-work-proactive`, `@lvis/plugin-agent-hub`
   마켓플레이스 install 또는 `lvis-cli install file://<path-to-dist.zip>` 으로 사이드로드
 - 앱 시작 시 Local Indexer 워커 + 자동 인덱서 구동
 - 실제 채팅 UI(렌더러) + preload IPC 브리지
@@ -187,15 +187,17 @@ macOS installer와 macOS 개발 환경은 Apple Silicon만 지원합니다. Inte
 
 `lvis://` deep link protocol과 Python bootstrap용 `uv` binary가 packaged app resource로 포함됩니다. 개발 환경의 `postinstall`은 현재 지원 플랫폼의 `resources/uv/<platform>-<arch>/uv`만 준비하고, installer 빌드는 패키징 직전에 해당 target binary만 `resources/uv-runtime/`에 staging한 뒤 포함합니다.
 
-## Windows (사내망) 실행 가이드
+## Windows 실행 가이드
 
-Windows corp PC(사내망, Hyper-V/VDI, EDR/AV 샌드박스 환경)에서의 first-run 경험을 단순화하기 위해 `scripts/run-electron.mjs` 가 다음을 자동 처리합니다.
+Windows에서의 first-run 경험을 단순화하기 위해 `scripts/run-electron.mjs` 가 다음을 자동 처리합니다.
 
-- **GPU 문제 우회** — Electron GPU 프로세스가 `error_code=18` 또는 "GPU process isn't usable. Goodbye!" 로 크래시하는 것을 막기 위해 `--disable-gpu`, `--disable-software-rasterizer`, `--disable-gpu-compositing`, `--no-sandbox` 플래그를 자동 추가합니다. GPU 정상 환경(패스스루 VM / CI)에서는 `LVIS_KEEP_GPU=1` 로 opt-out 하고, 추가 플래그가 필요하면 `LVIS_EXTRA_ELECTRON_FLAGS="--foo --bar"` 로 append 가능.
+- **GPU 문제 우회** — Electron GPU 프로세스가 `error_code=18` 또는 "GPU process isn't usable. Goodbye!" 로 크래시하는 것을 막기 위해 `--disable-gpu`, `--disable-software-rasterizer`, `--disable-gpu-compositing`, `--no-sandbox` 플래그를 자동 추가합니다. GPU 정상 환경(VM 패스스루 / CI)에서는 `LVIS_KEEP_GPU=1` 로 opt-out 하고, 추가 플래그가 필요하면 `LVIS_EXTRA_ELECTRON_FLAGS="--foo --bar"` 로 append 가능.
 - **플러그인 경로 허용** — dev runner는 `LVIS_DEV=1` 을 세팅해 로컬 개발 entry 경로를 허용합니다. 마켓플레이스 artifact 검증과 install receipt 무결성 검사는 dev env flag로 우회하지 않습니다.
 - **콘솔 UTF-8 정렬** — Windows 콘솔을 `chcp 65001` 로 UTF-8 로 전환하고 `PYTHONIOENCODING=utf-8`, `PYTHONUTF8=1`, `LANG/LC_ALL=en_US.UTF-8` 환경변수를 기본 주입합니다. cp949 로 인한 한글/이모지 깨짐이 사라집니다.
 
-### 권장 설치 절차 (사내망)
+> **Node.js 필수:** `scripts/run-electron.mjs` 는 시스템 `node` CLI를 직접 호출합니다. Node.js v18 이상이 설치되어 있어야 합니다.
+
+### 권장 설치 절차
 
 ```bash
 # 1) clone
@@ -224,7 +226,7 @@ bun run start
 
 전체 Windows 설치/실행 가이드는 [`docs/guides/windows-setup.md`](./docs/guides/windows-setup.md) 참고.
 
-### 사내망 환경변수 요약
+### 환경변수 요약
 
 | 변수 | 기본값 | 목적 |
 |------|--------|------|
@@ -232,8 +234,8 @@ bun run start
 | `LVIS_KEEP_GPU` | 미설정 | `1` 이면 Windows GPU safe-flag 주입 skip |
 | `LVIS_EXTRA_ELECTRON_FLAGS` | 미설정 | 기본 flag 유지한 채 추가 Electron flag append (`"--foo --bar"`) |
 | `LVIS_DEBUG` | 미설정 | `1` 이면 `run-electron.mjs` 가 적용한 args/env 출력 |
-| `LVIS_SKIP_CORP_CA` | 미설정 | `1` 이면 macOS 키체인 CA 추출도 skip (해외망/비-LG 네트워크) |
-| `LVIS_CORP_CA_DEBUG` | 미설정 | `1` 이면 Windows/Linux CA 추출 Phase 3 pending 로그 표시 |
+| `LVIS_SKIP_CORP_CA` | 미설정 | `1` 이면 CA 자동 주입 skip |
+| `LVIS_CORP_CA_DEBUG` | 미설정 | `1` 이면 CA 추출 디버그 로그 표시 |
 | `PYTHONIOENCODING` | `utf-8` | Python subprocess 출력 UTF-8 고정 |
 
 ## 테스트

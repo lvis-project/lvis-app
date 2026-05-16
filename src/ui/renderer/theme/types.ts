@@ -9,8 +9,8 @@
  *   - `bundleId`         — the active bundle id (e.g. "tokyo-night")
  *   - `setBundle`        — live-set the bundle + persist
  *   - `resolved`         — derived shell ("light" | "dark") from the active bundle (`ResolvedShell`)
- *   - `followSystem`     — LGE pair only: auto-switch based on prefers-color-scheme
- *   - `setFollowSystem`  — toggle followSystem (only meaningful for LGE pair)
+ *   - `followSystem`     — violet pair only: auto-switch based on prefers-color-scheme
+ *   - `setFollowSystem`  — toggle followSystem (only meaningful for violet pair)
  *
  * Legacy type aliases (ThemePreference, ChatThemePreference, etc.) live in
  * `settings-store.ts` for the migration path only and are marked @internal.
@@ -28,15 +28,15 @@ export type ResolvedShell = "light" | "dark";
 
 export interface ThemeContextValue {
   /**
-   * The user-configured bundle id (e.g. "lge-light" or "lge-dark").
+   * The user-configured bundle id (e.g. "violet-light" or "violet-dark").
    * When `followSystem` is active this may differ from `effectiveBundleId`.
    */
   bundleId: BundleId;
   /**
    * The bundle id actually applied to the DOM after resolving `followSystem`.
    * When `followSystem` is false this equals `bundleId`.
-   * When `followSystem` is true and bundleId is an LGE pair id, this reflects
-   * the OS-resolved variant ("lge-light" or "lge-dark").
+   * When `followSystem` is true and bundleId is a violet pair id, this reflects
+   * the OS-resolved variant ("violet-light" or "violet-dark").
    */
   effectiveBundleId: BundleId;
   /**
@@ -49,11 +49,11 @@ export interface ThemeContextValue {
    * Kept for backward compatibility (CustomTitleBar uses `optionalTheme.resolved`).
    */
   resolved: ResolvedShell;
-  /** When true (LGE pair only): auto-switch lge-light/lge-dark on OS scheme change. */
+  /** When true (violet pair only): auto-switch violet-light/violet-dark on OS scheme change. */
   followSystem: boolean;
-  /** Toggle followSystem persistence. Only meaningful when bundleId is "lge-light" or "lge-dark". */
+  /** Toggle followSystem persistence. Only meaningful when bundleId is "violet-light" or "violet-dark". */
   setFollowSystem: (next: boolean) => void;
 }
 
-/** LGE pair bundle ids that support followSystem. */
-export const LGE_PAIR_IDS: readonly string[] = ["lge-light", "lge-dark"];
+/** Violet pair bundle ids that support followSystem. */
+export const VIOLET_PAIR_IDS: readonly string[] = ["violet-light", "violet-dark"];

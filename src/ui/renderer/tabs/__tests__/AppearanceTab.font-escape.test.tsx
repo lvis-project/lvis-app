@@ -44,7 +44,7 @@ vi.mock("../../theme/index.js", async () => {
       return { bundleId, setBundle: vi.fn(), followSystem: false, setFollowSystem: vi.fn() };
     },
     BUNDLES: actual.BUNDLES ?? [],
-    LGE_PAIR_IDS: actual.LGE_PAIR_IDS ?? [],
+    VIOLET_PAIR_IDS: actual.VIOLET_PAIR_IDS ?? [],
   };
 });
 
