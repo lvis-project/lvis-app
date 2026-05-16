@@ -196,12 +196,12 @@ describe("sandbox-capability — PR-A1 new kind union members", () => {
 // ─── Fixture snapshot: sandbox-eval-verdicts.json ────────────────────────────
 
 describe("sandbox-eval-verdicts fixture", () => {
-  it("fixture file has all 6 expected cases", async () => {
+  it("fixture file has all 8 expected cases (PR-A3: +sandbox-exec +appcontainer)", async () => {
     const fixture = (await import("./__fixtures__/sandbox-eval-verdicts.json", {
       with: { type: "json" },
     })).default as Record<string, { rule: string; llm: string; final: string }>;
 
-    expect(Object.keys(fixture)).toHaveLength(6);
+    expect(Object.keys(fixture)).toHaveLength(8);
     expect(fixture["kind=none + benign tool"]).toEqual({ rule: "low", llm: "low", final: "low" });
     expect(fixture["kind=none + risky tool"]).toEqual({ rule: "medium", llm: "low", final: "medium" });
     expect(fixture["kind=bubblewrap + risky tool"]).toEqual({ rule: "medium", llm: "low", final: "medium" });
