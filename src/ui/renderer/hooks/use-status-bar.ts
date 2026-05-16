@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { LvisApi } from "../types.js";
+import { LONG_TOAST_TTL_MS } from "../constants.js";
 import type { PersistentItem, ToastItem } from "./status-bar/types.js";
 import { useStatusBarNotifications } from "./status-bar/use-status-bar-notifications.js";
 import { useStatusBarInstall } from "./status-bar/use-status-bar-install.js";
@@ -28,17 +29,11 @@ interface UseStatusBarOptions {
   api: LvisApi;
   /**
    * Default toast TTL in milliseconds. Override per-toast at push time.
-   * 5 s is short enough to feel ephemeral and long enough to read a
-   * single Korean sentence.
+   * Defaults to LONG_TOAST_TTL_MS (5 s) — long enough to read a single
+   * Korean sentence, short enough to feel ephemeral.
    */
   defaultToastTtlMs?: number;
 }
-
-/**
- * Toast TTL default — picked so a 4-word Korean phrase (~12 chars) can be
- * read at a comfortable pace, but transient enough not to clutter the bar.
- */
-const DEFAULT_TOAST_TTL_MS = 5000;
 
 /**
  * Hard cap on the toast queue. Prevents an event burst (e.g. 100 install
@@ -49,7 +44,9 @@ const DEFAULT_TOAST_TTL_MS = 5000;
 const TOAST_QUEUE_CAP = 50;
 
 export function useStatusBar(opts: UseStatusBarOptions) {
-  const { api, defaultToastTtlMs = DEFAULT_TOAST_TTL_MS } = opts;
+  // LONG_TOAST_TTL_MS (5 s) gives comfortable reading time for a Korean
+  // phrase; callers that need a shorter or longer window pass defaultToastTtlMs.
+  const { api, defaultToastTtlMs = LONG_TOAST_TTL_MS } = opts;
   const [persistent, setPersistent] = useState<PersistentItem[]>([]);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
 
