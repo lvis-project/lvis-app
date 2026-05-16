@@ -642,7 +642,7 @@ export type ApprovalRequest = {
    */
   sandboxCapability?: {
     kind: "none" | "bubblewrap" | "sandbox-exec" | "appcontainer" | "partial" | "fs-only";
-    confidence: "verified" | "assumed";
+    confidence: "verified" | "assumed" | "policy-best-effort";
     platform: NodeJS.Platform;
     reason: string;
   };
