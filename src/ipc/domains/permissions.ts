@@ -508,10 +508,19 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
       }
     }
     try {
-      // MEDIUM defense-in-depth: canonicalize at IPC handler to catch any
-      // non-renderer callers that bypass the renderer-side canonicalization.
-      let canonicalArgs = args;
-      try { canonicalArgs = canonicalStringify(JSON.parse(args)); } catch { /* args is already a canonical string or non-JSON — use as-is */ }
+      // MEDIUM security-M2: canonicalize at IPC handler to catch any non-renderer
+      // callers that bypass the renderer-side canonicalization. Non-JSON or
+      // non-object args are explicitly rejected (CLAUDE.md No Fallback Code).
+      let canonicalArgs: string;
+      try {
+        const parsed = JSON.parse(args);
+        if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+          return { ok: false, error: "args-not-object", message: "user-approval record: args must be a JSON object" };
+        }
+        canonicalArgs = canonicalStringify(parsed);
+      } catch {
+        return { ok: false, error: "args-not-json", message: "user-approval record: args must be valid JSON" };
+      }
       await recordApproval(toolName, canonicalArgs, source, {
         scope,
         verdictAtApproval,
