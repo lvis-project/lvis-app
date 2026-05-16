@@ -104,6 +104,20 @@ describe("UnifiedSearchPanel", () => {
     fireEvent.click(sessionButton!);
 
     expect(onLoadSession).toHaveBeenCalledWith("sess-1");
-    expect(onClose).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+
+  it("keeps the panel open when loading a selected session fails", async () => {
+    const onLoadSession = vi.fn(async () => false);
+    const onClose = vi.fn();
+    render(<UnifiedSearchPanel {...defaultProps({ onLoadSession, onClose })} />);
+
+    await waitFor(() => expect(screen.getByText("세션 제목")).toBeTruthy());
+    const sessionButton = screen.getByText("세션 제목").closest("button");
+    expect(sessionButton).toBeTruthy();
+    fireEvent.click(sessionButton!);
+
+    await waitFor(() => expect(onLoadSession).toHaveBeenCalledWith("sess-1"));
+    expect(onClose).not.toHaveBeenCalled();
   });
 });

@@ -48,6 +48,11 @@ import { createLogger } from "../lib/logger.js";
 const log = createLogger("lvis");
 
 const INLINE_PASTED_TEXT_RE = /(^|\n)-{5} Pasted text #\d+ \(\d+ lines\) -{5}\n/;
+const SESSION_ID_REGEX = /^[a-zA-Z0-9_\-]+$/;
+
+function isSafeSessionId(sessionId: unknown): sessionId is string {
+  return typeof sessionId === "string" && SESSION_ID_REGEX.test(sessionId);
+}
 const FILE_CONTENT_RESULT_TOOLS = new Set([
   "read_file",
   "grep_files",
@@ -720,6 +725,10 @@ export class ConversationLoop {
 
   /** 기존 세션 복원 — §4.5.7 */
   loadSession(sessionId: string): boolean {
+    if (!isSafeSessionId(sessionId)) {
+      log.warn({ sessionId }, "loadSession rejected unsafe sessionId");
+      return false;
+    }
     const messages = this.deps.memoryManager.loadSession(sessionId);
     if (!messages) return false;
 
