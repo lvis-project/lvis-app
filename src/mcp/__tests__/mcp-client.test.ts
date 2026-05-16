@@ -99,6 +99,7 @@ function httpApproval(
 function stdioApproval(
   id: string,
   command: string,
+  overrides: Partial<McpGovernancePolicy["servers"][number]> = {},
 ): McpGovernancePolicy["servers"][number] {
   return {
     id,
@@ -115,6 +116,7 @@ function stdioApproval(
     maxResponseSizeBytes: 1_000_000,
     connectionTimeoutMs: 5_000,
     maxConcurrentRequests: 4,
+    ...overrides,
   };
 }
 
@@ -464,7 +466,12 @@ describe("HttpTransport — happy path", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const gov = governanceWithPolicy(
-      buildPolicy([httpApproval("browser-use", "https://api.browser-use.com/v3/mcp")]),
+      buildPolicy([
+        httpApproval("browser-use", "https://api.browser-use.com/v3/mcp", {
+          requiredAuth: "api-key",
+          apiKeyHeader: "x-browser-use-api-key",
+        }),
+      ]),
     );
     const client = new McpClient(
       {
@@ -881,7 +888,12 @@ describe("StdioTransport — regression", () => {
     spawnMock.mockReturnValueOnce(fake);
 
     const gov = governanceWithPolicy(
-      buildPolicy([stdioApproval("browser-use", "uvx")]),
+      buildPolicy([
+        stdioApproval("browser-use", "uvx", {
+          requiredAuth: "api-key",
+          apiKeyEnv: "OPENAI_API_KEY",
+        }),
+      ]),
     );
     const client = new McpClient(
       {
@@ -899,8 +911,8 @@ describe("StdioTransport — regression", () => {
 
     await client.connect();
     expect(spawnMock).toHaveBeenCalledWith(
-      "uvx",
-      ["--from", "browser-use[cli]==0.12.6", "browser-use", "--mcp"],
+      expect.stringMatching(/resources\/uv\/[^/]+\/uv(?:\.exe)?$/),
+      ["tool", "run", "--from", "browser-use[cli]==0.12.6", "browser-use", "--mcp"],
       expect.objectContaining({
         env: expect.objectContaining({
           OPENAI_API_KEY: "openai-secret",
@@ -931,7 +943,7 @@ describe("StdioTransport — regression", () => {
         id: "no-env-key",
         transport: "stdio",
         command: "uvx",
-        auth: "api-key",
+        auth: "none",
         apiKey: "secret-should-not-appear",
         // intentionally no apiKeyEnv — apiKey must NOT appear in the spawn env
       } as McpStdioServerConfig,

@@ -143,10 +143,10 @@ export class McpManager {
   }
 
   /** 단일 서버 연결 */
-  async connectServer(config: McpServerConfig): Promise<void> {
+  async connectServer(config: McpServerConfig, opts: { force?: boolean } = {}): Promise<void> {
     // 이미 연결된 서버는 건너뛰기
     const existing = this.clients.get(config.id);
-    if (existing && existing.getState().status === "connected") {
+    if (existing && existing.getState().status === "connected" && !opts.force) {
       log.info(`${config.id}: 이미 연결됨 — 건너뛰기`);
       return;
     }
@@ -384,7 +384,7 @@ export class McpManager {
     }
 
     try {
-      await this.connectServer(updatedConfig);
+      await this.connectServer(updatedConfig, { force: true });
       // MEDIUM-5: audit log on success
       this.auditLogger?.log({
         timestamp: new Date().toISOString(),

@@ -149,7 +149,7 @@ export class McpGovernance {
     if (config.transport === "stdio") {
       const cmdResult = this.validateStdioCommand(config, approval);
       if (!cmdResult.valid) return cmdResult;
-      const apiKeyEnvResult = this.validateApiKeyEnv(config.apiKeyEnv);
+      const apiKeyEnvResult = this.validateApiKeyEnv(config, approval);
       if (!apiKeyEnvResult.valid) return apiKeyEnvResult;
     }
 
@@ -173,7 +173,7 @@ export class McpGovernance {
         //       values with \r or \n is cheap to block here.
         const headersResult = this.validateHeaders(config.headers);
         if (!headersResult.valid) return headersResult;
-        const apiKeyHeaderResult = this.validateApiKeyHeader(config.apiKeyHeader);
+        const apiKeyHeaderResult = this.validateApiKeyHeader(config, approval);
         if (!apiKeyHeaderResult.valid) return apiKeyHeaderResult;
 
         // L1-h: `allowPrivateNetworks` is a per-server escape hatch — it
@@ -428,8 +428,20 @@ export class McpGovernance {
     return { valid: true };
   }
 
-  private validateApiKeyEnv(name: string | undefined): ValidationResult {
-    if (!name) return { valid: true };
+  private validateApiKeyEnv(
+    config: McpServerConfig,
+    approval: McpServerApproval,
+  ): ValidationResult {
+    const name = config.apiKeyEnv;
+    const isApiKeyServer = config.auth === "api-key" || approval.requiredAuth === "api-key";
+    if (!name) {
+      if (!isApiKeyServer) return { valid: true };
+      return {
+        valid: false,
+        reason: `stdio API-key 서버는 승인된 apiKeyEnv가 필요합니다 (서버: ${config.id})`,
+        layer: 1,
+      };
+    }
     if (!ENV_NAME_RE.test(name)) {
       return {
         valid: false,
@@ -451,11 +463,29 @@ export class McpGovernance {
         layer: 1,
       };
     }
+    if (approval.apiKeyEnv !== name) {
+      return {
+        valid: false,
+        reason: `승인되지 않은 apiKeyEnv: '${name}'. 승인값: ${approval.apiKeyEnv ?? "(none)"}`,
+        layer: 1,
+      };
+    }
     return { valid: true };
   }
 
-  private validateApiKeyHeader(name: string | undefined): ValidationResult {
-    if (!name) return { valid: true };
+  private validateApiKeyHeader(
+    config: McpServerConfig,
+    approval: McpServerApproval,
+  ): ValidationResult {
+    const name = config.apiKeyHeader;
+    if (!name) {
+      if (!approval.apiKeyHeader) return { valid: true };
+      return {
+        valid: false,
+        reason: `HTTP API-key 서버는 승인된 apiKeyHeader '${approval.apiKeyHeader}'를 사용해야 합니다`,
+        layer: 1,
+      };
+    }
     if (!HTTP_HEADER_NAME_RE.test(name)) {
       return {
         valid: false,
@@ -474,6 +504,13 @@ export class McpGovernance {
       return {
         valid: false,
         reason: `apiKeyHeader '${name}'은 예약된 HTTP 헤더입니다`,
+        layer: 1,
+      };
+    }
+    if (approval.apiKeyHeader !== name) {
+      return {
+        valid: false,
+        reason: `승인되지 않은 apiKeyHeader: '${name}'. 승인값: ${approval.apiKeyHeader ?? "(none)"}`,
         layer: 1,
       };
     }

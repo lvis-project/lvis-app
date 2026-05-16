@@ -4,7 +4,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { McpGovernance } from "../mcp-governance.js";
-import type { McpGovernancePolicy } from "../types.js";
+import type { McpGovernancePolicy, McpServerApproval } from "../types.js";
 
 const testDir = join(tmpdir(), `lvis-mcp-governance-${process.pid}`);
 const policyPath = join(testDir, "mcp-policy.json");
@@ -42,6 +42,47 @@ function makePolicy(status: "approved" | "revoked"): McpGovernancePolicy {
   };
 }
 
+function governanceWithPolicy(policy: McpGovernancePolicy): McpGovernance {
+  const governance = new McpGovernance("/nonexistent/mcp-policy.json");
+  (governance as unknown as { policy: McpGovernancePolicy }).policy = policy;
+  return governance;
+}
+
+function basePolicy(server: Partial<McpServerApproval>): McpGovernancePolicy {
+  return {
+    version: "1.0-test",
+    defaultPolicy: "deny",
+    servers: [
+      {
+        id: "browser-use",
+        name: "Browser Use",
+        status: "approved",
+        transport: "stdio",
+        allowedCommands: ["uvx"],
+        requiredAuth: "api-key",
+        apiKeyEnv: "OPENAI_API_KEY",
+        tlsRequired: false,
+        allowedCapabilities: ["tools"],
+        maxTools: 16,
+        toolNamePrefix: "browser_use",
+        toolPermissionMode: "default",
+        maxResponseSizeBytes: 1_000_000,
+        connectionTimeoutMs: 5_000,
+        maxConcurrentRequests: 4,
+        ...server,
+      },
+    ],
+    globalRules: {
+      maxServersTotal: 10,
+      blockedUrlPatterns: [],
+      allowedUrlPatterns: [],
+      auditLevel: "full",
+      killSwitchEnabled: true,
+      policyRefreshIntervalMs: 20,
+    },
+  };
+}
+
 afterEach(async () => {
   vi.useRealTimers();
   await rm(testDir, { recursive: true, force: true });
@@ -61,6 +102,7 @@ function makeStdioPolicy(apiKeyEnv?: string): McpGovernancePolicy {
         transport: "stdio",
         allowedCommands: ["uvx"],
         requiredAuth: "api-key",
+        apiKeyEnv: apiKeyEnv ?? "MY_API_KEY",
         tlsRequired: false,
         allowedCapabilities: ["tools"],
         maxTools: 16,
@@ -94,6 +136,7 @@ function makeHttpPolicy(): McpGovernancePolicy {
         transport: "http",
         allowedUrls: ["example.com"],
         requiredAuth: "api-key",
+        apiKeyHeader: "x-api-key",
         tlsRequired: true,
         allowedCapabilities: ["tools"],
         maxTools: 16,
@@ -284,5 +327,103 @@ describe("McpGovernance.startPolicyRefresh", () => {
     expect(onRevoked).toHaveBeenCalledWith(["srv-a"]);
 
     governance.stopPolicyRefresh();
+  });
+});
+
+describe("McpGovernance.validateServer — API key sinks", () => {
+  it("accepts a stdio API key env only when it exactly matches approval", () => {
+    const governance = governanceWithPolicy(basePolicy({}));
+
+    expect(
+      governance.validateServer({
+        id: "browser-use",
+        transport: "stdio",
+        command: "uvx",
+        auth: "api-key",
+        apiKey: "sk-test",
+        apiKeyEnv: "OPENAI_API_KEY",
+      }),
+    ).toEqual({ valid: true });
+  });
+
+  it("rejects unapproved or reserved stdio API key env names", () => {
+    const governance = governanceWithPolicy(basePolicy({}));
+
+    expect(
+      governance.validateServer({
+        id: "browser-use",
+        transport: "stdio",
+        command: "uvx",
+        auth: "api-key",
+        apiKey: "sk-test",
+        apiKeyEnv: "ANTHROPIC_API_KEY",
+      }).valid,
+    ).toBe(false);
+    expect(
+      governance.validateServer({
+        id: "browser-use",
+        transport: "stdio",
+        command: "uvx",
+        auth: "api-key",
+        apiKey: "sk-test",
+        apiKeyEnv: "PATH",
+      }).valid,
+    ).toBe(false);
+  });
+
+  it("accepts a custom HTTP API key header only when it exactly matches approval", () => {
+    const governance = governanceWithPolicy(
+      basePolicy({
+        transport: "http",
+        allowedCommands: undefined,
+        allowedUrls: ["api.browser-use.com"],
+        apiKeyEnv: undefined,
+        apiKeyHeader: "x-browser-use-api-key",
+      }),
+    );
+
+    expect(
+      governance.validateServer({
+        id: "browser-use",
+        transport: "http",
+        url: "https://api.browser-use.com/v3/mcp",
+        auth: "api-key",
+        apiKey: "browser-use-secret",
+        apiKeyHeader: "x-browser-use-api-key",
+      }),
+    ).toEqual({ valid: true });
+  });
+
+  it("rejects unapproved or control HTTP API key header names", () => {
+    const governance = governanceWithPolicy(
+      basePolicy({
+        transport: "http",
+        allowedCommands: undefined,
+        allowedUrls: ["api.browser-use.com"],
+        apiKeyEnv: undefined,
+        apiKeyHeader: "x-browser-use-api-key",
+      }),
+    );
+
+    expect(
+      governance.validateServer({
+        id: "browser-use",
+        transport: "http",
+        url: "https://api.browser-use.com/v3/mcp",
+        auth: "api-key",
+        apiKey: "browser-use-secret",
+        apiKeyHeader: "x-other-api-key",
+      }).valid,
+    ).toBe(false);
+    expect(
+      governance.validateServer({
+        id: "browser-use",
+        transport: "http",
+        url: "https://api.browser-use.com/v3/mcp",
+        auth: "api-key",
+        apiKey: "browser-use-secret",
+        apiKeyHeader: "content-type",
+      }).valid,
+    ).toBe(false);
   });
 });

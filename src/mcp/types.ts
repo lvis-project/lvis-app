@@ -51,6 +51,16 @@ export interface McpServerApproval {
   // ─── Layer 2: 연결 보안 ────────────────────────
   /** 인증 요구 수준 */
   requiredAuth: "sso" | "api-key" | "oauth" | "mtls" | "none";
+  /**
+   * For stdio API-key servers, the exact environment variable name that may
+   * receive the user-supplied key at process launch.
+   */
+  apiKeyEnv?: string;
+  /**
+   * For HTTP API-key servers, the exact custom header name that may receive the
+   * user-supplied key. Omit to allow the built-in Bearer Authorization path.
+   */
+  apiKeyHeader?: string;
   /** TLS 강제 여부 (SSE/WebSocket) */
   tlsRequired: boolean;
 

@@ -46,6 +46,7 @@ import {
   validateHttpUrl,
 } from "../core/network-guard.js";
 import { createLogger } from "../lib/logger.js";
+import { resolveStdioSpawnCommand } from "./uvx-command.js";
 const log = createLogger("mcp-client");
 
 // ─── JSON-RPC 2.0 Types ──────────────────────────────
@@ -618,8 +619,9 @@ class StdioTransport implements McpTransport {
     if (!this.config.command) {
       throw new Error(`[mcp-client] stdio transport에 command가 필요합니다.`);
     }
+    const spawnCommand = resolveStdioSpawnCommand(this.config.command, this.config.args ?? []);
 
-    this.process = spawn(this.config.command, this.config.args ?? [], {
+    this.process = spawn(spawnCommand.command, spawnCommand.args, {
       stdio: ["pipe", "pipe", "pipe"],
       // Windows: 콘솔 창 생성 방지 (창이 뜨면 stdout 파이프 동작이 달라짐)
       windowsHide: true,

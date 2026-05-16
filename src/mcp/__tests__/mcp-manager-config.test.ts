@@ -224,6 +224,56 @@ describe("McpManager — addConfig()", () => {
     expect(mockConnect).toHaveBeenCalledOnce();
   });
 
+  it("forces reconnect when updating an already connected API key server", async () => {
+    const servers: McpServerConfig[] = [
+      {
+        id: "browser-use",
+        transport: "stdio",
+        command: "uvx",
+        args: ["--from", "browser-use[cli]==0.12.6", "browser-use", "--mcp"],
+        auth: "api-key",
+        apiKey: "old-key",
+        apiKeyEnv: "OPENAI_API_KEY",
+      },
+    ];
+    await writeFile(testConfigPath, JSON.stringify({ servers }), "utf-8");
+    const mgr = await makeManager();
+
+    await mgr.connectServer(servers[0]);
+    await expect(mgr.setApiKey("browser-use", "new-key")).resolves.toEqual({ connected: true });
+
+    const raw = JSON.parse(await readFile(testConfigPath, "utf-8")) as { servers: McpServerConfig[] };
+    expect(raw.servers[0]).toMatchObject({ apiKey: "new-key" });
+    expect(mockDisconnect).toHaveBeenCalledOnce();
+    expect(mockConnect).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not persist a new API key when governance rejects the updated config", async () => {
+    const servers: McpServerConfig[] = [
+      {
+        id: "browser-use",
+        transport: "stdio",
+        command: "uvx",
+        auth: "api-key",
+        apiKey: "old-key",
+        apiKeyEnv: "PATH",
+      },
+    ];
+    await writeFile(testConfigPath, JSON.stringify({ servers }), "utf-8");
+    mockValidateServer.mockReturnValueOnce({
+      valid: false,
+      reason: "apiKeyEnv는 런타임 제어 환경변수를 사용할 수 없습니다: 'PATH'",
+      layer: 1,
+    });
+    const mgr = await makeManager();
+
+    await expect(mgr.setApiKey("browser-use", "new-key")).rejects.toThrow("거버넌스 검증 실패");
+
+    const raw = JSON.parse(await readFile(testConfigPath, "utf-8")) as { servers: McpServerConfig[] };
+    expect(raw.servers[0]).toMatchObject({ apiKey: "old-key" });
+    expect(mockConnect).not.toHaveBeenCalled();
+  });
+
   it("rejects API key updates for non-api-key servers", async () => {
     const servers: McpServerConfig[] = [
       { id: "plain", transport: "stdio", command: "npx", auth: "none" },
