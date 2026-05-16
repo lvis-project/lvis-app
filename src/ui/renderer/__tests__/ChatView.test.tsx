@@ -1009,6 +1009,160 @@ describe("ChatView", () => {
 
 });
 
+describe("ChatView — userApprovalHit disclosure toast (#793 + cluster MAJOR-2/3)", () => {
+  type HitCb = (payload: {
+    toolName: string;
+    scope: "session" | "persistent";
+    verdictAtApproval: "low" | "medium" | "high";
+  }) => void;
+
+  async function setupWithCallback() {
+    const { container, api, unmount } = await renderApp({ hasApiKey: true });
+    const onHitMock = api.permission.onUserApprovalHit as unknown as ReturnType<
+      typeof vi.fn
+    >;
+    await waitFor(() => expect(onHitMock).toHaveBeenCalled());
+    const fire = onHitMock.mock.calls[0]?.[0] as HitCb;
+    expect(typeof fire).toBe("function");
+    return { container, unmount, fire };
+  }
+
+  it("renders toast on user-approval-hit broadcast with tool name + scope + verdict", async () => {
+    const { container, fire } = await setupWithCallback();
+    await act(async () => {
+      fire({ toolName: "fs_write", scope: "persistent", verdictAtApproval: "low" });
+    });
+    const toast = await waitFor(() => {
+      const el = container.querySelector('[data-testid="user-approval-hit-toast"]');
+      expect(el).not.toBeNull();
+      return el as HTMLElement;
+    });
+    expect(toast.textContent).toContain("권한 메모리 적용");
+    expect(toast.textContent).toContain("fs_write");
+    expect(toast.textContent).toContain("영구");
+    expect(toast.textContent).toContain("LOW");
+  });
+
+  it("session-scope hits render '세션' label, not '영구'", async () => {
+    const { container, fire } = await setupWithCallback();
+    await act(async () => {
+      fire({ toolName: "bash_run", scope: "session", verdictAtApproval: "medium" });
+    });
+    const toast = await waitFor(() => {
+      const el = container.querySelector('[data-testid="user-approval-hit-toast"]');
+      expect(el).not.toBeNull();
+      return el as HTMLElement;
+    });
+    expect(toast.textContent).toContain("세션");
+    expect(toast.textContent).not.toContain("영구");
+    expect(toast.textContent).toContain("MEDIUM");
+  });
+
+  it("verdict-tier tint: low=emerald, medium=amber, high=red (cluster MAJOR-3)", async () => {
+    const { container, fire } = await setupWithCallback();
+    const cases: Array<["low" | "medium" | "high", string]> = [
+      ["low", "emerald"],
+      ["medium", "amber"],
+      ["high", "red"],
+    ];
+    for (const [verdict, expectedTone] of cases) {
+      await act(async () => {
+        fire({ toolName: `tool_${verdict}`, scope: "session", verdictAtApproval: verdict });
+      });
+      const toast = await waitFor(() => {
+        const el = container.querySelector(
+          `[data-testid="user-approval-hit-toast"][data-verdict="${verdict}"]`,
+        );
+        expect(el).not.toBeNull();
+        return el as HTMLElement;
+      });
+      expect(
+        toast.className,
+        `verdict=${verdict} expected tone "${expectedTone}"`,
+      ).toContain(expectedTone);
+    }
+  });
+
+  it("HIGH verdict promotes role to 'alert' + aria-live 'assertive' (urgent disclosure)", async () => {
+    const { container, fire } = await setupWithCallback();
+    await act(async () => {
+      fire({ toolName: "fs_write_sensitive", scope: "session", verdictAtApproval: "high" });
+    });
+    const toast = await waitFor(() => {
+      const el = container.querySelector(
+        '[data-testid="user-approval-hit-toast"][data-verdict="high"]',
+      );
+      expect(el).not.toBeNull();
+      return el as HTMLElement;
+    });
+    expect(toast.getAttribute("role")).toBe("alert");
+    expect(toast.getAttribute("aria-live")).toBe("assertive");
+  });
+
+  it("non-HIGH stays role='status' + aria-live='polite'", async () => {
+    const { container, fire } = await setupWithCallback();
+    await act(async () => {
+      fire({ toolName: "fs_read", scope: "persistent", verdictAtApproval: "low" });
+    });
+    const toast = await waitFor(() => {
+      const el = container.querySelector('[data-testid="user-approval-hit-toast"]');
+      expect(el).not.toBeNull();
+      return el as HTMLElement;
+    });
+    expect(toast.getAttribute("role")).toBe("status");
+    expect(toast.getAttribute("aria-live")).toBe("polite");
+  });
+
+  it("malformed payload dropped via structural guard (security Med-2)", async () => {
+    const { container, fire } = await setupWithCallback();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await act(async () => {
+      // verdictAtApproval is null — pre-PR-A4-R3 entry shape or future bug.
+      fire({
+        toolName: "fs_write",
+        scope: "session",
+        verdictAtApproval: null as unknown as "low",
+      });
+    });
+    const toast = container.querySelector('[data-testid="user-approval-hit-toast"]');
+    expect(toast).toBeNull();
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it("subsequent hit replaces previous toast (new payload wins)", async () => {
+    const { container, fire } = await setupWithCallback();
+    await act(async () => {
+      fire({ toolName: "first_tool", scope: "session", verdictAtApproval: "low" });
+    });
+    await waitFor(() => {
+      expect(container.textContent).toContain("first_tool");
+    });
+    await act(async () => {
+      fire({ toolName: "second_tool", scope: "persistent", verdictAtApproval: "high" });
+    });
+    await waitFor(() => {
+      const el = container.querySelector('[data-testid="user-approval-hit-toast"]');
+      expect(el).not.toBeNull();
+      expect(el!.textContent).toContain("second_tool");
+      expect(el!.textContent).not.toContain("first_tool");
+    });
+  });
+
+  it("unmount mid-toast cancels dismiss timer without setState-after-unmount", async () => {
+    const { fire, unmount } = await setupWithCallback();
+    await act(async () => {
+      fire({ toolName: "fs_write", scope: "session", verdictAtApproval: "medium" });
+    });
+    // Unmount BEFORE the 4s dismiss timer would fire. If cleanup is broken
+    // a setState-after-unmount warning would be emitted; otherwise silent.
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    unmount();
+    expect(consoleErrorSpy).not.toHaveBeenCalled();
+    consoleErrorSpy.mockRestore();
+  });
+});
+
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();

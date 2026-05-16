@@ -256,6 +256,10 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
 
   // Subscribe to user-approval-hit broadcasts. Returned closure both
   // unsubscribes the IPC listener and cancels any in-flight dismiss timer.
+  // Cluster review S-Med-2: defense-in-depth structural validation of the
+  // IPC payload — TS type guarantees only compile-time; a future bug in
+  // permission-manager emitting `null` / `""` / `"critical"` would otherwise
+  // propagate to `.toUpperCase()` (throws) or render unexpected text.
   useEffect(() => {
     let api;
     try {
@@ -264,6 +268,20 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
       return;
     }
     const unsubscribe = api.permission.onUserApprovalHit((payload) => {
+      if (
+        !payload ||
+        typeof payload.toolName !== "string" ||
+        (payload.scope !== "session" && payload.scope !== "persistent") ||
+        (payload.verdictAtApproval !== "low" &&
+          payload.verdictAtApproval !== "medium" &&
+          payload.verdictAtApproval !== "high")
+      ) {
+        console.warn(
+          "[chat] dropping malformed userApprovalHit payload — see permissions-events.ts SOT",
+          payload,
+        );
+        return;
+      }
       if (userApprovalHitTimerRef.current) {
         clearTimeout(userApprovalHitTimerRef.current);
       }
@@ -732,20 +750,36 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           {forkToast}
         </div>
       )}
-      {/* R-2 user-approval memory-hit disclosure toast (#793) — auto-dismisses after 4 s */}
-      {userApprovalHitToast && (
-        <div
-          data-testid="user-approval-hit-toast"
-          role="status"
-          aria-live="polite"
-          className="sticky top-0 z-30 mx-3 mt-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300"
-        >
-          <span className="font-medium">권한 메모리 적용</span>
-          <span className="ml-2 text-muted-foreground">
-            {userApprovalHitToast.toolName} · {userApprovalHitToast.scope === "persistent" ? "영구" : "세션"} · {userApprovalHitToast.verdictAtApproval.toUpperCase()}
-          </span>
-        </div>
-      )}
+      {/* R-2 user-approval memory-hit disclosure toast (#793) — auto-dismisses after 4 s.
+          Verdict-tier tint surfaces the trust gradient (CRITICAL 4.1 disclosure):
+          - low    → emerald (lowest risk, informational)
+          - medium → amber (moderate risk)
+          - high   → red + role="alert" (urgent — user is re-using a high-risk approval)
+          Cluster review MAJOR-3 — disclosure surface must be visually distinguishable per tier. */}
+      {userApprovalHitToast && (() => {
+        const verdict = userApprovalHitToast.verdictAtApproval;
+        const isHigh = verdict === "high";
+        const tone =
+          verdict === "high"
+            ? "border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-300"
+            : verdict === "medium"
+            ? "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+            : "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
+        return (
+          <div
+            data-testid="user-approval-hit-toast"
+            data-verdict={verdict}
+            role={isHigh ? "alert" : "status"}
+            aria-live={isHigh ? "assertive" : "polite"}
+            className={`sticky top-0 z-30 mx-3 mt-2 rounded-md border px-3 py-2 text-xs ${tone}`}
+          >
+            <span className="font-medium">권한 메모리 적용</span>
+            <span className="ml-2 text-muted-foreground">
+              {userApprovalHitToast.toolName} · {userApprovalHitToast.scope === "persistent" ? "영구" : "세션"} · {verdict.toUpperCase()}
+            </span>
+          </div>
+        );
+      })()}
       {currentSessionKind === "routine" && (
         <div
           data-testid="current-session-kind-banner"
