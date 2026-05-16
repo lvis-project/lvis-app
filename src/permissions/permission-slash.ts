@@ -247,6 +247,7 @@ const VALID_REVIEWER_MODES: ReadonlySet<ReviewerMode> = new Set([
   "disabled",
   "rule",
   "llm",
+  "strict",
 ]);
 // Derived from REVIEWER_PROVIDERS (single SOT in permission-settings-store.ts).
 const VALID_REVIEWER_PROVIDERS: ReadonlySet<ReviewerProvider> = new Set(REVIEWER_PROVIDERS);

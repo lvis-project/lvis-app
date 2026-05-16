@@ -1,11 +1,11 @@
-# Permission Policy — Design Document (v2.2)
+# Permission Policy — Design Document (v2.3)
 
-> **Status:** Accepted v2.2 — implementation landed via PR #643; this document is the operating reference for the live permission stack. (Not "Ratified" because §15 hook-signing path is still a v1 deny-only baseline pending follow-up.)
-> **Issue:** #627 (implementation, closed) · #644 (this ratification)
+> **Status:** Accepted v2.3 — implementation landed via PR #643 (v2.2 baseline) + PR #664/#860 (v2.3 reviewer-mode normalization); this document is the operating reference for the live permission stack. (Not "Ratified" because §15 hook-signing path is still a v1 deny-only baseline pending follow-up.)
+> **Issue:** #627 (implementation, closed) · #644 (v2.2 ratification) · #664 / #860 (v2.3 reviewer-mode normalization)
 > **Owner:** Permissions stack maintainers (`src/permissions/`, `src/boot/steps/reviewer-wiring.ts`)
-> **Last updated:** 2026-05-13
-> **Change condition:** Material changes to the **5-category decision matrix** (`src/permissions/category-registry.ts` — `read | write | shell | network | meta` with `decisionFor({ mode, source, headless })`), the reviewer agent contract (`src/permissions/reviewer/`), or the hook v1 deny model require a new revision bump (v2.3+) with an accompanying design PR; minor wording / link / typo edits do not.
-> **v2.2 delta:** current implementation snapshot + future direction aligned to the permission-policy implementation
+> **Last updated:** 2026-05-17
+> **Change condition:** Material changes to the **5-category decision matrix** (`src/permissions/category-registry.ts` — `read | write | shell | network | meta` with `decisionFor({ mode, source, headless })`), the reviewer agent contract (`src/permissions/reviewer/`), or the hook v1 deny model require a new revision bump (v2.4+) with an accompanying design PR; minor wording / link / typo edits do not.
+> **v2.3 delta:** Layer 5 reviewer mode renormalization — `disabled` is now pass-through-LOW (not defer-all-HIGH); the fail-closed semantic moved to the honest name `strict`; pre-#664 settings files are auto-migrated at load via `migrateLegacyDisabledMode()` with a `disabledMigratedAt` marker for idempotency. Plugin manifests gain `writesToOwnSandbox` (SDK v1.0.x manifest schema) — when true AND every resolved `pathFields` value canonically stays inside `~/.lvis/plugins/<ownerPluginId>/`, the reviewer auto-LOWs the write so plugins like ms-graph can write their MSAL cache without round-tripping the user. UI-rooted invocation chains keep `origin:"ui"` through nested `ctx.callTool` calls via {@link runWithInvocationOrigin} (AsyncLocalStorage). Sensitive-path matching canonicalizes BOTH sides via `canonicalizePathForMatch()` so `..`, NFD unicode, mixed-case (darwin/win32), trailing slash, duplicate-slash bypass vectors are closed.
 
 ## 0. Purpose & scope
 
@@ -371,7 +371,7 @@ interface RoutineScope {
 {
   "permissions": {
     "reviewer": {
-      "mode": "llm",      // "disabled" | "rule" | "llm"
+      "mode": "rule",      // "disabled" | "rule" | "llm" | "strict"  ← v2.3 4-mode
       "provider": "openai",       // default vendor — Anthropic 의존성 분리
       "model": "gpt-4o-mini",     // default — ~$0.0002/call, 5x cheaper than Haiku
       "fallbackOnError": "deny", // "deny" | "rule" 만 허용
@@ -380,11 +380,34 @@ interface RoutineScope {
       // issue #690 — interactive auto-approve. 종전 `auto` exec mode 전용
       // 가시화 lane 이 mode-independent 한 SOT 로 분리됨. "off" = 항상
       // 모달, "low" = 리뷰어 LOW 시 모달 없이 통과. MED/HIGH 는 항상 모달.
-      "interactive": { "autoApprove": "off" }  // "off" | "low"
+      "interactive": { "autoApprove": "off" },  // "off" | "low"
+
+      // issue #664 boot-time migration marker. Stamped the first time a
+      // pre-#664 `mode:"disabled"` file is rewritten to `mode:"strict"`.
+      // Idempotent — never re-written. Hand-editable but unnecessary.
+      "disabledMigratedAt": "2026-05-17T00:00:00.000Z"  // optional
     }
   }
 }
 ```
+
+**Mode semantics (v2.3 — post-#664 normalization):**
+
+| Mode | Verdict | Use case | Notes |
+|------|---------|----------|-------|
+| `disabled` | always **LOW** (pass-through) | "I don't want the reviewer to gate plugin tool calls — the per-tool category × source × trust matrix in `PermissionManager` (deny rules, allowed-dir checks, overlay-trigger guards, explicit approval) is enough." | Pre-#664 this mode was wired as defer-all-HIGH; that semantic moved to `strict`. A boot-time migration shim (`migrateLegacyDisabledMode()` in `permission-settings-store.ts`) rewrites pre-#664 files to `strict` and stamps `disabledMigratedAt` for idempotency. |
+| `rule` | 36-rule heuristic (default) | "Deterministic, no LLM cost, decent coverage." | `RuleBasedRiskClassifier`. No provider dependency. Sandbox-internal plugin writes resolved by the `writesToOwnSandbox` auto-LOW rule (#664 P1). |
+| `llm` | `max(rule, llm)` composition | "Multi-vendor LLM second opinion on top of rule baseline. LLM cannot downgrade — security M1." | Requires provider + model. Fail-closed on parse/provider error (`fallbackOnError="deny"`) unless explicitly set to `"rule"`. Weak-sandbox / weak-context cannot be silently downgraded to LOW. |
+| `strict` | always **HIGH** (defer-all) | "Hardened deployment — every headless mutation manually approved." | `StrictRiskClassifier`. Equivalent to pre-#664 `disabled` but under an honest name. |
+
+**Migration shim (#664):**
+
+`readPermissionSettings()` invokes `migrateLegacyDisabledMode()` on every load. The detector signature is unambiguous:
+
+- `permissions.reviewer.mode === "disabled"` AND
+- `permissions.reviewer.disabledMigratedAt` is absent.
+
+On match, the loader rewrites `mode → "strict"` + `disabledMigratedAt = <now>` and persists the rewrite synchronously. Persistence failure (locked file / read-only mount) is logged but the in-memory result is still `strict`, so the user never silently lands on the new pass-through-LOW semantic. A user who later deliberately picks `disabled` (slash command or hand-edit) gets the new pass-through semantic without re-migration because the marker is already present.
 
 **Natural-language approval intent (issue #690 P4):**
 
@@ -878,3 +901,26 @@ Phase 2 executor 작업 중 사용자가 결정한 4 항목 — spec 에 binding
   registration** 으로 통일한다.
 - Future direction 은 signed hooks/deep DLP, plugin sandbox hardening,
   governance timeline integration 으로 분리한다.
+
+## 13. v2.2 → v2.3 — Reviewer mode renormalization + sandbox-write LOW + origin-chain (2026-05-17)
+
+PR #664 + PR #860 ratified.
+
+**Material changes (Layer 5):**
+
+- Reviewer mode model: **3-mode → 4-mode**. `disabled` semantics flipped from defer-all-HIGH to pass-through-LOW; the fail-closed semantic moved to the new honest name `strict`. Default for fresh installs is `rule` (not `disabled`) — a fresh install with no `~/.lvis/settings.json` no longer silently queues every plugin write/auth tool in `~/.lvis/permissions/deferred-queue.jsonl` (pre-#664 reproducer: ms-graph `msgraph_auth` interactive AAD popup silently deferred).
+- Migration shim: `migrateLegacyDisabledMode()` runs on every load of `~/.lvis/settings.json`. Detector signature = `mode==="disabled"` ∧ no `disabledMigratedAt` marker. Migration is idempotent and persisted on first read.
+- Sandbox-write auto-LOW (P1): SDK manifest gains `toolSchemas[*].writesToOwnSandbox?: boolean`. When the flag is `true` AND every resolved `pathFields` value canonically stays inside `~/.lvis/plugins/<ownerPluginId>/`, the reviewer auto-LOWs the write. Sound-by-construction — the runtime verifies the path-containment claim, the declaration alone is insufficient. Without this rule plugins like ms-graph that write MSAL token cache to their own sandbox get caught by the "write outside allowed dirs" HIGH rule because the host's `allowedDirectories` does not include plugin sandboxes by design (§5 file-based memory).
+- Origin-chain propagation (P2): UI-rooted invocations keep `origin:"ui"` through nested `ctx.callTool` calls via `runWithInvocationOrigin()` (AsyncLocalStorage). A wrapper plugin handler invoked from a UI panel no longer demotes its inner `ctx.callTool` to `plugin` origin — that pre-fix demotion routed the inner call through the headless reviewer lane and silently queued the AAD popup forever.
+- Path canonicalization (security MAJOR-3): both the sensitive-path hard-block (Layer 0) and the sandbox-write LOW rule (Layer 5) canonicalize via the shared `canonicalizePathForMatch()` helper before any prefix compare. Closes the `..` / NFD / mixed-case (darwin/win32) / trailing-slash / duplicate-slash bypass vectors.
+- Consumer drift fix: every reviewer-mode consumer (slash command, IPC, settings store, classifier factory, audit log) updated to the 4-mode set. No silent default-substitution at write time (only at read time for hand-edited files).
+
+**Spec ref updates:** §3 Layer 5 — explicit 4-mode table + migration shim block. §10 — this v2.3 changelog row. SDK manifest schema bump (`v1.0.x` adds `writesToOwnSandbox`) sibling PR opened on `lvis-plugin-sdk`.
+
+**Out-of-scope (deferred to follow-up issues, see PR #860 description for links):**
+
+- R-3 LLM caller retry wiring (deferred from PR #790)
+- Sandbox spawn-path full adoption — Node Readable compat (PR #791)
+- PR-A2 R2 missing tests (PR #779)
+- Sandbox A1/A2/A3 UX polish leftover (PR #806)
+- Preload bridge wiring for ApprovalRequest binding (PR #799 completion)

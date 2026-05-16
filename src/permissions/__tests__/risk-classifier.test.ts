@@ -42,10 +42,12 @@ function ctx(overrides: Partial<ToolInvocationContext>): ToolInvocationContext {
 }
 
 describe("DisabledRiskClassifier", () => {
-  it("returns HIGH for any input (defer-all)", () => {
+  // Issue #664: post-fix `disabled` is pass-through-LOW (not defer-all-HIGH).
+  // The fail-closed semantic moved to {@link StrictRiskClassifier}.
+  it("returns LOW for any input (pass-through)", () => {
     const c = new DisabledRiskClassifier();
     const v = c.classify(ctx({ category: "read" }));
-    expect(v.level).toBe("high");
+    expect(v.level).toBe("low");
     expect(v.reason).toMatch(/disabled/);
   });
 });

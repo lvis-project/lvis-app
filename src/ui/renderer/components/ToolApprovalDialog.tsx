@@ -92,6 +92,7 @@ export function ToolApprovalDialog({
       // same string — matching how dispatchReviewer builds the lookup key.
       const canonicalArgs = canonicalStringifyForRenderer(request.args ?? {});
       recordPromise = window.lvis?.userApproval?.record({
+        requestId: request.id,
         toolName: request.toolName,
         args: canonicalArgs,
         source: request.source ?? "builtin",
