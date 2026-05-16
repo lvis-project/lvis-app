@@ -76,6 +76,7 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
 
   // ── Deferred queue lifecycle ──
   "not-found": "요청한 항목을 찾을 수 없습니다.",
+  "no-such-request": "처리할 승인 요청을 찾을 수 없습니다.",
   "not-registered": "등록되지 않은 항목입니다.",
   "already-resolved": "이미 처리된 항목입니다.",
   "already-resolving": "이미 처리 중인 항목입니다.",
