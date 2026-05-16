@@ -7,7 +7,7 @@
  */
 import "../../../../test/renderer/setup.js";
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { SettingsDialog } from "../SettingsDialog.js";
 import { makeMockLvisApi } from "../../../../test/renderer/mock-lvis-api.js";
 
@@ -217,6 +217,113 @@ describe("SettingsDialog (smoke)", () => {
         .find((button) => button.textContent?.includes("권한"));
       expect(permissionsTrigger?.textContent).toContain("1");
       expect(permissionsTrigger?.textContent).not.toContain("7");
+    });
+  });
+
+  it("does not close the dialog after a successful TabSaveBar Save click", async () => {
+    const api = makeApi();
+    const onOpenChange = vi.fn();
+    vi.stubGlobal("lvisApi", api);
+
+    render(
+      <SettingsDialog
+        open={true}
+        onOpenChange={onOpenChange}
+        api={api as never}
+        onSaved={vi.fn()}
+        initialTab="llm"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(api.getSettings).toHaveBeenCalledTimes(1);
+    });
+    api.updateSettings.mockClear();
+    onOpenChange.mockClear();
+
+    fireEvent.click(screen.getByRole("button", { name: "저장" }));
+
+    await waitFor(() => {
+      expect(api.updateSettings).toHaveBeenCalled();
+    });
+    // PR #780 design: save() never closes the dialog. Close lives on
+    // Dialog X / Esc, same as every other modal.
+    expect(onOpenChange).not.toHaveBeenCalledWith(false);
+  });
+
+  it("surfaces an error banner when save fails, and clears it on reopen", async () => {
+    const api = makeApi();
+    api.updateSettings.mockRejectedValueOnce(new Error("disk full"));
+    vi.stubGlobal("lvisApi", api);
+
+    const { rerender } = render(
+      <SettingsDialog
+        open={true}
+        onOpenChange={vi.fn()}
+        api={api as never}
+        onSaved={vi.fn()}
+        initialTab="llm"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(api.getSettings).toHaveBeenCalledTimes(1);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "저장" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("settings-save-error")).toHaveTextContent("disk full");
+    });
+
+    // Close + reopen → banner should be cleared by the open-transition effect.
+    rerender(
+      <SettingsDialog
+        open={false}
+        onOpenChange={vi.fn()}
+        api={api as never}
+        onSaved={vi.fn()}
+        initialTab="llm"
+      />,
+    );
+    rerender(
+      <SettingsDialog
+        open={true}
+        onOpenChange={vi.fn()}
+        api={api as never}
+        onSaved={vi.fn()}
+        initialTab="llm"
+      />,
+    );
+    await waitFor(() => {
+      expect(screen.queryByTestId("settings-save-error")).toBeNull();
+    });
+  });
+
+  it("error banner can be dismissed via the 닫기 link", async () => {
+    const api = makeApi();
+    api.updateSettings.mockRejectedValueOnce(new Error("perms denied"));
+    vi.stubGlobal("lvisApi", api);
+
+    render(
+      <SettingsDialog
+        open={true}
+        onOpenChange={vi.fn()}
+        api={api as never}
+        onSaved={vi.fn()}
+        initialTab="llm"
+      />,
+    );
+    await waitFor(() => {
+      expect(api.getSettings).toHaveBeenCalledTimes(1);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "저장" }));
+    const banner = await screen.findByTestId("settings-save-error");
+    expect(banner).toHaveTextContent("perms denied");
+
+    fireEvent.click(within(banner).getByRole("button", { name: "닫기" }));
+    await waitFor(() => {
+      expect(screen.queryByTestId("settings-save-error")).toBeNull();
     });
   });
 });
