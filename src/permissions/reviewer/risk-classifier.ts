@@ -158,7 +158,7 @@ const TRUSTED_NETWORK_HOSTS: ReadonlySet<string> = new Set([
  * not feasible without the user's subscription credentials. See also
  * {@link validateFoundryEndpoint} in provider-adapters.ts.
  */
-const TRUSTED_NETWORK_HOST_SUFFIXES: readonly string[] = [
+export const TRUSTED_NETWORK_HOST_SUFFIXES: readonly string[] = [
   ".services.ai.azure.com",
   ".openai.azure.com",
 ];

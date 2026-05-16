@@ -36,9 +36,6 @@ const DEFAULT_REVIEWER_SETTINGS: PermissionReviewerSettings = {
   interactive: { autoApprove: "off" },
 };
 
-// Round-5 UX MAJOR — radio labels + descriptions rewritten for
-// non-technical users. "인터랙티브" / "mutating 호출" / "LOW 자동 승인"
-// / "모달" replaced with plain Korean.
 const REVIEWER_INTERACTIVE_OPTIONS: Array<{
   value: "off" | "low";
   label: string;
@@ -146,7 +143,7 @@ export function PermissionsTab() {
   const [reviewerModelDraft, setReviewerModelDraft] = useState(DEFAULT_REVIEWER_SETTINGS.model);
   const [reviewerBusy, setReviewerBusy] = useState(false);
   /**
-   * C3 — key-driven dynamic activation: maps each provider to whether
+   * Key-driven dynamic activation: maps each provider to whether
    * its required API key (or GCP service account) is stored. Providers
    * with no key are visible but non-selectable (greyed out + tooltip).
    * Refreshed on tab entry and whenever reviewerDispatch mutates settings.
@@ -168,7 +165,7 @@ export function PermissionsTab() {
           window.lvis.permission.hookTrustList(),
           window.lvis.permission.dirDispatch("list"),
           window.lvis.permission.reviewerDispatch("show"),
-          // C3 — check key presence for all five providers in parallel
+          // Check key presence for all five providers in parallel
           ...REVIEWER_PROVIDER_OPTIONS.map((opt) =>
             window.lvis.permission.reviewerProviderHasKey(opt.value),
           ),
@@ -204,12 +201,11 @@ export function PermissionsTab() {
   // ── Section A handler ─────────────────────────────
   const reviewerModeForExecMode = (m: ExecMode): PermissionReviewerMode =>
     m === "auto" ? "llm" : "disabled";
-  // Round-1 critic MAJOR-2 — interactive auto-approve is the SOT for
-  // foreground reviewer auto-allow. Selecting `auto` exec mode in the
-  // UI now also flips `interactive.autoApprove="low"` so the legacy UX
-  // (auto mode → LOW silent allow) is preserved without `auto` mode
-  // being a hidden second opt-in. Selecting any non-auto mode flips
-  // back to `"off"`.
+  // `interactive.autoApprove` is the SOT for foreground reviewer auto-allow.
+  // Selecting `auto` exec mode in the UI also flips
+  // `interactive.autoApprove="low"` so the legacy UX (auto mode → LOW
+  // silent allow) is preserved without `auto` being a hidden second opt-in.
+  // Selecting any non-auto mode flips back to `"off"`.
   const interactiveAutoApproveForExecMode = (
     m: ExecMode,
   ): "off" | "low" => (m === "auto" ? "low" : "off");
@@ -287,7 +283,7 @@ export function PermissionsTab() {
     }
   };
 
-  /** C3 — refresh provider key map (re-query all providers in parallel). */
+  /** Refresh provider key map (re-query all providers in parallel). */
   const refreshProviderKeyMap = useCallback(async () => {
     const results = await Promise.all(
       REVIEWER_PROVIDER_OPTIONS.map((opt) =>
@@ -301,7 +297,7 @@ export function PermissionsTab() {
     setProviderKeyMap(keyMap);
   }, []);
 
-  // C3 — refresh providerKeyMap whenever chat LLM settings change so that
+  // Refresh providerKeyMap whenever chat LLM settings change so that
   // adding an Azure AI Foundry or Gemini key in the Settings tab immediately
   // enables the corresponding reviewer provider without a tab switch.
   useEffect(() => {
@@ -330,7 +326,7 @@ export function PermissionsTab() {
     } finally {
       setReviewerBusy(false);
     }
-    // C3: refresh key map AFTER busy is cleared, so a provider change
+    // Refresh key map AFTER busy is cleared, so a provider change
     // paired with a key change in the same session updates the list.
     // Only refresh on success — no point querying keys after a failed dispatch.
     if (dispatchOk) {
@@ -753,8 +749,6 @@ export function PermissionsTab() {
                   ⚠ 백그라운드 권한 검사가 "명시 승인만" 으로 꺼져 있어 자동 허용이 동작하지 않습니다. "규칙 기반" 또는 "LLM" 으로 변경하세요.
                 </p>
               ) : null}
-              {/* Round-5 UX MAJOR — banner copy rewritten so non-
-                  technical users see what's wrong AND what to do. */}
               {mode === "auto" && reviewer.interactive.autoApprove === "off" ? (
                 <p
                   className="rounded-md border border-warning/40 bg-warning/15 px-3 py-2 text-[11px] text-warning"
@@ -769,9 +763,6 @@ export function PermissionsTab() {
                   className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-[11px] text-destructive"
                   data-testid="permissions-strict-low-contradiction-banner"
                 >
-                  {/* Round-6 architect MAJOR — banner label must match
-                      the actual radio label rendered above ("전체 물어보기"),
-                      not the internal mode name "엄격". */}
                   ⛔ "전체 물어보기" 모드와 "저위험 자동 허용"이 동시에 켜져 있어 설정이 충돌합니다.
                   모두 묻기 정책을 유지하려면 자동 허용을 "끔"으로 변경하세요.
                 </p>
