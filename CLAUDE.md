@@ -283,6 +283,7 @@ Relevant sections: 1 (Boot), 2 (ConversationLoop), 6 (Core Engines), 9 (Plugin S
   - `src/ipc/**`, `src/preload*.ts`
   - `src/boot/**`, `src/core/permissions-*`
 - **Threshold**: 같은 area 에 **14일 rolling window** 안 ≥3 PR 머지
+- **Bundle PR 처리**: 한 PR 안에 ≥3 commit 이 sensitive area 를 touch 하면 **N PR-equivalent** 로 카운트하여 그 PR 머지 직전 cluster review 실행. PR 가 분리되어 있어도 머지 후 14일 window 에 같이 들어가면 동일하게 트리거.
 - **확인 명령**: `gh pr list --state merged --search "merged:>=$(date -v-14d +%Y-%m-%d)" --json number,files` (또는 `git log --since="14 days" --name-only origin/main`)
 
 ### Review surface (각 agent 의 1차 책임)

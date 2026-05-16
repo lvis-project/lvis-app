@@ -96,9 +96,25 @@ describe("PermissionManager — fail-closed gate against legacy R-2 entries (#83
 
     expect(broadcast).not.toHaveBeenCalled();
     expect(warnSpy).toHaveBeenCalled();
-    const warnArgs = warnSpy.mock.calls[0]?.[0] as string | undefined;
-    expect(warnArgs).toContain("legacy R-2 entry without verdictAtApproval");
-    expect(warnArgs).toContain("tool=fs_write");
+    // Stable structured marker (2nd arg) — survives i18n / wording changes
+    // (cluster review S-Med-1 + C-Med-4).
+    const warnCalls = warnSpy.mock.calls;
+    const legacyCall = warnCalls.find((args: unknown[]) => {
+      const marker = args[1];
+      return (
+        marker != null &&
+        typeof marker === "object" &&
+        (marker as { event?: unknown }).event === "legacy-r2-null-verdict"
+      );
+    });
+    expect(legacyCall).toBeDefined();
+    const marker = legacyCall![1] as {
+      event: string;
+      toolName: string;
+      scope: string;
+    };
+    expect(marker.toolName).toBe("fs_write");
+    expect(marker.scope).toBe("persistent");
   });
 
   it("does broadcast when verdictAtApproval is a real value (sanity — gate only rejects null)", async () => {
