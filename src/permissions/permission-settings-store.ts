@@ -92,6 +92,18 @@ export interface ReviewerSettingsBlock {
   model: string;
   fallbackOnError: ReviewerFallbackOnError;
   interactive: ReviewerInteractiveBlock;
+  /**
+   * Issue #664 migration marker — ISO-8601 timestamp recorded the first
+   * time a pre-#664 `mode:"disabled"` setting was rewritten to
+   * `mode:"strict"`. Pre-#664 builds wired `disabled` as "defer-all-HIGH"
+   * (fail-closed), so an existing user file with `mode:"disabled"` and no
+   * marker represents a fail-closed posture the user actively chose. The
+   * #664 normalization flipped `disabled` to pass-through-LOW; without
+   * this migration that flip would be a silent post-deploy security
+   * downgrade. The presence of `disabledMigratedAt` makes the migration
+   * idempotent — subsequent loads do not re-write.
+   */
+  disabledMigratedAt?: string;
 }
 
 export interface PermissionSettingsBlock {
@@ -148,6 +160,14 @@ function defaultPath(): string {
  * Read `~/.lvis/settings.json`. Missing file → DEFAULT_FILE; malformed
  * file → DEFAULT_FILE + warn (atomic cutover: do NOT silently allow).
  *
+ * Issue #664 migration: when a pre-#664 file is detected (mode:"disabled"
+ * without `disabledMigratedAt` marker), the reviewer mode is rewritten to
+ * "strict" *and persisted* before returning. The on-disk file converges to
+ * the post-#664 canonical shape on the first read after upgrade, so
+ * subsequent loads do not re-rewrite. Persistence failure is logged but
+ * the in-memory result is still the migrated (strict) shape — the user
+ * never silently lands on the new pass-through-LOW semantic.
+ *
  * `pathOverride` is for tests.
  */
 export function readPermissionSettings(pathOverride?: string): PermissionSettingsFile {
@@ -156,7 +176,28 @@ export function readPermissionSettings(pathOverride?: string): PermissionSetting
   try {
     const raw = readFileSync(filePath, "utf-8");
     const parsed = JSON.parse(raw) as Record<string, unknown>;
-    return normalizePermissionSettings(parsed);
+    const migrated = migrateLegacyDisabledMode(parsed);
+    const normalized = normalizePermissionSettings(parsed);
+    if (migrated) {
+      // Persist the migration synchronously so the file converges to the
+      // post-#664 shape. We do a best-effort write — if the file is locked
+      // or the disk is read-only, we still return the migrated in-memory
+      // result so the user's runtime behaviour is fail-closed (strict).
+      try {
+        mkdirSync(dirname(filePath), { recursive: true, mode: 0o700 });
+        writeFileSync(filePath, JSON.stringify(parsed, null, 2), {
+          encoding: "utf-8",
+          mode: 0o600,
+        });
+      } catch (persistErr) {
+        log.warn(
+          "issue-664 migration: failed to persist migrated settings to %s — runtime still strict (%s)",
+          filePath,
+          (persistErr as Error).message,
+        );
+      }
+    }
+    return normalized;
   } catch (err) {
     log.warn(
       `failed to read ${filePath}: %s — falling back to defaults`,
@@ -164,6 +205,47 @@ export function readPermissionSettings(pathOverride?: string): PermissionSetting
     );
     return structuredClone(DEFAULT_FILE);
   }
+}
+
+/**
+ * Issue #664 boot-time migration shim.
+ *
+ * Detects a pre-#664 settings file by the (mode==="disabled" AND no
+ * disabledMigratedAt marker) signature and rewrites the in-memory object
+ * to `mode:"strict"` + marker. Returns `true` when the mutation happened
+ * so the caller can persist.
+ *
+ * Pre-#664 `disabled` was wired as "defer-all-HIGH" (fail-closed). Post-#664
+ * `disabled` is pass-through-LOW. Without this migration a user who
+ * explicitly opted into the fail-closed posture would silently land on
+ * pass-through after the upgrade — a security regression.
+ *
+ * Idempotency: the marker is written once and only once. A user who later
+ * deliberately picks `mode:"disabled"` after the migration (via slash
+ * command or hand-edit) gets the new pass-through semantic without
+ * re-migration because the marker is already present.
+ *
+ * Out-of-band: this is the only auto-rewrite the loader performs. All
+ * other validation falls back to defaults without mutation.
+ */
+export function migrateLegacyDisabledMode(parsed: Record<string, unknown>): boolean {
+  const perm = parsed.permissions;
+  if (!perm || typeof perm !== "object") return false;
+  const reviewer = (perm as Record<string, unknown>).reviewer;
+  if (!reviewer || typeof reviewer !== "object") return false;
+  const r = reviewer as Record<string, unknown>;
+  if (r.mode !== "disabled") return false;
+  if (typeof r.disabledMigratedAt === "string" && r.disabledMigratedAt.length > 0) {
+    return false;
+  }
+  const migratedAt = new Date().toISOString();
+  r.mode = "strict";
+  r.disabledMigratedAt = migratedAt;
+  log.warn(
+    "issue-664 migration: legacy reviewer mode 'disabled' (defer-all-HIGH) → 'strict' (defer-all-HIGH, honest name); marker=%s",
+    migratedAt,
+  );
+  return true;
 }
 
 /**
@@ -216,7 +298,11 @@ function normalizeReviewerBlock(parsed: unknown): ReviewerSettingsBlock {
       ? (obj.fallbackOnError as ReviewerFallbackOnError)
       : DEFAULT_REVIEWER.fallbackOnError;
   const interactive = normalizeInteractiveBlock(obj.interactive);
-  return { mode, provider, model, fallbackOnError, interactive };
+  const disabledMigratedAt =
+    typeof obj.disabledMigratedAt === "string" && obj.disabledMigratedAt.length > 0
+      ? obj.disabledMigratedAt
+      : undefined;
+  return { mode, provider, model, fallbackOnError, interactive, disabledMigratedAt };
 }
 
 function normalizeInteractiveBlock(parsed: unknown): ReviewerInteractiveBlock {
