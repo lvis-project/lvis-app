@@ -137,6 +137,7 @@ describe("ApprovalDialog", () => {
       <ApprovalDialog queue={[makeRequest({
         toolName: "bash",
         toolCategory: "shell",
+        reviewerVerdict: { level: "low", reason: "test fixture — exercise A/D shortcut path, not R-4 HIGH NL gate" },
       })]} onDecide={onDecide} />,
     );
     await waitFor(() => {
@@ -161,6 +162,7 @@ describe("ApprovalDialog", () => {
       <ApprovalDialog queue={[makeRequest({
         toolName: "bash",
         toolCategory: "shell",
+        reviewerVerdict: { level: "low", reason: "test fixture — exercise A/D shortcut path, not R-4 HIGH NL gate" },
       })]} onDecide={onDecide} />,
     );
     await waitFor(() => {
