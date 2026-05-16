@@ -748,14 +748,19 @@ async function abortableSleep(ms: number, signal?: AbortSignal): Promise<boolean
   if (ms <= 0) return true;
   if (signal?.aborted) return false;
   return new Promise<boolean>((resolve) => {
-    const timer = setTimeout(() => {
-      signal?.removeEventListener("abort", onAbort);
-      resolve(true);
-    }, ms);
     const onAbort = () => {
       clearTimeout(timer);
       resolve(false);
     };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      // Microtask-race guard (critic R1 MAJOR-3): the abort event may fire
+      // AFTER setTimeout queued this callback but BEFORE it executed. In
+      // that window `clearTimeout` is a no-op and `onAbort.resolve(false)`
+      // races our `resolve(true)`. Re-check the signal here so the sleep
+      // honestly reports completion vs abort.
+      resolve(!signal?.aborted);
+    }, ms);
     signal?.addEventListener("abort", onAbort, { once: true });
   });
 }
@@ -808,7 +813,14 @@ export class LlmRiskClassifier implements RiskClassifier {
     userPrompt: string,
     abortSignal: AbortSignal | undefined,
   ): Promise<{ completion: Awaited<ReturnType<LlmReviewerProvider["complete"]>>; attempts: number }> {
-    const maxAttempts = Math.max(1, this.retry.maxAttempts);
+    // Clamp config defensively (critic R1 MAJOR-1): caller may pass an
+    // unvalidated config from settings or a future runtime knob —
+    // `maxAttempts > 10` would risk retry storms, `jitterPct > 100` would
+    // collapse to zero-delay retry through `Math.max(0, …)`, `jitterPct < 0`
+    // would invert direction. Hard ceilings + floors prevent both.
+    const maxAttempts = Math.max(1, Math.min(10, this.retry.maxAttempts));
+    const jitterPct = Math.max(0, Math.min(100, this.retry.jitterPct));
+    const baseDelayMs = Math.max(0, this.retry.baseDelayMs);
     let lastErr: unknown = new Error("unreachable");
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       // Note: deliberately do NOT short-circuit on `abortSignal.aborted`
@@ -832,8 +844,8 @@ export class LlmRiskClassifier implements RiskClassifier {
         // Only the SLEEP between retries is signal-aware — if the user
         // cancels during back-off we honour it immediately rather than
         // making them wait out the remaining window.
-        const base = this.retry.baseDelayMs * Math.pow(2, attempt - 1);
-        const jitter = 1 + ((Math.random() * 2 - 1) * this.retry.jitterPct) / 100;
+        const base = baseDelayMs * Math.pow(2, attempt - 1);
+        const jitter = 1 + ((Math.random() * 2 - 1) * jitterPct) / 100;
         const delay = Math.max(0, Math.round(base * jitter));
         const completed = await abortableSleep(delay, abortSignal);
         if (!completed) {
@@ -881,10 +893,25 @@ export class LlmRiskClassifier implements RiskClassifier {
       llmVerdict = parsed;
     } catch (err) {
       // Any provider error (after retry exhaustion or terminal-classified)
-      // → fallbackOnError policy. attempts unknown here; telemetry records 0.
-      this.telemetry.onCall?.({ tokensIn: 0, tokensOut: 0, costUsd: 0, parseFailed: true });
+      // → fallbackOnError policy. Surface the worst-case attempt count to
+      // telemetry (critic R1 MINOR-4) so dashboards can distinguish
+      // first-try-failure from retry-exhaustion — the exhaustion rate is
+      // the exact signal #865 reliability work cares about.
+      this.telemetry.onCall?.({
+        tokensIn: 0,
+        tokensOut: 0,
+        costUsd: 0,
+        parseFailed: true,
+        attempts: Math.max(1, Math.min(10, this.retry.maxAttempts)),
+      });
       if (this.fallbackOnError === "deny") {
-        const msg = (err as Error).message?.slice(0, 60) ?? "error";
+        // DLP-mask the provider error message before embedding into the
+        // verdict reason (security R1 MINOR-3): provider errors sometimes
+        // echo request body fragments back, which would otherwise land in
+        // audit logs + UI without redaction.
+        const rawMsg = err instanceof Error ? err.message ?? "error" : "error";
+        const { masked } = maskSensitiveData(rawMsg);
+        const msg = masked.slice(0, 60);
         return { level: "high", reason: `llm error — fallback=deny (${msg})` };
       }
       return ruleVerdict;
