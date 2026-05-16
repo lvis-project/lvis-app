@@ -30,7 +30,7 @@ import { lvisHome } from "../shared/lvis-home.js";
 const log = createLogger("permission-settings");
 
 export type ReviewerMode = "disabled" | "rule" | "llm";
-export type ReviewerProvider = "openai" | "anthropic" | "google";
+export type ReviewerProvider = "openai" | "anthropic" | "google" | "foundry" | "gcp-playground";
 export type ReviewerFallbackOnError = "deny" | "rule";
 
 /**
@@ -98,6 +98,8 @@ const REVIEWER_PROVIDERS: ReadonlySet<ReviewerProvider> = new Set([
   "openai",
   "anthropic",
   "google",
+  "foundry",
+  "gcp-playground",
 ]);
 const REVIEWER_FALLBACKS: ReadonlySet<ReviewerFallbackOnError> = new Set(["deny", "rule"]);
 

@@ -48,6 +48,7 @@ function installLvisApi() {
         interactive: { autoApprove: "off" },
       },
     })),
+    reviewerProviderHasKey: vi.fn(async (provider: string) => provider === "openai"),
   };
   (window as unknown as { lvis: unknown }).lvis = {
     permission,
