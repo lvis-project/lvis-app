@@ -24,7 +24,7 @@
  */
 import { useState } from "react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
-import { anthropicCacheRates } from "../../../shared/pricing-data.js";
+import { computeCost, type ModelPricing } from "../../../shared/pricing-data.js";
 import type { LLMVendor } from "../../../shared/llm-vendor-defaults.js";
 
 export interface TokenCostBadgePricing {
@@ -90,23 +90,25 @@ export function TokenCostBadge({
   const headlineTokens = freshInputTokens + tokensOut;
   if (headlineTokens === 0 && tokensIn === 0) return null;
 
-  const cost = (() => {
-    if (!pricing) return null;
-    const baseInput = freshInputTokens * pricing.inputPer1M;
-    const output = tokensOut * pricing.outputPer1M;
-    if (vendor === "claude") {
-      // Anthropic raw shape — cache is additive at published ratios.
-      const { read: cacheReadRate, write: cacheWriteRate } = anthropicCacheRates(pricing);
-      return (baseInput + cacheReadTokens * cacheReadRate + cacheWriteTokens * cacheWriteRate + output) / 1_000_000;
-    }
-    // OpenAI / Gemini / Copilot / Azure-Foundry / Vertex-AI — cached portion
-    // is already inside the prompt_tokens that became `freshInputTokens`
-    // (Vercel SDK normalized `cachedInputTokens` is subtracted in the
-    // engine before emit). Provider auto-discounts the cached portion in
-    // billing — LVIS approximates with list price. No cache addition here
-    // would double-charge.
-    return (baseInput + output) / 1_000_000;
-  })();
+  // Single source of truth for cost math — shared `computeCost` (browser-safe
+  // via `shared/pricing-data.ts`) is the same function the engine billing
+  // pipeline calls. Keeps the badge from drifting when vendor branches evolve.
+  // `contextWindow` is irrelevant to the cost formula but `ModelPricing`
+  // requires it structurally, so we pin a dummy 0 — computeCost never reads
+  // it. Effective vendor defaults to "claude" for back-compat with tests that
+  // omit the prop (production callers always propagate from ChatContext).
+  const cost = pricing
+    ? computeCost(
+        {
+          inputTokens: freshInputTokens,
+          outputTokens: tokensOut,
+          cacheReadTokens,
+          cacheWriteTokens,
+        },
+        { ...(pricing as ModelPricing), contextWindow: (pricing as Partial<ModelPricing>).contextWindow ?? 0 },
+        vendor ?? "claude",
+      )
+    : null;
 
   const showCostMode = mode === "cost" && cost !== null;
 
