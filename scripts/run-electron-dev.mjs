@@ -24,7 +24,7 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, watch, copyFileSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, watch, copyFileSync, mkdirSync, readFileSync } from "node:fs";
 import { waitForAllFirstBuilds } from "./lib/dev-watcher-gate.mjs";
 import { homedir } from "node:os";
 import { basename, dirname, resolve } from "node:path";
@@ -359,14 +359,48 @@ function resolveLocalBin(name) {
   return name;
 }
 
+// Map<tag, { resolve, promise }> — populated by spawnWatcher when a watcher
+// has readyPattern. Consumed by the watcher list builder so dev-watcher-gate
+// can await stdout signals instead of polling output mtime.
+const watcherReady = new Map();
+
 function spawnWatcher(tag, cmd, args, opts = {}) {
+  const { readyPattern, ...spawnOpts } = opts;
+  // When readyPattern is supplied, pipe stdout so we can scan for the first
+  // build-complete signal (then tee to the parent terminal so the dev sees
+  // the same output). Without readyPattern the legacy mtime gate is used,
+  // so stdout/stderr inherit directly.
+  if (readyPattern) {
+    let resolveReady;
+    const promise = new Promise((r) => { resolveReady = r; });
+    watcherReady.set(tag, { resolve: resolveReady, promise });
+  }
   const child = spawn(cmd, args, {
     cwd: repoRoot,
-    stdio: ["ignore", "inherit", "inherit"],
+    // When readyPattern is set, pipe BOTH stdout and stderr — different
+    // tools emit the build-complete signal on different streams
+    // (tailwindcss prints "Done in NNNms" on stderr, esbuild prints
+    // "build finished" on stderr too). We tee both back to the parent
+    // terminal so dev still sees full output, but also scan for the
+    // pattern.
+    stdio: readyPattern ? ["ignore", "pipe", "pipe"] : ["ignore", "inherit", "inherit"],
     env: { ...process.env, LVIS_DEV: "1" },
     shell: process.platform === "win32" && cmd.toLowerCase().endsWith(".cmd"),
-    ...opts,
+    ...spawnOpts,
   });
+  if (readyPattern) {
+    let matched = false;
+    const scan = (chunk, sink) => {
+      sink.write(chunk);
+      if (!matched && readyPattern.test(chunk.toString())) {
+        matched = true;
+        const entry = watcherReady.get(tag);
+        if (entry) entry.resolve();
+      }
+    };
+    if (child.stdout) child.stdout.on("data", (c) => scan(c, process.stdout));
+    if (child.stderr) child.stderr.on("data", (c) => scan(c, process.stderr));
+  }
   child.on("error", (err) => {
     log(tag, `spawn failed: ${err.message}`);
     shutdown(1);
@@ -564,12 +598,18 @@ function scheduleRestart() {
 // may already have files in place; we want the new session's first emit.
 // See scripts/lib/dev-watcher-gate.mjs for the polling implementation.
 function makeWatcherList() {
+  // `output` (mtime gate) is the default first-build signal for esbuild
+  // watchers which always rewrite on first run. `readyPromise` (stdout gate)
+  // is required for tools with idempotent skip-write (tailwindcss v4 skips
+  // writes when resolved CSS is identical to the prior build, leaving mtime
+  // stale and the gate would hang). spawnWatcher populates watcherReady
+  // when the watcher is configured with a readyPattern.
   return [
     { tag: "main",           label: "Main process (esbuild)",  output: resolve(repoRoot, "dist/src/main/main.js") },
     { tag: "preload",        label: "Preload (esbuild)",       output: resolve(repoRoot, "dist/src/preload.cjs") },
     { tag: "plugin-preload", label: "Plugin preload (esbuild)",output: resolve(repoRoot, "dist/src/plugin-preload.cjs") },
     { tag: "renderer",       label: "Renderer (esbuild)",      output: resolve(repoRoot, "dist/src/renderer.js") },
-    { tag: "styles",         label: "Styles (Tailwind)",       output: resolve(repoRoot, "dist/src/styles.css") },
+    { tag: "styles",         label: "Styles (Tailwind)",       readyPromise: watcherReady.get("styles")?.promise },
   ];
 }
 
@@ -615,7 +655,9 @@ async function main() {
   // by the current dev session (not stale incremental output left behind
   // by a prior run).
   const launcherStartedAt = Date.now();
-  const watchers = makeWatcherList();
+  // Watcher list is built AFTER spawnWatcher calls below so that any
+  // readyPromise entries (populated by spawnWatcher into the watcherReady
+  // map) are visible. See makeWatcherList for the stdout-vs-mtime split.
 
   // Initial html copy
   copyHtml();
@@ -692,22 +734,20 @@ async function main() {
   ]);
 
   // Styles (tailwind --watch)
-  // Force-delete any pre-existing dist/src/styles.css before spawning the
-  // watcher. The first-build gate at waitForAllFirstBuilds() relies on
-  // output-file mtime ≥ launcherStartedAt, but tailwindcss v4 skips the
-  // write when the resolved CSS is identical to the prior build (idempotent
-  // optimization). Without this delete, every subsequent dev run hangs at
-  // "OK preload/plugin-preload/main/renderer — 1 remaining: styles" because
-  // the stale file's mtime never advances. Force-delete guarantees the next
-  // build is a fresh write.
-  rmSync(resolve(repoRoot, "dist/src/styles.css"), { force: true });
+  // tailwindcss v4 skips file writes when the resolved CSS is identical to
+  // the prior build (intentional incremental optimization). The mtime gate
+  // would then never see mtime advance and time out. Instead we capture
+  // the watcher's stdout and treat the first "Done in NNNms" line as the
+  // build-complete signal — works regardless of whether tailwindcss
+  // actually rewrote the file. See scripts/lib/dev-watcher-gate.mjs for the
+  // dual-signal (stdout + mtime fallback) detection logic.
   spawnWatcher("styles", resolveLocalBin("tailwindcss"), [
     "-i",
     "src/styles.css",
     "-o",
     "dist/src/styles.css",
     "--watch=always",
-  ]);
+  ], { readyPattern: /Done in \d+/ });
 
   // Wait for ALL watchers' first build before launching Electron. Pre-fix
   // the launcher only awaited dist/src/main/main.js, so renderer.js and
@@ -715,6 +755,7 @@ async function main() {
   // utility classes were undefined and v6 composer rendered as raw text
   // (Bug #TBD). The mtime gate ensures every watcher has produced a fresh
   // build for the current dev session.
+  const watchers = makeWatcherList();
   const ok = await waitForAllFirstBuilds(watchers, launcherStartedAt, log);
   if (!ok) {
     log("dev", "timed out waiting for watchers — see [dev:progress] FAIL lines above");
