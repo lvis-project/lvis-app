@@ -945,6 +945,9 @@ export class ToolExecutor {
             adjacencyWarnings: validation.adjacencyWarnings,
           },
           trustOrigin,
+          // R-2 R4: propagate approvalCacheKey so renderer record key
+          // matches dispatchReviewer lookup key — end-to-end symmetry.
+          ...(approvalCacheKey ? { approvalCacheKey } : {}),
         };
 
         let decision;
@@ -1367,6 +1370,9 @@ export class ToolExecutor {
             mode: this.currentApprovalMode(),
             sensitivePathPattern,
             trustOrigin: invocationPermissionContext.trustOrigin,
+            // R-2 R4: propagate approvalCacheKey so renderer record key
+            // matches dispatchReviewer lookup key — end-to-end symmetry.
+            ...(approvalCacheKey ? { approvalCacheKey } : {}),
             // Issue #691 round-1 — sandbox capability for the dialog.
             sandboxCapability: detectSandboxCapability(),
             evaluationContext,

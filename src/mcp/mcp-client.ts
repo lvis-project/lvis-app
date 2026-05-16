@@ -621,13 +621,24 @@ class StdioTransport implements McpTransport {
     }
     const spawnCommand = resolveStdioSpawnCommand(this.config.command, this.config.args ?? []);
 
-    // §691 PR-A3 D9: MCP stdio spawn path. The "mcp" registry slot is
+    // §691 PR-A4 D9: MCP stdio spawn path. The "mcp" registry slot is
     // pre-populated in boot.ts with the active OS runner so capability
     // reporting (getSandboxRunner("mcp")) reflects the OS isolation level.
-    // Full sandbox adoption for MCP (wrapping this spawn via SandboxRunner)
-    // is deferred to PR-A4 — SandboxRunner.spawn() currently uses
-    // stdio:["ignore","pipe","pipe"] but MCP requires a writable stdin pipe
-    // for JSON-RPC Content-Length framing. PR-A4 will add stdin support.
+    // Full sandbox adoption for MCP (wrapping this spawn via SandboxRunner.spawn())
+    // requires SandboxedProcess to expose a writable stdin channel for
+    // JSON-RPC Content-Length framing — tracked as a follow-up in #691.
+    // The LVIS_SANDBOX_ENABLED gate below logs runner availability so boot
+    // telemetry captures the sandbox status without blocking MCP startup.
+    if (process.env.LVIS_SANDBOX_ENABLED === "1") {
+      const { getSandboxRunner } = await import("../permissions/sandbox-runner.js");
+      const runner = getSandboxRunner("mcp") ?? getSandboxRunner(process.platform);
+      if (runner) {
+        // Runner available — full adoption pending stdin stream support.
+        // Capability is already reflected in detectSandboxCapability() SOT.
+        // eslint-disable-next-line no-console
+        console.debug("[mcp-client] LVIS_SANDBOX_ENABLED: MCP runner available (full adoption pending stdin support)");
+      }
+    }
     this.process = spawn(spawnCommand.command, spawnCommand.args, {
       stdio: ["pipe", "pipe", "pipe"],
       // Windows: 콘솔 창 생성 방지 (창이 뜨면 stdout 파이프 동작이 달라짐)
