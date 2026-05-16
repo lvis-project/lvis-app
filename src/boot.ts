@@ -637,7 +637,7 @@ export async function bootstrap(
   });
 
   // §4.2 Step 7: manifest-driven IPC bridges.
-  let disposePluginNotifications = registerPluginNotifications(pluginRuntime, mainWindow);
+  let disposePluginNotifications = registerPluginNotifications(pluginRuntime, mainWindow, bootAuditLogger);
   let disposePluginEventBridge = registerPluginEventBridge(pluginRuntime, mainWindow);
   let pluginEventBridgeWindow = mainWindow;
   const replacePluginEventBridge = (win: BrowserWindow) => {
@@ -1064,7 +1064,7 @@ export async function bootstrap(
     startRoutinesScheduler: () => routinesScheduler.start(),
     refreshPluginNotifications: () => {
       disposePluginNotifications();
-      disposePluginNotifications = registerPluginNotifications(pluginRuntime, pluginEventBridgeWindow);
+      disposePluginNotifications = registerPluginNotifications(pluginRuntime, pluginEventBridgeWindow, bootAuditLogger);
       replacePluginEventBridge(pluginEventBridgeWindow);
     },
     registerPluginEventBridge: replacePluginEventBridge,
