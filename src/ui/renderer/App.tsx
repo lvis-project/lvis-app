@@ -323,8 +323,7 @@ export function App() {
       }
       try {
         setActiveView("home");
-        await sessionLoad(sessionId, streaming, applyLoadedSession);
-        return true;
+        return await sessionLoad(sessionId, streaming, applyLoadedSession);
       } catch (err) {
         console.warn("[lvis] openRoutineSession failed:", (err as Error).message);
         return false;
@@ -991,9 +990,10 @@ export function App() {
               }}
               onOpen={searchOpenOverlay}
               onClose={searchCloseOverlay}
-              onLoadSession={(sessionId) => {
-                setActiveView("home");
-                return handleLoadSession(sessionId);
+              onLoadSession={async (sessionId) => {
+                const loaded = await handleLoadSession(sessionId);
+                if (loaded !== false) setActiveView("home");
+                return loaded;
               }}
               onOpenMemoryView={() => {
                 setActiveView("memory");

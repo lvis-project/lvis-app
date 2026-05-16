@@ -272,10 +272,10 @@ export function SettingsContent({
               idlePreferenceRefresh={s.idlePreferenceRefresh}
               setIdlePreferenceRefresh={s.setIdlePreferenceRefresh}
               piiRedactEnabled={s.piiRedactEnabled}
-              // ChatTab wraps onPiiRedactToggle with onImmediateChange
-              // internally, matching the pattern used by autoCompact /
-              // streamSmoothing / idlePreferenceRefresh. Don't fire the
-              // debounce here too — that would double-schedule.
+              settingsLoaded={s.settingsLoaded}
+              // ChatTab wraps onPiiRedactToggle with onImmediateChange.
+              // idlePreferenceRefresh owns a separate `features` patch path,
+              // so it must not schedule the bulk chat payload.
               onPiiRedactToggle={() => s.setPiiRedactEnabled(!s.piiRedactEnabled)}
               onImmediateChange={chatSave.schedule}
             />
