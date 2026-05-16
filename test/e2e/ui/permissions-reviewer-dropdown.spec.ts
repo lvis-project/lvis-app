@@ -7,22 +7,35 @@
  * call pattern, but cannot exercise the Radix portal-rendered SelectItem
  * disabled state or the live `SETTINGS.updated` broadcast wiring.
  *
- * Scenarios (per issue #768):
- *   1. `foundry` SelectItem disabled when no API key — tooltip on hover
- *      reveals "키 설정 필요" hint.
- *   2. `foundry` SelectItem enabled after API key + baseUrl saved.
- *   3. `gcp-playground` SelectItem disabled when no API key.
- *   4. `gcp-playground` SelectItem enabled after API key saved.
- *   5. Pre-existing providers (openai, anthropic) regression — openai is
- *      always enabled (test seed gives it a key by default); anthropic
- *      starts disabled (no key) and the dropdown render itself is sound.
+ * Scenarios (5 tests covering #768 items 1–5):
+ *   1. `foundry` — disabled with no key, no baseUrl; tooltip on hover
+ *      reveals "키 설정 필요" hint; enabled only after BOTH key + baseUrl.
+ *   2. `gcp-playground` — disabled with no key, enabled after gemini key.
+ *   3. Pre-existing providers (openai, anthropic) regression — both start
+ *      disabled in a fresh LVIS_HOME (no keys seeded). Adding anthropic
+ *      key enables only anthropic; openai stays disabled. Proves PR #756
+ *      didn't introduce a foundry-special branch.
+ *   4. Tooltip text — disabled foundry option exposes screen-reader hint
+ *      via Radix Tooltip portal.
+ *   5. Revoke scenario (#768 item 5) — set foundry key + baseUrl → assert
+ *      enabled → clear API key → assert disabled again. Verifies the
+ *      dynamic *disable* path mirrors the dynamic *enable* path so that
+ *      SETTINGS.updated broadcasts in both directions repaint the option
+ *      list.
  *
  * Pattern: builds on `fixtures.ts` so the renderer boots against an
- * isolated `LVIS_HOME`, then drives the real Electron settings window
- * through the same `openSettingsWindow` helper used by other settings
- * specs. Keys are written via the public `window.lvisApi.setApiKey` /
- * `updateSettings` IPC so the same `SETTINGS.updated` broadcast that
- * powers `PermissionsTab.refreshProviderKeyMap()` fires under test.
+ * isolated `LVIS_HOME` (fresh per test — no seeded API keys), then drives
+ * the real Electron settings window through the same `openSettingsWindow`
+ * helper used by other settings specs. Keys are written via the public
+ * `window.lvisApi.setApiKey` / `updateSettings` IPC so the same
+ * `SETTINGS.updated` broadcast that powers
+ * `PermissionsTab.refreshProviderKeyMap()` fires under test.
+ *
+ * `data-disabled=""` — Radix Select renders the attribute as an empty
+ * string on disabled SelectItems and omits it entirely on enabled ones.
+ * The assertion `toHaveAttribute('data-disabled', '')` checks for the
+ * exact disabled contract; `.not.toHaveAttribute('data-disabled', '')`
+ * asserts the attribute is absent (enabled).
  */
 import { test, expect } from './fixtures';
 import { openSettingsWindow } from './settings-window';
@@ -108,7 +121,7 @@ test.describe('PermissionsTab reviewer provider dropdown — #768', () => {
     await openProviderDropdown(settingsWindow);
     const foundryOption = settingsWindow.getByTestId('reviewer-provider-option-foundry');
     await expect(foundryOption).toBeVisible();
-    await expect(foundryOption).toHaveAttribute('data-disabled', /.*/);
+    await expect(foundryOption).toHaveAttribute('data-disabled', '');
     // "(키 없음)" suffix is rendered as a sibling span on disabled items.
     await expect(foundryOption).toContainText('(키 없음)');
     await closeProviderDropdown(settingsWindow);
@@ -116,7 +129,7 @@ test.describe('PermissionsTab reviewer provider dropdown — #768', () => {
     // ─── 2. Add API key only → still disabled (baseUrl still missing) ──
     await setApiKey(settingsWindow, 'azure-foundry', 'sk-foundry-e2e-test-key');
     await openProviderDropdown(settingsWindow);
-    await expect(foundryOption).toHaveAttribute('data-disabled', /.*/);
+    await expect(foundryOption).toHaveAttribute('data-disabled', '');
     await closeProviderDropdown(settingsWindow);
 
     // ─── 3. Add baseUrl → now enabled ─────────────────────────────────
@@ -124,7 +137,7 @@ test.describe('PermissionsTab reviewer provider dropdown — #768', () => {
     await openProviderDropdown(settingsWindow);
     // Allow a moment for the SETTINGS.updated broadcast to flow back to the
     // renderer and refreshProviderKeyMap to repaint the option list.
-    await expect(foundryOption).not.toHaveAttribute('data-disabled', /.*/, {
+    await expect(foundryOption).not.toHaveAttribute('data-disabled', '', {
       timeout: 5_000,
     });
     await expect(foundryOption).not.toContainText('(키 없음)');
@@ -145,14 +158,14 @@ test.describe('PermissionsTab reviewer provider dropdown — #768', () => {
       'reviewer-provider-option-gcp-playground',
     );
     await expect(gcpOption).toBeVisible();
-    await expect(gcpOption).toHaveAttribute('data-disabled', /.*/);
+    await expect(gcpOption).toHaveAttribute('data-disabled', '');
     await expect(gcpOption).toContainText('(키 없음)');
     await closeProviderDropdown(settingsWindow);
 
     // ─── 2. Save gemini key → enables gcp-playground ─────────────────
     await setApiKey(settingsWindow, 'gemini', 'AIza-gcp-e2e-test-key');
     await openProviderDropdown(settingsWindow);
-    await expect(gcpOption).not.toHaveAttribute('data-disabled', /.*/, {
+    await expect(gcpOption).not.toHaveAttribute('data-disabled', '', {
       timeout: 5_000,
     });
     await expect(gcpOption).not.toContainText('(키 없음)');
@@ -175,14 +188,14 @@ test.describe('PermissionsTab reviewer provider dropdown — #768', () => {
     // the activation rule is uniform across all five providers.
     const openaiOption = settingsWindow.getByTestId('reviewer-provider-option-openai');
     await expect(openaiOption).toBeVisible();
-    await expect(openaiOption).toHaveAttribute('data-disabled', /.*/);
+    await expect(openaiOption).toHaveAttribute('data-disabled', '');
     await expect(openaiOption).toContainText('(키 없음)');
 
     const anthropicOption = settingsWindow.getByTestId(
       'reviewer-provider-option-anthropic',
     );
     await expect(anthropicOption).toBeVisible();
-    await expect(anthropicOption).toHaveAttribute('data-disabled', /.*/);
+    await expect(anthropicOption).toHaveAttribute('data-disabled', '');
     await expect(anthropicOption).toContainText('(키 없음)');
 
     await closeProviderDropdown(settingsWindow);
@@ -194,13 +207,13 @@ test.describe('PermissionsTab reviewer provider dropdown — #768', () => {
     // this assertion fails before merge.
     await setApiKey(settingsWindow, 'anthropic', 'sk-ant-e2e-test-key');
     await openProviderDropdown(settingsWindow);
-    await expect(anthropicOption).not.toHaveAttribute('data-disabled', /.*/, {
+    await expect(anthropicOption).not.toHaveAttribute('data-disabled', '', {
       timeout: 5_000,
     });
     await expect(anthropicOption).not.toContainText('(키 없음)');
     // openai remains disabled (no key added) — confirms the enable was
     // scoped to the specific provider, not a blanket "any key present".
-    await expect(openaiOption).toHaveAttribute('data-disabled', /.*/);
+    await expect(openaiOption).toHaveAttribute('data-disabled', '');
     await closeProviderDropdown(settingsWindow);
 
     await settingsWindow.getByRole('button', { name: '닫기' }).click();
@@ -215,17 +228,48 @@ test.describe('PermissionsTab reviewer provider dropdown — #768', () => {
     await openProviderDropdown(settingsWindow);
     const foundryOption = settingsWindow.getByTestId('reviewer-provider-option-foundry');
     await expect(foundryOption).toBeVisible();
-    await expect(foundryOption).toHaveAttribute('data-disabled', /.*/);
+    await expect(foundryOption).toHaveAttribute('data-disabled', '');
 
     // Hover the disabled SelectItem (wrapped in TooltipTrigger) — the
-    // Radix Tooltip portal renders the description from PermissionsTab
-    // ("API 키 설정 필요 — 지능 설정에서 키를 추가하세요.").
+    // Radix Tooltip portal renders the description from PermissionsTab.
+    // Locate by data-testid (locale-independent) instead of Korean text.
     await foundryOption.hover();
     await expect(
-      settingsWindow.getByText('API 키 설정 필요 — 지능 설정에서 키를 추가하세요.'),
+      settingsWindow.getByTestId('reviewer-provider-tooltip'),
     ).toBeVisible({ timeout: 5_000 });
 
     await closeProviderDropdown(settingsWindow);
+    await settingsWindow.getByRole('button', { name: '닫기' }).click();
+  });
+
+  test('foundry option disables again when API key is revoked (issue #768 item 5)', async ({
+    app,
+    mainWindow,
+  }) => {
+    const settingsWindow = await openSettingsWindow(app, mainWindow, 'permissions');
+
+    // ─── 1. Seed both: key + baseUrl → foundry enabled ────────────────
+    await setApiKey(settingsWindow, 'azure-foundry', 'sk-foundry-e2e-test-key');
+    await setFoundryBaseUrl(settingsWindow, FOUNDRY_BASE_URL);
+    await openProviderDropdown(settingsWindow);
+    const foundryOption = settingsWindow.getByTestId('reviewer-provider-option-foundry');
+    await expect(foundryOption).not.toHaveAttribute('data-disabled', '', {
+      timeout: 5_000,
+    });
+    await expect(foundryOption).not.toContainText('(키 없음)');
+    await closeProviderDropdown(settingsWindow);
+
+    // ─── 2. Revoke the API key (empty string) → SETTINGS.updated fires
+    //       → refreshProviderKeyMap re-renders → option becomes disabled.
+    //       Mirrors the dynamic-enable path in the inverse direction.
+    await setApiKey(settingsWindow, 'azure-foundry', '');
+    await openProviderDropdown(settingsWindow);
+    await expect(foundryOption).toHaveAttribute('data-disabled', '', {
+      timeout: 5_000,
+    });
+    await expect(foundryOption).toContainText('(키 없음)');
+    await closeProviderDropdown(settingsWindow);
+
     await settingsWindow.getByRole('button', { name: '닫기' }).click();
   });
 });
