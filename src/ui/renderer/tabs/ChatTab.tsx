@@ -12,6 +12,8 @@ export interface ChatTabProps {
   setIdlePreferenceRefresh?: (v: boolean) => void;
   piiRedactEnabled: boolean;
   onPiiRedactToggle: () => void;
+  /** Debounced immediate-apply hook. All ChatTab controls are toggle/radio so they all call this. */
+  onImmediateChange?: () => void;
 }
 
 export function ChatTab({
@@ -23,6 +25,7 @@ export function ChatTab({
   setIdlePreferenceRefresh,
   piiRedactEnabled,
   onPiiRedactToggle,
+  onImmediateChange,
 }: ChatTabProps) {
   return (
     <div className="space-y-4 pt-4">
@@ -35,7 +38,10 @@ export function ChatTab({
           <Checkbox
             checked={autoCompact}
             className="size-5"
-            onCheckedChange={(checked) => setAutoCompact(checked === true)}
+            onCheckedChange={(checked) => {
+              setAutoCompact(checked === true);
+              onImmediateChange?.();
+            }}
           />
           <div className="space-y-0.5">
             <p className="text-sm font-medium">자동 컴팩트 활성화</p>
@@ -48,7 +54,10 @@ export function ChatTab({
         <RadioGroup
           className="flex gap-4 text-sm"
           value={streamSmoothing}
-          onValueChange={(value) => setStreamSmoothing(value as "none" | "word" | "char")}
+          onValueChange={(value) => {
+            setStreamSmoothing(value as "none" | "word" | "char");
+            onImmediateChange?.();
+          }}
           aria-label="Stream smoothing"
         >
           {(["none", "word", "char"] as const).map((opt) => (
@@ -70,7 +79,10 @@ export function ChatTab({
             checked={idlePreferenceRefresh ?? false}
             data-testid="idle-preference-refresh-toggle"
             className="size-5"
-            onCheckedChange={(checked) => setIdlePreferenceRefresh?.(checked === true)}
+            onCheckedChange={(checked) => {
+              setIdlePreferenceRefresh?.(checked === true);
+              onImmediateChange?.();
+            }}
           />
           <div className="space-y-0.5">
             <p className="text-sm font-medium">Experimental: idle 선호도 자동 갱신</p>
