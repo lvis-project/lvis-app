@@ -57,6 +57,26 @@ export interface SettingsOrchestrationState {
   // Lifecycle
   settingsLoaded: boolean;
   saving: boolean;
+  /**
+   * Last save failure surface. Cleared on the next successful save.
+   * SettingsDialog renders this as a banner so silent IPC failures
+   * (network drop, locked settings file, schema reject) become
+   * visible — without this, an auto-save that silently rejected
+   * would leave the user thinking a toggle persisted when it did not.
+   */
+  lastSaveError: { tab: string; message: string } | null;
+  /** Programmatic clear — used when the user opens the dialog fresh. */
+  clearLastSaveError: () => void;
+  /**
+   * Persist current draft for the named tab. Errors surface via
+   * `lastSaveError`, not via promise rejection (the debounced caller
+   * does `void s.save(tab)`).
+   *
+   * The save NEVER closes the dialog. Multi-tab Settings modals (VS Code,
+   * Linear, Raycast) keep the dialog open after Save so the user can
+   * verify the change and edit a sibling tab. Close lives on the
+   * Dialog X / Esc — same as every other modal.
+   */
   save: (tab: string) => Promise<void>;
   vendorInfo: (typeof VENDORS)[number];
 }
@@ -91,6 +111,8 @@ export function useSettingsOrchestration(
   const [hasMarketplaceApiKey, setHasMarketplaceApiKey] = useState(false);
   const [marketplaceApiKeyInput, setMarketplaceApiKeyInput] = useState("");
   const [saving, setSaving] = useState(false);
+  const [lastSaveError, setLastSaveError] = useState<{ tab: string; message: string } | null>(null);
+  const clearLastSaveError = useCallback(() => setLastSaveError(null), []);
   const [settingsSnapshot, setSettingsSnapshot] = useState<AppSettings | null>(null);
   const hydratedVendorRef = useRef<string | null>(null);
   const hydratedWebProviderRef = useRef<string | null>(null);
@@ -185,8 +207,29 @@ export function useSettingsOrchestration(
     return () => { cancelled = true; };
   }, [webProvider, open, api, settingsLoaded]);
 
-  const save = async (tab: string) => {
+  // In-flight guard + pending re-fire: if a debounced save lands while a
+  // previous save is still in flight (cross-tab race), mark it pending
+  // and re-fire after the current call resolves. Without this, two
+  // overlapping saves would race in settingsService and `setSaving`
+  // would flicker (the first call's `finally` clears the flag while the
+  // second is still running).
+  const savingRef = useRef(false);
+  const pendingSavePayload = useRef<null | { tab: string }>(null);
+  // Latest-`save` ref: the running save closure captures values from its
+  // own render. When `finally` re-fires the pending payload, it must
+  // call the LATEST `save` (with the latest closures) — otherwise
+  // toggles that landed between the call and the re-fire are silently
+  // dropped from the second save's payload. The ref is updated via
+  // `useEffect` (canonical latest-ref pattern) so a discarded concurrent
+  // render does not leave a dangling closure here.
+  const saveRef = useRef<(tab: string) => Promise<void>>(null!);
+  const save = async (tab: string): Promise<void> => {
     if (!settingsLoaded) return;
+    if (savingRef.current) {
+      pendingSavePayload.current = { tab };
+      return;
+    }
+    savingRef.current = true;
     setSaving(true);
     try {
       if (tab !== "permissions") {
@@ -243,10 +286,34 @@ export function useSettingsOrchestration(
           },
         } as any);
       }
-      if (tab !== "permissions") { onSaved(); onOpenChange(false); }
-      else { onOpenChange(false); }
-    } finally { setSaving(false); }
+      if (tab !== "permissions") onSaved();
+      setLastSaveError(null);
+    } catch (err) {
+      // Surface via state so SettingsDialog can render an inline banner —
+      // debounced callers do `void s.save(tab)` and would otherwise lose
+      // the rejection in an unhandled-promise warning, leaving the user
+      // thinking a toggle persisted when it did not.
+      const message =
+        err instanceof Error && err.message ? err.message : "설정 저장 실패";
+      setLastSaveError({ tab, message });
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+      // If a debounced save was coalesced while we were running, fire it
+      // now via the LATEST `save` closure (saveRef) so the re-fire reads
+      // the most recent state, not the stale closure of the original
+      // call. Without this the second save would silently drop any
+      // toggles that landed between the original call and the re-fire.
+      const pending = pendingSavePayload.current;
+      if (pending) {
+        pendingSavePayload.current = null;
+        void saveRef.current(pending.tab);
+      }
+    }
   };
+  useEffect(() => {
+    saveRef.current = save;
+  });
 
   const setIdlePreferenceRefreshLive = useCallback((next: boolean) => {
     const previous = idlePreferenceRefresh;
@@ -264,6 +331,8 @@ export function useSettingsOrchestration(
   }, [api, idlePreferenceRefresh, onSaved, settingsLoaded]);
 
   return {
+    lastSaveError,
+    clearLastSaveError,
     vendor, setVendor,
     keyInput, setKeyInput,
     model, setModel,

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Button } from "../../components/ui/button.js";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../../components/ui/tabs.js";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../components/ui/dialog.js";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../../components/ui/dialog.js";
 import type { LvisApi } from "./types.js";
 import { RolesTab } from "./tabs/RolesTab.js";
 import { PermissionsTab } from "./tabs/PermissionsTab.js";
@@ -16,7 +16,33 @@ import { McpTab } from "./tabs/McpTab.js";
 import { PluginConfigTab } from "./tabs/PluginConfigTab.js";
 import { MarketplaceTab } from "./tabs/MarketplaceTab.js";
 import { useSettingsOrchestration } from "./hooks/use-settings-orchestration.js";
+import { useDebouncedSave } from "./hooks/use-debounced-save.js";
 import { normalizeSettingsTab } from "../../shared/settings-tabs.js";
+
+/**
+ * Inline save bar rendered at the bottom of each tab that holds a
+ * deferred-save form (llm / chat / web / marketplace). Replaces the
+ * single dialog-level footer Save button so the action lives next to
+ * the inputs it persists, matching the per-section save policy used
+ * by the rest of the dialog.
+ */
+function TabSaveBar({
+  onSave,
+  saving,
+  settingsLoaded,
+}: {
+  onSave: () => void;
+  saving: boolean;
+  settingsLoaded: boolean;
+}) {
+  return (
+    <div className="mt-4 flex justify-end border-t border-border/40 pt-3">
+      <Button onClick={onSave} disabled={saving || !settingsLoaded}>
+        {saving ? "저장 중..." : "저장"}
+      </Button>
+    </div>
+  );
+}
 
 export function SettingsDialog({
   open,
@@ -33,7 +59,7 @@ export function SettingsDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent size="xl">
+      <DialogContent size="2xl">
         <DialogHeader>
           <DialogTitle>설정</DialogTitle>
           <DialogDescription>앱 환경, 채팅 동작, 검색 엔진, 권한 정책을 설정합니다.</DialogDescription>
@@ -67,9 +93,49 @@ export function SettingsContent({
   const [pendingPermissions, setPendingPermissions] = useState(0);
   const s = useSettingsOrchestration(open, api, onSaved, onOpenChange);
 
+  // Per-tab debounced save handlers. Immediate-apply controls (toggle,
+  // radio, slider, select) call `.schedule()`; rapid bursts collapse
+  // into a single `s.save(tab)` 200ms after the most recent change.
+  // The explicit TabSaveBar Save button calls `.cancel()` first to
+  // avoid a double-write race (pending debounce + click would otherwise
+  // fire `s.save` twice), then `s.save(tab)`. The save itself never
+  // closes the dialog — modern multi-tab Settings (VS Code, Linear,
+  // Raycast) keep the modal open after Save so the user can verify the
+  // change and edit a sibling tab; close lives on the Dialog X / Esc.
+  const llmSave = useDebouncedSave(() => void s.save("llm"));
+  const chatSave = useDebouncedSave(() => void s.save("chat"));
+  const webSave = useDebouncedSave(() => void s.save("web"));
+  const marketplaceSave = useDebouncedSave(() => void s.save("marketplace"));
+
+  // Cancel any pending debounced save when the dialog transitions to
+  // closed. Radix Dialog keeps its children mounted when `open=false`,
+  // so the hook's unmount-cleanup would otherwise miss this case —
+  // a toggle a millisecond before close would still fire its 200ms
+  // debounced save on a "closed" dialog, persisting a half-edited
+  // value the user already abandoned.
   useEffect(() => {
-    if (open) setTab(normalizeSettingsTab(initialTab));
-  }, [initialTab, open]);
+    if (!open) {
+      llmSave.cancel();
+      chatSave.cancel();
+      webSave.cancel();
+      marketplaceSave.cancel();
+    }
+  }, [open, llmSave, chatSave, webSave, marketplaceSave]);
+
+  // Reset tab + clear stale error banner ONLY when the dialog transitions
+  // open. Depending on the whole `s` orchestration object would re-fire
+  // this effect every render (since `s` is recreated each render) and
+  // clear the error banner the moment it is set — the user would see it
+  // flash and disappear. Depending on the stable `clearLastSaveError`
+  // identity (it is a `useCallback([])` inside the hook) keeps the
+  // dependency list explicit while still firing only on dialog open.
+  const clearLastSaveError = s.clearLastSaveError;
+  useEffect(() => {
+    if (open) {
+      setTab(normalizeSettingsTab(initialTab));
+      clearLastSaveError();
+    }
+  }, [initialTab, open, clearLastSaveError]);
 
   useEffect(() => {
     if (!open) return;
@@ -94,6 +160,25 @@ export function SettingsContent({
 
   return (
     <>
+        {s.lastSaveError && (
+          <div
+            role="alert"
+            className="mb-3 flex items-start justify-between gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+            data-testid="settings-save-error"
+          >
+            <div className="min-w-0">
+              <p className="font-medium">설정 저장 실패 — {s.lastSaveError.tab} 탭</p>
+              <p className="text-[11px] opacity-80">{s.lastSaveError.message}</p>
+            </div>
+            <button
+              type="button"
+              className="text-[11px] underline opacity-80 hover:opacity-100"
+              onClick={s.clearLastSaveError}
+            >
+              닫기
+            </button>
+          </div>
+        )}
         <Tabs value={tab} onValueChange={(nextTab) => setTab(normalizeSettingsTab(nextTab))}>
           <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1 [&>*]:!grow-0 [&>*]:!shrink-0 [&>*]:!basis-auto overflow-x-auto">
             <TabsTrigger value="llm">지능 (LLM)</TabsTrigger>
@@ -143,6 +228,15 @@ export function SettingsContent({
               fallbackOpen={s.fallbackOpen}
               setFallbackOpen={s.setFallbackOpen}
               onSaved={onSaved}
+              onImmediateChange={llmSave.schedule}
+            />
+            <TabSaveBar
+              onSave={() => {
+                llmSave.cancel();
+                void s.save("llm");
+              }}
+              saving={s.saving}
+              settingsLoaded={s.settingsLoaded}
             />
           </TabsContent>
 
@@ -159,8 +253,13 @@ export function SettingsContent({
               idlePreferenceRefresh={s.idlePreferenceRefresh}
               setIdlePreferenceRefresh={s.setIdlePreferenceRefresh}
               piiRedactEnabled={s.piiRedactEnabled}
-              onPiiRedactToggle={() => s.setPiiRedactEnabled(!s.piiRedactEnabled)}
+              onPiiRedactToggle={() => {
+                s.setPiiRedactEnabled(!s.piiRedactEnabled);
+                chatSave.schedule();
+              }}
+              onImmediateChange={chatSave.schedule}
             />
+            {/* ChatTab is fully immediate-apply — no deferred-save bar needed. */}
           </TabsContent>
 
           <TabsContent value="web">
@@ -173,6 +272,15 @@ export function SettingsContent({
               webKeyInput={s.webKeyInput}
               setWebKeyInput={s.setWebKeyInput}
               onSaved={onSaved}
+              onImmediateChange={webSave.schedule}
+            />
+            <TabSaveBar
+              onSave={() => {
+                webSave.cancel();
+                void s.save("web");
+              }}
+              saving={s.saving}
+              settingsLoaded={s.settingsLoaded}
             />
           </TabsContent>
 
@@ -195,15 +303,18 @@ export function SettingsContent({
               apiKeyInput={s.marketplaceApiKeyInput}
               setApiKeyInput={s.setMarketplaceApiKeyInput}
               onSaved={onSaved}
+              onImmediateChange={marketplaceSave.schedule}
+            />
+            <TabSaveBar
+              onSave={() => {
+                marketplaceSave.cancel();
+                void s.save("marketplace");
+              }}
+              saving={s.saving}
+              settingsLoaded={s.settingsLoaded}
             />
           </TabsContent>
         </Tabs>
-        <DialogFooter className="mt-6 border-t pt-4">
-          <Button variant="secondary" onClick={() => onOpenChange(false)}>닫기</Button>
-          {tab !== "permissions" && tab !== "usage" && tab !== "roles" && tab !== "audit" && tab !== "plugin-perf" && tab !== "mcp" && tab !== "plugin-config" && tab !== "appearance" && (
-            <Button onClick={() => void s.save(tab)} disabled={s.saving || !s.settingsLoaded}>{s.saving ? "저장 중..." : "저장"}</Button>
-          )}
-        </DialogFooter>
     </>
   );
 }
