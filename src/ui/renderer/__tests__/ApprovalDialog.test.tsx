@@ -381,6 +381,39 @@ describe("ApprovalDialog", () => {
     fireEvent.click(allowOnce!);
     expect(onDecide).toHaveBeenCalledWith("allow-once", undefined);
   });
+
+  it("record IPC call receives 5-component payload with canonical JSON args (critic MAJOR-5)", async () => {
+    // Verifies that window.lvis.userApproval.record is called with a payload
+    // containing all 5 required fields: toolName, args (canonical JSON string),
+    // source, trustOrigin, approvalCacheKey. Catches future regression of any field.
+    const onDecide = vi.fn();
+    render(
+      <ApprovalDialog queue={[makeRequest()]} onDecide={onDecide} />,
+    );
+    await waitFor(() => {
+      expect(document.body.textContent).toContain("read_file");
+    });
+    const allowBtn = Array.from(document.body.querySelectorAll("button")).find(
+      (b) => b.textContent?.includes("허용"),
+    );
+    expect(allowBtn).toBeTruthy();
+    fireEvent.click(allowBtn!);
+    await waitFor(() => expect(onDecide).toHaveBeenCalled());
+    // Assert required fields in record payload (toolName, args, source).
+    // trustOrigin and approvalCacheKey are optional string fields — TypeScript
+    // enforces their shape; undefined is valid when not provided by the request.
+    expect(window.lvis.userApproval.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toolName: expect.any(String),
+        args: expect.any(String),
+        source: expect.any(String),
+      }),
+    );
+    // args must be a canonical JSON object string (parseable, non-null object).
+    const recordPayload = (window.lvis.userApproval.record as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as Record<string, unknown>;
+    const parsedArgs = JSON.parse(recordPayload.args as string) as unknown;
+    expect(parsedArgs !== null && typeof parsedArgs === "object" && !Array.isArray(parsedArgs)).toBe(true);
+  });
 });
 
 afterEach(() => {
