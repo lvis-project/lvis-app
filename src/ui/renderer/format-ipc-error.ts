@@ -79,6 +79,7 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "not-registered": "등록되지 않은 항목입니다.",
   "already-resolved": "이미 처리된 항목입니다.",
   "already-resolving": "이미 처리 중인 항목입니다.",
+  "no-such-request": "승인 요청을 찾을 수 없습니다. 이미 처리되었거나 만료되었을 수 있습니다.",
 
   // ── Assistant context / role / memory / routine ──
   "invalid-assistant-context": "잘못된 어시스턴트 컨텍스트입니다.",
