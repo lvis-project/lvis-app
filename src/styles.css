@@ -1247,6 +1247,19 @@
     scrollbar-color: hsl(var(--scrollbar-thumb)) hsl(var(--scrollbar-track));
   }
 
+  /* ── Settings dialog body — gutter always reserved (G2) ─────────────────
+     macOS with default "Show scrollbars: Automatically based on mouse or
+     trackpad" treats `overflow-y: scroll` as an OVERLAY scrollbar — no
+     gutter reserved, indistinguishable from `auto`. `scrollbar-gutter:
+     stable` forces a gutter regardless of OS preference, so the user
+     perceives the area as scrollable even before content overflows
+     (the user-facing ask: "스크롤바 항상 노출하도록 하여, 스크롤 다운
+     되는 곳임을 인지 시킴"). The themed webkit scrollbar above renders
+     the thumb only once content exceeds the viewport. */
+  .lvis-settings-scroll {
+    scrollbar-gutter: stable;
+  }
+
   /* ── <kbd> element — themed pill ─────────────────────────────────────── */
   kbd {
     display: inline-block;

@@ -5,6 +5,7 @@ import { Input } from "../../../components/ui/input.js";
 import { Textarea } from "../../../components/ui/textarea.js";
 import { cloneDefaultRolePresets, type RolePreset } from "../../../data/role-presets.js";
 import type { LvisApi } from "../types.js";
+import { useNotifySaved } from "../contexts/saved-toast.js";
 
 type Section = "agents" | "memory" | "preferences" | "roles" | "preview";
 
@@ -19,6 +20,7 @@ const SECTIONS: Array<{ id: Section; label: string }> = [
 const EMPTY_DRAFT: RolePreset = { id: "", name: "", systemPromptAdd: "" };
 
 export function RolesTab({ api }: { api: LvisApi }) {
+  const notifySaved = useNotifySaved();
   const [section, setSection] = useState<Section>("agents");
   const [rolePresets, setRolePresets] = useState<RolePreset[]>([]);
   const [draft, setDraft] = useState<RolePreset>(EMPTY_DRAFT);
@@ -94,12 +96,13 @@ export function RolesTab({ api }: { api: LvisApi }) {
       const settings = await api.updateSettings({ roles: { presets: next } });
       setRolePresets(settings.roles.presets);
       setStatus("역할 프롬프트를 저장했습니다.");
+      notifySaved();
     } catch (err) {
       setError((err as Error).message);
     } finally {
       setSaving(null);
     }
-  }, [api, rolesLoaded]);
+  }, [api, rolesLoaded, notifySaved]);
 
   const startEdit = (preset: RolePreset) => {
     if (preset.isDefault) return;
@@ -142,6 +145,7 @@ export function RolesTab({ api }: { api: LvisApi }) {
     try {
       await api.memoryUpdateAgentsMd(agentsDraft);
       setStatus("AGENTS.md를 저장했습니다.");
+      notifySaved();
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -155,6 +159,7 @@ export function RolesTab({ api }: { api: LvisApi }) {
     try {
       await api.memoryUpdateUserPrefs(userPrefsDraft);
       setStatus("user-preferences.md를 저장했습니다.");
+      notifySaved();
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -204,6 +209,7 @@ export function RolesTab({ api }: { api: LvisApi }) {
         throw new Error("MEMORY.md가 다른 작업으로 변경되어 다시 읽었습니다. 확인 후 다시 저장하세요.");
       }
       setStatus("MEMORY.md를 저장했습니다.");
+      notifySaved();
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -229,6 +235,7 @@ export function RolesTab({ api }: { api: LvisApi }) {
       setMemoryIndex(latest);
       setMemoryIndexBase(latest);
       setStatus("긴급 기억을 MEMORY.md 섹션에 저장했습니다.");
+      notifySaved();
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -252,6 +259,7 @@ export function RolesTab({ api }: { api: LvisApi }) {
       setMemoryIndex(latest);
       setMemoryIndexBase(latest);
       setStatus("상세 기억을 memories/에 저장했습니다.");
+      notifySaved();
     } catch (err) {
       setError((err as Error).message);
     } finally {
