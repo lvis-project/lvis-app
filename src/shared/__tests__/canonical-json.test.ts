@@ -53,4 +53,42 @@ describe("canonicalStringify", () => {
     const sorted = Object.fromEntries(Object.entries(obj).sort(([a], [b]) => a.localeCompare(b)));
     expect(canonicalStringify(obj)).toBe(JSON.stringify(sorted));
   });
+
+  // Issue #797 — defense-in-depth: cycle guard + depth cap
+  describe("cycle guard + depth cap (#797)", () => {
+    it("does not stack-overflow on a self-referencing object", () => {
+      const obj: Record<string, unknown> = { a: 1 };
+      obj.self = obj;
+      expect(() => canonicalStringify(obj)).not.toThrow();
+      expect(canonicalStringify(obj)).toContain('"[Circular]"');
+    });
+
+    it("does not stack-overflow on a mutual cycle (a → b → a)", () => {
+      const a: Record<string, unknown> = { name: "a" };
+      const b: Record<string, unknown> = { name: "b", a };
+      a.b = b;
+      expect(() => canonicalStringify(a)).not.toThrow();
+      expect(canonicalStringify(a)).toContain('"[Circular]"');
+    });
+
+    it("caps deeply nested objects with [MaxDepth] marker", () => {
+      let leaf: Record<string, unknown> = { v: 1 };
+      for (let i = 0; i < 200; i++) {
+        leaf = { nested: leaf };
+      }
+      expect(() => canonicalStringify(leaf)).not.toThrow();
+      expect(canonicalStringify(leaf)).toContain('"[MaxDepth]"');
+    });
+
+    it("sibling objects sharing structure across separate calls each serialize cleanly", () => {
+      // Each top-level call starts with a fresh WeakSet, so a shared
+      // subgraph referenced from two distinct root objects does NOT
+      // count as a cycle from either root's perspective.
+      const shared = { x: 1 };
+      const a = { shared };
+      const b = { shared };
+      expect(canonicalStringify(a)).toBe(canonicalStringify(b));
+      expect(canonicalStringify(a)).not.toContain('"[Circular]"');
+    });
+  });
 });
