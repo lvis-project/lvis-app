@@ -745,7 +745,7 @@ export interface HookTrustRow {
   previousSha256?: string;
 }
 
-export type PermissionReviewerMode = "disabled" | "rule" | "llm";
+export type PermissionReviewerMode = "disabled" | "rule" | "llm" | "strict";
 export type PermissionReviewerProvider = "openai" | "anthropic" | "google" | "foundry" | "gcp-playground";
 export type PermissionReviewerFallbackOnError = "deny" | "rule";
 /** Issue #690 — interactive reviewer auto-approve scope. */

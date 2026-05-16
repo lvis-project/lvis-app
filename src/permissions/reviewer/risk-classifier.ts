@@ -38,6 +38,7 @@ import {
   isWeakSandbox,
   type SandboxCapability,
 } from "../sandbox-capability.js";
+import { canonicalizePathForMatch } from "../sensitive-paths.js";
 
 /** Verdict level — discrete enum. The reviewer lane never uses scalars. */
 export type RiskLevel = "low" | "medium" | "high";
@@ -411,22 +412,41 @@ function getDottedFieldValue(input: Record<string, unknown>, field: string): unk
   return current;
 }
 
+/**
+ * Extract declared paths and canonicalize each one for sandbox/allowed-dir
+ * matching. Security MAJOR-3 (cluster review): `..` segments / NFD unicode
+ * forms / trailing spaces / mixed-case (darwin/win32) / duplicate slashes
+ * are all collapsed via {@link canonicalizePathForMatch} before any
+ * prefix compare. Without canonicalization an attacker can pass
+ * `~/.lvis/plugins/foo/../../sessions/sensitive.jsonl` and bypass the
+ * sandbox-write check via plain `startsWith`.
+ *
+ * The allowed-dir list passed by the caller is also canonicalized at the
+ * caller's layer (boot-time / settings load), so both sides of the prefix
+ * compare have the same shape.
+ */
 function extractDeclaredPaths(ctx: ToolInvocationContext): string[] {
   const paths: string[] = [];
   for (const field of ctx.pathFields) {
     const candidate = getDottedFieldValue(ctx.finalInput, field);
     const values = Array.isArray(candidate) ? candidate : [candidate];
     for (const value of values) {
-      if (typeof value === "string" && value.length > 0) paths.push(value);
+      if (typeof value === "string" && value.length > 0) {
+        paths.push(canonicalizePathForMatch(value));
+      }
     }
   }
   return [...new Set(paths)];
 }
 
 /**
- * Cheap dir-containment check: does `path` start with any allowed dir?
- * Allowed dirs are already canonicalized at Layer 1; we accept that as
- * input invariant and do plain prefix compare here (no realpath calls).
+ * Dir-containment check: does `path` start with any allowed dir?
+ *
+ * Security MAJOR-3 — the inputs MUST already be canonicalized
+ * ({@link canonicalizePathForMatch}). Layer 1 canonicalizes allowed dirs
+ * at settings load; {@link extractDeclaredPaths} canonicalizes path-field
+ * values. This function therefore performs a plain prefix compare, but
+ * the canonical-form invariant is what closes the path-traversal vector.
  */
 function isInsideAllowed(path: string, allowed: string[]): boolean {
   for (const a of allowed) {
@@ -438,6 +458,7 @@ function isInsideAllowed(path: string, allowed: string[]): boolean {
 /**
  * "Deep" = path is inside an allowed dir but ≥3 levels below the
  * matched root (heuristic for "more dangerous than a leaf write").
+ * Same canonical-form invariant as {@link isInsideAllowed}.
  */
 function isDeepInsideAllowed(path: string, allowed: string[]): boolean {
   for (const a of allowed) {
@@ -528,8 +549,13 @@ const RULES: Array<(ctx: ToolInvocationContext) => RiskVerdict | null> = [
     if (!ctx.ownerPluginSandboxRoot) return null;
     const paths = extractDeclaredPaths(ctx);
     if (paths.length === 0) return null;
+    // Canonicalize the sandbox root on the producer's behalf so the
+    // path-traversal defense holds even if a caller forgets to pre-
+    // canonicalize. Both sides of the prefix compare are now bit-
+    // identical canonical strings (security MAJOR-3).
+    const canonicalRoot = canonicalizePathForMatch(ctx.ownerPluginSandboxRoot);
     const allInside = paths.every((p) =>
-      isInsideAllowed(p, [ctx.ownerPluginSandboxRoot!]),
+      isInsideAllowed(p, [canonicalRoot]),
     );
     if (!allInside) return null;
     return { level: "low", reason: "write inside owner plugin sandbox" };
