@@ -1,7 +1,7 @@
 # LVIS 마켓플레이스 퍼블리싱 가이드 (prod)
 
 > **상태**: Phase 2-final + git-based bootstrap 반영 (2026-04-27)
-> **대상**: 사내 prod 마켓플레이스에 플러그인 / MCP 서버를 게시하는 퍼블리셔
+> **대상**: enterprise prod 마켓플레이스에 플러그인 / MCP 서버를 게시하는 퍼블리셔
 > **선행 읽음**: [플러그인 개발 가이드](./plugin-development.md), [Phase 2 마켓플레이스 디자인](../blueprints/phase2-proper-marketplace-design.md)
 > **로컬 dev 루프**: 이 문서는 prod 흐름입니다. dev 환경에서 동일 흐름을 검증하려면 [`local-marketplace-testing.md`](./local-marketplace-testing.md). 마켓플레이스 우회 시나리오는 [`local-plugin-development.md`](./local-plugin-development.md).
 
@@ -88,7 +88,7 @@ LVIS 마켓플레이스는 **세 가지 publish 채널**을 운영합니다:
 
 ## 전제 조건
 
-- LVIS 마켓플레이스 서버 접근 권한 (사내 prod URL 은 운영팀에 문의 / 로컬 dev 는 `http://127.0.0.1:8000`)
+- LVIS 마켓플레이스 서버 접근 권한 (enterprise prod URL 은 운영팀에 문의 / 로컬 dev 는 `http://127.0.0.1:8000`)
 - Channel 1 (bootstrap) 사용 시: 마켓플레이스 서버가 접근 가능한 git 레포에 산출물 커밋 권한 + `lvis-marketplace` 의 `MANAGED_SOURCES` 등록 PR
 - Channel 2 (CLI publish) 사용 시: 퍼블리셔 API 키 발급 (관리자에게 요청)
 - Channel 3 (per-plugin CI) 사용 시: plugin repo 의 `.github/workflows/publish.yml` 가 마켓플레이스 secret (`MARKETPLACE_API_KEY`) 을 가진 상태 + tag push 권한
@@ -100,7 +100,7 @@ LVIS 마켓플레이스는 **세 가지 publish 채널**을 운영합니다:
 
 | 항목 | Channel 1 — Git Bootstrap | Channel 2 — CLI Publish | Channel 3 — Per-plugin CI |
 |------|-------------------------|-------------------------|---------------------------|
-| 권장 시점 | managed 사내 플러그인 (long-lived, 정식 등록) | ad-hoc 외부 플러그인, 단발성 게시, third-party | `lvis-plugin-*` 레포 (저자가 release version 통제) |
+| 권장 시점 | managed enterprise 플러그인 (long-lived, 정식 등록) | ad-hoc 외부 플러그인, 단발성 게시, third-party | `lvis-plugin-*` 레포 (저자가 release version 통제) |
 | 등록 절차 | `lvis-marketplace` 서버의 `MANAGED_SOURCES` 에 슬러그 등록 PR + 운영팀 머지/배포 | 퍼블리셔 API 키 발급 → `lvis-publish login` | repo 에 `MARKETPLACE_API_KEY` secret + `publish.yml` 워크플로우 |
 | 매번 publish 작업 | git push + 서버 재배포 (또는 운영팀 트리거) | `lvis-publish publish <zip> --slug <s>` | plugin.json.version PR + `git tag vX.Y.Z && git push origin vX.Y.Z` |
 | version SoT | git 레포의 plugin.json (서버가 git pull 시점에 읽음) | `lvis-publish publish` 인자 또는 zip 안의 plugin.json | git tag (= plugin.json.version, CI 가 일치 검증) |
@@ -108,7 +108,7 @@ LVIS 마켓플레이스는 **세 가지 publish 채널**을 운영합니다:
 | `installPolicy: "admin"` | bootstrap 자동 `approved` | `pending_review` → admin approve 필요 | `pending_review` → admin approve 필요 (채널 2 와 동일) |
 | 검증 | 서버 부팅 로그 + LVIS 앱 마켓플레이스 탭 | `lvis-publish list/show` + 앱 탭 | GitHub Actions run + 앱 탭 |
 
-기본 권장: **사내 정식 플러그인은 Channel 1**, **`lvis-plugin-*` 레포는 Channel 3**, **외부/단발성은 Channel 2**.
+기본 권장: **enterprise 정식 플러그인은 Channel 1**, **`lvis-plugin-*` 레포는 Channel 3**, **외부/단발성은 Channel 2**.
 
 ---
 
@@ -160,7 +160,7 @@ MARKETPLACE_SIGNING_PRIVATE_KEY_PROD_V2=<base64>
 | 필드 | 비고 |
 |------|------|
 | `$schema` | `"https://${LVIS_SCHEMA_HOST}/schemas/plugin.schema.json"` — 서버가 이 값을 보고 일반 플러그인으로 분류. dev 기본 `lvis.local`, prod 빌드 시 운영팀이 `LVIS_SCHEMA_HOST=<prod-host>` 로 build-time 치환 (lvis-marketplace#54). URL 자체는 fetch 되지 않는 식별자 |
-| `id` | 마켓플레이스 카탈로그 키 (manifest `id` = catalog `slug`). 게시 후 변경 불가. flat (`agent-hub`) 또는 도트 (`com.ep.agent-hub`) 모두 허용 |
+| `id` | 마켓플레이스 카탈로그 키 (manifest `id` = catalog `slug`). 게시 후 변경 불가. flat (`agent-hub`) 또는 도트 (`com.example.agent-hub`) 모두 허용 |
 | `version` | semver. 서버가 `(plugin_id, version)` 유니크 + sha256 immutability 강제 — 동일 버전 + 다른 sha256 은 거절 |
 | `tools` | LLM tool 이름 배열. 다른 플러그인과 namespace 충돌 시 publish 시점 거절 |
 | `installPolicy` | `"admin"` (관리형 — 사용자 임의 제거 불가) / `"user"` (사용자 직접 설치). bootstrap 채널에서 admin policy 는 §채널-선택 표 참고 |
@@ -215,7 +215,7 @@ MCP 서버는 일반 플러그인과 별개의 스키마(`mcp.schema.json`)를 �
 | `env` | 선택 | — | 기본 env 변수. 사용자가 mcp-servers.json 에서 override 가능 |
 | `url` | — | ✅ 필수 | Streamable HTTP 엔드포인트 |
 | `auth` | 선택 | 선택 | `"none"` / `"api-key"` / `"sso"`. api-key/sso 는 LVIS 앱이 사용자에게 prompt |
-| `allowPrivateNetworks` | — | 선택 | loopback / RFC1918 허용 (사내 배포 시) |
+| `allowPrivateNetworks` | — | 선택 | loopback / RFC1918 허용 (enterprise 배포 시) |
 
 ### 시크릿 정책
 
@@ -359,7 +359,7 @@ lvis-publish reject <publish-id> --reason <text> [--json]  # admin: 거절
 
 ## 채널 3 — Per-plugin CI publish (git tag SoT)
 
-> **요약**: 채널 1/2 와 같은 `POST /api/v1/plugins/<slug>/versions` 엔드포인트를 쓰지만 **트리거 surface 와 SoT 가 다름** — 마켓플레이스 폴링도 없고 사람이 CLI 를 돌리지도 않고, plugin repo 의 tag-push 가 직접 publish 를 일으킨다. 모든 `lvis-plugin-*` 레포에 동일하게 적용되는 contract (work-assistant 가 첫 도입, calendar/meeting/ms-graph/ep-api/local-indexer 순차 fan-out).
+> **요약**: 채널 1/2 와 같은 `POST /api/v1/plugins/<slug>/versions` 엔드포인트를 쓰지만 **트리거 surface 와 SoT 가 다름** — 마켓플레이스 폴링도 없고 사람이 CLI 를 돌리지도 않고, plugin repo 의 tag-push 가 직접 publish 를 일으킨다. 모든 `lvis-plugin-*` 레포에 동일하게 적용되는 contract (work-assistant 가 첫 도입, meeting/ms-graph/local-indexer 순차 fan-out).
 >
 > **이 룰의 enforcement 위치**: 각 plugin repo 의 `.github/workflows/publish.yml` 워크플로우. 호스트와 마켓플레이스 backend 는 catalog 만 trust 할 뿐 tag↔manifest 일치를 직접 강제하지 않는다 — discipline 은 publisher CI 에 있다.
 
@@ -408,7 +408,7 @@ git push origin v0.1.25
 > ⚠️ `plugin.json` 과 `dist/` 산출물은 **공개 채널**이며 마켓플레이스 immutability 로 인해 한 번 publish 되면 회수 불가 (admin yank 만 가능, 이미 다운로드한 사용자에겐 영향 없음). 다음을 매니페스트 / 번들에 절대 포함하지 말 것:
 >
 > - API 키, OAuth client secret, 서버 토큰, 내부 인증서, `.env` 파일
-> - 사내-only URL 이나 internal endpoint hard-code (호스트가 `hostApi.getSecret()` 또는 plugin manifest 의 `auth: "api-key"` 로 주입하게 함)
+> - enterprise-only URL 이나 internal endpoint hard-code (호스트가 `hostApi.getSecret()` 또는 plugin manifest 의 `auth: "api-key"` 로 주입하게 함)
 > - 사용자 PII / 테스트 데이터
 >
 > 시크릿 처리 패턴은 §시크릿 정책 (MCP 섹션 line 217 근처) 참조 — 일반 플러그인도 동일하게 적용. backend 의 `(plugin_id, version)` 중복 + sha256 immutability 가드 (§2-5) 가 *이미 publish 된* artifact 의 회수를 막는다는 점을 인지할 것.
@@ -431,7 +431,7 @@ LVIS 앱 → 설정 → **마켓플레이스** 탭:
 
 | 필드 | 값 |
 |------|----|
-| 서버 URL | prod URL (`https://marketplace.lvisai.xyz`) 또는 운영팀이 안내한 사내 URL |
+| 서버 URL | prod URL (`https://marketplace.lvisai.xyz`) 또는 운영팀이 안내한 enterprise URL |
 | API 키 | 보통 빈 값 — read-only catalog/download 엔드포인트는 인증 없음 |
 | 사설 네트워크 허용 | loopback/RFC1918 서버를 사용할 때만 켬 |
 

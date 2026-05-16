@@ -213,12 +213,12 @@ describe("McpServerConfig discriminated union", () => {
       id: "hr",
       transport: "http",
       url: "https://api.example.com/mcp",
-      headers: { "x-tenant": "lge" },
+      headers: { "x-tenant": "example" },
     };
     expect(cfg.transport).toBe("http");
     if (cfg.transport === "http") {
       expect(cfg.url).toBe("https://api.example.com/mcp");
-      expect(cfg.headers?.["x-tenant"]).toBe("lge");
+      expect(cfg.headers?.["x-tenant"]).toBe("example");
     }
   });
 
@@ -1087,7 +1087,7 @@ describe("McpGovernance — header validation", () => {
       id: "ok",
       transport: "http",
       url: "https://good.example.com/mcp",
-      headers: { "x-tenant": "lge", authorization: "Bearer redacted" },
+      headers: { "x-tenant": "example", authorization: "Bearer redacted" },
     });
     expect(result.valid).toBe(true);
   });

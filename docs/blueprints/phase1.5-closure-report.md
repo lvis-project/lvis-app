@@ -177,7 +177,7 @@ IPC 핸들러에서 actor 파라미터가 누락되더라도 최소 권한(user)
 `.ready` sentinel이 stale (이전 세션 mock 테스트의 잔재) — 실제 venv 바이너리는 부재. S1 cold boot physical run을 한 번 완주하면 S3/S4까지 자동 해결. 우회: `rm -rf ~/.lvis/runtime && npx tsx lvis-app/scripts/e2e-phase1.ts S1`.
 
 ### 8.4 Corporate TLS Interception (added 2026-04-14)
-사용자 실행 점검 중 meeting STT가 `SELF_SIGNED_CERT_IN_CHAIN`으로 실패. LG 사내망의 self-signed CA MITM이 원인. **dev bypass(D+E)를 `main.ts` 의 `if (!app.isPackaged)` 가드로 임시 적용** — `NODE_TLS_REJECT_UNAUTHORIZED` 환경변수 값 `0` + Chromium `--ignore-certificate-errors`. **packaged build에는 자동 미적용**이므로 production 진입 전 정식 구현 필수.
+사용자 실행 점검 중 meeting STT가 `SELF_SIGNED_CERT_IN_CHAIN`으로 실패. 조직 프록시의 self-signed CA MITM이 원인. **dev bypass(D+E)를 `main.ts` 의 `if (!app.isPackaged)` 가드로 임시 적용** — `NODE_TLS_REJECT_UNAUTHORIZED` 환경변수 값 `0` + Chromium `--ignore-certificate-errors`. **packaged build에는 자동 미적용**이므로 production 진입 전 정식 구현 필수.
 
 정식 대응: **Option B (OS keystore 런타임 추출, `mac-ca`/`win-ca`)** 권장. 상세 작업 + 체크리스트 + 보안 게이트는 `TODO.md §17` 참조. main.ts:30-44 에 inline TODO 마커 존재.
 
@@ -209,7 +209,7 @@ F-round(§4) 완료 후 사용자 실 Electron 실행 점검 중 **8개 layer에
 - After: **`boot: ready (21 tools, 3 plugins)`** — pageindex 정상 등록, fixtures + Downloads PDF 인덱싱 (BM25 + FTS5 + kiwi)
 - vitest 110/110, TSC 0 errors, 회귀 0
 
-**한계 (Phase 2 이월)**: 사내망 HF 다운로드 차단으로 vector layer 비활성 (BM25-only). 사외망 1회 cold boot으로 모델 영구 cache → 이후 사내망에서도 vector 활성. Phase 2에서 HF mirror 또는 pre-baked tarball 방식 IT 협의 필요.
+**한계 (Phase 2 이월)**: 네트워크 제한 환경에서 HF 다운로드 차단으로 vector layer 비활성 (BM25-only). 외부 네트워크 1회 cold boot으로 모델 영구 cache → 이후 제한 환경에서도 vector 활성. Phase 2에서 HF mirror 또는 pre-baked tarball 방식 검토 필요.
 
 ---
 

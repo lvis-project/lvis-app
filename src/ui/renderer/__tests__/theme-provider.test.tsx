@@ -330,7 +330,7 @@ describe("<ThemeProvider>", () => {
     const call = (api.notifyPluginTheme as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(call.tokens).toBeDefined();
     expect(typeof call.tokens["--lvis-bg"]).toBe("string");
-    expect(call.tokens["--lvis-primary"]).toContain("253");  // violet vivid purple
+    expect(call.tokens["--lvis-primary"]).toContain("253");  // vivid purple
   });
 });
 

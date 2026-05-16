@@ -1,16 +1,16 @@
 import type { ThemeBundle } from "./types.js";
 
 /**
- * Violet Dark bundle — absorbs the current `[data-theme="dark"][data-chat-theme="lg"]` variant.
+ * Violet Dark bundle — dark shell with warm-grey surface and vivid-purple accent.
  *
- * Surface: LG warm-grey dark palette (Grey-1 base, Grey-7 text).
- * Accent:  same as Violet Light (vivid-purple, LG red, lilac bubble) — brand
- *          reads consistently across shells.
+ * Surface: warm-grey dark palette (Grey-1 base, Grey-7 text).
+ * Accent:  vivid-purple primary, warm red destructive, lilac user bubble.
+ *          Reads consistently across shells.
  */
-export const lgeDarkBundle: ThemeBundle = {
+export const violetDarkBundle: ThemeBundle = {
   id: "violet-dark",
   name: "Violet Dark",
-  description: "다크 셸 + LG 웜그레이 서피스 + 비비드 퍼플 액센트",
+  description: "다크 셸 + 웜그레이 서피스 + 비비드 퍼플 액센트",
   shell: "dark",
   highContrast: false,
   tokens: {
@@ -32,7 +32,7 @@ export const lgeDarkBundle: ThemeBundle = {
     "muted-foreground":       "40 8% 64%",     /* warm light gray — timestamps */
     accent:                   "30 15% 28%",    /* warmer + brighter — hover / active accent */
     "accent-foreground":      "44 37% 94%",
-    destructive:              "1 98% 59%",     /* #FD312E — LG red STOP */
+    destructive:              "1 98% 59%",     /* #FD312E — red STOP */
     "destructive-foreground": "0 0% 100%",
     warning:                  "38 92% 62%",     /* amber-400 ish — vivid on warm-dark grey */
     "warning-foreground":     "0 0% 10%",

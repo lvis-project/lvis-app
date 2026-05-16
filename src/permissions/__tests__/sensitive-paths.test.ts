@@ -33,7 +33,7 @@ describe("SENSITIVE_PATH_PATTERNS", () => {
     expect(SENSITIVE_PATH_PATTERNS).toContain("**/.kube/config");
   });
 
-  it("contains corporate/LVIS-specific additions", () => {
+  it("contains LVIS-specific additions", () => {
     expect(SENSITIVE_PATH_PATTERNS).toContain("**/.lvis/certs/**");
     expect(SENSITIVE_PATH_PATTERNS).toContain("**/.lvis/secrets/**");
     expect(SENSITIVE_PATH_PATTERNS).toContain("**/.lvis/keys/**");
@@ -117,12 +117,12 @@ describe("isSensitivePath — positive matches", () => {
     expect(isSensitivePath("/home/ken/.kube/config")).toBe("**/.kube/config");
   });
 
-  it("matches /Users/example/.lvis/certs/corp-ca.pem (corporate addition)", () => {
+  it("matches /Users/example/.lvis/certs/corp-ca.pem (LVIS addition)", () => {
     const result = isSensitivePath("/Users/example/.lvis/certs/corp-ca.pem");
     expect(result).toBe("**/.lvis/certs/**");
   });
 
-  it("matches /Users/example/.lvis/secrets/openai.key (corporate addition)", () => {
+  it("matches /Users/example/.lvis/secrets/openai.key (LVIS addition)", () => {
     expect(isSensitivePath("/Users/example/.lvis/secrets/openai.key")).toBe(
       "**/.lvis/secrets/**",
     );
@@ -135,7 +135,7 @@ describe("isSensitivePath — positive matches", () => {
     expect(isSensitivePath("/Users/example/.lvis/permissions/reviewer-cache.jsonl")).toBe("**/.lvis/permissions/**");
   });
 
-  it("matches /Users/example/.lvis/lvis-secrets.json (corporate addition)", () => {
+  it("matches /Users/example/.lvis/lvis-secrets.json (LVIS addition)", () => {
     expect(isSensitivePath("/Users/example/.lvis/lvis-secrets.json")).toBe(
       "**/.lvis/lvis-secrets.json",
     );
