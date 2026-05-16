@@ -24,7 +24,7 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, watch, copyFileSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, watch, copyFileSync, mkdirSync, readFileSync } from "node:fs";
 import { waitForAllFirstBuilds } from "./lib/dev-watcher-gate.mjs";
 import { homedir } from "node:os";
 import { basename, dirname, resolve } from "node:path";
@@ -691,21 +691,22 @@ async function main() {
     "--watch=forever",
   ]);
 
-  // Styles (tailwind --watch)
-  // Force-delete any pre-existing dist/src/styles.css before spawning the
-  // watcher. The first-build gate at waitForAllFirstBuilds() relies on
-  // output-file mtime ≥ launcherStartedAt, but tailwindcss v4 skips the
-  // write when the resolved CSS is identical to the prior build (idempotent
-  // optimization). Without this delete, every subsequent dev run hangs at
-  // "OK preload/plugin-preload/main/renderer — 1 remaining: styles" because
-  // the stale file's mtime never advances. Force-delete guarantees the next
-  // build is a fresh write.
-  rmSync(resolve(repoRoot, "dist/src/styles.css"), { force: true });
+  // Styles (tailwind one-shot build → --watch)
+  // tailwindcss v4 skips file writes when the resolved CSS is identical to
+  // the prior build (intentional incremental optimization — "100x faster in
+  // microseconds" per v4 announcement). The first-build mtime gate at
+  // waitForAllFirstBuilds() then never sees mtime advance and times out.
+  // Fix via the public CLI contract: run `tailwindcss build` (one-shot) to
+  // guarantee a fresh write that advances mtime, THEN spawn --watch for
+  // ongoing recompilation. Two-step is the documented build → watch flow;
+  // no reliance on side effects of watcher behavior.
+  const stylesArgs = ["-i", "src/styles.css", "-o", "dist/src/styles.css"];
+  spawnSync(resolveLocalBin("tailwindcss"), [...stylesArgs], {
+    cwd: repoRoot,
+    stdio: "inherit",
+  });
   spawnWatcher("styles", resolveLocalBin("tailwindcss"), [
-    "-i",
-    "src/styles.css",
-    "-o",
-    "dist/src/styles.css",
+    ...stylesArgs,
     "--watch=always",
   ]);
 
