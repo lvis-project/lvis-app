@@ -44,6 +44,13 @@ export interface LlmTabProps {
   fallbackOpen: boolean;
   setFallbackOpen: (updater: boolean | ((o: boolean) => boolean)) => void;
   onSaved: () => void;
+  /**
+   * Called after the user changes an immediate-apply control (vendor /
+   * thinking toggle / reasoning slider). The dialog debounces these and
+   * persists via `s.save("llm")` so the user gets immediate-feel
+   * application without spamming saves.
+   */
+  onImmediateChange?: () => void;
 }
 
 export function LlmTab(props: LlmTabProps) {
@@ -72,14 +79,26 @@ export function LlmTab(props: LlmTabProps) {
     fallbackOpen,
     setFallbackOpen,
     onSaved,
+    onImmediateChange,
   } = props;
   const vendorInfo = VENDORS.find((v) => v.id === vendor) ?? VENDORS[0];
 
   return (
     <div className="space-y-4 pt-4">
       <div className="space-y-2">
-        <Label htmlFor="vendor-select">벤더</Label>
-        <Select value={vendor} onValueChange={setVendor}>
+        <Label htmlFor="vendor-select" className="flex items-center gap-2">
+          벤더
+          <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
+            즉시 적용
+          </span>
+        </Label>
+        <Select
+          value={vendor}
+          onValueChange={(v) => {
+            setVendor(v);
+            onImmediateChange?.();
+          }}
+        >
           <SelectTrigger id="vendor-select" className="w-full">
             <SelectValue placeholder="벤더 선택" />
           </SelectTrigger>
@@ -152,10 +171,18 @@ export function LlmTab(props: LlmTabProps) {
       <div className="space-y-2"><Label className="text-sm font-medium">모델</Label><Input data-testid="llm-model-input" value={model} onChange={(e) => setModel(e.target.value)} placeholder={vendorInfo.defaultModel} /></div>
       <div className="space-y-2 rounded-md border p-3">
         <Label className="flex items-center justify-between text-sm font-medium">
-          <span>Extended Thinking / Reasoning</span>
+          <span className="flex items-center gap-2">
+            Extended Thinking / Reasoning
+            <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
+              즉시 적용
+            </span>
+          </span>
           <Switch
             checked={enableThinking}
-            onCheckedChange={setEnableThinking}
+            onCheckedChange={(c) => {
+              setEnableThinking(c);
+              onImmediateChange?.();
+            }}
             aria-label="Extended Thinking / Reasoning"
           />
         </Label>
@@ -174,11 +201,10 @@ export function LlmTab(props: LlmTabProps) {
               max={REASONING_EFFORT_STEPS.length - 1}
               step={1}
               value={[budgetToEffortIndex(thinkingBudget)]}
-              onValueChange={([value]) =>
-                setThinkingBudget(
-                  REASONING_EFFORT_STEPS[value ?? 0]!.budget,
-                )
-              }
+              onValueChange={([value]) => {
+                setThinkingBudget(REASONING_EFFORT_STEPS[value ?? 0]!.budget);
+                onImmediateChange?.();
+              }}
               aria-label="Reasoning effort"
             />
             <div className="flex justify-between text-[10px] text-muted-foreground">
