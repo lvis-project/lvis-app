@@ -1,7 +1,7 @@
 /**
  * Phase 5 hook tests — use-chat-state + sibling hooks.
  *
- * Fix 2 (PR #98): Unit tests for the domain hooks extracted from App.tsx.
+ * Unit tests for the domain hooks extracted from App.tsx.
  * Focuses on the pieces most at risk of regressing:
  *   - use-chat-state subscribes on mount, unsubs on unmount, no double-subscribe
  *   - use-context-budget arithmetic is deterministic
@@ -149,22 +149,20 @@ describe("useChatState", () => {
         type: "compact_notice",
         removedMessages: 7,
         freedTokens: 123,
-        tier: "auto-compact",
+        trigger: "auto-compact",
         summary: "이전 주제 요약",
       });
     });
 
-    // Since 5b19e05c, compact_notice with freedTokens > 0 also emits a
-    // synthetic `context_usage` carrier after the checkpoint so the ring
-    // refreshes. The intent of this test is the checkpoint payload — not
-    // its position — so locate it by kind.
+    // The intent of this test is the checkpoint payload; context usage is
+    // updated only when the engine includes `estimatedAfter`.
     await waitFor(() => {
       const checkpoint = result.current.entries.findLast((e) => e.kind === "checkpoint");
       expect(checkpoint).toMatchObject({
         kind: "checkpoint",
         removedMessages: 7,
         freedTokens: 123,
-        tier: "auto-compact",
+        trigger: "auto-compact",
         summary: "이전 주제 요약",
       });
     });
@@ -496,11 +494,16 @@ describe("useSessions (streaming guard)", () => {
     expect(result.current.currentSessionId).toBe("manual-sess");
   });
 
-  it("hydrates the latest persisted session on startup when active loop is empty", async () => {
+  it("hydrates the explicit active main session on startup when active loop is empty", async () => {
     const { api } = makeMockLvisApi({
       currentSession: "fresh-empty",
       history: { sessionId: "fresh-empty", messages: [] },
       sessions: [{ id: "persisted-sess", modifiedAt: new Date().toISOString(), title: "Persisted" }],
+      mainActiveState: {
+        mainActiveSessionId: "persisted-sess",
+        mainActiveMode: "resume",
+        updatedAt: new Date().toISOString(),
+      },
     });
     api.chatSessionHistory.mockResolvedValueOnce({
       ok: true,
@@ -536,6 +539,11 @@ describe("useSessions (streaming guard)", () => {
           { index: 1, role: "assistant", content: "진행 중 답변" },
         ],
       },
+      mainActiveState: {
+        mainActiveSessionId: "active-sess",
+        mainActiveMode: "resume",
+        updatedAt: "2026-05-11T03:00:00.000Z",
+      },
     });
     const applyInitial = vi.fn();
 
@@ -550,64 +558,148 @@ describe("useSessions (streaming guard)", () => {
     });
   });
 
-  it("hydrates today's latest persisted session on startup when active loop is empty", async () => {
-    vi.useFakeTimers({ toFake: ["Date"] });
-    try {
-      vi.setSystemTime(new Date("2026-05-11T03:00:00.000Z"));
-      const { api } = makeMockLvisApi({
-        currentSession: "fresh-empty",
-        history: { sessionId: "fresh-empty", messages: [] },
-        sessions: [
-          { id: "today-early", modifiedAt: "2026-05-10T23:00:00.000Z", title: "Today early" },
-          { id: "yesterday-late", modifiedAt: "2026-05-10T14:59:59.000Z", title: "Yesterday late" },
-          { id: "today-late", modifiedAt: "2026-05-11T02:30:00.000Z", title: "Today late" },
-        ],
-      });
-      api.chatSessionHistory.mockResolvedValueOnce({
-        ok: true,
+  it("ignores active routine history on startup and resumes the explicit active main session", async () => {
+    const { api } = makeMockLvisApi({
+      currentSession: "routine-sess",
+      history: {
+        sessionId: "routine-sess",
+        sessionKind: "routine",
+        sessionTitle: "Daily routine",
         messages: [
-          { index: 0, role: "user", content: "오늘 마지막 질문" },
-          { index: 1, role: "assistant", content: "오늘 마지막 답변" },
+          { index: 0, role: "user", content: "루틴 질문" },
+          { index: 1, role: "assistant", content: "루틴 답변" },
         ],
-      });
-      const applyInitial = vi.fn();
+      },
+      mainActiveState: {
+        mainActiveSessionId: "main-sess",
+        mainActiveMode: "resume",
+        updatedAt: "2026-05-11T03:00:00.000Z",
+      },
+      historyBySession: {
+        "main-sess": {
+          sessionId: "main-sess",
+          sessionKind: "main",
+          sessionTitle: "Main session",
+          messages: [
+            { index: 0, role: "user", content: "메인 질문" },
+            { index: 1, role: "assistant", content: "메인 답변" },
+          ],
+        },
+      },
+    });
+    const applyInitial = vi.fn();
 
-      const { result } = renderHook(() =>
-        useSessions(api as unknown as LvisApi, applyInitial),
-      );
+    const { result } = renderHook(() =>
+      useSessions(api as unknown as LvisApi, applyInitial),
+    );
 
-      await waitFor(() => expect(api.chatSessionResume).toHaveBeenCalledWith("today-late"));
-      expect(api.chatSessionResume).not.toHaveBeenCalledWith("yesterday-late");
-      expect(result.current.currentSessionId).toBe("today-late");
-    } finally {
-      vi.useRealTimers();
-    }
+    await waitFor(() => expect(api.chatSessionResume).toHaveBeenCalledWith("main-sess"));
+    expect(applyInitial).toHaveBeenCalledWith([
+      { kind: "user", text: "메인 질문" },
+      { kind: "assistant", text: "메인 답변", streaming: false, route: undefined },
+    ]);
+    expect(result.current.currentSessionId).toBe("main-sess");
+    expect(result.current.currentSessionKind).toBe("main");
+    expect(result.current.currentSessionTitle).toBe("Main session");
   });
 
-  it("does not resume a prior-day session on startup when today has no persisted session", async () => {
-    vi.useFakeTimers({ toFake: ["Date"] });
-    try {
-      vi.setSystemTime(new Date("2026-05-11T03:00:00.000Z"));
-      const { api } = makeMockLvisApi({
-        currentSession: "fresh-empty",
-        history: { sessionId: "fresh-empty", messages: [] },
-        sessions: [
-          { id: "yesterday-late", modifiedAt: "2026-05-10T14:59:59.000Z", title: "Yesterday late" },
+  it("resets routine in-memory history to a blank main session when active main state is fresh", async () => {
+    const { api } = makeMockLvisApi({
+      currentSession: "routine-sess",
+      history: {
+        sessionId: "routine-sess",
+        sessionKind: "routine",
+        messages: [
+          { index: 0, role: "user", content: "루틴 질문" },
         ],
+      },
+      mainActiveState: {
+        mainActiveSessionId: null,
+        mainActiveMode: "fresh",
+        updatedAt: "2026-05-11T03:00:00.000Z",
+      },
+    });
+    api.chatGetHistory.mockReset();
+    api.chatGetHistory
+      .mockResolvedValueOnce({
+        sessionId: "routine-sess",
+        sessionKind: "routine",
+        messages: [{ index: 0, role: "user", content: "루틴 질문" }],
+      })
+      .mockResolvedValueOnce({
+        sessionId: "fresh-main",
+        sessionKind: "main",
+        messages: [],
       });
-      const applyInitial = vi.fn();
+    const applyInitial = vi.fn();
 
-      const { result } = renderHook(() =>
-        useSessions(api as unknown as LvisApi, applyInitial),
-      );
+    const { result } = renderHook(() =>
+      useSessions(api as unknown as LvisApi, applyInitial),
+    );
 
-      await waitFor(() => expect(api.chatSessions).toHaveBeenCalled());
-      expect(api.chatSessionResume).not.toHaveBeenCalled();
-      expect(applyInitial).toHaveBeenCalledWith([]);
-      expect(result.current.currentSessionId).toBe("fresh-empty");
-    } finally {
-      vi.useRealTimers();
-    }
+    await waitFor(() => expect(api.chatNew).toHaveBeenCalledTimes(1));
+    expect(applyInitial).toHaveBeenCalledWith([]);
+    expect(result.current.currentSessionId).toBe("fresh-main");
+    expect(result.current.currentSessionKind).toBe("main");
+  });
+
+  it("does not auto-resume the latest listed session when active main state is fresh", async () => {
+    const { api } = makeMockLvisApi({
+      currentSession: "fresh-empty",
+      history: { sessionId: "fresh-empty", messages: [] },
+      sessions: [
+        { id: "today-early", modifiedAt: "2026-05-10T23:00:00.000Z", title: "Today early" },
+        { id: "yesterday-late", modifiedAt: "2026-05-10T14:59:59.000Z", title: "Yesterday late" },
+        { id: "today-late", modifiedAt: "2026-05-11T02:30:00.000Z", title: "Today late" },
+      ],
+      mainActiveState: {
+        mainActiveSessionId: null,
+        mainActiveMode: "fresh",
+        updatedAt: "2026-05-11T03:00:00.000Z",
+      },
+    });
+    const applyInitial = vi.fn();
+
+    const { result } = renderHook(() =>
+      useSessions(api as unknown as LvisApi, applyInitial),
+    );
+
+    await waitFor(() => expect(api.chatMainActiveState).toHaveBeenCalled());
+    expect(api.chatSessionResume).not.toHaveBeenCalled();
+    expect(applyInitial).toHaveBeenCalledWith([]);
+    expect(result.current.currentSessionId).toBe("fresh-empty");
+  });
+
+  it("resumes the explicit active main session regardless of modified date", async () => {
+    const { api } = makeMockLvisApi({
+      currentSession: "fresh-empty",
+      history: { sessionId: "fresh-empty", messages: [] },
+      sessions: [
+        { id: "today-late", modifiedAt: "2026-05-11T02:30:00.000Z", title: "Today late" },
+        { id: "yesterday-late", modifiedAt: "2026-05-10T14:59:59.000Z", title: "Yesterday late" },
+      ],
+      mainActiveState: {
+        mainActiveSessionId: "yesterday-late",
+        mainActiveMode: "resume",
+        updatedAt: "2026-05-11T03:00:00.000Z",
+      },
+    });
+    api.chatSessionHistory.mockResolvedValueOnce({
+      ok: true,
+      messages: [
+        { index: 0, role: "user", content: "명시 active 질문" },
+        { index: 1, role: "assistant", content: "명시 active 답변" },
+      ],
+    });
+    const applyInitial = vi.fn();
+
+    const { result } = renderHook(() =>
+      useSessions(api as unknown as LvisApi, applyInitial),
+    );
+
+    await waitFor(() => expect(api.chatSessionResume).toHaveBeenCalledWith("yesterday-late"));
+    expect(api.chatSessionResume).not.toHaveBeenCalledWith("today-late");
+    expect(result.current.currentSessionId).toBe("yesterday-late");
   });
 });
 

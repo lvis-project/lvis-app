@@ -6,12 +6,12 @@
  * compact 결과를 단순 success/failure 가 아닌 다음 4 상태로 구분한다:
  *
  *   - `SUMMARIZED` — 정상 LLM 구조화 요약. 가장 일반적인 결과.
- *   - `CONTENT_TRUNCATED` — Layer A/B (per-message truncation + reverse-budget)
+ *   - `CONTENT_TRUNCATED` — per-message truncation + reverse-budget truncation
  *     만으로 충분히 reduce 되어 LLM 호출 skip. 단일 거대 tool_result 가
  *     temp 파일로 격리된 케이스. 사용자에게 원본 경로를 노출.
  *   - `NOOP` — history 가 충분히 작아서 reduce 불필요. preserveRecent 안에
  *     모두 들어가는 정상 케이스. 사용자에게 안내 메시지.
- *   - `REDUCED_INSUFFICIENT_FORCED` — Layer A+B+C 모두 동작 후에도 over-budget
+ *   - `REDUCED_INSUFFICIENT_FORCED` — truncation + summary 모두 동작 후에도 over-budget
  *     (LLM summary 실패 또는 boundary stub 자체가 거대). last-resort 로
  *     oldest 50% 강제 raw truncation. 사용자에게 명시적 경고.
  *

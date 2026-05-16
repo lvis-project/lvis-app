@@ -53,8 +53,7 @@ export function getModelPricing(vendor: LLMVendor, model: string): ModelPricing 
  *     읽어야 하며, 별도로 합산하면 double-count.
  *
  * Adapters MUST normalize their provider's shape into this convention
- * BEFORE calling computeCost. See `reference_token_session_4source.md` §1
- * for the per-vendor field mapping.
+ * BEFORE calling computeCost.
  */
 export interface UsageForCost {
   inputTokens: number;

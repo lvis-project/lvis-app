@@ -6,12 +6,12 @@
  *
  * 호출자는:
  *   - `history` append (assistant round commit)
- *   - context_error / stream_error / interrupted 결과 처리 (Layer 0 preflight 후 도달 시 사용자 안내)
+ *   - context_error / stream_error / interrupted 결과 처리 (token preflight 후 도달 시 사용자 안내)
  *   - callbacks 트리거 (onAssistantRound 등)
  * 를 담당한다. 본 모듈은 LLM 추상화 + 에러 분류 + abort 처리만 관여.
  *
- * PR-2-F-1 정정: reactive compact 재시도 인프라 (`reactiveCompacted` flag) 제거 —
- * Layer 0 preflight (`runPreflightGuard`) 가 사전 차단하므로 mid-loop 압축 retry 불필요.
+ * Reactive compact retry is intentionally absent —
+ * token preflight (`runPreflightGuard`) 가 사전 차단하므로 mid-loop 압축 retry 불필요.
  * estimator drift 로 도달 시 호출자가 사용자 안내 + turn 종료.
  */
 import type { LLMProvider, StreamEvent, ToolCallBlock, ToolSchema, GenericMessage, TokenUsage, ThinkingBlock } from "../llm/types.js";
@@ -100,7 +100,7 @@ export async function collectRoundStream(
   let usage: TokenUsage | undefined;
   let sawMessageComplete = false;
 
-  // PR-3 (v3 §4.2): provider 호출 직전에 marked tool_result 를 stub 으로 변환.
+  // Provider 호출 직전에 marked tool_result 를 stub 으로 변환.
   // memory 의 verbatim history 와 wire format 을 분리 — single source of truth.
   const wireMessages = stubMarkedToolResults(messages);
 
@@ -139,7 +139,7 @@ export async function collectRoundStream(
         case "error": {
           if (abortSignal?.aborted) return { kind: "interrupted", text };
           if (isContextLengthError(event.error)) {
-            // Layer 0 preflight 가 사전 차단하지만 estimator drift 시 도달.
+            // Token preflight 가 사전 차단하지만 estimator drift 시 도달.
             // 호출자 (queryLoop) 는 사용자 안내 후 turn 종료 — retry 없음.
             return { kind: "context_error", errorMessage: event.error };
           }

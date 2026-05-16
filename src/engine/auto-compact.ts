@@ -6,7 +6,7 @@
  *
  * 핵심 원칙:
  * - tool_use/tool_result 쌍은 절대 분리하지 않음
- * - 최근 N개 메시지는 보존 (PR-1a 에서 DEFAULT_CONFIG.preserveRecentMessages 4 → 12 상향)
+ * - 최근 N개 메시지는 보존 (DEFAULT_CONFIG.preserveRecentMessages = 12)
  * - 요약은 파일 참조, 진행 중인 작업, 핵심 결정을 보존
  */
 import type { GenericMessage, TokenUsage, LLMVendor, UserContentPart } from "./llm/types.js";
@@ -19,8 +19,8 @@ import { getUsableContext, getPreflightThreshold } from "../shared/context-budge
 //
 // Single source of truth for context windows lives in
 // `shared/pricing-data.ts:DEFAULT_PRICING`. This module defers all lookups
-// there. The previous in-tree `MODEL_CONTEXT_WINDOWS` table was removed in
-// the 2026-05 SoT consolidation (see `reference_token_session_4source.md`).
+// there. The previous in-tree `MODEL_CONTEXT_WINDOWS` table was removed so
+// pricing and context-window data share one maintained source.
 
 /**
  * Model identifier → effective context window in tokens.
@@ -43,17 +43,18 @@ export function getModelContextWindow(vendor: LLMVendor, model: string): number 
  * as the denominator for "fullness" math. Subtracts Cline-style fixed
  * buffer (output + safety reservation). See {@link getUsableContext}.
  *
- * Use this for `shouldCompact`, `decideRotation`, and any UI ring that
- * should hit 100% at the actual rotation point rather than at raw context.
+ * Use this for compact decisions and any UI ring that should hit 100% at the
+ * compact threshold rather than at the raw context window.
  */
 export function getModelUsableContext(vendor: LLMVendor, model: string): number {
   return getUsableContext(getModelContextWindow(vendor, model));
 }
 
 /**
- * Layer 0 pre-flight 트리거 (절대 token count). v3 §6 보수 default —
+ * Token preflight trigger (절대 token count). Same-session checkpoint
+ * compaction conservative default —
  * 64K → 50% / 128K → 55% / 200K → 60% / 1M → 65% / other → 60%.
- * 호출자: queryLoop 의 step 5/6 사이 (`infinity-session-redesign-v3.md` §4.1).
+ * 호출자: queryLoop 의 step 5/6 사이.
  *
  * **Dev override**: `LVIS_DEV_PREFLIGHT_OVERRIDE` 환경변수가 양의 정수면 그
  * 값을 그대로 사용. 실제 200K context 를 채우지 않고도 compact 시나리오 (130%
@@ -61,7 +62,7 @@ export function getModelUsableContext(vendor: LLMVendor, model: string): number 
  * 무시 — bypass 위험 차단.
  *
  * Example: `LVIS_DEV_PREFLIGHT_OVERRIDE=5000 bun run start` 로 실행하면
- * preflight 가 5K tokens 로 떨어져 짧은 대화만으로도 Layer 0 트리거 가능.
+ * preflight 가 5K tokens 로 떨어져 짧은 대화만으로도 auto compact 트리거 가능.
  *
  * @example
  * // 200K Sonnet → usable 160K → 60% × 160K = 96K trigger
@@ -113,9 +114,8 @@ export function getRuntimePreflightOverride(): number | null {
   return _runtimePreflightOverride;
 }
 
-// PR-2-F-2: 3-tier rotation 폐지 — `decideRotation` 함수 + `RotationDecision` interface +
-// `CheckpointTriggerType` type 모두 제거. Layer 0 preflight + Layer 2 LLM compact +
-// Layer 3 same-session checkpoint chain (Copilot 패턴) 으로 fork-based rotation 대체.
+// Compact pipeline: token preflight -> LLM compact -> same-session checkpoint.
+// Automatic session splitting is not part of this model.
 
 // ─── Types ──────────────────────────────────────────
 
@@ -161,16 +161,16 @@ export function estimateMessagesTokens(messages: GenericMessage[]): number {
 }
 
 
-// ─── Layer 1: Mark Stale Tool Results (memory-verbatim, serialization-stub) ──
+// ─── Mark Stale Tool Results (memory-verbatim, serialization-stub) ───────────
 //
-// PR-3 정정 — `infinity-session-redesign-v3.md` §4.2 의 *full* 패턴.
-// 이전 (PR-2 까지) 동작: content 즉시 stub 으로 교체 → memory/wire/disk 단일 source.
-// 신규 (PR-3) 동작: meta.compactedAt 만 set, content *verbatim* 보존.
-//   - memory: verbatim (UI / Layer 3 preview 가 원본 표시 가능)
+// Same-session checkpoint compaction uses the full marker pattern.
+// 이전 동작: content 즉시 stub 으로 교체 → memory/wire/disk 단일 source.
+// 현재 동작: meta.compactedAt 만 set, content *verbatim* 보존.
+//   - memory: verbatim (UI / checkpoint preview 가 원본 표시 가능)
 //   - wire: `wire-serialize.ts:stubMarkedToolResults` 가 provider 호출 직전 stub 변환
 //   - disk: 동일 helper 가 saveSession 직전 stub 변환 (R4 mitigation 유지)
 //
-// `meta.stripped` / `meta.strippedAt` / `meta.originalLength` 는 PR-3 에서 *완전 제거됨* (호환성 layer 없음).
+// `meta.stripped` / `meta.strippedAt` / `meta.originalLength` 는 제거됨 (호환성 layer 없음).
 // 단일 marker `meta.compactedAt` 가 "이 message 는 wire/disk 직렬화 시 stub 으로 변환되어야 함" 을 의미.
 
 export interface MarkStaleConfig {
@@ -203,7 +203,7 @@ export function buildToolResultStub(toolName: string | undefined, origLen: numbe
 }
 
 /**
- * Layer 1 — preventive, LLM-free part marking. Memory verbatim 보존.
+ * Preventive, LLM-free part marking. Memory verbatim 보존.
  *
  * - 최근 `preserveRecentToolResults` 개는 mark 면제 (assistant 가 직접 참조 가능)
  * - content 길이가 `minStubThreshold` 미만이면 mark 면제 (직렬화 시 절약 ≈ 0)
@@ -263,7 +263,7 @@ export function markStaleToolResults(
       toolUseId: msg.toolUseId,
       toolName: msg.toolName,
       isError: msg.isError,
-      content: msg.content, // *verbatim* — content 보존 (PR-3 핵심)
+      content: msg.content, // *verbatim* — content 보존
       meta: {
         ...(msg.meta ?? {}),
         compactedAt: nowIso,
@@ -339,4 +339,3 @@ export function isContextLengthError(err: unknown): boolean {
 
   return false;
 }
-

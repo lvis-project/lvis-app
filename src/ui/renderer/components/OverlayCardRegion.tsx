@@ -4,13 +4,11 @@
 // Never injects entries into chat history; routine sources remain isolated.
 //
 // Active item is resolved from OverlayContext queue. App.tsx also maintains an
-// overlayItemsRef Map for items that persist after dismiss — e.g. to keep the
-// routine session path available for RoutineSessionView modal after the overlay card
-// is removed from the queue (notification-only routines omit routineSessionPath).
+// overlayItemsRef Map for items that persist after dismiss.
 //
 // Two source variants:
-//   - routine: primary action opens RoutineSessionView modal ("결과 보기")
-//     — only shown when routineSessionPath is present (notification-only routines hide the button)
+//   - routine: primary action opens the exact routine conversation ("결과 보기")
+//     — only shown when routineSessionId is present (notification-only routines hide the button)
 //   - plugin (insertion-type): primary action deferred to onPluginPrimaryAction prop
 
 import { useOverlayContext } from "../context/OverlayContext.js";
@@ -34,8 +32,8 @@ export function OverlayCardRegion({ onPluginPrimaryAction, onRoutineAcknowledge 
 
   if (active.source.kind === "routine") {
     const { routineId, firedAt } = active.source;
-    // Only show "결과 보기" when there is a JSONL session file (notification-only routines have none)
-    const hasJsonl = !!active.routineSessionPath;
+    // Only show "결과 보기" when there is a routine conversation session.
+    const hasSession = !!active.routineSessionId;
     return (
       <div
         data-testid="overlay-card-region"
@@ -56,9 +54,11 @@ export function OverlayCardRegion({ onPluginPrimaryAction, onRoutineAcknowledge 
               if (!active.running) onRoutineAcknowledge?.(routineId, firedAt);
               dismiss(active.id);
             }}
-            onPrimaryAction={hasJsonl ? () => {
-              onRoutineAcknowledge?.(routineId, firedAt);
-              openSession(routineId, firedAt);
+            onPrimaryAction={hasSession ? () => {
+              void (async () => {
+                const opened = await openSession(active.routineSessionId!);
+                if (opened) onRoutineAcknowledge?.(routineId, firedAt);
+              })();
             } : undefined}
             primaryActionLabel="결과 보기"
             kind="routine"
