@@ -48,33 +48,74 @@ const _INVARIANT: Partial<Record<LvisTokenName, string>> = {
 };
 
 /**
+ * Build a color-mix() tinted surface value.
+ *
+ * @param color  - Resolved CSS color for the tint (e.g. `hsl(217, 91%, 60%)`)
+ * @param base   - Resolved CSS color for the base surface (e.g. `hsl(222, 84%, 5%)`)
+ * @param pct    - Percentage of `color` to mix in (remainder is `base`)
+ */
+function _tint(color: string, base: string, pct: number): string {
+  return `color-mix(in srgb, ${color} ${pct}%, ${base})`;
+}
+
+/**
  * Derive the full --lvis-* plugin token map from an active ThemeBundle.
  *
  * Bundles are self-contained — no legacy axis resolution needed.
  */
 export function bundleToPluginTokens(bundle: ThemeBundle): Record<LvisTokenName, string> {
   const t = bundle.tokens;
+  const isLight = bundle.shell === "light";
+  const isHighContrast = bundle.highContrast;
+
+  // Resolved base colors reused for derivations.
+  const primary   = tripleToHsl(t.primary);
+  const surface   = tripleToHsl(t.card);
+  const danger    = tripleToHsl(t.destructive);
+  const warning   = tripleToHsl(t.warning);
+  const success   = tripleToHsl(t.success);
+  const secondary = tripleToHsl(t.secondary);
+  const fg        = tripleToHsl(t.foreground);
+  const ring      = tripleToHsl(t.ring);
+
+  // Mix percentages scale by shell mode and high-contrast requirement.
+  // high-contrast: bump all to higher pct for a11y (WCAG AA+ readable tints).
+  const primarySubtlePct = isHighContrast ? 24 : isLight ? 14 : 18;
+  const primaryStrongPct = isHighContrast ? 40 : isLight ? 28 : 32;
+  const statusSubtlePct  = isHighContrast ? 24 : 14;
+  const hoverPct         = isHighContrast ? 14 : isLight ?  6 : 10;
+
   const bundleTokens: Partial<Record<LvisTokenName, string>> = {
     "--lvis-bg":              tripleToHsl(t.background),
-    "--lvis-surface":         tripleToHsl(t.card),
+    "--lvis-surface":         surface,
     "--lvis-surface-overlay": tripleToHsl(t.popover),
-    "--lvis-fg":              tripleToHsl(t.foreground),
+    "--lvis-fg":              fg,
     "--lvis-fg-muted":        tripleToHsl(t["muted-foreground"]),
     "--lvis-fg-disabled":     tripleToHsl(t["muted-foreground"]),
-    "--lvis-primary":         tripleToHsl(t.primary),
+    "--lvis-primary":         primary,
     "--lvis-primary-fg":      tripleToHsl(t["primary-foreground"]),
-    "--lvis-secondary":       tripleToHsl(t.secondary),
+    "--lvis-secondary":       secondary,
     "--lvis-secondary-fg":    tripleToHsl(t["secondary-foreground"]),
-    "--lvis-danger":          tripleToHsl(t.destructive),
+    "--lvis-danger":          danger,
     "--lvis-danger-fg":       tripleToHsl(t["destructive-foreground"]),
-    "--lvis-warning":         tripleToHsl(t.warning),
+    "--lvis-warning":         warning,
     "--lvis-warning-fg":      tripleToHsl(t["warning-foreground"]),
-    "--lvis-success":         tripleToHsl(t.success),
+    "--lvis-success":         success,
     "--lvis-success-fg":      _H(210, 40, 98),  // invariant — no component surfaces success-fg yet
     "--lvis-border":          tripleToHsl(t.border),
-    "--lvis-ring":            tripleToHsl(t.ring),
+    "--lvis-ring":            ring,
     "--lvis-radius":          "0.6rem",
     "--lvis-radius-sm":       "0.25rem",
+    // ── Derived tinted-surface tokens ────────────────────────────────────────
+    // Pre-computed so plugins use var(--lvis-primary-bg-subtle) instead of
+    // reinventing color-mix() across --pm-*, --accent-bg, --ah-* namespaces.
+    "--lvis-primary-bg-subtle":  _tint(primary, surface, primarySubtlePct),
+    "--lvis-primary-bg-strong":  _tint(primary, surface, primaryStrongPct),
+    "--lvis-danger-bg-subtle":   _tint(danger,  "transparent", statusSubtlePct),
+    "--lvis-warning-bg-subtle":  _tint(warning, "transparent", statusSubtlePct),
+    "--lvis-success-bg-subtle":  _tint(success, "transparent", statusSubtlePct),
+    "--lvis-surface-hover":      _tint(fg, secondary, hoverPct),
+    "--lvis-focus-shadow":       _tint(ring, "transparent", 62),
   };
   return { ..._INVARIANT, ...bundleTokens } as Record<LvisTokenName, string>;
 }
