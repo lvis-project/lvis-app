@@ -102,6 +102,30 @@ export interface PluginToolInvocationContext {
   origin: "plugin" | "ui";
   callerPluginId?: string;
   ownerPluginId?: string;
+  /**
+   * Issue #664 P2 — UI-origin chain propagation.
+   *
+   * When a host wrapper tool (sourced from a user click in the panel) calls
+   * `ctx.callTool(...)` to delegate to another plugin's tool, the inner call
+   * is dispatched with `origin: "plugin"` but the *user* already approved the
+   * outer wrapper at the UI. Without propagation the inner call hits the
+   * headless reviewer lane (`headless: origin !== "ui"`), defeating the user
+   * approval the wrapper UX promised.
+   *
+   * `parentOrigin` carries the *effective* origin of the user action that
+   * triggered the call chain. The plugin runtime sets it to the calling
+   * HostApi's `origin` so a UI→plugin→plugin chain stays UI-origin all the
+   * way down. The reviewer lane reads this through the executor's
+   * {@link ToolPermissionContext} so the inner call is treated as
+   * foreground (headless=false) and the user's outer approval is honoured.
+   *
+   * Boundary: only wrapper tools owned by the host or first-party plugins
+   * benefit from this — third-party plugins still cross the same trust gate
+   * because the reviewer continues to evaluate each call. The propagation
+   * only changes the `headless` lane decision, not the per-tool deny/allow
+   * rules or the per-tool category × source × trust matrix.
+   */
+  parentOrigin?: "plugin" | "ui";
 }
 
 export type PluginToolInvocationDelegate = (

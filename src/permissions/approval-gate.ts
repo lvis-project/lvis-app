@@ -227,6 +227,14 @@ interface PendingEntry {
   source?: "builtin" | "plugin" | "mcp";
   sourcePluginId?: string;
   approvalScope?: string;
+  /**
+   * Issue #799 — approval cache key captured server-side at request emit
+   * time. The userApprovalRecord IPC handler reads this via
+   * {@link ApprovalGate.getRequestSnapshot} instead of trusting the renderer
+   * to echo it back. Optional because non-tool kinds (out-of-allowed-dir,
+   * agent-action) do not propagate a cache key.
+   */
+  approvalCacheKey?: string;
   /** §D2: nonce issued for this request (echoed back verbatim) */
   nonce: string;
   /** §D2: expected HMAC for this request */
@@ -509,6 +517,7 @@ export class ApprovalGate {
         source: fullReq.source,
         sourcePluginId: fullReq.sourcePluginId,
         approvalScope: fullReq.approvalScope,
+        approvalCacheKey: fullReq.approvalCacheKey,
         nonce,
         expectedHmac,
       });
@@ -587,6 +596,40 @@ export class ApprovalGate {
       output: `[approval:decided] ${requestId} ${formatApprovalAuditFields(entry)} choice=${decision.choice} rememberPattern=${decision.rememberPattern ?? "none"}`,
     });
     entry.resolve(decision);
+  }
+
+  /**
+   * Issue #799 — server-side ApprovalRequest snapshot lookup.
+   *
+   * The userApprovalRecord IPC handler binds to an in-flight request by id
+   * and reads the canonical `trustOrigin` / `approvalCacheKey` / `toolName`
+   * / `source` from the main-process pending entry rather than trusting
+   * the renderer payload. Eliminates the "renderer pretends a different
+   * trustOrigin" attack class — a renderer XSS that spoofs
+   * `trustOrigin: "user-keyboard"` for an `llm-tool-arg` request can no
+   * longer fool the user-approval-store cache identity.
+   *
+   * Returns `null` when no pending entry exists for `requestId` (e.g. the
+   * approval already resolved or timed out).
+   */
+  getRequestSnapshot(requestId: string): {
+    toolName: string;
+    source: "builtin" | "plugin" | "mcp";
+    trustOrigin: string;
+    approvalCacheKey: string | undefined;
+  } | null {
+    const entry = this.pending.get(requestId);
+    if (!entry) return null;
+    return {
+      toolName: entry.toolName,
+      // PendingEntry.source can be undefined for legacy callers — default
+      // to "builtin" so cache identity is conservative (high-trust source).
+      // The strict-record handler additionally validates against the SOT
+      // emitter; this default never widens an existing approval.
+      source: entry.source ?? "builtin",
+      trustOrigin: entry.trustOrigin,
+      approvalCacheKey: entry.approvalCacheKey,
+    };
   }
 
   /** 정리: 앱 종료 시 모든 대기 중인 요청을 거부 */

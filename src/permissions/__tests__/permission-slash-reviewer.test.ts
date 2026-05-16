@@ -110,7 +110,9 @@ describe("dispatchPermissionReviewerCommand — persistence", () => {
     const r = await dispatchPermissionReviewerCommand({ verb: "show", value: "" }, path);
     expect(r.ok).toBe(true);
     if (r.ok && r.verb === "show") {
-      expect(r.settings.mode).toBe("disabled");
+      // #664 P0 default change: pre-#664 was "disabled" (defer-all-HIGH),
+      // post-#664 is "rule" (deterministic baseline, no LLM call).
+      expect(r.settings.mode).toBe("rule");
       expect(r.settings.provider).toBe("openai");
       expect(r.settings.model).toBe("gpt-4o-mini");
       expect(r.settings.fallbackOnError).toBe("deny");
@@ -251,7 +253,8 @@ describe("normalizePermissionSettings — reviewer block", () => {
   it("missing reviewer block → defaults", () => {
     const settings = normalizePermissionSettings({});
     expect(settings.permissions.reviewer).toEqual({
-      mode: "disabled",
+      // #664 P0: default flipped from "disabled" → "rule" (deterministic baseline).
+      mode: "rule",
       provider: "openai",
       model: "gpt-4o-mini",
       fallbackOnError: "deny",
@@ -270,7 +273,8 @@ describe("normalizePermissionSettings — reviewer block", () => {
         },
       },
     });
-    expect(settings.permissions.reviewer.mode).toBe("disabled");
+    // #664 P0: default flipped from "disabled" → "rule".
+    expect(settings.permissions.reviewer.mode).toBe("rule");
     expect(settings.permissions.reviewer.provider).toBe("openai");
     expect(settings.permissions.reviewer.fallbackOnError).toBe("deny");
     expect(settings.permissions.reviewer.model).toBe("gpt-4o-mini");
@@ -327,8 +331,8 @@ describe("settings file persistence — reviewer block format", () => {
         permissions: { reviewer: { mode: "yolo", provider: "openai", model: "x", fallbackOnError: "rule" } },
       }),
     );
-    // Read normalises silently (external boundary).
+    // Read normalises silently (external boundary). #664 P0: default is "rule".
     const r = readPermissionSettings(path);
-    expect(r.permissions.reviewer.mode).toBe("disabled");
+    expect(r.permissions.reviewer.mode).toBe("rule");
   });
 });

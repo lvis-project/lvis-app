@@ -21,6 +21,14 @@ interface ToolSchemaEntry {
   description?: string;
   category?: Exclude<ToolCategory, "meta">;
   pathFields?: string[];
+  /**
+   * Issue #664 P1 — manifest-declared sandbox-write self-attestation.
+   * When true AND the runtime verifies path containment under the
+   * owning plugin's sandbox root (`~/.lvis/plugins/<pluginId>/`),
+   * the reviewer auto-LOWs the verdict so plugin tools can touch
+   * their own data dir without round-tripping the user.
+   */
+  writesToOwnSandbox?: boolean;
   /** §6.4 Tool versioning — optional per-tool semver. Falls back to manifest.version. */
   version?: string;
   deprecatedSince?: string;
@@ -71,6 +79,7 @@ function buildPluginTool(
     category: schemaEntry.category,
     pluginId,
     pathFields: schemaEntry.pathFields,
+    writesToOwnSandbox: schemaEntry.writesToOwnSandbox,
     version: schemaEntry?.version ?? manifestVersion,
     deprecatedSince: schemaEntry?.deprecatedSince,
     replacedBy: schemaEntry?.replacedBy,
