@@ -98,7 +98,22 @@ interface ServerCatalogRow {
 }
 
 export class RealCloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceHttp {
-  constructor(private readonly config: RealCloudMarketplaceConfig) {}
+  constructor(private config: RealCloudMarketplaceConfig) {}
+
+  /**
+   * Live-update the SSRF-guard bypass flag without rebuilding the fetcher.
+   *
+   * The flag is captured into {@link config} at construction; subsequent
+   * `request()` calls read `this.config.allowPrivateNetwork` per request, so
+   * mutating the field here takes effect on the very next call. Required to
+   * honor the MarketplaceTab "즉시 적용" (immediate-apply) badge: the prior
+   * behavior captured the boot-time value and ignored settings changes until
+   * app restart, which made the badge a false UX claim for a security-relevant
+   * toggle.
+   */
+  updateAllowPrivateNetwork(value: boolean): void {
+    this.config = { ...this.config, allowPrivateNetwork: value };
+  }
 
   async listPlugins(): Promise<PluginMarketplaceItem[]> {
     const res = await this.request("GET", "/api/v1/catalog");
