@@ -22,6 +22,7 @@ import { BUNDLES, VIOLET_PAIR_IDS } from "../theme/index.js";
 import type { ThemeBundle } from "../theme/index.js";
 import type { CSSProperties } from "react";
 import { getApi } from "../api-client.js";
+import { useNotifySaved } from "../contexts/saved-toast.js";
 
 type WebViewPreferredFlow = "in-app" | "system-browser";
 
@@ -213,12 +214,14 @@ function useFontPreferences() {
     return () => { cancelled = true; unsub?.(); };
   }, []);
 
+  const notifySaved = useNotifySaved();
   const setFamily = (next: string) => {
     setFamilyState(next || "system");
     try {
       const api = getApi();
       void api
         .updateSettings({ appearance: { font: { family: next || "system" } } })
+        .then(() => notifySaved())
         .catch(() => { /* ignore — local state already reflects */ });
     } catch {
       /* ignore */
@@ -230,6 +233,7 @@ function useFontPreferences() {
       const api = getApi();
       void api
         .updateSettings({ appearance: { font: { sizeScale: next } } })
+        .then(() => notifySaved())
         .catch(() => { /* ignore */ });
     } catch {
       /* ignore */
@@ -269,6 +273,7 @@ function useWebViewPreferredFlow(): {
     return () => { cancelled = true; };
   }, []);
 
+  const notifySaved = useNotifySaved();
   const setFlow = (next: WebViewPreferredFlow) => {
     const prev = flow;
     setFlowState(next);
@@ -281,6 +286,7 @@ function useWebViewPreferredFlow(): {
       const api = getApi();
       void api
         .updateSettings({ webView: { preferredFlow: next } })
+        .then(() => notifySaved())
         .catch(() => { /* ignore — local state already reflects */ });
     } catch {
       /* ignore */
@@ -375,6 +381,14 @@ export function AppearanceTab() {
   const { bundleId, setBundle, followSystem, setFollowSystem } = useTheme();
   const { flow: webViewFlow, setFlow: setWebViewFlow } = useWebViewPreferredFlow();
   const { family, sizeScale, setFamily, setSizeScale } = useFontPreferences();
+  const notifySaved = useNotifySaved();
+  // useTheme persists bundle + followSystem through its own ThemeProvider
+  // (api.updateSettings inside ThemeProvider.tsx). The provider is a
+  // generic surface that can be mounted outside settings, so it does not
+  // notify the dialog itself. We wrap the setters at this consumer to
+  // surface the dialog-wide "저장되었습니다" toast on selection.
+  const selectBundle = (id: typeof bundleId) => { setBundle(id); notifySaved(); };
+  const selectFollowSystem = (next: boolean) => { setFollowSystem(next); notifySaved(); };
 
   const isVioletPair = VIOLET_PAIR_IDS.includes(bundleId);
   const activePreset = presetForStack(family);
@@ -402,7 +416,7 @@ export function AppearanceTab() {
               key={bundle.id}
               bundle={bundle}
               selected={bundleId === bundle.id}
-              onSelect={() => setBundle(bundle.id)}
+              onSelect={() => selectBundle(bundle.id)}
             />
           ))}
         </div>
@@ -424,7 +438,7 @@ export function AppearanceTab() {
               aria-checked={followSystem}
               aria-label="OS 시스템 색상 따라가기"
               data-testid="follow-system-toggle"
-              onClick={() => setFollowSystem(!followSystem)}
+              onClick={() => selectFollowSystem(!followSystem)}
               className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
                 followSystem ? "bg-primary" : "bg-muted"
               }`}
