@@ -515,6 +515,12 @@ export async function bootstrap(
   };
   rewireReviewerAgent();
 
+  // CRITICAL 4.1: wire memory-hit auto-approve IPC broadcast once at boot.
+  // The broadcast fn is stable across rewires (always sends to the current mainWindow).
+  permissionManager.setBroadcastUserApprovalHit((payload) => {
+    sendToWindow(getMainWindow(), PERMISSIONS.userApprovalHit, payload, log);
+  });
+
   // Manifest integrity proxy. Subscribes the audit logger so every read→write
   // violation lands in `~/.lvis/audit/` and pushes an IPC notification to the
   // renderer. Uses the live mainWindow getter so cross-restart UI keeps

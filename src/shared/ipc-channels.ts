@@ -64,6 +64,8 @@ export const PERMISSIONS = {
   userApprovalRecord: "lvis:permissions:user-approval-record",
   userApprovalRevoke: "lvis:permissions:user-approval-revoke",
   userApprovalList: "lvis:permissions:user-approval-list",
+  // 4.1: memory-hit auto-approve disclosure (main → renderer)
+  userApprovalHit: "lvis:permissions:user-approval-hit",
 } as const;
 
 export const SETTINGS = {

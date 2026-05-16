@@ -229,12 +229,20 @@ export function PermissionsTab() {
 
   useEffect(() => { void fetchApprovals(); }, [fetchApprovals]);
 
-  const handleRevokeApproval = async (key: string) => {
+  const handleRevokeApproval = async (key: string, toolName: string, scope: "session" | "persistent") => {
     if (!window.lvis?.userApproval) return;
+    // CRITICAL 2.1: persistent approvals require explicit confirmation — accidental revoke is unrecoverable
+    if (scope === "persistent") {
+      const confirmed = window.confirm(
+        `[${toolName}] 지속 승인을 취소하시겠습니까?\n\n취소 후 복구할 수 없으며, 다음 도구 호출 시 다시 승인 요청됩니다.`,
+      );
+      if (!confirmed) return;
+    }
     setApprovalsBusy(true);
     try {
       await window.lvis.userApproval.revokeByKey(key);
-      await fetchApprovals();
+      void fetchApprovals();
+      showBanner("warn", `[${toolName}] 승인이 취소되었습니다.`);
     } catch (err) {
       showBanner("error", `취소 실패: ${(err as Error).message}`);
     } finally {
@@ -1146,12 +1154,17 @@ export function PermissionsTab() {
                       <td className="max-w-[120px] truncate px-3 py-2 font-mono">
                         {a.key.split("::")[0]}
                       </td>
-                      <td className="px-3 py-2">{a.scope === "persistent" ? "지속" : "세션"}</td>
-                      <td className="px-3 py-2">{a.verdictAtApproval.toUpperCase()}</td>
+                      <td className="px-3 py-2">
+                        <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${a.scope === "persistent" ? "bg-warning/15 text-warning" : "bg-muted text-muted-foreground"}`}>
+                          {a.scope === "persistent" ? "지속" : "세션"}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2">{a.verdictAtApproval.toUpperCase()}{a.verdictAtApproval === "high" ? " (HIGH 고정)" : ""}</td>
                       <td className="px-3 py-2 text-muted-foreground">
                         {new Date(a.approvedAt).toLocaleString()}
                       </td>
-                      <td className="max-w-[180px] truncate px-3 py-2 text-muted-foreground">
+                      <td className="max-w-[180px] truncate px-3 py-2 text-muted-foreground"
+                          title={a.nlJustification ?? undefined}>
                         {a.nlJustification ?? "—"}
                       </td>
                       <td className="px-3 py-2">
@@ -1160,7 +1173,7 @@ export function PermissionsTab() {
                           size="sm"
                           className="h-6 px-2 text-[11px]"
                           disabled={approvalsBusy}
-                          onClick={() => void handleRevokeApproval(a.key)}
+                          onClick={() => void handleRevokeApproval(a.key, a.key.split("::")[0], a.scope)}
                         >
                           취소
                         </Button>
