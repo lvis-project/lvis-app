@@ -29,9 +29,11 @@ import {
   createStreamingFilter,
   stripSuggestedReplies,
 } from "../../engine/suggested-replies.js";
+import type { SessionKind } from "../../memory/memory-manager.js";
 const log = createLogger("chat");
 const MAX_ROLE_PROMPT_CHARS = 12_000;
 const MAX_SELECTED_SKILLS = 5;
+const SESSION_KIND_VALUES = new Set<SessionKind | "all">(["main", "routine", "all"]);
 
 export type { SerializedHistoryMessage } from "../../shared/chat-history.js";
 
@@ -347,13 +349,13 @@ async function runStreamedTurn(
           estimatedBefore,
           preflight,
         }),
-      onCompactOccurred: ({ removedMessages, freedTokens, estimatedAfter, tier, summary, compactNum, compactStatus, truncatedDir }) =>
+      onCompactOccurred: ({ removedMessages, freedTokens, estimatedAfter, trigger, summary, compactNum, compactStatus, truncatedDir }) =>
         send({
           type: "compact_notice",
           removedMessages,
           freedTokens,
           estimatedAfter,
-          ...(tier !== undefined ? { tier } : {}),
+          ...(trigger !== undefined ? { trigger } : {}),
           ...(summary !== undefined ? { summary } : {}),
           ...(compactNum !== undefined ? { compactNum } : {}),
           ...(compactStatus !== undefined ? { compactStatus } : {}),
@@ -422,6 +424,16 @@ export function registerChatHandlers(deps: IpcDeps): void {
   const streamTurnOptions = {
     inputOrigin: "user-keyboard" as const,
   };
+  const markMainActiveAfterTurn = async (input: string) => {
+    if (conversationLoop.getSessionKind() !== "main") return;
+    if (conversationLoop.getHistory().length > 0) {
+      await memoryManager.markMainActiveResume(conversationLoop.getSessionId());
+      return;
+    }
+    if (input.trim() === "/new") {
+      await memoryManager.markMainActiveFresh();
+    }
+  };
   const allocateStreamId = () => ++nextStreamId;
   const sanitizeOutgoingInput = (input: string, webContents: WebContents | undefined) => {
     let effective = input;
@@ -447,18 +459,22 @@ export function registerChatHandlers(deps: IpcDeps): void {
   ) => {
     const win = getMainWindow();
     const streamId = allocateStreamId();
-    return trackStreamTurn(() => runStreamedTurn(
-      conversationLoop,
-      input,
-      win?.webContents,
-      "lvis:chat:stream",
-      streamId,
-      {
-        ...streamTurnOptions,
-        ...(attachments && attachments.length > 0 ? { attachments } : {}),
-        ...(rolePrompt ? { rolePrompt } : {}),
-      },
-    ));
+    return trackStreamTurn(async () => {
+      const result = await runStreamedTurn(
+        conversationLoop,
+        input,
+        win?.webContents,
+        "lvis:chat:stream",
+        streamId,
+        {
+          ...streamTurnOptions,
+          ...(attachments && attachments.length > 0 ? { attachments } : {}),
+          ...(rolePrompt ? { rolePrompt } : {}),
+        },
+      );
+      await markMainActiveAfterTurn(input);
+      return result;
+    });
   };
 
   const parseChatSendPayload = (
@@ -534,14 +550,18 @@ export function registerChatHandlers(deps: IpcDeps): void {
     const effective = sanitizeOutgoingInput(input, win?.webContents);
     const effectiveRolePrompt = await mergeAssistantContextPrompt(rolePrompt, assistantContext, deps);
     const streamId = allocateStreamId();
-    return trackStreamTurn(() => runStreamedTurn(
-      conversationLoop,
-      effective,
-      win?.webContents,
-      "lvis:chat:stream",
-      streamId,
-      { ...streamTurnOptions, attachments: validated, inputOrigin, rolePrompt: effectiveRolePrompt },
-    ));
+    return trackStreamTurn(async () => {
+      const result = await runStreamedTurn(
+        conversationLoop,
+        effective,
+        win?.webContents,
+        "lvis:chat:stream",
+        streamId,
+        { ...streamTurnOptions, attachments: validated, inputOrigin, rolePrompt: effectiveRolePrompt },
+      );
+      await markMainActiveAfterTurn(effective);
+      return result;
+    });
   });
 
   // "guide" — non-interrupting mid-stream direction adjustment. Queues
@@ -607,14 +627,15 @@ export function registerChatHandlers(deps: IpcDeps): void {
     return { ok: true };
   });
 
-  ipcMain.handle("lvis:chat:new", (e) => {
+  ipcMain.handle("lvis:chat:new", async (e) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:new", e); return UNAUTHORIZED_FRAME; }
     conversationLoop.newConversation();
+    await memoryManager.markMainActiveFresh();
     return { ok: true };
   });
 
   // read-only, sender guard optional
-  ipcMain.handle("lvis:chat:sessions", (e, opts?: { limit?: unknown; before?: unknown; beforeId?: unknown; after?: unknown }) => {
+  ipcMain.handle("lvis:chat:sessions", (e, opts?: { limit?: unknown; before?: unknown; beforeId?: unknown; after?: unknown; kind?: unknown; routineId?: unknown }) => {
     if (!validateSender(e)) {
       auditUnauthorized(auditLogger, "lvis:chat:sessions", e);
       return { current: conversationLoop.getSessionId(), sessions: [] };
@@ -629,14 +650,20 @@ export function registerChatHandlers(deps: IpcDeps): void {
     const beforeId = typeof opts?.beforeId === "string" && /^[a-zA-Z0-9_\-]+$/.test(opts.beforeId)
       ? opts.beforeId
       : undefined;
+    const kind = SESSION_KIND_VALUES.has(opts?.kind as SessionKind | "all")
+      ? opts?.kind as SessionKind | "all"
+      : "main";
+    const routineId = typeof opts?.routineId === "string" ? opts.routineId : undefined;
     const sessions = memoryManager
-      .listSessionsPage({ limit, ...(before ? { before } : {}), ...(beforeId ? { beforeId } : {}), ...(after ? { after } : {}) })
+      .listSessionsPage({ kind, ...(routineId ? { routineId } : {}), limit, ...(before ? { before } : {}), ...(beforeId ? { beforeId } : {}), ...(after ? { after } : {}) })
       .map((s) => ({
         id: s.id,
         modifiedAt: s.modifiedAt.toISOString(),
         title: s.title,
-        // §PR-5: branch provenance — already on SessionListEntry, no extra loadSessionMetadata call
-        ...(s.parentSessionId ? { parentSessionId: s.parentSessionId } : {}),
+        sessionKind: s.sessionKind,
+        ...(s.routineId ? { routineId: s.routineId } : {}),
+        ...(s.routineTitle ? { routineTitle: s.routineTitle } : {}),
+        ...(s.routineFiredAt ? { routineFiredAt: s.routineFiredAt } : {}),
         ...(s.branchedFromCompactNum !== undefined ? { branchedFromCompactNum: s.branchedFromCompactNum } : {}),
         ...(s.branchedAt ? { branchedAt: s.branchedAt } : {}),
       }));
@@ -646,28 +673,22 @@ export function registerChatHandlers(deps: IpcDeps): void {
     };
   });
 
-  ipcMain.handle("lvis:chat:load-session", (e, sessionId: string) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:load-session", e); return UNAUTHORIZED_FRAME; }
-    const loaded = conversationLoop.loadSession(sessionId);
-    return { ok: loaded, sessionId: loaded ? sessionId : null };
-  });
-
   ipcMain.handle("lvis:chat:compact", (e) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:compact", e); return UNAUTHORIZED_FRAME; }
     // Wire onCompactStarted/onCompactOccurred so slash-/compact also shows
-    // the "자동 압축 중..." StatusBar indicator (parity with Layer 0 preflight
+    // the "자동 압축 중..." StatusBar indicator (parity with token preflight
     // path which gets it via runStreamedTurn callbacks). streamId is omitted
     // because manualCompact runs outside the per-turn stream.
     return conversationLoop.manualCompact({
       onCompactStarted: ({ triggerSource, estimatedBefore, preflight }) =>
         sendToWebContents(e.sender, "lvis:chat:stream", { type: "compact_started", triggerSource, estimatedBefore, preflight }, log),
-      onCompactOccurred: ({ removedMessages, freedTokens, estimatedAfter, tier, summary, compactNum, compactStatus, truncatedDir }) =>
+      onCompactOccurred: ({ removedMessages, freedTokens, estimatedAfter, trigger, summary, compactNum, compactStatus, truncatedDir }) =>
         sendToWebContents(e.sender, "lvis:chat:stream", {
           type: "compact_notice",
           removedMessages,
           freedTokens,
           estimatedAfter,
-          ...(tier !== undefined ? { tier } : {}),
+          ...(trigger !== undefined ? { trigger } : {}),
           ...(summary !== undefined ? { summary } : {}),
           ...(compactNum !== undefined ? { compactNum } : {}),
           ...(compactStatus !== undefined ? { compactStatus } : {}),
@@ -676,19 +697,40 @@ export function registerChatHandlers(deps: IpcDeps): void {
     });
   });
 
-  ipcMain.handle("lvis:chat:session-resume", (e, sessionId: string) => {
+  ipcMain.handle("lvis:chat:session-resume", async (e, sessionId: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:session-resume", e); return UNAUTHORIZED_FRAME; }
-    return conversationLoop.resetAndResume(sessionId);
+    const result = conversationLoop.resetAndResume(sessionId);
+    if (result.ok && conversationLoop.getSessionKind() === "main") {
+      await memoryManager.markMainActiveResume(sessionId).catch((err: unknown) => {
+        log.warn("session-resume markMainActiveResume failed: %s", (err as Error).message);
+      });
+    }
+    return result;
   });
 
   // read-only, sender guard optional
   ipcMain.handle("lvis:chat:get-history", () => {
     const messages = conversationLoop.getHistory().getMessages() as GenericMessage[];
+    const currentListEntry = memoryManager
+      .listSessions({ kind: "all", limit: Number.POSITIVE_INFINITY })
+      .find((session) => session.id === conversationLoop.getSessionId());
     return {
       sessionId: conversationLoop.getSessionId(),
+      sessionTitle: currentListEntry?.title,
+      sessionKind: conversationLoop.getSessionKind(),
+      ...(conversationLoop.getSessionRoutineId() ? { routineId: conversationLoop.getSessionRoutineId() } : {}),
+      ...(conversationLoop.getSessionRoutineTitle() ? { routineTitle: conversationLoop.getSessionRoutineTitle() } : {}),
       messages: messages.map(serializeHistoryMessage),
       estimatedInputTokens: estimateMessagesTokens(messages),
     };
+  });
+
+  ipcMain.handle("lvis:chat:main-active-state", (e) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, "lvis:chat:main-active-state", e);
+      return null;
+    }
+    return memoryManager.loadMainActiveSessionState();
   });
 
   // read-only: load messages for any session by id (does NOT change active session)
@@ -719,28 +761,45 @@ export function registerChatHandlers(deps: IpcDeps): void {
       (m): m is GenericMessage =>
         m != null && typeof m === "object" && "role" in m && "content" in m,
     );
-    // §457 PR-A: surface the rolling-summary preamble length so the renderer
+    // Surface the rolling-summary preamble length so the renderer
     // can prepend a `kind: "session_resume"` marker. We do not return the
     // preamble text — it is system-prompt material, not chat history, and
     // returning it would leak it into a UI surface that should only show a
     // disclosure ("요약 N자 적용") rather than the verbatim summary.
     let preambleChars = 0;
-    let parentSessionId: string | undefined;
+    let sessionKind: SessionKind = "main";
+    let sessionTitle: string | undefined;
+    let routineId: string | undefined;
+    let routineTitle: string | undefined;
+    let routineFiredAt: string | undefined;
     try {
       const meta = memoryManager.loadSessionMetadata(sessionId);
       if (meta) {
+        sessionKind = meta.sessionKind ?? "main";
+        sessionTitle = meta.title;
+        routineId = meta.routineId;
+        routineTitle = meta.routineTitle;
+        routineFiredAt = meta.routineFiredAt;
         preambleChars = typeof meta.summaryPreamble === "string" ? meta.summaryPreamble.length : 0;
-        if (typeof meta.parentSessionId === "string") parentSessionId = meta.parentSessionId;
       }
     } catch {
       // Metadata file missing/corrupt — fall through with empty session-resume hint.
     }
+    if (!sessionTitle) {
+      sessionTitle = memoryManager
+        .listSessions({ kind: "all", limit: Number.POSITIVE_INFINITY })
+        .find((session) => session.id === sessionId)?.title;
+    }
     return {
       ok: true,
+      sessionKind,
+      ...(sessionTitle ? { sessionTitle } : {}),
+      ...(routineId ? { routineId } : {}),
+      ...(routineTitle ? { routineTitle } : {}),
+      ...(routineFiredAt ? { routineFiredAt } : {}),
       messages: raw.map(serializeHistoryMessage),
       estimatedInputTokens: estimateMessagesTokens(raw),
       preambleChars,
-      ...(parentSessionId !== undefined ? { parentSessionId } : {}),
     };
   });
 
@@ -767,14 +826,27 @@ export function registerChatHandlers(deps: IpcDeps): void {
     }
     let slice = current.slice(0, upto);
     slice = removeOrphanToolUse(slice);
-    // PR-3 (v3 §4.2): JSONL 영속화 직전 marked tool_result 를 stub 으로 변환 — fork
-    // path 도 동일 boundary 통과해야 R4 (disk 무한 성장 방지) 일관 유지.
+    // JSONL 영속화 직전 marked tool_result 를 stub 으로 변환 — fork
+    // path 도 동일 boundary 통과해야 disk 무한 성장 방지 일관 유지.
     if (current.length > 0) {
       await memoryManager.saveSession(conversationLoop.getSessionId(), stubMarkedToolResults(current));
     }
     const newId = crypto.randomUUID();
     await memoryManager.saveSession(newId, stubMarkedToolResults(slice));
+    const currentMeta = memoryManager.loadSessionMetadata(conversationLoop.getSessionId());
+    await memoryManager.saveSessionMetadata(newId, {
+      sessionKind: currentMeta?.sessionKind ?? conversationLoop.getSessionKind(),
+      ...(currentMeta?.routineId ? { routineId: currentMeta.routineId } : {}),
+      ...(currentMeta?.routineTitle ? { routineTitle: currentMeta.routineTitle } : {}),
+      ...(currentMeta?.routineFiredAt ? { routineFiredAt: currentMeta.routineFiredAt } : {}),
+      ...(currentMeta?.summaryPreamble ? { summaryPreamble: currentMeta.summaryPreamble } : {}),
+    });
     const loaded = conversationLoop.loadSession(newId);
+    if (loaded && conversationLoop.getSessionKind() === "main") {
+      await memoryManager.markMainActiveResume(newId).catch((err: unknown) => {
+        log.warn("chat:fork markMainActiveResume failed: %s", (err as Error).message);
+      });
+    }
     return { ok: loaded, sessionId: loaded ? newId : null };
   });
 
@@ -882,7 +954,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
     return { ok: true, filePath: res.filePath };
   });
 
-  // ─── §PR-5: Layer 3 View-Mode + Branch ────────────────
+  // ─── Checkpoint View + Branch ─────────────────────────
 
   ipcMain.handle("lvis:chat:enter-checkpoint-view", (e, payload: unknown) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:enter-checkpoint-view", e); return UNAUTHORIZED_FRAME; }
@@ -1077,7 +1149,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
     return { ok: true };
   });
 
-  // ─── PR-4: verbatim tool_result lazy-load ───────────────────────────────
+  // ─── Verbatim tool_result lazy-load ────────────────────────────────────
   // Returns the in-memory verbatim content for a compacted tool_result.
   // Only works for the currently-active session — other sessions have been
   // stubbed to disk and the verbatim is gone. Returns null when:
