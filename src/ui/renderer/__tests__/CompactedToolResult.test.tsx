@@ -1,5 +1,5 @@
 /**
- * CompactedToolResult component tests — PR-4 Major #3.
+ * CompactedToolResult component tests.
  *
  * Covers state transitions:
  *   collapsed (default) → loading → expanded   (IPC success)
