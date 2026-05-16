@@ -5,6 +5,14 @@ export interface DebouncedSave {
   schedule: () => void;
   /** Cancel any pending save without firing. Safe to call when nothing is pending. */
   cancel: () => void;
+  /**
+   * If a save is pending, run it RIGHT NOW (synchronously) and cancel the
+   * timer. Safe to call when nothing is pending. SettingsDialog calls
+   * this from a `beforeunload` handler so a toggle made ~milliseconds
+   * before app quit still gets persisted instead of dying with the 200ms
+   * timer.
+   */
+  flush: () => void;
 }
 
 /**
@@ -51,5 +59,13 @@ export function useDebouncedSave(saveFn: () => void, ms = 200): DebouncedSave {
     }, ms);
   }, [ms]);
 
-  return useMemo(() => ({ schedule, cancel }), [schedule, cancel]);
+  const flush = useCallback(() => {
+    if (timer.current) {
+      clearTimeout(timer.current);
+      timer.current = null;
+      savedFn.current();
+    }
+  }, []);
+
+  return useMemo(() => ({ schedule, cancel, flush }), [schedule, cancel, flush]);
 }
