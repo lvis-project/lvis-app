@@ -37,7 +37,7 @@ function makeEntry(toolName = "bash_run") {
 }
 
 describe("emitSandboxAudit", () => {
-  it("creates audit.log if absent and appends JSONL entry", async () => {
+  it("creates daily sandbox.jsonl if absent and appends JSONL entry", async () => {
     const entry = makeEntry();
     await emitSandboxAudit(entry);
 
@@ -97,9 +97,12 @@ describe("emitSandboxAudit", () => {
     expect(parsed.reviewer.userApprovalUsed?.nlJustification).toBe("테스트용 파일 정리");
   });
 
-  it("sandboxAuditSinkPath returns path under LVIS_HOME", () => {
+  it("sandboxAuditSinkPath returns daily-rotated path under LVIS_HOME/audit/", () => {
     const path = sandboxAuditSinkPath();
     expect(path).toContain(TEST_HOME);
-    expect(path).toMatch(/audit\.log$/);
+    // Must be under the audit/ subdirectory, not at the root
+    expect(path).toContain("/audit/");
+    // Must match the daily-rotate pattern: YYYY-MM-DD.sandbox.jsonl
+    expect(path).toMatch(/\d{4}-\d{2}-\d{2}\.sandbox\.jsonl$/);
   });
 });
