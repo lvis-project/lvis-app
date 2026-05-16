@@ -121,10 +121,10 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
   return (
     <div className="space-y-4 pt-4">
       <div className="rounded-md border border-warning/40 bg-warning/15 px-3 py-2 text-[11px] text-warning">
-        설정은 저장 즉시 디스크에 기록되지만 *런타임 적용 시점* 은 항목마다 다릅니다 —
-        URL 변경은 부트스트랩 배너의 “다시 시도” 로 즉시 재시도 가능,
-        API 키 변경은 fetcher 재구성을 위해 앱 재시작 필요,
-        사설 네트워크 허용 토글은 다음 요청부터 즉시 적용됩니다.
+        설정은 저장 즉시 디스크에 기록되지만 <strong className="font-semibold">실제 적용 시점</strong> 은 항목마다 다릅니다 —
+        URL 변경은 마켓플레이스 오류 배너의 “다시 시도” 버튼으로 즉시 재시도,
+        API 키 변경은 앱 재시작 후 적용,
+        사설 네트워크 허용 토글은 다음 마켓플레이스 요청부터 즉시 적용됩니다.
       </div>
 
       <div className="space-y-2">
