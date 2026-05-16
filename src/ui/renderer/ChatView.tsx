@@ -131,7 +131,7 @@ export interface ChatViewProps {
   currentSessionKind?: "main" | "routine";
   currentSessionTitle?: string;
   sessions?: SessionSummary[];
-  onLoadSession?: (sessionId: string) => void | Promise<void>;
+  onLoadSession?: (sessionId: string) => void | boolean | Promise<void | boolean>;
   onRefreshSessions?: () => void | Promise<void>;
   /** Quick-action items for CommandPopover (빠른 실행 section) */
   commandActions: QuickAction[];
