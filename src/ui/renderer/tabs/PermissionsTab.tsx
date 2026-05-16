@@ -21,6 +21,7 @@ import {
   TooltipTrigger,
 } from "../../../components/ui/tooltip.js";
 import { PERMISSION_REVIEWER_FRAMEWORK } from "../../../shared/permission-reviewer-framework.js";
+import type { UserApprovalScope, UserApprovalVerdict } from "../../../shared/permissions-events.js";
 import { EXEC_MODE_OPTIONS } from "../constants.js";
 import { getApi } from "../api-client.js";
 import type {
@@ -172,8 +173,8 @@ export function PermissionsTab() {
   const [userApprovals, setUserApprovals] = useState<Array<{
     key: string;
     approvedAt: string;
-    scope: "session" | "persistent";
-    verdictAtApproval: "low" | "medium" | "high";
+    scope: UserApprovalScope;
+    verdictAtApproval: UserApprovalVerdict;
     nlJustification: string | null;
     revokedAt: string | null;
     /** R-2 Round-3: display metadata from user-approval-store. */
@@ -253,7 +254,7 @@ export function PermissionsTab() {
 
   useEffect(() => { void fetchApprovals(); }, [fetchApprovals]);
 
-  const handleRevokeApproval = async (key: string, toolName: string, scope: "session" | "persistent") => {
+  const handleRevokeApproval = async (key: string, toolName: string, scope: UserApprovalScope) => {
     if (!window.lvis?.userApproval) return;
     // CRITICAL 2.1: persistent approvals require explicit confirmation — accidental revoke is unrecoverable
     if (scope === "persistent") {

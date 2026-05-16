@@ -587,7 +587,25 @@ export class PermissionManager {
       verdictAtApproval: "low" | "medium" | "high" | null;
     } | null = null;
 
-    if (userApproval) {
+    // Cross-cutting root-cause fix: a legacy R-2 entry may carry
+    // `null verdictAtApproval` (PR-A4 R3 added the field; entries
+    // written before that PR pre-date it). A legacy null means
+    // "the original verdict is unrecoverable" — NOT "medium".
+    // Treat the memory hit as missing → fresh approval flow takes
+    // over. This protects two invariants:
+    //   (a) maxVerdict() below would otherwise receive null and
+    //       silently treat it as the rule verdict (downgrade risk).
+    //   (b) UserApprovalHitPayload broadcast is non-null per SOT —
+    //       a coerce to "medium" would mis-represent unknown origin
+    //       as a real medium-risk approval in the user's audit toast.
+    // Fail-closed: re-prompt is the correct UX when verdict
+    // provenance is lost.
+    if (userApproval && userApproval.verdictAtApproval == null) {
+      console.warn(
+        `[permission] legacy R-2 entry without verdictAtApproval — rejecting memory hit, forcing fresh approval (tool=${toolName}, scope=${userApproval.scope})`,
+      );
+    }
+    if (userApproval && userApproval.verdictAtApproval != null) {
       // Memory hit — use the rule-based verdict (cheaper + consistent).
       // We still run the rule classifier to get a fresh verdict; we just
       // skip the LLM call. The max(rule, stored) composition would allow
@@ -608,7 +626,9 @@ export class PermissionManager {
       // be silently downgraded if the rule classifier now returns LOW/MEDIUM.
       const ruleClassifier = new RuleBasedRiskClassifier();
       const ruleVerdict = ruleClassifier.classify(ctx);
-      const storedLevel = userApproval.verdictAtApproval;
+      // Narrowed above: the outer `userApproval.verdictAtApproval != null`
+      // gate guarantees a concrete verdict literal here.
+      const storedLevel: "low" | "medium" | "high" = userApproval.verdictAtApproval;
       verdict = maxVerdict(ruleVerdict, { level: storedLevel, reason: `stored approval verdict at approval time` });
       userApprovalUsed = {
         memoryHit: true,
@@ -618,18 +638,14 @@ export class PermissionManager {
       // CRITICAL 4.1: disclose memory-hit auto-approve to renderer + log
       console.info(`[permission] memory-hit auto-approve: ${toolName} (scope=${userApproval.scope}, verdict=${userApproval.verdictAtApproval})`);
       try {
-        // Cross-cutting follow-up: defend against legacy on-disk entries
-        // that may carry `null` verdictAtApproval (PR-A4 R3 added the
-        // field; older entries pre-date it). The renderer-side type
-        // (#793 chat-toast subscriber) is non-null per
-        // `UserApprovalHitPayload`, so coerce here at the broadcast
-        // boundary. "medium" is the conservative default per R-4 design
-        // (low = trivial, high = NL-required, medium = neutral).
-        const verdictForBroadcast = userApproval.verdictAtApproval ?? "medium";
+        // verdictAtApproval is non-null inside this branch — the outer
+        // gate `userApproval.verdictAtApproval != null` rejects legacy
+        // entries above. Broadcast passes the concrete literal straight
+        // through to UserApprovalHitPayload (non-null per SOT).
         this.broadcastUserApprovalHit?.({
           toolName,
           scope: userApproval.scope,
-          verdictAtApproval: verdictForBroadcast,
+          verdictAtApproval: storedLevel,
         });
       } catch {
         // broadcast failure must not block tool execution
