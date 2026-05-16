@@ -759,6 +759,40 @@ describe("CRITICAL-2: user-approval-record HIGH verdict IPC enforcement", () => 
 
     expect(result).toMatchObject({ ok: true });
   });
+
+  it("rejects non-JSON args with args-not-json error (security-M2 No Fallback Code)", async () => {
+    await setup();
+
+    const result = await invoke(PERMISSIONS.userApprovalRecord, {
+      toolName: "bash_run",
+      args: "not valid json",
+      source: "user-keyboard",
+      scope: "session",
+      verdictAtApproval: "low",
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: "args-not-json",
+    });
+  });
+
+  it("rejects non-object JSON args with args-not-object error (security-M2)", async () => {
+    await setup();
+
+    const result = await invoke(PERMISSIONS.userApprovalRecord, {
+      toolName: "bash_run",
+      args: '"just a string"',
+      source: "user-keyboard",
+      scope: "session",
+      verdictAtApproval: "low",
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: "args-not-object",
+    });
+  });
 });
 
 // ─── Minor-2 R2: vendors optional chain prevents TypeError ────────────────────
