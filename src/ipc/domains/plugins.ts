@@ -69,7 +69,7 @@ interface PluginWebviewBinding {
 const pluginWebviewRegistry = new Map<number, PluginWebviewBinding>();
 
 export type SafeThemePayload = {
-  /** v2: bundle identifier (e.g. "tokyo-night", "lge-dark"). */
+  /** v2: bundle identifier (e.g. "tokyo-night", "violet-dark"). */
   bundleId: string;
   /** v2: shell polarity derived from the active bundle. */
   shell: "light" | "dark";

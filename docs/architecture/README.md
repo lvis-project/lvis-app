@@ -20,7 +20,7 @@ LVIS 프로젝트의 **시스템 구조 및 기술 설계** 문서입니다.
 
 ## 아키텍처 요약
 
-> _"직원은 판단과 소통에 집중하고, 절차·탐색·정리는 Lvis·LGenie가 맡는 회사."_
+> _"사용자는 판단과 소통에 집중하고, 절차·탐색·정리는 LVIS가 맡는 환경."_
 
 ### 5-Layer Architecture
 
@@ -28,8 +28,8 @@ LVIS 프로젝트의 **시스템 구조 및 기술 설계** 문서입니다.
 |-------|------|-----------|
 | **L1** | 사용자·단말 | Electron UI + Plugin Slots |
 | **L2** | 클라이언트 인텔리전스 | 키워드 감지, 에이전트 라우팅, 인덱싱, 기억, overlay trigger |
-| **L3** | 실행·추론 | Lgenie(사내 LLM) 세션 + Agent Loop + Tool 실행 |
-| **L4** | 연동 | Agent Hub, Marketplace, 서버 인덱스, 사내 시스템 |
+| **L3** | 실행·추론 | LLM 세션 + Agent Loop + Tool 실행 |
+| **L4** | 연동 | Agent Hub, Marketplace, 서버 인덱스, 조직 내 시스템 |
 | **L5** | 거버넌스 | 인증, 정책, 감사, 암호화 |
 
 ### 핵심 컴포넌트
@@ -55,8 +55,8 @@ LVIS 프로젝트의 **시스템 구조 및 기술 설계** 문서입니다.
 └─────────────────────┬───────────────────────────────┘
                       │ SSE Streaming
               ┌───────┴───────┐
-              │  Lgenie (심장) │
-              │  사내 LLM 시스템│
+              │  LLM 백엔드 (심장) │
+              │  조직 내 LLM 시스템│
               └───────┬───────┘
                       │
         ┌─────────────┼─────────────┐
@@ -76,7 +76,7 @@ LVIS 프로젝트의 **시스템 구조 및 기술 설계** 문서입니다.
 7. Overlay Trigger Surface
 8. Agent Approval System — 에이전트 승인 체계
 9. Plugin System — UI Extension · **MCP Protocol Architecture**
-10. Agent Hub — 사원 레플리카 메시지 보드
+10. Agent Hub — 사용자 에이전트 메시지 보드
 11. Marketplace Hub — 사업부 플러그인 생태계
 12. Use Case → Architecture Mapping
 13. Data Flow
@@ -89,7 +89,7 @@ LVIS 프로젝트의 **시스템 구조 및 기술 설계** 문서입니다.
 |------|------|
 | Client | Electron + React, Rust (NAPI-RS), SQLite + FTS5 |
 | Indexing | Local Indexer (LLM 트리 인덱싱), Doc Parser (PDF·DOCX·PPTX·XLSX·Image) |
-| Server | Lgenie (사내 LLM), Agent Hub (Go/Rust + PostgreSQL + NATS), Marketplace |
+| Server | LLM 백엔드 (조직 내 LLM), Agent Hub (Go/Rust + PostgreSQL + NATS), Marketplace |
 | Protocol | SSE Streaming, gRPC/REST, MCP (stdio/http; SSE/WebSocket reserved) |
 | Governance | SSO/LDAP, OPA Policy Engine, AES-256 + TLS 1.3, Feature Flag Service |
 

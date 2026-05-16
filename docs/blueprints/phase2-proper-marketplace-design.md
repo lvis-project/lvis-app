@@ -13,7 +13,7 @@ Phase 1 은 `MockCloudMarketplaceAdapter` 로 시작되었고 Phase 1.5 는 mana
 
 1. **IT admin 이 플러그인을 사내 배포** — install 이 managed 정책과 자동 연동
 2. **개발자가 아닌 사용자 (기획, 운영, 영업 등) 도 플러그인 publish 가능** — 브라우저 Web UI
-3. **LVIS client 가 사내망에서만 catalog / zip 을 fetch** — 외부 노출 없음
+3. **LVIS client 가 내부 네트워크에서만 catalog / zip 을 fetch** — 외부 노출 없음
 4. **Phase 1.5 의 `MockCloudMarketplaceAdapter` 를 adapter-only 교체** — 호스트 host 코드 변경 최소화
 5. **§17 corporate TLS** + **§16.2 SSO** 와 일관된 auth 모델
 
@@ -32,7 +32,7 @@ Phase 1 은 `MockCloudMarketplaceAdapter` 로 시작되었고 Phase 1.5 는 mana
 
 | Q | 항목 | 결정 | Rationale |
 |---|---|---|---|
-| Q1 | 서버 호스팅 | 별도 repo `lvis-marketplace-server/`, 사내망 Linux VM 배포 | 통제 + 비개발자 UI 요구 |
+| Q1 | 서버 호스팅 | 별도 repo `lvis-marketplace-server/`, 내부 Linux VM 배포 | 통제 + 비개발자 UI 요구 |
 | Q2 | 서버 언어 | **FastAPI (Python 3.12)** | pageindex 팀 python stack 재사용, uv 런타임 재활용, OpenAPI 자동 생성 → client 스펙 lock |
 | Q3 | Auth | **MVP: API key per publisher (Bearer)** / Phase 3: SSO (sso.your-corp.example OIDC) passthrough | API key 로 단순하게 시작, SSO 로 성숙도 올리기 |
 | Q4 | Artifact | **zip** | Phase 1.5 `MockCloudMarketplaceAdapter` 와 호환, 기존 `plugin.json` parser 재사용 |
@@ -99,7 +99,7 @@ lvis-marketplace-server/
 ```
 GET /catalog
   → 200: { plugins: PluginSummary[], generatedAt: ISO8601 }
-  auth: none (사내망 전제, Phase 3 에 SSO 추가)
+  auth: none (내부 네트워크 전제, Phase 3 에 SSO 추가)
 
 GET /plugins/{pluginId}
   → 200: PluginDetail (모든 버전 정보)
@@ -258,7 +258,7 @@ CREATE TABLE audit_log (
 - RAM: 4 GB
 - Disk: 50 GB (artifacts 성장 고려)
 - OS: Ubuntu 22.04 LTS or RHEL 9
-- Network: 사내망 only, outbound HTTPS 불필요 (self-contained)
+- Network: 내부 네트워크 only, outbound HTTPS 불필요 (self-contained)
 
 **설치 절차 (systemd unit)**:
 ```
@@ -371,7 +371,7 @@ function createAdapter(config: MarketplaceConfig): MarketplaceAdapter {
 **비개발자 친화 설계**:
 - zip 업로드 시 client-side 파싱 → plugin.json 내용을 fill-in form 으로 보여줌
 - semver 자동 제안 (기존 latest version + 1)
-- 미리보기: "이 플러그인이 사내망 LVIS 앱에 이렇게 보일 것입니다"
+- 미리보기: "이 플러그인이 LVIS 앱에 이렇게 보일 것입니다"
 - 실패 시 Korean error message (검증 실패 사유별)
 
 ### 5.2 CLI (`lvis-marketplace` npm package)
@@ -421,7 +421,7 @@ Phase 3 승격 시에도 API key 경로는 유지 (CI 용).
 ### 7.1 Adapter swap 로드맵
 
 1. **Pre-deploy**: `RealCloudMarketplaceAdapter` 구현 + mock 과 interface 호환 유지
-2. **Server up**: IT 가 VM + nginx + LGE CA 인증서 준비, systemd 서비스 기동
+2. **Server up**: VM + nginx + TLS 인증서 준비, systemd 서비스 기동
 3. **초기 catalog 시드**: 3개 번들 플러그인 (meeting/pageindex/email) 을 admin 이 CLI 로 publish. `deployment: "managed"` 로.
 4. **LVIS client 업데이트**: `marketplace.config.json` 에 실 baseUrl 주입, next release 에 적용
 5. **A/B**: `LVIS_MARKETPLACE_MOCK=1` env 로 dev/test 는 기존 mock 유지 (회귀 테스트)
@@ -442,7 +442,7 @@ Phase 3 승격 시에도 API key 경로는 유지 (CI 용).
 | **M2** — Publisher API + zip validation | plugin.json schema + semver check + filesystem storage | 2d | M1 |
 | **M3** — Admin API | rollback, yank, org-allowed, key 발급 | 2d | M1 |
 | **M4** — Client adapter | `RealCloudMarketplaceAdapter` + config + MarketplaceService 교체 | 2d | M1 |
-| **M5** — Deploy to IT VM | systemd + nginx + LGE CA cert + 초기 catalog seed | 1d | **IT 협조 (VM 프로비저닝)** |
+| **M5** — Deploy to IT VM | systemd + nginx + TLS cert + 초기 catalog seed | 1d | **IT 협조 (VM 프로비저닝)** |
 | **M6** — Web UI | React + shadcn + publish/dashboard/admin 페이지 | 5d | M1-M3 |
 | **M7** — E2E test + smoke | vitest + pytest integration, physical publish/install cycle | 2d | M1-M6 |
 | **M8** — CLI publisher | npm package + CI 템플릿 | 2d | M1-M3 |
@@ -457,7 +457,7 @@ Phase 3 승격 시에도 API key 경로는 유지 (CI 용).
 
 다음 세션 coding 시작 전에 IT 에 문의:
 
-1. **VM 프로비저닝** — 사내망 Ubuntu/RHEL VM 1대 (2 vCPU / 4 GB / 50 GB) 확보 절차, 소요 시간, 요청 양식
+1. **VM 프로비저닝** — 내부 Ubuntu/RHEL VM 1대 (2 vCPU / 4 GB / 50 GB) 확보 절차, 소요 시간, 요청 양식
 2. **사내 도메인 등록** — `marketplace.lvis.internal.your-corp.example` (또는 유사) 할당 + DNS record + corporate CA 서명 cert 발급 가능 여부
 3. **nginx / systemd 권한** — LVIS 팀이 직접 운영 가능한지, IT 운영팀 관리 대상인지
 4. **SSO 통합 일정** — sso.your-corp.example OIDC client 등록 절차, 개발자가 직접 가능한지, IT 승인 필요한지
@@ -473,7 +473,7 @@ Phase 3 승격 시에도 API key 경로는 유지 (CI 용).
 ## 10. Non-goals (Phase 3 이월)
 
 - **Channel 분리** — stable / beta / canary. MVP 는 stable only.
-- **Multi-tenant** — organization 구분. MVP 는 single tenant (LGE 전체).
+- **Multi-tenant** — organization 구분. MVP 는 single tenant.
 - **Automated security scan** — plugin zip 에 대한 SAST / SBOM / dependency audit.
 - **Plugin signing (PKI)** — publisher 인증서 기반 서명. API key → signature 승격.
 - **External federation** — 사외 마켓플레이스 / OSS catalog 와 cross-fetch.

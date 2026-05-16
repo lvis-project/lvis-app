@@ -18,4 +18,4 @@ export type {
   BundleId,
   ResolvedShell,
 } from "./types.js";
-export { LGE_PAIR_IDS } from "./types.js";
+export { VIOLET_PAIR_IDS } from "./types.js";

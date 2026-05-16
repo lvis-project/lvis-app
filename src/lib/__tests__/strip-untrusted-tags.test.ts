@@ -9,8 +9,8 @@ describe("stripUntrustedTags", () => {
 
   it("strips multiple wrap classes", () => {
     const input =
-      "<untrusted-subject>제목</untrusted-subject> | <untrusted-sender-domain>finance.lge.com</untrusted-sender-domain>";
-    expect(stripUntrustedTags(input)).toBe("제목 | finance.lge.com");
+      "<untrusted-subject>제목</untrusted-subject> | <untrusted-sender-domain>finance.example.com</untrusted-sender-domain>";
+    expect(stripUntrustedTags(input)).toBe("제목 | finance.example.com");
   });
 
   it("handles unbalanced / missing close tag", () => {

@@ -120,11 +120,11 @@ describe("SettingsService plugin uninstall cleanup", () => {
     const service = new SettingsService({ userDataPath });
 
     await service.setPluginConfig("meeting", { apiKey: "abc" });
-    await service.setPluginConfig("calendar", { tenant: "lge" });
+    await service.setPluginConfig("calendar", { tenant: "example" });
     await service.deletePluginConfig("meeting");
 
     expect(service.getPluginConfig("meeting")).toEqual({});
-    expect(service.getPluginConfig("calendar")).toEqual({ tenant: "lge" });
+    expect(service.getPluginConfig("calendar")).toEqual({ tenant: "example" });
   });
 
   it("deletes only requested secret keys for the selected plugin", async () => {
@@ -146,13 +146,13 @@ describe("SettingsService plugin uninstall cleanup", () => {
   it("does not delete another dotted plugin id's secret by prefix", async () => {
     const service = new SettingsService({ userDataPath });
 
-    await service.setSecret("plugin.com.lge.token", "abc");
-    await service.setSecret("plugin.com.lge.mail.token", "preserved");
+    await service.setSecret("plugin.com.example.token", "abc");
+    await service.setSecret("plugin.com.example.mail.token", "preserved");
 
-    await expect(service.deletePluginSecrets("com.lge", ["token"])).resolves.toBe(1);
+    await expect(service.deletePluginSecrets("com.example", ["token"])).resolves.toBe(1);
 
-    expect(service.getSecret("plugin.com.lge.token")).toBeNull();
-    expect(service.getSecret("plugin.com.lge.mail.token")).toBe("preserved");
+    expect(service.getSecret("plugin.com.example.token")).toBeNull();
+    expect(service.getSecret("plugin.com.example.mail.token")).toBe("preserved");
   });
 });
 
@@ -388,9 +388,9 @@ describe("SettingsService appearance v2 — fresh install defaults", () => {
 
   it("v2 with followSystem=true round-trips", async () => {
     const service = new SettingsService({ userDataPath });
-    await service.patch({ appearance: { schemaVersion: 2, bundleId: "lge-light", followSystem: true } });
+    await service.patch({ appearance: { schemaVersion: 2, bundleId: "violet-light", followSystem: true } });
     const reloaded = new SettingsService({ userDataPath });
-    expect(reloaded.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "lge-light", followSystem: true });
+    expect(reloaded.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "violet-light", followSystem: true });
   });
 
   it("unknown bundleId coerces to tokyo-night", () => {
@@ -445,10 +445,10 @@ describe("SettingsService appearance v1 → v2 migration", () => {
     expect(s.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "tokyo-night" });
   });
 
-  it("dark + lg → lge-dark", () => {
+  it("dark + lg → violet-dark", () => {
     writeV1({ theme: "dark", chatTheme: "lg", codeTheme: "auto" });
     const s = new SettingsService({ userDataPath });
-    expect(s.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "lge-dark" });
+    expect(s.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "violet-dark" });
   });
 
   it("light + default → forest", () => {
@@ -457,16 +457,16 @@ describe("SettingsService appearance v1 → v2 migration", () => {
     expect(s.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "forest" });
   });
 
-  it("light + lg → lge-light", () => {
+  it("light + lg → violet-light", () => {
     writeV1({ theme: "light", chatTheme: "lg", codeTheme: "auto" });
     const s = new SettingsService({ userDataPath });
-    expect(s.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "lge-light" });
+    expect(s.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "violet-light" });
   });
 
-  it("dark + lg + dark (code override) → lge-dark (code override ignored)", () => {
+  it("dark + lg + dark (code override) → violet-dark (code override ignored)", () => {
     writeV1({ theme: "dark", chatTheme: "lg", codeTheme: "dark" });
     const s = new SettingsService({ userDataPath });
-    expect(s.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "lge-dark" });
+    expect(s.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "violet-dark" });
   });
 
   it("light + default + dark (code override) → forest (code override ignored)", () => {
@@ -515,11 +515,11 @@ describe("SettingsService appearance v1 → v2 migration", () => {
       onDisk = JSON.parse(readFileSync(join(userDataPath, "lvis-settings.json"), "utf-8")) as Record<string, unknown>;
       if ((onDisk.appearance as Record<string, unknown>).schemaVersion === 2) break;
     }
-    expect(onDisk.appearance).toEqual({ schemaVersion: 2, bundleId: "lge-dark" });
+    expect(onDisk.appearance).toEqual({ schemaVersion: 2, bundleId: "violet-dark" });
     // No legacy keys remain after write-back
     expect(onDisk.appearance.theme).toBeUndefined();
     expect(onDisk.appearance.chatTheme).toBeUndefined();
-    expect(service.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "lge-dark" });
+    expect(service.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "violet-dark" });
   });
 
   it("v2 file loads without re-migration", () => {
@@ -540,10 +540,10 @@ describe("SettingsService appearance v1 → v2 migration", () => {
     expect(s.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "tokyo-night" });
   });
 
-  it("system + lg → lge-dark + followSystem:true (main process: renderer will track OS)", () => {
+  it("system + lg → violet-dark + followSystem:true (main process: renderer will track OS)", () => {
     writeV1({ theme: "system", chatTheme: "lg", codeTheme: "auto" });
     const s = new SettingsService({ userDataPath });
-    expect(s.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "lge-dark", followSystem: true });
+    expect(s.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "violet-dark", followSystem: true });
   });
 
   it("codeTheme-only v1 triggers write-back (needsV2WriteBack includes codeTheme)", async () => {

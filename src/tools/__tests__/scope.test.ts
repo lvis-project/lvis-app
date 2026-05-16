@@ -49,9 +49,9 @@ function seed(): ToolRegistry {
   const r = new ToolRegistry();
   r.register(makeBuiltin("bash"));
   r.register(makeBuiltin("web_search"));
-  r.register(makePluginTool("meeting_start", "com.lge.meeting"));
-  r.register(makePluginTool("meeting_stop", "com.lge.meeting"));
-  r.register(makePluginTool("email_list", "com.lge.email"));
+  r.register(makePluginTool("meeting_start", "com.example.meeting"));
+  r.register(makePluginTool("meeting_stop", "com.example.meeting"));
+  r.register(makePluginTool("email_list", "com.example.email"));
   r.register(makeMcpTool("mcp_fetch", "server-1"));
   return r;
 }
@@ -71,7 +71,7 @@ describe("ToolRegistry.getToolSchemasForScope — Phase 1 Lazy Tool Scoping", ()
   it("single plugin in scope → builtins + that plugin's tools", () => {
     const r = seed();
     const schemas = r.getToolSchemasForScope({
-      activePluginIds: new Set(["com.lge.meeting"]),
+      activePluginIds: new Set(["com.example.meeting"]),
       includeBuiltins: true,
       includeMcp: false,
     });
@@ -82,7 +82,7 @@ describe("ToolRegistry.getToolSchemasForScope — Phase 1 Lazy Tool Scoping", ()
   it("multi-plugin scope → union of plugin tools", () => {
     const r = seed();
     const schemas = r.getToolSchemasForScope({
-      activePluginIds: new Set(["com.lge.meeting", "com.lge.email"]),
+      activePluginIds: new Set(["com.example.meeting", "com.example.email"]),
       includeBuiltins: true,
       includeMcp: false,
     });
@@ -116,7 +116,7 @@ describe("ToolRegistry.getToolSchemasForScope — Phase 1 Lazy Tool Scoping", ()
   it("includeBuiltins=false excludes host builtins", () => {
     const r = seed();
     const schemas = r.getToolSchemasForScope({
-      activePluginIds: new Set(["com.lge.meeting"]),
+      activePluginIds: new Set(["com.example.meeting"]),
       includeBuiltins: false,
       includeMcp: false,
     });
@@ -127,7 +127,7 @@ describe("ToolRegistry.getToolSchemasForScope — Phase 1 Lazy Tool Scoping", ()
   it("accepts string[] in addition to Set for activePluginIds", () => {
     const r = seed();
     const schemas = r.getToolSchemasForScope({
-      activePluginIds: ["com.lge.email"],
+      activePluginIds: ["com.example.email"],
       includeBuiltins: false,
       includeMcp: false,
     });
