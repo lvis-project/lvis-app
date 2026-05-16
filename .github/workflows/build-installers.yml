@@ -69,8 +69,19 @@ jobs:
             args+=("--skip-code-sign")
           fi
           args+=("--skip-native-rebuild")
+          # On tag push (release), tell electron-builder to publish artifacts
+          # AND the auto-update manifests (latest-mac.yml / latest.yml /
+          # latest-linux.yml) to the GitHub Release for the tag. Without
+          # this the artifacts only land in the workflow run as artifacts,
+          # so electron-updater cannot resolve a feed.
+          if [ "${{ github.event_name }}" = "push" ]; then
+            args+=("--publish" "always")
+          fi
           node scripts/build-installers.mjs "${args[@]}"
         env:
+          # GH_TOKEN is required by electron-builder's GitHub publisher to
+          # create/update the release and upload assets.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
