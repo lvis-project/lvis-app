@@ -22,6 +22,7 @@ import {
   readPermissionSettings,
   setReviewerSettingsPersist,
   type ReviewerFallbackOnError,
+  REVIEWER_PROVIDERS,
   type ReviewerMode,
   type ReviewerProvider,
   type ReviewerSettingsBlock,
@@ -247,13 +248,8 @@ const VALID_REVIEWER_MODES: ReadonlySet<ReviewerMode> = new Set([
   "rule",
   "llm",
 ]);
-const VALID_REVIEWER_PROVIDERS: ReadonlySet<ReviewerProvider> = new Set([
-  "openai",
-  "anthropic",
-  "google",
-  "foundry",
-  "gcp-playground",
-]);
+// Derived from REVIEWER_PROVIDERS (single SOT in permission-settings-store.ts).
+const VALID_REVIEWER_PROVIDERS: ReadonlySet<ReviewerProvider> = new Set(REVIEWER_PROVIDERS);
 const VALID_REVIEWER_FALLBACKS: ReadonlySet<ReviewerFallbackOnError> = new Set([
   "deny",
   "rule",

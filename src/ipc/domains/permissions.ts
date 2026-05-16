@@ -223,7 +223,7 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
     },
   );
 
-  // ── C3 — reviewer provider key-presence check ────────────────────────────
+  // ── Reviewer provider key-presence check ─────────────────────────────────
   // Used by the renderer settings UI to determine which reviewer providers
   // are activatable (key-driven dynamic activation). Read-only, but gated
   // to prevent a foreign frame from probing which LLM API keys are present.
