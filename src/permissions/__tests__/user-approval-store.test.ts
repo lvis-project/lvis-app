@@ -21,6 +21,7 @@ import {
   revokeApprovalByKey,
   listApprovals,
   readApprovals,
+  canonicalStringify,
   __resetSessionStoreForTest,
 } from "../user-approval-store.js";
 
@@ -200,5 +201,136 @@ describe("atomicWrite safety", () => {
     const file = await readApprovals();
     // At least one write must have landed; JSON must be valid (no corruption)
     expect(typeof file.approvals).toBe("object");
+  });
+});
+
+// ─── CRITICAL-4: trustOrigin cache identity isolation ─────────────────────────
+
+describe("CRITICAL-4: different trustOrigin values produce distinct cache keys", () => {
+  it("approval recorded with trustOrigin A is not visible under trustOrigin B", async () => {
+    await recordApproval("bash_run", '{"command":"ls"}', "user-keyboard", {
+      scope: "session",
+      verdictAtApproval: "high",
+      nlJustification: "user approved",
+      trustOrigin: "user-keyboard",
+    });
+
+    // Same tool/args/source but different trustOrigin — must not get a hit
+    const miss = await lookupApproval(
+      "bash_run",
+      '{"command":"ls"}',
+      "user-keyboard",
+      "plugin-untrusted",
+    );
+    expect(miss).toBeNull();
+  });
+
+  it("approval recorded with trustOrigin is found under same trustOrigin", async () => {
+    await recordApproval("bash_run", '{"command":"ls"}', "user-keyboard", {
+      scope: "session",
+      verdictAtApproval: "medium",
+      nlJustification: null,
+      trustOrigin: "mcp-server-abc",
+    });
+
+    const hit = await lookupApproval(
+      "bash_run",
+      '{"command":"ls"}',
+      "user-keyboard",
+      "mcp-server-abc",
+    );
+    expect(hit).not.toBeNull();
+    expect(hit!.verdictAtApproval).toBe("medium");
+  });
+
+  it("approval recorded without trustOrigin is not found when trustOrigin is supplied", async () => {
+    await recordApproval("bash_run", '{"command":"ls"}', "user-keyboard", {
+      scope: "session",
+      verdictAtApproval: "low",
+      nlJustification: null,
+    });
+
+    const miss = await lookupApproval(
+      "bash_run",
+      '{"command":"ls"}',
+      "user-keyboard",
+      "plugin-abc",
+    );
+    expect(miss).toBeNull();
+  });
+
+  it("different approvalCacheKey values produce distinct cache entries", async () => {
+    await recordApproval("bash_run", '{"command":"ls"}', "user-keyboard", {
+      scope: "session",
+      verdictAtApproval: "low",
+      nlJustification: null,
+      approvalCacheKey: "key-alpha",
+    });
+
+    const miss = await lookupApproval(
+      "bash_run",
+      '{"command":"ls"}',
+      "user-keyboard",
+      undefined,
+      "key-beta",
+    );
+    expect(miss).toBeNull();
+
+    const hit = await lookupApproval(
+      "bash_run",
+      '{"command":"ls"}',
+      "user-keyboard",
+      undefined,
+      "key-alpha",
+    );
+    expect(hit).not.toBeNull();
+  });
+});
+
+// ─── HIGH-2: canonicalStringify key-order invariance ──────────────────────────
+
+describe("HIGH-2: canonicalStringify produces key-order-invariant output", () => {
+  it("{a,b} and {b,a} produce the same string", () => {
+    expect(canonicalStringify({ a: 1, b: 2 })).toBe(canonicalStringify({ b: 2, a: 1 }));
+  });
+
+  it("nested objects are also sorted", () => {
+    const x = { outer: { z: 3, a: 1 }, b: 2 };
+    const y = { b: 2, outer: { a: 1, z: 3 } };
+    expect(canonicalStringify(x)).toBe(canonicalStringify(y));
+  });
+
+  it("arrays are not reordered (only object keys are sorted)", () => {
+    expect(canonicalStringify([3, 1, 2])).toBe("[3,1,2]");
+  });
+
+  it("null is handled", () => {
+    expect(canonicalStringify(null)).toBe("null");
+  });
+
+  it("callers that pre-canonicalize args get key-order-invariant store hits", async () => {
+    // The store's public API takes pre-stringified args; key-order invariance is
+    // the caller's responsibility (permission-manager.ts uses canonicalStringify
+    // before calling lookupApproval). This test verifies that if two callers
+    // both use canonicalStringify they get the same canonical string and therefore
+    // the same store key.
+    const argsObj1 = { path: "/tmp/a", mode: "r" };
+    const argsObj2 = { mode: "r", path: "/tmp/a" };
+    const canonical1 = canonicalStringify(argsObj1);
+    const canonical2 = canonicalStringify(argsObj2);
+
+    // Both canonical forms must be identical
+    expect(canonical1).toBe(canonical2);
+
+    // Record using canonical form of argsObj1
+    await recordApproval("file_read", canonical1, "builtin", {
+      scope: "session",
+      verdictAtApproval: "low",
+      nlJustification: null,
+    });
+
+    // Lookup using canonical form of argsObj2 — must hit
+    const hit = await lookupApproval("file_read", canonical2, "builtin");
+    expect(hit).not.toBeNull();
   });
 });
