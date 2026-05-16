@@ -72,6 +72,15 @@ describe("stripSuggestedReplies", () => {
     expect(stripSuggestedReplies(raw)).toBe("beforeafter");
   });
 
+  it("strips an unclosed trailing block (vendor malformation guard)", () => {
+    // GPT / Gemini occasionally truncate before the closing tag. Without
+    // this guard the open tag would survive into ~/.lvis/sessions JSONL and
+    // re-feed as context on every subsequent turn — the same leak class as
+    // M3 from the PR #807 review.
+    const raw = "본문\n<suggested_replies>\n- a";
+    expect(stripSuggestedReplies(raw)).toBe("본문");
+  });
+
   it("removes multiple blocks (defensive — model malformation or history echo)", () => {
     // If a prior turn's block survived into history and the next turn echoes
     // it back ALONGSIDE a freshly emitted block, both must be removed before

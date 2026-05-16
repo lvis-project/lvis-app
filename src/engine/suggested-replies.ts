@@ -25,9 +25,21 @@ export function parseSuggestedReplies(raw: string): string[] {
     .slice(0, 3);
 }
 
-/** Strip the suggested-replies block from a complete assistant message. */
+/**
+ * Strip the suggested-replies block from a complete assistant message.
+ *
+ * Two passes: closed blocks first, then any stray trailing unclosed block.
+ * The unclosed-block fallback guards against vendor-differential malformation
+ * (e.g. GPT or Gemini truncating before the closing tag) — otherwise the
+ * `<suggested_replies>` open-tag would survive into ~/.lvis/sessions JSONL
+ * and re-feed to the LLM as context every turn. The streaming filter
+ * already drops the partial block from the user-visible delta stream;
+ * this completes the same guarantee at the persistence layer.
+ */
 export function stripSuggestedReplies(raw: string): string {
-  return raw.replace(/\n*<suggested_replies>[\s\S]*?<\/suggested_replies>\s*/g, "").trimEnd();
+  const closed = raw.replace(/\n*<suggested_replies>[\s\S]*?<\/suggested_replies>\s*/g, "");
+  const noTrailingOrphan = closed.replace(/\n*<suggested_replies>[\s\S]*$/, "");
+  return noTrailingOrphan.trimEnd();
 }
 
 export interface StreamingFilter {
