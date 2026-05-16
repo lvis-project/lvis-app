@@ -14,6 +14,7 @@ import { markStaleToolResults, estimateMessagesTokens, getModelPreflightThreshol
 import { compactWithBoundary, renderBoundaryAsPreamble } from "./structured-compact.js";
 import { CompressionStatus } from "../shared/compact-status.js";
 import { stubMarkedToolResults } from "./wire-serialize.js";
+import { stripSuggestedReplies } from "./suggested-replies.js";
 import { createProvider, secretKeyFor } from "./llm/provider-factory.js";
 import { FallbackProvider, type FallbackStatus } from "./llm/vercel/fallback-chain.js";
 import type { LLMProvider, ToolSchema, TokenUsage } from "./llm/types.js";
@@ -544,7 +545,9 @@ export class ConversationLoop {
       if (ev.type === "message_complete") break;
       if (ev.type === "error") throw new Error(`LLM stream error: ${ev.error}`);
     }
-    return text.trim();
+    // Plugins and routines consume generateText() return verbatim — strip the
+    // suggested-replies block so it never reaches non-chat-stream callers.
+    return stripSuggestedReplies(text).trim();
   }
 
   /** 현재 벤더 이름 */
@@ -1488,7 +1491,10 @@ export class ConversationLoop {
         log.info(
           `queryLoop: EARLY-EXIT(interrupted) — round=${roundIndex} priorTextLen=${(stream.text ?? "").length}`,
         );
-        const savedText = (stream.text ?? "") + "\n\n[중단됨]";
+        // Strip suggested-replies block before persistence — otherwise raw
+        // `<suggested_replies>` tags would land in ~/.lvis/sessions/*.jsonl
+        // and be fed back to the LLM on every subsequent turn.
+        const savedText = stripSuggestedReplies(stream.text ?? "") + "\n\n[중단됨]";
         this.history.append({ role: "assistant", content: savedText });
         callbacks?.onTextDelta?.("\n\n[중단됨]");
         return { text: savedText, toolCalls: allToolCalls, usage: turnUsage, stopReason: "interrupted" };
@@ -1533,7 +1539,16 @@ export class ConversationLoop {
           (this.cumulativeUsage.cacheWriteTokens ?? 0) + cacheWrite;
       }
 
-      const { text: textContent, thought: thoughtContent, thinkingBlocks: roundThinkingBlocks, toolCalls: pendingToolCalls, stopReason } = stream;
+      const { text: streamText, thought: thoughtContent, thinkingBlocks: roundThinkingBlocks, toolCalls: pendingToolCalls, stopReason } = stream;
+      // Strip the suggested-replies block at the single chokepoint between the
+      // raw stream and every downstream consumer (history, callbacks, return
+      // value). Keeping this stripped here protects: (a) persisted session
+      // JSONL — the tag would otherwise be fed back as context on every
+      // subsequent turn, (b) sub-agent summaries — sub-agent results flow
+      // back to the parent via runTurn's return value, (c) plugin/routine
+      // generateText callers — orthogonal strip is also applied in
+      // generateText() but defense in depth.
+      const textContent = stripSuggestedReplies(streamText);
 
       // R2-CR-1: cap BEFORE persisting to history. Anthropic + OpenAI strict
       // APIs reject mismatches between assistant.tool_use blocks and the

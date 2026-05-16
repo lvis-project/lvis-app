@@ -71,6 +71,22 @@ describe("stripSuggestedReplies", () => {
     const raw = "before\n<suggested_replies>\n- x\n</suggested_replies>\nafter";
     expect(stripSuggestedReplies(raw)).toBe("beforeafter");
   });
+
+  it("removes multiple blocks (defensive — model malformation or history echo)", () => {
+    // If a prior turn's block survived into history and the next turn echoes
+    // it back ALONGSIDE a freshly emitted block, both must be removed before
+    // re-persistence — otherwise blocks would compound across turns.
+    const raw = [
+      "본문",
+      "<suggested_replies>",
+      "- old",
+      "</suggested_replies>",
+      "<suggested_replies>",
+      "- new",
+      "</suggested_replies>",
+    ].join("\n");
+    expect(stripSuggestedReplies(raw)).toBe("본문");
+  });
 });
 
 describe("createStreamingFilter", () => {
