@@ -823,17 +823,11 @@ function normalizeAppearance(input: unknown): AppearanceSettings {
 
   // v2 path — schemaVersion:2 present.
   if (obj.schemaVersion === 2) {
-    // Remap retired bundle IDs to their renamed successors. The keys here
-    // are LITERAL historical strings persisted in users' settings.json from
-    // earlier builds — they MUST be preserved verbatim so the migration
-    // matches existing on-disk state. New IDs (values) follow the current
-    // naming scheme. This map only grows when an ID is retired; it never
-    // shrinks.
-    const BUNDLE_ID_REMAP: Record<string, string> = {
-      "lge-dark":  "violet-dark",
-      "lge-light": "violet-light",
-    };
-    const rawBundleId = typeof obj.bundleId === "string" ? (BUNDLE_ID_REMAP[obj.bundleId] ?? obj.bundleId) : "";
+    // Retired bundle IDs from earlier internal builds are not migrated:
+    // the open-source release has no install base that would carry them
+    // forward. Unknown bundleIds fall through to DEFAULT_BUNDLE_ID by
+    // the VALID_BUNDLE_IDS gate below.
+    const rawBundleId = typeof obj.bundleId === "string" ? obj.bundleId : "";
     const bundleId =
       VALID_BUNDLE_IDS.includes(rawBundleId)
         ? rawBundleId
