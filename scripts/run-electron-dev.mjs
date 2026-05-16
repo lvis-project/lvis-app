@@ -359,14 +359,48 @@ function resolveLocalBin(name) {
   return name;
 }
 
+// Map<tag, { resolve, promise }> — populated by spawnWatcher when a watcher
+// has readyPattern. Consumed by the watcher list builder so dev-watcher-gate
+// can await stdout signals instead of polling output mtime.
+const watcherReady = new Map();
+
 function spawnWatcher(tag, cmd, args, opts = {}) {
+  const { readyPattern, ...spawnOpts } = opts;
+  // When readyPattern is supplied, pipe stdout so we can scan for the first
+  // build-complete signal (then tee to the parent terminal so the dev sees
+  // the same output). Without readyPattern the legacy mtime gate is used,
+  // so stdout/stderr inherit directly.
+  if (readyPattern) {
+    let resolveReady;
+    const promise = new Promise((r) => { resolveReady = r; });
+    watcherReady.set(tag, { resolve: resolveReady, promise });
+  }
   const child = spawn(cmd, args, {
     cwd: repoRoot,
-    stdio: ["ignore", "inherit", "inherit"],
+    // When readyPattern is set, pipe BOTH stdout and stderr — different
+    // tools emit the build-complete signal on different streams
+    // (tailwindcss prints "Done in NNNms" on stderr, esbuild prints
+    // "build finished" on stderr too). We tee both back to the parent
+    // terminal so dev still sees full output, but also scan for the
+    // pattern.
+    stdio: readyPattern ? ["ignore", "pipe", "pipe"] : ["ignore", "inherit", "inherit"],
     env: { ...process.env, LVIS_DEV: "1" },
     shell: process.platform === "win32" && cmd.toLowerCase().endsWith(".cmd"),
-    ...opts,
+    ...spawnOpts,
   });
+  if (readyPattern) {
+    let matched = false;
+    const scan = (chunk, sink) => {
+      sink.write(chunk);
+      if (!matched && readyPattern.test(chunk.toString())) {
+        matched = true;
+        const entry = watcherReady.get(tag);
+        if (entry) entry.resolve();
+      }
+    };
+    if (child.stdout) child.stdout.on("data", (c) => scan(c, process.stdout));
+    if (child.stderr) child.stderr.on("data", (c) => scan(c, process.stderr));
+  }
   child.on("error", (err) => {
     log(tag, `spawn failed: ${err.message}`);
     shutdown(1);
@@ -554,22 +588,37 @@ function scheduleRestart() {
   }, 400);
 }
 
-// Each watcher's expected output relative to repoRoot. We gate Electron
-// launch on ALL of them having a fresh first build so the renderer never
-// loads HTML referencing missing styles.css/renderer.js (which previously
-// produced an unstyled UI on first dev run after a clean dist).
+// Each watcher's expected first-build signal. We gate Electron launch on
+// ALL of them having a fresh first build so the renderer never loads HTML
+// referencing missing styles.css/renderer.js (which previously produced an
+// unstyled UI on first dev run after a clean dist).
 //
-// First-build detection uses output mtime ≥ launcherStartedAt rather than
-// existsSync alone, because incremental builds from a previous dev session
-// may already have files in place; we want the new session's first emit.
-// See scripts/lib/dev-watcher-gate.mjs for the polling implementation.
+// Two signal sources, picked per watcher:
+//   - `output` (mtime ≥ launcherStartedAt) — esbuild always rewrites on
+//     first invocation, so mtime polling is reliable.
+//   - `readyPromise` (resolves when spawnWatcher's stdout/stderr scan sees
+//     `readyPattern`) — required for tools with idempotent skip-write
+//     (tailwindcss v4 skips writes when resolved CSS is identical to the
+//     prior build, leaving mtime stale → mtime gate would hang).
+//
+// See scripts/lib/dev-watcher-gate.mjs for the dual-signal detection.
 function makeWatcherList() {
+  // Sanity check: the styles watcher MUST have been spawned (and thus
+  // populated `watcherReady`) before this function runs. Otherwise the
+  // readyPromise lookup returns undefined → gate silently falls back to
+  // mtime → tailwindcss skip-write → hang. Loud failure here beats a
+  // silent regression after a future caller reordering.
+  if (!watcherReady.has("styles")) {
+    throw new Error(
+      "makeWatcherList: styles watcher not spawned yet — call spawnWatcher('styles', ...) first",
+    );
+  }
   return [
     { tag: "main",           label: "Main process (esbuild)",  output: resolve(repoRoot, "dist/src/main/main.js") },
     { tag: "preload",        label: "Preload (esbuild)",       output: resolve(repoRoot, "dist/src/preload.cjs") },
     { tag: "plugin-preload", label: "Plugin preload (esbuild)",output: resolve(repoRoot, "dist/src/plugin-preload.cjs") },
     { tag: "renderer",       label: "Renderer (esbuild)",      output: resolve(repoRoot, "dist/src/renderer.js") },
-    { tag: "styles",         label: "Styles (Tailwind)",       output: resolve(repoRoot, "dist/src/styles.css") },
+    { tag: "styles",         label: "Styles (Tailwind)",       readyPromise: watcherReady.get("styles")?.promise },
   ];
 }
 
@@ -615,7 +664,9 @@ async function main() {
   // by the current dev session (not stale incremental output left behind
   // by a prior run).
   const launcherStartedAt = Date.now();
-  const watchers = makeWatcherList();
+  // Watcher list is built AFTER spawnWatcher calls below so that any
+  // readyPromise entries (populated by spawnWatcher into the watcherReady
+  // map) are visible. See makeWatcherList for the stdout-vs-mtime split.
 
   // Initial html copy
   copyHtml();
@@ -692,13 +743,25 @@ async function main() {
   ]);
 
   // Styles (tailwind --watch)
+  // tailwindcss v4 skips file writes when the resolved CSS is identical to
+  // the prior build (intentional incremental optimization). The mtime gate
+  // would then never see mtime advance and time out. Instead we capture
+  // the watcher's stdout and treat the first "Done in NNNms" line as the
+  // build-complete signal — works regardless of whether tailwindcss
+  // actually rewrote the file. See scripts/lib/dev-watcher-gate.mjs for the
+  // dual-signal (stdout + mtime fallback) detection logic.
+  // Pattern anchored at line start + `ms\b` suffix to avoid false positives
+  // from any "Done in N" substring appearing in error stack traces or CSS
+  // comments. tailwindcss v4's exact line is `Done in NNNms` (verified at
+  // node_modules/@tailwindcss/cli/dist/index.mjs). Failing tight is better
+  // than silently resolving on a non-build line.
   spawnWatcher("styles", resolveLocalBin("tailwindcss"), [
     "-i",
     "src/styles.css",
     "-o",
     "dist/src/styles.css",
     "--watch=always",
-  ]);
+  ], { readyPattern: /(^|\n)Done in \d+ms\b/ });
 
   // Wait for ALL watchers' first build before launching Electron. Pre-fix
   // the launcher only awaited dist/src/main/main.js, so renderer.js and
@@ -706,6 +769,7 @@ async function main() {
   // utility classes were undefined and v6 composer rendered as raw text
   // (Bug #TBD). The mtime gate ensures every watcher has produced a fresh
   // build for the current dev session.
+  const watchers = makeWatcherList();
   const ok = await waitForAllFirstBuilds(watchers, launcherStartedAt, log);
   if (!ok) {
     log("dev", "timed out waiting for watchers — see [dev:progress] FAIL lines above");
