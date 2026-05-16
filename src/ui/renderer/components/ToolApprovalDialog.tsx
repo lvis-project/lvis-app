@@ -89,7 +89,7 @@ export function ToolApprovalDialog({
     if (request) {
       // canonicalStringify: sort object keys so {a,b} and {b,a} produce the
       // same string — matching how dispatchReviewer builds the lookup key.
-      const canonicalArgs = canonicalStringifyForRenderer(request.args);
+      const canonicalArgs = canonicalStringifyForRenderer(request.args ?? {});
       recordPromise = window.lvis?.userApproval?.record({
         toolName: request.toolName,
         args: canonicalArgs,
