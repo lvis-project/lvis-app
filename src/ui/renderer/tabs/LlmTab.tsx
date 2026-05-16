@@ -171,8 +171,8 @@ export function LlmTab(props: LlmTabProps) {
               onChange={(e) => setBaseUrl(e.target.value)}
               placeholder={(vendorInfo as any).baseUrlPlaceholder ?? "https://..."}
             />
-            <p className="text-[10px] text-muted-foreground">
-              ⓘ 벤더를 바꾸면 이 입력은 새 벤더의 저장값으로 대체됩니다 — 저장 전에 벤더를 전환하면 입력 내용이 폐기됩니다.
+            <p className="text-[11px] text-muted-foreground">
+              ⓘ 저장 전 벤더 변경 시 현재 입력이 폐기됩니다.
             </p>
             {vendor === "azure-foundry" && (
               <p className="text-[11px] text-muted-foreground">
