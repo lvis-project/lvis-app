@@ -20,6 +20,8 @@ export interface MarketplaceTabProps {
   apiKeyInput: string;
   setApiKeyInput: (v: string) => void;
   onSaved: () => void;
+  /** Debounced immediate-apply hook — fired when private-network toggle flips. */
+  onImmediateChange?: () => void;
 }
 
 export function MarketplaceTab(props: MarketplaceTabProps) {
@@ -34,6 +36,7 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
     apiKeyInput,
     setApiKeyInput,
     onSaved,
+    onImmediateChange,
   } = props;
   const [packages, setPackages] = useState<MarketplaceItem[]>([]);
   const [packageStatus, setPackageStatus] = useState("로딩 중...");
@@ -187,7 +190,10 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
           checked={allowPrivateNetwork}
           aria-labelledby="marketplace-allow-private-network-label"
           className="mt-0.5 size-5"
-          onCheckedChange={(checked) => setAllowPrivateNetwork(checked === true)}
+          onCheckedChange={(checked) => {
+            setAllowPrivateNetwork(checked === true);
+            onImmediateChange?.();
+          }}
         />
         <div className="space-y-0.5">
           <p id="marketplace-allow-private-network-label" className="text-sm font-medium">

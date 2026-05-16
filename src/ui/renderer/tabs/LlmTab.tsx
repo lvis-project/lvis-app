@@ -44,6 +44,13 @@ export interface LlmTabProps {
   fallbackOpen: boolean;
   setFallbackOpen: (updater: boolean | ((o: boolean) => boolean)) => void;
   onSaved: () => void;
+  /**
+   * Called after the user changes an immediate-apply control (vendor /
+   * thinking toggle / reasoning slider). The dialog debounces these and
+   * persists via `s.save("llm")` so the user gets immediate-feel
+   * application without spamming saves.
+   */
+  onImmediateChange?: () => void;
 }
 
 export function LlmTab(props: LlmTabProps) {
@@ -72,6 +79,7 @@ export function LlmTab(props: LlmTabProps) {
     fallbackOpen,
     setFallbackOpen,
     onSaved,
+    onImmediateChange,
   } = props;
   const vendorInfo = VENDORS.find((v) => v.id === vendor) ?? VENDORS[0];
 
@@ -79,7 +87,13 @@ export function LlmTab(props: LlmTabProps) {
     <div className="space-y-4 pt-4">
       <div className="space-y-2">
         <Label htmlFor="vendor-select">벤더</Label>
-        <Select value={vendor} onValueChange={setVendor}>
+        <Select
+          value={vendor}
+          onValueChange={(v) => {
+            setVendor(v);
+            onImmediateChange?.();
+          }}
+        >
           <SelectTrigger id="vendor-select" className="w-full">
             <SelectValue placeholder="벤더 선택" />
           </SelectTrigger>
@@ -155,7 +169,10 @@ export function LlmTab(props: LlmTabProps) {
           <span>Extended Thinking / Reasoning</span>
           <Switch
             checked={enableThinking}
-            onCheckedChange={setEnableThinking}
+            onCheckedChange={(c) => {
+              setEnableThinking(c);
+              onImmediateChange?.();
+            }}
             aria-label="Extended Thinking / Reasoning"
           />
         </Label>
@@ -174,11 +191,10 @@ export function LlmTab(props: LlmTabProps) {
               max={REASONING_EFFORT_STEPS.length - 1}
               step={1}
               value={[budgetToEffortIndex(thinkingBudget)]}
-              onValueChange={([value]) =>
-                setThinkingBudget(
-                  REASONING_EFFORT_STEPS[value ?? 0]!.budget,
-                )
-              }
+              onValueChange={([value]) => {
+                setThinkingBudget(REASONING_EFFORT_STEPS[value ?? 0]!.budget);
+                onImmediateChange?.();
+              }}
               aria-label="Reasoning effort"
             />
             <div className="flex justify-between text-[10px] text-muted-foreground">

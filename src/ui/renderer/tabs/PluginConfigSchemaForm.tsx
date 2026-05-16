@@ -26,13 +26,14 @@
  * field is rendered as a read-only display so the user is not silently
  * locked out of declared settings.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "../../../components/ui/button.js";
 import { Checkbox } from "../../../components/ui/checkbox.js";
 import { Input } from "../../../components/ui/input.js";
 import { Label } from "../../../components/ui/label.js";
 import { NativeSelect, NativeSelectOption } from "../../../components/ui/native-select.js";
 import type { PluginConfigSchemaPropertySummary, PluginConfigSchemaSummary } from "../types.js";
+import { useDebouncedSave } from "../hooks/use-debounced-save.js";
 
 export type PluginConfigFormValues = Record<string, unknown>;
 
@@ -123,17 +124,6 @@ export function PluginConfigSchemaForm({
   const [secretSaving, setSecretSaving] = useState<Record<string, boolean>>({});
   const required = new Set(schema.required ?? []);
 
-  // Trailing-edge debounce for immediate-apply controls. Rapid toggles
-  // are collapsed into a single onSave so we don't fire one plugin
-  // restart per click.
-  const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(
-    () => () => {
-      if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
-    },
-    [],
-  );
-
   const buildOut = useCallback(
     (source: PluginConfigFormValues): PluginConfigFormValues => {
       const out: PluginConfigFormValues = {};
@@ -156,28 +146,27 @@ export function PluginConfigSchemaForm({
     [buildOut, onSave],
   );
 
+  // Trailing-edge debounce: rapid toggle bursts collapse into a single
+  // pluginConfig.set so we don't fire one plugin restart per click.
+  const autoSave = useDebouncedSave(
+    () => {
+      void saveDraft(draft);
+    },
+    IMMEDIATE_SAVE_DEBOUNCE_MS,
+  );
+
   const handleManualSave = useCallback(() => {
-    if (autoSaveTimer.current) {
-      clearTimeout(autoSaveTimer.current);
-      autoSaveTimer.current = null;
-    }
+    autoSave.cancel();
     void saveDraft(draft);
-  }, [draft, saveDraft]);
+  }, [autoSave, draft, saveDraft]);
 
   /** Update + schedule auto-save (200ms debounce). For toggle/enum. */
   const updateImmediate = useCallback(
     (key: string, value: unknown) => {
-      setDraft((prev) => {
-        const next = { ...prev, [key]: value };
-        if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
-        autoSaveTimer.current = setTimeout(() => {
-          autoSaveTimer.current = null;
-          void saveDraft(next);
-        }, IMMEDIATE_SAVE_DEBOUNCE_MS);
-        return next;
-      });
+      setDraft((prev) => ({ ...prev, [key]: value }));
+      autoSave.schedule();
     },
-    [saveDraft],
+    [autoSave],
   );
 
   /** Update local draft only. For text/number/array — explicit save. */

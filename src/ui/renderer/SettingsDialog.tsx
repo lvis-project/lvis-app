@@ -16,6 +16,7 @@ import { McpTab } from "./tabs/McpTab.js";
 import { PluginConfigTab } from "./tabs/PluginConfigTab.js";
 import { MarketplaceTab } from "./tabs/MarketplaceTab.js";
 import { useSettingsOrchestration } from "./hooks/use-settings-orchestration.js";
+import { useDebouncedSave } from "./hooks/use-debounced-save.js";
 import { normalizeSettingsTab } from "../../shared/settings-tabs.js";
 
 /**
@@ -91,6 +92,15 @@ export function SettingsContent({
   const [tab, setTab] = useState(() => normalizeSettingsTab(initialTab));
   const [pendingPermissions, setPendingPermissions] = useState(0);
   const s = useSettingsOrchestration(open, api, onSaved, onOpenChange);
+
+  // Per-tab debounced save handlers. Toggle / radio / slider controls
+  // call these `schedule` functions; rapid bursts (e.g. dragging a slider)
+  // collapse into a single `s.save(tab)` call 200ms after the most recent
+  // change. The deferred-save Save button calls `s.save(tab)` directly.
+  const llmAutoSave = useDebouncedSave(() => void s.save("llm")).schedule;
+  const chatAutoSave = useDebouncedSave(() => void s.save("chat")).schedule;
+  const webAutoSave = useDebouncedSave(() => void s.save("web")).schedule;
+  const marketplaceAutoSave = useDebouncedSave(() => void s.save("marketplace")).schedule;
 
   useEffect(() => {
     if (open) setTab(normalizeSettingsTab(initialTab));
@@ -168,6 +178,7 @@ export function SettingsContent({
               fallbackOpen={s.fallbackOpen}
               setFallbackOpen={s.setFallbackOpen}
               onSaved={onSaved}
+              onImmediateChange={llmAutoSave}
             />
             <TabSaveBar onSave={() => void s.save("llm")} saving={s.saving} settingsLoaded={s.settingsLoaded} />
           </TabsContent>
@@ -185,9 +196,13 @@ export function SettingsContent({
               idlePreferenceRefresh={s.idlePreferenceRefresh}
               setIdlePreferenceRefresh={s.setIdlePreferenceRefresh}
               piiRedactEnabled={s.piiRedactEnabled}
-              onPiiRedactToggle={() => s.setPiiRedactEnabled(!s.piiRedactEnabled)}
+              onPiiRedactToggle={() => {
+                s.setPiiRedactEnabled(!s.piiRedactEnabled);
+                chatAutoSave();
+              }}
+              onImmediateChange={chatAutoSave}
             />
-            <TabSaveBar onSave={() => void s.save("chat")} saving={s.saving} settingsLoaded={s.settingsLoaded} />
+            {/* ChatTab is fully immediate-apply — no deferred-save bar needed. */}
           </TabsContent>
 
           <TabsContent value="web">
@@ -200,6 +215,7 @@ export function SettingsContent({
               webKeyInput={s.webKeyInput}
               setWebKeyInput={s.setWebKeyInput}
               onSaved={onSaved}
+              onImmediateChange={webAutoSave}
             />
             <TabSaveBar onSave={() => void s.save("web")} saving={s.saving} settingsLoaded={s.settingsLoaded} />
           </TabsContent>
@@ -223,6 +239,7 @@ export function SettingsContent({
               apiKeyInput={s.marketplaceApiKeyInput}
               setApiKeyInput={s.setMarketplaceApiKeyInput}
               onSaved={onSaved}
+              onImmediateChange={marketplaceAutoSave}
             />
             <TabSaveBar onSave={() => void s.save("marketplace")} saving={s.saving} settingsLoaded={s.settingsLoaded} />
           </TabsContent>
