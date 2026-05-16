@@ -19,6 +19,19 @@ vi.mock("electron", () => ({
 function invoke(channel: string, ...args: unknown[]): unknown {
   const fn = handlers.get(channel);
   if (!fn) throw new Error(`No handler registered for: ${channel}`);
+  // Issue #798: mutating user-approval handlers gate on user-keyboard intent.
+  // Tests already invoke through the unauthenticated test seam (null event +
+  // validateSender mock); auto-inject the intent marker on the relevant
+  // channels so existing test fixtures don't need a payload rewrite.
+  const intentRequired =
+    channel === PERMISSIONS.userApprovalRecord ||
+    channel === PERMISSIONS.userApprovalRevoke;
+  if (intentRequired && typeof args[0] === "object" && args[0] !== null) {
+    const payload = args[0] as Record<string, unknown>;
+    if (payload.intent === undefined) {
+      args = [{ ...payload, intent: { inputOrigin: "user-keyboard", userActivation: true } }, ...args.slice(1)];
+    }
+  }
   return fn(null, ...args);
 }
 
