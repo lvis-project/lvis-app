@@ -93,19 +93,34 @@ export function SettingsContent({
   const [pendingPermissions, setPendingPermissions] = useState(0);
   const s = useSettingsOrchestration(open, api, onSaved, onOpenChange);
 
-  // Per-tab debounced save handlers. Toggle / radio / slider controls
-  // call `.schedule()`; rapid bursts (slider drag) collapse into a single
-  // `s.save(tab, { closeOnDone: false })` call 200ms after the most recent
-  // change. The explicit TabSaveBar Save button calls `.cancel()` first
-  // to avoid a double-write race (pending debounce + click on Save would
-  // otherwise fire `s.save` twice), then `s.save(tab)` with the default
-  // `closeOnDone: true`. `closeOnDone: false` for the debounce path is
-  // critical: without it, every immediate-apply toggle would close the
-  // dialog 200ms later.
-  const llmSave = useDebouncedSave(() => void s.save("llm", { closeOnDone: false }));
-  const chatSave = useDebouncedSave(() => void s.save("chat", { closeOnDone: false }));
-  const webSave = useDebouncedSave(() => void s.save("web", { closeOnDone: false }));
-  const marketplaceSave = useDebouncedSave(() => void s.save("marketplace", { closeOnDone: false }));
+  // Per-tab debounced save handlers. Immediate-apply controls (toggle,
+  // radio, slider, select) call `.schedule()`; rapid bursts collapse
+  // into a single `s.save(tab)` 200ms after the most recent change.
+  // The explicit TabSaveBar Save button calls `.cancel()` first to
+  // avoid a double-write race (pending debounce + click would otherwise
+  // fire `s.save` twice), then `s.save(tab)`. The save itself never
+  // closes the dialog — modern multi-tab Settings (VS Code, Linear,
+  // Raycast) keep the modal open after Save so the user can verify the
+  // change and edit a sibling tab; close lives on the Dialog X / Esc.
+  const llmSave = useDebouncedSave(() => void s.save("llm"));
+  const chatSave = useDebouncedSave(() => void s.save("chat"));
+  const webSave = useDebouncedSave(() => void s.save("web"));
+  const marketplaceSave = useDebouncedSave(() => void s.save("marketplace"));
+
+  // Cancel any pending debounced save when the dialog transitions to
+  // closed. Radix Dialog keeps its children mounted when `open=false`,
+  // so the hook's unmount-cleanup would otherwise miss this case —
+  // a toggle a millisecond before close would still fire its 200ms
+  // debounced save on a "closed" dialog, persisting a half-edited
+  // value the user already abandoned.
+  useEffect(() => {
+    if (!open) {
+      llmSave.cancel();
+      chatSave.cancel();
+      webSave.cancel();
+      marketplaceSave.cancel();
+    }
+  }, [open, llmSave, chatSave, webSave, marketplaceSave]);
 
   useEffect(() => {
     if (open) setTab(normalizeSettingsTab(initialTab));

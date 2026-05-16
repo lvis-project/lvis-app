@@ -58,15 +58,16 @@ export interface SettingsOrchestrationState {
   settingsLoaded: boolean;
   saving: boolean;
   /**
-   * Persist current draft for the named tab.
+   * Persist current draft for the named tab. Returns when the IPC round
+   * trip completes (or surfaces the error via the orchestration's own
+   * banner — callers do NOT receive a rejection).
    *
-   * @param opts.closeOnDone close the dialog when the save resolves (and
-   *   call `onSaved` for non-`permissions` tabs). Default `true` so the
-   *   existing footer-style Save buttons behave unchanged. Debounced
-   *   immediate-apply callers MUST pass `false` — closing the dialog 200ms
-   *   after every toggle is a UX trap.
+   * The save NEVER closes the dialog. Multi-tab Settings modals (VS Code,
+   * Linear, Raycast) keep the dialog open after Save so the user can
+   * verify the change and edit a sibling tab. Close lives on the
+   * Dialog X / Esc — same as every other modal.
    */
-  save: (tab: string, opts?: { closeOnDone?: boolean }) => Promise<void>;
+  save: (tab: string) => Promise<void>;
   vendorInfo: (typeof VENDORS)[number];
 }
 
@@ -201,24 +202,19 @@ export function useSettingsOrchestration(
   // would flicker (the first call's `finally` clears the flag while the
   // second is still running).
   const savingRef = useRef(false);
-  const pendingSavePayload = useRef<
-    null | { tab: string; opts: { closeOnDone: boolean } }
-  >(null);
-  const save = async (
-    tab: string,
-    opts: { closeOnDone?: boolean } = {},
-  ): Promise<void> => {
-    const closeOnDone = opts.closeOnDone ?? true;
+  const pendingSavePayload = useRef<null | { tab: string }>(null);
+  // Latest-`save` ref: the running save closure captures values from its
+  // own render. When `finally` re-fires the pending payload, it must
+  // call the LATEST `save` (with the latest closures) — otherwise
+  // toggles that landed between the call and the re-fire are silently
+  // dropped from the second save's payload. The ref is updated via
+  // `useEffect` (canonical latest-ref pattern) so a discarded concurrent
+  // render does not leave a dangling closure here.
+  const saveRef = useRef<(tab: string) => Promise<void>>(null!);
+  const save = async (tab: string): Promise<void> => {
     if (!settingsLoaded) return;
     if (savingRef.current) {
-      // Coalesce — keep the most recent intent; closeOnDone wins via OR
-      // so an explicit Save click never gets silently demoted by a later
-      // auto-save.
-      const prev = pendingSavePayload.current;
-      pendingSavePayload.current = {
-        tab,
-        opts: { closeOnDone: closeOnDone || Boolean(prev?.opts.closeOnDone) },
-      };
+      pendingSavePayload.current = { tab };
       return;
     }
     savingRef.current = true;
@@ -279,20 +275,24 @@ export function useSettingsOrchestration(
         } as any);
       }
       if (tab !== "permissions") onSaved();
-      if (closeOnDone) onOpenChange(false);
     } finally {
       savingRef.current = false;
       setSaving(false);
       // If a debounced save was coalesced while we were running, fire it
-      // now with the most recent draft. Otherwise persistence on the
-      // last-edited tab would be silently dropped under contention.
+      // now via the LATEST `save` closure (saveRef) so the re-fire reads
+      // the most recent state, not the stale closure of the original
+      // call. Without this the second save would silently drop any
+      // toggles that landed between the original call and the re-fire.
       const pending = pendingSavePayload.current;
       if (pending) {
         pendingSavePayload.current = null;
-        void save(pending.tab, pending.opts);
+        void saveRef.current(pending.tab);
       }
     }
   };
+  useEffect(() => {
+    saveRef.current = save;
+  });
 
   const setIdlePreferenceRefreshLive = useCallback((next: boolean) => {
     const previous = idlePreferenceRefresh;
