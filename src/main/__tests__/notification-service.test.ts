@@ -147,6 +147,7 @@ describe("NotificationService — routing decision", () => {
       notificationFactory: factoryStub.factory,
       isReady: () => true,
       isTestEnv: () => false,
+      isAnyWindowFocused: () => true, // multi-window probe: main is focused
     });
     svc.fire({
       kind: "turn-end",
@@ -466,6 +467,7 @@ describe("NotificationService — title sanitization (M1)", () => {
       notificationFactory: factoryStub.factory,
       isReady: () => true,
       isTestEnv: () => false,
+      isAnyWindowFocused: () => true,
     });
     svc.fire({
       kind: "routine",
@@ -477,5 +479,134 @@ describe("NotificationService — title sanitization (M1)", () => {
       IPC_NOTIFICATION_TOAST,
       expect.objectContaining({ title: "wakeup[1m완료" }),
     );
+  });
+});
+
+describe("NotificationService — multi-window focus gate (#842)", () => {
+  it("main blurred + aux window focused → focus gate ACTIVE (in-app toast, no OS pop)", () => {
+    // The pre-fix gate only consulted `win.isFocused()` on mainWindow. With
+    // a detached settings/auth/link window holding focus, the gate now
+    // correctly classifies as in-app via the `isAnyWindowFocused` probe.
+    const win = makeMockWindow({ focused: false, minimized: false });
+    const factoryStub = makeNotificationFactoryStub();
+    const svc = new NotificationService({
+      getMainWindow: () => win as unknown as Electron.BrowserWindow,
+      notificationFactory: factoryStub.factory,
+      isReady: () => true,
+      isTestEnv: () => false,
+      isAnyWindowFocused: () => true, // an aux window holds focus
+    });
+    svc.fire({ kind: "turn-end", title: "응답", body: "ok" });
+    expect(factoryStub.calls.length).toBe(0);
+    expect(win.webContents.send).toHaveBeenCalledWith(
+      IPC_NOTIFICATION_TOAST,
+      expect.objectContaining({ kind: "turn-end" }),
+    );
+  });
+
+  it("main blurred + no LVIS window focused → focus gate INACTIVE (OS path)", () => {
+    const win = makeMockWindow({ focused: false, minimized: false });
+    const factoryStub = makeNotificationFactoryStub();
+    const svc = new NotificationService({
+      getMainWindow: () => win as unknown as Electron.BrowserWindow,
+      notificationFactory: factoryStub.factory,
+      isReady: () => true,
+      isTestEnv: () => false,
+      isAnyWindowFocused: () => false,
+    });
+    svc.fire({ kind: "turn-end", title: "응답", body: "ok" });
+    expect(factoryStub.calls.length).toBe(1);
+  });
+
+  it("default isAnyWindowFocused returns false when Electron is unavailable (test env)", () => {
+    // Without injecting `isAnyWindowFocused`, the default tries to `require("electron")`.
+    // In a vitest environment without a real Electron context, the BrowserWindow
+    // call would throw — the wrapper returns false so notifications still fire
+    // via the OS path (degraded gracefully).
+    const win = makeMockWindow({ focused: false });
+    const factoryStub = makeNotificationFactoryStub();
+    const svc = new NotificationService({
+      getMainWindow: () => win as unknown as Electron.BrowserWindow,
+      notificationFactory: factoryStub.factory,
+      isReady: () => true,
+      isTestEnv: () => false,
+      // isAnyWindowFocused omitted → default path exercised
+    });
+    expect(() => svc.fire({ kind: "ask-user", title: "x", body: "y" })).not.toThrow();
+  });
+});
+
+describe("NotificationService — bypassFocusGate (#843)", () => {
+  it("bypassFocusGate=true + focused window → OS path fires (critical notification)", () => {
+    const win = makeMockWindow({ focused: true, minimized: false });
+    const factoryStub = makeNotificationFactoryStub();
+    const auditLogger = makeMockAuditLogger();
+    const svc = new NotificationService({
+      getMainWindow: () => win as unknown as Electron.BrowserWindow,
+      auditLogger,
+      notificationFactory: factoryStub.factory,
+      isReady: () => true,
+      isTestEnv: () => false,
+      isAnyWindowFocused: () => true,
+    });
+    svc.fire({
+      kind: "plugin",
+      title: "meeting.starting-soon",
+      body: "회의가 5분 후 시작됩니다",
+      bypassFocusGate: true,
+    });
+    // OS path used despite focused window
+    expect(factoryStub.calls.length).toBe(1);
+    expect(win.webContents.send).not.toHaveBeenCalledWith(
+      IPC_NOTIFICATION_TOAST,
+      expect.anything(),
+    );
+    // Audit reflects gate=os
+    const log = (auditLogger.log as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(log.input).toContain('"gate":"os"');
+  });
+
+  it("bypassFocusGate=false (default) + focused window → in-app toast (gate honored)", () => {
+    const win = makeMockWindow({ focused: true, minimized: false });
+    const factoryStub = makeNotificationFactoryStub();
+    const svc = new NotificationService({
+      getMainWindow: () => win as unknown as Electron.BrowserWindow,
+      notificationFactory: factoryStub.factory,
+      isReady: () => true,
+      isTestEnv: () => false,
+      isAnyWindowFocused: () => true,
+    });
+    svc.fire({ kind: "plugin", title: "noise", body: "chatter" });
+    expect(factoryStub.calls.length).toBe(0);
+    expect(win.webContents.send).toHaveBeenCalled();
+  });
+});
+
+describe("NotificationService — plugin kind cooldown (#841)", () => {
+  it("plugin: 5s cooldown coalesces back-to-back fires", () => {
+    const win = makeMockWindow({ focused: false, minimized: false });
+    const auditLogger = makeMockAuditLogger();
+    const factoryStub = makeNotificationFactoryStub();
+    const svc = new NotificationService({
+      getMainWindow: () => win as unknown as Electron.BrowserWindow,
+      auditLogger,
+      notificationFactory: factoryStub.factory,
+      isReady: () => true,
+      isTestEnv: () => false,
+      isAnyWindowFocused: () => false,
+    });
+    const perfBase = performance.now();
+    vi.spyOn(performance, "now").mockImplementation(() => perfBase);
+    svc.fire({ kind: "plugin", title: "a", body: "1" });
+    vi.spyOn(performance, "now").mockImplementation(() => perfBase + 1_000);
+    svc.fire({ kind: "plugin", title: "b", body: "2" }); // suppressed
+    vi.spyOn(performance, "now").mockImplementation(() => perfBase + 5_500);
+    svc.fire({ kind: "plugin", title: "c", body: "3" }); // succeeds
+    expect(factoryStub.calls.length).toBe(2);
+    const logs = (auditLogger.log as unknown as ReturnType<typeof vi.fn>).mock.calls.map(
+      (c) => c[0].input as string,
+    );
+    expect(logs.filter((l) => l.includes('"event":"notification.suppressed"')).length).toBe(1);
+    vi.restoreAllMocks();
   });
 });

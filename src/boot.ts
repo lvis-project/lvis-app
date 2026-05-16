@@ -661,8 +661,11 @@ export async function bootstrap(
     getActivePluginIds: () => pluginRuntime.listPluginIds(),
   });
 
-  // §4.2 Step 7: manifest-driven IPC bridges.
-  let disposePluginNotifications = registerPluginNotifications(pluginRuntime, mainWindow, bootAuditLogger);
+  // §4.2 Step 7: manifest-driven IPC bridges. Plugin notifications route
+  // through `notificationService` (#841) so they inherit the same focus
+  // gate, cooldown, sanitization, and audit policy as the host's lifecycle
+  // notifications.
+  let disposePluginNotifications = registerPluginNotifications(pluginRuntime, mainWindow, notificationService, bootAuditLogger);
   let disposePluginEventBridge = registerPluginEventBridge(pluginRuntime, mainWindow);
   let pluginEventBridgeWindow = mainWindow;
   const replacePluginEventBridge = (win: BrowserWindow) => {
@@ -1089,7 +1092,7 @@ export async function bootstrap(
     startRoutinesScheduler: () => routinesScheduler.start(),
     refreshPluginNotifications: () => {
       disposePluginNotifications();
-      disposePluginNotifications = registerPluginNotifications(pluginRuntime, pluginEventBridgeWindow, bootAuditLogger);
+      disposePluginNotifications = registerPluginNotifications(pluginRuntime, pluginEventBridgeWindow, notificationService, bootAuditLogger);
       replacePluginEventBridge(pluginEventBridgeWindow);
     },
     registerPluginEventBridge: replacePluginEventBridge,
