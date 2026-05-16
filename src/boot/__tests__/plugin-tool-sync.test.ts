@@ -17,7 +17,10 @@ vi.mock("electron", () => ({
   },
 }));
 
-import { syncPluginToolRegistry } from "../plugins.js";
+import {
+  syncPluginToolRegistry,
+  syncPluginToolRegistryForPlugin,
+} from "../plugins.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import { createDynamicTool } from "../../tools/base.js";
 import type { PluginRuntime } from "../../plugins/runtime.js";
@@ -148,8 +151,89 @@ describe("syncPluginToolRegistry — plugin lifecycle sync", () => {
     expect(registry.findByName("alpha_run")).toBeUndefined();
   });
 
+  it("targeted sync updates only the requested plugin and preserves bystander tool identity", () => {
+    const registry = new ToolRegistry();
+    syncPluginToolRegistry(
+      stubRuntime([
+        { pluginId: "alpha", manifest: manifest("alpha", ["alpha_run"], "1.0.0") },
+        { pluginId: "beta", manifest: manifest("beta", ["beta_run"], "1.0.0") },
+      ]),
+      registry,
+    );
+    const betaBefore = registry.findByName("beta_run");
+    expect(betaBefore?.pluginId).toBe("beta");
+
+    syncPluginToolRegistryForPlugin(
+      stubRuntime([
+        { pluginId: "alpha", manifest: manifest("alpha", ["alpha_run"], "2.0.0") },
+        { pluginId: "beta", manifest: manifest("beta", ["beta_run"], "2.0.0") },
+      ]),
+      registry,
+      "alpha",
+    );
+
+    expect(registry.findByName("alpha_run")?.version).toBe("2.0.0");
+    expect(registry.findByName("beta_run")).toBe(betaBefore);
+    expect(registry.findByName("beta_run")?.version).toBe("1.0.0");
+  });
+
+  it("targeted sync removes a single ghost plugin without sweeping bystanders", () => {
+    const registry = new ToolRegistry();
+    syncPluginToolRegistry(
+      stubRuntime([
+        { pluginId: "alpha", manifest: manifest("alpha", ["alpha_run"]) },
+        { pluginId: "beta", manifest: manifest("beta", ["beta_run"]) },
+      ]),
+      registry,
+    );
+    const betaBefore = registry.findByName("beta_run");
+
+    syncPluginToolRegistryForPlugin(
+      stubRuntime([
+        { pluginId: "beta", manifest: manifest("beta", ["beta_run"], "2.0.0") },
+      ]),
+      registry,
+      "alpha",
+    );
+
+    expect(registry.findByName("alpha_run")).toBeUndefined();
+    expect(registry.findByName("beta_run")).toBe(betaBefore);
+  });
+
+  it("restartAll-style targeted fan-out updates each plugin only on its own onEnable turn", () => {
+    const registry = new ToolRegistry();
+    syncPluginToolRegistry(
+      stubRuntime([
+        { pluginId: "alpha", manifest: manifest("alpha", ["alpha_run"], "1.0.0") },
+        { pluginId: "beta", manifest: manifest("beta", ["beta_run"], "1.0.0") },
+      ]),
+      registry,
+    );
+    const betaBefore = registry.findByName("beta_run");
+    const nextRuntime = stubRuntime([
+      { pluginId: "alpha", manifest: manifest("alpha", ["alpha_run"], "2.0.0") },
+      { pluginId: "beta", manifest: manifest("beta", ["beta_run"], "2.0.0") },
+    ]);
+
+    syncPluginToolRegistryForPlugin(nextRuntime, registry, "alpha");
+    const alphaAfter = registry.findByName("alpha_run");
+    expect(alphaAfter?.version).toBe("2.0.0");
+    expect(registry.findByName("beta_run")).toBe(betaBefore);
+
+    syncPluginToolRegistryForPlugin(nextRuntime, registry, "beta");
+    expect(registry.findByName("alpha_run")).toBe(alphaAfter);
+    expect(registry.findByName("beta_run")?.version).toBe("2.0.0");
+  });
+
   it("requires SDK-backed plugin authority metadata before registering tools", () => {
     const registry = new ToolRegistry();
+    syncPluginToolRegistry(
+      stubRuntime([
+        { pluginId: "stable", manifest: manifest("stable", ["stable_run"]) },
+      ]),
+      registry,
+    );
+    const stableBefore = registry.findByName("stable_run");
     const runtime = stubRuntime([
       {
         pluginId: "alpha",
@@ -170,8 +254,12 @@ describe("syncPluginToolRegistry — plugin lifecycle sync", () => {
     ]);
 
     expect(() => syncPluginToolRegistry(runtime, registry)).toThrow(/category is required/);
+    expect(registry.findByName("stable_run")).toBe(stableBefore);
+    expect(registry.findByName("alpha_read")).toBeUndefined();
+    expect(registry.findByName("alpha_write")).toBeUndefined();
 
     const validRuntime = stubRuntime([
+      { pluginId: "stable", manifest: manifest("stable", ["stable_run"]) },
       {
         pluginId: "alpha",
         manifest: {
@@ -204,4 +292,3 @@ describe("syncPluginToolRegistry — plugin lifecycle sync", () => {
     expect(write?.isReadOnly({})).toBe(false);
   });
 });
-

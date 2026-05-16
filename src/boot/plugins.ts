@@ -10,6 +10,7 @@ import { Notification } from "electron";
 import type { BrowserWindow } from "electron";
 import type { PluginRuntime } from "../plugins/runtime.js";
 import type { ToolRegistry } from "../tools/registry.js";
+import type { Tool } from "../tools/base.js";
 import type { SettingsService } from "../data/settings-store.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
 import { classifySubscription } from "../plugins/capabilities.js";
@@ -55,10 +56,8 @@ export function buildPluginConfigOverrides(settings: SettingsService): Record<st
 }
 
 export function registerPluginTools(pluginRuntime: PluginRuntime, toolRegistry: ToolRegistry): void {
-  for (const { pluginId, manifest } of pluginRuntime.listPluginManifests()) {
-    for (const tool of pluginToolsForRegistration(pluginRuntime, pluginId, manifest)) {
-      toolRegistry.register(tool);
-    }
+  for (const tool of pluginToolsForRuntimeEntries(pluginRuntime, pluginRuntime.listPluginManifests())) {
+    toolRegistry.register(tool);
   }
 }
 
@@ -66,37 +65,55 @@ export function registerPluginTools(pluginRuntime: PluginRuntime, toolRegistry: 
  * Idempotent full re-sync of plugin-sourced tools in {@link ToolRegistry}
  * from the current {@link PluginRuntime} state.
  *
- * Called by every install / uninstall / update / reinstall / dev-hot-reload
- * event so the registry always mirrors `pluginRuntime.listPluginManifests()`.
+ * Used for lifecycle surfaces that can leave ghost tools for plugins no longer
+ * in the runtime, such as uninstall. Single-plugin restart/reload paths should
+ * use {@link syncPluginToolRegistryForPlugin} to avoid touching bystanders.
  *
- * Two-step contract:
- *   1. Drop every plugin-sourced tool currently in the registry. We scan
- *      `toolRegistry.listAll()` rather than iterating `listPluginIds()`
- *      because an uninstalled plugin is already gone from the runtime but
- *      its tools still linger in the registry — those would survive a
- *      `listPluginIds`-only scan and become ghost entries the LLM keeps
- *      seeing. Builtins and MCP-sourced tools are untouched
- *      (`unregisterByPlugin` only matches `tool.pluginId === pluginId`).
- *   2. Re-register from the current runtime state via
- *      {@link registerPluginTools}. Same name@version safe because step 1
- *      cleared any prior generation.
- *
- * Idempotency means the catch path needs no recovery logic: a transient
- * failure is healed by the next install/uninstall/reload event firing
- * another full sync.
+ * The registry replacement is atomic: plugin tools are built and duplicate-
+ * checked before the live registry is changed. If a manifest is invalid, the
+ * previous registry remains intact.
  */
 export function syncPluginToolRegistry(
   pluginRuntime: PluginRuntime,
   toolRegistry: ToolRegistry,
 ): void {
-  const pluginIdsInRegistry = new Set<string>();
-  for (const tool of toolRegistry.listAll()) {
-    if (tool.source === "plugin" && tool.pluginId) {
-      pluginIdsInRegistry.add(tool.pluginId);
-    }
-  }
-  for (const id of pluginIdsInRegistry) toolRegistry.unregisterByPlugin(id);
-  registerPluginTools(pluginRuntime, toolRegistry);
+  const entries = pluginRuntime.listPluginManifests();
+  const pluginIds = new Set([
+    ...toolRegistry.listPluginIds(),
+    ...entries.map(({ pluginId }) => pluginId),
+  ]);
+  const tools = pluginToolsForRuntimeEntries(pluginRuntime, entries);
+  toolRegistry.replacePluginTools(pluginIds, tools);
+}
+
+/**
+ * Targeted sync for a single plugin lifecycle event.
+ *
+ * Replaces only that plugin's ToolRegistry entries. If the plugin is no
+ * longer loaded, this removes its stale tools and leaves every bystander
+ * plugin untouched.
+ */
+export function syncPluginToolRegistryForPlugin(
+  pluginRuntime: PluginRuntime,
+  toolRegistry: ToolRegistry,
+  pluginId: string,
+): void {
+  const entry = pluginRuntime
+    .listPluginManifests()
+    .find((candidate) => candidate.pluginId === pluginId);
+  const tools = entry
+    ? pluginToolsForRuntimeEntries(pluginRuntime, [entry])
+    : [];
+  toolRegistry.replacePluginTools([pluginId], tools);
+}
+
+function pluginToolsForRuntimeEntries(
+  pluginRuntime: PluginRuntime,
+  entries: Array<ReturnType<PluginRuntime["listPluginManifests"]>[number]>,
+): Tool[] {
+  return entries.flatMap(({ pluginId, manifest }) =>
+    pluginToolsForRegistration(pluginRuntime, pluginId, manifest),
+  );
 }
 
 export function registerManifestEventSubscriptions(

@@ -13,7 +13,10 @@ import { join } from "node:path";
 import { PluginRuntime } from "../../runtime.js";
 import { buildImportUrl } from "../sandbox.js";
 import { ToolRegistry } from "../../../tools/registry.js";
-import { syncPluginToolRegistry } from "../../../boot/plugins.js";
+import {
+  syncPluginToolRegistry,
+  syncPluginToolRegistryForPlugin,
+} from "../../../boot/plugins.js";
 
 describe("PluginRuntime lifecycle — restartPlugin", () => {
   let testDir: string;
@@ -431,13 +434,13 @@ export default async function createPlugin() {
   });
 
   // Boot-wiring integration test: real PluginRuntime + real ToolRegistry +
-  // a real `onEnable -> syncPluginToolRegistry` callback. Asserts that
+  // a real `onEnable -> syncPluginToolRegistryForPlugin` callback. Asserts that
   // restartPlugin's `onEnable` actually re-populates ToolRegistry end-to-end,
   // not just that the callback was called (the other lifecycle tests assert
   // the callback contract; this one pins the boot WIRING that turns the
   // callback into a registry resync). If anyone removes the `onEnable`
   // wiring from `src/boot/steps/plugin-runtime.ts`, this test fails.
-  it("boot wiring: onEnable → syncPluginToolRegistry actually re-registers tools after restartPlugin", async () => {
+  it("boot wiring: onEnable → targeted ToolRegistry sync re-registers tools after restartPlugin", async () => {
     const pluginId = "lc-bootwiring";
     const toolName = "lc_bootwiring_ping";
     const pluginDir = join(installedDir, pluginId);
@@ -489,7 +492,7 @@ export default async function createPlugin() {
       registryPath,
       pluginsRoot: installedDir,
       onDisable: (id) => { toolRegistry.unregisterByPlugin(id); },
-      onEnable: () => { syncPluginToolRegistry(runtime, toolRegistry); },
+      onEnable: (id) => { syncPluginToolRegistryForPlugin(runtime, toolRegistry, id); },
     });
     await runtime.startAll();
 
