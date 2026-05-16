@@ -4,7 +4,6 @@
  * Reminder IPC (lvis:reminders:*) removed — absorbed by lvis:routines:v2:* (atomic cutover).
  */
 import { ipcMain } from "electron";
-import { readFile } from "node:fs/promises";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import type { IpcDeps } from "../types.js";
 import type { RoutineExecution, RoutineFiredPayload, RoutineSchedule } from "../../shared/routines-types.js";
@@ -13,7 +12,7 @@ import { createLogger } from "../../lib/logger.js";
 const log = createLogger("lvis");
 
 export function registerMiscHandlers(deps: IpcDeps): void {
-  const { routinesStore, routinesScheduler, routineSessionStore, sessionTodoStore, conversationLoop, auditLogger, getMainWindow } = deps;
+  const { routinesStore, routinesScheduler, sessionTodoStore, conversationLoop, memoryManager, auditLogger, getMainWindow } = deps;
 
   // ─── Routines v2 ────────────────────────────────
   ipcMain.handle(ROUTINES_V2.list, (e) => {
@@ -42,9 +41,10 @@ export function registerMiscHandlers(deps: IpcDeps): void {
     }
     if (!routinesStore) return { ok: false, error: "no-store" };
     const ok = await routinesStore.remove(id);
-    // Q9: purge session files when routine is removed.
-    if (ok && routineSessionStore) {
-      await routineSessionStore.purgeRoutine(id);
+    if (ok) {
+      for (const session of memoryManager.listSessionsByRoutine(id)) {
+        memoryManager.deleteSession(session.id);
+      }
     }
     return { ok };
   });
@@ -85,11 +85,13 @@ export function registerMiscHandlers(deps: IpcDeps): void {
         title,
         summary: "",
       };
-      if (routine.execution === "llm-session" && routineSessionStore) {
-        const session = await routineSessionStore.findForFiredAt(routine.id, firedAt);
+      if (routine.execution === "llm-session" && routine.lastRoutineSessionId) {
+        const session = memoryManager
+          .listSessionsByRoutine(routine.id)
+          .find((candidate) => candidate.id === routine.lastRoutineSessionId);
         if (session) {
-          result.routineSessionPath = session.jsonlPath;
-          result.summary = await routineSessionStore.extractSummary(session.jsonlPath);
+          result.routineSessionId = session.id;
+          result.summary = session.preview;
         }
       }
       results.push(result);
@@ -136,38 +138,21 @@ export function registerMiscHandlers(deps: IpcDeps): void {
     },
   );
 
-  // ─── Routines v2 session history (Q9) ────────────
   ipcMain.handle(ROUTINES_V2.listSessions, async (e, routineId: string, limit?: number) => {
     if (!validateSender(e)) {
       auditUnauthorized(auditLogger, ROUTINES_V2.listSessions, e);
       return UNAUTHORIZED_FRAME;
     }
-    if (!routineSessionStore) return [];
-    return routineSessionStore.listRecent(routineId, limit ?? 10);
+    return memoryManager.listSessionsByRoutine(routineId, limit ?? 10).map((session) => ({
+      routineId: session.routineId ?? routineId,
+      firedAt: session.routineFiredAt ?? session.modifiedAt.toISOString(),
+      sessionId: session.id,
+      title: session.title,
+      preview: session.preview,
+    }));
   });
 
-  ipcMain.handle(ROUTINES_V2.readSession, async (e, jsonlPath: string) => {
-    if (!validateSender(e)) {
-      auditUnauthorized(auditLogger, ROUTINES_V2.readSession, e);
-      // Return empty string (not UNAUTHORIZED_FRAME object) — preload type is Promise<string>
-      log.warn("read-session: unauthorized frame rejected");
-      return "";
-    }
-    if (!routineSessionStore) return "";
-    // Path traversal guard — only allow paths inside ~/.lvis/routine/sessions/.
-    if (!routineSessionStore.isPathSafe(jsonlPath)) {
-      log.warn("read-session: path traversal attempt blocked: %s", jsonlPath);
-      return "";
-    }
-    try {
-      return await readFile(jsonlPath, "utf-8");
-    } catch (err) {
-      log.warn("read-session: read failed: %s", (err as Error).message);
-      return "";
-    }
-  });
-
-  // ─── Overlay v1 — renderer→main notification (tier1: influences chat content) ──
+  // ─── Overlay v1 — renderer→main notification (write influence) ──
   ipcMain.handle(OVERLAY_V1.primaryAction, (e, _pluginId: string, _eventId: string) => {
     if (!validateSender(e)) {
       auditUnauthorized(auditLogger, OVERLAY_V1.primaryAction, e);

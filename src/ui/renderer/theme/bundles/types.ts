@@ -12,7 +12,7 @@
  *   - Tier B''': peripheral system tokens (selection, scrollbar, kbd)
  *   - Tier C  : code-surface tokens (--code-bg, --code-fg, --code-border)
  *   - Tier D  : chart palette (--chart-1..--chart-5) for SVG visualizations
- *   - Action  : PR-4/5 reserved action tokens (--action-view/-branch/-compact)
+ *   - Action  : checkpoint action tokens (--action-view/-branch/-compact)
  */
 import type { BundleId } from "../../../../shared/theme-bundles.js";
 
@@ -76,7 +76,7 @@ export interface BundleTokens {
   "chart-4": string;
   "chart-5": string;
 
-  /* ── Action tokens (PR-4/5 reserved) ────────────────────────── */
+  /* ── Action tokens ─────────────────────────────────────────── */
   "action-view": string;
   "action-branch": string;
   "action-compact": string;

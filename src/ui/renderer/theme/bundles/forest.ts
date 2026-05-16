@@ -61,7 +61,7 @@ export const forestBundle: ThemeBundle = {
     "chart-3":                "262 83% 58%",      /* violet */
     "chart-4":                "330 81% 60%",      /* pink */
     "chart-5":                "48 96% 50%",       /* yellow */
-    /* ── Action tokens (PR-4/5) ────────────────────────────────── */
+    /* ── Action tokens ─────────────────────────────────────────── */
     "action-view":            "170 70% 35%",
     "action-branch":          "25 95% 53%",
     "action-compact":         "170 70% 35%",

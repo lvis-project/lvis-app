@@ -1,5 +1,5 @@
 /**
- * PR-2 — Conversation Continuity Guard section (id 9.9) — always-on after gate removal.
+ * Conversation Continuity Guard section (id 9.9) — always-on after gate removal.
  *
  * Verifies:
  *   - Hidden title/checkpoint markers are forbidden in the continuity guard
@@ -84,7 +84,6 @@ describe("SystemPromptBuilder — Conversation Continuity Guard", () => {
     expect(prompt).toContain("체크포인트와 세션 요약은 host 가 다음 턴 시작 전 context preflight 에서 자동 처리합니다");
     expect(prompt).not.toContain("### Title 정책");
     expect(prompt).not.toContain("### Checkpoint 마커");
-    expect(prompt).not.toContain("즉시 새 세션으로 회전");
   });
 
   it("injects current session title when set", () => {

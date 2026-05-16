@@ -86,7 +86,6 @@ import {
 } from "./boot/tools.js";
 import { RoutinesStore } from "./main/routines-store.js";
 import { RoutinesScheduler } from "./main/routines-scheduler.js";
-import { RoutineSessionStore } from "./main/routine-session-store.js";
 import { SessionTodoStore } from "./main/session-todo-store.js";
 import { AskUserQuestionGate, IPC_ASK_USER_QUESTION_REQUEST } from "./main/ask-user-question-gate.js";
 import { NotificationService } from "./main/notification-service.js";
@@ -358,7 +357,6 @@ export async function bootstrap(
     log.warn("boot: routines load failed (non-fatal): %s", (err as Error).message);
   });
   const routinesScheduler = new RoutinesScheduler(routinesStore);
-  const routineSessionStore = new RoutineSessionStore();
   const sessionTodoStore = new SessionTodoStore();
   const skillStore = new SkillStore();
   const agentProfileStore = new AgentProfileStore();
@@ -729,33 +727,16 @@ export async function bootstrap(
   // llm-session routines start a ConversationLoop with prePrompt.
   // notification-only routines fire an OS notification.
   routinesScheduler.onLlmSession(({ routine }) => {
-    // Create an isolated session file before firing so the JSONL path
-    // can be passed to the engine and routine turns never mix with main chat.
+    // Routine turns use a dedicated ConversationLoop but persist through the
+    // normal session repository as sessionKind="routine".
     // Emit running-started/finished so renderer can show progress indicator.
-    // createSession runs before runningStarted — abort if it throws.
     void (async () => {
       const firedAt = routine.lastFiredAt ?? new Date().toISOString();
       const title = routine.title ?? routine.notificationTitle ?? routine.id.slice(0, 8);
 
-      // createSession first — if it fails, abort and emit failed event.
-      let jsonlPath: string | null = null;
-      try {
-        jsonlPath = await routineSessionStore.createSession(routine.id, firedAt);
-      } catch (err) {
-        log.warn("routines v2 session-store create failed: %s", (err as Error).message);
-        try {
-          getMainWindow()?.webContents.send(ROUTINES_V2.failed, {
-            routineId: routine.id,
-            error: (err as Error).message,
-          });
-        } catch {
-          // non-fatal
-        }
-        return;
-      }
-
-      // C1: runningStarted after session created — enriched payload with title+firedAt
-      // so renderer can push a proper running OverlayItem immediately.
+      // C1: runningStarted before the headless turn finishes — enriched payload
+      // with title+firedAt so renderer can push a proper running OverlayItem
+      // immediately. The completed event later carries the routineSessionId.
       try {
         getMainWindow()?.webContents.send(ROUTINES_V2.runningStarted, {
           routineId: routine.id,
@@ -766,9 +747,8 @@ export async function bootstrap(
         // non-fatal
       }
 
-      // Pass jsonlPath to runRoutine so engine writes history to the
-      // isolated session file. summary comes from the LLM response directly.
       let runSummary = "";
+      let routineSessionId: string | undefined;
       try {
         const runResult = await routineEngine.runRoutine({
           id: routine.id,
@@ -776,9 +756,16 @@ export async function bootstrap(
           prePrompt: routine.prePrompt ?? "",
           title: routine.title,
           scope: routine.scope,
-          storagePath: jsonlPath ?? undefined,
+          firedAt,
         });
         runSummary = runResult.summary;
+        routineSessionId = runResult.sessionId;
+        if (routineSessionId) {
+          const updated = await routinesStore.update(routine.id, { lastRoutineSessionId: routineSessionId });
+          if (!updated) {
+            log.warn("routines v2 llm-session session id persist failed: routine not found (%s)", routine.id);
+          }
+        }
       } catch (err) {
         log.warn("routines v2 llm-session run failed: %s", (err as Error).message);
         // Emit failed so renderer knows to clear running state.
@@ -809,7 +796,7 @@ export async function bootstrap(
           firedAt,
           title,
           summary,
-          ...(jsonlPath ? { routineSessionPath: jsonlPath } : {}),
+          ...(routineSessionId ? { routineSessionId } : {}),
         } satisfies import("./shared/routines-types.js").RoutineFiredPayload);
       } catch (err) {
         log.warn("routines v2 llm-session emit failed: %s", (err as Error).message);
@@ -1065,8 +1052,8 @@ export async function bootstrap(
     systemPromptBuilder, conversationLoop, routineEngine, mcpManager, mcpArtifactStore, agentArtifactStore, skillArtifactStore,
     idleScheduler, preferenceRefreshService, bashAstValidator, auditService, auditLogger: bootAuditLogger, postTurnHookChain,
     approvalGate, rewireReviewerAgent, refreshMarketplaceFetcherConfig,
+    routinesStore, routinesScheduler, sessionTodoStore, askUserQuestionGate, skillStore, agentProfileStore,
     knowledgeAvailable, starredStore, feedbackStore,
-    routinesStore, routinesScheduler, routineSessionStore, sessionTodoStore, askUserQuestionGate, skillStore, agentProfileStore,
     notificationService,
     scriptHookManager,
     telemetry, pluginTelemetry, autoUpdaterStop,

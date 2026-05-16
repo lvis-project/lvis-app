@@ -1,5 +1,5 @@
 /**
- * PR-4 — CompactedToolResult
+ * CompactedToolResult
  *
  * Renders a compacted (stub) tool result as a collapsible 1-line row.
  * Clicking fetches the verbatim content via IPC (in-session only).

@@ -20,8 +20,8 @@ import type {
 export type { McpServerConfig, McpServerConfigDto, McpServerState };
 export type { PermissionEvaluationContext } from "../../permissions/evaluation-context.js";
 
-// Re-export checkpoint chain types for renderer-side consumers (type-only, no main-process runtime)
-export type { CheckpointTrigger, Checkpoint, SessionMetadata } from "../../memory/memory-manager.js";
+// Re-export checkpoint types for renderer-side consumers (type-only, no main-process runtime).
+export type { CheckpointTrigger, Checkpoint } from "../../memory/memory-manager.js";
 
 export type MarketplaceItem = {
   id: string;
@@ -76,16 +76,16 @@ export type PluginCardSummary = {
   loadStatus?: "loaded" | "failed" | "disabled";
   version?: string;
   publisher?: string;
-  /** §9.2 Track B — declarative settings schema, when the manifest declares one. */
+  /** Declarative settings schema, when the manifest declares one. */
   configSchema?: PluginConfigSchemaSummary;
-  /** Optional declarative auth contract — see architecture.md §9.4a "Plugin-Owned OAuth — Host UI Surface". */
+  /** Optional declarative auth contract for the host UI surface. */
   auth?: PluginAuthSummary;
 };
 
 /**
  * Mirror of host-side `PluginAuthSpec` for renderer consumption — kept as a
  * separate name to make the renderer/host boundary explicit. Field shape
- * matches by contract (architect review §9.4a Host UI Surface).
+ * matches the host contract.
  */
 export type PluginAuthSummary = {
   label?: string;
@@ -127,12 +127,12 @@ export type AppSettings = {
     realCloudBaseUrl?: string;
     realCloudAllowPrivateNetwork?: boolean;
   };
-  /** UX Track 3 — visual theme preferences (v2 single bundle). */
+  /** Visual theme preferences. */
   appearance?: {
     schemaVersion?: 2;
     bundleId?: string;
     followSystem?: boolean;
-    /** User-configurable font family + size (Track A scope extension). */
+    /** User-configurable font family + size. */
     font?: {
       /** `"system"` = HOST_FONT_STACK default; otherwise a validated raw stack. */
       family?: "system" | string;
@@ -281,19 +281,22 @@ export type LvisApi = {
   ) => Promise<unknown>;
   chatGuide: (input: string) => Promise<unknown>;
   chatNew: () => Promise<{ ok: true }>;
-  chatSessions: (opts?: { limit?: number; before?: string; beforeId?: string; after?: string }) => Promise<{ current: string; sessions: Array<{ id: string; modifiedAt: string; title: string; parentSessionId?: string; branchedFromCompactNum?: number }> }>;
-  chatLoadSession: (sessionId: string) => Promise<{ ok: boolean; sessionId: string | null }>;
+  chatSessions: (opts?: { kind?: "main" | "routine" | "all"; routineId?: string; limit?: number; before?: string; beforeId?: string; after?: string }) => Promise<{ current: string; sessions: Array<{ id: string; modifiedAt: string; title: string; sessionKind: "main" | "routine"; routineId?: string; routineTitle?: string; routineFiredAt?: string; branchedFromCompactNum?: number }> }>;
   onChatStream: (h: (e: StreamEvent) => void) => () => void;
   onChatFallback: (h: (payload: { from: string; to: string }) => void) => () => void;
-  chatGetHistory: () => Promise<{ sessionId: string; messages: SerializedHistoryMessage[]; estimatedInputTokens?: number }>;
+  chatGetHistory: () => Promise<{ sessionId: string; sessionTitle?: string; sessionKind: "main" | "routine"; routineId?: string; routineTitle?: string; messages: SerializedHistoryMessage[]; estimatedInputTokens?: number }>;
+  chatMainActiveState: () => Promise<{ mainActiveSessionId: string | null; mainActiveMode: "resume" | "fresh"; updatedAt: string } | null>;
   chatSessionHistory: (sessionId: string) => Promise<{
     ok: boolean;
+    sessionTitle?: string;
+    sessionKind?: "main" | "routine";
+    routineId?: string;
+    routineTitle?: string;
+    routineFiredAt?: string;
     messages: SerializedHistoryMessage[];
     estimatedInputTokens?: number;
-    /** §457 PR-A: chars in the rolling summary preamble inherited from parent. 0 = no preamble. */
+    /** Chars in the rolling summary preamble applied to this session. 0 = no preamble. */
     preambleChars?: number;
-    /** §457 PR-A: parent session id when this session is a rotation child. */
-    parentSessionId?: string;
   }>;
   chatEditResend: (messageIndex: number, newText: string) => Promise<{ ok: boolean; error?: string }>;
   chatFork: (messageIndex: number) => Promise<{ ok: boolean; sessionId: string | null }>;
@@ -301,15 +304,15 @@ export type LvisApi = {
   chatExport: (format: "markdown" | "json") => Promise<{ ok: boolean; filePath?: string; canceled?: boolean; error?: string }>;
   chatCompact: () => Promise<{ compacted: boolean; compactedAt: string | null; summary: string; removedMessageCount: number }>;
   chatSessionResume: (sessionId: string) => Promise<{ ok: boolean; compacted: boolean; compactedAt: string | null; removedMessageCount: number }>;
-  // §PR-5: Layer 3 View-Mode + Branch
+  // Checkpoint view and explicit branch actions.
   // Note: enter/branch return discriminated unions without `ok`; exit follows the
   // standard { ok: boolean } pattern. Callers guard with `"error" in result`.
   chatEnterCheckpointView: (sessionId: string, compactNum: number) => Promise<{ messageIndexAtCreation: number } | { error: string }>;
   chatExitCheckpointView: () => Promise<{ ok: boolean }>;
   chatBranchFromCheckpoint: (sessionId: string, compactNum: number) => Promise<{ newSessionId: string } | { error: string }>;
   chatAbort: () => Promise<{ ok: boolean }>;
-  /** PR-4: lazy-load in-session verbatim content for a compacted tool_result.
-   * Returns null when: session has rotated, toolUseId not found, verbatim
+  /** Lazy-load in-session verbatim content for a compacted tool_result.
+   * Returns null when: session changed, toolUseId not found, verbatim
    * already flushed to disk stub, or meta.compactedAt was never set. lineCount
    * is pre-computed server-side. */
   chatGetVerbatimToolResult: (
@@ -417,8 +420,7 @@ export type LvisApi = {
   listRoutineSessionsV2: (
     routineId: string,
     limit?: number,
-  ) => Promise<Array<{ routineId: string; firedAt: string; jsonlPath: string }>>;
-  readRoutineSessionV2: (jsonlPath: string) => Promise<string>;
+  ) => Promise<Array<{ routineId: string; firedAt: string; sessionId: string; title: string; preview: string }>>;
   onMarketplaceUpdatesAvailable: (h: (updates: Array<{ pluginId: string; installedVersion: string; latestVersion: string }>) => void) => () => void;
   onBootstrapStatus: (
     h: (status:
@@ -566,7 +568,7 @@ export type LvisApi = {
   };
   /**
    * Dev tools bridge — only useful in non-production NODE_ENV. Renderer
-   * floating panel uses these to adjust Layer 0 preflight threshold at
+   * floating panel uses these to adjust token preflight threshold at
    * runtime. production builds reject set/get with `production-disabled`.
    */
   dev: {
@@ -585,7 +587,7 @@ export type ApprovalChoice = "allow-once" | "allow-always" | "deny-once" | "deny
 
 /**
  * Permission policy — discriminated approval kinds. Renderer routes on this to
- * pick the right card. Default `"tool"` is the standard §6.3 dialog.
+ * pick the right card. Default `"tool"` is the standard approval dialog.
  */
 export type ApprovalKind = "tool" | "out-of-allowed-dir" | "agent-action";
 
@@ -597,7 +599,7 @@ export type ApprovalRequest = {
   toolName: string;
   /** Permission policy category for the invocation shown in the UI. */
   toolCategory?: "read" | "write" | "shell" | "network" | "meta";
-  /** Layer 5 reviewer verdict when the ask came from auto-review. */
+  /** Reviewer verdict when the ask came from auto-review. */
   reviewerVerdict?: { level: "low" | "medium" | "high"; reason: string };
   /** Captured policy/sandbox context for user review. */
   evaluationContext?: PermissionEvaluationContextShape;
@@ -628,7 +630,7 @@ export type ApprovalRequest = {
     currentAllowed: readonly string[];
     adjacencyWarnings: readonly string[];
   };
-  /** Permission policy §9 — trust-origin classification, e.g. "user" / "agent". */
+  /** Permission policy trust-origin classification, e.g. "user" / "agent". */
   trustOrigin?: string;
   /**
    * R-2 Round-3: semantic cache key for the approval (e.g. a stable hash of
@@ -763,7 +765,7 @@ export type LvisPermissionApi = {
   listRules: () => Promise<PermissionRule[]>;
   addRule: (pattern: string, action: "allow" | "deny") => Promise<AddRuleResult>;
   removeRule: (pattern: string, action: "allow" | "deny") => Promise<RemoveRuleResult>;
-  /** Permission policy — list pending HIGH-risk deferred entries (Layer 5 reviewer). */
+  /** Permission policy — list pending HIGH-risk deferred entries from reviewer. */
   deferredList: () => Promise<
     | { ok: true; pending: DeferredQueueEntry[]; total: number }
     | { ok: false; error: string }
@@ -785,7 +787,7 @@ export type LvisPermissionApi = {
   /**
    * Permission policy — resolve a pending entry with user gesture.
    *
-   * `approvalSource` (issue #690 P4) records how the user gestured:
+   * `approvalSource` records how the user gestured:
    *   - "button"           — clicked the DeferredQueuePanel button
    *   - "natural-language" — clicked the chat-surface chip after the
    *                          renderer's intent matcher detected an
@@ -892,13 +894,13 @@ export type LvisPluginConfigApi = {
     | { ok: true; config: PluginConfigRecord }
     | { ok: false; error: string; message?: string }
   >;
-  /** §9.2 Track B — fetch the manifest's declarative settings schema. */
+  /** Fetch the manifest's declarative settings schema. */
   getSchema: (pluginId: string) => Promise<
     | { ok: true; schema: PluginConfigSchemaSummary | null }
     | { ok: false; error: string; message?: string }
   >;
   /**
-   * §9.2 Track B — persist a `format: "secret"` field. The value lands in
+   * Persist a `format: "secret"` field. The value lands in
    * the encrypted keychain (`lvis-secrets.json`) and the host strips any
    * stale cleartext mirror from `pluginConfigs`.
    */
@@ -944,7 +946,7 @@ export type LvisMcpApi = {
   addConfig: (config: McpServerConfig) => Promise<{ connected: boolean; warning?: string }>;
   setApiKey: (id: string, apiKey: string) => Promise<{ connected: boolean; warning?: string }>;
   removeConfig: (id: string) => Promise<void>;
-  /** MCP Apps spec §3.3 — fetch a ui:// resource from the MCP server. */
+  /** MCP Apps UI resource fetch. */
   readUiResource: (serverId: string, uri: string) => Promise<string>;
 };
 

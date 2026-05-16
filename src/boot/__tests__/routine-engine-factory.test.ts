@@ -25,6 +25,7 @@ describe("createRoutineEngine", () => {
   it("runRoutine calls loop.runTurn with the prePrompt", async () => {
     const mockLoop = {
       getSessionId: vi.fn(() => "test-session-id"),
+      startRoutineConversation: vi.fn(async () => "test-session-id"),
       runTurn: vi.fn(async (prompt: string) => prompt + " 처리됨"),
       getLastAssistantMessage: vi.fn(async () => "오늘 업무 맥락 정리 처리됨"),
       dispose: vi.fn(),
@@ -40,6 +41,11 @@ describe("createRoutineEngine", () => {
       prePrompt: "오늘 업무 맥락 정리",
     });
 
+    expect(mockLoop.startRoutineConversation).toHaveBeenCalledWith(
+      "schedule-daily",
+      "schedule-daily",
+      expect.any(String),
+    );
     // routine-engine-v2 calls loop.runTurn(prePrompt, undefined, signal, options).
     expect(mockLoop.runTurn).toHaveBeenCalledWith(
       "오늘 업무 맥락 정리",
@@ -49,5 +55,6 @@ describe("createRoutineEngine", () => {
     );
     expect(result.routineId).toBe("schedule-daily");
     expect(result.trigger).toBe("schedule");
+    expect(result.sessionId).toBe("test-session-id");
   });
 });
