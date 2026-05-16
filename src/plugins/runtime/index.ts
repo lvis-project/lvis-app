@@ -1113,6 +1113,9 @@ export class PluginRuntime {
       await instance.start?.();
     } catch (err) {
       log.error(`start after reload failed: %s`, (err as Error).message);
+      this.markFailed(pluginId);
+      this.cleanupFailedStartRuntimeState(pluginId, methods);
+      await this.stopAfterStartFailure(pluginId, instance);
       throw err;
     }
     this.onEnable?.(pluginId);

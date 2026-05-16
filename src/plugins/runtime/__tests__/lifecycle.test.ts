@@ -366,6 +366,75 @@ export default async function createPlugin() {
     return manifestPath;
   }
 
+  async function writeLifecyclePlugin(pluginId: string): Promise<{ pluginId: string; manifestPath: string; toolName: string }> {
+    const pluginDir = join(installedDir, pluginId);
+    await mkdir(pluginDir, { recursive: true });
+    const manifestPath = join(pluginDir, "plugin.json");
+    const toolName = `${pluginId.replace(/-/g, "_")}_ping`;
+    await writeFile(
+      join(pluginDir, "entry.mjs"),
+      `export default async function createPlugin() {
+  return { handlers: { ${toolName}: async () => "ok" }, start: async () => {}, stop: async () => {} };
+}`,
+      "utf-8",
+    );
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        id: pluginId,
+        name: pluginId,
+        version: "1.0.0",
+        entry: "entry.mjs",
+        tools: [toolName],
+        toolSchemas: {
+          [toolName]: {
+            description: "lifecycle integration test",
+            category: "read",
+            inputSchema: { type: "object", properties: {}, additionalProperties: false },
+          },
+        },
+        description: "x",
+        publisher: "x",
+      }),
+      "utf-8",
+    );
+    return { pluginId, manifestPath, toolName };
+  }
+
+  async function writeLifecycleRegistry(
+    plugins: Array<{ pluginId: string; manifestPath: string }>,
+  ): Promise<void> {
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: plugins.map(({ pluginId, manifestPath }) => ({ id: pluginId, manifestPath, enabled: true })),
+      }),
+      "utf-8",
+    );
+  }
+
+  it("restartAll fires onEnable once for each restarted plugin", async () => {
+    const alpha = await writeLifecyclePlugin("lc-fanout-alpha");
+    const beta = await writeLifecyclePlugin("lc-fanout-beta");
+    await writeLifecycleRegistry([alpha, beta]);
+
+    const enabled: string[] = [];
+    const runtime = new PluginRuntime({
+      hostRoot: testDir,
+      registryPath,
+      pluginsRoot: installedDir,
+      onEnable: (pluginId) => { enabled.push(pluginId); },
+    });
+
+    await runtime.startAll();
+    expect(enabled).toEqual([]);
+
+    await runtime.restartAll();
+
+    expect([...enabled].sort()).toEqual(["lc-fanout-alpha", "lc-fanout-beta"]);
+  });
+
   it("restartPlugin fires onDisable then onEnable around the restart cycle", async () => {
     await setupLifecyclePluginFixture("lc-restart-pair");
 
@@ -508,6 +577,32 @@ export default async function createPlugin() {
     await runtime.restartPlugin(pluginId);
 
     expect(toolRegistry.findByName(toolName)?.pluginId).toBe(pluginId);
+  });
+
+  it("config-save restart path preserves bystander plugin tools", async () => {
+    const alpha = await writeLifecyclePlugin("lc-config-alpha");
+    const beta = await writeLifecyclePlugin("lc-config-beta");
+    await writeLifecycleRegistry([alpha, beta]);
+
+    const toolRegistry = new ToolRegistry();
+    let runtime!: PluginRuntime;
+    runtime = new PluginRuntime({
+      hostRoot: testDir,
+      registryPath,
+      pluginsRoot: installedDir,
+      onDisable: (id) => { toolRegistry.unregisterByPlugin(id); },
+      onEnable: (id) => { syncPluginToolRegistryForPlugin(runtime, toolRegistry, id); },
+    });
+    await runtime.startAll();
+    syncPluginToolRegistry(runtime, toolRegistry);
+    const betaBefore = toolRegistry.findByName(beta.toolName);
+    expect(betaBefore?.pluginId).toBe(beta.pluginId);
+
+    runtime.setConfigOverride(alpha.pluginId, { mode: "after-save" });
+    await runtime.restartPlugin(alpha.pluginId);
+
+    expect(toolRegistry.findByName(alpha.toolName)?.pluginId).toBe(alpha.pluginId);
+    expect(toolRegistry.findByName(beta.toolName)).toBe(betaBefore);
   });
 
   it("addPlugin failure path (start throws) does NOT fire onEnable", async () => {
