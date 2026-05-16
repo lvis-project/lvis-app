@@ -969,6 +969,7 @@ export function App() {
             }}
             onOpenDevTools={() => setDevToolsOpen((v) => !v)}
             appUpdateState={appUpdate.state}
+            appUpdateInFlight={appUpdate.inFlight}
             onDownloadAppUpdate={appUpdate.download}
             onInstallAppUpdate={appUpdate.install}
           />
