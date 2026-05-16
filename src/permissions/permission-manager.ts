@@ -618,7 +618,19 @@ export class PermissionManager {
       // CRITICAL 4.1: disclose memory-hit auto-approve to renderer + log
       console.info(`[permission] memory-hit auto-approve: ${toolName} (scope=${userApproval.scope}, verdict=${userApproval.verdictAtApproval})`);
       try {
-        this.broadcastUserApprovalHit?.({ toolName, scope: userApproval.scope, verdictAtApproval: userApproval.verdictAtApproval });
+        // Cross-cutting follow-up: defend against legacy on-disk entries
+        // that may carry `null` verdictAtApproval (PR-A4 R3 added the
+        // field; older entries pre-date it). The renderer-side type
+        // (#793 chat-toast subscriber) is non-null per
+        // `UserApprovalHitPayload`, so coerce here at the broadcast
+        // boundary. "medium" is the conservative default per R-4 design
+        // (low = trivial, high = NL-required, medium = neutral).
+        const verdictForBroadcast = userApproval.verdictAtApproval ?? "medium";
+        this.broadcastUserApprovalHit?.({
+          toolName,
+          scope: userApproval.scope,
+          verdictAtApproval: verdictForBroadcast,
+        });
       } catch {
         // broadcast failure must not block tool execution
       }

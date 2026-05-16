@@ -89,6 +89,27 @@ const REVIEWER_FALLBACK_OPTIONS: Array<{
   { value: "rule", label: "규칙 결과 사용", description: "LLM 실패 시 로컬 규칙 결과를 그대로 적용합니다." },
 ];
 
+/**
+ * Map IPC-layer revoke error codes to Korean user-facing strings.
+ *
+ * Mirrors `formatReviewerDispatchError` for the user-approval revoke
+ * path so the UI doesn't leak raw English error codes (e.g.
+ * "user-keyboard-required") to end users. Issue #826 introduced the
+ * intent gate; this helper closes the resulting localization gap
+ * surfaced in the cross-cutting review.
+ */
+function formatRevokeError(error: string | undefined, message: string | undefined): string {
+  if (error === "user-keyboard-required") {
+    return "이 권한 변경은 활성 사용자 입력에서만 실행할 수 있습니다.";
+  }
+  if (error === "invalid-key") {
+    return "유효하지 않은 승인 키입니다.";
+  }
+  // managed errors carry a backend message; surface verbatim if present.
+  if (message && message.trim().length > 0) return message;
+  return error ?? "알 수 없는 오류가 발생했습니다.";
+}
+
 function formatReviewerDispatchError(error: string): string {
   if (error.startsWith("reviewer-rewire-failed:")) {
     const detail = error.slice("reviewer-rewire-failed:".length).trim();
@@ -247,8 +268,19 @@ export function PermissionsTab() {
       // refresh failure after a SUCCESSFUL revoke shows an accurate banner
       // instead of the misleading "취소 실패" message that conflates the
       // two failure modes.
+      //
+      // Cross-cutting #826 follow-up: `revokeByKey` is an `ipcRenderer.invoke`
+      // that RESOLVES with `{ok:false,error,message}` on policy reject —
+      // it does NOT throw. The try blocks below catch thrown errors AND
+      // inspect the resolved result. The intent gate ("user-keyboard-
+      // required") is one such resolved-reject path.
       try {
-        await window.lvis.userApproval.revokeByKey(key);
+        const result = await window.lvis.userApproval.revokeByKey(key);
+        if (!result.ok) {
+          const message = formatRevokeError(result.error, result.message);
+          showBanner("error", `취소 실패: ${message}`);
+          return;
+        }
       } catch (err) {
         showBanner("error", `취소 실패: ${(err as Error).message}`);
         return;
