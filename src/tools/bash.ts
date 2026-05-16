@@ -125,11 +125,17 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
     // stdout/stderr as WHATWG ReadableStream<Uint8Array>; we pipe through
     // TextDecoderStream for UTF-8 string capture (CJK multi-byte boundary safe).
     //
-    // If no runner is registered (isolation=none per D8), fall through to the
-    // existing spawnWithTimeout path unchanged — R-1 composition rule + reviewer
-    // judgment remain the safety net.
+    // MEDIUM-2: Gated on LVIS_SANDBOX_ENABLED=1. Default off until PR-A4 R-2
+    // wires the policy hook and enables always-on. This prevents bwrap from
+    // breaking all Linux users before the full policy rollout.
+    // TODO(PR-A4 R-2): remove the env-gate and make sandbox always-on.
+    //
+    // If no runner is registered or sandbox is not enabled (isolation=none per D8),
+    // fall through to the existing spawnWithTimeout path unchanged — R-1 composition
+    // rule + reviewer judgment remain the safety net.
     const sandboxRunner = getSandboxRunner(process.platform as NodeJS.Platform);
-    if (sandboxRunner) {
+    const sandboxEnabled = process.env["LVIS_SANDBOX_ENABLED"] === "1";
+    if (sandboxRunner && sandboxEnabled) {
       return await spawnWithSandbox(sandboxRunner, input.command, resolvedCwd, input.timeoutSeconds);
     }
 
@@ -192,31 +198,41 @@ export async function spawnWithSandbox(
   timeoutSeconds: number,
 ): Promise<SpawnResult> {
   const shell = resolveShell();
-  const safeEnv = shellEnvForChild(shell, buildSafeChildEnv());
+  // Pass only string-valued env entries (SandboxRunner env type is Record<string,string>).
+  // CRITICAL-1: runner uses --clearenv + --setenv so only these entries enter the sandbox.
+  const safeEnv = Object.fromEntries(
+    Object.entries(shellEnvForChild(shell, buildSafeChildEnv())).filter(
+      (entry): entry is [string, string] => typeof entry[1] === "string",
+    ),
+  );
 
   const proc = await runner.spawn(
     shell.cmd,
     shell.shellArgs(command),
     {
       networkBlocked: true,
-      fsReadPaths: ["/etc", "/usr"],
+      // MEDIUM-3: /lib /lib64 /bin /sbin are now provided by the runner's base
+      // whitelist. Caller still specifies /etc /usr + HOME for shell/locale/git.
+      fsReadPaths: [
+        "/etc",
+        "/usr",
+        process.env["HOME"] ?? "/home",
+      ],
       fsWritePaths: [resolvedCwd],
       processIsolated: true,
     },
-    // Pass only string-valued env entries (SandboxRunner env type is Record<string,string>)
-    Object.fromEntries(
-      Object.entries(safeEnv).filter((entry): entry is [string, string] =>
-        typeof entry[1] === "string",
-      ),
-    ),
+    // CRITICAL-2: pass cwd so the runner applies --chdir inside the namespace.
+    { env: safeEnv, cwd: resolvedCwd },
   );
 
-  // Collect stdout+stderr chunks via TextDecoderStream (Web Streams API).
-  // TextDecoderStream handles multi-byte CJK split-chunk boundaries correctly.
-  const decoder = new TextDecoder("utf-8");
   const chunks: string[] = [];
 
+  // HIGH-2: per-stream TextDecoder instance — a single shared decoder would
+  // corrupt multi-byte CJK sequences when stdout and stderr are drained
+  // concurrently because TextDecoder is stateful (stream: true mode buffers
+  // incomplete byte sequences across calls).
   async function drainStream(stream: ReadableStream<Uint8Array>): Promise<void> {
+    const decoder = new TextDecoder("utf-8");
     const reader = stream.getReader();
     try {
       for (;;) {
@@ -224,7 +240,7 @@ export async function spawnWithSandbox(
         if (done) break;
         chunks.push(decoder.decode(value, { stream: true }));
       }
-      // Flush any remaining bytes in the decoder.
+      // Flush any remaining bytes held by the decoder.
       const flushed = decoder.decode(undefined, { stream: false });
       if (flushed) chunks.push(flushed);
     } finally {
@@ -244,9 +260,11 @@ export async function spawnWithSandbox(
     // Drain stdout and stderr concurrently, then wait for exit.
     await Promise.all([drainStream(proc.stdout), drainStream(proc.stderr)]);
     code = await proc.exitCode;
-  } catch {
-    // Signal kill or spawn error — treat as non-zero exit.
+  } catch (err) {
+    // HIGH-1: signal kill or spawn error — preserve the error message for
+    // diagnostic parity with spawnWithTimeout's "spawn failed: …" path.
     code = undefined;
+    chunks.push(`\nspawn failed: ${(err as Error).message}`);
   } finally {
     clearTimeout(timeoutHandle);
   }

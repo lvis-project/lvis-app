@@ -897,16 +897,22 @@ export async function bootstrap(
   // If bwrap is absent (dnf install bubblewrap), runner stays unregistered
   // and Linux tools run with isolation=none — R-1 composition rule + the
   // reviewer judgment provide the safety net.
+  //
+  // MEDIUM-2: Gated on LVIS_SANDBOX_ENABLED=1 (default off) until PR-A4 R-2
+  // wires the always-on policy hook. Without the gate, bwrap registration
+  // would activate for all Linux users before the policy rollout is ready.
+  // TODO(PR-A4 R-2): remove the env-gate condition and make this always-on.
   {
     const { registerSandboxRunner: _registerBwrap, sealSandboxRunnerRegistry } = await import(
       "./permissions/sandbox-runner.js"
     );
-    if (process.platform === "linux") {
+    if (process.platform === "linux" && process.env["LVIS_SANDBOX_ENABLED"] === "1") {
       const { BwrapRunner } = await import("./permissions/runners/bwrap-runner.js");
       const bwrapRunner = new BwrapRunner();
       const detection = await bwrapRunner.detect();
       if (detection.available) {
-        _registerBwrap("linux", bwrapRunner);
+        // MAJOR-1: pass detection so sandbox-capability SOT reflects the active runner.
+        _registerBwrap("linux", bwrapRunner, detection);
         log.info("boot: bwrap runner registered — %s", detection.reason);
       } else {
         log.warn(

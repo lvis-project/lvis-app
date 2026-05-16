@@ -30,6 +30,7 @@ import type {
   SandboxCapabilityDescriptor,
   SandboxedProcess,
   SandboxRunnerDetect,
+  SandboxSpawnOptions,
 } from "../sandbox-runner.js";
 
 /** Absolute path to the OS-installed bwrap binary (D1: no bundled fallback). */
@@ -78,23 +79,46 @@ export class BwrapRunner implements SandboxRunner {
    * Missing capability fields use conservative defaults:
    *   - `networkBlocked` defaults to `true` (block all outbound egress)
    *   - `processIsolated` defaults to `true` (separate PID namespace)
-   *   - `fsReadPaths` defaults to `[]` (no extra read mounts)
+   *   - `fsReadPaths` defaults to `[]` (no extra read mounts beyond the base whitelist)
    *   - `fsWritePaths` defaults to `[]` (no extra write mounts)
+   *
+   * CRITICAL-1: Uses `--clearenv` + `--setenv K V` for every entry in
+   *   `options.env`. The bwrap binary itself is spawned with `env: {}` so
+   *   no host env var (including ANTHROPIC_API_KEY, LVIS_*, etc.) leaks into
+   *   the sandbox even if bash.ts buildSafeChildEnv() is bypassed.
+   *
+   * CRITICAL-2: `options.cwd` is passed as `--chdir <cwd>` inside bwrap
+   *   (so the child's working directory is correct inside the namespace)
+   *   AND as Node spawn's `cwd` option (so the bwrap wrapper binary itself
+   *   resolves relative paths correctly before entering the namespace).
+   *
+   * MEDIUM-3: A base ro-bind whitelist (/lib /lib64 /bin /sbin) is always
+   *   mounted so dynamic-linker-bound commands (git, python, etc.) work without
+   *   callers having to enumerate low-level system paths.
    *
    * `stdout`/`stderr` are exposed as Web Streams (`ReadableStream<Uint8Array>`).
    * Consumers pipe through `TextDecoderStream` to obtain UTF-8 string chunks
    * (handles multi-byte CJK split-chunk boundaries correctly).
    *
-   * `abort()` sends SIGTERM to the bwrap wrapper; bwrap propagates the signal
-   * to the child process group inside the namespace.
+   * `abort()` sends SIGTERM then escalates to SIGKILL after 2 s if the child
+   * has not yet exited (MEDIUM-1: parity with bash.ts terminateProcess).
    */
   async spawn(
     cmd: string,
     args: readonly string[],
     capabilities: Partial<SandboxCapabilityDescriptor>,
-    env?: Record<string, string>,
+    options?: SandboxSpawnOptions,
   ): Promise<SandboxedProcess> {
     const bwrapArgs: string[] = [];
+
+    // CRITICAL-1: clear the entire inherited environment inside the namespace,
+    // then re-populate only the explicit env entries passed by the caller.
+    // This ensures no host secret (ANTHROPIC_API_KEY, LVIS_*, AWS_*, etc.)
+    // leaks into the sandbox even if an upstream caller forgets to strip them.
+    bwrapArgs.push("--clearenv");
+    for (const [k, v] of Object.entries(options?.env ?? {})) {
+      bwrapArgs.push("--setenv", k, v);
+    }
 
     // Network isolation — CLONE_NEWNET (D1 verified-kernel egress block).
     // Default: block (conservative). Caller passes `networkBlocked: false`
@@ -109,8 +133,16 @@ export class BwrapRunner implements SandboxRunner {
       bwrapArgs.push("--unshare-pid", "--new-session");
     }
 
-    // FS read paths — bind-mount read-only. --ro-bind-try silently skips
-    // if the source path does not exist (avoids hard failure on optional mounts).
+    // MEDIUM-3: Base ro-bind whitelist — always mounted so dynamic-linker-bound
+    // commands (git, bash, python, etc.) resolve their shared libraries and
+    // helper binaries without callers having to enumerate low-level system paths.
+    // --ro-bind-try silently skips absent paths (handles musl vs glibc layouts).
+    const baseReadPaths = ["/lib", "/lib64", "/bin", "/sbin"];
+    for (const path of baseReadPaths) {
+      bwrapArgs.push("--ro-bind-try", path, path);
+    }
+
+    // Caller-specified FS read paths — bind-mount read-only.
     for (const path of capabilities.fsReadPaths ?? []) {
       bwrapArgs.push("--ro-bind-try", path, path);
     }
@@ -133,16 +165,29 @@ export class BwrapRunner implements SandboxRunner {
       "--die-with-parent",
     );
 
+    // CRITICAL-2: set the working directory inside the namespace.
+    // Without --chdir the child inherits the host process cwd which may be
+    // outside the bind-mounted write path, causing relative-path commands to fail.
+    if (options?.cwd) {
+      bwrapArgs.push("--chdir", options.cwd);
+    }
+
     // Separator + actual command and its arguments.
     bwrapArgs.push("--", cmd, ...args);
 
     const child = spawn(BWRAP_BIN, bwrapArgs, {
-      // Merge optional env overrides on top of the current process environment.
-      // bash.ts already strips secrets via buildSafeChildEnv() before calling
-      // us, so we forward what we receive without additional stripping.
-      env: env ? { ...process.env, ...env } : process.env,
+      // CRITICAL-1: bwrap binary itself receives an empty environment — all env
+      // propagation into the sandbox happens via --clearenv + --setenv above.
+      env: {},
+      // CRITICAL-2: also pass cwd to Node spawn so bwrap resolves paths correctly
+      // before entering the namespace (e.g. relative --bind-try paths).
+      ...(options?.cwd ? { cwd: options.cwd } : {}),
       stdio: ["ignore", "pipe", "pipe"],
     });
+
+    if (!child.stdout || !child.stderr) {
+      throw new Error("BwrapRunner: child process missing stdout/stderr pipes");
+    }
 
     // exitCode promise: resolves with numeric code on clean exit, rejects on
     // signal kill or spawn error. Callers await this after draining stdout/stderr.
@@ -163,13 +208,20 @@ export class BwrapRunner implements SandboxRunner {
       pid: child.pid ?? -1,
       // Convert Node.js Readable streams to WHATWG ReadableStream<Uint8Array>.
       // TextDecoderStream is the idiomatic downstream consumer (PR-A2 bash.ts adoption).
-      stdout: Readable.toWeb(child.stdout!) as ReadableStream<Uint8Array>,
-      stderr: Readable.toWeb(child.stderr!) as ReadableStream<Uint8Array>,
+      stdout: Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
+      stderr: Readable.toWeb(child.stderr) as ReadableStream<Uint8Array>,
       exitCode,
       abort: async () => {
-        // SIGTERM gives the sandboxed process a chance to clean up.
-        // bwrap itself forwards the signal into the namespace.
+        // MEDIUM-1: SIGTERM → 2 s grace → SIGKILL escalation.
+        // Parity with bash.ts terminateProcess(). bwrap forwards SIGTERM into
+        // the namespace; if the sandboxed process traps and ignores it, SIGKILL
+        // is the backstop. .unref() so the timer does not prevent process exit.
         child.kill("SIGTERM");
+        setTimeout(() => {
+          if (child.exitCode === null && !child.killed) {
+            child.kill("SIGKILL");
+          }
+        }, 2000).unref();
       },
     };
   }

@@ -15,6 +15,7 @@
  */
 
 import type { SandboxKind, SandboxCapability } from "./sandbox-capability.js";
+import { setActiveSandboxCapability, __resetActiveSandboxCapabilityForTest } from "./sandbox-capability.js";
 
 // ─── Capability Descriptor ────────────────────────────────────────────────────
 
@@ -78,6 +79,22 @@ export interface SandboxRunnerDetect {
 // ─── SandboxRunner ────────────────────────────────────────────────────────────
 
 /**
+ * Options bag for SandboxRunner.spawn — extensible without breaking
+ * existing call-sites that pass capabilities + env positionally.
+ */
+export interface SandboxSpawnOptions {
+  /** Environment variables for the child (CRITICAL-1: runner uses --clearenv + --setenv). */
+  env?: Record<string, string>;
+  /**
+   * Working directory for the child process. Runner MUST honour this via
+   * its OS-specific mechanism (bwrap: --chdir) AND pass it to Node spawn's
+   * `cwd` option so the bwrap wrapper itself starts in the right directory.
+   * CRITICAL-2: omitting cwd causes child to inherit the host process cwd.
+   */
+  cwd?: string;
+}
+
+/**
  * Single sandbox runner abstraction. Per-OS implementations in PR-A2/A3.
  *
  * `spawn` MUST throw if the runner is not available — callers check
@@ -96,14 +113,14 @@ export interface SandboxRunner {
    * @param cmd          Absolute path to the executable (no shell expansion).
    * @param args         Argument list. Immutable to prevent TOCTOU mutations.
    * @param capabilities Requested sandbox constraints (D4 narrow allowlist).
-   * @param env          Optional environment overrides for the child.
+   * @param options      Optional env overrides and working directory (CRITICAL-1+2).
    * @returns            A live {@link SandboxedProcess} handle.
    */
   spawn(
     cmd: string,
     args: readonly string[],
     capabilities: Partial<SandboxCapabilityDescriptor>,
-    env?: Record<string, string>,
+    options?: SandboxSpawnOptions,
   ): Promise<SandboxedProcess>;
 
   /**
@@ -140,6 +157,14 @@ export type SandboxRunnerKey = NodeJS.Platform | "mcp";
 const runners = new Map<SandboxRunnerKey, SandboxRunner>();
 
 /**
+ * MAJOR-1 SOT fix: cache the detection result alongside the runner so
+ * detectSandboxCapability() can read from this authoritative store instead of
+ * always returning kind="none". registerSandboxRunner stores the result;
+ * detectSandboxCapability reads it once per call (no perf cost: cached).
+ */
+const detections = new Map<SandboxRunnerKey, SandboxRunnerDetect>();
+
+/**
  * Boot-phase lock. Set to `true` by {@link sealSandboxRunnerRegistry} after
  * all runners have been detected and registered at boot. Post-seal calls to
  * {@link registerSandboxRunner} throw in non-test environments to prevent
@@ -172,10 +197,15 @@ export function sealSandboxRunnerRegistry(): void {
  * Throws after {@link sealSandboxRunnerRegistry} has been called, unless
  * `NODE_ENV` includes `"test"` (vitest / jest environments bypass the guard
  * so runner mocks can be injected per-test via `afterEach` reset).
+ *
+ * @param detection  Optional detection result from runner.detect(). When
+ *   provided, stored alongside the runner so {@link getActiveCapability}
+ *   returns the correct kind/confidence — fixes MAJOR-1 SOT staleness.
  */
 export function registerSandboxRunner(
   platform: SandboxRunnerKey,
   runner: SandboxRunner,
+  detection?: SandboxRunnerDetect,
 ): void {
   if (sealed && !(process.env["NODE_ENV"] ?? "").includes("test")) {
     throw new Error(
@@ -183,6 +213,28 @@ export function registerSandboxRunner(
     );
   }
   runners.set(platform, runner);
+  if (detection) {
+    detections.set(platform, detection);
+    // MAJOR-1: update the SOT in sandbox-capability.ts so detectSandboxCapability()
+    // returns the correct kind without re-probing the OS.
+    setActiveSandboxCapability({
+      kind: detection.kind,
+      confidence: detection.confidence,
+      platform: platform === "mcp" ? process.platform : platform as NodeJS.Platform,
+      reason: detection.reason,
+    });
+  }
+}
+
+/**
+ * Return the detection result stored by {@link registerSandboxRunner} for the
+ * given platform, or `undefined` when no runner is registered.
+ *
+ * Used by {@link sandbox-capability.ts detectSandboxCapability} to provide an
+ * accurate SOT without re-probing the OS on every reviewer call.
+ */
+export function getActiveDetection(platform: SandboxRunnerKey): SandboxRunnerDetect | undefined {
+  return detections.get(platform);
 }
 
 /**
@@ -207,5 +259,7 @@ export function getSandboxRunner(
  */
 export function __resetSandboxRunnersForTest(): void {
   runners.clear();
+  detections.clear();
   sealed = false;
+  __resetActiveSandboxCapabilityForTest();
 }

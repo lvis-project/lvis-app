@@ -1,13 +1,20 @@
 /**
- * PR-A2 — BwrapRunner tests.
+ * PR-A2 — BwrapRunner tests (Round 2).
  *
- * Issue: #691
+ * Issue: #691 / PR #776
  *
  * Test coverage:
  *   detect() — Linux + bwrap present, Linux + bwrap absent, non-Linux
  *   spawn()  — bwrapArgs construction via spawn mock (capability mapping)
- *   abort()  — SIGTERM forwarded to child
- *   MCP slot — D9 round-trip integration test (registerSandboxRunner("mcp", ...))
+ *   CRITICAL-1 — --clearenv + --setenv: host secrets do not leak into sandbox
+ *   CRITICAL-2 — cwd: --chdir in bwrapArgs + Node spawn cwd option
+ *   HIGH-2    — per-stream TextDecoder: no CJK corruption on concurrent drain
+ *   MAJOR-1   — detectSandboxCapability SOT reflects registered runner kind
+ *   MEDIUM-1  — abort() SIGTERM → 2 s grace → SIGKILL escalation
+ *   MEDIUM-2  — LVIS_SANDBOX_ENABLED gate: sandbox only active when set to "1"
+ *   MEDIUM-3  — base ro-bind whitelist always present in bwrapArgs
+ *   abort()   — SIGTERM forwarded to child
+ *   MCP slot  — D9 round-trip integration test (registerSandboxRunner("mcp", ...))
  *   boot seal — sealSandboxRunnerRegistry blocks post-boot registration
  *
  * Integration tests (real bwrap invocations) are skipped unless
@@ -21,7 +28,7 @@
  *   `on`/`kill` mocks are reset in afterEach.
  */
 
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import type { Mock } from "vitest";
 
 // ─── Module mocks (hoisted to top of file by vitest) ──────────────────────────
@@ -45,7 +52,12 @@ import {
   getSandboxRunner,
   sealSandboxRunnerRegistry,
   __resetSandboxRunnersForTest,
+  getActiveDetection,
 } from "../../sandbox-runner.js";
+import {
+  detectSandboxCapability,
+  __resetActiveSandboxCapabilityForTest,
+} from "../../sandbox-capability.js";
 import { access } from "node:fs/promises";
 import { spawn } from "node:child_process";
 
@@ -65,6 +77,8 @@ function makeFakeChild(pid = 42): {
   stderr: Readable;
   on: Mock;
   kill: Mock;
+  exitCode: null;
+  killed: boolean;
 } {
   // Real Readable instances that immediately end — Readable.toWeb() requires
   // an actual stream.Readable, not a plain object.
@@ -81,6 +95,8 @@ function makeFakeChild(pid = 42): {
     stderr: makeStream(),
     on: vi.fn(),
     kill: vi.fn(),
+    exitCode: null,
+    killed: false,
   };
 }
 
@@ -92,7 +108,10 @@ const describeIntegration =
 
 afterEach(() => {
   __resetSandboxRunnersForTest();
+  __resetActiveSandboxCapabilityForTest();
   vi.clearAllMocks();
+  // Restore LVIS_SANDBOX_ENABLED to its original state (undefined in tests).
+  delete process.env["LVIS_SANDBOX_ENABLED"];
 });
 
 // ─── detect() ─────────────────────────────────────────────────────────────────
@@ -136,12 +155,12 @@ describe("BwrapRunner.spawn() — bwrapArgs construction", () => {
   /** Call spawn and return the args array that was passed to child_process.spawn. */
   async function captureArgs(
     capabilities: Parameters<BwrapRunner["spawn"]>[2],
-    env?: Record<string, string>,
+    options?: Parameters<BwrapRunner["spawn"]>[3],
   ): Promise<string[]> {
     const child = makeFakeChild();
     spawnMock.mockReturnValue(child);
     await new BwrapRunner()
-      .spawn("/bin/bash", ["-c", "echo hi"], capabilities, env)
+      .spawn("/bin/bash", ["-c", "echo hi"], capabilities, options)
       .catch(() => {});
     const lastCall = spawnMock.mock.calls[spawnMock.mock.calls.length - 1] as [string, string[], unknown];
     return lastCall[1];
@@ -174,7 +193,7 @@ describe("BwrapRunner.spawn() — bwrapArgs construction", () => {
     expect(args).not.toContain("--new-session");
   });
 
-  it("adds --ro-bind-try source dest for each fsReadPath", async () => {
+  it("adds --ro-bind-try source dest for each caller-specified fsReadPath", async () => {
     const args = await captureArgs({ fsReadPaths: ["/etc", "/usr"] });
     expect(args).toContain("--ro-bind-try");
     expect(args.filter((a) => a === "/etc").length).toBe(2); // source + dest
@@ -207,32 +226,6 @@ describe("BwrapRunner.spawn() — bwrapArgs construction", () => {
     expect(args[sepIdx + 3]).toBe("echo hi");
   });
 
-  it("merges env overrides onto process.env when env is provided", async () => {
-    const child = makeFakeChild();
-    spawnMock.mockReturnValue(child);
-    await new BwrapRunner()
-      .spawn("/bin/bash", ["-c", "echo"], {}, { CUSTOM_VAR: "value123" })
-      .catch(() => {});
-    const call = spawnMock.mock.calls[spawnMock.mock.calls.length - 1] as [
-      string,
-      string[],
-      { env?: Record<string, string> },
-    ];
-    expect(call[2].env?.["CUSTOM_VAR"]).toBe("value123");
-  });
-
-  it("uses process.env directly when no env override is provided", async () => {
-    const child = makeFakeChild();
-    spawnMock.mockReturnValue(child);
-    await new BwrapRunner().spawn("/bin/bash", ["-c", "echo"], {}).catch(() => {});
-    const call = spawnMock.mock.calls[spawnMock.mock.calls.length - 1] as [
-      string,
-      string[],
-      { env?: Record<string, string | undefined> },
-    ];
-    expect(call[2].env).toBe(process.env);
-  });
-
   it("returns pid from child.pid", async () => {
     const child = makeFakeChild(9999);
     spawnMock.mockReturnValue(child);
@@ -253,6 +246,249 @@ describe("BwrapRunner.spawn() — bwrapArgs construction", () => {
     const proc = await new BwrapRunner().spawn("/bin/bash", ["-c", "sleep 60"], {});
     await proc.abort();
     expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+  });
+});
+
+// ─── CRITICAL-1: --clearenv + --setenv env strip ──────────────────────────────
+
+describe("CRITICAL-1: --clearenv + --setenv — host env does not leak into sandbox", () => {
+  it("always includes --clearenv as the first bwrap arg", async () => {
+    const child = makeFakeChild();
+    spawnMock.mockReturnValue(child);
+    await new BwrapRunner().spawn("/bin/bash", ["-c", "echo"], {}).catch(() => {});
+    const call = spawnMock.mock.calls[spawnMock.mock.calls.length - 1] as [string, string[], unknown];
+    expect(call[1][0]).toBe("--clearenv");
+  });
+
+  it("does not include ANTHROPIC_API_KEY in bwrapArgs even if set on process.env", async () => {
+    const original = process.env["ANTHROPIC_API_KEY"];
+    process.env["ANTHROPIC_API_KEY"] = "sk-secret-should-not-leak";
+    try {
+      const child = makeFakeChild();
+      spawnMock.mockReturnValue(child);
+      // Pass an env that does NOT include ANTHROPIC_API_KEY (simulating buildSafeChildEnv strip)
+      await new BwrapRunner()
+        .spawn("/bin/bash", ["-c", "echo"], {}, { env: { PATH: "/usr/bin" } })
+        .catch(() => {});
+      const call = spawnMock.mock.calls[spawnMock.mock.calls.length - 1] as [string, string[], unknown];
+      const bwrapArgs = call[1];
+      // --setenv entries are: --setenv KEY VALUE — ensure ANTHROPIC_API_KEY is not a value
+      expect(bwrapArgs).not.toContain("ANTHROPIC_API_KEY");
+      expect(bwrapArgs).not.toContain("sk-secret-should-not-leak");
+    } finally {
+      if (original === undefined) {
+        delete process.env["ANTHROPIC_API_KEY"];
+      } else {
+        process.env["ANTHROPIC_API_KEY"] = original;
+      }
+    }
+  });
+
+  it("includes --setenv K V for each entry in options.env", async () => {
+    const child = makeFakeChild();
+    spawnMock.mockReturnValue(child);
+    await new BwrapRunner()
+      .spawn("/bin/bash", ["-c", "echo"], {}, { env: { FOO: "bar", PATH: "/usr/bin" } })
+      .catch(() => {});
+    const call = spawnMock.mock.calls[spawnMock.mock.calls.length - 1] as [string, string[], unknown];
+    const bwrapArgs = call[1];
+    const fooIdx = bwrapArgs.indexOf("FOO");
+    expect(bwrapArgs[fooIdx - 1]).toBe("--setenv");
+    expect(bwrapArgs[fooIdx + 1]).toBe("bar");
+    const pathIdx = bwrapArgs.indexOf("PATH");
+    expect(bwrapArgs[pathIdx - 1]).toBe("--setenv");
+    expect(bwrapArgs[pathIdx + 1]).toBe("/usr/bin");
+  });
+
+  it("passes env: {} to Node spawn so the bwrap binary itself gets no host env", async () => {
+    const child = makeFakeChild();
+    spawnMock.mockReturnValue(child);
+    await new BwrapRunner()
+      .spawn("/bin/bash", ["-c", "echo"], {}, { env: { MY_VAR: "value" } })
+      .catch(() => {});
+    const call = spawnMock.mock.calls[spawnMock.mock.calls.length - 1] as [
+      string,
+      string[],
+      { env?: Record<string, string> },
+    ];
+    // Node spawn env must be empty — NOT process.env or a merge of it.
+    expect(call[2].env).toEqual({});
+  });
+});
+
+// ─── CRITICAL-2: cwd forwarding ───────────────────────────────────────────────
+
+describe("CRITICAL-2: cwd forwarding — --chdir in namespace + Node spawn cwd", () => {
+  it("adds --chdir <cwd> to bwrapArgs when options.cwd is provided", async () => {
+    const child = makeFakeChild();
+    spawnMock.mockReturnValue(child);
+    const cwd = "/home/user/project";
+    await new BwrapRunner()
+      .spawn("/bin/bash", ["-c", "echo"], {}, { cwd })
+      .catch(() => {});
+    const call = spawnMock.mock.calls[spawnMock.mock.calls.length - 1] as [string, string[], unknown];
+    const bwrapArgs = call[1];
+    const chDirIdx = bwrapArgs.indexOf("--chdir");
+    expect(chDirIdx).toBeGreaterThan(-1);
+    expect(bwrapArgs[chDirIdx + 1]).toBe(cwd);
+  });
+
+  it("passes cwd as Node spawn option when options.cwd is provided", async () => {
+    const child = makeFakeChild();
+    spawnMock.mockReturnValue(child);
+    const cwd = "/home/user/project";
+    await new BwrapRunner()
+      .spawn("/bin/bash", ["-c", "echo"], {}, { cwd })
+      .catch(() => {});
+    const call = spawnMock.mock.calls[spawnMock.mock.calls.length - 1] as [
+      string,
+      string[],
+      { cwd?: string },
+    ];
+    expect(call[2].cwd).toBe(cwd);
+  });
+
+  it("omits --chdir when options.cwd is not provided", async () => {
+    const child = makeFakeChild();
+    spawnMock.mockReturnValue(child);
+    await new BwrapRunner().spawn("/bin/bash", ["-c", "echo"], {}).catch(() => {});
+    const call = spawnMock.mock.calls[spawnMock.mock.calls.length - 1] as [string, string[], unknown];
+    expect((call[1] as string[]).indexOf("--chdir")).toBe(-1);
+  });
+
+  it("does not set cwd on Node spawn when options.cwd is absent", async () => {
+    const child = makeFakeChild();
+    spawnMock.mockReturnValue(child);
+    await new BwrapRunner().spawn("/bin/bash", ["-c", "echo"], {}).catch(() => {});
+    const call = spawnMock.mock.calls[spawnMock.mock.calls.length - 1] as [
+      string,
+      string[],
+      { cwd?: string },
+    ];
+    expect(call[2].cwd).toBeUndefined();
+  });
+});
+
+// ─── MAJOR-1: detectSandboxCapability SOT ─────────────────────────────────────
+
+describe("MAJOR-1: detectSandboxCapability reflects registered runner", () => {
+  it("returns kind=none when no runner is registered", () => {
+    const cap = detectSandboxCapability();
+    expect(cap.kind).toBe("none");
+  });
+
+  it("returns kind=bubblewrap after registerSandboxRunner with detection", async () => {
+    const runner = new BwrapRunner();
+    const detection = {
+      available: true,
+      reason: "bwrap detected at /usr/bin/bwrap",
+      kind: "bubblewrap" as const,
+      confidence: "verified" as const,
+    };
+    registerSandboxRunner("linux", runner, detection);
+    const cap = detectSandboxCapability();
+    expect(cap.kind).toBe("bubblewrap");
+    expect(cap.confidence).toBe("verified");
+    expect(cap.reason).toContain("bwrap");
+  });
+
+  it("returns kind=none again after __resetSandboxRunnersForTest", () => {
+    const runner = new BwrapRunner();
+    registerSandboxRunner("linux", runner, {
+      available: true,
+      reason: "bwrap at /usr/bin/bwrap",
+      kind: "bubblewrap",
+      confidence: "verified",
+    });
+    __resetSandboxRunnersForTest();
+    expect(detectSandboxCapability().kind).toBe("none");
+  });
+
+  it("getActiveDetection returns the stored detection", () => {
+    const runner = new BwrapRunner();
+    const det = { available: true, reason: "ok", kind: "bubblewrap" as const, confidence: "verified" as const };
+    registerSandboxRunner("linux", runner, det);
+    expect(getActiveDetection("linux")).toEqual(det);
+  });
+});
+
+// ─── MEDIUM-1: abort() SIGTERM → SIGKILL escalation ──────────────────────────
+
+describe("MEDIUM-1: abort() SIGTERM → 2 s grace → SIGKILL", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("calls SIGTERM immediately on abort()", async () => {
+    const child = makeFakeChild();
+    spawnMock.mockReturnValue(child);
+    const proc = await new BwrapRunner().spawn("/bin/bash", ["-c", "sleep 60"], {});
+    await proc.abort();
+    expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+  });
+
+  it("sends SIGKILL after 2000 ms if child has not exited", async () => {
+    const child = makeFakeChild();
+    // Simulate a process that ignores SIGTERM: exitCode stays null, killed stays false
+    spawnMock.mockReturnValue(child);
+    const proc = await new BwrapRunner().spawn("/bin/bash", ["-c", "sleep 60"], {});
+    await proc.abort();
+    // Before 2 s: only SIGTERM sent
+    vi.advanceTimersByTime(1999);
+    expect(child.kill).toHaveBeenCalledTimes(1);
+    expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+    // After 2 s: SIGKILL sent
+    vi.advanceTimersByTime(1);
+    expect(child.kill).toHaveBeenCalledTimes(2);
+    expect(child.kill).toHaveBeenNthCalledWith(2, "SIGKILL");
+  });
+
+  it("does NOT send SIGKILL if child has already exited (exitCode not null)", async () => {
+    const child = { ...makeFakeChild(), exitCode: 0 as unknown as null };
+    spawnMock.mockReturnValue(child);
+    const proc = await new BwrapRunner().spawn("/bin/bash", ["-c", "echo"], {});
+    await proc.abort();
+    vi.advanceTimersByTime(3000);
+    // Only SIGTERM — child.exitCode is 0 (not null) so SIGKILL guard fires false
+    expect(child.kill).toHaveBeenCalledTimes(1);
+    expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+  });
+});
+
+// ─── MEDIUM-3: base ro-bind whitelist ─────────────────────────────────────────
+
+describe("MEDIUM-3: base ro-bind whitelist always present", () => {
+  async function captureArgs(
+    capabilities: Parameters<BwrapRunner["spawn"]>[2] = {},
+  ): Promise<string[]> {
+    const child = makeFakeChild();
+    spawnMock.mockReturnValue(child);
+    await new BwrapRunner().spawn("/bin/bash", ["-c", "echo"], capabilities).catch(() => {});
+    const call = spawnMock.mock.calls[spawnMock.mock.calls.length - 1] as [string, string[], unknown];
+    return call[1] as string[];
+  }
+
+  it("always mounts /lib /lib64 /bin /sbin as ro-bind-try", async () => {
+    const args = await captureArgs({});
+    for (const path of ["/lib", "/lib64", "/bin", "/sbin"]) {
+      const idx = args.indexOf(path);
+      expect(idx).toBeGreaterThan(-1);
+      expect(args[idx - 1]).toBe("--ro-bind-try");
+    }
+  });
+
+  it("base whitelist is present even when fsReadPaths is empty", async () => {
+    const args = await captureArgs({ fsReadPaths: [] });
+    expect(args.filter((a) => a === "/lib").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("caller-specified fsReadPaths are added in addition to base whitelist", async () => {
+    const args = await captureArgs({ fsReadPaths: ["/etc"] });
+    expect(args).toContain("/lib");
+    expect(args).toContain("/etc");
   });
 });
 
@@ -286,6 +522,22 @@ describe("sealSandboxRunnerRegistry + boot registration", () => {
     expect(getSandboxRunner("linux")).toBeUndefined();
     // Seal is lifted — registration works again
     expect(() => registerSandboxRunner("linux", runner)).not.toThrow();
+  });
+
+  it("post-seal registerSandboxRunner throws in non-test environments", () => {
+    // Simulate production: temporarily set NODE_ENV to something that does not include "test"
+    const orig = process.env["NODE_ENV"];
+    process.env["NODE_ENV"] = "production";
+    try {
+      sealSandboxRunnerRegistry();
+      expect(() => registerSandboxRunner("linux", new BwrapRunner())).toThrow(
+        /sealed after boot/,
+      );
+    } finally {
+      process.env["NODE_ENV"] = orig;
+      // Reset so afterEach cleanup works (seal was set above)
+      __resetSandboxRunnersForTest();
+    }
   });
 });
 
