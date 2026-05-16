@@ -3,6 +3,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PERMISSIONS } from "../../../shared/ipc-channels.js";
+import { UNAUTHORIZED_FRAME } from "../../gated.js";
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
 const USER_INTENT = { inputOrigin: "user-keyboard", userActivation: true };
@@ -581,5 +582,67 @@ describe("permissions IPC handlers", () => {
     expect(result).toEqual({ ok: false, error: "invalid-params" });
     expect(queue.resolve).not.toHaveBeenCalled();
     expect(deps.auditLogger.appendPermissionAuditEntry).not.toHaveBeenCalled();
+  });
+});
+
+// ─── Helper: create an IPC event with a foreign sender frame ─────────────────
+// validateSender(null) returns true (trusted); we need a foreign URL to test
+// the UNAUTHORIZED_FRAME path in reviewerProviderHasKey.
+
+function makeForeignEvent(url = "https://attacker.example.com/pwn") {
+  return { senderFrame: { url } };
+}
+
+function invokeWithEvent(channel: string, event: unknown, ...args: unknown[]): unknown {
+  const fn = handlers.get(channel);
+  if (!fn) throw new Error(`No handler registered for: ${channel}`);
+  return fn(event as never, ...args);
+}
+
+// ─── MAJOR-4: reviewerProviderHasKey returns UNAUTHORIZED_FRAME ───────────────
+
+describe("MAJOR-4: reviewerProviderHasKey returns UNAUTHORIZED_FRAME on invalid sender", () => {
+  it("returns UNAUTHORIZED_FRAME (not bare false) when sender is a foreign frame", async () => {
+    await setup();
+    const result = await invokeWithEvent(
+      PERMISSIONS.reviewerProviderHasKey,
+      makeForeignEvent(),
+      "openai",
+    );
+    expect(result).toEqual(UNAUTHORIZED_FRAME);
+    // Must NOT be bare false — bare false is indistinguishable from "key absent"
+    expect(result).not.toBe(false);
+  });
+});
+
+// ─── MEDIUM-3: reviewerProviderHasKey input allowlist ────────────────────────
+
+describe("MEDIUM-3: reviewerProviderHasKey input allowlist", () => {
+  it("returns false immediately for unknown provider string (not a valid reviewer provider)", async () => {
+    await setup();
+    // Trusted sender (null) — allowlist check fires, not sender check
+    const result = await invoke(PERMISSIONS.reviewerProviderHasKey, "malicious-provider");
+    expect(result).toBe(false);
+  });
+
+  it("returns false for non-string provider input", async () => {
+    await setup();
+    const result = await invoke(PERMISSIONS.reviewerProviderHasKey, 42);
+    expect(result).toBe(false);
+  });
+
+  it("returns false for null provider input", async () => {
+    await setup();
+    const result = await invoke(PERMISSIONS.reviewerProviderHasKey, null);
+    expect(result).toBe(false);
+  });
+
+  it("rejects unknown provider names immediately — allowlist short-circuits before touching deps", async () => {
+    // Ensure handler is registered before invoking.
+    await setup();
+    // "not-a-provider" is not in the allowlist → returns false immediately,
+    // before touching deps.settingsService (which isn't in this test's makeDeps).
+    const result = await invoke(PERMISSIONS.reviewerProviderHasKey, "not-a-provider-2");
+    expect(result).toBe(false);
   });
 });

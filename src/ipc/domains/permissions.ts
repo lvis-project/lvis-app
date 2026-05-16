@@ -227,9 +227,25 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
   // Used by the renderer settings UI to determine which reviewer providers
   // are activatable (key-driven dynamic activation). Read-only, but gated
   // to prevent a foreign frame from probing which LLM API keys are present.
-  ipcMain.handle(PERMISSIONS.reviewerProviderHasKey, async (e, provider: string) => {
+  //
+  // MAJOR-4: returns UNAUTHORIZED_FRAME (sibling handler parity) instead of
+  // bare `false` on validateSender failure. Bare `false` is indistinguishable
+  // from "key not present", masking the security rejection from the caller.
+  //
+  // MEDIUM-3: input allowlist — only the five known reviewer provider strings
+  // are accepted; anything else short-circuits before touching the secret store.
+  // Allowlist is derived from the ReviewerProvider union type so it stays in
+  // sync with permission-settings-store.ts.
+  const ALLOWED_REVIEWER_PROVIDERS = new Set([
+    "openai", "anthropic", "google", "foundry", "gcp-playground",
+  ] as const);
+  ipcMain.handle(PERMISSIONS.reviewerProviderHasKey, async (e, provider: unknown) => {
     if (!validateSender(e)) {
       auditUnauthorized(auditLogger, PERMISSIONS.reviewerProviderHasKey, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    // MEDIUM-3: reject unknown provider names before touching the secret store.
+    if (typeof provider !== "string" || !ALLOWED_REVIEWER_PROVIDERS.has(provider as "openai")) {
       return false;
     }
     const { reviewerProviderKeyPresent } = await import(

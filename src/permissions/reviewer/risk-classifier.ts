@@ -541,7 +541,15 @@ export class LlmRiskClassifier implements RiskClassifier {
     private readonly telemetry: LlmRiskClassifierTelemetry = {},
   ) {}
 
-  async classify(input: ToolInvocationContext): Promise<RiskVerdict> {
+  // MEDIUM-2: accepts optional abortSignal so callers (dispatchReviewer,
+  // interactive approval flow) can cancel an in-flight LLM call when the
+  // user cancels the operation. The second parameter is not part of the
+  // RiskClassifier interface (which is intentionally signal-agnostic) but
+  // is called directly by callers that have a signal available.
+  async classify(
+    input: ToolInvocationContext,
+    opts?: { abortSignal?: AbortSignal },
+  ): Promise<RiskVerdict> {
     // Composition baseline (security M1) — rule first, LLM cannot downgrade.
     const ruleVerdict = this.rule.classify(input);
 
@@ -552,6 +560,7 @@ export class LlmRiskClassifier implements RiskClassifier {
         model: this.model,
         systemPrompt: PERMISSION_REVIEWER_SYSTEM_PROMPT,
         userPrompt,
+        abortSignal: opts?.abortSignal,
       });
       const parsed = tryParseVerdict(completion.text);
       this.telemetry.onCall?.({

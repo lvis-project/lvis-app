@@ -425,6 +425,115 @@ describe("Permission policy C3 foundry/gcp wiring paths", () => {
   });
 });
 
+describe("MAJOR-2: cacheScope includes Foundry endpoint", () => {
+  it("foundry provider — cacheScope.endpoint set to the current endpoint value", () => {
+    const pm = new PermissionManager(join(tmpDir, "permissions.json"));
+    const setReviewerSpy = vi.spyOn(pm, "setReviewer");
+    wireReviewerAgent({
+      permissionManager: pm,
+      readSettings: () => ({
+        mode: "llm",
+        provider: "foundry",
+        model: "gpt-4o",
+        fallbackOnError: "deny",
+        interactive: { autoApprove: "off" },
+      }),
+      getSecret: (key) => (key === "llm.apiKey.azure-foundry" ? "az-api-key" : null),
+      getFoundryEndpoint: () => "https://proj.services.ai.azure.com",
+      verdictCachePath: join(tmpDir, "cache-m2-foundry.jsonl"),
+      deferredQueuePath: join(tmpDir, "queue-m2-foundry.jsonl"),
+    });
+    expect(setReviewerSpy).toHaveBeenCalledOnce();
+    const { cacheScope } = setReviewerSpy.mock.calls[0][0];
+    expect(cacheScope?.endpoint).toBe("https://proj.services.ai.azure.com");
+  });
+
+  it("gcp-playground provider — cacheScope.endpoint is null (no configurable endpoint)", () => {
+    const pm = new PermissionManager(join(tmpDir, "permissions.json"));
+    const setReviewerSpy = vi.spyOn(pm, "setReviewer");
+    wireReviewerAgent({
+      permissionManager: pm,
+      readSettings: () => ({
+        mode: "llm",
+        provider: "gcp-playground",
+        model: "gemini-1.5-flash",
+        fallbackOnError: "deny",
+        interactive: { autoApprove: "off" },
+      }),
+      getSecret: (key) => (key === "llm.apiKey.gemini" ? "AIza-key" : null),
+      verdictCachePath: join(tmpDir, "cache-m2-gcp.jsonl"),
+      deferredQueuePath: join(tmpDir, "queue-m2-gcp.jsonl"),
+    });
+    const { cacheScope } = setReviewerSpy.mock.calls[0][0];
+    expect(cacheScope?.endpoint).toBeNull();
+  });
+
+  it("openai provider — cacheScope.endpoint is null", () => {
+    const pm = new PermissionManager(join(tmpDir, "permissions.json"));
+    const setReviewerSpy = vi.spyOn(pm, "setReviewer");
+    const upstream = {
+      vendor: "openai" as const,
+      streamTurn: async function* () {},
+    };
+    wireReviewerAgent({
+      permissionManager: pm,
+      readSettings: () => ({
+        mode: "llm",
+        provider: "openai",
+        model: "gpt-4o-mini",
+        fallbackOnError: "deny",
+        interactive: { autoApprove: "off" },
+      }),
+      streamProviderFor: () => upstream,
+      verdictCachePath: join(tmpDir, "cache-m2-openai.jsonl"),
+      deferredQueuePath: join(tmpDir, "queue-m2-openai.jsonl"),
+    });
+    const { cacheScope } = setReviewerSpy.mock.calls[0][0];
+    expect(cacheScope?.endpoint).toBeNull();
+  });
+
+  it("changing endpoint causes different cacheScope — cache miss on re-wire", () => {
+    const pm = new PermissionManager(join(tmpDir, "permissions.json"));
+    const setReviewerSpy = vi.spyOn(pm, "setReviewer");
+
+    wireReviewerAgent({
+      permissionManager: pm,
+      readSettings: () => ({
+        mode: "llm",
+        provider: "foundry",
+        model: "gpt-4o",
+        fallbackOnError: "deny",
+        interactive: { autoApprove: "off" },
+      }),
+      getSecret: (key) => (key === "llm.apiKey.azure-foundry" ? "az-key" : null),
+      getFoundryEndpoint: () => "https://proj-a.services.ai.azure.com",
+      verdictCachePath: join(tmpDir, "cache-m2-change-a.jsonl"),
+      deferredQueuePath: join(tmpDir, "queue-m2-change-a.jsonl"),
+    });
+    wireReviewerAgent({
+      permissionManager: pm,
+      readSettings: () => ({
+        mode: "llm",
+        provider: "foundry",
+        model: "gpt-4o",
+        fallbackOnError: "deny",
+        interactive: { autoApprove: "off" },
+      }),
+      getSecret: (key) => (key === "llm.apiKey.azure-foundry" ? "az-key" : null),
+      getFoundryEndpoint: () => "https://proj-b.services.ai.azure.com",
+      verdictCachePath: join(tmpDir, "cache-m2-change-b.jsonl"),
+      deferredQueuePath: join(tmpDir, "queue-m2-change-b.jsonl"),
+    });
+
+    expect(setReviewerSpy).toHaveBeenCalledTimes(2);
+    const scope1 = setReviewerSpy.mock.calls[0][0].cacheScope;
+    const scope2 = setReviewerSpy.mock.calls[1][0].cacheScope;
+    expect(scope1?.endpoint).toBe("https://proj-a.services.ai.azure.com");
+    expect(scope2?.endpoint).toBe("https://proj-b.services.ai.azure.com");
+    expect(scope1?.endpoint).not.toBe(scope2?.endpoint);
+  });
+});
+
 describe("Permission policy P4 LlmReviewerProviderAdapter", () => {
   it("collects streamTurn `text_delta` events into a single string", async () => {
     const provider = stubProvider([
