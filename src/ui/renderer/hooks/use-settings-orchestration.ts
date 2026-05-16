@@ -70,14 +70,15 @@ export interface SettingsOrchestrationState {
   /**
    * Persist current draft for the named tab. Errors surface via
    * `lastSaveError`, not via promise rejection (the debounced caller
-   * does `void s.save(tab)`).
+   * does `void s.save(tab)`). Resolves to `true` on success so explicit
+   * Save handlers can render a "저장되었습니다" toast.
    *
    * The save NEVER closes the dialog. Multi-tab Settings modals (VS Code,
    * Linear, Raycast) keep the dialog open after Save so the user can
    * verify the change and edit a sibling tab. Close lives on the
    * Dialog X / Esc — same as every other modal.
    */
-  save: (tab: string) => Promise<void>;
+  save: (tab: string) => Promise<boolean>;
   vendorInfo: (typeof VENDORS)[number];
 }
 
@@ -221,15 +222,16 @@ export function useSettingsOrchestration(
   // dropped from the second save's payload. The ref is updated via
   // `useEffect` (canonical latest-ref pattern) so a discarded concurrent
   // render does not leave a dangling closure here.
-  const saveRef = useRef<(tab: string) => Promise<void>>(null!);
-  const save = async (tab: string): Promise<void> => {
-    if (!settingsLoaded) return;
+  const saveRef = useRef<(tab: string) => Promise<boolean>>(null!);
+  const save = async (tab: string): Promise<boolean> => {
+    if (!settingsLoaded) return false;
     if (savingRef.current) {
       pendingSavePayload.current = { tab };
-      return;
+      return false;
     }
     savingRef.current = true;
     setSaving(true);
+    let ok = false;
     try {
       if (tab !== "permissions") {
         const secretUpdates: Array<Promise<unknown>> = [];
@@ -287,6 +289,7 @@ export function useSettingsOrchestration(
       }
       if (tab !== "permissions") onSaved();
       setLastSaveError(null);
+      ok = true;
     } catch (err) {
       // Surface via state so SettingsDialog can render an inline banner —
       // debounced callers do `void s.save(tab)` and would otherwise lose
@@ -309,6 +312,7 @@ export function useSettingsOrchestration(
         void saveRef.current(pending.tab);
       }
     }
+    return ok;
   };
   useEffect(() => {
     saveRef.current = save;

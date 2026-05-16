@@ -5,7 +5,6 @@ import { Checkbox } from "../../../components/ui/checkbox.js";
 import { Input } from "../../../components/ui/input.js";
 import { Label } from "../../../components/ui/label.js";
 import { RadioGroup, RadioGroupItem } from "../../../components/ui/radio-group.js";
-import { ScrollArea } from "../../../components/ui/scroll-area.js";
 import {
   Select,
   SelectContent,
@@ -561,7 +560,11 @@ export function PermissionsTab() {
   }
 
   return (
-    <ScrollArea className="h-[420px] pr-2">
+    // SettingsContent's right pane owns the dialog-wide scroll (always-
+    // visible gutter via overflow-y-scroll). An inner ScrollArea here
+    // would double-stack scrollbars, which is what the audit/permissions
+    // pair looked like before this consolidation.
+    <div className="pr-1">
       <div className="space-y-6 pt-4">
 
         {/* ── 인라인 배너 (§F9 — alert 대체) ── */}
@@ -1252,7 +1255,7 @@ export function PermissionsTab() {
 
       </div>
       <AuditPanel open={auditOpen} onClose={() => setAuditOpen(false)} />
-    </ScrollArea>
+    </div>
   );
 }
 
