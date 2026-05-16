@@ -35,6 +35,10 @@ export interface UpdaterLike {
   on(event: "error", cb: (err: Error) => void): void;
   checkForUpdates(): Promise<unknown>;
   quitAndInstall(): void;
+  // Hardening: explicit anti-downgrade + channel pin (set in wire()).
+  // Optional on the type so tests can pass minimal fakes.
+  allowDowngrade?: boolean;
+  channel?: string;
 }
 
 export const CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
@@ -64,6 +68,13 @@ export function createAutoUpdater(deps: AutoUpdaterDeps): {
   const wire = (u: UpdaterLike) => {
     if (wired) return;
     wired = true;
+    // Defend against downgrade attacks: Linux AppImage integrity rests
+    // solely on the SHA512 in latest-linux.yml, so a release-feed
+    // compromise + a forged older version YAML would otherwise be
+    // accepted. Pin the channel to "latest" as well so a malicious
+    // pre-release tag cannot redirect end users.
+    u.allowDowngrade = false;
+    u.channel = "latest";
     u.on("update-available", (info) => {
       sendToast(deps.mainWindow, `새 버전 v${info.version} 다운로드 중`, "info");
     });
