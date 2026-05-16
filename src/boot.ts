@@ -448,6 +448,18 @@ export async function bootstrap(
     deploymentGuard,
   );
 
+  // Closure invoked by the settings IPC handler when MarketplaceTab fields
+  // change. Re-reads the persisted `marketplace.realCloudAllowPrivateNetwork`
+  // value and pushes it into the live RealCloudMarketplaceFetcher so the
+  // SSRF-guard bypass toggle takes effect on the next request (honoring the
+  // "즉시 적용" UX badge). No-op when the fetcher is the disabled variant —
+  // a disabled marketplace has no live config to refresh.
+  const refreshMarketplaceFetcherConfig = (): void => {
+    if (!(marketplaceFetcher instanceof RealCloudMarketplaceFetcher)) return;
+    const next = settingsService.get("marketplace").realCloudAllowPrivateNetwork ?? false;
+    marketplaceFetcher.updateAllowPrivateNetwork(next);
+  };
+
   // §9.5 — Managed plugin bootstrap. Mandatory enterprise plugins are fetched
   // from the marketplace on boot (VS Code-style), not packaged in app source.
   // Graceful: marketplace unreachable or per-plugin failure never bricks boot.
@@ -1046,7 +1058,8 @@ export async function bootstrap(
     memoryManager, keywordEngine, routeEngine, toolRegistry,
     systemPromptBuilder, conversationLoop, routineEngine, mcpManager, mcpArtifactStore, agentArtifactStore, skillArtifactStore,
     idleScheduler, preferenceRefreshService, bashAstValidator, auditService, auditLogger: bootAuditLogger, postTurnHookChain,
-    approvalGate, rewireReviewerAgent, knowledgeAvailable, starredStore, feedbackStore,
+    approvalGate, rewireReviewerAgent, refreshMarketplaceFetcherConfig,
+    knowledgeAvailable, starredStore, feedbackStore,
     routinesStore, routinesScheduler, routineSessionStore, sessionTodoStore, askUserQuestionGate, skillStore, agentProfileStore,
     notificationService,
     scriptHookManager,

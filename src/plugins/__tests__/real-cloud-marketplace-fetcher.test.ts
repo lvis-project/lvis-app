@@ -525,3 +525,44 @@ describe("RealCloudMarketplaceFetcher — input validation (security)", () => {
     expect(plugins[0].packageSpec).toBe("simple-plugin@1.0.0");
   });
 });
+
+describe("RealCloudMarketplaceFetcher.updateAllowPrivateNetwork (live config)", () => {
+  const originalFetch = global.fetch;
+
+  beforeEach(() => {
+    mockedFetchPublic.mockReset();
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  it("flips the SSRF-bypass path without rebuilding the fetcher", async () => {
+    const fakeFetch = vi.fn().mockResolvedValue(jsonResponse([]));
+    global.fetch = fakeFetch as unknown as typeof global.fetch;
+    mockedFetchPublic.mockResolvedValue(jsonResponse([]));
+
+    const fetcher = new RealCloudMarketplaceFetcher({
+      baseUrl: "http://127.0.0.1:8080",
+      allowPrivateNetwork: false,
+    });
+
+    // 1) Initial state: SSRF guard is in front of the request.
+    await fetcher.listPlugins();
+    expect(mockedFetchPublic).toHaveBeenCalledTimes(1);
+    expect(fakeFetch).not.toHaveBeenCalled();
+
+    // 2) Flip the live flag. Next request must bypass the SSRF guard.
+    fetcher.updateAllowPrivateNetwork(true);
+    await fetcher.listPlugins();
+    expect(mockedFetchPublic).toHaveBeenCalledTimes(1);
+    expect(fakeFetch).toHaveBeenCalledOnce();
+
+    // 3) Flip it back. Next request must route through the guard again.
+    fetcher.updateAllowPrivateNetwork(false);
+    await fetcher.listPlugins();
+    expect(mockedFetchPublic).toHaveBeenCalledTimes(2);
+    expect(fakeFetch).toHaveBeenCalledOnce();
+  });
+});
