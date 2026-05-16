@@ -214,6 +214,30 @@ Permission policy 구현은 `docs/architecture/permission-policy-design.md` 와 
 - Non-user-origin 입력(plugin overlay, file-content, LLM tool arg)은 slash command 로 dispatch 되면 안 된다. Leading slash 는 plain text 로 sanitize 하고, `/permission` dispatcher 는 `trustOrigin === "user-keyboard"` 만 처리한다.
 - Headless/routine 실행은 allow rule/auto mode 로 write/shell/network 를 우회하지 않는다. Mutating tool 은 reviewer layer 를 먼저 통과하고 HIGH 는 deferred queue 로 보낸다.
 
+## IPC Error Message Language Convention (REQUIRED)
+
+LVIS 는 IPC layer 와 UI layer 의 i18n 책임을 분리한다.
+
+### Layer 별 언어 규칙
+
+| Layer | 표시 대상 | 언어 | 예시 |
+|---|---|---|---|
+| **IPC handler return** (`{ok:false, error, message}`) | 개발자 (logs, audit, dev tools) | **English** | `"permission manager not initialized"` |
+| **`throw new Error()` from main process** | 개발자 (stack trace, crash log) | **English** | `"[security] dev mode not unlocked"` |
+| **`dialog.showOpenDialog` / `showMessageBox` 의 `title`/`message`** | 최종 사용자 | **Korean** | `"로컬 플러그인 설치 (개발자)"` |
+| **Renderer toast / banner / alert text** | 최종 사용자 | **Korean** | `"권한 메모리가 복구되어 새 승인이 필요합니다."` |
+
+### 룰
+
+- IPC handler 의 `message` 필드는 **English** 로 작성한다. 사용자에게 보여지는 i18n 은 renderer 의 mapping 함수 (예: `formatRevokeError`) 가 책임진다.
+- `error` 코드는 항상 **kebab-case English** (`invalid-pattern`, `user-keyboard-required`, `no-permission-manager`). UI 측 mapper 는 이 코드만으로 분기 가능해야 한다.
+- Renderer 에서 IPC error 를 그대로 노출하지 않는다 — code → user-facing Korean 으로 항상 변환.
+- 새 IPC handler 추가 시 Korean error message 발견되면 PR review 차단.
+
+### 위반 사례 (2026-05-17 이전)
+
+`src/ipc/domains/permissions.ts` 가 10+ 사이트에서 Korean error message 사용 (`"패턴은 문자열이어야 합니다."`, `"권한 매니저가 초기화되지 않았습니다."` 등). 같은 파일의 더 최근 추가 handler 들은 English 사용 (`"mode must be a string"`, `"durable mode command must require modal confirmation"`). 컨벤션 부재로 mixed surface. **Root cause**: layer 분리 미명시 → 작성자별 임의 선택. Fix: convention 명시 + sweep + UI mapper SOT (issue #830 - `formatIpcError`) 가 enforcement 보조.
+
 ## Build
 
 This repo uses **bun** as the default package manager + script runner.
