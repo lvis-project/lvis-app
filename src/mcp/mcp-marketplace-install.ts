@@ -13,7 +13,7 @@
  *     re-reads the runtime block from the verified manifest in the zip
  *   - secrets are NEVER carried in catalog or manifest. When
  *     `runtime.auth !== "none"` the renderer prompts the user via the
- *     existing api-key / SSO flows after the server entry is registered.
+ *     existing api-key / SSO / OAuth flows after the server entry is registered.
  */
 
 import { readFile } from "node:fs/promises";
@@ -32,7 +32,7 @@ export interface InstallMcpResult {
   installDir: string;
   /** True if `runtime.auth !== "none"` — caller prompts for credentials. */
   needsCredential: boolean;
-  authMode: "none" | "api-key" | "sso";
+  authMode: "none" | "api-key" | "sso" | "oauth";
 }
 
 export interface InstallMcpOptions {
@@ -173,11 +173,17 @@ export function buildMcpServerConfig(slug: string, runtime: McpRuntimeSpec): Mcp
       auth: runtime.auth ?? "none",
     };
   }
-  return {
+  const config: McpServerConfig = {
     id: slug,
     transport: "http",
     url: runtime.url,
     auth: runtime.auth ?? "none",
-    allowPrivateNetworks: runtime.allowPrivateNetworks,
   };
+  if (typeof runtime.allowPrivateNetworks === "boolean") {
+    config.allowPrivateNetworks = runtime.allowPrivateNetworks;
+  }
+  if (runtime.oauth) {
+    config.oauth = runtime.oauth;
+  }
+  return config;
 }

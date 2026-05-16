@@ -34,7 +34,7 @@ import { isLinkOwned } from "./main/link-window-registry.js";
 import { shouldBlockGlobalWebviewNavigation } from "./main/webview-navigation-policy.js";
 import { installHtmlPreviewPartitionBlock, installPluginPartitionPolicy } from "./main/html-preview-partition.js";
 import { registerPluginAssetProtocolScheme } from "./main/plugin-asset-protocol.js";
-import { findLvisProtocolUri, parseMarketplacePluginActionUri, parsePluginAuthUri } from "./main/lvis-protocol.js";
+import { findLvisProtocolUri, parseMarketplacePluginActionUri, parseMcpLoginUri, parsePluginAuthUri } from "./main/lvis-protocol.js";
 import { buildDevProtocolArgs } from "./main/electron-protocol-args.js";
 import { devNoSandboxAllowed, setIsPackaged } from "./boot/dev-flags.js";
 import { emitEvent as emitHostEvent } from "./boot/types.js";
@@ -486,6 +486,46 @@ async function handleMcpMarketplaceAction(
   });
 }
 
+async function handleMcpLoginAction(
+  activeServices: AppServices,
+  win: BrowserWindow,
+  params: { slug: string },
+): Promise<void> {
+  const existingConfigs = await activeServices.mcpManager.getConfigs().catch(() => []);
+  if (existingConfigs.some((config) => config.id === params.slug)) {
+    openSettingsWindow("mcp");
+    return;
+  }
+  const target = await resolveMarketplaceActionTarget(activeServices, params.slug);
+
+  const { response } = await dialog.showMessageBox(win, {
+    type: "question",
+    buttons: ["설치 후 설정 열기", "취소"],
+    defaultId: 1,
+    cancelId: 1,
+    message: `MCP '${target.name}' 로그인을 준비하시겠습니까?`,
+    detail:
+      "OAuth 로그인을 위해 먼저 MCP 서버를 설치하고 연결 설정을 등록합니다. 토큰이나 인증 코드는 마켓플레이스 manifest에 저장되지 않습니다.",
+  });
+  if (response !== 0) return;
+
+  void (async () => {
+    if (!activeServices.mcpArtifactStore) {
+      throw new Error("MCP marketplace login is unavailable: marketplace backend is disabled in this build.");
+    }
+    const { installMcpFromMarketplace } = await import("./mcp/mcp-marketplace-install.js");
+    const result = await installMcpFromMarketplace(params.slug, {
+      fetcher: activeServices.pluginMarketplace.getFetcher(),
+      store: activeServices.mcpArtifactStore,
+      pythonPath: activeServices.pythonPath,
+    });
+    await activeServices.mcpManager.addConfig(result.config);
+    openSettingsWindow("mcp");
+  })().catch((err: Error) => {
+    log.error({ slug: params.slug, error: err.message, stack: err.stack }, "lvis:// MCP login failed");
+  });
+}
+
 async function handleLvisUri(url: string) {
   lvisDevLog("[lvis] handleLvisUri called", { url });
 
@@ -503,6 +543,36 @@ async function handleLvisUri(url: string) {
       pluginId: authParams.pluginId,
       code: authParams.code,
     });
+    return;
+  }
+
+  const mcpLoginParams = parseMcpLoginUri(url);
+  if (mcpLoginParams) {
+    lvisDevLog("[lvis] handleLvisUri: MCP login URI parsed", {
+      slug: mcpLoginParams.slug,
+      servicesReady: !!services,
+    });
+    if (!services) {
+      pendingLvisUri = url;
+      return;
+    }
+    const activeServices = services;
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      createWindow({ showBootstrapSplash: false });
+      if (mainWindow) registerMainWindowPluginEventBridge(mainWindow);
+      try {
+        if (mainWindow) await loadMainInterface(mainWindow, "lvis-uri-mcp-login");
+      } catch (err) {
+        log.error({ err }, "failed to load index.html for lvis:// MCP login URI");
+      }
+    }
+    mainWindow?.focus();
+    const win = mainWindow;
+    if (!win) {
+      log.warn(`handleLvisUri: no window available, aborting MCP login for ${mcpLoginParams.slug}`);
+      return;
+    }
+    await handleMcpLoginAction(activeServices, win, mcpLoginParams);
     return;
   }
 
