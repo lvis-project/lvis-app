@@ -482,8 +482,10 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
   // 직접 텍스트만 응답한 경우) 으로 유지. tool_end 가 없으니 turn 끝에
   // onGuide 호출.
   //
-  // onGuide 가 fail (queue-full / too-long / no-active-turn) 하면 큐에
-  // 다시 추가 — 다음 brake-point 에 retry. 중복 inject 방지.
+  // brake-point 에서 큐 flush 시도. 실패 시 — re-add 는 무한 loop 위험
+  // (no-active-turn 직후 brake 가 다시 fire → 다시 drop → 영구 stuck) 라
+  // 메시지를 다시 큐에 넣지 않고 **사용자 가시 에러로 surface** 한다.
+  // 단순 console.warn 은 큐가 silent 로 사라지는 회귀였음 (#849).
   const flushQueueViaGuide = useCallback(() => {
     if (messageQueueStore.size() === 0) return;
     const taken = messageQueueStore.takeAll();
@@ -492,15 +494,21 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     void (async () => {
       const result = await onGuide(formatted);
       if (result?.ok !== true) {
-        // no-active-turn = turn 이 cancel/완료된 후 → re-add 하면 무한 loop.
-        // queue-full / too-long = 일시적이지만 사용자 cancel 동시 시 무한 retry
-        // 위험. 현재는 모든 실패를 best-effort drop 으로 처리 (사용자 알림 X).
-        // future: too-long 만 batch split + queue-full 만 backoff retry.
         const reason = result?.error ?? "unknown";
+        const count = taken.length;
+        const reasonLabel =
+          reason === "queue-full" ? "대기열이 가득 차" :
+          reason === "too-long" ? "메시지가 너무 길어" :
+          reason === "no-active-turn" ? "응답이 이미 종료되어" :
+          `(${reason})`;
+        // Surface a user-visible error so the lost messages don't disappear
+        // silently. Re-add is intentionally avoided to prevent infinite-retry
+        // cascade — the user can re-type if they want to retry.
+        onGuideError(`대기 중이던 메시지 ${count}건이 ${reasonLabel} 전송되지 못했습니다.`);
         console.warn(`[message-queue] guide flush dropped (${reason}):`, formatted.slice(0, 80));
       }
     })();
-  }, [messageQueueStore, onGuide]);
+  }, [messageQueueStore, onGuide, onGuideError]);
 
   useEffect(() => {
     const unsub = api.onChatStream((ev) => {
