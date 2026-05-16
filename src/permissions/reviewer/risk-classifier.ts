@@ -143,8 +143,9 @@ export interface RiskClassifier {
  * guards, explicit approval modal) is unaffected.
  *
  * Issue #664: pre-fix this classifier returned HIGH+"defer all" which silently
- * queued every plugin write/auth tool in the headless lane (msgraph_auth was
- * the reproducer). The name contradicted the behaviour and broke wrapper UX.
+ * queued every plugin write/auth tool in the headless lane (an auth/sign-in
+ * tool from the Microsoft Graph plugin was the original reproducer).
+ * The name contradicted the behaviour and broke wrapper UX.
  * Fail-closed semantics moved to {@link StrictRiskClassifier}.
  */
 export class DisabledRiskClassifier implements RiskClassifier {

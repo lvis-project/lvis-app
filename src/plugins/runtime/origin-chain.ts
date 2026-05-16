@@ -4,15 +4,15 @@
  * Wrapper plugins commonly look like:
  *
  *   user clicks panel button
- *     → bridge.callTool("agent_hub_msgraph_signin")        // UI origin
- *       → wrapper handler runs ctx.callTool("msgraph_auth") // plugin origin
- *         → ms-graph handler shows AAD BrowserWindow
+ *     → bridge.callTool("<wrapper_signin_tool>")        // UI origin
+ *       → wrapper handler runs ctx.callTool("<inner_auth_tool>") // plugin origin
+ *         → inner-auth handler shows OS-native sign-in window
  *
  * The user *did* approve the outer wrapper at the panel, but the inner
  * `ctx.callTool` is dispatched with `origin: "plugin"` because that is the
  * HostApi the wrapper holds. Pre-fix, the host then treated the inner call
  * as headless and routed it through the reviewer lane — silently queueing
- * the AAD popup forever (#664 reproducer).
+ * the sign-in popup forever (#664 reproducer).
  *
  * This tracker uses {@link AsyncLocalStorage} to thread the outermost
  * (effective) origin through the call chain. The plugin runtime enters a
