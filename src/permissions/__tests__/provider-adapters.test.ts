@@ -23,6 +23,7 @@ import {
   buildFoundryUrl,
   FOUNDRY_API_KEY_SECRET,
   GCP_PLAYGROUND_API_KEY_SECRET,
+  REVIEWER_VENDOR_MAP,
 } from "../reviewer/provider-adapters.js";
 
 // ─── fetch mock helpers ───────────────────────────────────────────────
@@ -50,34 +51,85 @@ afterEach(() => {
 });
 
 // ─── FoundryReviewerProvider ─────────────────────────────────────────
+// MAJOR-1: constructor now accepts accessor functions, not raw values.
 
 describe("FoundryReviewerProvider", () => {
-  it("constructs successfully with valid apiKey + endpoint", () => {
+  it("constructs successfully with valid accessor functions", () => {
     expect(
-      () => new FoundryReviewerProvider("sk-test", "https://my.services.ai.azure.com"),
+      () => new FoundryReviewerProvider(
+        () => "sk-test",
+        () => "https://my.services.ai.azure.com",
+      ),
     ).not.toThrow();
   });
 
-  it("throws when apiKey is empty", () => {
-    expect(() => new FoundryReviewerProvider("", "https://endpoint.services.ai.azure.com")).toThrow(
-      /apiKey is required/,
+  it("throws at complete() time when apiKey accessor returns null", async () => {
+    globalThis.fetch = mockFetch({ ok: true, json: async () => ({}) }) as unknown as typeof fetch;
+    const provider = new FoundryReviewerProvider(
+      () => null,
+      () => "https://e.services.ai.azure.com",
     );
+    await expect(
+      provider.complete({ model: "m", systemPrompt: "s", userPrompt: "u" }),
+    ).rejects.toThrow(/apiKey not configured/);
   });
 
-  it("throws when endpoint is empty", () => {
-    expect(() => new FoundryReviewerProvider("sk-test", "")).toThrow(/endpoint is required/);
+  it("throws at complete() time when endpoint accessor returns null", async () => {
+    globalThis.fetch = mockFetch({ ok: true, json: async () => ({}) }) as unknown as typeof fetch;
+    const provider = new FoundryReviewerProvider(
+      () => "key",
+      () => null,
+    );
+    await expect(
+      provider.complete({ model: "m", systemPrompt: "s", userPrompt: "u" }),
+    ).rejects.toThrow(/endpoint not configured/);
   });
 
-  it("throws when endpoint is HTTP (not HTTPS)", () => {
-    expect(
-      () => new FoundryReviewerProvider("sk-test", "http://proj.services.ai.azure.com"),
-    ).toThrow(/must use HTTPS/);
+  it("MAJOR-1: picks up rotated apiKey on next complete() call without rewiring", async () => {
+    let currentKey = "key-v1";
+    const fetchSpy = mockFetch({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: '{"level":"low","reason":"ok"}' } }],
+        usage: { prompt_tokens: 5, completion_tokens: 2 },
+      }),
+    });
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+    const provider = new FoundryReviewerProvider(
+      () => currentKey,
+      () => "https://proj.services.ai.azure.com",
+    );
+
+    await provider.complete({ model: "m", systemPrompt: "s", userPrompt: "u" });
+    expect((fetchSpy.mock.calls[0] as [string, RequestInit])[1]?.headers as Record<string, string>)
+      .toMatchObject({ Authorization: "Bearer key-v1" });
+
+    fetchSpy.mockClear();
+    currentKey = "key-v2";
+    await provider.complete({ model: "m", systemPrompt: "s", userPrompt: "u" });
+    expect((fetchSpy.mock.calls[0] as [string, RequestInit])[1]?.headers as Record<string, string>)
+      .toMatchObject({ Authorization: "Bearer key-v2" });
   });
 
-  it("throws when endpoint hostname does not end with a valid azure suffix", () => {
-    expect(
-      () => new FoundryReviewerProvider("sk-test", "https://evil.example.com"),
-    ).toThrow(/\.services\.ai\.azure\.com or \.openai\.azure\.com/);
+  it("throws at complete() time when endpoint is HTTP (not HTTPS)", async () => {
+    const provider = new FoundryReviewerProvider(
+      () => "sk-test",
+      () => "http://proj.services.ai.azure.com",
+    );
+    await expect(
+      provider.complete({ model: "m", systemPrompt: "s", userPrompt: "u" }),
+    ).rejects.toThrow(/must use HTTPS/);
+  });
+
+  it("throws at complete() time when endpoint hostname is not a valid azure suffix", async () => {
+    const provider = new FoundryReviewerProvider(
+      () => "sk-test",
+      () => "https://evil.example.com",
+    );
+    await expect(
+      provider.complete({ model: "m", systemPrompt: "s", userPrompt: "u" }),
+    ).rejects.toThrow(/\.services\.ai\.azure\.com or \.openai\.azure\.com/);
   });
 
   it("builds correct URL with model encoded in path + api-version query param", async () => {
@@ -90,7 +142,10 @@ describe("FoundryReviewerProvider", () => {
     });
     globalThis.fetch = fetchSpy as unknown as typeof fetch;
 
-    const provider = new FoundryReviewerProvider("sk-test", "https://proj.services.ai.azure.com");
+    const provider = new FoundryReviewerProvider(
+      () => "sk-test",
+      () => "https://proj.services.ai.azure.com",
+    );
     await provider.complete({
       model: "gpt-4o-mini",
       systemPrompt: "sys",
@@ -114,7 +169,10 @@ describe("FoundryReviewerProvider", () => {
     });
     globalThis.fetch = fetchSpy as unknown as typeof fetch;
 
-    const provider = new FoundryReviewerProvider("my-foundry-key", "https://e.services.ai.azure.com");
+    const provider = new FoundryReviewerProvider(
+      () => "my-foundry-key",
+      () => "https://e.services.ai.azure.com",
+    );
     await provider.complete({ model: "m", systemPrompt: "s", userPrompt: "u" });
 
     const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
@@ -133,7 +191,10 @@ describe("FoundryReviewerProvider", () => {
       }),
     }) as unknown as typeof fetch;
 
-    const provider = new FoundryReviewerProvider("key", "https://e.services.ai.azure.com");
+    const provider = new FoundryReviewerProvider(
+      () => "key",
+      () => "https://e.services.ai.azure.com",
+    );
     const result = await provider.complete({ model: "m", systemPrompt: "s", userPrompt: "u" });
 
     expect(result.text).toBe(responseText);
@@ -149,7 +210,10 @@ describe("FoundryReviewerProvider", () => {
       text: async () => "Unauthorized",
     }) as unknown as typeof fetch;
 
-    const provider = new FoundryReviewerProvider("bad-key", "https://e.services.ai.azure.com");
+    const provider = new FoundryReviewerProvider(
+      () => "bad-key",
+      () => "https://e.services.ai.azure.com",
+    );
     await expect(
       provider.complete({ model: "m", systemPrompt: "s", userPrompt: "u" }),
     ).rejects.toThrow(/Foundry reviewer HTTP 401/);
@@ -161,7 +225,10 @@ describe("FoundryReviewerProvider", () => {
       json: async () => ({ choices: [], usage: { prompt_tokens: 0, completion_tokens: 0 } }),
     }) as unknown as typeof fetch;
 
-    const provider = new FoundryReviewerProvider("key", "https://e.services.ai.azure.com");
+    const provider = new FoundryReviewerProvider(
+      () => "key",
+      () => "https://e.services.ai.azure.com",
+    );
     const result = await provider.complete({ model: "m", systemPrompt: "s", userPrompt: "u" });
     expect(result.text).toBe("");
   });
@@ -237,14 +304,42 @@ describe("validateFoundryEndpoint", () => {
 });
 
 // ─── GcpPlaygroundReviewerProvider ──────────────────────────────────
+// MAJOR-1: constructor now accepts an accessor function, not a raw value.
 
 describe("GcpPlaygroundReviewerProvider", () => {
-  it("constructs successfully with valid apiKey", () => {
-    expect(() => new GcpPlaygroundReviewerProvider("gcp-key-123")).not.toThrow();
+  it("constructs successfully with valid accessor function", () => {
+    expect(() => new GcpPlaygroundReviewerProvider(() => "gcp-key-123")).not.toThrow();
   });
 
-  it("throws when apiKey is empty", () => {
-    expect(() => new GcpPlaygroundReviewerProvider("")).toThrow(/apiKey is required/);
+  it("throws at complete() time when apiKey accessor returns null", async () => {
+    const provider = new GcpPlaygroundReviewerProvider(() => null);
+    await expect(
+      provider.complete({ model: "m", systemPrompt: "s", userPrompt: "u" }),
+    ).rejects.toThrow(/apiKey not configured/);
+  });
+
+  it("MAJOR-1: picks up rotated apiKey on next complete() call without rewiring", async () => {
+    let currentKey = "AIza-v1";
+    const fetchSpy = mockFetch({
+      ok: true,
+      json: async () => ({
+        candidates: [{ content: { parts: [{ text: '{"level":"low","reason":"ok"}' }] } }],
+        usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 2 },
+      }),
+    });
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+    const provider = new GcpPlaygroundReviewerProvider(() => currentKey);
+
+    await provider.complete({ model: "m", systemPrompt: "s", userPrompt: "u" });
+    expect((fetchSpy.mock.calls[0] as [string, RequestInit])[1]?.headers as Record<string, string>)
+      .toMatchObject({ "x-goog-api-key": "AIza-v1" });
+
+    fetchSpy.mockClear();
+    currentKey = "AIza-v2";
+    await provider.complete({ model: "m", systemPrompt: "s", userPrompt: "u" });
+    expect((fetchSpy.mock.calls[0] as [string, RequestInit])[1]?.headers as Record<string, string>)
+      .toMatchObject({ "x-goog-api-key": "AIza-v2" });
   });
 
   it("builds correct GCP URL with model in path (no API key in URL)", async () => {
@@ -257,7 +352,7 @@ describe("GcpPlaygroundReviewerProvider", () => {
     });
     globalThis.fetch = fetchSpy as unknown as typeof fetch;
 
-    const provider = new GcpPlaygroundReviewerProvider("AIza-test-key");
+    const provider = new GcpPlaygroundReviewerProvider(() => "AIza-test-key");
     await provider.complete({
       model: "gemini-1.5-flash",
       systemPrompt: "sys",
@@ -284,7 +379,7 @@ describe("GcpPlaygroundReviewerProvider", () => {
     });
     globalThis.fetch = fetchSpy as unknown as typeof fetch;
 
-    const provider = new GcpPlaygroundReviewerProvider("AIza-secret-key");
+    const provider = new GcpPlaygroundReviewerProvider(() => "AIza-secret-key");
     await provider.complete({ model: "m", systemPrompt: "s", userPrompt: "u" });
 
     const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
@@ -301,7 +396,7 @@ describe("GcpPlaygroundReviewerProvider", () => {
     });
     globalThis.fetch = fetchSpy as unknown as typeof fetch;
 
-    const provider = new GcpPlaygroundReviewerProvider("key");
+    const provider = new GcpPlaygroundReviewerProvider(() => "key");
     await provider.complete({ model: "m", systemPrompt: "system text", userPrompt: "user text" });
 
     const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
@@ -324,7 +419,7 @@ describe("GcpPlaygroundReviewerProvider", () => {
       }),
     }) as unknown as typeof fetch;
 
-    const provider = new GcpPlaygroundReviewerProvider("key");
+    const provider = new GcpPlaygroundReviewerProvider(() => "key");
     const result = await provider.complete({ model: "m", systemPrompt: "s", userPrompt: "u" });
 
     expect(result.text).toBe(responseText);
@@ -340,7 +435,7 @@ describe("GcpPlaygroundReviewerProvider", () => {
       text: async () => "Forbidden",
     }) as unknown as typeof fetch;
 
-    const provider = new GcpPlaygroundReviewerProvider("bad-key");
+    const provider = new GcpPlaygroundReviewerProvider(() => "bad-key");
     await expect(
       provider.complete({ model: "m", systemPrompt: "s", userPrompt: "u" }),
     ).rejects.toThrow(/GCP reviewer HTTP 403/);
@@ -352,7 +447,7 @@ describe("GcpPlaygroundReviewerProvider", () => {
       json: async () => ({ candidates: [], usageMetadata: {} }),
     }) as unknown as typeof fetch;
 
-    const provider = new GcpPlaygroundReviewerProvider("key");
+    const provider = new GcpPlaygroundReviewerProvider(() => "key");
     const result = await provider.complete({ model: "m", systemPrompt: "s", userPrompt: "u" });
     expect(result.text).toBe("");
   });
@@ -399,6 +494,63 @@ describe("createFoundryProvider", () => {
     expect(provider).toBeInstanceOf(FoundryReviewerProvider);
     expect(getSecret).toHaveBeenCalledWith("llm.apiKey.azure-foundry");
   });
+
+  // MAJOR-1: factory stores accessors — key/endpoint rotation transparent on complete()
+  it("MAJOR-1: adapter uses accessor on each complete() — rotated key propagates", async () => {
+    let liveKey = "az-key-v1";
+    let liveEndpoint = "https://proj.services.ai.azure.com";
+    const getSecret = vi.fn((key: string) =>
+      key === FOUNDRY_API_KEY_SECRET ? liveKey : null,
+    );
+    const getEndpoint = vi.fn(() => liveEndpoint);
+    const fetchSpy = mockFetch({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: '{"level":"low","reason":"ok"}' } }],
+        usage: { prompt_tokens: 5, completion_tokens: 2 },
+      }),
+    });
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+    const provider = createFoundryProvider(getSecret, getEndpoint)!;
+    expect(provider).not.toBeNull();
+
+    await provider.complete({ model: "m", systemPrompt: "s", userPrompt: "u" });
+    expect(
+      ((fetchSpy.mock.calls[0] as [string, RequestInit])[1]?.headers as Record<string, string>)["Authorization"],
+    ).toBe("Bearer az-key-v1");
+
+    fetchSpy.mockClear();
+    liveKey = "az-key-v2";
+    await provider.complete({ model: "m", systemPrompt: "s", userPrompt: "u" });
+    expect(
+      ((fetchSpy.mock.calls[0] as [string, RequestInit])[1]?.headers as Record<string, string>)["Authorization"],
+    ).toBe("Bearer az-key-v2");
+  });
+
+  it("MAJOR-1: adapter uses endpoint accessor on each complete() — endpoint rotation propagates", async () => {
+    const getSecret = vi.fn(() => "az-key");
+    const fetchSpy = mockFetch({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: '{"level":"low","reason":"ok"}' } }],
+        usage: { prompt_tokens: 5, completion_tokens: 2 },
+      }),
+    });
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+    let liveEndpoint = "https://proj1.services.ai.azure.com";
+    const getEndpoint = vi.fn(() => liveEndpoint);
+
+    const provider = createFoundryProvider(getSecret, getEndpoint)!;
+    await provider.complete({ model: "m", systemPrompt: "s", userPrompt: "u" });
+    expect((fetchSpy.mock.calls[0] as [string, RequestInit])[0]).toContain("proj1.services.ai.azure.com");
+
+    fetchSpy.mockClear();
+    liveEndpoint = "https://proj2.services.ai.azure.com";
+    await provider.complete({ model: "m", systemPrompt: "s", userPrompt: "u" });
+    expect((fetchSpy.mock.calls[0] as [string, RequestInit])[0]).toContain("proj2.services.ai.azure.com");
+  });
 });
 
 describe("createGcpPlaygroundProvider", () => {
@@ -422,6 +574,37 @@ describe("createGcpPlaygroundProvider", () => {
     const provider = createGcpPlaygroundProvider(getSecret);
     expect(provider).toBeInstanceOf(GcpPlaygroundReviewerProvider);
     expect(getSecret).toHaveBeenCalledWith("llm.apiKey.gemini");
+  });
+
+  // MAJOR-1: factory stores accessor — key rotation propagates to complete()
+  it("MAJOR-1: adapter uses accessor on each complete() — rotated key propagates", async () => {
+    let liveKey = "AIza-v1";
+    const getSecret = vi.fn((key: string) =>
+      key === GCP_PLAYGROUND_API_KEY_SECRET ? liveKey : null,
+    );
+    const fetchSpy = mockFetch({
+      ok: true,
+      json: async () => ({
+        candidates: [{ content: { parts: [{ text: '{"level":"low","reason":"ok"}' }] } }],
+        usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 2 },
+      }),
+    });
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+    const provider = createGcpPlaygroundProvider(getSecret)!;
+    expect(provider).not.toBeNull();
+
+    await provider.complete({ model: "m", systemPrompt: "s", userPrompt: "u" });
+    expect(
+      ((fetchSpy.mock.calls[0] as [string, RequestInit])[1]?.headers as Record<string, string>)["x-goog-api-key"],
+    ).toBe("AIza-v1");
+
+    fetchSpy.mockClear();
+    liveKey = "AIza-v2";
+    await provider.complete({ model: "m", systemPrompt: "s", userPrompt: "u" });
+    expect(
+      ((fetchSpy.mock.calls[0] as [string, RequestInit])[1]?.headers as Record<string, string>)["x-goog-api-key"],
+    ).toBe("AIza-v2");
   });
 });
 
@@ -527,10 +710,11 @@ describe("reviewerProviderKeyPresent", () => {
     expect(getSecret).toHaveBeenCalledWith("llm.apiKey.gemini");
   });
 
-  it("unknown provider → false (checked via llm.apiKey.unknown)", () => {
+  it("unknown provider → false, fail-closed (getSecret not called)", () => {
+    // MAJOR-3 R2: unknown provider name now returns false without probing getSecret.
     const getSecret = vi.fn((_key: string) => null);
     expect(reviewerProviderKeyPresent("unknown-provider", getSecret)).toBe(false);
-    expect(getSecret).toHaveBeenCalledWith("llm.apiKey.unknown-provider");
+    expect(getSecret).not.toHaveBeenCalled();
   });
 });
 
@@ -547,7 +731,10 @@ describe("FoundryReviewerProvider timeout (M4)", () => {
         }),
     ) as unknown as typeof fetch;
 
-    const provider = new FoundryReviewerProvider("key", "https://e.services.ai.azure.com");
+    const provider = new FoundryReviewerProvider(
+      () => "key",
+      () => "https://e.services.ai.azure.com",
+    );
     const completionPromise = provider.complete({ model: "m", systemPrompt: "s", userPrompt: "u" });
 
     // Advance timers past the 15s timeout
@@ -574,7 +761,7 @@ describe("GcpPlaygroundReviewerProvider timeout (M4)", () => {
         }),
     ) as unknown as typeof fetch;
 
-    const provider = new GcpPlaygroundReviewerProvider("AIza-key");
+    const provider = new GcpPlaygroundReviewerProvider(() => "AIza-key");
     const completionPromise = provider.complete({ model: "gemini-1.5-flash", systemPrompt: "s", userPrompt: "u" });
 
     await vi.advanceTimersByTimeAsync(16_000);
@@ -583,5 +770,150 @@ describe("GcpPlaygroundReviewerProvider timeout (M4)", () => {
     await expect(completionPromise).rejects.toThrow(/aborted|timeout/i);
 
     vi.useRealTimers();
+  });
+});
+
+// ─── HIGH-1: buildFoundryUrl path-segment + hostname-suffix check ─────
+
+describe("buildFoundryUrl (HIGH-1 — path-segment + hostname-suffix detection)", () => {
+  it("Foundry-native: appends /models/<model>/chat/completions?api-version=...", () => {
+    const url = buildFoundryUrl("https://proj.services.ai.azure.com", "gpt-4o");
+    expect(url).toContain("/models/gpt-4o/chat/completions");
+    expect(url).toContain("api-version=");
+    expect(url).not.toContain("/openai/deployments/");
+  });
+
+  it("Foundry-native: strips trailing slash before appending path", () => {
+    const url = buildFoundryUrl("https://proj.services.ai.azure.com/", "gpt-4o");
+    expect(url).not.toMatch(/\/\/models/);
+    expect(url).toContain("/models/gpt-4o/chat/completions");
+  });
+
+  it("Azure deployment (chat-shape): appends chat/completions only — no /models/<model>", () => {
+    const base = "https://res.openai.azure.com/openai/deployments/gpt-4o-mini";
+    const url = buildFoundryUrl(base, "gpt-4o-mini");
+    expect(url).toContain("/openai/deployments/gpt-4o-mini/chat/completions");
+    expect(url).toContain("api-version=");
+    expect(url).not.toMatch(/\/models\/gpt-4o-mini/);
+  });
+
+  it("Azure deployment with trailing slash: produces correct URL", () => {
+    const base = "https://res.openai.azure.com/openai/deployments/gpt-4o/";
+    const url = buildFoundryUrl(base, "gpt-4o");
+    expect(url).toBe(
+      "https://res.openai.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=2024-05-01-preview",
+    );
+  });
+
+  it("HIGH-1: Foundry-native endpoint with /openai/deployments/ in BASE PATH but .services.ai.azure.com host → treated as Foundry-native", () => {
+    // A Foundry project whose path happens to contain the deployment substring
+    // should NOT be misclassified as an Azure OpenAI deployment because its
+    // hostname does not end with .openai.azure.com.
+    const url = buildFoundryUrl(
+      "https://proj.services.ai.azure.com/openai/deployments/fake",
+      "actual-model",
+    );
+    // Must use Foundry-native shape (host does not end in .openai.azure.com)
+    expect(url).toContain("/models/actual-model/chat/completions");
+  });
+
+  it("HIGH-1: .openai.azure.com host WITHOUT /openai/deployments/ path → treated as Foundry-native", () => {
+    // An openai.azure.com endpoint that doesn't have the deployment path
+    // should fall through to Foundry-native shape.
+    const url = buildFoundryUrl("https://res.openai.azure.com", "gpt-4o");
+    expect(url).toContain("/models/gpt-4o/chat/completions");
+    expect(url).not.toContain("/openai/deployments/");
+  });
+});
+
+// ─── LOW-1: validateFoundryEndpoint subdomain regex ───────────────────
+
+describe("validateFoundryEndpoint (LOW-1 — subdomain regex tightening)", () => {
+  it("accepts https://<subdomain>.services.ai.azure.com", () => {
+    expect(() => validateFoundryEndpoint("https://proj.services.ai.azure.com")).not.toThrow();
+  });
+
+  it("accepts https://<resource>.openai.azure.com", () => {
+    expect(() => validateFoundryEndpoint("https://myresource.openai.azure.com")).not.toThrow();
+  });
+
+  it("accepts multi-label subdomain (e.g. a.b.services.ai.azure.com)", () => {
+    expect(() => validateFoundryEndpoint("https://a.b.services.ai.azure.com")).not.toThrow();
+  });
+
+  it("rejects HTTP endpoints", () => {
+    expect(() => validateFoundryEndpoint("http://proj.services.ai.azure.com")).toThrow(/HTTPS/);
+  });
+
+  it("rejects non-azure.com hostnames", () => {
+    expect(() => validateFoundryEndpoint("https://attacker.example.com")).toThrow(/\.services\.ai\.azure\.com or \.openai\.azure\.com/);
+  });
+
+  it("rejects invalid URL strings", () => {
+    expect(() => validateFoundryEndpoint("not-a-url")).toThrow(/valid URL/);
+  });
+
+  it("rejects bare services.ai.azure.com without subdomain prefix (fails suffix check)", () => {
+    // hostname = "services.ai.azure.com" does NOT end with ".services.ai.azure.com"
+    // (the suffix starts with a dot), so this is rejected by the suffix check, not
+    // the subdomain regex. The error is still a validation failure.
+    expect(() => validateFoundryEndpoint("https://services.ai.azure.com")).toThrow(/\.services\.ai\.azure\.com or \.openai\.azure\.com/);
+  });
+
+  it("rejects bare openai.azure.com without subdomain prefix (fails suffix check)", () => {
+    // hostname = "openai.azure.com" does NOT end with ".openai.azure.com"
+    expect(() => validateFoundryEndpoint("https://openai.azure.com")).toThrow(/\.services\.ai\.azure\.com or \.openai\.azure\.com/);
+  });
+
+  it("rejects subdomain with leading hyphen (LOW-1 DNS label validation)", () => {
+    expect(() => validateFoundryEndpoint("https://-bad.services.ai.azure.com")).toThrow(/invalid subdomain/);
+  });
+
+  it("rejects subdomain with trailing hyphen (LOW-1 DNS label validation)", () => {
+    expect(() => validateFoundryEndpoint("https://bad-.services.ai.azure.com")).toThrow(/invalid subdomain/);
+  });
+
+  it("accepts valid subdomain with hyphens", () => {
+    expect(() => validateFoundryEndpoint("https://my-project-123.services.ai.azure.com")).not.toThrow();
+  });
+});
+
+// ─── MEDIUM-3: REVIEWER_VENDOR_MAP null-prototype + hasOwnProperty ────
+
+describe("REVIEWER_VENDOR_MAP (MEDIUM-3 — prototype pollution closed)", () => {
+  it("does not have prototype-chain properties as own entries", () => {
+    // Object.create(null) has no prototype — __proto__, constructor, etc.
+    // must not be accessible as map values.
+    expect(Object.prototype.hasOwnProperty.call(REVIEWER_VENDOR_MAP, "__proto__")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(REVIEWER_VENDOR_MAP, "constructor")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(REVIEWER_VENDOR_MAP, "hasOwnProperty")).toBe(false);
+  });
+
+  it("contains the expected reviewer provider mappings", () => {
+    expect(REVIEWER_VENDOR_MAP["openai"]).toBe("openai");
+    expect(REVIEWER_VENDOR_MAP["anthropic"]).toBe("claude");
+    expect(REVIEWER_VENDOR_MAP["google"]).toBe("gemini");
+    expect(REVIEWER_VENDOR_MAP["azure-foundry"]).toBe("azure-foundry");
+    expect(REVIEWER_VENDOR_MAP["gemini"]).toBe("gemini");
+  });
+});
+
+describe("reviewerProviderKeyPresent (MEDIUM-3 — prototype-safe lookup)", () => {
+  it("unknown provider → false, fail-closed (does NOT fall through to getSecret)", () => {
+    // MAJOR-3 R2: unknown UI name no longer falls through to `?? provider` → fail-closed.
+    // getSecret must NOT be called for an unknown provider (no secret-store probe).
+    const getSecret = vi.fn((_key: string) => null);
+    expect(reviewerProviderKeyPresent("unknown-provider", getSecret)).toBe(false);
+    expect(getSecret).not.toHaveBeenCalled();
+  });
+
+  it("prototype property name as provider → false, fail-closed (no prototype pollution)", () => {
+    // If REVIEWER_VENDOR_MAP were a plain object, REVIEWER_VENDOR_MAP["constructor"]
+    // would return the Object constructor function. With Object.create(null) +
+    // hasOwnProperty check + MAJOR-3 fail-closed, unknown names return false immediately.
+    const getSecret = vi.fn((_key: string) => null);
+    expect(reviewerProviderKeyPresent("constructor", getSecret)).toBe(false);
+    // MAJOR-3: fail-closed means getSecret is never called for an unmapped provider.
+    expect(getSecret).not.toHaveBeenCalled();
   });
 });
