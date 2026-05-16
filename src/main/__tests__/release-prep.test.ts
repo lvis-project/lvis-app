@@ -28,18 +28,32 @@ function fakeUpdater() {
   const listeners: Record<string, Array<(p: unknown) => void>> = {};
   const u = {
     checks: 0,
+    downloads: 0,
+    installs: 0,
+    autoDownload: undefined as boolean | undefined,
     on(event: string, cb: (p: unknown) => void) {
       (listeners[event] ??= []).push(cb);
     },
     async checkForUpdates() {
       u.checks += 1;
     },
-    quitAndInstall() {},
+    async downloadUpdate() {
+      u.downloads += 1;
+    },
+    quitAndInstall() {
+      u.installs += 1;
+    },
     emit(e: string, p: unknown) {
       (listeners[e] ?? []).forEach((cb) => cb(p));
     }
   };
-  return u as unknown as UpdaterLike & { emit: (e: string, p: unknown) => void; checks: number };
+  return u as unknown as UpdaterLike & {
+    emit: (e: string, p: unknown) => void;
+    checks: number;
+    downloads: number;
+    installs: number;
+    autoDownload?: boolean;
+  };
 }
 
 describe("auto-updater", () => {
@@ -55,7 +69,7 @@ describe("auto-updater", () => {
     expect(u.checks).toBe(0);
   });
 
-  it("checks and forwards update-available toast", async () => {
+  it("checks and broadcasts available state without downloading", async () => {
     const fw = fakeWindow();
     const u = fakeUpdater();
     const svc = createAutoUpdater({
@@ -65,12 +79,16 @@ describe("auto-updater", () => {
     });
     await svc.triggerCheck();
     expect(u.checks).toBe(1);
+    // User-gated download contract: detection must NOT auto-download.
+    expect(u.autoDownload).toBe(false);
+    expect(u.downloads).toBe(0);
     u.emit("update-available", { version: "1.2.3" });
     expect(fw.sent[0]).toMatchObject({
-      channel: "lvis:update:toast",
-      payload: { kind: "info" }
+      channel: "lvis:update:state",
+      payload: { kind: "available", version: "1.2.3" }
     });
-    expect((fw.sent[0].payload as { message: string }).message).toContain("1.2.3");
+    // Still no implicit download after the available event.
+    expect(u.downloads).toBe(0);
   });
 
   it("swallows network errors silently", async () => {
@@ -106,7 +124,7 @@ describe("auto-updater", () => {
     expect(u.checks).toBe(0);
   });
 
-  it("emits action toast on update-downloaded with restart payload", async () => {
+  it("emits downloaded state on update-downloaded with version", async () => {
     const fw = fakeWindow();
     const u = fakeUpdater();
     const svc = createAutoUpdater({
@@ -116,8 +134,101 @@ describe("auto-updater", () => {
     });
     await svc.triggerCheck();
     u.emit("update-downloaded", { version: "9.9.9" });
-    const last = fw.sent.at(-1)!;
-    expect(last.payload).toMatchObject({ kind: "action", action: "restart-to-update" });
+    const last = fw.sent[fw.sent.length - 1]!;
+    expect(last).toMatchObject({
+      channel: "lvis:update:state",
+      payload: { kind: "downloaded", version: "9.9.9" }
+    });
+  });
+
+  it("translates download-progress events into downloading state with percent", async () => {
+    const fw = fakeWindow();
+    const u = fakeUpdater();
+    const svc = createAutoUpdater({
+      mainWindow: fw.win,
+      isEnabled: () => true,
+      updaterFactory: () => u
+    });
+    await svc.triggerCheck();
+    u.emit("update-available", { version: "2.0.0" });
+    u.emit("download-progress", { percent: 42.7, transferred: 100, total: 1000 });
+    const progress = fw.sent[fw.sent.length - 1]!;
+    expect(progress).toMatchObject({
+      channel: "lvis:update:state",
+      payload: { kind: "downloading", version: "2.0.0", percent: 43 }
+    });
+  });
+
+  // ── Negative-path coverage for the three MAJOR review findings ────────
+  it("downloadNow rejects when current state is not 'available'", async () => {
+    const fw = fakeWindow();
+    const u = fakeUpdater();
+    const svc = createAutoUpdater({
+      mainWindow: fw.win,
+      isEnabled: () => true,
+      updaterFactory: () => u,
+    });
+    await svc.triggerCheck();
+    // No update-available emitted yet — state is still { kind: "idle" }.
+    const result = await svc._testOnly.downloadNow();
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain("not-available");
+    expect(u.downloads).toBe(0);
+  });
+
+  it("installNow rejects when current state is not 'downloaded'", async () => {
+    const fw = fakeWindow();
+    const u = fakeUpdater();
+    const svc = createAutoUpdater({
+      mainWindow: fw.win,
+      isEnabled: () => true,
+      updaterFactory: () => u,
+    });
+    await svc.triggerCheck();
+    u.emit("update-available", { version: "3.0.0" });
+    // Still in "available" — install must reject (download not finished).
+    const result = await svc._testOnly.installNow();
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain("not-downloaded");
+    expect(u.installs).toBe(0);
+  });
+
+  it("reverts to 'available' when downloadUpdate rejects (user can retry)", async () => {
+    const fw = fakeWindow();
+    const u = fakeUpdater();
+    u.downloadUpdate = async () => {
+      throw new Error("ENETUNREACH");
+    };
+    const svc = createAutoUpdater({
+      mainWindow: fw.win,
+      isEnabled: () => true,
+      updaterFactory: () => u,
+    });
+    await svc.triggerCheck();
+    u.emit("update-available", { version: "4.0.0" });
+    const result = await svc._testOnly.downloadNow();
+    expect(result.ok).toBe(false);
+    // Final state should be back to "available" so the badge invites a retry,
+    // not stuck spinning on a "downloading" pill with no progress events.
+    const last = fw.sent[fw.sent.length - 1]!;
+    expect(last.payload).toMatchObject({ kind: "available", version: "4.0.0" });
+  });
+
+  it("drops download-progress events when state is neither 'downloading' nor 'available'", async () => {
+    const fw = fakeWindow();
+    const u = fakeUpdater();
+    const svc = createAutoUpdater({
+      mainWindow: fw.win,
+      isEnabled: () => true,
+      updaterFactory: () => u,
+    });
+    await svc.triggerCheck();
+    // State is still idle — a stray progress event (delta probe, blockmap
+    // fetch) MUST NOT promote the badge to "downloading" with version=""
+    // because the tooltip would render "v 다운로드 중 — N%" (broken).
+    const before = fw.sent.length;
+    u.emit("download-progress", { percent: 10, transferred: 1, total: 10 });
+    expect(fw.sent.length).toBe(before);
   });
 });
 
