@@ -22,7 +22,7 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   // ── Trust / intent gate (PR #826 cross-cutting code group) ──
   "user-keyboard-required": "이 권한 변경은 활성 사용자 입력에서만 실행할 수 있습니다.",
   "unauthorized": "권한이 없습니다.",
-  "unauthorized-frame": "인증되지 않은 프레임에서의 요청입니다.",
+  // "unauthorized-frame" defined below in Frame-trust gate section (single SOT).
   "missing-input-origin": "요청의 출처 정보가 누락되었습니다.",
   "cross-plugin-call-denied": "다른 플러그인을 직접 호출할 수 없습니다.",
   "missing-plugin-envelope": "플러그인 envelope 정보가 누락되었습니다.",

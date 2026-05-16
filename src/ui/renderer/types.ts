@@ -686,6 +686,11 @@ import type {
 
 export type LvisUserApprovalApi = {
   record: (entry: {
+    /** #799 P0: ID of the in-flight ApprovalRequest. Main process reads the
+     *  authoritative trustOrigin/source/approvalCacheKey from this ID via
+     *  ApprovalGate.getRequestSnapshot — renderer-supplied authority fields
+     *  below are ignored (kept on the wire for legacy callers + audit). */
+    requestId: string;
     toolName: string;
     args: string;
     source: string;
