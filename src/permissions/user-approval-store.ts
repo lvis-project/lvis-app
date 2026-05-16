@@ -22,11 +22,15 @@
  * Atomicity: writes use a random-suffix .tmp file + rename() so a crash
  * during write does not corrupt the store (same pattern as SkillApprovalsStore).
  */
-import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
+import { mkdir, readFile, writeFile, rename, access, constants, open, stat, chmod } from "node:fs/promises";
 import { resolve, dirname } from "node:path";
 import { createHash, randomBytes } from "node:crypto";
 import { lvisHome } from "../shared/lvis-home.js";
+import { canonicalStringify } from "../shared/canonical-json.js";
+import { createLogger } from "../lib/logger.js";
 import type { UserApprovalScope, UserApprovalVerdict } from "../shared/permissions-events.js";
+
+const log = createLogger("user-approval-store");
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -56,6 +60,23 @@ export interface UserApprovalEntry {
    */
   toolName?: string;
   source?: string;
+  /**
+   * Raw pre-canonicalized args string stored for migration support.
+   * Required by {@link migrateCanonicalization} (issue #837) to re-derive the
+   * entryKey after the canonicalStringify deep-recursion upgrade (PR #828).
+   * Optional for backward compat with entries written before this field existed.
+   */
+  args?: string;
+  /**
+   * trustOrigin component used to compute the entryKey, stored for migration.
+   * Optional — absent for entries that did not supply a trustOrigin.
+   */
+  trustOrigin?: string;
+  /**
+   * approvalCacheKey component used to compute the entryKey, stored for migration.
+   * Optional — absent for entries that did not supply an approvalCacheKey.
+   */
+  approvalCacheKey?: string;
 }
 
 interface ApprovalsFile {
@@ -75,6 +96,11 @@ const sessionStore = new Map<string, UserApprovalEntry>();
 
 function filePath(): string {
   return resolve(lvisHome(), "permissions", "user-approvals.json");
+}
+
+/** Idempotency sentinel: presence of this file means v1 migration ran. */
+function migrationMarkerPath(): string {
+  return resolve(lvisHome(), "permissions", ".canonicalization-migration-v1");
 }
 
 /**
@@ -123,10 +149,37 @@ async function readApprovalsFile(): Promise<ApprovalsFile> {
 
 async function atomicWrite(data: ApprovalsFile): Promise<void> {
   const path = filePath();
-  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-  const tmp = `${path}.${randomBytes(6).toString("hex")}.tmp`;
-  await writeFile(tmp, `${JSON.stringify(data, null, 2)}\n`, { mode: 0o600 });
+  const dir = dirname(path);
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+
+  // Verify directory permissions haven't drifted.
+  const dirStat = await stat(dir);
+  if ((dirStat.mode & 0o777) !== 0o700) {
+    await chmod(dir, 0o700);
+  }
+
+  // MAJOR-3: use O_CREAT|O_EXCL so a pre-existing symlink at the tmp path
+  // cannot redirect the write to an attacker-controlled target.
+  const tmp = `${path}.${randomBytes(16).toString("hex")}.tmp`;
+  const fd = await open(tmp, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600);
+  try {
+    const content = `${JSON.stringify(data, null, 2)}\n`;
+    await fd.writeFile(content);
+    // MEDIUM-1: fsync the file data before rename to survive power loss.
+    await fd.sync();
+  } finally {
+    await fd.close();
+  }
+
   await rename(tmp, path);
+
+  // MEDIUM-1: fsync the directory so the rename is durable.
+  const dirFd = await open(dir, constants.O_RDONLY);
+  try {
+    await dirFd.sync();
+  } finally {
+    await dirFd.close();
+  }
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -165,6 +218,12 @@ export async function recordApproval(
     // without re-parsing the hash key. R-2 Round-3 MEDIUM fix.
     toolName,
     source,
+    // Store key components for boot-time migration (issue #837): if
+    // canonicalStringify changes behavior, migrateCanonicalization() can
+    // re-derive the correct key from these stored values.
+    args,
+    ...(entry.trustOrigin !== undefined ? { trustOrigin: entry.trustOrigin } : {}),
+    ...(entry.approvalCacheKey !== undefined ? { approvalCacheKey: entry.approvalCacheKey } : {}),
   };
 
   if (entry.scope === "session") {
@@ -287,6 +346,186 @@ export async function listApprovals(): Promise<Array<{ key: string } & UserAppro
  */
 export async function readApprovals(): Promise<ApprovalsFile> {
   return readApprovalsFile();
+}
+
+// ─── Migration helpers ────────────────────────────────────────────────────────
+
+/**
+ * MAJOR-2 collision resolver: when two stale entries map to the same new key,
+ * pick the survivor that preserves the most audit information.
+ *
+ * Rules (in priority order):
+ *   1. A revoked entry (revokedAt non-null) wins — retains audit trail.
+ *   2. Among two non-revoked (or two revoked) entries, the earlier approvedAt wins
+ *      so we don't silently discard the oldest approval record.
+ */
+function chooseSurvivor(existing: UserApprovalEntry, incoming: UserApprovalEntry): UserApprovalEntry {
+  // Rule 1: prefer revoked entry for audit preservation.
+  if (existing.revokedAt && !incoming.revokedAt) return existing;
+  if (!existing.revokedAt && incoming.revokedAt) return incoming;
+
+  // Rule 2: prefer the entry with the earlier approvedAt.
+  if (existing.approvedAt <= incoming.approvedAt) return existing;
+  return incoming;
+}
+
+// ─── Boot-time migration ──────────────────────────────────────────────────────
+
+/**
+ * One-shot boot-time migration: re-canonicalize stored entry keys to match
+ * the deep RFC 8785 JCS behaviour introduced in PR #828.
+ *
+ * Before #828, nested objects inside arrays were serialized without recursive
+ * key-sorting. Entries recorded with the old behavior carry a stale hash key
+ * that no longer matches what `entryKey()` produces for the same args, causing
+ * silent approval invalidation (issue #837).
+ *
+ * Entries that stored `args` (written after this change) can be re-keyed
+ * precisely. Entries without `args` (written before this field was added)
+ * cannot be re-keyed and are carried forward unchanged — worst case the user
+ * sees one re-prompt for those entries.
+ *
+ * The function is idempotent: it writes a marker file
+ * `~/.lvis/permissions/.canonicalization-migration-v1` on first run and
+ * skips all work on subsequent boot calls.
+ *
+ * Atomicity: the updated approvals file is written via temp+rename.
+ */
+export async function migrateCanonicalization(): Promise<void> {
+  const markerPath = migrationMarkerPath();
+
+  // Idempotency check — skip if migration already completed.
+  try {
+    await access(markerPath, constants.F_OK);
+    return; // marker exists → already migrated
+  } catch {
+    // marker absent → proceed
+  }
+
+  // MAJOR-1: wrap entire migration body so a corrupt approvals file or
+  // permission error does not crash boot. On failure, skip writing the marker
+  // so the next boot will retry.
+  try {
+    const file = await readApprovalsFile();
+    const entries = Object.entries(file.approvals);
+    const total = entries.length;
+    let migrated = 0;
+    let skipped = 0;
+
+    if (total > 0) {
+      const updated: Record<string, UserApprovalEntry> = {};
+
+      for (const [storedKey, entry] of entries) {
+        // Entries without stored `args` cannot be re-keyed (written before
+        // this migration field was introduced). Carry them forward unchanged.
+        if (!entry.args || !entry.toolName || !entry.source) {
+          updated[storedKey] = entry;
+          continue;
+        }
+
+        // Guard against pathologically large args strings (>1 MB) to prevent
+        // DoS via a hand-crafted approvals file.
+        if (entry.args.length > 1_048_576) {
+          log.warn({
+            event: "r2-migration-args-too-large",
+            storedKey,
+            argsLength: entry.args.length,
+          });
+          updated[storedKey] = entry;
+          skipped++;
+          continue;
+        }
+
+        // Re-canonicalize args with the new deep SOT and compute the new key.
+        // The stored `args` string is a pre-stringified canonical string;
+        // parse it, then re-stringify with the new canonicalStringify to apply
+        // recursive key-sorting inside arrays-of-objects.
+        let reCanonicalizedArgs: string;
+        try {
+          const parsed: unknown = JSON.parse(entry.args);
+          reCanonicalizedArgs = canonicalStringify(parsed);
+        } catch {
+          // args is not valid JSON (e.g. a plain string passed directly).
+          // Cannot re-canonicalize — carry forward unchanged.
+          updated[storedKey] = entry;
+          skipped++;
+          continue;
+        }
+
+        const newKey = entryKey(
+          entry.toolName,
+          reCanonicalizedArgs,
+          entry.source,
+          entry.trustOrigin,
+          entry.approvalCacheKey,
+        );
+
+        if (newKey === storedKey) {
+          // No change — args had no nested-array-of-objects, already canonical.
+          updated[newKey] = entry;
+        } else {
+          // MAJOR-2: two stale entries may canonicalize to the same newKey.
+          // Prefer the revoked entry (revokedAt non-null wins for audit
+          // preservation); otherwise prefer the entry with the earlier
+          // approvedAt so we don't silently drop historical approvals.
+          if (newKey in updated) {
+            log.warn({
+              event: "r2-migration-collision",
+              oldKey: storedKey,
+              newKey,
+            });
+            updated[newKey] = chooseSurvivor(updated[newKey], { ...entry, args: reCanonicalizedArgs });
+          } else {
+            updated[newKey] = { ...entry, args: reCanonicalizedArgs };
+          }
+          migrated++;
+        }
+      }
+
+      if (migrated > 0) {
+        await atomicWrite({ approvals: updated });
+        // Invalidate session cache entries that were re-keyed.
+        sessionStore.clear();
+      }
+    }
+
+    // Write idempotency marker (atomic: O_CREAT|O_EXCL temp + rename).
+    const markerDir = dirname(markerPath);
+    await mkdir(markerDir, { recursive: true, mode: 0o700 });
+    const markerTmp = `${markerPath}.${randomBytes(16).toString("hex")}.tmp`;
+    const markerFd = await open(markerTmp, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600);
+    try {
+      const markerContent = `${JSON.stringify({ migratedAt: new Date().toISOString(), migrated, total })}\n`;
+      await markerFd.writeFile(markerContent);
+      await markerFd.sync();
+    } finally {
+      await markerFd.close();
+    }
+    await rename(markerTmp, markerPath);
+
+    // MEDIUM-1: fsync marker directory so rename is durable.
+    const markerDirFd = await open(markerDir, constants.O_RDONLY);
+    try {
+      await markerDirFd.sync();
+    } finally {
+      await markerDirFd.close();
+    }
+
+    // MEDIUM-4: route through structured logger (bootAuditLogger not yet
+    // available at this call site; createLogger routes to the same sink).
+    log.info({
+      event: "r2-canonicalization-migration",
+      migrated,
+      skipped,
+      total,
+    });
+  } catch (err) {
+    // MAJOR-1: log failure but do NOT write the marker — next boot will retry.
+    log.warn({
+      event: "r2-canonicalization-migration-failed",
+      error: (err as Error).message ?? String(err),
+    });
+  }
 }
 
 // ─── Test helpers ─────────────────────────────────────────────────────────────
