@@ -1,5 +1,5 @@
 /**
- * CheckpointDivider — Layer 2 compact / manual checkpoint 표시 horizontal divider.
+ * CheckpointDivider — auto compact / manual checkpoint 표시 horizontal divider.
  *
  * Phase 3 (compact pipeline rewrite) — status 별 visual variant:
  *   - SUMMARIZED          → 📦 정상 요약 (blue/slate)
@@ -7,11 +7,11 @@
  *   - NOOP                → ✓ 불필요 (gray) — small history
  *   - REDUCED_INSUFFICIENT_FORCED → ⚠️ 강제 절단됨 (red) — last-resort raw drop
  *
- * §PR-5: action buttons (view / branch) only rendered for SUMMARIZED + FORCED
+ * Action buttons (view / branch) are only rendered for SUMMARIZED + FORCED
  *   (둘 다 boundary 가 truthy 인 경로). NOOP / CONTENT_TRUNCATED 에선 숨김.
  */
 
-import type { CheckpointTier } from "../../../lib/chat-stream-state.js";
+import type { CheckpointTrigger } from "../../../lib/chat-stream-state.js";
 
 type CompactStatus =
   | "summarized"
@@ -53,7 +53,7 @@ const STATUS_VARIANTS: Record<CompactStatus, Variant> = {
   },
 };
 
-const TIER_VARIANTS: Record<CheckpointTier | "default", Variant> = {
+const TRIGGER_VARIANTS: Record<CheckpointTrigger | "default", Variant> = {
   "auto-compact": {
     label: "자동 정리",
     icon: "📌",
@@ -75,7 +75,7 @@ const TIER_VARIANTS: Record<CheckpointTier | "default", Variant> = {
 };
 
 export function CheckpointDivider({
-  tier,
+  trigger,
   messageCount,
   compactNum,
   compactStatus,
@@ -83,23 +83,23 @@ export function CheckpointDivider({
   onEnterView,
   onBranchFrom,
 }: {
-  tier?: CheckpointTier;
+  trigger?: CheckpointTrigger;
   messageCount: number;
-  /** §PR-5: compact sequence number — enables view/branch action buttons. */
+  /** Compact sequence number — enables view/branch action buttons. */
   compactNum?: number;
-  /** Phase 3: compact 결과 status. status variant 가 tier variant 보다 우선. */
+  /** Compact 결과 status. status variant 가 trigger variant 보다 우선. */
   compactStatus?: CompactStatus;
-  /** Phase 2: Layer A truncation 원본 디렉토리 — banner footnote 에 표시. */
+  /** Per-message truncation 원본 디렉토리 — banner footnote 에 표시. */
   truncatedDir?: string;
-  /** §PR-5: enter view-mode for this checkpoint. */
+  /** Enter view-mode for this checkpoint. */
   onEnterView?: (compactNum: number) => void | Promise<void>;
-  /** §PR-5: fork a new session from this checkpoint. */
+  /** Fork a new session from this checkpoint. */
   onBranchFrom?: (compactNum: number) => void | Promise<void>;
 }) {
-  // Status 가 명시되면 status variant 우선, 아니면 tier variant (legacy 호환).
+  // Status 가 명시되면 status variant 우선, 아니면 trigger variant.
   const variant: Variant = compactStatus !== undefined
     ? STATUS_VARIANTS[compactStatus]
-    : TIER_VARIANTS[tier ?? "default"];
+    : TRIGGER_VARIANTS[trigger ?? "default"];
   // Action buttons: SUMMARIZED 또는 REDUCED_INSUFFICIENT_FORCED (boundary 가
   // truthy 한 경로) + compactNum 있을 때만 노출. NOOP / CONTENT_TRUNCATED 는
   // boundary 가 없어 view/branch 불가.
@@ -111,7 +111,7 @@ export function CheckpointDivider({
   return (
     <div
       data-testid="checkpoint-divider"
-      data-tier={tier ?? "default"}
+      data-trigger={trigger ?? "default"}
       data-compact-status={compactStatus ?? "summarized"}
       data-compact-num={compactNum}
       className="my-2 flex flex-col gap-1.5 py-2"

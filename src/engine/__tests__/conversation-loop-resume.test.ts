@@ -145,8 +145,45 @@ describe("ConversationLoop.resetAndResume", () => {
     expect(loop.getSessionId()).toBe("test-session-id");
   });
 
-  it("PR-2-F-4: cumulativeUsage 추정값 set on resume — Layer 0 가 next turn 평가용으로 read", () => {
-    // 50 messages × 10K chars each → estimateMessagesTokens > 0. Layer 0 preflight 가
+  it("does not load or merge parent transcript when resuming a child session", () => {
+    const childHistory: GenericMessage[] = [{ role: "user", content: "child only" }];
+    const parentHistory: GenericMessage[] = [{ role: "user", content: "parent should not load" }];
+    const mem = {
+      ...makeMemoryManager(null),
+      loadSession: vi.fn((id: string) => {
+        if (id === "child-session") return childHistory;
+        if (id === "parent-session") return parentHistory;
+        return null;
+      }),
+      loadSessionMetadata: vi.fn((id: string) => {
+        if (id === "child-session") {
+          return {
+            parentSessionId: "parent-session",
+            summaryPreamble: "요약된 부모 맥락",
+          };
+        }
+        return null;
+      }),
+    } as unknown as ConversationLoopDeps["memoryManager"];
+    const systemPromptBuilder = {
+      build: () => "system",
+      setToolScope: vi.fn(),
+      setSummaryPreamble: vi.fn(),
+    } as unknown as ConversationLoopDeps["systemPromptBuilder"];
+    const loop = new ConversationLoop(makeDeps({ memoryManager: mem, systemPromptBuilder }));
+
+    const result = loop.resetAndResume("child-session");
+
+    expect(result.ok).toBe(true);
+    expect(mem.loadSession).toHaveBeenCalledTimes(1);
+    expect(mem.loadSession).toHaveBeenCalledWith("child-session");
+    expect(mem.loadSession).not.toHaveBeenCalledWith("parent-session");
+    expect(loop.getHistory().getMessages()).toEqual(childHistory);
+    expect(systemPromptBuilder.setSummaryPreamble).toHaveBeenCalledWith("요약된 부모 맥락");
+  });
+
+  it("sets cumulativeUsage estimate on resume for the next token preflight", () => {
+    // 50 messages × 10K chars each → estimateMessagesTokens > 0. Token preflight 가
     // next user turn 진입 시 이 값을 사용하여 임계 평가.
     const msgs: GenericMessage[] = [];
     for (let i = 0; i < 50; i++) {
@@ -157,9 +194,9 @@ describe("ConversationLoop.resetAndResume", () => {
 
     const result = loop.resetAndResume("test-session-id");
     expect(result.ok).toBe(true);
-    // cumulativeUsage 가 estimate 로 set 됐는지 — Layer 0 가 정확한 ratio 평가 가능
+    // cumulativeUsage 가 estimate 로 set 됐는지 — token preflight 가 정확한 ratio 평가 가능
     expect(loop.getCumulativeUsage().inputTokens).toBeGreaterThan(0);
-    // resetAndResume 자체는 더 이상 auto-compact 하지 않음 — Layer 0 가 next turn 처리
+    // resetAndResume 자체는 더 이상 auto-compact 하지 않음 — token preflight 가 next turn 처리
     expect(result.compacted).toBe(false);
   });
 
@@ -225,7 +262,7 @@ describe("ConversationLoop.manualCompact — Major Fix callbacks", () => {
     expect(result.compacted).toBe(false);
   });
 
-  it("manualCompact appends Layer 3 checkpoint + persists summary", async () => {
+  it("manualCompact appends a checkpoint and persists summary", async () => {
     // Long enough history to trigger compact
     const longHistory = makeLongHistory(40);
     const mem = makeMemoryManagerWithCheckpoint();
@@ -269,10 +306,10 @@ describe("ConversationLoop.manualCompact — Major Fix callbacks", () => {
 
     if (result.compacted) {
       // manualCompact 는 callbacks 파라미터가 없으므로 onCompactOccurred 는 호출 안 됨.
-      // 이 테스트는 Layer 3 checkpoint 영속화 (appendCheckpoint + saveSessionMetadata) 를 검증.
+      // 이 테스트는 checkpoint 영속화 (appendCheckpoint + saveSessionMetadata) 를 검증.
       expect(result.compacted).toBe(true);
       expect(result.removedMessageCount).toBeGreaterThan(0);
-      // Layer 3: appendCheckpoint and saveSessionMetadata must have been called
+      // appendCheckpoint and saveSessionMetadata must have been called.
       expect((memWithHistory as { appendCheckpoint: ReturnType<typeof vi.fn> }).appendCheckpoint).toHaveBeenCalled();
       expect((memWithHistory as { saveSessionMetadata: ReturnType<typeof vi.fn> }).saveSessionMetadata).toHaveBeenCalled();
     }

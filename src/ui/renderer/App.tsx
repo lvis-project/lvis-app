@@ -19,13 +19,6 @@ import { buildQuickActions } from "./components/command-actions.js";
 import { MainToolbar } from "./MainToolbar.js";
 import { DevToolsPanel } from "./components/DevToolsPanel.js";
 import { MainContent } from "./MainContent.js";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "../../components/ui/dialog.js";
 import { StatusBar } from "./components/StatusBar.js";
 import { useStatusBar, type NotificationToastMeta } from "./hooks/use-status-bar.js";
 import { useSettings } from "./hooks/use-settings.js";
@@ -57,7 +50,6 @@ import { useWorkflowTools } from "./hooks/use-workflow-tools.js";
 import { useInstallingPlugins } from "./hooks/use-installing-plugins.js";
 import { useMarketplaceUrl } from "./hooks/use-marketplace-url.js";
 import { OverlayContextProvider } from "./context/OverlayContext.js";
-import { RoutineSessionView } from "./components/RoutineSessionView.js";
 import { UnifiedSearchPanel } from "./components/UnifiedSearchPanel.js";
 import type { UserKeyboardIntentSnapshot } from "../../shared/chat-origin.js";
 
@@ -144,7 +136,7 @@ export function App() {
       title: evt.title,
       summary: evt.summary,
       running: false,
-      routineSessionPath: evt.routineSessionPath,
+      routineSessionId: evt.routineSessionId,
     });
   }, []);
 
@@ -275,22 +267,6 @@ export function App() {
     [api],
   );
 
-  // Routine session modal opened from OverlayCard "결과 보기".
-  const [routineSessionModal, setRoutineSessionModal] = useState<{ jsonlPath: string } | null>(null);
-  const handleOpenRoutineSession = useCallback(
-    async (routineId: string, firedAt: string) => {
-      try {
-        const sessions = await api.listRoutineSessionsV2(routineId, 20);
-        // Match firedAt — find closest session file for this fire event
-        const match = sessions.find((s) => s.firedAt === firedAt) ?? sessions[0];
-        if (match) setRoutineSessionModal({ jsonlPath: match.jsonlPath });
-      } catch (err) {
-        console.warn("[lvis] openRoutineSession failed:", (err as Error).message);
-      }
-    },
-    [api],
-  );
-
   // Marketplace + plugin UI extensions
   const {
     pluginViews,
@@ -335,9 +311,27 @@ export function App() {
     handleToggleSessionStar,
   } = useStarred(api);
   const {
-    currentSessionId, sessions, refreshSessionId, refreshSessions,
+    currentSessionId, currentSessionKind, currentSessionTitle, sessions, refreshSessionId, refreshSessions,
     handleLoadSession: sessionLoad, handleFork: sessionFork,
   } = useSessions(api, applyInitialSession);
+
+  const handleOpenRoutineSession = useCallback(
+    async (sessionId: string) => {
+      if (streaming) {
+        console.warn("[lvis] openRoutineSession blocked during streaming");
+        return false;
+      }
+      try {
+        setActiveView("home");
+        await sessionLoad(sessionId, streaming, applyLoadedSession);
+        return true;
+      } catch (err) {
+        console.warn("[lvis] openRoutineSession failed:", (err as Error).message);
+        return false;
+      }
+    },
+    [applyLoadedSession, sessionLoad, streaming],
+  );
 
   useEffect(() => {
     if (!searchOpen) return;
@@ -1038,6 +1032,8 @@ export function App() {
             api={api}
             starred={starred}
             currentSessionId={currentSessionId}
+            currentSessionKind={currentSessionKind}
+            currentSessionTitle={currentSessionTitle}
             sessions={sessions}
             refreshStarred={refreshStarred}
             onActivateHome={() => setActiveView("home")}
@@ -1093,36 +1089,6 @@ export function App() {
       <DevConsoleToggle />
       {/* Snap edge highlight — shown when a detached child window enters the snap zone */}
       <SnapEdgeHighlight />
-      {/* Routine session modal opened from OverlayCard "결과 보기".
-          Migrated to Radix Dialog so it inherits the unified Modal v1 glass
-          surface + themed overlay/blur. RoutineSessionView still owns its
-          own internal header + close button. */}
-      <Dialog
-        open={routineSessionModal !== null}
-        onOpenChange={(next) => {
-          if (!next) setRoutineSessionModal(null);
-        }}
-      >
-        <DialogContent
-          size="lg"
-          className="flex h-[80dvh] min-w-0 flex-col gap-0 overflow-hidden p-0"
-          data-testid="routine-session-dialog"
-        >
-          <DialogHeader className="sr-only">
-            <DialogTitle>루틴 세션 기록</DialogTitle>
-            <DialogDescription>
-              루틴 실행에 의해 저장된 메시지 기록을 봅니다.
-            </DialogDescription>
-          </DialogHeader>
-          {routineSessionModal && (
-            <RoutineSessionView
-              jsonlPath={routineSessionModal.jsonlPath}
-              api={api}
-              onClose={() => setRoutineSessionModal(null)}
-            />
-          )}
-        </DialogContent>
-      </Dialog>
     </OverlayContextProvider>
     </TooltipProvider>
     </ThemeProvider>

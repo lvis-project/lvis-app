@@ -67,7 +67,7 @@ export const highContrastBundle: ThemeBundle = {
     "chart-3":                "0 100% 50%",    /* red */
     "chart-4":                "180 100% 50%",  /* cyan */
     "chart-5":                "300 100% 60%",  /* magenta */
-    /* ── Action tokens (PR-4/5) ────────────────────────────────── */
+    /* ── Action tokens ─────────────────────────────────────────── */
     "action-view":            "60 100% 50%",
     "action-branch":          "60 100% 50%",
     "action-compact":         "60 100% 50%",

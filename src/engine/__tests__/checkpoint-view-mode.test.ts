@@ -1,5 +1,5 @@
 /**
- * §PR-5 Layer 3 View-Mode + Branch — ConversationLoop unit tests.
+ * Checkpoint view-mode and branch — ConversationLoop unit tests.
  *
  * Tests:
  *  1. enterViewMode returns null when checkpoint not found
@@ -26,7 +26,7 @@ const FAKE_DISK_MESSAGES = [
 ];
 
 function makeLoop(
-  metaCheckpoints?: Array<{ compactNum: number; messageCountAtTrigger: number }>,
+  metaCheckpoints?: Array<{ compactNum: number; messageCountAtTrigger: number; summary?: string | null }>,
   snapshotMessages?: unknown[] | null,
 ) {
   const toolRegistry = new ToolRegistry();
@@ -67,7 +67,7 @@ function makeLoop(
   return { loop, memoryManager, savedSessions, savedMetadata };
 }
 
-describe("ConversationLoop §PR-5 enterViewMode", () => {
+describe("ConversationLoop enterViewMode", () => {
   it("returns null when no checkpoints exist in session metadata", () => {
     const { loop } = makeLoop([]);
     expect(loop.enterViewMode(1)).toBeNull();
@@ -87,14 +87,14 @@ describe("ConversationLoop §PR-5 enterViewMode", () => {
   });
 });
 
-describe("ConversationLoop §PR-5 exitViewMode", () => {
+describe("ConversationLoop exitViewMode", () => {
   it("is a no-op and does not throw", () => {
     const { loop } = makeLoop();
     expect(() => loop.exitViewMode()).not.toThrow();
   });
 });
 
-describe("ConversationLoop §PR-5 branchFromCheckpoint", () => {
+describe("ConversationLoop branchFromCheckpoint", () => {
   it("throws when the checkpoint is not found", async () => {
     const { loop } = makeLoop([]);
     await expect(loop.branchFromCheckpoint(5)).rejects.toThrow("Checkpoint #5 not found");
@@ -169,11 +169,22 @@ describe("ConversationLoop §PR-5 branchFromCheckpoint", () => {
     expect(saved).toBeDefined();
     expect(saved!.length).toBe(2);
 
-    // Metadata includes parentSessionId and branchedFromCompactNum
+    // Metadata includes checkpoint provenance and prior summary.
     const meta = savedMetadata.get(newSessionId) as Record<string, unknown> | undefined;
     expect(meta).toBeDefined();
     expect(meta!.parentSessionId).toBe(loop.getSessionId());
     expect(meta!.branchedFromCompactNum).toBe(1);
     expect(typeof meta!.branchedAt).toBe("string");
+  });
+
+  it("persists checkpoint summary as branch summaryPreamble", async () => {
+    const { loop, savedMetadata } = makeLoop([
+      { compactNum: 1, messageCountAtTrigger: 2, summary: "요약된 이전 맥락" },
+    ]);
+
+    const { newSessionId } = await loop.branchFromCheckpoint(1);
+
+    const meta = savedMetadata.get(newSessionId) as Record<string, unknown> | undefined;
+    expect(meta?.summaryPreamble).toBe("요약된 이전 맥락");
   });
 });

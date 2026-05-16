@@ -4,8 +4,8 @@
  * Locks the layout (rooted at `lvisHome()/plugins/`) and the registry-relative
  * manifestPath helper used by every marketplace install path.
  *
- * Round-3: env-tier override removed. Tests now exercise constructor
- * injection only (the sole remaining override mechanism).
+ * Env override removed. Tests now exercise constructor injection only
+ * (the sole remaining override mechanism).
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { resolve } from "node:path";
@@ -37,8 +37,8 @@ describe("resolvePluginPaths", () => {
   });
 
   it("constructor-injected pluginsRoot redirects pluginsRoot + cache + registry", () => {
-    // Round-3: this replaces the previous LVIS_PLUGINS_DIR env-override
-    // test. Tests / portable installs / CI sandbox isolation pass an
+    // This replaces the previous LVIS_PLUGINS_DIR env-override test.
+    // Tests / portable installs / CI sandbox isolation pass an
     // explicit `pluginsRoot` instead of relying on env var resolution.
     const paths = resolvePluginPaths({ pluginsRoot: "/tmp/portable" });
     expect(paths.pluginsRoot).toBe(resolve("/tmp/portable"));
@@ -47,8 +47,8 @@ describe("resolvePluginPaths", () => {
   });
 
   it("constructor-injected pluginsRoot is honored even on packaged builds", () => {
-    // Round-3: there is no env-tier hard-gate to bypass anymore. Constructor
-    // injection is the only override path and it works regardless of
+    // There is no env hard-gate to bypass anymore. Constructor injection is
+    // the only override path and it works regardless of
     // packaged-mode (the input value is trusted because it came from
     // boot-process code, not a user-controllable env var).
     setIsPackaged(true);

@@ -32,7 +32,6 @@ export const ROUTINES_V2 = {
   pendingResults: "lvis:routines:v2:pending-results",
   acknowledgeResult: "lvis:routines:v2:ack-result",
   listSessions: "lvis:routines:v2:list-sessions",
-  readSession: "lvis:routines:v2:read-session",
   // Running indicator events (renderer reflects LLM session progress)
   runningStarted: "lvis:routines:v2:running-started",
   runningFinished: "lvis:routines:v2:running-finished",
