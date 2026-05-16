@@ -8,6 +8,7 @@ import { randomUUID } from "node:crypto";
 import { resolve as pathResolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { McpServerConfig } from "./mcp/types.js";
+import type { UserApprovalHitPayload } from "./shared/permissions-events.js";
 import type { SerializedHistoryMessage } from "./shared/chat-history.js";
 import { OVERLAY_V1, PERMISSIONS, ROUTINES_V2, SETTINGS } from "./shared/ipc-channels.js";
 import { PLUGIN_PRIVATE_NAMESPACES } from "./plugins/capabilities.js";
@@ -769,8 +770,8 @@ const api = {
         ipcRenderer.removeListener(PERMISSIONS.deferredPending, listener);
     },
     /** CRITICAL 4.1: memory-hit auto-approve disclosure — main→renderer event. */
-    onUserApprovalHit: (cb: (payload: { toolName: string; scope: "session" | "persistent"; verdictAtApproval: "low" | "medium" | "high" }) => void) => {
-      const listener = (_event: unknown, payload: { toolName: string; scope: "session" | "persistent"; verdictAtApproval: "low" | "medium" | "high" }) =>
+    onUserApprovalHit: (cb: (payload: UserApprovalHitPayload) => void) => {
+      const listener = (_event: unknown, payload: UserApprovalHitPayload) =>
         cb(payload);
       ipcRenderer.on(PERMISSIONS.userApprovalHit, listener);
       return () =>

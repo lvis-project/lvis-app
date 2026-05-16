@@ -21,6 +21,7 @@ import type { DenyRule, ToolCategory, ToolSource, ToolTrustOrigin, TrustLevel } 
 import { trustFromSource } from "../tools/types.js";
 import { readPermissionsFile, updatePermissionsFile } from "./permissions-store.js";
 import { isOverlayTriggerOrigin } from "../shared/overlay-trigger-source.js";
+import type { UserApprovalHitPayload } from "../shared/permissions-events.js";
 import { getToolCategoryDescriptor } from "./category-registry.js";
 import {
   LlmRiskClassifier,
@@ -188,7 +189,7 @@ export class PermissionManager {
    */
   private interactiveAutoApprove: "off" | "low" = "off";
   /** CRITICAL 4.1: optional broadcast for memory-hit auto-approve disclosure */
-  private broadcastUserApprovalHit: ((payload: { toolName: string; scope: "session" | "persistent"; verdictAtApproval: "low" | "medium" | "high" }) => void) | null = null;
+  private broadcastUserApprovalHit: ((payload: UserApprovalHitPayload) => void) | null = null;
 
   constructor(permissionsFilePath?: string) {
     this.permissionsFilePath =
@@ -239,7 +240,7 @@ export class PermissionManager {
    * Called once at boot. When set, every R-2 memory hit emits
    * `lvis:permissions:user-approval-hit` to the renderer and a console.info log.
    */
-  setBroadcastUserApprovalHit(fn: (payload: { toolName: string; scope: "session" | "persistent"; verdictAtApproval: "low" | "medium" | "high" }) => void): void {
+  setBroadcastUserApprovalHit(fn: (payload: UserApprovalHitPayload) => void): void {
     this.broadcastUserApprovalHit = fn;
   }
 
