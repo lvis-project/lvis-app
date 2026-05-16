@@ -69,7 +69,7 @@ export interface ParsedSummary {
  * - `vendorOpaqueState`: OpenAI 향후 path. compaction item 전체 (`{type: "compaction", encrypted_content, ...}`)
  *   를 저장. 현재는 Anthropic/Gemini 만 활성화되므로 placeholder.
  * - `structuredSummary`: 모든 vendor 의 차선 — 12-section 인간 readable.
- * - `recentVerbatim`: Cline preserve-recent 패턴. 끝 N 토큰 (per-model PRESERVE_RECENT_TOKENS).
+ * - `recentVerbatim`: LVIS preserve-recent window. 끝 N 토큰 (per-model PRESERVE_RECENT_TOKENS).
  * - `pinnedArtifacts`: skill 도구 출력 + `meta.lock=true` 메시지의 영구 보존.
  * - `toolBoundaryLedger`: 마지막 K 라운드 tool_use/result 요약 — fallback 시
  *   LLM 이 prior tool-chain 회상.
@@ -295,7 +295,7 @@ export interface CompactWithBoundaryArgs {
   messages: GenericMessage[];
   llm: LLMProvider;
   model: string;
-  /** Cline preserve-recent-tokens — `getModelPreflightThreshold()` 의 일부 또는 별도 설정. */
+  /** LVIS preserve-recent-tokens — `getModelPreflightThreshold()` 의 일부 또는 별도 설정. */
   preserveRecentTokens: number;
   compactNum: number;
   /**
@@ -331,7 +331,7 @@ export interface CompactWithBoundaryResult {
 }
 
 /**
- * Per-message truncation pre-pass — Codex CLI `TruncationPolicy` 패턴.
+ * Per-message truncation pre-pass — LVIS oversize-message guard.
  *
  * 단일 메시지가 `TRUNCATION_THRESHOLD_TOKENS` 를 초과하면:
  *   - 원본 content 를 `~/.lvis/sessions/<sessionId>/truncated/compact-<N>-msg-<idx>.txt` 로 격리
@@ -446,7 +446,7 @@ async function archiveDroppedMessages(
  * `toCompact` fits into the LLM's input budget before the summary call.
  * Walks from oldest forward, dropping messages until the cumulative token
  * count is under `budget`. Dropped messages are archived to disk so users
- * can recover originals if needed (Gemini CLI pattern).
+ * can recover originals if needed.
  *
  * Resolves the "many medium messages accumulating to >budget" case that
  * per-message truncation (`truncateOversizeMessages`) cannot solve alone —
@@ -514,7 +514,7 @@ export async function compactWithBoundary(
 ): Promise<CompactWithBoundaryResult> {
   const { messages, llm, model, preserveRecentTokens, compactNum, sessionId, preflightTokens, abortSignal } = args;
 
-  // 0. Per-message truncation pre-pass (Phase 2, Codex pattern).
+  // 0. Per-message truncation pre-pass.
   //    단일 거대 메시지 (>30K tokens) 가 LLM input context 초과하는 케이스 방지.
   const { messages: workingMessages, truncatedCount, truncatedDir: perMessageTruncDir } =
     await truncateOversizeMessages(messages, sessionId, compactNum);
@@ -550,8 +550,8 @@ export async function compactWithBoundary(
     };
   }
 
-  // 1a. History-wide reverse-budget truncation (Gemini pattern,
-  //     CRITICAL contract fix). Per-message truncation handles ONE huge
+  // 1a. History-wide reverse-budget truncation.
+  //     Per-message truncation handles ONE huge
   //     message, but many medium messages (예: 200 × 1K tokens) summing
   //     to > preflight will still overflow the LLM input context. Drop
   //     oldest from `toCompact` (archive to disk) until total <= 90% preflight.

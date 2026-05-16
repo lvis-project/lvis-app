@@ -5,7 +5,7 @@
  * → tool_use 감지 → 도구 실행 → loop back → 응답 완료
  *
  * 벤더 추상화: LLMProvider 인터페이스를 통해 Claude/OpenAI/Gemini/Copilot 통일 처리.
- * claw-code harness 패턴 기반.
+ * LVIS 내부 turn-runtime contract 기반.
  */
 import { ConversationHistory, normalizeToolPairInvariant } from "./conversation-history.js";
 import { ToolExecutor, type ToolResult, type ToolUseBlock } from "../tools/executor.js";
@@ -211,7 +211,7 @@ export interface TurnCallbacks {
      * Cache breakdown — Anthropic prompt cache (read 90% 할인 / write 25% 가산).
      * Vercel AI SDK v6 의 inputTokens 는 cached 포함 정규화이므로 이 두 값을
      * 별도로 surface 해야 사용자가 fresh vs cached 비용 차이 인지 가능.
-     * Reference: Kilo Code OpenCode session.ts:355 패턴.
+     * LVIS invariant: surface raw context usage and fresh billable input separately.
      */
     cacheReadTokens?: number;
     cacheWriteTokens?: number;
@@ -1532,9 +1532,9 @@ export class ConversationLoop {
 
       // stream.kind === "ok" — usage 반영 + assistant round commit
       //
-      // Kilo Code OpenCode session.ts:355 패턴 적용:
-      //   "AI SDK v6 normalized inputTokens to include cached tokens across
-      //    all providers — subtract cacheRead/cacheWrite to get fresh input."
+      // LVIS usage accounting invariant:
+      //   AI SDK v6 normalized inputTokens include cached tokens across
+      //   providers, so subtract cacheRead/cacheWrite to get fresh input.
       //
       // 1) turnUsage 는 모든 round 합산 (이전: `=` 으로 마지막 round 만 보존
       //    → multi-round turn 의 turn_summary 가 under-report 되던 버그).
@@ -1882,7 +1882,7 @@ export class ConversationLoop {
     };
 
     // Same-session checkpoint chain.
-    // ctxUsageAtTrigger 분모는 *usable context window* (Cline buffer 적용).
+    // ctxUsageAtTrigger 분모는 *usable context window* (LVIS reservation 적용).
     try {
       const llmSettings = this.deps.settingsService.get("llm");
       const provider = llmSettings.provider;

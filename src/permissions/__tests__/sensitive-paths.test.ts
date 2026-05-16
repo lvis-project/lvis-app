@@ -25,7 +25,7 @@ describe("SENSITIVE_PATH_PATTERNS", () => {
     expect(Object.isFrozen(SENSITIVE_PATH_PATTERNS)).toBe(true);
   });
 
-  it("contains core OpenHarness patterns", () => {
+  it("contains core credential-store patterns", () => {
     expect(SENSITIVE_PATH_PATTERNS).toContain("**/.ssh/**");
     expect(SENSITIVE_PATH_PATTERNS).toContain("**/.aws/credentials");
     expect(SENSITIVE_PATH_PATTERNS).toContain("**/.aws/config");

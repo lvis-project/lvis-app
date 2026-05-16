@@ -1,5 +1,5 @@
 /**
- * Audit Service — 데이터 플레인 분리 (claw-code telemetry 크레이트 패턴)
+ * Audit Service — LVIS audit data-plane separation
  *
  * 기존 audit-logger.ts의 sync write를 비동기 큐로 분리하여,
  * 디스크 I/O 장애가 도구 실행을 블록하지 않도록 한다.

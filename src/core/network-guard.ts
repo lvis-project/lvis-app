@@ -1,7 +1,7 @@
 /**
  * Portions adapted from OpenHarness (MIT License)
  * https://github.com/HKUDS/OpenHarness/blob/main/src/openharness/utils/network_guard.py
- * Copyright (c) 2026 HKU Data Intelligence Lab
+ * Copyright (c) 2025 OpenHarness Contributors
  *
  * NetworkGuard (Tier A2) — SSRF defense for outbound HTTP.
  *
