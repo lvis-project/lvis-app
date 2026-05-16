@@ -21,7 +21,7 @@ import type { DenyRule, ToolCategory, ToolSource, ToolTrustOrigin, TrustLevel } 
 import { trustFromSource } from "../tools/types.js";
 import { readPermissionsFile, updatePermissionsFile } from "./permissions-store.js";
 import { isOverlayTriggerOrigin } from "../shared/overlay-trigger-source.js";
-import type { UserApprovalHitPayload } from "../shared/permissions-events.js";
+import type { UserApprovalHitPayload, UserApprovalVerdict } from "../shared/permissions-events.js";
 import { getToolCategoryDescriptor } from "./category-registry.js";
 import {
   LlmRiskClassifier,
@@ -584,7 +584,7 @@ export class PermissionManager {
     let userApprovalUsed: {
       memoryHit: boolean;
       nlJustification: string | null;
-      verdictAtApproval: "low" | "medium" | "high" | null;
+      verdictAtApproval: UserApprovalVerdict | null;
     } | null = null;
 
     // Cross-cutting root-cause fix: a legacy R-2 entry may carry
@@ -628,7 +628,7 @@ export class PermissionManager {
       const ruleVerdict = ruleClassifier.classify(ctx);
       // Narrowed above: the outer `userApproval.verdictAtApproval != null`
       // gate guarantees a concrete verdict literal here.
-      const storedLevel: "low" | "medium" | "high" = userApproval.verdictAtApproval;
+      const storedLevel: UserApprovalVerdict = userApproval.verdictAtApproval;
       verdict = maxVerdict(ruleVerdict, { level: storedLevel, reason: `stored approval verdict at approval time` });
       userApprovalUsed = {
         memoryHit: true,
