@@ -229,6 +229,37 @@ export function ToolApprovalDialog({
 
             <PermissionEvaluationContextPanel context={request.evaluationContext} />
 
+            {/* MAJOR 1.6: NL justification moved above collapsible details so it's
+                visible without scrolling when the HIGH verdict disables Approve. */}
+            {/* R-4: NL justification — required for HIGH verdict */}
+            {finalVerdict === "high" && (
+              <div className="mt-3 rounded-md border border-destructive/30 bg-destructive/5 p-3">
+                <Label
+                  htmlFor="nl-justification"
+                  className="mb-1.5 block text-xs font-semibold text-destructive"
+                >
+                  이 작업의 목적을 한 문장으로 입력하세요 (필수)
+                  <span className="ml-1.5 text-[10px] font-normal text-muted-foreground">
+                    범위: 이 세션만 (HIGH 고정)
+                  </span>
+                </Label>
+                <Input
+                  id="nl-justification"
+                  ref={nlInputRef}
+                  type="text"
+                  value={nlJustification}
+                  onChange={(e) => setNlJustification(e.target.value)}
+                  placeholder="예: 사용자 요청에 따라 프로젝트 디렉터리의 빌드 결과물 삭제"
+                  maxLength={500}
+                  className="h-8 text-xs"
+                  data-testid="nl-justification-input"
+                />
+                <p className="mt-1 text-[10px] text-muted-foreground">
+                  높은 위험도 작업은 승인 사유를 기록합니다. 세션 종료 후 재승인이 필요합니다.
+                </p>
+              </div>
+            )}
+
             <details className="min-w-0 rounded-md border bg-muted/20">
               <summary className="cursor-pointer px-3 py-2 text-xs font-semibold">
                 전체 입력 보기
@@ -249,32 +280,6 @@ export function ToolApprovalDialog({
               )}
             </details>
           </div>
-
-          {/* R-4: NL justification — required for HIGH verdict */}
-          {finalVerdict === "high" && (
-            <div className="mt-3 rounded-md border border-destructive/30 bg-destructive/5 p-3">
-              <Label
-                htmlFor="nl-justification"
-                className="mb-1.5 block text-xs font-semibold text-destructive"
-              >
-                이 작업의 목적을 한 문장으로 입력하세요 (필수)
-              </Label>
-              <Input
-                id="nl-justification"
-                ref={nlInputRef}
-                type="text"
-                value={nlJustification}
-                onChange={(e) => setNlJustification(e.target.value)}
-                placeholder="예: 사용자 요청에 따라 프로젝트 디렉터리의 빌드 결과물 삭제"
-                maxLength={500}
-                className="h-8 text-xs"
-                data-testid="nl-justification-input"
-              />
-              <p className="mt-1 text-[10px] text-muted-foreground">
-                높은 위험도 작업은 승인 사유를 기록합니다. 세션 종료 후 재승인이 필요합니다.
-              </p>
-            </div>
-          )}
 
           {/* R-4: Scope selector — LOW/MEDIUM only (HIGH is always session) */}
           {finalVerdict !== "high" && (
@@ -319,6 +324,8 @@ export function ToolApprovalDialog({
               variant="outline"
               onClick={() => void handleApprove("allow-always", request.toolName)}
               disabled={approveDisabled}
+              title={approveDisabled ? "사유를 입력하세요" : undefined}
+              aria-describedby={approveDisabled ? "nl-justification-hint" : undefined}
             >
               항상 허용
             </Button>
@@ -327,11 +334,15 @@ export function ToolApprovalDialog({
               variant="default"
               onClick={() => void handleApprove("allow-once")}
               disabled={approveDisabled}
-              title="단축키: A"
+              title={approveDisabled ? "사유를 입력하세요" : "단축키: A"}
+              aria-describedby={approveDisabled ? "nl-justification-hint" : undefined}
               data-testid="approve-button"
             >
               한 번만 허용
             </Button>
+            <span id="nl-justification-hint" className="sr-only">
+              HIGH 위험 작업은 NL 사유 입력이 필수입니다
+            </span>
           </div>
         </section>
       </DialogContent>

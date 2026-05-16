@@ -187,6 +187,8 @@ export class PermissionManager {
    * decide whether to set `reviewer.route='foreground-auto'`.
    */
   private interactiveAutoApprove: "off" | "low" = "off";
+  /** CRITICAL 4.1: optional broadcast for memory-hit auto-approve disclosure */
+  private broadcastUserApprovalHit: ((payload: { toolName: string; scope: "session" | "persistent"; verdictAtApproval: "low" | "medium" | "high" }) => void) | null = null;
 
   constructor(permissionsFilePath?: string) {
     this.permissionsFilePath =
@@ -230,6 +232,15 @@ export class PermissionManager {
 
   getInteractiveAutoApprove(): "off" | "low" {
     return this.interactiveAutoApprove;
+  }
+
+  /**
+   * CRITICAL 4.1 — wire renderer broadcast for memory-hit auto-approve disclosure.
+   * Called once at boot. When set, every R-2 memory hit emits
+   * `lvis:permissions:user-approval-hit` to the renderer and a console.info log.
+   */
+  setBroadcastUserApprovalHit(fn: (payload: { toolName: string; scope: "session" | "persistent"; verdictAtApproval: "low" | "medium" | "high" }) => void): void {
+    this.broadcastUserApprovalHit = fn;
   }
 
   /**
@@ -603,6 +614,13 @@ export class PermissionManager {
         nlJustification: userApproval.nlJustification,
         verdictAtApproval: userApproval.verdictAtApproval,
       };
+      // CRITICAL 4.1: disclose memory-hit auto-approve to renderer + log
+      console.info(`[permission] memory-hit auto-approve: ${toolName} (scope=${userApproval.scope}, verdict=${userApproval.verdictAtApproval})`);
+      try {
+        this.broadcastUserApprovalHit?.({ toolName, scope: userApproval.scope, verdictAtApproval: userApproval.verdictAtApproval });
+      } catch {
+        // broadcast failure must not block tool execution
+      }
     } else if (cacheResult.hit && cacheResult.verdict) {
       verdict = cacheResult.verdict;
     } else {
