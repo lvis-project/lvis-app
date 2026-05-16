@@ -168,4 +168,99 @@ describe("historyToEntries", () => {
     });
   });
 
+  describe("createdAt propagation", () => {
+    it("propagates createdAt from SerializedHistoryMessage to assistant ChatEntry", () => {
+      const ts = 1_700_000_000_000;
+      const entries = historyToEntries([
+        { index: 0, role: "user", content: "q", createdAt: ts },
+        { index: 1, role: "assistant", content: "a", createdAt: ts + 500 },
+      ]);
+      const user = entries.find((e) => e.kind === "user");
+      const assistant = entries.find((e) => e.kind === "assistant");
+      expect(user?.kind === "user" ? user.createdAt : undefined).toBe(ts);
+      expect(assistant?.kind === "assistant" ? assistant.createdAt : undefined).toBe(ts + 500);
+    });
+
+    it("leaves createdAt undefined for legacy messages without it", () => {
+      const entries = historyToEntries([
+        { index: 0, role: "user", content: "old q" },
+        { index: 1, role: "assistant", content: "old a" },
+      ]);
+      const assistant = entries.find((e) => e.kind === "assistant");
+      expect(assistant?.kind === "assistant" ? assistant.createdAt : undefined).toBeUndefined();
+    });
+  });
+
+  describe("turnSummary reconstruction", () => {
+    it("emits a turn_summary ChatEntry after assistant when meta.turnSummary present", () => {
+      const entries = historyToEntries([
+        { index: 0, role: "user", content: "q" },
+        {
+          index: 1,
+          role: "assistant",
+          content: "a",
+          createdAt: 1_700_000_000_000,
+          turnSummary: {
+            turnDurationMs: 3500,
+            toolCount: 1,
+            cumulativeToolMs: 800,
+            tokensIn: 1200,
+            freshInputTokens: 1000,
+            tokensOut: 250,
+            cacheReadTokens: 200,
+          },
+        },
+      ]);
+      const summary = entries.find((e) => e.kind === "turn_summary");
+      expect(summary).toBeDefined();
+      if (summary?.kind === "turn_summary") {
+        expect(summary.turnDurationMs).toBe(3500);
+        expect(summary.tokensOut).toBe(250);
+        expect(summary.cacheReadTokens).toBe(200);
+      }
+    });
+
+    it("does NOT emit a turn_summary entry when meta.turnSummary is absent (legacy)", () => {
+      const entries = historyToEntries([
+        { index: 0, role: "user", content: "q" },
+        { index: 1, role: "assistant", content: "a" },
+      ]);
+      expect(entries.find((e) => e.kind === "turn_summary")).toBeUndefined();
+    });
+  });
+
+  describe("checkpointMeta reconstruction", () => {
+    it("emits a checkpoint ChatEntry when the user message carries meta.checkpointMeta", () => {
+      const entries = historyToEntries([
+        { index: 0, role: "user", content: "[compact stub]" },
+        {
+          index: 1,
+          role: "user",
+          content: "[Boundary marker]",
+          checkpointMeta: {
+            removedMessages: 5,
+            freedTokens: 1200,
+            trigger: "auto-compact",
+            summary: "summarized 5 messages",
+          },
+        },
+      ]);
+      const checkpoint = entries.find((e) => e.kind === "checkpoint");
+      expect(checkpoint).toBeDefined();
+      if (checkpoint?.kind === "checkpoint") {
+        expect(checkpoint.removedMessages).toBe(5);
+        expect(checkpoint.freedTokens).toBe(1200);
+        expect(checkpoint.trigger).toBe("auto-compact");
+        expect(checkpoint.summary).toBe("summarized 5 messages");
+      }
+    });
+
+    it("renders a normal user bubble when checkpointMeta is absent (legacy boundary)", () => {
+      const entries = historyToEntries([
+        { index: 0, role: "user", content: "old boundary stub" },
+      ]);
+      expect(entries[0]?.kind).toBe("user");
+      expect(entries.find((e) => e.kind === "checkpoint")).toBeUndefined();
+    });
+  });
 });

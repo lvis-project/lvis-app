@@ -22,6 +22,8 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   // ── Trust / intent gate (PR #826 cross-cutting code group) ──
   "user-keyboard-required": "이 권한 변경은 활성 사용자 입력에서만 실행할 수 있습니다.",
   "unauthorized": "권한이 없습니다.",
+  // "unauthorized-frame" lives below in the frame-trust gate section with a
+  // more actionable Korean message ("창을 새로고침하거나..."). Single key.
   "missing-input-origin": "요청의 출처 정보가 누락되었습니다.",
   "cross-plugin-call-denied": "다른 플러그인을 직접 호출할 수 없습니다.",
   "missing-plugin-envelope": "플러그인 envelope 정보가 누락되었습니다.",
@@ -98,8 +100,13 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "install-failed": "플러그인 설치에 실패했습니다.",
   "uninstall-failed": "플러그인 제거에 실패했습니다.",
   "marketplace-disabled": "마켓플레이스 기능이 비활성화되었습니다.",
-  // Frame-trust gate (used by chat.ts + plugins.ts pluginConfigError helper)
-  "unauthorized-frame": "권한이 없는 프레임에서의 요청입니다.",
+  // Frame-trust gate (used by chat.ts + plugins.ts pluginConfigError helper).
+  // The plain "unauthorized" entry above already maps to "권한이 없습니다." but
+  // "unauthorized-frame" carries a distinct semantic (the *frame/window* failed
+  // the trust check, not the user's role) that the user can act on differently:
+  // refresh the window or restart the app. Keep both keys with distinct
+  // wording so the surfaced Korean message preserves that signal.
+  "unauthorized-frame": "인증되지 않은 프레임에서의 요청입니다. 창을 새로고침하거나 앱을 다시 시작해 주세요.",
   // ── Legacy snake_case codes (src/ipc/domains/attach.ts) ──
   // These predate the kebab-case convention. New code MUST use kebab-case
   // (#803 IPC convention). The snake_case shape is grandfathered until the

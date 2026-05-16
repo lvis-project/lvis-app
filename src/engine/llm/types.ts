@@ -75,6 +75,49 @@ export interface MessageMeta {
    * prompt slot / checkpoint storage / history[0] view 가 같은 frozen reference.
    */
   boundary?: import("../structured-compact.js").CompactBoundary;
+  /**
+   * Wall-clock when the message was generated (Date.now() epoch ms). Stamped
+   * by ConversationHistory.append() so every persisted message carries its
+   * original creation time. Optional for backward compat — sessions written
+   * before this field existed have no createdAt; UI must render *nothing*
+   * rather than fake the current time.
+   */
+  createdAt?: number;
+  /**
+   * Turn-aggregate stats — present ONLY on the turn-final assistant message
+   * (the one whose stopReason ended the turn). Carries the same payload the
+   * live `onTurnSummary` callback emits so the renderer can rebuild the
+   * `kind: "turn_summary"` ChatEntry on session reload without re-running the
+   * conversation loop. Persisted alongside the message so TokenCostBadge +
+   * TurnActionBar show real numbers (not zeros) on historical sessions.
+   */
+  turnSummary?: {
+    turnDurationMs: number;
+    toolCount: number;
+    cumulativeToolMs: number;
+    tokensIn: number;
+    /** Sum of per-round (input − cacheRead − cacheWrite). Always set by the
+     * live conversation-loop emit, so required for any persisted turnSummary. */
+    freshInputTokens: number;
+    tokensOut: number;
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
+    breakdown?: Record<string, { count: number; ms: number }>;
+  };
+  /**
+   * Checkpoint metrics — present ONLY on the compactBoundary user message
+   * created by structured-compact. Lets historyToEntries reconstruct the
+   * `kind: "checkpoint"` divider with the right counts on reload.
+   * Trigger union matches CheckpointTrigger in `src/lib/chat-stream-state.ts`.
+   */
+  checkpointMeta?: {
+    removedMessages: number;
+    freedTokens: number;
+    trigger?: "auto-compact" | "manual";
+    compactStatus?: "summarized" | "content_truncated" | "noop" | "reduced_insufficient_forced";
+    summary?: string;
+    truncatedDir?: string;
+  };
 }
 
 /**

@@ -91,7 +91,7 @@ export function useChatState(api: LvisApi) {
         // 사용자 피드백 (2026-05-15): system entry → user bubble + 작은 hint 배지.
         const text = typeof ev.text === "string" ? ev.text : "";
         if (text.length === 0) return;
-        setEntries((p) => [...p, { kind: "user", text, injectHint: "queue" }]);
+        setEntries((p) => [...p, { kind: "user", text, injectHint: "queue", createdAt: Date.now() }]);
         return;
       }
       if (ev.type === "guidance_dropped") {
@@ -474,7 +474,7 @@ export function useChatState(api: LvisApi) {
       let failed = false;
       const requestId = beginStreamingRequest();
       try {
-        setEntries((p) => [...p.slice(0, entryIdx), { kind: "user", text: newText }]);
+        setEntries((p) => [...p.slice(0, entryIdx), { kind: "user", text: newText, createdAt: Date.now() }]);
         streamRef.current = "";
         thoughtRef.current = "";
         activeStreamIdRef.current = null;
