@@ -2,7 +2,8 @@
 import "../../../../../test/renderer/setup.js";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup } from "@testing-library/react";
 
 vi.mock("../../../../components/ui/scroll-area.js", () => ({
   ScrollArea: ({ children, className }: { children: ReactNode; className?: string }) => (
@@ -114,6 +115,8 @@ function installApi(disabledBatches: HookTrustRow[][]) {
         }
         throw new Error(`unexpected reviewerDispatch: ${rawArgs}`);
       }),
+      /** C3 — key-driven dynamic activation: return true for openai by default. */
+      reviewerProviderHasKey: vi.fn(async (provider: string) => provider === "openai"),
     },
     policy: {
       get: vi.fn(async () => ({
@@ -129,6 +132,11 @@ function installApi(disabledBatches: HookTrustRow[][]) {
 }
 
 beforeEach(() => {
+  delete (window as unknown as { lvis?: unknown }).lvis;
+});
+
+afterEach(() => {
+  cleanup();
   delete (window as unknown as { lvis?: unknown }).lvis;
 });
 
