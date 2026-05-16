@@ -109,7 +109,7 @@ export function AuditTab() {
   const maxCount = top3[0]?.[1] ?? 1;
 
   return (
-    <ScrollArea className="h-[460px] pr-2">
+    <ScrollArea className="h-full pr-2">
       <div className="space-y-4 pt-4">
 
         {/* ── Stats Bar ── */}

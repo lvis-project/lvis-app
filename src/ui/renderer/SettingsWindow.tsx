@@ -44,7 +44,12 @@ export function SettingsWindow({ initialTab }: { initialTab: string }) {
               앱 환경, 채팅 동작, 검색 엔진, 권한 정책을 설정합니다.
             </p>
           </header>
-          <main className="min-h-0 flex-1 overflow-y-auto p-6">
+          {/* SettingsContent now owns its own sidebar + scrollable right pane;
+              the main wrapper must NOT scroll, otherwise the inner scroll is
+              double-nested (you'd scroll the page, not the right pane) and
+              the sidebar would scroll out of view — defeating the fixed
+              sidebar conversion. */}
+          <main className="min-h-0 flex-1 overflow-hidden p-6">
             <SettingsContent
               open={true}
               onOpenChange={handleOpenChange}

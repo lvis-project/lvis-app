@@ -561,7 +561,7 @@ export function PermissionsTab() {
   }
 
   return (
-    <ScrollArea className="h-[420px] pr-2">
+    <ScrollArea className="h-full pr-2">
       <div className="space-y-6 pt-4">
 
         {/* ── 인라인 배너 (§F9 — alert 대체) ── */}

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { Button } from "../../components/ui/button.js";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../../components/ui/tabs.js";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../../components/ui/dialog.js";
@@ -44,6 +44,51 @@ function TabSaveBar({
   );
 }
 
+/**
+ * Settings-wide "저장되었습니다" notifier. Every successful save in the
+ * settings dialog — explicit Save click, immediate-apply debounced save,
+ * plugin config write, etc. — must call `notifySaved()` so the user sees
+ * one consistent feedback signal regardless of which tab triggered it.
+ *
+ * Tabs with their own non-orchestration save paths (PluginConfigTab,
+ * AppearanceTab, etc.) read the callback via `useNotifySaved()` and call
+ * it after their IPC resolves successfully.
+ */
+const SavedToastContext = createContext<(() => void) | null>(null);
+
+export function useNotifySaved(): () => void {
+  const cb = useContext(SavedToastContext);
+  return cb ?? (() => {});
+}
+
+/**
+ * Floating "저장되었습니다" pill rendered in the top-right corner of the
+ * settings content pane. Each call to `notifySaved()` bumps `at`; the
+ * toast fades in for ~2.2s then auto-dismisses. The fixed position keeps
+ * the feedback visible no matter which tab the user is on or how far
+ * they have scrolled.
+ */
+export function SavedToastFloating({ at }: { at: number | null }) {
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    if (!at) return;
+    setVisible(true);
+    const timer = setTimeout(() => setVisible(false), 2200);
+    return () => clearTimeout(timer);
+  }, [at]);
+  if (!visible) return null;
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      data-testid="settings-saved-toast"
+      className="pointer-events-none absolute right-4 top-3 z-10 rounded-full bg-success/15 px-3 py-1 text-xs font-medium text-success shadow-sm ring-1 ring-success/30 animate-in fade-in slide-in-from-top-2 duration-200"
+    >
+      ✓ 저장되었습니다
+    </div>
+  );
+}
+
 export function SettingsDialog({
   open,
   onOpenChange,
@@ -59,18 +104,23 @@ export function SettingsDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent size="2xl">
+      <DialogContent
+        size="2xl"
+        className="h-[90dvh] !overflow-hidden flex flex-col gap-3"
+      >
         <DialogHeader>
           <DialogTitle>설정</DialogTitle>
           <DialogDescription>앱 환경, 채팅 동작, 검색 엔진, 권한 정책을 설정합니다.</DialogDescription>
         </DialogHeader>
-        <SettingsContent
-          open={open}
-          onOpenChange={onOpenChange}
-          api={api}
-          onSaved={onSaved}
-          initialTab={initialTab}
-        />
+        <div className="flex-1 min-h-0 overflow-hidden">
+          <SettingsContent
+            open={open}
+            onOpenChange={onOpenChange}
+            api={api}
+            onSaved={onSaved}
+            initialTab={initialTab}
+          />
+        </div>
       </DialogContent>
     </Dialog>
   );
@@ -91,7 +141,18 @@ export function SettingsContent({
 }) {
   const [tab, setTab] = useState(() => normalizeSettingsTab(initialTab));
   const [pendingPermissions, setPendingPermissions] = useState(0);
-  const s = useSettingsOrchestration(open, api, onSaved);
+  // Floating "저장되었습니다" pulse — bumped on EVERY successful save in
+  // the dialog. Tabs whose save runs through the orchestration hook hit
+  // it via the wrapped `handleSaved` below; tabs with their own IPC
+  // (PluginConfigTab / AppearanceTab) call `notifySaved()` from the
+  // SavedToastContext after their own success.
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const notifySaved = useCallback(() => setSavedAt(Date.now()), []);
+  const handleSaved = useCallback(() => {
+    notifySaved();
+    onSaved();
+  }, [notifySaved, onSaved]);
+  const s = useSettingsOrchestration(open, api, handleSaved);
 
   // Per-tab debounced save handlers. Immediate-apply controls (toggle,
   // radio, slider, select) call `.schedule()`; rapid bursts collapse
@@ -179,8 +240,62 @@ export function SettingsContent({
     };
   }, [api, open]);
 
+  // Sidebar trigger style: full-width row, left-aligned, active row uses
+  // accent background to read like a real selected list item rather than
+  // the horizontal pill-tab style Radix ships by default. `data-[state=active]`
+  // overrides the base TabsTrigger active style (background + shadow) which
+  // looks wrong in a vertical list.
+  const sideTriggerCls =
+    "w-full justify-start rounded-md px-3 py-2 text-sm font-medium " +
+    "text-muted-foreground hover:bg-accent/60 hover:text-foreground " +
+    "data-[state=active]:bg-accent data-[state=active]:text-accent-foreground " +
+    "data-[state=active]:shadow-none";
+
   return (
-    <>
+    <SavedToastContext.Provider value={notifySaved}>
+    <Tabs
+      orientation="vertical"
+      value={tab}
+      onValueChange={(nextTab) => setTab(normalizeSettingsTab(nextTab))}
+      className="flex h-full min-h-0 gap-3"
+    >
+      {/* Sidebar — fixed column, scrolls independently if the trigger list
+          ever grows beyond the available height. The list stays put when
+          the right pane scrolls (the headline ux complaint that motivated
+          the sidebar conversion). */}
+      <TabsList
+        aria-label="설정 카테고리"
+        className="flex h-full w-48 shrink-0 flex-col items-stretch gap-0.5 overflow-y-auto rounded-md border bg-muted/30 p-1.5"
+      >
+        <TabsTrigger value="llm" className={sideTriggerCls}>지능 (LLM)</TabsTrigger>
+        <TabsTrigger value="appearance" className={sideTriggerCls}>테마</TabsTrigger>
+        <TabsTrigger value="chat" className={sideTriggerCls}>채팅</TabsTrigger>
+        <TabsTrigger value="web" className={sideTriggerCls}>검색 (Web)</TabsTrigger>
+        <TabsTrigger value="permissions" className={`${sideTriggerCls} gap-1.5`}>
+          권한
+          {pendingPermissions > 0 && (
+            <span className="ml-auto rounded-full bg-destructive px-1.5 py-0.5 text-[10px] leading-none text-destructive-foreground">
+              {pendingPermissions}
+            </span>
+          )}
+        </TabsTrigger>
+        <TabsTrigger value="roles" className={sideTriggerCls}>역할</TabsTrigger>
+        <TabsTrigger value="usage" className={sideTriggerCls}>사용량</TabsTrigger>
+        <TabsTrigger value="audit" className={sideTriggerCls}>감사</TabsTrigger>
+        <TabsTrigger value="plugin-perf" className={sideTriggerCls}>플러그인 성능</TabsTrigger>
+        <TabsTrigger value="mcp" className={sideTriggerCls}>MCP 서버</TabsTrigger>
+        <TabsTrigger value="plugin-config" className={sideTriggerCls}>플러그인 설정</TabsTrigger>
+        <TabsTrigger value="marketplace" className={sideTriggerCls}>마켓플레이스</TabsTrigger>
+      </TabsList>
+
+      {/* Right pane — always-visible scrollbar so the user perceives the
+          area as scrollable even before scroll is needed. `overflow-y-scroll`
+          (not `auto`) keeps the gutter reserved; the themed webkit
+          scrollbar set in styles.css renders the thumb only when content
+          exceeds the pane. `relative` so the floating SavedToast anchors
+          here rather than the dialog. */}
+      <div className="relative flex flex-1 min-w-0 flex-col overflow-y-scroll pr-1 lvis-settings-scroll">
+        <SavedToastFloating at={savedAt} />
         {s.lastSaveError && (
           <div
             role="alert"
@@ -200,30 +315,8 @@ export function SettingsContent({
             </button>
           </div>
         )}
-        <Tabs value={tab} onValueChange={(nextTab) => setTab(normalizeSettingsTab(nextTab))}>
-          <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1 [&>*]:!grow-0 [&>*]:!shrink-0 [&>*]:!basis-auto overflow-x-auto">
-            <TabsTrigger value="llm">지능 (LLM)</TabsTrigger>
-            <TabsTrigger value="appearance">테마</TabsTrigger>
-            <TabsTrigger value="chat">채팅</TabsTrigger>
-            <TabsTrigger value="web">검색 (Web)</TabsTrigger>
-            <TabsTrigger value="permissions" className="gap-1.5">
-              권한
-              {pendingPermissions > 0 && (
-                <span className="rounded-full bg-destructive px-1.5 py-0.5 text-[10px] leading-none text-destructive-foreground">
-                  {pendingPermissions}
-                </span>
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="roles">역할</TabsTrigger>
-            <TabsTrigger value="usage">사용량</TabsTrigger>
-            <TabsTrigger value="audit">감사</TabsTrigger>
-            <TabsTrigger value="plugin-perf">플러그인 성능</TabsTrigger>
-            <TabsTrigger value="mcp">MCP 서버</TabsTrigger>
-            <TabsTrigger value="plugin-config">플러그인 설정</TabsTrigger>
-            <TabsTrigger value="marketplace">마켓플레이스</TabsTrigger>
-          </TabsList>
 
-          <TabsContent value="llm">
+          <TabsContent value="llm" className="flex-1 min-h-0 outline-none">
             <LlmTab
               api={api}
               vendor={s.vendor}
@@ -259,11 +352,11 @@ export function SettingsContent({
             />
           </TabsContent>
 
-          <TabsContent value="appearance">
+          <TabsContent value="appearance" className="flex-1 min-h-0 outline-none">
             <AppearanceTab />
           </TabsContent>
 
-          <TabsContent value="chat">
+          <TabsContent value="chat" className="flex-1 min-h-0 outline-none">
             <ChatTab
               autoCompact={s.autoCompact}
               setAutoCompact={s.setAutoCompact}
@@ -282,7 +375,7 @@ export function SettingsContent({
             {/* ChatTab is fully immediate-apply — no deferred-save bar needed. */}
           </TabsContent>
 
-          <TabsContent value="web">
+          <TabsContent value="web" className="flex-1 min-h-0 outline-none">
             <WebTab
               api={api}
               webProvider={s.webProvider}
@@ -304,14 +397,14 @@ export function SettingsContent({
             />
           </TabsContent>
 
-          <TabsContent value="permissions"><PermissionsTab /></TabsContent>
-          <TabsContent value="roles"><RolesTab api={api} /></TabsContent>
-          <TabsContent value="usage"><UsageDashboard api={api} /></TabsContent>
-          <TabsContent value="audit"><AuditTab /></TabsContent>
-          <TabsContent value="plugin-perf"><PluginPerfTab api={api} /></TabsContent>
-          <TabsContent value="mcp"><McpTab /></TabsContent>
-          <TabsContent value="plugin-config"><PluginConfigTab /></TabsContent>
-          <TabsContent value="marketplace">
+          <TabsContent value="permissions" className="flex-1 min-h-0 outline-none"><PermissionsTab /></TabsContent>
+          <TabsContent value="roles" className="flex-1 min-h-0 outline-none"><RolesTab api={api} /></TabsContent>
+          <TabsContent value="usage" className="flex-1 min-h-0 outline-none"><UsageDashboard api={api} /></TabsContent>
+          <TabsContent value="audit" className="flex-1 min-h-0 outline-none"><AuditTab /></TabsContent>
+          <TabsContent value="plugin-perf" className="flex-1 min-h-0 outline-none"><PluginPerfTab api={api} /></TabsContent>
+          <TabsContent value="mcp" className="flex-1 min-h-0 outline-none"><McpTab /></TabsContent>
+          <TabsContent value="plugin-config" className="flex-1 min-h-0 outline-none"><PluginConfigTab /></TabsContent>
+          <TabsContent value="marketplace" className="flex-1 min-h-0 outline-none">
             <MarketplaceTab
               api={api}
               baseUrl={s.marketplaceBaseUrl}
@@ -334,7 +427,8 @@ export function SettingsContent({
               settingsLoaded={s.settingsLoaded}
             />
           </TabsContent>
-        </Tabs>
-    </>
+      </div>
+    </Tabs>
+    </SavedToastContext.Provider>
   );
 }
