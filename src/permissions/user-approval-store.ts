@@ -26,6 +26,7 @@ import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
 import { resolve, dirname } from "node:path";
 import { createHash, randomBytes } from "node:crypto";
 import { lvisHome } from "../shared/lvis-home.js";
+import type { UserApprovalScope, UserApprovalVerdict } from "../shared/permissions-events.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -33,9 +34,9 @@ export interface UserApprovalEntry {
   /** ISO 8601 wall-clock time the approval was granted. */
   approvedAt: string;
   /** "session" approvals are held in-memory only; "persistent" are written to disk. */
-  scope: "session" | "persistent";
+  scope: UserApprovalScope;
   /** The reviewer verdict that was shown to the user when they approved. */
-  verdictAtApproval: "low" | "medium" | "high";
+  verdictAtApproval: UserApprovalVerdict;
   /**
    * Natural-language justification entered by the user.
    * Required (non-null) for HIGH-verdict approvals.
@@ -145,8 +146,8 @@ export async function recordApproval(
   args: string,
   source: string,
   entry: {
-    scope: "session" | "persistent";
-    verdictAtApproval: "low" | "medium" | "high";
+    scope: UserApprovalScope;
+    verdictAtApproval: UserApprovalVerdict;
     nlJustification: string | null;
     approvedAt?: string;
     trustOrigin?: string;
