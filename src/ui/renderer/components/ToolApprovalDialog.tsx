@@ -1,6 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
+import { Input } from "../../../components/ui/input.js";
+import { Label } from "../../../components/ui/label.js";
+import { RadioGroup, RadioGroupItem } from "../../../components/ui/radio-group.js";
 import {
   Dialog,
   DialogContent,
@@ -10,6 +13,7 @@ import {
 } from "../../../components/ui/dialog.js";
 import { SOURCE_BADGE } from "../constants.js";
 import type { ApprovalChoice, ApprovalRequest } from "../types.js";
+import { canonicalStringify as canonicalStringifyForRenderer } from "../../../shared/canonical-json.js";
 import { isNonUserTrustOrigin, trustOriginLabel } from "../utils/trust-origin-label.js";
 import {
   SummaryTile,
@@ -47,15 +51,72 @@ export function ToolApprovalDialog({
   onDecide: (choice: ApprovalChoice, pattern?: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+  // R-4: NL justification (required for HIGH verdict approvals)
+  const [nlJustification, setNlJustification] = useState("");
+  // R-4: Scope selector ("session" | "persistent"). HIGH forces "session".
+  const [scopeChoice, setScopeChoice] = useState<"session" | "persistent">("session");
+  const nlInputRef = useRef<HTMLInputElement>(null);
 
-  // 키보드 단축키
+  // Reset R-4 state when a new request arrives.
+  useEffect(() => {
+    setNlJustification("");
+    setScopeChoice("session");
+  }, [request?.id]);
+
+  const finalVerdict = request?.reviewerVerdict?.level ?? riskLevelForCategory(request?.toolCategory ?? "meta");
+
+  // R-4: HIGH verdict → focus NL field when dialog opens.
+  useEffect(() => {
+    if (open && finalVerdict === "high") {
+      // Small delay so the dialog animation completes first.
+      const t = setTimeout(() => nlInputRef.current?.focus(), 100);
+      return () => clearTimeout(t);
+    }
+  }, [open, finalVerdict]);
+
+  // R-4: Approve is disabled for HIGH when NL field is empty.
+  const approveDisabled = finalVerdict === "high" && nlJustification.trim().length === 0;
+
+  // R-4: Wrap onDecide("allow-*") to record approval before deciding.
+  // R-2 Round-3 CRITICAL: use canonicalStringify for args + propagate trustOrigin
+  // + approvalCacheKey so that the record key matches the lookup key in
+  // dispatchReviewer. Without this, R-2 memory hit rate is 0%.
+  // Fire-and-await pattern: onDecide is called synchronously so the UI
+  // responds immediately; the record IPC is awaited in the background so
+  // test assertions on onDecide do not need to drain microtask queues.
+  async function handleApprove(choice: ApprovalChoice, pattern?: string) {
+    let recordPromise: Promise<unknown> | undefined;
+    if (request) {
+      // canonicalStringify: sort object keys so {a,b} and {b,a} produce the
+      // same string — matching how dispatchReviewer builds the lookup key.
+      const canonicalArgs = canonicalStringifyForRenderer(request.args ?? {});
+      recordPromise = window.lvis?.userApproval?.record({
+        toolName: request.toolName,
+        args: canonicalArgs,
+        source: request.source ?? "builtin",
+        scope: finalVerdict === "high" ? "session" : scopeChoice,
+        verdictAtApproval: finalVerdict as "low" | "medium" | "high",
+        nlJustification: finalVerdict === "high" ? nlJustification.trim() : null,
+        trustOrigin: request.trustOrigin,
+        approvalCacheKey: request.approvalCacheKey,
+      }).catch((err: unknown) => {
+        console.warn("[R-2] user-approval record failed (non-fatal):", err);
+      });
+    }
+    // Call onDecide synchronously so the UI responds immediately.
+    onDecide(choice, pattern);
+    // Await the record promise in the background (non-blocking for the user).
+    await recordPromise;
+  }
+
+  // 키보드 단축키 (disabled for HIGH when NL field empty)
   useEffect(() => {
     if (!open || !request) return;
     const handler = (e: KeyboardEvent) => {
       if (isTextEntryShortcutTarget(e.target)) return;
       if (e.key.toLowerCase() === "a" && !e.metaKey && !e.ctrlKey) {
         e.preventDefault();
-        onDecide("allow-once");
+        if (!approveDisabled) void handleApprove("allow-once");
       } else if (e.key.toLowerCase() === "d" && !e.metaKey && !e.ctrlKey) {
         e.preventDefault();
         onDecide("deny-once");
@@ -63,7 +124,8 @@ export function ToolApprovalDialog({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [open, request, onDecide]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, request, onDecide, approveDisabled]);
 
   if (!request) return null;
 
@@ -76,8 +138,8 @@ export function ToolApprovalDialog({
   const hasPending = pendingCount > 1;
   const originLabel = trustOriginLabel(request.trustOrigin);
   const category = request.toolCategory ?? "meta";
-  const riskLevel = request.reviewerVerdict?.level ?? riskLevelForCategory(category);
-  const badgeClassName = levelBadgeClass(riskLevel);
+  // finalVerdict already computed above (before the null-check guard) — use it here.
+  const badgeClassName = levelBadgeClass(finalVerdict as RiskLevel);
   const rows = approvalReviewRows(request, category, argsStr, originLabel, source, sourceBadge);
 
   return (
@@ -115,7 +177,7 @@ export function ToolApprovalDialog({
                     technical Korean users and was the most prominent
                     visual element in the dialog. */}
                 <Badge variant="outline" className={`${badgeClassName} shrink-0`}>
-                  {riskLevelKoLabel(riskLevel)}
+                  {riskLevelKoLabel(finalVerdict as RiskLevel)}
                 </Badge>
                 <h3 className="min-w-0 flex-1 text-base font-semibold">
                   {title}
@@ -152,7 +214,7 @@ export function ToolApprovalDialog({
               </SummaryTile>
             </div>
 
-            <div className={`min-w-0 overflow-hidden rounded-md border ${reviewBoxClass(riskLevel)}`}>
+            <div className={`min-w-0 overflow-hidden rounded-md border ${reviewBoxClass(finalVerdict as RiskLevel)}`}>
               <h4 className="border-b px-3 py-2 text-xs font-semibold">
                 {reviewTitleForCategory(category)}
               </h4>
@@ -181,6 +243,37 @@ export function ToolApprovalDialog({
 
             <PermissionEvaluationContextPanel context={request.evaluationContext} />
 
+            {/* MAJOR 1.6: NL justification moved above collapsible details so it's
+                visible without scrolling when the HIGH verdict disables Approve. */}
+            {/* R-4: NL justification — required for HIGH verdict */}
+            {finalVerdict === "high" && (
+              <div className="mt-3 rounded-md border border-destructive/30 bg-destructive/5 p-3">
+                <Label
+                  htmlFor="nl-justification"
+                  className="mb-1.5 block text-xs font-semibold text-destructive"
+                >
+                  이 작업의 목적을 한 문장으로 입력하세요 (필수)
+                  <span className="ml-1.5 text-[10px] font-normal text-muted-foreground">
+                    범위: 이 세션만 (HIGH 고정)
+                  </span>
+                </Label>
+                <Input
+                  id="nl-justification"
+                  ref={nlInputRef}
+                  type="text"
+                  value={nlJustification}
+                  onChange={(e) => setNlJustification(e.target.value)}
+                  placeholder="예: 사용자 요청에 따라 프로젝트 디렉터리의 빌드 결과물 삭제"
+                  maxLength={500}
+                  className="h-8 text-xs"
+                  data-testid="nl-justification-input"
+                />
+                <p className="mt-1 text-[10px] text-muted-foreground">
+                  높은 위험도 작업은 승인 사유를 기록합니다. 세션 종료 후 재승인이 필요합니다.
+                </p>
+              </div>
+            )}
+
             <details className="min-w-0 rounded-md border bg-muted/20">
               <summary className="cursor-pointer px-3 py-2 text-xs font-semibold">
                 전체 입력 보기
@@ -202,6 +295,27 @@ export function ToolApprovalDialog({
             </details>
           </div>
 
+          {/* R-4: Scope selector — LOW/MEDIUM only (HIGH is always session) */}
+          {finalVerdict !== "high" && (
+            <div className="mt-3">
+              <p className="mb-1.5 text-xs font-semibold">승인 범위</p>
+              <RadioGroup
+                value={scopeChoice}
+                onValueChange={(v) => setScopeChoice(v as "session" | "persistent")}
+                className="flex gap-4"
+              >
+                <div className="flex items-center gap-1.5">
+                  <RadioGroupItem value="session" id="scope-session" />
+                  <Label htmlFor="scope-session" className="text-xs">이 세션만</Label>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <RadioGroupItem value="persistent" id="scope-persistent" />
+                  <Label htmlFor="scope-persistent" className="text-xs">지속 허용</Label>
+                </div>
+              </RadioGroup>
+            </div>
+          )}
+
           <div className="mt-4 flex flex-wrap justify-end gap-2 border-t pt-3">
             <Button
               size="sm"
@@ -222,18 +336,27 @@ export function ToolApprovalDialog({
             <Button
               size="sm"
               variant="outline"
-              onClick={() => onDecide("allow-always", request.toolName)}
+              onClick={() => void handleApprove("allow-always", request.toolName)}
+              disabled={approveDisabled}
+              title={approveDisabled ? "사유를 입력하세요" : undefined}
+              aria-describedby={approveDisabled ? "nl-justification-hint" : undefined}
             >
               항상 허용
             </Button>
             <Button
               size="sm"
               variant="default"
-              onClick={() => onDecide("allow-once")}
-              title="단축키: A"
+              onClick={() => void handleApprove("allow-once")}
+              disabled={approveDisabled}
+              title={approveDisabled ? "사유를 입력하세요" : "단축키: A"}
+              aria-describedby={approveDisabled ? "nl-justification-hint" : undefined}
+              data-testid="approve-button"
             >
               한 번만 허용
             </Button>
+            <span id="nl-justification-hint" className="sr-only">
+              HIGH 위험 작업은 NL 사유 입력이 필수입니다
+            </span>
           </div>
         </section>
       </DialogContent>

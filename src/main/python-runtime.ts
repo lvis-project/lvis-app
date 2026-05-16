@@ -20,6 +20,7 @@ import type { BrowserWindow } from "electron";
 import { createLogger } from "../lib/logger.js";
 import { resolvePluginPaths } from "../plugins/plugin-paths.js";
 import { readPluginRegistry, resolveManifestPathsFromRegistry } from "../plugins/registry.js";
+import { getSandboxRunner } from "../permissions/sandbox-runner.js";
 import { resolveUvTarget, type UvTarget } from "../../scripts/uv-targets.mjs";
 import { lvisHome } from "../shared/lvis-home.js";
 const log = createLogger("python-runtime");
@@ -456,6 +457,21 @@ export class PythonRuntimeBootstrapper {
       // UV_CACHE_DIR (via the whitelist above or extraEnv) takes precedence.
       if (env.UV_CACHE_DIR === undefined) {
         env.UV_CACHE_DIR = UV_CACHE_DIR_PATH;
+      }
+
+      // §691 PR-A4: SandboxRunner adoption gate for uv spawn.
+      // When LVIS_SANDBOX_ENABLED=1 and a runner is registered, log the
+      // intent. Full adoption is deferred until SandboxedProcess exposes a
+      // Node.js-compatible stream API (SandboxedProcess uses WHATWG
+      // ReadableStream; runUv uses .on("data") event emitter pattern).
+      // Tracking: #691 spawn-path follow-up.
+      if (process.env.LVIS_SANDBOX_ENABLED === "1") {
+        const runner = getSandboxRunner(process.platform);
+        if (runner) {
+          // Runner is available — future: wrap spawn via runner.spawn()
+          // once SandboxedProcess stream compat is resolved.
+          void this.log("[python-runtime] LVIS_SANDBOX_ENABLED: uv runner available (full adoption pending stream compat)");
+        }
       }
 
       const proc = spawn(uvBin, args, { env, stdio: ["ignore", "pipe", "pipe"] });
