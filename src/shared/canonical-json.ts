@@ -66,15 +66,39 @@
  * Spec ref: docs/research/sandbox-isolation.md §R-2
  * Issue: #691 PR-A4 Round 5, #800 value-type docs
  */
+/**
+ * Defense-in-depth limits (issue #797).
+ *
+ * Production inputs (JSON-parsed LLM tool args, user-typed strings) cannot
+ * carry cycles or extreme nesting, so these guards are not exploitable
+ * today. They protect against future code paths that might call into this
+ * function with renderer-constructed objects (React state refs, DOM
+ * nodes) where cycles + huge graphs are easier to introduce.
+ */
+const MAX_DEPTH = 100;
+
 export function canonicalStringify(value: unknown): string {
+  return canonicalStringifyInner(value, new WeakSet(), 0);
+}
+
+function canonicalStringifyInner(
+  value: unknown,
+  seen: WeakSet<object>,
+  depth: number,
+): string {
+  if (depth > MAX_DEPTH) return '"[MaxDepth]"';
   if (value === undefined) return "null";
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     return JSON.stringify(value) ?? "null";
   }
+  if (seen.has(value as object)) return '"[Circular]"';
+  seen.add(value as object);
   const obj = value as Record<string, unknown>;
   const sortedKeys = Object.keys(obj)
     .filter(k => obj[k] !== undefined)
     .sort();
-  const parts = sortedKeys.map(k => `${JSON.stringify(k)}:${canonicalStringify(obj[k])}`);
+  const parts = sortedKeys.map(
+    k => `${JSON.stringify(k)}:${canonicalStringifyInner(obj[k], seen, depth + 1)}`,
+  );
   return `{${parts.join(",")}}`;
 }
