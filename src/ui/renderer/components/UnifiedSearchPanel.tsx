@@ -36,7 +36,7 @@ export interface UnifiedSearchPanelProps {
   onJumpToConversationMatch: (matchIndex: number) => void;
   onOpen: () => void;
   onClose: () => void;
-  onLoadSession: (sessionId: string) => void | Promise<void>;
+  onLoadSession: (sessionId: string) => void | boolean | Promise<void | boolean>;
   onOpenMemoryView: () => void;
   onOpenRoutinesView: () => void;
 }
@@ -193,8 +193,10 @@ export function UnifiedSearchPanel({
   };
 
   const handleLoadSession = (sessionId: string) => {
-    void onLoadSession(sessionId);
-    handleClose();
+    void (async () => {
+      const loaded = await onLoadSession(sessionId);
+      if (loaded !== false) handleClose();
+    })();
   };
 
   return (

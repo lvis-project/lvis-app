@@ -28,7 +28,7 @@ import { isValidCronExpression } from "../../../routines/cron-evaluator.js";
 
 export interface RoutinePanelProps {
   api: LvisApi;
-  onOpenSession?: (sessionId: string) => void;
+  onOpenSession?: (sessionId: string) => void | boolean | Promise<void | boolean>;
 }
 
 // ─── Execution badge ─────────────────────────────────────────────────────────
