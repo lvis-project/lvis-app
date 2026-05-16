@@ -32,10 +32,12 @@
  * `PermissionsTab.refreshProviderKeyMap()` fires under test.
  *
  * `data-disabled=""` — Radix Select renders the attribute as an empty
- * string on disabled SelectItems and omits it entirely on enabled ones.
- * The assertion `toHaveAttribute('data-disabled', '')` checks for the
- * exact disabled contract; `.not.toHaveAttribute('data-disabled', '')`
- * asserts the attribute is absent (enabled).
+ * string on disabled SelectItems and omits it entirely (`void 0`) on
+ * enabled ones. Assertions:
+ *   - disabled → `toHaveAttribute('data-disabled', '')` (exact empty).
+ *   - enabled  → `not.toHaveAttribute('data-disabled')` (1-arg form
+ *     asserts attribute ABSENT, not just "not equal to ''" — guards
+ *     against future Radix versions emitting `data-disabled="false"`).
  */
 import { test, expect } from './fixtures';
 import { openSettingsWindow } from './settings-window';
@@ -91,6 +93,28 @@ async function setApiKey(
   expect(result.ok).toBe(true);
 }
 
+/**
+ * Delete an LLM provider API key through the public preload bridge —
+ * the production revoke path that removes the secrets entry entirely
+ * (vs. `setApiKey(vendor, '')` which stores an empty-encrypted value
+ * and is NOT what the host treats as "no key").
+ */
+async function deleteApiKey(
+  settingsWindow: Page,
+  vendor: string,
+): Promise<void> {
+  const result = await settingsWindow.evaluate(async (v) => {
+    const api = (window as unknown as {
+      lvisApi?: {
+        deleteApiKey?: (vendor: string) => Promise<{ ok: boolean }>;
+      };
+    }).lvisApi;
+    if (!api?.deleteApiKey) throw new Error('window.lvisApi.deleteApiKey unavailable');
+    return api.deleteApiKey(v);
+  }, vendor);
+  expect(result.ok).toBe(true);
+}
+
 /** Patch the foundry baseUrl through `window.lvisApi.updateSettings`. */
 async function setFoundryBaseUrl(
   settingsWindow: Page,
@@ -137,7 +161,7 @@ test.describe('PermissionsTab reviewer provider dropdown — #768', () => {
     await openProviderDropdown(settingsWindow);
     // Allow a moment for the SETTINGS.updated broadcast to flow back to the
     // renderer and refreshProviderKeyMap to repaint the option list.
-    await expect(foundryOption).not.toHaveAttribute('data-disabled', '', {
+    await expect(foundryOption).not.toHaveAttribute('data-disabled', {
       timeout: 5_000,
     });
     await expect(foundryOption).not.toContainText('(키 없음)');
@@ -165,7 +189,7 @@ test.describe('PermissionsTab reviewer provider dropdown — #768', () => {
     // ─── 2. Save gemini key → enables gcp-playground ─────────────────
     await setApiKey(settingsWindow, 'gemini', 'AIza-gcp-e2e-test-key');
     await openProviderDropdown(settingsWindow);
-    await expect(gcpOption).not.toHaveAttribute('data-disabled', '', {
+    await expect(gcpOption).not.toHaveAttribute('data-disabled', {
       timeout: 5_000,
     });
     await expect(gcpOption).not.toContainText('(키 없음)');
@@ -207,7 +231,7 @@ test.describe('PermissionsTab reviewer provider dropdown — #768', () => {
     // this assertion fails before merge.
     await setApiKey(settingsWindow, 'anthropic', 'sk-ant-e2e-test-key');
     await openProviderDropdown(settingsWindow);
-    await expect(anthropicOption).not.toHaveAttribute('data-disabled', '', {
+    await expect(anthropicOption).not.toHaveAttribute('data-disabled', {
       timeout: 5_000,
     });
     await expect(anthropicOption).not.toContainText('(키 없음)');
@@ -253,16 +277,24 @@ test.describe('PermissionsTab reviewer provider dropdown — #768', () => {
     await setFoundryBaseUrl(settingsWindow, FOUNDRY_BASE_URL);
     await openProviderDropdown(settingsWindow);
     const foundryOption = settingsWindow.getByTestId('reviewer-provider-option-foundry');
-    await expect(foundryOption).not.toHaveAttribute('data-disabled', '', {
+    await expect(foundryOption).not.toHaveAttribute('data-disabled', {
       timeout: 5_000,
     });
     await expect(foundryOption).not.toContainText('(키 없음)');
     await closeProviderDropdown(settingsWindow);
 
-    // ─── 2. Revoke the API key (empty string) → SETTINGS.updated fires
-    //       → refreshProviderKeyMap re-renders → option becomes disabled.
-    //       Mirrors the dynamic-enable path in the inverse direction.
-    await setApiKey(settingsWindow, 'azure-foundry', '');
+    // ─── 2. Revoke the API key via the production delete path →
+    //       SETTINGS.updated fires → refreshProviderKeyMap re-renders →
+    //       option becomes disabled. Mirrors the dynamic-enable path in
+    //       the inverse direction. NOTE: `setApiKey(vendor, '')` would
+    //       NOT work — settingsService.setSecret stores an
+    //       empty-encrypted value (truthy in keyring), `getSecret` then
+    //       returns `""` (not `null`), and `reviewerProviderKeyPresent`
+    //       does `getSecret(...) !== null` → still treats key as present.
+    //       The actual revoke contract is the dedicated delete-api-key
+    //       IPC (settings-store.ts deleteSecret), bridged in preload.ts
+    //       as `window.lvisApi.deleteApiKey`.
+    await deleteApiKey(settingsWindow, 'azure-foundry');
     await openProviderDropdown(settingsWindow);
     await expect(foundryOption).toHaveAttribute('data-disabled', '', {
       timeout: 5_000,
