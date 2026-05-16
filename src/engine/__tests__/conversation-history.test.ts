@@ -8,6 +8,26 @@
 import { describe, expect, it } from "vitest";
 import { ConversationHistory } from "../conversation-history.js";
 
+// `ConversationHistory.append` stamps every message with `meta.createdAt`
+// (per-message wall-clock for session-restore UI) and turn-final
+// assistants pick up `meta.turnSummary` from the loop. Both are
+// auto-fields these trimming-invariant tests don't care about — strip
+// them before `.toEqual` to keep the expected fixtures focused on the
+// trim/repair behavior the test actually covers.
+function stripCreatedAt<T extends { meta?: object | undefined }>(m: T): T {
+  const meta = m.meta as Record<string, unknown> | undefined;
+  if (!meta) return m;
+  const { createdAt: _ts, turnSummary: _ts2, ...rest } = meta;
+  void _ts;
+  void _ts2;
+  if (Object.keys(rest).length === 0) {
+    const { meta: _meta, ...without } = m;
+    void _meta;
+    return without as T;
+  }
+  return { ...m, meta: rest as T["meta"] };
+}
+
 describe("ConversationHistory.getCapacityRemaining", () => {
   it("returns the full cap for an empty history", () => {
     const h = new ConversationHistory({ maxMessages: 10 });
@@ -56,7 +76,7 @@ describe("ConversationHistory tool-call invariant", () => {
     h.append({ role: "assistant", content: "answer" });
     h.append({ role: "user", content: "next" });
 
-    expect(h.getMessages()).toEqual([
+    expect(h.getMessages().map(stripCreatedAt)).toEqual([
       { role: "assistant", content: "answer" },
       { role: "user", content: "next" },
     ]);
@@ -82,7 +102,7 @@ describe("ConversationHistory tool-call invariant", () => {
       },
     ]);
 
-    expect(h.getMessages()).toEqual([
+    expect(h.getMessages().map(stripCreatedAt)).toEqual([
       { role: "assistant", content: "visible text" },
       { role: "assistant", content: "final" },
     ]);
@@ -104,7 +124,7 @@ describe("ConversationHistory tool-call invariant", () => {
       },
     ]);
 
-    expect(h.getMessages()).toEqual([
+    expect(h.getMessages().map(stripCreatedAt)).toEqual([
       { role: "assistant", content: "visible text" },
     ]);
   });
@@ -122,7 +142,7 @@ describe("ConversationHistory tool-call invariant", () => {
       ],
     });
 
-    expect(h.getMessages()).toEqual([
+    expect(h.getMessages().map(stripCreatedAt)).toEqual([
       { role: "user", content: "older" },
       { role: "assistant", content: "older answer" },
       {
@@ -142,7 +162,7 @@ describe("ConversationHistory tool-call invariant", () => {
       content: "A",
     });
 
-    expect(h.getMessages()).toEqual([
+    expect(h.getMessages().map(stripCreatedAt)).toEqual([
       { role: "assistant", content: "older answer" },
       {
         role: "assistant",

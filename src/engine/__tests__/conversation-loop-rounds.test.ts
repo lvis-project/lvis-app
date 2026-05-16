@@ -1,6 +1,26 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { KeywordEngine } from "../../core/keyword-engine.js";
+// `ConversationHistory.append` stamps every message with `meta.createdAt`
+// (session-restore per-message timestamp UI) and the conversation loop
+// attaches `meta.turnSummary` to the turn-final assistant message
+// (renderer turn-aggregate stats). Both are auto-fields these
+// shape-matching tests don't care about — strip them before `.toEqual`
+// while preserving any OTHER meta fields the tests DO assert on
+// (e.g. activeRolePrompt at the user-message level).
+function stripCreatedAt<T extends { meta?: object | undefined }>(m: T): T {
+  const meta = m.meta as Record<string, unknown> | undefined;
+  if (!meta) return m;
+  const { createdAt: _ts, turnSummary: _ts2, ...rest } = meta;
+  void _ts;
+  void _ts2;
+  if (Object.keys(rest).length === 0) {
+    const { meta: _meta, ...without } = m;
+    void _meta;
+    return without as T;
+  }
+  return { ...m, meta: rest as T["meta"] };
+}
 import { RouteEngine } from "../../core/route-engine.js";
 import { ConversationLoop } from "../conversation-loop.js";
 import type { LLMProvider, StreamEvent } from "../llm/types.js";
@@ -89,7 +109,7 @@ describe("ConversationLoop queryLoop", () => {
       rolePrompt: { name: "Reviewer", systemPromptAdd: "Review carefully." },
     });
 
-    expect(loop.getHistory().getMessages()[0]).toEqual({
+    expect(stripCreatedAt(loop.getHistory().getMessages()[0])).toEqual({
       role: "user",
       content: "review this",
       meta: {
@@ -416,7 +436,7 @@ describe("ConversationLoop queryLoop", () => {
       { type: "start", name: "list_directory" },
       { type: "end", name: "list_directory" },
     ]);
-    expect(loop.getHistory().getMessages()).toEqual([
+    expect(loop.getHistory().getMessages().map(stripCreatedAt)).toEqual([
       { role: "user", content: "질문" },
       {
         role: "assistant",
