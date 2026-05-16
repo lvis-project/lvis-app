@@ -1,12 +1,24 @@
 # Research: OS-Level Sandbox Isolation for LVIS Tool Execution
 
-**Status: pending approval**
+**Status: DECIDED** (all D1–D9 finalized 2026-05-16)
 
 **Issue**: #691 (sandbox capability + reviewer SOT integration)
 
-**Date**: 2026-05-15
+**Date**: 2026-05-15 (created) / 2026-05-16 (decisions finalized)
 
 **Scope**: C1 deliverable — per-OS sandbox tool evaluation + wrapper interface design (research + decision items only; zero code changes)
+
+---
+
+## Two Evaluation Surfaces
+
+| Surface | Scope | Audience | Cadence |
+|---|---|---|---|
+| S1 — Dev validation | LVIS sandbox implementation (bwrap command args, SBPL profile, AppContainer manifest correctness) | LVIS developers | PR / pre-release CI |
+| S2 — Runtime audit | Production tool-call observability (sandbox enforcement triggered? bypass detected? verdict path?) | LVIS operators / users | Every tool invocation |
+
+Decisions D1 through D9 (this document) govern the S1 implementation stack.
+Decision E-D5 + R-1/R-2/R-3/R-4 audit fields govern S2. See `network-restricted-eval.md` §3.6 for S2 runtime audit JSON schema.
 
 ---
 
@@ -29,9 +41,7 @@ This research documents the integration points where sandbox capability will plu
 
 ### Evaluation Context Integration Gap
 
-**Decision Item D7 (deferred)**: `src/permissions/evaluation-context.ts` — the PermissionEvaluationContext interface does **NOT** currently carry an `executionSandbox` field. Sandbox capability is rendered into the reviewer system prompt via the formatter (`sandbox-capability.ts:89-93`), not via evaluation-context injection. Research must note this discrepancy and propose either:
-- (a) Extend evaluation-context with `executionSandbox: SandboxCapability` for explicit context passing, or
-- (b) Keep the current prompt-side rendering pathway and ensure the formatter is the canonical site for capability → prompt translation.
+**Decision Item D7 (DECIDED: keep prompt-side rendering)**: `src/permissions/evaluation-context.ts` — the PermissionEvaluationContext interface does **NOT** currently carry an `executionSandbox` field. Sandbox capability is rendered into the reviewer system prompt via the formatter (`sandbox-capability.ts:89-93`), not via evaluation-context injection. The formatter pathway is the canonical site for capability → prompt translation. No evaluation-context change required.
 
 ---
 
@@ -58,73 +68,64 @@ This research documents the integration points where sandbox capability will plu
 | **landlock LSM v4** | PARTIAL (fs-only, no network; must pair with bwrap for egress block) | PASS (kernel policy, <2% overhead) | PASS (GPL-2.0) | N/A (Linux-only) | **PARTIAL** | Filesystem-only isolation via LSM stackable layer. Does NOT isolate network egress independently. Combining bwrap + landlock feasible but increases audit surface. Forward-path: v5+ may add network controls. Decision item D6: extend SandboxKind for `"fs-only"` isolation if used. |
 | **firejail** | PASS (network isolation via custom seccomp + netfilter) | PARTIAL (estimated 5–10% overhead but less predictable than bwrap) | PASS (GPL-3.0) | N/A (Linux-only) | **PASS** | Older, more features but less kernel-verified guarantees than bwrap. Used in some desktop environments. Bwrap is recommended over firejail for simpler, more auditable profiles. |
 
-**Linux Recommendation**: bwrap primary + landlock v4 optional hardening (decision D1).
+**Linux Recommendation**: bwrap OS-only (D1 DECIDED). No bundled binary.
 
 ### macOS
 
 | Candidate | Egress Block | Perf Overhead | License | Windows | Verdict | Notes |
 |---|---|---|---|---|---|---|
-| **sandbox-exec (`/usr/bin/sandbox-exec`)** | **PARTIAL** (policy-best-effort; `(deny network*)` does NOT cleanly block localhost IPv4/IPv6, system DNS resolver, Bonjour/mDNS, UNIX-domain-socket exfil to localhost services; bypass paths documented) | PASS (estimated <3% OS primitive overhead) | N/A (Apple system binary) | N/A (macOS-only) | **PARTIAL** | Undocumented but present in macOS 14.x/15.x. Custom `.sb` security profiles allow fine-grained policy. **Critical caveat**: sandbox-exec evidence quality is policy-best-effort, NOT verified-kernel. Known bypass paths: localhost binding (raw socket or UNIX domain), IPv6 link-local, system DNS via /etc/resolv.conf, Bonjour (mDNS multicast). See pre-mortem §Failure scenario 3 (sandbox-exec removal in macOS 16+). Decision item D2: accept PARTIAL with Lima fallback, or refuse-to-launch on macOS? |
+| **sandbox-exec (`/usr/bin/sandbox-exec`)** | **PARTIAL** (policy-best-effort; `(deny network*)` does NOT cleanly block localhost IPv4/IPv6, system DNS resolver, Bonjour/mDNS, UNIX-domain-socket exfil to localhost services; bypass paths documented) | PASS (estimated <3% OS primitive overhead) | N/A (Apple system binary) | N/A (macOS-only) | **PARTIAL** | Undocumented but present in macOS 14.x/15.x. Custom `.sb` security profiles allow fine-grained policy. **Critical caveat**: sandbox-exec evidence quality is policy-best-effort, NOT verified-kernel. Known bypass paths: localhost binding (raw socket or UNIX domain), IPv6 link-local, system DNS via /etc/resolv.conf, Bonjour (mDNS multicast). See pre-mortem §10 Failure scenario 3. |
 | **App Sandbox (Entitlements)** | PASS (verified-kernel for packaged apps) | PASS (<1% overhead, app-native) | N/A (Apple system) | N/A (macOS-only) | **FAIL** | Requires app re-codesigning + entitlements manifest. Electron asar + codesigning compatibility unverified. App Sandbox is per-app declarative (not per-tool dynamic). Rejected because LVIS dynamic tool execution cannot pre-declare all tool egress rules. |
 
-**macOS Recommendation**: sandbox-exec PARTIAL + Lima fallback for high-sensitivity tool calls (decision D2).
+**macOS Decision (D2 DECIDED)**: sandbox-exec PARTIAL accepted. Lima fallback dropped entirely (see §9 Considered & Rejected).
 
 ### Windows
 
 | Candidate | Egress Block | Perf Overhead | License | Windows | Verdict | Notes |
 |---|---|---|---|---|---|---|
-| **AppContainer + Win32 Job Object** | PASS (verified-kernel; capability SIDs isolate network access; Job Object enforces process limits) | PASS (estimated 2–5% OS overhead) | N/A (Windows system) | PASS (native) | **PASS** (subject to D3 validation) | Mature Windows native isolation. AppContainer = capability SID model (no-internetClient capability blocks outbound network). Win32 Job Object = process/UI restrictions. **Caveat**: Electron + asar packaging + AppContainer manifest compatibility unverified (plan-risk #2). Decision item D3: requires confirmation that Electron app.asar can be bundled in AppContainer + test deployment. If incompatible, fallback to WSL2. |
+| **AppContainer + Win32 Job Object** | PASS (verified-kernel; capability SIDs isolate network access; Job Object enforces process limits) | PASS (estimated 2–5% OS overhead) | N/A (Windows system) | PASS (native) | **PASS** | Mature Windows native isolation. AppContainer = capability SID model (no-internetClient capability blocks outbound network). Win32 Job Object = process/UI restrictions. **Caveat**: Electron + asar packaging + AppContainer manifest compatibility — smoke test required in build epic. If compat test fails: isolation=none (no fallback runner). |
 | **Win32 Job Object (alone)** | FAIL (no network isolation, only process limits) | PASS (<1% OS overhead) | N/A | PASS | **FAIL** | Process/UI restrictions only; no network/fs isolation. Rejected as insufficient per criterion 1. |
-| **WSL2 (Windows Subsystem for Linux)** | PASS (verified-kernel via Linux kernel inside WSL) | PARTIAL (estimated 10–20% overhead: VM boot, file sync, network relay) | PASS (free Windows feature) | PASS (one-time install) | **PASS** (fallback only) | Linux kernel inside Windows VM. One-time installation, then zero per-invocation elevation. Performance acceptable as fallback for high-sensitivity tools. LGE corp MSI installer can automate WSL2 setup. Decision item D3: WSL2 reserved as Windows fallback if AppContainer+asar compat test fails. |
+| **WSL2 (Windows Subsystem for Linux)** | PASS (verified-kernel via Linux kernel inside WSL) | PARTIAL (estimated 10–20% overhead: VM boot, file sync, network relay) | PASS (free Windows feature) | PASS (one-time install) | **CONSIDERED AND REJECTED** (see §9) | WSL2 was the recommended Windows fallback in the original research. Decision D3 drops WSL2 in favor of AppContainer-only. If AppContainer compat test fails, result is isolation=none, not WSL2. |
 | **Sandboxie-Plus** | PASS (user-mode isolation, API hooking) | PARTIAL (estimated 15–25% overhead; more heavyweight than OS primitives) | FAIL (GPL-3.0 + proprietary fork model; licensing ambiguity) | PARTIAL (deprecated in modern Windows) | **FAIL** | Dual-license (Classic GPL-3.0 / Plus proprietary) creates license-ambiguity risk. Deprecated in favor of AppContainer + Windows Defender Application Guard. Rejected on License criterion. |
 
-**Windows Recommendation**: AppContainer+Job Object primary + WSL2 fallback (decision D3).
+**Windows Decision (D3 DECIDED)**: AppContainer + Win32 Job Object only. WSL2 fallback dropped entirely.
 
 ---
 
-## 4. Surviving Candidates & Recommended Stack
+## 4. Surviving Candidates & Recommended Stack (DECIDED)
 
-After applying disqualification filters:
+After applying disqualification filters and finalizing D1–D3:
 
-### Primary (Option A) — Per-OS Native + Unified TS Wrapper
+### Primary — Per-OS Native + Unified TS Wrapper (DECIDED)
 
 **Linux**: bwrap (`--unshare-net --bind-try / / --ro-bind /home ~ --bind ...`)
 - Egress block: verified-kernel (CLONE_NEWNET namespace)
-- Deployment: system package (dnf bwrap on RHEL-family) or static-linked binary bundled in LVIS
-- Decision item D1: choose package dependency vs bundled binary
+- Deployment: OS package only (`dnf install bubblewrap` on RHEL-family)
+- **D1 DECIDED**: OS package only — no bundled binary, no hybrid fallback
+- If bwrap unavailable: isolation=none + user notification + reviewer no-downgrade active
 
 **macOS**: sandbox-exec with custom `.sb` profile
 - Egress block: policy-best-effort (known bypass paths; marked PARTIAL)
-- Fallback: Lima VM (Option B2) for high-sensitivity tool calls
-- Decision item D2: accept PARTIAL with user toggle, or default to Lima?
+- **D2 DECIDED**: PARTIAL accepted — isolation surfaced as `kind="partial"` to user and composition rule
+- Lima fallback: dropped (see §9)
 
 **Windows**: AppContainer + Win32 Job Object
 - Egress block: verified-kernel (capability SID no-internetClient)
-- Deployment: Electron asar with AppContainer manifest registration
-- Validation: requires proof of Electron+asar+AppContainer compatibility (decision item D3)
-- Fallback: WSL2 if AppContainer compat test fails
+- Deployment: Electron asar with AppContainer manifest registration (OS-native)
+- **D3 DECIDED**: AppContainer only — build epic includes compat smoke test; FAIL → isolation=none
+- WSL2 fallback: dropped (see §9)
 
-### Fallback (Option B2) — Linux-Container Runners for PARTIAL OS Rows
+### Previously Considered: Fallback Runners (Option B2) — Considered and Rejected
 
-When an OS row is PARTIAL or compat test fails:
-
-**Lima** (macOS fallback)
-- One-time install: ~500 MB VM image download
-- Per-tool overhead: 10–15% (container overhead + file sync)
-- License: MIT (free)
-- Deployment: signed LGE MSI installer bundles Lima setup script; first boot auto-runs, then zero elevation on tool spawn
-
-**WSL2** (Windows fallback)
-- One-time install: ~3 GB distro download + kernel setup
-- Per-tool overhead: 10–20% (VM intercommunication + file sync)
-- License: free Windows feature
-- Deployment: signed LGE MSI installer; first boot auto-runs WSL2 init; subsequent tool calls via `wsl` CLI
+> The original research proposed Lima (macOS) and WSL2 (Windows) as fallback container runners
+> for PARTIAL OS rows. These options were evaluated and rejected during the decision review
+> (2026-05-16). See §9 for rationale.
 
 ---
 
 ## 5. Wrapper Interface Design
 
-The `SandboxRunner` interface abstracts per-OS tools and allows boot-time registration of fallback runners (Option B2). All 4+ spawn paths adopt the same interface without code duplication.
+The `SandboxRunner` interface abstracts per-OS tools and allows boot-time registration. All 5 spawn paths adopt the same interface without code duplication.
 
 ### TS Pseudocode: Core Interfaces
 
@@ -152,7 +153,7 @@ export interface SandboxCapabilityDescriptor {
 
 /**
  * Single sandbox runner abstraction.
- * Each OS registers one primary runner + optional fallback.
+ * Each OS registers one primary runner.
  * 
  * The runner is responsible for:
  *   1. Executing cmd/args with the given capability constraints
@@ -180,6 +181,7 @@ export interface SandboxRunner {
   /**
    * Detect whether this runner is available on the current platform.
    * Called at boot to validate runner registration.
+   * If unavailable: boot sets kind="none", notifies user.
    * 
    * @returns - { available: boolean, reason: string }
    */
@@ -201,30 +203,30 @@ export interface SandboxedProcess {
 
 /**
  * Boot-time registration for per-OS sandbox runners.
- * Allows swappable primary + fallback per platform.
+ * One primary runner per platform — no fallback chain.
  * 
  * Example:
- *   registerSandboxRunner("darwin", new SandboxExecRunner()); // primary
- *   registerSandboxRunner("darwin", new LimaRunner()); // fallback (opt-in)
+ *   registerSandboxRunner("linux", new BwrapRunner());
+ *   registerSandboxRunner("darwin", new SandboxExecRunner());
+ *   registerSandboxRunner("win32", new AppContainerRunner());
  */
 export function registerSandboxRunner(
   platform: "linux" | "darwin" | "win32",
   runner: SandboxRunner,
-  isGrafallback?: boolean,
 ): void {
-  // Boot-time wiring; 4 spawn paths call getSandboxRunner(platform)
+  // Boot-time wiring; 5 spawn paths call getSandboxRunner(platform)
 }
 
 export function getSandboxRunner(
   platform: "linux" | "darwin" | "win32",
 ): SandboxRunner | undefined {
-  // Returns primary or fallback based on availability + user settings
+  // Returns registered runner for platform, or undefined if detect() failed
 }
 ```
 
 ### Integration at Spawn Paths (No Code Changes; Design Only)
 
-**Spawn paths** in LVIS that will adopt the wrapper:
+**Spawn paths** in LVIS that will adopt the wrapper (5 total, D9 DECIDED in-scope):
 
 1. **`src/tools/bash.ts`** — shell execution
    ```
@@ -252,71 +254,66 @@ export function getSandboxRunner(
    const proc = await runner.spawn(workerPath, workerArgs, capabilities);
    ```
 
-5. **MCP child-process spawn** (decision item D9: in-scope or deferred?) — if MCP tools are invoked as subprocesses, add wrapper adoption.
+5. **MCP child-process spawn** (D9 DECIDED: in-scope) — MCP tools invoked as subprocesses adopt `SandboxRunner.spawn()` as the 5th path. Same interface; no special MCP-specific runner.
 
 ---
 
-## 6. Deployment & Distribution Model
+## 6. Deployment & Distribution Model (D8 DECIDED: OS-only)
 
-### Binary Bundle vs. OS-Dependency Trade-off
+**Decision D8 DECIDED**: OS dependencies only. No bundled binaries. No hybrid path.
 
-**Option A1** — Bundled binaries
-- bwrap: 1.5 MB x86_64/arm64 static-linked binary in `resources/sandbox/`
-- Pros: zero OS dependency, works on any RHEL/Debian/Alpine
-- Cons: audit burden (binary verification), platform-specific builds, update channel management
-- LGE precedent: corporate builds often bundle frequently-updated tools
+### OS-Dependency Model
 
-**Option A2** — OS package dependency
-- Linux: assume `dnf install bubblewrap` available on target RHEL 8/9 (decision item D1)
-- macOS: sandbox-exec is OS-provided; .sb profiles ship with app
-- Windows: AppContainer is OS-native; WSL2 auto-install via signed MSI
-- Pros: minimal attack surface, OS vendor maintains bwrap, natural update path
-- Cons: deployment team must verify availability on all target distros
+**Linux**: `dnf install bubblewrap` (RHEL/CentOS/Fedora) or `apt install bubblewrap` (Debian/Ubuntu)
+- LVIS boot calls `bwrap --version` to detect availability
+- If absent: `detectSandboxCapability()` returns `{ kind: "none", confidence: "assumed" }`
+- User notification: "bubblewrap not installed. Run `dnf install bubblewrap` for sandbox isolation."
+- Reviewer operates with no-downgrade active (kind="none" triggers weak-sandbox predicate)
 
-**Option A3** — Hybrid (chosen in ADR §Consequence)
-- Linux: prefer OS package with fallback to bundled binary if unavailable
-- macOS: sandbox-exec (OS) + Lima fallback (bundled VM image ~500MB)
-- Windows: AppContainer (OS) + WSL2 (one-time install via MSI)
-- Cons: doubles audit surface (native + bundled paths)
+**macOS**: `/usr/bin/sandbox-exec` (OS-provided, always present on macOS 14/15)
+- Detects via `sandbox-exec -n /dev/null true` (no-op test)
+- Returns `kind: "sandbox-exec"`, `confidence: "policy-best-effort"` (PARTIAL)
 
-**Decision Item D8** (deployment phase): choose A1 (bundled), A2 (dependency), or A3 (hybrid). Decision affects boot initialization, version management, and security audit scope. **Per CLAUDE.md "No Fallback Code" rule**: if A3 hybrid is chosen, explicit deprecation plan + removal date for the non-primary path is required (e.g., "fallback binary removed Q3 2026 after all deployments confirm OS availability").
+**Windows**: AppContainer (OS-native capability in Windows 10+)
+- LVIS boot runs AppContainer compat smoke test
+- Pass → `kind: "appcontainer"`, `confidence: "verified-kernel"`
+- Fail → `kind: "none"`, `confidence: "assumed"`, user notification
+
+### Previously Considered: Binary Bundle vs. Hybrid (Rejected)
+
+The original §6 proposed three options (A1 bundled, A2 OS-dependency, A3 hybrid). Decision D8 selects A2 (OS-dependency only):
+- **A1 bundled** (rejected): binary verification audit burden, platform-specific build pipeline, update channel management — all out of scope.
+- **A3 hybrid** (rejected): doubles audit surface; violates "No Fallback Code" principle per CLAUDE.md unless explicit deprecation plan exists. No deprecation plan was viable — hybrid is permanent cruft risk.
 
 ---
 
-## 7. PARTIAL-Row Fallback Policy & Composition Rule Extension
+## 7. PARTIAL-Row Fallback Policy & Composition Rule Extension (DECIDED)
 
 When an OS sandbox detection returns PARTIAL confidence or egress-block evidence is incomplete:
 
-### Policy Options (Decision Item D5)
+### Policy (D5 DECIDED: `kind="partial"`)
 
-**Option D5-a** — Downgrade to `kind: "none"`
-- Effect: weak-sandbox predicate triggers; composition rule kicks in; LLM cannot downgrade MEDIUM/HIGH
-- Pro: conservative; existing composition rule unchanged
-- Con: loses the distinction "sandbox attempted but PARTIAL" vs "no sandbox at all"
+**DECIDED**: Introduce `kind: "partial"` to SandboxKind union — explicitly surfaces the compromise to users and composition rule.
 
-**Option D5-b** — Refuse-to-launch
-- Effect: high-risk tools on macOS (PARTIAL sandbox-exec) fail with user-visible error: "Sandbox unavailable; consider upgrading to macOS with [improvement] or install Lima"
-- Pro: no risk of false confidence
-- Con: forces user action; may interrupt workflows
+- Effect: SandboxKind = `"none" | "bubblewrap" | "sandbox-exec" | "appcontainer" | "partial" | "fs-only"` (D6)
+- UI label: "⚠ OS 격리 부분적" when `kind="partial"` or `kind="sandbox-exec"`
+- Composition rule amendment: `kind="partial"` triggers no-downgrade (same as `kind="none"`)
 
-**Option D5-c** — Introduce `kind: "partial"` to SandboxKind union
-- Effect: SandboxKind = `"none" | "bubblewrap" | "sandbox-exec" | "appcontainer" | "partial"`
-- Pro: explicit distinction in UI ("⚠ OS 격리 부분적") and composition rule ("if kind='partial', apply medium-confidence downgrade gate")
-- Con: requires SandboxKind union extension (decision item D6); composition rule logic grows
+Rejected alternatives (for reference only):
+- **D5-a** (downgrade to kind="none"): loses the distinction "sandbox attempted but PARTIAL" vs "no sandbox at all". Rejected — less informative for users and audit trail.
+- **D5-b** (refuse-to-launch): forces user action; interrupts workflows on macOS where sandbox-exec is the only available option. Rejected — too disruptive for PARTIAL rows.
 
-**Recommendation**: D5-c (`kind: "partial"`) + D6 (union extension) — explicitly surfaces the compromise to users and composition rule. Decision items D5 and D6 are locked together (cannot do D5-c without D6).
-
-### SandboxKind Union Extension (Decision Item D6)
+### SandboxKind Union Extension (D6 DECIDED: add both "partial" + "fs-only")
 
 Current: `"none" | "bubblewrap" | "sandbox-exec" | "appcontainer"`
 
-After D5-c: Add `"partial"` + potentially `"fs-only"` (if landlock-only registration happens in future):
+After D5+D6:
 ```typescript
 export type SandboxKind =
   | "none"              // no isolation active
   | "bubblewrap"        // Linux: verified-kernel network isolation
   | "sandbox-exec"      // macOS: policy-best-effort isolation (sandbox-exec + .sb profile)
-  | "partial"           // OS-level isolation present but evidence quality is PARTIAL (e.g. macOS fallback from sandbox-exec to Lima) 
+  | "partial"           // OS-level isolation present but evidence quality is PARTIAL
   | "appcontainer"      // Windows: verified-kernel via capability SID
   | "fs-only";          // Future: filesystem-only isolation (e.g. landlock without network namespace)
 ```
@@ -331,22 +328,27 @@ If executionSandbox.kind='fs-only', the LLM MUST NOT downgrade HIGH to MEDIUM/LO
 
 ---
 
-## 8. Built-in Deployment & Admin Install Pathway
+## 8. Built-in Deployment & Admin Install Pathway (UPDATED — OS-only)
 
-### LGE Corp MSI Installer Model
+### Detection & User Notification Flow (replaces MSI installer model)
 
-For Windows WSL2 fallback + macOS Lima fallback:
+With D8 DECIDED (OS-only), no bundled installers or MSI auto-installs. LVIS handles missing sandbox via detection + notification:
 
-**First-run behavior**:
-1. User launches LVIS.exe (signed by LGE, elevated installer)
-2. Boot sequence calls `registerSandboxRunner("win32", new WslRunner())`
-3. WslRunner.detect() returns `{ available: false, reason: "WSL2 not installed" }`
-4. Boot fallback: spawn `powershell -Command "wsl --install -d Ubuntu"` with user consent UI
-5. After install, WslRunner is ready; subsequent tool spawns use WSL2
+**Boot sequence**:
+1. LVIS boot calls `detectSandboxCapability()` per OS platform
+2. Per-OS probe executes (e.g. `bwrap --version` on Linux, `sandbox-exec -n /dev/null true` on macOS, AppContainer compat test on Windows)
+3. If probe succeeds: register runner, set appropriate `SandboxKind` + `confidence`
+4. If probe fails: set `kind="none"`, `confidence="assumed"`
+5. User notification (first boot only, dismissable): platform-specific install instruction
+   - Linux: "Install bubblewrap: `sudo dnf install bubblewrap` (RHEL/CentOS) or `sudo apt install bubblewrap` (Debian/Ubuntu)"
+   - Windows: "AppContainer incompatible with this configuration. Sandbox isolation unavailable."
+6. Reviewer operates at isolation=none + no-downgrade composition rule active
 
-**Rationale**: One-time elevation at app install time is operationally acceptable (LGE corp precedent: VC redistributable, Java runtime, etc.). Per-invocation elevation is not acceptable (violates disqualification criterion).
+**Auditing**: boot diagnostics record sandbox detection result + version (or failure reason) to `~/.lvis/audit.log`.
 
-**Auditing**: installer log + boot diagnostics record WSL2/Lima setup + version.
+### Previously Considered: Lima / WSL2 MSI Installer (Rejected)
+
+The original §8 described automatic Lima (macOS) and WSL2 (Windows) installation via LGE MSI installer. This approach was rejected in D2 (Lima 폐기) and D3 (WSL2 폐기). See §9 for full rationale.
 
 ---
 
@@ -361,7 +363,19 @@ Use Lima/WSL2/bwrap everywhere: all OSes route through a Linux container runtime
 - Unnecessary overhead on Linux (bwrap is already verified-kernel + lightweight)
 - Opaque to Electron auto-update (app version != container image version)
 - Per-tool latency penalty (10–20%) vs native (2–5% for AppContainer)
-- **Decision**: rejected; native primary with Option A2/A3 fallback for PARTIAL rows.
+- **Decision**: rejected; native primary with OS-only dependency (D8).
+
+### Option B2 — Linux-Container Runners for PARTIAL OS Rows (Considered and Rejected)
+
+**Lima** (macOS fallback — rejected in D2):
+- Was: one-time ~500 MB VM image download; 10–15% per-tool overhead; MIT license
+- Was: shipped via signed LGE MSI installer, first-boot auto-run
+- **Rejection rationale (D2)**: sandbox-exec PARTIAL accepted as sufficient for macOS. Lima adds ~500 MB bundle size, complex boot flow, and deployment pipeline complexity. PARTIAL isolation with user-visible warning is the correct trade-off. Lima bundling conflicts with D8 (OS-only deployment).
+
+**WSL2** (Windows fallback — rejected in D3):
+- Was: one-time ~3 GB distro download; 10–20% per-tool overhead; free Windows feature
+- Was: shipped via signed LGE MSI installer, first-boot WSL2 init
+- **Rejection rationale (D3)**: AppContainer-only for Windows. If AppContainer compat test fails, result is isolation=none — not WSL2. Adding WSL2 as fallback doubles the Windows deployment surface and conflicts with D8 (OS-only). No MSI auto-installer.
 
 ### Option C — Network-Only Isolation (Rejected)
 
@@ -376,7 +390,7 @@ Use only `unshare --net` (Linux), Network Extension filter (macOS), WFP (Windows
 
 ---
 
-## 10. Risks (Pre-Mortem)
+## 10. Risks (Pre-Mortem) — Updated for D1–D9 Decisions
 
 ### Failure Scenario 1 — Linux bwrap Unavailable on Target
 
@@ -384,12 +398,13 @@ Use only `unshare --net` (Linux), Network Extension filter (macOS), WFP (Windows
 
 **Evidence Quality**: unverified (no LGE corp Linux audit yet).
 
-**Mitigation**:
+**Mitigation** (updated for D1/D8 OS-only decision):
 - Step 2 (external research phase) explicitly validates bwrap availability on RHEL 8/9
-- Decision item D1 includes static-link bundling plan as Plan B if OS package unavailable
 - Pre-deployment gate: automated bwrap version check in CI
+- If unavailable: **no bundled fallback** — LVIS operates at isolation=none, reviewer no-downgrade active, user instructed to install bubblewrap via OS package manager
+- LGE corp IT team must confirm `bubblewrap` package availability on target distros before launch
 
-**Early Warning Signal**: If D1 research shows `dnf bwrap` absent on RHEL 8, escalate to infrastructure team before build epic starts.
+**Early Warning Signal**: If D1 research shows `dnf bwrap` absent on RHEL 8, escalate to infrastructure team. Mitigation is IT-side package install, not LVIS bundling.
 
 ### Failure Scenario 2 — Windows AppContainer + Electron asar Incompatibility
 
@@ -397,12 +412,12 @@ Use only `unshare --net` (Linux), Network Extension filter (macOS), WFP (Windows
 
 **Evidence Quality**: unverified (no Electron asar + AppContainer test yet).
 
-**Mitigation**:
-- Decision item D3 includes AppContainer + asar compat smoke test (spin up appcontainer, execute asar app, verify sandbox enforcement works)
-- If compat test fails: WSL2 fallback (decision item D3) becomes primary for Windows
-- Documented in build epic: "compat test must pass before shipping AppContainer primary"
+**Mitigation** (updated for D3 AppContainer-only decision):
+- Build epic includes `test-appcontainer-asar-compat.ts` smoke test (spin up AppContainer, execute asar app, verify sandbox enforcement works)
+- If compat test fails: **no WSL2 fallback** — Windows operates at isolation=none + user notification + reviewer no-downgrade
+- Documented in build epic: "compat test failure → isolation=none; WSL2 not available as escape hatch"
 
-**Early Warning Signal**: If D3 compat test in build epic shows FAIL, immediately backport to WSL2 primary + log as architecture decision amendment.
+**Early Warning Signal**: If D3 compat test in build epic shows FAIL, log as architecture decision amendment. Windows sandbox becomes isolation=none until AppContainer compat is fixed.
 
 ### Failure Scenario 3 — macOS sandbox-exec Removal in macOS 16+
 
@@ -410,96 +425,90 @@ Use only `unshare --net` (Linux), Network Extension filter (macOS), WFP (Windows
 
 **Evidence Quality**: unverified (no Apple roadmap commitment).
 
-**Mitigation**:
-- Decision item D2: commit to Lima fallback shipped from day-1 build if sandbox-exec is PARTIAL
-- OR explicit emergency runbook: "If macOS 16 breaks sandbox-exec, swap runner from SandboxExecRunner to LimaRunner at boot" (no app re-release needed, just plist config)
+**Mitigation** (updated for D2 Lima-폐기 decision):
+- **No Lima fallback** — Lima was rejected in D2. Emergency runbook instead:
+  - "If macOS 16 breaks sandbox-exec: swap SandboxExecRunner for NullRunner at boot (plist config change, no app re-release)"
+  - Result: macOS isolation=none, reviewer no-downgrade active, user notification
 - Quarterly monitoring: LVIS infra team watches Apple release notes for sandbox-exec deprecation signals
 
-**Early Warning Signal**: If Apple WWDC or release notes mention sandbox-exec removal/deprecation, trigger pre-mortem audit of Lima fallback readiness.
+**Early Warning Signal**: If Apple WWDC or release notes mention sandbox-exec removal/deprecation, trigger pre-mortem audit. Resolution path is plist config swap to NullRunner, not Lima installation.
 
 ### Failure Scenario 4 — Wrapper Interface Lock-in Drift
 
-**Risk**: Four spawn paths import `SandboxRunner.spawn()` before composition rule re-validation against new SandboxKind values. Later, decision items D5/D6 extend SandboxKind with `"partial"` or `"fs-only"`, but reviewer composition rule test fixtures aren't updated lockstep. Composition rule logic drifts out of sync with spawn-path capability reporting.
+**Risk**: Five spawn paths import `SandboxRunner.spawn()` before composition rule re-validation against new SandboxKind values. Later, decision items D5/D6 extend SandboxKind with `"partial"` or `"fs-only"`, but reviewer composition rule test fixtures aren't updated lockstep.
 
 **Evidence Quality**: organizational (no technical blocker, but coordination failure mode).
 
 **Mitigation**:
-- Decision items D5 + D6 (SandboxKind extensions) MUST be finalized BEFORE build epic begins
+- Decision items D5 + D6 (SandboxKind extensions) DECIDED before build epic begins
 - Build epic includes risk-classifier test fixture updates (`src/permissions/reviewer/risk-classifier.test.ts` lines ~309 + surrounding composition rule test cases) as mandatory gate
 - No spawn-path code changes without concurrent risk-classifier.test.ts amendments
+- R-1 context no-downgrade rule (§11.5) adds additional test cases for weak-context + weak-sandbox combinations
 
-**Early Warning Signal**: Build epic review shows `SandboxKind` extension in source but NO test fixture change — block merge, add reviewer comment "D6 test fixtures missing".
+**Early Warning Signal**: Build epic review shows `SandboxKind` extension in source but NO test fixture change — block merge.
 
 ---
 
-## 11. 결정 필요 (User Decision Items)
+## 11. 결정 완료 (User Decision Items — All DECIDED 2026-05-16)
 
-All decisions are **required** before the build epic can start.
+All decisions finalized. Build epic can start.
 
 ### Decision D1 — Linux Primary Sandbox Tool
 
-**Options**:
-1. **bwrap only** — rely on OS package (dnf bwrap available on RHEL 8/9)
-2. **bwrap + landlock v4** — bwrap for network, landlock for fs hardening (deepens audit, minimal benefit over bwrap alone)
-3. **bwrap bundled binary** — ship static-linked bwrap in LVIS app resources (1.5 MB, avoids OS dependency)
-4. **bwrap + bundled fallback** — prefer OS package; if absent, use bundled binary
+**DECIDED: bwrap OS-only** (2026-05-16)
 
-**Recommendation**: Option 4 (bwrap + bundled fallback)
-- Rationale: avoids hard dependency on corp Linux distro packaging; bundled fallback ensures 100% availability. Audit burden is acceptable (binary must be signed/verified in CI). Hybrid approach aligns with Option A3 deployment model.
+Selected option: **bwrap OS package only** — rely on `dnf install bubblewrap` (RHEL/CentOS) or `apt install bubblewrap` (Debian/Ubuntu). No bundled binary. No hybrid fallback.
 
-**Owner**: Infrastructure + Security team (validate bundled binary signing pipeline)
+Rationale: D8 (OS-only deployment) eliminates the bundled binary option. If bwrap unavailable: isolation=none + user install instruction.
+
+Rejected options (for record):
+- bwrap + landlock v4: deepens audit, minimal benefit over bwrap alone for v1
+- bwrap bundled binary: conflicts with D8 OS-only decision
+- bwrap + bundled fallback: conflicts with D8 OS-only decision + "No Fallback Code" rule
+
+**Owner**: Infrastructure + Security team (validate bwrap package availability on LGE corp RHEL distros)
 
 ---
 
 ### Decision D2 — macOS Sandbox Strategy
 
-**Options**:
-1. **sandbox-exec PARTIAL accepted** — use `/usr/bin/sandbox-exec` as primary, surface "⚠ OS 격리 부분적" to user, accept bypass paths (localhost/IPv6/DNS/Bonjour/UDS)
-2. **Lima fallback default** — ship Lima from day-1, offer user toggle "High-sensitivity tools use sandbox (fast) vs Lima (slow but verified)"
-3. **Refuse-to-launch on PARTIAL OS** — block tool invocation on macOS unless user installs Lima separately
+**DECIDED: sandbox-exec PARTIAL accepted** (2026-05-16)
 
-**Recommendation**: Option 2 (Lima fallback default)
-- Rationale: sandbox-exec is policy-best-effort with known bypass paths; composition rule cannot tolerate that uncertainty. Lima adds ~10–15% latency per tool, but egress guarantee becomes verified-kernel. User toggle balances risk/speed. Pre-mortem scenario 3 (sandbox-exec removal) is structurally mitigated (runner swap, no app re-release).
-- Trade-off: ~500 MB one-time download, first-boot setup via signed MSI, then transparent to user.
+Selected option: Use `/usr/bin/sandbox-exec` as primary. Surface "⚠ OS 격리 부분적" to user. Accept known bypass paths. `kind="sandbox-exec"`, `confidence="policy-best-effort"`.
 
-**Owner**: Product team (user setting UI design) + Deployment (signed MSI generation)
+Rationale: Lima fallback adds ~500 MB bundle size and complex deployment flow. PARTIAL isolation with user-visible warning + composition rule no-downgrade is the correct trade-off. D8 (OS-only) eliminates Lima bundling.
+
+Rejected options (for record):
+- Lima fallback default: dropped — conflicts with D8, excessive bundle size
+- Refuse-to-launch on PARTIAL OS: too disruptive on macOS where sandbox-exec is the only available mechanism
+
+**Owner**: Product team (user setting UI design showing "부분적 격리" warning)
 
 ---
 
 ### Decision D3 — Windows Primary Sandbox Tool
 
-**Options**:
-1. **AppContainer+Job Object primary** — assume Electron asar compat passes test; ship as primary
-2. **WSL2 primary** — use WSL2 (verified-kernel egress block), accept 10–20% per-tool latency
-3. **AppContainer primary, WSL2 fallback** — test AppContainer compat; if FAIL at deployment time, user auto-installs WSL2 via MSI
+**DECIDED: AppContainer only** (2026-05-16)
 
-**Recommendation**: Option 3 (AppContainer primary + WSL2 fallback with compatibility test gate)
-- Rationale: AppContainer is native + low-latency (2–5% overhead). WSL2 is verified-kernel fallback. Compatibility test in build epic determines actual primary post-research. If compat test fails, fallback is clear. Decision is "attempt AppContainer; WSL2 is the safety line."
-- Implementation: build epic includes `test-appcontainer-asar-compat.ts` that spins up AppContainer, executes tool inside app.asar, verifies sandbox enforcement. If test FAIL, build succeeds but with appcontainer.enabled=false flag in boot.ts, WSL2 is selected at runtime.
+Selected option: AppContainer + Win32 Job Object as sole Windows sandbox. Build epic includes compat smoke test. If compat FAIL → isolation=none. No WSL2.
 
-**Owner**: Engineering team (AppContainer integration + compatibility test) + Deployment (WSL2 MSI setup)
+Rationale: WSL2 fallback adds ~3 GB install + MSI complexity. D8 (OS-only) eliminates WSL2 bundled install. AppContainer is OS-native (Windows 10+).
+
+Rejected options (for record):
+- WSL2 primary: 10–20% per-tool overhead, ~3 GB install, conflicts with D8
+- AppContainer primary + WSL2 fallback: fallback conflicts with D8 + "No Fallback Code" rule
+
+**Owner**: Engineering team (AppContainer + asar compat smoke test) + Product team (isolation=none notification on Windows)
 
 ---
 
 ### Decision D4 — Capability Descriptor Shape (ADR-level)
 
-**Options**:
-1. **Narrow allowlist** (chosen) — `{ networkBlocked: bool, fsReadPaths: string[], fsWritePaths: string[], processIsolated: bool }`
-   - Pros: simple, reviewer LLM can reason about ("network blocked" vs "network allowed")
-   - Cons: less fine-grained; cannot express "allow syscall X but deny syscall Y"
-   - Forward path: v2 hybrid (selective OCI fields)
+**DECIDED: Narrow allowlist** (2026-05-16)
 
-2. **OCI-style fine-grained** — `{ capabilities: string[], syscalls: seccomp[], namespaces: ns[], rlimits: limit[] }`
-   - Pros: precise, portable across sandboxes
-   - Cons: reviewer LLM modeling burden ("can this syscall exfil?" requires expertise), v1 design bloat
-   - Not recommended for initial capability integration
+Selected option: `{ networkBlocked: bool, fsReadPaths: string[], fsWritePaths: string[], processIsolated: bool }`
 
-3. **Hybrid** — `{ network: bool, fs: bool, ociExtension?: {...} }`
-   - Pros: v1 simplicity, v2 expansion path baked in
-   - Cons: dual semantics confuse reviewers; design debt
-
-**Recommendation**: Narrow allowlist (Option 1)
-- Rationale: reviewers + UI are LLM-focused. Narrow semantic ("network blocked") is modelable. Fine-grained syscall reasoning is out of scope for v1. Forward path to hybrid is documented in ADR §Consequences.
+Rationale: simple, reviewer LLM can reason about boolean/path properties. Forward path to hybrid/OCI documented in ADR §Consequences.
 
 **Owner**: Architecture team (ADR write-up) + Reviewer system prompt team (compose rule updates)
 
@@ -507,13 +516,9 @@ All decisions are **required** before the build epic can start.
 
 ### Decision D5 — PARTIAL-Row Fallback Policy
 
-**Options**:
-1. **Downgrade to kind="none"** — weak-sandbox predicate triggers; composition rule gates LLM downgrade
-2. **Refuse-to-launch** — tool execution blocked on PARTIAL-sandbox OS with user message
-3. **Introduce kind="partial"** — extend SandboxKind union; explicit UI + composition rule amendment
+**DECIDED: Introduce `kind="partial"`** (2026-05-16)
 
-**Recommendation**: Option 3 (kind="partial")
-- Rationale: explicitly surfaces the compromise to users ("부분적 격리"). Composition rule can apply medium-confidence downgrade gate instead of hard block. Locked with D6 (union extension).
+Selected option: `kind: "partial"` added to SandboxKind union. Explicit UI + composition rule amendment. Locked with D6.
 
 **Owner**: Architecture team (composition rule amendment) + UI team (user messaging)
 
@@ -521,16 +526,11 @@ All decisions are **required** before the build epic can start.
 
 ### Decision D6 — SandboxKind Union Extension
 
-**Options**:
-1. **Keep current 4-member union** — no new kinds
-2. **Add "partial"** — for PARTIAL-evidence rows
-3. **Add "fs-only"** — future landlock-only registrations
-4. **Add both "partial" + "fs-only"** (recommended)
+**DECIDED: Add both `"partial"` + `"fs-only"`** (2026-05-16)
 
-**Recommendation**: Option 4 (both)
-- Rationale: "partial" required by D5-c decision. "fs-only" future-proofs against landlock-only registrations (v4 network-less) or custom narrowed runners. Composition rule amendments cover all cases upfront.
+Final union: `"none" | "bubblewrap" | "sandbox-exec" | "appcontainer" | "partial" | "fs-only"`
 
-**Locked with**: Decision D5 (cannot do D5-c without D6)
+**Locked with**: D5
 
 **Owner**: Architecture team (union definition + test fixture updates in risk-classifier.test.ts)
 
@@ -538,18 +538,9 @@ All decisions are **required** before the build epic can start.
 
 ### Decision D7 — evaluation-context.ts Integration
 
-**Options**:
-1. **Extend interface** — add `executionSandbox?: SandboxCapability` to PermissionEvaluationContext
-   - Pros: explicit context object carries all permission inputs, including sandbox
-   - Cons: larger context object; prompt builder must extract + translate
-   - Change site: `src/permissions/evaluation-context.ts` interface definition
+**DECIDED: Keep prompt-side formatter** (2026-05-16)
 
-2. **Keep prompt-side rendering** — formatter (`sandbox-capability.ts:89`) injects capability into system prompt, no evaluation-context change
-   - Pros: minimal interface change; formatter is already the canonical source
-   - Cons: sandbox capability is implicit in prompt text, not explicit in evaluation context
-
-**Recommendation**: Option 2 (keep prompt-side rendering)
-- Rationale: minimal; formatter is stable + grep-able; audit chain can match prompt input to verdict output. Evaluation-context remains focused on permission judgment inputs (tool, path, source, etc.). Sandbox is a risk-modifier, not a judgment input itself. If future capability scoring requires explicit context, extend in v2.
+Selected option: formatter at `sandbox-capability.ts:89-93` remains the canonical site. `evaluation-context.ts` interface unchanged.
 
 **Owner**: Reviewer system prompt team (confirm formatter pathway sufficient)
 
@@ -557,43 +548,145 @@ All decisions are **required** before the build epic can start.
 
 ### Decision D8 — Deployment Model (Binary vs. Dependency vs. Hybrid)
 
-**Options**:
-1. **Bundled binaries** — ship bwrap (Linux), Lima (macOS), WSL2 (Windows) in app resources
-2. **OS dependencies** — rely on system packages (dnf bwrap, system sandbox-exec, native AppContainer/WSL2)
-3. **Hybrid** — prefer OS packages; bundled fallback when unavailable (with explicit deprecation plan)
+**DECIDED: OS dependencies only** (2026-05-16)
 
-**Recommendation**: Option 3 (hybrid)
-- Rationale: avoids hard dependency on corp Linux availability while maintaining security audit simplicity (prefer native > bundled). Reduces burden on corp IT (no app bloat). Fallback ensures 100% availability.
-- **Critical**: per CLAUDE.md "No Fallback Code" rule — if hybrid is chosen, **explicit deprecation plan + removal date must be documented in ADR §Consequences and enforced in build epic**. Example: "Bundled binary fallback removed Q3 2026 after all deployments confirm OS availability." Without explicit removal, hybrid becomes permanent cruft.
+Selected option: all sandbox mechanisms sourced from OS. No bundled binaries. No hybrid fallback. No Lima/WSL2 auto-install MSI.
 
-**Owner**: Build team (binary bundling + versioning) + Deployment (OS package validation per distro)
+Rationale: bundling creates binary audit burden, platform-specific build pipeline, and update channel management. Hybrid conflicts with "No Fallback Code" rule without explicit removal date. OS-only is the clean path.
+
+**Owner**: Build team (remove any bundled sandbox binary references from build pipeline) + Deployment team (OS package validation per LGE corp Linux distro)
 
 ---
 
 ### Decision D9 — MCP Child-Process Spawn Path Inclusion
 
-**Options**:
-1. **In-scope** — MCP child-process spawns adopt the SandboxRunner wrapper (5th spawn path)
-2. **Out-of-scope** — MCP client manages its own process isolation; LVIS sandbox does not wrap MCP subprocesses
+**DECIDED: In-scope** (2026-05-16)
 
-**Recommendation**: Out-of-scope (defer to post-research build epic planning)
-- Rationale: MCP is an external protocol; sandbox runner is LVIS-specific. MCP has its own capability/permission model. Research focuses on 4 known spawn paths (bash, powershell, python, plugin-worker). MCP inclusion can be evaluated post-research if MCP tools require sandboxing.
+Selected option: MCP child-process spawns are the **5th spawn path**, unified through `SandboxRunner.spawn()`.
 
-**Owner**: Build epic planning team (MCP spawning requirements gathering)
+Rationale: MCP tools invoked as subprocesses carry the same egress/fs risk as other spawn paths. Excluding MCP would create an unmonitored escape hatch. `SandboxRunner` interface already supports arbitrary `cmd`/`args`.
+
+**Owner**: Build epic planning team (MCP spawn path integration spec)
+
+---
+
+## 11.5 Reviewer & UX Design Directives (R-1 to R-4)
+
+The following design rules supplement the composition rule framework and were
+locked alongside the C1 sandbox decisions to address reviewer/UX scope gaps
+surfaced during decision review (2026-05-16).
+
+### R-1 — Context-quality no-downgrade rule
+
+Extend the composition rule at `src/shared/permission-reviewer-framework.ts:36`:
+
+> If conversation context lacks an explicit stated purpose/intent for the tool
+> call, the LLM MUST NOT downgrade a rule-based MEDIUM/HIGH verdict to LOW.
+> (Mirrors the weak-sandbox no-downgrade pattern.)
+
+**Trigger detection**: reviewer evaluates whether `conversationContext` carries
+an explicit intent signal (most recent user message or in-conversation
+justification). LLM self-assessment is acceptable but must default to "weak"
+when ambiguous.
+
+**Test fixture**: `risk-classifier.test.ts` adds cases for empty-intent +
+LLM=LOW + rule=MEDIUM → expected finalVerdict=MEDIUM.
+
+---
+
+### R-2 — User-approval memory layer
+
+New storage: `~/.lvis/permissions/user-approvals.json` (per Storage Namespace
+per Feature rule; 0o700 dir / 0o600 file).
+
+Schema:
+```json
+{
+  "approvals": {
+    "<toolName>::<argHashSha256>::<source>": {
+      "approvedAt": "ISO8601",
+      "scope": "session|persistent",
+      "verdictAtApproval": "low|medium|high",
+      "nlJustification": "user-typed natural language (HIGH only)",
+      "revokedAt": null
+    }
+  }
+}
+```
+
+Reviewer flow integration:
+1. Rule classifier runs
+2. **User-approval memory lookup** — match → skip LLM, finalVerdict=APPROVE
+   (sandbox kind/composition rule still evaluated for audit)
+3. Miss → LLM classifier + composition rule
+
+Pattern matching: exact (toolName + args SHA-256 + source). Argument-prefix or
+fuzzy matching deferred to future epic.
+
+Default scope: "session". User selects "persistent" via approval dialog
+checkbox. UI revocation list lives in PermissionsTab.
+
+---
+
+### R-3 — Conversation-loop retry with intent enrichment
+
+Reject response shape (returned from reviewer):
+```ts
+type RejectResponse = {
+  verdict: "reject";
+  reason: string;   // human-readable
+  hint?: string;    // "providing X would make this approvable"
+  retryable: boolean;
+};
+```
+
+LLM loop behavior on reject:
+- Read reason + hint
+- Option A: enrich intent and retry SAME (toolName, args)
+- Option B: ask user for clarification
+
+Anti-abuse cap: max 2 automatic retries for identical (toolName, args). Beyond
+that, escalate to user. Args modification resets the counter (fresh review),
+preventing argument-narrowing exploit.
+
+---
+
+### R-4 — Natural-language explicit approval for HIGH risk
+
+Trigger: composition rule finalVerdict = HIGH.
+
+UI requirement (`src/ui/renderer/components/ToolApprovalDialog.tsx`):
+- Display tool + args + reviewer reason + expected impact
+- **Natural-language input field** with placeholder "이 작업의 목적을 한 문장으로 입력"
+- Approve button disabled until NL field is non-empty
+- NL text saved as `nlJustification` in R-2 memory + appended to audit.log
+
+MEDIUM/LOW: existing button-only approval remains.
+
+R-2 memory match for HIGH verdict: NL field still shown each time (no silent
+re-approval). R-2 memory caches LOW/MEDIUM aggressively; HIGH always prompts NL.
+
+---
+
+### Cross-impact on C2 evaluation framework
+
+- R-1 adds test scenario "D" to C2 §2: weak-context + benign tool → verdict
+  shift measurement.
+- R-2/R-3/R-4 audit fields added to S2 runtime audit JSON (see `network-restricted-eval.md` §3.6).
 
 ---
 
 ## 12. See Also
 
-- `docs/research/network-restricted-eval.md` — Evaluation framework design (C2 deliverable)
+- `docs/research/network-restricted-eval.md` — Evaluation framework design (C2 deliverable); §3.6 S2 runtime audit JSON schema
 - `docs/architecture/permission-policy-design.md` — Full permission policy specification
 - `docs/architecture/architecture.md` — § 6 (Core Engines) sandbox capability layer context
-- `.omc/plans/open-questions.md` — All 13 decision items from C1 + C2 tracked for user approval
+- `.omc/plans/open-questions.md` — All 13 decision items from C1 + C2 (all DECIDED 2026-05-16)
 
 ---
 
-**Research Status**: pending approval (awaiting user decisions D1–D9)
+**Research Status**: DECIDED (all D1–D9 finalized 2026-05-16 by user)
 
-**Citation Verification**: All file:line citations in §1 have been grep-verified against current codebase. Verification log available upon request.
+**Citation Verification**: All file:line citations in §1 have been grep-verified against current codebase.
 
 **Evidence Sources**: Indexed via context-mode from bubblewrap GitHub, Landlock LSM docs, Windows AppContainer MSDN, Lima VM, Sandboxie-Plus GitHub (2026-05-15 snapshot).

@@ -1,10 +1,10 @@
 # Research: Network-Restricted Sandbox Evaluation Framework
 
-**Status: pending approval**
+**Status: DECIDED** (all E-D1–E-D5 finalized 2026-05-16)
 
 **Issue**: #691 (sandbox capability + reviewer SOT integration)
 
-**Date**: 2026-05-15
+**Date**: 2026-05-15 (created) / 2026-05-16 (decisions finalized)
 
 **Scope**: C2 deliverable — evaluation framework design for validating that built-in sandbox blocks external network egress + observes reviewer verdict changes (design + decision items only; zero POC code)
 
@@ -20,6 +20,8 @@ This document specifies how to validate that the sandbox implementation from `sa
 - Can we reliably detect when egress is unexpectedly allowed?
 - Does the reviewer verdict shift (e.g., LOW→MEDIUM) when sandbox evidence changes?
 - What observability signals (audit logs, metrics) are necessary to audit the sandbox enforcement?
+
+**Surface separation**: This document governs both S1 (dev validation, §2–§5) and S2 (runtime audit, §3.6). See `sandbox-isolation.md` intro for surface definitions.
 
 ---
 
@@ -89,15 +91,35 @@ This document specifies how to validate that the sandbox implementation from `sa
 
 ---
 
+### Scenario D — Weak-Context + Benign Tool (R-1 cross-impact)
+
+**Setup** (added per R-1 design directive from `sandbox-isolation.md` §11.5):
+- Tool: low-risk (e.g. `ls /tmp`) inside sandbox
+- Conversation context: empty (no explicit user intent stated)
+- sandboxKind: any (R-1 is independent of sandbox state)
+
+**Expected outcome**:
+- Rule classifier: LOW (benign tool)
+- LLM classifier: LOW (benign tool + empty context)
+- R-1 composition rule: context lacks explicit intent → LLM MUST NOT downgrade MEDIUM/HIGH
+  - For LOW rule verdict: no R-1 trigger (rule is already LOW)
+  - For MEDIUM rule verdict + empty context: LLM LOW → R-1 blocks → finalVerdict=MEDIUM
+
+**Test fixture** (`risk-classifier.test.ts`):
+- Case: `{ tool: "ls", context: "", sandboxKind: "bubblewrap", ruleVerdict: "medium", llmVerdict: "low" }` → `finalVerdict: "medium"`
+- Case: `{ tool: "ls", context: "directory listing 위해 ls 사용", sandboxKind: "bubblewrap", ruleVerdict: "medium", llmVerdict: "low" }` → `finalVerdict: "medium"` (maxVerdict, not R-1 trigger)
+
+---
+
 ## 3. Expanded Test Plan (Unit / Integration / E2E / Observability)
 
 ### Unit Tests — Per-Runner Egress Block
 
 **Test scope**: each runner's egress-blocking capability in isolation (no full reviewer pipeline)
 
-**Fixtures**:
-- Local HTTP server (e.g. `http://127.0.0.1:9999/test`) — always accessible (localhost)
-- External test endpoint (e.g. `https://httpbin.org/status/200`) — blocked in sandbox, allowed outside
+**Fixtures** (E-D2 DECIDED):
+- Local HTTP server (`http://127.0.0.1:9999/test`) — always accessible (localhost) for unit-level isolation verification
+- External test endpoint (`https://httpbin.org/get`) — blocked in sandbox, allowed outside
 - Capability descriptor: `{ networkBlocked: true, fsReadPaths: ["/tmp"], fsWritePaths: ["/tmp"] }`
 
 **Test cases**:
@@ -108,8 +130,8 @@ This document specifies how to validate that the sandbox implementation from `sa
 | bwrap | curl to 127.0.0.1:9999 inside bwrap | Connection refused (loopback isolated unless explicitly allowed) |
 | sandbox-exec | curl to external URL inside sandbox-exec with `(deny network*)` | Policy enforcement; bypass paths flagged as EVIDENCE-MISSING if not detected |
 | AppContainer | curl to external URL inside AppContainer without internetClient capability | HRESULT_FROM_WIN32(ERROR_NETWORK_ACCESS_DENIED) |
-| Lima | curl to external URL inside Lima container | Connection refused (Linux namespace) |
-| WSL2 | curl to external URL via `wsl.exe` with isolated network | Connection error (WSL distro network isolated) |
+
+**Note**: Lima and WSL2 runner unit tests removed — both runners dropped in D2/D3.
 
 **Observability assertion**: each test emits audit log `"unit.sandbox_runner.${runner}.egress_test.blocked = true"`
 
@@ -117,18 +139,19 @@ This document specifies how to validate that the sandbox implementation from `sa
 
 ### Integration Tests — Per-OS × Spawn-Path Matrix
 
-**Test scope**: each of 4 spawn paths with each OS sandbox runner
+**Test scope**: each of 5 spawn paths (D9: MCP in-scope) with each OS sandbox runner
 
-**Matrix** (3 OS × 4 spawn paths = 12 cases):
+**Matrix** (3 OS × 5 spawn paths):
 
 | Spawn Path | Linux (bwrap) | macOS (sandbox-exec) | Windows (AppContainer) |
 |---|---|---|---|
 | **bash.ts** (shell exec) | Spawn `/bin/bash -c "curl https://..."` inside bwrap | Spawn `/bin/bash -c "curl https://..."` inside sandbox-exec | N/A (Bash is Unix-only) |
-| **powershell.ts** (Windows shell) | N/A (PowerShell on Linux is optional) | N/A (PowerShell on macOS available but less common spawn path) | Spawn `powershell -Command "Invoke-WebRequest https://..."` inside AppContainer |
+| **powershell.ts** (Windows shell) | N/A | N/A | Spawn `powershell -Command "Invoke-WebRequest https://..."` inside AppContainer |
 | **python-runtime.ts** (uv subprocess) | Spawn `uv run script.py` (script calls `urllib.request.urlopen("https://...")`) inside bwrap | Spawn `uv run script.py` inside sandbox-exec | Spawn `uv.exe run script.py` inside AppContainer |
-| **plugins/runtime.ts** (worker) | Spawn plugin worker JavaScript (node subprocess) inside bwrap, worker makes fetch() call | Spawn plugin worker inside sandbox-exec | Spawn plugin worker inside AppContainer |
+| **plugins/runtime.ts** (worker) | Spawn plugin worker JavaScript inside bwrap, worker makes fetch() call | Spawn plugin worker inside sandbox-exec | Spawn plugin worker inside AppContainer |
+| **MCP child-process** (D9 in-scope) | Spawn MCP subprocess inside bwrap, subprocess attempts outbound connection | Spawn MCP subprocess inside sandbox-exec | Spawn MCP subprocess inside AppContainer |
 
-**Test assertion**: all 12 cases show egress-block success (exit code ≠ 0, stderr contains network error)
+**Test assertion**: all applicable cells show egress-block success (exit code ≠ 0, stderr contains network error)
 
 **Observability**: integration log shows `"integration.spawn_path.${path}.sandbox.${runner}.egress_blocked = true"` per case
 
@@ -143,8 +166,8 @@ This document specifies how to validate that the sandbox implementation from `sa
 **Without sandbox**:
 1. Rule-based classifier: category="network" + input="https://external-domain.com" → ruleVerdict=MEDIUM
 2. LLM classifier: system prompt includes `executionSandbox=none` → llmVerdict=LOW (intent-based)
-3. Composition rule: no-downgrade not triggered (kind='none' is not weak per composition rule trigger... *decision item D5/D6 determines exact semantics*)
-4. Final verdict: maxVerdict(MEDIUM, LOW) = MEDIUM
+3. Composition rule: no-downgrade triggered (kind='none' is weak per D5/D6 composition rule)
+4. Final verdict: ruleVerdict=MEDIUM (no downgrade allowed)
 
 **With bwrap sandbox**:
 1. Rule-based classifier: same as above → ruleVerdict=MEDIUM
@@ -155,7 +178,7 @@ This document specifies how to validate that the sandbox implementation from `sa
 **With sandbox-exec (PARTIAL)**:
 1. Rule-based classifier: → ruleVerdict=MEDIUM
 2. LLM classifier: system prompt includes `executionSandbox=sandbox-exec (policy-best-effort, darwin) — network isolation via sandbox profile` → llmVerdict=LOW
-3. Composition rule: isWeakSandbox() returns true (sandbox-exec confidence='assumed' or kind='partial') → **LLM cannot downgrade MEDIUM → LOW**
+3. Composition rule: isWeakSandbox() returns true (sandbox-exec is PARTIAL) → **LLM cannot downgrade MEDIUM → LOW**
 4. Final verdict: ruleVerdict=MEDIUM (no downgrade allowed)
 
 **Approval UI assertion**:
@@ -163,44 +186,18 @@ This document specifies how to validate that the sandbox implementation from `sa
 - Sandbox card renders with appropriate label ("⚠ OS 격리 없음" vs "OS 격리 활성 (bwrap)" vs "⚠ OS 격리 부분적 (sandbox-exec)")
 - Verdict card shows ruleVerdict (MEDIUM) + composition rule blocking LLM downgrade (if applicable)
 
-**Observability**: audit log includes:
-- `approval_request{tool="curl", sandboxKind="bubblewrap"}`
-- `reviewer_verdict{sandboxKind="bubblewrap", ruleVerdict="medium", llmVerdict="low", finalVerdict="medium"}`
-- `composition_rule.no_downgrade_applied{reason="sandbox is PARTIAL or NONE"}`
+**R-4 HIGH verdict UI assertion** (new per R-4 directive):
+- When finalVerdict=HIGH: ToolApprovalDialog shows NL input field ("이 작업의 목적을 한 문장으로 입력")
+- Approve button disabled until NL field non-empty
+- On approve: NL text captured in audit.log `reviewer.userApprovalUsed.nlJustification`
+
+**Observability**: S2 audit log entry emitted (see §3.6).
 
 ---
 
-### Observability — Audit Log & Telemetry
+### Observability — Audit Log & Telemetry (S1 Dev Signals)
 
-**Audit log entries** (structured JSON, one per tool invocation):
-
-```json
-{
-  "timestamp": "2026-05-15T10:30:00Z",
-  "tool": "curl",
-  "sandboxCapability": {
-    "kind": "bubblewrap",
-    "confidence": "verified",
-    "platform": "linux",
-    "reason": "network egress blocked via Linux network namespace"
-  },
-  "ruleVerdict": { "level": "medium", "reason": "..." },
-  "llmVerdict": { "level": "low", "reason": "..." },
-  "compositionRuleApplied": {
-    "rule": "no-downgrade",
-    "triggered": true,
-    "reason": "sandboxCapability.kind='bubblewrap' is verified-kernel, no downgrade block"
-  },
-  "finalVerdict": { "level": "medium" },
-  "egressTest": {
-    "attempted": true,
-    "blocked": true,
-    "evidence": "network namespace isolation verified"
-  }
-}
-```
-
-**Telemetry counters**:
+**S1 telemetry counters** (dev validation signals):
 
 ```
 # Sandbox enforcement
@@ -217,107 +214,136 @@ sandbox.spawn_latency_ms{runner, kind, platform} = histogram (percentiles: p50, 
 sandbox.overhead_percent{runner, kind} = gauge (measured vs unsandboxed baseline)
 ```
 
-**Observability sink** (decision item D5 in network-eval): audit.log vs separate sandbox-events.log per Storage Namespace rule
-- Audit entries: append to `~/.lvis/audit.log` (cross-cutting resource)
-- Sandbox telemetry: can go to `~/.lvis/audit.log` OR separate `~/.lvis/sandbox/events.log` per Storage Namespace design
-- Recommendation: keep sandbox events in audit.log (single sink, simpler) unless volume becomes large (>100KB/day)
+---
+
+### 3.6 S2 Runtime Audit JSON Schema (E-D5 DECIDED: `~/.lvis/audit.log`)
+
+Every tool invocation emits one structured JSON entry to `~/.lvis/audit.log`.
+Schema covers 4 fields: tool identity, sandbox state, reviewer verdict path, performance.
+
+```json
+{
+  "timestamp": "ISO8601",
+  "tool": {
+    "name": "curl",
+    "args": "https://httpbin.org/get",
+    "source": "bash.ts|powershell.ts|python-runtime.ts|plugins/runtime.ts|mcp"
+  },
+  "sandbox": {
+    "kind": "bubblewrap|sandbox-exec|appcontainer|partial|fs-only|none",
+    "confidence": "verified-kernel|policy-best-effort|assumed",
+    "events": [
+      { "type": "egress_attempted", "blocked": true, "target": "https://httpbin.org/get" },
+      { "type": "fs_write_attempted", "blocked": false, "path": "/tmp/out.txt" }
+    ],
+    "spawnLatencyMs": 12,
+    "overheadPercent": 4.2
+  },
+  "reviewer": {
+    "ruleVerdict": "medium",
+    "llmVerdict": "low",
+    "finalVerdict": "medium",
+    "compositionRulesTriggered": [
+      { "rule": "weak-sandbox-no-downgrade", "reason": "kind='partial'" },
+      { "rule": "weak-context-no-downgrade", "reason": "intent_missing" }
+    ],
+    "userApprovalUsed": {
+      "memoryHit": false,
+      "nlJustification": "이 파일 디렉터리 조회 위해 ls 사용",
+      "verdictAtApproval": "low"
+    }
+  }
+}
+```
+
+**Field definitions**:
+
+| Field path | Type | Description |
+|---|---|---|
+| `timestamp` | ISO8601 string | UTC timestamp of tool invocation |
+| `tool.name` | string | Tool name (registry name, underscore format) |
+| `tool.args` | string | Serialized tool arguments (truncated at 512 chars) |
+| `tool.source` | string | Spawn path identifier — one of the 5 paths + MCP |
+| `sandbox.kind` | SandboxKind | Active sandbox type (see D6 union: none/bubblewrap/sandbox-exec/appcontainer/partial/fs-only) |
+| `sandbox.confidence` | string | Evidence quality: verified-kernel / policy-best-effort / assumed |
+| `sandbox.events[]` | array | Runtime sandbox events: egress attempts, fs write attempts, blocked/allowed |
+| `sandbox.spawnLatencyMs` | number | Time from SandboxRunner.spawn() call to process ready (ms) |
+| `sandbox.overheadPercent` | number | Overhead vs unsandboxed baseline (gauge, updated per measurement window) |
+| `reviewer.ruleVerdict` | low/medium/high | Output of rule-based classifier |
+| `reviewer.llmVerdict` | low/medium/high | Output of LLM classifier |
+| `reviewer.finalVerdict` | low/medium/high/approve/reject | After composition rule application |
+| `reviewer.compositionRulesTriggered[]` | array | Each composition rule that fired, with reason |
+| `reviewer.userApprovalUsed.memoryHit` | boolean | Whether R-2 user-approval memory matched (skipped LLM) |
+| `reviewer.userApprovalUsed.nlJustification` | string | NL text entered by user (R-4, HIGH only); null for LOW/MEDIUM |
+| `reviewer.userApprovalUsed.verdictAtApproval` | low/medium/high | Verdict level at time of user approval |
+
+**Sink** (E-D5 DECIDED): `~/.lvis/audit.log` — single cross-cutting sink. Storage Namespace rule permits cross-cutting resources at `~/.lvis/` root.
 
 ---
 
 ## 4. Test Harness Outline (Design Only — No Code)
 
-### Baseline Tool Selection (Decision Item E-D1)
+### Baseline Tool Selection (E-D1 DECIDED: curl)
 
-**Candidates**:
-1. **`curl`** — simple HTTP client, widely available, clear success/failure
-   - Pros: deterministic exit codes, stderr clarity
-   - Cons: HTTPS cert validation may fail in isolated network (use HTTP for test fixture)
-   
-2. **Python `urllib.request.urlopen()`** — cross-platform, language-level
-   - Pros: test the language runtime escape, not just OS utilities
-   - Cons: Python must be available in sandbox context
+**DECIDED**: `curl` as primary baseline tool.
 
-3. **Custom test binary** — minimal C program attempting socket creation
-   - Pros: lowest-level, minimal dependencies
-   - Cons: requires compilation per platform; less relatable to real tools
-
-**Recommendation**: Option 1 (`curl` as primary baseline)
-- Simple HTTP test endpoint hostname resolution → socket creation → TLS handshake
+Rationale: simplest, deterministic, widely available, clear success/failure signals.
 - Three failure points: DNS (NXDOMAIN if blocked), socket (ECONNREFUSED if network namespace isolated), TLS (timeout if packet loss)
-- Fallback: Python `urllib` for language runtime escape test
+- Fallback: Python `urllib` for language runtime escape test (secondary)
+
+Rejected options (for record):
+- Python `urllib.request.urlopen()`: Python must be available in sandbox context (not guaranteed)
+- Custom C binary: requires compilation per platform; less relatable to real tools
+
+**Owner**: QA team (test harness implementation)
 
 ---
 
-### Fixture Endpoint Hosting (Decision Item E-D2)
+### Fixture Endpoint Hosting (E-D2 DECIDED: public httpbin.org + local 127.0.0.1:9999)
 
-**Options**:
-1. **Internal/private test endpoint** — LGE corp internal server (e.g. corp test VPC, requires corp VPN)
-   - Pros: no external dependency, predictable availability
-   - Cons: requires corp network access during CI, slower CI feedback if endpoint unreachable
+**DECIDED**: Public `https://httpbin.org/get` for E2E + local `http://127.0.0.1:9999` for unit tests.
 
-2. **Public test endpoint** — httpbin.org, example.com, dedicated public test server
-   - Pros: always available, zero corp network requirement
-   - Cons: external dependency (network failure = test flake); potential for endpoint outage
-
-3. **Local test fixture** — spin up `python -m http.server` on `127.0.0.1:9999` per test
-   - Pros: zero network (all local), guaranteed available
-   - Cons: tests localhost binding instead of external network (less realistic); macOS sandbox-exec localhost bypass would pass this test
-
-**Recommendation**: Option 2 (public test endpoint) for E2E + Option 3 (local fixture) for unit tests
 - Unit tests (runner-level): local fixture ensures true network isolation (not localhost loopback escape)
 - E2E tests (full reviewer): public endpoint (httpbin.org) for realism + CI simplicity
-- Fallback to local if external endpoint unavailable (graceful degradation)
+
+Rejected options (for record):
+- Internal LGE corp endpoint: requires corp VPN in CI, slower feedback on endpoint unreachable
+
+**Owner**: Infrastructure (httpbin.org reliability SLA) + test team (local fixture server setup)
 
 ---
 
-### Automated vs. Manual Evaluation (Decision Item E-D3)
+### Automated vs. Manual Evaluation (E-D3 DECIDED: hybrid)
 
-**Options**:
-1. **Automated (CI-gated)** — sandbox tests run in CI; failure blocks merge
-   - Frequency: every PR + nightly full matrix
-   - Pros: early detection, regression prevention
-   - Cons: CI infra must support sandboxing (may not work in containerized CI); flakes can block PRs
+**DECIDED**: Hybrid — unit CI / integration nightly / E2E manual.
 
-2. **Manual (post-build)** — sandbox tests run by deployment team after build, before release
-   - Frequency: per release candidate
-   - Pros: production-like environment (real Linux, macOS, Windows VMs)
-   - Cons: slower feedback loop, latent issues discovered post-build
+- Unit tests: every PR (automated, fast, ~10 sec)
+- Integration tests: nightly CI matrix (~30–60 sec per OS combo)
+- E2E + full matrix: manual gate before each release candidate
 
-3. **Hybrid** — unit tests (small, fast) in CI; integration/E2E in post-build manual
-   - Frequency: unit in every PR; integration nightly in CI; E2E manual per RC
-   - Pros: balance speed + coverage
-   - Cons: dual test infrastructure
+Rejected options (for record):
+- Fully automated (CI-gated): CI infra may not support sandboxing in containerized CI; flakes block PRs
+- Manual post-build only: slow feedback loop; latent issues discovered post-build
 
-**Recommendation**: Option 3 (hybrid)
-- Unit tests: always automated (fast, 10 sec)
-- Integration tests: nightly CI matrix (30–60 sec per OS combo)
-- E2E + full matrix: manual gate before release (comprehensive coverage)
-- Decision: build epic defines which tests are required for PR merge vs. release
+**Owner**: Build team (CI/CD pipeline configuration)
 
 ---
 
 ## 5. Metrics & Measurement
 
-### Reviewer Verdict Differential (Decision Item E-D4)
+### Reviewer Verdict Differential (E-D4 DECIDED: snapshot test)
 
-**Measurement method**: Snapshot test vs. differential test
+**DECIDED**: Snapshot test approach.
 
-**Snapshot approach**:
-- Run 100 tool invocations with sandboxKind={none, bwrap, sandbox-exec}
-- Collect (tool, input, sandboxKind) → (ruleVerdict, llmVerdict, finalVerdict) tuples
-- Generate snapshot JSON: `sandbox-eval-verdicts.json`
-- In CI: assert snapshot matches baseline (regression detection)
-
-**Differential approach**:
-- Run 50 pairs of invocations: (sandboxKind=none, input=X) vs (sandboxKind=bwrap, input=X)
-- Measure verdict shift: ΔLevel = (finalVerdict_bwrap − finalVerdict_none)
-- Expected: ΔLevel ∈ {0, +1} (same or upgraded, never downgraded)
-- Counter-example (regression): ΔLevel = −1 (sandbox caused downgrade, violates composition rule)
-
-**Recommendation**: Snapshot test
-- Simpler: regenerate baseline after composition rule updates
-- Auditable: snapshot file shows exact verdicts that passed review
+- Baseline file: `sandbox-eval-verdicts.json`
+- CI asserts snapshot matches baseline (regression detection)
+- Regenerate snapshot after composition rule updates
 - Testid: `risk-classifier.test.ts` adds `describe("sandbox-eval-verdicts")`
+
+Rejected options (for record):
+- Differential analysis: more complex to maintain; snapshot is simpler and auditable
+
+**Owner**: Engineering team (test fixture design)
 
 ---
 
@@ -343,12 +369,10 @@ sandboxed_latency = run(tool, sandboxKind=bwrap, iterations=10)
 overhead_percent = (sandboxed_latency - baseline_latency) / baseline_latency * 100
 ```
 
-**Expected**:
+**Expected** (OS-native runners only; Lima/WSL2 dropped):
 - bwrap: 2–5% overhead (namespace creation, bind mounts)
 - sandbox-exec: 3–5% (profile policy evaluation)
 - AppContainer: 2–5% (capability SID check)
-- Lima: 10–20% (container intercommunication + file sync)
-- WSL2: 10–20% (WSL intercommunication)
 
 **Percentiles**: p50, p95, p99 (detect tail latency spikes)
 
@@ -360,25 +384,23 @@ overhead_percent = (sandboxed_latency - baseline_latency) / baseline_latency * 1
 
 The following decisions from C1 (sandbox-isolation.md) gate the eval framework:
 
-- **D1** (Linux primary tool) → Unit test fixture for bwrap launch + network namespace verification
-- **D2** (macOS sandbox strategy) → Integration test for sandbox-exec PARTIAL bypass detection
-- **D3** (Windows primary tool) → AppContainer compat test (must pass before AppContainer becomes primary)
-- **D5** (PARTIAL-row fallback policy) → E2E test for verdict shift when sandboxKind changes
-- **D6** (SandboxKind union extension) → Test fixture updates for any new kinds (e.g., "partial", "fs-only")
-- **D8** (deployment model) → Performance overhead measurement for bundled vs. OS-native runners
+- **D1** (Linux primary tool: bwrap OS-only) → Unit test fixture for bwrap launch + network namespace verification
+- **D2** (macOS: sandbox-exec PARTIAL accepted, Lima dropped) → Integration test for sandbox-exec PARTIAL bypass detection; no Lima runner tests
+- **D3** (Windows: AppContainer only, WSL2 dropped) → AppContainer compat test (must pass before AppContainer becomes primary); no WSL2 runner tests
+- **D5** (PARTIAL-row: kind="partial") → E2E test for verdict shift when sandboxKind changes; test fixtures include kind="partial" cases
+- **D6** (SandboxKind union: +partial +fs-only) → Test fixture updates for new kinds
+- **D8** (deployment: OS-only) → Performance overhead measurement for OS-native runners only (no bundled runner benchmarks)
+- **D9** (MCP in-scope) → 5th spawn path included in integration matrix
 
-**Evaluation cannot proceed** until D1–D3 decisions are finalized (can be done post-research in build epic).
+All C1 decisions DECIDED (2026-05-16). Evaluation framework can proceed.
 
 ---
 
-## 7. 결정 필요 (User Decision Items)
+## 7. 결정 완료 (User Decision Items — All DECIDED 2026-05-16)
 
 ### Decision E-D1 — Baseline Tool
 
-**Options**: curl (HTTP) vs Python urllib vs custom binary
-
-**Recommendation**: curl
-- Rationale: simplest, deterministic, widely available, clear success/failure signals
+**DECIDED: curl** (2026-05-16)
 
 **Owner**: QA team (test harness implementation)
 
@@ -386,21 +408,15 @@ The following decisions from C1 (sandbox-isolation.md) gate the eval framework:
 
 ### Decision E-D2 — Fixture Endpoint Hosting
 
-**Options**: internal LGE endpoint vs public (httpbin.org) vs local (127.0.0.1:9999)
+**DECIDED: Public httpbin.org (E2E) + local 127.0.0.1:9999 (unit)** (2026-05-16)
 
-**Recommendation**: public endpoint (httpbin.org) for E2E + local for unit
-- Rationale: E2E realism requires external network (tests the actual scenario); unit tests can use local for isolation verification
-
-**Owner**: Infrastructure (httpbin.org reliability) or test team (fallback plan if endpoint unavailable)
+**Owner**: Infrastructure + test team
 
 ---
 
 ### Decision E-D3 — Automation Cadence
 
-**Options**: fully automated (CI-gated) vs manual post-build vs hybrid
-
-**Recommendation**: hybrid (unit in CI, integration nightly, E2E manual)
-- Rationale: unit tests are fast (PR feedback); integration/E2E are comprehensive but slower (release gate)
+**DECIDED: Hybrid** — unit CI every PR / integration nightly / E2E manual per RC (2026-05-16)
 
 **Owner**: Build team (CI/CD pipeline configuration)
 
@@ -408,10 +424,7 @@ The following decisions from C1 (sandbox-isolation.md) gate the eval framework:
 
 ### Decision E-D4 — Verdict Diff Measurement Method
 
-**Options**: snapshot test vs differential analysis
-
-**Recommendation**: snapshot test
-- Rationale: simpler, auditable, integrates with risk-classifier.test.ts
+**DECIDED: Snapshot test** (`sandbox-eval-verdicts.json`) (2026-05-16)
 
 **Owner**: Engineering team (test fixture design)
 
@@ -419,10 +432,9 @@ The following decisions from C1 (sandbox-isolation.md) gate the eval framework:
 
 ### Decision E-D5 — Observability Sink
 
-**Options**: append to `~/.lvis/audit.log` (single sink) vs separate `~/.lvis/sandbox/events.log` (Storage Namespace rule)
+**DECIDED: Single `~/.lvis/audit.log`** (2026-05-16)
 
-**Recommendation**: single `~/.lvis/audit.log` (unless volume >100KB/day, then move to `~/.lvis/sandbox/`)
-- Rationale: simpler, unified audit trail; Storage Namespace rule allows cross-cutting resources at `~/.lvis/` root
+S2 runtime audit JSON (§3.6) appended to this sink. Storage Namespace rule: cross-cutting resource at `~/.lvis/` root.
 
 **Owner**: Deployment + observability team (log retention, Splunk/ELK sink)
 
@@ -430,12 +442,12 @@ The following decisions from C1 (sandbox-isolation.md) gate the eval framework:
 
 ## 8. See Also
 
-- `docs/research/sandbox-isolation.md` — Per-OS sandbox candidate evaluation + wrapper design (C1 deliverable)
+- `docs/research/sandbox-isolation.md` — Per-OS sandbox candidate evaluation + wrapper design (C1 deliverable); §11.5 R-1–R-4 design directives; Two Evaluation Surfaces
 - `docs/architecture/permission-policy-design.md` — Composition rule specification
-- `.omc/plans/open-questions.md` — All 13 decision items (C1 D1–D9 + C2 E-D1–E-D5)
+- `.omc/plans/open-questions.md` — All 13 decision items (C1 D1–D9 + C2 E-D1–E-D5), all DECIDED 2026-05-16
 
 ---
 
-**Research Status**: pending approval (awaiting user decisions E-D1–E-D5 + cross-link to C1 decisions D1–D8)
+**Research Status**: DECIDED (all E-D1–E-D5 finalized 2026-05-16 by user)
 
-**Evaluation Framework**: Design outline only. POC code will be implemented in post-research build epic after user decisions are finalized.
+**Evaluation Framework**: Design outline only. POC code implemented in post-research build epic after decisions finalized.
