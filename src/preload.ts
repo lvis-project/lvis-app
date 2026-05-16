@@ -44,7 +44,7 @@ const pluginShellUrl = safeResolveFileUrl("plugin-ui-shell.html");
 //       and skip its async settings.json hydrate, eliminating the cold-boot
 //       race where detached windows registered a plugin webview before
 //       the renderer's first `notifyPluginTheme` broadcast.
-// See architecture.md §6.7.1 ("race window = 0") and main.ts:initialThemeArgs.
+// See main.ts:initialThemeArgs for the matching startup payload.
 //
 // PREFIX, payload shape, and size cap are shared with main.ts via
 // `src/shared/initial-theme.ts` so the wire format has a single SoT.
@@ -305,35 +305,50 @@ const api = {
     }),
   chatGuide: async (input: string) => ipcRenderer.invoke("lvis:chat:guide", input),
   chatNew: async () => ipcRenderer.invoke("lvis:chat:new"),
-  chatSessions: async (opts?: { limit?: number; before?: string; beforeId?: string; after?: string }) =>
+  chatSessions: async (opts?: { kind?: "main" | "routine" | "all"; routineId?: string; limit?: number; before?: string; beforeId?: string; after?: string }) =>
     ipcRenderer.invoke("lvis:chat:sessions", opts) as Promise<{
       current: string;
       sessions: Array<{
         id: string;
         modifiedAt: string;
         title: string;
-        parentSessionId?: string;
+        sessionKind: "main" | "routine";
+        routineId?: string;
+        routineTitle?: string;
+        routineFiredAt?: string;
         branchedFromCompactNum?: number;
         branchedAt?: string;
       }>;
     }>,
-  chatLoadSession: async (sessionId: string) =>
-    ipcRenderer.invoke("lvis:chat:load-session", sessionId) as Promise<{
-      ok: boolean;
-      sessionId: string | null;
-    }>,
   // Sprint 4.C — conversation UX
   chatGetHistory: async () =>
-    ipcRenderer.invoke("lvis:chat:get-history") as Promise<{ sessionId: string; messages: SerializedHistoryMessage[]; estimatedInputTokens?: number }>,
+    ipcRenderer.invoke("lvis:chat:get-history") as Promise<{
+      sessionId: string;
+      sessionTitle?: string;
+      sessionKind: "main" | "routine";
+      routineId?: string;
+      routineTitle?: string;
+      messages: SerializedHistoryMessage[];
+      estimatedInputTokens?: number;
+    }>,
+  chatMainActiveState: async () =>
+    ipcRenderer.invoke("lvis:chat:main-active-state") as Promise<{
+      mainActiveSessionId: string | null;
+      mainActiveMode: "resume" | "fresh";
+      updatedAt: string;
+    } | null>,
   chatSessionHistory: async (sessionId: string) =>
     ipcRenderer.invoke("lvis:chat:session-history", sessionId) as Promise<{
       ok: boolean;
+      sessionTitle?: string;
+      sessionKind?: "main" | "routine";
+      routineId?: string;
+      routineTitle?: string;
+      routineFiredAt?: string;
       messages: SerializedHistoryMessage[];
       estimatedInputTokens?: number;
-      /** §457 PR-A: chars in the rolling summary preamble inherited from parent. 0 = no preamble. */
+      /** Chars in the rolling summary preamble applied to this session. 0 = no preamble. */
       preambleChars?: number;
-      /** §457 PR-A: parent session id when this session is a rotation child. */
-      parentSessionId?: string;
     }>,
   chatEditResend: async (messageIndex: number, newText: string) =>
     ipcRenderer.invoke("lvis:chat:edit-resend", messageIndex, newText),
@@ -343,7 +358,7 @@ const api = {
   chatExport: async (format: "markdown" | "json") => ipcRenderer.invoke("lvis:chat:export", format),
   chatCompact: async () => ipcRenderer.invoke("lvis:chat:compact"),
   chatSessionResume: async (sessionId: string) => ipcRenderer.invoke("lvis:chat:session-resume", sessionId),
-  // §PR-5: Layer 3 View-Mode + Branch
+  // Checkpoint view and explicit branch actions.
   chatEnterCheckpointView: async (sessionId: string, compactNum: number) =>
     ipcRenderer.invoke("lvis:chat:enter-checkpoint-view", { sessionId, compactNum }) as Promise<
       { messageIndexAtCreation: number } | { error: string }
@@ -355,7 +370,7 @@ const api = {
       { newSessionId: string } | { error: string }
     >,
   chatAbort: async () => ipcRenderer.invoke("lvis:chat:abort") as Promise<{ ok: boolean }>,
-  // PR-4: lazy-load verbatim tool_result content (in-session only)
+  // Lazy-load verbatim tool_result content (in-session only).
   chatGetVerbatimToolResult: async (sessionId: string, toolUseId: string) =>
     ipcRenderer.invoke("lvis:chat:get-verbatim-tool-result", { sessionId, toolUseId }) as Promise<
       { content: string; lineCount: number } | null
@@ -370,7 +385,7 @@ const api = {
     ipcRenderer.invoke("lvis:starred:add", entry),
   starredRemove: async (opts: { id?: string; sessionId?: string; messageIndex?: number }) =>
     ipcRenderer.invoke("lvis:starred:remove", opts),
-  onChatStream: (handler: (event: { type: string; text?: string; thought?: string; name?: string; error?: string; result?: string; isError?: boolean; input?: Record<string, unknown>; groupId?: string; toolUseId?: string; displayOrder?: number; roundIndex?: number; stopReason?: "end_turn" | "tool_use"; hasToolCalls?: boolean; removedMessages?: number; freedTokens?: number; tier?: "auto-compact" | "manual"; summary?: string; compactNum?: number; mode?: "default" | "strict" | "auto" | "allow"; phase?: "attempt" | "retry" | "fallback"; label?: string; attempt?: number; maxAttempts?: number; from?: string; to?: string; reason?: string; turnDurationMs?: number; toolCount?: number; cumulativeToolMs?: number; tokensIn?: number; tokensOut?: number; breakdown?: Record<string, { count: number; ms: number }>; triggerSource?: "estimate" | "actual-tokensIn" | "manual"; estimatedBefore?: number; preflight?: number; estimatedAfter?: number; compactStatus?: "summarized" | "content_truncated" | "noop" | "reduced_insufficient_forced"; truncatedDir?: string }) => void) => {
+  onChatStream: (handler: (event: { type: string; text?: string; thought?: string; name?: string; error?: string; result?: string; isError?: boolean; input?: Record<string, unknown>; groupId?: string; toolUseId?: string; displayOrder?: number; roundIndex?: number; stopReason?: "end_turn" | "tool_use"; hasToolCalls?: boolean; removedMessages?: number; freedTokens?: number; trigger?: "auto-compact" | "manual"; summary?: string; compactNum?: number; mode?: "default" | "strict" | "auto" | "allow"; phase?: "attempt" | "retry" | "fallback"; label?: string; attempt?: number; maxAttempts?: number; from?: string; to?: string; reason?: string; turnDurationMs?: number; toolCount?: number; cumulativeToolMs?: number; tokensIn?: number; tokensOut?: number; breakdown?: Record<string, { count: number; ms: number }>; triggerSource?: "estimate" | "actual-tokensIn" | "manual"; estimatedBefore?: number; preflight?: number; estimatedAfter?: number; compactStatus?: "summarized" | "content_truncated" | "noop" | "reduced_insufficient_forced"; truncatedDir?: string }) => void) => {
     const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
     ipcRenderer.on("lvis:chat:stream", listener);
     return () => ipcRenderer.removeListener("lvis:chat:stream", listener);
@@ -665,7 +680,7 @@ const api = {
       online: boolean;
     }>,
 
-  // ─── Plugin Events (§35 real-time streaming) ─────
+  // ─── Plugin Events ──────────────────────────────
   onPluginEvent: (
     eventType: string,
     handler: (data: unknown) => void,
@@ -723,7 +738,7 @@ const api = {
       ipcRenderer.invoke(PERMISSIONS.addRule, { pattern, action, intent: ipcUserKeyboardIntent() }),
     removeRule: async (pattern: string, action: string) =>
       ipcRenderer.invoke(PERMISSIONS.removeRule, { pattern, action, intent: ipcUserKeyboardIntent() }),
-    /** Permission policy — deferred queue (Layer 5 reviewer HIGH verdicts). */
+    /** Permission policy — deferred queue for reviewer HIGH verdicts. */
     deferredList: async () => ipcRenderer.invoke(PERMISSIONS.deferredList),
     /** Permission policy issue #633 — hook quarantine state for non-modal settings badge. */
     hookTrustList: async () => ipcRenderer.invoke(PERMISSIONS.hookTrustList),
@@ -774,7 +789,7 @@ const api = {
     auditVerify: async () =>
       ipcRenderer.invoke(PERMISSIONS.auditVerify),
     /**
-     * Permission policy §3.5 — manifest integrity violation notifier. Subscribes
+     * Permission policy — manifest integrity violation notifier. Subscribes
      * to `PERMISSIONS.manifestViolation` so the renderer can
      * surface a "Plugin X disabled — reinstall?" prompt.
      */
@@ -800,7 +815,7 @@ const api = {
       ipcRenderer.invoke(PERMISSIONS.policySet, { patch, intent: ipcUserKeyboardIntent() }),
   },
 
-  // ─── Approval Gate (§6.3 Layer 3 + §8) ─────────
+  // ─── Approval Gate ─────────────────────────────
   approval: {
     /** main→renderer 단방향 이벤트 구독 */
     onRequest: (cb: (req: unknown) => void) => {
@@ -946,13 +961,11 @@ const api = {
     ipcRenderer.on(ROUTINES_V2.failed, listener);
     return () => ipcRenderer.removeListener(ROUTINES_V2.failed, listener);
   },
-  // Routine session history — read-only viewer for per-routine session JSONL files
+  // Routine session history — unified conversation sessions scoped by routineId
   listRoutineSessionsV2: async (routineId: string, limit?: number) =>
     ipcRenderer.invoke(ROUTINES_V2.listSessions, routineId, limit) as Promise<
-      Array<{ routineId: string; firedAt: string; jsonlPath: string }>
+      Array<{ routineId: string; firedAt: string; sessionId: string; title: string; preview: string }>
     >,
-  readRoutineSessionV2: async (jsonlPath: string) =>
-    ipcRenderer.invoke(ROUTINES_V2.readSession, jsonlPath) as Promise<string>,
 
   // Overlay IPC bridges (main → renderer push + renderer → main confirm)
   onOverlayShow: (handler: (item: unknown) => void) => {
@@ -1119,7 +1132,7 @@ const api = {
 
   /**
    * Dev tools bridge — only useful in non-production builds. Renderer
-   * floating panel uses this to adjust the Layer 0 preflight threshold
+   * floating panel uses this to adjust the token preflight threshold
    * at runtime (so compact scenarios can be reproduced without filling
    * the actual model context window).
    */

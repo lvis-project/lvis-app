@@ -108,6 +108,12 @@ export interface RoutineRecord {
    * routine result card on next launch so completed-but-unseen runs are not lost.
    */
   lastResultAcknowledgedAt?: string;
+  /**
+   * Exact conversation session created by the latest llm-session run.
+   * Cleared when a routine fires and set only after the run successfully
+   * creates a session, so pending-result rehydration never guesses by date.
+   */
+  lastRoutineSessionId?: string;
   dismissedAt?: string;
   /**
    * Persistent cron dedup key — ISO string of the UTC minute that last fired.
@@ -147,6 +153,6 @@ export interface RoutineFiredPayload {
   firedAt: string;
   title: string;
   summary: string;
-  /** Present for llm-session routines so the overlay can open the captured JSONL. */
-  routineSessionPath?: string;
+  /** Present for llm-session routines so the overlay can open the routine conversation. */
+  routineSessionId?: string;
 }
