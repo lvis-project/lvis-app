@@ -1,5 +1,9 @@
 # Conversation History & Context Compaction — Reference Patterns
 
+> ⚠️ **SUPERSEDED** 2026-05-13 by **PR-2-F-2 / PR-3** (`continuous-chat-rotation-closure-report.md`).
+> The runtime model described here (`microcompactMessages`, `runRotationCheck`, `decideRotation`, `rotateActive`) is **retired**. The canonical conversation-history model + compaction pipeline now lives in `docs/architecture/architecture.md` §4.5 + the Gemini Reverse Token Budget 3-layer rewrite tracked by issue #715.
+> This file is preserved as a **frozen design scratchpad** capturing the peer-project survey that motivated the original adoption. New contributors: do not implement against the patterns below — they no longer match the runtime.
+
 **Purpose**: Capture how peer/reference projects manage LLM conversation history and context-window compaction, for future LVIS design decisions. Prepared 2026-04-17 during the microcompact adoption work.
 
 ## TL;DR
