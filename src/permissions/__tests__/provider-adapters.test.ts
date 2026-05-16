@@ -683,10 +683,11 @@ describe("reviewerProviderKeyPresent", () => {
     expect(getSecret).toHaveBeenCalledWith("llm.apiKey.gemini");
   });
 
-  it("unknown provider → false (checked via llm.apiKey.unknown)", () => {
+  it("unknown provider → false, fail-closed (getSecret not called)", () => {
+    // MAJOR-3 R2: unknown provider name now returns false without probing getSecret.
     const getSecret = vi.fn((_key: string) => null);
     expect(reviewerProviderKeyPresent("unknown-provider", getSecret)).toBe(false);
-    expect(getSecret).toHaveBeenCalledWith("llm.apiKey.unknown-provider");
+    expect(getSecret).not.toHaveBeenCalled();
   });
 });
 
@@ -871,19 +872,21 @@ describe("REVIEWER_VENDOR_MAP (MEDIUM-3 — prototype pollution closed)", () => 
 });
 
 describe("reviewerProviderKeyPresent (MEDIUM-3 — prototype-safe lookup)", () => {
-  it("unknown provider → false (checked via llm.apiKey.<provider>)", () => {
+  it("unknown provider → false, fail-closed (does NOT fall through to getSecret)", () => {
+    // MAJOR-3 R2: unknown UI name no longer falls through to `?? provider` → fail-closed.
+    // getSecret must NOT be called for an unknown provider (no secret-store probe).
     const getSecret = vi.fn((_key: string) => null);
     expect(reviewerProviderKeyPresent("unknown-provider", getSecret)).toBe(false);
-    expect(getSecret).toHaveBeenCalledWith("llm.apiKey.unknown-provider");
+    expect(getSecret).not.toHaveBeenCalled();
   });
 
-  it("prototype property name as provider → false (no prototype pollution)", () => {
+  it("prototype property name as provider → false, fail-closed (no prototype pollution)", () => {
     // If REVIEWER_VENDOR_MAP were a plain object, REVIEWER_VENDOR_MAP["constructor"]
-    // would return the Object constructor function, and vendor would be set to it.
-    // With Object.create(null) + hasOwnProperty check, it falls through to the provider name.
+    // would return the Object constructor function. With Object.create(null) +
+    // hasOwnProperty check + MAJOR-3 fail-closed, unknown names return false immediately.
     const getSecret = vi.fn((_key: string) => null);
     expect(reviewerProviderKeyPresent("constructor", getSecret)).toBe(false);
-    // Must look up llm.apiKey.constructor, not some prototype-derived value
-    expect(getSecret).toHaveBeenCalledWith("llm.apiKey.constructor");
+    // MAJOR-3: fail-closed means getSecret is never called for an unmapped provider.
+    expect(getSecret).not.toHaveBeenCalled();
   });
 });

@@ -479,8 +479,11 @@ export function reviewerProviderKeyPresent(
   // openai / anthropic / google — resolve UI name → canonical vendor, then check secret.
   // MEDIUM-3: use hasOwnProperty-safe lookup to avoid prototype-chain traversal on the
   // null-prototype REVIEWER_VENDOR_MAP (Object.create(null) has no .hasOwnProperty method).
-  const vendor = Object.prototype.hasOwnProperty.call(REVIEWER_VENDOR_MAP, provider)
-    ? REVIEWER_VENDOR_MAP[provider]
-    : provider;
+  // MAJOR-3: unknown provider name → fail-closed (return false) rather than
+  // falling through to `?? provider` which would silently check an arbitrary secret key.
+  if (!Object.prototype.hasOwnProperty.call(REVIEWER_VENDOR_MAP, provider)) {
+    return false;
+  }
+  const vendor = REVIEWER_VENDOR_MAP[provider];
   return getSecret(`llm.apiKey.${vendor}`) !== null;
 }

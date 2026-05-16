@@ -199,6 +199,155 @@ describe("marketplace:delete-api-key broadcast (MAJOR-3)", () => {
   });
 });
 
+// ─── MAJOR-2 R2: settings:update triggers rewireReviewerAgent when baseUrl changes ──
+
+describe("MAJOR-2: settings:update triggers rewireReviewerAgent on azure-foundry baseUrl change", () => {
+  it("calls rewireReviewerAgent when baseUrl changes from null to a new value", async () => {
+    const windows: ReturnType<typeof makeWindow>[] = [];
+    const rewire = vi.fn();
+    const baseDeps = makeDeps(windows, undefined);
+    const deps = {
+      ...baseDeps,
+      settingsService: {
+        ...baseDeps.settingsService,
+        get: vi.fn()
+          .mockReturnValueOnce({ provider: "openai", vendors: { "azure-foundry": { baseUrl: null } } })  // prevBaseUrl read
+          .mockReturnValueOnce({ provider: "openai", vendors: { "azure-foundry": { baseUrl: "https://proj.services.ai.azure.com" } } }), // newBaseUrl read
+        patch: vi.fn(async (p: unknown) => p),
+      },
+      rewireReviewerAgent: rewire,
+    };
+
+    const { registerSettingsHandlers } = await import("../settings.js");
+    registerSettingsHandlers(deps as never);
+
+    await invoke("lvis:settings:update", {
+      llm: { vendors: { "azure-foundry": { baseUrl: "https://proj.services.ai.azure.com" } } },
+    });
+
+    expect(rewire).toHaveBeenCalledOnce();
+  });
+
+  it("does NOT call rewireReviewerAgent when baseUrl stays the same", async () => {
+    const windows: ReturnType<typeof makeWindow>[] = [];
+    const rewire = vi.fn();
+    const sameUrl = "https://proj.services.ai.azure.com";
+    const baseDeps = makeDeps(windows, sameUrl);
+    const deps = {
+      ...baseDeps,
+      settingsService: {
+        ...baseDeps.settingsService,
+        get: vi.fn(() => ({ provider: "openai", vendors: { "azure-foundry": { baseUrl: sameUrl } } })),
+        patch: vi.fn(async (p: unknown) => p),
+      },
+      rewireReviewerAgent: rewire,
+    };
+
+    const { registerSettingsHandlers } = await import("../settings.js");
+    registerSettingsHandlers(deps as never);
+
+    await invoke("lvis:settings:update", { llm: { provider: "openai" } });
+
+    expect(rewire).not.toHaveBeenCalled();
+  });
+
+  it("calls rewireReviewerAgent on set-api-key so cacheScope refreshes", async () => {
+    const windows: ReturnType<typeof makeWindow>[] = [];
+    const rewire = vi.fn();
+    const deps = { ...makeDeps(windows), rewireReviewerAgent: rewire };
+
+    const { registerSettingsHandlers } = await import("../settings.js");
+    registerSettingsHandlers(deps as never);
+
+    await invoke("lvis:settings:set-api-key", "azure-foundry", "az-key");
+
+    expect(rewire).toHaveBeenCalledOnce();
+  });
+
+  it("calls rewireReviewerAgent on delete-api-key so cacheScope refreshes", async () => {
+    const windows: ReturnType<typeof makeWindow>[] = [];
+    const rewire = vi.fn();
+    const deps = { ...makeDeps(windows), rewireReviewerAgent: rewire };
+
+    const { registerSettingsHandlers } = await import("../settings.js");
+    registerSettingsHandlers(deps as never);
+
+    await invoke("lvis:settings:delete-api-key", "azure-foundry");
+
+    expect(rewire).toHaveBeenCalledOnce();
+  });
+});
+
+// ─── Minor-1 R2: broadcastSettingsSnapshot helper consolidation ───────────────
+
+describe("Minor-1: broadcastSettingsSnapshot helper — all mutation handlers call it", () => {
+  it("set-api-key broadcasts snapshot via helper (not stale inline copy)", async () => {
+    const win = makeWindow();
+    const snapshot = { llm: { provider: "anthropic", version: 2 } };
+    const deps = {
+      ...makeDeps([win]),
+      settingsService: {
+        ...makeDeps([win]).settingsService,
+        getAll: vi.fn(() => snapshot),
+        setSecret: vi.fn(async () => undefined),
+      },
+    };
+
+    const { registerSettingsHandlers } = await import("../settings.js");
+    registerSettingsHandlers(deps as never);
+
+    await invoke("lvis:settings:set-api-key", "openai", "sk-test");
+
+    expect(win.webContents.send).toHaveBeenCalledWith(SETTINGS.updated, snapshot);
+  });
+});
+
+// ─── Minor-4 R2: settings:update rejects non-string baseUrl ──────────────────
+
+describe("Minor-4: settings:update rejects non-string baseUrl", () => {
+  it("returns invalid-foundry-endpoint when baseUrl is a number", async () => {
+    const deps = makeDeps([]);
+
+    const { registerSettingsHandlers } = await import("../settings.js");
+    registerSettingsHandlers(deps as never);
+
+    const result = await invoke("lvis:settings:update", {
+      llm: { vendors: { "azure-foundry": { baseUrl: 12345 } } },
+    });
+
+    expect(result).toMatchObject({ ok: false, error: "invalid-foundry-endpoint", message: "baseUrl must be a string" });
+    expect(deps.settingsService.patch).not.toHaveBeenCalled();
+  });
+
+  it("returns invalid-foundry-endpoint when baseUrl is an object", async () => {
+    const deps = makeDeps([]);
+
+    const { registerSettingsHandlers } = await import("../settings.js");
+    registerSettingsHandlers(deps as never);
+
+    const result = await invoke("lvis:settings:update", {
+      llm: { vendors: { "azure-foundry": { baseUrl: { toString: () => "evil" } } } },
+    });
+
+    expect(result).toMatchObject({ ok: false, error: "invalid-foundry-endpoint", message: "baseUrl must be a string" });
+  });
+
+  it("accepts valid string baseUrl", async () => {
+    const deps = makeDeps([]);
+    deps.settingsService.patch.mockResolvedValue({ ok: true });
+    deps.settingsService.get = vi.fn(() => ({ provider: "openai", vendors: { "azure-foundry": { baseUrl: "https://proj.services.ai.azure.com" } } }));
+
+    const { registerSettingsHandlers } = await import("../settings.js");
+    registerSettingsHandlers(deps as never);
+
+    await invoke("lvis:settings:update", {
+      llm: { vendors: { "azure-foundry": { baseUrl: "https://proj.services.ai.azure.com" } } },
+    });
+
+    expect(deps.settingsService.patch).toHaveBeenCalled();
+  });
+});
+
 // ─── LOW-2: settings:update validates vendors["azure-foundry"].baseUrl ────────
 
 describe("LOW-2: settings:update validates azure-foundry baseUrl at write time", () => {

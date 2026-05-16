@@ -94,13 +94,16 @@ const DEFAULT_FILE: PermissionSettingsFile = {
 };
 
 const REVIEWER_MODES: ReadonlySet<ReviewerMode> = new Set(["disabled", "rule", "llm"]);
-const REVIEWER_PROVIDERS: ReadonlySet<ReviewerProvider> = new Set([
+/** Exported so IPC handlers can validate provider names against a single SOT. */
+export const REVIEWER_PROVIDERS_SET: ReadonlySet<ReviewerProvider> = new Set([
   "openai",
   "anthropic",
   "google",
   "foundry",
   "gcp-playground",
 ]);
+/** @internal — module-private alias used by validation helpers below. */
+const REVIEWER_PROVIDERS = REVIEWER_PROVIDERS_SET;
 const REVIEWER_FALLBACKS: ReadonlySet<ReviewerFallbackOnError> = new Set(["deny", "rule"]);
 
 function defaultPath(): string {

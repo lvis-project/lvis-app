@@ -9,8 +9,16 @@ import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.
 import { sendToWindow } from "../safe-send.js";
 import type { IpcDeps } from "../types.js";
 
+/** Minor-1: extracted helper — 6 handlers share identical 5-line broadcast. */
+function broadcastSettingsSnapshot(deps: IpcDeps): void {
+  const snapshot = deps.settingsService.getAll();
+  for (const win of deps.getAppWindows?.() ?? []) {
+    sendToWindow(win, SETTINGS.updated, snapshot);
+  }
+}
+
 export function registerSettingsHandlers(deps: IpcDeps): void {
-  const { settingsService, conversationLoop, auditLogger, getAppWindows } = deps;
+  const { settingsService, conversationLoop, auditLogger } = deps;
 
   // read-only — no sender guard needed
   ipcMain.handle("lvis:settings:get", () => settingsService.getAll());
@@ -23,21 +31,29 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
       ?.llm as Record<string, unknown> | undefined;
     const foundryVendorPatch = (foundryPatch?.vendors as Record<string, unknown> | undefined)
       ?.["azure-foundry"] as Record<string, unknown> | undefined;
-    if (foundryVendorPatch?.baseUrl) {
+    if (foundryVendorPatch?.baseUrl !== undefined) {
+      // Minor-4: reject non-string values explicitly before String() coercion.
+      if (typeof foundryVendorPatch.baseUrl !== "string") {
+        return { ok: false, error: "invalid-foundry-endpoint", message: "baseUrl must be a string" };
+      }
       const { validateFoundryEndpoint } = await import(
         "../../permissions/reviewer/provider-adapters.js"
       );
       try {
-        validateFoundryEndpoint(String(foundryVendorPatch.baseUrl));
+        validateFoundryEndpoint(foundryVendorPatch.baseUrl);
       } catch (err) {
         return { ok: false, error: "invalid-foundry-endpoint", message: (err as Error).message };
       }
     }
+    // MAJOR-2: detect baseUrl change before patching so cacheScope.endpoint refreshes.
+    const prevBaseUrl = settingsService.get("llm").vendors?.["azure-foundry"]?.baseUrl ?? null;
     const result = await settingsService.patch(partial);
-    conversationLoop.refreshProvider();
-    for (const win of getAppWindows?.() ?? []) {
-      sendToWindow(win, SETTINGS.updated, result);
+    const newBaseUrl = settingsService.get("llm").vendors?.["azure-foundry"]?.baseUrl ?? null;
+    if (prevBaseUrl !== newBaseUrl) {
+      deps.rewireReviewerAgent?.();
     }
+    conversationLoop.refreshProvider();
+    broadcastSettingsSnapshot(deps);
     return result;
   });
 
@@ -45,11 +61,10 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:settings:set-api-key", e); return UNAUTHORIZED_FRAME; }
     await settingsService.setSecret(`llm.apiKey.${vendor}`, apiKey);
     conversationLoop.refreshProvider();
+    // MAJOR-2: rewire reviewer when provider key changes so cacheScope refreshes.
+    deps.rewireReviewerAgent?.();
     // Broadcast settings snapshot so reviewer tab can auto-unlock without a full reload.
-    const snapshot = settingsService.getAll();
-    for (const win of getAppWindows?.() ?? []) {
-      sendToWindow(win, SETTINGS.updated, snapshot);
-    }
+    broadcastSettingsSnapshot(deps);
     return { ok: true };
   });
 
@@ -63,11 +78,9 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:settings:delete-api-key", e); return UNAUTHORIZED_FRAME; }
     await settingsService.deleteSecret(`llm.apiKey.${vendor}`);
     conversationLoop.refreshProvider();
-    // Broadcast settings snapshot so reviewer tab reflects key removal immediately.
-    const snapshot = settingsService.getAll();
-    for (const win of getAppWindows?.() ?? []) {
-      sendToWindow(win, SETTINGS.updated, snapshot);
-    }
+    // MAJOR-2: rewire reviewer when provider key is removed so cacheScope refreshes.
+    deps.rewireReviewerAgent?.();
+    broadcastSettingsSnapshot(deps);
     return { ok: true };
   });
 
@@ -75,11 +88,7 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
   ipcMain.handle("lvis:settings:marketplace:set-api-key", async (e, apiKey: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:settings:marketplace:set-api-key", e); return UNAUTHORIZED_FRAME; }
     await settingsService.setSecret("marketplace.apiKey", apiKey);
-    // MAJOR-3: broadcast settings snapshot so reviewer tab reflects change immediately.
-    const snapshot = settingsService.getAll();
-    for (const win of getAppWindows?.() ?? []) {
-      sendToWindow(win, SETTINGS.updated, snapshot);
-    }
+    broadcastSettingsSnapshot(deps);
     return { ok: true };
   });
 
@@ -90,11 +99,7 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
   ipcMain.handle("lvis:settings:marketplace:delete-api-key", async (e) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:settings:marketplace:delete-api-key", e); return UNAUTHORIZED_FRAME; }
     await settingsService.deleteSecret("marketplace.apiKey");
-    // MAJOR-3: broadcast settings snapshot so reviewer tab reflects change immediately.
-    const snapshot = settingsService.getAll();
-    for (const win of getAppWindows?.() ?? []) {
-      sendToWindow(win, SETTINGS.updated, snapshot);
-    }
+    broadcastSettingsSnapshot(deps);
     return { ok: true };
   });
 
@@ -116,11 +121,7 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
   ipcMain.handle("lvis:settings:set-web-api-key", async (e, provider: string, apiKey: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:settings:set-web-api-key", e); return UNAUTHORIZED_FRAME; }
     await settingsService.setSecret(`web.apiKey.${provider}`, apiKey);
-    // MAJOR-3: broadcast settings snapshot so reviewer tab reflects change immediately.
-    const snapshot = settingsService.getAll();
-    for (const win of getAppWindows?.() ?? []) {
-      sendToWindow(win, SETTINGS.updated, snapshot);
-    }
+    broadcastSettingsSnapshot(deps);
     return { ok: true };
   });
 
@@ -132,11 +133,7 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
   ipcMain.handle("lvis:settings:delete-web-api-key", async (e, provider: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:settings:delete-web-api-key", e); return UNAUTHORIZED_FRAME; }
     await settingsService.deleteSecret(`web.apiKey.${provider}`);
-    // MAJOR-3: broadcast settings snapshot so reviewer tab reflects change immediately.
-    const snapshot = settingsService.getAll();
-    for (const win of getAppWindows?.() ?? []) {
-      sendToWindow(win, SETTINGS.updated, snapshot);
-    }
+    broadcastSettingsSnapshot(deps);
     return { ok: true };
   });
 
