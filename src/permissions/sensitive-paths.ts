@@ -1,11 +1,11 @@
 /**
  * Portions adapted from OpenHarness (MIT License)
  * https://github.com/HKUDS/OpenHarness/blob/main/src/openharness/permissions/checker.py
- * Copyright (c) 2026 HKU Data Intelligence Lab
+ * Copyright (c) 2025 OpenHarness Contributors
  *
  * ─────────────────────────────────────────────────────────
  *
- * Sensitive Path Patterns — Tier S1+S2 (OpenHarness borrow)
+ * Sensitive Path Patterns — Tier S1+S2
  *
  * Hard-blocklist of filesystem patterns that should NEVER be read/written
  * by agent tools, regardless of user approval or permission mode. Defends
@@ -50,10 +50,10 @@ export const MAX_WALK_UP = 64;
  *   double-star  — matches any path (including path separators)
  *   single-star  — matches any single path segment
  *
- * Ordering: OpenHarness list first, then OS expansion, then LVIS-specific.
+ * Ordering: credential store patterns first, then OS expansion, then LVIS-specific.
  */
 export const SENSITIVE_PATH_PATTERNS: readonly string[] = Object.freeze([
-  // ── OpenHarness upstream ────────────────────────────
+  // ── Credential store patterns adapted from OpenHarness ─────────────
   "**/.ssh/**", // SSH keys and config
   "**/.aws/credentials", // AWS static credentials
   "**/.aws/config", // AWS profile/region config
@@ -62,8 +62,6 @@ export const SENSITIVE_PATH_PATTERNS: readonly string[] = Object.freeze([
   "**/.gnupg/**", // GPG keys
   "**/.docker/config.json", // Docker registry credentials
   "**/.kube/config", // Kubernetes credentials
-  "**/.openharness/credentials.json",
-  "**/.openharness/copilot_auth.json",
   // ── Permission policy P2.5 — OS sensitive paths ───────
   // Use double-star prefix because frozen-canonical realpath() resolves
   // /etc → /private/etc on macOS. The double-star matches both forms.
@@ -196,7 +194,7 @@ export function caseFoldForMatch(canonical: string): string {
 }
 
 /**
- * Returns the OpenHarness-style tuple `[path, path + "/"]` used by the
+ * Returns the path-policy tuple `[path, path + "/"]` used by the
  * underlying glob match pass. Exposed for tests and for callers that want
  * to run custom pattern lists against the same normalization.
  *

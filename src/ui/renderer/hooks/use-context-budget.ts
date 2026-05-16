@@ -34,7 +34,7 @@ import { estimateTokens } from "../../../engine/auto-compact.js";
  *
  * Context window source: `src/shared/pricing-data.ts` →
  * `effectiveContextWindow()` (picks 1M-beta tier for Sonnet/Opus 4.6) →
- * `getUsableContext()` (Cline-style fixed buffer for output reservation).
+ * `getUsableContext()` (LVIS fixed output/safety reservation).
  */
 export function useContextBudget(params: {
   entries: ChatEntry[];
@@ -46,7 +46,7 @@ export function useContextBudget(params: {
 
   const contextBudget = useMemo(() => {
     // Effective window picks the 1M beta tier when the model defines one
-    // (adapter auto-sends `context-1m-2025-08-07`). Cline-style buffer
+    // (adapter auto-sends `context-1m-2025-08-07`). LVIS reservation
     // then subtracts output + safety reservation so the ring hits 100% at
     // the compact threshold, not at raw context = full.
     // `lookupPricing` always returns a value (FALLBACK_PRICING on miss),

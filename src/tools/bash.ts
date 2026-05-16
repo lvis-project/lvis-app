@@ -1,7 +1,7 @@
 /**
  * Portions adapted from OpenHarness (MIT License)
  * https://github.com/HKUDS/OpenHarness/blob/main/src/openharness/tools/bash_tool.py
- * Copyright (c) 2026 HKU Data Intelligence Lab
+ * Copyright (c) 2025 OpenHarness Contributors
  *
  * SafeBashExecutor (Tier A1) — non-interactive shell execution with
  * preflight detection for interactive scaffolds, timeout handling with

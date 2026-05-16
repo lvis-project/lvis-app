@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { getUsableContext, getPreflightThreshold } from "../context-budget.js";
 
-describe("getUsableContext — Cline tier-fixed buffers", () => {
+describe("getUsableContext — LVIS tier-fixed reservations", () => {
   it("64K → 37K usable (27K reserved for output-heavy small models)", () => {
     expect(getUsableContext(64_000)).toBe(37_000);
   });
