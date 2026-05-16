@@ -7,6 +7,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/too
 import { ScrollArea } from "../../components/ui/scroll-area.js";
 import { formatCostBadge } from "../../lib/cost-estimator.js";
 import type { ChatEntry } from "../../lib/chat-stream-state.js";
+import type { UserApprovalHitPayload } from "../../shared/permissions-events.js";
 import { debugLog, isDebugStreamEnabled } from "../../lib/debug-stream.js";
 import { OverlayCardRegion } from "./components/OverlayCardRegion.js";
 import { AssistantCard } from "./components/AssistantCard.js";
@@ -235,10 +236,47 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
   const [forkToast, setForkToast] = useState<string | null>(null);
   const forkToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // R-2 user-approval memory-hit disclosure toast (#793). Subscribes to the
+  // `lvis:permissions:user-approval-hit` IPC broadcast wired by PR #786 and
+  // surfaces a transient banner so the user sees that a stored approval
+  // (R-2 cache) auto-resolved the tool call. Auto-dismisses after 4 s.
+  const [userApprovalHitToast, setUserApprovalHitToast] = useState<
+    UserApprovalHitPayload | null
+  >(null);
+  const userApprovalHitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+
   // Cleanup fork toast timer on unmount to avoid setState-after-unmount.
   useEffect(() => {
     return () => {
       if (forkToastTimerRef.current) clearTimeout(forkToastTimerRef.current);
+    };
+  }, []);
+
+  // Subscribe to user-approval-hit broadcasts. Returned closure both
+  // unsubscribes the IPC listener and cancels any in-flight dismiss timer.
+  useEffect(() => {
+    let api;
+    try {
+      api = getApi();
+    } catch {
+      return;
+    }
+    const unsubscribe = api.permission.onUserApprovalHit((payload) => {
+      if (userApprovalHitTimerRef.current) {
+        clearTimeout(userApprovalHitTimerRef.current);
+      }
+      setUserApprovalHitToast(payload);
+      userApprovalHitTimerRef.current = setTimeout(() => {
+        setUserApprovalHitToast(null);
+      }, 4000);
+    });
+    return () => {
+      unsubscribe();
+      if (userApprovalHitTimerRef.current) {
+        clearTimeout(userApprovalHitTimerRef.current);
+      }
     };
   }, []);
 
@@ -692,6 +730,20 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           className="sticky top-0 z-30 mx-3 mt-2 rounded-md border border-[hsl(var(--action-branch)/0.4)] bg-[hsl(var(--action-branch)/0.1)] px-3 py-2 text-xs text-[hsl(var(--action-branch))]"
         >
           {forkToast}
+        </div>
+      )}
+      {/* R-2 user-approval memory-hit disclosure toast (#793) — auto-dismisses after 4 s */}
+      {userApprovalHitToast && (
+        <div
+          data-testid="user-approval-hit-toast"
+          role="status"
+          aria-live="polite"
+          className="sticky top-0 z-30 mx-3 mt-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300"
+        >
+          <span className="font-medium">권한 메모리 적용</span>
+          <span className="ml-2 text-muted-foreground">
+            {userApprovalHitToast.toolName} · {userApprovalHitToast.scope === "persistent" ? "영구" : "세션"} · {userApprovalHitToast.verdictAtApproval.toUpperCase()}
+          </span>
         </div>
       )}
       {currentSessionKind === "routine" && (
