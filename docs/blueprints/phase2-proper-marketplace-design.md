@@ -11,7 +11,7 @@
 
 Phase 1 은 `MockCloudMarketplaceAdapter` 로 시작되었고 Phase 1.5 는 managed plugin guard + deployment model 을 확립했다. Phase 2 proper 에서는 **실 마켓플레이스 서버** 를 만들어 다음 요구사항을 충족한다:
 
-1. **IT admin 이 플러그인을 사내 배포** — install 이 managed 정책과 자동 연동
+1. **IT admin 이 플러그인을 enterprise 배포** — install 이 managed 정책과 자동 연동
 2. **개발자가 아닌 사용자 (기획, 운영, 영업 등) 도 플러그인 publish 가능** — 브라우저 Web UI
 3. **LVIS client 가 내부 네트워크에서만 catalog / zip 을 fetch** — 외부 노출 없음
 4. **Phase 1.5 의 `MockCloudMarketplaceAdapter` 를 adapter-only 교체** — 호스트 host 코드 변경 최소화
@@ -271,7 +271,7 @@ CREATE TABLE audit_log (
 7. systemctl enable --now lvis-marketplace
 ```
 
-**nginx reverse proxy (사내 도메인)**:
+**nginx reverse proxy (enterprise 도메인)**:
 - `https://marketplace.lvis.internal.your-corp.example` → `127.0.0.1:8080`
 - TLS cert: corporate internal CA 서명 (IT 발급)
 - Client max body size: 100 MB (artifact upload 상한)
@@ -458,7 +458,7 @@ Phase 3 승격 시에도 API key 경로는 유지 (CI 용).
 다음 세션 coding 시작 전에 IT 에 문의:
 
 1. **VM 프로비저닝** — 내부 Ubuntu/RHEL VM 1대 (2 vCPU / 4 GB / 50 GB) 확보 절차, 소요 시간, 요청 양식
-2. **사내 도메인 등록** — `marketplace.lvis.internal.your-corp.example` (또는 유사) 할당 + DNS record + corporate CA 서명 cert 발급 가능 여부
+2. **enterprise 도메인 등록** — `marketplace.lvis.internal.your-corp.example` (또는 유사) 할당 + DNS record + corporate CA 서명 cert 발급 가능 여부
 3. **nginx / systemd 권한** — LVIS 팀이 직접 운영 가능한지, IT 운영팀 관리 대상인지
 4. **SSO 통합 일정** — sso.your-corp.example OIDC client 등록 절차, 개발자가 직접 가능한지, IT 승인 필요한지
 5. **API key tier "admin" 의 발급 주체** — IT 가 발급? LVIS 팀이 발급 후 audit 제출?

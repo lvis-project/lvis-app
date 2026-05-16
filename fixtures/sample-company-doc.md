@@ -1,7 +1,7 @@
 # LVIS Company Handbook
 
 ## Security Policy
-사내 문서는 최소 권한 원칙으로 접근합니다.
+회사 문서는 최소 권한 원칙으로 접근합니다.
 
 ## Product Roadmap
 Q2 목표는 검색 기반 업무 자동화입니다.
