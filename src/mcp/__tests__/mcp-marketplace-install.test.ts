@@ -96,6 +96,35 @@ describe("buildMcpServerConfig", () => {
       allowPrivateNetworks: true,
     });
   });
+
+  it("emits http OAuth config with discovery metadata and no token material", () => {
+    const config = buildMcpServerConfig("remote-docs", {
+      transport: "http",
+      url: "https://mcp.example.com/mcp",
+      auth: "oauth",
+      oauth: {
+        resource: "https://mcp.example.com/mcp",
+        resourceMetadataUrl: "https://mcp.example.com/.well-known/oauth-protected-resource/mcp",
+        authorizationServers: ["https://auth.example.com"],
+        scopes: ["docs:read"],
+        clientRegistration: "client-id-metadata-document",
+      },
+    });
+    expect(config).toEqual({
+      id: "remote-docs",
+      transport: "http",
+      url: "https://mcp.example.com/mcp",
+      auth: "oauth",
+      oauth: {
+        resource: "https://mcp.example.com/mcp",
+        resourceMetadataUrl: "https://mcp.example.com/.well-known/oauth-protected-resource/mcp",
+        authorizationServers: ["https://auth.example.com"],
+        scopes: ["docs:read"],
+        clientRegistration: "client-id-metadata-document",
+      },
+    });
+    expect(JSON.stringify(config)).not.toMatch(/access[_-]?token|refresh[_-]?token|Bearer/i);
+  });
 });
 
 describe("readRuntimeFromInstalledManifest", () => {
@@ -122,6 +151,47 @@ describe("readRuntimeFromInstalledManifest", () => {
         command: "node",
         args: ["server.js"],
         auth: "none",
+      });
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("returns HTTP OAuth runtime metadata from a verified manifest", async () => {
+    const tmp = makeTmpDir();
+    try {
+      await mkdir(tmp, { recursive: true });
+      await writeFile(
+        join(tmp, "plugin.json"),
+        JSON.stringify({
+          id: "remote-docs",
+          version: "1.0.0",
+          runtime: {
+            transport: "http",
+            url: "https://mcp.example.com/mcp",
+            auth: "oauth",
+            oauth: {
+              resource: "https://mcp.example.com/mcp",
+              resourceMetadataUrl: "https://mcp.example.com/.well-known/oauth-protected-resource/mcp",
+              authorizationServers: ["https://auth.example.com"],
+              scopes: ["docs:read", "docs:search"],
+              clientRegistration: "client-id-metadata-document",
+            },
+          },
+        }),
+      );
+      const runtime = await readRuntimeFromInstalledManifest(tmp);
+      expect(runtime).toEqual({
+        transport: "http",
+        url: "https://mcp.example.com/mcp",
+        auth: "oauth",
+        oauth: {
+          resource: "https://mcp.example.com/mcp",
+          resourceMetadataUrl: "https://mcp.example.com/.well-known/oauth-protected-resource/mcp",
+          authorizationServers: ["https://auth.example.com"],
+          scopes: ["docs:read", "docs:search"],
+          clientRegistration: "client-id-metadata-document",
+        },
       });
     } finally {
       rmSync(tmp, { recursive: true, force: true });
@@ -264,6 +334,63 @@ describe("installMcpFromMarketplace", () => {
         "weather",
         expect.objectContaining({ version: "1.0.0" }),
       );
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("end-to-end: preserves MCP OAuth login metadata from the verified package", async () => {
+    const tmp = makeTmpDir();
+    try {
+      await mkdir(tmp, { recursive: true });
+      await writeFile(
+        join(tmp, "plugin.json"),
+        JSON.stringify({
+          id: "remote-docs",
+          version: "1.0.0",
+          runtime: {
+            transport: "http",
+            url: "https://mcp.example.com/mcp",
+            auth: "oauth",
+            oauth: {
+              resource: "https://mcp.example.com/mcp",
+              resourceMetadataUrl: "https://mcp.example.com/.well-known/oauth-protected-resource/mcp",
+              authorizationServers: ["https://auth.example.com"],
+              scopes: ["docs:read"],
+              clientRegistration: "client-id-metadata-document",
+            },
+          },
+        }),
+      );
+
+      const store = makeStubStore(tmp);
+      const fetcher = makeStubFetcher({
+        id: "remote-docs",
+        name: "Remote Docs MCP",
+        description: "",
+        packageSpec: "remote-docs@1.0.0",
+        packageName: "remote-docs",
+        tools: [],
+        version: "1.0.0",
+        pluginType: "mcp",
+      });
+      const result = await installMcpFromMarketplace("remote-docs", { fetcher, store });
+
+      expect(result.config).toEqual({
+        id: "remote-docs",
+        transport: "http",
+        url: "https://mcp.example.com/mcp",
+        auth: "oauth",
+        oauth: {
+          resource: "https://mcp.example.com/mcp",
+          resourceMetadataUrl: "https://mcp.example.com/.well-known/oauth-protected-resource/mcp",
+          authorizationServers: ["https://auth.example.com"],
+          scopes: ["docs:read"],
+          clientRegistration: "client-id-metadata-document",
+        },
+      });
+      expect(result.needsCredential).toBe(true);
+      expect(result.authMode).toBe("oauth");
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
