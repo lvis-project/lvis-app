@@ -422,6 +422,31 @@ export type LvisApi = {
     limit?: number,
   ) => Promise<Array<{ routineId: string; firedAt: string; sessionId: string; title: string; preview: string }>>;
   onMarketplaceUpdatesAvailable: (h: (updates: Array<{ pluginId: string; installedVersion: string; latestVersion: string }>) => void) => () => void;
+  /**
+   * App auto-update state stream — emitted by the main process whenever
+   * the updater state changes (available → downloading → downloaded).
+   * Renderer renders a permanent badge next to the Home button based on
+   * this state. Download is user-gated (badge click) — see `downloadAppUpdate`.
+   */
+  onAppUpdateState: (
+    handler: (state:
+      | { kind: "idle" }
+      | { kind: "available"; version: string }
+      | { kind: "downloading"; version: string; percent: number }
+      | { kind: "downloaded"; version: string }
+    ) => void,
+  ) => () => void;
+  /** Late-mount sync: fetch the last broadcasted state. */
+  getAppUpdateState: () => Promise<
+    | { kind: "idle" }
+    | { kind: "available"; version: string }
+    | { kind: "downloading"; version: string; percent: number }
+    | { kind: "downloaded"; version: string }
+  >;
+  /** Trigger download. Valid only when state is "available". */
+  downloadAppUpdate: () => Promise<{ ok: boolean; reason?: string }>;
+  /** Quit & install. Valid only when state is "downloaded". */
+  installAppUpdate: () => Promise<{ ok: boolean; reason?: string }>;
   onBootstrapStatus: (
     h: (status:
       | { phase: "start" }
