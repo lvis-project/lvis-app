@@ -25,6 +25,7 @@ import {
   recordApproval,
   revokeApprovalByKey,
   listApprovals,
+  canonicalStringify,
 } from "../../permissions/user-approval-store.js";
 
 function validateRulePatternInput(pattern: unknown): { ok: true; pattern: string } | { ok: false; error: string; message: string } {
@@ -483,6 +484,9 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
     const scope = body.scope;
     const verdictAtApproval = body.verdictAtApproval;
     const nlJustification = body.nlJustification;
+    // R-2 Round-3: extract optional fields for record/lookup key symmetry.
+    const trustOrigin = typeof body.trustOrigin === "string" ? body.trustOrigin : undefined;
+    const approvalCacheKey = typeof body.approvalCacheKey === "string" ? body.approvalCacheKey : undefined;
     if (
       typeof toolName !== "string" ||
       typeof args !== "string" ||
@@ -504,10 +508,16 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
       }
     }
     try {
-      await recordApproval(toolName, args, source, {
+      // MEDIUM defense-in-depth: canonicalize at IPC handler to catch any
+      // non-renderer callers that bypass the renderer-side canonicalization.
+      let canonicalArgs = args;
+      try { canonicalArgs = canonicalStringify(JSON.parse(args)); } catch { /* args is already a canonical string or non-JSON — use as-is */ }
+      await recordApproval(toolName, canonicalArgs, source, {
         scope,
         verdictAtApproval,
         nlJustification: typeof nlJustification === "string" ? nlJustification : null,
+        trustOrigin,
+        approvalCacheKey,
       });
       return { ok: true };
     } catch (err) {
