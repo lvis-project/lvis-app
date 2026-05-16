@@ -64,6 +64,7 @@ function isValidRecord(r: unknown): r is RoutineRecord {
   if (x.lastFiredMinuteUTC !== undefined && typeof x.lastFiredMinuteUTC !== "string") return false;
   if (x.lastFiredAt !== undefined && typeof x.lastFiredAt !== "string") return false;
   if (x.lastResultAcknowledgedAt !== undefined && typeof x.lastResultAcknowledgedAt !== "string") return false;
+  if (x.lastRoutineSessionId !== undefined && typeof x.lastRoutineSessionId !== "string") return false;
   if (x.dismissedAt !== undefined && typeof x.dismissedAt !== "string") return false;
   if (x.scope !== undefined && !isValidRoutineScope(x.scope)) return false;
   return true;
@@ -400,7 +401,7 @@ export class RoutinesStore {
    */
   async update(
     id: string,
-    patch: Partial<Pick<RoutineRecord, "lastFiredMinuteUTC" | "lastFiredAt" | "lastResultAcknowledgedAt" | "dismissedAt">>,
+    patch: Partial<Pick<RoutineRecord, "lastFiredMinuteUTC" | "lastFiredAt" | "lastResultAcknowledgedAt" | "lastRoutineSessionId" | "dismissedAt">>,
   ): Promise<RoutineRecord | null> {
     if (!this.loaded) await this.load();
     return withFileLock(this.filePath, async () => {
@@ -413,6 +414,7 @@ export class RoutinesStore {
       if (patch.lastFiredMinuteUTC !== undefined) r.lastFiredMinuteUTC = patch.lastFiredMinuteUTC;
       if (patch.lastFiredAt !== undefined) r.lastFiredAt = patch.lastFiredAt;
       if (patch.lastResultAcknowledgedAt !== undefined) r.lastResultAcknowledgedAt = patch.lastResultAcknowledgedAt;
+      if (patch.lastRoutineSessionId !== undefined) r.lastRoutineSessionId = patch.lastRoutineSessionId;
       if (patch.dismissedAt !== undefined) r.dismissedAt = patch.dismissedAt;
       await writeFileAtomic(this.filePath, file);
       this.cache = file.routines;
@@ -436,6 +438,7 @@ export class RoutinesStore {
       }
       const firedAt = new Date().toISOString();
       r.lastFiredAt = firedAt;
+      delete r.lastRoutineSessionId;
       const repeat = r.schedule?.repeat;
       if (!repeat || repeat.kind === "none") {
         r.dismissedAt = firedAt;
