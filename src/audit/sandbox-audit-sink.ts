@@ -6,9 +6,9 @@
  *
  * This module provides the *sink* for `SandboxAuditEntry` records — the
  * emit pipeline deferred from PR-A1. Entries are appended in JSONL format
- * to `~/.lvis/audit.log` (the same file used by the permission-gate audit
- * channel). The discriminator between channels is the presence of the
- * `sandbox` field on S2 entries vs `decision` on permission-gate entries.
+ * to `~/.lvis/audit/<YYYY-MM-DD>.sandbox.jsonl` (daily-rotated, same
+ * directory as the permission-gate audit channel so the AuditPanel reader
+ * can glob both channels from one directory).
  *
  * DLP note: callers MUST pass DLP-redacted args and nlJustification.
  * This sink does NOT apply DLP — it trusts the caller has already run
@@ -27,13 +27,20 @@ import type { SandboxAuditEntry } from "./sandbox-audit.js";
 // ─── Sink path ────────────────────────────────────────────────────────────────
 
 /**
- * Path to the combined JSONL audit log.
- * Cross-cutting resource — lives at `~/.lvis/audit.log` per CLAUDE.md
- * storage namespace convention (cross-cutting resources at root, not in
- * a sub-directory).
+ * Path to the daily-rotated sandbox JSONL audit log.
+ *
+ * Returns `~/.lvis/audit/<YYYY-MM-DD>.sandbox.jsonl` — one file per calendar
+ * day in the same `~/.lvis/audit/` directory used by the permission-gate audit
+ * channel. The `.sandbox` infix distinguishes the two channels; the AuditPanel
+ * reader globs `~/.lvis/audit/` and surfaces both without needing a discriminator
+ * field scan on every entry.
+ *
+ * Accepts an optional `date` parameter so tests can inject a fixed date without
+ * touching the real clock.
  */
-function sinkPath(): string {
-  return resolve(lvisHome(), "audit.log");
+function sinkPath(date = new Date()): string {
+  const ymd = date.toISOString().slice(0, 10); // YYYY-MM-DD
+  return resolve(lvisHome(), "audit", `${ymd}.sandbox.jsonl`);
 }
 
 // ─── Emit ─────────────────────────────────────────────────────────────────────
