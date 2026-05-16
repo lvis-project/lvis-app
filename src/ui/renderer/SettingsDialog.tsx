@@ -91,7 +91,7 @@ export function SettingsContent({
 }) {
   const [tab, setTab] = useState(() => normalizeSettingsTab(initialTab));
   const [pendingPermissions, setPendingPermissions] = useState(0);
-  const s = useSettingsOrchestration(open, api, onSaved, onOpenChange);
+  const s = useSettingsOrchestration(open, api, onSaved);
 
   // Per-tab debounced save handlers. Immediate-apply controls (toggle,
   // radio, slider, select) call `.schedule()`; rapid bursts collapse
