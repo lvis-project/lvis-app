@@ -27,6 +27,7 @@ import { TokenCostBadge } from "./components/TokenCostBadge.js";
 import { TokenProgressRing } from "./components/TokenProgressRing.js";
 import { BottomActionRow } from "./components/BottomActionRow.js";
 import { PermissionModeBadge } from "./components/permissions/PermissionModeBadge.js";
+import { DEFAULT_TOAST_TTL_MS } from "./constants.js";
 import { SkillBadge } from "./components/SkillBadge.js";
 import { WorkGroup } from "./components/WorkGroup.js";
 import { TurnActionBar } from "./components/TurnActionBar.js";
@@ -289,7 +290,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
       setUserApprovalHitToast(payload);
       userApprovalHitTimerRef.current = setTimeout(() => {
         setUserApprovalHitToast(null);
-      }, 4000);
+      }, DEFAULT_TOAST_TTL_MS);
     });
     return () => {
       unsubscribe();
@@ -426,10 +427,10 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     setViewMode(null);
     // Load the branched session
     await onLoadSession?.(result.newSessionId);
-    // Show 3-second fork-success toast
+    // Show fork-success toast (shorter than default — single-line confirmation needs less time)
     if (forkToastTimerRef.current) clearTimeout(forkToastTimerRef.current);
     setForkToast(`checkpoint #${compactNum} 에서 새 분기를 시작했습니다`);
-    forkToastTimerRef.current = setTimeout(() => setForkToast(null), 3000);
+    forkToastTimerRef.current = setTimeout(() => setForkToast(null), DEFAULT_TOAST_TTL_MS - 1000); // 3 s
   }, [api, currentSessionId, onLoadSession]);
 
   useEffect(() => {

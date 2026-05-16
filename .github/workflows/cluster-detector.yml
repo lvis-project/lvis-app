@@ -1,0 +1,186 @@
+name: Cluster Detector
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  pull-requests: write
+  statuses: write
+
+jobs:
+  cluster-detector:
+    name: Sensitive Area Cluster Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check sensitive area changes and cluster window
+        id: cluster-check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          set -euo pipefail
+
+          SENSITIVE_DIRS=(
+            "src/permissions"
+            "src/audit"
+            "src/sandbox"
+            "src/ipc"
+            "src/preload"
+            "src/boot"
+          )
+
+          # ── 1. Check if this PR touches sensitive areas ──────────────────
+          # Get changed files in this PR vs base
+          CHANGED_FILES=$(git diff --name-only "origin/${BASE_REF}...HEAD" 2>/dev/null || echo "")
+
+          SENSITIVE_HIT=false
+          for dir in "${SENSITIVE_DIRS[@]}"; do
+            if echo "$CHANGED_FILES" | grep -qE "^${dir}"; then
+              SENSITIVE_HIT=true
+              break
+            fi
+          done
+
+          # ── 2. Check single-bundle: ≥3 commits in this PR touch sensitive ─
+          BUNDLE_HIT=false
+          if [ "$SENSITIVE_HIT" = "true" ]; then
+            # Count commits in this PR that touch sensitive areas
+            SENSITIVE_COMMIT_COUNT=0
+            while IFS= read -r sha; do
+              for dir in "${SENSITIVE_DIRS[@]}"; do
+                if git diff-tree --no-commit-id -r --name-only "$sha" 2>/dev/null | grep -qE "^${dir}"; then
+                  SENSITIVE_COMMIT_COUNT=$((SENSITIVE_COMMIT_COUNT + 1))
+                  break
+                fi
+              done
+            done < <(git log "origin/${BASE_REF}..HEAD" --format="%H" 2>/dev/null)
+
+            if [ "$SENSITIVE_COMMIT_COUNT" -ge 3 ]; then
+              BUNDLE_HIT=true
+            fi
+          fi
+
+          # ── 3. Check 14-day window: ≥3 merged PRs in sensitive areas ─────
+          WINDOW_HIT=false
+          if [ "$SENSITIVE_HIT" = "true" ]; then
+            SINCE_DATE=$(date -d "14 days ago" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+              || date -v-14d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+              || echo "")
+
+            if [ -n "$SINCE_DATE" ]; then
+              MERGED_COUNT=$(gh pr list \
+                --repo "$REPO" \
+                --state merged \
+                --limit 100 \
+                --json number,mergedAt,files \
+                --jq --arg since "$SINCE_DATE" --argjson dirs "$(printf '%s\n' "${SENSITIVE_DIRS[@]}" | jq -R . | jq -s .)" '
+                  [ .[]
+                    | select(.mergedAt >= $since)
+                    | select(
+                        .files
+                        | map(.path)
+                        | any(
+                            path;
+                            ($dirs | any(. as $d | path | startswith($d)))
+                          )
+                      )
+                  ] | length
+                ' 2>/dev/null || echo "0")
+
+              if [ "${MERGED_COUNT:-0}" -ge 3 ]; then
+                WINDOW_HIT=true
+              fi
+            fi
+          fi
+
+          # ── 4. Determine overall violation ───────────────────────────────
+          VIOLATION=false
+          VIOLATION_REASON=""
+
+          if [ "$BUNDLE_HIT" = "true" ]; then
+            VIOLATION=true
+            VIOLATION_REASON="bundle"
+          elif [ "$WINDOW_HIT" = "true" ]; then
+            VIOLATION=true
+            VIOLATION_REASON="window"
+          fi
+
+          echo "sensitive_hit=${SENSITIVE_HIT}" >> "$GITHUB_OUTPUT"
+          echo "violation=${VIOLATION}" >> "$GITHUB_OUTPUT"
+          echo "violation_reason=${VIOLATION_REASON}" >> "$GITHUB_OUTPUT"
+
+      - name: Post violation comment
+        if: steps.cluster-check.outputs.violation == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          REASON: ${{ steps.cluster-check.outputs.violation_reason }}
+        run: |
+          set -euo pipefail
+
+          if [ "$REASON" = "bundle" ]; then
+            TRIGGER_MSG="이 PR 안에서 민감 영역을 건드리는 커밋이 **3개 이상** 포함되어 있습니다 (single-bundle cluster)."
+          else
+            TRIGGER_MSG="최근 **14일 이내**에 민감 영역을 건드리는 PR이 **3개 이상** 머지되었습니다 (rolling-window cluster)."
+          fi
+
+          COMMENT_BODY="## :rotating_light: Cross-Cutting Review Gate 위반
+
+          이 PR은 민감 영역 클러스터 조건을 충족합니다.
+
+          **감지 사유**: ${TRIGGER_MSG}
+
+          **민감 영역** (Sensitive Areas):
+          - \`src/permissions/**\`
+          - \`src/audit/**\`
+          - \`src/sandbox/**\`
+          - \`src/ipc/**\`
+          - \`src/preload*\`
+          - \`src/boot/**\`
+
+          **요구 사항**: 이 PR은 머지 전에 Cross-Cutting Review Gate를 통과해야 합니다.
+          자세한 기준은 [CLAUDE.md §Cross-Cutting Review Gate](../blob/main/CLAUDE.md) 를 참조하십시오.
+
+          > 이 검사는 \`.github/workflows/cluster-detector.yml\` 이 자동으로 실행합니다."
+
+          gh pr comment "$PR_NUMBER" \
+            --repo "$REPO" \
+            --body "$COMMENT_BODY"
+
+      - name: Set commit status — violation
+        if: steps.cluster-check.outputs.violation == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh api \
+            --method POST \
+            "repos/${REPO}/statuses/${HEAD_SHA}" \
+            -f state=failure \
+            -f context="cluster-detector" \
+            -f description="Sensitive area cluster detected — Cross-Cutting Review Gate required" \
+            -f target_url="https://github.com/${REPO}/blob/main/CLAUDE.md"
+
+      - name: Set commit status — pass
+        if: steps.cluster-check.outputs.violation != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh api \
+            --method POST \
+            "repos/${REPO}/statuses/${HEAD_SHA}" \
+            -f state=success \
+            -f context="cluster-detector" \
+            -f description="No sensitive area cluster detected"

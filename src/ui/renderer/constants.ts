@@ -1,5 +1,13 @@
 // Phase 2: React-free constants extracted from src/renderer.tsx.
 
+// ── Toast / Banner TTL ────────────────────────────────────────────────────────
+/**
+ * Default auto-dismiss duration for inline toasts and banners (ms).
+ * Most callsites use 4 s; those that need a longer read window (complex
+ * permission banners, MCP status) override explicitly with a comment.
+ */
+export const DEFAULT_TOAST_TTL_MS = 4000;
+
 import type { ExecMode } from "./types.js";
 import {
   LLM_VENDOR_DEFAULTS,

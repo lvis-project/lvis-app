@@ -14,6 +14,7 @@ import {
 import { detectFromStream } from "../../../lib/stream-markers.js";
 import { debugLog, isDebugStreamEnabled } from "../../../lib/debug-stream.js";
 import type { LvisApi } from "../types.js";
+import { DEFAULT_TOAST_TTL_MS } from "../constants.js";
 
 /**
  * Chat state + stream hook.
@@ -429,7 +430,7 @@ export function useChatState(api: LvisApi) {
       if (!aliveRef.current) return;
       if (fallbackToastTimerRef.current) clearTimeout(fallbackToastTimerRef.current);
       setFallbackToast(`⚡ ${from}→${to} 자동 전환`);
-      fallbackToastTimerRef.current = setTimeout(() => setFallbackToast(null), 4000);
+      fallbackToastTimerRef.current = setTimeout(() => setFallbackToast(null), DEFAULT_TOAST_TTL_MS);
     });
     return () => {
       unsub();
