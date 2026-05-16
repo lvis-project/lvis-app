@@ -20,6 +20,9 @@ const CLIENT_REGISTRATION_MODES = new Set([
   "manual",
 ]);
 
+const ENV_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const HTTP_HEADER_NAME_RE = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+
 /**
  * Parse a `runtime` block (advisory catalog row OR authoritative
  * extracted manifest) into the {@link McpRuntimeSpec} discriminated
@@ -55,12 +58,18 @@ export function parseMcpRuntimeSpec(value: unknown): McpRuntimeSpec | undefined 
     if (args && args.length > 0) out.args = args;
     if (env && Object.keys(env).length > 0) out.env = env;
     if (validStdioAuth) out.auth = validStdioAuth;
+    if (typeof r.apiKeyEnv === "string" && ENV_NAME_RE.test(r.apiKeyEnv.trim())) {
+      out.apiKeyEnv = r.apiKeyEnv.trim();
+    }
     return out;
   }
   if (r.transport === "http") {
     if (typeof r.url !== "string" || r.url.trim().length === 0) return undefined;
     const out: McpRuntimeSpec = { transport: "http", url: r.url };
     if (validHttpAuth) out.auth = validHttpAuth;
+    if (typeof r.apiKeyHeader === "string" && HTTP_HEADER_NAME_RE.test(r.apiKeyHeader.trim())) {
+      out.apiKeyHeader = r.apiKeyHeader.trim();
+    }
     if (typeof r.allowPrivateNetworks === "boolean") {
       out.allowPrivateNetworks = r.allowPrivateNetworks;
     }

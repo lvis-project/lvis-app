@@ -157,6 +157,7 @@ export function substituteRuntimeTokens(
       );
     }
     if (runtime.auth) out.auth = runtime.auth;
+    if (runtime.apiKeyEnv) out.apiKeyEnv = runtime.apiKeyEnv;
     return out;
   }
   return { ...runtime };
@@ -164,7 +165,7 @@ export function substituteRuntimeTokens(
 
 export function buildMcpServerConfig(slug: string, runtime: McpRuntimeSpec): McpServerConfig {
   if (runtime.transport === "stdio") {
-    return {
+    const config: McpServerConfig = {
       id: slug,
       transport: "stdio",
       command: runtime.command,
@@ -172,6 +173,10 @@ export function buildMcpServerConfig(slug: string, runtime: McpRuntimeSpec): Mcp
       env: runtime.env,
       auth: runtime.auth ?? "none",
     };
+    if (runtime.apiKeyEnv) {
+      config.apiKeyEnv = runtime.apiKeyEnv;
+    }
+    return config;
   }
   const config: McpServerConfig = {
     id: slug,
@@ -179,6 +184,9 @@ export function buildMcpServerConfig(slug: string, runtime: McpRuntimeSpec): Mcp
     url: runtime.url,
     auth: runtime.auth ?? "none",
   };
+  if (runtime.apiKeyHeader) {
+    config.apiKeyHeader = runtime.apiKeyHeader;
+  }
   if (typeof runtime.allowPrivateNetworks === "boolean") {
     config.allowPrivateNetworks = runtime.allowPrivateNetworks;
   }

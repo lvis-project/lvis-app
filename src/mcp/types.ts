@@ -168,8 +168,11 @@ export interface McpStdioServerConfig extends McpServerConfigBase {
   args?: string[];
   /** 환경 변수 */
   env?: Record<string, string>;
+  /** Safe env var name that receives apiKey at process launch. */
+  apiKeyEnv?: string;
   url?: never;
   headers?: never;
+  apiKeyHeader?: never;
   allowPrivateNetworks?: never;
 }
 
@@ -181,6 +184,8 @@ export interface McpHttpServerConfig extends McpServerConfigBase {
   oauth?: McpOAuthConfig;
   /** Optional additional request headers (e.g. `Authorization`). */
   headers?: Record<string, string>;
+  /** Safe header name that receives apiKey on MCP HTTP requests. */
+  apiKeyHeader?: string;
   /**
    * Opt-in escape hatch for on-prem / localhost deployments. When true,
    * NetworkGuard's private-IP check is skipped for this server — the governance
@@ -191,6 +196,7 @@ export interface McpHttpServerConfig extends McpServerConfigBase {
   command?: never;
   args?: never;
   env?: never;
+  apiKeyEnv?: never;
 }
 
 /**
@@ -202,9 +208,11 @@ export interface McpLegacyRemoteServerConfig extends McpServerConfigBase {
   transport: "sse" | "websocket";
   url: string;
   headers?: Record<string, string>;
+  apiKeyHeader?: string;
   command?: never;
   args?: never;
   env?: never;
+  apiKeyEnv?: never;
   allowPrivateNetworks?: never;
 }
 

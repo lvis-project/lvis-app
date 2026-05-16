@@ -50,6 +50,23 @@ describe("substituteRuntimeTokens", () => {
     });
   });
 
+  it("preserves stdio apiKeyEnv metadata without substituting secret material", () => {
+    const runtime: McpRuntimeSpec = {
+      transport: "stdio",
+      command: "uvx",
+      args: ["--from", "browser-use[cli]", "browser-use", "--mcp"],
+      auth: "api-key",
+      apiKeyEnv: "OPENAI_API_KEY",
+    };
+    const out = substituteRuntimeTokens(runtime, {
+      pluginDir: "/data/mcp/browser-use",
+      nodePath: "/usr/bin/node",
+      pythonPath: "/usr/bin/python3",
+    });
+    expect(out).toEqual(runtime);
+    expect(JSON.stringify(out)).not.toMatch(/sk-|Bearer|secret/i);
+  });
+
   it("does not substitute http url tokens (publisher controls endpoint)", () => {
     const runtime: McpRuntimeSpec = {
       transport: "http",
@@ -81,6 +98,25 @@ describe("buildMcpServerConfig", () => {
     });
   });
 
+  it("emits stdio api-key config with apiKeyEnv metadata", () => {
+    const config = buildMcpServerConfig("browser-use-mcp", {
+      transport: "stdio",
+      command: "uvx",
+      args: ["--from", "browser-use[cli]", "browser-use", "--mcp"],
+      auth: "api-key",
+      apiKeyEnv: "OPENAI_API_KEY",
+    });
+    expect(config).toEqual({
+      id: "browser-use-mcp",
+      transport: "stdio",
+      command: "uvx",
+      args: ["--from", "browser-use[cli]", "browser-use", "--mcp"],
+      env: undefined,
+      auth: "api-key",
+      apiKeyEnv: "OPENAI_API_KEY",
+    });
+  });
+
   it("emits http config with allowPrivateNetworks pass-through", () => {
     const config = buildMcpServerConfig("internal", {
       transport: "http",
@@ -94,6 +130,22 @@ describe("buildMcpServerConfig", () => {
       url: "http://localhost:8765",
       auth: "sso",
       allowPrivateNetworks: true,
+    });
+  });
+
+  it("emits http api-key config with custom safe header metadata", () => {
+    const config = buildMcpServerConfig("browser-use-cloud-mcp", {
+      transport: "http",
+      url: "https://api.browser-use.com/v3/mcp",
+      auth: "api-key",
+      apiKeyHeader: "x-browser-use-api-key",
+    });
+    expect(config).toEqual({
+      id: "browser-use-cloud-mcp",
+      transport: "http",
+      url: "https://api.browser-use.com/v3/mcp",
+      auth: "api-key",
+      apiKeyHeader: "x-browser-use-api-key",
     });
   });
 
@@ -192,6 +244,37 @@ describe("readRuntimeFromInstalledManifest", () => {
           scopes: ["docs:read", "docs:search"],
           clientRegistration: "client-id-metadata-document",
         },
+      });
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("returns browser-use stdio apiKeyEnv metadata from a verified manifest", async () => {
+    const tmp = makeTmpDir();
+    try {
+      await mkdir(tmp, { recursive: true });
+      await writeFile(
+        join(tmp, "plugin.json"),
+        JSON.stringify({
+          id: "browser-use-mcp",
+          version: "0.12.6",
+          runtime: {
+            transport: "stdio",
+            command: "uvx",
+            args: ["--from", "browser-use[cli]==0.12.6", "browser-use", "--mcp"],
+            auth: "api-key",
+            apiKeyEnv: "OPENAI_API_KEY",
+          },
+        }),
+      );
+      const runtime = await readRuntimeFromInstalledManifest(tmp);
+      expect(runtime).toEqual({
+        transport: "stdio",
+        command: "uvx",
+        args: ["--from", "browser-use[cli]==0.12.6", "browser-use", "--mcp"],
+        auth: "api-key",
+        apiKeyEnv: "OPENAI_API_KEY",
       });
     } finally {
       rmSync(tmp, { recursive: true, force: true });

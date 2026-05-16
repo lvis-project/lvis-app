@@ -107,6 +107,7 @@ describe("McpManager — getConfigs()", () => {
         transport: "http" as const,
         url: "https://example.com/mcp",
         apiKey: "super-secret",
+        apiKeyHeader: "x-api-key",
         headers: { Authorization: "Bearer token" },
       },
       {
@@ -114,6 +115,7 @@ describe("McpManager — getConfigs()", () => {
         transport: "stdio" as const,
         command: "npx tool",
         apiKey: "stdio-api-secret",
+        apiKeyEnv: "OPENAI_API_KEY",
         args: ["--token=abc123", "--verbose"],
         env: { SECRET_TOKEN: "abc123", PATH: "/usr/bin" },
       },
@@ -125,10 +127,12 @@ describe("McpManager — getConfigs()", () => {
     // http server: apiKey and headers stripped
     expect(result[0]).not.toHaveProperty("apiKey");
     expect(result[0]).not.toHaveProperty("headers");
+    expect(result[0]).toHaveProperty("apiKeyHeader", "x-api-key");
     // stdio server: apiKey, args, and env stripped (all can embed secrets)
     expect(result[1]).not.toHaveProperty("apiKey");
     expect(result[1]).not.toHaveProperty("args");
     expect(result[1]).not.toHaveProperty("env");
+    expect(result[1]).toHaveProperty("apiKeyEnv", "OPENAI_API_KEY");
     expect(result[0].id).toBe("http-srv");
     expect(result[1].id).toBe("stdio-srv");
   });
@@ -190,6 +194,42 @@ describe("McpManager — addConfig()", () => {
 
     const raw = JSON.parse(await readFile(testConfigPath, "utf-8")) as { servers: McpServerConfig[] };
     expect(raw.servers.map((server) => server.id)).toContain("warn-srv");
+  });
+
+  it("updates write-only API key for an existing api-key server and reconnects", async () => {
+    const servers: McpServerConfig[] = [
+      {
+        id: "browser-use",
+        transport: "stdio",
+        command: "uvx",
+        args: ["--from", "browser-use[cli]==0.12.6", "browser-use", "--mcp"],
+        auth: "api-key",
+        apiKeyEnv: "OPENAI_API_KEY",
+      },
+    ];
+    await writeFile(testConfigPath, JSON.stringify({ servers }), "utf-8");
+    const mgr = await makeManager();
+
+    await expect(mgr.setApiKey("browser-use", "sk-test")).resolves.toEqual({ connected: true });
+
+    const raw = JSON.parse(await readFile(testConfigPath, "utf-8")) as { servers: McpServerConfig[] };
+    expect(raw.servers[0]).toMatchObject({
+      id: "browser-use",
+      auth: "api-key",
+      apiKey: "sk-test",
+      apiKeyEnv: "OPENAI_API_KEY",
+    });
+    expect(mockConnect).toHaveBeenCalledOnce();
+  });
+
+  it("rejects API key updates for non-api-key servers", async () => {
+    const servers: McpServerConfig[] = [
+      { id: "plain", transport: "stdio", command: "npx", auth: "none" },
+    ];
+    await writeFile(testConfigPath, JSON.stringify({ servers }), "utf-8");
+    const mgr = await makeManager();
+
+    await expect(mgr.setApiKey("plain", "secret")).rejects.toThrow("API key 인증 서버가 아닙니다");
   });
 
   it("cleans up failed clients after connectServer throws", async () => {

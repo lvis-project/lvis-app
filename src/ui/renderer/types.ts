@@ -901,6 +901,7 @@ export type LvisMcpApi = {
   getConfigs: () => Promise<McpServerConfigDto[]>;
   getConfigPath: () => Promise<string>;
   addConfig: (config: McpServerConfig) => Promise<{ connected: boolean; warning?: string }>;
+  setApiKey: (id: string, apiKey: string) => Promise<{ connected: boolean; warning?: string }>;
   removeConfig: (id: string) => Promise<void>;
   /** MCP Apps spec §3.3 — fetch a ui:// resource from the MCP server. */
   readUiResource: (serverId: string, uri: string) => Promise<string>;

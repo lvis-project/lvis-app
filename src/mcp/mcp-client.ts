@@ -632,6 +632,9 @@ class StdioTransport implements McpTransport {
         LANG: process.env.LANG,
         NODE_ENV: process.env.NODE_ENV,
         ...this.config.env, // 관리자 승인 환경변수만
+        ...(this.config.apiKey && this.config.apiKeyEnv
+          ? { [this.config.apiKeyEnv]: this.config.apiKey }
+          : {}),
       },
     });
 
@@ -855,8 +858,12 @@ class HttpTransport implements McpTransport {
       accept: "application/json, text/event-stream",
       ...this.config.headers,
     };
-    if (this.config.apiKey && !hasAuthorization(headers)) {
-      headers.authorization = `Bearer ${this.config.apiKey}`;
+    if (this.config.apiKey) {
+      if (this.config.apiKeyHeader) {
+        headers[this.config.apiKeyHeader] = this.config.apiKey;
+      } else if (!hasAuthorization(headers)) {
+        headers.authorization = `Bearer ${this.config.apiKey}`;
+      }
     }
 
     const body = JSON.stringify(message);

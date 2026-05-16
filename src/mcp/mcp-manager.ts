@@ -323,6 +323,47 @@ export class McpManager {
     });
   }
 
+  async setApiKey(serverId: string, apiKey: string): Promise<{ connected: boolean; warning?: string }> {
+    const id = serverId.trim();
+    if (!id) {
+      throw new Error("[mcp-manager] 서버 id가 비어있거나 공백만 포함할 수 없습니다.");
+    }
+    if (!apiKey.trim()) {
+      throw new Error("[mcp-manager] API 키가 비어있습니다.");
+    }
+
+    let updatedConfig: McpServerConfig | undefined;
+    await this.withConfigLock(async () => {
+      await this.withConfigFileLock(async () => {
+        const existing = await this.loadFromConfigUnlocked();
+        const idx = existing.findIndex((server) => server.id === id);
+        if (idx === -1) {
+          throw new Error(`[mcp-manager] 서버 id '${id}'를 찾을 수 없습니다.`);
+        }
+        const current = existing[idx];
+        if (current.auth !== "api-key") {
+          throw new Error(`[mcp-manager] 서버 '${id}'는 API key 인증 서버가 아닙니다.`);
+        }
+        updatedConfig = { ...current, apiKey: apiKey.trim() } as McpServerConfig;
+        const updated = [...existing];
+        updated[idx] = updatedConfig;
+        await this.saveConfigs(updated);
+      });
+    });
+
+    if (!updatedConfig) {
+      throw new Error(`[mcp-manager] 서버 id '${id}'를 찾을 수 없습니다.`);
+    }
+    try {
+      await this.connectServer(updatedConfig);
+      return { connected: true };
+    } catch (err) {
+      const warning = err instanceof Error ? err.message : String(err);
+      log.warn(`API 키 설정 후 연결 실패 (${id}): %s`, err);
+      return { connected: false, warning };
+    }
+  }
+
   /**
    * 설정 파일에서 서버 제거 + 연결 해제.
    * 존재하지 않아도 에러 없이 처리. write-lock으로 동시 제거 시 TOCTOU 방지.

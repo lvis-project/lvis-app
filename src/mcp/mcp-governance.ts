@@ -22,6 +22,9 @@ import { createLogger } from "../lib/logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
 const log = createLogger("mcp-governance");
 
+const ENV_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const HTTP_HEADER_NAME_RE = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+
 const DEFAULT_POLICY: McpGovernancePolicy = {
   version: "1.0",
   defaultPolicy: "deny",
@@ -142,6 +145,8 @@ export class McpGovernance {
     if (config.transport === "stdio") {
       const cmdResult = this.validateStdioCommand(config, approval);
       if (!cmdResult.valid) return cmdResult;
+      const apiKeyEnvResult = this.validateApiKeyEnv(config.apiKeyEnv);
+      if (!apiKeyEnvResult.valid) return apiKeyEnvResult;
     }
 
     // L1-e: HTTP / SSE / WebSocket — URL 검증
@@ -164,6 +169,8 @@ export class McpGovernance {
         //       values with \r or \n is cheap to block here.
         const headersResult = this.validateHeaders(config.headers);
         if (!headersResult.valid) return headersResult;
+        const apiKeyHeaderResult = this.validateApiKeyHeader(config.apiKeyHeader);
+        if (!apiKeyHeaderResult.valid) return apiKeyHeaderResult;
 
         // L1-h: `allowPrivateNetworks` is a per-server escape hatch — it
         //       must be authorised by admin policy, either globally or on
@@ -415,6 +422,26 @@ export class McpGovernance {
       }
     }
     return { valid: true };
+  }
+
+  private validateApiKeyEnv(name: string | undefined): ValidationResult {
+    if (!name) return { valid: true };
+    if (ENV_NAME_RE.test(name)) return { valid: true };
+    return {
+      valid: false,
+      reason: `apiKeyEnv는 안전한 환경변수 이름이어야 합니다: '${name}'`,
+      layer: 1,
+    };
+  }
+
+  private validateApiKeyHeader(name: string | undefined): ValidationResult {
+    if (!name) return { valid: true };
+    if (HTTP_HEADER_NAME_RE.test(name)) return { valid: true };
+    return {
+      valid: false,
+      reason: `apiKeyHeader는 안전한 HTTP 헤더 이름이어야 합니다: '${name}'`,
+      layer: 1,
+    };
   }
 
   /**

@@ -898,6 +898,10 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:mcp:config:add", e); return UNAUTHORIZED_FRAME; }
     return deps.mcpManager.addConfig(config as import("../../mcp/types.js").McpServerConfig);
   });
+  ipcMain.handle("lvis:mcp:config:set-api-key", async (e, serverId: string, apiKey: string) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:mcp:config:set-api-key", e); return UNAUTHORIZED_FRAME; }
+    return deps.mcpManager.setApiKey(serverId, apiKey);
+  });
   ipcMain.handle("lvis:mcp:config:remove", async (e, serverId: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:mcp:config:remove", e); return UNAUTHORIZED_FRAME; }
     return deps.mcpManager.removeConfig(serverId);
