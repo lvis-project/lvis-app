@@ -51,6 +51,46 @@ export interface LlmTabProps {
    * application without spamming saves.
    */
   onImmediateChange?: () => void;
+  /**
+   * Section-anchored explicit save handler. Both the 공급자 구성 and
+   * Fallback Chain sections render their own Save button that calls
+   * this — the orchestration save() persists the whole `llm` payload,
+   * so the two buttons are functionally identical and the visual
+   * placement just anchors each Save to its inputs.
+   */
+  onSave?: () => void;
+  saving?: boolean;
+  settingsLoaded?: boolean;
+}
+
+/**
+ * Inline save bar for a LlmTab subsection. Both 공급자 구성 and Fallback
+ * Chain reuse this; the Extended Thinking section is fully immediate-apply
+ * (Switch + Slider auto-save via onImmediateChange) and renders no bar.
+ */
+function SectionSaveBar({
+  onSave,
+  saving,
+  settingsLoaded,
+  testId,
+}: {
+  onSave: () => void;
+  saving: boolean;
+  settingsLoaded: boolean;
+  testId: string;
+}) {
+  return (
+    <div className="flex justify-end border-t border-border/40 pt-2">
+      <Button
+        size="sm"
+        onClick={onSave}
+        disabled={saving || !settingsLoaded}
+        data-testid={testId}
+      >
+        {saving ? "저장 중…" : "저장"}
+      </Button>
+    </div>
+  );
 }
 
 export function LlmTab(props: LlmTabProps) {
@@ -80,96 +120,123 @@ export function LlmTab(props: LlmTabProps) {
     setFallbackOpen,
     onSaved,
     onImmediateChange,
+    onSave,
+    saving = false,
+    settingsLoaded = true,
   } = props;
   const vendorInfo = VENDORS.find((v) => v.id === vendor) ?? VENDORS[0];
+  const hasOnSave = typeof onSave === "function";
 
   return (
     <div className="space-y-4 pt-4">
-      <div className="space-y-2">
-        <Label htmlFor="vendor-select" className="flex items-center gap-2">
-          벤더
-          <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
-            즉시 적용
-          </span>
-        </Label>
-        <Select
-          value={vendor}
-          onValueChange={(v) => {
-            setVendor(v);
-            onImmediateChange?.();
-          }}
-        >
-          <SelectTrigger id="vendor-select" className="w-full">
-            <SelectValue placeholder="벤더 선택" />
-          </SelectTrigger>
-          <SelectContent>
-            {VENDORS.map((v) => (
-              <SelectItem key={v.id} value={v.id}>{v.label}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-      {vendor !== "vertex-ai" && (vendorInfo.needsBaseUrl || vendor === "openai" || vendor === "copilot") && (
+      {/* Section A — 공급자 구성. Vendor select auto-saves immediately;
+          baseUrl / vertex / API key / model are deferred and persist via
+          the section's 저장 button. */}
+      <section
+        className="space-y-3 rounded-md border bg-card/50 p-3"
+        data-testid="llm-tab:section-providers"
+      >
+        <h3 className="text-sm font-semibold">공급자 구성</h3>
         <div className="space-y-2">
-          <Label className="text-sm font-medium">
-            Endpoint (baseUrl){vendorInfo.needsBaseUrl ? " *" : " (선택)"}
+          <Label htmlFor="vendor-select" className="flex items-center gap-2">
+            벤더
+            <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
+              즉시 적용
+            </span>
           </Label>
-          <Input
-            value={baseUrl}
-            onChange={(e) => setBaseUrl(e.target.value)}
-            placeholder={(vendorInfo as any).baseUrlPlaceholder ?? "https://..."}
+          <Select
+            value={vendor}
+            onValueChange={(v) => {
+              setVendor(v);
+              onImmediateChange?.();
+            }}
+          >
+            <SelectTrigger id="vendor-select" className="w-full">
+              <SelectValue placeholder="벤더 선택" />
+            </SelectTrigger>
+            <SelectContent>
+              {VENDORS.map((v) => (
+                <SelectItem key={v.id} value={v.id}>{v.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        {vendor !== "vertex-ai" && (vendorInfo.needsBaseUrl || vendor === "openai" || vendor === "copilot") && (
+          <div className="space-y-2">
+            <Label className="text-sm font-medium">
+              Endpoint (baseUrl){vendorInfo.needsBaseUrl ? " *" : " (선택)"}
+            </Label>
+            <Input
+              value={baseUrl}
+              onChange={(e) => setBaseUrl(e.target.value)}
+              placeholder={(vendorInfo as any).baseUrlPlaceholder ?? "https://..."}
+            />
+            {vendor === "azure-foundry" && (
+              <p className="text-[11px] text-muted-foreground">
+                Azure AI Foundry 엔드포인트 형식:
+                {" "}<code>https://{"{resource}"}.openai.azure.com/openai/deployments/{"{deployment}"}/</code>
+                {" "}— 모델 필드에는 deployment 이름을 입력합니다.
+              </p>
+            )}
+            {(vendor === "openai" || vendor === "copilot") && (
+              <p className="text-[11px] text-muted-foreground">
+                프록시 또는 커스텀 엔드포인트를 사용하는 경우에만 입력합니다.
+              </p>
+            )}
+          </div>
+        )}
+        {vendor === "vertex-ai" && (
+          <div className="space-y-2 rounded-md border p-3">
+            <p className="text-sm font-medium">Google Vertex AI</p>
+            <p className="text-[11px] text-muted-foreground">
+              서비스 계정 또는 ADC(<code>gcloud auth application-default login</code>)로 인증합니다.
+              API 키는 사용하지 않으며, <code>GOOGLE_APPLICATION_CREDENTIALS</code> 환경 변수로 서비스 계정 JSON 경로를 지정할 수 있습니다.
+            </p>
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">GCP Project ID *</Label>
+              <Input
+                value={vertexProject}
+                onChange={(e) => setVertexProject(e.target.value)}
+                placeholder="my-gcp-project"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">Location (region) — 선택</Label>
+              <Input
+                value={vertexLocation}
+                onChange={(e) => setVertexLocation(e.target.value)}
+                placeholder="us-central1 (기본값)"
+              />
+            </div>
+          </div>
+        )}
+        {vendor !== "vertex-ai" && (
+          <div className="space-y-2">
+            <Label className="text-sm font-medium">{vendorInfo.label} API 키</Label>
+            <div className="flex items-center gap-2">
+              {hasKey ? <Badge variant="default" className="text-xs">설정됨</Badge> : <Badge variant="secondary" className="text-xs">미설정</Badge>}
+              {hasKey && <Button size="sm" variant="ghost" className="h-7 text-xs text-destructive" onClick={() => void api.deleteApiKey(vendor).then(() => { setHasKey(false); onSaved(); })}>삭제</Button>}
+            </div>
+            <Input type="password" placeholder={hasKey ? "새 키로 교체" : vendorInfo.placeholder} value={keyInput} onChange={(e) => setKeyInput(e.target.value)} />
+          </div>
+        )}
+        <div className="space-y-2"><Label className="text-sm font-medium">모델</Label><Input data-testid="llm-model-input" value={model} onChange={(e) => setModel(e.target.value)} placeholder={vendorInfo.defaultModel} /></div>
+        {hasOnSave && (
+          <SectionSaveBar
+            onSave={onSave!}
+            saving={saving}
+            settingsLoaded={settingsLoaded}
+            testId="llm-tab:save-providers"
           />
-          {vendor === "azure-foundry" && (
-            <p className="text-[11px] text-muted-foreground">
-              Azure AI Foundry 엔드포인트 형식:
-              {" "}<code>https://{"{resource}"}.openai.azure.com/openai/deployments/{"{deployment}"}/</code>
-              {" "}— 모델 필드에는 deployment 이름을 입력합니다.
-            </p>
-          )}
-          {(vendor === "openai" || vendor === "copilot") && (
-            <p className="text-[11px] text-muted-foreground">
-              프록시 또는 커스텀 엔드포인트를 사용하는 경우에만 입력합니다.
-            </p>
-          )}
-        </div>
-      )}
-      {vendor === "vertex-ai" && (
-        <div className="space-y-2 rounded-md border p-3">
-          <p className="text-sm font-medium">Google Vertex AI</p>
-          <p className="text-[11px] text-muted-foreground">
-            서비스 계정 또는 ADC(<code>gcloud auth application-default login</code>)로 인증합니다.
-            API 키는 사용하지 않으며, <code>GOOGLE_APPLICATION_CREDENTIALS</code> 환경 변수로 서비스 계정 JSON 경로를 지정할 수 있습니다.
-          </p>
-          <div className="space-y-1">
-            <Label className="text-xs text-muted-foreground">GCP Project ID *</Label>
-            <Input
-              value={vertexProject}
-              onChange={(e) => setVertexProject(e.target.value)}
-              placeholder="my-gcp-project"
-            />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs text-muted-foreground">Location (region) — 선택</Label>
-            <Input
-              value={vertexLocation}
-              onChange={(e) => setVertexLocation(e.target.value)}
-              placeholder="us-central1 (기본값)"
-            />
-          </div>
-        </div>
-      )}
-      {vendor !== "vertex-ai" && (
-        <div className="space-y-2">
-          <Label className="text-sm font-medium">{vendorInfo.label} API 키</Label>
-          <div className="flex items-center gap-2">
-            {hasKey ? <Badge variant="default" className="text-xs">설정됨</Badge> : <Badge variant="secondary" className="text-xs">미설정</Badge>}
-            {hasKey && <Button size="sm" variant="ghost" className="h-7 text-xs text-destructive" onClick={() => void api.deleteApiKey(vendor).then(() => { setHasKey(false); onSaved(); })}>삭제</Button>}
-          </div>
-          <Input type="password" placeholder={hasKey ? "새 키로 교체" : vendorInfo.placeholder} value={keyInput} onChange={(e) => setKeyInput(e.target.value)} />
-        </div>
-      )}
-      <div className="space-y-2"><Label className="text-sm font-medium">모델</Label><Input data-testid="llm-model-input" value={model} onChange={(e) => setModel(e.target.value)} placeholder={vendorInfo.defaultModel} /></div>
-      <div className="space-y-2 rounded-md border p-3">
+        )}
+      </section>
+
+      {/* Section B — Extended Thinking / Reasoning. All controls (Switch +
+          Slider) auto-save via onImmediateChange; no explicit Save bar. */}
+      <section
+        className="space-y-2 rounded-md border bg-card/50 p-3"
+        data-testid="llm-tab:section-thinking"
+      >
         <Label className="flex items-center justify-between text-sm font-medium">
           <span className="flex items-center gap-2">
             Extended Thinking / Reasoning
@@ -217,8 +284,14 @@ export function LlmTab(props: LlmTabProps) {
             </p>
           </div>
         )}
-      </div>
-      <div className="space-y-2 rounded-md border" data-testid="fallback-chain-section">
+      </section>
+
+      {/* Section C — Fallback Chain. Collapsible list of provider/model
+          rows; explicit save anchored at the bottom of the open panel. */}
+      <section
+        className="space-y-2 rounded-md border bg-card/50"
+        data-testid="fallback-chain-section"
+      >
         <Button
           type="button"
           variant="ghost"
@@ -229,7 +302,7 @@ export function LlmTab(props: LlmTabProps) {
           <span className="text-muted-foreground">{fallbackOpen ? "▲" : "▼"}</span>
         </Button>
         {fallbackOpen && (
-          <div className="space-y-2 px-3 pb-3">
+          <div className="space-y-3 px-3 pb-3">
             <p className="text-[11px] text-muted-foreground">첫 응답이 1초 안에 오지 않거나 5xx/429/네트워크 오류가 나면 같은 모델을 5회 시도한 뒤 순서대로 전환할 벤더·모델 목록입니다.</p>
             {fallbackChain.map((entry, idx) => (
               <div key={idx} className="flex gap-2">
@@ -276,9 +349,17 @@ export function LlmTab(props: LlmTabProps) {
             >
               + 추가
             </Button>
+            {hasOnSave && (
+              <SectionSaveBar
+                onSave={onSave!}
+                saving={saving}
+                settingsLoaded={settingsLoaded}
+                testId="llm-tab:save-fallback"
+              />
+            )}
           </div>
         )}
-      </div>
+      </section>
     </div>
   );
 }
