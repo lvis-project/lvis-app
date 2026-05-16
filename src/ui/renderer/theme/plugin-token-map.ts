@@ -79,7 +79,7 @@ export function bundleToPluginTokens(bundle: ThemeBundle): Record<LvisTokenName,
   const ring      = tripleToHsl(t.ring);
 
   // Mix percentages scale by shell mode and high-contrast requirement.
-  // high-contrast: bump all to higher pct for a11y (WCAG AA+ readable tints).
+  // AA contrast on dark surfaces; HC bundle bumps mix to 24/40 for elevated contrast over body background.
   const primarySubtlePct = isHighContrast ? 24 : isLight ? 14 : 18;
   const primaryStrongPct = isHighContrast ? 40 : isLight ? 28 : 32;
   const statusSubtlePct  = isHighContrast ? 24 : 14;
