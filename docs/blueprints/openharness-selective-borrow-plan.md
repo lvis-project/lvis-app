@@ -9,7 +9,7 @@
 
 ## 1. Context
 
-HKUDS/OpenHarness (9.7k stars, 14 days old at discovery, MIT) is a Python re-implementation of Claude Code's agent harness — 42 tools, plugin ecosystem, permission hooks, memory, MCP client, swarm coordination. Initial enthusiasm suggested forking as a LVIS host replacement. Deep analysis rejected the fork because:
+HKUDS/OpenHarness (9.7k stars, 14 days old at discovery, MIT) is a Python CLI agent harness with 42 tools, plugin ecosystem, permission hooks, memory, MCP client, and swarm coordination. Initial enthusiasm suggested forking as a LVIS host replacement. Deep analysis rejected the fork because:
 
 | Axis | LVIS | OpenHarness | Verdict |
 |---|---|---|---|
@@ -59,7 +59,7 @@ HKUDS/OpenHarness (9.7k stars, 14 days old at discovery, MIT) is a Python re-imp
 
 ## 5. Tier C — Do NOT Borrow
 
-- Claude Code plugin spec (LVIS plugins are a different concept per user decision)
+- External plugin spec adoption (LVIS plugins are a different concept per user decision)
 - `voice/` tools (explicitly rejected)
 - `channels/` (Feishu/Slack/Telegram/Discord gateway)
 - Ink TUI frontend
@@ -77,21 +77,21 @@ Every ported file carries a header:
 /**
  * Portions adapted from OpenHarness (MIT License)
  * https://github.com/HKUDS/OpenHarness/blob/main/src/openharness/<path>.py
- * Copyright (c) 2026 HKU Data Intelligence Lab
+ * Copyright (c) 2025 OpenHarness Contributors
  */
 ```
 
-Files with attribution:
+Files or blocks with attribution:
 - `src/permissions/sensitive-paths.ts` — from `permissions/checker.py`
 - `src/tools/base.ts` — from `tools/base.py`
 - `src/tools/untrusted-banner.ts` — from `tools/web_fetch_tool.py` banner
 - `src/sandbox/path-validator.ts` — from `sandbox/path_validator.py`
 - `src/core/network-guard.ts` — from `utils/network_guard.py`
 - `src/tools/bash.ts` — from `tools/bash_tool.py`
-- `src/hooks/external-executor.ts` — from `hooks/executor.py`
-- `src/hooks/types.ts` — from `hooks/types.py`
-- `src/hooks/schemas.ts` — from `hooks/schemas.py`
-- `src/hooks/config-loader.ts` — from `hooks/loader.py`
+- `src/tools/__tests__/executor.test.ts` — C1 sensitive-path regression block from `permissions/checker.py`
+
+`src/tools/safe-env.ts` is an LVIS implementation and carries no OpenHarness
+attribution because no matching upstream implementation source was identified.
 
 Dependencies added:
 - `zod ^3.23.0` (pinned to v3 — `zod-to-json-schema` is built against v3 API)
@@ -139,6 +139,6 @@ QA cycle commit: `dfbe47b` on `qa/phase3-borrow-all` (5 PRs merged, TSC 0, vites
 ## 9. What This Doc is NOT
 
 - NOT an authorization to fork OpenHarness as host replacement (rejected)
-- NOT an adoption of Claude Code plugin spec (user rejected — LVIS plugins are different concept)
+- NOT an adoption of an external plugin spec (user rejected — LVIS plugins are different concept)
 - NOT an adoption of MCP protocol as primary (separate decision for Phase 4)
 - NOT a commitment to full folder refactor sprint beyond Phase 3 (done — see refactor plan)
