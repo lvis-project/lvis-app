@@ -25,6 +25,10 @@ import type { IpcDeps } from "../types.js";
 import { sendToWebContents } from "../safe-send.js";
 import { createLogger } from "../../lib/logger.js";
 import { readDiffSidecar, isSafeId } from "../../tools/write-diff-cache.js";
+import {
+  createStreamingFilter,
+  stripSuggestedReplies,
+} from "../../engine/suggested-replies.js";
 const log = createLogger("chat");
 const MAX_ROLE_PROMPT_CHARS = 12_000;
 const MAX_SELECTED_SKILLS = 5;
@@ -308,15 +312,28 @@ async function runStreamedTurn(
   const originSource = options.inputOrigin === "plugin-emitted"
     ? parseImportedTriggerEnvelope(input)
     : null;
+  // Per-turn streaming filter for the <suggested_replies> block. Withholds
+  // chunks that could be (or are) part of the trailing tag, surfaces the
+  // parsed list when the turn ends. See
+  // `docs/architecture/proposals/suggested-replies-ghost-text.md`.
+  const suggestedRepliesFilter = createStreamingFilter();
   const result = await conversationLoop.runTurn(
     input,
     {
       onReasoningDelta: (text) => send({ type: "reasoning_delta", text }),
       onTextDelta: (text) => {
-        send({ type: "text_delta", text });
+        const visible = suggestedRepliesFilter.feed(text);
+        if (visible) send({ type: "text_delta", text: visible });
       },
       onAssistantRound: ({ roundIndex, text, thought, stopReason, hasToolCalls }) =>
-        send({ type: "assistant_round", roundIndex, text, thought, stopReason, hasToolCalls }),
+        send({
+          type: "assistant_round",
+          roundIndex,
+          text: stripSuggestedReplies(text),
+          thought,
+          stopReason,
+          hasToolCalls,
+        }),
       onToolStart: (name, toolInput, meta) =>
         send({ type: "tool_start", name, input: toolInput, ...meta }),
       onToolEnd: (name, toolResult, isError, meta, uiPayload, durationMs) =>
@@ -370,6 +387,9 @@ async function runStreamedTurn(
       ...(options.rolePrompt ? { rolePrompt: options.rolePrompt } : {}),
     },
   );
+  const { trailing, suggestedReplies } = suggestedRepliesFilter.finish();
+  if (trailing) send({ type: "text_delta", text: trailing });
+  send({ type: "suggested_replies", replies: suggestedReplies });
   send({ type: "done", ...(result.route === "command" ? { route: "command" } : {}) });
   return result;
 }
