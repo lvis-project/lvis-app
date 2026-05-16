@@ -147,6 +147,8 @@ export function buildSandboxAuditEntry(params: {
   sandbox: SandboxAuditEntry["sandbox"];
   reviewer: SandboxAuditEntry["reviewer"];
 }): SandboxAuditEntry {
+  // Explicit field-by-field copy so the builder always controls timestamp;
+  // do not switch to ...params (would allow caller-injected timestamp override).
   return {
     timestamp: new Date().toISOString(),
     tool: params.tool,

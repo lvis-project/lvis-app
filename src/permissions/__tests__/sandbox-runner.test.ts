@@ -24,8 +24,8 @@ function makeMockRunner(): SandboxRunner {
       const encoder = new TextEncoderStream();
       return {
         pid: 12345,
-        stdout: encoder.readable as unknown as ReadableStream<string>,
-        stderr: new ReadableStream<string>(),
+        stdout: encoder.readable,  // already ReadableStream<Uint8Array> — no cast needed
+        stderr: new ReadableStream<Uint8Array>(),
         exitCode: Promise.resolve(0),
         abort: async () => {},
       };

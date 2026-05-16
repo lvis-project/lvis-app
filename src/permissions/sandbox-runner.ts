@@ -125,13 +125,13 @@ export interface SandboxRunner {
 export type SandboxRunnerKey = NodeJS.Platform | "mcp";
 
 /**
- * Boot-time registry keyed by {@link SandboxRunnerKey}.
+ * Boot-time platform-keyed registry. Native platforms ('linux', 'darwin',
+ * 'win32') are registered by per-OS runner modules; the conventional 'mcp'
+ * key reserves a slot for D9 child-process integration in PR-A2/A3.
  *
- * Per-OS PR-A2/A3 will call {@link registerSandboxRunner} during the
- * boot sequence (§4.2 step 3). The MCP spawn path (D9) registers under
- * the conventional key "mcp" — handled by the caller as a cross-platform
- * override; the platform key lookup falls through to "mcp" when no native
- * runner is registered.
+ * Consumers MAY explicitly retry with key 'mcp' when getSandboxRunner(process.platform)
+ * returns undefined. (Automatic fallback wrapper deferred to PR-A2 when MCP
+ * runner lands.)
  *
  * Registry is module-level so the same Map is shared across all callers
  * in the same process. Tests MUST call {@link __resetSandboxRunnersForTest}
