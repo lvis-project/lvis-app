@@ -823,6 +823,10 @@ const api = {
       scope: "session" | "persistent";
       verdictAtApproval: "low" | "medium" | "high";
       nlJustification: string | null;
+      /** R-2 Round-3: propagated for record/lookup key symmetry. */
+      trustOrigin?: string;
+      /** R-2 Round-3: propagated for record/lookup key symmetry. */
+      approvalCacheKey?: string;
     }) => ipcRenderer.invoke(PERMISSIONS.userApprovalRecord, entry),
     /** Revoke an approval by raw composite key. */
     revokeByKey: async (key: string) =>
