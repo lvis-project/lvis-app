@@ -679,6 +679,7 @@ export type ApprovalDecision = {
  * (cross-cutting review of PRs #822-#827).
  */
 import type {
+  UserApprovalHitPayload,
   UserApprovalScope,
   UserApprovalVerdict,
 } from "../../shared/permissions-events.js";
@@ -826,6 +827,14 @@ export type LvisPermissionApi = {
       attempted: string;
     }) => void,
   ) => () => void;
+  /**
+   * Permission policy CRITICAL 4.1 — subscribe to user-approval memory-hit
+   * disclosure events. Fires when an R-2 approval cache entry auto-resolves
+   * a tool invocation that would otherwise have prompted. Renderer is
+   * expected to surface a transient toast/banner so the user sees that a
+   * stored approval was applied. Returns an unsubscribe function.
+   */
+  onUserApprovalHit: (cb: (payload: UserApprovalHitPayload) => void) => () => void;
   /** Permission policy — `/permission reviewer ...` slash dispatch. */
   reviewerDispatch: (
     rawArgs: string,

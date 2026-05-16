@@ -24,6 +24,7 @@ import { PERMISSION_REVIEWER_FRAMEWORK } from "../../../shared/permission-review
 import type { UserApprovalScope, UserApprovalVerdict } from "../../../shared/permissions-events.js";
 import { EXEC_MODE_OPTIONS } from "../constants.js";
 import { getApi } from "../api-client.js";
+import { formatIpcError } from "../format-ipc-error.js";
 import type {
   ExecMode,
   HookTrustRow,
@@ -98,17 +99,14 @@ const REVIEWER_FALLBACK_OPTIONS: Array<{
  * "user-keyboard-required") to end users. Issue #826 introduced the
  * intent gate; this helper closes the resulting localization gap
  * surfaced in the cross-cutting review.
+ *
+ * Migrated to shared `formatIpcError` SOT (#830) — only the revoke-
+ * specific `invalid-key` wording rides on `codeMap`.
  */
 function formatRevokeError(error: string | undefined, message: string | undefined): string {
-  if (error === "user-keyboard-required") {
-    return "이 권한 변경은 활성 사용자 입력에서만 실행할 수 있습니다.";
-  }
-  if (error === "invalid-key") {
-    return "유효하지 않은 승인 키입니다.";
-  }
-  // managed errors carry a backend message; surface verbatim if present.
-  if (message && message.trim().length > 0) return message;
-  return error ?? "알 수 없는 오류가 발생했습니다.";
+  return formatIpcError(error, message, {
+    codeMap: { "invalid-key": "유효하지 않은 승인 키입니다." },
+  });
 }
 
 function formatReviewerDispatchError(error: string): string {
@@ -120,12 +118,10 @@ function formatReviewerDispatchError(error: string): string {
       detail ? `상세: ${detail}` : "",
     ].filter(Boolean).join(" ");
   }
-  if (error === "user-keyboard-required") {
-    return "리뷰어 설정 변경은 활성 사용자 입력에서만 실행할 수 있습니다.";
-  }
-  // Minor-3.2: catch-all wraps unknown backend errors with Korean prefix
-  // instead of letting raw English strings pass through to the UI.
-  return `리뷰어 오류: ${error}`;
+  return formatIpcError(error, undefined, {
+    codeMap: { "user-keyboard-required": "리뷰어 설정 변경은 활성 사용자 입력에서만 실행할 수 있습니다." },
+    fallbackContext: "리뷰어 오류",
+  });
 }
 
 export function PermissionsTab() {
