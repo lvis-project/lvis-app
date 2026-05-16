@@ -98,6 +98,15 @@ export interface AppServices {
   approvalGate?: ApprovalGate;
   /** Rebuild Layer 5 reviewer bindings after persisted reviewer settings change. */
   rewireReviewerAgent?: () => void;
+  /**
+   * Re-apply the live MarketplaceTab settings to the marketplace fetcher
+   * constructed at boot. Currently used for the SSRF-guard bypass toggle
+   * (`marketplace.realCloudAllowPrivateNetwork`) — the field is read
+   * per-request on the fetcher, so calling this after a settings patch
+   * makes the toggle effective on the next marketplace request without
+   * an app restart. No-op for the disabled fetcher.
+   */
+  refreshMarketplaceFetcherConfig?: () => void;
   /** Whether knowledge search tools were successfully registered. */
   knowledgeAvailable: boolean;
   /** Sprint 4.C — starred messages persistence (~/.lvis/starred.json) */

@@ -211,8 +211,10 @@ describe("MAJOR-2: settings:update triggers rewireReviewerAgent on azure-foundry
       settingsService: {
         ...baseDeps.settingsService,
         get: vi.fn()
-          .mockReturnValueOnce({ provider: "openai", vendors: { "azure-foundry": { baseUrl: null } } })  // prevBaseUrl read
-          .mockReturnValueOnce({ provider: "openai", vendors: { "azure-foundry": { baseUrl: "https://proj.services.ai.azure.com" } } }), // newBaseUrl read
+          .mockReturnValueOnce({ provider: "openai", vendors: { "azure-foundry": { baseUrl: null } } })  // prevBaseUrl read (key: "llm")
+          .mockReturnValueOnce({ realCloudAllowPrivateNetwork: false })  // prevAllowPrivate read (key: "marketplace")
+          .mockReturnValueOnce({ provider: "openai", vendors: { "azure-foundry": { baseUrl: "https://proj.services.ai.azure.com" } } })  // newBaseUrl read (key: "llm")
+          .mockReturnValueOnce({ realCloudAllowPrivateNetwork: false }),  // newAllowPrivate read (key: "marketplace")
         patch: vi.fn(async (p: unknown) => p),
       },
       rewireReviewerAgent: rewire,
@@ -275,6 +277,63 @@ describe("MAJOR-2: settings:update triggers rewireReviewerAgent on azure-foundry
     await invoke("lvis:settings:delete-api-key", "azure-foundry");
 
     expect(rewire).toHaveBeenCalledOnce();
+  });
+});
+
+// ─── PR #795 follow-up: settings:update triggers refreshMarketplaceFetcherConfig
+//     when the allowPrivateNetwork toggle changes so the live SSRF-bypass flag
+//     honors the "즉시 적용" UX badge instead of waiting for an app restart.
+describe("settings:update triggers refreshMarketplaceFetcherConfig on allowPrivateNetwork toggle", () => {
+  it("calls refreshMarketplaceFetcherConfig when the flag flips false → true", async () => {
+    const windows: ReturnType<typeof makeWindow>[] = [];
+    const refresh = vi.fn();
+    const baseDeps = makeDeps(windows);
+    const deps = {
+      ...baseDeps,
+      settingsService: {
+        ...baseDeps.settingsService,
+        get: vi.fn()
+          .mockReturnValueOnce({ provider: "openai", vendors: { "azure-foundry": { baseUrl: null } } })  // prevBaseUrl
+          .mockReturnValueOnce({ realCloudAllowPrivateNetwork: false })                                    // prevAllowPrivate
+          .mockReturnValueOnce({ provider: "openai", vendors: { "azure-foundry": { baseUrl: null } } })  // newBaseUrl
+          .mockReturnValueOnce({ realCloudAllowPrivateNetwork: true }),                                    // newAllowPrivate
+        patch: vi.fn(async (p: unknown) => p),
+      },
+      refreshMarketplaceFetcherConfig: refresh,
+    };
+
+    const { registerSettingsHandlers } = await import("../settings.js");
+    registerSettingsHandlers(deps as never);
+
+    await invoke("lvis:settings:update", { marketplace: { realCloudAllowPrivateNetwork: true } });
+
+    expect(refresh).toHaveBeenCalledOnce();
+  });
+
+  it("does NOT call refreshMarketplaceFetcherConfig when the flag stays the same", async () => {
+    const windows: ReturnType<typeof makeWindow>[] = [];
+    const refresh = vi.fn();
+    const baseDeps = makeDeps(windows);
+    const deps = {
+      ...baseDeps,
+      settingsService: {
+        ...baseDeps.settingsService,
+        get: vi.fn((key: string) =>
+          key === "marketplace"
+            ? { realCloudAllowPrivateNetwork: true }
+            : { provider: "openai", vendors: { "azure-foundry": { baseUrl: null } } },
+        ),
+        patch: vi.fn(async (p: unknown) => p),
+      },
+      refreshMarketplaceFetcherConfig: refresh,
+    };
+
+    const { registerSettingsHandlers } = await import("../settings.js");
+    registerSettingsHandlers(deps as never);
+
+    await invoke("lvis:settings:update", { marketplace: { realCloudAllowPrivateNetwork: true } });
+
+    expect(refresh).not.toHaveBeenCalled();
   });
 });
 
