@@ -891,6 +891,36 @@ export async function bootstrap(
     });
   })();
 
+  // §691 PR-A2: Linux bwrap runner detection + boot-phase registry seal.
+  // Runs after MCP connects so the full service graph is ready before
+  // adding OS-level spawn isolation. Only attempted on Linux (D1+D8).
+  // If bwrap is absent (dnf install bubblewrap), runner stays unregistered
+  // and Linux tools run with isolation=none — R-1 composition rule + the
+  // reviewer judgment provide the safety net.
+  {
+    const { registerSandboxRunner: _registerBwrap, sealSandboxRunnerRegistry } = await import(
+      "./permissions/sandbox-runner.js"
+    );
+    if (process.platform === "linux") {
+      const { BwrapRunner } = await import("./permissions/runners/bwrap-runner.js");
+      const bwrapRunner = new BwrapRunner();
+      const detection = await bwrapRunner.detect();
+      if (detection.available) {
+        _registerBwrap("linux", bwrapRunner);
+        log.info("boot: bwrap runner registered — %s", detection.reason);
+      } else {
+        log.warn(
+          "boot: bwrap runner unavailable — %s. Linux tools will run with isolation=none.",
+          detection.reason,
+        );
+      }
+    }
+    // Seal the registry after all boot-time runners are registered.
+    // Post-seal registration throws in production (NODE_ENV !== "test")
+    // to prevent runtime injection of untrusted runners (PR-A1 follow-up #1).
+    sealSandboxRunnerRegistry();
+  }
+
   log.info("boot: ready (%d tools, %d plugins, %d mcp)", toolRegistry.size, pluginRuntime.listPluginIds().length, mcpManager.listServers().filter(s => s.status === "connected").length);
 
   // Watcher telemetry consumer — plugin-emitted watcher poll events are

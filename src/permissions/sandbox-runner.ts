@@ -140,14 +140,48 @@ export type SandboxRunnerKey = NodeJS.Platform | "mcp";
 const runners = new Map<SandboxRunnerKey, SandboxRunner>();
 
 /**
+ * Boot-phase lock. Set to `true` by {@link sealSandboxRunnerRegistry} after
+ * all runners have been detected and registered at boot. Post-seal calls to
+ * {@link registerSandboxRunner} throw in non-test environments to prevent
+ * runtime injection of untrusted runners.
+ *
+ * Tests bypass the seal check when `NODE_ENV` includes `"test"`.
+ */
+let sealed = false;
+
+/**
+ * Lock the runner registry after boot-time detection is complete.
+ *
+ * Called once from `boot.ts` after all per-OS runners have been detected and
+ * registered. Post-seal attempts to register runners throw in production
+ * (guarded by `NODE_ENV !== "test"`) so runtime injection of untrusted
+ * runners is caught immediately.
+ *
+ * PR-A2 follow-up: called from boot.ts immediately after BwrapRunner
+ * registration.
+ */
+export function sealSandboxRunnerRegistry(): void {
+  sealed = true;
+}
+
+/**
  * Register a sandbox runner for the given platform or MCP slot. Called once
  * per runner at boot (PR-A2/A3). Subsequent registrations for the same key
  * overwrite the previous entry — this enables test injection.
+ *
+ * Throws after {@link sealSandboxRunnerRegistry} has been called, unless
+ * `NODE_ENV` includes `"test"` (vitest / jest environments bypass the guard
+ * so runner mocks can be injected per-test via `afterEach` reset).
  */
 export function registerSandboxRunner(
   platform: SandboxRunnerKey,
   runner: SandboxRunner,
 ): void {
+  if (sealed && !(process.env["NODE_ENV"] ?? "").includes("test")) {
+    throw new Error(
+      `SandboxRunner registry is sealed after boot — cannot register runner for '${platform}' at runtime`,
+    );
+  }
   runners.set(platform, runner);
 }
 
@@ -163,11 +197,15 @@ export function getSandboxRunner(
 }
 
 /**
- * For test isolation only. Clears all registered runners so each test
- * starts from a clean slate.
+ * For test isolation only. Clears all registered runners AND resets the
+ * boot-phase seal so each test starts from a clean slate.
+ *
+ * MUST be called in `afterEach` for any test that calls
+ * {@link registerSandboxRunner} or {@link sealSandboxRunnerRegistry}.
  *
  * @internal
  */
 export function __resetSandboxRunnersForTest(): void {
   runners.clear();
+  sealed = false;
 }
