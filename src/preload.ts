@@ -843,10 +843,10 @@ const api = {
       trustOrigin?: string;
       /** R-2 Round-3: propagated for record/lookup key symmetry. */
       approvalCacheKey?: string;
-    }) => ipcRenderer.invoke(PERMISSIONS.userApprovalRecord, entry),
+    }) => ipcRenderer.invoke(PERMISSIONS.userApprovalRecord, { ...entry, intent: ipcUserKeyboardIntent() }),
     /** Revoke an approval by raw composite key. */
     revokeByKey: async (key: string) =>
-      ipcRenderer.invoke(PERMISSIONS.userApprovalRevoke, key),
+      ipcRenderer.invoke(PERMISSIONS.userApprovalRevoke, { key, intent: ipcUserKeyboardIntent() }),
     /** List all approval entries (for PermissionsTab display). */
     list: async () => ipcRenderer.invoke(PERMISSIONS.userApprovalList),
   },
