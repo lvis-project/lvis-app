@@ -8,8 +8,7 @@
  *   - snooze removed (production smoke test: UX risk)
  *   - stale fire replace: new fire for same routineId replaces all prior entries
  *
- * Isolation: only ~200ch summary flows here. Full content is read
- * directly by RoutineSessionView from the JSONL file.
+ * Isolation: only summary plus the exact routine session id flows here.
  */
 import {
   createContext,
@@ -38,8 +37,8 @@ export interface OverlayItem {
   running: boolean;
   /** primary action label — routine: "결과 보기", plugin: free */
   primaryActionLabel?: string;
-  /** routine-specific — path to JSONL for RoutineSessionView */
-  routineSessionPath?: string;
+  /** routine-specific — unified conversation session id */
+  routineSessionId?: string;
   /**
    * Plugin insertion overlay — prompt to inject into main chat when the
    * user confirms (primary action). Absent for routine-source items.
@@ -67,8 +66,8 @@ export interface OverlayContextValue {
   dismiss: (id: string) => void;
   /** Add or update an overlay item. Replaces existing entry with same source key. */
   addFire: (item: OverlayItem) => void;
-  /** Open RoutineSessionView modal */
-  openSession: (routineId: string, firedAt: string) => void;
+  /** Open routine conversation session by exact unified session id. */
+  openSession: (sessionId: string) => Promise<boolean>;
 }
 
 const OverlayContext = createContext<OverlayContextValue | null>(null);
@@ -80,7 +79,7 @@ export function OverlayContextProvider({
   runningRoutines,
 }: {
   children: ReactNode;
-  onOpenSession: (routineId: string, firedAt: string) => void;
+  onOpenSession: (sessionId: string) => boolean | Promise<boolean>;
   /**
    * Optional ref that App.tsx populates so it can call addFire() from
    * outside the React tree (e.g. from an IPC subscription useEffect).
@@ -194,9 +193,7 @@ export function OverlayContextProvider({
   }, [queue.length]);
 
   const openSession = useCallback(
-    (routineId: string, firedAt: string) => {
-      onOpenSession(routineId, firedAt);
-    },
+    (sessionId: string) => Promise.resolve(onOpenSession(sessionId)),
     [onOpenSession],
   );
 

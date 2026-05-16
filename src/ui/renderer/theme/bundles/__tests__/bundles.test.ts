@@ -32,7 +32,7 @@ const REQUIRED_TOKEN_KEYS: ReadonlyArray<keyof BundleTokens> = [
   "code-bg", "code-fg", "code-border",
   /* Tier D — chart palette */
   "chart-1", "chart-2", "chart-3", "chart-4", "chart-5",
-  /* Action tokens PR-4/5 */
+  /* Action tokens */
   "action-view", "action-branch", "action-compact",
 ];
 

@@ -3,7 +3,7 @@
  *
  * onRoutineFiredV2 delivery + dismiss IPC. Snooze IPC was removed in PR
  * #626 (Routine v2) — see OverlayCard.tsx comment. Also covers result-view
- * action wiring for routine results with session paths.
+ * action wiring for routine results with session ids.
  */
 import "./setup.js";
 import { describe, it, expect, vi, afterEach } from "vitest";
@@ -18,6 +18,23 @@ function makeRoutineResult() {
     title: "Daily schedule",
     summary: "daily summary",
   };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
+
+async function submitUser(container: HTMLElement, text: string) {
+  const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
+  expect(textarea).toBeTruthy();
+  await act(async () => {
+    fireEvent.change(textarea, { target: { value: text } });
+    fireEvent.keyDown(textarea, { key: "Enter", code: "Enter" });
+  });
 }
 
 describe("Routine flow (Phase 3.3 regression net)", () => {
@@ -44,7 +61,7 @@ describe("Routine flow (Phase 3.3 regression net)", () => {
   it("rehydrates an unacknowledged routine result on mount after restart", async () => {
     const routineResult = {
       ...makeRoutineResult(),
-      routineSessionPath: "/tmp/routine-session.jsonl",
+      routineSessionId: "routine-session-1",
     };
     const { container, api } = await renderApp({ pendingRoutineResults: [routineResult] });
     await waitFor(() => {
@@ -113,12 +130,12 @@ describe("Routine flow (Phase 3.3 regression net)", () => {
   // previous "snooze trigger button is rendered with the new label" test
   // pointed at a `routine-card-snooze-trigger` data-testid that no longer
   // exists; deleting the orphan rather than leaving it to fail every run.
-  it("renders the result-view action for routines with a session path", async () => {
-    const { container, emitRoutineFiredV2 } = await renderApp();
+  it("renders the result-view action for routines with a session id", async () => {
+    const { container, api, emitRoutineFiredV2 } = await renderApp();
     await act(async () => {
       emitRoutineFiredV2({
         ...makeRoutineResult(),
-        routineSessionPath: "/tmp/routine-session.jsonl",
+        routineSessionId: "routine-session-1",
       });
     });
     const card = await waitFor(() => {
@@ -130,6 +147,51 @@ describe("Routine flow (Phase 3.3 regression net)", () => {
     const primary = card.querySelector('[data-testid="overlay-card-primary-action"]');
     expect(primary).toBeTruthy();
     expect(primary?.textContent).toContain("결과 보기");
+
+    await act(async () => {
+      fireEvent.click(primary!);
+    });
+
+    await waitFor(() => {
+      expect(api.chatSessionResume).toHaveBeenCalledWith("routine-session-1");
+      expect(api.chatSessionHistory).toHaveBeenCalledWith("routine-session-1");
+    });
+    expect(api.listRoutineSessionsV2).not.toHaveBeenCalled();
+  });
+
+  it("does not open or acknowledge a routine session while the active chat is streaming", async () => {
+    const { container, api, emitRoutineFiredV2 } = await renderApp();
+    const pendingSend = deferred<{ ok: true }>();
+    api.chatSend.mockImplementationOnce(async () => pendingSend.promise);
+
+    await submitUser(container, "진행 중인 질문");
+    await waitFor(() => expect(api.chatSend).toHaveBeenCalled());
+
+    await act(async () => {
+      emitRoutineFiredV2({
+        ...makeRoutineResult(),
+        routineSessionId: "routine-session-1",
+      });
+    });
+    const primary = await waitFor(() => {
+      const el = container.querySelector('[data-testid="overlay-card-primary-action"]');
+      if (!el) throw new Error("primary action not rendered");
+      return el;
+    });
+
+    await act(async () => {
+      fireEvent.click(primary);
+      await Promise.resolve();
+    });
+
+    expect(api.chatSessionResume).not.toHaveBeenCalledWith("routine-session-1");
+    expect(api.chatSessionHistory).not.toHaveBeenCalledWith("routine-session-1");
+    expect(api.acknowledgeRoutineResultV2).not.toHaveBeenCalled();
+
+    await act(async () => {
+      pendingSend.resolve({ ok: true });
+      await Promise.resolve();
+    });
   });
 
   it("stacks results with distinct routineIds and shows the index indicator", async () => {

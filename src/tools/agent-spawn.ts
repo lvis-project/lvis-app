@@ -154,7 +154,7 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
         typeof a.maxTurns === "number" && Number.isFinite(a.maxTurns)
           ? Math.max(1, Math.min(60, Math.floor(a.maxTurns)))
           : undefined;
-      const parentSessionId =
+      const originSessionId =
         typeof ctx.metadata?.sessionId === "string"
           ? (ctx.metadata.sessionId as string)
           : undefined;
@@ -173,7 +173,7 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
               : instructions,
             sourceTools,
             maxTurns,
-            parentSessionId,
+            originSessionId,
           },
           {
             onTurn: (u) =>

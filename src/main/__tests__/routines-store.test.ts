@@ -60,6 +60,33 @@ describe("RoutinesStore v2 — basic persistence", () => {
     }
   });
 
+  it("persists the exact last routine session id and clears it on the next fire", async () => {
+    const { store, cleanup } = tempStore();
+    try {
+      const r = await store.add({
+        trigger: "schedule",
+        execution: "llm-session",
+        schedule: { at: futureIso(), repeat: { kind: "daily" } },
+        prePrompt: "daily briefing",
+        title: "Daily",
+      });
+
+      const updated = await store.update(r.id, { lastRoutineSessionId: "routine-session-1" });
+      expect(updated?.lastRoutineSessionId).toBe("routine-session-1");
+      expect(store.list()[0].lastRoutineSessionId).toBe("routine-session-1");
+
+      const fired = await store.markFired(r.id);
+      expect(fired?.lastRoutineSessionId).toBeUndefined();
+      expect(store.list()[0].lastRoutineSessionId).toBeUndefined();
+
+      const current = await store.update(r.id, { lastRoutineSessionId: "routine-session-2" });
+      expect(current?.lastRoutineSessionId).toBe("routine-session-2");
+      expect(store.list()[0].lastRoutineSessionId).toBe("routine-session-2");
+    } finally {
+      cleanup();
+    }
+  });
+
   it("rejects non-canonical routine records with flat plugin scope fields", async () => {
     const { store, dir, cleanup } = tempStore();
     try {

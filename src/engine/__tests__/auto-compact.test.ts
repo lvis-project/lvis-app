@@ -1,7 +1,7 @@
 /**
- * Auto-Compact — 2-stage compaction tests.
+ * Auto-Compact tests.
  *
- * Stage 1 (markStaleToolResults): preventive tool_result stub 교체.
+ * markStaleToolResults: preventive tool_result stub 교체.
  */
 import { describe, it, expect } from "vitest";
 
@@ -54,7 +54,7 @@ describe("markStaleToolResults", () => {
     const toolResults = out.filter((m) => m.role === "tool_result");
     expect(toolResults).toHaveLength(10);
 
-    // 처음 6개: marked (compactedAt set) + content *verbatim* — PR-3 핵심
+    // 처음 6개: marked (compactedAt set) + content *verbatim*.
     for (let i = 0; i < 6; i++) {
       const m = toolResults[i];
       expect(m.role).toBe("tool_result");

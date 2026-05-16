@@ -116,8 +116,6 @@ export interface AppServices {
   /** Workflow tools — exposed for IPC handlers + shutdown wiring. */
   routinesStore?: import("../main/routines-store.js").RoutinesStore;
   routinesScheduler?: import("../main/routines-scheduler.js").RoutinesScheduler;
-  /** Per-routine session JSONL store (~/.lvis/routine-sessions/). */
-  routineSessionStore?: import("../main/routine-session-store.js").RoutineSessionStore;
   sessionTodoStore?: import("../main/session-todo-store.js").SessionTodoStore;
   askUserQuestionGate?: import("../main/ask-user-question-gate.js").AskUserQuestionGate;
   skillStore?: import("../main/skill-store.js").SkillStore;

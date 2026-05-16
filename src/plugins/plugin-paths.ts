@@ -10,10 +10,10 @@
  * 는 플러그인 — 플러그인이 호스트 폴더에 끼어들거나 호스트가 플러그인 폴더를
  * 들여다보지 않는다.
  *
- * Round-3 cleanup: env-tier override (`LVIS_PLUGINS_DIR`) 제거. 이제 경로
- * 오버라이드는 constructor injection (resolvePluginPaths의 `pluginsRoot`
- * 인자) 단일 경로만 지원한다 — 테스트는 항상 DI, dev 런타임은 항상 canonical
- * `lvisHome()/plugins/`. env tier 가 없어도 모든 호출자가 이미 DI 를 쓰고 있다.
+ * Legacy env override (`LVIS_PLUGINS_DIR`) 제거. 이제 경로 오버라이드는
+ * constructor injection (resolvePluginPaths의 `pluginsRoot` 인자) 단일 경로만
+ * 지원한다 — 테스트는 항상 DI, dev 런타임은 항상 canonical
+ * `lvisHome()/plugins/`. env override 가 없어도 모든 호출자가 이미 DI 를 쓰고 있다.
  *
  * Electron 은 의도적으로 import 하지 않는다 — 이 모듈은 vitest 에서 electron
  * stub 없이도 동작한다.
@@ -39,7 +39,7 @@ export interface ResolvePluginPathsInput {
    * Override for the plugins root. When omitted, defaults to
    * `lvisHome()/plugins`.
    *
-   * Tests use this for sandbox isolation. There is no env-tier fallback —
+   * Tests use this for sandbox isolation. There is no env fallback —
    * if an override is needed, callers must pass it explicitly.
    */
   pluginsRoot?: string;

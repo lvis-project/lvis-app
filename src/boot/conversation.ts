@@ -233,9 +233,9 @@ export function createRoutineConversationLoop(
     forcedActivePluginIds,
     additionalDirectories: scope?.directories ?? [],
     headless: true,
-    disableSessionPersistence: true,
     // postTurnHookChain / idleScheduler intentionally omitted — routine loops
-    // are isolated from normal chat persistence and idle-poke side effects.
+    // are isolated from interactive chat side effects. The fallback persistence
+    // path still saves the routine session through the normal session model.
   });
 }
 

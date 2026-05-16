@@ -1,5 +1,5 @@
 /**
- * Layer 0 Pre-flight Guard — token accumulation → preflight trigger → compactWithBoundary.
+ * Token preflight guard — token accumulation → compact trigger → compactWithBoundary.
  *
  * Covers:
  * - estimate-based trigger: estimateMessagesTokens ≥ threshold → compact called

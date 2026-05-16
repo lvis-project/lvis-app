@@ -4,9 +4,9 @@
  * Two concerns:
  *  1. validateSender() allows trusted frames (file://, localhost) and rejects
  *     untrusted origins.
- *  2. Every channel classified as TIER 1 or TIER 2 in the channel manifest has
+ *  2. Every channel classified as mutating or sensitive in the channel manifest has
  *     a validateSender() guard present in the IPC domain source files
- *     (src/ipc/domains/*). TIER 3 (read-only) channels are excluded.
+ *     (src/ipc/domains/*). Public read-only channels are excluded.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -18,95 +18,93 @@ import type { IpcMainInvokeEvent } from "electron";
 // ─── Channel manifest ────────────────────────────────────────────────────────
 
 /**
- * TIER 1: destructive or settings/permissions/plugins/files/network mutators.
- * TIER 2: triggers LLM calls, writes memory/tasks, or reads sensitive local context.
- * TIER 3: pure non-sensitive read-only queries — guard not required.
+ * mutating: destructive or settings/permissions/plugins/files/network mutators.
+ * sensitive: triggers LLM calls, writes memory/tasks, or reads sensitive local context.
+ * public read-only: pure non-sensitive read-only queries — guard not required.
  */
-const CHANNEL_MANIFEST: Record<string, "tier1" | "tier2" | "tier3"> = {
+const CHANNEL_MANIFEST: Record<string, "mutating" | "sensitive" | "public-read"> = {
   // Settings
-  "lvis:settings:get": "tier3",
-  "lvis:settings:update": "tier1",
-  "lvis:settings:set-api-key": "tier1",
-  "lvis:settings:has-api-key": "tier3",
-  "lvis:settings:delete-api-key": "tier1",
-  "lvis:settings:set-web-api-key": "tier1",
-  "lvis:settings:has-web-api-key": "tier3",
-  "lvis:settings:delete-web-api-key": "tier1",
+  "lvis:settings:get": "public-read",
+  "lvis:settings:update": "mutating",
+  "lvis:settings:set-api-key": "mutating",
+  "lvis:settings:has-api-key": "public-read",
+  "lvis:settings:delete-api-key": "mutating",
+  "lvis:settings:set-web-api-key": "mutating",
+  "lvis:settings:has-web-api-key": "public-read",
+  "lvis:settings:delete-web-api-key": "mutating",
   // Chat
-  "lvis:chat:has-provider": "tier3",
-  "lvis:chat:send": "tier2",
-  "lvis:chat:new": "tier1",
-  "lvis:chat:sessions": "tier3",
-  "lvis:chat:load-session": "tier1",
-  "lvis:chat:get-history": "tier3",
-  "lvis:chat:edit-resend": "tier2",
-  "lvis:chat:fork": "tier2",
-  "lvis:chat:retry-effort": "tier2",
-  "lvis:chat:export": "tier2",
+  "lvis:chat:has-provider": "public-read",
+  "lvis:chat:send": "sensitive",
+  "lvis:chat:new": "mutating",
+  "lvis:chat:sessions": "public-read",
+  "lvis:chat:get-history": "public-read",
+  "lvis:chat:edit-resend": "sensitive",
+  "lvis:chat:fork": "sensitive",
+  "lvis:chat:retry-effort": "sensitive",
+  "lvis:chat:export": "sensitive",
   // Memory
-  "lvis:memory:entries:list": "tier2",
-  "lvis:memory:entries:save": "tier2",
-  "lvis:memory:entries:delete": "tier1",
-  "lvis:memory:entries:search": "tier2",
-  "lvis:memory:index:get": "tier2",
-  "lvis:memory:sessions:list": "tier2",
-  "lvis:memory:sessions:search": "tier2",
-  "lvis:memory:agents-md:get": "tier2",
-  "lvis:memory:agents-md:update": "tier1",
-  "lvis:memory:lvis-md:get": "tier2",
-  "lvis:memory:lvis-md:update": "tier1",
-  "lvis:memory:user-prefs:get": "tier2",
-  "lvis:memory:user-prefs:update": "tier1",
+  "lvis:memory:entries:list": "sensitive",
+  "lvis:memory:entries:save": "sensitive",
+  "lvis:memory:entries:delete": "mutating",
+  "lvis:memory:entries:search": "sensitive",
+  "lvis:memory:index:get": "sensitive",
+  "lvis:memory:sessions:list": "sensitive",
+  "lvis:memory:sessions:search": "sensitive",
+  "lvis:memory:agents-md:get": "sensitive",
+  "lvis:memory:agents-md:update": "mutating",
+  "lvis:memory:lvis-md:get": "sensitive",
+  "lvis:memory:lvis-md:update": "mutating",
+  "lvis:memory:user-prefs:get": "sensitive",
+  "lvis:memory:user-prefs:update": "mutating",
   // Plugins
-  "lvis:plugins:marketplace:list": "tier3",
-  "lvis:plugins:install": "tier1",
-  "lvis:plugins:uninstall": "tier1",
-  "lvis:plugins:ui:list": "tier3",
-  "lvis:plugins:cards": "tier3",
-  "lvis:plugins:perf-stats": "tier3",
-  "lvis:plugins:call": "tier2",
+  "lvis:plugins:marketplace:list": "public-read",
+  "lvis:plugins:install": "mutating",
+  "lvis:plugins:uninstall": "mutating",
+  "lvis:plugins:ui:list": "public-read",
+  "lvis:plugins:cards": "public-read",
+  "lvis:plugins:perf-stats": "public-read",
+  "lvis:plugins:call": "sensitive",
   // MCP
-  "lvis:mcp:servers": "tier3",
-  "lvis:mcp:kill": "tier1",
+  "lvis:mcp:servers": "public-read",
+  "lvis:mcp:kill": "mutating",
   // Permissions
-  "lvis:permission:get-mode": "tier3",
-  "lvis:permission:set-mode": "tier1",
-  "lvis:permission:list-rules": "tier3",
-  "lvis:permission:add-rule": "tier1",
-  "lvis:permission:remove-rule": "tier1",
-  [PERMISSIONS.dirDispatch]: "tier1",
-  [PERMISSIONS.reviewerDispatch]: "tier2",
-  [PERMISSIONS.deferredList]: "tier2",
-  [PERMISSIONS.deferredResolve]: "tier1",
-  [PERMISSIONS.auditShow]: "tier2",
-  [PERMISSIONS.auditVerify]: "tier2",
-  [PERMISSIONS.hookTrustList]: "tier2",
+  "lvis:permission:get-mode": "public-read",
+  "lvis:permission:set-mode": "mutating",
+  "lvis:permission:list-rules": "public-read",
+  "lvis:permission:add-rule": "mutating",
+  "lvis:permission:remove-rule": "mutating",
+  [PERMISSIONS.dirDispatch]: "mutating",
+  [PERMISSIONS.reviewerDispatch]: "sensitive",
+  [PERMISSIONS.deferredList]: "sensitive",
+  [PERMISSIONS.deferredResolve]: "mutating",
+  [PERMISSIONS.auditShow]: "sensitive",
+  [PERMISSIONS.auditVerify]: "sensitive",
+  [PERMISSIONS.hookTrustList]: "sensitive",
   // Approval
-  "lvis:approval:respond": "tier1",
+  "lvis:approval:respond": "mutating",
   // Policy
-  "lvis:policy:get": "tier3",
-  "lvis:policy:set": "tier1",
+  "lvis:policy:get": "public-read",
+  "lvis:policy:set": "mutating",
   // Usage / observability
-  "lvis:usage:summary": "tier3",
+  "lvis:usage:summary": "public-read",
   // Conversation UX extras
-  "lvis:starred:list": "tier3",
-  "lvis:starred:add": "tier2",
-  "lvis:starred:remove": "tier2",
+  "lvis:starred:list": "public-read",
+  "lvis:starred:add": "sensitive",
+  "lvis:starred:remove": "sensitive",
   // Audit
-  "lvis:audit:search": "tier3",
-  "lvis:audit:stats": "tier3",
+  "lvis:audit:search": "public-read",
+  "lvis:audit:stats": "public-read",
   // Telemetry
-  "lvis:telemetry:consent-answer": "tier1",
+  "lvis:telemetry:consent-answer": "mutating",
   // Routines v2 — invoke channels only (fired/running-started/running-finished are main→renderer push, no handle)
-  "lvis:routines:v2:list": "tier3",
-  "lvis:routines:v2:add": "tier1",
-  "lvis:routines:v2:dismiss": "tier1",
-  "lvis:routines:v2:remove": "tier1",
-  "lvis:routines:v2:trigger-now": "tier1",
-  "lvis:routines:v2:list-sessions": "tier3",
-  "lvis:routines:v2:read-session": "tier2",
+  "lvis:routines:v2:list": "public-read",
+  "lvis:routines:v2:add": "mutating",
+  "lvis:routines:v2:dismiss": "mutating",
+  "lvis:routines:v2:remove": "mutating",
+  "lvis:routines:v2:trigger-now": "mutating",
+  "lvis:routines:v2:list-sessions": "public-read",
   // Overlay v1 — primary-action is renderer→main invoke (write influence); show/update/dismiss are main→renderer push events
-  "lvis:overlay:primary-action": "tier1",
+  "lvis:overlay:primary-action": "mutating",
 };
 
 // ─── validateSender unit tests ───────────────────────────────────────────────
@@ -153,7 +151,7 @@ describe("validateSender", () => {
 
 // ─── Source-level guard audit ────────────────────────────────────────────────
 
-describe("ipc-bridge.ts — TIER 1/2 channels have validateSender guard", () => {
+describe("ipc-bridge.ts — mutating/sensitive channels have validateSender guard", () => {
   // ipc-bridge.ts is now a thin re-export shim; all handler source lives in
   // src/ipc/domains/*. Aggregate the full source so the channel + guard checks
   // remain valid against the actual implementation files.
@@ -185,11 +183,11 @@ describe("ipc-bridge.ts — TIER 1/2 channels have validateSender guard", () => 
   }
 
   const gatedChannels = Object.entries(CHANNEL_MANIFEST)
-    .filter(([, tier]) => tier === "tier1" || tier === "tier2")
+    .filter(([, access]) => access === "mutating" || access === "sensitive")
     .map(([channel]) => channel);
 
-  const tier3Channels = Object.entries(CHANNEL_MANIFEST)
-    .filter(([, tier]) => tier === "tier3")
+  const publicReadChannels = Object.entries(CHANNEL_MANIFEST)
+    .filter(([, access]) => access === "public-read")
     .map(([channel]) => channel);
   const channelConstantAliases: Record<string, string> = {
     "lvis:routines:v2:list": "ROUTINES_V2.list",
@@ -198,7 +196,6 @@ describe("ipc-bridge.ts — TIER 1/2 channels have validateSender guard", () => 
     "lvis:routines:v2:remove": "ROUTINES_V2.remove",
     "lvis:routines:v2:trigger-now": "ROUTINES_V2.triggerNow",
     "lvis:routines:v2:list-sessions": "ROUTINES_V2.listSessions",
-    "lvis:routines:v2:read-session": "ROUTINES_V2.readSession",
     "lvis:overlay:primary-action": "OVERLAY_V1.primaryAction",
     "lvis:permission:get-mode": "PERMISSIONS.getMode",
     "lvis:permission:set-mode": "PERMISSIONS.setMode",
@@ -248,8 +245,8 @@ describe("ipc-bridge.ts — TIER 1/2 channels have validateSender guard", () => 
     });
   }
 
-  for (const channel of tier3Channels) {
-    it(`${channel} is classified read-only (TIER 3)`, () => {
+  for (const channel of publicReadChannels) {
+    it(`${channel} is classified read-only (public read-only)`, () => {
       const channelPattern = handlePatternFor(channel);
       const channelIdx = source.search(channelPattern);
       expect(channelIdx, `channel "${channel}" not found in ipc-bridge.ts`).toBeGreaterThan(-1);
