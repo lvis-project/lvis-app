@@ -12,6 +12,13 @@
  */
 
 import type { McpOAuthMetadata, McpRuntimeSpec } from "./types.js";
+import {
+  ENV_NAME_RE,
+  HTTP_HEADER_NAME_RE,
+  MAX_NAME_LEN,
+  RESERVED_ENV_NAMES,
+  RESERVED_HEADERS,
+} from "../mcp/safe-names.js";
 
 const CLIENT_REGISTRATION_MODES = new Set([
   "client-id-metadata-document",
@@ -55,12 +62,34 @@ export function parseMcpRuntimeSpec(value: unknown): McpRuntimeSpec | undefined 
     if (args && args.length > 0) out.args = args;
     if (env && Object.keys(env).length > 0) out.env = env;
     if (validStdioAuth) out.auth = validStdioAuth;
+    if (typeof r.apiKeyEnv === "string") {
+      const v = r.apiKeyEnv.trim();
+      if (
+        v.length > 0 &&
+        v.length <= MAX_NAME_LEN &&
+        ENV_NAME_RE.test(v) &&
+        !RESERVED_ENV_NAMES.has(v.toUpperCase())
+      ) {
+        out.apiKeyEnv = v;
+      }
+    }
     return out;
   }
   if (r.transport === "http") {
     if (typeof r.url !== "string" || r.url.trim().length === 0) return undefined;
     const out: McpRuntimeSpec = { transport: "http", url: r.url };
     if (validHttpAuth) out.auth = validHttpAuth;
+    if (typeof r.apiKeyHeader === "string") {
+      const v = r.apiKeyHeader.trim();
+      if (
+        v.length > 0 &&
+        v.length <= MAX_NAME_LEN &&
+        HTTP_HEADER_NAME_RE.test(v) &&
+        !RESERVED_HEADERS.has(v.toLowerCase())
+      ) {
+        out.apiKeyHeader = v;
+      }
+    }
     if (typeof r.allowPrivateNetworks === "boolean") {
       out.allowPrivateNetworks = r.allowPrivateNetworks;
     }
