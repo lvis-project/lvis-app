@@ -120,6 +120,7 @@ import { wireReleasePrep, wireUpdateCheck } from "./boot/steps/post-boot.js";
 import { wireReviewerAgent } from "./boot/steps/reviewer-wiring.js";
 import { wireHookSystem } from "./boot/steps/hook-system-wiring.js";
 import { readPermissionSettings } from "./permissions/permission-settings-store.js";
+import { migrateCanonicalization } from "./permissions/user-approval-store.js";
 import { createProvider, secretKeyFor } from "./engine/llm/provider-factory.js";
 import { reviewerVendorFor } from "./permissions/reviewer/reviewer-vendor-map.js";
 import type { LLMProvider } from "./engine/llm/types.js";
@@ -176,6 +177,12 @@ export async function bootstrap(
     toolRegistry,
     routeEngine,
   } = core;
+
+  // Issue #837 — one-shot idempotent migration: re-canonicalize R-2
+  // user-approval keys after PR #828 upgraded canonicalStringify to RFC 8785
+  // JCS deep recursion. Runs after bootstrapCoreServices so any failure is
+  // caught internally and logged without aborting boot. Noop if marker present.
+  await migrateCanonicalization();
 
   // Sprint 1-A A3 — shared AuditLogger instance (plugin runtime + hooks + gate).
   const { AuditLogger } = await import("./audit/audit-logger.js");
