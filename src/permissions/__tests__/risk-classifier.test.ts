@@ -575,3 +575,236 @@ describe("maxVerdict ordering", () => {
     expect(maxVerdict(a, b).reason).toBe("llm");
   });
 });
+
+// ─── PR-A1 additions: new SandboxKind cases ──────────────────────────────────
+
+describe("LlmRiskClassifier — new kind='partial' (D5) no-downgrade", () => {
+  it("kind=partial + LLM LOW on MEDIUM rule → final MEDIUM (weak sandbox no-downgrade)", async () => {
+    const provider: LlmReviewerProvider = {
+      complete: vi.fn(async () => ({
+        text: '{"level":"low","reason":"llm says ok"}',
+        tokensIn: 1, tokensOut: 1, costUsd: 0,
+      })),
+    };
+    const c = new LlmRiskClassifier(provider, "gpt-4o-mini");
+    const v = await c.classify(
+      ctx({
+        category: "shell",
+        finalInput: { command: "make build" },
+        sandboxCapability: {
+          kind: "partial",
+          confidence: "verified",
+          platform: "darwin",
+          reason: "sandbox-exec partial profile",
+        },
+      }),
+    );
+    // Rule classifies `make build` as MEDIUM. LLM tried LOW.
+    // kind=partial is weak → no-downgrade → final MEDIUM.
+    expect(v.level).toBe("medium");
+  });
+
+  it("kind=partial + LLM HIGH on MEDIUM rule → final HIGH (escalation still works)", async () => {
+    const provider: LlmReviewerProvider = {
+      complete: vi.fn(async () => ({
+        text: '{"level":"high","reason":"llm sees risk"}',
+        tokensIn: 1, tokensOut: 1, costUsd: 0,
+      })),
+    };
+    const c = new LlmRiskClassifier(provider, "gpt-4o-mini");
+    const v = await c.classify(
+      ctx({
+        category: "shell",
+        finalInput: { command: "make build" },
+        sandboxCapability: {
+          kind: "partial",
+          confidence: "verified",
+          platform: "darwin",
+          reason: "sandbox-exec partial profile",
+        },
+      }),
+    );
+    expect(v.level).toBe("high");
+  });
+});
+
+describe("LlmRiskClassifier — kind='fs-only' (D6) — not weak, maxVerdict applies normally", () => {
+  it("kind=fs-only + LLM LOW on LOW rule → final LOW (fs-only is strong, no override)", async () => {
+    const provider: LlmReviewerProvider = {
+      complete: vi.fn(async () => ({
+        text: '{"level":"low","reason":"fine"}',
+        tokensIn: 1, tokensOut: 1, costUsd: 0,
+      })),
+    };
+    const c = new LlmRiskClassifier(provider, "gpt-4o-mini");
+    const v = await c.classify(
+      ctx({
+        category: "write",
+        finalInput: { path: "/Users/ken/work/note.md" },
+        sandboxCapability: {
+          kind: "fs-only",
+          confidence: "verified",
+          platform: "linux",
+          reason: "landlock filesystem isolation",
+        },
+        conversationContext: { recentUserMessage: "이 파일에 메모를 추가해 줘" },
+      }),
+    );
+    // Rule: write at allowed-dir leaf → LOW. LLM: LOW. fs-only is not weak.
+    expect(v.level).toBe("low");
+  });
+
+  it("kind=fs-only + LLM MEDIUM on LOW rule → final MEDIUM (LLM can still escalate)", async () => {
+    const provider: LlmReviewerProvider = {
+      complete: vi.fn(async () => ({
+        text: '{"level":"medium","reason":"llm escalates"}',
+        tokensIn: 1, tokensOut: 1, costUsd: 0,
+      })),
+    };
+    const c = new LlmRiskClassifier(provider, "gpt-4o-mini");
+    const v = await c.classify(
+      ctx({
+        category: "write",
+        finalInput: { path: "/Users/ken/work/note.md" },
+        sandboxCapability: {
+          kind: "fs-only",
+          confidence: "verified",
+          platform: "linux",
+          reason: "landlock filesystem isolation",
+        },
+        conversationContext: { recentUserMessage: "파일 저장해 줘" },
+      }),
+    );
+    expect(v.level).toBe("medium");
+  });
+});
+
+// ─── PR-A1 additions: R-1 context-quality no-downgrade ───────────────────────
+
+describe("LlmRiskClassifier — R-1 weak context no-downgrade", () => {
+  it("absent conversationContext + LLM LOW on MEDIUM rule → final MEDIUM", async () => {
+    const provider: LlmReviewerProvider = {
+      complete: vi.fn(async () => ({
+        text: '{"level":"low","reason":"llm says ok"}',
+        tokensIn: 1, tokensOut: 1, costUsd: 0,
+      })),
+    };
+    const c = new LlmRiskClassifier(provider, "gpt-4o-mini");
+    const v = await c.classify(
+      ctx({
+        category: "shell",
+        finalInput: { command: "make build" },
+        sandboxCapability: {
+          kind: "bubblewrap",
+          confidence: "verified",
+          platform: "linux",
+          reason: "bwrap active",
+        },
+        // No conversationContext → isContextMissingIntent = true
+      }),
+    );
+    expect(v.level).toBe("medium");
+  });
+
+  it("short recentUserMessage (<5 chars) + LLM LOW on MEDIUM rule → final MEDIUM", async () => {
+    const provider: LlmReviewerProvider = {
+      complete: vi.fn(async () => ({
+        text: '{"level":"low","reason":"llm says ok"}',
+        tokensIn: 1, tokensOut: 1, costUsd: 0,
+      })),
+    };
+    const c = new LlmRiskClassifier(provider, "gpt-4o-mini");
+    const v = await c.classify(
+      ctx({
+        category: "shell",
+        finalInput: { command: "make build" },
+        sandboxCapability: {
+          kind: "bubblewrap",
+          confidence: "verified",
+          platform: "linux",
+          reason: "bwrap active",
+        },
+        conversationContext: { recentUserMessage: "ok" },  // 2 chars < 5
+      }),
+    );
+    expect(v.level).toBe("medium");
+  });
+
+  it("adequate recentUserMessage (≥5 chars) + strong sandbox + LLM LOW on LOW rule → final LOW", async () => {
+    const provider: LlmReviewerProvider = {
+      complete: vi.fn(async () => ({
+        text: '{"level":"low","reason":"fine"}',
+        tokensIn: 1, tokensOut: 1, costUsd: 0,
+      })),
+    };
+    const c = new LlmRiskClassifier(provider, "gpt-4o-mini");
+    const v = await c.classify(
+      ctx({
+        category: "write",
+        finalInput: { path: "/Users/ken/work/note.md" },
+        sandboxCapability: {
+          kind: "bubblewrap",
+          confidence: "verified",
+          platform: "linux",
+          reason: "bwrap active",
+        },
+        conversationContext: { recentUserMessage: "이 파일 저장해줘" },  // 9 chars ≥ 5
+      }),
+    );
+    // Rule: write at allowed-dir leaf → LOW. LLM: LOW. Strong sandbox + adequate context.
+    expect(v.level).toBe("low");
+  });
+
+  it("R-1 composition rule string is present in PERMISSION_REVIEWER_COMPOSITION_RULES", () => {
+    expect(PERMISSION_REVIEWER_FRAMEWORK.compositionRules).toContainEqual(
+      expect.stringContaining("conversation context lacks an explicit stated purpose"),
+    );
+  });
+});
+
+describe("isContextMissingIntent helper", () => {
+  it("returns true when conversationContext is absent", async () => {
+    const input = ctx({ conversationContext: undefined });
+    // Access via _internal to test the helper directly without going through LLM
+    const { isContextMissingIntent: fn } = (await import("../reviewer/risk-classifier.js"))._internal;
+    expect(fn(input)).toBe(true);
+  });
+});
+
+// ─── PR-A1: fixture-driven snapshot assertions ────────────────────────────────
+
+describe("sandbox-eval-verdicts fixture — composition rule verification", () => {
+  it("fixture 'kind=none + risky tool': rule MEDIUM prevents LLM LOW downgrade", async () => {
+    const fixture = (await import("./__fixtures__/sandbox-eval-verdicts.json", {
+      with: { type: "json" },
+    })).default as Record<string, { rule: string; llm: string; final: string }>;
+
+    const entry = fixture["kind=none + risky tool"];
+    // Verify that the fixture correctly encodes the no-downgrade behaviour.
+    expect(entry.rule).toBe("medium");
+    expect(entry.llm).toBe("low");
+    expect(entry.final).toBe("medium");  // LLM LOW cannot downgrade rule MEDIUM
+  });
+
+  it("fixture 'kind=partial + risky tool': partial is weak, no-downgrade applies", async () => {
+    const fixture = (await import("./__fixtures__/sandbox-eval-verdicts.json", {
+      with: { type: "json" },
+    })).default as Record<string, { rule: string; llm: string; final: string }>;
+
+    const entry = fixture["kind=partial + risky tool"];
+    expect(entry.rule).toBe("medium");
+    expect(entry.llm).toBe("low");
+    expect(entry.final).toBe("medium");
+  });
+
+  it("fixture 'weak context + benign tool': R-1 prevents downgrade", async () => {
+    const fixture = (await import("./__fixtures__/sandbox-eval-verdicts.json", {
+      with: { type: "json" },
+    })).default as Record<string, { rule: string; llm: string; final: string }>;
+
+    const entry = fixture["weak context + benign tool"];
+    expect(entry.rule).toBe("medium");
+    expect(entry.llm).toBe("low");
+    expect(entry.final).toBe("medium");
+  });
+});

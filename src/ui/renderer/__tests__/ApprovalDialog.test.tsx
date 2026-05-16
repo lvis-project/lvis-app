@@ -240,6 +240,57 @@ describe("ApprovalDialog", () => {
     });
   });
 
+  it("renders ⚠ weak when kind=partial (HIGH-1 SOT consumer regression guard)", async () => {
+    render(
+      <ApprovalDialog
+        queue={[makeRequest({
+          toolName: "bash",
+          toolCategory: "shell",
+          sandboxCapability: {
+            kind: "partial",
+            confidence: "verified",
+            platform: "darwin",
+            reason: "sandbox-exec partial profile",
+          },
+        })]}
+        onDecide={vi.fn()}
+      />,
+    );
+    await waitFor(() => {
+      const row = document.body.querySelector('[data-testid="tool-approval-sandbox"]');
+      expect(row).toBeTruthy();
+      // partial kind is weak per isWeakSandbox() SOT — must show warning
+      expect(row!.textContent).toContain("⚠");
+      expect(row!.textContent).toContain("OS 격리 없음");
+    });
+  });
+
+  it("renders strong (no ⚠) when kind=fs-only + confidence=verified", async () => {
+    render(
+      <ApprovalDialog
+        queue={[makeRequest({
+          toolName: "bash",
+          toolCategory: "shell",
+          sandboxCapability: {
+            kind: "fs-only",
+            confidence: "verified",
+            platform: "linux",
+            reason: "landlock LSM active",
+          },
+        })]}
+        onDecide={vi.fn()}
+      />,
+    );
+    await waitFor(() => {
+      const row = document.body.querySelector('[data-testid="tool-approval-sandbox"]');
+      expect(row).toBeTruthy();
+      // fs-only is strong (not weak) per isWeakSandbox() SOT
+      expect(row!.textContent).not.toContain("⚠");
+      expect(row!.textContent).toContain("OS 격리 활성");
+      expect(row!.textContent).toContain("fs-only");
+    });
+  });
+
   it("omits the sandbox row entirely when sandboxCapability is undefined", async () => {
     render(
       <ApprovalDialog
