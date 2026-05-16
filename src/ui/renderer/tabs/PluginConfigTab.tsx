@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
 import { Button } from "../../../components/ui/button.js";
 import { Input } from "../../../components/ui/input.js";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
@@ -13,6 +14,8 @@ import { usePluginAuthStatuses } from "../hooks/use-plugin-auth-status.js";
 import { PluginUninstallDialog } from "../dialogs/PluginUninstallDialog.js";
 import { PluginConfigSchemaForm } from "./PluginConfigSchemaForm.js";
 import { DEFAULT_TOAST_TTL_MS } from "../constants.js";
+import { useNotifySaved } from "../contexts/saved-toast.js";
+import { MARKDOWN_REMARK_PLUGINS } from "../utils/markdown-plugins.js";
 
 type KV = { key: string; value: string };
 
@@ -39,6 +42,11 @@ function entriesToConfig(entries: KV[]): Record<string, unknown> {
 }
 
 export function PluginConfigTab() {
+  // Pull the dialog-wide "저장되었습니다" notifier so every successful
+  // plugin-config write — manual key/value editor save, schema-form save,
+  // and per-secret writes — surfaces a uniform toast next to the user's
+  // gaze without each tab having to roll its own banner.
+  const notifySaved = useNotifySaved();
   const [plugins, setPlugins] = useState<PluginCardSummary[]>([]);
   const [installInFlight, setInstallInFlight] = useState<InstallInFlight>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -217,12 +225,13 @@ export function PluginConfigTab() {
       }
       setEntries(configToEntries(result.config));
       showBanner("success", "설정이 저장되었습니다.");
+      notifySaved();
     } catch (e) {
       showBanner("error", (e as Error).message ?? "저장 실패");
     } finally {
       setSaving(false);
     }
-  }, [selectedId, entries, showBanner]);
+  }, [selectedId, entries, showBanner, notifySaved]);
 
   const selectedPlugin = plugins.find((p) => p.id === selectedId);
   // §9.2 Track B — merge schema-declared defaults with the saved config
@@ -526,19 +535,31 @@ export function PluginConfigTab() {
                   </>
                 )}
 
-                {/* Tools section */}
+                {/* Tools section — tool descriptions are markdown (plugin
+                    manifests routinely include `**bold**`, code spans, lists,
+                    and line breaks). Rendering them as a single plain <span>
+                    flattens newlines and shows the literal `*` characters,
+                    which is the "md 포맷 깨짐" the user reported. We render
+                    through the shared ReactMarkdown surface used by chat
+                    cards so the typography stays consistent. */}
                 {selectedPlugin.tools.length > 0 && (
                   <>
                     <Separator />
                     <div className="space-y-1">
                       <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">제공 툴</p>
-                      <div className="space-y-0.5 max-h-24 overflow-y-auto">
+                      <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
                         {selectedPlugin.tools.map((tool) => {
                           const desc = selectedPlugin.toolDescriptions?.[tool];
                           return (
-                            <div key={tool} className="flex flex-col">
-                              <span className="font-mono text-[10px] font-medium">{tool}</span>
-                              {desc && <span className="text-[10px] text-muted-foreground">{desc}</span>}
+                            <div key={tool} className="flex flex-col gap-0.5 rounded border border-border/40 bg-muted/20 px-2 py-1.5">
+                              <span className="font-mono text-[11px] font-semibold">{tool}</span>
+                              {desc && (
+                                <div className="prose prose-sm lvis-prose max-w-none break-words text-[11px] text-muted-foreground [&_p]:my-0.5 [&_ul]:my-0.5 [&_ol]:my-0.5 [&_code]:text-[10px]">
+                                  <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>
+                                    {desc}
+                                  </ReactMarkdown>
+                                </div>
+                              )}
                             </div>
                           );
                         })}
@@ -575,6 +596,7 @@ export function PluginConfigTab() {
                             setSavedConfig(result.config as Record<string, unknown>);
                             setEntries(configToEntries(result.config));
                             showBanner("success", "설정이 저장되었습니다.");
+                            notifySaved();
                           } catch (e) {
                             showBanner("error", (e as Error).message ?? "저장 실패");
                           } finally {
@@ -595,13 +617,30 @@ export function PluginConfigTab() {
                           // masked "**** (저장됨)" placeholder appears immediately.
                           setSecretsPresent((prev) => ({ ...prev, [key]: true }));
                           showBanner("success", `${key} 저장 완료`);
+                          notifySaved();
                         }}
                       />
                     </div>
                   </ScrollArea>
                 ) : (
                   <>
-                    <ScrollArea className="flex-1 min-h-0">
+                    {/* "환경변수" section — schema-less plugins use the raw
+                        key/value editor. Without an explicit heading the
+                        user can't tell what this list represents ("환경변수
+                        헤더 누락"), so anchor it visually with a label and
+                        a hint that the value box accepts JSON. The row
+                        list caps at ~5 rows (220px ≈ row height × 5 +
+                        gaps) and scrolls beyond that so a plugin with 20
+                        env vars doesn't push the Save button off-screen. */}
+                    <div className="flex items-baseline justify-between">
+                      <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
+                        환경변수
+                      </p>
+                      <span className="text-[10px] text-muted-foreground">
+                        {entries.length}개 · 값은 문자열 또는 JSON
+                      </span>
+                    </div>
+                    <ScrollArea className="w-full rounded-md border bg-background/40 p-2" style={{ maxHeight: 220 }}>
                       <div className="space-y-1.5 pr-2">
                         {entries.length === 0 && (
                           <p className="text-xs text-muted-foreground">
@@ -611,7 +650,7 @@ export function PluginConfigTab() {
                         {entries.map((entry) => (
                           <div key={entry.key} className="flex items-center gap-2">
                             <Input
-                              className="h-7 text-xs font-mono flex-[0_0_35%]"
+                              className="h-7 text-xs font-mono flex-[0_0_30%]"
                               value={entry.key}
                               readOnly
                             />
@@ -637,7 +676,7 @@ export function PluginConfigTab() {
 
                     <div className="flex items-center gap-2">
                       <Input
-                        className="h-7 text-xs font-mono flex-[0_0_35%]"
+                        className="h-7 text-xs font-mono flex-[0_0_30%]"
                         placeholder="key"
                         value={newKey}
                         onChange={(e) => setNewKey(e.target.value)}
