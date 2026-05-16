@@ -1,16 +1,16 @@
 import "../../../../test/renderer/setup.js";
 import { beforeAll, describe, it, expect, vi } from "vitest";
 import { fireEvent, render, waitFor } from "@testing-library/react";
-import { DayDivider } from "../components/DayDivider.js";
+import { SessionDateNavigator } from "../components/SessionDateNavigator.js";
 import { preloadCalendar } from "../components/LazyCalendar.js";
 
-describe("DayDivider", () => {
+describe("SessionDateNavigator", () => {
   beforeAll(async () => {
     await preloadCalendar();
   }, 30_000);
 
   it("opens the calendar with the divider date selected", async () => {
-    const { getByRole } = render(<DayDivider dateKey="2026-05-06" />);
+    const { getByRole } = render(<SessionDateNavigator dateKey="2026-05-06" />);
 
     fireEvent.click(getByRole("button", { name: /2026-05-06/ }));
 
@@ -22,9 +22,9 @@ describe("DayDivider", () => {
   });
 
   it("updates the selected calendar day when the divider date changes", async () => {
-    const { getByRole, rerender } = render(<DayDivider dateKey="2026-05-06" />);
+    const { getByRole, rerender } = render(<SessionDateNavigator dateKey="2026-05-06" />);
 
-    rerender(<DayDivider dateKey="2026-05-07" />);
+    rerender(<SessionDateNavigator dateKey="2026-05-07" />);
     fireEvent.click(getByRole("button", { name: /2026-05-07/ }));
 
     await waitFor(() => {
@@ -36,7 +36,7 @@ describe("DayDivider", () => {
 
   it("uses the KST day key when filtering sessions around UTC boundaries", async () => {
     const { getByRole, findByText } = render(
-      <DayDivider
+      <SessionDateNavigator
         dateKey="2026-05-06"
         sessions={[
           {
@@ -56,7 +56,7 @@ describe("DayDivider", () => {
   it("notifies session selection even for the current session", async () => {
     const onLoadSession = vi.fn();
     const { getByRole, findByText } = render(
-      <DayDivider
+      <SessionDateNavigator
         dateKey="2026-05-06"
         currentSessionId="current-session"
         onLoadSession={onLoadSession}

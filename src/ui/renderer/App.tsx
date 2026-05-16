@@ -1003,6 +1003,32 @@ export function App() {
                 setActiveView("routines");
                 searchCloseOverlay();
               }}
+              currentSessionId={currentSessionId}
+              streaming={streaming}
+              onRefreshSessions={refreshSessions}
+              onJumpToEntry={(entryIndex) => {
+                // Calendar popover in the search bar jumps to entries tagged
+                // with data-chat-entry-index in ChatView. Switch the view to
+                // home before scrolling so the entry is mounted.
+                // ChatView (and its Suspense-wrapped children) may not be in
+                // the DOM at the next paint — retry a bounded number of
+                // frames so the scroll lands once mount completes.
+                if (!Number.isInteger(entryIndex) || entryIndex < 0) return;
+                setActiveView("home");
+                const selector = `[data-chat-entry-index="${entryIndex}"]`;
+                const MAX_SCROLL_RETRY_FRAMES = 10; // ~160ms ceiling at 60fps
+                let attempts = 0;
+                const tryScroll = () => {
+                  const el = document.querySelector<HTMLElement>(selector);
+                  if (el) {
+                    el.scrollIntoView({ behavior: "smooth", block: "start" });
+                    return;
+                  }
+                  if (++attempts >= MAX_SCROLL_RETRY_FRAMES) return;
+                  requestAnimationFrame(tryScroll);
+                };
+                requestAnimationFrame(tryScroll);
+              }}
             />
           )}
 

@@ -19,10 +19,45 @@ export class ConversationHistory {
   }
 
   append(message: GenericMessage): void {
-    this.messages.push(message);
+    this.messages.push(stampCreatedAt(message));
     this.trim();
   }
 
+  /**
+   * Attach `turnSummary` to the last assistant message. Dedicated entry-point
+   * (rather than a generic meta merge) so the type system enforces every
+   * required turnSummary field — including `freshInputTokens` — at every
+   * future call site, not just the one in conversation-loop today.
+   *
+   * No-op when there is no assistant message yet (rare tool-only termination).
+   *
+   * Mutation contract: `getMessages()` returns a shallow copy of the array
+   * but each element is the same object reference held internally, so an
+   * `attachTurnSummaryToLastAssistant` call AFTER a getMessages() snapshot
+   * IS visible through that snapshot. This is intentional — the persistence
+   * path (`saveSession`) calls `getMessages()` followed by attach so both
+   * see the same final meta.
+   */
+  attachTurnSummaryToLastAssistant(
+    turnSummary: NonNullable<NonNullable<GenericMessage["meta"]>["turnSummary"]>,
+  ): void {
+    for (let i = this.messages.length - 1; i >= 0; i--) {
+      const m = this.messages[i];
+      if (m.role === "assistant") {
+        m.meta = { ...(m.meta ?? {}), turnSummary };
+        return;
+      }
+    }
+  }
+
+  /**
+   * Returns a SHALLOW copy of the messages array. Each element is the same
+   * object reference held internally — mutations applied via
+   * `attachTurnSummaryToLastAssistant` (or any future meta mutator) are
+   * visible through previously-returned snapshots. This is intentional:
+   * `saveSession` reads a snapshot then the loop attaches turnSummary, and
+   * both must see the same final meta.
+   */
   getMessages(): GenericMessage[] {
     return [...this.messages];
   }
@@ -40,6 +75,10 @@ export class ConversationHistory {
   }
 
   restore(messages: GenericMessage[]): void {
+    // Restore from disk — preserve original createdAt (set on prior session
+    // turn) rather than restamping with the load time. Messages with no
+    // createdAt (legacy sessions written before the field existed) stay
+    // undefined — UI renders nothing rather than fake a fresh timestamp.
     this.messages = normalizeToolPairInvariant(messages).messages;
     this.trim();
   }
@@ -85,6 +124,19 @@ export class ConversationHistory {
 
 interface NormalizeToolPairOptions {
   preserveOpenToolTail?: boolean;
+}
+
+/**
+ * Stamp `meta.createdAt` (wall-clock epoch ms) on any incoming message that
+ * doesn't already carry one. Append boundary is the single chokepoint for
+ * every message route (user input, LLM round assistant, executor tool_result,
+ * structured-compact boundary) so this is the right place to ensure every
+ * persisted row has a creation time. Existing createdAt is preserved so
+ * restored or programmatically-constructed messages keep their original time.
+ */
+function stampCreatedAt(message: GenericMessage): GenericMessage {
+  if (message.meta?.createdAt !== undefined) return message;
+  return { ...message, meta: { ...(message.meta ?? {}), createdAt: Date.now() } };
 }
 
 export function normalizeToolPairInvariant(
