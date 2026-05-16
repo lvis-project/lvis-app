@@ -59,6 +59,7 @@ import {
   buildPluginConfigOverrides,
   registerPluginTools,
   syncPluginToolRegistry,
+  syncPluginToolRegistryForPlugin,
 } from "../plugins.js";
 import { createLogger } from "../../lib/logger.js";
 import { stripUntrustedTags } from "../../lib/strip-untrusted-tags.js";
@@ -942,7 +943,7 @@ export async function initPluginRuntime(
     // a sync exception is logged but does not become `runtime reload failed`.
     onEnable: (pluginId) => {
       try {
-        syncPluginToolRegistry(pluginRuntime, toolRegistry);
+        syncPluginToolRegistryForPlugin(pluginRuntime, toolRegistry, pluginId);
       } catch (err) {
         log.error(
           `tool registry sync failed after plugin onEnable (${pluginId}): %s`,
