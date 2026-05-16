@@ -153,7 +153,7 @@ export class ToolRegistry {
     const nextVersioned = this.cloneVersioned();
     for (const [name, versionMap] of nextVersioned) {
       for (const [version, tool] of versionMap) {
-        if (tool.pluginId && targetPluginIds.has(tool.pluginId)) {
+        if (tool.source === "plugin" && tool.pluginId && targetPluginIds.has(tool.pluginId)) {
           versionMap.delete(version);
         }
       }
