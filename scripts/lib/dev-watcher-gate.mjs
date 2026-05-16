@@ -9,11 +9,29 @@
 import { statSync } from "node:fs";
 
 /**
- * Poll a single watcher's output file until its mtime is at or after the
- * `since` baseline (typically the launcher's startup epoch). Returns true
- * if the freshness criterion is met within `timeoutMs`, false on timeout.
+ * Wait for a single watcher's first build.
+ *
+ * Two detection modes, in priority order:
+ *
+ * 1. **Process stdout signal** (`watcher.readyPromise`) — when the caller
+ *    can intercept the watcher's stdout (e.g. tailwindcss prints
+ *    "Done in NNNms", esbuild prints "build finished"), it resolves the
+ *    supplied promise on the first match. This is the correct signal
+ *    source for any tool with idempotent skip-write — the watcher can
+ *    report "rebuilt" without touching the output file.
+ *
+ * 2. **Output file mtime** (`watcher.output`) — falls back to polling
+ *    `mtimeMs ≥ since` when no readyPromise is supplied. Works for
+ *    watchers that always rewrite on first invocation.
+ *
+ * Returns true if either signal arrives within `timeoutMs`, false on timeout.
  */
 export async function waitForFirstBuild(watcher, since, timeoutMs, sleepMs = 100) {
+  if (watcher.readyPromise) {
+    const timeout = new Promise((r) => setTimeout(() => r("__timeout__"), timeoutMs));
+    const result = await Promise.race([watcher.readyPromise.then(() => "__ready__"), timeout]);
+    return result === "__ready__";
+  }
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     try {
