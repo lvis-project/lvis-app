@@ -159,6 +159,10 @@ describe("SettingsDialog (smoke)", () => {
     await waitFor(() => {
       expect(api.onSettingsUpdated).toHaveBeenCalled();
     });
+    const saveButton = await screen.findByRole("button", { name: "저장" });
+    await waitFor(() => {
+      expect(saveButton).toBeEnabled();
+    });
     const onSettingsUpdated = api.onSettingsUpdated.mock.calls[0][0] as (settings: unknown) => void;
     onSettingsUpdated({
       ...(baseSettings as object),
@@ -171,7 +175,7 @@ describe("SettingsDialog (smoke)", () => {
     // slice). LlmTab still has a TabSaveBar Save button after the PR #780
     // UX overhaul — ChatTab went fully immediate-apply, so the original
     // initialTab="chat" no longer has a Save button to click.
-    fireEvent.click(screen.getByRole("button", { name: "저장" }));
+    fireEvent.click(saveButton);
 
     await waitFor(() => {
       expect(api.updateSettings).toHaveBeenCalled();
