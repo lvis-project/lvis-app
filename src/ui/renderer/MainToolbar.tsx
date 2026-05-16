@@ -11,12 +11,13 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/too
  *   available    → "↓ v0.1.5" pill, click starts the user-gated download
  *   downloading  → spinner + percent, click is disabled
  *   downloaded   → "v0.1.5 적용" pill (success tint), click → quit & install
+ *
+ * Type is re-exported (not redeclared) from the cross-process SoT in
+ * `src/shared/update-state.ts` so main / preload / renderer / this UI
+ * stay in lockstep when a new variant is ever added.
  */
-export type AppUpdateBadgeState =
-  | { kind: "idle" }
-  | { kind: "available"; version: string }
-  | { kind: "downloading"; version: string; percent: number }
-  | { kind: "downloaded"; version: string };
+import type { UpdateState } from "../../shared/update-state.js";
+export type AppUpdateBadgeState = UpdateState;
 
 /**
  * Dev mode 감지 — preload (`src/preload.ts`) 가 `window.__lvisDevMode` 를
