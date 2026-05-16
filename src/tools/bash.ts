@@ -34,6 +34,7 @@ import {
   validateShellCommandPathPolicy,
   validateShellWorkingDirectory,
 } from "./shell-path-policy.js";
+import { getSandboxRunner } from "../permissions/sandbox-runner.js";
 
 export const BashToolInputSchema = z.object({
   command: z.string().min(1).describe("Shell command to execute"),
@@ -118,7 +119,27 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
       return { output: commandPathViolation, isError: true };
     }
 
-    return await spawnWithTimeout(input.command, resolvedCwd, input.timeoutSeconds); // Uses shared shell resolver
+    // §691 PR-A2: SandboxRunner spawn path (first consumer of SandboxedProcess).
+    // If a runner is registered for the current platform (Linux bwrap via PR-A2,
+    // macOS/Win via PR-A3), delegate spawn to it. The sandboxed process exposes
+    // stdout/stderr as WHATWG ReadableStream<Uint8Array>; we pipe through
+    // TextDecoderStream for UTF-8 string capture (CJK multi-byte boundary safe).
+    //
+    // MEDIUM-2: Gated on LVIS_SANDBOX_ENABLED=1. Default off until PR-A4 R-2
+    // wires the policy hook and enables always-on. This prevents bwrap from
+    // breaking all Linux users before the full policy rollout.
+    // TODO(PR-A4 R-2): remove the env-gate and make sandbox always-on.
+    //
+    // If no runner is registered or sandbox is not enabled (isolation=none per D8),
+    // fall through to the existing spawnWithTimeout path unchanged — R-1 composition
+    // rule + reviewer judgment remain the safety net.
+    const sandboxRunner = getSandboxRunner(process.platform as NodeJS.Platform);
+    const sandboxEnabled = process.env["LVIS_SANDBOX_ENABLED"] === "1";
+    if (sandboxRunner && sandboxEnabled) {
+      return await spawnWithSandbox(sandboxRunner, input.command, resolvedCwd, input.timeoutSeconds);
+    }
+
+    return await spawnWithTimeout(input.command, resolvedCwd, input.timeoutSeconds); // isolation=none path
   }
 }
 
@@ -143,6 +164,127 @@ interface SpawnResult {
   output: string;
   isError: boolean;
   metadata: Record<string, unknown>;
+}
+
+/**
+ * Execute a shell command via the registered {@link SandboxRunner} for the
+ * current platform (PR-A2: Linux bwrap; PR-A3: macOS/Windows).
+ *
+ * The command is run as `bash -c <command>` inside the sandbox. stdout and
+ * stderr are merged into a single string output (matching the behaviour of
+ * {@link spawnWithTimeout}) via TextDecoderStream UTF-8 decoding.
+ *
+ * Timeout: after `timeoutSeconds` the process is aborted via `proc.abort()`
+ * (SIGTERM to bwrap wrapper, which propagates into the namespace).
+ *
+ * The sandboxed process is given a conservative capability set:
+ *   - `networkBlocked: true` — no outbound egress (D1 verified-kernel)
+ *   - `fsReadPaths: ["/etc", "/usr"]` — minimal read mounts
+ *   - `fsWritePaths: [resolvedCwd]` — write access only to the working dir
+ *   - `processIsolated: true` — separate PID namespace
+ *
+ * Policy notes:
+ *   - Network policy will be refined by R-2 hook in PR-A4.
+ *   - fsReadPaths will be extended based on tool analysis in PR-A3.
+ *   - The cwd bind is the only write path — tools that need broader write
+ *     access must request it via the capability system (future R-3).
+ *
+ * @internal — only exported for testing.
+ */
+export async function spawnWithSandbox(
+  runner: import("../permissions/sandbox-runner.js").SandboxRunner,
+  command: string,
+  resolvedCwd: string,
+  timeoutSeconds: number,
+): Promise<SpawnResult> {
+  const shell = resolveShell();
+  // Pass only string-valued env entries (SandboxRunner env type is Record<string,string>).
+  // CRITICAL-1: runner uses --clearenv + --setenv so only these entries enter the sandbox.
+  const safeEnv = Object.fromEntries(
+    Object.entries(shellEnvForChild(shell, buildSafeChildEnv())).filter(
+      (entry): entry is [string, string] => typeof entry[1] === "string",
+    ),
+  );
+
+  const proc = await runner.spawn(
+    shell.cmd,
+    shell.shellArgs(command),
+    {
+      networkBlocked: true,
+      // MEDIUM-3: /lib /lib64 /bin /sbin are now provided by the runner's base
+      // whitelist. Caller still specifies /etc /usr + HOME for shell/locale/git.
+      fsReadPaths: [
+        "/etc",
+        "/usr",
+        process.env["HOME"] ?? "/home",
+      ],
+      fsWritePaths: [resolvedCwd],
+      processIsolated: true,
+    },
+    // CRITICAL-2: pass cwd so the runner applies --chdir inside the namespace.
+    { env: safeEnv, cwd: resolvedCwd },
+  );
+
+  const chunks: string[] = [];
+
+  // HIGH-2: per-stream TextDecoder instance — a single shared decoder would
+  // corrupt multi-byte CJK sequences when stdout and stderr are drained
+  // concurrently because TextDecoder is stateful (stream: true mode buffers
+  // incomplete byte sequences across calls).
+  async function drainStream(stream: ReadableStream<Uint8Array>): Promise<void> {
+    const decoder = new TextDecoder("utf-8");
+    const reader = stream.getReader();
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(decoder.decode(value, { stream: true }));
+      }
+      // Flush any remaining bytes held by the decoder.
+      const flushed = decoder.decode(undefined, { stream: false });
+      if (flushed) chunks.push(flushed);
+    } finally {
+      reader.releaseLock();
+    }
+  }
+
+  let timedOut = false;
+  let code: number | undefined;
+
+  const timeoutHandle = setTimeout(async () => {
+    timedOut = true;
+    await proc.abort();
+  }, timeoutSeconds * 1000);
+
+  try {
+    // Drain stdout and stderr concurrently, then wait for exit.
+    await Promise.all([drainStream(proc.stdout), drainStream(proc.stderr)]);
+    code = await proc.exitCode;
+  } catch (err) {
+    // HIGH-1: signal kill or spawn error — preserve the error message for
+    // diagnostic parity with spawnWithTimeout's "spawn failed: …" path.
+    code = undefined;
+    chunks.push(`\nspawn failed: ${(err as Error).message}`);
+  } finally {
+    clearTimeout(timeoutHandle);
+  }
+
+  const combined = chunks.join("");
+  const formatted = formatOutput(combined);
+
+  if (timedOut) {
+    return {
+      output: formatTimeoutOutput(formatted, command, timeoutSeconds),
+      isError: true,
+      metadata: { returncode: code ?? null, timedOut: true, sandboxed: true },
+    };
+  }
+
+  return {
+    output: formatted,
+    isError: code !== 0,
+    metadata: { returncode: code ?? null, sandboxed: true },
+  };
 }
 
 async function spawnWithTimeout(

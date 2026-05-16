@@ -58,26 +58,47 @@ export interface SandboxCapability {
 }
 
 /**
+ * MAJOR-1 SOT fix: active capability cache. Set by {@link setActiveSandboxCapability}
+ * which is called from sandbox-runner.ts after a runner is registered with its
+ * detection result. Avoids circular import (sandbox-runner already imports from
+ * this module as `import type`; we expose a setter here so the dependency stays
+ * one-directional at the value level).
+ */
+let _activeCapability: SandboxCapability | undefined;
+
+/**
+ * Store the active sandbox capability after boot-time runner registration.
+ * Called by sandbox-runner.ts → registerSandboxRunner when a detection result
+ * is provided. Subsequent calls to detectSandboxCapability return this value.
+ *
+ * @internal — only sandbox-runner.ts and tests should call this.
+ */
+export function setActiveSandboxCapability(cap: SandboxCapability): void {
+  _activeCapability = cap;
+}
+
+/**
+ * Reset the active capability cache. Used by test teardown.
+ * @internal
+ */
+export function __resetActiveSandboxCapabilityForTest(): void {
+  _activeCapability = undefined;
+}
+
+/**
  * Detect the OS execution sandbox available to spawned shell commands.
  *
- * Current implementation: returns `kind: "none", confidence: "verified"`
- * unconditionally. The platform field captures the host OS so audit
- * records remain replayable, and the reason string is stable for tests.
+ * MAJOR-1 fix: returns the capability stored by {@link setActiveSandboxCapability}
+ * when a runner has been registered at boot with its detection result. Falls back
+ * to kind="none" only when no runner is registered (isolation=none per D8).
  *
- * Future plumbing points (single-place edits, no fallback paths):
- *   - Linux  : `which bwrap` + check `bwrap --version` exit code
- *              → `kind: "bubblewrap", confidence: "verified"`
- *   - macOS  : `which sandbox-exec` (always present on darwin)
- *              → `kind: "sandbox-exec", confidence: "verified"`
- *              (still gated on host policy actually using it)
- *   - Windows: `appcontainer` requires UWP-style packaging; mostly N/A
- *              for an Electron desktop app, so this stays `none` even
- *              after Linux/macOS land.
- *
- * Detection is pure / sync — no filesystem touch — so every caller can
- * invoke this once per dispatch without ceremony.
+ * This is the single SOT the reviewer and UI consult — all callers automatically
+ * see the correct kind after BwrapRunner registration without re-probing the OS.
  */
 export function detectSandboxCapability(): SandboxCapability {
+  if (_activeCapability) {
+    return _activeCapability;
+  }
   return {
     kind: "none",
     confidence: "verified",
