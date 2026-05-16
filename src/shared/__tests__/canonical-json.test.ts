@@ -36,9 +36,17 @@ describe("canonicalStringify", () => {
     expect(canonicalStringify(false)).toBe("false");
   });
 
-  it("serialises arrays identically to JSON.stringify (no key sorting)", () => {
+  it("serialises arrays of primitives identically to JSON.stringify (element order preserved)", () => {
     const arr = [3, 1, 2];
     expect(canonicalStringify(arr)).toBe(JSON.stringify(arr));
+  });
+
+  it("recursively canonicalizes nested objects within arrays (RFC 8785 JCS — #828)", () => {
+    expect(canonicalStringify([{ b: 2, a: 1 }])).toBe('[{"a":1,"b":2}]');
+    expect(canonicalStringify([{ a: 1, b: 2 }])).toBe('[{"a":1,"b":2}]');
+    expect(canonicalStringify({ items: [{ z: 9, a: 1 }, { y: 2, b: 8 }] })).toBe(
+      '{"items":[{"a":1,"z":9},{"b":8,"y":2}]}',
+    );
   });
 
   it("handles nested objects with undefined values", () => {
