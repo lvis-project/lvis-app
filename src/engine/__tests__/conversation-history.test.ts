@@ -7,6 +7,16 @@
  */
 import { describe, expect, it } from "vitest";
 import { ConversationHistory } from "../conversation-history.js";
+import type { GenericMessage } from "../llm/types.js";
+
+function withoutRuntimeMeta(messages: ReadonlyArray<GenericMessage>) {
+  return messages.map((message) => {
+    const { meta, ...rest } = message;
+    if (!meta) return rest;
+    const { createdAt: _createdAt, turnSummary: _turnSummary, ...stableMeta } = meta;
+    return Object.keys(stableMeta).length > 0 ? { ...rest, meta: stableMeta } : rest;
+  });
+}
 
 describe("ConversationHistory.getCapacityRemaining", () => {
   it("returns the full cap for an empty history", () => {
@@ -56,7 +66,7 @@ describe("ConversationHistory tool-call invariant", () => {
     h.append({ role: "assistant", content: "answer" });
     h.append({ role: "user", content: "next" });
 
-    expect(h.getMessages()).toEqual([
+    expect(withoutRuntimeMeta(h.getMessages())).toEqual([
       { role: "assistant", content: "answer" },
       { role: "user", content: "next" },
     ]);
@@ -122,7 +132,7 @@ describe("ConversationHistory tool-call invariant", () => {
       ],
     });
 
-    expect(h.getMessages()).toEqual([
+    expect(withoutRuntimeMeta(h.getMessages())).toEqual([
       { role: "user", content: "older" },
       { role: "assistant", content: "older answer" },
       {
@@ -142,7 +152,7 @@ describe("ConversationHistory tool-call invariant", () => {
       content: "A",
     });
 
-    expect(h.getMessages()).toEqual([
+    expect(withoutRuntimeMeta(h.getMessages())).toEqual([
       { role: "assistant", content: "older answer" },
       {
         role: "assistant",
