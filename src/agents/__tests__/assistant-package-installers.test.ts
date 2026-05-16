@@ -1,4 +1,8 @@
 import AdmZip from "adm-zip";
+import { mkdtempSync, rmSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import { installAgentPackageFromMarketplace } from "../agent-installer.js";
@@ -53,6 +57,100 @@ function makeStore(buffer: Buffer): PluginArtifactStore & {
 }
 
 describe("assistant package installers", () => {
+  it("end-to-end: installs an agent package and records the marketplace registry entry", async () => {
+    const tmp = mkdtempSync(join(tmpdir(), "lvis-agent-package-"));
+    try {
+      const store = makeStore(zipBuffer({
+        "plugin.json": JSON.stringify({ id: "reviewer", version: "1.0.0" }),
+        "AGENTS.md": "---\nname: reviewer\n---\nDo reviewer work.\n",
+      }));
+      const registryPath = join(tmp, "agents.json");
+
+      const result = await installAgentPackageFromMarketplace("reviewer", {
+        fetcher: makeFetcher("agent"),
+        store,
+        registryPath,
+      });
+
+      expect(result).toEqual({
+        agentId: "reviewer",
+        slug: "reviewer",
+        version: "1.0.0",
+        installed: true,
+      });
+      expect(store.extractZip).toHaveBeenCalledWith("reviewer", expect.any(Buffer));
+      expect(store.writeInstallReceipt).toHaveBeenCalledWith(
+        "reviewer",
+        expect.objectContaining({
+          version: "1.0.0",
+          installSource: "marketplace",
+          artifactSha256: "abc123",
+          signerKeyId: "test-key",
+        }),
+      );
+      const registry = JSON.parse(await readFile(registryPath, "utf-8")) as {
+        agents: Array<{ id: string; source: string; enabled: boolean; profilePath: string; manifestPath: string }>;
+      };
+      expect(registry.agents).toHaveLength(1);
+      expect(registry.agents[0]).toMatchObject({
+        id: "reviewer",
+        source: "marketplace",
+        enabled: true,
+        profilePath: "/tmp/lvis-package/AGENTS.md",
+        manifestPath: "/tmp/lvis-package/plugin.json",
+      });
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("end-to-end: installs a skill package and records the marketplace registry entry", async () => {
+    const tmp = mkdtempSync(join(tmpdir(), "lvis-skill-package-"));
+    try {
+      const store = makeStore(zipBuffer({
+        "plugin.json": JSON.stringify({ id: "audit", version: "1.0.0" }),
+        "SKILL.md": "---\nname: audit\n---\nUse audit checks.\n",
+      }));
+      const registryPath = join(tmp, "skills.json");
+
+      const result = await installSkillPackageFromMarketplace("audit", {
+        fetcher: makeFetcher("skill"),
+        store,
+        registryPath,
+      });
+
+      expect(result).toEqual({
+        skillId: "audit",
+        slug: "audit",
+        version: "1.0.0",
+        installed: true,
+      });
+      expect(store.extractZip).toHaveBeenCalledWith("audit", expect.any(Buffer));
+      expect(store.writeInstallReceipt).toHaveBeenCalledWith(
+        "audit",
+        expect.objectContaining({
+          version: "1.0.0",
+          installSource: "marketplace",
+          artifactSha256: "abc123",
+          signerKeyId: "test-key",
+        }),
+      );
+      const registry = JSON.parse(await readFile(registryPath, "utf-8")) as {
+        skills: Array<{ id: string; source: string; enabled: boolean; skillPath: string; manifestPath: string }>;
+      };
+      expect(registry.skills).toHaveLength(1);
+      expect(registry.skills[0]).toMatchObject({
+        id: "audit",
+        source: "marketplace",
+        enabled: true,
+        skillPath: "/tmp/lvis-package/SKILL.md",
+        manifestPath: "/tmp/lvis-package/plugin.json",
+      });
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it("rejects an empty agent profile before extracting the package", async () => {
     const store = makeStore(zipBuffer({
       "plugin.json": "{}",

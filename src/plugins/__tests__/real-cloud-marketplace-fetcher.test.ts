@@ -148,6 +148,71 @@ describe("RealCloudMarketplaceFetcher (public-network path)", () => {
     ]);
   });
 
+  it("listPlugins() preserves MCP OAuth runtime and login metadata from the server", async () => {
+    mockedFetchPublic.mockResolvedValueOnce(
+      jsonResponse({
+        plugins: [
+          {
+            id: 2,
+            slug: "remote-docs",
+            display_name: "Remote Docs MCP",
+            description: "OAuth protected MCP server.",
+            latest_stable_version: "1.0.0",
+            plugin_type: "mcp",
+            runtime: {
+              transport: "http",
+              url: "https://mcp.example.com/mcp",
+              auth: "oauth",
+              oauth: {
+                resource: "https://mcp.example.com/mcp",
+                resourceMetadataUrl: "https://mcp.example.com/.well-known/oauth-protected-resource/mcp",
+                authorizationServers: ["https://auth.example.com"],
+                scopes: ["docs:read"],
+                clientRegistration: "client-id-metadata-document",
+              },
+            },
+            mcp_auth: {
+              mode: "oauth",
+              transport: "http",
+              resource: "https://mcp.example.com/mcp",
+              resourceMetadataUrl: "https://mcp.example.com/.well-known/oauth-protected-resource/mcp",
+              authorizationServers: ["https://auth.example.com"],
+              scopes: ["docs:read"],
+            },
+          },
+        ],
+      }),
+    );
+
+    const fetcher = new RealCloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com/",
+    });
+    const plugins = await fetcher.listPlugins();
+
+    expect(plugins).toHaveLength(1);
+    expect(plugins[0].pluginType).toBe("mcp");
+    expect(plugins[0].mcpRuntime).toEqual({
+      transport: "http",
+      url: "https://mcp.example.com/mcp",
+      auth: "oauth",
+      oauth: {
+        resource: "https://mcp.example.com/mcp",
+        resourceMetadataUrl: "https://mcp.example.com/.well-known/oauth-protected-resource/mcp",
+        authorizationServers: ["https://auth.example.com"],
+        scopes: ["docs:read"],
+        clientRegistration: "client-id-metadata-document",
+      },
+    });
+    expect(plugins[0].mcpAuth).toEqual({
+      mode: "oauth",
+      transport: "http",
+      resource: "https://mcp.example.com/mcp",
+      resourceMetadataUrl: "https://mcp.example.com/.well-known/oauth-protected-resource/mcp",
+      authorizationServers: ["https://auth.example.com"],
+      scopes: ["docs:read"],
+    });
+  });
+
   it("getPluginDetail() returns null on 404", async () => {
     mockedFetchPublic.mockResolvedValueOnce(
       jsonResponse({ error: "not found" }, { status: 404, ok: false }),
