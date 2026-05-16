@@ -735,8 +735,8 @@ function centerAuthWindowOnScreen(authWindow: BrowserWindow): void {
  * cache, indexedDB, HTTP cache, auth cache, and the WebStorage stack.
  * Used after a plugin's user-triggered sign-out so that subsequent
  * `openAuthWindow` calls against the same partition cannot silently SSO
- * via residual IdP cookies (`.lge.com`, `.microsoft.com`, etc.) the host
- * Chromium still holds. Without this, plugin "sign out" only clears the
+ * via residual IdP cookies the host Chromium still holds. Without this,
+ * plugin "sign out" only clears the
  * plugin's in-memory + on-disk shadow state; the partition keeps the
  * federated session alive and re-login proceeds with no challenge.
  *
