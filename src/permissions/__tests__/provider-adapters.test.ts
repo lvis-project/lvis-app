@@ -893,8 +893,11 @@ describe("REVIEWER_VENDOR_MAP (MEDIUM-3 — prototype pollution closed)", () => 
     expect(REVIEWER_VENDOR_MAP["openai"]).toBe("openai");
     expect(REVIEWER_VENDOR_MAP["anthropic"]).toBe("claude");
     expect(REVIEWER_VENDOR_MAP["google"]).toBe("gemini");
-    expect(REVIEWER_VENDOR_MAP["azure-foundry"]).toBe("azure-foundry");
-    expect(REVIEWER_VENDOR_MAP["gemini"]).toBe("gemini");
+    // "azure-foundry" and "gemini" are intentionally absent from REVIEWER_VENDOR_MAP
+    // after #771 (10e07e2a): foundry / gcp-playground are handled by dedicated
+    // branches in provider-adapters.ts before the map lookup is reached.
+    expect(REVIEWER_VENDOR_MAP["azure-foundry"]).toBeUndefined();
+    expect(REVIEWER_VENDOR_MAP["gemini"]).toBeUndefined();
   });
 });
 
