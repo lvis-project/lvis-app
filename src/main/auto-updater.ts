@@ -135,13 +135,17 @@ export function createAutoUpdater(deps: AutoUpdaterDeps): {
       // previously-detected available update across reconnects).
     });
     u.on("download-progress", (p) => {
-      // Only emit if we actually started a user-gated download. Defensive:
-      // electron-updater can technically emit progress in other flows.
-      const v =
-        lastState.kind === "downloading" || lastState.kind === "available"
-          ? (lastState as { version: string }).version
-          : "";
-      broadcast({ kind: "downloading", version: v, percent: Math.round(p.percent) });
+      // Only emit progress when we actually expect a user-gated download
+      // to be in flight. If `lastState` is something else, electron-updater
+      // is generating a spurious event (e.g., delta probe, blockmap fetch)
+      // and we MUST NOT broadcast — otherwise the badge tooltip would
+      // render "v 다운로드 중 — N%" with an empty version string (the
+      // exact MAJOR finding from PR #876 review).
+      if (lastState.kind !== "downloading" && lastState.kind !== "available") {
+        return;
+      }
+      const version = (lastState as { version: string }).version;
+      broadcast({ kind: "downloading", version, percent: Math.round(p.percent) });
     });
     u.on("update-downloaded", (info) => {
       log.info("update-downloaded: v%s", info.version);
@@ -175,9 +179,11 @@ export function createAutoUpdater(deps: AutoUpdaterDeps): {
     if (lastState.kind !== "available") {
       return { ok: false, reason: `not-available (state=${lastState.kind})` };
     }
+    log.info("user-initiated download for v%s", lastState.version);
     // Promote state immediately so the badge flips to "다운로드 중…" even
     // before electron-updater emits the first progress event.
-    broadcast({ kind: "downloading", version: lastState.version, percent: 0 });
+    const version = lastState.version;
+    broadcast({ kind: "downloading", version, percent: 0 });
     try {
       await u.downloadUpdate();
       return { ok: true };
@@ -185,7 +191,7 @@ export function createAutoUpdater(deps: AutoUpdaterDeps): {
       log.warn("downloadUpdate failed: %s", (err as Error).message);
       // Revert badge to "available" so the user can retry instead of being
       // stuck on a spinning "downloading…" state with no progress events.
-      broadcast({ kind: "available", version: lastState.version });
+      broadcast({ kind: "available", version });
       return { ok: false, reason: (err as Error).message };
     }
   };
@@ -196,9 +202,11 @@ export function createAutoUpdater(deps: AutoUpdaterDeps): {
     if (lastState.kind !== "downloaded") {
       return { ok: false, reason: `not-downloaded (state=${lastState.kind})` };
     }
+    log.info("user-initiated install for v%s", lastState.version);
     try {
       // Fires quit-and-install on the next tick. The renderer is responsible
-      // for confirming with the user before calling this.
+      // for confirming with the user before calling this — see
+      // useAppUpdate.install() which window.confirm()s first.
       setImmediate(() => {
         try { u.quitAndInstall(); } catch (err) {
           log.warn("quitAndInstall failed: %s", (err as Error).message);
@@ -236,10 +244,13 @@ export function createAutoUpdater(deps: AutoUpdaterDeps): {
     ipc.handle("lvis:update:get-state", onGetState);
   };
   const unregisterIpc = () => {
+    // Always clear the flag, even if loadIpcMain returns null — otherwise
+    // a future start() would skip re-registration because the gate would
+    // stay stuck on `true`.
     if (!ipcRegistered) return;
+    ipcRegistered = false;
     const ipc = loadIpcMain();
     if (!ipc) return;
-    ipcRegistered = false;
     ipc.removeHandler("lvis:update:download-now");
     ipc.removeHandler("lvis:update:install-now");
     ipc.removeHandler("lvis:update:get-state");
