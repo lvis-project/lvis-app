@@ -159,6 +159,15 @@ export interface ApprovalRequest {
    */
   sensitivePathPattern?: string | null;
   /**
+   * R-2 R4: Cache key for approval record/lookup symmetry.
+   * Propagated from executor's approvalCacheKeyFor() result so the
+   * renderer can record and look up entries using the same key that
+   * dispatchReviewer uses. Without this field the renderer receives
+   * undefined and the record key mismatches the lookup key → R-2 hit
+   * rate 0% for tools like schedule_routine / bash / fs_write.
+   */
+  approvalCacheKey?: string;
+  /**
    * §D2: Confused-deputy defense — random nonce bound to this request.
    * The renderer MUST echo this value back unchanged in the
    * {@link ApprovalDecision}. Paired with {@link hmac} for integrity.
