@@ -60,6 +60,10 @@ export const PERMISSIONS = {
   auditVerify: "lvis:permissions:audit-verify",
   hookTrustList: "lvis:permissions:hook-trust-list",
   manifestViolation: "lvis:permissions:manifest-violation",
+  // R-2 user-approval store (PR-A4)
+  userApprovalRecord: "lvis:permissions:user-approval-record",
+  userApprovalRevoke: "lvis:permissions:user-approval-revoke",
+  userApprovalList: "lvis:permissions:user-approval-list",
 } as const;
 
 export const SETTINGS = {
