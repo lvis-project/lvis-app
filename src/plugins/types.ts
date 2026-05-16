@@ -534,6 +534,12 @@ export interface PluginMarketplaceItem {
   uiCallable?: string[];
   auth?: PluginAuthSpec;
   emittedEvents?: string[];
+  /**
+   * Mirrors `PluginManifest.notificationEvents` so marketplace cards can
+   * render the same field. See PluginManifest JSDoc above for semantics.
+   * `bypassFocusGate` (#843) on marketplace items is informational only;
+   * the runtime contract is enforced by the manifest field at install time.
+   */
   notificationEvents?: Array<{
     event: string;
     titleField?: string;
