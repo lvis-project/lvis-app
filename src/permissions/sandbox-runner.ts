@@ -47,11 +47,16 @@ export interface SandboxCapabilityDescriptor {
  * termination result. `abort()` requests graceful shutdown followed by
  * SIGKILL if the process does not exit within an implementation-defined
  * grace period (PR-A2/A3 will document the exact timeout).
+ *
+ * `stdout`/`stderr` are Web Streams (`ReadableStream<Uint8Array>`) following
+ * the Fetch/WHATWG convention. PR-A2/A3 consumers pipe through
+ * `TextDecoderStream` to obtain UTF-8 string chunks; this handles multi-byte
+ * CJK split-chunk boundaries correctly.
  */
 export interface SandboxedProcess {
   pid: number;
-  stdout: ReadableStream<string>;
-  stderr: ReadableStream<string>;
+  stdout: ReadableStream<Uint8Array>;
+  stderr: ReadableStream<Uint8Array>;
   exitCode: Promise<number>;
   abort(): Promise<void>;
 }
@@ -112,7 +117,15 @@ export interface SandboxRunner {
 // ─── Registry ─────────────────────────────────────────────────────────────────
 
 /**
- * Boot-time registry keyed by `NodeJS.Platform`.
+ * Registry key: either a `NodeJS.Platform` value (per-OS runners registered
+ * by PR-A2/A3) or the literal `"mcp"` for the cross-platform MCP spawn path
+ * (D9 commitment). Using `"mcp"` here makes the D9 slot type-system enforced
+ * rather than a docstring-only convention.
+ */
+export type SandboxRunnerKey = NodeJS.Platform | "mcp";
+
+/**
+ * Boot-time registry keyed by {@link SandboxRunnerKey}.
  *
  * Per-OS PR-A2/A3 will call {@link registerSandboxRunner} during the
  * boot sequence (§4.2 step 3). The MCP spawn path (D9) registers under
@@ -124,27 +137,27 @@ export interface SandboxRunner {
  * in the same process. Tests MUST call {@link __resetSandboxRunnersForTest}
  * in `afterEach` to avoid cross-test pollution.
  */
-const runners = new Map<NodeJS.Platform, SandboxRunner>();
+const runners = new Map<SandboxRunnerKey, SandboxRunner>();
 
 /**
- * Register a sandbox runner for the given platform. Called once per
- * runner at boot (PR-A2/A3). Subsequent registrations for the same
- * platform overwrite the previous entry — this enables test injection.
+ * Register a sandbox runner for the given platform or MCP slot. Called once
+ * per runner at boot (PR-A2/A3). Subsequent registrations for the same key
+ * overwrite the previous entry — this enables test injection.
  */
 export function registerSandboxRunner(
-  platform: NodeJS.Platform,
+  platform: SandboxRunnerKey,
   runner: SandboxRunner,
 ): void {
   runners.set(platform, runner);
 }
 
 /**
- * Retrieve the registered runner for the given platform.
+ * Retrieve the registered runner for the given platform or MCP slot.
  * Returns `undefined` when no runner has been registered (i.e. PR-A2/A3
  * have not run yet, or the host OS has no supported runner).
  */
 export function getSandboxRunner(
-  platform: NodeJS.Platform,
+  platform: SandboxRunnerKey,
 ): SandboxRunner | undefined {
   return runners.get(platform);
 }

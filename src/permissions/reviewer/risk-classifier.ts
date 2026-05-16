@@ -121,9 +121,13 @@ export class DisabledRiskClassifier implements RiskClassifier {
  * → treat as weak context. The LLM composition rule then prevents
  * the LLM from downgrading a rule-based MEDIUM/HIGH verdict to LOW.
  *
- * PR-A4 will replace this with an LLM-side intent classifier backed by
- * the user-approval-store. This v1 version is intentionally conservative
- * and cheap (no LLM call).
+ * KNOWN GAP: Korean CJK utterances like "확인해"/"실행해" (3 chars) are
+ * legitimate intent but flagged as weak by this length threshold.
+ * PR-A4 will replace this with an LLM-side intent classifier using
+ * grapheme cluster count + entropy. Conservative bias is correct for
+ * v1 — defaults to no-downgrade when uncertain.
+ *
+ * This v1 version is intentionally conservative and cheap (no LLM call).
  */
 export function isContextMissingIntent(input: ToolInvocationContext): boolean {
   return (
@@ -630,11 +634,7 @@ export class LlmRiskClassifier implements RiskClassifier {
     const weakSandbox = isWeakSandbox(input.sandboxCapability);
     const weakContext = isContextMissingIntent(input);
     if (weakSandbox || weakContext) {
-      const LEVEL_RANK_LOCAL: Record<string, number> = { low: 0, medium: 1, high: 2 };
-      if (
-        LEVEL_RANK_LOCAL[llmVerdict.level] < LEVEL_RANK_LOCAL[ruleVerdict.level]
-        && ruleVerdict.level !== "low"
-      ) {
+      if (LEVEL_RANK[llmVerdict.level] < LEVEL_RANK[ruleVerdict.level]) {
         // LLM attempted to downgrade — honour the rule verdict.
         return ruleVerdict;
       }

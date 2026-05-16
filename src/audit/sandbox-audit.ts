@@ -149,6 +149,8 @@ export function buildSandboxAuditEntry(params: {
 }): SandboxAuditEntry {
   return {
     timestamp: new Date().toISOString(),
-    ...params,
+    tool: params.tool,
+    sandbox: params.sandbox,
+    reviewer: params.reviewer,
   };
 }

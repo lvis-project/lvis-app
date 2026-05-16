@@ -6,7 +6,7 @@
  * Tests the audit entry shape and builder function.
  * Actual sink (audit.log append) lands in PR-A4.
  */
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect } from "vitest";
 import { buildSandboxAuditEntry, type SandboxAuditEntry } from "../sandbox-audit.js";
 
 const VALID_TOOL: SandboxAuditEntry["tool"] = {
