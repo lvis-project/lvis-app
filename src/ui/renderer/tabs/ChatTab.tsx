@@ -1,3 +1,4 @@
+import { useCallback } from "react";
 import { PrivacyTab } from "./PrivacyTab.js";
 import { Checkbox } from "../../../components/ui/checkbox.js";
 import { Label } from "../../../components/ui/label.js";
@@ -27,6 +28,13 @@ export function ChatTab({
   onPiiRedactToggle,
   onImmediateChange,
 }: ChatTabProps) {
+  // Memoize the wrapped onToggle so PrivacyTab receives a stable identity
+  // across re-renders — if PrivacyTab ever memoizes via React.memo / props
+  // comparison, an inline arrow would defeat it.
+  const handlePiiRedactToggle = useCallback(() => {
+    onPiiRedactToggle();
+    onImmediateChange?.();
+  }, [onPiiRedactToggle, onImmediateChange]);
   return (
     <div className="space-y-4 pt-4">
       <div className="space-y-2">
@@ -99,10 +107,7 @@ export function ChatTab({
         </div>
         <PrivacyTab
           piiRedactEnabled={piiRedactEnabled}
-          onToggle={() => {
-            onPiiRedactToggle();
-            onImmediateChange?.();
-          }}
+          onToggle={handlePiiRedactToggle}
         />
       </section>
     </div>
