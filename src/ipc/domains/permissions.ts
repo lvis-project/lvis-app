@@ -21,6 +21,11 @@ import {
   REVIEWER_PROVIDERS_SET,
   type ReviewerProvider,
 } from "../../permissions/permission-settings-store.js";
+import {
+  recordApproval,
+  revokeApprovalByKey,
+  listApprovals,
+} from "../../permissions/user-approval-store.js";
 
 function validateRulePatternInput(pattern: unknown): { ok: true; pattern: string } | { ok: false; error: string; message: string } {
   if (typeof pattern !== "string") {
@@ -464,6 +469,60 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
       return { ok: true, policy: updated };
     } catch (err) {
       return { ok: false, error: "managed", message: (err as Error).message };
+    }
+  });
+
+  // ── R-2 User-Approval Store handlers (PR-A4) ──────────────────────────
+
+  ipcMain.handle(PERMISSIONS.userApprovalRecord, async (e, payload: unknown) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, PERMISSIONS.userApprovalRecord, e); return UNAUTHORIZED_FRAME; }
+    const body = payloadRecord(payload);
+    const toolName = body.toolName;
+    const args = body.args;
+    const source = body.source;
+    const scope = body.scope;
+    const verdictAtApproval = body.verdictAtApproval;
+    const nlJustification = body.nlJustification;
+    if (
+      typeof toolName !== "string" ||
+      typeof args !== "string" ||
+      typeof source !== "string" ||
+      (scope !== "session" && scope !== "persistent") ||
+      (verdictAtApproval !== "low" && verdictAtApproval !== "medium" && verdictAtApproval !== "high")
+    ) {
+      return { ok: false, error: "invalid-payload", message: "user-approval record: invalid payload" };
+    }
+    try {
+      await recordApproval(toolName, args, source, {
+        scope,
+        verdictAtApproval,
+        nlJustification: typeof nlJustification === "string" ? nlJustification : null,
+      });
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: "managed", message: (err as Error).message };
+    }
+  });
+
+  ipcMain.handle(PERMISSIONS.userApprovalRevoke, async (e, key: unknown) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, PERMISSIONS.userApprovalRevoke, e); return UNAUTHORIZED_FRAME; }
+    if (typeof key !== "string" || key.trim().length === 0) {
+      return { ok: false, error: "invalid-key", message: "revoke: key must be a non-empty string" };
+    }
+    try {
+      await revokeApprovalByKey(key.trim());
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: "managed", message: (err as Error).message };
+    }
+  });
+
+  ipcMain.handle(PERMISSIONS.userApprovalList, async (e) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, PERMISSIONS.userApprovalList, e); return UNAUTHORIZED_FRAME; }
+    try {
+      return await listApprovals();
+    } catch {
+      return [];
     }
   });
 }
