@@ -8,7 +8,7 @@
  *     [○ TokenRing $] [? 가이드 ⌘K] [⇧⏎ 줄바꿈] [⌘⏎ 즉시(busy)]
  *
  *   actions cluster (우):
- *     [esc 취소(busy)] [↑ 전송/메시지 큐에 추가 ⏎]
+ *     [■ 취소(busy, 컴팩트 원형 stop)] [↑ 전송/메시지 큐에 추가 ⏎]
  *
  * Send 버튼 라벨은 isBusy 따라 morph: idle="전송" / busy="메시지 큐에 추가".
  *
@@ -16,6 +16,7 @@
  */
 
 import type { ReactNode } from "react";
+import { Square } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
 import type { UserKeyboardIntentSnapshot } from "../../../shared/chat-origin.js";
 
@@ -84,11 +85,11 @@ export function BottomActionRow({
             type="button"
             onClick={onCancel}
             data-testid="composer-cancel-button"
-            className="inline-flex h-7 items-center gap-1 rounded border border-destructive/30 px-3 text-[11px] text-destructive transition-colors hover:bg-destructive/10 hover:text-destructive"
+            className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-foreground text-background transition-opacity hover:opacity-80"
             title="LLM 취소 (ESC)"
-            aria-label="LLM 취소"
+            aria-label="LLM 취소 (ESC)"
           >
-            esc 취소
+            <Square className="h-2.5 w-2.5 fill-current" strokeWidth={0} />
           </button>
         )}
         <Button
