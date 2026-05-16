@@ -229,8 +229,6 @@ export function SettingsContent({
               setFallbackOpen={s.setFallbackOpen}
               onSaved={onSaved}
               onImmediateChange={llmSave.schedule}
-            />
-            <TabSaveBar
               onSave={() => {
                 llmSave.cancel();
                 void s.save("llm");
