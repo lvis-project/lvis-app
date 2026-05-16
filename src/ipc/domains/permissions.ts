@@ -17,6 +17,10 @@ import type {
   PermissionReviewerCommand,
   PermissionRulesCommand,
 } from "../../permissions/permission-slash.js";
+import {
+  REVIEWER_PROVIDERS_SET,
+  type ReviewerProvider,
+} from "../../permissions/permission-settings-store.js";
 
 function validateRulePatternInput(pattern: unknown): { ok: true; pattern: string } | { ok: false; error: string; message: string } {
   if (typeof pattern !== "string") {
@@ -227,9 +231,21 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
   // Used by the renderer settings UI to determine which reviewer providers
   // are activatable (key-driven dynamic activation). Read-only, but gated
   // to prevent a foreign frame from probing which LLM API keys are present.
-  ipcMain.handle(PERMISSIONS.reviewerProviderHasKey, async (e, provider: string) => {
+  //
+  // MAJOR-4: returns UNAUTHORIZED_FRAME (sibling handler parity) instead of
+  // bare `false` on validateSender failure. Bare `false` is indistinguishable
+  // from "key not present", masking the security rejection from the caller.
+  //
+  // MEDIUM-3: input allowlist — only the five known reviewer provider strings
+  // are accepted; anything else short-circuits before touching the secret store.
+  // Minor-3: REVIEWER_PROVIDERS_SET imported from permission-settings-store (single SOT).
+  ipcMain.handle(PERMISSIONS.reviewerProviderHasKey, async (e, provider: unknown) => {
     if (!validateSender(e)) {
       auditUnauthorized(auditLogger, PERMISSIONS.reviewerProviderHasKey, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    // MEDIUM-3: reject unknown provider names before touching the secret store.
+    if (typeof provider !== "string" || !REVIEWER_PROVIDERS_SET.has(provider as ReviewerProvider)) {
       return false;
     }
     const { reviewerProviderKeyPresent } = await import(
@@ -239,7 +255,8 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
       provider,
       (key) => deps.settingsService.getSecret(key),
       // Foundry endpoint lives in the plain settings (not encrypted).
-      () => deps.settingsService.get("llm").vendors["azure-foundry"]?.baseUrl ?? null,
+      // Minor-2: vendors may be undefined — use optional chain to avoid TypeError.
+      () => deps.settingsService.get("llm").vendors?.["azure-foundry"]?.baseUrl ?? null,
     );
   });
 
