@@ -47,10 +47,21 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     }
     // MAJOR-2: detect baseUrl change before patching so cacheScope.endpoint refreshes.
     const prevBaseUrl = settingsService.get("llm").vendors?.["azure-foundry"]?.baseUrl ?? null;
+    // PR #795 follow-up: the MarketplaceTab "즉시 적용" badge on the SSRF-bypass
+    // toggle promised next-request activation, but the marketplace fetcher was
+    // capturing the flag at boot only. Detect a change here and call the boot
+    // closure that pushes the new value into the live fetcher instance.
+    const prevAllowPrivate =
+      settingsService.get("marketplace").realCloudAllowPrivateNetwork ?? false;
     const result = await settingsService.patch(partial);
     const newBaseUrl = settingsService.get("llm").vendors?.["azure-foundry"]?.baseUrl ?? null;
+    const newAllowPrivate =
+      settingsService.get("marketplace").realCloudAllowPrivateNetwork ?? false;
     if (prevBaseUrl !== newBaseUrl) {
       deps.rewireReviewerAgent?.();
+    }
+    if (prevAllowPrivate !== newAllowPrivate) {
+      deps.refreshMarketplaceFetcherConfig?.();
     }
     conversationLoop.refreshProvider();
     broadcastSettingsSnapshot(deps);
