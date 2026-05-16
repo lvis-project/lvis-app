@@ -1452,7 +1452,7 @@ plugin-specific app branch 를 두지 않는다.
 | Plugin categories | SDK manifest schema 의 per-tool `category/pathFields` 가 plugin tool authority SOT 이다. Host 는 SDK schema 를 그대로 검증하고, category 가 없는 plugin tool 은 hard-fail 한다. `meta` 및 향후 host-only category 는 plugin contract 로 자동 확장되지 않는다. | 추가 plugin 도입 시 SDK schema category/pathFields 선언과 plugin sanity test 를 PR merge gate 로 유지 |
 | Runtime modes | 사용자-facing 정책은 `default`(read 허용), `strict`(read 포함 전체 ask), `auto`(백그라운드 리뷰어 기반 자동 검증), `allow`(하드 차단 밖 전체 허용) 4개다. | allow mode 는 Layer 0/1/deny/overlay-trigger guard 를 우회하지 않는 opt-in 으로 유지 |
 | Permission IPC | `PERMISSIONS` 가 main / preload / sender-guard test 의 단일 channel SOT. | 새 permission channel 은 반드시 `src/shared/ipc-channels.ts` 에 먼저 추가 |
-| Reviewer | `disabled/rule/llm` 3-mode. `llm` wiring 실패는 silent downgrade 없이 fail-fast. | cost/quality telemetry 로 model default 조정 가능, fallback 은 `deny|rule` 만 |
+| Reviewer | `disabled/rule/llm/strict` 4-mode (issue #664 normalization). `disabled` 는 reviewer 레인 pass-through (LOW), `strict` 는 fail-closed (defer-all) — 둘 다 카테고리 매트릭스/허용 디렉토리는 그대로 적용. `llm` wiring 실패는 silent downgrade 없이 fail-fast. | cost/quality telemetry 로 model default 조정 가능, fallback 은 `deny|rule` 만 |
 | Deferred queue | Headless MED/HIGH verdict 는 사용자가 큐 버튼을 열 때 approve/reject, resolution 은 permission audit chain 에 기록. | §8 approval timeline 과 통합 표시 |
 | Hooks | `hooks.json` command/http executor 제거. `~/.config/lvis/hooks/{pre,post,perm}-*.sh` + strict-deny quarantine + typed trust registration 만 허용. | signed hooks follow-up 전까지 `modify` action 금지 |
 | Audit | HMAC chain + daily seal. Recent view 는 tail-scan. | key rotation / archive policy 는 follow-up |
@@ -1474,7 +1474,7 @@ flowchart TB
     L1 --> L2["Layer 2 — Action<br/>(allow / ask / deny + denyReasons[])"]
     L2 --> L3["Layer 3 — Category × Source × Mode<br/>(read/write/shell/network/meta)"]
     L3 --> L4["Layer 4 — Subscription scope<br/>(routine.scope discriminated union)"]
-    L4 --> L5["Layer 5 — Reviewer agent<br/>(headless: rule / llm / disabled)"]
+    L4 --> L5["Layer 5 — Reviewer agent<br/>(headless: rule / llm / disabled / strict)"]
     L5 --> L6["Layer 6 — Hook chain v1<br/>(deny-only, ~/.config/lvis/hooks/)"]
     L6 --> L7["Layer 7 — Audit emit<br/>(discriminated union + HMAC chain)"]
     L7 --> L8["Layer 8 — Runtime mode<br/>(/permission slash, user-keyboard gated)"]
@@ -1518,14 +1518,35 @@ hook stdin → Layer 7 audit → Layer 8 slash dispatcher.
 #### 6.3.4 — Reviewer agent (multi-vendor)
 
 Foreground auto-review 및 headless write/shell/network/read-out-of-dir 호출에 대한 risk
-classifier. 3-mode (`disabled` / `rule` / `llm`) + multi-vendor adapter
+classifier. 4-mode (`disabled` / `rule` / `llm` / `strict`) + multi-vendor adapter
 (default OpenAI gpt-4o-mini, Anthropic / Google 도 swap 가능). 항상
 rule classifier 가 baseline 으로 함께 실행되며 `final = max(rule, llm)`
 (LLM downgrade 불가). Foreground auto-review 는 LOW 만 allow + audit 하고
 MED/HIGH 는 approval modal 로 승격한다. Headless reviewer 는 LOW 만 실행하고
 MED/HIGH 는 deferred queue 에 append 되어 사용자가 큐 버튼을 열 때 surface 된다.
 
-**선택 surface:** `/permission reviewer mode disabled|rule|llm` /
+**Mode semantics (post issue #664 normalization):**
+
+- `disabled` — reviewer 레인 pass-through. 모든 dispatch 는 LOW 로 평가됨.
+  Layer 1-4 의 카테고리 × source × trust 매트릭스 + 디렉토리/sensitive-path
+  체크는 그대로 적용. 사용자가 LLM/rule-based risk 분류 자체를 끄고 싶을
+  때 선택. **Migration warning:** pre-#664 에서 `disabled` 는 "defer-all-HIGH"
+  semantic 이었고 이 의미는 `strict` 로 이전됨. settings.json 에 `mode:"disabled"`
+  를 가진 사용자는 boot-time 에 자동 `strict` 로 마이그레이션되며 warn 로그가
+  발행됨.
+- `rule` — deterministic 36-rule heuristic. LLM 호출 없음.
+- `llm` — multi-vendor LLM classifier + rule composition (`final = max(rule, llm)`).
+- `strict` — fail-closed. 모든 dispatch 는 HIGH 로 평가되어 deferred queue 로
+  routing 됨. Pre-#664 의 `disabled` semantic 과 동일하지만 honest name. 사용자가
+  모든 headless plugin/MCP 변경을 직접 승인하고 싶은 hardened deployments 용.
+
+**Sandbox-write self-attestation (issue #664 P1):** plugin manifest 의
+`toolSchemas[*].writesToOwnSandbox?: boolean` 필드를 통해 plugin 이
+"내 sandbox 안에만 write 한다" 고 선언할 수 있다. runtime 은 path field
+값이 실제로 `~/.lvis/plugins/<pluginId>/` 안에 있는지 검증한 뒤 LOW 로
+auto-resolve. 검증 실패 시 일반 write 규칙으로 폴백 (sound-by-construction).
+
+**선택 surface:** `/permission reviewer mode disabled|rule|llm|strict` /
 `/permission reviewer model <name>` / `/permission reviewer provider
 openai|anthropic|google`. 변경은 settings.json 에 persist + selective
 verdict-cache invalidation.
