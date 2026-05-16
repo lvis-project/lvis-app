@@ -699,13 +699,92 @@ function tryParseVerdict(text: string): RiskVerdict | null {
 
 export type FallbackOnError = "deny" | "rule";
 
+/**
+ * Retry policy for the LLM provider call inside `classify()`. Transient
+ * failures (network blip, rate limit, 5xx) are retried with exponential
+ * back-off + jitter; deterministic failures (parse error, abort, 4xx
+ * client errors) are NOT retried. Defaults are chosen so the user-visible
+ * worst-case latency (~1s for 3 attempts at 250ms / 500ms with jitter)
+ * stays well under the approval modal's perceptual threshold while still
+ * absorbing a single transient flap.
+ *
+ * Issue: #865 — before this wiring, every provider failure went straight
+ * to `fallbackOnError`, so users saw spurious "denied" verdicts on any
+ * network glitch even when a retry would have succeeded.
+ */
+export interface LlmReviewerRetryConfig {
+  /** Total attempts including the first try. 1 = no retry. Clamped >= 1. */
+  maxAttempts: number;
+  /** Initial delay before the FIRST retry (ms). Doubles each attempt. */
+  baseDelayMs: number;
+  /** Jitter % applied to each delay (0-100). 25 → ±25% multiplicative. */
+  jitterPct: number;
+}
+
+export const DEFAULT_REVIEWER_RETRY: LlmReviewerRetryConfig = {
+  maxAttempts: 3,
+  baseDelayMs: 250,
+  jitterPct: 25,
+};
+
 export interface LlmRiskClassifierTelemetry {
   onCall?(stats: {
     tokensIn: number;
     tokensOut: number;
     costUsd: number;
     parseFailed: boolean;
+    /** Total LLM provider invocations including retries. 1 = success on first try. */
+    attempts?: number;
   }): void;
+}
+
+/**
+ * Sleep that resolves early when the abort signal fires. Returns whether
+ * the sleep completed normally (true) or was aborted (false). Used so a
+ * user-cancel during a retry back-off does not block the cancel UX behind
+ * the remaining sleep window.
+ */
+async function abortableSleep(ms: number, signal?: AbortSignal): Promise<boolean> {
+  if (ms <= 0) return true;
+  if (signal?.aborted) return false;
+  return new Promise<boolean>((resolve) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve(true);
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve(false);
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+/**
+ * Classify a provider error as transient (worth retrying) vs terminal.
+ * Terminal: abort (user cancel), 4xx-client (other than rate limit), parse
+ * issues (those are handled separately, never reach this). Transient: 5xx,
+ * 429 rate limit, network/timeout flap, AggregateError, unknown error
+ * shapes (conservative: prefer to retry rather than fail fast when we don't
+ * know — bounded by maxAttempts).
+ */
+function isTransientReviewerError(err: unknown): boolean {
+  if (err instanceof Error) {
+    if (err.name === "AbortError") return false;
+    const msg = err.message.toLowerCase();
+    if (msg.includes("aborted")) return false;
+    if (msg.includes("429") || msg.includes("rate limit") || msg.includes("rate-limit")) return true;
+    if (/\b5\d{2}\b/.test(msg)) return true; // 5xx
+    if (msg.includes("etimedout") || msg.includes("econnreset") || msg.includes("enotfound") ||
+        msg.includes("econnrefused") || msg.includes("network") || msg.includes("fetch failed") ||
+        msg.includes("timeout") || msg.includes("socket")) {
+      return true;
+    }
+    // Explicit 4xx (not 429) → terminal
+    if (/\b4\d{2}\b/.test(msg)) return false;
+  }
+  // Conservative default: retry. maxAttempts bounds the blast.
+  return true;
 }
 
 export class LlmRiskClassifier implements RiskClassifier {
@@ -716,7 +795,54 @@ export class LlmRiskClassifier implements RiskClassifier {
     private readonly model: string,
     private readonly fallbackOnError: FallbackOnError = "deny",
     private readonly telemetry: LlmRiskClassifierTelemetry = {},
+    private readonly retry: LlmReviewerRetryConfig = DEFAULT_REVIEWER_RETRY,
   ) {}
+
+  /**
+   * Run `provider.complete()` with bounded retry on transient errors.
+   * Returns the attempt count on success so telemetry can record it. Throws
+   * the LAST error on exhaustion or on the first terminal error. Honors
+   * `abortSignal` at every sleep boundary so user-cancel is not blocked.
+   */
+  private async runProviderWithRetry(
+    userPrompt: string,
+    abortSignal: AbortSignal | undefined,
+  ): Promise<{ completion: Awaited<ReturnType<LlmReviewerProvider["complete"]>>; attempts: number }> {
+    const maxAttempts = Math.max(1, this.retry.maxAttempts);
+    let lastErr: unknown = new Error("unreachable");
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      // Note: deliberately do NOT short-circuit on `abortSignal.aborted`
+      // before calling complete(). The provider is the canonical owner of
+      // abort handling and tests rely on the provider seeing the signal
+      // even when it was already-aborted at entry — preserves the
+      // pre-#865 contract.
+      try {
+        const completion = await this.provider.complete({
+          model: this.model,
+          systemPrompt: PERMISSION_REVIEWER_SYSTEM_PROMPT,
+          userPrompt,
+          abortSignal,
+        });
+        return { completion, attempts: attempt };
+      } catch (err) {
+        lastErr = err;
+        if (attempt >= maxAttempts) break;
+        if (!isTransientReviewerError(err)) break;
+        // Exponential back-off with multiplicative jitter (±jitterPct).
+        // Only the SLEEP between retries is signal-aware — if the user
+        // cancels during back-off we honour it immediately rather than
+        // making them wait out the remaining window.
+        const base = this.retry.baseDelayMs * Math.pow(2, attempt - 1);
+        const jitter = 1 + ((Math.random() * 2 - 1) * this.retry.jitterPct) / 100;
+        const delay = Math.max(0, Math.round(base * jitter));
+        const completed = await abortableSleep(delay, abortSignal);
+        if (!completed) {
+          throw new Error("aborted");
+        }
+      }
+    }
+    throw lastErr;
+  }
 
   // MEDIUM-2: accepts optional abortSignal so callers (dispatchReviewer,
   // interactive approval flow) can cancel an in-flight LLM call when the
@@ -733,18 +859,17 @@ export class LlmRiskClassifier implements RiskClassifier {
     let llmVerdict: RiskVerdict;
     try {
       const userPrompt = buildUserPrompt(input);
-      const completion = await this.provider.complete({
-        model: this.model,
-        systemPrompt: PERMISSION_REVIEWER_SYSTEM_PROMPT,
+      const { completion, attempts } = await this.runProviderWithRetry(
         userPrompt,
-        abortSignal: opts?.abortSignal,
-      });
+        opts?.abortSignal,
+      );
       const parsed = tryParseVerdict(completion.text);
       this.telemetry.onCall?.({
         tokensIn: completion.tokensIn,
         tokensOut: completion.tokensOut,
         costUsd: completion.costUsd,
         parseFailed: parsed === null,
+        attempts,
       });
       if (parsed === null) {
         // Parse failure → fallbackOnError policy
@@ -755,7 +880,8 @@ export class LlmRiskClassifier implements RiskClassifier {
       }
       llmVerdict = parsed;
     } catch (err) {
-      // Any provider error → fallbackOnError policy
+      // Any provider error (after retry exhaustion or terminal-classified)
+      // → fallbackOnError policy. attempts unknown here; telemetry records 0.
       this.telemetry.onCall?.({ tokensIn: 0, tokensOut: 0, costUsd: 0, parseFailed: true });
       if (this.fallbackOnError === "deny") {
         const msg = (err as Error).message?.slice(0, 60) ?? "error";
