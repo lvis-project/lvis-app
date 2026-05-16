@@ -3,8 +3,10 @@
  *
  * Win/Linux: renders a 36 px drag band with Minimize / Maximize / Close
  *            buttons in the trailing corner.
- * macOS:     renders a 28 px drag-only band so traffic lights (OS-drawn) have
- *            enough vertical room. No buttons are shown.
+ * macOS:     renders a 36 px drag-only band — matches Win/Linux height so the
+ *            top chrome looks consistent across platforms, and gives the
+ *            OS-drawn traffic lights ((36-12)/2 = 12 px) breathing room above
+ *            and below. No buttons are shown.
  *
  * Platform detection uses `window.lvisPlatform.isDarwin` (set by preload)
  * rather than a UA sniff — throw if the bridge is absent so misconfigurations
@@ -125,7 +127,7 @@ export function CustomTitleBar() {
       <div
         data-testid="custom-titlebar-darwin"
         style={{
-          height: 28,
+          height: 36,
           // @ts-expect-error — Electron-specific CSS extension
           WebkitAppRegion: "drag",
           flexShrink: 0,

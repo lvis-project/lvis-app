@@ -250,7 +250,9 @@ export async function openLinkWindow(
     autoHideMenuBar: true,
     frame: process.platform !== "darwin" ? false : undefined,
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "hidden",
-    trafficLightPosition: process.platform === "darwin" ? { x: 14, y: 14 } : undefined,
+    // Centers 12px traffic lights in the 36px .titlebar-mac strip emitted by
+    // window-titlebar-shell.ts: y = (36 - 12) / 2 = 12.
+    trafficLightPosition: process.platform === "darwin" ? { x: 14, y: 12 } : undefined,
     webPreferences: {
       /* Shell loads a `data:` URL that hosts a sandboxed `<webview>` for
          the external content. The webviewTag flag enables the embedded
