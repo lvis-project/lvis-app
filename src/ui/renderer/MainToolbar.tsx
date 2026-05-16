@@ -48,6 +48,10 @@ export interface MainToolbarProps {
   onOpenDevTools?: () => void;
   /** Latest app-update state from the main process. */
   appUpdateState?: AppUpdateBadgeState;
+  /** When true, the user-initiated download/install IPC is in flight —
+   *  disables the badge to prevent rapid double-clicks during the IPC
+   *  round-trip window. */
+  appUpdateInFlight?: boolean;
   /** Triggered when the badge is in "available" state and clicked. */
   onDownloadAppUpdate?: () => void | Promise<void>;
   /** Triggered when the badge is in "downloaded" state and clicked. */
@@ -71,6 +75,7 @@ export function MainToolbar({
   onOpenDetachedView,
   onOpenDevTools,
   appUpdateState = { kind: "idle" },
+  appUpdateInFlight = false,
   onDownloadAppUpdate,
   onInstallAppUpdate,
 }: MainToolbarProps) {
@@ -102,6 +107,7 @@ export function MainToolbar({
             background fetch (사용자 명시 클릭 전엔 절대 다운로드 금지). */}
         <AppUpdateBadge
           state={appUpdateState}
+          inFlight={appUpdateInFlight}
           onDownload={onDownloadAppUpdate}
           onInstall={onInstallAppUpdate}
         />
@@ -260,10 +266,15 @@ export function MainToolbar({
  */
 function AppUpdateBadge({
   state,
+  inFlight = false,
   onDownload,
   onInstall,
 }: {
   state: AppUpdateBadgeState;
+  /** When true, an IPC action (download/install) is in flight — disables
+   *  the button to prevent rapid double-click during the round-trip
+   *  window before the main process broadcasts the next state. */
+  inFlight?: boolean;
   onDownload?: () => void | Promise<void>;
   onInstall?: () => void | Promise<void>;
 }) {
@@ -276,8 +287,9 @@ function AppUpdateBadge({
           <Button
             variant="ghost"
             size="sm"
-            className="h-7 gap-1 px-2 text-[11px] font-medium text-info border border-info/40 bg-info/10 hover:bg-info/20"
+            className="h-7 gap-1 px-2 text-[11px] font-medium text-info border border-info/40 bg-info/10 hover:bg-info/20 disabled:opacity-60"
             onClick={() => void onDownload?.()}
+            disabled={inFlight}
             title={`새 버전 v${state.version} 사용 가능 — 클릭해서 다운로드`}
             aria-label={`업데이트 다운로드 (v${state.version})`}
             data-testid="app-update-badge-available"
@@ -320,8 +332,9 @@ function AppUpdateBadge({
         <Button
           variant="ghost"
           size="sm"
-          className="h-7 gap-1 px-2 text-[11px] font-medium text-success border border-success/40 bg-success/10 hover:bg-success/20"
+          className="h-7 gap-1 px-2 text-[11px] font-medium text-success border border-success/40 bg-success/10 hover:bg-success/20 disabled:opacity-60"
           onClick={() => void onInstall?.()}
+          disabled={inFlight}
           title={`v${state.version} 다운로드 완료 — 클릭해서 재시작 적용`}
           aria-label={`업데이트 적용 (v${state.version})`}
           data-testid="app-update-badge-downloaded"
