@@ -28,18 +28,21 @@ import { createLogger } from "../lib/logger.js";
 import { stripMarkdown } from "../shared/strip-markdown.js";
 const log = createLogger("lvis");
 
-export type NotificationKind = "turn-end" | "routine" | "ask-user" | "approval";
+export type NotificationKind = "turn-end" | "routine" | "ask-user" | "approval" | "plugin";
 
 /**
  * Closed enumeration of valid `NotificationKind` values. Exported so IPC
  * handlers can validate untrusted renderer payloads without re-listing the
- * 4 kinds inline.
+ * kinds inline. `plugin` was added in #841 when manifest-driven plugin
+ * notifications were routed through this service to inherit cooldown,
+ * truncation, sanitization, click-restore, and structured audit.
  */
 export const NOTIFICATION_KINDS: ReadonlySet<NotificationKind> = new Set([
   "turn-end",
   "routine",
   "ask-user",
   "approval",
+  "plugin",
 ]);
 
 export interface NotificationContextRef {
@@ -57,6 +60,16 @@ export interface FireOptions {
   contextRef?: NotificationContextRef;
   /** Approval defaults true; rest default false. */
   urgent?: boolean;
+  /**
+   * #843 — opt out of the focus-suppression gate. When true, the OS
+   * notification fires regardless of focus state (critical surfaces like
+   * `meeting.starting-soon` / `approval.deadline-imminent` / `incident.page`).
+   * Defaults false. Routed through from `plugin.json` manifest's
+   * `notificationEvents[i].bypassFocusGate`. Independent of `urgent` —
+   * a critical notification can be focus-bypassed without being marked urgent
+   * (silent: !urgent still applies).
+   */
+  bypassFocusGate?: boolean;
 }
 
 /**
@@ -86,6 +99,7 @@ const ELLIPSIS = "…";
  *   - approval : 2 s  (coalesce micro-bursts only)
  *   - routine  : 0    (rare — always fire)
  *   - ask-user : 0    (rare — user expects every one)
+ *   - plugin   : 5 s  (#841 — protects against runaway plugin emit loops)
  *
  * In-memory only — cooldown resets on app restart by design
  * (cross-restart persistence is overkill for an anti-spam gate).
@@ -95,6 +109,12 @@ const COOLDOWN_MS_BY_KIND: Record<NotificationKind, number> = {
   approval: 2_000,
   routine: 0,
   "ask-user": 0,
+  // #841 — plugin notifications inherit a 5s cooldown. Lower than turn-end
+  // because plugin events span many distinct surfaces (meeting/work-proactive
+  // /agent-hub etc.) and a per-kind cooldown that's too aggressive would
+  // coalesce legitimate independent alerts. Still tight enough to defang a
+  // buggy plugin emitting 30 events/sec from blasting toasts.
+  plugin: 5_000,
 };
 
 /**
@@ -146,6 +166,15 @@ export interface NotificationServiceOptions {
    * Test override of NODE_ENV check. Default: read process.env.NODE_ENV.
    */
   isTestEnv?: () => boolean;
+  /**
+   * #842 — focus detection across ALL LVIS-owned BrowserWindows (settings,
+   * auth-window, link-window, auth-partition-viewer, detached children).
+   * The pre-fix gate only consulted `mainWindow.isFocused()`, so an active
+   * settings window would still trigger an OS pop. Defaults to a live
+   * `BrowserWindow.getAllWindows().some(w => !w.isDestroyed() && w.isFocused())`
+   * scan; tests override to avoid loading Electron.
+   */
+  isAnyWindowFocused?: () => boolean;
 }
 
 /**
@@ -210,12 +239,33 @@ function defaultIsReady(): boolean {
   }
 }
 
+/**
+ * #842 — default multi-window focus probe. Scans every LVIS-owned
+ * `BrowserWindow` (main + settings + auth + link + detached children) so
+ * "user is actively working in some LVIS window" is detected even when
+ * the main window is blurred. `isDestroyed()` filtered out to avoid
+ * touching a window that's already being torn down. Wrapped in try/catch
+ * so callers without Electron loaded (tests) fall back to "no focus".
+ */
+function defaultIsAnyWindowFocused(): boolean {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { BrowserWindow } = require("electron") as typeof import("electron");
+    return BrowserWindow.getAllWindows().some(
+      (w) => !w.isDestroyed() && w.isFocused(),
+    );
+  } catch {
+    return false;
+  }
+}
+
 export class NotificationService {
   private readonly getMainWindow: () => BrowserWindow | null;
   private readonly auditLogger?: AuditLogger;
   private readonly notificationFactory: NonNullable<NotificationServiceOptions["notificationFactory"]>;
   private readonly isReady: () => boolean;
   private readonly isTestEnv: () => boolean;
+  private readonly isAnyWindowFocused: () => boolean;
   /**
    * Per-kind last-fire monotonic timestamps (performance.now() ms). Using a
    * monotonic clock (immune to NTP steps and manual clock changes) means a
@@ -231,6 +281,7 @@ export class NotificationService {
     this.notificationFactory = opts.notificationFactory ?? defaultNotificationFactory;
     this.isReady = opts.isReady ?? defaultIsReady;
     this.isTestEnv = opts.isTestEnv ?? defaultIsTestEnv;
+    this.isAnyWindowFocused = opts.isAnyWindowFocused ?? defaultIsAnyWindowFocused;
   }
 
   fire(opts: FireOptions): void {
@@ -274,12 +325,17 @@ export class NotificationService {
     const truncatedPlainBody = truncateBody(stripMarkdown(opts.body));
     const urgent = opts.urgent ?? (opts.kind === "approval");
 
+    // #842 — focus gate consults EVERY LVIS-owned window. The pre-fix path
+    // checked `win.isFocused()` only, missing detached/aux windows (settings,
+    // auth, link). #843 — `bypassFocusGate` forces the OS path regardless of
+    // any focused window (critical surfaces like meeting.starting-soon).
     const win = this.getMainWindow();
-    const winFocused =
-      win !== null && !win.isDestroyed() && win.isFocused() && !win.isMinimized();
-    const gate: "os" | "in-app" = winFocused ? "in-app" : "os";
+    const mainAlive = win !== null && !win.isDestroyed() && !win.isMinimized();
+    const anyFocused = this.isAnyWindowFocused();
+    const focusGateActive = !opts.bypassFocusGate && mainAlive && anyFocused;
+    const gate: "os" | "in-app" = focusGateActive ? "in-app" : "os";
 
-    if (winFocused && win) {
+    if (focusGateActive && win) {
       const payload: ToastPayload = {
         kind: opts.kind,
         title: cleanTitle,
