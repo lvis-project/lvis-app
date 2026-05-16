@@ -43,7 +43,7 @@ export interface PluginTelemetryEvent {
   v: 1;
   /** Event type. No payload content, no PII. */
   name: PluginTelemetryEventName;
-  /** Plugin slug (e.g. "com.lge.meeting-recorder"). */
+  /** Plugin slug (e.g. "com.example.plugin"). */
   slug: string;
   /** Plugin semver (e.g. "1.2.3"). */
   version: string;

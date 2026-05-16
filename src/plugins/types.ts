@@ -154,7 +154,7 @@ export interface EventSubscription {
 
 
 export interface PluginManifest {
-  /** 플러그인 고유 식별자. 도트(`.`) 형식 권장: `com.lge.meeting-recorder`. */
+  /** 플러그인 고유 식별자. 도트(`.`) 형식 권장: `com.example.meeting-recorder`. */
   id: string;
   name: string;
   version: string;

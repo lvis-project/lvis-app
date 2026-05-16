@@ -57,7 +57,7 @@
 ### Phase 2 (후속)
 - 로컬 임베딩: BAAI/bge-m3 (8K context, MIT, AutoRAG Kor 0.6754)
 - 서버 Index Engine 실연결 (§13.2 Elasticsearch + Milvus/Qdrant)
-- Lgenie/Ollama LLM 경로
+- 로컬/Ollama LLM 경로
 - Rust 재작성 검토
 
 ---
@@ -65,7 +65,7 @@
 ## 3. 통합 디렉터리 구조
 
 ```
-사원 PC
+사용자 PC
 ├── /Applications/LVIS.app                           # Electron 번들 (서명됨)
 │   └── Contents/
 │       ├── Resources/
@@ -461,7 +461,7 @@ Day 5 ──── Phase 1 끝
 
 | 위험 | 심각도 | 완화 |
 |---|---|---|
-| 느린 기업망 첫 부팅 3-6분 | High | 진행률 UI, runtime.offlineBundle 옵션, 사내 PyPI mirror (Phase 1.5) |
+| 느린 네트워크 첫 부팅 3-6분 | High | 진행률 UI, runtime.offlineBundle 옵션, enterprise PyPI mirror (Phase 1.5) |
 | kiwipiepy wheel 누락 플랫폼 | Medium | `pip download --platform` 5종 선제 검증 |
 | OpenAI 임베딩 장애 | High | indexer.pause, FTS5만 동작, degraded 배너 |
 | FTS5 corruption | Medium | WAL + integrity_check, indexState.ndjson 재구성 |
@@ -480,8 +480,8 @@ Day 5 ──── Phase 1 끝
 |---|---|---|
 | LightRAG KG 검색 | race condition 리스크 | Phase 1.5 |
 | BAAI/bge-m3 로컬 임베딩 | OpenAI 우선 검증 | Phase 2 |
-| Lgenie/Ollama LLM | 사용자 지시 | Phase 2 |
-| 사내 ES/Milvus 실연결 | API 미제공 | 후속 |
+| 로컬/Ollama LLM | 사용자 지시 | Phase 2 |
+| enterprise ES/Milvus 실연결 | API 미제공 | 후속 |
 | PPTX/XLSX 이미지 OCR | markitdown 텍스트만 | Phase 2 Vision |
 | FTS5 multi-language | 한국어 우선 | 추후 |
 | 플러그인 자동 업데이트 | Marketplace 수동 | Phase 2 |
@@ -552,8 +552,8 @@ Day 5 ──── Phase 1 끝
 |------|------|------------|
 | LightRAG KG 검색 | race condition 리스크 (#1968) | Phase 1 통합 테스트 7건 green + 평균 문서 < 3K + OpenAI 예산 승인 |
 | BAAI/bge-m3 로컬 임베딩 | OpenAI 우선 검증 | Phase 2 |
-| Lgenie/Ollama LLM | 사용자 지시 | Phase 2 |
-| 사내 ES/Milvus 실연결 | API 명세 미제공 | 후속 라운드 |
+| 로컬/Ollama LLM | 사용자 지시 | Phase 2 |
+| enterprise ES/Milvus 실연결 | API 명세 미제공 | 후속 라운드 |
 | PPTX/XLSX 이미지 OCR | markitdown 텍스트만 | Phase 2 Vision |
 
 ### 다음 단계

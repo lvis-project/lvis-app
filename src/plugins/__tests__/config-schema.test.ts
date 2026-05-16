@@ -265,7 +265,7 @@ describe("US-B1 regression — baseline manifest WITHOUT configSchema still vali
     // manifests — no configSchema, but heavy use of toolSchemas and
     // capabilities. Must keep loading without modification (DoD §4).
     const ok = validate({
-      id: "com.lge.meeting-recorder",
+      id: "com.example.meeting-recorder",
       name: "회의록 녹음",
       version: "1.3.0",
       description: "Test fixture.",

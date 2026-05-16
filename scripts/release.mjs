@@ -69,7 +69,7 @@ async function checkDevPublisherKey() {
   if (!arrayRefsDev) return;
   const msg =
     "[release] SECURITY: BUNDLED_PUBLISHER_PUBLIC_KEYS still contains DEVELOPMENT_PUBLISHER_PUBLIC_KEY_PEM.\n" +
-    "         Replace it with the production LGE publisher key before shipping.\n" +
+    "         Replace it with the production publisher key before shipping.\n" +
     "         Re-run with --allow-dev-key only for internal dev snapshots.";
   if (IS_CI && !ALLOW_DEV_KEY) {
     console.error(msg);

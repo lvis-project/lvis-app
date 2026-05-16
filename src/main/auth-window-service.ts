@@ -9,7 +9,7 @@
  *  - 호스트가 브라우저 창 lifecycle을 소유 — 플러그인은 `ipcMain`/`BrowserWindow`에
  *    직접 접근하지 않는다 (§4.5 IPC 스코프 원칙).
  *  - 완료 조건(URL 패턴)과 쿠키 호스트 화이트리스트는 플러그인이 호출 시 전달 —
- *    호스트는 LGE-specific 정보를 알지 못한다 (§1 원칙 "NO plugin-specific code in host").
+ *    호스트는 plugin-specific 정보를 알지 못한다 (§1 원칙 "NO plugin-specific code in host").
  */
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";

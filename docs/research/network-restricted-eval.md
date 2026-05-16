@@ -307,7 +307,7 @@ Rejected options (for record):
 - E2E tests (full reviewer): public endpoint (httpbin.org) for realism + CI simplicity
 
 Rejected options (for record):
-- Internal LGE corp endpoint: requires corp VPN in CI, slower feedback on endpoint unreachable
+- Internal corp endpoint: requires corp VPN in CI, slower feedback on endpoint unreachable
 
 **Owner**: Infrastructure (httpbin.org reliability SLA) + test team (local fixture server setup)
 

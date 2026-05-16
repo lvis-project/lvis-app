@@ -3,10 +3,10 @@
  *
  * Covers:
  *  - applyBundleToDocument() writes data-theme-bundle + data-shell + class
- *  - resolveSystemPair() returns lge-light/lge-dark based on matchMedia
+ *  - resolveSystemPair() returns violet-light/violet-dark based on matchMedia
  *  - <ThemeProvider> hydrates bundleId from settings (v2 shape)
  *  - setBundle persists + updates DOM
- *  - followSystem toggle (LGE pair) persists + tracks OS scheme
+ *  - followSystem toggle (violet pair) persists + tracks OS scheme
  *  - bundleToPluginTokens() returns correct token map
  *  - useTheme outside provider throws
  *  - useOptionalTheme returns null without provider
@@ -53,24 +53,24 @@ describe("applyBundleToDocument", () => {
   });
 
   it("sets data-shell=light for light bundles", () => {
-    applyBundleToDocument(findBundle("lge-light")!);
+    applyBundleToDocument(findBundle("violet-light")!);
     expect(document.documentElement.getAttribute("data-shell")).toBe("light");
   });
 });
 
 describe("resolveSystemPair", () => {
-  it("returns lge-light when prefers-color-scheme: light matches", () => {
+  it("returns violet-light when prefers-color-scheme: light matches", () => {
     const win = { matchMedia: () => ({ matches: true } as MediaQueryList) } as unknown as Window;
-    expect(resolveSystemPair(win)).toBe("lge-light");
+    expect(resolveSystemPair(win)).toBe("violet-light");
   });
 
-  it("returns lge-dark when prefers-color-scheme: light does not match", () => {
+  it("returns violet-dark when prefers-color-scheme: light does not match", () => {
     const win = { matchMedia: () => ({ matches: false } as MediaQueryList) } as unknown as Window;
-    expect(resolveSystemPair(win)).toBe("lge-dark");
+    expect(resolveSystemPair(win)).toBe("violet-dark");
   });
 
-  it("returns lge-dark fallback when matchMedia is unavailable", () => {
-    expect(resolveSystemPair(undefined)).toBe("lge-dark");
+  it("returns violet-dark fallback when matchMedia is unavailable", () => {
+    expect(resolveSystemPair(undefined)).toBe("violet-dark");
   });
 });
 
@@ -85,8 +85,8 @@ describe("bundleToPluginTokens", () => {
     expect(tokens["--lvis-radius"]).toBe("0.6rem");
   });
 
-  it("lge-dark — primary maps to vivid purple", () => {
-    const bundle = findBundle("lge-dark")!;
+  it("violet-dark — primary maps to vivid purple", () => {
+    const bundle = findBundle("violet-dark")!;
     const tokens = bundleToPluginTokens(bundle);
     expect(tokens["--lvis-primary"]).toContain("253");  // hsl(253, 100%, 65%)
   });
@@ -305,7 +305,7 @@ describe("<ThemeProvider>", () => {
       return null;
     }
     render(
-      <ThemeProvider api={api as never} initialBundleId="lge-dark">
+      <ThemeProvider api={api as never} initialBundleId="violet-dark">
         <Capture />
       </ThemeProvider>,
     );
@@ -321,7 +321,7 @@ describe("<ThemeProvider>", () => {
     const { api } = makeMockLvisApi();
     await act(async () => {
       render(
-        <ThemeProvider api={api} initialBundleId="lge-dark">
+        <ThemeProvider api={api} initialBundleId="violet-dark">
           <div />
         </ThemeProvider>,
       );
@@ -330,7 +330,7 @@ describe("<ThemeProvider>", () => {
     const call = (api.notifyPluginTheme as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(call.tokens).toBeDefined();
     expect(typeof call.tokens["--lvis-bg"]).toBe("string");
-    expect(call.tokens["--lvis-primary"]).toContain("253");  // LGE vivid purple
+    expect(call.tokens["--lvis-primary"]).toContain("253");  // vivid purple
   });
 });
 

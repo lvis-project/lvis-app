@@ -10,7 +10,7 @@
  * 3. Local Skill Match → 플러그인 스킬 매칭
  * 4. Agent Message Routing
  * 5. Marketplace API
- * 6. Lgenie Fallback → LLM 직접 대화
+ * 6. LLM Fallback → LLM 직접 대화
  */
 import type { InputClassification } from "./keyword-engine.js";
 import type { ToolRegistry } from "../tools/registry.js";

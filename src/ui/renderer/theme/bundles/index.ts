@@ -9,8 +9,8 @@ import type { BundleId } from "../../../../shared/theme-bundles.js";
 import { tokyoNightBundle } from "./tokyo-night.js";
 import { midnightBundle } from "./midnight.js";
 import { forestBundle } from "./forest.js";
-import { lgeLightBundle } from "./lge-light.js";
-import { lgeDarkBundle } from "./lge-dark.js";
+import { violetLightBundle } from "./violet-light.js";
+import { violetDarkBundle } from "./violet-dark.js";
 import { highContrastBundle } from "./high-contrast.js";
 import { catppuccinMochaBundle } from "./catppuccin-mocha.js";
 import { catppuccinLatteBundle } from "./catppuccin-latte.js";
@@ -33,8 +33,8 @@ export const BUNDLES = [
   tokyoNightBundle,
   midnightBundle,
   forestBundle,
-  lgeLightBundle,
-  lgeDarkBundle,
+  violetLightBundle,
+  violetDarkBundle,
   catppuccinMochaBundle,
   catppuccinLatteBundle,
   nordBundle,

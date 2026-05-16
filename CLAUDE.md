@@ -148,7 +148,7 @@ LVIS host + plugin 의 모든 user-data storage 는 **`~/.lvis/<feature>/`** 디
 
 1. **NO plugin-specific code in host** — All plugin integration via HostApi self-registration
 2. **Three naming namespaces** — Plugin identifiers come in three forms with **no runtime conversion** between them:
-   - **Plugin IDs**: dot or kebab-case (`com.lge.meeting-recorder`, generic `foo-bar`)
+   - **Plugin IDs**: dot or kebab-case (`com.example.meeting-recorder`, generic `foo-bar`)
    - **LLM tool names**: underscore-only (`foo_bar_open`) — declared in this form in the manifest
    - **Plugin event names**: `${manifest.id}.<verb>.<noun>` using the literal manifest id, **no `_`↔`-` normalization**. A plugin with id `foo-bar` (dash) emits `foo-bar.auth.changed`, **not** `foo_bar.auth.changed` (underscore mirroring its tool prefix). Host hooks (`usePluginAuthStatuses`) subscribe via the literal id; tool-prefix mirroring is a real regression class (load-time soft warn enforced by `manifest-validation.ts` cross-field check: `auth` declared ⇒ `${id}.auth.changed ∈ emittedEvents[]`). See `architecture.md §9.4a` and `docs/references/plugin-tool-schema-design.md §2.4`.
 3. **Multi-vendor LLM** — GenericMessage abstraction, never vendor-specific in core logic

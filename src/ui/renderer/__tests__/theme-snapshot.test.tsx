@@ -76,7 +76,7 @@ describe("Theme snapshots — semantic-token components are bundle-invariant", (
     expect(html).not.toMatch(/\btext-black\b/);
     /* Opacity-variant black/white classes — caught the original modal backdrop
        regression where `bg-black/50` looked correct in tokyo-night but became
-       invisible in forest/lge-light. The base rule (bare bg-white/bg-black)
+       invisible in forest/violet-light. The base rule (bare bg-white/bg-black)
        was already covered; this extends it to include /N variants. */
     expect(html).not.toMatch(/\bbg-(black|white)\/\d+\b/);
     expect(html).not.toMatch(/\bhover:bg-(black|white)\/\d+\b/);

@@ -65,10 +65,10 @@ describe("write → read round-trip", () => {
   it("persists and restores partition map", async () => {
     const map = new Map<string, Set<string>>([
       [
-        "com.lge.plugin",
+        "com.example.plugin",
         new Set([
-          "persist:plugin-auth:com.lge.plugin",
-          "persist:plugin-auth:com.lge.plugin:tenant",
+          "persist:plugin-auth:com.example.plugin",
+          "persist:plugin-auth:com.example.plugin:tenant",
         ]),
       ],
       ["other.plugin", new Set(["persist:plugin-auth:other.plugin"])],
@@ -78,10 +78,10 @@ describe("write → read round-trip", () => {
     const result = await readPersistedPluginAuthPartitions();
 
     expect(result).not.toBeNull();
-    expect(result!["com.lge.plugin"]).toEqual(
+    expect(result!["com.example.plugin"]).toEqual(
       expect.arrayContaining([
-        "persist:plugin-auth:com.lge.plugin",
-        "persist:plugin-auth:com.lge.plugin:tenant",
+        "persist:plugin-auth:com.example.plugin",
+        "persist:plugin-auth:com.example.plugin:tenant",
       ]),
     );
     expect(result!["other.plugin"]).toEqual(["persist:plugin-auth:other.plugin"]);
@@ -116,14 +116,14 @@ describe("deletePersistedPluginAuthPartitions", () => {
 
   it("removes only the target plugin, preserves others", async () => {
     const map = new Map([
-      ["com.lge.plugin", new Set(["persist:plugin-auth:com.lge.plugin"])],
+      ["com.example.plugin", new Set(["persist:plugin-auth:com.example.plugin"])],
       ["other.plugin", new Set(["persist:plugin-auth:other.plugin"])],
     ]);
     await writePersistedPluginAuthPartitions(map);
-    await deletePersistedPluginAuthPartitions("com.lge.plugin");
+    await deletePersistedPluginAuthPartitions("com.example.plugin");
 
     const result = await readPersistedPluginAuthPartitions();
-    expect(result!["com.lge.plugin"]).toBeUndefined();
+    expect(result!["com.example.plugin"]).toBeUndefined();
     expect(result!["other.plugin"]).toEqual(["persist:plugin-auth:other.plugin"]);
   });
 
@@ -223,7 +223,7 @@ describe("cleanupStaleTmpFiles", () => {
     // Create a valid auth file and a stale tmp file simulating a prior crash.
     await writeFile(
       authFile,
-      JSON.stringify({ partitions: { "com.lge.test": ["persist:plugin-auth:com.lge.test"] } }, null, 2) + "\n",
+      JSON.stringify({ partitions: { "com.example.plugin": ["persist:plugin-auth:com.example.plugin"] } }, null, 2) + "\n",
       { encoding: "utf8", mode: 0o600 },
     );
     await writeFile(staleTmp, "incomplete write", { encoding: "utf8", mode: 0o600 });
@@ -239,6 +239,6 @@ describe("cleanupStaleTmpFiles", () => {
 
     // The real auth file must be untouched.
     const result = await readPersistedPluginAuthPartitions();
-    expect(result!["com.lge.test"]).toEqual(["persist:plugin-auth:com.lge.test"]);
+    expect(result!["com.example.plugin"]).toEqual(["persist:plugin-auth:com.example.plugin"]);
   });
 });

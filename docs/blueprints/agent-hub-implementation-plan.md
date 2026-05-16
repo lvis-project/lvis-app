@@ -286,10 +286,10 @@ export type ApprovalChoice = "allow-once" | "allow-always" | "deny-once" | "deny
   "id": "agent-hub",
   "name": "LVIS Agent Hub",
   "version": "0.2.0",                           // 0.1.27 → 0.2.0 (UI v3 break)
-  "publisher": "LG Electronics IT",
+  "publisher": "lvis-project",
   "installPolicy": "user",
   "entry": "dist/hostPlugin.js",
-  "description": "사원 에이전트 보드 — v3 마이워크/팀보드 통합 UI, 승인 bridge, 팀 KPI, 일정 합본",
+  "description": "사용자 에이전트 보드 — v3 마이워크/팀보드 통합 UI, 승인 bridge, 팀 KPI, 일정 합본",
 
   "dependencies": [
     { "pluginId": "ms-graph", "required": true }   // calendar-list 의존이 strict 해짐
@@ -383,7 +383,7 @@ export type ApprovalChoice = "allow-once" | "allow-always" | "deny-once" | "deny
         "type": "string", "default": "",
         "pattern": "^(#[0-9a-fA-F]{6})?$",
         "title": "리스크 강조 색 override",
-        "description": "비워두면 v3 default --red (#f78166). 사내 색상 토큰 사용 시 6자리 hex"
+        "description": "비워두면 v3 default --red (#f78166). 커스텀 색상 토큰 사용 시 6자리 hex"
       }
     }
   },
@@ -528,7 +528,7 @@ export type ApprovalChoice = "allow-once" | "allow-always" | "deny-once" | "deny
     aggregatorSnapshot: AggregatorSnapshot;     // mail/meeting/calendar/routine
     myWorkBoardSnapshot: MyWorkBoardV3Result;   // 7 day 일지 + approvals 등
     maxTokens?: number;                          // configSchema.llmBriefingMaxTokens default
-    systemPromptOverride?: string;               // 사내 톤 customization 용
+    systemPromptOverride?: string;               // 톤 customization 용
   }
   ```
 - **Output.**

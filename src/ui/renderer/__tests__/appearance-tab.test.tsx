@@ -4,7 +4,7 @@
  * The tab shows one bundle card per ThemeBundle in a single grid.
  * Clicking a card sets the active bundle and writes data-theme-bundle to <html>.
  *
- * followSystem toggle is shown only when the LGE pair (lge-light / lge-dark)
+ * followSystem toggle is shown only when the violet pair (violet-light / violet-dark)
  * is selected; hidden otherwise.
  *
  * The external URL (webView) section is unchanged from v1.
@@ -70,11 +70,11 @@ describe("AppearanceTab — bundle card grid", () => {
     });
   });
 
-  it("clicking lge-dark card writes data-theme-bundle=lge-dark", async () => {
+  it("clicking violet-dark card writes data-theme-bundle=violet-dark", async () => {
     const { getByRole } = renderWithBundle("tokyo-night");
-    fireEvent.click(getByRole("radio", { name: /테마: LGE Dark/ }));
+    fireEvent.click(getByRole("radio", { name: /테마: Violet Dark/ }));
     await waitFor(() => {
-      expect(document.documentElement.getAttribute("data-theme-bundle")).toBe("lge-dark");
+      expect(document.documentElement.getAttribute("data-theme-bundle")).toBe("violet-dark");
     });
   });
 
@@ -97,23 +97,23 @@ describe("AppearanceTab — bundle card grid", () => {
   });
 });
 
-describe("AppearanceTab — followSystem toggle (LGE pair only)", () => {
-  it("followSystem toggle is hidden when a non-LGE bundle is active", () => {
+describe("AppearanceTab — followSystem toggle (violet pair only)", () => {
+  it("followSystem toggle is hidden when a non-violet bundle is active", () => {
     const { queryByTestId } = renderWithBundle("tokyo-night");
     expect(queryByTestId("follow-system-toggle")).toBeNull();
   });
 
-  it("followSystem toggle is shown when lge-light is active", async () => {
+  it("followSystem toggle is shown when violet-light is active", async () => {
     const { getByRole, getByTestId } = renderWithBundle("tokyo-night");
-    fireEvent.click(getByRole("radio", { name: /테마: LGE Light/ }));
+    fireEvent.click(getByRole("radio", { name: /테마: Violet Light/ }));
     await waitFor(() => {
       expect(getByTestId("follow-system-toggle")).toBeTruthy();
     });
   });
 
-  it("followSystem toggle is shown when lge-dark is active", async () => {
-    const { getByTestId } = renderWithBundle("lge-dark");
-    // Already on lge-dark — toggle should be visible
+  it("followSystem toggle is shown when violet-dark is active", async () => {
+    const { getByTestId } = renderWithBundle("violet-dark");
+    // Already on violet-dark — toggle should be visible
     await waitFor(() => {
       expect(getByTestId("follow-system-toggle")).toBeTruthy();
     });

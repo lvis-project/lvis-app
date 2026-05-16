@@ -29,7 +29,7 @@ interface PluginManifest {
    * 플러그인 고유 식별자. flat form 을 권장한다 —
    * 영문 소문자/숫자/`-`/`_`/`.` 허용 (`^[a-zA-Z][a-zA-Z0-9._-]*$`, 3~128자).
    * 실제 번들 플러그인(meeting / local-indexer / ms-graph) 은 모두 flat id
-   * 를 사용한다. dot-form (`com.lge.meeting-recorder`) 도 허용하지만 강제하지
+   * 를 사용한다. dot-form (`com.example.meeting-recorder`) 도 허용하지만 강제하지
    * 않는다.
    */
   id: string;
@@ -238,7 +238,7 @@ interface PluginManifest {
     { "keyword": "녹음", "skillId": "meeting" }
   ],
   "installPolicy": "user",
-  "publisher": "LG Electronics IT"
+  "publisher": "example-publisher"
 }
 ```
 
@@ -322,7 +322,7 @@ Renderer UI 는 `lvis:plugins:call` IPC 를 통해 allowlist 된 플러그인 to
 
 ### 2.4 `auth` — Plugin-Owned OAuth 의 Host UI Surface
 
-OAuth-flow 를 소유한 플러그인 (ms-graph, lge-api 등) 이 호스트 Settings UI 에 generic 미인증 / 인증됨 뱃지 + 로그인/로그아웃 버튼을 제공하기 위한 *선언적* 계약. 호스트는 OAuth 코드를 모르고, 단지 manifest 에 적힌 tool 이름을 dispatch + standardized 이벤트를 listen 한다. architecture.md §9.4a "Plugin-Owned OAuth — Host UI Surface" 와 짝.
+OAuth-flow 를 소유한 플러그인 (ms-graph, ms-graph 등) 이 호스트 Settings UI 에 generic 미인증 / 인증됨 뱃지 + 로그인/로그아웃 버튼을 제공하기 위한 *선언적* 계약. 호스트는 OAuth 코드를 모르고, 단지 manifest 에 적힌 tool 이름을 dispatch + standardized 이벤트를 listen 한다. architecture.md §9.4a "Plugin-Owned OAuth — Host UI Surface" 와 짝.
 
 **Manifest 형**
 
@@ -351,7 +351,7 @@ interface PluginAuthStatusResult {
 
 호스트 defensive parse — 추가 필드는 무시. `outputSchema` 강제 검증은 별 PR 로 toolSchemas 전체 인프라 작업 후 도입.
 
-**`<pluginId>.auth.changed` 이벤트** — 인증 전이 시 plugin 이 emit. `manifest.emittedEvents[]` 등록 필수. 호스트 `usePluginAuthStatuses` 훅이 받아 statusTool 재호출 → 뱃지 갱신. **폴링 안 함.** `lvis-plugin-ms-graph` / `lvis-plugin-lge-api` 가 PR 와 함께 emit 흐름 추가.
+**`<pluginId>.auth.changed` 이벤트** — 인증 전이 시 plugin 이 emit. `manifest.emittedEvents[]` 등록 필수. 호스트 `usePluginAuthStatuses` 훅이 받아 statusTool 재호출 → 뱃지 갱신. **폴링 안 함.** `lvis-plugin-ms-graph` / `lvis-plugin-corp-portal` 가 PR 와 함께 emit 흐름 추가.
 
 > **이름 규칙**: `<pluginId>` 는 manifest `id` 필드 literal — `_`↔`-` 정규화 없음. tool 이름 prefix (`meeting_*`, `agent_hub_*`) 와 다른 형식이라 mirror 하지 말 것. 예) `id: "foo-bar"` (dash) 인 플러그인의 auth 이벤트는 정확히 `foo-bar.auth.changed` 여야 하며, `foo_bar.auth.changed` (underscore) 는 host hook 의 strict subscribe 와 매치 안 되어 뱃지 stuck. `manifest-validation.ts` 의 cross-field check 가 `auth` 선언 시 `emittedEvents[]` 에 `${id}.auth.changed` 가 빠져있으면 load-time `log.warn` 발행 — 같은 룰이 architecture.md §9.4a 에 명시됨.
 
@@ -482,7 +482,7 @@ plugin.json
 **단계별 실제 에러 포맷:**
 
 ```
-[manifest:<unknown>] JSON parse error (Unexpected token ...). Example: {"id":"com.lge.sample",...}
+[manifest:<unknown>] JSON parse error (Unexpected token ...). Example: {"id":"com.example.sample",...}
 [manifest:meeting] schema validation failed (/path/to/plugin.json): /uiCallable/0 must match pattern "^[a-zA-Z_][a-zA-Z0-9_]*$"
 Invalid tool name 'meeting.start' in plugin 'meeting' at 'tools[0]' (/path/to/plugin.json): tool names must match ^[a-zA-Z_][a-zA-Z0-9_]*$ (start with letter/underscore, then letters/digits/underscores). Example: "tools": ["meeting_start"] (not "meeting.start")
 [plugin-runtime] managed plugin 'lvis-plugin-ms-graph' rejected — signature invalid
@@ -756,25 +756,25 @@ const suggestion = await hostApi.callLlm(
 ### openAuthWindow 상세
 
 ```typescript
-// 플러그인이 LGE 포털 쿠키를 수집하는 예
+// 플러그인이 포털 쿠키를 수집하는 예
 const cookies = await hostApi.openAuthWindow({
-  url: "http://space.lge.com/",
-  completionUrlPatterns: ["newep.lge.com/portal/main", "space.lge.com"],
-  cookieHosts: ["sso.lge.com", "newep.lge.com", "space.lge.com"],
+  url: "http://example.corp/",
+  completionUrlPatterns: ["api.example.corp/portal/main", "example.corp"],
+  cookieHosts: ["sso.example.corp", "api.example.corp", "example.corp"],
   timeoutMs: 300_000,
-  windowTitle: "LGE 포털 로그인",
+  windowTitle: "포털 로그인",
 });
 
 // 반환된 쿠키로 직접 HTTP 요청
 const jar = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
-const res = await fetch("https://newep.lge.com/api/...", { headers: { Cookie: jar } });
+const res = await fetch("https://api.example.corp/api/...", { headers: { Cookie: jar } });
 ```
 
 - Electron 내장 Chromium `BrowserWindow` + `session.cookies` API 사용 — **Selenium/webdriver 의존 제거**.
 - 사용자가 창 안에서 SSO 로그인 수행 → `completionUrlPatterns` 중 하나와 매칭되는 URL로 navigate되면 쿠키 수집 후 창 자동 close.
-- `cookieHosts`는 **도메인 suffix 매칭** (선행 점 정규화) — `evil-lge.com`이 `lge.com`에 매칭되지 않도록 엄격 비교.
+- `cookieHosts`는 **도메인 suffix 매칭** (선행 점 정규화) — `evil-example.corp`이 `example.corp`에 매칭되지 않도록 엄격 비교.
 - 타임아웃(기본 5분), 사용자 창 수동 close, `loadURL` 실패 모두 reject.
-- `persistPartition`(예: `persist:lge-auth`)을 지정하면 영구 세션 격리 — 여러 포털 간 쿠키 교차 방지.
+- `persistPartition`(예: `persist:corp-auth`)을 지정하면 영구 세션 격리 — 여러 포털 간 쿠키 교차 방지.
 - **Capability gate**: `manifest.capabilities[]` 에 `external-auth-consumer` 선언 필수. 미선언 시 호출은 `throw` 되고 AuditLogger 에 `open_auth_window_capability_denied` 레코드가 남는다.
 - 허용된 호출도 AuditLogger 에 기록되어 어떤 플러그인이 어떤 포털에 대해 쿠키를 수집했는지 추적 가능.
 - 로그/감사에는 **URL 의 origin + path 만** 기록 — SAML/OAuth 응답 URL 에 담기는 `SAMLRequest` / `code` / `state` / 세션 토큰은 민감 자산이므로 query/hash 를 제외한다.
@@ -1035,7 +1035,7 @@ export const createPlugin: RuntimePluginFactory = async (context) => {
 
 ### @lvis/plugin-sdk (현행)
 
-호스트와 활성 플러그인 (`meeting` / `local-indexer` / `ms-graph` / `lge-api` / `work-assistant` / `agent-hub`) 은 released git tag 로 고정한 `@lvis/plugin-sdk` 를 사용한다. 호스트는 SDK 패키지의 `schemas/plugin-manifest.schema.json` 을 런타임에 resolve 하며, app-local schema extension 이나 플러그인별 path alias 를 두지 않는다. SDK 태그는 manifest schema, 공개 타입, `host:overlay` capability enum 의 단일 배포 단위다.
+호스트와 활성 플러그인 (`meeting` / `local-indexer` / `ms-graph` / `corp-portal` / `work-assistant` / `agent-hub`) 은 released git tag 로 고정한 `@lvis/plugin-sdk` 를 사용한다. 호스트는 SDK 패키지의 `schemas/plugin-manifest.schema.json` 을 런타임에 resolve 하며, app-local schema extension 이나 플러그인별 path alias 를 두지 않는다. SDK 태그는 manifest schema, 공개 타입, `host:overlay` capability enum 의 단일 배포 단위다.
 
 ```jsonc
 // package.json

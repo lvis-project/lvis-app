@@ -299,8 +299,8 @@
  *    1. tokyo-night   — dark shell + blue accent
  *    2. midnight      — dark shell + magenta accent
  *    3. forest        — light shell + teal accent
- *    4. lge-light     — light shell + LG warm-grey + vivid purple
- *    5. lge-dark      — dark shell  + LG warm-grey-1 + vivid purple
+ *    4. violet-light  — light shell + warm-grey + vivid purple
+ *    5. violet-dark   — dark shell  + warm-grey-1 + vivid purple
  *    6. high-contrast — black bg + yellow primary (accessibility)
  *
  *  Token tiers:
@@ -553,8 +553,8 @@
     color-scheme: light;
   }
 
-  /* ── 4. lge-light ─ light + LG warm-grey + vivid purple + LG red ─── */
-  :root[data-theme-bundle="lge-light"] {
+  /* ── 4. violet-light ─ light + warm-grey + vivid purple ─── */
+  :root[data-theme-bundle="violet-light"] {
     --background:               40 25% 92%;    /* Grey 6  #F0ECE4 — canvas */
     --foreground:               0 0% 15%;      /* Grey 1  #262626 */
     --card:                     40 35% 96%;    /* lifted warm ivory */
@@ -569,7 +569,7 @@
     --muted-foreground:         43 8% 28%;     /* darkened for body contrast on 89% L muted */
     --accent:                   25 35% 82%;
     --accent-foreground:        0 0% 15%;
-    --destructive:              1 98% 59%;     /* #FD312E — LG red STOP */
+    --destructive:              1 98% 59%;     /* #FD312E — red STOP */
     --destructive-foreground:   0 0% 100%;
     --warning:                  35 91% 45%;
     --warning-foreground:       0 0% 5%;
@@ -609,8 +609,8 @@
     color-scheme: light;
   }
 
-  /* ── 5. lge-dark ── dark + LG warm-grey-1 + vivid purple + LG red ── */
-  :root[data-theme-bundle="lge-dark"] {
+  /* ── 5. violet-dark ── dark + warm-grey-1 + vivid purple ── */
+  :root[data-theme-bundle="violet-dark"] {
     --background:               0 0% 15%;      /* Grey 1  #262626 — canvas */
     --foreground:               44 37% 94%;    /* Grey 7  #F6F3EB */
     --card:                     30 8% 20%;     /* warm-grey lifted card */
@@ -625,7 +625,7 @@
     --muted-foreground:         40 8% 64%;
     --accent:                   30 15% 28%;
     --accent-foreground:        44 37% 94%;
-    --destructive:              1 98% 59%;     /* #FD312E — LG red STOP */
+    --destructive:              1 98% 59%;     /* #FD312E — red STOP */
     --destructive-foreground:   0 0% 100%;
     --warning:                  38 92% 62%;
     --warning-foreground:       0 0% 10%;
@@ -1329,7 +1329,7 @@
     width: 100%;
     height: 100%;
     /* `--mock-bg`/`--mock-text` are optional per-card overrides so a
-       theme with its own surface palette (e.g. LG warm-grey) shows
+       theme with its own surface palette (e.g. warm-grey) shows
        its real surface, not a generic slate-50. Falls back to slate
        defaults when not set. */
     background: var(--mock-bg, hsl(var(--p-slate-50)));

@@ -140,7 +140,7 @@ All decisions below are **required** before the build epic can start.
 
 ### E-D2 — Fixture Endpoint Hosting
 
-- [ ] Option: internal LGE corp endpoint
+- [ ] Option: internal corp endpoint
 - [x] ~~Option: public (httpbin.org) (**RECOMMENDED**)~~
 - [x] ~~Option: local (127.0.0.1:9999) for unit only~~
 

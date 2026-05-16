@@ -1,6 +1,6 @@
 # LVIS Project Documentation
 
-**Lvis (LG Virtual Intelligence Secretary)**
+**Lvis (Local Versatile Intelligent System)**
 AI 프론티어 생산성 향상 엔터프라이즈 매니지먼트 시스템
 
 이 디렉터리는 LVIS 프로젝트 문서의 **단일 소스**입니다. 기존 standalone `lvis-project/docs` 저장소는 아카이브용 히스토리 레퍼런스만 유지합니다.
@@ -50,7 +50,7 @@ docs/
 
 1. **[구현 철학](./vision/philosophy.md)** — 배경·시장 맥락·회사 안에서의 문제 인식·사용 시나리오
 2. **[비전 & 골](./vision/README.md)** — 프로젝트가 추구하는 방향과 로드맵
-3. **[아키텍처](./architecture/architecture.md)** — 전체 시스템 설계 (5-Layer, Lgenie 중심, Electron + Rust)
+3. **[아키텍처](./architecture/architecture.md)** — 전체 시스템 설계 (5-Layer, LLM 중심, Electron + Rust)
 4. **[도구 거버넌스 보충](./architecture/tool-governance.md)** — ToolExecutor 단일 choke point와 Builtin / Plugin / MCP 정책
 5. **[실행 가이드](./guides/getting-started.md)** — 설치 및 실행 방법
 

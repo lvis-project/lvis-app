@@ -95,7 +95,7 @@ export async function parsePluginJson(
   } catch (err) {
     throw new Error(
       `Invalid plugin manifest '<unknown>' at '${path}': JSON parse error (${(err as Error).message}). ` +
-      `Example: {"id":"com.lge.sample","name":"Sample","version":"1.0.0","entry":"dist/index.js","tools":["sample_ping"]}`,
+      `Example: {"id":"com.example.sample","name":"Sample","version":"1.0.0","entry":"dist/index.js","tools":["sample_ping"]}`,
     );
   }
   const pid = typeof parsed?.id === "string" && parsed.id.length > 0 ? parsed.id : "<unknown>";
@@ -184,7 +184,7 @@ export async function parsePluginJson(
   parsed.installPolicy = normalizeInstallPolicy(parsed);
 
   if (typeof parsed.id !== "string" || parsed.id.length === 0) {
-    fail("id", "must be a non-empty string", `"id": "com.lge.meeting-recorder"`);
+    fail("id", "must be a non-empty string", `"id": "com.example.meeting-recorder"`);
   }
   // Stable SemVer only — same regex as the SDK schema and the per-plugin
   // publish.yml tag-validation step. Anchored on both ends so `1.2.3.4`,

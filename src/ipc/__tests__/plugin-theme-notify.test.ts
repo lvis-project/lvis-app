@@ -15,10 +15,10 @@ describe("validateThemePayload", () => {
   });
 
   it("accepts light shell", () => {
-    const result = validateThemePayload({ bundleId: "lge-light", shell: "light", tokens: { "--lvis-bg": "#fff" } });
+    const result = validateThemePayload({ bundleId: "violet-light", shell: "light", tokens: { "--lvis-bg": "#fff" } });
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.safe.bundleId).toBe("lge-light");
+      expect(result.safe.bundleId).toBe("violet-light");
       expect(result.safe.shell).toBe("light");
     }
   });
@@ -74,7 +74,7 @@ describe("validateThemePayload", () => {
 
   it("passes through valid --lvis-* tokens", () => {
     const result = validateThemePayload({
-      bundleId: "lge-dark", shell: "dark",
+      bundleId: "violet-dark", shell: "dark",
       tokens: { "--lvis-bg": "hsl(0, 0%, 15%)", "--lvis-primary": "#734dff" },
     });
     expect(result.ok).toBe(true);
@@ -170,7 +170,7 @@ describe("validateThemePayload", () => {
 
   it("accepts hsl with decimal values and hex colors", () => {
     const result = validateThemePayload({
-      bundleId: "lge-dark", shell: "dark",
+      bundleId: "violet-dark", shell: "dark",
       tokens: { "--lvis-radius": "0.6rem", "--lvis-radius-sm": "0.25rem", "--lvis-primary": "#734dff" },
     });
     expect(result.ok).toBe(true);
@@ -184,8 +184,8 @@ describe("validateThemePayload", () => {
       ["tokyo-night", "dark"],
       ["midnight", "dark"],
       ["forest", "light"],
-      ["lge-light", "light"],
-      ["lge-dark", "dark"],
+      ["violet-light", "light"],
+      ["violet-dark", "dark"],
       ["high-contrast", "dark"],
     ];
     for (const [bundleId, shell] of cases) {
