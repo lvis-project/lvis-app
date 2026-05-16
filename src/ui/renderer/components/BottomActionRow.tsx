@@ -8,9 +8,11 @@
  *     [○ TokenRing $] [? 가이드 ⌘K] [⇧⏎ 줄바꿈] [⌘⏎ 즉시(busy)]
  *
  *   actions cluster (우):
- *     [■ 취소(busy, 컴팩트 원형 stop)] [↑ 전송/메시지 큐에 추가 ⏎]
+ *     [■ 취소(busy, 컴팩트 원형 stop)] [↑ 전송 ⏎]
  *
- * Send 버튼 라벨은 isBusy 따라 morph: idle="전송" / busy="메시지 큐에 추가".
+ * Send 버튼 라벨은 isBusy 상관없이 항상 "전송" 으로 고정. 큐 인입 시맨틱은
+ * textarea placeholder ("메시지 큐에 추가됩니다 ...") 와 ⌘⏎ hint 로 표현해
+ * 버튼이 두 줄로 줄바꿈되는 레이아웃 깨짐을 방지.
  *
  * Spec: docs/blueprints/composer-redesign-message-queue.md
  */
@@ -99,7 +101,7 @@ export function BottomActionRow({
           data-testid="composer-send-button"
           className="inline-flex h-7 items-center gap-1.5 px-3 text-xs font-semibold"
         >
-          <span>{isBusy ? "메시지 큐에 추가" : "전송"}</span>
+          <span>전송</span>
           <KbdInverse>⏎</KbdInverse>
         </Button>
       </div>
