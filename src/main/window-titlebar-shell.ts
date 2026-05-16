@@ -34,8 +34,9 @@ export interface TitlebarShellOptions {
   title: string;
 }
 
-/** Render the titlebar root <div>. macOS gets a 28px drag-only strip;
- *  Win/Linux gets a full bar with title + min/max/close buttons. */
+/** Render the titlebar root <div>. macOS gets a 36px drag-only strip (matches
+ *  Win/Linux height so chrome looks consistent and OS traffic lights center
+ *  cleanly); Win/Linux gets a full bar with title + min/max/close buttons. */
 export function buildTitlebarHtml({ platform }: TitlebarShellOptions): string {
   const isMac = platform === "darwin";
   if (isMac) {
@@ -106,8 +107,8 @@ export function buildTitlebarCss(): string {
       -webkit-app-region: drag;
     }
     .titlebar-mac {
-      height: 28px;
-      flex: 0 0 28px;
+      height: 36px;
+      flex: 0 0 36px;
       border-bottom: 0;
       background: transparent;
     }
