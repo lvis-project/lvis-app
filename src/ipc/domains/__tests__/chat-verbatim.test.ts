@@ -306,6 +306,17 @@ describe("lvis:chat active main state", () => {
     expect(routineDeps.memoryManager.markMainActiveResume).not.toHaveBeenCalled();
   });
 
+  it("rejects unsafe session ids before resuming", async () => {
+    const loop = makeConversationLoop("session-main", []);
+    const deps = await setupHandlers(loop);
+
+    const result = await invoke("lvis:chat:session-resume", "../evil") as { ok: boolean };
+
+    expect(result.ok).toBe(false);
+    expect(loop.resetAndResume).not.toHaveBeenCalled();
+    expect(deps.memoryManager.markMainActiveResume).not.toHaveBeenCalled();
+  });
+
   it("marks main active after main turns but not after routine turns", async () => {
     const mainLoop = makeConversationLoop("session-main", [{ role: "user", content: "existing" }]);
     mainLoop.runTurn.mockResolvedValue({ text: "ok", toolCalls: [], stopReason: "end_turn" });
