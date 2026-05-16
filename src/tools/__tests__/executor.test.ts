@@ -1,7 +1,4 @@
 /**
- * Portions adapted from OpenHarness (MIT License)
- * Copyright (c) 2026 HKU Data Intelligence Lab
- *
  * ToolExecutor integration test — C1 regression.
  *
  * Scenario: the tool executor receives a tool_use for `read_file` with
@@ -116,6 +113,12 @@ function makeReadFileTool(
 
 // ─── Tests ───────────────────────────────────────────
 
+/**
+ * Sensitive-path hard-block fixtures in this block exercise behavior adapted
+ * from OpenHarness's permission checker (MIT License):
+ * https://github.com/HKUDS/OpenHarness/blob/main/src/openharness/permissions/checker.py
+ * Copyright (c) 2025 OpenHarness Contributors
+ */
 describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
   it("tool_use read_file on ~/.ssh/id_rsa: approval-gate §S1 hard-blocks BEFORE dialog", async () => {
     // 1. Registry with a read_file tool that tracks whether it was invoked

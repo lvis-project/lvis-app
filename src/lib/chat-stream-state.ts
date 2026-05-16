@@ -104,7 +104,7 @@ export type StreamEvent = {
   /**
    * Cache breakdown — Anthropic prompt cache (read 90% 할인 / write 25% 가산).
    * Vercel AI SDK v6 가 inputTokens 를 cached 포함 정규화하므로 separately
-   * surface. Reference: Kilo Code session.ts:354.
+   * surface.
    */
   cacheReadTokens?: number;
   cacheWriteTokens?: number;

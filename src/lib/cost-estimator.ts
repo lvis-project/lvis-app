@@ -6,9 +6,9 @@
  * post-call display must use provider-reported `usage` from `turn_summary`
  * (see TokenCostBadge / useContextBudget for the post-call surfaces).
  *
- * 2026-05-07 Phase 3: kept as the only client-side estimator (Kilo Code
- * pattern — single tiktoken-equivalent for *prediction* before the call,
- * never reconciled against post-call reality). chars/4 is good enough for
+ * 2026-05-07 Phase 3: kept as the only client-side estimator. A single
+ * tiktoken-equivalent estimate is used for *prediction* before the call and
+ * never reconciled against post-call reality. chars/4 is good enough for
  * "will this draft cost a lot?" vibe-check; precise figures come from the
  * provider.
  */

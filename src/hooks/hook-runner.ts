@@ -1,5 +1,5 @@
 /**
- * Hook Runner — claw-code 패턴: PreToolUse / PostToolUse / PostToolUseFailure
+ * Hook Runner — LVIS in-process tool interception
  *
  * 도구 실행 전후에 인터셉션 포인트를 제공.
  * Hook은 deny(차단), modify(입력 변경), feedback(결과에 메시지 추가) 가능.
