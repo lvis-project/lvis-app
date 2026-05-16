@@ -29,7 +29,7 @@ import type { LvisApi } from "../types.js";
 export function useChatState(api: LvisApi) {
   const [entries, setEntries] = useState<ChatEntry[]>([]);
   const [streaming, setStreaming] = useState(false);
-  /** True while a pre-turn auto-compact (Layer 0 preflight) is running. */
+  /** True while a pre-turn auto-compact is running. */
   const [isCompacting, setIsCompacting] = useState(false);
   const streamRef = useRef("");
   const thoughtRef = useRef("");
@@ -39,7 +39,7 @@ export function useChatState(api: LvisApi) {
   const [editingEntryIdx, setEditingEntryIdx] = useState<number | null>(null);
   const [editBusy, setEditBusy] = useState(false);
 
-  // Guard against setState after unmount — Fix 1 (PR #98).
+  // Guard against setState after unmount.
   const aliveRef = useRef(true);
   useEffect(() => {
     aliveRef.current = true;
@@ -200,7 +200,7 @@ export function useChatState(api: LvisApi) {
         const { groupId, toolUseId, result, isError, uiPayload, durationMs } = ev;
         setEntries((p) => applyToolEnd(p, { groupId, toolUseId, result, isError, uiPayload, durationMs }));
       } else if (ev.type === "error") {
-        // Layer 2 compact may have started but thrown — clear the indicator
+        // LLM compact may have started but thrown — clear the indicator
         // so the StatusBar item doesn't stick when compact_notice never arrives.
         setIsCompacting(false);
         setEntries((p) =>
@@ -210,7 +210,7 @@ export function useChatState(api: LvisApi) {
         thoughtRef.current = "";
         activeStreamIdRef.current = null;
       } else if (ev.type === "redact_notice") {
-        // Sprint E §3 — user draft 에서 PII 가 리댁트되었음을 알리는 시스템 배지.
+        // user draft 에서 PII 가 리댁트되었음을 알리는 시스템 배지.
         const count = (ev as unknown as { count?: number }).count ?? 0;
         const byKind = (ev as unknown as { byKind?: Record<string, number> }).byKind ?? {};
         const kindLabel = Object.entries(byKind)
@@ -258,56 +258,32 @@ export function useChatState(api: LvisApi) {
       } else if (ev.type === "compact_notice") {
         // Compact completed — clear the in-progress indicator.
         setIsCompacting(false);
-        // §457 PR-A: emit a structured `kind: "checkpoint"` entry instead of
-        // a free-text system bubble. ChatView reads `tier` to pick a
-        // tier-aware label/color. Keeping the old prose route would
-        // force a brittle string-match (`entry.text.includes("checkpoint")`)
-        // that never fired in production because the legacy text didn't
-        // contain that token. See Issue #457 Phase 1+2 cleanup.
+        // Emit a structured `kind: "checkpoint"` entry so ChatView can render
+        // a consistent checkpoint divider instead of string-matching prose.
         const removed = ev.removedMessages ?? 0;
         const freed = ev.freedTokens ?? 0;
         const estimatedAfter = ev.estimatedAfter;
         setEntries((p) => {
           const hasReliableAfter = typeof estimatedAfter === "number" && estimatedAfter >= 0;
-          // Synthetic usage carrier only when we have a reliable signal:
-          //   1. Engine-supplied `estimatedAfter` (preferred — exact post-compact tokens), or
-          //   2. `freedTokens > 0` (legacy fallback: subtract from lastKnown)
-          // When BOTH are absent (older IPC + zero-removed no-op), emitting a
-          // synthetic context_usage with stale lastKnown is misleading —
-          // it overwrites genuine turn_summary state. Skip in that case.
           const checkpointEntry = {
             kind: "checkpoint" as const,
             removedMessages: removed,
             freedTokens: freed,
-            ...(ev.tier ? { tier: ev.tier } : {}),
+            ...(ev.trigger ? { trigger: ev.trigger } : {}),
             ...(ev.summary ? { summary: ev.summary } : {}),
             ...(ev.compactNum !== undefined ? { compactNum: ev.compactNum } : {}),
             ...(ev.compactStatus !== undefined ? { compactStatus: ev.compactStatus } : {}),
             ...(ev.truncatedDir !== undefined ? { truncatedDir: ev.truncatedDir } : {}),
           };
-          if (!hasReliableAfter && freed <= 0) {
+          if (!hasReliableAfter) {
             return [...p, checkpointEntry];
-          }
-          let postCompactTokens: number;
-          if (hasReliableAfter) {
-            postCompactTokens = estimatedAfter;
-          } else {
-            let lastKnownTokens = 0;
-            for (let i = p.length - 1; i >= 0; i--) {
-              const e = p[i];
-              if (e?.kind === "turn_summary" || e?.kind === "context_usage") {
-                lastKnownTokens = e.tokensIn;
-                break;
-              }
-            }
-            postCompactTokens = Math.max(0, lastKnownTokens - freed);
           }
           return [
             ...p,
             checkpointEntry,
             {
               kind: "context_usage" as const,
-              tokensIn: postCompactTokens,
+              tokensIn: estimatedAfter,
               source: "session-estimate" as const,
             },
           ];
@@ -326,7 +302,7 @@ export function useChatState(api: LvisApi) {
         }
         if (streamRef.current || thoughtRef.current) {
           const doneRoute = ev.route;
-          // §PR-3: strip <title>...</title> and [checkpoint] markers
+          // Strip <title>...</title> and [checkpoint] markers.
           // that may have been streamed as raw deltas before post-turn cleanup.
           const detected = detectFromStream(streamRef.current);
           const finalText = visibleAssistantText(detected.cleanedText);

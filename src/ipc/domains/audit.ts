@@ -18,7 +18,7 @@ export function registerAuditHandlers(deps: IpcDeps): void {
     return auditLogger.getStats(typeof lastDays === "number" ? lastDays : 7);
   });
 
-  // TIER 3 read-only, sender guard optional
+  // read-only, sender guard optional
   ipcMain.handle("lvis:dlp:stats", async (_e, days: number) => {
     const { getDlpStats } = await import("../../audit/dlp-stats.js");
     return getDlpStats(typeof days === "number" ? days : 7);

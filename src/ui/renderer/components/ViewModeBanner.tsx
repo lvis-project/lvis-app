@@ -1,7 +1,7 @@
 /**
- * ViewModeBanner — sticky top banner shown when the user is in Layer 3 View-Mode.
+ * ViewModeBanner — sticky top banner shown when the user is viewing a checkpoint slice.
  *
- * §PR-5: When the user clicks "이 시점 보기" on a CheckpointDivider, the chat
+ * When the user clicks "이 시점 보기" on a CheckpointDivider, the chat
  * view slices messages to [0..slicedRangeEnd] and shows this banner at the top.
  * The banner is dismissible via "▶ 라이브 시점으로 복귀" which calls onExit.
  *

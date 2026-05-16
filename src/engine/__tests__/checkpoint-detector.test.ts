@@ -1,5 +1,5 @@
 /**
- * Checkpoint Detector tests — §PR-3
+ * Checkpoint Detector tests.
  */
 import { describe, it, expect } from "vitest";
 import { detectFromStream } from "../checkpoint-detector.js";

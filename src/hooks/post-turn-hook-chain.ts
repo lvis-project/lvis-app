@@ -1,12 +1,12 @@
 /**
- * Post-Turn Hook Chain — §4.5 11단계 후 실행
+ * Post-Turn Hook Chain — turn 완료 후 실행
  *
  * mark-stale → detect-checkpoint → saveSession → extractMemory → update-title → auditLog → idle-poke 순차 실행.
  * 각 단계는 독립적이며 한 단계 실패가 다음을 차단하지 않음.
  *
- * PR-2-F-3 정정: Stage 1b (post-turn full compact) 제거. Layer 0 preflight (`runPreflightGuard`,
- * conversation-loop.ts) 가 *next turn 진입 전* 동등한 LLM-based 압축을 더 보수적 임계로 처리.
- * 이 hook chain 은 Layer 1 (markStaleToolResults) + 5 개 housekeeping step 만 담당.
+ * Post-turn full compact is intentionally absent. Token preflight (`runPreflightGuard`,
+ * conversation-loop.ts) handles LLM-based compaction before the next turn.
+ * This hook chain handles tool-result stubbing and housekeeping only.
  */
 
 import { markStaleToolResults } from "../engine/auto-compact.js";
@@ -49,8 +49,8 @@ export interface PostTurnHookChainDeps {
   idleScheduler?: IdleSchedulerService;
   settingsService?: SettingsService;
   /**
-   * §PR-3: optional callback invoked when a legacy [checkpoint] marker is detected.
-   * Caller (typically conversation-loop or IPC bridge) can trigger PR-4 summary.
+   * Optional callback invoked when a [checkpoint] marker is detected.
+   * Caller (typically conversation-loop or IPC bridge) can trigger summary handling.
    */
   onCheckpointSuggested?: (sessionId: string, cleanedOutput: string) => void;
 }
@@ -58,7 +58,7 @@ export interface PostTurnHookChainDeps {
 export interface PostTurnHookResult {
   /** 컴팩션이 발생한 경우 새 메시지 배열. 없으면 null. */
   compactedMessages: GenericMessage[] | null;
-  /** §PR-3: detect-checkpoint 결과. output에 마커가 없으면 default 값. */
+  /** detect-checkpoint 결과. output에 마커가 없으면 default 값. */
   detector: DetectorResult;
 }
 
@@ -73,10 +73,9 @@ export class PostTurnHookChain {
   async run(ctx: PostTurnHookContext): Promise<PostTurnHookResult> {
     let compactedMessages: GenericMessage[] | null = null;
 
-    // 1. Layer 1 — markStaleToolResults (LLM-free, lazy, 항상).
-    // PR-2-F-3 정정: Stage 1b (post-turn full compact) 제거. Layer 0 preflight
-    // (`runPreflightGuard`) 가 *next turn 진입 전* 동등한 구조적 압축을 더 보수적
-    // 임계 (50/55/60/65%) 로 수행하므로 post-turn 추가 압축 불필요.
+    // 1. markStaleToolResults (LLM-free, lazy, 항상).
+    // Token preflight (`runPreflightGuard`) 가 *next turn 진입 전* 구조적
+    // 압축을 보수적 임계 (50/55/60/65%) 로 수행하므로 post-turn 추가 압축 불필요.
     try {
       const autoCompactEnabled = this.deps.settingsService?.get("chat").autoCompact ?? true;
       if (!autoCompactEnabled) {
@@ -97,14 +96,14 @@ export class PostTurnHookChain {
       log.warn({ err }, "mark-stale failed");
     }
 
-    // 2. §PR-3: Detect legacy checkpoint/title markers — detectFromStream 호출
+    // 2. Detect checkpoint/title markers.
     //    Run before persistence so durable session history stores the same
     //    cleaned assistant output that the caller and renderer receive.
     let detector: DetectorResult = { cleanedText: ctx.output, newTitle: null, checkpointSuggested: false };
     try {
       detector = detectFromStream(ctx.output);
       if (detector.checkpointSuggested) {
-        log.info(`detect-checkpoint: legacy [checkpoint] marker stripped for session ${ctx.sessionId}`);
+        log.info(`detect-checkpoint: [checkpoint] marker stripped for session ${ctx.sessionId}`);
         try {
           this.deps.onCheckpointSuggested?.(ctx.sessionId, detector.cleanedText);
         } catch (cbErr) {
@@ -122,21 +121,21 @@ export class PostTurnHookChain {
           ? EMPTY_ASSISTANT_RESPONSE_TEXT
           : outputForHooks;
 
-    // 3. 세션 영속화 (§4.5.7)
+    // 세션 영속화
     try {
       const baseMessages = compactedMessages ?? ctx.messages;
       const messagesToSave =
         outputForPersistence !== ctx.output
           ? replaceLastAssistantOutput(baseMessages, ctx.output, outputForPersistence)
           : baseMessages;
-      // PR-3 (v3 §4.2): JSONL 영속화 직전 marked tool_result 를 stub 으로 변환 — disk 무한
-      // 성장 방지 (R4 mitigation 유지). caller (engine) 의 in-memory verbatim 은 변경 안 됨.
+      // JSONL 영속화 직전 marked tool_result 를 stub 으로 변환 — disk 무한
+      // 성장 방지. caller (engine) 의 in-memory verbatim 은 변경 안 됨.
       await this.deps.memoryManager?.saveSession(ctx.sessionId, stubMarkedToolResults(messagesToSave));
     } catch (err) {
       log.warn("saveSession failed: %s", err);
     }
 
-    // 4. Memory Extraction — "기억해" 패턴 감지 시 memories/ 자동 저장
+    // Memory Extraction — "기억해" 패턴 감지 시 memories/ 자동 저장
     try {
       if (this.deps.memoryManager) {
         const memoryPatterns = /기억해|기억하|잊지\s*마|remember|don't forget/i;
@@ -158,11 +157,9 @@ export class PostTurnHookChain {
       log.warn("extractMemory failed: %s", err);
     }
 
-    // 5. Legacy [title] marker handling — newTitle 가 detector 에서 추출되면
-    //    session metadata 에 저장. LLM-based title chaining 은 PR #729 에서
-    //    완전 제거됨 (호출처가 없는 dead code 였음 — No Fallback Code 룰).
-    //    LLM title chaining 을 재도입하려면 별도 PR 에서 llmProvider 주입 +
-    //    빈도 게이트 (e.g. "N turn 마다") 를 함께 설계.
+    // [title] marker handling — newTitle 가 detector 에서 추출되면
+    //    session metadata 에 저장. LLM-based title chaining 은 호출처가 없어
+    //    제거됨.
     try {
       if (this.deps.memoryManager && detector.newTitle) {
         const sessionMeta = this.deps.memoryManager.loadSessionMetadata(ctx.sessionId) ?? {};
@@ -176,7 +173,7 @@ export class PostTurnHookChain {
       log.warn("update-title failed: %s", err);
     }
 
-    // 6. Audit Log (§14.2)
+    // Audit Log
     //    Emit `${provider}/${model}` for "llm" routes (usage-stats.parseRoute
     //    splits on `/`); non-LLM routes (skill/command/agent-message) keep the
     //    classification verbatim. Snapshot fields on ctx win over live
@@ -203,7 +200,7 @@ export class PostTurnHookChain {
       log.warn("audit failed: %s", err);
     }
 
-    // 7. Idle poke (Agent 5 §6.1 신호 흡수)
+    // 7. Idle poke.
     try {
       this.deps.idleScheduler?.signalConversation();
     } catch (err) {

@@ -1,6 +1,6 @@
 /**
- * Structured Compact tests — Layer 2 interface + parser + freeze invariant + LLM call.
- * `compactWithBoundary()` 는 `ConversationLoop.runPreflightGuard` 에서 호출됨 (PR-2-C/D 완료).
+ * Structured Compact tests — LLM compact interface + parser + freeze invariant + LLM call.
+ * `compactWithBoundary()` 는 `ConversationLoop.runPreflightGuard` 에서 호출됨.
  */
 import { describe, it, expect } from "vitest";
 import {
@@ -254,7 +254,7 @@ describe("freezeBoundary — Object.freeze invariant (P7)", () => {
   });
 });
 
-// ─── compactWithBoundary (Layer 2 LLM call) ──────────
+// ─── compactWithBoundary (LLM call) ──────────
 
 function makeMockLlm(responses: string[]): LLMProvider {
   let idx = 0;
@@ -309,7 +309,7 @@ function makeLongHistory(turnCount: number): GenericMessage[] {
   return out;
 }
 
-describe("compactWithBoundary — Layer 2 LLM call integration", () => {
+describe("compactWithBoundary — LLM call integration", () => {
   it("splits, calls LLM, parses, returns frozen boundary + new history", async () => {
     const llm = makeMockLlm([makeFullSummaryText()]);
     const messages = makeLongHistory(50);
@@ -547,7 +547,7 @@ describe("compactWithBoundary — Layer 2 LLM call integration", () => {
   });
 
   it("REDUCED_INSUFFICIENT_FORCED — post-compact > preflight*0.8 triggers oldest 50% drop + archive", async () => {
-    // Layer D: LLM summary 후에도 budget 초과 시 toPreserve oldest 50% 강제
+    // Forced archive: LLM summary 후에도 budget 초과 시 toPreserve oldest 50% 강제
     // drop. fresh preserveRecent 가 충분히 커서 post-compact 가 여전히
     // preflight × 0.8 초과하도록 fixture 구성.
     const llm = makeMockLlm([makeFullSummaryText()]);
