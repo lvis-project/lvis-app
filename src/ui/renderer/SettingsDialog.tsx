@@ -38,7 +38,7 @@ function TabSaveBar({
   return (
     <div className="mt-4 flex justify-end border-t border-border/40 pt-3">
       <Button onClick={onSave} disabled={saving || !settingsLoaded}>
-        {saving ? "저장 중..." : "저장"}
+        {saving ? "저장 중…" : "저장"}
       </Button>
     </div>
   );
