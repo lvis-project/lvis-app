@@ -30,17 +30,17 @@ import {
 
 function validateRulePatternInput(pattern: unknown): { ok: true; pattern: string } | { ok: false; error: string; message: string } {
   if (typeof pattern !== "string") {
-    return { ok: false, error: "invalid-pattern", message: "패턴은 문자열이어야 합니다." };
+    return { ok: false, error: "invalid-pattern", message: "pattern must be a string" };
   }
   const normalized = pattern.trim();
   if (normalized.length === 0) {
-    return { ok: false, error: "invalid-pattern", message: "패턴은 빈 문자열일 수 없습니다." };
+    return { ok: false, error: "invalid-pattern", message: "pattern must be non-empty" };
   }
   if (normalized.length > 128) {
-    return { ok: false, error: "invalid-pattern", message: "패턴은 128자를 초과할 수 없습니다." };
+    return { ok: false, error: "invalid-pattern", message: "pattern must not exceed 128 characters" };
   }
   if (/\s/.test(normalized)) {
-    return { ok: false, error: "invalid-pattern", message: "패턴에는 공백을 포함할 수 없습니다." };
+    return { ok: false, error: "invalid-pattern", message: "pattern must not contain whitespace" };
   }
   return { ok: true, pattern: normalized };
 }
@@ -50,7 +50,7 @@ function requireUserKeyboardIntent(payload: unknown): { ok: true } | { ok: false
   return {
     ok: false,
     error: "user-keyboard-required",
-    message: "이 권한 변경은 활성 사용자 제스처에서만 실행할 수 있습니다.",
+    message: "permission change requires active user gesture (keyboard intent)",
   };
 }
 
@@ -100,7 +100,7 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
       return { ok: false, error: "missing-durable-confirm", message: "durable mode command must require modal confirmation" };
     }
     const pm = conversationLoop.permissionManager;
-    if (!pm) return { ok: false, error: "no-permission-manager", message: "권한 매니저가 초기화되지 않았습니다." };
+    if (!pm) return { ok: false, error: "no-permission-manager", message: "permission manager not initialized" };
     const { applyPermissionModeCommand } = await import("../../permissions/permission-mode-apply.js");
     const result = await applyPermissionModeCommand(parsed, {
       permissionManager: pm,
@@ -126,7 +126,7 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
     if (!intent.ok) return intent;
     const action = body.action;
     if (action !== "allow" && action !== "deny") {
-      return { ok: false, error: "invalid-action", message: `유효하지 않은 action: '${action}'. 허용값: allow, deny` };
+      return { ok: false, error: "invalid-action", message: `invalid action: '${action}' (allowed: allow, deny)` };
     }
     const validated = validateRulePatternInput(body.pattern);
     if (!validated.ok) return validated;
@@ -135,7 +135,7 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
     if (isParseError<PermissionRulesCommand>(parsed)) return { ok: false, error: "parse-error", message: parsed.error };
     if (parsed.sub !== "add") return { ok: false, error: "parse-error", message: "add rule command did not parse as add" };
     const pm = conversationLoop.permissionManager;
-    if (!pm) return { ok: false, error: "no-permission-manager", message: "권한 매니저가 초기화되지 않았습니다." };
+    if (!pm) return { ok: false, error: "no-permission-manager", message: "permission manager not initialized" };
     try {
       if (parsed.action === "allow") {
         await pm.addAlwaysAllowedPersist(parsed.pattern);
@@ -156,7 +156,7 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
     if (!intent.ok) return intent;
     const action = body.action;
     if (action !== "allow" && action !== "deny") {
-      return { ok: false, error: "invalid-action", message: `유효하지 않은 action: '${action}'. 허용값: allow, deny` };
+      return { ok: false, error: "invalid-action", message: `invalid action: '${action}' (allowed: allow, deny)` };
     }
     const validated = validateRulePatternInput(body.pattern);
     if (!validated.ok) return validated;
@@ -165,7 +165,7 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
     if (isParseError<PermissionRulesCommand>(parsed)) return { ok: false, error: "parse-error", message: parsed.error };
     if (parsed.sub !== "remove") return { ok: false, error: "parse-error", message: "remove rule command did not parse as remove" };
     const pm = conversationLoop.permissionManager;
-    if (!pm) return { ok: false, error: "no-permission-manager", message: "권한 매니저가 초기화되지 않았습니다." };
+    if (!pm) return { ok: false, error: "no-permission-manager", message: "permission manager not initialized" };
     try {
       await pm.removeRule(parsed.pattern, parsed.action);
       deps.toolRegistry.setDenyRules(pm.getVisibilityDenyRules());
@@ -457,10 +457,10 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
     if (!intent.ok) return intent;
     const patch = payloadRecord(body.patch);
     if ("managed" in patch) {
-      return { ok: false, error: "invalid-patch", message: "'managed' 필드는 사용자가 변경할 수 없습니다." };
+      return { ok: false, error: "invalid-patch", message: "'managed' field is read-only and cannot be modified by user" };
     }
     if ("requireExplicitApproval" in patch && typeof patch.requireExplicitApproval !== "boolean") {
-      return { ok: false, error: "invalid-patch", message: "'requireExplicitApproval'은 boolean이어야 합니다." };
+      return { ok: false, error: "invalid-patch", message: "'requireExplicitApproval' must be a boolean" };
     }
     try {
       const updated = await savePolicy(patch as Parameters<typeof savePolicy>[0]);

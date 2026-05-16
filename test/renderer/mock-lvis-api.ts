@@ -190,6 +190,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
       auditShow: vi.fn(async () => ({ ok: true, entries: [], total: 0, summary: { files: 0, bytes: 0 } })),
       auditVerify: vi.fn(async () => ({ ok: true, intact: true, totalFiles: 0, totalEntries: 0, perDay: [] })),
       onManifestViolation: vi.fn(() => () => undefined),
+      onUserApprovalHit: vi.fn(() => () => undefined),
     },
     policy: {
       get: vi.fn(async () => ({
