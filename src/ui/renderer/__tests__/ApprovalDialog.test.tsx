@@ -5,7 +5,7 @@
  * to document.body — assertions must query document.body, not the render container.
  */
 import "../../../../test/renderer/setup.js";
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, fireEvent, waitFor } from "@testing-library/react";
 import { ApprovalDialog } from "../dialogs/ApprovalDialog.js";
 import type { ApprovalRequest, PermissionEvaluationContext } from "../types.js";
@@ -43,6 +43,22 @@ function makeRequest(overrides: Partial<ApprovalRequest> = {}): ApprovalRequest 
 }
 
 describe("ApprovalDialog", () => {
+  // HIGH-1 CI fix: ToolApprovalDialog.handleApprove calls window.lvis.userApproval.record.
+  // Without this mock the IPC bridge throws synchronously before onDecide is reached.
+  // The fire-and-await pattern calls onDecide synchronously before awaiting record,
+  // so the test's fireEvent.click assertion is always synchronous — but the record
+  // mock must exist so the optional-chain doesn't return undefined and throw.
+  // vi.stubGlobal is used so the outer afterEach's vi.unstubAllGlobals() handles cleanup.
+  beforeEach(() => {
+    vi.stubGlobal("lvis", {
+      userApproval: {
+        record: vi.fn().mockResolvedValue({ ok: true }),
+        revokeByKey: vi.fn().mockResolvedValue({ ok: true }),
+        list: vi.fn().mockResolvedValue([]),
+      },
+    });
+  });
+
   it("renders without crashing with empty queue", () => {
     const { container } = render(
       <ApprovalDialog queue={[]} onDecide={vi.fn()} />,

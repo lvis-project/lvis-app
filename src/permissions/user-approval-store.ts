@@ -48,6 +48,13 @@ export interface UserApprovalEntry {
    * by {@link lookupApproval}.
    */
   revokedAt: string | null;
+  /**
+   * Display metadata — stored alongside the entry so listApprovals() can
+   * return human-readable tool identity without re-parsing the hash key.
+   * R-2 Round-3: required for PermissionsTab table to show toolName.
+   */
+  toolName?: string;
+  source?: string;
 }
 
 interface ApprovalsFile {
@@ -78,19 +85,12 @@ function filePath(): string {
  * cached approval. This prevents a low-trust caller from inheriting a high-trust
  * approval made by a different origin (CRITICAL-4 cache identity collapse fix).
  *
- * args is canonicalized via `canonicalStringify` before hashing so that object
- * key ordering differences ({a,b} vs {b,a}) do not produce distinct keys
- * for semantically identical inputs (HIGH-2 JSON canonical fix).
+ * args is canonicalized via `canonicalStringify` (from shared/canonical-json.ts)
+ * before hashing so that object key ordering differences ({a,b} vs {b,a}) do
+ * not produce distinct keys for semantically identical inputs (HIGH-2 JSON
+ * canonical fix). Re-exported for backward-compat with existing importers.
  */
-export function canonicalStringify(value: unknown): string {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    return JSON.stringify(value);
-  }
-  const obj = value as Record<string, unknown>;
-  const sortedKeys = Object.keys(obj).sort();
-  const parts = sortedKeys.map(k => `${JSON.stringify(k)}:${canonicalStringify(obj[k])}`);
-  return `{${parts.join(",")}}`;
-}
+export { canonicalStringify } from "../shared/canonical-json.js";
 
 function entryKey(
   toolName: string,
@@ -160,6 +160,10 @@ export async function recordApproval(
     verdictAtApproval: entry.verdictAtApproval,
     nlJustification: entry.nlJustification,
     revokedAt: null,
+    // Store display metadata so listApprovals() can surface toolName/source
+    // without re-parsing the hash key. R-2 Round-3 MEDIUM fix.
+    toolName,
+    source,
   };
 
   if (entry.scope === "session") {

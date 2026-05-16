@@ -155,6 +155,9 @@ export function PermissionsTab() {
     verdictAtApproval: "low" | "medium" | "high";
     nlJustification: string | null;
     revokedAt: string | null;
+    /** R-2 Round-3: display metadata from user-approval-store. */
+    toolName?: string;
+    source?: string;
   }>>([]);
   const [approvalsBusy, setApprovalsBusy] = useState(false);
   const [reviewer, setReviewer] = useState<PermissionReviewerSettings>(DEFAULT_REVIEWER_SETTINGS);
@@ -241,7 +244,7 @@ export function PermissionsTab() {
     setApprovalsBusy(true);
     try {
       await window.lvis.userApproval.revokeByKey(key);
-      void fetchApprovals();
+      await fetchApprovals();  // MEDIUM: await so table state is consistent before banner
       showBanner("warn", `[${toolName}] 승인이 취소되었습니다.`);
     } catch (err) {
       showBanner("error", `취소 실패: ${(err as Error).message}`);
@@ -1152,7 +1155,8 @@ export function PermissionsTab() {
                   {userApprovals.map((a) => (
                     <tr key={a.key} className="border-b last:border-0">
                       <td className="max-w-[120px] truncate px-3 py-2 font-mono">
-                        {a.key.split("::")[0]}
+                        {/* R-2 Round-3 MEDIUM: show toolName from entry metadata, not hex hash fragment */}
+                        {a.toolName ?? a.key.slice(0, 12)}
                       </td>
                       <td className="px-3 py-2">
                         <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${a.scope === "persistent" ? "bg-warning/15 text-warning" : "bg-muted text-muted-foreground"}`}>
@@ -1173,7 +1177,7 @@ export function PermissionsTab() {
                           size="sm"
                           className="h-6 px-2 text-[11px]"
                           disabled={approvalsBusy}
-                          onClick={() => void handleRevokeApproval(a.key, a.key.split("::")[0], a.scope)}
+                          onClick={() => void handleRevokeApproval(a.key, a.toolName ?? a.key.slice(0, 12), a.scope)}
                         >
                           취소
                         </Button>
