@@ -39,7 +39,7 @@ describe("PermissionModeBadge", () => {
       expect(badge.getAttribute("data-mode")).toBe("auto");
       expect(badge.textContent).toContain("자동 검증");
       expect(badge.textContent).not.toContain("LLM");
-      expect(badge.getAttribute("aria-label")).toContain("백그라운드 리뷰어");
+      expect(badge.getAttribute("aria-label")).toContain("권한 리뷰어");
     });
     expect(fetcher).toHaveBeenCalled();
   });
