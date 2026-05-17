@@ -23,6 +23,15 @@ import { createLogger } from "../../lib/logger.js";
  */
 export const STABLE_SEMVER_RE =
   /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
+
+/**
+ * #893 — Allow-listed host secret key pattern. A plugin manifest's
+ * `hostSecrets.read[]` entries MUST match this regex so the runtime allowlist
+ * only ever points at LLM API keys (the only host-owned secret class plugins
+ * may currently request). Mirrors the SDK JSON-schema constraint so a plugin
+ * cannot install a wider allowlist via a stale SDK build.
+ */
+export const HOST_SECRETS_KEY_PATTERN = /^llm\.apiKey\.[a-z-]+$/;
 const log = createLogger("plugin-runtime");
 
 export function normalizeInstallPolicy(
@@ -362,6 +371,58 @@ export async function parsePluginJson(
         `key not in tools[]`,
         `remove the key or add '${k}' to tools[]`,
       );
+    }
+  }
+
+  // #893 — hostSecrets.read[] schema enforcement. The SDK JSON-schema mirrors
+  // this rule, but we re-check at host load time so a plugin shipped with a
+  // stale SDK schema cannot grant itself a wider allowlist by adding a
+  // non-`llm.apiKey.*` entry. Reason tag is `manifest_schema` to mirror the
+  // host's other supply-chain-visibility audit tags.
+  const hostSecretsRaw: unknown = (parsed as { hostSecrets?: unknown }).hostSecrets;
+  if (hostSecretsRaw !== undefined) {
+    if (
+      hostSecretsRaw === null ||
+      typeof hostSecretsRaw !== "object" ||
+      Array.isArray(hostSecretsRaw)
+    ) {
+      fail(
+        "hostSecrets",
+        "must be an object with optional `read` array",
+        `"hostSecrets": { "read": ["llm.apiKey.openai"] }`,
+      );
+    }
+    const readListRaw: unknown = (hostSecretsRaw as { read?: unknown }).read;
+    if (readListRaw !== undefined) {
+      if (!Array.isArray(readListRaw)) {
+        fail(
+          "hostSecrets.read",
+          "must be an array of strings",
+          `"hostSecrets": { "read": ["llm.apiKey.openai"] }`,
+        );
+      }
+      const readArr = readListRaw as unknown[];
+      for (let i = 0; i < readArr.length; i += 1) {
+        const key = readArr[i];
+        if (typeof key !== "string") {
+          fail(
+            `hostSecrets.read[${i}]`,
+            "must be a string",
+            `"hostSecrets": { "read": ["llm.apiKey.openai"] }`,
+          );
+        }
+        // `fail()` returns `never`, but TS's narrowing through the
+        // arrow-function call path is sometimes lossy — re-assert via a
+        // local typed binding so the regex test below sees `key: string`.
+        const keyStr: string = key as string;
+        if (!HOST_SECRETS_KEY_PATTERN.test(keyStr)) {
+          fail(
+            `hostSecrets.read[${i}]`,
+            `value '${keyStr}' does not match the allowed host-secret pattern (manifest_schema). Only \`llm.apiKey.<vendor>\` keys are accepted`,
+            `"hostSecrets": { "read": ["llm.apiKey.openai"] }`,
+          );
+        }
+      }
     }
   }
 
