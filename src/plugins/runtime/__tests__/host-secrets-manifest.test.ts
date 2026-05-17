@@ -51,7 +51,7 @@ describe("manifest hostSecrets.read[] validator (#893)", () => {
     await writeFile(
       path,
       JSON.stringify({
-        id: "com.example.host-secrets-test",
+        id: "host-secrets-test",
         name: "Host Secrets Test",
         description: "x",
         version: "1.0.0",
