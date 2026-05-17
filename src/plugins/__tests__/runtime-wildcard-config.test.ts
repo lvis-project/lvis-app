@@ -7,6 +7,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { PluginRuntime } from "../runtime.js";
+import { buildPluginContext } from "../sandbox.js";
 
 describe("PluginRuntime wildcard configOverrides (#893)", () => {
   function makeRuntime(initial: Record<string, Record<string, unknown>> = {}) {
@@ -86,5 +87,41 @@ describe("PluginRuntime wildcard configOverrides (#893)", () => {
   it("getWildcardConfigOverride returns an empty object when no wildcard is set", () => {
     const rt = makeRuntime({});
     expect(rt.getWildcardConfigOverride()).toEqual({});
+  });
+
+  // CRIT-1 regression guard — llmApiKey must NOT appear in the wildcard slot
+  // or in the effective plugin config map. The raw API key flows through
+  // getSecret, not through configOverrides.
+  it("config.get('llmApiKey') returns undefined — CRIT-1 regression guard", () => {
+    const rt = makeRuntime({});
+    // Wildcard slot must not contain llmApiKey
+    expect(rt.getWildcardConfigOverride()["llmApiKey"]).toBeUndefined();
+    expect(rt.getWildcardConfigOverride()["llmProvider"]).toBeUndefined();
+
+    // Even after the vendor id is injected (normal cycle-3 boot path),
+    // llmApiKey must still be absent from the effective config.
+    rt.setWildcardConfigOverride({ hostApiVendor: "openai" });
+    const effectiveConfig = buildPluginContext({
+      pluginId: "test-plugin",
+      pluginRoot: "/tmp",
+      hostRoot: "/tmp",
+      pluginDataDir: "/tmp",
+      manifest: {
+        id: "test-plugin",
+        name: "Test",
+        version: "1.0.0",
+        description: "Test",
+        publisher: "Test",
+        entry: "index.js",
+        tools: [],
+      },
+      configOverrides: (rt as unknown as { configOverrides: Record<string, Record<string, unknown>> }).configOverrides,
+      hostApi: {} as never,
+    }).config;
+
+    expect((effectiveConfig as Record<string, unknown>)["llmApiKey"]).toBeUndefined();
+    expect((effectiveConfig as Record<string, unknown>)["llmProvider"]).toBeUndefined();
+    // vendor id IS present (injected by boot)
+    expect((effectiveConfig as Record<string, unknown>)["hostApiVendor"]).toBe("openai");
   });
 });
