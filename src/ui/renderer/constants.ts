@@ -120,7 +120,7 @@ export function budgetToEffortIndex(budget: number): number {
 export const EXEC_MODE_OPTIONS: { value: ExecMode; label: string; description: string }[] = [
   { value: "default", label: "기본", description: "읽기 도구는 허용하고 변경·셸·네트워크는 승인 요청" },
   { value: "strict", label: "전체 물어보기", description: "읽기까지 포함해 모든 도구 실행 전 승인 요청" },
-  { value: "auto", label: "자동 검증", description: "저위험 작업은 감사 기록으로 처리하고 헤드리스 작업은 백그라운드 리뷰어가 검증" },
+  { value: "auto", label: "자동 검증", description: "저위험 작업은 감사 기록으로 처리하고 자동(헤드리스) 실행과 대화형 채팅 모두를 권한 리뷰어가 검증" },
   { value: "allow", label: "전체 허용", description: "하드 차단 밖 도구는 자동 허용하고 허용 디렉터리 밖 접근은 별도 승인" },
 ];
 

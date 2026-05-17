@@ -78,25 +78,29 @@ function getWindowBridge(): {
 // ─── Component ────────────────────────────────────────────────────────────
 
 export function CustomTitleBar() {
+  // Rules-of-hooks: all hook calls MUST come before any early return so the
+  // hook order stays stable across renders. The platformBridge check is moved
+  // below all hooks; the bridge-dependent useEffect bodies are gated with an
+  // internal `if (!platformBridge) return;` so they noop when the bridge is
+  // absent (jsdom / Storybook / SSR) without affecting hook count.
   const platformBridge = tryGetPlatformBridge();
-  // In non-Electron environments (jsdom, Storybook, SSR) the preload bridge
-  // is not injected. Skip rendering — there is no native frame to replace.
-  if (!platformBridge) return null;
-  const { isDarwin } = platformBridge;
+  const isDarwin = platformBridge?.isDarwin ?? false;
   const [isMaximized, setIsMaximized] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const optionalTheme = useOptionalTheme();
 
   // Listen for maximize / fullscreen state from main process.
   useEffect(() => {
+    if (!platformBridge) return;
     const bridge = getWindowBridge();
     const unsubMax = bridge.onMaximizedChanged((maximized) => setIsMaximized(maximized));
     const unsubFull = bridge.onFullscreenChanged((fullscreen) => setIsFullscreen(fullscreen));
     return () => { unsubMax(); unsubFull(); };
-  }, []);
+  }, [platformBridge]);
 
   // Sync titlebar overlay colors when theme changes (Win/Linux only).
   useEffect(() => {
+    if (!platformBridge) return;
     if (isDarwin) return;
     if (typeof document === "undefined") return;
     try {
@@ -111,14 +115,17 @@ export function CustomTitleBar() {
     }
     // optionalTheme.resolved is the dependency — rerun whenever shell theme flips
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDarwin, optionalTheme?.resolved]);
+  }, [platformBridge, isDarwin, optionalTheme?.resolved]);
 
   const handleMinimize = useCallback(() => { void getWindowBridge().minimize(); }, []);
   const handleMaximize = useCallback(() => { void getWindowBridge().toggleMaximize(); }, []);
   const handleClose = useCallback(() => { void getWindowBridge().close(); }, []);
   const handleDoubleClick = useCallback(() => { void getWindowBridge().toggleMaximize(); }, []);
 
-  // Hide entirely in fullscreen — OS/Electron handles fullscreen chrome.
+  // Early returns (all AFTER hooks have been called):
+  // - No preload bridge → non-Electron environment (jsdom / Storybook / SSR).
+  // - Fullscreen → OS/Electron draws fullscreen chrome.
+  if (!platformBridge) return null;
   if (isFullscreen) return null;
 
   if (isDarwin) {
