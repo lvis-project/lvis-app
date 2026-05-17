@@ -15,6 +15,9 @@ import { getApi, getPluginViewLabel, toViewKey } from "./api-client.js";
 import type { PluginEntry } from "./components/PluginGridButton.js";
 import { ApprovalDialog } from "./dialogs/ApprovalDialog.js";
 import { DeferredQueueDialog } from "./dialogs/DeferredQueueDialog.js";
+import { OnboardingDialog } from "./components/OnboardingDialog.js";
+import { LoginModal } from "./components/LoginModal.js";
+import { LLM_VENDORS } from "../../shared/llm-vendor-defaults.js";
 import { buildQuickActions } from "./components/command-actions.js";
 import { MainToolbar } from "./MainToolbar.js";
 import { useAppUpdate } from "./hooks/use-app-update.js";
@@ -101,6 +104,12 @@ export function App() {
 
   // App state
   const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
+  // #893 — onboarding + login dialog state. The onboarding effect below
+  // probes `getSettings()` once on boot; if no vendor has a key *and* the
+  // user has not previously dismissed onboarding, the dialog opens.
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [appLoginOpen, setAppLoginOpen] = useState(false);
+  const [onboardingVendor, setOnboardingVendor] = useState<string>("claude");
   const [deferredQueueOpen, setDeferredQueueOpen] = useState(false);
   const [activeView, setActiveView] = useState("home");
   const [commandPopoverOpen, setCommandPopoverOpen] = useState(false);
@@ -552,6 +561,41 @@ export function App() {
     setActiveView("home");
   }, [activeView, activePluginView]);
   const checkApiKey = useCallback(async () => { const h = await api.hasApiKey(); setHasApiKey(h); return h; }, [api]);
+
+  // #893 — First-boot onboarding probe. Runs once on mount; opens the
+  // onboarding dialog when (a) no vendor has a persisted API key AND (b)
+  // the user has not previously dismissed onboarding. Both choices flip
+  // `features.onboardingCompleted = true` so subsequent boots skip the
+  // dialog even if the user closes Settings without saving a key.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const settings = await api.getSettings();
+        if (cancelled) return;
+        if (settings.features?.onboardingCompleted === true) return;
+        const anyKey = await Promise.all(
+          LLM_VENDORS.map((v) => api.hasApiKey(v).catch(() => false)),
+        );
+        if (cancelled) return;
+        if (anyKey.some(Boolean)) return;
+        setOnboardingVendor(settings.llm.provider);
+        setOnboardingOpen(true);
+      } catch {
+        // Probe failure is non-fatal — chat still works once a key exists.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [api]);
+
+  const markOnboardingCompleted = useCallback(async () => {
+    try {
+      await api.updateSettings({ features: { onboardingCompleted: true } });
+    } catch {
+      // Persist failure is non-fatal; the dialog still dismisses for the
+      // current session even if the disk write fails.
+    }
+  }, [api]);
   const vendorSupportsThinking = useMemo(() => vendorSupportsThinkingShared(llmVendor, llmModel), [llmVendor, llmModel]);
   const onOpenSettings = useCallback((tab = "llm") => {
     void api.openSettingsWindow(tab);
@@ -1117,6 +1161,32 @@ export function App() {
           See <AskUserQuestionCard> + ChatView ask-question slot. */}
       <DeferredQueueDialog open={deferredQueueOpen} onOpenChange={setDeferredQueueOpen} />
       <ApprovalDialog queue={approvalQueue} onDecide={handleApprovalDecide} />
+      <OnboardingDialog
+        open={onboardingOpen}
+        onOpenChange={(open) => {
+          setOnboardingOpen(open);
+          if (!open) void markOnboardingCompleted();
+        }}
+        onChooseApiKey={() => {
+          setOnboardingOpen(false);
+          void markOnboardingCompleted();
+          onOpenSettings("llm");
+        }}
+        onChooseLogin={() => {
+          setOnboardingOpen(false);
+          void markOnboardingCompleted();
+          setAppLoginOpen(true);
+        }}
+      />
+      <LoginModal
+        api={api}
+        vendor={onboardingVendor}
+        open={appLoginOpen}
+        onOpenChange={setAppLoginOpen}
+        onSuccess={() => {
+          void checkApiKey();
+        }}
+      />
       {/* v6: ApprovalQueueStatus floating chip 제거. 큐 정보는 InputActionBar
           trailing 의 DeferredApprovalChip 으로 통합. Spec docs/blueprints/
           composer-redesign-message-queue.md "제거" 섹션. */}

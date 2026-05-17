@@ -91,6 +91,14 @@ export interface FeatureFlags {
    * configured LLM to refresh user-preferences.md. Default false: manual only.
    */
   idlePreferenceRefresh?: boolean;
+  /**
+   * #893 — Set to `true` after the user has dismissed the first-boot onboarding
+   * dialog (either via "API 키 입력" or "로그인"). Defaults to undefined / false
+   * so legacy installs see the dialog once on first launch after upgrade. The
+   * value is persisted to `~/.lvis/settings.json` via the standard settings
+   * patch flow — no separate disk file.
+   */
+  onboardingCompleted?: boolean;
 }
 
 export interface AppSettings {
