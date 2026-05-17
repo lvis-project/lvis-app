@@ -49,10 +49,10 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
   const [filter, setFilter] = useState<"all" | MarketplacePackageType>("all");
   const [workingSlug, setWorkingSlug] = useState<string | null>(null);
 
-  // URL is committed via an explicit "저장" button (user directive 2026-05-18) —
-  // typing only updates a local draft; the parent setter (and marketplace
-  // endpoint switchover) fire when Save is pressed. Re-sync the draft if the
-  // parent value changes externally (cross-window broadcast, initial load).
+  // URL has an explicit "저장" button — typing only updates a local draft;
+  // the parent setter (and marketplace endpoint switchover) fire when Save
+  // is pressed. Re-sync the draft if the parent value changes externally
+  // (cross-window broadcast, initial load).
   const [urlDraft, setUrlDraft] = useState(baseUrl);
   useEffect(() => { setUrlDraft(baseUrl); }, [baseUrl]);
   const isUrlDirty = urlDraft.trim() !== baseUrl.trim();
@@ -74,12 +74,9 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
     onSaveNow?.();
   }, [onSaveNow]);
 
-  // "Leave without saving" warning — user directive 2026-05-18 ("저장 버튼
-  // 안누르고 컨텐츠를 벗어나려고 하면 경고 띄워주기"). Fires on window close
-  // (Cmd+Q / X) when there are unsaved URL changes or a typed-but-not-saved
-  // API key. Browsers/Electron show their native "leave?" confirm when
-  // `returnValue` is set. The private-network toggle is immediate-apply
-  // and isn't tracked here — it persists the moment the user clicks it.
+  // "Leave without saving" warning. Fires on window close when there are
+  // unsaved URL changes or a typed-but-not-saved API key. Private-network
+  // toggle is immediate-apply (no dirty tracking needed).
   useEffect(() => {
     const isDirty = urlDraft.trim() !== baseUrl.trim() || apiKeyInput.trim() !== "";
     if (!isDirty) return;
@@ -95,7 +92,7 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
   }, [urlDraft, baseUrl, apiKeyInput]);
 
   // API key + private network sit behind a "고급 옵션" collapse since most
-  // users keep the default endpoint with no auth (user directive 2026-05-18).
+  // users keep the default endpoint with no auth.
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const refreshPackages = useCallback(async () => {
@@ -188,9 +185,9 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
       </div>
 
       <SettingsSection title="서버 연결">
-        {/* URL — explicit Save button (user directive 2026-05-18). The
-            draft state means typing doesn't churn the marketplace endpoint
-            on every keystroke; "저장" disabled when draft == committed. */}
+        {/* URL — draft state means typing doesn't churn the marketplace
+            endpoint on every keystroke; "저장" is disabled when draft
+            equals the committed value. */}
         <div className="space-y-2">
           <Label className="text-sm font-medium">마켓플레이스 서버 URL</Label>
           <div className="flex items-center gap-2">
