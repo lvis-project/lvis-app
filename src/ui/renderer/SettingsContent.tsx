@@ -1,8 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
-import { VisuallyHidden } from "radix-ui";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "../../components/ui/button.js";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../../components/ui/tabs.js";
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from "../../components/ui/dialog.js";
 import { SavedToastFloating, SavedToastProvider } from "./contexts/saved-toast.js";
 import type { LvisApi } from "./types.js";
 import { RolesTab } from "./tabs/RolesTab.js";
@@ -48,66 +46,8 @@ function TabSaveBar({
 
 // Settings-wide "저장되었습니다" toast plumbing now lives in
 // `./contexts/saved-toast.tsx` so PluginConfigTab can import the consumer
-// hook without forming a circular import with SettingsDialog (which
+// hook without forming a circular import with SettingsContent (which
 // itself imports PluginConfigTab in this file).
-
-export function SettingsDialog({
-  open,
-  onOpenChange,
-  api,
-  onSaved,
-  initialTab = "llm",
-}: {
-  open: boolean;
-  onOpenChange: (o: boolean) => void;
-  api: LvisApi;
-  onSaved: () => void;
-  initialTab?: string;
-}) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        size="2xl"
-        // Linear-style flush layout (round-3 fix per 3-agent verification):
-        //   - !p-0      → kill the dialog cva's base p-6 so sidebar + content
-        //                 reach the dialog's outer border (no padding gap).
-        //   - !gap-0    → kill the dialog cva's base `gap-4`. The base is
-        //                 `grid gap-4` for stacked sm/md dialogs; with our
-        //                 horizontal flex layout the gap-4 would otherwise
-        //                 push the content area down ~16px even after we
-        //                 removed DialogHeader.
-        //   - flex/flex-col → override base `grid` so children stack via flex.
-        className="h-[90dvh] min-h-[600px] max-h-[920px] !overflow-hidden !p-0 !gap-0 flex flex-col"
-      >
-        {/* Linear-style — outer page heading removed. Each tab renders its
-            own page header (SettingsPageHeader) so the right pane top is
-            flush with the left nav top.
-
-            sr-only via Tailwind utility is unreliable here: shadcn's
-            DialogHeader is a `flex flex-col space-y-1.5` wrapper whose
-            layout-props can race with the sr-only class. Use Radix's
-            VisuallyHidden primitive instead — it owns position:absolute
-            + clip + width:1px + height:1px directly on the rendered
-            element, so the title/description are hidden but still
-            announced by screen readers (Radix Dialog requires both
-            for a11y). */}
-        <VisuallyHidden.Root>
-          <DialogTitle>설정</DialogTitle>
-          <DialogDescription>앱 환경, 채팅 동작, 검색 엔진, 권한 정책을 설정합니다.</DialogDescription>
-        </VisuallyHidden.Root>
-        <div className="flex-1 min-h-0 overflow-hidden">
-          <SettingsContent
-            open={open}
-            onOpenChange={onOpenChange}
-            api={api}
-            onSaved={onSaved}
-            initialTab={initialTab}
-          />
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
 
 export function SettingsContent({
   open,
@@ -228,6 +168,15 @@ export function SettingsContent({
     };
   }, [api, open]);
 
+  // Scroll-reset: when the user switches tabs, reset the right pane to top
+  // so they always land at the page header rather than the previous tab's
+  // scroll position. `behavior: "instant"` avoids the animated scroll
+  // fighting the tab transition animation on fast tab-switchers.
+  const rightPaneRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    rightPaneRef.current?.scrollTo({ top: 0, behavior: "instant" });
+  }, [tab]);
+
   // Sidebar trigger style: full-width row, left-aligned, active row uses
   // accent background to read like a real selected list item rather than
   // the horizontal pill-tab style Radix ships by default. `data-[state=active]`
@@ -293,17 +242,18 @@ export function SettingsContent({
         <TabsTrigger value="marketplace" className={sideTriggerCls}>마켓플레이스</TabsTrigger>
       </TabsList>
 
-      {/* Right pane — always-visible scrollbar so the user perceives the
-          area as scrollable even before scroll is needed. `overflow-y-scroll`
-          (not `auto`) keeps the gutter reserved; the themed webkit
-          scrollbar set in styles.css renders the thumb only when content
-          exceeds the pane. `relative` so the floating SavedToast anchors
-          here rather than the dialog. */}
-      {/* Right pane owns its own padding now that the dialog itself is
-          flush (DialogContent !p-0). pt-2 matches the sidebar's p-2 so
-          the first sidebar trigger and the page header start at the
-          same vertical position (architect round-3 alignment fix). */}
-      <div className="flex flex-1 min-w-0 flex-col overflow-y-scroll px-6 pt-2 pb-5 lvis-settings-scroll">
+      {/* Right pane — two-layer layout so split-pane tabs (PluginConfigTab,
+          McpTab) can use h-full reliably.
+          Outer: `overflow-hidden flex-col flex-1` — gives a fixed height
+            to the column so children can fill it with h-full / flex-1.
+          Inner scroll: `overflow-y-scroll flex-1 min-h-0` — the actual
+            scroll container. `overflow-y-scroll` (not `auto`) keeps the
+            gutter always-reserved so layout doesn't shift on short pages.
+            `lvis-settings-scroll` hooks the themed webkit scrollbar.
+          pt-2 on outer matches the sidebar's p-2 so the first sidebar
+          trigger and the SettingsPageHeader h2 land at the same Y. */}
+      <div className="flex flex-1 min-w-0 flex-col overflow-hidden">
+      <div ref={rightPaneRef} className="flex flex-1 min-h-0 flex-col overflow-y-scroll px-6 pt-2 pb-5 lvis-settings-scroll">
         {s.lastSaveError && (
           <div
             role="alert"
@@ -435,6 +385,7 @@ export function SettingsContent({
               settingsLoaded={s.settingsLoaded}
             />
           </TabsContent>
+      </div>
       </div>
     </Tabs>
     </SavedToastProvider>
