@@ -63,6 +63,12 @@ export function isLLMVendor(v: unknown): v is LLMVendor {
  *   `stopSequences` — modern frontier models (GPT-5+, Claude 4+) deprecate
  *   or ignore these sampling/decoding params. Vendor SDK defaults are used.
  *   Persisted values for these keys are silently dropped on next write.
+ *
+ * CHANGELOG (#893 top-level authMode promotion):
+ *   Removed `authMode` — login now wraps vendor selection itself (one switch
+ *   for the whole app, not per-vendor). The top-level `LLMSettings.authMode`
+ *   is the new source of truth. Legacy per-vendor `authMode` keys on disk
+ *   are migrated up in `loadSettings()` and dropped on next write.
  */
 export interface LLMVendorSettings {
   model: string;
@@ -71,17 +77,6 @@ export interface LLMVendorSettings {
   vertexLocation?: string;
   enableThinking: boolean;
   thinkingBudgetTokens: number;
-  /**
-   * #893 — How the user authenticates to this vendor.
-   *   - `"manual"` (default): user pastes an API key into the Settings UI.
-   *   - `"login"`: user clicks "Login" and the host runs a mockup credential
-   *     check; on success the matching `LVIS_DEMO_KEY_<VENDOR>` env var is
-   *     installed into the encrypted secret store under `llm.apiKey.<vendor>`.
-   *
-   * Optional + default `"manual"` so persisted settings written before this
-   * field shipped keep working unchanged.
-   */
-  authMode?: "manual" | "login";
 }
 
 const DEFAULT_MODEL: Record<LLMVendor, string> = {
@@ -99,7 +94,6 @@ function defaultBlock(vendor: LLMVendor): LLMVendorSettings {
     model,
     enableThinking: vendorSupportsThinking(vendor, model),
     thinkingBudgetTokens: 10_000,
-    authMode: "manual",
   };
 }
 
