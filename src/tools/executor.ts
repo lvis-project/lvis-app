@@ -31,6 +31,7 @@ import type {
   ToolTrustOrigin,
 } from "./types.js";
 import { trustFromSource } from "./types.js";
+import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
 import type { PermissionManager, PermissionCheckResult } from "../permissions/permission-manager.js";
 import type { ApprovalGate, ApprovalMode } from "../permissions/approval-gate.js";
 import {
@@ -1591,8 +1592,28 @@ export class ToolExecutor {
       abortSignal,
     };
 
+    // Global ceiling — last-resort cap so a hung tool can never leave the
+    // user waiting indefinitely. Built-in shell tools also enforce their own
+    // SIGTERM ladder at `timeoutSeconds`; the ceiling here is the only cap
+    // for tool surfaces (read/grep/glob/plugin tools, etc.) that don't
+    // accept a `timeoutSeconds` argument from the model.
+    let ceilingTimer: NodeJS.Timeout | undefined;
+    const ceilingPromise = new Promise<never>((_, reject) => {
+      ceilingTimer = setTimeout(
+        () =>
+          reject(
+            new Error(
+              `tool execution exceeded global ceiling (${TOOL_TIMEOUT_POLICY.globalCeilingMs}ms): ${toolUse.name}`,
+            ),
+          ),
+        TOOL_TIMEOUT_POLICY.globalCeilingMs,
+      );
+    });
     try {
-      const result = await tool.execute(finalInput, executionContext);
+      const result = await Promise.race([
+        tool.execute(finalInput, executionContext),
+        ceilingPromise,
+      ]);
       content = result.output;
       isError = result.isError;
       // MCP Apps §3.2 — propagate uiPayload from tool metadata
@@ -1605,6 +1626,8 @@ export class ToolExecutor {
     } catch (err) {
       content = err instanceof Error ? err.message : "알 수 없는 도구 실행 오류";
       isError = true;
+    } finally {
+      if (ceilingTimer) clearTimeout(ceilingTimer);
     }
 
     // ── Step 7: PostHook + Feedback Merge ───────────
