@@ -1136,14 +1136,17 @@ export class ToolExecutor {
     };
 
     const applyApprovedDirectory = (approvedDirectory: string): void => {
-      invocationAllowedScope = buildAllowedScope([
-        ...baseAdditionalDirectories,
-        approvedDirectory,
-      ]);
-      invocationRuntimeAllowedDirectories = buildRuntimeAllowedDirectories([
-        ...baseAdditionalDirectories,
-        approvedDirectory,
-      ]);
+      // Re-read fresh: a parallel sibling in the same Promise.all(executeAll)
+      // batch may have just resolved its own out-of-allowed-dir dialog and
+      // mutated the conversation loop's session/turn lists. Spreading from
+      // `baseAdditionalDirectories` (executeOne-entry snapshot) would silently
+      // drop the sibling's grant — read-side is fresh via getAdditionalDirectories
+      // but write-side must also be fresh for symmetry. (architect 2-round Q1)
+      const fresh: readonly string[] =
+        invocationPermissionContext.getAdditionalDirectories?.()
+        ?? baseAdditionalDirectories;
+      invocationAllowedScope = buildAllowedScope([...fresh, approvedDirectory]);
+      invocationRuntimeAllowedDirectories = buildRuntimeAllowedDirectories([...fresh, approvedDirectory]);
     };
 
     // Propagate the user's grant lifetime choice up to the conversation
@@ -1165,8 +1168,12 @@ export class ToolExecutor {
       }
       if (scope === "session") {
         if (!invocationPermissionContext.onSessionDirectoryGrant) {
+          if (!invocationPermissionContext.onTurnDirectoryGrant) {
+            log.error(`[permission-scope] both session and turn callbacks unwired — session-scope grant for ${approvedDirectory} dropped entirely`);
+            return;
+          }
           log.error(`[permission-scope] onSessionDirectoryGrant unwired — degrading session-scope grant for ${approvedDirectory} to turn-scope`);
-          invocationPermissionContext.onTurnDirectoryGrant?.(approvedDirectory);
+          invocationPermissionContext.onTurnDirectoryGrant(approvedDirectory);
           return;
         }
         invocationPermissionContext.onSessionDirectoryGrant(approvedDirectory);
