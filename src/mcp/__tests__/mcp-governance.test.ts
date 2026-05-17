@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { McpGovernance } from "../mcp-governance.js";
 import type { McpGovernancePolicy, McpServerApproval } from "../types.js";
+import { TOOL_TIMEOUT_POLICY } from "../../shared/tool-timeout-policy.js";
 
 const testDir = join(tmpdir(), `lvis-mcp-governance-${process.pid}`);
 const policyPath = join(testDir, "mcp-policy.json");
@@ -425,5 +426,100 @@ describe("McpGovernance.validateServer — API key sinks", () => {
         apiKeyHeader: "content-type",
       }).valid,
     ).toBe(false);
+  });
+});
+
+describe("McpGovernance — connectionTimeoutMs policy cap (ingestion clamp)", () => {
+  it("rejects an approval whose connectionTimeoutMs exceeds mcpRequestMaxMs", async () => {
+    const aboveCap = TOOL_TIMEOUT_POLICY.mcpRequestMaxMs + 1;
+    const policy: McpGovernancePolicy = {
+      version: "1.0",
+      defaultPolicy: "deny",
+      servers: [
+        {
+          id: "test-stdio",
+          name: "test-stdio",
+          status: "approved",
+          transport: "stdio",
+          allowedCommands: ["uvx"],
+          requiredAuth: "api-key",
+          apiKeyEnv: "MY_API_KEY",
+          tlsRequired: false,
+          allowedCapabilities: ["tools"],
+          maxTools: 16,
+          toolNamePrefix: "test",
+          toolPermissionMode: "default",
+          maxResponseSizeBytes: 1_000_000,
+          connectionTimeoutMs: aboveCap,
+          maxConcurrentRequests: 4,
+        },
+      ],
+      globalRules: {
+        maxServersTotal: 10,
+        blockedUrlPatterns: [],
+        allowedUrlPatterns: [],
+        auditLevel: "full",
+        killSwitchEnabled: true,
+        policyRefreshIntervalMs: 60_000,
+      },
+    };
+    await writePolicy(policy);
+    const gov = new McpGovernance(policyPath);
+    const result = gov.validateServer({
+      id: "test-stdio",
+      transport: "stdio",
+      command: "uvx",
+      auth: "api-key",
+      apiKey: "sk-test",
+      apiKeyEnv: "MY_API_KEY",
+    });
+    expect(result.valid).toBe(false);
+    expect(result.reason).toMatch(/connectionTimeoutMs 정책 상한 위반/);
+  });
+
+  it("accepts an approval whose connectionTimeoutMs is within the cap", async () => {
+    const withinCap = TOOL_TIMEOUT_POLICY.mcpRequestMaxMs;
+    const policy: McpGovernancePolicy = {
+      version: "1.0",
+      defaultPolicy: "deny",
+      servers: [
+        {
+          id: "test-stdio",
+          name: "test-stdio",
+          status: "approved",
+          transport: "stdio",
+          allowedCommands: ["uvx"],
+          requiredAuth: "api-key",
+          apiKeyEnv: "MY_API_KEY",
+          tlsRequired: false,
+          allowedCapabilities: ["tools"],
+          maxTools: 16,
+          toolNamePrefix: "test",
+          toolPermissionMode: "default",
+          maxResponseSizeBytes: 1_000_000,
+          connectionTimeoutMs: withinCap,
+          maxConcurrentRequests: 4,
+        },
+      ],
+      globalRules: {
+        maxServersTotal: 10,
+        blockedUrlPatterns: [],
+        allowedUrlPatterns: [],
+        auditLevel: "full",
+        killSwitchEnabled: true,
+        policyRefreshIntervalMs: 60_000,
+      },
+    };
+    await writePolicy(policy);
+    const gov = new McpGovernance(policyPath);
+    const result = gov.validateServer({
+      id: "test-stdio",
+      transport: "stdio",
+      command: "uvx",
+      auth: "api-key",
+      apiKey: "sk-test",
+      apiKeyEnv: "MY_API_KEY",
+    });
+    expect(result.valid).toBe(true);
   });
 });

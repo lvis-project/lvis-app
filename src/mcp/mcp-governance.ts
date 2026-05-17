@@ -20,6 +20,7 @@ import type {
 } from "./types.js";
 import { createLogger } from "../lib/logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
+import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
 import {
   ENV_NAME_RE,
   HTTP_HEADER_NAME_RE,
@@ -536,6 +537,21 @@ export class McpGovernance {
   }
 
   private validateConnectionSecurity(config: McpServerConfig, approval: McpServerApproval): ValidationResult {
+    // connectionTimeoutMs 정책 cap — ingestion 단에서 거부해 dispatch 외부
+    // 소비자 (settings UI, 감사 로그 등) 가 unsafe 값 그대로 보지 않도록 한다.
+    if (
+      typeof approval.connectionTimeoutMs === "number"
+      && approval.connectionTimeoutMs > TOOL_TIMEOUT_POLICY.mcpRequestMaxMs
+    ) {
+      return {
+        valid: false,
+        reason:
+          `connectionTimeoutMs 정책 상한 위반 (서버: ${approval.id}): ` +
+          `${approval.connectionTimeoutMs}ms > ${TOOL_TIMEOUT_POLICY.mcpRequestMaxMs}ms 최대치.`,
+        layer: 2,
+      };
+    }
+
     // TLS 강제 (원격 연결)
     if (approval.tlsRequired && config.url) {
       const isSecure = config.url.startsWith("https://") || config.url.startsWith("wss://");
