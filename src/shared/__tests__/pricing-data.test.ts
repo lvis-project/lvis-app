@@ -105,4 +105,43 @@ describe("engine pricing env-override (Node-only layer)", () => {
     // Known model still resolves
     expect(lookupPricingOptional("claude", "claude-sonnet-4-6")?.inputPer1M).toBe(3);
   });
+
+  // Regression lock — issue #900. Pre-fix values were stale (mini/nano
+  // contextWindow registered as 1.05M while official is 400K; pricing
+  // 2-6x off across the family). Pin exact values so a future drift is
+  // caught at test time rather than via user-reported 429 errors. When
+  // OpenAI revises the spec, update both the catalog and this test in
+  // the same PR.
+  describe("gpt-5.4 family — exact OpenAI spec pin (issue #900)", () => {
+    it("gpt-5.4 (1M-class base)", () => {
+      const p = lookupPricing("openai", "gpt-5.4");
+      expect(p.inputPer1M).toBe(2.5);
+      expect(p.outputPer1M).toBe(15);
+      expect(p.contextWindow).toBe(1_050_000);
+    });
+    it("gpt-5.4-mini (400K tier)", () => {
+      const p = lookupPricing("openai", "gpt-5.4-mini");
+      expect(p.inputPer1M).toBe(0.75);
+      expect(p.outputPer1M).toBe(4.5);
+      expect(p.contextWindow).toBe(400_000);
+    });
+    it("gpt-5.4-nano (400K tier, cheapest)", () => {
+      const p = lookupPricing("openai", "gpt-5.4-nano");
+      expect(p.inputPer1M).toBe(0.2);
+      expect(p.outputPer1M).toBe(1.25);
+      expect(p.contextWindow).toBe(400_000);
+    });
+    it("gpt-5.4-pro (1.1M-class premium)", () => {
+      const p = lookupPricing("openai", "gpt-5.4-pro");
+      expect(p.inputPer1M).toBe(30);
+      expect(p.outputPer1M).toBe(180);
+      expect(p.contextWindow).toBe(1_100_000);
+    });
+    it("Copilot proxy gpt-5.4-mini contextWindow matches OpenAI spec (pricing 0 — subscription billing)", () => {
+      const p = lookupPricing("copilot", "gpt-5.4-mini");
+      expect(p.inputPer1M).toBe(0);
+      expect(p.outputPer1M).toBe(0);
+      expect(p.contextWindow).toBe(400_000);
+    });
+  });
 });
