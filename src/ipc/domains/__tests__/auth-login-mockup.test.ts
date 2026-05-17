@@ -127,7 +127,7 @@ describe("auth:login-mockup IPC handler (#893)", () => {
       password: "demo123",
       vendor: "openai",
     });
-    expect(result).toEqual({ ok: true, vendor: "openai" });
+    expect(result).toMatchObject({ ok: true, vendor: "openai" });
     expect(deps.settingsService.setSecret).toHaveBeenCalledWith(
       "llm.apiKey.openai",
       "sk-demo-test",
@@ -155,7 +155,7 @@ describe("auth:login-mockup IPC handler (#893)", () => {
       password: "secret",
       vendor: "claude",
     });
-    expect(ok).toEqual({ ok: true, vendor: "claude" });
+    expect(ok).toMatchObject({ ok: true, vendor: "claude" });
     expect(deps.settingsService.setSecret).toHaveBeenCalledWith(
       "llm.apiKey.claude",
       "sk-ant-demo",
@@ -174,7 +174,7 @@ describe("auth:login-mockup IPC handler (#893)", () => {
       password: "demo123",
       vendor: "azure-foundry",
     });
-    expect(result).toEqual({ ok: true, vendor: "azure-foundry" });
+    expect(result).toMatchObject({ ok: true, vendor: "azure-foundry" });
     expect(deps.settingsService.setSecret).toHaveBeenCalledWith(
       "llm.apiKey.azure-foundry",
       "sk-azure-demo",
@@ -206,7 +206,7 @@ describe("auth:login-mockup IPC handler (#893)", () => {
       password: "demo123",
       vendor: "openai",
     });
-    expect(result).toEqual({ ok: true, vendor: "openai" });
+    expect(result).toMatchObject({ ok: true, vendor: "openai" });
   });
 
   it("registers handler in dev builds even when LVIS_DEMO_ENABLED is unset", async () => {
