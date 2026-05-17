@@ -5,6 +5,7 @@ import { Input } from "../../../components/ui/input.js";
 import { formatCost, formatTokens } from "../utils/cost-format.js";
 import type { LvisApi, UsageSummaryShape, UsageTrendPt } from "../types.js";
 import { Sparkline } from "./Sparkline.js";
+import { SettingsPageHeader } from "./SettingsPageHeader.js";
 
 type Preset = "7d" | "30d" | "90d" | "all" | "custom";
 
@@ -78,14 +79,36 @@ export function UsageDashboard({ api }: { api: LvisApi }) {
     }
   }, [api, summary]);
 
-  if (loading) return <div className="py-6 text-center text-sm text-muted-foreground">로딩 중...</div>;
-  if (!summary) return <div className="py-6 text-center text-sm text-muted-foreground">사용량 데이터를 불러올 수 없습니다.</div>;
+  const header = (
+    <SettingsPageHeader
+      title="사용량"
+      description="기간별 토큰 사용량, 비용, 모델별 누적량을 확인합니다"
+    />
+  );
+
+  if (loading) {
+    return (
+      <div className="space-y-5">
+        {header}
+        <div className="py-6 text-center text-sm text-muted-foreground">로딩 중...</div>
+      </div>
+    );
+  }
+  if (!summary) {
+    return (
+      <div className="space-y-5">
+        {header}
+        <div className="py-6 text-center text-sm text-muted-foreground">사용량 데이터를 불러올 수 없습니다.</div>
+      </div>
+    );
+  }
 
   const sparkPoints = summary.trend.map((p) => p.totalTokens);
   const projection = computeMonthlyProjection(summary.trend);
 
   return (
-    <div className="space-y-4 pt-4">
+    <div className="space-y-5">
+      {header}
       <Card>
         <CardHeader className="pb-1 pt-3 px-3 flex-row items-center justify-between">
           <CardTitle className="text-xs text-muted-foreground">기간 선택</CardTitle>

@@ -23,6 +23,8 @@ import type { ThemeBundle } from "../theme/index.js";
 import type { CSSProperties } from "react";
 import { getApi } from "../api-client.js";
 import { useNotifySaved } from "../contexts/saved-toast.js";
+import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
+import { SettingsSection } from "../components/SettingsSection.js";
 
 type WebViewPreferredFlow = "in-app" | "system-browser";
 
@@ -395,17 +397,17 @@ export function AppearanceTab() {
   const customStack = activePreset === "custom" ? family : "";
 
   return (
-    <div className="space-y-6 pt-4">
-      {/* Header */}
-      <div className="space-y-1">
-        <p className="text-sm font-medium">테마</p>
-        <p className="text-[11px] text-muted-foreground">
-          테마를 선택하면 채팅 배경, 강조 색상, 코드 블록이 함께 변경됩니다. 변경은 즉시 적용되며 재시작이 필요 없습니다.
-        </p>
-      </div>
+    <div className="space-y-6">
+      <SettingsPageHeader
+        title="테마"
+        description="화면 색상, 글꼴, 외부 URL 표시 방식을 설정합니다"
+      />
 
-      {/* ── 6-bundle card grid ───────────────────────────────────────── */}
-      <section className="space-y-3">
+      {/* ── 테마 선택 ─────────────────────────────────── */}
+      <SettingsSection
+        title="색상 테마"
+        description="테마를 선택하면 채팅 배경, 강조 색상, 코드 블록이 함께 변경됩니다. 변경은 즉시 적용되며 재시작이 필요 없습니다."
+      >
         <div
           role="radiogroup"
           aria-label="테마 선택"
@@ -420,14 +422,12 @@ export function AppearanceTab() {
             />
           ))}
         </div>
-      </section>
 
-      {/* ── followSystem toggle — violet pair only ─────────────────────── */}
-      {isVioletPair && (
-        <section className="space-y-2 border-t border-border pt-4">
-          <div className="flex items-center justify-between">
+        {/* followSystem toggle — violet pair only */}
+        {isVioletPair && (
+          <div className="flex items-center justify-between pt-2 border-t border-border">
             <div>
-              <h3 className="text-sm font-semibold">시스템 테마 따르기</h3>
+              <p className="text-sm font-medium">시스템 테마 따르기</p>
               <p className="text-[11px] text-muted-foreground">
                 OS 라이트/다크 모드에 맞춰 Violet Light / Violet Dark 를 자동 전환합니다.
               </p>
@@ -450,23 +450,20 @@ export function AppearanceTab() {
               />
             </button>
           </div>
-        </section>
-      )}
+        )}
+      </SettingsSection>
 
-      {/* ── 폰트 (사용자 자율화) ────────────────────────────────────── */}
-      <section className="space-y-3 border-t border-border pt-4">
-        <div className="flex items-baseline justify-between">
-          <h3 className="text-sm font-semibold">폰트</h3>
+      {/* ── 폰트 ────────────────────────────────────── */}
+      <SettingsSection
+        title="폰트"
+        description="호스트 본체 / 채팅 / 설정 창 전체에 적용됩니다. 시스템 기본은 OS 의 sans-serif 와 한글 폰트 fallback 체인을 사용합니다. 플러그인 자체 창은 호스트 설정과 별도로 자체 폰트를 사용합니다."
+        actions={
           <span className="text-[11px] text-muted-foreground">
             크기 미리보기:{" "}
             <span className="font-mono text-foreground">{Math.round(sizeScale * 16)}px</span>
           </span>
-        </div>
-        <p className="text-[11px] text-muted-foreground">
-          호스트 본체 / 채팅 / 설정 창 전체에 적용됩니다. 시스템 기본은 OS 의 sans-serif 와 한글 폰트 fallback 체인을 사용합니다.
-          플러그인 자체 창은 호스트 설정과 별도로 자체 폰트를 사용합니다.
-        </p>
-
+        }
+      >
         {/* 폰트 패밀리 */}
         <div className="space-y-2">
           <label className="text-[11px] text-muted-foreground">패밀리</label>
@@ -498,11 +495,7 @@ export function AppearanceTab() {
             })}
           </div>
 
-          {/* 사용자 stack 직접 입력 — commit on blur / Enter only.
-              `onChange` 마다 updateSettings 를 invoke 하면 disk write + 모든 윈도우에
-              SETTINGS.updated broadcast + ThemeProvider 의 CSS variable setProperty 가
-              키스트로크당 fire — 60자 stack 입력 시 60 disk write + 60 broadcast.
-              로컬 raw 값으로만 추적하다가 commit 시점에만 trim + updateSettings. */}
+          {/* 사용자 stack 직접 입력 — commit on blur / Enter only. */}
           <FontFamilyCustomInput
             initial={customStack}
             onCommit={(value) => setFamily(value)}
@@ -541,19 +534,18 @@ export function AppearanceTab() {
             })}
           </div>
         </div>
-      </section>
+      </SettingsSection>
 
       {/* ── 외부 URL 표시 정책 (B1) ─────────────────────────────────── */}
-      <section className="space-y-2 border-t border-border pt-4">
-        <div className="flex items-baseline justify-between">
-          <h3 className="text-sm font-semibold">외부 URL 표시</h3>
+      <SettingsSection
+        title="외부 URL 표시"
+        description="이 설정은 플러그인이 호스트에 위임한 외부 URL 표시에 적용됩니다."
+        actions={
           <span className="text-[11px] text-muted-foreground">
             현재: <span className="font-mono text-foreground">{webViewFlow}</span>
           </span>
-        </div>
-        <p className="text-[11px] text-muted-foreground">
-          이 설정은 플러그인이 호스트에 위임한 외부 URL 표시에 적용됩니다.
-        </p>
+        }
+      >
         <div
           role="radiogroup"
           aria-label="외부 URL 표시 정책 선택"
@@ -582,7 +574,7 @@ export function AppearanceTab() {
             );
           })}
         </div>
-      </section>
+      </SettingsSection>
     </div>
   );
 }
