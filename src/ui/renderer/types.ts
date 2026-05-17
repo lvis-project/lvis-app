@@ -107,6 +107,8 @@ export type LLMVendorSettingsRenderer = {
   vertexLocation?: string;
   enableThinking: boolean;
   thinkingBudgetTokens: number;
+  /** #893 — `"manual"` (API key input) or `"login"` (mockup credential flow). */
+  authMode?: "manual" | "login";
 };
 
 export type AppSettings = {
@@ -147,6 +149,8 @@ export type AppSettings = {
   /** Experimental feature flags — all default false. */
   features?: {
     idlePreferenceRefresh?: boolean;
+    /** #893 — `true` after the user has dismissed the first-boot onboarding. */
+    onboardingCompleted?: boolean;
   };
 };
 
@@ -218,6 +222,16 @@ export type LvisApi = {
   setMarketplaceApiKey: (k: string) => Promise<{ ok: true }>;
   hasMarketplaceApiKey: () => Promise<boolean>;
   deleteMarketplaceApiKey: () => Promise<{ ok: true }>;
+  /**
+   * #893 — Mockup credential login. On `ok: true` the vendor's API key has
+   * been installed into the encrypted secret store; the renderer should
+   * refresh its `hasKey(vendor)` snapshot. The `error` codes are kebab-case
+   * English (`invalid-credentials`, `invalid-vendor`, `no-demo-key`); the
+   * user-facing Korean text is constructed in the caller.
+   */
+  loginMockup: (payload: { username: string; password: string; vendor: string }) => Promise<
+    { ok: true; vendor: string } | { ok: false; error: string }
+  >;
   openSettingsWindow: (initialTab?: string) => Promise<{ ok: true; windowId: number } | { ok: false; error: string }>;
   notifySettingsWindowSaved: () => Promise<{ ok: true } | { ok: false; error: string }>;
   onSettingsWindowSaved: (handler: () => void) => () => void;
