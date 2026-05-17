@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures';
-import { openSettingsWindow } from './settings-window';
+import { closeSettingsWindow, openSettingsWindow } from './settings-window';
 
 test('native settings window opens and closes', async ({ app, mainWindow }) => {
   const settingsWindow = await openSettingsWindow(app, mainWindow, 'chat');
@@ -10,9 +10,7 @@ test('native settings window opens and closes', async ({ app, mainWindow }) => {
     'active',
   );
 
-  const closePromise = settingsWindow.waitForEvent('close');
-  await settingsWindow.getByRole('button', { name: '닫기' }).click();
-  await closePromise;
+  await closeSettingsWindow(app, settingsWindow);
 });
 
 test('native settings window preserves standard copy and paste shortcuts', async ({ app, mainWindow }) => {
@@ -35,7 +33,5 @@ test('native settings window preserves standard copy and paste shortcuts', async
   const copied = await app.evaluate(({ clipboard }) => clipboard.readText());
   expect(copied).toBe(pastedModel);
 
-  const closePromise = settingsWindow.waitForEvent('close');
-  await settingsWindow.getByRole('button', { name: '닫기' }).click();
-  await closePromise;
+  await closeSettingsWindow(app, settingsWindow);
 });

@@ -13,12 +13,6 @@ import {
   SelectValue,
 } from "../../../components/ui/select.js";
 import { Separator } from "../../../components/ui/separator.js";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "../../../components/ui/tooltip.js";
 import { PERMISSION_REVIEWER_FRAMEWORK } from "../../../shared/permission-reviewer-framework.js";
 import type { UserApprovalScope, UserApprovalVerdict } from "../../../shared/permissions-events.js";
 import { EXEC_MODE_OPTIONS, LONG_TOAST_TTL_MS } from "../constants.js";
@@ -747,36 +741,40 @@ export function PermissionsTab() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <TooltipProvider>
-                      {REVIEWER_PROVIDER_OPTIONS.map((opt) => {
-                        const hasKey = providerKeyMap[opt.value] ?? false;
-                        const isDisabled = !hasKey;
-                        // Minor-4.1: use design-system Tooltip (hover + keyboard focus)
-                        // instead of title attribute (hover-only, not read by screen readers).
-                        // opacity-40 → opacity-60 for Minor-1.2 contrast improvement.
-                        const item = (
-                          <SelectItem
-                            key={opt.value}
-                            value={opt.value}
-                            disabled={isDisabled}
-                            className={isDisabled ? "opacity-60 cursor-not-allowed" : undefined}
-                            data-testid={`reviewer-provider-option-${opt.value}`}
-                          >
-                            {opt.label}
-                            {isDisabled && (
-                              <span className="ml-2 text-[10px] text-muted-foreground">(키 없음)</span>
-                            )}
-                          </SelectItem>
-                        );
-                        if (!isDisabled) return item;
-                        return (
-                          <Tooltip key={opt.value}>
-                            <TooltipTrigger asChild>{item}</TooltipTrigger>
-                            <TooltipContent data-testid="reviewer-provider-tooltip">API 키 설정 필요 — 지능 설정에서 키를 추가하세요.</TooltipContent>
-                          </Tooltip>
-                        );
-                      })}
-                    </TooltipProvider>
+                    {REVIEWER_PROVIDER_OPTIONS.map((opt) => {
+                      const hasKey = providerKeyMap[opt.value] ?? false;
+                      const isDisabled = !hasKey;
+                      // Disabled SelectItem 의 reason 을 모든 모달리티에 노출:
+                      //   sighted mouse/keyboard → inline `(키 없음 · 설정 필요)` 항상 표시
+                      //   screen reader          → `aria-label` 에 전체 reason 포함
+                      // 이전에는 Tooltip 으로 처리했으나 Radix Select 는 disabled
+                      // SelectItem 에 `data-disabled:pointer-events-none` 을 강제하므로
+                      // hover/focus 가 발화되지 않아 Tooltip 이 영원히 열리지 않고
+                      // `aria-describedby` 도 wire 되지 않음 → 모든 사용자가 reason 을
+                      // 알 수 없는 상태였음. inline + aria-label 패턴은 Radix
+                      // listbox ARIA 트리도 손상시키지 않는다.
+                      const reason = "API 키 설정 필요 — 지능 설정에서 키를 추가하세요.";
+                      return (
+                        <SelectItem
+                          key={opt.value}
+                          value={opt.value}
+                          disabled={isDisabled}
+                          className={isDisabled ? "opacity-60 cursor-not-allowed" : undefined}
+                          data-testid={`reviewer-provider-option-${opt.value}`}
+                          aria-label={isDisabled ? `${opt.label} — ${reason}` : undefined}
+                        >
+                          {opt.label}
+                          {isDisabled && (
+                            <span
+                              data-testid="reviewer-provider-tooltip"
+                              className="ml-2 text-[10px] text-muted-foreground"
+                            >
+                              (키 없음)
+                            </span>
+                          )}
+                        </SelectItem>
+                      );
+                    })}
                   </SelectContent>
                 </Select>
               </Label>
