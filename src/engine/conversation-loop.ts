@@ -246,6 +246,14 @@ export interface ConversationLoopDeps {
   routeEngine: RouteEngine;
   toolRegistry: ToolRegistry;
   memoryManager: MemoryManager;
+  /**
+   * Notify all renderer windows that the directory config mutated.
+   * Wired by boot from `ipc/domains/permissions.ts`. Called by
+   * `addSessionAdditionalDirectory` so dialog-driven (executor-side)
+   * grants reach the PermissionsTab subscribers, not only slash-dispatch
+   * grants. Closes the round-3 architect Q5 / critic M1 / security Q6 gap.
+   */
+  broadcastPermissionConfigChanged?: () => void;
   permissionManager?: import("../permissions/permission-manager.js").PermissionManager;
   routineEngine?: RoutineEngine;
   /** Agent 5: turn 완료 시 idle scheduler에 대화 신호 전송 (§6.1) */
@@ -379,6 +387,16 @@ export class ConversationLoop {
   /** Session-wide total of request_plugin activations (cap MAX_SESSION_PLUGIN_EXPANSION). */
   private sessionPluginExpansions = 0;
   private sessionAdditionalDirectories: string[] = [];
+  /**
+   * Turn-scope additional allowed directories. Populated when the user
+   * chooses "이번 1회만" on an out-of-allowed-dir approval — kept alive
+   * across all tool calls inside the same `runTurn` so a multi-step
+   * agentic round (e.g. `bash ls` → `bash find` → `bash stat` on the
+   * same directory) does not re-prompt the user for the same path on
+   * every subsequent call. Cleared in `runTurn`'s finally so the grant
+   * does not survive into the next user message.
+   */
+  private turnAdditionalDirectories: string[] = [];
   /**
    * Single in-flight LLM compact lock per ConversationLoop.
    * 같은 instance 에서 두 turn 이 동시에 compact trigger 시 두 번째는 skip (race 방지).
@@ -589,6 +607,7 @@ export class ConversationLoop {
     this.sessionRoutineId = null;
     this.sessionRoutineTitle = null;
     this.sessionAdditionalDirectories = [];
+    this.turnAdditionalDirectories = [];
     this.history.clear();
     this.cumulativeUsage = { inputTokens: 0, outputTokens: 0 };
     this.sessionPluginExpansions = 0;
@@ -601,6 +620,17 @@ export class ConversationLoop {
   addSessionAdditionalDirectory(path: string): void {
     if (!this.sessionAdditionalDirectories.includes(path)) {
       this.sessionAdditionalDirectories.push(path);
+      // Round-3 fix: every callsite that mutates the session list must
+      // notify multi-window PermissionsTab subscribers. The slash-dispatch
+      // path also broadcasts (ipc/domains/permissions.ts) — this closes
+      // the executor-callback path that was previously silent.
+      this.deps.broadcastPermissionConfigChanged?.();
+    }
+  }
+
+  addTurnAdditionalDirectory(path: string): void {
+    if (!this.turnAdditionalDirectories.includes(path)) {
+      this.turnAdditionalDirectories.push(path);
     }
   }
 
@@ -608,6 +638,7 @@ export class ConversationLoop {
     return [
       ...(this.deps.getAdditionalDirectories?.() ?? this.deps.additionalDirectories ?? []),
       ...this.sessionAdditionalDirectories,
+      ...this.turnAdditionalDirectories,
     ];
   }
 
@@ -771,6 +802,7 @@ export class ConversationLoop {
     this.cumulativeUsage = { inputTokens: 0, outputTokens: 0 };
     this.sessionPluginExpansions = 0;
     this.sessionAdditionalDirectories = [];
+    this.turnAdditionalDirectories = [];
     // Use max compactNum across all checkpoints (monotonic guarantee).
     // Using array length would produce a stale value when normalizeCheckpoint drops
     // invalid entries — next compact would reuse an already-used compactNum.
@@ -1168,6 +1200,11 @@ export class ConversationLoop {
       // TriggerExecutor's chat-busy guard), and a single failed chat turn
       // would permanently block trigger imports.
       this.currentAbortController = null;
+      // "이번 1회만" out-of-allowed-dir grants live only for the duration
+      // of one user message. Clearing here (queryLoop terminal regardless
+      // of success/error/abort) ensures the next turn re-prompts for the
+      // same path — the user's "1회" intent.
+      this.turnAdditionalDirectories = [];
       // Drain any guidance that never reached a round boundary (single-
       // round turn, or guidance queued after the last round closed). It
       // cannot be applied to a future turn safely — the next turn's user
@@ -1781,7 +1818,10 @@ export class ConversationLoop {
             headless: this.deps.headless,
             allowedPluginIds: new Set(scope.activePluginIds),
             additionalDirectories: this.getTurnAdditionalDirectories(),
+            getAdditionalDirectories: () => this.getTurnAdditionalDirectories(),
             trustOrigin: toolTrustOrigin,
+            onTurnDirectoryGrant: (path) => this.addTurnAdditionalDirectory(path),
+            onSessionDirectoryGrant: (path) => this.addSessionAdditionalDirectory(path),
           },
         },
       );

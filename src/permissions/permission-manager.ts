@@ -203,6 +203,15 @@ export class PermissionManager {
   private interactiveAutoApprove: "off" | "low" = "off";
   /** CRITICAL 4.1: optional broadcast for memory-hit auto-approve disclosure */
   private broadcastUserApprovalHit: ((payload: UserApprovalHitPayload) => void) | null = null;
+  /**
+   * Architectural choke point for permission config fan-out — every
+   * persisted mutation through PermissionManager (addAlwaysAllowedPersist,
+   * addAlwaysDeniedPersist, removeRule) fires this callback so multi-window
+   * PermissionsTab refreshes without each call site re-implementing the
+   * broadcast wiring. Wired by boot from
+   * `ipc/domains/permissions.ts:broadcastPermissionConfigChanged`.
+   */
+  private broadcastConfigChanged: (() => void) | null = null;
 
   constructor(permissionsFilePath?: string) {
     this.permissionsFilePath =
@@ -253,6 +262,10 @@ export class PermissionManager {
    * Called once at boot. When set, every R-2 memory hit emits
    * `lvis:permissions:user-approval-hit` to the renderer and a console.info log.
    */
+  setBroadcastConfigChanged(fn: () => void): void {
+    this.broadcastConfigChanged = fn;
+  }
+
   setBroadcastUserApprovalHit(fn: (payload: UserApprovalHitPayload) => void): void {
     this.broadcastUserApprovalHit = fn;
   }
@@ -328,6 +341,7 @@ export class PermissionManager {
     });
     // 인메모리: durable write 성공 후 alwaysAllowed Set (checkDetailed layer 5)
     this.alwaysAllowed.add(pattern);
+    this.broadcastConfigChanged?.();
   }
 
   /**
@@ -351,6 +365,7 @@ export class PermissionManager {
         file.rules.unshift({ pattern, action: "deny" });
       }
     });
+    this.broadcastConfigChanged?.();
   }
 
   /**
@@ -368,6 +383,7 @@ export class PermissionManager {
         (r) => !(r.pattern === pattern && r.action === action && !r.source),
       );
     });
+    this.broadcastConfigChanged?.();
   }
 
   /**
