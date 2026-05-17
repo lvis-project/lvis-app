@@ -726,6 +726,17 @@ export class PluginRuntime {
   }
 
   /**
+   * #893 / PR #894 B2 — Read the wildcard slot so `hostApi.config.get(...)`
+   * can merge host-injected values (e.g. `hostApiVendor`) into every
+   * plugin's effective config map. Returns an empty object when no wildcard
+   * overrides have been set so callers can spread the result unconditionally.
+   * The returned object is a shallow copy — callers MUST NOT mutate it.
+   */
+  getWildcardConfigOverride(): Record<string, unknown> {
+    return { ...(this.configOverrides["*"] ?? {}) };
+  }
+
+  /**
    * #893 — Inverse of `setWildcardConfigOverride`. Clears ONLY the keys
    * named in `keys` from the wildcard slot, preserving other injected
    * values. When `keys` is empty the call is a no-op so the unrelated

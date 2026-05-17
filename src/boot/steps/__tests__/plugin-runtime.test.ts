@@ -528,4 +528,152 @@ describe("initPluginRuntime HostApi factory", () => {
       expect(ctx.ownerPluginId).toBe("ms-graph");
     }
   });
+
+  // PR #894 review B6 — active-vendor cross-check in getSecret
+  it("B6 — getSecret denies non-active-vendor llm.apiKey.* even when allowlisted", async () => {
+    runtimeTestState.capturedRuntimeOptions = null;
+    const bootAuditLogger = { log: vi.fn() };
+
+    const getSecretMock = vi.fn((key: string) => {
+      if (key === "llm.apiKey.openai") return "sk-openai";
+      if (key === "llm.apiKey.claude") return "sk-claude";
+      return null;
+    });
+
+    await initPluginRuntime({
+      projectRoot: "/tmp/lvis-test/project",
+      settingsService: {
+        get: vi.fn((key: string) => {
+          // openai is the active vendor for this test
+          if (key === "llm") return { provider: "openai" };
+          if (key === "pluginConfigs") return {};
+          return undefined;
+        }),
+        getSecret: getSecretMock,
+        getPluginConfig: vi.fn(() => ({})),
+        setPluginConfig: vi.fn(),
+      } as never,
+      memoryManager: {} as never,
+      keywordEngine: {
+        registerKeywords: vi.fn(),
+        unregisterByPlugin: vi.fn(),
+      } as never,
+      toolRegistry: {
+        unregisterByPlugin: vi.fn(),
+        register: vi.fn(),
+        listAll: vi.fn(() => []),
+      } as never,
+      pythonPath: undefined,
+      bootAuditLogger: bootAuditLogger as never,
+      mainWindow: {} as never,
+      openAuthWindowService: vi.fn(),
+      openLinkWindowService: vi.fn(),
+      openAuthPartitionViewerService: vi.fn(),
+      shellOpenExternal: vi.fn(),
+      approvalGate: { requestAndWait: vi.fn() } as never,
+    });
+
+    const createHostApi = runtimeTestState.capturedRuntimeOptions?.createHostApi as
+      | ((pluginId: string, manifest: {
+          id: string;
+          config?: Record<string, unknown>;
+          hostSecrets?: { read?: string[] };
+        }, pluginDataDir: string) => {
+          getSecret: (key: string) => string | null;
+        })
+      | undefined;
+    expect(createHostApi).toBeDefined();
+
+    const pluginDataDir = mkdtempSync("/tmp/lvis-hostapi-data-");
+    const api = createHostApi!(
+      "plugin-b6",
+      {
+        id: "plugin-b6",
+        config: {},
+        // Plugin allowlists BOTH vendors; without B6 it could read both.
+        hostSecrets: { read: ["llm.apiKey.openai", "llm.apiKey.claude"] },
+      },
+      pluginDataDir,
+    );
+
+    // Active vendor (openai) — allowed
+    expect(api.getSecret("llm.apiKey.openai")).toBe("sk-openai");
+
+    // Non-active vendor (claude) — denied even though allowlisted
+    expect(api.getSecret("llm.apiKey.claude")).toBeNull();
+
+    // Audit captured non-active-vendor warn
+    const denyAudit = bootAuditLogger.log.mock.calls.find((c) => {
+      const input = (c[0] as { input?: string }).input ?? "";
+      return input.includes("non-active-vendor") && input.includes("llm.apiKey.claude");
+    });
+    expect(denyAudit).toBeDefined();
+  });
+
+  it("B7 — getSecret denied for unknown prefix falls into `other` counter bucket", async () => {
+    runtimeTestState.capturedRuntimeOptions = null;
+    const bootAuditLogger = { log: vi.fn() };
+    const { resetHostSecretCountersForTesting, getHostSecretCounter } = await import(
+      "../../../telemetry/host-secret-counters.js"
+    );
+    resetHostSecretCountersForTesting();
+
+    await initPluginRuntime({
+      projectRoot: "/tmp/lvis-test/project",
+      settingsService: {
+        get: vi.fn((key: string) => {
+          if (key === "llm") return { provider: "openai" };
+          if (key === "pluginConfigs") return {};
+          return undefined;
+        }),
+        getSecret: vi.fn(() => null),
+        getPluginConfig: vi.fn(() => ({})),
+        setPluginConfig: vi.fn(),
+      } as never,
+      memoryManager: {} as never,
+      keywordEngine: {
+        registerKeywords: vi.fn(),
+        unregisterByPlugin: vi.fn(),
+      } as never,
+      toolRegistry: {
+        unregisterByPlugin: vi.fn(),
+        register: vi.fn(),
+        listAll: vi.fn(() => []),
+      } as never,
+      pythonPath: undefined,
+      bootAuditLogger: bootAuditLogger as never,
+      mainWindow: {} as never,
+      openAuthWindowService: vi.fn(),
+      openLinkWindowService: vi.fn(),
+      openAuthPartitionViewerService: vi.fn(),
+      shellOpenExternal: vi.fn(),
+      approvalGate: { requestAndWait: vi.fn() } as never,
+    });
+
+    const createHostApi = runtimeTestState.capturedRuntimeOptions?.createHostApi as
+      | ((pluginId: string, manifest: {
+          id: string;
+          config?: Record<string, unknown>;
+          hostSecrets?: { read?: string[] };
+        }, pluginDataDir: string) => {
+          getSecret: (key: string) => string | null;
+        })
+      | undefined;
+    expect(createHostApi).toBeDefined();
+
+    const pluginDataDir = mkdtempSync("/tmp/lvis-hostapi-data-");
+    const api = createHostApi!(
+      "plugin-b7",
+      { id: "plugin-b7", config: {}, hostSecrets: { read: [] } },
+      pluginDataDir,
+    );
+
+    // Attacker-controlled prefix gets folded into `other`
+    expect(api.getSecret("attacker.x")).toBeNull();
+    expect(api.getSecret("garbage.y")).toBeNull();
+    expect(api.getSecret("evilprefix.z")).toBeNull();
+
+    expect(getHostSecretCounter("hostSecret_denied", "plugin-b7", "other")).toBe(3);
+    expect(getHostSecretCounter("hostSecret_denied", "plugin-b7", "attacker")).toBe(0);
+  });
 });
