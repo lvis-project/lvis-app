@@ -16,6 +16,7 @@ import { PluginConfigSchemaForm } from "./PluginConfigSchemaForm.js";
 import { DEFAULT_TOAST_TTL_MS } from "../constants.js";
 import { useNotifySaved } from "../contexts/saved-toast.js";
 import { MARKDOWN_REMARK_PLUGINS } from "../utils/markdown-plugins.js";
+import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
 
 type KV = { key: string; value: string };
 
@@ -326,7 +327,12 @@ export function PluginConfigTab() {
   }, [showBanner]);
 
   return (
-    <div className="flex flex-col h-full gap-3">
+    <div className="flex flex-col gap-3">
+      <SettingsPageHeader
+        title="플러그인 설정"
+        description="설치된 플러그인의 개별 설정을 관리합니다"
+      />
+      <div className="flex flex-col h-full gap-3">
       <PluginUninstallDialog
         target={uninstallTarget}
         working={saving}
@@ -706,6 +712,7 @@ export function PluginConfigTab() {
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }

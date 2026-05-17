@@ -6,6 +6,8 @@ import { Label } from "../../../components/ui/label.js";
 import { NativeSelect, NativeSelectOption } from "../../../components/ui/native-select.js";
 import { Separator } from "../../../components/ui/separator.js";
 import type { AuditEntry } from "../../../audit/audit-logger.js";
+import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
+import { SettingsSection } from "../components/SettingsSection.js";
 
 interface AuditStats {
   totalByType: Record<string, number>;
@@ -112,12 +114,15 @@ export function AuditTab() {
     // single dialog scroll (always-visible gutter for G2). Wrapping the
     // tab in its own ScrollArea here would create a double scrollbar.
     <div className="pr-1">
-      <div className="space-y-4 pt-4">
+      <div className="space-y-5">
+        <SettingsPageHeader
+          title="감사"
+          description="감사 로그를 조회하고 export 합니다"
+        />
 
         {/* ── Stats Bar ── */}
         {stats && (
-          <div className="space-y-2">
-            <p className="text-sm font-medium">최근 7일 통계</p>
+          <SettingsSection title="최근 7일 통계">
             <div className="flex flex-wrap gap-3">
               <div className="rounded-md border px-3 py-2 text-center">
                 <p className="text-xs text-muted-foreground">총 항목</p>
@@ -149,14 +154,11 @@ export function AuditTab() {
                 ))}
               </div>
             )}
-          </div>
+          </SettingsSection>
         )}
 
-        <Separator />
-
         {/* ── Filters ── */}
-        <div className="space-y-2">
-          <p className="text-sm font-medium">검색 필터</p>
+        <SettingsSection title="검색 필터">
           <div className="grid grid-cols-2 gap-2">
             <div className="space-y-1">
               <Label className="text-[11px] text-muted-foreground">시작 날짜</Label>
@@ -204,15 +206,13 @@ export function AuditTab() {
               {loading ? "..." : "검색"}
             </Button>
           </div>
-        </div>
-
-        <Separator />
+        </SettingsSection>
 
         {/* ── Results ── */}
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <p className="text-sm font-medium">결과 {result.total > 0 ? `(${result.total.toLocaleString()}건)` : ""}</p>
-            {totalPages > 1 && (
+        <SettingsSection
+          title={`결과 ${result.total > 0 ? `(${result.total.toLocaleString()}건)` : ""}`}
+          actions={
+            totalPages > 1 ? (
               <div className="flex items-center gap-1 text-[11px]">
                 <button
                   className="rounded px-1 hover:bg-muted disabled:opacity-40"
@@ -230,9 +230,9 @@ export function AuditTab() {
                   ›
                 </button>
               </div>
-            )}
-          </div>
-
+            ) : undefined
+          }
+        >
           {error && (
             <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
               {error}
@@ -294,8 +294,7 @@ export function AuditTab() {
               </table>
             </div>
           )}
-        </div>
-
+        </SettingsSection>
       </div>
     </div>
   );
