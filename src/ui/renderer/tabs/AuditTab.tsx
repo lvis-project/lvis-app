@@ -128,7 +128,7 @@ export function AuditTab() {
     // single dialog scroll (always-visible gutter for G2). Wrapping the
     // tab in its own ScrollArea here would create a double scrollbar.
     <div className="pr-1">
-      <div className="space-y-5">
+      <div className="space-y-6">
         <SettingsPageHeader
           title="감사"
           description="감사 로그를 조회하고 export 합니다"

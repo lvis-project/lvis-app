@@ -121,7 +121,7 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
   ];
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <SettingsPageHeader
         title="마켓플레이스"
         description="플러그인 마켓플레이스 연결과 신뢰 정책을 설정합니다"
