@@ -319,10 +319,12 @@ export function SettingsContent({
             scroll container. `overflow-y-scroll` (not `auto`) keeps the
             gutter always-reserved so layout doesn't shift on short pages.
             `lvis-settings-scroll` hooks the themed webkit scrollbar.
-          pt-2 on outer matches the sidebar's p-2 so the first sidebar
-          trigger and the SettingsPageHeader h2 land at the same Y. */}
+          Top padding: NONE here. shadcn TabsContent has a built-in
+          `mt-2` default (8px) which serves as the only top offset,
+          matching the sidebar TabsList's `p-2 (8) + trigger py-2 (8)`
+          text-top of 16px when combined with the h2's `leading-9`. */}
       <div className="flex flex-1 min-w-0 flex-col overflow-hidden">
-      <div ref={rightPaneRef} className="flex flex-1 min-h-0 flex-col overflow-y-scroll px-8 pt-2 pb-8 lvis-settings-scroll">
+      <div ref={rightPaneRef} className="flex flex-1 min-h-0 flex-col overflow-y-scroll px-8 pb-8 lvis-settings-scroll">
         {s.lastSaveError && (
           <div
             role="alert"
