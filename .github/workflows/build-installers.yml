@@ -95,6 +95,16 @@ jobs:
           WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
       - name: Smoke launch packaged app
+        # macOS Gatekeeper blocks launch of unsigned .app bundles. When
+        # the matrix entry is mac AND signing was explicitly skipped via
+        # workflow_dispatch (inputs.skip_code_sign == 'true'), the smoke
+        # step would always fail at app boot — making the entire job fail
+        # and the Upload installers step skip, hiding the perfectly-good
+        # unsigned dmg/zip artifacts. Skip smoke for that one combination
+        # so the artifacts upload and can be inspected / hand-attached to
+        # a release. All other combinations (any target on tag push,
+        # mac+signed on dispatch, linux/win always) still run smoke.
+        if: matrix.target != 'mac' || inputs.skip_code_sign != 'true'
         shell: bash
         run: |
           set -euo pipefail
