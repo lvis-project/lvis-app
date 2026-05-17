@@ -709,13 +709,12 @@ export class PluginRuntime {
   }
 
   /**
-   * #893 — Wildcard (`"*"` slot) config injection. Plugins read these via
-   * `hostApi.config.get("hostApiKey")` / `hostApi.config.get("hostApiVendor")`;
-   * the host pushes the active LLM vendor's apiKey + vendor id here so a
-   * plugin that needs an LLM call doesn't have to ship its own
-   * vendor-detection logic. Merges with existing wildcard overrides
-   * (e.g. `pythonExecutable`) so calling this does NOT clobber unrelated
-   * keys set by other boot steps.
+   * #893 — Wildcard (`"*"` slot) config injection. Plugins read the active
+   * LLM vendor id via `hostApi.config.get("hostApiVendor")`; the raw API key
+   * is NOT injected here — callers must obtain it through `getSecret` so it
+   * never appears in the plain-object config map. Merges with existing
+   * wildcard overrides (e.g. `pythonExecutable`) so calling this does NOT
+   * clobber unrelated keys set by other boot steps.
    */
   setWildcardConfigOverride(config: Record<string, unknown>): void {
     if (Object.keys(config).length === 0) return;
