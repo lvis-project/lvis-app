@@ -437,10 +437,6 @@ export function SettingsContent({
               setApiKeyInput={s.setMarketplaceApiKeyInput}
               onSaved={onSaved}
               onImmediateChange={marketplaceSave.schedule}
-              onSaveNow={() => {
-                marketplaceSave.cancel();
-                void s.save("marketplace");
-              }}
             />
             {/* No bottom TabSaveBar — URL + API key each own an inline
                 Save; private-network toggle is immediate-apply. */}
