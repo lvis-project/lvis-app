@@ -273,7 +273,7 @@ export function RolesTab({ api }: { api: LvisApi }) {
   const preferencesBusy = saving === "preferences" || saving === "refresh-preferences";
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <SettingsPageHeader
         title="역할"
         description="역할 프롬프트와 활성 역할을 관리합니다"

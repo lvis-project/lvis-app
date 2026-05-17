@@ -25,7 +25,7 @@ export function WebTab(props: WebTabProps) {
   const webInfo = WEB_PROVIDERS.find((p) => p.id === webProvider) ?? WEB_PROVIDERS[0];
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <SettingsPageHeader
         title="검색 (Web)"
         description="웹 검색 제공자와 동작을 설정합니다"
