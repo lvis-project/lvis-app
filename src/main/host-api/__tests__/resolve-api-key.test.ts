@@ -292,7 +292,7 @@ describe("resolveApiKey — Tier-4 vendor mismatch", () => {
 });
 
 describe("resolveApiKey — success: release() lifetime", () => {
-  it("bearer returns key before release, empty string after", async () => {
+  it("bearer throws after release", async () => {
     const manifest = manifestFor("p", ["llm.apiKey.openai"]);
     await seedRegistryWithGrant({
       pluginId: "p",
@@ -316,7 +316,7 @@ describe("resolveApiKey — success: release() lifetime", () => {
     if (result.ok) {
       expect(result.bearer()).toBe("sk-host");
       result.release();
-      expect(result.bearer()).toBe("");
+      expect(() => result.bearer()).toThrow("released");
     }
   });
 });
@@ -347,8 +347,8 @@ describe("resolveApiKey — signal aborts mid-flight (cycle 1 HIGH)", () => {
     if (result.ok) {
       expect(result.bearer()).toBe("sk-host");
       ac.abort();
-      // Abort fires the signal listener → release() runs → bearer empty.
-      expect(result.bearer()).toBe("");
+      // Abort fires the signal listener → release() runs → bearer throws.
+      expect(() => result.bearer()).toThrow("released");
     }
   });
 });

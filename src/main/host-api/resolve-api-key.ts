@@ -107,10 +107,11 @@ function audit(deps: ResolveApiKeyDeps, level: "info" | "warn", message: string)
 /**
  * Ralph cycle 1 HIGH fix — one-shot bearer thunk wired to the request's
  * `AbortSignal`. The captured string is dropped after `release()` so
- * subsequent `bearer()` calls observe an empty string. Strings in JS
- * are immutable so we cannot literally zero the buffer; the "zeroize"
- * here is a best-effort signal: the reference is dropped, and tests
- * can assert the post-release state.
+ * subsequent `bearer()` calls throw `Error("released")` per SDK contract
+ * (see `sdk/src/index.ts` `bearer()` docs). Strings in JS are immutable
+ * so we cannot literally zero the buffer; the "zeroize" here is a
+ * best-effort signal: the reference is dropped, and tests can assert
+ * the post-release state.
  *
  * Before the fix `release()` ignored the signal and the bearer stayed
  * captured after the caller aborted. Now an aborted signal at construction
@@ -140,7 +141,12 @@ function makeSuccess(
   const result: ResolveApiKeyResult & { ok: true } = {
     ok: true,
     vendor,
-    bearer: () => captured ?? "",
+    bearer: () => {
+      if (captured === null) {
+        throw new Error("released");
+      }
+      return captured;
+    },
     release,
   };
   if (baseUrl !== undefined) {
