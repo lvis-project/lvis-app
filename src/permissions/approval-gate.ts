@@ -23,6 +23,7 @@ import type { PermissionEvaluationContext } from "./evaluation-context.js";
 import { isSensitivePath, canonicalizePathForMatch } from "./sensitive-paths.js";
 import { maskSensitiveData } from "../audit/dlp-filter.js";
 import { canonicalStringify } from "../shared/canonical-json.js";
+import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
 
 // ─── §D1 args DLP masking ────────────────────────────
 // Approval 모달에 전달되는 tool args 내 민감정보(API key, 이메일, 전화번호,
@@ -325,7 +326,7 @@ export class ApprovalGate {
   constructor(
     webContents: WebContents,
     initialPolicy?: PolicyFile,
-    timeoutMs = 5 * 60 * 1000,
+    timeoutMs = TOOL_TIMEOUT_POLICY.approvalGateUserWaitMs,
     auditLogger?: AuditLogger,
     notificationService?: NotificationService,
     sandboxCapabilityProvider: () => SandboxCapability = detectSandboxCapability,
