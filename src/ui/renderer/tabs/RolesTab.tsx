@@ -6,6 +6,8 @@ import { Textarea } from "../../../components/ui/textarea.js";
 import { cloneDefaultRolePresets, type RolePreset } from "../../../data/role-presets.js";
 import type { LvisApi } from "../types.js";
 import { useNotifySaved } from "../contexts/saved-toast.js";
+import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
+import { SettingsSection } from "../components/SettingsSection.js";
 
 type Section = "agents" | "memory" | "preferences" | "roles" | "preview";
 
@@ -271,106 +273,112 @@ export function RolesTab({ api }: { api: LvisApi }) {
   const preferencesBusy = saving === "preferences" || saving === "refresh-preferences";
 
   return (
-    <div className="space-y-4 pt-4">
-      <div className="flex flex-wrap gap-2">
-        {SECTIONS.map((item) => (
-          <Button key={item.id} type="button" size="sm" variant={section === item.id ? "default" : "outline"} onClick={() => setSection(item.id)}>
-            {item.label}
-          </Button>
-        ))}
-      </div>
+    <div className="space-y-6">
+      <SettingsPageHeader
+        title="역할"
+        description="역할 프롬프트와 활성 역할을 관리합니다"
+      />
 
-      <div className="min-h-[420px] rounded-md border border-border/80 bg-background/60 p-3">
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <div className="text-sm font-semibold">{selectedSection?.label}</div>
-          {loading ? <Badge variant="secondary">읽는 중</Badge> : null}
+      <SettingsSection title="역할 소스">
+        <div className="flex flex-wrap gap-2">
+          {SECTIONS.map((item) => (
+            <Button key={item.id} type="button" size="sm" variant={section === item.id ? "default" : "outline"} onClick={() => setSection(item.id)}>
+              {item.label}
+            </Button>
+          ))}
         </div>
 
-        {section === "agents" ? (
-          <div className="space-y-3">
-            <Textarea value={agentsDraft} onChange={(event) => setAgentsDraft(event.target.value)} className="min-h-[320px] font-mono text-xs" />
-            <div className="flex justify-end">
-              <Button size="sm" onClick={saveAgents} disabled={saving === "agents"}>{saving === "agents" ? "저장 중..." : "AGENTS.md 저장"}</Button>
-            </div>
+        <div className="min-h-[420px] rounded-md border border-border/80 bg-background/60 p-3">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div className="text-sm font-semibold">{selectedSection?.label}</div>
+            {loading ? <Badge variant="secondary">읽는 중</Badge> : null}
           </div>
-        ) : null}
 
-        {section === "memory" ? (
-          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_320px]">
-            <Textarea value={memoryIndex} onChange={(event) => setMemoryIndex(event.target.value)} className="min-h-[420px] font-mono text-xs" />
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Textarea value={quickMemory} maxLength={520} onChange={(event) => setQuickMemory(event.target.value)} placeholder="긴급 기억 (500자 내외)" className="min-h-[120px] text-xs" />
-                <div className="text-right text-[11px] text-muted-foreground">{quickMemory.length}/520</div>
-                <Textarea value={quickLinks} onChange={(event) => setQuickLinks(event.target.value)} placeholder="레퍼런스 링크" className="min-h-[70px] text-xs" />
-                <div className="flex justify-end gap-2">
-                  <Button size="sm" variant="outline" onClick={refreshMemoryIndex} disabled={saving === "memory-index"}>다시 읽기</Button>
-                  <Button size="sm" variant="outline" onClick={saveMemoryIndex} disabled={saving === "memory-index-save"}>MEMORY.md 저장</Button>
-                  <Button size="sm" onClick={saveQuickMemory} disabled={!quickMemory.trim() || saving === "quick-memory"}>섹션에 저장</Button>
-                </div>
-              </div>
-              <div className="space-y-2 border-t border-border/70 pt-3">
-                <Input value={detailMemoryTitle} onChange={(event) => setDetailMemoryTitle(event.target.value)} placeholder="상세 기억 제목" />
-                <Textarea value={detailMemory} onChange={(event) => setDetailMemory(event.target.value)} placeholder="상세 기억" className="min-h-[110px] text-xs" />
-                <Textarea value={detailLinks} onChange={(event) => setDetailLinks(event.target.value)} placeholder="레퍼런스 링크" className="min-h-[70px] text-xs" />
-                <div className="flex justify-end">
-                  <Button size="sm" onClick={saveDetailedMemory} disabled={!detailMemoryTitle.trim() || !detailMemory.trim() || saving === "detail-memory"}>상세 기억 저장</Button>
-                </div>
+          {section === "agents" ? (
+            <div className="space-y-3">
+              <Textarea value={agentsDraft} onChange={(event) => setAgentsDraft(event.target.value)} className="min-h-[320px] font-mono text-xs" />
+              <div className="flex justify-end">
+                <Button size="sm" onClick={saveAgents} disabled={saving === "agents"}>{saving === "agents" ? "저장 중..." : "AGENTS.md 저장"}</Button>
               </div>
             </div>
-          </div>
-        ) : null}
+          ) : null}
 
-        {section === "preferences" ? (
-          <div className="space-y-3">
-            <Textarea value={userPrefsDraft} onChange={(event) => setUserPrefsDraft(event.target.value)} className="min-h-[320px] font-mono text-xs" />
-            <div className="flex justify-end gap-2">
-              <Button size="sm" variant="outline" onClick={refreshUserPrefs} disabled={preferencesBusy}>{saving === "refresh-preferences" ? "갱신 중..." : "LLM으로 갱신"}</Button>
-              <Button size="sm" onClick={saveUserPrefs} disabled={preferencesBusy}>{saving === "preferences" ? "저장 중..." : "user-preferences.md 저장"}</Button>
-            </div>
-          </div>
-        ) : null}
-
-        {section === "roles" ? (
-          <div className="space-y-3">
-            <div className="flex justify-end">
-              <Button size="sm" variant="ghost" onClick={resetRoles} disabled={!rolesLoaded || saving === "roles"}>기본값으로 리셋</Button>
-            </div>
-            <div className="space-y-2">
-              {rolePresets.map((preset) => (
-                <div key={preset.id} className="rounded-md border border-border/70 p-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-medium">
-                        {preset.name}
-                        {preset.isDefault ? <Badge variant="secondary" className="ml-2 text-[10px]">기본</Badge> : null}
-                      </div>
-                      <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">{preset.systemPromptAdd || "역할 프롬프트 없음"}</div>
-                    </div>
-                    <div className="flex shrink-0 gap-1">
-                      <Button size="sm" variant="ghost" className="h-7 text-[11px]" onClick={() => startEdit(preset)} disabled={!rolesLoaded || Boolean(preset.isDefault)}>편집</Button>
-                      {!preset.isDefault ? <Button size="sm" variant="ghost" className="h-7 text-[11px] text-destructive" onClick={() => void removePreset(preset.id)} disabled={!rolesLoaded}>삭제</Button> : null}
-                    </div>
+          {section === "memory" ? (
+            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_320px]">
+              <Textarea value={memoryIndex} onChange={(event) => setMemoryIndex(event.target.value)} className="min-h-[420px] font-mono text-xs" />
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Textarea value={quickMemory} maxLength={520} onChange={(event) => setQuickMemory(event.target.value)} placeholder="긴급 기억 (500자 내외)" className="min-h-[120px] text-xs" />
+                  <div className="text-right text-[11px] text-muted-foreground">{quickMemory.length}/520</div>
+                  <Textarea value={quickLinks} onChange={(event) => setQuickLinks(event.target.value)} placeholder="레퍼런스 링크" className="min-h-[70px] text-xs" />
+                  <div className="flex justify-end gap-2">
+                    <Button size="sm" variant="outline" onClick={refreshMemoryIndex} disabled={saving === "memory-index"}>다시 읽기</Button>
+                    <Button size="sm" variant="outline" onClick={saveMemoryIndex} disabled={saving === "memory-index-save"}>MEMORY.md 저장</Button>
+                    <Button size="sm" onClick={saveQuickMemory} disabled={!quickMemory.trim() || saving === "quick-memory"}>섹션에 저장</Button>
                   </div>
                 </div>
-              ))}
-            </div>
-            <div className="rounded-md border border-border/70 p-3">
-              <div className="mb-2 text-sm font-medium">{editingId ? "프롬프트 편집" : "새 역할 프롬프트"}</div>
-              <div className="space-y-2">
-                <Input placeholder="이름" value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} />
-                <Textarea placeholder="해당 턴의 시스템 프롬프트에 주입할 역할 지시" value={draft.systemPromptAdd} onChange={(event) => setDraft({ ...draft, systemPromptAdd: event.target.value })} className="min-h-[90px]" />
-                <div className="flex justify-end gap-2">
-                  {editingId ? <Button size="sm" variant="ghost" onClick={cancelEdit}>취소</Button> : null}
-                  <Button size="sm" onClick={() => void saveDraft()} disabled={!rolesLoaded || !draft.name.trim() || saving === "roles"}>{editingId ? "업데이트" : "추가"}</Button>
+                <div className="space-y-2 border-t border-border/70 pt-3">
+                  <Input value={detailMemoryTitle} onChange={(event) => setDetailMemoryTitle(event.target.value)} placeholder="상세 기억 제목" />
+                  <Textarea value={detailMemory} onChange={(event) => setDetailMemory(event.target.value)} placeholder="상세 기억" className="min-h-[110px] text-xs" />
+                  <Textarea value={detailLinks} onChange={(event) => setDetailLinks(event.target.value)} placeholder="레퍼런스 링크" className="min-h-[70px] text-xs" />
+                  <div className="flex justify-end">
+                    <Button size="sm" onClick={saveDetailedMemory} disabled={!detailMemoryTitle.trim() || !detailMemory.trim() || saving === "detail-memory"}>상세 기억 저장</Button>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-        ) : null}
+          ) : null}
 
-        {section === "preview" ? (
-          <pre className="overflow-auto rounded-md bg-muted/50 p-3 text-xs leading-5">
+          {section === "preferences" ? (
+            <div className="space-y-3">
+              <Textarea value={userPrefsDraft} onChange={(event) => setUserPrefsDraft(event.target.value)} className="min-h-[320px] font-mono text-xs" />
+              <div className="flex justify-end gap-2">
+                <Button size="sm" variant="outline" onClick={refreshUserPrefs} disabled={preferencesBusy}>{saving === "refresh-preferences" ? "갱신 중..." : "LLM으로 갱신"}</Button>
+                <Button size="sm" onClick={saveUserPrefs} disabled={preferencesBusy}>{saving === "preferences" ? "저장 중..." : "user-preferences.md 저장"}</Button>
+              </div>
+            </div>
+          ) : null}
+
+          {section === "roles" ? (
+            <div className="space-y-3">
+              <div className="flex justify-end">
+                <Button size="sm" variant="ghost" onClick={resetRoles} disabled={!rolesLoaded || saving === "roles"}>기본값으로 리셋</Button>
+              </div>
+              <div className="space-y-2">
+                {rolePresets.map((preset) => (
+                  <div key={preset.id} className="rounded-md border border-border/70 p-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium">
+                          {preset.name}
+                          {preset.isDefault ? <Badge variant="secondary" className="ml-2 text-[10px]">기본</Badge> : null}
+                        </div>
+                        <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">{preset.systemPromptAdd || "역할 프롬프트 없음"}</div>
+                      </div>
+                      <div className="flex shrink-0 gap-1">
+                        <Button size="sm" variant="ghost" className="h-7 text-[11px]" onClick={() => startEdit(preset)} disabled={!rolesLoaded || Boolean(preset.isDefault)}>편집</Button>
+                        {!preset.isDefault ? <Button size="sm" variant="ghost" className="h-7 text-[11px] text-destructive" onClick={() => void removePreset(preset.id)} disabled={!rolesLoaded}>삭제</Button> : null}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="rounded-md border border-border/70 p-3">
+                <div className="mb-2 text-sm font-medium">{editingId ? "프롬프트 편집" : "새 역할 프롬프트"}</div>
+                <div className="space-y-2">
+                  <Input placeholder="이름" value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} />
+                  <Textarea placeholder="해당 턴의 시스템 프롬프트에 주입할 역할 지시" value={draft.systemPromptAdd} onChange={(event) => setDraft({ ...draft, systemPromptAdd: event.target.value })} className="min-h-[90px]" />
+                  <div className="flex justify-end gap-2">
+                    {editingId ? <Button size="sm" variant="ghost" onClick={cancelEdit}>취소</Button> : null}
+                    <Button size="sm" onClick={() => void saveDraft()} disabled={!rolesLoaded || !draft.name.trim() || saving === "roles"}>{editingId ? "업데이트" : "추가"}</Button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {section === "preview" ? (
+            <pre className="overflow-auto rounded-md bg-muted/50 p-3 text-xs leading-5">
 {`AGENTS.md                  -> project / org / agent operating context
 memories/MEMORY.md          -> urgent memory, references, and saved-memory index
 memories/*.md               -> detailed long-term memories with references
@@ -383,12 +391,13 @@ Idle:
 Turn:
   system prompt reads AGENTS.md + user-preferences.md + MEMORY.md + memories/*.md
   selected role prompt is injected as a per-turn system prompt section`}
-          </pre>
-        ) : null}
-      </div>
+            </pre>
+          ) : null}
+        </div>
 
-      {status ? <div className="text-xs text-muted-foreground">{status}</div> : null}
-      {error ? <div className="whitespace-pre-line text-xs text-destructive">{error}</div> : null}
+        {status ? <div className="text-xs text-muted-foreground">{status}</div> : null}
+        {error ? <div className="whitespace-pre-line text-xs text-destructive">{error}</div> : null}
+      </SettingsSection>
     </div>
   );
 }
