@@ -251,14 +251,43 @@ export interface ToolPermissionContext {
    * through every executeAll() invocation. The executor merges with computed
    * defaults via {@link buildAllowedScope}; an `undefined` value here means
    * "use defaults only" (NOT "silent allow").
+   *
+   * Snapshot taken when executeAll() is dispatched. For within-round
+   * propagation of mid-batch grants, prefer `getAdditionalDirectories`
+   * which is re-evaluated at the top of each `executeOne`.
    */
   additionalDirectories?: readonly string[];
+  /**
+   * Optional fresh accessor for the additional-directories view. When
+   * provided, `executeOne` invokes this at its start so that an earlier
+   * tool in the same `Promise.all(executeAll)` batch granting
+   * `allow-once`/`allow-session` widens the scope visible to siblings
+   * scheduled after it on the event loop. Falls back to
+   * `additionalDirectories` (snapshot) when omitted — keeps legacy
+   * callers working.
+   */
+  getAdditionalDirectories?: () => readonly string[];
   /**
    * Trust origin classification carried with each tool invocation. Audited and
    * propagated into approval-request payloads. Distinguishes user-keyboard
    * input from plugin-emitted, LLM-tool-arg, and file-content origins.
    */
   trustOrigin: ToolTrustOrigin;
+  /**
+   * Invoked when the user selects "이번 1회만" (turn-scope grant) on an
+   * out-of-allowed-dir approval. The conversation loop is expected to
+   * remember `approvedDirectory` for the remaining tool calls inside the
+   * SAME `runTurn`, then drop it. Distinct from `onSessionDirectoryGrant`
+   * (whole conversation lifetime) and persisted rules (settings.json).
+   */
+  onTurnDirectoryGrant?: (approvedDirectory: string) => void;
+  /**
+   * Invoked when the user selects "이번 세션 동안 허용" (session-scope
+   * grant). The conversation loop appends `approvedDirectory` to the
+   * session-wide allow list, surviving across user messages but cleared
+   * on `newConversation` / `loadSession`.
+   */
+  onSessionDirectoryGrant?: (approvedDirectory: string) => void;
 }
 
 /**
@@ -871,8 +900,18 @@ export class ToolExecutor {
       ...permissionContext,
       ...(approvalCacheKey ? { approvalCacheKey } : {}),
     };
-    let invocationAllowedScope = buildAllowedScope(invocationPermissionContext.additionalDirectories);
-    let invocationRuntimeAllowedDirectories = buildRuntimeAllowedDirectories(invocationPermissionContext.additionalDirectories);
+    // Within-round freshness: when the caller provided a getter we read
+    // the *current* additional-directories view at the top of this
+    // executeOne (rather than the snapshot taken when executeAll() was
+    // dispatched). This makes an `allow-once`/`allow-session` grant
+    // applied by an earlier sibling in the same Promise.all batch
+    // visible to tools scheduled after it on the event loop.
+    const baseAdditionalDirectories: readonly string[] =
+      invocationPermissionContext.getAdditionalDirectories?.()
+      ?? invocationPermissionContext.additionalDirectories
+      ?? [];
+    let invocationAllowedScope = buildAllowedScope(baseAdditionalDirectories);
+    let invocationRuntimeAllowedDirectories = buildRuntimeAllowedDirectories(baseAdditionalDirectories);
     const makeEvaluationContext = (input: {
       pathFields: readonly string[];
       targetFilePaths?: readonly string[];
@@ -896,7 +935,7 @@ export class ToolExecutor {
       requestSensitivePathPattern: string | null,
       reviewerPathFields: readonly string[],
     ): Promise<
-      | { allowed: true; approvedDirectory: string; permissionResult?: PermissionCheckResult }
+      | { allowed: true; approvedDirectory: string; scope: "turn" | "session" | "always"; permissionResult?: PermissionCheckResult }
       | { allowed: false; result: ToolResult }
     > => {
       const headless = invocationPermissionContext.headless === true;
@@ -1015,8 +1054,37 @@ export class ToolExecutor {
             await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...dirLayerResult, decision: "deny" }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
             return { allowed: false, result: { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs } };
           }
+          return { allowed: true, approvedDirectory, scope: "always" };
         }
-        return { allowed: true, approvedDirectory };
+        if (decision.choice === "allow-session") {
+          // Mirror allow-always' persist convention so the permission
+          // audit trail records the directory addition; the caller's
+          // onSessionDirectoryGrant callback then keeps the in-memory
+          // ConversationLoop scope in sync. `session: true` ensures
+          // settings.json is NOT mutated — the grant dies with the
+          // conversation. Widen to suggestedParent (when present) so
+          // the next tool call in the same conversation hitting a
+          // sibling path under the same directory passes Layer 1
+          // without re-prompting.
+          const sessionScopePath = suggestedParent ?? outOfAllowedTarget.filePath;
+          const dirResult = await dispatchPermissionDirCommand({
+            verb: "allow",
+            path: sessionScopePath,
+            session: true,
+            acknowledgeWarnings: true,
+          });
+          if (!dirResult.ok || dirResult.verb !== "allow") {
+            const msg = `[디렉토리 정책 세션 등록 실패] 도구 '${toolUse.name}' — ${dirResult.ok ? "unexpected result" : dirResult.error}`;
+            const durationMs = Date.now() - startTime;
+            emitToolStart(callbacks, toolUse.name, finalInput, meta);
+            callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+            await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...dirLayerResult, decision: "deny" }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
+            return { allowed: false, result: { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs } };
+          }
+          return { allowed: true, approvedDirectory: sessionScopePath, scope: "session" };
+        }
+        // allow-once: turn-scope, no persistence, narrowest path.
+        return { allowed: true, approvedDirectory, scope: "turn" };
       }
 
       if (headless) {
@@ -1069,13 +1137,43 @@ export class ToolExecutor {
 
     const applyApprovedDirectory = (approvedDirectory: string): void => {
       invocationAllowedScope = buildAllowedScope([
-        ...(invocationPermissionContext.additionalDirectories ?? []),
+        ...baseAdditionalDirectories,
         approvedDirectory,
       ]);
       invocationRuntimeAllowedDirectories = buildRuntimeAllowedDirectories([
-        ...(invocationPermissionContext.additionalDirectories ?? []),
+        ...baseAdditionalDirectories,
         approvedDirectory,
       ]);
+    };
+
+    // Propagate the user's grant lifetime choice up to the conversation
+    // loop. The local `applyApprovedDirectory` only widens the *current*
+    // invocation's scope; without these callbacks the grant would not
+    // outlive this single tool call — the exact "한 번만 허용 = 1 tool
+    // call" bug being fixed here. Fail-loud on missing callback: silently
+    // dropping a grant is exactly the bug class this refactor eliminates,
+    // so we log and degrade conservatively (session → turn) rather than
+    // pretending the propagation succeeded.
+    const propagateGrantScope = (approvedDirectory: string, scope: "turn" | "session" | "always"): void => {
+      if (scope === "turn") {
+        if (!invocationPermissionContext.onTurnDirectoryGrant) {
+          log.warn(`[permission-scope] onTurnDirectoryGrant unwired — turn-scope grant for ${approvedDirectory} will not survive this tool call`);
+          return;
+        }
+        invocationPermissionContext.onTurnDirectoryGrant(approvedDirectory);
+        return;
+      }
+      if (scope === "session") {
+        if (!invocationPermissionContext.onSessionDirectoryGrant) {
+          log.error(`[permission-scope] onSessionDirectoryGrant unwired — degrading session-scope grant for ${approvedDirectory} to turn-scope`);
+          invocationPermissionContext.onTurnDirectoryGrant?.(approvedDirectory);
+          return;
+        }
+        invocationPermissionContext.onSessionDirectoryGrant(approvedDirectory);
+        return;
+      }
+      // "always" is already persisted via dispatchPermissionDirCommand
+      // inside requestOutOfAllowedDirectoryAccess; nothing to do here.
     };
 
     if (invocationCategory === "shell") {
@@ -1110,6 +1208,7 @@ export class ToolExecutor {
           if (!resolution.allowed) return resolution.result;
           if (resolution.permissionResult) permissionResult = resolution.permissionResult;
           applyApprovedDirectory(resolution.approvedDirectory);
+          propagateGrantScope(resolution.approvedDirectory, resolution.scope);
           continue;
         }
 
@@ -1236,7 +1335,8 @@ export class ToolExecutor {
         if (!resolution.allowed) return resolution.result;
         if (resolution.permissionResult) permissionResult = resolution.permissionResult;
         applyApprovedDirectory(resolution.approvedDirectory);
-        // allow-once / allow-always — fall through to Step 3
+        propagateGrantScope(resolution.approvedDirectory, resolution.scope);
+        // allow-once / allow-session / allow-always — fall through to Step 3
         // (full Layer 3 check still runs; Layer 1 is necessary, not
         // sufficient).
       }
