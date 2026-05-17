@@ -312,7 +312,7 @@ export function SettingsContent({
           pt-2 on outer matches the sidebar's p-2 so the first sidebar
           trigger and the SettingsPageHeader h2 land at the same Y. */}
       <div className="flex flex-1 min-w-0 flex-col overflow-hidden">
-      <div ref={rightPaneRef} className="flex flex-1 min-h-0 flex-col overflow-y-scroll px-6 pt-2 pb-5 lvis-settings-scroll">
+      <div ref={rightPaneRef} className="flex flex-1 min-h-0 flex-col overflow-y-scroll px-8 pt-2 pb-8 lvis-settings-scroll">
         {s.lastSaveError && (
           <div
             role="alert"
