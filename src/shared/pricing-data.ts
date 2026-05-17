@@ -61,6 +61,20 @@ export interface ModelPricing {
    * present — see {@link effectiveContextWindow}.
    */
   contextWindow1MBeta?: number;
+  /**
+   * Long-context input surcharge — input tokens BEYOND `surchargeInputThreshold`
+   * trigger a session-wide price multiplier on BOTH input + output. Currently
+   * applies to OpenAI's gpt-5.4 / gpt-5.4-pro: when prompt > 272K, the full
+   * session is billed at 2x input + 1.5x output. Renderer cost badge + cost
+   * estimator MUST honor this so users see real billing, not standard-tier
+   * understatement (issue #900).
+   *
+   * Set on per-model basis when the provider documents such a tier. Undefined
+   * → standard tier only (no surcharge).
+   */
+  surchargeInputThreshold?: number;
+  surchargeInputMultiplier?: number;
+  surchargeOutputMultiplier?: number;
 }
 
 /** Default pricing + context catalog. */
@@ -98,10 +112,10 @@ export const DEFAULT_PRICING: Record<PricingVendor, Record<string, ModelPricing>
     // 은 본 PR scope 외. issue #900 follow-up 으로 추적 (computeCost 의 openai 분기
     // 에 input>272K 시 2x/1.5x 곱셈 layer 추가). >272K 세션의 cost 추정치는 현재
     // 실제 청구액 대비 ~50% 저평가됨.
-    "gpt-5.4":                     { inputPer1M: 2.5,  outputPer1M: 15,  contextWindow: 1_050_000 },
+    "gpt-5.4":                     { inputPer1M: 2.5,  outputPer1M: 15,  contextWindow: 1_050_000, surchargeInputThreshold: 272_000, surchargeInputMultiplier: 2,   surchargeOutputMultiplier: 1.5 },
     "gpt-5.4-mini":                { inputPer1M: 0.75, outputPer1M: 4.5, contextWindow:   400_000 },
     "gpt-5.4-nano":                { inputPer1M: 0.2,  outputPer1M: 1.25, contextWindow:  400_000 },
-    "gpt-5.4-pro":                 { inputPer1M: 30,   outputPer1M: 180, contextWindow: 1_100_000 },
+    "gpt-5.4-pro":                 { inputPer1M: 30,   outputPer1M: 180, contextWindow: 1_100_000, surchargeInputThreshold: 272_000, surchargeInputMultiplier: 2,   surchargeOutputMultiplier: 1.5 },
     "gpt-5.3":                     { inputPer1M: 0,    outputPer1M: 0,  contextWindow:   400_000 },
     "gpt-5.3-codex":               { inputPer1M: 0,    outputPer1M: 0,  contextWindow:   400_000 },
     "gpt-5.2":                     { inputPer1M: 0,    outputPer1M: 0,  contextWindow:   400_000 },
@@ -156,6 +170,10 @@ export const DEFAULT_PRICING: Record<PricingVendor, Record<string, ModelPricing>
     // 등록이 stale 이었음 — 공식 400K.
     "gpt-5.4":                     { inputPer1M: 0, outputPer1M: 0, contextWindow: 1_050_000 },
     "gpt-5.4-mini":                { inputPer1M: 0, outputPer1M: 0, contextWindow:   400_000 },
+    // nano/pro defensive add — Copilot 이 미래에 proxy 시 prefix-match fallback
+    // 으로 gpt-5.4 (1.05M) 잘못 매치 회피 (ralph round-1 architect WARN).
+    "gpt-5.4-nano":                { inputPer1M: 0, outputPer1M: 0, contextWindow:   400_000 },
+    "gpt-5.4-pro":                 { inputPer1M: 0, outputPer1M: 0, contextWindow: 1_100_000 },
     "gpt-5.3":                     { inputPer1M: 0, outputPer1M: 0, contextWindow:   400_000 },
     "gpt-5.2":                     { inputPer1M: 0, outputPer1M: 0, contextWindow:   400_000 },
     "gpt-5.1":                     { inputPer1M: 0, outputPer1M: 0, contextWindow:   400_000 },
@@ -336,7 +354,15 @@ export function computeCost(
       // `prompt_tokens` 가 cached 를 이미 포함 — cacheRead 를 또 더하면
       // double-count. cached portion 의 자동 할인 (~50%) 은 provider 빌링
       // 파이프라인에서 처리되며 LVIS 는 list-price 로 근사한다.
-      return per1M(input, pricing.inputPer1M) + per1M(output, pricing.outputPer1M);
+      //
+      // Long-context surcharge (gpt-5.4 / gpt-5.4-pro): input>threshold 시
+      // 세션 전체가 input × M_in + output × M_out 로 우상향. issue #900.
+      const inSurcharge =
+        typeof pricing.surchargeInputThreshold === "number"
+        && input > pricing.surchargeInputThreshold;
+      const inMul = inSurcharge ? (pricing.surchargeInputMultiplier ?? 1) : 1;
+      const outMul = inSurcharge ? (pricing.surchargeOutputMultiplier ?? 1) : 1;
+      return per1M(input, pricing.inputPer1M * inMul) + per1M(output, pricing.outputPer1M * outMul);
     }
     case "gemini":
     case "vertex-ai": {
