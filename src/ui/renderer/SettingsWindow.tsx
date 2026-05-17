@@ -38,18 +38,16 @@ export function SettingsWindow({ initialTab }: { initialTab: string }) {
     <ThemeProvider api={api}>
       <TooltipProvider>
         <div className="flex h-screen min-h-0 flex-col overflow-hidden bg-background text-foreground">
-          <header className="border-b bg-card px-6 py-5">
-            <h1 className="text-lg font-semibold leading-none tracking-tight">설정</h1>
-            <p className="mt-2 text-sm text-muted-foreground">
-              앱 환경, 채팅 동작, 검색 엔진, 권한 정책을 설정합니다.
-            </p>
-          </header>
-          {/* SettingsContent now owns its own sidebar + scrollable right pane;
-              the main wrapper must NOT scroll, otherwise the inner scroll is
-              double-nested (you'd scroll the page, not the right pane) and
-              the sidebar would scroll out of view — defeating the fixed
-              sidebar conversion. */}
-          <main className="min-h-0 flex-1 overflow-hidden p-6">
+          {/* Linear-style — outer "설정 / 앱 환경..." header removed.
+              The native window chrome already shows "LVIS 설정" as the
+              title, and each tab renders its own SettingsPageHeader.
+              The in-page header was redundant + created the "왜 컨텐츠
+              안에 컨텐츠" visual the user kept reporting. */}
+          {/* main wrapper owns NO padding now — sidebar must reach the
+              window's left edge directly (not sit inside another card).
+              The sidebar + right pane already own their own internal
+              padding. SettingsContent owns the scroll surface. */}
+          <main className="min-h-0 flex-1 overflow-hidden">
             <SettingsContent
               open={true}
               onOpenChange={handleOpenChange}
