@@ -469,6 +469,28 @@ export async function bootstrap(
     marketplaceFetcher.updateAllowPrivateNetwork(next);
   };
 
+  // #893 — Push the active LLM vendor's apiKey + vendor id into the plugin
+  // runtime's wildcard configOverrides slot. Plugins read these via
+  // `hostApi.config.get("hostApiKey")` / `hostApi.config.get("hostApiVendor")`
+  // so a plugin that needs an LLM call doesn't have to ship its own
+  // vendor-detection logic. Called once at boot (after plugin runtime is
+  // available) and again after every llm-settings IPC change.
+  const WILDCARD_LLM_KEYS = ["hostApiKey", "hostApiVendor"];
+  const refreshActiveLlmWildcard = (): void => {
+    const llm = settingsService.get("llm");
+    const activeVendor = llm.provider;
+    const activeKey = settingsService.getSecret(`llm.apiKey.${activeVendor}`);
+    if (typeof activeKey === "string" && activeKey.length > 0) {
+      pluginRuntime.setWildcardConfigOverride({
+        hostApiKey: activeKey,
+        hostApiVendor: activeVendor,
+      });
+    } else {
+      pluginRuntime.clearWildcardConfigOverride(WILDCARD_LLM_KEYS);
+    }
+  };
+  refreshActiveLlmWildcard();
+
   // §9.5 — Managed plugin bootstrap. Mandatory enterprise plugins are fetched
   // from the marketplace on boot (VS Code-style), not packaged in app source.
   // Graceful: marketplace unreachable or per-plugin failure never bricks boot.
@@ -1079,7 +1101,7 @@ export async function bootstrap(
     memoryManager, keywordEngine, routeEngine, toolRegistry,
     systemPromptBuilder, conversationLoop, routineEngine, mcpManager, mcpArtifactStore, agentArtifactStore, skillArtifactStore,
     idleScheduler, preferenceRefreshService, bashAstValidator, auditService, auditLogger: bootAuditLogger, postTurnHookChain,
-    approvalGate, rewireReviewerAgent, refreshMarketplaceFetcherConfig,
+    approvalGate, rewireReviewerAgent, refreshMarketplaceFetcherConfig, refreshActiveLlmWildcard,
     routinesStore, routinesScheduler, sessionTodoStore, askUserQuestionGate, skillStore, agentProfileStore,
     knowledgeAvailable, starredStore, feedbackStore,
     notificationService,
