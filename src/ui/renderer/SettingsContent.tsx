@@ -297,7 +297,7 @@ export function SettingsContent({
           tastefully. Static text only; no IPC needed. */}
       <div className="shrink-0 border-t px-3 py-2.5">
         <span className="text-[11px] tabular-nums text-muted-foreground/60 select-none">
-          v0.1.6
+          v0.1.7
         </span>
       </div>
       </div>
