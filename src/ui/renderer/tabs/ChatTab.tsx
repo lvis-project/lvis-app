@@ -41,7 +41,7 @@ export function ChatTab({
   }, [onPiiRedactToggle, onImmediateChange]);
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <SettingsPageHeader
         title="채팅"
         description="자동 컴팩트, 스트리밍 표시, 실험적 기능을 설정합니다"

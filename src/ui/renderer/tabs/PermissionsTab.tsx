@@ -504,7 +504,7 @@ export function PermissionsTab() {
 
   return (
     <div className="pr-1">
-      <div className="space-y-5">
+      <div className="space-y-6">
         <SettingsPageHeader
           title="권한"
           description="도구 권한 정책, 리뷰어, 디렉터리 화이트리스트를 설정합니다"
