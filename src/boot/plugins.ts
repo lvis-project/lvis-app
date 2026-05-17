@@ -30,22 +30,27 @@ export interface EventHint {
   title: string;
 }
 
-/** 현재 LLM 벤더의 API 키를 모든 플러그인에 범용으로 전달 */
+/**
+ * Build the plugin configOverrides map: non-secret metadata only.
+ *
+ * PR #894 Cycle 3 CRIT-1 — the wildcard slot must never carry `llmApiKey`.
+ * Plugins receive the actual key via `hostApi.getSecret("llm.apiKey.<vendor>")`,
+ * which routes through the three-tier `hostSecrets.read[]` allowlist gate.
+ * Injecting the key here would bypass the gate and leak the secret to every
+ * loaded plugin regardless of its manifest. The single non-secret signal
+ * the host shares is `hostApiVendor`, which mirrors the contract that
+ * `refreshActiveLlmWildcard` in `boot.ts` re-applies on every vendor change.
+ *
+ * Per-plugin entries in `pluginConfigs` are merged unchanged.
+ */
 export function buildPluginConfigOverrides(settings: SettingsService): Record<string, Record<string, unknown>> {
   const overrides: Record<string, Record<string, unknown>> = {};
   const llm = settings.get("llm");
 
-  // 글로벌 process.env 오염 금지 — configOverrides를 통한 명시적 주입만 허용.
-  const currentKey = settings.getSecret(`llm.apiKey.${llm.provider}`);
-
-  // 모든 플러그인에 범용 LLM 설정만 전달한다. 플러그인별 키 이름은
-  // HostApi 계약이 아니므로 여기서 주입하지 않는다.
-  if (currentKey) {
-    overrides["*"] = {
-      llmApiKey: currentKey,
-      llmProvider: llm.provider,
-    };
-  }
+  // Wildcard slot carries only non-secret metadata. The host secret stays
+  // gated behind getSecret(); the previous `llmApiKey` injection (Cycle 2)
+  // bypassed `hostSecrets.read[]` and is removed in Cycle 3 (CRIT-1).
+  overrides["*"] = { hostApiVendor: llm.provider };
 
   // Merge per-plugin configs from settings
   const pluginConfigs = settings.get("pluginConfigs");
