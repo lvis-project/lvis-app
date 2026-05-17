@@ -22,11 +22,10 @@ export interface MarketplaceTabProps {
   apiKeyInput: string;
   setApiKeyInput: (v: string) => void;
   onSaved: () => void;
-  /** Debounced immediate-apply hook — fired when private-network toggle flips. */
+  /** Debounced immediate-apply hook — fires on private-network toggle and on
+   *  the explicit URL / API key Save buttons (200ms after the React state
+   *  update commits, so the save reads fresh values). */
   onImmediateChange?: () => void;
-  /** Synchronous "save now" — cancels any pending debounce and runs s.save("marketplace")
-   *  immediately. Wired to inline Save buttons (URL, API key). */
-  onSaveNow?: () => void;
 }
 
 export function MarketplaceTab(props: MarketplaceTabProps) {
@@ -42,7 +41,6 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
     setApiKeyInput,
     onSaved,
     onImmediateChange,
-    onSaveNow,
   } = props;
   const [packages, setPackages] = useState<MarketplaceItem[]>([]);
   const [packageStatus, setPackageStatus] = useState("로딩 중…");
@@ -58,21 +56,19 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
   const isUrlDirty = urlDraft.trim() !== baseUrl.trim();
   const commitUrl = useCallback(() => {
     setBaseUrl(urlDraft.trim());
-    // setBaseUrl schedules a parent-state update; the debounced save would
-    // fire 200ms later. For an explicit "Save" button we want sync persist,
-    // so call onSaveNow which cancels the debounce and runs s.save("marketplace")
-    // right now. The state will have committed by the next render before
-    // s.save reads it (React 18 batches setState within the same call).
-    onSaveNow?.();
-  }, [urlDraft, setBaseUrl, onSaveNow]);
+    // Use the debounced save scheduler instead of a synchronous flush.
+    // Synchronous `s.save("marketplace")` would close over the PRE-update
+    // orchestration state — `setBaseUrl` schedules a re-render and the new
+    // value isn't visible to the closure until the next render. The
+    // debounce gives React time to commit before firing.
+    onImmediateChange?.();
+  }, [urlDraft, setBaseUrl, onImmediateChange]);
 
-  // API key persistence — same explicit-save pattern as URL. The value lives
-  // in `apiKeyInput` (updated on every keystroke); Save button flushes the
-  // marketplace section. Disabled when the input is empty since the
-  // marketplace endpoint only requires a key when the server demands one.
+  // API key — same debounced pattern. The value is already in `apiKeyInput`
+  // (no separate draft); Save schedules the debounced persist.
   const commitApiKey = useCallback(() => {
-    onSaveNow?.();
-  }, [onSaveNow]);
+    onImmediateChange?.();
+  }, [onImmediateChange]);
 
   // "Leave without saving" warning. Fires on window close when there are
   // unsaved URL changes or a typed-but-not-saved API key. Private-network
@@ -205,6 +201,7 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
               onClick={commitUrl}
               disabled={!isUrlDirty}
               title={isUrlDirty ? "변경된 URL을 저장합니다" : "변경 사항이 없습니다"}
+              data-testid="marketplace:url:save"
             >
               저장
             </Button>
@@ -279,6 +276,7 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
                     onClick={commitApiKey}
                     disabled={!apiKeyInput.trim()}
                     title="API 키를 OS 키체인에 저장합니다"
+                    data-testid="marketplace:apikey:save"
                   >
                     저장
                   </Button>
