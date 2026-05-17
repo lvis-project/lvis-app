@@ -26,7 +26,12 @@ import { existsSync } from "node:fs";
 import { createLogger } from "../../lib/logger.js";
 import { verifyEnvelope } from "../envelope-verifier.js";
 import { WHITELIST_PUBLIC_KEYS, WHITELIST_PRIMARY_KEY_ID } from "../marketplace-keys.js";
+import type { PublicKeyInput } from "../envelope-verifier.js";
 import type { SignatureEnvelope } from "../types.js";
+import {
+  incrementHostSecretCounter,
+  sanitizeKeyPrefix,
+} from "../../telemetry/host-secret-counters.js";
 import {
   parseWhitelistDocument,
   type WhitelistDocument,
@@ -96,6 +101,20 @@ class WhitelistRegistry {
   private initialized = false;
   /** Set when a fetch attempt found no cache and offline → permanent deny. */
   private noCacheOffline = false;
+  /**
+   * Ralph cycle 1 HIGH fix — trust roots used for signature verification.
+   * Defaults to the frozen production `WHITELIST_PUBLIC_KEYS` map; tests
+   * inject a per-run keypair via the singleton's
+   * `setPublicKeysForTesting()` helper instead of mutating the module
+   * constant.
+   */
+  private publicKeys: Record<string, PublicKeyInput> = WHITELIST_PUBLIC_KEYS;
+
+  constructor(publicKeys?: Record<string, PublicKeyInput>) {
+    if (publicKeys) {
+      this.publicKeys = publicKeys;
+    }
+  }
 
   /** Test-only — reset state between tests. NOT exported in production callers. */
   resetForTesting(): void {
@@ -103,6 +122,20 @@ class WhitelistRegistry {
     this.initialized = false;
     this.noCacheOffline = false;
     this.now = Date.now;
+    // Restore the production key map so a follow-up test that doesn't call
+    // `setPublicKeysForTesting()` doesn't inherit the previous run's
+    // ephemeral keypair.
+    this.publicKeys = WHITELIST_PUBLIC_KEYS;
+  }
+
+  /**
+   * Ralph cycle 1 — test-only key injection. Production callers use the
+   * frozen module-level `WHITELIST_PUBLIC_KEYS` map; tests generate a
+   * fresh ed25519 keypair per run and swap it in via this helper without
+   * mutating the frozen production constant.
+   */
+  setPublicKeysForTesting(publicKeys: Record<string, PublicKeyInput>): void {
+    this.publicKeys = publicKeys;
   }
 
   /**
@@ -184,7 +217,7 @@ class WhitelistRegistry {
       const verify = verifyEnvelope(
         Buffer.from(outcome.body, "utf-8"),
         envelope,
-        WHITELIST_PUBLIC_KEYS,
+        this.publicKeys,
       );
       if (!verify.ok) {
         telemetry("whitelist_fetch_failed", { reason: "signature_invalid" });
@@ -250,6 +283,19 @@ class WhitelistRegistry {
     if (status.state === "stale-past-grace") {
       return { kind: "deny", reason: "whitelist-stale-exceeded" };
     }
+    if (status.state === "stale-within-grace") {
+      // Ralph cycle 1 MEDIUM fix — emit the previously-declared but
+      // never-called `whitelist_cache_stale` counter so operators see
+      // when the registry is serving grants from a past-expiry doc
+      // inside the 7d grace window. `keyPrefix` carries the requested
+      // key's namespace (folded through `sanitizeKeyPrefix` so unknown
+      // namespaces don't balloon the counter map).
+      incrementHostSecretCounter(
+        "whitelist_cache_stale",
+        pluginId,
+        sanitizeKeyPrefix(key),
+      );
+    }
     const grant = this.snapshot.doc.pluginGrants[pluginId];
     if (!grant) {
       return { kind: "deny", reason: "not-whitelisted" };
@@ -309,7 +355,7 @@ class WhitelistRegistry {
       const verify = verifyEnvelope(
         Buffer.from(cached.body, "utf-8"),
         envelope,
-        WHITELIST_PUBLIC_KEYS,
+        this.publicKeys,
       );
       if (!verify.ok) {
         log.warn(`cached whitelist signature invalid: ${verify.reason}`);
@@ -338,22 +384,28 @@ class WhitelistRegistry {
       }
       const body = await readFile(path, "utf-8");
       const sigPath = `${path}.sig`;
-      // Demo snapshot signature is OPTIONAL — it's baked into asar with the
-      // app binary, so the trust model is "code signing of the app".
-      // When present we still verify (defense in depth); when absent we
-      // accept the JSON shape via parse alone.
-      if (existsSync(sigPath)) {
-        const sigRaw = await readFile(sigPath, "utf-8");
-        const envelope = JSON.parse(sigRaw) as SignatureEnvelope;
-        const verify = verifyEnvelope(
-          Buffer.from(body, "utf-8"),
-          envelope,
-          WHITELIST_PUBLIC_KEYS,
-        );
-        if (!verify.ok) {
-          log.warn(`demo snapshot signature invalid: ${verify.reason}`);
-          return null;
-        }
+      // Ralph cycle 1 MEDIUM fix — demo snapshot signature is now MANDATORY.
+      // Previously the verifier accepted the snapshot bare when `.sig` was
+      // missing, on the theory that asar code-signing covered the trust
+      // model. That assumption fails for two paths the comment didn't
+      // account for: (a) a dev/test build where the asar isn't code-signed
+      // at all and (b) on-disk tampering of the asar's static resources.
+      // Fail closed when the sig is absent — operators can always
+      // regenerate one with the existing `whitelist-v1` keypair.
+      if (!existsSync(sigPath)) {
+        log.warn(`demo snapshot signature missing (fail-closed): ${sigPath}`);
+        return null;
+      }
+      const sigRaw = await readFile(sigPath, "utf-8");
+      const envelope = JSON.parse(sigRaw) as SignatureEnvelope;
+      const verify = verifyEnvelope(
+        Buffer.from(body, "utf-8"),
+        envelope,
+        this.publicKeys,
+      );
+      if (!verify.ok) {
+        log.warn(`demo snapshot signature invalid: ${verify.reason}`);
+        return null;
       }
       return parseWhitelistDocument(body);
     } catch (err) {
