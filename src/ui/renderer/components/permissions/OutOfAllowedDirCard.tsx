@@ -103,8 +103,9 @@ export function OutOfAllowedDirCard({
           </DialogTitle>
           <DialogDescription>
             도구 <code className="rounded bg-muted px-1 py-0.5 font-mono">{request.toolName}</code>{" "}
-            가 현재 허용 디렉토리 목록 외부의 경로에 접근하려 합니다. 이번 1회만
-            허용할지, 디렉토리를 영구 목록에 추가할지, 아니면 거부할지 선택하세요.
+            가 현재 허용 디렉토리 목록 외부의 경로에 접근하려 합니다. 허용 범위를
+            선택하세요 — 이번 1회 (현재 메시지 처리 동안), 이번 세션 (현재
+            대화 종료까지), 영구 (설정에 저장), 또는 거부.
           </DialogDescription>
         </DialogHeader>
 
@@ -186,8 +187,31 @@ export function OutOfAllowedDirCard({
           <Button className="w-full sm:w-auto" variant="ghost" onClick={() => onDecide("deny-once")}>
             거부
           </Button>
-          <Button className="w-full sm:w-auto" variant="outline" onClick={() => onDecide("allow-once")}>
-            한 번만 허용
+          <Button
+            className="w-full sm:w-auto"
+            variant="outline"
+            onClick={() => onDecide("allow-once")}
+            title="현재 메시지 처리 동안만 허용. 다음 메시지에서는 다시 묻습니다."
+          >
+            이번 1회만
+          </Button>
+          <Button
+            className="w-full sm:w-auto"
+            variant="outline"
+            disabled={!suggestedParent || adjacencyBlocking}
+            onClick={() => {
+              if (!suggestedParent) return;
+              onDecide("allow-session", suggestedParent);
+            }}
+            title={
+              adjacencyBlocking
+                ? "민감 경로 인접 경고를 먼저 확인하세요"
+                : suggestedParent
+                  ? `현재 대화 종료까지 ${suggestedParent} 하위 전체 접근을 허용 (영구 저장하지 않음)`
+                  : "추천 추가 디렉토리가 없습니다"
+            }
+          >
+            이번 세션 동안 허용
           </Button>
           <Button
             className="w-full sm:w-auto"

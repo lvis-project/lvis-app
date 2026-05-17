@@ -246,6 +246,23 @@ export function PermissionsTab() {
 
   useEffect(() => { void fetchApprovals(); }, [fetchApprovals]);
 
+  // Auto-refresh on cross-window directory/rule/user-approval config changes
+  // (allow-session grants from out-of-allowed-dir dialog, addRule/removeRule
+  // through PermissionManager SOT, userApprovalRecord/Revoke in another
+  // window). Refresh BOTH `fetchAll` (rules + directories + mode) AND
+  // `fetchApprovals` (R-2 active approvals) so every PermissionsTab section
+  // stays in sync — the broadcast is a single hint event covering all
+  // permission-state mutations.
+  useEffect(() => {
+    const unsubscribe = window.lvis?.permission?.onConfigChanged?.(() => {
+      void fetchAll();
+      void fetchApprovals();
+    });
+    return () => {
+      unsubscribe?.();
+    };
+  }, [fetchAll, fetchApprovals]);
+
   const handleRevokeApproval = async (key: string, toolName: string, scope: UserApprovalScope) => {
     if (!window.lvis?.userApproval) return;
     if (scope === "persistent") {
