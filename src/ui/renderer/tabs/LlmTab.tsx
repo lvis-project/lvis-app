@@ -2,6 +2,7 @@ import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
 import { Input } from "../../../components/ui/input.js";
 import { Label } from "../../../components/ui/label.js";
+import { RadioGroup, RadioGroupItem } from "../../../components/ui/radio-group.js";
 import {
   Select,
   SelectContent,
@@ -33,6 +34,16 @@ export interface LlmTabProps {
   setHasKey: (v: boolean) => void;
   keyInput: string;
   setKeyInput: (v: string) => void;
+  /**
+   * #893 — Auth mode for the active vendor. `"manual"` (default) renders the
+   * raw API key input; `"login"` swaps it for a mockup credential login
+   * button that drives `api.loginMockup(...)`. Persisted under
+   * `llm.vendors.<vendor>.authMode`.
+   */
+  authMode: "manual" | "login";
+  setAuthMode: (mode: "manual" | "login") => void;
+  /** Fired when the user clicks the "Login" button in the auth-mode section. */
+  onOpenLogin?: () => void;
   model: string;
   setModel: (v: string) => void;
   enableThinking: boolean;
@@ -108,6 +119,9 @@ export function LlmTab(props: LlmTabProps) {
     setHasKey,
     keyInput,
     setKeyInput,
+    authMode,
+    setAuthMode,
+    onOpenLogin,
     model,
     setModel,
     enableThinking,
@@ -215,12 +229,44 @@ export function LlmTab(props: LlmTabProps) {
         )}
         {vendor !== "vertex-ai" && (
           <div className="space-y-2">
-            <Label className="text-sm font-medium">{vendorInfo.label} API 키</Label>
+            <Label className="text-sm font-medium">{vendorInfo.label} 인증</Label>
+            <RadioGroup
+              value={authMode}
+              onValueChange={(v) => {
+                if (v === "manual" || v === "login") {
+                  setAuthMode(v);
+                  onImmediateChange?.();
+                }
+              }}
+              className="flex gap-4"
+              data-testid="llm-tab:auth-mode"
+            >
+              <div className="flex items-center gap-2">
+                <RadioGroupItem value="manual" id={`auth-mode-manual-${vendor}`} />
+                <Label htmlFor={`auth-mode-manual-${vendor}`} className="text-xs">API 키</Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <RadioGroupItem value="login" id={`auth-mode-login-${vendor}`} />
+                <Label htmlFor={`auth-mode-login-${vendor}`} className="text-xs">로그인</Label>
+              </div>
+            </RadioGroup>
             <div className="flex items-center gap-2">
               {hasKey ? <Badge variant="default" className="text-xs">설정됨</Badge> : <Badge variant="secondary" className="text-xs">미설정</Badge>}
               {hasKey && <Button size="sm" variant="ghost" className="h-7 text-xs text-destructive" onClick={() => void api.deleteApiKey(vendor).then(() => { setHasKey(false); onSaved(); })}>삭제</Button>}
             </div>
-            <Input type="password" placeholder={hasKey ? "새 키로 교체" : vendorInfo.placeholder} value={keyInput} onChange={(e) => setKeyInput(e.target.value)} />
+            {authMode === "manual" ? (
+              <Input type="password" placeholder={hasKey ? "새 키로 교체" : vendorInfo.placeholder} value={keyInput} onChange={(e) => setKeyInput(e.target.value)} />
+            ) : (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 text-xs"
+                data-testid="llm-tab:open-login"
+                onClick={() => onOpenLogin?.()}
+              >
+                로그인
+              </Button>
+            )}
           </div>
         )}
         <div className="space-y-2"><Label className="text-sm font-medium">모델</Label><Input data-testid="llm-model-input" value={model} onChange={(e) => setModel(e.target.value)} placeholder={vendorInfo.defaultModel} /></div>
