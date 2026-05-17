@@ -234,6 +234,20 @@ export function PermissionsTab() {
 
   useEffect(() => { void fetchAll(); }, [fetchAll]);
 
+  // Auto-refresh on cross-window directory config changes (allow-session
+  // grants applied from an out-of-allowed-dir dialog in another window,
+  // PermissionsTab dirDispatch from another window, slash-allow). Without
+  // this subscription, multi-window users have to manually reload the
+  // "session additions" view.
+  useEffect(() => {
+    const unsubscribe = window.lvis?.permission?.onConfigChanged?.(() => {
+      void fetchAll();
+    });
+    return () => {
+      unsubscribe?.();
+    };
+  }, [fetchAll]);
+
   const fetchApprovals = useCallback(async () => {
     if (!window.lvis?.userApproval) return;
     try {
