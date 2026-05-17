@@ -70,7 +70,7 @@ export function PluginPerfTab({ api }: { api: LvisApi }) {
   }, [refresh]);
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <SettingsPageHeader
         title="플러그인 성능"
         description="플러그인 메트릭과 자원 사용을 확인합니다"
