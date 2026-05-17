@@ -778,6 +778,41 @@ export interface PluginHostApi {
   onPluginsChanged(handler: (event: PluginLifecycleEvent) => void): () => void;
   getSecret(key: string): string | null;
 
+  /**
+   * #893 Stage 2 — Host-managed LLM key resolver. Mirrors the SDK's
+   * `PluginHostApi.resolveApiKey` (optional, may be undefined on older host
+   * builds — plugins guard with `typeof hostApi.resolveApiKey === "function"`).
+   *
+   * Implementation in `src/main/host-api/resolve-api-key.ts` runs the four-tier
+   * gate and returns the SDK's discriminated union (`ResolveApiKeyResult`).
+   * The host interface accepts a structurally compatible shape so the SDK
+   * import stays optional at the type level — callers receive the same
+   * `ok: true | false` discriminator either way.
+   */
+  resolveApiKey?(opts: {
+    purpose: "llm" | "stt" | "embedding" | "vision";
+    vendor?: "openai" | "azure-openai" | "vertex" | "anthropic";
+    signal?: AbortSignal;
+  }): Promise<
+    | {
+        ok: true;
+        vendor: string;
+        bearer: () => string;
+        baseUrl?: string;
+        release: () => void;
+      }
+    | {
+        ok: false;
+        reason:
+          | "no-host-vendor"
+          | "vendor-mismatch"
+          | "not-whitelisted"
+          | "user-mode-plugin"
+          | "aborted"
+          | "user-endpoint-with-host-key";
+      }
+  >;
+
   // Plugin-owned OAuth keeps provider-specific auth inside plugins; the host
   // exposes only generic HostApi surfaces.
   callTool<T = unknown>(toolName: string, payload?: unknown): Promise<T>;

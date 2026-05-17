@@ -1378,7 +1378,7 @@
     border-radius: 0.45rem;
     /* Default (other-side) bubble. Per-card override via `--mock-bubble-other`
        lets a theme paint the assistant bubble with its own muted color
-       (e.g. LG's warm-grey-7) instead of generic slate-200. */
+       (e.g. a warm-grey-7) instead of generic slate-200. */
     background: var(--mock-bubble-other, hsl(var(--p-slate-200)));
     flex: 1 1 auto;
   }

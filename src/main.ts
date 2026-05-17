@@ -1215,7 +1215,7 @@ const BOOTSTRAP_SPLASH = `<!DOCTYPE html>
   html,body{margin:0;height:100%;background:#f3f3f3;color:#2c2c2c;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Apple SD Gothic Neo","Noto Sans KR","Malgun Gothic",sans-serif}
   body{overflow:hidden}
 
-  /* Light shell (default) — cherry-blossom radial gradient + LG vivid red wordmark */
+  /* Light shell (default) — cherry-blossom radial gradient + vivid red wordmark */
   .wrap{
     box-sizing:border-box;display:flex;align-items:center;justify-content:center;
     min-height:100vh;padding:28px;
