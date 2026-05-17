@@ -43,7 +43,14 @@ test('chat history persists across app restart, or skips cleanly', async ({
 
   try {
     const win2 = await app2.firstWindow();
-    await win2.waitForLoadState('domcontentloaded');
+    // The app first loads a data: splash URL, then boots and replaces it
+    // with the real index.html. domcontentloaded fires on the splash where
+    // there is no #root — wait for the persistent main-toolbar testid
+    // instead, mirroring fixtures.mainWindow's bootstrap gate.
+    await win2.locator('[data-testid="main-toolbar"]').first().waitFor({
+      state: 'visible',
+      timeout: 60_000,
+    });
 
     const rootCount = await win2.locator('#root').count();
     expect(rootCount).toBe(1);
