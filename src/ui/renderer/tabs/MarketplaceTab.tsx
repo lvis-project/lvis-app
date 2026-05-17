@@ -24,6 +24,9 @@ export interface MarketplaceTabProps {
   onSaved: () => void;
   /** Debounced immediate-apply hook — fired when private-network toggle flips. */
   onImmediateChange?: () => void;
+  /** Synchronous "save now" — cancels any pending debounce and runs s.save("marketplace")
+   *  immediately. Wired to inline Save buttons (URL, API key). */
+  onSaveNow?: () => void;
 }
 
 export function MarketplaceTab(props: MarketplaceTabProps) {
@@ -39,6 +42,7 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
     setApiKeyInput,
     onSaved,
     onImmediateChange,
+    onSaveNow,
   } = props;
   const [packages, setPackages] = useState<MarketplaceItem[]>([]);
   const [packageStatus, setPackageStatus] = useState("로딩 중…");
@@ -54,8 +58,21 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
   const isUrlDirty = urlDraft.trim() !== baseUrl.trim();
   const commitUrl = useCallback(() => {
     setBaseUrl(urlDraft.trim());
-    onImmediateChange?.();
-  }, [urlDraft, setBaseUrl, onImmediateChange]);
+    // setBaseUrl schedules a parent-state update; the debounced save would
+    // fire 200ms later. For an explicit "Save" button we want sync persist,
+    // so call onSaveNow which cancels the debounce and runs s.save("marketplace")
+    // right now. The state will have committed by the next render before
+    // s.save reads it (React 18 batches setState within the same call).
+    onSaveNow?.();
+  }, [urlDraft, setBaseUrl, onSaveNow]);
+
+  // API key persistence — same explicit-save pattern as URL. The value lives
+  // in `apiKeyInput` (updated on every keystroke); Save button flushes the
+  // marketplace section. Disabled when the input is empty since the
+  // marketplace endpoint only requires a key when the server demands one.
+  const commitApiKey = useCallback(() => {
+    onSaveNow?.();
+  }, [onSaveNow]);
 
   // API key + private network sit behind a "고급 옵션" collapse since most
   // users keep the default endpoint with no auth (user directive 2026-05-18).
@@ -230,12 +247,25 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
                     </Button>
                   )}
                 </div>
-                <Input
-                  type="password"
-                  placeholder={hasApiKey ? "새 키로 교체" : "Bearer token (서버가 요구하는 경우)"}
-                  value={apiKeyInput}
-                  onChange={(e) => setApiKeyInput(e.target.value)}
-                />
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="password"
+                    placeholder={hasApiKey ? "새 키로 교체" : "Bearer token (서버가 요구하는 경우)"}
+                    value={apiKeyInput}
+                    onChange={(e) => setApiKeyInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter" && apiKeyInput.trim()) commitApiKey(); }}
+                    className="flex-1"
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={commitApiKey}
+                    disabled={!apiKeyInput.trim()}
+                    title="API 키를 OS 키체인에 저장합니다"
+                  >
+                    저장
+                  </Button>
+                </div>
                 <p className="text-[11px] text-muted-foreground">
                   서버가 인증을 요구할 때만 입력하세요. 키는 OS 키체인에 암호화되어 저장됩니다.
                 </p>
