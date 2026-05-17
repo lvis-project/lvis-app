@@ -3,6 +3,7 @@ import { TooltipProvider } from "../../components/ui/tooltip.js";
 import { normalizeSettingsTab } from "../../shared/settings-tabs.js";
 import { getApi } from "./api-client.js";
 import { SettingsContent } from "./SettingsContent.js";
+import { CustomTitleBar } from "./components/CustomTitleBar.js";
 import { ThemeProvider } from "./theme/index.js";
 
 export function SettingsWindow({ initialTab }: { initialTab: string }) {
@@ -27,6 +28,11 @@ export function SettingsWindow({ initialTab }: { initialTab: string }) {
     <ThemeProvider api={api}>
       <TooltipProvider>
         <div className="flex h-screen min-h-0 flex-col overflow-hidden bg-background text-foreground">
+          {/* CustomTitleBar — cross-window chrome unification. Same
+              36px drag band + OS traffic-light inset as main / link /
+              auth windows. The macOS branch renders only the drag
+              region; traffic lights are drawn by the OS. */}
+          <CustomTitleBar />
           <main className="min-h-0 flex-1 overflow-hidden">
             <SettingsContent
               open={true}
