@@ -27,6 +27,7 @@ function isoDateOffset(days: number): string {
 const PAGE_SIZE = 50;
 
 const TYPE_BADGE: Record<string, string> = {
+  // Telemetry AuditEntry types (src/audit/audit-logger.ts:85)
   turn: "bg-info/15 text-info",
   tool_call: "bg-success/15 text-success",
   approval: "bg-warning/15 text-warning",
@@ -34,6 +35,19 @@ const TYPE_BADGE: Record<string, string> = {
   error: "bg-destructive/15 text-destructive",
   mcp_connect: "bg-emphasis/15 text-emphasis",
   kill_switch: "bg-destructive/15 text-destructive",
+  // Permission HMAC-chain AuditCommon decisions (src/audit/audit-schema.ts:85+).
+  // Rows in the permission-audit jsonl have no `type` field; the row
+  // normalize step falls back to `decision`. Without these keys every
+  // permission row used to render the neutral muted badge — code-reviewer
+  // round-3 MAJOR finding. Color-coded so allow/ask/deny are visually
+  // distinct at a glance.
+  allow: "bg-success/15 text-success",
+  ask: "bg-warning/15 text-warning",
+  deny: "bg-destructive/15 text-destructive",
+  deferred: "bg-info/15 text-info",
+  deferred_resolve: "bg-info/15 text-info",
+  mode_change: "bg-emphasis/15 text-emphasis",
+  manifest_violation: "bg-destructive/15 text-destructive",
 };
 
 export function AuditTab() {
