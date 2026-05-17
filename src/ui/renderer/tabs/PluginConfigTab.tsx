@@ -16,6 +16,7 @@ import { PluginConfigSchemaForm } from "./PluginConfigSchemaForm.js";
 import { DEFAULT_TOAST_TTL_MS } from "../constants.js";
 import { useNotifySaved } from "../contexts/saved-toast.js";
 import { MARKDOWN_REMARK_PLUGINS } from "../utils/markdown-plugins.js";
+import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
 
 type KV = { key: string; value: string };
 
@@ -51,6 +52,13 @@ export function PluginConfigTab() {
   const [installInFlight, setInstallInFlight] = useState<InstallInFlight>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [uninstallTarget, setUninstallTarget] = useState<PluginCardSummary | null>(null);
+  // Tools list is collapsed by default — plugins that declare many tools
+  // would otherwise dominate the detail panel. Reset to collapsed on
+  // plugin switch.
+  const [toolsExpanded, setToolsExpanded] = useState(false);
+  useEffect(() => {
+    setToolsExpanded(false);
+  }, [selectedId]);
   // Test environments do not always inject `window.lvisApi`; fall back to
   // `null` so unrelated PluginConfigTab tests don't crash before they
   // exercise their own code paths. The hook short-circuits when api is null.
@@ -326,7 +334,12 @@ export function PluginConfigTab() {
   }, [showBanner]);
 
   return (
-    <div className="flex flex-col h-full gap-3">
+    <div className="flex flex-1 min-h-0 flex-col gap-3">
+      <SettingsPageHeader
+        title="플러그인 설정"
+        description="설치된 플러그인의 개별 설정을 관리합니다"
+      />
+      <div className="flex flex-1 min-h-0 flex-col gap-3">
       <PluginUninstallDialog
         target={uninstallTarget}
         working={saving}
@@ -372,8 +385,15 @@ export function PluginConfigTab() {
           설치된 플러그인이 없습니다.
         </div>
       ) : (
-        <div className="flex gap-3 min-h-[520px] max-h-[70dvh]">
-          {/* Left: plugin list */}
+        // Split height fills to the viewport bottom. The 180px reserve
+        // matches the actual non-split chrome above:
+        //   CustomTitleBar 36 + right-pane pt-2 8 + TabsContent mt-2 8 +
+        //   page header (94) + right-pane pb-8 32 ≈ 178.
+        // Right detail card stretches to fill the split height; its own
+        // `overflow-y-auto` is the single scroll surface for the card so
+        // the entire 환경 설정 list is reachable by scrolling.
+        <div className="flex gap-3 h-[calc(100dvh-180px)] min-h-[350px]">
+          {/* Left: plugin list (sub-sidebar — fixed width) */}
           <div className="w-60 shrink-0 rounded-md border bg-card">
             <ScrollArea className="h-full">
               <div className="p-1 space-y-0.5">
@@ -445,8 +465,11 @@ export function PluginConfigTab() {
             </ScrollArea>
           </div>
 
-          {/* Right: detail + key-value editor */}
-          <div className="flex-1 min-w-0 flex flex-col gap-2 rounded-md border bg-card p-3">
+          {/* Right: detail card. The card itself is the ONE scroll surface
+              for everything inside (header + 인증 + 제공 툴 + 환경 설정),
+              so the user can scroll past the auth/tools sections to reach
+              the full list of config fields. */}
+          <div className="flex-1 min-w-0 flex flex-col gap-2 rounded-md border bg-card p-3 overflow-y-auto min-h-0">
             {selectedPlugin ? (
               <>
                 <div className="flex items-start justify-between gap-2">
@@ -484,15 +507,15 @@ export function PluginConfigTab() {
                         )
                       )}
                     </div>
-                    <div className="flex items-center gap-1 mt-0.5">
+                    <div className="flex items-center gap-1 mt-0.5 flex-wrap">
+                      <span className="font-mono text-[10px] text-muted-foreground">{selectedPlugin.id}</span>
                       {selectedPlugin.version && (
-                        <span className="text-[10px] text-muted-foreground">v{selectedPlugin.version}</span>
+                        <span className="text-[10px] text-muted-foreground">· v{selectedPlugin.version}</span>
                       )}
                       {selectedPlugin.publisher && (
                         <span className="text-[10px] text-muted-foreground">· {selectedPlugin.publisher}</span>
                       )}
                     </div>
-                    <p className="font-mono text-[10px] text-muted-foreground">{selectedPlugin.id}</p>
                     {selectedPlugin.description && (
                       <p className="mt-1 text-xs text-muted-foreground">{selectedPlugin.description}</p>
                     )}
@@ -518,6 +541,8 @@ export function PluginConfigTab() {
                   apiForAuthHook && (
                   <>
                     <Separator />
+                    {/* PluginAuthSection renders its own "인증" header
+                        internally — no outer label needed. */}
                     <PluginAuthSection
                       // `key` forces React to remount the section when the
                       // user switches between plugins in the list. Without
@@ -537,33 +562,55 @@ export function PluginConfigTab() {
 
                 {/* Tools section — tool descriptions are markdown (plugin
                     manifests routinely include `**bold**`, code spans, lists,
-                    and line breaks). Rendering them as a single plain <span>
-                    flattens newlines and shows the literal `*` characters,
-                    which is the "md 포맷 깨짐" the user reported. We render
-                    through the shared ReactMarkdown surface used by chat
-                    cards so the typography stays consistent. */}
+                    and line breaks). Rendered through the shared ReactMarkdown
+                    surface (chat cards) for consistent typography.
+
+                    Collapsed by default with a tool-count badge so the detail
+                    panel stays scannable for plugins with many tools. Click
+                    the row to expand. */}
                 {selectedPlugin.tools.length > 0 && (
                   <>
                     <Separator />
                     <div className="space-y-1">
-                      <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">제공 툴</p>
-                      <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-                        {selectedPlugin.tools.map((tool) => {
-                          const desc = selectedPlugin.toolDescriptions?.[tool];
-                          return (
-                            <div key={tool} className="flex flex-col gap-0.5 rounded border border-border/40 bg-muted/20 px-2 py-1.5">
-                              <span className="font-mono text-[11px] font-semibold">{tool}</span>
-                              {desc && (
-                                <div className="prose prose-sm lvis-prose max-w-none break-words text-[11px] text-muted-foreground [&_p]:my-0.5 [&_ul]:my-0.5 [&_ol]:my-0.5 [&_code]:text-[10px]">
-                                  <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>
-                                    {desc}
-                                  </ReactMarkdown>
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
+                      <button
+                        type="button"
+                        className="flex w-full items-center justify-between gap-2 rounded text-left hover:bg-muted/30 -mx-1 px-1 py-1"
+                        aria-expanded={toolsExpanded}
+                        aria-controls={`plugin-tools-list-${selectedPlugin.id}`}
+                        onClick={() => setToolsExpanded((prev) => !prev)}
+                      >
+                        <span className="flex items-center gap-2">
+                          <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">제공 툴</span>
+                          <span className="inline-flex items-center justify-center min-w-[1.25rem] rounded-full bg-muted px-1.5 py-px text-[10px] font-medium text-muted-foreground tabular-nums">
+                            {selectedPlugin.tools.length}
+                          </span>
+                        </span>
+                        <span aria-hidden="true" className="text-[10px] text-muted-foreground">
+                          {toolsExpanded ? "▾" : "▸"}
+                        </span>
+                      </button>
+                      {toolsExpanded && (
+                        <div
+                          id={`plugin-tools-list-${selectedPlugin.id}`}
+                          className="space-y-2 max-h-48 overflow-y-auto pr-1"
+                        >
+                          {selectedPlugin.tools.map((tool) => {
+                            const desc = selectedPlugin.toolDescriptions?.[tool];
+                            return (
+                              <div key={tool} className="flex flex-col gap-0.5 rounded border border-border/40 bg-muted/20 px-2 py-1.5">
+                                <span className="font-mono text-[11px] font-semibold">{tool}</span>
+                                {desc && (
+                                  <div className="prose prose-sm lvis-prose max-w-none break-words text-[11px] text-muted-foreground [&_p]:my-0.5 [&_ul]:my-0.5 [&_ol]:my-0.5 [&_code]:text-[10px]">
+                                    <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>
+                                      {desc}
+                                    </ReactMarkdown>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   </>
                 )}
@@ -574,14 +621,16 @@ export function PluginConfigTab() {
                   // through pluginConfig.set; format:'secret' fields go
                   // through pluginConfig.setSecret so values land in the
                   // encrypted keychain instead of cleartext settings.json.
-                  <ScrollArea className="flex-1 min-h-0">
-                    <div className="pr-2">
-                      <PluginConfigSchemaForm
+                  // The form renders inline (no internal ScrollArea) — the
+                  // PARENT right-detail card has `overflow-y-auto`, so all
+                  // env-config items are reachable by scrolling the card.
+                  <div className="space-y-1.5">
+                    <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">환경 설정</span>
+                    <PluginConfigSchemaForm
                         pluginId={selectedPlugin.id}
                         schema={selectedPlugin.configSchema}
                         values={mergedConfigValues}
                         secretsPresent={secretsPresent}
-                        saving={saving}
                         onSave={async (values) => {
                           setSaving(true);
                           try {
@@ -620,8 +669,7 @@ export function PluginConfigTab() {
                           notifySaved();
                         }}
                       />
-                    </div>
-                  </ScrollArea>
+                  </div>
                 ) : (
                   <>
                     {/* "환경변수" section — schema-less plugins use the raw
@@ -706,6 +754,7 @@ export function PluginConfigTab() {
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }

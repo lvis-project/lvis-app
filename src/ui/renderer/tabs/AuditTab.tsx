@@ -6,6 +6,8 @@ import { Label } from "../../../components/ui/label.js";
 import { NativeSelect, NativeSelectOption } from "../../../components/ui/native-select.js";
 import { Separator } from "../../../components/ui/separator.js";
 import type { AuditEntry } from "../../../audit/audit-logger.js";
+import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
+import { SettingsSection } from "../components/SettingsSection.js";
 
 interface AuditStats {
   totalByType: Record<string, number>;
@@ -25,6 +27,7 @@ function isoDateOffset(days: number): string {
 const PAGE_SIZE = 50;
 
 const TYPE_BADGE: Record<string, string> = {
+  // Telemetry AuditEntry types (src/audit/audit-logger.ts:85)
   turn: "bg-info/15 text-info",
   tool_call: "bg-success/15 text-success",
   approval: "bg-warning/15 text-warning",
@@ -32,6 +35,19 @@ const TYPE_BADGE: Record<string, string> = {
   error: "bg-destructive/15 text-destructive",
   mcp_connect: "bg-emphasis/15 text-emphasis",
   kill_switch: "bg-destructive/15 text-destructive",
+  // Permission HMAC-chain AuditCommon decisions (src/audit/audit-schema.ts:85+).
+  // Rows in the permission-audit jsonl have no `type` field; the row
+  // normalize step falls back to `decision`. Without these keys every
+  // permission row used to render the neutral muted badge — code-reviewer
+  // round-3 MAJOR finding. Color-coded so allow/ask/deny are visually
+  // distinct at a glance.
+  allow: "bg-success/15 text-success",
+  ask: "bg-warning/15 text-warning",
+  deny: "bg-destructive/15 text-destructive",
+  deferred: "bg-info/15 text-info",
+  deferred_resolve: "bg-info/15 text-info",
+  mode_change: "bg-emphasis/15 text-emphasis",
+  manifest_violation: "bg-destructive/15 text-destructive",
 };
 
 export function AuditTab() {
@@ -112,12 +128,15 @@ export function AuditTab() {
     // single dialog scroll (always-visible gutter for G2). Wrapping the
     // tab in its own ScrollArea here would create a double scrollbar.
     <div className="pr-1">
-      <div className="space-y-4 pt-4">
+      <div className="space-y-6">
+        <SettingsPageHeader
+          title="감사"
+          description="감사 로그를 조회하고 export 합니다"
+        />
 
         {/* ── Stats Bar ── */}
         {stats && (
-          <div className="space-y-2">
-            <p className="text-sm font-medium">최근 7일 통계</p>
+          <SettingsSection title="최근 7일 통계">
             <div className="flex flex-wrap gap-3">
               <div className="rounded-md border px-3 py-2 text-center">
                 <p className="text-xs text-muted-foreground">총 항목</p>
@@ -149,14 +168,11 @@ export function AuditTab() {
                 ))}
               </div>
             )}
-          </div>
+          </SettingsSection>
         )}
 
-        <Separator />
-
         {/* ── Filters ── */}
-        <div className="space-y-2">
-          <p className="text-sm font-medium">검색 필터</p>
+        <SettingsSection title="검색 필터">
           <div className="grid grid-cols-2 gap-2">
             <div className="space-y-1">
               <Label className="text-[11px] text-muted-foreground">시작 날짜</Label>
@@ -204,15 +220,13 @@ export function AuditTab() {
               {loading ? "..." : "검색"}
             </Button>
           </div>
-        </div>
-
-        <Separator />
+        </SettingsSection>
 
         {/* ── Results ── */}
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <p className="text-sm font-medium">결과 {result.total > 0 ? `(${result.total.toLocaleString()}건)` : ""}</p>
-            {totalPages > 1 && (
+        <SettingsSection
+          title={`결과 ${result.total > 0 ? `(${result.total.toLocaleString()}건)` : ""}`}
+          actions={
+            totalPages > 1 ? (
               <div className="flex items-center gap-1 text-[11px]">
                 <button
                   className="rounded px-1 hover:bg-muted disabled:opacity-40"
@@ -230,9 +244,9 @@ export function AuditTab() {
                   ›
                 </button>
               </div>
-            )}
-          </div>
-
+            ) : undefined
+          }
+        >
           {error && (
             <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
               {error}
@@ -257,8 +271,22 @@ export function AuditTab() {
                 <tbody>
                   {result.entries.map((entry, i) => {
                     const isExpanded = expandedIdx === i;
-                    const badgeClass = TYPE_BADGE[entry.type] ?? "bg-muted text-muted-foreground";
-                    const preview = entry.input ?? entry.output ?? "";
+                    // Audit results mix two record shapes in a single stream:
+                    // (1) telemetry AuditEntry (timestamp/type/route/input/output)
+                    // (2) permission HMAC-chain AuditCommon (ts/auditId/trustOrigin/
+                    //     decision/prevHash/tool). The row used to read only (1)'s
+                    // fields, so every (2) row rendered as blank skeleton cells.
+                    // Normalize once per row with a small fallback chain — the
+                    // expanded JSON view below still shows the raw entry so power
+                    // users see everything.
+                    const e = entry as unknown as Record<string, unknown>;
+                    const ts = (e.timestamp ?? e.ts) as string | undefined;
+                    const rowType = (e.type ?? e.decision ?? "—") as string;
+                    const sessionPreview = typeof e.sessionId === "string" ? (e.sessionId as string).slice(0, 8) : undefined;
+                    const routeOrTool = (e.route ?? e.tool ?? e.trustOrigin ?? sessionPreview) as string | undefined;
+                    const previewRaw = (e.input ?? e.output ?? e.reason ?? "") as string;
+                    const preview = typeof previewRaw === "string" ? previewRaw : String(previewRaw);
+                    const badgeClass = TYPE_BADGE[rowType] ?? "bg-muted text-muted-foreground";
                     return (
                       <React.Fragment key={i}>
                         <tr
@@ -266,13 +294,13 @@ export function AuditTab() {
                           onClick={() => setExpandedIdx(isExpanded ? null : i)}
                         >
                           <td className="px-3 py-1.5 font-mono text-[10px] text-muted-foreground whitespace-nowrap">
-                            {entry.timestamp?.slice(0, 19).replace("T", " ")}
+                            {ts?.slice(0, 19).replace("T", " ") ?? "—"}
                           </td>
                           <td className="px-3 py-1.5">
-                            <Badge className={`text-[10px] ${badgeClass}`}>{entry.type}</Badge>
+                            <Badge className={`text-[10px] ${badgeClass}`}>{rowType}</Badge>
                           </td>
                           <td className="px-3 py-1.5 text-muted-foreground font-mono">
-                            {entry.route ?? entry.sessionId?.slice(0, 8) ?? "—"}
+                            {routeOrTool ?? "—"}
                           </td>
                           <td className="max-w-[200px] truncate px-3 py-1.5 text-muted-foreground">
                             {preview.slice(0, 80)}
@@ -294,8 +322,7 @@ export function AuditTab() {
               </table>
             </div>
           )}
-        </div>
-
+        </SettingsSection>
       </div>
     </div>
   );
