@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, Loader2, Wrench } from "lucide-react";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
 
@@ -64,6 +64,37 @@ function ToolDurationBadge({ durationMs }: { durationMs?: number }) {
       className="shrink-0 font-mono text-[10px] tabular-nums opacity-70"
       title={`${durationMs} ms`}
       data-testid="tool-duration"
+    >
+      ⏱ {label}
+    </span>
+  );
+}
+
+/**
+ * Live ticking elapsed counter while a tool is in-flight. Mirrors the
+ * formatted output of `ToolDurationBadge` so a tool's badge shape does
+ * not jump when it transitions from running → done. Ticks every 200ms
+ * — fine-grained enough to feel alive on short calls, cheap enough not
+ * to thrash React for long ones. Returns null until `startedAt` is set
+ * (legacy stream events without per-tool start timestamps).
+ */
+function RunningDurationBadge({ startedAt }: { startedAt?: number }) {
+  const [now, setNow] = useState<number>(() => Date.now());
+  useEffect(() => {
+    if (typeof startedAt !== "number") return;
+    const id = setInterval(() => setNow(Date.now()), 200);
+    return () => clearInterval(id);
+  }, [startedAt]);
+  if (typeof startedAt !== "number") return null;
+  const elapsed = Math.max(0, now - startedAt);
+  const label = formatToolDuration(elapsed);
+  if (!label) return null;
+  return (
+    <span
+      className="shrink-0 font-mono text-[10px] tabular-nums opacity-70"
+      title={`${elapsed} ms (실행 중)`}
+      data-testid="tool-duration-running"
+      aria-live="polite"
     >
       ⏱ {label}
     </span>
@@ -178,7 +209,9 @@ function SingleToolInline({
       >
         <Wrench className="h-3 w-3 flex-shrink-0" />
         <span className="min-w-0 truncate font-medium">{getToolDisplayName(tool.name)}</span>
-        {!isRunning && <ToolDurationBadge durationMs={tool.durationMs} />}
+        {isRunning
+          ? <RunningDurationBadge startedAt={tool.startedAt} />
+          : <ToolDurationBadge durationMs={tool.durationMs} />}
         {isRunning ? (
           <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
         ) : (
@@ -326,7 +359,9 @@ export function ToolGroupCard({
                 >
                   {isExpanded ? <ChevronDown className="h-2.5 w-2.5 flex-shrink-0" /> : <ChevronRight className="h-2.5 w-2.5 flex-shrink-0" />}
                   <span className="min-w-0 truncate">{getToolDisplayName(tool.name)}</span>
-                  {tool.status !== "running" && <ToolDurationBadge durationMs={tool.durationMs} />}
+                  {tool.status === "running"
+                    ? <RunningDurationBadge startedAt={tool.startedAt} />
+                    : <ToolDurationBadge durationMs={tool.durationMs} />}
                   {tool.status === "running" ? (
                     <Loader2 className="h-2.5 w-2.5 shrink-0 animate-spin" />
                   ) : (
