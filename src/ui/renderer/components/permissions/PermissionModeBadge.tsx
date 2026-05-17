@@ -50,7 +50,7 @@ const MODE_LABELS: Record<ModeBadgeVariant, string> = {
 const MODE_DESCRIPTIONS: Record<ModeBadgeVariant, string> = {
   default: "기본: 읽기 허용, 변경 작업 승인 요청",
   strict: "전체 물어보기: 읽기 포함 모든 도구 승인 요청",
-  auto: "자동 검증: 저위험 처리 + 헤드리스 백그라운드 리뷰어 검증",
+  auto: "자동 검증: 저위험 처리 + 자동(헤드리스) 실행과 대화형 채팅을 권한 리뷰어 검증",
   allow: "전체 허용: 하드 차단 밖 자동 허용, 허용 디렉터리 밖 접근은 별도 승인",
   unknown: "권한 모드 미확인",
 };
