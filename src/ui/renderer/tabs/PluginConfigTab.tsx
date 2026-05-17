@@ -631,7 +631,6 @@ export function PluginConfigTab() {
                         schema={selectedPlugin.configSchema}
                         values={mergedConfigValues}
                         secretsPresent={secretsPresent}
-                        saving={saving}
                         onSave={async (values) => {
                           setSaving(true);
                           try {
