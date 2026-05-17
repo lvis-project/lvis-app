@@ -52,9 +52,9 @@ export function PluginConfigTab() {
   const [installInFlight, setInstallInFlight] = useState<InstallInFlight>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [uninstallTarget, setUninstallTarget] = useState<PluginCardSummary | null>(null);
-  // Tools list is collapsed by default — plugins with many tools (e.g.
-  // agent-hub ships 9+) would otherwise dominate the detail panel.
-  // Reset to collapsed whenever the selected plugin changes.
+  // Tools list is collapsed by default — plugins that declare many tools
+  // would otherwise dominate the detail panel. Reset to collapsed on
+  // plugin switch.
   const [toolsExpanded, setToolsExpanded] = useState(false);
   useEffect(() => {
     setToolsExpanded(false);
@@ -566,8 +566,8 @@ export function PluginConfigTab() {
                     surface (chat cards) for consistent typography.
 
                     Collapsed by default with a tool-count badge so the detail
-                    panel stays scannable for plugins with many tools (e.g.
-                    agent-hub ships 9+). Click the row to expand. */}
+                    panel stays scannable for plugins with many tools. Click
+                    the row to expand. */}
                 {selectedPlugin.tools.length > 0 && (
                   <>
                     <Separator />
