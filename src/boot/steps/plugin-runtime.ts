@@ -16,7 +16,7 @@
 import { app, BrowserWindow as ElectronBrowserWindow, shell } from "electron";
 import type { BrowserWindow } from "electron";
 import { mkdirSync } from "node:fs";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import { installPluginPartitionPolicy } from "../../main/html-preview-partition.js";
 import { pluginPartitionName } from "../../shared/plugin-partition.js";
 import { onEvent as onHostEvent } from "../types.js";
@@ -66,6 +66,12 @@ import { createLogger } from "../../lib/logger.js";
 import { stripUntrustedTags } from "../../lib/strip-untrusted-tags.js";
 import { plog, PluginPhase } from "../../plugins/lifecycle-log.js";
 import { incrementHostSecretCounter, sanitizeKeyPrefix } from "../../telemetry/host-secret-counters.js";
+import { whitelistRegistry } from "../../plugins/whitelist/whitelist-registry.js";
+import {
+  resolveApiKey as resolveApiKeyImpl,
+  type ResolveApiKeyPurpose,
+  type ResolveApiKeyVendor,
+} from "../../main/host-api/resolve-api-key.js";
 import {
   ApprovalIssuerRegistry,
   verifyApprovalRequestScope,
@@ -953,7 +959,17 @@ export async function initPluginRuntime(
         );
       }
     },
-    createHostApi: (pluginId: string, manifest: PluginManifest, pluginDataDir: string): PluginHostApi => ({
+    createHostApi: (pluginId: string, manifest: PluginManifest, pluginDataDir: string): PluginHostApi => {
+      // #893 Stage 2 — manifest sha256 pin (Tier-3 whitelist check). The
+      // whitelist registry stores `approvedManifestSha256` per pluginId; we
+      // compare against the canonicalized JSON of the running manifest so a
+      // post-install manifest swap (different tools / wider hostSecrets.read)
+      // forces a fresh whitelist roll. Canonicalization = stable key order
+      // via JSON.stringify with the SDK's `getDeclaredEmittedEvents`-style
+      // semantics; for now we sort top-level keys deterministically.
+      const canonical = JSON.stringify(manifest, Object.keys(manifest).sort());
+      const manifestSha256 = createHash("sha256").update(canonical).digest("hex");
+      return ({
       storage: createPluginStorage(pluginId, pluginDataDir, (msg, meta) => {
         try {
           bootAuditLogger.log({
@@ -1095,18 +1111,48 @@ export async function initPluginRuntime(
         pluginRuntime.registerDisposer(pluginId, unsubscribe);
         return unsubscribe;
       },
+      // #893 Stage 2 — Host implementation of the SDK's `resolveApiKey`.
+      // Returns the SDK `ResolveApiKeyResult` discriminated union (bearer +
+      // release on success; typed reason on failure). Plugins read the
+      // key via `result.bearer()` and SHOULD call `result.release()` in a
+      // `finally` so the captured string has a deterministic lifetime.
+      // All four tiers are evaluated in-line inside `resolveApiKeyImpl`;
+      // the call here is a thin closure capture of pluginId + manifest +
+      // manifestSha256 + the shared audit/settings services.
+      resolveApiKey: async (opts) => {
+        return resolveApiKeyImpl(
+          {
+            purpose: opts.purpose as ResolveApiKeyPurpose,
+            vendor: opts.vendor as ResolveApiKeyVendor | undefined,
+            signal: opts.signal,
+          },
+          {
+            pluginId,
+            manifest,
+            manifestSha256,
+            settingsService,
+            auditLogger: bootAuditLogger,
+          },
+        );
+      },
       getSecret: (key) => {
-        // #893 — Three-tier secret access gate:
+        // #893 Stage 2 — Four-tier secret access gate:
         //   (1) Plugin's own `plugin.<pluginId>.*` namespace — always allowed.
-        //   (2) Host secret whose key is declared in the manifest's
-        //       `hostSecrets.read[]` allowlist AND points to the currently
-        //       active LLM vendor — granted, with an audit entry +
-        //       telemetry counter so operators can spot drift.
-        //   (3) Anything else — denied, audited (warn), telemetry counter
-        //       incremented, and `null` returned. The plugin sees the
-        //       missing-key path identically to a tier-2 key that has not
-        //       been provisioned yet, so a denied lookup is indistinguishable
-        //       from a legitimate "key not set".
+        //       ADDITIVE WHITELIST: this tier intentionally never consults the
+        //       whitelist registry so non-whitelisted plugins still get to hold
+        //       their own keys under their own namespace.
+        //   (2) Host secret declared in `manifest.hostSecrets.read[]` — must
+        //       match the static manifest allowlist. Manifest-only check.
+        //   (3) Whitelist registry — `whitelistRegistry.isAllowed(pluginId,
+        //       key, manifestSha256)`. Tier-3 was added in Stage 2 of the
+        //       #893 redesign so a remote-signed policy roll can pull a
+        //       grant without shipping a host build. Manifest sha pin
+        //       prevents post-install manifest swaps from inheriting the
+        //       grant.
+        //   (4) Active-vendor cross-check — `settings.llm.provider` must
+        //       equal the vendor in the requested `llm.apiKey.<vendor>` key.
+        //       Stops a plugin from harvesting idle credentials for a
+        //       non-active provider.
         //
         // PR #894 review B7 — `keyPrefix` is folded through `sanitizeKeyPrefix`
         // before it reaches the in-process counter map. An attacker plugin
@@ -1118,12 +1164,33 @@ export async function initPluginRuntime(
         // Audit log lines additionally cap `key` to 64 chars so an attacker
         // can't bloat the JSONL with megabyte-long denied keys.
         const auditKey = key.slice(0, 64);
+        // Tier 1 — own namespace.
         if (key.startsWith(`plugin.${pluginId}.`)) {
           return settingsService.getSecret(key);
         }
         const allowlist = manifest.hostSecrets?.read ?? [];
         const keyPrefix = sanitizeKeyPrefix(key);
+        // Tier 2 — manifest allowlist.
         if (allowlist.includes(key)) {
+          // Tier 3 — whitelist registry (Stage 2). Additive: we only run this
+          // when the key is already in the manifest allowlist; own-namespace
+          // calls above bypass the registry entirely so a plugin can hold its
+          // own credentials regardless of registry state.
+          const decision = whitelistRegistry.isAllowed(pluginId, key, manifestSha256);
+          if (decision.kind === "deny") {
+            try {
+              bootAuditLogger.log({
+                timestamp: new Date().toISOString(),
+                sessionId: "plugin",
+                type: "warn",
+                input: `[plugin:${pluginId}] hostSecret_denied reason=${decision.reason} key=${auditKey}`,
+              });
+            } catch { /* audit must not break host */ }
+            incrementHostSecretCounter("hostSecret_denied", pluginId, keyPrefix);
+            return null;
+          }
+          // Tier 4 — active-vendor cross-check.
+          //
           // PR #894 review B6 — `hostSecrets.read[]` is a static manifest
           // declaration; it does not track which vendor the user is
           // currently using. Allowing a plugin to read
@@ -1165,7 +1232,7 @@ export async function initPluginRuntime(
             timestamp: new Date().toISOString(),
             sessionId: "plugin",
             type: "warn",
-            input: `[plugin:${pluginId}] hostSecret_denied key=${auditKey}`,
+            input: `[plugin:${pluginId}] hostSecret_denied reason=not-allowlisted key=${auditKey}`,
           });
         } catch { /* audit must not break host */ }
         incrementHostSecretCounter("hostSecret_denied", pluginId, keyPrefix);
@@ -1576,7 +1643,8 @@ export async function initPluginRuntime(
 
         return { accepted: true, source: decision.source, eventId };
       },
-    }),
+    });
+    },
   });
 
   // AC1.2 — periodic purge of stale ApprovalIssuerRegistry entries.
