@@ -222,27 +222,40 @@ export function PluginConfigSchemaForm({
               <p className="text-[11px] text-muted-foreground">{prop.description}</p>
             )}
             {isSecret ? (
-              <div className="flex items-center gap-2">
-                <Input
-                  id={fieldId}
-                  type="password"
-                  className="h-7 text-xs flex-1"
-                  placeholder={secretsPresent[key] ? "**** (저장됨)" : "값을 입력하세요"}
-                  value={secretDrafts[key] ?? ""}
-                  onChange={(e) =>
-                    setSecretDrafts((prev) => ({ ...prev, [key]: e.target.value }))
-                  }
-                />
-                <Button
-                  size="sm"
-                  className="h-7 text-xs px-2"
-                  onClick={() => void handleSetSecret(key)}
-                  disabled={Boolean(secretSaving[key])}
-                  data-testid={`${fieldId}:save`}
-                >
-                  {secretSaving[key] ? "저장 중…" : "저장"}
-                </Button>
-              </div>
+              <>
+                <div className="flex items-center gap-2">
+                  <Input
+                    id={fieldId}
+                    type="password"
+                    className="h-7 text-xs flex-1"
+                    placeholder={secretsPresent[key] ? "**** (저장됨)" : "값을 입력하세요"}
+                    value={secretDrafts[key] ?? ""}
+                    onChange={(e) =>
+                      setSecretDrafts((prev) => ({ ...prev, [key]: e.target.value }))
+                    }
+                  />
+                  <Button
+                    size="sm"
+                    className="h-7 text-xs px-2"
+                    onClick={() => void handleSetSecret(key)}
+                    disabled={Boolean(secretSaving[key])}
+                    data-testid={`${fieldId}:save`}
+                    title="OS 키체인에 즉시 저장합니다 (배치 저장 대상이 아님)"
+                  >
+                    {secretSaving[key] ? "저장 중…" : "저장"}
+                  </Button>
+                </div>
+                {/* Why does this field have its OWN Save while others batch
+                    at the bottom? Secrets (api keys, tokens) go through a
+                    separate IPC (`pluginConfig.setSecret`) that writes to
+                    the OS keychain per-field — they CAN'T be batched with
+                    cleartext config (different storage backend). Surface
+                    that asymmetry inline so the user isn't confused
+                    (user feedback 2026-05-18). */}
+                <p className="text-[10px] text-muted-foreground">
+                  🔒 보안 — 이 값은 OS 키체인에 즉시 저장됩니다. 하단 일괄 저장에 포함되지 않습니다.
+                </p>
+              </>
             ) : prop.enum ? (
               <NativeSelect
                 id={fieldId}
