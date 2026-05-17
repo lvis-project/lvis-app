@@ -214,15 +214,11 @@ export function SettingsContent({
           can sit below the nav list as a sibling (Radix TabsList only
           accepts TabsTrigger children). */}
       <div className="flex h-full w-48 shrink-0 flex-col border-r">
-      {/* Sidebar "설정" header — sits above the nav list as a section
-          label. NO border-b between header and nav (user directive:
-          "헤더에 있는 라인을 제거"); typographic separation only via
-          `mb-6`. `pt-6` mirrors the right-pane stack
-            (scroll pt-2 + TabsContent mt-2 + SettingsPageHeader pt-2 = 24)
+      {/* Sidebar "설정" header. `pt-6` mirrors the right-pane stack
+          (scroll pt-2 + TabsContent mt-2 + SettingsPageHeader pt-2 = 24)
           so the sidebar h2 baseline aligns with the right-pane h2 of
-          the active tab. Horizontal `px-5` (20px) aligns the "설정"
-          text-left with the nav-trigger icon-left (TabsList p-2 (8) +
-          trigger px-3 (12) = 20). */}
+          the active tab. `px-5` (20px) aligns the "설정" text-left with
+          the nav-trigger icon-left (TabsList p-2 + trigger px-3 = 20). */}
       <div className="px-5 pt-6 mb-6">
         <h2 className="text-xl font-semibold leading-9 tracking-tight">설정</h2>
       </div>
@@ -446,11 +442,8 @@ export function SettingsContent({
                 void s.save("marketplace");
               }}
             />
-            {/* Bottom <TabSaveBar> removed — URL has its own explicit
-                "저장" button, API key has an inline Save in the
-                "고급 옵션" collapse, and the private-network toggle is
-                immediate-apply. A bottom batch-save was redundant + the
-                user (2026-05-18) explicitly questioned it. */}
+            {/* No bottom TabSaveBar — URL + API key each own an inline
+                Save; private-network toggle is immediate-apply. */}
           </TabsContent>
       </div>
       </div>
