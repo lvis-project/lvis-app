@@ -72,6 +72,23 @@ function broadcastPermissionModeChanged(deps: IpcDeps, mode: string): void {
   }
 }
 
+/**
+ * Notify all renderers that the allowed-directories config mutated
+ * (session-add via slash dispatch / PermissionsTab dirDispatch / etc.).
+ * Multi-window subscribers (PermissionsTab) refresh their views without
+ * manual reload. Sent as a hint event — listeners pull fresh state via
+ * the existing `permission.dirDispatch("list")` rather than receiving
+ * the full list in the broadcast payload (avoids serialization size
+ * and keeps a single source of truth in the slash dispatcher).
+ */
+function broadcastPermissionConfigChanged(deps: IpcDeps): void {
+  const mainWindow = deps.getMainWindow?.();
+  const windows = deps.getAppWindows?.() ?? [mainWindow];
+  for (const win of windows) {
+    sendToWindow(win, PERMISSIONS.configChanged, {});
+  }
+}
+
 export function registerPermissionsHandlers(deps: IpcDeps): void {
   const { conversationLoop, approvalGate, auditLogger } = deps;
   const deferredResolveInFlight = new Set<string>();
@@ -208,6 +225,13 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
       const result = await dispatchPermissionDirCommand(parsed);
       if (result.ok && result.verb === "allow" && result.sessionOnly && result.sessionDirectory) {
         conversationLoop.addSessionAdditionalDirectory(result.sessionDirectory);
+      }
+      // Notify all renderer windows whenever the directory config mutates
+      // (any successful allow/deny that touches persisted or session
+      // additions). The `verb === "list"` short-circuit avoids spurious
+      // broadcasts from read-only list queries.
+      if (result.ok && result.verb !== "list") {
+        broadcastPermissionConfigChanged(deps);
       }
       return result;
     },
