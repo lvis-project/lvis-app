@@ -43,14 +43,23 @@ describe("PowerShellTool — policy surface", () => {
     expect(found?.isReadOnly({ command: "Get-ChildItem" })).toBe(false);
   });
 
-  it("defaults timeoutSeconds to policy.shellDefaultMs / 1000", () => {
+  it("defaults timeoutSeconds to 60", () => {
     const parsed = PowerShellToolInputSchema.parse({ command: "Get-ChildItem" });
-    expect(parsed.timeoutSeconds).toBe(TOOL_TIMEOUT_POLICY.shellDefaultMs / 1000);
+    expect(parsed.timeoutSeconds).toBe(60);
   });
 
-  it("rejects timeoutSeconds above policy.shellMaxMs / 1000", () => {
-    const above = TOOL_TIMEOUT_POLICY.shellMaxMs / 1000 + 1;
-    expect(() => PowerShellToolInputSchema.parse({ command: "Get-ChildItem", timeoutSeconds: above })).toThrow();
+  it("accepts timeoutSeconds at exactly the max (120, inclusive boundary)", () => {
+    const parsed = PowerShellToolInputSchema.parse({ command: "Get-ChildItem", timeoutSeconds: 120 });
+    expect(parsed.timeoutSeconds).toBe(120);
+  });
+
+  it("rejects timeoutSeconds above 120", () => {
+    expect(() => PowerShellToolInputSchema.parse({ command: "Get-ChildItem", timeoutSeconds: 121 })).toThrow();
+  });
+
+  it("SOT stays in lockstep with the hardcoded contract (regression guard)", () => {
+    expect(TOOL_TIMEOUT_POLICY.shellDefaultMs / 1000).toBe(60);
+    expect(TOOL_TIMEOUT_POLICY.shellMaxMs / 1000).toBe(120);
   });
 
   it("blocks expression execution and encoded command forms from the AST summary", () => {
