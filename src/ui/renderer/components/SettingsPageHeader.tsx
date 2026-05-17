@@ -7,7 +7,7 @@ export interface SettingsPageHeaderProps {
 
 export function SettingsPageHeader({ title, description }: SettingsPageHeaderProps) {
   return (
-    <header className="pt-2 space-y-1 mb-4">
+    <header className="pt-2 space-y-1.5 mb-6">
       {/*
         `leading-9` (36px) makes the h2's line-box height match the
         sidebar trigger's row height:
