@@ -153,6 +153,26 @@ test.describe("chat layout overflow", () => {
     utimesSync(historicalSessionPath, old, old);
     utimesSync(activeSessionPath, now, now);
 
+    // 부트 시 historical session 이 자동 resume 되도록 .active-session.json 시드.
+    // useSessions.hydrateInitialSession 은 chatMainActiveState 를 먼저 보고
+    // (mainActiveMode==="resume" && mainActiveSessionId) 이면 그 세션을 복원한다.
+    // 시드 없으면 historical 세션은 그냥 sidebar 목록에만 보이고 active 가 아니라
+    // WorkGroup 들이 chat surface 에 렌더되지 않아 본 테스트가 잡으려는 horizontal
+    // overflow 케이스를 만들 수 없다.
+    writeFileSync(
+      resolve(sessionsDir, ".active-session.json"),
+      JSON.stringify(
+        {
+          mainActiveMode: "resume",
+          mainActiveSessionId: historicalSessionId,
+          updatedAt: new Date().toISOString(),
+        },
+        null,
+        2,
+      ),
+      "utf-8",
+    );
+
     app = await electron.launch({
       args: [MAIN_ENTRY, `--user-data-dir=${userDataDir}`, "--no-sandbox"],
       env: {
@@ -216,9 +236,12 @@ test.describe("chat layout overflow", () => {
           clientWidth: (el as HTMLElement).clientWidth,
         };
       };
-      const sentinel = document.querySelector('[data-testid="chat-history-sentinel"]');
-      const chatViewport = sentinel?.closest("[data-radix-scroll-area-viewport]");
-      const chatContentWrapper = chatViewport?.firstElementChild;
+      // `chat-history-sentinel` 은 더 이상 렌더되지 않으므로 chat ScrollArea
+      // 컨테이너 (`.lvis-chat-scroll`) 안의 Radix scroll viewport 를 직접 찾는다.
+      const chatViewport = document.querySelector(
+        ".lvis-chat-scroll [data-radix-scroll-area-viewport]",
+      );
+      const chatContentWrapper = chatViewport?.firstElementChild ?? null;
       const viewportBox = toBox(chatViewport);
       const contentWrapperBox = toBox(chatContentWrapper);
       const elementBoxes = [
