@@ -7,22 +7,42 @@
  * should call `release()` in a `finally` block so the in-memory copy of the
  * key has a deterministic lifetime.
  *
- * Decision tree (mirrors `plugin-runtime.ts:getSecret`):
+ * Decision tree (Ralph cycle 1 — aligned with `plugin-runtime.ts:getSecret`):
  *   - tier-1 own-namespace          → ok=true (vendor = requested vendor or active)
  *   - tier-2 manifest allowlist     → check
- *   - tier-3 whitelist registry     → check
+ *   - tier-3 whitelist registry     → check (BEFORE Tier-4 — see ORDER below)
  *   - tier-4 active-vendor cross    → reason "vendor-mismatch"
  *   - whitelist no-cache + offline  → reason "not-whitelisted" (closest SDK enum)
  *   - missing key in settings       → reason "no-host-vendor"
  *
+ * Tier-3 / Tier-4 ORDER (Ralph cycle 1 MEDIUM fix):
+ *   Both `getSecret` and `resolveApiKey` now evaluate Tier-3 (whitelist
+ *   registry) BEFORE Tier-4 (active-vendor cross-check). The whitelist is
+ *   a coarse ACL — it is the static, signed declaration of which plugin
+ *   may read which key. The vendor cross-check is per-call and dynamic
+ *   (driven by `settings.llm.provider`). Running the coarse ACL first
+ *   prevents an unwhitelisted plugin from leaking the dynamic vendor
+ *   state via the deny-reason channel.
+ *
+ * Vendor alias normalization (Ralph cycle 1 CRITICAL fix):
+ *   The SDK enum (`@lvis/plugin-sdk`) uses
+ *   `"openai" | "azure-openai" | "vertex" | "anthropic"`; the host's
+ *   internal vendor union (`src/shared/llm-vendor-defaults.ts`) uses
+ *   `"openai" | "azure-foundry" | "vertex-ai" | "claude"`. Map the SDK
+ *   names to host names at the entry so a Claude-default user + a demo
+ *   plugin that asks for `vendor:"anthropic"` doesn't silently fall into
+ *   `not-whitelisted` for a non-existent `llm.apiKey.anthropic` key.
+ *
  * Cancellation: when `signal.aborted`, returns `{ ok: false, reason: "aborted" }`
- * before any I/O.
+ * before any I/O. On a successful resolve the returned `release()` is wired
+ * to fire automatically when the signal aborts mid-flight, so the captured
+ * bearer reference is dropped without the plugin having to remember.
  */
 import type { ResolveApiKeyResult } from "@lvis/plugin-sdk";
 import type { SettingsService } from "../../data/settings-store.js";
 import type { PluginManifest } from "../../plugins/types.js";
 import type { AuditLogger } from "../../audit/audit-logger.js";
-import { whitelistRegistry } from "../../plugins/whitelist/whitelist-registry.js";
+import { runTier3Then4 } from "../../plugins/whitelist/tier-order.js";
 import {
   incrementHostSecretCounter,
   sanitizeKeyPrefix,
@@ -49,6 +69,28 @@ export interface ResolveApiKeyDeps {
   auditLogger: Pick<AuditLogger, "log">;
 }
 
+/**
+ * Ralph cycle 1 CRITICAL fix — Map SDK-enum vendor names to host
+ * internal vendor names. The SDK ships
+ * `"openai" | "azure-openai" | "vertex" | "anthropic"`; the host's
+ * `LLM_VENDORS` union is
+ * `"openai" | "azure-foundry" | "vertex-ai" | "claude" | "gemini" | "copilot"`.
+ *
+ * Only the three aliases that *differ* between the two surfaces are
+ * mapped; `"openai"` passes through unchanged. Adding a new SDK alias
+ * needs an entry here AND an `llm.apiKey.<host-vendor>` key wired into
+ * the manifest allowlist + demo whitelist.
+ */
+const VENDOR_ALIAS_MAP: Record<string, string> = {
+  anthropic: "claude",
+  "azure-openai": "azure-foundry",
+  vertex: "vertex-ai",
+};
+
+function normalizeVendor(v: string): string {
+  return VENDOR_ALIAS_MAP[v] ?? v;
+}
+
 function audit(deps: ResolveApiKeyDeps, level: "info" | "warn", message: string): void {
   try {
     deps.auditLogger.log({
@@ -63,22 +105,48 @@ function audit(deps: ResolveApiKeyDeps, level: "info" | "warn", message: string)
 }
 
 /**
- * One-shot bearer thunk. The captured string is dropped after `release()` so
- * subsequent `bearer()` calls observe an empty string. Strings in JS are
- * immutable so we cannot literally zero the buffer; the "zeroize" here is a
- * best-effort signal: the reference is dropped, and tests can assert the
- * post-release state.
+ * Ralph cycle 1 HIGH fix — one-shot bearer thunk wired to the request's
+ * `AbortSignal`. The captured string is dropped after `release()` so
+ * subsequent `bearer()` calls observe an empty string. Strings in JS
+ * are immutable so we cannot literally zero the buffer; the "zeroize"
+ * here is a best-effort signal: the reference is dropped, and tests
+ * can assert the post-release state.
+ *
+ * Before the fix `release()` ignored the signal and the bearer stayed
+ * captured after the caller aborted. Now an aborted signal at construction
+ * time releases immediately, and a mid-flight abort fires a one-shot
+ * listener that drops the reference automatically.
  */
-function makeSuccess(vendor: string, value: string): ResolveApiKeyResult & { ok: true } {
+function makeSuccess(
+  vendor: string,
+  value: string,
+  signal?: AbortSignal,
+  baseUrl?: string,
+): ResolveApiKeyResult & { ok: true } {
   let captured: string | null = value;
-  return {
+  const release = () => {
+    captured = null;
+  };
+  if (signal) {
+    if (signal.aborted) {
+      release();
+    } else {
+      // `once: true` so the host doesn't leak listeners across hundreds
+      // of plugin calls sharing the same long-lived signal (e.g. an
+      // overlay session controller's signal).
+      signal.addEventListener("abort", release, { once: true });
+    }
+  }
+  const result: ResolveApiKeyResult & { ok: true } = {
     ok: true,
     vendor,
     bearer: () => captured ?? "",
-    release: () => {
-      captured = null;
-    },
+    release,
   };
+  if (baseUrl !== undefined) {
+    (result as { baseUrl?: string }).baseUrl = baseUrl;
+  }
+  return result;
 }
 
 /**
@@ -97,10 +165,25 @@ export async function resolveApiKey(
   // it (purpose-only call). This matches the SDK example where the plugin
   // declines to pin a specific provider and asks the host to pick.
   const activeProvider = deps.settingsService.get("llm").provider as string;
-  const vendor = request.vendor ?? activeProvider;
-  if (typeof vendor !== "string" || vendor.length === 0) {
+  // Ralph cycle 1 CRITICAL — map SDK vendor enum to host vendor name so
+  // a Claude-default user + `vendor:"anthropic"` request lands on
+  // `llm.apiKey.claude` not a non-existent `llm.apiKey.anthropic`.
+  const requestedVendor = request.vendor ?? activeProvider;
+  const normalizedVendor =
+    typeof requestedVendor === "string" ? normalizeVendor(requestedVendor) : requestedVendor;
+  if (typeof normalizedVendor !== "string" || normalizedVendor.length === 0) {
     return { ok: false, reason: "no-host-vendor" };
   }
+  // Audit log records BOTH the requested SDK name and the normalized
+  // host name so operators see the alias resolution.
+  if (typeof requestedVendor === "string" && requestedVendor !== normalizedVendor) {
+    audit(
+      deps,
+      "info",
+      `resolveApiKey vendor_alias requested=${requestedVendor} normalized=${normalizedVendor}`,
+    );
+  }
+  const vendor = normalizedVendor;
   const llmKey = `llm.apiKey.${vendor}`;
   const keyPrefix = sanitizeKeyPrefix(llmKey);
 
@@ -116,7 +199,7 @@ export async function resolveApiKey(
       `resolveApiKey allow source=plugin-namespace vendor=${vendor} purpose=${request.purpose}`,
     );
     incrementHostSecretCounter("hostSecret_read", deps.pluginId, keyPrefix);
-    return makeSuccess(vendor, ownValue);
+    return makeSuccess(vendor, ownValue, request.signal);
   }
 
   // Tier-2 manifest allowlist.
@@ -131,36 +214,31 @@ export async function resolveApiKey(
     return { ok: false, reason: "not-whitelisted" };
   }
 
-  // Tier-4 active-vendor cross-check (run before the registry so a
-  // vendor-mismatch surfaces with the dedicated SDK enum rather than being
-  // masked by the registry's `not-whitelisted` denial).
-  if (vendor !== activeProvider) {
+  // Tier-3 + Tier-4 via the shared helper (`runTier3Then4`). Ralph cycle 1
+  // MEDIUM fix unifies the order between this path and `getSecret`:
+  // whitelist registry (coarse signed ACL) → active-vendor cross-check
+  // (per-call dynamic state).
+  const tierOutcome = runTier3Then4({
+    pluginId: deps.pluginId,
+    key: llmKey,
+    manifestSha256: deps.manifestSha256,
+    vendor,
+    activeProvider,
+  });
+  if (tierOutcome.kind === "deny") {
     audit(
       deps,
       "warn",
-      `resolveApiKey deny reason=vendor-mismatch requested=${vendor} active=${activeProvider}`,
+      `resolveApiKey deny reason=${tierOutcome.reason} vendor=${vendor} (${tierOutcome.tier})`,
     );
     incrementHostSecretCounter("hostSecret_denied", deps.pluginId, keyPrefix);
-    return { ok: false, reason: "vendor-mismatch" };
-  }
-
-  // Tier-3 whitelist registry.
-  const decision = whitelistRegistry.isAllowed(
-    deps.pluginId,
-    llmKey,
-    deps.manifestSha256,
-  );
-  if (decision.kind === "deny") {
-    audit(
-      deps,
-      "warn",
-      `resolveApiKey deny reason=${decision.reason} vendor=${vendor} (whitelist)`,
-    );
-    incrementHostSecretCounter("hostSecret_denied", deps.pluginId, keyPrefix);
-    // Map registry reasons to SDK enum. `manifest-sha-mismatch` /
-    // `whitelist-unreachable` / `whitelist-stale-exceeded` all surface as
-    // `not-whitelisted` to the plugin — the SDK enum is intentionally
-    // narrow; the detailed reason lives in the audit log for operators.
+    if (tierOutcome.tier === "tier-4") {
+      return { ok: false, reason: "vendor-mismatch" };
+    }
+    // Tier-3 deny — map registry reasons (`manifest-sha-mismatch`,
+    // `whitelist-unreachable`, `whitelist-stale-exceeded`, `not-whitelisted`)
+    // to the SDK enum's narrow `not-whitelisted` slot. Detailed reason
+    // lives in the audit log for operators.
     return { ok: false, reason: "not-whitelisted" };
   }
 
@@ -177,5 +255,16 @@ export async function resolveApiKey(
     `resolveApiKey allow source=whitelist-registry vendor=${vendor} purpose=${request.purpose}`,
   );
   incrementHostSecretCounter("hostSecret_read", deps.pluginId, keyPrefix);
-  return makeSuccess(vendor, value);
+
+  // azure-foundry needs a baseUrl alongside the bearer — the SDK contract
+  // already exposes it. Reach into the per-vendor settings block when
+  // the vendor is azure-foundry; otherwise leave baseUrl unset.
+  let baseUrl: string | undefined;
+  if (vendor === "azure-foundry") {
+    const llmSettings = deps.settingsService.get("llm") as {
+      vendors?: Record<string, { baseUrl?: string } | undefined>;
+    };
+    baseUrl = llmSettings?.vendors?.["azure-foundry"]?.baseUrl;
+  }
+  return makeSuccess(vendor, value, request.signal, baseUrl);
 }
