@@ -291,16 +291,16 @@ grep -rn "<ComponentName>" src/ | head
 ### 핵심 룰
 
 - **사용자 무한 대기 0**: `tools/executor.ts` Step 6 (Execute) 의 `runWithCeiling(...)` (`tools/executor-ceiling.ts`) wrap 우회 금지. 모든 tool path 가 이 step 거치며, ceiling fire 시 AbortController 가 tool 의 abortSignal 을 actually abort.
-- **사용자-facing 최대 cap 120s**: `shellMaxSeconds=120` / `globalCeilingMs=120_000` / `mcpRequestMaxMs=120_000`. 어떤 경로로도 이 cap 위는 허용 안 됨. `subAgentCeilingMs=600_000` 은 *sub-agent inner loop 전용* 예외 — 일반 tool 에 적용 금지.
+- **사용자-facing 최대 cap 120_000ms**: `shellMaxMs=120_000` / `globalCeilingMs=120_000` / `mcpRequestMaxMs=120_000`. 모든 SOT 값이 ms 단위로 통일 — 직접 비교 가능. 어떤 경로로도 이 cap 위는 허용 안 됨. `subAgentCeilingMs=600_000` 은 *sub-agent inner loop 전용* 예외 — 일반 tool 에 적용 금지.
 - **MCP timeout 은 dispatch + ingestion 두 단 모두 clamp**: `mcp-client.ts` 의 `Math.min(..., MAX_REQUEST_TIMEOUT_MS)` 는 dispatch 단; `mcp-governance.ts` `validateConnectionSecurity` 는 ingestion 단에서 `connectionTimeoutMs > mcpRequestMaxMs` approval 을 reject. 한쪽만 적용하면 settings UI / 감사 로그가 unsafe 값을 표시할 위험.
 - **MCP SSE absolute deadline**: streaming activity reset 이 per-chunk window 를 update 해도 *최초 dispatch 시점에 잡힌 절대 deadline* 을 넘기지 못한다. 한 byte 흘리며 영원히 잡고 있는 hostile server 패턴 방어.
-- **LLM judging — cap 안에서 자율**: model 이 long-running (bun install, large build 등) 으로 판단하면 shell tool 의 `timeoutSeconds` input 으로 최대 `shellMaxSeconds=120` 까지 명시 가능. *host-enforced hard ceiling + per-call model override* 패턴.
+- **LLM judging — cap 안에서 자율**: model 이 long-running (bun install, large build 등) 으로 판단하면 shell tool 의 `timeoutSeconds` input 으로 최대 `shellMaxMs / 1000 = 120` 까지 명시 가능. SOT 자체는 ms, schema 가 `/ 1000` 변환해 model 에 노출. *host-enforced hard ceiling + per-call model override* 패턴.
 - **사용자 입력 대기는 별도 surface**: `approvalGateUserWaitMs=300_000` 은 *사용자가 느린 케이스* 라 globalCeiling 의 cap 대상 아님. tool 실행 cap 과 의미 다름.
 - **외부 평균 변경 시 SOT 만 수정**: 외부 OSS agent runtime 의 평균 timeout 정책이 변동하면 `tool-timeout-policy.ts` 만 update — inline literal 흩어지면 회귀 보장.
 
 ### 위반 패턴
 
-- 새 tool 의 schema 에 `.default(120)` 직접 → `TOOL_TIMEOUT_POLICY.shellDefaultSeconds`
+- 새 tool 의 schema 에 `.default(120)` 직접 → `TOOL_TIMEOUT_POLICY.shellDefaultMs / 1000` (SOT 는 ms, schema 가 변환)
 - 새 MCP 통합에 `connectionTimeoutMs: 30_000` hardcode → `mcpRequestDefaultMs`
 - `setTimeout(..., 600_000)` 같은 inline literal → SOT 추가하고 import
 - timeout-bypass 분기 (예: `if (trustedTool) { skipTimeout }`) — 신뢰 가정으로도 우회 금지
