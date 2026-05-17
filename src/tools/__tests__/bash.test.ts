@@ -277,14 +277,26 @@ describe("BashTool — sandbox violation", () => {
 });
 
 describe("BashTool — schema default", () => {
-  it("input schema defaults timeoutSeconds to policy.shellDefaultMs / 1000 when omitted", () => {
+  // Hardcoded numeric expectations pin the model-facing contract. If the
+  // SOT changes (e.g. shellDefaultMs becomes 61_000), these tests break and
+  // force an explicit decision instead of silently drifting the contract.
+  it("input schema defaults timeoutSeconds to 60 when omitted", () => {
     const parsed = BashToolInputSchema.parse({ command: "echo hi" });
-    expect(parsed.timeoutSeconds).toBe(TOOL_TIMEOUT_POLICY.shellDefaultMs / 1000);
+    expect(parsed.timeoutSeconds).toBe(60);
   });
 
-  it("input schema rejects timeoutSeconds above policy.shellMaxMs / 1000", () => {
-    const above = TOOL_TIMEOUT_POLICY.shellMaxMs / 1000 + 1;
-    expect(() => BashToolInputSchema.parse({ command: "echo hi", timeoutSeconds: above })).toThrow();
+  it("input schema accepts timeoutSeconds at exactly the max (120, inclusive boundary)", () => {
+    const parsed = BashToolInputSchema.parse({ command: "echo hi", timeoutSeconds: 120 });
+    expect(parsed.timeoutSeconds).toBe(120);
+  });
+
+  it("input schema rejects timeoutSeconds above 120", () => {
+    expect(() => BashToolInputSchema.parse({ command: "echo hi", timeoutSeconds: 121 })).toThrow();
+  });
+
+  it("SOT stays in lockstep with the hardcoded contract (regression guard)", () => {
+    expect(TOOL_TIMEOUT_POLICY.shellDefaultMs / 1000).toBe(60);
+    expect(TOOL_TIMEOUT_POLICY.shellMaxMs / 1000).toBe(120);
   });
 });
 
