@@ -543,15 +543,22 @@ describe("initPluginRuntime HostApi factory", () => {
     const { WhitelistCache } = await import(
       "../../../plugins/whitelist/whitelist-cache.js"
     );
-    const { WHITELIST_PUBLIC_KEYS, WHITELIST_PRIMARY_KEY_ID } = await import(
+    const { WHITELIST_PRIMARY_KEY_ID } = await import(
       "../../../plugins/marketplace-keys.js"
+    );
+    const { canonicalJSON } = await import(
+      "../../../plugins/whitelist/canonical-json.js"
     );
     const { generateKeyPairSync, sign, createHash } = await import("node:crypto");
     const { mkdtempSync: mkdtempSyncOs } = await import("node:fs");
     whitelistRegistry.resetForTesting();
     const { publicKey, privateKey } = generateKeyPairSync("ed25519");
     const rawPub = publicKey.export({ type: "spki", format: "der" }).slice(-32);
-    WHITELIST_PUBLIC_KEYS[WHITELIST_PRIMARY_KEY_ID] = rawPub.toString("base64");
+    // Ralph cycle 1 — production keys are frozen; tests inject via the
+    // singleton's dedicated helper.
+    whitelistRegistry.setPublicKeysForTesting({
+      [WHITELIST_PRIMARY_KEY_ID]: rawPub.toString("base64"),
+    });
     const grantDoc = {
       version: 1,
       schemaVersion: 1,
@@ -561,17 +568,17 @@ describe("initPluginRuntime HostApi factory", () => {
         "plugin-b6": {
           publisher: "test",
           hostSecrets: { read: ["llm.apiKey.openai", "llm.apiKey.claude"] },
-          // Hash of the canonicalized manifest used below.
+          // Hash of the canonicalized manifest used below. The host now
+          // canonicalizes via the recursive `canonicalJSON` helper
+          // (Ralph cycle 1 fix to the manifest-sha pin) so the test
+          // mirrors the production path.
           approvedManifestSha256: createHash("sha256")
             .update(
-              JSON.stringify(
-                {
-                  id: "plugin-b6",
-                  config: {},
-                  hostSecrets: { read: ["llm.apiKey.openai", "llm.apiKey.claude"] },
-                },
-                ["config", "hostSecrets", "id"],
-              ),
+              canonicalJSON({
+                id: "plugin-b6",
+                config: {},
+                hostSecrets: { read: ["llm.apiKey.openai", "llm.apiKey.claude"] },
+              }),
             )
             .digest("hex"),
         },

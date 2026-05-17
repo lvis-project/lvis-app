@@ -67,6 +67,8 @@ import { stripUntrustedTags } from "../../lib/strip-untrusted-tags.js";
 import { plog, PluginPhase } from "../../plugins/lifecycle-log.js";
 import { incrementHostSecretCounter, sanitizeKeyPrefix } from "../../telemetry/host-secret-counters.js";
 import { whitelistRegistry } from "../../plugins/whitelist/whitelist-registry.js";
+import { canonicalJSON } from "../../plugins/whitelist/canonical-json.js";
+import { runTier3Then4 } from "../../plugins/whitelist/tier-order.js";
 import {
   resolveApiKey as resolveApiKeyImpl,
   type ResolveApiKeyPurpose,
@@ -964,10 +966,16 @@ export async function initPluginRuntime(
       // whitelist registry stores `approvedManifestSha256` per pluginId; we
       // compare against the canonicalized JSON of the running manifest so a
       // post-install manifest swap (different tools / wider hostSecrets.read)
-      // forces a fresh whitelist roll. Canonicalization = stable key order
-      // via JSON.stringify with the SDK's `getDeclaredEmittedEvents`-style
-      // semantics; for now we sort top-level keys deterministically.
-      const canonical = JSON.stringify(manifest, Object.keys(manifest).sort());
+      // forces a fresh whitelist roll.
+      //
+      // Ralph cycle 1 fix — previously this used the REPLACER-ARRAY form of
+      // `JSON.stringify(manifest, Object.keys(manifest).sort())` which only
+      // filters top-level keys and emits every nested object as `{}`. As a
+      // result every plugin's manifest hashed to (nearly) the same sha and
+      // the Tier-3 pin was defeated. Switching to a recursive canonical
+      // JSON serializer (RFC 8785 JCS-style — sort keys at every depth,
+      // preserve array element order) restores the pin.
+      const canonical = canonicalJSON(manifest);
       const manifestSha256 = createHash("sha256").update(canonical).digest("hex");
       return ({
       storage: createPluginStorage(pluginId, pluginDataDir, (msg, meta) => {
@@ -1172,49 +1180,41 @@ export async function initPluginRuntime(
         const keyPrefix = sanitizeKeyPrefix(key);
         // Tier 2 — manifest allowlist.
         if (allowlist.includes(key)) {
-          // Tier 3 — whitelist registry (Stage 2). Additive: we only run this
-          // when the key is already in the manifest allowlist; own-namespace
-          // calls above bypass the registry entirely so a plugin can hold its
-          // own credentials regardless of registry state.
-          const decision = whitelistRegistry.isAllowed(pluginId, key, manifestSha256);
-          if (decision.kind === "deny") {
+          // Tier 3 + Tier 4 — shared helper (`runTier3Then4`) keeps the
+          // order identical with `resolveApiKey`: whitelist registry
+          // (coarse signed ACL) before vendor cross-check (per-call
+          // dynamic state). Ralph cycle 1 MEDIUM fix.
+          //
+          // Tier-4 only applies to `llm.apiKey.*` keys; non-`llm.apiKey.*`
+          // allowlist entries (if any future host-secret class is added)
+          // are passed `activeProvider === vendor` so the cross-check is a
+          // no-op for them.
+          const llmKeyPrefix = "llm.apiKey.";
+          const isLlmKey = key.startsWith(llmKeyPrefix);
+          const vendor = isLlmKey ? key.slice(llmKeyPrefix.length) : "";
+          const activeProvider = isLlmKey
+            ? (settingsService.get("llm").provider as string)
+            : vendor;
+          const outcome = runTier3Then4({
+            pluginId,
+            key,
+            manifestSha256,
+            vendor,
+            activeProvider,
+          });
+          if (outcome.kind === "deny") {
+            const auditReason =
+              outcome.tier === "tier-4" ? "non-active-vendor" : outcome.reason;
             try {
               bootAuditLogger.log({
                 timestamp: new Date().toISOString(),
                 sessionId: "plugin",
                 type: "warn",
-                input: `[plugin:${pluginId}] hostSecret_denied reason=${decision.reason} key=${auditKey}`,
+                input: `[plugin:${pluginId}] hostSecret_denied reason=${auditReason} key=${auditKey}`,
               });
             } catch { /* audit must not break host */ }
             incrementHostSecretCounter("hostSecret_denied", pluginId, keyPrefix);
             return null;
-          }
-          // Tier 4 — active-vendor cross-check.
-          //
-          // PR #894 review B6 — `hostSecrets.read[]` is a static manifest
-          // declaration; it does not track which vendor the user is
-          // currently using. Allowing a plugin to read
-          // `llm.apiKey.<non-active-vendor>` exposes idle credentials that
-          // the user did not opt into for this session. Cross-check the
-          // requested key against the currently active LLM vendor and deny
-          // when they don't match. Non-`llm.apiKey.*` allowlist entries
-          // (if any future host-secret class is added) bypass this gate.
-          const llmKeyPrefix = "llm.apiKey.";
-          if (key.startsWith(llmKeyPrefix)) {
-            const activeVendor = settingsService.get("llm").provider;
-            const expectedKey = `${llmKeyPrefix}${activeVendor}`;
-            if (key !== expectedKey) {
-              try {
-                bootAuditLogger.log({
-                  timestamp: new Date().toISOString(),
-                  sessionId: "plugin",
-                  type: "warn",
-                  input: `[plugin:${pluginId}] hostSecret_denied reason=non-active-vendor key=${auditKey}`,
-                });
-              } catch { /* audit must not break host */ }
-              incrementHostSecretCounter("hostSecret_denied", pluginId, keyPrefix);
-              return null;
-            }
           }
           try {
             bootAuditLogger.log({

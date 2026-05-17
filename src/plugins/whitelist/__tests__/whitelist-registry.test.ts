@@ -14,10 +14,7 @@ import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { whitelistRegistry } from "../whitelist-registry.js";
 import { WhitelistCache } from "../whitelist-cache.js";
 import type { SignatureEnvelope } from "../../types.js";
-import {
-  WHITELIST_PUBLIC_KEYS,
-  WHITELIST_PRIMARY_KEY_ID,
-} from "../../marketplace-keys.js";
+import { WHITELIST_PRIMARY_KEY_ID } from "../../marketplace-keys.js";
 
 // ---------------------------------------------------------------------
 // Helpers
@@ -94,9 +91,11 @@ afterAll(() => {
 });
 
 // ---------------------------------------------------------------------
-// Suite — install a known keypair into WHITELIST_PUBLIC_KEYS for the test
-// run. The real key map is `Object.freeze`-ed, so we patch via a property
-// re-definition keyed by a brand-new `key_id`.
+// Suite — inject a fresh keypair per run via the registry's
+// `setPublicKeysForTesting()` helper. Ralph cycle 1 HIGH fix: the
+// production `WHITELIST_PUBLIC_KEYS` map is now `Object.freeze`-ed so
+// tests cannot mutate the module-level constant; the registry exposes a
+// dedicated test-injection surface instead.
 // ---------------------------------------------------------------------
 
 beforeEach(() => {
@@ -105,14 +104,14 @@ beforeEach(() => {
 
   // Generate a fresh keypair for this test run; key id matches the host's
   // primary key id so `verifyEnvelope` accepts the signature against the
-  // (intentionally non-frozen) WHITELIST_PUBLIC_KEYS map. The map carries
-  // a baseline production key; tests overwrite it for the duration of the
-  // run — production code never mutates the slot.
+  // injected map.
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");
   const rawPub = publicKey.export({ type: "spki", format: "der" }).slice(-32);
   testPrivateKey = privateKey;
   testKeyId = WHITELIST_PRIMARY_KEY_ID;
-  WHITELIST_PUBLIC_KEYS[WHITELIST_PRIMARY_KEY_ID] = rawPub.toString("base64");
+  whitelistRegistry.setPublicKeysForTesting({
+    [WHITELIST_PRIMARY_KEY_ID]: rawPub.toString("base64"),
+  });
 });
 
 // ---------------------------------------------------------------------
