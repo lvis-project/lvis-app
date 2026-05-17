@@ -227,6 +227,9 @@ function SingleToolInline({
           <FileEditDiff data={fileDiff} />
         </div>
       )}
+      {tool.status === "done" && tool.uiPayload && (
+        <McpAppView key={tool.toolUseId} payload={tool.uiPayload} />
+      )}
     </div>
   );
 }
