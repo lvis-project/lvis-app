@@ -101,6 +101,11 @@ export interface AuditEntry {
     permissionDecision?: string;
     permissionReason?: string;
     rateLimitRemaining?: number;
+    /** How the tool execution ended — `"ok"` on success, `"ceiling"` when the
+     *  executor's global timeout fired, `"user-abort"` when caller cancelled
+     *  via abortSignal, `"error"` for any other failure. Distinguishes
+     *  policy-enforced cap from user cancellation in post-incident analysis. */
+    terminationReason?: "ok" | "ceiling" | "user-abort" | "error";
   }>;
   tokenUsage?: {
     inputTokens: number;
