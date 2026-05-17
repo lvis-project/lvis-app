@@ -109,8 +109,11 @@ interface McpToolCallResult {
 
 // ─── Constants ────────────────────────────────────────
 
+import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
+
 const MCP_PROTOCOL_VERSION = "2024-11-05";
-const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+const DEFAULT_REQUEST_TIMEOUT_MS = TOOL_TIMEOUT_POLICY.mcpRequestDefaultMs;
+const MAX_REQUEST_TIMEOUT_MS = TOOL_TIMEOUT_POLICY.mcpRequestMaxMs;
 const HANDSHAKE_TIMEOUT_MS = 10_000; // initialize / tools/list 핸드셰이크용
 const HEALTH_CHECK_INTERVAL_MS = 30_000;
 const MAX_BUFFERED_RESPONSES = 128;
@@ -286,7 +289,10 @@ export class McpClient {
     }
 
     const approval = this.governance.getApproval(this.config.id);
-    const timeoutMs = approval?.connectionTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+    const timeoutMs = Math.min(
+      approval?.connectionTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
+      MAX_REQUEST_TIMEOUT_MS,
+    );
 
     try {
       const result = await this.sendRequest<McpToolCallResult>(
@@ -380,7 +386,7 @@ export class McpClient {
       }
 
       const id = this.nextRequestId++;
-      const timeout = timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+      const timeout = Math.min(timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS, MAX_REQUEST_TIMEOUT_MS);
 
       const timer = setTimeout(() => {
         this.pendingRequests.delete(id);
