@@ -2,8 +2,8 @@
  * Permission policy Phase 2.5 — OutOfAllowedDirCard unit tests.
  *
  * Verifies the re-typed confirmation gate (M3 phishing defense), the
- * adjacency-warning blocking checkbox, and the three-button decision
- * routing.
+ * adjacency-warning blocking checkbox, and the four-button decision
+ * routing (deny / turn-scope / session-scope / persisted).
  */
 import "../../../../test/renderer/setup.js";
 import { describe, it, expect, vi, afterEach } from "vitest";
@@ -55,7 +55,8 @@ describe("OutOfAllowedDirCard", () => {
     expect(document.body.textContent).toContain("/Users/ken/Documents/old-project/notes/today");
     expect(document.body.textContent).toContain("/Users/ken/work");
     expect(getByText("거부")).toBeTruthy();
-    expect(getByText("한 번만 허용")).toBeTruthy();
+    expect(getByText("이번 1회만")).toBeTruthy();
+    expect(getByText("이번 세션 동안 허용")).toBeTruthy();
     expect(getByText("디렉토리 영구 추가")).toBeTruthy();
   });
 
@@ -68,13 +69,25 @@ describe("OutOfAllowedDirCard", () => {
     expect(onDecide).toHaveBeenCalledWith("deny-once");
   });
 
-  it("clicking '한 번만 허용' invokes onDecide('allow-once')", () => {
+  it("clicking '이번 1회만' invokes onDecide('allow-once') — turn-scope grant", () => {
     const onDecide = vi.fn();
     const { getByText } = render(
       <OutOfAllowedDirCard open={true} request={makeReq()} onDecide={onDecide} />,
     );
-    fireEvent.click(getByText("한 번만 허용"));
+    fireEvent.click(getByText("이번 1회만"));
     expect(onDecide).toHaveBeenCalledWith("allow-once");
+  });
+
+  it("clicking '이번 세션 동안 허용' invokes onDecide('allow-session', suggestedParent) — conversation-scope grant", () => {
+    const onDecide = vi.fn();
+    const { getByText } = render(
+      <OutOfAllowedDirCard open={true} request={makeReq()} onDecide={onDecide} />,
+    );
+    fireEvent.click(getByText("이번 세션 동안 허용"));
+    expect(onDecide).toHaveBeenCalledWith(
+      "allow-session",
+      "/Users/ken/Documents/old-project/notes/today",
+    );
   });
 
   it("'디렉토리 영구 추가' is DISABLED until user re-types the full suggested directory", () => {

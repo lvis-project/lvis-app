@@ -605,7 +605,7 @@ export type LvisApi = {
 };
 
 // ─── Approval types (mirrored from approval-gate.ts — no node import in renderer) ─
-export type ApprovalChoice = "allow-once" | "allow-always" | "deny-once" | "deny-always";
+export type ApprovalChoice = "allow-once" | "allow-session" | "allow-always" | "deny-once" | "deny-always";
 
 /**
  * Permission policy — discriminated approval kinds. Renderer routes on this to
