@@ -24,10 +24,11 @@ async function writePlugin(
 ): Promise<void> {
   const pluginDir = join(installedDir, id);
   await mkdir(pluginDir, { recursive: true });
+  const toolName = `${id.replace(/-/g, "_")}_ping`;
   await writeFile(
     join(pluginDir, "entry.mjs"),
     `export default async function createPlugin(ctx) {
-  return { handlers: { ${id}_ping: async () => "pong" }, start: async () => {}, stop: async () => {} };
+  return { handlers: { ${toolName}: async () => "pong" }, start: async () => {}, stop: async () => {} };
 }`,
     "utf-8",
   );
@@ -38,7 +39,7 @@ async function writePlugin(
     description: "Test fixture.",
     publisher: "Test fixture",
     entry: "entry.mjs",
-    tools: [`${id}_ping`],
+    tools: [toolName],
     eventSubscriptions,
   };
   await writeFile(join(pluginDir, "plugin.json"), JSON.stringify(manifest), "utf-8");
@@ -70,7 +71,7 @@ describe("buildManifestEventHints", () => {
   });
 
   it("string form → neutral fallback hint", async () => {
-    await writePlugin(installedDir, registryPath, "p_str", ["meeting.ended"]);
+    await writePlugin(installedDir, registryPath, "p-str", ["meeting.ended"]);
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
 
@@ -83,7 +84,7 @@ describe("buildManifestEventHints", () => {
   });
 
   it("object form with hint → uses hint verbatim", async () => {
-    await writePlugin(installedDir, registryPath, "p_obj", [
+    await writePlugin(installedDir, registryPath, "p-obj", [
       { type: "meeting.summary.created", hint: { category: "meeting", priority: "medium", title: "회의 요약" } },
     ]);
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
@@ -98,7 +99,7 @@ describe("buildManifestEventHints", () => {
   });
 
   it("object form without hint → neutral fallback", async () => {
-    await writePlugin(installedDir, registryPath, "p_nohint", [
+    await writePlugin(installedDir, registryPath, "p-nohint", [
       { type: "email.analyzed" },
     ]);
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
@@ -113,7 +114,7 @@ describe("buildManifestEventHints", () => {
   });
 
   it("mixed old+new in same manifest → both resolved correctly", async () => {
-    await writePlugin(installedDir, registryPath, "p_mixed", [
+    await writePlugin(installedDir, registryPath, "p-mixed", [
       "email.analyzed",
       { type: "meeting.ended", hint: { category: "meeting", priority: "high", title: "회의 종료" } },
     ]);
