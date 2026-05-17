@@ -74,6 +74,23 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
     onSaveNow?.();
   }, [onSaveNow]);
 
+  // "Leave without saving" warning — user directive 2026-05-18 ("저장 버튼
+  // 안누르고 컨텐츠를 벗어나려고 하면 경고 띄워주기"). Fires on window close
+  // (Cmd+Q / X) when there are unsaved URL changes or a typed-but-not-saved
+  // API key. Browsers/Electron show their native "leave?" confirm when
+  // `returnValue` is set. The private-network toggle is immediate-apply
+  // and isn't tracked here — it persists the moment the user clicks it.
+  useEffect(() => {
+    const isDirty = urlDraft.trim() !== baseUrl.trim() || apiKeyInput.trim() !== "";
+    if (!isDirty) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [urlDraft, baseUrl, apiKeyInput]);
+
   // API key + private network sit behind a "고급 옵션" collapse since most
   // users keep the default endpoint with no auth (user directive 2026-05-18).
   const [advancedOpen, setAdvancedOpen] = useState(false);

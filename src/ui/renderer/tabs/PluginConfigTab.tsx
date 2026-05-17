@@ -385,16 +385,16 @@ export function PluginConfigTab() {
           설치된 플러그인이 없습니다.
         </div>
       ) : (
-        // Split height is explicit `h-[calc(100dvh-250px)]` (with a 350px
-        // floor) because `flex-1 min-h-0` does not propagate height through
-        // the outer settings-window scroll container (`overflow-y-auto`
-        // bounds children to content size, not viewport). The 250px reserve
-        // covers: CustomTitleBar (36) + right-pane padding (40) + page
-        // header (94) + dev-mode banner (50, when visible) + gap-3 buffer.
-        // Sub-sidebar (left, w-60 shrink-0) stays fixed; the internal
-        // ScrollArea in each pane handles overflow — user directive
-        // 2026-05-18: 사이드바 고정 + 우측 디테일만 스크롤.
-        <div className="flex gap-3 h-[calc(100dvh-250px)] min-h-[350px]">
+        // Split height fills to the viewport bottom. The 180px reserve
+        // matches the actual non-split chrome above:
+        //   CustomTitleBar 36 + right-pane pt-2 8 + TabsContent mt-2 8 +
+        //   page header (pt-2 8 + leading-9 36 + space-y-1.5 6 + desc 20 +
+        //                mb-6 24) = 94 + right-pane pb-8 32 ≈ 178.
+        // Right detail card stretches to fill the split height; its own
+        // `overflow-y-auto` handles all internal overflow (header + 인증 +
+        // 제공 툴 + 환경 설정 all flow inside one scrollable card so the
+        // entire 환경 설정 list is reachable — user directive 2026-05-18).
+        <div className="flex gap-3 h-[calc(100dvh-180px)] min-h-[350px]">
           {/* Left: plugin list (sub-sidebar — fixed width) */}
           <div className="w-60 shrink-0 rounded-md border bg-card">
             <ScrollArea className="h-full">
@@ -467,13 +467,12 @@ export function PluginConfigTab() {
             </ScrollArea>
           </div>
 
-          {/* Right: detail + key-value editor. The internal ScrollArea
-              around `PluginConfigSchemaForm` handles overflow when the
-              plugin has many config keys — keeps the sub-sidebar (left)
-              visible while the user reviews/edits a long list. The
-              wrapper deliberately does NOT add `overflow-y-auto`; that
-              would compete with the inner ScrollArea and double-clip. */}
-          <div className="flex-1 min-w-0 flex flex-col gap-2 rounded-md border bg-card p-3">
+          {/* Right: detail card. The card itself is the ONE scroll surface
+              for everything inside (header + 인증 + 제공 툴 + 환경 설정),
+              so the user can scroll past the auth/tools sections to reach
+              the full list of config fields — user directive 2026-05-18
+              ("디테일 컨텐츠 전체가 스크롤", "환경설정이 전체 항목이 노출"). */}
+          <div className="flex-1 min-w-0 flex flex-col gap-2 rounded-md border bg-card p-3 overflow-y-auto min-h-0">
             {selectedPlugin ? (
               <>
                 <div className="flex items-start justify-between gap-2">
@@ -628,13 +627,12 @@ export function PluginConfigTab() {
                   // through pluginConfig.set; format:'secret' fields go
                   // through pluginConfig.setSecret so values land in the
                   // encrypted keychain instead of cleartext settings.json.
-                  // Wrapped in `flex-col flex-1 min-h-0` so the section
-                  // label + ScrollArea share the remaining vertical space.
-                  <div className="flex flex-1 min-h-0 flex-col gap-1.5">
+                  // The form renders inline (no internal ScrollArea) — the
+                  // PARENT right-detail card has `overflow-y-auto`, so all
+                  // env-config items are reachable by scrolling the card.
+                  <div className="space-y-1.5">
                     <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">환경 설정</span>
-                    <ScrollArea className="flex-1 min-h-0">
-                    <div className="pr-2">
-                      <PluginConfigSchemaForm
+                    <PluginConfigSchemaForm
                         pluginId={selectedPlugin.id}
                         schema={selectedPlugin.configSchema}
                         values={mergedConfigValues}
@@ -678,8 +676,6 @@ export function PluginConfigTab() {
                           notifySaved();
                         }}
                       />
-                    </div>
-                  </ScrollArea>
                   </div>
                 ) : (
                   <>
