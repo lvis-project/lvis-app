@@ -16,6 +16,7 @@ import { WebTab } from "./tabs/WebTab.js";
 import { McpTab } from "./tabs/McpTab.js";
 import { PluginConfigTab } from "./tabs/PluginConfigTab.js";
 import { MarketplaceTab } from "./tabs/MarketplaceTab.js";
+import { LoginModal } from "./components/LoginModal.js";
 import { useSettingsOrchestration } from "./hooks/use-settings-orchestration.js";
 import { useDebouncedSave } from "./hooks/use-debounced-save.js";
 import { normalizeSettingsTab } from "../../shared/settings-tabs.js";
@@ -130,6 +131,8 @@ export function SettingsContent({
   // Raycast) keep the modal open after Save so the user can verify the
   // change and edit a sibling tab; close lives on the Dialog X / Esc.
   const llmSave = useDebouncedSave(() => void s.save("llm"));
+  // #893 — login modal open state. Driven by the LlmTab "로그인" button.
+  const [loginOpen, setLoginOpen] = useState(false);
   const chatSave = useDebouncedSave(() => void s.save("chat"));
   const webSave = useDebouncedSave(() => void s.save("web"));
   const marketplaceSave = useDebouncedSave(() => void s.save("marketplace"));
@@ -304,6 +307,9 @@ export function SettingsContent({
               setHasKey={s.setHasKey}
               keyInput={s.keyInput}
               setKeyInput={s.setKeyInput}
+              authMode={s.authMode}
+              setAuthMode={s.setAuthMode}
+              onOpenLogin={() => setLoginOpen(true)}
               model={s.model}
               setModel={s.setModel}
               enableThinking={s.enableThinking}
@@ -402,6 +408,16 @@ export function SettingsContent({
           </TabsContent>
       </div>
     </Tabs>
+    <LoginModal
+      api={api}
+      vendor={s.vendor}
+      open={loginOpen}
+      onOpenChange={setLoginOpen}
+      onSuccess={() => {
+        s.setHasKey(true);
+        onSaved();
+      }}
+    />
     </SavedToastProvider>
   );
 }

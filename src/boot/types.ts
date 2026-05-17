@@ -107,6 +107,15 @@ export interface AppServices {
    * an app restart. No-op for the disabled fetcher.
    */
   refreshMarketplaceFetcherConfig?: () => void;
+  /**
+   * #893 — Re-sync the plugin runtime's wildcard config overrides
+   * (`hostApiKey` / `hostApiVendor`) against the current active LLM
+   * vendor's apiKey. Invoked from the settings IPC handler after the
+   * vendor changes or an apiKey is set/deleted, so plugins reading
+   * `hostApi.config.get("hostApiKey")` observe the new value on their
+   * next call without an app restart.
+   */
+  refreshActiveLlmWildcard?: () => void;
   /** Whether knowledge search tools were successfully registered. */
   knowledgeAvailable: boolean;
   /** Sprint 4.C — starred messages persistence (~/.lvis/starred.json) */

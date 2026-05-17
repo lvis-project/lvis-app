@@ -71,6 +71,17 @@ export interface LLMVendorSettings {
   vertexLocation?: string;
   enableThinking: boolean;
   thinkingBudgetTokens: number;
+  /**
+   * #893 — How the user authenticates to this vendor.
+   *   - `"manual"` (default): user pastes an API key into the Settings UI.
+   *   - `"login"`: user clicks "Login" and the host runs a mockup credential
+   *     check; on success the matching `LVIS_DEMO_KEY_<VENDOR>` env var is
+   *     installed into the encrypted secret store under `llm.apiKey.<vendor>`.
+   *
+   * Optional + default `"manual"` so persisted settings written before this
+   * field shipped keep working unchanged.
+   */
+  authMode?: "manual" | "login";
 }
 
 const DEFAULT_MODEL: Record<LLMVendor, string> = {
@@ -88,6 +99,7 @@ function defaultBlock(vendor: LLMVendor): LLMVendorSettings {
     model,
     enableThinking: vendorSupportsThinking(vendor, model),
     thinkingBudgetTokens: 10_000,
+    authMode: "manual",
   };
 }
 

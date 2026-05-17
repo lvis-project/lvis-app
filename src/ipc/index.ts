@@ -8,6 +8,7 @@
  *
  * Domain → channel prefix mapping:
  *   settings     lvis:settings:*, lvis:shell:*, lvis:telemetry:consent-answer
+ *   auth         lvis:auth:* (#893 mockup login)
  *   chat         lvis:chat:*, lvis:routines:*, lvis:routine:*, lvis:trigger:*,
  *                lvis:memory:*, lvis:starred:*, lvis:feedback:*, lvis:ask-user-question:*
  *   plugins      lvis:plugins:*, lvis:bootstrap:*, lvis:runtime:*, lvis:marketplace:*,
@@ -22,6 +23,7 @@
 import { initDlpAudit } from "../audit/dlp-filter.js";
 import { getIsPackaged } from "../boot/dev-flags.js";
 import { registerSettingsHandlers } from "./domains/settings.js";
+import { registerAuthHandlers } from "./domains/auth.js";
 import { registerChatHandlers } from "./domains/chat.js";
 import { registerPluginsHandlers } from "./domains/plugins.js";
 import { registerUsageHandlers } from "./domains/usage.js";
@@ -56,6 +58,7 @@ export function registerIpcHandlers(
   initDlpAudit(deps.auditLogger, deps.conversationLoop.getSessionId());
 
   registerSettingsHandlers(deps);
+  registerAuthHandlers(deps);
   registerChatHandlers(deps);
   registerPluginsHandlers(deps);
   registerUsageHandlers(deps);
