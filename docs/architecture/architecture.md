@@ -1450,7 +1450,7 @@ plugin-specific app branch 를 두지 않는다.
 | Surface | Current posture | Future direction |
 | --- | --- | --- |
 | Plugin categories | SDK manifest schema 의 per-tool `category/pathFields` 가 plugin tool authority SOT 이다. Host 는 SDK schema 를 그대로 검증하고, category 가 없는 plugin tool 은 hard-fail 한다. `meta` 및 향후 host-only category 는 plugin contract 로 자동 확장되지 않는다. | 추가 plugin 도입 시 SDK schema category/pathFields 선언과 plugin sanity test 를 PR merge gate 로 유지 |
-| Runtime modes | 사용자-facing 정책은 `default`(read 허용), `strict`(read 포함 전체 ask), `auto`(백그라운드 리뷰어 기반 자동 검증), `allow`(하드 차단 밖 전체 허용) 4개다. | allow mode 는 Layer 0/1/deny/overlay-trigger guard 를 우회하지 않는 opt-in 으로 유지 |
+| Runtime modes | 사용자-facing 정책은 `default`(read 허용), `strict`(read 포함 전체 ask), `auto`(권한 리뷰어 기반 자동 검증 — 자동/헤드리스 + 대화형 채팅 양 lane), `allow`(하드 차단 밖 전체 허용) 4개다. | allow mode 는 Layer 0/1/deny/overlay-trigger guard 를 우회하지 않는 opt-in 으로 유지 |
 | Permission IPC | `PERMISSIONS` 가 main / preload / sender-guard test 의 단일 channel SOT. | 새 permission channel 은 반드시 `src/shared/ipc-channels.ts` 에 먼저 추가 |
 | Reviewer | `disabled/rule/llm/strict` 4-mode (issue #664 normalization). `disabled` 는 reviewer 레인 pass-through (LOW), `strict` 는 fail-closed (defer-all) — 둘 다 카테고리 매트릭스/허용 디렉토리는 그대로 적용. `llm` wiring 실패는 silent downgrade 없이 fail-fast. | cost/quality telemetry 로 model default 조정 가능, fallback 은 `deny|rule` 만 |
 | Deferred queue | Headless MED/HIGH verdict 는 사용자가 큐 버튼을 열 때 approve/reject, resolution 은 permission audit chain 에 기록. | §8 approval timeline 과 통합 표시 |
