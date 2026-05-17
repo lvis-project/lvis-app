@@ -39,6 +39,7 @@
  */
 import { app, powerMonitor } from "electron";
 import type { BrowserWindow } from "electron";
+import { BrowserWindow as BrowserWindowValue } from "electron";
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { adaptPowerMonitor } from "./main/idle-scheduler.js";
@@ -543,6 +544,17 @@ export async function bootstrap(
     sendToWindow(getMainWindow(), PERMISSIONS.userApprovalHit, payload, log);
   });
 
+  // Round-4 fix: PermissionManager is the architectural choke point for
+  // every persisted rule mutation (addAlwaysAllowedPersist /
+  // addAlwaysDeniedPersist / removeRule). Wiring the broadcast here means
+  // executor-side dialog approvals (always allow / always deny), slash
+  // `/permission rules add|remove`, and the IPC addRule/removeRule
+  // handlers all reach multi-window PermissionsTab — without each
+  // call site re-implementing the wiring.
+  permissionManager.setBroadcastConfigChanged(() => {
+    broadcastPermissionConfigChangedFromIpc({ getMainWindow, getAppWindows: () => BrowserWindowValue.getAllWindows() } as Parameters<typeof broadcastPermissionConfigChangedFromIpc>[0]);
+  });
+
   // Manifest integrity proxy. Subscribes the audit logger so every read→write
   // violation lands in `~/.lvis/audit/` and pushes an IPC notification to the
   // renderer. Uses the live mainWindow getter so cross-restart UI keeps
@@ -709,7 +721,7 @@ export async function bootstrap(
     // and forwards it to the broadcaster declared in the permissions
     // IPC domain — no engine→ipc coupling, just a callback handed down.
     broadcastPermissionConfigChanged: () => {
-      broadcastPermissionConfigChangedFromIpc({ getMainWindow } as Parameters<typeof broadcastPermissionConfigChangedFromIpc>[0]);
+      broadcastPermissionConfigChangedFromIpc({ getMainWindow, getAppWindows: () => BrowserWindowValue.getAllWindows() } as Parameters<typeof broadcastPermissionConfigChangedFromIpc>[0]);
     },
     pluginRuntime,
     skillOverlay,
