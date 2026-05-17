@@ -469,25 +469,49 @@ export async function bootstrap(
     marketplaceFetcher.updateAllowPrivateNetwork(next);
   };
 
-  // #893 — Push the active LLM vendor's apiKey + vendor id into the plugin
-  // runtime's wildcard configOverrides slot. Plugins read these via
-  // `hostApi.config.get("hostApiKey")` / `hostApi.config.get("hostApiVendor")`
-  // so a plugin that needs an LLM call doesn't have to ship its own
-  // vendor-detection logic. Called once at boot (after plugin runtime is
-  // available) and again after every llm-settings IPC change.
-  const WILDCARD_LLM_KEYS = ["hostApiKey", "hostApiVendor"];
+  // #893 — Push the active LLM vendor id into the plugin runtime's wildcard
+  // configOverrides slot. Plugins read this via
+  // `hostApi.config.get("hostApiVendor")` so a plugin that needs an LLM call
+  // doesn't have to ship its own vendor-detection logic. Called once at
+  // boot (after plugin runtime is available) and again after every
+  // llm-settings IPC change.
+  //
+  // PR #894 review B2: we no longer inject `hostApiKey` here. The actual
+  // secret must always flow through `hostApi.getSecret("llm.apiKey.<vendor>")`,
+  // which routes through the three-tier allowlist gate (only plugins that
+  // declare the matching `hostSecrets.read[]` entry receive the key).
+  // Injecting the apiKey into a wildcard config slot bypassed that gate
+  // — every plugin received the key via `config.get("hostApiKey")`
+  // regardless of its manifest. Removing it closes that hole.
+  let lastWildcardVendor: string | null = null;
+  let restartTimer: NodeJS.Timeout | null = null;
   const refreshActiveLlmWildcard = (): void => {
     const llm = settingsService.get("llm");
     const activeVendor = llm.provider;
-    const activeKey = settingsService.getSecret(`llm.apiKey.${activeVendor}`);
-    if (typeof activeKey === "string" && activeKey.length > 0) {
-      pluginRuntime.setWildcardConfigOverride({
-        hostApiKey: activeKey,
-        hostApiVendor: activeVendor,
-      });
-    } else {
-      pluginRuntime.clearWildcardConfigOverride(WILDCARD_LLM_KEYS);
+    // Always clear the stale `hostApiKey` slot — older builds populated it,
+    // and a soft-reload after upgrade would otherwise leave a ghost value.
+    pluginRuntime.clearWildcardConfigOverride(["hostApiKey"]);
+    pluginRuntime.setWildcardConfigOverride({ hostApiVendor: activeVendor });
+
+    // PR #894 T1-2 — when the vendor actually changes, restart active
+    // plugins so their next `hostApi.config.get("hostApiVendor")` /
+    // `hostApi.getSecret(...)` call observes the new value without an app
+    // restart. Debounce to coalesce bursts from rapid settings churn
+    // (vendor + key + baseUrl all patched in one IPC, see settings.ts).
+    // First call (boot init) seeds `lastWildcardVendor` without restarting.
+    if (lastWildcardVendor !== null && lastWildcardVendor !== activeVendor) {
+      if (restartTimer) clearTimeout(restartTimer);
+      restartTimer = setTimeout(() => {
+        restartTimer = null;
+        const ids = pluginRuntime.listPluginIds();
+        for (const pid of ids) {
+          pluginRuntime.restartPlugin(pid).catch((err: unknown) => {
+            log.warn(`restartPlugin(${pid}) after vendor change failed: ${(err as Error).message}`);
+          });
+        }
+      }, 200);
     }
+    lastWildcardVendor = activeVendor;
   };
   refreshActiveLlmWildcard();
 
