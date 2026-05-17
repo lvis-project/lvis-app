@@ -203,7 +203,7 @@ export function SettingsContent({
   // shadcn TabsTrigger primitive's default `inline-flex items-center
   // justify-center` (which would center-align the icon+label horizontally).
   const sideTriggerCls =
-    "flex w-full items-center justify-start gap-2 overflow-hidden whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium " +
+    "flex w-full items-center justify-start gap-2.5 overflow-hidden whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium " +
     "text-muted-foreground hover:bg-accent/60 hover:text-foreground " +
     "data-[state=active]:bg-accent data-[state=active]:text-accent-foreground " +
     "data-[state=active]:shadow-none";
@@ -244,7 +244,7 @@ export function SettingsContent({
         // 올라옴" symptom). Explicit `justify-start` + `h-full` + plain
         // `flex` (not inline-flex) + `rounded-none bg-transparent` make
         // the override unambiguous.
-        className="flex h-full w-48 shrink-0 flex-col items-stretch justify-start gap-0.5 overflow-y-auto rounded-none border-r bg-transparent p-2"
+        className="flex h-full w-48 shrink-0 flex-col items-stretch justify-start gap-1 overflow-y-auto rounded-none border-r bg-transparent p-2"
       >
         <TabsTrigger value="llm" className={sideTriggerCls}>
           <Brain className={navIconCls} aria-hidden="true" />
