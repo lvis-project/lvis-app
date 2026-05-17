@@ -27,16 +27,23 @@ export const MARKETPLACE_PRIMARY_KEY_ID = "poc-v1" as const;
  * this map. Remove the old entry once the cache TTL has expired
  * everywhere (currently 7d grace window — see `whitelist-registry.ts`).
  */
-// NOT `Object.freeze`-ed so the unit-test harness can swap in a per-test
-// ed25519 keypair via `Object.defineProperty` without rebuilding the
-// production demo snapshot for every run. Production code never mutates
-// this map — adding a key in production goes through a host source-code
-// edit (rotation lands a fresh key id like "whitelist-v2" here).
-export const WHITELIST_PUBLIC_KEYS: Record<string, PublicKeyInput> = {
+// Ralph cycle 1 HIGH fix — `Object.freeze`-ed in production. Tests no
+// longer mutate this map; instead `WhitelistRegistry` accepts a
+// `publicKeys` constructor parameter (or the singleton's
+// `setPublicKeysForTesting()` swap helper). A frozen production map
+// closes the supply-chain footgun where an in-process compromise could
+// have injected a per-run trust root.
+export const WHITELIST_PUBLIC_KEYS: Readonly<Record<string, PublicKeyInput>> = Object.freeze({
   // Base64 of raw 32-byte ed25519 public key. Demo snapshot is signed
   // by the matching private key (kept out of this repo); production
   // rotation lands a fresh key id (e.g. "whitelist-v2") here.
-  "whitelist-v1": "zs4kTBATK36qDAwbQCijXJ2htbyO3+MNkOvI6j53E6Q=",
-};
+  //
+  // Ralph cycle 1 — this slot was rotated alongside the demo snapshot
+  // re-sign that expanded vendor coverage to claude/gemini/azure-foundry/
+  // vertex-ai. The private key that produced
+  // `resources/marketplace-whitelist.demo.json.sig` is held by the
+  // operator team out-of-band.
+  "whitelist-v1": "XvsEdFTepXM7in7TnnsQqtzHLia/ro1idMBqr9kNJzM=",
+});
 
 export const WHITELIST_PRIMARY_KEY_ID = "whitelist-v1" as const;
