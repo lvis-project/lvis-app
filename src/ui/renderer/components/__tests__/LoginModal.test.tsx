@@ -13,7 +13,12 @@ import { LoginModal } from "../LoginModal.js";
  *     it visible on the next render (T1-1 / L1 cleanup).
  */
 
-function makeApi(impl: () => Promise<{ ok: true; vendor: string } | { ok: false; error: string }>) {
+function makeApi(
+  impl: () => Promise<
+    | { ok: true; vendor: string; fieldsApplied: string[] }
+    | { ok: false; error: string }
+  >,
+) {
   return {
     loginMockup: vi.fn(impl),
   } as unknown as Parameters<typeof LoginModal>[0]["api"];
@@ -46,7 +51,7 @@ describe("LoginModal — IPC failure handling (#894 T1-1)", () => {
     const api = makeApi(async () => {
       throw new Error("IPC channel disconnected");
     });
-    render(<LoginModal api={api} vendor="openai" open onOpenChange={() => {}} />);
+    render(<LoginModal api={api} open onOpenChange={() => {}} />);
     fillAndSubmit();
 
     await waitFor(() => {
@@ -64,12 +69,11 @@ describe("LoginModal — IPC failure handling (#894 T1-1)", () => {
   });
 
   it("clears the password in finally even on success", async () => {
-    const api = makeApi(async () => ({ ok: true, vendor: "openai" }));
+    const api = makeApi(async () => ({ ok: true, vendor: "openai", fieldsApplied: ["apiKey"] }));
     let openState = true;
     render(
       <LoginModal
         api={api}
-        vendor="openai"
         open={openState}
         onOpenChange={(o) => {
           openState = o;
@@ -88,7 +92,7 @@ describe("LoginModal — IPC failure handling (#894 T1-1)", () => {
 
   it("shows the mapped Korean error for invalid-credentials", async () => {
     const api = makeApi(async () => ({ ok: false, error: "invalid-credentials" }));
-    render(<LoginModal api={api} vendor="openai" open onOpenChange={() => {}} />);
+    render(<LoginModal api={api} open onOpenChange={() => {}} />);
     fillAndSubmit("wrong");
     await waitFor(() => {
       const err = document.querySelector('[data-testid="login-modal:error"]');

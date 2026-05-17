@@ -240,13 +240,23 @@ const api = {
   setMarketplaceApiKey: async (apiKey: string) => ipcRenderer.invoke("lvis:settings:marketplace:set-api-key", apiKey),
   hasMarketplaceApiKey: async () => ipcRenderer.invoke("lvis:settings:marketplace:has-api-key") as Promise<boolean>,
   deleteMarketplaceApiKey: async () => ipcRenderer.invoke("lvis:settings:marketplace:delete-api-key"),
-  // #893 — mockup credential login. Hard-coded `demo`/`demo123` (env override
-  // via `LVIS_DEMO_USER` / `LVIS_DEMO_PASS`); on success the per-vendor demo
-  // key env var (`LVIS_DEMO_KEY_<VENDOR>`) is moved into the encrypted secret
-  // store under `llm.apiKey.<vendor>`.
-  loginMockup: async (payload: { username: string; password: string; vendor: string }) =>
+  // #893 — top-level mockup credential login. Hard-coded `demo`/`demo123`
+  // (env override via `LVIS_DEMO_USER` / `LVIS_DEMO_PASS`). Vendor is no
+  // longer sent by the renderer; the backend picks via `LVIS_DEMO_VENDOR`
+  // (default `"openai"`) and reports it back on success along with the
+  // applied baseUrl/model/vertex config.
+  loginMockup: async (payload: { username: string; password: string }) =>
     ipcRenderer.invoke("lvis:auth:login-mockup", payload) as Promise<
-      { ok: true; vendor: string } | { ok: false; error: string }
+      | {
+          ok: true;
+          vendor: string;
+          model?: string;
+          baseUrl?: string;
+          vertexProject?: string;
+          vertexLocation?: string;
+          fieldsApplied: string[];
+        }
+      | { ok: false; error: string }
     >,
   openSettingsWindow: async (initialTab?: string) =>
     ipcRenderer.invoke("lvis:settings-window:open", initialTab) as Promise<

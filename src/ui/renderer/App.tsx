@@ -109,7 +109,6 @@ export function App() {
   // user has not previously dismissed onboarding, the dialog opens.
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [appLoginOpen, setAppLoginOpen] = useState(false);
-  const [onboardingVendor, setOnboardingVendor] = useState<string>("claude");
   const [deferredQueueOpen, setDeferredQueueOpen] = useState(false);
   const [activeView, setActiveView] = useState("home");
   const [commandPopoverOpen, setCommandPopoverOpen] = useState(false);
@@ -579,7 +578,9 @@ export function App() {
         );
         if (cancelled) return;
         if (anyKey.some(Boolean)) return;
-        setOnboardingVendor(settings.llm.provider);
+        // #893 — top-level login wraps vendor selection; the LoginModal
+        // backend decides the vendor (LVIS_DEMO_VENDOR), so we no longer
+        // need to seed an onboarding vendor here.
         setOnboardingOpen(true);
       } catch {
         // Probe failure is non-fatal — chat still works once a key exists.
@@ -1180,7 +1181,6 @@ export function App() {
       />
       <LoginModal
         api={api}
-        vendor={onboardingVendor}
         open={appLoginOpen}
         onOpenChange={setAppLoginOpen}
         onSuccess={() => {
