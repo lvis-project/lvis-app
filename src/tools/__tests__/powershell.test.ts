@@ -12,6 +12,7 @@ import {
   type PowerShellAstSummary,
 } from "../powershell.js";
 import type { ToolExecutionContext } from "../base.js";
+import { TOOL_TIMEOUT_POLICY } from "../../shared/tool-timeout-policy.js";
 
 const ctx = (cwd: string = process.cwd()): ToolExecutionContext => ({
   cwd,
@@ -42,9 +43,14 @@ describe("PowerShellTool — policy surface", () => {
     expect(found?.isReadOnly({ command: "Get-ChildItem" })).toBe(false);
   });
 
-  it("defaults timeoutSeconds to 600", () => {
+  it("defaults timeoutSeconds to policy.shellDefaultMs / 1000", () => {
     const parsed = PowerShellToolInputSchema.parse({ command: "Get-ChildItem" });
-    expect(parsed.timeoutSeconds).toBe(600);
+    expect(parsed.timeoutSeconds).toBe(TOOL_TIMEOUT_POLICY.shellDefaultMs / 1000);
+  });
+
+  it("rejects timeoutSeconds above policy.shellMaxMs / 1000", () => {
+    const above = TOOL_TIMEOUT_POLICY.shellMaxMs / 1000 + 1;
+    expect(() => PowerShellToolInputSchema.parse({ command: "Get-ChildItem", timeoutSeconds: above })).toThrow();
   });
 
   it("blocks expression execution and encoded command forms from the AST summary", () => {

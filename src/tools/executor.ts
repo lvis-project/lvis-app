@@ -31,6 +31,8 @@ import type {
   ToolTrustOrigin,
 } from "./types.js";
 import { trustFromSource } from "./types.js";
+import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
+import { runWithCeiling } from "./executor-ceiling.js";
 import type { PermissionManager, PermissionCheckResult } from "../permissions/permission-manager.js";
 import type { ApprovalGate, ApprovalMode } from "../permissions/approval-gate.js";
 import {
@@ -251,14 +253,43 @@ export interface ToolPermissionContext {
    * through every executeAll() invocation. The executor merges with computed
    * defaults via {@link buildAllowedScope}; an `undefined` value here means
    * "use defaults only" (NOT "silent allow").
+   *
+   * Snapshot taken when executeAll() is dispatched. For within-round
+   * propagation of mid-batch grants, prefer `getAdditionalDirectories`
+   * which is re-evaluated at the top of each `executeOne`.
    */
   additionalDirectories?: readonly string[];
+  /**
+   * Optional fresh accessor for the additional-directories view. When
+   * provided, `executeOne` invokes this at its start so that an earlier
+   * tool in the same `Promise.all(executeAll)` batch granting
+   * `allow-once`/`allow-session` widens the scope visible to siblings
+   * scheduled after it on the event loop. Falls back to
+   * `additionalDirectories` (snapshot) when omitted — keeps legacy
+   * callers working.
+   */
+  getAdditionalDirectories?: () => readonly string[];
   /**
    * Trust origin classification carried with each tool invocation. Audited and
    * propagated into approval-request payloads. Distinguishes user-keyboard
    * input from plugin-emitted, LLM-tool-arg, and file-content origins.
    */
   trustOrigin: ToolTrustOrigin;
+  /**
+   * Invoked when the user selects "이번 1회만" (turn-scope grant) on an
+   * out-of-allowed-dir approval. The conversation loop is expected to
+   * remember `approvedDirectory` for the remaining tool calls inside the
+   * SAME `runTurn`, then drop it. Distinct from `onSessionDirectoryGrant`
+   * (whole conversation lifetime) and persisted rules (settings.json).
+   */
+  onTurnDirectoryGrant?: (approvedDirectory: string) => void;
+  /**
+   * Invoked when the user selects "이번 세션 동안 허용" (session-scope
+   * grant). The conversation loop appends `approvedDirectory` to the
+   * session-wide allow list, surviving across user messages but cleared
+   * on `newConversation` / `loadSession`.
+   */
+  onSessionDirectoryGrant?: (approvedDirectory: string) => void;
 }
 
 /**
@@ -871,8 +902,18 @@ export class ToolExecutor {
       ...permissionContext,
       ...(approvalCacheKey ? { approvalCacheKey } : {}),
     };
-    let invocationAllowedScope = buildAllowedScope(invocationPermissionContext.additionalDirectories);
-    let invocationRuntimeAllowedDirectories = buildRuntimeAllowedDirectories(invocationPermissionContext.additionalDirectories);
+    // Within-round freshness: when the caller provided a getter we read
+    // the *current* additional-directories view at the top of this
+    // executeOne (rather than the snapshot taken when executeAll() was
+    // dispatched). This makes an `allow-once`/`allow-session` grant
+    // applied by an earlier sibling in the same Promise.all batch
+    // visible to tools scheduled after it on the event loop.
+    const baseAdditionalDirectories: readonly string[] =
+      invocationPermissionContext.getAdditionalDirectories?.()
+      ?? invocationPermissionContext.additionalDirectories
+      ?? [];
+    let invocationAllowedScope = buildAllowedScope(baseAdditionalDirectories);
+    let invocationRuntimeAllowedDirectories = buildRuntimeAllowedDirectories(baseAdditionalDirectories);
     const makeEvaluationContext = (input: {
       pathFields: readonly string[];
       targetFilePaths?: readonly string[];
@@ -896,7 +937,7 @@ export class ToolExecutor {
       requestSensitivePathPattern: string | null,
       reviewerPathFields: readonly string[],
     ): Promise<
-      | { allowed: true; approvedDirectory: string; permissionResult?: PermissionCheckResult }
+      | { allowed: true; approvedDirectory: string; scope: "turn" | "session" | "always"; permissionResult?: PermissionCheckResult }
       | { allowed: false; result: ToolResult }
     > => {
       const headless = invocationPermissionContext.headless === true;
@@ -1015,8 +1056,37 @@ export class ToolExecutor {
             await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...dirLayerResult, decision: "deny" }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
             return { allowed: false, result: { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs } };
           }
+          return { allowed: true, approvedDirectory, scope: "always" };
         }
-        return { allowed: true, approvedDirectory };
+        if (decision.choice === "allow-session") {
+          // Mirror allow-always' persist convention so the permission
+          // audit trail records the directory addition; the caller's
+          // onSessionDirectoryGrant callback then keeps the in-memory
+          // ConversationLoop scope in sync. `session: true` ensures
+          // settings.json is NOT mutated — the grant dies with the
+          // conversation. Widen to suggestedParent (when present) so
+          // the next tool call in the same conversation hitting a
+          // sibling path under the same directory passes Layer 1
+          // without re-prompting.
+          const sessionScopePath = suggestedParent ?? outOfAllowedTarget.filePath;
+          const dirResult = await dispatchPermissionDirCommand({
+            verb: "allow",
+            path: sessionScopePath,
+            session: true,
+            acknowledgeWarnings: true,
+          });
+          if (!dirResult.ok || dirResult.verb !== "allow") {
+            const msg = `[디렉토리 정책 세션 등록 실패] 도구 '${toolUse.name}' — ${dirResult.ok ? "unexpected result" : dirResult.error}`;
+            const durationMs = Date.now() - startTime;
+            emitToolStart(callbacks, toolUse.name, finalInput, meta);
+            callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+            await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...dirLayerResult, decision: "deny" }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
+            return { allowed: false, result: { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs } };
+          }
+          return { allowed: true, approvedDirectory: sessionScopePath, scope: "session" };
+        }
+        // allow-once: turn-scope, no persistence, narrowest path.
+        return { allowed: true, approvedDirectory, scope: "turn" };
       }
 
       if (headless) {
@@ -1068,14 +1138,70 @@ export class ToolExecutor {
     };
 
     const applyApprovedDirectory = (approvedDirectory: string): void => {
-      invocationAllowedScope = buildAllowedScope([
-        ...(invocationPermissionContext.additionalDirectories ?? []),
-        approvedDirectory,
-      ]);
-      invocationRuntimeAllowedDirectories = buildRuntimeAllowedDirectories([
-        ...(invocationPermissionContext.additionalDirectories ?? []),
-        approvedDirectory,
-      ]);
+      // Re-read fresh: a parallel sibling in the same Promise.all(executeAll)
+      // batch may have just resolved its own out-of-allowed-dir dialog and
+      // mutated the conversation loop's session/turn lists. Spreading from
+      // `baseAdditionalDirectories` (executeOne-entry snapshot) would silently
+      // drop the sibling's grant — read-side is fresh via getAdditionalDirectories
+      // but write-side must also be fresh for symmetry. (architect 2-round Q1)
+      const fresh: readonly string[] =
+        invocationPermissionContext.getAdditionalDirectories?.()
+        ?? baseAdditionalDirectories;
+      invocationAllowedScope = buildAllowedScope([...fresh, approvedDirectory]);
+      invocationRuntimeAllowedDirectories = buildRuntimeAllowedDirectories([...fresh, approvedDirectory]);
+    };
+
+    // Propagate the user's grant lifetime choice up to the conversation
+    // loop. The local `applyApprovedDirectory` only widens the *current*
+    // invocation's scope; without these callbacks the grant would not
+    // outlive this single tool call — the exact "한 번만 허용 = 1 tool
+    // call" bug being fixed here. Fail-loud on missing callback: silently
+    // dropping a grant is exactly the bug class this refactor eliminates,
+    // so we log and degrade conservatively (session → turn) rather than
+    // pretending the propagation succeeded.
+    const propagateGrantScope = (approvedDirectory: string, scope: "turn" | "session" | "always"): void => {
+      const emitGrantAudit = (lifetime: "turn" | "session" | "always" | "degraded-to-turn"): void => {
+        // Fire-and-forget: audit append errors are logged inside the
+        // helper (or thrown only when requirePermissionAuditChain), so we
+        // don't block tool execution on audit I/O.
+        void this.auditPermissionGrant({
+          toolName: toolUse.name,
+          source,
+          category: invocationCategory,
+          directory: approvedDirectory,
+          grantLifetime: lifetime,
+          permissionContext: invocationPermissionContext,
+        });
+      };
+      if (scope === "turn") {
+        if (!invocationPermissionContext.onTurnDirectoryGrant) {
+          log.warn(`[permission-scope] onTurnDirectoryGrant unwired — turn-scope grant for ${approvedDirectory} will not survive this tool call`);
+          return;
+        }
+        invocationPermissionContext.onTurnDirectoryGrant(approvedDirectory);
+        emitGrantAudit("turn");
+        return;
+      }
+      if (scope === "session") {
+        if (!invocationPermissionContext.onSessionDirectoryGrant) {
+          if (!invocationPermissionContext.onTurnDirectoryGrant) {
+            log.error(`[permission-scope] both session and turn callbacks unwired — session-scope grant for ${approvedDirectory} dropped entirely`);
+            return;
+          }
+          log.error(`[permission-scope] onSessionDirectoryGrant unwired — degrading session-scope grant for ${approvedDirectory} to turn-scope`);
+          invocationPermissionContext.onTurnDirectoryGrant(approvedDirectory);
+          emitGrantAudit("degraded-to-turn");
+          return;
+        }
+        invocationPermissionContext.onSessionDirectoryGrant(approvedDirectory);
+        emitGrantAudit("session");
+        return;
+      }
+      // "always" — dispatchPermissionDirCommand already persisted the rule
+      // inside requestOutOfAllowedDirectoryAccess; emit the audit row here
+      // so forensic replay sees a unified grant timeline across all three
+      // lifetimes.
+      emitGrantAudit("always");
     };
 
     if (invocationCategory === "shell") {
@@ -1110,6 +1236,7 @@ export class ToolExecutor {
           if (!resolution.allowed) return resolution.result;
           if (resolution.permissionResult) permissionResult = resolution.permissionResult;
           applyApprovedDirectory(resolution.approvedDirectory);
+          propagateGrantScope(resolution.approvedDirectory, resolution.scope);
           continue;
         }
 
@@ -1236,7 +1363,8 @@ export class ToolExecutor {
         if (!resolution.allowed) return resolution.result;
         if (resolution.permissionResult) permissionResult = resolution.permissionResult;
         applyApprovedDirectory(resolution.approvedDirectory);
-        // allow-once / allow-always — fall through to Step 3
+        propagateGrantScope(resolution.approvedDirectory, resolution.scope);
+        // allow-once / allow-session / allow-always — fall through to Step 3
         // (full Layer 3 check still runs; Layer 1 is necessary, not
         // sufficient).
       }
@@ -1591,8 +1719,27 @@ export class ToolExecutor {
       abortSignal,
     };
 
-    try {
-      const result = await tool.execute(finalInput, executionContext);
+    // Global ceiling via `runWithCeiling` helper — last-resort cap with a
+    // linked AbortController so the underlying tool work actually stops
+    // (tools that participate in `executionContext.abortSignal` propagate
+    // the cancellation). `agent_spawn` runs a full sub-agent loop and uses
+    // the larger `subAgentCeilingMs` instead of the per-tool cap.
+    const effectiveCeilingMs =
+      toolUse.name === "agent_spawn"
+        ? TOOL_TIMEOUT_POLICY.subAgentCeilingMs
+        : TOOL_TIMEOUT_POLICY.globalCeilingMs;
+    let terminationReason: "ok" | "ceiling" | "user-abort" | "error" = "ok";
+    const outcome = await runWithCeiling(
+      async (signal) => {
+        const ctx: ToolExecutionContext = { ...executionContext, abortSignal: signal };
+        return tool.execute(finalInput, ctx);
+      },
+      effectiveCeilingMs,
+      abortSignal,
+      toolUse.name,
+    );
+    if (outcome.ok) {
+      const result = outcome.value;
       content = result.output;
       isError = result.isError;
       // MCP Apps §3.2 — propagate uiPayload from tool metadata
@@ -1602,8 +1749,15 @@ export class ToolExecutor {
       if (Object.prototype.hasOwnProperty.call(result.metadata ?? {}, "rawResult")) {
         rawResult = result.metadata?.rawResult;
       }
-    } catch (err) {
-      content = err instanceof Error ? err.message : "알 수 없는 도구 실행 오류";
+      if (isError) terminationReason = "error";
+    } else {
+      terminationReason = outcome.reason;
+      content =
+        outcome.reason === "ceiling"
+          ? `tool execution exceeded global ceiling (${effectiveCeilingMs}ms): ${toolUse.name}`
+          : outcome.reason === "user-abort"
+            ? outcome.error.message || "도구 실행이 취소되었습니다"
+            : outcome.error.message || "알 수 없는 도구 실행 오류";
       isError = true;
     }
 
@@ -1683,7 +1837,7 @@ export class ToolExecutor {
       toolUse.name === "ask_user_question" && source === "builtin" && !isError
         ? redactAskUserAuditOutput(displayContent)
         : displayContent;
-    await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, auditContent, isError, startTime, permissionResult, rateResult.remaining, invocationPermissionContext, invocationCategory, executionCwd, targetFilePath);
+    await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, auditContent, isError, startTime, permissionResult, rateResult.remaining, invocationPermissionContext, invocationCategory, executionCwd, targetFilePath, terminationReason);
 
     return {
       tool_use_id: toolUse.id,
@@ -1696,6 +1850,57 @@ export class ToolExecutor {
   }
 
   // ─── Audit (불변 — 항상 실행) ────────────────────
+
+  /**
+   * Emit an `AuditAllow` row when the user resolves an out-of-allowed-dir
+   * approval (allow-once / allow-session / allow-always) — or when
+   * `propagateGrantScope` had to degrade a session-intent grant to turn
+   * scope because the session callback was unwired. Decoupled from
+   * `auditToolCall` so the per-tool audit row can stay focused on
+   * execution outcome while the directory-grant decision lives in a
+   * dedicated forensic row tied to the dialog click.
+   */
+  private async auditPermissionGrant(args: {
+    toolName: string;
+    source: ToolSource;
+    category: ToolCategory;
+    directory: string;
+    grantLifetime: "turn" | "session" | "always" | "degraded-to-turn";
+    permissionContext?: ToolPermissionContext;
+  }): Promise<void> {
+    if (!this.auditLogger.isPermissionAuditChainReady()) {
+      if (this.requirePermissionAuditChain) {
+        throw new Error("permission audit chain is not initialized");
+      }
+      return;
+    }
+    const entry: PermissionAuditEntryInput = {
+      decision: "allow",
+      ts: new Date().toISOString(),
+      auditId: randomUUID(),
+      tool: args.toolName,
+      source: args.source,
+      category: args.category,
+      directory: args.directory,
+      directoryAllowed: true,
+      grantLifetime: args.grantLifetime,
+      layer: 1,
+      trustOrigin: auditTrustOrigin(args.permissionContext),
+    };
+    try {
+      await this.auditLogger.appendPermissionAuditEntry(entry);
+    } catch (err) {
+      if (this.requirePermissionAuditChain) {
+        throw err;
+      }
+      log.warn(
+        "permission grant audit append failed for %s (%s): %s",
+        args.toolName,
+        args.grantLifetime,
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  }
 
   private async auditPermissionAsk(
     toolName: string,
@@ -1754,6 +1959,7 @@ export class ToolExecutor {
     category?: ToolCategory,
     cwd?: string,
     auditDirectory?: string,
+    terminationReason?: "ok" | "ceiling" | "user-abort" | "error",
   ): Promise<void> {
     try {
       const inputText = JSON.stringify(input);
@@ -1773,6 +1979,7 @@ export class ToolExecutor {
           permissionDecision: permission?.deferred ? "deferred" : permission?.decision ?? "allow",
           permissionReason: permission?.reason,
           rateLimitRemaining,
+          ...(terminationReason ? { terminationReason } : {}),
         }],
       });
     } catch (err) {
