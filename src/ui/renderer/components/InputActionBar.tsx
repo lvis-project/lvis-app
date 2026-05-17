@@ -173,6 +173,7 @@ export function InputActionBar({
               className="relative h-7 w-7 bg-input-bar p-0"
               title={assistantTitle}
               aria-label={assistantTitle}
+              data-testid="iab-assistant-context-button"
             >
               <User className="h-3.5 w-3.5" />
               {hasAssistantContext && (
@@ -184,14 +185,23 @@ export function InputActionBar({
               the chat surface). Without `side="top"` Radix defaults to
               "bottom" and the menu clips below the viewport; that also
               forces the Agent/Skills/Persona submenus to RTL-flip
-              independently of the parent, making them visually detach. */}
-          <DropdownMenuContent side="top" sideOffset={8} align="end" className="w-56">
+              independently of the parent, making them visually detach.
+
+              `overflow-visible` overrides the shadcn default `overflow-hidden`:
+              the parent popper element has a CSS transform applied by
+              floating-ui, which establishes a containing block for the
+              `position: fixed` submenu. Combined with `overflow:hidden`, that
+              clips submenus when collision detection flips them left (the
+              trigger sits at the right edge of the chat, so a default
+              right-opening submenu has no room and flips). `collisionPadding`
+              keeps the flipped submenu off the chat-panel edge. */}
+          <DropdownMenuContent side="top" sideOffset={8} align="end" collisionPadding={8} className="w-56 overflow-visible">
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>
                 <Bot className="mr-2 h-3.5 w-3.5" />
                 <span>Agent</span>
               </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="max-h-72 w-60 overflow-y-auto">
+              <DropdownMenuSubContent sideOffset={4} collisionPadding={8} className="max-h-72 w-60 overflow-y-auto">
                 <DropdownMenuItem onClick={() => onSelectAgent("")}>
                   <Check className={`mr-2 h-3.5 w-3.5 ${activeAgentName ? "opacity-0" : "opacity-100"}`} />
                   <span>기본 에이전트</span>
@@ -215,7 +225,7 @@ export function InputActionBar({
                 <Sparkles className="mr-2 h-3.5 w-3.5" />
                 <span>Skills</span>
               </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="max-h-72 w-60 overflow-y-auto">
+              <DropdownMenuSubContent sideOffset={4} collisionPadding={8} className="max-h-72 w-60 overflow-y-auto">
                 <DropdownMenuItem
                   onSelect={(event) => {
                     event.preventDefault();
@@ -251,7 +261,7 @@ export function InputActionBar({
                 <User className="mr-2 h-3.5 w-3.5" />
                 <span>Persona</span>
               </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="max-h-72 w-56 overflow-y-auto">
+              <DropdownMenuSubContent sideOffset={4} collisionPadding={8} className="max-h-72 w-56 overflow-y-auto">
                 {rolePresets.map((p) => (
                   <DropdownMenuItem key={p.id} onClick={() => onSelectPreset(p.id)}>
                     <Check className={`mr-2 h-3.5 w-3.5 ${activePresetId === p.id ? "opacity-100" : "opacity-0"}`} />
