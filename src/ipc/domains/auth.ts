@@ -37,7 +37,7 @@ import { createLogger } from "../../lib/logger.js";
 import { getIsPackaged } from "../../boot/dev-flags.js";
 import {
   getDemoCredentials,
-  getDemoKey,
+  getDemoVendorConfig,
   isDemoEnabled,
 } from "../../main/demo-credentials.js";
 import type { IpcDeps } from "../types.js";
@@ -74,7 +74,7 @@ export function registerAuthHandlers(deps: IpcDeps): void {
       e,
       payload: { username?: unknown; password?: unknown; vendor?: unknown },
     ): Promise<
-      | { ok: true; vendor: string }
+      | { ok: true; vendor: string; fieldsApplied: string[] }
       | { ok: false; error: string }
     > => {
       if (!validateSender(e)) {
@@ -105,12 +105,44 @@ export function registerAuthHandlers(deps: IpcDeps): void {
         return { ok: false, error: "invalid-credentials" };
       }
 
-      const apiKey = getDemoKey(vendor);
-      if (typeof apiKey !== "string" || apiKey.length === 0) {
+      const demoConfig = getDemoVendorConfig(vendor);
+      if (demoConfig === null) {
         return { ok: false, error: "no-demo-key" };
       }
 
-      await settingsService.setSecret(`llm.apiKey.${vendor}`, apiKey);
+      const fieldsApplied: string[] = ["apiKey"];
+
+      // Persist the API key into the encrypted secret store.
+      await settingsService.setSecret(`llm.apiKey.${vendor}`, demoConfig.apiKey);
+
+      // Build vendor settings patch for optional fields (baseUrl / model / vertex).
+      // Only apply fields that the demo config actually provides — this ensures
+      // that when a demo env var is absent, existing user-entered values are
+      // preserved (backward compat: apiKey-only login still works as before).
+      const vendorPatch: Record<string, unknown> = {};
+      if (demoConfig.baseUrl !== undefined) {
+        vendorPatch.baseUrl = demoConfig.baseUrl;
+        fieldsApplied.push("baseUrl");
+      }
+      if (demoConfig.model !== undefined) {
+        vendorPatch.model = demoConfig.model;
+        fieldsApplied.push("model");
+      }
+      if (demoConfig.vertexProject !== undefined) {
+        vendorPatch.vertexProject = demoConfig.vertexProject;
+        fieldsApplied.push("vertexProject");
+      }
+      if (demoConfig.vertexLocation !== undefined) {
+        vendorPatch.vertexLocation = demoConfig.vertexLocation;
+        fieldsApplied.push("vertexLocation");
+      }
+
+      if (Object.keys(vendorPatch).length > 0) {
+        await settingsService.patch({
+          llm: { vendors: { [vendor]: vendorPatch } },
+        });
+      }
+
       // #893 — refresh plugin wildcard so a plugin's next `hostApi.config.get
       // ("hostApiKey")` observes the newly-installed key without an app
       // restart. The reviewer is rewired by the same closure path the
@@ -127,10 +159,10 @@ export function registerAuthHandlers(deps: IpcDeps): void {
           timestamp: new Date().toISOString(),
           sessionId: "auth",
           type: "info",
-          input: `login_mockup_ok vendor=${vendor} keySource=present`,
+          input: `login_mockup_ok vendor=${vendor} keySource=present fields=${fieldsApplied.join(",")}`,
         });
       } catch { /* audit must not break IPC */ }
-      return { ok: true, vendor };
+      return { ok: true, vendor, fieldsApplied };
     },
   );
 }
