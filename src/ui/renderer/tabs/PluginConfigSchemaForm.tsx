@@ -121,11 +121,19 @@ export function PluginConfigSchemaForm({
     setDraft({ ...values });
   }, [values]);
   const [secretDrafts, setSecretDrafts] = useState<Record<string, string>>({});
+  /** Per-key saving indicator — drives the inline Save button's loading state
+   *  on text / number / array / secret fields. Toggle / enum auto-save uses
+   *  the parent's `saving` prop. */
+  const [fieldSaving, setFieldSaving] = useState<Record<string, boolean>>({});
   const required = new Set(schema.required ?? []);
 
-  const buildOut = useCallback(
-    (source: PluginConfigFormValues): PluginConfigFormValues => {
+  // Build the full cleartext payload with `nextValue` substituted for `nextKey`.
+  // Secrets are stripped (they go through `onSetSecret` separately). Empty
+  // strings + undefined are dropped so `default` falls back at read time.
+  const buildPayload = useCallback(
+    (nextKey: string, nextValue: unknown): PluginConfigFormValues => {
       const out: PluginConfigFormValues = {};
+      const source = { ...draft, [nextKey]: nextValue };
       for (const key of propertyKeys) {
         const prop = properties[key];
         if (prop.type === "string" && prop.format === "secret") continue;
@@ -135,40 +143,19 @@ export function PluginConfigSchemaForm({
       }
       return out;
     },
-    [properties, propertyKeys],
+    [draft, properties, propertyKeys],
   );
 
-  const saveDraft = useCallback(
-    async (source: PluginConfigFormValues) => {
-      await onSave(buildOut(source));
-    },
-    [buildOut, onSave],
-  );
-
-  // Trailing-edge debounce: rapid toggle bursts collapse into a single
-  // pluginConfig.set so we don't fire one plugin restart per click.
+  // Auto-save for toggle/enum only (immediate-apply controls). Debounced
+  // so rapid bursts collapse into one plugin restart.
   const autoSave = useDebouncedSave(
     () => {
-      void saveDraft(draft);
+      void onSave(buildPayload("", undefined));
     },
     IMMEDIATE_SAVE_DEBOUNCE_MS,
   );
 
-  // Unified "변경사항 저장" — writes cleartext via `onSave` AND any dirty
-  // secret drafts via `onSetSecret`. Cleartext goes to settings.json,
-  // secrets land in the OS keychain on a separate IPC; from the user's
-  // perspective there is ONE Save button that persists everything.
-  const handleManualSave = useCallback(async () => {
-    autoSave.cancel();
-    await saveDraft(draft);
-    const dirtySecretKeys = Object.keys(secretDrafts).filter((k) => secretDrafts[k].length > 0);
-    for (const key of dirtySecretKeys) {
-      await onSetSecret(key, secretDrafts[key]);
-    }
-    if (dirtySecretKeys.length > 0) setSecretDrafts({});
-  }, [autoSave, draft, saveDraft, secretDrafts, onSetSecret]);
-
-  /** Update + schedule auto-save (200ms debounce). For toggle/enum. */
+  /** Toggle/enum — set draft + schedule debounced auto-save. */
   const updateImmediate = useCallback(
     (key: string, value: unknown) => {
       setDraft((prev) => ({ ...prev, [key]: value }));
@@ -177,23 +164,52 @@ export function PluginConfigSchemaForm({
     [autoSave],
   );
 
-  /** Update local draft only. For text/number/array — explicit save. */
+  /** Text/number/array — set draft only; explicit per-field Save button persists. */
   const updateDraft = useCallback((key: string, value: unknown) => {
     setDraft((prev) => ({ ...prev, [key]: value }));
   }, []);
 
-  // Show the section-level "변경사항 저장" button when there is at least
-  // one explicit-save field (text/number/array) OR any secret field —
-  // secrets persist through this same button (unified save flow).
-  // Pure toggle/enum forms with no secrets auto-save and the button
-  // would just be visual noise.
-  const hasExplicitSaveFields = propertyKeys.some((key) => {
-    const prop = properties[key];
-    if (prop.type === "string" && prop.format === "secret") return true;
-    if (prop.type === "boolean") return false;
-    if (prop.enum) return false;
-    return true;
-  });
+  /** Per-field cleartext save — text/number/array. */
+  const saveField = useCallback(
+    async (key: string) => {
+      autoSave.cancel();
+      setFieldSaving((p) => ({ ...p, [key]: true }));
+      try {
+        await onSave(buildPayload(key, draft[key]));
+      } finally {
+        setFieldSaving((p) => ({ ...p, [key]: false }));
+      }
+    },
+    [autoSave, buildPayload, draft, onSave],
+  );
+
+  /** Per-field secret save — text/password input, routes to keychain. */
+  const saveSecretField = useCallback(
+    async (key: string) => {
+      const value = secretDrafts[key] ?? "";
+      setFieldSaving((p) => ({ ...p, [key]: true }));
+      try {
+        await onSetSecret(key, value);
+        setSecretDrafts((p) => ({ ...p, [key]: "" }));
+      } finally {
+        setFieldSaving((p) => ({ ...p, [key]: false }));
+      }
+    },
+    [secretDrafts, onSetSecret],
+  );
+
+  /** Dirty check for cleartext fields — draft differs from saved `values`. */
+  const isCleartextDirty = useCallback(
+    (key: string): boolean => {
+      const draftVal = draft[key];
+      const savedVal = values[key];
+      if (Array.isArray(draftVal) && Array.isArray(savedVal)) {
+        return JSON.stringify(draftVal) !== JSON.stringify(savedVal);
+      }
+      return draftVal !== savedVal;
+    },
+    [draft, values],
+  );
 
   return (
     <div data-testid={`plugin-config-form:${pluginId}`} className="flex flex-col gap-3">
@@ -218,17 +234,28 @@ export function PluginConfigSchemaForm({
               <p className="text-[11px] text-muted-foreground">{prop.description}</p>
             )}
             {isSecret ? (
-              <Input
-                id={fieldId}
-                type="password"
-                className="h-7 text-xs"
-                placeholder={secretsPresent[key] ? "**** (저장됨)" : "값을 입력하세요"}
-                value={secretDrafts[key] ?? ""}
-                onChange={(e) =>
-                  setSecretDrafts((prev) => ({ ...prev, [key]: e.target.value }))
-                }
-                data-testid={`${fieldId}:input`}
-              />
+              <div className="flex items-center gap-2">
+                <Input
+                  id={fieldId}
+                  type="password"
+                  className="h-7 text-xs flex-1"
+                  placeholder={secretsPresent[key] ? "**** (저장됨)" : "값을 입력하세요"}
+                  value={secretDrafts[key] ?? ""}
+                  onChange={(e) =>
+                    setSecretDrafts((prev) => ({ ...prev, [key]: e.target.value }))
+                  }
+                  data-testid={`${fieldId}:input`}
+                />
+                <Button
+                  size="sm"
+                  className="h-7 text-xs px-2 shrink-0"
+                  onClick={() => void saveSecretField(key)}
+                  disabled={!(secretDrafts[key]?.length ?? 0) || Boolean(fieldSaving[key])}
+                  data-testid={`${fieldId}:save`}
+                >
+                  {fieldSaving[key] ? "저장 중…" : "저장"}
+                </Button>
+              </div>
             ) : prop.enum ? (
               <NativeSelect
                 id={fieldId}
@@ -265,53 +292,89 @@ export function PluginConfigSchemaForm({
                 <span className="text-muted-foreground">{label} 활성화</span>
               </Label>
             ) : prop.type === "array" && prop.items?.type === "string" ? (
-              <Input
-                id={fieldId}
-                className="h-7 text-xs"
-                placeholder="쉼표로 구분"
-                value={
-                  Array.isArray(value)
-                    ? value.join(", ")
-                    : Array.isArray(prop.default)
-                      ? (prop.default as unknown[]).join(", ")
-                      : ""
-                }
-                onChange={(e) => {
-                  const tokens = e.target.value
-                    .split(",")
-                    .map((s) => s.trim())
-                    .filter((s) => s.length > 0);
-                  updateDraft(key, tokens);
-                }}
-              />
+              <div className="flex items-center gap-2">
+                <Input
+                  id={fieldId}
+                  className="h-7 text-xs flex-1"
+                  placeholder="쉼표로 구분"
+                  value={
+                    Array.isArray(value)
+                      ? value.join(", ")
+                      : Array.isArray(prop.default)
+                        ? (prop.default as unknown[]).join(", ")
+                        : ""
+                  }
+                  onChange={(e) => {
+                    const tokens = e.target.value
+                      .split(",")
+                      .map((s) => s.trim())
+                      .filter((s) => s.length > 0);
+                    updateDraft(key, tokens);
+                  }}
+                  onKeyDown={(e) => { if (e.key === "Enter" && isCleartextDirty(key)) void saveField(key); }}
+                />
+                <Button
+                  size="sm"
+                  className="h-7 text-xs px-2 shrink-0"
+                  onClick={() => void saveField(key)}
+                  disabled={!isCleartextDirty(key) || Boolean(fieldSaving[key])}
+                  data-testid={`${fieldId}:save`}
+                >
+                  {fieldSaving[key] ? "저장 중…" : "저장"}
+                </Button>
+              </div>
             ) : prop.type === "number" || prop.type === "integer" ? (
-              <Input
-                id={fieldId}
-                type="number"
-                className="h-7 text-xs"
-                value={
-                  typeof value === "number"
-                    ? String(value)
-                    : typeof prop.default === "number"
-                      ? String(prop.default)
-                      : ""
-                }
-                onChange={(e) => {
-                  const next = coerceNumber(e.target.value, prop);
-                  updateDraft(key, next);
-                }}
-                step={prop.type === "integer" ? 1 : "any"}
-                min={prop.minimum}
-                max={prop.maximum}
-              />
+              <div className="flex items-center gap-2">
+                <Input
+                  id={fieldId}
+                  type="number"
+                  className="h-7 text-xs flex-1"
+                  value={
+                    typeof value === "number"
+                      ? String(value)
+                      : typeof prop.default === "number"
+                        ? String(prop.default)
+                        : ""
+                  }
+                  onChange={(e) => {
+                    const next = coerceNumber(e.target.value, prop);
+                    updateDraft(key, next);
+                  }}
+                  onKeyDown={(e) => { if (e.key === "Enter" && isCleartextDirty(key)) void saveField(key); }}
+                  step={prop.type === "integer" ? 1 : "any"}
+                  min={prop.minimum}
+                  max={prop.maximum}
+                />
+                <Button
+                  size="sm"
+                  className="h-7 text-xs px-2 shrink-0"
+                  onClick={() => void saveField(key)}
+                  disabled={!isCleartextDirty(key) || Boolean(fieldSaving[key])}
+                  data-testid={`${fieldId}:save`}
+                >
+                  {fieldSaving[key] ? "저장 중…" : "저장"}
+                </Button>
+              </div>
             ) : (
-              <Input
-                id={fieldId}
-                className="h-7 text-xs"
-                value={typeof value === "string" ? value : (prop.default as string | undefined) ?? ""}
-                onChange={(e) => updateDraft(key, e.target.value)}
-                maxLength={prop.maxLength}
-              />
+              <div className="flex items-center gap-2">
+                <Input
+                  id={fieldId}
+                  className="h-7 text-xs flex-1"
+                  value={typeof value === "string" ? value : (prop.default as string | undefined) ?? ""}
+                  onChange={(e) => updateDraft(key, e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && isCleartextDirty(key)) void saveField(key); }}
+                  maxLength={prop.maxLength}
+                />
+                <Button
+                  size="sm"
+                  className="h-7 text-xs px-2 shrink-0"
+                  onClick={() => void saveField(key)}
+                  disabled={!isCleartextDirty(key) || Boolean(fieldSaving[key])}
+                  data-testid={`${fieldId}:save`}
+                >
+                  {fieldSaving[key] ? "저장 중…" : "저장"}
+                </Button>
+              </div>
             )}
             {error && <p className="text-[11px] text-destructive">{error}</p>}
           </div>
@@ -326,21 +389,8 @@ export function PluginConfigSchemaForm({
           향후 UI Slot System(§9.3) 을 통해 자동 마운트될 예정입니다.
         </div>
       )}
-      {hasExplicitSaveFields && (
-        <div className="flex items-center justify-between gap-3 border-t border-border/40 pt-2">
-          <p className="text-[10px] text-muted-foreground">
-            토글 · 드롭다운은 자동 저장됩니다. 입력 필드 · API 키는 변경 후 저장 버튼을 눌러주세요.
-          </p>
-          <Button
-            size="sm"
-            onClick={() => void handleManualSave()}
-            disabled={Boolean(saving)}
-            data-testid={`plugin-config-form:${pluginId}:save`}
-          >
-            {saving ? "저장 중…" : "변경사항 저장"}
-          </Button>
-        </div>
-      )}
+      {/* No bottom batch button — text/number/array/secret fields each have
+          their own inline "저장" button; toggle/enum still auto-save. */}
     </div>
   );
 }
