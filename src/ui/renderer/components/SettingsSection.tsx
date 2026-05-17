@@ -27,7 +27,7 @@ export function SettingsSection({
     <section
       id={id}
       className={cn(
-        "rounded-lg border bg-card p-5 space-y-4",
+        "rounded-lg border bg-card p-6 space-y-5",
         className,
       )}
     >
