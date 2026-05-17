@@ -35,10 +35,11 @@ export interface LlmTabProps {
   keyInput: string;
   setKeyInput: (v: string) => void;
   /**
-   * #893 — Auth mode for the active vendor. `"manual"` (default) renders the
-   * raw API key input; `"login"` swaps it for a mockup credential login
-   * button that drives `api.loginMockup(...)`. Persisted under
-   * `llm.vendors.<vendor>.authMode`.
+   * #893 — Top-level auth mode. `"manual"` (default) renders the vendor
+   * dropdown + full per-vendor form (API key, baseUrl, model, vertex…);
+   * `"login"` collapses everything down to status + a single Login button
+   * whose backend decides the vendor (see `LVIS_DEMO_VENDOR`). Persisted
+   * at `llm.authMode` (top-level, not per-vendor).
    */
   authMode: "manual" | "login";
   setAuthMode: (mode: "manual" | "login") => void;
@@ -143,160 +144,165 @@ export function LlmTab(props: LlmTabProps) {
 
   return (
     <div className="space-y-4 pt-4">
-      {/* Section A — 공급자 구성. Vendor select auto-saves immediately;
-          baseUrl / vertex / API key / model are deferred and persist via
-          the section's 저장 button. */}
+      {/* Section A — 공급자 구성.
+          #893 top-level authMode toggle: when `login`, the vendor dropdown
+          and every per-vendor field collapse out of the DOM — only status +
+          Login button remain. Manual mode renders the full per-vendor form
+          (baseUrl / vertex / API key / model) deferred to the section's
+          저장 button.  */}
       <section
         className="space-y-3 rounded-md border bg-card/50 p-3"
         data-testid="llm-tab:section-providers"
       >
         <h3 className="text-sm font-semibold">공급자 구성</h3>
         <div className="space-y-2">
-          <Label htmlFor="vendor-select" className="flex items-center gap-2">
-            벤더
-            <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
-              즉시 적용
-            </span>
-          </Label>
-          <Select
-            value={vendor}
+          <Label className="text-sm font-medium">인증 방식</Label>
+          <RadioGroup
+            value={authMode}
             onValueChange={(v) => {
-              setVendor(v);
-              onImmediateChange?.();
+              if (v === "manual" || v === "login") {
+                setAuthMode(v);
+                onImmediateChange?.();
+              }
             }}
+            className="flex gap-4"
+            data-testid="llm-tab:auth-mode"
           >
-            <SelectTrigger id="vendor-select" className="w-full">
-              <SelectValue placeholder="벤더 선택" />
-            </SelectTrigger>
-            <SelectContent>
-              {VENDORS.map((v) => (
-                <SelectItem key={v.id} value={v.id}>{v.label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        {vendor !== "vertex-ai" && (vendorInfo.needsBaseUrl || vendor === "openai" || vendor === "copilot") && (
-          <div className="space-y-2">
-            <Label className="text-sm font-medium">
-              Endpoint (baseUrl){vendorInfo.needsBaseUrl ? " *" : " (선택)"}
-            </Label>
-            <Input
-              value={baseUrl}
-              onChange={(e) => setBaseUrl(e.target.value)}
-              placeholder={(vendorInfo as any).baseUrlPlaceholder ?? "https://..."}
-              readOnly={authMode === "login"}
-              disabled={authMode === "login"}
-            />
-            {authMode === "login" && (
-              <p className="text-[11px] text-muted-foreground">(로그인으로 관리)</p>
-            )}
-            {authMode !== "login" && (
-              <p className="text-[11px] text-muted-foreground">
-                ⓘ 저장 전 벤더 변경 시 현재 입력이 폐기됩니다.
-              </p>
-            )}
-            {vendor === "azure-foundry" && authMode !== "login" && (
-              <p className="text-[11px] text-muted-foreground">
-                Azure AI Foundry 엔드포인트 형식:
-                {" "}<code>https://{"{resource}"}.openai.azure.com/openai/deployments/{"{deployment}"}/</code>
-                {" "}— 모델 필드에는 deployment 이름을 입력합니다.
-              </p>
-            )}
-            {(vendor === "openai" || vendor === "copilot") && authMode !== "login" && (
-              <p className="text-[11px] text-muted-foreground">
-                프록시 또는 커스텀 엔드포인트를 사용하는 경우에만 입력합니다.
-              </p>
-            )}
-          </div>
-        )}
-        {vendor === "vertex-ai" && (
-          <div className="space-y-2 rounded-md border p-3">
-            <p className="text-sm font-medium">Google Vertex AI</p>
-            <p className="text-[11px] text-muted-foreground">
-              서비스 계정 또는 ADC(<code>gcloud auth application-default login</code>)로 인증합니다.
-              API 키는 사용하지 않으며, <code>GOOGLE_APPLICATION_CREDENTIALS</code> 환경 변수로 서비스 계정 JSON 경로를 지정할 수 있습니다.
-            </p>
-            <div className="space-y-1">
-              <Label className="text-xs text-muted-foreground">GCP Project ID *</Label>
-              <Input
-                value={vertexProject}
-                onChange={(e) => setVertexProject(e.target.value)}
-                placeholder="my-gcp-project"
-                readOnly={authMode === "login"}
-                disabled={authMode === "login"}
-              />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs text-muted-foreground">Location (region) — 선택</Label>
-              <Input
-                value={vertexLocation}
-                onChange={(e) => setVertexLocation(e.target.value)}
-                placeholder="us-central1 (기본값)"
-                readOnly={authMode === "login"}
-                disabled={authMode === "login"}
-              />
-            </div>
-            {authMode === "login" && (
-              <p className="text-[11px] text-muted-foreground">(로그인으로 관리)</p>
-            )}
-          </div>
-        )}
-        {vendor !== "vertex-ai" && (
-          <div className="space-y-2">
-            <Label className="text-sm font-medium">{vendorInfo.label} 인증</Label>
-            <RadioGroup
-              value={authMode}
-              onValueChange={(v) => {
-                if (v === "manual" || v === "login") {
-                  setAuthMode(v);
-                  onImmediateChange?.();
-                }
-              }}
-              className="flex gap-4"
-              data-testid="llm-tab:auth-mode"
-            >
-              <div className="flex items-center gap-2">
-                <RadioGroupItem value="manual" id={`auth-mode-manual-${vendor}`} />
-                <Label htmlFor={`auth-mode-manual-${vendor}`} className="text-xs">API 키</Label>
-              </div>
-              <div className="flex items-center gap-2">
-                <RadioGroupItem value="login" id={`auth-mode-login-${vendor}`} />
-                <Label htmlFor={`auth-mode-login-${vendor}`} className="text-xs">로그인</Label>
-              </div>
-            </RadioGroup>
             <div className="flex items-center gap-2">
-              {hasKey ? <Badge variant="default" className="text-xs">설정됨</Badge> : <Badge variant="secondary" className="text-xs">미설정</Badge>}
-              {hasKey && <Button size="sm" variant="ghost" className="h-7 text-xs text-destructive" onClick={() => void api.deleteApiKey(vendor).then(() => { setHasKey(false); onSaved(); })}>삭제</Button>}
+              <RadioGroupItem value="manual" id="auth-mode-manual" />
+              <Label htmlFor="auth-mode-manual" className="text-xs">API 키 직접 입력</Label>
             </div>
-            {authMode === "manual" ? (
-              <Input type="password" placeholder={hasKey ? "새 키로 교체" : vendorInfo.placeholder} value={keyInput} onChange={(e) => setKeyInput(e.target.value)} />
-            ) : (
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-8 text-xs"
-                data-testid="llm-tab:open-login"
-                onClick={() => onOpenLogin?.()}
+            <div className="flex items-center gap-2">
+              <RadioGroupItem value="login" id="auth-mode-login" />
+              <Label htmlFor="auth-mode-login" className="text-xs">Login</Label>
+            </div>
+          </RadioGroup>
+        </div>
+
+        {authMode === "login" ? (
+          <div className="space-y-2" data-testid="llm-tab:login-section">
+            <p className="text-[11px] text-muted-foreground">
+              현재 활성 벤더: <code>{vendorInfo.label}</code> ({model || vendorInfo.defaultModel})
+            </p>
+            <div className="flex items-center gap-2">
+              {hasKey ? (
+                <Badge variant="default" className="text-xs">로그인됨</Badge>
+              ) : (
+                <Badge variant="secondary" className="text-xs">로그인 필요</Badge>
+              )}
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 text-xs"
+              data-testid="llm-tab:open-login"
+              onClick={() => onOpenLogin?.()}
+            >
+              Login
+            </Button>
+            <p className="text-[11px] text-muted-foreground">
+              로그인 시 벤더 선택 · API 키 · 엔드포인트 · 모델이 자동으로 설정됩니다.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-3" data-testid="llm-tab:manual-section">
+            <div className="space-y-2">
+              <Label htmlFor="vendor-select" className="flex items-center gap-2">
+                벤더
+                <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
+                  즉시 적용
+                </span>
+              </Label>
+              <Select
+                value={vendor}
+                onValueChange={(v) => {
+                  setVendor(v);
+                  onImmediateChange?.();
+                }}
               >
-                로그인
-              </Button>
+                <SelectTrigger id="vendor-select" className="w-full">
+                  <SelectValue placeholder="벤더 선택" />
+                </SelectTrigger>
+                <SelectContent>
+                  {VENDORS.map((v) => (
+                    <SelectItem key={v.id} value={v.id}>{v.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {vendor !== "vertex-ai" && (vendorInfo.needsBaseUrl || vendor === "openai" || vendor === "copilot") && (
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">
+                  Endpoint (baseUrl){vendorInfo.needsBaseUrl ? " *" : " (선택)"}
+                </Label>
+                <Input
+                  value={baseUrl}
+                  onChange={(e) => setBaseUrl(e.target.value)}
+                  placeholder={(vendorInfo as any).baseUrlPlaceholder ?? "https://..."}
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  ⓘ 저장 전 벤더 변경 시 현재 입력이 폐기됩니다.
+                </p>
+                {vendor === "azure-foundry" && (
+                  <p className="text-[11px] text-muted-foreground">
+                    Azure AI Foundry 엔드포인트 형식:
+                    {" "}<code>https://{"{resource}"}.openai.azure.com/openai/deployments/{"{deployment}"}/</code>
+                    {" "}— 모델 필드에는 deployment 이름을 입력합니다.
+                  </p>
+                )}
+                {(vendor === "openai" || vendor === "copilot") && (
+                  <p className="text-[11px] text-muted-foreground">
+                    프록시 또는 커스텀 엔드포인트를 사용하는 경우에만 입력합니다.
+                  </p>
+                )}
+              </div>
             )}
+            {vendor === "vertex-ai" && (
+              <div className="space-y-2 rounded-md border p-3">
+                <p className="text-sm font-medium">Google Vertex AI</p>
+                <p className="text-[11px] text-muted-foreground">
+                  서비스 계정 또는 ADC(<code>gcloud auth application-default login</code>)로 인증합니다.
+                  API 키는 사용하지 않으며, <code>GOOGLE_APPLICATION_CREDENTIALS</code> 환경 변수로 서비스 계정 JSON 경로를 지정할 수 있습니다.
+                </p>
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">GCP Project ID *</Label>
+                  <Input
+                    value={vertexProject}
+                    onChange={(e) => setVertexProject(e.target.value)}
+                    placeholder="my-gcp-project"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">Location (region) — 선택</Label>
+                  <Input
+                    value={vertexLocation}
+                    onChange={(e) => setVertexLocation(e.target.value)}
+                    placeholder="us-central1 (기본값)"
+                  />
+                </div>
+              </div>
+            )}
+            {vendor !== "vertex-ai" && (
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">{vendorInfo.label} 인증</Label>
+                <div className="flex items-center gap-2">
+                  {hasKey ? <Badge variant="default" className="text-xs">설정됨</Badge> : <Badge variant="secondary" className="text-xs">미설정</Badge>}
+                  {hasKey && <Button size="sm" variant="ghost" className="h-7 text-xs text-destructive" onClick={() => void api.deleteApiKey(vendor).then(() => { setHasKey(false); onSaved(); })}>삭제</Button>}
+                </div>
+                <Input type="password" placeholder={hasKey ? "새 키로 교체" : vendorInfo.placeholder} value={keyInput} onChange={(e) => setKeyInput(e.target.value)} />
+              </div>
+            )}
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">모델</Label>
+              <Input
+                data-testid="llm-model-input"
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                placeholder={vendorInfo.defaultModel}
+              />
+            </div>
           </div>
         )}
-        <div className="space-y-2">
-          <Label className="text-sm font-medium">모델</Label>
-          <Input
-            data-testid="llm-model-input"
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-            placeholder={vendorInfo.defaultModel}
-            readOnly={authMode === "login"}
-            disabled={authMode === "login"}
-          />
-          {authMode === "login" && (
-            <p className="text-[11px] text-muted-foreground">(로그인으로 관리)</p>
-          )}
-        </div>
         {hasOnSave && (
           <SectionSaveBar
             onSave={onSave!}

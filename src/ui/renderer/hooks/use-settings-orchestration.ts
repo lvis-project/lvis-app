@@ -14,8 +14,10 @@ export interface SettingsOrchestrationState {
   hasKey: boolean;
   setHasKey: (v: boolean) => void;
   /**
-   * #893 — Auth mode for the active vendor. Persisted in
-   * `llm.vendors.<vendor>.authMode`. Defaults to `"manual"`.
+   * #893 — Top-level auth mode toggle. Persisted in `llm.authMode`.
+   * `"login"` collapses the vendor dropdown + per-vendor settings down to a
+   * single Login button; `"manual"` (default) shows the full per-vendor
+   * form.
    */
   authMode: "manual" | "login";
   setAuthMode: (mode: "manual" | "login") => void;
@@ -97,7 +99,7 @@ export function useSettingsOrchestration(
   const [keyInput, setKeyInput] = useState("");
   const [model, setModel] = useState("");
   const [hasKey, setHasKey] = useState(false);
-  // #893 — Auth mode for the active vendor block; hydrated from settings snapshot.
+  // #893 — Top-level auth mode. Hydrated from `settings.llm.authMode`.
   const [authMode, setAuthMode] = useState<"manual" | "login">("manual");
   const [autoCompact, setAutoCompact] = useState(true);
   const [enableThinking, setEnableThinking] = useState(true);
@@ -145,6 +147,11 @@ export function useSettingsOrchestration(
       hydratedWebProviderRef.current = s.webSearch.provider;
       setSettingsSnapshot(s);
       setVendor(s.llm.provider);
+      // #893 — top-level authMode hydration. Legacy installs (per-vendor
+      // authMode) were migrated up in the settings store at load time, so
+      // by the time the renderer reads `s.llm.authMode` the field is
+      // authoritative.
+      setAuthMode(s.llm.authMode === "login" ? "login" : "manual");
       hydrateVendorBlock(block);
       setStreamSmoothing(s.llm.streamSmoothing);
       setAutoCompact(s.chat.autoCompact ?? true);
@@ -200,8 +207,9 @@ export function useSettingsOrchestration(
     setVertexLocation(block.vertexLocation ?? "");
     setEnableThinking(block.enableThinking);
     setThinkingBudget(block.thinkingBudgetTokens);
-    // #893 — legacy persisted settings won't have `authMode`; treat as "manual".
-    setAuthMode(block.authMode === "login" ? "login" : "manual");
+    // #893 — authMode is no longer per-vendor; the top-level value is set by
+    // the open-time snapshot read (see effect above) and survives vendor
+    // switches.
   }
 
   // Re-check web key when webProvider changes
@@ -280,10 +288,11 @@ export function useSettingsOrchestration(
           vertexLocation: trimmedVertexLocation || undefined,
           enableThinking,
           thinkingBudgetTokens: thinkingBudget,
-          authMode,
         };
         await api.updateSettings({
           llm: {
+            // #893 — top-level authMode persisted alongside provider.
+            authMode,
             provider: vendor as any,
             vendors: { [vendor]: activeBlock } as any,
             streamSmoothing,

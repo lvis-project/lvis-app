@@ -410,10 +410,14 @@ export function SettingsContent({
     </Tabs>
     <LoginModal
       api={api}
-      vendor={s.vendor}
       open={loginOpen}
       onOpenChange={setLoginOpen}
-      onSuccess={() => {
+      onSuccess={(activatedVendor) => {
+        // #893 — backend decides vendor; mirror it back into the dialog
+        // state so the user lands on the now-active vendor without a
+        // settings reload.
+        s.setVendor(activatedVendor);
+        s.setAuthMode("login");
         s.setHasKey(true);
         onSaved();
       }}
