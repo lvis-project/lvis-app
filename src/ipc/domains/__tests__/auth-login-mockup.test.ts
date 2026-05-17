@@ -6,25 +6,24 @@
  * persisting the resolved key under `llm.apiKey.<vendor>`.
  *
  * PR #894 review B1 / T1-10 — tests cover the production gate (handler
- * skipped when `app.isPackaged && !isDemoEnabled()`) and the redacted
+ * skipped when `getIsPackaged() && !isDemoEnabled()`) and the redacted
  * audit `keySource=present` fingerprint.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
-let appIsPackaged = false;
+let _isPackaged = false;
 
 vi.mock("electron", () => ({
-  app: {
-    get isPackaged() {
-      return appIsPackaged;
-    },
-  },
   ipcMain: {
     handle: vi.fn((channel: string, fn: (...args: unknown[]) => unknown) => {
       handlers.set(channel, fn);
     }),
   },
+}));
+
+vi.mock("../../../boot/dev-flags.js", () => ({
+  getIsPackaged: vi.fn(() => _isPackaged),
 }));
 
 function invoke(channel: string, ...args: unknown[]): Promise<unknown> {
@@ -52,7 +51,7 @@ const ORIGINAL_ENV = { ...process.env };
 
 beforeEach(async () => {
   handlers.clear();
-  appIsPackaged = false;
+  _isPackaged = false;
   vi.resetModules();
   // Default: enable demo so handler registers. Individual tests override.
   process.env.LVIS_DEMO_ENABLED = "1";
@@ -184,7 +183,7 @@ describe("auth:login-mockup IPC handler (#893)", () => {
 
   // PR #894 review B1 — production gate
   it("skips handler registration in packaged builds when LVIS_DEMO_ENABLED is unset", async () => {
-    appIsPackaged = true;
+    _isPackaged = true;
     delete process.env.LVIS_DEMO_ENABLED;
     const deps = makeDeps();
     const { registerAuthHandlers } = await loadAuthModule();
@@ -194,7 +193,7 @@ describe("auth:login-mockup IPC handler (#893)", () => {
   });
 
   it("registers handler in packaged builds when LVIS_DEMO_ENABLED=1 was captured pre-scrub", async () => {
-    appIsPackaged = true;
+    _isPackaged = true;
     process.env.LVIS_DEMO_ENABLED = "1";
     process.env.LVIS_DEMO_KEY_OPENAI = "sk-demo-prod-test";
     const deps = makeDeps();
@@ -211,7 +210,7 @@ describe("auth:login-mockup IPC handler (#893)", () => {
   });
 
   it("registers handler in dev builds even when LVIS_DEMO_ENABLED is unset", async () => {
-    appIsPackaged = false;
+    _isPackaged = false;
     delete process.env.LVIS_DEMO_ENABLED;
     process.env.LVIS_DEMO_KEY_OPENAI = "sk-dev-test";
     const deps = makeDeps();
