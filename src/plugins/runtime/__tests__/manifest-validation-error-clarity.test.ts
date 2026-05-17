@@ -76,7 +76,7 @@ describe("manifest-validation enriched error messages (#737)", () => {
     await writeFile(
       path,
       JSON.stringify({
-        id: "x.x",
+        id: "x-x",
         name: "X",
         description: "y",
         version: "0.0.1",
@@ -103,7 +103,7 @@ describe("manifest-validation enriched error messages (#737)", () => {
     await writeFile(
       path,
       JSON.stringify({
-        id: "x.x",
+        id: "x-x",
         name: "X",
         description: "y",
         version: "0.0.1",
@@ -126,7 +126,7 @@ describe("manifest-validation enriched error messages (#737)", () => {
     await writeFile(
       path,
       JSON.stringify({
-        id: "x.x",
+        id: "x-x",
         name: "X",
         description: "y",
         version: "not-semver",
@@ -153,7 +153,7 @@ describe("manifest-validation enriched error messages (#737)", () => {
     await writeFile(
       path,
       JSON.stringify({
-        id: "x.x",
+        id: "x-x",
         name: "X",
         description: "y",
         version: "abc",
