@@ -160,7 +160,8 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
         await pm.addAlwaysDeniedPersist(parsed.pattern);
       }
       deps.toolRegistry.setDenyRules(pm.getVisibilityDenyRules());
-      broadcastPermissionConfigChanged(deps);
+      // No explicit broadcast — PermissionManager.addAlwaysAllowed/DeniedPersist
+      // fire broadcastConfigChanged via the boot-wired setter (round-4 SOT).
       return { ok: true, rule: { pattern: parsed.pattern, action: parsed.action } };
     } catch (err) {
       return { ok: false, error: "add-failed", message: (err as Error).message };
@@ -187,7 +188,8 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
     try {
       await pm.removeRule(parsed.pattern, parsed.action);
       deps.toolRegistry.setDenyRules(pm.getVisibilityDenyRules());
-      broadcastPermissionConfigChanged(deps);
+      // No explicit broadcast — PermissionManager.removeRule fires
+      // broadcastConfigChanged via the boot-wired setter (round-4 SOT).
       return { ok: true };
     } catch (err) {
       return { ok: false, error: "remove-failed", message: (err as Error).message };
@@ -584,6 +586,10 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
         trustOrigin: snapshot.trustOrigin,
         approvalCacheKey: snapshot.approvalCacheKey,
       });
+      // R-2 user-approval store mutation — outside PermissionManager, so
+      // emit the broadcast explicitly to keep the Active Approvals view
+      // in multi-window PermissionsTab fresh.
+      broadcastPermissionConfigChanged(deps);
       return { ok: true };
     } catch (err) {
       return { ok: false, error: "managed", message: (err as Error).message };
@@ -607,6 +613,9 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
     }
     try {
       await revokeApprovalByKey(key.trim());
+      // Destructive — emit broadcast so the Active Approvals table refreshes
+      // in any concurrently open PermissionsTab.
+      broadcastPermissionConfigChanged(deps);
       return { ok: true };
     } catch (err) {
       return { ok: false, error: "managed", message: (err as Error).message };
