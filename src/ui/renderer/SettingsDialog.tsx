@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
+import { VisuallyHidden } from "radix-ui";
 import { Button } from "../../components/ui/button.js";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../../components/ui/tabs.js";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../../components/ui/dialog.js";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "../../components/ui/dialog.js";
 import { SavedToastFloating, SavedToastProvider } from "./contexts/saved-toast.js";
 import type { LvisApi } from "./types.js";
 import { RolesTab } from "./tabs/RolesTab.js";
@@ -67,22 +68,33 @@ export function SettingsDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         size="2xl"
-        // !p-0: sidebar must reach the dialog's outer border (not sit inside
-        // another card). User direction: "사이드바가 전체 영역에 붙어야지 왜
-        // 컨텐츠 안에 컨텐츠로 자리잡고 있나". The right pane owns its own
-        // padding via SettingsContent below.
-        className="h-[90dvh] min-h-[600px] max-h-[920px] !overflow-hidden flex flex-col !p-0"
+        // Linear-style flush layout (round-3 fix per 3-agent verification):
+        //   - !p-0      → kill the dialog cva's base p-6 so sidebar + content
+        //                 reach the dialog's outer border (no padding gap).
+        //   - !gap-0    → kill the dialog cva's base `gap-4`. The base is
+        //                 `grid gap-4` for stacked sm/md dialogs; with our
+        //                 horizontal flex layout the gap-4 would otherwise
+        //                 push the content area down ~16px even after we
+        //                 removed DialogHeader.
+        //   - flex/flex-col → override base `grid` so children stack via flex.
+        className="h-[90dvh] min-h-[600px] max-h-[920px] !overflow-hidden !p-0 !gap-0 flex flex-col"
       >
         {/* Linear-style — outer page heading removed. Each tab renders its
             own page header (SettingsPageHeader) so the right pane top is
-            flush with the left nav top, and there is no redundant "설정"
-            label above the per-page "모델 / 테마 / ..." title.
-            DialogTitle + DialogDescription are kept inside DialogHeader
-            with sr-only so Radix's a11y contract is still satisfied. */}
-        <DialogHeader className="sr-only">
+            flush with the left nav top.
+
+            sr-only via Tailwind utility is unreliable here: shadcn's
+            DialogHeader is a `flex flex-col space-y-1.5` wrapper whose
+            layout-props can race with the sr-only class. Use Radix's
+            VisuallyHidden primitive instead — it owns position:absolute
+            + clip + width:1px + height:1px directly on the rendered
+            element, so the title/description are hidden but still
+            announced by screen readers (Radix Dialog requires both
+            for a11y). */}
+        <VisuallyHidden.Root>
           <DialogTitle>설정</DialogTitle>
           <DialogDescription>앱 환경, 채팅 동작, 검색 엔진, 권한 정책을 설정합니다.</DialogDescription>
-        </DialogHeader>
+        </VisuallyHidden.Root>
         <div className="flex-1 min-h-0 overflow-hidden">
           <SettingsContent
             open={open}
@@ -254,10 +266,11 @@ export function SettingsContent({
       <TabsList
         aria-label="설정 카테고리"
         // Sidebar = single region of the dialog, not a nested card.
-        // Drops the rounded border and bg tint that made it look like
-        // "content inside content"; keeps only a right border so the
-        // boundary with the content pane is still legible.
-        className="flex h-full w-48 shrink-0 flex-col items-stretch gap-0.5 overflow-y-auto border-r bg-muted/20 p-2"
+        // Drops the rounded border AND the bg tint (critic round-3:
+        // bg-muted/20 created a "second surface inside the card"
+        // optical illusion against the dialog's rounded-lg border).
+        // Only the right border remains as the boundary with content.
+        className="flex h-full w-48 shrink-0 flex-col items-stretch gap-0.5 overflow-y-auto border-r p-2"
       >
         <TabsTrigger value="llm" className={sideTriggerCls}>모델</TabsTrigger>
         <TabsTrigger value="appearance" className={sideTriggerCls}>테마</TabsTrigger>
@@ -287,9 +300,10 @@ export function SettingsContent({
           exceeds the pane. `relative` so the floating SavedToast anchors
           here rather than the dialog. */}
       {/* Right pane owns its own padding now that the dialog itself is
-          flush (DialogContent !p-0). px-6 py-5 leaves breathing room
-          around the page header and section cards. */}
-      <div className="flex flex-1 min-w-0 flex-col overflow-y-scroll px-6 py-5 lvis-settings-scroll">
+          flush (DialogContent !p-0). pt-2 matches the sidebar's p-2 so
+          the first sidebar trigger and the page header start at the
+          same vertical position (architect round-3 alignment fix). */}
+      <div className="flex flex-1 min-w-0 flex-col overflow-y-scroll px-6 pt-2 pb-5 lvis-settings-scroll">
         {s.lastSaveError && (
           <div
             role="alert"
