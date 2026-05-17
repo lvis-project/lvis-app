@@ -11,6 +11,14 @@
  *   - User-facing Korean text is the renderer's responsibility — never
  *     embedded in the IPC payload.
  *
+ * Production gate (PR #894 review B1):
+ *   - Demo credentials live in `LVIS_DEMO_*` env vars captured at boot,
+ *     then scrubbed from `process.env`. In packaged builds, the handler
+ *     refuses to register unless `LVIS_DEMO_ENABLED=1` was set at boot.
+ *   - This prevents a shipped binary from accepting the literal `demo` /
+ *     `demo123` mockup credentials and persisting an attacker-controlled
+ *     "demo" key under `llm.apiKey.<vendor>`.
+ *
  * Credential override:
  *   `LVIS_DEMO_USER` / `LVIS_DEMO_PASS` — let local dev rotate the demo
  *   credentials without rebuilding. Production builds rely on the defaults.
@@ -22,10 +30,18 @@
  *   `error: "no-demo-key"` so the renderer can fall through to manual
  *   entry without silently appearing to succeed.
  */
-import { ipcMain } from "electron";
+import { app, ipcMain } from "electron";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import { isLLMVendor } from "../../shared/llm-vendor-defaults.js";
+import { createLogger } from "../../lib/logger.js";
+import {
+  getDemoCredentials,
+  getDemoKey,
+  isDemoEnabled,
+} from "../../main/demo-credentials.js";
 import type { IpcDeps } from "../types.js";
+
+const log = createLogger("auth-ipc");
 
 const DEFAULT_DEMO_USER = "demo";
 const DEFAULT_DEMO_PASS = "demo123";
@@ -41,6 +57,15 @@ export function demoKeyEnvVar(vendor: string): string {
 
 export function registerAuthHandlers(deps: IpcDeps): void {
   const { settingsService, auditLogger } = deps;
+
+  // PR #894 B1 — Production safety gate. In packaged builds the mockup
+  // login handler must not register unless `LVIS_DEMO_ENABLED=1` was set
+  // at boot (captured pre-scrub). Dev builds always register so local
+  // engineering still has the demo loop.
+  if (app.isPackaged && !isDemoEnabled()) {
+    log.info("mockup login handler skipped (production build, LVIS_DEMO_ENABLED unset)");
+    return;
+  }
 
   ipcMain.handle(
     "lvis:auth:login-mockup",
@@ -64,8 +89,9 @@ export function registerAuthHandlers(deps: IpcDeps): void {
         return { ok: false, error: "invalid-vendor" };
       }
 
-      const expectedUser = process.env.LVIS_DEMO_USER ?? DEFAULT_DEMO_USER;
-      const expectedPass = process.env.LVIS_DEMO_PASS ?? DEFAULT_DEMO_PASS;
+      const overrides = getDemoCredentials();
+      const expectedUser = overrides.user ?? DEFAULT_DEMO_USER;
+      const expectedPass = overrides.pass ?? DEFAULT_DEMO_PASS;
       if (username !== expectedUser || password !== expectedPass) {
         try {
           auditLogger.log({
@@ -78,8 +104,7 @@ export function registerAuthHandlers(deps: IpcDeps): void {
         return { ok: false, error: "invalid-credentials" };
       }
 
-      const envVar = demoKeyEnvVar(vendor);
-      const apiKey = process.env[envVar];
+      const apiKey = getDemoKey(vendor);
       if (typeof apiKey !== "string" || apiKey.length === 0) {
         return { ok: false, error: "no-demo-key" };
       }
@@ -92,11 +117,16 @@ export function registerAuthHandlers(deps: IpcDeps): void {
       // that don't wire the AppServices bag stay simple.
       deps.refreshActiveLlmWildcard?.();
       try {
+        // PR #894 T1-10 — `keySource=<envVar>` previously leaked the exact
+        // env var name (`LVIS_DEMO_KEY_OPENAI`) into the audit log, giving
+        // an attacker who scraped audit JSONL the namespace to enumerate.
+        // The fingerprint is "demo key was present"; the env var name is
+        // not load-bearing for forensics, so redact to `present`.
         auditLogger.log({
           timestamp: new Date().toISOString(),
           sessionId: "auth",
           type: "info",
-          input: `login_mockup_ok vendor=${vendor} keySource=${envVar}`,
+          input: `login_mockup_ok vendor=${vendor} keySource=present`,
         });
       } catch { /* audit must not break IPC */ }
       return { ok: true, vendor };
