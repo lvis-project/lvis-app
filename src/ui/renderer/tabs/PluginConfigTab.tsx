@@ -378,6 +378,14 @@ export function PluginConfigTab() {
         </div>
       )}
 
+      {/* Section sub-header — "플러그인 환경 설정" (user directive 2026-05-18).
+          Renders unconditionally so the title is a stable anchor during
+          loading / empty-state. */}
+      <div className="space-y-1">
+        <h3 className="text-base font-semibold tracking-tight">플러그인 환경 설정</h3>
+        <p className="text-sm text-muted-foreground">선택된 플러그인의 활성화 + 개별 설정값을 편집합니다</p>
+      </div>
+
       {loading ? (
         <p className="text-xs text-muted-foreground">로딩 중…</p>
       ) : plugins.length === 0 ? (
@@ -385,8 +393,15 @@ export function PluginConfigTab() {
           설치된 플러그인이 없습니다.
         </div>
       ) : (
-        <div className="flex gap-3 min-h-[520px] max-h-[70dvh]">
-          {/* Left: plugin list */}
+        // Split fills the tab's available height (`flex-1 min-h-0`).
+        // Sub-sidebar (left, w-60 shrink-0) stays fixed; its internal
+        // ScrollArea covers the full height. Right detail pane gets
+        // `overflow-y-auto min-h-0` so the editor scrolls based on the
+        // count of config keys — user directive 2026-05-18:
+        // "플러그인 개별 환경설정 항목 개수에 따라 오버플로우가 충분히 되어
+        //  스크롤이 동적으로 변화 할 수 있도록".
+        <div className="flex flex-1 min-h-0 gap-3">
+          {/* Left: plugin list (sub-sidebar — fixed width) */}
           <div className="w-60 shrink-0 rounded-md border bg-card">
             <ScrollArea className="h-full">
               <div className="p-1 space-y-0.5">
@@ -458,8 +473,11 @@ export function PluginConfigTab() {
             </ScrollArea>
           </div>
 
-          {/* Right: detail + key-value editor */}
-          <div className="flex-1 min-w-0 flex flex-col gap-2 rounded-md border bg-card p-3">
+          {/* Right: detail + key-value editor. `overflow-y-auto min-h-0`
+              makes the editor scroll internally when the plugin has many
+              config keys — keeps the sub-sidebar (left) visible while
+              the user reviews/edits a long list. */}
+          <div className="flex-1 min-w-0 flex flex-col gap-2 rounded-md border bg-card p-3 overflow-y-auto min-h-0">
             {selectedPlugin ? (
               <>
                 <div className="flex items-start justify-between gap-2">
