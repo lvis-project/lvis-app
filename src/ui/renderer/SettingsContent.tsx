@@ -307,16 +307,19 @@ export function SettingsContent({
           McpTab) can use h-full reliably.
           Outer: `overflow-hidden flex-col flex-1` — gives a fixed height
             to the column so children can fill it with h-full / flex-1.
-          Inner scroll: `overflow-y-scroll flex-1 min-h-0` — the actual
-            scroll container. `overflow-y-scroll` (not `auto`) keeps the
-            gutter always-reserved so layout doesn't shift on short pages.
-            `lvis-settings-scroll` hooks the themed webkit scrollbar.
+          Inner scroll: `overflow-y-auto [scrollbar-gutter:stable]` —
+            scrolls only when content overflows AND reserves the gutter
+            via the CSS `scrollbar-gutter` property so the layout
+            doesn't shift on short pages. Replaces the previous
+            `overflow-y-scroll` (always-visible track) — that variant
+            caused a double-scrollbar on Win/Linux for tabs that owned
+            their own internal scroll (PluginConfigTab, McpTab).
           Top padding: pt-2 on the inner scroll matches the sidebar
           wrapper's pt-2, plus SettingsPageHeader's pt-2 lands h2 at
           the same Y as the sidebar first trigger text — both well
-          below the title bar (user's "사이드바를 아래로 내려라" intent). */}
+          below the title bar. */}
       <div className="flex flex-1 min-w-0 flex-col overflow-hidden">
-      <div ref={rightPaneRef} className="flex flex-1 min-h-0 flex-col overflow-y-scroll px-8 pt-2 pb-8 lvis-settings-scroll">
+      <div ref={rightPaneRef} className="flex flex-1 min-h-0 flex-col overflow-y-auto [scrollbar-gutter:stable] px-8 pt-2 pb-8 lvis-settings-scroll">
         {s.lastSaveError && (
           <div
             role="alert"
