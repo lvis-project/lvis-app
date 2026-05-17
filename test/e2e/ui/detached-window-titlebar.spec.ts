@@ -1,4 +1,10 @@
 import { test, expect } from './fixtures';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = path.resolve(HERE, '../../..');
+const DIST_SRC = path.join(REPO_ROOT, 'dist/src');
 
 /**
  * DetachedView titlebar — B1 CustomTitleBar integration (#354 follow-up).
@@ -23,8 +29,12 @@ test('detached window exposes CustomTitleBar drag region', async ({ app, mainWin
   // Navigate the main window renderer to open a detached window via the
   // window.lvisApi bridge if available, otherwise open the URL directly in
   // a new BrowserWindow via Electron evaluation.
-  await app.evaluate(async ({ BrowserWindow, screen }, mainEntry) => {
-    const preloadPath = mainEntry.replace('main.js', 'preload.cjs');
+  // Build dist layout has divergent sibling paths — main.js lives in
+  // `dist/src/main/`, preload.cjs in `dist/src/`, and index.html in
+  // `dist/src/`. The prior `mainEntry.replace('main.js', 'preload.cjs')`
+  // shortcut assumed they were all in the same directory and broke after
+  // the build layout split. Resolve each path from `dist/src/` explicitly.
+  await app.evaluate(async ({ BrowserWindow, screen }, paths) => {
     const win = new BrowserWindow({
       width: 600,
       height: 500,
@@ -35,16 +45,23 @@ test('detached window exposes CustomTitleBar drag region', async ({ app, mainWin
         nodeIntegration: false,
         sandbox: false,
         webviewTag: false,
-        preload: preloadPath,
+        preload: paths.preload,
       },
     });
     // Load the detached route
-    const indexPath = mainEntry.replace('main.js', 'index.html');
-    await win.loadFile(indexPath, { hash: 'detached/tasks' });
+    await win.loadFile(paths.index, { hash: 'detached/tasks' });
     win.show();
     // @ts-ignore — screen access
     void screen;
-  }, process.env.LVIS_MAIN_ENTRY ?? '');
+  }, {
+    // Build layout: dist/src/preload.cjs + dist/src/index.html
+    // (main.js lives one dir deeper at dist/src/main/main.js, so we resolve
+    // siblings from `dist/src/` directly — derived in the test process
+    // because `app.evaluate` runs in Electron's main process where
+    // `process.env.LVIS_MAIN_ENTRY` is undefined unless explicitly seeded).
+    preload: path.join(DIST_SRC, 'preload.cjs'),
+    index: path.join(DIST_SRC, 'index.html'),
+  });
 
   const detachedPage = await newWindowPromise;
   await detachedPage.waitForLoadState('domcontentloaded');
