@@ -1158,12 +1158,26 @@ export class ToolExecutor {
     // so we log and degrade conservatively (session → turn) rather than
     // pretending the propagation succeeded.
     const propagateGrantScope = (approvedDirectory: string, scope: "turn" | "session" | "always"): void => {
+      const emitGrantAudit = (lifetime: "turn" | "session" | "always" | "degraded-to-turn"): void => {
+        // Fire-and-forget: audit append errors are logged inside the
+        // helper (or thrown only when requirePermissionAuditChain), so we
+        // don't block tool execution on audit I/O.
+        void this.auditPermissionGrant({
+          toolName: toolUse.name,
+          source,
+          category: invocationCategory,
+          directory: approvedDirectory,
+          grantLifetime: lifetime,
+          permissionContext: invocationPermissionContext,
+        });
+      };
       if (scope === "turn") {
         if (!invocationPermissionContext.onTurnDirectoryGrant) {
           log.warn(`[permission-scope] onTurnDirectoryGrant unwired — turn-scope grant for ${approvedDirectory} will not survive this tool call`);
           return;
         }
         invocationPermissionContext.onTurnDirectoryGrant(approvedDirectory);
+        emitGrantAudit("turn");
         return;
       }
       if (scope === "session") {
@@ -1174,13 +1188,18 @@ export class ToolExecutor {
           }
           log.error(`[permission-scope] onSessionDirectoryGrant unwired — degrading session-scope grant for ${approvedDirectory} to turn-scope`);
           invocationPermissionContext.onTurnDirectoryGrant(approvedDirectory);
+          emitGrantAudit("degraded-to-turn");
           return;
         }
         invocationPermissionContext.onSessionDirectoryGrant(approvedDirectory);
+        emitGrantAudit("session");
         return;
       }
-      // "always" is already persisted via dispatchPermissionDirCommand
-      // inside requestOutOfAllowedDirectoryAccess; nothing to do here.
+      // "always" — dispatchPermissionDirCommand already persisted the rule
+      // inside requestOutOfAllowedDirectoryAccess; emit the audit row here
+      // so forensic replay sees a unified grant timeline across all three
+      // lifetimes.
+      emitGrantAudit("always");
     };
 
     if (invocationCategory === "shell") {
@@ -1803,6 +1822,57 @@ export class ToolExecutor {
   }
 
   // ─── Audit (불변 — 항상 실행) ────────────────────
+
+  /**
+   * Emit an `AuditAllow` row when the user resolves an out-of-allowed-dir
+   * approval (allow-once / allow-session / allow-always) — or when
+   * `propagateGrantScope` had to degrade a session-intent grant to turn
+   * scope because the session callback was unwired. Decoupled from
+   * `auditToolCall` so the per-tool audit row can stay focused on
+   * execution outcome while the directory-grant decision lives in a
+   * dedicated forensic row tied to the dialog click.
+   */
+  private async auditPermissionGrant(args: {
+    toolName: string;
+    source: ToolSource;
+    category: ToolCategory;
+    directory: string;
+    grantLifetime: "turn" | "session" | "always" | "degraded-to-turn";
+    permissionContext?: ToolPermissionContext;
+  }): Promise<void> {
+    if (!this.auditLogger.isPermissionAuditChainReady()) {
+      if (this.requirePermissionAuditChain) {
+        throw new Error("permission audit chain is not initialized");
+      }
+      return;
+    }
+    const entry: PermissionAuditEntryInput = {
+      decision: "allow",
+      ts: new Date().toISOString(),
+      auditId: randomUUID(),
+      tool: args.toolName,
+      source: args.source,
+      category: args.category,
+      directory: args.directory,
+      directoryAllowed: true,
+      grantLifetime: args.grantLifetime,
+      layer: 1,
+      trustOrigin: auditTrustOrigin(args.permissionContext),
+    };
+    try {
+      await this.auditLogger.appendPermissionAuditEntry(entry);
+    } catch (err) {
+      if (this.requirePermissionAuditChain) {
+        throw err;
+      }
+      log.warn(
+        "permission grant audit append failed for %s (%s): %s",
+        args.toolName,
+        args.grantLifetime,
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  }
 
   private async auditPermissionAsk(
     toolName: string,
