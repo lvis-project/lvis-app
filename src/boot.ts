@@ -39,6 +39,7 @@
  */
 import { app, powerMonitor } from "electron";
 import type { BrowserWindow } from "electron";
+import { BrowserWindow as BrowserWindowValue } from "electron";
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { adaptPowerMonitor } from "./main/idle-scheduler.js";
@@ -75,6 +76,7 @@ import { shell } from "electron";
 import { type AppServices, emitEvent, onEvent } from "./boot/types.js";
 import { PERMISSIONS, ROUTINES_V2 } from "./shared/ipc-channels.js";
 import { sendToWindow } from "./ipc/safe-send.js";
+import { broadcastPermissionConfigChanged as broadcastPermissionConfigChangedFromIpc } from "./ipc/domains/permissions.js";
 import { startWatcherTelemetryCollector } from "./boot/steps/watcher-telemetry-collector.js";
 import { bootstrapCoreServices } from "./boot/services.js";
 import { registerPluginNotifications } from "./boot/plugins.js";
@@ -579,6 +581,17 @@ export async function bootstrap(
     sendToWindow(getMainWindow(), PERMISSIONS.userApprovalHit, payload, log);
   });
 
+  // Round-4 fix: PermissionManager is the architectural choke point for
+  // every persisted rule mutation (addAlwaysAllowedPersist /
+  // addAlwaysDeniedPersist / removeRule). Wiring the broadcast here means
+  // executor-side dialog approvals (always allow / always deny), slash
+  // `/permission rules add|remove`, and the IPC addRule/removeRule
+  // handlers all reach multi-window PermissionsTab — without each
+  // call site re-implementing the wiring.
+  permissionManager.setBroadcastConfigChanged(() => {
+    broadcastPermissionConfigChangedFromIpc({ getMainWindow, getAppWindows: () => BrowserWindowValue.getAllWindows() } as Parameters<typeof broadcastPermissionConfigChangedFromIpc>[0]);
+  });
+
   // Manifest integrity proxy. Subscribes the audit logger so every read→write
   // violation lands in `~/.lvis/audit/` and pushes an IPC notification to the
   // renderer. Uses the live mainWindow getter so cross-restart UI keeps
@@ -740,6 +753,13 @@ export async function bootstrap(
     hookRunner,
     scriptHookManager,
     getAdditionalDirectories: () => readPermissionSettings().permissions.additionalDirectories,
+    // Round-3 fix: dialog-driven session-add grants must broadcast so
+    // multi-window PermissionsTab refreshes. Boot owns getMainWindow
+    // and forwards it to the broadcaster declared in the permissions
+    // IPC domain — no engine→ipc coupling, just a callback handed down.
+    broadcastPermissionConfigChanged: () => {
+      broadcastPermissionConfigChangedFromIpc({ getMainWindow, getAppWindows: () => BrowserWindowValue.getAllWindows() } as Parameters<typeof broadcastPermissionConfigChangedFromIpc>[0]);
+    },
     pluginRuntime,
     skillOverlay,
     notificationService,
