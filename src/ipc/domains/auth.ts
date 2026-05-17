@@ -30,10 +30,11 @@
  *   `error: "no-demo-key"` so the renderer can fall through to manual
  *   entry without silently appearing to succeed.
  */
-import { app, ipcMain } from "electron";
+import { ipcMain } from "electron";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import { isLLMVendor } from "../../shared/llm-vendor-defaults.js";
 import { createLogger } from "../../lib/logger.js";
+import { getIsPackaged } from "../../boot/dev-flags.js";
 import {
   getDemoCredentials,
   getDemoKey,
@@ -62,7 +63,7 @@ export function registerAuthHandlers(deps: IpcDeps): void {
   // login handler must not register unless `LVIS_DEMO_ENABLED=1` was set
   // at boot (captured pre-scrub). Dev builds always register so local
   // engineering still has the demo loop.
-  if (app.isPackaged && !isDemoEnabled()) {
+  if (getIsPackaged() && !isDemoEnabled()) {
     log.info("mockup login handler skipped (production build, LVIS_DEMO_ENABLED unset)");
     return;
   }
