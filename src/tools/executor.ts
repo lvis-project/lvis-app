@@ -31,6 +31,8 @@ import type {
   ToolTrustOrigin,
 } from "./types.js";
 import { trustFromSource } from "./types.js";
+import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
+import { runWithCeiling } from "./executor-ceiling.js";
 import type { PermissionManager, PermissionCheckResult } from "../permissions/permission-manager.js";
 import type { ApprovalGate, ApprovalMode } from "../permissions/approval-gate.js";
 import {
@@ -1717,8 +1719,27 @@ export class ToolExecutor {
       abortSignal,
     };
 
-    try {
-      const result = await tool.execute(finalInput, executionContext);
+    // Global ceiling via `runWithCeiling` helper — last-resort cap with a
+    // linked AbortController so the underlying tool work actually stops
+    // (tools that participate in `executionContext.abortSignal` propagate
+    // the cancellation). `agent_spawn` runs a full sub-agent loop and uses
+    // the larger `subAgentCeilingMs` instead of the per-tool cap.
+    const effectiveCeilingMs =
+      toolUse.name === "agent_spawn"
+        ? TOOL_TIMEOUT_POLICY.subAgentCeilingMs
+        : TOOL_TIMEOUT_POLICY.globalCeilingMs;
+    let terminationReason: "ok" | "ceiling" | "user-abort" | "error" = "ok";
+    const outcome = await runWithCeiling(
+      async (signal) => {
+        const ctx: ToolExecutionContext = { ...executionContext, abortSignal: signal };
+        return tool.execute(finalInput, ctx);
+      },
+      effectiveCeilingMs,
+      abortSignal,
+      toolUse.name,
+    );
+    if (outcome.ok) {
+      const result = outcome.value;
       content = result.output;
       isError = result.isError;
       // MCP Apps §3.2 — propagate uiPayload from tool metadata
@@ -1728,8 +1749,15 @@ export class ToolExecutor {
       if (Object.prototype.hasOwnProperty.call(result.metadata ?? {}, "rawResult")) {
         rawResult = result.metadata?.rawResult;
       }
-    } catch (err) {
-      content = err instanceof Error ? err.message : "알 수 없는 도구 실행 오류";
+      if (isError) terminationReason = "error";
+    } else {
+      terminationReason = outcome.reason;
+      content =
+        outcome.reason === "ceiling"
+          ? `tool execution exceeded global ceiling (${effectiveCeilingMs}ms): ${toolUse.name}`
+          : outcome.reason === "user-abort"
+            ? outcome.error.message || "도구 실행이 취소되었습니다"
+            : outcome.error.message || "알 수 없는 도구 실행 오류";
       isError = true;
     }
 
@@ -1809,7 +1837,7 @@ export class ToolExecutor {
       toolUse.name === "ask_user_question" && source === "builtin" && !isError
         ? redactAskUserAuditOutput(displayContent)
         : displayContent;
-    await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, auditContent, isError, startTime, permissionResult, rateResult.remaining, invocationPermissionContext, invocationCategory, executionCwd, targetFilePath);
+    await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, auditContent, isError, startTime, permissionResult, rateResult.remaining, invocationPermissionContext, invocationCategory, executionCwd, targetFilePath, terminationReason);
 
     return {
       tool_use_id: toolUse.id,
@@ -1931,6 +1959,7 @@ export class ToolExecutor {
     category?: ToolCategory,
     cwd?: string,
     auditDirectory?: string,
+    terminationReason?: "ok" | "ceiling" | "user-abort" | "error",
   ): Promise<void> {
     try {
       const inputText = JSON.stringify(input);
@@ -1950,6 +1979,7 @@ export class ToolExecutor {
           permissionDecision: permission?.deferred ? "deferred" : permission?.decision ?? "allow",
           permissionReason: permission?.reason,
           rateLimitRemaining,
+          ...(terminationReason ? { terminationReason } : {}),
         }],
       });
     } catch (err) {

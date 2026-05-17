@@ -109,8 +109,11 @@ interface McpToolCallResult {
 
 // ─── Constants ────────────────────────────────────────
 
+import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
+
 const MCP_PROTOCOL_VERSION = "2024-11-05";
-const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+const DEFAULT_REQUEST_TIMEOUT_MS = TOOL_TIMEOUT_POLICY.mcpRequestDefaultMs;
+const MAX_REQUEST_TIMEOUT_MS = TOOL_TIMEOUT_POLICY.mcpRequestMaxMs;
 const HANDSHAKE_TIMEOUT_MS = 10_000; // initialize / tools/list 핸드셰이크용
 const HEALTH_CHECK_INTERVAL_MS = 30_000;
 const MAX_BUFFERED_RESPONSES = 128;
@@ -145,7 +148,15 @@ interface PendingRequest {
   resolve: (value: unknown) => void;
   reject: (reason: Error) => void;
   timer: NodeJS.Timeout;
+  /** Per-chunk activity window — gets reset by `resetPendingTimers` when SSE
+   *  data flows so a long-running streaming response isn't killed mid-flight. */
   timeoutMs: number;
+  /** Absolute wall-clock deadline (`Date.now()` ms) computed at request
+   *  creation. Streaming activity reset cannot push the request past this
+   *  point — the per-chunk timer is clamped to `min(timeoutMs, deadlineMs -
+   *  now)` so a hostile server cannot trickle one byte every (timeoutMs-1)
+   *  to extend the request indefinitely. */
+  deadlineMs: number;
   method: string;
 }
 
@@ -286,7 +297,10 @@ export class McpClient {
     }
 
     const approval = this.governance.getApproval(this.config.id);
-    const timeoutMs = approval?.connectionTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+    const timeoutMs = Math.min(
+      approval?.connectionTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
+      MAX_REQUEST_TIMEOUT_MS,
+    );
 
     try {
       const result = await this.sendRequest<McpToolCallResult>(
@@ -380,7 +394,7 @@ export class McpClient {
       }
 
       const id = this.nextRequestId++;
-      const timeout = timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+      const timeout = Math.min(timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS, MAX_REQUEST_TIMEOUT_MS);
 
       const timer = setTimeout(() => {
         this.pendingRequests.delete(id);
@@ -392,6 +406,7 @@ export class McpClient {
         reject,
         timer,
         timeoutMs: timeout,
+        deadlineMs: Date.now() + timeout,
         method,
       });
 
@@ -501,19 +516,35 @@ export class McpClient {
    * Reset per-request timeout timers. Called by streaming transports on each
    * incoming chunk so that long-running SSE responses (e.g., a streaming
    * `tools/call`) aren't killed by the standard timeout while data is still
-   * flowing. Each timer gets a fresh `timeoutMs` window from "now".
+   * flowing.
+   *
+   * The new window is clamped by the request's absolute deadline (set at
+   * creation) — a hostile server cannot trickle one byte every
+   * (timeoutMs - 1) ms to extend the request beyond `MAX_REQUEST_TIMEOUT_MS`.
+   * When the deadline has already passed at chunk arrival, the request is
+   * rejected immediately.
    */
   private resetPendingTimers(): void {
+    const now = Date.now();
     for (const [id, pending] of this.pendingRequests) {
       clearTimeout(pending.timer);
       const method = pending.method;
       const timeoutMs = pending.timeoutMs;
+      const remaining = pending.deadlineMs - now;
+      if (remaining <= 0) {
+        this.pendingRequests.delete(id);
+        pending.reject(
+          new Error(`[mcp-client] 요청 절대 타임아웃 (${timeoutMs}ms): ${method}`),
+        );
+        continue;
+      }
+      const effectiveWindowMs = Math.min(timeoutMs, remaining);
       const newTimer = setTimeout(() => {
         this.pendingRequests.delete(id);
         pending.reject(
           new Error(`[mcp-client] 요청 타임아웃 (${timeoutMs}ms): ${method}`),
         );
-      }, timeoutMs);
+      }, effectiveWindowMs);
       pending.timer = newTimer;
     }
   }
