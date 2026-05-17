@@ -246,6 +246,14 @@ export interface ConversationLoopDeps {
   routeEngine: RouteEngine;
   toolRegistry: ToolRegistry;
   memoryManager: MemoryManager;
+  /**
+   * Notify all renderer windows that the directory config mutated.
+   * Wired by boot from `ipc/domains/permissions.ts`. Called by
+   * `addSessionAdditionalDirectory` so dialog-driven (executor-side)
+   * grants reach the PermissionsTab subscribers, not only slash-dispatch
+   * grants. Closes the round-3 architect Q5 / critic M1 / security Q6 gap.
+   */
+  broadcastPermissionConfigChanged?: () => void;
   permissionManager?: import("../permissions/permission-manager.js").PermissionManager;
   routineEngine?: RoutineEngine;
   /** Agent 5: turn 완료 시 idle scheduler에 대화 신호 전송 (§6.1) */
@@ -612,6 +620,11 @@ export class ConversationLoop {
   addSessionAdditionalDirectory(path: string): void {
     if (!this.sessionAdditionalDirectories.includes(path)) {
       this.sessionAdditionalDirectories.push(path);
+      // Round-3 fix: every callsite that mutates the session list must
+      // notify multi-window PermissionsTab subscribers. The slash-dispatch
+      // path also broadcasts (ipc/domains/permissions.ts) — this closes
+      // the executor-callback path that was previously silent.
+      this.deps.broadcastPermissionConfigChanged?.();
     }
   }
 
