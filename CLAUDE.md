@@ -238,6 +238,52 @@ LVIS 는 IPC layer 와 UI layer 의 i18n 책임을 분리한다.
 
 `src/ipc/domains/permissions.ts` 가 10+ 사이트에서 Korean error message 사용 (`"패턴은 문자열이어야 합니다."`, `"권한 매니저가 초기화되지 않았습니다."` 등). 같은 파일의 더 최근 추가 handler 들은 English 사용 (`"mode must be a string"`, `"durable mode command must require modal confirmation"`). 컨벤션 부재로 mixed surface. **Root cause**: layer 분리 미명시 → 작성자별 임의 선택. Fix: convention 명시 + sweep + UI mapper SOT (issue #830 - `formatIpcError`) 가 enforcement 보조.
 
+## UI Component Editing Discipline (REQUIRED)
+
+UI 컴포넌트 (settings / dialog / window / sidebar 류) 수정 시 다음 4가지 룰 지킬 것.
+
+### 1. SOT 검증 — edit 전 `grep -rn <ComponentName>` 1줄 필수
+
+수정 직전 컴포넌트 이름으로 import 그래프 trace:
+
+```bash
+grep -rn "<ComponentName>" src/ | head
+```
+
+결과가 wrapper-only / re-export 만이면 **SOT divergence 신호** — 진짜 consumer (BrowserWindow entry 또는 다른 dialog) 부터 찾아 그쪽 수정.
+
+### 2. shadcn primitive 확장 시 default override 명시
+
+`TabsList`, `DialogContent`, `Card` 등 shadcn primitive 를 default 방향과 **다르게** (vertical sidebar, transparent bg, borderless 등) 쓸 때:
+
+- `components/ui/<name>.tsx` 의 default className 한 번 확인
+- override 키워드 명시: `justify-*`, `items-*`, `flex-*`, `rounded-*`, `bg-*`
+- `cn()` 의 tailwind-merge 는 **conflicting utility** 만 병합. 명시 안 한 utility 는 primitive default 가 생존
+- 같은 변형을 2회 이상 쓰면 wrapper 만들어 재사용 (`<VerticalTabsList>` 등)
+
+### 3. Component naming convention
+
+- `*Window.tsx` — BrowserWindow entry only
+- `*Content.tsx` — body shared by Window + (옵션) in-app Dialog
+- `*Dialog.tsx` — **오직** in-app Dialog 한정. wrapper-only 금지
+- wrapper-only 파일 발견 시 즉시 collapse + 파일 rename
+
+### 4. 변경이 화면에 안 보일 때 — build cache 의심은 최후
+
+진단 우선순위:
+1. **SOT divergence** (위 #1) — 가장 자주 발생
+2. **Production import path 미스** — BrowserWindow vs in-app Dialog 같은 entry 분기
+3. **IPC / window routing** — 새 IPC handler 등록 / window message subscription 누락
+4. dev server reload 실패 (`tail -f` 로 확인)
+5. **최후의 최후로** build / chunk cache
+
+위 1~4 다 검증 안 한 채 build cache 핑계로 rebuild 반복 금지. 사용자 명시 룰: **"코드 패치인데 빌드가 꼬일 일이 뭐가 있어, 처음부터 올바르게 하자."**
+
+### 위반 사례 (2026-05-17 PR #890 — settings UI redesign)
+
+- `SettingsDialog.tsx` 수정했으나 production path 는 `SettingsWindow → SettingsContent`. 변경 안 보여 build cache 의심으로 3-4 round 손실. 첫 grep 1줄이면 즉시 발견됐을 사고. → 이후 SOT collapse + 파일 rename 으로 영구 해소.
+- `TabsList` 가 vertical sidebar 인데 primitive default `justify-center` 가 override 없이 생존 → 모든 trigger 가 vertical 중앙 정렬 → 사이드바 ~수백px 빈공간. Fix: `justify-start rounded-none bg-transparent` 명시.
+
 ## Build
 
 This repo uses **bun** as the default package manager + script runner.
