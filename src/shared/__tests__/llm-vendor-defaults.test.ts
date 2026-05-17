@@ -45,20 +45,17 @@ describe("isLLMVendor", () => {
   });
 });
 
-describe("LLMVendorSettings authMode default (#893)", () => {
-  it("every vendor's default block carries `authMode: \"manual\"`", () => {
+describe("LLMVendorSettings — #893 top-level authMode promotion", () => {
+  it("no vendor's default block carries an `authMode` field (promoted top-level)", () => {
     for (const v of LLM_VENDORS) {
-      expect(LLM_VENDOR_DEFAULTS[v].authMode).toBe("manual");
+      expect("authMode" in LLM_VENDOR_DEFAULTS[v]).toBe(false);
     }
   });
 
-  it("freshVendorBlocks() returns mutable copies that retain the manual default", () => {
+  it("freshVendorBlocks() returns mutable copies without authMode", () => {
     const blocks = freshVendorBlocks();
     for (const v of LLM_VENDORS) {
-      expect(blocks[v].authMode).toBe("manual");
+      expect("authMode" in blocks[v]).toBe(false);
     }
-    // Mutating a returned block must not poison the frozen defaults.
-    blocks.claude.authMode = "login";
-    expect(LLM_VENDOR_DEFAULTS.claude.authMode).toBe("manual");
   });
 });

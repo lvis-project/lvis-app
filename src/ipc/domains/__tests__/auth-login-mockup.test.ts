@@ -41,6 +41,7 @@ function makeDeps() {
   return {
     settingsService: {
       setSecret: vi.fn(async () => undefined),
+      patch: vi.fn(async () => undefined),
     },
     auditLogger: { log: vi.fn() },
     refreshActiveLlmWildcard: vi.fn(),
@@ -71,21 +72,7 @@ async function loadAuthModule() {
   return await import("../auth.js");
 }
 
-describe("auth:login-mockup IPC handler (#893)", () => {
-  it("rejects unknown vendors with invalid-vendor", async () => {
-    const deps = makeDeps();
-    const { registerAuthHandlers } = await loadAuthModule();
-    registerAuthHandlers(deps as never);
-
-    const result = await invoke("lvis:auth:login-mockup", {
-      username: "demo",
-      password: "demo123",
-      vendor: "not-a-vendor",
-    });
-    expect(result).toEqual({ ok: false, error: "invalid-vendor" });
-    expect(deps.settingsService.setSecret).not.toHaveBeenCalled();
-  });
-
+describe("auth:login-mockup IPC handler (#893 top-level)", () => {
   it("rejects bad credentials with invalid-credentials and audits the failure", async () => {
     const deps = makeDeps();
     const { registerAuthHandlers } = await loadAuthModule();
@@ -94,15 +81,15 @@ describe("auth:login-mockup IPC handler (#893)", () => {
     const result = await invoke("lvis:auth:login-mockup", {
       username: "demo",
       password: "wrong",
-      vendor: "openai",
     });
     expect(result).toEqual({ ok: false, error: "invalid-credentials" });
     expect(deps.auditLogger.log).toHaveBeenCalled();
     expect(deps.settingsService.setSecret).not.toHaveBeenCalled();
   });
 
-  it("returns no-demo-key when the per-vendor env var is missing", async () => {
+  it("returns no-demo-key when the active vendor's env var is missing", async () => {
     delete process.env.LVIS_DEMO_KEY_OPENAI;
+    // LVIS_DEMO_VENDOR defaults to "openai" — apiKey env is absent → no-demo-key.
     const deps = makeDeps();
     const { registerAuthHandlers } = await loadAuthModule();
     registerAuthHandlers(deps as never);
@@ -110,13 +97,12 @@ describe("auth:login-mockup IPC handler (#893)", () => {
     const result = await invoke("lvis:auth:login-mockup", {
       username: "demo",
       password: "demo123",
-      vendor: "openai",
     });
     expect(result).toEqual({ ok: false, error: "no-demo-key" });
     expect(deps.settingsService.setSecret).not.toHaveBeenCalled();
   });
 
-  it("persists the demo key under llm.apiKey.<vendor> on success", async () => {
+  it("uses LVIS_DEMO_VENDOR to pick the active vendor (default openai)", async () => {
     process.env.LVIS_DEMO_KEY_OPENAI = "sk-demo-test";
     const deps = makeDeps();
     const { registerAuthHandlers } = await loadAuthModule();
@@ -125,7 +111,6 @@ describe("auth:login-mockup IPC handler (#893)", () => {
     const result = await invoke("lvis:auth:login-mockup", {
       username: "demo",
       password: "demo123",
-      vendor: "openai",
     });
     expect(result).toMatchObject({ ok: true, vendor: "openai" });
     expect(deps.settingsService.setSecret).toHaveBeenCalledWith(
@@ -135,9 +120,28 @@ describe("auth:login-mockup IPC handler (#893)", () => {
     expect(deps.refreshActiveLlmWildcard).toHaveBeenCalled();
   });
 
+  it("flips top-level llm.authMode and llm.provider in the settings patch", async () => {
+    process.env.LVIS_DEMO_VENDOR = "claude";
+    process.env.LVIS_DEMO_KEY_CLAUDE = "sk-ant-demo";
+    const deps = makeDeps();
+    const { registerAuthHandlers } = await loadAuthModule();
+    registerAuthHandlers(deps as never);
+
+    const result = await invoke("lvis:auth:login-mockup", {
+      username: "demo",
+      password: "demo123",
+    });
+    expect(result).toMatchObject({ ok: true, vendor: "claude" });
+    expect(deps.settingsService.patch).toHaveBeenCalled();
+    const patchArg = deps.settingsService.patch.mock.calls[0][0];
+    expect(patchArg.llm.authMode).toBe("login");
+    expect(patchArg.llm.provider).toBe("claude");
+  });
+
   it("honours LVIS_DEMO_USER / LVIS_DEMO_PASS env overrides", async () => {
     process.env.LVIS_DEMO_USER = "alice";
     process.env.LVIS_DEMO_PASS = "secret";
+    process.env.LVIS_DEMO_VENDOR = "claude";
     process.env.LVIS_DEMO_KEY_CLAUDE = "sk-ant-demo";
     const deps = makeDeps();
     const { registerAuthHandlers } = await loadAuthModule();
@@ -146,14 +150,12 @@ describe("auth:login-mockup IPC handler (#893)", () => {
     const denied = await invoke("lvis:auth:login-mockup", {
       username: "demo",
       password: "demo123",
-      vendor: "claude",
     });
     expect(denied).toEqual({ ok: false, error: "invalid-credentials" });
 
     const ok = await invoke("lvis:auth:login-mockup", {
       username: "alice",
       password: "secret",
-      vendor: "claude",
     });
     expect(ok).toMatchObject({ ok: true, vendor: "claude" });
     expect(deps.settingsService.setSecret).toHaveBeenCalledWith(
@@ -163,6 +165,7 @@ describe("auth:login-mockup IPC handler (#893)", () => {
   });
 
   it("maps kebab-case vendor ids to underscored env-var suffixes", async () => {
+    process.env.LVIS_DEMO_VENDOR = "azure-foundry";
     process.env.LVIS_DEMO_KEY_AZURE_FOUNDRY = "sk-azure-demo";
     const deps = makeDeps();
     const { registerAuthHandlers, demoKeyEnvVar } = await loadAuthModule();
@@ -172,7 +175,6 @@ describe("auth:login-mockup IPC handler (#893)", () => {
     const result = await invoke("lvis:auth:login-mockup", {
       username: "demo",
       password: "demo123",
-      vendor: "azure-foundry",
     });
     expect(result).toMatchObject({ ok: true, vendor: "azure-foundry" });
     expect(deps.settingsService.setSecret).toHaveBeenCalledWith(
@@ -204,7 +206,6 @@ describe("auth:login-mockup IPC handler (#893)", () => {
     const result = await invoke("lvis:auth:login-mockup", {
       username: "demo",
       password: "demo123",
-      vendor: "openai",
     });
     expect(result).toMatchObject({ ok: true, vendor: "openai" });
   });
@@ -230,7 +231,6 @@ describe("auth:login-mockup IPC handler (#893)", () => {
     await invoke("lvis:auth:login-mockup", {
       username: "demo",
       password: "demo123",
-      vendor: "openai",
     });
 
     const calls = deps.auditLogger.log.mock.calls;
