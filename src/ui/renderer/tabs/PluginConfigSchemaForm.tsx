@@ -26,15 +26,13 @@
  * field is rendered as a read-only display so the user is not silently
  * locked out of declared settings.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../../../components/ui/button.js";
 import { Checkbox } from "../../../components/ui/checkbox.js";
 import { Input } from "../../../components/ui/input.js";
 import { Label } from "../../../components/ui/label.js";
 import { NativeSelect, NativeSelectOption } from "../../../components/ui/native-select.js";
 import type { PluginConfigSchemaPropertySummary, PluginConfigSchemaSummary } from "../types.js";
-import { useDebouncedSave } from "../hooks/use-debounced-save.js";
-
 export type PluginConfigFormValues = Record<string, unknown>;
 
 export interface PluginConfigSchemaFormProps {
@@ -47,9 +45,6 @@ export interface PluginConfigSchemaFormProps {
   onSave: (values: PluginConfigFormValues) => Promise<void> | void;
   onSetSecret: (key: string, value: string) => Promise<void> | void;
 }
-
-/** Debounce window for immediate-apply controls (toggle / enum select). */
-const IMMEDIATE_SAVE_DEBOUNCE_MS = 200;
 
 function deriveLabel(key: string, prop: PluginConfigSchemaPropertySummary): string {
   return prop.title?.trim() || key;
@@ -109,15 +104,40 @@ export function PluginConfigSchemaForm({
   const properties = schema.properties ?? {};
   const propertyKeys = useMemo(() => Object.keys(properties), [properties]);
   const [draft, setDraft] = useState<PluginConfigFormValues>(() => ({ ...values }));
-  // Re-sync draft when `values` reference changes — the parent's saved-config
-  // fetch is async and resolves AFTER this form first mounts, so the lazy
-  // `useState` initializer runs against an empty `values` and locks the form
-  // into a blank state. PluginConfigTab memoizes `values` on
-  // [selectedPlugin, savedConfig], so this only fires on plugin switch or
-  // post-save refresh — not on every keystroke.
+  // Resync rule:
+  //  - On plugin SWITCH (pluginId changed): hard reset draft to the new
+  //    plugin's saved values + clear secret drafts. Drafts from a previous
+  //    plugin must not bleed into the next one.
+  //  - On values CHANGE (same plugin — e.g. after a per-field save commits
+  //    or a cross-window broadcast arrives): merge in the new saved values
+  //    BUT preserve any field the user has typed-but-not-yet-saved. Without
+  //    this preservation, saving field A would re-fire this effect with the
+  //    parent's updated `values` and clobber the unsaved drafts of B / C /…
+  //    causing silent data loss (per-field save's whole point is per-field).
+  const prevPluginIdRef = useRef(pluginId);
   useEffect(() => {
-    setDraft({ ...values });
-  }, [values]);
+    if (prevPluginIdRef.current !== pluginId) {
+      setDraft({ ...values });
+      setSecretDrafts({});
+      prevPluginIdRef.current = pluginId;
+      return;
+    }
+    setDraft((prev) => {
+      const next = { ...values };
+      for (const key of propertyKeys) {
+        const prop = properties[key];
+        if (prop.type === "string" && prop.format === "secret") continue;
+        if (prev[key] === undefined) continue;
+        const draftV = prev[key];
+        const savedV = values[key];
+        const dirty = Array.isArray(draftV) && Array.isArray(savedV)
+          ? JSON.stringify(draftV) !== JSON.stringify(savedV)
+          : draftV !== savedV;
+        if (dirty) next[key] = draftV;
+      }
+      return next;
+    });
+  }, [pluginId, values, propertyKeys, properties]);
   const [secretDrafts, setSecretDrafts] = useState<Record<string, string>>({});
   /** Per-key saving indicator — drives the inline Save button's loading state
    *  on text / number / array / secret fields. Toggle / enum auto-save uses
@@ -125,41 +145,38 @@ export function PluginConfigSchemaForm({
   const [fieldSaving, setFieldSaving] = useState<Record<string, boolean>>({});
   const required = new Set(schema.required ?? []);
 
-  // Build the full cleartext payload with `nextValue` substituted for `nextKey`.
-  // Secrets are stripped (they go through `onSetSecret` separately). Empty
-  // strings + undefined are dropped so `default` falls back at read time.
-  const buildPayload = useCallback(
+  // Build a single-key cleartext payload — uses `values` (the saved baseline)
+  // for every key EXCEPT `nextKey`, which takes `nextValue`. This is critical:
+  // building from `draft` would side-effect-persist other dirty text fields
+  // when the user clicks Save on just one — silently committing values the
+  // user never confirmed. Secrets are stripped (separate IPC), empty/undefined
+  // dropped so `default` falls back at read time.
+  const buildSingleKeyPayload = useCallback(
     (nextKey: string, nextValue: unknown): PluginConfigFormValues => {
       const out: PluginConfigFormValues = {};
-      const source = { ...draft, [nextKey]: nextValue };
       for (const key of propertyKeys) {
         const prop = properties[key];
         if (prop.type === "string" && prop.format === "secret") continue;
-        const v = source[key];
+        const v = key === nextKey ? nextValue : values[key];
         if (v === undefined || v === "") continue;
         out[key] = v;
       }
       return out;
     },
-    [draft, properties, propertyKeys],
+    [properties, propertyKeys, values],
   );
 
-  // Auto-save for toggle/enum only (immediate-apply controls). Debounced
-  // so rapid bursts collapse into one plugin restart.
-  const autoSave = useDebouncedSave(
-    () => {
-      void onSave(buildPayload("", undefined));
-    },
-    IMMEDIATE_SAVE_DEBOUNCE_MS,
-  );
-
-  /** Toggle/enum — set draft + schedule debounced auto-save. */
+  // Toggle/enum auto-save — fires onSave immediately for the changed key
+  // only. The previous debounced full-draft save was retired because it
+  // also caused cross-field bleed (same root cause as buildSingleKeyPayload).
+  // Toggle/enum interactions are typically one click at a time, so the
+  // 200ms debounce is unnecessary; remove it to keep semantics clean.
   const updateImmediate = useCallback(
     (key: string, value: unknown) => {
       setDraft((prev) => ({ ...prev, [key]: value }));
-      autoSave.schedule();
+      void onSave(buildSingleKeyPayload(key, value));
     },
-    [autoSave],
+    [buildSingleKeyPayload, onSave],
   );
 
   /** Text/number/array — set draft only; explicit per-field Save button persists. */
@@ -167,18 +184,22 @@ export function PluginConfigSchemaForm({
     setDraft((prev) => ({ ...prev, [key]: value }));
   }, []);
 
-  /** Per-field cleartext save — text/number/array. */
+  /** Per-field cleartext save — text/number/array. Only this field's value
+   *  is committed; other dirty drafts stay in local state (not persisted).
+   *  Errors are owned by the parent's onSave (which already surfaces a
+   *  toast); we only ensure the saving indicator clears on either path. */
   const saveField = useCallback(
     async (key: string) => {
-      autoSave.cancel();
       setFieldSaving((p) => ({ ...p, [key]: true }));
       try {
-        await onSave(buildPayload(key, draft[key]));
+        await onSave(buildSingleKeyPayload(key, draft[key]));
+      } catch {
+        // Parent shows a banner; nothing more to do here.
       } finally {
         setFieldSaving((p) => ({ ...p, [key]: false }));
       }
     },
-    [autoSave, buildPayload, draft, onSave],
+    [buildSingleKeyPayload, draft, onSave],
   );
 
   /** Per-field secret save — text/password input, routes to keychain. */
@@ -189,6 +210,8 @@ export function PluginConfigSchemaForm({
       try {
         await onSetSecret(key, value);
         setSecretDrafts((p) => ({ ...p, [key]: "" }));
+      } catch {
+        // Parent shows a banner; preserve the draft so the user can retry.
       } finally {
         setFieldSaving((p) => ({ ...p, [key]: false }));
       }
