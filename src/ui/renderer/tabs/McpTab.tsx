@@ -11,6 +11,7 @@ import { Textarea } from "../../../components/ui/textarea.js";
 import type { McpServerConfig, McpServerConfigDto, McpServerState } from "../types.js";
 import { LONG_TOAST_TTL_MS } from "../constants.js";
 import { useNotifySaved } from "../contexts/saved-toast.js";
+import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
 
 // ─── Helper types re-exported from renderer/types.ts ─
 // McpServerConfig / McpServerState 는 window.lvis.mcp 의 반환 타입
@@ -186,10 +187,9 @@ export function McpTab() {
   const showBanner = useCallback((type: "error" | "success", msg: string) => {
     if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current);
     setBanner({ type, msg });
-    bannerTimerRef.current = setTimeout(() => setBanner(null), LONG_TOAST_TTL_MS); // MCP status messages need longer read time
+    bannerTimerRef.current = setTimeout(() => setBanner(null), LONG_TOAST_TTL_MS);
   }, []);
 
-  // 언마운트 시 타이머 정리 — 언마운트 후 setBanner 호출 방지
   useEffect(() => {
     return () => {
       if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current);
@@ -287,8 +287,6 @@ export function McpTab() {
           ? `${credentialTargetId} API Key가 저장되고 연결되었습니다.`
           : `${credentialTargetId} API Key는 저장되었지만 연결 실패: ${result.warning ?? "원인 불명"}`,
       );
-      // Save itself succeeded — the connection-failure branch above is a
-      // post-save warning, not a save failure. Toast either way.
       notifySaved();
     } catch (e) {
       showBanner("error", e instanceof Error ? e.message : String(e));
@@ -309,7 +307,6 @@ export function McpTab() {
       return;
     }
 
-    // Validate auth / apiKey combination before building the config payload.
     const authError = validateAuthApiKey(form.auth, form.apiKey);
     if (authError) { showBanner("error", authError); return; }
 
@@ -318,7 +315,6 @@ export function McpTab() {
       const shared = {
         id: form.id.trim(),
         ...(form.auth !== "none" ? { auth: form.auth } : {}),
-        // Only persist apiKey when the auth mode actually uses it.
         ...(form.auth === "api-key" ? { apiKey: form.apiKey.trim() } : {}),
       };
 
@@ -364,8 +360,6 @@ export function McpTab() {
           ? `${config.id} 서버가 추가되고 연결되었습니다.`
           : `${config.id} 서버 설정은 저장되었지만 연결 실패: ${result.warning ?? "원인 불명"}`,
       );
-      // addConfig persisted the entry — connection failure is a separate
-      // post-save warning, not a save failure. Toast either way.
       notifySaved();
       void fetchAll();
     } catch (e) {
@@ -385,352 +379,359 @@ export function McpTab() {
   const getConfig = (id: string) => configs.find((c) => c.id === id);
 
   return (
-    <div className="flex flex-col h-full gap-4">
-      {/* 배너 */}
-      {banner && (
-        <div
-          className={`rounded-md px-3 py-2 text-sm ${
-            banner.type === "error" ? "bg-destructive/15 text-destructive" : "bg-success/15 text-success"
-          }`}
-        >
-          {banner.msg}
-        </div>
-      )}
+    <div className="space-y-5">
+      <SettingsPageHeader
+        title="MCP 서버"
+        description="MCP 서버 구성과 도구 노출을 관리합니다"
+      />
 
-      {/* 에러 */}
-      {error && (
-        <div className="rounded-md bg-destructive/15 px-3 py-2 text-sm text-destructive">{error}</div>
-      )}
+      <div className="flex flex-col gap-4">
+        {/* 배너 */}
+        {banner && (
+          <div
+            className={`rounded-md px-3 py-2 text-sm ${
+              banner.type === "error" ? "bg-destructive/15 text-destructive" : "bg-success/15 text-success"
+            }`}
+          >
+            {banner.msg}
+          </div>
+        )}
 
-      {/* ── Section A: 서버 목록 ────────────────────── */}
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-foreground">MCP 서버</h3>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => void fetchAll()} disabled={loading}>
-            새로고침
-          </Button>
-          <Button size="sm" onClick={() => setShowForm((v) => !v)}>
-            {showForm ? "취소" : "+ 서버 추가"}
-          </Button>
-        </div>
-      </div>
+        {/* 에러 */}
+        {error && (
+          <div className="rounded-md bg-destructive/15 px-3 py-2 text-sm text-destructive">{error}</div>
+        )}
 
-      {loading ? (
-        <p className="text-xs text-muted-foreground">로딩 중…</p>
-      ) : allIds.size === 0 ? (
-        <div className="rounded-md border border-dashed p-4 text-center text-xs text-muted-foreground">
-          등록된 MCP 서버가 없습니다.
-          <br />
-          <span className="text-xs">
-            설정 파일: <code>{configPath}</code>
-          </span>
+        {/* ── Section A: 서버 목록 ────────────────────── */}
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-foreground">MCP 서버</h3>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => void fetchAll()} disabled={loading}>
+              새로고침
+            </Button>
+            <Button size="sm" onClick={() => setShowForm((v) => !v)}>
+              {showForm ? "취소" : "+ 서버 추가"}
+            </Button>
+          </div>
         </div>
-      ) : (
-        <ScrollArea className="flex-1 min-h-0">
-          <div className="space-y-2 pr-2">
-            {Array.from(allIds).map((id) => {
-              const st = getState(id);
-              const cfg = getConfig(id);
-              const status = st?.status ?? "disconnected";
-              return (
-                <div key={id} className="rounded-md border bg-card p-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono text-xs font-semibold truncate">{id}</span>
-                        <Badge className={`text-[10px] px-1.5 py-0 ${STATUS_BADGE[status]}`}>
-                          {STATUS_LABEL[status]}
-                        </Badge>
-                        {cfg && (
-                          <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-                            {cfg.transport}
+
+        {loading ? (
+          <p className="text-xs text-muted-foreground">로딩 중…</p>
+        ) : allIds.size === 0 ? (
+          <div className="rounded-md border border-dashed p-4 text-center text-xs text-muted-foreground">
+            등록된 MCP 서버가 없습니다.
+            <br />
+            <span className="text-xs">
+              설정 파일: <code>{configPath}</code>
+            </span>
+          </div>
+        ) : (
+          <ScrollArea className="flex-1 min-h-0">
+            <div className="space-y-2 pr-2">
+              {Array.from(allIds).map((id) => {
+                const st = getState(id);
+                const cfg = getConfig(id);
+                const status = st?.status ?? "disconnected";
+                return (
+                  <div key={id} className="rounded-md border bg-card p-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-xs font-semibold truncate">{id}</span>
+                          <Badge className={`text-[10px] px-1.5 py-0 ${STATUS_BADGE[status]}`}>
+                            {STATUS_LABEL[status]}
                           </Badge>
+                          {cfg && (
+                            <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                              {cfg.transport}
+                            </Badge>
+                          )}
+                          {cfg?.auth && (
+                            <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                              auth:{cfg.auth}
+                            </Badge>
+                          )}
+                        </div>
+                        {st?.registeredTools.length ? (
+                          <p className="mt-1 text-[11px] text-muted-foreground">
+                            도구: {st.registeredTools.join(", ")}
+                          </p>
+                        ) : null}
+                        {st?.lastError && (
+                          <p className="mt-1 text-[11px] text-destructive truncate">{st.lastError}</p>
                         )}
-                        {cfg?.auth && (
-                          <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-                            auth:{cfg.auth}
-                          </Badge>
+                        {st?.connectedAt && (
+                          <p className="mt-0.5 text-[10px] text-muted-foreground">
+                            연결: {new Date(st.connectedAt).toLocaleString()}
+                          </p>
+                        )}
+                        {cfg?.transport === "stdio" && cfg.command && (
+                          <p className="mt-0.5 text-[10px] text-muted-foreground font-mono truncate">
+                            실행: {cfg.command}
+                          </p>
+                        )}
+                        {cfg?.transport === "http" && cfg.url && (
+                          <p className="mt-0.5 text-[10px] text-muted-foreground font-mono truncate">
+                            URL: {cfg.url}
+                          </p>
                         )}
                       </div>
-                      {st?.registeredTools.length ? (
-                        <p className="mt-1 text-[11px] text-muted-foreground">
-                          도구: {st.registeredTools.join(", ")}
-                        </p>
-                      ) : null}
-                      {st?.lastError && (
-                        <p className="mt-1 text-[11px] text-destructive truncate">{st.lastError}</p>
-                      )}
-                      {st?.connectedAt && (
-                        <p className="mt-0.5 text-[10px] text-muted-foreground">
-                          연결: {new Date(st.connectedAt).toLocaleString()}
-                        </p>
-                      )}
-                      {cfg?.transport === "stdio" && cfg.command && (
-                        <p className="mt-0.5 text-[10px] text-muted-foreground font-mono truncate">
-                          실행: {cfg.command}
-                        </p>
-                      )}
-                      {cfg?.transport === "http" && cfg.url && (
-                        <p className="mt-0.5 text-[10px] text-muted-foreground font-mono truncate">
-                          URL: {cfg.url}
-                        </p>
-                      )}
-                    </div>
-                    <div className="flex gap-1.5 shrink-0">
-                      {cfg?.auth === "api-key" && (
+                      <div className="flex gap-1.5 shrink-0">
+                        {cfg?.auth === "api-key" && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-6 text-xs px-2"
+                            onClick={() => {
+                              setCredentialTargetId((current) => (current === id ? null : id));
+                              setCredentialApiKey("");
+                            }}
+                          >
+                            키 설정
+                          </Button>
+                        )}
+                        {status === "connected" && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-6 text-xs px-2 text-warning border-warning/40"
+                            onClick={() => void handleKill(id)}
+                          >
+                            킬
+                          </Button>
+                        )}
                         <Button
                           variant="outline"
                           size="sm"
-                          className="h-6 text-xs px-2"
-                          onClick={() => {
-                            setCredentialTargetId((current) => (current === id ? null : id));
-                            setCredentialApiKey("");
-                          }}
+                          className="h-6 text-xs px-2 text-destructive border-destructive/40"
+                          disabled={loading || removingId !== null}
+                          onClick={() => void handleRemove(id)}
                         >
-                          키 설정
+                          제거
                         </Button>
-                      )}
-                      {status === "connected" && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-6 text-xs px-2 text-warning border-warning/40"
-                          onClick={() => void handleKill(id)}
-                        >
-                          킬
-                        </Button>
-                      )}
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-6 text-xs px-2 text-destructive border-destructive/40"
-                        disabled={loading || removingId !== null}
-                        onClick={() => void handleRemove(id)}
-                      >
-                        제거
-                      </Button>
+                      </div>
                     </div>
+                    {credentialTargetId === id && (
+                      <div className="mt-3 flex items-end gap-2 border-t pt-3">
+                        <div className="min-w-0 flex-1 space-y-1">
+                          <Label htmlFor={`${id}-api-key-update`} className="text-xs">
+                            API Key (write-only)
+                          </Label>
+                          <Input
+                            id={`${id}-api-key-update`}
+                            type="password"
+                            className="h-7 text-xs font-mono"
+                            placeholder={
+                              cfg?.transport === "stdio" && cfg.apiKeyEnv
+                                ? `${cfg.apiKeyEnv}=...`
+                                : cfg?.transport === "http" && cfg.apiKeyHeader
+                                  ? `${cfg.apiKeyHeader}: ...`
+                                  : "API key"
+                            }
+                            value={credentialApiKey}
+                            onChange={(event) => setCredentialApiKey(event.target.value)}
+                          />
+                        </div>
+                        <Button
+                          size="sm"
+                          className="h-7 px-2 text-xs"
+                          disabled={credentialBusy}
+                          onClick={() => void handleSetApiKey()}
+                        >
+                          저장
+                        </Button>
+                      </div>
+                    )}
                   </div>
-                  {credentialTargetId === id && (
-                    <div className="mt-3 flex items-end gap-2 border-t pt-3">
-                      <div className="min-w-0 flex-1 space-y-1">
-                        <Label htmlFor={`${id}-api-key-update`} className="text-xs">
-                          API Key (write-only)
-                        </Label>
-                        <Input
-                          id={`${id}-api-key-update`}
-                          type="password"
-                          className="h-7 text-xs font-mono"
-                          placeholder={
-                            cfg?.transport === "stdio" && cfg.apiKeyEnv
-                              ? `${cfg.apiKeyEnv}=...`
-                              : cfg?.transport === "http" && cfg.apiKeyHeader
-                                ? `${cfg.apiKeyHeader}: ...`
-                                : "API key"
-                          }
-                          value={credentialApiKey}
-                          onChange={(event) => setCredentialApiKey(event.target.value)}
-                        />
-                      </div>
-                      <Button
-                        size="sm"
-                        className="h-7 px-2 text-xs"
-                        disabled={credentialBusy}
-                        onClick={() => void handleSetApiKey()}
-                      >
-                        저장
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </ScrollArea>
-      )}
-
-      {/* ── Section B: 서버 추가 폼 ─────────────────── */}
-      {showForm && (
-        <>
-          <Separator />
-          <div className="space-y-3 rounded-md border bg-muted/40 p-4">
-            <h4 className="text-xs font-semibold text-foreground">새 MCP 서버 추가</h4>
-
-            <div className="grid grid-cols-2 gap-3">
-              {/* ID */}
-              <div className="space-y-1">
-                <Label htmlFor={formIds.id} className="text-xs">
-                  서버 ID *
-                </Label>
-                <Input
-                  id={formIds.id}
-                  className="h-7 text-xs"
-                  placeholder="my-mcp-server"
-                  value={form.id}
-                  onChange={(e) => setForm((f) => ({ ...f, id: e.target.value }))}
-                />
-              </div>
-
-              {/* Transport */}
-              <div className="space-y-1">
-                <Label htmlFor={formIds.transport} className="text-xs">
-                  Transport *
-                </Label>
-                <NativeSelect
-                  id={formIds.transport}
-                  size="sm"
-                  className="w-full"
-                  value={form.transport}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, transport: e.target.value as Transport }))
-                  }
-                >
-                  <NativeSelectOption value="stdio">stdio (로컬 프로세스)</NativeSelectOption>
-                  <NativeSelectOption value="http">http (원격 서버)</NativeSelectOption>
-                </NativeSelect>
-              </div>
+                );
+              })}
             </div>
+          </ScrollArea>
+        )}
 
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <Label htmlFor={formIds.auth} className="text-xs">
-                  Auth
-                </Label>
-                <NativeSelect
-                  id={formIds.auth}
-                  size="sm"
-                  className="w-full"
-                  value={form.auth}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, auth: e.target.value as typeof EMPTY_FORM.auth }))
-                  }
-                >
-                  <NativeSelectOption value="none">없음</NativeSelectOption>
-                  <NativeSelectOption value="sso">SSO</NativeSelectOption>
-                  <NativeSelectOption value="api-key">API Key</NativeSelectOption>
-                </NativeSelect>
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor={formIds.apiKey} className="text-xs">
-                  API Key (write-only)
-                </Label>
-                <Input
-                  id={formIds.apiKey}
-                  type="password"
-                  className="h-7 text-xs font-mono"
-                  placeholder="sk-..."
-                  value={form.apiKey}
-                  onChange={(e) => setForm((f) => ({ ...f, apiKey: e.target.value }))}
-                />
-              </div>
-            </div>
+        {/* ── Section B: 서버 추가 폼 ─────────────────── */}
+        {showForm && (
+          <>
+            <Separator />
+            <div className="space-y-3 rounded-md border bg-muted/40 p-4">
+              <h4 className="text-xs font-semibold text-foreground">새 MCP 서버 추가</h4>
 
-            {form.transport === "stdio" ? (
-              <>
+              <div className="grid grid-cols-2 gap-3">
+                {/* ID */}
                 <div className="space-y-1">
-                  <Label htmlFor={formIds.command} className="text-xs">
-                    Command *
+                  <Label htmlFor={formIds.id} className="text-xs">
+                    서버 ID *
                   </Label>
                   <Input
-                    id={formIds.command}
-                    className="h-7 text-xs font-mono"
-                    placeholder="uvx my-mcp-server"
-                    value={form.command}
-                    onChange={(e) => setForm((f) => ({ ...f, command: e.target.value }))}
+                    id={formIds.id}
+                    className="h-7 text-xs"
+                    placeholder="my-mcp-server"
+                    value={form.id}
+                    onChange={(e) => setForm((f) => ({ ...f, id: e.target.value }))}
                   />
-                  <p className="text-[10px] text-muted-foreground">
-                    실행 파일만 입력하거나 전체 명령줄을 입력해도 자동 분리됩니다.
-                  </p>
                 </div>
+
+                {/* Transport */}
                 <div className="space-y-1">
-                  <Label htmlFor={formIds.args} className="text-xs">
-                    Args (추가 인자)
+                  <Label htmlFor={formIds.transport} className="text-xs">
+                    Transport *
                   </Label>
-                  <Input
-                    id={formIds.args}
-                    className="h-7 text-xs font-mono"
-                    placeholder="--port 3000 --profile 'team alpha'"
-                    value={form.args}
-                    onChange={(e) => setForm((f) => ({ ...f, args: e.target.value }))}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor={formIds.env} className="text-xs">
-                    Env (KEY=value, write-only)
-                  </Label>
-                  <Textarea
-                    id={formIds.env}
-                    className="min-h-[88px] text-xs font-mono"
-                    placeholder={"OPENAI_API_KEY=...\nMCP_PROFILE=team-alpha"}
-                    value={form.env}
-                    onChange={(e) => setForm((f) => ({ ...f, env: e.target.value }))}
-                  />
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="space-y-1">
-                  <Label htmlFor={formIds.url} className="text-xs">
-                    URL *
-                  </Label>
-                  <Input
-                    id={formIds.url}
-                    className="h-7 text-xs font-mono"
-                    placeholder="https://example.com/mcp"
-                    value={form.url}
-                    onChange={(e) => setForm((f) => ({ ...f, url: e.target.value }))}
-                  />
-                </div>
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id={formIds.allowPrivateNetworks}
-                    checked={form.allowPrivateNetworks}
-                    onCheckedChange={(checked) =>
-                      setForm((f) => ({ ...f, allowPrivateNetworks: checked === true }))
+                  <NativeSelect
+                    id={formIds.transport}
+                    size="sm"
+                    className="w-full"
+                    value={form.transport}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, transport: e.target.value as Transport }))
                     }
-                    className="size-3.5"
-                  />
-                  <Label htmlFor={formIds.allowPrivateNetworks} className="text-xs">
-                    사설 네트워크 허용 (localhost/로컬 네트워크)
+                  >
+                    <NativeSelectOption value="stdio">stdio (로컬 프로세스)</NativeSelectOption>
+                    <NativeSelectOption value="http">http (원격 서버)</NativeSelectOption>
+                  </NativeSelect>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label htmlFor={formIds.auth} className="text-xs">
+                    Auth
                   </Label>
+                  <NativeSelect
+                    id={formIds.auth}
+                    size="sm"
+                    className="w-full"
+                    value={form.auth}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, auth: e.target.value as typeof EMPTY_FORM.auth }))
+                    }
+                  >
+                    <NativeSelectOption value="none">없음</NativeSelectOption>
+                    <NativeSelectOption value="sso">SSO</NativeSelectOption>
+                    <NativeSelectOption value="api-key">API Key</NativeSelectOption>
+                  </NativeSelect>
                 </div>
                 <div className="space-y-1">
-                  <Label htmlFor={formIds.headers} className="text-xs">
-                    Headers (HEADER: value, write-only)
+                  <Label htmlFor={formIds.apiKey} className="text-xs">
+                    API Key (write-only)
                   </Label>
-                  <Textarea
-                    id={formIds.headers}
-                    className="min-h-[88px] text-xs font-mono"
-                    placeholder={"Authorization: Bearer ...\nX-Team: alpha"}
-                    value={form.headers}
-                    onChange={(e) => setForm((f) => ({ ...f, headers: e.target.value }))}
+                  <Input
+                    id={formIds.apiKey}
+                    type="password"
+                    className="h-7 text-xs font-mono"
+                    placeholder="sk-..."
+                    value={form.apiKey}
+                    onChange={(e) => setForm((f) => ({ ...f, apiKey: e.target.value }))}
                   />
                 </div>
-              </>
-            )}
+              </div>
 
-            <p className="text-[10px] text-muted-foreground">
-              비밀값(API key / headers / env / args)은 저장 후 다시 표시되지 않습니다.
-            </p>
+              {form.transport === "stdio" ? (
+                <>
+                  <div className="space-y-1">
+                    <Label htmlFor={formIds.command} className="text-xs">
+                      Command *
+                    </Label>
+                    <Input
+                      id={formIds.command}
+                      className="h-7 text-xs font-mono"
+                      placeholder="uvx my-mcp-server"
+                      value={form.command}
+                      onChange={(e) => setForm((f) => ({ ...f, command: e.target.value }))}
+                    />
+                    <p className="text-[10px] text-muted-foreground">
+                      실행 파일만 입력하거나 전체 명령줄을 입력해도 자동 분리됩니다.
+                    </p>
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor={formIds.args} className="text-xs">
+                      Args (추가 인자)
+                    </Label>
+                    <Input
+                      id={formIds.args}
+                      className="h-7 text-xs font-mono"
+                      placeholder="--port 3000 --profile 'team alpha'"
+                      value={form.args}
+                      onChange={(e) => setForm((f) => ({ ...f, args: e.target.value }))}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor={formIds.env} className="text-xs">
+                      Env (KEY=value, write-only)
+                    </Label>
+                    <Textarea
+                      id={formIds.env}
+                      className="min-h-[88px] text-xs font-mono"
+                      placeholder={"OPENAI_API_KEY=...\nMCP_PROFILE=team-alpha"}
+                      value={form.env}
+                      onChange={(e) => setForm((f) => ({ ...f, env: e.target.value }))}
+                    />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="space-y-1">
+                    <Label htmlFor={formIds.url} className="text-xs">
+                      URL *
+                    </Label>
+                    <Input
+                      id={formIds.url}
+                      className="h-7 text-xs font-mono"
+                      placeholder="https://example.com/mcp"
+                      value={form.url}
+                      onChange={(e) => setForm((f) => ({ ...f, url: e.target.value }))}
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id={formIds.allowPrivateNetworks}
+                      checked={form.allowPrivateNetworks}
+                      onCheckedChange={(checked) =>
+                        setForm((f) => ({ ...f, allowPrivateNetworks: checked === true }))
+                      }
+                      className="size-3.5"
+                    />
+                    <Label htmlFor={formIds.allowPrivateNetworks} className="text-xs">
+                      사설 네트워크 허용 (localhost/로컬 네트워크)
+                    </Label>
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor={formIds.headers} className="text-xs">
+                      Headers (HEADER: value, write-only)
+                    </Label>
+                    <Textarea
+                      id={formIds.headers}
+                      className="min-h-[88px] text-xs font-mono"
+                      placeholder={"Authorization: Bearer ...\nX-Team: alpha"}
+                      value={form.headers}
+                      onChange={(e) => setForm((f) => ({ ...f, headers: e.target.value }))}
+                    />
+                  </div>
+                </>
+              )}
 
-            <div className="flex justify-end gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setForm(EMPTY_FORM);
-                  setShowForm(false);
-                }}
-              >
-                취소
-              </Button>
-              <Button size="sm" onClick={() => void handleAdd()} disabled={formBusy}>
-                {formBusy ? "추가 중…" : "추가"}
-              </Button>
+              <p className="text-[10px] text-muted-foreground">
+                비밀값(API key / headers / env / args)은 저장 후 다시 표시되지 않습니다.
+              </p>
+
+              <div className="flex justify-end gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setForm(EMPTY_FORM);
+                    setShowForm(false);
+                  }}
+                >
+                  취소
+                </Button>
+                <Button size="sm" onClick={() => void handleAdd()} disabled={formBusy}>
+                  {formBusy ? "추가 중…" : "추가"}
+                </Button>
+              </div>
             </div>
-          </div>
-        </>
-      )}
+          </>
+        )}
+      </div>
     </div>
   );
 }
