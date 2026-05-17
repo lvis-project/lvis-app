@@ -185,6 +185,7 @@ export interface ApprovalRequest {
 
 export type ApprovalChoice =
   | "allow-once"
+  | "allow-session"
   | "allow-always"
   | "deny-once"
   | "deny-always";
