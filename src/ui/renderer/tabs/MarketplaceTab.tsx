@@ -8,6 +8,8 @@ import { ScrollArea } from "../../../components/ui/scroll-area.js";
 import { getHostMarketplaceApi } from "../host-marketplace-api.js";
 import type { LvisApi, MarketplaceItem } from "../types.js";
 import type { MarketplacePackageType } from "../../../shared/assistant-context.js";
+import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
+import { SettingsSection } from "../components/SettingsSection.js";
 
 export interface MarketplaceTabProps {
   api: LvisApi;
@@ -119,111 +121,117 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
   ];
 
   return (
-    <div className="space-y-4 pt-4">
+    <div className="space-y-5">
+      <SettingsPageHeader
+        title="마켓플레이스"
+        description="플러그인 마켓플레이스 연결과 신뢰 정책을 설정합니다"
+      />
+
       <div className="rounded-md border border-warning/40 bg-warning/15 px-3 py-2 text-[11px] text-warning">
         설정은 저장 즉시 디스크에 기록되지만 <strong className="font-semibold">실제 적용 시점</strong> 은 항목마다 다릅니다 —
-        URL 변경은 마켓플레이스 오류 배너의 “다시 시도” 버튼으로 즉시 재시도,
+        URL 변경은 마켓플레이스 오류 배너의 "다시 시도" 버튼으로 즉시 재시도,
         API 키 변경은 앱 재시작 후 적용,
         사설 네트워크 허용 토글은 다음 마켓플레이스 요청부터 즉시 적용됩니다.
       </div>
 
-      <div className="space-y-2">
-        <Label className="text-sm font-medium">마켓플레이스 서버 URL</Label>
-        <div className="flex items-center gap-2">
-          <Input
-            type="url"
-            placeholder="https://marketplace.your-corp.example"
-            value={baseUrl}
-            onChange={(e) => setBaseUrl(e.target.value)}
-            className="flex-1"
-          />
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={!baseUrl.trim()}
-            onClick={() => {
-              const url = baseUrl.trim();
-              if (url) void api.openExternalUrl(url);
-            }}
-            aria-label="마켓플레이스 웹페이지 열기"
-            title="설정된 마켓플레이스 URL을 시스템 브라우저로 엽니다"
-          >
-            마켓플레이스 열기 ↗
-          </Button>
-        </div>
-        <p className="text-[11px] text-muted-foreground">
-          lvis-marketplace REST API 엔드포인트. 자체 배포 시 내부 호스트로 변경하세요. 비워두면 마켓플레이스 기능이 비활성화됩니다.
-        </p>
-      </div>
-
-      <div className="space-y-2">
-        <Label className="text-sm font-medium">API 키 (선택)</Label>
-        <div className="flex items-center gap-2">
-          {hasApiKey
-            ? <Badge variant="default" className="text-xs">설정됨</Badge>
-            : <Badge variant="secondary" className="text-xs">미설정</Badge>}
-          {hasApiKey && (
+      <SettingsSection title="서버 연결">
+        <div className="space-y-2">
+          <Label className="text-sm font-medium">마켓플레이스 서버 URL</Label>
+          <div className="flex items-center gap-2">
+            <Input
+              type="url"
+              placeholder="https://marketplace.your-corp.example"
+              value={baseUrl}
+              onChange={(e) => setBaseUrl(e.target.value)}
+              className="flex-1"
+            />
             <Button
+              type="button"
+              variant="outline"
               size="sm"
-              variant="ghost"
-              className="h-7 text-xs text-destructive"
-              onClick={() => void api.deleteMarketplaceApiKey().then(() => {
-                setHasApiKey(false);
-                onSaved();
-              })}
+              disabled={!baseUrl.trim()}
+              onClick={() => {
+                const url = baseUrl.trim();
+                if (url) void api.openExternalUrl(url);
+              }}
+              aria-label="마켓플레이스 웹페이지 열기"
+              title="설정된 마켓플레이스 URL을 시스템 브라우저로 엽니다"
             >
-              삭제
+              마켓플레이스 열기 ↗
             </Button>
-          )}
-        </div>
-        <Input
-          type="password"
-          placeholder={hasApiKey ? "새 키로 교체" : "Bearer token (서버가 요구하는 경우)"}
-          value={apiKeyInput}
-          onChange={(e) => setApiKeyInput(e.target.value)}
-        />
-        <p className="text-[11px] text-muted-foreground">
-          서버가 인증을 요구할 때만 입력하세요. 키는 OS 키체인에 암호화되어 저장됩니다.
-        </p>
-      </div>
-
-      <div className="flex items-start gap-3 rounded-md border px-3 py-2.5">
-        <Checkbox
-          checked={allowPrivateNetwork}
-          aria-labelledby="marketplace-allow-private-network-label"
-          className="mt-0.5 size-5"
-          onCheckedChange={(checked) => {
-            setAllowPrivateNetwork(checked === true);
-            onImmediateChange?.();
-          }}
-        />
-        <div className="space-y-0.5">
-          <p
-            id="marketplace-allow-private-network-label"
-            className="flex items-center gap-2 text-sm font-medium"
-          >
-            사설 네트워크 허용 (loopback / RFC1918)
-            <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
-              즉시 적용
-            </span>
-          </p>
-          <p className="text-[11px] text-muted-foreground">
-            로컬 또는 내부 마켓플레이스 서버에 접속할 때 활성화합니다. SSRF 가드를 우회하므로 외부 호스트(prod) 환경에서는 끄세요.
-          </p>
-        </div>
-      </div>
-
-      <div className="space-y-3 rounded-md border bg-card p-3">
-        <div className="flex items-center justify-between gap-2">
-          <div>
-            <h3 className="text-sm font-semibold">패키지 인벤토리</h3>
-            <p className="text-[11px] text-muted-foreground">{packageStatus}</p>
           </div>
+          <p className="text-[11px] text-muted-foreground">
+            lvis-marketplace REST API 엔드포인트. 자체 배포 시 내부 호스트로 변경하세요. 비워두면 마켓플레이스 기능이 비활성화됩니다.
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          <Label className="text-sm font-medium">API 키 (선택)</Label>
+          <div className="flex items-center gap-2">
+            {hasApiKey
+              ? <Badge variant="default" className="text-xs">설정됨</Badge>
+              : <Badge variant="secondary" className="text-xs">미설정</Badge>}
+            {hasApiKey && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 text-xs text-destructive"
+                onClick={() => void api.deleteMarketplaceApiKey().then(() => {
+                  setHasApiKey(false);
+                  onSaved();
+                })}
+              >
+                삭제
+              </Button>
+            )}
+          </div>
+          <Input
+            type="password"
+            placeholder={hasApiKey ? "새 키로 교체" : "Bearer token (서버가 요구하는 경우)"}
+            value={apiKeyInput}
+            onChange={(e) => setApiKeyInput(e.target.value)}
+          />
+          <p className="text-[11px] text-muted-foreground">
+            서버가 인증을 요구할 때만 입력하세요. 키는 OS 키체인에 암호화되어 저장됩니다.
+          </p>
+        </div>
+
+        <div className="flex items-start gap-3 rounded-md border px-3 py-2.5">
+          <Checkbox
+            checked={allowPrivateNetwork}
+            aria-labelledby="marketplace-allow-private-network-label"
+            className="mt-0.5 size-5"
+            onCheckedChange={(checked) => {
+              setAllowPrivateNetwork(checked === true);
+              onImmediateChange?.();
+            }}
+          />
+          <div className="space-y-0.5">
+            <p
+              id="marketplace-allow-private-network-label"
+              className="flex items-center gap-2 text-sm font-medium"
+            >
+              사설 네트워크 허용 (loopback / RFC1918)
+              <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
+                즉시 적용
+              </span>
+            </p>
+            <p className="text-[11px] text-muted-foreground">
+              로컬 또는 내부 마켓플레이스 서버에 접속할 때 활성화합니다. SSRF 가드를 우회하므로 외부 호스트(prod) 환경에서는 끄세요.
+            </p>
+          </div>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection
+        title="패키지 인벤토리"
+        description={packageStatus}
+        actions={
           <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => void refreshPackages()}>
             새로고침
           </Button>
-        </div>
+        }
+      >
         <div className="flex flex-wrap gap-1">
           {filterOptions.map((option) => (
             <Button
@@ -273,7 +281,7 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
             })}
           </div>
         </ScrollArea>
-      </div>
+      </SettingsSection>
     </div>
   );
 }
