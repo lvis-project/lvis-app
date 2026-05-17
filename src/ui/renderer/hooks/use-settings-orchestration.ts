@@ -59,7 +59,7 @@ export interface SettingsOrchestrationState {
   saving: boolean;
   /**
    * Last save failure surface. Cleared on the next successful save.
-   * SettingsDialog renders this as a banner so silent IPC failures
+   * SettingsContent renders this as a banner so silent IPC failures
    * (network drop, locked settings file, schema reject) become
    * visible — without this, an auto-save that silently rejected
    * would leave the user thinking a toggle persisted when it did not.
@@ -83,7 +83,6 @@ export interface SettingsOrchestrationState {
 }
 
 export function useSettingsOrchestration(
-  open: boolean,
   api: LvisApi,
   onSaved: () => void,
 ): SettingsOrchestrationState {
@@ -119,9 +118,9 @@ export function useSettingsOrchestration(
 
   const vendorInfo = VENDORS.find((v) => v.id === vendor) ?? VENDORS[0];
 
-  // Load all settings when dialog opens
+  // Load all settings on mount. (Before the BrowserWindow conversion this
+  // was gated on `open`; that's now always true while the window exists.)
   useEffect(() => {
-    if (!open) return;
     let cancelled = false;
     setSettingsLoaded(false);
     void (async () => {
@@ -152,26 +151,20 @@ export function useSettingsOrchestration(
       setSettingsLoaded(true);
     })();
     return () => { cancelled = true; };
-  }, [open, api]);
+  }, [api]);
 
-  // Stay in sync with cross-window settings broadcasts. Without this, a sibling
-  // window (e.g. the native settings BrowserWindow) saving while this dialog
-  // is open would leave `settingsSnapshot` stale — the vendor-switch path
-  // below reads `settingsSnapshot.llm.vendors[vendor]` and would hydrate the
-  // form back to pre-save values. The `userTouchedRef`-style guards in this
-  // hook protect in-flight form edits; updating the snapshot only refreshes
-  // the cached source that the vendor-switch effect consults.
+  // Stay in sync with cross-window settings broadcasts. Updating the snapshot
+  // refreshes the cached source that the vendor-switch effect consults; the
+  // userTouchedRef-style guards in this hook protect in-flight form edits.
   useEffect(() => {
-    if (!open) return;
     return api.onSettingsUpdated((next) => {
       setSettingsSnapshot(next);
       setIdlePreferenceRefresh(next.features?.idlePreferenceRefresh ?? false);
     });
-  }, [open, api]);
+  }, [api]);
 
   // Re-hydrate every vendor-specific field when the active vendor changes.
   useEffect(() => {
-    if (!open) return;
     if (!settingsLoaded) return;
     if (!VENDORS.some((x) => x.id === vendor)) return;
     if (hydratedVendorRef.current === vendor) {
@@ -183,7 +176,7 @@ export function useSettingsOrchestration(
     const block = settingsSnapshot?.llm.vendors[vendor];
     if (block) hydrateVendorBlock(block);
     return () => { cancelled = true; };
-  }, [vendor, open, api, settingsLoaded, settingsSnapshot]);
+  }, [vendor, api, settingsLoaded, settingsSnapshot]);
 
   function hydrateVendorBlock(block: AppSettings["llm"]["vendors"][string]): void {
     setModel(block.model);
@@ -196,7 +189,6 @@ export function useSettingsOrchestration(
 
   // Re-check web key when webProvider changes
   useEffect(() => {
-    if (!open) return;
     if (!settingsLoaded) return;
     if (hydratedWebProviderRef.current === webProvider) {
       hydratedWebProviderRef.current = null;
@@ -205,7 +197,7 @@ export function useSettingsOrchestration(
     let cancelled = false;
     void api.hasWebApiKey(webProvider).then((k) => { if (!cancelled) setHasWebKey(k); });
     return () => { cancelled = true; };
-  }, [webProvider, open, api, settingsLoaded]);
+  }, [webProvider, api, settingsLoaded]);
 
   // In-flight guard + pending re-fire: if a debounced save lands while a
   // previous save is still in flight (cross-tab race), mark it pending
@@ -291,7 +283,7 @@ export function useSettingsOrchestration(
       setLastSaveError(null);
       ok = true;
     } catch (err) {
-      // Surface via state so SettingsDialog can render an inline banner —
+      // Surface via state so SettingsContent can render an inline banner —
       // debounced callers do `void s.save(tab)` and would otherwise lose
       // the rejection in an unhandled-promise warning, leaving the user
       // thinking a toggle persisted when it did not.
