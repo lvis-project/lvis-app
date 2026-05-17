@@ -76,7 +76,18 @@ test.describe("Sandbox approval flow", () => {
       executablePath: undefined,
     });
     page = await app.firstWindow();
-    await page.waitForLoadState("domcontentloaded");
+    // The app first loads a data: splash URL, then boots and replaces it with
+    // the real index.html. Waiting only for `domcontentloaded` resolves on
+    // the splash, before IPC handlers (`lvis:settings-window:open`, …) and
+    // the renderer's approval listeners are wired — webContents.send / IPC
+    // invocations from the test would then race against bootstrap and either
+    // silently no-op or fail with "No handler registered". Wait for the
+    // first persistent post-boot affordance (`[data-testid="main-toolbar"]`)
+    // to match the boot gate used by `fixtures.ts`.
+    await page.locator('[data-testid="main-toolbar"]').first().waitFor({
+      state: "visible",
+      timeout: 60_000,
+    });
   });
 
   test.afterEach(async () => {
@@ -87,8 +98,10 @@ test.describe("Sandbox approval flow", () => {
 
   test("HIGH verdict requires NL justification before Approve button is enabled", async () => {
     // Inject a HIGH-verdict approval request via IPC
-    await app.evaluate(({ ipcMain }, req) => {
-      const { BrowserWindow } = require("electron");
+    // Electron main-process `evaluate` is loaded as ESM in this build — the
+    // CommonJS `require()` shim is not available, so use the destructured
+    // `electron` arg (`BrowserWindow`) that Playwright already injects.
+    await app.evaluate(({ BrowserWindow }, req) => {
       const win = BrowserWindow.getAllWindows()[0];
       win?.webContents.send("lvis:approval:request", req);
     }, buildApprovalRequest({ reviewerVerdict: { level: "high", reason: "shell destructive verb" } }));
@@ -113,8 +126,10 @@ test.describe("Sandbox approval flow", () => {
   });
 
   test("LOW verdict shows scope selector and Approve is enabled without NL", async () => {
-    await app.evaluate(({ ipcMain }, req) => {
-      const { BrowserWindow } = require("electron");
+    // Electron main-process `evaluate` is loaded as ESM in this build — the
+    // CommonJS `require()` shim is not available, so use the destructured
+    // `electron` arg (`BrowserWindow`) that Playwright already injects.
+    await app.evaluate(({ BrowserWindow }, req) => {
       const win = BrowserWindow.getAllWindows()[0];
       win?.webContents.send("lvis:approval:request", req);
     }, buildApprovalRequest({
@@ -139,8 +154,10 @@ test.describe("Sandbox approval flow", () => {
   });
 
   test("partial sandbox shows correct Korean label in approval dialog", async () => {
-    await app.evaluate(({ ipcMain }, req) => {
-      const { BrowserWindow } = require("electron");
+    // Electron main-process `evaluate` is loaded as ESM in this build — the
+    // CommonJS `require()` shim is not available, so use the destructured
+    // `electron` arg (`BrowserWindow`) that Playwright already injects.
+    await app.evaluate(({ BrowserWindow }, req) => {
       const win = BrowserWindow.getAllWindows()[0];
       win?.webContents.send("lvis:approval:request", req);
     }, buildApprovalRequest({
@@ -178,16 +195,23 @@ test.describe("Sandbox approval flow", () => {
       "utf-8",
     );
 
-    // Navigate to Settings → Permissions tab
-    const settingsButton = page.locator('[data-testid="settings-button"], [aria-label*="설정"]').first();
-    await expect(settingsButton).toBeVisible({ timeout: 5000 });
-    await settingsButton.click();
+    // Settings is now a native BrowserWindow opened via IPC (no in-DOM
+    // toolbar button to scrape). Open it through `window.lvisApi` and
+    // assert the permissions tab content there.
+    const settingsWindowPromise = app.waitForEvent("window", { timeout: 10_000 });
+    const openResult = await page.evaluate(async () => {
+      const api = (window as unknown as {
+        lvisApi?: { openSettingsWindow?: (tab?: string) => Promise<{ ok: boolean; error?: string }> };
+      }).lvisApi;
+      if (!api?.openSettingsWindow) throw new Error("window.lvisApi.openSettingsWindow unavailable");
+      return api.openSettingsWindow("permissions");
+    });
+    if (!openResult.ok) throw new Error(openResult.error ?? "openSettingsWindow failed");
+    const settingsWindow = await settingsWindowPromise;
+    await settingsWindow.waitForLoadState("domcontentloaded");
 
-    const permissionsTab = page.locator('[data-testid="permissions-tab"], :text("권한")').first();
-    await expect(permissionsTab).toBeVisible({ timeout: 5000 });
-    await permissionsTab.click();
-
-    // Check the approval records section exists
-    await expect(page.locator(':text("사용자 승인 기록")')).toBeVisible({ timeout: 5000 });
+    // Permissions tab is selected by initialTab; the approval records
+    // section heading "사용자 승인 기록" should be visible inside it.
+    await expect(settingsWindow.locator(':text("사용자 승인 기록")')).toBeVisible({ timeout: 5000 });
   });
 });
