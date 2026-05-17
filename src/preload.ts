@@ -776,6 +776,18 @@ const api = {
       return () =>
         ipcRenderer.removeListener(PERMISSIONS.modeChanged, listener);
     },
+    /**
+     * Hint event — directory config mutated. Listeners refresh state by
+     * calling `permission.dirDispatch("list")` rather than receiving the
+     * full directory list in the broadcast payload (slash dispatcher is
+     * the single source of truth).
+     */
+    onConfigChanged: (cb: () => void) => {
+      const listener = () => cb();
+      ipcRenderer.on(PERMISSIONS.configChanged, listener);
+      return () =>
+        ipcRenderer.removeListener(PERMISSIONS.configChanged, listener);
+    },
     listRules: async () => ipcRenderer.invoke(PERMISSIONS.listRules),
     addRule: async (pattern: string, action: string) =>
       ipcRenderer.invoke(PERMISSIONS.addRule, { pattern, action, intent: ipcUserKeyboardIntent() }),
