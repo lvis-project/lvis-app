@@ -29,6 +29,34 @@ import { verifyInstallReceipt } from "../plugin-install-receipt.js";
 import { updatePluginRegistry } from "../registry.js";
 import { TOOL_TIMEOUT_POLICY } from "../../shared/tool-timeout-policy.js";
 
+/**
+ * Run a plugin's `start()` lifecycle hook under a host-enforced timeout. The
+ * manifest's declared `startupTimeoutMs` is honored when present and clamped
+ * to `pluginStartupMaxMs`; an undeclared value falls back to
+ * `pluginStartupDefaultMs`. The two call sites in this file share this helper
+ * — when they diverge, fix it here, not in two places.
+ */
+export async function runStartWithTimeout(
+  start: () => unknown,
+  declaredTimeoutMs: number | undefined,
+): Promise<void> {
+  const hardTimeoutMs = Math.min(
+    declaredTimeoutMs ?? TOOL_TIMEOUT_POLICY.pluginStartupDefaultMs,
+    TOOL_TIMEOUT_POLICY.pluginStartupMaxMs,
+  );
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(`startup timeout (>${hardTimeoutMs}ms)`));
+    }, hardTimeoutMs);
+  });
+  try {
+    await Promise.race([Promise.resolve(start()), timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 import {
   buildManifestValidator,
   getDeclaredEmittedEvents,
@@ -473,19 +501,10 @@ export class PluginRuntime {
             this.perfStats.get(id)!.startupMs = Date.now() - startedAt;
             return;
           }
-          const hardTimeoutMs =
-            plugin.manifest.startupTimeoutMs ?? TOOL_TIMEOUT_POLICY.pluginStartupDefaultMs;
-          let timer: NodeJS.Timeout | undefined;
-          const timeout = new Promise<never>((_, reject) => {
-            timer = setTimeout(() => {
-              reject(new Error(`startup timeout (>${hardTimeoutMs}ms)`));
-            }, hardTimeoutMs);
-          });
-          try {
-            await Promise.race([Promise.resolve(plugin.instance.start()), timeout]);
-          } finally {
-            if (timer) clearTimeout(timer);
-          }
+          await runStartWithTimeout(
+            plugin.instance.start.bind(plugin.instance),
+            plugin.manifest.startupTimeoutMs,
+          );
         } finally {
           clearTimeout(slowTimer);
         }
@@ -1024,17 +1043,7 @@ export class PluginRuntime {
     if (instance.start) {
       const startedAt = Date.now();
       try {
-        const hardTimeoutMs =
-          manifest.startupTimeoutMs ?? TOOL_TIMEOUT_POLICY.pluginStartupDefaultMs;
-        let timer: NodeJS.Timeout | undefined;
-        const timeout = new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(new Error(`startup timeout (>${hardTimeoutMs}ms)`)), hardTimeoutMs);
-        });
-        try {
-          await Promise.race([Promise.resolve(instance.start()), timeout]);
-        } finally {
-          if (timer) clearTimeout(timer);
-        }
+        await runStartWithTimeout(instance.start.bind(instance), manifest.startupTimeoutMs);
         this.perfStats.get(manifest.id)!.startupMs = Date.now() - startedAt;
       } catch (err) {
         log.error(`start during addPlugin failed: %s`, (err as Error).message);
