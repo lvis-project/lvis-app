@@ -1,6 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "../../components/ui/button.js";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../../components/ui/tabs.js";
+import {
+  Brain,
+  Palette,
+  MessageSquare,
+  Globe,
+  Shield,
+  UserCog,
+  BarChart3,
+  FileSearch,
+  Gauge,
+  Server,
+  Puzzle,
+  Store,
+} from "lucide-react";
 import { SavedToastFloating, SavedToastProvider } from "./contexts/saved-toast.js";
 import type { LvisApi } from "./types.js";
 import { RolesTab } from "./tabs/RolesTab.js";
@@ -184,11 +198,17 @@ export function SettingsContent({
   // looks wrong in a vertical list. `whitespace-nowrap` + `overflow-hidden`
   // keep long labels (or scaled-up system fonts) from wrapping to two lines
   // and breaking the row rhythm of the sidebar.
+  // Sidebar trigger style includes `flex` (not inline-flex), `gap-2` for
+  // the icon spacing, and explicit `justify-start` to override the
+  // shadcn TabsTrigger primitive's default `inline-flex items-center
+  // justify-center` (which would center-align the icon+label horizontally).
   const sideTriggerCls =
-    "w-full justify-start overflow-hidden whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium " +
+    "flex w-full items-center justify-start gap-2 overflow-hidden whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium " +
     "text-muted-foreground hover:bg-accent/60 hover:text-foreground " +
     "data-[state=active]:bg-accent data-[state=active]:text-accent-foreground " +
     "data-[state=active]:shadow-none";
+  // Common icon class so the 12 nav entries render at a uniform 16px.
+  const navIconCls = "size-4 shrink-0";
 
   return (
     <SavedToastProvider value={notifySaved}>
@@ -214,18 +234,36 @@ export function SettingsContent({
           the sidebar conversion). */}
       <TabsList
         aria-label="설정 카테고리"
-        // Sidebar = single region of the dialog, not a nested card.
-        // Drops the rounded border AND the bg tint (critic round-3:
-        // bg-muted/20 created a "second surface inside the card"
-        // optical illusion against the dialog's rounded-lg border).
-        // Only the right border remains as the boundary with content.
-        className="flex h-full w-48 shrink-0 flex-col items-stretch gap-0.5 overflow-y-auto border-r p-2"
+        // Vertical sidebar — the shadcn TabsList primitive defaults to a
+        // horizontal pill (`inline-flex h-10 items-center justify-center
+        // rounded-md bg-muted p-1`). cn() merges class lists but only
+        // tailwind-merge collapses conflicting utilities — the primitive's
+        // `justify-center` survived previous overrides because we never
+        // specified a competing `justify-*`, which left every trigger
+        // vertically centered in the column (the "사이드바가 상단으로 안
+        // 올라옴" symptom). Explicit `justify-start` + `h-full` + plain
+        // `flex` (not inline-flex) + `rounded-none bg-transparent` make
+        // the override unambiguous.
+        className="flex h-full w-48 shrink-0 flex-col items-stretch justify-start gap-0.5 overflow-y-auto rounded-none border-r bg-transparent p-2"
       >
-        <TabsTrigger value="llm" className={sideTriggerCls}>모델</TabsTrigger>
-        <TabsTrigger value="appearance" className={sideTriggerCls}>테마</TabsTrigger>
-        <TabsTrigger value="chat" className={sideTriggerCls}>채팅</TabsTrigger>
-        <TabsTrigger value="web" className={sideTriggerCls}>검색 (Web)</TabsTrigger>
-        <TabsTrigger value="permissions" className={`${sideTriggerCls} gap-1.5`}>
+        <TabsTrigger value="llm" className={sideTriggerCls}>
+          <Brain className={navIconCls} aria-hidden="true" />
+          모델
+        </TabsTrigger>
+        <TabsTrigger value="appearance" className={sideTriggerCls}>
+          <Palette className={navIconCls} aria-hidden="true" />
+          테마
+        </TabsTrigger>
+        <TabsTrigger value="chat" className={sideTriggerCls}>
+          <MessageSquare className={navIconCls} aria-hidden="true" />
+          채팅
+        </TabsTrigger>
+        <TabsTrigger value="web" className={sideTriggerCls}>
+          <Globe className={navIconCls} aria-hidden="true" />
+          검색 (Web)
+        </TabsTrigger>
+        <TabsTrigger value="permissions" className={sideTriggerCls}>
+          <Shield className={navIconCls} aria-hidden="true" />
           권한
           {pendingPermissions > 0 && (
             <span className="ml-auto rounded-full bg-destructive px-1.5 py-0.5 text-[10px] leading-none text-destructive-foreground">
@@ -233,13 +271,34 @@ export function SettingsContent({
             </span>
           )}
         </TabsTrigger>
-        <TabsTrigger value="roles" className={sideTriggerCls}>역할</TabsTrigger>
-        <TabsTrigger value="usage" className={sideTriggerCls}>사용량</TabsTrigger>
-        <TabsTrigger value="audit" className={sideTriggerCls}>감사</TabsTrigger>
-        <TabsTrigger value="plugin-perf" className={sideTriggerCls}>플러그인 성능</TabsTrigger>
-        <TabsTrigger value="mcp" className={sideTriggerCls}>MCP 서버</TabsTrigger>
-        <TabsTrigger value="plugin-config" className={sideTriggerCls}>플러그인 설정</TabsTrigger>
-        <TabsTrigger value="marketplace" className={sideTriggerCls}>마켓플레이스</TabsTrigger>
+        <TabsTrigger value="roles" className={sideTriggerCls}>
+          <UserCog className={navIconCls} aria-hidden="true" />
+          역할
+        </TabsTrigger>
+        <TabsTrigger value="usage" className={sideTriggerCls}>
+          <BarChart3 className={navIconCls} aria-hidden="true" />
+          사용량
+        </TabsTrigger>
+        <TabsTrigger value="audit" className={sideTriggerCls}>
+          <FileSearch className={navIconCls} aria-hidden="true" />
+          감사
+        </TabsTrigger>
+        <TabsTrigger value="plugin-perf" className={sideTriggerCls}>
+          <Gauge className={navIconCls} aria-hidden="true" />
+          플러그인 성능
+        </TabsTrigger>
+        <TabsTrigger value="mcp" className={sideTriggerCls}>
+          <Server className={navIconCls} aria-hidden="true" />
+          MCP 서버
+        </TabsTrigger>
+        <TabsTrigger value="plugin-config" className={sideTriggerCls}>
+          <Puzzle className={navIconCls} aria-hidden="true" />
+          플러그인 설정
+        </TabsTrigger>
+        <TabsTrigger value="marketplace" className={sideTriggerCls}>
+          <Store className={navIconCls} aria-hidden="true" />
+          마켓플레이스
+        </TabsTrigger>
       </TabsList>
 
       {/* Right pane — two-layer layout so split-pane tabs (PluginConfigTab,
