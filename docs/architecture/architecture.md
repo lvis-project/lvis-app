@@ -4096,6 +4096,31 @@ interface ToolMeta {
 - `replacedBy` 는 에이전트가 구 도구를 호출했을 때 후속 도구 안내를 Prompt에 포함하는 데 사용된다.
 - 버전 정책: 도구 스키마(arg 이름/타입) 변경은 **major bump**. 이 경우 구 도구를 한 릴리즈 이상 `deprecatedSince` 로 공존시킨 뒤 제거한다.
 
+#### §6.4.Y Tool Execution Timeout Policy (신규 v5)
+
+§4.5.6 8-step pipeline 의 Step 6(Execute) 은 모든 도구 호출에 *글로벌 마지막 방어선*인 timeout 을 적용한다. 사용자가 무한히 기다리는 상황은 어느 surface 에서도 허용되지 않는다.
+
+**Policy SOT**: `src/shared/tool-timeout-policy.ts` 의 `TOOL_TIMEOUT_POLICY` 객체. surface 별 의미:
+
+| Surface | 상수 | 값 | 의미 |
+|---|---|---|---|
+| Built-in shell Zod schema default | `shellDefaultSeconds` | `60` | model 이 `timeoutSeconds` 미명시 시 기본 |
+| Built-in shell Zod schema max | `shellMaxSeconds` | `120` | model 이 input 으로 줄 수 있는 상한 |
+| Executor 글로벌 ceiling | `globalCeilingMs` | `120_000` | `tool.execute()` 를 `Promise.race` 로 wrap — last-resort cap |
+| `hostApi.callTool` 경로 | `pluginCallToolCeilingMs` | `120_000` | invoker 가 executor 거치므로 글로벌 ceiling 으로 cover |
+| MCP request default | `mcpRequestDefaultMs` | `60_000` | per-server `connectionTimeoutMs` 미선언 시 |
+| MCP request max ceiling | `mcpRequestMaxMs` | `120_000` | server 선언 timeout 도 이 값으로 clamp |
+| Plugin `instance.start()` default | `pluginStartupDefaultMs` | `10_000` | manifest `startupTimeoutMs` 미선언 시 host 강제 |
+
+**LLM judging — 연장은 model 자율, 단 cap 안에서**: model 이 long-running (bun install, large build 등) 으로 판단하면 shell tool 의 `timeoutSeconds` 인자에 최대 `shellMaxSeconds=120` 까지 명시 가능. cap 위는 어떤 경로로도 허용되지 않으며, 글로벌 ceiling 이 fail-safe 로 동시에 동작한다.
+
+**외부 평균 근거**: Cline 30s / Codex CLI 30s / OpenCode 60s / Claude Code 120s 산술 평균 60s, 사용자-facing 최대 cap 으로 Claude Code 문서 max 120s 채택. LVIS 이전 default 600s(10분) 는 model 이 task 완료 후에도 timeout 인자를 줄이지 않으면 사용자가 10분까지 무한 대기하던 회귀의 원천.
+
+**Invariants** (`src/shared/__tests__/tool-timeout-policy.test.ts` 가 지키는 룰):
+- `shellDefaultSeconds <= shellMaxSeconds` / `mcpRequestDefaultMs <= mcpRequestMaxMs`
+- 모든 값 finite + positive (Infinity 또는 0 금지)
+- `globalCeilingMs >= shellMaxSeconds * 1000` (last-resort cap 이 per-surface max 보다 작으면 회귀)
+
 #### §7.X Marketplace 승인 워크플로우 — S13 (신규 v5)
 
 v4 §7 의 Marketplace Hub 배포 플로우는 유지된다. v5 는 **publisher 게시 → 관리자 승인 → 카탈로그 노출** 사이에 명시적 게이트를 추가한다.
