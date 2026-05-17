@@ -233,7 +233,19 @@ export function SettingsContent({
           Outer div owns the column width + border-r so the version footer
           can sit below the nav list as a sibling (Radix TabsList only
           accepts TabsTrigger children). */}
-      <div className="flex h-full w-48 shrink-0 flex-col border-r pt-2">
+      <div className="flex h-full w-48 shrink-0 flex-col border-r">
+      {/* Sidebar "설정" header — sits above the nav list as a section
+          label. NO border-b between header and nav (user directive:
+          "헤더에 있는 라인을 제거"); typographic separation only via
+          `mb-6`. `pt-6` mirrors the right-pane stack
+            (scroll pt-2 + TabsContent mt-2 + SettingsPageHeader pt-2 = 24)
+          so the sidebar h2 baseline aligns with the right-pane h2 of
+          the active tab. Horizontal `px-5` (20px) aligns the "설정"
+          text-left with the nav-trigger icon-left (TabsList p-2 (8) +
+          trigger px-3 (12) = 20). */}
+      <div className="px-5 pt-6 mb-6">
+        <h2 className="text-xl font-semibold leading-9 tracking-tight">설정</h2>
+      </div>
       <TabsList
         aria-label="설정 카테고리"
         // Vertical sidebar — the shadcn TabsList primitive defaults to a
