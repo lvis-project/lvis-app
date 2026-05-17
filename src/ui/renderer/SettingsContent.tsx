@@ -64,12 +64,10 @@ function TabSaveBar({
 // itself imports PluginConfigTab in this file).
 
 export function SettingsContent({
-  open,
   api,
   onSaved,
   initialTab = "llm",
 }: {
-  open: boolean;
   api: LvisApi;
   onSaved: () => void;
   initialTab?: string;
@@ -92,7 +90,7 @@ export function SettingsContent({
     notifySaved();
     onSaved();
   }, [notifySaved, onSaved]);
-  const s = useSettingsOrchestration(open, api, handleSaved);
+  const s = useSettingsOrchestration(api, handleSaved);
 
   // Per-tab debounced save handlers. Immediate-apply controls (toggle,
   // radio, slider, select) call `.schedule()`; rapid bursts collapse
@@ -108,28 +106,15 @@ export function SettingsContent({
   const webSave = useDebouncedSave(() => void s.save("web"));
   const marketplaceSave = useDebouncedSave(() => void s.save("marketplace"));
 
-  // Cancel any pending debounced save when the dialog transitions to
-  // closed. Radix Dialog keeps its children mounted when `open=false`,
-  // so the hook's unmount-cleanup would otherwise miss this case —
-  // a toggle a millisecond before close would still fire its 200ms
-  // debounced save on a "closed" dialog, persisting a half-edited
-  // value the user already abandoned.
-  useEffect(() => {
-    if (!open) {
-      llmSave.cancel();
-      chatSave.cancel();
-      webSave.cancel();
-      marketplaceSave.cancel();
-    }
-  }, [open, llmSave, chatSave, webSave, marketplaceSave]);
-
   // Flush any pending debounced save when the user closes the window or
   // quits the app. The 200ms debounce window is short, but a user who
   // toggles a control and immediately hits Cmd+Q would otherwise lose
   // that toggle to the dying renderer process. `flush()` is a no-op
   // when nothing is pending, so registering all four is safe.
+  // (Note: in the BrowserWindow conversion the hook's own unmount
+  // cleanup also fires `cancel()`, so the pre-conversion Dialog
+  // `open=false` cancel-effect was retired — see PR #890 review.)
   useEffect(() => {
-    if (!open) return;
     const flushAll = () => {
       llmSave.flush();
       chatSave.flush();
@@ -142,25 +127,20 @@ export function SettingsContent({
       window.removeEventListener("beforeunload", flushAll);
       window.removeEventListener("pagehide", flushAll);
     };
-  }, [open, llmSave, chatSave, webSave, marketplaceSave]);
+  }, [llmSave, chatSave, webSave, marketplaceSave]);
 
-  // Reset tab + clear stale error banner ONLY when the dialog transitions
-  // open. Depending on the whole `s` orchestration object would re-fire
-  // this effect every render (since `s` is recreated each render) and
-  // clear the error banner the moment it is set — the user would see it
-  // flash and disappear. Depending on the stable `clearLastSaveError`
-  // identity (it is a `useCallback([])` inside the hook) keeps the
-  // dependency list explicit while still firing only on dialog open.
+  // Reset tab + clear stale error banner whenever a new `initialTab` arrives
+  // (mount or IPC-driven tab change). Depending on the whole `s` orchestration
+  // object would re-fire this effect every render and clear the error banner
+  // the moment it is set; depending on the stable `clearLastSaveError`
+  // identity (`useCallback([])` inside the hook) keeps the dep list explicit.
   const clearLastSaveError = s.clearLastSaveError;
   useEffect(() => {
-    if (open) {
-      setTab(normalizeSettingsTab(initialTab));
-      clearLastSaveError();
-    }
-  }, [initialTab, open, clearLastSaveError]);
+    setTab(normalizeSettingsTab(initialTab));
+    clearLastSaveError();
+  }, [initialTab, clearLastSaveError]);
 
   useEffect(() => {
-    if (!open) return;
     let alive = true;
     const refreshPending = async () => {
       try {
@@ -178,7 +158,7 @@ export function SettingsContent({
       alive = false;
       unsubscribe();
     };
-  }, [api, open]);
+  }, [api]);
 
   // Scroll-reset: when the user switches tabs, reset the right pane to top
   // so they always land at the page header rather than the previous tab's
