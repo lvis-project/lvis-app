@@ -65,13 +65,11 @@ function TabSaveBar({
 
 export function SettingsContent({
   open,
-  onOpenChange,
   api,
   onSaved,
   initialTab = "llm",
 }: {
   open: boolean;
-  onOpenChange: (o: boolean) => void;
   api: LvisApi;
   onSaved: () => void;
   initialTab?: string;
