@@ -290,10 +290,13 @@ grep -rn "<ComponentName>" src/ | head
 
 ### 핵심 룰
 
-- **사용자 무한 대기 0**: `tools/executor.ts` Step 6 (Execute) 의 `Promise.race(tool.execute, globalCeilingMs)` wrap 우회 금지. 모든 tool path 가 이 step 거침.
-- **사용자-facing 최대 cap 120s**: `shellMaxSeconds=120` / `globalCeilingMs=120_000` / `mcpRequestMaxMs=120_000` / `pluginCallToolCeilingMs=120_000`. 어떤 경로로도 이 cap 위는 허용 안 됨.
-- **LLM judging — cap 안에서 자율**: model 이 long-running (bun install, large build 등) 으로 판단하면 shell tool 의 `timeoutSeconds` input 으로 최대 `shellMaxSeconds=120` 까지 명시 가능. 외부 OSS agent 의 *host-enforced hard ceiling + per-call model override* 패턴 (Claude Code) 과 정합.
-- **외부 평균 변경 시 SOT 만 수정**: Cline 30s / Codex 30s / OpenCode 60s / Claude Code 120s 산술 평균이 변동하면 `tool-timeout-policy.ts` 만 update — inline literal 흩어지면 회귀 보장.
+- **사용자 무한 대기 0**: `tools/executor.ts` Step 6 (Execute) 의 `runWithCeiling(...)` (`tools/executor-ceiling.ts`) wrap 우회 금지. 모든 tool path 가 이 step 거치며, ceiling fire 시 AbortController 가 tool 의 abortSignal 을 actually abort.
+- **사용자-facing 최대 cap 120s**: `shellMaxSeconds=120` / `globalCeilingMs=120_000` / `mcpRequestMaxMs=120_000`. 어떤 경로로도 이 cap 위는 허용 안 됨. `subAgentCeilingMs=600_000` 은 *sub-agent inner loop 전용* 예외 — 일반 tool 에 적용 금지.
+- **MCP timeout 은 dispatch + ingestion 두 단 모두 clamp**: `mcp-client.ts` 의 `Math.min(..., MAX_REQUEST_TIMEOUT_MS)` 는 dispatch 단; `mcp-governance.ts` `validateConnectionSecurity` 는 ingestion 단에서 `connectionTimeoutMs > mcpRequestMaxMs` approval 을 reject. 한쪽만 적용하면 settings UI / 감사 로그가 unsafe 값을 표시할 위험.
+- **MCP SSE absolute deadline**: streaming activity reset 이 per-chunk window 를 update 해도 *최초 dispatch 시점에 잡힌 절대 deadline* 을 넘기지 못한다. 한 byte 흘리며 영원히 잡고 있는 hostile server 패턴 방어.
+- **LLM judging — cap 안에서 자율**: model 이 long-running (bun install, large build 등) 으로 판단하면 shell tool 의 `timeoutSeconds` input 으로 최대 `shellMaxSeconds=120` 까지 명시 가능. *host-enforced hard ceiling + per-call model override* 패턴.
+- **사용자 입력 대기는 별도 surface**: `approvalGateUserWaitMs=300_000` 은 *사용자가 느린 케이스* 라 globalCeiling 의 cap 대상 아님. tool 실행 cap 과 의미 다름.
+- **외부 평균 변경 시 SOT 만 수정**: 외부 OSS agent runtime 의 평균 timeout 정책이 변동하면 `tool-timeout-policy.ts` 만 update — inline literal 흩어지면 회귀 보장.
 
 ### 위반 패턴
 
@@ -301,10 +304,13 @@ grep -rn "<ComponentName>" src/ | head
 - 새 MCP 통합에 `connectionTimeoutMs: 30_000` hardcode → `mcpRequestDefaultMs`
 - `setTimeout(..., 600_000)` 같은 inline literal → SOT 추가하고 import
 - timeout-bypass 분기 (예: `if (trustedTool) { skipTimeout }`) — 신뢰 가정으로도 우회 금지
+- ceiling 에 Promise.race 만 쓰고 AbortController 안 wire — tool 의 실제 작업이 ceiling 후에도 계속 돌아 detached side effect 위험
 
 ### 위반 사례 (2026-05-18 이전)
 
-`tools/bash.ts:42` + `tools/powershell.ts:33` 의 `timeoutSeconds.default(600).max(600)` 가 사용자가 *10분까지 무한 대기* 하는 원인. `tools/executor.ts` 8-step pipeline 에 글로벌 ceiling 부재. `mcp-client.ts` 의 `DEFAULT_REQUEST_TIMEOUT_MS=30_000` 만 있고 max ceiling 없어 server 가 임의 큰 값 줄 수 있던 상태. `plugin runtime/index.ts` 의 `if (hardTimeoutMs > 0) ... else { instance.start() }` 분기로 미선언 plugin 은 startup 무한 대기 가능. Fix: 단일 SOT `tool-timeout-policy.ts` 도입 + 5 surface (bash/powershell/executor/MCP request/plugin startup) 모두 wire. `__tests__/tool-timeout-policy.test.ts` 가 invariant 영구화.
+`tools/bash.ts:42` + `tools/powershell.ts:33` 의 `timeoutSeconds.default(600).max(600)` 가 사용자가 *10분까지 무한 대기* 하는 원인. `tools/executor.ts` 8-step pipeline 에 글로벌 ceiling 부재. `mcp-client.ts` 의 `DEFAULT_REQUEST_TIMEOUT_MS=30_000` 만 있고 max ceiling 없어 server 가 임의 큰 값 줄 수 있던 상태. `plugin runtime/index.ts` 의 `if (hardTimeoutMs > 0) ... else { instance.start() }` 분기로 미선언 plugin 은 startup 무한 대기 가능.
+
+후속 (cluster review post-merge) 에서 Promise.race-only ceiling 이 *tool 의 작업을 실제로 stop 못 하는* 회귀 발견, SSE streaming activity reset 이 새 MCP cap 무력화, `pluginCallToolCeilingMs` 가 dead key (callTool 이 invoker→executor 거쳐 globalCeiling 자연 cover). Fix: `runWithCeiling` AbortController helper 추출 + SSE absolute deadline + governance ingestion clamp + dead key 삭제 + `subAgentCeilingMs`/`pluginStartupMaxMs`/`networkFetchDefaultMs`/`approvalGateUserWaitMs` SOT 통합 + `executor-ceiling.test.ts` / `mcp-governance.test.ts` / `startup-timeout.test.ts` runtime test 추가.
 
 ## Build
 
