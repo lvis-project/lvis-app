@@ -277,13 +277,13 @@ describe("BashTool — sandbox violation", () => {
 });
 
 describe("BashTool — schema default", () => {
-  it("input schema defaults timeoutSeconds to policy.shellDefaultSeconds when omitted", () => {
+  it("input schema defaults timeoutSeconds to policy.shellDefaultMs / 1000 when omitted", () => {
     const parsed = BashToolInputSchema.parse({ command: "echo hi" });
-    expect(parsed.timeoutSeconds).toBe(TOOL_TIMEOUT_POLICY.shellDefaultSeconds);
+    expect(parsed.timeoutSeconds).toBe(TOOL_TIMEOUT_POLICY.shellDefaultMs / 1000);
   });
 
-  it("input schema rejects timeoutSeconds above policy.shellMaxSeconds", () => {
-    const above = TOOL_TIMEOUT_POLICY.shellMaxSeconds + 1;
+  it("input schema rejects timeoutSeconds above policy.shellMaxMs / 1000", () => {
+    const above = TOOL_TIMEOUT_POLICY.shellMaxMs / 1000 + 1;
     expect(() => BashToolInputSchema.parse({ command: "echo hi", timeoutSeconds: above })).toThrow();
   });
 });
