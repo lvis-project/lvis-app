@@ -54,8 +54,30 @@ export function getDeclaredEmittedEvents(manifest: PluginManifest): string[] {
  * Lazy-load + compile the SDK plugin manifest schema into an AJV validator.
  * The SDK schema is the manifest shape SOT; if it cannot be resolved or
  * compiled, plugin loading must fail closed instead of switching validators.
+ *
+ * PR #894 review B5 — when the SDK exposes a `compileManifestValidator()`
+ * helper, prefer it so host + SDK never drift apart on AJV options. The
+ * helper is intentionally optional; older SDK builds (pre-#893 follow-up)
+ * fall through to the local AJV compile path with a one-shot warn so
+ * operators see the drift signal in logs.
  */
 export async function buildManifestValidator(): Promise<ValidateFunction> {
+  try {
+    // Prefer SDK helper when available so AJV options stay in lockstep.
+    type SdkModule = { compileManifestValidator?: () => ValidateFunction };
+    const sdk = (await import("@lvis/plugin-sdk")) as unknown as SdkModule;
+    if (typeof sdk.compileManifestValidator === "function") {
+      return sdk.compileManifestValidator();
+    }
+    log.warn(
+      "SDK does not export compileManifestValidator() — falling back to host-local AJV compile. Update @lvis/plugin-sdk to keep manifest validation in lockstep.",
+    );
+  } catch (err) {
+    // SDK import itself failed (rare — host always depends on SDK for
+    // types). Fall through to the local compile so plugin loading isn't
+    // blocked on an SDK packaging quirk.
+    log.warn(`SDK validator import failed, using host-local AJV: ${(err as Error).message}`);
+  }
   try {
     const schemaPath = createRequire(import.meta.url).resolve(
       "@lvis/plugin-sdk/schemas/plugin-manifest.schema.json",
@@ -194,6 +216,26 @@ export async function parsePluginJson(
 
   if (typeof parsed.id !== "string" || parsed.id.length === 0) {
     fail("id", "must be a non-empty string", `"id": "com.example.meeting-recorder"`);
+  }
+  // PR #894 review B8 — reject malformed dotted ids that create ambiguity
+  // in the `plugin.<pluginId>.*` secret namespace, the audit log
+  // `[plugin:${id}]` prefix, and the host-secret allowlist key parser.
+  //   - Leading/trailing dots produce empty segments (`plugin..foo.bar`)
+  //   - Consecutive dots (`..`) make audit log greps unparseable
+  // Reason tag is `manifest_schema` to match the supply-chain audit tag.
+  // Normal dot-segmented ids (`com.example.meeting-recorder`) remain valid
+  // per the SDK schema's "dot-format recommended" convention.
+  if (
+    typeof parsed.id === "string" &&
+    (parsed.id.startsWith(".") ||
+      parsed.id.endsWith(".") ||
+      parsed.id.includes(".."))
+  ) {
+    fail(
+      "id",
+      `value '${parsed.id}' has malformed dot segments (leading/trailing/consecutive dots) — manifest_schema. Dotted ids are allowed (e.g. 'com.example.foo'), but each segment must be non-empty`,
+      `"id": "com.example.meeting-recorder"`,
+    );
   }
   // Stable SemVer only — same regex as the SDK schema and the per-plugin
   // publish.yml tag-validation step. Anchored on both ends so `1.2.3.4`,

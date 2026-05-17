@@ -121,4 +121,53 @@ describe("manifest hostSecrets.read[] validator (#893)", () => {
     const parsed = await parsePluginJson(path, validator);
     expect(parsed.hostSecrets).toBeUndefined();
   });
+
+  // PR #894 review B8 — manifest id dot-segment validation
+  describe("manifest id dot-segment guard (B8)", () => {
+    async function writeManifestWithId(id: string): Promise<string> {
+      const path = join(workDir, "plugin.json");
+      await writeFile(
+        path,
+        JSON.stringify({
+          id,
+          name: "Id Test",
+          description: "x",
+          version: "1.0.0",
+          entry: "dist/p.js",
+          tools: ["t_one"],
+        }),
+      );
+      return path;
+    }
+
+    it("accepts normal dot-segmented ids (com.example.foo)", async () => {
+      const path = await writeManifestWithId("com.example.meeting-recorder");
+      const parsed = await parsePluginJson(path, makeValidator());
+      expect(parsed.id).toBe("com.example.meeting-recorder");
+    });
+
+    // Leading dots are rejected at AJV pattern level (the SDK schema's
+    // id pattern requires a leading letter), so the host-side check never
+    // sees them. We still want to verify the AJV path rejects.
+    it("rejects ids with leading dots", async () => {
+      const path = await writeManifestWithId(".com.example.foo");
+      await expect(parsePluginJson(path, makeValidator())).rejects.toThrow(
+        /id.*pattern/i,
+      );
+    });
+
+    it("rejects ids with trailing dots (manifest_schema)", async () => {
+      const path = await writeManifestWithId("com.example.foo.");
+      await expect(parsePluginJson(path, makeValidator())).rejects.toThrow(
+        /id.*manifest_schema/,
+      );
+    });
+
+    it("rejects ids with consecutive dots (manifest_schema)", async () => {
+      const path = await writeManifestWithId("com..example.foo");
+      await expect(parsePluginJson(path, makeValidator())).rejects.toThrow(
+        /id.*manifest_schema/,
+      );
+    });
+  });
 });
