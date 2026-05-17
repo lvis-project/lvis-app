@@ -121,7 +121,6 @@ export function PluginConfigSchemaForm({
     setDraft({ ...values });
   }, [values]);
   const [secretDrafts, setSecretDrafts] = useState<Record<string, string>>({});
-  const [secretSaving, setSecretSaving] = useState<Record<string, boolean>>({});
   const required = new Set(schema.required ?? []);
 
   const buildOut = useCallback(
@@ -155,10 +154,19 @@ export function PluginConfigSchemaForm({
     IMMEDIATE_SAVE_DEBOUNCE_MS,
   );
 
-  const handleManualSave = useCallback(() => {
+  // Unified "변경사항 저장" — writes cleartext via `onSave` AND any dirty
+  // secret drafts via `onSetSecret`. Cleartext goes to settings.json,
+  // secrets land in the OS keychain on a separate IPC; from the user's
+  // perspective there is ONE Save button that persists everything.
+  const handleManualSave = useCallback(async () => {
     autoSave.cancel();
-    void saveDraft(draft);
-  }, [autoSave, draft, saveDraft]);
+    await saveDraft(draft);
+    const dirtySecretKeys = Object.keys(secretDrafts).filter((k) => secretDrafts[k].length > 0);
+    for (const key of dirtySecretKeys) {
+      await onSetSecret(key, secretDrafts[key]);
+    }
+    if (dirtySecretKeys.length > 0) setSecretDrafts({});
+  }, [autoSave, draft, saveDraft, secretDrafts, onSetSecret]);
 
   /** Update + schedule auto-save (200ms debounce). For toggle/enum. */
   const updateImmediate = useCallback(
@@ -174,26 +182,14 @@ export function PluginConfigSchemaForm({
     setDraft((prev) => ({ ...prev, [key]: value }));
   }, []);
 
-  const handleSetSecret = useCallback(
-    async (key: string) => {
-      const value = secretDrafts[key] ?? "";
-      setSecretSaving((prev) => ({ ...prev, [key]: true }));
-      try {
-        await onSetSecret(key, value);
-        setSecretDrafts((prev) => ({ ...prev, [key]: "" }));
-      } finally {
-        setSecretSaving((prev) => ({ ...prev, [key]: false }));
-      }
-    },
-    [secretDrafts, onSetSecret],
-  );
-
-  // Only show the section-level "변경사항 저장" button when there is at
-  // least one explicit-save field (text/number/array). Pure toggle/enum
-  // forms auto-save and the button would just be visual noise.
+  // Show the section-level "변경사항 저장" button when there is at least
+  // one explicit-save field (text/number/array) OR any secret field —
+  // secrets persist through this same button (unified save flow).
+  // Pure toggle/enum forms with no secrets auto-save and the button
+  // would just be visual noise.
   const hasExplicitSaveFields = propertyKeys.some((key) => {
     const prop = properties[key];
-    if (prop.type === "string" && prop.format === "secret") return false;
+    if (prop.type === "string" && prop.format === "secret") return true;
     if (prop.type === "boolean") return false;
     if (prop.enum) return false;
     return true;
@@ -222,40 +218,17 @@ export function PluginConfigSchemaForm({
               <p className="text-[11px] text-muted-foreground">{prop.description}</p>
             )}
             {isSecret ? (
-              <>
-                <div className="flex items-center gap-2">
-                  <Input
-                    id={fieldId}
-                    type="password"
-                    className="h-7 text-xs flex-1"
-                    placeholder={secretsPresent[key] ? "**** (저장됨)" : "값을 입력하세요"}
-                    value={secretDrafts[key] ?? ""}
-                    onChange={(e) =>
-                      setSecretDrafts((prev) => ({ ...prev, [key]: e.target.value }))
-                    }
-                  />
-                  <Button
-                    size="sm"
-                    className="h-7 text-xs px-2"
-                    onClick={() => void handleSetSecret(key)}
-                    disabled={Boolean(secretSaving[key])}
-                    data-testid={`${fieldId}:save`}
-                    title="OS 키체인에 즉시 저장합니다 (배치 저장 대상이 아님)"
-                  >
-                    {secretSaving[key] ? "저장 중…" : "저장"}
-                  </Button>
-                </div>
-                {/* Why does this field have its OWN Save while others batch
-                    at the bottom? Secrets (api keys, tokens) go through a
-                    separate IPC (`pluginConfig.setSecret`) that writes to
-                    the OS keychain per-field — they CAN'T be batched with
-                    cleartext config (different storage backend). Surface
-                    that asymmetry inline so the user isn't confused
-                    (user feedback 2026-05-18). */}
-                <p className="text-[10px] text-muted-foreground">
-                  🔒 보안 — 이 값은 OS 키체인에 즉시 저장됩니다. 하단 일괄 저장에 포함되지 않습니다.
-                </p>
-              </>
+              <Input
+                id={fieldId}
+                type="password"
+                className="h-7 text-xs"
+                placeholder={secretsPresent[key] ? "**** (저장됨)" : "값을 입력하세요"}
+                value={secretDrafts[key] ?? ""}
+                onChange={(e) =>
+                  setSecretDrafts((prev) => ({ ...prev, [key]: e.target.value }))
+                }
+                data-testid={`${fieldId}:input`}
+              />
             ) : prop.enum ? (
               <NativeSelect
                 id={fieldId}
@@ -356,11 +329,11 @@ export function PluginConfigSchemaForm({
       {hasExplicitSaveFields && (
         <div className="flex items-center justify-between gap-3 border-t border-border/40 pt-2">
           <p className="text-[10px] text-muted-foreground">
-            토글 · 드롭다운은 자동 저장됩니다. 입력 필드는 변경 후 우측 버튼으로 저장하세요.
+            토글 · 드롭다운은 자동 저장됩니다. 입력 필드 · API 키는 변경 후 저장 버튼을 눌러주세요.
           </p>
           <Button
             size="sm"
-            onClick={handleManualSave}
+            onClick={() => void handleManualSave()}
             disabled={Boolean(saving)}
             data-testid={`plugin-config-form:${pluginId}:save`}
           >
