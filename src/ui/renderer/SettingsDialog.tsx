@@ -241,7 +241,7 @@ export function SettingsContent({
         aria-label="설정 카테고리"
         className="flex h-full w-48 shrink-0 flex-col items-stretch gap-0.5 overflow-y-auto rounded-md border bg-muted/30 p-1.5"
       >
-        <TabsTrigger value="llm" className={sideTriggerCls}>지능 (LLM)</TabsTrigger>
+        <TabsTrigger value="llm" className={sideTriggerCls}>모델</TabsTrigger>
         <TabsTrigger value="appearance" className={sideTriggerCls}>테마</TabsTrigger>
         <TabsTrigger value="chat" className={sideTriggerCls}>채팅</TabsTrigger>
         <TabsTrigger value="web" className={sideTriggerCls}>검색 (Web)</TabsTrigger>
