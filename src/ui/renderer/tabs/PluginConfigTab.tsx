@@ -378,14 +378,6 @@ export function PluginConfigTab() {
         </div>
       )}
 
-      {/* Section sub-header — "플러그인 환경 설정" (user directive 2026-05-18).
-          Renders unconditionally so the title is a stable anchor during
-          loading / empty-state. */}
-      <div className="space-y-1">
-        <h3 className="text-base font-semibold tracking-tight">플러그인 환경 설정</h3>
-        <p className="text-sm text-muted-foreground">선택된 플러그인의 활성화 + 개별 설정값을 편집합니다</p>
-      </div>
-
       {loading ? (
         <p className="text-xs text-muted-foreground">로딩 중…</p>
       ) : plugins.length === 0 ? (
@@ -393,14 +385,16 @@ export function PluginConfigTab() {
           설치된 플러그인이 없습니다.
         </div>
       ) : (
-        // Split fills the tab's available height (`flex-1 min-h-0`).
-        // Sub-sidebar (left, w-60 shrink-0) stays fixed; its internal
-        // ScrollArea covers the full height. Right detail pane gets
-        // `overflow-y-auto min-h-0` so the editor scrolls based on the
-        // count of config keys — user directive 2026-05-18:
-        // "플러그인 개별 환경설정 항목 개수에 따라 오버플로우가 충분히 되어
-        //  스크롤이 동적으로 변화 할 수 있도록".
-        <div className="flex flex-1 min-h-0 gap-3">
+        // Split height is explicit `h-[calc(100dvh-250px)]` (with a 350px
+        // floor) because `flex-1 min-h-0` does not propagate height through
+        // the outer settings-window scroll container (`overflow-y-auto`
+        // bounds children to content size, not viewport). The 250px reserve
+        // covers: CustomTitleBar (36) + right-pane padding (40) + page
+        // header (94) + dev-mode banner (50, when visible) + gap-3 buffer.
+        // Sub-sidebar (left, w-60 shrink-0) stays fixed; the internal
+        // ScrollArea in each pane handles overflow — user directive
+        // 2026-05-18: 사이드바 고정 + 우측 디테일만 스크롤.
+        <div className="flex gap-3 h-[calc(100dvh-250px)] min-h-[350px]">
           {/* Left: plugin list (sub-sidebar — fixed width) */}
           <div className="w-60 shrink-0 rounded-md border bg-card">
             <ScrollArea className="h-full">
@@ -473,11 +467,13 @@ export function PluginConfigTab() {
             </ScrollArea>
           </div>
 
-          {/* Right: detail + key-value editor. `overflow-y-auto min-h-0`
-              makes the editor scroll internally when the plugin has many
-              config keys — keeps the sub-sidebar (left) visible while
-              the user reviews/edits a long list. */}
-          <div className="flex-1 min-w-0 flex flex-col gap-2 rounded-md border bg-card p-3 overflow-y-auto min-h-0">
+          {/* Right: detail + key-value editor. The internal ScrollArea
+              around `PluginConfigSchemaForm` handles overflow when the
+              plugin has many config keys — keeps the sub-sidebar (left)
+              visible while the user reviews/edits a long list. The
+              wrapper deliberately does NOT add `overflow-y-auto`; that
+              would compete with the inner ScrollArea and double-clip. */}
+          <div className="flex-1 min-w-0 flex flex-col gap-2 rounded-md border bg-card p-3">
             {selectedPlugin ? (
               <>
                 <div className="flex items-start justify-between gap-2">
@@ -549,20 +545,25 @@ export function PluginConfigTab() {
                   apiForAuthHook && (
                   <>
                     <Separator />
-                    <PluginAuthSection
-                      // `key` forces React to remount the section when the
-                      // user switches between plugins in the list. Without
-                      // it the same instance is reused across plugin
-                      // selections and stale internal state (`working`,
-                      // `localError`) carries over between plugins.
-                      key={selectedPlugin.id}
-                      api={apiForAuthHook}
-                      pluginId={selectedPlugin.id}
-                      pluginName={selectedPlugin.name}
-                      auth={selectedPlugin.auth}
-                      state={authStatuses.get(selectedPlugin.id) ?? { kind: "loading" }}
-                      onRefresh={() => refreshAuthStatus(selectedPlugin.id)}
-                    />
+                    <div className="space-y-1.5">
+                      {/* Section label — pairs with "제공 툴" + "환경 설정" so
+                          the right-pane has a visible 3-section hierarchy. */}
+                      <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">인증</span>
+                      <PluginAuthSection
+                        // `key` forces React to remount the section when the
+                        // user switches between plugins in the list. Without
+                        // it the same instance is reused across plugin
+                        // selections and stale internal state (`working`,
+                        // `localError`) carries over between plugins.
+                        key={selectedPlugin.id}
+                        api={apiForAuthHook}
+                        pluginId={selectedPlugin.id}
+                        pluginName={selectedPlugin.name}
+                        auth={selectedPlugin.auth}
+                        state={authStatuses.get(selectedPlugin.id) ?? { kind: "loading" }}
+                        onRefresh={() => refreshAuthStatus(selectedPlugin.id)}
+                      />
+                    </div>
                   </>
                 )}
 
@@ -627,7 +628,11 @@ export function PluginConfigTab() {
                   // through pluginConfig.set; format:'secret' fields go
                   // through pluginConfig.setSecret so values land in the
                   // encrypted keychain instead of cleartext settings.json.
-                  <ScrollArea className="flex-1 min-h-0">
+                  // Wrapped in `flex-col flex-1 min-h-0` so the section
+                  // label + ScrollArea share the remaining vertical space.
+                  <div className="flex flex-1 min-h-0 flex-col gap-1.5">
+                    <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">환경 설정</span>
+                    <ScrollArea className="flex-1 min-h-0">
                     <div className="pr-2">
                       <PluginConfigSchemaForm
                         pluginId={selectedPlugin.id}
@@ -675,6 +680,7 @@ export function PluginConfigTab() {
                       />
                     </div>
                   </ScrollArea>
+                  </div>
                 ) : (
                   <>
                     {/* "환경변수" section — schema-less plugins use the raw
