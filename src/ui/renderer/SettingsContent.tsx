@@ -231,7 +231,11 @@ export function SettingsContent({
       {/* Sidebar — fixed column, scrolls independently if the trigger list
           ever grows beyond the available height. The list stays put when
           the right pane scrolls (the headline ux complaint that motivated
-          the sidebar conversion). */}
+          the sidebar conversion).
+          Outer div owns the column width + border-r so the version footer
+          can sit below the nav list as a sibling (Radix TabsList only
+          accepts TabsTrigger children). */}
+      <div className="flex h-full w-48 shrink-0 flex-col border-r">
       <TabsList
         aria-label="설정 카테고리"
         // Vertical sidebar — the shadcn TabsList primitive defaults to a
@@ -244,7 +248,7 @@ export function SettingsContent({
         // 올라옴" symptom). Explicit `justify-start` + `h-full` + plain
         // `flex` (not inline-flex) + `rounded-none bg-transparent` make
         // the override unambiguous.
-        className="flex h-full w-48 shrink-0 flex-col items-stretch justify-start gap-1 overflow-y-auto rounded-none border-r bg-transparent p-2"
+        className="flex flex-1 flex-col items-stretch justify-start gap-1 overflow-y-auto rounded-none bg-transparent p-2"
       >
         <TabsTrigger value="llm" className={sideTriggerCls}>
           <Brain className={navIconCls} aria-hidden="true" />
@@ -300,6 +304,14 @@ export function SettingsContent({
           마켓플레이스
         </TabsTrigger>
       </TabsList>
+      {/* Version footer — fills dead space at the bottom of the sidebar
+          tastefully. Static text only; no IPC needed. */}
+      <div className="shrink-0 border-t px-3 py-2.5">
+        <span className="text-[11px] tabular-nums text-muted-foreground/60 select-none">
+          v0.1.6
+        </span>
+      </div>
+      </div>
 
       {/* Right pane — two-layer layout so split-pane tabs (PluginConfigTab,
           McpTab) can use h-full reliably.
