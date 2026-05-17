@@ -78,6 +78,7 @@ import { sendToWindow } from "./ipc/safe-send.js";
 import { startWatcherTelemetryCollector } from "./boot/steps/watcher-telemetry-collector.js";
 import { bootstrapCoreServices } from "./boot/services.js";
 import { registerPluginNotifications } from "./boot/plugins.js";
+import { createRefreshActiveLlmWildcard } from "./boot/steps/refresh-active-llm-wildcard.js";
 import {
   registerBuiltinTools,
   registerRequestPluginMetaTool,
@@ -483,36 +484,18 @@ export async function bootstrap(
   // Injecting the apiKey into a wildcard config slot bypassed that gate
   // — every plugin received the key via `config.get("hostApiKey")`
   // regardless of its manifest. Removing it closes that hole.
-  let lastWildcardVendor: string | null = null;
-  let restartTimer: NodeJS.Timeout | null = null;
-  const refreshActiveLlmWildcard = (): void => {
-    const llm = settingsService.get("llm");
-    const activeVendor = llm.provider;
-    // Always clear the stale `hostApiKey` slot — older builds populated it,
-    // and a soft-reload after upgrade would otherwise leave a ghost value.
-    pluginRuntime.clearWildcardConfigOverride(["hostApiKey"]);
-    pluginRuntime.setWildcardConfigOverride({ hostApiVendor: activeVendor });
-
-    // PR #894 T1-2 — when the vendor actually changes, restart active
-    // plugins so their next `hostApi.config.get("hostApiVendor")` /
-    // `hostApi.getSecret(...)` call observes the new value without an app
-    // restart. Debounce to coalesce bursts from rapid settings churn
-    // (vendor + key + baseUrl all patched in one IPC, see settings.ts).
-    // First call (boot init) seeds `lastWildcardVendor` without restarting.
-    if (lastWildcardVendor !== null && lastWildcardVendor !== activeVendor) {
-      if (restartTimer) clearTimeout(restartTimer);
-      restartTimer = setTimeout(() => {
-        restartTimer = null;
-        const ids = pluginRuntime.listPluginIds();
-        for (const pid of ids) {
-          pluginRuntime.restartPlugin(pid).catch((err: unknown) => {
-            log.warn(`restartPlugin(${pid}) after vendor change failed: ${(err as Error).message}`);
-          });
-        }
-      }, 200);
-    }
-    lastWildcardVendor = activeVendor;
-  };
+  // PR #894 Cycle 3 T1-2 — factory extracted to
+  // `boot/steps/refresh-active-llm-wildcard.ts` so the debounce + vendor-
+  // change-restart contract is independently unit-testable. Same semantics
+  // as before: first call seeds, subsequent vendor changes trigger a
+  // debounced restart sweep of every loaded plugin.
+  const { refresh: refreshActiveLlmWildcard } = createRefreshActiveLlmWildcard({
+    getActiveVendor: () => settingsService.get("llm").provider,
+    setWildcardConfigOverride: (config) => pluginRuntime.setWildcardConfigOverride(config),
+    clearWildcardConfigOverride: (keys) => pluginRuntime.clearWildcardConfigOverride(keys),
+    listPluginIds: () => pluginRuntime.listPluginIds(),
+    restartPlugin: (pid) => pluginRuntime.restartPlugin(pid),
+  });
   refreshActiveLlmWildcard();
 
   // §9.5 — Managed plugin bootstrap. Mandatory enterprise plugins are fetched
