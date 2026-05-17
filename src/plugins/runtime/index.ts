@@ -709,6 +709,40 @@ export class PluginRuntime {
   }
 
   /**
+   * #893 — Wildcard (`"*"` slot) config injection. Plugins read these via
+   * `hostApi.config.get("hostApiKey")` / `hostApi.config.get("hostApiVendor")`;
+   * the host pushes the active LLM vendor's apiKey + vendor id here so a
+   * plugin that needs an LLM call doesn't have to ship its own
+   * vendor-detection logic. Merges with existing wildcard overrides
+   * (e.g. `pythonExecutable`) so calling this does NOT clobber unrelated
+   * keys set by other boot steps.
+   */
+  setWildcardConfigOverride(config: Record<string, unknown>): void {
+    if (Object.keys(config).length === 0) return;
+    this.configOverrides["*"] = {
+      ...(this.configOverrides["*"] ?? {}),
+      ...config,
+    };
+  }
+
+  /**
+   * #893 — Inverse of `setWildcardConfigOverride`. Clears ONLY the keys
+   * named in `keys` from the wildcard slot, preserving other injected
+   * values. When `keys` is empty the call is a no-op so the unrelated
+   * `pythonExecutable` slot survives a vendor swap.
+   */
+  clearWildcardConfigOverride(keys: string[]): void {
+    const current = this.configOverrides["*"];
+    if (!current) return;
+    for (const key of keys) {
+      delete current[key];
+    }
+    if (Object.keys(current).length === 0) {
+      delete this.configOverrides["*"];
+    }
+  }
+
+  /**
    * US-A3 — Targeted single-plugin add for install / install-local paths.
    */
   async addPlugin(pluginId: string): Promise<void> {
