@@ -93,8 +93,11 @@ export const DEFAULT_PRICING: Record<PricingVendor, Record<string, ModelPricing>
     //   - mini/nano 의 contextWindow 가 1.05M 로 잘못 등록 → 실제 400K
     //   - pricing 도 input/output 양쪽 모두 stale (mini/nano 는 ~2.5x, pro 는 ~5x 저평가)
     // gpt-5.4 / gpt-5.4-pro 의 1M-class window 는 272K 초과 시 2x input + 1.5x output
-    // 의 *세션 전체* 가격 우상향 — 본 테이블의 inputPer1M/outputPer1M 은 *standard tier*
-    // (≤272K) 기준이며, surcharge 는 별도 layer 에서 계산.
+    // 의 *세션 전체* 가격 우상향. 본 테이블의 inputPer1M/outputPer1M 은 *standard tier*
+    // (≤272K) 기준이며 surcharge 는 **현재 미구현** — 입력 size 감지 + multiplier 적용
+    // 은 본 PR scope 외. issue #900 follow-up 으로 추적 (computeCost 의 openai 분기
+    // 에 input>272K 시 2x/1.5x 곱셈 layer 추가). >272K 세션의 cost 추정치는 현재
+    // 실제 청구액 대비 ~50% 저평가됨.
     "gpt-5.4":                     { inputPer1M: 2.5,  outputPer1M: 15,  contextWindow: 1_050_000 },
     "gpt-5.4-mini":                { inputPer1M: 0.75, outputPer1M: 4.5, contextWindow:   400_000 },
     "gpt-5.4-nano":                { inputPer1M: 0.2,  outputPer1M: 1.25, contextWindow:  400_000 },
