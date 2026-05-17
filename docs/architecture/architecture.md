@@ -2877,6 +2877,7 @@ hostApi.emitEvent(`${pluginId}.auth.changed`);  // 예: "ms-graph.auth.changed"
 - `manifest-validation.ts` 의 cross-field check 가 `auth` 선언 시 `emittedEvents[]` 에 `${id}.auth.changed` 가 빠져있으면 load-time `log.warn` 발행 — drift 신호 (soft warn, hard fail 은 grace 후 별 PR 에서 전환 검토).
 - 네임스페이스는 plugin id prefix 라 `classifySubscription` 에서 `neutral` 로 떨어지지만 (private 아님), `boot/steps/ipc-bridge.ts` 가 neutral / public 둘 다 forward.
 - 호스트 `usePluginAuthStatuses` 훅이 이벤트를 받아 statusTool 를 재호출 → 뱃지 갱신. **폴링 안 함** — 폐기된 `onMsGraphAuthChange` host-callback 안티패턴 회귀 방지.
+- **다중 emit 허용** — payload 자체가 advisory (`{authenticated: boolean}` 정도) 이고 host 는 매번 statusTool 을 재호출하는 pull-model 이므로, 한 로그인 시퀀스에서 동일 `${id}.auth.changed{true}` 이벤트가 여러 번 emit 되는 것이 정상이다. 대표 사례: lge-api 의 `lge_login` 핸들러가 (a) EP cookie harvest 직후 1차 emit (UI auth-overlay 즉시 hide), (b) `runTier1Enrichment` 가 LDAP/SSO 로 identity (`empNo`/`empNm` 등) 를 보강한 뒤 2차 emit (사이드바 사번/이름 badge refresh) 를 보낸다. host hook 은 매 emit 마다 statusTool 재호출이 idempotent 하다고 가정 — flicker 가 보이면 그건 hook 측 다이프 부재 회귀이지 plugin 의 emit 횟수 문제가 아니다. `lastEmittedAuthState` 같은 dedup 가드는 *transition* (`true → false`, `false → true`) 에만 의미가 있고, progressive identity refresh 같이 같은 boolean 으로 다시 emit 하는 케이스는 의도적으로 우회한다.
 
 **호스트 UI surface**
 
