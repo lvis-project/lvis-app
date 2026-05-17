@@ -534,6 +534,64 @@ describe("initPluginRuntime HostApi factory", () => {
     runtimeTestState.capturedRuntimeOptions = null;
     const bootAuditLogger = { log: vi.fn() };
 
+    // #893 Stage 2 — seed the whitelist registry with a grant for plugin-b6
+    // so tier-3 lets the call through; B6 specifically exercises tier-4
+    // active-vendor cross-check inside getSecret.
+    const { whitelistRegistry } = await import(
+      "../../../plugins/whitelist/whitelist-registry.js"
+    );
+    const { WhitelistCache } = await import(
+      "../../../plugins/whitelist/whitelist-cache.js"
+    );
+    const { WHITELIST_PUBLIC_KEYS, WHITELIST_PRIMARY_KEY_ID } = await import(
+      "../../../plugins/marketplace-keys.js"
+    );
+    const { generateKeyPairSync, sign, createHash } = await import("node:crypto");
+    const { mkdtempSync: mkdtempSyncOs } = await import("node:fs");
+    whitelistRegistry.resetForTesting();
+    const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+    const rawPub = publicKey.export({ type: "spki", format: "der" }).slice(-32);
+    WHITELIST_PUBLIC_KEYS[WHITELIST_PRIMARY_KEY_ID] = rawPub.toString("base64");
+    const grantDoc = {
+      version: 1,
+      schemaVersion: 1,
+      issuedAt: "2026-05-17T00:00:00.000Z",
+      expiresAt: "2030-01-01T00:00:00.000Z",
+      pluginGrants: {
+        "plugin-b6": {
+          publisher: "test",
+          hostSecrets: { read: ["llm.apiKey.openai", "llm.apiKey.claude"] },
+          // Hash of the canonicalized manifest used below.
+          approvedManifestSha256: createHash("sha256")
+            .update(
+              JSON.stringify(
+                {
+                  id: "plugin-b6",
+                  config: {},
+                  hostSecrets: { read: ["llm.apiKey.openai", "llm.apiKey.claude"] },
+                },
+                ["config", "hostSecrets", "id"],
+              ),
+            )
+            .digest("hex"),
+        },
+      },
+    };
+    const grantBody = JSON.stringify(grantDoc);
+    const grantSig = sign(null, Buffer.from(grantBody, "utf-8"), privateKey);
+    const envelope = {
+      version: 1,
+      iat: Math.floor(Date.now() / 1000),
+      artifact_sha256: createHash("sha256").update(Buffer.from(grantBody, "utf-8")).digest("hex"),
+      signatures: [
+        { key_id: WHITELIST_PRIMARY_KEY_ID, alg: "ed25519", sig: grantSig.toString("base64") },
+      ],
+    };
+    const cacheRoot = mkdtempSyncOs("/tmp/lvis-b6-whitelist-");
+    const cache = new WhitelistCache(cacheRoot);
+    await cache.store({ body: grantBody, signature: JSON.stringify(envelope), meta: {} });
+    await whitelistRegistry.init({ userDataDir: cacheRoot, online: false });
+
     const getSecretMock = vi.fn((key: string) => {
       if (key === "llm.apiKey.openai") return "sk-openai";
       if (key === "llm.apiKey.claude") return "sk-claude";

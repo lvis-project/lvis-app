@@ -120,6 +120,7 @@ import {
   runWithInvocationOrigin,
 } from "./plugins/runtime/origin-chain.js";
 import { initPluginRuntime } from "./boot/steps/plugin-runtime.js";
+import { wireWhitelistRegistry } from "./boot/steps/whitelist-bootstrap.js";
 import { registerPluginEventBridge } from "./boot/steps/ipc-bridge.js";
 import { wireReleasePrep, wireUpdateCheck } from "./boot/steps/post-boot.js";
 import { wireReviewerAgent } from "./boot/steps/reviewer-wiring.js";
@@ -337,6 +338,13 @@ export async function bootstrap(
     .catch((err) => {
       log.warn("boot: diff-cache-sweeper crashed (non-fatal): %s", (err as Error).message);
     });
+
+  // #893 Stage 2 — Load the marketplace whitelist registry BEFORE
+  // initPluginRuntime. The per-plugin HostApi factory consults the registry
+  // synchronously from `getSecret`; if the registry isn't initialized the
+  // tier-3 check fails closed with `whitelist-unreachable`. Resolves on every
+  // path (success, offline, demo) so a network blip never blocks boot.
+  await wireWhitelistRegistry({ bootAuditLogger });
 
   const {
     pluginRuntime,

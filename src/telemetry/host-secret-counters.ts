@@ -14,7 +14,34 @@
  * via the counter snapshot.
  */
 
-export type HostSecretCounterEvent = "hostSecret_read" | "hostSecret_denied";
+export type HostSecretCounterEvent =
+  | "hostSecret_read"
+  | "hostSecret_denied"
+  // #893 Stage 2 — whitelist registry observability. Bucketed under the same
+  // counter map so operators see allow / deny / whitelist-fetch state in a
+  // single inspection. `pluginId` = "boot" for registry-wide events; the
+  // `keyPrefix` slot holds the reason/source bucket (e.g. "network",
+  // "primary", "monotonicity").
+  | "whitelist_fetch_ok"
+  | "whitelist_fetch_failed"
+  | "whitelist_cache_hit"
+  | "whitelist_cache_stale"
+  | "whitelist_cache_miss_offline";
+
+/**
+ * #893 — `hostSecret_denied` denial taxonomy. Recorded into the audit log
+ * (free-form text) alongside the counter increment so operators can pivot
+ * on specific reasons. The bucket key in `counters` stays one of
+ * `HostSecretCounterEvent` to keep cardinality bounded — the reason is a
+ * free-form audit-only tag, not a Map index.
+ */
+export type HostSecretDeniedReason =
+  | "not-allowlisted"
+  | "non-active-vendor"
+  | "not-whitelisted"
+  | "manifest-sha-mismatch"
+  | "whitelist-unreachable"
+  | "whitelist-stale-exceeded";
 
 /**
  * PR #894 review B7 — Known, bounded set of key prefixes the host counter
@@ -28,7 +55,26 @@ export type HostSecretCounterEvent = "hostSecret_read" | "hostSecret_denied";
  * new access — the three-tier gate in `plugin-runtime.ts` is still the
  * authority — it only changes how the counter buckets the call.
  */
-const KNOWN_PREFIXES = new Set<string>(["llm", "plugin", "marketplace", "web"]);
+const KNOWN_PREFIXES = new Set<string>([
+  "llm",
+  "plugin",
+  "marketplace",
+  "web",
+  // #893 Stage 2 — whitelist registry buckets ("primary" / "fallback" /
+  // "network" / "monotonicity" / "no-cache" / etc.). Keeping the bucket
+  // names in this allowlist preserves the O(1) cardinality guard while
+  // making the registry's per-reason counters readable in inspections.
+  "primary",
+  "fallback",
+  "network",
+  "signature_invalid",
+  "monotonicity",
+  "no-cache",
+  "corrupt",
+  "demo-snapshot",
+  "cache",
+  "default",
+]);
 
 /**
  * Fold a secret key into a small, bounded prefix bucket. The first
