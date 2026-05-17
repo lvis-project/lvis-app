@@ -103,15 +103,16 @@ export const DEFAULT_PRICING: Record<PricingVendor, Record<string, ModelPricing>
   // Unknown variant pricing intentionally left at 0 — env override expected.
   openai: {
     // gpt-5.4 family — OpenAI 공식 사양 (developers.openai.com/api/docs/models/gpt-5.4*,
-    // openai.com/api/pricing, 2026-05 시점 verify). 이전 값은 stale 이었음 (issue #900):
-    //   - mini/nano 의 contextWindow 가 1.05M 로 잘못 등록 → 실제 400K
-    //   - pricing 도 input/output 양쪽 모두 stale (mini/nano 는 ~2.5x, pro 는 ~5x 저평가)
-    // gpt-5.4 / gpt-5.4-pro 의 1M-class window 는 272K 초과 시 2x input + 1.5x output
-    // 의 *세션 전체* 가격 우상향. 본 테이블의 inputPer1M/outputPer1M 은 *standard tier*
-    // (≤272K) 기준이며 surcharge 는 **현재 미구현** — 입력 size 감지 + multiplier 적용
-    // 은 본 PR scope 외. issue #900 follow-up 으로 추적 (computeCost 의 openai 분기
-    // 에 input>272K 시 2x/1.5x 곱셈 layer 추가). >272K 세션의 cost 추정치는 현재
-    // 실제 청구액 대비 ~50% 저평가됨.
+    // openai.com/api/pricing, 2026-05 시점 verify).
+    //
+    // Long-context surcharge: gpt-5.4 / gpt-5.4-pro 의 1M-class window 는 input>272K
+    // 시 *세션 전체* 가 input 2x + output 1.5x 로 우상향 (flat full-session, NOT
+    // tiered — 272K 초과한 *순간* 모든 token 이 multiplier 적용). 본 테이블의
+    // inputPer1M/outputPer1M 은 standard tier (≤272K) 기준이고, 우상향 multiplier
+    // 는 surchargeInput{Threshold|Multiplier} / surchargeOutputMultiplier 필드로
+    // 자동 적용됨 — `computeCost` 의 openai/copilot/azure-foundry 분기 참조.
+    //
+    // gpt-5.4-mini / nano 는 OpenAI spec 상 surcharge 없음 (400K 단일 tier).
     "gpt-5.4":                     { inputPer1M: 2.5,  outputPer1M: 15,  contextWindow: 1_050_000, surchargeInputThreshold: 272_000, surchargeInputMultiplier: 2,   surchargeOutputMultiplier: 1.5 },
     "gpt-5.4-mini":                { inputPer1M: 0.75, outputPer1M: 4.5, contextWindow:   400_000 },
     "gpt-5.4-nano":                { inputPer1M: 0.2,  outputPer1M: 1.25, contextWindow:  400_000 },
