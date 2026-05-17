@@ -234,20 +234,6 @@ export function PermissionsTab() {
 
   useEffect(() => { void fetchAll(); }, [fetchAll]);
 
-  // Auto-refresh on cross-window directory config changes (allow-session
-  // grants applied from an out-of-allowed-dir dialog in another window,
-  // PermissionsTab dirDispatch from another window, slash-allow). Without
-  // this subscription, multi-window users have to manually reload the
-  // "session additions" view.
-  useEffect(() => {
-    const unsubscribe = window.lvis?.permission?.onConfigChanged?.(() => {
-      void fetchAll();
-    });
-    return () => {
-      unsubscribe?.();
-    };
-  }, [fetchAll]);
-
   const fetchApprovals = useCallback(async () => {
     if (!window.lvis?.userApproval) return;
     try {
@@ -259,6 +245,23 @@ export function PermissionsTab() {
   }, []);
 
   useEffect(() => { void fetchApprovals(); }, [fetchApprovals]);
+
+  // Auto-refresh on cross-window directory/rule/user-approval config changes
+  // (allow-session grants from out-of-allowed-dir dialog, addRule/removeRule
+  // through PermissionManager SOT, userApprovalRecord/Revoke in another
+  // window). Refresh BOTH `fetchAll` (rules + directories + mode) AND
+  // `fetchApprovals` (R-2 active approvals) so every PermissionsTab section
+  // stays in sync — the broadcast is a single hint event covering all
+  // permission-state mutations.
+  useEffect(() => {
+    const unsubscribe = window.lvis?.permission?.onConfigChanged?.(() => {
+      void fetchAll();
+      void fetchApprovals();
+    });
+    return () => {
+      unsubscribe?.();
+    };
+  }, [fetchAll, fetchApprovals]);
 
   const handleRevokeApproval = async (key: string, toolName: string, scope: UserApprovalScope) => {
     if (!window.lvis?.userApproval) return;

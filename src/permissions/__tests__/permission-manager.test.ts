@@ -413,3 +413,51 @@ describe("PermissionManager — overlay-trigger origin override", () => {
     expect(r.decision).toBe("deny");
   });
 });
+
+describe("PermissionManager — broadcastConfigChanged SOT (round-5 regression guard)", () => {
+  let pm: PermissionManager;
+
+  beforeEach(() => {
+    mockStore.rules = [];
+    mockStore.mode = "default";
+    _mockLock = Promise.resolve();
+    pm = new PermissionManager("/tmp/test-permissions.json");
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("addAlwaysAllowedPersist fires broadcastConfigChanged when wired", async () => {
+    const broadcast = vi.fn();
+    pm.setBroadcastConfigChanged(broadcast);
+    await pm.addAlwaysAllowedPersist("read_file");
+    expect(broadcast).toHaveBeenCalledTimes(1);
+  });
+
+  it("addAlwaysDeniedPersist fires broadcastConfigChanged when wired", async () => {
+    const broadcast = vi.fn();
+    pm.setBroadcastConfigChanged(broadcast);
+    await pm.addAlwaysDeniedPersist("write_file");
+    expect(broadcast).toHaveBeenCalledTimes(1);
+  });
+
+  it("removeRule fires broadcastConfigChanged when wired", async () => {
+    const broadcast = vi.fn();
+    pm.setBroadcastConfigChanged(broadcast);
+    // seed a rule so removeRule has something to remove
+    await pm.addAlwaysAllowedPersist("read_file");
+    broadcast.mockClear();
+    await pm.removeRule("read_file", "allow");
+    expect(broadcast).toHaveBeenCalledTimes(1);
+  });
+
+  it("mutations do not throw when broadcastConfigChanged is not wired (optional contract)", async () => {
+    // No setBroadcastConfigChanged call — the optional `?.` chain must
+    // silently skip rather than crash early-boot or test setups that
+    // don't need the renderer fan-out.
+    await expect(pm.addAlwaysAllowedPersist("a")).resolves.toBeUndefined();
+    await expect(pm.addAlwaysDeniedPersist("b")).resolves.toBeUndefined();
+    await expect(pm.removeRule("a", "allow")).resolves.toBeUndefined();
+  });
+});
