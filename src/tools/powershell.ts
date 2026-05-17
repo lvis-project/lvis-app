@@ -23,6 +23,7 @@ import {
   validateShellWorkingDirectory,
 } from "./shell-path-policy.js";
 import { getSandboxRunner } from "../permissions/sandbox-runner.js";
+import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
 
 type PipedChild = ChildProcessByStdio<null, Readable, Readable>;
 type PowerShellParser = (command: string) => Promise<PowerShellAstSummary>;
@@ -30,7 +31,12 @@ type PowerShellParser = (command: string) => Promise<PowerShellAstSummary>;
 export const PowerShellToolInputSchema = z.object({
   command: z.string().min(1).describe("PowerShell command to execute"),
   cwd: z.string().optional().describe("Working directory override"),
-  timeoutSeconds: z.number().int().min(1).max(600).default(600),
+  timeoutSeconds: z
+    .number()
+    .int()
+    .min(1)
+    .max(TOOL_TIMEOUT_POLICY.shellMaxSeconds)
+    .default(TOOL_TIMEOUT_POLICY.shellDefaultSeconds),
 });
 
 const OUTPUT_CAP = 12_000;
