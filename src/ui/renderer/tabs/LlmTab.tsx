@@ -184,18 +184,25 @@ export function LlmTab(props: LlmTabProps) {
               value={baseUrl}
               onChange={(e) => setBaseUrl(e.target.value)}
               placeholder={(vendorInfo as any).baseUrlPlaceholder ?? "https://..."}
+              readOnly={authMode === "login"}
+              disabled={authMode === "login"}
             />
-            <p className="text-[11px] text-muted-foreground">
-              ⓘ 저장 전 벤더 변경 시 현재 입력이 폐기됩니다.
-            </p>
-            {vendor === "azure-foundry" && (
+            {authMode === "login" && (
+              <p className="text-[11px] text-muted-foreground">(로그인으로 관리)</p>
+            )}
+            {authMode !== "login" && (
+              <p className="text-[11px] text-muted-foreground">
+                ⓘ 저장 전 벤더 변경 시 현재 입력이 폐기됩니다.
+              </p>
+            )}
+            {vendor === "azure-foundry" && authMode !== "login" && (
               <p className="text-[11px] text-muted-foreground">
                 Azure AI Foundry 엔드포인트 형식:
                 {" "}<code>https://{"{resource}"}.openai.azure.com/openai/deployments/{"{deployment}"}/</code>
                 {" "}— 모델 필드에는 deployment 이름을 입력합니다.
               </p>
             )}
-            {(vendor === "openai" || vendor === "copilot") && (
+            {(vendor === "openai" || vendor === "copilot") && authMode !== "login" && (
               <p className="text-[11px] text-muted-foreground">
                 프록시 또는 커스텀 엔드포인트를 사용하는 경우에만 입력합니다.
               </p>
@@ -215,6 +222,8 @@ export function LlmTab(props: LlmTabProps) {
                 value={vertexProject}
                 onChange={(e) => setVertexProject(e.target.value)}
                 placeholder="my-gcp-project"
+                readOnly={authMode === "login"}
+                disabled={authMode === "login"}
               />
             </div>
             <div className="space-y-1">
@@ -223,8 +232,13 @@ export function LlmTab(props: LlmTabProps) {
                 value={vertexLocation}
                 onChange={(e) => setVertexLocation(e.target.value)}
                 placeholder="us-central1 (기본값)"
+                readOnly={authMode === "login"}
+                disabled={authMode === "login"}
               />
             </div>
+            {authMode === "login" && (
+              <p className="text-[11px] text-muted-foreground">(로그인으로 관리)</p>
+            )}
           </div>
         )}
         {vendor !== "vertex-ai" && (
@@ -269,7 +283,20 @@ export function LlmTab(props: LlmTabProps) {
             )}
           </div>
         )}
-        <div className="space-y-2"><Label className="text-sm font-medium">모델</Label><Input data-testid="llm-model-input" value={model} onChange={(e) => setModel(e.target.value)} placeholder={vendorInfo.defaultModel} /></div>
+        <div className="space-y-2">
+          <Label className="text-sm font-medium">모델</Label>
+          <Input
+            data-testid="llm-model-input"
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+            placeholder={vendorInfo.defaultModel}
+            readOnly={authMode === "login"}
+            disabled={authMode === "login"}
+          />
+          {authMode === "login" && (
+            <p className="text-[11px] text-muted-foreground">(로그인으로 관리)</p>
+          )}
+        </div>
         {hasOnSave && (
           <SectionSaveBar
             onSave={onSave!}
