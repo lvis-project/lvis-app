@@ -388,12 +388,10 @@ export function PluginConfigTab() {
         // Split height fills to the viewport bottom. The 180px reserve
         // matches the actual non-split chrome above:
         //   CustomTitleBar 36 + right-pane pt-2 8 + TabsContent mt-2 8 +
-        //   page header (pt-2 8 + leading-9 36 + space-y-1.5 6 + desc 20 +
-        //                mb-6 24) = 94 + right-pane pb-8 32 ≈ 178.
+        //   page header (94) + right-pane pb-8 32 ≈ 178.
         // Right detail card stretches to fill the split height; its own
-        // `overflow-y-auto` handles all internal overflow (header + 인증 +
-        // 제공 툴 + 환경 설정 all flow inside one scrollable card so the
-        // entire 환경 설정 list is reachable — user directive 2026-05-18).
+        // `overflow-y-auto` is the single scroll surface for the card so
+        // the entire 환경 설정 list is reachable by scrolling.
         <div className="flex gap-3 h-[calc(100dvh-180px)] min-h-[350px]">
           {/* Left: plugin list (sub-sidebar — fixed width) */}
           <div className="w-60 shrink-0 rounded-md border bg-card">
@@ -470,8 +468,7 @@ export function PluginConfigTab() {
           {/* Right: detail card. The card itself is the ONE scroll surface
               for everything inside (header + 인증 + 제공 툴 + 환경 설정),
               so the user can scroll past the auth/tools sections to reach
-              the full list of config fields — user directive 2026-05-18
-              ("디테일 컨텐츠 전체가 스크롤", "환경설정이 전체 항목이 노출"). */}
+              the full list of config fields. */}
           <div className="flex-1 min-w-0 flex flex-col gap-2 rounded-md border bg-card p-3 overflow-y-auto min-h-0">
             {selectedPlugin ? (
               <>
@@ -544,9 +541,8 @@ export function PluginConfigTab() {
                   apiForAuthHook && (
                   <>
                     <Separator />
-                    {/* PluginAuthSection renders its OWN "인증" label
-                        internally — don't double-up. (User feedback
-                        2026-05-18: "인증이 왜 두개가 되었냐.") */}
+                    {/* PluginAuthSection renders its own "인증" header
+                        internally — no outer label needed. */}
                     <PluginAuthSection
                       // `key` forces React to remount the section when the
                       // user switches between plugins in the list. Without
