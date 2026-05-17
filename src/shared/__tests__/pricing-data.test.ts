@@ -5,6 +5,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  computeCost,
   DEFAULT_PRICING,
   FALLBACK_PRICING,
   lookupPricing,
@@ -143,5 +144,49 @@ describe("engine pricing env-override (Node-only layer)", () => {
       expect(p.outputPer1M).toBe(0);
       expect(p.contextWindow).toBe(400_000);
     });
+  });
+});
+
+// Long-context surcharge (issue #900). OpenAI 공식: gpt-5.4 / gpt-5.4-pro
+// 의 1M-class window 는 input>272K 시 *flat full-session* — 모든 token 이
+// input 2x + output 1.5x. tiered (272K 초과분만 multiplier) 가 아닌 cliff.
+// Sources: developers.openai.com/api/docs/models/gpt-5.4, openai.com/api/pricing
+describe("computeCost — long-context surcharge (issue #900)", () => {
+  const gpt54 = lookupPricing("openai", "gpt-5.4");
+  const gpt54mini = lookupPricing("openai", "gpt-5.4-mini");
+
+  it("input == threshold (272_000) — surcharge NOT applied (> check, not >=)", () => {
+    const cost = computeCost({ inputTokens: 272_000, outputTokens: 10_000 }, gpt54, "openai");
+    // standard: 272_000/1M × $2.5 + 10_000/1M × $15 = $0.68 + $0.15 = $0.83
+    expect(cost).toBeCloseTo(0.83, 5);
+  });
+
+  it("input == 272_001 — full session surcharge (input 2x + output 1.5x)", () => {
+    const cost = computeCost({ inputTokens: 272_001, outputTokens: 10_000 }, gpt54, "openai");
+    // 272_001/1M × ($2.5 × 2) + 10_000/1M × ($15 × 1.5) = $1.360005 + $0.225 = $1.585005
+    expect(cost).toBeCloseTo(1.585005, 5);
+  });
+
+  it("input == 300_000, output 10_000 — exact USD per OpenAI flat-session model", () => {
+    const cost = computeCost({ inputTokens: 300_000, outputTokens: 10_000 }, gpt54, "openai");
+    // 300_000/1M × $5 + 10_000/1M × $22.5 = $1.5 + $0.225 = $1.725
+    expect(cost).toBeCloseTo(1.725, 5);
+  });
+
+  it("vendor isolation — claude with same threshold value does NOT trigger surcharge", () => {
+    // Construct a synthetic ModelPricing with surcharge fields but vendor=claude
+    // — the openai branch is the ONLY one with surcharge logic.
+    const synth = { inputPer1M: 3, outputPer1M: 15, contextWindow: 200_000,
+      surchargeInputThreshold: 272_000, surchargeInputMultiplier: 2, surchargeOutputMultiplier: 1.5 };
+    const cost = computeCost({ inputTokens: 300_000, outputTokens: 10_000 }, synth, "claude");
+    // claude branch: no surcharge applied — standard rates only
+    // 300_000/1M × $3 + 10_000/1M × $15 = $0.9 + $0.15 = $1.05
+    expect(cost).toBeCloseTo(1.05, 5);
+  });
+
+  it("model WITHOUT surcharge fields (gpt-5.4-mini) — no multiplier even above 272K", () => {
+    const cost = computeCost({ inputTokens: 350_000, outputTokens: 10_000 }, gpt54mini, "openai");
+    // mini standard: 350_000/1M × $0.75 + 10_000/1M × $4.5 = $0.2625 + $0.045 = $0.3075
+    expect(cost).toBeCloseTo(0.3075, 5);
   });
 });
