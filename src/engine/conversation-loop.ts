@@ -16,7 +16,6 @@ import { CompressionStatus } from "../shared/compact-status.js";
 import { stubMarkedToolResults } from "./wire-serialize.js";
 import { stripSuggestedReplies } from "./suggested-replies.js";
 import { createProvider, secretKeyFor } from "./llm/provider-factory.js";
-import { classifyProviderError } from "./llm/error-classifier.js";
 import { FallbackProvider, type FallbackStatus } from "./llm/vercel/fallback-chain.js";
 import type { LLMProvider, ToolSchema, TokenUsage } from "./llm/types.js";
 import { collectRoundStream } from "./turn/stream-collector.js";
@@ -1566,14 +1565,16 @@ export class ConversationLoop {
         log.warn(
           `queryLoop: EARLY-EXIT(context_error after token preflight) — round=${roundIndex} err="${(stream.errorMessage ?? "").slice(0, 100)}" (estimator drift suspected)`,
         );
-        // Issue #900: provider 에러 raw 를 한 번 더 classify — TPM (분당
-        // 처리량) 한도일 수도 있는데 그건 *자동 압축* 으로 해결되지 않음.
-        // 잘못된 안내 메시지가 사용자에게 무한 retry 반복 유발하던 회귀.
-        const rawErr = stream.errorMessage ?? "";
-        const { category } = classifyProviderError(rawErr);
-        const userMsg = category === "rate-limit"
-          ? "분당 처리 한도(TPM) 초과 — 잠시 후 재시도하거나, 더 작은 메시지/첨부로 시도하세요. (대화 길이가 아닌 분당 토큰 처리량 한도이므로 자동 압축이 해결하지 못합니다.)"
-          : "대화 이력이 모델 한도를 초과했습니다. 새 메시지를 보내면 자동 압축이 다시 시도됩니다.";
+        // `stream.kind === "context_error"` 는 `stream-collector.ts` 의
+        // `isContextLengthError(raw)` 가 *이미* true 를 판정한 신호 — 이
+        // 분기 도달 raw 는 context-window 초과로 확정. TPM rate-limit raw
+        // 는 `isContextLengthError` 패턴 (prompt is too long / maximum
+        // context length / context window / input token count) 어느 것
+        // 에도 매치되지 않으므로 *별도 경로* (`stream_error`, line 1582)
+        // 로 도달 — 그쪽에서 새 `classifyProviderError` 가 정확한 TPM
+        // 메시지를 전달함 (issue #900).
+        const userMsg =
+          "대화 이력이 모델 한도를 초과했습니다. 새 메시지를 보내면 자동 압축이 다시 시도됩니다.";
         callbacks?.onError?.(userMsg);
         this.history.append({ role: "assistant", content: userMsg });
         return { text: userMsg, toolCalls: allToolCalls, usage: turnUsage, stopReason: "context-error" };
