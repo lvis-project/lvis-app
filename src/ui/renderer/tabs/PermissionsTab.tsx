@@ -53,8 +53,8 @@ const REVIEWER_INTERACTIVE_OPTIONS: Array<{
     value: "low",
     label: "저위험 자동 허용",
     description:
-      "위험도가 낮다고 판단된 작업은 확인 없이 자동으로 허용합니다. " +
-      "중간·높은 위험도는 여전히 확인 창이 표시됩니다.",
+      "저위험으로 판단된 작업은 확인 없이 자동으로 허용합니다. " +
+      "중·고위험은 여전히 확인 창이 표시됩니다.",
   },
 ];
 
@@ -63,10 +63,10 @@ const REVIEWER_MODE_OPTIONS: Array<{
   label: string;
   description: string;
 }> = [
-  { value: "disabled", label: "검토 끔 (자동 통과)", description: "리뷰어 레인을 끄고 카테고리 기본 정책만 적용합니다. 도구별 차단/허용 규칙은 그대로 유지됩니다." },
-  { value: "rule", label: "규칙 기반 검증", description: "로컬 규칙으로 저위험 작업만 통과시키고 고위험은 대기시킵니다." },
+  { value: "disabled", label: "검증 끔 (자동 통과)", description: "권한 리뷰어를 끄고 카테고리 기본 정책만 적용합니다. 도구별 차단/허용 규칙은 그대로 유지됩니다." },
+  { value: "rule", label: "규칙 기반 검증", description: "로컬 규칙으로 저위험 작업만 통과시키고 중·고위험은 대기시킵니다." },
   { value: "llm", label: "LLM 검증", description: "규칙 검증 뒤 LLM이 위험도를 올릴 수 있습니다. 낮출 수는 없습니다." },
-  { value: "strict", label: "엄격 (모두 보류)", description: "헤드리스 변경을 모두 보류 대기열로 보냅니다. 사용자가 직접 승인해야 실행됩니다." },
+  { value: "strict", label: "엄격 (모두 보류)", description: "자동(헤드리스) 실행과 대화형 채팅의 변경 작업을 모두 보류 대기열로 보냅니다. 사용자가 직접 승인해야 실행됩니다." },
 ];
 
 /** All five providers — always visible so users know what's available. */
@@ -83,7 +83,7 @@ const REVIEWER_FALLBACK_OPTIONS: Array<{
   label: string;
   description: string;
 }> = [
-  { value: "deny", label: "차단", description: "LLM 오류나 응답 파싱 실패 시 검토 대기열로 보냅니다." },
+  { value: "deny", label: "차단", description: "LLM 오류나 응답 파싱 실패 시 보류 대기열로 보냅니다." },
   { value: "rule", label: "규칙 결과 사용", description: "LLM 실패 시 로컬 규칙 결과를 그대로 적용합니다." },
 ];
 
@@ -97,16 +97,21 @@ function formatReviewerDispatchError(error: string): string {
   if (error.startsWith("reviewer-rewire-failed:")) {
     const detail = error.slice("reviewer-rewire-failed:".length).trim();
     return [
-      "리뷰어 런타임 재연결에 실패해 이전 설정으로 복원했습니다.",
+      "권한 리뷰어 런타임 재연결에 실패해 이전 설정으로 복원했습니다.",
       "공급자 API 키, 모델 이름, 오류 처리 정책을 확인한 뒤 다시 적용하세요.",
       detail ? `상세: ${detail}` : "",
     ].filter(Boolean).join(" ");
   }
   return formatIpcError(error, undefined, {
-    codeMap: { "user-keyboard-required": "리뷰어 설정 변경은 활성 사용자 입력에서만 실행할 수 있습니다." },
-    fallbackContext: "리뷰어 오류",
+    codeMap: { "user-keyboard-required": "권한 리뷰어 설정 변경은 활성 사용자 입력에서만 실행할 수 있습니다." },
+    fallbackContext: "권한 리뷰어 오류",
   });
 }
+
+const REVIEWER_RENAME_NOTICE_LS_KEY = "permissions.reviewer.rename-notice.dismissed-v1";
+const REVIEWER_RENAME_NOTICE_TEXT =
+  "권한 리뷰어 설정은 자동(헤드리스) 실행과 대화형 채팅 모두에 적용됩니다. " +
+  "이 패널에서 정책을 한 번 조정하면 두 영역에 동일하게 반영됩니다.";
 
 export function PermissionsTab() {
   // ── 로딩 상태 ─────────────────────────────────────
@@ -121,6 +126,25 @@ export function PermissionsTab() {
     if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current);
     setBanner({ type, msg });
     bannerTimerRef.current = setTimeout(() => setBanner(null), LONG_TOAST_TTL_MS);
+  }, []);
+
+  // ── 권한 리뷰어 rename 1회 안내 ───────────────────
+  const [showRenameNotice, setShowRenameNotice] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      if (window.localStorage.getItem(REVIEWER_RENAME_NOTICE_LS_KEY) !== "1") {
+        setShowRenameNotice(true);
+      }
+    } catch {
+      // LocalStorage unavailable — fail closed (don't show banner repeatedly)
+    }
+  }, []);
+  const dismissRenameNotice = useCallback(() => {
+    setShowRenameNotice(false);
+    try {
+      window.localStorage.setItem(REVIEWER_RENAME_NOTICE_LS_KEY, "1");
+    } catch {}
   }, []);
 
   // ── Execution Mode ────────────────────────────────
@@ -579,7 +603,7 @@ export function PermissionsTab() {
               <p className="mt-1 text-sm font-medium">{EXEC_MODE_OPTIONS.find((opt) => opt.value === mode)?.label ?? mode}</p>
             </div>
             <div className="rounded-md border px-3 py-2">
-              <p className="text-[11px] font-medium text-muted-foreground">백그라운드 리뷰</p>
+              <p className="text-[11px] font-medium text-muted-foreground">권한 리뷰어</p>
               <p className="mt-1 text-sm font-medium">{REVIEWER_MODE_OPTIONS.find((opt) => opt.value === reviewer.mode)?.label ?? reviewer.mode}</p>
             </div>
             <div className="rounded-md border px-3 py-2">
@@ -592,7 +616,7 @@ export function PermissionsTab() {
         {/* ── Section A: Permission Policy Preset ── */}
         <SettingsSection
           title="권한 정책"
-          description="기본은 읽기 도구를 허용하고, 전체 물어보기는 읽기까지 확인합니다. 자동 검증은 헤드리스 작업을 백그라운드 리뷰어 설정으로 검증하고, 전체 허용은 하드 차단 범위 밖의 도구를 자동 허용하되 허용 디렉터리 밖 접근은 별도 승인합니다."
+          description="기본은 읽기 도구를 허용하고, 전체 물어보기는 읽기까지 확인합니다. 자동 검증은 자동(헤드리스) 실행과 대화형 채팅 모두를 권한 리뷰어 설정으로 검증하고, 전체 허용은 하드 차단 범위 밖의 도구를 자동 허용하되 허용 디렉터리 밖 접근은 별도 승인합니다."
         >
           <RadioGroup
             value={mode}
@@ -623,15 +647,32 @@ export function PermissionsTab() {
           </RadioGroup>
         </SettingsSection>
 
-        {/* ── 백그라운드 권한 리뷰어 ── */}
+        {/* ── 권한 리뷰어 ── */}
         <SettingsSection
-          title="백그라운드 권한 리뷰어"
-          description="루틴·헤드리스 실행을 어떻게 검증할지 선택합니다. LLM 검증은 로컬 규칙 뒤에 실행되며 위험도를 낮출 수 없습니다."
+          title="권한 리뷰어"
+          description="자동(헤드리스) 실행과 대화형 채팅 모두에 적용됩니다. 어떻게 검증할지 선택하세요. LLM 검증은 로컬 규칙 뒤에 실행되며 위험도를 낮출 수 없습니다."
         >
+          {showRenameNotice ? (
+            <div
+              role="status"
+              data-testid="reviewer-rename-notice"
+              className="flex items-start gap-2 rounded-md border border-info/40 bg-info/10 px-3 py-2 text-[11px] text-info"
+            >
+              <span className="flex-1">{REVIEWER_RENAME_NOTICE_TEXT}</span>
+              <button
+                type="button"
+                onClick={dismissRenameNotice}
+                aria-label="알림 닫기"
+                className="text-xs underline-offset-2 hover:underline"
+              >
+                닫기
+              </button>
+            </div>
+          ) : null}
           <RadioGroup
             value={reviewer.mode}
             disabled={reviewerBusy}
-            aria-label="백그라운드 권한 리뷰어 선택"
+            aria-label="권한 리뷰어 선택"
             onValueChange={(value) => void applyReviewerCommand(`mode ${value}`)}
             className="space-y-1.5"
           >
@@ -791,7 +832,7 @@ export function PermissionsTab() {
               </RadioGroup>
               {reviewer.interactive.autoApprove === "low" && reviewer.mode === "disabled" ? (
                 <p className="rounded-md border border-warning/40 bg-warning/15 px-3 py-2 text-[11px] text-warning">
-                  ⚠ 백그라운드 권한 검사가 "명시 승인만" 으로 꺼져 있어 자동 허용이 동작하지 않습니다. "규칙 기반" 또는 "LLM" 으로 변경하세요.
+                  ⚠ 권한 리뷰어가 꺼져 있어 저위험 자동 허용이 동작하지 않습니다. 권한 리뷰어를 "규칙 기반 검증" 또는 "LLM 검증"으로 켜세요.
                 </p>
               ) : null}
               {mode === "auto" && reviewer.interactive.autoApprove === "off" ? (
@@ -799,8 +840,8 @@ export function PermissionsTab() {
                   className="rounded-md border border-warning/40 bg-warning/15 px-3 py-2 text-[11px] text-warning"
                   data-testid="permissions-legacy-auto-mode-banner"
                 >
-                  ⚠ "자동 검증" 모드에서 자동 허용이 꺼져 있습니다.
-                  낮은 위험도 작업을 확인 없이 허용하려면 위에서 "저위험 자동 허용"을 선택하세요.
+                  ⚠ "자동 검증" 모드에서 저위험 자동 허용이 꺼져 있습니다.
+                  저위험 작업을 확인 없이 허용하려면 위에서 "저위험 자동 허용"을 켜세요.
                 </p>
               ) : null}
               {mode === "strict" && reviewer.interactive.autoApprove === "low" ? (
@@ -808,8 +849,8 @@ export function PermissionsTab() {
                   className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-[11px] text-destructive"
                   data-testid="permissions-strict-low-contradiction-banner"
                 >
-                  ⛔ "전체 물어보기" 모드와 "저위험 자동 허용"이 동시에 켜져 있어 설정이 충돌합니다.
-                  모두 묻기 정책을 유지하려면 자동 허용을 "끔"으로 변경하세요.
+                  ⛔ "전체 물어보기" 모드는 모든 작업을 확인하지만 "저위험 자동 허용"이 켜져 있어 설정이 충돌합니다.
+                  모두 확인 정책을 유지하려면 저위험 자동 허용을 "끔"으로 변경하세요.
                 </p>
               ) : null}
               {mode === "allow" ? (
@@ -817,11 +858,32 @@ export function PermissionsTab() {
                   className="rounded-md border border-warning/40 bg-warning/15 px-3 py-2 text-[11px] text-warning"
                   data-testid="permissions-allow-mode-banner"
                 >
-                  ⚠ "전체 허용" 모드에서는 모든 작업이 자동으로 허용되므로 자동 허용 설정이 적용되지 않습니다.
+                  ⚠ "전체 허용" 모드는 모든 작업을 자동 허용하므로 권한 리뷰어와 저위험 자동 허용 설정이 적용되지 않습니다.
                 </p>
               ) : null}
             </div>
           </div>
+
+          <details
+            className="rounded-md border bg-muted/20"
+            data-testid="reviewer-cli-mapping-panel"
+          >
+            <summary className="cursor-pointer px-3 py-2 text-xs font-semibold">
+              CLI 매핑 (슬래시 명령)
+            </summary>
+            <div className="space-y-2 border-t px-3 py-3 text-[11px]">
+              <p className="text-muted-foreground">
+                동일 설정을 채팅 입력창에서 슬래시 명령으로도 변경할 수 있습니다.
+              </p>
+              <ul className="space-y-1 font-mono leading-relaxed">
+                <li><code>/permission reviewer mode &lt;disabled|rule|llm|strict&gt;</code></li>
+                <li><code>/permission reviewer interactive &lt;off|low&gt;</code></li>
+                <li><code>/permission reviewer provider &lt;openai|anthropic|google|foundry|gcp-playground&gt;</code></li>
+                <li><code>/permission reviewer model &lt;모델 이름&gt;</code></li>
+                <li><code>/permission reviewer fallback &lt;deny|rule&gt;</code></li>
+              </ul>
+            </div>
+          </details>
 
           <details
             className="rounded-md border bg-muted/20"
