@@ -81,7 +81,7 @@ function broadcastPermissionModeChanged(deps: IpcDeps, mode: string): void {
  * the full list in the broadcast payload (avoids serialization size
  * and keeps a single source of truth in the slash dispatcher).
  */
-function broadcastPermissionConfigChanged(deps: IpcDeps): void {
+export function broadcastPermissionConfigChanged(deps: IpcDeps): void {
   const mainWindow = deps.getMainWindow?.();
   const windows = deps.getAppWindows?.() ?? [mainWindow];
   for (const win of windows) {
@@ -160,6 +160,7 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
         await pm.addAlwaysDeniedPersist(parsed.pattern);
       }
       deps.toolRegistry.setDenyRules(pm.getVisibilityDenyRules());
+      broadcastPermissionConfigChanged(deps);
       return { ok: true, rule: { pattern: parsed.pattern, action: parsed.action } };
     } catch (err) {
       return { ok: false, error: "add-failed", message: (err as Error).message };
@@ -186,6 +187,7 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
     try {
       await pm.removeRule(parsed.pattern, parsed.action);
       deps.toolRegistry.setDenyRules(pm.getVisibilityDenyRules());
+      broadcastPermissionConfigChanged(deps);
       return { ok: true };
     } catch (err) {
       return { ok: false, error: "remove-failed", message: (err as Error).message };

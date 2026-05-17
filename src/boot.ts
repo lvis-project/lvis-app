@@ -75,6 +75,7 @@ import { shell } from "electron";
 import { type AppServices, emitEvent, onEvent } from "./boot/types.js";
 import { PERMISSIONS, ROUTINES_V2 } from "./shared/ipc-channels.js";
 import { sendToWindow } from "./ipc/safe-send.js";
+import { broadcastPermissionConfigChanged as broadcastPermissionConfigChangedFromIpc } from "./ipc/domains/permissions.js";
 import { startWatcherTelemetryCollector } from "./boot/steps/watcher-telemetry-collector.js";
 import { bootstrapCoreServices } from "./boot/services.js";
 import { registerPluginNotifications } from "./boot/plugins.js";
@@ -703,6 +704,13 @@ export async function bootstrap(
     hookRunner,
     scriptHookManager,
     getAdditionalDirectories: () => readPermissionSettings().permissions.additionalDirectories,
+    // Round-3 fix: dialog-driven session-add grants must broadcast so
+    // multi-window PermissionsTab refreshes. Boot owns getMainWindow
+    // and forwards it to the broadcaster declared in the permissions
+    // IPC domain — no engine→ipc coupling, just a callback handed down.
+    broadcastPermissionConfigChanged: () => {
+      broadcastPermissionConfigChangedFromIpc({ getMainWindow } as Parameters<typeof broadcastPermissionConfigChangedFromIpc>[0]);
+    },
     pluginRuntime,
     skillOverlay,
     notificationService,
