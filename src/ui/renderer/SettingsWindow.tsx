@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { TooltipProvider } from "../../components/ui/tooltip.js";
 import { normalizeSettingsTab } from "../../shared/settings-tabs.js";
 import { getApi } from "./api-client.js";
-import { SettingsContent } from "./SettingsDialog.js";
+import { SettingsContent } from "./SettingsContent.js";
 import { ThemeProvider } from "./theme/index.js";
 
 function closeCurrentWindow(): void {
