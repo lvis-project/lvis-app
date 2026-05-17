@@ -44,8 +44,8 @@ export const BashToolInputSchema = z.object({
     .number()
     .int()
     .min(1)
-    .max(TOOL_TIMEOUT_POLICY.shellMaxSeconds)
-    .default(TOOL_TIMEOUT_POLICY.shellDefaultSeconds),
+    .max(TOOL_TIMEOUT_POLICY.shellMaxMs / 1000)
+    .default(TOOL_TIMEOUT_POLICY.shellDefaultMs / 1000),
 });
 
 const OUTPUT_CAP = 12_000;

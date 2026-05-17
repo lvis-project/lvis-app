@@ -43,13 +43,13 @@ describe("PowerShellTool — policy surface", () => {
     expect(found?.isReadOnly({ command: "Get-ChildItem" })).toBe(false);
   });
 
-  it("defaults timeoutSeconds to policy.shellDefaultSeconds", () => {
+  it("defaults timeoutSeconds to policy.shellDefaultMs / 1000", () => {
     const parsed = PowerShellToolInputSchema.parse({ command: "Get-ChildItem" });
-    expect(parsed.timeoutSeconds).toBe(TOOL_TIMEOUT_POLICY.shellDefaultSeconds);
+    expect(parsed.timeoutSeconds).toBe(TOOL_TIMEOUT_POLICY.shellDefaultMs / 1000);
   });
 
-  it("rejects timeoutSeconds above policy.shellMaxSeconds", () => {
-    const above = TOOL_TIMEOUT_POLICY.shellMaxSeconds + 1;
+  it("rejects timeoutSeconds above policy.shellMaxMs / 1000", () => {
+    const above = TOOL_TIMEOUT_POLICY.shellMaxMs / 1000 + 1;
     expect(() => PowerShellToolInputSchema.parse({ command: "Get-ChildItem", timeoutSeconds: above })).toThrow();
   });
 
