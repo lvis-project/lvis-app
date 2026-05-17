@@ -1682,6 +1682,85 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
     expect(results[0].is_error).toBeUndefined();
   });
 
+  it("allow-once → invokes onTurnDirectoryGrant with the request path (turn-scope grant propagation)", async () => {
+    const executeSpy = vi.fn(async () => "ok");
+    const registry = new ToolRegistry();
+    registry.register(makeReadFileTool(executeSpy));
+
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const executor = new ToolExecutor(registry, undefined, undefined, undefined, gate);
+
+    const onTurnDirectoryGrant = vi.fn();
+    const onSessionDirectoryGrant = vi.fn();
+    const callPromise = executor.executeAll(
+      [{
+        id: "tu-l1-allow-once-cb",
+        name: "read_file",
+        input: { path: "/var/tmp/turn-scope/notes.md" },
+      }],
+      {
+        sessionId: "sess-l1-allow-once-cb",
+        permissionContext: userPermissionContext({ onTurnDirectoryGrant, onSessionDirectoryGrant }),
+      },
+    );
+
+    const sent = await waitForApprovalPayload<{ id: string; nonce: string; hmac: string }>(wc);
+    gate.resolve(sent.id, {
+      requestId: sent.id,
+      choice: "allow-once",
+      nonce: sent.nonce,
+      hmac: sent.hmac,
+    });
+
+    const results = await callPromise;
+    expect(results[0].is_error).toBeUndefined();
+    expect(onTurnDirectoryGrant).toHaveBeenCalledTimes(1);
+    expect(onSessionDirectoryGrant).not.toHaveBeenCalled();
+    // Narrow path (not parent) for allow-once.
+    expect(onTurnDirectoryGrant.mock.calls[0][0]).toContain("notes.md");
+  });
+
+  it("allow-session → invokes onSessionDirectoryGrant with suggestedParent (session-scope widening)", async () => {
+    const executeSpy = vi.fn(async () => "ok");
+    const registry = new ToolRegistry();
+    registry.register(makeReadFileTool(executeSpy));
+
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const executor = new ToolExecutor(registry, undefined, undefined, undefined, gate);
+
+    const onTurnDirectoryGrant = vi.fn();
+    const onSessionDirectoryGrant = vi.fn();
+    const callPromise = executor.executeAll(
+      [{
+        id: "tu-l1-allow-session-cb",
+        name: "read_file",
+        input: { path: "/var/tmp/session-scope/proj/notes.md" },
+      }],
+      {
+        sessionId: "sess-l1-allow-session-cb",
+        permissionContext: userPermissionContext({ onTurnDirectoryGrant, onSessionDirectoryGrant }),
+      },
+    );
+
+    const sent = await waitForApprovalPayload<{ id: string; nonce: string; hmac: string; outOfAllowedDir?: { suggestedParent?: string } }>(wc);
+    gate.resolve(sent.id, {
+      requestId: sent.id,
+      choice: "allow-session",
+      rememberPattern: sent.outOfAllowedDir?.suggestedParent,
+      nonce: sent.nonce,
+      hmac: sent.hmac,
+    });
+
+    const results = await callPromise;
+    expect(results[0].is_error).toBeUndefined();
+    expect(onSessionDirectoryGrant).toHaveBeenCalledTimes(1);
+    expect(onTurnDirectoryGrant).not.toHaveBeenCalled();
+    // session-scope widens to suggestedParent (parent dir) rather than the file path.
+    expect(onSessionDirectoryGrant.mock.calls[0][0]).not.toContain("notes.md");
+  });
+
   it("captures post-directory-grant evaluation context for the Step 3 approval", async () => {
     const outside = mkdtempSync(join(tmpdir(), "lvis-executor-context-scope-"));
     try {
