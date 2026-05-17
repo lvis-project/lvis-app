@@ -334,12 +334,12 @@ export function PluginConfigTab() {
   }, [showBanner]);
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-1 min-h-0 flex-col gap-3">
       <SettingsPageHeader
         title="플러그인 설정"
         description="설치된 플러그인의 개별 설정을 관리합니다"
       />
-      <div className="flex flex-col h-full gap-3">
+      <div className="flex flex-1 min-h-0 flex-col gap-3">
       <PluginUninstallDialog
         target={uninstallTarget}
         working={saving}
