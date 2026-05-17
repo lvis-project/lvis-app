@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "../../../components/ui/button.js";
 import type { LvisApi, PluginPerfStats } from "../types.js";
+import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
+import { SettingsSection } from "../components/SettingsSection.js";
 
 type Row = {
   pluginId: string;
@@ -68,71 +70,79 @@ export function PluginPerfTab({ api }: { api: LvisApi }) {
   }, [refresh]);
 
   return (
-    <div className="space-y-4 pt-4">
-      <div className="flex items-center justify-between">
-        <p className="text-xs text-muted-foreground">로드된 플러그인의 런타임 성능 지표입니다.</p>
-        <Button size="sm" variant="outline" onClick={() => void refresh()} disabled={loading}>
-          {loading ? "갱신 중..." : "새로고침"}
-        </Button>
-      </div>
+    <div className="space-y-6">
+      <SettingsPageHeader
+        title="플러그인 성능"
+        description="플러그인 메트릭과 자원 사용을 확인합니다"
+      />
 
-      {error && (
-        <p className="rounded-md border border-destructive px-3 py-2 text-xs text-destructive">
-          {error}
-        </p>
-      )}
+      <SettingsSection
+        title="런타임 지표"
+        description="로드된 플러그인의 런타임 성능 지표입니다."
+        actions={
+          <Button size="sm" variant="outline" onClick={() => void refresh()} disabled={loading}>
+            {loading ? "갱신 중..." : "새로고침"}
+          </Button>
+        }
+      >
+        {error && (
+          <p className="rounded-md border border-destructive px-3 py-2 text-xs text-destructive">
+            {error}
+          </p>
+        )}
 
-      {rows.length === 0 && !loading && !error && (
-        <p className="text-xs text-muted-foreground">로드된 플러그인이 없습니다.</p>
-      )}
+        {rows.length === 0 && !loading && !error && (
+          <p className="text-xs text-muted-foreground">로드된 플러그인이 없습니다.</p>
+        )}
 
-      {rows.length > 0 && (
-        <>
-          <div className="overflow-x-auto rounded-md border">
-            <table className="w-full text-xs">
-              <thead className="border-b bg-muted/40">
-                <tr>
-                  <th className="px-3 py-2 text-left font-medium">플러그인</th>
-                  <th className="px-3 py-2 text-right font-medium">시작 ms</th>
-                  <th className="px-3 py-2 text-right font-medium">호출 수</th>
-                  <th className="px-3 py-2 text-right font-medium">오류 수</th>
-                  <th className="px-3 py-2 text-right font-medium">오류율 %</th>
-                  <th className="px-3 py-2 text-right font-medium">평균 ms</th>
-                  <th className="px-3 py-2 text-left font-medium">마지막 호출</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r) => {
-                  const rate = errorRate(r.stats);
-                  const avg = avgExecMs(r.stats);
-                  return (
-                    <tr key={r.pluginId} className="border-b last:border-b-0 hover:bg-muted/20">
-                      <td className="px-3 py-2 font-mono">{r.pluginId}</td>
-                      <td className="px-3 py-2 text-right tabular-nums">{r.stats.startupMs}</td>
-                      <td className="px-3 py-2 text-right tabular-nums">{r.stats.toolCallCount}</td>
-                      <td className="px-3 py-2 text-right tabular-nums">{r.stats.errorCount}</td>
-                      <td className={`px-3 py-2 text-right tabular-nums ${errorRateBadgeClass(rate)}`}>
-                        {rate.toFixed(1)}%
-                      </td>
-                      <td className="px-3 py-2 text-right tabular-nums">{avg.toFixed(1)}</td>
-                      <td className="px-3 py-2 text-muted-foreground">
-                        {r.stats.lastCallAt
-                          ? new Date(r.stats.lastCallAt).toLocaleTimeString()
-                          : "—"}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+        {rows.length > 0 && (
+          <>
+            <div className="overflow-x-auto rounded-md border">
+              <table className="w-full text-xs">
+                <thead className="border-b bg-muted/40">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-medium">플러그인</th>
+                    <th className="px-3 py-2 text-right font-medium">시작 ms</th>
+                    <th className="px-3 py-2 text-right font-medium">호출 수</th>
+                    <th className="px-3 py-2 text-right font-medium">오류 수</th>
+                    <th className="px-3 py-2 text-right font-medium">오류율 %</th>
+                    <th className="px-3 py-2 text-right font-medium">평균 ms</th>
+                    <th className="px-3 py-2 text-left font-medium">마지막 호출</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r) => {
+                    const rate = errorRate(r.stats);
+                    const avg = avgExecMs(r.stats);
+                    return (
+                      <tr key={r.pluginId} className="border-b last:border-b-0 hover:bg-muted/20">
+                        <td className="px-3 py-2 font-mono">{r.pluginId}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{r.stats.startupMs}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{r.stats.toolCallCount}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{r.stats.errorCount}</td>
+                        <td className={`px-3 py-2 text-right tabular-nums ${errorRateBadgeClass(rate)}`}>
+                          {rate.toFixed(1)}%
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums">{avg.toFixed(1)}</td>
+                        <td className="px-3 py-2 text-muted-foreground">
+                          {r.stats.lastCallAt
+                            ? new Date(r.stats.lastCallAt).toLocaleTimeString()
+                            : "—"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
 
-          <div className="space-y-1">
-            <p className="text-xs font-medium">평균 실행 시간 (ms)</p>
-            <BarChart rows={rows} />
-          </div>
-        </>
-      )}
+            <div className="space-y-1">
+              <p className="text-xs font-medium">평균 실행 시간 (ms)</p>
+              <BarChart rows={rows} />
+            </div>
+          </>
+        )}
+      </SettingsSection>
     </div>
   );
 }

@@ -28,6 +28,8 @@ import type {
   PermissionRule,
 } from "../types.js";
 import { AuditPanel } from "../components/permissions/AuditPanel.js";
+import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
+import { SettingsSection } from "../components/SettingsSection.js";
 
 const DEFAULT_REVIEWER_SETTINGS: PermissionReviewerSettings = {
   mode: "disabled",
@@ -51,8 +53,8 @@ const REVIEWER_INTERACTIVE_OPTIONS: Array<{
     value: "low",
     label: "저위험 자동 허용",
     description:
-      "위험도가 낮다고 판단된 작업은 확인 없이 자동으로 허용합니다. " +
-      "중간·높은 위험도는 여전히 확인 창이 표시됩니다.",
+      "저위험으로 판단된 작업은 확인 없이 자동으로 허용합니다. " +
+      "중·고위험은 여전히 확인 창이 표시됩니다.",
   },
 ];
 
@@ -61,14 +63,10 @@ const REVIEWER_MODE_OPTIONS: Array<{
   label: string;
   description: string;
 }> = [
-  // 4-mode enum (post issue #664 normalization). `disabled` is now a true
-  // pass-through (no reviewer lane); `strict` is the new fail-closed mode
-  // equivalent to the pre-#664 "disabled" semantic. See
-  // docs/architecture/permission-policy-design.md §3 Layer 5.
-  { value: "disabled", label: "검토 끔 (자동 통과)", description: "리뷰어 레인을 끄고 카테고리 기본 정책만 적용합니다. 도구별 차단/허용 규칙은 그대로 유지됩니다." },
-  { value: "rule", label: "규칙 기반 검증", description: "로컬 규칙으로 저위험 작업만 통과시키고 고위험은 대기시킵니다." },
+  { value: "disabled", label: "검증 끔 (자동 통과)", description: "권한 리뷰어를 끄고 카테고리 기본 정책만 적용합니다. 도구별 차단/허용 규칙은 그대로 유지됩니다." },
+  { value: "rule", label: "규칙 기반 검증", description: "로컬 규칙으로 저위험 작업만 통과시키고 중·고위험은 대기시킵니다." },
   { value: "llm", label: "LLM 검증", description: "규칙 검증 뒤 LLM이 위험도를 올릴 수 있습니다. 낮출 수는 없습니다." },
-  { value: "strict", label: "엄격 (모두 보류)", description: "헤드리스 변경을 모두 보류 대기열로 보냅니다. 사용자가 직접 승인해야 실행됩니다." },
+  { value: "strict", label: "엄격 (모두 보류)", description: "자동(헤드리스) 실행과 대화형 채팅의 변경 작업을 모두 보류 대기열로 보냅니다. 사용자가 직접 승인해야 실행됩니다." },
 ];
 
 /** All five providers — always visible so users know what's available. */
@@ -85,22 +83,10 @@ const REVIEWER_FALLBACK_OPTIONS: Array<{
   label: string;
   description: string;
 }> = [
-  { value: "deny", label: "차단", description: "LLM 오류나 응답 파싱 실패 시 검토 대기열로 보냅니다." },
+  { value: "deny", label: "차단", description: "LLM 오류나 응답 파싱 실패 시 보류 대기열로 보냅니다." },
   { value: "rule", label: "규칙 결과 사용", description: "LLM 실패 시 로컬 규칙 결과를 그대로 적용합니다." },
 ];
 
-/**
- * Map IPC-layer revoke error codes to Korean user-facing strings.
- *
- * Mirrors `formatReviewerDispatchError` for the user-approval revoke
- * path so the UI doesn't leak raw English error codes (e.g.
- * "user-keyboard-required") to end users. Issue #826 introduced the
- * intent gate; this helper closes the resulting localization gap
- * surfaced in the cross-cutting review.
- *
- * Migrated to shared `formatIpcError` SOT (#830) — only the revoke-
- * specific `invalid-key` wording rides on `codeMap`.
- */
 function formatRevokeError(error: string | undefined, message: string | undefined): string {
   return formatIpcError(error, message, {
     codeMap: { "invalid-key": "유효하지 않은 승인 키입니다." },
@@ -111,16 +97,21 @@ function formatReviewerDispatchError(error: string): string {
   if (error.startsWith("reviewer-rewire-failed:")) {
     const detail = error.slice("reviewer-rewire-failed:".length).trim();
     return [
-      "리뷰어 런타임 재연결에 실패해 이전 설정으로 복원했습니다.",
+      "권한 리뷰어 런타임 재연결에 실패해 이전 설정으로 복원했습니다.",
       "공급자 API 키, 모델 이름, 오류 처리 정책을 확인한 뒤 다시 적용하세요.",
       detail ? `상세: ${detail}` : "",
     ].filter(Boolean).join(" ");
   }
   return formatIpcError(error, undefined, {
-    codeMap: { "user-keyboard-required": "리뷰어 설정 변경은 활성 사용자 입력에서만 실행할 수 있습니다." },
-    fallbackContext: "리뷰어 오류",
+    codeMap: { "user-keyboard-required": "권한 리뷰어 설정 변경은 활성 사용자 입력에서만 실행할 수 있습니다." },
+    fallbackContext: "권한 리뷰어 오류",
   });
 }
+
+const REVIEWER_RENAME_NOTICE_LS_KEY = "permissions.reviewer.rename-notice.dismissed-v1";
+const REVIEWER_RENAME_NOTICE_TEXT =
+  "권한 리뷰어 설정은 자동(헤드리스) 실행과 대화형 채팅 모두에 적용됩니다. " +
+  "이 패널에서 정책을 한 번 조정하면 두 영역에 동일하게 반영됩니다.";
 
 export function PermissionsTab() {
   // ── 로딩 상태 ─────────────────────────────────────
@@ -134,7 +125,26 @@ export function PermissionsTab() {
   const showBanner = useCallback((type: "error" | "warn", msg: string) => {
     if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current);
     setBanner({ type, msg });
-    bannerTimerRef.current = setTimeout(() => setBanner(null), LONG_TOAST_TTL_MS); // permission banners contain policy text that needs longer read time
+    bannerTimerRef.current = setTimeout(() => setBanner(null), LONG_TOAST_TTL_MS);
+  }, []);
+
+  // ── 권한 리뷰어 rename 1회 안내 ───────────────────
+  const [showRenameNotice, setShowRenameNotice] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      if (window.localStorage.getItem(REVIEWER_RENAME_NOTICE_LS_KEY) !== "1") {
+        setShowRenameNotice(true);
+      }
+    } catch {
+      // LocalStorage unavailable — fail closed (don't show banner repeatedly)
+    }
+  }, []);
+  const dismissRenameNotice = useCallback(() => {
+    setShowRenameNotice(false);
+    try {
+      window.localStorage.setItem(REVIEWER_RENAME_NOTICE_LS_KEY, "1");
+    } catch {}
   }, []);
 
   // ── Execution Mode ────────────────────────────────
@@ -145,7 +155,6 @@ export function PermissionsTab() {
   const [requireExplicit, setRequireExplicit] = useState(true);
   const [policyManaged, setPolicyManaged] = useState(false);
   const [policyBusy, setPolicyBusy] = useState(false);
-  /** §C2: admin-dir source tracking */
   const [policySource, setPolicySource] = useState<"defaults" | "user" | "admin" | "merged">("defaults");
   const [policyAdminPath, setPolicyAdminPath] = useState<string | undefined>(undefined);
 
@@ -163,7 +172,6 @@ export function PermissionsTab() {
   } | null>(null);
   const [quarantinedHooks, setQuarantinedHooks] = useState<HookTrustRow[]>([]);
   const [auditOpen, setAuditOpen] = useState(false);
-  // R-2 / R-5: user approval records
   const [userApprovals, setUserApprovals] = useState<Array<{
     key: string;
     approvedAt: string;
@@ -171,7 +179,6 @@ export function PermissionsTab() {
     verdictAtApproval: UserApprovalVerdict;
     nlJustification: string | null;
     revokedAt: string | null;
-    /** R-2 Round-3: display metadata from user-approval-store. */
     toolName?: string;
     source?: string;
   }>>([]);
@@ -179,12 +186,6 @@ export function PermissionsTab() {
   const [reviewer, setReviewer] = useState<PermissionReviewerSettings>(DEFAULT_REVIEWER_SETTINGS);
   const [reviewerModelDraft, setReviewerModelDraft] = useState(DEFAULT_REVIEWER_SETTINGS.model);
   const [reviewerBusy, setReviewerBusy] = useState(false);
-  /**
-   * Key-driven dynamic activation: maps each provider to whether
-   * its required API key (or GCP service account) is stored. Providers
-   * with no key are visible but non-selectable (greyed out + tooltip).
-   * Refreshed on tab entry and whenever reviewerDispatch mutates settings.
-   */
   const [providerKeyMap, setProviderKeyMap] = useState<
     Partial<Record<PermissionReviewerProvider, boolean>>
   >({});
@@ -202,7 +203,6 @@ export function PermissionsTab() {
           window.lvis.permission.hookTrustList(),
           window.lvis.permission.dirDispatch("list"),
           window.lvis.permission.reviewerDispatch("show"),
-          // Check key presence for all five providers in parallel
           ...REVIEWER_PROVIDER_OPTIONS.map((opt) =>
             window.lvis.permission.reviewerProviderHasKey(opt.value),
           ),
@@ -220,7 +220,6 @@ export function PermissionsTab() {
       setDirectories(dirRes.ok && dirRes.verb === "list" ? dirRes.userAdditions : []);
       setReviewer(reviewerRes.settings);
       setReviewerModelDraft(reviewerRes.settings.model);
-      // Build provider key map from parallel key-check results
       const keyMap: Partial<Record<PermissionReviewerProvider, boolean>> = {};
       REVIEWER_PROVIDER_OPTIONS.forEach((opt, i) => {
         keyMap[opt.value] = Boolean(keyChecks[i]);
@@ -235,7 +234,6 @@ export function PermissionsTab() {
 
   useEffect(() => { void fetchAll(); }, [fetchAll]);
 
-  // ── R-2/R-5: User approval records ───────────────
   const fetchApprovals = useCallback(async () => {
     if (!window.lvis?.userApproval) return;
     try {
@@ -250,7 +248,6 @@ export function PermissionsTab() {
 
   const handleRevokeApproval = async (key: string, toolName: string, scope: UserApprovalScope) => {
     if (!window.lvis?.userApproval) return;
-    // CRITICAL 2.1: persistent approvals require explicit confirmation — accidental revoke is unrecoverable
     if (scope === "persistent") {
       const confirmed = window.confirm(
         `[${toolName}] 지속 승인을 취소하시겠습니까?\n\n취소 후 복구할 수 없으며, 다음 도구 호출 시 다시 승인 요청됩니다.`,
@@ -259,16 +256,6 @@ export function PermissionsTab() {
     }
     setApprovalsBusy(true);
     try {
-      // Issue #805: split revoke + refresh into separate try blocks so a
-      // refresh failure after a SUCCESSFUL revoke shows an accurate banner
-      // instead of the misleading "취소 실패" message that conflates the
-      // two failure modes.
-      //
-      // Cross-cutting #826 follow-up: `revokeByKey` is an `ipcRenderer.invoke`
-      // that RESOLVES with `{ok:false,error,message}` on policy reject —
-      // it does NOT throw. The try blocks below catch thrown errors AND
-      // inspect the resolved result. The intent gate ("user-keyboard-
-      // required") is one such resolved-reject path.
       try {
         const result = await window.lvis.userApproval.revokeByKey(key);
         if (!result.ok) {
@@ -280,8 +267,6 @@ export function PermissionsTab() {
         showBanner("error", `취소 실패: ${(err as Error).message}`);
         return;
       }
-      // Revoke succeeded — refresh the table. If that fails, the row may
-      // stay visible until the next reload but the revoke itself landed.
       try {
         await fetchApprovals();
         showBanner("warn", `[${toolName}] 승인이 취소되었습니다.`);
@@ -296,14 +281,8 @@ export function PermissionsTab() {
     }
   };
 
-  // ── Section A handler ─────────────────────────────
   const reviewerModeForExecMode = (m: ExecMode): PermissionReviewerMode =>
     m === "auto" ? "llm" : "disabled";
-  // `interactive.autoApprove` is the SOT for foreground reviewer auto-allow.
-  // Selecting `auto` exec mode in the UI also flips
-  // `interactive.autoApprove="low"` so the legacy UX (auto mode → LOW
-  // silent allow) is preserved without `auto` being a hidden second opt-in.
-  // Selecting any non-auto mode flips back to `"off"`.
   const interactiveAutoApproveForExecMode = (
     m: ExecMode,
   ): "off" | "low" => (m === "auto" ? "low" : "off");
@@ -362,7 +341,6 @@ export function PermissionsTab() {
     }
   };
 
-  // ── Section B handler ─────────────────────────────
   const handleExplicitToggle = async () => {
     if (policyManaged) return;
     setPolicyBusy(true);
@@ -381,7 +359,6 @@ export function PermissionsTab() {
     }
   };
 
-  /** Refresh provider key map (re-query all providers in parallel). */
   const refreshProviderKeyMap = useCallback(async () => {
     const results = await Promise.all(
       REVIEWER_PROVIDER_OPTIONS.map((opt) =>
@@ -395,11 +372,6 @@ export function PermissionsTab() {
     setProviderKeyMap(keyMap);
   }, []);
 
-  // Refresh providerKeyMap whenever chat LLM settings change so that
-  // adding an Azure AI Foundry or Gemini key in the Settings tab immediately
-  // enables the corresponding reviewer provider without a tab switch.
-  // Minor-1.3 fix: use getApi() consistent with AppearanceTab / RolesTab
-  // instead of direct (window as unknown as { lvisApi }).lvisApi access.
   useEffect(() => {
     let api: ReturnType<typeof getApi> | undefined;
     try { api = getApi(); } catch { return; }
@@ -427,9 +399,6 @@ export function PermissionsTab() {
     } finally {
       setReviewerBusy(false);
     }
-    // Refresh key map AFTER busy is cleared, so a provider change
-    // paired with a key change in the same session updates the list.
-    // Only refresh on success — no point querying keys after a failed dispatch.
     if (dispatchOk) {
       await refreshProviderKeyMap();
     }
@@ -448,7 +417,6 @@ export function PermissionsTab() {
     await applyReviewerCommand(`model ${model}`);
   };
 
-  // ── Section C handlers ────────────────────────────
   const refreshRules = async () => {
     const r = await window.lvis.permission.listRules();
     setRules(r);
@@ -559,12 +527,12 @@ export function PermissionsTab() {
   }
 
   return (
-    // SettingsContent's right pane owns the dialog-wide scroll (always-
-    // visible gutter via overflow-y-scroll). An inner ScrollArea here
-    // would double-stack scrollbars, which is what the audit/permissions
-    // pair looked like before this consolidation.
     <div className="pr-1">
-      <div className="space-y-6 pt-4">
+      <div className="space-y-6">
+        <SettingsPageHeader
+          title="권한"
+          description="도구 권한 정책, 리뷰어, 디렉터리 화이트리스트를 설정합니다"
+        />
 
         {/* ── 인라인 배너 (§F9 — alert 대체) ── */}
         {banner && (
@@ -624,20 +592,18 @@ export function PermissionsTab() {
           </div>
         )}
 
-        <div className="space-y-3">
-          <div>
-            <p className="text-sm font-medium">현재 권한 정책</p>
-            <p className="text-[11px] text-muted-foreground">
-              기본, 전체 물어보기, 자동 검증, 전체 허용 중 하나를 선택하고 세부 리뷰어 설정을 조정합니다.
-            </p>
-          </div>
+        {/* ── 현재 권한 정책 요약 ── */}
+        <SettingsSection
+          title="현재 권한 정책"
+          description="기본, 전체 물어보기, 자동 검증, 전체 허용 중 하나를 선택하고 세부 리뷰어 설정을 조정합니다."
+        >
           <div className="grid gap-2 sm:grid-cols-3">
             <div className="rounded-md border px-3 py-2">
               <p className="text-[11px] font-medium text-muted-foreground">정책 프리셋</p>
               <p className="mt-1 text-sm font-medium">{EXEC_MODE_OPTIONS.find((opt) => opt.value === mode)?.label ?? mode}</p>
             </div>
             <div className="rounded-md border px-3 py-2">
-              <p className="text-[11px] font-medium text-muted-foreground">백그라운드 리뷰</p>
+              <p className="text-[11px] font-medium text-muted-foreground">권한 리뷰어</p>
               <p className="mt-1 text-sm font-medium">{REVIEWER_MODE_OPTIONS.find((opt) => opt.value === reviewer.mode)?.label ?? reviewer.mode}</p>
             </div>
             <div className="rounded-md border px-3 py-2">
@@ -645,18 +611,13 @@ export function PermissionsTab() {
               <p className="mt-1 text-sm font-medium">{requireExplicit ? "명시 액션 필수" : "닫기 동작은 거부 처리"}</p>
             </div>
           </div>
-        </div>
-
-        <Separator />
+        </SettingsSection>
 
         {/* ── Section A: Permission Policy Preset ── */}
-        <div className="space-y-2">
-          <div>
-            <p className="text-sm font-medium">권한 정책</p>
-            <p className="text-[11px] text-muted-foreground">
-              기본은 읽기 도구를 허용하고, 전체 물어보기는 읽기까지 확인합니다. 자동 검증은 헤드리스 작업을 백그라운드 리뷰어 설정으로 검증하고, 전체 허용은 하드 차단 범위 밖의 도구를 자동 허용하되 허용 디렉터리 밖 접근은 별도 승인합니다.
-            </p>
-          </div>
+        <SettingsSection
+          title="권한 정책"
+          description="기본은 읽기 도구를 허용하고, 전체 물어보기는 읽기까지 확인합니다. 자동 검증은 자동(헤드리스) 실행과 대화형 채팅 모두를 권한 리뷰어 설정으로 검증하고, 전체 허용은 하드 차단 범위 밖의 도구를 자동 허용하되 허용 디렉터리 밖 접근은 별도 승인합니다."
+        >
           <RadioGroup
             value={mode}
             disabled={modeBusy}
@@ -684,22 +645,34 @@ export function PermissionsTab() {
               </Label>
             ))}
           </RadioGroup>
-        </div>
+        </SettingsSection>
 
-        <Separator />
-
-        <div className="space-y-3">
-          <div>
-            <p className="text-sm font-medium">백그라운드 권한 리뷰어</p>
-            <p className="text-[11px] text-muted-foreground">
-              루틴·헤드리스 실행을 어떻게 검증할지 선택합니다. LLM 검증은 로컬 규칙 뒤에 실행되며 위험도를 낮출 수 없습니다.
-            </p>
-          </div>
-
+        {/* ── 권한 리뷰어 ── */}
+        <SettingsSection
+          title="권한 리뷰어"
+          description="자동(헤드리스) 실행과 대화형 채팅 모두에 적용됩니다. 어떻게 검증할지 선택하세요. LLM 검증은 로컬 규칙 뒤에 실행되며 위험도를 낮출 수 없습니다."
+        >
+          {showRenameNotice ? (
+            <div
+              role="status"
+              data-testid="reviewer-rename-notice"
+              className="flex items-start gap-2 rounded-md border border-info/40 bg-info/10 px-3 py-2 text-[11px] text-info"
+            >
+              <span className="flex-1">{REVIEWER_RENAME_NOTICE_TEXT}</span>
+              <button
+                type="button"
+                onClick={dismissRenameNotice}
+                aria-label="알림 닫기"
+                className="text-xs underline-offset-2 hover:underline"
+              >
+                닫기
+              </button>
+            </div>
+          ) : null}
           <RadioGroup
             value={reviewer.mode}
             disabled={reviewerBusy}
-            aria-label="백그라운드 권한 리뷰어 선택"
+            aria-label="권한 리뷰어 선택"
             onValueChange={(value) => void applyReviewerCommand(`mode ${value}`)}
             className="space-y-1.5"
           >
@@ -744,15 +717,6 @@ export function PermissionsTab() {
                     {REVIEWER_PROVIDER_OPTIONS.map((opt) => {
                       const hasKey = providerKeyMap[opt.value] ?? false;
                       const isDisabled = !hasKey;
-                      // Disabled SelectItem 의 reason 을 모든 모달리티에 노출:
-                      //   sighted mouse/keyboard → inline `(키 없음 · 설정 필요)` 항상 표시
-                      //   screen reader          → `aria-label` 에 전체 reason 포함
-                      // 이전에는 Tooltip 으로 처리했으나 Radix Select 는 disabled
-                      // SelectItem 에 `data-disabled:pointer-events-none` 을 강제하므로
-                      // hover/focus 가 발화되지 않아 Tooltip 이 영원히 열리지 않고
-                      // `aria-describedby` 도 wire 되지 않음 → 모든 사용자가 reason 을
-                      // 알 수 없는 상태였음. inline + aria-label 패턴은 Radix
-                      // listbox ARIA 트리도 손상시키지 않는다.
                       const reason = "API 키 설정 필요 — 지능 설정에서 키를 추가하세요.";
                       return (
                         <SelectItem
@@ -824,7 +788,6 @@ export function PermissionsTab() {
               Azure AI Foundry · Google AI Studio: 지능 설정에서 Azure AI Foundry 또는 Gemini 공급자 API 키를 저장하면 자동으로 활성화됩니다. Foundry 는 엔드포인트 baseUrl 도 함께 설정해야 합니다.
               키가 없는 공급자는 선택할 수 없습니다.
             </p>
-            {/* Minor-1.4: Foundry baseUrl format hint — prose-only was ambiguous */}
             <details className="text-[10px] text-muted-foreground">
               <summary className="cursor-pointer select-none">Foundry baseUrl 형식 보기</summary>
               <code className="mt-1 block rounded bg-muted/30 px-2 py-1 font-mono">
@@ -869,7 +832,7 @@ export function PermissionsTab() {
               </RadioGroup>
               {reviewer.interactive.autoApprove === "low" && reviewer.mode === "disabled" ? (
                 <p className="rounded-md border border-warning/40 bg-warning/15 px-3 py-2 text-[11px] text-warning">
-                  ⚠ 백그라운드 권한 검사가 "명시 승인만" 으로 꺼져 있어 자동 허용이 동작하지 않습니다. "규칙 기반" 또는 "LLM" 으로 변경하세요.
+                  ⚠ 권한 리뷰어가 꺼져 있어 저위험 자동 허용이 동작하지 않습니다. 권한 리뷰어를 "규칙 기반 검증" 또는 "LLM 검증"으로 켜세요.
                 </p>
               ) : null}
               {mode === "auto" && reviewer.interactive.autoApprove === "off" ? (
@@ -877,8 +840,8 @@ export function PermissionsTab() {
                   className="rounded-md border border-warning/40 bg-warning/15 px-3 py-2 text-[11px] text-warning"
                   data-testid="permissions-legacy-auto-mode-banner"
                 >
-                  ⚠ "자동 검증" 모드에서 자동 허용이 꺼져 있습니다.
-                  낮은 위험도 작업을 확인 없이 허용하려면 위에서 "저위험 자동 허용"을 선택하세요.
+                  ⚠ "자동 검증" 모드에서 저위험 자동 허용이 꺼져 있습니다.
+                  저위험 작업을 확인 없이 허용하려면 위에서 "저위험 자동 허용"을 켜세요.
                 </p>
               ) : null}
               {mode === "strict" && reviewer.interactive.autoApprove === "low" ? (
@@ -886,8 +849,8 @@ export function PermissionsTab() {
                   className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-[11px] text-destructive"
                   data-testid="permissions-strict-low-contradiction-banner"
                 >
-                  ⛔ "전체 물어보기" 모드와 "저위험 자동 허용"이 동시에 켜져 있어 설정이 충돌합니다.
-                  모두 묻기 정책을 유지하려면 자동 허용을 "끔"으로 변경하세요.
+                  ⛔ "전체 물어보기" 모드는 모든 작업을 확인하지만 "저위험 자동 허용"이 켜져 있어 설정이 충돌합니다.
+                  모두 확인 정책을 유지하려면 저위험 자동 허용을 "끔"으로 변경하세요.
                 </p>
               ) : null}
               {mode === "allow" ? (
@@ -895,11 +858,32 @@ export function PermissionsTab() {
                   className="rounded-md border border-warning/40 bg-warning/15 px-3 py-2 text-[11px] text-warning"
                   data-testid="permissions-allow-mode-banner"
                 >
-                  ⚠ "전체 허용" 모드에서는 모든 작업이 자동으로 허용되므로 자동 허용 설정이 적용되지 않습니다.
+                  ⚠ "전체 허용" 모드는 모든 작업을 자동 허용하므로 권한 리뷰어와 저위험 자동 허용 설정이 적용되지 않습니다.
                 </p>
               ) : null}
             </div>
           </div>
+
+          <details
+            className="rounded-md border bg-muted/20"
+            data-testid="reviewer-cli-mapping-panel"
+          >
+            <summary className="cursor-pointer px-3 py-2 text-xs font-semibold">
+              CLI 매핑 (슬래시 명령)
+            </summary>
+            <div className="space-y-2 border-t px-3 py-3 text-[11px]">
+              <p className="text-muted-foreground">
+                동일 설정을 채팅 입력창에서 슬래시 명령으로도 변경할 수 있습니다.
+              </p>
+              <ul className="space-y-1 font-mono leading-relaxed">
+                <li><code>/permission reviewer mode &lt;disabled|rule|llm|strict&gt;</code></li>
+                <li><code>/permission reviewer interactive &lt;off|low&gt;</code></li>
+                <li><code>/permission reviewer provider &lt;openai|anthropic|google|foundry|gcp-playground&gt;</code></li>
+                <li><code>/permission reviewer model &lt;모델 이름&gt;</code></li>
+                <li><code>/permission reviewer fallback &lt;deny|rule&gt;</code></li>
+              </ul>
+            </div>
+          </details>
 
           <details
             className="rounded-md border bg-muted/20"
@@ -953,16 +937,13 @@ export function PermissionsTab() {
               </details>
             </div>
           </details>
-        </div>
-
-        <Separator />
+        </SettingsSection>
 
         {/* ── Section B: Explicit Approval Policy ── */}
-        <div className="space-y-2">
-          <div>
-            <p className="text-sm font-medium">승인 대화상자 동작</p>
-            <p className="text-[11px] text-muted-foreground">체크 시 승인 대화상자에서 모달 외부 클릭과 Escape 키가 차단되어 버튼 또는 승인 단축키로 명시적으로 결정해야 합니다.</p>
-          </div>
+        <SettingsSection
+          title="승인 대화상자 동작"
+          description="체크 시 승인 대화상자에서 모달 외부 클릭과 Escape 키가 차단되어 버튼 또는 승인 단축키로 명시적으로 결정해야 합니다."
+        >
           <div className="flex items-center gap-3">
             <Checkbox
               checked={requireExplicit}
@@ -981,18 +962,13 @@ export function PermissionsTab() {
                 : "이 정책은 IT 관리자가 설정했습니다. 사용자가 변경할 수 없습니다."}
             </p>
           )}
-        </div>
-
-        <Separator />
+        </SettingsSection>
 
         {/* ── Section C: Rule Editor ── */}
-        <div className="space-y-3">
-          <div>
-            <p className="text-sm font-medium">도구 규칙</p>
-            <p className="text-[11px] text-muted-foreground">특정 도구 패턴에 대해 항상 허용 / 항상 거부를 설정합니다 (와일드카드 지원: <code className="text-[10px]">mcp_*</code>).</p>
-          </div>
-
-          {/* 규칙 테이블 */}
+        <SettingsSection
+          title="도구 규칙"
+          description={<>특정 도구 패턴에 대해 항상 허용 / 항상 거부를 설정합니다 (와일드카드 지원: <code className="text-[10px]">mcp_*</code>).</>}
+        >
           {rules.length === 0 ? (
             <p className="text-[11px] text-muted-foreground italic">저장된 규칙이 없습니다.</p>
           ) : (
@@ -1034,8 +1010,6 @@ export function PermissionsTab() {
               </table>
             </div>
           )}
-
-          {/* 규칙 추가 */}
           <div className="flex items-center gap-2">
             <Input
               className="h-8 flex-1 text-xs"
@@ -1060,17 +1034,13 @@ export function PermissionsTab() {
               추가
             </Button>
           </div>
-        </div>
-
-        <Separator />
+        </SettingsSection>
 
         {/* ── Section D: Additional Directories ── */}
-        <div className="space-y-3">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-sm font-medium">허용 디렉터리</p>
-              <p className="text-[11px] text-muted-foreground">작업 디렉터리 밖에서 파일 도구가 접근할 수 있는 사용자 승인 경로입니다.</p>
-            </div>
+        <SettingsSection
+          title="허용 디렉터리"
+          description="작업 디렉터리 밖에서 파일 도구가 접근할 수 있는 사용자 승인 경로입니다."
+          actions={
             <Button
               variant="outline"
               size="sm"
@@ -1080,8 +1050,8 @@ export function PermissionsTab() {
             >
               새로고침
             </Button>
-          </div>
-
+          }
+        >
           {directories.length === 0 ? (
             <p className="text-[11px] text-muted-foreground italic">추가 허용 디렉터리가 없습니다.</p>
           ) : (
@@ -1117,7 +1087,6 @@ export function PermissionsTab() {
               </table>
             </div>
           )}
-
           <div className="flex items-center gap-2">
             <Input
               className="h-8 flex-1 text-xs"
@@ -1133,7 +1102,6 @@ export function PermissionsTab() {
               추가
             </Button>
           </div>
-
           {pendingDirectoryWarning && pendingDirectoryWarning.path === newDirectory.trim() && (
             <div
               data-testid="directory-warning-confirmation"
@@ -1166,17 +1134,13 @@ export function PermissionsTab() {
               </div>
             </div>
           )}
-        </div>
-
-        <Separator />
+        </SettingsSection>
 
         {/* ── R-5: 사용자 승인 기록 ── */}
-        <div className="space-y-2">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-sm font-medium">사용자 승인 기록 ({userApprovals.length})</p>
-              <p className="text-[11px] text-muted-foreground">세션 또는 지속적으로 기록된 도구 승인 목록입니다.</p>
-            </div>
+        <SettingsSection
+          title={`사용자 승인 기록 (${userApprovals.length})`}
+          description="세션 또는 지속적으로 기록된 도구 승인 목록입니다."
+          actions={
             <Button
               size="sm"
               variant="outline"
@@ -1186,7 +1150,8 @@ export function PermissionsTab() {
             >
               새로고침
             </Button>
-          </div>
+          }
+        >
           {userApprovals.length === 0 ? (
             <p className="text-[11px] text-muted-foreground">기록된 승인이 없습니다.</p>
           ) : (
@@ -1206,7 +1171,6 @@ export function PermissionsTab() {
                   {userApprovals.map((a) => (
                     <tr key={a.key} className="border-b last:border-0">
                       <td className="max-w-[120px] truncate px-3 py-2 font-mono">
-                        {/* R-2 Round-3 MEDIUM: show toolName from entry metadata, not hex hash fragment */}
                         {a.toolName ?? a.key.slice(0, 12)}
                       </td>
                       <td className="px-3 py-2">
@@ -1239,22 +1203,20 @@ export function PermissionsTab() {
               </table>
             </div>
           )}
-        </div>
-
-        <Separator />
+        </SettingsSection>
 
         {/* ── Audit Log ── */}
-        <div className="space-y-2">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-            <p className="text-sm font-medium">감사 로그</p>
-            <p className="text-[11px] text-muted-foreground">최근 권한 감사 기록과 체인 검증 상태를 확인합니다.</p>
-            </div>
+        <SettingsSection
+          title="감사 로그"
+          description="최근 권한 감사 기록과 체인 검증 상태를 확인합니다."
+          actions={
             <Button size="sm" variant="outline" className="h-8 px-3 text-[12px]" onClick={() => setAuditOpen(true)}>
               열기
             </Button>
-          </div>
-        </div>
+          }
+        >
+          <p className="text-[11px] text-muted-foreground">감사 로그 패널을 열어 최근 7일간의 권한 이벤트를 확인하세요.</p>
+        </SettingsSection>
 
       </div>
       <AuditPanel open={auditOpen} onClose={() => setAuditOpen(false)} />
