@@ -441,15 +441,16 @@ export function SettingsContent({
               setApiKeyInput={s.setMarketplaceApiKeyInput}
               onSaved={onSaved}
               onImmediateChange={marketplaceSave.schedule}
-            />
-            <TabSaveBar
-              onSave={() => {
+              onSaveNow={() => {
                 marketplaceSave.cancel();
                 void s.save("marketplace");
               }}
-              saving={s.saving}
-              settingsLoaded={s.settingsLoaded}
             />
+            {/* Bottom <TabSaveBar> removed — URL has its own explicit
+                "저장" button, API key has an inline Save in the
+                "고급 옵션" collapse, and the private-network toggle is
+                immediate-apply. A bottom batch-save was redundant + the
+                user (2026-05-18) explicitly questioned it. */}
           </TabsContent>
       </div>
       </div>
