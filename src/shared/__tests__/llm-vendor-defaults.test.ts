@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { isLLMVendor, LLM_VENDORS } from "../llm-vendor-defaults.js";
+import {
+  isLLMVendor,
+  LLM_VENDORS,
+  LLM_VENDOR_DEFAULTS,
+  freshVendorBlocks,
+} from "../llm-vendor-defaults.js";
 
 describe("isLLMVendor", () => {
   it("accepts every member of LLM_VENDORS", () => {
@@ -37,5 +42,23 @@ describe("isLLMVendor", () => {
     } else {
       expect.fail("raw should have narrowed to LLMVendor");
     }
+  });
+});
+
+describe("LLMVendorSettings authMode default (#893)", () => {
+  it("every vendor's default block carries `authMode: \"manual\"`", () => {
+    for (const v of LLM_VENDORS) {
+      expect(LLM_VENDOR_DEFAULTS[v].authMode).toBe("manual");
+    }
+  });
+
+  it("freshVendorBlocks() returns mutable copies that retain the manual default", () => {
+    const blocks = freshVendorBlocks();
+    for (const v of LLM_VENDORS) {
+      expect(blocks[v].authMode).toBe("manual");
+    }
+    // Mutating a returned block must not poison the frozen defaults.
+    blocks.claude.authMode = "login";
+    expect(LLM_VENDOR_DEFAULTS.claude.authMode).toBe("manual");
   });
 });
