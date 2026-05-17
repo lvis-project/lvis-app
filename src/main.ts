@@ -1059,9 +1059,12 @@ function openSettingsWindow(initialTabInput: unknown = "llm"): BrowserWindow {
     title: "LVIS 설정",
     icon: resolveAppIconPath(),
     autoHideMenuBar: true,
-    // Cross-window chrome unification — match main / link / auth windows
-    // (which all use hiddenInset + CustomTitleBar). Settings was the only
-    // outlier using native macOS chrome, breaking brand identity.
+    // Chrome unification — match `mainWindow` further down in this file
+    // (line ~1374). Settings was previously the only outlier using native
+    // macOS chrome (no `frame`/`titleBarStyle`), breaking brand identity.
+    // The `link-window-service.ts` / `auth-window-service.ts` constructors
+    // use the same triple — when a 4th window joins, extract to a
+    // `getCommonChromeOptions()` helper in `src/main/window-chrome.ts`.
     frame: process.platform !== "darwin" ? false : undefined,
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "hidden",
     trafficLightPosition: process.platform === "darwin" ? { x: 14, y: 12 } : undefined,
