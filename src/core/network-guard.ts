@@ -22,6 +22,7 @@
  */
 import { promises as dns } from "node:dns";
 import { isIPv4, isIPv6 } from "node:net";
+import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
 
 export class NetworkGuardError extends Error {
   constructor(message: string) {
@@ -117,7 +118,12 @@ export async function fetchPublicHttpResponse(
   rawUrl: string,
   init: RequestInit & { maxRedirects?: number; timeoutMs?: number } = {},
 ): Promise<Response> {
-  const { maxRedirects = 5, timeoutMs = 15000, signal: externalSignal, ...restInit } = init;
+  const {
+    maxRedirects = 5,
+    timeoutMs = TOOL_TIMEOUT_POLICY.networkFetchDefaultMs,
+    signal: externalSignal,
+    ...restInit
+  } = init;
   let currentUrl = rawUrl;
 
   for (let hop = 0; hop <= maxRedirects; hop++) {
