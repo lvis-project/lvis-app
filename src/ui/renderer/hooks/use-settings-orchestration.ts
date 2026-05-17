@@ -13,6 +13,12 @@ export interface SettingsOrchestrationState {
   setModel: (v: string) => void;
   hasKey: boolean;
   setHasKey: (v: boolean) => void;
+  /**
+   * #893 — Auth mode for the active vendor. Persisted in
+   * `llm.vendors.<vendor>.authMode`. Defaults to `"manual"`.
+   */
+  authMode: "manual" | "login";
+  setAuthMode: (mode: "manual" | "login") => void;
   autoCompact: boolean;
   setAutoCompact: (updater: boolean | ((prev: boolean) => boolean)) => void;
   enableThinking: boolean;
@@ -91,6 +97,8 @@ export function useSettingsOrchestration(
   const [keyInput, setKeyInput] = useState("");
   const [model, setModel] = useState("");
   const [hasKey, setHasKey] = useState(false);
+  // #893 — Auth mode for the active vendor block; hydrated from settings snapshot.
+  const [authMode, setAuthMode] = useState<"manual" | "login">("manual");
   const [autoCompact, setAutoCompact] = useState(true);
   const [enableThinking, setEnableThinking] = useState(true);
   const [thinkingBudget, setThinkingBudget] = useState(10_000);
@@ -192,6 +200,8 @@ export function useSettingsOrchestration(
     setVertexLocation(block.vertexLocation ?? "");
     setEnableThinking(block.enableThinking);
     setThinkingBudget(block.thinkingBudgetTokens);
+    // #893 — legacy persisted settings won't have `authMode`; treat as "manual".
+    setAuthMode(block.authMode === "login" ? "login" : "manual");
   }
 
   // Re-check web key when webProvider changes
@@ -270,6 +280,7 @@ export function useSettingsOrchestration(
           vertexLocation: trimmedVertexLocation || undefined,
           enableThinking,
           thinkingBudgetTokens: thinkingBudget,
+          authMode,
         };
         await api.updateSettings({
           llm: {
@@ -340,6 +351,7 @@ export function useSettingsOrchestration(
     keyInput, setKeyInput,
     model, setModel,
     hasKey, setHasKey,
+    authMode, setAuthMode,
     autoCompact, setAutoCompact,
     enableThinking, setEnableThinking,
     thinkingBudget, setThinkingBudget,
