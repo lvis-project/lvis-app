@@ -397,7 +397,7 @@ export function AppearanceTab() {
   const customStack = activePreset === "custom" ? family : "";
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <SettingsPageHeader
         title="테마"
         description="화면 색상, 글꼴, 외부 URL 표시 방식을 설정합니다"

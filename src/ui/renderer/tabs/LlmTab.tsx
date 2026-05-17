@@ -139,7 +139,7 @@ export function LlmTab(props: LlmTabProps) {
   const hasOnSave = typeof onSave === "function";
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <SettingsPageHeader
         title="모델"
         description="AI 공급자와 모델, API 키, 폴백 체인을 설정합니다"
