@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { ToolRegistry } from "../registry.js";
 import { BashTool, BashToolInputSchema } from "../bash.js";
 import type { ToolExecutionContext } from "../base.js";
+import { TOOL_TIMEOUT_POLICY } from "../../shared/tool-timeout-policy.js";
 
 const ctx = (cwd: string = process.cwd()): ToolExecutionContext => ({
   cwd,
@@ -276,9 +277,14 @@ describe("BashTool — sandbox violation", () => {
 });
 
 describe("BashTool — schema default", () => {
-  it("input schema defaults timeoutSeconds to 600 when omitted", () => {
+  it("input schema defaults timeoutSeconds to policy.shellDefaultSeconds when omitted", () => {
     const parsed = BashToolInputSchema.parse({ command: "echo hi" });
-    expect(parsed.timeoutSeconds).toBe(600);
+    expect(parsed.timeoutSeconds).toBe(TOOL_TIMEOUT_POLICY.shellDefaultSeconds);
+  });
+
+  it("input schema rejects timeoutSeconds above policy.shellMaxSeconds", () => {
+    const above = TOOL_TIMEOUT_POLICY.shellMaxSeconds + 1;
+    expect(() => BashToolInputSchema.parse({ command: "echo hi", timeoutSeconds: above })).toThrow();
   });
 });
 
