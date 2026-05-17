@@ -801,6 +801,12 @@ export type LvisPermissionApi = {
     | { ok: false; error: string; message?: string }
   >;
   onModeChanged: (cb: (mode: string) => void) => () => void;
+  /**
+   * Hint event — directory config mutated. Listeners refresh state via
+   * `permission.dirDispatch("list")` rather than receiving payload data
+   * (slash dispatcher is the single source of truth).
+   */
+  onConfigChanged: (cb: () => void) => () => void;
   listRules: () => Promise<PermissionRule[]>;
   addRule: (pattern: string, action: "allow" | "deny") => Promise<AddRuleResult>;
   removeRule: (pattern: string, action: "allow" | "deny") => Promise<RemoveRuleResult>;
