@@ -84,8 +84,11 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
     const isDirty = urlDraft.trim() !== baseUrl.trim() || apiKeyInput.trim() !== "";
     if (!isDirty) return;
     const handler = (e: BeforeUnloadEvent) => {
+      // preventDefault alone is sufficient in modern browsers / Electron
+      // to trigger the native "leave?" confirm. The legacy `returnValue`
+      // assignment is now deprecated (TS6385); preventDefault is the
+      // standards-track replacement.
       e.preventDefault();
-      e.returnValue = "";
     };
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
