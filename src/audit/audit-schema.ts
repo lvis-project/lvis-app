@@ -90,6 +90,17 @@ export interface AuditAllow extends AuditCommon {
   directory?: string;
   directoryAllowed?: true;
   scope?: RoutineScopeSnapshot;
+  /**
+   * Grant lifetime for out-of-allowed-dir directory approvals. Set when
+   * the user resolved an `AuditAsk` (out-of-allowed-dir) with allow-once
+   * / allow-session / allow-always. Forensic replay distinguishes
+   * "narrow + turn-bound" vs "parent + conversation-bound" vs
+   * "parent + persisted" grants from a single audit log diff.
+   * `"degraded-to-turn"` records the propagateGrantScope fallback when a
+   * session-intent grant could not be wired through to the conversation
+   * loop and was conservatively narrowed.
+   */
+  grantLifetime?: "turn" | "session" | "always" | "degraded-to-turn";
   layer: number;
   reviewer?: RiskVerdict;
   hookChain?: HookResult[];

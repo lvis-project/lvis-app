@@ -133,6 +133,14 @@ export type ToolEntryItem = {
    * duration; once `status` flips to "done"/"error" this is populated.
    */
   durationMs?: number;
+  /**
+   * Wall-clock timestamp (Date.now()) captured when this tool transitions
+   * to "running" via applyToolStart. Read by ToolGroupCard to render a
+   * live ticking elapsed counter (`⏱ 0.3s`, `⏱ 1.4s`, ...) while the
+   * tool is in flight — so users can tell a long-running call is making
+   * progress vs. hung. Cleared by applyToolEnd in favor of `durationMs`.
+   */
+  startedAt?: number;
 };
 
 export type ChatEntry =
@@ -542,6 +550,7 @@ export function applyToolStart(
     displayOrder: payload.displayOrder ?? 0,
     status: "running",
     input: payload.input,
+    startedAt: Date.now(),
   };
 
   if (groupIdx >= 0) {
@@ -604,17 +613,17 @@ export function applyToolEnd(
   }
 
   const group = next[groupIdx] as ToolGroupEntry;
-  const tools = group.tools.map((tool: ToolEntryItem) =>
-    tool.toolUseId === payload.toolUseId
-      ? {
-          ...tool,
-          status: (payload.isError ? "error" : "done") as "done" | "error",
-          result: payload.result,
-          ...(payload.uiPayload && { uiPayload: payload.uiPayload }),
-          ...(typeof payload.durationMs === "number" && { durationMs: payload.durationMs }),
-        }
-      : tool,
-  );
+  const tools = group.tools.map((tool: ToolEntryItem) => {
+    if (tool.toolUseId !== payload.toolUseId) return tool;
+    const { startedAt: _startedAt, ...rest } = tool;
+    return {
+      ...rest,
+      status: (payload.isError ? "error" : "done") as "done" | "error",
+      result: payload.result,
+      ...(payload.uiPayload && { uiPayload: payload.uiPayload }),
+      ...(typeof payload.durationMs === "number" && { durationMs: payload.durationMs }),
+    };
+  });
   const completedTool = tools.find((tool: ToolEntryItem) => tool.toolUseId === payload.toolUseId);
   const stillRunning = tools.some((tool: ToolEntryItem) => tool.status === "running");
   next[groupIdx] = { ...group, status: stillRunning ? "running" : "done", tools };

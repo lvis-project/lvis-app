@@ -142,6 +142,14 @@ export interface ConversationDeps {
   pluginRuntime: PluginRuntime;
   additionalDirectories?: readonly string[];
   getAdditionalDirectories?: () => readonly string[];
+  /**
+   * Fan-out hook for permission config mutations. Boot wires this from
+   * `ipc/domains/permissions.ts:broadcastPermissionConfigChanged` so the
+   * conversation loop's `addSessionAdditionalDirectory` (dialog-driven
+   * session grants) reaches multi-window PermissionsTab subscribers,
+   * not only slash-dispatch grants.
+   */
+  broadcastPermissionConfigChanged?: () => void;
   /** C2(c): per-session SkillOverlay handle, cleared on newConversation(). */
   skillOverlay?: { clear(sessionId: string): void };
   /** Session-scoped assistant TO-DO lifecycle. */
@@ -249,6 +257,7 @@ export function createConversationLoop(deps: ConversationDeps): ConversationLoop
     toolRegistry: deps.toolRegistry,
     memoryManager: deps.memoryManager,
     permissionManager: deps.permissionManager,
+    broadcastPermissionConfigChanged: deps.broadcastPermissionConfigChanged,
     routineEngine: deps.routineEngine,
     idleScheduler: deps.idleScheduler,
     postTurnHookChain: deps.postTurnHookChain,
