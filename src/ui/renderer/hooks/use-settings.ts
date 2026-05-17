@@ -23,7 +23,7 @@ function narrowVendor(raw: unknown): LLMVendor {
  *
  * Centralises the chat-input-bar's read-through cache of LLM provider/model/
  * thinking toggle, plus the context-overflow provider/model snapshot loaded
- * once at mount. Exposes a `refresh` callback invoked after SettingsDialog
+ * once at mount. Exposes a `refresh` callback invoked after SettingsContent
  * saves so the chat bar reflects changes without a restart.
  */
 export interface UseSettingsResult {
@@ -35,7 +35,7 @@ export interface UseSettingsResult {
   enableThinkingChat: boolean;
   /** One-shot snapshot of {provider, model} used for context overflow %. */
   currentLlmSettings: { provider: LLMVendor; model: string } | null;
-  /** Re-read settings from disk (call after SettingsDialog save). */
+  /** Re-read settings from disk (call after SettingsContent save). */
   refresh: () => Promise<void>;
   /** Persist + optimistically update the thinking toggle. */
   toggleThinking: (next: boolean) => Promise<void>;

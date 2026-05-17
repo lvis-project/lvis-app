@@ -59,7 +59,7 @@ export interface SettingsOrchestrationState {
   saving: boolean;
   /**
    * Last save failure surface. Cleared on the next successful save.
-   * SettingsDialog renders this as a banner so silent IPC failures
+   * SettingsContent renders this as a banner so silent IPC failures
    * (network drop, locked settings file, schema reject) become
    * visible — without this, an auto-save that silently rejected
    * would leave the user thinking a toggle persisted when it did not.
@@ -291,7 +291,7 @@ export function useSettingsOrchestration(
       setLastSaveError(null);
       ok = true;
     } catch (err) {
-      // Surface via state so SettingsDialog can render an inline banner —
+      // Surface via state so SettingsContent can render an inline banner —
       // debounced callers do `void s.save(tab)` and would otherwise lose
       // the rejection in an unhandled-promise warning, leaving the user
       // thinking a toggle persisted when it did not.

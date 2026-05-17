@@ -8,8 +8,8 @@ import { createContext, useContext, useEffect, useState } from "react";
  * the user sees one consistent feedback signal regardless of which tab
  * triggered the write.
  *
- * Lives in its own file (not in SettingsDialog) to avoid the circular
- * import that would otherwise form: SettingsDialog imports tab components,
+ * Lives in its own file (not in SettingsContent) to avoid the circular
+ * import that would otherwise form: SettingsContent imports tab components,
  * tab components import the notifier. Keeping the context here lets both
  * sides depend on the same neutral module.
  */
