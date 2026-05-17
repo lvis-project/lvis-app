@@ -234,28 +234,33 @@ export function PluginConfigSchemaForm({
               <p className="text-[11px] text-muted-foreground">{prop.description}</p>
             )}
             {isSecret ? (
-              <div className="flex items-center gap-2">
-                <Input
-                  id={fieldId}
-                  type="password"
-                  className="h-7 text-xs flex-1"
-                  placeholder={secretsPresent[key] ? "**** (저장됨)" : "값을 입력하세요"}
-                  value={secretDrafts[key] ?? ""}
-                  onChange={(e) =>
-                    setSecretDrafts((prev) => ({ ...prev, [key]: e.target.value }))
-                  }
-                  data-testid={`${fieldId}:input`}
-                />
-                <Button
-                  size="sm"
-                  className="h-7 text-xs px-2 shrink-0"
-                  onClick={() => void saveSecretField(key)}
-                  disabled={!(secretDrafts[key]?.length ?? 0) || Boolean(fieldSaving[key])}
-                  data-testid={`${fieldId}:save`}
-                >
-                  {fieldSaving[key] ? "저장 중…" : "저장"}
-                </Button>
-              </div>
+              <>
+                <div className="flex items-center gap-2">
+                  <Input
+                    id={fieldId}
+                    type="password"
+                    className="h-7 text-xs flex-1"
+                    placeholder={secretsPresent[key] ? "**** (저장됨)" : "값을 입력하세요"}
+                    value={secretDrafts[key] ?? ""}
+                    onChange={(e) =>
+                      setSecretDrafts((prev) => ({ ...prev, [key]: e.target.value }))
+                    }
+                    data-testid={`${fieldId}:input`}
+                  />
+                  <Button
+                    size="sm"
+                    className="h-7 text-xs px-2 shrink-0"
+                    onClick={() => void saveSecretField(key)}
+                    disabled={!(secretDrafts[key]?.length ?? 0) || Boolean(fieldSaving[key])}
+                    data-testid={`${fieldId}:save`}
+                  >
+                    {fieldSaving[key] ? "저장 중…" : "저장"}
+                  </Button>
+                </div>
+                <p className="text-[10px] text-muted-foreground">
+                  🔒 OS 키체인에 암호화 저장됩니다. settings.json 에는 저장되지 않으므로 안전합니다.
+                </p>
+              </>
             ) : prop.enum ? (
               <NativeSelect
                 id={fieldId}
