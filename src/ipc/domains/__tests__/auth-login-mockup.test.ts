@@ -4,12 +4,22 @@
  * Verifies the kebab-case English `error` code contract, env-override
  * credential check, demo-key env-var sourcing, and the side-effect of
  * persisting the resolved key under `llm.apiKey.<vendor>`.
+ *
+ * PR #894 review B1 / T1-10 — tests cover the production gate (handler
+ * skipped when `app.isPackaged && !isDemoEnabled()`) and the redacted
+ * audit `keySource=present` fingerprint.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
+let appIsPackaged = false;
 
 vi.mock("electron", () => ({
+  app: {
+    get isPackaged() {
+      return appIsPackaged;
+    },
+  },
   ipcMain: {
     handle: vi.fn((channel: string, fn: (...args: unknown[]) => unknown) => {
       handlers.set(channel, fn);
@@ -40,19 +50,32 @@ function makeDeps() {
 
 const ORIGINAL_ENV = { ...process.env };
 
-beforeEach(() => {
+beforeEach(async () => {
   handlers.clear();
+  appIsPackaged = false;
   vi.resetModules();
+  // Default: enable demo so handler registers. Individual tests override.
+  process.env.LVIS_DEMO_ENABLED = "1";
+  process.env.LVIS_DEMO_KEY_OPENAI = process.env.LVIS_DEMO_KEY_OPENAI ?? "";
+  const mod = await import("../../../main/demo-credentials.js");
+  mod.resetDemoCredentialsForTesting();
 });
 
 afterEach(() => {
   process.env = { ...ORIGINAL_ENV };
 });
 
+async function loadAuthModule() {
+  const demoMod = await import("../../../main/demo-credentials.js");
+  demoMod.resetDemoCredentialsForTesting();
+  demoMod.captureDemoCredentials();
+  return await import("../auth.js");
+}
+
 describe("auth:login-mockup IPC handler (#893)", () => {
   it("rejects unknown vendors with invalid-vendor", async () => {
     const deps = makeDeps();
-    const { registerAuthHandlers } = await import("../auth.js");
+    const { registerAuthHandlers } = await loadAuthModule();
     registerAuthHandlers(deps as never);
 
     const result = await invoke("lvis:auth:login-mockup", {
@@ -66,7 +89,7 @@ describe("auth:login-mockup IPC handler (#893)", () => {
 
   it("rejects bad credentials with invalid-credentials and audits the failure", async () => {
     const deps = makeDeps();
-    const { registerAuthHandlers } = await import("../auth.js");
+    const { registerAuthHandlers } = await loadAuthModule();
     registerAuthHandlers(deps as never);
 
     const result = await invoke("lvis:auth:login-mockup", {
@@ -82,7 +105,7 @@ describe("auth:login-mockup IPC handler (#893)", () => {
   it("returns no-demo-key when the per-vendor env var is missing", async () => {
     delete process.env.LVIS_DEMO_KEY_OPENAI;
     const deps = makeDeps();
-    const { registerAuthHandlers } = await import("../auth.js");
+    const { registerAuthHandlers } = await loadAuthModule();
     registerAuthHandlers(deps as never);
 
     const result = await invoke("lvis:auth:login-mockup", {
@@ -97,7 +120,7 @@ describe("auth:login-mockup IPC handler (#893)", () => {
   it("persists the demo key under llm.apiKey.<vendor> on success", async () => {
     process.env.LVIS_DEMO_KEY_OPENAI = "sk-demo-test";
     const deps = makeDeps();
-    const { registerAuthHandlers } = await import("../auth.js");
+    const { registerAuthHandlers } = await loadAuthModule();
     registerAuthHandlers(deps as never);
 
     const result = await invoke("lvis:auth:login-mockup", {
@@ -118,7 +141,7 @@ describe("auth:login-mockup IPC handler (#893)", () => {
     process.env.LVIS_DEMO_PASS = "secret";
     process.env.LVIS_DEMO_KEY_CLAUDE = "sk-ant-demo";
     const deps = makeDeps();
-    const { registerAuthHandlers } = await import("../auth.js");
+    const { registerAuthHandlers } = await loadAuthModule();
     registerAuthHandlers(deps as never);
 
     const denied = await invoke("lvis:auth:login-mockup", {
@@ -143,7 +166,7 @@ describe("auth:login-mockup IPC handler (#893)", () => {
   it("maps kebab-case vendor ids to underscored env-var suffixes", async () => {
     process.env.LVIS_DEMO_KEY_AZURE_FOUNDRY = "sk-azure-demo";
     const deps = makeDeps();
-    const { registerAuthHandlers, demoKeyEnvVar } = await import("../auth.js");
+    const { registerAuthHandlers, demoKeyEnvVar } = await loadAuthModule();
     registerAuthHandlers(deps as never);
     expect(demoKeyEnvVar("azure-foundry")).toBe("LVIS_DEMO_KEY_AZURE_FOUNDRY");
 
@@ -157,5 +180,68 @@ describe("auth:login-mockup IPC handler (#893)", () => {
       "llm.apiKey.azure-foundry",
       "sk-azure-demo",
     );
+  });
+
+  // PR #894 review B1 — production gate
+  it("skips handler registration in packaged builds when LVIS_DEMO_ENABLED is unset", async () => {
+    appIsPackaged = true;
+    delete process.env.LVIS_DEMO_ENABLED;
+    const deps = makeDeps();
+    const { registerAuthHandlers } = await loadAuthModule();
+    registerAuthHandlers(deps as never);
+
+    expect(handlers.has("lvis:auth:login-mockup")).toBe(false);
+  });
+
+  it("registers handler in packaged builds when LVIS_DEMO_ENABLED=1 was captured pre-scrub", async () => {
+    appIsPackaged = true;
+    process.env.LVIS_DEMO_ENABLED = "1";
+    process.env.LVIS_DEMO_KEY_OPENAI = "sk-demo-prod-test";
+    const deps = makeDeps();
+    const { registerAuthHandlers } = await loadAuthModule();
+    registerAuthHandlers(deps as never);
+
+    expect(handlers.has("lvis:auth:login-mockup")).toBe(true);
+    const result = await invoke("lvis:auth:login-mockup", {
+      username: "demo",
+      password: "demo123",
+      vendor: "openai",
+    });
+    expect(result).toEqual({ ok: true, vendor: "openai" });
+  });
+
+  it("registers handler in dev builds even when LVIS_DEMO_ENABLED is unset", async () => {
+    appIsPackaged = false;
+    delete process.env.LVIS_DEMO_ENABLED;
+    process.env.LVIS_DEMO_KEY_OPENAI = "sk-dev-test";
+    const deps = makeDeps();
+    const { registerAuthHandlers } = await loadAuthModule();
+    registerAuthHandlers(deps as never);
+
+    expect(handlers.has("lvis:auth:login-mockup")).toBe(true);
+  });
+
+  // PR #894 review T1-10 — audit log fingerprint redaction
+  it("redacts keySource from the audit log to `present` on successful login", async () => {
+    process.env.LVIS_DEMO_KEY_OPENAI = "sk-redact-test";
+    const deps = makeDeps();
+    const { registerAuthHandlers } = await loadAuthModule();
+    registerAuthHandlers(deps as never);
+
+    await invoke("lvis:auth:login-mockup", {
+      username: "demo",
+      password: "demo123",
+      vendor: "openai",
+    });
+
+    const calls = deps.auditLogger.log.mock.calls;
+    const successCall = calls.find((c) => {
+      const input = (c[0] as { input?: string }).input ?? "";
+      return input.startsWith("login_mockup_ok");
+    });
+    expect(successCall).toBeDefined();
+    const successInput = (successCall![0] as { input: string }).input;
+    expect(successInput).toContain("keySource=present");
+    expect(successInput).not.toContain("LVIS_DEMO_KEY_");
   });
 });
