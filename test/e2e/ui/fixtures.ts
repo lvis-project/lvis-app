@@ -187,6 +187,10 @@ export const test = base.extend<ElectronFixtures>({
         LVIS_DEV: '1',
         LVIS_E2E: '1',
         LVIS_HOME: lvisHomeForTest,
+        // Consumed by detached-window-titlebar.spec.ts which spawns a second
+        // BrowserWindow via app.evaluate and needs the resolved main.js path
+        // for preload/indexHtml siblings.
+        LVIS_MAIN_ENTRY: mainEntry,
         NODE_ENV: 'test',
         ELECTRON_DISABLE_SECURITY_WARNINGS: '1',
       },
