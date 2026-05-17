@@ -67,9 +67,19 @@ export function SettingsDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         size="2xl"
-        className="h-[90dvh] min-h-[600px] max-h-[920px] !overflow-hidden flex flex-col gap-3"
+        // !p-0: sidebar must reach the dialog's outer border (not sit inside
+        // another card). User direction: "사이드바가 전체 영역에 붙어야지 왜
+        // 컨텐츠 안에 컨텐츠로 자리잡고 있나". The right pane owns its own
+        // padding via SettingsContent below.
+        className="h-[90dvh] min-h-[600px] max-h-[920px] !overflow-hidden flex flex-col !p-0"
       >
-        <DialogHeader>
+        {/* Linear-style — outer page heading removed. Each tab renders its
+            own page header (SettingsPageHeader) so the right pane top is
+            flush with the left nav top, and there is no redundant "설정"
+            label above the per-page "모델 / 테마 / ..." title.
+            DialogTitle + DialogDescription are kept inside DialogHeader
+            with sr-only so Radix's a11y contract is still satisfied. */}
+        <DialogHeader className="sr-only">
           <DialogTitle>설정</DialogTitle>
           <DialogDescription>앱 환경, 채팅 동작, 검색 엔진, 권한 정책을 설정합니다.</DialogDescription>
         </DialogHeader>
@@ -225,7 +235,11 @@ export function SettingsContent({
       orientation="vertical"
       value={tab}
       onValueChange={(nextTab) => setTab(normalizeSettingsTab(nextTab))}
-      className="relative flex h-full min-h-0 gap-3"
+      // No gap: sidebar and content share a single border (right edge of
+      // the sidebar) so the layout reads as two regions of the dialog,
+      // not two stacked cards. Simplified per user direction
+      // "레이아웃을 단순화해".
+      className="relative flex h-full min-h-0"
     >
       {/* Dialog-wide save feedback — anchored to the Tabs root (not the
           right pane) so the user sees it even after scrolling deep into
@@ -239,7 +253,11 @@ export function SettingsContent({
           the sidebar conversion). */}
       <TabsList
         aria-label="설정 카테고리"
-        className="flex h-full w-48 shrink-0 flex-col items-stretch gap-0.5 overflow-y-auto rounded-md border bg-muted/30 p-1.5"
+        // Sidebar = single region of the dialog, not a nested card.
+        // Drops the rounded border and bg tint that made it look like
+        // "content inside content"; keeps only a right border so the
+        // boundary with the content pane is still legible.
+        className="flex h-full w-48 shrink-0 flex-col items-stretch gap-0.5 overflow-y-auto border-r bg-muted/20 p-2"
       >
         <TabsTrigger value="llm" className={sideTriggerCls}>모델</TabsTrigger>
         <TabsTrigger value="appearance" className={sideTriggerCls}>테마</TabsTrigger>
@@ -268,7 +286,10 @@ export function SettingsContent({
           scrollbar set in styles.css renders the thumb only when content
           exceeds the pane. `relative` so the floating SavedToast anchors
           here rather than the dialog. */}
-      <div className="flex flex-1 min-w-0 flex-col overflow-y-scroll pr-1 lvis-settings-scroll">
+      {/* Right pane owns its own padding now that the dialog itself is
+          flush (DialogContent !p-0). px-6 py-5 leaves breathing room
+          around the page header and section cards. */}
+      <div className="flex flex-1 min-w-0 flex-col overflow-y-scroll px-6 py-5 lvis-settings-scroll">
         {s.lastSaveError && (
           <div
             role="alert"
