@@ -13,6 +13,7 @@ import * as tls from "node:tls";
 import { Agent, setGlobalDispatcher } from "undici";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { bootstrap, type AppServices } from "./boot.js";
+import { getCommonChromeOptions } from "./main/window-chrome.js";
 import {
   auditUnauthorized,
   getLastThemePayload,
@@ -1071,6 +1072,9 @@ function openSettingsWindow(initialTabInput: unknown = "llm"): BrowserWindow {
     title: "LVIS 설정",
     icon: resolveAppIconPath(),
     autoHideMenuBar: true,
+    // Chrome unification — spread from the shared helper so settings,
+    // main, link, and auth windows all stay byte-identical.
+    ...getCommonChromeOptions(),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -1378,17 +1382,9 @@ function createWindow(options: { showBootstrapSplash?: boolean } = {}) {
     show: true,
     icon: resolveAppIconPath(),
     autoHideMenuBar: false,
-    // ─── Cross-platform titlebar ─────────────────────────────────────────
-    // macOS: keep native frame so traffic-light buttons render via the OS;
-    //        hiddenInset shifts content area below the traffic lights.
-    // Win/Linux: remove native frame entirely — CustomTitleBar.tsx renders
-    //            our own minimize/maximize/close buttons in the renderer.
-    frame: process.platform !== "darwin" ? false : undefined,
-    titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "hidden",
-    // x=14 keeps existing left inset; y=12 vertically centers the 12px lights
-    // inside the 36px CustomTitleBar (see CustomTitleBar.tsx darwin branch).
-    trafficLightPosition: process.platform === "darwin" ? { x: 14, y: 12 } : undefined,
-    // ─────────────────────────────────────────────────────────────────────
+    // Cross-platform titlebar — see `src/main/window-chrome.ts` for the
+    // full rationale. The helper unifies main / settings / link / auth.
+    ...getCommonChromeOptions(),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,

@@ -16,6 +16,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { getCommonChromeOptions } from "./window-chrome.js";
 import { BrowserWindow, screen, session, type Cookie, type Session, type WebContents } from "electron";
 import { registerWindowEventListeners } from "../ipc/domains/window.js";
 import { markAsWindowControlOwned } from "../ipc/window-control-registry.js";
@@ -475,8 +476,11 @@ export async function openAuthWindow(
     title: windowTitle,
     icon: resolveAppIconPath(),
     autoHideMenuBar: true,
-    frame: process.platform !== "darwin" ? false : undefined,
-    titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "hidden",
+    // Frame settings sourced from the shared `getCommonChromeOptions()`
+    // helper so this window — when made visible — uses the same
+    // 36px CustomTitleBar slot + traffic-light position as the other
+    // LVIS windows. See `src/main/window-chrome.ts`.
+    ...getCommonChromeOptions(),
     // Hidden warmup BrowserWindow — page still loads + harvests cookies +
     // emits navigation events; never rendered to the user. Electron's
     // default `show: true` produces the popup-flash when callers want
