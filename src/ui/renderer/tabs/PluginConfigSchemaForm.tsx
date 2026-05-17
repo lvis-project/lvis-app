@@ -44,7 +44,6 @@ export interface PluginConfigSchemaFormProps {
   values: PluginConfigFormValues;
   /** Per-secret-key indicator: true when the keychain holds a value for this key. */
   secretsPresent: Record<string, boolean>;
-  saving?: boolean;
   onSave: (values: PluginConfigFormValues) => Promise<void> | void;
   onSetSecret: (key: string, value: string) => Promise<void> | void;
 }
@@ -104,7 +103,6 @@ export function PluginConfigSchemaForm({
   schema,
   values,
   secretsPresent,
-  saving,
   onSave,
   onSetSecret,
 }: PluginConfigSchemaFormProps) {
