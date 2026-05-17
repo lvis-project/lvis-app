@@ -284,6 +284,28 @@ grep -rn "<ComponentName>" src/ | head
 - `SettingsDialog.tsx` 수정했으나 production path 는 `SettingsWindow → SettingsContent`. 변경 안 보여 build cache 의심으로 3-4 round 손실. 첫 grep 1줄이면 즉시 발견됐을 사고. → 이후 SOT collapse + 파일 rename 으로 영구 해소.
 - `TabsList` 가 vertical sidebar 인데 primitive default `justify-center` 가 override 없이 생존 → 모든 trigger 가 vertical 중앙 정렬 → 사이드바 ~수백px 빈공간. Fix: `justify-start rounded-none bg-transparent` 명시.
 
+## Tool Execution Timeout Policy (REQUIRED)
+
+모든 tool 호출 timeout 은 `src/shared/tool-timeout-policy.ts` 의 `TOOL_TIMEOUT_POLICY` 객체가 단일 SOT. 새 tool / executor 변경 / MCP 통합 시 timeout 값을 직접 hardcode 하지 말고 이 객체에서 import. 자세한 매트릭스는 `docs/architecture/architecture.md` §6.4.Y.
+
+### 핵심 룰
+
+- **사용자 무한 대기 0**: `tools/executor.ts` Step 6 (Execute) 의 `Promise.race(tool.execute, globalCeilingMs)` wrap 우회 금지. 모든 tool path 가 이 step 거침.
+- **사용자-facing 최대 cap 120s**: `shellMaxSeconds=120` / `globalCeilingMs=120_000` / `mcpRequestMaxMs=120_000` / `pluginCallToolCeilingMs=120_000`. 어떤 경로로도 이 cap 위는 허용 안 됨.
+- **LLM judging — cap 안에서 자율**: model 이 long-running (bun install, large build 등) 으로 판단하면 shell tool 의 `timeoutSeconds` input 으로 최대 `shellMaxSeconds=120` 까지 명시 가능. 외부 OSS agent 의 *host-enforced hard ceiling + per-call model override* 패턴 (Claude Code) 과 정합.
+- **외부 평균 변경 시 SOT 만 수정**: Cline 30s / Codex 30s / OpenCode 60s / Claude Code 120s 산술 평균이 변동하면 `tool-timeout-policy.ts` 만 update — inline literal 흩어지면 회귀 보장.
+
+### 위반 패턴
+
+- 새 tool 의 schema 에 `.default(120)` 직접 → `TOOL_TIMEOUT_POLICY.shellDefaultSeconds`
+- 새 MCP 통합에 `connectionTimeoutMs: 30_000` hardcode → `mcpRequestDefaultMs`
+- `setTimeout(..., 600_000)` 같은 inline literal → SOT 추가하고 import
+- timeout-bypass 분기 (예: `if (trustedTool) { skipTimeout }`) — 신뢰 가정으로도 우회 금지
+
+### 위반 사례 (2026-05-18 이전)
+
+`tools/bash.ts:42` + `tools/powershell.ts:33` 의 `timeoutSeconds.default(600).max(600)` 가 사용자가 *10분까지 무한 대기* 하는 원인. `tools/executor.ts` 8-step pipeline 에 글로벌 ceiling 부재. `mcp-client.ts` 의 `DEFAULT_REQUEST_TIMEOUT_MS=30_000` 만 있고 max ceiling 없어 server 가 임의 큰 값 줄 수 있던 상태. `plugin runtime/index.ts` 의 `if (hardTimeoutMs > 0) ... else { instance.start() }` 분기로 미선언 plugin 은 startup 무한 대기 가능. Fix: 단일 SOT `tool-timeout-policy.ts` 도입 + 5 surface (bash/powershell/executor/MCP request/plugin startup) 모두 wire. `__tests__/tool-timeout-policy.test.ts` 가 invariant 영구화.
+
 ## Build
 
 This repo uses **bun** as the default package manager + script runner.
