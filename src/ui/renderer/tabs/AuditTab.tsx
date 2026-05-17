@@ -257,8 +257,22 @@ export function AuditTab() {
                 <tbody>
                   {result.entries.map((entry, i) => {
                     const isExpanded = expandedIdx === i;
-                    const badgeClass = TYPE_BADGE[entry.type] ?? "bg-muted text-muted-foreground";
-                    const preview = entry.input ?? entry.output ?? "";
+                    // Audit results mix two record shapes in a single stream:
+                    // (1) telemetry AuditEntry (timestamp/type/route/input/output)
+                    // (2) permission HMAC-chain AuditCommon (ts/auditId/trustOrigin/
+                    //     decision/prevHash/tool). The row used to read only (1)'s
+                    // fields, so every (2) row rendered as blank skeleton cells.
+                    // Normalize once per row with a small fallback chain — the
+                    // expanded JSON view below still shows the raw entry so power
+                    // users see everything.
+                    const e = entry as unknown as Record<string, unknown>;
+                    const ts = (e.timestamp ?? e.ts) as string | undefined;
+                    const rowType = (e.type ?? e.decision ?? "—") as string;
+                    const sessionPreview = typeof e.sessionId === "string" ? (e.sessionId as string).slice(0, 8) : undefined;
+                    const routeOrTool = (e.route ?? e.tool ?? e.trustOrigin ?? sessionPreview) as string | undefined;
+                    const previewRaw = (e.input ?? e.output ?? e.reason ?? "") as string;
+                    const preview = typeof previewRaw === "string" ? previewRaw : String(previewRaw);
+                    const badgeClass = TYPE_BADGE[rowType] ?? "bg-muted text-muted-foreground";
                     return (
                       <React.Fragment key={i}>
                         <tr
@@ -266,13 +280,13 @@ export function AuditTab() {
                           onClick={() => setExpandedIdx(isExpanded ? null : i)}
                         >
                           <td className="px-3 py-1.5 font-mono text-[10px] text-muted-foreground whitespace-nowrap">
-                            {entry.timestamp?.slice(0, 19).replace("T", " ")}
+                            {ts?.slice(0, 19).replace("T", " ") ?? "—"}
                           </td>
                           <td className="px-3 py-1.5">
-                            <Badge className={`text-[10px] ${badgeClass}`}>{entry.type}</Badge>
+                            <Badge className={`text-[10px] ${badgeClass}`}>{rowType}</Badge>
                           </td>
                           <td className="px-3 py-1.5 text-muted-foreground font-mono">
-                            {entry.route ?? entry.sessionId?.slice(0, 8) ?? "—"}
+                            {routeOrTool ?? "—"}
                           </td>
                           <td className="max-w-[200px] truncate px-3 py-1.5 text-muted-foreground">
                             {preview.slice(0, 80)}

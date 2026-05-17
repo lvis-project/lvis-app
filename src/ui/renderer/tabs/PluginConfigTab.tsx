@@ -51,6 +51,13 @@ export function PluginConfigTab() {
   const [installInFlight, setInstallInFlight] = useState<InstallInFlight>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [uninstallTarget, setUninstallTarget] = useState<PluginCardSummary | null>(null);
+  // Tools list is collapsed by default — plugins with many tools (e.g.
+  // agent-hub ships 9+) would otherwise dominate the detail panel.
+  // Reset to collapsed whenever the selected plugin changes.
+  const [toolsExpanded, setToolsExpanded] = useState(false);
+  useEffect(() => {
+    setToolsExpanded(false);
+  }, [selectedId]);
   // Test environments do not always inject `window.lvisApi`; fall back to
   // `null` so unrelated PluginConfigTab tests don't crash before they
   // exercise their own code paths. The hook short-circuits when api is null.
@@ -484,15 +491,15 @@ export function PluginConfigTab() {
                         )
                       )}
                     </div>
-                    <div className="flex items-center gap-1 mt-0.5">
+                    <div className="flex items-center gap-1 mt-0.5 flex-wrap">
+                      <span className="font-mono text-[10px] text-muted-foreground">{selectedPlugin.id}</span>
                       {selectedPlugin.version && (
-                        <span className="text-[10px] text-muted-foreground">v{selectedPlugin.version}</span>
+                        <span className="text-[10px] text-muted-foreground">· v{selectedPlugin.version}</span>
                       )}
                       {selectedPlugin.publisher && (
                         <span className="text-[10px] text-muted-foreground">· {selectedPlugin.publisher}</span>
                       )}
                     </div>
-                    <p className="font-mono text-[10px] text-muted-foreground">{selectedPlugin.id}</p>
                     {selectedPlugin.description && (
                       <p className="mt-1 text-xs text-muted-foreground">{selectedPlugin.description}</p>
                     )}
@@ -537,33 +544,55 @@ export function PluginConfigTab() {
 
                 {/* Tools section — tool descriptions are markdown (plugin
                     manifests routinely include `**bold**`, code spans, lists,
-                    and line breaks). Rendering them as a single plain <span>
-                    flattens newlines and shows the literal `*` characters,
-                    which is the "md 포맷 깨짐" the user reported. We render
-                    through the shared ReactMarkdown surface used by chat
-                    cards so the typography stays consistent. */}
+                    and line breaks). Rendered through the shared ReactMarkdown
+                    surface (chat cards) for consistent typography.
+
+                    Collapsed by default with a tool-count badge so the detail
+                    panel stays scannable for plugins with many tools (e.g.
+                    agent-hub ships 9+). Click the row to expand. */}
                 {selectedPlugin.tools.length > 0 && (
                   <>
                     <Separator />
                     <div className="space-y-1">
-                      <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">제공 툴</p>
-                      <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-                        {selectedPlugin.tools.map((tool) => {
-                          const desc = selectedPlugin.toolDescriptions?.[tool];
-                          return (
-                            <div key={tool} className="flex flex-col gap-0.5 rounded border border-border/40 bg-muted/20 px-2 py-1.5">
-                              <span className="font-mono text-[11px] font-semibold">{tool}</span>
-                              {desc && (
-                                <div className="prose prose-sm lvis-prose max-w-none break-words text-[11px] text-muted-foreground [&_p]:my-0.5 [&_ul]:my-0.5 [&_ol]:my-0.5 [&_code]:text-[10px]">
-                                  <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>
-                                    {desc}
-                                  </ReactMarkdown>
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
+                      <button
+                        type="button"
+                        className="flex w-full items-center justify-between gap-2 rounded text-left hover:bg-muted/30 -mx-1 px-1 py-1"
+                        aria-expanded={toolsExpanded}
+                        aria-controls={`plugin-tools-list-${selectedPlugin.id}`}
+                        onClick={() => setToolsExpanded((prev) => !prev)}
+                      >
+                        <span className="flex items-center gap-2">
+                          <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">제공 툴</span>
+                          <span className="inline-flex items-center justify-center min-w-[1.25rem] rounded-full bg-muted px-1.5 py-px text-[10px] font-medium text-muted-foreground tabular-nums">
+                            {selectedPlugin.tools.length}
+                          </span>
+                        </span>
+                        <span aria-hidden="true" className="text-[10px] text-muted-foreground">
+                          {toolsExpanded ? "▾" : "▸"}
+                        </span>
+                      </button>
+                      {toolsExpanded && (
+                        <div
+                          id={`plugin-tools-list-${selectedPlugin.id}`}
+                          className="space-y-2 max-h-48 overflow-y-auto pr-1"
+                        >
+                          {selectedPlugin.tools.map((tool) => {
+                            const desc = selectedPlugin.toolDescriptions?.[tool];
+                            return (
+                              <div key={tool} className="flex flex-col gap-0.5 rounded border border-border/40 bg-muted/20 px-2 py-1.5">
+                                <span className="font-mono text-[11px] font-semibold">{tool}</span>
+                                {desc && (
+                                  <div className="prose prose-sm lvis-prose max-w-none break-words text-[11px] text-muted-foreground [&_p]:my-0.5 [&_ul]:my-0.5 [&_ol]:my-0.5 [&_code]:text-[10px]">
+                                    <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>
+                                      {desc}
+                                    </ReactMarkdown>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   </>
                 )}
