@@ -88,10 +88,17 @@ export const DEFAULT_PRICING: Record<PricingVendor, Record<string, ModelPricing>
   // Pricing source: https://platform.openai.com/docs/pricing
   // Unknown variant pricing intentionally left at 0 — env override expected.
   openai: {
-    "gpt-5.4":                     { inputPer1M: 1.25, outputPer1M: 10, contextWindow: 1_050_000 },
-    "gpt-5.4-mini":                { inputPer1M: 1.25, outputPer1M: 10, contextWindow: 1_050_000 },
-    "gpt-5.4-nano":                { inputPer1M: 0.5,  outputPer1M: 4,  contextWindow: 1_050_000 },
-    "gpt-5.4-pro":                 { inputPer1M: 5,    outputPer1M: 40, contextWindow: 1_050_000 },
+    // gpt-5.4 family — OpenAI 공식 사양 (developers.openai.com/api/docs/models/gpt-5.4*,
+    // openai.com/api/pricing, 2026-05 시점 verify). 이전 값은 stale 이었음 (issue #900):
+    //   - mini/nano 의 contextWindow 가 1.05M 로 잘못 등록 → 실제 400K
+    //   - pricing 도 input/output 양쪽 모두 stale (mini/nano 는 ~2.5x, pro 는 ~5x 저평가)
+    // gpt-5.4 / gpt-5.4-pro 의 1M-class window 는 272K 초과 시 2x input + 1.5x output
+    // 의 *세션 전체* 가격 우상향 — 본 테이블의 inputPer1M/outputPer1M 은 *standard tier*
+    // (≤272K) 기준이며, surcharge 는 별도 layer 에서 계산.
+    "gpt-5.4":                     { inputPer1M: 2.5,  outputPer1M: 15,  contextWindow: 1_050_000 },
+    "gpt-5.4-mini":                { inputPer1M: 0.75, outputPer1M: 4.5, contextWindow:   400_000 },
+    "gpt-5.4-nano":                { inputPer1M: 0.2,  outputPer1M: 1.25, contextWindow:  400_000 },
+    "gpt-5.4-pro":                 { inputPer1M: 30,   outputPer1M: 180, contextWindow: 1_100_000 },
     "gpt-5.3":                     { inputPer1M: 0,    outputPer1M: 0,  contextWindow:   400_000 },
     "gpt-5.3-codex":               { inputPer1M: 0,    outputPer1M: 0,  contextWindow:   400_000 },
     "gpt-5.2":                     { inputPer1M: 0,    outputPer1M: 0,  contextWindow:   400_000 },
@@ -141,8 +148,11 @@ export const DEFAULT_PRICING: Record<PricingVendor, Record<string, ModelPricing>
   // Billing rolls into Copilot subscription — list prices reported as 0.
   // Routing: github.ai/inference proxies these models.
   copilot: {
+    // gpt-5.4 family — pricing 0 (Copilot 구독 billing), contextWindow 는 모델 사양
+    // (developers.openai.com/api/docs/models/gpt-5.4*). issue #900: mini 의 1.05M
+    // 등록이 stale 이었음 — 공식 400K.
     "gpt-5.4":                     { inputPer1M: 0, outputPer1M: 0, contextWindow: 1_050_000 },
-    "gpt-5.4-mini":                { inputPer1M: 0, outputPer1M: 0, contextWindow: 1_050_000 },
+    "gpt-5.4-mini":                { inputPer1M: 0, outputPer1M: 0, contextWindow:   400_000 },
     "gpt-5.3":                     { inputPer1M: 0, outputPer1M: 0, contextWindow:   400_000 },
     "gpt-5.2":                     { inputPer1M: 0, outputPer1M: 0, contextWindow:   400_000 },
     "gpt-5.1":                     { inputPer1M: 0, outputPer1M: 0, contextWindow:   400_000 },
