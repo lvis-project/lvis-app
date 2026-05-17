@@ -6,6 +6,14 @@
  * mockup is intentionally minimal — production SSO/OAuth is out of scope
  * for this PR and lives in the plugin-owned auth path.
  *
+ * Top-level login (#893):
+ *   The renderer no longer sends a `vendor` — Login wraps vendor selection.
+ *   The backend reads `LVIS_DEMO_VENDOR` (default `"openai"`) via
+ *   `getDemoActiveVendor()`, persists the matching key, applies the full
+ *   vendor config (baseUrl / model / vertex), and flips top-level settings
+ *   `authMode = "login"` + `provider = <vendor>` in a single patch so the
+ *   UI lands on the now-active vendor with manual fields hidden.
+ *
  * Error contract (CLAUDE.md):
  *   - IPC `error` codes are kebab-case English (machine-readable).
  *   - User-facing Korean text is the renderer's responsibility — never
@@ -32,10 +40,10 @@
  */
 import { ipcMain } from "electron";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
-import { isLLMVendor } from "../../shared/llm-vendor-defaults.js";
 import { createLogger } from "../../lib/logger.js";
 import { getIsPackaged } from "../../boot/dev-flags.js";
 import {
+  getDemoActiveVendor,
   getDemoCredentials,
   getDemoVendorConfig,
   isDemoEnabled,
@@ -72,9 +80,17 @@ export function registerAuthHandlers(deps: IpcDeps): void {
     "lvis:auth:login-mockup",
     async (
       e,
-      payload: { username?: unknown; password?: unknown; vendor?: unknown },
+      payload: { username?: unknown; password?: unknown },
     ): Promise<
-      | { ok: true; vendor: string; fieldsApplied: string[] }
+      | {
+          ok: true;
+          vendor: string;
+          model?: string;
+          baseUrl?: string;
+          vertexProject?: string;
+          vertexLocation?: string;
+          fieldsApplied: string[];
+        }
       | { ok: false; error: string }
     > => {
       if (!validateSender(e)) {
@@ -84,11 +100,10 @@ export function registerAuthHandlers(deps: IpcDeps): void {
 
       const username = typeof payload?.username === "string" ? payload.username : "";
       const password = typeof payload?.password === "string" ? payload.password : "";
-      const vendor = typeof payload?.vendor === "string" ? payload.vendor : "";
 
-      if (!isLLMVendor(vendor)) {
-        return { ok: false, error: "invalid-vendor" };
-      }
+      // #893 top-level login — vendor is decided by the backend
+      // (LVIS_DEMO_VENDOR env, default "openai"), not by the renderer.
+      const vendor = getDemoActiveVendor();
 
       const overrides = getDemoCredentials();
       const expectedUser = overrides.user ?? DEFAULT_DEMO_USER;
@@ -137,11 +152,18 @@ export function registerAuthHandlers(deps: IpcDeps): void {
         fieldsApplied.push("vertexLocation");
       }
 
-      if (Object.keys(vendorPatch).length > 0) {
-        await settingsService.patch({
-          llm: { vendors: { [vendor]: vendorPatch } },
-        });
-      }
+      // #893 — single combined patch: flip top-level authMode + provider AND
+      // apply the active vendor's optional config block. The settings store's
+      // mergeLlmPatch leaves other vendors untouched.
+      await settingsService.patch({
+        llm: {
+          authMode: "login",
+          provider: vendor,
+          ...(Object.keys(vendorPatch).length > 0
+            ? { vendors: { [vendor]: vendorPatch } }
+            : {}),
+        },
+      });
 
       // #893 — refresh plugin wildcard so a plugin's next `hostApi.config.get
       // ("hostApiKey")` observes the newly-installed key without an app
@@ -162,7 +184,20 @@ export function registerAuthHandlers(deps: IpcDeps): void {
           input: `login_mockup_ok vendor=${vendor} keySource=present fields=${fieldsApplied.join(",")}`,
         });
       } catch { /* audit must not break IPC */ }
-      return { ok: true, vendor, fieldsApplied };
+      const response: {
+        ok: true;
+        vendor: string;
+        model?: string;
+        baseUrl?: string;
+        vertexProject?: string;
+        vertexLocation?: string;
+        fieldsApplied: string[];
+      } = { ok: true, vendor, fieldsApplied };
+      if (demoConfig.model !== undefined) response.model = demoConfig.model;
+      if (demoConfig.baseUrl !== undefined) response.baseUrl = demoConfig.baseUrl;
+      if (demoConfig.vertexProject !== undefined) response.vertexProject = demoConfig.vertexProject;
+      if (demoConfig.vertexLocation !== undefined) response.vertexLocation = demoConfig.vertexLocation;
+      return response;
     },
   );
 }

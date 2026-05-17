@@ -21,8 +21,14 @@
  *   LVIS_DEMO_MODEL_<VENDOR>     — default model id (optional override)
  *   LVIS_DEMO_VERTEX_PROJECT     — Vertex AI GCP project (vertex-ai only)
  *   LVIS_DEMO_VERTEX_LOCATION    — Vertex AI GCP region (vertex-ai only)
+ *
+ * #893 top-level login toggle:
+ *   LVIS_DEMO_VENDOR             — kebab-case vendor id the backend should
+ *                                  log the user in as. Default `"openai"`.
+ *                                  Read via `getDemoActiveVendor()`.
  */
 import { createLogger } from "../lib/logger.js";
+import { isLLMVendor, type LLMVendor } from "../shared/llm-vendor-defaults.js";
 
 const log = createLogger("demo-credentials");
 
@@ -43,6 +49,12 @@ interface DemoState {
   enabled: boolean;
   user?: string;
   pass?: string;
+  /**
+   * #893 — vendor the demo/login backend should activate when the user
+   * clicks the top-level Login button. Captured from `LVIS_DEMO_VENDOR`
+   * (kebab-case); when absent the default `"openai"` is used.
+   */
+  activeVendor: LLMVendor;
   keys: Map<string, string>;     // vendorSuffix → apiKey
   baseUrls: Map<string, string>; // vendorSuffix → baseUrl
   models: Map<string, string>;   // vendorSuffix → model
@@ -50,8 +62,11 @@ interface DemoState {
   vertexLocation?: string;
 }
 
+const DEFAULT_DEMO_VENDOR: LLMVendor = "openai";
+
 let captured: DemoState = {
   enabled: false,
+  activeVendor: DEFAULT_DEMO_VENDOR,
   keys: new Map(),
   baseUrls: new Map(),
   models: new Map(),
@@ -93,9 +108,14 @@ export function captureDemoCredentials(): void {
 
   const vertexProject = process.env.LVIS_DEMO_VERTEX_PROJECT;
   const vertexLocation = process.env.LVIS_DEMO_VERTEX_LOCATION;
+  const rawActiveVendor = process.env.LVIS_DEMO_VENDOR;
+  const activeVendor: LLMVendor = isLLMVendor(rawActiveVendor)
+    ? rawActiveVendor
+    : DEFAULT_DEMO_VENDOR;
 
   captured = {
     enabled,
+    activeVendor,
     ...(typeof user === "string" && user.length > 0 ? { user } : {}),
     ...(typeof pass === "string" && pass.length > 0 ? { pass } : {}),
     keys,
@@ -105,7 +125,7 @@ export function captureDemoCredentials(): void {
     ...(typeof vertexLocation === "string" && vertexLocation.length > 0 ? { vertexLocation } : {}),
   };
   if (enabled) {
-    log.info(`demo credentials captured: keys=${keys.size} baseUrls=${baseUrls.size} models=${models.size}`);
+    log.info(`demo credentials captured: vendor=${activeVendor} keys=${keys.size} baseUrls=${baseUrls.size} models=${models.size}`);
   }
 }
 
@@ -116,6 +136,18 @@ export function captureDemoCredentials(): void {
  */
 export function isDemoEnabled(): boolean {
   return captured.enabled;
+}
+
+/**
+ * #893 — Vendor the top-level Login button should activate. Captured from
+ * `LVIS_DEMO_VENDOR`; defaults to `"openai"` when absent or invalid.
+ *
+ * The auth IPC handler reads this to decide which vendor to persist the
+ * demo apiKey under; the renderer never has to pick a vendor when the user
+ * is in `authMode === "login"`.
+ */
+export function getDemoActiveVendor(): LLMVendor {
+  return captured.activeVendor;
 }
 
 /** Demo user/pass overrides, or `undefined` when the defaults apply. */
@@ -172,6 +204,7 @@ export function getDemoVendorConfig(vendor: string): DemoVendorConfig | null {
 export function resetDemoCredentialsForTesting(): void {
   captured = {
     enabled: false,
+    activeVendor: DEFAULT_DEMO_VENDOR,
     keys: new Map(),
     baseUrls: new Map(),
     models: new Map(),
