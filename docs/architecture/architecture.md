@@ -4098,7 +4098,7 @@ interface ToolMeta {
 
 #### §6.4.Y Tool Execution Timeout Policy (신규 v5)
 
-§4.5.6 8-step pipeline 의 Step 6(Execute) 은 모든 도구 호출에 *글로벌 마지막 방어선*인 timeout 을 적용한다. 사용자가 무한히 기다리는 상황은 어느 surface 에서도 허용되지 않는다.
+§4.5.6 8-step pipeline 의 Step 6(Execute) 은 모든 도구 호출에 *글로벌 마지막 방어선*인 timeout 을 적용한다. 사용자가 무한히 기다리는 상황은 어느 surface 에서도 허용되지 않는다. ceiling 은 `runWithCeiling` (`src/tools/executor-ceiling.ts`) 헬퍼가 AbortController 를 연결해 *tool 의 실제 작업을 중단*시킨다 — Promise.race 가 단순히 결과를 무시하는 패턴과 다르게, abortSignal 을 따르는 tool (built-in shell, MCP adapter, plugin handlers) 은 ceiling fire 시 실제로 stop.
 
 **Policy SOT**: `src/shared/tool-timeout-policy.ts` 의 `TOOL_TIMEOUT_POLICY` 객체. surface 별 의미:
 
@@ -4106,20 +4106,25 @@ interface ToolMeta {
 |---|---|---|---|
 | Built-in shell Zod schema default | `shellDefaultSeconds` | `60` | model 이 `timeoutSeconds` 미명시 시 기본 |
 | Built-in shell Zod schema max | `shellMaxSeconds` | `120` | model 이 input 으로 줄 수 있는 상한 |
-| Executor 글로벌 ceiling | `globalCeilingMs` | `120_000` | `tool.execute()` 를 `Promise.race` 로 wrap — last-resort cap |
-| `hostApi.callTool` 경로 | `pluginCallToolCeilingMs` | `120_000` | invoker 가 executor 거치므로 글로벌 ceiling 으로 cover |
+| Executor 글로벌 ceiling | `globalCeilingMs` | `120_000` | `runWithCeiling` AbortController-linked last-resort cap. `hostApi.callTool` 경로도 invoker 가 executor 거치므로 같은 ceiling 으로 cover (별도 키 없음) |
+| Sub-agent ceiling | `subAgentCeilingMs` | `600_000` | `agent_spawn` 처럼 자체 sub-agent loop 를 가진 tool 의 ceiling. globalCeiling 보다 길어야 inner round chain 이 살아남는다 |
 | MCP request default | `mcpRequestDefaultMs` | `60_000` | per-server `connectionTimeoutMs` 미선언 시 |
-| MCP request max ceiling | `mcpRequestMaxMs` | `120_000` | server 선언 timeout 도 이 값으로 clamp |
+| MCP request max ceiling | `mcpRequestMaxMs` | `120_000` | server 선언 timeout 은 dispatch+ingestion 두 단 모두 이 값으로 clamp/reject. SSE streaming activity reset 도 *absolute wall-clock deadline* 으로 clamp 되어 server 가 chunk 흘리며 영원히 잡고 있을 수 없다 |
 | Plugin `instance.start()` default | `pluginStartupDefaultMs` | `10_000` | manifest `startupTimeoutMs` 미선언 시 host 강제 |
+| Plugin `instance.start()` max | `pluginStartupMaxMs` | `60_000` | manifest 가 선언한 큰 값도 이 cap 으로 clamp |
+| Network fetch default | `networkFetchDefaultMs` | `15_000` | `core/network-guard.ts` `fetchPublicHttpResponse` 의 per-hop timeout |
+| Approval gate user wait | `approvalGateUserWaitMs` | `300_000` | 사용자 입력 대기. *runtime hang 이 아니라 사용자가 느린* 케이스 — globalCeiling 의 cap 대상 아님 |
 
 **LLM judging — 연장은 model 자율, 단 cap 안에서**: model 이 long-running (bun install, large build 등) 으로 판단하면 shell tool 의 `timeoutSeconds` 인자에 최대 `shellMaxSeconds=120` 까지 명시 가능. cap 위는 어떤 경로로도 허용되지 않으며, 글로벌 ceiling 이 fail-safe 로 동시에 동작한다.
 
-**외부 평균 근거**: Cline 30s / Codex CLI 30s / OpenCode 60s / Claude Code 120s 산술 평균 60s, 사용자-facing 최대 cap 으로 Claude Code 문서 max 120s 채택. LVIS 이전 default 600s(10분) 는 model 이 task 완료 후에도 timeout 인자를 줄이지 않으면 사용자가 10분까지 무한 대기하던 회귀의 원천.
+**외부 평균 근거**: 외부 OSS agent runtime 의 산술 평균이 ≈60s, 사용자-facing 최대 cap 으로 120s 합의. LVIS 이전 default 600s(10분) 는 model 이 task 완료 후에도 timeout 인자를 줄이지 않으면 사용자가 10분까지 무한 대기하던 회귀의 원천.
 
 **Invariants** (`src/shared/__tests__/tool-timeout-policy.test.ts` 가 지키는 룰):
-- `shellDefaultSeconds <= shellMaxSeconds` / `mcpRequestDefaultMs <= mcpRequestMaxMs`
+- `shellDefaultSeconds <= shellMaxSeconds` / `mcpRequestDefaultMs <= mcpRequestMaxMs` / `pluginStartupDefaultMs <= pluginStartupMaxMs`
 - 모든 값 finite + positive (Infinity 또는 0 금지)
-- `globalCeilingMs >= shellMaxSeconds * 1000` (last-resort cap 이 per-surface max 보다 작으면 회귀)
+- `globalCeilingMs >= shellMaxSeconds * 1000` / `>= mcpRequestMaxMs` (last-resort cap 이 per-surface max 보다 작으면 회귀)
+- `subAgentCeilingMs > globalCeilingMs` (sub-agent 가 inner 도구들의 ceiling 보다 길어야 함)
+- `approvalGateUserWaitMs > globalCeilingMs` (사용자 입력 대기는 tool 실행 cap 과 독립)
 
 #### §7.X Marketplace 승인 워크플로우 — S13 (신규 v5)
 
