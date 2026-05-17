@@ -35,7 +35,6 @@ export function SettingsWindow({ initialTab }: { initialTab: string }) {
           <CustomTitleBar />
           <main className="min-h-0 flex-1 overflow-hidden">
             <SettingsContent
-              open={true}
               api={api}
               onSaved={handleSaved}
               initialTab={tab}
