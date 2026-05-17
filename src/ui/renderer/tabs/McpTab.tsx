@@ -379,7 +379,7 @@ export function McpTab() {
   const getConfig = (id: string) => configs.find((c) => c.id === id);
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <SettingsPageHeader
         title="MCP 서버"
         description="MCP 서버 구성과 도구 노출을 관리합니다"
