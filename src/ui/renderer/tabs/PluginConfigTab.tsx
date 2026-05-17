@@ -544,25 +544,23 @@ export function PluginConfigTab() {
                   apiForAuthHook && (
                   <>
                     <Separator />
-                    <div className="space-y-1.5">
-                      {/* Section label — pairs with "제공 툴" + "환경 설정" so
-                          the right-pane has a visible 3-section hierarchy. */}
-                      <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">인증</span>
-                      <PluginAuthSection
-                        // `key` forces React to remount the section when the
-                        // user switches between plugins in the list. Without
-                        // it the same instance is reused across plugin
-                        // selections and stale internal state (`working`,
-                        // `localError`) carries over between plugins.
-                        key={selectedPlugin.id}
-                        api={apiForAuthHook}
-                        pluginId={selectedPlugin.id}
-                        pluginName={selectedPlugin.name}
-                        auth={selectedPlugin.auth}
-                        state={authStatuses.get(selectedPlugin.id) ?? { kind: "loading" }}
-                        onRefresh={() => refreshAuthStatus(selectedPlugin.id)}
-                      />
-                    </div>
+                    {/* PluginAuthSection renders its OWN "인증" label
+                        internally — don't double-up. (User feedback
+                        2026-05-18: "인증이 왜 두개가 되었냐.") */}
+                    <PluginAuthSection
+                      // `key` forces React to remount the section when the
+                      // user switches between plugins in the list. Without
+                      // it the same instance is reused across plugin
+                      // selections and stale internal state (`working`,
+                      // `localError`) carries over between plugins.
+                      key={selectedPlugin.id}
+                      api={apiForAuthHook}
+                      pluginId={selectedPlugin.id}
+                      pluginName={selectedPlugin.name}
+                      auth={selectedPlugin.auth}
+                      state={authStatuses.get(selectedPlugin.id) ?? { kind: "loading" }}
+                      onRefresh={() => refreshAuthStatus(selectedPlugin.id)}
+                    />
                   </>
                 )}
 
