@@ -1,7 +1,20 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "../../components/ui/button.js";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../../components/ui/tabs.js";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../../components/ui/dialog.js";
+import {
+  Brain,
+  Palette,
+  MessageSquare,
+  Globe,
+  Shield,
+  UserCog,
+  BarChart3,
+  FileSearch,
+  Gauge,
+  Server,
+  Puzzle,
+  Store,
+} from "lucide-react";
 import { SavedToastFloating, SavedToastProvider } from "./contexts/saved-toast.js";
 import type { LvisApi } from "./types.js";
 import { RolesTab } from "./tabs/RolesTab.js";
@@ -47,55 +60,14 @@ function TabSaveBar({
 
 // Settings-wide "저장되었습니다" toast plumbing now lives in
 // `./contexts/saved-toast.tsx` so PluginConfigTab can import the consumer
-// hook without forming a circular import with SettingsDialog (which
+// hook without forming a circular import with SettingsContent (which
 // itself imports PluginConfigTab in this file).
 
-export function SettingsDialog({
-  open,
-  onOpenChange,
-  api,
-  onSaved,
-  initialTab = "llm",
-}: {
-  open: boolean;
-  onOpenChange: (o: boolean) => void;
-  api: LvisApi;
-  onSaved: () => void;
-  initialTab?: string;
-}) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        size="2xl"
-        className="h-[90dvh] min-h-[600px] max-h-[920px] !overflow-hidden flex flex-col gap-3"
-      >
-        <DialogHeader>
-          <DialogTitle>설정</DialogTitle>
-          <DialogDescription>앱 환경, 채팅 동작, 검색 엔진, 권한 정책을 설정합니다.</DialogDescription>
-        </DialogHeader>
-        <div className="flex-1 min-h-0 overflow-hidden">
-          <SettingsContent
-            open={open}
-            onOpenChange={onOpenChange}
-            api={api}
-            onSaved={onSaved}
-            initialTab={initialTab}
-          />
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 export function SettingsContent({
-  open,
-  onOpenChange,
   api,
   onSaved,
   initialTab = "llm",
 }: {
-  open: boolean;
-  onOpenChange: (o: boolean) => void;
   api: LvisApi;
   onSaved: () => void;
   initialTab?: string;
@@ -118,7 +90,7 @@ export function SettingsContent({
     notifySaved();
     onSaved();
   }, [notifySaved, onSaved]);
-  const s = useSettingsOrchestration(open, api, handleSaved);
+  const s = useSettingsOrchestration(api, handleSaved);
 
   // Per-tab debounced save handlers. Immediate-apply controls (toggle,
   // radio, slider, select) call `.schedule()`; rapid bursts collapse
@@ -134,28 +106,15 @@ export function SettingsContent({
   const webSave = useDebouncedSave(() => void s.save("web"));
   const marketplaceSave = useDebouncedSave(() => void s.save("marketplace"));
 
-  // Cancel any pending debounced save when the dialog transitions to
-  // closed. Radix Dialog keeps its children mounted when `open=false`,
-  // so the hook's unmount-cleanup would otherwise miss this case —
-  // a toggle a millisecond before close would still fire its 200ms
-  // debounced save on a "closed" dialog, persisting a half-edited
-  // value the user already abandoned.
-  useEffect(() => {
-    if (!open) {
-      llmSave.cancel();
-      chatSave.cancel();
-      webSave.cancel();
-      marketplaceSave.cancel();
-    }
-  }, [open, llmSave, chatSave, webSave, marketplaceSave]);
-
   // Flush any pending debounced save when the user closes the window or
   // quits the app. The 200ms debounce window is short, but a user who
   // toggles a control and immediately hits Cmd+Q would otherwise lose
   // that toggle to the dying renderer process. `flush()` is a no-op
   // when nothing is pending, so registering all four is safe.
+  // (Note: in the BrowserWindow conversion the hook's own unmount
+  // cleanup also fires `cancel()`, so the pre-conversion Dialog
+  // `open=false` cancel-effect was retired — see PR #890 review.)
   useEffect(() => {
-    if (!open) return;
     const flushAll = () => {
       llmSave.flush();
       chatSave.flush();
@@ -168,25 +127,20 @@ export function SettingsContent({
       window.removeEventListener("beforeunload", flushAll);
       window.removeEventListener("pagehide", flushAll);
     };
-  }, [open, llmSave, chatSave, webSave, marketplaceSave]);
+  }, [llmSave, chatSave, webSave, marketplaceSave]);
 
-  // Reset tab + clear stale error banner ONLY when the dialog transitions
-  // open. Depending on the whole `s` orchestration object would re-fire
-  // this effect every render (since `s` is recreated each render) and
-  // clear the error banner the moment it is set — the user would see it
-  // flash and disappear. Depending on the stable `clearLastSaveError`
-  // identity (it is a `useCallback([])` inside the hook) keeps the
-  // dependency list explicit while still firing only on dialog open.
+  // Reset tab + clear stale error banner whenever a new `initialTab` arrives
+  // (mount or IPC-driven tab change). Depending on the whole `s` orchestration
+  // object would re-fire this effect every render and clear the error banner
+  // the moment it is set; depending on the stable `clearLastSaveError`
+  // identity (`useCallback([])` inside the hook) keeps the dep list explicit.
   const clearLastSaveError = s.clearLastSaveError;
   useEffect(() => {
-    if (open) {
-      setTab(normalizeSettingsTab(initialTab));
-      clearLastSaveError();
-    }
-  }, [initialTab, open, clearLastSaveError]);
+    setTab(normalizeSettingsTab(initialTab));
+    clearLastSaveError();
+  }, [initialTab, clearLastSaveError]);
 
   useEffect(() => {
-    if (!open) return;
     let alive = true;
     const refreshPending = async () => {
       try {
@@ -204,7 +158,16 @@ export function SettingsContent({
       alive = false;
       unsubscribe();
     };
-  }, [api, open]);
+  }, [api]);
+
+  // Scroll-reset: when the user switches tabs, reset the right pane to top
+  // so they always land at the page header rather than the previous tab's
+  // scroll position. `behavior: "instant"` avoids the animated scroll
+  // fighting the tab transition animation on fast tab-switchers.
+  const rightPaneRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    rightPaneRef.current?.scrollTo({ top: 0, behavior: "instant" });
+  }, [tab]);
 
   // Sidebar trigger style: full-width row, left-aligned, active row uses
   // accent background to read like a real selected list item rather than
@@ -213,11 +176,17 @@ export function SettingsContent({
   // looks wrong in a vertical list. `whitespace-nowrap` + `overflow-hidden`
   // keep long labels (or scaled-up system fonts) from wrapping to two lines
   // and breaking the row rhythm of the sidebar.
+  // Sidebar trigger style includes `flex` (not inline-flex), `gap-2` for
+  // the icon spacing, and explicit `justify-start` to override the
+  // shadcn TabsTrigger primitive's default `inline-flex items-center
+  // justify-center` (which would center-align the icon+label horizontally).
   const sideTriggerCls =
-    "w-full justify-start overflow-hidden whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium " +
+    "flex w-full items-center justify-start gap-2.5 overflow-hidden whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium " +
     "text-muted-foreground hover:bg-accent/60 hover:text-foreground " +
     "data-[state=active]:bg-accent data-[state=active]:text-accent-foreground " +
     "data-[state=active]:shadow-none";
+  // Common icon class so the 12 nav entries render at a uniform 16px.
+  const navIconCls = "size-4 shrink-0";
 
   return (
     <SavedToastProvider value={notifySaved}>
@@ -225,7 +194,11 @@ export function SettingsContent({
       orientation="vertical"
       value={tab}
       onValueChange={(nextTab) => setTab(normalizeSettingsTab(nextTab))}
-      className="relative flex h-full min-h-0 gap-3"
+      // No gap: sidebar and content share a single border (right edge of
+      // the sidebar) so the layout reads as two regions of the dialog,
+      // not two stacked cards. Simplified per user direction
+      // "레이아웃을 단순화해".
+      className="relative flex h-full min-h-0"
     >
       {/* Dialog-wide save feedback — anchored to the Tabs root (not the
           right pane) so the user sees it even after scrolling deep into
@@ -236,16 +209,51 @@ export function SettingsContent({
       {/* Sidebar — fixed column, scrolls independently if the trigger list
           ever grows beyond the available height. The list stays put when
           the right pane scrolls (the headline ux complaint that motivated
-          the sidebar conversion). */}
+          the sidebar conversion).
+          Outer div owns the column width + border-r so the version footer
+          can sit below the nav list as a sibling (Radix TabsList only
+          accepts TabsTrigger children). */}
+      <div className="flex h-full w-48 shrink-0 flex-col border-r">
+      {/* Sidebar "설정" header. `pt-6` mirrors the right-pane stack
+          (scroll pt-2 + TabsContent mt-2 + SettingsPageHeader pt-2 = 24)
+          so the sidebar h2 baseline aligns with the right-pane h2 of
+          the active tab. `px-5` (20px) aligns the "설정" text-left with
+          the nav-trigger icon-left (TabsList p-2 + trigger px-3 = 20). */}
+      <div className="px-5 pt-6 mb-6">
+        <h2 className="text-xl font-semibold leading-9 tracking-tight">설정</h2>
+      </div>
       <TabsList
         aria-label="설정 카테고리"
-        className="flex h-full w-48 shrink-0 flex-col items-stretch gap-0.5 overflow-y-auto rounded-md border bg-muted/30 p-1.5"
+        // Vertical sidebar — the shadcn TabsList primitive defaults to a
+        // horizontal pill (`inline-flex h-10 items-center justify-center
+        // rounded-md bg-muted p-1`). cn() merges class lists but only
+        // tailwind-merge collapses conflicting utilities — the primitive's
+        // `justify-center` survived previous overrides because we never
+        // specified a competing `justify-*`, which left every trigger
+        // vertically centered in the column (the "사이드바가 상단으로 안
+        // 올라옴" symptom). Explicit `justify-start` + `h-full` + plain
+        // `flex` (not inline-flex) + `rounded-none bg-transparent` make
+        // the override unambiguous.
+        className="flex flex-1 flex-col items-stretch justify-start gap-1 overflow-y-auto rounded-none bg-transparent p-2"
       >
-        <TabsTrigger value="llm" className={sideTriggerCls}>지능 (LLM)</TabsTrigger>
-        <TabsTrigger value="appearance" className={sideTriggerCls}>테마</TabsTrigger>
-        <TabsTrigger value="chat" className={sideTriggerCls}>채팅</TabsTrigger>
-        <TabsTrigger value="web" className={sideTriggerCls}>검색 (Web)</TabsTrigger>
-        <TabsTrigger value="permissions" className={`${sideTriggerCls} gap-1.5`}>
+        <TabsTrigger value="llm" className={sideTriggerCls}>
+          <Brain className={navIconCls} aria-hidden="true" />
+          모델
+        </TabsTrigger>
+        <TabsTrigger value="appearance" className={sideTriggerCls}>
+          <Palette className={navIconCls} aria-hidden="true" />
+          테마
+        </TabsTrigger>
+        <TabsTrigger value="chat" className={sideTriggerCls}>
+          <MessageSquare className={navIconCls} aria-hidden="true" />
+          채팅
+        </TabsTrigger>
+        <TabsTrigger value="web" className={sideTriggerCls}>
+          <Globe className={navIconCls} aria-hidden="true" />
+          검색 (Web)
+        </TabsTrigger>
+        <TabsTrigger value="permissions" className={sideTriggerCls}>
+          <Shield className={navIconCls} aria-hidden="true" />
           권한
           {pendingPermissions > 0 && (
             <span className="ml-auto rounded-full bg-destructive px-1.5 py-0.5 text-[10px] leading-none text-destructive-foreground">
@@ -253,22 +261,61 @@ export function SettingsContent({
             </span>
           )}
         </TabsTrigger>
-        <TabsTrigger value="roles" className={sideTriggerCls}>역할</TabsTrigger>
-        <TabsTrigger value="usage" className={sideTriggerCls}>사용량</TabsTrigger>
-        <TabsTrigger value="audit" className={sideTriggerCls}>감사</TabsTrigger>
-        <TabsTrigger value="plugin-perf" className={sideTriggerCls}>플러그인 성능</TabsTrigger>
-        <TabsTrigger value="mcp" className={sideTriggerCls}>MCP 서버</TabsTrigger>
-        <TabsTrigger value="plugin-config" className={sideTriggerCls}>플러그인 설정</TabsTrigger>
-        <TabsTrigger value="marketplace" className={sideTriggerCls}>마켓플레이스</TabsTrigger>
+        <TabsTrigger value="roles" className={sideTriggerCls}>
+          <UserCog className={navIconCls} aria-hidden="true" />
+          역할
+        </TabsTrigger>
+        <TabsTrigger value="usage" className={sideTriggerCls}>
+          <BarChart3 className={navIconCls} aria-hidden="true" />
+          사용량
+        </TabsTrigger>
+        <TabsTrigger value="audit" className={sideTriggerCls}>
+          <FileSearch className={navIconCls} aria-hidden="true" />
+          감사
+        </TabsTrigger>
+        <TabsTrigger value="plugin-perf" className={sideTriggerCls}>
+          <Gauge className={navIconCls} aria-hidden="true" />
+          플러그인 성능
+        </TabsTrigger>
+        <TabsTrigger value="mcp" className={sideTriggerCls}>
+          <Server className={navIconCls} aria-hidden="true" />
+          MCP 서버
+        </TabsTrigger>
+        <TabsTrigger value="plugin-config" className={sideTriggerCls}>
+          <Puzzle className={navIconCls} aria-hidden="true" />
+          플러그인 설정
+        </TabsTrigger>
+        <TabsTrigger value="marketplace" className={sideTriggerCls}>
+          <Store className={navIconCls} aria-hidden="true" />
+          마켓플레이스
+        </TabsTrigger>
       </TabsList>
+      {/* Version footer — fills dead space at the bottom of the sidebar
+          tastefully. Static text only; no IPC needed. */}
+      <div className="shrink-0 border-t px-3 py-2.5">
+        <span className="text-[11px] tabular-nums text-muted-foreground/60 select-none">
+          v0.1.6
+        </span>
+      </div>
+      </div>
 
-      {/* Right pane — always-visible scrollbar so the user perceives the
-          area as scrollable even before scroll is needed. `overflow-y-scroll`
-          (not `auto`) keeps the gutter reserved; the themed webkit
-          scrollbar set in styles.css renders the thumb only when content
-          exceeds the pane. `relative` so the floating SavedToast anchors
-          here rather than the dialog. */}
-      <div className="flex flex-1 min-w-0 flex-col overflow-y-scroll pr-1 lvis-settings-scroll">
+      {/* Right pane — two-layer layout so split-pane tabs (PluginConfigTab,
+          McpTab) can use h-full reliably.
+          Outer: `overflow-hidden flex-col flex-1` — gives a fixed height
+            to the column so children can fill it with h-full / flex-1.
+          Inner scroll: `overflow-y-auto [scrollbar-gutter:stable]` —
+            scrolls only when content overflows AND reserves the gutter
+            via the CSS `scrollbar-gutter` property so the layout
+            doesn't shift on short pages. Replaces the previous
+            `overflow-y-scroll` (always-visible track) — that variant
+            caused a double-scrollbar on Win/Linux for tabs that owned
+            their own internal scroll (PluginConfigTab, McpTab).
+          Top padding: pt-2 on the inner scroll matches the sidebar
+          wrapper's pt-2, plus SettingsPageHeader's pt-2 lands h2 at
+          the same Y as the sidebar first trigger text — both well
+          below the title bar. */}
+      <div className="flex flex-1 min-w-0 flex-col overflow-hidden">
+      <div ref={rightPaneRef} className="flex flex-1 min-h-0 flex-col overflow-y-auto [scrollbar-gutter:stable] px-8 pt-2 pb-8 lvis-settings-scroll">
         {s.lastSaveError && (
           <div
             role="alert"
@@ -391,15 +438,10 @@ export function SettingsContent({
               onSaved={onSaved}
               onImmediateChange={marketplaceSave.schedule}
             />
-            <TabSaveBar
-              onSave={() => {
-                marketplaceSave.cancel();
-                void s.save("marketplace");
-              }}
-              saving={s.saving}
-              settingsLoaded={s.settingsLoaded}
-            />
+            {/* No bottom TabSaveBar — URL + API key each own an inline
+                Save; private-network toggle is immediate-apply. */}
           </TabsContent>
+      </div>
       </div>
     </Tabs>
     </SavedToastProvider>
