@@ -65,7 +65,7 @@ import {
 import { createLogger } from "../../lib/logger.js";
 import { stripUntrustedTags } from "../../lib/strip-untrusted-tags.js";
 import { plog, PluginPhase } from "../../plugins/lifecycle-log.js";
-import { incrementHostSecretCounter } from "../../telemetry/host-secret-counters.js";
+import { incrementHostSecretCounter, sanitizeKeyPrefix } from "../../telemetry/host-secret-counters.js";
 import {
   ApprovalIssuerRegistry,
   verifyApprovalRequestScope,
@@ -978,8 +978,14 @@ export async function initPluginRuntime(
       //   the underlying bus rejects cross-plugin observation.
       config: {
         get: <T = unknown>(key: string): T | undefined => {
+          // PR #894 B2 follow-up — merge wildcard slot (`hostApiVendor` etc.)
+          // BETWEEN manifest defaults and plugin-specific overrides so a
+          // plugin's own config can shadow a host-injected value (rare, but
+          // useful for test fixtures and explicit per-plugin overrides),
+          // while shipping a sensible default for plugins that don't set it.
           const merged = {
             ...(manifest.config ?? {}),
+            ...(pluginRuntime.getWildcardConfigOverride?.() ?? {}),
             ...(settingsService.getPluginConfig(pluginId) ?? {}),
           };
           return merged[key] as T | undefined;
@@ -1093,25 +1099,62 @@ export async function initPluginRuntime(
         // #893 — Three-tier secret access gate:
         //   (1) Plugin's own `plugin.<pluginId>.*` namespace — always allowed.
         //   (2) Host secret whose key is declared in the manifest's
-        //       `hostSecrets.read[]` allowlist — granted, with an audit
-        //       entry + telemetry counter so operators can spot drift.
+        //       `hostSecrets.read[]` allowlist AND points to the currently
+        //       active LLM vendor — granted, with an audit entry +
+        //       telemetry counter so operators can spot drift.
         //   (3) Anything else — denied, audited (warn), telemetry counter
         //       incremented, and `null` returned. The plugin sees the
         //       missing-key path identically to a tier-2 key that has not
         //       been provisioned yet, so a denied lookup is indistinguishable
         //       from a legitimate "key not set".
+        //
+        // PR #894 review B7 — `keyPrefix` is folded through `sanitizeKeyPrefix`
+        // before it reaches the in-process counter map. An attacker plugin
+        // could otherwise call `hostApi.getSecret("<random-prefix>.x")` in a
+        // loop and grow the counter map unboundedly via the `denied` branch
+        // (one entry per attacker-controlled prefix). Folding unknown
+        // prefixes to the bucket `"other"` caps the cardinality.
+        //
+        // Audit log lines additionally cap `key` to 64 chars so an attacker
+        // can't bloat the JSONL with megabyte-long denied keys.
+        const auditKey = key.slice(0, 64);
         if (key.startsWith(`plugin.${pluginId}.`)) {
           return settingsService.getSecret(key);
         }
         const allowlist = manifest.hostSecrets?.read ?? [];
-        const keyPrefix = key.split(".")[0] ?? "";
+        const keyPrefix = sanitizeKeyPrefix(key);
         if (allowlist.includes(key)) {
+          // PR #894 review B6 — `hostSecrets.read[]` is a static manifest
+          // declaration; it does not track which vendor the user is
+          // currently using. Allowing a plugin to read
+          // `llm.apiKey.<non-active-vendor>` exposes idle credentials that
+          // the user did not opt into for this session. Cross-check the
+          // requested key against the currently active LLM vendor and deny
+          // when they don't match. Non-`llm.apiKey.*` allowlist entries
+          // (if any future host-secret class is added) bypass this gate.
+          const llmKeyPrefix = "llm.apiKey.";
+          if (key.startsWith(llmKeyPrefix)) {
+            const activeVendor = settingsService.get("llm").provider;
+            const expectedKey = `${llmKeyPrefix}${activeVendor}`;
+            if (key !== expectedKey) {
+              try {
+                bootAuditLogger.log({
+                  timestamp: new Date().toISOString(),
+                  sessionId: "plugin",
+                  type: "warn",
+                  input: `[plugin:${pluginId}] hostSecret_denied reason=non-active-vendor key=${auditKey}`,
+                });
+              } catch { /* audit must not break host */ }
+              incrementHostSecretCounter("hostSecret_denied", pluginId, keyPrefix);
+              return null;
+            }
+          }
           try {
             bootAuditLogger.log({
               timestamp: new Date().toISOString(),
               sessionId: "plugin",
               type: "info",
-              input: `[plugin:${pluginId}] hostSecret_read key=${key}`,
+              input: `[plugin:${pluginId}] hostSecret_read key=${auditKey}`,
             });
           } catch { /* audit must not break host */ }
           incrementHostSecretCounter("hostSecret_read", pluginId, keyPrefix);
@@ -1122,7 +1165,7 @@ export async function initPluginRuntime(
             timestamp: new Date().toISOString(),
             sessionId: "plugin",
             type: "warn",
-            input: `[plugin:${pluginId}] hostSecret_denied key=${key}`,
+            input: `[plugin:${pluginId}] hostSecret_denied key=${auditKey}`,
           });
         } catch { /* audit must not break host */ }
         incrementHostSecretCounter("hostSecret_denied", pluginId, keyPrefix);

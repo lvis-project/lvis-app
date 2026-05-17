@@ -54,18 +54,33 @@ export function LoginModal({ api, vendor, open, onOpenChange, onSuccess }: Login
     if (submitting) return;
     setSubmitting(true);
     setError(null);
+    // PR #894 T1-1 — `api.loginMockup` is an IPC call; if the renderer
+    // process loses the main-process channel (worker crash, preload
+    // teardown), the promise rejects rather than resolving with
+    // `{ ok: false, ... }`. Without a try/catch the rejection bubbles into
+    // React as an unhandled promise rejection, `setSubmitting(false)`
+    // never fires, and the modal stays disabled forever. The finally
+    // block also clears the password so a transient error never leaves a
+    // typed password visible on the next render (T1-1 / L1 cleanup).
     try {
       const result = await api.loginMockup({ username, password, vendor });
       if (result.ok) {
         onSuccess?.(vendor);
         onOpenChange(false);
         setUsername("");
-        setPassword("");
         return;
       }
       setError(errorMessage(result.error));
+    } catch (err) {
+      setError("로그인 처리 중 오류가 발생했습니다.");
+      // Surface IPC failure detail for forensic logs without leaking it to
+      // the user-facing error string. The renderer's console is preload-
+      // gated; this never traverses an IPC channel.
+      // eslint-disable-next-line no-console
+      console.error("loginMockup IPC failed", err);
     } finally {
       setSubmitting(false);
+      setPassword("");
     }
   }
 

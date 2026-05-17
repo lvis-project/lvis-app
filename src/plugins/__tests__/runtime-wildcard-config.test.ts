@@ -62,4 +62,29 @@ describe("PluginRuntime wildcard configOverrides (#893)", () => {
       .configOverrides["*"];
     expect(slot).toEqual({ pythonExecutable: "/usr/bin/python3" });
   });
+
+  // PR #894 review B2 — getter for wildcard config, used by hostApi.config.get
+  it("getWildcardConfigOverride returns a shallow copy of the wildcard slot", () => {
+    const rt = makeRuntime({
+      "*": { hostApiVendor: "openai", pythonExecutable: "/usr/bin/python3" },
+    });
+    const copy = rt.getWildcardConfigOverride();
+    expect(copy).toEqual({
+      hostApiVendor: "openai",
+      pythonExecutable: "/usr/bin/python3",
+    });
+    // mutating the copy must not affect the underlying slot
+    copy.attacker = "x";
+    const slot = (rt as unknown as { configOverrides: Record<string, Record<string, unknown>> })
+      .configOverrides["*"];
+    expect(slot).toEqual({
+      hostApiVendor: "openai",
+      pythonExecutable: "/usr/bin/python3",
+    });
+  });
+
+  it("getWildcardConfigOverride returns an empty object when no wildcard is set", () => {
+    const rt = makeRuntime({});
+    expect(rt.getWildcardConfigOverride()).toEqual({});
+  });
 });
