@@ -27,6 +27,7 @@ import { resolveDependencies } from "../dependency-resolver.js";
 import { isDevModeUnlocked } from "../../boot/dev-flags.js";
 import { verifyInstallReceipt } from "../plugin-install-receipt.js";
 import { updatePluginRegistry } from "../registry.js";
+import { TOOL_TIMEOUT_POLICY } from "../../shared/tool-timeout-policy.js";
 
 import {
   buildManifestValidator,
@@ -472,21 +473,18 @@ export class PluginRuntime {
             this.perfStats.get(id)!.startupMs = Date.now() - startedAt;
             return;
           }
-          const hardTimeoutMs = plugin.manifest.startupTimeoutMs;
-          if (hardTimeoutMs && hardTimeoutMs > 0) {
-            let timer: NodeJS.Timeout | undefined;
-            const timeout = new Promise<never>((_, reject) => {
-              timer = setTimeout(() => {
-                reject(new Error(`startup timeout (>${hardTimeoutMs}ms)`));
-              }, hardTimeoutMs);
-            });
-            try {
-              await Promise.race([Promise.resolve(plugin.instance.start()), timeout]);
-            } finally {
-              if (timer) clearTimeout(timer);
-            }
-          } else {
-            await plugin.instance.start();
+          const hardTimeoutMs =
+            plugin.manifest.startupTimeoutMs ?? TOOL_TIMEOUT_POLICY.pluginStartupDefaultMs;
+          let timer: NodeJS.Timeout | undefined;
+          const timeout = new Promise<never>((_, reject) => {
+            timer = setTimeout(() => {
+              reject(new Error(`startup timeout (>${hardTimeoutMs}ms)`));
+            }, hardTimeoutMs);
+          });
+          try {
+            await Promise.race([Promise.resolve(plugin.instance.start()), timeout]);
+          } finally {
+            if (timer) clearTimeout(timer);
           }
         } finally {
           clearTimeout(slowTimer);
@@ -1026,19 +1024,16 @@ export class PluginRuntime {
     if (instance.start) {
       const startedAt = Date.now();
       try {
-        const hardTimeoutMs = manifest.startupTimeoutMs;
-        if (hardTimeoutMs && hardTimeoutMs > 0) {
-          let timer: NodeJS.Timeout | undefined;
-          const timeout = new Promise<never>((_, reject) => {
-            timer = setTimeout(() => reject(new Error(`startup timeout (>${hardTimeoutMs}ms)`)), hardTimeoutMs);
-          });
-          try {
-            await Promise.race([Promise.resolve(instance.start()), timeout]);
-          } finally {
-            if (timer) clearTimeout(timer);
-          }
-        } else {
-          await instance.start();
+        const hardTimeoutMs =
+          manifest.startupTimeoutMs ?? TOOL_TIMEOUT_POLICY.pluginStartupDefaultMs;
+        let timer: NodeJS.Timeout | undefined;
+        const timeout = new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error(`startup timeout (>${hardTimeoutMs}ms)`)), hardTimeoutMs);
+        });
+        try {
+          await Promise.race([Promise.resolve(instance.start()), timeout]);
+        } finally {
+          if (timer) clearTimeout(timer);
         }
         this.perfStats.get(manifest.id)!.startupMs = Date.now() - startedAt;
       } catch (err) {
