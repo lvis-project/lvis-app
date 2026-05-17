@@ -1066,6 +1066,7 @@ export interface PluginHostApi {
  */
 export type ApprovalChoice =
   | "allow-once"
+  | "allow-session"
   | "allow-always"
   | "deny-once"
   | "deny-always";
