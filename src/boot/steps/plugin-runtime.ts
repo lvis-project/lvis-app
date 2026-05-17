@@ -65,6 +65,7 @@ import {
 import { createLogger } from "../../lib/logger.js";
 import { stripUntrustedTags } from "../../lib/strip-untrusted-tags.js";
 import { plog, PluginPhase } from "../../plugins/lifecycle-log.js";
+import { incrementHostSecretCounter } from "../../telemetry/host-secret-counters.js";
 import {
   ApprovalIssuerRegistry,
   verifyApprovalRequestScope,
@@ -1089,7 +1090,43 @@ export async function initPluginRuntime(
         return unsubscribe;
       },
       getSecret: (key) => {
-        return settingsService.getSecret(key);
+        // #893 — Three-tier secret access gate:
+        //   (1) Plugin's own `plugin.<pluginId>.*` namespace — always allowed.
+        //   (2) Host secret whose key is declared in the manifest's
+        //       `hostSecrets.read[]` allowlist — granted, with an audit
+        //       entry + telemetry counter so operators can spot drift.
+        //   (3) Anything else — denied, audited (warn), telemetry counter
+        //       incremented, and `null` returned. The plugin sees the
+        //       missing-key path identically to a tier-2 key that has not
+        //       been provisioned yet, so a denied lookup is indistinguishable
+        //       from a legitimate "key not set".
+        if (key.startsWith(`plugin.${pluginId}.`)) {
+          return settingsService.getSecret(key);
+        }
+        const allowlist = manifest.hostSecrets?.read ?? [];
+        const keyPrefix = key.split(".")[0] ?? "";
+        if (allowlist.includes(key)) {
+          try {
+            bootAuditLogger.log({
+              timestamp: new Date().toISOString(),
+              sessionId: "plugin",
+              type: "info",
+              input: `[plugin:${pluginId}] hostSecret_read key=${key}`,
+            });
+          } catch { /* audit must not break host */ }
+          incrementHostSecretCounter("hostSecret_read", pluginId, keyPrefix);
+          return settingsService.getSecret(key);
+        }
+        try {
+          bootAuditLogger.log({
+            timestamp: new Date().toISOString(),
+            sessionId: "plugin",
+            type: "warn",
+            input: `[plugin:${pluginId}] hostSecret_denied key=${key}`,
+          });
+        } catch { /* audit must not break host */ }
+        incrementHostSecretCounter("hostSecret_denied", pluginId, keyPrefix);
+        return null;
       },
       callTool: async <T = unknown>(toolName: string, payload?: unknown): Promise<T> => {
         pluginRuntime.assertPluginToolAccess(pluginId, toolName);
