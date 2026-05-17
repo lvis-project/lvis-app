@@ -4104,8 +4104,8 @@ interface ToolMeta {
 
 | Surface | 상수 | 값 | 의미 |
 |---|---|---|---|
-| Built-in shell Zod schema default | `shellDefaultSeconds` | `60` | model 이 `timeoutSeconds` 미명시 시 기본 |
-| Built-in shell Zod schema max | `shellMaxSeconds` | `120` | model 이 input 으로 줄 수 있는 상한 |
+| Built-in shell Zod schema default | `shellDefaultMs` | `60_000` | model 이 `timeoutSeconds` 미명시 시 기본 (Zod schema 가 `/ 1000` 변환해 seconds 노출) |
+| Built-in shell Zod schema max | `shellMaxMs` | `120_000` | model 이 input 으로 줄 수 있는 상한 (Zod schema 가 `/ 1000` 변환) |
 | Executor 글로벌 ceiling | `globalCeilingMs` | `120_000` | `runWithCeiling` AbortController-linked last-resort cap. `hostApi.callTool` 경로도 invoker 가 executor 거치므로 같은 ceiling 으로 cover (별도 키 없음) |
 | Sub-agent ceiling | `subAgentCeilingMs` | `600_000` | `agent_spawn` 처럼 자체 sub-agent loop 를 가진 tool 의 ceiling. globalCeiling 보다 길어야 inner round chain 이 살아남는다 |
 | MCP request default | `mcpRequestDefaultMs` | `60_000` | per-server `connectionTimeoutMs` 미선언 시 |
@@ -4115,14 +4115,15 @@ interface ToolMeta {
 | Network fetch default | `networkFetchDefaultMs` | `15_000` | `core/network-guard.ts` `fetchPublicHttpResponse` 의 per-hop timeout |
 | Approval gate user wait | `approvalGateUserWaitMs` | `300_000` | 사용자 입력 대기. *runtime hang 이 아니라 사용자가 느린* 케이스 — globalCeiling 의 cap 대상 아님 |
 
-**LLM judging — 연장은 model 자율, 단 cap 안에서**: model 이 long-running (bun install, large build 등) 으로 판단하면 shell tool 의 `timeoutSeconds` 인자에 최대 `shellMaxSeconds=120` 까지 명시 가능. cap 위는 어떤 경로로도 허용되지 않으며, 글로벌 ceiling 이 fail-safe 로 동시에 동작한다.
+**LLM judging — 연장은 model 자율, 단 cap 안에서**: model 이 long-running (bun install, large build 등) 으로 판단하면 shell tool 의 `timeoutSeconds` 인자에 최대 `shellMaxMs / 1000 = 120` 까지 명시 가능 (SOT 는 ms, Zod schema 가 `/ 1000` 변환해 model 에 노출). cap 위는 어떤 경로로도 허용되지 않으며, 글로벌 ceiling 이 fail-safe 로 동시에 동작한다.
 
 **외부 평균 근거**: 외부 OSS agent runtime 의 산술 평균이 ≈60s, 사용자-facing 최대 cap 으로 120s 합의. LVIS 이전 default 600s(10분) 는 model 이 task 완료 후에도 timeout 인자를 줄이지 않으면 사용자가 10분까지 무한 대기하던 회귀의 원천.
 
 **Invariants** (`src/shared/__tests__/tool-timeout-policy.test.ts` 가 지키는 룰):
-- `shellDefaultSeconds <= shellMaxSeconds` / `mcpRequestDefaultMs <= mcpRequestMaxMs` / `pluginStartupDefaultMs <= pluginStartupMaxMs`
+- `shellDefaultMs <= shellMaxMs` / `mcpRequestDefaultMs <= mcpRequestMaxMs` / `pluginStartupDefaultMs <= pluginStartupMaxMs`
 - 모든 값 finite + positive (Infinity 또는 0 금지)
-- `globalCeilingMs >= shellMaxSeconds * 1000` / `>= mcpRequestMaxMs` (last-resort cap 이 per-surface max 보다 작으면 회귀)
+- `globalCeilingMs >= shellMaxMs` / `>= mcpRequestMaxMs` (last-resort cap 이 per-surface max 보다 작으면 회귀)
+- `shellDefaultMs % 1000 === 0` / `shellMaxMs % 1000 === 0` (Zod schema `/ 1000` 변환 후 정수 보장)
 - `subAgentCeilingMs > globalCeilingMs` (sub-agent 가 inner 도구들의 ceiling 보다 길어야 함)
 - `approvalGateUserWaitMs > globalCeilingMs` (사용자 입력 대기는 tool 실행 cap 과 독립)
 

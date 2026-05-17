@@ -1,11 +1,16 @@
 /**
  * Tool execution timeout policy — single source of truth.
  *
+ * All values are milliseconds for direct comparison without unit conversion.
+ * The built-in shell tools' Zod schema exposes `timeoutSeconds` as the
+ * model-facing field (model API contract), but the underlying SOT stays in
+ * ms — the schema does the `/ 1000` conversion at the boundary.
+ *
  * Surfaces:
- *  - Built-in shell tools (bash/powershell) use seconds via Zod schema; the
- *    `shellDefaultSeconds` / `shellMaxSeconds` are exposed to the model so it
- *    can pick a value within the cap. The host still enforces `globalCeilingMs`
- *    on top of whatever the model picks.
+ *  - Built-in shell tools (bash/powershell) — `shellDefaultMs` / `shellMaxMs`
+ *    are exposed to the model (as `timeoutSeconds` after `/ 1000`) so it
+ *    can pick a value within the cap. The host still enforces
+ *    `globalCeilingMs` on top of whatever the model picks.
  *  - The executor caps every `tool.execute()` with an AbortController linked
  *    to a ceiling timer so the underlying work actually stops (tools that
  *    participate in `executionContext.abortSignal` propagate the
@@ -31,8 +36,8 @@
  * long-running can pick a value up to the cap.
  */
 export const TOOL_TIMEOUT_POLICY = {
-  shellDefaultSeconds: 60,
-  shellMaxSeconds: 120,
+  shellDefaultMs: 60_000,
+  shellMaxMs: 120_000,
   globalCeilingMs: 120_000,
   pluginStartupDefaultMs: 10_000,
   pluginStartupMaxMs: 60_000,
