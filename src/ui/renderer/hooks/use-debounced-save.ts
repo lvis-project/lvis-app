@@ -7,7 +7,7 @@ export interface DebouncedSave {
   cancel: () => void;
   /**
    * If a save is pending, run it RIGHT NOW (synchronously) and cancel the
-   * timer. Safe to call when nothing is pending. SettingsDialog calls
+   * timer. Safe to call when nothing is pending. SettingsContent calls
    * this from a `beforeunload` handler so a toggle made ~milliseconds
    * before app quit still gets persisted instead of dying with the 200ms
    * timer.
