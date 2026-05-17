@@ -27,18 +27,23 @@ export function classifyProviderError(raw: string): ClassifiedError {
     };
   }
 
-  if (/context_length|too many tokens|413/.test(lower)) {
+  // Order matters: rate-limit FIRST. OpenAI 의 "Request too large for ...
+  // Limit 200,000, Requested 271,630" (TPM 초과) 메시지가 context-length
+  // 패턴의 "too many tokens" 에 잘못 매치되어 *자동 압축* 으로 처리되던
+  // 문제. TPM 초과는 대화 길이가 아닌 분당 처리량 한도라 압축이 해결
+  // 못함 (issue #900).
+  if (/rate_limit|429|too many requests|requests per minute|tokens per minute|tpm|rpm|request too large|too large for/.test(lower)) {
     return {
-      category: "context-length",
-      userMessage: "대화가 너무 길어 압축이 필요합니다.",
+      category: "rate-limit",
+      userMessage: "분당 처리 한도(TPM) 초과 — 잠시 후 재시도하거나, 더 작은 메시지/첨부로 시도하세요. (이 한도는 *대화 길이* 가 아닌 *분당 토큰 처리량* 이므로 자동 압축으로 해결되지 않습니다.)",
       rawError: raw,
     };
   }
 
-  if (/rate_limit|429|too many/.test(lower)) {
+  if (/context_length|too many tokens|413|context window/.test(lower)) {
     return {
-      category: "rate-limit",
-      userMessage: "잠시 후 다시 시도해주세요 (모델 요청 한도).",
+      category: "context-length",
+      userMessage: "대화 컨텍스트가 모델의 최대 입력 한도를 넘었습니다 — 자동 압축 또는 새 대화가 필요합니다.",
       rawError: raw,
     };
   }
