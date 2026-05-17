@@ -36,6 +36,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
 import { registerWindowEventListeners } from "../ipc/domains/window.js";
+import { getCommonChromeOptions } from "./window-chrome.js";
 import { markAsWindowControlOwned } from "../ipc/window-control-registry.js";
 import { markAsLinkOwned } from "./link-window-registry.js";
 import {
@@ -248,11 +249,10 @@ export async function openLinkWindow(
     title: shellTitle,
     icon: resolveAppIconPath(),
     autoHideMenuBar: true,
-    frame: process.platform !== "darwin" ? false : undefined,
-    titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "hidden",
-    // Centers 12px traffic lights in the 36px .titlebar-mac strip emitted by
-    // window-titlebar-shell.ts: y = (36 - 12) / 2 = 12.
-    trafficLightPosition: process.platform === "darwin" ? { x: 14, y: 12 } : undefined,
+    // Frame settings sourced from the shared `getCommonChromeOptions()`
+    // helper so traffic-light spacing stays uniform across every LVIS
+    // window. See `src/main/window-chrome.ts`.
+    ...getCommonChromeOptions(),
     webPreferences: {
       /* Shell loads a `data:` URL that hosts a sandboxed `<webview>` for
          the external content. The webviewTag flag enables the embedded
