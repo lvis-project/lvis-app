@@ -101,6 +101,17 @@ export function useContextBudget(params: {
     [usedTokens, tpmLimit],
   );
 
+  // Issue #912 — TokenProgressRing 의 budget 으로 사용할 *효과적 한도*.
+  // tpmLimit 가 등록된 모델 (현재 gpt-5.4-nano 만) 에서는 *분당 처리 한도*
+  // 가 *contextWindow* 보다 훨씬 작은 *실질 한도* 이므로 ring 이 두 한도
+  // 중 더 작은 쪽을 100% 으로 시각화해야 사용자의 "한도 초과 인지" 와
+  // ring 표시가 일치. tpmLimit 미등록 모델은 기존 contextBudget 그대로
+  // — staleness 진단 (image #35 의 mini 케이스) 은 #912 별 분석.
+  const effectiveBudget = useMemo(
+    () => (typeof tpmLimit === "number" && tpmLimit < contextBudget ? tpmLimit : contextBudget),
+    [contextBudget, tpmLimit],
+  );
+
   return {
     usedTokens,
     contextBudget,
@@ -110,5 +121,7 @@ export function useContextBudget(params: {
     tpmLimit,
     tpmPct,
     isTpmOverflow: typeof tpmPct === "number" && tpmPct >= 1,
+    // #912 — ring 이 사용할 한도 (TPM-bound 모델에선 tpmLimit, else contextBudget).
+    effectiveBudget,
   };
 }
