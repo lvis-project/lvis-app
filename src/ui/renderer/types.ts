@@ -166,6 +166,13 @@ export type AppSettings = {
      * the proposal `docs/architecture/proposals/live-autoplay.md` §7.
      */
     demoAutoplayEnabled?: boolean;
+    /**
+     * Tutorial-X3 — rotation index into the `DEMO_SCRIPTS` catalog. Each
+     * activation picks `DEMO_SCRIPTS[index % len]` then bumps the index.
+     * See `scripts-registry.ts` for the catalog and `pickScript`/
+     * `nextRotationIndex` helpers.
+     */
+    demoAutoplayRotationIndex?: number;
   };
 };
 
@@ -295,6 +302,28 @@ export type LvisApi = {
     | { ok: false; error: string }
   >;
   /**
+   * Tutorial-X1 — Auth progress IPC. The host emits real progress events
+   * for each step of the `loginMockup` flow on `lvis:auth:progress` so the
+   * LoginModal checklist animates against actual main-process work, not a
+   * renderer `setTimeout` illusion. `onProgress` returns the unsubscribe
+   * function. Event payloads use kebab-case English `step` + `status`
+   * codes (CLAUDE.md error-language rule).
+   */
+  auth: {
+    onProgress: (
+      handler: (event: {
+        step:
+          | "credentials-validating"
+          | "llm-key-issuing"
+          | "sandbox-preparing"
+          | "complete";
+        status: "running" | "done" | "failed";
+        vendor?: string;
+        error?: string;
+      }) => void,
+    ) => () => void;
+  };
+  /**
    * Tutorial-A — login screen variant preference. The host persists the
    * variant under `~/.lvis/login-prefs/login-prefs.json`; `loginPrefsGet`
    * never rejects on parse error (it returns the default), while
@@ -385,6 +414,18 @@ export type LvisApi = {
   >;
   tutorialShowContextMenu: () => Promise<
     | { ok: true }
+    | { ok: false; error: string; message: string }
+  >;
+  /**
+   * Tutorial-X2 — install a plugin from the Discovery Swipe / Memory Seed
+   * recommendation flows. Delegates to the canonical `lvis:plugins:install`
+   * channel so the tutorial path reuses the entire marketplace install
+   * pipeline (download → verify → register → restart broadcasts) rather
+   * than forking a tutorial-only install loop. Error codes are
+   * kebab-case English; the renderer translates for the user.
+   */
+  tutorialInstallPlugin: (pluginId: string) => Promise<
+    | { ok: true; pluginId: string }
     | { ok: false; error: string; message: string }
   >;
   onTutorialOpen: (handler: (payload: { source: string }) => void) => () => void;

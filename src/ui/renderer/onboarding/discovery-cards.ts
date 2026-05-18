@@ -28,6 +28,16 @@ export interface DiscoveryCard {
   tags: readonly string[];
   /** PR-C Spotlight tour id. Falls back to `welcome-tour` when missing. */
   spotlightScenarioId: string;
+  /**
+   * Tutorial-X2 — plugin id this card represents, if any. When set, a "✓
+   * 시도해볼래요" swipe triggers a real PluginInstallDialog confirmation
+   * via the host's marketplace install path. `null` means the card is
+   * meta (chat basics / multi-agent etc.) and only schedules a tour.
+   *
+   * The id matches the marketplace catalog slug (e.g. `lvis-plugin-meeting`)
+   * so the dialog can look up the package by id without a second probe.
+   */
+  pluginId: string | null;
 }
 
 export const DISCOVERY_CARDS: readonly DiscoveryCard[] = [
@@ -38,7 +48,8 @@ export const DISCOVERY_CARDS: readonly DiscoveryCard[] = [
     description:
       "meeting 플러그인이 STT → 요약 → 액션 아이템 추출까지 한 번에 처리합니다.",
     tags: ["5분 시연", "한국어 STT", "로컬 저장"],
-    spotlightScenarioId: "meeting-summary-tour",
+    spotlightScenarioId: "meeting-walkthrough",
+    pluginId: "lvis-plugin-meeting",
   },
   {
     id: "doc-search",
@@ -47,7 +58,8 @@ export const DISCOVERY_CARDS: readonly DiscoveryCard[] = [
     description:
       "local-indexer 가 PDF / Word / 마크다운을 인덱싱하고 자연어로 답합니다.",
     tags: ["오프라인", "한국어 RRF", "PII 마스킹"],
-    spotlightScenarioId: "doc-search-tour",
+    spotlightScenarioId: "indexer-walkthrough",
+    pluginId: "lvis-plugin-local-indexer",
   },
   {
     id: "proactive-work",
@@ -56,7 +68,8 @@ export const DISCOVERY_CARDS: readonly DiscoveryCard[] = [
     description:
       "work-proactive 가 받은편지함을 스캔해 액션 아이템 후보를 알려줍니다.",
     tags: ["오버레이", "알림", "수동 승인"],
-    spotlightScenarioId: "proactive-work-tour",
+    spotlightScenarioId: "proactive-walkthrough",
+    pluginId: "lvis-plugin-work-proactive",
   },
   {
     id: "multi-agent",
@@ -66,6 +79,7 @@ export const DISCOVERY_CARDS: readonly DiscoveryCard[] = [
       "여러 에이전트가 작업을 분산해 처리하고 결과를 다시 합성합니다.",
     tags: ["병렬", "비용 가시화", "감사"],
     spotlightScenarioId: "multi-agent-tour",
+    pluginId: "lvis-plugin-agent-hub",
   },
   {
     id: "chat-basics",
@@ -75,6 +89,7 @@ export const DISCOVERY_CARDS: readonly DiscoveryCard[] = [
       "기본 채팅 + 도구 승인 + Command Palette 로 LVIS 의 모든 기능을 호출합니다.",
     tags: ["⌘K", "도구 승인", "한국어"],
     spotlightScenarioId: "first-boot-essentials",
+    pluginId: null,
   },
 ] as const;
 

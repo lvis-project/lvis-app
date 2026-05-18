@@ -123,6 +123,14 @@ export interface FeatureFlags {
    * unset this entire path is dead — the demo cannot silently activate.
    */
   demoAutoplayEnabled?: boolean;
+  /**
+   * Tutorial-X3 — index into the `DEMO_SCRIPTS` rotation. Each install
+   * boot picks `DEMO_SCRIPTS[index % len]`, then bumps the index. The
+   * value is best-effort: `undefined` falls back to 0, out-of-range
+   * values are wrapped modulo the catalog length. A single int avoids a
+   * dedicated namespace for one counter.
+   */
+  demoAutoplayRotationIndex?: number;
 }
 
 export interface AppSettings {
@@ -1019,6 +1027,20 @@ function normalizeFeatureFlags(input: unknown): FeatureFlags {
   const result: FeatureFlags = {};
   if (typeof obj.idlePreferenceRefresh === "boolean") {
     result.idlePreferenceRefresh = obj.idlePreferenceRefresh;
+  }
+  if (typeof obj.onboardingCompleted === "boolean") {
+    result.onboardingCompleted = obj.onboardingCompleted;
+  }
+  if (typeof obj.demoAutoplayEnabled === "boolean") {
+    result.demoAutoplayEnabled = obj.demoAutoplayEnabled;
+  }
+  // Tutorial-X3 — accept the int rotation index; drop NaN / non-finite
+  // values so a corrupted on-disk state never crashes the autoplay path.
+  if (
+    typeof obj.demoAutoplayRotationIndex === "number" &&
+    Number.isFinite(obj.demoAutoplayRotationIndex)
+  ) {
+    result.demoAutoplayRotationIndex = obj.demoAutoplayRotationIndex;
   }
   return result;
 }
