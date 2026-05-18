@@ -164,7 +164,7 @@
       "!node_modules/better-sqlite3/src{,/**/*}",
       "!node_modules/better-sqlite3/binding.gyp",
       "!node_modules/{prebuild-install,napi-build-utils,node-abi}{,/**/*}",
-      "!node_modules/{ai,zod,ajv,ajv-formats,undici,adm-zip,proper-lockfile}{,/**/*}",
+      "!node_modules/{ai,zod,undici,adm-zip,proper-lockfile}{,/**/*}",
       "!node_modules/@ai-sdk{,/**/*}",
       "!node_modules/@azure/msal-*{,/**/*}",
       "!node_modules/@radix-ui{,/**/*}",
