@@ -10,7 +10,15 @@
 import { ConversationHistory, normalizeToolPairInvariant } from "./conversation-history.js";
 import { ToolExecutor, type ToolResult, type ToolUseBlock } from "../tools/executor.js";
 import { HookRunner } from "../hooks/hook-runner.js";
-import { markStaleToolResults, estimateMessagesTokens, getModelPreflightThreshold, getModelUsableContext } from "./auto-compact.js";
+import { markStaleToolResults, estimateMessagesTokens, getModelPreflightThreshold, getModelUsableContext, isContextLengthError } from "./auto-compact.js";
+
+/**
+ * 사용자가 반복적으로 context_error 유발 input 보낼 때 compact API 호출
+ * 폭주 방어 (Issue #910 round-4 security MEDIUM). 정상 사용자는 도달하지
+ * 않는 임계 — 3 회 연속 force-recover 는 *compact 가 reduce 못 하는*
+ * pathological 상태이거나 *adversarial input* 신호.
+ */
+const MAX_FORCE_RECOVER_PER_SESSION = 3;
 import { compactWithBoundary, renderBoundaryAsPreamble } from "./structured-compact.js";
 import { CompressionStatus } from "../shared/compact-status.js";
 import { stubMarkedToolResults } from "./wire-serialize.js";
@@ -412,9 +420,17 @@ export class ConversationLoop {
    * 에 기록 안 됨* + estimate 가 chars/4 으로 15-25% 과소 → 다음 turn
    * preflight 가 미발동, compact 도 NOOP 반환 → 약속 깨짐. 이 flag 는
    * 다음 turn 의 preflight 가 임계 무시 + preserve=0 으로 force trigger
-   * 하도록 한다. 성공 또는 정상 turn 시점에 clear.
+   * 하도록 한다. 성공/실패/NOOP 모두 finally 에서 clear.
    */
   private contextErrorPending: boolean = false;
+  /**
+   * Force-recover 반복 횟수 — DoS 방어 (security round-4 MED). 사용자가
+   * 반복적으로 context_error 유발 input 보내면 compact LLM API 호출이
+   * 누적 cost. `MAX_FORCE_RECOVER_PER_SESSION` 초과 시 force-recover 진입
+   * 차단 + user-facing 경고. 정상 사용자는 절대 도달하지 않는 임계 (3
+   * 회 연속 force-recover = 3 turn 연속 모델 한도 초과).
+   */
+  private contextErrorRecoveryCount: number = 0;
   /**
    * "Guide" utterance buffer — mid-stream direction adjustments that the
    * user typed while a turn is in flight. Drained at each round boundary in
@@ -1615,9 +1631,15 @@ export class ConversationLoop {
           content: stream.userMessage,
           meta: { systemNotice: "stream-error" },
         });
-        // Same as context-error path — provider rejected the call, next turn
-        // should force-compact to recover.
-        this.contextErrorPending = true;
+        // Issue #910 round-4 security MED — stream_error covers network /
+        // auth / rate-limit / 5xx in addition to context-length. Only set
+        // the force-recover flag when the underlying message *actually*
+        // matches a context-length pattern; for other stream errors
+        // forcing a destructive (preserve=0) compact would just drop the
+        // user's working history for no benefit.
+        if (isContextLengthError(stream.userMessage)) {
+          this.contextErrorPending = true;
+        }
         return { text: stream.userMessage, toolCalls: allToolCalls, usage: turnUsage, stopReason: "stream-error" };
       }
 
@@ -2060,8 +2082,25 @@ export class ConversationLoop {
     // Force-trigger compact regardless of threshold + autoCompact setting:
     // the host's promise overrides the user's compact-off preference for this
     // single recovery cycle (otherwise the conversation is unrecoverable
-    // without manual /compact). Flag clears below on success/failure.
-    const forceRecover = this.contextErrorPending;
+    // without manual /compact). Flag clears in `finally` so every path
+    // (success / NOOP / throw) keeps the "single cycle = single clear"
+    // invariant.
+    //
+    // DoS guard (round-4 security MED): if the same session has already
+    // burned through MAX_FORCE_RECOVER_PER_SESSION recovery attempts without
+    // the user being able to make progress, stop force-triggering — the
+    // failure is structural (compact cannot reduce, or input pattern keeps
+    // hitting the limit) and further attempts just multiply API cost.
+    const overRecoveryBudget = this.contextErrorRecoveryCount >= MAX_FORCE_RECOVER_PER_SESSION;
+    const forceRecover = this.contextErrorPending && !overRecoveryBudget;
+    if (this.contextErrorPending && overRecoveryBudget) {
+      log.warn(
+        `preflight: force-recover BUDGET EXHAUSTED (count=${this.contextErrorRecoveryCount}/${MAX_FORCE_RECOVER_PER_SESSION}) — falling back to threshold gate`,
+      );
+      // Stay armed for a normal threshold-based trigger but stop the
+      // override behaviour. Clear the flag so the normal gates apply.
+      this.contextErrorPending = false;
+    }
     if (!forceRecover && !this.isAutoCompactEnabled()) {
       log.debug("runPreflightGuard: skipped (autoCompact 설정 OFF)");
       return;
@@ -2132,15 +2171,8 @@ export class ConversationLoop {
 
       if (compactResult.status === CompressionStatus.NOOP) {
         log.info("preflight: LLM compact returned NOOP (history within preserveRecentTokens) — no mutation");
-        // Clear recover flag even on NOOP — the compact attempt fulfilled
-        // the host's promise even if structurally there was nothing to
-        // compact. Avoids infinite retry loop on tiny-but-rejected inputs.
-        this.contextErrorPending = false;
         return;
       }
-      // Successful compact path — flag will be cleared in the finally
-      // block; applyBoundaryToSession runs next and may throw.
-      this.contextErrorPending = false;
 
       // 다음 prompt assembly 가 새 boundary 를 read 해야 함.
       // onCompactOccurred (compactNum 포함) 은 applyBoundaryToSession 안에서 단일 emit.
@@ -2156,6 +2188,15 @@ export class ConversationLoop {
       log.warn(`preflight: LLM compact failed — ${(err as Error).message}. context_error safety net 으로 위임.`);
     } finally {
       this.isCompacting = false;
+      // Single-cycle invariant — every force-recover attempt (success /
+      // NOOP / throw) clears the flag and bumps the recovery counter.
+      // Without this in `finally`, a `compactWithBoundary` throw would
+      // leave the flag set and the next turn would force-recover again
+      // → indistinguishable from infinite retry (round-4 architect MAJOR).
+      if (forceRecover) {
+        this.contextErrorPending = false;
+        this.contextErrorRecoveryCount += 1;
+      }
     }
   }
 
