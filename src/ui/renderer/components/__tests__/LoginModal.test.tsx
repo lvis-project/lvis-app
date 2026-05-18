@@ -19,8 +19,19 @@ function makeApi(
     | { ok: false; error: string }
   >,
 ) {
+  // Tutorial-A — LoginModal is now a variant-aware wrapper that calls
+  // `loginPrefsGet` on mount and subscribes to `onLoginPrefsChanged`.
+  // The form-behaviour tests only need the conversational variant (the
+  // wrapper's default), so we stub the prefs surface with a synchronous
+  // resolved value and a no-op unsubscribe.
   return {
     loginMockup: vi.fn(impl),
+    loginPrefsGet: vi.fn(async () => ({
+      ok: true as const,
+      prefs: { loginVariant: "conversational" as const },
+    })),
+    loginPrefsSet: vi.fn(),
+    onLoginPrefsChanged: vi.fn(() => () => {}),
   } as unknown as Parameters<typeof LoginModal>[0]["api"];
 }
 
