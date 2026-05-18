@@ -1,9 +1,11 @@
 import { spawnSync, type ChildProcess } from "node:child_process";
 import { createLogger } from "../lib/logger.js";
+import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
 
 const log = createLogger("lvis");
-const PROCESS_TREE_KILL_TIMEOUT_MS = 1000;
-const DETACHED_PROCESS_GROUP_POLL_MS = 1000;
+const PROCESS_TREE_KILL_TIMEOUT_MS = TOOL_TIMEOUT_POLICY.processTreeKillMs;
+const DETACHED_PROCESS_GROUP_POLL_MS = TOOL_TIMEOUT_POLICY.processGroupPollMs;
+const PROCESS_GROUP_DISPOSAL_MAX_MS = TOOL_TIMEOUT_POLICY.processGroupDisposalMaxMs;
 
 interface ManagedChildProcess {
   child: ChildProcess;
@@ -11,6 +13,7 @@ interface ManagedChildProcess {
   killProcessGroup: boolean;
   processGroupId?: number;
   disposeTimer?: NodeJS.Timeout;
+  disposalStartedAt?: number;
   dispose: () => void;
   onSettled: () => void;
 }
@@ -115,10 +118,25 @@ function isKillable(entry: ManagedChildProcess): boolean {
 
 function scheduleProcessGroupDisposal(entry: ManagedChildProcess): void {
   if (entry.disposeTimer) return;
+  if (entry.disposalStartedAt === undefined) entry.disposalStartedAt = Date.now();
 
   const poll = (): void => {
     entry.disposeTimer = undefined;
     if (entry.processGroupId === undefined || !processGroupExists(entry.processGroupId)) {
+      entry.dispose();
+      return;
+    }
+    const elapsed = Date.now() - (entry.disposalStartedAt ?? Date.now());
+    if (elapsed >= PROCESS_GROUP_DISPOSAL_MAX_MS) {
+      // Unkillable process group (typically a setuid descendant or one
+      // that crossed a uid boundary). Force-dispose the entry so the
+      // managed-children Set does not retain it for the lifetime of the
+      // host process — the original child has already exited.
+      log.warn({
+        label: entry.label,
+        processGroupId: entry.processGroupId,
+        elapsedMs: elapsed,
+      }, "managed-child: process group disposal exceeded max wall-clock, force-disposing entry");
       entry.dispose();
       return;
     }
@@ -130,13 +148,26 @@ function scheduleProcessGroupDisposal(entry: ManagedChildProcess): void {
   entry.disposeTimer.unref?.();
 }
 
+/**
+ * Probe whether a detached process group is still around.
+ *
+ * `process.kill(-pgid, 0)` returns iff signal 0 was delivered successfully.
+ * Errors map as:
+ *   - ESRCH → group is gone (true negative)
+ *   - EPERM → group exists but is owned by a foreign uid (still around,
+ *     conservatively keep polling)
+ *   - anything else (EINVAL on some BSDs, generic Error from NaN pid) →
+ *     treat as "still around" so we err on the side of completing the
+ *     disposal poll rather than prematurely freeing the entry while the
+ *     group is actually alive.
+ */
 function processGroupExists(processGroupId: number): boolean {
   try {
     process.kill(-processGroupId, 0);
     return true;
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
-    return code === "EPERM";
+    return code !== "ESRCH";
   }
 }
 
