@@ -48,6 +48,7 @@ function makeDeps() {
       setSecret: vi.fn(async () => undefined),
       deleteSecret: vi.fn(async () => undefined),
       patch: vi.fn(async () => undefined),
+      replaceLlm: vi.fn(async () => undefined),
     },
     auditLogger: { log: vi.fn() },
     conversationLoop: { refreshProvider: vi.fn() },
@@ -159,7 +160,7 @@ describe("auth:login-mockup IPC handler (#893 top-level)", () => {
         provider: "claude",
       },
     });
-    expect(deps.settingsService.patch).toHaveBeenNthCalledWith(2, { llm: prevLlm });
+    expect(deps.settingsService.replaceLlm).toHaveBeenCalledWith(prevLlm);
     expect(deps.rewireReviewerAgent).toHaveBeenCalledTimes(2);
     expect(deps.conversationLoop.refreshProvider).toHaveBeenCalled();
     expect(deps.refreshActiveLlmWildcard).toHaveBeenCalled();
