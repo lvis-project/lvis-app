@@ -75,6 +75,19 @@ export interface ModelPricing {
   surchargeInputThreshold?: number;
   surchargeInputMultiplier?: number;
   surchargeOutputMultiplier?: number;
+  /**
+   * Conservative Tier-1 TPM (Tokens Per Minute) cap. 작은 tier 의 OpenAI
+   * 모델은 `contextWindow` 보다 *훨씬 작은* 분당 처리 한도 — 예: nano 는
+   * contextWindow 400K 이지만 Tier-1 TPM 200K. 단발 input 이 contextWindow
+   * 안이라도 TPM 초과로 reject 가능 (사용자 영상의 271K request 사례).
+   *
+   * `auto-compact.getModelPreflightThreshold` 가 이 값과 contextWindow
+   * 기반 임계의 *min* 을 사용 — TPM 인지 preflight 로 사용자 사고 prevent.
+   * 값은 *org Tier-1 보수적 default* — 더 큰 tier 는 over-compact 가능
+   * 하지만 *TPM hit 의 silent fail* 보다 안전 trade-off. 동적 header
+   * (`x-ratelimit-remaining-tokens`) 기반 update 는 별 cycle.
+   */
+  tpmDefault?: number;
 }
 
 /** Default pricing + context catalog. */
@@ -113,10 +126,14 @@ export const DEFAULT_PRICING: Record<PricingVendor, Record<string, ModelPricing>
     // 자동 적용됨 — `computeCost` 의 openai/copilot/azure-foundry 분기 참조.
     //
     // gpt-5.4-mini / nano 는 OpenAI spec 상 surcharge 없음 (400K 단일 tier).
-    "gpt-5.4":                     { inputPer1M: 2.5,  outputPer1M: 15,  contextWindow: 1_050_000, surchargeInputThreshold: 272_000, surchargeInputMultiplier: 2,   surchargeOutputMultiplier: 1.5 },
-    "gpt-5.4-mini":                { inputPer1M: 0.75, outputPer1M: 4.5, contextWindow:   400_000 },
-    "gpt-5.4-nano":                { inputPer1M: 0.2,  outputPer1M: 1.25, contextWindow:  400_000 },
-    "gpt-5.4-pro":                 { inputPer1M: 30,   outputPer1M: 180, contextWindow: 1_100_000, surchargeInputThreshold: 272_000, surchargeInputMultiplier: 2,   surchargeOutputMultiplier: 1.5 },
+    // tpmDefault — OpenAI Tier-1 의 보수적 분당 처리량 한도 (issue #900 #3).
+    // contextWindow 보다 작은 모델은 단발 input 이 window 안이라도 TPM 초과
+    // 가능. preflight 가 min(window-based, tpmDefault×0.8) 로 fire — 사고
+    // 사례 (nano 271K request → 200K TPM reject) prevention.
+    "gpt-5.4":                     { inputPer1M: 2.5,  outputPer1M: 15,  contextWindow: 1_050_000, surchargeInputThreshold: 272_000, surchargeInputMultiplier: 2,   surchargeOutputMultiplier: 1.5, tpmDefault: 30_000_000 },
+    "gpt-5.4-mini":                { inputPer1M: 0.75, outputPer1M: 4.5, contextWindow:   400_000, tpmDefault:  2_000_000 },
+    "gpt-5.4-nano":                { inputPer1M: 0.2,  outputPer1M: 1.25, contextWindow:  400_000, tpmDefault:    200_000 },
+    "gpt-5.4-pro":                 { inputPer1M: 30,   outputPer1M: 180, contextWindow: 1_100_000, surchargeInputThreshold: 272_000, surchargeInputMultiplier: 2,   surchargeOutputMultiplier: 1.5, tpmDefault: 30_000_000 },
     "gpt-5.3":                     { inputPer1M: 0,    outputPer1M: 0,  contextWindow:   400_000 },
     "gpt-5.3-codex":               { inputPer1M: 0,    outputPer1M: 0,  contextWindow:   400_000 },
     "gpt-5.2":                     { inputPer1M: 0,    outputPer1M: 0,  contextWindow:   400_000 },
