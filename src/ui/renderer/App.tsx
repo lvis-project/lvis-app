@@ -16,6 +16,7 @@ import type { PluginEntry } from "./components/PluginGridButton.js";
 import { ApprovalDialog } from "./dialogs/ApprovalDialog.js";
 import { DeferredQueueDialog } from "./dialogs/DeferredQueueDialog.js";
 import { OnboardingDialog } from "./components/OnboardingDialog.js";
+import { SpotlightTour } from "./components/SpotlightTour.js";
 import { LoginModal } from "./components/LoginModal.js";
 import { LLM_VENDORS } from "../../shared/llm-vendor-defaults.js";
 import { buildQuickActions } from "./components/command-actions.js";
@@ -1220,6 +1221,10 @@ export function App() {
           void checkApiKey();
         }}
       />
+      {/* Tutorial-C — SpotlightTour mounts always; it stays invisible until
+          a `lvis:tour:start` broadcast (Settings → 도움말, or a first-boot
+          trigger) flips it on. State lives in `~/.lvis/onboarding/`. */}
+      <SpotlightTour api={api} />
       {/* v6: ApprovalQueueStatus floating chip 제거. 큐 정보는 InputActionBar
           trailing 의 DeferredApprovalChip 으로 통합. Spec docs/blueprints/
           composer-redesign-message-queue.md "제거" 섹션. */}
