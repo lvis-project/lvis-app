@@ -1351,14 +1351,17 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             attachDisabled={
               attachments.length >= ATTACH_MAX_COUNT ||
               hasApiKey === false ||
-              contextOverflowPct >= 0.95
+              contextOverflowPct >= 0.95 ||
+              (typeof tpmPct === "number" && tpmPct >= 0.95)
             }
             attachDisabledReason={
               hasApiKey === false
                 ? "no-api-key"
                 : contextOverflowPct >= 0.95
                   ? "context-overflow"
-                  : "limit"
+                  : (typeof tpmPct === "number" && tpmPct >= 0.95)
+                    ? "context-overflow"
+                    : "limit"
             }
             onAttach={async () => {
             const result = await window.lvis.attach.openFile();
@@ -1490,7 +1493,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
               // Slash commands (e.g. /compact) bypass the context-overflow gate
               // so the user can escape a fully-blocked input even while the
               // "자동 압축이 필요합니다" banner is showing.
-              (hasApiKey === false || contextOverflowPct >= 0.95 || viewMode !== null) &&
+              (hasApiKey === false || contextOverflowPct >= 0.95 || (typeof tpmPct === "number" && tpmPct >= 0.95) || viewMode !== null) &&
               !question.trimStart().startsWith("/")
             }
             onWarning={(msg) => console.warn(msg)}
@@ -1522,7 +1525,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             }
             isBusy={streaming}
             isSendDisabled={
-              (hasApiKey === false || contextOverflowPct >= 0.95 || viewMode !== null) &&
+              (hasApiKey === false || contextOverflowPct >= 0.95 || (typeof tpmPct === "number" && tpmPct >= 0.95) || viewMode !== null) &&
               !question.trimStart().startsWith("/")
                 ? true
                 : question.trim().length === 0 && attachments.length === 0
