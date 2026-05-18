@@ -34,14 +34,17 @@ const EMPTY_SNAPSHOT: SuggestedRepliesSnapshot = {
   isDismissed: false,
 };
 
-// Suggestions whose leading character is one of these prefixes are filtered
-// out before they reach the store. Slash + bang + dollar map to the host's
-// command-style entrypoints (e.g. `/admin`, `/clear`, `!shell`, `$env`); we
-// never want an LLM-generated suggestion to silently inject one of those.
-// Defined here (and not in the engine) because the same string could be a
-// legitimate token in a future channel — the renderer is the right place to
-// enforce a UI-policy filter for *suggestion* surfacing.
-const SLASH_COMMAND_PATTERN = /^[/!$]/;
+// Suggestions matching this pattern are filtered out before they reach the
+// store. Spec §10 intent = drop LLM-generated *executable* command payloads
+// (`/admin run prod`, `!shell -c rm`, `$env=foo bar`) — i.e. command-prefix
+// *followed by* an argument. Single-token commands (`/clear`, `/help`,
+// `!ls`) intentionally pass through: chip click only fills the textarea
+// (no auto-send), so the host's command parser at send-time is the real
+// trust boundary. A blanket prefix taboo would block legitimate suggestion
+// of the user's own slash commands — false-positive surface > injection
+// surface here. Pattern: prefix char + non-whitespace + whitespace +
+// non-whitespace (i.e. argument present).
+const SLASH_COMMAND_PATTERN = /^[/!$]\S+\s+\S/;
 
 // Module-level store — single source of truth for all subscribers. Reset to
 // `EMPTY_SNAPSHOT` on every new replies push so React's `Object.is` snapshot
