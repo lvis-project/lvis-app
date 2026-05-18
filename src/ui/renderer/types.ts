@@ -544,7 +544,12 @@ export type LvisApi = {
       questions: Array<{
         question: string;
         choices?: string[];
+        recommendedIndex?: number;
+        altIndices?: number[];
         allowFreeText: boolean;
+        allowMultiple?: boolean;
+        placeholder?: string;
+        summaryHint?: string;
         suggestedAnswers?: string[];
       }>;
       createdAt: number;
@@ -552,7 +557,12 @@ export type LvisApi = {
   ) => () => void;
   respondAskUserQuestion: (response: {
     requestId: string;
-    answers?: Array<{ choice?: string; freeText?: string }>;
+    answers?: Array<{
+      choice?: string;
+      /** Multi-select selections (only set when the question allowMultiple). */
+      choices?: string[];
+      freeText?: string;
+    }>;
     dismissed?: boolean;
   }) => Promise<{ ok: boolean; error?: string }>;
   /** Renderer is notified when the gate's 5-minute timeout fires. */
