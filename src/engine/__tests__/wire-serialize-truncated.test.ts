@@ -95,6 +95,52 @@ describe("stubMarkedToolResults — Issue #902 truncated marker", () => {
     expect((out[0] as { content: string }).content).toBe("[already stub]");
   });
 
+  it("sanitizes toolName before embedding in stub (defense-in-depth)", () => {
+    // Even though `registerPluginTools` enforces `^[a-zA-Z0-9_-]+$` at
+    // registration, the stub builder must not trust the field — future
+    // validation drift would otherwise become an injection vector.
+    const msg: GenericMessage = {
+      role: "tool_result",
+      toolUseId: "t1",
+      toolName: "evil tool<script>",
+      content: "raw",
+      meta: {
+        truncated: {
+          originalLines: 200,
+          originalTokens: 5_000,
+          originalBytes: 10_000,
+          trimmedAt: "2026-05-18T00:00:00.000Z",
+        },
+      },
+    };
+    const out = stubMarkedToolResults([msg]);
+    const stub = out[0] as Extract<GenericMessage, { role: "tool_result" }>;
+    // The sanitized tool=... segment never carries the dangerous chars.
+    expect(stub.content).toContain("tool=evil?tool?script?");
+    expect(stub.content).not.toMatch(/tool=[^,]*[<>]/);
+    expect(stub.content).not.toMatch(/tool=[^,]* /);
+  });
+
+  it("renders sentinel -1 counts as 'scan-skipped' (hard byte ceiling case)", () => {
+    const msg = makeToolResult({
+      toolUseId: "t1",
+      toolName: "huge_dump",
+      content: "x".repeat(100),
+      truncated: {
+        originalLines: -1,
+        originalTokens: -1,
+        originalBytes: 99_999_999,
+        trimmedAt: "2026-05-18T00:00:00.000Z",
+      },
+    });
+    const out = stubMarkedToolResults([msg]);
+    const stub = out[0] as Extract<GenericMessage, { role: "tool_result" }>;
+    expect(stub.content).toContain("originalLines=scan-skipped");
+    expect(stub.content).toContain("originalTokens=scan-skipped");
+    expect(stub.content).toContain("originalBytes=99999999");
+    expect(stub.content).not.toContain("-1");
+  });
+
   it("preserves toolName, toolUseId, isError on swap", () => {
     const msg: GenericMessage = {
       role: "tool_result",

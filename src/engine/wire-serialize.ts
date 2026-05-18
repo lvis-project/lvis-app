@@ -21,16 +21,29 @@ import { buildToolResultStub } from "./auto-compact.js";
  * filtering) to make a sensible follow-up call. The verbose form costs
  * a handful of tokens but saves the model from blindly retrying the
  * same oversized call.
+ *
+ * `originalLines === -1` / `originalTokens === -1` are sentinels meaning
+ * "exact scan skipped because the payload exceeded HARD_BYTES_CEILING"
+ * — surfaced as "(scan skipped — over hard ceiling)" so the model knows
+ * the count is unknown rather than literally negative.
+ *
+ * `toolName` is sanitized with the same `^[A-Za-z0-9_-]+$` charset that
+ * `registerPluginTools` enforces at registration time. Defense-in-depth:
+ * if future validation weakens, the stub cannot become an injection
+ * vector via a hostile tool name.
  */
 function buildToolResultTruncatedStub(
   toolName: string | undefined,
   info: NonNullable<NonNullable<GenericMessage["meta"]>["truncated"]>,
 ): string {
+  const safeName = (toolName ?? "?").replace(/[^A-Za-z0-9_-]/g, "?");
+  const lineLabel = info.originalLines === -1 ? "scan-skipped" : `${info.originalLines}`;
+  const tokenLabel = info.originalTokens === -1 ? "scan-skipped" : `${info.originalTokens}`;
   return (
     `[tool_result truncated by host (Issue #902):` +
-    ` tool=${toolName ?? "?"},` +
-    ` originalLines=${info.originalLines},` +
-    ` originalTokens=${info.originalTokens},` +
+    ` tool=${safeName},` +
+    ` originalLines=${lineLabel},` +
+    ` originalTokens=${tokenLabel},` +
     ` originalBytes=${info.originalBytes}.` +
     ` The full response exceeded the per-result size cap` +
     ` and was dropped from history to protect TPM / context window.` +
@@ -46,9 +59,10 @@ function buildToolResultTruncatedStub(
  *   - `compactedAt` — LLM auto-compact 이 turn 을 요약 → 원본 raw content
  *     는 더 이상 의미 없으므로 짧은 stub 으로 swap (token 회수)
  *   - `truncated`   — 호스트가 size cap 으로 잘림 (Issue #902). in-memory
- *     content 는 이미 head + marker 형태인데, wire/disk 직렬화 시에는
- *     marker 만 남기는 더 짧은 stub 로 swap (disk 부담 감소 + 다음 load
- *     시 jsonl 의 원본 verbatim 보호용 raw 는 *executor 가 보존*)
+ *     content 는 **raw verbatim 그대로 보존** (UI / inspection 정합) —
+ *     이 함수가 wire/disk 직렬화 시점에서만 짧은 stub 로 swap. 따라서
+ *     in-memory snapshot 을 보는 UI 는 원본을 볼 수 있고, LLM 으로
+ *     보내거나 jsonl 에 저장될 때는 stub 으로 통일.
  *
  * - 입력 array 는 mutate 안 함 — caller 의 in-memory verbatim 보존
  * - mark 안 된 메시지는 reference-equal (per-turn allocation 회피)
@@ -85,6 +99,20 @@ export function stubMarkedToolResults(messages: GenericMessage[]): GenericMessag
       // compactedAt takes precedence — once the LLM has summarized the
       // turn the original is fully redundant, so the shorter generic
       // stub is right even if the result was *also* size-capped.
+      //
+      // origLen passed to `buildToolResultStub`:
+      //   - When the message was *also* truncated, prefer the recorded
+      //     `truncated.originalBytes` so the stub reflects the *raw*
+      //     payload size (UI / debug tooltips show "100K original" even
+      //     after compactedAt swap). `msg.content.length` would only
+      //     equal the in-memory raw length pre-stub — once another
+      //     serialization cycle has run, that length is the stub's, not
+      //     the raw's. The `serializedStub` guard above ensures we never
+      //     reach this branch a second time for the same message, but
+      //     pulling from `truncated.originalBytes` is the more honest
+      //     value contractually.
+      //   - When only `compactedAt` is set (no truncated meta), the
+      //     pre-PR behaviour is preserved: use the in-memory length.
       const stubContent =
         msg.meta.compactedAt !== undefined
           ? buildToolResultStub(msg.toolName, msg.meta.truncated?.originalBytes ?? msg.content.length)
