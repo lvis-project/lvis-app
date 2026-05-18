@@ -79,7 +79,36 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     const newAllowPrivate =
       settingsService.get("marketplace").realCloudAllowPrivateNetwork ?? false;
     if (prevBaseUrl !== newBaseUrl || prevActiveLlmIdentity !== newActiveLlmIdentity) {
-      deps.rewireReviewerAgent?.();
+      try {
+        deps.rewireReviewerAgent?.();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        try {
+          await settingsService.patch({ llm: prevLlm });
+        } catch (rollbackErr) {
+          const rollbackMessage =
+            rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr);
+          return {
+            ok: false,
+            error: "reviewer-rewire-failed",
+            message: `${message}; rollback failed: ${rollbackMessage}`,
+          };
+        }
+        try {
+          deps.rewireReviewerAgent?.();
+        } catch {
+          // The active LLM settings have been rolled back. Keep the IPC error
+          // focused on the original failing rewire; a second failure leaves the
+          // app on the same fail-closed reviewer path it had before the patch.
+        }
+        if (prevAllowPrivate !== newAllowPrivate) {
+          deps.refreshMarketplaceFetcherConfig?.();
+        }
+        conversationLoop.refreshProvider();
+        deps.refreshActiveLlmWildcard?.();
+        broadcastSettingsSnapshot(deps);
+        return { ok: false, error: "reviewer-rewire-failed", message };
+      }
     }
     if (prevAllowPrivate !== newAllowPrivate) {
       deps.refreshMarketplaceFetcherConfig?.();

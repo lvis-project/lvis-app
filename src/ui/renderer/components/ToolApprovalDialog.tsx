@@ -58,7 +58,8 @@ export function ToolApprovalDialog({
   const [scopeChoice, setScopeChoice] = useState<UserApprovalScope>("session");
   const nlInputRef = useRef<HTMLInputElement>(null);
   const suggestedPurpose =
-    request?.approvalPurpose?.confidence === "sufficient"
+    request?.approvalPurpose?.source === "conversation" &&
+    request.approvalPurpose.confidence === "sufficient"
       ? request.approvalPurpose.text.trim()
       : "";
 
