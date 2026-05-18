@@ -64,6 +64,29 @@ export interface MessageMeta {
    */
   serializedStub?: boolean;
   /**
+   * Tool-result generic size cap marker (Issue #902).
+   *
+   * Set by `ConversationHistory.append`/`restore` on tool_result messages
+   * whose raw content exceeds `MAX_TOOL_RESULT_LINES` or
+   * `MAX_TOOL_RESULT_TOKENS` (shared/tool-result-trim.ts). The in-memory
+   * `content` already holds the truncated head (verbatim safe to send to
+   * the model); this field records the original size so wire/disk
+   * serialization (`wire-serialize.ts`) can substitute a stub form and
+   * the UI can show "truncated (N lines / M tokens)".
+   *
+   * Why a separate marker from `compactedAt`: compactedAt means "the LLM
+   * summarized this turn"; truncated means "host enforced a per-result
+   * size cap because a single tool returned an outsized payload that
+   * would blow the next-turn TPM/context window". Different lifecycle,
+   * different recovery semantics.
+   */
+  truncated?: {
+    originalLines: number;
+    originalTokens: number;
+    originalBytes: number;
+    trimmedAt: string;
+  };
+  /**
    * Per-turn role prompt metadata selected by the user for this user message.
    * Stored so retry/edit-resend can replay the same system-prompt role without
    * embedding role instructions into visible user text.
