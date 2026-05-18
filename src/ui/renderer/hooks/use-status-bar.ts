@@ -6,6 +6,7 @@ import { useStatusBarNotifications } from "./status-bar/use-status-bar-notificat
 import { useStatusBarInstall } from "./status-bar/use-status-bar-install.js";
 import { useStatusBarRuntime } from "./status-bar/use-status-bar-runtime.js";
 import { useStatusBarMarketplace } from "./status-bar/use-status-bar-marketplace.js";
+import { useStatusBarOs } from "./status-bar/use-status-bar-os.js";
 
 // Re-export shared types so existing call sites (App.tsx, StatusBar.tsx, tests)
 // continue to import from this module without changes.
@@ -118,6 +119,7 @@ export function useStatusBar(opts: UseStatusBarOptions) {
   useStatusBarInstall({ api, pushToast });
   useStatusBarRuntime({ api, upsertPersistent });
   useStatusBarMarketplace({ api, upsertPersistent, removePersistent });
+  useStatusBarOs({ api, upsertPersistent });
 
   return {
     persistent,
