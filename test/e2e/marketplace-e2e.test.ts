@@ -46,6 +46,8 @@ function buildPluginZip(slug: string, version: string): Buffer {
     installPolicy: "user",
     description: "M4 e2e test plugin",
     publisher: "lvis-community",
+    // SDK v5.13 manifest schema required: id, name, version, entry, tools, description.
+    tools: [],
   };
   zip.addFile("plugin.json", Buffer.from(JSON.stringify(pluginJson)));
   // A trivial smoke handler that the assertion below exec()s indirectly by
