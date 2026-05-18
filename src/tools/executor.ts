@@ -139,8 +139,7 @@ function resolveInvocationCategory(
   tool: import("./base.js").Tool,
   finalInput: Record<string, unknown>,
 ): ToolCategory {
-  void finalInput;
-  return tool.category;
+  return tool.categoryForInput?.(finalInput) ?? tool.category;
 }
 
 function shellPathPolicyViolation(

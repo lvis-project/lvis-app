@@ -12,7 +12,8 @@
  *      non-http(s) schemes, missing hosts, and embedded credentials.
  *   2. {@link ensurePublicHttpUrl} — async DNS-aware check. Resolves
  *      the host and rejects any result that lands on a private /
- *      loopback / link-local / ULA address (IPv4 + IPv6 + IPv4-mapped).
+ *      loopback / link-local / ULA address (IPv4 + IPv6 + IPv4-mapped),
+ *      unless the caller explicitly opts into private network access.
  *   3. {@link fetchPublicHttpResponse} — drop-in replacement for
  *      `fetch` that validates every hop of a redirect chain (defense
  *      against DNS rebinding + CRLF location injection) and enforces
@@ -31,14 +32,32 @@ export class NetworkGuardError extends Error {
   }
 }
 
+export interface NetworkGuardOptions {
+  /**
+   * Allows RFC1918 IPv4 and IPv6 ULA addresses after an upstream approval
+   * gate has authorized the request. Loopback, link-local, metadata, CGNAT,
+   * and 0.0.0.0/8 remain blocked.
+   */
+  allowPrivateNetworks?: boolean;
+}
+
+type NetworkGuardFetchInit = RequestInit & NetworkGuardOptions & {
+  maxRedirects?: number;
+  timeoutMs?: number;
+};
+
 // ─── Private / reserved IPv4 ranges (RFC 1918, 5735, 6598, 3927) ────
-const PRIVATE_IPV4_RANGES: Array<[bigint, bigint]> = [
+const RFC1918_IPV4_RANGES: Array<[bigint, bigint]> = [
   // 10.0.0.0/8
   [ipv4ToBigInt("10.0.0.0"), ipv4ToBigInt("10.255.255.255")],
   // 172.16.0.0/12
   [ipv4ToBigInt("172.16.0.0"), ipv4ToBigInt("172.31.255.255")],
   // 192.168.0.0/16
   [ipv4ToBigInt("192.168.0.0"), ipv4ToBigInt("192.168.255.255")],
+];
+
+const PRIVATE_IPV4_RANGES: Array<[bigint, bigint]> = [
+  ...RFC1918_IPV4_RANGES,
   // 127.0.0.0/8 (loopback)
   [ipv4ToBigInt("127.0.0.0"), ipv4ToBigInt("127.255.255.255")],
   // 169.254.0.0/16 (link-local, AWS metadata 169.254.169.254)
@@ -83,15 +102,19 @@ export function validateHttpUrl(rawUrl: string): URL {
  *
  * This is the primary SSRF control: by the time a request reaches
  * {@link fetchPublicHttpResponse} we have already proven that the
- * host resolves to a public address.
+ * host resolves to a public address, or to an explicitly approved
+ * private-network address.
  */
-export async function ensurePublicHttpUrl(rawUrl: string): Promise<URL> {
+export async function ensurePublicHttpUrl(
+  rawUrl: string,
+  options: NetworkGuardOptions = {},
+): Promise<URL> {
   const parsed = validateHttpUrl(rawUrl);
   const addresses = await resolveHostAddresses(parsed.hostname);
   if (addresses.length === 0) {
     throw new NetworkGuardError(`target host did not resolve: ${parsed.hostname}`);
   }
-  const blocked = addresses.filter((addr) => !isPublicAddress(addr));
+  const blocked = addresses.filter((addr) => !isAllowedAddress(addr, options));
   if (blocked.length > 0) {
     const rendered =
       blocked.slice(0, 3).join(", ") + (blocked.length > 3 ? ", ..." : "");
@@ -116,9 +139,10 @@ export async function ensurePublicHttpUrl(rawUrl: string): Promise<URL> {
  */
 export async function fetchPublicHttpResponse(
   rawUrl: string,
-  init: RequestInit & { maxRedirects?: number; timeoutMs?: number } = {},
+  init: NetworkGuardFetchInit = {},
 ): Promise<Response> {
   const {
+    allowPrivateNetworks = false,
     maxRedirects = 5,
     timeoutMs = TOOL_TIMEOUT_POLICY.networkFetchDefaultMs,
     signal: externalSignal,
@@ -127,7 +151,7 @@ export async function fetchPublicHttpResponse(
   let currentUrl = rawUrl;
 
   for (let hop = 0; hop <= maxRedirects; hop++) {
-    await ensurePublicHttpUrl(currentUrl);
+    await ensurePublicHttpUrl(currentUrl, { allowPrivateNetworks });
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     // Forward aborts from the caller-supplied signal so callers can cancel
@@ -232,6 +256,30 @@ function isPublicAddress(address: string): boolean {
   }
   // Unknown address family → fail closed.
   return false;
+}
+
+function isAllowedAddress(address: string, options: NetworkGuardOptions): boolean {
+  if (isPublicAddress(address)) return true;
+  if (options.allowPrivateNetworks !== true) return false;
+  return isPrivateNetworkAddress(address);
+}
+
+function isPrivateNetworkAddress(address: string): boolean {
+  if (isIPv4(address)) return isRfc1918Ipv4(address);
+  if (isIPv6(address)) {
+    const lower = address.toLowerCase();
+    if (lower.startsWith("::ffff:")) {
+      const ipv4 = ipv4FromMappedIpv6(lower);
+      return ipv4 !== null && isRfc1918Ipv4(ipv4);
+    }
+    return lower.startsWith("fc") || lower.startsWith("fd");
+  }
+  return false;
+}
+
+function isRfc1918Ipv4(address: string): boolean {
+  const num = ipv4ToBigInt(address);
+  return RFC1918_IPV4_RANGES.some(([start, end]) => num >= start && num <= end);
 }
 
 /**
