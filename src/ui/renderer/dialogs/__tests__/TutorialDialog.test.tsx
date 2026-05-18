@@ -133,4 +133,39 @@ describe("TutorialDialog (Tutorial-D)", () => {
     render(<TutorialDialog open={false} onOpenChange={() => {}} api={api} />);
     expect(screen.queryByTestId("tutorial-dialog")).toBeNull();
   });
+
+  // F5 — `prefers-reduced-motion: reduce` swaps the rotate(...) deck
+  // transforms for opacity-only positioning so vestibular-sensitive
+  // users do not see the cards tilt. The `data-reduce-motion="true"`
+  // marker on the active deck root makes the swap inspectable from the
+  // DOM without re-reading inline styles.
+  it("uses instant card swap when prefers-reduced-motion is set (F5)", () => {
+    const originalMatchMedia = window.matchMedia;
+    // @ts-expect-error — jsdom polyfill from setup.ts is mutable.
+    window.matchMedia = (query: string) => ({
+      matches: query.includes("prefers-reduced-motion: reduce"),
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+      media: query,
+    });
+    try {
+      const api = makeApi();
+      render(<TutorialDialog open onOpenChange={() => {}} api={api} />);
+      const active = screen.getByTestId("tutorial-dialog:active");
+      expect(active.getAttribute("data-reduce-motion")).toBe("true");
+      // The decorative back/middle cards drop their `rotate(...)`
+      // transform under reduced motion. We assert via the sibling
+      // `aria-hidden` decorative divs inside the active deck.
+      const decoratives = active.querySelectorAll('[aria-hidden="true"]');
+      for (const node of Array.from(decoratives)) {
+        const styleTransform = (node as HTMLElement).style.transform || "";
+        expect(styleTransform).not.toContain("rotate");
+      }
+    } finally {
+      window.matchMedia = originalMatchMedia;
+    }
+  });
 });

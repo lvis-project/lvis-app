@@ -583,6 +583,14 @@ export function App() {
   // the user has not previously dismissed onboarding. Both choices flip
   // `features.onboardingCompleted = true` so subsequent boots skip the
   // dialog even if the user closes Settings without saving a key.
+  //
+  // Tutorial-A fix (F1): when no vendor key is persisted, surface the
+  // LoginModal (L-X1/L-X2 demo onboarding) before the MemorySeed wizard.
+  // The LoginModal handles credential issue → demo key auto-provisioning
+  // and only then does MemorySeed open via onSuccess → the flow is:
+  //   first-boot → LoginModal → onSuccess → MemorySeedDialog → tour.start
+  // `features.onboardingCompleted` still gates re-entry so an existing
+  // install with a key but cleared onboarding flag does not re-prompt.
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -598,6 +606,12 @@ export function App() {
         // #893 — top-level login wraps vendor selection; the LoginModal
         // backend decides the vendor (LVIS_DEMO_VENDOR), so we no longer
         // need to seed an onboarding vendor here.
+        //
+        // F1 — open the LoginModal first; on success it triggers the
+        // MemorySeedDialog. If the user dismisses LoginModal without
+        // logging in, MemorySeed still opens (legacy path) so existing
+        // BYOK users are not blocked behind the demo gate.
+        setAppLoginOpen(true);
         setOnboardingOpen(true);
       } catch {
         // Probe failure is non-fatal — chat still works once a key exists.
@@ -647,6 +661,25 @@ export function App() {
   // detached panes — so the SpotlightTour component (always mounted in
   // App.tsx) flips on. Guarded against open dialogs so the shortcut never
   // races a modal interaction.
+  //
+  // F4 — demo↔tour mutex: when the Live Auto-play demo is mid-turn the
+  // shortcut is a no-op. The Spotlight engine would otherwise paint a
+  // backdrop on top of the demo overlay, breaking the scripted flow.
+  // We capture the demo turn in a ref so the handler stays stable, and
+  // mirror the flag onto `document.body[data-demo-active]` so the
+  // SpotlightTour component (which listens to IPC `tour:start` broadcasts
+  // independent of this shortcut) can also self-guard.
+  const demoActiveRef = useRef<boolean>(false);
+  useEffect(() => {
+    demoActiveRef.current = demoAutoplay.turn !== null;
+    if (typeof document !== "undefined") {
+      if (demoActiveRef.current) {
+        document.body.setAttribute("data-demo-active", "true");
+      } else {
+        document.body.removeAttribute("data-demo-active");
+      }
+    }
+  }, [demoAutoplay.turn]);
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key !== "?" && e.key !== "/") return;
@@ -658,6 +691,13 @@ export function App() {
           '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]',
         )
       ) {
+        return;
+      }
+      // F4 — demo↔tour mutex: while the demo is running, swallow the
+      // help-shortcut so the Spotlight tour can't fire on top of the
+      // scripted overlay.
+      if (demoActiveRef.current) {
+        e.preventDefault();
         return;
       }
       e.preventDefault();
