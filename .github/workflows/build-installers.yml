@@ -66,6 +66,7 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
       - name: Build installer
+        id: build
         shell: bash
         run: |
           set -euo pipefail
@@ -76,10 +77,15 @@ jobs:
           #      otherwise electron-builder's codesign.js resolves empty CSC_LINK as cwd and
           #      throws "<workspace> not a file"). Mac uses CSC_LINK; Win uses WIN_CSC_LINK.
           #      Linux doesn't sign so this guard skips noop on linux target.
+          # When skipping, emit `skip_sign=true` step output so the smoke gate below can
+          # also skip — unsigned mac app can't pass Gatekeeper-driven smoke launch.
           if [ "${{ github.event_name == 'push' && 'false' || inputs.skip_code_sign }}" = "true" ] \
              || { [ "${{ matrix.target }}" = "mac" ] && [ -z "${CSC_LINK:-}" ]; } \
              || { [ "${{ matrix.target }}" = "win" ] && [ -z "${WIN_CSC_LINK:-}" ]; }; then
             args+=("--skip-code-sign")
+            echo "skip_sign=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip_sign=false" >> "$GITHUB_OUTPUT"
           fi
           args+=("--skip-native-rebuild")
           # On tag push (release), tell electron-builder to publish artifacts
@@ -103,16 +109,18 @@ jobs:
           WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
       - name: Smoke launch packaged app
-        # macOS Gatekeeper blocks launch of unsigned .app bundles. When
-        # the matrix entry is mac AND signing was explicitly skipped via
-        # workflow_dispatch (inputs.skip_code_sign == 'true'), the smoke
-        # step would always fail at app boot — making the entire job fail
-        # and the Upload installers step skip, hiding the perfectly-good
-        # unsigned dmg/zip artifacts. Skip smoke for that one combination
-        # so the artifacts upload and can be inspected / hand-attached to
-        # a release. All other combinations (any target on tag push,
-        # mac+signed on dispatch, linux/win always) still run smoke.
-        if: matrix.target != 'mac' || inputs.skip_code_sign != 'true'
+        # macOS Gatekeeper blocks launch of unsigned .app bundles. When the
+        # matrix entry is mac AND signing was skipped (either via
+        # workflow_dispatch `skip_code_sign=true` OR via graceful-degradation
+        # when `CSC_LINK` is empty on tag-push), the smoke step would always
+        # fail at app boot — making the entire job fail and the Upload
+        # installers step skip, hiding the perfectly-good unsigned dmg/zip
+        # artifacts. Skip smoke for that combination so the artifacts upload
+        # and can be inspected / hand-attached to a release. All other
+        # combinations (mac+signed, linux/win always) still run smoke.
+        # `steps.build.outputs.skip_sign` is set by the Build installer step
+        # above and is the SOT for whether code-sign was applied.
+        if: matrix.target != 'mac' || steps.build.outputs.skip_sign != 'true'
         shell: bash
         run: |
           set -euo pipefail
