@@ -3,6 +3,7 @@ import { test as base, expect } from '@playwright/test';
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
+import { createHash, generateKeyPairSync, sign } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
 import {
@@ -19,6 +20,140 @@ const E2E_PLUGIN_REPOS = [
   'lvis-plugin-work-proactive',
   'lvis-plugin-agent-hub',
 ] as const;
+
+const E2E_RESOLVE_DEMO_KEY_TOOL = 'meeting_resolve_demo_key';
+
+type LaunchEnv = Record<string, string | undefined>;
+
+type E2eManifest = {
+  id?: unknown;
+  version?: unknown;
+  pluginAccess?: unknown;
+  tools?: unknown;
+  uiCallable?: unknown;
+  hostSecrets?: { read?: unknown };
+  toolSchemas?: Record<string, unknown>;
+  ui?: unknown;
+};
+
+function canonicalJson(value: unknown): string {
+  if (value === undefined) return 'null';
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value) ?? 'null';
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => canonicalJson(item)).join(',')}]`;
+  }
+  const obj = value as Record<string, unknown>;
+  return `{${Object.keys(obj)
+    .filter((key) => obj[key] !== undefined)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${canonicalJson(obj[key])}`)
+    .join(',')}}`;
+}
+
+function addUniqueString(list: unknown, value: string): string[] {
+  const next = Array.isArray(list) ? list.filter((item): item is string => typeof item === 'string') : [];
+  if (!next.includes(value)) next.push(value);
+  return next;
+}
+
+function prepareE2eManifest(manifest: E2eManifest, enableDemoKeyProbe: boolean): E2eManifest {
+  if (!enableDemoKeyProbe || manifest.id !== 'meeting') return manifest;
+
+  const hostSecretReads = addUniqueString(manifest.hostSecrets?.read, 'llm.apiKey.openai');
+  return {
+    ...manifest,
+    hostSecrets: { read: hostSecretReads },
+    tools: addUniqueString(manifest.tools, E2E_RESOLVE_DEMO_KEY_TOOL),
+    uiCallable: addUniqueString(manifest.uiCallable, E2E_RESOLVE_DEMO_KEY_TOOL),
+    toolSchemas: {
+      ...(manifest.toolSchemas ?? {}),
+      [E2E_RESOLVE_DEMO_KEY_TOOL]: {
+        description: 'E2E-only probe that resolves the host-managed OpenAI key through hostApi.resolveApiKey.',
+        category: 'read',
+        inputSchema: {
+          type: 'object',
+          properties: {},
+          additionalProperties: false,
+        },
+      },
+    },
+  };
+}
+
+function buildHostPluginStub(manifestId: string, enableDemoKeyProbe: boolean): string {
+  if (!enableDemoKeyProbe || manifestId !== 'meeting') {
+    return `export default function createPlugin() { return { handlers: {}, start() {}, stop() {} }; }\n`;
+  }
+
+  return `export default function createPlugin(context) {
+  return {
+    handlers: {
+      ${E2E_RESOLVE_DEMO_KEY_TOOL}: async () => {
+        const resolver = context.hostApi && context.hostApi.resolveApiKey;
+        if (typeof resolver !== "function") {
+          return { ok: false, reason: "missing-resolveApiKey" };
+        }
+        const result = await resolver({ purpose: "stt", vendor: "openai" });
+        if (!result.ok) return result;
+        try {
+          return { ok: true, vendor: result.vendor, bearer: result.bearer() };
+        } finally {
+          result.release();
+        }
+      }
+    },
+    start() {},
+    stop() {}
+  };
+}\n`;
+}
+
+function buildSignedWhitelistEnv(
+  lvisHomeForTest: string,
+  grants: Record<string, { read: string[]; manifestSha256: string }>,
+): LaunchEnv {
+  if (Object.keys(grants).length === 0) return {};
+  const { publicKey, privateKey } = generateKeyPairSync('ed25519');
+  const rawPublicKey = publicKey.export({ type: 'spki', format: 'der' }).slice(-32);
+  const doc = {
+    version: 1,
+    schemaVersion: 1,
+    issuedAt: '2026-05-17T00:00:00.000Z',
+    expiresAt: '2030-01-01T00:00:00.000Z',
+    pluginGrants: Object.fromEntries(
+      Object.entries(grants).map(([pluginId, grant]) => [
+        pluginId,
+        {
+          publisher: 'e2e',
+          hostSecrets: { read: grant.read },
+          approvedManifestSha256: grant.manifestSha256,
+        },
+      ]),
+    ),
+  };
+  const body = JSON.stringify(doc);
+  const envelope = {
+    version: 1,
+    iat: Math.floor(Date.now() / 1000),
+    artifact_sha256: createHash('sha256').update(Buffer.from(body, 'utf-8')).digest('hex'),
+    signatures: [
+      {
+        key_id: 'whitelist-v1',
+        alg: 'ed25519',
+        sig: sign(null, Buffer.from(body, 'utf-8'), privateKey).toString('base64'),
+      },
+    ],
+  };
+  const whitelistPath = path.join(lvisHomeForTest, 'e2e-marketplace-whitelist.demo.json');
+  fs.writeFileSync(whitelistPath, body, 'utf-8');
+  fs.writeFileSync(`${whitelistPath}.sig`, JSON.stringify(envelope), 'utf-8');
+  return {
+    LVIS_E2E_WHITELIST_SNAPSHOT_PATH: whitelistPath,
+    LVIS_E2E_WHITELIST_PUBLIC_KEY: rawPublicKey.toString('base64'),
+  };
+}
 
 /** Kill any processes occupying the local-indexer worker port so E2E runs cleanly. */
 function killLocalIndexerWorkers(): void {
@@ -39,11 +174,16 @@ function resolveE2ePluginSourceRoot(repoRoot: string): string {
     : path.resolve(repoRoot, '..');
 }
 
-async function seedE2ePlugins(repoRoot: string, lvisHomeForTest: string): Promise<void> {
+async function seedE2ePlugins(
+  repoRoot: string,
+  lvisHomeForTest: string,
+  enableDemoKeyProbe: boolean,
+): Promise<LaunchEnv> {
   const sourceRoot = resolveE2ePluginSourceRoot(repoRoot);
   const pluginsRoot = path.join(lvisHomeForTest, 'plugins');
   const cacheRoot = path.join(pluginsRoot, '.cache');
   fs.mkdirSync(pluginsRoot, { recursive: true, mode: 0o700 });
+  const whitelistGrants: Record<string, { read: string[]; manifestSha256: string }> = {};
 
   const entries: Array<{
     id: string;
@@ -62,19 +202,28 @@ async function seedE2ePlugins(repoRoot: string, lvisHomeForTest: string): Promis
     }
 
     const sourceManifestText = fs.readFileSync(sourceManifest, 'utf-8');
-    const manifest = JSON.parse(sourceManifestText) as {
-      id?: unknown;
-      version?: unknown;
-      pluginAccess?: unknown;
-    };
+    const manifest = prepareE2eManifest(
+      JSON.parse(sourceManifestText) as E2eManifest,
+      enableDemoKeyProbe,
+    );
     if (typeof manifest.id !== 'string' || typeof manifest.version !== 'string') {
       throw new Error(`[e2e] invalid plugin manifest: ${sourceManifest}`);
+    }
+    const manifestText = `${JSON.stringify(manifest, null, 2)}\n`;
+    const hostSecretReads = Array.isArray(manifest.hostSecrets?.read)
+      ? manifest.hostSecrets.read.filter((item): item is string => typeof item === 'string')
+      : [];
+    if (hostSecretReads.length > 0) {
+      whitelistGrants[manifest.id] = {
+        read: hostSecretReads,
+        manifestSha256: createHash('sha256').update(canonicalJson(manifest)).digest('hex'),
+      };
     }
 
     const pluginDir = path.join(pluginsRoot, manifest.id);
     fs.rmSync(pluginDir, { recursive: true, force: true });
     fs.mkdirSync(pluginDir, { recursive: true, mode: 0o700 });
-    fs.writeFileSync(path.join(pluginDir, 'plugin.json'), sourceManifestText, 'utf-8');
+    fs.writeFileSync(path.join(pluginDir, 'plugin.json'), manifestText, 'utf-8');
 
     const targetDist = path.join(pluginDir, 'dist');
     if (manifest.id === 'agent-hub') {
@@ -94,7 +243,7 @@ async function seedE2ePlugins(repoRoot: string, lvisHomeForTest: string): Promis
       fs.mkdirSync(targetDist, { recursive: true, mode: 0o700 });
       fs.writeFileSync(
         path.join(targetDist, 'hostPlugin.js'),
-        `export default function createPlugin() { return { handlers: {}, start() {}, stop() {} }; }\n`,
+        buildHostPluginStub(manifest.id, enableDemoKeyProbe),
         'utf-8',
       );
       for (const ui of uiEntries) {
@@ -140,6 +289,8 @@ async function seedE2ePlugins(repoRoot: string, lvisHomeForTest: string): Promis
     `${JSON.stringify({ version: 1, plugins: entries }, null, 2)}\n`,
     'utf-8',
   );
+
+  return buildSignedWhitelistEnv(lvisHomeForTest, whitelistGrants);
 }
 
 /**
@@ -151,8 +302,13 @@ export type ElectronFixtures = {
   mainWindow: Page;
   userDataDir: string;
 };
+export type ElectronOptions = {
+  launchEnv: LaunchEnv;
+};
 
-export const test = base.extend<ElectronFixtures>({
+export const test = base.extend<ElectronFixtures & ElectronOptions>({
+  launchEnv: [{}, { option: true }],
+
   userDataDir: async ({}, use) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lvis-e2e-'));
     await use(dir);
@@ -163,7 +319,7 @@ export const test = base.extend<ElectronFixtures>({
     }
   },
 
-  app: async ({ userDataDir }, use) => {
+  app: async ({ userDataDir, launchEnv }, use) => {
     const repoRoot = path.resolve(HERE, '../../..');
     const mainEntry = path.join(repoRoot, 'dist/src/main/main.js');
     if (!fs.existsSync(mainEntry)) {
@@ -179,11 +335,17 @@ export const test = base.extend<ElectronFixtures>({
        bootstrap dies). Resolved via the shared `lvisHome()` helper. */
     const lvisHomeForTest = path.join(userDataDir, 'lvis-state');
     fs.mkdirSync(lvisHomeForTest, { recursive: true, mode: 0o700 });
-    await seedE2ePlugins(repoRoot, lvisHomeForTest);
+    const e2eWhitelistEnv = await seedE2ePlugins(
+      repoRoot,
+      lvisHomeForTest,
+      launchEnv.LVIS_E2E_RESOLVE_DEMO_KEY_PROBE === '1',
+    );
     const app = await electron.launch({
       args: [mainEntry, `--user-data-dir=${userDataDir}`, '--no-sandbox'],
       env: {
         ...process.env,
+        ...launchEnv,
+        ...e2eWhitelistEnv,
         LVIS_DEV: '1',
         LVIS_E2E: '1',
         LVIS_HOME: lvisHomeForTest,
