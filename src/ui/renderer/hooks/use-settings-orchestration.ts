@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AppSettings, LvisApi } from "../types.js";
+import type { AppSettings, DeepPartial, LvisApi } from "../types.js";
 import { VENDORS } from "../constants.js";
 import type { FallbackEntry } from "../tabs/LlmTab.js";
 
@@ -75,6 +75,12 @@ export interface SettingsOrchestrationState {
   lastSaveError: { tab: string; message: string } | null;
   /** Programmatic clear — used when the user opens the dialog fresh. */
   clearLastSaveError: () => void;
+  /**
+   * Rehydrate the in-memory LLM draft from a freshly-read settings snapshot.
+   * Used by host-managed login so the renderer cache and visible fields move
+   * together after the backend writes provider/model/key state.
+   */
+  hydrateLlmFromSettings: (settings: AppSettings) => void;
   /**
    * Persist current draft for the named tab. Errors surface via
    * `lastSaveError`, not via promise rejection (the debounced caller
@@ -175,6 +181,15 @@ export function useSettingsOrchestration(
     return api.onSettingsUpdated((next) => {
       setSettingsSnapshot(next);
       setIdlePreferenceRefresh(next.features?.idlePreferenceRefresh ?? false);
+      if (next.llm.authMode === "login") {
+        const nextVendor = next.llm.provider;
+        const block = next.llm.vendors[nextVendor];
+        hydratedVendorRef.current = nextVendor;
+        setVendor(nextVendor);
+        setAuthMode("login");
+        hydrateVendorBlock(block);
+        void api.hasApiKey(nextVendor).then((k) => setHasKey(k));
+      }
     });
   }, [api]);
 
@@ -203,6 +218,18 @@ export function useSettingsOrchestration(
     // #893 — authMode is no longer per-vendor; the top-level value is set by
     // the open-time snapshot read (see effect above) and survives vendor
     // switches.
+  }
+
+  function hydrateLlmFromSettings(next: AppSettings): void {
+    const nextVendor = next.llm.provider;
+    const block = next.llm.vendors[nextVendor];
+    hydratedVendorRef.current = nextVendor;
+    setSettingsSnapshot(next);
+    setVendor(nextVendor);
+    setAuthMode(next.llm.authMode === "login" ? "login" : "manual");
+    hydrateVendorBlock(block);
+    setStreamSmoothing(next.llm.streamSmoothing);
+    setFallbackChain(next.llm.fallbackChain.map((e) => ({ provider: e.provider, model: e.model })));
   }
 
   // Re-check web key when webProvider changes
@@ -281,23 +308,29 @@ export function useSettingsOrchestration(
           enableThinking,
           thinkingBudgetTokens: thinkingBudget,
         };
+        const llmPatch: DeepPartial<AppSettings["llm"]> = {
+          // #893 — top-level authMode persisted alongside provider.
+          authMode,
+          provider: vendor,
+          streamSmoothing,
+          fallbackChain: fallbackChain.filter((e) => e.provider && e.model).map((e) => ({ provider: e.provider, model: e.model })),
+        };
+        if (authMode !== "login") {
+          // In login mode, provider-specific fields are host-managed by the
+          // login IPC. Persisting the hidden manual draft here can race the
+          // login response and overwrite demo/model/baseUrl with stale values.
+          llmPatch.vendors = { [vendor]: activeBlock };
+        }
         await api.updateSettings({
-          llm: {
-            // #893 — top-level authMode persisted alongside provider.
-            authMode,
-            provider: vendor as any,
-            vendors: { [vendor]: activeBlock } as any,
-            streamSmoothing,
-            fallbackChain: fallbackChain.filter((e) => e.provider && e.model).map((e) => ({ provider: e.provider, model: e.model })),
-          },
-          webSearch: { provider: webProvider as any },
+          llm: llmPatch,
+          webSearch: { provider: webProvider },
           chat: { autoCompact },
           privacy: { piiRedactEnabled },
           marketplace: {
             realCloudBaseUrl: marketplaceBaseUrl.trim() || undefined,
             realCloudAllowPrivateNetwork: marketplaceAllowPrivateNetwork,
           },
-        } as any);
+        });
       }
       if (tab !== "permissions") onSaved();
       setLastSaveError(null);
@@ -348,6 +381,7 @@ export function useSettingsOrchestration(
   return {
     lastSaveError,
     clearLastSaveError,
+    hydrateLlmFromSettings,
     vendor, setVendor,
     keyInput, setKeyInput,
     model, setModel,

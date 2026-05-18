@@ -356,7 +356,10 @@ export function SettingsContent({
               setKeyInput={s.setKeyInput}
               authMode={s.authMode}
               setAuthMode={s.setAuthMode}
-              onOpenLogin={() => setLoginOpen(true)}
+              onOpenLogin={() => {
+                llmSave.cancel();
+                setLoginOpen(true);
+              }}
               model={s.model}
               setModel={s.setModel}
               enableThinking={s.enableThinking}
@@ -454,13 +457,23 @@ export function SettingsContent({
       api={api}
       open={loginOpen}
       onOpenChange={setLoginOpen}
-      onSuccess={(activatedVendor) => {
+      onSuccess={(activatedVendor, result) => {
+        llmSave.cancel();
         // #893 — backend decides vendor; mirror it back into the dialog
         // state so the user lands on the now-active vendor without a
         // settings reload.
         s.setVendor(activatedVendor);
         s.setAuthMode("login");
         s.setHasKey(true);
+        if (result.model !== undefined) s.setModel(result.model);
+        if (result.baseUrl !== undefined) s.setBaseUrl(result.baseUrl);
+        if (result.vertexProject !== undefined) s.setVertexProject(result.vertexProject);
+        if (result.vertexLocation !== undefined) s.setVertexLocation(result.vertexLocation);
+        void api.getSettings().then((settings) => {
+          const provider = settings.llm.provider;
+          s.hydrateLlmFromSettings(settings);
+          void api.hasApiKey(provider).then((hasKey) => s.setHasKey(hasKey));
+        });
         onSaved();
       }}
     />
