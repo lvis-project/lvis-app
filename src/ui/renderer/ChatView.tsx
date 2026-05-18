@@ -43,6 +43,7 @@ import { useChatContext, type ChatContextValue } from "./context/ChatContext.js"
 import { InputActionBar } from "./components/InputActionBar.js";
 import { Composer, type ComposerHandle } from "./components/Composer.js";
 import { useSuggestedReplies } from "./hooks/use-suggested-replies.js";
+import { computeComposerPlaceholder } from "./utils/composer-placeholder.js";
 import { DeferredApprovalChip } from "./components/DeferredApprovalChip.js";
 import {
   ATTACH_MAX_COUNT,
@@ -1513,13 +1514,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
               !question.trimStart().startsWith("/")
             }
             onWarning={(msg) => console.warn(msg)}
-            placeholder={
-              hasApiKey === false
-                ? "API 키를 먼저 설정해 주세요..."
-                : streaming
-                  ? "메시지 큐에 추가됩니다 (즉시 인터럽트는 ⌘⏎)"
-                  : "질문 입력 (Enter 전송 · Cmd/Ctrl+V 첨부) · /command 사용 가능"
-            }
+            placeholder={computeComposerPlaceholder({ hasApiKey, streaming, suggestedReplies })}
           />
           <BottomActionRow
             tokenSlot={
