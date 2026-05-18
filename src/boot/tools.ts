@@ -36,6 +36,31 @@ import { fetchPublicHttpResponse } from "../core/network-guard.js";
 import { createLogger } from "../lib/logger.js";
 const log = createLogger("lvis");
 
+function webFetchPrivateNetworkApprovalCacheKey(input: unknown): string | undefined {
+  const args = input && typeof input === "object"
+    ? input as Record<string, unknown>
+    : {};
+  if (args.allowPrivateNetwork !== true || typeof args.url !== "string") {
+    return undefined;
+  }
+  try {
+    const parsed = new URL(args.url);
+    if ((parsed.protocol !== "http:" && parsed.protocol !== "https:") || !parsed.host) {
+      return undefined;
+    }
+    return `private-network:${parsed.protocol}//${parsed.host.toLowerCase()}`;
+  } catch {
+    return undefined;
+  }
+}
+
+function webFetchCategoryForInput(input: unknown): "read" | "network" {
+  const args = input && typeof input === "object"
+    ? input as Record<string, unknown>
+    : {};
+  return args.allowPrivateNetwork === true ? "network" : "read";
+}
+
 export function registerRequestPluginMetaTool(toolRegistry: ToolRegistry): void {
   // Phase 1.5 Option C — request_plugin 메타 툴 (항상 활성, scope filter 통과)
   // execute는 no-op — 실제 scope 확장은 ConversationLoop.queryLoop이 가로챈다.
@@ -309,20 +334,31 @@ export function registerBuiltinTools(
       description: "특정 URL의 웹 페이지 내용을 읽어 텍스트로 변환합니다.",
       source: "builtin",
       category: "read",
+      categoryForInput: webFetchCategoryForInput,
       isReadOnly: () => true,
+      approvalCacheKey: webFetchPrivateNetworkApprovalCacheKey,
       jsonSchema: {
         type: "object",
-        properties: { url: { type: "string", description: "읽어올 웹 페이지 URL" } },
+        properties: {
+          url: { type: "string", description: "읽어올 웹 페이지 URL" },
+          allowPrivateNetwork: {
+            type: "boolean",
+            description:
+              "사용자 승인 후 RFC1918/ULA 사설망 주소 접근을 허용합니다. loopback/link-local/metadata 주소는 계속 차단됩니다.",
+          },
+        },
         required: ["url"],
       },
       execute: async (rawInput) => {
         const args = (rawInput ?? {}) as Record<string, unknown>;
         const url = args.url as string;
+        const allowPrivateNetwork = args.allowPrivateNetwork === true;
         try {
           // SSRF guard: route through NetworkGuard so private / loopback /
           // link-local / metadata endpoints are rejected per hop (incl. redirect
           // chain) and bad schemes / embedded credentials are refused up front.
           const response = await fetchPublicHttpResponse(url, {
+            allowPrivateNetworks: allowPrivateNetwork,
             headers: { "User-Agent": "LVIS-Assistant/0.1.0" },
           });
           const html = await response.text();

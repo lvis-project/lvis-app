@@ -50,6 +50,7 @@ import { PostTurnHookChain } from "../hooks/post-turn-hook-chain.js";
 import type { ToolCallMeta } from "../tools/executor.js";
 import type { ChatInputOrigin } from "../shared/chat-origin.js";
 import { isUserKeyboardOrigin } from "../shared/chat-origin.js";
+import type { PermissionReviewEvent } from "../shared/permission-review-status.js";
 import { stripLeadingSlash } from "../shared/slash-sanitizer.js";
 import { createTracer, type ConversationTracer } from "../observability/conversation-trace.js";
 import { createLogger } from "../lib/logger.js";
@@ -76,6 +77,22 @@ function initialToolTrustOrigin(inputOrigin: ChatInputOrigin, turnInput: string)
   return "llm-tool-arg";
 }
 
+function summarizePermissionUserIntent(
+  inputOrigin: ChatInputOrigin,
+  turnInput: string,
+): string | undefined {
+  if (!isUserKeyboardOrigin(inputOrigin) && inputOrigin !== "queue-auto") {
+    return undefined;
+  }
+  const cleaned = turnInput
+    .replace(/<[^>]*>/g, " ")
+    .replace(/[\u0000-\u001f\u007f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned || cleaned.startsWith("/")) return undefined;
+  return cleaned.length > 500 ? `${cleaned.slice(0, 499)}…` : cleaned;
+}
+
 function nextToolTrustOrigin(
   current: ToolTrustOrigin,
   toolUses: readonly ToolUseBlock[],
@@ -98,6 +115,7 @@ export interface TurnCallbacks {
   onReasoningDelta?: (text: string) => void;
   onTextDelta?: (text: string) => void;
   onToolStart?: (name: string, input: Record<string, unknown>, meta: ToolCallMeta) => void;
+  onPermissionReview?: (event: PermissionReviewEvent) => void;
   onToolEnd?: (
     name: string,
     result: string,
@@ -1048,6 +1066,7 @@ export class ConversationLoop {
     const inputOrigin: ChatInputOrigin = options.inputOrigin;
     const turnInput = isUserKeyboardOrigin(inputOrigin) ? input : stripLeadingSlash(input);
     const toolTrustOrigin = initialToolTrustOrigin(inputOrigin, turnInput);
+    const permissionUserIntent = summarizePermissionUserIntent(inputOrigin, turnInput);
     this.deps.sessionTodoStore?.clearIfAllCompleted(effectiveSessionId);
 
     // §4.5.2 step 1 — REQUEST_ENTRY (main process 도달 시점)
@@ -1218,6 +1237,7 @@ export class ConversationLoop {
           spawnDepth: options?.spawnDepth,
           inputOrigin,
           toolTrustOrigin,
+          permissionUserIntent,
         },
       );
     } finally {
@@ -1453,6 +1473,7 @@ export class ConversationLoop {
       spawnDepth?: number;
       inputOrigin: ChatInputOrigin;
       toolTrustOrigin: ToolTrustOrigin;
+      permissionUserIntent?: string;
     },
   ): Promise<{ text: string; toolCalls: Array<{ name: string; input: Record<string, unknown>; result: string }>; usage?: TokenUsage; stopReason?: TurnStopReason }> {
     const llmSettings = this.deps.settingsService.get("llm");
@@ -1861,6 +1882,7 @@ export class ConversationLoop {
         {
           callbacks: {
             onToolStart: callbacks?.onToolStart,
+            onPermissionReview: callbacks?.onPermissionReview,
             onToolEnd: callbacks?.onToolEnd,
           },
           // C3(c): sub-agents pass their childSessionId so audit attribution
@@ -1885,6 +1907,7 @@ export class ConversationLoop {
             additionalDirectories: this.getTurnAdditionalDirectories(),
             getAdditionalDirectories: () => this.getTurnAdditionalDirectories(),
             trustOrigin: toolTrustOrigin,
+            ...(bounds.permissionUserIntent ? { userIntent: bounds.permissionUserIntent } : {}),
             onTurnDirectoryGrant: (path) => this.addTurnAdditionalDirectory(path),
             onSessionDirectoryGrant: (path) => this.addSessionAdditionalDirectory(path),
           },
@@ -2342,7 +2365,7 @@ export class ConversationLoop {
 /permission — 현재 권한 모드
 /permission mode <strict|default|auto|allow> --durable — 권한 모드 변경
 /permission dir <list|allow|deny> [path] — 허용 디렉터리 관리
-/permission reviewer <show|mode|provider|model|fallback> [value] — 리뷰어 설정
+/permission reviewer <show|mode|fallback|interactive> [value] — 리뷰어 설정
 /permission audit <show|verify> — 권한 감사 조회/검증
 /permission hooks <list|accept|disable|reject> [name] — script hook 신뢰 상태 관리
 /help — 이 도움말`;
@@ -2408,8 +2431,14 @@ export class ConversationLoop {
         this.deps.rewireReviewerAgent,
       );
       if (!result.ok) return `Reviewer 설정 오류: ${result.error}`;
-      const { mode, provider, model, fallbackOnError } = result.settings;
-      return `Reviewer 설정\nmode=${mode}\nprovider=${provider}\nmodel=${model}\nfallbackOnError=${fallbackOnError}`;
+      const { mode, fallbackOnError, interactive } = result.settings;
+      return [
+        "Reviewer 설정",
+        `mode=${mode}`,
+        "provider/model=active LLM settings",
+        `fallbackOnError=${fallbackOnError}`,
+        `interactiveAutoApprove=${interactive.autoApprove}`,
+      ].join("\n");
     }
     if (outcome.kind === "audit") {
       const auditLogger = this.deps.auditLogger;

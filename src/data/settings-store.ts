@@ -555,6 +555,12 @@ export class SettingsService {
     return this.getAll();
   }
 
+  async replaceLlm(llm: LLMSettings): Promise<AppSettings> {
+    this.settings.llm = structuredClone(llm);
+    await this.saveSettings();
+    return this.getAll();
+  }
+
   getPluginConfig(pluginId: string): PluginConfigRecord {
     const safePluginId = sanitizePluginConfigPluginId(pluginId);
     return structuredClone(this.settings.pluginConfigs[safePluginId] ?? {});

@@ -165,6 +165,37 @@ describe("ensurePublicHttpUrl — IP literal blocking", () => {
   });
 });
 
+describe("ensurePublicHttpUrl — explicit private network access", () => {
+  it("allows RFC1918 IPv4 literals when explicitly enabled", async () => {
+    const url = await ensurePublicHttpUrl("http://10.185.177.209/", {
+      allowPrivateNetworks: true,
+    });
+    expect(url.hostname).toBe("10.185.177.209");
+  });
+
+  it("allows DNS hosts that resolve to RFC1918 IPv4 when explicitly enabled", async () => {
+    lookupMock.mockResolvedValueOnce([{ address: "10.185.177.209", family: 4 }]);
+    const url = await ensurePublicHttpUrl("https://internal.example.com/", {
+      allowPrivateNetworks: true,
+    });
+    expect(url.hostname).toBe("internal.example.com");
+  });
+
+  it("keeps loopback blocked even when private network access is enabled", async () => {
+    await expect(
+      ensurePublicHttpUrl("http://127.0.0.1/", { allowPrivateNetworks: true }),
+    ).rejects.toThrowError(/non-public/);
+  });
+
+  it("keeps link-local metadata blocked even when private network access is enabled", async () => {
+    await expect(
+      ensurePublicHttpUrl("http://169.254.169.254/latest/meta-data/", {
+        allowPrivateNetworks: true,
+      }),
+    ).rejects.toThrowError(/non-public/);
+  });
+});
+
 describe("ensurePublicHttpUrl — IPv6", () => {
   it("blocks http://[::1] (IPv6 loopback)", async () => {
     await expect(ensurePublicHttpUrl("http://[::1]/")).rejects.toThrowError(
@@ -201,6 +232,13 @@ describe("ensurePublicHttpUrl — IPv6", () => {
     const url = await ensurePublicHttpUrl("http://[2606:4700:4700::1111]/");
     expect(url.hostname).toBe("[2606:4700:4700::1111]");
     expect(lookupMock).not.toHaveBeenCalled();
+  });
+
+  it("allows IPv6 ULA when private network access is explicitly enabled", async () => {
+    const url = await ensurePublicHttpUrl("http://[fd00::1]/", {
+      allowPrivateNetworks: true,
+    });
+    expect(url.hostname).toBe("[fd00::1]");
   });
 });
 
@@ -279,6 +317,27 @@ describe("fetchPublicHttpResponse (mocked fetch)", () => {
     // fetch ran exactly once (the first hop); the second hop was blocked
     // by ensurePublicHttpUrl before any network call.
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows a private-IP redirect when explicitly enabled", async () => {
+    lookupMock.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(null, {
+          status: 302,
+          headers: { location: "http://10.0.0.1/internal" },
+        }),
+      )
+      .mockResolvedValueOnce(new Response("private", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const resp = await fetchPublicHttpResponse("https://start.example.com/", {
+      allowPrivateNetworks: true,
+    });
+    expect(resp.status).toBe(200);
+    expect(await resp.text()).toBe("private");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("aborts after too many redirects", async () => {

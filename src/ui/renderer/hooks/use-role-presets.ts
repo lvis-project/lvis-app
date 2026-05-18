@@ -4,7 +4,7 @@ import {
   normalizeRolePresets,
   type RolePreset,
 } from "../../../data/role-presets.js";
-import type { LvisApi } from "../types.js";
+import { isIpcErrorResult, type LvisApi } from "../types.js";
 
 export const LEGACY_ROLE_PRESETS_STORAGE_KEY = "lvis:role-presets:v1";
 
@@ -56,6 +56,9 @@ async function migrateLegacyRolePresets(api: LvisApi, currentPresets: RolePreset
   }
 
   const updated = await api.updateSettings({ roles: { presets: legacyPresets } });
+  if (isIpcErrorResult(updated)) {
+    return currentPresets;
+  }
   try {
     storage?.removeItem(LEGACY_ROLE_PRESETS_STORAGE_KEY);
   } catch {

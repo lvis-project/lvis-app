@@ -12,14 +12,12 @@ LVIS 데스크톱 호스트 앱입니다. Electron main/renderer/preload, 플러
 - 실제 채팅 UI(렌더러) + preload IPC 브리지
 - webpack 기반 renderer/preload/plugin-preload 번들링
 - macOS Apple Silicon / Linux / Windows installer 빌드 스크립트와 GitHub Actions matrix
-- IPC 핸들러
-  - `lvis:index:scan`
-  - `lvis:index:documents`
-  - `lvis:chat:preview`
-  - `lvis:meeting:start`
-  - `lvis:meeting:push-chunk`
-  - `lvis:meeting:stop`
-  - `lvis:meeting:transcript`
+- 주요 IPC 핸들러 (전체 목록은 `src/ipc/domains/*.ts` 참조)
+  - 채팅 / 세션: `lvis:chat:send`, `lvis:chat:abort`, `lvis:chat:sessions`, `lvis:chat:session-resume`, `lvis:chat:fork`, `lvis:chat:branch-from-checkpoint`, `lvis:chat:edit-resend`, `lvis:chat:export`, `lvis:chat:compact`
+  - 워크플로우: `lvis:ask-user-question:respond` (인라인 질문 카드 응답)
+  - 인덱스: `lvis:index:scan`, `lvis:index:documents`
+  - 미팅: `lvis:meeting:start`, `lvis:meeting:push-chunk`, `lvis:meeting:stop`, `lvis:meeting:transcript`
+  - 거버넌스: `lvis:audit:search`, `lvis:dlp:stats`, `lvis:agents:list`, `lvis:agents:install`
 - E2E 플로우 스모크 테스트 스크립트
 
 ## 현재 빌드/배포 상태
@@ -91,22 +89,40 @@ UI 렌더링 책임은 호스트(`lvis-app` renderer)에 있으며, 플러그인
 ```json
 {
   "notificationEvents": [
-    { "event": "email.new", "titleField": "sender", "bodyField": "subject" }
+    { "event": "meeting.summary.created", "titleField": "title", "bodyField": "summary" }
   ]
 }
 ```
 
 ### 이벤트 버스
 
-선제성 기능은 `emitEvent` / `onEvent` 기반 비동기 이벤트 버스로 통신합니다:
+선제성 기능은 `emitEvent` / `onEvent` 기반 비동기 이벤트 버스로 통신합니다. 현재 활성 플러그인 셋(`meeting`, `work-proactive`, `local-indexer`, `ms-graph`, `agent-hub`) 기준:
 
 | 이벤트 | 발행자 | 구독자 |
 |--------|--------|--------|
-| `calendar.from_email.suggested` | calendar hostPlugin | — |
-| `calendar.pattern.detected` | calendar hostPlugin | calendar UI |
-| `email.action.needed` | email hostPlugin | calendar hostPlugin |
-| `email.new` | email hostPlugin | boot.ts (OS 알림) |
-| `meeting.ended` | meeting hostPlugin | calendar hostPlugin |
+| `meeting.summary.created` | meeting hostPlugin | work-proactive, boot.ts (OS 알림) |
+| `meeting.transcript.updated` | meeting hostPlugin | boot.ts (OS 알림) |
+| `meeting.summary.degraded` | meeting hostPlugin | boot.ts (OS 알림) |
+| `meeting.ended` | meeting hostPlugin | work-proactive |
+
+플러그인은 manifest 의 `emittedEvents` / `subscriptions` 로 이벤트 계약을 선언하고, manifest validator 가 `auth` capability 와 `${id}.auth.changed` 같은 cross-field 일관성을 boot 시 검사합니다.
+
+## 채팅 UX 핵심
+
+### `ask_user_question` 카드
+LLM 이 분기점에서 사용자에게 직접 묻는 인라인 워크플로우 도구. 한 카드에 **1~4개**의 관련 질문을 묶어 호출하며, 페이지네이션으로 차례로 답하고 마지막 컨펌 페이지에서 한꺼번에 제출합니다.
+
+- **`choices` / `recommendedIndex` / `altIndices`**: 객관식 chip 0~3개. UI 가 칩 앞쪽에 "추천" / "대안" 배지를 자동 부착합니다 (모델은 평문 라벨만 emit).
+- **`allowFreeText`** (기본 true): 단일-라인 자유 입력. chip 만으로 안 풀리는 경우의 escape hatch.
+- **`allowMultiple`** (기본 false): 다중 선택 모드. true 일 때 응답이 `answers[i].choices: string[]` 으로 돌아오고 자동 제출이 비활성화되어 사용자가 명시적으로 "보내기"를 눌러야 합니다.
+- **키보드 네비게이션**: 카드 mount 시 자동 포커스 → `↑/↓` 답변/자유입력 이동, `←/→` 질문 이동, `Enter` 다음/검토/보내기, `Esc` 건너뛰기.
+- **타임아웃**: 5분 안에 확인이 없으면 `dismissed: true` 로 반환, LLM 은 기본값으로 폴백.
+
+### Suggested Replies
+대화 흐름에서 다음 사용자 입력을 보조하는 chip row + ghost suggestion. 입력창에 텍스트를 치기 시작하면 자동 hide, IME composition 중에도 ghost 가 표시되지 않습니다.
+
+### Status Bar
+상태 표시줄은 텍스트 라벨 대신 플랫폼-emoji 글리프로 렌더링하고, 스크린 리더용 a11y 라벨은 별도로 유지합니다.
 
 ## 개발 환경 설치
 

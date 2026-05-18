@@ -655,6 +655,11 @@ export function dlpRedactInputForPrompt(
 
 function buildUserPrompt(input: ToolInvocationContext): string {
   const redacted = dlpRedactInputForPrompt(input.finalInput);
+  const recentUserMessage = input.conversationContext?.recentUserMessage;
+  const redactedContext =
+    typeof recentUserMessage === "string" && recentUserMessage.trim().length > 0
+      ? maskSensitiveData(recentUserMessage).masked.slice(0, 500)
+      : undefined;
   return (
     `<UNTRUSTED_INPUT>\n` +
     `tool: ${input.toolName}\n` +
@@ -663,6 +668,7 @@ function buildUserPrompt(input: ToolInvocationContext): string {
     `pathFields: ${JSON.stringify(input.pathFields)}\n` +
     `trustOrigin: ${input.trustOrigin}\n` +
     `input (DLP-redacted): ${JSON.stringify(redacted)}\n` +
+    `conversationContext (DLP-redacted): ${JSON.stringify(redactedContext ?? null)}\n` +
     `allowedDirectories: ${JSON.stringify(input.allowedDirectories.slice(0, 8))}\n` +
     `sensitivePathsAdjacent: ${JSON.stringify(input.sensitivePathsAdjacent.slice(0, 8))}\n` +
     `${formatSandboxCapabilityForPrompt(input.sandboxCapability)}\n` +

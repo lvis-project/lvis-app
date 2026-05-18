@@ -79,19 +79,20 @@ describe("PluginMarketplaceService + PluginDeploymentGuard canInstall", () => {
     return new PluginMarketplaceService(paths, fetcher, guard);
   }
 
-  it("install() rejects admin-policy catalog item before runNpmInstall fires", async () => {
+  it("install() escalates admin-policy catalog item to actor=it-admin (passes guard)", async () => {
+    // Post-#964-redesign: actor decision moved inside
+    // PluginMarketplaceService.install — admin-policy catalog items
+    // auto-escalate to actor="it-admin" so the deployment-guard does not
+    // reject them. The previous behavior (reject "installed by user") was
+    // a property of the IPC handler defaulting actor="user", which is no
+    // longer the case. The downstream failure here surfaces from the
+    // artifact store (no real download backend in tests) — proving the
+    // guard *passed* before npm/zip work began.
     await writeCatalog("admin");
     await writeEmptyRegistry();
     const service = makeService();
 
-    await expect(service.install("mp-test")).rejects.toThrow(/installed by user/);
-
-    // npm install should NOT have been attempted — proving the guard
-    // short-circuited before any filesystem work. We verify this by
-    // checking that no new manifest was written and registry is unchanged.
-    const { readFile } = await import("node:fs/promises");
-    const registry = JSON.parse(await readFile(registryPath, "utf-8"));
-    expect(registry.plugins).toHaveLength(0);
+    await expect(service.install("mp-test")).rejects.not.toThrow(/installed by user/);
   });
 
   it("install() surfaces 'Plugin not found' for unknown id (no guard bypass)", async () => {

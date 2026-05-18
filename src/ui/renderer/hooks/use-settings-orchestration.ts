@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AppSettings, DeepPartial, LvisApi } from "../types.js";
+import { isIpcErrorResult, type AppSettings, type DeepPartial, type LvisApi } from "../types.js";
 import { VENDORS } from "../constants.js";
+import { formatIpcError } from "../format-ipc-error.js";
 import type { FallbackEntry } from "../tabs/LlmTab.js";
 
 export interface SettingsOrchestrationState {
@@ -345,7 +346,7 @@ export function useSettingsOrchestration(
           // login response and overwrite demo/model/baseUrl with stale values.
           llmPatch.vendors = { [vendor]: activeBlock };
         }
-        await api.updateSettings({
+        const updateResult = await api.updateSettings({
           llm: llmPatch,
           webSearch: { provider: webProvider },
           chat: { autoCompact },
@@ -355,6 +356,9 @@ export function useSettingsOrchestration(
             realCloudAllowPrivateNetwork: marketplaceAllowPrivateNetwork,
           },
         });
+        if (isIpcErrorResult(updateResult)) {
+          throw new Error(formatIpcError(updateResult.error, updateResult.message));
+        }
         if (shouldPersistLlmKey) {
           if (llmDraftGeneration !== llmDraftGenerationRef.current) {
             return false;
@@ -402,6 +406,7 @@ export function useSettingsOrchestration(
     void api
       .updateSettings({ features: { idlePreferenceRefresh: next } })
       .then((updated) => {
+        if (isIpcErrorResult(updated)) throw new Error(updated.message ?? updated.error);
         setSettingsSnapshot(updated);
         onSaved();
       })
