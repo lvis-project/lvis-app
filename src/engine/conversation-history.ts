@@ -5,6 +5,7 @@
  * 벤더 추상화: Anthropic.MessageParam 대신 GenericMessage 사용.
  */
 import type { GenericMessage } from "./llm/types.js";
+import { trimOversizedToolResult } from "../shared/tool-result-trim.js";
 
 export interface ConversationHistoryOptions {
   maxMessages?: number;
@@ -19,7 +20,7 @@ export class ConversationHistory {
   }
 
   append(message: GenericMessage): void {
-    this.messages.push(stampCreatedAt(message));
+    this.messages.push(stampCreatedAt(applyToolResultCap(message)));
     this.trim();
   }
 
@@ -79,7 +80,16 @@ export class ConversationHistory {
     // turn) rather than restamping with the load time. Messages with no
     // createdAt (legacy sessions written before the field existed) stay
     // undefined — UI renders nothing rather than fake a fresh timestamp.
-    this.messages = normalizeToolPairInvariant(messages).messages;
+    //
+    // applyToolResultCap re-runs on every restored tool_result *with the
+    // recompute flag* so that any host-attributed meta (`truncated` /
+    // `serializedStub`) read off disk is stripped and re-derived from the
+    // actual content. Defends against jsonl tampering: a row that arrives
+    // with `meta.serializedStub: true` would otherwise bypass the cap
+    // check in `wire-serialize.stubMarkedToolResults` (security review
+    // Minor 2).
+    const capped = messages.map((m) => applyToolResultCap(m, { recompute: true }));
+    this.messages = normalizeToolPairInvariant(capped).messages;
     this.trim();
   }
 
@@ -137,6 +147,58 @@ interface NormalizeToolPairOptions {
 function stampCreatedAt(message: GenericMessage): GenericMessage {
   if (message.meta?.createdAt !== undefined) return message;
   return { ...message, meta: { ...(message.meta ?? {}), createdAt: Date.now() } };
+}
+
+/**
+ * Apply the Issue #902 generic tool_result size cap as a *meta-only* mark.
+ * Non-tool_result messages pass through unchanged. Sub-cap content passes
+ * through with reference equality.
+ *
+ * Why meta-only (no content swap here): `wire-serialize.stubMarkedToolResults`
+ * already runs on every send (`stream-collector.ts`) and every disk write
+ * (`saveSession` call sites in `conversation-loop.ts`/`ipc/domains/chat.ts`/
+ * `hooks/post-turn-hook-chain.ts`). Centralising the actual stub swap there
+ * means in-memory content stays raw verbatim for the UI / inspection, and
+ * the same stub form lands in both the LLM wire payload and the jsonl —
+ * matching the existing `compactedAt` marker's behaviour exactly.
+ *
+ * Called from both `.append` (live executor → loop push) and `.restore`
+ * (session jsonl rehydrate). Single chokepoint guarantees future append
+ * sites added to the loop are auto-protected without further wiring.
+ *
+ * @param opts.recompute  When true (restore path), strip any pre-existing
+ *                        host-attributed meta (`truncated`, `serializedStub`)
+ *                        and re-measure the *content*. Defends against
+ *                        jsonl tampering — a row that arrives with a forged
+ *                        `serializedStub: true` would otherwise bypass the
+ *                        `wire-serialize` cap check. Off by default (append
+ *                        path) so an already-marked in-memory message stays
+ *                        idempotent.
+ */
+function applyToolResultCap(
+  message: GenericMessage,
+  opts?: { recompute?: boolean },
+): GenericMessage {
+  if (message.role !== "tool_result") return message;
+  if (!opts?.recompute && message.meta?.truncated !== undefined) return message;
+  const trimmed = trimOversizedToolResult(message.content);
+  if (trimmed.truncated === undefined) {
+    if (!opts?.recompute) return message;
+    // Recompute path with sub-cap content: strip any forged host meta so
+    // the in-memory row reflects the actual content, not the disk claim.
+    if (message.meta?.truncated === undefined && message.meta?.serializedStub === undefined) {
+      return message;
+    }
+    const { truncated: _t, serializedStub: _s, ...cleanMeta } = message.meta ?? {};
+    return { ...message, meta: cleanMeta };
+  }
+  // Over-cap: write the freshly-computed truncated info, drop any prior
+  // serializedStub claim (will be re-set by wire-serialize on next send).
+  const { serializedStub: _s, ...preservedMeta } = message.meta ?? {};
+  return {
+    ...message,
+    meta: { ...preservedMeta, truncated: trimmed.truncated },
+  };
 }
 
 export function normalizeToolPairInvariant(
