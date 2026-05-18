@@ -48,17 +48,17 @@ describe("parsePermissionReviewerCommand", () => {
     });
   });
 
-  it("parses 'provider openai'", () => {
+  it("rejects reviewer-local provider changes", () => {
     expect(parsePermissionReviewerCommand("provider openai")).toEqual({
-      verb: "provider",
-      value: "openai",
+      ok: false,
+      error: expect.stringContaining("active LLM settings"),
     });
   });
 
-  it("parses 'model gpt-4o-mini'", () => {
+  it("rejects reviewer-local model changes", () => {
     expect(parsePermissionReviewerCommand("model gpt-4o-mini")).toEqual({
-      verb: "model",
-      value: "gpt-4o-mini",
+      ok: false,
+      error: expect.stringContaining("active LLM settings"),
     });
   });
 
@@ -126,21 +126,28 @@ describe("dispatchPermissionReviewerCommand — persistence", () => {
     expect(settings.permissions.reviewer.mode).toBe("rule");
   });
 
-  it("provider anthropic persists", async () => {
+  it("provider changes are rejected and leave legacy settings untouched", async () => {
     const path = tmpSettingsPath();
-    await dispatchPermissionReviewerCommand({ verb: "provider", value: "anthropic" }, path);
-    const settings = readPermissionSettings(path);
-    expect(settings.permissions.reviewer.provider).toBe("anthropic");
-  });
-
-  it("model claude-haiku persists", async () => {
-    const path = tmpSettingsPath();
-    await dispatchPermissionReviewerCommand(
-      { verb: "model", value: "claude-haiku-4-5" },
+    const result = await dispatchPermissionReviewerCommand(
+      { verb: "provider", value: "anthropic" } as never,
       path,
     );
     const settings = readPermissionSettings(path);
-    expect(settings.permissions.reviewer.model).toBe("claude-haiku-4-5");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("active LLM settings");
+    expect(settings.permissions.reviewer.provider).toBe("openai");
+  });
+
+  it("model changes are rejected and leave legacy settings untouched", async () => {
+    const path = tmpSettingsPath();
+    const result = await dispatchPermissionReviewerCommand(
+      { verb: "model", value: "claude-haiku-4-5" } as never,
+      path,
+    );
+    const settings = readPermissionSettings(path);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("active LLM settings");
+    expect(settings.permissions.reviewer.model).toBe("gpt-4o-mini");
   });
 
   it("fallback rule persists when explicitly selected", async () => {
@@ -190,14 +197,14 @@ describe("dispatchPermissionReviewerCommand — persistence", () => {
     if (!r.ok) expect(r.error).toMatch(/invalid mode/);
   });
 
-  it("invalid provider returns ok:false", async () => {
+  it("invalid provider subcommand returns the active-LLM guidance", async () => {
     const path = tmpSettingsPath();
     const r = await dispatchPermissionReviewerCommand(
-      { verb: "provider", value: "ollama" },
+      { verb: "provider", value: "ollama" } as never,
       path,
     );
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.error).toMatch(/invalid provider/);
+    if (!r.ok) expect(r.error).toMatch(/active LLM settings/);
   });
 
   it("invalid fallback returns ok:false", async () => {
@@ -210,10 +217,11 @@ describe("dispatchPermissionReviewerCommand — persistence", () => {
     if (!r.ok) expect(r.error).toMatch(/invalid fallback/);
   });
 
-  it("empty model returns ok:false", async () => {
+  it("empty model subcommand returns the active-LLM guidance", async () => {
     const path = tmpSettingsPath();
-    const r = await dispatchPermissionReviewerCommand({ verb: "model", value: "" }, path);
+    const r = await dispatchPermissionReviewerCommand({ verb: "model", value: "" } as never, path);
     expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/active LLM settings/);
   });
 
   it("setReviewerSettingsPersist preserves additionalDirectories", async () => {
