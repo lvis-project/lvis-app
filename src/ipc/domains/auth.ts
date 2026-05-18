@@ -175,7 +175,7 @@ export function registerAuthHandlers(deps: IpcDeps): void {
       try {
         deps.rewireReviewerAgent?.();
       } catch {
-        await settingsService.patch({ llm: prevLlm });
+        await settingsService.replaceLlm(prevLlm);
         if (prevApiKey === null) {
           await settingsService.deleteSecret(apiKeySecretKey);
         } else {
