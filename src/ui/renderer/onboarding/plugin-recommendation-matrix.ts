@@ -22,6 +22,13 @@ export interface PluginRecommendation {
   label: string;
   /** Leading emoji in the chip. */
   emoji: string;
+  /**
+   * Tutorial-X2 — marketplace package slug for `lvis:plugins:install`.
+   * `null` for the `chat-basics` fallback (a meta recommendation that
+   * has no installable plugin). When set, clicking the chip in the
+   * MemorySeedDialog triggers the canonical plugin-install pipeline.
+   */
+  marketplaceSlug: string | null;
 }
 
 interface MatrixRow {
@@ -29,6 +36,7 @@ interface MatrixRow {
   label: string;
   emoji: string;
   keywords: string[];
+  marketplaceSlug: string | null;
 }
 
 /**
@@ -42,30 +50,35 @@ const MATRIX: MatrixRow[] = [
     label: "meeting",
     emoji: "🎙️",
     keywords: ["회의", "미팅", "녹음", "회의록", "stt", "meeting"],
+    marketplaceSlug: "lvis-plugin-meeting",
   },
   {
     pluginId: "local-indexer",
     label: "local-indexer",
     emoji: "🔍",
     keywords: ["문서", "검색", "pdf", "파일", "인덱스", "indexer", "document"],
+    marketplaceSlug: "lvis-plugin-local-indexer",
   },
   {
     pluginId: "work-proactive",
     label: "work-proactive",
     emoji: "💼",
     keywords: ["업무", "할일", "todo", "task", "proactive", "일정"],
+    marketplaceSlug: "lvis-plugin-work-proactive",
   },
   {
     pluginId: "ms-graph",
     label: "calendar (MS Graph)",
     emoji: "📅",
     keywords: ["일정", "이메일", "메일", "캘린더", "calendar", "outlook", "email", "ms graph", "msgraph"],
+    marketplaceSlug: "lvis-plugin-ms-graph",
   },
   {
     pluginId: "agent-hub",
     label: "agent-hub",
     emoji: "🤖",
     keywords: ["에이전트", "오케스트", "agent", "orchestr"],
+    marketplaceSlug: "lvis-plugin-agent-hub",
   },
 ];
 
@@ -73,6 +86,7 @@ const FALLBACK: PluginRecommendation = {
   pluginId: "chat-basics",
   label: "chat 기본 사용",
   emoji: "💬",
+  marketplaceSlug: null,
 };
 
 /**
@@ -90,7 +104,12 @@ export function inferRecommendedPlugins(intro: string): PluginRecommendation[] {
     if (row.keywords.some((kw) => normalized.includes(kw))) {
       if (seen.has(row.pluginId)) continue;
       seen.add(row.pluginId);
-      hits.push({ pluginId: row.pluginId, label: row.label, emoji: row.emoji });
+      hits.push({
+        pluginId: row.pluginId,
+        label: row.label,
+        emoji: row.emoji,
+        marketplaceSlug: row.marketplaceSlug,
+      });
     }
   }
 
