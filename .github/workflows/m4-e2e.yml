@@ -71,7 +71,7 @@ jobs:
             --publisher-key "$PUBLISHER_KEY"
 
       - name: Sync poc-v1 public key from M4 signing secret (M4-local only)
-        working-directory: lvis-marketplace
+        working-directory: lvis-marketplace/server
         env:
           MARKETPLACE_SIGNING_PRIVATE_KEY_POC_V1: ${{ secrets.M4_MARKETPLACE_SIGNING_KEY_POC_V1 }}
         run: |
@@ -82,7 +82,8 @@ jobs:
           # Derive the public from our private secret and write it locally only
           # (working-directory checkout is ephemeral; production repo + deploy
           # unchanged). Same key_id (poc-v1), private from secret, pub regenerated.
-          python3 -c "
+          # Use `uv run python` so cryptography (already installed via uv sync) is on path.
+          uv run python -c "
           import base64, os, sys
           from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
           from cryptography.hazmat.primitives import serialization
@@ -98,9 +99,11 @@ jobs:
           print(base64.b64encode(pub).decode())
           " > /tmp/m4-poc-v1.pub
           echo "derived pub: $(cat /tmp/m4-poc-v1.pub)"
-          echo "old pub on disk: $(cat schemas/keys/poc-v1.pub 2>/dev/null || echo 'absent')"
-          cp /tmp/m4-poc-v1.pub schemas/keys/poc-v1.pub
-          echo "new pub on disk: $(cat schemas/keys/poc-v1.pub)"
+          # schemas/keys/ is at marketplace repo root; we are in server/ subdir.
+          PUB_PATH="../schemas/keys/poc-v1.pub"
+          echo "old pub on disk: $(cat "$PUB_PATH" 2>/dev/null || echo 'absent')"
+          cp /tmp/m4-poc-v1.pub "$PUB_PATH"
+          echo "new pub on disk: $(cat "$PUB_PATH")"
 
       - name: Start marketplace server (sqlite, background)
         working-directory: lvis-marketplace/server
