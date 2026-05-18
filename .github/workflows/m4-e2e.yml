@@ -75,6 +75,22 @@ jobs:
           uv run python scripts/seed_e2e_keys.py \
             --publisher-key "$PUBLISHER_KEY"
 
+      - name: Debug — inspect DB after seed + GET /me
+        env:
+          PUBLISHER_KEY: ${{ secrets.M4_PUBLISHER_KEY }}
+        run: |
+          sudo apt-get install -y sqlite3 >/dev/null 2>&1 || true
+          echo "=== DB file ==="
+          ls -la /tmp/m4-marketplace.db 2>&1 || echo "no DB file"
+          echo "=== api_keys rows ==="
+          sqlite3 /tmp/m4-marketplace.db "SELECT id,label,role,revoked_at,key_prefix,LENGTH(key_hash) FROM api_keys" 2>&1 || true
+          echo "=== publisher key length / first chars ==="
+          echo "len=$(printf '%s' "$PUBLISHER_KEY" | wc -c) prefix=$(printf '%s' "$PUBLISHER_KEY" | head -c 12)"
+          echo "=== GET /me via server background ==="
+          curl -s -w "\nHTTP %{http_code}\n" -H "Authorization: Bearer $PUBLISHER_KEY" http://127.0.0.1:8000/api/v1/me 2>&1 | head -5
+          echo "=== expected hash (sha256 of plaintext) ==="
+          printf '%s' "$PUBLISHER_KEY" | sha256sum | head -c 32 ; echo
+
       - name: Setup Node (required by postinstall + build scripts)
         uses: actions/setup-node@v6
         with:
