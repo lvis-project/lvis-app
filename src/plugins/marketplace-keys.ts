@@ -47,6 +47,13 @@ export const WHITELIST_PUBLIC_KEYS: Readonly<Record<string, PublicKeyInput>> = O
   // re-signed in the same change so the offline demo path continues to
   // verify against this slot.
   "whitelist-v1": "3YF7rRRj+NtxengU3VudHcufo/+L/Dnz/CIYSmvyRI0=",
+  // Stage 2 rolling rotation — catalog republish workflow signs with the
+  // whitelist-v2 keypair (private key held in GitHub Actions secret
+  // `WHITELIST_SIGNING_KEY`). The live remote catalog at
+  // `https://lvis-project.github.io/marketplace-whitelist/v1/whitelist.json`
+  // is signed with this key; the offline demo snapshot continues to
+  // verify against `whitelist-v1` until the next snapshot refresh.
+  "whitelist-v2": "Uu2KCaHTTVeUorDtPA2IgWdqccupbGk0o5wvrJUiBk0=",
 });
 
 export const WHITELIST_PRIMARY_KEY_ID = "whitelist-v1" as const;
