@@ -456,6 +456,17 @@ const api = {
       message: typeof raw?.message === "string" ? raw.message : "plugin install failed",
     };
   },
+  // Tutorial-X4 — Onboarding Context writer. Called once by the renderer
+  // after the Memory Seed wizard dismisses with a short markdown block
+  // (호칭 + 자기소개 + installed plugin slugs). The host writes the file
+  // under `~/.lvis/onboarding/onboarding-context.md`; the SystemPromptBuilder
+  // then injects it as section id=9.86 "User Onboarding Context" on each
+  // subsequent turn until the user clears it.
+  onboardingContextSet: async (content: string) =>
+    ipcRenderer.invoke("lvis:onboarding:context:set", { content }) as Promise<
+      | { ok: true }
+      | { ok: false; error: string; message: string }
+    >,
   onTutorialOpen: (handler: (payload: { source: string }) => void) => {
     const listener = (_event: unknown, payload: { source?: unknown }) => {
       const source = typeof payload?.source === "string" ? payload.source : "ipc";

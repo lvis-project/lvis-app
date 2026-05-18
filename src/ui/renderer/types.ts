@@ -428,6 +428,19 @@ export type LvisApi = {
     | { ok: true; pluginId: string }
     | { ok: false; error: string; message: string }
   >;
+  /**
+   * Tutorial-X4 — write the synthesized onboarding context to
+   * `~/.lvis/onboarding/onboarding-context.md`. The host's
+   * SystemPromptBuilder picks this up as section id=9.86 "User Onboarding
+   * Context" on every subsequent turn (until the file is cleared). The
+   * renderer wizard composes a short markdown block (호칭 + 자기소개 +
+   * installed plugin ids + last completed walkthrough) and calls this
+   * once after `MemorySeedDialog` dismissal. Capped server-side at 4 KB.
+   */
+  onboardingContextSet: (content: string) => Promise<
+    | { ok: true }
+    | { ok: false; error: string; message: string }
+  >;
   onTutorialOpen: (handler: (payload: { source: string }) => void) => () => void;
   onTutorialPreferencesChanged: (
     handler: (prefs: TutorialPreferences) => void,
