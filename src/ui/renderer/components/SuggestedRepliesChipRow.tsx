@@ -55,7 +55,7 @@ export function SuggestedRepliesChipRow({
         const isFocused = focusedIdx === idx;
         return (
           <button
-            key={text}
+            key={`${idx}-${text}`}
             ref={(el) => {
               chipRefs.current[idx] = el;
             }}
