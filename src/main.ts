@@ -50,6 +50,14 @@ import { uninstallPluginWithLifecycle } from "./plugins/uninstall-lifecycle.js";
 import { lvisHome } from "./shared/lvis-home.js";
 import { runShutdownRoutines } from "./main/shutdown-routines.js";
 import { captureDemoCredentials } from "./main/demo-credentials.js";
+import {
+  forceKillManagedChildProcesses,
+  getManagedChildProcessCount,
+} from "./main/managed-child-processes.js";
+import {
+  resolveShutdownCleanupTimeoutMs,
+  runCleanupWithHardTimeout,
+} from "./main/shutdown-timeout.js";
 const log = createLogger("lvis");
 
 function errorMessage(err: unknown): string {
@@ -1775,17 +1783,35 @@ app.on("before-quit", (event) => {
   // closure boundary, and so a future window-closed handler that nulls
   // `services` mid-shutdown cannot NPE us on the next member access.
   const svc = services;
+  const cleanupTimeoutMs = resolveShutdownCleanupTimeoutMs();
   void (async () => {
-    try {
+    const result = await runCleanupWithHardTimeout(async () => {
       // v2 shutdown routines — fire all active shutdown-trigger routines with a
       // 5s timeout so a hung LLM call cannot block app.quit() indefinitely.
       await runShutdownRoutines(svc);
       await svc.shutdown?.();
       await svc.pluginRuntime.stopAll();
       windowManager?.persistAll();
-    } finally {
+    }, cleanupTimeoutMs);
+
+    if (result.status === "timed-out") {
+      const trackedChildCount = getManagedChildProcessCount();
+      const killedChildCount = forceKillManagedChildProcesses("app shutdown cleanup timeout");
+      log.error({
+        timeoutMs: cleanupTimeoutMs,
+        trackedChildCount,
+        killedChildCount,
+      }, "before-quit: shutdown cleanup timed out; forcing app exit");
       appShutdownCompleted = true;
-      app.quit();
+      app.exit(0);
+      return;
     }
+
+    if (result.status === "failed") {
+      log.error("before-quit: shutdown cleanup failed: %s", errorMessage(result.error));
+    }
+
+    appShutdownCompleted = true;
+    app.quit();
   })();
 });
