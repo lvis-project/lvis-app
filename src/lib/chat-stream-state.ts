@@ -38,7 +38,7 @@ export type StreamEvent = {
    * `compact_notice` (completion). Allows showing a "자동 압축 중..." indicator
    * during the blocking LLM compaction call.
    */
-  triggerSource?: "estimate" | "actual-tokensIn" | "manual";
+  triggerSource?: "estimate" | "actual-tokensIn" | "manual" | "force-recover";
   estimatedBefore?: number;
   preflight?: number;
   /** Compact trigger on `compact_notice` — token preflight vs manual command. */
@@ -146,7 +146,7 @@ export type ToolEntryItem = {
 export type ChatEntry =
   | { kind: "user"; text: string; injectHint?: "queue" | "interrupt"; createdAt?: number }
   | { kind: "reasoning"; text: string; streaming?: boolean; createdAt?: number }
-  | { kind: "assistant"; text: string; streaming?: boolean; route?: "command"; phase?: "work" | "final"; createdAt?: number }
+  | { kind: "assistant"; text: string; streaming?: boolean; route?: "command"; phase?: "work" | "final"; createdAt?: number; systemNotice?: "context-error" | "stream-error" }
   | { kind: "tool_group"; groupId: string; groupIds: string[]; status: "running" | "done" | "error"; tools: ToolEntryItem[] }
   | {
       kind: "ask_user_answer";
@@ -430,6 +430,15 @@ export function finalizeStreamingAssistant(
      * time. Live streaming callers omit this — the live path stamps Date.now().
      */
     createdAt?: number;
+    /**
+     * Issue #911 — when the assistant message is a host-emitted system
+     * notice (context-error, stream-error), pass the marker through so
+     * the renderer can apply destructive styling. Reload path reads this
+     * from `SerializedHistoryMessage.systemNotice`; live path emits it
+     * from `conversation-loop.ts` when stream.kind === "context_error"
+     * / "stream_error".
+     */
+    systemNotice?: "context-error" | "stream-error";
   },
 ): ChatEntry[] {
   const next = [...entries];
@@ -460,6 +469,11 @@ export function finalizeStreamingAssistant(
           route: opts?.route,
           phase: opts?.phase,
           createdAt: opts?.createdAt ?? assistant.createdAt ?? Date.now(),
+          ...(opts?.systemNotice !== undefined
+            ? { systemNotice: opts.systemNotice }
+            : assistant.systemNotice !== undefined
+              ? { systemNotice: assistant.systemNotice }
+              : {}),
         };
         return next;
       }
@@ -482,6 +496,11 @@ export function finalizeStreamingAssistant(
       // until the next session reload, defeating the PR's user-visible goal.
       // Preserve existing createdAt on re-finalize (idempotency).
       createdAt: opts?.createdAt ?? assistant.createdAt ?? Date.now(),
+      ...(opts?.systemNotice !== undefined
+        ? { systemNotice: opts.systemNotice }
+        : assistant.systemNotice !== undefined
+          ? { systemNotice: assistant.systemNotice }
+          : {}),
     };
     return next;
   }
@@ -506,11 +525,23 @@ export function finalizeStreamingAssistant(
     route: opts?.route,
     phase: opts?.phase,
     ...(opts?.createdAt !== undefined ? { createdAt: opts.createdAt } : {}),
+    ...(opts?.systemNotice !== undefined ? { systemNotice: opts.systemNotice } : {}),
   });
   return next;
 }
 
-export function setAssistantError(entries: ChatEntry[], message: string, fallbackThought: string = ""): ChatEntry[] {
+export function setAssistantError(
+  entries: ChatEntry[],
+  message: string,
+  fallbackThought: string = "",
+  systemNotice?: "context-error" | "stream-error",
+): ChatEntry[] {
+  // Issue #911 — live error path. When the caller knows the error is a
+  // host-emitted system notice (context-error / stream-error), stamp the
+  // marker so AssistantCard renders destructive styling immediately,
+  // matching what reload sees from jsonl. Without this, the user sees the
+  // error first as a normal assistant reply and only gets the red banner
+  // after refreshing the session.
   const next = finalizeStreamingReasoning(entries, fallbackThought);
   const assistantIdx = findLastIdx(
     next,
@@ -518,10 +549,17 @@ export function setAssistantError(entries: ChatEntry[], message: string, fallbac
       entry.kind === "assistant" && !!entry.streaming,
   );
 
+  const baseEntry = {
+    kind: "assistant" as const,
+    text: message,
+    streaming: false,
+    ...(systemNotice !== undefined ? { systemNotice } : {}),
+  };
+
   if (assistantIdx >= 0) {
-    next[assistantIdx] = { kind: "assistant", text: message, streaming: false };
+    next[assistantIdx] = baseEntry;
   } else {
-    next.push({ kind: "assistant", text: message, streaming: false });
+    next.push(baseEntry);
   }
   return next;
 }
