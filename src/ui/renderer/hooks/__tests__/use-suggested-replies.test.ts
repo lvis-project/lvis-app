@@ -119,29 +119,39 @@ describe("useSuggestedReplies", () => {
 
   // --- PR-D additions: slash filter + telemetry ---
 
-  it("slash-command prefixed suggestions are filtered out", () => {
+  it("slash-command WITH arguments is filtered out (executable payload)", () => {
     const { result } = renderHook(() => useSuggestedReplies());
-    act(() => { pushSuggestedReplies(["/admin", "/clear", "확인"]); });
+    act(() => { pushSuggestedReplies(["/admin run prod", "확인"]); });
     expect(result.current.best).toBe("확인");
     expect(result.current.alternates).toEqual([]);
   });
 
-  it("bang and dollar prefixed suggestions are filtered out", () => {
+  it("single-token slash command passes filter (legitimate suggestion)", () => {
+    // Critic review #971: `/clear`, `/help` 같은 *no-arg* host command 추천은
+    // 사용자가 정당하게 원할 수 있음 — chip click 은 textarea fill 만 하고
+    // host parser 가 send 시점에 권한 체크하므로 trust boundary 유효.
     const { result } = renderHook(() => useSuggestedReplies());
-    act(() => { pushSuggestedReplies(["!run", "$env", "다음"]); });
+    act(() => { pushSuggestedReplies(["/clear", "/help"]); });
+    expect(result.current.best).toBe("/clear");
+    expect(result.current.alternates).toEqual(["/help"]);
+  });
+
+  it("bang and dollar commands WITH arguments are filtered out", () => {
+    const { result } = renderHook(() => useSuggestedReplies());
+    act(() => { pushSuggestedReplies(["!shell -c rm", "$env=foo bar", "다음"]); });
     expect(result.current.best).toBe("다음");
   });
 
-  it("list with only command-prefixed suggestions collapses to empty", () => {
+  it("list with only command-with-args suggestions collapses to empty", () => {
     const { result } = renderHook(() => useSuggestedReplies());
-    act(() => { pushSuggestedReplies(["/help", "!ls", "$path"]); });
+    act(() => { pushSuggestedReplies(["/help me with X", "!ls -la /", "$path=evil ok"]); });
     expect(result.current.best).toBeNull();
     expect(result.current.alternates).toEqual([]);
   });
 
-  it("slash prefix with leading whitespace is also filtered (trim before match)", () => {
+  it("command-with-args + leading whitespace still filtered (trim before match)", () => {
     const { result } = renderHook(() => useSuggestedReplies());
-    act(() => { pushSuggestedReplies(["  /admin", "확인"]); });
+    act(() => { pushSuggestedReplies(["  /admin run prod", "확인"]); });
     expect(result.current.best).toBe("확인");
   });
 
