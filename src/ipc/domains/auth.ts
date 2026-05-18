@@ -128,7 +128,9 @@ export function registerAuthHandlers(deps: IpcDeps): void {
       const fieldsApplied: string[] = ["apiKey"];
 
       // Persist the API key into the encrypted secret store.
-      await settingsService.setSecret(`llm.apiKey.${vendor}`, demoConfig.apiKey);
+      const apiKeySecretKey = `llm.apiKey.${vendor}`;
+      const prevApiKey = settingsService.getSecret(apiKeySecretKey);
+      await settingsService.setSecret(apiKeySecretKey, demoConfig.apiKey);
       const prevLlm = settingsService.get("llm");
 
       // Build vendor settings patch for optional fields (baseUrl / model / vertex).
@@ -174,6 +176,11 @@ export function registerAuthHandlers(deps: IpcDeps): void {
         deps.rewireReviewerAgent?.();
       } catch {
         await settingsService.patch({ llm: prevLlm });
+        if (prevApiKey === null) {
+          await settingsService.deleteSecret(apiKeySecretKey);
+        } else {
+          await settingsService.setSecret(apiKeySecretKey, prevApiKey);
+        }
         try {
           deps.rewireReviewerAgent?.();
         } catch {
