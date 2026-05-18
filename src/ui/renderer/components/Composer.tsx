@@ -21,6 +21,13 @@ import {
 import { findMarkerAt, parseMarkers } from "../utils/attachment-markers.js";
 import { handleClipboardPaste } from "../utils/clipboard-paste.js";
 import type { UserKeyboardIntentSnapshot } from "../../../shared/chat-origin.js";
+import { SuggestedRepliesGhost } from "./SuggestedRepliesGhost.js";
+import { SuggestedRepliesChipRow } from "./SuggestedRepliesChipRow.js";
+import {
+  acceptSuggestedReply,
+  dismissSuggestedReplies,
+  type SuggestedRepliesSnapshot,
+} from "../hooks/use-suggested-replies.js";
 
 export interface ComposerHandle {
   focus(): void;
@@ -67,6 +74,15 @@ export interface ComposerProps {
   disabled?: boolean;
   placeholder?: string;
   onWarning?: (message: string) => void;
+  /**
+   * Suggested-replies snapshot from `useSuggestedReplies()`. Composer renders
+   * (a) `best` as ghost text inside the textarea when value is empty + not
+   * dismissed, and (b) `alternates` as a chip row above the textarea. Tab
+   * fills the best suggestion; Escape dismisses the current snapshot.
+   *
+   * Spec: `docs/architecture/proposals/suggested-replies-ghost-text.md` §6.2.
+   */
+  suggestedReplies?: SuggestedRepliesSnapshot;
 }
 
 /**
@@ -91,6 +107,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     disabled = false,
     placeholder,
     onWarning,
+    suggestedReplies,
   },
   ref,
 ) {
@@ -215,6 +232,49 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       if (e.nativeEvent.isComposing) return;
 
+      // Suggested Replies (spec §6.2):
+      //   Tab (no modifier) + value empty + best != null + not dismissed
+      //     → fill textarea with `best`, dismiss current snapshot.
+      //   Escape + any active suggestion → dismiss only (LLM-abort path is
+      //     ChatView's ESC handler which runs at document level + is gated
+      //     by `streaming`; dismissing here does not interfere because ESC
+      //     in idle state has no other Composer-side semantics).
+      const best = suggestedReplies?.best ?? null;
+      const alternates = suggestedReplies?.alternates ?? [];
+      const dismissed = suggestedReplies?.isDismissed ?? false;
+      const hasGhost = best !== null && !dismissed && text.length === 0;
+      const hasAnySuggestion = (best !== null || alternates.length > 0) && !dismissed;
+
+      if (
+        e.key === "Tab" &&
+        !e.shiftKey &&
+        !e.altKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        hasGhost &&
+        best !== null
+      ) {
+        e.preventDefault();
+        if (disabled) return;
+        onTextChange(best);
+        acceptSuggestedReply(best);
+        requestAnimationFrame(() => {
+          if (taRef.current) {
+            const pos = best.length;
+            taRef.current.setSelectionRange(pos, pos);
+            taRef.current.focus();
+          }
+        });
+        return;
+      }
+
+      if (e.key === "Escape" && hasAnySuggestion) {
+        // Don't preventDefault — let the document-level ESC handler (ChatView)
+        // still run when streaming. Dismissing the snapshot is additive.
+        dismissSuggestedReplies();
+        // Fall through so other ESC consumers still see the event.
+      }
+
       // Backspace inside or at the trailing edge of a `[Image #N]` style
       // marker → delete the whole block in one keystroke (Slack chip UX).
       // Skip when a modifier is held so word-delete (alt+backspace) and
@@ -258,16 +318,38 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         onSend(captureUserKeyboardIntent());
       }
     },
-    [captureUserKeyboardIntent, disabled, onSend, text, onTextChange],
+    [captureUserKeyboardIntent, disabled, onSend, text, onTextChange, suggestedReplies],
   );
 
   const isFull = liveAttachments.length >= ATTACH_MAX_COUNT;
+  const ghostBest = suggestedReplies?.best ?? null;
+  const ghostVisible =
+    text.length === 0 && ghostBest !== null && !(suggestedReplies?.isDismissed ?? false);
+  const chipAlternates =
+    suggestedReplies && !suggestedReplies.isDismissed ? suggestedReplies.alternates : [];
+
+  const acceptChip = useCallback(
+    (chipText: string) => {
+      if (disabled) return;
+      onTextChange(chipText);
+      acceptSuggestedReply(chipText);
+      requestAnimationFrame(() => {
+        if (taRef.current) {
+          const pos = chipText.length;
+          taRef.current.setSelectionRange(pos, pos);
+          taRef.current.focus();
+        }
+      });
+    },
+    [disabled, onTextChange],
+  );
 
   return (
     <div data-testid="composer" className="min-w-0">
+      <SuggestedRepliesChipRow alternates={chipAlternates} onAccept={acceptChip} />
       <div
         data-testid="composer-input-bar"
-        className="flex min-w-0 w-full items-stretch gap-0 overflow-hidden"
+        className="relative flex min-w-0 w-full items-stretch gap-0 overflow-hidden"
       >
         {/* Strip is rendered ONLY when there is at least one attachment so
             the empty state does not reserve horizontal space. Single chip
@@ -312,6 +394,11 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         {/* v6: Send/Stop 버튼은 BottomActionRow 로 이전. input-bar 안에는
             attachment chip + textarea 만. 키보드 (Enter/Shift+Enter/Ctrl+Enter)
             는 textarea onKeyDown 에서 그대로 처리. */}
+
+        {/* Ghost text overlay — absolute on top of textarea, pointer-events-none
+            so caret + clicks fall through. Visible only when value 빈 + 추천
+            가능. Spec: docs/architecture/proposals/suggested-replies-ghost-text.md */}
+        <SuggestedRepliesGhost text={ghostBest} visible={ghostVisible} />
       </div>
       {isFull ? (
         <div
