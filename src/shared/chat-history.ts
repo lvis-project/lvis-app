@@ -37,6 +37,9 @@ export type SerializedHistoryMessage = {
   turnSummary?: SerializedTurnSummary;
   /** Checkpoint metrics — only on compactBoundary user messages. */
   checkpointMeta?: SerializedCheckpointMeta;
+  /** Issue #911 system-notice marker — assistant entries that are host
+   *  notifications, rendered with destructive styling in the UI. */
+  systemNotice?: NonNullable<MessageMeta["systemNotice"]>;
 };
 
 export function serializeHistoryMessage(
@@ -53,6 +56,7 @@ export function serializeHistoryMessage(
     ...(m.meta?.createdAt !== undefined ? { createdAt: m.meta.createdAt } : {}),
     ...(m.meta?.turnSummary !== undefined ? { turnSummary: m.meta.turnSummary } : {}),
     ...(m.meta?.checkpointMeta !== undefined ? { checkpointMeta: m.meta.checkpointMeta } : {}),
+    ...(m.meta?.systemNotice !== undefined ? { systemNotice: m.meta.systemNotice } : {}),
   };
   const base = {
     index,

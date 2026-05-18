@@ -10,7 +10,15 @@
 import { ConversationHistory, normalizeToolPairInvariant } from "./conversation-history.js";
 import { ToolExecutor, type ToolResult, type ToolUseBlock } from "../tools/executor.js";
 import { HookRunner } from "../hooks/hook-runner.js";
-import { markStaleToolResults, estimateMessagesTokens, getModelPreflightThreshold, getModelUsableContext } from "./auto-compact.js";
+import { markStaleToolResults, estimateMessagesTokens, getModelPreflightThreshold, getModelUsableContext, isContextLengthError } from "./auto-compact.js";
+
+/**
+ * 사용자가 반복적으로 context_error 유발 input 보낼 때 compact API 호출
+ * 폭주 방어 (Issue #910 round-4 security MEDIUM). 정상 사용자는 도달하지
+ * 않는 임계 — 3 회 연속 force-recover 는 *compact 가 reduce 못 하는*
+ * pathological 상태이거나 *adversarial input* 신호.
+ */
+const MAX_FORCE_RECOVER_PER_SESSION = 3;
 import { compactWithBoundary, renderBoundaryAsPreamble } from "./structured-compact.js";
 import { CompressionStatus } from "../shared/compact-status.js";
 import { stubMarkedToolResults } from "./wire-serialize.js";
@@ -149,7 +157,7 @@ export interface TurnCallbacks {
    * which fires on completion.
    */
   onCompactStarted?: (info: {
-    triggerSource: "estimate" | "actual-tokensIn" | "manual";
+    triggerSource: "estimate" | "actual-tokensIn" | "manual" | "force-recover";
     estimatedBefore: number;
     preflight: number;
   }) => void;
@@ -404,6 +412,25 @@ export class ConversationLoop {
   private isCompacting: boolean = false;
   /** LLM compact 가 #N 번째인지 추적하는 numbered checkpoint counter. */
   private compactNum: number = 0;
+  /**
+   * Issue #910 / #900 약속 정합 — `context_error` / `stream_error` 발생 직
+   * 후 user-facing 메시지가 "새 메시지를 보내면 자동 압축이 다시 시도됩니
+   * 다" 라고 약속. 그러나 기본 `runPreflightGuard` 는 cumulativeUsage /
+   * estimateMessagesTokens 임계 기반인데, *Forbidden 시도는 cumulative
+   * 에 기록 안 됨* + estimate 가 chars/4 으로 15-25% 과소 → 다음 turn
+   * preflight 가 미발동, compact 도 NOOP 반환 → 약속 깨짐. 이 flag 는
+   * 다음 turn 의 preflight 가 임계 무시 + preserve=0 으로 force trigger
+   * 하도록 한다. 성공/실패/NOOP 모두 finally 에서 clear.
+   */
+  private contextErrorPending: boolean = false;
+  /**
+   * Force-recover 반복 횟수 — DoS 방어 (security round-4 MED). 사용자가
+   * 반복적으로 context_error 유발 input 보내면 compact LLM API 호출이
+   * 누적 cost. `MAX_FORCE_RECOVER_PER_SESSION` 초과 시 force-recover 진입
+   * 차단 + user-facing 경고. 정상 사용자는 절대 도달하지 않는 임계 (3
+   * 회 연속 force-recover = 3 turn 연속 모델 한도 초과).
+   */
+  private contextErrorRecoveryCount: number = 0;
   /**
    * "Guide" utterance buffer — mid-stream direction adjustments that the
    * user typed while a turn is in flight. Drained at each round boundary in
@@ -1576,7 +1603,19 @@ export class ConversationLoop {
         const userMsg =
           "대화 이력이 모델 한도를 초과했습니다. 새 메시지를 보내면 자동 압축이 다시 시도됩니다.";
         callbacks?.onError?.(userMsg);
-        this.history.append({ role: "assistant", content: userMsg });
+        // Issue #911: mark as systemNotice so the UI renders a destructive
+        // banner (red border + warning icon) instead of a normal assistant
+        // reply. Without this marker the user cannot distinguish a real LLM
+        // turn from a host-emitted error notice.
+        this.history.append({
+          role: "assistant",
+          content: userMsg,
+          meta: { systemNotice: "context-error" },
+        });
+        // Issue #910 follow-up — the user-facing message promises "새 메시지를
+        // 보내면 자동 압축이 다시 시도됩니다". Set a pending flag so the next
+        // runPreflightGuard force-triggers compact regardless of threshold.
+        this.contextErrorPending = true;
         return { text: userMsg, toolCalls: allToolCalls, usage: turnUsage, stopReason: "context-error" };
       }
 
@@ -1587,7 +1626,20 @@ export class ConversationLoop {
           `queryLoop: EARLY-EXIT(stream-error) — round=${roundIndex} userMessage="${stream.userMessage.slice(0, 100)}"`,
         );
         callbacks?.onError?.(stream.userMessage);
-        this.history.append({ role: "assistant", content: stream.userMessage });
+        this.history.append({
+          role: "assistant",
+          content: stream.userMessage,
+          meta: { systemNotice: "stream-error" },
+        });
+        // Issue #910 round-4 security MED — stream_error covers network /
+        // auth / rate-limit / 5xx in addition to context-length. Only set
+        // the force-recover flag when the underlying message *actually*
+        // matches a context-length pattern; for other stream errors
+        // forcing a destructive (preserve=0) compact would just drop the
+        // user's working history for no benefit.
+        if (isContextLengthError(stream.userMessage)) {
+          this.contextErrorPending = true;
+        }
         return { text: stream.userMessage, toolCalls: allToolCalls, usage: turnUsage, stopReason: "stream-error" };
       }
 
@@ -1600,6 +1652,11 @@ export class ConversationLoop {
         // Strip suggested-replies block before persistence — otherwise raw
         // `<suggested_replies>` tags would land in ~/.lvis/sessions/*.jsonl
         // and be fed back to the LLM on every subsequent turn.
+        //
+        // interrupted is *user-initiated* not a host error, so we do NOT
+        // attach systemNotice — the assistant content that was streamed
+        // before the abort is real model output and stays styled normally;
+        // only the "[중단됨]" suffix marks the boundary.
         const savedText = stripSuggestedReplies(stream.text ?? "") + "\n\n[중단됨]";
         this.history.append({ role: "assistant", content: savedText });
         callbacks?.onTextDelta?.("\n\n[중단됨]");
@@ -2020,7 +2077,31 @@ export class ConversationLoop {
     abortSignal?: AbortSignal,
     callbacks?: TurnCallbacks,
   ): Promise<void> {
-    if (!this.isAutoCompactEnabled()) {
+    // Issue #910 follow-up — prior turn ended with context_error / stream_error
+    // and the user-facing message promised auto-compact on the next send.
+    // Force-trigger compact regardless of threshold + autoCompact setting:
+    // the host's promise overrides the user's compact-off preference for this
+    // single recovery cycle (otherwise the conversation is unrecoverable
+    // without manual /compact). Flag clears in `finally` so every path
+    // (success / NOOP / throw) keeps the "single cycle = single clear"
+    // invariant.
+    //
+    // DoS guard (round-4 security MED): if the same session has already
+    // burned through MAX_FORCE_RECOVER_PER_SESSION recovery attempts without
+    // the user being able to make progress, stop force-triggering — the
+    // failure is structural (compact cannot reduce, or input pattern keeps
+    // hitting the limit) and further attempts just multiply API cost.
+    const overRecoveryBudget = this.contextErrorRecoveryCount >= MAX_FORCE_RECOVER_PER_SESSION;
+    const forceRecover = this.contextErrorPending && !overRecoveryBudget;
+    if (this.contextErrorPending && overRecoveryBudget) {
+      log.warn(
+        `preflight: force-recover BUDGET EXHAUSTED (count=${this.contextErrorRecoveryCount}/${MAX_FORCE_RECOVER_PER_SESSION}) — falling back to threshold gate`,
+      );
+      // Stay armed for a normal threshold-based trigger but stop the
+      // override behaviour. Clear the flag so the normal gates apply.
+      this.contextErrorPending = false;
+    }
+    if (!forceRecover && !this.isAutoCompactEnabled()) {
       log.debug("runPreflightGuard: skipped (autoCompact 설정 OFF)");
       return;
     }
@@ -2034,7 +2115,7 @@ export class ConversationLoop {
     const provider = llmSettings.provider;
     const model = llmSettings.vendors[provider].model;
     const preflight = getModelPreflightThreshold(provider, model);
-    if (preflight <= 0) return;
+    if (!forceRecover && preflight <= 0) return;
 
     const messagesBefore = this.history.getMessages();
     const estimated = estimateMessagesTokens(messagesBefore);
@@ -2044,9 +2125,12 @@ export class ConversationLoop {
     // even when the local estimate is below threshold but the live billing said
     // the next round will overflow.
     const actualTokensIn = this.cumulativeUsage.inputTokens;
-    if (estimated < preflight && actualTokensIn < preflight) return;
-    const triggerSource: "estimate" | "actual-tokensIn" =
-      estimated >= preflight ? "estimate" : "actual-tokensIn";
+    if (!forceRecover && estimated < preflight && actualTokensIn < preflight) return;
+    const triggerSource: "estimate" | "actual-tokensIn" | "force-recover" = forceRecover
+      ? "force-recover"
+      : estimated >= preflight
+        ? "estimate"
+        : "actual-tokensIn";
 
     this.isCompacting = true;
     // Notify renderer immediately so it can show a "자동 압축 중..." indicator
@@ -2064,8 +2148,12 @@ export class ConversationLoop {
       // Adaptive preserve budget — usagePct 가 높을수록 더 공격적으로 줄여서
       // compact 가 항상 reduce 보장. red zone (usage >= 100%) 에서는 preserve=0
       // 으로 전체 compact (boundary stub 만 남김).
+      //
+      // forceRecover (context_error pending) 도 동일하게 preserve=0 — provider 가
+      // 직접 거부한 상황이므로 보수적 preserve 가 의미 없음. 약속한 compact
+      // 를 가장 공격적으로 수행하는 게 사용자 약속 정합.
       const usagePct = preflight > 0 ? estimated / preflight : 0;
-      const preserveRecentTokens = usagePct >= 1.0
+      const preserveRecentTokens = forceRecover || usagePct >= 1.0
         ? 0
         : usagePct >= 0.8
           ? Math.max(1_000, Math.floor(preflight * 0.2))
@@ -2100,6 +2188,15 @@ export class ConversationLoop {
       log.warn(`preflight: LLM compact failed — ${(err as Error).message}. context_error safety net 으로 위임.`);
     } finally {
       this.isCompacting = false;
+      // Single-cycle invariant — every force-recover attempt (success /
+      // NOOP / throw) clears the flag and bumps the recovery counter.
+      // Without this in `finally`, a `compactWithBoundary` throw would
+      // leave the flag set and the next turn would force-recover again
+      // → indistinguishable from infinite retry (round-4 architect MAJOR).
+      if (forceRecover) {
+        this.contextErrorPending = false;
+        this.contextErrorRecoveryCount += 1;
+      }
     }
   }
 
