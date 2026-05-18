@@ -5,8 +5,36 @@ import { render, fireEvent } from "@testing-library/react";
 import { TooltipProvider } from "../../../../components/ui/tooltip.js";
 import { InputActionBar } from "../InputActionBar.js";
 import type { RolePreset } from "../../../../data/role-presets.js";
+import type { AssistantContextMenuAction } from "../../../../shared/assistant-context-menu.js";
 
 const mockPreset: RolePreset = { id: "default", name: "기본", systemPromptAdd: "" };
+const codingPreset: RolePreset = { id: "coding", name: "코딩", systemPromptAdd: "Code carefully." };
+
+function installNativeMenuMock() {
+  const previous = (window as unknown as { lvis?: unknown }).lvis;
+  let handler: ((action: AssistantContextMenuAction) => void) | null = null;
+  const unsubscribe = vi.fn();
+  const showAssistantContextMenu = vi.fn(async () => ({ ok: true as const }));
+  const onAssistantContextAction = vi.fn((cb: (action: AssistantContextMenuAction) => void) => {
+    handler = cb;
+    return unsubscribe;
+  });
+  (window as unknown as { lvis?: unknown }).lvis = {
+    ...(previous && typeof previous === "object" ? previous : {}),
+    ui: { showAssistantContextMenu, onAssistantContextAction },
+  };
+  return {
+    showAssistantContextMenu,
+    emit: (action: AssistantContextMenuAction) => handler?.(action),
+    restore: () => {
+      if (previous === undefined) {
+        delete (window as unknown as { lvis?: unknown }).lvis;
+      } else {
+        (window as unknown as { lvis?: unknown }).lvis = previous;
+      }
+    },
+  };
+}
 
 function renderBar(overrides: Partial<Parameters<typeof InputActionBar>[0]> = {}) {
   const props: Parameters<typeof InputActionBar>[0] = {
@@ -124,5 +152,119 @@ describe("InputActionBar (post indexer-removal)", () => {
     expect((btn as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(btn);
     expect(onAttach).not.toHaveBeenCalled();
+  });
+
+  it("opens the assistant context picker through the native menu bridge", () => {
+    const nativeMenu = installNativeMenuMock();
+    try {
+      const { getByTestId } = renderBar({
+        rolePresets: [mockPreset, codingPreset],
+        agentOptions: [{ name: "Planner", description: "", sourceTools: [], triggers: [], source: "user" }],
+        skillOptions: [{ name: "Debugger", description: "", triggers: [], source: "user" }],
+        activeAgentName: "Planner",
+        activeSkillNames: ["Debugger"],
+        activePreset: codingPreset,
+        activePresetId: "coding",
+      });
+      fireEvent.click(getByTestId("iab-assistant-context-button"));
+      const payload = nativeMenu.showAssistantContextMenu.mock.calls[0]?.[0];
+      expect(typeof payload.requestId).toBe("string");
+      expect(typeof payload.x).toBe("number");
+      expect(typeof payload.y).toBe("number");
+      expect(nativeMenu.showAssistantContextMenu).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agents: [{ name: "Planner" }],
+          skills: [{ name: "Debugger" }],
+          personas: [
+            { id: "default", name: "기본" },
+            { id: "coding", name: "코딩" },
+          ],
+          activeAgentName: "Planner",
+          activeSkillNames: ["Debugger"],
+          activePersonaId: "coding",
+        }),
+      );
+    } finally {
+      nativeMenu.restore();
+    }
+  });
+
+  it("opens the assistant context picker on right-click and prevents the DOM context menu", () => {
+    const nativeMenu = installNativeMenuMock();
+    try {
+      const { getByTestId } = renderBar();
+      const button = getByTestId("iab-assistant-context-button");
+      const event = new MouseEvent("contextmenu", {
+        bubbles: true,
+        cancelable: true,
+        clientX: 21,
+        clientY: 34,
+      });
+      button.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(true);
+      expect(nativeMenu.showAssistantContextMenu).toHaveBeenCalledWith(
+        expect.objectContaining({ x: 21, y: 34 }),
+      );
+    } finally {
+      nativeMenu.restore();
+    }
+  });
+
+  it("routes native assistant context actions back to the existing selectors", () => {
+    const nativeMenu = installNativeMenuMock();
+    const onSelectAgent = vi.fn();
+    const onSelectPreset = vi.fn();
+    const onChangeSkillNames = vi.fn();
+    try {
+      const { getByTestId } = renderBar({
+        rolePresets: [mockPreset, codingPreset],
+        onSelectAgent,
+        onSelectPreset,
+        onChangeSkillNames,
+      });
+      fireEvent.click(getByTestId("iab-assistant-context-button"));
+      const firstRequestId = nativeMenu.showAssistantContextMenu.mock.calls[0]?.[0]?.requestId;
+      expect(typeof firstRequestId).toBe("string");
+
+      nativeMenu.emit({ requestId: "other", kind: "agent", name: "Ignored" });
+      expect(onSelectPreset).not.toHaveBeenCalled();
+      expect(onSelectAgent).not.toHaveBeenCalled();
+
+      nativeMenu.emit({ requestId: firstRequestId, kind: "agent", name: "Planner" });
+      nativeMenu.emit({ requestId: firstRequestId, kind: "agent", name: "Duplicate" });
+      fireEvent.click(getByTestId("iab-assistant-context-button"));
+      const secondRequestId = nativeMenu.showAssistantContextMenu.mock.calls[1]?.[0]?.requestId;
+      nativeMenu.emit({ requestId: secondRequestId, kind: "persona", id: "coding" });
+      fireEvent.click(getByTestId("iab-assistant-context-button"));
+      const thirdRequestId = nativeMenu.showAssistantContextMenu.mock.calls[2]?.[0]?.requestId;
+      nativeMenu.emit({ requestId: thirdRequestId, kind: "skills-clear" });
+      fireEvent.click(getByTestId("iab-assistant-context-button"));
+      const fourthRequestId = nativeMenu.showAssistantContextMenu.mock.calls[3]?.[0]?.requestId;
+      nativeMenu.emit({ requestId: fourthRequestId, kind: "skill-toggle", name: "Debugger" });
+
+      expect(onSelectAgent).toHaveBeenCalledWith("Planner");
+      expect(onSelectAgent).not.toHaveBeenCalledWith("Duplicate");
+      expect(onSelectPreset).toHaveBeenCalledWith("coding");
+      expect(onChangeSkillNames).toHaveBeenCalledTimes(2);
+      const clearUpdater = onChangeSkillNames.mock.calls[0]?.[0] as (current: string[]) => string[];
+      const toggleUpdater = onChangeSkillNames.mock.calls[1]?.[0] as (current: string[]) => string[];
+      expect(clearUpdater(["Debugger"])).toEqual([]);
+      expect(toggleUpdater(["Other"])).toEqual(["Other", "Debugger"]);
+      expect(toggleUpdater(["Debugger"])).toEqual([]);
+    } finally {
+      nativeMenu.restore();
+    }
+  });
+
+  it("keeps fixed trailing controls shrink-proof while permission slots clip first", () => {
+    const { getByTestId, getByText } = renderBar({
+      permissionSlot: <span data-testid="long-permission-slot">자동 검증 · 읽기 허용 · 매우 긴 권한 상태 텍스트</span>,
+      approvalSlot: <span data-testid="long-approval-slot">승인 확인 실패 · 매우 긴 큐 상태 텍스트</span>,
+    });
+    expect(getByTestId("iab-trailing").className).toContain("overflow-hidden");
+    expect(getByTestId("iab-permission-slots").className).toContain("min-w-0");
+    expect(getByTestId("iab-permission-slots").className).toContain("overflow-hidden");
+    expect(getByTestId("iab-assistant-context-button").className).toContain("shrink-0");
+    expect(getByText("Thinking").parentElement?.className).toContain("shrink-0");
   });
 });
