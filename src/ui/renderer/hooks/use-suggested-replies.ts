@@ -91,7 +91,6 @@ let ipcUnsub: (() => void) | null = null;
  */
 function ensureIpcWired(): void {
   if (ipcWired) return;
-  ipcWired = true;
   try {
     const api = getApi();
     ipcUnsub = api.onChatStream((ev) => {
@@ -104,10 +103,13 @@ function ensureIpcWired(): void {
       const cleaned = replies.filter((r): r is string => typeof r === "string");
       pushSuggestedReplies(cleaned);
     });
+    // Only mark wired after successful subscription — if getApi() / onChatStream
+    // throws, leave `ipcWired = false` so the next consumer can retry once the
+    // bridge is available (e.g. SSR-then-hydrate, or test that wires the stub
+    // after first render).
+    ipcWired = true;
   } catch {
-    // No lvisApi (e.g. SSR / isolated unit test that didn't stub) — fall back
-    // to manual pushSuggestedReplies (tests + future direct callers).
-    ipcWired = false;
+    ipcUnsub = null;
   }
 }
 
@@ -125,4 +127,20 @@ export function useSuggestedReplies(): SuggestedRepliesSnapshot {
     ensureIpcWired();
   }, []);
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+}
+
+// HMR cleanup (dev only). Without this, Vite hot-replacing this module leaves
+// the previous IPC subscription dangling — both old + new closures fire on
+// every `suggested_replies` event, doubling `pushSuggestedReplies` calls and
+// freezing the store at whichever closure ran last. Disposing on dispose
+// ensures the next module instance re-arms cleanly.
+//
+// `import.meta.hot` is a Vite-injected runtime feature; the project does not
+// pull in `vite/client` globally so we narrow it via a local structural type
+// instead of polluting tsconfig with a wider type bundle.
+const hot = (import.meta as { hot?: { dispose: (cb: () => void) => void } }).hot;
+if (hot) {
+  hot.dispose(() => {
+    __teardownSuggestedRepliesIpcForTests();
+  });
 }
