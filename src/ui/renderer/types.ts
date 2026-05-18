@@ -111,6 +111,12 @@ export type LLMVendorSettingsRenderer = {
 
 export type AppSettings = {
   llm: {
+    /**
+     * #893 — Top-level auth toggle. `"manual"` shows the vendor dropdown +
+     * per-vendor settings; `"login"` collapses everything down to a single
+     * Login button whose backend chooses the vendor.
+     */
+    authMode: "manual" | "login";
     provider: string;
     vendors: Record<string, LLMVendorSettingsRenderer>;
     streamSmoothing: "none" | "word" | "char";
@@ -147,6 +153,8 @@ export type AppSettings = {
   /** Experimental feature flags — all default false. */
   features?: {
     idlePreferenceRefresh?: boolean;
+    /** #893 — `true` after the user has dismissed the first-boot onboarding. */
+    onboardingCompleted?: boolean;
   };
 };
 
@@ -218,6 +226,27 @@ export type LvisApi = {
   setMarketplaceApiKey: (k: string) => Promise<{ ok: true }>;
   hasMarketplaceApiKey: () => Promise<boolean>;
   deleteMarketplaceApiKey: () => Promise<{ ok: true }>;
+  /**
+   * #893 — Top-level mockup credential login. On `ok: true` the host has
+   * installed the demo API key into the encrypted secret store AND flipped
+   * top-level settings (`authMode = "login"`, `provider = <vendor>`). The
+   * vendor is decided by the backend (`LVIS_DEMO_VENDOR`, default
+   * `"openai"`) — the renderer never sends one. The `error` codes are
+   * kebab-case English (`invalid-credentials`, `no-demo-key`); the
+   * user-facing Korean text is constructed in the caller.
+   */
+  loginMockup: (payload: { username: string; password: string }) => Promise<
+    | {
+        ok: true;
+        vendor: string;
+        model?: string;
+        baseUrl?: string;
+        vertexProject?: string;
+        vertexLocation?: string;
+        fieldsApplied: string[];
+      }
+    | { ok: false; error: string }
+  >;
   openSettingsWindow: (initialTab?: string) => Promise<{ ok: true; windowId: number } | { ok: false; error: string }>;
   notifySettingsWindowSaved: () => Promise<{ ok: true } | { ok: false; error: string }>;
   onSettingsWindowSaved: (handler: () => void) => () => void;
