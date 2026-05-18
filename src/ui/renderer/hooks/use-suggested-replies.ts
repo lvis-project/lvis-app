@@ -6,9 +6,21 @@
 //
 // Spec: `docs/architecture/proposals/suggested-replies-ghost-text.md` §6.1.
 //
-// PR-B scope. PR-D will add dismiss memory / animation / telemetry.
+// PR-D additions:
+//   • Slash-command prefix filter (`/`, `!`, `$`) — security guard so a
+//     malicious / hallucinated suggestion cannot ride straight into a host
+//     command (proposal §10 follow-up).
+//   • Turn-scoped dismiss memory — once the user dismisses, subsequent pushes
+//     within the same turn keep `isDismissed: true`. A *new user message*
+//     calls `clearDismissedReplies()` to reset the latch so the next turn's
+//     suggestions render fresh.
+//   • Telemetry — `shown / accepted-best / accepted-chip / dismissed /
+//     ignored` counters routed through `telemetry/suggested-replies-counter`.
 import { useEffect, useSyncExternalStore } from "react";
 import { getApi } from "../api-client.js";
+import {
+  recordSuggestedRepliesEvent,
+} from "../../../telemetry/suggested-replies-counter.js";
 
 export interface SuggestedRepliesSnapshot {
   best: string | null;
@@ -22,12 +34,35 @@ const EMPTY_SNAPSHOT: SuggestedRepliesSnapshot = {
   isDismissed: false,
 };
 
+// Suggestions whose leading character is one of these prefixes are filtered
+// out before they reach the store. Slash + bang + dollar map to the host's
+// command-style entrypoints (e.g. `/admin`, `/clear`, `!shell`, `$env`); we
+// never want an LLM-generated suggestion to silently inject one of those.
+// Defined here (and not in the engine) because the same string could be a
+// legitimate token in a future channel — the renderer is the right place to
+// enforce a UI-policy filter for *suggestion* surfacing.
+const SLASH_COMMAND_PATTERN = /^[/!$]/;
+
 // Module-level store — single source of truth for all subscribers. Reset to
 // `EMPTY_SNAPSHOT` on every new replies push so React's `Object.is` snapshot
 // check correctly skips renders when nothing changed (object identity stable
 // across pushes that yield 0 replies).
 let snapshot: SuggestedRepliesSnapshot = EMPTY_SNAPSHOT;
 const subscribers = new Set<() => void>();
+
+// PR-D dismiss-memory: when the user hits Escape, we latch a flag so any
+// subsequent push *within the same turn* (rare but possible — e.g. a plugin
+// re-emit) keeps the snapshot dismissed. `clearDismissedReplies()` is called
+// by the Composer when the user sends a new message, releasing the latch so
+// the next turn's suggestions render fresh.
+let dismissLatch = false;
+
+// PR-D ignored telemetry: when a new non-empty push arrives while the prior
+// snapshot was *active and unaccepted* (best != null, not dismissed), we
+// record an `ignored` event before overwriting. Tracking the active flag as
+// a separate scalar keeps the bookkeeping outside `snapshot` so it doesn't
+// pollute the public snapshot identity.
+let priorActiveUnused = false;
 
 function notify(): void {
   for (const cb of subscribers) cb();
@@ -45,17 +80,44 @@ function getSnapshot(): SuggestedRepliesSnapshot {
 }
 
 export function pushSuggestedReplies(replies: string[]): void {
-  if (replies.length === 0) {
+  // Slash-command filter runs *before* the empty-check so a list whose only
+  // entries are command-prefixed correctly collapses to "no suggestions".
+  const filtered = replies.filter(
+    (r) => typeof r === "string" && r.length > 0 && !SLASH_COMMAND_PATTERN.test(r.trim()),
+  );
+
+  // Telemetry: if the previous snapshot was still active + unaccepted when a
+  // new push arrives, the user effectively ignored it. Record before we
+  // overwrite (and only on a *fresh* non-empty arrival — an empty push
+  // means "clear" which isn't a user-driven ignore).
+  if (priorActiveUnused && filtered.length > 0) {
+    recordSuggestedRepliesEvent("ignored");
+  }
+
+  if (filtered.length === 0) {
+    priorActiveUnused = false;
     if (snapshot === EMPTY_SNAPSHOT) return;
     snapshot = EMPTY_SNAPSHOT;
     notify();
     return;
   }
+
+  // Dismiss-memory: if the latch is set, the new push remains dismissed so
+  // the user's prior Escape decision is honored across the (rare) intra-turn
+  // re-push. `clearDismissedReplies()` releases the latch.
   snapshot = {
-    best: replies[0]!,
-    alternates: replies.slice(1),
-    isDismissed: false,
+    best: filtered[0]!,
+    alternates: filtered.slice(1),
+    isDismissed: dismissLatch,
   };
+  // Only count as "shown" when the snapshot is actually visible (not latched
+  // into dismissed state).
+  if (!dismissLatch) {
+    recordSuggestedRepliesEvent("shown");
+    priorActiveUnused = true;
+  } else {
+    priorActiveUnused = false;
+  }
   notify();
 }
 
@@ -63,20 +125,47 @@ export function dismissSuggestedReplies(): void {
   if (snapshot.isDismissed) return;
   if (snapshot.best === null && snapshot.alternates.length === 0) return;
   snapshot = { ...snapshot, isDismissed: true };
+  dismissLatch = true;
+  priorActiveUnused = false;
+  recordSuggestedRepliesEvent("dismissed");
   notify();
 }
 
-export function acceptSuggestedReply(_text: string): void {
+/**
+ * Reset the dismiss latch + telemetry "active" flag. Called by the Composer
+ * when the user sends a new message — at that point the prior turn is over
+ * and the next push (next turn) should render fresh.
+ *
+ * Idempotent. Safe to call when nothing is dismissed.
+ */
+export function clearDismissedReplies(): void {
+  dismissLatch = false;
+  // Also clear `priorActiveUnused` — sending the message means the user
+  // engaged with the turn, so any prior suggestion that's about to be
+  // replaced shouldn't count as "ignored".
+  priorActiveUnused = false;
+}
+
+export function acceptSuggestedReply(
+  _text: string,
+  source: "best" | "chip" = "best",
+): void {
   // Composer 가 채워 넣은 후 호출. 추천은 1회성이므로 store 비움.
-  // _text 는 telemetry (PR-D) 에서 사용 예정 — 현 시점에서는 reset 만.
   if (snapshot === EMPTY_SNAPSHOT) return;
+  recordSuggestedRepliesEvent(source === "best" ? "accepted-best" : "accepted-chip");
   snapshot = EMPTY_SNAPSHOT;
+  // Accept also releases the dismiss latch — the snapshot was consumed, so
+  // the next push should render fresh regardless of any prior Escape.
+  dismissLatch = false;
+  priorActiveUnused = false;
   notify();
 }
 
 // Test-only: reset between cases.
 export function __resetSuggestedRepliesStoreForTests(): void {
   snapshot = EMPTY_SNAPSHOT;
+  dismissLatch = false;
+  priorActiveUnused = false;
   // 구독자는 비우지 않음 — 활성 컴포넌트가 다시 subscribe 하므로.
 }
 
