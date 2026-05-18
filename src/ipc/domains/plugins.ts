@@ -27,6 +27,7 @@ import { LVIS_TOKEN_NAMES } from "../../shared/plugin-ui-tokens.js";
 import { pluginAssetUrlFromRealPath } from "../../main/plugin-asset-protocol.js";
 import { preparePythonRuntimeForInstalledPlugin, withPluginInstallLock } from "../../plugins/install-lifecycle.js";
 import { uninstallPluginWithLifecycle } from "../../plugins/uninstall-lifecycle.js";
+import { normalizeInstallPolicy } from "../../plugins/runtime/manifest-validation.js";
 import { lvisHome } from "../../shared/lvis-home.js";
 const log = createLogger("lvis");
 
@@ -305,8 +306,44 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   ipcMain.handle("lvis:plugins:install", async (e, pluginId: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:plugins:install", e); return UNAUTHORIZED_FRAME; }
     return withPluginInstallLock(pluginId, async () => {
+      // Per-plugin actor resolution — catalog 의 installPolicy 가 admin 인
+      // plugin (예: meeting v0.4.14+, local-indexer v0.4.11+) 의 사용자 update
+      // click 시 actor="it-admin" 자동 escalation. 일괄 처리 아님 — *각 plugin*
+      // 의 catalog policy 를 조회하여 admin 인 경우에만 escalate. user policy
+      // plugin 은 default "user" 유지. catalog 가 signed marketplace truth 이므로
+      // escalation 은 boot-time `ensureManagedInstalled` 의 actor="it-admin"
+      // 패턴과 동일한 trust anchor 로 정당화됨. catalog fetch 실패 시 default
+      // "user" — install path 의 deployment-guard 가 다시 차단.
+      let actor: "user" | "it-admin" = "user";
+      try {
+        const catalogItem = await pluginMarketplace.getFetcher().getPluginDetail(pluginId);
+        if (catalogItem && normalizeInstallPolicy(catalogItem) === "admin") {
+          actor = "it-admin";
+          try {
+            auditLogger.log({
+              timestamp: new Date().toISOString(),
+              sessionId: "ipc-guard",
+              type: "info",
+              input: JSON.stringify({
+                channel: "lvis:plugins:install",
+                event: "plugin-install-escalation",
+                pluginId,
+                catalogPolicy: "admin",
+                actorOriginal: "user",
+                actorEscalated: "it-admin",
+              }),
+            });
+          } catch {
+            // Audit failure must never block install.
+          }
+        }
+      } catch (err) {
+        log.warn(
+          `lvis:plugins:install: catalog policy lookup failed for ${pluginId} — proceeding with actor="user" (${(err as Error).message})`,
+        );
+      }
       broadcastPluginLifecycleEvent("lvis:plugins:install-progress", { slug: pluginId, phase: "installing" });
-      const result = await pluginMarketplace.install(pluginId, "user", (evt) => {
+      const result = await pluginMarketplace.install(pluginId, actor, (evt) => {
         if (evt.phase === "downloading") {
           broadcastPluginLifecycleEvent("lvis:plugins:install-progress", {
             slug: pluginId,
