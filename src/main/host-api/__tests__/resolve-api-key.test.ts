@@ -520,3 +520,153 @@ describe("resolveApiKey — baseUrl present on azure-foundry success", () => {
     }
   });
 });
+
+describe("resolveApiKey — registry.installSource precedence (#958 round-1)", () => {
+  it("registry.installSource='admin' triggers Tier-3 bypass even when manifest.installPolicy='user'", async () => {
+    // Setup: plugin's manifest says `"user"` (so Tier-3 should normally
+    // run and deny — the registry holds no grant), but the host-verified
+    // registry entry was recorded with `installSource:"admin"`. With the
+    // round-1 fix the registry value MUST win — Tier-3 is bypassed and
+    // the secret is returned.
+    const manifest = manifestFor("p", ["llm.apiKey.openai"]);
+    // Note: NO `seedRegistryWithGrant` call — the whitelist registry has
+    // no grant for this plugin. Without admin-bypass Tier-3 would deny.
+    const auditLogger = makeAuditLogger();
+    const result = await resolveApiKey(
+      { purpose: "llm", vendor: "openai" },
+      {
+        pluginId: "p",
+        manifest, // manifest.installPolicy === undefined (~"user")
+        manifestSha256: shaOfManifest(manifest),
+        settingsService: makeSettingsService({
+          provider: "openai",
+          secrets: { "llm.apiKey.openai": "sk-admin-host" },
+        }) as never,
+        auditLogger,
+        // Host-verified install record: admin install.
+        registryInstallSource: "admin",
+      },
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.bearer()).toBe("sk-admin-host");
+    }
+    // Audit trail records the bypass with the registry source.
+    const bypassLine = auditLogger.mock.mock.calls.find((c) =>
+      String(c[0]?.input ?? "").includes("policy=admin tier3-bypassed"),
+    );
+    expect(bypassLine).toBeDefined();
+    expect(String(bypassLine?.[0]?.input ?? "")).toContain(
+      "source=registry.installSource",
+    );
+  });
+
+  it("registry.installSource='user' overrides a malicious manifest.installPolicy='admin'", async () => {
+    // The attack: a malicious post-install patch flips `plugin.json` to
+    // `"installPolicy":"admin"` to inherit Tier-3 bypass. The registry
+    // still holds the verified `"user"` record. With the round-1 fix
+    // the registry wins and the plugin is denied (no whitelist grant).
+    const manifest = {
+      ...manifestFor("p", ["llm.apiKey.openai"]),
+      installPolicy: "admin" as const,
+    };
+    const result = await resolveApiKey(
+      { purpose: "llm", vendor: "openai" },
+      {
+        pluginId: "p",
+        manifest,
+        manifestSha256: shaOfManifest(manifest),
+        settingsService: makeSettingsService({
+          provider: "openai",
+          secrets: { "llm.apiKey.openai": "sk-host" },
+        }) as never,
+        auditLogger: makeAuditLogger(),
+        registryInstallSource: "user",
+      },
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("not-whitelisted");
+  });
+
+  it("falls back to manifest.installPolicy when registry.installSource is absent (legacy entries)", async () => {
+    // Legacy registries that pre-date the `installSource` field still
+    // need the bypass to work via the manifest path so the #955 fix
+    // remains effective for pre-migration data.
+    const manifest = {
+      ...manifestFor("p", ["llm.apiKey.openai"]),
+      installPolicy: "admin" as const,
+    };
+    const result = await resolveApiKey(
+      { purpose: "llm", vendor: "openai" },
+      {
+        pluginId: "p",
+        manifest,
+        manifestSha256: shaOfManifest(manifest),
+        settingsService: makeSettingsService({
+          provider: "openai",
+          secrets: { "llm.apiKey.openai": "sk-host" },
+        }) as never,
+        auditLogger: makeAuditLogger(),
+        // `registryInstallSource` deliberately omitted → manifest path.
+      },
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.bearer()).toBe("sk-host");
+  });
+
+  it("emits hostSecret_admin_bypass counter on admin-bypass success", async () => {
+    const { getHostSecretCounter } = await import(
+      "../../../telemetry/host-secret-counters.js"
+    );
+    const manifest = manifestFor("p", ["llm.apiKey.openai"]);
+    const result = await resolveApiKey(
+      { purpose: "llm", vendor: "openai" },
+      {
+        pluginId: "p",
+        manifest,
+        manifestSha256: shaOfManifest(manifest),
+        settingsService: makeSettingsService({
+          provider: "openai",
+          secrets: { "llm.apiKey.openai": "sk-admin" },
+        }) as never,
+        auditLogger: makeAuditLogger(),
+        registryInstallSource: "admin",
+      },
+    );
+    expect(result.ok).toBe(true);
+    expect(getHostSecretCounter("hostSecret_admin_bypass", "p", "llm")).toBe(1);
+    // The regular read counter is incremented on top, so totals stay
+    // comparable across bypass and non-bypass paths.
+    expect(getHostSecretCounter("hostSecret_read", "p", "llm")).toBe(1);
+  });
+
+  it("audit `source=manifest.installPolicy` when registry value absent (#958)", async () => {
+    const manifest = {
+      ...manifestFor("p", ["llm.apiKey.openai"]),
+      installPolicy: "admin" as const,
+    };
+    const auditLogger = makeAuditLogger();
+    const result = await resolveApiKey(
+      { purpose: "llm", vendor: "openai" },
+      {
+        pluginId: "p",
+        manifest,
+        manifestSha256: shaOfManifest(manifest),
+        settingsService: makeSettingsService({
+          provider: "openai",
+          secrets: { "llm.apiKey.openai": "sk-x" },
+        }) as never,
+        auditLogger,
+        // registryInstallSource omitted → manifest fallback.
+      },
+    );
+    expect(result.ok).toBe(true);
+    const bypassLine = auditLogger.mock.mock.calls.find((c) =>
+      String(c[0]?.input ?? "").includes("policy=admin tier3-bypassed"),
+    );
+    expect(bypassLine).toBeDefined();
+    expect(String(bypassLine?.[0]?.input ?? "")).toContain(
+      "source=manifest.installPolicy",
+    );
+  });
+});

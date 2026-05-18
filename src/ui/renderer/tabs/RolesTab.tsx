@@ -4,7 +4,7 @@ import { Button } from "../../../components/ui/button.js";
 import { Input } from "../../../components/ui/input.js";
 import { Textarea } from "../../../components/ui/textarea.js";
 import { cloneDefaultRolePresets, type RolePreset } from "../../../data/role-presets.js";
-import type { LvisApi } from "../types.js";
+import { isIpcErrorResult, type LvisApi } from "../types.js";
 import { useNotifySaved } from "../contexts/saved-toast.js";
 import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
 import { SettingsSection } from "../components/SettingsSection.js";
@@ -96,6 +96,9 @@ export function RolesTab({ api }: { api: LvisApi }) {
     setRolePresets(next);
     try {
       const settings = await api.updateSettings({ roles: { presets: next } });
+      if (isIpcErrorResult(settings)) {
+        throw new Error(settings.message ?? settings.error);
+      }
       setRolePresets(settings.roles.presets);
       setStatus("역할 프롬프트를 저장했습니다.");
       notifySaved();

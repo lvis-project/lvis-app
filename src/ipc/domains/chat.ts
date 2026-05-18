@@ -343,6 +343,20 @@ async function runStreamedTurn(
         }),
       onToolStart: (name, toolInput, meta) =>
         send({ type: "tool_start", name, input: toolInput, ...meta }),
+      onPermissionReview: (event) =>
+        send({
+          type: "permission_review",
+          reviewStatus: event.status,
+          name: event.toolName,
+          toolCategory: event.toolCategory,
+          source: event.source,
+          groupId: event.groupId,
+          toolUseId: event.toolUseId,
+          displayOrder: event.displayOrder,
+          verdictLevel: event.verdictLevel,
+          reason: event.reason,
+          approvalPurpose: event.approvalPurpose,
+        }),
       onToolEnd: (name, toolResult, isError, meta, uiPayload, durationMs) =>
         send({ type: "tool_end", name, result: toolResult, isError, ...meta, ...(uiPayload && { uiPayload }), durationMs }),
       onError: (error) => send({ type: "error", error }),
@@ -1237,8 +1251,13 @@ export function registerChatHandlers(deps: IpcDeps): void {
     const answers = rawAnswers
       ? rawAnswers.map((entry) => {
           const a = (entry ?? {}) as Record<string, unknown>;
+          const multiRaw = Array.isArray(a.choices) ? (a.choices as unknown[]) : null;
+          const choices = multiRaw
+            ? multiRaw.filter((c): c is string => typeof c === "string" && c.length > 0)
+            : undefined;
           return {
             choice: typeof a.choice === "string" ? a.choice : undefined,
+            choices: choices && choices.length > 0 ? choices : undefined,
             freeText: typeof a.freeText === "string" ? a.freeText : undefined,
           };
         })

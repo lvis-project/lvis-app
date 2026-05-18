@@ -26,16 +26,18 @@ export function useStatusBarMarketplace({ api, upsertPersistent, removePersisten
         upsertPersistent({
           id: "marketplace:online",
           severity: result.online ? "success" : "error",
-          label: "Marketplace",
-          value: result.online ? "online" : "offline",
+          label: "🛒",
+          value: result.online ? "🟢" : "🔴",
+          a11yLabel: result.online ? "마켓플레이스 온라인" : "마켓플레이스 오프라인",
         });
       } catch {
         if (cancelled || my !== pingToken) return;
         upsertPersistent({
           id: "marketplace:online",
           severity: "error",
-          label: "Marketplace",
-          value: "offline",
+          label: "🛒",
+          value: "🔴",
+          a11yLabel: "마켓플레이스 오프라인",
         });
       }
     };

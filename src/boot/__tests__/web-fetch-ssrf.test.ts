@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { registerBuiltinTools } from "../tools.js";
 import { ToolRegistry } from "../../tools/registry.js";
+import { registerStandardCategories } from "../../permissions/category-registry.js";
+import { PermissionManager } from "../../permissions/permission-manager.js";
 
 /**
  * web_fetch must route through NetworkGuard.fetchPublicHttpResponse so
@@ -53,5 +55,50 @@ describe("web_fetch SSRF guard", () => {
     const result = await tool.execute({ url: "file:///etc/passwd" }, {} as never);
     expect(result.isError).toBe(true);
     expect(result.output).toMatch(/http and https/i);
+  });
+
+  it("scopes private network access behind a separate approval key", () => {
+    const tool = makeWebFetchTool();
+
+    expect(tool.category).toBe("read");
+    expect(tool.categoryForInput?.({
+      url: "http://10.185.177.209:8080/status",
+      allowPrivateNetwork: true,
+    })).toBe("network");
+    expect(tool.approvalCacheKey?.({
+      url: "http://10.185.177.209:8080/status",
+      allowPrivateNetwork: true,
+    })).toBe("private-network:http://10.185.177.209:8080");
+    expect(tool.approvalCacheKey?.({
+      url: "http://10.185.177.209:8080/status",
+    })).toBeUndefined();
+  });
+
+  it("does not reuse the bare web_fetch allow rule for private network access", () => {
+    registerStandardCategories();
+    const pm = new PermissionManager();
+    pm.setRules([{ pattern: "web_fetch", action: "allow" }]);
+
+    const publicDecision = pm.checkDetailed("web_fetch", "builtin", "network", null, {});
+    expect(publicDecision.decision).toBe("allow");
+
+    const privateDecision = pm.checkDetailed(
+      "web_fetch",
+      "builtin",
+      "network",
+      null,
+      { approvalCacheKey: "web_fetch:private-network:http://10.185.177.209:8080" },
+    );
+    expect(privateDecision.decision).toBe("ask");
+  });
+
+  it("still rejects loopback when private network access is requested", async () => {
+    const tool = makeWebFetchTool();
+    const result = await tool.execute(
+      { url: "http://127.0.0.1/", allowPrivateNetwork: true },
+      {} as never,
+    );
+    expect(result.isError).toBe(true);
+    expect(result.output).toMatch(/non-public address/i);
   });
 });

@@ -268,6 +268,30 @@ describe("SettingsService LLM per-vendor patching", () => {
     expect(llm.vendors.openai.model).toBe("gpt-5-turbo");
   });
 
+  it("replaceLlm removes optional transport fields that merge patches would retain", async () => {
+    const service = new SettingsService({ userDataPath });
+    const original = service.get("llm");
+
+    await service.patch({
+      llm: {
+        provider: "openai",
+        vendors: {
+          openai: {
+            baseUrl: "https://proxy.example/v1",
+            vertexProject: "should-clear",
+            vertexLocation: "us-central1",
+          },
+        },
+      },
+    });
+    await service.replaceLlm(original);
+
+    const llm = service.get("llm");
+    expect(llm.vendors.openai.baseUrl).toBeUndefined();
+    expect(llm.vendors.openai.vertexProject).toBeUndefined();
+    expect(llm.vendors.openai.vertexLocation).toBeUndefined();
+  });
+
   it("coerces a stale unknown provider on disk to the default", () => {
     // Simulate an old install where the user had a since-removed vendor
     // selected. Without coercion, `llm.vendors[llm.provider]` would be

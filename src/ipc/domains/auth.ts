@@ -128,7 +128,10 @@ export function registerAuthHandlers(deps: IpcDeps): void {
       const fieldsApplied: string[] = ["apiKey"];
 
       // Persist the API key into the encrypted secret store.
-      await settingsService.setSecret(`llm.apiKey.${vendor}`, demoConfig.apiKey);
+      const apiKeySecretKey = `llm.apiKey.${vendor}`;
+      const prevApiKey = settingsService.getSecret(apiKeySecretKey);
+      await settingsService.setSecret(apiKeySecretKey, demoConfig.apiKey);
+      const prevLlm = settingsService.get("llm");
 
       // Build vendor settings patch for optional fields (baseUrl / model / vertex).
       // Only apply fields that the demo config actually provides — this ensures
@@ -167,9 +170,28 @@ export function registerAuthHandlers(deps: IpcDeps): void {
 
       // #893 — refresh plugin wildcard so a plugin's next `hostApi.config.get
       // ("hostApiKey")` observes the newly-installed key without an app
-      // restart. The reviewer is rewired by the same closure path the
-      // settings IPC handler uses; keeping the helper optional so unit tests
-      // that don't wire the AppServices bag stay simple.
+      // restart. Reviewer wiring follows the active chat provider/model, so
+      // this login path must rewire through the same closure as settings:update.
+      try {
+        deps.rewireReviewerAgent?.();
+      } catch {
+        await settingsService.replaceLlm(prevLlm);
+        if (prevApiKey === null) {
+          await settingsService.deleteSecret(apiKeySecretKey);
+        } else {
+          await settingsService.setSecret(apiKeySecretKey, prevApiKey);
+        }
+        try {
+          deps.rewireReviewerAgent?.();
+        } catch {
+          // Rolled back to the previous active LLM settings. Keep returning
+          // the machine-readable error so the renderer can surface retry UI.
+        }
+        deps.conversationLoop?.refreshProvider?.();
+        deps.refreshActiveLlmWildcard?.();
+        return { ok: false, error: "reviewer-rewire-failed" };
+      }
+      deps.conversationLoop?.refreshProvider?.();
       deps.refreshActiveLlmWildcard?.();
       try {
         // PR #894 T1-10 — `keySource=<envVar>` previously leaked the exact

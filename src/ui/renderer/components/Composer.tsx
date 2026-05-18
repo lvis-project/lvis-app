@@ -5,6 +5,7 @@ import {
   useImperativeHandle,
   useMemo,
   useRef,
+  useState,
   type Dispatch,
   type SetStateAction,
 } from "react";
@@ -21,6 +22,14 @@ import {
 import { findMarkerAt, parseMarkers } from "../utils/attachment-markers.js";
 import { handleClipboardPaste } from "../utils/clipboard-paste.js";
 import type { UserKeyboardIntentSnapshot } from "../../../shared/chat-origin.js";
+import { SuggestedRepliesGhost } from "./SuggestedRepliesGhost.js";
+import { SuggestedRepliesChipRow } from "./SuggestedRepliesChipRow.js";
+import {
+  acceptSuggestedReply,
+  clearDismissedReplies,
+  dismissSuggestedReplies,
+  type SuggestedRepliesSnapshot,
+} from "../hooks/use-suggested-replies.js";
 
 export interface ComposerHandle {
   focus(): void;
@@ -67,6 +76,15 @@ export interface ComposerProps {
   disabled?: boolean;
   placeholder?: string;
   onWarning?: (message: string) => void;
+  /**
+   * Suggested-replies snapshot from `useSuggestedReplies()`. Composer renders
+   * (a) `best` as ghost text inside the textarea when value is empty + not
+   * dismissed, and (b) `alternates` as a chip row above the textarea. Tab
+   * fills the best suggestion; Escape dismisses the current snapshot.
+   *
+   * Spec: `docs/architecture/proposals/suggested-replies-ghost-text.md` §6.2.
+   */
+  suggestedReplies?: SuggestedRepliesSnapshot;
 }
 
 /**
@@ -91,10 +109,21 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     disabled = false,
     placeholder,
     onWarning,
+    suggestedReplies,
   },
   ref,
 ) {
   const taRef = useRef<HTMLTextAreaElement | null>(null);
+  // IME composition state (e.g. 한글 조합 중). Spec §8: ImePreedit 중 → ghost
+  // hide, composition 끝나면 reappear. Tracked via React composition events
+  // because `e.nativeEvent.isComposing` is only available inside keydown — the
+  // ghost render path needs the value at render time, not just on key events.
+  const [isComposing, setIsComposing] = useState(false);
+  // PR-D ↑/↓ chip cycle: index of the currently-focused alternate chip, or
+  // `null` when focus is in the textarea. Composer owns this state so the
+  // textarea's keydown handler can advance it (ChipRow is otherwise a leaf
+  // and would have no way to know about the textarea's key events).
+  const [chipFocusIdx, setChipFocusIdx] = useState<number | null>(null);
 
   const captureUserKeyboardIntent = useCallback((): UserKeyboardIntentSnapshot => {
     const api = (globalThis as typeof globalThis & {
@@ -215,6 +244,100 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       if (e.nativeEvent.isComposing) return;
 
+      // Suggested Replies (spec §6.2):
+      //   Tab (no modifier) + value empty + best != null + not dismissed
+      //     → fill textarea with `best`, dismiss current snapshot.
+      //   Escape + any active suggestion → dismiss only (LLM-abort path is
+      //     ChatView's ESC handler which runs at document level + is gated
+      //     by `streaming`; dismissing here does not interfere because ESC
+      //     in idle state has no other Composer-side semantics).
+      const best = suggestedReplies?.best ?? null;
+      const alternates = suggestedReplies?.alternates ?? [];
+      const dismissed = suggestedReplies?.isDismissed ?? false;
+      const hasGhost = best !== null && !dismissed && text.length === 0;
+      const hasAnySuggestion = (best !== null || alternates.length > 0) && !dismissed;
+
+      if (
+        e.key === "Tab" &&
+        !e.shiftKey &&
+        !e.altKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        hasGhost &&
+        best !== null
+      ) {
+        e.preventDefault();
+        if (disabled) return;
+        onTextChange(best);
+        acceptSuggestedReply(best, "best");
+        setChipFocusIdx(null);
+        requestAnimationFrame(() => {
+          if (taRef.current) {
+            const pos = best.length;
+            taRef.current.setSelectionRange(pos, pos);
+            taRef.current.focus();
+          }
+        });
+        return;
+      }
+
+      // PR-D ↑/↓ chip cycle: ArrowDown moves focus into the row (or to the
+      // next chip); ArrowUp moves it back. We only intercept when chips are
+      // actually visible — otherwise the keys keep their native textarea
+      // caret-movement semantics. `preventDefault` is gated on a real
+      // navigation actually firing so single-line composers don't lose the
+      // caret-jump shortcut when nothing is rendered anyway.
+      if (
+        e.key === "ArrowDown" &&
+        !e.shiftKey &&
+        !e.altKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        alternates.length > 0 &&
+        !dismissed &&
+        text.length === 0
+      ) {
+        e.preventDefault();
+        setChipFocusIdx((i) => {
+          if (i === null) return 0;
+          return Math.min(i + 1, alternates.length - 1);
+        });
+        return;
+      }
+
+      if (
+        e.key === "ArrowUp" &&
+        !e.shiftKey &&
+        !e.altKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        alternates.length > 0 &&
+        !dismissed &&
+        text.length === 0 &&
+        chipFocusIdx !== null
+      ) {
+        e.preventDefault();
+        setChipFocusIdx((i) => {
+          if (i === null || i === 0) {
+            // Cycle back to textarea — Composer's ChipRow useEffect won't
+            // re-focus when idx is null, but we still need to pull DOM focus
+            // away from the chip so the textarea is editable.
+            requestAnimationFrame(() => taRef.current?.focus());
+            return null;
+          }
+          return i - 1;
+        });
+        return;
+      }
+
+      if (e.key === "Escape" && hasAnySuggestion) {
+        // Don't preventDefault — let the document-level ESC handler (ChatView)
+        // still run when streaming. Dismissing the snapshot is additive.
+        dismissSuggestedReplies();
+        setChipFocusIdx(null);
+        // Fall through so other ESC consumers still see the event.
+      }
+
       // Backspace inside or at the trailing edge of a `[Image #N]` style
       // marker → delete the whole block in one keystroke (Slack chip UX).
       // Skip when a modifier is held so word-delete (alt+backspace) and
@@ -255,19 +378,70 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         // 일반 Enter = onSend (idle = 전송, busy = 큐 추가).
         e.preventDefault();
         if (disabled) return;
+        // PR-D dismiss memory: a new user message means we're transitioning
+        // to the next turn — release the dismiss latch so the next suggestion
+        // push renders fresh regardless of any prior Escape during this turn.
+        clearDismissedReplies();
         onSend(captureUserKeyboardIntent());
       }
     },
-    [captureUserKeyboardIntent, disabled, onSend, text, onTextChange],
+    [captureUserKeyboardIntent, disabled, onSend, text, onTextChange, suggestedReplies, chipFocusIdx],
   );
 
   const isFull = liveAttachments.length >= ATTACH_MAX_COUNT;
+  const ghostBest = suggestedReplies?.best ?? null;
+  // Spec §3 line 42 + §8: ghost hidden when (a) user has typed any char, (b)
+  // IME composition active (preedit), (c) no `best`, or (d) dismissed.
+  const ghostVisible =
+    text.length === 0 &&
+    !isComposing &&
+    ghostBest !== null &&
+    !(suggestedReplies?.isDismissed ?? false);
+  // Spec §3 line 42: "사용자가 1자 이상 입력 → ghost + chip row 즉시 hide".
+  // Chip row hides as soon as the textarea has any text, mirroring the ghost.
+  const chipAlternates =
+    text.length === 0 && suggestedReplies && !suggestedReplies.isDismissed
+      ? suggestedReplies.alternates
+      : [];
+
+  const acceptChip = useCallback(
+    (chipText: string) => {
+      if (disabled) return;
+      onTextChange(chipText);
+      acceptSuggestedReply(chipText, "chip");
+      setChipFocusIdx(null);
+      requestAnimationFrame(() => {
+        if (taRef.current) {
+          const pos = chipText.length;
+          taRef.current.setSelectionRange(pos, pos);
+          taRef.current.focus();
+        }
+      });
+    },
+    [disabled, onTextChange],
+  );
+
+  // PR-D: when the chip row disappears (alternates empty, dismissed, or
+  // user typed something), drop the focused index so the next render of the
+  // row starts fresh from `null`. Without this, a stale index could survive
+  // across snapshots and try to focus a non-existent chip.
+  useEffect(() => {
+    if (chipAlternates.length === 0 && chipFocusIdx !== null) {
+      setChipFocusIdx(null);
+    }
+  }, [chipAlternates.length, chipFocusIdx]);
 
   return (
     <div data-testid="composer" className="min-w-0">
+      <SuggestedRepliesChipRow
+        alternates={chipAlternates}
+        focusedIdx={chipFocusIdx}
+        onAccept={acceptChip}
+        onFocusChange={setChipFocusIdx}
+      />
       <div
         data-testid="composer-input-bar"
-        className="flex min-w-0 w-full items-stretch gap-0 overflow-hidden"
+        className="relative flex min-w-0 w-full items-stretch gap-0 overflow-hidden"
       >
         {/* Strip is rendered ONLY when there is at least one attachment so
             the empty state does not reserve horizontal space. Single chip
@@ -302,6 +476,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           onChange={(e) => onTextChange(e.target.value)}
           onPaste={handlePaste}
           onKeyDown={handleKeyDown}
+          onCompositionStart={() => setIsComposing(true)}
+          onCompositionEnd={() => setIsComposing(false)}
           placeholder={placeholder ?? "질문을 입력하세요... (Cmd/Ctrl+V 로 클립보드 붙여넣기)"}
           /* v6 layout: ~2 줄 시작 (min-h-[40px] = 2 lines @ leading-5),
              자동 확장 후 ~6 줄에서 scroll. 기존 88px 는 4 줄+ 차지해 textarea 가
@@ -309,9 +485,14 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           className="min-w-0 flex-1 resize-none min-h-[40px] max-h-[144px] overflow-y-auto border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none rounded-none text-xs placeholder:text-xs px-4 py-2"
         />
 
-        {/* v6: Send/Stop/Guide 버튼은 BottomActionRow 로 이전. input-bar 안에는
+        {/* v6: Send/Stop 버튼은 BottomActionRow 로 이전. input-bar 안에는
             attachment chip + textarea 만. 키보드 (Enter/Shift+Enter/Ctrl+Enter)
             는 textarea onKeyDown 에서 그대로 처리. */}
+
+        {/* Ghost text overlay — absolute on top of textarea, pointer-events-none
+            so caret + clicks fall through. Visible only when value 빈 + 추천
+            가능. Spec: docs/architecture/proposals/suggested-replies-ghost-text.md */}
+        <SuggestedRepliesGhost text={ghostBest} visible={ghostVisible} />
       </div>
       {isFull ? (
         <div

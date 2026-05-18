@@ -17,6 +17,14 @@
 export type HostSecretCounterEvent =
   | "hostSecret_read"
   | "hostSecret_denied"
+  // #958 round-1 security MEDIUM — separate counter for admin-install
+  // Tier-3 bypass events so anomaly detection can spot an unexpected
+  // burst of admin-bypass reads (e.g. a runaway plugin, or one whose
+  // installSource was upgraded without operator awareness). Bucketed
+  // by the same `(pluginId, keyPrefix)` tuple as the other host-secret
+  // counters; `hostSecret_read` is still incremented on top so totals
+  // remain comparable.
+  | "hostSecret_admin_bypass"
   // #893 Stage 2 — whitelist registry observability. Bucketed under the same
   // counter map so operators see allow / deny / whitelist-fetch state in a
   // single inspection. `pluginId` = "boot" for registry-wide events; the
