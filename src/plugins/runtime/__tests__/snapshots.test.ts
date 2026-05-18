@@ -16,7 +16,7 @@ beforeAll(async () => {
 });
 
 const VALID_MANIFEST = {
-  id: "com.test.snap",
+  id: "snap-test",
   name: "Snap",
   version: "1.0.0",
   entry: "dist/index.js",
@@ -54,7 +54,7 @@ describe("readEnabledManifestSnapshots", () => {
         validator,
       );
       expect(result.has("override-id")).toBe(true);
-      expect(result.get("override-id")?.manifest.id).toBe("com.test.snap");
+      expect(result.get("override-id")?.manifest.id).toBe("snap-test");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -70,7 +70,7 @@ describe("readEnabledManifestSnapshots", () => {
         [{ manifestPath, enabled: true }],
         validator,
       );
-      expect(result.has("com.test.snap")).toBe(true);
+      expect(result.has("snap-test")).toBe(true);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -111,13 +111,13 @@ describe("readEnabledManifestSnapshots", () => {
     try {
       const manifestPath = join(dir, "plugin.json");
       await writeFile(manifestPath, JSON.stringify(VALID_MANIFEST), "utf-8");
-      const access = { plugins: [{ pluginId: "com.test.other", tools: ["other_ping"] }] };
+      const access = { plugins: [{ pluginId: "other-test", tools: ["other_ping"] }] };
 
       const result = await readEnabledManifestSnapshots(
         [{ manifestPath, enabled: true, approvedPluginAccess: access as never }],
         validator,
       );
-      const snap = result.get("com.test.snap");
+      const snap = result.get("snap-test");
       expect(snap?.approvedPluginAccess).toEqual(access);
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -147,7 +147,7 @@ describe("resolveManifestLoadPlan — registry", () => {
     const dir = await makeTempDir();
     try {
       const pluginsRoot = join(dir, "plugins");
-      const pluginDir = join(pluginsRoot, "com.test.snap");
+      const pluginDir = join(pluginsRoot, "snap-test");
       await mkdir(pluginDir, { recursive: true });
       const manifestPath = join(pluginDir, "plugin.json");
       await writeFile(manifestPath, JSON.stringify(VALID_MANIFEST), "utf-8");
@@ -157,7 +157,7 @@ describe("resolveManifestLoadPlan — registry", () => {
         registryPath,
         JSON.stringify({
           version: 1,
-          plugins: [{ id: "com.test.snap", manifestPath, enabled: true }],
+          plugins: [{ id: "snap-test", manifestPath, enabled: true }],
         }),
         "utf-8",
       );
@@ -167,7 +167,7 @@ describe("resolveManifestLoadPlan — registry", () => {
         registryPath,
         pluginsRoot,
       });
-      const entry = plans.find((p) => p.pluginIdHint === "com.test.snap");
+      const entry = plans.find((p) => p.pluginIdHint === "snap-test");
       expect(entry).toBeDefined();
       expect(entry?.enabled).toBe(true);
     } finally {

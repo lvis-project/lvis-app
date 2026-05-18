@@ -87,14 +87,14 @@ describe("PluginRuntime — entry path allowlist", () => {
     const origError = console.error;
     console.error = (msg: unknown) => { errors.push(String(msg)); };
     try {
-      await writeManifest("p_evil", "../../../etc/passwd.js");
-      await writeRegistry(["p_evil"]);
+      await writeManifest("p-evil", "../../../etc/passwd.js");
+      await writeRegistry(["p-evil"]);
 
       const runtime = makeRuntime();
       await runtime.load();
 
       // Plugin dropped fail-soft.
-      expect(runtime.listPluginIds()).not.toContain("p_evil");
+      expect(runtime.listPluginIds()).not.toContain("p-evil");
       // Audit trail recorded the rejection.
       expect(
         auditEntries.some(
@@ -110,13 +110,13 @@ describe("PluginRuntime — entry path allowlist", () => {
     const origError = console.error;
     console.error = () => {};
     try {
-      await writeManifest("p_abs", "/etc/passwd.js");
-      await writeRegistry(["p_abs"]);
+      await writeManifest("p-abs", "/etc/passwd.js");
+      await writeRegistry(["p-abs"]);
 
       const runtime = makeRuntime();
       await runtime.load();
 
-      expect(runtime.listPluginIds()).not.toContain("p_abs");
+      expect(runtime.listPluginIds()).not.toContain("p-abs");
       expect(
         auditEntries.some(
           (e) => e.level === "error" && e.message === "plugin_entry_path_rejected",
@@ -128,13 +128,13 @@ describe("PluginRuntime — entry path allowlist", () => {
   });
 
   it("accepts a normal relative entry inside the plugin dir", async () => {
-    await writeManifest("p_ok", "entry.mjs", { writeEntryFile: true });
-    await writeRegistry(["p_ok"]);
+    await writeManifest("p-ok", "entry.mjs", { writeEntryFile: true });
+    await writeRegistry(["p-ok"]);
 
     const runtime = makeRuntime();
     await runtime.load();
 
-    expect(runtime.listPluginIds()).toContain("p_ok");
+    expect(runtime.listPluginIds()).toContain("p-ok");
     expect(
       auditEntries.some((e) => e.message === "plugin_entry_path_rejected"),
     ).toBe(false);

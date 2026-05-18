@@ -20,7 +20,7 @@ describe("parsePluginJson — SDK schema validator required", () => {
     await writeFile(
       manifestPath,
       JSON.stringify({
-        id: "com.test.validator",
+        id: "validator-test",
         name: "Validator Test",
         version: "1.0.0",
         entry: "dist/index.js",
@@ -45,7 +45,7 @@ describe("parsePluginJson — SDK schema validator required", () => {
   it("parses a valid manifest with the SDK schema validator", async () => {
     const validator = await buildManifestValidator();
     const manifest = await parsePluginJson(manifestPath, validator);
-    expect(manifest.id).toBe("com.test.validator");
+    expect(manifest.id).toBe("validator-test");
     expect(manifest.installPolicy).toBe("user");
   });
 
@@ -53,7 +53,7 @@ describe("parsePluginJson — SDK schema validator required", () => {
     await writeFile(
       manifestPath,
       JSON.stringify({
-        id: "com.test.validator",
+        id: "validator-test",
         name: "Validator Test",
         version: "1.0.0",
         entry: "dist/index.js",

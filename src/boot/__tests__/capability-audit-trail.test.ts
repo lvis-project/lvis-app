@@ -120,12 +120,12 @@ describe("M4 — capability violation audit trail", () => {
   }
 
   it("emitEvent without required capability writes an audit error", async () => {
-    await writePlugin("p_no_mail", { capabilities: ["worker-client"] });
+    await writePlugin("p-no-mail", { capabilities: ["worker-client"] });
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
 
     const { entries, logger } = collectingAudit();
-    const { emit, emitted } = makeGuardedEmit(runtime, "p_no_mail", logger);
+    const { emit, emitted } = makeGuardedEmit(runtime, "p-no-mail", logger);
     emit("email.new", { subject: "hi" });
 
     expect(emitted).toHaveLength(0);
@@ -136,12 +136,12 @@ describe("M4 — capability violation audit trail", () => {
   });
 
   it("legitimate emit with the right capability does NOT audit-log", async () => {
-    await writePlugin("p_mail", { capabilities: ["mail-source"] });
+    await writePlugin("p-mail", { capabilities: ["mail-source"] });
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
 
     const { entries, logger } = collectingAudit();
-    const { emit, emitted } = makeGuardedEmit(runtime, "p_mail", logger);
+    const { emit, emitted } = makeGuardedEmit(runtime, "p-mail", logger);
     emit("email.new", { subject: "hi" });
 
     expect(emitted).toHaveLength(1);
@@ -149,12 +149,12 @@ describe("M4 — capability violation audit trail", () => {
   });
 
   it("neutral namespace emit (no capability required) does NOT audit-log", async () => {
-    await writePlugin("p_any", { capabilities: [] });
+    await writePlugin("p-any", { capabilities: [] });
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
 
     const { entries, logger } = collectingAudit();
-    const { emit, emitted } = makeGuardedEmit(runtime, "p_any", logger);
+    const { emit, emitted } = makeGuardedEmit(runtime, "p-any", logger);
     emit("custom.something", { x: 1 });
 
     expect(emitted).toHaveLength(1);
@@ -162,7 +162,7 @@ describe("M4 — capability violation audit trail", () => {
   });
 
   it("private namespace subscription writes an audit error", async () => {
-    await writePlugin("p_priv", {
+    await writePlugin("p-priv", {
       eventSubscriptions: ["memory.private.leaked"],
     });
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
@@ -186,7 +186,7 @@ describe("M4 — capability violation audit trail", () => {
   });
 
   it("public subscription does NOT audit-log", async () => {
-    await writePlugin("p_pub", { eventSubscriptions: ["email.new"] });
+    await writePlugin("p-pub", { eventSubscriptions: ["email.new"] });
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
 

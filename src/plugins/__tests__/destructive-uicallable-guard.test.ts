@@ -34,7 +34,7 @@ async function writeTempPlugin(opts: {
 }): Promise<string> {
   const root = mkdtempSync(join(tmpdir(), "lvis-uicallable-"));
   const manifest = {
-    id: `com.example.test-${Math.random().toString(36).slice(2, 8)}`,
+    id: `test-${Math.random().toString(36).slice(2, 8)}`,
     name: "uiCallable Test",
     version: "1.0.0",
     description: "Test fixture.",
@@ -165,15 +165,15 @@ describe("callFromUi scope enforcement", () => {
       plugins: Map<string, { manifest: { uiCallable: string[] } }>;
       methodMap: Map<string, { pluginId: string; handler: (p?: unknown) => Promise<unknown> }>;
     };
-    internals.plugins.set("test.plugin", {
+    internals.plugins.set("test-plugin", {
       manifest: { uiCallable: ["foo_get"] },
     } as unknown as never);
     internals.methodMap.set("foo_delete", {
-      pluginId: "test.plugin",
+      pluginId: "test-plugin",
       handler: async () => "should-never-run",
     });
     internals.methodMap.set("foo_get", {
-      pluginId: "test.plugin",
+      pluginId: "test-plugin",
       handler: async () => "ok",
     });
     rt.setToolInvocationDelegate((method, payload) => {
@@ -195,11 +195,11 @@ describe("callFromUi scope enforcement", () => {
       plugins: Map<string, { manifest: { uiCallable: string[] } }>;
       methodMap: Map<string, { pluginId: string; handler: (p?: unknown) => Promise<unknown> }>;
     };
-    internals.plugins.set("test.plugin", {
+    internals.plugins.set("test-plugin", {
       manifest: { uiCallable: ["foo_get"] },
     } as unknown as never);
     internals.methodMap.set("foo_get", {
-      pluginId: "test.plugin",
+      pluginId: "test-plugin",
       handler: async () => "should-never-run",
     });
 
