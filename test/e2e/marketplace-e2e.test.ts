@@ -42,11 +42,11 @@ function buildPluginZip(slug: string, version: string): Buffer {
     // SDK v5.13 schema requires `entry`. `main` is the older field.
     // Keep both for back-compat with intermediate SDK versions.
     entry: "index.js",
-    main: "index.js",
     installPolicy: "user",
     description: "M4 e2e test plugin",
     publisher: "lvis-community",
-    // SDK v5.13 manifest schema required: id, name, version, entry, tools, description.
+    // SDK v5.13 schema: additionalProperties=false. Required fields:
+    // id, name, version, entry, tools, description.
     tools: [],
   };
   zip.addFile("plugin.json", Buffer.from(JSON.stringify(pluginJson)));
