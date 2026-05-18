@@ -67,6 +67,15 @@ export interface ResolveApiKeyDeps {
   manifestSha256?: string;
   settingsService: Pick<SettingsService, "get" | "getSecret">;
   auditLogger: Pick<AuditLogger, "log">;
+  /**
+   * Cluster review M1 — optional accessor for the PermissionManager's
+   * per-plugin revoke signal. When provided, the returned bearer is wired
+   * to release on EITHER the caller's signal OR this signal — so a
+   * permission rule change aborts the outstanding bearer mid-flight even
+   * when the plugin's own `opts.signal` is never aborted. Boot wiring in
+   * `plugin-runtime.ts` binds this to `permissionManager.getPluginRevokeSignal`.
+   */
+  getPluginRevokeSignal?: (pluginId: string) => AbortSignal;
 }
 
 /**
@@ -164,7 +173,14 @@ export async function resolveApiKey(
   request: ResolveApiKeyRequest,
   deps: ResolveApiKeyDeps,
 ): Promise<ResolveApiKeyResult> {
-  if (request.signal?.aborted) {
+  // Cluster review M1 — merge the caller's per-request signal with the
+  // PermissionManager's per-plugin revoke signal so a permission rule
+  // change aborts an in-flight bearer even when the plugin's own signal
+  // never fires. The merged signal flows into `makeSuccess` and short-
+  // circuits the entry-guard below when either signal is already aborted.
+  const revokeSignal = deps.getPluginRevokeSignal?.(deps.pluginId);
+  const mergedSignal = mergeSignals(request.signal, revokeSignal);
+  if (mergedSignal?.aborted) {
     return { ok: false, reason: "aborted" };
   }
   // Default vendor to the user's active LLM provider when the plugin omits
@@ -205,7 +221,7 @@ export async function resolveApiKey(
       `resolveApiKey allow source=plugin-namespace vendor=${vendor} purpose=${request.purpose}`,
     );
     incrementHostSecretCounter("hostSecret_read", deps.pluginId, keyPrefix);
-    return makeSuccess(vendor, ownValue, request.signal);
+    return makeSuccess(vendor, ownValue, mergedSignal);
   }
 
   // Tier-2 manifest allowlist.
@@ -272,5 +288,32 @@ export async function resolveApiKey(
     };
     baseUrl = llmSettings?.vendors?.["azure-foundry"]?.baseUrl;
   }
-  return makeSuccess(vendor, value, request.signal, baseUrl);
+  return makeSuccess(vendor, value, mergedSignal, baseUrl);
+}
+
+/**
+ * Cluster review M1 — combine the caller's per-request signal with the
+ * PermissionManager's per-plugin revoke signal into a single AbortSignal.
+ * Returns `undefined` when both inputs are absent so the bearer thunk skips
+ * the listener wiring entirely. Falls back gracefully when `AbortSignal.any`
+ * is unavailable (older Node) by returning the first defined signal — the
+ * loss of merge fidelity is preferable to a hard crash on plugin call.
+ */
+function mergeSignals(
+  a: AbortSignal | undefined,
+  b: AbortSignal | undefined,
+): AbortSignal | undefined {
+  if (!a && !b) return undefined;
+  if (a && !b) return a;
+  if (!a && b) return b;
+  // Both signals present — use AbortSignal.any when available so the
+  // returned signal aborts on whichever fires first.
+  const anyFn = (AbortSignal as unknown as { any?: (signals: AbortSignal[]) => AbortSignal }).any;
+  if (typeof anyFn === "function") {
+    return anyFn([a!, b!]);
+  }
+  // Fallback for runtimes without AbortSignal.any — prefer the revoke
+  // signal so the security guarantee is preserved at the cost of losing
+  // the caller's cancellation propagation.
+  return b ?? a;
 }

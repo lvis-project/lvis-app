@@ -437,6 +437,61 @@ describe("resolveApiKey — vendor alias normalization (cycle 1 CRITICAL)", () =
   });
 });
 
+describe("resolveApiKey — permission revoke fires release() on outstanding bearer (cluster M1)", () => {
+  it("permission revoke signal abort fires release() on outstanding bearer", async () => {
+    // Simulate the boot wiring: a per-plugin revoke controller owned by
+    // PermissionManager. The host-api merges it with the caller's signal
+    // via AbortSignal.any so the bearer aborts on either source.
+    const revokeController = new AbortController();
+    const manifest = manifestFor("p", ["llm.apiKey.openai"]);
+    await seedRegistryWithGrant({
+      pluginId: "p",
+      allowedKeys: ["llm.apiKey.openai"],
+      manifestSha256: shaOfManifest(manifest),
+    });
+    const result = await resolveApiKey(
+      { purpose: "llm", vendor: "openai" },
+      {
+        pluginId: "p",
+        manifest,
+        manifestSha256: shaOfManifest(manifest),
+        settingsService: makeSettingsService({
+          provider: "openai",
+          secrets: { "llm.apiKey.openai": "sk-host" },
+        }) as never,
+        auditLogger: makeAuditLogger(),
+        getPluginRevokeSignal: () => revokeController.signal,
+      },
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.bearer()).toBe("sk-host");
+      // PermissionManager.revokePluginAccess(...) would fire this:
+      revokeController.abort(new Error("permission-revoked: deny-rule-added"));
+      // The bearer is released → next read throws per SDK contract.
+      expect(() => result.bearer()).toThrow("released");
+    }
+  });
+
+  it("returns reason=aborted when revoke signal is pre-aborted before entry", async () => {
+    const revokeController = new AbortController();
+    revokeController.abort(new Error("permission-revoked: pre-aborted"));
+    const manifest = manifestFor("p", []);
+    const result = await resolveApiKey(
+      { purpose: "llm", vendor: "openai" },
+      {
+        pluginId: "p",
+        manifest,
+        settingsService: makeSettingsService({ provider: "openai" }) as never,
+        auditLogger: makeAuditLogger(),
+        getPluginRevokeSignal: () => revokeController.signal,
+      },
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("aborted");
+  });
+});
+
 describe("resolveApiKey — baseUrl present on azure-foundry success", () => {
   it("baseUrl threaded from llm.vendors['azure-foundry'].baseUrl", async () => {
     const manifest = manifestFor("p", ["llm.apiKey.azure-foundry"]);
