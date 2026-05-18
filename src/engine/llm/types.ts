@@ -64,6 +64,23 @@ export interface MessageMeta {
    */
   serializedStub?: boolean;
   /**
+   * System notice marker (Issue #911).
+   *
+   * Set on assistant messages that are *system notifications* rather than
+   * real LLM output — e.g. "context exceeded, retry next turn" or
+   * "provider stream error". The UI uses this marker to render the
+   * message with destructive styling (red border + warning icon + "시스템
+   * 알림" label) so the user can distinguish it from normal assistant
+   * replies. Persisted to jsonl so reloads preserve the styling.
+   *
+   * Why not a new `role: "system"`: every vendor adapter + serializer +
+   * UI path would need to handle the new variant. A meta marker on
+   * existing `role: "assistant"` is the minimal-change form and keeps
+   * the message inside the same turn-pair invariant that the rest of the
+   * system already respects.
+   */
+  systemNotice?: "context-error" | "stream-error" | "interrupted";
+  /**
    * Tool-result generic size cap marker (Issue #902).
    *
    * Set by `ConversationHistory.append`/`restore` on tool_result messages
