@@ -27,7 +27,7 @@ async function writePlugin(
   await writeFile(
     join(pluginDir, "entry.mjs"),
     `export default async function createPlugin(ctx) {
-  return { handlers: { ${id}_ping: async () => "pong" }, start: async () => {}, stop: async () => {} };
+  return { handlers: { ${id.replace(/-/g, "_")}_ping: async () => "pong" }, start: async () => {}, stop: async () => {} };
 }`,
     "utf-8",
   );
@@ -38,7 +38,7 @@ async function writePlugin(
     description: "Test fixture.",
     publisher: "Test fixture",
     entry: "entry.mjs",
-    tools: [`${id}_ping`],
+    tools: [`${id.replace(/-/g, "_")}_ping`],
     eventSubscriptions,
   };
   await writeFile(join(pluginDir, "plugin.json"), JSON.stringify(manifest), "utf-8");

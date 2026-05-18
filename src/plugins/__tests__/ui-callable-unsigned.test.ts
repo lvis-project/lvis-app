@@ -60,7 +60,7 @@ describe("PluginRuntime — uiCallable suffix-blocking removed", () => {
     await writeFile(
       join(pluginDir, "entry.mjs"),
       `export default async function createPlugin(ctx) {
-  return { handlers: { "${id}_get": async () => "ok", "${id}_delete": async () => "ok" }, start: async () => {}, stop: async () => {} };
+  return { handlers: { "${id.replace(/-/g, "_")}_get": async () => "ok", "${id.replace(/-/g, "_")}_delete": async () => "ok" }, start: async () => {}, stop: async () => {} };
 }`,
       "utf-8",
     );
@@ -71,7 +71,7 @@ describe("PluginRuntime — uiCallable suffix-blocking removed", () => {
       description: "Test fixture.",
       publisher: "Test fixture",
       entry: "entry.mjs",
-      tools: [`${id}_get`, `${id}_delete`],
+      tools: [`${id.replace(/-/g, "_")}_get`, `${id.replace(/-/g, "_")}_delete`],
       ...manifestOverrides,
     };
     await writeFile(join(pluginDir, "plugin.json"), JSON.stringify(manifest), "utf-8");
@@ -100,7 +100,7 @@ describe("PluginRuntime — uiCallable suffix-blocking removed", () => {
   it("managed plugin with any suffix loads successfully (no verifier needed)", async () => {
     await writePlugin("p-managed-default", {
       installPolicy: "admin",
-      uiCallable: ["p-managed-default_delete"],
+      uiCallable: ["p_managed_default_delete"],
     });
 
     const runtime = makeRuntime();
@@ -112,7 +112,7 @@ describe("PluginRuntime — uiCallable suffix-blocking removed", () => {
   it("user plugin with any suffix loads successfully", async () => {
     await writePlugin("p-user-delete", {
       installPolicy: "user",
-      uiCallable: ["p-user-delete_delete"],
+      uiCallable: ["p_user_delete_delete"],
     });
 
     const runtime = makeRuntime();
@@ -124,11 +124,11 @@ describe("PluginRuntime — uiCallable suffix-blocking removed", () => {
   it("allowManagedUnsigned has no effect on uiCallable validation (backward compat)", async () => {
     await writePlugin("p-managed-allow", {
       installPolicy: "admin",
-      uiCallable: ["p-managed-allow_delete"],
+      uiCallable: ["p_managed_allow_delete"],
     });
     await writePlugin("p-user-allow", {
       installPolicy: "user",
-      uiCallable: ["p-user-allow_delete"],
+      uiCallable: ["p_user_allow_delete"],
     });
 
     // Rewrite the registry to include both plugins (writePlugin overwrites it).
@@ -154,7 +154,7 @@ describe("PluginRuntime — uiCallable suffix-blocking removed", () => {
   it("auditLog is NOT called for destructive suffix (no longer blocked)", async () => {
     await writePlugin("p-audit-check", {
       installPolicy: "user",
-      uiCallable: ["p-audit-check_delete"],
+      uiCallable: ["p_audit_check_delete"],
     });
 
     const runtime = makeRuntime();

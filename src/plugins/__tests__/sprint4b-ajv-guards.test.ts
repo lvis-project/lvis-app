@@ -38,7 +38,7 @@ describe("Sprint 4-B — AJV + uiCallable + destructive guards", () => {
     await writeFile(
       join(pluginDir, "entry.mjs"),
       `export default async function createPlugin(ctx) {
-  return { handlers: { "${id}_hello": async () => "hi", "${id}_delete": async () => "nope" }, start: async () => {}, stop: async () => {} };
+  return { handlers: { "${id.replace(/-/g, "_")}_hello": async () => "hi", "${id.replace(/-/g, "_")}_delete": async () => "nope" }, start: async () => {}, stop: async () => {} };
 }`,
       "utf-8",
     );
@@ -49,7 +49,7 @@ describe("Sprint 4-B — AJV + uiCallable + destructive guards", () => {
       description: "Test fixture.",
       publisher: "Test fixture",
       entry: "entry.mjs",
-      tools: [`${id}_hello`, `${id}_delete`],
+      tools: [`${id.replace(/-/g, "_")}_hello`, `${id.replace(/-/g, "_")}_delete`],
       ...manifestOverrides,
     };
     await writeFile(join(pluginDir, "plugin.json"), JSON.stringify(manifest), "utf-8");
@@ -94,7 +94,7 @@ describe("Sprint 4-B — AJV + uiCallable + destructive guards", () => {
   });
 
   it("B-3: uiCallable not in tools[] is rejected", async () => {
-    await writePlugin("p-ui-missing", { uiCallable: ["p-ui-missing_ghost"] });
+    await writePlugin("p-ui-missing", { uiCallable: ["p_ui_missing_ghost"] });
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     const origErr = console.error;
     const ctxArgs: unknown[] = [];
@@ -110,7 +110,7 @@ describe("Sprint 4-B — AJV + uiCallable + destructive guards", () => {
 
   it("B-3: any suffix in uiCallable accepted when tool is in tools[]", async () => {
     await writePlugin("p-destructive", {
-      uiCallable: ["p-destructive_delete"],
+      uiCallable: ["p_destructive_delete"],
       installPolicy: "user",
     });
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
@@ -119,7 +119,7 @@ describe("Sprint 4-B — AJV + uiCallable + destructive guards", () => {
   });
 
   it("B-3: read-like uiCallable tool is permitted", async () => {
-    await writePlugin("p-ok", { tools: ["p-ok_get", "p-ok_delete"], uiCallable: ["p-ok_get"], installPolicy: "user" });
+    await writePlugin("p-ok", { tools: ["p_ok_get", "p_ok_delete"], uiCallable: ["p_ok_get"], installPolicy: "user" });
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
     expect(runtime.listPluginIds()).toContain("p-ok");

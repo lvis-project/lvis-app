@@ -42,9 +42,9 @@ describe("runtime manifest validation hardening", () => {
     const defaultEntry = `export default async function createPlugin(ctx) {
   return {
     handlers: {
-      "${id}_hello": async () => "hi",
-      "${id}_bad": async () => { throw new Error("boom"); },
-      "${id}_good": async () => "ok",
+      "${id.replace(/-/g, "_")}_hello": async () => "hi",
+      "${id.replace(/-/g, "_")}_bad": async () => { throw new Error("boom"); },
+      "${id.replace(/-/g, "_")}_good": async () => "ok",
     },
     start: async () => {},
     stop: async () => {},
@@ -58,7 +58,7 @@ describe("runtime manifest validation hardening", () => {
       description: "Test fixture.",
       publisher: "Test fixture",
       entry: "entry.mjs",
-      tools: [`${id}_hello`, `${id}_bad`, `${id}_good`],
+      tools: [`${id.replace(/-/g, "_")}_hello`, `${id.replace(/-/g, "_")}_bad`, `${id.replace(/-/g, "_")}_good`],
       ...manifestOverrides,
     };
     await writeFile(join(pluginDir, "plugin.json"), JSON.stringify(manifest), "utf-8");
@@ -92,7 +92,7 @@ describe("runtime manifest validation hardening", () => {
 
   it("1) keywords[].skillId not in tools[] fails load", async () => {
     await writePlugin("p-kw", {
-      keywords: [{ keyword: "회의", skillId: "p-kw_missing" }],
+      keywords: [{ keyword: "회의", skillId: "p_kw_missing" }],
     });
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     const cap = captureErrors();
@@ -234,7 +234,7 @@ describe("runtime manifest validation hardening", () => {
   // 는 계속 동작.
   it("5) AJV rejects manifest with unknown root property (startupTools post 5.7.0)", async () => {
     await writePlugin("p-unknown-field", {
-      startupTools: ["p-unknown-field_hello"],
+      startupTools: ["p_unknown_field_hello"],
     });
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     const cap = captureErrors();
@@ -254,7 +254,7 @@ describe("runtime manifest validation hardening", () => {
   // 남아야 security ops / operator 가 어느 plugin 이 왜 드랍됐는지 추적 가능.
   it("6) auditLog emits plugin_manifest_rejected on manifest reject", async () => {
     await writePlugin("p-audit-target", {
-      startupTools: ["p-audit-target_hello"], // AJV reject trigger
+      startupTools: ["p_audit_target_hello"], // AJV reject trigger
     });
     const auditLog = vi.fn();
     const runtime = new PluginRuntime({
