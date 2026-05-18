@@ -7,6 +7,7 @@ import {
   applyToolStart,
   finalizeStreamingReasoning,
   finalizeStreamingAssistant,
+  setAssistantError,
   upsertStreamingReasoning,
   upsertStreamingAssistant,
   type ChatEntry,
@@ -433,6 +434,36 @@ describe("imported_trigger helpers (overlay import marker lifecycle)", () => {
       "turn_summary",
       "imported_trigger",
     ]);
-    expect(entries.at(-1)).toMatchObject({ kind: "imported_trigger", sessionId: "s1" });
+    expect(entries[entries.length - 1]).toMatchObject({ kind: "imported_trigger", sessionId: "s1" });
+  });
+});
+
+describe("setAssistantError — Issue #911 systemNotice option", () => {
+  it("stamps systemNotice on the streaming-assistant replacement", () => {
+    const initial: ChatEntry[] = [
+      { kind: "user", text: "hi" },
+      { kind: "assistant", text: "partial...", streaming: true },
+    ];
+    const out = setAssistantError(initial, "대화 이력이 모델 한도를 초과했습니다.", "", "context-error");
+    const last = out[out.length - 1] as Extract<ChatEntry, { kind: "assistant" }>;
+    expect(last.systemNotice).toBe("context-error");
+    expect(last.streaming).toBe(false);
+  });
+
+  it("stamps systemNotice on the pushed entry when no streaming assistant exists", () => {
+    const out = setAssistantError(
+      [{ kind: "user", text: "hi" }],
+      "응답 스트림이 끊겼습니다.",
+      "",
+      "stream-error",
+    );
+    const last = out[out.length - 1] as Extract<ChatEntry, { kind: "assistant" }>;
+    expect(last.systemNotice).toBe("stream-error");
+  });
+
+  it("omits systemNotice when option not passed (backward compat)", () => {
+    const out = setAssistantError([{ kind: "user", text: "hi" }], "일반 오류");
+    const last = out[out.length - 1] as Extract<ChatEntry, { kind: "assistant" }>;
+    expect(last.systemNotice).toBeUndefined();
   });
 });

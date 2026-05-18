@@ -530,7 +530,18 @@ export function finalizeStreamingAssistant(
   return next;
 }
 
-export function setAssistantError(entries: ChatEntry[], message: string, fallbackThought: string = ""): ChatEntry[] {
+export function setAssistantError(
+  entries: ChatEntry[],
+  message: string,
+  fallbackThought: string = "",
+  systemNotice?: "context-error" | "stream-error",
+): ChatEntry[] {
+  // Issue #911 — live error path. When the caller knows the error is a
+  // host-emitted system notice (context-error / stream-error), stamp the
+  // marker so AssistantCard renders destructive styling immediately,
+  // matching what reload sees from jsonl. Without this, the user sees the
+  // error first as a normal assistant reply and only gets the red banner
+  // after refreshing the session.
   const next = finalizeStreamingReasoning(entries, fallbackThought);
   const assistantIdx = findLastIdx(
     next,
@@ -538,10 +549,17 @@ export function setAssistantError(entries: ChatEntry[], message: string, fallbac
       entry.kind === "assistant" && !!entry.streaming,
   );
 
+  const baseEntry = {
+    kind: "assistant" as const,
+    text: message,
+    streaming: false,
+    ...(systemNotice !== undefined ? { systemNotice } : {}),
+  };
+
   if (assistantIdx >= 0) {
-    next[assistantIdx] = { kind: "assistant", text: message, streaming: false };
+    next[assistantIdx] = baseEntry;
   } else {
-    next.push({ kind: "assistant", text: message, streaming: false });
+    next.push(baseEntry);
   }
   return next;
 }
