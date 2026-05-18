@@ -36,13 +36,14 @@ describe("parseSuggestedReplies", () => {
     expect(parseSuggestedReplies(raw)).toEqual(["a", "b"]);
   });
 
-  it("caps results at 3 items", () => {
-    const raw = "<suggested_replies>\n- 1\n- 2\n- 3\n- 4\n- 5\n</suggested_replies>";
-    expect(parseSuggestedReplies(raw)).toEqual(["1", "2", "3"]);
+  it("caps results at 5 items (matches SUGGESTED_REPLIES_INSTRUCTION upper bound)", () => {
+    const raw =
+      "<suggested_replies>\n- 1\n- 2\n- 3\n- 4\n- 5\n- 6\n</suggested_replies>";
+    expect(parseSuggestedReplies(raw)).toEqual(["1", "2", "3", "4", "5"]);
   });
 
-  it("drops candidates over 50 characters (model malformation)", () => {
-    const tooLong = "x".repeat(60);
+  it("drops candidates over 80 characters (parser safety cap above 40~60자 recommended length)", () => {
+    const tooLong = "x".repeat(90);
     const raw = `<suggested_replies>\n- short\n- ${tooLong}\n- ok\n</suggested_replies>`;
     expect(parseSuggestedReplies(raw)).toEqual(["short", "ok"]);
   });

@@ -305,8 +305,12 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   ipcMain.handle("lvis:plugins:install", async (e, pluginId: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:plugins:install", e); return UNAUTHORIZED_FRAME; }
     return withPluginInstallLock(pluginId, async () => {
+      // IPC is pure transport — actor decisions live inside
+      // PluginMarketplaceService.install (catalog → admin escalation).
+      // deployment-guard §7.3: "IPC 핸들러에서 actor를 직접 받지 말 것 —
+      // 'it-admin'은 ManagedPluginInstaller 같은 내부 플로우에서만 사용."
       broadcastPluginLifecycleEvent("lvis:plugins:install-progress", { slug: pluginId, phase: "installing" });
-      const result = await pluginMarketplace.install(pluginId, "user", (evt) => {
+      const result = await pluginMarketplace.install(pluginId, (evt) => {
         if (evt.phase === "downloading") {
           broadcastPluginLifecycleEvent("lvis:plugins:install-progress", {
             slug: pluginId,

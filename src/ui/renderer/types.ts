@@ -9,6 +9,7 @@ import type { PluginConfigRecord } from "../../shared/plugin-config.js";
 import type { ChatSendInputOrigin } from "../../shared/chat-origin.js";
 import type { ActiveRolePrompt, RolePreset } from "../../data/role-presets.js";
 import type { PermissionEvaluationContext as PermissionEvaluationContextShape } from "../../permissions/evaluation-context.js";
+import type { ApprovalPurposeSuggestion } from "../../shared/permission-review-status.js";
 import type {
   AssistantAgentSummary,
   AssistantSkillSummary,
@@ -162,6 +163,18 @@ export type AppSettings = {
   };
 };
 
+export type IpcErrorResult = { ok: false; error: string; message?: string };
+export type SettingsUpdateResult = AppSettings | IpcErrorResult;
+
+export function isIpcErrorResult(value: unknown): value is IpcErrorResult {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    (value as { ok?: unknown }).ok === false &&
+    typeof (value as { error?: unknown }).error === "string"
+  );
+}
+
 export type DeepPartial<T> = T extends object ? { [K in keyof T]?: DeepPartial<T[K]> } : T;
 
 // ─── Plugin Performance types (Observability) ──────
@@ -219,7 +232,7 @@ export type LvisApi = {
   }) => Promise<{ ok: boolean; error?: string }>;
   fileScanPaths: (paths: string[]) => Promise<{ ok: boolean; indexed?: number; failed?: number; jobId?: string; error?: string }>;
   getSettings: () => Promise<AppSettings>;
-  updateSettings: (patch: DeepPartial<AppSettings>) => Promise<AppSettings>;
+  updateSettings: (patch: DeepPartial<AppSettings>) => Promise<SettingsUpdateResult>;
   onSettingsUpdated: (handler: (settings: AppSettings) => void) => () => void;
   setApiKey: (vendor: string, k: string) => Promise<{ ok: true }>;
   hasApiKey: (vendor?: string) => Promise<boolean>;
@@ -531,7 +544,12 @@ export type LvisApi = {
       questions: Array<{
         question: string;
         choices?: string[];
+        recommendedIndex?: number;
+        altIndices?: number[];
         allowFreeText: boolean;
+        allowMultiple?: boolean;
+        placeholder?: string;
+        summaryHint?: string;
         suggestedAnswers?: string[];
       }>;
       createdAt: number;
@@ -539,7 +557,12 @@ export type LvisApi = {
   ) => () => void;
   respondAskUserQuestion: (response: {
     requestId: string;
-    answers?: Array<{ choice?: string; freeText?: string }>;
+    answers?: Array<{
+      choice?: string;
+      /** Multi-select selections (only set when the question allowMultiple). */
+      choices?: string[];
+      freeText?: string;
+    }>;
     dismissed?: boolean;
   }) => Promise<{ ok: boolean; error?: string }>;
   /** Renderer is notified when the gate's 5-minute timeout fires. */
@@ -658,6 +681,8 @@ export type ApprovalRequest = {
   reviewerVerdict?: { level: "low" | "medium" | "high"; reason: string };
   /** Captured policy/sandbox context for user review. */
   evaluationContext?: PermissionEvaluationContextShape;
+  /** Suggested natural-language purpose shown in the approval dialog. */
+  approvalPurpose?: ApprovalPurposeSuggestion;
   args: unknown;
   reason: string;
   source?: "builtin" | "plugin" | "mcp";

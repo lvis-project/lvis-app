@@ -1,0 +1,1011 @@
+<!DOCTYPE html>
+<!--
+  LVIS Permission Reviewer Status + Purpose Prefill Mockup
+
+  Purpose:
+  - Agreement mockup only. Not production code.
+  - Shows how foreground permission reviewer latency is surfaced in chat.
+  - Shows how HIGH approval purpose text is prefilled when context is enough.
+  - Keeps security posture unchanged: HIGH still requires explicit approval.
+-->
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LVIS 권한 검토 상태 + 승인 목적 자동 작성 목업</title>
+<style>
+  :root {
+    --bg: #111318;
+    --surface: #171a21;
+    --surface-2: #1f232c;
+    --surface-3: #272c36;
+    --paper: #f8f6f1;
+    --paper-2: #f0ede6;
+    --paper-3: #e6e1d8;
+    --ink: #eef1f6;
+    --ink-paper: #2f302f;
+    --muted: #9ca3af;
+    --muted-paper: #716d65;
+    --line: #343a46;
+    --line-paper: #d4cec2;
+    --blue: #78a8ff;
+    --blue-bg: rgba(120, 168, 255, .14);
+    --amber: #d9a441;
+    --amber-bg: rgba(217, 164, 65, .15);
+    --green: #58c98c;
+    --green-bg: rgba(88, 201, 140, .14);
+    --red: #ea6b6b;
+    --red-bg: rgba(234, 107, 107, .13);
+    --violet: #a78bfa;
+    --violet-bg: rgba(167, 139, 250, .15);
+    --shadow: 0 24px 64px rgba(0, 0, 0, .42);
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body { margin: 0; min-height: 100%; }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", sans-serif;
+    letter-spacing: 0;
+  }
+
+  button, input, textarea { font: inherit; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+  .page {
+    width: min(1440px, calc(100vw - 32px));
+    margin: 0 auto;
+    padding: 22px 0 42px;
+  }
+
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    margin-bottom: 14px;
+  }
+
+  .title h1 {
+    margin: 0;
+    font-size: 21px;
+    line-height: 1.24;
+    font-weight: 760;
+  }
+
+  .title p {
+    margin: 6px 0 0;
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  .segmented {
+    display: inline-grid;
+    grid-template-columns: repeat(4, minmax(94px, 1fr));
+    gap: 3px;
+    padding: 3px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface);
+  }
+
+  .segmented button {
+    height: 32px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 12px;
+  }
+
+  .segmented button[aria-pressed="true"] {
+    background: var(--surface-3);
+    color: var(--ink);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,.06);
+  }
+
+  .workspace {
+    display: grid;
+    grid-template-columns: minmax(0, 1.08fr) minmax(430px, .92fr);
+    gap: 14px;
+    align-items: start;
+  }
+
+  .chat-shell,
+  .notes-panel {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface);
+    overflow: hidden;
+  }
+
+  .chat-header,
+  .notes-header {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 13px;
+    border-bottom: 1px solid var(--line);
+    background: var(--surface-2);
+  }
+
+  .chat-header h2,
+  .notes-header h2 {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 720;
+  }
+
+  .mode-pill {
+    display: inline-flex;
+    align-items: center;
+    min-height: 22px;
+    padding: 2px 8px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    color: var(--muted);
+    font-size: 11px;
+    white-space: nowrap;
+  }
+
+  .chat-body {
+    min-height: 720px;
+    display: grid;
+    grid-template-rows: 1fr auto;
+    background: #12151b;
+  }
+
+  .messages {
+    min-height: 0;
+    padding: 16px;
+    overflow: hidden;
+  }
+
+  .message {
+    display: grid;
+    gap: 5px;
+    margin-bottom: 14px;
+  }
+
+  .speaker {
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 720;
+  }
+
+  .bubble {
+    width: fit-content;
+    max-width: min(680px, 88%);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 9px 11px;
+    color: var(--ink);
+    background: var(--surface-2);
+    font-size: 13px;
+    line-height: 1.55;
+  }
+
+  .message.user {
+    justify-items: end;
+  }
+
+  .message.user .speaker {
+    margin-right: 4px;
+  }
+
+  .message.user .bubble {
+    background: #263244;
+    border-color: #334966;
+  }
+
+  .assistant-copy {
+    max-width: 720px;
+    color: #dce3ef;
+    font-size: 13px;
+    line-height: 1.62;
+    margin: 0 0 14px;
+  }
+
+  .work-group {
+    width: min(720px, 100%);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #151922;
+    overflow: hidden;
+    margin-top: 10px;
+  }
+
+  .work-header {
+    min-height: 38px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 9px 11px;
+    border-bottom: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .status-card {
+    display: grid;
+    grid-template-columns: 7px minmax(0, 1fr) auto;
+    gap: 11px;
+    align-items: start;
+    padding: 12px;
+  }
+
+  .status-bar {
+    width: 7px;
+    min-height: 64px;
+    border-radius: 999px;
+    background: var(--amber);
+  }
+
+  .status-card[data-tone="reviewing"] {
+    background: linear-gradient(90deg, rgba(217,164,65,.09), transparent 68%);
+  }
+
+  .status-card[data-tone="reviewing"] .status-bar { background: var(--amber); }
+  .status-card[data-tone="needs-approval"] .status-bar { background: var(--red); }
+  .status-card[data-tone="needs-approval"] { background: linear-gradient(90deg, rgba(234,107,107,.09), transparent 68%); }
+  .status-card[data-tone="approved"] .status-bar { background: var(--green); }
+  .status-card[data-tone="approved"] { background: linear-gradient(90deg, rgba(88,201,140,.08), transparent 68%); }
+  .status-card[data-tone="unknown"] .status-bar { background: var(--violet); }
+  .status-card[data-tone="unknown"] { background: linear-gradient(90deg, rgba(167,139,250,.09), transparent 68%); }
+
+  .status-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 3px;
+    font-size: 13px;
+    font-weight: 760;
+  }
+
+  .spinner {
+    width: 13px;
+    height: 13px;
+    border: 2px solid rgba(217,164,65,.25);
+    border-top-color: var(--amber);
+    border-radius: 999px;
+    animation: spin .8s linear infinite;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .status-main {
+    min-width: 0;
+  }
+
+  .status-copy {
+    margin: 0;
+    color: #c4ccd8;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  .meta-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    min-height: 22px;
+    max-width: 100%;
+    padding: 2px 8px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    color: #d4d9e2;
+    background: rgba(255,255,255,.04);
+    font-size: 11px;
+    white-space: nowrap;
+  }
+
+  .chip.amber { color: #f8db9c; border-color: rgba(217,164,65,.48); background: var(--amber-bg); }
+  .chip.red { color: #ffd4d4; border-color: rgba(234,107,107,.5); background: var(--red-bg); }
+  .chip.green { color: #c8f6dc; border-color: rgba(88,201,140,.48); background: var(--green-bg); }
+  .chip.blue { color: #d8e6ff; border-color: rgba(120,168,255,.48); background: var(--blue-bg); }
+  .chip.violet { color: #eee6ff; border-color: rgba(167,139,250,.5); background: var(--violet-bg); }
+
+  .status-side {
+    min-width: 104px;
+    display: grid;
+    justify-items: end;
+    gap: 5px;
+    color: var(--muted);
+    font-size: 11px;
+  }
+
+  .tool-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 12px;
+    border-top: 1px solid var(--line);
+    color: #dce3ef;
+    font-size: 12px;
+  }
+
+  .tool-row:first-of-type { border-top: 0; }
+
+  .tool-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+
+  .composer {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 62px;
+    padding: 10px 12px;
+    border-top: 1px solid var(--line);
+    background: var(--surface-2);
+  }
+
+  .composer-input {
+    flex: 1;
+    min-width: 0;
+    height: 38px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #11151d;
+    color: var(--ink);
+    padding: 0 11px;
+    font-size: 13px;
+  }
+
+  .composer-status {
+    color: var(--muted);
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  .btn {
+    min-height: 32px;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    padding: 0 11px;
+    background: var(--surface-3);
+    color: var(--ink);
+    cursor: pointer;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  .btn.primary {
+    border-color: rgba(120,168,255,.5);
+    background: var(--blue);
+    color: #101318;
+    font-weight: 740;
+  }
+
+  .btn.danger {
+    border-color: rgba(234,107,107,.55);
+    background: transparent;
+    color: #ffb8b8;
+  }
+
+  .modal-stage {
+    position: relative;
+    min-height: 720px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background:
+      linear-gradient(180deg, rgba(167,139,250,.08), transparent 260px),
+      #14161d;
+    overflow: hidden;
+  }
+
+  .modal-backdrop {
+    min-height: 720px;
+    display: grid;
+    place-items: center;
+    padding: 22px;
+    background: rgba(0,0,0,.25);
+  }
+
+  .approval-modal {
+    width: min(720px, 100%);
+    max-height: 676px;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    border: 1px solid #c8bfb0;
+    border-radius: 8px;
+    background: var(--paper);
+    color: var(--ink-paper);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+
+  .modal-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    min-height: 48px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--line-paper);
+    background: var(--paper);
+  }
+
+  .modal-title {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    min-width: 0;
+  }
+
+  .modal-title h2 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 760;
+  }
+
+  .risk {
+    display: inline-flex;
+    align-items: center;
+    min-height: 24px;
+    border-radius: 999px;
+    padding: 2px 9px;
+    font-size: 11px;
+    font-weight: 760;
+  }
+
+  .risk.high {
+    color: #b91c1c;
+    border: 1px solid rgba(185,28,28,.45);
+    background: rgba(185,28,28,.08);
+  }
+
+  .risk.low {
+    color: #047857;
+    border: 1px solid rgba(4,120,87,.42);
+    background: rgba(4,120,87,.08);
+  }
+
+  .modal-body {
+    min-height: 0;
+    overflow: auto;
+    padding: 14px 16px;
+  }
+
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+
+  .summary-tile,
+  .review-box,
+  .purpose-box,
+  .details-row {
+    border: 1px solid var(--line-paper);
+    border-radius: 8px;
+    background: #fffdf8;
+  }
+
+  .summary-tile {
+    padding: 10px;
+    min-height: 70px;
+  }
+
+  .label {
+    display: block;
+    margin-bottom: 5px;
+    color: var(--muted-paper);
+    font-size: 11px;
+    font-weight: 720;
+  }
+
+  .summary-value {
+    font-size: 13px;
+    line-height: 1.45;
+  }
+
+  .review-box {
+    margin-bottom: 10px;
+    overflow: hidden;
+  }
+
+  .review-box.high {
+    border-color: rgba(234,107,107,.55);
+    background: #fff2ef;
+  }
+
+  .review-box.low {
+    border-color: rgba(88,201,140,.5);
+    background: #f0fff6;
+  }
+
+  .review-title {
+    padding: 9px 11px;
+    border-bottom: 1px solid rgba(0,0,0,.1);
+    font-size: 12px;
+    font-weight: 760;
+  }
+
+  .review-row {
+    display: grid;
+    grid-template-columns: 116px minmax(0, 1fr);
+    gap: 10px;
+    padding: 9px 11px;
+    border-top: 1px solid rgba(0,0,0,.08);
+    font-size: 12px;
+    line-height: 1.48;
+  }
+
+  .review-row:first-of-type { border-top: 0; }
+  .review-key { color: var(--muted-paper); font-weight: 700; }
+  .review-value code { color: #374151; word-break: break-word; }
+
+  .purpose-box {
+    padding: 11px;
+    margin-bottom: 10px;
+  }
+
+  .purpose-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .purpose-title {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+    color: #1f2937;
+    font-size: 12px;
+    font-weight: 760;
+  }
+
+  .source-pill {
+    display: inline-flex;
+    min-height: 21px;
+    align-items: center;
+    padding: 2px 7px;
+    border-radius: 999px;
+    font-size: 10.5px;
+    font-weight: 720;
+    white-space: nowrap;
+  }
+
+  .source-pill.auto {
+    color: #1d4ed8;
+    background: rgba(37,99,235,.1);
+    border: 1px solid rgba(37,99,235,.28);
+  }
+
+  .source-pill.required {
+    color: #b91c1c;
+    background: rgba(185,28,28,.08);
+    border: 1px solid rgba(185,28,28,.3);
+  }
+
+  .purpose-input {
+    width: 100%;
+    min-height: 42px;
+    resize: vertical;
+    border: 1px solid #bbb2a4;
+    border-radius: 8px;
+    background: #f7f4ed;
+    color: #2f302f;
+    padding: 10px;
+    font-size: 13px;
+    line-height: 1.45;
+  }
+
+  .purpose-input:focus {
+    outline: 2px solid rgba(120,168,255,.8);
+    border-color: transparent;
+  }
+
+  .purpose-help {
+    margin: 7px 0 0;
+    color: var(--muted-paper);
+    font-size: 11px;
+    line-height: 1.45;
+  }
+
+  .details-row {
+    padding: 10px 11px;
+    color: var(--muted-paper);
+    font-size: 12px;
+  }
+
+  .modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 12px 16px;
+    border-top: 1px solid var(--line-paper);
+    background: var(--paper-2);
+  }
+
+  .paper-btn {
+    min-height: 32px;
+    border: 1px solid #c3bbaf;
+    border-radius: 7px;
+    background: #f8f6f1;
+    color: #33312e;
+    padding: 0 12px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  .paper-btn.primary {
+    border-color: #6b4ff7;
+    background: #6b4ff7;
+    color: #fff;
+    font-weight: 740;
+  }
+
+  .paper-btn.danger {
+    border-color: rgba(220,38,38,.55);
+    color: #b91c1c;
+  }
+
+  .paper-btn[disabled] {
+    opacity: .44;
+    cursor: not-allowed;
+  }
+
+  .notes-panel {
+    margin-top: 14px;
+  }
+
+  .notes-body {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+    padding: 12px;
+  }
+
+  .note-card {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #151922;
+    padding: 12px;
+  }
+
+  .note-card h3 {
+    margin: 0 0 7px;
+    font-size: 12px;
+    color: #e7edf8;
+  }
+
+  .note-card p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  [data-state-view] { display: none; }
+  body[data-state="reviewing"] [data-state-view~="reviewing"],
+  body[data-state="approval"] [data-state-view~="approval"],
+  body[data-state="approved"] [data-state-view~="approved"],
+  body[data-state="unknown"] [data-state-view~="unknown"] { display: revert; }
+
+  body[data-state="reviewing"] .modal-stage .approval-modal,
+  body[data-state="approved"] .modal-stage .approval-modal { display: none; }
+
+  .empty-stage {
+    display: grid;
+    place-items: center;
+    min-height: 720px;
+    color: var(--muted);
+    text-align: center;
+    padding: 24px;
+  }
+
+  .empty-stage h2 {
+    margin: 0 0 7px;
+    color: #dce3ef;
+    font-size: 14px;
+  }
+
+  .empty-stage p {
+    margin: 0;
+    max-width: 360px;
+    font-size: 12px;
+    line-height: 1.55;
+  }
+
+  @media (max-width: 1100px) {
+    .topbar { align-items: stretch; flex-direction: column; }
+    .segmented { width: 100%; }
+    .workspace { grid-template-columns: 1fr; }
+    .modal-stage, .modal-backdrop, .empty-stage { min-height: 620px; }
+    .notes-body { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+
+  @media (max-width: 640px) {
+    .page { width: min(100vw - 18px, 1440px); padding-top: 10px; }
+    .segmented { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .summary-grid { grid-template-columns: 1fr; }
+    .review-row { grid-template-columns: 1fr; gap: 4px; }
+    .status-card { grid-template-columns: 6px minmax(0, 1fr); }
+    .status-side { grid-column: 2; justify-items: start; }
+    .notes-body { grid-template-columns: 1fr; }
+    .modal-actions { flex-wrap: wrap; }
+    .paper-btn { flex: 1 1 auto; }
+  }
+</style>
+</head>
+<body data-state="reviewing">
+<div class="page">
+  <header class="topbar">
+    <div class="title">
+      <h1>권한 LLM 검토 상태 표시 + HIGH 승인 목적 자동 작성</h1>
+      <p>채팅이 멈춘 것처럼 보이는 공백을 없애고, 승인 모달의 반복 입력 부담을 줄이는 UX 목업입니다.</p>
+    </div>
+    <nav class="segmented" aria-label="목업 상태 전환">
+      <button type="button" data-state-button="reviewing" aria-pressed="true">검토중</button>
+      <button type="button" data-state-button="approval" aria-pressed="false">승인 필요</button>
+      <button type="button" data-state-button="approved" aria-pressed="false">자동 진행</button>
+      <button type="button" data-state-button="unknown" aria-pressed="false">목적 부족</button>
+    </nav>
+  </header>
+
+  <main class="workspace">
+    <section class="chat-shell" aria-label="채팅 영역 목업">
+      <div class="chat-header">
+        <h2>채팅</h2>
+        <span class="mode-pill">권한 모드: 자동 검증</span>
+      </div>
+      <div class="chat-body">
+        <div class="messages">
+          <div class="message user">
+            <div class="speaker">나</div>
+            <div class="bubble">규정 찾아줘. 플러그인에서 검색해도 돼.</div>
+          </div>
+
+          <div class="speaker">LVIS</div>
+          <p class="assistant-copy">관련 규정을 찾기 위해 Genie Query 플러그인 검색을 준비합니다.</p>
+
+          <div class="work-group" aria-label="현재 턴 작업 상태">
+            <div class="work-header">
+              <span>작업 상태</span>
+              <span data-state-view="reviewing">응답 대기 없음</span>
+              <span data-state-view="approval">사용자 승인 대기</span>
+              <span data-state-view="approved">도구 실행 중</span>
+              <span data-state-view="unknown">사용자 설명 필요</span>
+            </div>
+
+            <div class="status-card" data-tone="reviewing" data-state-view="reviewing" role="status" aria-live="polite">
+              <div class="status-bar"></div>
+              <div class="status-main">
+                <div class="status-title"><span class="spinner" aria-hidden="true"></span>권한 검토중...</div>
+                <p class="status-copy">도구 실행 전 안전성을 확인하고 있습니다. LLM 응답이 비어 있어도 시스템은 진행 중입니다.</p>
+                <div class="meta-grid">
+                  <span class="chip amber">lge_lgenie_query</span>
+                  <span class="chip blue">외부 전송</span>
+                  <span class="chip violet">플러그인 생성 요청</span>
+                </div>
+              </div>
+              <div class="status-side">
+                <span>fast reviewer</span>
+                <span>thinking 없음</span>
+              </div>
+            </div>
+
+            <div class="status-card" data-tone="needs-approval" data-state-view="approval" role="status" aria-live="polite">
+              <div class="status-bar"></div>
+              <div class="status-main">
+                <div class="status-title">승인 필요 · 높은 위험</div>
+                <p class="status-copy">검토가 끝났고 승인 창이 열렸습니다. 자동 작성된 목적과 실행 범위를 확인하세요.</p>
+                <div class="meta-grid">
+                  <span class="chip red">HIGH</span>
+                  <span class="chip blue">외부 전송</span>
+                  <span class="chip green">목적 자동 작성됨</span>
+                </div>
+              </div>
+              <div class="status-side">
+                <span>승인창 표시</span>
+                <span>세션 승인만</span>
+              </div>
+            </div>
+
+            <div class="status-card" data-tone="approved" data-state-view="approved" role="status" aria-live="polite">
+              <div class="status-bar"></div>
+              <div class="status-main">
+                <div class="status-title">권한 검토 완료 · 낮은 위험</div>
+                <p class="status-copy">리뷰어가 낮은 위험으로 판정해 사용자 입력 없이 도구 실행으로 전환했습니다.</p>
+                <div class="meta-grid">
+                  <span class="chip green">LOW</span>
+                  <span class="chip blue">자동 진행</span>
+                  <span class="chip">캐시 가능</span>
+                </div>
+              </div>
+              <div class="status-side">
+                <span>0.8초</span>
+                <span>승인 없음</span>
+              </div>
+            </div>
+
+            <div class="status-card" data-tone="unknown" data-state-view="unknown" role="status" aria-live="polite">
+              <div class="status-bar"></div>
+              <div class="status-main">
+                <div class="status-title">승인 필요 · 목적 확인 불가</div>
+                <p class="status-copy">대화와 도구 입력만으로 실행 목적을 충분히 설명할 수 없어 사용자 입력을 요청합니다.</p>
+                <div class="meta-grid">
+                  <span class="chip red">HIGH</span>
+                  <span class="chip violet">목적 부족</span>
+                  <span class="chip">수동 입력 필요</span>
+                </div>
+              </div>
+              <div class="status-side">
+                <span>승인창 표시</span>
+                <span>버튼 비활성</span>
+              </div>
+            </div>
+
+            <div class="tool-row" data-state-view="approved">
+              <span class="tool-name">lge_lgenie_query</span>
+              <span class="chip green">실행 중</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="composer">
+          <input class="composer-input" value="검토 중에도 채팅 UI는 진행 상태를 보여줍니다" aria-label="메시지 입력" />
+          <span class="composer-status" data-state-view="reviewing approval unknown">현재 턴 진행 중</span>
+          <button class="btn primary" type="button" data-state-view="approved">전송</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="modal-stage" aria-label="승인 모달 목업">
+      <div class="empty-stage" data-state-view="reviewing">
+        <div>
+          <h2>승인창은 아직 열리지 않음</h2>
+          <p>이 상태에서는 채팅 영역의 상태 카드만 보여서 사용자가 시스템 진행 여부를 확인합니다.</p>
+        </div>
+      </div>
+      <div class="empty-stage" data-state-view="approved">
+        <div>
+          <h2>승인창 없이 자동 진행</h2>
+          <p>LOW 판정은 승인 모달을 띄우지 않고 도구 실행 카드로 바로 이어집니다.</p>
+        </div>
+      </div>
+
+      <div class="modal-backdrop" data-state-view="approval unknown">
+        <article class="approval-modal" role="dialog" aria-modal="true" aria-labelledby="approval-title">
+          <div class="modal-top">
+            <div class="modal-title">
+              <span class="risk high">높은 위험</span>
+              <h2 id="approval-title">도구 실행 승인</h2>
+            </div>
+            <span class="mode-pill" style="color:#6f6559;border-color:#d4cec2;background:#fffdf8;">세션 승인만</span>
+          </div>
+
+          <div class="modal-body">
+            <div class="summary-grid">
+              <div class="summary-tile">
+                <span class="label">도구 / 출처</span>
+                <div class="summary-value"><code>lge_lgenie_query</code><br>출처: 플러그인</div>
+              </div>
+              <div class="summary-tile">
+                <span class="label">권한 분류</span>
+                <div class="summary-value">외부 전송</div>
+              </div>
+            </div>
+
+            <div class="review-box high">
+              <div class="review-title">네트워크 영향범위</div>
+              <div class="review-row">
+                <div class="review-key">주의</div>
+                <div class="review-value">이 요청은 사용자가 직접 입력한 명령이 아니라 플러그인 생성 요청에서 시작되었습니다.</div>
+              </div>
+              <div class="review-row">
+                <div class="review-key">판단</div>
+                <div class="review-value">높은 위험 · 외부 전송 전 사용자 승인 필요</div>
+              </div>
+              <div class="review-row">
+                <div class="review-key">보안 격리</div>
+                <div class="review-value">OS 격리 없음 — 도구가 추가 제한 없이 실행됩니다</div>
+              </div>
+            </div>
+
+            <section class="purpose-box" data-state-view="approval">
+              <div class="purpose-head">
+                <div class="purpose-title">작업 목적</div>
+                <span class="source-pill auto">자동 작성됨</span>
+              </div>
+              <textarea class="purpose-input" aria-label="자동 작성된 작업 목적">사용자 요청에 따라 Genie Query 플러그인으로 관련 규정을 검색합니다.</textarea>
+              <p class="purpose-help">대화와 도구 입력을 바탕으로 작성했습니다. 필요하면 수정하세요. 이 내용은 승인 기록에 저장됩니다.</p>
+            </section>
+
+            <section class="purpose-box" data-state-view="unknown">
+              <div class="purpose-head">
+                <div class="purpose-title">작업 목적</div>
+                <span class="source-pill required">직접 입력 필요</span>
+              </div>
+              <textarea class="purpose-input" aria-label="작업 목적 직접 입력" placeholder="예: 사용자가 요청한 규정을 검색하기 위해 플러그인 쿼리를 실행"></textarea>
+              <p class="purpose-help">대화 맥락만으로 승인 기록에 남길 목적을 확정할 수 없습니다. 한 문장으로 입력하면 승인할 수 있습니다.</p>
+            </section>
+
+            <details class="details-row">
+              <summary>전체 입력 보기</summary>
+              <pre style="white-space:pre-wrap;word-break:break-word;font-size:11px;line-height:1.45;">{
+  "query": "규정",
+  "source": "plugin-generated",
+  "maxResults": 5
+}</pre>
+            </details>
+          </div>
+
+          <div class="modal-actions">
+            <button class="paper-btn danger" type="button">항상 거부</button>
+            <button class="paper-btn" type="button">거부</button>
+            <button class="paper-btn" type="button" data-state-view="approval">항상 허용</button>
+            <button class="paper-btn primary" type="button" data-state-view="approval">한 번만 허용</button>
+            <button class="paper-btn" type="button" disabled data-state-view="unknown">항상 허용</button>
+            <button class="paper-btn primary" type="button" disabled data-state-view="unknown">한 번만 허용</button>
+          </div>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <section class="notes-panel" aria-label="디자인 결정">
+    <div class="notes-header">
+      <h2>디자인 결정</h2>
+      <span class="mode-pill">구현 기준</span>
+    </div>
+    <div class="notes-body">
+      <div class="note-card">
+        <h3>상태 카드는 채팅 작업 흐름 안에 배치</h3>
+        <p>assistant 답변처럼 보이지 않게 work group 내부의 status 카드로 표현합니다.</p>
+      </div>
+      <div class="note-card">
+        <h3>검토중은 경고색이 아닌 amber</h3>
+        <p>빨강은 위험 확정처럼 보이므로 검토중에는 amber/info 톤을 사용합니다.</p>
+      </div>
+      <div class="note-card">
+        <h3>목적 자동 작성은 보조 정보</h3>
+        <p>자동 작성은 실행 허용이 아니라 승인 기록용 설명 보조입니다. HIGH 승인은 그대로 명시 승인 대상입니다.</p>
+      </div>
+      <div class="note-card">
+        <h3>부족할 때만 사용자 입력</h3>
+        <p>자동 목적이 충분하면 버튼을 활성화하고, 목적이 불명확할 때만 필수 입력으로 전환합니다.</p>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+  const stateButtons = [...document.querySelectorAll("[data-state-button]")];
+  function setState(nextState) {
+    document.body.dataset.state = nextState;
+    for (const button of stateButtons) {
+      button.setAttribute("aria-pressed", button.dataset.stateButton === nextState ? "true" : "false");
+    }
+  }
+  for (const button of stateButtons) {
+    button.addEventListener("click", () => setState(button.dataset.stateButton));
+  }
+</script>
+</body>
+</html>

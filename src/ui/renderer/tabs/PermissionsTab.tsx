@@ -16,14 +16,12 @@ import { Separator } from "../../../components/ui/separator.js";
 import { PERMISSION_REVIEWER_FRAMEWORK } from "../../../shared/permission-reviewer-framework.js";
 import type { UserApprovalScope, UserApprovalVerdict } from "../../../shared/permissions-events.js";
 import { EXEC_MODE_OPTIONS, LONG_TOAST_TTL_MS } from "../constants.js";
-import { getApi } from "../api-client.js";
 import { formatIpcError } from "../format-ipc-error.js";
 import type {
   ExecMode,
   HookTrustRow,
   PermissionReviewerFallbackOnError,
   PermissionReviewerMode,
-  PermissionReviewerProvider,
   PermissionReviewerSettings,
   PermissionRule,
 } from "../types.js";
@@ -67,15 +65,6 @@ const REVIEWER_MODE_OPTIONS: Array<{
   { value: "rule", label: "규칙 기반 검증", description: "로컬 규칙으로 저위험 작업만 통과시키고 중·고위험은 대기시킵니다." },
   { value: "llm", label: "LLM 검증", description: "규칙 검증 뒤 LLM이 위험도를 올릴 수 있습니다. 낮출 수는 없습니다." },
   { value: "strict", label: "엄격 (모두 보류)", description: "자동(헤드리스) 실행과 대화형 채팅의 변경 작업을 모두 보류 대기열로 보냅니다. 사용자가 직접 승인해야 실행됩니다." },
-];
-
-/** All five providers — always visible so users know what's available. */
-const REVIEWER_PROVIDER_OPTIONS: Array<{ value: PermissionReviewerProvider; label: string }> = [
-  { value: "openai", label: "OpenAI" },
-  { value: "anthropic", label: "Anthropic Claude" },
-  { value: "google", label: "Google Gemini" },
-  { value: "foundry", label: "Azure AI Foundry" },
-  { value: "gcp-playground", label: "Google AI Studio (GCP)" },
 ];
 
 const REVIEWER_FALLBACK_OPTIONS: Array<{
@@ -184,18 +173,14 @@ export function PermissionsTab() {
   }>>([]);
   const [approvalsBusy, setApprovalsBusy] = useState(false);
   const [reviewer, setReviewer] = useState<PermissionReviewerSettings>(DEFAULT_REVIEWER_SETTINGS);
-  const [reviewerModelDraft, setReviewerModelDraft] = useState(DEFAULT_REVIEWER_SETTINGS.model);
   const [reviewerBusy, setReviewerBusy] = useState(false);
-  const [providerKeyMap, setProviderKeyMap] = useState<
-    Partial<Record<PermissionReviewerProvider, boolean>>
-  >({});
 
   // ── 초기 fetch (탭 진입 시) ───────────────────────
   const fetchAll = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [modeRes, policyRes, rulesRes, hookTrustRes, dirRes, reviewerRes, ...keyChecks] =
+      const [modeRes, policyRes, rulesRes, hookTrustRes, dirRes, reviewerRes] =
         await Promise.all([
           window.lvis.permission.getMode(),
           window.lvis.policy.get(),
@@ -203,9 +188,6 @@ export function PermissionsTab() {
           window.lvis.permission.hookTrustList(),
           window.lvis.permission.dirDispatch("list"),
           window.lvis.permission.reviewerDispatch("show"),
-          ...REVIEWER_PROVIDER_OPTIONS.map((opt) =>
-            window.lvis.permission.reviewerProviderHasKey(opt.value),
-          ),
         ]);
       if (!reviewerRes.ok) {
         throw new Error(reviewerRes.error);
@@ -219,12 +201,6 @@ export function PermissionsTab() {
       setQuarantinedHooks(hookTrustRes.ok ? hookTrustRes.disabled : []);
       setDirectories(dirRes.ok && dirRes.verb === "list" ? dirRes.userAdditions : []);
       setReviewer(reviewerRes.settings);
-      setReviewerModelDraft(reviewerRes.settings.model);
-      const keyMap: Partial<Record<PermissionReviewerProvider, boolean>> = {};
-      REVIEWER_PROVIDER_OPTIONS.forEach((opt, i) => {
-        keyMap[opt.value] = Boolean(keyChecks[i]);
-      });
-      setProviderKeyMap(keyMap);
     } catch (e) {
       setError((e as Error).message ?? "데이터를 불러오지 못했습니다.");
     } finally {
@@ -333,7 +309,6 @@ export function PermissionsTab() {
         const reviewerRes = await window.lvis.permission.reviewerDispatch(`mode ${targetReviewerMode}`);
         if (reviewerRes.ok) {
           setReviewer(reviewerRes.settings);
-          setReviewerModelDraft(reviewerRes.settings.model);
         } else {
           showBanner("error", formatReviewerDispatchError(reviewerRes.error));
           return;
@@ -376,38 +351,13 @@ export function PermissionsTab() {
     }
   };
 
-  const refreshProviderKeyMap = useCallback(async () => {
-    const results = await Promise.all(
-      REVIEWER_PROVIDER_OPTIONS.map((opt) =>
-        window.lvis.permission.reviewerProviderHasKey(opt.value),
-      ),
-    );
-    const keyMap: Partial<Record<PermissionReviewerProvider, boolean>> = {};
-    REVIEWER_PROVIDER_OPTIONS.forEach((opt, i) => {
-      keyMap[opt.value] = Boolean(results[i]);
-    });
-    setProviderKeyMap(keyMap);
-  }, []);
-
-  useEffect(() => {
-    let api: ReturnType<typeof getApi> | undefined;
-    try { api = getApi(); } catch { return; }
-    if (!api?.onSettingsUpdated) return;
-    return api.onSettingsUpdated(() => {
-      void refreshProviderKeyMap();
-    });
-  }, [refreshProviderKeyMap]);
-
   const applyReviewerCommand = async (rawArgs: string) => {
     if (reviewerBusy) return;
     setReviewerBusy(true);
-    let dispatchOk = false;
     try {
       const res = await window.lvis.permission.reviewerDispatch(rawArgs);
       if (res.ok) {
         setReviewer(res.settings);
-        setReviewerModelDraft(res.settings.model);
-        dispatchOk = true;
       } else {
         showBanner("error", formatReviewerDispatchError(res.error));
       }
@@ -416,22 +366,6 @@ export function PermissionsTab() {
     } finally {
       setReviewerBusy(false);
     }
-    if (dispatchOk) {
-      await refreshProviderKeyMap();
-    }
-  };
-
-  const handleReviewerModelApply = async () => {
-    const model = reviewerModelDraft.trim();
-    if (!model) {
-      showBanner("error", "리뷰어 모델 이름을 입력하세요.");
-      return;
-    }
-    if (/\s/.test(model)) {
-      showBanner("error", "리뷰어 모델 이름에는 공백을 사용할 수 없습니다.");
-      return;
-    }
-    await applyReviewerCommand(`model ${model}`);
   };
 
   const refreshRules = async () => {
@@ -717,48 +651,18 @@ export function PermissionsTab() {
           <div className="space-y-3 rounded-md border bg-muted/20 px-3 py-3">
             <div>
               <p className="text-xs font-medium">LLM 검증 설정</p>
-              <p className="text-[11px] text-muted-foreground">LLM 검증을 선택하기 전에 공급자, 모델, 오류 처리 정책을 미리 정합니다.</p>
+              <p className="text-[11px] text-muted-foreground">공급자와 모델은 지능 설정의 활성 LLM을 그대로 따릅니다.</p>
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
-              <Label className="space-y-1 text-xs">
-                <span className="font-medium">LLM 공급자</span>
-                <Select
-                  value={reviewer.provider}
-                  disabled={reviewerBusy}
-                  onValueChange={(value) => void applyReviewerCommand(`provider ${value}`)}
-                >
-                  <SelectTrigger data-testid="reviewer-provider-select" className="w-full text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {REVIEWER_PROVIDER_OPTIONS.map((opt) => {
-                      const hasKey = providerKeyMap[opt.value] ?? false;
-                      const isDisabled = !hasKey;
-                      const reason = "API 키 설정 필요 — 지능 설정에서 키를 추가하세요.";
-                      return (
-                        <SelectItem
-                          key={opt.value}
-                          value={opt.value}
-                          disabled={isDisabled}
-                          className={isDisabled ? "opacity-60 cursor-not-allowed" : undefined}
-                          data-testid={`reviewer-provider-option-${opt.value}`}
-                          aria-label={isDisabled ? `${opt.label} — ${reason}` : undefined}
-                        >
-                          {opt.label}
-                          {isDisabled && (
-                            <span
-                              data-testid="reviewer-provider-tooltip"
-                              className="ml-2 text-[10px] text-muted-foreground"
-                            >
-                              (키 없음)
-                            </span>
-                          )}
-                        </SelectItem>
-                      );
-                    })}
-                  </SelectContent>
-                </Select>
-              </Label>
+              <div
+                className="rounded-md border bg-background px-3 py-2 text-xs"
+                data-testid="reviewer-active-llm-source"
+              >
+                <p className="font-medium">검증 LLM</p>
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  지능 설정의 현재 공급자/모델
+                </p>
+              </div>
               <Label className="space-y-1 text-xs">
                 <span className="font-medium">오류 처리</span>
                 <Select
@@ -777,40 +681,9 @@ export function PermissionsTab() {
                 </Select>
               </Label>
             </div>
-            <Label className="space-y-1 text-xs">
-              <span className="font-medium">리뷰어 모델</span>
-              <div className="flex gap-2">
-                <Input
-                  data-testid="reviewer-model-input"
-                  className="h-8 flex-1 text-xs"
-                  value={reviewerModelDraft}
-                  disabled={reviewerBusy}
-                  onChange={(e) => setReviewerModelDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") void handleReviewerModelApply();
-                  }}
-                />
-                <Button
-                  size="sm"
-                  className="h-8 px-3"
-                  disabled={reviewerBusy || reviewerModelDraft.trim() === reviewer.model}
-                  onClick={() => void handleReviewerModelApply()}
-                >
-                  적용
-                </Button>
-              </div>
-            </Label>
             <p className="text-[11px] text-muted-foreground">
-              OpenAI · Anthropic · Google: 지능 설정의 공급자 키를 사용합니다.
-              Azure AI Foundry · Google AI Studio: 지능 설정에서 Azure AI Foundry 또는 Gemini 공급자 API 키를 저장하면 자동으로 활성화됩니다. Foundry 는 엔드포인트 baseUrl 도 함께 설정해야 합니다.
-              키가 없는 공급자는 선택할 수 없습니다.
+              공급자, 모델, API 키, baseUrl, Vertex 프로젝트/리전 변경은 지능 설정에서 관리합니다.
             </p>
-            <details className="text-[10px] text-muted-foreground">
-              <summary className="cursor-pointer select-none">Foundry baseUrl 형식 보기</summary>
-              <code className="mt-1 block rounded bg-muted/30 px-2 py-1 font-mono">
-                {"https://<resource>.openai.azure.com/openai/deployments/<deployment>"}
-              </code>
-            </details>
 
             <div className="space-y-2 border-t pt-3">
               <div className="flex items-baseline justify-between">
@@ -895,10 +768,11 @@ export function PermissionsTab() {
               <ul className="space-y-1 font-mono leading-relaxed">
                 <li><code>/permission reviewer mode &lt;disabled|rule|llm|strict&gt;</code></li>
                 <li><code>/permission reviewer interactive &lt;off|low&gt;</code></li>
-                <li><code>/permission reviewer provider &lt;openai|anthropic|google|foundry|gcp-playground&gt;</code></li>
-                <li><code>/permission reviewer model &lt;모델 이름&gt;</code></li>
                 <li><code>/permission reviewer fallback &lt;deny|rule&gt;</code></li>
               </ul>
+              <p className="text-muted-foreground">
+                provider/model 은 지능 설정의 활성 LLM을 따릅니다.
+              </p>
             </div>
           </details>
 

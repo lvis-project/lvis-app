@@ -120,8 +120,17 @@ export interface ReviewerDispatchInput {
   pathFields: readonly string[];
   /** DLP-redacted finalInput — caller is responsible for redaction. */
   finalInput: Record<string, unknown>;
+  /**
+   * Raw invocation identity for local approval/cache matching. This must not be
+   * sent to the reviewer classifier, deferred queue, or sandbox audit.
+   */
+  cacheIdentityInput?: Record<string, unknown>;
   /** Captured policy/sandbox context for user review. */
   evaluationContext?: PermissionEvaluationContext;
+  /** Recent user-authored message used for reviewer context-quality checks. */
+  conversationContext?: {
+    recentUserMessage?: string;
+  };
   allowedDirectories: string[];
   sensitivePathsAdjacent: string[];
   /**
@@ -653,6 +662,7 @@ export class PermissionManager {
     const classifier = this.reviewerClassifier!;
     const cache = this.verdictCache!;
     const queue = this.deferredQueue!;
+    const cacheIdentityInput = input.cacheIdentityInput ?? input.finalInput;
 
     const lookupKey = {
       toolName,
@@ -661,7 +671,8 @@ export class PermissionManager {
       pathFields: input.pathFields,
       trustOrigin: input.trustOrigin,
       approvalCacheKey: input.approvalCacheKey,
-      finalInput: input.finalInput,
+      conversationContext: input.conversationContext,
+      finalInput: cacheIdentityInput,
       // Issue #664 P1 — sandbox-write attestation participates in cache
       // identity. A future change to the owning plugin's sandbox root
       // (e.g. plugin renamed/reinstalled) invalidates stale verdicts.
@@ -694,7 +705,7 @@ export class PermissionManager {
     // justified a HIGH action this session, re-running the LLM is wasteful.
     const userApproval = await lookupApproval(
       toolName,
-      canonicalStringify(input.finalInput),
+      canonicalStringify(cacheIdentityInput),
       input.source,
       input.trustOrigin,
       input.approvalCacheKey,
@@ -745,6 +756,7 @@ export class PermissionManager {
         allowedDirectories: input.allowedDirectories,
         sensitivePathsAdjacent: input.sensitivePathsAdjacent,
         sandboxCapability: detectSandboxCapability(),
+        ...(input.conversationContext ? { conversationContext: input.conversationContext } : {}),
         ...(input.writesToOwnSandbox !== undefined
           ? { writesToOwnSandbox: input.writesToOwnSandbox }
           : {}),
@@ -794,6 +806,7 @@ export class PermissionManager {
         allowedDirectories: input.allowedDirectories,
         sensitivePathsAdjacent: input.sensitivePathsAdjacent,
         sandboxCapability: detectSandboxCapability(),
+        ...(input.conversationContext ? { conversationContext: input.conversationContext } : {}),
         ...(input.writesToOwnSandbox !== undefined
           ? { writesToOwnSandbox: input.writesToOwnSandbox }
           : {}),

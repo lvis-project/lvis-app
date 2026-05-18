@@ -149,6 +149,7 @@ describe("PluginUpdateDetector", () => {
     expect(updates).toHaveLength(1);
     expect(updates[0]).toEqual({
       pluginId: "local-indexer",
+      pluginName: "local-indexer",
       installedVersion: "1.0.0",
       latestVersion: "1.1.0"
     });

@@ -132,6 +132,7 @@ import { migrateCanonicalization } from "./permissions/user-approval-store.js";
 import { createProvider, secretKeyFor } from "./engine/llm/provider-factory.js";
 import { reviewerVendorFor } from "./permissions/reviewer/reviewer-vendor-map.js";
 import type { LLMProvider } from "./engine/llm/types.js";
+import { isLLMVendor } from "./shared/llm-vendor-defaults.js";
 import {
   bindManifestIntegrityAudit,
   manifestIntegrityState,
@@ -139,6 +140,7 @@ import {
 import { runManagedBootstrap } from "./boot/managed-marketplace.js";
 import { createLogger } from "./lib/logger.js";
 import { lvisHome } from "./shared/lvis-home.js";
+import { seedLvisHomeDocs } from "./main/seed-lvis-home-docs.js";
 const log = createLogger("lvis");
 
 export type { AppServices } from "./boot/types.js";
@@ -171,6 +173,23 @@ export async function bootstrap(
   getMainWindow: () => BrowserWindow | null = () => mainWindow,
 ): Promise<AppServices> {
   log.info("boot: starting...");
+
+  // Seed user-facing docs into `~/.lvis/` before any other component reads
+  // home state. AGENTS.md is the LLM-facing system reference; on first boot
+  // it is copied from packaged resources, and on subsequent upgrades a
+  // `.new` sibling is dropped next to the user's edited copy for diff/merge.
+  // Non-fatal — failures log and continue.
+  try {
+    const seeded = seedLvisHomeDocs();
+    if (seeded.seeded.length > 0) {
+      log.info(`boot: seeded lvis-home docs: ${seeded.seeded.join(", ")}`);
+    }
+    if (seeded.upgraded.length > 0) {
+      log.info(`boot: lvis-home docs upgrade available: ${seeded.upgraded.join(", ")}`);
+    }
+  } catch (err) {
+    log.warn(`boot: seedLvisHomeDocs failed (non-fatal): ${String(err)}`);
+  }
 
   // §4.2 Step 0-1 + 4-5: Core services.
   const core = await bootstrapCoreServices(mainWindow);
@@ -477,6 +496,7 @@ export async function bootstrap(
     pluginPaths,
     marketplaceFetcher,
     deploymentGuard,
+    bootAuditLogger,
   );
 
   // Closure invoked by the settings IPC handler when MarketplaceTab fields
@@ -559,19 +579,48 @@ export async function bootstrap(
   // VercelUnifiedProvider streaming surface — the reviewer needs only a
   // one-shot complete() call shape.
   const reviewerStreamProviderFor = (vendor: string): LLMProvider | null => {
-    // Reviewer settings provider name → canonical LLMVendor via shared helper.
-    // "openai" → "openai", "anthropic" → "claude", "google" → "gemini".
-    // "foundry" and "gcp-playground" are handled by dedicated adapters
-    // and never reach this function.
-    const llmVendor = reviewerVendorFor(vendor);
+    // Reviewer legacy provider names still resolve through the shared map.
+    // Active-LLM following passes canonical LLMVendor names directly.
+    const llmVendor = reviewerVendorFor(vendor) ?? (isLLMVendor(vendor) ? vendor : null);
     if (!llmVendor) return null;
+    const llmSettings = settingsService.get("llm");
+    const block = llmSettings.vendors[llmVendor];
     const apiKey = settingsService.getSecret(secretKeyFor(llmVendor));
-    if (!apiKey) return null;
-    return createProvider({ vendor: llmVendor, apiKey });
+    const isVertex = llmVendor === "vertex-ai";
+    if (!apiKey && !isVertex) return null;
+    if (
+      isVertex &&
+      !block.vertexProject &&
+      !process.env.GOOGLE_CLOUD_PROJECT &&
+      !process.env.GCLOUD_PROJECT
+    ) {
+      return null;
+    }
+    return createProvider({
+      vendor: llmVendor,
+      apiKey: apiKey ?? "",
+      model: block.model,
+      ...(block.baseUrl ? { baseUrl: block.baseUrl } : {}),
+      ...(block.vertexProject ? { vertexProject: block.vertexProject } : {}),
+      ...(block.vertexLocation ? { vertexLocation: block.vertexLocation } : {}),
+    });
+  };
+  const readActiveReviewerLlm = () => {
+    const llm = settingsService.get("llm");
+    const provider = llm.provider;
+    const block = llm.vendors[provider];
+    return {
+      provider,
+      model: block.model,
+      ...(block.baseUrl ? { baseUrl: block.baseUrl } : {}),
+      ...(block.vertexProject ? { vertexProject: block.vertexProject } : {}),
+      ...(block.vertexLocation ? { vertexLocation: block.vertexLocation } : {}),
+    };
   };
   const rewireReviewerAgent = (): void => {
     wireReviewerAgent({
       permissionManager,
+      readActiveLlm: readActiveReviewerLlm,
       streamProviderFor: reviewerStreamProviderFor,
       // Key inheritance — Foundry reads llm.apiKey.azure-foundry,
       // GCP playground reads llm.apiKey.gemini. Both use the same secret
