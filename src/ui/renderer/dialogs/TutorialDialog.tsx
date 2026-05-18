@@ -42,6 +42,34 @@ import {
 } from "../onboarding/discovery-cards.js";
 import type { TutorialAction } from "../types.js";
 
+/**
+ * F5 — `prefers-reduced-motion` reactive hook. When the OS toggle is set
+ * to "reduce" we swap the rotate+translate deck transforms for opacity-only
+ * positioning so a vestibular-sensitive user does not see the cards rotate.
+ */
+function usePrefersReducedMotion(): boolean {
+  const [reduce, setReduce] = React.useState<boolean>(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return false;
+    }
+    return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  });
+  React.useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return;
+    }
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const onChange = () => setReduce(mq.matches);
+    if (typeof mq.addEventListener === "function") {
+      mq.addEventListener("change", onChange);
+      return () => mq.removeEventListener("change", onChange);
+    }
+    mq.addListener(onChange);
+    return () => mq.removeListener(onChange);
+  }, []);
+  return reduce;
+}
+
 export interface TutorialDialogApi {
   tutorialRecord: (
     payload: { cardId: string; action: TutorialAction },
@@ -221,9 +249,25 @@ function ActiveDeck({
   canUndo,
 }: ActiveDeckProps) {
   const total = cards.length;
+  const reduceMotion = usePrefersReducedMotion();
+
+  // F5 — under reduced-motion, the decorative back/middle cards drop
+  // their `rotate(...)` transform and shift to opacity-only fades so a
+  // vestibular-sensitive user does not see the cards rotate. The
+  // mockup-faithful tilt only applies when motion is allowed.
+  const backCardStyle: React.CSSProperties = reduceMotion
+    ? { opacity: 0.5, top: "18%" }
+    : { transform: "rotate(-3deg) translate(-12px, 12px)", top: "18%" };
+  const middleCardStyle: React.CSSProperties = reduceMotion
+    ? { opacity: 0.75, top: "16%" }
+    : { transform: "rotate(2deg) translate(8px, 6px)", top: "16%" };
 
   return (
-    <div className="flex h-[640px] min-w-0 flex-col" data-testid="tutorial-dialog:active">
+    <div
+      className="flex h-[640px] min-w-0 flex-col"
+      data-testid="tutorial-dialog:active"
+      data-reduce-motion={reduceMotion ? "true" : "false"}
+    >
       <div className="px-4 pt-4 pb-2">
         <div
           className="text-[10px] uppercase tracking-wider text-muted-foreground"
@@ -244,13 +288,13 @@ function ActiveDeck({
         <div
           aria-hidden
           className="absolute h-[58%] w-[80%] rounded-2xl border border-border bg-card/80"
-          style={{ transform: "rotate(-3deg) translate(-12px, 12px)", top: "18%" }}
+          style={backCardStyle}
         />
         {/* middle card (decorative) */}
         <div
           aria-hidden
           className="absolute h-[60%] w-[85%] rounded-2xl border border-border bg-card"
-          style={{ transform: "rotate(2deg) translate(8px, 6px)", top: "16%" }}
+          style={middleCardStyle}
         />
         {/* top card */}
         <div
