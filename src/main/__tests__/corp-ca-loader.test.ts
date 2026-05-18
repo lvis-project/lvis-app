@@ -78,6 +78,7 @@ const REAL_PLATFORM = process.platform;
 describe("ensureCorporateCa", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    delete process.env.LVIS_CORP_CA_CN;
     // Mock process.platform to 'darwin' so extractByPlatform() calls extractMacos()
     // which invokes execSync — required for extraction tests to pass on Linux CI.
     Object.defineProperty(process, "platform", { value: "darwin", configurable: true, writable: true });
@@ -93,6 +94,7 @@ describe("ensureCorporateCa", () => {
   });
 
   afterEach(() => {
+    delete process.env.LVIS_CORP_CA_CN;
     Object.defineProperty(process, "platform", { value: REAL_PLATFORM, configurable: true, writable: true });
     vi.resetModules();
   });
@@ -190,5 +192,66 @@ describe("ensureCorporateCa", () => {
 
     expect(result.pem).toBeNull();
     expect(result.source).toBe("none");
+  });
+
+  it("macOS tries fallback corporate CA hints in order", async () => {
+    mockedExecFile.mockImplementation(((...args: unknown[]) => {
+      const callback = args.at(-1) as (err: Error | null, stdout: string, stderr: string) => void;
+      const requestedCn = (args[1] as string[])[3];
+      if (requestedCn === "Corporate Root CA") {
+        callback(null, "", "");
+      } else if (requestedCn === "LGERootCA") {
+        callback(null, SAMPLE_PEM, "");
+      } else {
+        callback(new Error(`unexpected CN ${requestedCn}`), "", "");
+      }
+      return {} as ReturnType<typeof cpMock.execFile>;
+    }) as never);
+
+    const { ensureCorporateCa } = await import("../corp-ca-loader.js");
+    const result = await ensureCorporateCa();
+
+    expect(result.pem).toBe(SAMPLE_PEM);
+    expect(result.source).toBe("extracted");
+    expect(mockedExecFile).toHaveBeenCalledTimes(2);
+  });
+
+  it("Windows exports trusted root store PEM via PowerShell", async () => {
+    Object.defineProperty(process, "platform", { value: "win32", configurable: true, writable: true });
+    mockExecFileStdout(SAMPLE_PEM);
+
+    const { ensureCorporateCa } = await import("../corp-ca-loader.js");
+    const result = await ensureCorporateCa();
+
+    expect(result.pem).toBe(SAMPLE_PEM);
+    expect(result.source).toBe("extracted");
+    expect(mockedExecFile).toHaveBeenCalledTimes(1);
+    const [command, args] = mockedExecFile.mock.calls[0] as unknown as [string, string[]];
+    expect(command).toBe("powershell.exe");
+    expect(args).toContain("-EncodedCommand");
+    const encoded = args[args.indexOf("-EncodedCommand") + 1];
+    const script = Buffer.from(encoded, "base64").toString("utf16le");
+    expect(script).toContain("Location = 'LocalMachine'");
+    expect(script).toContain("Location = 'CurrentUser'");
+    expect(script).toContain("Name = 'CA'");
+    expect(script).toContain("$cert.NotAfter -le $now");
+    expect(script).toContain("$issuer = [string]$cert.Issuer");
+    expect(script).toContain("'Corporate Root CA'");
+    expect(script).toContain("'LGERootCA'");
+  });
+
+  it("Windows honors LVIS_CORP_CA_CN subject filters", async () => {
+    Object.defineProperty(process, "platform", { value: "win32", configurable: true, writable: true });
+    process.env.LVIS_CORP_CA_CN = "LGERootCA; LG Issuing";
+    mockExecFileStdout(SAMPLE_PEM);
+
+    const { ensureCorporateCa } = await import("../corp-ca-loader.js");
+    await ensureCorporateCa();
+
+    const [, args] = mockedExecFile.mock.calls[0] as unknown as [string, string[]];
+    const encoded = args[args.indexOf("-EncodedCommand") + 1];
+    const script = Buffer.from(encoded, "base64").toString("utf16le");
+    expect(script).toContain("'LGERootCA'");
+    expect(script).toContain("'LG Issuing'");
   });
 });

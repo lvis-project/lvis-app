@@ -1474,8 +1474,8 @@ export async function initPluginRuntime(
         // 여야 한다. 그렇지 않으면 plugin A 가 `plugin-auth:pluginB` 를 지정해
         // plugin B 의 쿠키를 읽어가는 cross-plugin exfiltration 경로가 열린다.
         const encodedId = encodeURIComponent(pluginId);
-        const defaultPartition = `plugin-auth:${encodedId}`;
-        const allowedPersistBase = `persist:${defaultPartition}`;
+        const defaultPartition = `persist:plugin-auth:${encodedId}`;
+        const allowedPersistBase = defaultPartition;
         const requested = opts.persistPartition;
         if (
           requested !== undefined &&

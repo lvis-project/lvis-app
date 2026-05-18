@@ -8,8 +8,7 @@
  *
  * 재사용 cache: ~/.lvis/certs/corp-ca.pem (다음 부팅 skip, 7일마다 refresh)
  *
- * TODO Phase 3: Windows (win-ca / certutil) + Linux (/etc/ssl/certs) 구현.
- *   - Windows: `certutil -exportPFX -p "" Root "<CN>" tmp.pfx` or win-ca npm pkg
+ * TODO Phase 3: Linux (/etc/ssl/certs) 구현.
  *   - Linux:   /etc/ssl/certs/*RootCA*.pem or `update-ca-certificates` hook
  */
 import { execFile } from "node:child_process";
@@ -43,15 +42,37 @@ const CACHE_PATH = join(CACHE_DIR, "corp-ca.pem");
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
- * macOS System.keychain에서 검색할 CN 이름.
- * 환경변수 LVIS_CORP_CA_CN 으로 오버라이드 가능 (기본값: "Corporate Root CA").
- * 조직 MDM이 배포한 root CA 하나만 추출하면 chain이 해결된다.
+ * macOS 검색 힌트 / Windows optional subject filter.
+ *
+ * - `LVIS_CORP_CA_CN` unset:
+ *   - macOS   -> try known corp-root display names in order.
+ *   - Windows -> extract only corp-related, non-expired Root/CA entries.
+ * - `LVIS_CORP_CA_CN` set:
+ *   - one or more `;` / `,` separated subject substrings to match.
  */
-const CORP_ROOT_CA_CN = process.env.LVIS_CORP_CA_CN ?? "Corporate Root CA";
+const DEFAULT_CORP_CA_HINTS = ["Corporate Root CA", "LGERootCA"] as const;
+
+function parseCorporateCaHints(): string[] {
+  const raw = process.env.LVIS_CORP_CA_CN?.trim();
+  if (!raw) return [...DEFAULT_CORP_CA_HINTS];
+  return raw
+    .split(/[;,]/)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+}
+
+const CORP_CA_HINTS = parseCorporateCaHints();
 
 // ─── Cache read (sync — startup 경로에서 호출됨) ──────────────────────────────
 
 function readCacheIfFresh(): string | null {
+  // Windows corp roots are rotated/reissued in-place in the machine/user
+  // stores, and stale cached bundles can keep expired LG roots around long
+  // after the store has been repaired. Re-extract on every boot for
+  // correctness; the PowerShell export is cheap enough for startup.
+  if (process.platform === "win32") {
+    return null;
+  }
   try {
     const st = statSync(CACHE_PATH);
     const ageMs = Date.now() - st.mtimeMs;
@@ -70,11 +91,91 @@ function readCacheIfFresh(): string | null {
 // ─── Platform-specific extraction ────────────────────────────────────────────
 
 async function extractMacos(): Promise<string | null> {
+  for (const hint of CORP_CA_HINTS) {
+    try {
+      const output = await execFileAsync(
+        "security",
+        ["find-certificate", "-a", "-c", hint, "-p", "/Library/Keychains/System.keychain"],
+        { encoding: "utf8", timeout: 10_000, maxBuffer: 2 * 1024 * 1024 },
+      ) as unknown;
+      const stdout =
+        typeof output === "object" && output !== null && "stdout" in output
+          ? (output as { stdout?: string | Buffer }).stdout
+          : output;
+      const pem = Buffer.isBuffer(stdout) ? stdout.toString("utf8") : String(stdout ?? "");
+      if (pem.includes("-----BEGIN CERTIFICATE-----")) {
+        return pem;
+      }
+    } catch (err) {
+      log.warn("macOS extraction failed for '%s': %s", hint, (err as Error).message);
+    }
+  }
+  log.warn("macOS: corporate root CA not found in System.keychain (set LVIS_CORP_CA_CN to match your CA's CN)");
+  return null;
+}
+
+function encodePowerShellScript(script: string): string {
+  return Buffer.from(script, "utf16le").toString("base64");
+}
+
+async function extractWindows(): Promise<string | null> {
+  const filterList = CORP_CA_HINTS.map((hint) => `'${hint.replace(/'/g, "''")}'`).join(", ");
+  const script = [
+    "$storeSpecs = @(",
+    "  @{ Name = 'Root'; Location = 'LocalMachine' },",
+    "  @{ Name = 'Root'; Location = 'CurrentUser' },",
+    "  @{ Name = 'CA'; Location = 'LocalMachine' },",
+    "  @{ Name = 'CA'; Location = 'CurrentUser' }",
+    ")",
+    `$filters = @(${filterList})`,
+    "$now = Get-Date",
+    "$seen = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)",
+    "foreach ($spec in $storeSpecs) {",
+    "  $store = New-Object System.Security.Cryptography.X509Certificates.X509Store($spec.Name, $spec.Location)",
+    "  try {",
+    "    $store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadOnly)",
+    "    foreach ($cert in $store.Certificates) {",
+    "      $subject = [string]$cert.Subject",
+    "      $issuer = [string]$cert.Issuer",
+    "      if ($cert.NotAfter -le $now) { continue }",
+    "      $matched = $false",
+    "      foreach ($filter in $filters) {",
+    "        if (",
+    "          $subject.IndexOf($filter, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -or",
+    "          $issuer.IndexOf($filter, [System.StringComparison]::OrdinalIgnoreCase) -ge 0",
+    "        ) {",
+    "          $matched = $true",
+    "          break",
+    "        }",
+    "      }",
+    "      if (-not $matched) { continue }",
+    "      $thumb = [string]$cert.Thumbprint",
+    "      if (-not $thumb) { continue }",
+    "      if (-not $seen.Add($thumb)) { continue }",
+    "      $bytes = $cert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert)",
+    "      $base64 = [Convert]::ToBase64String($bytes, [System.Base64FormattingOptions]::InsertLineBreaks)",
+    "      Write-Output '-----BEGIN CERTIFICATE-----'",
+    "      Write-Output $base64",
+    "      Write-Output '-----END CERTIFICATE-----'",
+    "    }",
+    "  } finally {",
+    "    $store.Close()",
+    "  }",
+    "}",
+  ].join("\n");
+
   try {
     const output = await execFileAsync(
-      "security",
-      ["find-certificate", "-a", "-c", CORP_ROOT_CA_CN, "-p", "/Library/Keychains/System.keychain"],
-      { encoding: "utf8", timeout: 10_000, maxBuffer: 2 * 1024 * 1024 },
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-EncodedCommand",
+        encodePowerShellScript(script),
+      ],
+      { encoding: "utf8", timeout: 15_000, maxBuffer: 8 * 1024 * 1024 },
     ) as unknown;
     const stdout =
       typeof output === "object" && output !== null && "stdout" in output
@@ -82,25 +183,19 @@ async function extractMacos(): Promise<string | null> {
         : output;
     const pem = Buffer.isBuffer(stdout) ? stdout.toString("utf8") : String(stdout ?? "");
     if (!pem.includes("-----BEGIN CERTIFICATE-----")) {
-      log.warn("macOS: corporate root CA not found in System.keychain (set LVIS_CORP_CA_CN to match your CA's CN)");
+      if (process.env.LVIS_CORP_CA_DEBUG === "1") {
+        log.info(
+          "Windows extraction returned no PEM blocks%s",
+          ` for filter(s): ${CORP_CA_HINTS.join(", ")}`,
+        );
+      }
       return null;
     }
     return pem;
   } catch (err) {
-    log.warn("macOS extraction failed: %s", (err as Error).message);
+    log.warn("Windows extraction failed: %s", (err as Error).message);
     return null;
   }
-}
-
-async function extractWindows(): Promise<string | null> {
-  // Windows runtime extraction is Phase 3 (win-ca pkg or certutil pfx export).
-  // Until then, the OS still presents installed CAs to Chromium via the system
-  // trust store, so TLS usually works without injection; skip silently unless
-  // the user wants diagnostics (LVIS_CORP_CA_DEBUG=1).
-  if (process.env.LVIS_CORP_CA_DEBUG === "1") {
-    log.info("Windows runtime extraction skipped (Phase 3 pending)");
-  }
-  return null;
 }
 
 async function extractLinux(): Promise<string | null> {

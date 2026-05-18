@@ -35,7 +35,9 @@ vi.mock("electron", () => ({
     isPackaged: false,
     prependOnceListener: runtimeTestState.appPrependOnceListener,
   },
-  BrowserWindow: vi.fn(),
+  BrowserWindow: Object.assign(vi.fn(), {
+    getFocusedWindow: vi.fn(() => null),
+  }),
   shell: {
     openExternal: vi.fn(),
   },
@@ -421,6 +423,82 @@ describe("initPluginRuntime HostApi factory", () => {
       callerPluginId: "caller-plugin",
       ownerPluginId: "owner-plugin",
     });
+  });
+
+  it("defaults openAuthWindow to the persistent plugin-auth partition", async () => {
+    runtimeTestState.capturedRuntimeOptions = null;
+    const openAuthWindowService = vi.fn(async () => []);
+
+    await initPluginRuntime({
+      projectRoot: "/tmp/lvis-test/project",
+      settingsService: {
+        get: vi.fn((key: string) => {
+          if (key === "llm") return { provider: "openai" };
+          if (key === "pluginConfigs") return {};
+          return undefined;
+        }),
+        getSecret: vi.fn(() => undefined),
+        getPluginConfig: vi.fn(() => ({})),
+        setPluginConfig: vi.fn(),
+      } as never,
+      memoryManager: {} as never,
+      keywordEngine: {
+        registerKeywords: vi.fn(),
+        unregisterByPlugin: vi.fn(),
+      } as never,
+      toolRegistry: {
+        unregisterByPlugin: vi.fn(),
+        register: vi.fn(),
+        listAll: vi.fn(() => []),
+      } as never,
+      pythonPath: undefined,
+      bootAuditLogger: { log: vi.fn() } as never,
+      mainWindow: {} as never,
+      openAuthWindowService: openAuthWindowService as never,
+      openLinkWindowService: vi.fn(),
+      openAuthPartitionViewerService: vi.fn(),
+      shellOpenExternal: vi.fn(),
+      approvalGate: {} as never,
+    });
+
+    const createHostApi = runtimeTestState.capturedRuntimeOptions?.createHostApi as
+      | ((pluginId: string, manifest: {
+          id: string;
+          capabilities?: string[];
+          config?: Record<string, unknown>;
+        }, pluginDataDir: string) => {
+          openAuthWindow: (opts: {
+            url: string;
+            completionUrlPatterns: string[];
+            cookieHosts: string[];
+          }) => Promise<unknown>;
+        })
+      | undefined;
+    expect(createHostApi).toBeDefined();
+
+    const pluginDataDir = mkdtempSync("/tmp/lvis-hostapi-data-");
+    const api = createHostApi!(
+      "ms-graph",
+      {
+        id: "ms-graph",
+        capabilities: ["external-auth-consumer"],
+        config: {},
+      },
+      pluginDataDir,
+    );
+
+    await api.openAuthWindow({
+      url: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+      completionUrlPatterns: ["http://localhost:"],
+      cookieHosts: ["localhost"],
+    });
+
+    expect(openAuthWindowService).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        persistPartition: "persist:plugin-auth:ms-graph",
+      }),
+    );
   });
 
   /**

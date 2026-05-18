@@ -6,11 +6,12 @@
  */
 import { Menu, Tray, app, BrowserWindow, ipcMain, shell, dialog, nativeImage, protocol, screen, type IpcMainInvokeEvent, type MenuItemConstructorOptions } from "electron";
 import { Buffer } from "node:buffer";
+import { X509Certificate } from "node:crypto";
 import { dirname, resolve } from "node:path";
 import { existsSync } from "node:fs";
 import * as https from "node:https";
 import * as tls from "node:tls";
-import { Agent, setGlobalDispatcher } from "undici";
+import { Agent, fetch as undiciFetch, setGlobalDispatcher } from "undici";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { bootstrap, type AppServices } from "./boot.js";
 import { getCommonChromeOptions } from "./main/window-chrome.js";
@@ -54,6 +55,54 @@ const log = createLogger("lvis");
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+function safeFetchUrlForLog(input: unknown): string {
+  try {
+    if (typeof input === "string") {
+      const parsed = new URL(input);
+      return `${parsed.origin}${parsed.pathname}`;
+    }
+    if (input instanceof URL) {
+      return `${input.origin}${input.pathname}`;
+    }
+    if (typeof input === "object" && input !== null && "url" in input) {
+      const raw = Reflect.get(input, "url");
+      if (typeof raw === "string") {
+        const parsed = new URL(raw);
+        return `${parsed.origin}${parsed.pathname}`;
+      }
+    }
+  } catch {
+    // fall through
+  }
+  return "[unknown-url]";
+}
+
+function shouldLogFetchFailure(url: string): boolean {
+  return url.startsWith("https://login.microsoftonline.com/") || url.startsWith("https://graph.microsoft.com/");
+}
+
+function summarizeCorporateCaBundle(pemBundle: string): Array<{
+  subject: string;
+  issuer: string;
+  validTo: string;
+}> {
+  const certs: Array<{ subject: string; issuer: string; validTo: string }> = [];
+  const matches = pemBundle.match(/-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g) ?? [];
+  for (const pem of matches) {
+    try {
+      const x509 = new X509Certificate(pem);
+      certs.push({
+        subject: x509.subject,
+        issuer: x509.issuer,
+        validTo: x509.validTo,
+      });
+    } catch {
+      // ignore parse failures in diagnostics
+    }
+  }
+  return certs;
 }
 
 const __filename = fileURLToPath(import.meta.url);
@@ -154,11 +203,46 @@ async function injectCorporateCa() {
       return;
     }
     const ca = [...tls.rootCertificates, result.pem];
+    const corporateAgent = new Agent({ connect: { ca } });
     // 1) undici (Node fetch / global dispatcher)
-    setGlobalDispatcher(new Agent({ connect: { ca } }));
+    setGlobalDispatcher(corporateAgent);
+    // 1.5) Electron main-process `fetch` can miss dispatcher updates on some
+    // corp Windows builds, so pin it to the same CA-aware undici agent.
+    globalThis.fetch = ((input: unknown, init?: unknown) => {
+      const safeUrl = safeFetchUrlForLog(input);
+      return undiciFetch(
+        input as never,
+        { ...((init as Record<string, unknown> | undefined) ?? {}), dispatcher: corporateAgent } as never,
+      ).catch((err) => {
+        if (shouldLogFetchFailure(safeUrl)) {
+          const cause = err instanceof Error && "cause" in err ? (err as Error & { cause?: unknown }).cause : undefined;
+          log.error(
+            {
+              url: safeUrl,
+              errName: err instanceof Error ? err.name : typeof err,
+              errMessage: errorMessage(err),
+              causeCode: typeof cause === "object" && cause !== null && "code" in cause ? Reflect.get(cause, "code") : undefined,
+              causeMessage: typeof cause === "object" && cause !== null && "message" in cause ? Reflect.get(cause, "message") : undefined,
+            },
+            "fetch failed after corporate CA injection",
+          );
+        }
+        throw err;
+      });
+    }) as unknown as typeof fetch;
     // 2) https.globalAgent (legacy https.get / https.request)
     (https.globalAgent.options as Record<string, unknown>).ca = ca;
     // 3) tls.setDefaultCACertificates — Node 24 기준 미존재, 향후 확장 포인트
+    tls.setDefaultCACertificates(ca);
+    log.info(
+      {
+        source: result.source,
+        certCount: result.certCount,
+        path: result.path,
+        bundle: summarizeCorporateCaBundle(result.pem),
+      },
+      "corporate CA injected details",
+    );
     log.info(`corporate CA injected: source=${result.source} certs=${result.certCount} path=${result.path}`);
   } catch (e) {
     // 주입 실패해도 앱은 계속 실행 (해외망에서는 기본 CA로 충분)
