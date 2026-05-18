@@ -1220,6 +1220,10 @@ export async function initPluginRuntime(
             manifestSha256,
             vendor,
             activeProvider,
+            // #955 follow-up — admin-installed plugins bypass the Tier-3
+            // signed whitelist registry ACL. Tier-4 vendor cross-check
+            // still applies via the same helper.
+            installPolicy: manifest.installPolicy,
           });
           if (outcome.kind === "deny") {
             const auditReason =

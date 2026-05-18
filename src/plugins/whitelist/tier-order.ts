@@ -38,12 +38,30 @@ export interface TierCheckInput {
   manifestSha256?: string;
   vendor: string;
   activeProvider: string;
+  /**
+   * #955 follow-up — when the plugin declared `installPolicy: "admin"` in
+   * its manifest, the user (or operator) has explicitly accepted an
+   * elevated install grant. In that mode the marketplace publish itself
+   * is the policy decision, and the separate Tier-3 signed whitelist
+   * registry ACL is redundant — it is meant to keep `user`-installed
+   * plugins from reading host secrets they were never approved for.
+   *
+   * Tier-4 (active-vendor cross-check) is preserved unconditionally so
+   * an admin plugin still cannot read a non-active vendor's key — the
+   * dynamic per-session vendor identity gate continues to apply.
+   */
+  installPolicy?: "user" | "admin";
 }
 
 /**
  * Run Tier-3 (whitelist registry) then Tier-4 (active-vendor cross-check)
  * in that fixed order. Returns the first deny outcome encountered or
  * `{ kind: "allow" }` when both gates pass.
+ *
+ * `installPolicy === "admin"` bypasses Tier-3 entirely (admin-install
+ * already represents an explicit elevated grant — see field JSDoc on
+ * `TierCheckInput`). Tier-4 still runs so vendor cross-check is enforced
+ * regardless of install policy.
  *
  * NB: callers MUST still emit their own audit log lines + counter
  * increments — this helper deliberately stays free of those concerns
@@ -52,6 +70,12 @@ export interface TierCheckInput {
  * injected `auditLogger`).
  */
 export function runTier3Then4(input: TierCheckInput): TierOutcome {
+  if (input.installPolicy === "admin") {
+    if (input.vendor !== input.activeProvider) {
+      return { kind: "deny", tier: "tier-4", reason: "vendor-mismatch" };
+    }
+    return { kind: "allow" };
+  }
   const decision = whitelistRegistry.isAllowed(
     input.pluginId,
     input.key,
