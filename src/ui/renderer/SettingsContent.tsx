@@ -358,6 +358,8 @@ export function SettingsContent({
               setAuthMode={s.setAuthMode}
               onOpenLogin={() => {
                 llmSave.cancel();
+                s.invalidateLlmDraftSaves();
+                s.setKeyInput("");
                 setLoginOpen(true);
               }}
               model={s.model}
@@ -459,6 +461,8 @@ export function SettingsContent({
       onOpenChange={setLoginOpen}
       onSuccess={(activatedVendor, result) => {
         llmSave.cancel();
+        s.invalidateLlmDraftSaves();
+        s.setKeyInput("");
         // #893 — backend decides vendor; mirror it back into the dialog
         // state so the user lands on the now-active vendor without a
         // settings reload.
