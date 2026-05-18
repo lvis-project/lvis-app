@@ -298,6 +298,53 @@ export type LvisApi = {
     | { ok: false; error: string; message: string }
   >;
   onLoginPrefsChanged: (handler: (prefs: LoginPrefs) => void) => () => void;
+  /**
+   * Tutorial-C — SpotlightTour state + broadcast bridge. The host persists
+   * the tour state under `~/.lvis/onboarding/tour-state.json` (Storage
+   * Namespace per Feature). `tour.start` fans out to every open window
+   * so a Settings → "도움말" button pressed in the main window also
+   * launches the tour inside a detached pane.
+   */
+  tour: {
+    getState: () => Promise<
+      | {
+          ok: true;
+          state: {
+            lastSeenScenario: string | null;
+            completedScenarios: string[];
+            dismissedAt: string | null;
+          };
+        }
+      | { ok: false; error: string; message: string }
+    >;
+    markComplete: (scenarioId: string) => Promise<
+      | {
+          ok: true;
+          state: {
+            lastSeenScenario: string | null;
+            completedScenarios: string[];
+            dismissedAt: string | null;
+          };
+        }
+      | { ok: false; error: string; message: string }
+    >;
+    dismiss: (scenarioId: string) => Promise<
+      | {
+          ok: true;
+          state: {
+            lastSeenScenario: string | null;
+            completedScenarios: string[];
+            dismissedAt: string | null;
+          };
+        }
+      | { ok: false; error: string; message: string }
+    >;
+    start: (scenarioId: string) => Promise<
+      | { ok: true; scenarioId: string }
+      | { ok: false; error: string; message: string }
+    >;
+    onStart: (handler: (payload: { scenarioId: string }) => void) => () => void;
+  };
   openSettingsWindow: (initialTab?: string) => Promise<{ ok: true; windowId: number } | { ok: false; error: string }>;
   notifySettingsWindowSaved: () => Promise<{ ok: true } | { ok: false; error: string }>;
   onSettingsWindowSaved: (handler: () => void) => () => void;
