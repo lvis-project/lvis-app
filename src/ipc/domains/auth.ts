@@ -48,6 +48,7 @@ import {
   getDemoVendorConfig,
   isDemoEnabled,
 } from "../../main/demo-credentials.js";
+import { LoginProgressEmitter } from "../../main/login-progress-emitter.js";
 import type { IpcDeps } from "../types.js";
 
 const log = createLogger("auth-ipc");
@@ -75,6 +76,22 @@ export function registerAuthHandlers(deps: IpcDeps): void {
     log.info("mockup login handler skipped (production build, LVIS_DEMO_ENABLED unset)");
     return;
   }
+
+  // Tutorial-X1 — broadcasts step-by-step progress on `lvis:auth:progress`
+  // so the LoginModal checklist tracks the *real* main-process steps
+  // instead of a renderer setTimeout illusion. The getAppWindows accessor
+  // gracefully degrades when neither accessor is wired (e.g. test
+  // harnesses pass minimal deps): an empty array means the broadcast is
+  // a no-op while the audit row still fires.
+  const progress = new LoginProgressEmitter(
+    () => {
+      const fromAll = deps.getAppWindows?.();
+      if (Array.isArray(fromAll)) return fromAll;
+      const main = deps.getMainWindow?.();
+      return main ? [main] : [];
+    },
+    auditLogger,
+  );
 
   ipcMain.handle(
     "lvis:auth:login-mockup",
@@ -105,10 +122,16 @@ export function registerAuthHandlers(deps: IpcDeps): void {
       // (LVIS_DEMO_VENDOR env, default "openai"), not by the renderer.
       const vendor = getDemoActiveVendor();
 
+      // Step 1 — credentials-validating. Emits `running` before the
+      // expected-user comparison, then `done` after a successful match.
+      // A mismatch reports `failed` + the matching IPC error code so the
+      // renderer's checklist shows the X mark on the right row.
+      progress.emit({ step: "credentials-validating", status: "running" });
       const overrides = getDemoCredentials();
       const expectedUser = overrides.user ?? DEFAULT_DEMO_USER;
       const expectedPass = overrides.pass ?? DEFAULT_DEMO_PASS;
       if (username !== expectedUser || password !== expectedPass) {
+        progress.fail("credentials-validating", "invalid-credentials");
         try {
           auditLogger.log({
             timestamp: new Date().toISOString(),
@@ -119,61 +142,79 @@ export function registerAuthHandlers(deps: IpcDeps): void {
         } catch { /* audit must not break IPC */ }
         return { ok: false, error: "invalid-credentials" };
       }
+      progress.emit({ step: "credentials-validating", status: "done" });
 
       const demoConfig = getDemoVendorConfig(vendor);
       if (demoConfig === null) {
+        progress.fail("llm-key-issuing", "no-demo-key", vendor);
         return { ok: false, error: "no-demo-key" };
       }
 
       const fieldsApplied: string[] = ["apiKey"];
 
-      // Persist the API key into the encrypted secret store.
+      // Step 2 — llm-key-issuing. Encapsulates the secret-store write +
+      // top-level settings patch so the renderer sees "키 발급" run until
+      // the persistent state is durable on disk.
       const apiKeySecretKey = `llm.apiKey.${vendor}`;
       const prevApiKey = settingsService.getSecret(apiKeySecretKey);
-      await settingsService.setSecret(apiKeySecretKey, demoConfig.apiKey);
       const prevLlm = settingsService.get("llm");
+      await progress.runStep(
+        "llm-key-issuing",
+        async () => {
+          await settingsService.setSecret(apiKeySecretKey, demoConfig.apiKey);
 
-      // Build vendor settings patch for optional fields (baseUrl / model / vertex).
-      // Only apply fields that the demo config actually provides — this ensures
-      // that when a demo env var is absent, existing user-entered values are
-      // preserved (backward compat: apiKey-only login still works as before).
-      const vendorPatch: Record<string, unknown> = {};
-      if (demoConfig.baseUrl !== undefined) {
-        vendorPatch.baseUrl = demoConfig.baseUrl;
-        fieldsApplied.push("baseUrl");
-      }
-      if (demoConfig.model !== undefined) {
-        vendorPatch.model = demoConfig.model;
-        fieldsApplied.push("model");
-      }
-      if (demoConfig.vertexProject !== undefined) {
-        vendorPatch.vertexProject = demoConfig.vertexProject;
-        fieldsApplied.push("vertexProject");
-      }
-      if (demoConfig.vertexLocation !== undefined) {
-        vendorPatch.vertexLocation = demoConfig.vertexLocation;
-        fieldsApplied.push("vertexLocation");
-      }
-
-      // #893 — single combined patch: flip top-level authMode + provider AND
-      // apply the active vendor's optional config block. The settings store's
-      // mergeLlmPatch leaves other vendors untouched.
-      await settingsService.patch({
-        llm: {
-          authMode: "login",
-          provider: vendor,
-          ...(Object.keys(vendorPatch).length > 0
-            ? { vendors: { [vendor]: vendorPatch } }
-            : {}),
+          // Build vendor settings patch for optional fields (baseUrl / model
+          // / vertex). Only apply fields the demo config actually provides
+          // so apiKey-only login still works as before.
+          const vendorPatch: Record<string, unknown> = {};
+          if (demoConfig.baseUrl !== undefined) {
+            vendorPatch.baseUrl = demoConfig.baseUrl;
+            fieldsApplied.push("baseUrl");
+          }
+          if (demoConfig.model !== undefined) {
+            vendorPatch.model = demoConfig.model;
+            fieldsApplied.push("model");
+          }
+          if (demoConfig.vertexProject !== undefined) {
+            vendorPatch.vertexProject = demoConfig.vertexProject;
+            fieldsApplied.push("vertexProject");
+          }
+          if (demoConfig.vertexLocation !== undefined) {
+            vendorPatch.vertexLocation = demoConfig.vertexLocation;
+            fieldsApplied.push("vertexLocation");
+          }
+          // #893 — single combined patch: flip top-level authMode + provider
+          // AND apply the active vendor's optional config block.
+          await settingsService.patch({
+            llm: {
+              authMode: "login",
+              provider: vendor,
+              ...(Object.keys(vendorPatch).length > 0
+                ? { vendors: { [vendor]: vendorPatch } }
+                : {}),
+            },
+          });
         },
-      });
+        vendor,
+      );
 
-      // #893 — refresh plugin wildcard so a plugin's next `hostApi.config.get
-      // ("hostApiKey")` observes the newly-installed key without an app
-      // restart. Reviewer wiring follows the active chat provider/model, so
-      // this login path must rewire through the same closure as settings:update.
+      // Step 3 — sandbox-preparing. Captures the reviewer-agent rewire +
+      // provider refresh so the user sees the agent sandbox spin up. On
+      // rewire failure we roll the settings store back to its prior state
+      // and report `reviewer-rewire-failed`.
       try {
-        deps.rewireReviewerAgent?.();
+        await progress.runStep(
+          "sandbox-preparing",
+          async () => {
+            // #893 — refresh plugin wildcard so a plugin's next
+            // `hostApi.config.get("hostApiKey")` observes the newly-installed
+            // key without an app restart. Reviewer wiring follows the active
+            // chat provider/model, so this login path must rewire through
+            // the same closure as settings:update.
+            deps.rewireReviewerAgent?.();
+          },
+          vendor,
+        );
       } catch {
         await settingsService.replaceLlm(prevLlm);
         if (prevApiKey === null) {
@@ -206,6 +247,11 @@ export function registerAuthHandlers(deps: IpcDeps): void {
           input: `login_mockup_ok vendor=${vendor} keySource=present fields=${fieldsApplied.join(",")}`,
         });
       } catch { /* audit must not break IPC */ }
+
+      // Step 4 — terminal `complete` event. Lets the renderer collapse the
+      // checklist + hide the spinner once every step has settled.
+      progress.complete(vendor);
+
       const response: {
         ok: true;
         vendor: string;

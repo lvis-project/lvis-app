@@ -46,6 +46,12 @@ import { Button } from "../../../components/ui/button.js";
 import { Input } from "../../../components/ui/input.js";
 import { Label } from "../../../components/ui/label.js";
 import type { LoginModalProps } from "./LoginModal.js";
+import {
+  AUTH_STEP_LABEL_KO,
+  AUTH_STEP_ORDER,
+  useAuthProgress,
+  type AuthProgressStatus,
+} from "../hooks/use-auth-progress.js";
 
 function errorMessage(code: string): string {
   switch (code) {
@@ -75,6 +81,22 @@ const CURSOR_KEYFRAMES = `
 }
 `;
 
+/**
+ * Tutorial-X1 — CLI transcript icon per step status. Mirrors the
+ * conversational variant's `progressIcon` so the two variants stay in
+ * lockstep at the visual contract level.
+ */
+function cliIcon(status: AuthProgressStatus): string {
+  switch (status) {
+    case "done":
+      return "[OK]";
+    case "failed":
+      return "[ERR]";
+    case "running":
+      return "›";
+  }
+}
+
 export function LoginModalCliAgent({
   api,
   open,
@@ -91,6 +113,10 @@ export function LoginModalCliAgent({
   // view is still mounted under the transcript so existing tests can
   // reach `data-testid="login-modal:username"` without flipping mode.
   const [showForm, setShowForm] = useState(false);
+  // Tutorial-X1 — wire the same `lvis:auth:progress` subscription as the
+  // conversational variant so this CLI transcript paints real-time step
+  // results rather than a pre-baked `[OK] sandbox ready` block.
+  const progress = useAuthProgress(api, open);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -169,9 +195,17 @@ export function LoginModalCliAgent({
           </DialogTitle>
         </DialogHeader>
 
-        {/* Transcript header — frames the modal as a running shell. The
-            output is decorative; the real IPC fires on submit below. */}
-        <div className="space-y-0.5 border-y border-border py-2 text-[12px] leading-[1.7]">
+        {/* Tutorial-X1 — transcript reflects the *real* IPC progress.
+            While idle, prints the environment-check banner only. After
+            the first `lvis:auth:progress` event arrives, the transcript
+            extends with one row per step that tracks the actual
+            running/done/failed status emitted by the main process.
+            The pre-existing test selector (`login-modal:submit`) is
+            untouched so the L-X2 tests keep passing. */}
+        <div
+          className="space-y-0.5 border-y border-border py-2 text-[12px] leading-[1.7]"
+          data-testid="login-modal:transcript"
+        >
           <div>
             <span className="text-primary">$</span> lvis auth init
           </div>
@@ -205,6 +239,40 @@ export function LoginModalCliAgent({
           <div className="pl-3">
             <span className="text-muted-foreground">scope:</span> chat · tools · sandbox
           </div>
+
+          {/* Tutorial-X1 — Real progress rows from `lvis:auth:progress`
+              IPC events. Renders only while the auth flow is active so
+              the static cached-credential transcript above remains the
+              default presentation. */}
+          {progress.active &&
+            AUTH_STEP_ORDER.map((step) => {
+              const status = progress.steps[step];
+              if (status === undefined) return null;
+              return (
+                <div
+                  key={step}
+                  className="pl-3"
+                  data-testid={`login-modal:progress:${step}`}
+                  data-status={status}
+                >
+                  <span
+                    className={
+                      status === "failed"
+                        ? "text-destructive"
+                        : status === "done"
+                          ? "text-success"
+                          : "text-primary"
+                    }
+                  >
+                    {cliIcon(status)}
+                  </span>{" "}
+                  {AUTH_STEP_LABEL_KO[step]}
+                  {step === "llm-key-issuing" && progress.vendor
+                    ? ` (${progress.vendor})`
+                    : null}
+                </div>
+              );
+            })}
         </div>
 
         {/* F3 — `[OK] authenticated as demo` success box with the
