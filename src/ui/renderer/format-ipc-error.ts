@@ -118,6 +118,10 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "denied_extension": "허용되지 않은 파일 확장자입니다.",
   "no-store": "저장소를 사용할 수 없습니다.",
   "no-starred-store": "즐겨찾기 저장소를 사용할 수 없습니다.",
+  // ── #893 Auth mockup login ──
+  "invalid-credentials": "아이디 또는 비밀번호가 올바르지 않습니다.",
+  "invalid-vendor": "지원하지 않는 벤더입니다.",
+  "no-demo-key": "이 벤더의 데모 API 키가 환경 변수에 설정되어 있지 않습니다.",
 
   // ── Misc IO / system ──
   "invalid-request-id": "잘못된 요청 ID입니다.",

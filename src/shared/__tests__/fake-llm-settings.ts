@@ -15,11 +15,14 @@ export function fakeLlmSettings(overrides: {
   provider?: LLMVendor;
   /** Shorthand: override the active vendor's model without spelling out the block. */
   model?: string;
+  /** #893 — top-level authMode toggle. Defaults to "manual". */
+  authMode?: "manual" | "login";
 } = {}) {
   const provider: LLMVendor = overrides.provider ?? "openai";
   const vendors = freshVendorBlocks();
   if (overrides.model !== undefined) vendors[provider].model = overrides.model;
   return {
+    authMode: overrides.authMode ?? "manual" as const,
     provider,
     vendors,
     streamSmoothing: "none" as const,

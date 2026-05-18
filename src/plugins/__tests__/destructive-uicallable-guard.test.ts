@@ -34,7 +34,7 @@ async function writeTempPlugin(opts: {
 }): Promise<string> {
   const root = mkdtempSync(join(tmpdir(), "lvis-uicallable-"));
   const manifest = {
-    id: `com.example.test-${Math.random().toString(36).slice(2, 8)}`,
+    id: `test-${Math.random().toString(36).slice(2, 8)}`,
     name: "uiCallable Test",
     version: "1.0.0",
     description: "Test fixture.",

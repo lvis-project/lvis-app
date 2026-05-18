@@ -21,7 +21,7 @@ import { mkdtempSync } from "node:fs";
  * observable without exercising the real download/extract pipeline.
  */
 const SAMPLE_ITEM: PluginMarketplaceItem = {
-  id: "com.example.sample",
+  id: "example-sample",
   name: "Sample",
   description: "sample",
   publisher: "Test fixture",
@@ -54,7 +54,7 @@ describe("PluginMarketplaceService install → update → rollback", () => {
     const installedDir = join(testDir, "plugins");
     registryPath = join(installedDir, "registry.json");
     cacheRoot = join(testDir, ".cache");
-    pluginDir = join(installedDir, "com.example.sample");
+    pluginDir = join(installedDir, "example-sample");
     await mkdir(installedDir, { recursive: true });
     await writeFile(
       registryPath,
@@ -82,31 +82,31 @@ describe("PluginMarketplaceService install → update → rollback", () => {
       const manifestFile = join(pluginDir, "plugin.json");
       await writeFile(
         manifestFile,
-        JSON.stringify({ id: "com.example.sample", version, entry: "./dist/index.js", tools: [] }),
+        JSON.stringify({ id: "example-sample", version, entry: "./dist/index.js", tools: [] }),
         "utf-8",
       );
-      return "com.example.sample/plugin.json";
+      return "example-sample/plugin.json";
     });
     return svc;
   }
 
   it("rollback restores the prior installed version", async () => {
     const svc = makeService();
-    await svc.installPlugin("com.example.sample", "1.0.0");
+    await svc.installPlugin("example-sample", "1.0.0");
     expect(JSON.parse(await readFile(join(pluginDir, "plugin.json"), "utf-8")).version).toBe("1.0.0");
 
-    await svc.installPlugin("com.example.sample", "1.1.0");
+    await svc.installPlugin("example-sample", "1.1.0");
     expect(JSON.parse(await readFile(join(pluginDir, "plugin.json"), "utf-8")).version).toBe("1.1.0");
 
-    const result = await svc.rollbackPlugin("com.example.sample");
+    const result = await svc.rollbackPlugin("example-sample");
     expect(result.rolledBackTo).toBe("1.0.0");
     expect(JSON.parse(await readFile(join(pluginDir, "plugin.json"), "utf-8")).version).toBe("1.0.0");
   });
 
   it("rollback without a prior cached version throws", async () => {
     const svc = makeService();
-    await svc.installPlugin("com.example.sample", "1.0.0");
-    await expect(svc.rollbackPlugin("com.example.sample")).rejects.toThrow(/No prior version/);
+    await svc.installPlugin("example-sample", "1.0.0");
+    await expect(svc.rollbackPlugin("example-sample")).rejects.toThrow(/No prior version/);
   });
 
   it("installPlugin migrates a legacy `_devLinked: true` entry to local-dev then re-stamps to user on install", async () => {
@@ -119,14 +119,14 @@ describe("PluginMarketplaceService install → update → rollback", () => {
       registryPath,
       JSON.stringify({
         version: 1,
-        plugins: [{ id: "com.example.sample", manifestPath: "com.example.sample/plugin.json", enabled: true, installedBy: "user", _devLinked: true }],
+        plugins: [{ id: "example-sample", manifestPath: "example-sample/plugin.json", enabled: true, installedBy: "user", _devLinked: true }],
       }),
       "utf-8",
     );
     const svc = makeService();
     // installPlugin with a version already in registry triggers touchInstalledRegistryEntry.
-    await svc.installPlugin("com.example.sample", "1.0.0");
-    await svc.installPlugin("com.example.sample", "1.0.0"); // same version → fast path
+    await svc.installPlugin("example-sample", "1.0.0");
+    await svc.installPlugin("example-sample", "1.0.0"); // same version → fast path
     const registry = JSON.parse(await readFile(registryPath, "utf-8"));
     expect(registry.plugins[0].installSource).toBe("user");
     // Deprecated fields must not survive the migration round-trip.
@@ -141,34 +141,34 @@ describe("PluginMarketplaceService install → update → rollback", () => {
       registryPath,
       JSON.stringify({
         version: 1,
-        plugins: [{ id: "com.example.sample", manifestPath: "com.example.sample/plugin.json", enabled: true, installSource: "dev-link" }],
+        plugins: [{ id: "example-sample", manifestPath: "example-sample/plugin.json", enabled: true, installSource: "dev-link" }],
       }),
       "utf-8",
     );
     const svc = makeService();
-    await svc.installPlugin("com.example.sample", "1.0.0");
+    await svc.installPlugin("example-sample", "1.0.0");
     const registry = JSON.parse(await readFile(registryPath, "utf-8"));
     expect(registry.plugins[0].installSource).toBe("user");
   });
 
   it("rollbackPlugin re-stamps installSource='user' on a rolled-back entry whose registry was tampered with a legacy dev-link value", async () => {
     const svc = makeService();
-    await svc.installPlugin("com.example.sample", "1.0.0");
-    await svc.installPlugin("com.example.sample", "1.1.0");
+    await svc.installPlugin("example-sample", "1.0.0");
+    await svc.installPlugin("example-sample", "1.1.0");
     // Manually flip installSource to a legacy dev-link to simulate a stale
     // state. The next registry read rewrites it to "local-dev"; rollback
     // then normalises any non-admin source back to "user".
     const reg = JSON.parse(await readFile(registryPath, "utf-8"));
     reg.plugins[0].installSource = "dev-link";
     await writeFile(registryPath, JSON.stringify(reg), "utf-8");
-    await svc.rollbackPlugin("com.example.sample");
+    await svc.rollbackPlugin("example-sample");
     const restored = JSON.parse(await readFile(registryPath, "utf-8"));
     expect(restored.plugins[0].installSource).toBe("user");
   });
 
   it("installPlugin sets installSource='user' on fresh install", async () => {
     const svc = makeService();
-    await svc.installPlugin("com.example.sample", "1.0.0");
+    await svc.installPlugin("example-sample", "1.0.0");
     const registry = JSON.parse(await readFile(registryPath, "utf-8"));
     expect(registry.plugins[0].installSource).toBe("user");
   });
@@ -178,25 +178,25 @@ describe("PluginMarketplaceService install → update → rollback", () => {
       registryPath,
       JSON.stringify({
         version: 1,
-        plugins: [{ id: "com.example.sample", manifestPath: "com.example.sample/plugin.json", enabled: true, installSource: "dev-link" }],
+        plugins: [{ id: "example-sample", manifestPath: "example-sample/plugin.json", enabled: true, installSource: "dev-link" }],
       }),
       "utf-8",
     );
     const svc = makeService();
-    await svc.installPlugin("com.example.sample", "1.0.0");
+    await svc.installPlugin("example-sample", "1.0.0");
     const registry = JSON.parse(await readFile(registryPath, "utf-8"));
     expect(registry.plugins[0].installSource).toBe("user");
   });
 
   it("rollback preserves installSource='user' from the pre-install state", async () => {
     const svc = makeService();
-    await svc.installPlugin("com.example.sample", "1.0.0");
-    await svc.installPlugin("com.example.sample", "1.1.0");
+    await svc.installPlugin("example-sample", "1.0.0");
+    await svc.installPlugin("example-sample", "1.1.0");
 
     const registry = JSON.parse(await readFile(registryPath, "utf-8"));
     expect(registry.plugins[0].installSource).toBe("user");
 
-    await svc.rollbackPlugin("com.example.sample");
+    await svc.rollbackPlugin("example-sample");
 
     const restored = JSON.parse(await readFile(registryPath, "utf-8"));
     expect(restored.plugins[0].installSource).toBe("user");
@@ -211,39 +211,39 @@ describe("PluginMarketplaceService install → update → rollback", () => {
     // re-install (see marketplace.ts rollbackPlugin).
     setIsPackaged(true);
     const svc = makeService();
-    await svc.installPlugin("com.example.sample", "1.0.0");
-    await svc.installPlugin("com.example.sample", "1.1.0");
+    await svc.installPlugin("example-sample", "1.0.0");
+    await svc.installPlugin("example-sample", "1.1.0");
     const reg = JSON.parse(await readFile(registryPath, "utf-8"));
     reg.plugins[0].installSource = "dev-link";
     await writeFile(registryPath, JSON.stringify(reg), "utf-8");
-    await svc.rollbackPlugin("com.example.sample");
+    await svc.rollbackPlugin("example-sample");
     const restored = JSON.parse(await readFile(registryPath, "utf-8"));
     expect(restored.plugins[0].installSource).toBe("user");
   });
 
   it("rollback normalizes installSource='local-dev' back to 'user' (marketplace re-install)", async () => {
     const svc = makeService();
-    await svc.installPlugin("com.example.sample", "1.0.0");
-    await svc.installPlugin("com.example.sample", "1.1.0");
+    await svc.installPlugin("example-sample", "1.0.0");
+    await svc.installPlugin("example-sample", "1.1.0");
     // Simulate first version having been a local-dev install.
     const reg = JSON.parse(await readFile(registryPath, "utf-8"));
     reg.plugins[0].installSource = "local-dev";
     await writeFile(registryPath, JSON.stringify(reg), "utf-8");
-    await svc.rollbackPlugin("com.example.sample");
+    await svc.rollbackPlugin("example-sample");
     const restored = JSON.parse(await readFile(registryPath, "utf-8"));
     expect(restored.plugins[0].installSource).toBe("user");
   });
 
   it("rollback preserves bundleRefs metadata (and re-stamps installSource='user')", async () => {
     const svc = makeService();
-    await svc.installPlugin("com.example.sample", "1.0.0");
-    await svc.installPlugin("com.example.sample", "1.1.0");
+    await svc.installPlugin("example-sample", "1.0.0");
+    await svc.installPlugin("example-sample", "1.1.0");
 
     const registry = JSON.parse(await readFile(registryPath, "utf-8"));
     registry.plugins[0].bundleRefs = ["work-assistant"];
     await writeFile(registryPath, JSON.stringify(registry), "utf-8");
 
-    await svc.rollbackPlugin("com.example.sample");
+    await svc.rollbackPlugin("example-sample");
 
     const restored = JSON.parse(await readFile(registryPath, "utf-8"));
     // rollbackPlugin is always a user-actor marketplace re-install — admin
@@ -264,8 +264,8 @@ describe("PluginMarketplaceService install → update → rollback", () => {
     // calling rollback. The service must explain the delisted cause so
     // settings UI can render an actionable message.
     const svc = makeService();
-    await svc.installPlugin("com.example.sample", "1.0.0");
-    await svc.installPlugin("com.example.sample", "1.1.0");
+    await svc.installPlugin("example-sample", "1.0.0");
+    await svc.installPlugin("example-sample", "1.1.0");
 
     // Now simulate the catalog yank — fetcher.getPluginDetail returns null.
     vi.spyOn(svc as unknown as {
@@ -278,7 +278,7 @@ describe("PluginMarketplaceService install → update → rollback", () => {
       },
     });
 
-    await expect(svc.rollbackPlugin("com.example.sample")).rejects.toThrow(
+    await expect(svc.rollbackPlugin("example-sample")).rejects.toThrow(
       /no longer in the marketplace catalog.*Delisted plugins are unsupported/i,
     );
   });

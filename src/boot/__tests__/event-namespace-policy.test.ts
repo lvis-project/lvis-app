@@ -124,10 +124,11 @@ describe("registerManifestEventSubscriptions namespace gate", () => {
   ): Promise<void> {
     const pluginDir = join(installedDir, id);
     await mkdir(pluginDir, { recursive: true });
+    const toolName = `${id.replace(/-/g, "_")}_ping`;
     await writeFile(
       join(pluginDir, "entry.mjs"),
       `export default async function createPlugin(ctx) {
-  return { handlers: { ${id}_ping: async () => "pong" }, start: async () => {}, stop: async () => {} };
+  return { handlers: { ${toolName}: async () => "pong" }, start: async () => {}, stop: async () => {} };
 }`,
       "utf-8",
     );
@@ -138,7 +139,7 @@ describe("registerManifestEventSubscriptions namespace gate", () => {
       description: "Test fixture.",
       publisher: "Test fixture",
       entry: "entry.mjs",
-      tools: [`${id}_ping`],
+      tools: [toolName],
       eventSubscriptions,
       ...extra,
     };
@@ -168,7 +169,7 @@ describe("registerManifestEventSubscriptions namespace gate", () => {
   }
 
   it("rejects subscription to a private namespace with warn", async () => {
-    await writePlugin("p_priv", ["memory.private.leaked"]);
+    await writePlugin("p-priv", ["memory.private.leaked"]);
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
 
@@ -187,7 +188,7 @@ describe("registerManifestEventSubscriptions namespace gate", () => {
   });
 
   it("accepts a known public subscription silently", async () => {
-    await writePlugin("p_pub", ["email.new"]);
+    await writePlugin("p-pub", ["email.new"]);
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
 
@@ -205,7 +206,7 @@ describe("registerManifestEventSubscriptions namespace gate", () => {
   });
 
   it("accepts explicit host public events silently while keeping host namespace closed", async () => {
-    await writePlugin("p_host_theme", ["host.theme.changed"]);
+    await writePlugin("p-host-theme", ["host.theme.changed"]);
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
 
@@ -222,7 +223,7 @@ describe("registerManifestEventSubscriptions namespace gate", () => {
   });
 
   it("allows unknown neutral subscription with a drift warning", async () => {
-    await writePlugin("p_neutral", ["custom.thing"]);
+    await writePlugin("p-neutral", ["custom.thing"]);
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
 
@@ -260,10 +261,11 @@ describe("capability emit gate", () => {
   async function writePlugin(id: string, capabilities: string[]): Promise<void> {
     const pluginDir = join(installedDir, id);
     await mkdir(pluginDir, { recursive: true });
+    const toolName = `${id.replace(/-/g, "_")}_ping`;
     await writeFile(
       join(pluginDir, "entry.mjs"),
       `export default async function createPlugin(ctx) {
-  return { handlers: { ${id}_ping: async () => "pong" }, start: async () => {}, stop: async () => {} };
+  return { handlers: { ${toolName}: async () => "pong" }, start: async () => {}, stop: async () => {} };
 }`,
       "utf-8",
     );
@@ -274,7 +276,7 @@ describe("capability emit gate", () => {
       description: "Test fixture.",
       publisher: "Test fixture",
       entry: "entry.mjs",
-      tools: [`${id}_ping`],
+      tools: [toolName],
       capabilities,
     };
     await writeFile(join(pluginDir, "plugin.json"), JSON.stringify(manifest), "utf-8");
@@ -313,11 +315,11 @@ describe("capability emit gate", () => {
   }
 
   it("drops email.* emission from a plugin lacking mail-source capability", async () => {
-    await writePlugin("p_no_mail", ["worker-client"]); // unrelated cap
+    await writePlugin("p-no-mail", ["worker-client"]); // unrelated cap
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
 
-    const { guardedEmit, emitted, warns } = makeEmitGate(runtime, "p_no_mail");
+    const { guardedEmit, emitted, warns } = makeEmitGate(runtime, "p-no-mail");
     guardedEmit("email.new", { subject: "hi" });
 
     expect(emitted).toHaveLength(0);
@@ -325,11 +327,11 @@ describe("capability emit gate", () => {
   });
 
   it("passes email.* emission from a plugin declaring mail-source", async () => {
-    await writePlugin("p_mail", ["mail-source"]);
+    await writePlugin("p-mail", ["mail-source"]);
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
 
-    const { guardedEmit, emitted, warns } = makeEmitGate(runtime, "p_mail");
+    const { guardedEmit, emitted, warns } = makeEmitGate(runtime, "p-mail");
     guardedEmit("email.new", { subject: "hi" });
 
     expect(emitted).toEqual([{ type: "email.new", data: { subject: "hi" } }]);
@@ -341,11 +343,11 @@ describe("capability emit gate", () => {
     // is a no-op. Trust comes from HostApi pluginId binding (the
     // runtime overwrites payload.pluginId with the bound runtime id),
     // not from a manifest-declared capability.
-    await writePlugin("p_custom", []);
+    await writePlugin("p-custom", []);
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
 
-    const { guardedEmit, emitted, warns } = makeEmitGate(runtime, "p_custom");
+    const { guardedEmit, emitted, warns } = makeEmitGate(runtime, "p-custom");
     guardedEmit("custom.event", { foo: 1 });
 
     expect(emitted).toEqual([{ type: "custom.event", data: { foo: 1 } }]);

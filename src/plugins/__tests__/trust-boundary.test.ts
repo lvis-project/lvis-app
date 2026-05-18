@@ -112,9 +112,9 @@ describe("Phase 1 — plugin trust boundary", () => {
     it("accepts a registry manifest path under pluginsRoot", async () => {
       const manifestPath = await writePluginAt(
         join(pluginsRoot, "p-user"),
-        "tb.user",
+        "tb-user",
       );
-      await writeRegistry([{ id: "tb.user", manifestPath }]);
+      await writeRegistry([{ id: "tb-user", manifestPath }]);
 
       const runtime = new PluginRuntime({
         hostRoot,
@@ -122,15 +122,15 @@ describe("Phase 1 — plugin trust boundary", () => {
         pluginsRoot,
       });
       await runtime.load();
-      expect(runtime.listPluginIds()).toContain("tb.user");
+      expect(runtime.listPluginIds()).toContain("tb-user");
     });
 
     it("rejects a registry manifest path under hostRoot (no longer a trust root)", async () => {
       const manifestPath = await writePluginAt(
         join(hostRoot, "plugins", "installed", "p-host"),
-        "tb.host",
+        "tb-host",
       );
-      await writeRegistry([{ id: "tb.host", manifestPath }]);
+      await writeRegistry([{ id: "tb-host", manifestPath }]);
 
       const runtime = new PluginRuntime({
         hostRoot,
@@ -138,15 +138,15 @@ describe("Phase 1 — plugin trust boundary", () => {
         pluginsRoot,
       });
       await runtime.load();
-      expect(runtime.listPluginIds()).not.toContain("tb.host");
+      expect(runtime.listPluginIds()).not.toContain("tb-host");
     });
 
     it("rejects a registry manifest path outside pluginsRoot", async () => {
       const manifestPath = await writePluginAt(
         join(testDir, "rogue", "p-rogue"),
-        "tb.rogue",
+        "tb-rogue",
       );
-      await writeRegistry([{ id: "tb.rogue", manifestPath }]);
+      await writeRegistry([{ id: "tb-rogue", manifestPath }]);
 
       const runtime = new PluginRuntime({
         hostRoot,
@@ -154,7 +154,7 @@ describe("Phase 1 — plugin trust boundary", () => {
         pluginsRoot,
       });
       await runtime.load();
-      expect(runtime.listPluginIds()).not.toContain("tb.rogue");
+      expect(runtime.listPluginIds()).not.toContain("tb-rogue");
     });
 
     // Symlink creation on Windows requires admin or developer mode. Skip
@@ -167,7 +167,7 @@ describe("Phase 1 — plugin trust boundary", () => {
         // Real plugin lives at testDir/outside/p-evil/plugin.json — outside
         // pluginsRoot.
         const realDir = join(testDir, "outside", "p-evil");
-        const realManifest = await writePluginAt(realDir, "tb.evil");
+        const realManifest = await writePluginAt(realDir, "tb-evil");
         // Plant a symlink inside pluginsRoot that points at the real
         // directory. Without realpath defeat, this would naively pass the
         // containment check.
@@ -176,7 +176,7 @@ describe("Phase 1 — plugin trust boundary", () => {
         const linkedManifest = join(linkDir, "plugin.json");
         // Sanity check both paths resolve to the same file before runtime.
         expect(realManifest).not.toEqual(linkedManifest);
-        await writeRegistry([{ id: "tb.evil", manifestPath: linkedManifest }]);
+        await writeRegistry([{ id: "tb-evil", manifestPath: linkedManifest }]);
 
         const runtime = new PluginRuntime({
           hostRoot,
@@ -184,7 +184,7 @@ describe("Phase 1 — plugin trust boundary", () => {
           pluginsRoot,
         });
         await runtime.load();
-        expect(runtime.listPluginIds()).not.toContain("tb.evil");
+        expect(runtime.listPluginIds()).not.toContain("tb-evil");
       },
     );
   });
@@ -194,9 +194,9 @@ describe("Phase 1 — plugin trust boundary", () => {
   describe("marketplace install receipt integrity", () => {
     it("loads a registry plugin when its install receipt matches installed files", async () => {
       const pluginDir = join(pluginsRoot, "p-receipted");
-      const manifestPath = await writePluginAt(pluginDir, "tb.receipted");
-      await writeReceipt("tb.receipted", pluginDir);
-      await writeRegistry([{ id: "tb.receipted", manifestPath }]);
+      const manifestPath = await writePluginAt(pluginDir, "tb-receipted");
+      await writeReceipt("tb-receipted", pluginDir);
+      await writeRegistry([{ id: "tb-receipted", manifestPath }]);
 
       const auditCalls: Array<{ level: string; message: string }> = [];
       const runtime = new PluginRuntime({
@@ -208,16 +208,16 @@ describe("Phase 1 — plugin trust boundary", () => {
       });
       await runtime.load();
 
-      expect(runtime.listPluginIds()).toContain("tb.receipted");
+      expect(runtime.listPluginIds()).toContain("tb-receipted");
       expect(auditCalls).toContainEqual({ level: "info", message: "plugin_integrity_verified" });
     });
 
     it("rejects a registry plugin when an installed file differs from its receipt", async () => {
       const pluginDir = join(pluginsRoot, "p-tampered");
-      const manifestPath = await writePluginAt(pluginDir, "tb.receipt.tampered");
-      await writeReceipt("tb.receipt.tampered", pluginDir);
+      const manifestPath = await writePluginAt(pluginDir, "tb-receipt-tampered");
+      await writeReceipt("tb-receipt-tampered", pluginDir);
       await writeFile(join(pluginDir, "entry.mjs"), `${ENTRY_SOURCE}\n// tampered`, "utf-8");
-      await writeRegistry([{ id: "tb.receipt.tampered", manifestPath }]);
+      await writeRegistry([{ id: "tb-receipt-tampered", manifestPath }]);
 
       const auditCalls: Array<{ level: string; message: string }> = [];
       const runtime = new PluginRuntime({
@@ -229,7 +229,7 @@ describe("Phase 1 — plugin trust boundary", () => {
       });
       await runtime.load();
 
-      expect(runtime.listPluginIds()).not.toContain("tb.receipt.tampered");
+      expect(runtime.listPluginIds()).not.toContain("tb-receipt-tampered");
       expect(auditCalls).toContainEqual({ level: "error", message: "plugin_integrity_rejected" });
     });
 
@@ -249,18 +249,18 @@ describe("Phase 1 — plugin trust boundary", () => {
       // recorded with installSource="admin" at install time — that record is
       // authoritative.
       const userDir = join(pluginsRoot, "p-tampered");
-      const manifestPath = await writePluginAt(userDir, "tb.tampered", {
+      const manifestPath = await writePluginAt(userDir, "tb-tampered", {
         installPolicy: "user",
       });
       await writeRegistry([
-        { id: "tb.tampered", manifestPath, installSource: "admin" },
+        { id: "tb-tampered", manifestPath, installSource: "admin" },
       ]);
 
       const guard = new PluginDeploymentGuard({
         registryPath,
         pluginsRoot,
       });
-      const result = await guard.canUninstall("tb.tampered", "user");
+      const result = await guard.canUninstall("tb-tampered", "user");
 
       expect(result.allowed).toBe(false);
       expect(result.reason).toMatch(/registry installSource="admin"/);
@@ -272,18 +272,18 @@ describe("Phase 1 — plugin trust boundary", () => {
       // sees the migrated value and treats it as authoritative. This pins
       // the migration mapping for the admin-classification path.
       const userDir = join(pluginsRoot, "p-legacy-admin");
-      const manifestPath = await writePluginAt(userDir, "tb.legacy.admin", {
+      const manifestPath = await writePluginAt(userDir, "tb-legacy-admin", {
         installPolicy: "user",
       });
       await writeRegistry([
-        { id: "tb.legacy.admin", manifestPath, installedBy: "admin" },
+        { id: "tb-legacy-admin", manifestPath, installedBy: "admin" },
       ]);
 
       const guard = new PluginDeploymentGuard({
         registryPath,
         pluginsRoot,
       });
-      const result = await guard.canUninstall("tb.legacy.admin", "user");
+      const result = await guard.canUninstall("tb-legacy-admin", "user");
 
       expect(result.allowed).toBe(false);
       expect(result.reason).toMatch(/registry installSource="admin"/);
@@ -293,16 +293,16 @@ describe("Phase 1 — plugin trust boundary", () => {
       // Legacy entry with no `installedBy` recorded — guard must not break;
       // the manifest field is the only signal so it's used.
       const userDir = join(pluginsRoot, "p-legacy");
-      const manifestPath = await writePluginAt(userDir, "tb.legacy", {
+      const manifestPath = await writePluginAt(userDir, "tb-legacy", {
         installPolicy: "admin",
       });
-      await writeRegistry([{ id: "tb.legacy", manifestPath }]);
+      await writeRegistry([{ id: "tb-legacy", manifestPath }]);
 
       const guard = new PluginDeploymentGuard({
         registryPath,
         pluginsRoot,
       });
-      const result = await guard.canUninstall("tb.legacy", "user");
+      const result = await guard.canUninstall("tb-legacy", "user");
 
       expect(result.allowed).toBe(false);
       expect(result.reason).toMatch(/installPolicy="admin"/);
@@ -373,11 +373,11 @@ describe("Phase 1 — plugin trust boundary", () => {
       delete process.env.LVIS_DEV;
       setIsPackaged(true);
       const pluginDir = join(pluginsRoot, "p-dev-signer");
-      const manifestPath = await writePluginAt(pluginDir, "tb.dev-signer");
+      const manifestPath = await writePluginAt(pluginDir, "tb-dev-signer");
 
       const devReceipt: PluginInstallReceipt = {
         schemaVersion: 2,
-        pluginId: "tb.dev-signer",
+        pluginId: "tb-dev-signer",
         version: "1.0.0",
         installSource: "local-dev",
         artifactSha256: null,
@@ -386,7 +386,7 @@ describe("Phase 1 — plugin trust boundary", () => {
         files: await hashReceiptFiles(pluginDir, ["entry.mjs", "plugin.json"]),
       };
       await writeInstallReceipt(cacheRoot, devReceipt);
-      await writeRegistry([{ id: "tb.dev-signer", manifestPath, installedBy: "user" }]);
+      await writeRegistry([{ id: "tb-dev-signer", manifestPath, installedBy: "user" }]);
 
       const auditCalls: Array<{ level: string; message: string; extras?: Record<string, unknown> }> = [];
       const runtime = new PluginRuntime({
@@ -398,7 +398,7 @@ describe("Phase 1 — plugin trust boundary", () => {
       });
       await runtime.load();
 
-      expect(runtime.listPluginIds()).not.toContain("tb.dev-signer");
+      expect(runtime.listPluginIds()).not.toContain("tb-dev-signer");
       expect(auditCalls).toContainEqual(
         expect.objectContaining({ level: "error", message: "plugin_integrity_rejected" }),
       );
@@ -410,12 +410,12 @@ describe("Phase 1 — plugin trust boundary", () => {
       delete process.env.LVIS_DEV;
       setIsPackaged(true);
       const pluginDir = join(pluginsRoot, "p-v1-dev-signer");
-      const manifestPath = await writePluginAt(pluginDir, "tb.v1-dev-signer");
+      const manifestPath = await writePluginAt(pluginDir, "tb-v1-dev-signer");
 
       // Write a raw v1 JSON receipt (bypassing writeInstallReceipt which would upgrade)
       const v1Receipt = {
         schemaVersion: 1,
-        pluginId: "tb.v1-dev-signer",
+        pluginId: "tb-v1-dev-signer",
         version: "1.0.0",
         artifactSha256: "dev:local-install",
         signerKeyId: "dev:local-install",
@@ -424,11 +424,11 @@ describe("Phase 1 — plugin trust boundary", () => {
       };
       const { writeFile: wf, mkdir: mk } = await import("node:fs/promises");
       const { resolve: res } = await import("node:path");
-      const receiptPath = res(cacheRoot, "tb.v1-dev-signer", "install-receipt.json");
-      await mk(res(cacheRoot, "tb.v1-dev-signer"), { recursive: true });
+      const receiptPath = res(cacheRoot, "tb-v1-dev-signer", "install-receipt.json");
+      await mk(res(cacheRoot, "tb-v1-dev-signer"), { recursive: true });
       await wf(receiptPath, `${JSON.stringify(v1Receipt, null, 2)}\n`, "utf-8");
 
-      await writeRegistry([{ id: "tb.v1-dev-signer", manifestPath, installedBy: "user" }]);
+      await writeRegistry([{ id: "tb-v1-dev-signer", manifestPath, installedBy: "user" }]);
       const runtime = new PluginRuntime({
         hostRoot,
         registryPath,
@@ -436,7 +436,7 @@ describe("Phase 1 — plugin trust boundary", () => {
         installReceiptCacheRoot: cacheRoot,
       });
       await runtime.load();
-      expect(runtime.listPluginIds()).not.toContain("tb.v1-dev-signer");
+      expect(runtime.listPluginIds()).not.toContain("tb-v1-dev-signer");
     });
 
     it("v1 marketplace receipt (non-dev: signerKeyId) → normalised to marketplace → loads in packaged", async () => {
@@ -445,11 +445,11 @@ describe("Phase 1 — plugin trust boundary", () => {
       delete process.env.LVIS_DEV;
       setIsPackaged(true);
       const pluginDir = join(pluginsRoot, "p-v1-mkt");
-      const manifestPath = await writePluginAt(pluginDir, "tb.v1-mkt");
+      const manifestPath = await writePluginAt(pluginDir, "tb-v1-mkt");
 
       const v1Receipt = {
         schemaVersion: 1,
-        pluginId: "tb.v1-mkt",
+        pluginId: "tb-v1-mkt",
         version: "1.0.0",
         artifactSha256: "a".repeat(64),
         signerKeyId: "poc-v1",
@@ -458,11 +458,11 @@ describe("Phase 1 — plugin trust boundary", () => {
       };
       const { writeFile: wf2, mkdir: mk2 } = await import("node:fs/promises");
       const { resolve: res2 } = await import("node:path");
-      const receiptPath2 = res2(cacheRoot, "tb.v1-mkt", "install-receipt.json");
-      await mk2(res2(cacheRoot, "tb.v1-mkt"), { recursive: true });
+      const receiptPath2 = res2(cacheRoot, "tb-v1-mkt", "install-receipt.json");
+      await mk2(res2(cacheRoot, "tb-v1-mkt"), { recursive: true });
       await wf2(receiptPath2, `${JSON.stringify(v1Receipt, null, 2)}\n`, "utf-8");
 
-      await writeRegistry([{ id: "tb.v1-mkt", manifestPath, installedBy: "user" }]);
+      await writeRegistry([{ id: "tb-v1-mkt", manifestPath, installedBy: "user" }]);
       const runtime = new PluginRuntime({
         hostRoot,
         registryPath,
@@ -471,18 +471,18 @@ describe("Phase 1 — plugin trust boundary", () => {
       });
       await runtime.load();
       // marketplace-normalised v1 receipt should load (hash verification passes)
-      expect(runtime.listPluginIds()).toContain("tb.v1-mkt");
+      expect(runtime.listPluginIds()).toContain("tb-v1-mkt");
     });
 
     it("unpackaged build + local-dev receipt → plugin loads normally", async () => {
       process.env.LVIS_DEV = "1";
       setIsPackaged(false);
       const pluginDir = join(pluginsRoot, "p-dev-signer-unpkg");
-      const manifestPath = await writePluginAt(pluginDir, "tb.dev-signer-unpkg");
+      const manifestPath = await writePluginAt(pluginDir, "tb-dev-signer-unpkg");
 
       const devReceipt: PluginInstallReceipt = {
         schemaVersion: 2,
-        pluginId: "tb.dev-signer-unpkg",
+        pluginId: "tb-dev-signer-unpkg",
         version: "1.0.0",
         installSource: "local-dev",
         artifactSha256: null,
@@ -491,7 +491,7 @@ describe("Phase 1 — plugin trust boundary", () => {
         files: await hashReceiptFiles(pluginDir, ["entry.mjs", "plugin.json"]),
       };
       await writeInstallReceipt(cacheRoot, devReceipt);
-      await writeRegistry([{ id: "tb.dev-signer-unpkg", manifestPath, installedBy: "user" }]);
+      await writeRegistry([{ id: "tb-dev-signer-unpkg", manifestPath, installedBy: "user" }]);
 
       const runtime = new PluginRuntime({
         hostRoot,
@@ -501,18 +501,18 @@ describe("Phase 1 — plugin trust boundary", () => {
       });
       await runtime.load();
 
-      expect(runtime.listPluginIds()).toContain("tb.dev-signer-unpkg");
+      expect(runtime.listPluginIds()).toContain("tb-dev-signer-unpkg");
     });
 
     it("packaged build + local-dev receipt via restartPlugin → rejected", async () => {
       process.env.LVIS_DEV = "1";
       setIsPackaged(false);
       const pluginDir = join(pluginsRoot, "p-restart-dev-signer");
-      const manifestPath = await writePluginAt(pluginDir, "tb.restart-dev-signer");
+      const manifestPath = await writePluginAt(pluginDir, "tb-restart-dev-signer");
 
       const devReceipt: PluginInstallReceipt = {
         schemaVersion: 2,
-        pluginId: "tb.restart-dev-signer",
+        pluginId: "tb-restart-dev-signer",
         version: "1.0.0",
         installSource: "local-dev",
         artifactSha256: null,
@@ -521,7 +521,7 @@ describe("Phase 1 — plugin trust boundary", () => {
         files: await hashReceiptFiles(pluginDir, ["entry.mjs", "plugin.json"]),
       };
       await writeInstallReceipt(cacheRoot, devReceipt);
-      await writeRegistry([{ id: "tb.restart-dev-signer", manifestPath, installedBy: "user" }]);
+      await writeRegistry([{ id: "tb-restart-dev-signer", manifestPath, installedBy: "user" }]);
 
       // Load successfully in dev mode
       const runtime = new PluginRuntime({
@@ -531,7 +531,7 @@ describe("Phase 1 — plugin trust boundary", () => {
         installReceiptCacheRoot: cacheRoot,
       });
       await runtime.load();
-      expect(runtime.listPluginIds()).toContain("tb.restart-dev-signer");
+      expect(runtime.listPluginIds()).toContain("tb-restart-dev-signer");
 
       // Switch to packaged mode — restart should now reject
       delete process.env.LVIS_DEV;
@@ -540,8 +540,8 @@ describe("Phase 1 — plugin trust boundary", () => {
       (runtime as unknown as { auditLog?: (level: string, msg: string) => void }).auditLog =
         (level, message) => auditCalls.push({ level, message });
 
-      await runtime.restartPlugin("tb.restart-dev-signer");
-      expect(runtime.listPluginIds()).not.toContain("tb.restart-dev-signer");
+      await runtime.restartPlugin("tb-restart-dev-signer");
+      expect(runtime.listPluginIds()).not.toContain("tb-restart-dev-signer");
       expect(auditCalls).toContainEqual(
         expect.objectContaining({ level: "error", message: "plugin_integrity_rejected" }),
       );

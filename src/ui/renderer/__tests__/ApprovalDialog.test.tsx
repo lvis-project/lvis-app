@@ -377,7 +377,7 @@ describe("ApprovalDialog", () => {
     });
 
     const allowOnce = Array.from(document.body.querySelectorAll("button")).find(
-      (button) => button.textContent === "한 번만 허용",
+      (button) => button.textContent === "이번 1회만",
     );
     expect(allowOnce).toBeTruthy();
     fireEvent.click(allowOnce!);

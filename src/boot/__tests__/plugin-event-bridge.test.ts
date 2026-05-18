@@ -94,8 +94,8 @@ describe("plugin event bridge — manifest.emittedEvents", () => {
   it("forwards public events from two plugins with distinct emittedEvents", () => {
     const win = makeFakeWindow();
     const runtime = makeRuntime([
-      { id: "com.test.a", emittedEvents: ["meeting.transcript.updated"] },
-      { id: "com.test.b", emittedEvents: ["email.action.needed"] },
+      { id: "test-a", emittedEvents: ["meeting.transcript.updated"] },
+      { id: "test-b", emittedEvents: ["email.action.needed"] },
     ]);
     const dispose = registerBridge(runtime, win);
 
@@ -116,7 +116,7 @@ describe("plugin event bridge — manifest.emittedEvents", () => {
   it("does NOT forward private-namespace events", () => {
     const win = makeFakeWindow();
     const runtime = makeRuntime([
-      { id: "com.test.c", emittedEvents: ["audit.log.entry"] },
+      { id: "test-c", emittedEvents: ["audit.log.entry"] },
     ]);
     const dispose = registerBridge(runtime, win);
 
@@ -130,7 +130,7 @@ describe("plugin event bridge — manifest.emittedEvents", () => {
   it("stops forwarding after dispose()", () => {
     const win = makeFakeWindow();
     const runtime = makeRuntime([
-      { id: "com.test.d", emittedEvents: ["meeting.status.changed"] },
+      { id: "test-d", emittedEvents: ["meeting.status.changed"] },
     ]);
     const dispose = registerBridge(runtime, win);
 
@@ -145,8 +145,8 @@ describe("plugin event bridge — manifest.emittedEvents", () => {
   it("deduplicates when two plugins declare the same emittedEvent", () => {
     const win = makeFakeWindow();
     const runtime = makeRuntime([
-      { id: "com.test.e1", emittedEvents: ["calendar.event.created"] },
-      { id: "com.test.e2", emittedEvents: ["calendar.event.created"] },
+      { id: "test-e1", emittedEvents: ["calendar.event.created"] },
+      { id: "test-e2", emittedEvents: ["calendar.event.created"] },
     ]);
     const dispose = registerBridge(runtime, win);
 

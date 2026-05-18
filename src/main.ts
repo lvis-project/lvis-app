@@ -49,6 +49,7 @@ import { ensureWorkspaceCwd } from "./main/ensure-workspace-cwd.js";
 import { uninstallPluginWithLifecycle } from "./plugins/uninstall-lifecycle.js";
 import { lvisHome } from "./shared/lvis-home.js";
 import { runShutdownRoutines } from "./main/shutdown-routines.js";
+import { captureDemoCredentials } from "./main/demo-credentials.js";
 const log = createLogger("lvis");
 
 function errorMessage(err: unknown): string {
@@ -118,9 +119,20 @@ function applyRuntimeAppIcon() {
 // `LVIS_DEV_NO_SANDBOX`, which made it incorrectly look like a dev flag;
 // the rename moves it out of the dev mask but it's still hard-gated on
 // `!app.isPackaged` by `dev-flags.ts:devNoSandboxAllowed()`.
+// #893 / PR #894 B1 — Capture `LVIS_DEMO_*` BEFORE the scrub so the mockup
+// auth handler can still consume the demo keys + enable flag through an
+// internal channel, while the renderer/preload/workers never observe them
+// via inherited `process.env`. Capture is idempotent; the scrub below
+// runs unconditionally to close the env side-channel.
+captureDemoCredentials();
+
 if (app.isPackaged) {
   for (const key of Object.keys(process.env)) {
-    if (key.startsWith("LVIS_DEV") || key === "LVIS_WIN_NO_SANDBOX") {
+    if (
+      key.startsWith("LVIS_DEV") ||
+      key.startsWith("LVIS_DEMO") ||
+      key === "LVIS_WIN_NO_SANDBOX"
+    ) {
       delete process.env[key];
     }
   }
@@ -1203,7 +1215,7 @@ const BOOTSTRAP_SPLASH = `<!DOCTYPE html>
   html,body{margin:0;height:100%;background:#f3f3f3;color:#2c2c2c;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Apple SD Gothic Neo","Noto Sans KR","Malgun Gothic",sans-serif}
   body{overflow:hidden}
 
-  /* Light shell (default) — cherry-blossom radial gradient + LG vivid red wordmark */
+  /* Light shell (default) — cherry-blossom radial gradient + vivid red wordmark */
   .wrap{
     box-sizing:border-box;display:flex;align-items:center;justify-content:center;
     min-height:100vh;padding:28px;
