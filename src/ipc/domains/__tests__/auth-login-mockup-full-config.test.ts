@@ -40,10 +40,16 @@ function invoke(channel: string, ...args: unknown[]): Promise<unknown> {
 function makeDeps() {
   return {
     settingsService: {
+      get: vi.fn(() => ({
+        provider: "openai",
+        vendors: { openai: { model: "gpt-4o" } },
+      })),
       setSecret: vi.fn(async () => undefined),
       patch: vi.fn(async () => undefined),
     },
     auditLogger: { log: vi.fn() },
+    conversationLoop: { refreshProvider: vi.fn() },
+    rewireReviewerAgent: vi.fn(),
     refreshActiveLlmWildcard: vi.fn(),
   };
 }

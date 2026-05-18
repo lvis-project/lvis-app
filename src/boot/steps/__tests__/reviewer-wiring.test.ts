@@ -134,6 +134,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
       readActiveLlm: () => ({
         provider: "claude",
         model: "claude-sonnet-4-6",
+        baseUrl: "https://anthropic-proxy.example/v1",
       }),
       streamProviderFor: factorySpy,
       verdictCachePath: join(tmpDir, "cache-active-llm.jsonl"),
@@ -147,6 +148,50 @@ describe("Permission policy P4 reviewer-wiring", () => {
     const { cacheScope } = setReviewerSpy.mock.calls[0][0];
     expect(cacheScope?.provider).toBe("claude");
     expect(cacheScope?.model).toBe("claude-sonnet-4-6");
+    expect(cacheScope?.providerBaseUrl).toBe("https://anthropic-proxy.example/v1");
+  });
+
+  it("mode=llm active cacheScope includes Vertex transport identity", () => {
+    const pm = new PermissionManager(join(tmpDir, "permissions.json"));
+    const setReviewerSpy = vi.spyOn(pm, "setReviewer");
+    const provider = stubProvider([
+      {
+        type: "message_complete",
+        stopReason: "end_turn",
+      },
+    ]);
+    const factorySpy = vi.fn((vendor: string) =>
+      vendor === "vertex-ai" ? provider : null,
+    );
+
+    const result = wireReviewerAgent({
+      permissionManager: pm,
+      readSettings: () => ({
+        mode: "llm",
+        provider: "openai",
+        model: "gpt-4o-mini",
+        fallbackOnError: "deny",
+        interactive: { autoApprove: "off" },
+      }),
+      readActiveLlm: () => ({
+        provider: "vertex-ai",
+        model: "gemini-2.5-pro",
+        vertexProject: "prod-project",
+        vertexLocation: "us-central1",
+      }),
+      streamProviderFor: factorySpy,
+      verdictCachePath: join(tmpDir, "cache-active-vertex.jsonl"),
+      deferredQueuePath: join(tmpDir, "queue-active-vertex.jsonl"),
+    });
+
+    expect(result.effectiveSettings.provider).toBe("vertex-ai");
+    expect(result.effectiveSettings.vertexProject).toBe("prod-project");
+    expect(result.effectiveSettings.vertexLocation).toBe("us-central1");
+    expect(factorySpy).toHaveBeenCalledWith("vertex-ai");
+    const { cacheScope } = setReviewerSpy.mock.calls[0][0];
+    expect(cacheScope?.provider).toBe("vertex-ai");
+    expect(cacheScope?.vertexProject).toBe("prod-project");
+    expect(cacheScope?.vertexLocation).toBe("us-central1");
   });
 
   it("mode=llm but no streamProviderFor → throws (atomic cutover)", () => {
