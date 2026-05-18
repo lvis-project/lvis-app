@@ -235,7 +235,7 @@ Plugin 제거:
 | skill_load | read | ask (default; first-use approval gated) |
 | todo_session_write | write | ask (default) |
 | web_search | read | allow |
-| web_fetch | read | allow |
+| web_fetch | read / network | allow (public URL), ask (private network opt-in) |
 
 ---
 
