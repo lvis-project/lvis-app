@@ -30,6 +30,7 @@ export function createAskUserQuestionTool(deps: AskUserQuestionToolDeps): Tool {
       "각 질문은 객관식(choices, 최대 3개, 항목당 한국어 ≤ 20자) + 자유 입력(allowFreeText, single-line) 조합. " +
       "컨텍스트로 명확히 한 답에 weight 가 있을 때만 그 인덱스를 recommendedIndex 로 표기 (전체 0 또는 1개). 그 외에 추가로 권장하고 싶은 답은 altIndices 에 0~N 개 — UI 가 칩 앞쪽에 'Recommend' / '대안' 배지를 자동 부착합니다. " +
       "사용자의 사적/외부 사실(거주지·취향 등)이 답이라면 recommendedIndex 와 altIndices 모두 비워두세요. " +
+      "allowMultiple=true 로 두면 사용자가 choices 중 여러 개를 동시에 선택할 수 있고 응답은 answers[].choices 배열로 돌아옵니다 (기본 false — 단일 선택, answers[].choice 단일 문자열). " +
       "placeholder 는 자유입력 단서(한국어 ≤ 20자), summaryHint 는 confirm 단계 표 row label (≤ 10자). " +
       "5분 안에 확인이 없으면 dismissed=true 로 반환.",
     source: "builtin",
@@ -85,6 +86,14 @@ export function createAskUserQuestionTool(deps: AskUserQuestionToolDeps): Tool {
               allowFreeText: {
                 type: "boolean",
                 description: "자유 텍스트 입력 허용 여부. 기본 true (single-line input).",
+              },
+              allowMultiple: {
+                type: "boolean",
+                description:
+                  "여러 항목을 동시에 선택 가능한 다중 선택 모드. 기본 false (단일 선택). " +
+                  "true 일 때 응답은 answers[].choices: string[] (선택 라벨 배열), false 일 때 answers[].choice: string. " +
+                  "여러 후보가 동시에 답이 될 수 있는 질문(관심사·태그·범위 등)에만 사용하세요. " +
+                  "단일 선택 질문에는 false 로 두세요.",
               },
               placeholder: {
                 type: "string",
@@ -210,12 +219,22 @@ export function createAskUserQuestionTool(deps: AskUserQuestionToolDeps): Tool {
               (s): s is string => typeof s === "string" && s.trim().length > 0,
             ).slice(0, 3)
           : undefined;
+        // Multi-select is only meaningful with at least one choice; otherwise
+        // the field has no surface to apply to. Emit `true` only when on so
+        // the absence is a clean undefined for downstream equality checks.
+        const allowMultiple =
+          q.allowMultiple === true &&
+          filteredChoices !== undefined &&
+          filteredChoices.length > 0
+            ? true
+            : undefined;
         questions.push({
           question,
           choices: filteredChoices && filteredChoices.length > 0 ? filteredChoices : undefined,
           recommendedIndex,
           altIndices,
           allowFreeText,
+          allowMultiple,
           placeholder,
           summaryHint,
           suggestedAnswers:
