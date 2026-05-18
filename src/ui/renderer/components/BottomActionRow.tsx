@@ -5,7 +5,7 @@
  * 본 컴포넌트는 BOTTOM ROW 전체를 담당:
  *
  *   info cluster (좌, grow):
- *     [○ TokenRing $] [? 가이드 ⌘K] [⇧⏎ 줄바꿈] [⌘⏎ 즉시(busy)]
+ *     [○ TokenRing $] [⇧⏎ 줄바꿈] [⌘⏎ 즉시(busy)]
  *
  *   actions cluster (우):
  *     [■ 취소(busy, 컴팩트 원형 stop)] [↑ 전송 ⏎]
@@ -33,10 +33,6 @@ export interface BottomActionRowProps {
   onSend: () => void;
   /** ESC 취소 = LLM abort (큐 보존). LLM busy 일 때만 노출. */
   onCancel: () => void;
-  /** 가이드 ghost button 클릭. ⌘K 단축키도 동일 핸들러. */
-  onGuide: () => void;
-  /** 가이드 비활성 (composer 비어 있는 등). 시각만 흐림. */
-  guideDisabled?: boolean;
 }
 
 export function BottomActionRow({
@@ -45,8 +41,6 @@ export function BottomActionRow({
   isSendDisabled,
   onSend,
   onCancel,
-  onGuide,
-  guideDisabled = false,
 }: BottomActionRowProps) {
   return (
     <div
@@ -55,18 +49,6 @@ export function BottomActionRow({
     >
       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
         {tokenSlot}
-        <button
-          type="button"
-          onClick={onGuide}
-          disabled={guideDisabled}
-          data-testid="composer-guide-ghost"
-          className="inline-flex h-6 items-center gap-1 rounded border border-transparent px-2 text-[11px] text-muted-foreground transition-colors hover:border-border hover:bg-accent/10 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-          title="가이드 보기 (⌘K)"
-        >
-          <span className="opacity-70">?</span>
-          <span>가이드</span>
-          <Kbd>⌘K</Kbd>
-        </button>
         <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
           <Kbd>⇧⏎</Kbd>
           <span>줄바꿈</span>
