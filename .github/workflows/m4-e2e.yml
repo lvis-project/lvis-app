@@ -49,6 +49,18 @@ jobs:
           pip install -U pip uv
           uv sync --frozen --all-groups || uv sync --all-groups
 
+      - name: Build plugin schemas (production-equivalent of Dockerfile RUN)
+        working-directory: lvis-marketplace
+        run: |
+          # Production Dockerfile runs `python scripts/build_schemas.py` to
+          # convert vendor/lvis-plugin-sdk/schemas/*.schema.json into
+          # server-loadable schemas/ at marketplace repo root. Without this,
+          # publish endpoints raise FileNotFoundError on schemas/plugin.schema.json.
+          mkdir -p schemas
+          (cd server && uv run python scripts/build_schemas.py --out ../schemas) \
+            || uv run --directory server python scripts/build_schemas.py
+          ls -la schemas/
+
       - name: Clean stale M4 DB only (DO NOT kill processes — production marketplace shares the host)
         run: |
           # Self-hosted runner co-hosts the production marketplace server.
