@@ -5,6 +5,7 @@ import {
   useImperativeHandle,
   useMemo,
   useRef,
+  useState,
   type Dispatch,
   type SetStateAction,
 } from "react";
@@ -112,6 +113,11 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   ref,
 ) {
   const taRef = useRef<HTMLTextAreaElement | null>(null);
+  // IME composition state (e.g. 한글 조합 중). Spec §8: ImePreedit 중 → ghost
+  // hide, composition 끝나면 reappear. Tracked via React composition events
+  // because `e.nativeEvent.isComposing` is only available inside keydown — the
+  // ghost render path needs the value at render time, not just on key events.
+  const [isComposing, setIsComposing] = useState(false);
 
   const captureUserKeyboardIntent = useCallback((): UserKeyboardIntentSnapshot => {
     const api = (globalThis as typeof globalThis & {
@@ -323,10 +329,19 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 
   const isFull = liveAttachments.length >= ATTACH_MAX_COUNT;
   const ghostBest = suggestedReplies?.best ?? null;
+  // Spec §3 line 42 + §8: ghost hidden when (a) user has typed any char, (b)
+  // IME composition active (preedit), (c) no `best`, or (d) dismissed.
   const ghostVisible =
-    text.length === 0 && ghostBest !== null && !(suggestedReplies?.isDismissed ?? false);
+    text.length === 0 &&
+    !isComposing &&
+    ghostBest !== null &&
+    !(suggestedReplies?.isDismissed ?? false);
+  // Spec §3 line 42: "사용자가 1자 이상 입력 → ghost + chip row 즉시 hide".
+  // Chip row hides as soon as the textarea has any text, mirroring the ghost.
   const chipAlternates =
-    suggestedReplies && !suggestedReplies.isDismissed ? suggestedReplies.alternates : [];
+    text.length === 0 && suggestedReplies && !suggestedReplies.isDismissed
+      ? suggestedReplies.alternates
+      : [];
 
   const acceptChip = useCallback(
     (chipText: string) => {
@@ -384,6 +399,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           onChange={(e) => onTextChange(e.target.value)}
           onPaste={handlePaste}
           onKeyDown={handleKeyDown}
+          onCompositionStart={() => setIsComposing(true)}
+          onCompositionEnd={() => setIsComposing(false)}
           placeholder={placeholder ?? "질문을 입력하세요... (Cmd/Ctrl+V 로 클립보드 붙여넣기)"}
           /* v6 layout: ~2 줄 시작 (min-h-[40px] = 2 lines @ leading-5),
              자동 확장 후 ~6 줄에서 scroll. 기존 88px 는 4 줄+ 차지해 textarea 가

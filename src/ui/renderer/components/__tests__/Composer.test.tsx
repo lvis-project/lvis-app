@@ -357,6 +357,38 @@ describe("Composer", () => {
     expect(ta.value).toBe("아니오");
   });
 
+  it("hides chip row once user types 1+ chars (MAJOR-1 round-1)", () => {
+    // Spec §3 line 42: "사용자가 1자 이상 입력 → ghost + chip row 즉시 hide".
+    // Ghost was already hidden in a separate test; this asserts chip row hides
+    // for the same condition so the two surfaces stay in lockstep.
+    render(
+      <Harness
+        initialText="abc"
+        suggestedReplies={{ best: "네", alternates: ["아니오", "나중에"], isDismissed: false }}
+      />,
+    );
+    expect(screen.queryByTestId("suggested-replies-chip-row")).toBeNull();
+  });
+
+  it("hides ghost during IME composition + reappears after end (MAJOR-2 round-1)", async () => {
+    // Spec §8: ImePreedit (한글 조합) 중 → ghost hide, composition 끝나면 reappear.
+    render(
+      <Harness
+        suggestedReplies={{ best: "네", alternates: [], isDismissed: false }}
+      />,
+    );
+    expect(screen.getByTestId("suggested-replies-ghost")).toBeTruthy();
+    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    await act(async () => {
+      fireEvent.compositionStart(ta);
+    });
+    expect(screen.queryByTestId("suggested-replies-ghost")).toBeNull();
+    await act(async () => {
+      fireEvent.compositionEnd(ta);
+    });
+    expect(screen.getByTestId("suggested-replies-ghost")).toBeTruthy();
+  });
+
   it("Escape dismisses suggestion (ghost disappears)", async () => {
     function HarnessWithDismiss() {
       const [reps, setReps] = useState<SuggestedRepliesSnapshot>({
