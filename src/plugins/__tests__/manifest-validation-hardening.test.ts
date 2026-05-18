@@ -103,14 +103,14 @@ describe("runtime manifest validation hardening", () => {
     }
     expect(runtime.listPluginIds()).toHaveLength(0);
     expect(
-      cap.errors.some((e) => /keywords\[0\]\.skillId.*p-kw_missing.*not in tools\[\]/.test(e)),
+      cap.errors.some((e) => /keywords\[0\]\.skillId.*p_kw_missing.*not in tools\[\]/.test(e)),
     ).toBe(true);
   });
 
   it("2) toolSchemas key not in tools[] fails load", async () => {
     await writePlugin("p-ts", {
       toolSchemas: {
-        p-ts_ghost: {
+        p_ts_ghost: {
           description: "ghost tool description here",
           category: "read",
           inputSchema: { type: "object", properties: {} },
