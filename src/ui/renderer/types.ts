@@ -15,6 +15,10 @@ import type {
   MarketplacePackageType,
   SelectedAssistantContext,
 } from "../../shared/assistant-context.js";
+import type {
+  AssistantContextMenuAction,
+  AssistantContextMenuPayload,
+} from "../../shared/assistant-context-menu.js";
 
 // Re-export MCP types for renderer-side consumers (type-only, no main-process runtime)
 export type { McpServerConfig, McpServerConfigDto, McpServerState };
@@ -450,7 +454,7 @@ export type LvisApi = {
     routineId: string,
     limit?: number,
   ) => Promise<Array<{ routineId: string; firedAt: string; sessionId: string; title: string; preview: string }>>;
-  onMarketplaceUpdatesAvailable: (h: (updates: Array<{ pluginId: string; installedVersion: string; latestVersion: string }>) => void) => () => void;
+  onMarketplaceUpdatesAvailable: (h: (updates: Array<{ pluginId: string; pluginName?: string; installedVersion: string; latestVersion: string }>) => void) => () => void;
   /**
    * App auto-update state stream — emitted by the main process whenever
    * the updater state changes (available → downloading → downloaded).
@@ -1082,6 +1086,15 @@ export interface LvisAttachApi {
   openExternal: (filePath: string) => Promise<{ ok: boolean; error?: string }>;
 }
 
+export interface LvisUiApi {
+  showAssistantContextMenu: (
+    payload: AssistantContextMenuPayload,
+  ) => Promise<{ ok: true } | { ok: false; error: string }>;
+  onAssistantContextAction: (
+    cb: (action: AssistantContextMenuAction) => void,
+  ) => () => void;
+}
+
 declare global {
   interface Window {
     lvisApi: LvisApi;
@@ -1094,6 +1107,7 @@ declare global {
       mcp: LvisMcpApi;
       plugins: LvisPluginsApi;
       pluginConfig: LvisPluginConfigApi;
+      ui: LvisUiApi;
       attach: LvisAttachApi;
       env: {
         isDev: boolean;
