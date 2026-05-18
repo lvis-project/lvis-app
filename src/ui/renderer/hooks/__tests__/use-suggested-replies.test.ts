@@ -7,14 +7,20 @@ import {
   pushSuggestedReplies,
   dismissSuggestedReplies,
   acceptSuggestedReply,
+  clearDismissedReplies,
   __resetSuggestedRepliesStoreForTests,
   __teardownSuggestedRepliesIpcForTests,
 } from "../use-suggested-replies.js";
+import {
+  getSuggestedRepliesCounters,
+  resetSuggestedRepliesCountersForTesting,
+} from "../../../../telemetry/suggested-replies-counter.js";
 
 describe("useSuggestedReplies", () => {
   beforeEach(() => {
     __resetSuggestedRepliesStoreForTests();
     __teardownSuggestedRepliesIpcForTests();
+    resetSuggestedRepliesCountersForTesting();
   });
 
   it("starts with empty snapshot", () => {
@@ -69,14 +75,37 @@ describe("useSuggestedReplies", () => {
     expect(result.current.isDismissed).toBe(false);
   });
 
-  it("new push after dismiss re-enables (fresh snapshot)", () => {
+  it("new push after dismiss preserves dismissed flag (PR-D turn-scoped memory)", () => {
+    // Spec PR-D #3: intra-turn re-push must honor the user's prior Escape.
+    // Only `clearDismissedReplies()` (called by Composer on send) or
+    // `acceptSuggestedReply()` releases the latch.
     const { result } = renderHook(() => useSuggestedReplies());
     act(() => { pushSuggestedReplies(["네"]); });
     act(() => { dismissSuggestedReplies(); });
     expect(result.current.isDismissed).toBe(true);
     act(() => { pushSuggestedReplies(["다음 단계"]); });
+    expect(result.current.isDismissed).toBe(true);
+    expect(result.current.best).toBe("다음 단계");
+  });
+
+  it("clearDismissedReplies releases the latch — next push renders fresh", () => {
+    const { result } = renderHook(() => useSuggestedReplies());
+    act(() => { pushSuggestedReplies(["네"]); });
+    act(() => { dismissSuggestedReplies(); });
+    expect(result.current.isDismissed).toBe(true);
+    act(() => { clearDismissedReplies(); });
+    act(() => { pushSuggestedReplies(["다음 단계"]); });
     expect(result.current.isDismissed).toBe(false);
     expect(result.current.best).toBe("다음 단계");
+  });
+
+  it("accept also releases the dismiss latch", () => {
+    const { result } = renderHook(() => useSuggestedReplies());
+    act(() => { pushSuggestedReplies(["네"]); });
+    act(() => { dismissSuggestedReplies(); });
+    act(() => { acceptSuggestedReply("네", "best"); });
+    act(() => { pushSuggestedReplies(["다음 단계"]); });
+    expect(result.current.isDismissed).toBe(false);
   });
 
   it("multiple subscribers see the same snapshot", () => {
@@ -86,5 +115,97 @@ describe("useSuggestedReplies", () => {
     expect(r1.current.best).toBe("네");
     expect(r2.current.best).toBe("네");
     expect(r1.current).toBe(r2.current); // identical reference
+  });
+
+  // --- PR-D additions: slash filter + telemetry ---
+
+  it("slash-command WITH arguments is filtered out (executable payload)", () => {
+    const { result } = renderHook(() => useSuggestedReplies());
+    act(() => { pushSuggestedReplies(["/admin run prod", "확인"]); });
+    expect(result.current.best).toBe("확인");
+    expect(result.current.alternates).toEqual([]);
+  });
+
+  it("single-token slash command passes filter (legitimate suggestion)", () => {
+    // Critic review #971: `/clear`, `/help` 같은 *no-arg* host command 추천은
+    // 사용자가 정당하게 원할 수 있음 — chip click 은 textarea fill 만 하고
+    // host parser 가 send 시점에 권한 체크하므로 trust boundary 유효.
+    const { result } = renderHook(() => useSuggestedReplies());
+    act(() => { pushSuggestedReplies(["/clear", "/help"]); });
+    expect(result.current.best).toBe("/clear");
+    expect(result.current.alternates).toEqual(["/help"]);
+  });
+
+  it("bang and dollar commands WITH arguments are filtered out", () => {
+    const { result } = renderHook(() => useSuggestedReplies());
+    act(() => { pushSuggestedReplies(["!shell -c rm", "$env=foo bar", "다음"]); });
+    expect(result.current.best).toBe("다음");
+  });
+
+  it("list with only command-with-args suggestions collapses to empty", () => {
+    const { result } = renderHook(() => useSuggestedReplies());
+    act(() => { pushSuggestedReplies(["/help me with X", "!ls -la /", "$path=evil ok"]); });
+    expect(result.current.best).toBeNull();
+    expect(result.current.alternates).toEqual([]);
+  });
+
+  it("command-with-args + leading whitespace still filtered (trim before match)", () => {
+    const { result } = renderHook(() => useSuggestedReplies());
+    act(() => { pushSuggestedReplies(["  /admin run prod", "확인"]); });
+    expect(result.current.best).toBe("확인");
+  });
+
+  it("telemetry: shown counter increments on non-empty push", () => {
+    renderHook(() => useSuggestedReplies());
+    act(() => { pushSuggestedReplies(["네"]); });
+    expect(getSuggestedRepliesCounters().shown).toBe(1);
+  });
+
+  it("telemetry: dismissed counter increments on dismiss", () => {
+    renderHook(() => useSuggestedReplies());
+    act(() => { pushSuggestedReplies(["네"]); });
+    act(() => { dismissSuggestedReplies(); });
+    expect(getSuggestedRepliesCounters().dismissed).toBe(1);
+  });
+
+  it("telemetry: accepted-best counter increments on best accept", () => {
+    renderHook(() => useSuggestedReplies());
+    act(() => { pushSuggestedReplies(["네"]); });
+    act(() => { acceptSuggestedReply("네", "best"); });
+    expect(getSuggestedRepliesCounters()["accepted-best"]).toBe(1);
+    expect(getSuggestedRepliesCounters()["accepted-chip"]).toBe(0);
+  });
+
+  it("telemetry: accepted-chip counter increments on chip accept", () => {
+    renderHook(() => useSuggestedReplies());
+    act(() => { pushSuggestedReplies(["네", "아니오"]); });
+    act(() => { acceptSuggestedReply("아니오", "chip"); });
+    expect(getSuggestedRepliesCounters()["accepted-chip"]).toBe(1);
+    expect(getSuggestedRepliesCounters()["accepted-best"]).toBe(0);
+  });
+
+  it("telemetry: ignored counter increments when prior active push is replaced", () => {
+    renderHook(() => useSuggestedReplies());
+    act(() => { pushSuggestedReplies(["첫 번째"]); });
+    act(() => { pushSuggestedReplies(["두 번째"]); });
+    expect(getSuggestedRepliesCounters().ignored).toBe(1);
+  });
+
+  it("telemetry: dismissed snapshot is NOT counted as ignored on next push", () => {
+    renderHook(() => useSuggestedReplies());
+    act(() => { pushSuggestedReplies(["첫"]); });
+    act(() => { dismissSuggestedReplies(); });
+    act(() => { clearDismissedReplies(); });
+    act(() => { pushSuggestedReplies(["둘"]); });
+    expect(getSuggestedRepliesCounters().ignored).toBe(0);
+    expect(getSuggestedRepliesCounters().dismissed).toBe(1);
+  });
+
+  it("telemetry: shown is NOT counted when push lands while dismiss latch is set", () => {
+    renderHook(() => useSuggestedReplies());
+    act(() => { pushSuggestedReplies(["첫"]); }); // shown=1
+    act(() => { dismissSuggestedReplies(); });    // dismissed=1, latch on
+    act(() => { pushSuggestedReplies(["둘"]); }); // dismissed snapshot, NOT shown
+    expect(getSuggestedRepliesCounters().shown).toBe(1);
   });
 });
