@@ -29,6 +29,13 @@ export interface AskUserQuestionItem {
   /** Indices in `choices` of secondary recommendations (disjoint with recommendedIndex). */
   altIndices?: number[];
   allowFreeText: boolean;
+  /**
+   * When true, the user may pick more than one of `choices` and the response
+   * carries them in `choices: string[]`. Single-select (default) preserves
+   * the `choice: string` response shape. Auto-submit on single-question
+   * cards is disabled in multi-select mode — the user must press 보내기.
+   */
+  allowMultiple?: boolean;
   /** Single-line placeholder text for the free-text input (≤ 20 Korean chars). */
   placeholder?: string;
   /** Confirm-step row label override (≤ 10 Korean chars). Falls back to a truncated question. */
@@ -48,7 +55,14 @@ export interface AskUserQuestionRequest {
 
 /** One answer inside a multi-question response. */
 export interface AskUserQuestionAnswer {
+  /** Single-select selected label. Mutually exclusive with `choices`. */
   choice?: string;
+  /**
+   * Multi-select selected labels (only present when the question was
+   * declared `allowMultiple: true`). Always a fresh array in request order;
+   * empty array is normalized to undefined upstream.
+   */
+  choices?: string[];
   freeText?: string;
 }
 
@@ -157,6 +171,7 @@ export class AskUserQuestionGate {
         recommendedIndex: q.recommendedIndex,
         altIndices: q.altIndices,
         allowFreeText: q.allowFreeText !== false,
+        allowMultiple: q.allowMultiple === true ? true : undefined,
         placeholder: q.placeholder,
         summaryHint: q.summaryHint,
         suggestedAnswers: q.suggestedAnswers,
