@@ -2365,7 +2365,7 @@ export class ConversationLoop {
 /permission — 현재 권한 모드
 /permission mode <strict|default|auto|allow> --durable — 권한 모드 변경
 /permission dir <list|allow|deny> [path] — 허용 디렉터리 관리
-/permission reviewer <show|mode|provider|model|fallback> [value] — 리뷰어 설정
+/permission reviewer <show|mode|fallback|interactive> [value] — 리뷰어 설정
 /permission audit <show|verify> — 권한 감사 조회/검증
 /permission hooks <list|accept|disable|reject> [name] — script hook 신뢰 상태 관리
 /help — 이 도움말`;
@@ -2431,8 +2431,14 @@ export class ConversationLoop {
         this.deps.rewireReviewerAgent,
       );
       if (!result.ok) return `Reviewer 설정 오류: ${result.error}`;
-      const { mode, provider, model, fallbackOnError } = result.settings;
-      return `Reviewer 설정\nmode=${mode}\nprovider=${provider}\nmodel=${model}\nfallbackOnError=${fallbackOnError}`;
+      const { mode, fallbackOnError, interactive } = result.settings;
+      return [
+        "Reviewer 설정",
+        `mode=${mode}`,
+        "provider/model=active LLM settings",
+        `fallbackOnError=${fallbackOnError}`,
+        `interactiveAutoApprove=${interactive.autoApprove}`,
+      ].join("\n");
     }
     if (outcome.kind === "audit") {
       const auditLogger = this.deps.auditLogger;
