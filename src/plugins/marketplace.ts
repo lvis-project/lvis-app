@@ -23,6 +23,7 @@ import { createLogger } from "../lib/logger.js";
 import { readAgentRegistry } from "../agents/agent-registry.js";
 import { readSkillRegistry } from "../skills/skill-registry.js";
 import { lvisHome } from "../shared/lvis-home.js";
+import type { AuditLogger } from "../audit/audit-logger.js";
 const log = createLogger("marketplace");
 
 export type { MarketplaceFetcher } from "./marketplace-fetcher.js";
@@ -169,6 +170,12 @@ export class PluginMarketplaceService {
   private readonly pluginsRoot: string;
   private readonly deploymentGuard?: PluginDeploymentGuard;
   private readonly fetcher: MarketplaceFetcher;
+  /**
+   * Optional audit sink — wired by boot so `install()` can emit the
+   * per-plugin admin escalation entry from the same trust boundary that
+   * owns the catalog fetch. IPC handler stays a pure transport.
+   */
+  private readonly auditLogger?: AuditLogger;
   /** Sprint 3-B §9.6: per-plugin version cache for rollback. */
   private readonly cacheRoot: string;
   /**
@@ -204,12 +211,14 @@ export class PluginMarketplaceService {
     paths: PluginPaths,
     fetcher: MarketplaceFetcher,
     deploymentGuard?: PluginDeploymentGuard,
+    auditLogger?: AuditLogger,
   ) {
     this.registryPath = paths.registryPath;
     this.pluginsRoot = paths.pluginsRoot;
     this.cacheRoot = paths.cacheRoot;
     this.deploymentGuard = deploymentGuard;
     this.fetcher = fetcher;
+    this.auditLogger = auditLogger;
     // Catalog cache is off for the test mock fetcher; production fetchers
     // get a sibling under `paths.cacheRoot` (closed #266 — was homedir()).
     this.catalogCacheBase =
@@ -327,11 +336,54 @@ export class PluginMarketplaceService {
     }
   }
 
+  /**
+   * External install entry point — IPC + deep-link callers only pass a
+   * pluginId (and an optional progress sink). Actor resolution lives
+   * *inside* marketplace so the IPC handler stays a pure transport and the
+   * deployment-guard §7.3 trust-boundary contract holds:
+   *
+   *   > IPC 핸들러에서 actor를 직접 받지 말 것 — "it-admin"은 ManagedPluginInstaller
+   *   > 같은 내부 플로우에서만 사용.
+   *
+   * Catalog 의 installPolicy === "admin" 인 plugin (예: meeting v0.4.14+,
+   * local-indexer v0.4.11+) 의 사용자 update click 시 actor 를 "it-admin"
+   * 으로 자동 escalate. catalog 가 signed marketplace truth 이므로 boot-time
+   * `ensureManagedInstalled` 의 actor="it-admin" 패턴과 동일 anchor.
+   * catalog fetch 실패 시 default "user" — install path 의 deployment-guard
+   * 가 다시 차단.
+   */
   async install(
     pluginId: string,
-    actor: "user" | "it-admin" = "user",
     onProgress?: (event: InstallerProgressEvent) => void,
   ): Promise<{ pluginId: string; installed: true }> {
+    let actor: "user" | "it-admin" = "user";
+    try {
+      const catalogItem = await this.fetcher.getPluginDetail(pluginId);
+      if (catalogItem && normalizeInstallPolicy(catalogItem) === "admin") {
+        actor = "it-admin";
+        try {
+          this.auditLogger?.log({
+            timestamp: new Date().toISOString(),
+            sessionId: "marketplace-install",
+            type: "info",
+            input: JSON.stringify({
+              event: "plugin-install-escalation",
+              pluginId,
+              catalogPolicy: "admin",
+              actorOriginal: "user",
+              actorEscalated: "it-admin",
+              location: "marketplace.install",
+            }),
+          });
+        } catch {
+          // Audit failure must never block install.
+        }
+      }
+    } catch (err) {
+      log.warn(
+        `install: catalog policy lookup failed for ${pluginId} — proceeding with actor="user" (${(err as Error).message})`,
+      );
+    }
     const state: InstallOperationState = {
       installedPluginIds: [],
       touchedEntries: new Map(),
@@ -506,7 +558,22 @@ export class PluginMarketplaceService {
     for (const plugin of managed) {
       if (installedIds.has(plugin.id)) continue;
       try {
-        await this.install(plugin.id, "it-admin");
+        // Boot-time managed bootstrap is an internal, trusted flow —
+        // bypass the public `install()` entry (which derives actor from
+        // catalog) and drive `installWithDependencies` directly with
+        // actor="it-admin". This is the same trust anchor as the IPC
+        // path (catalog → admin escalation), just expressed without the
+        // catalog round-trip since we already hold the catalog item.
+        const state: InstallOperationState = {
+          installedPluginIds: [],
+          touchedEntries: new Map(),
+        };
+        try {
+          await this.installWithDependencies(plugin.id, "it-admin", new Set<string>(), null, state);
+        } catch (innerErr) {
+          await this.rollbackInstallOperation(state);
+          throw innerErr;
+        }
         result.installed.push(plugin.id);
       } catch (err) {
         const msg = (err as Error).message;
