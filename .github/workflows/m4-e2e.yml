@@ -49,10 +49,25 @@ jobs:
           pip install -U pip uv
           uv sync --frozen --all-groups || uv sync --all-groups
 
-      - name: Clean stale M4 sqlite DB (self-hosted runner persists /tmp)
+      - name: Kill stale marketplace server + clean DB (self-hosted runner persists state)
         run: |
-          rm -f /tmp/m4-marketplace.db /tmp/m4-marketplace.db-wal /tmp/m4-marketplace.db-shm
-          echo "stale DB removed (if present)"
+          # Self-hosted runner persists /tmp AND process tree across runs.
+          # Previous runs may leave a uvicorn marketplace server holding port 8000;
+          # subsequent uvicorn fails to bind and our seed-row never reaches the
+          # actual responding server. Wipe both.
+          set +e
+          if [ -f /tmp/marketplace.pid ]; then
+            kill "$(cat /tmp/marketplace.pid)" 2>/dev/null || true
+            sleep 1
+          fi
+          # Catch any uvicorn not tracked by our pid file.
+          pkill -9 -f "uvicorn.*lvis_marketplace" 2>/dev/null || true
+          # Free port 8000 if still bound.
+          fuser -k 8000/tcp 2>/dev/null || true
+          sleep 1
+          rm -f /tmp/marketplace.pid /tmp/m4-marketplace.db /tmp/m4-marketplace.db-wal /tmp/m4-marketplace.db-shm
+          echo "stale server + DB cleaned"
+          set -e
 
       - name: Seed publisher API key (before server start — avoids sqlite lock)
         env:
