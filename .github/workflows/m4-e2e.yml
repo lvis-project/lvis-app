@@ -49,25 +49,18 @@ jobs:
           pip install -U pip uv
           uv sync --frozen --all-groups || uv sync --all-groups
 
-      - name: Kill stale marketplace server + clean DB (self-hosted runner persists state)
+      - name: Clean stale M4 DB only (DO NOT kill processes — production marketplace shares the host)
         run: |
-          # Self-hosted runner persists /tmp AND process tree across runs.
-          # Previous runs may leave a uvicorn marketplace server holding port 8000;
-          # subsequent uvicorn fails to bind and our seed-row never reaches the
-          # actual responding server. Wipe both.
-          set +e
-          if [ -f /tmp/marketplace.pid ]; then
-            kill "$(cat /tmp/marketplace.pid)" 2>/dev/null || true
+          # Self-hosted runner co-hosts the production marketplace server.
+          # Killing uvicorn here would take down production. Use a dedicated
+          # port (8765, set below) and only clean OUR pid file + sqlite DB.
+          # Stale M4 uvicorn (port 8765) is owned by the workflow only.
+          if [ -f /tmp/m4-marketplace.pid ]; then
+            kill "$(cat /tmp/m4-marketplace.pid)" 2>/dev/null || true
             sleep 1
           fi
-          # Catch any uvicorn not tracked by our pid file.
-          pkill -9 -f "uvicorn.*lvis_marketplace" 2>/dev/null || true
-          # Free port 8000 if still bound.
-          fuser -k 8000/tcp 2>/dev/null || true
-          sleep 1
-          rm -f /tmp/marketplace.pid /tmp/m4-marketplace.db /tmp/m4-marketplace.db-wal /tmp/m4-marketplace.db-shm
-          echo "stale server + DB cleaned"
-          set -e
+          rm -f /tmp/m4-marketplace.pid /tmp/m4-marketplace.db /tmp/m4-marketplace.db-wal /tmp/m4-marketplace.db-shm
+          echo "stale M4 DB + tracked pid cleaned (production processes untouched)"
 
       - name: Seed publisher API key (before server start — avoids sqlite lock)
         env:
@@ -90,11 +83,11 @@ jobs:
           LVIS_MARKETPLACE_SKIP_BOOTSTRAP: "1"
         run: |
           uv run uvicorn lvis_marketplace.main:create_app \
-            --factory --host 127.0.0.1 --port 8000 &
-          echo $! > /tmp/marketplace.pid
+            --factory --host 127.0.0.1 --port 8765 &
+          echo $! > /tmp/m4-marketplace.pid
           # Wait for readiness.
           for i in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:8000/api/v1/health >/dev/null; then
+            if curl -fsS http://127.0.0.1:8765/api/v1/health >/dev/null; then
               echo "marketplace ready"; exit 0
             fi
             sleep 1
@@ -113,7 +106,7 @@ jobs:
           echo "=== publisher key length / first chars ==="
           echo "len=$(printf '%s' "$PUBLISHER_KEY" | wc -c) prefix=$(printf '%s' "$PUBLISHER_KEY" | head -c 12)"
           echo "=== GET /me via server background ==="
-          curl -s -w "\nHTTP %{http_code}\n" -H "Authorization: Bearer $PUBLISHER_KEY" http://127.0.0.1:8000/api/v1/me 2>&1 | head -5
+          curl -s -w "\nHTTP %{http_code}\n" -H "Authorization: Bearer $PUBLISHER_KEY" http://127.0.0.1:8765/api/v1/me 2>&1 | head -5
           echo "=== expected hash (sha256 of plaintext) ==="
           printf '%s' "$PUBLISHER_KEY" | sha256sum | head -c 32 ; echo
 
@@ -133,7 +126,7 @@ jobs:
         working-directory: lvis-app
         env:
           M4_E2E: "1"
-          MARKETPLACE_URL: http://127.0.0.1:8000
+          MARKETPLACE_URL: http://127.0.0.1:8765
           MARKETPLACE_PUBLISHER_KEY: ${{ env.PUBLISHER_KEY }}
         run: |
           echo "=== env debug ==="
@@ -145,6 +138,6 @@ jobs:
       - name: Stop marketplace
         if: always()
         run: |
-          if [ -f /tmp/marketplace.pid ]; then
-            kill "$(cat /tmp/marketplace.pid)" || true
+          if [ -f /tmp/m4-marketplace.pid ]; then
+            kill "$(cat /tmp/m4-marketplace.pid)" || true
           fi
