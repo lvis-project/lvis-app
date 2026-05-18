@@ -82,8 +82,10 @@ export interface ReviewerInteractiveBlock {
 }
 
 /**
- * Permission policy P3 — `permissions.reviewer` block. Defaults per spec v2.1 §11
- * binding decision: provider="openai", model="gpt-4o-mini",
+ * Permission policy P3 — `permissions.reviewer` block. Provider/model remain
+ * persisted for legacy command compatibility; runtime LLM reviewer wiring now
+ * follows the active chat LLM provider/model when available.
+ * Defaults: provider="openai", model="gpt-4o-mini",
  * fallbackOnError="deny", interactive.autoApprove="off".
  */
 export interface ReviewerSettingsBlock {

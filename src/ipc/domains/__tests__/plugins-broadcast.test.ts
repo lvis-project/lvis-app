@@ -4,6 +4,15 @@ const handlers = new Map<string, (...args: unknown[]) => unknown>();
 const electronMocks = vi.hoisted(() => ({
   showOpenDialog: vi.fn(),
 }));
+type InstallProgressHandler = (event: { phase: string }) => void;
+
+function emitRegisteringProgress(args: unknown[]): void {
+  const onProgress = args.find((arg): arg is InstallProgressHandler => typeof arg === "function");
+  if (!onProgress) {
+    throw new TypeError("install mock expected progress handler");
+  }
+  onProgress({ phase: "registering" });
+}
 
 vi.mock("electron", () => ({
   app: {
@@ -48,8 +57,8 @@ async function setup() {
   const appWindows = [makeWindow(), makeWindow()];
   const deps = {
     pluginMarketplace: {
-      install: vi.fn(async (_pluginId: string, _scope: string, onProgress: (event: { phase: string }) => void) => {
-        onProgress({ phase: "registering" });
+      install: vi.fn(async (...args: unknown[]) => {
+        emitRegisteringProgress(args);
         return { pluginId: "agent-hub", installed: true };
       }),
       uninstall: vi.fn(async (pluginId: string) => ({ pluginId, uninstalled: true })),
@@ -296,8 +305,8 @@ describe("plugins IPC lifecycle broadcast", () => {
     const destroyedWindow = makeWindow({ destroyed: true });
     const deps = {
       pluginMarketplace: {
-        install: vi.fn(async (_pluginId: string, _scope: string, onProgress: (event: { phase: string }) => void) => {
-          onProgress({ phase: "registering" });
+        install: vi.fn(async (...args: unknown[]) => {
+          emitRegisteringProgress(args);
           return { pluginId: "agent-hub", installed: true };
         }),
         uninstall: vi.fn(async (pluginId: string) => ({ pluginId, uninstalled: true })),

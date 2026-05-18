@@ -321,9 +321,10 @@ describe("PermissionsTab hook quarantine notice", () => {
     });
 
     expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("mode llm");
-    expect(screen.getByTestId("reviewer-provider-select")).toBeTruthy();
+    expect(screen.getByTestId("reviewer-active-llm-source")).toBeTruthy();
+    expect(screen.queryByTestId("reviewer-provider-select")).toBeNull();
     expect(screen.getByTestId("reviewer-fallback-select")).toBeTruthy();
-    expect(screen.getByTestId("reviewer-model-input")).toBeTruthy();
+    expect(screen.queryByTestId("reviewer-model-input")).toBeNull();
     expect(screen.getByTestId("reviewer-framework-panel")).toBeTruthy();
     expect(screen.getByText("permission-reviewer-framework/v1")).toBeTruthy();
   });
@@ -356,24 +357,21 @@ describe("PermissionsTab hook quarantine notice", () => {
     expect(screen.getByTestId("reviewer-fallback-select").textContent).toContain("규칙 결과 사용");
   });
 
-  it("persists reviewer model changes through reviewerDispatch", async () => {
+  it("does not expose legacy reviewer provider/model controls", async () => {
     const api = installApi([[]]);
 
     await act(async () => {
       render(<PermissionsTab />);
     });
-    await act(async () => {
-      fireEvent.click(screen.getByTestId("reviewer-mode-llm"));
-    });
-    await act(async () => {
-      fireEvent.change(screen.getByTestId("reviewer-model-input"), {
-        target: { value: "gpt-5.5-mini" },
-      });
-      fireEvent.click(screen.getByText("적용"));
-    });
 
-    expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("model gpt-5.5-mini");
-    expect((screen.getByTestId("reviewer-model-input") as HTMLInputElement).value).toBe("gpt-5.5-mini");
+    expect(screen.queryByTestId("reviewer-provider-select")).toBeNull();
+    expect(screen.queryByTestId("reviewer-model-input")).toBeNull();
+    expect(screen.getByTestId("reviewer-active-llm-source")).toHaveTextContent(
+      "지능 설정의 현재 공급자/모델",
+    );
+    expect(api.permission.reviewerDispatch).not.toHaveBeenCalledWith(
+      expect.stringMatching(/^(provider|model)\b/),
+    );
   });
 
   it("toggles interactive auto-approve through reviewerDispatch (issue #690)", async () => {
