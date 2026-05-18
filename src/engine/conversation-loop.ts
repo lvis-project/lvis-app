@@ -1576,7 +1576,15 @@ export class ConversationLoop {
         const userMsg =
           "대화 이력이 모델 한도를 초과했습니다. 새 메시지를 보내면 자동 압축이 다시 시도됩니다.";
         callbacks?.onError?.(userMsg);
-        this.history.append({ role: "assistant", content: userMsg });
+        // Issue #911: mark as systemNotice so the UI renders a destructive
+        // banner (red border + warning icon) instead of a normal assistant
+        // reply. Without this marker the user cannot distinguish a real LLM
+        // turn from a host-emitted error notice.
+        this.history.append({
+          role: "assistant",
+          content: userMsg,
+          meta: { systemNotice: "context-error" },
+        });
         return { text: userMsg, toolCalls: allToolCalls, usage: turnUsage, stopReason: "context-error" };
       }
 
@@ -1587,7 +1595,11 @@ export class ConversationLoop {
           `queryLoop: EARLY-EXIT(stream-error) — round=${roundIndex} userMessage="${stream.userMessage.slice(0, 100)}"`,
         );
         callbacks?.onError?.(stream.userMessage);
-        this.history.append({ role: "assistant", content: stream.userMessage });
+        this.history.append({
+          role: "assistant",
+          content: stream.userMessage,
+          meta: { systemNotice: "stream-error" },
+        });
         return { text: stream.userMessage, toolCalls: allToolCalls, usage: turnUsage, stopReason: "stream-error" };
       }
 
@@ -1600,6 +1612,11 @@ export class ConversationLoop {
         // Strip suggested-replies block before persistence — otherwise raw
         // `<suggested_replies>` tags would land in ~/.lvis/sessions/*.jsonl
         // and be fed back to the LLM on every subsequent turn.
+        //
+        // interrupted is *user-initiated* not a host error, so we do NOT
+        // attach systemNotice — the assistant content that was streamed
+        // before the abort is real model output and stays styled normally;
+        // only the "[중단됨]" suffix marks the boundary.
         const savedText = stripSuggestedReplies(stream.text ?? "") + "\n\n[중단됨]";
         this.history.append({ role: "assistant", content: savedText });
         callbacks?.onTextDelta?.("\n\n[중단됨]");

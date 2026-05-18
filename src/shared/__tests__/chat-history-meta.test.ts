@@ -55,4 +55,23 @@ describe("serializeHistoryMessage createdAt + turnSummary projection", () => {
     expect(s.toolCalls?.[0].id).toBe("t1");
     expect(s.createdAt).toBe(1_700_000_000_000);
   });
+
+  it("preserves systemNotice marker through serialization (Issue #911)", () => {
+    const m: GenericMessage = {
+      role: "assistant",
+      content: "대화 이력이 모델 한도를 초과했습니다.",
+      meta: { systemNotice: "context-error" },
+    };
+    const s: SerializedHistoryMessage = serializeHistoryMessage(m, 3);
+    expect(s.systemNotice).toBe("context-error");
+  });
+
+  it("omits systemNotice field when meta has no marker", () => {
+    const m: GenericMessage = {
+      role: "assistant",
+      content: "normal reply",
+    };
+    const s: SerializedHistoryMessage = serializeHistoryMessage(m, 4);
+    expect(s.systemNotice).toBeUndefined();
+  });
 });

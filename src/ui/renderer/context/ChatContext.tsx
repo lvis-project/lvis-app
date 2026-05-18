@@ -56,6 +56,10 @@ export interface ChatContextValue {
   contextOverflowPct: number;
   usedTokens: number;
   contextBudget: number;
+  /** Issue #912 — ring 이 사용하는 *실질 한도*. tpmLimit < contextBudget
+   *  인 모델 (현재 nano) 에선 tpmLimit, else contextBudget. ring 의 100%
+   *  이 사용자의 "한도 초과" 인지와 일치하도록. */
+  effectiveBudget: number;
   // Issue #900 #1 — per-request TPM hint. tpmLimit undefined for models
   // without a registered tpmDefault (most models) → UI hides the indicator.
   tpmLimit: number | undefined;
