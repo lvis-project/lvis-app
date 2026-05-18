@@ -18,10 +18,22 @@ export function useStatusBarRuntime({ api, upsertPersistent }: Options): void {
         const c = await api.getRuntimeCounts();
         if (cancelled || my !== callToken) return;
         upsertPersistent({
-          id: "runtime:counts",
+          id: "runtime:tools",
           severity: "info",
-          label: "Runtime",
-          value: `Tools ${c.tools} · Plugins ${c.plugins} · MCP ${c.mcps}`,
+          label: "🔧",
+          value: String(c.tools),
+        });
+        upsertPersistent({
+          id: "runtime:plugins",
+          severity: "info",
+          label: "🧩",
+          value: String(c.plugins),
+        });
+        upsertPersistent({
+          id: "runtime:mcps",
+          severity: "info",
+          label: "🔌",
+          value: String(c.mcps),
         });
       } catch {
         // Non-fatal — counts are an awareness signal, not load-bearing.
