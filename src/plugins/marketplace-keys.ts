@@ -34,19 +34,16 @@ export const MARKETPLACE_PRIMARY_KEY_ID = "poc-v1" as const;
 // closes the supply-chain footgun where an in-process compromise could
 // have injected a per-run trust root.
 export const WHITELIST_PUBLIC_KEYS: Readonly<Record<string, PublicKeyInput>> = Object.freeze({
-  // Base64 of raw 32-byte ed25519 public key. Demo snapshot is signed
-  // by the matching private key (kept out of this repo); production
-  // rotation lands a fresh key id (e.g. "whitelist-v2") here.
-  //
-  // Stage 2 publish — rotated to the keypair that signs the live
-  // registry at
+  // Base64 of raw 32-byte ed25519 public key. The matching private key
+  // signs both the offline demo snapshot (`resources/marketplace-whitelist.demo.json.sig`)
+  // and the live remote registry at
   // `https://lvis-project.github.io/marketplace-whitelist/v1/whitelist.json`.
-  // The matching private key is held out-of-band by the operator team
-  // (see SECURITY.md in the marketplace-whitelist repo). The demo
-  // snapshot in `resources/marketplace-whitelist.demo.json.sig` was
-  // re-signed in the same change so the offline demo path continues to
-  // verify against this slot.
-  "whitelist-v1": "3YF7rRRj+NtxengU3VudHcufo/+L/Dnz/CIYSmvyRI0=",
+  // Private key custody: GitHub Actions secret `WHITELIST_SIGNING_KEY`
+  // on `lvis-project/marketplace-whitelist` (see SECURITY.md there).
+  // Add a new entry (e.g. `whitelist-v2`) on rotation; never remove an
+  // active id until every signed artifact referencing it has been
+  // republished.
+  "whitelist-v1": "N2BcUoKwVGZugKE5w3V8jE/TS/5Mmn8xMTaycBmMzPI=",
 });
 
 export const WHITELIST_PRIMARY_KEY_ID = "whitelist-v1" as const;
