@@ -56,6 +56,11 @@ export interface ChatContextValue {
   contextOverflowPct: number;
   usedTokens: number;
   contextBudget: number;
+  // Issue #900 #1 — per-request TPM hint. tpmLimit undefined for models
+  // without a registered tpmDefault (most models) → UI hides the indicator.
+  tpmLimit: number | undefined;
+  tpmPct: number | undefined;
+  isTpmOverflow: boolean;
 
   // Role presets
   rolePresets: RolePreset[];
