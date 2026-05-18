@@ -1574,6 +1574,11 @@ export default async function createPlugin() {
       description: "regression fixture",
       publisher: "Test fixture",
       entry: "entry-v1.mjs", tools: ["p_update_ping"],
+      configSchema: {
+        properties: {
+          endpoint: { type: "string", title: "endpoint" },
+        },
+      },
     }), "utf-8");
     await writeFile(
       registryPath,
@@ -1586,6 +1591,8 @@ export default async function createPlugin() {
     const runtime = makeRuntime();
     await runtime.startAll();
     expect(await runtime.call("p_update_ping")).toBe("v1-1");
+    expect(runtime.listPluginCards().find((card) => card.id === "p-update")?.configSchema?.properties)
+      .toHaveProperty("endpoint");
 
     // Simulate marketplace update: write v2 entry and update manifest on disk.
     await writeFile(join(pluginDir, "entry-v2.mjs"), `
@@ -1604,6 +1611,11 @@ export default async function createPlugin() {
       description: "regression fixture v2",
       publisher: "Test fixture",
       entry: "entry-v2.mjs", tools: ["p_update_ping"],
+      configSchema: {
+        properties: {
+          baseUrl: { type: "string", title: "baseUrl" },
+        },
+      },
     }), "utf-8");
 
     // addPlugin sees it's loaded → calls restartPlugin → must re-read manifest from disk.
@@ -1613,6 +1625,84 @@ export default async function createPlugin() {
     // Note: ESM module caching means we can't test the v2 handler body here
     // (same URL = cached module), but we verify the plugin is re-started (counter resets).
     expect(runtime.listPluginIds()).toContain("p-update");
+    const card = runtime.listPluginCards().find((candidate) => candidate.id === "p-update");
+    expect(card?.version).toBe("2.0.0");
+    expect(card?.configSchema?.properties).toHaveProperty("baseUrl");
+    expect(card?.configSchema?.properties).not.toHaveProperty("endpoint");
+  });
+
+  it("addPlugin on a running plugin follows updated registry manifestPath and refreshes plugin cards", async () => {
+    const pluginId = "p-update-schema";
+    const toolName = "p_update_schema_ping";
+
+    async function writeVersion(version: string, fieldName: string): Promise<string> {
+      const pluginDir = join(installedDir, pluginId, version);
+      await mkdir(pluginDir, { recursive: true });
+      await writeFile(
+        join(pluginDir, "entry.mjs"),
+        `export default async function createPlugin() {
+  return {
+    handlers: { "${toolName}": async () => "${version}" },
+    start: async () => {},
+    stop: async () => {},
+  };
+}
+`,
+        "utf-8",
+      );
+      const manifestPath = join(pluginDir, "plugin.json");
+      await writeFile(
+        manifestPath,
+        JSON.stringify({
+          id: pluginId,
+          name: "Update Schema",
+          version,
+          description: `schema fixture ${version}`,
+          publisher: "Test fixture",
+          entry: "entry.mjs",
+          tools: [toolName],
+          configSchema: {
+            properties: {
+              [fieldName]: { type: "string", title: fieldName },
+            },
+          },
+        }),
+        "utf-8",
+      );
+      return manifestPath;
+    }
+
+    const v1ManifestPath = await writeVersion("1.0.0", "endpoint");
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: pluginId, manifestPath: v1ManifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+
+    const runtime = makeRuntime();
+    await runtime.startAll();
+    expect(runtime.listPluginCards().find((card) => card.id === pluginId)?.version).toBe("1.0.0");
+
+    const v2ManifestPath = await writeVersion("2.0.0", "baseUrl");
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: pluginId, manifestPath: v2ManifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+
+    await runtime.addPlugin(pluginId);
+
+    const card = runtime.listPluginCards().find((candidate) => candidate.id === pluginId);
+    expect(runtime.getPluginRoot(pluginId)).toBe(join(installedDir, pluginId, "2.0.0"));
+    expect(card?.version).toBe("2.0.0");
+    expect(card?.configSchema?.properties).toHaveProperty("baseUrl");
+    expect(card?.configSchema?.properties).not.toHaveProperty("endpoint");
   });
 });
 
