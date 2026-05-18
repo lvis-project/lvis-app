@@ -34,6 +34,26 @@ export const STABLE_SEMVER_RE =
 export const HOST_SECRETS_KEY_PATTERN = /^llm\.apiKey\.[a-z-]+$/;
 const log = createLogger("plugin-runtime");
 
+function patchHostSecretsIntoLegacySdkSchema(schema: unknown): unknown {
+  if (!schema || typeof schema !== "object" || Array.isArray(schema)) return schema;
+  const root = schema as { properties?: Record<string, unknown> };
+  if (!root.properties || root.properties.hostSecrets !== undefined) return schema;
+  root.properties.hostSecrets = {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      read: {
+        type: "array",
+        items: {
+          type: "string",
+          pattern: "^llm\\.apiKey\\.[a-z-]+$",
+        },
+      },
+    },
+  };
+  return schema;
+}
+
 export function normalizeInstallPolicy(
   source: Partial<Pick<PluginManifest, "installPolicy">> | undefined,
 ): InstallPolicy {
@@ -83,7 +103,7 @@ export async function buildManifestValidator(): Promise<ValidateFunction> {
       "@lvis/plugin-sdk/schemas/plugin-manifest.schema.json",
     );
     const schemaBytes = await readFile(schemaPath, "utf-8");
-    const schema = JSON.parse(schemaBytes);
+    const schema = patchHostSecretsIntoLegacySdkSchema(JSON.parse(schemaBytes));
     // Ajv default export compat for ESM/CJS interop.
     const AjvAny = AjvModule as unknown as { default?: unknown };
     const AjvCtor = (AjvAny.default ?? AjvModule) as new (opts?: unknown) => {
