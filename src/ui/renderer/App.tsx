@@ -18,6 +18,7 @@ import { DeferredQueueDialog } from "./dialogs/DeferredQueueDialog.js";
 import { TutorialDialog } from "./dialogs/TutorialDialog.js";
 import { MemorySeedDialog } from "./dialogs/MemorySeedDialog.js";
 import { SpotlightTour } from "./components/SpotlightTour.js";
+import { PostTourFirstTask } from "./onboarding/PostTourFirstTask.js";
 import { LoginModal } from "./components/LoginModal.js";
 import { LLM_VENDORS } from "../../shared/llm-vendor-defaults.js";
 import { buildQuickActions } from "./components/command-actions.js";
@@ -119,6 +120,11 @@ export function App() {
   // and the renderer flips this flag to mount the dialog on top of any
   // active surface.
   const [tutorialOpen, setTutorialOpen] = useState(false);
+  // Tutorial-X5 — flipped true when SpotlightTour emits `onComplete`. The
+  // PostTourFirstTask card watches this + the installed-plugin list and
+  // offers a real first-task once the tour finishes (never on early
+  // dismissal). Session-only — no persistence; first-boot is one shot.
+  const [tourCompleted, setTourCompleted] = useState(false);
   const [activeView, setActiveView] = useState("home");
   const [commandPopoverOpen, setCommandPopoverOpen] = useState(false);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
@@ -1312,8 +1318,30 @@ export function App() {
       {/* Tutorial-C — SpotlightTour mounts always; it stays invisible until
           a `lvis:tour:start` broadcast flips it on. Production trigger:
           ⌘+Shift+/ (macOS "⌘?" help shortcut) / Ctrl+Shift+/ — see the
-          useEffect above. State lives in `~/.lvis/onboarding/`. */}
-      <SpotlightTour api={api} />
+          useEffect above. State lives in `~/.lvis/onboarding/`. The X5
+          `onComplete` callback fires only when the user reaches the
+          final tour step (not on early-dismissal), so the PostTourFirstTask
+          card never offers itself prematurely. */}
+      <SpotlightTour
+        api={api}
+        onComplete={() => setTourCompleted(true)}
+      />
+      {/* Tutorial-X5 — Post-tour first-task proposal. Mounts always,
+          stays invisible until the user finishes a tour AND at least one
+          installed plugin has a registered proposal in first-task-proposals.
+          The composerSeedText callback writes directly to the chat
+          composer state setter so the user is one click away from a real
+          plugin invocation — no hidden IPC. */}
+      <PostTourFirstTask
+        api={{
+          composerSeedText: (text: string) => {
+            setQuestion(text);
+            return { ok: true };
+          },
+        }}
+        installedPluginIds={pluginCards.map((c) => c.id)}
+        tourCompleted={tourCompleted}
+      />
       {/* v6: ApprovalQueueStatus floating chip 제거. 큐 정보는 InputActionBar
           trailing 의 DeferredApprovalChip 으로 통합. Spec docs/blueprints/
           composer-redesign-message-queue.md "제거" 섹션. */}

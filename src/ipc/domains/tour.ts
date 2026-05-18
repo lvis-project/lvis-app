@@ -18,8 +18,11 @@
  * directory + 0o600 file modes.
  */
 import { ipcMain } from "electron";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import { createLogger } from "../../lib/logger.js";
+import { lvisHome } from "../../shared/lvis-home.js";
 import {
   DEFAULT_TOUR_STATE,
   readTourState,
@@ -28,6 +31,15 @@ import {
   type TourState,
 } from "../../main/tour-state-store.js";
 import type { IpcDeps } from "../types.js";
+
+/**
+ * Tutorial-X4 — onboarding context size cap. The renderer-synthesized
+ * markdown should be a short, single-page hint (호칭 + installed plugins
+ * + last tour). 4 KB is a generous ceiling — anything larger is almost
+ * certainly a renderer bug, and we refuse rather than letting the system
+ * prompt balloon.
+ */
+const ONBOARDING_CONTEXT_MAX_BYTES = 4 * 1024;
 
 const log = createLogger("tour-ipc");
 
@@ -194,6 +206,65 @@ export function registerTourHandlers(deps: IpcDeps): void {
         }
       }
       return { ok: true, scenarioId };
+    },
+  );
+
+  // Tutorial-X4 — write the renderer-synthesized onboarding context to
+  // `~/.lvis/onboarding/onboarding-context.md`. The system prompt builder
+  // (boot/conversation.ts) reads this file each turn and injects it as
+  // section id=9.86 "User Onboarding Context" when non-empty. Renderer
+  // calls this once after MemorySeedDialog dismissal with a brief markdown
+  // block (호칭 + installed plugins + last tour). Empty `content` is
+  // treated as "clear" (write empty string) — keeps the file present so a
+  // future read short-circuits cleanly.
+  ipcMain.handle(
+    "lvis:onboarding:context:set",
+    async (
+      e,
+      payload: { content?: unknown },
+    ): Promise<
+      | { ok: true }
+      | { ok: false; error: string; message: string }
+    > => {
+      if (!validateSender(e)) {
+        auditUnauthorized(auditLogger, "lvis:onboarding:context:set", e);
+        return {
+          ok: false,
+          error: UNAUTHORIZED_FRAME.error,
+          message: "sender frame is not authorized",
+        };
+      }
+      const content = payload?.content;
+      if (typeof content !== "string") {
+        return {
+          ok: false,
+          error: "invalid-content",
+          message: "content must be a string",
+        };
+      }
+      if (Buffer.byteLength(content, "utf-8") > ONBOARDING_CONTEXT_MAX_BYTES) {
+        return {
+          ok: false,
+          error: "content-too-large",
+          message: `content exceeds ${ONBOARDING_CONTEXT_MAX_BYTES} bytes`,
+        };
+      }
+      try {
+        const path = join(lvisHome(), "onboarding", "onboarding-context.md");
+        mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+        writeFileSync(path, content, { encoding: "utf-8", mode: 0o600 });
+        return { ok: true };
+      } catch (err) {
+        log.error(
+          { err: err instanceof Error ? err.message : String(err) },
+          "onboarding-context write failed",
+        );
+        return {
+          ok: false,
+          error: "write-failed",
+          message: err instanceof Error ? err.message : "unknown write failure",
+        };
+      }
     },
   );
 }
