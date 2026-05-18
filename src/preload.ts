@@ -292,6 +292,67 @@ const api = {
     ipcRenderer.on("lvis:login-prefs:changed", listener);
     return () => ipcRenderer.removeListener("lvis:login-prefs:changed", listener);
   },
+  // Tutorial-C — SpotlightTour state bridge. Host stores tour completion
+  // under `~/.lvis/onboarding/tour-state.json`; `tour.start` broadcasts a
+  // `lvis:tour:start` event to every open window so detached panes also
+  // launch the tour. `getState` is read-never-throws (returns the default
+  // shape on any failure) per the project storage contract.
+  tour: {
+    getState: async () =>
+      ipcRenderer.invoke("lvis:tour:get-state") as Promise<
+        | {
+            ok: true;
+            state: {
+              lastSeenScenario: string | null;
+              completedScenarios: string[];
+              dismissedAt: string | null;
+            };
+          }
+        | { ok: false; error: string; message: string }
+      >,
+    markComplete: async (scenarioId: string) =>
+      ipcRenderer.invoke("lvis:tour:mark-complete", { scenarioId }) as Promise<
+        | {
+            ok: true;
+            state: {
+              lastSeenScenario: string | null;
+              completedScenarios: string[];
+              dismissedAt: string | null;
+            };
+          }
+        | { ok: false; error: string; message: string }
+      >,
+    dismiss: async (scenarioId: string) =>
+      ipcRenderer.invoke("lvis:tour:dismiss", { scenarioId }) as Promise<
+        | {
+            ok: true;
+            state: {
+              lastSeenScenario: string | null;
+              completedScenarios: string[];
+              dismissedAt: string | null;
+            };
+          }
+        | { ok: false; error: string; message: string }
+      >,
+    start: async (scenarioId: string) =>
+      ipcRenderer.invoke("lvis:tour:start", { scenarioId }) as Promise<
+        | { ok: true; scenarioId: string }
+        | { ok: false; error: string; message: string }
+      >,
+    onStart: (handler: (payload: { scenarioId: string }) => void) => {
+      const listener = (
+        _event: unknown,
+        payload: { scenarioId?: unknown },
+      ) => {
+        const id = payload?.scenarioId;
+        if (typeof id === "string" && id.length > 0) {
+          handler({ scenarioId: id });
+        }
+      };
+      ipcRenderer.on("lvis:tour:start", listener);
+      return () => ipcRenderer.removeListener("lvis:tour:start", listener);
+    },
+  },
   openSettingsWindow: async (initialTab?: string) =>
     ipcRenderer.invoke("lvis:settings-window:open", initialTab) as Promise<
       { ok: true; windowId: number } | { ok: false; error: string }
