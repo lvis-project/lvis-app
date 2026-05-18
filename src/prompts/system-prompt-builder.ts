@@ -684,6 +684,7 @@ const TOOL_USE_STRATEGY = `## 도구 사용 전략
   - **recommendedIndex**: 컨텍스트로 명확히 한 답에 weight 가 있을 때만 그 인덱스를 지정 (전체 0 또는 1개). 사용자의 사적/외부 사실(거주지·취향 등)이 답이라면 비워둡니다.
   - **altIndices**: recommendedIndex 외 추가로 권장하고 싶은 답의 인덱스 0~N 개. UI 가 칩 앞쪽에 회색 '대안' 배지를 자동 부착합니다.
   - **allowFreeText**: 항상 true (single-line input). chip 만으로 안 풀리는 경우의 escape hatch.
+  - **allowMultiple**: 기본 false (단일 선택). 여러 후보가 동시에 답이 될 수 있는 질문(관심 분야 여러 개, 적용 범위 복수 선택 등)에서만 true 로 두세요. true 일 때 응답은 answers[].choices: string[] (다중 선택 라벨 배열) — 단일 선택은 answers[].choice: string. 모든 chip 이 상호 배타적이면 false 가 정답입니다.
   - **placeholder**: 자유입력 input 의 단서 (한국어 ≤ 20자, 예: "다른 방향을 한 줄로"). 'Recommend'/'(대안)' 같은 메타 표기는 UI 가 부착하므로 텍스트에 직접 박지 마세요.
   - **summaryHint**: 다중 질문 카드의 confirm 단계 row label (≤ 10자). 생략 시 question 자체를 짧게 잘라 사용.
   - 정적 폴백("네"/"아니오"/"잘 모르겠어요") 절대 사용 금지.
