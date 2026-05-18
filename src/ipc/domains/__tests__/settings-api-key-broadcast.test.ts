@@ -202,6 +202,92 @@ describe("marketplace:delete-api-key broadcast (MAJOR-3)", () => {
 // ─── MAJOR-2 R2: settings:update triggers rewireReviewerAgent when baseUrl changes ──
 
 describe("MAJOR-2: settings:update triggers rewireReviewerAgent on azure-foundry baseUrl change", () => {
+  it("calls rewireReviewerAgent when the active LLM provider changes", async () => {
+    const windows: ReturnType<typeof makeWindow>[] = [];
+    const rewire = vi.fn();
+    const prevLlm = {
+      provider: "openai",
+      vendors: {
+        openai: { model: "gpt-4o" },
+        claude: { model: "claude-sonnet-4-6" },
+        "azure-foundry": { baseUrl: null },
+      },
+    };
+    const nextLlm = {
+      provider: "claude",
+      vendors: {
+        openai: { model: "gpt-4o" },
+        claude: { model: "claude-sonnet-4-6" },
+        "azure-foundry": { baseUrl: null },
+      },
+    };
+    let llmReads = 0;
+    const baseDeps = makeDeps(windows);
+    const deps = {
+      ...baseDeps,
+      settingsService: {
+        ...baseDeps.settingsService,
+        get: vi.fn((key: string) => {
+          if (key === "marketplace") return { realCloudAllowPrivateNetwork: false };
+          llmReads += 1;
+          return llmReads === 1 ? prevLlm : nextLlm;
+        }),
+        patch: vi.fn(async (p: unknown) => p),
+      },
+      rewireReviewerAgent: rewire,
+    };
+
+    const { registerSettingsHandlers } = await import("../settings.js");
+    registerSettingsHandlers(deps as never);
+
+    await invoke("lvis:settings:update", { llm: { provider: "claude" } });
+
+    expect(rewire).toHaveBeenCalledOnce();
+  });
+
+  it("calls rewireReviewerAgent when the active LLM model changes", async () => {
+    const windows: ReturnType<typeof makeWindow>[] = [];
+    const rewire = vi.fn();
+    const prevLlm = {
+      provider: "openai",
+      vendors: {
+        openai: { model: "gpt-4o" },
+        "azure-foundry": { baseUrl: null },
+      },
+    };
+    const nextLlm = {
+      provider: "openai",
+      vendors: {
+        openai: { model: "gpt-5.4" },
+        "azure-foundry": { baseUrl: null },
+      },
+    };
+    let llmReads = 0;
+    const baseDeps = makeDeps(windows);
+    const deps = {
+      ...baseDeps,
+      settingsService: {
+        ...baseDeps.settingsService,
+        get: vi.fn((key: string) => {
+          if (key === "marketplace") return { realCloudAllowPrivateNetwork: false };
+          llmReads += 1;
+          return llmReads === 1 ? prevLlm : nextLlm;
+        }),
+        patch: vi.fn(async (p: unknown) => p),
+      },
+      rewireReviewerAgent: rewire,
+    };
+
+    const { registerSettingsHandlers } = await import("../settings.js");
+    registerSettingsHandlers(deps as never);
+
+    await invoke("lvis:settings:update", {
+      llm: { vendors: { openai: { model: "gpt-5.4" } } },
+    });
+
+    expect(rewire).toHaveBeenCalledOnce();
+  });
+
   it("calls rewireReviewerAgent when baseUrl changes from null to a new value", async () => {
     const windows: ReturnType<typeof makeWindow>[] = [];
     const rewire = vi.fn();

@@ -9,6 +9,7 @@ import type { PluginConfigRecord } from "../../shared/plugin-config.js";
 import type { ChatSendInputOrigin } from "../../shared/chat-origin.js";
 import type { ActiveRolePrompt, RolePreset } from "../../data/role-presets.js";
 import type { PermissionEvaluationContext as PermissionEvaluationContextShape } from "../../permissions/evaluation-context.js";
+import type { ApprovalPurposeSuggestion } from "../../shared/permission-review-status.js";
 import type {
   AssistantAgentSummary,
   AssistantSkillSummary,
@@ -658,6 +659,8 @@ export type ApprovalRequest = {
   reviewerVerdict?: { level: "low" | "medium" | "high"; reason: string };
   /** Captured policy/sandbox context for user review. */
   evaluationContext?: PermissionEvaluationContextShape;
+  /** Suggested natural-language purpose shown in the approval dialog. */
+  approvalPurpose?: ApprovalPurposeSuggestion;
   args: unknown;
   reason: string;
   source?: "builtin" | "plugin" | "mcp";

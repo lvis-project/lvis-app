@@ -30,6 +30,7 @@ import { PermissionModeBadge } from "./components/permissions/PermissionModeBadg
 import { DEFAULT_TOAST_TTL_MS, SHORT_TOAST_TTL_MS } from "./constants.js";
 import { SkillBadge } from "./components/SkillBadge.js";
 import { WorkGroup } from "./components/WorkGroup.js";
+import { PermissionReviewStatusCard } from "./components/PermissionReviewStatusCard.js";
 import { TurnActionBar } from "./components/TurnActionBar.js";
 // TurnSummaryFooter 컴포넌트는 2026-05-07 폐기. 토큰 정보는 TurnActionBar 의
 // TokenCostBadge (provider-truth, 토글 + tooltip breakdown) 가 단일 source 로
@@ -892,7 +893,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             const e = activeEntries[i];
             if (!e) continue;
             if (isTurnStartEntry(e)) { turnStart = i; continue; }
-            if (e.kind !== "assistant" && e.kind !== "reasoning" && e.kind !== "tool_group") continue;
+            if (e.kind !== "assistant" && e.kind !== "reasoning" && e.kind !== "tool_group" && e.kind !== "permission_review") continue;
 
             let nextTurnStartIdx = activeEntries.length;
             for (let j = i + 1; j < activeEntries.length; j++) {
@@ -901,17 +902,17 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
 
             const subsequentTurnEntries = activeEntries.slice(i + 1, nextTurnStartIdx);
             const hasSubsequent = subsequentTurnEntries.some(
-              (ne) => ne.kind === "assistant" || ne.kind === "tool_group" || ne.kind === "reasoning",
+              (ne) => ne.kind === "assistant" || ne.kind === "tool_group" || ne.kind === "reasoning" || ne.kind === "permission_review",
             );
             const hasSubsequentWork = subsequentTurnEntries.some(
-              (ne) => ne.kind === "tool_group" || ne.kind === "reasoning",
+              (ne) => ne.kind === "tool_group" || ne.kind === "reasoning" || ne.kind === "permission_review",
             );
 
             const myTurnStart = turnStart >= 0 ? turnStart : 0;
             entryTurnStartMap.set(i, myTurnStart);
             const isActiveTurnEntry = myTurnStart === lastTurnStartIdx && streaming;
             const hasPriorWork = activeEntries.slice(myTurnStart + 1, i).some(
-              (pe) => pe.kind === "tool_group" || pe.kind === "reasoning",
+              (pe) => pe.kind === "tool_group" || pe.kind === "reasoning" || pe.kind === "permission_review",
             );
 
             if (e.kind === "assistant") {
@@ -1119,6 +1120,15 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
                   } else {
                     break;
                   }
+                } else if (e.kind === "permission_review") {
+                  if (cls === "intermediate") {
+                    groupEntries.push({
+                      idx: i,
+                      node: <PermissionReviewStatusCard key={`permission-review-${e.toolUseId}`} entry={e} />,
+                    });
+                  } else {
+                    break;
+                  }
                 } else if (e.kind === "tool_group") {
                   if (cls === "intermediate") {
                     const spawnNodes = renderSpawnsForGroup(e);
@@ -1209,6 +1219,8 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             if (entryClassMap.get(i) === "live") {
               if (entry.kind === "reasoning") {
                 rendered.push(<ReasoningCard key={idx} entry={entry} />);
+              } else if (entry.kind === "permission_review") {
+                rendered.push(<PermissionReviewStatusCard key={`permission-review-${entry.toolUseId}`} entry={entry} />);
               } else if (entry.kind === "tool_group") {
                 rendered.push(<ToolGroupCard key={entry.groupId} group={entry} sessionId={currentSessionId} />);
                 for (const node of renderSpawnsForGroup(entry)) rendered.push(node);
@@ -1263,6 +1275,8 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             // ── Fallback: unclassified edge-case entries ──
             if (entry.kind === "reasoning") {
               rendered.push(<ReasoningCard key={idx} entry={entry} />);
+            } else if (entry.kind === "permission_review") {
+              rendered.push(<PermissionReviewStatusCard key={`permission-review-${entry.toolUseId}`} entry={entry} />);
             } else if (entry.kind === "tool_group") {
               rendered.push(<ToolGroupCard key={entry.groupId} group={entry} sessionId={currentSessionId} />);
               for (const node of renderSpawnsForGroup(entry)) rendered.push(node);

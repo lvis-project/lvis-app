@@ -372,8 +372,8 @@ interface RoutineScope {
   "permissions": {
     "reviewer": {
       "mode": "rule",      // "disabled" | "rule" | "llm" | "strict"  ← v2.3 4-mode
-      "provider": "openai",       // default vendor — Anthropic 의존성 분리
-      "model": "gpt-4o-mini",     // default — ~$0.0002/call, 5x cheaper than Haiku
+      "provider": "openai",       // legacy persisted field; runtime follows active llm.provider
+      "model": "gpt-4o-mini",     // legacy persisted field; runtime follows active llm.vendors[provider].model
       "fallbackOnError": "deny", // "deny" | "rule" 만 허용
       // "thresholds" 제거: verdict 는 discrete enum 이라 threshold 불필요
 
@@ -878,8 +878,8 @@ Phase 2 executor 작업 중 사용자가 결정한 4 항목 — spec 에 binding
 
 | 항목 | 결정 | 함의 |
 |---|---|---|
-| Layer 5 default provider | **OpenAI gpt-4o-mini** + vendor-neutral abstraction | Anthropic 의존성 분리 (main conversation 의 quota 와 별도 budget). `LlmRiskClassifier` 는 thin adapter (provider/model/key swap 가능). 사용자가 `/permission reviewer model anthropic claude-haiku-4-5` 등으로 변경 가능 |
-| Layer 5 default model 변경 가능 surface | `/permission reviewer model <name>` slash + settings.json | Phase 5 의 slash grammar 에 이미 포함. `provider` 도 변경 가능: `/permission reviewer provider openai\|anthropic\|google` |
+| Layer 5 provider/model | **active chat LLM provider/model 추종** + vendor-neutral abstraction | `LlmRiskClassifier` 는 thin adapter 를 유지하되 runtime provider/model 은 `settings.llm.provider` 와 active vendor block 의 `model` 을 따른다. 기존 `permissions.reviewer.provider/model` 은 legacy persisted field 로 남긴다. |
+| Layer 5 legacy provider/model surface | `/permission reviewer model <name>` slash + settings.json | Legacy compatibility surface. Runtime 은 active chat LLM 을 우선 적용하므로 provider/model 변경은 지능 설정의 LLM provider/model 에서 수행한다. |
 | Layer 6 hook v1 ship | **빈 디렉토리** | `~/.config/lvis/hooks/` 만 mkdir. 기본 hook 없음. 사용자가 적극적으로 추가하기 전까지 attack surface 0. Sample hook 의 ergonomic value < security 이라는 trade-off |
 | Layer 5 cache invalidation | **Selective by `invalidationKey`** | `invalidationKey = hash(allowedDirectories, scope)` 의 매치만 cache hit. settings 변경 시 매치 안 되는 entry 만 무효, 동일 context 의 cache 보존. cold-start hit-rate 보존. 가정: verdict 의 settings-dependent input 은 (allowedDirectories, scope) 뿐 (Phase 4 hook chain 결과가 verdict 영향 시 hook hash 도 invalidationKey 에 포함 필요) |
 | arch.md §6.3 rewrite | **In-place rewrite** | 기존 §6.3 의 3-layer model 자리에 10-layer 으로 직접 덮어쓰기. 외부 link / anchor (`#permissions`) 호환 유지. Phase 5 deliverable |
