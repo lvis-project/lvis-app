@@ -202,7 +202,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     question, setQuestion, chatEndRef, currentSessionId,
     hasApiKey, onOpenSettings,
     searchOpen, searchMatches, searchMatchSet, searchIdx, searchHighlight,
-    contextOverflowPct, usedTokens, contextBudget, effectiveBudget,
+    contextOverflowPct, usedTokens, effectiveBudget,
     tpmLimit, tpmPct,
     rolePresets, activePreset, activePresetId, setActivePresetId,
     agentOptions, skillOptions, activeAgentName, setActiveAgentName,
