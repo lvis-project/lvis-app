@@ -339,6 +339,69 @@ describe("useContextBudget (deterministic math)", () => {
     expect(a).toBe(12_345);
     expect(b).toBe(6_789);
   });
+
+  // Issue #900 #1 — TPM hint fields (tpmLimit / tpmPct / isTpmOverflow).
+  // Hook 의 새 3 field 가 (a) tpmDefault 등록 모델 (nano) 에서 노출되고,
+  // (b) 미등록 모델에서는 undefined 로 silent, (c) usedTokens >= tpmLimit
+  // 시 isTpmOverflow 가 true 가 되는지 contract pin.
+  it("tpmLimit/tpmPct/isTpmOverflow — gpt-5.4-nano returns numeric values", () => {
+    const entries: ChatEntry[] = [
+      {
+        kind: "turn_summary",
+        turnDurationMs: 1000,
+        toolCount: 0,
+        cumulativeToolMs: 0,
+        tokensIn: 100_000,
+        freshInputTokens: 100_000,
+        tokensOut: 200,
+      },
+    ];
+    const { result } = renderHook(() =>
+      useContextBudget({ entries, llmVendor: "openai", llmModel: "gpt-5.4-nano" }),
+    );
+    expect(result.current.tpmLimit).toBe(200_000);
+    expect(result.current.tpmPct).toBeCloseTo(0.5, 5);
+    expect(result.current.isTpmOverflow).toBe(false);
+  });
+
+  it("tpmLimit/tpmPct/isTpmOverflow — unregistered model returns undefined (backward-compat)", () => {
+    const entries: ChatEntry[] = [
+      {
+        kind: "turn_summary",
+        turnDurationMs: 1000,
+        toolCount: 0,
+        cumulativeToolMs: 0,
+        tokensIn: 100_000,
+        freshInputTokens: 100_000,
+        tokensOut: 200,
+      },
+    ];
+    const { result } = renderHook(() =>
+      useContextBudget({ entries, llmVendor: "openai", llmModel: "gpt-4o-mini" }),
+    );
+    expect(result.current.tpmLimit).toBeUndefined();
+    expect(result.current.tpmPct).toBeUndefined();
+    expect(result.current.isTpmOverflow).toBe(false);
+  });
+
+  it("isTpmOverflow trips when usedTokens >= tpmLimit (nano at 200K)", () => {
+    const entries: ChatEntry[] = [
+      {
+        kind: "turn_summary",
+        turnDurationMs: 1000,
+        toolCount: 0,
+        cumulativeToolMs: 0,
+        tokensIn: 200_000,
+        freshInputTokens: 200_000,
+        tokensOut: 100,
+      },
+    ];
+    const { result } = renderHook(() =>
+      useContextBudget({ entries, llmVendor: "openai", llmModel: "gpt-5.4-nano" }),
+    );
+    expect(result.current.tpmPct).toBeCloseTo(1.0, 5);
+    expect(result.current.isTpmOverflow).toBe(true);
+  });
 });
 
 describe("useCostEstimate (memo invariants)", () => {
