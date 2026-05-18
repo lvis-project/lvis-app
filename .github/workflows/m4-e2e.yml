@@ -49,6 +49,11 @@ jobs:
           pip install -U pip uv
           uv sync --frozen --all-groups || uv sync --all-groups
 
+      - name: Clean stale M4 sqlite DB (self-hosted runner persists /tmp)
+        run: |
+          rm -f /tmp/m4-marketplace.db /tmp/m4-marketplace.db-wal /tmp/m4-marketplace.db-shm
+          echo "stale DB removed (if present)"
+
       - name: Seed publisher API key (before server start — avoids sqlite lock)
         env:
           MARKETPLACE_DB_URL: "sqlite+aiosqlite:////tmp/m4-marketplace.db"
