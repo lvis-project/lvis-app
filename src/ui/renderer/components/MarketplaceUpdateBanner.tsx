@@ -28,10 +28,13 @@ export function MarketplaceUpdateBanner({
 
   if (updates.length === 0) return null;
 
-  const label =
+  const updateLabels = updates.map((update) => formatUpdateLabel(update));
+  const summary =
     updates.length === 1
-      ? `플러그인 업데이트 가능: ${updates[0].pluginId} → ${updates[0].latestVersion}`
-      : `${updates.length}개 플러그인 업데이트 가능`;
+      ? "플러그인 업데이트 가능:"
+      : `${updates.length}개 플러그인 업데이트 가능:`;
+  const details = updateLabels.join(", ");
+  const label = `${summary} ${details}`;
 
   const handleUpdate = async () => {
     setBusy(true);
@@ -54,14 +57,15 @@ export function MarketplaceUpdateBanner({
 
   return (
     <div
-      className="flex items-center justify-between gap-2 bg-info/15 border border-info/40 text-info text-sm px-4 py-2 rounded-md mx-2 mt-2 lvis-anim-slide-down"
+      className="flex h-11 items-center justify-between gap-2 overflow-hidden bg-info/15 border border-info/40 text-info text-sm px-4 py-1.5 rounded-md mx-2 mt-2 lvis-anim-slide-down"
       data-testid="marketplace-update-banner"
     >
-      <span>
-        {label}
+      <span className="min-w-0 flex-1" title={label}>
+        <span className="block truncate leading-4">{summary}</span>
+        <span className="block truncate text-[11px] leading-3 text-info/75">{details}</span>
         {error ? <span className="ml-2 text-destructive">— 일부 실패: {error}</span> : null}
       </span>
-      <div className="flex items-center gap-1">
+      <div className="flex shrink-0 items-center gap-1">
         <Button
           variant="default"
           size="sm"
@@ -84,4 +88,11 @@ export function MarketplaceUpdateBanner({
       </div>
     </div>
   );
+}
+
+function formatUpdateLabel(update: PluginUpdateInfo): string {
+  const displayName = update.pluginName?.trim() || update.pluginId;
+  const name =
+    displayName === update.pluginId ? displayName : `${displayName} (${update.pluginId})`;
+  return `${name} → ${update.latestVersion}`;
 }

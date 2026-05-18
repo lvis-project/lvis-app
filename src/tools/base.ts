@@ -49,6 +49,7 @@ export interface Tool {
   readonly description: string;
   readonly source: ToolSource;
   readonly category: ToolCategory;
+  readonly categoryForInput?: (input: unknown) => ToolCategory;
   /**
    * Permission policy — declared only on `category === "meta"` tools. Tells the executor
    * to take the explicit short-circuit path rather than the standard Layer 3
@@ -102,7 +103,7 @@ export interface Tool {
    * permission manager. Tools that declare this opt out of bare tool-name
    * "allow always" reuse because their arguments carry permission scope.
    */
-  approvalCacheKey?(input: unknown, ctx?: Pick<ToolExecutionContext, "cwd">): string;
+  approvalCacheKey?(input: unknown, ctx?: Pick<ToolExecutionContext, "cwd">): string | undefined;
 
   /** JSON Schema describing the input shape — sent to LLM providers. */
   toJsonSchema(): unknown;
@@ -185,6 +186,7 @@ export interface DynamicToolSpec {
   description: string;
   source: ToolSource;
   category: ToolCategory;
+  categoryForInput?: (input: unknown) => ToolCategory;
   decisionOverride?: ToolDecisionOverride;
   pluginId?: string;
   mcpServerId?: string;
@@ -198,7 +200,7 @@ export interface DynamicToolSpec {
   /** §6.4 — replacement tool name; enables transparent redirect. */
   replacedBy?: string;
   /** Permission policy #634 — per-tool approval cache identity. */
-  approvalCacheKey?: (input: unknown, ctx?: Pick<ToolExecutionContext, "cwd">) => string;
+  approvalCacheKey?: (input: unknown, ctx?: Pick<ToolExecutionContext, "cwd">) => string | undefined;
   /** Raw JSON Schema — used when no Zod schema is available (plugin/MCP). */
   jsonSchema: object;
   execute: (
@@ -221,6 +223,7 @@ export function createDynamicTool(spec: DynamicToolSpec): Tool {
     description: spec.description,
     source: spec.source,
     category: spec.category,
+    categoryForInput: spec.categoryForInput,
     decisionOverride: spec.decisionOverride,
     pluginId: spec.pluginId,
     mcpServerId: spec.mcpServerId,
