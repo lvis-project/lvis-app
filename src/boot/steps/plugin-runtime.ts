@@ -26,6 +26,11 @@ import { PluginRuntime } from "../../plugins/runtime.js";
 import { currentInvocationOrigin } from "../../plugins/runtime/origin-chain.js";
 import { startPluginDevWatcher } from "../../plugins/dev-watcher.js";
 import { PluginDeploymentGuard } from "../../plugins/deployment-guard.js";
+// #958 round-1 security MEDIUM — read installSource from the registry so
+// the Tier-3 admin-bypass gate is anchored to a host-verified field, not
+// the user-writable `plugin.json` manifest.
+import { readPluginRegistry } from "../../plugins/registry.js";
+import type { PluginRegistryEntryInstallSource } from "../../plugins/types.js";
 import { createPluginStorage } from "../../plugins/storage.js";
 import {
   setIsPackaged,
@@ -905,6 +910,48 @@ export async function initPluginRuntime(
     pluginsRoot: pluginPaths.pluginsRoot,
   });
 
+  // #958 round-1 security MEDIUM — installSource cache. The registry file
+  // (`~/.lvis/plugins/registry.json`) is the host-verified source of
+  // truth for whether a plugin was installed by an admin or by a user;
+  // `manifest.installPolicy` lives inside the plugin's writable
+  // `plugin.json` and cannot be trusted alone. We populate this map at
+  // boot and refresh on every install/uninstall event so the
+  // host-api closures (getSecret + resolveApiKey) can answer
+  // installSource lookups synchronously without touching disk on the
+  // hot path.
+  //
+  // Trust precedence: caller code (getSecret / resolveApiKey) reads
+  // this map first; only when the entry is absent (legacy registry
+  // pre-dating the field — `readPluginRegistry` migrates these on
+  // read, but a defensive miss can still occur for plugins discovered
+  // before the cache is rehydrated) does it consult
+  // `manifest.installPolicy`. Mirrors the precedence rule in
+  // `deployment-guard.ts:84-92`.
+  const installSourceCache = new Map<string, PluginRegistryEntryInstallSource>();
+  const refreshInstallSourceCache = async (): Promise<void> => {
+    try {
+      const registry = await readPluginRegistry(pluginPaths.registryPath);
+      installSourceCache.clear();
+      for (const entry of registry.plugins) {
+        if (entry.installSource !== undefined) {
+          installSourceCache.set(entry.id, entry.installSource);
+        }
+      }
+    } catch (err) {
+      // Cache stays empty / stale — callers will fall back to
+      // `manifest.installPolicy` which is correct for first-boot
+      // (no registry file yet) and legacy registry entries.
+      log.warn(
+        "installSource cache refresh failed: %s",
+        (err as Error).message,
+      );
+    }
+  };
+  await refreshInstallSourceCache();
+  const getRegistryInstallSource = (
+    pluginId: string,
+  ): PluginRegistryEntryInstallSource | undefined => installSourceCache.get(pluginId);
+
   // Late-binding refs for ConversationLoop-dependent callers.
   const lateBinding: LateBindingRefs = {
     llmCallerRef: { fn: null },
@@ -1149,6 +1196,15 @@ export async function initPluginRuntime(
             manifestSha256,
             settingsService,
             auditLogger: bootAuditLogger,
+            // #958 round-1 — feed the registry-anchored installSource so
+            // the Tier-3 admin-bypass gate trusts the host-verified
+            // install record over the user-writable manifest field.
+            // Falls through to `undefined` on legacy entries (handled by
+            // the helper's manifest fallback).
+            ...((): { registryInstallSource?: "admin" | "user" | "local-dev" } => {
+              const src = getRegistryInstallSource(pluginId);
+              return src !== undefined ? { registryInstallSource: src } : {};
+            })(),
             // Cluster review M1 — bind the permission-manager revoke signal
             // accessor so an in-flight bearer aborts when permissions
             // change for this plugin. When permissionManager is not wired
@@ -1214,6 +1270,19 @@ export async function initPluginRuntime(
           const activeProvider = isLlmKey
             ? (settingsService.get("llm").provider as string)
             : vendor;
+          // #958 round-1 security MEDIUM — trust precedence: registry-
+          // recorded `installSource` wins over `manifest.installPolicy`.
+          // The registry file is host-managed; `plugin.json` is inside
+          // the plugin's writable surface so a malicious post-install
+          // patch could flip `installPolicy:"admin"` and inherit Tier-3
+          // bypass. Mirrors `deployment-guard.ts:84-92`.
+          const registryInstallSource = getRegistryInstallSource(pluginId);
+          const effectiveInstallPolicy: "admin" | "user" | undefined =
+            registryInstallSource !== undefined
+              ? registryInstallSource === "admin"
+                ? "admin"
+                : "user"
+              : manifest.installPolicy;
           const outcome = runTier3Then4({
             pluginId,
             key,
@@ -1223,7 +1292,10 @@ export async function initPluginRuntime(
             // #955 follow-up — admin-installed plugins bypass the Tier-3
             // signed whitelist registry ACL. Tier-4 vendor cross-check
             // still applies via the same helper.
-            installPolicy: manifest.installPolicy,
+            // #958 round-1 — value comes from the registry-anchored
+            // decision above so a user can't flip the bypass by editing
+            // plugin.json.
+            installPolicy: effectiveInstallPolicy,
           });
           if (outcome.kind === "deny") {
             const auditReason =
@@ -1238,6 +1310,27 @@ export async function initPluginRuntime(
             } catch { /* audit must not break host */ }
             incrementHostSecretCounter("hostSecret_denied", pluginId, keyPrefix);
             return null;
+          }
+          // #958 round-1 security MEDIUM — admin-bypass audit + counter.
+          // Emit BEFORE the host-secret read line so operators can pivot
+          // on `policy=admin tier3-bypassed` in the audit log. The
+          // dedicated `hostSecret_admin_bypass` counter is on top of the
+          // regular `hostSecret_read` increment below so totals stay
+          // comparable across bypass and non-bypass reads.
+          if (outcome.via === "admin-bypass") {
+            try {
+              bootAuditLogger.log({
+                timestamp: new Date().toISOString(),
+                sessionId: "plugin",
+                type: "info",
+                input: `[plugin:${pluginId}] policy=admin tier3-bypassed key=${auditKey} source=${registryInstallSource !== undefined ? "registry.installSource" : "manifest.installPolicy"}`,
+              });
+            } catch { /* audit must not break host */ }
+            incrementHostSecretCounter(
+              "hostSecret_admin_bypass",
+              pluginId,
+              keyPrefix,
+            );
           }
           try {
             bootAuditLogger.log({
@@ -1734,6 +1827,10 @@ export async function initPluginRuntime(
     installPluginPartitionPolicy(pluginPartitionName(pluginId), {
       pluginRoot: pluginRuntime.getPluginRoot(pluginId),
     });
+    // #958 round-1 — keep the installSource cache in sync so a freshly
+    // installed admin plugin gets its Tier-3 bypass on first call,
+    // without waiting for the next boot.
+    void refreshInstallSourceCache();
   });
 
   // Uninstall: `onDisable` only unregisters the removed plugin's tools, but a
@@ -1751,6 +1848,10 @@ export async function initPluginRuntime(
         (err as Error).message,
       );
     }
+    // #958 round-1 — drop the stale cache entry so a re-install (or a
+    // re-introduction with a different installSource) does not inherit
+    // the previous Tier-3 bypass decision.
+    void refreshInstallSourceCache();
   });
 
   // 플러그인 메서드를 ToolRegistry에 등록

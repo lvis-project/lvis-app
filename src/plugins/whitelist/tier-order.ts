@@ -19,8 +19,21 @@
  */
 import { whitelistRegistry } from "./whitelist-registry.js";
 
+/**
+ * #958 round-1 security MEDIUM — `via` discriminator on the `allow`
+ * variant so the audit trail can record WHICH gate path produced the
+ * grant. Today the only non-default path is `"admin-bypass"` (Tier-3
+ * skipped because `installPolicy === "admin"`). Adding new bypass
+ * sources later means new union members on this field — callers
+ * pattern-match exhaustively so a new variant is a compile-time error
+ * at every audit/counter site.
+ *
+ * Default `allow` (`via` undefined) means "all four tiers ran and
+ * passed". Operators reading the audit log can therefore distinguish
+ * a regular grant from one that skipped the signed whitelist ACL.
+ */
 export type TierOutcome =
-  | { kind: "allow" }
+  | { kind: "allow"; via?: "admin-bypass" }
   | {
       kind: "deny";
       tier: "tier-3" | "tier-4";
@@ -74,7 +87,11 @@ export function runTier3Then4(input: TierCheckInput): TierOutcome {
     if (input.vendor !== input.activeProvider) {
       return { kind: "deny", tier: "tier-4", reason: "vendor-mismatch" };
     }
-    return { kind: "allow" };
+    // #958 round-1 security MEDIUM — mark this allow as having taken the
+    // admin-bypass branch so callers can emit an explicit audit line +
+    // counter for anomaly detection. The signed Tier-3 ACL was NOT
+    // consulted; only Tier-4 (vendor cross-check) ran above.
+    return { kind: "allow", via: "admin-bypass" };
   }
   const decision = whitelistRegistry.isAllowed(
     input.pluginId,
