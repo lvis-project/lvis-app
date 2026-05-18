@@ -971,7 +971,12 @@ const api = {
       questions: Array<{
         question: string;
         choices?: string[];
+        recommendedIndex?: number;
+        altIndices?: number[];
         allowFreeText: boolean;
+        allowMultiple?: boolean;
+        placeholder?: string;
+        summaryHint?: string;
         suggestedAnswers?: string[];
       }>;
       createdAt: number;
@@ -983,7 +988,7 @@ const api = {
   },
   respondAskUserQuestion: async (response: {
     requestId: string;
-    answers?: Array<{ choice?: string; freeText?: string }>;
+    answers?: Array<{ choice?: string; choices?: string[]; freeText?: string }>;
     dismissed?: boolean;
   }) => ipcRenderer.invoke("lvis:ask-user-question:respond", response),
   // Timeout side-channel — main process notifies the renderer when an

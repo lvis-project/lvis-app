@@ -2,16 +2,18 @@
  * Reviewer agent boot wiring.
  *
  * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 5,
- * §11 v2.1 binding decisions (default `provider="openai"`,
- * `model="gpt-4o-mini"`, `fallbackOnError ∈ {deny, rule}` with
- * fail-closed default).
+ * §11 v2.1 binding decisions plus active-LLM following: persisted
+ * `permissions.reviewer.provider/model` are legacy fields, while runtime
+ * `mode="llm"` uses the active chat provider/model when boot supplies it.
+ * `fallbackOnError ∈ {deny, rule}` with fail-closed default.
  *
  * This step wires the {@link RiskClassifier}, cache, and deferred queue into
  * {@link PermissionManager}:
  *
  * 1. Read `permissions.reviewer` block from `~/.lvis/settings.json`.
  * 2. For `mode: "rule" | "disabled"` — sync classifier, no provider needed.
- * 3. For `mode: "llm"` — wrap host's existing LLMProvider in a thin
+ * 3. For `mode: "llm"` — follow the active chat LLM provider/model and wrap
+ *    host's existing LLMProvider in a thin
  *    {@link LlmReviewerProviderAdapter} that translates the provider's
  *    chunked `streamTurn` interface into the one-shot `complete` shape
  *    {@link LlmRiskClassifier} expects.
@@ -43,7 +45,7 @@ import {
   readPermissionSettings,
   type ReviewerSettingsBlock,
 } from "../../permissions/permission-settings-store.js";
-import type { LLMProvider } from "../../engine/llm/types.js";
+import type { LLMProvider, LLMVendor } from "../../engine/llm/types.js";
 import { createLogger } from "../../lib/logger.js";
 
 const log = createLogger("reviewer-wiring");
@@ -128,8 +130,16 @@ export interface WireReviewerDeps {
    */
   readSettings?: () => ReviewerSettingsBlock;
   /**
-   * Provider factory for `mode: "llm"` with `openai | anthropic | google`
-   * providers. Boot calls this only for the stream-based host providers.
+   * Active chat LLM identity. When supplied, reviewer mode="llm" follows this
+   * provider/model instead of the legacy permissions.reviewer provider/model
+   * fields, so the permission reviewer stays on the same vendor/model as chat.
+   */
+  readActiveLlm?: () => ActiveReviewerLlmIdentity;
+  /**
+   * Provider factory for `mode: "llm"` stream-based host providers. Legacy
+   * reviewer names (`openai | anthropic | google`) and active LLM vendor names
+   * (`claude | openai | gemini | copilot | azure-foundry | vertex-ai`) can
+   * reach this callback.
    * Returning `null` means "vendor not configured" — wiring fails closed.
    * Not called for `foundry` or `gcp-playground` (direct HTTP adapters).
    */
@@ -159,9 +169,26 @@ export interface WireReviewerResult {
   classifier: RiskClassifier;
   cache: VerdictCache;
   deferredQueue: DeferredQueue;
-  /** Reviewer block actually applied (post-normalisation). */
+  /** Persisted reviewer block actually loaded (post-normalisation). */
   appliedSettings: ReviewerSettingsBlock;
+  /** Provider/model actually used by the runtime after active-LLM following. */
+  effectiveSettings: EffectiveReviewerSettings;
 }
+
+export interface ActiveReviewerLlmIdentity {
+  provider: LLMVendor;
+  model: string;
+  baseUrl?: string;
+  vertexProject?: string;
+  vertexLocation?: string;
+}
+
+type EffectiveReviewerSettings = Omit<ReviewerSettingsBlock, "provider"> & {
+  provider: string;
+  baseUrl?: string;
+  vertexProject?: string;
+  vertexLocation?: string;
+};
 
 /**
  * Wire the reviewer agent. Idempotent — calling twice replaces the
@@ -179,6 +206,7 @@ export interface WireReviewerResult {
  */
 export function wireReviewerAgent(deps: WireReviewerDeps): WireReviewerResult {
   const settings = (deps.readSettings ?? defaultReadSettings)();
+  const effectiveSettings = resolveEffectiveSettings(settings, deps);
   const cache = new VerdictCache(deps.verdictCachePath);
   const deferredQueue = new DeferredQueue(
     deps.deferredQueuePath,
@@ -191,18 +219,18 @@ export function wireReviewerAgent(deps: WireReviewerDeps): WireReviewerResult {
     log.info("boot: reviewer wired (mode=%s)", settings.mode);
   } else {
     // mode === "llm"
-    const adapter = resolveReviewerAdapter(settings.provider, deps);
+    const adapter = resolveReviewerAdapter(effectiveSettings.provider, deps);
     const reviewerSettings: ReviewerSettings = {
       mode: "llm",
       provider: adapter,
-      model: settings.model,
+      model: effectiveSettings.model,
       fallbackOnError: settings.fallbackOnError,
     };
     classifier = createRiskClassifier(reviewerSettings);
     log.info(
       "boot: reviewer wired (mode=llm provider=%s model=%s fallback=%s)",
-      settings.provider,
-      settings.model,
+      effectiveSettings.provider,
+      effectiveSettings.model,
       settings.fallbackOnError,
     );
   }
@@ -213,21 +241,25 @@ export function wireReviewerAgent(deps: WireReviewerDeps): WireReviewerResult {
     deferredQueue,
     cacheScope: {
       mode: settings.mode,
-      provider: settings.provider,
-      model: settings.model,
+      provider: effectiveSettings.provider,
+      model: effectiveSettings.model,
       fallbackOnError: settings.fallbackOnError,
       // Include interactive auto-approve in the cache scope so a setting
       // change naturally invalidates cached verdicts. Without this,
       // toggling autoApprove off → on could reuse a stale verdict that
       // was produced under different policy assumptions.
       interactiveAutoApprove: settings.interactive.autoApprove,
-      // MAJOR-2: include Foundry endpoint in cacheScope so that a baseUrl change
-      // causes a cache miss — otherwise cached verdicts from the old endpoint
-      // would be replayed against a different (potentially attacker-controlled)
-      // Foundry deployment. GCP does not have a configurable endpoint.
+      // Include active provider transport identity in cacheScope so baseUrl /
+      // Vertex project changes invalidate reviewer verdicts produced under a
+      // different upstream deployment.
+      providerBaseUrl: effectiveSettings.baseUrl ?? null,
+      vertexProject: effectiveSettings.vertexProject ?? null,
+      vertexLocation: effectiveSettings.vertexLocation ?? null,
+      // Legacy Foundry endpoint key retained for existing cache-scope tests.
       endpoint:
-        settings.provider === "foundry"
-          ? (deps.getFoundryEndpoint?.() ?? null)
+        effectiveSettings.provider === "foundry" ||
+        effectiveSettings.provider === "azure-foundry"
+          ? (effectiveSettings.baseUrl ?? deps.getFoundryEndpoint?.() ?? null)
           : null,
     },
   });
@@ -279,11 +311,28 @@ export function wireReviewerAgent(deps: WireReviewerDeps): WireReviewerResult {
       "setting has no effect under allow mode.",
     );
   }
-  return { classifier, cache, deferredQueue, appliedSettings: settings };
+  return { classifier, cache, deferredQueue, appliedSettings: settings, effectiveSettings };
 }
 
 function defaultReadSettings(): ReviewerSettingsBlock {
   return readPermissionSettings().permissions.reviewer;
+}
+
+function resolveEffectiveSettings(
+  settings: ReviewerSettingsBlock,
+  deps: WireReviewerDeps,
+): EffectiveReviewerSettings {
+  if (settings.mode !== "llm") return settings;
+  const active = deps.readActiveLlm?.();
+  if (!active) return settings;
+  return {
+    ...settings,
+    provider: active.provider,
+    model: active.model,
+    ...(active.baseUrl !== undefined ? { baseUrl: active.baseUrl } : {}),
+    ...(active.vertexProject !== undefined ? { vertexProject: active.vertexProject } : {}),
+    ...(active.vertexLocation !== undefined ? { vertexLocation: active.vertexLocation } : {}),
+  };
 }
 
 /**
@@ -293,8 +342,8 @@ function defaultReadSettings(): ReviewerSettingsBlock {
  * fallback per CLAUDE.md No-Fallback.
  *
  * `foundry` and `gcp-playground` use direct HTTP adapters keyed from
- * the encrypted secret store via `deps.getSecret`. `openai`, `anthropic`,
- * and `google` use the host's streaming LLMProvider via `deps.streamProviderFor`.
+ * the encrypted secret store via `deps.getSecret`. Other provider strings
+ * use the host's streaming LLMProvider via `deps.streamProviderFor`.
  */
 function resolveReviewerAdapter(
   provider: string,

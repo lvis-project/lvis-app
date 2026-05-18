@@ -1546,9 +1546,12 @@ MED/HIGH 는 deferred queue 에 append 되어 사용자가 큐 버튼을 열 때
 값이 실제로 `~/.lvis/plugins/<pluginId>/` 안에 있는지 검증한 뒤 LOW 로
 auto-resolve. 검증 실패 시 일반 write 규칙으로 폴백 (sound-by-construction).
 
-**선택 surface:** `/permission reviewer mode disabled|rule|llm|strict` /
-`/permission reviewer model <name>` / `/permission reviewer provider
-openai|anthropic|google`. 변경은 settings.json 에 persist + selective
+**선택 surface:** `/permission reviewer mode disabled|rule|llm|strict`,
+`/permission reviewer fallback deny|rule`,
+`/permission reviewer interactive off|low`. Reviewer provider/model 은
+별도 slash surface 가 아니며 지능 설정의 active LLM provider/model 을 따른다.
+`permissions.reviewer.provider/model` 은 이전 버전 호환용 persisted field 이고
+사용자-facing SOT 가 아니다. 변경은 settings.json 에 persist + selective
 verdict-cache invalidation.
 
 **Cost optimization:** `~/.lvis/permissions/reviewer-cache.jsonl` —
@@ -1684,8 +1687,8 @@ Spec §3 Layer 8 grammar (final, Phase 5):
 /permission audit show [--last=N]
 /permission audit verify
 /permission reviewer mode disabled|rule|llm
-/permission reviewer model <name>
-/permission reviewer provider openai|anthropic|google
+/permission reviewer fallback deny|rule
+/permission reviewer interactive off|low
 /permission hooks list
 /permission hooks accept <name>
 /permission hooks disable <name>

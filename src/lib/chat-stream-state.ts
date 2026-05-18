@@ -1,3 +1,9 @@
+import type {
+  ApprovalPurposeSuggestion,
+  PermissionReviewRiskLevel,
+  PermissionReviewStatus,
+} from "../shared/permission-review-status.js";
+
 /**
  * Checkpoint trigger reason on `compact_notice` events.
  * - "auto-compact": token preflight 가 LLM compact 를 실행
@@ -23,6 +29,11 @@ export type StreamEvent = {
   groupId?: string;
   toolUseId?: string;
   displayOrder?: number;
+  reviewStatus?: PermissionReviewStatus;
+  toolCategory?: "read" | "write" | "shell" | "network" | "meta";
+  source?: "builtin" | "plugin" | "mcp";
+  verdictLevel?: PermissionReviewRiskLevel;
+  approvalPurpose?: ApprovalPurposeSuggestion;
   roundIndex?: number;
   stopReason?: "end_turn" | "tool_use";
   hasToolCalls?: boolean;
@@ -147,6 +158,19 @@ export type ChatEntry =
   | { kind: "user"; text: string; injectHint?: "queue" | "interrupt"; createdAt?: number }
   | { kind: "reasoning"; text: string; streaming?: boolean; createdAt?: number }
   | { kind: "assistant"; text: string; streaming?: boolean; route?: "command"; phase?: "work" | "final"; createdAt?: number; systemNotice?: "context-error" | "stream-error" }
+  | {
+      kind: "permission_review";
+      status: PermissionReviewStatus;
+      toolName: string;
+      toolCategory?: "read" | "write" | "shell" | "network" | "meta";
+      source?: "builtin" | "plugin" | "mcp";
+      groupId: string;
+      toolUseId: string;
+      displayOrder: number;
+      verdictLevel?: PermissionReviewRiskLevel;
+      reason?: string;
+      approvalPurpose?: ApprovalPurposeSuggestion;
+    }
   | { kind: "tool_group"; groupId: string; groupIds: string[]; status: "running" | "done" | "error"; tools: ToolEntryItem[] }
   | {
       kind: "ask_user_answer";
@@ -260,6 +284,7 @@ export type ChatEntry =
 type ReasoningEntry = Extract<ChatEntry, { kind: "reasoning" }>;
 type AssistantEntry = Extract<ChatEntry, { kind: "assistant" }>;
 type ToolGroupEntry = Extract<ChatEntry, { kind: "tool_group" }>;
+type PermissionReviewEntry = Extract<ChatEntry, { kind: "permission_review" }>;
 
 function isTurnStartEntry(entry: ChatEntry | undefined): boolean {
   return entry?.kind === "user" || entry?.kind === "imported_trigger";
@@ -562,6 +587,64 @@ export function setAssistantError(
     next.push(baseEntry);
   }
   return next;
+}
+
+export function upsertPermissionReview(
+  entries: ChatEntry[],
+  payload: {
+    status: PermissionReviewStatus;
+    toolName: string;
+    toolCategory?: "read" | "write" | "shell" | "network" | "meta";
+    source?: "builtin" | "plugin" | "mcp";
+    groupId: string;
+    toolUseId: string;
+    displayOrder?: number;
+    verdictLevel?: PermissionReviewRiskLevel;
+    reason?: string;
+    approvalPurpose?: ApprovalPurposeSuggestion;
+  },
+): ChatEntry[] {
+  const next = [...entries];
+  const entry: PermissionReviewEntry = {
+    kind: "permission_review",
+    status: payload.status,
+    toolName: payload.toolName,
+    groupId: payload.groupId,
+    toolUseId: payload.toolUseId,
+    displayOrder: payload.displayOrder ?? 0,
+    ...(payload.toolCategory ? { toolCategory: payload.toolCategory } : {}),
+    ...(payload.source ? { source: payload.source } : {}),
+    ...(payload.verdictLevel ? { verdictLevel: payload.verdictLevel } : {}),
+    ...(payload.reason ? { reason: payload.reason } : {}),
+    ...(payload.approvalPurpose ? { approvalPurpose: payload.approvalPurpose } : {}),
+  };
+  const idx = findLastIdx(
+    next,
+    (candidate): candidate is PermissionReviewEntry =>
+      candidate.kind === "permission_review" &&
+      candidate.toolUseId === payload.toolUseId,
+  );
+  if (idx >= 0) {
+    next[idx] = entry;
+    return next;
+  }
+  next.push(entry);
+  return next;
+}
+
+export function dropPermissionReviewEntries(
+  entries: ChatEntry[],
+  payload?: { groupId?: string; toolUseId?: string },
+): ChatEntry[] {
+  if (!payload?.groupId && !payload?.toolUseId) {
+    return entries.filter((entry) => entry.kind !== "permission_review");
+  }
+  return entries.filter((entry) => {
+    if (entry.kind !== "permission_review") return true;
+    if (payload.toolUseId) return entry.toolUseId !== payload.toolUseId;
+    if (payload.groupId && entry.groupId === payload.groupId) return false;
+    return true;
+  });
 }
 
 export function applyToolStart(
