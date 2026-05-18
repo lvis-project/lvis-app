@@ -70,6 +70,38 @@ jobs:
           uv run python scripts/seed_e2e_keys.py \
             --publisher-key "$PUBLISHER_KEY"
 
+      - name: Sync poc-v1 public key from M4 signing secret (M4-local only)
+        working-directory: lvis-marketplace
+        env:
+          MARKETPLACE_SIGNING_PRIVATE_KEY_POC_V1: ${{ secrets.M4_MARKETPLACE_SIGNING_KEY_POC_V1 }}
+        run: |
+          # The repo-committed schemas/keys/poc-v1.pub is the production public
+          # key. The M4 signing secret is a separate keypair, so server startup
+          # warns "public key on disk does NOT match the loaded private key"
+          # and publish fails 500 at signing time.
+          # Derive the public from our private secret and write it locally only
+          # (working-directory checkout is ephemeral; production repo + deploy
+          # unchanged). Same key_id (poc-v1), private from secret, pub regenerated.
+          python3 -c "
+          import base64, os, sys
+          from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+          from cryptography.hazmat.primitives import serialization
+          priv_b64 = os.environ['MARKETPLACE_SIGNING_PRIVATE_KEY_POC_V1']
+          raw = base64.b64decode(priv_b64)
+          if len(raw) != 32:
+              print(f'ERROR: private key must be 32 bytes raw, got {len(raw)}', file=sys.stderr); sys.exit(1)
+          priv = Ed25519PrivateKey.from_private_bytes(raw)
+          pub = priv.public_key().public_bytes(
+              encoding=serialization.Encoding.Raw,
+              format=serialization.PublicFormat.Raw,
+          )
+          print(base64.b64encode(pub).decode())
+          " > /tmp/m4-poc-v1.pub
+          echo "derived pub: $(cat /tmp/m4-poc-v1.pub)"
+          echo "old pub on disk: $(cat schemas/keys/poc-v1.pub 2>/dev/null || echo 'absent')"
+          cp /tmp/m4-poc-v1.pub schemas/keys/poc-v1.pub
+          echo "new pub on disk: $(cat schemas/keys/poc-v1.pub)"
+
       - name: Start marketplace server (sqlite, background)
         working-directory: lvis-marketplace/server
         env:
