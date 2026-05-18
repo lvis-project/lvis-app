@@ -309,7 +309,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           className="min-w-0 flex-1 resize-none min-h-[40px] max-h-[144px] overflow-y-auto border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none rounded-none text-xs placeholder:text-xs px-4 py-2"
         />
 
-        {/* v6: Send/Stop/Guide 버튼은 BottomActionRow 로 이전. input-bar 안에는
+        {/* v6: Send/Stop 버튼은 BottomActionRow 로 이전. input-bar 안에는
             attachment chip + textarea 만. 키보드 (Enter/Shift+Enter/Ctrl+Enter)
             는 textarea onKeyDown 에서 그대로 처리. */}
       </div>
