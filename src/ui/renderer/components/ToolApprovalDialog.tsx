@@ -57,23 +57,27 @@ export function ToolApprovalDialog({
   // R-4: Scope selector ("session" | "persistent"). HIGH forces "session".
   const [scopeChoice, setScopeChoice] = useState<UserApprovalScope>("session");
   const nlInputRef = useRef<HTMLInputElement>(null);
+  const suggestedPurpose =
+    request?.approvalPurpose?.confidence === "sufficient"
+      ? request.approvalPurpose.text.trim()
+      : "";
 
   // Reset R-4 state when a new request arrives.
   useEffect(() => {
-    setNlJustification("");
+    setNlJustification(suggestedPurpose);
     setScopeChoice("session");
-  }, [request?.id]);
+  }, [request?.id, suggestedPurpose]);
 
   const finalVerdict = request?.reviewerVerdict?.level ?? riskLevelForCategory(request?.toolCategory ?? "meta");
 
   // R-4: HIGH verdict → focus NL field when dialog opens.
   useEffect(() => {
-    if (open && finalVerdict === "high") {
+    if (open && finalVerdict === "high" && suggestedPurpose.length === 0) {
       // Small delay so the dialog animation completes first.
       const t = setTimeout(() => nlInputRef.current?.focus(), 100);
       return () => clearTimeout(t);
     }
-  }, [open, finalVerdict]);
+  }, [open, finalVerdict, suggestedPurpose.length]);
 
   // R-4: Approve is disabled for HIGH when NL field is empty.
   const approveDisabled = finalVerdict === "high" && nlJustification.trim().length === 0;
@@ -258,7 +262,7 @@ export function ToolApprovalDialog({
                   htmlFor="nl-justification"
                   className="mb-1.5 block text-xs font-semibold text-destructive"
                 >
-                  이 작업의 목적을 한 문장으로 입력하세요 (필수)
+                  {suggestedPurpose.length > 0 ? "자동 작성된 작업 목적 (필수)" : "이 작업의 목적을 한 문장으로 입력하세요 (필수)"}
                   <span className="ml-1.5 text-[10px] font-normal text-muted-foreground">
                     범위: 이 세션만 (HIGH 고정)
                   </span>
@@ -275,7 +279,9 @@ export function ToolApprovalDialog({
                   data-testid="nl-justification-input"
                 />
                 <p className="mt-1 text-[10px] text-muted-foreground">
-                  높은 위험도 작업은 승인 사유를 기록합니다. 세션 종료 후 재승인이 필요합니다.
+                  {suggestedPurpose.length > 0
+                    ? "대화 맥락에서 목적을 채웠습니다. 다르면 수정하세요. 세션 종료 후 재승인이 필요합니다."
+                    : "높은 위험도 작업은 승인 사유를 기록합니다. 세션 종료 후 재승인이 필요합니다."}
                 </p>
               </div>
             )}

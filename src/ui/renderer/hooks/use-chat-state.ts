@@ -4,9 +4,11 @@ import {
   appendUserEntry,
   applyToolEnd,
   applyToolStart,
+  dropPermissionReviewEntries,
   finalizeStreamingAssistant,
   finalizeStreamingReasoning,
   setAssistantError,
+  upsertPermissionReview,
   upsertStreamingAssistant,
   upsertStreamingReasoning,
   type ChatEntry,
@@ -149,6 +151,39 @@ export function useChatState(api: LvisApi) {
           const base = p;
           return upsertStreamingReasoning(dropPendingLlmStatusAssistant(base), thoughtRef.current);
         });
+      } else if (
+        ev.type === "permission_review" &&
+        ev.reviewStatus &&
+        ev.name &&
+        ev.groupId &&
+        ev.toolUseId !== undefined
+      ) {
+        const {
+          reviewStatus,
+          name,
+          toolCategory,
+          source,
+          groupId,
+          toolUseId,
+          displayOrder = 0,
+          verdictLevel,
+          reason,
+          approvalPurpose,
+        } = ev;
+        setEntries((p) =>
+          upsertPermissionReview(dropPendingLlmStatusAssistant(p), {
+            status: reviewStatus,
+            toolName: name,
+            groupId,
+            toolUseId,
+            displayOrder,
+            ...(toolCategory ? { toolCategory } : {}),
+            ...(source ? { source } : {}),
+            ...(verdictLevel ? { verdictLevel } : {}),
+            ...(reason ? { reason } : {}),
+            ...(approvalPurpose ? { approvalPurpose } : {}),
+          }),
+        );
       } else if (ev.type === "assistant_round") {
         if (debugStreamEnabled) {
           debugLog("stream", "assistant_round:enter", {
@@ -196,7 +231,12 @@ export function useChatState(api: LvisApi) {
         thoughtRef.current = "";
       } else if (ev.type === "tool_start" && ev.name && ev.groupId && ev.toolUseId !== undefined) {
         const { groupId, toolUseId, displayOrder = 0, name, input } = ev;
-        setEntries((p) => applyToolStart(dropPendingLlmStatusAssistant(p), { groupId, toolUseId, displayOrder, name, input }));
+        setEntries((p) =>
+          applyToolStart(
+            dropPermissionReviewEntries(dropPendingLlmStatusAssistant(p), { groupId, toolUseId }),
+            { groupId, toolUseId, displayOrder, name, input },
+          ),
+        );
       } else if (ev.type === "tool_end" && ev.name && ev.groupId && ev.toolUseId !== undefined) {
         const { groupId, toolUseId, result, isError, uiPayload, durationMs } = ev;
         setEntries((p) => applyToolEnd(p, { groupId, toolUseId, result, isError, uiPayload, durationMs }));
@@ -205,7 +245,7 @@ export function useChatState(api: LvisApi) {
         // so the StatusBar item doesn't stick when compact_notice never arrives.
         setIsCompacting(false);
         setEntries((p) =>
-          setAssistantError(p, `오류: ${ev.error || "알 수 없는 오류"}`, thoughtRef.current),
+          setAssistantError(dropPermissionReviewEntries(p), `오류: ${ev.error || "알 수 없는 오류"}`, thoughtRef.current),
         );
         streamRef.current = "";
         thoughtRef.current = "";
@@ -317,7 +357,7 @@ export function useChatState(api: LvisApi) {
             });
           }
           setEntries((p) => {
-            const base = p;
+            const base = dropPermissionReviewEntries(p);
             let next = finalizeStreamingReasoning(base, thoughtRef.current);
             next = finalizeStreamingAssistant(
               next,
@@ -335,7 +375,7 @@ export function useChatState(api: LvisApi) {
           streamRef.current = "";
           thoughtRef.current = "";
         } else {
-          setEntries((p) => dropPendingLlmStatusAssistant(p));
+          setEntries((p) => dropPermissionReviewEntries(dropPendingLlmStatusAssistant(p)));
           if (debugStreamEnabled) {
             debugLog("stream", "done:skip-finalize", {
               reason: "streamRef and thoughtRef both empty",

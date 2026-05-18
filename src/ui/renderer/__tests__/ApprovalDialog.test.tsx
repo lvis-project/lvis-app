@@ -384,6 +384,86 @@ describe("ApprovalDialog", () => {
     expect(onDecide).toHaveBeenCalledWith("allow-once", undefined);
   });
 
+  it("prefills HIGH approval purpose from a sufficient suggestion and enables approval", async () => {
+    const onDecide = vi.fn();
+    render(
+      <ApprovalDialog
+        queue={[makeRequest({
+          toolName: "bash",
+          toolCategory: "shell",
+          reviewerVerdict: { level: "high", reason: "shell command" },
+          trustOrigin: "llm-tool-arg",
+          approvalPurpose: {
+            text: "사용자 요청에 따라 프로젝트 빌드 결과를 확인합니다.",
+            source: "conversation",
+            confidence: "sufficient",
+          },
+        })]}
+        onDecide={onDecide}
+      />,
+    );
+
+    await waitFor(() => {
+      const input = document.body.querySelector<HTMLInputElement>('[data-testid="nl-justification-input"]');
+      expect(input?.value).toBe("사용자 요청에 따라 프로젝트 빌드 결과를 확인합니다.");
+      expect(document.body.textContent).toContain("자동 작성된 작업 목적");
+    });
+
+    const approve = document.body.querySelector<HTMLButtonElement>('[data-testid="approve-button"]');
+    expect(approve).toBeTruthy();
+    expect(approve!.disabled).toBe(false);
+    fireEvent.click(approve!);
+
+    await waitFor(() => expect(onDecide).toHaveBeenCalledWith("allow-once", undefined));
+    expect(window.lvis.userApproval.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        nlJustification: "사용자 요청에 따라 프로젝트 빌드 결과를 확인합니다.",
+      }),
+    );
+  });
+
+  it("requires manual HIGH purpose when no sufficient purpose is available, then records it", async () => {
+    const onDecide = vi.fn();
+    render(
+      <ApprovalDialog
+        queue={[makeRequest({
+          toolName: "bash",
+          toolCategory: "shell",
+          reviewerVerdict: { level: "high", reason: "shell command" },
+          approvalPurpose: {
+            text: "입력만으로는 목적을 확정할 수 없습니다.",
+            source: "tool-input",
+            confidence: "insufficient",
+          },
+        })]}
+        onDecide={onDecide}
+      />,
+    );
+
+    let input: HTMLInputElement | null = null;
+    let approve: HTMLButtonElement | null = null;
+    await waitFor(() => {
+      input = document.body.querySelector<HTMLInputElement>('[data-testid="nl-justification-input"]');
+      approve = document.body.querySelector<HTMLButtonElement>('[data-testid="approve-button"]');
+      expect(input?.value).toBe("");
+      expect(approve?.disabled).toBe(true);
+      expect(document.body.textContent).toContain("이 작업의 목적을 한 문장으로 입력하세요");
+    });
+
+    fireEvent.change(input!, { target: { value: "사용자 요청에 따라 로컬 빌드 로그를 확인합니다." } });
+    await waitFor(() => {
+      expect(approve?.disabled).toBe(false);
+    });
+    fireEvent.click(approve!);
+
+    await waitFor(() => expect(onDecide).toHaveBeenCalledWith("allow-once", undefined));
+    expect(window.lvis.userApproval.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        nlJustification: "사용자 요청에 따라 로컬 빌드 로그를 확인합니다.",
+      }),
+    );
+  });
+
   it("record IPC call receives 5-component payload with canonical JSON args (critic MAJOR-5)", async () => {
     // Verifies that window.lvis.userApproval.record is called with a payload
     // containing all 5 required fields: toolName, args (canonical JSON string),

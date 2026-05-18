@@ -343,6 +343,20 @@ async function runStreamedTurn(
         }),
       onToolStart: (name, toolInput, meta) =>
         send({ type: "tool_start", name, input: toolInput, ...meta }),
+      onPermissionReview: (event) =>
+        send({
+          type: "permission_review",
+          reviewStatus: event.status,
+          name: event.toolName,
+          toolCategory: event.toolCategory,
+          source: event.source,
+          groupId: event.groupId,
+          toolUseId: event.toolUseId,
+          displayOrder: event.displayOrder,
+          verdictLevel: event.verdictLevel,
+          reason: event.reason,
+          approvalPurpose: event.approvalPurpose,
+        }),
       onToolEnd: (name, toolResult, isError, meta, uiPayload, durationMs) =>
         send({ type: "tool_end", name, result: toolResult, isError, ...meta, ...(uiPayload && { uiPayload }), durationMs }),
       onError: (error) => send({ type: "error", error }),
