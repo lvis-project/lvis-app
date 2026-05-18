@@ -256,7 +256,10 @@ export async function resolveApiKey(
       `resolveApiKey allow source=plugin-namespace vendor=${vendor} purpose=${request.purpose}`,
     );
     incrementHostSecretCounter("hostSecret_read", deps.pluginId, keyPrefix);
-    return makeSuccess(vendor, ownValue, mergedSignal);
+    // #955 L2 follow-up — host vendor baseUrl is part of the resolved
+    // handle even when the bearer came from the plugin's own namespace,
+    // so plugins that BYO key + host endpoint don't lose the inherit.
+    return makeSuccess(vendor, ownValue, mergedSignal, readVendorBaseUrl(deps, vendor));
   }
 
   // Tier-2 manifest allowlist.
@@ -352,17 +355,33 @@ export async function resolveApiKey(
   );
   incrementHostSecretCounter("hostSecret_read", deps.pluginId, keyPrefix);
 
-  // azure-foundry needs a baseUrl alongside the bearer — the SDK contract
-  // already exposes it. Reach into the per-vendor settings block when
-  // the vendor is azure-foundry; otherwise leave baseUrl unset.
-  let baseUrl: string | undefined;
-  if (vendor === "azure-foundry") {
-    const llmSettings = deps.settingsService.get("llm") as {
-      vendors?: Record<string, { baseUrl?: string } | undefined>;
-    };
-    baseUrl = llmSettings?.vendors?.["azure-foundry"]?.baseUrl;
-  }
+  // #955 L2 follow-up — surface the active vendor's `baseUrl` so plugins
+  // can inherit the host's LLM endpoint (e.g. Azure AI Foundry chat
+  // completions URL → derive a transcriptions URL on the same hostname).
+  // Previously only `azure-foundry` exposed the field; expanding to every
+  // vendor lets a plugin's sidecar URL fall back to the host endpoint
+  // whenever the user hasn't pinned a plugin-specific override.
+  // The plugin owns its own logic to convert chat→stt path; the host only
+  // hands over the raw value as recorded in settings.
+  const baseUrl = readVendorBaseUrl(deps, vendor);
   return makeSuccess(vendor, value, mergedSignal, baseUrl);
+}
+
+/**
+ * Read the `baseUrl` for `vendor` out of `settings.llm.vendors`. Returns
+ * `undefined` when the field is unset, empty, or the vendor block is missing.
+ * Defined once so the Tier-1 own-namespace short-circuit and the post-
+ * Tier-4 happy path expose the same field consistently.
+ */
+function readVendorBaseUrl(
+  deps: ResolveApiKeyDeps,
+  vendor: string,
+): string | undefined {
+  const llmSettings = deps.settingsService.get("llm") as {
+    vendors?: Record<string, { baseUrl?: string } | undefined>;
+  };
+  const value = llmSettings?.vendors?.[vendor]?.baseUrl;
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 /**

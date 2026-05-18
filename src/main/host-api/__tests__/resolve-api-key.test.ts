@@ -120,20 +120,32 @@ function makeAuditLogger() {
 interface SettingsOverrides {
   provider: string;
   secrets?: Record<string, string | null>;
+  /**
+   * Legacy convenience — sets `vendors["azure-foundry"].baseUrl`. Kept so
+   * the original Azure-only tests stay green. Prefer `vendorBaseUrls` for
+   * non-azure vendor coverage (#955 L2 follow-up).
+   */
   baseUrl?: string;
+  vendorBaseUrls?: Record<string, string>;
 }
 
 function makeSettingsService(overrides: SettingsOverrides) {
   return {
     get: vi.fn((key: string) => {
       if (key === "llm") {
+        const vendors: Record<string, { baseUrl?: string }> = {
+          "azure-foundry": overrides.baseUrl
+            ? { baseUrl: overrides.baseUrl }
+            : {},
+        };
+        if (overrides.vendorBaseUrls) {
+          for (const [v, url] of Object.entries(overrides.vendorBaseUrls)) {
+            vendors[v] = { baseUrl: url };
+          }
+        }
         return {
           provider: overrides.provider,
-          vendors: {
-            "azure-foundry": overrides.baseUrl
-              ? { baseUrl: overrides.baseUrl }
-              : {},
-          },
+          vendors,
         };
       }
       return undefined;
@@ -517,6 +529,92 @@ describe("resolveApiKey — baseUrl present on azure-foundry success", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.baseUrl).toBe("https://foo.bar/");
+    }
+  });
+});
+
+describe("resolveApiKey — baseUrl inherit for any vendor (#955 L2 follow-up)", () => {
+  it("openai vendor surfaces baseUrl from llm.vendors['openai'].baseUrl", async () => {
+    const manifest = manifestFor("p", ["llm.apiKey.openai"]);
+    await seedRegistryWithGrant({
+      pluginId: "p",
+      allowedKeys: ["llm.apiKey.openai"],
+      manifestSha256: shaOfManifest(manifest),
+    });
+    const result = await resolveApiKey(
+      { purpose: "stt", vendor: "openai" },
+      {
+        pluginId: "p",
+        manifest,
+        manifestSha256: shaOfManifest(manifest),
+        settingsService: makeSettingsService({
+          provider: "openai",
+          secrets: { "llm.apiKey.openai": "sk-host" },
+          vendorBaseUrls: { openai: "https://my-openai-gateway.example/v1" },
+        }) as never,
+        auditLogger: makeAuditLogger(),
+      },
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.baseUrl).toBe("https://my-openai-gateway.example/v1");
+    }
+  });
+
+  it("baseUrl omitted when vendor block has no baseUrl set", async () => {
+    const manifest = manifestFor("p", ["llm.apiKey.openai"]);
+    await seedRegistryWithGrant({
+      pluginId: "p",
+      allowedKeys: ["llm.apiKey.openai"],
+      manifestSha256: shaOfManifest(manifest),
+    });
+    const result = await resolveApiKey(
+      { purpose: "llm", vendor: "openai" },
+      {
+        pluginId: "p",
+        manifest,
+        manifestSha256: shaOfManifest(manifest),
+        settingsService: makeSettingsService({
+          provider: "openai",
+          secrets: { "llm.apiKey.openai": "sk-host" },
+          // No vendorBaseUrls — every vendor block returns empty.
+        }) as never,
+        auditLogger: makeAuditLogger(),
+      },
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.baseUrl).toBeUndefined();
+    }
+  });
+
+  it("Tier-1 own-namespace bearer also receives vendor baseUrl", async () => {
+    // Plugin uses its own key namespace — the host endpoint should still
+    // ride along so a plugin sidecar URL can derive from the host's
+    // baseUrl when the user has not pinned a plugin-specific override.
+    const manifest = manifestFor("plugin-x", []);
+    const settings = makeSettingsService({
+      provider: "azure-foundry",
+      secrets: { "plugin.plugin-x.llm.apiKey.azure-foundry": "sk-own" },
+      vendorBaseUrls: {
+        "azure-foundry":
+          "https://aif-swc-axpg-hq-hckt19.openai.azure.com/openai/deployments/gpt-5.4-mini/chat/completions?api-version=2025-01-01-preview",
+      },
+    });
+    const result = await resolveApiKey(
+      { purpose: "stt", vendor: "azure-openai" }, // SDK alias
+      {
+        pluginId: "plugin-x",
+        manifest,
+        settingsService: settings as never,
+        auditLogger: makeAuditLogger(),
+      },
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.vendor).toBe("azure-foundry");
+      expect(result.bearer()).toBe("sk-own");
+      expect(result.baseUrl).toContain("aif-swc-axpg-hq-hckt19.openai.azure.com");
     }
   });
 });
