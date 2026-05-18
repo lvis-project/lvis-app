@@ -26,6 +26,7 @@ import { SuggestedRepliesGhost } from "./SuggestedRepliesGhost.js";
 import { SuggestedRepliesChipRow } from "./SuggestedRepliesChipRow.js";
 import {
   acceptSuggestedReply,
+  clearDismissedReplies,
   dismissSuggestedReplies,
   type SuggestedRepliesSnapshot,
 } from "../hooks/use-suggested-replies.js";
@@ -118,6 +119,11 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   // because `e.nativeEvent.isComposing` is only available inside keydown — the
   // ghost render path needs the value at render time, not just on key events.
   const [isComposing, setIsComposing] = useState(false);
+  // PR-D ↑/↓ chip cycle: index of the currently-focused alternate chip, or
+  // `null` when focus is in the textarea. Composer owns this state so the
+  // textarea's keydown handler can advance it (ChipRow is otherwise a leaf
+  // and would have no way to know about the textarea's key events).
+  const [chipFocusIdx, setChipFocusIdx] = useState<number | null>(null);
 
   const captureUserKeyboardIntent = useCallback((): UserKeyboardIntentSnapshot => {
     const api = (globalThis as typeof globalThis & {
@@ -263,7 +269,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         e.preventDefault();
         if (disabled) return;
         onTextChange(best);
-        acceptSuggestedReply(best);
+        acceptSuggestedReply(best, "best");
+        setChipFocusIdx(null);
         requestAnimationFrame(() => {
           if (taRef.current) {
             const pos = best.length;
@@ -274,10 +281,60 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         return;
       }
 
+      // PR-D ↑/↓ chip cycle: ArrowDown moves focus into the row (or to the
+      // next chip); ArrowUp moves it back. We only intercept when chips are
+      // actually visible — otherwise the keys keep their native textarea
+      // caret-movement semantics. `preventDefault` is gated on a real
+      // navigation actually firing so single-line composers don't lose the
+      // caret-jump shortcut when nothing is rendered anyway.
+      if (
+        e.key === "ArrowDown" &&
+        !e.shiftKey &&
+        !e.altKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        alternates.length > 0 &&
+        !dismissed &&
+        text.length === 0
+      ) {
+        e.preventDefault();
+        setChipFocusIdx((i) => {
+          if (i === null) return 0;
+          return Math.min(i + 1, alternates.length - 1);
+        });
+        return;
+      }
+
+      if (
+        e.key === "ArrowUp" &&
+        !e.shiftKey &&
+        !e.altKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        alternates.length > 0 &&
+        !dismissed &&
+        text.length === 0 &&
+        chipFocusIdx !== null
+      ) {
+        e.preventDefault();
+        setChipFocusIdx((i) => {
+          if (i === null || i === 0) {
+            // Cycle back to textarea — Composer's ChipRow useEffect won't
+            // re-focus when idx is null, but we still need to pull DOM focus
+            // away from the chip so the textarea is editable.
+            requestAnimationFrame(() => taRef.current?.focus());
+            return null;
+          }
+          return i - 1;
+        });
+        return;
+      }
+
       if (e.key === "Escape" && hasAnySuggestion) {
         // Don't preventDefault — let the document-level ESC handler (ChatView)
         // still run when streaming. Dismissing the snapshot is additive.
         dismissSuggestedReplies();
+        setChipFocusIdx(null);
         // Fall through so other ESC consumers still see the event.
       }
 
@@ -321,10 +378,14 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         // 일반 Enter = onSend (idle = 전송, busy = 큐 추가).
         e.preventDefault();
         if (disabled) return;
+        // PR-D dismiss memory: a new user message means we're transitioning
+        // to the next turn — release the dismiss latch so the next suggestion
+        // push renders fresh regardless of any prior Escape during this turn.
+        clearDismissedReplies();
         onSend(captureUserKeyboardIntent());
       }
     },
-    [captureUserKeyboardIntent, disabled, onSend, text, onTextChange, suggestedReplies],
+    [captureUserKeyboardIntent, disabled, onSend, text, onTextChange, suggestedReplies, chipFocusIdx],
   );
 
   const isFull = liveAttachments.length >= ATTACH_MAX_COUNT;
@@ -347,7 +408,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     (chipText: string) => {
       if (disabled) return;
       onTextChange(chipText);
-      acceptSuggestedReply(chipText);
+      acceptSuggestedReply(chipText, "chip");
+      setChipFocusIdx(null);
       requestAnimationFrame(() => {
         if (taRef.current) {
           const pos = chipText.length;
@@ -359,9 +421,24 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     [disabled, onTextChange],
   );
 
+  // PR-D: when the chip row disappears (alternates empty, dismissed, or
+  // user typed something), drop the focused index so the next render of the
+  // row starts fresh from `null`. Without this, a stale index could survive
+  // across snapshots and try to focus a non-existent chip.
+  useEffect(() => {
+    if (chipAlternates.length === 0 && chipFocusIdx !== null) {
+      setChipFocusIdx(null);
+    }
+  }, [chipAlternates.length, chipFocusIdx]);
+
   return (
     <div data-testid="composer" className="min-w-0">
-      <SuggestedRepliesChipRow alternates={chipAlternates} onAccept={acceptChip} />
+      <SuggestedRepliesChipRow
+        alternates={chipAlternates}
+        focusedIdx={chipFocusIdx}
+        onAccept={acceptChip}
+        onFocusChange={setChipFocusIdx}
+      />
       <div
         data-testid="composer-input-bar"
         className="relative flex min-w-0 w-full items-stretch gap-0 overflow-hidden"
