@@ -21,6 +21,8 @@ import { LLM_VENDORS } from "../../shared/llm-vendor-defaults.js";
 import { buildQuickActions } from "./components/command-actions.js";
 import { MainToolbar } from "./MainToolbar.js";
 import { useAppUpdate } from "./hooks/use-app-update.js";
+import { useDemoAutoplay } from "./hooks/use-demo-autoplay.js";
+import { DemoAutoplayView } from "./components/DemoAutoplayView.js";
 import { DevToolsPanel } from "./components/DevToolsPanel.js";
 import { MainContent } from "./MainContent.js";
 import { StatusBar } from "./components/StatusBar.js";
@@ -597,6 +599,20 @@ export function App() {
       // current session even if the disk write fails.
     }
   }, [api]);
+
+  // Live Auto-play (proposal: docs/architecture/proposals/live-autoplay.md).
+  // Activates on first-run when `LVIS_DEMO_VENDOR` env is set OR when the
+  // user explicitly opts in via `features.demoAutoplayEnabled = true`. In
+  // packaged production builds without the env var this is a dead path.
+  const demoAutoplay = useDemoAutoplay(api);
+  // When the demo is active we keep the onboarding dialog closed — the
+  // demo is itself the onboarding surface and reasserts onboardingCompleted
+  // when it terminates.
+  useEffect(() => {
+    if (demoAutoplay.turn && onboardingOpen) {
+      setOnboardingOpen(false);
+    }
+  }, [demoAutoplay.turn, onboardingOpen]);
   const vendorSupportsThinking = useMemo(() => vendorSupportsThinkingShared(llmVendor, llmModel), [llmVendor, llmModel]);
   const onOpenSettings = useCallback((tab = "llm") => {
     void api.openSettingsWindow(tab);
@@ -1161,6 +1177,22 @@ export function App() {
           (immediately after the active turn's entries),
           so the previous App-level FloatingQuestionPanel mount is gone.
           See <AskUserQuestionCard> + ChatView ask-question slot. */}
+      {demoAutoplay.turn && (
+        <div
+          data-testid="demo-autoplay-overlay"
+          className="fixed inset-0 z-[10000] flex items-stretch justify-center bg-background/95 backdrop-blur-sm"
+          role="dialog"
+          aria-label="LVIS Live Auto-play demo"
+        >
+          <div className="m-4 flex w-full max-w-[460px] flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl">
+            <DemoAutoplayView
+              turn={demoAutoplay.turn}
+              onFinished={demoAutoplay.onFinished}
+              onAuditEvent={demoAutoplay.emitAuditEvent}
+            />
+          </div>
+        </div>
+      )}
       <DeferredQueueDialog open={deferredQueueOpen} onOpenChange={setDeferredQueueOpen} />
       <ApprovalDialog queue={approvalQueue} onDecide={handleApprovalDecide} />
       <OnboardingDialog
