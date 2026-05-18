@@ -10,7 +10,8 @@
  *   settings     lvis:settings:*, lvis:shell:*, lvis:telemetry:consent-answer
  *   auth         lvis:auth:* (#893 mockup login)
  *   login-prefs  lvis:login-prefs:* — login screen variant toggle
- *   tour         lvis:tour:* — Tutorial-C SpotlightTour state + broadcast
+ *   tour         lvis:tour:*        — Tutorial-C SpotlightTour state + broadcast
+ *   tutorial     lvis:tutorial:*    — Tutorial-D Discovery Swipe state + open trigger
  *   chat         lvis:chat:*, lvis:routines:*, lvis:routine:*, lvis:trigger:*,
  *                lvis:memory:*, lvis:starred:*, lvis:feedback:*, lvis:ask-user-question:*
  *   plugins      lvis:plugins:*, lvis:bootstrap:*, lvis:runtime:*, lvis:marketplace:*,
@@ -29,6 +30,7 @@ import { registerSettingsHandlers } from "./domains/settings.js";
 import { registerAuthHandlers } from "./domains/auth.js";
 import { registerLoginPrefsHandlers } from "./domains/login-prefs.js";
 import { registerTourHandlers } from "./domains/tour.js";
+import { registerTutorialHandlers } from "./domains/tutorial.js";
 import { registerChatHandlers } from "./domains/chat.js";
 import { registerPluginsHandlers } from "./domains/plugins.js";
 import { registerUsageHandlers } from "./domains/usage.js";
@@ -67,6 +69,7 @@ export function registerIpcHandlers(
   registerAuthHandlers(deps);
   registerLoginPrefsHandlers(deps);
   registerTourHandlers(deps);
+  registerTutorialHandlers(deps);
   registerChatHandlers(deps);
   registerPluginsHandlers(deps);
   registerUsageHandlers(deps);
