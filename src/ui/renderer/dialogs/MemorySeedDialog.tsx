@@ -47,8 +47,15 @@ import { inferRecommendedPlugins } from "../onboarding/plugin-recommendation-mat
 export interface MemorySeedDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Subset of LvisApi we depend on so tests can stub without instantiating the full preload surface. */
-  api: Pick<LvisApi, "memoryUpdateIndexSections" | "tour" | "updateSettings">;
+  /**
+   * Subset of LvisApi we depend on so tests can stub without instantiating
+   * the full preload surface. `tutorialInstallPlugin` is optional so the
+   * existing fixture-stubs (which omit it) keep mounting unchanged; the
+   * chip simply becomes a no-op when the bridge isn't wired.
+   */
+  api: Pick<LvisApi, "memoryUpdateIndexSections" | "tour" | "updateSettings"> & {
+    tutorialInstallPlugin?: LvisApi["tutorialInstallPlugin"];
+  };
   /** Called after dismissal (Submit or Skip). Flips `features.onboardingCompleted`. */
   onDismissed: () => void;
 }
@@ -91,6 +98,33 @@ export function MemorySeedDialog({
   }, [open]);
 
   const recommendations = useMemo(() => inferRecommendedPlugins(intro), [intro]);
+
+  // Tutorial-X2 — track chips the user has *clicked* so they remain
+  // visibly distinct after install was requested. The Set lives in
+  // component state so re-renders preserve the "installing"/"installed"
+  // badge; it never persists across remounts (the user closes the wizard
+  // once and onboardingCompleted flips true).
+  const [installRequested, setInstallRequested] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const handleChipClick = useCallback(
+    (slug: string | null, pluginId: string) => {
+      if (!slug) return; // chat-basics fallback — meta recommendation only
+      if (installRequested.has(pluginId)) return; // already requested
+      setInstallRequested((prev) => {
+        const next = new Set(prev);
+        next.add(pluginId);
+        return next;
+      });
+      if (typeof api.tutorialInstallPlugin === "function") {
+        void api.tutorialInstallPlugin(slug).catch(() => {
+          // install path emits its own audit + lifecycle broadcasts; the
+          // wizard never blocks the user on a transient install error
+        });
+      }
+    },
+    [api, installRequested],
+  );
 
   const startTour = useCallback(() => {
     // Fire-and-forget — the SpotlightTour mounts unconditionally in App.tsx
@@ -224,20 +258,45 @@ export function MemorySeedDialog({
               자기소개 기반으로 다음 도구를 추천합니다:
             </div>
             <div className="mt-2 flex flex-wrap gap-1.5">
-              {recommendations.map((rec) => (
-                <span
-                  key={rec.pluginId}
-                  data-testid={`memory-seed-dialog:chip:${rec.pluginId}`}
-                  className="text-[11px] px-2 py-0.5 rounded-full"
-                  style={{
-                    background: "hsl(var(--p-purple-500) / 0.18)",
-                    color: "hsl(var(--p-purple-500))",
-                  }}
-                >
-                  {rec.emoji} {rec.label}
-                </span>
-              ))}
+              {recommendations.map((rec) => {
+                const requested = installRequested.has(rec.pluginId);
+                const installable = rec.marketplaceSlug !== null;
+                return (
+                  <button
+                    type="button"
+                    key={rec.pluginId}
+                    data-testid={`memory-seed-dialog:chip:${rec.pluginId}`}
+                    data-install-requested={requested ? "true" : "false"}
+                    onClick={() => handleChipClick(rec.marketplaceSlug, rec.pluginId)}
+                    disabled={!installable || requested}
+                    title={
+                      installable
+                        ? requested
+                          ? "설치 요청을 보냈습니다"
+                          : "클릭하면 설치합니다"
+                        : "이 추천은 설치 가능한 플러그인이 없습니다"
+                    }
+                    className={
+                      "text-[11px] px-2 py-0.5 rounded-full transition disabled:cursor-default"
+                    }
+                    style={{
+                      background: requested
+                        ? "hsl(var(--p-purple-500) / 0.30)"
+                        : "hsl(var(--p-purple-500) / 0.18)",
+                      color: "hsl(var(--p-purple-500))",
+                    }}
+                  >
+                    {rec.emoji} {rec.label}
+                    {requested ? " ✓" : installable ? "" : ""}
+                  </button>
+                );
+              })}
             </div>
+            {/* Microcopy explains the chip becomes a real install. The
+                fallback chat-basics chip stays a non-button (disabled). */}
+            <p className="mt-2 text-[10.5px] text-muted-foreground">
+              ✦ 클릭하면 해당 플러그인이 즉시 설치됩니다.
+            </p>
           </div>
 
           {/* CTAs */}

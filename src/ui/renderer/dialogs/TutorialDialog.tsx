@@ -82,6 +82,18 @@ export interface TutorialDialogApi {
   tour: {
     start: (scenarioId: string) => Promise<{ ok: boolean }>;
   };
+  /**
+   * Tutorial-X2 — real plugin install bridge. When a Discovery Swipe card
+   * has a non-null `pluginId` and the user marks it `liked`, the dialog
+   * fires this method so the host installs the plugin via the canonical
+   * marketplace install pipeline. Omitting the method (older callers /
+   * tests) makes the install step a no-op — the user's `liked` action is
+   * still recorded so the tour still launches at the end of the deck.
+   */
+  tutorialInstallPlugin?: (pluginId: string) => Promise<
+    | { ok: true; pluginId: string }
+    | { ok: false; error: string; message: string }
+  >;
 }
 
 export interface TutorialDialogProps {
@@ -122,7 +134,11 @@ export function TutorialDialog({
   const finished = cursor >= total;
   const currentCard = !finished ? cards[cursor] : undefined;
 
-  // Apply a single action: persist via IPC + advance the cursor.
+  // Apply a single action: persist via IPC + (when the card has a
+  // pluginId) fire-and-forget a real install via `tutorialInstallPlugin`.
+  // Install failures never block the deck because the user is mid-swipe;
+  // any failure is surfaced through the host's existing install audit /
+  // notification path (the same one the marketplace UI relies on).
   const recordAction = React.useCallback(
     (action: TutorialAction) => {
       if (finished) return;
@@ -132,6 +148,18 @@ export function TutorialDialog({
         void api.tutorialRecord({ cardId: card.id, action }).catch(() => {
           /* Persistence failure is logged main-side; UI keeps flowing
              so the user is never blocked on a disk hiccup. */
+        });
+      }
+      // Tutorial-X2 — real plugin install on `liked` + non-null pluginId.
+      // The bridge is optional so older callers / tests still work.
+      if (
+        action === "liked" &&
+        card.pluginId &&
+        typeof api.tutorialInstallPlugin === "function"
+      ) {
+        void api.tutorialInstallPlugin(card.pluginId).catch(() => {
+          /* install path emits its own audit + lifecycle broadcasts —
+             the dialog never needs to surface a toast itself */
         });
       }
       setHistory((prev) => [...prev, { cardIndex: cursor, action }]);

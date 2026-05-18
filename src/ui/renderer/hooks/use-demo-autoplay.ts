@@ -14,9 +14,10 @@ import {
   shouldActivateDemoAutoplay,
   type ScriptedTurn,
 } from "../../../engine/demo-autoplay/types.js";
-import meetingSummaryDemo from "../../../engine/demo-autoplay/scripts/meeting-summary-demo.json" with { type: "json" };
-
-const DEFAULT_DEMO_SCRIPT: ScriptedTurn = meetingSummaryDemo as ScriptedTurn;
+import {
+  nextRotationIndex,
+  pickScript,
+} from "../../../engine/demo-autoplay/scripts-registry.js";
 
 interface DemoEnvProbe {
   demoVendorPresent: boolean;
@@ -62,7 +63,9 @@ export function useDemoAutoplay(api: LvisApi): UseDemoAutoplayResult {
   const finishedRef = useRef(false);
   const env = useMemo(() => readDemoEnv(), []);
 
-  // Probe once on mount.
+  // Probe once on mount. Tutorial-X3 picks the script from the rotation
+  // catalog and stores the script ref in state so onFinished can audit
+  // with the correct id.
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -77,7 +80,21 @@ export function useDemoAutoplay(api: LvisApi): UseDemoAutoplayResult {
           demoVendorPresent: env.demoVendorPresent,
         });
         if (!active) return;
-        setTurn(DEFAULT_DEMO_SCRIPT);
+        const rotationIndex = settings.features?.demoAutoplayRotationIndex;
+        const picked = pickScript(rotationIndex);
+        setTurn(picked);
+        // Bump the rotation index immediately so a refresh/reboot before
+        // onFinished still progresses to the next script. The settings
+        // store dedupes redundant writes so this is cheap.
+        const nextIndex = nextRotationIndex(rotationIndex);
+        void api
+          .updateSettings({
+            features: { demoAutoplayRotationIndex: nextIndex },
+          })
+          .catch(() => {
+            /* rotation persistence is best-effort — worst case the
+               same script plays twice */
+          });
       } catch {
         // Probe failure → no demo. Safer than activating speculatively.
       }
@@ -91,6 +108,7 @@ export function useDemoAutoplay(api: LvisApi): UseDemoAutoplayResult {
     (reason: string) => {
       if (finishedRef.current) return;
       finishedRef.current = true;
+      const finishedScriptId = turn?.id ?? "unknown";
       setTurn(null);
       // One-shot consumption — flip the flag off so the demo never re-runs.
       // Always set `demoAutoplayEnabled: false` *and* `onboardingCompleted: true`
@@ -105,12 +123,12 @@ export function useDemoAutoplay(api: LvisApi): UseDemoAutoplayResult {
       // Fire-and-forget audit row for the abort reason.
       const auditApi = window as unknown as DemoAuditApi;
       void auditApi.audit?.logDemoAutoplay?.({
-        scriptId: DEFAULT_DEMO_SCRIPT.id,
+        scriptId: finishedScriptId,
         phase: "finished",
         detail: reason,
       });
     },
-    [api],
+    [api, turn],
   );
 
   const emitAuditEvent = useCallback(
