@@ -100,7 +100,12 @@ export function historyToEntries(
       out = finalizeStreamingAssistant(
         out,
         visibleText,
-        m.createdAt !== undefined ? { createdAt: m.createdAt } : undefined,
+        {
+          ...(m.createdAt !== undefined ? { createdAt: m.createdAt } : {}),
+          ...(m.systemNotice !== undefined && m.systemNotice !== "interrupted"
+            ? { systemNotice: m.systemNotice }
+            : {}),
+        },
       );
 
       if (m.toolCalls?.length) {

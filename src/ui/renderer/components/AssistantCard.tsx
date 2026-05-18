@@ -1,4 +1,4 @@
-import { Loader2, Star, RefreshCw, GitBranch, ThumbsUp, ThumbsDown } from "lucide-react";
+import { Loader2, Star, RefreshCw, GitBranch, ThumbsUp, ThumbsDown, AlertTriangle } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { useState } from "react";
 import { Button } from "../../../components/ui/button.js";
@@ -28,7 +28,21 @@ export function AssistantCard({
   const [feedbackRating, setFeedbackRating] = useState<"up" | "down" | null>(null);
   const [showReasonBox, setShowReasonBox] = useState(false);
   const [reasonDraft, setReasonDraft] = useState("");
-  const title = entry.streaming ? "LVIS 응답 작성 중" : "LVIS 응답";
+  // Issue #911 — host-emitted system notice (context-error / stream-error)
+  // gets destructive styling + a "시스템 알림" header so the user can
+  // distinguish a real LLM reply from an error banner masquerading as one.
+  const isSystemNotice = entry.systemNotice !== undefined;
+  const systemNoticeLabel =
+    entry.systemNotice === "context-error"
+      ? "시스템 알림 — 모델 한도 초과"
+      : entry.systemNotice === "stream-error"
+        ? "시스템 알림 — 응답 스트림 오류"
+        : "시스템 알림";
+  const title = isSystemNotice
+    ? systemNoticeLabel
+    : entry.streaming
+      ? "LVIS 응답 작성 중"
+      : "LVIS 응답";
   const displayText = detectFromStream(entry.text || "").cleanedText;
   const renderedText = replaceToolNamesInText(displayText);
   const markdownText = entry.route === "command" ? preserveCommandLineBreaks(renderedText) : renderedText;
@@ -36,9 +50,22 @@ export function AssistantCard({
   // 가 provider-reported 값을 단일 source 로 표시. 카드 헤더의 ~tok 배지는
   // 한국어 2-3× under-estimate 거짓 정보였음.
   return (
-    <div className="group relative min-w-0 w-full max-w-full overflow-visible rounded-md px-3 py-2 text-sm lvis-anim-message-in">
-      {(actions !== undefined || entry.streaming) && (
-        <div className="mb-1 flex items-center gap-2 text-[11px] text-muted-foreground">
+    <div
+      className={
+        isSystemNotice
+          ? "group relative min-w-0 w-full max-w-full overflow-visible rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm lvis-anim-message-in"
+          : "group relative min-w-0 w-full max-w-full overflow-visible rounded-md px-3 py-2 text-sm lvis-anim-message-in"
+      }
+    >
+      {(actions !== undefined || entry.streaming || isSystemNotice) && (
+        <div
+          className={
+            isSystemNotice
+              ? "mb-1 flex items-center gap-2 text-[11px] font-semibold text-destructive"
+              : "mb-1 flex items-center gap-2 text-[11px] text-muted-foreground"
+          }
+        >
+          {isSystemNotice ? <AlertTriangle className="h-3 w-3" /> : null}
           {title}
           {entry.streaming ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
           {isStarred ? <Star key="starred" className="h-3 w-3 fill-emphasis text-emphasis lvis-anim-star" /> : null}
