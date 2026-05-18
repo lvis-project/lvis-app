@@ -176,6 +176,76 @@ describe("PluginConfigTab", () => {
       expect(screen.getAllByText("Agent Hub").length).toBeGreaterThan(0);
     });
   });
+
+  it("refreshes rendered configSchema fields when an install result returns an updated plugin card", async () => {
+    const meetingV1 = {
+      id: "meeting",
+      name: "Meeting",
+      description: "Meeting plugin",
+      publisher: "Test fixture",
+      sampleTools: [],
+      capabilities: [],
+      tools: [],
+      loadStatus: "loaded" as const,
+      version: "1.0.0",
+      configSchema: {
+        properties: {
+          endpoint: { type: "string", title: "Endpoint" },
+        },
+      },
+    };
+    const meetingV2 = {
+      ...meetingV1,
+      version: "2.0.0",
+      configSchema: {
+        properties: {
+          baseUrl: { type: "string", title: "Base URL" },
+        },
+      },
+    };
+    const cards = vi.fn()
+      .mockResolvedValueOnce([meetingV1])
+      .mockResolvedValueOnce([meetingV2]);
+    let installResultHandler: ((payload: { slug: string; success: boolean; error?: string }) => void) | null = null;
+    Object.defineProperty(window, "lvis", {
+      value: {
+        plugins: { cards },
+        pluginConfig: { get: mockGet, set: mockSet },
+      },
+      writable: true,
+      configurable: true,
+    });
+    Object.defineProperty(window, "lvisApi", {
+      value: {
+        onPluginInstallProgress: vi.fn(() => () => undefined),
+        onPluginInstallResult: vi.fn((handler: (payload: { slug: string; success: boolean; error?: string }) => void) => {
+          installResultHandler = handler;
+          return () => undefined;
+        }),
+        onPluginUninstallResult: vi.fn(() => () => undefined),
+      },
+      writable: true,
+      configurable: true,
+    });
+
+    render(<PluginConfigTab />);
+
+    await waitFor(() => {
+      expect(cards).toHaveBeenCalledTimes(1);
+      expect(screen.getByText("Endpoint")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Base URL")).toBeNull();
+
+    await act(async () => {
+      installResultHandler?.({ slug: "meeting", success: true });
+    });
+
+    await waitFor(() => {
+      expect(cards).toHaveBeenCalledTimes(2);
+      expect(screen.getByText("Base URL")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Endpoint")).toBeNull();
+  });
 });
 
 describe("PluginConfigTab — §9.2 Track B configSchema rendering", () => {
