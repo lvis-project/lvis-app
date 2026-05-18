@@ -145,11 +145,19 @@ function cardPlacement(rect: SpotlightRect | null): React.CSSProperties {
   };
 }
 
-function ringStyle(rect: SpotlightRect | null): React.CSSProperties | null {
+function ringStyle(
+  rect: SpotlightRect | null,
+  reduceMotion: boolean,
+): React.CSSProperties | null {
   if (!rect) return null;
   // The ring is drawn 6px outside the anchor so it doesn't visually
   // crop the underlying element. The matching glow uses a wider
   // box-shadow for the "halo" effect from the mockup.
+  //
+  // F5 — when `prefers-reduced-motion: reduce`, drop the glowing
+  // box-shadow halo (which animates in via the dialog mount). The
+  // 1px violet border still marks the anchor unambiguously without
+  // the visually-animated glow that a vestibular user would notice.
   const inset = 6;
   return {
     position: "fixed",
@@ -159,10 +167,40 @@ function ringStyle(rect: SpotlightRect | null): React.CSSProperties | null {
     height: rect.height + inset * 2,
     borderRadius: 8,
     pointerEvents: "none",
-    boxShadow:
-      "0 0 0 4px hsl(262 83% 58% / 0.7), 0 0 30px hsl(262 83% 58% / 0.4)",
+    boxShadow: reduceMotion
+      ? "0 0 0 2px hsl(262 83% 58% / 0.7)"
+      : "0 0 0 4px hsl(262 83% 58% / 0.7), 0 0 30px hsl(262 83% 58% / 0.4)",
     border: "1px solid hsl(262 83% 58% / 0.7)",
   };
+}
+
+/**
+ * Subscribe to `prefers-reduced-motion: reduce` so the component re-renders
+ * when the OS toggle flips. Returns the current preference; defaults to
+ * `false` in non-DOM test environments.
+ */
+function usePrefersReducedMotion(): boolean {
+  const [reduce, setReduce] = useState<boolean>(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return false;
+    }
+    return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  });
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return;
+    }
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const onChange = () => setReduce(mq.matches);
+    // Safari < 14 only supports `addListener` / `removeListener`.
+    if (typeof mq.addEventListener === "function") {
+      mq.addEventListener("change", onChange);
+      return () => mq.removeEventListener("change", onChange);
+    }
+    mq.addListener(onChange);
+    return () => mq.removeListener(onChange);
+  }, []);
+  return reduce;
 }
 
 export function SpotlightTour({
@@ -199,13 +237,23 @@ export function SpotlightTour({
   // whole App tree with a hand-rolled api, so a missing `tour.onStart`
   // must not crash the ErrorBoundary. Production preload always exposes
   // the full tour API.
+  //
+  // F4 — demo↔tour mutex: if the Live Auto-play demo is mid-flight,
+  // `document.body[data-demo-active]` is set by `App.tsx`. We ignore
+  // tour.start broadcasts in that case so the Spotlight backdrop can't
+  // paint over the demo overlay.
   useEffect(() => {
     const subscribe = api?.tour?.onStart;
     if (typeof subscribe !== "function") return;
     const off = subscribe(({ scenarioId }) => {
-      if (typeof scenarioId === "string" && scenarioId.length > 0) {
-        setActiveScenarioId(scenarioId);
+      if (typeof scenarioId !== "string" || scenarioId.length === 0) return;
+      if (
+        typeof document !== "undefined" &&
+        document.body?.getAttribute("data-demo-active") === "true"
+      ) {
+        return;
       }
+      setActiveScenarioId(scenarioId);
     });
     return off;
   }, [api]);
@@ -298,19 +346,24 @@ export function SpotlightTour({
     return () => window.removeEventListener("keydown", onKey);
   }, [scenario, handleNext, handlePrev, closeAfterDismissal]);
 
+  const reduceMotion = usePrefersReducedMotion();
   if (!scenario || !currentStep) return null;
 
   const total = scenario.steps.length;
   const isLast = stepIndex >= total - 1;
   const rect = readRect(currentStep.anchorSelector);
-  const ring = ringStyle(rect);
+  const ring = ringStyle(rect, reduceMotion);
   const card = cardPlacement(rect);
 
   const titleId = `lvis-tour-title-${scenario.id}-${stepIndex}`;
   const bodyId = `lvis-tour-body-${scenario.id}-${stepIndex}`;
 
   return (
-    <div data-testid="spotlight-tour" data-scenario-id={scenario.id}>
+    <div
+      data-testid="spotlight-tour"
+      data-scenario-id={scenario.id}
+      data-reduce-motion={reduceMotion ? "true" : "false"}
+    >
       {/* Backdrop — clicking it dismisses the tour. The 78% black layer
           matches the mockup; pointer-events stay on so anchor clicks are
           intentionally blocked while the tour is active. */}
@@ -346,7 +399,11 @@ export function SpotlightTour({
           border: "1px solid hsl(262 83% 58% / 0.5)",
           borderRadius: 12,
           padding: 20,
-          boxShadow: "0 20px 50px -10px rgba(0,0,0,0.6)",
+          // F5 — under `prefers-reduced-motion: reduce`, drop the soft
+          // animated drop-shadow that the mockup uses to "float" the
+          // card; a vestibular-sensitive user still sees the card via
+          // the violet border + filled backdrop.
+          boxShadow: reduceMotion ? "none" : "0 20px 50px -10px rgba(0,0,0,0.6)",
         }}
       >
         <div

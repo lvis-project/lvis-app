@@ -220,4 +220,43 @@ describe("SpotlightTour", () => {
     const card = await findByTestId("spotlight-tour:card");
     expect(card.getAttribute("data-step-index")).toBe("0");
   });
+
+  // F5 — `prefers-reduced-motion: reduce` swaps the animated drop-shadow
+  // glow for an opacity-only static border. We assert the
+  // `data-reduce-motion` attribute on the tour root so future renders can
+  // be inspected from the DOM without re-reading inline styles.
+  it("hides animation when prefers-reduced-motion is set (F5)", async () => {
+    const originalMatchMedia = window.matchMedia;
+    // Stub matchMedia so the `(prefers-reduced-motion: reduce)` query
+    // returns `matches: true` for the duration of this test.
+    // @ts-expect-error — jsdom polyfill from setup.ts is mutable.
+    window.matchMedia = (query: string) => ({
+      matches: query.includes("prefers-reduced-motion: reduce"),
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+      media: query,
+    });
+    try {
+      const { api, fireStart } = makeApi();
+      const { findByTestId } = render(
+        <SpotlightTour api={api} scenarios={FIXTURE_REGISTRY} />,
+      );
+      fireStart("test-scenario");
+      const root = await findByTestId("spotlight-tour");
+      expect(root.getAttribute("data-reduce-motion")).toBe("true");
+      const card = await findByTestId("spotlight-tour:card");
+      // The animated drop-shadow is replaced with no shadow under
+      // reduced motion. Inline `style.boxShadow` reflects the resolved
+      // value rather than the keyword, so a literal "none" or empty
+      // string is acceptable; we just assert the heavy `30px` glow
+      // shadow from the default path is absent.
+      const inlineShadow = (card as HTMLElement).style.boxShadow;
+      expect(inlineShadow).not.toContain("30px");
+    } finally {
+      window.matchMedia = originalMatchMedia;
+    }
+  });
 });
