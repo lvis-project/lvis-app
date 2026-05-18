@@ -50,15 +50,44 @@ import { uninstallPluginWithLifecycle } from "./plugins/uninstall-lifecycle.js";
 import { lvisHome } from "./shared/lvis-home.js";
 import { runShutdownRoutines } from "./main/shutdown-routines.js";
 import { captureDemoCredentials } from "./main/demo-credentials.js";
-import {
-  forceKillManagedChildProcesses,
-  getManagedChildProcessCount,
-} from "./main/managed-child-processes.js";
+import { forceKillManagedChildProcesses } from "./main/managed-child-processes.js";
 import {
   resolveShutdownCleanupTimeoutMs,
   runCleanupWithHardTimeout,
 } from "./main/shutdown-timeout.js";
+import { logger as rootPinoLogger } from "./lib/logger.js";
 const log = createLogger("lvis");
+
+/**
+ * Drain the pino transport queue before `app.exit(0)` hard-terminates.
+ *
+ * Without this the final "shutdown cleanup timed out" diagnostic — the
+ * exact line audit needs to explain a force-kill — gets buffered and
+ * dropped when the Electron process tears down. We give the flush a tiny
+ * deadline so a wedged transport cannot itself defeat the timeout.
+ */
+async function flushLogger(_unused?: unknown): Promise<void> {
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+    // Hard cap so a stuck transport can't defeat the timeout itself.
+    const cap = setTimeout(finish, 500);
+    cap.unref?.();
+    try {
+      rootPinoLogger.flush(() => {
+        clearTimeout(cap);
+        finish();
+      });
+    } catch {
+      clearTimeout(cap);
+      finish();
+    }
+  });
+}
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -1785,23 +1814,37 @@ app.on("before-quit", (event) => {
   const svc = services;
   const cleanupTimeoutMs = resolveShutdownCleanupTimeoutMs();
   void (async () => {
-    const result = await runCleanupWithHardTimeout(async () => {
+    const result = await runCleanupWithHardTimeout(async (signal) => {
+      // Persist window state FIRST — it's a fast synchronous-ish operation
+      // and if any later async step (shutdown routines / plugin stopAll)
+      // hangs past the cleanup deadline we still don't lose the user's
+      // last window layout. The remaining steps honor the AbortSignal so
+      // they can break out of their inner loops when the deadline fires.
+      windowManager?.persistAll();
+      if (signal.aborted) return;
       // v2 shutdown routines — fire all active shutdown-trigger routines with a
       // 5s timeout so a hung LLM call cannot block app.quit() indefinitely.
       await runShutdownRoutines(svc);
+      if (signal.aborted) return;
       await svc.shutdown?.();
+      if (signal.aborted) return;
       await svc.pluginRuntime.stopAll();
-      windowManager?.persistAll();
     }, cleanupTimeoutMs);
 
     if (result.status === "timed-out") {
-      const trackedChildCount = getManagedChildProcessCount();
+      // Force-kill BEFORE the log line so killedChildCount reflects what
+      // actually happened, not an optimistic pre-kill count.
       const killedChildCount = forceKillManagedChildProcesses("app shutdown cleanup timeout");
       log.error({
         timeoutMs: cleanupTimeoutMs,
-        trackedChildCount,
         killedChildCount,
       }, "before-quit: shutdown cleanup timed out; forcing app exit");
+      // Flush the logger so the diagnostic above (and any preceding warn
+      // about which subsystem hung) makes it to disk before app.exit()
+      // hard-terminates the process. pino transports buffer writes by
+      // default, so without this the "why we force-killed" trail is lost
+      // — precisely the line audit needs after a force exit.
+      await flushLogger(log);
       appShutdownCompleted = true;
       app.exit(0);
       return;
@@ -1809,6 +1852,7 @@ app.on("before-quit", (event) => {
 
     if (result.status === "failed") {
       log.error("before-quit: shutdown cleanup failed: %s", errorMessage(result.error));
+      await flushLogger(log);
     }
 
     appShutdownCompleted = true;
