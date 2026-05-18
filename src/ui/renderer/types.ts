@@ -163,6 +163,18 @@ export type AppSettings = {
   };
 };
 
+export type IpcErrorResult = { ok: false; error: string; message?: string };
+export type SettingsUpdateResult = AppSettings | IpcErrorResult;
+
+export function isIpcErrorResult(value: unknown): value is IpcErrorResult {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    (value as { ok?: unknown }).ok === false &&
+    typeof (value as { error?: unknown }).error === "string"
+  );
+}
+
 export type DeepPartial<T> = T extends object ? { [K in keyof T]?: DeepPartial<T[K]> } : T;
 
 // ─── Plugin Performance types (Observability) ──────
@@ -220,7 +232,7 @@ export type LvisApi = {
   }) => Promise<{ ok: boolean; error?: string }>;
   fileScanPaths: (paths: string[]) => Promise<{ ok: boolean; indexed?: number; failed?: number; jobId?: string; error?: string }>;
   getSettings: () => Promise<AppSettings>;
-  updateSettings: (patch: DeepPartial<AppSettings>) => Promise<AppSettings>;
+  updateSettings: (patch: DeepPartial<AppSettings>) => Promise<SettingsUpdateResult>;
   onSettingsUpdated: (handler: (settings: AppSettings) => void) => () => void;
   setApiKey: (vendor: string, k: string) => Promise<{ ok: true }>;
   hasApiKey: (vendor?: string) => Promise<boolean>;
