@@ -55,6 +55,13 @@ export interface MemorySeedDialogProps {
    */
   api: Pick<LvisApi, "memoryUpdateIndexSections" | "tour" | "updateSettings"> & {
     tutorialInstallPlugin?: LvisApi["tutorialInstallPlugin"];
+    /**
+     * Tutorial-X4 — optional onboarding-context writer. When wired the
+     * wizard writes a short markdown synth (호칭 + 자기소개 + clicked
+     * install requests) so the SystemPromptBuilder injects it as section
+     * id=9.86 on every subsequent turn. Omitted in tests/fixtures.
+     */
+    onboardingContextSet?: LvisApi["onboardingContextSet"];
   };
   /** Called after dismissal (Submit or Skip). Flips `features.onboardingCompleted`. */
   onDismissed: () => void;
@@ -76,6 +83,53 @@ export function composeUrgentMemorySeed(name: string, intro: string): string {
   if (trimmedIntro.length > 0) {
     lines.push(`- 자기소개: ${trimmedIntro}`);
   }
+  return lines.join("\n");
+}
+
+/**
+ * Tutorial-X4 — compose the markdown block the host writes to
+ * `~/.lvis/onboarding/onboarding-context.md`. The SystemPromptBuilder
+ * picks this up as section id=9.86 so the LLM's first post-onboarding
+ * turn can greet the user by 호칭, reference their 자기소개, and suggest
+ * tasks bound to the plugins the user just chose to install.
+ *
+ * Pure for unit testability — caller composes from the same state the
+ * Memory Seed wizard collected. Returns "" when nothing useful would be
+ * emitted so the system-prompt section silently drops out.
+ */
+export function composeOnboardingContext(
+  name: string,
+  intro: string,
+  installedSlugs: readonly string[],
+): string {
+  const trimmedName = name.trim();
+  const trimmedIntro = intro.trim();
+  const slugs = installedSlugs.filter((s) => s.length > 0);
+  if (
+    trimmedName.length === 0 &&
+    trimmedIntro.length === 0 &&
+    slugs.length === 0
+  ) {
+    return "";
+  }
+  const lines: string[] = [];
+  if (trimmedName.length > 0) {
+    lines.push(`- 사용자 호칭: ${trimmedName}`);
+    lines.push(
+      `- 호칭 사용 규칙: 첫 turn 의 인사에서 "${trimmedName}" 호칭을 자연스럽게 한 번 사용하고, 이후 turn 에서는 과도하게 반복하지 않습니다.`,
+    );
+  }
+  if (trimmedIntro.length > 0) {
+    lines.push(`- 사용자 자기소개: ${trimmedIntro}`);
+  }
+  if (slugs.length > 0) {
+    lines.push(
+      `- 방금 설치 요청한 플러그인: ${slugs.join(", ")}. 첫 turn 에서 이 플러그인 중 하나로 시작할 수 있는 *진짜 첫 작업* 을 자연스럽게 제안하세요.`,
+    );
+  }
+  lines.push(
+    `- 첫 turn 가이드라인: 사용자가 방금 LVIS 의 온보딩을 마쳤습니다. 일반적인 환영 인사가 아닌, 위 정보 기반의 *구체적 다음 행동* 을 1~2 문장으로 제시하세요.`,
+  );
   return lines.join("\n");
 }
 
@@ -148,10 +202,37 @@ export function MemorySeedDialog({
         // disk failure is non-fatal — proceed to tour anyway.
       }
     }
+    // Tutorial-X4 — write the synthesized onboarding context so the
+    // SystemPromptBuilder injects it as section id=9.86 on subsequent
+    // turns. Fire-and-forget: disk failure must not block the tour
+    // hand-off because the user is already mid-flow.
+    if (typeof api.onboardingContextSet === "function") {
+      const installedSlugs = Array.from(installRequested);
+      const onboardingContext = composeOnboardingContext(
+        name,
+        intro,
+        installedSlugs,
+      );
+      try {
+        await api.onboardingContextSet(onboardingContext);
+      } catch {
+        // file-write failure stays local — the LLM simply won't see the
+        // section on the first turn, which is still a valid UX.
+      }
+    }
     onDismissed();
     onOpenChange(false);
     startTour();
-  }, [api, intro, name, onDismissed, onOpenChange, startTour, submitting]);
+  }, [
+    api,
+    intro,
+    name,
+    onDismissed,
+    onOpenChange,
+    startTour,
+    submitting,
+    installRequested,
+  ]);
 
   const handleSkip = useCallback(() => {
     onDismissed();
