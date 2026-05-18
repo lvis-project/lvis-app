@@ -8,7 +8,7 @@
  *
  * Proposal: `docs/architecture/proposals/live-autoplay.md` §7 + §8.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { LvisApi } from "../types.js";
 import {
   shouldActivateDemoAutoplay,
@@ -56,6 +56,10 @@ export interface UseDemoAutoplayResult {
  */
 export function useDemoAutoplay(api: LvisApi): UseDemoAutoplayResult {
   const [turn, setTurn] = useState<ScriptedTurn | null>(null);
+  // Single-call guard on onFinished — the engine's idempotent abort()
+  // only protects engine-internal emission; the React side still needs
+  // to defend against double-finalization racing the settings patch.
+  const finishedRef = useRef(false);
   const env = useMemo(() => readDemoEnv(), []);
 
   // Probe once on mount.
@@ -85,6 +89,8 @@ export function useDemoAutoplay(api: LvisApi): UseDemoAutoplayResult {
 
   const onFinished = useCallback(
     (reason: string) => {
+      if (finishedRef.current) return;
+      finishedRef.current = true;
       setTurn(null);
       // One-shot consumption — flip the flag off so the demo never re-runs.
       // Always set `demoAutoplayEnabled: false` *and* `onboardingCompleted: true`
