@@ -80,6 +80,7 @@ import { broadcastPermissionConfigChanged as broadcastPermissionConfigChangedFro
 import { startWatcherTelemetryCollector } from "./boot/steps/watcher-telemetry-collector.js";
 import { bootstrapCoreServices } from "./boot/services.js";
 import { registerPluginNotifications } from "./boot/plugins.js";
+import { createRefreshActiveLlmWildcard } from "./boot/steps/refresh-active-llm-wildcard.js";
 import {
   registerBuiltinTools,
   registerRequestPluginMetaTool,
@@ -121,6 +122,7 @@ import {
   runWithInvocationOrigin,
 } from "./plugins/runtime/origin-chain.js";
 import { initPluginRuntime } from "./boot/steps/plugin-runtime.js";
+import { wireWhitelistRegistry } from "./boot/steps/whitelist-bootstrap.js";
 import { registerPluginEventBridge } from "./boot/steps/ipc-bridge.js";
 import { wireReleasePrep, wireUpdateCheck } from "./boot/steps/post-boot.js";
 import { wireReviewerAgent } from "./boot/steps/reviewer-wiring.js";
@@ -339,6 +341,20 @@ export async function bootstrap(
       log.warn("boot: diff-cache-sweeper crashed (non-fatal): %s", (err as Error).message);
     });
 
+  // #893 Stage 2 — Load the marketplace whitelist registry BEFORE
+  // initPluginRuntime. The per-plugin HostApi factory consults the registry
+  // synchronously from `getSecret`; if the registry isn't initialized the
+  // tier-3 check fails closed with `whitelist-unreachable`. Resolves on every
+  // path (success, offline, demo) so a network blip never blocks boot.
+  await wireWhitelistRegistry({ bootAuditLogger });
+
+  // Cluster review M1 — PermissionManager is built BEFORE initPluginRuntime
+  // so its per-plugin revoke signal can be wired into the resolveApiKey host
+  // factory at plugin construction time. The reviewer + broadcast hookups
+  // below still happen after pluginRuntime exists (they depend on the
+  // mainWindow getter and the registered plugins).
+  const permissionManager = await createPermissionManager();
+
   const {
     pluginRuntime,
     deploymentGuard,
@@ -359,6 +375,10 @@ export async function bootstrap(
     clearAuthPartitionService,
     shellOpenExternal: (url: string) => shell.openExternal(url),
     approvalGate,
+    // Cluster review M1 — wire PermissionManager so the per-plugin
+    // resolveApiKey host implementation can abort outstanding bearers when
+    // permission rules change.
+    permissionManager,
   });
 
   // Workflow system tools (S1+S2) — services constructed up-front so the
@@ -471,6 +491,34 @@ export async function bootstrap(
     marketplaceFetcher.updateAllowPrivateNetwork(next);
   };
 
+  // #893 — Push the active LLM vendor id into the plugin runtime's wildcard
+  // configOverrides slot. Plugins read this via
+  // `hostApi.config.get("hostApiVendor")` so a plugin that needs an LLM call
+  // doesn't have to ship its own vendor-detection logic. Called once at
+  // boot (after plugin runtime is available) and again after every
+  // llm-settings IPC change.
+  //
+  // PR #894 review B2: we no longer inject `hostApiKey` here. The actual
+  // secret must always flow through `hostApi.getSecret("llm.apiKey.<vendor>")`,
+  // which routes through the three-tier allowlist gate (only plugins that
+  // declare the matching `hostSecrets.read[]` entry receive the key).
+  // Injecting the apiKey into a wildcard config slot bypassed that gate
+  // — every plugin received the key via `config.get("hostApiKey")`
+  // regardless of its manifest. Removing it closes that hole.
+  // PR #894 Cycle 3 T1-2 — factory extracted to
+  // `boot/steps/refresh-active-llm-wildcard.ts` so the debounce + vendor-
+  // change-restart contract is independently unit-testable. Same semantics
+  // as before: first call seeds, subsequent vendor changes trigger a
+  // debounced restart sweep of every loaded plugin.
+  const { refresh: refreshActiveLlmWildcard } = createRefreshActiveLlmWildcard({
+    getActiveVendor: () => settingsService.get("llm").provider,
+    setWildcardConfigOverride: (config) => pluginRuntime.setWildcardConfigOverride(config),
+    clearWildcardConfigOverride: (keys) => pluginRuntime.clearWildcardConfigOverride(keys),
+    listPluginIds: () => pluginRuntime.listPluginIds(),
+    restartPlugin: (pid) => pluginRuntime.restartPlugin(pid),
+  });
+  refreshActiveLlmWildcard();
+
   // §9.5 — Managed plugin bootstrap. Mandatory enterprise plugins are fetched
   // from the marketplace on boot (VS Code-style), not packaged in app source.
   // Graceful: marketplace unreachable or per-plugin failure never bricks boot.
@@ -497,8 +545,10 @@ export async function bootstrap(
     pluginRuntime,
     getActiveSkillsSection: (sessionId) => skillOverlay.buildSection(sessionId),
   });
-  // §6.3: PermissionManager (Layer 2-3).
-  const permissionManager = await createPermissionManager();
+  // §6.3: PermissionManager — instance was constructed before
+  // initPluginRuntime (cluster M1) so the resolveApiKey host wiring could
+  // see it. Now that toolRegistry is built, push the visibility deny
+  // rules across.
   toolRegistry.setDenyRules(permissionManager.getVisibilityDenyRules());
 
   // Permission policy P4 — Layer 5 reviewer agent wiring (Phase 3 deferral resolution).
@@ -1099,7 +1149,7 @@ export async function bootstrap(
     memoryManager, keywordEngine, routeEngine, toolRegistry,
     systemPromptBuilder, conversationLoop, routineEngine, mcpManager, mcpArtifactStore, agentArtifactStore, skillArtifactStore,
     idleScheduler, preferenceRefreshService, bashAstValidator, auditService, auditLogger: bootAuditLogger, postTurnHookChain,
-    approvalGate, rewireReviewerAgent, refreshMarketplaceFetcherConfig,
+    approvalGate, rewireReviewerAgent, refreshMarketplaceFetcherConfig, refreshActiveLlmWildcard,
     routinesStore, routinesScheduler, sessionTodoStore, askUserQuestionGate, skillStore, agentProfileStore,
     knowledgeAvailable, starredStore, feedbackStore,
     notificationService,

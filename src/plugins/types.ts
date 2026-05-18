@@ -311,6 +311,24 @@ export interface PluginManifest {
    * Use when no Lucide glyph matches the plugin's domain identity.
    */
   iconText?: string;
+  /**
+   * #893 — Declarative allowlist of host-owned secret keys this plugin is
+   * allowed to read via `hostApi.getSecret(key)`. The runtime gate matches
+   * the requested key against `hostSecrets.read[]` (`audit.log` on
+   * allow + deny) and currently only accepts entries shaped
+   * `llm.apiKey.<vendor>` — enforced both here at manifest load time and
+   * by the SDK JSON-schema so plugins can't grant themselves wildcard
+   * access by shipping an older SDK build.
+   *
+   * Keys outside the namespace are rejected at manifest load
+   * (`manifest_schema` reason) so a misconfigured plugin never reaches the
+   * runtime gate. A plugin's own `plugin.<id>.*` namespace remains
+   * always-allowed and does NOT need an entry here.
+   */
+  hostSecrets?: {
+    /** Allowlisted secret keys this plugin can read via `hostApi.getSecret`. */
+    read?: string[];
+  };
 }
 
 /**
@@ -759,6 +777,41 @@ export interface PluginHostApi {
    */
   onPluginsChanged(handler: (event: PluginLifecycleEvent) => void): () => void;
   getSecret(key: string): string | null;
+
+  /**
+   * #893 Stage 2 — Host-managed LLM key resolver. Mirrors the SDK's
+   * `PluginHostApi.resolveApiKey` (optional, may be undefined on older host
+   * builds — plugins guard with `typeof hostApi.resolveApiKey === "function"`).
+   *
+   * Implementation in `src/main/host-api/resolve-api-key.ts` runs the four-tier
+   * gate and returns the SDK's discriminated union (`ResolveApiKeyResult`).
+   * The host interface accepts a structurally compatible shape so the SDK
+   * import stays optional at the type level — callers receive the same
+   * `ok: true | false` discriminator either way.
+   */
+  resolveApiKey?(opts: {
+    purpose: "llm" | "stt" | "embedding" | "vision";
+    vendor?: "openai" | "azure-openai" | "vertex" | "anthropic";
+    signal?: AbortSignal;
+  }): Promise<
+    | {
+        ok: true;
+        vendor: string;
+        bearer: () => string;
+        baseUrl?: string;
+        release: () => void;
+      }
+    | {
+        ok: false;
+        reason:
+          | "no-host-vendor"
+          | "vendor-mismatch"
+          | "not-whitelisted"
+          | "user-mode-plugin"
+          | "aborted"
+          | "user-endpoint-with-host-key";
+      }
+  >;
 
   // Plugin-owned OAuth keeps provider-specific auth inside plugins; the host
   // exposes only generic HostApi surfaces.
