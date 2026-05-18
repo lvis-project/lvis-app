@@ -22,9 +22,7 @@ import {
   readPermissionSettings,
   setReviewerSettingsPersist,
   type ReviewerFallbackOnError,
-  REVIEWER_PROVIDERS,
   type ReviewerMode,
-  type ReviewerProvider,
   type ReviewerSettingsBlock,
 } from "./permission-settings-store.js";
 import {
@@ -222,23 +220,19 @@ export async function dispatchPermissionDirCommand(
 
 export type PermissionReviewerVerb =
   | "mode"
-  | "provider"
-  | "model"
   | "fallback"
   | "interactive"
   | "show";
 
 export interface PermissionReviewerCommand {
   verb: PermissionReviewerVerb;
-  /** For mode/provider/model: the new value. Empty string for `show`. */
+  /** For mode/fallback/interactive: the new value. Empty string for `show`. */
   value: string;
 }
 
 export type PermissionReviewerResult =
   | { ok: true; verb: "show"; settings: ReviewerSettingsBlock }
   | { ok: true; verb: "mode"; settings: ReviewerSettingsBlock }
-  | { ok: true; verb: "provider"; settings: ReviewerSettingsBlock }
-  | { ok: true; verb: "model"; settings: ReviewerSettingsBlock }
   | { ok: true; verb: "fallback"; settings: ReviewerSettingsBlock }
   | { ok: true; verb: "interactive"; settings: ReviewerSettingsBlock }
   | { ok: false; error: string };
@@ -249,8 +243,6 @@ const VALID_REVIEWER_MODES: ReadonlySet<ReviewerMode> = new Set([
   "llm",
   "strict",
 ]);
-// Derived from REVIEWER_PROVIDERS (single SOT in permission-settings-store.ts).
-const VALID_REVIEWER_PROVIDERS: ReadonlySet<ReviewerProvider> = new Set(REVIEWER_PROVIDERS);
 const VALID_REVIEWER_FALLBACKS: ReadonlySet<ReviewerFallbackOnError> = new Set([
   "deny",
   "rule",
@@ -268,8 +260,6 @@ const VALID_REVIEWER_INTERACTIVE_AUTO_APPROVES: ReadonlySet<"off" | "low"> = new
  *   "mode disabled"
  *   "mode rule"
  *   "mode llm"
- *   "provider openai"
- *   "model gpt-4o-mini"
  *   "fallback deny"
  */
 export function parsePermissionReviewerCommand(
@@ -280,21 +270,26 @@ export function parsePermissionReviewerCommand(
     return {
       ok: false,
       error:
-        "missing subcommand — usage: /permission reviewer <show|mode|provider|model|fallback> [value]",
+        "missing subcommand — usage: /permission reviewer <show|mode|fallback|interactive> [value]",
     };
   }
-  const verb = args[0] as PermissionReviewerVerb;
+  const rawVerb = args[0];
+  if (rawVerb === "provider" || rawVerb === "model") {
+    return {
+      ok: false,
+      error: "reviewer provider/model follows the active LLM settings; change provider/model in Intelligence settings",
+    };
+  }
+  const verb = rawVerb as PermissionReviewerVerb;
   if (
     verb !== "mode" &&
-    verb !== "provider" &&
-    verb !== "model" &&
     verb !== "fallback" &&
     verb !== "interactive" &&
     verb !== "show"
   ) {
     return {
       ok: false,
-      error: `unknown subcommand '${verb}' — expected show|mode|provider|model|fallback|interactive`,
+      error: `unknown subcommand '${verb}' — expected show|mode|fallback|interactive`,
     };
   }
   if (verb === "show") {
@@ -320,6 +315,13 @@ export async function dispatchPermissionReviewerCommand(
   cmd: PermissionReviewerCommand,
   pathOverride?: string,
 ): Promise<PermissionReviewerResult> {
+  const legacyVerb = (cmd as { verb: string }).verb;
+  if (legacyVerb === "provider" || legacyVerb === "model") {
+    return {
+      ok: false,
+      error: "reviewer provider/model follows the active LLM settings; change provider/model in Intelligence settings",
+    };
+  }
   if (cmd.verb === "show") {
     const current = readPermissionSettings(pathOverride);
     return { ok: true, verb: "show", settings: current.permissions.reviewer };
@@ -337,23 +339,6 @@ export async function dispatchPermissionReviewerCommand(
         pathOverride,
       );
       return { ok: true, verb: "mode", settings };
-    } catch (err) {
-      return { ok: false, error: (err as Error).message };
-    }
-  }
-  if (cmd.verb === "provider") {
-    if (!VALID_REVIEWER_PROVIDERS.has(cmd.value as ReviewerProvider)) {
-      return {
-        ok: false,
-        error: `invalid provider '${cmd.value}' — expected ${[...VALID_REVIEWER_PROVIDERS].join("|")}`,
-      };
-    }
-    try {
-      const settings = await setReviewerSettingsPersist(
-        { provider: cmd.value as ReviewerProvider },
-        pathOverride,
-      );
-      return { ok: true, verb: "provider", settings };
     } catch (err) {
       return { ok: false, error: (err as Error).message };
     }
@@ -392,19 +377,7 @@ export async function dispatchPermissionReviewerCommand(
       return { ok: false, error: (err as Error).message };
     }
   }
-  // model
-  if (cmd.value.length === 0) {
-    return { ok: false, error: "model name cannot be empty" };
-  }
-  try {
-    const settings = await setReviewerSettingsPersist(
-      { model: cmd.value },
-      pathOverride,
-    );
-    return { ok: true, verb: "model", settings };
-  } catch (err) {
-    return { ok: false, error: (err as Error).message };
-  }
+  return { ok: false, error: `unknown reviewer command '${legacyVerb}'` };
 }
 
 export async function dispatchPermissionReviewerCommandWithRewire(
