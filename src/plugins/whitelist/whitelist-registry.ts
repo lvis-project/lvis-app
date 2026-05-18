@@ -73,11 +73,14 @@ export interface WhitelistInitOptions {
   userDataDir: string;
   /**
    * Path to the demo whitelist snapshot baked into asar. When set AND
-   * `process.env.LVIS_DEMO_ENABLED === "1"`, the registry loads this file
-   * exclusively and skips the network fetch entirely. Demo path bypasses
-   * the monotonicity guard so a kiosk re-launch doesn't reject the snapshot.
+   * `useDemoSnapshot === true` (or legacy `LVIS_DEMO_ENABLED=1`), the
+   * registry loads this file exclusively and skips the network fetch entirely.
+   * Demo path bypasses the monotonicity guard so a kiosk re-launch doesn't
+   * reject the snapshot.
    */
   demoSnapshotPath?: string;
+  /** Captured demo-mode flag from boot. Prefer this over reading scrubbed env. */
+  useDemoSnapshot?: boolean;
   /** Skip the network fetch (for tests + offline demo). Cache + demo still apply. */
   online: boolean;
   /** Wall-clock now provider — injected for deterministic tests. Defaults to `Date.now`. */
@@ -163,7 +166,9 @@ class WhitelistRegistry {
     const telemetry = opts.telemetry ?? (() => {});
 
     // Demo snapshot path — kiosk / pre-prod / offline trade show.
-    if (opts.demoSnapshotPath && process.env.LVIS_DEMO_ENABLED === "1") {
+    const useDemoSnapshot =
+      opts.useDemoSnapshot ?? process.env.LVIS_DEMO_ENABLED === "1";
+    if (opts.demoSnapshotPath && useDemoSnapshot) {
       const loaded = await this.tryLoadDemoSnapshot(opts.demoSnapshotPath);
       if (loaded) {
         this.snapshot = { doc: loaded, source: "demo-snapshot" };
