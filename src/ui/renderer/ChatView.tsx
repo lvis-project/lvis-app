@@ -42,6 +42,7 @@ import { highlightText } from "./utils/html-preview.js";
 import { useChatContext, type ChatContextValue } from "./context/ChatContext.js";
 import { InputActionBar } from "./components/InputActionBar.js";
 import { Composer, type ComposerHandle } from "./components/Composer.js";
+import { useSuggestedReplies } from "./hooks/use-suggested-replies.js";
 import { DeferredApprovalChip } from "./components/DeferredApprovalChip.js";
 import {
   ATTACH_MAX_COUNT,
@@ -198,6 +199,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
   const workflowApi = getApi();
   const debugStreamEnabled = isDebugStreamEnabled();
   const composerRef = useRef<ComposerHandle | null>(null);
+  const suggestedReplies = useSuggestedReplies();
   const {
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
     question, setQuestion, chatEndRef, currentSessionId,
@@ -1502,6 +1504,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             saveClipboardImage={(b64) => window.lvis.attach.saveClipboardImage(b64)}
             openExternal={(p) => window.lvis.attach.openExternal(p)}
             onSend={handleComposerSend}
+            suggestedReplies={suggestedReplies}
             disabled={
               // Slash commands (e.g. /compact) bypass the context-overflow gate
               // so the user can escape a fully-blocked input even while the
