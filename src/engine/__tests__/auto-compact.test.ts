@@ -343,9 +343,10 @@ describe("getModelPreflightThreshold — setRuntimePreflightOverride (Dev Tools 
 
 describe("getModelPreflightThreshold — TPM-aware preflight (issue #900 #3)", () => {
   it("gpt-5.4-nano — TPM 200K × 0.8 = 160K 가 window 기반 threshold 보다 작음 → tpm 채택", () => {
-    // nano: contextWindow 400K → window threshold ≈ floor(380K usable × 0.6) ≈ 228K
+    // nano: contextWindow 400K → usable = max(360K, 320K) = 360K (context-budget.ts:28-34)
+    //       → bucket `<= 1M` 의 60% → window threshold = floor(360K × 0.6) = 216K
     // nano: tpmDefault 200K → tpm threshold = floor(200K × 0.8) = 160K
-    // min(228K, 160K) = 160K. TPM 가 작은 한도라 채택 — 사용자 사고 prevention.
+    // min(216K, 160K) = 160K. TPM 가 작은 한도라 채택 — 사용자 사고 prevention.
     const t = getModelPreflightThreshold("openai", "gpt-5.4-nano");
     expect(t).toBe(160_000);
   });
