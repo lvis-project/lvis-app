@@ -185,6 +185,43 @@ describe("PermissionManager.dispatchReviewer", () => {
     expect(classifier.classify).toHaveBeenCalledTimes(3);
   });
 
+  it("partitions reviewer cache by raw identity when redacted finalInput collides", async () => {
+    const classifier: RiskClassifier = {
+      classify: vi.fn((_ctx: ToolInvocationContext): RiskVerdict => ({
+        level: "low",
+        reason: "classifier called",
+      })),
+    };
+    pm.setReviewer({ classifier, cache, deferredQueue: queue });
+    const base = {
+      source: "plugin" as const,
+      category: "network" as const,
+      pathFields: [],
+      finalInput: { payload: "send ***@example.com with sk-****" },
+      allowedDirectories: [],
+      sensitivePathsAdjacent: [],
+      trustOrigin: "llm-tool-arg" as const,
+    };
+
+    const first = await pm.dispatchReviewer("plugin_send", {
+      ...base,
+      cacheIdentityInput: { payload: "send alice@example.com with sk-alice" },
+    });
+    const second = await pm.dispatchReviewer("plugin_send", {
+      ...base,
+      cacheIdentityInput: { payload: "send bob@example.com with sk-bob" },
+    });
+    const firstAgain = await pm.dispatchReviewer("plugin_send", {
+      ...base,
+      cacheIdentityInput: { payload: "send alice@example.com with sk-alice" },
+    });
+
+    expect(first.cacheReason).toBe("miss-not-found");
+    expect(second.cacheReason).toBe("miss-not-found");
+    expect(firstAgain.cacheReason).toBe("hit");
+    expect(classifier.classify).toHaveBeenCalledTimes(2);
+  });
+
   it("does not reuse reversible shell reviewer cache for destructive shell commands", async () => {
     const bash = new BashTool();
     const allowedDirectories = ["/Users/ken/work"];
