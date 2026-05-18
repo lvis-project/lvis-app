@@ -939,6 +939,38 @@ function createDisplayMenu(): MenuItemConstructorOptions {
   };
 }
 
+/**
+ * Tutorial-D — broadcast the Discovery Swipe open signal to every open
+ * BrowserWindow so the dialog mounts on top of any active surface
+ * (chat, settings, plugin webview). Used by the Help menu item and the
+ * chat empty-area context menu.
+ */
+function broadcastTutorialOpen(source: string): void {
+  const payload = { source };
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (win.isDestroyed()) continue;
+    try {
+      win.webContents.send("lvis:tutorial:open", payload);
+    } catch {
+      /* one window's send failure must not block the others */
+    }
+  }
+}
+
+function createHelpMenu(): MenuItemConstructorOptions {
+  return {
+    label: "도움말",
+    role: "help",
+    submenu: [
+      {
+        label: "튜토리얼",
+        accelerator: "CommandOrControl+Shift+T",
+        click: () => broadcastTutorialOpen("menu"),
+      },
+    ],
+  };
+}
+
 function createEditMenu(): MenuItemConstructorOptions {
   return {
     label: "편집",
@@ -961,6 +993,7 @@ function refreshApplicationMenu() {
   const settingsMenuItem = createSettingsMenuItem();
   const editMenu = createEditMenu();
   const displayMenu = createDisplayMenu();
+  const helpMenu = createHelpMenu();
   const template: MenuItemConstructorOptions[] =
     process.platform === "darwin"
       ? [
@@ -978,12 +1011,14 @@ function refreshApplicationMenu() {
           editMenu,
           createViewMenu(),
           displayMenu,
+          helpMenu,
         ]
       : [
           { label: "앱", submenu: [createAlwaysOnTopMenuItem(), settingsMenuItem, { type: "separator" }, { role: "quit" }] },
           editMenu,
           createViewMenu(),
           displayMenu,
+          helpMenu,
         ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
