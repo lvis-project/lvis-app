@@ -348,6 +348,13 @@ export async function bootstrap(
   // path (success, offline, demo) so a network blip never blocks boot.
   await wireWhitelistRegistry({ bootAuditLogger });
 
+  // Cluster review M1 — PermissionManager is built BEFORE initPluginRuntime
+  // so its per-plugin revoke signal can be wired into the resolveApiKey host
+  // factory at plugin construction time. The reviewer + broadcast hookups
+  // below still happen after pluginRuntime exists (they depend on the
+  // mainWindow getter and the registered plugins).
+  const permissionManager = await createPermissionManager();
+
   const {
     pluginRuntime,
     deploymentGuard,
@@ -368,6 +375,10 @@ export async function bootstrap(
     clearAuthPartitionService,
     shellOpenExternal: (url: string) => shell.openExternal(url),
     approvalGate,
+    // Cluster review M1 — wire PermissionManager so the per-plugin
+    // resolveApiKey host implementation can abort outstanding bearers when
+    // permission rules change.
+    permissionManager,
   });
 
   // Workflow system tools (S1+S2) — services constructed up-front so the
@@ -534,8 +545,10 @@ export async function bootstrap(
     pluginRuntime,
     getActiveSkillsSection: (sessionId) => skillOverlay.buildSection(sessionId),
   });
-  // §6.3: PermissionManager (Layer 2-3).
-  const permissionManager = await createPermissionManager();
+  // §6.3: PermissionManager — instance was constructed before
+  // initPluginRuntime (cluster M1) so the resolveApiKey host wiring could
+  // see it. Now that toolRegistry is built, push the visibility deny
+  // rules across.
   toolRegistry.setDenyRules(permissionManager.getVisibilityDenyRules());
 
   // Permission policy P4 — Layer 5 reviewer agent wiring (Phase 3 deferral resolution).

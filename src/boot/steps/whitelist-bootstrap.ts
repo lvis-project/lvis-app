@@ -28,6 +28,13 @@ export interface WhitelistBootstrapInput {
   bootAuditLogger: AuditLogger;
   /** Online toggle — disabled in tests + when `LVIS_DEMO_ENABLED=1`. */
   online?: boolean;
+  /**
+   * Cluster review optional fix — app-shutdown AbortSignal. When the app
+   * quits while a slow CDN response is in flight, this aborts the
+   * underlying fetch immediately instead of waiting for the 10s HTTP
+   * timeout. Boot passes its lifetime signal here.
+   */
+  appShutdownSignal?: AbortSignal;
 }
 
 function isOnlineByDefault(): boolean {
@@ -57,6 +64,7 @@ export async function wireWhitelistRegistry(input: WhitelistBootstrapInput): Pro
     userDataDir,
     demoSnapshotPath,
     online,
+    ...(input.appShutdownSignal ? { signal: input.appShutdownSignal } : {}),
     audit: (input: string) => {
       try {
         bootAuditLogger.log({
