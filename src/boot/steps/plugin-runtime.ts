@@ -978,6 +978,12 @@ export async function initPluginRuntime(
   // capability is advisory metadata only; there is no host-side auth gate.
   let pluginRuntime!: PluginRuntime;
 
+  const installLoadedPluginPartitionPolicy = (pluginId: string): void => {
+    installPluginPartitionPolicy(pluginPartitionName(pluginId), {
+      pluginRoot: pluginRuntime.getPluginRoot(pluginId),
+    });
+  };
+
   // Phase 1 §Step 1 + §Step 2 — thread the user-installed dir as a second
   // trust root and the unsigned-user-plugin opt-in flag.
   pluginRuntime = new PluginRuntime({
@@ -1008,6 +1014,12 @@ export async function initPluginRuntime(
     // `도구를 찾을 수 없습니다` post-restart (see PR #760). Non-fatal:
     // a sync exception is logged but does not become `runtime reload failed`.
     onEnable: (pluginId) => {
+      // `restartAll()` is also the managed-marketplace first-sync path:
+      // ensureManagedInstalled() writes the registry, then restartAll() loads
+      // the new plugin without emitting plugin.installed. Register the
+      // partition preload here so freshly managed plugin UIs get
+      // window.lvisPlugin immediately instead of only after app restart.
+      installLoadedPluginPartitionPolicy(pluginId);
       try {
         syncPluginToolRegistryForPlugin(pluginRuntime, toolRegistry, pluginId);
       } catch (err) {
@@ -1806,9 +1818,7 @@ export async function initPluginRuntime(
   // by walking the loaded-plugin set sidesteps the partition-name read
   // entirely.
   for (const pluginId of pluginRuntime.listPluginIds()) {
-    installPluginPartitionPolicy(pluginPartitionName(pluginId), {
-      pluginRoot: pluginRuntime.getPluginRoot(pluginId),
-    });
+    installLoadedPluginPartitionPolicy(pluginId);
   }
   // Cover plugins added AFTER startAll() — deep-link install
   // (`lvis://install/<slug>` → `addPlugin`), dev hot-reload watcher
@@ -1824,9 +1834,7 @@ export async function initPluginRuntime(
   onHostEvent("plugin.installed", (data) => {
     const pluginId = (data as { pluginId?: string } | undefined)?.pluginId;
     if (typeof pluginId !== "string") return;
-    installPluginPartitionPolicy(pluginPartitionName(pluginId), {
-      pluginRoot: pluginRuntime.getPluginRoot(pluginId),
-    });
+    installLoadedPluginPartitionPolicy(pluginId);
     // #958 round-1 — keep the installSource cache in sync so a freshly
     // installed admin plugin gets its Tier-3 bypass on first call,
     // without waiting for the next boot.
