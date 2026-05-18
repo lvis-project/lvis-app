@@ -158,19 +158,19 @@ export function PermissionModeBadge({
   const queueLabel = pendingError ? "승인 확인 실패" : `승인 ${pendingPermissions}`;
 
   return (
-    <div className="inline-flex items-center gap-1" data-testid="permission-policy-controls">
+    <div className="inline-flex max-w-full min-w-0 items-center gap-1" data-testid="permission-policy-controls">
       <Button
         type="button"
         variant="ghost"
         size="sm"
         onClick={handleClick}
-        className="h-auto rounded-full p-0 hover:bg-transparent"
+        className="h-auto min-w-0 rounded-full p-0 hover:bg-transparent"
         title={MODE_DESCRIPTIONS[mode]}
         aria-label={`현재 권한 정책: ${MODE_DESCRIPTIONS[mode]}`}
         data-testid="permission-mode-badge"
         data-mode={mode}
       >
-        <Badge variant="outline" className={`text-[10px] ${MODE_COLOR_CLASSES[mode]}`}>
+        <Badge variant="outline" className={`max-w-[9rem] truncate whitespace-nowrap text-[10px] ${MODE_COLOR_CLASSES[mode]}`}>
           {MODE_LABELS[mode]}
         </Badge>
       </Button>
@@ -181,18 +181,18 @@ export function PermissionModeBadge({
           size="sm"
           onClick={onQueueClick}
           disabled={!onQueueClick}
-          className="h-auto rounded-full p-0 hover:bg-transparent"
+          className="h-auto min-w-0 rounded-full p-0 hover:bg-transparent"
           title={`보류된 승인 큐 열기${pendingText}`}
           aria-label={`보류된 승인 큐 열기${pendingText}`}
           data-testid="permission-queue-button"
         >
           <Badge
             variant="outline"
-            className="inline-flex items-center gap-1 border-destructive bg-destructive/10 px-2 text-[10px] text-destructive"
+            className="inline-flex max-w-[7rem] items-center gap-1 truncate whitespace-nowrap border-destructive bg-destructive/10 px-2 text-[10px] text-destructive"
             data-testid="permission-pending-badge"
           >
             <Inbox className="h-3 w-3" aria-hidden="true" />
-            {queueLabel}
+            <span className="min-w-0 truncate">{queueLabel}</span>
           </Badge>
         </Button>
       )}
