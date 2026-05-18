@@ -38,7 +38,6 @@
  * to fire automatically when the signal aborts mid-flight, so the captured
  * bearer reference is dropped without the plugin having to remember.
  */
-import type { ResolveApiKeyResult } from "@lvis/plugin-sdk";
 import type { SettingsService } from "../../data/settings-store.js";
 import type { PluginManifest } from "../../plugins/types.js";
 import type { AuditLogger } from "../../audit/audit-logger.js";
@@ -54,6 +53,25 @@ export type ResolveApiKeyVendor =
   | "azure-openai"
   | "vertex"
   | "anthropic";
+
+export type ResolveApiKeyResult =
+  | {
+      ok: true;
+      vendor: string;
+      bearer: () => string;
+      baseUrl?: string;
+      release: () => void;
+    }
+  | {
+      ok: false;
+      reason:
+        | "no-host-vendor"
+        | "vendor-mismatch"
+        | "not-whitelisted"
+        | "user-mode-plugin"
+        | "aborted"
+        | "user-endpoint-with-host-key";
+    };
 
 export interface ResolveApiKeyRequest {
   purpose: ResolveApiKeyPurpose;
