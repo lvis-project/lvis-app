@@ -37,6 +37,7 @@ jobs:
           repository: lvis-project/lvis-marketplace
           path: lvis-marketplace
           token: ${{ secrets.M4_MARKETPLACE_CHECKOUT_TOKEN }}
+          submodules: recursive
 
       - name: Setup Python
         uses: actions/setup-python@v6
