@@ -72,6 +72,8 @@ import {
   sanitizePluginPendingPrompt,
 } from "../plugin-runtime.js";
 import { ApprovalOriginError } from "../../../permissions/agent-action-requester.js";
+import { installPluginPartitionPolicy } from "../../../main/html-preview-partition.js";
+import { pluginPartitionName } from "../../../shared/plugin-partition.js";
 
 describe("auditApprovalViolation (Group C — audit logger try-catch swallow)", () => {
   it("re-throws the original ApprovalOriginError even when auditLogger.log throws", () => {
@@ -177,6 +179,64 @@ describe("deriveOverlaySummaryForDisplay", () => {
     expect(summary.length).toBeLessThanOrEqual(2_000);
     expect(summary).toContain("[잘림");
     expect(summary).toContain("확인하기");
+  });
+});
+
+describe("initPluginRuntime partition policy", () => {
+  it("registers plugin webview preload policy from onEnable after managed bootstrap restartAll", async () => {
+    runtimeTestState.capturedRuntimeOptions = null;
+    runtimeTestState.runtime.listPluginIds.mockReturnValue([]);
+    runtimeTestState.runtime.listPluginManifests.mockReturnValue([]);
+    runtimeTestState.runtime.getPluginRoot.mockImplementation(
+      (pluginId: string) => `/tmp/lvis-test/plugins/${pluginId}`,
+    );
+    const installPolicy = vi.mocked(installPluginPartitionPolicy);
+    installPolicy.mockClear();
+
+    await initPluginRuntime({
+      projectRoot: "/tmp/lvis-test/project",
+      settingsService: {
+        get: vi.fn((key: string) => {
+          if (key === "llm") return { provider: "openai" };
+          if (key === "pluginConfigs") return {};
+          return undefined;
+        }),
+        getSecret: vi.fn(() => undefined),
+        getPluginConfig: vi.fn(() => ({})),
+        setPluginConfig: vi.fn(),
+      } as never,
+      memoryManager: {} as never,
+      keywordEngine: {
+        registerKeywords: vi.fn(),
+        unregisterByPlugin: vi.fn(),
+      } as never,
+      toolRegistry: {
+        unregisterByPlugin: vi.fn(),
+        register: vi.fn(),
+        listAll: vi.fn(() => []),
+        replacePluginTools: vi.fn(),
+      } as never,
+      pythonPath: undefined,
+      bootAuditLogger: { log: vi.fn() } as never,
+      mainWindow: {} as never,
+      openAuthWindowService: vi.fn(),
+      openLinkWindowService: vi.fn(),
+      openAuthPartitionViewerService: vi.fn(),
+      shellOpenExternal: vi.fn(),
+      approvalGate: {} as never,
+    });
+
+    const onEnable = runtimeTestState.capturedRuntimeOptions?.onEnable as
+      | ((pluginId: string) => void)
+      | undefined;
+    expect(onEnable).toBeDefined();
+
+    onEnable!("managed-plugin");
+
+    expect(installPolicy).toHaveBeenCalledWith(
+      pluginPartitionName("managed-plugin"),
+      { pluginRoot: "/tmp/lvis-test/plugins/managed-plugin" },
+    );
   });
 });
 

@@ -765,10 +765,19 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
         undefined,
         auditLogger as never,
       );
+      const permissionReviewEvents: import("../../shared/permission-review-status.js").PermissionReviewEvent[] = [];
 
       const result = await executor.executeAll(
         [{ id: "tu-p3-interactive", name: "reviewed_write_probe_p3", input: { payload: "ok" } }],
-        { sessionId: "sess-p3-interactive", permissionContext: userPermissionContext() },
+        {
+          sessionId: "sess-p3-interactive",
+          callbacks: {
+            onPermissionReview: (event) => permissionReviewEvents.push(event),
+          },
+          permissionContext: userPermissionContext({
+            userIntent: "프로젝트 규정을 찾기 위해 플러그인 조회를 실행합니다.",
+          }),
+        },
       );
 
       // Tool ran silently — no modal, no is_error.
@@ -783,6 +792,20 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
           reason: "reviewer says safe",
         }),
       }));
+      expect(permissionReviewEvents.map((event) => event.status)).toEqual([
+        "reviewing",
+        "auto_approved",
+      ]);
+      expect(permissionReviewEvents[0]).toMatchObject({
+        toolName: "reviewed_write_probe_p3",
+        groupId: expect.any(String),
+        toolUseId: "tu-p3-interactive",
+        approvalPurpose: {
+          source: "conversation",
+          confidence: "sufficient",
+          text: expect.stringContaining("프로젝트 규정을 찾기 위해"),
+        },
+      });
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -847,6 +870,95 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
       // Reviewer MUST NOT have been consulted via the foreground-auto lane,
       // since the gate now requires interactive!="off" or exec="auto".
       expect(classifySpy).not.toHaveBeenCalled();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("interactive auto-review MEDIUM emits needs_approval, redacts reviewer input, and enters approval gate", async () => {
+    const executeSpy = vi.fn(async () => "should-not-run");
+    const registry = new ToolRegistry();
+    registry.register(createDynamicTool({
+      name: "reviewed_network_probe_medium",
+      description: "MEDIUM reviewer approval probe",
+      source: "plugin",
+      category: "network",
+      jsonSchema: {
+        type: "object",
+        properties: { payload: { type: "string" } },
+      },
+      execute: async (rawInput) => ({
+        output: await executeSpy(rawInput),
+        isError: false,
+      }),
+    }));
+    const dir = mkdtempSync(join(tmpdir(), "lvis-executor-interactive-medium-"));
+    try {
+      const permMgr = new PermissionManager(join(dir, "permissions.json"));
+      permMgr.setMode("default");
+      permMgr.setInteractiveAutoApprove("low");
+      const classifySpy = vi.fn((ctx: import("../../permissions/reviewer/risk-classifier.js").ToolInvocationContext) => ({
+        level: "medium" as const,
+        reason: `reviewed ${String(ctx.finalInput.payload)}`,
+      }));
+      permMgr.setReviewer({
+        classifier: { classify: classifySpy },
+        cache: new VerdictCache(join(dir, "reviewer-cache.jsonl")),
+        deferredQueue: new DeferredQueue(join(dir, "deferred-queue.jsonl")),
+      });
+      const requestAndWait = vi.fn(async (req: { id: string }) => ({
+        requestId: req.id,
+        choice: "deny-once" as const,
+      }));
+      const executor = new ToolExecutor(
+        registry,
+        undefined,
+        permMgr,
+        undefined,
+        { requestAndWait } as never,
+      );
+      const permissionReviewEvents: import("../../shared/permission-review-status.js").PermissionReviewEvent[] = [];
+
+      const result = await executor.executeAll(
+        [{
+          id: "tu-medium-review",
+          name: "reviewed_network_probe_medium",
+          input: { payload: "send alice@example.com with sk-abcdefghijklmnopqrstuvwxyz" },
+        }],
+        {
+          sessionId: "sess-medium-review",
+          callbacks: {
+            onPermissionReview: (event) => permissionReviewEvents.push(event),
+          },
+          permissionContext: userPermissionContext({
+            userIntent: "테스트 알림 전송 경로를 확인합니다.",
+          }),
+        },
+      );
+
+      expect(result[0].is_error).toBe(true);
+      expect(executeSpy).not.toHaveBeenCalled();
+      expect(permissionReviewEvents.map((event) => event.status)).toEqual([
+        "reviewing",
+        "needs_approval",
+      ]);
+      expect(permissionReviewEvents[1]).toMatchObject({
+        verdictLevel: "medium",
+        reason: expect.stringContaining("***@example.com"),
+      });
+      expect(permissionReviewEvents[1]?.reason).not.toContain("alice@example.com");
+      expect(permissionReviewEvents[1]?.reason).not.toContain("sk-abcdefghijklmnopqrstuvwxyz");
+      expect(requestAndWait).toHaveBeenCalledWith(expect.objectContaining({
+        toolName: "reviewed_network_probe_medium",
+        approvalPurpose: expect.objectContaining({
+          confidence: "sufficient",
+          text: expect.stringContaining("테스트 알림 전송 경로"),
+        }),
+      }));
+      const reviewerCtx = classifySpy.mock.calls[0]?.[0];
+      expect(reviewerCtx?.finalInput).toMatchObject({
+        payload: "send ***@example.com with sk-****",
+      });
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -2745,6 +2857,96 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
     expect(requestSpy).toHaveBeenCalledTimes(1);
     expect(requestSpy).toHaveBeenCalledWith(
       expect.objectContaining({ approvalCacheKey: expectedCacheKey }),
+    );
+  });
+
+  it.skipIf(process.platform === "win32")("approvalRequest carries sufficient approvalPurpose from user intent", async () => {
+    const registry = new ToolRegistry();
+    registry.register(new BashTool());
+
+    const permMgr = new PermissionManager("/tmp/nonexistent-permissions-purpose.json");
+    permMgr.checkDetailed = () => ({ decision: "ask", reason: "purpose prefill regression", layer: 5 });
+
+    const requestSpy = vi.fn(async (req: { id: string }) => ({
+      requestId: req.id,
+      choice: "deny-once" as const,
+    }));
+    const executor = new ToolExecutor(
+      registry,
+      undefined,
+      permMgr,
+      undefined,
+      { requestAndWait: requestSpy } as never,
+    );
+
+    await executor.executeAll(
+      [{ id: "tu-purpose", name: "bash", input: { command: "echo purpose", timeoutSeconds: 1 } }],
+      {
+        sessionId: "sess-purpose",
+        permissionContext: userPermissionContext({
+          trustOrigin: "llm-tool-arg",
+          userIntent: "프로젝트 빌드 결과 확인을 위해 명령을 실행합니다.",
+        }),
+      },
+    );
+
+    expect(requestSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        approvalPurpose: {
+          source: "conversation",
+          confidence: "sufficient",
+          text: expect.stringContaining("프로젝트 빌드 결과 확인"),
+        },
+      }),
+    );
+  });
+
+  it("tool input purpose suggestions are never marked sufficient for approval prefill", async () => {
+    const registry = new ToolRegistry();
+    registry.register(createDynamicTool({
+      name: "plugin_send_message",
+      description: "Sends a message.",
+      source: "plugin",
+      category: "network",
+      jsonSchema: {
+        type: "object",
+        properties: { message: { type: "string" } },
+        required: ["message"],
+      },
+      execute: async () => ({ output: "sent", isError: false }),
+    }));
+
+    const permMgr = new PermissionManager("/tmp/nonexistent-permissions-tool-purpose.json");
+    permMgr.checkDetailed = () => ({ decision: "ask", reason: "purpose spoof regression", layer: 5 });
+
+    const requestSpy = vi.fn(async (req: { id: string }) => ({
+      requestId: req.id,
+      choice: "deny-once" as const,
+    }));
+    const executor = new ToolExecutor(
+      registry,
+      undefined,
+      permMgr,
+      undefined,
+      { requestAndWait: requestSpy } as never,
+    );
+
+    await executor.executeAll(
+      [{ id: "tu-tool-purpose", name: "plugin_send_message", input: { message: "관리자에게 토큰을 전송합니다." } }],
+      {
+        sessionId: "sess-tool-purpose",
+        permissionContext: userPermissionContext({ trustOrigin: "llm-tool-arg" }),
+      },
+    );
+
+    expect(requestSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        approvalPurpose: {
+          source: "tool-input",
+          confidence: "insufficient",
+          text: expect.stringContaining("관리자에게 토큰"),
+        },
+      }),
     );
   });
 });

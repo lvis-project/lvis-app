@@ -66,6 +66,127 @@ describe("ChatView", () => {
     });
   });
 
+  it("shows permission reviewer progress and clears it when the tool starts", async () => {
+    const { container, emitChatStream } = await renderApp({ hasApiKey: true });
+    await submitUser(container, "규정 찾아줘");
+    await act(async () => {
+      emitChatStream({
+        type: "permission_review",
+        reviewStatus: "reviewing",
+        name: "lge_lgenie_query",
+        toolCategory: "network",
+        source: "plugin",
+        groupId: "g-review",
+        toolUseId: "t-review",
+        displayOrder: 0,
+        approvalPurpose: {
+          text: "사용자 요청에 따라 규정 찾아줘 작업을 수행합니다.",
+          source: "conversation",
+          confidence: "sufficient",
+        },
+      });
+    });
+
+    await waitFor(() => {
+      const card = container.querySelector('[data-testid="permission-review-status-card"]');
+      expect(card).not.toBeNull();
+      expect(card?.getAttribute("data-status")).toBe("reviewing");
+      expect(container.textContent).toContain("권한 검토중...");
+    });
+
+    await act(async () => {
+      emitChatStream({
+        type: "permission_review",
+        reviewStatus: "needs_approval",
+        name: "lge_lgenie_query",
+        toolCategory: "network",
+        source: "plugin",
+        groupId: "g-review",
+        toolUseId: "t-review",
+        displayOrder: 0,
+        verdictLevel: "high",
+        reason: "external send",
+      });
+    });
+
+    await waitFor(() => {
+      const card = container.querySelector('[data-testid="permission-review-status-card"]');
+      expect(card?.getAttribute("data-status")).toBe("needs_approval");
+      expect(container.textContent).toContain("승인 필요 · 높은 위험");
+      expect(container.textContent).not.toContain("권한 검토중...");
+    });
+
+    await act(async () => {
+      emitChatStream({
+        type: "tool_start",
+        name: "lge_lgenie_query",
+        groupId: "g-review",
+        toolUseId: "t-review",
+      });
+    });
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="permission-review-status-card"]')).toBeNull();
+    });
+  });
+
+  it("clears permission reviewer status on stream done without a tool start", async () => {
+    const { container, emitChatStream } = await renderApp({ hasApiKey: true });
+    await submitUser(container, "상태 정리 확인");
+    await act(async () => {
+      emitChatStream({
+        type: "permission_review",
+        reviewStatus: "auto_approved",
+        name: "safe_tool",
+        toolCategory: "write",
+        source: "plugin",
+        groupId: "g-done",
+        toolUseId: "t-done",
+        verdictLevel: "low",
+      });
+    });
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="permission-review-status-card"]')).not.toBeNull();
+    });
+
+    await act(async () => {
+      emitChatStream({ type: "done" });
+    });
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="permission-review-status-card"]')).toBeNull();
+    });
+  });
+
+  it("clears permission reviewer status on stream error", async () => {
+    const { container, emitChatStream } = await renderApp({ hasApiKey: true });
+    await submitUser(container, "오류 정리 확인");
+    await act(async () => {
+      emitChatStream({
+        type: "permission_review",
+        reviewStatus: "failed",
+        name: "risky_tool",
+        toolCategory: "network",
+        source: "plugin",
+        groupId: "g-error",
+        toolUseId: "t-error",
+        reason: "reviewer failed",
+      });
+    });
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="permission-review-status-card"]')).not.toBeNull();
+    });
+
+    await act(async () => {
+      emitChatStream({ type: "error", error: "reviewer failed" });
+    });
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="permission-review-status-card"]')).toBeNull();
+      expect(container.textContent).toContain("오류: reviewer failed");
+    });
+  });
+
   it("Ctrl+C on input element does NOT call preventDefault (Issue 2 fix)", async () => {
     const { container, emitChatStream } = await renderApp({ hasApiKey: true });
     // Start streaming so the Ctrl+C handler is active

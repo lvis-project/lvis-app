@@ -7,7 +7,7 @@
  * Storage: `~/.lvis/permissions/reviewer-cache.jsonl` (append-only,
  * per-feature namespace per CLAUDE.md storage rule).
  *
- * Cache key: sha256(toolName + source + category + trustOrigin + approvalCacheKey + canonicalInputIdentity).
+ * Cache key: sha256(toolName + source + category + trustOrigin + approvalCacheKey + canonicalInputIdentity + conversationContext).
  *   - canonicalInputShape replaces every value with its type-name and
  *     deep-sorts keys for categories whose deterministic reviewer rules
  *     do not inspect literal values.
@@ -63,6 +63,9 @@ export interface VerdictCacheLookupKey {
    */
   trustOrigin: ToolTrustOrigin;
   approvalCacheKey?: string;
+  conversationContext?: {
+    recentUserMessage?: string;
+  };
   finalInput: Record<string, unknown>;
 }
 
@@ -127,7 +130,10 @@ export function computeCacheKey(lookup: VerdictCacheLookupKey): string {
   const shape = isValueSensitiveCategory(lookup.category)
     ? canonicalInputValue(lookup.finalInput)
     : canonicalInputShape(lookup.finalInput);
-  return sha256(`${lookup.toolName}\x1f${lookup.source}\x1f${lookup.category}\x1f${lookup.trustOrigin}\x1f${lookup.approvalCacheKey ?? ""}\x1f${shape}`);
+  const conversationContext = canonicalInputValue({
+    conversationContext: lookup.conversationContext ?? null,
+  });
+  return sha256(`${lookup.toolName}\x1f${lookup.source}\x1f${lookup.category}\x1f${lookup.trustOrigin}\x1f${lookup.approvalCacheKey ?? ""}\x1f${shape}\x1f${conversationContext}`);
 }
 
 function isValueSensitiveCategory(category: ToolCategory): boolean {
