@@ -28,6 +28,7 @@ export function useStatusBarMarketplace({ api, upsertPersistent, removePersisten
           severity: result.online ? "success" : "error",
           label: "🛒",
           value: result.online ? "🟢" : "🔴",
+          a11yLabel: result.online ? "마켓플레이스 온라인" : "마켓플레이스 오프라인",
         });
       } catch {
         if (cancelled || my !== pingToken) return;
@@ -36,6 +37,7 @@ export function useStatusBarMarketplace({ api, upsertPersistent, removePersisten
           severity: "error",
           label: "🛒",
           value: "🔴",
+          a11yLabel: "마켓플레이스 오프라인",
         });
       }
     };
