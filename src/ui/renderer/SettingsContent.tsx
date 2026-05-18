@@ -389,6 +389,7 @@ export function SettingsContent({
 
           <TabsContent value="chat" className="flex-1 min-h-0 outline-none">
             <ChatTab
+              api={api}
               autoCompact={s.autoCompact}
               setAutoCompact={s.setAutoCompact}
               streamSmoothing={s.streamSmoothing}

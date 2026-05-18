@@ -163,6 +163,17 @@ export type AppSettings = {
   };
 };
 
+/**
+ * Tutorial-A — Login screen variant. Mirrors `LoginVariant` from the
+ * host-side `src/main/login-prefs-store.ts`. Renderer keeps a separate
+ * literal so a host-only refactor never leaks node imports into the
+ * renderer bundle; values must stay in lockstep.
+ */
+export type LoginVariant = "conversational" | "cli-agent";
+export interface LoginPrefs {
+  loginVariant: LoginVariant;
+}
+
 export type IpcErrorResult = { ok: false; error: string; message?: string };
 export type SettingsUpdateResult = AppSettings | IpcErrorResult;
 
@@ -264,6 +275,23 @@ export type LvisApi = {
       }
     | { ok: false; error: string }
   >;
+  /**
+   * Tutorial-A — login screen variant preference. The host persists the
+   * variant under `~/.lvis/login-prefs/login-prefs.json`; `loginPrefsGet`
+   * never rejects on parse error (it returns the default), while
+   * `loginPrefsSet` returns a kebab-case `error` code on validation /
+   * write failure. `onLoginPrefsChanged` fires after every successful set
+   * so siblings remount their LoginModal without an app restart.
+   */
+  loginPrefsGet: () => Promise<
+    | { ok: true; prefs: LoginPrefs }
+    | { ok: false; error: string; message: string }
+  >;
+  loginPrefsSet: (payload: LoginPrefs) => Promise<
+    | { ok: true; prefs: LoginPrefs }
+    | { ok: false; error: string; message: string }
+  >;
+  onLoginPrefsChanged: (handler: (prefs: LoginPrefs) => void) => () => void;
   openSettingsWindow: (initialTab?: string) => Promise<{ ok: true; windowId: number } | { ok: false; error: string }>;
   notifySettingsWindowSaved: () => Promise<{ ok: true } | { ok: false; error: string }>;
   onSettingsWindowSaved: (handler: () => void) => () => void;
