@@ -19,8 +19,11 @@ function makeChild(): ChildProcess & FakeChildProcess {
 }
 
 afterEach(() => {
+  vi.restoreAllMocks();
   __resetManagedChildProcessesForTest();
 });
+
+const itPosix = process.platform === "win32" ? it.skip : it;
 
 describe("managed child process tracking", () => {
   it("tracks and untracks a child process on exit", () => {
@@ -42,6 +45,24 @@ describe("managed child process tracking", () => {
     expect(forceKillManagedChildProcesses("test-timeout")).toBe(1);
 
     expect(child.kill).toHaveBeenCalledWith("SIGKILL");
+    expect(getManagedChildProcessCount()).toBe(0);
+  });
+
+  itPosix("keeps a detached process group tracked after the root exits", () => {
+    const child = makeChild();
+    child.pid = 1234;
+    const killSpy = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+      if (pid === -1234 && (signal === 0 || signal === "SIGKILL")) return true;
+      return true;
+    });
+    trackManagedChildProcess(child, { label: "detached-hook", killProcessGroup: true });
+
+    child.exitCode = 0;
+    child.emit("exit", 0, null);
+
+    expect(getManagedChildProcessCount()).toBe(1);
+    expect(forceKillManagedChildProcesses("test-timeout")).toBe(1);
+    expect(killSpy).toHaveBeenCalledWith(-1234, "SIGKILL");
     expect(getManagedChildProcessCount()).toBe(0);
   });
 });
