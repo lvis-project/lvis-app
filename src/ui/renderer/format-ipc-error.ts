@@ -124,6 +124,9 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "invalid-vendor": "지원하지 않는 벤더입니다.",
   "no-demo-key": "이 벤더의 데모 API 키가 환경 변수에 설정되어 있지 않습니다.",
   "reviewer-rewire-failed": "권한 검토 모델을 새 설정으로 연결하지 못했습니다. 설정이 이전 상태로 되돌려졌습니다.",
+  // ── Tutorial-A — login-prefs:set validation + write failures ──
+  "invalid-login-variant": "선택한 로그인 화면 스타일이 올바르지 않습니다.",
+  "write-failed": "설정을 저장하지 못했습니다.",
 
   // ── Misc IO / system ──
   "invalid-request-id": "잘못된 요청 ID입니다.",
