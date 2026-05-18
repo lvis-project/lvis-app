@@ -94,6 +94,23 @@ export interface ResolveApiKeyDeps {
    * `plugin-runtime.ts` binds this to `permissionManager.getPluginRevokeSignal`.
    */
   getPluginRevokeSignal?: (pluginId: string) => AbortSignal;
+  /**
+   * #958 round-1 security MEDIUM — install-source from the on-disk plugin
+   * registry (`PluginRegistryEntry.installSource`). When present this
+   * value takes PRECEDENCE over `manifest.installPolicy` for the Tier-3
+   * admin-bypass gate. Rationale (mirrors `deployment-guard.ts:84-92`):
+   *   - `registry.installSource` is written by the host at install time
+   *     under a verified actor; the file lives at
+   *     `~/.lvis/plugins/registry.json` and is not part of the plugin's
+   *     own writable surface.
+   *   - `manifest.installPolicy` is a field inside `plugin.json` — a
+   *     user-installed plugin (or a malicious post-install patch) can
+   *     flip it to `"admin"` and inherit the Tier-3 bypass.
+   * Trust precedence: registry ≫ manifest. We fall back to the manifest
+   * only when registry has no recorded `installSource` (legacy entry
+   * pre-dating the field — `readPluginRegistry` migrates these on read).
+   */
+  registryInstallSource?: "admin" | "user" | "local-dev";
 }
 
 /**
@@ -254,6 +271,22 @@ export async function resolveApiKey(
     return { ok: false, reason: "not-whitelisted" };
   }
 
+  // #958 round-1 security MEDIUM — trust precedence for the Tier-3
+  // admin-bypass gate: registry-recorded `installSource` (verified at
+  // install time, lives outside the plugin's writable surface) wins over
+  // `manifest.installPolicy` (inside `plugin.json`, user-writable).
+  // Without this anchoring a malicious post-install plugin.json patch
+  // could flip `installPolicy:"admin"` and inherit the Tier-3 bypass.
+  // Only `installSource === "admin"` triggers the bypass; `"local-dev"`
+  // and `"user"` keep the full Tier-3 ACL. Manifest is consulted only
+  // when registry has no `installSource` (legacy migration window —
+  // see `readPluginRegistry`).
+  const effectiveInstallPolicy: "admin" | "user" | undefined =
+    deps.registryInstallSource !== undefined
+      ? deps.registryInstallSource === "admin"
+        ? "admin"
+        : "user"
+      : deps.manifest.installPolicy;
   // Tier-3 + Tier-4 via the shared helper (`runTier3Then4`). Ralph cycle 1
   // MEDIUM fix unifies the order between this path and `getSecret`:
   // whitelist registry (coarse signed ACL) → active-vendor cross-check
@@ -266,7 +299,9 @@ export async function resolveApiKey(
     activeProvider,
     // #955 follow-up — admin-installed plugins bypass the Tier-3 signed
     // whitelist registry ACL. Tier-4 vendor cross-check still applies.
-    installPolicy: deps.manifest.installPolicy,
+    // #958 round-1 — value comes from the registry-anchored decision
+    // above so a user can't flip the bypass by editing plugin.json.
+    installPolicy: effectiveInstallPolicy,
   });
   if (tierOutcome.kind === "deny") {
     audit(
@@ -283,6 +318,24 @@ export async function resolveApiKey(
     // to the SDK enum's narrow `not-whitelisted` slot. Detailed reason
     // lives in the audit log for operators.
     return { ok: false, reason: "not-whitelisted" };
+  }
+  // #958 round-1 security MEDIUM — admin-bypass audit + counter. Emit an
+  // explicit audit line BEFORE the host-secret read so operators can
+  // pivot on `policy=admin tier3-bypassed` in the audit log even if the
+  // subsequent settings lookup fails for an unrelated reason. The
+  // dedicated `hostSecret_admin_bypass` counter is on top of the regular
+  // `hostSecret_read` increment downstream so totals stay comparable.
+  if (tierOutcome.via === "admin-bypass") {
+    audit(
+      deps,
+      "info",
+      `resolveApiKey policy=admin tier3-bypassed vendor=${vendor} purpose=${request.purpose} source=${deps.registryInstallSource !== undefined ? "registry.installSource" : "manifest.installPolicy"}`,
+    );
+    incrementHostSecretCounter(
+      "hostSecret_admin_bypass",
+      deps.pluginId,
+      keyPrefix,
+    );
   }
 
   // All four tiers passed — fetch the key from settings.
