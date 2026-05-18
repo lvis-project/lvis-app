@@ -22,6 +22,16 @@ import { Input } from "../../../components/ui/input.js";
 import { Label } from "../../../components/ui/label.js";
 import type { LvisApi } from "../types.js";
 
+export interface LoginMockupSuccess {
+  ok: true;
+  vendor: string;
+  model?: string;
+  baseUrl?: string;
+  vertexProject?: string;
+  vertexLocation?: string;
+  fieldsApplied: string[];
+}
+
 export interface LoginModalProps {
   api: LvisApi;
   open: boolean;
@@ -31,7 +41,7 @@ export interface LoginModalProps {
    * activated vendor is reported by the backend (top-level login decides
    * vendor) so the caller can refresh vendor-keyed UI state.
    */
-  onSuccess?: (vendor: string) => void;
+  onSuccess?: (vendor: string, result: LoginMockupSuccess) => void;
 }
 
 function errorMessage(code: string): string {
@@ -67,7 +77,7 @@ export function LoginModal({ api, open, onOpenChange, onSuccess }: LoginModalPro
     try {
       const result = await api.loginMockup({ username, password });
       if (result.ok) {
-        onSuccess?.(result.vendor);
+        onSuccess?.(result.vendor, result);
         onOpenChange(false);
         setUsername("");
         return;

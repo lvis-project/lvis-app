@@ -181,7 +181,10 @@ export function LlmTab(props: LlmTabProps) {
               onValueChange={(v) => {
                 if (v === "manual" || v === "login") {
                   setAuthMode(v);
-                  onImmediateChange?.();
+                  // Login success owns provider/model persistence; avoid a stale manual-mode autosave.
+                  if (v === "manual") {
+                    onImmediateChange?.();
+                  }
                 }
               }}
               className="flex gap-4"
