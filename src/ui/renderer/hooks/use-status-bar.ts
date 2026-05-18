@@ -5,7 +5,6 @@ import type { PersistentItem, ToastItem } from "./status-bar/types.js";
 import { useStatusBarNotifications } from "./status-bar/use-status-bar-notifications.js";
 import { useStatusBarInstall } from "./status-bar/use-status-bar-install.js";
 import { useStatusBarRuntime } from "./status-bar/use-status-bar-runtime.js";
-import { useStatusBarEnv } from "./status-bar/use-status-bar-env.js";
 import { useStatusBarMarketplace } from "./status-bar/use-status-bar-marketplace.js";
 
 // Re-export shared types so existing call sites (App.tsx, StatusBar.tsx, tests)
@@ -118,7 +117,6 @@ export function useStatusBar(opts: UseStatusBarOptions) {
   useStatusBarNotifications({ api, pushToast });
   useStatusBarInstall({ api, pushToast });
   useStatusBarRuntime({ api, upsertPersistent });
-  useStatusBarEnv({ api, upsertPersistent });
   useStatusBarMarketplace({ api, upsertPersistent, removePersistent });
 
   return {
