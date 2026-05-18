@@ -15,6 +15,7 @@ import { getApi, getPluginViewLabel, toViewKey } from "./api-client.js";
 import type { PluginEntry } from "./components/PluginGridButton.js";
 import { ApprovalDialog } from "./dialogs/ApprovalDialog.js";
 import { DeferredQueueDialog } from "./dialogs/DeferredQueueDialog.js";
+import { TutorialDialog } from "./dialogs/TutorialDialog.js";
 import { OnboardingDialog } from "./components/OnboardingDialog.js";
 import { SpotlightTour } from "./components/SpotlightTour.js";
 import { LoginModal } from "./components/LoginModal.js";
@@ -113,6 +114,11 @@ export function App() {
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [appLoginOpen, setAppLoginOpen] = useState(false);
   const [deferredQueueOpen, setDeferredQueueOpen] = useState(false);
+  // Tutorial-D — Discovery Swipe dialog open state. Main process
+  // broadcasts `lvis:tutorial:open` from the menu / chat context menu,
+  // and the renderer flips this flag to mount the dialog on top of any
+  // active surface.
+  const [tutorialOpen, setTutorialOpen] = useState(false);
   const [activeView, setActiveView] = useState("home");
   const [commandPopoverOpen, setCommandPopoverOpen] = useState(false);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
@@ -233,6 +239,14 @@ export function App() {
         })
       : () => {};
     return () => { unsubShow(); unsubDismiss(); };
+  }, [api]);
+
+  // Tutorial-D — listen for the broadcast emitted by the menu builder
+  // and the chat empty-area context menu. Flipping `tutorialOpen` true
+  // mounts the Discovery Swipe dialog from anywhere in the app.
+  useEffect(() => {
+    if (typeof api.onTutorialOpen !== "function") return;
+    return api.onTutorialOpen(() => setTutorialOpen(true));
   }, [api]);
 
   // Plugin overlay primary action handler (user confirm → main chat insert).
@@ -1195,6 +1209,11 @@ export function App() {
         </div>
       )}
       <DeferredQueueDialog open={deferredQueueOpen} onOpenChange={setDeferredQueueOpen} />
+      <TutorialDialog
+        open={tutorialOpen}
+        onOpenChange={setTutorialOpen}
+        api={api}
+      />
       <ApprovalDialog queue={approvalQueue} onDecide={handleApprovalDecide} />
       <OnboardingDialog
         open={onboardingOpen}
