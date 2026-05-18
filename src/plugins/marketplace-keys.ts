@@ -38,12 +38,15 @@ export const WHITELIST_PUBLIC_KEYS: Readonly<Record<string, PublicKeyInput>> = O
   // by the matching private key (kept out of this repo); production
   // rotation lands a fresh key id (e.g. "whitelist-v2") here.
   //
-  // Ralph cycle 1 — this slot was rotated alongside the demo snapshot
-  // re-sign that expanded vendor coverage to claude/gemini/azure-foundry/
-  // vertex-ai. The private key that produced
-  // `resources/marketplace-whitelist.demo.json.sig` is held by the
-  // operator team out-of-band.
-  "whitelist-v1": "XvsEdFTepXM7in7TnnsQqtzHLia/ro1idMBqr9kNJzM=",
+  // Stage 2 publish — rotated to the keypair that signs the live
+  // registry at
+  // `https://lvis-project.github.io/marketplace-whitelist/v1/whitelist.json`.
+  // The matching private key is held out-of-band by the operator team
+  // (see SECURITY.md in the marketplace-whitelist repo). The demo
+  // snapshot in `resources/marketplace-whitelist.demo.json.sig` was
+  // re-signed in the same change so the offline demo path continues to
+  // verify against this slot.
+  "whitelist-v1": "3YF7rRRj+NtxengU3VudHcufo/+L/Dnz/CIYSmvyRI0=",
 });
 
 export const WHITELIST_PRIMARY_KEY_ID = "whitelist-v1" as const;
