@@ -13,7 +13,12 @@ const baseExclude = [
   ".claude/**",
   // Playwright E2E specs run under the `playwright test` runner,
   // not vitest. Excluded here to avoid double-execution + import errors.
-  "test/e2e/**",
+  // M4 workflow runs marketplace-e2e.test.ts directly (env M4_E2E=1).
+  // Default mode: exclude entire test/e2e/** (Playwright owns it).
+  // M4 mode: exclude only Playwright subdirs so vitest picks up the marketplace e2e.
+  ...(process.env.M4_E2E === "1"
+    ? ["test/e2e/agent-hub/**", "test/e2e/ui/**", "test/e2e/window/**"]
+    : ["test/e2e/**"]),
 ];
 const rendererTestGlobs = [
   `test/renderer/${testFileGlob}`,
