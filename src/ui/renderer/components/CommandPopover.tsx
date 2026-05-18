@@ -37,6 +37,10 @@ export function CommandPopover({ actions, onInsert, open, onOpenChange }: Comman
               className="h-7 w-7 p-0"
               aria-label="명령 팔레트 (Ctrl/Cmd+K)"
               data-testid="command-popover-trigger"
+              // Tutorial-C SpotlightTour anchor (PR #983 follow-up). Step 3
+              // of `first-boot-essentials` highlights this ⌘K toggle, see
+              // `default-tour-scenarios.ts`.
+              data-tour-anchor="command-palette-toggle"
             >
               <CommandIcon className="h-3.5 w-3.5" />
             </Button>
