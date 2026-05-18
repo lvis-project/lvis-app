@@ -252,6 +252,7 @@
       "oneClick": true,
       "perMachine": false,
       "runAfterFinish": true,
+      "differentialPackage": true,
       "artifactName": "${productName}-${version}-windows-${arch}-setup.${ext}"
     }
   }
