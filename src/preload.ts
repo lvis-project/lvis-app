@@ -975,6 +975,16 @@ const api = {
       offset?: number;
     }) => ipcRenderer.invoke("lvis:audit:search", filter),
     getStats: async (lastDays: number) => ipcRenderer.invoke("lvis:audit:stats", lastDays),
+    /**
+     * Live Auto-play — renderer reports each demo phase. The main-side
+     * handler enforces the `[demo-autoplay]` prefix + `route: "demo-autoplay"`
+     * so analytics queries can filter the demo channel without inspecting
+     * per-field payloads. Proposal: docs/architecture/proposals/live-autoplay.md §8.
+     */
+    logDemoAutoplay: async (payload: { scriptId: string; phase: string; detail?: string }) =>
+      ipcRenderer.invoke("lvis:audit:log-demo-autoplay", payload) as Promise<
+        { ok: true } | { ok: false; error: string; message: string }
+      >,
   },
 
   // ─── D6 — Message feedback ───────────────────────
@@ -1372,6 +1382,12 @@ contextBridge.exposeInMainWorld("lvis", {
     debugStream:
       process.env.VITE_DEBUG_STREAM === "1" ||
       (process.env.LVIS_DEV === "1" && process.env.LVIS_DEV_CONSOLE === "1"),
+    /**
+     * Live Auto-play (proposal §7) — vendor id pre-staged by env. Surfaced
+     * to the renderer so `useDemoAutoplay()` can short-circuit when
+     * `LVIS_DEMO_VENDOR` is unset (production dead-path).
+     */
+    demoVendor: typeof process.env.LVIS_DEMO_VENDOR === "string" ? process.env.LVIS_DEMO_VENDOR : null,
   },
   attach: {
     openFile: () => ipcRenderer.invoke("lvis:attach:openFile"),
