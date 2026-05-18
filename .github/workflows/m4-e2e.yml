@@ -93,7 +93,12 @@ jobs:
           M4_E2E: "1"
           MARKETPLACE_URL: http://127.0.0.1:8000
           MARKETPLACE_PUBLISHER_KEY: ${{ env.PUBLISHER_KEY }}
-        run: bunx vitest run test/e2e/marketplace-e2e.test.ts
+        run: |
+          echo "=== env debug ==="
+          echo "M4_E2E=$M4_E2E"
+          echo "MARKETPLACE_URL=$MARKETPLACE_URL"
+          echo "=== vitest collection (dry-run via --reporter=verbose, single file) ==="
+          M4_E2E=1 bunx vitest run --reporter=verbose test/e2e/marketplace-e2e.test.ts
 
       - name: Stop marketplace
         if: always()
