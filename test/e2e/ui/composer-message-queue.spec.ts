@@ -7,7 +7,7 @@
  * 실제 LLM streaming 필요. 대신 v6 layout 의 정적 DOM 구조만 검증:
  *
  * - composer textarea-only (input-bar 안 SEND/Stop/Guide 0)
- * - BottomActionRow 가 TokenRing slot + 가이드 + ⇧⏎ kbd + Send 노출
+ * - BottomActionRow 가 TokenRing slot + ⇧⏎ kbd + Send 노출
  * - InputActionBar trailing 순서: 📎 → 권한 → (승인) → 페르소나 → Thinking
  * - MessageQueuePanel sentinel: 큐 비면 panel 자체 미렌더
  * - ApprovalQueueStatus floating chip 제거 (DOM 부재)
@@ -27,12 +27,13 @@ test('idle: composer input-bar contains textarea only (no Send/Stop/Guide button
   await expect(buttonsInsideInputBar).toHaveCount(0);
 });
 
-test('idle: BottomActionRow 가 TokenRing + 가이드 ghost + 단축키 hints + Send 모두 표시', async ({ mainWindow }) => {
+test('idle: BottomActionRow 가 TokenRing + 단축키 hints + Send 표시, 가이드 버튼 미노출', async ({ mainWindow }) => {
   const row = mainWindow.locator('[data-testid="composer-bottom-action-row"]');
   await expect(row).toBeVisible();
-  // 가이드 ghost 버튼 (⌘K hint 포함)
+
   const guideBtn = mainWindow.locator('[data-testid="composer-guide-ghost"]');
-  await expect(guideBtn).toBeVisible();
+  await expect(guideBtn).toHaveCount(0);
+
   // Send 버튼 (idle 라벨 = "전송")
   const sendBtn = mainWindow.locator('[data-testid="composer-send-button"]');
   await expect(sendBtn).toBeVisible();
