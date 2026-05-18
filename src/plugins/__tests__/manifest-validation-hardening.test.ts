@@ -91,7 +91,8 @@ describe("runtime manifest validation hardening", () => {
   }
 
   it("1) keywords[].skillId not in tools[] fails load", async () => {
-    await writePlugin("p_kw", {
+    await writePlugin("p-kw", {
+      tools: ["pkw_hello", "pkw_bad", "pkw_good"],
       keywords: [{ keyword: "회의", skillId: "p_kw_missing" }],
     });
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
@@ -108,7 +109,8 @@ describe("runtime manifest validation hardening", () => {
   });
 
   it("2) toolSchemas key not in tools[] fails load", async () => {
-    await writePlugin("p_ts", {
+    await writePlugin("p-ts", {
+      tools: ["pts_hello", "pts_bad", "pts_good"],
       toolSchemas: {
         p_ts_ghost: {
           description: "ghost tool description here",
@@ -131,7 +133,8 @@ describe("runtime manifest validation hardening", () => {
   });
 
   it("3) notificationEvents.event not in eventSubscriptions → soft warn, plugin still loads", async () => {
-    await writePlugin("p_notif", {
+    await writePlugin("p-notif", {
+      tools: ["pnotif_hello", "pnotif_bad", "pnotif_good"],
       eventSubscriptions: ["meeting.started"],
       notificationEvents: [{ event: "meeting.ghost" }],
     });
@@ -142,7 +145,7 @@ describe("runtime manifest validation hardening", () => {
     } finally {
       cap.restore();
     }
-    expect(runtime.listPluginIds()).toContain("p_notif");
+    expect(runtime.listPluginIds()).toContain("p-notif");
     expect(
       cap.warns.some((w) =>
         /notificationEvents\[0\]\.event 'meeting\.ghost' not declared in eventSubscriptions/.test(w),
@@ -151,7 +154,8 @@ describe("runtime manifest validation hardening", () => {
   });
 
   it("4) ui[] invalid entry fails load instead of dropping entries", async () => {
-    await writePlugin("p_ui", {
+    await writePlugin("p-ui", {
+      tools: ["pui_hello", "pui_bad", "pui_good"],
       ui: [
         // bad embedded-module (missing exportName) — should fail the manifest
         { id: "a", slot: "sidebar", kind: "embedded-module", title: "A", entry: "dist/a.js" },
@@ -166,7 +170,7 @@ describe("runtime manifest validation hardening", () => {
     } finally {
       cap.restore();
     }
-    expect(runtime.listPluginIds()).not.toContain("p_ui");
+    expect(runtime.listPluginIds()).not.toContain("p-ui");
     expect(
       cap.errors.some((e) =>
         /ui\[0\].*kind="embedded-module" missing required field\(s\): exportName/.test(e),
@@ -175,7 +179,8 @@ describe("runtime manifest validation hardening", () => {
   });
 
   it("4c) ui[] kind=\"action\" without tool fails load", async () => {
-    await writePlugin("p_action_bad", {
+    await writePlugin("p-action-bad", {
+      tools: ["pab_hello", "pab_bad", "pab_good"],
       ui: [
         { id: "a", slot: "sidebar", kind: "action", title: "A" },
       ],
@@ -187,7 +192,7 @@ describe("runtime manifest validation hardening", () => {
     } finally {
       cap.restore();
     }
-    expect(runtime.listPluginIds()).not.toContain("p_action_bad");
+    expect(runtime.listPluginIds()).not.toContain("p-action-bad");
     expect(
       cap.errors.some((e) =>
         /ui\[0\].*kind="action" missing required field\(s\): tool/.test(e),
@@ -196,7 +201,7 @@ describe("runtime manifest validation hardening", () => {
   });
 
   it("4d) ui[] kind=\"action\" with valid tool loads", async () => {
-    await writePlugin("p_action_ok", {
+    await writePlugin("p-action-ok", {
       tools: ["my_tool"],
       ui: [
         { id: "a", slot: "sidebar", kind: "action", title: "A", tool: "my_tool" },
@@ -205,11 +210,12 @@ describe("runtime manifest validation hardening", () => {
     });
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
-    expect(runtime.listPluginIds()).toContain("p_action_ok");
+    expect(runtime.listPluginIds()).toContain("p-action-ok");
   });
 
   it("4b) ui[] non-plain-object entries fail load instead of being dropped", async () => {
-    await writePlugin("p_ui_bad", {
+    await writePlugin("p-ui-bad", {
+      tools: ["puibad_hello", "puibad_bad", "puibad_good"],
       ui: [
         [], // array — must fail
         123,
@@ -224,7 +230,7 @@ describe("runtime manifest validation hardening", () => {
     } finally {
       cap.restore();
     }
-    expect(runtime.listPluginIds()).not.toContain("p_ui_bad");
+    expect(runtime.listPluginIds()).not.toContain("p-ui-bad");
     expect(cap.errors.some((e) => /ui\[0\].*must be an object/.test(e))).toBe(true);
   });
 
@@ -233,7 +239,8 @@ describe("runtime manifest validation hardening", () => {
   // AJV 단계에서 hard reject 되어야 한다. plugin 자체가 fail-soft drop 되며 host
   // 는 계속 동작.
   it("5) AJV rejects manifest with unknown root property (startupTools post 5.7.0)", async () => {
-    await writePlugin("p_unknown_field", {
+    await writePlugin("p-unknown-field", {
+      tools: ["puf_hello", "puf_bad", "puf_good"],
       startupTools: ["p_unknown_field_hello"],
     });
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
@@ -243,7 +250,7 @@ describe("runtime manifest validation hardening", () => {
     } finally {
       cap.restore();
     }
-    expect(runtime.listPluginIds()).not.toContain("p_unknown_field");
+    expect(runtime.listPluginIds()).not.toContain("p-unknown-field");
     expect(
       cap.errors.some((e) => /additional|unknown|startupTools/i.test(e)),
     ).toBe(true);
@@ -253,7 +260,8 @@ describe("runtime manifest validation hardening", () => {
   // plugin 이 fail-soft drop 될 때 audit log 에 `plugin_manifest_rejected` 가
   // 남아야 security ops / operator 가 어느 plugin 이 왜 드랍됐는지 추적 가능.
   it("6) auditLog emits plugin_manifest_rejected on manifest reject", async () => {
-    await writePlugin("p_audit_target", {
+    await writePlugin("p-audit-target", {
+      tools: ["pat_hello", "pat_bad", "pat_good"],
       startupTools: ["p_audit_target_hello"], // AJV reject trigger
     });
     const auditLog = vi.fn();
@@ -269,14 +277,14 @@ describe("runtime manifest validation hardening", () => {
     } finally {
       cap.restore();
     }
-    expect(runtime.listPluginIds()).not.toContain("p_audit_target");
+    expect(runtime.listPluginIds()).not.toContain("p-audit-target");
     const rejected = auditLog.mock.calls.find(
       (call) => call[1] === "plugin_manifest_rejected",
     );
     expect(rejected).toBeTruthy();
     expect(rejected?.[0]).toBe("error");
     const data = rejected?.[2] as { manifestPath: string; error: string };
-    expect(data.manifestPath).toContain("p_audit_target");
+    expect(data.manifestPath).toContain("p-audit-target");
     expect(data.error).toMatch(/additional|startupTools|schema/i);
   });
 

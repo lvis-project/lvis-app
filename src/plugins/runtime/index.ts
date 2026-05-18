@@ -726,6 +726,50 @@ export class PluginRuntime {
   }
 
   /**
+   * #893 — Wildcard (`"*"` slot) config injection. Plugins read the active
+   * LLM vendor id via `hostApi.config.get("hostApiVendor")`; the raw API key
+   * is NOT injected here — callers must obtain it through `getSecret` so it
+   * never appears in the plain-object config map. Merges with existing
+   * wildcard overrides (e.g. `pythonExecutable`) so calling this does NOT
+   * clobber unrelated keys set by other boot steps.
+   */
+  setWildcardConfigOverride(config: Record<string, unknown>): void {
+    if (Object.keys(config).length === 0) return;
+    this.configOverrides["*"] = {
+      ...(this.configOverrides["*"] ?? {}),
+      ...config,
+    };
+  }
+
+  /**
+   * #893 / PR #894 B2 — Read the wildcard slot so `hostApi.config.get(...)`
+   * can merge host-injected values (e.g. `hostApiVendor`) into every
+   * plugin's effective config map. Returns an empty object when no wildcard
+   * overrides have been set so callers can spread the result unconditionally.
+   * The returned object is a shallow copy — callers MUST NOT mutate it.
+   */
+  getWildcardConfigOverride(): Record<string, unknown> {
+    return { ...(this.configOverrides["*"] ?? {}) };
+  }
+
+  /**
+   * #893 — Inverse of `setWildcardConfigOverride`. Clears ONLY the keys
+   * named in `keys` from the wildcard slot, preserving other injected
+   * values. When `keys` is empty the call is a no-op so the unrelated
+   * `pythonExecutable` slot survives a vendor swap.
+   */
+  clearWildcardConfigOverride(keys: string[]): void {
+    const current = this.configOverrides["*"];
+    if (!current) return;
+    for (const key of keys) {
+      delete current[key];
+    }
+    if (Object.keys(current).length === 0) {
+      delete this.configOverrides["*"];
+    }
+  }
+
+  /**
    * US-A3 — Targeted single-plugin add for install / install-local paths.
    */
   async addPlugin(pluginId: string): Promise<void> {

@@ -64,6 +64,9 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
       deps.refreshMarketplaceFetcherConfig?.();
     }
     conversationLoop.refreshProvider();
+    // #893 — vendor/baseUrl may have changed; re-sync the plugin wildcard so
+    // `hostApi.config.get("hostApiKey")` stays consistent with the active vendor.
+    deps.refreshActiveLlmWildcard?.();
     broadcastSettingsSnapshot(deps);
     return result;
   });
@@ -74,6 +77,8 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     conversationLoop.refreshProvider();
     // MAJOR-2: rewire reviewer when provider key changes so cacheScope refreshes.
     deps.rewireReviewerAgent?.();
+    // #893 — refresh plugin wildcard with the new key for the active vendor.
+    deps.refreshActiveLlmWildcard?.();
     // Broadcast settings snapshot so reviewer tab can auto-unlock without a full reload.
     broadcastSettingsSnapshot(deps);
     return { ok: true };
@@ -91,6 +96,8 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     conversationLoop.refreshProvider();
     // MAJOR-2: rewire reviewer when provider key is removed so cacheScope refreshes.
     deps.rewireReviewerAgent?.();
+    // #893 — refresh plugin wildcard so the now-missing key is cleared.
+    deps.refreshActiveLlmWildcard?.();
     broadcastSettingsSnapshot(deps);
     return { ok: true };
   });

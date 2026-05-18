@@ -98,37 +98,41 @@ describe("PluginRuntime — uiCallable suffix-blocking removed", () => {
   }
 
   it("managed plugin with any suffix loads successfully (no verifier needed)", async () => {
-    await writePlugin("p_managed_default", {
+    await writePlugin("p-managed-default", {
       installPolicy: "admin",
-      uiCallable: ["p_managed_default_delete"],
+      tools: ["pmd_get", "pmd_delete"],
+      uiCallable: ["pmd_delete"],
     });
 
     const runtime = makeRuntime();
     await runtime.load();
 
-    expect(runtime.listPluginIds()).toContain("p_managed_default");
+    expect(runtime.listPluginIds()).toContain("p-managed-default");
   });
 
   it("user plugin with any suffix loads successfully", async () => {
-    await writePlugin("p_user_delete", {
+    await writePlugin("p-user-delete", {
       installPolicy: "user",
-      uiCallable: ["p_user_delete_delete"],
+      tools: ["pud_get", "pud_delete"],
+      uiCallable: ["pud_delete"],
     });
 
     const runtime = makeRuntime();
     await runtime.load();
 
-    expect(runtime.listPluginIds()).toContain("p_user_delete");
+    expect(runtime.listPluginIds()).toContain("p-user-delete");
   });
 
   it("allowManagedUnsigned has no effect on uiCallable validation (backward compat)", async () => {
-    await writePlugin("p_managed_allow", {
+    await writePlugin("p-managed-allow", {
       installPolicy: "admin",
-      uiCallable: ["p_managed_allow_delete"],
+      tools: ["pma_get", "pma_delete"],
+      uiCallable: ["pma_delete"],
     });
-    await writePlugin("p_user_allow", {
+    await writePlugin("p-user-allow", {
       installPolicy: "user",
-      uiCallable: ["p_user_allow_delete"],
+      tools: ["pua_get", "pua_delete"],
+      uiCallable: ["pua_delete"],
     });
 
     // Rewrite the registry to include both plugins (writePlugin overwrites it).
@@ -137,8 +141,8 @@ describe("PluginRuntime — uiCallable suffix-blocking removed", () => {
       JSON.stringify({
         version: 1,
         plugins: [
-          { id: "p_managed_allow", manifestPath: join(installedDir, "p_managed_allow", "plugin.json") },
-          { id: "p_user_allow", manifestPath: join(installedDir, "p_user_allow", "plugin.json") },
+          { id: "p-managed-allow", manifestPath: join(installedDir, "p-managed-allow", "plugin.json") },
+          { id: "p-user-allow", manifestPath: join(installedDir, "p-user-allow", "plugin.json") },
         ],
       }),
       "utf-8",
@@ -147,20 +151,21 @@ describe("PluginRuntime — uiCallable suffix-blocking removed", () => {
     const runtime = makeRuntime({ allowManagedUnsigned: true });
     await runtime.load();
 
-    expect(runtime.listPluginIds()).toContain("p_managed_allow");
-    expect(runtime.listPluginIds()).toContain("p_user_allow");
+    expect(runtime.listPluginIds()).toContain("p-managed-allow");
+    expect(runtime.listPluginIds()).toContain("p-user-allow");
   });
 
   it("auditLog is NOT called for destructive suffix (no longer blocked)", async () => {
-    await writePlugin("p_audit_check", {
+    await writePlugin("p-audit-check", {
       installPolicy: "user",
-      uiCallable: ["p_audit_check_delete"],
+      tools: ["pac_get", "pac_delete"],
+      uiCallable: ["pac_delete"],
     });
 
     const runtime = makeRuntime();
     await runtime.load();
 
-    expect(runtime.listPluginIds()).toContain("p_audit_check");
+    expect(runtime.listPluginIds()).toContain("p-audit-check");
     expect(
       auditEntries.some(
         (e) => e.message === "plugin_uiCallable_destructive_rejected",

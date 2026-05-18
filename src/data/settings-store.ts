@@ -42,6 +42,20 @@ export { LLM_VENDORS };
  *   the policy. Stale on-disk keys are dropped on next write.
  */
 export interface LLMSettings {
+  /**
+   * #893 — Top-level auth toggle. `"manual"` (default) shows the vendor
+   * dropdown + per-vendor settings (API key, baseUrl, model, vertex…);
+   * `"login"` collapses all of that down to a single Login button whose
+   * backend chooses the vendor (see `LVIS_DEMO_VENDOR`). Login wraps
+   * vendor selection itself — when `authMode === "login"` the user is
+   * never asked which vendor.
+   *
+   * Legacy installs that wrote per-vendor `vendors[v].authMode = "login"`
+   * are migrated up at load time: if any vendor was in login mode the
+   * top-level switch flips to `"login"` and that vendor is promoted to
+   * `provider`. The per-vendor keys are dropped on next write.
+   */
+  authMode: "manual" | "login";
   provider: LLMVendor;
   vendors: Record<LLMVendor, LLMVendorSettings>;
   streamSmoothing: "none" | "word" | "char";
@@ -53,6 +67,7 @@ export interface LLMSettings {
  * a UI save touching a single vendor doesn't have to send all six.
  */
 export interface LLMSettingsPatch {
+  authMode?: "manual" | "login";
   provider?: LLMVendor;
   vendors?: Partial<Record<LLMVendor, Partial<LLMVendorSettings>>>;
   streamSmoothing?: "none" | "word" | "char";
@@ -91,6 +106,14 @@ export interface FeatureFlags {
    * configured LLM to refresh user-preferences.md. Default false: manual only.
    */
   idlePreferenceRefresh?: boolean;
+  /**
+   * #893 — Set to `true` after the user has dismissed the first-boot onboarding
+   * dialog (either via "API 키 입력" or "로그인"). Defaults to undefined / false
+   * so legacy installs see the dialog once on first launch after upgrade. The
+   * value is persisted to `~/.lvis/settings.json` via the standard settings
+   * patch flow — no separate disk file.
+   */
+  onboardingCompleted?: boolean;
 }
 
 export interface AppSettings {
@@ -318,6 +341,7 @@ export interface SettingsServiceOptions {
 
 const DEFAULT_SETTINGS: AppSettings = {
   llm: {
+    authMode: "manual",
     provider: DEFAULT_LLM_VENDOR,
     vendors: freshVendorBlocks(),
     streamSmoothing: "none",
@@ -630,7 +654,8 @@ export class SettingsService {
     try {
       const raw = readFileSync(this.settingsPath, "utf-8");
       const parsed = JSON.parse(raw) as any;
-      const llm = mergeLlmPatch(DEFAULT_SETTINGS.llm, parsed.llm ?? {});
+      const migratedLlm = migrateLegacyLlmAuthMode(parsed.llm);
+      const llm = mergeLlmPatch(DEFAULT_SETTINGS.llm, migratedLlm);
       const marketplaceParsed: Record<string, unknown> = { ...(parsed.marketplace ?? {}) };
       // Pin the only valid backend literal — narrows the unknown spread back
       // to the AppSettings type without preserving legacy "mock" inputs.
@@ -727,12 +752,74 @@ function mergeLlmPatch(base: LLMSettings, partial: LLMSettingsPatch): LLMSetting
   const provider: LLMVendor = isLLMVendor(partial.provider)
     ? partial.provider
     : base.provider;
+  const authMode: "manual" | "login" =
+    partial.authMode === "login" || partial.authMode === "manual"
+      ? partial.authMode
+      : base.authMode;
   return {
+    authMode,
     provider,
     vendors,
     streamSmoothing: partial.streamSmoothing ?? base.streamSmoothing,
     fallbackChain: partial.fallbackChain ?? base.fallbackChain,
   };
+}
+
+/**
+ * #893 — Legacy migration. Earlier builds persisted `authMode` per vendor at
+ * `llm.vendors.<v>.authMode`; the new top-level toggle lives at
+ * `llm.authMode`. On load, if any vendor block carries `authMode: "login"`
+ * we promote the switch to top-level "login" and elect that vendor as the
+ * active provider so the user lands exactly where they last logged in. The
+ * per-vendor key is stripped so the next write produces a clean shape.
+ *
+ * Tolerant by design: malformed input falls through to the caller's default
+ * (settings load never crashes boot over a UI-only field).
+ */
+function migrateLegacyLlmAuthMode(input: unknown): LLMSettingsPatch {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return {};
+  const llm = input as Record<string, unknown>;
+  const result: LLMSettingsPatch = { ...(llm as object) } as LLMSettingsPatch;
+
+  // Already top-level authMode? Honour it, but still strip any stray
+  // per-vendor authMode keys so the on-disk shape converges.
+  const topLevelAuthMode =
+    llm.authMode === "login" || llm.authMode === "manual"
+      ? (llm.authMode as "manual" | "login")
+      : null;
+
+  if (llm.vendors && typeof llm.vendors === "object" && !Array.isArray(llm.vendors)) {
+    const vendors = llm.vendors as Record<string, Record<string, unknown>>;
+    let promotedVendor: LLMVendor | null = null;
+    const cleanedVendors: Record<string, Record<string, unknown>> = {};
+    for (const [vid, block] of Object.entries(vendors)) {
+      if (!block || typeof block !== "object" || Array.isArray(block)) {
+        cleanedVendors[vid] = block as Record<string, unknown>;
+        continue;
+      }
+      const { authMode: legacyMode, ...rest } = block;
+      if (legacyMode === "login" && promotedVendor === null && isLLMVendor(vid)) {
+        promotedVendor = vid;
+      }
+      cleanedVendors[vid] = rest;
+    }
+    result.vendors = cleanedVendors as LLMSettingsPatch["vendors"];
+
+    // Top-level wins when explicitly set; otherwise promote from per-vendor.
+    if (topLevelAuthMode === null && promotedVendor !== null) {
+      result.authMode = "login";
+      // Only override provider when the persisted one wasn't already this vendor.
+      if (!isLLMVendor(llm.provider) || llm.provider !== promotedVendor) {
+        result.provider = promotedVendor;
+      }
+      log.warn(
+        `migrated legacy llm.vendors.${promotedVendor}.authMode="login" → top-level authMode + provider`,
+      );
+    }
+  }
+
+  // Strip the legacy top-level keys we don't own here.
+  return result;
 }
 
 function normalizeRoleSettings(input: unknown, base: RoleSettings = DEFAULT_SETTINGS.roles): RoleSettings {
