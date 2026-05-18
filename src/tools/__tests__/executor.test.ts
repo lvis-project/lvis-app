@@ -2949,4 +2949,73 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
       }),
     );
   });
+
+  it("uses categoryForInput and scoped approval keys after input finalization", async () => {
+    const executeSpy = vi.fn(async () => "ok");
+    const registry = new ToolRegistry();
+    registry.register(createDynamicTool({
+      name: "scoped_fetch_probe",
+      description: "Fetch probe.",
+      source: "builtin",
+      category: "read",
+      categoryForInput: (input) => {
+        const args = input && typeof input === "object"
+          ? input as Record<string, unknown>
+          : {};
+        return args.allowPrivateNetwork === true ? "network" : "read";
+      },
+      approvalCacheKey: (input) => {
+        const args = input && typeof input === "object"
+          ? input as Record<string, unknown>
+          : {};
+        return args.allowPrivateNetwork === true
+          ? "private-network:http://10.0.0.1"
+          : undefined;
+      },
+      isReadOnly: () => true,
+      jsonSchema: {
+        type: "object",
+        properties: { allowPrivateNetwork: { type: "boolean" } },
+      },
+      execute: async (rawInput) => ({
+        output: await executeSpy(rawInput),
+        isError: false,
+      }),
+    }));
+
+    const permMgr = new PermissionManager("/tmp/nonexistent-permissions-input-category.json");
+    permMgr.setRules([{ pattern: "scoped_fetch_probe", action: "allow" }]);
+    const requestSpy = vi.fn(async (req: { id: string }) => ({
+      requestId: req.id,
+      choice: "deny-once" as const,
+    }));
+    const executor = new ToolExecutor(
+      registry,
+      undefined,
+      permMgr,
+      undefined,
+      { requestAndWait: requestSpy } as never,
+    );
+
+    const publicResult = await executor.executeAll(
+      [{ id: "tu-public", name: "scoped_fetch_probe", input: {} }],
+      { sessionId: "sess-input-category-public", permissionContext: userPermissionContext() },
+    );
+    expect(publicResult[0].is_error).not.toBe(true);
+    expect(executeSpy).toHaveBeenCalledTimes(1);
+    expect(requestSpy).not.toHaveBeenCalled();
+
+    const privateResult = await executor.executeAll(
+      [{ id: "tu-private", name: "scoped_fetch_probe", input: { allowPrivateNetwork: true } }],
+      { sessionId: "sess-input-category-private", permissionContext: userPermissionContext() },
+    );
+    expect(privateResult[0].is_error).toBe(true);
+    expect(executeSpy).toHaveBeenCalledTimes(1);
+    expect(requestSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toolCategory: "network",
+        approvalCacheKey: "scoped_fetch_probe:private-network:http://10.0.0.1",
+      }),
+    );
+  });
 });
