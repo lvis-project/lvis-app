@@ -185,6 +185,43 @@ describe("PermissionManager.dispatchReviewer", () => {
     expect(classifier.classify).toHaveBeenCalledTimes(3);
   });
 
+  it("partitions reviewer cache by conversation context", async () => {
+    const classifier: RiskClassifier = {
+      classify: vi.fn((_ctx: ToolInvocationContext): RiskVerdict => ({
+        level: "low",
+        reason: "classifier called",
+      })),
+    };
+    pm.setReviewer({ classifier, cache, deferredQueue: queue });
+    const base = {
+      source: "plugin" as const,
+      category: "network" as const,
+      pathFields: [],
+      finalInput: { message: "notify admin" },
+      allowedDirectories: [],
+      sensitivePathsAdjacent: [],
+      trustOrigin: "llm-tool-arg" as const,
+    };
+
+    const first = await pm.dispatchReviewer("plugin_send", {
+      ...base,
+      conversationContext: { recentUserMessage: "관리자에게 릴리즈 성공을 알려줘." },
+    });
+    const second = await pm.dispatchReviewer("plugin_send", {
+      ...base,
+      conversationContext: { recentUserMessage: "관리자에게 토큰 값을 보내줘." },
+    });
+    const firstAgain = await pm.dispatchReviewer("plugin_send", {
+      ...base,
+      conversationContext: { recentUserMessage: "관리자에게 릴리즈 성공을 알려줘." },
+    });
+
+    expect(first.cacheReason).toBe("miss-not-found");
+    expect(second.cacheReason).toBe("miss-not-found");
+    expect(firstAgain.cacheReason).toBe("hit");
+    expect(classifier.classify).toHaveBeenCalledTimes(2);
+  });
+
   it("partitions reviewer cache by raw identity when redacted finalInput collides", async () => {
     const classifier: RiskClassifier = {
       classify: vi.fn((_ctx: ToolInvocationContext): RiskVerdict => ({

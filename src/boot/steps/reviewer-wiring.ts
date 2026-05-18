@@ -134,7 +134,7 @@ export interface WireReviewerDeps {
    * provider/model instead of the legacy permissions.reviewer provider/model
    * fields, so the permission reviewer stays on the same vendor/model as chat.
    */
-  readActiveLlm?: () => { provider: LLMVendor; model: string };
+  readActiveLlm?: () => ActiveReviewerLlmIdentity;
   /**
    * Provider factory for `mode: "llm"` stream-based host providers. Legacy
    * reviewer names (`openai | anthropic | google`) and active LLM vendor names
@@ -175,7 +175,20 @@ export interface WireReviewerResult {
   effectiveSettings: EffectiveReviewerSettings;
 }
 
-type EffectiveReviewerSettings = Omit<ReviewerSettingsBlock, "provider"> & { provider: string };
+export interface ActiveReviewerLlmIdentity {
+  provider: LLMVendor;
+  model: string;
+  baseUrl?: string;
+  vertexProject?: string;
+  vertexLocation?: string;
+}
+
+type EffectiveReviewerSettings = Omit<ReviewerSettingsBlock, "provider"> & {
+  provider: string;
+  baseUrl?: string;
+  vertexProject?: string;
+  vertexLocation?: string;
+};
 
 /**
  * Wire the reviewer agent. Idempotent — calling twice replaces the
@@ -236,14 +249,17 @@ export function wireReviewerAgent(deps: WireReviewerDeps): WireReviewerResult {
       // toggling autoApprove off → on could reuse a stale verdict that
       // was produced under different policy assumptions.
       interactiveAutoApprove: settings.interactive.autoApprove,
-      // MAJOR-2: include Foundry endpoint in cacheScope so that a baseUrl change
-      // causes a cache miss — otherwise cached verdicts from the old endpoint
-      // would be replayed against a different (potentially attacker-controlled)
-      // Foundry deployment. GCP does not have a configurable endpoint.
+      // Include active provider transport identity in cacheScope so baseUrl /
+      // Vertex project changes invalidate reviewer verdicts produced under a
+      // different upstream deployment.
+      providerBaseUrl: effectiveSettings.baseUrl ?? null,
+      vertexProject: effectiveSettings.vertexProject ?? null,
+      vertexLocation: effectiveSettings.vertexLocation ?? null,
+      // Legacy Foundry endpoint key retained for existing cache-scope tests.
       endpoint:
         effectiveSettings.provider === "foundry" ||
         effectiveSettings.provider === "azure-foundry"
-          ? (deps.getFoundryEndpoint?.() ?? null)
+          ? (effectiveSettings.baseUrl ?? deps.getFoundryEndpoint?.() ?? null)
           : null,
     },
   });
@@ -313,6 +329,9 @@ function resolveEffectiveSettings(
     ...settings,
     provider: active.provider,
     model: active.model,
+    ...(active.baseUrl !== undefined ? { baseUrl: active.baseUrl } : {}),
+    ...(active.vertexProject !== undefined ? { vertexProject: active.vertexProject } : {}),
+    ...(active.vertexLocation !== undefined ? { vertexLocation: active.vertexLocation } : {}),
   };
 }
 

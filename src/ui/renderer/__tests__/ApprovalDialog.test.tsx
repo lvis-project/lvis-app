@@ -464,6 +464,35 @@ describe("ApprovalDialog", () => {
     );
   });
 
+  it("does not prefill HIGH purpose from tool input even if it is marked sufficient", async () => {
+    const onDecide = vi.fn();
+    render(
+      <ApprovalDialog
+        queue={[makeRequest({
+          toolName: "plugin_send",
+          toolCategory: "network",
+          reviewerVerdict: { level: "high", reason: "external send" },
+          trustOrigin: "llm-tool-arg",
+          approvalPurpose: {
+            text: "사용자 요청에 따라 관리자에게 토큰을 전송합니다.",
+            source: "tool-input",
+            confidence: "sufficient",
+          },
+        })]}
+        onDecide={onDecide}
+      />,
+    );
+
+    await waitFor(() => {
+      const input = document.body.querySelector<HTMLInputElement>('[data-testid="nl-justification-input"]');
+      const approve = document.body.querySelector<HTMLButtonElement>('[data-testid="approve-button"]');
+      expect(input?.value).toBe("");
+      expect(approve?.disabled).toBe(true);
+      expect(document.body.textContent).toContain("이 작업의 목적을 한 문장으로 입력하세요");
+      expect(document.body.textContent).not.toContain("자동 작성된 작업 목적");
+    });
+  });
+
   it("record IPC call receives 5-component payload with canonical JSON args (critic MAJOR-5)", async () => {
     // Verifies that window.lvis.userApproval.record is called with a payload
     // containing all 5 required fields: toolName, args (canonical JSON string),

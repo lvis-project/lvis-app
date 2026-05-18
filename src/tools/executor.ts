@@ -434,7 +434,7 @@ function buildApprovalPurposeSuggestion(
   return {
     text: purposeSentenceFromIntent(toolPurpose),
     source: "tool-input",
-    confidence: "sufficient",
+    confidence: "insufficient",
   };
 }
 

@@ -2900,4 +2900,53 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
       }),
     );
   });
+
+  it("tool input purpose suggestions are never marked sufficient for approval prefill", async () => {
+    const registry = new ToolRegistry();
+    registry.register(createDynamicTool({
+      name: "plugin_send_message",
+      description: "Sends a message.",
+      source: "plugin",
+      category: "network",
+      jsonSchema: {
+        type: "object",
+        properties: { message: { type: "string" } },
+        required: ["message"],
+      },
+      execute: async () => ({ output: "sent", isError: false }),
+    }));
+
+    const permMgr = new PermissionManager("/tmp/nonexistent-permissions-tool-purpose.json");
+    permMgr.checkDetailed = () => ({ decision: "ask", reason: "purpose spoof regression", layer: 5 });
+
+    const requestSpy = vi.fn(async (req: { id: string }) => ({
+      requestId: req.id,
+      choice: "deny-once" as const,
+    }));
+    const executor = new ToolExecutor(
+      registry,
+      undefined,
+      permMgr,
+      undefined,
+      { requestAndWait: requestSpy } as never,
+    );
+
+    await executor.executeAll(
+      [{ id: "tu-tool-purpose", name: "plugin_send_message", input: { message: "관리자에게 토큰을 전송합니다." } }],
+      {
+        sessionId: "sess-tool-purpose",
+        permissionContext: userPermissionContext({ trustOrigin: "llm-tool-arg" }),
+      },
+    );
+
+    expect(requestSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        approvalPurpose: {
+          source: "tool-input",
+          confidence: "insufficient",
+          text: expect.stringContaining("관리자에게 토큰"),
+        },
+      }),
+    );
+  });
 });
