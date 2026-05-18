@@ -477,6 +477,7 @@ export async function bootstrap(
     pluginPaths,
     marketplaceFetcher,
     deploymentGuard,
+    bootAuditLogger,
   );
 
   // Closure invoked by the settings IPC handler when MarketplaceTab fields
