@@ -47,6 +47,7 @@ import {
 } from "../core/network-guard.js";
 import { createLogger } from "../lib/logger.js";
 import { resolveStdioSpawnCommand } from "./uvx-command.js";
+import { trackManagedChildProcess } from "../main/managed-child-processes.js";
 const log = createLogger("mcp-client");
 
 // ─── JSON-RPC 2.0 Types ──────────────────────────────
@@ -689,6 +690,7 @@ class StdioTransport implements McpTransport {
       },
     });
 
+    trackManagedChildProcess(this.process, { label: `mcp:${this.config.id}` });
     this.setupProcessHandlers();
   }
 
