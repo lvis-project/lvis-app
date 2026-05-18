@@ -43,6 +43,13 @@ export interface AskUserQuestionItem {
   altIndices?: number[];
   allowFreeText: boolean;
   /**
+   * Multi-select mode. When true, clicking a choice toggles its membership
+   * in a selection set instead of single-picking; submission waits for an
+   * explicit 보내기. Response carries `choices: string[]` rather than the
+   * single `choice: string`.
+   */
+  allowMultiple?: boolean;
+  /**
    * Single-line placeholder for the free-text input. Korean ≤ 20 chars
    * by prompt contract; the UI does not enforce.
    */
@@ -74,6 +81,12 @@ interface DraftAnswer {
    * chip as selected at once.
    */
   choiceIndex?: number;
+  /**
+   * Multi-select: indices of every chip in the selection set, in click
+   * order. Mutually exclusive with `choice`/`choiceIndex` per draft — the
+   * UI sets one path or the other based on `item.allowMultiple`.
+   */
+  choiceIndices?: number[];
   freeText?: string;
 }
 
@@ -85,6 +98,9 @@ export interface AskUserQuestionCardProps {
 }
 
 function isAnswerComplete(item: AskUserQuestionItem, draft: DraftAnswer): boolean {
+  if (item.allowMultiple && draft.choiceIndices && draft.choiceIndices.length > 0) {
+    return true;
+  }
   if (draft.choice && draft.choice.length > 0) return true;
   if (item.allowFreeText && draft.freeText && draft.freeText.trim().length > 0) {
     return true;
@@ -92,7 +108,22 @@ function isAnswerComplete(item: AskUserQuestionItem, draft: DraftAnswer): boolea
   return false;
 }
 
+function selectedChoicesForMulti(item: AskUserQuestionItem, draft: DraftAnswer): string[] {
+  const list = effectiveChoices(item);
+  if (!item.allowMultiple || !draft.choiceIndices) return [];
+  return draft.choiceIndices
+    .filter((i) => i >= 0 && i < list.length)
+    .map((i) => list[i]);
+}
+
 function describeAnswer(item: AskUserQuestionItem, draft: DraftAnswer): string {
+  if (item.allowMultiple) {
+    const picks = selectedChoicesForMulti(item, draft);
+    const free = item.allowFreeText ? draft.freeText?.trim() : "";
+    const parts = [...picks];
+    if (free) parts.push(free);
+    return parts.length > 0 ? parts.join(", ") : "(미응답)";
+  }
   if (draft.choice) return draft.choice;
   if (item.allowFreeText && draft.freeText) return draft.freeText.trim();
   return "(미응답)";
@@ -140,6 +171,7 @@ export function AskUserQuestionCard({
   const [submitting, setSubmitting] = useState(false);
   const submitButtonRef = useRef<HTMLButtonElement | null>(null);
   const questionFormRef = useRef<QuestionFormHandle | null>(null);
+  const cardRef = useRef<HTMLDivElement | null>(null);
 
   // New request → reset all internal state. The id is the discriminator
   // so re-rendering the same card with the same questions keeps state.
@@ -147,6 +179,13 @@ export function AskUserQuestionCard({
     setStep(0);
     setDrafts(request.questions.map(() => ({})));
   }, [request.id, request.questions]);
+
+  // Auto-focus on mount so ArrowUp/Down can reach the card-level handler
+  // immediately — without this, focus stays on the chat composer and arrow
+  // keys move the textarea cursor instead of navigating chips.
+  useEffect(() => {
+    cardRef.current?.focus();
+  }, [request.id]);
 
   const onConfirmStep = isMulti && step === total;
   const currentItem = onConfirmStep ? null : request.questions[step];
@@ -187,10 +226,20 @@ export function AskUserQuestionCard({
 
   const submitAll = () =>
     void respondAndClose({
-      answers: drafts.map((d) => ({
-        choice: d.choice,
-        freeText: d.freeText?.trim() || undefined,
-      })),
+      answers: drafts.map((d, i) => {
+        const item = request.questions[i];
+        if (item.allowMultiple) {
+          const picks = selectedChoicesForMulti(item, d);
+          return {
+            choices: picks.length > 0 ? picks : undefined,
+            freeText: d.freeText?.trim() || undefined,
+          };
+        }
+        return {
+          choice: d.choice,
+          freeText: d.freeText?.trim() || undefined,
+        };
+      }),
     });
 
   const dismiss = () => void respondAndClose({ dismissed: true });
@@ -238,6 +287,7 @@ export function AskUserQuestionCard({
 
   return (
     <Card
+      ref={cardRef}
       aria-label="질문 응답 카드"
       className={`w-full max-w-none border border-l-4 border-l-message-user bg-card shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${className ?? ""}`}
       data-testid="ask-user-question-card"
@@ -305,12 +355,28 @@ export function AskUserQuestionCard({
             draft={currentDraft}
             disabled={submitting}
             onChoose={(choice, choiceIndex) => {
+              if (currentItem.allowMultiple) {
+                // Multi-select: toggle this index in/out of the set.
+                // Always returns "incomplete" — even when a chip is now in
+                // the set, submission must wait for explicit 보내기/다음 so
+                // the user can pick additional chips.
+                const prev = currentDraft.choiceIndices ?? [];
+                const exists = prev.includes(choiceIndex);
+                const nextIndices = exists
+                  ? prev.filter((i) => i !== choiceIndex)
+                  : [...prev, choiceIndex];
+                setAnswer(step, {
+                  choiceIndices: nextIndices,
+                  freeText: currentDraft.freeText,
+                });
+                return { kind: "incomplete" };
+              }
               const newDraft = { choice, choiceIndex };
               setAnswer(step, newDraft);
               if (!isMulti) {
-                // Single-question path: respondAndClose handles everything.
-                // Return "closed" so the keyboard handler does NOT call
-                // onAdvance() — doing so would be a redundant double advance.
+                // Single-question single-select path: respondAndClose handles
+                // everything. Return "closed" so the keyboard handler does NOT
+                // call onAdvance() — doing so would be a redundant double advance.
                 void respondAndClose({ answers: [{ choice }] });
                 return { kind: "closed" };
               }
@@ -322,7 +388,20 @@ export function AskUserQuestionCard({
               }
               return { kind: "incomplete" };
             }}
-            onFreeText={(freeText) => setAnswer(step, { freeText })}
+            onFreeText={(freeText) => {
+              // Multi-select: free text is additive — preserve the picked
+              // choice indices. Single-select keeps the original overwrite
+              // semantics so editing the input clears any chip selection
+              // (the user is changing their answer).
+              if (currentItem.allowMultiple) {
+                setAnswer(step, {
+                  choiceIndices: currentDraft.choiceIndices,
+                  freeText,
+                });
+              } else {
+                setAnswer(step, { freeText });
+              }
+            }}
             onSubmit={handleSubmit}
             onAdvance={goNext}
           />
@@ -380,16 +459,22 @@ export function AskUserQuestionCard({
                 보내기
               </Button>
             )}
-            {!isMulti && currentItem && currentItem.allowFreeText && (
-              <Button
-                size="sm"
-                disabled={submitting || !isAnswerComplete(currentItem, currentDraft)}
-                onClick={submitAll}
-                className="h-7 px-3 text-[11px]"
-              >
-                보내기
-              </Button>
-            )}
+            {!isMulti &&
+              currentItem &&
+              (currentItem.allowFreeText || currentItem.allowMultiple) && (
+                // Single-question card surfaces 보내기 whenever click-to-submit
+                // is suppressed: free-text answers and multi-select both need
+                // an explicit confirm. Single-select chip-only cards keep the
+                // click-to-submit shortcut.
+                <Button
+                  size="sm"
+                  disabled={submitting || !isAnswerComplete(currentItem, currentDraft)}
+                  onClick={submitAll}
+                  className="h-7 px-3 text-[11px]"
+                >
+                  보내기
+                </Button>
+              )}
           </div>
         </div>
       </CardContent>
@@ -554,9 +639,15 @@ const QuestionForm = forwardRef<QuestionFormHandle, QuestionFormProps>(function 
   // still receives tabIndex=0 when the sentinel is active.
   // arrowNav(+1) from card surface: focusAnswerAt(-1 + 1) = 0 ("first choice").
   // arrowNav(-1) from card surface: focusAnswerAt(-1 - 1) = -2 → wraps to last.
-  const [focusedIdx, setFocusedIdx] = useState<number>(
-    () => draft.choiceIndex ?? (recommendIndex(item) ?? -1),
-  );
+  const [focusedIdx, setFocusedIdx] = useState<number>(() => {
+    if (item.allowMultiple && draft.choiceIndices && draft.choiceIndices.length > 0) {
+      // For multi-select, seed focus to the last-toggled index so the user
+      // continues navigating from where they left off rather than jumping
+      // back to the recommend slot.
+      return draft.choiceIndices[draft.choiceIndices.length - 1];
+    }
+    return draft.choiceIndex ?? (recommendIndex(item) ?? -1);
+  });
   const buttonRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
@@ -653,7 +744,9 @@ const QuestionForm = forwardRef<QuestionFormHandle, QuestionFormProps>(function 
             // choice strings would otherwise mark every same-label chip
             // as selected at once. The index-prefixed React key below is
             // the same defense applied to reconciliation.
-            const selected = draft.choiceIndex === i;
+            const selected = item.allowMultiple
+              ? Boolean(draft.choiceIndices?.includes(i))
+              : draft.choiceIndex === i;
             const showRecommend = recommend === i;
             const showAlt = alts.has(i);
             // Roving tabIndex: only the focused item (or selected item when
@@ -674,6 +767,18 @@ const QuestionForm = forwardRef<QuestionFormHandle, QuestionFormProps>(function 
                 onFocus={() => setFocusedIdx(i)}
                 className="h-auto justify-start gap-2 px-2.5 py-1.5 text-[12px]"
               >
+                {item.allowMultiple && (
+                  <span
+                    aria-hidden="true"
+                    className={`inline-flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center rounded-sm border ${
+                      selected
+                        ? "border-current bg-current/15 text-inherit"
+                        : "border-current/40 text-inherit"
+                    }`}
+                  >
+                    {selected ? "✓" : ""}
+                  </span>
+                )}
                 {showRecommend && <ChoiceBadge kind="recommend" />}
                 {showAlt && <ChoiceBadge kind="alt" />}
                 <span className="flex-1 text-left whitespace-normal">{c}</span>

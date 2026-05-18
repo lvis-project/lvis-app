@@ -673,3 +673,251 @@ describe("AskUserQuestionCard — ArrowDown suppressed on confirm step", () => {
     expect(focused?.getAttribute("role")).not.toBe("option");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Auto-focus on mount — the long-standing "ArrowUp/Down doesn't work"
+// regression was actually a focus management gap: card was rendered but
+// never claimed keyboard focus, so arrow keys couldn't reach arrowNav.
+// ---------------------------------------------------------------------------
+
+describe("AskUserQuestionCard — auto-focus on mount enables arrow nav", () => {
+  it("focuses the card container immediately when the request mounts", async () => {
+    const api = makeApi();
+    const request = makeRequest();
+    const { getByTestId } = render(
+      <AskUserQuestionCard api={api as never} request={request} onResolved={vi.fn()} />,
+    );
+
+    const card = getByTestId("ask-user-question-card");
+    expect(document.activeElement).toBe(card);
+  });
+
+  it("ArrowDown works right after mount with no prior interaction", async () => {
+    const api = makeApi();
+    const request = makeRequest({
+      questions: [
+        { question: "색상", choices: ["빨강", "파랑"], allowFreeText: false },
+      ],
+    });
+
+    const { getByTestId } = render(
+      <AskUserQuestionCard api={api as never} request={request} onResolved={vi.fn()} />,
+    );
+
+    const card = getByTestId("ask-user-question-card");
+    // Note: no manual card.focus() — auto-focus on mount must have done it.
+    await act(async () => { fireEvent.keyDown(card, { key: "ArrowDown" }); });
+
+    expect(document.activeElement?.textContent).toContain("빨강");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Multi-select (allowMultiple: true)
+// ---------------------------------------------------------------------------
+
+describe("AskUserQuestionCard — multi-select", () => {
+  it("clicking a choice toggles its membership and does NOT auto-submit", async () => {
+    const api = makeApi();
+    const onResolved = vi.fn();
+    const request = makeRequest({
+      questions: [
+        {
+          question: "관심 분야 (복수)",
+          choices: ["AI", "보안", "UX"],
+          allowFreeText: false,
+          allowMultiple: true,
+        },
+      ],
+    });
+
+    const { getByText } = render(
+      <AskUserQuestionCard api={api as never} request={request} onResolved={onResolved} />,
+    );
+
+    await act(async () => { fireEvent.click(getByText("AI").closest("button")!); });
+    // Multi-select must not auto-submit on single-question cards either.
+    expect(api.respondAskUserQuestion).not.toHaveBeenCalled();
+
+    await act(async () => { fireEvent.click(getByText("UX").closest("button")!); });
+    expect(api.respondAskUserQuestion).not.toHaveBeenCalled();
+
+    // Both AI and UX should be visually selected.
+    expect(getByText("AI").closest("button")!.getAttribute("aria-selected")).toBe("true");
+    expect(getByText("UX").closest("button")!.getAttribute("aria-selected")).toBe("true");
+    expect(getByText("보안").closest("button")!.getAttribute("aria-selected")).toBe("false");
+  });
+
+  it("explicit 보내기 sends choices: string[] for multi-select", async () => {
+    const api = makeApi();
+    const onResolved = vi.fn();
+    const request = makeRequest({
+      questions: [
+        {
+          question: "관심 분야 (복수)",
+          choices: ["AI", "보안", "UX"],
+          allowFreeText: false,
+          allowMultiple: true,
+        },
+      ],
+    });
+
+    const { getByText, getByRole } = render(
+      <AskUserQuestionCard api={api as never} request={request} onResolved={onResolved} />,
+    );
+
+    await act(async () => { fireEvent.click(getByText("AI").closest("button")!); });
+    await act(async () => { fireEvent.click(getByText("UX").closest("button")!); });
+
+    const submit = getByRole("button", { name: "보내기" });
+    await act(async () => { fireEvent.click(submit); });
+
+    expect(api.respondAskUserQuestion).toHaveBeenCalledTimes(1);
+    expect(api.respondAskUserQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestId: "req-1",
+        answers: [expect.objectContaining({ choices: ["AI", "UX"] })],
+      }),
+    );
+  });
+
+  it("re-clicking a selected chip removes it from the selection set", async () => {
+    const api = makeApi();
+    const request = makeRequest({
+      questions: [
+        {
+          question: "관심 분야 (복수)",
+          choices: ["AI", "보안"],
+          allowFreeText: false,
+          allowMultiple: true,
+        },
+      ],
+    });
+
+    const { getByText, getByRole } = render(
+      <AskUserQuestionCard api={api as never} request={request} onResolved={vi.fn()} />,
+    );
+
+    await act(async () => { fireEvent.click(getByText("AI").closest("button")!); });
+    await act(async () => { fireEvent.click(getByText("보안").closest("button")!); });
+    // Toggle "AI" back off.
+    await act(async () => { fireEvent.click(getByText("AI").closest("button")!); });
+
+    expect(getByText("AI").closest("button")!.getAttribute("aria-selected")).toBe("false");
+    expect(getByText("보안").closest("button")!.getAttribute("aria-selected")).toBe("true");
+
+    const submit = getByRole("button", { name: "보내기" });
+    await act(async () => { fireEvent.click(submit); });
+
+    expect(api.respondAskUserQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        answers: [expect.objectContaining({ choices: ["보안"] })],
+      }),
+    );
+  });
+
+  it("Enter on a multi-select chip toggles it but does not advance the step", async () => {
+    const api = makeApi();
+    const request = makeRequest({
+      questions: [
+        {
+          question: "Q1",
+          choices: ["A", "B"],
+          allowFreeText: false,
+          allowMultiple: true,
+        },
+        { question: "Q2", choices: ["X"], allowFreeText: false },
+      ],
+    });
+
+    const { getByText, queryByText } = render(
+      <AskUserQuestionCard api={api as never} request={request} onResolved={vi.fn()} />,
+    );
+
+    const btnA = getByText("A").closest("button")!;
+    btnA.focus();
+    await act(async () => { fireEvent.keyDown(btnA, { key: "Enter" }); });
+
+    // Multi-select Enter must NOT auto-advance to Q2.
+    expect(queryByText("Q2")).toBeNull();
+    expect(btnA.getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("multi-select preserves picks when typing into the free-text input", async () => {
+    const api = makeApi();
+    const request = makeRequest({
+      questions: [
+        {
+          question: "도구 (복수)",
+          choices: ["vim", "vscode"],
+          allowFreeText: true,
+          allowMultiple: true,
+          placeholder: "그 외",
+        },
+      ],
+    });
+
+    const { getByText, getByPlaceholderText, getByRole } = render(
+      <AskUserQuestionCard api={api as never} request={request} onResolved={vi.fn()} />,
+    );
+
+    await act(async () => { fireEvent.click(getByText("vim").closest("button")!); });
+    const input = getByPlaceholderText("그 외") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "emacs" } });
+
+    // Chip still selected — free text didn't blow away the multi-select set.
+    expect(getByText("vim").closest("button")!.getAttribute("aria-selected")).toBe("true");
+
+    const submit = getByRole("button", { name: "보내기" });
+    await act(async () => { fireEvent.click(submit); });
+
+    expect(api.respondAskUserQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        answers: [expect.objectContaining({ choices: ["vim"], freeText: "emacs" })],
+      }),
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 4-question card — confirms the cap is honored end-to-end through the UI
+// ---------------------------------------------------------------------------
+
+describe("AskUserQuestionCard — 4-question pagination", () => {
+  it("paginates through 4 questions and submits all answers", async () => {
+    const api = makeApi();
+    const request = makeRequest({
+      questions: [
+        { question: "Q1", choices: ["A"], allowFreeText: false },
+        { question: "Q2", choices: ["B"], allowFreeText: false },
+        { question: "Q3", choices: ["C"], allowFreeText: false },
+        { question: "Q4", choices: ["D"], allowFreeText: false },
+      ],
+    });
+
+    const { getByText, getByRole } = render(
+      <AskUserQuestionCard api={api as never} request={request} onResolved={vi.fn()} />,
+    );
+
+    // Advance through each step via Enter on the only choice.
+    for (const label of ["A", "B", "C", "D"]) {
+      const btn = getByText(label).closest("button")!;
+      btn.focus();
+      await act(async () => { fireEvent.keyDown(btn, { key: "Enter" }); });
+    }
+
+    const submit = getByRole("button", { name: "보내기" });
+    await act(async () => { fireEvent.click(submit); });
+
+    expect(api.respondAskUserQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        answers: [
+          { choice: "A" },
+          { choice: "B" },
+          { choice: "C" },
+          { choice: "D" },
+        ],
+      }),
+    );
+  });
+});
