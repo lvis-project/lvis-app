@@ -671,8 +671,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     return () => window.removeEventListener("keydown", handler);
   }, [handleImmediateInject]);
 
-  // ⌘K = 가이드 호출. BottomActionRow 의 ghost 버튼과 동일
-  // onGuide 위임. text 비어 있으면 noop. busy 와 무관 (idle 에서도 가이드 가능).
+  // ⌘K = 가이드 호출. text 비어 있으면 noop. busy 와 무관 (idle 에서도 가이드 가능).
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key !== "k" && e.key !== "K") return;
@@ -1489,7 +1488,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             }
             approvalSlot={<DeferredApprovalChip draftText={question} />}
           />
-          {/* v6 layout: Composer (textarea) + BottomActionRow (TokenRing/가이드/
+          {/* v6 layout: Composer (textarea) + BottomActionRow (TokenRing/
               단축키/취소/Send) 가 하나의 흰색 컨테이너 안. 사용자 인지 = "타이핑
               영역 + 즉시 액션" 한 묶음. shadow-md + rounded-xl 로 경계 강조. */}
           <div className="mx-3 rounded-xl bg-input-bar shadow-md overflow-hidden">
@@ -1549,27 +1548,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
               // ESC handler 와 동일: 큐를 inject + abort (멈춤 X, 입력으로 inject).
               flushQueueAsUserMessage();
             }}
-            onGuide={() => {
-              // 가이드 버튼 = ChatView 의 onGuide 호출 위임. ⌘K 단축키와
-              // 동일한 진입점. 현재는 streaming 중
-              // 방향지시 와 동일 동작 (text 비어있어도 시도).
-              const text = question;
-              void (async () => {
-                const result = await onGuide(text);
-                if (result?.ok === true) {
-                  setQuestion("");
-                } else if (result?.ok === false) {
-                  const message =
-                    result.error === "queue-full" ? "방향 지시가 너무 많아 대기열이 가득 찼습니다." :
-                    result.error === "too-long" ? "방향 지시 한 건이 너무 깁니다 (최대 8000자)." :
-                    result.error === "no-active-turn" ? "진행 중인 응답이 없어 방향 지시를 보낼 수 없습니다." :
-                    `방향 지시 전송 실패: ${result.error}`;
-                  onGuideError(message);
-                }
-              })();
-            }}
-            guideDisabled={!streaming || question.trim().length === 0}
-          />
+            />
           </div>
           {/* PermissionModeBadge + DeferredApprovalChip 모두
               InputActionBar trailing 으로 이전 완료. 본 자리 비움. */}
