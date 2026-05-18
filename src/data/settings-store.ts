@@ -114,6 +114,15 @@ export interface FeatureFlags {
    * patch flow — no separate disk file.
    */
   onboardingCompleted?: boolean;
+  /**
+   * O-X1 Live Auto-play (proposal: docs/architecture/proposals/live-autoplay.md).
+   * Demo-only flag. When true *and* `process.env.LVIS_DEMO_VENDOR` is set,
+   * ChatView mounts in demo-autoplay mode on first run. After the user takes
+   * over (any keystroke or "키 잡기 →" click) the flag is flipped to false so
+   * the demo never re-runs. In packaged production builds with `LVIS_DEMO_VENDOR`
+   * unset this entire path is dead — the demo cannot silently activate.
+   */
+  demoAutoplayEnabled?: boolean;
 }
 
 export interface AppSettings {
