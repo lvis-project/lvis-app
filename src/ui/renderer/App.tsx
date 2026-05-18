@@ -364,7 +364,7 @@ export function App() {
   // LLM settings + context budget (single source of truth: src/shared/pricing-data.ts)
   const { llmVendor, llmModel, enableThinkingChat, refresh: refreshLlmSettings, toggleThinking } = useSettings(api);
 
-  const { usedTokens, contextBudget, contextOverflowPct, tpmLimit, tpmPct, isTpmOverflow } =
+  const { usedTokens, contextBudget, effectiveBudget, contextOverflowPct, tpmLimit, tpmPct, isTpmOverflow } =
     useContextBudget({ entries, llmVendor, llmModel, draftText: question });
 
   const activePluginView = useMemo(() => pluginViews.find((i) => toViewKey(i) === activeView), [pluginViews, activeView]);
@@ -872,7 +872,7 @@ export function App() {
     question, setQuestion, chatEndRef, currentSessionId, hasApiKey, onOpenSettings,
     searchOpen, searchQuery, searchCase, searchMatches, searchMatchSet, searchIdx, searchHighlight,
     searchChangeQuery, searchToggleCase, searchNext, searchPrev, searchCloseOverlay, searchToggleOverlay,
-    contextOverflowPct, usedTokens, contextBudget,
+    contextOverflowPct, usedTokens, contextBudget, effectiveBudget,
     tpmLimit, tpmPct, isTpmOverflow,
     rolePresets, activePreset, activePresetId, setActivePresetId,
     agentOptions, skillOptions, activeAgentName, setActiveAgentName,
