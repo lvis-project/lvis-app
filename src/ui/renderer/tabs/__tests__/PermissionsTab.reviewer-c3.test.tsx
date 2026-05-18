@@ -1,16 +1,9 @@
 /**
- * Permission policy C3 — Settings UI key-driven dynamic activation tests.
+ * Permission policy C3 — Settings UI active-LLM following tests.
  *
- * Verifies that:
- *   - `reviewerProviderHasKey` is called for all 5 providers on mount
- *   - `reviewerProviderHasKey` is called again after a successful reviewerDispatch
- *   - The provider select is rendered
- *   - The footnote for Foundry/GCP key storage is present
- *
- * NOTE: SelectItem content renders in a Radix portal that is not in the DOM
- * until the Select is opened. Per-item disabled state tests are covered in
- * the provider-adapters unit tests (reviewerProviderKeyPresent predicate).
- * The UI integration tests verify the IPC call pattern and rendered elements.
+ * Provider/model are no longer reviewer-local controls. The reviewer follows
+ * the active Intelligence LLM identity, so this panel must not query or mutate
+ * legacy `permissions.reviewer.provider/model` as if they were authoritative.
  */
 import "../../../../../test/renderer/setup.js";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -141,7 +134,7 @@ function installApi(providerKeys: Partial<Record<string, boolean>> = {}) {
   return lvis;
 }
 
-describe("PermissionsTab C3 — provider key-driven activation", () => {
+describe("PermissionsTab C3 — active LLM following", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     delete (window as unknown as { lvis?: unknown }).lvis;
@@ -152,67 +145,55 @@ describe("PermissionsTab C3 — provider key-driven activation", () => {
     delete (window as unknown as { lvis?: unknown }).lvis;
   });
 
-  it("calls reviewerProviderHasKey for all 5 providers on mount", async () => {
+  it("does not query legacy reviewer provider keys on mount", async () => {
     const api = installApi();
     await act(async () => {
       render(<PermissionsTab />);
     });
     await waitFor(() =>
-      expect(api.permission.reviewerProviderHasKey).toHaveBeenCalled(),
+      expect(screen.getByTestId("reviewer-active-llm-source")).toBeInTheDocument(),
     );
-    expect(api.permission.reviewerProviderHasKey).toHaveBeenCalledWith("openai");
-    expect(api.permission.reviewerProviderHasKey).toHaveBeenCalledWith("anthropic");
-    expect(api.permission.reviewerProviderHasKey).toHaveBeenCalledWith("google");
-    expect(api.permission.reviewerProviderHasKey).toHaveBeenCalledWith("foundry");
-    expect(api.permission.reviewerProviderHasKey).toHaveBeenCalledWith("gcp-playground");
-    // Exactly 5 key checks — one per provider
-    expect(api.permission.reviewerProviderHasKey).toHaveBeenCalledTimes(5);
+    expect(api.permission.reviewerProviderHasKey).not.toHaveBeenCalled();
   });
 
-  it("renders the reviewer provider select trigger", async () => {
+  it("renders active LLM source instead of reviewer provider/model controls", async () => {
     installApi();
     await act(async () => {
       render(<PermissionsTab />);
     });
     await waitFor(() =>
-      expect(screen.queryByTestId("reviewer-provider-select")).toBeInTheDocument(),
+      expect(screen.queryByTestId("reviewer-active-llm-source")).toBeInTheDocument(),
     );
+    expect(screen.queryByTestId("reviewer-provider-select")).toBeNull();
+    expect(screen.queryByTestId("reviewer-model-input")).toBeNull();
   });
 
-  it("shows Foundry/GCP key storage footnote", async () => {
+  it("shows that provider/model are controlled by Intelligence settings", async () => {
     installApi();
     await act(async () => {
       render(<PermissionsTab />);
     });
     await waitFor(() =>
-      expect(screen.queryByText(/Azure AI Foundry/)).toBeInTheDocument(),
+      expect(screen.queryByText(/지능 설정의 현재 공급자\/모델/)).toBeInTheDocument(),
     );
-    expect(screen.getByText(/Azure AI Foundry/)).toBeInTheDocument();
-    expect(screen.getByText(/Google AI Studio/)).toBeInTheDocument();
+    expect(screen.getByText(/provider\/model 은 지능 설정의 활성 LLM을 따릅니다/)).toBeInTheDocument();
   });
 
-  it("calls reviewerProviderHasKey again after a successful reviewerDispatch (key map refresh)", async () => {
+  it("does not refresh legacy provider keys after a successful reviewerDispatch", async () => {
     const api = installApi({ openai: true });
     await act(async () => {
       render(<PermissionsTab />);
     });
-    // Wait for initial key map load (5 calls from fetchAll)
     await waitFor(() =>
-      expect(api.permission.reviewerProviderHasKey).toHaveBeenCalledTimes(5),
+      expect(screen.getByTestId("reviewer-mode-llm")).toBeInTheDocument(),
     );
-    const countAfterMount = api.permission.reviewerProviderHasKey.mock.calls.length;
 
-    // Simulate the LLM provider mode radio being selected (triggers applyReviewerCommand)
     await act(async () => {
       fireEvent.click(screen.getByTestId("reviewer-mode-llm"));
     });
 
-    // After a successful dispatch, refreshProviderKeyMap is called (5 more calls)
-    await waitFor(() =>
-      expect(api.permission.reviewerProviderHasKey.mock.calls.length).toBeGreaterThan(
-        countAfterMount,
-      ),
-    );
+    expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("mode llm");
+    expect(api.permission.reviewerProviderHasKey).not.toHaveBeenCalled();
   });
 
   it("does not call reviewerProviderHasKey for a failed dispatch", async () => {
@@ -239,18 +220,13 @@ describe("PermissionsTab C3 — provider key-driven activation", () => {
       render(<PermissionsTab />);
     });
     await waitFor(() =>
-      expect(api.permission.reviewerProviderHasKey).toHaveBeenCalledTimes(5),
+      expect(screen.getByTestId("reviewer-mode-llm")).toBeInTheDocument(),
     );
-    const countAfterMount = api.permission.reviewerProviderHasKey.mock.calls.length;
 
-    // Trigger a failing dispatch
     await act(async () => {
       fireEvent.click(screen.getByTestId("reviewer-mode-llm"));
     });
 
-    // On dispatch failure, refreshProviderKeyMap is NOT called
-    // Small delay to confirm no extra calls happen
-    await new Promise((r) => setTimeout(r, 50));
-    expect(api.permission.reviewerProviderHasKey.mock.calls.length).toBe(countAfterMount);
+    expect(api.permission.reviewerProviderHasKey).not.toHaveBeenCalled();
   });
 });
