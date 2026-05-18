@@ -73,7 +73,19 @@ export function getModelPreflightThreshold(vendor: LLMVendor, model: string): nu
   if (_runtimePreflightOverride !== null) return _runtimePreflightOverride;
   const devOverride = readDevPreflightOverride();
   if (devOverride !== null) return devOverride;
-  return getPreflightThreshold(getModelContextWindow(vendor, model));
+  const windowThreshold = getPreflightThreshold(getModelContextWindow(vendor, model));
+  // Issue #900 #3: small-tier 모델 (nano 200K TPM, mini 2M TPM 등) 은
+  // contextWindow 보다 *분당 처리량 (TPM)* 한도가 훨씬 작음 — 단발 input 이
+  // window 안이라도 TPM 초과로 429. preflight 가 TPM*0.8 도 같이 보고
+  // *min* 으로 compact trigger — 사용자 영상의 271K nano 사고 prevention.
+  // 0.8 safety margin: 대화 history 외에 system prompt / tool schemas /
+  // pageindex 가 추가로 들어가 실제 전송 size 는 estimate 보다 큼.
+  const pricing = lookupPricing(vendor, model);
+  if (typeof pricing.tpmDefault === "number" && pricing.tpmDefault > 0) {
+    const tpmThreshold = Math.floor(pricing.tpmDefault * 0.8);
+    return Math.min(windowThreshold, tpmThreshold);
+  }
+  return windowThreshold;
 }
 
 let _devOverrideWarnedValue: number | null | undefined = undefined;
