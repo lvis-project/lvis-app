@@ -40,10 +40,16 @@ function invoke(channel: string, ...args: unknown[]): Promise<unknown> {
 function makeDeps() {
   return {
     settingsService: {
+      get: vi.fn(() => ({
+        provider: "openai",
+        vendors: { openai: { model: "gpt-4o" } },
+      })),
       setSecret: vi.fn(async () => undefined),
       patch: vi.fn(async () => undefined),
     },
     auditLogger: { log: vi.fn() },
+    conversationLoop: { refreshProvider: vi.fn() },
+    rewireReviewerAgent: vi.fn(),
     refreshActiveLlmWildcard: vi.fn(),
   };
 }
@@ -117,6 +123,43 @@ describe("auth:login-mockup IPC handler (#893 top-level)", () => {
       "llm.apiKey.openai",
       "sk-demo-test",
     );
+    expect(deps.rewireReviewerAgent).toHaveBeenCalled();
+    expect(deps.conversationLoop.refreshProvider).toHaveBeenCalled();
+    expect(deps.refreshActiveLlmWildcard).toHaveBeenCalled();
+  });
+
+  it("rolls back LLM settings when reviewer rewire fails", async () => {
+    process.env.LVIS_DEMO_VENDOR = "claude";
+    process.env.LVIS_DEMO_KEY_CLAUDE = "sk-ant-demo";
+    const prevLlm = {
+      provider: "openai",
+      vendors: { openai: { model: "gpt-4o" }, claude: { model: "claude-sonnet-4-6" } },
+    };
+    const deps = makeDeps();
+    deps.settingsService.get.mockReturnValue(prevLlm);
+    deps.rewireReviewerAgent
+      .mockImplementationOnce(() => {
+        throw new Error("missing reviewer provider");
+      })
+      .mockImplementationOnce(() => undefined);
+    const { registerAuthHandlers } = await loadAuthModule();
+    registerAuthHandlers(deps as never);
+
+    const result = await invoke("lvis:auth:login-mockup", {
+      username: "demo",
+      password: "demo123",
+    });
+
+    expect(result).toEqual({ ok: false, error: "reviewer-rewire-failed" });
+    expect(deps.settingsService.patch).toHaveBeenNthCalledWith(1, {
+      llm: {
+        authMode: "login",
+        provider: "claude",
+      },
+    });
+    expect(deps.settingsService.patch).toHaveBeenNthCalledWith(2, { llm: prevLlm });
+    expect(deps.rewireReviewerAgent).toHaveBeenCalledTimes(2);
+    expect(deps.conversationLoop.refreshProvider).toHaveBeenCalled();
     expect(deps.refreshActiveLlmWildcard).toHaveBeenCalled();
   });
 

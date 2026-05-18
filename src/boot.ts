@@ -589,9 +589,13 @@ export async function bootstrap(
   const readActiveReviewerLlm = () => {
     const llm = settingsService.get("llm");
     const provider = llm.provider;
+    const block = llm.vendors[provider];
     return {
       provider,
-      model: llm.vendors[provider].model,
+      model: block.model,
+      ...(block.baseUrl ? { baseUrl: block.baseUrl } : {}),
+      ...(block.vertexProject ? { vertexProject: block.vertexProject } : {}),
+      ...(block.vertexLocation ? { vertexLocation: block.vertexLocation } : {}),
     };
   };
   const rewireReviewerAgent = (): void => {
