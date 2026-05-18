@@ -14,7 +14,7 @@ import type {
   UserApprovalVerdict,
 } from "./shared/permissions-events.js";
 import type { SerializedHistoryMessage } from "./shared/chat-history.js";
-import { OVERLAY_V1, PERMISSIONS, ROUTINES_V2, SETTINGS } from "./shared/ipc-channels.js";
+import { OVERLAY_V1, PERMISSIONS, ROUTINES_V2, SETTINGS, UI } from "./shared/ipc-channels.js";
 import { PLUGIN_PRIVATE_NAMESPACES } from "./plugins/capabilities.js";
 import type {
   ChatSendInputOrigin,
@@ -22,6 +22,10 @@ import type {
   UserKeyboardIntentSnapshot,
 } from "./shared/chat-origin.js";
 import type { SelectedAssistantContext } from "./shared/assistant-context.js";
+import type {
+  AssistantContextMenuAction,
+  AssistantContextMenuPayload,
+} from "./shared/assistant-context-menu.js";
 
 // ─── Deterministic plugin webview asset URLs ────────────────────────────────
 // `__dirname` here resolves to the host preload's bundled location
@@ -553,7 +557,7 @@ const api = {
     }>,
 
   // ─── Marketplace update notifications (S8) ───────
-  onMarketplaceUpdatesAvailable: (handler: (updates: Array<{ pluginId: string; installedVersion: string; latestVersion: string }>) => void) => {
+  onMarketplaceUpdatesAvailable: (handler: (updates: Array<{ pluginId: string; pluginName?: string; installedVersion: string; latestVersion: string }>) => void) => {
     const listener = (_event: unknown, updates: Parameters<typeof handler>[0]) => handler(updates);
     ipcRenderer.on("marketplace:updates-available", listener);
     return () => ipcRenderer.removeListener("marketplace:updates-available", listener);
@@ -1306,6 +1310,15 @@ contextBridge.exposeInMainWorld("lvis", {
   mcp: api.mcp,
   plugins: {
     cards: () => ipcRenderer.invoke("lvis:plugins:cards"),
+  },
+  ui: {
+    showAssistantContextMenu: (payload: AssistantContextMenuPayload) =>
+      ipcRenderer.invoke(UI.assistantContextMenu, payload),
+    onAssistantContextAction: (cb: (action: AssistantContextMenuAction) => void) => {
+      const listener = (_event: unknown, action: AssistantContextMenuAction) => cb(action);
+      ipcRenderer.on(UI.assistantContextAction, listener);
+      return () => ipcRenderer.removeListener(UI.assistantContextAction, listener);
+    },
   },
   pluginConfig: {
     get: (pluginId: string) => ipcRenderer.invoke("lvis:plugins:config:get", pluginId),
