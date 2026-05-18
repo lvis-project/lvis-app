@@ -27,6 +27,9 @@ import {
   buildTitlebarButtonScript,
 } from "./window-titlebar-shell.js";
 import { resolveAppIconPath } from "./app-icon.js";
+import { createLogger } from "../lib/logger.js";
+
+const log = createLogger("auth-window");
 
 const requireFromHere = createRequire(import.meta.url);
 
@@ -555,6 +558,36 @@ export async function openAuthWindow(
     prefs.partition = effectivePartition;
   });
 
+  // Diagnostic instrumentation — issue #960. Silent-SSO warmup 회귀 (window
+  // 가 ~39ms 만에 close — race 의심) 의 정확한 close-trigger path 식별을
+  // 위해 모든 close path 에 구조화된 로그 기록. ms delta + URL + reason
+  // 추적. 진단 단계 — overhead 무시 가능 (auth-window 는 사용자 명시
+  // 액션마다 1회 생성).
+  const createdAtMs = Date.now();
+  const sinceCreated = (): number => Date.now() - createdAtMs;
+  const sanitizedOpenUrl = sanitizeUrlForLog(url);
+  // `lastSeenUrl` is for diagnostics — updated from any nav signal (including
+  // `did-navigate-in-page` which fires on history.pushState/replaceState).
+  // `lastCommittedUrl` only updates on `did-navigate` (real top-level commit)
+  // — used as the trust gate for grace-collect. Page JS can spoof the former
+  // via `history.replaceState(...)`, but cannot fabricate a top-level
+  // navigation (security cycle-1 HIGH).
+  let lastSeenUrl: string | null = null;
+  let lastCommittedUrl: string | null = null;
+  let webviewAttached = false;
+  log.info(
+    {
+      phase: "open",
+      url: sanitizedOpenUrl,
+      partition: effectivePartition,
+      showRequested,
+      timeoutMs,
+      completionPatternCount: normalizedCompletionPatterns.length,
+      cookieHostCount: normalizedCookieHosts.length,
+    },
+    `[auth-window:open] url=${sanitizedOpenUrl} partition=${effectivePartition} show=${showRequested} timeoutMs=${timeoutMs}`,
+  );
+
   return new Promise<AuthCookie[] | OpenAuthWindowResult>((resolve, reject) => {
     let settled = false;
     const finish = (fn: () => void) => {
@@ -565,6 +598,16 @@ export async function openAuthWindow(
 
     const timer = setTimeout(() => {
       finish(() => {
+        log.warn(
+          {
+            phase: "close",
+            closeReason: "timeout",
+            elapsedMs: sinceCreated(),
+            lastSeenUrl: lastSeenUrl ? sanitizeUrlForLog(lastSeenUrl) : null,
+            webviewAttached,
+          },
+          `[auth-window:timeout] url=${sanitizedOpenUrl} elapsedMs=${sinceCreated()} lastSeenUrl=${lastSeenUrl ? sanitizeUrlForLog(lastSeenUrl) : "none"} webviewAttached=${webviewAttached}`,
+        );
         reject(new Error(`openAuthWindow: login timeout after ${timeoutMs}ms`));
         if (!authWindow.isDestroyed()) authWindow.close();
       });
@@ -594,10 +637,53 @@ export async function openAuthWindow(
 
     authWindow.webContents.on("did-attach-webview", (_event, contents) => {
       authContents = contents;
+      webviewAttached = true;
       markAsAuthOwned(contents);
       attachAuthNavigationGuards(contents);
-      contents.on("did-navigate", () => { void checkAndCollect(); });
-      contents.on("did-navigate-in-page", () => { void checkAndCollect(); });
+      log.info(
+        { phase: "webview-attached", elapsedMs: sinceCreated(), url: sanitizedOpenUrl },
+        `[auth-window:webview-attached] elapsedMs=${sinceCreated()} url=${sanitizedOpenUrl}`,
+      );
+      const trackNav = (navUrl: string, kind: string, isCommitted: boolean): void => {
+        lastSeenUrl = navUrl;
+        if (isCommitted) lastCommittedUrl = navUrl;
+        log.info(
+          { phase: kind, elapsedMs: sinceCreated(), url: sanitizeUrlForLog(navUrl), isCommitted },
+          `[auth-window:${kind}] elapsedMs=${sinceCreated()} url=${sanitizeUrlForLog(navUrl)} committed=${isCommitted}`,
+        );
+      };
+      contents.on("did-navigate", (_e, navUrl: string) => {
+        trackNav(navUrl, "did-navigate", true);
+        void checkAndCollect();
+      });
+      contents.on("did-navigate-in-page", (_e, navUrl: string) => {
+        // history.pushState / replaceState — page-script controlled, NOT a
+        // committed navigation. Diagnostic only, not trusted for grace-collect.
+        trackNav(navUrl, "did-navigate-in-page", false);
+        void checkAndCollect();
+      });
+      contents.on("will-redirect", (_e, navUrl: string) => {
+        // Pre-commit redirect intent — not yet observed by server.
+        trackNav(navUrl, "will-redirect", false);
+      });
+      contents.on("did-finish-load", () => {
+        const cur = (() => { try { return contents.getURL(); } catch { return null; } })();
+        if (cur) lastSeenUrl = cur;
+        log.info(
+          { phase: "did-finish-load", elapsedMs: sinceCreated(), url: cur ? sanitizeUrlForLog(cur) : null },
+          `[auth-window:did-finish-load] elapsedMs=${sinceCreated()} url=${cur ? sanitizeUrlForLog(cur) : "unknown"}`,
+        );
+      });
+      contents.on("destroyed", () => {
+        log.warn(
+          {
+            phase: "webview-destroyed",
+            elapsedMs: sinceCreated(),
+            lastSeenUrl: lastSeenUrl ? sanitizeUrlForLog(lastSeenUrl) : null,
+          },
+          `[auth-window:webview-destroyed] elapsedMs=${sinceCreated()} lastSeenUrl=${lastSeenUrl ? sanitizeUrlForLog(lastSeenUrl) : "none"}`,
+        );
+      });
       // Inject eruda into the sandboxed webview after each navigation so
       // the in-page console survives the SPA's own client-side routes.
       // The webview's CSP comes from the remote server and may forbid
@@ -652,6 +738,17 @@ export async function openAuthWindow(
     const failReject = (errorCode: number, errorDesc: string, validatedUrl: string) =>
       finish(() => {
         clearTimeout(timer);
+        log.warn(
+          {
+            phase: "close",
+            closeReason: "did-fail-load",
+            errorCode,
+            errorDescription: errorDesc,
+            url: sanitizeUrlForLog(validatedUrl),
+            elapsedMs: sinceCreated(),
+          },
+          `[auth-window:fail-load] errorCode=${errorCode} desc=${errorDesc} url=${sanitizeUrlForLog(validatedUrl)} elapsedMs=${sinceCreated()}`,
+        );
         reject(
           new Error(
             `openAuthWindow: navigation failed (${errorCode} ${errorDesc}) url=${sanitizeUrlForLog(validatedUrl)}`,
@@ -692,14 +789,109 @@ export async function openAuthWindow(
     authWindow.webContents.on("render-process-gone", (_e, details) => {
       finish(() => {
         clearTimeout(timer);
+        log.warn(
+          {
+            phase: "close",
+            closeReason: "render-process-gone",
+            reason: details.reason,
+            elapsedMs: sinceCreated(),
+            url: sanitizedOpenUrl,
+          },
+          `[auth-window:render-process-gone] reason=${details.reason} elapsedMs=${sinceCreated()} url=${sanitizedOpenUrl}`,
+        );
         reject(new Error(`openAuthWindow: render process gone (${details.reason})`));
         if (!authWindow.isDestroyed()) authWindow.close();
       });
     });
 
     authWindow.on("closed", () => {
+      if (settled) return;
+      clearTimeout(timer);
+      // Grace-collect (issue #960 fix) — window 가 silent SSO race 로 너무
+      // 빨리 닫혔어도 webview 가 attach 됐고 *committed* navigation URL 이
+      // completion pattern 매치하면 partition session 에서 cookies 한 번 더
+      // fetch 시도. server 가 cookie 검증을 어차피 함 → 보안 우회 아님.
+      // 반드시 `lastCommittedUrl` (did-navigate top-level only) 사용 —
+      // `lastSeenUrl` 은 page JS 가 history.pushState 로 spoof 가능 (security
+      // cycle-1 HIGH).
+      const lastUrlSanitized = lastSeenUrl ? sanitizeUrlForLog(lastSeenUrl) : null;
+      const lastCommittedSanitized = lastCommittedUrl
+        ? sanitizeUrlForLog(lastCommittedUrl)
+        : null;
+      const isGraceEligible =
+        webviewAttached &&
+        lastCommittedUrl !== null &&
+        isCompletionUrl(lastCommittedUrl, normalizedCompletionPatterns);
+      if (isGraceEligible && lastCommittedUrl) {
+        const capturedUrl = lastCommittedUrl;
+        const partitionSession = session.fromPartition(effectivePartition);
+        log.warn(
+          {
+            phase: "close",
+            closeReason: "closed-event",
+            graceCollectAttempt: true,
+            url: sanitizedOpenUrl,
+            lastSeenUrl: lastUrlSanitized,
+            lastCommittedUrl: lastCommittedSanitized,
+            webviewAttached,
+            elapsedMs: sinceCreated(),
+          },
+          `[auth-window:closed-grace-collect] url=${sanitizedOpenUrl} committed=${lastCommittedSanitized} elapsedMs=${sinceCreated()} — attempting grace cookie fetch`,
+        );
+        void (async () => {
+          try {
+            const allCookies = await partitionSession.cookies.get({});
+            const filtered = filterCookiesByHost(allCookies, normalizedCookieHosts);
+            finish(() => {
+              log.info(
+                {
+                  phase: "close",
+                  closeReason: "closed-event-grace-resolved",
+                  cookieCount: filtered.length,
+                  elapsedMs: sinceCreated(),
+                },
+                `[auth-window:closed-grace-resolved] cookies=${filtered.length} elapsedMs=${sinceCreated()}`,
+              );
+              resolve(buildAuthResult(filtered, capturedUrl, returnFinalUrl));
+            });
+          } catch (err) {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            finish(() => {
+              log.warn(
+                {
+                  phase: "close",
+                  closeReason: "closed-event-grace-failed",
+                  errorMessage: errMsg,
+                  elapsedMs: sinceCreated(),
+                },
+                `[auth-window:closed-grace-failed] err=${errMsg} elapsedMs=${sinceCreated()}`,
+              );
+              reject(new Error(`openAuthWindow: window closed before login completed (grace fetch failed: ${errMsg})`));
+            });
+          }
+        })();
+        return;
+      }
       finish(() => {
-        clearTimeout(timer);
+        // issue #960 hint — webviewAttached=false + elapsedMs<100 면 webview
+        // attach 도착 전에 외부 close. 가능 source: window-control IPC,
+        // partition reuse cleanup, render-process crash 직전 등.
+        // webviewAttached=true + lastSeenUrl 미매치 면 page 의 window.close()
+        // 또는 checkAndCollect 가 reach 안 한 silent SSO race (grace path
+        // 도 trigger 안 됨 — completion URL 아니라).
+        log.warn(
+          {
+            phase: "close",
+            closeReason: "closed-event",
+            graceCollectAttempt: false,
+            url: sanitizedOpenUrl,
+            lastSeenUrl: lastUrlSanitized,
+            lastCommittedUrl: lastCommittedSanitized,
+            webviewAttached,
+            elapsedMs: sinceCreated(),
+          },
+          `[auth-window:closed-before-completion] url=${sanitizedOpenUrl} lastSeenUrl=${lastUrlSanitized ?? "none"} committed=${lastCommittedSanitized ?? "none"} webviewAttached=${webviewAttached} elapsedMs=${sinceCreated()}`,
+        );
         reject(new Error("openAuthWindow: window closed before login completed"));
       });
     });
@@ -714,7 +906,18 @@ export async function openAuthWindow(
     authWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`).catch((err) => {
       finish(() => {
         clearTimeout(timer);
-        reject(new Error(`openAuthWindow: load failed for ${sanitizeUrlForLog(url)} (${(err as Error).name || "Error"})`));
+        const errName = (err as Error).name || "Error";
+        log.warn(
+          {
+            phase: "close",
+            closeReason: "load-url-failed",
+            url: sanitizedOpenUrl,
+            errorName: errName,
+            elapsedMs: sinceCreated(),
+          },
+          `[auth-window:load-url-failed] url=${sanitizedOpenUrl} err=${errName} elapsedMs=${sinceCreated()}`,
+        );
+        reject(new Error(`openAuthWindow: load failed for ${sanitizeUrlForLog(url)} (${errName})`));
         if (!authWindow.isDestroyed()) authWindow.close();
       });
     });
