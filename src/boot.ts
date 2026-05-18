@@ -132,6 +132,7 @@ import { migrateCanonicalization } from "./permissions/user-approval-store.js";
 import { createProvider, secretKeyFor } from "./engine/llm/provider-factory.js";
 import { reviewerVendorFor } from "./permissions/reviewer/reviewer-vendor-map.js";
 import type { LLMProvider } from "./engine/llm/types.js";
+import { isLLMVendor } from "./shared/llm-vendor-defaults.js";
 import {
   bindManifestIntegrityAudit,
   manifestIntegrityState,
@@ -477,6 +478,7 @@ export async function bootstrap(
     pluginPaths,
     marketplaceFetcher,
     deploymentGuard,
+    bootAuditLogger,
   );
 
   // Closure invoked by the settings IPC handler when MarketplaceTab fields
@@ -559,19 +561,48 @@ export async function bootstrap(
   // VercelUnifiedProvider streaming surface — the reviewer needs only a
   // one-shot complete() call shape.
   const reviewerStreamProviderFor = (vendor: string): LLMProvider | null => {
-    // Reviewer settings provider name → canonical LLMVendor via shared helper.
-    // "openai" → "openai", "anthropic" → "claude", "google" → "gemini".
-    // "foundry" and "gcp-playground" are handled by dedicated adapters
-    // and never reach this function.
-    const llmVendor = reviewerVendorFor(vendor);
+    // Reviewer legacy provider names still resolve through the shared map.
+    // Active-LLM following passes canonical LLMVendor names directly.
+    const llmVendor = reviewerVendorFor(vendor) ?? (isLLMVendor(vendor) ? vendor : null);
     if (!llmVendor) return null;
+    const llmSettings = settingsService.get("llm");
+    const block = llmSettings.vendors[llmVendor];
     const apiKey = settingsService.getSecret(secretKeyFor(llmVendor));
-    if (!apiKey) return null;
-    return createProvider({ vendor: llmVendor, apiKey });
+    const isVertex = llmVendor === "vertex-ai";
+    if (!apiKey && !isVertex) return null;
+    if (
+      isVertex &&
+      !block.vertexProject &&
+      !process.env.GOOGLE_CLOUD_PROJECT &&
+      !process.env.GCLOUD_PROJECT
+    ) {
+      return null;
+    }
+    return createProvider({
+      vendor: llmVendor,
+      apiKey: apiKey ?? "",
+      model: block.model,
+      ...(block.baseUrl ? { baseUrl: block.baseUrl } : {}),
+      ...(block.vertexProject ? { vertexProject: block.vertexProject } : {}),
+      ...(block.vertexLocation ? { vertexLocation: block.vertexLocation } : {}),
+    });
+  };
+  const readActiveReviewerLlm = () => {
+    const llm = settingsService.get("llm");
+    const provider = llm.provider;
+    const block = llm.vendors[provider];
+    return {
+      provider,
+      model: block.model,
+      ...(block.baseUrl ? { baseUrl: block.baseUrl } : {}),
+      ...(block.vertexProject ? { vertexProject: block.vertexProject } : {}),
+      ...(block.vertexLocation ? { vertexLocation: block.vertexLocation } : {}),
+    };
   };
   const rewireReviewerAgent = (): void => {
     wireReviewerAgent({
       permissionManager,
+      readActiveLlm: readActiveReviewerLlm,
       streamProviderFor: reviewerStreamProviderFor,
       // Key inheritance — Foundry reads llm.apiKey.azure-foundry,
       // GCP playground reads llm.apiKey.gemini. Both use the same secret

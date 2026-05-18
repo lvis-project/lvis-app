@@ -18,6 +18,7 @@ const log = createLogger("update-detector");
 
 export interface UpdateInfo {
   pluginId: string;
+  pluginName: string;
   installedVersion: string;
   latestVersion: string;
 }
@@ -79,6 +80,7 @@ export class PluginUpdateDetector {
         if (isNewer(catalogEntry.version, installedVersion)) {
           updates.push({
             pluginId: entry.id,
+            pluginName: catalogEntry.name || entry.id,
             installedVersion,
             latestVersion: catalogEntry.version,
           });

@@ -46,6 +46,7 @@ function makeDeps(appWindows: ReturnType<typeof makeWindow>[], vendorBaseUrl?: s
         vendors: { "azure-foundry": { baseUrl: vendorBaseUrl ?? null } },
       })),
       patch: vi.fn(async (p: unknown) => p),
+      replaceLlm: vi.fn(async (llm: unknown) => llm),
       getSecret: vi.fn(() => null),
       setSecret: vi.fn(async () => undefined),
       deleteSecret: vi.fn(async () => undefined),
@@ -202,6 +203,216 @@ describe("marketplace:delete-api-key broadcast (MAJOR-3)", () => {
 // ─── MAJOR-2 R2: settings:update triggers rewireReviewerAgent when baseUrl changes ──
 
 describe("MAJOR-2: settings:update triggers rewireReviewerAgent on azure-foundry baseUrl change", () => {
+  it("calls rewireReviewerAgent when the active LLM provider changes", async () => {
+    const windows: ReturnType<typeof makeWindow>[] = [];
+    const rewire = vi.fn();
+    const prevLlm = {
+      provider: "openai",
+      vendors: {
+        openai: { model: "gpt-4o" },
+        claude: { model: "claude-sonnet-4-6" },
+        "azure-foundry": { baseUrl: null },
+      },
+    };
+    const nextLlm = {
+      provider: "claude",
+      vendors: {
+        openai: { model: "gpt-4o" },
+        claude: { model: "claude-sonnet-4-6" },
+        "azure-foundry": { baseUrl: null },
+      },
+    };
+    let llmReads = 0;
+    const baseDeps = makeDeps(windows);
+    const deps = {
+      ...baseDeps,
+      settingsService: {
+        ...baseDeps.settingsService,
+        get: vi.fn((key: string) => {
+          if (key === "marketplace") return { realCloudAllowPrivateNetwork: false };
+          llmReads += 1;
+          return llmReads === 1 ? prevLlm : nextLlm;
+        }),
+        patch: vi.fn(async (p: unknown) => p),
+      },
+      rewireReviewerAgent: rewire,
+    };
+
+    const { registerSettingsHandlers } = await import("../settings.js");
+    registerSettingsHandlers(deps as never);
+
+    await invoke("lvis:settings:update", { llm: { provider: "claude" } });
+
+    expect(rewire).toHaveBeenCalledOnce();
+  });
+
+  it("calls rewireReviewerAgent when the active LLM model changes", async () => {
+    const windows: ReturnType<typeof makeWindow>[] = [];
+    const rewire = vi.fn();
+    const prevLlm = {
+      provider: "openai",
+      vendors: {
+        openai: { model: "gpt-4o" },
+        "azure-foundry": { baseUrl: null },
+      },
+    };
+    const nextLlm = {
+      provider: "openai",
+      vendors: {
+        openai: { model: "gpt-5.4" },
+        "azure-foundry": { baseUrl: null },
+      },
+    };
+    let llmReads = 0;
+    const baseDeps = makeDeps(windows);
+    const deps = {
+      ...baseDeps,
+      settingsService: {
+        ...baseDeps.settingsService,
+        get: vi.fn((key: string) => {
+          if (key === "marketplace") return { realCloudAllowPrivateNetwork: false };
+          llmReads += 1;
+          return llmReads === 1 ? prevLlm : nextLlm;
+        }),
+        patch: vi.fn(async (p: unknown) => p),
+      },
+      rewireReviewerAgent: rewire,
+    };
+
+    const { registerSettingsHandlers } = await import("../settings.js");
+    registerSettingsHandlers(deps as never);
+
+    await invoke("lvis:settings:update", {
+      llm: { vendors: { openai: { model: "gpt-5.4" } } },
+    });
+
+    expect(rewire).toHaveBeenCalledOnce();
+  });
+
+  it("rolls back active LLM settings when reviewer rewire fails", async () => {
+    const windows: ReturnType<typeof makeWindow>[] = [];
+    const rewire = vi.fn()
+      .mockImplementationOnce(() => {
+        throw new Error("missing reviewer provider");
+      })
+      .mockImplementationOnce(() => undefined);
+    const refreshWildcard = vi.fn();
+    const prevLlm = {
+      provider: "openai",
+      vendors: {
+        openai: { model: "gpt-4o" },
+        claude: { model: "claude-sonnet-4-6" },
+        "azure-foundry": { baseUrl: null },
+      },
+    };
+    const nextLlm = {
+      provider: "claude",
+      vendors: {
+        openai: { model: "gpt-4o" },
+        claude: { model: "claude-sonnet-4-6" },
+        "azure-foundry": { baseUrl: null },
+      },
+    };
+    let llmReads = 0;
+    const patch = vi.fn(async (p: unknown) => p);
+    const replaceLlm = vi.fn(async (llm: unknown) => llm);
+    const baseDeps = makeDeps(windows);
+    const deps = {
+      ...baseDeps,
+      settingsService: {
+        ...baseDeps.settingsService,
+        get: vi.fn((key: string) => {
+          if (key === "marketplace") return { realCloudAllowPrivateNetwork: false };
+          llmReads += 1;
+          return llmReads === 1 ? prevLlm : nextLlm;
+        }),
+        patch,
+        replaceLlm,
+      },
+      rewireReviewerAgent: rewire,
+      refreshActiveLlmWildcard: refreshWildcard,
+    };
+
+    const { registerSettingsHandlers } = await import("../settings.js");
+    registerSettingsHandlers(deps as never);
+
+    const result = await invoke("lvis:settings:update", { llm: { provider: "claude" } });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: "reviewer-rewire-failed",
+      message: "missing reviewer provider",
+    });
+    expect(patch).toHaveBeenNthCalledWith(1, { llm: { provider: "claude" } });
+    expect(replaceLlm).toHaveBeenCalledWith(prevLlm);
+    expect(rewire).toHaveBeenCalledTimes(2);
+    expect(deps.conversationLoop.refreshProvider).toHaveBeenCalled();
+    expect(refreshWildcard).toHaveBeenCalled();
+  });
+
+  it("uses exact LLM replacement rollback when failed update adds active transport fields", async () => {
+    const windows: ReturnType<typeof makeWindow>[] = [];
+    const rewire = vi.fn()
+      .mockImplementationOnce(() => {
+        throw new Error("bad transport");
+      })
+      .mockImplementationOnce(() => undefined);
+    const prevLlm = {
+      provider: "openai",
+      vendors: {
+        openai: { model: "gpt-4o" },
+        "azure-foundry": { baseUrl: null },
+      },
+    };
+    const nextLlm = {
+      provider: "openai",
+      vendors: {
+        openai: {
+          model: "gpt-4o",
+          baseUrl: "https://proxy.example/v1",
+          vertexProject: "bad-project",
+          vertexLocation: "us-central1",
+        },
+        "azure-foundry": { baseUrl: null },
+      },
+    };
+    let llmReads = 0;
+    const replaceLlm = vi.fn(async (llm: unknown) => llm);
+    const baseDeps = makeDeps(windows);
+    const deps = {
+      ...baseDeps,
+      settingsService: {
+        ...baseDeps.settingsService,
+        get: vi.fn((key: string) => {
+          if (key === "marketplace") return { realCloudAllowPrivateNetwork: false };
+          llmReads += 1;
+          return llmReads === 1 ? prevLlm : nextLlm;
+        }),
+        patch: vi.fn(async (p: unknown) => p),
+        replaceLlm,
+      },
+      rewireReviewerAgent: rewire,
+    };
+
+    const { registerSettingsHandlers } = await import("../settings.js");
+    registerSettingsHandlers(deps as never);
+
+    const result = await invoke("lvis:settings:update", {
+      llm: {
+        vendors: {
+          openai: {
+            baseUrl: "https://proxy.example/v1",
+            vertexProject: "bad-project",
+            vertexLocation: "us-central1",
+          },
+        },
+      },
+    });
+
+    expect(result).toMatchObject({ ok: false, error: "reviewer-rewire-failed" });
+    expect(replaceLlm).toHaveBeenCalledWith(prevLlm);
+  });
+
   it("calls rewireReviewerAgent when baseUrl changes from null to a new value", async () => {
     const windows: ReturnType<typeof makeWindow>[] = [];
     const rewire = vi.fn();

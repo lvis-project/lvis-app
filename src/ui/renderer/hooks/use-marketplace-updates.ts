@@ -3,6 +3,7 @@ import type { LvisApi } from "../types.js";
 
 export interface PluginUpdateInfo {
   pluginId: string;
+  pluginName?: string;
   installedVersion: string;
   latestVersion: string;
 }

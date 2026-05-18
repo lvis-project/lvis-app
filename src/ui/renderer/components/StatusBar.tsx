@@ -1,6 +1,9 @@
 import type { PersistentItem, StatusBarSeverity, ToastItem } from "../hooks/use-status-bar.js";
 import { LvisLogo } from "./LvisLogo.js";
 
+const EMOJI_FONT_STACK =
+  "'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', 'Twemoji Mozilla', sans-serif";
+
 /**
  * Bottom status bar (#231). Two slots:
  *   - left: persistent items (next routine, online/offline, …)
@@ -57,23 +60,32 @@ export function StatusBar(props: StatusBarProps) {
       role="status"
       aria-live="polite"
     >
-      <div className="flex min-w-0 items-center gap-3 truncate">
+      <div className="flex min-w-0 items-center truncate">
         {persistent.length === 0 ? (
           <span className="flex items-center gap-1.5 opacity-60">
             <LvisLogo className="h-3.5 w-3.5 shrink-0" decorative />
             <span>LVIS</span>
           </span>
         ) : (
-          persistent.map((item) => (
-            <span key={item.id} className="flex min-w-0 items-center gap-1.5 truncate">
-              <span
-                className={`h-1.5 w-1.5 shrink-0 rounded-full ${SEVERITY_DOT[item.severity]}`}
-                aria-hidden="true"
-              />
-              <span className="truncate">
-                <span className="opacity-70">{item.label}</span>
-                <span className="px-1 opacity-40">·</span>
-                <span>{item.value}</span>
+          persistent.map((item, idx) => (
+            <span key={item.id} className="flex min-w-0 items-center truncate">
+              {idx > 0 && (
+                <span className="px-2 opacity-30" aria-hidden="true">|</span>
+              )}
+              <span className="flex items-center gap-1 truncate">
+                {item.a11yLabel !== undefined && (
+                  <span className="sr-only">{item.a11yLabel}</span>
+                )}
+                <span
+                  style={{ fontFamily: EMOJI_FONT_STACK }}
+                  className="shrink-0 leading-none"
+                  aria-hidden="true"
+                >
+                  {item.label}
+                </span>
+                <span className={`truncate tabular-nums ${SEVERITY_TEXT[item.severity]}`}>
+                  {item.value}
+                </span>
               </span>
             </span>
           ))
