@@ -118,7 +118,8 @@ jobs:
           LVIS_MARKETPLACE_SKIP_BOOTSTRAP: "1"
         run: |
           uv run uvicorn lvis_marketplace.main:create_app \
-            --factory --host 127.0.0.1 --port 8765 &
+            --factory --host 127.0.0.1 --port 8765 \
+            >/tmp/m4-server.log 2>&1 &
           echo $! > /tmp/m4-marketplace.pid
           # Wait for readiness.
           for i in $(seq 1 30); do
@@ -169,6 +170,12 @@ jobs:
           echo "MARKETPLACE_URL=$MARKETPLACE_URL"
           echo "=== vitest collection (dry-run via --reporter=verbose, single file) ==="
           M4_E2E=1 bunx vitest run --reporter=verbose test/e2e/marketplace-e2e.test.ts
+
+      - name: Dump marketplace server log (always)
+        if: always()
+        run: |
+          echo "=== /tmp/m4-server.log ==="
+          tail -200 /tmp/m4-server.log 2>&1 || echo "no server log"
 
       - name: Stop marketplace
         if: always()
