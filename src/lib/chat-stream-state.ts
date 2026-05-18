@@ -146,7 +146,7 @@ export type ToolEntryItem = {
 export type ChatEntry =
   | { kind: "user"; text: string; injectHint?: "queue" | "interrupt"; createdAt?: number }
   | { kind: "reasoning"; text: string; streaming?: boolean; createdAt?: number }
-  | { kind: "assistant"; text: string; streaming?: boolean; route?: "command"; phase?: "work" | "final"; createdAt?: number }
+  | { kind: "assistant"; text: string; streaming?: boolean; route?: "command"; phase?: "work" | "final"; createdAt?: number; systemNotice?: "context-error" | "stream-error" }
   | { kind: "tool_group"; groupId: string; groupIds: string[]; status: "running" | "done" | "error"; tools: ToolEntryItem[] }
   | {
       kind: "ask_user_answer";
@@ -430,6 +430,15 @@ export function finalizeStreamingAssistant(
      * time. Live streaming callers omit this — the live path stamps Date.now().
      */
     createdAt?: number;
+    /**
+     * Issue #911 — when the assistant message is a host-emitted system
+     * notice (context-error, stream-error), pass the marker through so
+     * the renderer can apply destructive styling. Reload path reads this
+     * from `SerializedHistoryMessage.systemNotice`; live path emits it
+     * from `conversation-loop.ts` when stream.kind === "context_error"
+     * / "stream_error".
+     */
+    systemNotice?: "context-error" | "stream-error";
   },
 ): ChatEntry[] {
   const next = [...entries];
@@ -460,6 +469,11 @@ export function finalizeStreamingAssistant(
           route: opts?.route,
           phase: opts?.phase,
           createdAt: opts?.createdAt ?? assistant.createdAt ?? Date.now(),
+          ...(opts?.systemNotice !== undefined
+            ? { systemNotice: opts.systemNotice }
+            : assistant.systemNotice !== undefined
+              ? { systemNotice: assistant.systemNotice }
+              : {}),
         };
         return next;
       }
@@ -482,6 +496,11 @@ export function finalizeStreamingAssistant(
       // until the next session reload, defeating the PR's user-visible goal.
       // Preserve existing createdAt on re-finalize (idempotency).
       createdAt: opts?.createdAt ?? assistant.createdAt ?? Date.now(),
+      ...(opts?.systemNotice !== undefined
+        ? { systemNotice: opts.systemNotice }
+        : assistant.systemNotice !== undefined
+          ? { systemNotice: assistant.systemNotice }
+          : {}),
     };
     return next;
   }
@@ -506,6 +525,7 @@ export function finalizeStreamingAssistant(
     route: opts?.route,
     phase: opts?.phase,
     ...(opts?.createdAt !== undefined ? { createdAt: opts.createdAt } : {}),
+    ...(opts?.systemNotice !== undefined ? { systemNotice: opts.systemNotice } : {}),
   });
   return next;
 }
