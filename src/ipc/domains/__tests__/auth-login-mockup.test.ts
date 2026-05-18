@@ -44,7 +44,9 @@ function makeDeps() {
         provider: "openai",
         vendors: { openai: { model: "gpt-4o" } },
       })),
+      getSecret: vi.fn(() => null),
       setSecret: vi.fn(async () => undefined),
+      deleteSecret: vi.fn(async () => undefined),
       patch: vi.fn(async () => undefined),
     },
     auditLogger: { log: vi.fn() },
@@ -161,6 +163,38 @@ describe("auth:login-mockup IPC handler (#893 top-level)", () => {
     expect(deps.rewireReviewerAgent).toHaveBeenCalledTimes(2);
     expect(deps.conversationLoop.refreshProvider).toHaveBeenCalled();
     expect(deps.refreshActiveLlmWildcard).toHaveBeenCalled();
+  });
+
+  it("restores the previous same-vendor API key when reviewer rewire fails", async () => {
+    process.env.LVIS_DEMO_VENDOR = "openai";
+    process.env.LVIS_DEMO_KEY_OPENAI = "sk-new-demo";
+    const deps = makeDeps();
+    deps.settingsService.getSecret.mockReturnValue("sk-old-manual");
+    deps.rewireReviewerAgent
+      .mockImplementationOnce(() => {
+        throw new Error("missing reviewer provider");
+      })
+      .mockImplementationOnce(() => undefined);
+    const { registerAuthHandlers } = await loadAuthModule();
+    registerAuthHandlers(deps as never);
+
+    const result = await invoke("lvis:auth:login-mockup", {
+      username: "demo",
+      password: "demo123",
+    });
+
+    expect(result).toEqual({ ok: false, error: "reviewer-rewire-failed" });
+    expect(deps.settingsService.setSecret).toHaveBeenNthCalledWith(
+      1,
+      "llm.apiKey.openai",
+      "sk-new-demo",
+    );
+    expect(deps.settingsService.setSecret).toHaveBeenNthCalledWith(
+      2,
+      "llm.apiKey.openai",
+      "sk-old-manual",
+    );
+    expect(deps.settingsService.deleteSecret).not.toHaveBeenCalled();
   });
 
   it("flips top-level llm.authMode and llm.provider in the settings patch", async () => {
