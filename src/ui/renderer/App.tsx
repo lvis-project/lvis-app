@@ -626,6 +626,33 @@ export function App() {
     });
   }, [api, checkApiKey, refreshLlmSettings]);
 
+  // Tutorial-C SpotlightTour trigger (PR #983 follow-up). ⌘+Shift+/ ("⌘?")
+  // is the canonical "help" shortcut on macOS; on Windows/Linux Ctrl+Shift+/
+  // serves the same role. The handler fires `api.tour.start` which fans the
+  // `lvis:tour:start` IPC broadcast out to every open window — including
+  // detached panes — so the SpotlightTour component (always mounted in
+  // App.tsx) flips on. Guarded against open dialogs so the shortcut never
+  // races a modal interaction.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== "?" && e.key !== "/") return;
+      if (!(e.metaKey || e.ctrlKey)) return;
+      if (!e.shiftKey) return;
+      if (e.isComposing) return;
+      if (
+        document.querySelector(
+          '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]',
+        )
+      ) {
+        return;
+      }
+      e.preventDefault();
+      void api.tour.start("first-boot-essentials");
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [api]);
+
   const composeOutgoing = useCallback(
     (raw: string) => composeOutgoingUtil({ raw, activePreset, attachments }),
     [activePreset, attachments],
@@ -1222,8 +1249,9 @@ export function App() {
         }}
       />
       {/* Tutorial-C — SpotlightTour mounts always; it stays invisible until
-          a `lvis:tour:start` broadcast (Settings → 도움말, or a first-boot
-          trigger) flips it on. State lives in `~/.lvis/onboarding/`. */}
+          a `lvis:tour:start` broadcast flips it on. Production trigger:
+          ⌘+Shift+/ (macOS "⌘?" help shortcut) / Ctrl+Shift+/ — see the
+          useEffect above. State lives in `~/.lvis/onboarding/`. */}
       <SpotlightTour api={api} />
       {/* v6: ApprovalQueueStatus floating chip 제거. 큐 정보는 InputActionBar
           trailing 의 DeferredApprovalChip 으로 통합. Spec docs/blueprints/
