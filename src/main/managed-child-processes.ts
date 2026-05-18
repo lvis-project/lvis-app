@@ -3,12 +3,16 @@ import { createLogger } from "../lib/logger.js";
 
 const log = createLogger("lvis");
 const PROCESS_TREE_KILL_TIMEOUT_MS = 1000;
+const DETACHED_PROCESS_GROUP_POLL_MS = 1000;
 
 interface ManagedChildProcess {
   child: ChildProcess;
   label: string;
   killProcessGroup: boolean;
+  processGroupId?: number;
+  disposeTimer?: NodeJS.Timeout;
   dispose: () => void;
+  onSettled: () => void;
 }
 
 const managedChildren = new Set<ManagedChildProcess>();
@@ -30,21 +34,37 @@ export function trackManagedChildProcess(
     child,
     label: options.label ?? "child-process",
     killProcessGroup: options.killProcessGroup === true,
+    processGroupId: options.killProcessGroup === true &&
+      process.platform !== "win32" &&
+      typeof child.pid === "number" &&
+      child.pid > 0
+      ? child.pid
+      : undefined,
     dispose: () => {},
+    onSettled: () => {},
   };
 
   const dispose = (): void => {
     managedChildren.delete(entry);
-    child.off("exit", dispose);
-    child.off("close", dispose);
-    child.off("error", dispose);
+    if (entry.disposeTimer) clearTimeout(entry.disposeTimer);
+    child.off("exit", entry.onSettled);
+    child.off("close", entry.onSettled);
+    child.off("error", entry.onSettled);
+  };
+  const onSettled = (): void => {
+    if (entry.processGroupId !== undefined && processGroupExists(entry.processGroupId)) {
+      scheduleProcessGroupDisposal(entry);
+      return;
+    }
+    entry.dispose();
   };
   entry.dispose = dispose;
+  entry.onSettled = onSettled;
 
   managedChildren.add(entry);
-  child.once("exit", dispose);
-  child.once("close", dispose);
-  child.once("error", dispose);
+  child.once("exit", onSettled);
+  child.once("close", onSettled);
+  child.once("error", onSettled);
   return dispose;
 }
 
@@ -57,14 +77,14 @@ export function forceKillManagedChildProcesses(reason: string): number {
 
   for (const entry of [...managedChildren]) {
     const { child, label, killProcessGroup } = entry;
-    if (child.exitCode !== null) {
+    if (!isKillable(entry)) {
       entry.dispose();
       continue;
     }
 
     try {
       const pid = child.pid;
-      forceKillProcessTree(child, killProcessGroup);
+      forceKillProcessTree(child, killProcessGroup, entry.processGroupId);
       killed += 1;
       log.warn({ pid: pid ?? null, label, killProcessGroup, reason }, "shutdown: force killed managed child process");
     } catch (err) {
@@ -88,15 +108,52 @@ export function __resetManagedChildProcessesForTest(): void {
   managedChildren.clear();
 }
 
-function forceKillProcessTree(child: ChildProcess, killProcessGroup: boolean): void {
+function isKillable(entry: ManagedChildProcess): boolean {
+  if (entry.processGroupId !== undefined && processGroupExists(entry.processGroupId)) return true;
+  return entry.child.exitCode === null;
+}
+
+function scheduleProcessGroupDisposal(entry: ManagedChildProcess): void {
+  if (entry.disposeTimer) return;
+
+  const poll = (): void => {
+    entry.disposeTimer = undefined;
+    if (entry.processGroupId === undefined || !processGroupExists(entry.processGroupId)) {
+      entry.dispose();
+      return;
+    }
+    entry.disposeTimer = setTimeout(poll, DETACHED_PROCESS_GROUP_POLL_MS);
+    entry.disposeTimer.unref?.();
+  };
+
+  entry.disposeTimer = setTimeout(poll, DETACHED_PROCESS_GROUP_POLL_MS);
+  entry.disposeTimer.unref?.();
+}
+
+function processGroupExists(processGroupId: number): boolean {
+  try {
+    process.kill(-processGroupId, 0);
+    return true;
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    return code === "EPERM";
+  }
+}
+
+function forceKillProcessTree(
+  child: ChildProcess,
+  killProcessGroup: boolean,
+  processGroupId?: number,
+): void {
   const pid = child.pid;
-  if (typeof pid !== "number" || pid <= 0) {
-    child.kill("SIGKILL");
+
+  if (killProcessGroup && process.platform !== "win32" && processGroupId !== undefined) {
+    process.kill(-processGroupId, "SIGKILL");
     return;
   }
 
-  if (killProcessGroup && process.platform !== "win32") {
-    process.kill(-pid, "SIGKILL");
+  if (typeof pid !== "number" || pid <= 0) {
+    child.kill("SIGKILL");
     return;
   }
 
