@@ -461,3 +461,75 @@ describe("PermissionManager — broadcastConfigChanged SOT (round-5 regression g
     await expect(pm.removeRule("a", "allow")).resolves.toBeUndefined();
   });
 });
+
+describe("PermissionManager — revoke controllers (cluster M1)", () => {
+  let pm: PermissionManager;
+
+  beforeEach(() => {
+    mockStore.rules = [];
+    mockStore.mode = "default";
+    _mockLock = Promise.resolve();
+    pm = new PermissionManager("/tmp/test-permissions.json");
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("getPluginRevokeSignal returns the same signal across calls until revoked", () => {
+    const a1 = pm.getPluginRevokeSignal("plugin-a");
+    const a2 = pm.getPluginRevokeSignal("plugin-a");
+    expect(a1).toBe(a2);
+    expect(a1.aborted).toBe(false);
+  });
+
+  it("revokePluginAccess aborts the current controller and recreates a fresh one", () => {
+    const before = pm.getPluginRevokeSignal("plugin-a");
+    expect(before.aborted).toBe(false);
+
+    pm.revokePluginAccess("plugin-a", "test-reason");
+    expect(before.aborted).toBe(true);
+    // signal.reason is the Error we threw on abort
+    const reason = (before as AbortSignal & { reason: unknown }).reason;
+    expect((reason as Error).message).toContain("permission-revoked: test-reason");
+
+    // Next call yields a fresh, un-aborted controller — outstanding bearers
+    // released, future bearers re-resolve under the new policy.
+    const after = pm.getPluginRevokeSignal("plugin-a");
+    expect(after).not.toBe(before);
+    expect(after.aborted).toBe(false);
+  });
+
+  it("addAlwaysDeniedPersist aborts outstanding bearers across all known plugins", async () => {
+    const sigA = pm.getPluginRevokeSignal("plugin-a");
+    const sigB = pm.getPluginRevokeSignal("plugin-b");
+    expect(sigA.aborted).toBe(false);
+    expect(sigB.aborted).toBe(false);
+
+    await pm.addAlwaysDeniedPersist("some_tool");
+
+    expect(sigA.aborted).toBe(true);
+    expect(sigB.aborted).toBe(true);
+  });
+
+  it("addAlwaysAllowedPersist aborts outstanding bearers (rule change → re-resolve)", async () => {
+    const sig = pm.getPluginRevokeSignal("plugin-a");
+    expect(sig.aborted).toBe(false);
+    await pm.addAlwaysAllowedPersist("safe_tool");
+    expect(sig.aborted).toBe(true);
+  });
+
+  it("removeRule aborts outstanding bearers across all known plugins", async () => {
+    await pm.addAlwaysAllowedPersist("removable_tool");
+    const sig = pm.getPluginRevokeSignal("plugin-a");
+    expect(sig.aborted).toBe(false);
+    await pm.removeRule("removable_tool", "allow");
+    expect(sig.aborted).toBe(true);
+  });
+
+  it("revokePluginAccess on unknown plugin is a safe no-op", () => {
+    // No controller has been requested — revoke must not throw or create
+    // spurious entries that leak memory.
+    expect(() => pm.revokePluginAccess("never-seen", "test")).not.toThrow();
+  });
+});

@@ -212,6 +212,24 @@ export class PermissionManager {
    * `ipc/domains/permissions.ts:broadcastPermissionConfigChanged`.
    */
   private broadcastConfigChanged: (() => void) | null = null;
+  /**
+   * Cluster review M1 — per-plugin AbortControllers used to abort outstanding
+   * `hostApi.resolveApiKey` bearers when permissions are revoked. The
+   * persisted-mutation entry points (`addAlwaysAllowedPersist`,
+   * `addAlwaysDeniedPersist`, `removeRule`) call {@link revokeAllPluginAccess}
+   * so any in-flight bearer with a captured signal fires its `release()`
+   * listener and drops the bearer reference.
+   *
+   * Conservative default: every rule change aborts ALL plugins (coarse but
+   * safe — a permission change is rare enough that the cost of re-resolving
+   * the bearer for unaffected plugins is negligible compared to the risk of
+   * letting a revoked plugin continue holding a captured key via a closure).
+   *
+   * Controllers are lazily created on first `getPluginRevokeSignal(id)` call
+   * and recreated after each abort so the next resolve receives a fresh,
+   * un-aborted signal.
+   */
+  private readonly pluginAbortControllers = new Map<string, AbortController>();
 
   constructor(permissionsFilePath?: string) {
     this.permissionsFilePath =
@@ -268,6 +286,62 @@ export class PermissionManager {
 
   setBroadcastUserApprovalHit(fn: (payload: UserApprovalHitPayload) => void): void {
     this.broadcastUserApprovalHit = fn;
+  }
+
+  /**
+   * Cluster review M1 — return the AbortSignal that will fire when this
+   * plugin's outstanding bearer leases must be aborted (i.e. on any
+   * permission rule change). Lazily creates the controller on first call.
+   *
+   * Callers combine this signal with the caller-provided per-request signal
+   * via `AbortSignal.any` so the bearer's `release()` runs on whichever
+   * triggers first. The controller is recreated after every abort, so the
+   * returned signal is stable only across the current "lease epoch" — the
+   * next call after an abort gets a fresh signal.
+   */
+  getPluginRevokeSignal(pluginId: string): AbortSignal {
+    let controller = this.pluginAbortControllers.get(pluginId);
+    if (!controller) {
+      controller = new AbortController();
+      this.pluginAbortControllers.set(pluginId, controller);
+    }
+    return controller.signal;
+  }
+
+  /**
+   * Cluster review M1 — abort the named plugin's outstanding bearer leases
+   * and recreate a fresh controller so the next `getPluginRevokeSignal` call
+   * returns an un-aborted signal. The abort reason is wrapped in
+   * `Error('permission-revoked: <reason>')` so downstream listeners that
+   * surface `signal.reason` see a structured, human-readable cause.
+   */
+  revokePluginAccess(pluginId: string, reason: string): void {
+    const controller = this.pluginAbortControllers.get(pluginId);
+    if (!controller) return;
+    try {
+      controller.abort(new Error(`permission-revoked: ${reason}`));
+    } catch {
+      // AbortController.abort never throws in practice; the catch is
+      // defense-in-depth so a bad polyfill can't break the mutation path.
+    }
+    // Recreate so the NEXT resolve gets an un-aborted controller. Without
+    // this, every subsequent resolve would receive the already-aborted
+    // signal and fire release() before the bearer is ever read.
+    this.pluginAbortControllers.set(pluginId, new AbortController());
+  }
+
+  /**
+   * Cluster review M1 — abort every known plugin's outstanding bearer leases.
+   * Called from the persisted-mutation entry points (addAlwaysAllowedPersist,
+   * addAlwaysDeniedPersist, removeRule) so any rule change invalidates
+   * outstanding bearers across all plugins (coarse but safe — the alternative
+   * is per-rule plugin-id resolution which is fragile when rules use glob
+   * patterns that can match any future plugin's tool names).
+   */
+  revokeAllPluginAccess(reason: string): void {
+    for (const pluginId of [...this.pluginAbortControllers.keys()]) {
+      this.revokePluginAccess(pluginId, reason);
+    }
   }
 
   /**
@@ -342,6 +416,10 @@ export class PermissionManager {
     // 인메모리: durable write 성공 후 alwaysAllowed Set (checkDetailed layer 5)
     this.alwaysAllowed.add(pattern);
     this.broadcastConfigChanged?.();
+    // Cluster review M1 — rule change aborts outstanding bearers so plugins
+    // re-resolve their keys under the new policy. An allow rule going wider
+    // is benign but still needs the next bearer to reflect the new state.
+    this.revokeAllPluginAccess(`allow-rule-added:${pattern}`);
   }
 
   /**
@@ -366,6 +444,10 @@ export class PermissionManager {
       }
     });
     this.broadcastConfigChanged?.();
+    // Cluster review M1 — deny added → outstanding bearers MUST be aborted
+    // so a plugin that held a bearer captured in a closure can't continue
+    // calling the upstream provider after the user revoked access.
+    this.revokeAllPluginAccess(`deny-rule-added:${pattern}`);
   }
 
   /**
@@ -384,6 +466,11 @@ export class PermissionManager {
       );
     });
     this.broadcastConfigChanged?.();
+    // Cluster review M1 — rule removal is also a permission change. An
+    // allow removal narrows the policy (revoke); a deny removal widens it.
+    // In both cases outstanding bearers should re-resolve under the new
+    // policy rather than keep operating under the now-stale snapshot.
+    this.revokeAllPluginAccess(`rule-removed:${action}:${pattern}`);
   }
 
   /**
