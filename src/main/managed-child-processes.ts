@@ -1,4 +1,4 @@
-import { spawnSync, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { createLogger } from "../lib/logger.js";
 import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
 
@@ -23,6 +23,38 @@ const managedChildren = new Set<ManagedChildProcess>();
 export interface TrackManagedChildProcessOptions {
   label?: string;
   killProcessGroup?: boolean;
+}
+
+/**
+ * Spawn a child process and register it with the managed-children
+ * tracker in one step. Prefer this helper over raw `spawn(...) +
+ * trackManagedChildProcess(...)` so that newly added callsites cannot
+ * silently regress force-kill coverage on Quit.
+ *
+ * `trackOptions.killProcessGroup` defaults to true when `options.detached`
+ * is true on POSIX — detached children form their own process group that
+ * tree-kill via SIGTERM/SIGKILL does not reach by default. Callers can
+ * still override the inference (e.g. for child processes whose lifetime
+ * is fully managed by an external supervisor).
+ */
+export function spawnManaged(
+  command: string,
+  args: ReadonlyArray<string>,
+  spawnOptions: SpawnOptions,
+  trackOptions: TrackManagedChildProcessOptions = {},
+): ChildProcess {
+  // ESLint-style guardrail: callers MUST go through this helper. Direct
+  // `spawn()` imports outside of `managed-child-processes.ts` should be
+  // flagged by a future lint rule (`no-restricted-imports` allowlisting
+  // this module only).
+  const child = spawn(command, args, spawnOptions);
+  const inferredGroupKill =
+    spawnOptions.detached === true && process.platform !== "win32";
+  trackManagedChildProcess(child, {
+    label: trackOptions.label,
+    killProcessGroup: trackOptions.killProcessGroup ?? inferredGroupKill,
+  });
+  return child;
 }
 
 export function trackManagedChildProcess(
