@@ -73,10 +73,13 @@ export function StatusBar(props: StatusBarProps) {
                 <span className="px-2 opacity-30" aria-hidden="true">|</span>
               )}
               <span className="flex items-center gap-1 truncate">
+                {item.a11yLabel !== undefined && (
+                  <span className="sr-only">{item.a11yLabel}</span>
+                )}
                 <span
                   style={{ fontFamily: EMOJI_FONT_STACK }}
                   className="shrink-0 leading-none"
-                  aria-label={item.label}
+                  aria-hidden="true"
                 >
                   {item.label}
                 </span>
