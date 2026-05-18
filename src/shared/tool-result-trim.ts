@@ -38,6 +38,15 @@ export const MAX_TOOL_RESULT_LINES = 100;
 export const MAX_TOOL_RESULT_TOKENS = 2_000;
 
 /**
+ * Hard byte ceiling — content above this size short-circuits the exact
+ * line/token scan and is treated as oversized verbatim. Defends against
+ * an adversarial plugin returning a 100MB+ payload that would otherwise
+ * cost O(N) scans inside the host's event loop. Set well above any
+ * realistic legitimate tool output (50MB ≈ a full PDF text dump).
+ */
+export const HARD_BYTES_CEILING = 50_000_000;
+
+/**
  * Result of a trim measurement — `truncated` is undefined when the input
  * is within the cap (caller skips meta marking).
  */
@@ -54,16 +63,21 @@ export interface TrimmedToolResult {
  * Measure a single tool_result content string against the cap. Pure: depends
  * only on inputs, no IO. Returns `{ truncated: undefined }` when the cap
  * is not exceeded (caller can short-circuit meta marking + allocation).
- *
- * @param content   raw tool_result content string
- * @param _toolName unused here but accepted so the call-site signature
- *                  documents which tool produced the over-cap result
- *                  (wire-serialize uses the marker on the message itself)
  */
-export function trimOversizedToolResult(
-  content: string,
-  _toolName: string | undefined,
-): TrimmedToolResult {
+export function trimOversizedToolResult(content: string): TrimmedToolResult {
+  // Hard ceiling — skip exact scan for adversarial-sized payloads. We
+  // still need *some* count to fill the marker, so use a sentinel:
+  // `originalLines = -1` signals "scan skipped due to hard ceiling".
+  if (content.length > HARD_BYTES_CEILING) {
+    return {
+      truncated: {
+        originalLines: -1,
+        originalTokens: -1,
+        originalBytes: content.length,
+        trimmedAt: new Date().toISOString(),
+      },
+    };
+  }
   const originalLines = countLines(content);
   if (originalLines <= MAX_TOOL_RESULT_LINES) {
     const originalTokens = estimateTokens(content);
