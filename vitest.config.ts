@@ -48,7 +48,15 @@ export default defineConfig({
     // every worker fork restores the pre-v25 behaviour where jsdom owns
     // the `localStorage` global, and is a no-op on Node versions where
     // webstorage is not on by default (e.g. v22 on Windows CI).
-    execArgv: ["--no-experimental-webstorage"],
+    // `--no-experimental-webstorage` is a Node v25+ flag. Older Node
+    // versions (e.g. Node 20 on the M4 e2e self-hosted runner) reject it
+    // as "bad option" causing every worker fork to crash before vitest
+    // can pick up any test file ("Test Files: no tests"). Apply only when
+    // the host Node is v25 or newer.
+    execArgv: (() => {
+      const major = parseInt(process.versions.node.split(".")[0], 10);
+      return major >= 25 ? ["--no-experimental-webstorage"] : [];
+    })(),
     projects: [
       {
         extends: true,
