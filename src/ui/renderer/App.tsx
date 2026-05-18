@@ -1336,7 +1336,6 @@ export function App() {
         api={{
           composerSeedText: (text: string) => {
             setQuestion(text);
-            return { ok: true };
           },
         }}
         installedPluginIds={pluginCards.map((c) => c.id)}
