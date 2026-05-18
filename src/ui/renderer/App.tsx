@@ -16,7 +16,7 @@ import type { PluginEntry } from "./components/PluginGridButton.js";
 import { ApprovalDialog } from "./dialogs/ApprovalDialog.js";
 import { DeferredQueueDialog } from "./dialogs/DeferredQueueDialog.js";
 import { TutorialDialog } from "./dialogs/TutorialDialog.js";
-import { OnboardingDialog } from "./components/OnboardingDialog.js";
+import { MemorySeedDialog } from "./dialogs/MemorySeedDialog.js";
 import { SpotlightTour } from "./components/SpotlightTour.js";
 import { LoginModal } from "./components/LoginModal.js";
 import { LLM_VENDORS } from "../../shared/llm-vendor-defaults.js";
@@ -1242,21 +1242,23 @@ export function App() {
         api={api}
       />
       <ApprovalDialog queue={approvalQueue} onDecide={handleApprovalDecide} />
-      <OnboardingDialog
+      {/* Tutorial-B (O-X2) — Memory Seed Onboarding Wizard replaces the
+          legacy vendor-credential picker. The wizard chains into
+          SpotlightTour via `api.tour.start("first-boot-essentials")` so the
+          first-boot UX is single-funnel: identity (호칭 + 자기소개) →
+          MEMORY.md seeded → guided tour. `markOnboardingCompleted` flips
+          `features.onboardingCompleted` so subsequent boots skip the
+          wizard; re-entry is handled by ⌘+Shift+/ which directly fires
+          `api.tour.start` (PR-C-fix). */}
+      <MemorySeedDialog
         open={onboardingOpen}
         onOpenChange={(open) => {
           setOnboardingOpen(open);
           if (!open) void markOnboardingCompleted();
         }}
-        onChooseApiKey={() => {
-          setOnboardingOpen(false);
+        api={api}
+        onDismissed={() => {
           void markOnboardingCompleted();
-          onOpenSettings("llm");
-        }}
-        onChooseLogin={() => {
-          setOnboardingOpen(false);
-          void markOnboardingCompleted();
-          setAppLoginOpen(true);
         }}
       />
       <LoginModal
