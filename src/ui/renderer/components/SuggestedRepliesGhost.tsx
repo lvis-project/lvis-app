@@ -8,6 +8,11 @@
 // focus / caret behavior is unchanged.
 //
 // Spec: `docs/architecture/proposals/suggested-replies-ghost-text.md` §6.1.
+//
+// PR-D animation: `motion-safe:animate-in fade-in` eases the ghost in when
+// a new turn's suggestion arrives. The `transition-opacity` keeps the fade
+// smooth when CSS class state flips (e.g. typing → empty). `prefers-
+// reduced-motion` opt-outs are honored by Tailwind's `motion-safe:` variant.
 import type { ReactElement } from "react";
 
 interface Props {
@@ -21,7 +26,7 @@ export function SuggestedRepliesGhost({ text, visible }: Props): ReactElement | 
     <div
       data-testid="suggested-replies-ghost"
       aria-hidden="true"
-      className="pointer-events-none absolute inset-0 flex items-start px-4 py-2 text-xs text-muted-foreground/60"
+      className="pointer-events-none absolute inset-0 flex items-start px-4 py-2 text-xs text-muted-foreground/60 transition-opacity duration-150 motion-safe:animate-in motion-safe:fade-in"
     >
       <span className="truncate">{text}</span>
       <span className="ml-auto whitespace-nowrap pl-2 text-[10px] opacity-70">
