@@ -249,9 +249,10 @@
       ]
     },
     "nsis": {
-      "oneClick": false,
+      "oneClick": true,
       "perMachine": false,
-      "allowToChangeInstallationDirectory": true,
+      "runAfterFinish": true,
+      "differentialPackage": true,
       "artifactName": "${productName}-${version}-windows-${arch}-setup.${ext}"
     }
   }
