@@ -22,18 +22,21 @@ export function useStatusBarRuntime({ api, upsertPersistent }: Options): void {
           severity: "info",
           label: "🔧",
           value: String(c.tools),
+          a11yLabel: "도구 개수",
         });
         upsertPersistent({
           id: "runtime:plugins",
           severity: "info",
           label: "🧩",
           value: String(c.plugins),
+          a11yLabel: "플러그인 개수",
         });
         upsertPersistent({
           id: "runtime:mcps",
           severity: "info",
           label: "🔌",
           value: String(c.mcps),
+          a11yLabel: "MCP 서버 개수",
         });
       } catch {
         // Non-fatal — counts are an awareness signal, not load-bearing.
