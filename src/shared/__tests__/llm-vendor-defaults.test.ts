@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { isLLMVendor, LLM_VENDORS } from "../llm-vendor-defaults.js";
+import {
+  isLLMVendor,
+  LLM_VENDORS,
+  LLM_VENDOR_DEFAULTS,
+  freshVendorBlocks,
+} from "../llm-vendor-defaults.js";
 
 describe("isLLMVendor", () => {
   it("accepts every member of LLM_VENDORS", () => {
@@ -36,6 +41,21 @@ describe("isLLMVendor", () => {
       expect(acceptVendor(raw)).toBe("claude");
     } else {
       expect.fail("raw should have narrowed to LLMVendor");
+    }
+  });
+});
+
+describe("LLMVendorSettings — #893 top-level authMode promotion", () => {
+  it("no vendor's default block carries an `authMode` field (promoted top-level)", () => {
+    for (const v of LLM_VENDORS) {
+      expect("authMode" in LLM_VENDOR_DEFAULTS[v]).toBe(false);
+    }
+  });
+
+  it("freshVendorBlocks() returns mutable copies without authMode", () => {
+    const blocks = freshVendorBlocks();
+    for (const v of LLM_VENDORS) {
+      expect("authMode" in blocks[v]).toBe(false);
     }
   });
 });

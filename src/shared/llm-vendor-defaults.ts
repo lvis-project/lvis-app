@@ -63,6 +63,12 @@ export function isLLMVendor(v: unknown): v is LLMVendor {
  *   `stopSequences` — modern frontier models (GPT-5+, Claude 4+) deprecate
  *   or ignore these sampling/decoding params. Vendor SDK defaults are used.
  *   Persisted values for these keys are silently dropped on next write.
+ *
+ * CHANGELOG (#893 top-level authMode promotion):
+ *   Removed `authMode` — login now wraps vendor selection itself (one switch
+ *   for the whole app, not per-vendor). The top-level `LLMSettings.authMode`
+ *   is the new source of truth. Legacy per-vendor `authMode` keys on disk
+ *   are migrated up in `loadSettings()` and dropped on next write.
  */
 export interface LLMVendorSettings {
   model: string;

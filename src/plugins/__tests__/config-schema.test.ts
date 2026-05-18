@@ -60,7 +60,7 @@ describe("US-B1 — host plugin.schema.json declares configSchema", () => {
     const ajv = buildAjv();
     const validate = ajv.compile(await loadHostManifestSchema());
     const ok = validate({
-      id: "test.plugin",
+      id: "test-plugin",
       name: "Test",
       version: "1.0.0",
       description: "Test fixture.",
@@ -89,7 +89,7 @@ describe("US-B1 — host plugin.schema.json declares configSchema", () => {
     const ajv = buildAjv();
     const validate = ajv.compile(await loadHostManifestSchema());
     const ok = validate({
-      id: "test.plugin",
+      id: "test-plugin",
       name: "Test",
       version: "1.0.0",
       entry: "index.js",
@@ -106,7 +106,7 @@ describe("US-B1 — host plugin.schema.json declares configSchema", () => {
     const ajv = buildAjv();
     const validate = ajv.compile(await loadHostManifestSchema());
     const ok = validate({
-      id: "test.plugin",
+      id: "test-plugin",
       name: "Test",
       version: "1.0.0",
       entry: "index.js",
@@ -124,7 +124,7 @@ describe("US-B1 — host plugin.schema.json declares configSchema", () => {
     const ajv = buildAjv();
     const validate = ajv.compile(await loadHostManifestSchema());
     const ok = validate({
-      id: "test.plugin",
+      id: "test-plugin",
       name: "Test",
       version: "1.0.0",
       entry: "index.js",
@@ -142,7 +142,7 @@ describe("US-B1 — host plugin.schema.json declares configSchema", () => {
 describe("toolSchemas authority metadata", () => {
   function manifestWithToolSchema(toolSchema: Record<string, unknown>) {
     return {
-      id: "test.plugin",
+      id: "test-plugin",
       name: "Test",
       version: "1.0.0",
       description: "Test fixture.",
@@ -265,7 +265,7 @@ describe("US-B1 regression — baseline manifest WITHOUT configSchema still vali
     // manifests — no configSchema, but heavy use of toolSchemas and
     // capabilities. Must keep loading without modification (DoD §4).
     const ok = validate({
-      id: "com.example.meeting-recorder",
+      id: "meeting-recorder",
       name: "회의록 녹음",
       version: "1.3.0",
       description: "Test fixture.",

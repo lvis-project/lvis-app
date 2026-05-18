@@ -65,7 +65,7 @@ describe("PluginRuntime.listPluginCards — Phase 1.5 Option C catalog", () => {
   });
 
   it("returns id, name, description, sampleTools (max 3)", async () => {
-    const manifestA = writePlugin(tmp, "com.example.meeting", {
+    const manifestA = writePlugin(tmp, "example-meeting", {
       name: "Meeting",
       tools: ["meeting_start", "meeting_push_chunk", "meeting_stop", "meeting_extra"],
       toolSchemas: {
@@ -80,7 +80,7 @@ describe("PluginRuntime.listPluginCards — Phase 1.5 Option C catalog", () => {
 
     const cards = runtime.listPluginCards();
     expect(cards).toHaveLength(1);
-    expect(cards[0].id).toBe("com.example.meeting");
+    expect(cards[0].id).toBe("example-meeting");
     expect(cards[0].name).toBe("Meeting");
     expect(cards[0].sampleTools).toEqual(["meeting_start", "meeting_push_chunk", "meeting_stop"]);
     // Schema v3 requires manifest.description; it takes priority over toolSchemas derivation.
@@ -91,7 +91,7 @@ describe("PluginRuntime.listPluginCards — Phase 1.5 Option C catalog", () => {
   });
 
   it("uses manifest description when toolSchemas absent", async () => {
-    const manifestA = writePlugin(tmp, "com.example.plain", {
+    const manifestA = writePlugin(tmp, "example-plain", {
       name: "Plain",
       tools: ["plain_do"],
     });
@@ -105,7 +105,7 @@ describe("PluginRuntime.listPluginCards — Phase 1.5 Option C catalog", () => {
   });
 
   it("MEDIUM-1: sampleTools excludes deny-rule-blocked tools when toolRegistry provided", async () => {
-    const manifestA = writePlugin(tmp, "com.example.filtered", {
+    const manifestA = writePlugin(tmp, "example-filtered", {
       name: "Filtered",
       tools: ["filtered_a", "filtered_b", "filtered_c"],
     });
@@ -124,14 +124,14 @@ describe("PluginRuntime.listPluginCards — Phase 1.5 Option C catalog", () => {
   });
 
   it("surfaces disabled and failed plugin loadStatus values from registry-backed runtime", async () => {
-    const disabledManifest = writePlugin(tmp, "com.example.disabled", {
+    const disabledManifest = writePlugin(tmp, "example-disabled", {
       name: "Disabled",
       tools: ["disabled_read"],
     });
-    const failedDir = join(tmp, "com.example.failed");
+    const failedDir = join(tmp, "example-failed");
     mkdirSync(failedDir, { recursive: true });
     writeFileSync(join(failedDir, "plugin.json"), JSON.stringify({
-      id: "com.example.failed",
+      id: "example-failed",
       name: "Failed",
       version: "1.0.0",
       description: "Test fixture.",
@@ -144,8 +144,8 @@ describe("PluginRuntime.listPluginCards — Phase 1.5 Option C catalog", () => {
       `throw new Error("boom"); export default () => ({ handlers: { failed_read: async () => ({ ok: true }) } });`,
     );
     const registryPath = writeRegistry(tmp, [
-      { id: "com.example.disabled", manifestPath: disabledManifest, enabled: false },
-      { id: "com.example.failed", manifestPath: join(failedDir, "plugin.json"), enabled: true },
+      { id: "example-disabled", manifestPath: disabledManifest, enabled: false },
+      { id: "example-failed", manifestPath: join(failedDir, "plugin.json"), enabled: true },
     ]);
 
     const runtime = new PluginRuntime({ hostRoot: tmp, registryPath, pluginsRoot: tmp });
@@ -153,8 +153,8 @@ describe("PluginRuntime.listPluginCards — Phase 1.5 Option C catalog", () => {
 
     const cards = runtime.listPluginCards().sort((a, b) => a.id.localeCompare(b.id));
     expect(cards).toEqual([
-      expect.objectContaining({ id: "com.example.disabled", loadStatus: "disabled" }),
-      expect.objectContaining({ id: "com.example.failed", loadStatus: "failed" }),
+      expect.objectContaining({ id: "example-disabled", loadStatus: "disabled" }),
+      expect.objectContaining({ id: "example-failed", loadStatus: "failed" }),
     ]);
   });
 });
