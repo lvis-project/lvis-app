@@ -48,6 +48,7 @@ function makeDeps() {
       setSecret: vi.fn(async () => undefined),
       deleteSecret: vi.fn(async () => undefined),
       patch: vi.fn(async () => undefined),
+      replaceLlm: vi.fn(async () => undefined),
     },
     auditLogger: { log: vi.fn() },
     conversationLoop: { refreshProvider: vi.fn() },

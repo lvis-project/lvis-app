@@ -84,7 +84,7 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         try {
-          await settingsService.patch({ llm: prevLlm });
+          await settingsService.replaceLlm(prevLlm);
         } catch (rollbackErr) {
           const rollbackMessage =
             rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr);
