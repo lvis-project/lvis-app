@@ -86,6 +86,14 @@ export interface WhitelistInitOptions {
   audit?: (input: string) => void;
   /** Telemetry sink — incremented for each fetch/cache outcome. */
   telemetry?: (event: string, meta?: Record<string, string>) => void;
+  /**
+   * Cluster review optional fix — app-shutdown AbortSignal threaded from
+   * boot so a slow CDN response doesn't keep the registry's fetch alive
+   * after the user quit (up to the 10s HTTP timeout). The signal flows
+   * directly into `whitelist-fetcher.ts` and aborts the underlying
+   * `fetch()` immediately.
+   */
+  signal?: AbortSignal;
 }
 
 const STALE_GRACE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
@@ -202,7 +210,10 @@ class WhitelistRegistry {
     // an ETag so the CDN can short-circuit.
     try {
       const meta = await cache.loadMeta();
-      const outcome = await fetchWhitelist({ ifNoneMatch: meta.etag });
+      const outcome = await fetchWhitelist({
+        ifNoneMatch: meta.etag,
+        ...(opts.signal ? { signal: opts.signal } : {}),
+      });
       if ("notModified" in outcome) {
         telemetry("whitelist_fetch_ok", { source: outcome.source, conditional: "304" });
         // Cache unchanged — keep current snapshot, touch lastFetchAt.
@@ -376,6 +387,24 @@ class WhitelistRegistry {
     }
   }
 
+  /**
+   * Cluster review M2 (doc) — DEMO SNAPSHOT EXPIRY POLICY
+   *
+   * The demo snapshot bundled at `resources/marketplace-whitelist.demo.json`
+   * intentionally ships with a multi-year `expiresAt` (currently 2030-01-01).
+   * Kiosk / trade-show machines must function for the lifetime of the demo
+   * build (signed app binary) without a network round-trip to the live
+   * registry, so a short expiry would brick the bundled offline experience
+   * during long trade-show runs or air-gapped deployments.
+   *
+   * Production catalog (the live `lvis-project/marketplace-whitelist` repo)
+   * uses a rolling 90-day expiry and is fetched + verified at boot via
+   * `whitelist-fetcher.ts`. The demo path is gated behind
+   * `LVIS_DEMO_ENABLED=1` so production builds never load this snapshot.
+   *
+   * Do NOT shorten the demo snapshot's `expiresAt` to match production —
+   * that is an environment-policy decision, not a security regression.
+   */
   private async tryLoadDemoSnapshot(path: string): Promise<WhitelistDocument | null> {
     try {
       if (!existsSync(path)) {

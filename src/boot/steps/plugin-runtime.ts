@@ -792,6 +792,15 @@ export interface InitPluginRuntimeInput {
    */
   shellOpenExternal: (url: string) => Promise<void>;
   /**
+   * Cluster review M1 — optional PermissionManager reference. When provided,
+   * the per-plugin `resolveApiKey` host implementation merges the manager's
+   * `getPluginRevokeSignal` with the caller's request signal so a permission
+   * rule change aborts outstanding bearers across plugins. Optional so unit
+   * tests that build a minimal runtime can skip the wiring; production boot
+   * (boot.ts) always passes the live instance.
+   */
+  permissionManager?: import("../../permissions/permission-manager.js").PermissionManager;
+  /**
    * §8 — required ApprovalGate instance. The `agentApproval` namespace on
    * every plugin's HostApi is wired to this gate so main-process plugin
    * handlers can respond to pending approvals without going through the
@@ -834,6 +843,7 @@ export async function initPluginRuntime(
     clearAuthPartitionService,
     shellOpenExternal,
     approvalGate,
+    permissionManager,
   } = input;
 
   // §B3 — host public preference reader, shared across all per-plugin HostApi
@@ -1140,6 +1150,16 @@ export async function initPluginRuntime(
             manifestSha256,
             settingsService,
             auditLogger: bootAuditLogger,
+            // Cluster review M1 — bind the permission-manager revoke signal
+            // accessor so an in-flight bearer aborts when permissions
+            // change for this plugin. When permissionManager is not wired
+            // (test runtimes) the host-api falls back to caller-signal-only.
+            ...(permissionManager
+              ? {
+                  getPluginRevokeSignal: (id: string) =>
+                    permissionManager.getPluginRevokeSignal(id),
+                }
+              : {}),
           },
         );
       },
