@@ -58,6 +58,10 @@ import { maskSensitiveData } from "../audit/dlp-filter.js";
 import type { RiskVerdict } from "../permissions/reviewer/risk-classifier.js";
 import { detectSandboxCapability } from "../permissions/sandbox-capability.js";
 import { lvisHome } from "../shared/lvis-home.js";
+import type {
+  ApprovalPurposeSuggestion,
+  PermissionReviewEvent,
+} from "../shared/permission-review-status.js";
 import { BashAstValidator } from "../main/bash-ast-validator.js";
 import {
   findShellPathPolicyViolation,
@@ -223,6 +227,7 @@ export interface ToolResult {
 
 export interface ToolExecutorCallbacks {
   onToolStart?: (name: string, input: Record<string, unknown>, meta: ToolCallMeta) => void;
+  onPermissionReview?: (event: PermissionReviewEvent) => void;
   /**
    * Fired after Step 7b (DLP) and Step 8 (audit) for both success and
    * failure paths. `durationMs` is wall-clock from Step 1 start to the
@@ -275,6 +280,12 @@ export interface ToolPermissionContext {
    * input from plugin-emitted, LLM-tool-arg, and file-content origins.
    */
   trustOrigin: ToolTrustOrigin;
+  /**
+   * Recent user-authored turn text. Used only to provide reviewer context
+   * and prefill the high-risk approval purpose field; plugin/file origins
+   * should leave this absent.
+   */
+  userIntent?: string;
   /**
    * Invoked when the user selects "이번 1회만" (turn-scope grant) on an
    * out-of-allowed-dir approval. The conversation loop is expected to
@@ -358,6 +369,73 @@ function emitToolStart(
   meta: ToolCallMeta,
 ): void {
   callbacks?.onToolStart?.(name, maskToolInputForDisplay(input), meta);
+}
+
+function emitPermissionReview(
+  callbacks: ToolExecutorCallbacks | undefined,
+  event: PermissionReviewEvent,
+): void {
+  callbacks?.onPermissionReview?.(event);
+}
+
+function cleanApprovalPurposeText(value: unknown, maxLength = 180): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value
+    .replace(/<[^>]*>/g, " ")
+    .replace(/[\u0000-\u001f\u007f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!normalized || normalized.startsWith("/")) return undefined;
+  return normalized.length > maxLength
+    ? `${normalized.slice(0, Math.max(0, maxLength - 1))}…`
+    : normalized;
+}
+
+function purposeSentenceFromIntent(intent: string): string {
+  const text = intent.replace(/[.!?。！？]+$/u, "").trim();
+  return maskSensitiveData(`사용자 요청에 따라 ${text} 작업을 수행합니다.`).masked;
+}
+
+function pickPurposeFromToolInput(input: Record<string, unknown>): string | undefined {
+  const keys = [
+    "purpose",
+    "intent",
+    "reason",
+    "task",
+    "summary",
+    "query",
+    "prompt",
+    "message",
+    "text",
+    "description",
+  ];
+  for (const key of keys) {
+    const value = cleanApprovalPurposeText(input[key]);
+    if (value) return value;
+  }
+  return undefined;
+}
+
+function buildApprovalPurposeSuggestion(
+  finalInput: Record<string, unknown>,
+  context: ToolPermissionContext,
+): ApprovalPurposeSuggestion | undefined {
+  const userIntent = cleanApprovalPurposeText(context.userIntent, 220);
+  if (userIntent) {
+    return {
+      text: purposeSentenceFromIntent(userIntent),
+      source: "conversation",
+      confidence: "sufficient",
+    };
+  }
+
+  const toolPurpose = pickPurposeFromToolInput(finalInput);
+  if (!toolPurpose) return undefined;
+  return {
+    text: purposeSentenceFromIntent(toolPurpose),
+    source: "tool-input",
+    confidence: "sufficient",
+  };
 }
 
 function auditTrustOrigin(context?: ToolPermissionContext): HookTrustOrigin {
@@ -600,11 +678,15 @@ export class ToolExecutor {
     category: ToolCategory,
     pathFields: readonly string[],
     finalInput: Record<string, unknown>,
+    cacheIdentityInput: Record<string, unknown>,
     allowedDirectories: string[],
     sensitivePathsAdjacent: string[],
     context: ToolPermissionContext,
     evaluationContext: PermissionEvaluationContext,
     sandboxAttestation: { writesToOwnSandbox?: boolean; ownerPluginSandboxRoot?: string },
+    callbacks: ToolExecutorCallbacks | undefined,
+    meta: ToolCallMeta,
+    approvalPurpose: ApprovalPurposeSuggestion | undefined,
     abortSignal?: AbortSignal,
   ): Promise<
     | { allowed: true; permissionResult: PermissionCheckResult }
@@ -648,6 +730,14 @@ export class ToolExecutor {
         },
       };
     }
+    emitPermissionReview(callbacks, {
+      status: "reviewing",
+      toolName,
+      toolCategory: category,
+      source,
+      ...meta,
+      ...(approvalPurpose ? { approvalPurpose } : {}),
+    });
     const reviewer = await this.permissionManager.dispatchReviewer(
       toolName,
       {
@@ -655,10 +745,12 @@ export class ToolExecutor {
         category,
         pathFields,
         finalInput,
+        cacheIdentityInput,
         allowedDirectories,
         sensitivePathsAdjacent,
         trustOrigin: context.trustOrigin,
         evaluationContext,
+        ...(context.userIntent ? { conversationContext: { recentUserMessage: context.userIntent } } : {}),
         ...(context.approvalCacheKey ? { approvalCacheKey: context.approvalCacheKey } : {}),
         ...(sandboxAttestation.writesToOwnSandbox !== undefined
           ? { writesToOwnSandbox: sandboxAttestation.writesToOwnSandbox }
@@ -675,6 +767,16 @@ export class ToolExecutor {
       },
       { defer: "medium-high", abortSignal },
     );
+    emitPermissionReview(callbacks, {
+      status: reviewer.verdict.level === "low" ? "auto_approved" : "needs_approval",
+      toolName,
+      toolCategory: category,
+      source,
+      ...meta,
+      verdictLevel: reviewer.verdict.level,
+      reason: reviewer.verdict.reason,
+      ...(approvalPurpose ? { approvalPurpose } : {}),
+    });
     if (reviewer.verdict.level !== "low") {
       return {
         allowed: false,
@@ -710,11 +812,15 @@ export class ToolExecutor {
     category: ToolCategory,
     pathFields: readonly string[],
     finalInput: Record<string, unknown>,
+    cacheIdentityInput: Record<string, unknown>,
     allowedDirectories: string[],
     sensitivePathsAdjacent: string[],
     context: ToolPermissionContext,
     evaluationContext: PermissionEvaluationContext,
     sandboxAttestation: { writesToOwnSandbox?: boolean; ownerPluginSandboxRoot?: string },
+    callbacks: ToolExecutorCallbacks | undefined,
+    meta: ToolCallMeta,
+    approvalPurpose: ApprovalPurposeSuggestion | undefined,
     abortSignal?: AbortSignal,
   ): Promise<PermissionCheckResult | null> {
     if (context.headless === true) return null;
@@ -739,33 +845,69 @@ export class ToolExecutor {
       };
     }
 
-    const reviewer = await this.permissionManager.dispatchReviewer(
+    emitPermissionReview(callbacks, {
+      status: "reviewing",
       toolName,
-      {
+      toolCategory: category,
+      source,
+      ...meta,
+      ...(approvalPurpose ? { approvalPurpose } : {}),
+    });
+
+    let reviewer: Awaited<ReturnType<PermissionManager["dispatchReviewer"]>>;
+    try {
+      reviewer = await mgr.dispatchReviewer(
+        toolName,
+        {
+          source,
+          category,
+          pathFields,
+          finalInput,
+          cacheIdentityInput,
+          allowedDirectories,
+          sensitivePathsAdjacent,
+          trustOrigin: context.trustOrigin,
+          evaluationContext,
+          ...(context.userIntent ? { conversationContext: { recentUserMessage: context.userIntent } } : {}),
+          ...(context.approvalCacheKey ? { approvalCacheKey: context.approvalCacheKey } : {}),
+          ...(sandboxAttestation.writesToOwnSandbox !== undefined
+            ? { writesToOwnSandbox: sandboxAttestation.writesToOwnSandbox }
+            : {}),
+          ...(sandboxAttestation.ownerPluginSandboxRoot !== undefined
+            ? { ownerPluginSandboxRoot: sandboxAttestation.ownerPluginSandboxRoot }
+            : {}),
+        },
+        {
+          allowedPluginIds: context.allowedPluginIds
+            ? [...context.allowedPluginIds]
+            : undefined,
+          additionalDirectories: context.additionalDirectories ?? [],
+        },
+        { defer: "none", abortSignal },
+      );
+    } catch (err) {
+      emitPermissionReview(callbacks, {
+        status: "failed",
+        toolName,
+        toolCategory: category,
         source,
-        category,
-        pathFields,
-        finalInput,
-        allowedDirectories,
-        sensitivePathsAdjacent,
-        trustOrigin: context.trustOrigin,
-        evaluationContext,
-        ...(context.approvalCacheKey ? { approvalCacheKey: context.approvalCacheKey } : {}),
-        ...(sandboxAttestation.writesToOwnSandbox !== undefined
-          ? { writesToOwnSandbox: sandboxAttestation.writesToOwnSandbox }
-          : {}),
-        ...(sandboxAttestation.ownerPluginSandboxRoot !== undefined
-          ? { ownerPluginSandboxRoot: sandboxAttestation.ownerPluginSandboxRoot }
-          : {}),
-      },
-      {
-        allowedPluginIds: context.allowedPluginIds
-          ? [...context.allowedPluginIds]
-          : undefined,
-        additionalDirectories: context.additionalDirectories ?? [],
-      },
-      { defer: "none", abortSignal },
-    );
+        ...meta,
+        reason: err instanceof Error ? err.message : String(err),
+        ...(approvalPurpose ? { approvalPurpose } : {}),
+      });
+      throw err;
+    }
+
+    emitPermissionReview(callbacks, {
+      status: reviewer.verdict.level === "low" ? "auto_approved" : "needs_approval",
+      toolName,
+      toolCategory: category,
+      source,
+      ...meta,
+      verdictLevel: reviewer.verdict.level,
+      reason: reviewer.verdict.reason,
+      ...(approvalPurpose ? { approvalPurpose } : {}),
+    });
 
     if (reviewer.verdict.level === "low") {
       return {
@@ -902,6 +1044,8 @@ export class ToolExecutor {
       ...permissionContext,
       ...(approvalCacheKey ? { approvalCacheKey } : {}),
     };
+    const approvalPurpose = buildApprovalPurposeSuggestion(finalInput, invocationPermissionContext);
+    const reviewerInput = maskToolInputForDisplay(finalInput);
     // Within-round freshness: when the caller provided a getter we read
     // the *current* additional-directories view at the top of this
     // executeOne (rather than the snapshot taken when executeAll() was
@@ -1012,7 +1156,7 @@ export class ToolExecutor {
             toolUse.name,
             source,
             invocationCategory,
-            finalInput,
+        finalInput,
             dirLayerResult,
             executionCwd,
             invocationPermissionContext,
@@ -1430,6 +1574,7 @@ export class ToolExecutor {
           source,
           invocationCategory,
           tool.pathFields ?? [],
+          reviewerInput,
           finalInput,
           invocationAllowedScope.directories,
           sensitivePathPattern ? [sensitivePathPattern] : [],
@@ -1445,6 +1590,9 @@ export class ToolExecutor {
               ? pathResolve(lvisHome(), "plugins", tool.pluginId)
               : undefined,
           },
+          callbacks,
+          meta,
+          approvalPurpose,
           abortSignal,
         );
         if (reviewerResult) {
@@ -1484,6 +1632,7 @@ export class ToolExecutor {
             source,
             invocationCategory,
             tool.pathFields ?? [],
+            reviewerInput,
             finalInput,
             invocationAllowedScope.directories,
             sensitivePathPattern ? [sensitivePathPattern] : [],
@@ -1497,6 +1646,9 @@ export class ToolExecutor {
                 ? pathResolve(lvisHome(), "plugins", tool.pluginId)
                 : undefined,
             },
+            callbacks,
+            meta,
+            approvalPurpose,
             abortSignal,
           );
           if (reviewerResult.allowed) {
@@ -1522,6 +1674,7 @@ export class ToolExecutor {
             toolName: toolUse.name,
             toolCategory: invocationCategory,
             reviewerVerdict: permissionResult.reviewer?.verdict,
+            ...(approvalPurpose ? { approvalPurpose } : {}),
             args: finalInput,
             reason: permissionResult.reason,
             source: source as "builtin" | "plugin" | "mcp",

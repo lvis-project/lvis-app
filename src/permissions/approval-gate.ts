@@ -24,6 +24,7 @@ import { isSensitivePath, canonicalizePathForMatch } from "./sensitive-paths.js"
 import { maskSensitiveData } from "../audit/dlp-filter.js";
 import { canonicalStringify } from "../shared/canonical-json.js";
 import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
+import type { ApprovalPurposeSuggestion } from "../shared/permission-review-status.js";
 
 // ─── §D1 args DLP masking ────────────────────────────
 // Approval 모달에 전달되는 tool args 내 민감정보(API key, 이메일, 전화번호,
@@ -47,6 +48,15 @@ function maskArgsForDisplay(value: unknown, detections: Set<string>): unknown {
     return out;
   }
   return value;
+}
+
+function maskApprovalPurposeForDisplay(
+  purpose: ApprovalPurposeSuggestion,
+  detections: Set<string>,
+): ApprovalPurposeSuggestion {
+  const { masked, detections: hits } = maskSensitiveData(purpose.text);
+  for (const hit of hits) detections.add(hit);
+  return { ...purpose, text: masked };
 }
 
 // ─── 공개 타입 ────────────────────────────────────────
@@ -84,6 +94,8 @@ export interface ApprovalRequest {
   reviewerVerdict?: RiskVerdict;
   /** Single captured tool-call evaluation context shown to the user. */
   evaluationContext?: PermissionEvaluationContext;
+  /** Suggested natural-language purpose shown in the approval dialog. */
+  approvalPurpose?: ApprovalPurposeSuggestion;
   args: unknown;
   reason: string;
   source?: "builtin" | "plugin" | "mcp";
@@ -529,9 +541,13 @@ export class ApprovalGate {
       // 내부에 남아 tool 실행에는 그대로 사용됨.
       // §D2: 마스킹된 payload 에 nonce+hmac 을 덧붙여 confused-deputy 방어.
       const dlpHits = new Set<string>();
+      const maskedApprovalPurpose = signedReq.approvalPurpose
+        ? maskApprovalPurposeForDisplay(signedReq.approvalPurpose, dlpHits)
+        : undefined;
       const maskedSignedReq: ApprovalRequest = {
         ...signedReq,
         args: maskArgsForDisplay(fullReq.args, dlpHits),
+        ...(maskedApprovalPurpose ? { approvalPurpose: maskedApprovalPurpose } : {}),
       };
       if (dlpHits.size > 0) {
         this.auditLogger?.log({

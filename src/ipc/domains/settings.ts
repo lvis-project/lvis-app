@@ -8,6 +8,7 @@ import { SETTINGS } from "../../shared/ipc-channels.js";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import { sendToWindow } from "../safe-send.js";
 import type { IpcDeps } from "../types.js";
+import type { LLMSettings } from "../../data/settings-store.js";
 
 /** Minor-1: extracted helper — 6 handlers share identical 5-line broadcast. */
 function broadcastSettingsSnapshot(deps: IpcDeps): void {
@@ -15,6 +16,18 @@ function broadcastSettingsSnapshot(deps: IpcDeps): void {
   for (const win of deps.getAppWindows?.() ?? []) {
     sendToWindow(win, SETTINGS.updated, snapshot);
   }
+}
+
+function activeLlmIdentity(llm: LLMSettings): string {
+  const provider = llm.provider;
+  const block = llm.vendors?.[provider];
+  return JSON.stringify({
+    provider,
+    model: block?.model ?? null,
+    baseUrl: block?.baseUrl ?? null,
+    vertexProject: block?.vertexProject ?? null,
+    vertexLocation: block?.vertexLocation ?? null,
+  });
 }
 
 export function registerSettingsHandlers(deps: IpcDeps): void {
@@ -45,8 +58,14 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
         return { ok: false, error: "invalid-foundry-endpoint", message: (err as Error).message };
       }
     }
-    // MAJOR-2: detect baseUrl change before patching so cacheScope.endpoint refreshes.
-    const prevBaseUrl = settingsService.get("llm").vendors?.["azure-foundry"]?.baseUrl ?? null;
+    // Reviewer LLM follows the active chat provider/model. Capture the
+    // active identity before patching so provider/model/baseUrl/Vertex changes
+    // can refresh reviewer wiring and cache scope immediately.
+    const prevLlm = settingsService.get("llm");
+    const prevActiveLlmIdentity = activeLlmIdentity(prevLlm);
+    // MAJOR-2 legacy guard: still detect Foundry baseUrl changes even when
+    // the active provider is not Foundry, preserving the prior explicit rewire.
+    const prevBaseUrl = prevLlm.vendors?.["azure-foundry"]?.baseUrl ?? null;
     // PR #795 follow-up: the MarketplaceTab "즉시 적용" badge on the SSRF-bypass
     // toggle promised next-request activation, but the marketplace fetcher was
     // capturing the flag at boot only. Detect a change here and call the boot
@@ -54,10 +73,12 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     const prevAllowPrivate =
       settingsService.get("marketplace").realCloudAllowPrivateNetwork ?? false;
     const result = await settingsService.patch(partial);
-    const newBaseUrl = settingsService.get("llm").vendors?.["azure-foundry"]?.baseUrl ?? null;
+    const newLlm = settingsService.get("llm");
+    const newActiveLlmIdentity = activeLlmIdentity(newLlm);
+    const newBaseUrl = newLlm.vendors?.["azure-foundry"]?.baseUrl ?? null;
     const newAllowPrivate =
       settingsService.get("marketplace").realCloudAllowPrivateNetwork ?? false;
-    if (prevBaseUrl !== newBaseUrl) {
+    if (prevBaseUrl !== newBaseUrl || prevActiveLlmIdentity !== newActiveLlmIdentity) {
       deps.rewireReviewerAgent?.();
     }
     if (prevAllowPrivate !== newAllowPrivate) {

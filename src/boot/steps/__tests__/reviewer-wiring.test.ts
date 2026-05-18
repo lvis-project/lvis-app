@@ -109,6 +109,46 @@ describe("Permission policy P4 reviewer-wiring", () => {
     expect(pm.hasReviewer()).toBe(true);
   });
 
+  it("mode=llm follows active chat LLM provider and model", () => {
+    const pm = new PermissionManager(join(tmpDir, "permissions.json"));
+    const setReviewerSpy = vi.spyOn(pm, "setReviewer");
+    const provider = stubProvider([
+      {
+        type: "message_complete",
+        stopReason: "end_turn",
+        usage: { inputTokens: 10, outputTokens: 5 },
+      },
+    ]);
+    const factorySpy = vi.fn((vendor: string) =>
+      vendor === "claude" ? provider : null,
+    );
+    const result = wireReviewerAgent({
+      permissionManager: pm,
+      readSettings: () => ({
+        mode: "llm",
+        provider: "openai",
+        model: "gpt-4o-mini",
+        fallbackOnError: "deny",
+        interactive: { autoApprove: "off" },
+      }),
+      readActiveLlm: () => ({
+        provider: "claude",
+        model: "claude-sonnet-4-6",
+      }),
+      streamProviderFor: factorySpy,
+      verdictCachePath: join(tmpDir, "cache-active-llm.jsonl"),
+      deferredQueuePath: join(tmpDir, "queue-active-llm.jsonl"),
+    });
+
+    expect(result.appliedSettings.provider).toBe("openai");
+    expect(result.effectiveSettings.provider).toBe("claude");
+    expect(result.effectiveSettings.model).toBe("claude-sonnet-4-6");
+    expect(factorySpy).toHaveBeenCalledWith("claude");
+    const { cacheScope } = setReviewerSpy.mock.calls[0][0];
+    expect(cacheScope?.provider).toBe("claude");
+    expect(cacheScope?.model).toBe("claude-sonnet-4-6");
+  });
+
   it("mode=llm but no streamProviderFor → throws (atomic cutover)", () => {
     const pm = new PermissionManager(join(tmpDir, "permissions.json"));
     expect(() =>
