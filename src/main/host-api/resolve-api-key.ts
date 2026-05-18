@@ -264,6 +264,9 @@ export async function resolveApiKey(
     manifestSha256: deps.manifestSha256,
     vendor,
     activeProvider,
+    // #955 follow-up — admin-installed plugins bypass the Tier-3 signed
+    // whitelist registry ACL. Tier-4 vendor cross-check still applies.
+    installPolicy: deps.manifest.installPolicy,
   });
   if (tierOutcome.kind === "deny") {
     audit(
