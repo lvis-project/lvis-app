@@ -203,6 +203,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     hasApiKey, onOpenSettings,
     searchOpen, searchMatches, searchMatchSet, searchIdx, searchHighlight,
     contextOverflowPct, usedTokens, contextBudget,
+    tpmLimit, tpmPct,
     rolePresets, activePreset, activePresetId, setActivePresetId,
     agentOptions, skillOptions, activeAgentName, setActiveAgentName,
     activeSkillNames, setActiveSkillNames,
@@ -1296,6 +1297,25 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
         <div className="flex w-full max-w-full items-center gap-2 border-t bg-warning/15 px-3 py-1.5 text-xs text-warning">
           <span className="font-semibold">컨텍스트 {Math.round(contextOverflowPct * 100)}% 사용</span>
           <span>— 곧 자동 압축됩니다.</span>
+        </div>
+      )}
+      {/*
+        Issue #900 #1 — per-request TPM (Tokens Per Minute) hint. *Cumulative*
+        context-budget 와 별 metric — 작은-tier 모델 (nano 등) 은 단발 input
+        이 contextBudget 안이라도 분당 처리 한도 초과로 429 가능. tpmLimit 가
+        등록된 모델 (현재 gpt-5.4-nano 만) + 80% 이상 사용 시 표시. 사용자
+        영상의 271K nano 사고 patterns 를 사전 경고.
+      */}
+      {typeof tpmPct === "number" && typeof tpmLimit === "number" && tpmPct >= 0.95 && (
+        <div className="flex w-full max-w-full items-center gap-2 border-t bg-destructive/10 px-3 py-1.5 text-xs text-destructive">
+          <span className="font-semibold">분당 한도(TPM) {Math.round(tpmPct * 100)}% — {usedTokens.toLocaleString()} / {tpmLimit.toLocaleString()}</span>
+          <span>— 전송 시 분당 처리 한도 초과 가능. 잠시 대기하거나 메시지를 작게 쪼개세요.</span>
+        </div>
+      )}
+      {typeof tpmPct === "number" && typeof tpmLimit === "number" && tpmPct >= 0.80 && tpmPct < 0.95 && (
+        <div className="flex w-full max-w-full items-center gap-2 border-t bg-warning/15 px-3 py-1.5 text-xs text-warning">
+          <span className="font-semibold">분당 한도(TPM) {Math.round(tpmPct * 100)}% — {usedTokens.toLocaleString()} / {tpmLimit.toLocaleString()}</span>
+          <span>— 작은-tier 모델 (예: nano) 의 분당 처리량 한도에 근접.</span>
         </div>
       )}
       {/* Assistant todo panel — anchored above the input cluster, below the
