@@ -121,8 +121,12 @@ describe("AuditLogger.search()", () => {
 });
 
 describe("AuditLogger.getStats()", () => {
+  // getStats(N) filters by file-name date; pin fixtures to today so the
+  // window doesn't rot as the calendar advances past a hard-coded date.
+  const todayJsonl = () => `${new Date().toISOString().slice(0, 10)}.jsonl`;
+
   it("counts entries by type", async () => {
-    writeJsonl("2026-04-17.jsonl", [
+    writeJsonl(todayJsonl(), [
       makeEntry({ type: "turn" }),
       makeEntry({ type: "turn" }),
       makeEntry({ type: "tool_call" }),
@@ -134,7 +138,7 @@ describe("AuditLogger.getStats()", () => {
   });
 
   it("counts sensitive ops (approval + kill_switch)", async () => {
-    writeJsonl("2026-04-17.jsonl", [
+    writeJsonl(todayJsonl(), [
       makeEntry({ type: "approval" }),
       makeEntry({ type: "kill_switch" }),
       makeEntry({ type: "turn" }),
