@@ -70,7 +70,15 @@ jobs:
         run: |
           set -euo pipefail
           args=("--${{ matrix.target }}")
-          if [ "${{ github.event_name == 'push' && 'false' || inputs.skip_code_sign }}" = "true" ]; then
+          # Skip code signing when:
+          #   1. workflow_dispatch with skip_code_sign=true (default)
+          #   2. tag-push BUT relevant platform cert secret is empty (graceful degradation —
+          #      otherwise electron-builder's codesign.js resolves empty CSC_LINK as cwd and
+          #      throws "<workspace> not a file"). Mac uses CSC_LINK; Win uses WIN_CSC_LINK.
+          #      Linux doesn't sign so this guard skips noop on linux target.
+          if [ "${{ github.event_name == 'push' && 'false' || inputs.skip_code_sign }}" = "true" ] \
+             || { [ "${{ matrix.target }}" = "mac" ] && [ -z "${CSC_LINK:-}" ]; } \
+             || { [ "${{ matrix.target }}" = "win" ] && [ -z "${WIN_CSC_LINK:-}" ]; }; then
             args+=("--skip-code-sign")
           fi
           args+=("--skip-native-rebuild")
