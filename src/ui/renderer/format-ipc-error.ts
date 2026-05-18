@@ -83,6 +83,7 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
 
   // ── Assistant context / role / memory / routine ──
   "invalid-assistant-context": "잘못된 어시스턴트 컨텍스트입니다.",
+  "invalid-assistant-context-menu": "잘못된 어시스턴트 컨텍스트 메뉴 요청입니다.",
   "invalid-assistant-agent": "잘못된 어시스턴트 에이전트입니다.",
   "invalid-assistant-skill": "잘못된 어시스턴트 스킬입니다.",
   "invalid-assistant-skills": "잘못된 어시스턴트 스킬 목록입니다.",
