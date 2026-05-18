@@ -288,6 +288,7 @@ async function parsePowerShellAst(command: string): Promise<PowerShellAstSummary
         env: buildSafeChildEnv(),
       },
     );
+    trackManagedChildProcess(parser, { label: "tool:powershell-parser" });
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
     parser.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
