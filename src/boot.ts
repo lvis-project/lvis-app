@@ -140,6 +140,7 @@ import {
 import { runManagedBootstrap } from "./boot/managed-marketplace.js";
 import { createLogger } from "./lib/logger.js";
 import { lvisHome } from "./shared/lvis-home.js";
+import { seedLvisHomeDocs } from "./main/seed-lvis-home-docs.js";
 const log = createLogger("lvis");
 
 export type { AppServices } from "./boot/types.js";
@@ -172,6 +173,23 @@ export async function bootstrap(
   getMainWindow: () => BrowserWindow | null = () => mainWindow,
 ): Promise<AppServices> {
   log.info("boot: starting...");
+
+  // Seed user-facing docs into `~/.lvis/` before any other component reads
+  // home state. AGENTS.md is the LLM-facing system reference; on first boot
+  // it is copied from packaged resources, and on subsequent upgrades a
+  // `.new` sibling is dropped next to the user's edited copy for diff/merge.
+  // Non-fatal — failures log and continue.
+  try {
+    const seeded = seedLvisHomeDocs();
+    if (seeded.seeded.length > 0) {
+      log.info(`boot: seeded lvis-home docs: ${seeded.seeded.join(", ")}`);
+    }
+    if (seeded.upgraded.length > 0) {
+      log.info(`boot: lvis-home docs upgrade available: ${seeded.upgraded.join(", ")}`);
+    }
+  } catch (err) {
+    log.warn(`boot: seedLvisHomeDocs failed (non-fatal): ${String(err)}`);
+  }
 
   // §4.2 Step 0-1 + 4-5: Core services.
   const core = await bootstrapCoreServices(mainWindow);
