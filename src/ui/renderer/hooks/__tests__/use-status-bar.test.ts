@@ -361,8 +361,8 @@ describe("useStatusBar — counts producer race token", () => {
     });
 
     await waitFor(() => {
-      const item = result.current.persistent.find((p) => p.id === "runtime:counts");
-      expect(item?.value).toContain("Tools 2");
+      const item = result.current.persistent.find((p) => p.id === "runtime:tools");
+      expect(item?.value).toBe("2");
     });
 
     // Resolve first call (stale) → tools: 1. Race token should discard this.
@@ -373,8 +373,8 @@ describe("useStatusBar — counts producer race token", () => {
     // Yield one microtask cycle to let any pending setState settle.
     await act(async () => { await Promise.resolve(); });
 
-    const item = result.current.persistent.find((p) => p.id === "runtime:counts");
-    expect(item?.value).toContain("Tools 2");
+    const item = result.current.persistent.find((p) => p.id === "runtime:tools");
+    expect(item?.value).toBe("2");
   });
 });
 
