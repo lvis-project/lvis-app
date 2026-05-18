@@ -16,7 +16,7 @@
 import { app, BrowserWindow as ElectronBrowserWindow, shell } from "electron";
 import type { BrowserWindow } from "electron";
 import { mkdirSync } from "node:fs";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import { installPluginPartitionPolicy } from "../../main/html-preview-partition.js";
 import { pluginPartitionName } from "../../shared/plugin-partition.js";
 import { onEvent as onHostEvent } from "../types.js";
@@ -65,6 +65,14 @@ import {
 import { createLogger } from "../../lib/logger.js";
 import { stripUntrustedTags } from "../../lib/strip-untrusted-tags.js";
 import { plog, PluginPhase } from "../../plugins/lifecycle-log.js";
+import { incrementHostSecretCounter, sanitizeKeyPrefix } from "../../telemetry/host-secret-counters.js";
+import { canonicalJSON } from "../../plugins/whitelist/canonical-json.js";
+import { runTier3Then4 } from "../../plugins/whitelist/tier-order.js";
+import {
+  resolveApiKey as resolveApiKeyImpl,
+  type ResolveApiKeyPurpose,
+  type ResolveApiKeyVendor,
+} from "../../main/host-api/resolve-api-key.js";
 import {
   ApprovalIssuerRegistry,
   verifyApprovalRequestScope,
@@ -783,6 +791,15 @@ export interface InitPluginRuntimeInput {
    */
   shellOpenExternal: (url: string) => Promise<void>;
   /**
+   * Cluster review M1 — optional PermissionManager reference. When provided,
+   * the per-plugin `resolveApiKey` host implementation merges the manager's
+   * `getPluginRevokeSignal` with the caller's request signal so a permission
+   * rule change aborts outstanding bearers across plugins. Optional so unit
+   * tests that build a minimal runtime can skip the wiring; production boot
+   * (boot.ts) always passes the live instance.
+   */
+  permissionManager?: import("../../permissions/permission-manager.js").PermissionManager;
+  /**
    * §8 — required ApprovalGate instance. The `agentApproval` namespace on
    * every plugin's HostApi is wired to this gate so main-process plugin
    * handlers can respond to pending approvals without going through the
@@ -825,6 +842,7 @@ export async function initPluginRuntime(
     clearAuthPartitionService,
     shellOpenExternal,
     approvalGate,
+    permissionManager,
   } = input;
 
   // §B3 — host public preference reader, shared across all per-plugin HostApi
@@ -952,7 +970,23 @@ export async function initPluginRuntime(
         );
       }
     },
-    createHostApi: (pluginId: string, manifest: PluginManifest, pluginDataDir: string): PluginHostApi => ({
+    createHostApi: (pluginId: string, manifest: PluginManifest, pluginDataDir: string): PluginHostApi => {
+      // #893 Stage 2 — manifest sha256 pin (Tier-3 whitelist check). The
+      // whitelist registry stores `approvedManifestSha256` per pluginId; we
+      // compare against the canonicalized JSON of the running manifest so a
+      // post-install manifest swap (different tools / wider hostSecrets.read)
+      // forces a fresh whitelist roll.
+      //
+      // Ralph cycle 1 fix — previously this used the REPLACER-ARRAY form of
+      // `JSON.stringify(manifest, Object.keys(manifest).sort())` which only
+      // filters top-level keys and emits every nested object as `{}`. As a
+      // result every plugin's manifest hashed to (nearly) the same sha and
+      // the Tier-3 pin was defeated. Switching to a recursive canonical
+      // JSON serializer (RFC 8785 JCS-style — sort keys at every depth,
+      // preserve array element order) restores the pin.
+      const canonical = canonicalJSON(manifest);
+      const manifestSha256 = createHash("sha256").update(canonical).digest("hex");
+      return ({
       storage: createPluginStorage(pluginId, pluginDataDir, (msg, meta) => {
         try {
           bootAuditLogger.log({
@@ -977,8 +1011,14 @@ export async function initPluginRuntime(
       //   the underlying bus rejects cross-plugin observation.
       config: {
         get: <T = unknown>(key: string): T | undefined => {
+          // PR #894 B2 follow-up — merge wildcard slot (`hostApiVendor` etc.)
+          // BETWEEN manifest defaults and plugin-specific overrides so a
+          // plugin's own config can shadow a host-injected value (rare, but
+          // useful for test fixtures and explicit per-plugin overrides),
+          // while shipping a sensible default for plugins that don't set it.
           const merged = {
             ...(manifest.config ?? {}),
+            ...(pluginRuntime.getWildcardConfigOverride?.() ?? {}),
             ...(settingsService.getPluginConfig(pluginId) ?? {}),
           };
           return merged[key] as T | undefined;
@@ -1088,8 +1128,134 @@ export async function initPluginRuntime(
         pluginRuntime.registerDisposer(pluginId, unsubscribe);
         return unsubscribe;
       },
+      // #893 Stage 2 — Host implementation of the SDK's `resolveApiKey`.
+      // Returns the SDK `ResolveApiKeyResult` discriminated union (bearer +
+      // release on success; typed reason on failure). Plugins read the
+      // key via `result.bearer()` and SHOULD call `result.release()` in a
+      // `finally` so the captured string has a deterministic lifetime.
+      // All four tiers are evaluated in-line inside `resolveApiKeyImpl`;
+      // the call here is a thin closure capture of pluginId + manifest +
+      // manifestSha256 + the shared audit/settings services.
+      resolveApiKey: async (opts) => {
+        return resolveApiKeyImpl(
+          {
+            purpose: opts.purpose as ResolveApiKeyPurpose,
+            vendor: opts.vendor as ResolveApiKeyVendor | undefined,
+            signal: opts.signal,
+          },
+          {
+            pluginId,
+            manifest,
+            manifestSha256,
+            settingsService,
+            auditLogger: bootAuditLogger,
+            // Cluster review M1 — bind the permission-manager revoke signal
+            // accessor so an in-flight bearer aborts when permissions
+            // change for this plugin. When permissionManager is not wired
+            // (test runtimes) the host-api falls back to caller-signal-only.
+            ...(permissionManager
+              ? {
+                  getPluginRevokeSignal: (id: string) =>
+                    permissionManager.getPluginRevokeSignal(id),
+                }
+              : {}),
+          },
+        );
+      },
       getSecret: (key) => {
-        return settingsService.getSecret(key);
+        // #893 Stage 2 — Four-tier secret access gate:
+        //   (1) Plugin's own `plugin.<pluginId>.*` namespace — always allowed.
+        //       ADDITIVE WHITELIST: this tier intentionally never consults the
+        //       whitelist registry so non-whitelisted plugins still get to hold
+        //       their own keys under their own namespace.
+        //   (2) Host secret declared in `manifest.hostSecrets.read[]` — must
+        //       match the static manifest allowlist. Manifest-only check.
+        //   (3) Whitelist registry — `whitelistRegistry.isAllowed(pluginId,
+        //       key, manifestSha256)`. Tier-3 was added in Stage 2 of the
+        //       #893 redesign so a remote-signed policy roll can pull a
+        //       grant without shipping a host build. Manifest sha pin
+        //       prevents post-install manifest swaps from inheriting the
+        //       grant.
+        //   (4) Active-vendor cross-check — `settings.llm.provider` must
+        //       equal the vendor in the requested `llm.apiKey.<vendor>` key.
+        //       Stops a plugin from harvesting idle credentials for a
+        //       non-active provider.
+        //
+        // PR #894 review B7 — `keyPrefix` is folded through `sanitizeKeyPrefix`
+        // before it reaches the in-process counter map. An attacker plugin
+        // could otherwise call `hostApi.getSecret("<random-prefix>.x")` in a
+        // loop and grow the counter map unboundedly via the `denied` branch
+        // (one entry per attacker-controlled prefix). Folding unknown
+        // prefixes to the bucket `"other"` caps the cardinality.
+        //
+        // Audit log lines additionally cap `key` to 64 chars so an attacker
+        // can't bloat the JSONL with megabyte-long denied keys.
+        const auditKey = key.slice(0, 64);
+        // Tier 1 — own namespace.
+        if (key.startsWith(`plugin.${pluginId}.`)) {
+          return settingsService.getSecret(key);
+        }
+        const allowlist = manifest.hostSecrets?.read ?? [];
+        const keyPrefix = sanitizeKeyPrefix(key);
+        // Tier 2 — manifest allowlist.
+        if (allowlist.includes(key)) {
+          // Tier 3 + Tier 4 — shared helper (`runTier3Then4`) keeps the
+          // order identical with `resolveApiKey`: whitelist registry
+          // (coarse signed ACL) before vendor cross-check (per-call
+          // dynamic state). Ralph cycle 1 MEDIUM fix.
+          //
+          // Tier-4 only applies to `llm.apiKey.*` keys; non-`llm.apiKey.*`
+          // allowlist entries (if any future host-secret class is added)
+          // are passed `activeProvider === vendor` so the cross-check is a
+          // no-op for them.
+          const llmKeyPrefix = "llm.apiKey.";
+          const isLlmKey = key.startsWith(llmKeyPrefix);
+          const vendor = isLlmKey ? key.slice(llmKeyPrefix.length) : "";
+          const activeProvider = isLlmKey
+            ? (settingsService.get("llm").provider as string)
+            : vendor;
+          const outcome = runTier3Then4({
+            pluginId,
+            key,
+            manifestSha256,
+            vendor,
+            activeProvider,
+          });
+          if (outcome.kind === "deny") {
+            const auditReason =
+              outcome.tier === "tier-4" ? "non-active-vendor" : outcome.reason;
+            try {
+              bootAuditLogger.log({
+                timestamp: new Date().toISOString(),
+                sessionId: "plugin",
+                type: "warn",
+                input: `[plugin:${pluginId}] hostSecret_denied reason=${auditReason} key=${auditKey}`,
+              });
+            } catch { /* audit must not break host */ }
+            incrementHostSecretCounter("hostSecret_denied", pluginId, keyPrefix);
+            return null;
+          }
+          try {
+            bootAuditLogger.log({
+              timestamp: new Date().toISOString(),
+              sessionId: "plugin",
+              type: "info",
+              input: `[plugin:${pluginId}] hostSecret_read key=${auditKey}`,
+            });
+          } catch { /* audit must not break host */ }
+          incrementHostSecretCounter("hostSecret_read", pluginId, keyPrefix);
+          return settingsService.getSecret(key);
+        }
+        try {
+          bootAuditLogger.log({
+            timestamp: new Date().toISOString(),
+            sessionId: "plugin",
+            type: "warn",
+            input: `[plugin:${pluginId}] hostSecret_denied reason=not-allowlisted key=${auditKey}`,
+          });
+        } catch { /* audit must not break host */ }
+        incrementHostSecretCounter("hostSecret_denied", pluginId, keyPrefix);
+        return null;
       },
       callTool: async <T = unknown>(toolName: string, payload?: unknown): Promise<T> => {
         pluginRuntime.assertPluginToolAccess(pluginId, toolName);
@@ -1496,7 +1662,8 @@ export async function initPluginRuntime(
 
         return { accepted: true, source: decision.source, eventId };
       },
-    }),
+    });
+    },
   });
 
   // AC1.2 — periodic purge of stale ApprovalIssuerRegistry entries.
