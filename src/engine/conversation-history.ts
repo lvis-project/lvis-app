@@ -5,6 +5,7 @@
  * 벤더 추상화: Anthropic.MessageParam 대신 GenericMessage 사용.
  */
 import type { GenericMessage } from "./llm/types.js";
+import { trimOversizedToolResult } from "../shared/tool-result-trim.js";
 
 export interface ConversationHistoryOptions {
   maxMessages?: number;
@@ -19,7 +20,7 @@ export class ConversationHistory {
   }
 
   append(message: GenericMessage): void {
-    this.messages.push(stampCreatedAt(message));
+    this.messages.push(stampCreatedAt(applyToolResultCap(message)));
     this.trim();
   }
 
@@ -79,7 +80,13 @@ export class ConversationHistory {
     // turn) rather than restamping with the load time. Messages with no
     // createdAt (legacy sessions written before the field existed) stay
     // undefined — UI renders nothing rather than fake a fresh timestamp.
-    this.messages = normalizeToolPairInvariant(messages).messages;
+    //
+    // applyToolResultCap re-runs on every restored tool_result so a session
+    // written before the cap existed (or written with a since-tightened
+    // cap) is protected on rehydrate, not just on fresh append. The on-
+    // disk jsonl keeps the raw verbatim payload.
+    const capped = messages.map(applyToolResultCap);
+    this.messages = normalizeToolPairInvariant(capped).messages;
     this.trim();
   }
 
@@ -137,6 +144,35 @@ interface NormalizeToolPairOptions {
 function stampCreatedAt(message: GenericMessage): GenericMessage {
   if (message.meta?.createdAt !== undefined) return message;
   return { ...message, meta: { ...(message.meta ?? {}), createdAt: Date.now() } };
+}
+
+/**
+ * Apply the Issue #902 generic tool_result size cap as a *meta-only* mark.
+ * Non-tool_result messages pass through unchanged. Already-marked messages
+ * (`meta.truncated` set) pass through unchanged so restore-after-append is
+ * idempotent. Sub-cap content passes through with reference equality.
+ *
+ * Why meta-only (no content swap here): `wire-serialize.stubMarkedToolResults`
+ * already runs on every send (`stream-collector.ts`) and every disk write
+ * (`saveSession` call sites in `conversation-loop.ts`/`ipc/domains/chat.ts`/
+ * `hooks/post-turn-hook-chain.ts`). Centralising the actual stub swap there
+ * means in-memory content stays raw verbatim for the UI / inspection, and
+ * the same stub form lands in both the LLM wire payload and the jsonl —
+ * matching the existing `compactedAt` marker's behaviour exactly.
+ *
+ * Called from both `.append` (live executor → loop push) and `.restore`
+ * (session jsonl rehydrate). Single chokepoint guarantees future append
+ * sites added to the loop are auto-protected without further wiring.
+ */
+function applyToolResultCap(message: GenericMessage): GenericMessage {
+  if (message.role !== "tool_result") return message;
+  if (message.meta?.truncated !== undefined) return message;
+  const trimmed = trimOversizedToolResult(message.content, message.toolName);
+  if (trimmed.truncated === undefined) return message;
+  return {
+    ...message,
+    meta: { ...(message.meta ?? {}), truncated: trimmed.truncated },
+  };
 }
 
 export function normalizeToolPairInvariant(
