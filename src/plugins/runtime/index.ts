@@ -311,6 +311,31 @@ export class PluginRuntime {
     return readEnabledManifestSnapshots(loadPlan, validator);
   }
 
+  private rememberPluginManifest(
+    pluginId: string,
+    manifest: PluginManifest,
+    approvedPluginAccess: PluginAccessSpec | undefined,
+  ): void {
+    this.knownPluginManifests.set(pluginId, manifest);
+    if (approvedPluginAccess) {
+      this.knownPluginAccessGrants.set(pluginId, approvedPluginAccess);
+    } else {
+      this.knownPluginAccessGrants.delete(pluginId);
+    }
+    for (const [toolName, ownerId] of [...this.knownToolOwners.entries()]) {
+      if (ownerId === pluginId) this.knownToolOwners.delete(toolName);
+    }
+    for (const [eventType, ownerId] of [...this.knownEventOwners.entries()]) {
+      if (ownerId === pluginId) this.knownEventOwners.delete(eventType);
+    }
+    for (const toolName of manifest.tools ?? []) {
+      this.knownToolOwners.set(toolName, pluginId);
+    }
+    for (const eventType of getDeclaredEmittedEvents(manifest)) {
+      this.knownEventOwners.set(eventType, pluginId);
+    }
+  }
+
   // ─── Lifecycle ─────────────────────────────────────────────────────────────
 
   async load(): Promise<void> {
@@ -607,7 +632,20 @@ export class PluginRuntime {
 
     this.onDisable?.(pluginId);
 
-    const { pluginRoot } = plugin;
+    const loadPlan = await this.resolveManifestLoadPlanInternal();
+    const enabledSnapshots = await this.readSnapshotsInternal(loadPlan);
+    const snapshot = enabledSnapshots.get(pluginId);
+    const targetPlan = loadPlan.find(
+      (p) =>
+        p.pluginIdHint === pluginId ||
+        (p.enabled && this.matchesManifestPath(p.manifestPath, pluginId)),
+    );
+    const pluginRoot = targetPlan ? dirname(targetPlan.manifestPath) : plugin.pluginRoot;
+    const approvedPluginAccess =
+      snapshot?.approvedPluginAccess ??
+      targetPlan?.approvedPluginAccess ??
+      plugin.approvedPluginAccess ??
+      this.knownPluginAccessGrants.get(pluginId);
     const integrityResult = await this.verifyReceiptAndDevGuard(pluginId, pluginRoot);
     if (!integrityResult.ok) {
       this.markFailed(pluginId);
@@ -615,13 +653,15 @@ export class PluginRuntime {
     }
     let manifest: PluginManifest;
     try {
-      const manifestPath = resolve(pluginRoot, "plugin.json");
-      manifest = await this.readManifest(manifestPath);
+      manifest =
+        snapshot?.manifest ??
+        (await this.readManifest(targetPlan?.manifestPath ?? resolve(pluginRoot, "plugin.json")));
     } catch (err) {
       plog("error", { pluginId, phase: PluginPhase.RESTART_RELOAD_FAIL, err, reason: "manifest_read" }, "manifest read failed during restart");
       this.markFailed(pluginId);
       return;
     }
+    this.rememberPluginManifest(pluginId, manifest, approvedPluginAccess);
     const entryPath = this.resolveEntryPathForPlugin(pluginRoot, manifest.entry);
     const resolvedEntryPath = resolveRealEntryPath(entryPath);
     // Cache-bust: Node ESM loader memoizes by URL — without it
@@ -691,7 +731,7 @@ export class PluginRuntime {
       pluginRoot,
       instance,
       methods,
-      approvedPluginAccess: this.knownPluginAccessGrants.get(pluginId),
+      approvedPluginAccess,
     });
     this.failedPluginIds.delete(pluginId);
     this.disabledPluginIds.delete(pluginId);
