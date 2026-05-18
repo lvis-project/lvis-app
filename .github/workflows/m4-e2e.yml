@@ -62,6 +62,12 @@ jobs:
         env:
           LVIS_MARKETPLACE_RATE_LIMIT_DISABLED: "1"
           MARKETPLACE_DB_URL: "sqlite+aiosqlite:////tmp/m4-marketplace.db"
+          # bootstrap_on_startup runs managed-plugin git pulls + seeds an
+          # internal admin key (prefix "seed_dev"). For M4 e2e we only need
+          # the e2e-publisher row seeded above; bootstrap's concurrent DB
+          # writes contend with our pre-seeded row under SQLite single-writer
+          # semantics, leading to 401s after the seed step succeeds.
+          LVIS_MARKETPLACE_SKIP_BOOTSTRAP: "1"
         run: |
           uv run uvicorn lvis_marketplace.main:create_app \
             --factory --host 127.0.0.1 --port 8000 &
