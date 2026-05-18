@@ -136,10 +136,14 @@ describe("ConversationHistory — Issue #902 tool_result cap", () => {
     expect(tr.meta!.truncated!.trimmedAt).not.toBe("1999-01-01T00:00:00.000Z");
   });
 
-  it("idempotent — restore-after-append does not re-mark or change trimmedAt", () => {
+  it("restore preserves truncated marker on re-rehydrate (re-stamps trimmedAt — recompute invariant)", () => {
+    // Round-1 introduced `restore({ recompute: true })` so jsonl tampering of
+    // host-attributed meta cannot bypass the cap. A consequence is that
+    // trimmedAt is *re-stamped* on every restore — that is intentional
+    // (the timestamp records when the host *most recently* enforced the
+    // cap, not when it was first observed). What must be invariant across
+    // re-restore is the *fact of truncation* + the *original size facts*.
     const h = new ConversationHistory();
-    // Append a paired (assistant + tool_result) so normalizeToolPairInvariant
-    // in restore() keeps the tool_result rather than dropping it as orphan.
     h.append({ role: "user", content: "hi" });
     h.append({
       role: "assistant",
@@ -155,13 +159,15 @@ describe("ConversationHistory — Issue #902 tool_result cap", () => {
     const trMsg = h
       .getMessages()
       .find((m) => m.role === "tool_result") as Extract<GenericMessage, { role: "tool_result" }>;
-    const firstStamp = trMsg.meta!.truncated!.trimmedAt;
-    // Cross-restore — feed the same marked messages back through restore.
+    const firstLines = trMsg.meta!.truncated!.originalLines;
+    const firstBytes = trMsg.meta!.truncated!.originalBytes;
     const h2 = new ConversationHistory();
     h2.restore(h.getMessages());
     const reTr = h2
       .getMessages()
       .find((m) => m.role === "tool_result") as Extract<GenericMessage, { role: "tool_result" }>;
-    expect(reTr.meta!.truncated!.trimmedAt).toBe(firstStamp);
+    expect(reTr.meta?.truncated).toBeDefined();
+    expect(reTr.meta!.truncated!.originalLines).toBe(firstLines);
+    expect(reTr.meta!.truncated!.originalBytes).toBe(firstBytes);
   });
 });
