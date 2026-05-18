@@ -66,7 +66,6 @@ import { createLogger } from "../../lib/logger.js";
 import { stripUntrustedTags } from "../../lib/strip-untrusted-tags.js";
 import { plog, PluginPhase } from "../../plugins/lifecycle-log.js";
 import { incrementHostSecretCounter, sanitizeKeyPrefix } from "../../telemetry/host-secret-counters.js";
-import { whitelistRegistry } from "../../plugins/whitelist/whitelist-registry.js";
 import { canonicalJSON } from "../../plugins/whitelist/canonical-json.js";
 import { runTier3Then4 } from "../../plugins/whitelist/tier-order.js";
 import {
