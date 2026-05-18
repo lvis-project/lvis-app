@@ -95,7 +95,7 @@ function buildHostPluginStub(manifestId: string, enableDemoKeyProbe: boolean): s
         if (typeof resolver !== "function") {
           return { ok: false, reason: "missing-resolveApiKey" };
         }
-        const result = await resolver({ purpose: "stt", vendor: "openai" });
+        const result = await resolver({ purpose: "llm", vendor: "openai" });
         if (!result.ok) return result;
         try {
           return { ok: true, vendor: result.vendor, bearer: result.bearer() };

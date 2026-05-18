@@ -82,6 +82,12 @@ export interface SettingsOrchestrationState {
    */
   hydrateLlmFromSettings: (settings: AppSettings) => void;
   /**
+   * Invalidates LLM draft saves that were already scheduled before the user
+   * entered the host-managed login flow. Used to stop stale manual-mode
+   * payloads from landing after login owns provider/model/key state.
+   */
+  invalidateLlmDraftSaves: () => void;
+  /**
    * Persist current draft for the named tab. Errors surface via
    * `lastSaveError`, not via promise rejection (the debounced caller
    * does `void s.save(tab)`). Resolves to `true` on success so explicit
@@ -105,7 +111,7 @@ export function useSettingsOrchestration(
   const [model, setModel] = useState("");
   const [hasKey, setHasKey] = useState(false);
   // #893 — Top-level auth mode. Hydrated from `settings.llm.authMode`.
-  const [authMode, setAuthMode] = useState<"manual" | "login">("manual");
+  const [authMode, setAuthModeState] = useState<"manual" | "login">("manual");
   const [autoCompact, setAutoCompact] = useState(true);
   const [enableThinking, setEnableThinking] = useState(true);
   const [thinkingBudget, setThinkingBudget] = useState(10_000);
@@ -131,6 +137,21 @@ export function useSettingsOrchestration(
   const [settingsSnapshot, setSettingsSnapshot] = useState<AppSettings | null>(null);
   const hydratedVendorRef = useRef<string | null>(null);
   const hydratedWebProviderRef = useRef<string | null>(null);
+  const authModeRef = useRef<"manual" | "login">("manual");
+  const llmDraftGenerationRef = useRef(0);
+
+  const invalidateLlmDraftSaves = useCallback(() => {
+    llmDraftGenerationRef.current += 1;
+  }, []);
+
+  const setAuthMode = useCallback((mode: "manual" | "login") => {
+    authModeRef.current = mode;
+    if (mode === "login") {
+      invalidateLlmDraftSaves();
+      setKeyInput("");
+    }
+    setAuthModeState(mode);
+  }, [invalidateLlmDraftSaves]);
 
   const vendorInfo = VENDORS.find((v) => v.id === vendor) ?? VENDORS[0];
 
@@ -172,7 +193,7 @@ export function useSettingsOrchestration(
       setSettingsLoaded(true);
     })();
     return () => { cancelled = true; };
-  }, [api]);
+  }, [api, setAuthMode]);
 
   // Stay in sync with cross-window settings broadcasts. Updating the snapshot
   // refreshes the cached source that the vendor-switch effect consults; the
@@ -191,7 +212,7 @@ export function useSettingsOrchestration(
         void api.hasApiKey(nextVendor).then((k) => setHasKey(k));
       }
     });
-  }, [api]);
+  }, [api, setAuthMode]);
 
   // Re-hydrate every vendor-specific field when the active vendor changes.
   useEffect(() => {
@@ -266,20 +287,20 @@ export function useSettingsOrchestration(
       pendingSavePayload.current = { tab };
       return false;
     }
+    const isLlmSave = tab === "llm";
+    const llmDraftGeneration = llmDraftGenerationRef.current;
     savingRef.current = true;
     setSaving(true);
     let ok = false;
     try {
       if (tab !== "permissions") {
         const secretUpdates: Array<Promise<unknown>> = [];
-        if (keyInput.trim()) {
-          secretUpdates.push(
-            api.setApiKey(vendor, keyInput.trim()).then(() => {
-              setKeyInput("");
-              setHasKey(true);
-            }),
-          );
-        }
+        const latestAuthMode = authModeRef.current;
+        const trimmedKeyInput = keyInput.trim();
+        const shouldPersistLlmKey =
+          isLlmSave &&
+          latestAuthMode !== "login" &&
+          trimmedKeyInput.length > 0;
         if (webKeyInput.trim()) {
           secretUpdates.push(
             api.setWebApiKey(webProvider, webKeyInput.trim()).then(() => {
@@ -297,6 +318,9 @@ export function useSettingsOrchestration(
           );
         }
         await Promise.all(secretUpdates);
+        if (isLlmSave && llmDraftGeneration !== llmDraftGenerationRef.current) {
+          return false;
+        }
         const trimmedBaseUrl = baseUrl.trim();
         const trimmedVertexProject = vertexProject.trim();
         const trimmedVertexLocation = vertexLocation.trim();
@@ -310,12 +334,12 @@ export function useSettingsOrchestration(
         };
         const llmPatch: DeepPartial<AppSettings["llm"]> = {
           // #893 — top-level authMode persisted alongside provider.
-          authMode,
+          authMode: latestAuthMode,
           provider: vendor,
           streamSmoothing,
           fallbackChain: fallbackChain.filter((e) => e.provider && e.model).map((e) => ({ provider: e.provider, model: e.model })),
         };
-        if (authMode !== "login") {
+        if (latestAuthMode !== "login") {
           // In login mode, provider-specific fields are host-managed by the
           // login IPC. Persisting the hidden manual draft here can race the
           // login response and overwrite demo/model/baseUrl with stale values.
@@ -331,6 +355,14 @@ export function useSettingsOrchestration(
             realCloudAllowPrivateNetwork: marketplaceAllowPrivateNetwork,
           },
         });
+        if (shouldPersistLlmKey) {
+          if (llmDraftGeneration !== llmDraftGenerationRef.current) {
+            return false;
+          }
+          await api.setApiKey(vendor, trimmedKeyInput);
+          setKeyInput("");
+          setHasKey(true);
+        }
       }
       if (tab !== "permissions") onSaved();
       setLastSaveError(null);
@@ -382,6 +414,7 @@ export function useSettingsOrchestration(
     lastSaveError,
     clearLastSaveError,
     hydrateLlmFromSettings,
+    invalidateLlmDraftSaves,
     vendor, setVendor,
     keyInput, setKeyInput,
     model, setModel,
