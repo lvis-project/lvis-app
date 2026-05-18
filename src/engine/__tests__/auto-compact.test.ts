@@ -340,3 +340,29 @@ describe("getModelPreflightThreshold — setRuntimePreflightOverride (Dev Tools 
     restore();
   });
 });
+
+describe("getModelPreflightThreshold — TPM-aware preflight (issue #900 #3)", () => {
+  it("gpt-5.4-nano — TPM 200K × 0.8 = 160K 가 window 기반 threshold 보다 작음 → tpm 채택", () => {
+    // nano: contextWindow 400K → usable = max(360K, 320K) = 360K (context-budget.ts:28-34)
+    //       → bucket `<= 1M` 의 60% → window threshold = floor(360K × 0.6) = 216K
+    // nano: tpmDefault 200K → tpm threshold = floor(200K × 0.8) = 160K
+    // min(216K, 160K) = 160K. TPM 가 작은 한도라 채택 — 사용자 사고 prevention.
+    const t = getModelPreflightThreshold("openai", "gpt-5.4-nano");
+    expect(t).toBe(160_000);
+  });
+
+  it("gpt-5.4 — tpmDefault 30M >> window-based threshold → window 채택", () => {
+    // gpt-5.4: contextWindow 1.05M → else bucket → 55% × 1.01M ≈ 555K window threshold
+    // gpt-5.4: tpmDefault 30M → tpm threshold = 24M
+    // min(555K, 24M) = 555K. window 가 작은 한도라 그대로.
+    const t = getModelPreflightThreshold("openai", "gpt-5.4");
+    expect(t).toBeLessThan(1_000_000);
+    expect(t).toBeGreaterThan(400_000);
+  });
+
+  it("tpmDefault 미설정 모델 — 기존 동작 유지 (window-based threshold)", () => {
+    // claude-sonnet-4-6 는 tpmDefault 등록 안 됨 → window-only 동작 — backward-compat 검증
+    const t = getModelPreflightThreshold("claude", "claude-sonnet-4-6");
+    expect(t).toBeGreaterThan(50_000);
+  });
+});
