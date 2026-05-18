@@ -39,8 +39,13 @@ function buildPluginZip(slug: string, version: string): Buffer {
     id: slug,
     name: "M4 E2E Plugin",
     version,
+    // SDK v5.13 schema requires `entry`. `main` is the older field.
+    // Keep both for back-compat with intermediate SDK versions.
+    entry: "index.js",
     main: "index.js",
     installPolicy: "user",
+    description: "M4 e2e test plugin",
+    publisher: "lvis-community",
   };
   zip.addFile("plugin.json", Buffer.from(JSON.stringify(pluginJson)));
   // A trivial smoke handler that the assertion below exec()s indirectly by
