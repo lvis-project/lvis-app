@@ -59,24 +59,32 @@ test('status bar renders emoji identity glyphs and | separator', async ({ mainWi
   }
 });
 
-test('status bar emoji label uses platform emoji font stack', async ({ mainWindow }) => {
+test('status bar emoji label uses platform emoji font stack + a11y split', async ({ mainWindow }) => {
   const statusBar = mainWindow.locator('[data-testid="status-bar"]');
   await statusBar.waitFor({ state: 'visible', timeout: 10_000 });
 
-  const emojiSpan = statusBar.locator('span[aria-label]').first();
+  // The emoji glyph is rendered inside an aria-hidden span so screen readers
+  // don't announce the Unicode emoji name ("wrench"). The semantic label is
+  // a sibling sr-only span supplied by the producer (e.g. "도구 개수").
+  const emojiSpan = statusBar.locator('span[aria-hidden="true"][style*="Apple Color Emoji"]').first();
   const found = await emojiSpan
     .waitFor({ state: 'visible', timeout: 10_000 })
     .then(() => true)
     .catch(() => false);
 
-  test.skip(!found, 'No emoji-labelled span — likely no producer items yet.');
+  test.skip(!found, 'No emoji span with font stack — likely no producer items yet.');
 
-  // The component sets fontFamily via inline style with a fallback stack
-  // covering macOS / Windows / Linux color emoji fonts.
   const fontFamily = await emojiSpan.evaluate((el) => (el as HTMLElement).style.fontFamily);
   expect(fontFamily).toContain('Apple Color Emoji');
   expect(fontFamily).toContain('Segoe UI Emoji');
   expect(fontFamily).toContain('Noto Color Emoji');
+
+  // Screen-reader sr-only label must accompany the emoji so SR users hear a
+  // semantic phrase instead of the emoji's Unicode name.
+  const srLabel = statusBar.locator('span.sr-only').first();
+  await srLabel.waitFor({ state: 'attached', timeout: 5_000 });
+  const srText = (await srLabel.textContent()) ?? '';
+  expect(srText.length).toBeGreaterThan(0);
 });
 
 test('status bar does NOT render the deprecated env/account producer', async ({ mainWindow }) => {
