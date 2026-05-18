@@ -49,6 +49,14 @@ jobs:
           pip install -U pip uv
           uv sync --frozen --all-groups || uv sync --all-groups
 
+      - name: Seed publisher API key (before server start — avoids sqlite lock)
+        env:
+          MARKETPLACE_DB_URL: "sqlite+aiosqlite:////tmp/m4-marketplace.db"
+        working-directory: lvis-marketplace/server
+        run: |
+          uv run python scripts/seed_e2e_keys.py \
+            --publisher-key "$PUBLISHER_KEY"
+
       - name: Start marketplace server (sqlite, background)
         working-directory: lvis-marketplace/server
         env:
@@ -66,14 +74,6 @@ jobs:
             sleep 1
           done
           echo "marketplace failed to start" >&2; exit 1
-
-      - name: Seed publisher API key
-        env:
-          MARKETPLACE_DB_URL: "sqlite+aiosqlite:////tmp/m4-marketplace.db"
-        working-directory: lvis-marketplace/server
-        run: |
-          uv run python scripts/seed_e2e_keys.py \
-            --publisher-key "$PUBLISHER_KEY"
 
       - name: Debug — inspect DB after seed + GET /me
         env:
