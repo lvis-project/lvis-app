@@ -23,6 +23,7 @@ import { ScenarioShowcase } from "./onboarding/ScenarioShowcase.js";
 import { WelcomeQuestion } from "./onboarding/WelcomeQuestion.js";
 import { PluginShowcase } from "./onboarding/PluginShowcase.js";
 import {
+  initialOnboardingChainState,
   onboardingChainReducer,
   type OnboardingChainStage,
 } from "./onboarding/onboarding-chain.js";
@@ -130,10 +131,19 @@ export function App() {
   // done (returning user). Starting at `idle` instead of `showcase`
   // eliminates the closet-flash race where a true fresh-state boot
   // briefly shows the intro Dialog and then collapses (#1014).
-  const [chainStage, dispatchChain] = useReducer(
+  const [chainState, dispatchChain] = useReducer(
     onboardingChainReducer,
-    "idle" as OnboardingChainStage,
+    initialOnboardingChainState,
   );
+  const chainStage: OnboardingChainStage = chainState.stage;
+  /**
+   * ScenarioShowcase carry — which card the user clicked in the first
+   * step. Threaded into MemorySeed recommendations and PluginShowcase
+   * ordering so the chain is personalised by the user's first choice.
+   * `null` means the user reached the chain via skip / returning-user
+   * paths and downstream stages should use their default ordering.
+   */
+  const selectedScenarioId: string | null = chainState.selectedScenarioId;
   // Display name surfaced inside WelcomeQuestion — best-effort from the
   // host's persisted memory seed. Empty string when unknown, the
   // greeting card falls back to a neutral phrase.
@@ -1387,7 +1397,9 @@ export function App() {
           race (#982/#990/#997) cannot recur. */}
       <ScenarioShowcase
         open={chainStage === "showcase"}
-        onStart={() => dispatchChain({ type: "showcase-start" })}
+        onStart={(scenarioId) =>
+          dispatchChain({ type: "showcase-start", scenarioId })
+        }
         onSkip={() => dispatchChain({ type: "showcase-skip" })}
       />
       <LoginModal
@@ -1421,6 +1433,7 @@ export function App() {
           re-renders for an early-back-out chain. */}
       <MemorySeedDialog
         open={chainStage === "memory"}
+        selectedScenarioId={selectedScenarioId}
         onOpenChange={(next) => {
           if (chainStage !== "memory") return;
           if (!next) {
@@ -1483,6 +1496,7 @@ export function App() {
         installedPluginIds={pluginCards.map((c) => c.id)}
         api={api}
         onClose={() => dispatchChain({ type: "plugins-close" })}
+        prioritizedScenarioId={selectedScenarioId}
       />
       {/* Tutorial-X5 — Post-tour first-task proposal. Mounts always,
           stays invisible until the user finishes a tour AND at least one
