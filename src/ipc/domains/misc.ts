@@ -8,6 +8,7 @@ import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.
 import type { IpcDeps } from "../types.js";
 import type { RoutineExecution, RoutineFiredPayload, RoutineSchedule } from "../../shared/routines-types.js";
 import { ROUTINES_V2, OVERLAY_V1 } from "../../shared/ipc-channels.js";
+import { getLvisAppVersion } from "../../shared/app-version.js";
 import { createLogger } from "../../lib/logger.js";
 const log = createLogger("lvis");
 
@@ -161,6 +162,34 @@ export function registerMiscHandlers(deps: IpcDeps): void {
     // Renderer has already inserted pendingPrompt into chat before invoking this.
     // Main-side handler acknowledges the action (future: audit log, plugin callback).
     return undefined;
+  });
+
+  // ─── App info ────────────────────────────────────
+  // Read-only host metadata for the Settings "일반" tab dashboard. Returns:
+  //   - `version`: LVIS package.json version (single source of truth).
+  //     Resolved via `shared/app-version.ts` so dev and packaged use the
+  //     same logic that the bootstrap splash already relies on. We avoid
+  //     `app.getVersion()` because in dev mode (running unpackaged via
+  //     `electron dist/src/main/main.js`) it returns the Electron binary
+  //     version instead of the LVIS project version.
+  //   - `electronVersion` / `nodeVersion` / `chromeVersion` / `v8Version`:
+  //     stack info from `process.versions` (visible in 시스템 섹션).
+  //   - `platform` / `arch` / `userDataPath`: host environment used by the
+  //     OS label and 데이터 경로 row.
+  // Read-only and idempotent; no sender guard required (mirrors
+  // `lvis:settings:get` / `lvis:audit:stats`).
+  ipcMain.handle("lvis:app:info", async () => {
+    const { app } = await import("electron");
+    return {
+      version: getLvisAppVersion(),
+      electronVersion: process.versions.electron ?? "",
+      nodeVersion: process.versions.node ?? "",
+      chromeVersion: process.versions.chrome ?? "",
+      v8Version: process.versions.v8 ?? "",
+      platform: process.platform,
+      arch: process.arch,
+      userDataPath: app.getPath("userData"),
+    };
   });
 
   // ─── Session Todo ────────────────────────────────

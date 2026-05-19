@@ -60,6 +60,16 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-installers-${{ hashFiles('bun.lock') }}-
             ${{ runner.os }}-installers-
+      # Cache fetched uv runtime (downloaded by scripts/fetch-uv.mjs during postinstall).
+      # Key is pinned to uv-targets.mjs so version bumps invalidate the cache. Saves
+      # ~30s per matrix job on cold runners and avoids re-downloading from GitHub releases.
+      - name: Restore uv runtime cache
+        uses: actions/cache@v4
+        with:
+          path: resources/uv
+          key: ${{ runner.os }}-uv-${{ hashFiles('scripts/uv-targets.mjs', 'scripts/fetch-uv.mjs') }}
+          restore-keys: |
+            ${{ runner.os }}-uv-
       - name: Install Linux packaging tools
         if: matrix.target == 'linux'
         run: sudo apt-get update && sudo apt-get install -y fakeroot rpm xvfb

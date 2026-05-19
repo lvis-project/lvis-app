@@ -1,0 +1,73 @@
+/**
+ * LVIS app version resolution — single source of truth.
+ *
+ * Reads the project `package.json` synchronously relative to the bundled
+ * `dist/src/main/main.js` so the same logic works in:
+ *   - dev   (`electron dist/src/main/main.js`)
+ *   - packaged (`app.asar/dist/src/main/main.js`)
+ *
+ * Why not `app.getVersion()`?
+ *   In dev mode `app.getVersion()` returns the *Electron binary* version
+ *   (e.g. `41.6.1`) instead of the LVIS project version, because the
+ *   project is not packaged. Resolving the LVIS `package.json` relative to
+ *   the bundled main entry point gives the correct project version in both
+ *   environments and avoids the `electron.app` runtime ordering issues
+ *   that affect the bootstrap splash (which executes before `app.whenReady`).
+ *
+ * Robustness:
+ *   - Cached after the first successful read (synchronous, cheap).
+ *   - Falls back to `"unknown"` if every candidate path fails — callers
+ *     surface this verbatim so regressions are visible (no silent default).
+ */
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const FALLBACK_VERSION = "unknown";
+
+let cachedVersion: string | null = null;
+
+function readVersionFromCandidates(): string {
+  const here = dirname(fileURLToPath(import.meta.url));
+  // The bundled main entry lives at `dist/src/main/main.js`. This module is
+  // inlined into that bundle by esbuild, so `import.meta.url` resolves to
+  // the bundle. Walk up to the project root which contains `package.json`
+  // in both dev (`<repo>/package.json`) and packaged (`app.asar/package.json`).
+  const candidates = [
+    resolve(here, "..", "..", "..", "package.json"), // dist/src/main -> repo root
+    resolve(here, "..", "..", "package.json"),       // dist/src      -> repo root (older layout)
+    resolve(here, "..", "package.json"),             // dist          -> repo root (defensive)
+  ];
+
+  for (const candidate of candidates) {
+    try {
+      const raw = readFileSync(candidate, "utf8");
+      const parsed = JSON.parse(raw) as { name?: unknown; version?: unknown };
+      if (
+        typeof parsed.version === "string" &&
+        parsed.version.length > 0 &&
+        // Guard against accidentally reading Electron's own package.json
+        // if the entry point ever shifts. LVIS package.json has name "lvis-app".
+        (typeof parsed.name !== "string" || parsed.name === "lvis-app")
+      ) {
+        return parsed.version;
+      }
+    } catch {
+      // Try next candidate.
+    }
+  }
+
+  return FALLBACK_VERSION;
+}
+
+/** Returns the LVIS app version (cached). Never throws. */
+export function getLvisAppVersion(): string {
+  if (cachedVersion !== null) return cachedVersion;
+  cachedVersion = readVersionFromCandidates();
+  return cachedVersion;
+}
+
+/** Test-only — resets the memoised value between unit tests. */
+export function __resetLvisAppVersionCacheForTest(): void {
+  cachedVersion = null;
+}

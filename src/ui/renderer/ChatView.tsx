@@ -755,8 +755,39 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     return () => window.removeEventListener("keydown", handler);
   }, [streaming, onAbort]);
 
+  // Tutorial-D — chat empty-area right-click opens the system menu with
+  // a "튜토리얼 보기" entry. Right-clicks that originate inside an
+  // interactive descendant (button, anchor, contenteditable, input,
+  // textarea) keep their existing behaviour — we only intercept the
+  // "background" right-click that would otherwise land on Electron's
+  // default empty menu.
+  const handleChatBackgroundContextMenu = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      const target = event.target as HTMLElement | null;
+      if (target) {
+        const interactive = target.closest(
+          "a, button, input, textarea, select, [contenteditable=\"true\"], [data-skip-tutorial-context]",
+        );
+        if (interactive) return;
+      }
+      event.preventDefault();
+      const show = window.lvisApi?.tutorialShowContextMenu;
+      if (typeof show === "function") {
+        void show().catch(() => {
+          /* renderer keeps the chat view interactive even if the menu
+             dispatch fails — the user can still use the Help menu. */
+        });
+      }
+    },
+    [],
+  );
+
   return (
-    <div className="relative flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden">
+    <div
+      className="relative flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden"
+      onContextMenu={handleChatBackgroundContextMenu}
+      data-testid="chat-view-root"
+    >
       {hasApiKey === false && (
         <div className="absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2">
           <Card className="w-[400px]"><CardHeader className="text-center"><KeyRound className="mx-auto mb-2 h-10 w-10 text-muted-foreground" /><CardTitle>API 키 설정 필요</CardTitle><CardDescription>채팅을 시작하려면 Claude API 키를 설정해 주세요.</CardDescription></CardHeader>
@@ -861,7 +892,12 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
         {orphanSpawns.map((spawn) => (
           <SubAgentCard key={spawn.spawnId} spawn={spawn} />
         ))}
-        {visibleEntries.length === 0 && hasApiKey !== false && !hasAskQuestions && <div className="py-12 text-center text-sm text-muted-foreground">LVIS 에이전트가 준비되었습니다. 질문을 입력하거나 /command를 사용하세요.</div>}
+        {/* Ready-state empty-prompt: only when we know `hasApiKey === true`.
+            `null` (still loading) and `false` (no key) both suppress the
+            "준비되었습니다" copy so the user never sees a "로그인된 척" race
+            where the empty state paints before the boot probe resolves
+            (#1014 tracer: Stage B). */}
+        {visibleEntries.length === 0 && hasApiKey === true && !hasAskQuestions && <div className="py-12 text-center text-sm text-muted-foreground">LVIS 에이전트가 준비되었습니다. 질문을 입력하거나 /command를 사용하세요.</div>}
         {(() => {
           // Three-way entry classification eliminates retroactive-reclassification flicker.
           //

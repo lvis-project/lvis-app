@@ -67,28 +67,72 @@ export function StatusBar(props: StatusBarProps) {
             <span>LVIS</span>
           </span>
         ) : (
-          persistent.map((item, idx) => (
-            <span key={item.id} className="flex min-w-0 items-center truncate">
-              {idx > 0 && (
-                <span className="px-2 opacity-30" aria-hidden="true">|</span>
-              )}
-              <span className="flex items-center gap-1 truncate">
+          persistent.map((item, idx) => {
+            const inner = item.dot === true ? (
+              <>
                 {item.a11yLabel !== undefined && (
                   <span className="sr-only">{item.a11yLabel}</span>
                 )}
                 <span
-                  style={{ fontFamily: EMOJI_FONT_STACK }}
-                  className="shrink-0 leading-none"
+                  data-testid={`status-bar-dot-${item.id}`}
+                  className={`h-2 w-2 shrink-0 rounded-full ${SEVERITY_DOT[item.severity]}`}
                   aria-hidden="true"
-                >
-                  {item.label}
-                </span>
-                <span className={`truncate tabular-nums ${SEVERITY_TEXT[item.severity]}`}>
-                  {item.value}
-                </span>
+                />
+              </>
+            ) : (
+              <>
+                {item.a11yLabel !== undefined && (
+                  <span className="sr-only">{item.a11yLabel}</span>
+                )}
+                {item.label !== undefined && item.label.length > 0 && (
+                  <span
+                    style={{ fontFamily: EMOJI_FONT_STACK }}
+                    className="shrink-0 leading-none"
+                    aria-hidden="true"
+                  >
+                    {item.label}
+                  </span>
+                )}
+                {item.value !== undefined && item.value.length > 0 && (
+                  <span className={`truncate tabular-nums ${SEVERITY_TEXT[item.severity]}`}>
+                    {item.value}
+                  </span>
+                )}
+              </>
+            );
+            // Z onboarding chain — the vendor/model cell is the final
+            // SpotlightTour anchor (step 7). Tagging it here keeps the
+            // anchor close to the rendered DOM rather than requiring a
+            // separate wrapper component.
+            const tourAnchor =
+              item.id === "vendor:llm" ? "status-bar-vendor" : undefined;
+            return (
+              <span key={item.id} className="flex min-w-0 items-center truncate">
+                {idx > 0 && (
+                  <span className="px-2 opacity-30" aria-hidden="true">|</span>
+                )}
+                {item.onClick !== undefined ? (
+                  <button
+                    type="button"
+                    onClick={item.onClick}
+                    title={item.tooltip}
+                    data-tour-anchor={tourAnchor}
+                    className="flex items-center gap-1 truncate cursor-pointer hover:opacity-80 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  >
+                    {inner}
+                  </button>
+                ) : (
+                  <span
+                    className="flex items-center gap-1 truncate"
+                    title={item.tooltip}
+                    data-tour-anchor={tourAnchor}
+                  >
+                    {inner}
+                  </span>
+                )}
               </span>
-            </span>
-          ))
+            );
+          })
         )}
       </div>
       <div className="flex min-w-0 items-center gap-2 truncate">

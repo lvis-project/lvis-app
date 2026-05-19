@@ -5,6 +5,7 @@ import { Checkbox } from "../../../components/ui/checkbox.js";
 import { Input } from "../../../components/ui/input.js";
 import { Label } from "../../../components/ui/label.js";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
+import { Store } from "lucide-react";
 import { getHostMarketplaceApi } from "../host-marketplace-api.js";
 import type { LvisApi, MarketplaceItem } from "../types.js";
 import type { MarketplacePackageType } from "../../../shared/assistant-context.js";
@@ -91,6 +92,38 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
   // users keep the default endpoint with no auth.
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
+  // Connection health pill for the primary CTA. Polls `pingMarketplace`
+  // once on mount (and whenever the saved baseUrl changes) so the user
+  // sees an at-a-glance status next to the "마켓플레이스 열기" button.
+  const [pingState, setPingState] = useState<
+    | { phase: "loading" }
+    | { phase: "result"; configured: boolean; online: boolean }
+  >({ phase: "loading" });
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      try {
+        const res = await api.pingMarketplace();
+        if (alive) setPingState({ phase: "result", ...res });
+      } catch {
+        if (alive) setPingState({ phase: "result", configured: false, online: false });
+      }
+    })();
+    return () => { alive = false; };
+  }, [api, baseUrl]);
+  const statusBadge = useMemo(() => {
+    if (pingState.phase === "loading") {
+      return { dot: "bg-muted-foreground/40", label: "확인 중…" };
+    }
+    if (!pingState.configured) return { dot: "bg-muted-foreground/40", label: "미연결" };
+    if (pingState.online) return { dot: "bg-success", label: "정상" };
+    return { dot: "bg-destructive", label: "응답 없음" };
+  }, [pingState]);
+  const openMarketplace = useCallback(() => {
+    const url = baseUrl.trim();
+    if (url) void api.openExternalUrl(url);
+  }, [api, baseUrl]);
+
   const refreshPackages = useCallback(async () => {
     try {
       const items = await api.listMarketplacePlugins();
@@ -173,149 +206,41 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
         description="플러그인 마켓플레이스 연결과 신뢰 정책을 설정합니다"
       />
 
-      <div className="rounded-md border border-warning/40 bg-warning/15 px-3 py-2 text-[11px] text-warning">
-        설정은 저장 즉시 디스크에 기록되지만 <strong className="font-semibold">실제 적용 시점</strong> 은 항목마다 다릅니다 —
-        URL 변경은 마켓플레이스 오류 배너의 "다시 시도" 버튼으로 즉시 재시도,
-        API 키 변경은 앱 재시작 후 적용,
-        사설 네트워크 허용 토글은 다음 마켓플레이스 요청부터 즉시 적용됩니다.
+      {/* ── Primary onboarding CTA ────────────────────────────
+          Big violet-gradient launcher to the marketplace web UI plus a
+          tiny status dot. Most users only need this row; the connection
+          / auth knobs sit behind the "고급 옵션" collapse below so the
+          surface stays decluttered. */}
+      <div
+        className="flex flex-col items-center gap-3 rounded-xl border border-primary/30 bg-gradient-to-br from-primary/10 via-primary/5 to-transparent px-4 py-6 text-center"
+        data-testid="marketplace:cta"
+      >
+        <Button
+          type="button"
+          size="lg"
+          onClick={openMarketplace}
+          disabled={!baseUrl.trim()}
+          className="bg-gradient-to-r from-primary to-primary/80 px-6 py-5 text-base font-semibold shadow-md hover:from-primary/90 hover:to-primary/70"
+          data-testid="marketplace:cta:open"
+          aria-label="마켓플레이스 웹페이지 열기"
+        >
+          <Store className="mr-2 size-5" aria-hidden={true} />
+          마켓플레이스 열기 →
+        </Button>
+        <p className="text-sm text-muted-foreground">
+          플러그인 · MCP · 에이전트 · 스킬을 둘러보세요
+        </p>
+        <div
+          className="flex items-center gap-1.5 text-[11px] text-muted-foreground"
+          data-testid="marketplace:cta:status"
+        >
+          <span
+            className={`inline-block size-2 rounded-full ${statusBadge.dot}`}
+            aria-hidden={true}
+          />
+          <span>{statusBadge.label}</span>
+        </div>
       </div>
-
-      <SettingsSection title="서버 연결">
-        {/* URL — draft state means typing doesn't churn the marketplace
-            endpoint on every keystroke; "저장" is disabled when draft
-            equals the committed value. */}
-        <div className="space-y-2">
-          <Label className="text-sm font-medium">마켓플레이스 서버 URL</Label>
-          <div className="flex items-center gap-2">
-            <Input
-              type="url"
-              placeholder="https://marketplace.your-corp.example"
-              value={urlDraft}
-              onChange={(e) => setUrlDraft(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter" && isUrlDirty) commitUrl(); }}
-              className="flex-1"
-            />
-            <Button
-              type="button"
-              size="sm"
-              onClick={commitUrl}
-              disabled={!isUrlDirty}
-              title={isUrlDirty ? "변경된 URL을 저장합니다" : "변경 사항이 없습니다"}
-              data-testid="marketplace:url:save"
-            >
-              저장
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={!baseUrl.trim()}
-              onClick={() => {
-                const url = baseUrl.trim();
-                if (url) void api.openExternalUrl(url);
-              }}
-              aria-label="마켓플레이스 웹페이지 열기"
-              title="설정된 마켓플레이스 URL을 시스템 브라우저로 엽니다"
-            >
-              마켓플레이스 열기 ↗
-            </Button>
-          </div>
-          <p className="text-[11px] text-muted-foreground">
-            lvis-marketplace REST API 엔드포인트. 자체 배포 시 내부 호스트로 변경하세요. 비워두면 마켓플레이스 기능이 비활성화됩니다.
-          </p>
-        </div>
-
-        {/* 고급 옵션 — API 키 + 사설 네트워크. Collapsed by default; most
-            deployments use the public endpoint with no auth. */}
-        <div className="space-y-2 pt-3 border-t border-border/50">
-          <button
-            type="button"
-            onClick={() => setAdvancedOpen((o) => !o)}
-            className="flex w-full items-center gap-1.5 rounded-md py-1 text-sm font-medium text-muted-foreground hover:text-foreground"
-            aria-expanded={advancedOpen}
-          >
-            <span className="inline-block w-3 text-xs leading-none">{advancedOpen ? "▾" : "▸"}</span>
-            고급 옵션
-          </button>
-
-          {advancedOpen && (
-            <div className="space-y-4 pt-2">
-              {/* API key */}
-              <div className="space-y-2">
-                <Label className="text-sm font-medium">API 키 (선택)</Label>
-                <div className="flex items-center gap-2">
-                  {hasApiKey
-                    ? <Badge variant="default" className="text-xs">설정됨</Badge>
-                    : <Badge variant="secondary" className="text-xs">미설정</Badge>}
-                  {hasApiKey && (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-7 text-xs text-destructive"
-                      onClick={() => void api.deleteMarketplaceApiKey().then(() => {
-                        setHasApiKey(false);
-                        onSaved();
-                      })}
-                    >
-                      삭제
-                    </Button>
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  <Input
-                    type="password"
-                    placeholder={hasApiKey ? "새 키로 교체" : "Bearer token (서버가 요구하는 경우)"}
-                    value={apiKeyInput}
-                    onChange={(e) => setApiKeyInput(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter" && apiKeyInput.trim()) commitApiKey(); }}
-                    className="flex-1"
-                  />
-                  <Button
-                    type="button"
-                    size="sm"
-                    onClick={commitApiKey}
-                    disabled={!apiKeyInput.trim()}
-                    title="API 키를 OS 키체인에 저장합니다"
-                    data-testid="marketplace:apikey:save"
-                  >
-                    저장
-                  </Button>
-                </div>
-                <p className="text-[11px] text-muted-foreground">
-                  서버가 인증을 요구할 때만 입력하세요. 키는 OS 키체인에 암호화되어 저장됩니다.
-                </p>
-              </div>
-
-              {/* Private network toggle */}
-              <div className="flex items-start gap-3 rounded-md border px-3 py-2.5">
-                <Checkbox
-                  checked={allowPrivateNetwork}
-                  aria-labelledby="marketplace-allow-private-network-label"
-                  className="mt-0.5 size-5"
-                  onCheckedChange={(checked) => {
-                    setAllowPrivateNetwork(checked === true);
-                    onImmediateChange?.();
-                  }}
-                />
-                <div className="space-y-0.5">
-                  <p
-                    id="marketplace-allow-private-network-label"
-                    className="flex items-center gap-2 text-sm font-medium"
-                  >
-                    사설 네트워크 허용 (loopback / RFC1918)
-                    <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
-                      즉시 적용
-                    </span>
-                  </p>
-                  <p className="text-[11px] text-muted-foreground">
-                    로컬 또는 내부 마켓플레이스 서버에 접속할 때 활성화합니다. SSRF 가드를 우회하므로 외부 호스트(prod) 환경에서는 끄세요.
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      </SettingsSection>
 
       <SettingsSection
         title="패키지 인벤토리"
@@ -375,6 +300,142 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
             })}
           </div>
         </ScrollArea>
+      </SettingsSection>
+
+      {/* ── 고급 옵션 ──────────────────────────────────────────
+          Moved to the bottom of the Marketplace tab so the primary
+          surface (CTA → 패키지 인벤토리) is what most users see first.
+          The entire "서버 연결" surface (URL editor + warning banner +
+          API key + private-network toggle) lives behind this collapse.
+          Default-deployment users never have to interact with it. */}
+      <SettingsSection
+        title="고급 옵션"
+        description="서버 URL · 인증 · 신뢰 정책. 기본 배포에서는 변경할 필요가 없습니다."
+      >
+        <button
+          type="button"
+          onClick={() => setAdvancedOpen((o) => !o)}
+          className="flex w-full items-center gap-1.5 rounded-md py-1 text-sm font-medium text-muted-foreground hover:text-foreground"
+          aria-expanded={advancedOpen}
+          data-testid="marketplace:advanced:toggle"
+        >
+          <span className="inline-block w-3 text-xs leading-none">{advancedOpen ? "▾" : "▸"}</span>
+          {advancedOpen ? "고급 옵션 접기" : "고급 옵션 펼치기"}
+        </button>
+
+        {advancedOpen && (
+          <div className="space-y-4 pt-2" data-testid="marketplace:advanced:body">
+            <div className="rounded-md border border-warning/40 bg-warning/15 px-3 py-2 text-[11px] text-warning">
+              설정은 저장 즉시 디스크에 기록되지만 <strong className="font-semibold">실제 적용 시점</strong> 은 항목마다 다릅니다 —
+              URL 변경은 마켓플레이스 오류 배너의 "다시 시도" 버튼으로 즉시 재시도,
+              API 키 변경은 앱 재시작 후 적용,
+              사설 네트워크 허용 토글은 다음 마켓플레이스 요청부터 즉시 적용됩니다.
+            </div>
+
+            {/* URL — draft state means typing doesn't churn the marketplace
+                endpoint on every keystroke; "저장" is disabled when draft
+                equals the committed value. */}
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">마켓플레이스 서버 URL</Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="url"
+                  placeholder="https://marketplace.your-corp.example"
+                  value={urlDraft}
+                  onChange={(e) => setUrlDraft(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && isUrlDirty) commitUrl(); }}
+                  className="flex-1"
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={commitUrl}
+                  disabled={!isUrlDirty}
+                  title={isUrlDirty ? "변경된 URL을 저장합니다" : "변경 사항이 없습니다"}
+                  data-testid="marketplace:url:save"
+                >
+                  저장
+                </Button>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                lvis-marketplace REST API 엔드포인트. 자체 배포 시 내부 호스트로 변경하세요. 비워두면 마켓플레이스 기능이 비활성화됩니다.
+              </p>
+            </div>
+
+            {/* API key */}
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">API 키 (선택)</Label>
+              <div className="flex items-center gap-2">
+                {hasApiKey
+                  ? <Badge variant="default" className="text-xs">설정됨</Badge>
+                  : <Badge variant="secondary" className="text-xs">미설정</Badge>}
+                {hasApiKey && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 text-xs text-destructive"
+                    onClick={() => void api.deleteMarketplaceApiKey().then(() => {
+                      setHasApiKey(false);
+                      onSaved();
+                    })}
+                  >
+                    삭제
+                  </Button>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="password"
+                  placeholder={hasApiKey ? "새 키로 교체" : "Bearer token (서버가 요구하는 경우)"}
+                  value={apiKeyInput}
+                  onChange={(e) => setApiKeyInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && apiKeyInput.trim()) commitApiKey(); }}
+                  className="flex-1"
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={commitApiKey}
+                  disabled={!apiKeyInput.trim()}
+                  title="API 키를 OS 키체인에 저장합니다"
+                  data-testid="marketplace:apikey:save"
+                >
+                  저장
+                </Button>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                서버가 인증을 요구할 때만 입력하세요. 키는 OS 키체인에 암호화되어 저장됩니다.
+              </p>
+            </div>
+
+            {/* Private network toggle */}
+            <div className="flex items-start gap-3 rounded-md border px-3 py-2.5">
+              <Checkbox
+                checked={allowPrivateNetwork}
+                aria-labelledby="marketplace-allow-private-network-label"
+                className="mt-0.5 size-5"
+                onCheckedChange={(checked) => {
+                  setAllowPrivateNetwork(checked === true);
+                  onImmediateChange?.();
+                }}
+              />
+              <div className="space-y-0.5">
+                <p
+                  id="marketplace-allow-private-network-label"
+                  className="flex items-center gap-2 text-sm font-medium"
+                >
+                  사설 네트워크 허용 (loopback / RFC1918)
+                  <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
+                    즉시 적용
+                  </span>
+                </p>
+                <p className="text-[11px] text-muted-foreground">
+                  로컬 또는 내부 마켓플레이스 서버에 접속할 때 활성화합니다. SSRF 가드를 우회하므로 외부 호스트(prod) 환경에서는 끄세요.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
       </SettingsSection>
     </div>
   );
