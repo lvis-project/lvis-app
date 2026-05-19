@@ -52,7 +52,9 @@ describe("captureDemoCredentials — baseUrl / model env vars", () => {
   it("returns null from getDemoVendorConfig when apiKey is absent even if other fields are present", () => {
     process.env.LVIS_DEMO_ENABLED = "1";
     process.env.LVIS_DEMO_BASEURL_AZURE_FOUNDRY = "https://some.endpoint.com/";
-    // No LVIS_DEMO_KEY_AZURE_FOUNDRY set.
+    // No LVIS_DEMO_KEY_AZURE_FOUNDRY set. Option 2 (Path 3): no baked-in
+    // fallback — env vars are the only valid key source. The .env.demo file
+    // (gitignored) provides the key for local dev; see local-demo-setup.md.
     captureDemoCredentials();
 
     expect(getDemoVendorConfig("azure-foundry")).toBeNull();
