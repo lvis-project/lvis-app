@@ -148,6 +148,8 @@ export interface AppSettings {
   appearance: AppearanceSettings;
   /** §B1 — external URL viewer policy (in-app BrowserWindow vs system browser). */
   webView: WebViewSettings;
+  /** Window close-button behaviour (hide-to-tray vs quit). */
+  system: SystemSettings;
   /** Plugin settings reserved for non-trust UI preferences. Trust gates are host-owned. */
   plugins: PluginSettings;
   /** 플러그인별 설정값 — pluginId → key/value 맵 */
@@ -264,6 +266,23 @@ export type WebViewPreferredFlow = "in-app" | "system-browser";
 
 export interface WebViewSettings {
   preferredFlow: WebViewPreferredFlow;
+}
+
+/**
+ * Window close-button behaviour.
+ *
+ * `hide-to-tray` (default) — `win.on("close")` calls `preventDefault()` and
+ * hides the window, leaving the main process alive so the tray icon, routine
+ * scheduler, and any plugin background work keep running. Quitting requires
+ * the tray context menu's 종료 item or `Cmd/Ctrl+Q`.
+ *
+ * `quit` — the close button terminates the app the same way a regular Windows
+ * app does. Users who don't want LVIS running in the background can pick this.
+ */
+export type SystemCloseBehavior = "hide-to-tray" | "quit";
+
+export interface SystemSettings {
+  closeBehavior: SystemCloseBehavior;
 }
 
 /**
@@ -408,6 +427,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   },
   webView: {
     preferredFlow: "in-app",
+  },
+  system: {
+    closeBehavior: "hide-to-tray",
   },
   plugins: {},
   pluginConfigs: {},
@@ -560,6 +582,24 @@ export class SettingsService {
     }
     if (partial.webView) {
       this.settings.webView = { ...this.settings.webView, ...partial.webView };
+    }
+    if (partial.system) {
+      // Field-level validation (mirrors `appearance` pattern): invalid
+      // `closeBehavior` is silently dropped so an existing valid preference
+      // is not clobbered by a malformed renderer / IPC payload. The
+      // disk-load path's `normalizeSystem` still backfills missing fields
+      // with defaults.
+      const next: SystemSettings = { ...this.settings.system };
+      const rawBehavior = partial.system.closeBehavior;
+      if (typeof rawBehavior === "string" && (VALID_CLOSE_BEHAVIORS as readonly string[]).includes(rawBehavior)) {
+        next.closeBehavior = rawBehavior as SystemCloseBehavior;
+      } else if (rawBehavior !== undefined) {
+        log.warn(
+          `system.closeBehavior patch ignored (received ${JSON.stringify(rawBehavior)}), keeping %s`,
+          this.settings.system.closeBehavior,
+        );
+      }
+      this.settings.system = next;
     }
     if (partial.pluginConfigs) {
       const sanitized: Record<string, PluginConfigRecord> = {};
@@ -716,6 +756,7 @@ export class SettingsService {
         audit: { ...DEFAULT_SETTINGS.audit, ...parsed.audit },
         appearance,
         webView: normalizeWebView(parsed.webView),
+        system: normalizeSystem(parsed.system),
         plugins: {},
         pluginConfigs: { ...DEFAULT_SETTINGS.pluginConfigs, ...pluginConfigs },
         features: { ...DEFAULT_SETTINGS.features, ...normalizeFeatureFlags(parsed.features) },
@@ -1020,6 +1061,26 @@ function normalizeWebView(input: unknown): WebViewSettings {
     );
   }
   return { ...DEFAULT_SETTINGS.webView };
+}
+
+const VALID_CLOSE_BEHAVIORS: readonly SystemCloseBehavior[] = ["hide-to-tray", "quit"];
+
+function normalizeSystem(input: unknown): SystemSettings {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return { ...DEFAULT_SETTINGS.system };
+  }
+  const obj = input as { closeBehavior?: unknown };
+  const raw = obj.closeBehavior;
+  if (typeof raw === "string" && (VALID_CLOSE_BEHAVIORS as readonly string[]).includes(raw)) {
+    return { closeBehavior: raw as SystemCloseBehavior };
+  }
+  if (raw !== undefined) {
+    log.warn(
+      `system.closeBehavior invalid (received ${JSON.stringify(raw)}), using default %s`,
+      DEFAULT_SETTINGS.system.closeBehavior,
+    );
+  }
+  return { ...DEFAULT_SETTINGS.system };
 }
 
 /**
