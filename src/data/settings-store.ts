@@ -928,7 +928,7 @@ const VALID_BUNDLE_IDS: readonly string[] = BUNDLE_IDS;
  *  dark + lg            → violet-dark
  *  light + default/auto → forest
  *  light + lg           → violet-light
- *  system + default     → tokyo-night (DEFAULT_BUNDLE_ID; renderer may apply followSystem)
+ *  system + default     → DEFAULT_BUNDLE_ID (renderer may apply followSystem)
  *  system + lg          → violet-dark + followSystem:true (renderer tracks OS scheme)
  *  * + purple|orange|blue → midnight (closest dark accent coercion)
  *  high-contrast + *    → high-contrast (HC always wins)
@@ -965,9 +965,9 @@ export function migrateAppearanceV1ToV2(
     return { schemaVersion: 2, bundleId: "violet-dark", followSystem: true };
   }
 
-  // Default chat (no overlay) — pick by explicit shell; "system" → DEFAULT.
+  // Default chat (no overlay) — preserve explicit legacy shell; "system" → DEFAULT.
   if (theme === "light") return { schemaVersion: 2, bundleId: "forest" };
-  if (theme === "dark")  return { schemaVersion: 2, bundleId: DEFAULT_BUNDLE_ID };
+  if (theme === "dark")  return { schemaVersion: 2, bundleId: "tokyo-night" };
 
   // system or unknown → DEFAULT_BUNDLE_ID
   return { schemaVersion: 2, bundleId: DEFAULT_BUNDLE_ID };
