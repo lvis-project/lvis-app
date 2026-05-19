@@ -234,3 +234,28 @@ export function resetDemoCredentialsForTesting(): void {
   };
   didCapture = false;
 }
+
+/**
+ * Re-run the env capture after the demo activation IPC handler has injected
+ * the decrypted `.env.demo` payload into `process.env`. The boot-time
+ * capture (in `main.ts`) runs *before* the user clicks the activation chip
+ * — at that moment `LVIS_DEMO_*` are absent (the packaged build never ships
+ * them) so `captured` is the empty default. This helper exists so the auth
+ * IPC handler can then see the freshly-injected values and successfully
+ * resolve the vendor config.
+ *
+ * Production safety:
+ *   - Only called from the demo activation IPC handler, which itself only
+ *     fires after the user explicitly pastes a valid activation string. The
+ *     handler is the bottleneck; if it ever needs to ship gated, the gate
+ *     lives there (not here).
+ *   - The boot-time `didCapture` flag is forcibly reset so the inner loop
+ *     re-reads `process.env`. Subsequent calls to `captureDemoCredentials()`
+ *     remain no-ops (idempotency for the boot path is preserved by the
+ *     standard re-entrance through `captureDemoCredentials` itself; the
+ *     reset only applies to this re-capture window).
+ */
+export function recaptureDemoCredentialsAfterActivation(): void {
+  didCapture = false;
+  captureDemoCredentials();
+}
