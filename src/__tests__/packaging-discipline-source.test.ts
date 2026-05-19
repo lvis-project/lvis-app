@@ -63,4 +63,21 @@ describe("installer smoke and packaging discipline", () => {
     expect(releaseChecklist).toContain("DMG 106M / ZIP 103M");
     expect(releaseChecklist).toContain("DMG 227M / ZIP 226M");
   });
+
+  it("fails packaging when the platform uv payload or uv license notice is missing", () => {
+    const buildInstallers = readRepoFile("scripts/build-installers.mjs");
+    const afterPack = readRepoFile("scripts/electron-after-pack.cjs");
+    const packageFootprint = readRepoFile("scripts/check-package-footprint.mjs");
+
+    expect(buildInstallers).toContain("assertUvRuntimePayload(target)");
+    expect(buildInstallers).toContain("staged uv runtime must contain only");
+    expect(buildInstallers).toContain("compressed uv archive missing from staged runtime");
+    expect(buildInstallers).toContain("staged uv binary SHA mismatch");
+    expect(afterPack).toContain("assertBundledUvResource(context)");
+    expect(afterPack).toContain("packaged uv resource must contain exactly one target");
+    expect(afterPack).toContain("packaged uv binary SHA mismatch");
+    expect(afterPack).toContain("uv license notice missing");
+    expect(packageFootprint).toContain("packaged uv binary SHA mismatch");
+    expect(packageFootprint).toContain("uv license notice missing");
+  });
 });
