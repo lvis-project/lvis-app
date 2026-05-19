@@ -256,19 +256,29 @@ describe("usage-stats", () => {
     const dir = mkdtempSync(join(tmpdir(), "usage-stats-"));
     try {
       mkdirSync(dir, { recursive: true });
-      const file = join(dir, "2026-04-18.jsonl");
+      // Use a fixture date pinned to "yesterday" so the test stays inside
+      // the 30-day lookback regardless of when CI runs. A hardcoded date
+      // (e.g. "2026-04-18") silently ages out once wall-clock drifts past
+      // the lookback window — the exact regression the previous fixture
+      // hit on 2026-05-19 (1 day past the 30-day cap).
+      const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const yyyy = yesterday.getUTCFullYear();
+      const mm = String(yesterday.getUTCMonth() + 1).padStart(2, "0");
+      const dd = String(yesterday.getUTCDate()).padStart(2, "0");
+      const dateStr = `${yyyy}-${mm}-${dd}`;
+      const file = join(dir, `${dateStr}.jsonl`);
       writeFileSync(
         file,
         [
-          JSON.stringify(turn({ timestamp: "2026-04-18T10:00:00Z" })),
-          JSON.stringify({ type: "tool_call", timestamp: "2026-04-18T10:05:00Z" }),
+          JSON.stringify(turn({ timestamp: `${dateStr}T10:00:00Z` })),
+          JSON.stringify({ type: "tool_call", timestamp: `${dateStr}T10:05:00Z` }),
           "not json",
           "",
-          JSON.stringify(turn({ timestamp: "2026-04-18T11:00:00Z" })),
+          JSON.stringify(turn({ timestamp: `${dateStr}T11:00:00Z` })),
         ].join("\n") + "\n",
         "utf-8",
       );
-      const read = readAuditEntries(dir, 30);
+      const read = readAuditEntries(dir, 365);
       expect(read.length).toBe(2);
       expect(read.every((e) => e.type === "turn")).toBe(true);
     } finally {

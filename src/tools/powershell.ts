@@ -24,6 +24,7 @@ import {
 } from "./shell-path-policy.js";
 import { getSandboxRunner } from "../permissions/sandbox-runner.js";
 import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
+import { trackManagedChildProcess } from "../main/managed-child-processes.js";
 
 type PipedChild = ChildProcessByStdio<null, Readable, Readable>;
 type PowerShellParser = (command: string) => Promise<PowerShellAstSummary>;
@@ -287,6 +288,7 @@ async function parsePowerShellAst(command: string): Promise<PowerShellAstSummary
         env: buildSafeChildEnv(),
       },
     );
+    trackManagedChildProcess(parser, { label: "tool:powershell-parser" });
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
     parser.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
@@ -468,6 +470,7 @@ async function spawnPowerShell(
         env: buildSafeChildEnv(),
       },
     );
+    trackManagedChildProcess(child, { label: "tool:powershell" });
 
     const chunks: Buffer[] = [];
     const collect = (chunk: Buffer): void => {
