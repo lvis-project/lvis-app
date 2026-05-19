@@ -8,7 +8,7 @@
  * Token groups:
  *   - Tier B  : semantic shell + chat surface tokens
  *   - Tier B' : status + state tokens (info/success-fg/warning/emphasis)
- *   - Tier B'': surface overlay + interaction tokens (overlay, hover-overlay, focus-ring, link)
+ *   - Tier B'': surface overlay + interaction tokens (ui-line, overlay, hover-overlay, focus-ring, link)
  *   - Tier B''': peripheral system tokens (selection, scrollbar, kbd)
  *   - Tier C  : code-surface tokens (--code-bg, --code-fg, --code-border)
  *   - Tier D  : chart palette (--chart-1..--chart-5) for SVG visualizations
@@ -46,6 +46,7 @@ export interface BundleTokens {
   border: string;
   input: string;
   ring: string;
+  "ui-line": string;
   "message-user-bg": string;
   "message-user-fg": string;
   "input-bar-bg": string;
@@ -93,6 +94,6 @@ export interface ThemeBundle {
   shell: "light" | "dark";
   /** When true this bundle is always displayed; never auto-suggested. */
   highContrast: boolean;
-  /** All 25 Tier B + 3 Tier C + 3 action tokens. */
+  /** Complete semantic token payload for this bundle. */
   tokens: BundleTokens;
 }
