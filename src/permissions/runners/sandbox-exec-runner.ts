@@ -38,6 +38,7 @@ import type {
   SandboxRunnerDetect,
   SandboxSpawnOptions,
 } from "../sandbox-runner.js";
+import { trackManagedChildProcess } from "../../main/managed-child-processes.js";
 
 /** Absolute path to the macOS system sandbox-exec binary (D8: no bundled fallback). */
 export const SANDBOX_EXEC_BIN = "/usr/bin/sandbox-exec";
@@ -155,6 +156,7 @@ export class SandboxExecRunner implements SandboxRunner {
         ...(options.cwd ? { cwd: options.cwd } : {}),
         stdio: ["ignore", "pipe", "pipe"],
       });
+      trackManagedChildProcess(child, { label: "sandbox:sandbox-exec" });
 
       if (!child.stdout || !child.stderr) {
         throw new Error("SandboxExecRunner: child process missing stdout/stderr pipes");

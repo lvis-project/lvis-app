@@ -23,6 +23,7 @@ import { readPluginRegistry, resolveManifestPathsFromRegistry } from "../plugins
 import { getSandboxRunner } from "../permissions/sandbox-runner.js";
 import { resolveUvTarget, type UvTarget } from "../../scripts/uv-targets.mjs";
 import { lvisHome } from "../shared/lvis-home.js";
+import { trackManagedChildProcess } from "./managed-child-processes.js";
 const log = createLogger("python-runtime");
 
 const __filename = fileURLToPath(import.meta.url);
@@ -475,6 +476,7 @@ export class PythonRuntimeBootstrapper {
       }
 
       const proc = spawn(uvBin, args, { env, stdio: ["ignore", "pipe", "pipe"] });
+      trackManagedChildProcess(proc, { label: "python-runtime:uv" });
 
       let stdout = "";
       let stderr = "";
@@ -537,6 +539,7 @@ export class PythonRuntimeBootstrapper {
         if (value !== undefined) safeEnv[key] = value;
       }
       const proc = spawn(pythonBin, args, { env: safeEnv, stdio: ["ignore", "pipe", "pipe"] });
+      trackManagedChildProcess(proc, { label: "python-runtime:python" });
 
       let stdout = "";
       let stderr = "";
