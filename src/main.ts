@@ -166,8 +166,8 @@ function applyRuntimeAppIcon() {
 captureDemoCredentials();
 // Path 2 hotfix — when `LVIS_DEMO_VENDOR=azure-foundry` and
 // `LVIS_DEMO_HOST_MAP` is non-empty, install a Chromium `host-resolver-rules`
-// switch so the demo Azure Foundry hostnames resolve to the LGE intranet
-// IPs *inside Electron only* (no `/etc/hosts` mutation, no sudo).
+// switch so the demo Azure Foundry hostnames resolve to the internal
+// intranet IPs *inside Electron only* (no `/etc/hosts` mutation, no sudo).
 // MUST be called before `app.whenReady()` — done here so the switch is
 // installed before any network service initialisation. Also runs BEFORE
 // the env scrub for the same reason as `captureDemoCredentials()`: the
