@@ -14,9 +14,10 @@ interface Options {
  * `<user>@<hostname>` (account info). Users requested the account fields be
  * dropped while keeping the OS marker visible.
  *
- * Renders an OS glyph (🍎 macOS, 🪟 Windows, 🐧 Linux, 💻 fallback) followed
- * by a short OS short-name. Screen readers receive a semantic Korean label
- * via `a11yLabel` so the emoji's Unicode name ("red apple") is not announced.
+ * Renders an OS glyph (🍎 / 🪟 / 🐧 / 💻 fallback) only — the prior textual
+ * short-name ("macOS"/"Win"/"Linux") was dropped per user feedback to keep
+ * the indicator OS-name-agnostic. Screen readers receive a generic Korean
+ * label "운영체제" via `a11yLabel` so the emoji's Unicode name is not announced.
  */
 export function useStatusBarOs({ api, upsertPersistent }: Options): void {
   useEffect(() => {
@@ -26,13 +27,13 @@ export function useStatusBarOs({ api, upsertPersistent }: Options): void {
       try {
         const env = await api.getRuntimeEnv();
         if (cancelled) return;
-        const os = describeOs(env.platform);
+        const emoji = osEmoji(env.platform);
         upsertPersistent({
           id: "runtime:os",
           severity: "info",
-          label: os.emoji,
-          value: os.shortName,
-          a11yLabel: os.a11y,
+          label: emoji,
+          value: "",
+          a11yLabel: "운영체제",
         });
       } catch {
         // Non-fatal — the OS marker is decorative.
@@ -44,15 +45,15 @@ export function useStatusBarOs({ api, upsertPersistent }: Options): void {
   }, [api, upsertPersistent]);
 }
 
-function describeOs(platform: string): { emoji: string; shortName: string; a11y: string } {
+function osEmoji(platform: string): string {
   switch (platform) {
     case "darwin":
-      return { emoji: "🍎", shortName: "macOS", a11y: "운영체제: macOS" };
+      return "🍎";
     case "win32":
-      return { emoji: "🪟", shortName: "Win", a11y: "운영체제: Windows" };
+      return "🪟";
     case "linux":
-      return { emoji: "🐧", shortName: "Linux", a11y: "운영체제: Linux" };
+      return "🐧";
     default:
-      return { emoji: "💻", shortName: platform, a11y: `운영체제: ${platform}` };
+      return "💻";
   }
 }
