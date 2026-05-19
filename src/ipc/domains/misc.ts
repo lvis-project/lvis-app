@@ -164,16 +164,42 @@ export function registerMiscHandlers(deps: IpcDeps): void {
   });
 
   // ─── App info ────────────────────────────────────
-  // Read-only host metadata for the Settings "일반" tab dashboard. Returns
-  // the canonical app version (electron `app.getVersion()` — single source
-  // of truth) plus the host's `process.platform` so the renderer can show
-  // the OS label without duplicating a userAgent parser.
+  // Read-only host metadata for the Settings "일반" tab dashboard. Returns:
+  //   - `version`: LVIS package.json version (single source of truth).
+  //     `app.getVersion()` is intentionally avoided because in dev mode
+  //     (running unpackaged via `electron .`) it returns the Electron binary
+  //     version instead of the project version. We resolve the project
+  //     package.json relative to `app.getAppPath()` so both packaged
+  //     (`app.asar/package.json`) and dev (`<repo>/package.json`) work.
+  //   - `electronVersion` / `nodeVersion` / `chromeVersion` / `v8Version`:
+  //     stack info from `process.versions` (visible in 시스템 섹션).
+  //   - `platform` / `arch` / `userDataPath`: host environment used by the
+  //     OS label and 데이터 경로 row.
   // Read-only and idempotent; no sender guard required (mirrors
   // `lvis:settings:get` / `lvis:audit:stats`).
   ipcMain.handle("lvis:app:info", async () => {
     const { app } = await import("electron");
+    const { readFile } = await import("node:fs/promises");
+    const path = await import("node:path");
+    let appVersion = "unknown";
+    try {
+      const pkgPath = path.join(app.getAppPath(), "package.json");
+      const raw = await readFile(pkgPath, "utf8");
+      const parsed = JSON.parse(raw) as { version?: unknown };
+      if (typeof parsed.version === "string" && parsed.version.length > 0) {
+        appVersion = parsed.version;
+      }
+    } catch (err) {
+      log.warn(
+        `lvis:app:info package.json read failed: ${(err as Error)?.message ?? String(err)}`,
+      );
+    }
     return {
-      version: app.getVersion(),
+      version: appVersion,
+      electronVersion: process.versions.electron ?? "",
+      nodeVersion: process.versions.node ?? "",
+      chromeVersion: process.versions.chrome ?? "",
+      v8Version: process.versions.v8 ?? "",
       platform: process.platform,
       arch: process.arch,
       userDataPath: app.getPath("userData"),
