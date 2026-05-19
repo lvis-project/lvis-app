@@ -87,6 +87,18 @@ interface PluginManifest {
     bodyField?: string;
   }>;
   installPolicy?: "admin" | "user";
+  /**
+   * 마켓플레이스 install 시 호스트가 사용자에게 dep 누락을 알리는 "preflight" 메타데이터.
+   * **Host 는 dep 을 absolutely auto-install 하지 않는다** (issue #92, 2026-05).
+   *
+   * - string form `"foo"` 와 `required` 누락 object 는 `{ pluginId, required: true }` 로 정규화.
+   * - `required: true` (또는 string form): dep 미설치면 install 차단 + `MissingPluginDependenciesError`.
+   * - `required: false`: install 진행. 컨슈머 플러그인은 dep-absent 케이스를 graceful degrade
+   *   (detector idle / envelope `{status:'<dep>_unavailable'}` 등) 해야 한다 — host 는 강제하지 않음.
+   *
+   * 권장 패턴: 대부분의 cross-plugin 통신은 `dependencies: [{ pluginId, required: false }]` +
+   * `pluginAccess.plugins[]` 조합으로 선언한다.
+   */
   dependencies?: Array<string | { pluginId: string; versionRange?: string; required?: boolean }>;
   pluginAccess?: {
     plugins: Array<{ pluginId: string; tools?: string[]; events?: string[] }>;
@@ -149,7 +161,7 @@ interface PluginManifest {
 | `uiCallable[]` | `PluginRuntime.callFromUi()` allowlist | renderer IPC 호출 |
 | `capabilities[]` | HostApi MS Graph 게이트 + `emitEvent` namespace 게이트 | 런타임 전반 |
 | `installPolicy` | Install-policy guard + signature gate policy | install + uninstall + load |
-| `dependencies` | Marketplace dependency resolver | install |
+| `dependencies` | Marketplace install **preflight gate**. `required:true` (default — string form / `required` 누락 object 포함) 미설치 시 install 거부 + `MissingPluginDependenciesError`; `required:false` 는 install 통과 + 컨슈머 책임으로 degrade. **Host 는 dep 을 auto-install 하지 않는다** (issue #92). | install |
 | `pluginAccess` | Cross-plugin tool/event access gate + agent approval scope grant | runtime |
 | `publisher` | 감사 로그 · 마켓플레이스 카드 | install + 표시 |
 

@@ -2603,6 +2603,12 @@ graph TB
 
 > **Deprecated (Phase 1 스키마에서 제거됨):** `additionalProperties: false` 적용 (Phase 1 결정) 이후 아래 legacy 필드는 매니페스트에 포함하면 로드 거부된다: top-level `permissions[]` 문자열 배열 (host 미사용, Phase 1 제거), `eventPublishes[]` (`emittedEvents`로 교체), nested 객체 형태의 `tools[{ name, entry, description }]`, `skills[]`, 객체 형태의 `ui`, `hooks`, `events`, `dependencies`. `description` 은 Phase 1 이후 MUST 필드로 승격되었다. 이전 설계 초안은 git history (pre-Sprint-3-B) 에서만 확인 가능하다.
 
+> **`dependencies[]` — declarative preflight metadata only (issue #92, 2026-05).** Host는 manifest 의 `dependencies[]` 에 선언된 다른 플러그인을 **절대 auto-install 하지 않는다**. 마켓플레이스 install 시:
+> - `required: true` (default — `required` 누락 object 와 legacy string-form `"<id>"` 모두 `normalizeDependencies` 가 동일 의미로 정규화): 해당 plugin 이 installed registry 에 없으면 install 거부 + `MissingPluginDependenciesError`. 사용자가 직접 dep 을 먼저 설치해야 함.
+> - `required: false`: install 진행. **컨슈머 플러그인은 dep-absent 케이스를 runtime degrade** (detector idle / tool envelope `{status:'<dep>_unavailable'}` 등) 해야 한다 — host 는 강제하지 않는다.
+>
+> 회귀 사례 (issue #92): pre-fix 호스트가 `dependencies[]` 를 recursive auto-install 시도하던 시절, `work-assistant` (user policy) 가 `ms-graph` (admin policy) 를 `required: false` 로 선언했음에도 user actor 로 ms-graph install 이 cascade 되어 admin-guard 가 차단 → user 가 work-assistant 를 설치 못 함. Fix 는 cascade install 자체를 제거하고 hard-required 미설치만 명확한 preflight 로 거부하도록 단순화. Plugin System CI 의 invariant: marketplace install path 는 declared `dependencies[]` 를 **재귀적으로 install 하지 않는다**.
+
 **마켓플레이스 검증:** 플러그인 repo는 sidecar signature를 만들지 않는다. Marketplace upload API가 zip/manifest/schema/version/policy/dependency/access를 검증하고 최종 artifact envelope에 서명한다. Host는 설치 시 envelope를 검증하고 install receipt를 저장한다.
 
 **검증 플로우:** marketplace envelope verification → install receipt file-hash verification → JSON.parse → AJV (`@lvis/plugin-sdk/schemas/plugin-manifest.schema.json`) → cross-field (tool-name regex, `uiCallable ⊂ tools`, `startupTimeoutMs > 0`) → capability enforcement → entry import. 각 단계 실패 시 해당 플러그인 fail-soft drop. 에러 포맷 상세는 `docs/references/plugin-tool-schema-design.md` §2.5.
