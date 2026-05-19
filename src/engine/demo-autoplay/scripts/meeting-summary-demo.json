@@ -1,0 +1,15 @@
+{
+  "id": "meeting-summary-demo",
+  "titleKo": "회의록 요약 시연",
+  "userMessage": "이번 주 회의록 한꺼번에 정리해줘",
+  "toolCalls": [
+    {
+      "toolName": "meeting_list",
+      "labelKo": "최근 5일 회의",
+      "fakeResultKo": "3건 발견: Q2 OKR · Sprint 51 · Vendor sync",
+      "delayMs": 700
+    }
+  ],
+  "assistantResponse": "이번 주 회의 3건 요약:\n\n① Q2 OKR 리뷰 — 매출 92% 달성, 리텐션 개선 필요\n② Sprint 51 — 5/6 완료, 1건 다음 스프린트로\n③ Vendor sync — 계약 갱신 협상 진행 중",
+  "typeOnMsPerChar": 22
+}

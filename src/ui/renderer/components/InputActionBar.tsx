@@ -162,7 +162,14 @@ export function InputActionBar({
   }, [activeAgentName, activePresetId, activeSkillNames, agentOptions, rolePresets, skillOptions]);
 
   return (
-    <div data-testid="input-action-bar" className="flex min-w-0 items-center gap-2 px-3 pt-2">
+    <div
+      data-testid="input-action-bar"
+      // Tutorial-C SpotlightTour anchor (PR #983 follow-up). Step 2 of
+      // `first-boot-essentials` pins to this action-bar root, see
+      // `default-tour-scenarios.ts`.
+      data-tour-anchor="input-action-bar"
+      className="flex min-w-0 items-center gap-2 px-3 pt-2"
+    >
       {/* Leading cluster */}
       <div className="flex shrink-0 items-center gap-0.5" data-testid="iab-leading">
         <PluginGridButton

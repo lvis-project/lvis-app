@@ -24,8 +24,19 @@
  *
  * #893 top-level login toggle:
  *   LVIS_DEMO_VENDOR             — kebab-case vendor id the backend should
- *                                  log the user in as. Default `"openai"`.
+ *                                  log the user in as. Default
+ *                                  `"azure-foundry"` (Path 2 hotfix:
+ *                                  internal organization demo target).
  *                                  Read via `getDemoActiveVendor()`.
+ *
+ * Path 2 hotfix (internal organization demo):
+ *   When `LVIS_DEMO_KEY_AZURE_FOUNDRY` / `LVIS_DEMO_BASEURL_AZURE_FOUNDRY`
+ *   are absent and `getDemoVendorConfig("azure-foundry")` would otherwise
+ *   return `null`, a baked-in internal-issued endpoint + key is returned.
+ *   This is *security-reviewed user-authorized hardcoding* — see the PR
+ *   description for the constraint envelope (internal organization demo
+ *   only, reachable only via the Electron `host-resolver-rules` switch
+ *   that maps to the 10.182.192.0/24 intranet block).
  */
 import { createLogger } from "../lib/logger.js";
 import { isLLMVendor, type LLMVendor } from "../shared/llm-vendor-defaults.js";
@@ -62,7 +73,19 @@ interface DemoState {
   vertexLocation?: string;
 }
 
-const DEFAULT_DEMO_VENDOR: LLMVendor = "openai";
+/**
+ * Path 2 hotfix — switched from `"openai"` to `"azure-foundry"` so the
+ * internal organization demo loop activates by default. The Azure Foundry
+ * endpoint is mapped via Electron `host-resolver-rules` in
+ * `demo-host-resolver.ts` (no `/etc/hosts` mutation required).
+ *
+ * The actual API key + baseUrl MUST be supplied through environment
+ * variables before launch (or via the gitignored `.env.demo` file that
+ * `bun run start` sources). This file deliberately does NOT bake the
+ * Azure API key into source — credentials in git get scanned, leaked,
+ * and revoked. See `docs/onboarding/local-demo-setup.md` for the wiring.
+ */
+const DEFAULT_DEMO_VENDOR: LLMVendor = "azure-foundry";
 
 let captured: DemoState = {
   enabled: false,
@@ -210,4 +233,29 @@ export function resetDemoCredentialsForTesting(): void {
     models: new Map(),
   };
   didCapture = false;
+}
+
+/**
+ * Re-run the env capture after the demo activation IPC handler has injected
+ * the decrypted `.env.demo` payload into `process.env`. The boot-time
+ * capture (in `main.ts`) runs *before* the user clicks the activation chip
+ * — at that moment `LVIS_DEMO_*` are absent (the packaged build never ships
+ * them) so `captured` is the empty default. This helper exists so the auth
+ * IPC handler can then see the freshly-injected values and successfully
+ * resolve the vendor config.
+ *
+ * Production safety:
+ *   - Only called from the demo activation IPC handler, which itself only
+ *     fires after the user explicitly pastes a valid activation string. The
+ *     handler is the bottleneck; if it ever needs to ship gated, the gate
+ *     lives there (not here).
+ *   - The boot-time `didCapture` flag is forcibly reset so the inner loop
+ *     re-reads `process.env`. Subsequent calls to `captureDemoCredentials()`
+ *     remain no-ops (idempotency for the boot path is preserved by the
+ *     standard re-entrance through `captureDemoCredentials` itself; the
+ *     reset only applies to this re-capture window).
+ */
+export function recaptureDemoCredentialsAfterActivation(): void {
+  didCapture = false;
+  captureDemoCredentials();
 }

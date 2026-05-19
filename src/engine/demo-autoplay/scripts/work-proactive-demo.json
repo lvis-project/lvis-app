@@ -1,0 +1,21 @@
+{
+  "id": "work-proactive-demo",
+  "titleKo": "업무 알림 시연",
+  "userMessage": "오늘 처리할 일 정리해줘",
+  "toolCalls": [
+    {
+      "toolName": "work_inbox_scan",
+      "labelKo": "받은 메일 스캔",
+      "fakeResultKo": "신규 메일 12건 중 5건이 액션 아이템 후보",
+      "delayMs": 700
+    },
+    {
+      "toolName": "work_extract_tasks",
+      "labelKo": "할 일 추출",
+      "fakeResultKo": "후보 5건: ① 벤더 응답 ② 디자인 검토 ③ 일정 확인 ④ 회의 자료 공유 ⑤ 보고서 초안",
+      "delayMs": 500
+    }
+  ],
+  "assistantResponse": "오늘 우선 처리할 5건:\n\n① 벤더 응답 (마감 오늘 18:00)\n② 디자인 검토 (사용자 피드백 첨부)\n③ 일정 확인 (수요일 워크샵)\n④ 회의 자료 공유 (PM 요청)\n⑤ 보고서 초안 (이번 주 금요일)\n\n각 항목을 ⌘K → '할 일'에서 바로 등록할 수 있어요.",
+  "typeOnMsPerChar": 22
+}
