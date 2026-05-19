@@ -359,11 +359,12 @@ describe("PythonRuntimeBootstrapper", () => {
     const manifestPath = path.join(manifestRoot, "plugin.json");
     const lockFilePath = path.join(manifestRoot, "python-requirements.lock");
     const packagedUvDir = path.join(resourcesPath, "uv", "linux-arm64");
-    const expectedUvBin = path.join(uvRuntimeDir, "linux-arm64", "test-sha256", "uv");
+    const uvSha = "f0c6469da6ce77395335e1dd05f3d03411b1a674c17332769d301275b5496f12";
+    const expectedUvBin = path.join(uvRuntimeDir, "linux-arm64", uvSha, "uv");
 
     mkdirSync(packagedUvDir, { recursive: true });
     writeFileSync(path.join(packagedUvDir, "uv.gz"), gzipSync(Buffer.from("uv-bin")));
-    writeFileSync(path.join(packagedUvDir, "uv.meta.json"), JSON.stringify({ binarySha256: "test-sha256" }));
+    writeFileSync(path.join(packagedUvDir, "uv.meta.json"), JSON.stringify({ binarySha256: uvSha }));
     writeFileSync(manifestPath, JSON.stringify({ python: { managedBy: "lvis-app" } }));
     writeFileSync(lockFilePath, "");
 
@@ -414,6 +415,106 @@ describe("PythonRuntimeBootstrapper", () => {
       rmSync(resourcesPath, { recursive: true, force: true });
       rmSync(uvRuntimeDir, { recursive: true, force: true });
       rmSync(manifestRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("packaged Electron에서 .ready sentinel이 있어도 uv를 먼저 materialize한다", async () => {
+    const resourcesPath = mkdtempSync(path.join(tmpdir(), "lvis-packaged-ready-resources-"));
+    const uvRuntimeDir = mkdtempSync(path.join(tmpdir(), "lvis-packaged-ready-uv-"));
+    const targetDirName = `${process.platform}-${process.arch}`;
+    const binName = process.platform === "win32" ? "uv.exe" : "uv";
+    const packagedUvDir = path.join(resourcesPath, "uv", targetDirName);
+    const uvSha = "4561e9cbacc2878e64dbdcc60796818bd3c026eb1c1097467fe09730284bb170";
+    const expectedUvBin = path.join(uvRuntimeDir, targetDirName, uvSha, binName);
+
+    mkdirSync(packagedUvDir, { recursive: true });
+    writeFileSync(path.join(packagedUvDir, `${binName}.gz`), gzipSync(Buffer.from("ready-uv-bin")));
+    writeFileSync(path.join(packagedUvDir, "uv.meta.json"), JSON.stringify({ binarySha256: uvSha }));
+
+    const originalDefaultApp = (process as { defaultApp?: boolean }).defaultApp;
+    const originalResourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
+    (process as { defaultApp?: boolean }).defaultApp = false;
+    (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = resourcesPath;
+    mockedAccess.mockResolvedValue(undefined);
+
+    try {
+      const bootstrapper = new PythonRuntimeBootstrapper({ uvRuntimeDir });
+      await bootstrapper.ensureReady(makeBrowserWindow());
+
+      expect(existsSync(expectedUvBin)).toBe(true);
+      expect(readFileSync(expectedUvBin, "utf8")).toBe("ready-uv-bin");
+      expect(mockedSpawn).not.toHaveBeenCalled();
+    } finally {
+      (process as { defaultApp?: boolean }).defaultApp = originalDefaultApp;
+      (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = originalResourcesPath;
+      rmSync(resourcesPath, { recursive: true, force: true });
+      rmSync(uvRuntimeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("packaged uv archive SHA가 metadata와 다르면 실행하지 않는다", async () => {
+    const resourcesPath = mkdtempSync(path.join(tmpdir(), "lvis-packaged-bad-sha-resources-"));
+    const uvRuntimeDir = mkdtempSync(path.join(tmpdir(), "lvis-packaged-bad-sha-uv-"));
+    const targetDirName = `${process.platform}-${process.arch}`;
+    const binName = process.platform === "win32" ? "uv.exe" : "uv";
+    const packagedUvDir = path.join(resourcesPath, "uv", targetDirName);
+
+    mkdirSync(packagedUvDir, { recursive: true });
+    writeFileSync(path.join(packagedUvDir, `${binName}.gz`), gzipSync(Buffer.from("ready-uv-bin")));
+    writeFileSync(path.join(packagedUvDir, "uv.meta.json"), JSON.stringify({
+      binarySha256: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    }));
+
+    const originalDefaultApp = (process as { defaultApp?: boolean }).defaultApp;
+    const originalResourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
+    (process as { defaultApp?: boolean }).defaultApp = false;
+    (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = resourcesPath;
+    mockedAccess.mockResolvedValue(undefined);
+
+    try {
+      const bootstrapper = new PythonRuntimeBootstrapper({ uvRuntimeDir });
+      await expect(bootstrapper.ensureReady(makeBrowserWindow())).rejects.toThrow(/SHA mismatch/);
+      expect(mockedSpawn).not.toHaveBeenCalled();
+    } finally {
+      (process as { defaultApp?: boolean }).defaultApp = originalDefaultApp;
+      (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = originalResourcesPath;
+      rmSync(resourcesPath, { recursive: true, force: true });
+      rmSync(uvRuntimeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("packaged uv 캐시 파일 SHA가 다르면 archive에서 다시 materialize한다", async () => {
+    const resourcesPath = mkdtempSync(path.join(tmpdir(), "lvis-packaged-cache-sha-resources-"));
+    const uvRuntimeDir = mkdtempSync(path.join(tmpdir(), "lvis-packaged-cache-sha-uv-"));
+    const targetDirName = `${process.platform}-${process.arch}`;
+    const binName = process.platform === "win32" ? "uv.exe" : "uv";
+    const packagedUvDir = path.join(resourcesPath, "uv", targetDirName);
+    const uvSha = "4561e9cbacc2878e64dbdcc60796818bd3c026eb1c1097467fe09730284bb170";
+    const expectedUvBin = path.join(uvRuntimeDir, targetDirName, uvSha, binName);
+
+    mkdirSync(packagedUvDir, { recursive: true });
+    mkdirSync(path.dirname(expectedUvBin), { recursive: true });
+    writeFileSync(path.join(packagedUvDir, `${binName}.gz`), gzipSync(Buffer.from("ready-uv-bin")));
+    writeFileSync(path.join(packagedUvDir, "uv.meta.json"), JSON.stringify({ binarySha256: uvSha }));
+    writeFileSync(expectedUvBin, "stale-uv-bin");
+
+    const originalDefaultApp = (process as { defaultApp?: boolean }).defaultApp;
+    const originalResourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
+    (process as { defaultApp?: boolean }).defaultApp = false;
+    (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = resourcesPath;
+    mockedAccess.mockResolvedValue(undefined);
+
+    try {
+      const bootstrapper = new PythonRuntimeBootstrapper({ uvRuntimeDir });
+      await bootstrapper.ensureReady(makeBrowserWindow());
+
+      expect(readFileSync(expectedUvBin, "utf8")).toBe("ready-uv-bin");
+      expect(mockedSpawn).not.toHaveBeenCalled();
+    } finally {
+      (process as { defaultApp?: boolean }).defaultApp = originalDefaultApp;
+      (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = originalResourcesPath;
+      rmSync(resourcesPath, { recursive: true, force: true });
+      rmSync(uvRuntimeDir, { recursive: true, force: true });
     }
   });
 
@@ -731,11 +832,12 @@ describe("PythonRuntimeBootstrapper", () => {
       const lockFilePath = path.join(manifestRoot, "python-requirements.lock");
       const packagedUvDir = path.join(resourcesPath, "uv", `${process.platform}-${process.arch}`);
       const binName = "uv";
-      const expectedUvBin = path.join(uvRuntimeDir, `${process.platform}-${process.arch}`, "sha717", binName);
+      const uvSha = "3105dd1dda985da51e5ea5001f835e2a7bd675ac145aa8779201c8737d72073b";
+      const expectedUvBin = path.join(uvRuntimeDir, `${process.platform}-${process.arch}`, uvSha, binName);
 
       mkdirSync(packagedUvDir, { recursive: true });
       writeFileSync(path.join(packagedUvDir, "uv.gz"), gzipSync(Buffer.from("uv-bin-content")));
-      writeFileSync(path.join(packagedUvDir, "uv.meta.json"), JSON.stringify({ binarySha256: "sha717" }));
+      writeFileSync(path.join(packagedUvDir, "uv.meta.json"), JSON.stringify({ binarySha256: uvSha }));
       writeFileSync(manifestPath, JSON.stringify({ python: { managedBy: "lvis-app" } }));
       writeFileSync(lockFilePath, "");
 
