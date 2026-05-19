@@ -694,15 +694,30 @@ export function App() {
   }, [api, chainStage, markOnboardingCompleted]);
 
   // Live Auto-play (proposal: docs/architecture/proposals/live-autoplay.md).
-  // Activates on first-run when `LVIS_DEMO_VENDOR` env is set OR when the
-  // user explicitly opts in via `features.demoAutoplayEnabled = true`. In
-  // packaged production builds without the env var this is a dead path.
+  // Activates for returning users (onboardingCompleted=true) when
+  // `LVIS_DEMO_VENDOR` env is set OR when the user explicitly opts in via
+  // `features.demoAutoplayEnabled = true`. In packaged production builds
+  // without the env var this is a dead path. On a fresh install the demo
+  // is gated behind onboarding so the ScenarioShowcase chain is always
+  // shown first — see `shouldActivateDemoAutoplay` (engine/demo-autoplay/
+  // types.ts §7) for the activation truth table.
   const demoAutoplay = useDemoAutoplay(api);
-  // When the demo is active we collapse the entire Z chain — the demo
-  // is itself the onboarding surface and reasserts onboardingCompleted
-  // when it terminates.
+  // When the demo is active we collapse the rest of the Z chain — the demo
+  // re-engages a returning user and reasserts onboardingCompleted when it
+  // terminates. Exceptions:
+  //   - `idle` / `done`: no chain to collapse.
+  //   - `showcase`: the user has started seeing the ScenarioShowcase
+  //     intro. Demo MUST NOT yank it out from under them — if both
+  //     somehow fired together (e.g. flag flipped mid-boot), we keep the
+  //     showcase visible and let the demo abort path retire itself when
+  //     the user dismisses or completes showcase.
   useEffect(() => {
-    if (demoAutoplay.turn && chainStage !== "done" && chainStage !== "idle") {
+    if (
+      demoAutoplay.turn &&
+      chainStage !== "done" &&
+      chainStage !== "idle" &&
+      chainStage !== "showcase"
+    ) {
       dispatchChain({ type: "force-finish" });
     }
   }, [demoAutoplay.turn, chainStage]);
