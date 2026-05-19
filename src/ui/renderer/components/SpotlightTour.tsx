@@ -103,12 +103,40 @@ function readRect(selector: string): SpotlightRect | null {
   if (!el) return null;
   const rect = el.getBoundingClientRect();
   if (rect.width === 0 && rect.height === 0) return null;
+  // U3 — viewport visibility check. An anchor whose bounding rect lands
+  // fully off-screen (e.g. hidden behind a still-mounted Radix Dialog
+  // portal that ate the layout, or scrolled out of view) would cause
+  // the spotlight ring to draw at coordinates the user cannot see.
+  // Returning null lets the caller fall back to the centred card.
+  if (typeof window !== "undefined") {
+    const offScreen =
+      rect.bottom <= 0 ||
+      rect.right <= 0 ||
+      rect.top >= window.innerHeight ||
+      rect.left >= window.innerWidth;
+    if (offScreen) return null;
+  }
   return {
     top: rect.top,
     left: rect.left,
     width: rect.width,
     height: rect.height,
   };
+}
+
+/**
+ * U6 — Detect whether another modal Dialog / AlertDialog is currently
+ * mounted. If true, the SpotlightTour must NOT paint its backdrop on
+ * top because the user would see the violet ring float above a still-
+ * visible Radix Dialog (the bug from the 2026-05-19 screenshot).
+ */
+function anyModalDialogOpen(): boolean {
+  if (typeof document === "undefined") return false;
+  return Boolean(
+    document.querySelector(
+      '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]',
+    ),
+  );
 }
 
 /**
@@ -250,6 +278,14 @@ export function SpotlightTour({
   // `document.body[data-demo-active]` is set by `App.tsx`. We ignore
   // tour.start broadcasts in that case so the Spotlight backdrop can't
   // paint over the demo overlay.
+  //
+  // U6 — modal precondition: if any Radix Dialog / AlertDialog is open
+  // when the tour.start broadcast arrives, queue the scenario and wait
+  // for the dialog to close before mounting. Without this guard the
+  // SpotlightTour would paint its backdrop + ring on top of the still-
+  // open dialog, leaving the violet ring floating over an unrelated
+  // anchor that the user can't see (the 2026-05-19 screenshot bug).
+  const pendingScenarioRef = useRef<string | null>(null);
   useEffect(() => {
     const subscribe = api?.tour?.onStart;
     if (typeof subscribe !== "function") return;
@@ -261,10 +297,38 @@ export function SpotlightTour({
       ) {
         return;
       }
+      if (anyModalDialogOpen()) {
+        // Queue the scenario; the MutationObserver below will pick it up
+        // when the offending dialog unmounts.
+        pendingScenarioRef.current = scenarioId;
+        return;
+      }
       setActiveScenarioId(scenarioId);
     });
     return off;
   }, [api]);
+
+  // U6 — observer that flushes the queued scenario when every modal
+  // dialog has closed. We watch `document.body` for the data-state
+  // attribute mutations Radix emits on close.
+  useEffect(() => {
+    if (typeof MutationObserver === "undefined" || typeof document === "undefined") {
+      return;
+    }
+    const observer = new MutationObserver(() => {
+      if (pendingScenarioRef.current && !anyModalDialogOpen()) {
+        const next = pendingScenarioRef.current;
+        pendingScenarioRef.current = null;
+        setActiveScenarioId(next);
+      }
+    });
+    observer.observe(document.body, {
+      attributes: true,
+      subtree: true,
+      attributeFilter: ["data-state"],
+    });
+    return () => observer.disconnect();
+  }, []);
 
   // Refresh the anchor rect on resize so the ring follows the target.
   useEffect(() => {
