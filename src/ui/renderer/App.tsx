@@ -1442,7 +1442,17 @@ export function App() {
           chain effect fires `api.tour.start`. We pass a small wrapper
           for `tour.start` that doubles as the welcomeDisplayName seeder
           so the WelcomeQuestion knows what 호칭 the user picked when it
-          re-renders for an early-back-out chain. */}
+          re-renders for an early-back-out chain.
+
+          Test/production trigger seam (see memory-seed-onboarding.spec.ts):
+          the wrapper below intentionally swallows MemorySeed's own
+          `startTour()` IPC so the chain-effect at the top of this file
+          (stage="tour" branch) is the *single* canonical broadcaster.
+          Without the swallow both paths fire in sequence and the
+          SpotlightTour subscriber visibly resets to step 0 (regression
+          from PR #1019, fix landed in #1029). The e2e spec asserts the
+          chain-effect path — MemorySeed's startTour() remains as a
+          defensive secondary call for the dev-mode swallow-failure case. */}
       <MemorySeedDialog
         open={chainStage === "memory"}
         selectedScenarioId={selectedScenarioId}
