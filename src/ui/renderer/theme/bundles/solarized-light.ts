@@ -41,6 +41,7 @@ export const solarizedLightBundle: ThemeBundle = {
     border:                   "46 42% 78%",
     input:                    "46 42% 78%",
     ring:                     "205 69% 49%",
+    "ui-line":                "46 42% 35.5%",
     "message-user-bg":        "205 69% 49%",
     "message-user-fg":        "0 0% 5%",
     "input-bar-bg":           "44 87% 94%",

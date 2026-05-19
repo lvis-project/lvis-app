@@ -41,6 +41,7 @@ export const rosePineBundle: ThemeBundle = {
     border:                   "248 13% 36%",   /* highlight-high #524f67 */
     input:                    "248 13% 36%",
     ring:                     "267 57% 78%",
+    "ui-line":                "248 25% 59.0%",
     "message-user-bg":        "267 57% 78%",
     "message-user-fg":        "249 22% 12%",
     "input-bar-bg":           "247 23% 15%",
