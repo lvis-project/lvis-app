@@ -305,7 +305,7 @@ describe("SettingsService LLM per-vendor patching", () => {
     const service = new SettingsService({ userDataPath });
     const llm = service.get("llm");
 
-    expect(llm.provider).toBe("claude");
+    expect(llm.provider).toBe("azure-foundry");
     expect(llm.vendors[llm.provider]).toBeDefined();
   });
 });

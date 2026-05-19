@@ -119,13 +119,18 @@ export function App() {
   // Z onboarding chain (2026-05-19) — replaces the previous pair of
   // `onboardingOpen` + `appLoginOpen` flags with an explicit reducer
   // that drives every stage of the first-boot funnel:
-  //   idle → showcase → login → welcome → memory → tour → plugins → done
+  //   showcase → login → welcome → memory → tour → plugins → done
   // The reducer keeps the JSX render branches small (each dialog
   // mounts only when its stage matches) and prevents the race where
   // multiple Radix Dialogs were mounted at once (#982/#990/#997).
+  //
+  // Initial state is "showcase" so the intro screen mounts on first
+  // paint without waiting for the async boot probe. Returning users
+  // skip the chain via `probe-skip` (handled from both `idle` and
+  // `showcase` in the reducer) so the Dialog never visibly flashes.
   const [chainStage, dispatchChain] = useReducer(
     onboardingChainReducer,
-    "idle" as OnboardingChainStage,
+    "showcase" as OnboardingChainStage,
   );
   // Display name surfaced inside WelcomeQuestion — best-effort from the
   // host's persisted memory seed. Empty string when unknown, the
@@ -1060,9 +1065,21 @@ export function App() {
   const onNewChat = useCallback(() => { void handleNewChat(); }, [handleNewChat]);
 
   // ChatView context bundle — avoids drilling ~40 props through the tree.
+  //
+  // Mask `hasApiKey === false` while the onboarding chain is still in
+  // progress so the "Claude API 키 설정 필요" empty state never paints
+  // underneath the Z chain dialogs. The chain itself is the canonical
+  // first-boot CTA; surfacing a competing empty state below it leaks
+  // through the Radix Dialog backdrop and confuses the user (the bug
+  // this fix resolves). Returning users with `chainStage === "done"`
+  // (probe-skip or chain completion) still see the empty state when
+  // they remove their key from Settings, so the safety-net behaviour
+  // for that path is preserved.
+  const effectiveHasApiKey: boolean | null =
+    chainStage === "done" ? hasApiKey : (hasApiKey === false ? null : hasApiKey);
   const chatContextValue = useChatContextValue({
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
-    question, setQuestion, chatEndRef, currentSessionId, hasApiKey, onOpenSettings,
+    question, setQuestion, chatEndRef, currentSessionId, hasApiKey: effectiveHasApiKey, onOpenSettings,
     searchOpen, searchQuery, searchCase, searchMatches, searchMatchSet, searchIdx, searchHighlight,
     searchChangeQuery, searchToggleCase, searchNext, searchPrev, searchCloseOverlay, searchToggleOverlay,
     contextOverflowPct, usedTokens, contextBudget, effectiveBudget,
@@ -1143,7 +1160,7 @@ export function App() {
           <MainToolbar
             activeView={activeView}
             streaming={streaming}
-            hasApiKey={hasApiKey}
+            hasApiKey={effectiveHasApiKey}
             isCurrentSessionStarred={Boolean(currentSessionId && isSessionStarred(currentSessionId))}
             onNewChat={onNewChat}
             onToggleCurrentSessionStar={() => currentSessionId
