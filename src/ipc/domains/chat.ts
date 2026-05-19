@@ -1203,7 +1203,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
         ? memoryManager.loadToolResultArtifact(sessionId, toolUseId)
         : null;
       if (!artifact && msg.meta?.compactedAt === undefined && msg.meta?.truncated === undefined) return null;
-      if (isToolResultStubContent(content) && !artifact) return null;
+      if (msg.meta?.serializedStub === true && isToolResultStubContent(content) && !artifact) return null;
       const verbatim = artifact?.content ?? content;
       // zero-allocation line count
       let lineCount = 1;
