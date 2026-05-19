@@ -4,11 +4,11 @@
  * Returns `truncated` info when a single tool_result content exceeds the
  * cap; otherwise returns the input unchanged. Used by
  * `ConversationHistory.append`/`.restore` to *mark* over-cap tool_result
- * messages with `meta.truncated`; the actual content swap to a short
- * stub form happens in `wire-serialize.stubMarkedToolResults` so that
- * in-memory content stays raw verbatim for UI / inspection while the
- * wire payload and on-disk jsonl both receive the stub (mirroring the
- * existing `meta.compactedAt` lifecycle exactly).
+ * messages with `meta.truncated`; provider sends use
+ * `wire-serialize.stubMarkedToolResults`, while session saves use
+ * `MemoryManager.saveSession` to write a short JSONL stub plus a
+ * file-backed artifact. In-memory content stays raw verbatim for UI,
+ * inspection, and chunk reads.
  *
  * Background: the user-visible repro (Issue #900) was a single
  * `index_documents` response at 438KB (~110K tokens) + an `index_scan`

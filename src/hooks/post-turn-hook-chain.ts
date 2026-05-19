@@ -10,7 +10,6 @@
  */
 
 import { markStaleToolResults } from "../engine/auto-compact.js";
-import { stubMarkedToolResults } from "../engine/wire-serialize.js";
 import { detectFromStream, type DetectorResult } from "../engine/checkpoint-detector.js";
 import type { GenericMessage, TokenUsage } from "../engine/llm/types.js";
 import type { MemoryManager } from "../memory/memory-manager.js";
@@ -128,9 +127,9 @@ export class PostTurnHookChain {
         outputForPersistence !== ctx.output
           ? replaceLastAssistantOutput(baseMessages, ctx.output, outputForPersistence)
           : baseMessages;
-      // JSONL 영속화 직전 marked tool_result 를 stub 으로 변환 — disk 무한
-      // 성장 방지. caller (engine) 의 in-memory verbatim 은 변경 안 됨.
-      await this.deps.memoryManager?.saveSession(ctx.sessionId, stubMarkedToolResults(messagesToSave));
+      // saveSession owns JSONL stubbing + file-backed tool_result artifacts.
+      // caller (engine) 의 in-memory verbatim 은 변경 안 됨.
+      await this.deps.memoryManager?.saveSession(ctx.sessionId, messagesToSave);
     } catch (err) {
       log.warn("saveSession failed: %s", err);
     }
