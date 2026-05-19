@@ -41,6 +41,7 @@ export const gruvboxDarkHardBundle: ThemeBundle = {
     border:                   "20 8% 30%",
     input:                    "20 8% 30%",
     ring:                     "24 99% 55%",
+    "ui-line":                "18 6% 53.0%",
     "message-user-bg":        "24 99% 55%",
     "message-user-fg":        "195 7% 12%",
     "input-bar-bg":           "0 0% 16%",

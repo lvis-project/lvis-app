@@ -46,6 +46,7 @@ export const violetDarkBundle: ThemeBundle = {
     border:                   "25 10% 30%",    /* warm dark border — picks up bundle hue */
     input:                    "25 10% 30%",
     ring:                     "263 70% 70%",
+    "ui-line":                "15 5% 57.0%",
     "message-user-bg":        "271 76% 76%",   /* #c497ef — lilac user bubble */
     "message-user-fg":        "0 0% 15%",      /* dark on light lilac (was white → contrast ~1.5 fail) */
     "input-bar-bg":           "35 12% 26%",    /* warm elevated composer — matches popover */

@@ -15,6 +15,7 @@
  */
 
 export const BUNDLE_IDS = [
+  "cherry-blossom",
   "tokyo-night",
   "midnight",
   "forest",
@@ -27,9 +28,8 @@ export const BUNDLE_IDS = [
   "gruvbox-dark-hard",
   "solarized-light",
   "rose-pine",
-  "cherry-blossom",
 ] as const;
 
 export type BundleId = (typeof BUNDLE_IDS)[number];
 
-export const DEFAULT_BUNDLE_ID: BundleId = "tokyo-night";
+export const DEFAULT_BUNDLE_ID: BundleId = "cherry-blossom";
