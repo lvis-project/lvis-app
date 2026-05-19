@@ -949,12 +949,17 @@ const api = {
       online: boolean;
     }>,
 
-  // Settings "일반" dashboard — host metadata. Single source of truth is
-  // electron `app.getVersion()` + `process.platform`; the renderer never
-  // hard-codes either value.
+  // Settings "일반" dashboard — host metadata. SoT for `version` is the
+  // LVIS project package.json (resolved by the main process via
+  // `app.getAppPath()`); stack fields come from `process.versions`. The
+  // renderer never hard-codes these values.
   getAppInfo: async () =>
     ipcRenderer.invoke("lvis:app:info") as Promise<{
       version: string;
+      electronVersion: string;
+      nodeVersion: string;
+      chromeVersion: string;
+      v8Version: string;
       platform: NodeJS.Platform;
       arch: string;
       userDataPath: string;
