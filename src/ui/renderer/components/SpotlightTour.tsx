@@ -295,6 +295,20 @@ export function SpotlightTour({
   // SpotlightTour would paint its backdrop + ring on top of the still-
   // open dialog, leaving the violet ring floating over an unrelated
   // anchor that the user can't see (the 2026-05-19 screenshot bug).
+  //
+  // Double-broadcast guard (2026-05-19): if the SAME scenario is already
+  // mounted, ignore the incoming broadcast instead of calling
+  // `setActiveScenarioId` again. The downstream `useEffect [activeScenarioId]`
+  // resets `stepIndex` to 0 and clears `dismissedRef`, so re-setting the
+  // same id visibly re-mounts the tour at step 0 — the "스팟하이라이트
+  // 시퀀스가 2번 노출" symptom. The chain side-effect in App.tsx already
+  // carries an idempotency ref; this is defense-in-depth so external
+  // callers (⌘+Shift+/ help shortcut, PluginShowcase 둘러보기) also can't
+  // re-mount the active tour.
+  const activeScenarioIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    activeScenarioIdRef.current = activeScenarioId;
+  }, [activeScenarioId]);
   const pendingScenarioRef = useRef<string | null>(null);
   useEffect(() => {
     const subscribe = api?.tour?.onStart;
@@ -305,6 +319,10 @@ export function SpotlightTour({
         typeof document !== "undefined" &&
         document.body?.getAttribute("data-demo-active") === "true"
       ) {
+        return;
+      }
+      if (activeScenarioIdRef.current === scenarioId) {
+        // Same scenario already running — ignore the re-broadcast.
         return;
       }
       if (anyModalDialogOpen()) {
@@ -329,6 +347,8 @@ export function SpotlightTour({
       if (pendingScenarioRef.current && !anyModalDialogOpen()) {
         const next = pendingScenarioRef.current;
         pendingScenarioRef.current = null;
+        // Same-scenario guard — see the onStart subscriber comment above.
+        if (activeScenarioIdRef.current === next) return;
         setActiveScenarioId(next);
       }
     });
