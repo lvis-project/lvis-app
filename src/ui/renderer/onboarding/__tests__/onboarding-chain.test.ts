@@ -2,7 +2,13 @@
  * Z onboarding chain — reducer unit test.
  *
  * Verifies every legal transition + that out-of-order events stay
- * no-op. Pure test, no React mount, no jsdom.
+ * no-op. 2026-05-20 redesign — the `welcome` stage was removed; the
+ * new chain order is:
+ *   showcase → login → memory → personalized_welcome → tour → plugins → done
+ * Memory now precedes the welcome card so the welcome can reference
+ * the 호칭/자기소개 the user just typed.
+ *
+ * Pure test, no React mount, no jsdom.
  */
 import { describe, it, expect } from "vitest";
 import {
@@ -51,44 +57,26 @@ describe("nextOnboardingStage", () => {
     );
   });
 
-  it("full happy-path traversal", () => {
+  it("full happy-path traversal — memory precedes personalized_welcome", () => {
     const result = transitionStage("idle", [
       { type: "probe-start" },
       { type: "showcase-start" },
       { type: "login-success" },
-      { type: "welcome-accept" },
       { type: "memory-finish" },
+      { type: "personalized-welcome-accept" },
       { type: "tour-finish" },
       { type: "plugins-close" },
     ]);
     expect(result).toBe("done");
   });
 
-  it("showcase-skip jumps directly to done", () => {
-    const result = transitionStage("idle", [
-      { type: "probe-start" },
-      { type: "showcase-skip" },
-    ]);
-    expect(result).toBe("done");
-  });
-
-  it("login-skip still advances to welcome", () => {
+  it("login-skip still advances to memory", () => {
     const result = transitionStage("idle", [
       { type: "probe-start" },
       { type: "showcase-start" },
       { type: "login-skip" },
     ]);
-    expect(result).toBe("welcome");
-  });
-
-  it("welcome-skip jumps to done (bypasses memory + tour + plugins)", () => {
-    const result = transitionStage("idle", [
-      { type: "probe-start" },
-      { type: "showcase-start" },
-      { type: "login-success" },
-      { type: "welcome-skip" },
-    ]);
-    expect(result).toBe("done");
+    expect(result).toBe("memory");
   });
 
   it("tour-skip still advances to plugins", () => {
@@ -96,8 +84,8 @@ describe("nextOnboardingStage", () => {
       { type: "probe-start" },
       { type: "showcase-start" },
       { type: "login-success" },
-      { type: "welcome-accept" },
       { type: "memory-finish" },
+      { type: "personalized-welcome-accept" },
       { type: "tour-skip" },
     ]);
     expect(result).toBe("plugins");
@@ -105,14 +93,14 @@ describe("nextOnboardingStage", () => {
 
   it("out-of-order events stay no-op", () => {
     expect(
-      nextOnboardingStage("showcase", { type: "welcome-accept" }),
+      nextOnboardingStage("showcase", { type: "personalized-welcome-accept" }),
     ).toBe("showcase");
     expect(nextOnboardingStage("idle", { type: "login-success" })).toBe(
       "idle",
     );
     expect(
-      nextOnboardingStage("welcome", { type: "memory-finish" }),
-    ).toBe("welcome");
+      nextOnboardingStage("memory", { type: "personalized-welcome-accept" }),
+    ).toBe("memory");
     expect(nextOnboardingStage("tour", { type: "plugins-close" })).toBe(
       "tour",
     );
@@ -131,8 +119,8 @@ describe("nextOnboardingStage", () => {
     const stages: OnboardingChainStage[] = [
       "showcase",
       "login",
-      "welcome",
       "memory",
+      "personalized_welcome",
       "tour",
       "plugins",
     ];
@@ -147,63 +135,129 @@ describe("nextOnboardingStage", () => {
     const result = transitionStage("showcase", [
       { type: "showcase-start" },
       { type: "login-success" },
-      { type: "welcome-accept" },
       { type: "memory-finish" },
+      { type: "personalized-welcome-accept" },
       { type: "tour-finish" },
       { type: "plugins-close" },
     ]);
     expect(result).toBe("done");
   });
+
+  it("personalized_welcome only advances via personalized-welcome-accept", () => {
+    expect(
+      nextOnboardingStage("personalized_welcome", { type: "tour-finish" }),
+    ).toBe("personalized_welcome");
+    expect(
+      nextOnboardingStage("personalized_welcome", {
+        type: "personalized-welcome-accept",
+      }),
+    ).toBe("tour");
+  });
 });
 
 describe("onboardingChainReducer (state record)", () => {
-  it("initial state is idle with no selected scenario", () => {
+  it("initial state is idle with no selected scenario / empty memory seed", () => {
     expect(initialOnboardingChainState).toEqual({
       stage: "idle",
       selectedScenarioId: null,
+      memorySeed: { nickname: "", introduction: "" },
     });
   });
 
   it("showcase-start carries the picked scenarioId into chain context", () => {
     const next = onboardingChainReducer(
-      { stage: "showcase", selectedScenarioId: null },
+      {
+        stage: "showcase",
+        selectedScenarioId: null,
+        memorySeed: { nickname: "", introduction: "" },
+      },
       { type: "showcase-start", scenarioId: "docs" },
     );
-    expect(next).toEqual({ stage: "login", selectedScenarioId: "docs" });
+    expect(next).toEqual({
+      stage: "login",
+      selectedScenarioId: "docs",
+      memorySeed: { nickname: "", introduction: "" },
+    });
   });
 
   it("showcase-start without scenarioId preserves null selection", () => {
     const next = onboardingChainReducer(
-      { stage: "showcase", selectedScenarioId: null },
+      {
+        stage: "showcase",
+        selectedScenarioId: null,
+        memorySeed: { nickname: "", introduction: "" },
+      },
       { type: "showcase-start" },
     );
-    expect(next).toEqual({ stage: "login", selectedScenarioId: null });
+    expect(next).toEqual({
+      stage: "login",
+      selectedScenarioId: null,
+      memorySeed: { nickname: "", introduction: "" },
+    });
   });
 
-  it("downstream transitions preserve the selected scenarioId", () => {
+  it("memory-finish stores nickname + introduction into chain context", () => {
+    const next = onboardingChainReducer(
+      {
+        stage: "memory",
+        selectedScenarioId: "meeting",
+        memorySeed: { nickname: "", introduction: "" },
+      },
+      { type: "memory-finish", nickname: "Ken", introduction: "PM" },
+    );
+    expect(next).toEqual({
+      stage: "personalized_welcome",
+      selectedScenarioId: "meeting",
+      memorySeed: { nickname: "Ken", introduction: "PM" },
+    });
+  });
+
+  it("memory-finish without payload preserves prior memorySeed values", () => {
+    const next = onboardingChainReducer(
+      {
+        stage: "memory",
+        selectedScenarioId: null,
+        memorySeed: { nickname: "Ken", introduction: "PM" },
+      },
+      { type: "memory-finish" },
+    );
+    expect(next).toEqual({
+      stage: "personalized_welcome",
+      selectedScenarioId: null,
+      memorySeed: { nickname: "Ken", introduction: "PM" },
+    });
+  });
+
+  it("downstream transitions preserve the selected scenarioId + memory seed", () => {
     const result = transitionState(initialOnboardingChainState, [
       { type: "probe-start" },
       { type: "showcase-start", scenarioId: "meeting" },
       { type: "login-success" },
-      { type: "welcome-accept" },
-      { type: "memory-finish" },
+      { type: "memory-finish", nickname: "Ken", introduction: "PM" },
+      { type: "personalized-welcome-accept" },
       { type: "tour-finish" },
       { type: "plugins-close" },
     ]);
     expect(result).toEqual({
       stage: "done",
       selectedScenarioId: "meeting",
+      memorySeed: { nickname: "Ken", introduction: "PM" },
     });
   });
 
-  it("force-finish collapses to done and keeps the prior selection", () => {
+  it("force-finish collapses to done and keeps the prior selection + memory seed", () => {
     const next = onboardingChainReducer(
-      { stage: "tour", selectedScenarioId: "multi-agent" },
+      {
+        stage: "tour",
+        selectedScenarioId: "multi-agent",
+        memorySeed: { nickname: "Ken", introduction: "PM" },
+      },
       { type: "force-finish" },
     );
     expect(next).toEqual({
       stage: "done",
       selectedScenarioId: "multi-agent",
+      memorySeed: { nickname: "Ken", introduction: "PM" },
     });
   });
 });

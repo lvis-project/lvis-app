@@ -268,6 +268,11 @@ export function LoginModalConversational({
     setError(null);
     setChecklistRevealed(0);
     setSuccessConfirmed(false);
+    // The activation page is now a separate render branch; once auth
+    // starts the modal renders the chip dialog (with the bubble +
+    // checklist), so close the activation page even on failure so the
+    // auth error surface (login-modal:error-bubble) is visible.
+    setActivationOpen(false);
     try {
       const result = await api.loginMockup({
         username: DEMO_USERNAME,
@@ -388,8 +393,130 @@ export function LoginModalConversational({
     CHECKLIST_LINES[checklistRevealed - 1]?.mark === "⟳";
   const handleDialogOpenChange = useCallback((next: boolean) => {
     if (activationRelaunching && !next) return;
+    // 2026-05-20 Deliverable 3: forced choice — user must pick 1/2/3.
+    // Block outside-click / Esc dismissal from the chip page. The parent
+    // closes the dialog programmatically by passing `open=false` after
+    // successful auth or success state transitions.
+    if (!next) return;
     onOpenChange(next);
   }, [activationRelaunching, onOpenChange]);
+
+  // 2026-05-20 Deliverable 4 — activation input is now a fullscreen
+  // page (separate render branch), not an inline expansion in the same
+  // chat dialog. Chip selection of demo flips `activationOpen` true
+  // which renders the dedicated activation page below.
+  const cancelActivation = useCallback(() => {
+    setActivationOpen(false);
+    setActivationCode("");
+    setActivationError(null);
+    setUserTurnVisible(false);
+    setAssistantReply(false);
+  }, []);
+
+  // Activation page render branch — replaces the 1/2/3 chip dialog
+  // entirely while the user is in the activation step. Has its own
+  // ← 뒤로가기 button at the top and no cancel button next to the
+  // submit input (per Deliverable 4).
+  if (activationOpen && !submitting) {
+    return (
+      <Dialog open={open} onOpenChange={handleDialogOpenChange}>
+        <DialogContent
+          size="sm"
+          data-testid="login-modal"
+          data-variant="conversational"
+          data-page="activation"
+        >
+          <DialogHeader>
+            <button
+              type="button"
+              data-testid="login-modal:activation-back"
+              onClick={cancelActivation}
+              disabled={activating || activationRelaunching}
+              className="self-start text-[12px] text-muted-foreground transition hover:text-foreground disabled:opacity-50"
+            >
+              ← 뒤로가기
+            </button>
+            <DialogTitle>데모 활성 코드 입력</DialogTitle>
+          </DialogHeader>
+
+          <div className="flex items-center gap-2 border-b border-border/60 pb-2 text-[11px] text-muted-foreground">
+            <span className="inline-block size-1.5 rounded-full bg-success" aria-hidden="true" />
+            <span>LVIS · 데모 활성화</span>
+          </div>
+
+          <div className="space-y-3 pt-2">
+            <p className="rounded-lg bg-muted px-3 py-2 text-[12.5px] leading-relaxed text-foreground">
+              데모 활성 코드를 받으셨나요? 한 줄로 붙여넣어 주세요. 형식은
+              {" "}<code className="font-mono text-[11.5px]">LVIS-DEMO:v1:...</code>
+              {" "}입니다.
+            </p>
+
+            <div
+              data-testid="login-modal:activation-input"
+              className="space-y-2"
+            >
+              <textarea
+                value={activationCode}
+                onChange={(ev) => setActivationCode(ev.target.value)}
+                onKeyDown={(ev) => {
+                  if (
+                    ev.key === "Enter" &&
+                    !ev.shiftKey &&
+                    !ev.nativeEvent.isComposing
+                  ) {
+                    ev.preventDefault();
+                    void submitActivation();
+                  }
+                }}
+                disabled={activating || activationRelaunching}
+                rows={3}
+                placeholder="LVIS-DEMO:v1:..."
+                aria-label="데모 활성 코드"
+                data-testid="login-modal:activation-code-input"
+                autoFocus
+                className="w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-[11.5px] leading-snug text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-60"
+              />
+              <Button
+                type="button"
+                data-testid="login-modal:activation-submit"
+                onClick={() => void submitActivation()}
+                disabled={
+                  activating ||
+                  activationRelaunching ||
+                  activationCode.trim().length === 0
+                }
+                className="w-full"
+              >
+                {activationRelaunching
+                  ? "재시작 대기…"
+                  : activating
+                    ? "활성 중…"
+                    : "활성 →"}
+              </Button>
+              {activationError && (
+                <p
+                  data-testid="login-modal:activation-error"
+                  role="alert"
+                  className="rounded-md bg-destructive/10 px-2 py-1.5 text-[11.5px] leading-relaxed text-destructive"
+                >
+                  {activationError}
+                </p>
+              )}
+              {activationNotice && (
+                <p
+                  data-testid="login-modal:activation-notice"
+                  role="status"
+                  className="rounded-md bg-success/10 px-2 py-1.5 text-[11.5px] leading-relaxed text-success"
+                >
+                  {activationNotice}
+                </p>
+              )}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    );
+  }
 
   return (
     <Dialog open={open} onOpenChange={handleDialogOpenChange}>
@@ -513,11 +640,10 @@ export function LoginModalConversational({
               ✦
             </div>
             <div className="space-y-1.5">
-              {/* Stage 1 — activation prompt (default), Stage 2 — activation
-                  in-flight, Stage 3 — auth transcript. The bubble copy adapts
-                  to whichever stage is active so the conversation reads
-                  end-to-end without the assistant suddenly switching
-                  topics. */}
+              {/* 2026-05-20 Deliverable 4: activation textarea moved to a
+                  dedicated render branch (`data-page="activation"`). This
+                  chip dialog only renders the auth-in-flight transcript
+                  copy + checklist after activation succeeds. */}
               <p
                 className="rounded-lg rounded-tl-sm bg-muted px-3 py-2 text-[12.5px] leading-relaxed text-foreground"
                 data-testid="login-modal:assistant-prompt"
@@ -526,95 +652,8 @@ export function LoginModalConversational({
                   ? "활성 완료 · 데모 자격증명으로 인증을 시작합니다…"
                   : activationRelaunching
                     ? "활성 완료 · 호스트 적용을 위해 5초 후 자동으로 재시작합니다…"
-                    : "데모 활성 코드를 받으셨나요? 한 줄로 붙여넣어 주세요. 형식은 `LVIS-DEMO:v1:...` 입니다."}
+                    : "활성 완료 · 인증을 시작합니다…"}
               </p>
-
-              {/* F2 — Activation input sub-state. Painted while the user is
-                  in the activation step (before submitting auth). The block
-                  collapses once `submitting` flips true so the auth checklist
-                  has clean visual space. The textarea accepts a multi-line
-                  paste defensively (some chat clients wrap long links) but
-                  the codec only inspects the trimmed payload. */}
-              {activationOpen && !submitting && (
-                <div
-                  data-testid="login-modal:activation-input"
-                  className="space-y-1.5"
-                >
-                  <textarea
-                    value={activationCode}
-                    onChange={(ev) => setActivationCode(ev.target.value)}
-                    onKeyDown={(ev) => {
-                      // Enter (without Shift) submits; Shift+Enter keeps the
-                      // newline behaviour for the rare wrapped-paste case.
-                      if (
-                        ev.key === "Enter" &&
-                        !ev.shiftKey &&
-                        !ev.nativeEvent.isComposing
-                      ) {
-                        ev.preventDefault();
-                        void submitActivation();
-                      }
-                    }}
-                    disabled={activating || activationRelaunching}
-                    rows={2}
-                    placeholder="LVIS-DEMO:v1:..."
-                    aria-label="데모 활성 코드"
-                    data-testid="login-modal:activation-code-input"
-                    className="w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-[11.5px] leading-snug text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-60"
-                  />
-                  <div className="flex items-center gap-2">
-                    <Button
-                      type="button"
-                      size="sm"
-                      data-testid="login-modal:activation-submit"
-                      onClick={() => void submitActivation()}
-                      disabled={activating || activationRelaunching || activationCode.trim().length === 0}
-                    >
-                      {activationRelaunching ? "재시작 대기…" : activating ? "활성 중…" : "활성 →"}
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      data-testid="login-modal:activation-cancel"
-                      onClick={() => {
-                        setActivationOpen(false);
-                        setActivationCode("");
-                        setActivationError(null);
-                        setUserTurnVisible(false);
-                        setAssistantReply(false);
-                      }}
-                      disabled={activating || activationRelaunching}
-                    >
-                      취소
-                    </Button>
-                  </div>
-                  {activationError && (
-                    <p
-                      data-testid="login-modal:activation-error"
-                      role="alert"
-                      className="rounded-md bg-destructive/10 px-2 py-1.5 text-[11.5px] leading-relaxed text-destructive"
-                    >
-                      {activationError}
-                    </p>
-                  )}
-                  {activationNotice && (
-                    <p
-                      data-testid="login-modal:activation-notice"
-                      role="status"
-                      className="rounded-md bg-success/10 px-2 py-1.5 text-[11.5px] leading-relaxed text-success"
-                    >
-                      {activationNotice}
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {/* Activation success chains directly into `runAuthMockup` —
-                  there is no idle "press Enter to begin" interstitial.
-                  `submitting` flips true synchronously when the auth chain
-                  starts, so the checklist below takes over the same visual
-                  lane without an intermediate ack state. */}
 
               {checklistRevealed > 0 && (
                 <pre
@@ -708,20 +747,11 @@ export function LoginModalConversational({
           </div>
         )}
 
-        {/* Cancel-only footer button — there is no submit, the chips ARE
-            the submit. Cancel closes the modal without authenticating. */}
-        <div className="flex justify-end gap-2 pt-3">
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => onOpenChange(false)}
-            disabled={submitting || activationRelaunching}
-            data-testid="login-modal:cancel"
-          >
-            {activationRelaunching ? "재시작 대기…" : submitting ? "인증 중…" : "취소"}
-          </Button>
-        </div>
+        {/* 2026-05-20: Cancel footer button removed — 1/2/3 forced choice.
+            The user MUST pick one of the chips (or the disabled SSO
+            placeholder); there is no path to dismiss the modal without
+            advancing. Status text for in-flight auth/relaunch surfaces
+            inline via the chip disabled state + assistant bubble copy. */}
 
         {/* F2 — Footer hint mirrors the mockup's
             "위 선택지를 클릭하거나 `1`~`3` 키로 빠른 선택" line. */}
