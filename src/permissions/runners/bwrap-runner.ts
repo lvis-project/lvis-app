@@ -32,6 +32,7 @@ import type {
   SandboxRunnerDetect,
   SandboxSpawnOptions,
 } from "../sandbox-runner.js";
+import { trackManagedChildProcess } from "../../main/managed-child-processes.js";
 
 /** Absolute path to the OS-installed bwrap binary (D1: no bundled fallback). */
 export const BWRAP_BIN = "/usr/bin/bwrap";
@@ -184,6 +185,7 @@ export class BwrapRunner implements SandboxRunner {
       ...(options?.cwd ? { cwd: options.cwd } : {}),
       stdio: ["ignore", "pipe", "pipe"],
     });
+    trackManagedChildProcess(child, { label: "sandbox:bwrap" });
 
     if (!child.stdout || !child.stderr) {
       throw new Error("BwrapRunner: child process missing stdout/stderr pipes");
