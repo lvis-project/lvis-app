@@ -18,10 +18,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DEMO_ACTIVATION_DEV_RELAUNCH_EXIT_CODE } from "../../../../scripts/lib/dev-electron-exit.mjs";
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
 const relaunchMock = vi.fn();
 const exitMock = vi.fn();
+let appIsPackaged = true;
 
 vi.mock("electron", () => ({
   ipcMain: {
@@ -33,6 +35,9 @@ vi.mock("electron", () => ({
   // `app.exit(0)` on first-activation to heal the host-resolver-rules
   // race. The mocks prevent the test runner from actually exiting.
   app: {
+    get isPackaged() {
+      return appIsPackaged;
+    },
     relaunch: relaunchMock,
     exit: exitMock,
   },
@@ -47,6 +52,12 @@ function invoke(channel: string, ...args: unknown[]): Promise<unknown> {
       ...args,
     ),
   );
+}
+
+function invokeWithEvent(channel: string, event: unknown, ...args: unknown[]): Promise<unknown> {
+  const fn = handlers.get(channel);
+  if (!fn) throw new Error(`No handler registered for: ${channel}`);
+  return Promise.resolve(fn(event, ...args));
 }
 
 function makeDeps() {
@@ -76,6 +87,8 @@ beforeEach(() => {
   for (const k of Object.keys(process.env)) {
     if (k.startsWith("LVIS_DEMO_")) delete process.env[k];
   }
+  delete process.env.LVIS_DEV;
+  appIsPackaged = true;
   vi.resetModules();
 });
 
@@ -108,12 +121,15 @@ describe("lvis:demo:activate — happy path", () => {
     expect(result.ok).toBe(true);
     expect(result.vendor).toBe("azure-foundry");
 
-    // v0.2.1 hotfix — first-activation (boot capture empty) MUST
-    // request relaunch so Chromium command-line picks up
-    // host-resolver-rules with the freshly-injected hostmap.
+    // First activation is armed for relaunch, but the renderer owns the
+    // 5s onboarding dwell before it calls the explicit relaunch IPC.
     expect(result.requiresRelaunch).toBe(true);
-    // The relaunch fires from setImmediate so the IPC response can
-    // arrive before the process exits. Flush the microtask queue.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(relaunchMock).not.toHaveBeenCalled();
+    expect(exitMock).not.toHaveBeenCalled();
+
+    const relaunch = await invoke("lvis:demo:relaunch-after-activation");
+    expect(relaunch).toEqual({ ok: true });
     await new Promise<void>((resolve) => setImmediate(resolve));
     expect(relaunchMock).toHaveBeenCalledOnce();
     expect(exitMock).toHaveBeenCalledWith(0);
@@ -147,12 +163,37 @@ describe("lvis:demo:activate — happy path", () => {
 });
 
 describe("lvis:demo:activate — first-activation relaunch (v0.2.1 hotfix)", () => {
+  it("uses the dev-runner managed relaunch exit code under bun run dev", async () => {
+    process.env.LVIS_DEV = "1";
+    appIsPackaged = false;
+    const { codec, demoMod } = await loadDemoModule();
+    const code = codec.encryptActivationPayload(SAMPLE_ENV);
+    const deps = makeDeps();
+    demoMod.registerDemoHandlers(deps as never);
+
+    const result = (await invoke("lvis:demo:activate", { code })) as {
+      ok: true;
+      vendor: string;
+      requiresRelaunch?: boolean;
+    };
+    expect(result.ok).toBe(true);
+    expect(result.requiresRelaunch).toBe(true);
+    expect(exitMock).not.toHaveBeenCalled();
+    const relaunch = await invoke("lvis:demo:relaunch-after-activation");
+    expect(relaunch).toEqual({ ok: true });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(relaunchMock).not.toHaveBeenCalled();
+    expect(exitMock).toHaveBeenCalledWith(DEMO_ACTIVATION_DEV_RELAUNCH_EXIT_CODE);
+  });
+
   it("omits requiresRelaunch and skips app.relaunch when demo was already effective at boot", async () => {
     // Simulate the second-boot path: `.env.demo` already on disk →
     // `captureDemoCredentials` ran with the right env → `isDemoEnabled()`
     // returns true → activation handler captures `demoWasEffectiveAtBoot=true`.
     process.env.LVIS_DEMO_ENABLED = "1";
     process.env.LVIS_DEMO_VENDOR = "azure-foundry";
+    process.env.LVIS_DEMO_KEY_AZURE_FOUNDRY = "sk-boot-key";
+    process.env.LVIS_DEMO_BASEURL_AZURE_FOUNDRY = "https://example.openai.azure.com/openai/v1/";
     const { codec, credsMod, demoMod } = await loadDemoModule();
     // captureDemoCredentials before registerDemoHandlers — mirrors the
     // real boot order in main.ts.
@@ -173,10 +214,27 @@ describe("lvis:demo:activate — first-activation relaunch (v0.2.1 hotfix)", () 
     await new Promise<void>((resolve) => setImmediate(resolve));
     expect(relaunchMock).not.toHaveBeenCalled();
     expect(exitMock).not.toHaveBeenCalled();
+    const relaunch = await invoke("lvis:demo:relaunch-after-activation");
+    expect(relaunch).toEqual({ ok: false, error: "not-armed" });
   });
 });
 
 describe("lvis:demo:activate — invalid-code", () => {
+  it("rejects an untrusted sender frame", async () => {
+    const { codec, demoMod } = await loadDemoModule();
+    const deps = makeDeps();
+    demoMod.registerDemoHandlers(deps as never);
+    const code = codec.encryptActivationPayload(SAMPLE_ENV);
+    const result = await invokeWithEvent(
+      "lvis:demo:activate",
+      { senderFrame: { url: "https://evil.example/app" } },
+      { code },
+    );
+    expect(result).toEqual({ ok: false, error: "unauthorized-frame" });
+    expect(relaunchMock).not.toHaveBeenCalled();
+    expect(exitMock).not.toHaveBeenCalled();
+  });
+
   it("rejects an empty string", async () => {
     const { demoMod } = await loadDemoModule();
     const deps = makeDeps();
@@ -230,6 +288,21 @@ describe("lvis:demo:activate — invalid-code", () => {
         input: expect.stringContaining("invalid-code"),
       }),
     );
+  });
+});
+
+describe("lvis:demo:relaunch-after-activation — sender guard", () => {
+  it("rejects an untrusted sender frame before checking armed state", async () => {
+    const { demoMod } = await loadDemoModule();
+    const deps = makeDeps();
+    demoMod.registerDemoHandlers(deps as never);
+    const result = await invokeWithEvent(
+      "lvis:demo:relaunch-after-activation",
+      { senderFrame: { url: "https://evil.example/app" } },
+    );
+    expect(result).toEqual({ ok: false, error: "unauthorized-frame" });
+    expect(relaunchMock).not.toHaveBeenCalled();
+    expect(exitMock).not.toHaveBeenCalled();
   });
 });
 

@@ -430,6 +430,13 @@ export function registerChatHandlers(deps: IpcDeps): void {
 
   // read-only, sender guard optional
   ipcMain.handle("lvis:chat:has-provider", () => conversationLoop.hasProvider());
+  ipcMain.handle("lvis:llm:ping", async (e) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, "lvis:llm:ping", e);
+      return UNAUTHORIZED_FRAME;
+    }
+    return conversationLoop.pingProvider();
+  });
 
   let activeStreamTurn: Promise<TurnResult> | null = null;
   let nextStreamId = 0;
