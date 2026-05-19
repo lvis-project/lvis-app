@@ -220,6 +220,10 @@
         "to": "uv"
       },
       {
+        "from": "resources/licenses/uv",
+        "to": "licenses/uv"
+      },
+      {
         "from": "resources/AGENTS.md",
         "to": "AGENTS.md"
       }
