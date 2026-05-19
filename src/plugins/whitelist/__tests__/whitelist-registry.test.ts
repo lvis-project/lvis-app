@@ -100,7 +100,6 @@ afterAll(() => {
 
 beforeEach(() => {
   whitelistRegistry.resetForTesting();
-  delete process.env.LVIS_DEMO_ENABLED;
 
   // Generate a fresh keypair for this test run; key id matches the host's
   // primary key id so `verifyEnvelope` accepts the signature against the
@@ -341,7 +340,7 @@ describe("WhitelistRegistry — stale grace windows", () => {
 });
 
 describe("WhitelistRegistry — demo snapshot path", () => {
-  it("loads the demo snapshot when LVIS_DEMO_ENABLED=1", async () => {
+  it("loads the demo snapshot when useDemoSnapshot is true", async () => {
     const userDataDir = freshUserData();
     const demoDir = freshUserData();
     const demoPath = join(demoDir, "marketplace-whitelist.demo.json");
@@ -353,17 +352,13 @@ describe("WhitelistRegistry — demo snapshot path", () => {
     writeFileSync(demoPath, signed.body, "utf-8");
     writeFileSync(`${demoPath}.sig`, signed.signature, "utf-8");
 
-    process.env.LVIS_DEMO_ENABLED = "1";
-    try {
-      await whitelistRegistry.init({
-        userDataDir,
-        demoSnapshotPath: demoPath,
-        online: false,
-        now: () => Date.parse("2026-05-18T00:00:00.000Z"),
-      });
-    } finally {
-      delete process.env.LVIS_DEMO_ENABLED;
-    }
+    await whitelistRegistry.init({
+      userDataDir,
+      demoSnapshotPath: demoPath,
+      useDemoSnapshot: true,
+      online: false,
+      now: () => Date.parse("2026-05-18T00:00:00.000Z"),
+    });
 
     const status = whitelistRegistry.status();
     expect(status.source).toBe("demo-snapshot");
@@ -372,7 +367,7 @@ describe("WhitelistRegistry — demo snapshot path", () => {
     expect(decision.kind).toBe("allow");
   });
 
-  it("falls through to remote/cache when LVIS_DEMO_ENABLED is unset even with a demo path", async () => {
+  it("falls through to remote/cache when useDemoSnapshot is omitted even with a demo path", async () => {
     const userDataDir = freshUserData();
     const demoDir = freshUserData();
     const demoPath = join(demoDir, "marketplace-whitelist.demo.json");
@@ -383,7 +378,7 @@ describe("WhitelistRegistry — demo snapshot path", () => {
     writeFileSync(demoPath, signed.body, "utf-8");
     writeFileSync(`${demoPath}.sig`, signed.signature, "utf-8");
 
-    // LVIS_DEMO_ENABLED unset → demo skipped → no cache → no remote
+    // useDemoSnapshot omitted → demo skipped → no cache → no remote
     // (online:false) → no-cache-and-offline.
     await whitelistRegistry.init({
       userDataDir,
