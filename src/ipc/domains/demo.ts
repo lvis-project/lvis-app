@@ -14,7 +14,10 @@
  *   4. The handler calls `recaptureDemoCredentialsAfterActivation()` so the
  *      auth IPC handler's subsequent `loginMockup` call observes the
  *      freshly-injected demo keys instead of the empty boot-time capture.
- *   5. The renderer then proceeds with the existing `loginMockup` chain.
+ *   5. If activation was already effective at boot, the renderer proceeds
+ *      with the existing `loginMockup` chain. First activation instead arms
+ *      a relaunch; the renderer shows a 5s onboarding notice, then calls the
+ *      relaunch IPC so Chromium boots with the new host resolver rules.
  *
  * Why a separate IPC handler (not folded into `auth.ts`):
  *   - The activation step is a *prerequisite* to `loginMockup`. Folding it
@@ -60,6 +63,23 @@ const log = createLogger("demo-activation-ipc");
 // the parent watcher owns relaunching so it can keep all watch processes alive.
 const DEMO_ACTIVATION_DEV_RELAUNCH_EXIT_CODE = 42;
 
+function requestDemoActivationRelaunch(): void {
+  setImmediate(() => {
+    try {
+      if (process.env.LVIS_DEV === "1" && app.isPackaged === false) {
+        app.exit(DEMO_ACTIVATION_DEV_RELAUNCH_EXIT_CODE);
+        return;
+      }
+      app.relaunch();
+      app.exit(0);
+    } catch (err) {
+      log.error(
+        `auto-relaunch failed after activation: ${(err as Error).message}`,
+      );
+    }
+  });
+}
+
 /**
  * Inject the parsed `.env.demo` key/value pairs into `process.env`. Mirrors
  * the dev-time `scripts/run-electron.mjs` loader so the *same* runtime
@@ -94,6 +114,7 @@ async function writeEnvDemoFile(path: string, contents: string): Promise<void> {
 
 export function registerDemoHandlers(deps: IpcDeps): void {
   const { auditLogger } = deps;
+  let relaunchArmed = false;
 
   // v0.2.1 hotfix — snapshot whether demo capture was already populated
   // by boot-time `captureDemoCredentials()`. If yes, `.env.demo` was on
@@ -221,25 +242,14 @@ export function registerDemoHandlers(deps: IpcDeps): void {
       // the watcher owns that relaunch via a special exit code so it can keep
       // main/preload/renderer/style watchers alive instead of shutting down.
       //
-      // `requiresRelaunch=true` is the renderer's cue; the actual
-      // relaunch fires from `setImmediate` so the IPC return value
-      // arrives before the process exits.
+      // `requiresRelaunch=true` is the renderer's cue. The renderer owns
+      // the 5s onboarding dwell, then calls `lvis:demo:relaunch-after-activation`
+      // to execute the already-armed relaunch. This keeps the message visible
+      // before the process exits while preserving the main-process-only
+      // relaunch authority.
       const shouldRelaunch = !demoWasEffectiveAtBoot;
       if (shouldRelaunch) {
-        setImmediate(() => {
-          try {
-            if (process.env.LVIS_DEV === "1" && app.isPackaged === false) {
-              app.exit(DEMO_ACTIVATION_DEV_RELAUNCH_EXIT_CODE);
-              return;
-            }
-            app.relaunch();
-            app.exit(0);
-          } catch (err) {
-            log.error(
-              `auto-relaunch failed after activation: ${(err as Error).message}`,
-            );
-          }
-        });
+        relaunchArmed = true;
       }
 
       return {
@@ -247,6 +257,27 @@ export function registerDemoHandlers(deps: IpcDeps): void {
         vendor,
         ...(shouldRelaunch ? { requiresRelaunch: true } : {}),
       };
+    },
+  );
+
+  ipcMain.handle(
+    "lvis:demo:relaunch-after-activation",
+    async (
+      e,
+    ): Promise<
+      | { ok: true }
+      | { ok: false; error: "not-armed" | "unauthorized-frame" }
+    > => {
+      if (!validateSender(e)) {
+        auditUnauthorized(auditLogger, "lvis:demo:relaunch-after-activation", e);
+        return { ok: false, error: UNAUTHORIZED_FRAME.error };
+      }
+      if (!relaunchArmed) {
+        return { ok: false, error: "not-armed" };
+      }
+      relaunchArmed = false;
+      requestDemoActivationRelaunch();
+      return { ok: true };
     },
   );
 }

@@ -68,6 +68,9 @@ export function StatusBar(props: StatusBarProps) {
           </span>
         ) : (
           persistent.map((item, idx) => {
+            const previous = idx > 0 ? persistent[idx - 1] : undefined;
+            const joinWithPrevious =
+              previous?.id === "provider:llm-ping" && item.id === "vendor:llm";
             const inner = item.dot === true ? (
               <>
                 {item.a11yLabel !== undefined && (
@@ -107,8 +110,11 @@ export function StatusBar(props: StatusBarProps) {
             const tourAnchor =
               item.id === "vendor:llm" ? "status-bar-vendor" : undefined;
             return (
-              <span key={item.id} className="flex min-w-0 items-center truncate">
-                {idx > 0 && (
+              <span
+                key={item.id}
+                className={`flex min-w-0 items-center truncate ${joinWithPrevious ? "ml-1.5" : ""}`}
+              >
+                {idx > 0 && !joinWithPrevious && (
                   <span className="px-2 opacity-30" aria-hidden="true">|</span>
                 )}
                 {item.onClick !== undefined ? (

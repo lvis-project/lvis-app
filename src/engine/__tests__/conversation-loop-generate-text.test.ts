@@ -3,16 +3,18 @@ import { describe, expect, it } from "vitest";
 import { KeywordEngine } from "../../core/keyword-engine.js";
 import { RouteEngine } from "../../core/route-engine.js";
 import { ConversationLoop } from "../conversation-loop.js";
-import type { LLMProvider, StreamEvent } from "../llm/types.js";
+import type { LLMProvider, StreamEvent, StreamTurnParams } from "../llm/types.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
 
 class FakeProvider implements LLMProvider {
   readonly vendor = "openai" as const;
+  lastParams: StreamTurnParams | null = null;
 
   constructor(private readonly events: StreamEvent[]) {}
 
-  async *streamTurn(): AsyncIterable<StreamEvent> {
+  async *streamTurn(params: StreamTurnParams): AsyncIterable<StreamEvent> {
+    this.lastParams = params;
     yield* this.events;
   }
 }
@@ -88,5 +90,50 @@ describe("ConversationLoop.generateText", () => {
     const loop = buildLoop(provider);
     const result = await loop.generateText("prompt");
     expect(result).toBe("first");
+  });
+});
+
+describe("ConversationLoop.pingProvider", () => {
+  it("returns not-configured when no provider is available", async () => {
+    const loop = buildLoop(null);
+    await expect(loop.pingProvider()).resolves.toEqual({
+      configured: false,
+      online: false,
+      vendor: "openai",
+      model: "gpt-4o",
+      error: "not-configured",
+    });
+  });
+
+  it("returns online=true after a message_complete ping", async () => {
+    const provider = new FakeProvider([
+      { type: "text_delta", text: "PONG" },
+      { type: "message_complete", stopReason: "end_turn" },
+    ]);
+    const loop = buildLoop(provider);
+    const result = await loop.pingProvider();
+    expect(result).toMatchObject({
+      configured: true,
+      online: true,
+      vendor: "openai",
+      model: "gpt-4o",
+    });
+    expect(result.latencyMs).toBeGreaterThanOrEqual(0);
+    expect(provider.lastParams?.messages).toEqual([{ role: "user", content: "ping" }]);
+    expect(provider.lastParams?.abortSignal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("returns online=false when the ping stream emits an error", async () => {
+    const provider = new FakeProvider([
+      { type: "error", error: "rate_limit" },
+    ]);
+    const loop = buildLoop(provider);
+    await expect(loop.pingProvider()).resolves.toMatchObject({
+      configured: true,
+      online: false,
+      vendor: "openai",
+      model: "gpt-4o",
+      error: "rate_limit",
+    });
   });
 });
