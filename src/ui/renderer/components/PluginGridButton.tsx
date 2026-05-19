@@ -13,6 +13,7 @@ const PHASE_LABEL: Record<InstallPhase, string> = {
   installing: "설치",
   registering: "등록",
   restarting: "재시작",
+  preparing: "준비",
 };
 
 export interface PluginEntry {

@@ -22,6 +22,7 @@ export type LoadedPlugin = {
   instance: RuntimePlugin;
   methods: Map<string, PluginToolHandler>;
   approvedPluginAccess?: PluginAccessSpec;
+  started?: boolean;
 };
 
 /**

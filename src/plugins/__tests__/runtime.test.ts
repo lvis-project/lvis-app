@@ -370,7 +370,7 @@ describe("PluginRuntime.disable", () => {
 
     await writeRegistry([{ id: "ui-callable", manifestPath, enabled: true }]);
     const runtime = makeRuntime();
-    await runtime.load();
+    await runtime.startAll();
     runtime.setToolInvocationDelegate((method, payload) => runtime.call(method, payload));
 
     await expect(runtime.callFromUi("uic_get")).resolves.toBe("public-ok");
@@ -485,7 +485,7 @@ describe("PluginRuntime.disable", () => {
           return hostApi;
         },
       });
-      await runtime.load();
+      await runtime.startAll();
 
       // Verify the tool is loaded and callTool was injected
       expect(runtime.listToolNames()).toContain("calltool_ping");
@@ -530,7 +530,7 @@ describe("PluginRuntime.disable", () => {
           onShutdown: () => {},
         }),
       });
-      await runtime.load();
+      await runtime.startAll();
 
       // callTool → pluginRuntime.call → returns Promise<T>
       const result = await runtime.call("calltool_echo", { msg: "hello" });
@@ -1194,6 +1194,30 @@ export default async function createPlugin({ hostApi }) {
     });
   }
 
+  function makeRuntimeWithPreparation(
+    preparePluginStart: ConstructorParameters<typeof PluginRuntime>[0]["preparePluginStart"],
+  ): PluginRuntime {
+    return new PluginRuntime({
+      hostRoot: testDir,
+      registryPath,
+      pluginsRoot: installedDir,
+      preparePluginStart,
+    });
+  }
+
+  async function waitUntil<T>(fn: () => Promise<T> | T): Promise<T> {
+    let lastErr: unknown;
+    for (let i = 0; i < 25; i += 1) {
+      try {
+        return await fn();
+      } catch (err) {
+        lastErr = err;
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+    }
+    throw lastErr;
+  }
+
   function makeRuntimeWithTrackedHostDisposer(
     disposed: string[],
     disabled: string[],
@@ -1299,7 +1323,7 @@ export default async function createPlugin({ hostApi }) {
     expect(runtime.listPluginIds()).toEqual(["p-existing"]);
   });
 
-  it("addPlugin restart path stops and disposes the new instance when start fails", async () => {
+  it("addPlugin restart path keeps the loaded plugin when replacement start fails", async () => {
     const existingPath = await writePlugin("p-restart-broken");
     await writeFile(
       registryPath,
@@ -1313,15 +1337,38 @@ export default async function createPlugin({ hostApi }) {
     const disabled: string[] = [];
     const runtime = makeRuntimeWithTrackedHostDisposer(disposed, disabled);
     await runtime.startAll();
+    expect(await runtime.call("p_restart_broken_ping")).toBe("hi-p-restart-broken-1");
 
     const { stoppedPath } = await writeHostDisposerStartFailingPlugin("p-restart-broken");
 
     await expect(runtime.addPlugin("p-restart-broken")).rejects.toThrow(/addPlugin failed/);
 
-    expect(runtime.listPluginIds()).not.toContain("p-restart-broken");
-    expect(disposed).toEqual(["p-restart-broken"]);
-    expect(disabled).toEqual(["p-restart-broken", "p-restart-broken"]);
+    expect(runtime.listPluginIds()).toEqual(["p-restart-broken"]);
+    expect(await runtime.call("p_restart_broken_ping")).toBe("hi-p-restart-broken-1");
+    expect(disposed).toEqual([]);
+    expect(disabled).toEqual([]);
     await expect(readFile(stoppedPath, "utf-8")).resolves.toBe("stopped");
+  });
+
+  it("boot-loaded plugin methods are not callable until startAll completes start()", async () => {
+    const manifestPath = await writePlugin("p-start-guard");
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: "p-start-guard", manifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+    const runtime = makeRuntime();
+
+    await runtime.load();
+
+    await expect(runtime.call("p_start_guard_ping")).rejects.toThrow(/still starting/);
+
+    await runtime.startAll();
+
+    await expect(runtime.call("p_start_guard_ping")).resolves.toBe("hi-p-start-guard-1");
   });
 
   it("setting plugin A config does not restart plugin B (single-plugin lifecycle)", async () => {
@@ -1400,6 +1447,449 @@ export default async function createPlugin({ hostApi }) {
     expect(await runtime.call("p_new_ping")).toBe("hi-p-new-1");
     // p-existing was NOT restarted — counter still at 1.
     expect(await runtime.call("p_existing_ping")).toBe("hi-p-existing-1");
+  });
+
+  it("startAll defers dependency-prepared plugins and guards calls until ready", async () => {
+    const manifestPath = await writePlugin("p-deferred");
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: "p-deferred", manifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+
+    let resolvePrepare!: () => void;
+    const preparePromise = new Promise<void>((resolve) => {
+      resolvePrepare = resolve;
+    });
+    const runtime = makeRuntimeWithPreparation(({ pluginId }) =>
+      pluginId === "p-deferred" ? preparePromise : undefined,
+    );
+
+    await runtime.startAll();
+
+    expect(runtime.listPluginIds()).toEqual([]);
+    expect(runtime.listPluginManifests().map((entry) => entry.pluginId)).toEqual(["p-deferred"]);
+    expect(runtime.listPluginCards().find((card) => card.id === "p-deferred")?.loadStatus).toBe("preparing");
+    await expect(runtime.call("p_deferred_ping")).rejects.toThrow(/still installing its runtime dependencies/);
+
+    resolvePrepare();
+
+    await expect(waitUntil(() => runtime.call("p_deferred_ping"))).resolves.toBe("hi-p-deferred-1");
+    expect(runtime.listPluginCards().find((card) => card.id === "p-deferred")?.loadStatus).toBe("loaded");
+  });
+
+  it("addPlugin returns while dependency preparation continues asynchronously", async () => {
+    const existingPath = await writePlugin("p-existing");
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: "p-existing", manifestPath: existingPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+
+    let resolvePrepare!: () => void;
+    const preparePromise = new Promise<void>((resolve) => {
+      resolvePrepare = resolve;
+    });
+    const runtime = makeRuntimeWithPreparation(({ pluginId }) =>
+      pluginId === "p-new" ? preparePromise : undefined,
+    );
+    await runtime.startAll();
+    expect(await runtime.call("p_existing_ping")).toBe("hi-p-existing-1");
+
+    const newPath = await writePlugin("p-new");
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [
+          { id: "p-existing", manifestPath: existingPath, enabled: true },
+          { id: "p-new", manifestPath: newPath, enabled: true },
+        ],
+      }),
+      "utf-8",
+    );
+
+    await expect(runtime.addPlugin("p-new")).resolves.toBe("preparing");
+
+    expect(runtime.listPluginIds()).toEqual(["p-existing"]);
+    expect(runtime.listPluginCards().find((card) => card.id === "p-new")?.loadStatus).toBe("preparing");
+    await expect(runtime.call("p_new_ping")).rejects.toThrow(/still installing its runtime dependencies/);
+
+    resolvePrepare();
+
+    await expect(waitUntil(() => runtime.call("p_new_ping"))).resolves.toBe("hi-p-new-1");
+    expect(await runtime.call("p_existing_ping")).toBe("hi-p-existing-1");
+  });
+
+  it("addPlugin reuses an existing pending dependency preparation", async () => {
+    const manifestPath = await writePlugin("p-dedup-prep");
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: "p-dedup-prep", manifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+
+    let resolvePrepare!: () => void;
+    const preparePromise = new Promise<void>((resolve) => {
+      resolvePrepare = resolve;
+    });
+    const preparePluginStart = vi.fn(({ pluginId }) =>
+      pluginId === "p-dedup-prep" ? preparePromise : undefined,
+    );
+    const runtime = makeRuntimeWithPreparation(preparePluginStart);
+
+    await expect(runtime.addPlugin("p-dedup-prep")).resolves.toBe("preparing");
+    await expect(runtime.addPlugin("p-dedup-prep")).resolves.toBe("preparing");
+
+    expect(preparePluginStart).toHaveBeenCalledOnce();
+    resolvePrepare();
+    await expect(runtime.waitForPluginReady("p-dedup-prep")).resolves.toBeUndefined();
+    expect(await runtime.call("p_dedup_prep_ping")).toBe("hi-p-dedup-prep-1");
+  });
+
+  it("removePlugin cancels a pending dependency-prepared start", async () => {
+    const manifestPath = await writePlugin("p-pending-remove");
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: "p-pending-remove", manifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+
+    let resolvePrepare!: () => void;
+    const preparePromise = new Promise<void>((resolve) => {
+      resolvePrepare = resolve;
+    });
+    const runtime = makeRuntimeWithPreparation(({ pluginId }) =>
+      pluginId === "p-pending-remove" ? preparePromise : undefined,
+    );
+
+    await expect(runtime.addPlugin("p-pending-remove")).resolves.toBe("preparing");
+    expect(runtime.listPluginCards().find((card) => card.id === "p-pending-remove")?.loadStatus).toBe("preparing");
+
+    await runtime.removePlugin("p-pending-remove");
+    resolvePrepare();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(runtime.listPluginIds()).toEqual([]);
+    expect(runtime.listPluginCards().find((card) => card.id === "p-pending-remove")).toBeUndefined();
+    await expect(runtime.call("p_pending_remove_ping")).rejects.toThrow(/Plugin method not found/);
+  });
+
+  it("removePlugin cancellation does not invalidate another plugin preparation", async () => {
+    const removedPath = await writePlugin("p-remove-one");
+    const keptPath = await writePlugin("p-keep-one");
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [
+          { id: "p-remove-one", manifestPath: removedPath, enabled: true },
+          { id: "p-keep-one", manifestPath: keptPath, enabled: true },
+        ],
+      }),
+      "utf-8",
+    );
+
+    let resolveRemoved!: () => void;
+    let resolveKept!: () => void;
+    const removedPreparePromise = new Promise<void>((resolve) => {
+      resolveRemoved = resolve;
+    });
+    const keptPreparePromise = new Promise<void>((resolve) => {
+      resolveKept = resolve;
+    });
+    const runtime = makeRuntimeWithPreparation(({ pluginId }) => {
+      if (pluginId === "p-remove-one") return removedPreparePromise;
+      if (pluginId === "p-keep-one") return keptPreparePromise;
+      return undefined;
+    });
+
+    await expect(runtime.addPlugin("p-remove-one")).resolves.toBe("preparing");
+    await expect(runtime.addPlugin("p-keep-one")).resolves.toBe("preparing");
+
+    await runtime.removePlugin("p-remove-one");
+    resolveRemoved();
+    resolveKept();
+
+    await expect(waitUntil(() => runtime.call("p_keep_one_ping"))).resolves.toBe("hi-p-keep-one-1");
+    expect(runtime.listPluginIds()).toEqual(["p-keep-one"]);
+    expect(runtime.listPluginCards().find((card) => card.id === "p-remove-one")).toBeUndefined();
+    await expect(runtime.call("p_remove_one_ping")).rejects.toThrow(/Plugin method not found/);
+  });
+
+  it("stale prepared start failure does not mark a newer generation failed", async () => {
+    const pluginId = "p-stale-start";
+    const methodName = "p_stale_start_ping";
+    const staleDir = join(installedDir, `${pluginId}-stale`);
+    await mkdir(staleDir, { recursive: true });
+    const staleManifestPath = join(staleDir, "plugin.json");
+
+    let startEntered!: () => void;
+    const startEnteredPromise = new Promise<void>((resolve) => {
+      startEntered = resolve;
+    });
+    let rejectStart!: () => void;
+    const startGate = new Promise<void>((_, reject) => {
+      rejectStart = () => reject(new Error("stale start failed"));
+    });
+    let staleStopped!: () => void;
+    const staleStoppedPromise = new Promise<void>((resolve) => {
+      staleStopped = resolve;
+    });
+    const controls = new Map([
+      [pluginId, { startEntered, startGate, staleStopped }],
+    ]);
+    const globalWithControls = globalThis as typeof globalThis & {
+      __lvisRuntimeTestControls?: typeof controls;
+    };
+    globalWithControls.__lvisRuntimeTestControls = controls;
+
+    try {
+      await writeFile(
+        join(staleDir, "entry.mjs"),
+        `const controls = globalThis.__lvisRuntimeTestControls.get(${JSON.stringify(pluginId)});
+export default async function createPlugin() {
+  return {
+    handlers: { ${JSON.stringify(methodName)}: async () => "stale" },
+    start: async () => {
+      controls.startEntered();
+      await controls.startGate;
+    },
+    stop: async () => { controls.staleStopped(); },
+  };
+}
+`,
+        "utf-8",
+      );
+      await writeFile(
+        staleManifestPath,
+        JSON.stringify({
+          id: pluginId,
+          name: pluginId,
+          version: "1.0.0",
+          entry: "entry.mjs",
+          tools: [methodName],
+          description: "stale start fixture",
+          publisher: "Test fixture",
+        }),
+        "utf-8",
+      );
+      await writeFile(
+        registryPath,
+        JSON.stringify({ version: 1, plugins: [{ id: pluginId, manifestPath: staleManifestPath, enabled: true }] }),
+        "utf-8",
+      );
+
+      let resolvePrepare!: () => void;
+      const preparePromise = new Promise<void>((resolve) => {
+        resolvePrepare = resolve;
+      });
+      let firstPrepare = true;
+      const runtime = makeRuntimeWithPreparation(({ pluginId: requestedId }) => {
+        if (requestedId !== pluginId || !firstPrepare) return undefined;
+        firstPrepare = false;
+        return preparePromise;
+      });
+
+      await expect(runtime.addPlugin(pluginId)).resolves.toBe("preparing");
+      resolvePrepare();
+      await startEnteredPromise;
+
+      await runtime.removePlugin(pluginId);
+
+      const freshDir = join(installedDir, `${pluginId}-fresh`);
+      await mkdir(freshDir, { recursive: true });
+      const freshManifestPath = join(freshDir, "plugin.json");
+      await writeFile(
+        join(freshDir, "entry.mjs"),
+        `export default async function createPlugin() {
+  return {
+    handlers: { ${JSON.stringify(methodName)}: async () => "fresh" },
+    start: async () => {},
+    stop: async () => {},
+  };
+}
+`,
+        "utf-8",
+      );
+      await writeFile(
+        freshManifestPath,
+        JSON.stringify({
+          id: pluginId,
+          name: pluginId,
+          version: "1.0.1",
+          entry: "entry.mjs",
+          tools: [methodName],
+          description: "fresh start fixture",
+          publisher: "Test fixture",
+        }),
+        "utf-8",
+      );
+      await writeFile(
+        registryPath,
+        JSON.stringify({ version: 1, plugins: [{ id: pluginId, manifestPath: freshManifestPath, enabled: true }] }),
+        "utf-8",
+      );
+
+      await expect(runtime.addPlugin(pluginId)).resolves.toBe("started");
+      await expect(runtime.call(methodName)).resolves.toBe("fresh");
+
+      rejectStart();
+      await staleStoppedPromise;
+
+      const failedPluginIds = (runtime as unknown as { failedPluginIds: Set<string> }).failedPluginIds;
+      expect(failedPluginIds.has(pluginId)).toBe(false);
+      await expect(runtime.call(methodName)).resolves.toBe("fresh");
+    } finally {
+      delete globalWithControls.__lvisRuntimeTestControls;
+    }
+  });
+
+  it("restartPlugin keeps the existing plugin loaded when dependency preparation fails", async () => {
+    const manifestPath = await writePlugin("p-restart-prepare-fails");
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: "p-restart-prepare-fails", manifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+
+    let failRestartPreparation = false;
+    const runtime = makeRuntimeWithPreparation(({ pluginId }) => {
+      if (!failRestartPreparation || pluginId !== "p-restart-prepare-fails") return undefined;
+      return Promise.reject(new Error("prepare failed"));
+    });
+    await runtime.startAll();
+    expect(await runtime.call("p_restart_prepare_fails_ping")).toBe("hi-p-restart-prepare-fails-1");
+
+    failRestartPreparation = true;
+    await expect(runtime.restartPlugin("p-restart-prepare-fails")).resolves.toBe("failed");
+
+    expect(runtime.listPluginIds()).toEqual(["p-restart-prepare-fails"]);
+    expect(await runtime.call("p_restart_prepare_fails_ping")).toBe("hi-p-restart-prepare-fails-1");
+  });
+
+  it("addPlugin restart path prepares dependencies before stopping the loaded plugin", async () => {
+    const manifestPath = await writePlugin("p-restart-prep");
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: "p-restart-prep", manifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+
+    let prepareRestart = false;
+    let resolvePrepare!: () => void;
+    const preparePromise = new Promise<void>((resolve) => {
+      resolvePrepare = resolve;
+    });
+    const runtime = makeRuntimeWithPreparation(({ pluginId }) =>
+      prepareRestart && pluginId === "p-restart-prep" ? preparePromise : undefined,
+    );
+    await runtime.startAll();
+    expect(await runtime.call("p_restart_prep_ping")).toBe("hi-p-restart-prep-1");
+
+    prepareRestart = true;
+    let restartCompleted = false;
+    const restartPromise = runtime.addPlugin("p-restart-prep").then((result) => {
+      restartCompleted = true;
+      return result;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(runtime.listPluginIds()).toEqual(["p-restart-prep"]);
+    expect(runtime.listPluginCards().find((card) => card.id === "p-restart-prep")?.loadStatus).toBe("loaded");
+    expect(await runtime.call("p_restart_prep_ping")).toBe("hi-p-restart-prep-1");
+    expect(restartCompleted).toBe(false);
+
+    resolvePrepare();
+
+    await expect(restartPromise).resolves.toBe("started");
+    await expect(waitUntil(() => runtime.call("p_restart_prep_ping"))).resolves.toBe("hi-p-restart-prep-1");
+  });
+
+  it("addPlugin restart path preserves the loaded plugin when dependency preparation fails", async () => {
+    const manifestPath = await writePlugin("p-restart-add-prepare-fails");
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: "p-restart-add-prepare-fails", manifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+
+    let failRestartPreparation = false;
+    const runtime = makeRuntimeWithPreparation(({ pluginId }) => {
+      if (!failRestartPreparation || pluginId !== "p-restart-add-prepare-fails") return undefined;
+      return Promise.reject(new Error("prepare failed"));
+    });
+    await runtime.startAll();
+    expect(await runtime.call("p_restart_add_prepare_fails_ping")).toBe("hi-p-restart-add-prepare-fails-1");
+
+    failRestartPreparation = true;
+    await expect(runtime.addPlugin("p-restart-add-prepare-fails")).rejects.toThrow(/addPlugin failed/);
+
+    expect(runtime.listPluginIds()).toEqual(["p-restart-add-prepare-fails"]);
+    expect(await runtime.call("p_restart_add_prepare_fails_ping")).toBe("hi-p-restart-add-prepare-fails-1");
+  });
+
+  it("restartPlugin coalesces concurrent dependency preparation for a loaded plugin", async () => {
+    const manifestPath = await writePlugin("p-restart-dedup-prep");
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: "p-restart-dedup-prep", manifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+
+    let prepareRestart = false;
+    let resolvePrepare!: () => void;
+    const preparePromise = new Promise<void>((resolve) => {
+      resolvePrepare = resolve;
+    });
+    const preparePluginStart = vi.fn(({ pluginId }) =>
+      prepareRestart && pluginId === "p-restart-dedup-prep" ? preparePromise : undefined,
+    );
+    const runtime = makeRuntimeWithPreparation(preparePluginStart);
+    await runtime.startAll();
+    preparePluginStart.mockClear();
+
+    prepareRestart = true;
+    const first = runtime.restartPlugin("p-restart-dedup-prep");
+    const second = runtime.restartPlugin("p-restart-dedup-prep");
+    await waitUntil(() => {
+      const calls = preparePluginStart.mock.calls.length;
+      if (calls !== 1) throw new Error(`prepare calls: ${calls}`);
+      return calls;
+    });
+
+    expect(preparePluginStart).toHaveBeenCalledTimes(1);
+    expect(runtime.listPluginIds()).toEqual(["p-restart-dedup-prep"]);
+    expect(await runtime.call("p_restart_dedup_prep_ping")).toBe("hi-p-restart-dedup-prep-1");
+
+    resolvePrepare();
+
+    await expect(first).resolves.toBe("started");
+    await expect(second).resolves.toBe("started");
   });
 
   it("addPlugin on an already-loaded plugin acts as restartPlugin (reinstall path)", async () => {

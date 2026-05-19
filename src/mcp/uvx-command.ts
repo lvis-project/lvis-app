@@ -6,16 +6,20 @@ export interface StdioSpawnCommand {
 }
 
 export function resolveStdioSpawnCommand(command: string, args: string[] = []): StdioSpawnCommand {
-  if (!isBareUvxCommand(command)) {
+  const uvxInlineArgs = parseUvxCommand(command);
+  if (!uvxInlineArgs) {
     return { command, args };
   }
   return {
     command: resolveBundledUvBinaryPath(),
-    args: ["tool", "run", ...args],
+    args: ["tool", "run", ...uvxInlineArgs, ...args],
   };
 }
 
-function isBareUvxCommand(command: string): boolean {
-  const trimmed = command.trim();
-  return trimmed === "uvx" || trimmed === "uvx.exe";
+function parseUvxCommand(command: string): string[] | null {
+  const parts = command.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return null;
+  const executable = parts[0];
+  if (executable !== "uvx" && executable !== "uvx.exe") return null;
+  return parts.slice(1);
 }

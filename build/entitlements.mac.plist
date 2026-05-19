@@ -7,7 +7,7 @@
   <key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/>
   <!-- Python dylib loading from venv (정당화: uv가 관리하는 격리된 venv) -->
   <key>com.apple.security.cs.disable-library-validation</key><true/>
-  <!-- Network for OpenAI API + uv binary download -->
+  <!-- Network for model APIs and plugin-owned dependency downloads -->
   <key>com.apple.security.network.client</key><true/>
 </dict>
 </plist>
