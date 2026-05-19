@@ -332,7 +332,7 @@ const api = {
   demo: {
     activate: async (code: string) =>
       ipcRenderer.invoke("lvis:demo:activate", { code }) as Promise<
-        | { ok: true; vendor: string }
+        | { ok: true; vendor: string; requiresRelaunch?: boolean }
         | { ok: false; error: "invalid-code" | "no-vendor" | "persist-failed" | "unauthorized-frame" }
       >,
   },

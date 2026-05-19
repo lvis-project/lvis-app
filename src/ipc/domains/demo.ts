@@ -39,7 +39,7 @@
  *   a credentials artifact and lives alongside the encrypted secret store
  *   blob. Directory mode 0o700, file mode 0o600.
  */
-import { ipcMain } from "electron";
+import { app, ipcMain } from "electron";
 import { promises as fs } from "node:fs";
 import { dirname } from "node:path";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
@@ -49,7 +49,10 @@ import {
   parseEnvDemoText,
 } from "../../main/demo-activation-codec.js";
 import { persistedEnvDemoPath } from "../../main/demo-activation-loader.js";
-import { recaptureDemoCredentialsAfterActivation } from "../../main/demo-credentials.js";
+import {
+  isDemoEnabled,
+  recaptureDemoCredentialsAfterActivation,
+} from "../../main/demo-credentials.js";
 import type { IpcDeps } from "../types.js";
 
 const log = createLogger("demo-activation-ipc");
@@ -89,13 +92,24 @@ async function writeEnvDemoFile(path: string, contents: string): Promise<void> {
 export function registerDemoHandlers(deps: IpcDeps): void {
   const { auditLogger } = deps;
 
+  // v0.2.1 hotfix — snapshot whether demo capture was already populated
+  // by boot-time `captureDemoCredentials()`. If yes, `.env.demo` was on
+  // disk pre-boot and `applyDemoHostResolverRules()` already wired the
+  // Azure Foundry hostmap into Chromium's net stack. If no, the current
+  // activation is the *first* activation; Chromium command-line is
+  // frozen, so retroactive host-resolver-rules cannot apply and we must
+  // relaunch on success. Captured at register time (called early during
+  // boot, before any activation IPC) so a subsequent activation cannot
+  // flip the snapshot.
+  const demoWasEffectiveAtBoot = isDemoEnabled();
+
   ipcMain.handle(
     "lvis:demo:activate",
     async (
       e,
       payload: { code?: unknown },
     ): Promise<
-      | { ok: true; vendor: string }
+      | { ok: true; vendor: string; requiresRelaunch?: boolean }
       | { ok: false; error: "invalid-code" | "persist-failed" | "no-vendor" | "unauthorized-frame" }
     > => {
       if (!validateSender(e)) {
@@ -182,7 +196,48 @@ export function registerDemoHandlers(deps: IpcDeps): void {
       } catch { /* audit must not break IPC */ }
 
       log.info(`demo activation succeeded: vendor=${vendor}`);
-      return { ok: true, vendor };
+
+      // v0.2.1 hotfix — First-activation race fix.
+      //
+      // Chromium command-line switches (host-resolver-rules, used by
+      // `applyDemoHostResolverRules` to map the internal Azure Foundry
+      // hostname onto the 10.182.192.0/24 intranet) are frozen after
+      // `app.whenReady()`. We only call `applyDemoHostResolverRules` once
+      // at boot. If `.env.demo` was absent at boot (i.e. this is the very
+      // first activation), retroactive `injectDemoEnv` mutates
+      // `process.env` but cannot rewire the Chromium net stack — the
+      // subsequent `loginMockup` → `refreshProvider` path probes the
+      // Azure Foundry endpoint and trips `ENOTFOUND`.
+      //
+      // The next boot path is correct: `loadPersistedDemoActivationSync()`
+      // hydrates `process.env` from `~/.lvis/secrets/.env.demo` BEFORE
+      // `applyDemoHostResolverRules()` runs, so host-resolver-rules is
+      // armed with the right hostmap by the time renderer code starts.
+      // Therefore: on activation success, ask the renderer to surface a
+      // brief "재시작 중…" message, then `app.relaunch + app.exit(0)`.
+      //
+      // `requiresRelaunch=true` is the renderer's cue; the actual
+      // relaunch fires from `setImmediate` so the IPC return value
+      // arrives before the process exits.
+      const shouldRelaunch = !demoWasEffectiveAtBoot;
+      if (shouldRelaunch) {
+        setImmediate(() => {
+          try {
+            app.relaunch();
+            app.exit(0);
+          } catch (err) {
+            log.error(
+              `auto-relaunch failed after activation: ${(err as Error).message}`,
+            );
+          }
+        });
+      }
+
+      return {
+        ok: true,
+        vendor,
+        ...(shouldRelaunch ? { requiresRelaunch: true } : {}),
+      };
     },
   );
 }
