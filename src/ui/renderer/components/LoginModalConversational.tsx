@@ -59,8 +59,20 @@ function errorMessage(code: string): string {
       // azure-foundry demo loop (baked-in creds now wired). If it does
       // fire, the user is on a non-azure-foundry vendor without env keys.
       return "데모 모드 설정 확인이 필요해요. 환경 변수 `LVIS_DEMO_VENDOR=azure-foundry` 를 설정한 뒤 다시 시도하세요. (docs/onboarding/local-demo-setup.md 참조)";
+    // v0.2.1 hotfix — Step 2 (llm-key-issuing) try/catch surfaces this
+    // when setSecret / patch fails (disk full, Keychain locked, etc.).
+    // Without this branch the renderer fell through to the generic
+    // "로그인에 실패했습니다" toast — the user-reported "sandbox 준비 중"
+    // fail had no actionable hint.
+    case "llm-key-issuing-failed":
+      return "LLM 키 저장 중 오류가 발생했어요. 디스크 권한 또는 Keychain 상태를 확인해주세요.";
     case "reviewer-rewire-failed":
       return "에이전트 sandbox 초기화에 실패했습니다. 다시 시도해 주세요.";
+    // v0.2.1 hotfix — Azure Foundry endpoint unreachable. Surfaces when
+    // the host-resolver-rules first-activation race could not be healed
+    // by relaunch (e.g. VPN/intranet not connected post-relaunch).
+    case "endpoint-unreachable":
+      return "내부망 endpoint 에 연결할 수 없어요. VPN 또는 내부망 연결을 확인해주세요.";
     default:
       return "로그인에 실패했습니다.";
   }
@@ -278,6 +290,15 @@ export function LoginModalConversational({
     try {
       const result = await api.demo.activate(trimmed);
       if (result.ok) {
+        // v0.2.1 hotfix — first-activation race: main process needs to
+        // relaunch so Chromium command-line picks up host-resolver-rules
+        // with the freshly-injected hostmap. Surface a brief "재시작 중…"
+        // message so the user knows what's happening, then yield — the
+        // main process will `app.exit(0)` within ~10ms.
+        if (result.requiresRelaunch) {
+          setActivationError("활성 완료. LVIS 를 재시작합니다…");
+          return;
+        }
         // Chain straight into the auth transcript — no extra Enter press
         // required. `runAuthMockup` flips `submitting` true on entry, which
         // collapses the activation block (gated by `!submitting`) and lets

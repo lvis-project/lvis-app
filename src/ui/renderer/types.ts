@@ -326,7 +326,7 @@ export type LvisApi = {
    */
   demo: {
     activate: (code: string) => Promise<
-      | { ok: true; vendor: string }
+      | { ok: true; vendor: string; requiresRelaunch?: boolean }
       | { ok: false; error: "invalid-code" | "no-vendor" | "persist-failed" | "unauthorized-frame" }
     >;
   };
