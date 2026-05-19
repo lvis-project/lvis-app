@@ -5,6 +5,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import {
   PluginShowcase,
   resolveShowcaseCards,
+  scenarioToPluginId,
   type PluginShowcaseApi,
 } from "../PluginShowcase.js";
 
@@ -43,6 +44,54 @@ describe("resolveShowcaseCards", () => {
     const xyz = cards.find((c) => c.id === "custom-plugin-xyz");
     expect(xyz).toBeTruthy();
     expect(xyz?.emoji).toBe("🧩");
+  });
+
+  it("hoists the prioritized plugin to the top when set", () => {
+    const cards = resolveShowcaseCards(
+      ["meeting", "local-indexer", "work-proactive", "agent-hub"],
+      "agent-hub",
+    );
+    expect(cards.map((c) => c.id)).toEqual([
+      "agent-hub",
+      "meeting",
+      "local-indexer",
+      "work-proactive",
+    ]);
+  });
+
+  it("priority that matches the already-top card is a no-op", () => {
+    const cards = resolveShowcaseCards(
+      ["meeting", "local-indexer", "agent-hub"],
+      "meeting",
+    );
+    expect(cards.map((c) => c.id)).toEqual([
+      "meeting",
+      "local-indexer",
+      "agent-hub",
+    ]);
+  });
+
+  it("priority that does not match any installed card preserves order", () => {
+    const cards = resolveShowcaseCards(
+      ["meeting", "local-indexer"],
+      "nonexistent",
+    );
+    expect(cards.map((c) => c.id)).toEqual(["meeting", "local-indexer"]);
+  });
+});
+
+describe("scenarioToPluginId", () => {
+  it("maps each ScenarioShowcase id to the matching plugin id", () => {
+    expect(scenarioToPluginId("meeting")).toBe("meeting");
+    expect(scenarioToPluginId("docs")).toBe("local-indexer");
+    expect(scenarioToPluginId("work")).toBe("work-proactive");
+    expect(scenarioToPluginId("multi-agent")).toBe("agent-hub");
+  });
+
+  it("returns null for null / unknown ids", () => {
+    expect(scenarioToPluginId(null)).toBeNull();
+    expect(scenarioToPluginId(undefined)).toBeNull();
+    expect(scenarioToPluginId("unknown")).toBeNull();
   });
 });
 

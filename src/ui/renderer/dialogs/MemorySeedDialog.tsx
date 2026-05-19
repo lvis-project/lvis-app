@@ -65,6 +65,36 @@ export interface MemorySeedDialogProps {
   };
   /** Called after dismissal (Submit or Skip). Flips `features.onboardingCompleted`. */
   onDismissed: () => void;
+  /**
+   * ScenarioShowcase carry — the card id the user clicked in the first
+   * step (e.g. "meeting" / "docs" / "work" / "multi-agent"). When set,
+   * the intro textarea placeholder swaps to a scenario-tinted hint so
+   * the user sees an example aligned with their pick. `null` means no
+   * scenario was selected and the legacy generic placeholder applies.
+   */
+  selectedScenarioId?: string | null;
+}
+
+/**
+ * Scenario-tinted intro placeholder. Pure so the unit test pins each
+ * scenario id → placeholder mapping. Unknown / null ids fall through
+ * to the legacy generic example.
+ */
+export function scenarioIntroPlaceholder(
+  scenarioId: string | null | undefined,
+): string {
+  switch (scenarioId) {
+    case "meeting":
+      return "예) 매주 회의가 많은 PM. 회의록 정리와 액션 아이템 추출에 관심.";
+    case "docs":
+      return "예) 사내 문서가 많은 시니어 엔지니어. 빠른 검색과 요약이 필요.";
+    case "work":
+      return "예) 메일·일정이 폭주하는 매니저. 우선순위 정리와 알림 자동화에 관심.";
+    case "multi-agent":
+      return "예) 리서치/분석을 여러 갈래로 동시 진행하는 PM·전략가.";
+    default:
+      return "예) 매주 회의가 많은 PM. 회의록 정리와 일정 관리 자동화에 관심.";
+  }
 }
 
 const TOUR_SCENARIO_ID = "first-boot-essentials";
@@ -138,6 +168,7 @@ export function MemorySeedDialog({
   onOpenChange,
   api,
   onDismissed,
+  selectedScenarioId = null,
 }: MemorySeedDialogProps) {
   const [name, setName] = useState("");
   const [intro, setIntro] = useState("");
@@ -312,7 +343,7 @@ export function MemorySeedDialog({
               onChange={(e) => setIntro(e.target.value)}
               rows={2}
               className="resize-none"
-              placeholder="예) 매주 회의가 많은 PM. 회의록 정리와 일정 관리 자동화에 관심."
+              placeholder={scenarioIntroPlaceholder(selectedScenarioId)}
             />
             <p className="text-[10px] text-muted-foreground">
               ✦ 이 내용이 MEMORY.md 의 첫 항목이 됩니다.
