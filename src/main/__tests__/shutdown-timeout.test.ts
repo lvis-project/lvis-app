@@ -38,6 +38,19 @@ describe("shutdown cleanup hard timeout", () => {
     );
   });
 
+  it("falls back to the default for NaN / non-numeric / zero env values", () => {
+    expect(resolveShutdownCleanupTimeoutMs({ LVIS_SHUTDOWN_CLEANUP_TIMEOUT_MS: "abc" })).toBe(
+      DEFAULT_SHUTDOWN_CLEANUP_TIMEOUT_MS,
+    );
+    expect(resolveShutdownCleanupTimeoutMs({ LVIS_SHUTDOWN_CLEANUP_TIMEOUT_MS: "0" })).toBe(
+      DEFAULT_SHUTDOWN_CLEANUP_TIMEOUT_MS,
+    );
+  });
+
+  it("returns the default when no env vars are set", () => {
+    expect(resolveShutdownCleanupTimeoutMs({})).toBe(DEFAULT_SHUTDOWN_CLEANUP_TIMEOUT_MS);
+  });
+
   it("aborts the cleanup signal on timeout so callers can break out", async () => {
     let captured: AbortSignal | undefined;
     const result = await runCleanupWithHardTimeout((signal) => {
