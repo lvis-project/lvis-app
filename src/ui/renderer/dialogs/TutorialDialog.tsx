@@ -615,7 +615,7 @@ function ActiveDeck({
               data-testid="tutorial-dialog:run"
               onClick={onRun}
               className={cn(
-                "mt-3 w-full rounded-md py-1.5 text-[11.5px] font-semibold text-white transition",
+                "mt-3 w-full rounded-md py-1.5 text-[11.5px] font-semibold text-primary-foreground transition",
                 "hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50",
               )}
               style={{
@@ -753,7 +753,7 @@ function FinishedSummary({ cards, history, onStart, onClose }: FinishedSummaryPr
           data-testid="tutorial-dialog:start"
           onClick={onStart}
           className={cn(
-            "w-full rounded-lg py-2 text-[12px] font-semibold text-white transition",
+            "w-full rounded-lg py-2 text-[12px] font-semibold text-primary-foreground transition",
             "hover:opacity-90",
           )}
           style={{
