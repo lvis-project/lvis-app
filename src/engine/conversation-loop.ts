@@ -774,7 +774,9 @@ export class ConversationLoop {
       );
     if (!match) return null;
     if (isToolResultStubContent(match.content)) {
-      const artifact = this.deps.memoryManager.loadToolResultArtifact(this.sessionId, toolUseId);
+      const artifact = match.meta?.artifactUnavailable
+        ? null
+        : this.deps.memoryManager.loadToolResultArtifact(this.sessionId, toolUseId);
       if (!artifact) return match;
       return {
         toolUseId: artifact.toolUseId,

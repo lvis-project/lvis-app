@@ -511,13 +511,13 @@ describe("lvis:chat:fork", () => {
   });
 
   it("rehydrates artifact-backed tool_result stubs before saving a forked session", async () => {
-    const stubContent = "[tool_result truncated by host (Issue #902): tool=lge_lgenie_query, toolUseId=\"tu-art\", originalBytes=12000]";
+    const stubContent = "[tool_result truncated by host (Issue #902): tool=long_output_query, toolUseId=\"tu-art\", originalBytes=12000]";
     const rawContent = "artifact-backed result\n".repeat(120);
     const loop = makeConversationLoop("session-fork-source", [
-      { role: "assistant" as const, content: "", toolCalls: [{ id: "tu-art", name: "lge_lgenie_query", input: {} }] },
+      { role: "assistant" as const, content: "", toolCalls: [{ id: "tu-art", name: "long_output_query", input: {} }] },
       makeToolResultMsg({
         toolUseId: "tu-art",
-        toolName: "lge_lgenie_query",
+        toolName: "long_output_query",
         content: stubContent,
       }),
     ]);

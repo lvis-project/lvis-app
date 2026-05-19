@@ -182,12 +182,12 @@ describe("ConversationLoop branchFromCheckpoint", () => {
   it("rehydrates checkpoint stub tool_results from artifacts before saving the branch", async () => {
     const raw = "artifact-backed result\n".repeat(120);
     const snapshot = [
-      { role: "assistant" as const, content: "", toolCalls: [{ id: "tu-art", name: "lge_lgenie_query", input: {} }] },
+      { role: "assistant" as const, content: "", toolCalls: [{ id: "tu-art", name: "long_output_query", input: {} }] },
       {
         role: "tool_result" as const,
         toolUseId: "tu-art",
-        toolName: "lge_lgenie_query",
-        content: "[tool_result truncated by host (Issue #902): tool=lge_lgenie_query, toolUseId=tu-art, originalBytes=12000]",
+        toolName: "long_output_query",
+        content: "[tool_result truncated by host (Issue #902): tool=long_output_query, toolUseId=tu-art, originalBytes=12000]",
         meta: { serializedStub: true },
       },
     ];
@@ -214,7 +214,7 @@ describe("ConversationLoop branchFromCheckpoint", () => {
     );
     memoryManager.loadToolResultArtifact.mockReturnValue({
       toolUseId: "tu-art",
-      toolName: "lge_lgenie_query",
+      toolName: "long_output_query",
       content: raw,
       truncated: {
         originalLines: 120,
