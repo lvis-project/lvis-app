@@ -29,6 +29,20 @@ describe("desktop packaging", () => {
     );
   });
 
+  it("packages compressed uv runtime and its license notice as Electron resources", () => {
+    const pkg = readPackageJson();
+    expect(pkg.build.extraResources).toEqual(
+      expect.arrayContaining([
+        { from: "resources/uv-runtime", to: "uv" },
+        { from: "resources/licenses/uv", to: "licenses/uv" },
+      ]),
+    );
+
+    const uvLicense = readFileSync(join(root, "resources", "licenses", "uv", "LICENSE-MIT"), "utf8");
+    expect(uvLicense).toContain("MIT License Copyright (c) 2025 Astral Software Inc.");
+    expect(uvLicense).toContain("permission notice shall be included");
+  });
+
   it("ships a macOS uninstall helper in the DMG extras", () => {
     const pkg = readPackageJson();
     expect(pkg.build.dmg.contents).toEqual(

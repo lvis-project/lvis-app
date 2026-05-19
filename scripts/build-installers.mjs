@@ -7,10 +7,11 @@
  * target tooling, so the three-platform release path is the CI OS matrix.
  */
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { gzipSync } from "node:zlib";
+import { gunzipSync, gzipSync } from "node:zlib";
 import { installerUvTargetFor } from "./uv-targets.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -189,7 +190,52 @@ function prepareUvRuntime(target) {
   mkdirSync(targetDir, { recursive: true });
   cpSync(resolve(sourceDir, "uv.meta.json"), resolve(targetDir, "uv.meta.json"));
   writeFileSync(resolve(targetDir, `${uvTarget.bin}.gz`), gzipSync(readFileSync(sourceBin), { level: 9 }));
+  assertUvRuntimePayload(target);
   process.stdout.write(`[installer] staged compressed uv runtime: ${uvTarget.dir}\n`);
+}
+
+function assertUvRuntimePayload(target) {
+  const uvTarget = installerUvTargetFor(target);
+  const targetDir = resolve(uvRuntimeDir, uvTarget.dir);
+  if (!existsSync(targetDir)) {
+    throw new Error(`staged uv runtime target missing: ${targetDir}`);
+  }
+
+  const stagedTargets = readdirSync(uvRuntimeDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name);
+  if (stagedTargets.length !== 1 || stagedTargets[0] !== uvTarget.dir) {
+    throw new Error(`staged uv runtime must contain only ${uvTarget.dir}; found ${stagedTargets.join(", ")}`);
+  }
+
+  const files = new Set(readdirSync(targetDir));
+  if (files.has(uvTarget.bin)) {
+    throw new Error(`raw uv binary leaked into staged runtime: ${resolve(targetDir, uvTarget.bin)}`);
+  }
+  if (!files.has(`${uvTarget.bin}.gz`)) {
+    throw new Error(`compressed uv archive missing from staged runtime: ${resolve(targetDir, `${uvTarget.bin}.gz`)}`);
+  }
+  if (!files.has("uv.meta.json")) {
+    throw new Error(`uv metadata missing from staged runtime: ${resolve(targetDir, "uv.meta.json")}`);
+  }
+
+  const metaPath = resolve(targetDir, "uv.meta.json");
+  const compressedBin = resolve(targetDir, `${uvTarget.bin}.gz`);
+  const meta = JSON.parse(readFileSync(metaPath, "utf8"));
+  if (typeof meta.binarySha256 !== "string" || !/^[0-9a-f]{64}$/.test(meta.binarySha256)) {
+    throw new Error(`uv metadata has invalid binarySha256: ${metaPath}`);
+  }
+
+  const actualBinarySha256 = sha256Hex(gunzipSync(readFileSync(compressedBin)));
+  if (actualBinarySha256 !== meta.binarySha256) {
+    throw new Error(
+      `staged uv binary SHA mismatch: expected ${meta.binarySha256}, got ${actualBinarySha256}: ${compressedBin}`,
+    );
+  }
+}
+
+function sha256Hex(buffer) {
+  return createHash("sha256").update(buffer).digest("hex");
 }
 
 function builderArgsFor(target, { publish, dirOnly, skipNativeRebuild, fast }) {
