@@ -116,7 +116,9 @@ describe("LoginModal — chip-driven demo flow (Path 2 hotfix)", () => {
 
     await waitFor(() => {
       const err = document.querySelector('[data-testid="login-modal:error"]');
-      expect(err?.textContent).toMatch(/데모 API 키가 환경 변수에 설정되어 있지 않습니다/);
+      // F3 — softened copy calls out LVIS_DEMO_VENDOR=azure-foundry.
+      expect(err?.textContent).toMatch(/데모 모드 설정 확인이 필요해요/);
+      expect(err?.textContent).toMatch(/LVIS_DEMO_VENDOR=azure-foundry/);
     });
   });
 
