@@ -459,6 +459,23 @@ describe("useStatusBar — AI provider ping producer", () => {
       expect(ping?.severity).toBe("error");
     });
   });
+
+  it("renders an error dot when the provider ping IPC rejects the sender", async () => {
+    const api = makeApi({
+      pingAiProvider: vi.fn(async () => ({
+        ok: false as const,
+        error: "unauthorized-frame" as const,
+      })),
+    });
+
+    const { result } = renderHook(() => useStatusBar({ api }));
+
+    await waitFor(() => {
+      const ping = result.current.persistent.find((p) => p.id === "provider:llm-ping");
+      expect(ping?.severity).toBe("error");
+      expect(ping?.tooltip).toBe("AI provider: Unauthorized");
+    });
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -1,5 +1,8 @@
 import { useEffect } from "react";
-import type { AiProviderPingResult } from "../../../../shared/ai-provider-ping.js";
+import type {
+  AiProviderPingIpcResult,
+  AiProviderPingResult,
+} from "../../../../shared/ai-provider-ping.js";
 import type { LvisApi } from "../../types.js";
 import type { PersistentItem } from "./types.js";
 
@@ -62,8 +65,18 @@ export function useStatusBarProviderPing({ api, upsertPersistent }: Options): vo
   }, [api, upsertPersistent]);
 }
 
-function itemFromPingResult(result: AiProviderPingResult): PersistentItem {
-  if (!result.configured) {
+function itemFromPingResult(result: AiProviderPingIpcResult): PersistentItem {
+  if (isUnauthorizedPingResult(result)) {
+    return {
+      id: ITEM_ID,
+      severity: "error",
+      dot: true,
+      a11yLabel: "AI provider: Unauthorized",
+      tooltip: "AI provider: Unauthorized",
+    };
+  }
+  const ping = result as AiProviderPingResult;
+  if (!ping.configured) {
     return {
       id: ITEM_ID,
       severity: "warning",
@@ -72,14 +85,14 @@ function itemFromPingResult(result: AiProviderPingResult): PersistentItem {
       tooltip: "AI provider: Not configured",
     };
   }
-  const label = formatProviderLabel(result.vendor, result.model);
-  if (result.online) {
+  const label = formatProviderLabel(ping.vendor, ping.model);
+  if (ping.online) {
     return {
       id: ITEM_ID,
       severity: "success",
       dot: true,
       a11yLabel: `AI provider: Connected (${label})`,
-      tooltip: `AI provider: Connected (${label}, ${result.latencyMs} ms)`,
+      tooltip: `AI provider: Connected (${label}, ${ping.latencyMs} ms)`,
     };
   }
   return {
@@ -93,4 +106,10 @@ function itemFromPingResult(result: AiProviderPingResult): PersistentItem {
 
 function formatProviderLabel(vendor: string, model: string): string {
   return model ? `${vendor} · ${model}` : vendor;
+}
+
+function isUnauthorizedPingResult(
+  result: AiProviderPingIpcResult,
+): result is { ok: false; error: "unauthorized-frame" } {
+  return "ok" in result && result.ok === false;
 }

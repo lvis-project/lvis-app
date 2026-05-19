@@ -319,7 +319,7 @@ export function LoginModalConversational({
       if (result.ok) {
         if (result.requiresRelaunch) {
           setActivationNotice(
-            "호스트 적용을 위해 자동으로 재시작됩니다. 재시작 후 AI provider ping 으로 연결 상태를 확인합니다.",
+            "활성화 적용을 위해 5초 후 자동으로 다시 시작합니다. 다시 시작 후 AI 연결 상태를 확인합니다.",
           );
           setActivationRelaunching(true);
           return;
