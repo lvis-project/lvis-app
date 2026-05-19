@@ -104,24 +104,37 @@ export interface DemoActivationInputs {
  *   AND
  *   (B) user did NOT explicitly opt out (`demoAutoplayEnabled === false`)
  *   AND
- *   (C) `demoAutoplayEnabled === true` (explicit opt-in)
- *      OR
- *      `onboardingCompleted === true` (returning user re-engage)
+ *   (C) `onboardingCompleted === true` (returning user re-engage)
+ *
+ * Why fresh-state `flagEnabled === true` no longer trumps onboarding
+ * (M2 fix, critic MAJOR finding 2026-05-19):
+ *   A user with `demoAutoplayEnabled=true` set in settings.json but no
+ *   `onboardingCompleted` flag (clean install carrying over a previous
+ *   profile, or a QA snapshot) would otherwise activate demo while the
+ *   Z chain reducer is sitting in stage="welcome"/"memory". The demo
+ *   view paints over those dialogs and the chain never advances —
+ *   `markOnboardingCompleted` never fires, so the next boot loops.
+ *   Activating the explicit opt-in still requires the user to clear
+ *   onboarding once; afterwards both `flagEnabled === true` and
+ *   `onboardingCompleted === true` activate the demo.
  *
  * Resulting truth table (encoded for tests):
- *   flag=true    + completed=*     + vendor=true  → activate (explicit enable)
+ *   flag=true    + completed=true  + vendor=true → activate (explicit enable, post-onboard)
+ *   flag=true    + completed=false + vendor=true → skip (first-run → showcase)
+ *   flag=true    + completed=undef + vendor=true → skip (first-run → showcase)
  *   flag=undef   + completed=true  + vendor=true → activate (returning user)
  *   flag=undef   + completed=false + vendor=true → skip (first-run → showcase)
  *   flag=undef   + completed=undef + vendor=true → skip (first-run → showcase)
- *   flag=false   + completed=*     + vendor=true  → skip (explicit opt-out)
+ *   flag=false   + completed=*     + vendor=true → skip (explicit opt-out)
  *   *            + *               + vendor=false → skip (production dead path)
  */
 export function shouldActivateDemoAutoplay(inputs: DemoActivationInputs): boolean {
   if (!inputs.demoVendorPresent) return false;
   if (inputs.flagEnabled === false) return false;
-  if (inputs.flagEnabled === true) return true;
-  // flag undefined → returning-user gate: only activate when onboarding
-  // has explicitly completed. First-run users (onboardingCompleted false
-  // or undefined) must see the ScenarioShowcase chain first.
+  // First-run gate: activate only when onboarding has explicitly completed.
+  // Applies to BOTH explicit opt-in (`flagEnabled === true`) and the
+  // returning-user implicit path. First-run users (onboardingCompleted false
+  // or undefined) must see the ScenarioShowcase chain first — otherwise
+  // the demo paints over the chain reducer and the chain stalls forever.
   return inputs.onboardingCompleted === true;
 }
