@@ -48,6 +48,21 @@ describe("managed child process tracking", () => {
     expect(getManagedChildProcessCount()).toBe(0);
   });
 
+  it("skips the kill call when the tracked child already exited (exitCode set)", () => {
+    // Regression guard for the race between `before-quit` shutdown and a
+    // child that resolved on its own a microtask earlier. `isKillable`
+    // must short-circuit so the SIGKILL is not sent to a dead pid (which
+    // could otherwise race with PID reuse and signal an unrelated
+    // process on long-lived hosts).
+    const child = makeChild();
+    child.exitCode = 0;
+    trackManagedChildProcess(child, { label: "test-already-dead" });
+
+    expect(forceKillManagedChildProcesses("test-timeout")).toBe(0);
+    expect(child.kill).not.toHaveBeenCalled();
+    expect(getManagedChildProcessCount()).toBe(0);
+  });
+
   itPosix("keeps a detached process group tracked after the root exits", () => {
     const child = makeChild();
     child.pid = 1234;
