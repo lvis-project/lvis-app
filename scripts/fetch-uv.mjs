@@ -1,7 +1,10 @@
 /**
  * fetch-uv.mjs — uv standalone binary 다운로드 스크립트
  *
- * GitHub releases (astral-sh/uv) 에서 필요한 플랫폼 바이너리만 다운로드한다.
+ * 우선순위:
+ *   1) vendored fast-path: resources/uv-archives/<archive> (repo-committed)
+ *   2) GitHub releases (astral-sh/uv) HTTP 다운로드 fallback
+ *
  * 이미 존재하면 skip (idempotent).
  *
  * 사용:
@@ -27,6 +30,7 @@ const PROJECT_ROOT = path.resolve(__dirname, "..");
 
 const DEFAULT_VERSION = "0.7.3"; // uv 안정 버전 (2026-04-13 기준)
 const METADATA_FILE = "uv.meta.json";
+const VENDORED_ARCHIVES_DIR = "resources/uv-archives";
 
 function usage() {
   return [
@@ -318,6 +322,27 @@ async function verifyArchiveSha256(target, archiveBuffer) {
   return { archiveName, archiveSha256: actual, source: "uv-targets" };
 }
 
+/**
+ * Try to load archive from repo-vendored resources/uv-archives/<archive>.
+ * Returns Buffer if present (caller still SHA256-verifies), null otherwise.
+ *
+ * Rationale: archives are committed via Git LFS / direct blobs so postinstall
+ * works offline and in CI without network. SHA256 verification still runs against
+ * the same UV_TARGETS known-good values, so a tampered vendored file is detected.
+ */
+async function loadVendoredArchive(target) {
+  const vendoredPath = path.join(PROJECT_ROOT, VENDORED_ARCHIVES_DIR, target.archive);
+  if (!existsSync(vendoredPath)) return null;
+  try {
+    const buf = await readFile(vendoredPath);
+    return { buffer: buf, vendoredPath };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log(`  vendored archive read failed (${msg}) — falling back to HTTP`);
+    return null;
+  }
+}
+
 async function downloadTarget(target) {
   const destDir = path.join(PROJECT_ROOT, "resources", "uv", target.dir);
   const destBin = path.join(destDir, target.bin);
@@ -329,19 +354,29 @@ async function downloadTarget(target) {
       log(`SKIP (verified cache): ${path.relative(PROJECT_ROOT, destBin)}`);
       return;
     }
-    log(`CACHE STALE (${cached.reason}): ${path.relative(PROJECT_ROOT, destBin)} — redownloading`);
+    log(`CACHE STALE (${cached.reason}): ${path.relative(PROJECT_ROOT, destBin)} — refetching`);
   }
 
   await mkdir(destDir, { recursive: true });
 
-  const url = `https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/${target.archive}`;
-  log(`Downloading: ${url}`);
+  let buffer;
+  let source;
+  const vendored = await loadVendoredArchive(target);
+  if (vendored) {
+    buffer = vendored.buffer;
+    source = `vendored (${path.relative(PROJECT_ROOT, vendored.vendoredPath)})`;
+    log(`Using vendored archive: ${source} (${(buffer.length / 1024 / 1024).toFixed(1)} MB)`);
+  } else {
+    const url = `https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/${target.archive}`;
+    log(`Downloading: ${url}`);
+    const resp = await fetchWithRedirect(url);
+    const arrayBuffer = await resp.arrayBuffer();
+    buffer = Buffer.from(arrayBuffer);
+    source = "http";
+    log(`  Downloaded ${(buffer.length / 1024 / 1024).toFixed(1)} MB`);
+  }
 
-  const resp = await fetchWithRedirect(url);
-  const arrayBuffer = await resp.arrayBuffer();
-  const buffer = Buffer.from(arrayBuffer);
-
-  log(`  Downloaded ${(buffer.length / 1024 / 1024).toFixed(1)} MB — extracting ${target.bin}...`);
+  log(`  Extracting ${target.bin}... (source: ${source})`);
 
   const verification = await verifyArchiveSha256(target, buffer);
 
