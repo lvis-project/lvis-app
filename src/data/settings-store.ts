@@ -273,8 +273,8 @@ export interface WebViewSettings {
  *
  * `hide-to-tray` (default) — `win.on("close")` calls `preventDefault()` and
  * hides the window, leaving the main process alive so the tray icon, routine
- * scheduler, briefing engine, and any plugin background work keep running.
- * Quitting requires the tray context menu's 종료 item or `Cmd/Ctrl+Q`.
+ * scheduler, and any plugin background work keep running. Quitting requires
+ * the tray context menu's 종료 item or `Cmd/Ctrl+Q`.
  *
  * `quit` — the close button terminates the app the same way a regular Windows
  * app does. Users who don't want LVIS running in the background can pick this.
