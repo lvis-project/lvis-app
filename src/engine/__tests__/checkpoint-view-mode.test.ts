@@ -46,6 +46,7 @@ function makeLoop(
       return { checkpoints: metaCheckpoints };
     }),
     loadToolResultArtifact: vi.fn(() => null),
+    rehydrateToolResultArtifacts: vi.fn((_sessionId: string, messages: unknown[]) => messages),
     loadCheckpointSnapshot: vi.fn((_id: string, _num: number) => resolvedSnapshot),
     listSessions: vi.fn(() => []),
   };
@@ -194,6 +195,23 @@ describe("ConversationLoop branchFromCheckpoint", () => {
       [{ compactNum: 1, messageCountAtTrigger: 2 }],
       snapshot,
     );
+    memoryManager.rehydrateToolResultArtifacts.mockImplementation((_sessionId: string, messages: unknown[]) =>
+      messages.map((message) => {
+        if ((message as { role?: string; toolUseId?: string }).role !== "tool_result") return message;
+        return {
+          ...message as Record<string, unknown>,
+          content: raw,
+          meta: {
+            truncated: {
+              originalLines: 120,
+              originalTokens: 2000,
+              originalBytes: raw.length,
+              trimmedAt: "2026-05-19T00:00:00.000Z",
+            },
+          },
+        };
+      }),
+    );
     memoryManager.loadToolResultArtifact.mockReturnValue({
       toolUseId: "tu-art",
       toolName: "lge_lgenie_query",
@@ -224,7 +242,7 @@ describe("ConversationLoop branchFromCheckpoint", () => {
       },
     });
     expect((saved[1].meta as Record<string, unknown>).serializedStub).toBeUndefined();
-    expect(memoryManager.loadToolResultArtifact).toHaveBeenCalledWith(loop.getSessionId(), "tu-art");
+    expect(memoryManager.rehydrateToolResultArtifacts).toHaveBeenCalledWith(loop.getSessionId(), snapshot);
   });
 
   it("persists checkpoint summary as branch summaryPreamble", async () => {

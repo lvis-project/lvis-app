@@ -50,7 +50,7 @@ describe("stubMarkedToolResults — Issue #902 truncated marker", () => {
     const stub = out[0] as Extract<GenericMessage, { role: "tool_result" }>;
     expect(stub.content).toContain("Issue #902");
     expect(stub.content).toContain("tool=index_documents");
-    expect(stub.content).toContain("toolUseId=t1");
+    expect(stub.content).toContain('toolUseId="t1"');
     expect(stub.content).toContain("originalLines=12345");
     expect(stub.content).toContain("originalTokens=110000");
     expect(stub.content).toContain("originalBytes=450000");
@@ -124,7 +124,7 @@ describe("stubMarkedToolResults — Issue #902 truncated marker", () => {
     expect(stub.content).not.toMatch(/tool=[^,]* /);
   });
 
-  it("sanitizes toolUseId before embedding in recovery instructions", () => {
+  it("embeds the exact toolUseId as a JSON string in recovery instructions", () => {
     const msg: GenericMessage = {
       role: "tool_result",
       toolUseId: "toolu bad<script>",
@@ -141,9 +141,8 @@ describe("stubMarkedToolResults — Issue #902 truncated marker", () => {
     };
     const out = stubMarkedToolResults([msg]);
     const stub = out[0] as Extract<GenericMessage, { role: "tool_result" }>;
-    expect(stub.content).toContain("toolUseId=toolu?bad?script?");
-    expect(stub.content).toContain('toolUseId="toolu?bad?script?"');
-    expect(stub.content).not.toMatch(/toolUseId=[^,]*[<>]/);
+    expect(stub.content).toContain(`toolUseId=${JSON.stringify("toolu bad<script>")}`);
+    expect(stub.content).toContain(`read_tool_result_chunk with toolUseId=${JSON.stringify("toolu bad<script>")}`);
   });
 
   it("renders sentinel -1 counts as 'scan-skipped' (hard byte ceiling case)", () => {

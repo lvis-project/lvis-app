@@ -754,6 +754,31 @@ export class MemoryManager {
     }
   }
 
+  rehydrateToolResultArtifacts(sessionId: string, messages: unknown[]): unknown[] {
+    if (!isValidSessionId(sessionId)) return messages;
+    let changed = false;
+    const hydrated = messages.map((message) => {
+      if (!isToolResultRecord(message) || !isToolResultStubContent(message.content)) {
+        return message;
+      }
+      const artifact = this.loadToolResultArtifact(sessionId, message.toolUseId);
+      if (!artifact) return message;
+      const meta = isRecord(message.meta) ? message.meta : {};
+      const { serializedStub: _serializedStub, ...restMeta } = meta;
+      changed = true;
+      return {
+        ...message,
+        toolName: artifact.toolName ?? message.toolName,
+        content: artifact.content,
+        meta: {
+          ...restMeta,
+          truncated: artifact.truncated,
+        },
+      };
+    });
+    return changed ? hydrated : messages;
+  }
+
   async saveSessionMetadata(sessionId: string, metadata: SessionMetadata): Promise<void> {
     if (!isValidSessionId(sessionId)) {
       throw new Error(`saveSessionMetadata: invalid sessionId "${sessionId}"`);
@@ -1124,15 +1149,16 @@ export class MemoryManager {
       const meta = isRecord(message.meta) ? message.meta : {};
       let truncated = normalizeTruncatedInfo(meta.truncated);
       const compactedAt = typeof meta.compactedAt === "string" ? meta.compactedAt : undefined;
-      const isStub = isToolResultStubContent(message.content);
+      const hasStubPrefix = isToolResultStubContent(message.content);
+      const isSerializedStub = hasStubPrefix && (meta.serializedStub === true || !truncated);
 
       if (truncated) {
         const paths = this.toolResultArtifactPaths(sessionId, message.toolUseId);
         keepArtifactKeys.add(paths.key);
-        if (!isStub) {
+        if (!isSerializedStub) {
           this.writeToolResultArtifact(sessionId, message, truncated);
         }
-      } else if (isStub) {
+      } else if (isSerializedStub) {
         const paths = this.toolResultArtifactPaths(sessionId, message.toolUseId);
         const artifact = this.loadToolResultArtifact(sessionId, message.toolUseId);
         if (artifact) {

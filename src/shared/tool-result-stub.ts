@@ -15,20 +15,20 @@ export function buildToolResultTruncatedStub(
   info: ToolResultTruncatedInfo,
 ): string {
   const safeName = (toolName ?? "?").replace(/[^A-Za-z0-9_-]/g, "?");
-  const safeToolUseId = toolUseId.replace(/[^A-Za-z0-9_.:-]/g, "?");
+  const quotedToolUseId = JSON.stringify(toolUseId);
   const lineLabel = info.originalLines === -1 ? "scan-skipped" : `${info.originalLines}`;
   const tokenLabel = info.originalTokens === -1 ? "scan-skipped" : `${info.originalTokens}`;
   return (
     `[tool_result truncated by host (Issue #902):` +
     ` tool=${safeName},` +
-    ` toolUseId=${safeToolUseId},` +
+    ` toolUseId=${quotedToolUseId},` +
     ` originalLines=${lineLabel},` +
     ` originalTokens=${tokenLabel},` +
     ` originalBytes=${info.originalBytes}.` +
     ` The full response exceeded the per-result size cap` +
     ` and was dropped from provider history to protect TPM / context window.` +
     ` The current session keeps the verbatim result in a file-backed artifact.` +
-    ` Call read_tool_result_chunk with toolUseId="${safeToolUseId}" and chunkIndex=0, then increment chunkIndex while hasMore=true.]`
+    ` Call read_tool_result_chunk with toolUseId=${quotedToolUseId} and chunkIndex=0, then increment chunkIndex while hasMore=true.]`
   );
 }
 

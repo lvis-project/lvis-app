@@ -87,6 +87,54 @@ describe("MemoryManager file-backed tool_result artifacts", () => {
     });
   });
 
+  it("rehydrates artifact-backed stubs for fork-style cross-session saves", async () => {
+    const raw = "forkable artifact result\n".repeat(140);
+    await mm.saveSession(SESSION_ID, [artifactMessage(raw)]);
+    const loaded = mm.loadSession(SESSION_ID);
+    expect(loaded).not.toBeNull();
+
+    const hydrated = mm.rehydrateToolResultArtifacts(SESSION_ID, loaded!);
+
+    expect(hydrated[0]).toMatchObject({
+      role: "tool_result",
+      toolUseId: "toolu_artifact_1",
+      content: raw,
+      meta: {
+        truncated: TRUNCATED,
+      },
+    });
+
+    const forkId = "artifact-session-fork";
+    await mm.saveSession(forkId, hydrated);
+    expect(mm.loadToolResultArtifact(forkId, "toolu_artifact_1")?.content).toBe(raw);
+  });
+
+  it("does not mistake raw oversized content with a stub prefix for a serialized stub", async () => {
+    const raw = `[tool_result truncated by host but this is real output]\n${"prefix collision\n".repeat(160)}`;
+
+    await mm.saveSession(SESSION_ID, [artifactMessage(raw)]);
+
+    const jsonl = readFileSync(join(dir, "sessions", `${SESSION_ID}.jsonl`), "utf-8");
+    expect(jsonl).toContain("[tool_result truncated by host");
+    expect(jsonl).not.toContain("prefix collision");
+    expect(mm.loadToolResultArtifact(SESSION_ID, "toolu_artifact_1")?.content).toBe(raw);
+  });
+
+  it("preserves exact opaque toolUseIds in the recovery instruction", async () => {
+    const opaqueId = "toolu weird/opaque?id=1";
+    const raw = "opaque result\n".repeat(160);
+    await mm.saveSession(SESSION_ID, [{
+      ...artifactMessage(raw),
+      toolUseId: opaqueId,
+    }]);
+
+    const jsonl = readFileSync(join(dir, "sessions", `${SESSION_ID}.jsonl`), "utf-8");
+    const saved = JSON.parse(jsonl) as { content: string };
+    expect(saved.content).toContain(`toolUseId=${JSON.stringify(opaqueId)}`);
+    expect(saved.content).toContain(`read_tool_result_chunk with toolUseId=${JSON.stringify(opaqueId)}`);
+    expect(mm.loadToolResultArtifact(SESSION_ID, opaqueId)?.content).toBe(raw);
+  });
+
   it("preserves compacted stub precedence while retaining its artifact", async () => {
     const raw = "compacted artifact result\n".repeat(160);
     await mm.saveSession(SESSION_ID, [{
