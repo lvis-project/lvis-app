@@ -41,6 +41,7 @@ export const nordBundle: ThemeBundle = {
     border:                   "220 16% 36%",
     input:                    "220 16% 36%",
     ring:                     "193 43% 67%",
+    "ui-line":                "222 16% 64.0%",
     "message-user-bg":        "193 43% 67%",
     "message-user-fg":        "220 16% 22%",
     "input-bar-bg":           "222 16% 28%",
