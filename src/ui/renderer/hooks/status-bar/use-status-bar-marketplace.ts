@@ -26,7 +26,7 @@ export function useStatusBarMarketplace({ api, upsertPersistent, removePersisten
         upsertPersistent({
           id: "marketplace:online",
           severity: result.online ? "success" : "error",
-          label: "🛒",
+          label: "마켓",
           value: result.online ? "🟢" : "🔴",
           a11yLabel: result.online ? "마켓플레이스 온라인" : "마켓플레이스 오프라인",
         });
@@ -35,7 +35,7 @@ export function useStatusBarMarketplace({ api, upsertPersistent, removePersisten
         upsertPersistent({
           id: "marketplace:online",
           severity: "error",
-          label: "🛒",
+          label: "마켓",
           value: "🔴",
           a11yLabel: "마켓플레이스 오프라인",
         });
