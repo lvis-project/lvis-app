@@ -21,7 +21,6 @@ import { markStaleToolResults, estimateMessagesTokens, getModelPreflightThreshol
 const MAX_FORCE_RECOVER_PER_SESSION = 3;
 import { compactWithBoundary, renderBoundaryAsPreamble } from "./structured-compact.js";
 import { CompressionStatus } from "../shared/compact-status.js";
-import { stubMarkedToolResults } from "./wire-serialize.js";
 import { stripSuggestedReplies } from "./suggested-replies.js";
 import { createProvider, secretKeyFor } from "./llm/provider-factory.js";
 import { FallbackProvider, type FallbackStatus } from "./llm/vercel/fallback-chain.js";
@@ -53,6 +52,7 @@ import type { ChatInputOrigin } from "../shared/chat-origin.js";
 import { isUserKeyboardOrigin } from "../shared/chat-origin.js";
 import type { PermissionReviewEvent } from "../shared/permission-review-status.js";
 import { stripLeadingSlash } from "../shared/slash-sanitizer.js";
+import { isToolResultStubContent } from "../shared/tool-result-stub.js";
 import { createTracer, type ConversationTracer } from "../observability/conversation-trace.js";
 import { createLogger } from "../lib/logger.js";
 const log = createLogger("lvis");
@@ -63,6 +63,34 @@ const SESSION_ID_REGEX = /^[a-zA-Z0-9_\-]+$/;
 function isSafeSessionId(sessionId: unknown): sessionId is string {
   return typeof sessionId === "string" && SESSION_ID_REGEX.test(sessionId);
 }
+
+function rehydrateToolResultArtifactsForFork(
+  memoryManager: MemoryManager,
+  sourceSessionId: string,
+  messages: GenericMessage[],
+): GenericMessage[] {
+  let changed = false;
+  const hydrated = messages.map((message) => {
+    if (message.role !== "tool_result" || !isToolResultStubContent(message.content)) {
+      return message;
+    }
+    const artifact = memoryManager.loadToolResultArtifact(sourceSessionId, message.toolUseId);
+    if (!artifact) return message;
+    const { serializedStub: _serializedStub, ...meta } = message.meta ?? {};
+    changed = true;
+    return {
+      ...message,
+      toolName: artifact.toolName ?? message.toolName,
+      content: artifact.content,
+      meta: {
+        ...meta,
+        truncated: artifact.truncated,
+      },
+    };
+  });
+  return changed ? hydrated : messages;
+}
+
 const FILE_CONTENT_RESULT_TOOLS = new Set([
   "read_file",
   "grep_files",
@@ -641,7 +669,7 @@ export class ConversationLoop {
   /** 대화 이력 초기화 (새 대화) — §4.5.7 */
   newConversation(kind: SessionKind = "main"): void {
     if (this.history.length > 0) {
-      this.deps.memoryManager.saveSession(this.sessionId, stubMarkedToolResults(this.history.getMessages())).catch((err: unknown) => {
+      this.deps.memoryManager.saveSession(this.sessionId, this.history.getMessages()).catch((err: unknown) => {
         log.warn("newConversation saveSession failed: %s", (err as Error).message);
       });
     }
@@ -699,6 +727,17 @@ export class ConversationLoop {
         m.role === "tool_result" && m.toolUseId === toolUseId,
       );
     if (!match) return null;
+    if (isToolResultStubContent(match.content)) {
+      const artifact = this.deps.memoryManager.loadToolResultArtifact(this.sessionId, toolUseId);
+      if (!artifact) return match;
+      return {
+        toolUseId: artifact.toolUseId,
+        toolName: artifact.toolName ?? match.toolName,
+        content: artifact.content,
+        isError: match.isError,
+        meta: { ...(match.meta ?? {}), truncated: artifact.truncated },
+      };
+    }
     return {
       toolUseId: match.toolUseId,
       toolName: match.toolName,
@@ -779,8 +818,8 @@ export class ConversationLoop {
       );
     }
 
-    // wire-serialize: markStaleToolResults 된 verbatim history 를 stub 치환 후 영속화
-    await this.deps.memoryManager.saveSession(newSessionId, stubMarkedToolResults(repaired));
+    const forkMessages = rehydrateToolResultArtifactsForFork(this.deps.memoryManager, this.sessionId, repaired);
+    await this.deps.memoryManager.saveSession(newSessionId, forkMessages);
 
     // 브랜치 세션 metadata — checkpoint/fork provenance + prior summary.
     await this.deps.memoryManager.saveSessionMetadata(newSessionId, {
@@ -839,7 +878,7 @@ export class ConversationLoop {
 
     // 현재 세션 저장 후 전환
     if (this.history.length > 0) {
-      this.deps.memoryManager.saveSession(this.sessionId, stubMarkedToolResults(this.history.getMessages())).catch((err: unknown) => {
+      this.deps.memoryManager.saveSession(this.sessionId, this.history.getMessages()).catch((err: unknown) => {
         log.warn("loadSession saveSession failed: %s", (err as Error).message);
       });
     }
@@ -849,7 +888,7 @@ export class ConversationLoop {
       log.warn(
         `loadSession: repaired invalid tool history for ${sessionId} (removedMessages=${normalized.removedMessages}, removedToolCalls=${normalized.removedToolCalls})`,
       );
-      void this.deps.memoryManager.saveSession(sessionId, stubMarkedToolResults(normalized.messages)).catch((err: unknown) => {
+      void this.deps.memoryManager.saveSession(sessionId, normalized.messages).catch((err: unknown) => {
         log.warn("loadSession repair saveSession failed: %s", (err as Error).message);
       });
     }
@@ -996,7 +1035,7 @@ export class ConversationLoop {
 
       // 영속화 — manualCompact 완료 시점에 즉시 disk 반영.
       void Promise.resolve(
-        this.deps.memoryManager?.saveSession(this.sessionId, stubMarkedToolResults(this.history.getMessages())),
+        this.deps.memoryManager?.saveSession(this.sessionId, this.history.getMessages()),
       ).catch((err: unknown) => {
         log.warn("manualCompact saveSession failed: %s", (err as Error).message);
       });
@@ -1347,7 +1386,7 @@ export class ConversationLoop {
         }
       }
       if (!this.deps.disableSessionPersistence) {
-        await this.deps.memoryManager.saveSession(this.sessionId, stubMarkedToolResults(this.history.getMessages()));
+        await this.deps.memoryManager.saveSession(this.sessionId, this.history.getMessages());
       }
       // Mirror PostTurnHookChain's audit-route format so usage attribution
       // stays consistent across both code paths. SubAgentRunner constructs
@@ -2033,15 +2072,15 @@ export class ConversationLoop {
 
     this.compactNum = result.boundary.compactNum;
 
-    // Persist pre-compact verbatim history so branchFromCheckpoint can replay.
-    // wire-serialize stub applied to avoid disk explosion from large tool results.
+    // Persist pre-compact history so branchFromCheckpoint can replay. saveCheckpointSnapshot
+    // owns JSONL stubbing and file-backed artifacts for oversized tool results.
     // Failure is non-fatal — warn and continue; branch-from-checkpoint will surface the
     // "no snapshot found" error at use-time rather than silently corrupting a compact.
     try {
       await this.deps.memoryManager.saveCheckpointSnapshot(
         this.sessionId,
         this.compactNum,
-        stubMarkedToolResults(messagesBefore),
+        messagesBefore,
       );
     } catch (snapshotErr) {
       log.warn(`applyBoundaryToSession: saveCheckpointSnapshot failed — ${(snapshotErr as Error).message}`);

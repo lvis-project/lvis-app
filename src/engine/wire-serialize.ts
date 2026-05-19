@@ -1,15 +1,18 @@
 /**
- * Wire/Disk serialization transform — marked tool_results 를 stub 으로 변환.
+ * Wire serialization transform — marked tool_results 를 stub 으로 변환.
  *
  * `markStaleToolResults` 가 *memory verbatim* 보존하므로 provider 호출
- * 직전 + JSONL 영속화 직전 두 boundary 에서 *반드시* 이 helper 를 통과시켜 stub 형태로 만든다.
+ * 직전 boundary 에서 *반드시* 이 helper 를 통과시켜 stub 형태로 만든다.
+ * JSONL 영속화는 `MemoryManager.saveSession` 이 같은 stub builder 를 사용하되,
+ * oversized raw content 는 file-backed artifact 로 따로 보존한다.
  *
  * 단일 source of truth — 모든 vendor adapter (Anthropic / OpenAI / Gemini / Copilot / Vertex /
- * Azure Foundry) 와 disk 영속화 사이트는 공통적으로 이 함수를 통해 직렬화 형태를 얻는다.
+ * Azure Foundry) 는 공통적으로 이 함수를 통해 wire 직렬화 형태를 얻는다.
  */
 
 import type { GenericMessage } from "./llm/types.js";
 import { buildToolResultStub } from "./auto-compact.js";
+import { buildToolResultTruncatedStub } from "../shared/tool-result-stub.js";
 
 /**
  * Stub form for tool_result messages marked by Issue #902's generic size
@@ -32,32 +35,17 @@ import { buildToolResultStub } from "./auto-compact.js";
  * if future validation weakens, the stub cannot become an injection
  * vector via a hostile tool name.
  */
-function buildToolResultTruncatedStub(
+function buildToolResultTruncatedStubForWire(
   toolUseId: string,
   toolName: string | undefined,
   info: NonNullable<NonNullable<GenericMessage["meta"]>["truncated"]>,
 ): string {
-  const safeName = (toolName ?? "?").replace(/[^A-Za-z0-9_-]/g, "?");
-  const safeToolUseId = toolUseId.replace(/[^A-Za-z0-9_.:-]/g, "?");
-  const lineLabel = info.originalLines === -1 ? "scan-skipped" : `${info.originalLines}`;
-  const tokenLabel = info.originalTokens === -1 ? "scan-skipped" : `${info.originalTokens}`;
-  return (
-    `[tool_result truncated by host (Issue #902):` +
-    ` tool=${safeName},` +
-    ` toolUseId=${safeToolUseId},` +
-    ` originalLines=${lineLabel},` +
-    ` originalTokens=${tokenLabel},` +
-    ` originalBytes=${info.originalBytes}.` +
-    ` The full response exceeded the per-result size cap` +
-    ` and was dropped from provider history to protect TPM / context window.` +
-    ` The current session still keeps the verbatim result in memory.` +
-    ` Call read_tool_result_chunk with toolUseId="${safeToolUseId}" and chunkIndex=0, then increment chunkIndex while hasMore=true.]`
-  );
+  return buildToolResultTruncatedStub(toolUseId, toolName, info);
 }
 
 /**
  * `meta.compactedAt` 또는 `meta.truncated` set 된 tool_result content 를
- * stub 텍스트로 교체한 새 array 반환.
+ * provider용 stub 텍스트로 교체한 새 array 반환.
  *
  * 두 마커의 의미:
  *   - `compactedAt` — LLM auto-compact 이 turn 을 요약 → 원본 raw content
@@ -66,7 +54,8 @@ function buildToolResultTruncatedStub(
  *     content 는 **raw verbatim 그대로 보존** (UI / inspection 정합) —
  *     이 함수가 wire/disk 직렬화 시점에서만 짧은 stub 로 swap. 따라서
  *     in-memory snapshot 을 보는 UI 는 원본을 볼 수 있고, LLM 으로
- *     보내거나 jsonl 에 저장될 때는 stub 으로 통일.
+ *     보낼 때는 stub 으로 통일. JSONL 저장도 같은 marker 를 쓰지만
+ *     `MemoryManager.saveSession` 에서 file-backed artifact 를 함께 쓴다.
  *
  * - 입력 array 는 mutate 안 함 — caller 의 in-memory verbatim 보존
  * - mark 안 된 메시지는 reference-equal (per-turn allocation 회피)
@@ -120,7 +109,7 @@ export function stubMarkedToolResults(messages: GenericMessage[]): GenericMessag
       const stubContent =
         msg.meta.compactedAt !== undefined
           ? buildToolResultStub(msg.toolName, msg.meta.truncated?.originalBytes ?? msg.content.length)
-          : buildToolResultTruncatedStub(msg.toolUseId, msg.toolName, msg.meta.truncated!);
+          : buildToolResultTruncatedStubForWire(msg.toolUseId, msg.toolName, msg.meta.truncated!);
       out.push({
         role: "tool_result",
         toolUseId: msg.toolUseId,
