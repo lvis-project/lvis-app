@@ -7,11 +7,12 @@
  * mounting React.
  *
  * States:
- *   idle      — legacy initial state; kept for backwards-compat reducer
- *               callers and the `probe-start`/`probe-skip` transitions.
- *               Fresh boots now use "showcase" as the initial state so the
- *               intro screen mounts on first paint without waiting for the
- *               async boot probe.
+ *   idle      — initial state. The async boot probe in App.tsx fires
+ *               exactly one of `probe-start` → showcase (fresh boot) or
+ *               `probe-skip` → done (returning user). Starting at `idle`
+ *               means the showcase Dialog only mounts after the probe
+ *               classifies the boot, so a stale `probe-skip` arriving late
+ *               can never collapse a freshly-shown showcase.
  *   showcase  — ScenarioShowcase mounted (intro preview cards).
  *   login     — LoginModal mounted (waiting for vendor key / skip).
  *   welcome   — WelcomeQuestion mounted ("시작해볼까요?" card).
@@ -96,11 +97,13 @@ export function onboardingChainReducer(
     case "showcase":
       if (event.type === "showcase-start") return "login";
       if (event.type === "showcase-skip") return "done";
-      // boot-time default initial state is now "showcase"; the boot probe
-      // dispatches `probe-skip` directly when an existing key / completed
-      // flag is found, so the chain still self-cancels for returning users
-      // without flickering the showcase Dialog.
-      if (event.type === "probe-skip") return "done";
+      // `probe-skip` is intentionally NOT accepted from `showcase`. Initial
+      // state is `idle`; the async boot probe explicitly dispatches either
+      // `probe-start` (mount showcase) or `probe-skip` (skip to done) from
+      // `idle`, so an in-flight probe can never collapse a freshly-mounted
+      // showcase. This eliminates the closet-flash race where a stale
+      // probe-skip arriving after showcase mount would dismiss the intro
+      // for genuinely fresh-state users (#1014).
       return state;
 
     case "login":

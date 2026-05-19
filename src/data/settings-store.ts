@@ -413,6 +413,13 @@ const DEFAULT_SETTINGS: AppSettings = {
   pluginConfigs: {},
   features: {
     idlePreferenceRefresh: false,
+    // Fresh installs MUST start the Z onboarding chain. Persisting an
+    // explicit `false` (instead of relying on `undefined`) keeps the
+    // contract obvious: the flag flips to `true` exactly once, from
+    // `markOnboardingCompleted` after the user finishes (or skips) the
+    // chain. Any other path that wants to suppress the chain must set
+    // this to `true` deliberately — no "missing key === skipped" trap.
+    onboardingCompleted: false,
   },
 };
 

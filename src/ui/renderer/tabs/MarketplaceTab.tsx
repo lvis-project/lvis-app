@@ -242,7 +242,69 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
         </div>
       </div>
 
+      <SettingsSection
+        title="패키지 인벤토리"
+        description={packageStatus}
+        actions={
+          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => void refreshPackages()}>
+            새로고침
+          </Button>
+        }
+      >
+        <div className="flex flex-wrap gap-1">
+          {filterOptions.map((option) => (
+            <Button
+              key={option.value}
+              size="sm"
+              variant={filter === option.value ? "default" : "outline"}
+              className="h-7 px-2 text-xs"
+              onClick={() => setFilter(option.value)}
+            >
+              {option.label}
+            </Button>
+          ))}
+        </div>
+        <ScrollArea className="h-64 rounded-md border">
+          <div className="divide-y">
+            {visiblePackages.length === 0 ? (
+              <div className="p-4 text-center text-xs text-muted-foreground">표시할 패키지가 없습니다.</div>
+            ) : visiblePackages.map((item) => {
+              const packageType = item.pluginType ?? "plugin";
+              const isWorking = workingSlug === item.id;
+              const canUninstall = item.installed && (packageType === "plugin" || packageType === "agent" || packageType === "skill");
+              return (
+                <div key={`${packageType}:${item.id}`} className="flex items-start justify-between gap-3 p-2">
+                  <div className="min-w-0">
+                    <div className="flex min-w-0 items-center gap-1.5">
+                      <span className="truncate text-sm font-medium">{item.name}</span>
+                      <Badge variant="secondary" className="h-5 px-1.5 text-[10px] uppercase">{packageType}</Badge>
+                      {packageType === "mcp" && item.mcpAuth?.mode === "oauth" && (
+                        <Badge variant="secondary" className="h-5 px-1.5 text-[10px] uppercase">OAuth</Badge>
+                      )}
+                      {item.installed && <Badge variant="default" className="h-5 px-1.5 text-[10px]">설치됨</Badge>}
+                    </div>
+                    <p className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground">{item.description || item.packageSpec}</p>
+                    <p className="mt-0.5 font-mono text-[10px] text-muted-foreground">{item.id}</p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant={item.installed ? "outline" : "default"}
+                    className="h-7 shrink-0 px-2 text-xs"
+                    disabled={isWorking || (item.installed && !canUninstall)}
+                    onClick={() => void (item.installed ? uninstallPackage(item) : installPackage(item))}
+                  >
+                    {isWorking ? "처리 중…" : item.installed ? "제거" : "설치"}
+                  </Button>
+                </div>
+              );
+            })}
+          </div>
+        </ScrollArea>
+      </SettingsSection>
+
       {/* ── 고급 옵션 ──────────────────────────────────────────
+          Moved to the bottom of the Marketplace tab so the primary
+          surface (CTA → 패키지 인벤토리) is what most users see first.
           The entire "서버 연결" surface (URL editor + warning banner +
           API key + private-network toggle) lives behind this collapse.
           Default-deployment users never have to interact with it. */}
@@ -374,66 +436,6 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
             </div>
           </div>
         )}
-      </SettingsSection>
-
-      <SettingsSection
-        title="패키지 인벤토리"
-        description={packageStatus}
-        actions={
-          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => void refreshPackages()}>
-            새로고침
-          </Button>
-        }
-      >
-        <div className="flex flex-wrap gap-1">
-          {filterOptions.map((option) => (
-            <Button
-              key={option.value}
-              size="sm"
-              variant={filter === option.value ? "default" : "outline"}
-              className="h-7 px-2 text-xs"
-              onClick={() => setFilter(option.value)}
-            >
-              {option.label}
-            </Button>
-          ))}
-        </div>
-        <ScrollArea className="h-64 rounded-md border">
-          <div className="divide-y">
-            {visiblePackages.length === 0 ? (
-              <div className="p-4 text-center text-xs text-muted-foreground">표시할 패키지가 없습니다.</div>
-            ) : visiblePackages.map((item) => {
-              const packageType = item.pluginType ?? "plugin";
-              const isWorking = workingSlug === item.id;
-              const canUninstall = item.installed && (packageType === "plugin" || packageType === "agent" || packageType === "skill");
-              return (
-                <div key={`${packageType}:${item.id}`} className="flex items-start justify-between gap-3 p-2">
-                  <div className="min-w-0">
-                    <div className="flex min-w-0 items-center gap-1.5">
-                      <span className="truncate text-sm font-medium">{item.name}</span>
-                      <Badge variant="secondary" className="h-5 px-1.5 text-[10px] uppercase">{packageType}</Badge>
-                      {packageType === "mcp" && item.mcpAuth?.mode === "oauth" && (
-                        <Badge variant="secondary" className="h-5 px-1.5 text-[10px] uppercase">OAuth</Badge>
-                      )}
-                      {item.installed && <Badge variant="default" className="h-5 px-1.5 text-[10px]">설치됨</Badge>}
-                    </div>
-                    <p className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground">{item.description || item.packageSpec}</p>
-                    <p className="mt-0.5 font-mono text-[10px] text-muted-foreground">{item.id}</p>
-                  </div>
-                  <Button
-                    size="sm"
-                    variant={item.installed ? "outline" : "default"}
-                    className="h-7 shrink-0 px-2 text-xs"
-                    disabled={isWorking || (item.installed && !canUninstall)}
-                    onClick={() => void (item.installed ? uninstallPackage(item) : installPackage(item))}
-                  >
-                    {isWorking ? "처리 중…" : item.installed ? "제거" : "설치"}
-                  </Button>
-                </div>
-              );
-            })}
-          </div>
-        </ScrollArea>
       </SettingsSection>
     </div>
   );

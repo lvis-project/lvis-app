@@ -119,18 +119,20 @@ export function App() {
   // Z onboarding chain (2026-05-19) — replaces the previous pair of
   // `onboardingOpen` + `appLoginOpen` flags with an explicit reducer
   // that drives every stage of the first-boot funnel:
-  //   showcase → login → welcome → memory → tour → plugins → done
+  //   idle → showcase → login → welcome → memory → tour → plugins → done
   // The reducer keeps the JSX render branches small (each dialog
   // mounts only when its stage matches) and prevents the race where
   // multiple Radix Dialogs were mounted at once (#982/#990/#997).
   //
-  // Initial state is "showcase" so the intro screen mounts on first
-  // paint without waiting for the async boot probe. Returning users
-  // skip the chain via `probe-skip` (handled from both `idle` and
-  // `showcase` in the reducer) so the Dialog never visibly flashes.
+  // Initial state is `idle`. The boot probe (below) classifies the
+  // boot exactly once and dispatches either `probe-start` → showcase
+  // (fresh install, no key, onboarding incomplete) or `probe-skip` →
+  // done (returning user). Starting at `idle` instead of `showcase`
+  // eliminates the closet-flash race where a true fresh-state boot
+  // briefly shows the intro Dialog and then collapses (#1014).
   const [chainStage, dispatchChain] = useReducer(
     onboardingChainReducer,
-    "showcase" as OnboardingChainStage,
+    "idle" as OnboardingChainStage,
   );
   // Display name surfaced inside WelcomeQuestion — best-effort from the
   // host's persisted memory seed. Empty string when unknown, the
@@ -624,6 +626,13 @@ export function App() {
     let cancelled = false;
     void (async () => {
       try {
+        // Populate `hasApiKey` state up-front so the downstream
+        // `effectiveHasApiKey` mask can resolve to a concrete boolean
+        // the moment the chain advances to `done`. Without this the
+        // boot probe only dispatched chain events; `hasApiKey` stayed
+        // `null` until the user opened+saved Settings, producing the
+        // "로그인된 척" race (#1014 tracer Stage B).
+        void checkApiKey();
         const settings = await api.getSettings();
         if (cancelled) return;
         if (settings.features?.onboardingCompleted === true) {
@@ -647,7 +656,7 @@ export function App() {
       }
     })();
     return () => { cancelled = true; };
-  }, [api]);
+  }, [api, checkApiKey]);
 
   const markOnboardingCompleted = useCallback(async () => {
     try {
@@ -1075,8 +1084,16 @@ export function App() {
   // (probe-skip or chain completion) still see the empty state when
   // they remove their key from Settings, so the safety-net behaviour
   // for that path is preserved.
+  // Tracer Stage B race fix (#1014): only surface the boolean when BOTH
+  // (a) the Z chain has finished AND (b) the boot probe has resolved
+  // `hasApiKey` to a concrete boolean. Any other state — chain still
+  // running, or probe still pending — returns `null` so downstream
+  // empty-state branches stay in their loading shape. This prevents the
+  // "로그인된 척" race where chain advanced to `done` but `hasApiKey`
+  // hadn't been populated yet, letting `hasApiKey !== false` falsely
+  // paint the ready-state empty prompt.
   const effectiveHasApiKey: boolean | null =
-    chainStage === "done" ? hasApiKey : (hasApiKey === false ? null : hasApiKey);
+    chainStage === "done" && hasApiKey !== null ? hasApiKey : null;
   const chatContextValue = useChatContextValue({
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
     question, setQuestion, chatEndRef, currentSessionId, hasApiKey: effectiveHasApiKey, onOpenSettings,
