@@ -76,7 +76,7 @@ describe("chat-stream-state", () => {
     let entries: ChatEntry[] = appendUserEntry([], "규정 찾아줘");
     entries = upsertPermissionReview(entries, {
       status: "reviewing",
-      toolName: "lge_lgenie_query",
+      toolName: "internal_kb_query",
       toolCategory: "network",
       source: "plugin",
       groupId: "round-review",
@@ -85,7 +85,7 @@ describe("chat-stream-state", () => {
     });
     entries = upsertPermissionReview(entries, {
       status: "needs_approval",
-      toolName: "lge_lgenie_query",
+      toolName: "internal_kb_query",
       toolCategory: "network",
       source: "plugin",
       groupId: "round-review",
@@ -107,7 +107,7 @@ describe("chat-stream-state", () => {
       {
         groupId: "round-review",
         toolUseId: "tool-review",
-        name: "lge_lgenie_query",
+        name: "internal_kb_query",
         displayOrder: 0,
       },
     );

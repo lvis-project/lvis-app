@@ -1,8 +1,17 @@
 # LVIS Local Demo Setup
 
-This guide covers the LGE internal demo loop (Path 2). Demo mode lets a new
+This guide covers the internal organization demo loop (Path 2). Demo mode lets a new
 user click **"데모 자격증명으로 30초 안에 체험"** in the Login modal and have the
 app silently provision an LLM key + endpoint without typing anything.
+
+> **Host mapping is handled at the app level — no `/etc/hosts` edits, no
+> sudo.** When `LVIS_DEMO_VENDOR=azure-foundry` and `LVIS_DEMO_HOST_MAP`
+> is non-empty, the Electron main process installs a Chromium
+> `host-resolver-rules` command-line switch at boot so the demo Azure
+> Foundry hostnames resolve to the configured intranet IPs *inside the
+> Electron process only*. The mapping never escapes Electron and never
+> touches the host OS. See [Host mapping (intranet)](#host-mapping-intranet)
+> below and `src/main/demo-host-resolver.ts` for the implementation.
 
 ## How demo mode is activated
 
@@ -14,7 +23,7 @@ it into the encrypted secret store.
 | Env var | Purpose |
 |---|---|
 | `LVIS_DEMO_ENABLED=1` | Master gate. Without this, the IPC handler refuses to register in packaged builds. |
-| `LVIS_DEMO_VENDOR=azure-foundry` | Top-level vendor the login activates (default is `azure-foundry` for LGE internal demo). |
+| `LVIS_DEMO_VENDOR=azure-foundry` | Top-level vendor the login activates (default is `azure-foundry` for the internal organization demo target). |
 | `LVIS_DEMO_KEY_AZURE_FOUNDRY=<api-key>` | The Azure Foundry API key to provision. |
 | `LVIS_DEMO_BASEURL_AZURE_FOUNDRY=<endpoint>` | The Azure Foundry endpoint URL. |
 | `LVIS_DEMO_MODEL_AZURE_FOUNDRY=<model>` | Optional model id override. |
@@ -24,25 +33,39 @@ These variables are scrubbed from `process.env` in packaged builds before
 the renderer / preload / workers can observe them. The captured values
 live in main-process module state only.
 
-## Host mapping (LGE intranet)
+## Host mapping (intranet)
 
 The Azure Foundry demo endpoint (`aif-swc-axpg-hq-hckt19.*.azure.com`)
-resolves only on the LGE intranet (10.182.192.0/24). Public DNS does not
-return these IPs.
+resolves only on the internal organization intranet (10.182.192.0/24).
+Public DNS does not return these IPs.
 
-LVIS applies the mapping **inside Electron only** via the Chromium
-`host-resolver-rules` command-line switch — no `/etc/hosts` mutation, no
-sudo. The mapping is sourced from `LVIS_DEMO_HOST_MAP` and is applied at
-boot iff `LVIS_DEMO_VENDOR=azure-foundry`.
+LVIS applies the mapping **inside the Electron process only** via the
+Chromium `host-resolver-rules` command-line switch — **no `/etc/hosts`
+mutation, no sudo, no system-wide state change**. The switch is appended
+in `src/main/demo-host-resolver.ts` before `app.whenReady()`; once
+Chromium's network service spins up the command line is frozen. The
+mapping is sourced from `LVIS_DEMO_HOST_MAP` and is applied at boot iff
+`LVIS_DEMO_VENDOR=azure-foundry`.
 
-Example value (LGE intranet IPs as of 2026-05-19):
+Example value (intranet IPs as of 2026-05-19):
 
 ```
 LVIS_DEMO_HOST_MAP="aif-swc-axpg-hq-hckt19.cognitiveservices.azure.com=10.182.192.174,aif-swc-axpg-hq-hckt19.openai.azure.com=10.182.192.175,aif-swc-axpg-hq-hckt19.services.ai.azure.com=10.182.192.176"
 ```
 
+Mapping summary applied automatically when the env conditions are met:
+
+| Hostname | Intranet IP |
+|---|---|
+| `aif-swc-axpg-hq-hckt19.cognitiveservices.azure.com` | `10.182.192.174` |
+| `aif-swc-axpg-hq-hckt19.openai.azure.com` | `10.182.192.175` |
+| `aif-swc-axpg-hq-hckt19.services.ai.azure.com` | `10.182.192.176` |
+
 When `LVIS_DEMO_VENDOR` is anything other than `azure-foundry`, the host
-map is ignored (other vendors resolve via public DNS).
+map is ignored (other vendors resolve via public DNS). Confirm activation
+by looking for the `[demo-host-resolver] mapping applied: N host(s)` line
+in the main-process log; absence of that line means the switch was
+skipped (vendor mismatch, demo disabled, or empty map).
 
 ## Local launch — `.env.demo` setup
 
@@ -51,7 +74,7 @@ A template is committed at `.env.demo.example`. Copy it to `.env.demo`
 
 ```bash
 cp .env.demo.example .env.demo
-# Open .env.demo and replace <paste-api-key-here> with the LGE-issued key.
+# Open .env.demo and replace <paste-api-key-here> with the internal-issued demo key.
 ```
 
 `scripts/run-electron.mjs` automatically loads `.env.demo` when the file is
@@ -99,6 +122,6 @@ and closes the modal.
   The main-process log emits `[demo-host-resolver] mapping applied: N
   host(s)` when the switch is installed; absence of that line means the
   switch was skipped (vendor mismatch or empty map).
-- **Public network user (not on LGE intranet)** — the demo loop is
-  intentionally intranet-only. Use the BYOK chip (`2`) to enter your own
-  vendor API key via Settings → LLM tab.
+- **Public network user (not on the organization intranet)** — the demo
+  loop is intentionally intranet-only. Use the BYOK chip (`2`) to enter
+  your own vendor API key via Settings → LLM tab.
