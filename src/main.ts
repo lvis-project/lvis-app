@@ -5,7 +5,6 @@
  * §4.1 Client Architecture 준수.
  */
 import { Menu, Tray, app, BrowserWindow, ipcMain, shell, dialog, nativeImage, protocol, screen, type IpcMainInvokeEvent, type MenuItemConstructorOptions } from "electron";
-import { Buffer } from "node:buffer";
 import { dirname, resolve } from "node:path";
 import { existsSync } from "node:fs";
 import * as https from "node:https";
@@ -54,6 +53,7 @@ import { captureDemoCredentials } from "./main/demo-credentials.js";
 import { loadPersistedDemoActivationSync } from "./main/demo-activation-loader.js";
 import { applyDemoHostResolverRules } from "./main/demo-host-resolver.js";
 import { forceKillManagedChildProcesses } from "./main/managed-child-processes.js";
+import { createLvisTrayIcon } from "./main/tray-icon.js";
 import {
   resolveShutdownCleanupTimeoutMs,
   runCleanupWithHardTimeout,
@@ -953,17 +953,7 @@ function refreshTrayMenu(): void {
 }
 
 function createTrayIcon() {
-  // Per Apple HIG, macOS template images render using the alpha channel only —
-  // AppKit tints them to match menubar text color, so source color is moot. On
-  // Windows / Linux, the tray surface shows the source RGB directly, so we use
-  // pure white for the LVIS person silhouette per the corporate-demo brief.
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${LVIS_LOGO_VIEW_BOX}"><path fill="#ffffff" d="${LVIS_LOGO_PATH}"/></svg>`;
-  const icon = nativeImage.createFromDataURL(`data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`);
-  const resized = icon.isEmpty() ? icon : icon.resize({ width: 18, height: 18 });
-  if (process.platform === "darwin") {
-    resized.setTemplateImage(true);
-  }
-  return resized;
+  return createLvisTrayIcon({ nativeImage });
 }
 
 function ensureTray(): void {
