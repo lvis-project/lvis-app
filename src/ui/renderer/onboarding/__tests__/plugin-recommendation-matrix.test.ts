@@ -21,10 +21,10 @@ describe("inferRecommendedPlugins", () => {
     const ids = inferRecommendedPlugins(
       "회의록 정리하고 문서 검색도 자주 합니다. 일정 관리 자동화",
     ).map((r) => r.pluginId);
-    // Matrix order: meeting → local-indexer → work-proactive → ms-graph → agent-hub
-    // "일정" hits both work-proactive and ms-graph rows (shared keyword by design —
+    // Matrix order: meeting → local-indexer → work-assistant → ms-graph → agent-hub
+    // "일정" hits both work-assistant and ms-graph rows (shared keyword by design —
     // scheduling spans both surfaces).
-    expect(ids).toEqual(["meeting", "local-indexer", "work-proactive", "ms-graph"]);
+    expect(ids).toEqual(["meeting", "local-indexer", "work-assistant", "ms-graph"]);
   });
 
   it("collapses duplicate hits from synonyms", () => {
