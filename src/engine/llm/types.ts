@@ -43,7 +43,7 @@ export const LLM_DEFAULT_MODELS: Record<LLMVendor, string> = {
 export interface MessageMeta {
   /**
    * Tool-result stubbing + LLM compact 양쪽의 단일 marker — set 시 의미:
-   *   - tool_result message: `wire-serialize.ts:stubMarkedToolResults` 가 wire/disk 직렬화 시
+   *   - tool_result message: provider send / session save serialization 시
    *     content 를 stub 으로 변환해야 함 (memory verbatim, serialization stub)
    *   - user-role boundary message: LLM compact 가 생성한 경계 (compactBoundary 와 paired)
    */
@@ -57,7 +57,7 @@ export interface MessageMeta {
   /** Tool-result stubbing 면제 — skill 도구 출력 또는 사용자 명시 lock. structured-compact 의 pinnedArtifacts 와 paired. */
   lock?: boolean;
   /**
-   * wire/disk serialization 직전 stub 화가 적용되어 content 가 이미 placeholder 인 경우 true.
+   * provider/session serialization 직전 stub 화가 적용되어 content 가 이미 placeholder 인 경우 true.
    * 이중 변환 방지 idempotency guard. memoryManager.saveSession 시 보존되어야 함.
    * string-prefix 체크 대신 이 flag 를 사용함으로써 도구 출력이 우연히 stub prefix 로 시작하는
    * false-positive 방지.
@@ -86,10 +86,9 @@ export interface MessageMeta {
    * Set by `ConversationHistory.append`/`restore` on tool_result messages
    * whose raw content exceeds `MAX_TOOL_RESULT_LINES` or
    * `MAX_TOOL_RESULT_TOKENS` (shared/tool-result-trim.ts). The in-memory
-   * `content` already holds the truncated head (verbatim safe to send to
-   * the model); this field records the original size so wire/disk
-   * serialization (`wire-serialize.ts`) can substitute a stub form and
-   * the UI can show "truncated (N lines / M tokens)".
+   * `content` stays raw verbatim; this field records the original size so
+   * provider serialization can substitute a stub and session persistence can
+   * keep the raw payload in a file-backed artifact.
    *
    * Why a separate marker from `compactedAt`: compactedAt means "the LLM
    * summarized this turn"; truncated means "host enforced a per-result

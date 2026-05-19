@@ -45,14 +45,27 @@ function makeToolResultMsg(opts: {
   content: string;
   toolName?: string;
   compactedAt?: string;
+  truncated?: {
+    originalLines: number;
+    originalTokens: number;
+    originalBytes: number;
+    trimmedAt: string;
+  };
+  serializedStub?: boolean;
 }) {
   return {
     role: "tool_result" as const,
     toolUseId: opts.toolUseId,
     toolName: opts.toolName ?? "Read",
     content: opts.content,
-    ...(opts.compactedAt !== undefined
-      ? { meta: { compactedAt: opts.compactedAt } }
+    ...(opts.compactedAt !== undefined || opts.truncated !== undefined || opts.serializedStub === true
+      ? {
+          meta: {
+            ...(opts.compactedAt !== undefined ? { compactedAt: opts.compactedAt } : {}),
+            ...(opts.truncated !== undefined ? { truncated: opts.truncated } : {}),
+            ...(opts.serializedStub === true ? { serializedStub: true } : {}),
+          },
+        }
       : {}),
   };
 }
@@ -102,8 +115,10 @@ function makeMinimalDeps(
       listSessionsPage: vi.fn(() => []),
       listSessions: vi.fn(() => []),
       loadSession: vi.fn(),
+      loadToolResultArtifact: vi.fn(() => null),
       loadSessionMetadata: vi.fn(() => null),
       saveSessionMetadata: vi.fn(),
+      rehydrateToolResultArtifacts: vi.fn((_sessionId: string, messages: unknown[]) => messages),
       loadMainActiveSessionState: vi.fn(() => null),
       markMainActiveFresh: vi.fn(async () => undefined),
       markMainActiveResume: vi.fn(async () => undefined),
@@ -191,12 +206,61 @@ describe("lvis:chat:get-verbatim-tool-result", () => {
         toolUseId: "tu-1",
         content: "[tool_result stripped: tool=Read, origLen=12345]",
         compactedAt: "2026-05-08T00:00:00Z",
+        serializedStub: true,
       }),
     ]);
     await setupHandlers(loop);
 
     const result = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-1" });
     expect(result).toBeNull();
+  });
+
+  it("returns null when content is already a host-truncated stub (verbatim lost)", async () => {
+    const loop = makeConversationLoop(SESSION_ID, [
+      makeToolResultMsg({
+        toolUseId: "tu-1",
+        content: "[tool_result truncated by host (Issue #902): tool=Read, originalBytes=12345]",
+        truncated: {
+          originalLines: 200,
+          originalTokens: 5000,
+          originalBytes: 12345,
+          trimmedAt: "2026-05-19T00:00:00.000Z",
+        },
+        serializedStub: true,
+      }),
+    ]);
+    await setupHandlers(loop);
+
+    const result = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-1" });
+    expect(result).toBeNull();
+  });
+
+  it("returns artifact content when a host-truncated disk stub is backed by a file artifact", async () => {
+    const loop = makeConversationLoop(SESSION_ID, [
+      makeToolResultMsg({
+        toolUseId: "tu-1",
+        content: "[tool_result truncated by host (Issue #902): tool=Read, toolUseId=tu-1, originalBytes=12345]",
+      }),
+    ]);
+    const deps = await setupHandlers(loop);
+    const artifactContent = "artifact line one\nartifact line two";
+    deps.memoryManager.loadToolResultArtifact.mockReturnValue({
+      toolUseId: "tu-1",
+      toolName: "Read",
+      content: artifactContent,
+      truncated: {
+        originalLines: 2,
+        originalTokens: 20,
+        originalBytes: artifactContent.length,
+        trimmedAt: "2026-05-19T00:00:00.000Z",
+      },
+      sha256: "sha",
+      createdAt: "2026-05-19T00:00:00.000Z",
+    });
+
+    const result = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-1" });
+    expect(result).toEqual({ content: artifactContent, lineCount: 2 });
+    expect(deps.memoryManager.loadToolResultArtifact).toHaveBeenCalledWith(SESSION_ID, "tu-1");
   });
 
   it("returns null for non-compacted tool_result (meta.compactedAt not set)", async () => {
@@ -209,6 +273,46 @@ describe("lvis:chat:get-verbatim-tool-result", () => {
 
     const result = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-1" });
     expect(result).toBeNull();
+  });
+
+  it("returns verbatim for size-capped tool_result that still has in-memory content", async () => {
+    const content = "verbatim capped content\nline two";
+    const loop = makeConversationLoop(SESSION_ID, [
+      makeToolResultMsg({
+        toolUseId: "tu-1",
+        content,
+        truncated: {
+          originalLines: 2,
+          originalTokens: 20,
+          originalBytes: content.length,
+          trimmedAt: "2026-05-19T00:00:00.000Z",
+        },
+      }),
+    ]);
+    await setupHandlers(loop);
+
+    const result = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-1" });
+    expect(result).toEqual({ content, lineCount: 2 });
+  });
+
+  it("returns in-memory verbatim when raw size-capped content starts with a stub prefix", async () => {
+    const content = "[tool_result truncated by host but real output]\nline two";
+    const loop = makeConversationLoop(SESSION_ID, [
+      makeToolResultMsg({
+        toolUseId: "tu-prefix",
+        content,
+        truncated: {
+          originalLines: 2,
+          originalTokens: 20,
+          originalBytes: content.length,
+          trimmedAt: "2026-05-19T00:00:00.000Z",
+        },
+      }),
+    ]);
+    await setupHandlers(loop);
+
+    const result = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-prefix" });
+    expect(result).toEqual({ content, lineCount: 2 });
   });
 
   it("returns verbatim for compacted tool_result that still has verbatim content", async () => {
@@ -403,6 +507,50 @@ describe("lvis:chat:fork", () => {
         sessionKind: "main",
         summaryPreamble: "요약된 이전 맥락",
       }),
+    );
+  });
+
+  it("rehydrates artifact-backed tool_result stubs before saving a forked session", async () => {
+    const stubContent = "[tool_result truncated by host (Issue #902): tool=lge_lgenie_query, toolUseId=\"tu-art\", originalBytes=12000]";
+    const rawContent = "artifact-backed result\n".repeat(120);
+    const loop = makeConversationLoop("session-fork-source", [
+      { role: "assistant" as const, content: "", toolCalls: [{ id: "tu-art", name: "lge_lgenie_query", input: {} }] },
+      makeToolResultMsg({
+        toolUseId: "tu-art",
+        toolName: "lge_lgenie_query",
+        content: stubContent,
+      }),
+    ]);
+    loop.loadSession.mockReturnValue(true);
+    const deps = await setupHandlers(loop);
+    deps.memoryManager.rehydrateToolResultArtifacts.mockImplementation((_sessionId: string, messages: unknown[]) =>
+      messages.map((message) => {
+        if ((message as { role?: string; toolUseId?: string }).role !== "tool_result") return message;
+        return {
+          ...message as Record<string, unknown>,
+          content: rawContent,
+          meta: {
+            truncated: {
+              originalLines: 120,
+              originalTokens: 2000,
+              originalBytes: rawContent.length,
+              trimmedAt: "2026-05-19T00:00:00.000Z",
+            },
+          },
+        };
+      }),
+    );
+
+    const result = await invoke("lvis:chat:fork", undefined) as { ok: boolean; sessionId: string | null };
+
+    expect(result.ok).toBe(true);
+    expect(deps.memoryManager.rehydrateToolResultArtifacts).toHaveBeenCalledWith(
+      "session-fork-source",
+      expect.arrayContaining([expect.objectContaining({ toolUseId: "tu-art", content: stubContent })]),
+    );
+    expect(deps.memoryManager.saveSession).toHaveBeenCalledWith(
+      result.sessionId,
+      expect.arrayContaining([expect.objectContaining({ toolUseId: "tu-art", content: rawContent })]),
     );
   });
 });

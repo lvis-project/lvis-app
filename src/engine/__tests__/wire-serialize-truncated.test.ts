@@ -50,9 +50,12 @@ describe("stubMarkedToolResults — Issue #902 truncated marker", () => {
     const stub = out[0] as Extract<GenericMessage, { role: "tool_result" }>;
     expect(stub.content).toContain("Issue #902");
     expect(stub.content).toContain("tool=index_documents");
+    expect(stub.content).toContain('toolUseId="t1"');
     expect(stub.content).toContain("originalLines=12345");
     expect(stub.content).toContain("originalTokens=110000");
     expect(stub.content).toContain("originalBytes=450000");
+    expect(stub.content).toContain("read_tool_result_chunk");
+    expect(stub.content).not.toContain("Retry with pagination");
     expect(stub.meta?.serializedStub).toBe(true);
     expect(stub.meta?.truncated).toEqual(msg.meta!.truncated);
   });
@@ -119,6 +122,27 @@ describe("stubMarkedToolResults — Issue #902 truncated marker", () => {
     expect(stub.content).toContain("tool=evil?tool?script?");
     expect(stub.content).not.toMatch(/tool=[^,]*[<>]/);
     expect(stub.content).not.toMatch(/tool=[^,]* /);
+  });
+
+  it("embeds the exact toolUseId as a JSON string in recovery instructions", () => {
+    const msg: GenericMessage = {
+      role: "tool_result",
+      toolUseId: "toolu bad<script>",
+      toolName: "safe_tool",
+      content: "raw",
+      meta: {
+        truncated: {
+          originalLines: 200,
+          originalTokens: 5_000,
+          originalBytes: 10_000,
+          trimmedAt: "2026-05-18T00:00:00.000Z",
+        },
+      },
+    };
+    const out = stubMarkedToolResults([msg]);
+    const stub = out[0] as Extract<GenericMessage, { role: "tool_result" }>;
+    expect(stub.content).toContain(`toolUseId=${JSON.stringify("toolu bad<script>")}`);
+    expect(stub.content).toContain(`read_tool_result_chunk with toolUseId=${JSON.stringify("toolu bad<script>")}`);
   });
 
   it("renders sentinel -1 counts as 'scan-skipped' (hard byte ceiling case)", () => {

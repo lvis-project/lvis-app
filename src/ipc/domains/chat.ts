@@ -12,7 +12,6 @@ import { redactForLLM } from "../../audit/dlp-filter.js";
 import { estimateMessagesTokens } from "../../engine/auto-compact.js";
 import type { GenericMessage } from "../../engine/llm/types.js";
 import { userContentText } from "../../engine/llm/types.js";
-import { stubMarkedToolResults } from "../../engine/wire-serialize.js";
 import { serializeHistoryMessage } from "../../shared/chat-history.js";
 import type { ConversationLoop, TurnResult } from "../../engine/conversation-loop.js";
 import { parseImportedTriggerEnvelope } from "../../shared/overlay-trigger-source.js";
@@ -25,6 +24,7 @@ import type { IpcDeps } from "../types.js";
 import { sendToWebContents } from "../safe-send.js";
 import { createLogger } from "../../lib/logger.js";
 import { readDiffSidecar, isSafeId } from "../../tools/write-diff-cache.js";
+import { isToolResultStubContent } from "../../shared/tool-result-stub.js";
 import {
   createStreamingFilter,
   stripSuggestedReplies,
@@ -848,14 +848,14 @@ export function registerChatHandlers(deps: IpcDeps): void {
     }
     let slice = current.slice(0, upto);
     slice = removeOrphanToolUse(slice);
-    // JSONL 영속화 직전 marked tool_result 를 stub 으로 변환 — fork
-    // path 도 동일 boundary 통과해야 disk 무한 성장 방지 일관 유지.
     if (current.length > 0) {
-      await memoryManager.saveSession(conversationLoop.getSessionId(), stubMarkedToolResults(current));
+      await memoryManager.saveSession(conversationLoop.getSessionId(), current);
     }
     const newId = crypto.randomUUID();
-    await memoryManager.saveSession(newId, stubMarkedToolResults(slice));
-    const currentMeta = memoryManager.loadSessionMetadata(conversationLoop.getSessionId());
+    const sourceSessionId = conversationLoop.getSessionId();
+    const forkSlice = memoryManager.rehydrateToolResultArtifacts(sourceSessionId, slice) as GenericMessage[];
+    await memoryManager.saveSession(newId, forkSlice);
+    const currentMeta = memoryManager.loadSessionMetadata(sourceSessionId);
     await memoryManager.saveSessionMetadata(newId, {
       sessionKind: currentMeta?.sessionKind ?? conversationLoop.getSessionKind(),
       ...(currentMeta?.routineId ? { routineId: currentMeta.routineId } : {}),
@@ -1172,14 +1172,15 @@ export function registerChatHandlers(deps: IpcDeps): void {
   });
 
   // ─── Verbatim tool_result lazy-load ────────────────────────────────────
-  // Returns the in-memory verbatim content for a compacted tool_result.
-  // Only works for the currently-active session — other sessions have been
-  // stubbed to disk and the verbatim is gone. Returns null when:
+  // Returns the in-memory verbatim content for a compacted or size-capped tool_result.
+  // Only works for the currently-active session; when the active history has
+  // a disk stub, the host attempts to rehydrate it from the file-backed artifact.
+  // Returns null when:
   //   - sessionId does not match the active session
   //   - toolUseId not found in history
-  //   - message has NOT been compacted (meta.compactedAt not set) — callers
-  //     should only request verbatim for compacted (stubbed) tool results
-  //   - message is already a disk stub (content starts with "[tool_result stripped:")
+  //   - message has NOT been compacted or size-capped — callers should only
+  //     request verbatim for stubbed tool results
+  //   - message is a disk stub and no matching artifact is available
   // lineCount is computed here so the renderer never has to split on "\n".
   ipcMain.handle(
     "lvis:chat:get-verbatim-tool-result",
@@ -1195,19 +1196,21 @@ export function registerChatHandlers(deps: IpcDeps): void {
           m.role === "tool_result" && m.toolUseId === toolUseId,
       );
       if (!msg) return null;
-      // only serve verbatim for messages that have been compacted
-      if (msg.meta?.compactedAt === undefined) return null;
       // content is always string on tool_result messages
       const content = msg.content;
       if (typeof content !== "string") return null;
-      // already stub text → verbatim lost
-      if (content.startsWith("[tool_result stripped:")) return null;
+      const artifact = isToolResultStubContent(content)
+        ? memoryManager.loadToolResultArtifact(sessionId, toolUseId)
+        : null;
+      if (!artifact && msg.meta?.compactedAt === undefined && msg.meta?.truncated === undefined) return null;
+      if (msg.meta?.serializedStub === true && isToolResultStubContent(content) && !artifact) return null;
+      const verbatim = artifact?.content ?? content;
       // zero-allocation line count
       let lineCount = 1;
-      for (let i = 0; i < content.length; i++) {
-        if (content.charCodeAt(i) === 10) lineCount++;
+      for (let i = 0; i < verbatim.length; i++) {
+        if (verbatim.charCodeAt(i) === 10) lineCount++;
       }
-      return { content, lineCount };
+      return { content: verbatim, lineCount };
     },
   );
 
