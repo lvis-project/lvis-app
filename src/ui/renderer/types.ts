@@ -20,6 +20,7 @@ import type {
   AssistantContextMenuAction,
   AssistantContextMenuPayload,
 } from "../../shared/assistant-context-menu.js";
+import type { AiProviderPingResult } from "../../shared/ai-provider-ping.js";
 
 // Re-export MCP types for renderer-side consumers (type-only, no main-process runtime)
 export type { McpServerConfig, McpServerConfigDto, McpServerState };
@@ -330,8 +331,12 @@ export type LvisApi = {
    */
   demo: {
     activate: (code: string) => Promise<
-      | { ok: true; vendor: string }
+      | { ok: true; vendor: string; requiresRelaunch?: boolean }
       | { ok: false; error: "invalid-code" | "no-vendor" | "persist-failed" | "unauthorized-frame" }
+    >;
+    relaunchAfterActivation: () => Promise<
+      | { ok: true }
+      | { ok: false; error: "not-armed" | "unauthorized-frame" }
     >;
   };
   /**
@@ -704,6 +709,7 @@ export type LvisApi = {
   getRuntimeCounts: () => Promise<{ tools: number; plugins: number; mcps: number }>;
   getRuntimeEnv: () => Promise<{ platform: string; hostname: string; user: string }>;
   pingMarketplace: () => Promise<{ configured: boolean; online: boolean }>;
+  pingAiProvider: () => Promise<AiProviderPingResult>;
   /**
    * Settings "일반" dashboard host metadata. SoT for `version` is the LVIS
    * project package.json resolved by the main process via

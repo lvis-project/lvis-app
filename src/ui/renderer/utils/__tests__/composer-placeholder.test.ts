@@ -71,15 +71,15 @@ describe("computeComposerPlaceholder", () => {
     ).toBe("질문 입력 (Enter 전송 · Cmd/Ctrl+V 첨부) · /command 사용 가능");
   });
 
-  it("streaming + 활성 chip 이 동시에 있어도 streaming 안내가 우선", () => {
-    // streaming 중에는 user input 자체가 큐에 쌓이므로 chip 비활성 흐름이
-    // 더 명확함 — placeholder 가 빈 문자열로 잠기지 않도록 priority 우선
+  it("streaming + 활성 chip 이 동시에 있으면 추천 UI 가 placeholder 를 숨김", () => {
+    // `suggested_replies` 이벤트가 `done`보다 먼저 도착하므로, streaming
+    // placeholder 를 유지하면 ghost/chip 과 같은 textarea 줄에서 겹쳐 보인다.
     expect(
       computeComposerPlaceholder({
         hasApiKey: true,
         streaming: true,
         suggestedReplies: ACTIVE,
       }),
-    ).toBe("메시지 큐에 추가됩니다 (즉시 인터럽트는 ⌘⏎)");
+    ).toBe("");
   });
 });
