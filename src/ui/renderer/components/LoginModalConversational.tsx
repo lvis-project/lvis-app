@@ -72,8 +72,22 @@ const CHECKLIST_LINES: readonly { mark: string; label: string }[] = Object.freez
   { mark: "⟳", label: "sandbox 준비 중…" },
 ]);
 
-/** Stagger between checklist line reveals (ms). */
-const CHECKLIST_STAGGER_MS = 280;
+/**
+ * Stagger between checklist line reveals (ms). Y1 (pace): increased from
+ * 280ms → 720ms so the user has enough dwell time to read each line before
+ * the next one types on. Korean reading speed ~250 wpm = ~600ms/short
+ * phrase, so 720ms keeps the cursor on a line long enough to register.
+ */
+const CHECKLIST_STAGGER_MS = 720;
+
+/**
+ * Y1 (pace) — extra dwell time AFTER all checklist lines have rendered
+ * and the IPC call has resolved successfully, before the modal closes
+ * and hands off to MemorySeedDialog. Gives the user a beat to see the
+ * "✓ sandbox 준비 완료" confirmation rather than the modal vanishing
+ * the moment auth succeeds.
+ */
+const SUCCESS_DWELL_MS = 1800;
 
 export function LoginModalConversational({
   api,
@@ -92,6 +106,11 @@ export function LoginModalConversational({
   const [userTurnVisible, setUserTurnVisible] = useState(false);
   const [assistantReply, setAssistantReply] = useState(false);
   const [checklistRevealed, setChecklistRevealed] = useState(0);
+  // Y1 — flips true the moment loginMockup resolves OK. The trailing
+  // spinner row swaps to a green ✓ + "sandbox 준비 완료" confirmation
+  // so the user sees an explicit success state before the SUCCESS_DWELL_MS
+  // window elapses and the modal closes.
+  const [successConfirmed, setSuccessConfirmed] = useState(false);
 
   // Reset the conversational flow on every open so a re-entry starts
   // from the cold "어떤 방식으로 시작할까요?" prompt.
@@ -100,6 +119,7 @@ export function LoginModalConversational({
       setUserTurnVisible(false);
       setAssistantReply(false);
       setChecklistRevealed(0);
+      setSuccessConfirmed(false);
       setError(null);
     }
   }, [open]);
@@ -120,6 +140,10 @@ export function LoginModalConversational({
    * Demo chip handler — fires `loginMockup` with the hard-coded demo
    * credentials directly. The user never types a password; the chip
    * IS the submit. Errors surface in the inline error region.
+   *
+   * Y1 (pace) — on success, dwell for SUCCESS_DWELL_MS BEFORE handing
+   * off to the next dialog so the user sees the "✓ sandbox 준비 완료"
+   * confirmation rather than the modal vanishing instantly.
    */
   const activateDemoChip = useCallback(async () => {
     if (submitting) return;
@@ -130,7 +154,7 @@ export function LoginModalConversational({
     // perceived ordering.
     window.setTimeout(() => {
       setAssistantReply(true);
-    }, 120);
+    }, 220);
 
     setSubmitting(true);
     try {
@@ -139,6 +163,13 @@ export function LoginModalConversational({
         password: DEMO_PASSWORD,
       });
       if (result.ok) {
+        // Y1 — flip the trailing spinner line to a ✓ confirmation
+        // (state lives in `successConfirmed`), then dwell so the user
+        // actually sees "sandbox 준비 완료" before the modal closes.
+        setSuccessConfirmed(true);
+        await new Promise<void>((resolve) =>
+          window.setTimeout(resolve, SUCCESS_DWELL_MS),
+        );
         onSuccess?.(result.vendor, result);
         onOpenChange(false);
         return;
@@ -291,10 +322,12 @@ export function LoginModalConversational({
         {/* F2 — User-side bubble + assistant follow-up + type-on
             checklist. The blocks reveal only after the demo chip is
             selected so the cold-open mockup retains its original
-            "어떤 방식으로 시작할까요?" framing. */}
+            "어떤 방식으로 시작할까요?" framing. Y2 — slide-up fade-in
+            keyframes (`lvis-anim-slide-up`) make the conversational
+            turns land smoothly instead of popping. */}
         {userTurnVisible && (
           <div
-            className="flex justify-end pt-2"
+            className="flex justify-end pt-2 lvis-anim-slide-up"
             data-testid="login-modal:user-turn"
           >
             <p className="rounded-lg rounded-tr-sm bg-primary/15 px-3 py-2 text-[12.5px] leading-relaxed text-foreground">
@@ -303,7 +336,10 @@ export function LoginModalConversational({
           </div>
         )}
         {assistantReply && (
-          <div className="flex gap-2" data-testid="login-modal:assistant-reply">
+          <div
+            className="flex gap-2 lvis-anim-slide-up"
+            data-testid="login-modal:assistant-reply"
+          >
             <div
               className="grid size-7 shrink-0 place-items-center rounded-md bg-primary text-[11px] text-primary-foreground"
               aria-hidden="true"
@@ -322,19 +358,39 @@ export function LoginModalConversational({
                   {CHECKLIST_LINES.slice(0, checklistRevealed).map((line, i) => {
                     const isLast = i === checklistRevealed - 1;
                     const isSpinner = line.mark === "⟳";
+                    // Y1 — once success is confirmed, flip the trailing
+                    // spinner glyph to ✓ and re-label to "sandbox 준비 완료"
+                    // so the user gets an explicit success cue during the
+                    // SUCCESS_DWELL_MS window before the modal hands off.
+                    const isFinalSpinner = isSpinner && isLast;
+                    const mark =
+                      isFinalSpinner && successConfirmed ? "✓" : line.mark;
+                    const label =
+                      isFinalSpinner && successConfirmed
+                        ? "sandbox 준비 완료"
+                        : line.label;
+                    const isCheckmark =
+                      mark === "✓" || (isFinalSpinner && successConfirmed);
                     return (
-                      <div key={line.label}>
+                      <div
+                        key={line.label}
+                        // Y3 — fade-in each newly-revealed checklist line
+                        // so the cursor visually "carries" from row to
+                        // row instead of resetting with each reveal. Uses
+                        // the shared `lvis-anim-slide-up` keyframe so
+                        // prefers-reduced-motion collapses it to an opacity
+                        // fade automatically (see src/styles.css §290).
+                        className="lvis-anim-slide-up"
+                      >
                         <span
                           className={
-                            isSpinner
-                              ? "text-primary"
-                              : "text-success"
+                            isCheckmark ? "text-success" : "text-primary"
                           }
                         >
-                          {line.mark}
+                          {mark}
                         </span>{" "}
-                        {line.label}
-                        {isLast && lastLineIsSpinner ? (
+                        {label}
+                        {isLast && lastLineIsSpinner && !successConfirmed ? (
                           <span
                             data-testid="login-modal:cursor"
                             className="ml-1 inline-block animate-pulse text-primary"
