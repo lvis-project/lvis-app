@@ -160,8 +160,34 @@ export type AppSettings = {
     idlePreferenceRefresh?: boolean;
     /** #893 — `true` after the user has dismissed the first-boot onboarding. */
     onboardingCompleted?: boolean;
+    /**
+     * O-X1 Live Auto-play — demo-only flag. See main-process SOT in
+     * `src/data/settings-store.ts` `FeatureFlags.demoAutoplayEnabled` and
+     * the proposal `docs/architecture/proposals/live-autoplay.md` §7.
+     */
+    demoAutoplayEnabled?: boolean;
+    /**
+     * Tutorial-X3 — rotation index into the `DEMO_SCRIPTS` catalog. Each
+     * activation picks `DEMO_SCRIPTS[index % len]` then bumps the index.
+     * See `scripts-registry.ts` for the catalog and `pickScript`/
+     * `nextRotationIndex` helpers.
+     */
+    demoAutoplayRotationIndex?: number;
   };
 };
+
+/**
+ * Tutorial-D — Discovery Swipe outcome. Mirrors `TutorialAction` from
+ * the host-side `src/main/tutorial-store.ts`. Renderer keeps a separate
+ * literal so a host-only refactor never leaks node imports into the
+ * renderer bundle; values must stay in lockstep.
+ */
+export type TutorialAction = "liked" | "disliked" | "skipped" | "undone";
+export interface TutorialPreferences {
+  liked: string[];
+  disliked: string[];
+  lastShownAt: string;
+}
 
 export type IpcErrorResult = { ok: false; error: string; message?: string };
 export type SettingsUpdateResult = AppSettings | IpcErrorResult;
@@ -264,6 +290,151 @@ export type LvisApi = {
       }
     | { ok: false; error: string }
   >;
+  /**
+   * Tutorial-X1 — Auth progress IPC. The host emits real progress events
+   * for each step of the `loginMockup` flow on `lvis:auth:progress` so the
+   * LoginModal checklist animates against actual main-process work, not a
+   * renderer `setTimeout` illusion. `onProgress` returns the unsubscribe
+   * function. Event payloads use kebab-case English `step` + `status`
+   * codes (CLAUDE.md error-language rule).
+   */
+  auth: {
+    onProgress: (
+      handler: (event: {
+        step:
+          | "credentials-validating"
+          | "llm-key-issuing"
+          | "sandbox-preparing"
+          | "complete";
+        status: "running" | "done" | "failed";
+        vendor?: string;
+        error?: string;
+      }) => void,
+    ) => () => void;
+  };
+  /**
+   * Demo activation bridge. Wraps the `lvis:demo:activate` IPC channel
+   * exposed by the preload. The renderer's LoginModal calls this from the
+   * activation-input sub-state (chip 1 → paste code → submit) before the
+   * existing `loginMockup` chain runs. The main process decrypts the
+   * activation string back into the original `.env.demo` payload, persists
+   * it under `~/.lvis/secrets/.env.demo`, and injects the keys so the
+   * downstream auth handler can see them.
+   *
+   * Error codes are kebab-case English; the renderer translates each into
+   * a Korean message in the LoginModal.
+   */
+  demo: {
+    activate: (code: string) => Promise<
+      | { ok: true; vendor: string }
+      | { ok: false; error: "invalid-code" | "no-vendor" | "persist-failed" | "unauthorized-frame" }
+    >;
+  };
+  /**
+   * Tutorial-C — SpotlightTour state + broadcast bridge. The host persists
+   * the tour state under `~/.lvis/onboarding/tour-state.json` (Storage
+   * Namespace per Feature). `tour.start` fans out to every open window
+   * so a Settings → "도움말" button pressed in the main window also
+   * launches the tour inside a detached pane. Tutorial-D's Discovery
+   * Swipe dialog also calls `tour.start` after the deck empties so the
+   * Spotlight engine is the single tour entry point.
+   */
+  tour: {
+    getState: () => Promise<
+      | {
+          ok: true;
+          state: {
+            lastSeenScenario: string | null;
+            completedScenarios: string[];
+            dismissedAt: string | null;
+          };
+        }
+      | { ok: false; error: string; message: string }
+    >;
+    markComplete: (scenarioId: string) => Promise<
+      | {
+          ok: true;
+          state: {
+            lastSeenScenario: string | null;
+            completedScenarios: string[];
+            dismissedAt: string | null;
+          };
+        }
+      | { ok: false; error: string; message: string }
+    >;
+    dismiss: (scenarioId: string) => Promise<
+      | {
+          ok: true;
+          state: {
+            lastSeenScenario: string | null;
+            completedScenarios: string[];
+            dismissedAt: string | null;
+          };
+        }
+      | { ok: false; error: string; message: string }
+    >;
+    start: (scenarioId: string) => Promise<
+      | { ok: true; scenarioId: string }
+      | { ok: false; error: string; message: string }
+    >;
+    onStart: (handler: (payload: { scenarioId: string }) => void) => () => void;
+  };
+  /**
+   * Tutorial-D — Discovery Swipe IPC surface. The host persists the
+   * outcome under `~/.lvis/tutorial/preferences.json`; reads never throw
+   * and fall back to the empty default. `tutorialOpen` broadcasts the
+   * open signal so every window mounts the dialog without an app
+   * restart. The dialog itself dispatches the final scenario via
+   * Tutorial-C's `tour.start` so the Spotlight engine remains the one
+   * place that owns the tour entry contract.
+   */
+  tutorialGetPreferences: () => Promise<
+    | { ok: true; prefs: TutorialPreferences }
+    | { ok: false; error: string; message: string }
+  >;
+  tutorialRecord: (
+    payload: { cardId: string; action: TutorialAction },
+  ) => Promise<
+    | { ok: true; prefs: TutorialPreferences }
+    | { ok: false; error: string; message: string }
+  >;
+  tutorialOpen: () => Promise<
+    | { ok: true }
+    | { ok: false; error: string; message: string }
+  >;
+  tutorialShowContextMenu: () => Promise<
+    | { ok: true }
+    | { ok: false; error: string; message: string }
+  >;
+  /**
+   * Tutorial-X2 — install a plugin from the Discovery Swipe / Memory Seed
+   * recommendation flows. Delegates to the canonical `lvis:plugins:install`
+   * channel so the tutorial path reuses the entire marketplace install
+   * pipeline (download → verify → register → restart broadcasts) rather
+   * than forking a tutorial-only install loop. Error codes are
+   * kebab-case English; the renderer translates for the user.
+   */
+  tutorialInstallPlugin: (pluginId: string) => Promise<
+    | { ok: true; pluginId: string }
+    | { ok: false; error: string; message: string }
+  >;
+  /**
+   * Tutorial-X4 — write the synthesized onboarding context to
+   * `~/.lvis/onboarding/onboarding-context.md`. The host's
+   * SystemPromptBuilder picks this up as section id=9.86 "User Onboarding
+   * Context" on every subsequent turn (until the file is cleared). The
+   * renderer wizard composes a short markdown block (호칭 + 자기소개 +
+   * installed plugin ids + last completed walkthrough) and calls this
+   * once after `MemorySeedDialog` dismissal. Capped server-side at 4 KB.
+   */
+  onboardingContextSet: (content: string) => Promise<
+    | { ok: true }
+    | { ok: false; error: string; message: string }
+  >;
+  onTutorialOpen: (handler: (payload: { source: string }) => void) => () => void;
+  onTutorialPreferencesChanged: (
+    handler: (prefs: TutorialPreferences) => void,
+  ) => () => void;
   openSettingsWindow: (initialTab?: string) => Promise<{ ok: true; windowId: number } | { ok: false; error: string }>;
   notifySettingsWindowSaved: () => Promise<{ ok: true } | { ok: false; error: string }>;
   onSettingsWindowSaved: (handler: () => void) => () => void;
@@ -529,6 +700,23 @@ export type LvisApi = {
   getRuntimeCounts: () => Promise<{ tools: number; plugins: number; mcps: number }>;
   getRuntimeEnv: () => Promise<{ platform: string; hostname: string; user: string }>;
   pingMarketplace: () => Promise<{ configured: boolean; online: boolean }>;
+  /**
+   * Settings "일반" dashboard host metadata. SoT for `version` is the LVIS
+   * project package.json resolved by the main process via
+   * `app.getAppPath()`; stack fields (`electronVersion` / `nodeVersion` /
+   * `chromeVersion` / `v8Version`) come from `process.versions`. The
+   * renderer never duplicates these values.
+   */
+  getAppInfo: () => Promise<{
+    version: string;
+    electronVersion: string;
+    nodeVersion: string;
+    chromeVersion: string;
+    v8Version: string;
+    platform: NodeJS.Platform;
+    arch: string;
+    userDataPath: string;
+  }>;
   registerPluginWebview: (payload: { webContentsId: number; pluginId: string; entryUrl: string }) => Promise<{ ok: boolean; error?: string }>;
   onViewActivate: (h: (k: string) => void) => () => void;
   getUsageSummary: (days?: number) => Promise<UsageSummaryShape>;

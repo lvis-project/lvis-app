@@ -1,0 +1,230 @@
+/**
+ * Demo activation IPC handler tests.
+ *
+ * Verifies the full round-trip:
+ *   1. Renderer paste of a valid activation string → decrypt → persist →
+ *      env inject → recapture of demo credentials.
+ *   2. Invalid code / tampered ciphertext → `invalid-code` error.
+ *   3. Payload missing `LVIS_DEMO_VENDOR` → `no-vendor` error.
+ *   4. Filesystem write failure → `persist-failed` error.
+ *   5. Empty/whitespace input → `invalid-code` (renderer-friendly).
+ *
+ * The codec module is used as-is — round-tripping through the real
+ * encrypt/decrypt path catches any drift between the two sides without
+ * mocking the cipher (and without baking a fragile golden string into
+ * the test fixture).
+ */
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, rmSync, readFileSync, existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+const handlers = new Map<string, (...args: unknown[]) => unknown>();
+
+vi.mock("electron", () => ({
+  ipcMain: {
+    handle: vi.fn((channel: string, fn: (...args: unknown[]) => unknown) => {
+      handlers.set(channel, fn);
+    }),
+  },
+}));
+
+function invoke(channel: string, ...args: unknown[]): Promise<unknown> {
+  const fn = handlers.get(channel);
+  if (!fn) throw new Error(`No handler registered for: ${channel}`);
+  return Promise.resolve(
+    fn(
+      { frameId: 0, processId: 0, frame: { url: "lvis://app" } } as never,
+      ...args,
+    ),
+  );
+}
+
+function makeDeps() {
+  return {
+    auditLogger: { log: vi.fn() },
+  };
+}
+
+const SAMPLE_ENV = [
+  "LVIS_DEMO_ENABLED=1",
+  "LVIS_DEMO_VENDOR=azure-foundry",
+  "LVIS_DEMO_KEY_AZURE_FOUNDRY=sk-activated-key",
+  "LVIS_DEMO_BASEURL_AZURE_FOUNDRY=https://example.openai.azure.com/openai/v1/",
+  "",
+].join("\n");
+
+const ORIGINAL_ENV = { ...process.env };
+let tempHome: string;
+
+beforeEach(() => {
+  handlers.clear();
+  tempHome = mkdtempSync(join(tmpdir(), "lvis-demo-activate-test-"));
+  process.env.LVIS_HOME = tempHome;
+  // Wipe inherited LVIS_DEMO_* so tests are isolated.
+  for (const k of Object.keys(process.env)) {
+    if (k.startsWith("LVIS_DEMO_")) delete process.env[k];
+  }
+  vi.resetModules();
+});
+
+afterEach(() => {
+  rmSync(tempHome, { recursive: true, force: true });
+  process.env = { ...ORIGINAL_ENV };
+});
+
+async function loadDemoModule() {
+  const codec = await import("../../../main/demo-activation-codec.js");
+  const credsMod = await import("../../../main/demo-credentials.js");
+  credsMod.resetDemoCredentialsForTesting();
+  const demoMod = await import("../demo.js");
+  return { codec, credsMod, demoMod };
+}
+
+describe("lvis:demo:activate — happy path", () => {
+  it("decrypts a valid code, persists the file, and injects the env", async () => {
+    const { codec, credsMod, demoMod } = await loadDemoModule();
+    const code = codec.encryptActivationPayload(SAMPLE_ENV);
+
+    const deps = makeDeps();
+    demoMod.registerDemoHandlers(deps as never);
+
+    const result = (await invoke("lvis:demo:activate", { code })) as {
+      ok: true;
+      vendor: string;
+    };
+    expect(result.ok).toBe(true);
+    expect(result.vendor).toBe("azure-foundry");
+
+    // File persisted under ~/.lvis/secrets/.env.demo (via LVIS_HOME override).
+    const persisted = readFileSync(
+      join(tempHome, "secrets", ".env.demo"),
+      "utf8",
+    );
+    expect(persisted).toBe(SAMPLE_ENV);
+
+    // process.env got injected.
+    expect(process.env.LVIS_DEMO_VENDOR).toBe("azure-foundry");
+    expect(process.env.LVIS_DEMO_KEY_AZURE_FOUNDRY).toBe("sk-activated-key");
+
+    // demo-credentials recapture observed the new keys.
+    expect(credsMod.isDemoEnabled()).toBe(true);
+    expect(credsMod.getDemoActiveVendor()).toBe("azure-foundry");
+    const cfg = credsMod.getDemoVendorConfig("azure-foundry");
+    expect(cfg?.apiKey).toBe("sk-activated-key");
+    expect(cfg?.baseUrl).toBe("https://example.openai.azure.com/openai/v1/");
+
+    // Audit row written.
+    expect(deps.auditLogger.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "info",
+        input: expect.stringContaining("[demo-activation] activated"),
+      }),
+    );
+  });
+});
+
+describe("lvis:demo:activate — invalid-code", () => {
+  it("rejects an empty string", async () => {
+    const { demoMod } = await loadDemoModule();
+    const deps = makeDeps();
+    demoMod.registerDemoHandlers(deps as never);
+    const result = await invoke("lvis:demo:activate", { code: "" });
+    expect(result).toEqual({ ok: false, error: "invalid-code" });
+  });
+
+  it("rejects a non-string payload", async () => {
+    const { demoMod } = await loadDemoModule();
+    const deps = makeDeps();
+    demoMod.registerDemoHandlers(deps as never);
+    const result = await invoke("lvis:demo:activate", { code: 42 });
+    expect(result).toEqual({ ok: false, error: "invalid-code" });
+  });
+
+  it("rejects a code without the LVIS-DEMO:v1: prefix", async () => {
+    const { demoMod } = await loadDemoModule();
+    const deps = makeDeps();
+    demoMod.registerDemoHandlers(deps as never);
+    const result = await invoke("lvis:demo:activate", {
+      code: "not-a-valid-activation-string",
+    });
+    expect(result).toEqual({ ok: false, error: "invalid-code" });
+  });
+
+  it("rejects a tampered ciphertext", async () => {
+    const { codec, demoMod } = await loadDemoModule();
+    const original = codec.encryptActivationPayload(SAMPLE_ENV);
+    const idx = original.length - 5;
+    const tampered =
+      original.slice(0, idx) +
+      (original[idx] === "a" ? "b" : "a") +
+      original.slice(idx + 1);
+    const deps = makeDeps();
+    demoMod.registerDemoHandlers(deps as never);
+    const result = await invoke("lvis:demo:activate", { code: tampered });
+    expect(result).toEqual({ ok: false, error: "invalid-code" });
+    // File MUST NOT be persisted on tamper.
+    expect(existsSync(join(tempHome, "secrets", ".env.demo"))).toBe(false);
+  });
+
+  it("emits a warn audit row for invalid codes", async () => {
+    const { demoMod } = await loadDemoModule();
+    const deps = makeDeps();
+    demoMod.registerDemoHandlers(deps as never);
+    await invoke("lvis:demo:activate", { code: "garbage" });
+    expect(deps.auditLogger.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "warn",
+        input: expect.stringContaining("invalid-code"),
+      }),
+    );
+  });
+});
+
+describe("lvis:demo:activate — no-vendor", () => {
+  it("rejects a payload missing LVIS_DEMO_VENDOR", async () => {
+    const { codec, demoMod } = await loadDemoModule();
+    const payloadWithoutVendor = "LVIS_DEMO_ENABLED=1\nLVIS_DEMO_KEY_OPENAI=k\n";
+    const code = codec.encryptActivationPayload(payloadWithoutVendor);
+
+    const deps = makeDeps();
+    demoMod.registerDemoHandlers(deps as never);
+
+    const result = await invoke("lvis:demo:activate", { code });
+    expect(result).toEqual({ ok: false, error: "no-vendor" });
+    // No persistence on validation failure.
+    expect(existsSync(join(tempHome, "secrets", ".env.demo"))).toBe(false);
+  });
+});
+
+describe("lvis:demo:activate — persist-failed audit", () => {
+  it("emits a warn audit row when disk persistence fails (M3)", async () => {
+    // critic MAJOR M3 (2026-05-19): persist-failed branch previously
+    // returned the error without writing an audit row, leaving partial-
+    // state activations invisible to forensic timelines. This regression
+    // guard asserts symmetry with the invalid-code audit row.
+    const { codec, demoMod } = await loadDemoModule();
+    const code = codec.encryptActivationPayload(SAMPLE_ENV);
+
+    // Force the persist path to fail by pointing LVIS_HOME at a regular file
+    // so mkdir(<LVIS_HOME>/secrets, {recursive:true}) inside writeEnvDemoFile
+    // raises ENOTDIR. lvisHome() reads LVIS_HOME and returns it verbatim;
+    // the handler then resolves <LVIS_HOME>/secrets/.env.demo.
+    const { writeFileSync } = await import("node:fs");
+    const blockingFile = join(tempHome, "blocked-lvis-home");
+    writeFileSync(blockingFile, "not-a-dir");
+    process.env.LVIS_HOME = blockingFile;
+
+    const deps = makeDeps();
+    demoMod.registerDemoHandlers(deps as never);
+
+    const result = await invoke("lvis:demo:activate", { code });
+    expect(result).toEqual({ ok: false, error: "persist-failed" });
+    expect(deps.auditLogger.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "warn",
+        input: expect.stringContaining("persist-failed"),
+      }),
+    );
+  });
+});

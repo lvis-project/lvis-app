@@ -58,7 +58,12 @@ const DEFAULT_SETTINGS = {
   webSearch: { provider: "none" },
   routine: {},
   privacy: { piiRedactEnabled: false },
-  features: { idlePreferenceRefresh: false },
+  // Z onboarding chain — mark the seed user as already past onboarding so
+  // the first-boot probe dispatches `probe-skip` and the chain advances
+  // straight to `done`. Without this, the chain stays at the new default
+  // initial stage ("showcase") and masks the ChatView empty-state branch
+  // that several tests rely on.
+  features: { idlePreferenceRefresh: false, onboardingCompleted: true },
 };
 
 const DEFAULT_USAGE = {

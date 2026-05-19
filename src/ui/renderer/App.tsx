@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { debugLog, isDebugStreamEnabled } from "../../lib/debug-stream.js";
 import {
   composeImportedTriggerOutgoing,
@@ -15,12 +15,25 @@ import { getApi, getPluginViewLabel, toViewKey } from "./api-client.js";
 import type { PluginEntry } from "./components/PluginGridButton.js";
 import { ApprovalDialog } from "./dialogs/ApprovalDialog.js";
 import { DeferredQueueDialog } from "./dialogs/DeferredQueueDialog.js";
-import { OnboardingDialog } from "./components/OnboardingDialog.js";
+import { TutorialDialog } from "./dialogs/TutorialDialog.js";
+import { MemorySeedDialog } from "./dialogs/MemorySeedDialog.js";
+import { SpotlightTour } from "./components/SpotlightTour.js";
+import { PostTourFirstTask } from "./onboarding/PostTourFirstTask.js";
+import { ScenarioShowcase } from "./onboarding/ScenarioShowcase.js";
+import { WelcomeQuestion } from "./onboarding/WelcomeQuestion.js";
+import { PluginShowcase } from "./onboarding/PluginShowcase.js";
+import {
+  initialOnboardingChainState,
+  onboardingChainReducer,
+  type OnboardingChainStage,
+} from "./onboarding/onboarding-chain.js";
 import { LoginModal } from "./components/LoginModal.js";
 import { LLM_VENDORS } from "../../shared/llm-vendor-defaults.js";
 import { buildQuickActions } from "./components/command-actions.js";
 import { MainToolbar } from "./MainToolbar.js";
 import { useAppUpdate } from "./hooks/use-app-update.js";
+import { useDemoAutoplay } from "./hooks/use-demo-autoplay.js";
+import { DemoAutoplayView } from "./components/DemoAutoplayView.js";
 import { DevToolsPanel } from "./components/DevToolsPanel.js";
 import { MainContent } from "./MainContent.js";
 import { StatusBar } from "./components/StatusBar.js";
@@ -104,12 +117,50 @@ export function App() {
 
   // App state
   const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
-  // #893 — onboarding + login dialog state. The onboarding effect below
-  // probes `getSettings()` once on boot; if no vendor has a key *and* the
-  // user has not previously dismissed onboarding, the dialog opens.
-  const [onboardingOpen, setOnboardingOpen] = useState(false);
-  const [appLoginOpen, setAppLoginOpen] = useState(false);
+  // Z onboarding chain (2026-05-19) — replaces the previous pair of
+  // `onboardingOpen` + `appLoginOpen` flags with an explicit reducer
+  // that drives every stage of the first-boot funnel:
+  //   idle → showcase → login → welcome → memory → tour → plugins → done
+  // The reducer keeps the JSX render branches small (each dialog
+  // mounts only when its stage matches) and prevents the race where
+  // multiple Radix Dialogs were mounted at once (#982/#990/#997).
+  //
+  // Initial state is `idle`. The boot probe (below) classifies the
+  // boot exactly once and dispatches either `probe-start` → showcase
+  // (fresh install, no key, onboarding incomplete) or `probe-skip` →
+  // done (returning user). Starting at `idle` instead of `showcase`
+  // eliminates the closet-flash race where a true fresh-state boot
+  // briefly shows the intro Dialog and then collapses (#1014).
+  const [chainState, dispatchChain] = useReducer(
+    onboardingChainReducer,
+    initialOnboardingChainState,
+  );
+  const chainStage: OnboardingChainStage = chainState.stage;
+  /**
+   * ScenarioShowcase carry — which card the user clicked in the first
+   * step. Threaded into MemorySeed recommendations and PluginShowcase
+   * ordering so the chain is personalised by the user's first choice.
+   * `null` means the user reached the chain via skip / returning-user
+   * paths and downstream stages should use their default ordering.
+   */
+  const selectedScenarioId: string | null = chainState.selectedScenarioId;
+  // Display name surfaced inside WelcomeQuestion — best-effort from the
+  // host's persisted memory seed. Empty string when unknown, the
+  // greeting card falls back to a neutral phrase.
+  const [welcomeDisplayName, setWelcomeDisplayName] = useState<string>("");
   const [deferredQueueOpen, setDeferredQueueOpen] = useState(false);
+  // Tutorial-D — Discovery Swipe dialog open state. Main process
+  // broadcasts `lvis:tutorial:open` from the menu / chat context menu,
+  // and the renderer flips this flag to mount the dialog on top of any
+  // active surface.
+  const [tutorialOpen, setTutorialOpen] = useState(false);
+  // Z chain — `tourCompleted` is derived from the chain reducer. The
+  // PostTourFirstTask still receives a boolean prop so its existing
+  // contract is unchanged; downstream consumers see `true` only after
+  // the SpotlightTour reaches its last step (mapped to chain stage
+  // "plugins" or beyond).
+  const tourCompleted =
+    chainStage === "plugins" || chainStage === "done";
   const [activeView, setActiveView] = useState("home");
   const [commandPopoverOpen, setCommandPopoverOpen] = useState(false);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
@@ -230,6 +281,14 @@ export function App() {
         })
       : () => {};
     return () => { unsubShow(); unsubDismiss(); };
+  }, [api]);
+
+  // Tutorial-D — listen for the broadcast emitted by the menu builder
+  // and the chat empty-area context menu. Flipping `tutorialOpen` true
+  // mounts the Discovery Swipe dialog from anywhere in the app.
+  useEffect(() => {
+    if (typeof api.onTutorialOpen !== "function") return;
+    return api.onTutorialOpen(() => setTutorialOpen(true));
   }, [api]);
 
   // Plugin overlay primary action handler (user confirm → main chat insert).
@@ -561,33 +620,53 @@ export function App() {
   }, [activeView, activePluginView]);
   const checkApiKey = useCallback(async () => { const h = await api.hasApiKey(); setHasApiKey(h); return h; }, [api]);
 
-  // #893 — First-boot onboarding probe. Runs once on mount; opens the
-  // onboarding dialog when (a) no vendor has a persisted API key AND (b)
-  // the user has not previously dismissed onboarding. Both choices flip
-  // `features.onboardingCompleted = true` so subsequent boots skip the
-  // dialog even if the user closes Settings without saving a key.
+  // Z onboarding chain — first-boot probe.
+  //
+  // Runs once on mount: when the user already has a vendor key or the
+  // onboardingCompleted flag is set, the chain stays at `idle` and
+  // resolves directly to `done`. Otherwise the reducer advances to
+  // `showcase` which mounts the ScenarioShowcase intro screen. All
+  // subsequent transitions are driven by user actions on the in-chain
+  // dialogs (NOT by additional IPC probes), so the funnel is fully
+  // deterministic and easy to reason about.
+  const firstBootProbedRef = useRef(false);
   useEffect(() => {
+    if (firstBootProbedRef.current) return;
+    firstBootProbedRef.current = true;
     let cancelled = false;
     void (async () => {
       try {
+        // Populate `hasApiKey` state up-front so the downstream
+        // `effectiveHasApiKey` mask can resolve to a concrete boolean
+        // the moment the chain advances to `done`. Without this the
+        // boot probe only dispatched chain events; `hasApiKey` stayed
+        // `null` until the user opened+saved Settings, producing the
+        // "로그인된 척" race (#1014 tracer Stage B).
+        void checkApiKey();
         const settings = await api.getSettings();
         if (cancelled) return;
-        if (settings.features?.onboardingCompleted === true) return;
+        if (settings.features?.onboardingCompleted === true) {
+          dispatchChain({ type: "probe-skip" });
+          return;
+        }
         const anyKey = await Promise.all(
           LLM_VENDORS.map((v) => api.hasApiKey(v).catch(() => false)),
         );
         if (cancelled) return;
-        if (anyKey.some(Boolean)) return;
-        // #893 — top-level login wraps vendor selection; the LoginModal
-        // backend decides the vendor (LVIS_DEMO_VENDOR), so we no longer
-        // need to seed an onboarding vendor here.
-        setOnboardingOpen(true);
+        if (anyKey.some(Boolean)) {
+          // Existing-install flow — skip the whole Z chain so returning
+          // users are never prompted to re-seed identity.
+          dispatchChain({ type: "probe-skip" });
+          return;
+        }
+        dispatchChain({ type: "probe-start" });
       } catch {
         // Probe failure is non-fatal — chat still works once a key exists.
+        dispatchChain({ type: "probe-skip" });
       }
     })();
     return () => { cancelled = true; };
-  }, [api]);
+  }, [api, checkApiKey]);
 
   const markOnboardingCompleted = useCallback(async () => {
     try {
@@ -597,6 +676,73 @@ export function App() {
       // current session even if the disk write fails.
     }
   }, [api]);
+
+  // Z onboarding chain — persist completion + auto-trigger SpotlightTour.
+  // Side-effects driven by the reducer state:
+  //   - tour stage:    fan the host's tour broadcast so SpotlightTour
+  //                    mounts the first-boot scenario without depending
+  //                    on MemorySeedDialog firing the trigger itself.
+  //   - done stage:    flip `features.onboardingCompleted=true` once so
+  //                    the next boot skips the entire chain (idempotent
+  //                    via the markOnboardingCompleted helper above).
+  //
+  // Both side-effects are guarded by a per-run ref so React 18 StrictMode's
+  // double-invoked dev-mode effects (mount → cleanup → mount) cannot
+  // broadcast `tour.start` twice — without the guard the second mount
+  // re-fires the IPC, which re-enters the SpotlightTour subscriber and
+  // visibly resets the scenario to step 0 ("스팟하이라이트 시퀀스가 2번 노출"
+  // — user report 2026-05-19). The ref also protects against incidental
+  // re-renders that change `api` / `markOnboardingCompleted` while
+  // `chainStage === "tour"` stays pinned.
+  const chainCompletionPersistedRef = useRef(false);
+  const chainTourBroadcastRef = useRef(false);
+  useEffect(() => {
+    if (chainStage === "tour") {
+      if (chainTourBroadcastRef.current) return;
+      chainTourBroadcastRef.current = true;
+      try {
+        void api.tour.start("first-boot-essentials");
+      } catch {
+        // tour.start failure is non-fatal — user can still reach the
+        // PluginShowcase via the SpotlightTour onComplete callback path
+        // by pressing 다음 from within the tour.
+      }
+      return;
+    }
+    if (chainStage === "done" && !chainCompletionPersistedRef.current) {
+      chainCompletionPersistedRef.current = true;
+      void markOnboardingCompleted();
+    }
+  }, [api, chainStage, markOnboardingCompleted]);
+
+  // Live Auto-play (proposal: docs/architecture/proposals/live-autoplay.md).
+  // Activates for returning users (onboardingCompleted=true) when
+  // `LVIS_DEMO_VENDOR` env is set OR when the user explicitly opts in via
+  // `features.demoAutoplayEnabled = true`. In packaged production builds
+  // without the env var this is a dead path. On a fresh install the demo
+  // is gated behind onboarding so the ScenarioShowcase chain is always
+  // shown first — see `shouldActivateDemoAutoplay` (engine/demo-autoplay/
+  // types.ts §7) for the activation truth table.
+  const demoAutoplay = useDemoAutoplay(api);
+  // When the demo is active we collapse the rest of the Z chain — the demo
+  // re-engages a returning user and reasserts onboardingCompleted when it
+  // terminates. Exceptions:
+  //   - `idle` / `done`: no chain to collapse.
+  //   - `showcase`: the user has started seeing the ScenarioShowcase
+  //     intro. Demo MUST NOT yank it out from under them — if both
+  //     somehow fired together (e.g. flag flipped mid-boot), we keep the
+  //     showcase visible and let the demo abort path retire itself when
+  //     the user dismisses or completes showcase.
+  useEffect(() => {
+    if (
+      demoAutoplay.turn &&
+      chainStage !== "done" &&
+      chainStage !== "idle" &&
+      chainStage !== "showcase"
+    ) {
+      dispatchChain({ type: "force-finish" });
+    }
+  }, [demoAutoplay.turn, chainStage]);
   const vendorSupportsThinking = useMemo(() => vendorSupportsThinkingShared(llmVendor, llmModel), [llmVendor, llmModel]);
   const onOpenSettings = useCallback((tab = "llm") => {
     void api.openSettingsWindow(tab);
@@ -608,6 +754,59 @@ export function App() {
       void refreshLlmSettings();
     });
   }, [api, checkApiKey, refreshLlmSettings]);
+
+  // Tutorial-C SpotlightTour trigger (PR #983 follow-up). ⌘+Shift+/ ("⌘?")
+  // is the canonical "help" shortcut on macOS; on Windows/Linux Ctrl+Shift+/
+  // serves the same role. The handler fires `api.tour.start` which fans the
+  // `lvis:tour:start` IPC broadcast out to every open window — including
+  // detached panes — so the SpotlightTour component (always mounted in
+  // App.tsx) flips on. Guarded against open dialogs so the shortcut never
+  // races a modal interaction.
+  //
+  // F4 — demo↔tour mutex: when the Live Auto-play demo is mid-turn the
+  // shortcut is a no-op. The Spotlight engine would otherwise paint a
+  // backdrop on top of the demo overlay, breaking the scripted flow.
+  // We capture the demo turn in a ref so the handler stays stable, and
+  // mirror the flag onto `document.body[data-demo-active]` so the
+  // SpotlightTour component (which listens to IPC `tour:start` broadcasts
+  // independent of this shortcut) can also self-guard.
+  const demoActiveRef = useRef<boolean>(false);
+  useEffect(() => {
+    demoActiveRef.current = demoAutoplay.turn !== null;
+    if (typeof document !== "undefined") {
+      if (demoActiveRef.current) {
+        document.body.setAttribute("data-demo-active", "true");
+      } else {
+        document.body.removeAttribute("data-demo-active");
+      }
+    }
+  }, [demoAutoplay.turn]);
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== "?" && e.key !== "/") return;
+      if (!(e.metaKey || e.ctrlKey)) return;
+      if (!e.shiftKey) return;
+      if (e.isComposing) return;
+      if (
+        document.querySelector(
+          '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]',
+        )
+      ) {
+        return;
+      }
+      // F4 — demo↔tour mutex: while the demo is running, swallow the
+      // help-shortcut so the Spotlight tour can't fire on top of the
+      // scripted overlay.
+      if (demoActiveRef.current) {
+        e.preventDefault();
+        return;
+      }
+      e.preventDefault();
+      void api.tour.start("first-boot-essentials");
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [api]);
 
   const composeOutgoing = useCallback(
     (raw: string) => composeOutgoingUtil({ raw, activePreset, attachments }),
@@ -912,9 +1111,29 @@ export function App() {
   const onNewChat = useCallback(() => { void handleNewChat(); }, [handleNewChat]);
 
   // ChatView context bundle — avoids drilling ~40 props through the tree.
+  //
+  // Mask `hasApiKey === false` while the onboarding chain is still in
+  // progress so the "Claude API 키 설정 필요" empty state never paints
+  // underneath the Z chain dialogs. The chain itself is the canonical
+  // first-boot CTA; surfacing a competing empty state below it leaks
+  // through the Radix Dialog backdrop and confuses the user (the bug
+  // this fix resolves). Returning users with `chainStage === "done"`
+  // (probe-skip or chain completion) still see the empty state when
+  // they remove their key from Settings, so the safety-net behaviour
+  // for that path is preserved.
+  // Tracer Stage B race fix (#1014): only surface the boolean when BOTH
+  // (a) the Z chain has finished AND (b) the boot probe has resolved
+  // `hasApiKey` to a concrete boolean. Any other state — chain still
+  // running, or probe still pending — returns `null` so downstream
+  // empty-state branches stay in their loading shape. This prevents the
+  // "로그인된 척" race where chain advanced to `done` but `hasApiKey`
+  // hadn't been populated yet, letting `hasApiKey !== false` falsely
+  // paint the ready-state empty prompt.
+  const effectiveHasApiKey: boolean | null =
+    chainStage === "done" && hasApiKey !== null ? hasApiKey : null;
   const chatContextValue = useChatContextValue({
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
-    question, setQuestion, chatEndRef, currentSessionId, hasApiKey, onOpenSettings,
+    question, setQuestion, chatEndRef, currentSessionId, hasApiKey: effectiveHasApiKey, onOpenSettings,
     searchOpen, searchQuery, searchCase, searchMatches, searchMatchSet, searchIdx, searchHighlight,
     searchChangeQuery, searchToggleCase, searchNext, searchPrev, searchCloseOverlay, searchToggleOverlay,
     contextOverflowPct, usedTokens, contextBudget, effectiveBudget,
@@ -995,7 +1214,7 @@ export function App() {
           <MainToolbar
             activeView={activeView}
             streaming={streaming}
-            hasApiKey={hasApiKey}
+            hasApiKey={effectiveHasApiKey}
             isCurrentSessionStarred={Boolean(currentSessionId && isSessionStarred(currentSessionId))}
             onNewChat={onNewChat}
             onToggleCurrentSessionStar={() => currentSessionId
@@ -1161,32 +1380,160 @@ export function App() {
           (immediately after the active turn's entries),
           so the previous App-level FloatingQuestionPanel mount is gone.
           See <AskUserQuestionCard> + ChatView ask-question slot. */}
+      {demoAutoplay.turn && (
+        <div
+          data-testid="demo-autoplay-overlay"
+          className="fixed inset-0 z-[10000] flex items-stretch justify-center bg-background/95 backdrop-blur-sm"
+          role="dialog"
+          aria-label="LVIS Live Auto-play demo"
+        >
+          <div className="m-4 flex w-full max-w-[460px] flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl">
+            <DemoAutoplayView
+              turn={demoAutoplay.turn}
+              onFinished={demoAutoplay.onFinished}
+              onAuditEvent={demoAutoplay.emitAuditEvent}
+            />
+          </div>
+        </div>
+      )}
       <DeferredQueueDialog open={deferredQueueOpen} onOpenChange={setDeferredQueueOpen} />
+      <TutorialDialog
+        open={tutorialOpen}
+        onOpenChange={setTutorialOpen}
+        api={api}
+      />
       <ApprovalDialog queue={approvalQueue} onDecide={handleApprovalDecide} />
-      <OnboardingDialog
-        open={onboardingOpen}
-        onOpenChange={(open) => {
-          setOnboardingOpen(open);
-          if (!open) void markOnboardingCompleted();
-        }}
-        onChooseApiKey={() => {
-          setOnboardingOpen(false);
-          void markOnboardingCompleted();
-          onOpenSettings("llm");
-        }}
-        onChooseLogin={() => {
-          setOnboardingOpen(false);
-          void markOnboardingCompleted();
-          setAppLoginOpen(true);
-        }}
+      {/* Z onboarding chain — staged sequence of dialogs.
+          The chain reducer guarantees only one of these dialogs is
+          ever mounted at a time, so the historical multi-Dialog
+          race (#982/#990/#997) cannot recur. */}
+      <ScenarioShowcase
+        open={chainStage === "showcase"}
+        onStart={(scenarioId) =>
+          dispatchChain({ type: "showcase-start", scenarioId })
+        }
+        onSkip={() => dispatchChain({ type: "showcase-skip" })}
       />
       <LoginModal
         api={api}
-        open={appLoginOpen}
-        onOpenChange={setAppLoginOpen}
+        open={chainStage === "login"}
+        onOpenChange={(next) => {
+          if (chainStage !== "login") return;
+          if (!next) {
+            // Radix closed the dialog — treat any close that didn't
+            // already advance the chain as a user-initiated skip.
+            dispatchChain({ type: "login-skip" });
+          }
+        }}
         onSuccess={() => {
           void checkApiKey();
+          dispatchChain({ type: "login-success" });
         }}
+      />
+      <WelcomeQuestion
+        open={chainStage === "welcome"}
+        displayName={welcomeDisplayName}
+        onAccept={() => dispatchChain({ type: "welcome-accept" })}
+        onSkip={() => dispatchChain({ type: "welcome-skip" })}
+      />
+      {/* Tutorial-B (O-X2) — Memory Seed Onboarding Wizard. The chain
+          reducer drives `open` from stage "memory" only; `onDismissed`
+          advances the chain to the tour stage where the dedicated
+          chain effect fires `api.tour.start`. We pass a small wrapper
+          for `tour.start` that doubles as the welcomeDisplayName seeder
+          so the WelcomeQuestion knows what 호칭 the user picked when it
+          re-renders for an early-back-out chain.
+
+          Test/production trigger seam (see memory-seed-onboarding.spec.ts):
+          the wrapper below intentionally swallows MemorySeed's own
+          `startTour()` IPC so the chain-effect at the top of this file
+          (stage="tour" branch) is the *single* canonical broadcaster.
+          Without the swallow both paths fire in sequence and the
+          SpotlightTour subscriber visibly resets to step 0 (regression
+          from PR #1019, fix landed in #1029). The e2e spec asserts the
+          chain-effect path — MemorySeed's startTour() remains as a
+          defensive secondary call for the dev-mode swallow-failure case. */}
+      <MemorySeedDialog
+        open={chainStage === "memory"}
+        selectedScenarioId={selectedScenarioId}
+        onOpenChange={(next) => {
+          if (chainStage !== "memory") return;
+          if (!next) {
+            // Radix-side close. The MemorySeed's own onDismissed
+            // already fires for Submit / Skip; this branch covers the
+            // Esc / outside-click paths.
+            dispatchChain({ type: "memory-finish" });
+          }
+        }}
+        api={{
+          ...api,
+          tour: {
+            ...api.tour,
+            // Swallow the MemorySeed's internal tour.start fire — the
+            // Z chain effect on stage="tour" already broadcasts the
+            // canonical scenario. Double-broadcast would reset the
+            // SpotlightTour to step 0 visibly.
+            start: async () => ({ ok: true as const, scenarioId: "first-boot-essentials" }),
+          },
+        } as typeof api}
+        onDismissed={() => {
+          // Persist the typed 호칭 (best-effort) so a future re-render
+          // of WelcomeQuestion shows the proper greeting. We read it
+          // through DOM rather than wiring a callback: the wizard's
+          // input lives at testid memory-seed-dialog:name and the
+          // value is still in the DOM at the dismissal frame.
+          if (typeof document !== "undefined") {
+            const el = document.querySelector<HTMLInputElement>(
+              '[data-testid="memory-seed-dialog:name"]',
+            );
+            const value = el?.value?.trim() ?? "";
+            if (value.length > 0) setWelcomeDisplayName(value);
+          }
+          dispatchChain({ type: "memory-finish" });
+        }}
+      />
+      {/* Tutorial-C — SpotlightTour mounts always; it stays invisible until
+          a `lvis:tour:start` broadcast flips it on. Production trigger:
+          ⌘+Shift+/ (macOS "⌘?" help shortcut) / Ctrl+Shift+/ — see the
+          useEffect above. State lives in `~/.lvis/onboarding/`. The
+          `onComplete` callback fires only when the user reaches the
+          final tour step (not on early-dismissal); the Z chain
+          dispatches `tour-finish` so PluginShowcase mounts next. */}
+      <SpotlightTour
+        api={api}
+        onComplete={() => {
+          if (chainStage === "tour") dispatchChain({ type: "tour-finish" });
+        }}
+        onDismiss={() => {
+          if (chainStage === "tour") dispatchChain({ type: "tour-skip" });
+        }}
+      />
+      {/* Z onboarding chain — PluginShowcase. Mounted only at stage
+          "plugins"; carries the host's installed pluginCards so each
+          card reflects what the user actually has. Closing the
+          showcase finishes the chain (state → done) and the
+          markOnboardingCompleted side-effect persists the flag. */}
+      <PluginShowcase
+        open={chainStage === "plugins"}
+        installedPluginIds={pluginCards.map((c) => c.id)}
+        api={api}
+        onClose={() => dispatchChain({ type: "plugins-close" })}
+        prioritizedScenarioId={selectedScenarioId}
+      />
+      {/* Tutorial-X5 — Post-tour first-task proposal. Mounts always,
+          stays invisible until the user finishes a tour AND at least one
+          installed plugin has a registered proposal in first-task-proposals.
+          The composerSeedText callback writes directly to the chat
+          composer state setter so the user is one click away from a real
+          plugin invocation — no hidden IPC. */}
+      <PostTourFirstTask
+        api={{
+          composerSeedText: (text: string) => {
+            setQuestion(text);
+          },
+        }}
+        installedPluginIds={pluginCards.map((c) => c.id)}
+        tourCompleted={tourCompleted}
       />
       {/* v6: ApprovalQueueStatus floating chip 제거. 큐 정보는 InputActionBar
           trailing 의 DeferredApprovalChip 으로 통합. Spec docs/blueprints/

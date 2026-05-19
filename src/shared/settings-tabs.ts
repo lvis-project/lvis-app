@@ -1,4 +1,5 @@
 export const SETTINGS_TABS = [
+  "general",
   "llm",
   "appearance",
   "chat",
@@ -19,5 +20,5 @@ export function normalizeSettingsTab(tab: unknown): SettingsTab {
   if (tab === "privacy") return "chat";
   return typeof tab === "string" && (SETTINGS_TABS as readonly string[]).includes(tab)
     ? (tab as SettingsTab)
-    : "llm";
+    : "general";
 }
