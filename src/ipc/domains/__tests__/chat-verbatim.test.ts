@@ -113,6 +113,7 @@ function makeMinimalDeps(
       listSessionsPage: vi.fn(() => []),
       listSessions: vi.fn(() => []),
       loadSession: vi.fn(),
+      loadToolResultArtifact: vi.fn(() => null),
       loadSessionMetadata: vi.fn(() => null),
       saveSessionMetadata: vi.fn(),
       loadMainActiveSessionState: vi.fn(() => null),
@@ -227,6 +228,34 @@ describe("lvis:chat:get-verbatim-tool-result", () => {
 
     const result = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-1" });
     expect(result).toBeNull();
+  });
+
+  it("returns artifact content when a host-truncated disk stub is backed by a file artifact", async () => {
+    const loop = makeConversationLoop(SESSION_ID, [
+      makeToolResultMsg({
+        toolUseId: "tu-1",
+        content: "[tool_result truncated by host (Issue #902): tool=Read, toolUseId=tu-1, originalBytes=12345]",
+      }),
+    ]);
+    const deps = await setupHandlers(loop);
+    const artifactContent = "artifact line one\nartifact line two";
+    deps.memoryManager.loadToolResultArtifact.mockReturnValue({
+      toolUseId: "tu-1",
+      toolName: "Read",
+      content: artifactContent,
+      truncated: {
+        originalLines: 2,
+        originalTokens: 20,
+        originalBytes: artifactContent.length,
+        trimmedAt: "2026-05-19T00:00:00.000Z",
+      },
+      sha256: "sha",
+      createdAt: "2026-05-19T00:00:00.000Z",
+    });
+
+    const result = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-1" });
+    expect(result).toEqual({ content: artifactContent, lineCount: 2 });
+    expect(deps.memoryManager.loadToolResultArtifact).toHaveBeenCalledWith(SESSION_ID, "tu-1");
   });
 
   it("returns null for non-compacted tool_result (meta.compactedAt not set)", async () => {

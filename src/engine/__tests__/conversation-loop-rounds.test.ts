@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import { KeywordEngine } from "../../core/keyword-engine.js";
@@ -9,6 +12,7 @@ import { createDynamicTool } from "../../tools/base.js";
 import { createReadToolResultChunkTool } from "../../tools/tool-result-chunk.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
 import { SessionTodoStore } from "../../main/session-todo-store.js";
+import { MemoryManager } from "../../memory/memory-manager.js";
 
 class FakeProvider implements LLMProvider {
   readonly vendor = "openai" as const;
@@ -610,5 +614,99 @@ describe("ConversationLoop queryLoop", () => {
       hasMore: true,
       chunk: longContent.slice(0, 500),
     });
+  });
+
+  it("reads host-truncated tool_result chunks from file-backed artifacts after session reload", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "lvis-loop-artifact-"));
+    try {
+      const sessionId = "loop-artifact-session";
+      const memoryManager = new MemoryManager({ lvisDir: dir });
+      const longContent = Array.from(
+        { length: 160 },
+        (_, i) => `row-${i.toString().padStart(3, "0")}: ${"x".repeat(20)}`,
+      ).join("\n");
+      await memoryManager.saveSession(sessionId, [
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [{ id: "long-1", name: "long_tool", input: {} }],
+        },
+        {
+          role: "tool_result",
+          toolUseId: "long-1",
+          toolName: "long_tool",
+          content: longContent,
+          meta: {
+            truncated: {
+              originalLines: 160,
+              originalTokens: 1200,
+              originalBytes: longContent.length,
+              trimmedAt: "2026-05-19T00:00:00.000Z",
+            },
+          },
+        },
+      ] as GenericMessage[]);
+
+      const toolRegistry = new ToolRegistry();
+      toolRegistry.register(createReadToolResultChunkTool());
+      const provider = new FakeProvider([
+        [
+          {
+            type: "tool_call",
+            id: "chunk-1",
+            name: "read_tool_result_chunk",
+            input: { toolUseId: "long-1", chunkIndex: 1, maxChars: 500 },
+          },
+          { type: "message_complete", stopReason: "tool_use" },
+        ],
+        [
+          { type: "text_delta", text: "done" },
+          { type: "message_complete", stopReason: "end_turn" },
+        ],
+      ]);
+      const loop = new ConversationLoop(({
+        settingsService: {
+          get: () => fakeLlmSettings(),
+          getSecret: () => "test-key",
+        },
+        systemPromptBuilder: {
+          build: () => "system",
+          setSummaryPreamble: vi.fn(),
+        },
+        keywordEngine: new KeywordEngine(),
+        routeEngine: new RouteEngine({ toolRegistry }),
+        toolRegistry,
+        memoryManager,
+      } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+      (loop as { provider: LLMProvider | null }).provider = provider;
+
+      expect(loop.loadSession(sessionId)).toBe(true);
+      const reloaded = loop.getHistory().getMessages().find(
+        (m): m is Extract<GenericMessage, { role: "tool_result" }> =>
+          m.role === "tool_result" && m.toolUseId === "long-1",
+      );
+      expect(reloaded?.content).toContain("[tool_result truncated by host");
+      expect(reloaded?.meta?.truncated).toBeUndefined();
+
+      await loop.runTurn("read chunk", undefined, undefined, { inputOrigin: "user-keyboard" });
+
+      const chunkResult = loop.getHistory().getMessages().find(
+        (m): m is Extract<GenericMessage, { role: "tool_result" }> =>
+          m.role === "tool_result" && m.toolUseId === "chunk-1",
+      );
+      expect(chunkResult?.isError).toBeUndefined();
+      const parsed = JSON.parse(chunkResult!.content) as Record<string, unknown>;
+      expect(parsed).toMatchObject({
+        toolUseId: "long-1",
+        toolName: "long_tool",
+        chunkIndex: 1,
+        startChar: 500,
+        endChar: 1000,
+        hasMore: true,
+        chunk: longContent.slice(500, 1000),
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

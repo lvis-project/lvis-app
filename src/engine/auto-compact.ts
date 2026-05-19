@@ -13,6 +13,7 @@ import type { GenericMessage, TokenUsage, LLMVendor, UserContentPart } from "./l
 import { serializeMessageForEstimation, userContentText } from "./llm/types.js";
 import { lookupPricing, effectiveContextWindow } from "../shared/pricing-data.js";
 import { getUsableContext, getPreflightThreshold } from "../shared/context-budget.js";
+import { buildToolResultStrippedStub } from "../shared/tool-result-stub.js";
 
 
 // ─── Context Window Registry ─────────────────────────
@@ -180,10 +181,10 @@ export function estimateMessagesTokens(messages: GenericMessage[]): number {
 // 현재 동작: meta.compactedAt 만 set, content *verbatim* 보존.
 //   - memory: verbatim (UI / checkpoint preview 가 원본 표시 가능)
 //   - wire: `wire-serialize.ts:stubMarkedToolResults` 가 provider 호출 직전 stub 변환
-//   - disk: 동일 helper 가 saveSession 직전 stub 변환 (R4 mitigation 유지)
+//   - disk: `MemoryManager.saveSession` 이 stub JSONL + file-backed artifact 로 영속화
 //
 // `meta.stripped` / `meta.strippedAt` / `meta.originalLength` 는 제거됨 (호환성 layer 없음).
-// 단일 marker `meta.compactedAt` 가 "이 message 는 wire/disk 직렬화 시 stub 으로 변환되어야 함" 을 의미.
+// 단일 marker `meta.compactedAt` 가 "이 message 는 serialization 시 stub 으로 변환되어야 함" 을 의미.
 
 export interface MarkStaleConfig {
   /** 말단에서부터 이 개수만큼의 tool_result는 raw 유지 (기본 8) */
@@ -211,7 +212,7 @@ const DEFAULT_MARK_STALE_CONFIG: MarkStaleConfig = {
  * `wire-serialize.ts` 와 같은 패턴 사용 (단일 source of truth).
  */
 export function buildToolResultStub(toolName: string | undefined, origLen: number): string {
-  return `[tool_result stripped: tool=${toolName ?? "?"}, origLen=${origLen}]`;
+  return buildToolResultStrippedStub(toolName, origLen);
 }
 
 /**
