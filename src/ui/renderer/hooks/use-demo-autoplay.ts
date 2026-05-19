@@ -52,8 +52,13 @@ export interface UseDemoAutoplayResult {
 
 /**
  * Returns the active demo turn (or null) based on the activation predicate.
- * The hook flips `features.demoAutoplayEnabled = false` + `onboardingCompleted = true`
- * after the first emit so the demo is one-shot per install.
+ * The hook flips `features.demoAutoplayEnabled = false` after the first emit
+ * so the demo is one-shot per install. The onboarding chain
+ * (`onboardingCompleted`) is intentionally NOT touched here — chain
+ * completion is the responsibility of the explicit ScenarioShowcase →
+ * MemorySeed → tour → plugins path in `App.tsx` (`markOnboardingCompleted`).
+ * Coupling the two paths previously caused the demo to terminate the
+ * onboarding chain before ScenarioShowcase could mount on fresh installs.
  */
 export function useDemoAutoplay(api: LvisApi): UseDemoAutoplayResult {
   const [turn, setTurn] = useState<ScriptedTurn | null>(null);
@@ -110,12 +115,17 @@ export function useDemoAutoplay(api: LvisApi): UseDemoAutoplayResult {
       finishedRef.current = true;
       const finishedScriptId = turn?.id ?? "unknown";
       setTurn(null);
-      // One-shot consumption — flip the flag off so the demo never re-runs.
-      // Always set `demoAutoplayEnabled: false` *and* `onboardingCompleted: true`
-      // so the next mount of <App> skips both the onboarding dialog and the demo.
+      // One-shot consumption — flip `demoAutoplayEnabled` off so the demo
+      // never re-runs. `onboardingCompleted` is deliberately NOT set here:
+      // demoAutoplay and the Z onboarding chain (ScenarioShowcase →
+      // MemorySeed → tour → plugins) are separate paths and only the
+      // explicit chain completion (`markOnboardingCompleted` in App.tsx)
+      // is allowed to mark onboarding as done. Previously the demo
+      // terminated the chain before ScenarioShowcase could mount on a
+      // fresh install.
       void api
         .updateSettings({
-          features: { demoAutoplayEnabled: false, onboardingCompleted: true },
+          features: { demoAutoplayEnabled: false },
         })
         .catch(() => {
           // Persist failure is non-fatal; demo will simply re-prompt next boot.
