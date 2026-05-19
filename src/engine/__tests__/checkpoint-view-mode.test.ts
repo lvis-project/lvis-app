@@ -45,6 +45,8 @@ function makeLoop(
       if (!metaCheckpoints) return null;
       return { checkpoints: metaCheckpoints };
     }),
+    loadToolResultArtifact: vi.fn(() => null),
+    rehydrateToolResultArtifacts: vi.fn((_sessionId: string, messages: unknown[]) => messages),
     loadCheckpointSnapshot: vi.fn((_id: string, _num: number) => resolvedSnapshot),
     listSessions: vi.fn(() => []),
   };
@@ -175,6 +177,72 @@ describe("ConversationLoop branchFromCheckpoint", () => {
     expect(meta!.parentSessionId).toBe(loop.getSessionId());
     expect(meta!.branchedFromCompactNum).toBe(1);
     expect(typeof meta!.branchedAt).toBe("string");
+  });
+
+  it("rehydrates checkpoint stub tool_results from artifacts before saving the branch", async () => {
+    const raw = "artifact-backed result\n".repeat(120);
+    const snapshot = [
+      { role: "assistant" as const, content: "", toolCalls: [{ id: "tu-art", name: "lge_lgenie_query", input: {} }] },
+      {
+        role: "tool_result" as const,
+        toolUseId: "tu-art",
+        toolName: "lge_lgenie_query",
+        content: "[tool_result truncated by host (Issue #902): tool=lge_lgenie_query, toolUseId=tu-art, originalBytes=12000]",
+        meta: { serializedStub: true },
+      },
+    ];
+    const { loop, memoryManager, savedSessions } = makeLoop(
+      [{ compactNum: 1, messageCountAtTrigger: 2 }],
+      snapshot,
+    );
+    memoryManager.rehydrateToolResultArtifacts.mockImplementation((_sessionId: string, messages: unknown[]) =>
+      messages.map((message) => {
+        if ((message as { role?: string; toolUseId?: string }).role !== "tool_result") return message;
+        return {
+          ...message as Record<string, unknown>,
+          content: raw,
+          meta: {
+            truncated: {
+              originalLines: 120,
+              originalTokens: 2000,
+              originalBytes: raw.length,
+              trimmedAt: "2026-05-19T00:00:00.000Z",
+            },
+          },
+        };
+      }),
+    );
+    memoryManager.loadToolResultArtifact.mockReturnValue({
+      toolUseId: "tu-art",
+      toolName: "lge_lgenie_query",
+      content: raw,
+      truncated: {
+        originalLines: 120,
+        originalTokens: 2000,
+        originalBytes: raw.length,
+        trimmedAt: "2026-05-19T00:00:00.000Z",
+      },
+      sha256: "sha",
+      createdAt: "2026-05-19T00:00:00.000Z",
+    });
+
+    const { newSessionId } = await loop.branchFromCheckpoint(1);
+
+    const saved = savedSessions.get(newSessionId) as Array<Record<string, unknown>>;
+    expect(saved[1]).toMatchObject({
+      role: "tool_result",
+      toolUseId: "tu-art",
+      content: raw,
+      meta: {
+        truncated: {
+          originalLines: 120,
+          originalTokens: 2000,
+          originalBytes: raw.length,
+        },
+      },
+    });
+    expect((saved[1].meta as Record<string, unknown>).serializedStub).toBeUndefined();
+    expect(memoryManager.rehydrateToolResultArtifacts).toHaveBeenCalledWith(loop.getSessionId(), snapshot);
   });
 
   it("persists checkpoint summary as branch summaryPreamble", async () => {

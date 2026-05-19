@@ -47,7 +47,7 @@ function truncateInput(input: Record<string, unknown> | undefined): string {
 
 /** Extract original char count from stub text for display fallback. */
 function parseStubChars(stubContent: string): number | null {
-  const m = stubContent.match(/origLen=(\d+)/);
+  const m = stubContent.match(/(?:origLen|originalBytes)=(\d+)/);
   return m ? parseInt(m[1], 10) : null;
 }
 
