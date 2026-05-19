@@ -48,7 +48,7 @@ function errorMessage(code: string): string {
     case "invalid-credentials":
       return "데모 자격증명이 올바르지 않습니다.";
     case "no-demo-key":
-      // F3 — Path 3 hotfix: this should no longer fire for the LGE
+      // F3 — Path 3 hotfix: this should no longer fire for the internal
       // azure-foundry demo loop (baked-in creds now wired). If it does
       // fire, the user is on a non-azure-foundry vendor without env keys.
       return "데모 모드 설정 확인이 필요해요. 환경 변수 `LVIS_DEMO_VENDOR=azure-foundry` 를 설정한 뒤 다시 시도하세요. (docs/onboarding/local-demo-setup.md 참조)";

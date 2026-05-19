@@ -120,8 +120,8 @@ describe("captureDemoCredentials — LVIS_DEMO_VENDOR (#893 top-level)", () => {
   });
 
   // Path 2 hotfix (2026-05-19): the default fallback vendor changed from
-  // "openai" to "azure-foundry" so the LGE internal demo loop activates
-  // by default. The two tests below assert the new default.
+  // "openai" to "azure-foundry" so the internal organization demo loop
+  // activates by default. The two tests below assert the new default.
   it("defaults to azure-foundry when LVIS_DEMO_VENDOR is absent", () => {
     process.env.LVIS_DEMO_ENABLED = "1";
     delete process.env.LVIS_DEMO_VENDOR;
