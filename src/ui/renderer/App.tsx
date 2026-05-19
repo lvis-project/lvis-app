@@ -119,18 +119,20 @@ export function App() {
   // Z onboarding chain (2026-05-19) — replaces the previous pair of
   // `onboardingOpen` + `appLoginOpen` flags with an explicit reducer
   // that drives every stage of the first-boot funnel:
-  //   showcase → login → welcome → memory → tour → plugins → done
+  //   idle → showcase → login → welcome → memory → tour → plugins → done
   // The reducer keeps the JSX render branches small (each dialog
   // mounts only when its stage matches) and prevents the race where
   // multiple Radix Dialogs were mounted at once (#982/#990/#997).
   //
-  // Initial state is "showcase" so the intro screen mounts on first
-  // paint without waiting for the async boot probe. Returning users
-  // skip the chain via `probe-skip` (handled from both `idle` and
-  // `showcase` in the reducer) so the Dialog never visibly flashes.
+  // Initial state is `idle`. The boot probe (below) classifies the
+  // boot exactly once and dispatches either `probe-start` → showcase
+  // (fresh install, no key, onboarding incomplete) or `probe-skip` →
+  // done (returning user). Starting at `idle` instead of `showcase`
+  // eliminates the closet-flash race where a true fresh-state boot
+  // briefly shows the intro Dialog and then collapses (#1014).
   const [chainStage, dispatchChain] = useReducer(
     onboardingChainReducer,
-    "showcase" as OnboardingChainStage,
+    "idle" as OnboardingChainStage,
   );
   // Display name surfaced inside WelcomeQuestion — best-effort from the
   // host's persisted memory seed. Empty string when unknown, the
