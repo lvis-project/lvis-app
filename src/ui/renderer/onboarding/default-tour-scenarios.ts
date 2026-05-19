@@ -100,12 +100,107 @@ const FIRST_BOOT_ESSENTIALS: TourScenario = {
 };
 
 /**
+ * Tutorial-X3 — per-plugin walkthrough scenarios. Each scenario spotlights
+ * the *real* DOM anchors a plugin shell exposes (data-tour-anchor) so the
+ * user sees the plugin's UI rather than a generic placeholder. Anchors
+ * use `[data-tour-anchor="plugin-shell:<id>"]` so the plugin webview
+ * shell can declare them once and every scenario reuses the selector.
+ *
+ * The 4th step in each scenario points at the composer so the tour ends
+ * with the user back on the chat surface — preventing the user from
+ * being stranded inside a plugin UI without a path back to chat.
+ */
+const MEETING_WALKTHROUGH: TourScenario = {
+  id: "meeting-walkthrough",
+  title: "회의 플러그인 둘러보기",
+  steps: [
+    {
+      anchorSelector: '[data-tour-anchor="plugin-shell:meeting-record"]',
+      title: "원클릭 회의 녹음",
+      body: "이 버튼으로 회의 녹음을 시작합니다. STT 와 요약이 자동으로 이어집니다.",
+    },
+    {
+      anchorSelector: '[data-tour-anchor="plugin-shell:meeting-history"]',
+      title: "지난 회의 기록",
+      body: "이전 회의의 요약·액션 아이템·원문 STT 가 로컬에 저장됩니다.",
+    },
+    {
+      anchorSelector: '[data-tour-anchor="plugin-shell:meeting-actions"]',
+      title: "추출된 할 일",
+      body: "회의에서 자동 추출된 액션 아이템을 ⌘K → '할 일' 에서 바로 등록할 수 있어요.",
+    },
+    {
+      anchorSelector: '[data-tour-anchor="composer-input"]',
+      title: "회의 후 자연스러운 후속 대화",
+      body: '"이번 회의 요약 보여줘" 같은 자연어로 회의 결과를 다시 불러올 수 있어요.',
+    },
+  ],
+};
+
+const INDEXER_WALKTHROUGH: TourScenario = {
+  id: "indexer-walkthrough",
+  title: "로컬 인덱서 둘러보기",
+  steps: [
+    {
+      anchorSelector: '[data-tour-anchor="plugin-shell:indexer-add-folder"]',
+      title: "인덱스할 폴더 추가",
+      body: "PDF / Word / Markdown 폴더를 추가하면 로컬에서 임베딩이 만들어집니다. 외부 서버로 문서가 전송되지 않습니다.",
+    },
+    {
+      anchorSelector: '[data-tour-anchor="plugin-shell:indexer-status"]',
+      title: "인덱싱 진행 상태",
+      body: "파일 수, PII 마스킹 결과, 마지막 동기화 시각을 확인할 수 있어요.",
+    },
+    {
+      anchorSelector: '[data-tour-anchor="plugin-shell:indexer-search"]',
+      title: "자연어 검색",
+      body: '"Q2 보안 정책" 같은 자연어를 입력하면 한국어 RRF 가 가장 관련성 높은 문단을 찾아옵니다.',
+    },
+    {
+      anchorSelector: '[data-tour-anchor="composer-input"]',
+      title: "채팅과 함께 사용",
+      body: "채팅에서 직접 '문서 검색해줘' 라고 말해도 인덱서가 답변에 결합됩니다.",
+    },
+  ],
+};
+
+const PROACTIVE_WALKTHROUGH: TourScenario = {
+  id: "proactive-walkthrough",
+  title: "업무 알림 둘러보기",
+  steps: [
+    {
+      anchorSelector: '[data-tour-anchor="plugin-shell:proactive-inbox"]',
+      title: "받은 메일 자동 스캔",
+      body: "받은편지함에서 액션 아이템 후보를 자동으로 추출합니다. 외부로 보내지 않고 로컬에서만 분석.",
+    },
+    {
+      anchorSelector: '[data-tour-anchor="plugin-shell:proactive-actions"]',
+      title: "할 일 후보 카드",
+      body: "후보별로 한 줄 요약 + '할 일 추가' 버튼이 있어요. 항상 사용자 승인 후에 LVIS 작업이 됩니다.",
+    },
+    {
+      anchorSelector: '[data-tour-anchor="plugin-shell:proactive-rules"]',
+      title: "규칙 편집",
+      body: "어떤 발신자/키워드를 우선 처리할지 직접 정합니다. 변경은 즉시 반영.",
+    },
+    {
+      anchorSelector: '[data-tour-anchor="composer-input"]',
+      title: "후속 채팅",
+      body: '"오늘 우선 처리할 할 일" 같은 자연어로 후보 목록을 다시 볼 수 있어요.',
+    },
+  ],
+};
+
+/**
  * Registry — `SpotlightTour` consumes this map to resolve `scenarioId`
  * payloads received over `lvis:tour:start`. New scenarios are added here;
  * the host-side store is unaware of the contents.
  */
 export const DEFAULT_TOUR_SCENARIOS: Readonly<Record<string, TourScenario>> = Object.freeze({
   [FIRST_BOOT_ESSENTIALS.id]: FIRST_BOOT_ESSENTIALS,
+  [MEETING_WALKTHROUGH.id]: MEETING_WALKTHROUGH,
+  [INDEXER_WALKTHROUGH.id]: INDEXER_WALKTHROUGH,
+  [PROACTIVE_WALKTHROUGH.id]: PROACTIVE_WALKTHROUGH,
 });
 
 export function getTourScenario(id: string): TourScenario | undefined {

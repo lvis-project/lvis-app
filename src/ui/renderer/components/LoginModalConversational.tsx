@@ -42,6 +42,12 @@ import { Button } from "../../../components/ui/button.js";
 import { Input } from "../../../components/ui/input.js";
 import { Label } from "../../../components/ui/label.js";
 import type { LoginModalProps } from "./LoginModal.js";
+import {
+  AUTH_STEP_LABEL_KO,
+  AUTH_STEP_ORDER,
+  useAuthProgress,
+  type AuthProgressStatus,
+} from "../hooks/use-auth-progress.js";
 
 function errorMessage(code: string): string {
   switch (code) {
@@ -55,10 +61,11 @@ function errorMessage(code: string): string {
 }
 
 /**
- * Type-on checklist lines for the auth progress. Rendered after the demo
- * chip is selected — the steps reveal one at a time with a short stagger
- * so the user reads them sequentially. The final `⟳` line shows a
- * blinking `▍` cursor while the form is still awaiting submission.
+ * Type-on checklist lines for the auth progress (F2 fallback). Rendered
+ * after the demo chip is selected when the live IPC progress is not yet
+ * active — the steps reveal one at a time with a short stagger so the
+ * user reads them sequentially. The final `⟳` line shows a blinking
+ * `▍` cursor while the form is still awaiting submission.
  */
 const CHECKLIST_LINES: readonly { mark: string; label: string }[] = Object.freeze([
   { mark: "✓", label: "자격증명 검증" },
@@ -68,6 +75,23 @@ const CHECKLIST_LINES: readonly { mark: string; label: string }[] = Object.freez
 
 /** Stagger between checklist line reveals (ms). */
 const CHECKLIST_STAGGER_MS = 280;
+
+/**
+ * Tutorial-X1 — single-character icon for each auth-progress row. Kept
+ * out of the JSX so the checklist's render expression stays declarative.
+ */
+function progressIcon(status: AuthProgressStatus | undefined): string {
+  switch (status) {
+    case "done":
+      return "✓";
+    case "failed":
+      return "✕";
+    case "running":
+      return "⟳";
+    default:
+      return "·";
+  }
+}
 
 export function LoginModalConversational({
   api,
@@ -84,6 +108,9 @@ export function LoginModalConversational({
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Tutorial-X1 — subscribe to real `lvis:auth:progress` events so the
+  // checklist below paints ✓ marks against actual main-process steps.
+  const progress = useAuthProgress(api, open);
 
   // F2 — 2-turn conversational flow that fires when the demo chip is
   // selected. `userTurnVisible` shows the user bubble, `assistantReply`
@@ -228,7 +255,13 @@ export function LoginModalConversational({
         {/* Chip choices — informational links above the credential form.
             "데모 자격증명" focuses the password field so the user lands
             directly on the next required input AND fires the 2-turn
-            conversational flow (F2). */}
+            conversational flow (F2).
+
+            Per Tutorial-X scope refinement (2026-05-19 directive): only
+            the SSO chip remains mock; the demo + BYOK chips dispatch real
+            IPC. The BYOK chip opens Settings → LLM tab via the existing
+            `openSettingsWindow("llm")` channel so the user lands on the
+            same API-key editor that the rest of the app uses. */}
         <div className="pl-9 space-y-1.5">
           <button
             type="button"
@@ -247,29 +280,41 @@ export function LoginModalConversational({
           </button>
           <button
             type="button"
-            disabled
             data-testid="login-modal:chip-byok"
-            className="w-full cursor-not-allowed rounded-lg border border-border bg-muted/40 px-3 py-2 text-left text-[12px] text-muted-foreground"
-            title="설정 → 모델에서 API 키를 직접 입력하세요"
+            onClick={() => {
+              // Open the canonical API-key editor (Settings → LLM tab).
+              // The host's `openSettingsWindow` handler validates the tab
+              // id and falls back to the default tab if unknown, so we
+              // can pass the string directly without sanitising here.
+              void api.openSettingsWindow?.("llm");
+              onOpenChange(false);
+            }}
+            className="w-full rounded-lg border border-border bg-muted/40 px-3 py-2 text-left text-[12px] text-foreground hover:bg-muted/60"
           >
             <span className="mr-1">🔑</span>
             <span className="mr-1 inline-flex h-4 min-w-4 items-center justify-center rounded bg-muted px-1 text-[10px] font-semibold text-muted-foreground">
               2
             </span>
             제가 발급받은 API 키가 있어요
+            <span className="ml-2 text-[10px] text-muted-foreground">
+              설정 → LLM 탭에서 입력
+            </span>
           </button>
           <button
             type="button"
             disabled
             data-testid="login-modal:chip-sso"
             className="w-full cursor-not-allowed rounded-lg border border-border bg-muted/40 px-3 py-2 text-left text-[12px] text-muted-foreground"
-            title="조직 SSO 는 별도 구성이 필요합니다"
+            title="조직 SSO 연결은 곧 지원 예정입니다"
           >
             <span className="mr-1">🏢</span>
             <span className="mr-1 inline-flex h-4 min-w-4 items-center justify-center rounded bg-muted px-1 text-[10px] font-semibold text-muted-foreground">
               3
             </span>
             조직 SSO 로 연결
+            <span className="ml-2 text-[10px] text-muted-foreground">
+              곧 지원 예정
+            </span>
           </button>
         </div>
 
@@ -335,6 +380,49 @@ export function LoginModalConversational({
               )}
             </div>
           </div>
+        )}
+
+        {/* Tutorial-X1 — real IPC progress checklist. Renders only after
+            the first `lvis:auth:progress` event arrives so the form layout
+            is stable in the idle state. Each row's icon tracks the latest
+            `status` for that step (running → spinner, done → ✓, failed → ✕).
+            Kebab-case English step ids stay in the IPC payload; the
+            Korean labels are renderer-owned (CLAUDE.md error-language). */}
+        {progress.active && (
+          <ul
+            data-testid="login-modal:progress"
+            className="pl-9 mt-1 space-y-0.5 text-[11px]"
+          >
+            {AUTH_STEP_ORDER.map((step) => {
+              const status = progress.steps[step];
+              return (
+                <li
+                  key={step}
+                  data-testid={`login-modal:progress:${step}`}
+                  data-status={status ?? "pending"}
+                  className="flex items-center gap-1.5"
+                >
+                  <span aria-hidden="true">{progressIcon(status)}</span>
+                  <span
+                    className={
+                      status === "done"
+                        ? "text-success"
+                        : status === "failed"
+                          ? "text-destructive"
+                          : status === "running"
+                            ? "text-primary"
+                            : "text-muted-foreground"
+                    }
+                  >
+                    {AUTH_STEP_LABEL_KO[step]}
+                    {step === "llm-key-issuing" && progress.vendor
+                      ? ` (${progress.vendor})`
+                      : null}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
         )}
 
         <form
