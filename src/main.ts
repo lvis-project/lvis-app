@@ -1548,8 +1548,7 @@ function createWindow(options: { showBootstrapSplash?: boolean } = {}) {
       // owns shutdown ordering — calling `app.quit()` without preventDefault
       // races the window's default destroy against the async cleanup queue
       // and can leave the user staring at an invisible-but-not-yet-exited
-      // process for up to `cleanupTimeoutMs` on slow shutdowns (architect
-      // MAJOR-1 in PR #1032 cluster review).
+      // process for up to `cleanupTimeoutMs` on slow shutdowns.
       event.preventDefault();
       app.quit();
       return;
