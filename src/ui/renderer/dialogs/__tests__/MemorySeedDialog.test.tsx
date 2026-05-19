@@ -5,6 +5,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import {
   MemorySeedDialog,
   composeUrgentMemorySeed,
+  scenarioIntroPlaceholder,
 } from "../MemorySeedDialog.js";
 import type { LvisApi } from "../../types.js";
 
@@ -172,5 +173,55 @@ describe("MemorySeedDialog", () => {
     });
     expect(tourStart).toHaveBeenCalledWith("first-boot-essentials");
     expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+});
+
+describe("scenarioIntroPlaceholder", () => {
+  it("returns a scenario-tinted hint for known ids", () => {
+    expect(scenarioIntroPlaceholder("meeting")).toContain("회의");
+    expect(scenarioIntroPlaceholder("docs")).toContain("문서");
+    expect(scenarioIntroPlaceholder("work")).toContain("메일");
+    expect(scenarioIntroPlaceholder("multi-agent")).toContain("리서치");
+  });
+
+  it("falls back to the legacy generic example for null / unknown ids", () => {
+    expect(scenarioIntroPlaceholder(null)).toContain("매주 회의가 많은 PM");
+    expect(scenarioIntroPlaceholder(undefined)).toContain("매주 회의가 많은 PM");
+    expect(scenarioIntroPlaceholder("nope")).toContain("매주 회의가 많은 PM");
+  });
+});
+
+describe("MemorySeedDialog placeholder integration", () => {
+  it("applies the scenario-tinted placeholder when selectedScenarioId is set", () => {
+    const { api } = makeApi();
+    render(
+      <MemorySeedDialog
+        open
+        api={api}
+        onDismissed={() => {}}
+        onOpenChange={() => {}}
+        selectedScenarioId="docs"
+      />,
+    );
+    const intro = screen.getByTestId(
+      "memory-seed-dialog:intro",
+    ) as HTMLTextAreaElement;
+    expect(intro.placeholder).toContain("문서");
+  });
+
+  it("uses the legacy placeholder when selectedScenarioId is omitted", () => {
+    const { api } = makeApi();
+    render(
+      <MemorySeedDialog
+        open
+        api={api}
+        onDismissed={() => {}}
+        onOpenChange={() => {}}
+      />,
+    );
+    const intro = screen.getByTestId(
+      "memory-seed-dialog:intro",
+    ) as HTMLTextAreaElement;
+    expect(intro.placeholder).toContain("매주 회의가 많은 PM");
   });
 });
