@@ -116,6 +116,7 @@ function makeMinimalDeps(
       loadToolResultArtifact: vi.fn(() => null),
       loadSessionMetadata: vi.fn(() => null),
       saveSessionMetadata: vi.fn(),
+      rehydrateToolResultArtifacts: vi.fn((_sessionId: string, messages: unknown[]) => messages),
       loadMainActiveSessionState: vi.fn(() => null),
       markMainActiveFresh: vi.fn(async () => undefined),
       markMainActiveResume: vi.fn(async () => undefined),
@@ -482,6 +483,50 @@ describe("lvis:chat:fork", () => {
         sessionKind: "main",
         summaryPreamble: "요약된 이전 맥락",
       }),
+    );
+  });
+
+  it("rehydrates artifact-backed tool_result stubs before saving a forked session", async () => {
+    const stubContent = "[tool_result truncated by host (Issue #902): tool=lge_lgenie_query, toolUseId=\"tu-art\", originalBytes=12000]";
+    const rawContent = "artifact-backed result\n".repeat(120);
+    const loop = makeConversationLoop("session-fork-source", [
+      { role: "assistant" as const, content: "", toolCalls: [{ id: "tu-art", name: "lge_lgenie_query", input: {} }] },
+      makeToolResultMsg({
+        toolUseId: "tu-art",
+        toolName: "lge_lgenie_query",
+        content: stubContent,
+      }),
+    ]);
+    loop.loadSession.mockReturnValue(true);
+    const deps = await setupHandlers(loop);
+    deps.memoryManager.rehydrateToolResultArtifacts.mockImplementation((_sessionId: string, messages: unknown[]) =>
+      messages.map((message) => {
+        if ((message as { role?: string; toolUseId?: string }).role !== "tool_result") return message;
+        return {
+          ...message as Record<string, unknown>,
+          content: rawContent,
+          meta: {
+            truncated: {
+              originalLines: 120,
+              originalTokens: 2000,
+              originalBytes: rawContent.length,
+              trimmedAt: "2026-05-19T00:00:00.000Z",
+            },
+          },
+        };
+      }),
+    );
+
+    const result = await invoke("lvis:chat:fork", undefined) as { ok: boolean; sessionId: string | null };
+
+    expect(result.ok).toBe(true);
+    expect(deps.memoryManager.rehydrateToolResultArtifacts).toHaveBeenCalledWith(
+      "session-fork-source",
+      expect.arrayContaining([expect.objectContaining({ toolUseId: "tu-art", content: stubContent })]),
+    );
+    expect(deps.memoryManager.saveSession).toHaveBeenCalledWith(
+      result.sessionId,
+      expect.arrayContaining([expect.objectContaining({ toolUseId: "tu-art", content: rawContent })]),
     );
   });
 });
