@@ -42,7 +42,7 @@ packages/hello-world/
 # Legacy bun binary lockfile — repo uses text bun.lock
 bun.lockb
 
-# Demo credentials — gitignored so LGE-issued API keys are never committed.
+# Demo credentials — gitignored so API keys are never committed.
 # Copy .env.demo.example to .env.demo and fill in the real values.
 # scripts/run-electron.mjs auto-loads this file on `bun run start`.
 .env.demo

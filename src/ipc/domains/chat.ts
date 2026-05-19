@@ -1206,7 +1206,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
       // content is always string on tool_result messages
       const content = msg.content;
       if (typeof content !== "string") return null;
-      const artifact = isToolResultStubContent(content)
+      const artifact = isToolResultStubContent(content) && !msg.meta?.artifactUnavailable
         ? memoryManager.loadToolResultArtifact(sessionId, toolUseId)
         : null;
       if (!artifact && msg.meta?.compactedAt === undefined && msg.meta?.truncated === undefined) return null;
