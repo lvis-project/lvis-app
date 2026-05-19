@@ -133,6 +133,14 @@ function expandJsonStrings(value: unknown, depth = 0): unknown {
   return value;
 }
 
+function isToolResultStub(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    (value.startsWith("[tool_result stripped:") ||
+      value.startsWith("[tool_result truncated by host"))
+  );
+}
+
 /** Single-tool inline indicator — no collapsible wrapper */
 function SingleToolInline({
   tool,
@@ -149,10 +157,7 @@ function SingleToolInline({
   // Stub result — render collapsible CompactedToolResult instead of raw block.
   // Compaction marks tool_results by role+length, independent of error status,
   // so error tool_results can also be stubs.
-  const isStubResult =
-    !isRunning &&
-    typeof tool.result === "string" &&
-    tool.result.startsWith("[tool_result stripped:");
+  const isStubResult = !isRunning && isToolResultStub(tool.result);
 
   if (isStubResult && sessionId) {
     return (
@@ -387,7 +392,7 @@ export function ToolGroupCard({
                           {tool.status === "error" ? "오류" : "결과"}
                         </div>
                         {/* Stub results render as collapsible CompactedToolResult. */}
-                        {tool.result.startsWith("[tool_result stripped:") && sessionId ? (
+                        {isToolResultStub(tool.result) && sessionId ? (
                           <CompactedToolResult
                             toolUseId={tool.toolUseId}
                             toolName={getToolDisplayName(tool.name)}
