@@ -97,12 +97,18 @@ describe("app icon assets", () => {
     expect([template2x.width, template2x.height]).toEqual([36, 36]);
 
     const whiteVisible = visiblePixels(white);
+    const white2xVisible = visiblePixels(white2x);
     const templateVisible = visiblePixels(template);
+    const template2xVisible = visiblePixels(template2x);
     expect(whiteVisible.length).toBeGreaterThan(24);
-    expect(whiteVisible.length).toBeLessThan(white.width * white.height * 0.65);
+    expect(whiteVisible.length).toBeLessThan(white.width * white.height * 0.45);
+    expect(white2xVisible.length).toBeLessThan(white2x.width * white2x.height * 0.4);
     expect(templateVisible.length).toBe(whiteVisible.length);
+    expect(template2xVisible.length).toBe(white2xVisible.length);
     expect(whiteVisible.every(([r, g, b]) => r === 255 && g === 255 && b === 255)).toBe(true);
+    expect(white2xVisible.every(([r, g, b]) => r === 255 && g === 255 && b === 255)).toBe(true);
     expect(templateVisible.every(([r, g, b]) => r === 0 && g === 0 && b === 0)).toBe(true);
+    expect(template2xVisible.every(([r, g, b]) => r === 0 && g === 0 && b === 0)).toBe(true);
     expect(pixel(white, 0, 0)[3]).toBe(0);
     expect(pixel(template, 0, 0)[3]).toBe(0);
   });
