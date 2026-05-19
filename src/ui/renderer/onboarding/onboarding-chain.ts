@@ -7,7 +7,11 @@
  * mounting React.
  *
  * States:
- *   idle      — initial state before the boot probe runs.
+ *   idle      — legacy initial state; kept for backwards-compat reducer
+ *               callers and the `probe-start`/`probe-skip` transitions.
+ *               Fresh boots now use "showcase" as the initial state so the
+ *               intro screen mounts on first paint without waiting for the
+ *               async boot probe.
  *   showcase  — ScenarioShowcase mounted (intro preview cards).
  *   login     — LoginModal mounted (waiting for vendor key / skip).
  *   welcome   — WelcomeQuestion mounted ("시작해볼까요?" card).
@@ -92,6 +96,11 @@ export function onboardingChainReducer(
     case "showcase":
       if (event.type === "showcase-start") return "login";
       if (event.type === "showcase-skip") return "done";
+      // boot-time default initial state is now "showcase"; the boot probe
+      // dispatches `probe-skip` directly when an existing key / completed
+      // flag is found, so the chain still self-cancels for returning users
+      // without flickering the showcase Dialog.
+      if (event.type === "probe-skip") return "done";
       return state;
 
     case "login":
