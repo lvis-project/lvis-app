@@ -294,6 +294,15 @@ describe("Composer", () => {
     expect(chips.map((c) => c.textContent)).toEqual(["아니오", "나중에"]);
   });
 
+  it("adds top inset to the chip row inside the composer surface", () => {
+    render(
+      <Harness
+        suggestedReplies={{ best: "네", alternates: ["아니오"], isDismissed: false }}
+      />,
+    );
+    expect(screen.getByTestId("suggested-replies-chip-row")).toHaveClass("mt-3");
+  });
+
   it("hides chip row when alternates empty", () => {
     render(
       <Harness
