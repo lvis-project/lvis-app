@@ -36,6 +36,7 @@ import {
 } from "./shell-path-policy.js";
 import { getSandboxRunner } from "../permissions/sandbox-runner.js";
 import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
+import { trackManagedChildProcess } from "../main/managed-child-processes.js";
 
 export const BashToolInputSchema = z.object({
   command: z.string().min(1).describe("Shell command to execute"),
@@ -307,6 +308,7 @@ async function spawnWithTimeout(
       // from the child's environment. Only generic shell/locale vars.
       env: shellEnvForChild(shell, buildSafeChildEnv()),
     });
+    trackManagedChildProcess(child, { label: "tool:bash" });
 
     const chunks: Buffer[] = [];
     const collect = (c: Buffer): void => {
