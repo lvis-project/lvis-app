@@ -98,14 +98,14 @@ jobs:
             echo "skip_sign=false" >> "$GITHUB_OUTPUT"
           fi
           args+=("--skip-native-rebuild")
-          # On tag push (release), tell electron-builder to publish artifacts
-          # AND the auto-update manifests (latest-mac.yml / latest.yml /
-          # latest-linux.yml) to the GitHub Release for the tag. Without
-          # this the artifacts only land in the workflow run as artifacts,
-          # so electron-updater cannot resolve a feed.
-          if [ "${{ github.event_name }}" = "push" ]; then
-            args+=("--publish" "always")
-          fi
+          # NO `--publish` here. The matrix runs three jobs in parallel and
+          # if each told electron-builder to publish directly to the same
+          # GitHub Release draft, the GitHub API contention produced partial
+          # uploads (some assets land, others don't) — observed in v0.2.1 +
+          # v0.2.2 release cycles. Instead each job uploads its build output
+          # as a workflow artifact, and a single `publish-release` job (below,
+          # `needs: installers`) assembles every platform's artifacts and
+          # uploads them atomically.
           node scripts/build-installers.mjs "${args[@]}"
         env:
           # GH_TOKEN is required by electron-builder's GitHub publisher to
@@ -143,8 +143,68 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: lvis-${{ matrix.target }}-installers
+          # Include `.blockmap` (electron-updater differential update sidecar)
+          # so the `publish-release` job can attach it to the GitHub Release
+          # alongside the installer itself. Without the blockmap, auto-update
+          # falls back to full downloads. Internal subdirs like `mac-arm64/`
+          # or `win-unpacked/` (electron-builder's intermediate output) are
+          # not uploaded — only the top-level installer artifacts.
           path: |
-            release/*
-            !release/**/*.blockmap
+            release/*.dmg
+            release/*.dmg.blockmap
+            release/*.zip
+            release/*.zip.blockmap
+            release/*.AppImage
+            release/*.deb
+            release/*.rpm
+            release/*.exe
+            release/*.exe.blockmap
+            release/latest*.yml
           if-no-files-found: error
           retention-days: 14
+
+  # ─────────────────────────────────────────────────────────────────────
+  # publish-release — atomic single-job publisher.
+  #
+  # The matrix `installers` jobs above used to call `electron-builder
+  # --publish always` directly, which produced partial Release pages
+  # whenever 3 simultaneous uploads hit the GitHub API contention window
+  # (v0.2.1 + v0.2.2 release cycles both lost ~5 assets each). This job
+  # consolidates the upload step into a single runner: download every
+  # platform artifact, then attach them all to the tag's GitHub Release
+  # in one go via `softprops/action-gh-release`. No race possible.
+  #
+  # Triggered only on tag push (the same condition the old inline
+  # publisher used). `workflow_dispatch` builds still produce workflow
+  # artifacts but skip the Release upload, matching prior behavior.
+  publish-release:
+    name: Publish GitHub Release assets (atomic)
+    needs: installers
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all platform installers
+        uses: actions/download-artifact@v4
+        with:
+          path: release-staging
+          pattern: lvis-*-installers
+          merge-multiple: true
+      - name: List downloaded assets
+        run: ls -la release-staging/
+      - name: Attach assets to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          # `tag_name` defaults to the pushed tag (github.ref_name) since
+          # this job runs only on tag push events.
+          files: release-staging/*
+          # Keep the release draft until a human (or the release script)
+          # publishes it — matches the prior electron-builder default.
+          draft: true
+          # Append to whatever body the release was created with (the
+          # initial Release draft is auto-created by GitHub on tag push;
+          # we do not overwrite its body here).
+          append_body: false
+          generate_release_notes: false
+          fail_on_unmatched_files: true
