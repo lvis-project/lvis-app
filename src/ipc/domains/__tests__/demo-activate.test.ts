@@ -115,12 +115,15 @@ describe("lvis:demo:activate — happy path", () => {
     expect(result.ok).toBe(true);
     expect(result.vendor).toBe("azure-foundry");
 
-    // v0.2.1 hotfix — first-activation (boot capture empty) MUST
-    // request relaunch so Chromium command-line picks up
-    // host-resolver-rules with the freshly-injected hostmap.
+    // First activation is armed for relaunch, but the renderer owns the
+    // 5s onboarding dwell before it calls the explicit relaunch IPC.
     expect(result.requiresRelaunch).toBe(true);
-    // The relaunch fires from setImmediate so the IPC response can
-    // arrive before the process exits. Flush the microtask queue.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(relaunchMock).not.toHaveBeenCalled();
+    expect(exitMock).not.toHaveBeenCalled();
+
+    const relaunch = await invoke("lvis:demo:relaunch-after-activation");
+    expect(relaunch).toEqual({ ok: true });
     await new Promise<void>((resolve) => setImmediate(resolve));
     expect(relaunchMock).toHaveBeenCalledOnce();
     expect(exitMock).toHaveBeenCalledWith(0);
@@ -169,6 +172,9 @@ describe("lvis:demo:activate — first-activation relaunch (v0.2.1 hotfix)", () 
     };
     expect(result.ok).toBe(true);
     expect(result.requiresRelaunch).toBe(true);
+    expect(exitMock).not.toHaveBeenCalled();
+    const relaunch = await invoke("lvis:demo:relaunch-after-activation");
+    expect(relaunch).toEqual({ ok: true });
     await new Promise<void>((resolve) => setImmediate(resolve));
     expect(relaunchMock).not.toHaveBeenCalled();
     expect(exitMock).toHaveBeenCalledWith(DEMO_ACTIVATION_DEV_RELAUNCH_EXIT_CODE);
@@ -200,6 +206,8 @@ describe("lvis:demo:activate — first-activation relaunch (v0.2.1 hotfix)", () 
     await new Promise<void>((resolve) => setImmediate(resolve));
     expect(relaunchMock).not.toHaveBeenCalled();
     expect(exitMock).not.toHaveBeenCalled();
+    const relaunch = await invoke("lvis:demo:relaunch-after-activation");
+    expect(relaunch).toEqual({ ok: false, error: "not-armed" });
   });
 });
 
