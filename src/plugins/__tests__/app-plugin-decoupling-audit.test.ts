@@ -41,6 +41,17 @@ const FORBIDDEN_LIVE_APP_LITERALS = [
   },
 ] as const;
 
+/**
+ * Directories where literal plugin-id references are by-design allowed:
+ *   - `onboarding/` — discovery cards, tour scenarios, plugin-recommendation
+ *     matrices. The whole purpose of these files is to *recommend specific
+ *     plugins* to a fresh user; that recommendation list MUST mention
+ *     concrete plugin ids. The rule the host-runtime decoupling test
+ *     guards (host does not *invoke* a plugin by hardcoded id) is a
+ *     different concern from onboarding's recommendation data tables.
+ */
+const ALLOWED_DIRS = new Set(["onboarding"]);
+
 function listSourceFiles(dir: string): string[] {
   const entries = readdirSync(dir);
   const files: string[] = [];
@@ -49,6 +60,7 @@ function listSourceFiles(dir: string): string[] {
     const stat = statSync(fullPath);
     if (stat.isDirectory()) {
       if (entry === "__tests__") continue;
+      if (ALLOWED_DIRS.has(entry)) continue;
       files.push(...listSourceFiles(fullPath));
       continue;
     }
