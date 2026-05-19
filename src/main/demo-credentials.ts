@@ -25,17 +25,18 @@
  * #893 top-level login toggle:
  *   LVIS_DEMO_VENDOR             — kebab-case vendor id the backend should
  *                                  log the user in as. Default
- *                                  `"azure-foundry"` (Path 2 hotfix: LGE
- *                                  internal demo target).
+ *                                  `"azure-foundry"` (Path 2 hotfix:
+ *                                  internal organization demo target).
  *                                  Read via `getDemoActiveVendor()`.
  *
- * Path 2 hotfix (LGE internal demo):
+ * Path 2 hotfix (internal organization demo):
  *   When `LVIS_DEMO_KEY_AZURE_FOUNDRY` / `LVIS_DEMO_BASEURL_AZURE_FOUNDRY`
  *   are absent and `getDemoVendorConfig("azure-foundry")` would otherwise
- *   return `null`, a baked-in LGE-issued endpoint + key is returned. This
- *   is *security-reviewed user-authorized hardcoding* — see the PR
- *   description for the constraint envelope (LGE internal demo only,
- *   reachable only via `/etc/hosts` map to 10.182.192.0/24).
+ *   return `null`, a baked-in internal-issued endpoint + key is returned.
+ *   This is *security-reviewed user-authorized hardcoding* — see the PR
+ *   description for the constraint envelope (internal organization demo
+ *   only, reachable only via the Electron `host-resolver-rules` switch
+ *   that maps to the 10.182.192.0/24 intranet block).
  */
 import { createLogger } from "../lib/logger.js";
 import { isLLMVendor, type LLMVendor } from "../shared/llm-vendor-defaults.js";
@@ -74,9 +75,9 @@ interface DemoState {
 
 /**
  * Path 2 hotfix — switched from `"openai"` to `"azure-foundry"` so the
- * LGE internal demo loop activates by default. The Azure Foundry endpoint
- * is mapped via Electron `host-resolver-rules` in `demo-host-resolver.ts`
- * (no `/etc/hosts` mutation required).
+ * internal organization demo loop activates by default. The Azure Foundry
+ * endpoint is mapped via Electron `host-resolver-rules` in
+ * `demo-host-resolver.ts` (no `/etc/hosts` mutation required).
  *
  * The actual API key + baseUrl MUST be supplied through environment
  * variables before launch (or via the gitignored `.env.demo` file that
