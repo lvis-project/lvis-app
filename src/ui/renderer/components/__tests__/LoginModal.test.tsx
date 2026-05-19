@@ -5,12 +5,13 @@ import { render, fireEvent, waitFor } from "@testing-library/react";
 import { LoginModal } from "../LoginModal.js";
 
 /**
- * #893 / PR #894 review T1-1 — LoginModal try/catch + finally cleanup tests.
+ * LoginModal — IPC failure / error mapping tests.
  *
- * Verifies:
- *   - IPC rejection surfaces a Korean user-facing error and resets submitting
- *   - The password is wiped in finally so a transient error doesn't leave
- *     it visible on the next render (T1-1 / L1 cleanup).
+ * Path 2 hotfix (2026-05-19): the conversational variant is form-less.
+ * The demo chip auto-fires `loginMockup({ username: "demo", password:
+ * "demo123" })` without ever exposing inputs to the user. These tests
+ * exercise the chip-driven flow and confirm the renderer maps kebab-case
+ * IPC error codes to Korean user-facing text (CLAUDE.md error-language).
  */
 
 function makeApi(
@@ -19,13 +20,12 @@ function makeApi(
     | { ok: false; error: string }
   >,
 ) {
-  // Tutorial-A — LoginModal is now a variant-aware wrapper that calls
-  // `loginPrefsGet` on mount and subscribes to `onLoginPrefsChanged`.
-  // The form-behaviour tests only need the conversational variant (the
-  // wrapper's default), so we stub the prefs surface with a synchronous
-  // resolved value and a no-op unsubscribe.
+  // Tutorial-A — LoginModal is a variant-aware wrapper that calls
+  // `loginPrefsGet` on mount. Stub the prefs surface so the wrapper
+  // mounts the conversational variant deterministically.
   return {
     loginMockup: vi.fn(impl),
+    openSettingsWindow: vi.fn(),
     loginPrefsGet: vi.fn(async () => ({
       ok: true as const,
       prefs: { loginVariant: "conversational" as const },
@@ -35,7 +35,7 @@ function makeApi(
   } as unknown as Parameters<typeof LoginModal>[0]["api"];
 }
 
-describe("LoginModal — IPC failure handling (#894 T1-1)", () => {
+describe("LoginModal — chip-driven demo flow (Path 2 hotfix)", () => {
   let originalConsoleError: typeof console.error;
   beforeEach(() => {
     originalConsoleError = console.error;
@@ -46,68 +46,91 @@ describe("LoginModal — IPC failure handling (#894 T1-1)", () => {
     console.error = originalConsoleError;
   });
 
-  // Dialog renders into a portal attached to `document.body`, not into the
-  // render container. All queries below traverse `document` rather than the
-  // returned `container` so the test sees the modal contents.
-  function fillAndSubmit(password: string = "demo123") {
-    const username = document.querySelector('[data-testid="login-modal:username"]') as HTMLInputElement;
-    const pw = document.querySelector('[data-testid="login-modal:password"]') as HTMLInputElement;
-    const submit = document.querySelector('[data-testid="login-modal:submit"]') as HTMLButtonElement;
-    fireEvent.change(username, { target: { value: "demo" } });
-    fireEvent.change(pw, { target: { value: password } });
-    fireEvent.click(submit);
+  function clickDemoChip() {
+    const chip = document.querySelector('[data-testid="login-modal:chip-demo"]') as HTMLButtonElement;
+    expect(chip).toBeTruthy();
+    fireEvent.click(chip);
   }
+
+  it("fires loginMockup with hard-coded demo credentials on chip click", async () => {
+    const api = makeApi(async () => ({
+      ok: true,
+      vendor: "azure-foundry",
+      fieldsApplied: ["apiKey"],
+    }));
+    render(<LoginModal api={api} open onOpenChange={() => {}} />);
+
+    // Wait for the conversational variant to mount (it does a loginPrefsGet)
+    await waitFor(() => {
+      expect(document.querySelector('[data-testid="login-modal:chip-demo"]')).toBeTruthy();
+    });
+    clickDemoChip();
+
+    await waitFor(() => {
+      expect(
+        (api as unknown as { loginMockup: ReturnType<typeof vi.fn> }).loginMockup,
+      ).toHaveBeenCalledWith({ username: "demo", password: "demo123" });
+    });
+  });
 
   it("displays a Korean error message when the IPC call rejects", async () => {
     const api = makeApi(async () => {
       throw new Error("IPC channel disconnected");
     });
     render(<LoginModal api={api} open onOpenChange={() => {}} />);
-    fillAndSubmit();
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-testid="login-modal:chip-demo"]')).toBeTruthy();
+    });
+    clickDemoChip();
 
     await waitFor(() => {
       const err = document.querySelector('[data-testid="login-modal:error"]');
       expect(err?.textContent).toBe("로그인 처리 중 오류가 발생했습니다.");
     });
-    const submit = document.querySelector('[data-testid="login-modal:submit"]') as HTMLButtonElement;
-    const pw = document.querySelector('[data-testid="login-modal:password"]') as HTMLInputElement;
-    // The password is wiped in finally so a transient error never leaves it
-    // on screen (L1 cleanup).
-    expect(pw.value).toBe("");
-    // Submit is disabled because the password is empty — NOT because the
-    // submitting flag stayed stuck.
-    expect(submit.disabled).toBe(true);
-  });
-
-  it("clears the password in finally even on success", async () => {
-    const api = makeApi(async () => ({ ok: true, vendor: "openai", fieldsApplied: ["apiKey"] }));
-    let openState = true;
-    render(
-      <LoginModal
-        api={api}
-        open={openState}
-        onOpenChange={(o) => {
-          openState = o;
-        }}
-      />,
-    );
-    fillAndSubmit("demo123");
-    await waitFor(() => {
-      expect((api as unknown as { loginMockup: ReturnType<typeof vi.fn> }).loginMockup).toHaveBeenCalled();
-    });
-    const pw = document.querySelector('[data-testid="login-modal:password"]') as HTMLInputElement | null;
-    if (pw) {
-      expect(pw.value).toBe("");
-    }
   });
 
   it("shows the mapped Korean error for invalid-credentials", async () => {
     const api = makeApi(async () => ({ ok: false, error: "invalid-credentials" }));
     render(<LoginModal api={api} open onOpenChange={() => {}} />);
-    fillAndSubmit("wrong");
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-testid="login-modal:chip-demo"]')).toBeTruthy();
+    });
+    clickDemoChip();
+
     await waitFor(() => {
       const err = document.querySelector('[data-testid="login-modal:error"]');
-      expect(err?.textContent).toBe("아이디 또는 비밀번호가 올바르지 않습니다.");
+      expect(err?.textContent).toBe("데모 자격증명이 올바르지 않습니다.");
     });
+  });
+
+  it("shows the mapped Korean error for no-demo-key", async () => {
+    const api = makeApi(async () => ({ ok: false, error: "no-demo-key" }));
+    render(<LoginModal api={api} open onOpenChange={() => {}} />);
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-testid="login-modal:chip-demo"]')).toBeTruthy();
+    });
+    clickDemoChip();
+
+    await waitFor(() => {
+      const err = document.querySelector('[data-testid="login-modal:error"]');
+      expect(err?.textContent).toMatch(/데모 API 키가 환경 변수에 설정되어 있지 않습니다/);
+    });
+  });
+
+  it("does not render the legacy username/password form in the conversational variant", async () => {
+    const api = makeApi(async () => ({ ok: true, vendor: "azure-foundry", fieldsApplied: ["apiKey"] }));
+    render(<LoginModal api={api} open onOpenChange={() => {}} />);
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-testid="login-modal:chip-demo"]')).toBeTruthy();
+    });
+
+    expect(document.querySelector('[data-testid="login-modal:username"]')).toBeNull();
+    expect(document.querySelector('[data-testid="login-modal:password"]')).toBeNull();
+    expect(document.querySelector('[data-testid="login-modal:submit"]')).toBeNull();
+    expect(document.querySelector('[data-testid="login-modal:form"]')).toBeNull();
   });
 });
