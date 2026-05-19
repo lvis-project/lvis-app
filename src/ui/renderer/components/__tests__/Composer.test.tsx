@@ -243,6 +243,16 @@ describe("Composer", () => {
     expect(ghost.textContent).toContain("Tab to fill");
   });
 
+  it("suppresses the fallback placeholder while ghost text is visible", () => {
+    render(
+      <Harness
+        suggestedReplies={{ best: "네", alternates: [], isDismissed: false }}
+      />,
+    );
+    const textarea = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    expect(textarea.getAttribute("placeholder")).toBe("");
+  });
+
   it("hides ghost text once user types 1+ chars", () => {
     render(
       <Harness

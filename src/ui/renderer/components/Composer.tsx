@@ -31,6 +31,8 @@ import {
   type SuggestedRepliesSnapshot,
 } from "../hooks/use-suggested-replies.js";
 
+const DEFAULT_PLACEHOLDER = "질문을 입력하세요... (Cmd/Ctrl+V 로 클립보드 붙여넣기)";
+
 export interface ComposerHandle {
   focus(): void;
   /**
@@ -403,6 +405,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     text.length === 0 && suggestedReplies && !suggestedReplies.isDismissed
       ? suggestedReplies.alternates
       : [];
+  const suggestionSurfaceVisible = ghostVisible || chipAlternates.length > 0;
+  const fallbackPlaceholder = suggestionSurfaceVisible ? "" : DEFAULT_PLACEHOLDER;
 
   const acceptChip = useCallback(
     (chipText: string) => {
@@ -483,7 +487,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           onKeyDown={handleKeyDown}
           onCompositionStart={() => setIsComposing(true)}
           onCompositionEnd={() => setIsComposing(false)}
-          placeholder={placeholder ?? "질문을 입력하세요... (Cmd/Ctrl+V 로 클립보드 붙여넣기)"}
+          placeholder={placeholder ?? fallbackPlaceholder}
           /* v6 layout: ~2 줄 시작 (min-h-[40px] = 2 lines @ leading-5),
              자동 확장 후 ~6 줄에서 scroll. 기존 88px 는 4 줄+ 차지해 textarea 가
              채팅 영역을 잡아먹는 문제 (issue: composer redesign) 해결. */
