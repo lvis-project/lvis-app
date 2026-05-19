@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import electronPath from "electron";
@@ -7,6 +8,41 @@ import { WINDOWS_SAFE_GPU_FLAGS, SANDBOX_BYPASS_FLAG } from "./electron-flags.mj
 const args = process.argv.slice(2);
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
+
+// Auto-load `.env.demo` if it exists in the repo root (gitignored — never
+// committed). This lets a developer run `bun run start` without having to
+// manually `source` the file first. Only applied when the file is present
+// so non-demo dev runs are unaffected.
+//
+// Format: simple `KEY=VALUE` lines (no `export`, no quoting required).
+// Comments (`# …`) and blank lines are ignored. Values with surrounding
+// double or single quotes have the quotes stripped.
+const dotEnvDemoPath = resolve(new URL("..", import.meta.url).pathname, ".env.demo");
+if (existsSync(dotEnvDemoPath)) {
+  const lines = readFileSync(dotEnvDemoPath, "utf8").split("\n");
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) continue;
+    // Strip leading `export ` prefix if present.
+    const stripped = line.replace(/^export\s+/, "");
+    const eq = stripped.indexOf("=");
+    if (eq < 1) continue;
+    const key = stripped.slice(0, eq).trim();
+    let val = stripped.slice(eq + 1).trim();
+    // Strip surrounding quotes.
+    if (
+      (val.startsWith('"') && val.endsWith('"')) ||
+      (val.startsWith("'") && val.endsWith("'"))
+    ) {
+      val = val.slice(1, -1);
+    }
+    // Shell-env already wins: existing values are not overwritten so a
+    // developer can still override `.env.demo` via the shell.
+    if (!(key in env)) {
+      env[key] = val;
+    }
+  }
+}
 
 // Ensure NODE_ENV is set so logger.ts can select pino-pretty at module load
 // time. This script handles unpackaged dev runs (`bun run start`); packaged
