@@ -20,7 +20,7 @@ import { MemorySeedDialog } from "./dialogs/MemorySeedDialog.js";
 import { SpotlightTour } from "./components/SpotlightTour.js";
 import { PostTourFirstTask } from "./onboarding/PostTourFirstTask.js";
 import { ScenarioShowcase } from "./onboarding/ScenarioShowcase.js";
-import { WelcomeQuestion } from "./onboarding/WelcomeQuestion.js";
+import { PersonalizedWelcome } from "./onboarding/PersonalizedWelcome.js";
 import { PluginShowcase } from "./onboarding/PluginShowcase.js";
 import {
   initialOnboardingChainState,
@@ -144,10 +144,11 @@ export function App() {
    * paths and downstream stages should use their default ordering.
    */
   const selectedScenarioId: string | null = chainState.selectedScenarioId;
-  // Display name surfaced inside WelcomeQuestion — best-effort from the
-  // host's persisted memory seed. Empty string when unknown, the
-  // greeting card falls back to a neutral phrase.
-  const [welcomeDisplayName, setWelcomeDisplayName] = useState<string>("");
+  // 2026-05-20: PersonalizedWelcome reads its display name + intro
+  // straight from the chain's memorySeed context, which `memory-finish`
+  // populates from the MemorySeed wizard inputs. No separate state.
+  const memorySeedNickname = chainState.memorySeed.nickname;
+  const memorySeedIntroduction = chainState.memorySeed.introduction;
   const [deferredQueueOpen, setDeferredQueueOpen] = useState(false);
   // Tutorial-D — Discovery Swipe dialog open state. Main process
   // broadcasts `lvis:tutorial:open` from the menu / chat context menu,
@@ -1412,7 +1413,6 @@ export function App() {
         onStart={(scenarioId) =>
           dispatchChain({ type: "showcase-start", scenarioId })
         }
-        onSkip={() => dispatchChain({ type: "showcase-skip" })}
       />
       <LoginModal
         api={api}
@@ -1430,29 +1430,15 @@ export function App() {
           dispatchChain({ type: "login-success" });
         }}
       />
-      <WelcomeQuestion
-        open={chainStage === "welcome"}
-        displayName={welcomeDisplayName}
-        onAccept={() => dispatchChain({ type: "welcome-accept" })}
-        onSkip={() => dispatchChain({ type: "welcome-skip" })}
-      />
-      {/* Tutorial-B (O-X2) — Memory Seed Onboarding Wizard. The chain
-          reducer drives `open` from stage "memory" only; `onDismissed`
-          advances the chain to the tour stage where the dedicated
-          chain effect fires `api.tour.start`. We pass a small wrapper
-          for `tour.start` that doubles as the welcomeDisplayName seeder
-          so the WelcomeQuestion knows what 호칭 the user picked when it
-          re-renders for an early-back-out chain.
+      {/* Tutorial-B (O-X2) — Memory Seed Onboarding Wizard. 2026-05-20:
+          MemorySeed now mounts BEFORE the welcome card so the typed
+          호칭/자기소개 can personalize the welcome greeting that follows.
+          The chain reducer drives `open` from stage "memory" only;
+          `onDismissed` advances the chain to "personalized_welcome".
 
-          Test/production trigger seam (see memory-seed-onboarding.spec.ts):
-          the wrapper below intentionally swallows MemorySeed's own
-          `startTour()` IPC so the chain-effect at the top of this file
-          (stage="tour" branch) is the *single* canonical broadcaster.
-          Without the swallow both paths fire in sequence and the
-          SpotlightTour subscriber visibly resets to step 0 (regression
-          from PR #1019, fix landed in #1029). The e2e spec asserts the
-          chain-effect path — MemorySeed's startTour() remains as a
-          defensive secondary call for the dev-mode swallow-failure case. */}
+          The wrapper below intentionally swallows MemorySeed's own
+          `startTour()` IPC so the chain-effect on stage="tour" remains
+          the single canonical broadcaster (preserves the #1029 fix). */}
       <MemorySeedDialog
         open={chainStage === "memory"}
         selectedScenarioId={selectedScenarioId}
@@ -1477,20 +1463,45 @@ export function App() {
           },
         } as typeof api}
         onDismissed={() => {
-          // Persist the typed 호칭 (best-effort) so a future re-render
-          // of WelcomeQuestion shows the proper greeting. We read it
-          // through DOM rather than wiring a callback: the wizard's
-          // input lives at testid memory-seed-dialog:name and the
-          // value is still in the DOM at the dismissal frame.
+          // Read the typed 호칭/자기소개 from the DOM at the dismissal
+          // frame and feed them into the chain reducer so the
+          // PersonalizedWelcome card can address the user by name.
+          // The MemorySeed wizard's own write to MEMORY.md is unaffected
+          // (it runs inside the wizard before this callback fires).
+          let nickname = "";
+          let introduction = "";
           if (typeof document !== "undefined") {
-            const el = document.querySelector<HTMLInputElement>(
+            const nameEl = document.querySelector<HTMLInputElement>(
               '[data-testid="memory-seed-dialog:name"]',
             );
-            const value = el?.value?.trim() ?? "";
-            if (value.length > 0) setWelcomeDisplayName(value);
+            const introEl = document.querySelector<HTMLTextAreaElement>(
+              '[data-testid="memory-seed-dialog:intro"]',
+            );
+            nickname = nameEl?.value?.trim() ?? "";
+            introduction = introEl?.value?.trim() ?? "";
           }
-          dispatchChain({ type: "memory-finish" });
+          dispatchChain({
+            type: "memory-finish",
+            nickname,
+            introduction,
+          });
         }}
+      />
+      {/* PersonalizedWelcome (2026-05-20) — replaces WelcomeQuestion.
+          Mounted after MemorySeed so the card greets the user by the
+          호칭 they just typed and references their 자기소개. Forced
+          choice — there is no skip; pressing "예, 시작할게요 →" is
+          the only path forward. The card also pings the LLM provider
+          on mount and surfaces vendor/model/latency inline as a
+          connection-confirmation cue. */}
+      <PersonalizedWelcome
+        open={chainStage === "personalized_welcome"}
+        nickname={memorySeedNickname}
+        introduction={memorySeedIntroduction}
+        api={{ pingAiProvider: api.pingAiProvider }}
+        onContinue={() =>
+          dispatchChain({ type: "personalized-welcome-accept" })
+        }
       />
       {/* Tutorial-C — SpotlightTour mounts always; it stays invisible until
           a `lvis:tour:start` broadcast flips it on. Production trigger:

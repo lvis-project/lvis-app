@@ -6,20 +6,28 @@
  * effects. Pure because the unit test pins every transition without
  * mounting React.
  *
- * Stages:
- *   idle      — initial state. The async boot probe in App.tsx fires
- *               exactly one of `probe-start` → showcase (fresh boot) or
- *               `probe-skip` → done (returning user). Starting at `idle`
- *               means the showcase Dialog only mounts after the probe
- *               classifies the boot, so a stale `probe-skip` arriving late
- *               can never collapse a freshly-shown showcase.
- *   showcase  — ScenarioShowcase mounted (intro preview cards).
- *   login     — LoginModal mounted (waiting for vendor key / skip).
- *   welcome   — WelcomeQuestion mounted ("시작해볼까요?" card).
- *   memory    — MemorySeedDialog mounted (호칭 + 자기소개).
- *   tour      — SpotlightTour active (7-step first-boot scenario).
- *   plugins   — PluginShowcase mounted (per-plugin descriptions).
- *   done      — chain complete; chat empty-state visible.
+ * Stages (2026-05-20 redesign — `welcome` stage removed; MemorySeed
+ * now precedes a personalized welcome card that reads the seeded
+ * 호칭/자기소개):
+ *   idle                — initial state. The async boot probe in App.tsx
+ *                         fires exactly one of `probe-start` → showcase
+ *                         (fresh boot) or `probe-skip` → done (returning
+ *                         user). Starting at `idle` means the showcase
+ *                         Dialog only mounts after the probe classifies
+ *                         the boot, so a stale `probe-skip` arriving late
+ *                         can never collapse a freshly-shown showcase.
+ *   showcase            — ScenarioShowcase mounted (intro preview cards).
+ *   login               — LoginModal mounted (waiting for vendor key / skip).
+ *   memory              — MemorySeedDialog mounted (호칭 + 자기소개).
+ *                         Now FIRST after login so the personalized
+ *                         welcome card downstream can address the user
+ *                         by their chosen 호칭.
+ *   personalized_welcome — PersonalizedWelcome card mounted. Greets the
+ *                         user by the 호칭 they just typed and confirms
+ *                         the next phase (tour).
+ *   tour                — SpotlightTour active (8-step first-boot scenario).
+ *   plugins             — PluginShowcase mounted (per-plugin descriptions).
+ *   done                — chain complete; chat empty-state visible.
  *
  * Chain context (Option A — 2026-05-19):
  *   `selectedScenarioId` carries the ScenarioShowcase card the user
@@ -30,24 +38,31 @@
  *   click. `null` means the user skipped the showcase or no card was
  *   clicked.
  *
- * Events:
- *   probe-skip            — boot probe found an existing key (skip whole chain).
- *   probe-start           — boot probe says first-boot; mount Showcase.
- *   showcase-start        — user pressed "이 시나리오로 시작 →" inside the
- *                           showcase. Carries the picked `scenarioId` so
- *                           the chain context records the selection.
- *   showcase-skip         — user pressed "건너뛰기" in Showcase.
- *   login-success         — LoginModal onSuccess fired.
- *   login-skip            — LoginModal closed without success.
- *   welcome-accept        — user pressed "예, 시작할게요".
- *   welcome-skip          — user pressed "나중에 (skip)".
- *   memory-finish         — MemorySeed onDismissed fired (success or skip).
- *   tour-finish           — SpotlightTour completed all steps.
- *   tour-skip             — SpotlightTour dismissed early.
- *   plugins-close         — PluginShowcase closed (or skipped).
+ *   `memorySeed` carries the 호칭 + 자기소개 the user typed into the
+ *   MemorySeedDialog so the downstream `personalized_welcome` stage
+ *   can address the user by name without re-reading the DOM.
  *
- * Skipping at any stage advances to `done` so the user never gets
- * trapped. The reducer never returns to a prior stage — strict forward
+ * Events:
+ *   probe-skip                  — boot probe found an existing key (skip whole chain).
+ *   probe-start                 — boot probe says first-boot; mount Showcase.
+ *   showcase-start              — user pressed "로그인하에 LVIS 시작하기" inside
+ *                                 the showcase. Carries the picked `scenarioId`
+ *                                 so the chain context records the selection.
+ *   login-success               — LoginModal onSuccess fired.
+ *   login-skip                  — LoginModal closed without success.
+ *   memory-finish               — MemorySeed onDismissed fired (success or skip).
+ *                                 Optionally carries the typed 호칭 / 자기소개
+ *                                 so the personalized welcome card can read it.
+ *   personalized-welcome-accept — user pressed "예, 시작할게요 →" in the
+ *                                 PersonalizedWelcome card.
+ *   tour-finish                 — SpotlightTour completed all steps.
+ *   tour-skip                   — SpotlightTour dismissed early.
+ *   plugins-close               — PluginShowcase closed (or skipped).
+ *
+ * `showcase-skip` was removed 2026-05-20 — the showcase no longer offers a
+ * skip path; the user MUST pick one of the 4 cards before advancing.
+ *
+ * The reducer never returns to a prior stage — strict forward
  * progress — so a stale onSuccess event from a re-mounted LoginModal
  * cannot reanimate the chain.
  */
@@ -56,16 +71,27 @@ export type OnboardingChainStage =
   | "idle"
   | "showcase"
   | "login"
-  | "welcome"
   | "memory"
+  | "personalized_welcome"
   | "tour"
   | "plugins"
   | "done";
 
 /**
+ * MemorySeed inputs threaded forward into the PersonalizedWelcome card.
+ * Both fields default to the empty string so the welcome card always
+ * renders even when the user skipped or partially filled the wizard.
+ */
+export interface OnboardingMemorySeed {
+  nickname: string;
+  introduction: string;
+}
+
+/**
  * Chain state — wraps the FSM stage with carry-along context so the
  * reducer remains a pure `(state, event) => state` function while still
- * threading the picked scenario through every downstream stage.
+ * threading the picked scenario + memory seed through every downstream
+ * stage.
  */
 export interface OnboardingChainState {
   stage: OnboardingChainStage;
@@ -75,23 +101,31 @@ export interface OnboardingChainState {
    * `null` when no card was picked (skip path or returning user).
    */
   selectedScenarioId: string | null;
+  /**
+   * 호칭 + 자기소개 captured by the MemorySeed wizard. Threaded into
+   * the PersonalizedWelcome card so it can address the user by name.
+   */
+  memorySeed: OnboardingMemorySeed;
 }
 
 export const initialOnboardingChainState: OnboardingChainState = {
   stage: "idle",
   selectedScenarioId: null,
+  memorySeed: { nickname: "", introduction: "" },
 };
 
 export type OnboardingChainEvent =
   | { type: "probe-skip" }
   | { type: "probe-start" }
   | { type: "showcase-start"; scenarioId?: string | null }
-  | { type: "showcase-skip" }
   | { type: "login-success" }
   | { type: "login-skip" }
-  | { type: "welcome-accept" }
-  | { type: "welcome-skip" }
-  | { type: "memory-finish" }
+  | {
+      type: "memory-finish";
+      nickname?: string;
+      introduction?: string;
+    }
+  | { type: "personalized-welcome-accept" }
   | { type: "tour-finish" }
   | { type: "tour-skip" }
   | { type: "plugins-close" }
@@ -126,7 +160,6 @@ export function nextOnboardingStage(
 
     case "showcase":
       if (event.type === "showcase-start") return "login";
-      if (event.type === "showcase-skip") return "done";
       // `probe-skip` is intentionally NOT accepted from `showcase`.
       // Initial stage is `idle`; the async boot probe explicitly
       // dispatches either `probe-start` (mount showcase) or
@@ -138,17 +171,16 @@ export function nextOnboardingStage(
       return stage;
 
     case "login":
-      if (event.type === "login-success") return "welcome";
-      if (event.type === "login-skip") return "welcome";
-      return stage;
-
-    case "welcome":
-      if (event.type === "welcome-accept") return "memory";
-      if (event.type === "welcome-skip") return "done";
+      if (event.type === "login-success") return "memory";
+      if (event.type === "login-skip") return "memory";
       return stage;
 
     case "memory":
-      if (event.type === "memory-finish") return "tour";
+      if (event.type === "memory-finish") return "personalized_welcome";
+      return stage;
+
+    case "personalized_welcome":
+      if (event.type === "personalized-welcome-accept") return "tour";
       return stage;
 
     case "tour":
@@ -168,9 +200,10 @@ export function nextOnboardingStage(
 /**
  * Pure reducer for the Z onboarding chain.
  *
- * Threads `selectedScenarioId` through the chain so downstream stages
- * (MemorySeed recommendations, PluginShowcase ordering, etc.) can read
- * what the user clicked in the ScenarioShowcase.
+ * Threads `selectedScenarioId` + `memorySeed` through the chain so
+ * downstream stages (MemorySeed recommendations, PluginShowcase
+ * ordering, PersonalizedWelcome greeting) can read what the user
+ * selected / typed earlier in the flow.
  */
 export function onboardingChainReducer(
   state: OnboardingChainState,
@@ -178,12 +211,24 @@ export function onboardingChainReducer(
 ): OnboardingChainState {
   const stage = nextOnboardingStage(state.stage, event);
   let selectedScenarioId = state.selectedScenarioId;
+  let memorySeed = state.memorySeed;
   if (event.type === "showcase-start") {
     if (typeof event.scenarioId === "string" && event.scenarioId.length > 0) {
       selectedScenarioId = event.scenarioId;
     }
   }
-  return { stage, selectedScenarioId };
+  if (event.type === "memory-finish") {
+    const nickname =
+      typeof event.nickname === "string" ? event.nickname.trim() : "";
+    const introduction =
+      typeof event.introduction === "string" ? event.introduction.trim() : "";
+    memorySeed = {
+      nickname: nickname.length > 0 ? nickname : memorySeed.nickname,
+      introduction:
+        introduction.length > 0 ? introduction : memorySeed.introduction,
+    };
+  }
+  return { stage, selectedScenarioId, memorySeed };
 }
 
 /**
@@ -194,8 +239,9 @@ export function onboardingChainReducer(
 export const onboardingChainHelpers = {
   isShowcase: (s: OnboardingChainStage) => s === "showcase",
   isLogin: (s: OnboardingChainStage) => s === "login",
-  isWelcome: (s: OnboardingChainStage) => s === "welcome",
   isMemory: (s: OnboardingChainStage) => s === "memory",
+  isPersonalizedWelcome: (s: OnboardingChainStage) =>
+    s === "personalized_welcome",
   isTour: (s: OnboardingChainStage) => s === "tour",
   isPlugins: (s: OnboardingChainStage) => s === "plugins",
   isDone: (s: OnboardingChainStage) => s === "done",
