@@ -1,21 +1,15 @@
 {
   "id": "doc-search-demo",
   "titleKo": "문서 검색 시연",
-  "userMessage": "이번 분기 보안 정책 문서 찾아줘",
+  "userMessage": "이번 주 작성한 PRD 문서 찾아줘",
   "toolCalls": [
     {
       "toolName": "index_search",
       "labelKo": "로컬 문서 검색",
-      "fakeResultKo": "3건 발견: security-policy-q2.pdf · vendor-review.md · access-control-2026.docx",
+      "fakeResultKo": "5건 발견: LVIS-DEMO-PRD.md · sprint-51-plan.md · api-spec.md · vendor-review.md · security-policy-q2.md",
       "delayMs": 600
-    },
-    {
-      "toolName": "index_summarize",
-      "labelKo": "핵심 문단 요약",
-      "fakeResultKo": "Q2 보안 정책 핵심: ① MFA 의무 ② 키 회전 90일 ③ 외부 협력사 SSO 필수",
-      "delayMs": 500
     }
   ],
-  "assistantResponse": "분기 보안 정책 핵심 3가지:\n\n① 전사 MFA 의무화 (5/15 적용)\n② 키 90일 회전 룰\n③ 외부 협력사 SSO 의무\n\n관련 문서 3건이 로컬 인덱스에서 발견됐어요.",
+  "assistantResponse": "이번 주 작성된 문서 5건 발견:\n\n① LVIS PRD — 핵심 사용 시나리오 + 성공 기준\n② Sprint 51 — 진행률 + 다음 스프린트 이월 항목\n③ API Spec — Conversation Loop v4 인터페이스\n④ Vendor Review — 협상 메모 + 비교표\n⑤ Security Policy Q2 — MFA / 키 회전 / SSO\n\n어떤 것을 먼저 보시겠어요?",
   "typeOnMsPerChar": 22
 }
