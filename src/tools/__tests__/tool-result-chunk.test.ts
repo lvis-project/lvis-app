@@ -23,7 +23,7 @@ describe("read_tool_result_chunk", () => {
       { toolUseId: "toolu_123", chunkIndex: 1, maxChars: 500 },
       ctx((toolUseId) => ({
         toolUseId,
-        toolName: "lge_lgenie_query",
+        toolName: "long_output_query",
         content,
         meta: {
           truncated: {
@@ -40,7 +40,7 @@ describe("read_tool_result_chunk", () => {
     const parsed = JSON.parse(result.output) as Record<string, unknown>;
     expect(parsed).toMatchObject({
       toolUseId: "toolu_123",
-      toolName: "lge_lgenie_query",
+      toolName: "long_output_query",
       chunkIndex: 1,
       chunkCount: 3,
       startChar: 500,
@@ -101,7 +101,7 @@ describe("read_tool_result_chunk", () => {
       { toolUseId: "toolu_prefix", chunkIndex: 0, maxChars: 500 },
       ctx((toolUseId) => ({
         toolUseId,
-        toolName: "lge_lgenie_query",
+        toolName: "long_output_query",
         content,
         meta: {
           truncated: {
