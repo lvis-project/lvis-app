@@ -79,7 +79,7 @@ export type PluginCardSummary = {
   isManaged?: boolean;
   /** Install policy from the plugin manifest: "admin" (IT-managed only) or "user" (anyone). */
   installPolicy?: "admin" | "user";
-  loadStatus?: "loaded" | "failed" | "disabled";
+  loadStatus?: "loaded" | "preparing" | "failed" | "disabled";
   version?: string;
   publisher?: string;
   /** Declarative settings schema, when the manifest declares one. */
@@ -635,7 +635,7 @@ export type LvisApi = {
     ) => void,
   ) => () => void;
   retryBootstrap: () => Promise<{ ok: true } | { ok: false; error: string }>;
-  onPluginInstallResult: (h: (payload: { slug: string; success: boolean; error?: string }) => void) => () => void;
+  onPluginInstallResult: (h: (payload: { slug: string; success: boolean; preparing?: boolean; error?: string }) => void) => () => void;
   onPluginUninstallResult: (h: (payload: { slug: string; success: boolean; error?: string }) => void) => () => void;
   onAgentInstallResult: (h: (payload: { slug: string; success: boolean; agentId?: string; error?: string }) => void) => () => void;
   onAgentUninstallResult: (h: (payload: { slug: string; success: boolean; agentId?: string; error?: string }) => void) => () => void;
@@ -652,7 +652,7 @@ export type LvisApi = {
    */
   installLocalPlugin: () => Promise<{ pluginId: string; installed: true } | null>;
   onPluginInstallProgress: (h: (payload:
-    | { slug: string; phase: "installing" | "restarting" | "verifying" | "registering" }
+    | { slug: string; phase: "installing" | "restarting" | "verifying" | "registering" | "preparing" }
     | { slug: string; phase: "downloading"; bytesDownloaded: number; bytesTotal: number | null }
   ) => void) => () => void;
   onAgentInstallProgress: (h: (payload:
